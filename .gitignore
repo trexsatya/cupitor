@@ -1,6 +1,8 @@
 .gradle
 /build/
 
+*.swp
+
 #Ignore in current as well as sub folders
 node_modules/
 
