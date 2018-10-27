@@ -30,6 +30,13 @@ yarn run build
 yarn run test:unit
 ```
 
+I have put a build.gradle that can create a docker image to serve this JS application using nginx server.
+
+gradle clean dockerBuild
+
+clean.sh file is there to make life easy while you are experimenting.
+create-config-file.sh file is there so that it will create a config.js file in target directory which is then included into index.html, so that you can pass API_URL etc from environment variables.
+
 # To know
 
 Current arbitrary choices are:
@@ -40,6 +47,4 @@ Current arbitrary choices are:
 
 These can be changed when the contributors reach a consensus.
 
-# Connect
 
-Join us on [Discord](https://discord.gg/NE2jNmg)
