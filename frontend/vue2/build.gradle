@@ -52,8 +52,15 @@ task dockerBuild {
 task dockerRun {
    dependsOn dockerBuild
    println "Running docker run command"
+   def API_URL = project.properties['API_URL'] ?: '//localhost:8080/api'
+   def imageCdnUrl = project.properties['imageCdnUrl'] ?: '//localhost/images'
+   def port = project.properties['port'] ?: '80'
+
    exec {
-     commandLine 'docker', 'run', '-p', '8081:80', '--name=frontend', '--env', '__js_config__API_URL=http://localhost:8080/api', '-d', 'frontend:latest'
+     commandLine 'docker', 'run', '-p', "${port}:80", '--name=frontend', '--env', 
+		"__js_config__API_URL=${API_URL}", '--env',
+		"__js_config__imageCdnUrl=${imageCdnUrl}",
+		'-d', 'frontend:latest'
    }
 }
 

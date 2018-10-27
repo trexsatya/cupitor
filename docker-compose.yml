@@ -15,6 +15,17 @@ services:
     networks:
       - backend
 
+  frontend:
+    image: trexsatya/cupitor-frontend-vuejs:latest
+    container_name: cupitor-frontend
+    environment:
+      - __js_config__API_URL=//cupitor-api:8080/api
+      - __js_config__imageCdnUrl=//cupitor.online:8080/images
+    ports:
+      - "80:80"
+    networks:
+      - backend
+    
   backend:
     image: trexsatya/cupitor-backend-springboot:latest
     container_name: cupitor-api
