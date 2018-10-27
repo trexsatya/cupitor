@@ -1,0 +1,74 @@
+group 'com.satya'
+version '1.0'
+
+task dockerClean {
+  try {
+    exec {
+      commandLine 'chmod', '+x', 'clean.sh'
+    }
+  exec {
+    commandLine './clean.sh'
+  }
+  }catch(e){
+   e.printStackTrace()
+  }
+}
+
+task yarnBuild {
+  exec {
+    commandLine 'npm', 'install', '-g', 'yarn'
+    commandLine  'yarn', 'build'
+  }
+}
+
+
+task dockerBuild {
+  dependsOn yarnBuild
+  
+  copy {
+    from 'dist'
+    into 'docker/dist'
+  }
+  copy {
+    from 'nginx.conf'
+    into 'docker'
+  } 
+
+  copy {
+    from 'Dockerfile'
+    into 'docker'
+  }
+  copy {
+    from 'create-config-file.sh'
+    into 'docker'
+  }
+
+  exec {
+    commandLine "docker", "build", "-t", "frontend:latest", "docker/", "--no-cache", "--rm"
+  }
+  //recreateConfigFile( 'docker/dist/config.js')
+}
+
+task dockerRun {
+   dependsOn dockerBuild
+   println "Running docker run command"
+   exec {
+     commandLine 'docker', 'run', '-p', '8081:80', '--name=frontend', '--env', '__js_config__API_URL=http://localhost:8080/api', '-d', 'frontend:latest'
+   }
+}
+
+def recreateConfigFile(path){
+    def file = new File(path)
+
+    def lines = [""]
+
+    project.properties.each { k,v ->
+        if(k.startsWith("__js_config__")){
+            println k
+            lines << "${k.split("__js_config__")[1]}='$v'"
+        }
+    }
+
+    file.append(lines.join("\n"))
+}
+
