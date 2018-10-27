@@ -1,6 +1,9 @@
 .gradle
 /build/
 
+#Ignore in current as well as sub folders
+node_modules/
+
 # Ignore Gradle GUI config
 gradle-app.setting
 

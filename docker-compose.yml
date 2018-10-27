@@ -1,0 +1,36 @@
+version: "3"
+
+networks:
+  backend:
+    driver: bridge
+
+services:
+  mongodb:
+    image: bitnami/mongodb:latest
+    container_name: mongodb-server
+    ports:
+      - "27017:27017"
+    volumes:
+      - /var/lib/mongodb/cupitor/data:/bitnami
+    networks:
+      - backend
+
+  backend:
+    image: trexsatya/cupitor-backend-springboot:latest
+    container_name: cupitor-api
+    environment:
+      - users=${USERS}
+    ports:
+      - "8080:8080"
+    networks:
+      - backend
+    depends_on: 
+      - mongodb
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 2
+      restart_policy:
+        condition: on-failure
+
+
