@@ -18,3 +18,10 @@ sudo <env variables> docker-compose up -d
 #To shutdown
 sudo docker-compose down
 
+
+After making changes to the projects rebuild docker images tag them and then push them to DockerHub repository.
+
+Example:<br>
+docker tag cupitor-backend-springboot[:tag] trexsatya/cupitor-backend-springboot
+docker push trexsatya/cupitor-backend-springboot:latest
+
