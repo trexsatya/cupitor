@@ -1,5 +1,5 @@
 <template>
-  <div style="padding-top: 10px;">
+  <div style="padding-top: 10px;padding-top: 3%; padding-bottom: 3%;background-color: #424950;">
     <ArticlePage :articleId="articleId" :key="articleId" />
   </div>
    
@@ -65,15 +65,18 @@ blockquote {
     border-color: #ccc;
     border-width: 0 0 0 10;
 }
+.article-container {
+    padding-left: 2%;
+    padding-right: 2%;
+}
 
 @media only screen and (min-width: 1000px) {
   .article-container {
-    padding-left: 10%;
-    padding-right: 10%;
+    padding-left: 8%;
+    padding-right: 8%;
     margin-right: 15%;
-    margin-left: 5%;
+    margin-left: 15%;
   }
  
 }
-
 </style>
