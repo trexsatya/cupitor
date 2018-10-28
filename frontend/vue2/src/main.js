@@ -23,6 +23,10 @@ ApiService.init();
 
 // Ensure we checked auth before each page load.
 router.beforeEach((to, from, next) => {
+  if(ga){
+	  ga('set', 'page', '/'+to.fullPath);
+	  ga('send', 'pageview');
+  }
   return Promise.all([store.dispatch(CHECK_AUTH)]).then(next);
 });
 
