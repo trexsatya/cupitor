@@ -75,6 +75,11 @@ blockquote {
 .article-container {
     padding-left: 2%;
     padding-right: 2%;
+    padding-top: 10px;
+    -webkit-box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
+    -moz-box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
+    box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
+
 }
 
 .comments {

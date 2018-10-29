@@ -91,7 +91,7 @@ export default {
 }
 
 .blog-card {
-  margin-bottom: 5% !important;
+  margin-bottom: 3% !important;
   transition: height 0.3s ease;
   -webkit-transition: height 0.3s ease;
   background: #fff;
@@ -104,6 +104,10 @@ export default {
   line-height: 1.45em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-box-shadow: -11px 0px 0px 0px rgba(15,209,115,1);
+  -moz-box-shadow: -11px 0px 0px 0px rgba(15,209,115,1);
+  box-shadow: -11px 0px 0px 0px rgba(15,209,115,1);
+
 }
 .blog-card:hover .details {
   left: 0;
