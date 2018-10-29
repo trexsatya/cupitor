@@ -47,7 +47,7 @@
     "build": "vue-cli-service build",
     "dockerBuild": "vue-cli-service build; mkdir -p docker; cp -r dist docker/;cp server.js docker;cp package.json docker; docker build docker -t cupitor-frontend-vuejs:latest --file=Dockerfile --no-cache",
     "lint": "vue-cli-service lint",
-    "serve": "vue-cli-service serve --port 8080",
+    "serve": "vue-cli-service serve",
     "test:unit": "vue-cli-service test:unit"
   },
   "version": "0.1.0"
