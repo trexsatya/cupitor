@@ -1,5 +1,6 @@
 <template>
    <div style="padding-top: 10px;padding-top: 3%; padding-bottom: 3%; background-color: #424950;" >
+       <div id="disqus_thread"/>
        <ArticlesList :subject="subject" />
    </div>
 </template>

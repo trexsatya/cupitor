@@ -1,6 +1,12 @@
 <template>
   <div style="padding-top: 10px;padding-top: 3%; padding-bottom: 3%;background-color: #424950;">
     <ArticlePage :articleId="articleId" :key="articleId" />
+
+    <template>
+      <div class="comments">
+        <vue-disqus shortname="livintolearn" :identifier="articleId" :url="url"></vue-disqus>
+      </div>
+    </template>
   </div>
    
 </template>
@@ -33,7 +39,8 @@ export default {
     });
   },*/
   computed: {
-    articleId(){ return this.$route.params.id; }
+    articleId(){ return this.$route.params.id; },
+    url(){ return "http://cupitor.online/article/"+this.$route.params.id ; }
   },
   unmounted(){
     console.log('unm') 
@@ -70,6 +77,10 @@ blockquote {
     padding-right: 2%;
 }
 
+.comments {
+  margin-top: 2%;
+}
+
 @media only screen and (min-width: 1000px) {
   .article-container {
     padding-left: 8%;
@@ -77,6 +88,13 @@ blockquote {
     margin-right: 15%;
     margin-left: 15%;
   }
+
+  .comments {
+    margin-left: 12%;
+    margin-right: 12%;
+  }
  
 }
+
+
 </style>
