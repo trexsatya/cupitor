@@ -15,6 +15,10 @@ import ErrorFilter from "@/common/error.filter";
 // // Init plugin
 // Vue.use(Loading);
 
+import VueDisqus from 'vue-disqus'
+ 
+Vue.use(VueDisqus)
+
 Vue.config.productionTip = false;
 Vue.filter("date", DateFilter);
 Vue.filter("error", ErrorFilter);
