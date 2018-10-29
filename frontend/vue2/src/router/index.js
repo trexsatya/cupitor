@@ -4,11 +4,7 @@ import Router from "vue-router";
 Vue.use(Router);
 
 export default new Router({
-<<<<<<< HEAD
-  mode: "history",
-=======
   mode: 'history',
->>>>>>> f8902ad62537f6add14f8662472f33b91779e3de
   routes: [
     {
       path: "/",
