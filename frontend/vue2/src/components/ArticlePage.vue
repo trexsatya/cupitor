@@ -62,6 +62,11 @@ export default {
   },
   updated(){
       this.transformArticle()
+      try {
+        const name = this.article && this.article.name || 'LivingToLearn'
+        document.title = name;
+
+      } catch(e){}
   },
   methods: {
       fetchArticle() {

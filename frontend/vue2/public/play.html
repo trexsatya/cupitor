@@ -2,6 +2,7 @@
 
 <head>
     <script src="/jquery.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
     <script type="text/javascript" src="/fabric.min.js"></script>
     <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
     <script type="text/javascript" src="/textillate.js"></script>
@@ -15,8 +16,8 @@
    </script>
 </head>
 <body>
-<canvas id="playerCanvas" width="1200" height="900" ></canvas>
-<canvas id="overlayCanvas" width="1200" height="900"  style="position: absolute;"></canvas>
+<canvas id="playerCanvas" width="1200" height="1000" ></canvas>
+<canvas id="overlayCanvas" width="1200" height="1000"  style="position: absolute;"></canvas>
 
 <script type="text/javascript">
 		var API_HOST = 'http://livintolearn.com/api';
@@ -342,7 +343,7 @@
 	</script>
 
 <div id="toolbar" style="display: inline-block; margin-left: 10px;position: absolute; right: -10; top: 50; z-index: 1000000">
-
+    <button id="toolbarToggle" style="margin-bottom: 20px;"> Toggle Toolbar</button>
     <div id="drawing-mode-options">
         <button id="clear-canvas" class="btn btn-info">Clear</button> <button id="flip-drawing" class="btn btn-info" >Draw/Don't</button>
 
@@ -401,10 +402,15 @@
 		
 		
         <span id="instruction" style="width:150px"></span>
+
     </div>
 </div>
 
 <script type="text/javascript">
+      $(document).ready(e=>{
+         $('#toolbarToggle').click(e => {  $('#drawing-mode-options').toggle(); });
+         $('#toolbar').draggable();
+      });
 		$('#drawing-mode-selector').change(e => {
 			oc.freeDrawingBrush = new fabric[e.target.value+'Brush'](oc)
 		})
