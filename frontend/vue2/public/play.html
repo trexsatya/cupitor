@@ -1,7 +1,10 @@
 <html>
 
 <head>
+	<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+
     <script src="/jquery.js"></script>
+	<script></script>
     <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
     <script type="text/javascript" src="/fabric.min.js"></script>
     <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
@@ -14,10 +17,17 @@
         return Math.max.apply(null, this);
       };
    </script>
+   <style>
+   canvas { 
+	  height: 100vh; 
+	  width: 100vw; 
+	  display: block;
+	}
+   </style>
 </head>
 <body>
-<canvas id="playerCanvas" width="1200" height="1000" ></canvas>
-<canvas id="overlayCanvas" width="1200" height="1000"  style="position: absolute;"></canvas>
+<canvas id="playerCanvas"  ></canvas>
+<canvas id="overlayCanvas" style="position: absolute;"></canvas>
 
 <script type="text/javascript">
 		var API_HOST = 'http://livintolearn.com/api';
@@ -51,11 +61,11 @@
 			isDrawingMode: true
 		});
 
-		pc.setWidth(1200)
-		pc.setHeight(900)
+		pc.setWidth(window.innerWidth)
+		pc.setHeight(window.innerHeight)
 
-		oc.setWidth(1200)
-		oc.setHeight(900)
+		oc.setWidth(window.innerWidth)
+		oc.setHeight(window.innerHeight)
 
 		function superimposeOverlayCanvas(){
 			var pos = $('#playerCanvas').position()
@@ -338,39 +348,28 @@
 		  grp.destroy();
 		  pc.remove(grp);
 		  items.forEach(item => pc.add(item));
-		  
+		  items.forEach(item => item.hasControls = false);
 		}
 	</script>
 
-<div id="toolbar" style="display: inline-block; margin-left: 10px;position: absolute; right: -10; top: 50; z-index: 1000000">
-    <button id="toolbarToggle" style="margin-bottom: 20px;"> Toggle Toolbar</button>
-    <div id="drawing-mode-options">
+	
+<div id="toolbar" style="display: inline-block; margin-left: 10px;position: absolute; right: -10; top: 50; z-index: 1000000; height: 0">
+    <img id="toolbarToggle" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#drawing-mode-options').toggle();" src="data:image/png;base64,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"></img><select id="savePoints" style="margin-right: 30px;float: right;" onchange="restoreCanvas()"><option >0</option></select>
+	
+	
+    <div id="drawing-mode-options" style="background: rgba(15, 14, 14, 0.4);padding-left: 10px;padding-top: 10px;">
         <button id="clear-canvas" class="btn btn-info">Clear</button> <button id="flip-drawing" class="btn btn-info" >Draw/Don't</button>
 
         <button id="delete-selected" class="btn btn-info" onclick="deleteSelectedObjects()">Del</button>
 
         <br><br>
-        <select id="drawing-mode-selector">
-            <option>Pencil</option>
-            <option>Circle</option>
-            <option>Spray</option>
-            <option>Pattern</option>
-
-        </select><br><br>
-
-        <label for="drawing-line-width">Line width:</label>
-        <span class="info">3</span><input type="range" value="30" min="0" max="150" id="drawing-line-width"><br>
-        <br><br>
+        
 		<button  class="btn btn-info" onclick="Copy(pc)">Copy</button>
 		<button  class="btn btn-info" onclick="Paste(pc)">Paste</button>
 		<button  class="btn btn-info" onclick="degroup(pc)">Ungroup</button>
 		
-        <br><br><label for="drawing-color">Line color:</label>
-        <input type="color" value="#005E7A" id="drawing-color"><br>
-        <br>
-        <label for="drawing-color">Text color:</label>
-        <input type="color" value="#005E7A" id="text-color"><br>
         <br><br>
+        
         <button id="create-text" class="btn btn-info">Text</button>
         <button id="create-small-text" class="btn btn-info">Small Text</button>
 		<button id="create-rect-text" class="btn btn-info">[]</button>
@@ -381,8 +380,8 @@
         <button  id="greenen" class="btn btn-info" onclick="changeCircleColor('green')">Gr</button>
         <button  id="whiten" class="btn btn-info" onclick="changeCircleColor('white')">Wh</button>
         <br><br>
-		<button  id="greenen" class="btn btn-info" onclick="zoomSelectedObject(true)">+</button>
-        <button  id="whiten" class="btn btn-info" onclick="zoomSelectedObject(false)">-</button>
+		<button  id="greenen" class="btn btn-info" onclick="zoomSelectedObject(true)" style="margin-right:10px;">+</button>
+        <button  id="whiten" class="btn btn-info" onclick="zoomSelectedObject(false)"style="margin-right:10px;">-</button>
 		
 		<button  id="arrow" class="btn btn-info" onclick="arrowButton()">--></button>
 		<br><br>
@@ -393,24 +392,86 @@
 		
         <br><br>
 		
-		<button  id="create-array" class="btn btn-info" onclick="window.insertArray=true" style="">Array</button>
-        <!--<button  id="execute-next" class="btn btn-info" onclick="executeNextLine()">Execute Next Line</button>-->
-        <br><br>
+		<button  id="create-array" class="btn btn-info" onclick="window.insertArray=true" style="margin-right:10px;">Array</button>
+        
         <button  id="insert-matex" class="btn btn-info" onclick="window.signalMatexInsertion=true;">Matex</button>
 		<button  id="insert-image" class="btn btn-info" onclick="window.signalImageInsertion=true;">Image</button>
 		<br><br>
-		
-		
+		<button id="save" style="margin-right:10px;" onclick="saveCanvas()">Save</button>
+		<button id="newCanvas" onclick="newCanvas()"> New </button>
+		<br><br>
+		<select id="drawing-mode-selector">
+            <option>Pencil</option>
+            <option>Circle</option>
+            <option>Spray</option>
+            <option>Pattern</option>
+
+        </select><br><br>
+
+        <label for="drawing-line-width">Line width:</label>
+        <span class="info">3</span><input type="range" value="30" min="0" max="150" id="drawing-line-width"><br>
+        <br><br>
+		<label for="drawing-color">Line color:</label>
+		<input type="color" value="#005E7A" id="drawing-color"><br>
+        <br>
+        <label for="drawing-color">Text color:</label>
+        <input type="color" value="#005E7A" id="text-color"><br>
+        <br><br>
         <span id="instruction" style="width:150px"></span>
 
     </div>
 </div>
 
 <script type="text/javascript">
+	  localStorage.setItem('pc', JSON.stringify({}))
+	  localStorage.setItem('oc', JSON.stringify({}))
+
+	  if(location.hash.indexOf('debug') >= 0) alert(window.innerWidth +","+ window.innerHeight)
+      if(window.innerWidth < window.innerHeight){
+		$('#toolbar').css({ position: 'absolute', bottom: 0})
+	  }
+	  
+	  $('body').scroll(function(e){
+		console.log('resized')
+		
+	  });
+	  
       $(document).ready(e=>{
-         $('#toolbarToggle').click(e => {  $('#drawing-mode-options').toggle(); });
+         
          $('#toolbar').draggable();
       });
+	  function saveCanvas(){
+		var idx = window.savePoint || 0;
+		
+		localStorage.setItem('pc_'+idx, JSON.stringify( pc.toDatalessJSON() ))
+		localStorage.setItem('oc_'+idx, JSON.stringify( oc.toDatalessJSON() ))
+		
+	  }
+	  
+	  function restoreCanvas(){
+	    var idx = Number.parseInt($('#savePoints').val())
+		saveCanvas()
+		window.savePoint = idx;
+		pc.clear(); oc.clear();
+	    var data = JSON.parse(localStorage.getItem('pc_'+idx))
+		pc.loadFromDatalessJSON(data)
+		
+		pc.renderAll();
+		var data1 = JSON.parse(localStorage.getItem('oc_'+idx))
+		oc.loadFromDatalessJSON(data1)
+		oc.renderAll();
+	  }
+	  
+	  function newCanvas(){
+		saveCanvas()
+		var idx = $('#savePoints option').length
+		pc.clear(); oc.clear();
+		$('#savePoints').append('<option>'+ idx + '</option>')
+		$('#savePoints').val(idx+'')
+		
+		window.savePoint = idx;
+	  }
+	  
 		$('#drawing-mode-selector').change(e => {
 			oc.freeDrawingBrush = new fabric[e.target.value+'Brush'](oc)
 		})
@@ -488,6 +549,12 @@
 		});
 		
 		pc.on('mouse:up', function(e){
+		    $('#drawing-mode-options').hide();
+			
+			if(!e.e) e.e = {}
+			if(!e.e.clientX) e.e.clientX = 10;
+			if(!e.e.clientY) e.e.clientY = 10;
+			
 			if(window.insertText){
 				var tb = textbox({top: e.e.clientY, left: e.e.clientX})
 				pc.add(tb)
@@ -520,6 +587,7 @@
 			    var text = prompt('Enter text')
 				if(!text) return;
 				var tb = textInRect( text, e.e.clientX, e.e.clientY, pc, {}, {})
+				tb.hasControls = false;
 				pc.add(tb)
 			}
 			
@@ -528,7 +596,8 @@
 				var text = prompt('Enter text')
 				if(!text) return;
 				
-				showArray( text.split(','), e.e.clientX, e.e.clientY, pc);
+				var ar = showArray( text.split(','), e.e.clientX, e.e.clientY, pc);
+				pc.getObjects().forEach(o => o.hasControls = false);
 			}
 			
 			if(window.arrowButtonClicked){
