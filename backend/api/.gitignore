@@ -1,0 +1,8 @@
+build/
+.idea/
+.gradle/
+*-prod.*
+**/*-prod.*
+nohup.out
+*.iml
+out/
