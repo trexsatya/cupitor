@@ -2,6 +2,7 @@
 /build/
 
 *.swp
+package-lock.json
 
 #Ignore in current as well as sub folders
 node_modules/
