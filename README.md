@@ -1,3 +1,11 @@
+# What are we creating here
+A  <a href="https://en.wikipedia.org/wiki/Multitier_architecture">multi-tiered</a> web based application which has a front-end (web pages which users can see on the internet), a REST-based backend API, and a DB MongoDB based backend storage.
+We will create different implementations of Frontend and backend API. Currently VueJS (Vue2) implementation is available for frontend and Groovy/Java based implementation for backend.
+
+Each of the module (backend and frontend) will be deployable using Docker. 
+Docker Compose file is provided to start the whole application (frontend, backend and DB) at once.
+
+Functionality of the application: Currently this application is a simple website which will show articles. Articles are stored in MongoDB. Frontend fetches articles using REST API.
 
 # Deploy and Run:
 
