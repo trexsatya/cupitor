@@ -63,10 +63,10 @@ export const ArticlesService = {
     return ApiService.get("article", slug);
   },
   create(params) {
-    return ApiService.post("articles", { article: params });
+    return ApiService.post("articles",  params );
   },
   update(slug, params) {
-    return ApiService.update("articles", slug, { article: params });
+    return ApiService.update("articles", slug, params );
   },
   destroy(slug) {
     return ApiService.delete(`articles/${slug}`);

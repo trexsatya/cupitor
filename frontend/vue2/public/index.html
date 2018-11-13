@@ -40,7 +40,7 @@
     <script type="text/javascript">
         
       window.imageCdnUrl = "http://cupitor.online:8080/images/"
-	  window.API_URL = "http://cupitor.online:8080/api/"
+	    window.API_URL = "http://cupitor.online:8080/api/"
 	  
       function fixImageUrls(){
           $('img').each((i,e) => {
@@ -83,7 +83,13 @@
       }
       
     </script>
-
+    <script type="text/javascript">
+      if(location.href.indexOf('editor') >= 0){
+        var el = document.createElement('script');
+        el.src = "/ckeditor/ckeditor.js";
+        document.head.append(el);
+      }
+    </script>
   </head>
   <body>
     <noscript>
