@@ -1,4 +1,4 @@
-import com.satya.spring.boot.Application
+import com.satya.Application
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.context.embedded.LocalServerPort
 import org.springframework.boot.test.context.SpringBootTest

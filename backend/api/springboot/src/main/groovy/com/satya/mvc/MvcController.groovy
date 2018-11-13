@@ -60,8 +60,8 @@ class ArticleController {
             @ApiImplicitParam(name="X-Auth", required = true)
     )
     @CrossOrigin
-    @RequestMapping(value = "/article", method = RequestMethod.POST)
-    def @ResponseBody postArticle( @RequestBody Article article, HttpServletRequest request) {
+    @RequestMapping(value = "/article/{id}", method = RequestMethod.PUT)
+    def @ResponseBody updateArticle( @RequestBody Article article, HttpServletRequest request, @PathVariable("id") String id) {
         if(!article.id) throw new ArticleNotFoundException("Id can't be null")
 
         def resp = articleRepo.findOne(article.id)
@@ -100,8 +100,8 @@ class ArticleController {
             @ApiImplicitParam(name="X-Auth", required = true)
     )
     @CrossOrigin
-    @RequestMapping(value = "/article", method = RequestMethod.PUT)
-    def @ResponseBody putArticle( @RequestBody Article article,HttpServletRequest request) {
+    @RequestMapping(value = "/article", method = RequestMethod.POST)
+    def @ResponseBody newArticle( @RequestBody Article article,HttpServletRequest request) {
         def resp
         article.id = counterService.getNextSequence("article")
         if( article.id) resp =  articleRepo.findOne(article.id)

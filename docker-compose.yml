@@ -14,6 +14,8 @@ services:
       - /var/lib/mongodb/cupitor/data:/bitnami
     networks:
       - backend
+    environment:
+      - MONGO_URL=mongodb://mongodb-server:27017/cupitor-db
 
   frontend:
     image: trexsatya/cupitor-frontend-vuejs:latest

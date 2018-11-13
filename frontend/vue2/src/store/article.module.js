@@ -92,7 +92,7 @@ export const actions = {
     return ArticlesService.destroy(slug);
   },
   [ARTICLE_EDIT]({ state }) {
-    return ArticlesService.update(state.article.slug, state.article);
+    return ArticlesService.update(state.article.id, state.article);
   },
   [ARTICLE_EDIT_ADD_TAG](context, tag) {
     context.commit(TAG_ADD, tag);

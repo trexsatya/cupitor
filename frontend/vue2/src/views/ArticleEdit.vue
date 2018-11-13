@@ -4,29 +4,30 @@
       <div class="row">
         <div class="col-md-10 offset-md-1 col-xs-12">
           <RwvListErrors :errors="errors"/>
-          <form v-on:submit.prevent="onPublish(article.slug)">
+          <form v-on:submit.prevent="onPublish(article.id)">
             <fieldset :disabled="inProgress">
               <fieldset class="form-group">
                 <input
                   type="text"
                   class="form-control form-control-lg"
-                  v-model="article.title"
+                  v-model="article.name"
                   placeholder="Article Title">
               </fieldset>
               <fieldset class="form-group">
                 <input
                   type="text"
                   class="form-control"
-                  v-model="article.description"
-                  placeholder="What's this article about?">
+                  v-model="article.subject"
+                  placeholder="Subject">
               </fieldset>
               <fieldset class="form-group">
-                <textarea
+                <textarea id="editor" name="editor"
                   class="form-control"
                   rows="8"
-                  v-model="article.body"
+                  v-model="article.content"
                   placeholder="Write your article (in markdown)">
                 </textarea>
+                
               </fieldset>
               <fieldset class="form-group">
                 <input
@@ -66,6 +67,7 @@
 import { mapGetters } from "vuex";
 import store from "@/store";
 import RwvListErrors from "@/components/ListErrors";
+
 import {
   ARTICLE_PUBLISH,
   ARTICLE_EDIT,
@@ -77,7 +79,7 @@ import {
 
 export default {
   name: "RwvArticleEdit",
-  components: { RwvListErrors },
+  components: { RwvListErrors: RwvListErrors },
   props: {
     previousArticle: {
       type: Object,
@@ -91,8 +93,10 @@ export default {
     return next();
   },
   async beforeRouteEnter(to, from, next) {
-    // SO: https://github.com/vuejs/vue-router/issues/1034
-    // If we arrive directly to this url, we need to fetch the article
+    if(to.params.slug == 'new'){
+      return next();
+    }
+
     await store.dispatch(ARTICLE_RESET_STATE);
     if (to.params.slug !== undefined) {
       await store.dispatch(
@@ -117,8 +121,40 @@ export default {
   computed: {
     ...mapGetters(["article"])
   },
+  updated() {
+    if(!CKEDITOR.instances['editor']){
+        CKEDITOR.replace( 'editor' , {
+            entities: true,
+            extraPlugins: 'mathematica,codesnippet',
+            allowedContent: true,
+        });
+
+    }
+  },
+  mounted() {
+    if(!CKEDITOR.instances['editor']){
+        CKEDITOR.replace( 'editor' , {
+            entities: true,
+            extraPlugins: 'mathematica,codesnippet',
+            allowedContent: true,
+        });
+    }
+  },
   methods: {
+    validate(){
+      console.log(this.article);
+      var errors = {}
+      if(!this.article.name){
+        errors.title = ["Can't be empty"];
+      }
+      if(!this.article.subject){
+       errors.subject = ["Can't be empty"];
+      }
+      this.errors = errors
+    },
     onPublish(slug) {
+      if(!this.validate()) return;
+
       let action = slug ? ARTICLE_EDIT : ARTICLE_PUBLISH;
       this.inProgress = true;
       this.$store
@@ -132,7 +168,7 @@ export default {
         })
         .catch(({ response }) => {
           this.inProgress = false;
-          this.errors = response.data.errors;
+          this.errors = response.errors || [];
         });
     },
     removeTag(tag) {

@@ -1,4 +1,4 @@
-import com.satya.spring.boot.Application
+import com.satya.Application
 import org.springframework.test.context.ContextConfiguration
 import spock.lang.Specification
 
