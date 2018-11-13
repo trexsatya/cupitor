@@ -63,7 +63,7 @@ export default {
                               }]
                       },{
                           key: 'abstract',
-                          name: 'Abstract Knowledge',
+                          name: 'Miscellaneous Knowledge',
                           children: [{
                                   key: 'philosophy',
                                   name: 'Philosophy',
