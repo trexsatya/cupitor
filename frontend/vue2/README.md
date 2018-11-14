@@ -1,3 +1,10 @@
+
+Run these commands on command line:
+		npm i -g yarn 
+		gradle dockerBuild
+		docker tag frontend:latest trexsatya/cupitor-frontend-vuejs:latest
+		docker push trexsatya/cupitor-frontend-vuejs:latest
+
 [![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
 
 This project is started using RealWorld github repository [RealWorld](https://github.com/gothinkster/realworld) VueJS project.

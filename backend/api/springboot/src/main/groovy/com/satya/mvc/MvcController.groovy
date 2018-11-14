@@ -59,7 +59,7 @@ class ArticleController {
     @ApiImplicitParams(
             @ApiImplicitParam(name="X-Auth", required = true)
     )
-    @CrossOrigin
+    @CrossOrigin(origins = ["*"])
     @RequestMapping(value = "/article/{id}", method = RequestMethod.PUT)
     def @ResponseBody updateArticle( @RequestBody Article article, HttpServletRequest request, @PathVariable("id") String id) {
         if(!article.id) throw new ArticleNotFoundException("Id can't be null")
@@ -75,7 +75,7 @@ class ArticleController {
     @ApiImplicitParams(
             @ApiImplicitParam(name="X-Auth", required = true)
     )
-    @CrossOrigin
+    @CrossOrigin(origins = ["*"])
     @RequestMapping(value = "/notepad/{id}", method = RequestMethod.POST)
     def @ResponseBody postNotepadNote( @RequestBody String data, HttpServletRequest request,
                                    @PathVariable("id") String id) {
@@ -99,7 +99,7 @@ class ArticleController {
     @ApiImplicitParams(
             @ApiImplicitParam(name="X-Auth", required = true)
     )
-    @CrossOrigin
+    @CrossOrigin(origins = ["*"])
     @RequestMapping(value = "/article", method = RequestMethod.POST)
     def @ResponseBody newArticle( @RequestBody Article article,HttpServletRequest request) {
         def resp
