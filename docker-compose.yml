@@ -16,6 +16,7 @@ services:
       - backend
     environment:
       - MONGO_URL=mongodb://mongodb-server:27017/cupitor-db
+      - PORT=8080
 
   frontend:
     image: trexsatya/cupitor-frontend-vuejs:latest
