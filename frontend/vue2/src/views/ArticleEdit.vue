@@ -151,7 +151,7 @@ export default {
        errors.subject = ["Can't be empty"];
       }
       this.errors = errors
-      return Object.keys(errors).length;
+      return Object.keys(errors).length == 0;
     },
     onPublish(slug) {
       if(!this.validate()) return;

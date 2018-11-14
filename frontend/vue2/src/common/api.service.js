@@ -14,6 +14,7 @@ const ApiService = {
     Vue.axios.defaults.headers.common[
       "Authorization"
     ] = `Token ${JwtService.getToken()}`;
+    Vue.axios.defaults.headers.common["X-Auth"] = window['X-Auth']
   },
 
   query(resource, params) {
@@ -66,7 +67,7 @@ export const ArticlesService = {
     return ApiService.post("articles",  params );
   },
   update(slug, params) {
-    return ApiService.update("articles", slug, params );
+    return ApiService.update("article", slug, params );
   },
   destroy(slug) {
     return ApiService.delete(`articles/${slug}`);
