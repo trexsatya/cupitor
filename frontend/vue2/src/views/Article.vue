@@ -72,6 +72,7 @@ blockquote {
     border-color: #ccc;
     border-width: 0 0 0 10;
 }
+
 .article-container {
     padding-left: 2%;
     padding-right: 2%;
@@ -80,6 +81,15 @@ blockquote {
     -moz-box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
     box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
 
+}
+
+.article-container h2{
+	font-family: "Source Sans Pro", sans-serif;
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 100%;
+    padding-bottom: 1%;
+    color: #404ceb;
 }
 
 .comments {

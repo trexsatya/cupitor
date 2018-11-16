@@ -14,7 +14,10 @@ const ApiService = {
     Vue.axios.defaults.headers.common[
       "Authorization"
     ] = `Token ${JwtService.getToken()}`;
-    Vue.axios.defaults.headers.common["X-Auth"] = window['X-Auth']
+  },
+
+  config() {
+    return { headers: { 'X-Auth': window['X-Auth'] }}
   },
 
   query(resource, params) {
@@ -30,15 +33,15 @@ const ApiService = {
   },
 
   post(resource, params) {
-    return Vue.axios.post(`${resource}`, params);
+    return Vue.axios.post(`${resource}`, params, this.config());
   },
 
   update(resource, slug, params) {
-    return Vue.axios.put(`${resource}/${slug}`, params);
+    return Vue.axios.put(`${resource}/${slug}`, params, this.config());
   },
 
   put(resource, params) {
-    return Vue.axios.put(`${resource}`, params);
+    return Vue.axios.put(`${resource}`, params, this.config());
   },
 
   delete(resource) {
@@ -106,3 +109,4 @@ export const FavoriteService = {
     return ApiService.delete(`articles/${slug}/favorite`);
   }
 };
+
