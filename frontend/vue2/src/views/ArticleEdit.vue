@@ -33,6 +33,13 @@
                 <input
                   type="text"
                   class="form-control"
+                  v-model="article.summary"
+                  placeholder="Description">
+              </fieldset>
+              <fieldset class="form-group">
+                <input
+                  type="text"
+                  class="form-control"
                   placeholder="Enter tags"
                   v-model="tagInput"
                   v-on:keypress.enter.prevent="addTag(tagInput)">
@@ -139,6 +146,9 @@ export default {
             allowedContent: true,
         });
     }
+    window.onbeforeunload = function(){
+  	return 'Are you sure you want to leave?';
+    };
   },
   methods: {
     validate(){
@@ -156,6 +166,7 @@ export default {
     onPublish(slug) {
       if(!this.validate()) return;
 
+      this.article.content = CKEDITOR.instances['editor'].getData()
       let action = slug ? ARTICLE_EDIT : ARTICLE_PUBLISH;
       this.inProgress = true;
       this.$store
@@ -169,7 +180,7 @@ export default {
         })
         .catch(({ response }) => {
           this.inProgress = false;
-          this.errors = response.errors || [];
+          this.errors = response || {};
         });
     },
     removeTag(tag) {

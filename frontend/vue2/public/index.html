@@ -37,11 +37,9 @@
        background:#eeeeee;border:1px solid #cccccc;padding:5px 10px;box-shadow: -5px 0 5px 0 blue;
       }
     </style>
+    <script src="/config.js"></script>
     <script type="text/javascript">
         
-      window.imageCdnUrl = "http://cupitor.online:8080/images/"
-	    window.API_URL = "http://cupitor.online:8080/api/"
-	  
       function fixImageUrls(){
           $('img').each((i,e) => {
               var href = $(e).attr('src')
