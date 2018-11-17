@@ -1,5 +1,6 @@
 <template>
-      <div style="display:inline-flex; width: 30%;margin-left:20%">
+      <div style="display:inline-flex;" class="search-container">
+
             <model-list-select :list="searchResults"
                              option-value="id"
                              option-text="name"
@@ -49,6 +50,7 @@
          if(!this.selectedArticle || !this.selectedArticle.id) return;
          this.$router.push("/article/"+this.selectedArticle.id);
          //this.selectedArticle = {}
+          this.$emit('selected');
        }
     }
   }
@@ -66,5 +68,17 @@
     width: 100% !important;
     overflow: hidden !important;
     line-height: 1.3em !important;
+  }
+
+  @media only screen and (max-width: 500px) {
+    .search-container {
+      width: 100%;
+    }
+  }
+
+  @media only screen and (min-width: 501px) {
+    .search-container {
+      width: 30%;
+    }
   }
 </style>
