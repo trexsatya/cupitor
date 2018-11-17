@@ -16,6 +16,10 @@ const ApiService = {
     ] = `Token ${JwtService.getToken()}`;
   },
 
+  config() {
+    return { headers: { 'X-Auth': window['X-Auth'] }}
+  },
+
   query(resource, params) {
     return Vue.axios.get(resource, params).catch(error => {
       throw new Error(`[RWV] ApiService ${error}`);
@@ -29,15 +33,15 @@ const ApiService = {
   },
 
   post(resource, params) {
-    return Vue.axios.post(`${resource}`, params);
+    return Vue.axios.post(`${resource}`, params, this.config());
   },
 
   update(resource, slug, params) {
-    return Vue.axios.put(`${resource}/${slug}`, params);
+    return Vue.axios.put(`${resource}/${slug}`, params, this.config());
   },
 
   put(resource, params) {
-    return Vue.axios.put(`${resource}`, params);
+    return Vue.axios.put(`${resource}`, params, this.config());
   },
 
   delete(resource) {
@@ -66,7 +70,7 @@ export const ArticlesService = {
     return ApiService.post("articles",  params );
   },
   update(slug, params) {
-    return ApiService.update("articles", slug, params );
+    return ApiService.update("article", slug, params );
   },
   destroy(slug) {
     return ApiService.delete(`articles/${slug}`);
@@ -105,3 +109,4 @@ export const FavoriteService = {
     return ApiService.delete(`articles/${slug}/favorite`);
   }
 };
+
