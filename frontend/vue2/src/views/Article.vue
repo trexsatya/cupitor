@@ -2,7 +2,6 @@
   <div style="padding-top: 10px;padding-top: 3%; padding-bottom: 3%;background-color: #424950;">
     <ArticlePage :articleId="articleId" :key="articleId" />
 
-    <span class="btn show-comment-btn" v-on:click="showComments()">Show Comments</span>
     <div class="comments">
       <vue-disqus shortname="livintolearn" :identifier="articleId" :url="url"></vue-disqus>
     </div>
@@ -50,8 +49,15 @@ export default {
   },
   methods: {
       showComments(){
-        $('.comments').toggle('slide');
-      }
+        $('.comments').show();
+        $('.show-comment-btn').hide()
+        $('.hide-comment-btn').show();
+      },
+      hideComments(){
+        $('.comments').hide();
+        $('.show-comment-btn').show()
+        $('.hide-comment-btn').hide();
+      },
   }
 };
 </script>
@@ -83,10 +89,14 @@ blockquote {
 
 }
 
-.show-comment-btn {
+.show-comment-btn, .hide-comment-btn {
   margin-top: 1%;
   width: 98%;
   margin-left: 1%;
+}
+
+.hide-comment-btn {
+  display: none;
 }
 
 .article-container h2{
@@ -101,12 +111,11 @@ blockquote {
 .comments {
   margin: 2%;
   margin-top: 2%;
-  display: none;
 }
 
 @media only screen and (min-width: 1000px) {
   .article-container {
-    padding-left: 8%;
+    padding-left: 5%;
     padding-right: 8%;
     margin-right: 15%;
     margin-left: 15%;
@@ -121,7 +130,7 @@ blockquote {
     margin-right: 12%;
   }
  
-  .show-comment-btn {
+  .show-comment-btn, .hide-comment-btn {
     margin-left: 14%;
     width: 72%;
   }
