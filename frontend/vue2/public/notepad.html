@@ -56,13 +56,13 @@
 
 
 </div>
-<script src="/js/jquery.js"></script>
+<script src="/jquery.js"></script>
 <script type="text/javascript">
     let notepadsFromLocalStorage = ()=>{
       return JSON.parse(localStorage.notepads)
     }
 
-    var API = '/api/notepadData'
+    var API = '//cupitor.online:8080/api/notepadData'
 
     let createNewNotepadOnServer = () => {
       return fetch(API,{
@@ -159,8 +159,8 @@
     Notepad
 </div>
     
-<script src="/js/ace-min/ace.js"></script>
-<script src="/js/rx.all.min.js"></script>
+<script src="/ace-min/ace.js"></script>
+<script src="/rx.all.min.js"></script>
 <script>
     let postNotepad = (text) => {
       if(!$('#editor').data('api-link')) {
