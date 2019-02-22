@@ -1,10 +1,10 @@
 <html>
 
 <head>
-	<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 
     <script src="/jquery.js"></script>
-	<script></script>
+    <script></script>
     <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
     <script type="text/javascript" src="/fabric.min.js"></script>
     <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
@@ -13,604 +13,757 @@
     </script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
     <script type="text/javascript">
-   	  Array.prototype.max = function() {
-        return Math.max.apply(null, this);
-      };
-   </script>
-   <style>
-   canvas { 
-	  height: 100vh; 
-	  width: 100vw; 
-	  display: block;
-	}
-   </style>
+        Array.prototype.max = function() {
+            return Math.max.apply(null, this);
+        };
+    </script>
+    <style>
+        canvas {
+            height: 100vh;
+            width: 100vw;
+            display: block;
+        }
+    </style>
 </head>
+
 <body>
-<canvas id="playerCanvas"  ></canvas>
-<canvas id="overlayCanvas" style="position: absolute;"></canvas>
+    <canvas id="playerCanvas"></canvas>
+    <canvas id="overlayCanvas" style="position: absolute;"></canvas>
 
-<script type="text/javascript">
-		var API_HOST = 'http://livintolearn.com/api';
-
-		var id = window.location.hash.replace("#","")
-
-	/*	$.ajax(`${API_HOST}/articleAccessories/${id}`).then(resp => {
-			//console.log(resp); //Content loaded
-			var speeches = resp.speechTexts
-			var animations = resp.animationScripts
-
-			console.log(speeches)
-			console.log(animations)
-
+    <script type="text/javascript">
+        var API_HOST = 'http://livintolearn.com/api';
+        var id = window.location.hash.replace("#", "")
+            /*  $.ajax(`${API_HOST}/articleAccessories/${id}`).then(resp => {
+      //console.log(resp); //Content loaded
+      var speeches = resp.speechTexts
+      var animations = resp.animationScripts
+      console.log(speeches)
+      console.log(animations)
          var playerCanvas = new fabric.Canvas('playerCanvas')
          var _ = {}
          var playerCanvasObjects = _;
          var _pc = playerCanvas;
-
-			new timer(Object.keys(speeches).map(x => Number.parseInt(x)).max(), t => {
+      new timer(Object.keys(speeches).map(x => Number.parseInt(x)).max(), t => {
             if(animations[t]) eval(animations[t]);
          });
+    }) */
+        window.pc = new fabric.Canvas('playerCanvas')
+        window._ = {
+            textboxes: []
+        }
+        window.oc = new fabric.Canvas('overlayCanvas', {
+            isDrawingMode: true
+        });
+        pc.setWidth(window.innerWidth)
+        pc.setHeight(window.innerHeight)
+        oc.setWidth(window.innerWidth)
+        oc.setHeight(window.innerHeight)
 
+        function superimposeOverlayCanvas() {
+            var pos = $('#playerCanvas').position()
+            $('#overlayCanvas').css({
+                position: 'absolute',
+                top: pos.top,
+                left: pos.left,
+                width: $('#playerCanvas').width(),
+                height: $('#playerCanvas').height()
+            });
+        }
 
-		}) */
+        function showOverlayCanvas() {
+            $($('.canvas-container')[1]).css({
+                zIndex: 2000
+            })
+            window.overlayCanvasHidden = false
+        }
 
+        function hideOverlayCanvas() {
+            $($('.canvas-container')[1]).css({
+                zIndex: -2000
+            })
+            window.overlayCanvasHidden = true
+        }
 
-		window.pc = new fabric.Canvas('playerCanvas')
-		window._ = { textboxes: []}
-		window.oc = new fabric.Canvas('overlayCanvas', {
-			isDrawingMode: true
-		});
+        function showToolbar() {
+            $('#toolbar').show();
+        }
 
-		pc.setWidth(window.innerWidth)
-		pc.setHeight(window.innerHeight)
+        function hideToolbar() {
+            $('#toolbar').show();
+        }
+        $('.canvas-container').css({
+            position: 'absolute'
+        });
+        superimposeOverlayCanvas()
+        hideOverlayCanvas()
 
-		oc.setWidth(window.innerWidth)
-		oc.setHeight(window.innerHeight)
+        function changeCircleColor(c) {
+            try {
+                pc.getActiveObject()._objects[0].setFill(c)
 
-		function superimposeOverlayCanvas(){
-			var pos = $('#playerCanvas').position()
-			$('#overlayCanvas').css({ position: 'absolute', top: pos.top, left: pos.left, width: $('#playerCanvas').width(), height: $('#playerCanvas').height() });
+            } catch (e) {
+                try {
+                    pc.getActiveObject().setFill(c)
+                } catch (e) {
+                    console.log(e);
+                }
+            }
+            pc.renderAll()
+        }
 
-		}
+        function flipConnectionMode() {
+            var connectionModeOn = window.connectionMode || false;
 
-		function showOverlayCanvas(){
-		    $($('.canvas-container')[1]).css({ zIndex: 2000})
-		    window.overlayCanvasHidden = false
-		}
+            window.connectionMode = !connectionModeOn
+            if (window.connectionMode) $('#flipConnectionMode').css({
+                backgroundColor: 'blue'
+            })
+            else $('#flipConnectionMode').css({
+                backgroundColor: ''
+            })
 
-		function hideOverlayCanvas(){
-		    $($('.canvas-container')[1]).css({ zIndex: -2000})
-		    window.overlayCanvasHidden = true
-		}
-		function showToolbar(){ $('#toolbar').show(); }
-		function hideToolbar(){ $('#toolbar').show(); }
+            window.firstOfConnection = null
+        }
 
-		$('.canvas-container').css({ position: 'absolute'});
+        function selectFirstOfConnection(e) {
+            window.firstOfConnection = pc.getActiveObject()
+        }
 
-		superimposeOverlayCanvas()
-		hideOverlayCanvas()
+        function makeConnection(e) {
+            if (window.firstOfConnection) {
+                connect(pc, firstOfConnection, pc.getActiveObject())
+                window.firstOfConnection = null
+            }
+        }
 
-		function changeCircleColor(c){
-
-			try {
-				pc.getActiveObject()._objects[0].setFill(c)
-				
-			} catch(e){
-			   try{ pc.getActiveObject().setFill(c)	 } catch(e){ console.log(e); }
-			}
-			pc.renderAll()
-		}
-
-		function flipConnectionMode(){
-			var connectionModeOn = window.connectionMode || false;
-			
-			window.connectionMode = !connectionModeOn
-			if(window.connectionMode) $('#flipConnectionMode').css({ backgroundColor: 'blue' })
-			else $('#flipConnectionMode').css({ backgroundColor: '' })
-			
-			window.firstOfConnection = null
-		}
-		
-		function selectFirstOfConnection(e){
-			window.firstOfConnection = pc.getActiveObject()
-		}
-
-		function makeConnection(e){
-			if(window.firstOfConnection){
-				connect(pc, firstOfConnection, pc.getActiveObject())
-				window.firstOfConnection = null
-			}
-		}
-
-		function getScript(id){
+        function getScript(id) {
             $.ajax(`/api/${id}`).then(resp => {
                 console.log(resp)
-                window.jsToExecute = {lines: resp, index: 0}
+                window.jsToExecute = {
+                    lines: resp,
+                    index: 0
+                }
             })
-		}
+        }
+        var id = window.location.hash.replace("#", "")
+        if (id) getScript(id)
 
-        var id = window.location.hash.replace("#","")
-        if(id)getScript(id)
+        function executeNextLine() {
+            if (window.jsToExecute) {
+                eval(window.jsToExecute.lines[window.jsToExecute.index])
+                window.jsToExecute.index = window.jsToExecute.index + 1
+            }
+        }
 
-		function executeNextLine(){
-		    if(window.jsToExecute) {
-		        eval(window.jsToExecute.lines[window.jsToExecute.index])
-		        window.jsToExecute.index = window.jsToExecute.index + 1
-		    }
-		}
-		
-		function zoomSelectedObject(isPlus){
-		    if(!pc.getActiveObject()) return;
-			var amount = 1.5
-			
-			if(isPlus){
-				var activeObject = pc.getActiveObject()
-				activeObject.scaleX = activeObject.scaleX*amount
-				activeObject.scaleY = activeObject.scaleY*amount
-				
-			} else {
-				var activeObject = pc.getActiveObject()
-				activeObject.scaleX = activeObject.scaleX/amount
-				activeObject.scaleY = activeObject.scaleY/amount
-				
-			}
-			activeObject.setCoords();
-			pc.renderAll()
-		}
-		
-		function moveActiveObject(prop, amount){
-			var activeObject = pc.getActiveObject()
-			activeObject[prop] = activeObject[prop] + amount
-			activeObject.setCoords();
-			pc.renderAll()
-		}
-		
-		function deleteSelectedObjects(){
-			pc.remove(pc.getActiveObject())
-			if(pc.getActiveGroup()){
-				pc.getActiveGroup()._objects.forEach(x => pc.remove(x))
-			}
-			pc.renderAll()
-		}
-		
-	    function Copy(canvas) {
-			// clone what are you copying since you
-			// may want copy and paste on different moment.
-			// and you do not want the changes happened
-			// later to reflect on the copy.
-			var target = canvas.getActiveObject() || canvas.getActiveGroup();
-			target.clone(function(cloned) {
-				_clipboard = cloned;
-			});
-		}
+        function zoomSelectedObject(isPlus) {
+            if (!pc.getActiveObject()) return;
+            var amount = 1.5
 
-		function Paste(canvas) {
-		    if(!_clipboard) return;
-			// clone again, so you can do multiple copies.
-			_clipboard.clone(function(clonedObj) {
-				canvas.discardActiveObject();
-				canvas.discardActiveGroup();
-				
-				var options = {
-					left: clonedObj.left + 10,
-					top: clonedObj.top + 10,
-					evented: true,
-				};
-				
-				clonedObj.set(options);
-				
-				if (clonedObj.type === 'activeSelection') {
-					// active selection needs a reference to the canvas.
-					clonedObj.canvas = canvas;
-					clonedObj.forEachObject(function(obj) {
-						canvas.add(obj);
-						var tr = obj.calcTransformMatrix()
-						options.left = obj.left+10+tr[4]
-						options.top = obj.top+10+tr[5]
-						obj.set(options)
-						obj.setCoords();
-					});
-					
-				} else {
-					canvas.add(clonedObj);
-				}
-				_clipboard.top += 10;
-				_clipboard.left += 10;
-				//canvas.setActiveObject(clonedObj);
-				canvas.renderAll();
-			});
-		}
-		
-		function editSelectedObject(){
-			if(!pc.getActiveObject()) return;
-			var obj = pc.getActiveObject()
-			
-			var p = prompt('Enter command')
-			if(!p || !p.split(":").length == 2) return
-			
-			var command = p.split(":")[0]
-			var data = p.split(":")[1].trim()
-			
-			if(!obj._objects || obj._objects.length < 2) return;
-			
-			switch(command){
-			   case 'bg':
-				obj._objects[0].set({ fill: data })
-			    break
-			   case 'fg':
-			    obj._objects[1].set({ fill: data })
-                break
-               case 'text':
-			    obj._objects[1].set({ text: data })
-			    break
-			}
-			pc.renderAll();
-		}
-		function makeLine(coords) {
-			return new fabric.Line(coords, {
-			  fill: 'red',
-			  stroke: 'red',
-			  strokeWidth: 2,
-			  selectable: false
-			});
-		}
+            if (isPlus) {
+                var activeObject = pc.getActiveObject()
+                activeObject.scaleX = activeObject.scaleX * amount
+                activeObject.scaleY = activeObject.scaleY * amount
 
-		function makeSubtree(node, values, pc, opts){
-		  var options = opts || { width: 150, height: 50  };
-		  
-		  node.treeConnection = node.treeConnection || {incoming: {}, outgoing: {}};
-		  
-		  if(node.oCoords && node.oCoords.mb){
-			var px = node.oCoords.mb.x, py = node.oCoords.mb.y ;
-			node.treeConnection.outgoing = { lines: [], point: 'mb' }
-			
-			var mid = Math.ceil(values.length/2)
-			if(values.length == 1) mid = 0;
-			
-			var w = (options.width/2)/values.length;
-			
-			var x = px, y = py + options.height;
-			
-			var addConnection = (x1, y1, x2, y2, text)=>{
-				var circ = textInEllipse(text, x2, y2, {}, {})
-				pc.add(circ)
-				var line = makeLine([ x1, y1, circ.oCoords.mt.x, circ.oCoords.mt.y])
-				pc.add(line)
-				node.treeConnection.outgoing.lines.push(line)
-				
-				circ.treeConnection = { incoming: { lines: [line], point: 'mt' }}
-			}
-				
-			addConnection(px, py, x, y, values[mid])
-			
-			for(var i=mid - 1; i >= 0; i--){
-			   x = x - w;	   
-			   addConnection(px, py, x, y, values[i])
-			}
-			
-			x = px, y = py;
-			
-			for(var i = mid+1; i < values.length;  i++){
-			   x = x + w;	
-			   addConnection(px, py, x, y, values[i])
-			} 
-		  }
-		}
-		
-        function drawMathSymbols(text, canvas){
-              matex(text, function(svg, width, height) {
-                  // Here you have a data url for a svg file
-                  // Draw using FabricJS:
-                  fabric.Image.fromURL(svg, function(img) {
-                      img.height = height;
-                      img.width = width;
-                      img.left = matexInsertionPoint.left
-                      img.top = matexInsertionPoint.top
-                      canvas.add(img);
-                  });
-              });
-        }		
-		
-		function onMakeTreeClick(){
-		    if(!pc.getActiveObject()) {
-			  alert('Select an object first'); return;
-			}
-			var p = prompt('Enter command')
-			if(!p) return;
-			makeSubtree(pc.getActiveObject(), p.split(','), pc)
-		}
-		
-		
-		function onRemoveTreeClick(){
-			if(!pc.getActiveObject()) {
-			  alert('Select an object first'); return;
-			}
-			var obj = pc.getActiveObject()
-			
-			if(obj.treeConnection && obj.treeConnection.outgoing){
-				obj.treeConnection.outgoing.lines.forEach(l => {
-					pc.remove(l);
-				})
-			}
-			obj.treeConnection = null
-		}
-		
-		function arrowButton(){
-			if(!window.arrowButtonClicked){
-			  window.arrowButtonClicked = {}
-			}
-		}
-		
-		function degroup(pc){
-		  var grp = pc.getActiveObject()
-		  if(grp.type != 'group') return;
-		  var items = grp.getObjects() || []
-		  grp.destroy();
-		  pc.remove(grp);
-		  items.forEach(item => pc.add(item));
-		  items.forEach(item => item.hasControls = false);
-		}
-	</script>
+            } else {
+                var activeObject = pc.getActiveObject()
+                activeObject.scaleX = activeObject.scaleX / amount
+                activeObject.scaleY = activeObject.scaleY / amount
 
-	
-<div id="toolbar" style="display: inline-block; margin-left: 10px;position: absolute; right: -10; top: 50; z-index: 1000000; height: 0">
-    <img id="toolbarToggle" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#drawing-mode-options').toggle();" src="data:image/png;base64,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"></img><select id="savePoints" style="margin-right: 30px;float: right;" onchange="restoreCanvas()"><option >0</option></select>
-	
-	
-    <div id="drawing-mode-options" style="background: rgba(15, 14, 14, 0.4);padding-left: 10px;padding-top: 10px;">
-        <button id="clear-canvas" class="btn btn-info">Clear</button> <button id="flip-drawing" class="btn btn-info" >Draw/Don't</button>
+            }
+            activeObject.setCoords();
+            pc.renderAll()
+        }
 
-        <button id="delete-selected" class="btn btn-info" onclick="deleteSelectedObjects()">Del</button>
+        function moveActiveObject(prop, amount) {
+            var activeObject = pc.getActiveObject()
+            activeObject[prop] = activeObject[prop] + amount
+            activeObject.setCoords();
+            pc.renderAll()
+        }
 
-        <br><br>
-        
-		<button  class="btn btn-info" onclick="Copy(pc)">Copy</button>
-		<button  class="btn btn-info" onclick="Paste(pc)">Paste</button>
-		<button  class="btn btn-info" onclick="degroup(pc)">Ungroup</button>
-		
-        <br><br>
-        
-        <button id="create-text" class="btn btn-info">Text</button>
-        <button id="create-small-text" class="btn btn-info">Small Text</button>
-		<button id="create-rect-text" class="btn btn-info">[]</button>
+        function deleteSelectedObjects() {
+            pc.remove(pc.getActiveObject())
+            if (pc.getActiveGroup()) {
+                pc.getActiveGroup()._objects.forEach(x => pc.remove(x))
+            }
+            pc.renderAll()
+        }
 
-        <br><br>
-        <button  id="bluen" class="btn btn-info" onclick="changeCircleColor('blue')">BL</button>
-        <button  id="reden" class="btn btn-info" onclick="changeCircleColor('red')">Red</button>
-        <button  id="greenen" class="btn btn-info" onclick="changeCircleColor('green')">Gr</button>
-        <button  id="whiten" class="btn btn-info" onclick="changeCircleColor('white')">Wh</button>
-        <br><br>
-		<button  id="greenen" class="btn btn-info" onclick="zoomSelectedObject(true)" style="margin-right:10px;">+</button>
-        <button  id="whiten" class="btn btn-info" onclick="zoomSelectedObject(false)"style="margin-right:10px;">-</button>
-		
-		<button  id="arrow" class="btn btn-info" onclick="arrowButton()">--></button>
-		<br><br>
-        
-        <button  id="flipConnectionMode" class="btn btn-info" onclick="flipConnectionMode(event)" style="">Connect</button>
-        <button  id="makeTree" class="btn btn-info" onclick="onMakeTreeClick(event)" style="">MakeTree</button>
-		<button  id="removeTree" class="btn btn-info" onclick="onRemoveTreeClick(event)" style="">RemoveTree</button>
-		
-        <br><br>
-		
-		<button  id="create-array" class="btn btn-info" onclick="window.insertArray=true" style="margin-right:10px;">Array</button>
-        
-        <button  id="insert-matex" class="btn btn-info" onclick="window.signalMatexInsertion=true;">Matex</button>
-		<button  id="insert-image" class="btn btn-info" onclick="window.signalImageInsertion=true;">Image</button>
-		<br><br>
-		<button id="save" style="margin-right:10px;" onclick="saveCanvas()">Save</button>
-		<button id="newCanvas" onclick="newCanvas()"> New </button>
-		<br><br>
-		<select id="drawing-mode-selector">
-            <option>Pencil</option>
-            <option>Circle</option>
-            <option>Spray</option>
-            <option>Pattern</option>
+        function Copy(canvas) {
+            // clone what are you copying since you
+            // may want copy and paste on different moment.
+            // and you do not want the changes happened
+            // later to reflect on the copy.
+            var target = canvas.getActiveObject() || canvas.getActiveGroup();
+            target.clone(function(cloned) {
+                _clipboard = cloned;
+            });
+        }
 
-        </select><br><br>
+        function Paste(canvas) {
+            if (!_clipboard) return;
+            // clone again, so you can do multiple copies.
+            _clipboard.clone(function(clonedObj) {
+                canvas.discardActiveObject();
+                canvas.discardActiveGroup();
 
-        <label for="drawing-line-width">Line width:</label>
-        <span class="info">3</span><input type="range" value="30" min="0" max="150" id="drawing-line-width"><br>
-        <br><br>
-		<label for="drawing-color">Line color:</label>
-		<input type="color" value="#005E7A" id="drawing-color"><br>
-        <br>
-        <label for="drawing-color">Text color:</label>
-        <input type="color" value="#005E7A" id="text-color"><br>
-        <br><br>
-        <span id="instruction" style="width:150px"></span>
+                var options = {
+                    left: clonedObj.left + 10,
+                    top: clonedObj.top + 10,
+                    evented: true,
+                };
 
+                clonedObj.set(options);
+
+                if (clonedObj.type === 'activeSelection') {
+                    // active selection needs a reference to the canvas.
+                    clonedObj.canvas = canvas;
+                    clonedObj.forEachObject(function(obj) {
+                        canvas.add(obj);
+                        var tr = obj.calcTransformMatrix()
+                        options.left = obj.left + 10 + tr[4]
+                        options.top = obj.top + 10 + tr[5]
+                        obj.set(options)
+                        obj.setCoords();
+                    });
+
+                } else {
+                    canvas.add(clonedObj);
+                }
+                _clipboard.top += 10;
+                _clipboard.left += 10;
+                //canvas.setActiveObject(clonedObj);
+                canvas.renderAll();
+            });
+        }
+
+        function editSelectedObject() {
+            if (!pc.getActiveObject()) return;
+            var obj = pc.getActiveObject()
+
+            var p = prompt('Enter command')
+            if (!p || !p.split(":").length == 2) return
+
+            var command = p.split(":")[0]
+            var data = p.split(":")[1].trim()
+
+            if (!obj._objects || obj._objects.length < 2) return;
+
+            switch (command) {
+                case 'bg':
+                    obj._objects[0].set({
+                        fill: data
+                    })
+                    break
+                case 'fg':
+                    obj._objects[1].set({
+                        fill: data
+                    })
+                    break
+                case 'text':
+                    obj._objects[1].set({
+                        text: data
+                    })
+                    break
+            }
+            pc.renderAll();
+        }
+
+        function makeLine(coords) {
+            return new fabric.Line(coords, {
+                fill: 'red',
+                stroke: 'red',
+                strokeWidth: 2,
+                selectable: false
+            });
+        }
+
+        function makeSubtree(node, values, pc, opts) {
+            var options = opts || {
+                width: 150,
+                height: 50
+            };
+
+            node.treeConnection = node.treeConnection || {
+                incoming: {},
+                outgoing: {}
+            };
+
+            if (node.oCoords && node.oCoords.mb) {
+                var px = node.oCoords.mb.x,
+                    py = node.oCoords.mb.y;
+                node.treeConnection.outgoing = {
+                    lines: [],
+                    point: 'mb'
+                }
+
+                var mid = Math.ceil(values.length / 2)
+                if (values.length == 1) mid = 0;
+
+                var w = (options.width / 2) / values.length;
+
+                var x = px,
+                    y = py + options.height;
+
+                var addConnection = (x1, y1, x2, y2, text) => {
+                    var circ = textInEllipse(text, x2, y2, {}, {})
+                    pc.add(circ)
+                    var line = makeLine([x1, y1, circ.oCoords.mt.x, circ.oCoords.mt.y])
+                    pc.add(line)
+                    node.treeConnection.outgoing.lines.push(line)
+
+                    circ.treeConnection = {
+                        incoming: {
+                            lines: [line],
+                            point: 'mt'
+                        }
+                    }
+                }
+
+                addConnection(px, py, x, y, values[mid])
+
+                for (var i = mid - 1; i >= 0; i--) {
+                    x = x - w;
+                    addConnection(px, py, x, y, values[i])
+                }
+
+                x = px, y = py;
+
+                for (var i = mid + 1; i < values.length; i++) {
+                    x = x + w;
+                    addConnection(px, py, x, y, values[i])
+                }
+            }
+        }
+
+        function drawMathSymbols(text, canvas) {
+            matex(text, function(svg, width, height) {
+                // Here you have a data url for a svg file
+                // Draw using FabricJS:
+                fabric.Image.fromURL(svg, function(img) {
+                    img.height = height;
+                    img.width = width;
+                    img.left = matexInsertionPoint.left
+                    img.top = matexInsertionPoint.top
+                    canvas.add(img);
+                });
+            });
+        }
+
+        function onMakeTreeClick() {
+            if (!pc.getActiveObject()) {
+                alert('Select an object first');
+                return;
+            }
+            var p = prompt('Enter command')
+            if (!p) return;
+            makeSubtree(pc.getActiveObject(), p.split(','), pc)
+        }
+
+
+        function onRemoveTreeClick() {
+            if (!pc.getActiveObject()) {
+                alert('Select an object first');
+                return;
+            }
+            var obj = pc.getActiveObject()
+
+            if (obj.treeConnection && obj.treeConnection.outgoing) {
+                obj.treeConnection.outgoing.lines.forEach(l => {
+                    pc.remove(l);
+                })
+            }
+            obj.treeConnection = null
+        }
+
+        function arrowButton() {
+            if (!window.arrowButtonClicked) {
+                window.arrowButtonClicked = {}
+            }
+        }
+
+        function degroup(pc) {
+            var grp = pc.getActiveObject()
+            if (grp.type != 'group') return;
+            var items = grp.getObjects() || []
+            grp.destroy();
+            pc.remove(grp);
+            items.forEach(item => pc.add(item));
+            items.forEach(item => item.hasControls = false);
+        }
+
+        window.drawingStack = []
+        function undoDrawing(){
+            var last = oc.getObjects().pop()
+            oc.remove(last)
+            drawingStack.push(last)
+            oc.renderAll();
+        }
+        function redoDrawing(){
+            var last = drawingStack.pop()
+            oc.add(last)
+            oc.renderAll();
+        }
+    </script>
+
+    <div id="drawing-toolbar" style="display: inline-block; margin-left: 10px;position: absolute; left: 0; top: 50; z-index: 1000000; height: 0" class="ui-draggable ui-draggable-handle">
+        <img id="toolbarToggle1" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#toolbar1-buttons').toggle();" src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png">
+
+        <div id="toolbar1-buttons">
+            <button id="flip-drawing" class="btn btn-info">Flip Drawing Mode</button><br><br>
+            <button id="undo" class="btn btn-info" onclick="undoDrawing(event)">Undo</button> <span> &nbsp;&nbsp;&nbsp;</span>
+            <button id="redo" class="btn btn-info" onclick="redoDrawing(event)">Redo</button><br>
+
+            <br>
+            <label for="drawing-mode-selector">Mode:</label>
+            <select id="drawing-mode-selector">
+                <option>Pencil</option>
+                <option>Circle</option>
+                <option>Spray</option>
+                <option>Pattern</option>
+
+                <option>hline</option>
+                <option>vline</option>
+                <option>square</option>
+                <option>diamond</option>
+                <option>texture</option>
+            </select><br>
+            <br>
+            <label for="drawing-line-width">Line width:</label>
+            <span class="info">2</span><input type="range" value="2" min="0" max="150" id="drawing-line-width"><br>
+            <br>
+            <label for="drawing-color">Line color:</label>
+            <input type="color" value="#005E7A" id="drawing-color"><br>
+            <br>
+            <label for="drawing-shadow-color">Shadow color:</label>
+            <input type="color" value="#005E7A" id="drawing-shadow-color"><br>
+            <br>
+            <label for="drawing-shadow-width">Shadow width:</label>
+            <span class="info">0</span><input type="range" value="0" min="0" max="50" id="drawing-shadow-width"><br>
+            
+            <br>
+            <label for="drawing-shadow-offset">Shadow offset:</label>
+            <span class="info">0</span><input type="range" value="0" min="0" max="50" id="drawing-shadow-offset"><br>
+            <br><button id="clear-canvas" class="btn btn-info">Clear</button>
+        </div>
     </div>
-</div>
 
-<script type="text/javascript">
-	  localStorage.setItem('pc', JSON.stringify({}))
-	  localStorage.setItem('oc', JSON.stringify({}))
+    <div id="toolbar" style="display: inline-block; margin-left: 10px;position: absolute; right: -10; top: 50; z-index: 1000000; height: 0">
+        <img id="toolbarToggle" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#drawing-mode-options').toggle();" src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png"></img>
 
-	  if(location.hash.indexOf('debug') >= 0) alert(window.innerWidth +","+ window.innerHeight)
-      if(window.innerWidth < window.innerHeight){
-		$('#toolbar').css({ position: 'absolute', bottom: 0})
-	  }
-	  
-	  $('body').scroll(function(e){
-		console.log('resized')
-		
-	  });
-	  
-      $(document).ready(e=>{
-         
-         $('#toolbar').draggable();
-      });
-	  function saveCanvas(){
-		var idx = window.savePoint || 0;
-		
-		localStorage.setItem('pc_'+idx, JSON.stringify( pc.toDatalessJSON() ))
-		localStorage.setItem('oc_'+idx, JSON.stringify( oc.toDatalessJSON() ))
-		
-	  }
-	  
-	  function restoreCanvas(){
-	    var idx = Number.parseInt($('#savePoints').val())
-		saveCanvas()
-		window.savePoint = idx;
-		pc.clear(); oc.clear();
-	    var data = JSON.parse(localStorage.getItem('pc_'+idx))
-		pc.loadFromDatalessJSON(data)
-		
-		pc.renderAll();
-		var data1 = JSON.parse(localStorage.getItem('oc_'+idx))
-		oc.loadFromDatalessJSON(data1)
-		oc.renderAll();
-	  }
-	  
-	  function newCanvas(){
-		saveCanvas()
-		var idx = $('#savePoints option').length
-		pc.clear(); oc.clear();
-		$('#savePoints').append('<option>'+ idx + '</option>')
-		$('#savePoints').val(idx+'')
-		
-		window.savePoint = idx;
-	  }
-	  
-		$('#drawing-mode-selector').change(e => {
-			oc.freeDrawingBrush = new fabric[e.target.value+'Brush'](oc)
-		})
+        <select id="savePoints" style="margin-right: 30px;float: right;" onchange="restoreCanvas()"><option >0</option></select>
 
-		$('#drawing-color').change(e => { oc.freeDrawingBrush.color = e.target.value;  })
 
-		$('#text-color').change(e => { window.textColor = e.target.value;  })
+        <div id="drawing-mode-options" style="background: rgba(15, 14, 14, 0.4);padding-left: 10px;padding-top: 10px;">
 
-		$('#clear-canvas').click(e => oc.clear());
+            <button id="delete-selected" class="btn btn-info" onclick="deleteSelectedObjects()">Delete</button>
 
-		$('#create-text').click(e=> {
-			window.insertText = true;
-		})
+            <br><br>
 
-		$('#create-small-text').click(e=> {
-			window.insertSmallText = true;
-		})
-		
-		$('#create-rect-text').click(e=> {
-			window.insertRectText = true;
-		})
+            <button class="btn btn-info" onclick="Copy(pc)">Copy</button>
+            <button class="btn btn-info" onclick="Paste(pc)">Paste</button>
+            <button class="btn btn-info" onclick="degroup(pc)">Ungroup</button>
 
-		$('#flip-drawing').click(e=> {
-			if(window.overlayCanvasHidden) showOverlayCanvas()
-			else hideOverlayCanvas()
-		})
+            <br><br>
 
-		pc.on('object:selected', function(e){
-			var obj = e.target
-			if(window.connectionMode) {
-				if(!window.firstOfConnection) firstOfConnection = obj
-				else {
-				  makeConnection(e)
-				  flipConnectionMode()
-				}
-				
-			}
-		});
-			
-		pc.on('object:removed', e => {
-		  console.log(e.target);
-		  var obj = e.target;
-		  if(obj.treeConnection && obj.treeConnection.outgoing){
-				obj.treeConnection.outgoing.lines.forEach(l => {
-					pc.remove(l);
-				})
-		  }
-		})
+            <button id="create-text" class="btn btn-info">Text</button>
+            <button id="create-small-text" class="btn btn-info">Small Text</button>
+            <button id="create-rect-text" class="btn btn-info">[]</button>
 
-		pc.on('object:moving', e =>{
-		  var t = e.target;
-		  var getPointCoords = (obj, pt) => {
-			 if(pt == 'mt'){
-			   return obj.aCoords.mt || {y: obj.oCoords.tl.y, x: obj.oCoords.tl.x + obj.width/2}
-			 } 
-			 if(pt == 'mb'){
-			   return obj.aCoords.mb || {y: obj.oCoords.bl.y, x: obj.oCoords.bl.x + obj.width/2}
-			 }
-		  }
-		  
-		  if(t.treeConnection ){
-			var inward = t.treeConnection.incoming || {}
-			var outward = t.treeConnection.outgoing || {}
-			
-			if(inward.lines && inward.point){
-			  var p = getPointCoords(t, inward.point)
-			  inward.lines.forEach(l => { l.set('x2', p.x); l.set('y2', p.y); t.setCoords(); l.setCoords(); pc.renderAll(); } ); 
-			}
-			if(outward.lines && outward.point){
-			  var p = getPointCoords(t, outward.point)
-			  outward.lines.forEach(l => { l.set('x1', p.x); l.set('y1', p.y); t.setCoords(); l.setCoords(); pc.renderAll(); } ); 
-			}
-			
-		  }
-		});
-		
-		pc.on('mouse:up', function(e){
-		    $('#drawing-mode-options').hide();
-			
-			if(!e.e) e.e = {}
-			if(!e.e.clientX) e.e.clientX = 10;
-			if(!e.e.clientY) e.e.clientY = 10;
-			
-			if(window.insertText){
-				var tb = textbox({top: e.e.clientY, left: e.e.clientX})
-				pc.add(tb)
-				
-				pc.setActiveObject(tb)
-				_.textboxes.push(tb)
-				window.insertText = false;
-			}
-			if(window.insertSmallText){
-			    var tb = textbox({top: e.e.clientY, left: e.e.clientX, width: 25})
-				pc.add(tb)
-				
-				pc.setActiveObject(tb)
-				_.textboxes.push(tb)
-				window.insertSmallText = false;
-			}
-			if(window.signalMatexInsertion){
+            <br><br>
+            <button id="bluen" class="btn btn-info" onclick="changeCircleColor('blue')">BL</button>
+            <button id="reden" class="btn btn-info" onclick="changeCircleColor('red')">Red</button>
+            <button id="greenen" class="btn btn-info" onclick="changeCircleColor('green')">Gr</button>
+            <button id="whiten" class="btn btn-info" onclick="changeCircleColor('white')">Wh</button>
+            <br><br>
+            <button id="greenen" class="btn btn-info" onclick="zoomSelectedObject(true)" style="margin-right:10px;">+</button>
+            <button id="whiten" class="btn btn-info" onclick="zoomSelectedObject(false)" style="margin-right:10px;">-</button>
+
+            <button id="arrow" class="btn btn-info" onclick="arrowButton()">--></button>
+            <br><br>
+
+            <button id="flipConnectionMode" class="btn btn-info" onclick="flipConnectionMode(event)" style="">Connect</button>
+            <button id="makeTree" class="btn btn-info" onclick="onMakeTreeClick(event)" style="">MakeTree</button>
+            <button id="removeTree" class="btn btn-info" onclick="onRemoveTreeClick(event)" style="">RemoveTree</button>
+
+            <br><br>
+
+            <button id="create-array" class="btn btn-info" onclick="window.insertArray=true" style="margin-right:10px;">Array</button>
+
+            <button id="insert-matex" class="btn btn-info" onclick="window.signalMatexInsertion=true;">Matex</button>
+            <button id="insert-image" class="btn btn-info" onclick="window.signalImageInsertion=true;">Image</button>
+            <br><br>
+            <button id="save" style="margin-right:10px;" onclick="saveCanvas()">Save</button>
+            <button id="newCanvas" onclick="newCanvas()"> New </button>
+            <br><br>
+
+            <br><br>
+            <span id="instruction" style="width:150px"></span>
+
+        </div>
+    </div>
+    <script >
+
+          var drawingModeEl = $('#drawing-mode'),
+              drawingOptionsEl = $('#drawing-mode-options'),
+              drawingColorEl = $('#drawing-color'),
+              drawingShadowColorEl = $('#drawing-shadow-color'),
+              drawingLineWidthEl = $('#drawing-line-width'),
+              drawingShadowWidth = $('#drawing-shadow-width'),
+              drawingShadowOffset = $('#drawing-shadow-offset'),
+              clearEl = $('#clear-canvas');
+
+          clearEl.click(function() { oc.clear() });
+
+          drawingColorEl.change(function(e) {
+              oc.freeDrawingBrush.color = this.value;
+          });
+          drawingShadowColorEl.change(function() {
+            oc.freeDrawingBrush.shadow.color = this.value;
+          });
+          drawingLineWidthEl.change( function() {
+            oc.freeDrawingBrush.width = parseInt(this.value, 10) || 1;
+            this.previousSibling.innerHTML = this.value;
+          });
+          drawingShadowWidth.change(function() {
+            oc.freeDrawingBrush.shadow.blur = parseInt(this.value, 10) || 0;
+            this.previousSibling.innerHTML = this.value;
+          });
+          drawingShadowOffset.change( function() {
+            oc.freeDrawingBrush.shadow.offsetX = parseInt(this.value, 10) || 0;
+            oc.freeDrawingBrush.shadow.offsetY = parseInt(this.value, 10) || 0;
+            this.previousSibling.innerHTML = this.value;
+          });
+
+          if (oc.freeDrawingBrush) {
+            oc.freeDrawingBrush.color = drawingColorEl.val() || 'black';
+            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 1;
+            oc.freeDrawingBrush.shadow = new fabric.Shadow({
+              blur: parseInt(drawingShadowWidth.val(), 10) || 0,
+              offsetX: 0,
+              offsetY: 0,
+              affectStroke: true,
+              color: drawingShadowColorEl.val() || 'black',
+            });
+          };
+    </script>
+    <script type="text/javascript">
+        localStorage.setItem('pc', JSON.stringify({}))
+        localStorage.setItem('oc', JSON.stringify({}))
+        if (location.hash.indexOf('debug') >= 0) alert(window.innerWidth + "," + window.innerHeight)
+        if (window.innerWidth < window.innerHeight) {
+            $('#toolbar').css({
+                position: 'absolute',
+                bottom: 0
+            })
+        }
+
+        $('body').scroll(function(e) {
+            console.log('resized')
+
+        });
+
+        $(document).ready(e => {
+
+            $('#toolbar').draggable();
+        });
+
+        function saveCanvas() {
+            var idx = window.savePoint || 0;
+
+            localStorage.setItem('pc_' + idx, JSON.stringify(pc.toDatalessJSON()))
+            localStorage.setItem('oc_' + idx, JSON.stringify(oc.toDatalessJSON()))
+
+        }
+
+        function restoreCanvas() {
+            var idx = Number.parseInt($('#savePoints').val())
+            saveCanvas()
+            window.savePoint = idx;
+            pc.clear();
+            oc.clear();
+            var data = JSON.parse(localStorage.getItem('pc_' + idx))
+            pc.loadFromDatalessJSON(data)
+
+            pc.renderAll();
+            var data1 = JSON.parse(localStorage.getItem('oc_' + idx))
+            oc.loadFromDatalessJSON(data1)
+            oc.renderAll();
+        }
+
+        function newCanvas() {
+            saveCanvas()
+            var idx = $('#savePoints option').length
+            pc.clear();
+            oc.clear();
+            $('#savePoints').append('<option>' + idx + '</option>')
+            $('#savePoints').val(idx + '')
+
+            window.savePoint = idx;
+        }
+
+
+        $('#create-text').click(e => {
+            window.insertText = true;
+        })
+        $('#create-small-text').click(e => {
+            window.insertSmallText = true;
+        })
+
+        $('#create-rect-text').click(e => {
+            window.insertRectText = true;
+        })
+        $('#flip-drawing').click(e => {
+            if (window.overlayCanvasHidden) showOverlayCanvas()
+            else hideOverlayCanvas()
+        })
+        pc.on('object:selected', function(e) {
+            var obj = e.target
+            if (window.connectionMode) {
+                if (!window.firstOfConnection) firstOfConnection = obj
+                else {
+                    makeConnection(e)
+                    flipConnectionMode()
+                }
+
+            }
+        });
+
+        pc.on('object:removed', e => {
+            console.log(e.target);
+            var obj = e.target;
+            if (obj.treeConnection && obj.treeConnection.outgoing) {
+                obj.treeConnection.outgoing.lines.forEach(l => {
+                    pc.remove(l);
+                })
+            }
+        })
+        pc.on('object:moving', e => {
+            var t = e.target;
+            var getPointCoords = (obj, pt) => {
+                if (pt == 'mt') {
+                    return obj.aCoords.mt || {
+                        y: obj.oCoords.tl.y,
+                        x: obj.oCoords.tl.x + obj.width / 2
+                    }
+                }
+                if (pt == 'mb') {
+                    return obj.aCoords.mb || {
+                        y: obj.oCoords.bl.y,
+                        x: obj.oCoords.bl.x + obj.width / 2
+                    }
+                }
+            }
+
+            if (t.treeConnection) {
+                var inward = t.treeConnection.incoming || {}
+                var outward = t.treeConnection.outgoing || {}
+
+                if (inward.lines && inward.point) {
+                    var p = getPointCoords(t, inward.point)
+                    inward.lines.forEach(l => {
+                        l.set('x2', p.x);
+                        l.set('y2', p.y);
+                        t.setCoords();
+                        l.setCoords();
+                        pc.renderAll();
+                    });
+                }
+                if (outward.lines && outward.point) {
+                    var p = getPointCoords(t, outward.point)
+                    outward.lines.forEach(l => {
+                        l.set('x1', p.x);
+                        l.set('y1', p.y);
+                        t.setCoords();
+                        l.setCoords();
+                        pc.renderAll();
+                    });
+                }
+
+            }
+        });
+
+        oc.on('mouse:up', function(e) {
+            $('#drawing-mode-options').hide();
+            $('#toolbar1-buttons').hide();
+        })
+        pc.on('mouse:up', function(e) {
+            $('#drawing-mode-options').hide();
+            $('#toolbar1-buttons').hide();
+
+            if (!e.e) e.e = {}
+            if (!e.e.clientX) e.e.clientX = 10;
+            if (!e.e.clientY) e.e.clientY = 10;
+
+            if (window.insertText) {
+                var tb = textbox({
+                    top: e.e.clientY,
+                    left: e.e.clientX
+                })
+                pc.add(tb)
+
+                pc.setActiveObject(tb)
+                _.textboxes.push(tb)
+                window.insertText = false;
+            }
+            if (window.insertSmallText) {
+                var tb = textbox({
+                    top: e.e.clientY,
+                    left: e.e.clientX,
+                    width: 25
+                })
+                pc.add(tb)
+
+                pc.setActiveObject(tb)
+                _.textboxes.push(tb)
+                window.insertSmallText = false;
+            }
+            if (window.signalMatexInsertion) {
                 window.signalMatexInsertion = false;
-                window.matexInsertionPoint = {top: e.e.clientY, left: e.e.clientX }
+                window.matexInsertionPoint = {
+                    top: e.e.clientY,
+                    left: e.e.clientX
+                }
                 document.getElementById('mathjaxDialog').style.display = 'block';
-			}
-
-			if(window.signalImageInsertion){
+            }
+            if (window.signalImageInsertion) {
                 window.signalImageInsertion = false;
-				$('#imageInputDialog').show();
-			}
-			
-			if(window.insertRectText){
-				window.insertRectText = false;
-			    var text = prompt('Enter text')
-				if(!text) return;
-				var tb = textInRect( text, e.e.clientX, e.e.clientY, pc, {}, {})
-				tb.hasControls = false;
-				pc.add(tb)
-			}
-			
-			if(window.insertArray){
-				window.insertArray = false;
-				var text = prompt('Enter text')
-				if(!text) return;
-				
-				var ar = showArray( text.split(','), e.e.clientX, e.e.clientY, pc);
-				pc.getObjects().forEach(o => o.hasControls = false);
-			}
-			
-			if(window.arrowButtonClicked){
-			   if(window.arrowButtonClicked.first){
-			     var a = window.arrowButtonClicked.first
-			     pc.add(arrow(a.x, a.y, e.e.clientX, e.e.clientY, { stroke: ( $('#drawing-color').val() || 'black' ) } ))
-				 window.arrowButtonClicked = null;
-			   } else {
-			     window.arrowButtonClicked.first = { x: e.e.clientX, y: e.e.clientY}
-			   }
-			}
-		})
+                $('#imageInputDialog').show();
+            }
 
+            if (window.insertRectText) {
+                window.insertRectText = false;
+                var text = prompt('Enter text')
+                if (!text) return;
+                var tb = textInRect(text, e.e.clientX, e.e.clientY, pc, {}, {})
+                tb.hasControls = false;
+                pc.add(tb)
+            }
+
+            if (window.insertArray) {
+                window.insertArray = false;
+                var text = prompt('Enter text')
+                if (!text) return;
+
+                var ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc);
+                pc.getObjects().forEach(o => o.hasControls = false);
+            }
+
+            if (window.arrowButtonClicked) {
+                if (window.arrowButtonClicked.first) {
+                    var a = window.arrowButtonClicked.first
+                    pc.add(arrow(a.x, a.y, e.e.clientX, e.e.clientY, {
+                        stroke: ($('#drawing-color').val() || 'black')
+                    }))
+                    window.arrowButtonClicked = null;
+                } else {
+                    window.arrowButtonClicked.first = {
+                        x: e.e.clientX,
+                        y: e.e.clientY
+                    }
+                }
+            }
+        })
         var mapping = {
             'l': 'clear-canvas',
             'Delete': 'delete-selected',
@@ -623,99 +776,101 @@
             'e': 'execute-next',
             'w': 'whiten'
         }
-
         $(document).keyup(e => {
-		    if(document.getElementById('mathjaxDialog').style.display == 'block') return false;
-            if(pc.getActiveObject() && pc.getActiveObject().type == 'textbox' && pc.getActiveObject().isEditing) return;
-            if(mapping[e.key]) $("#"+mapping[e.key]).click()
-			if(e.keyCode == 187 ){ //zoom in
-				zoomSelectedObject(true)
-			}
-			if(e.keyCode == 189 ){ //zoom out
-				zoomSelectedObject(false)
-			}
-			if(e.keyCode == 46){
-				$('#delete-selected').click()
-			}
-			switch(e.keyCode){
-				case 37: //left
-				 moveActiveObject('left', -10)
-				 break
-				case 39: //right
-				 moveActiveObject('left', 10)
-				 break
-				case 40: //down
-				 moveActiveObject('top', 10)
-				 break
-				case 38: //up
-				 moveActiveObject('top', -10)
-				 break
-				case 69:
-				 editSelectedObject()
-				 break
-				default: break
-			}
+            if (document.getElementById('mathjaxDialog').style.display == 'block') return false;
+            if (pc.getActiveObject() && pc.getActiveObject().type == 'textbox' && pc.getActiveObject().isEditing) return;
+            if (mapping[e.key]) $("#" + mapping[e.key]).click()
+            if (e.keyCode == 187) { //zoom in
+                zoomSelectedObject(true)
+            }
+            if (e.keyCode == 189) { //zoom out
+                zoomSelectedObject(false)
+            }
+            if (e.keyCode == 46) {
+                $('#delete-selected').click()
+            }
+            switch (e.keyCode) {
+                case 37: //left
+                    moveActiveObject('left', -10)
+                    break
+                case 39: //right
+                    moveActiveObject('left', 10)
+                    break
+                case 40: //down
+                    moveActiveObject('top', 10)
+                    break
+                case 38: //up
+                    moveActiveObject('top', -10)
+                    break
+                case 69:
+                    editSelectedObject()
+                    break
+                default:
+                    break
+            }
         })
+    </script>
 
+    <script>
+        function handleFileDialogButtons(src) {
+            if (src == "OK") {
+                var url = $('#imageInputUrl').val()
+                if (url) {
+                    fabric.Image.fromURL(url, function(oImg) {
+                        oImg.set({
+                            'left': 100
+                        });
+                        oImg.set({
+                            'top': 100
+                        });
+                        pc.add(oImg);
+                        $('#imageInputUrl').val('')
+                    });
+                } else {
+                    //Handle file selection
+                    var file = document.querySelector('#imageInputFile').files[0];
+                    var reader = new FileReader();
+                    reader.addEventListener("load", function() {
+                        fabric.Image.fromURL(reader.result, function(oImg) {
+                            oImg.set({
+                                'left': 100
+                            });
+                            oImg.set({
+                                'top': 100
+                            });
+                            pc.add(oImg);
+                        });
+                    }, false);
+                    if (file) {
+                        reader.readAsDataURL(file);
+                    }
+                }
+                $('#imageInputDialog').hide();
+            } else {
+                $('#imageInputDialog').hide();
+            }
+        }
+    </script>
 
+    <div id="imageInputDialog" style="background: blue; color: white; display: none; z-index: 500000;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
+        <input autofocus type="text" id="imageInputUrl" onkeyup="renderMath(event)">
 
-	</script>
+        <input type="file" id="imageInputFile">
 
-	<script>
-		function handleFileDialogButtons(src){
-		  if(src == "OK"){
-		    var url = $('#imageInputUrl').val()
-			if(url){
-				fabric.Image.fromURL(url, function(oImg) {
-					oImg.set({'left': 100 });
-					oImg.set({'top': 100 });
-					pc.add(oImg);
-					$('#imageInputUrl').val('')
-				});
-			} else {
-				//Handle file selection
-				var file    = document.querySelector('#imageInputFile').files[0];
-				var reader  = new FileReader();
+        <button onclick="handleFileDialogButtons('OK')">OK</button> <button onclick="handleFileDialogButtons('')">Close</button>
+    </div>
 
-				reader.addEventListener("load", function () {
-					fabric.Image.fromURL(reader.result, function(oImg) {
-						oImg.set({'left': 100 });
-						oImg.set({'top': 100 });
-						pc.add(oImg);
-					});
-				}, false);
-
-				if (file) {
-				    reader.readAsDataURL(file);
-				}
-			}
-			$('#imageInputDialog').hide();
-		  } else {
-		    $('#imageInputDialog').hide();
-		  }
-		}
-	</script>
-	
-	<div id="imageInputDialog" style="background: blue; color: white; display: none; z-index: 500000;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
-		<input autofocus type="text" id="imageInputUrl" onkeyup="renderMath(event)">
-		
-		<input type="file" id="imageInputFile">
-		
-		<button onclick="handleFileDialogButtons('OK')">OK</button> <button onclick="handleFileDialogButtons('')">Close</button>
-	</div>
-	
     <div id="mathjaxDialog" style="background: blue; color: white; display: none; z-index: 500000;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
         <script>
-            function renderMath(e){
-                if(e.keyCode == 13){
+            function renderMath(e) {
+                if (e.keyCode == 13) {
                     drawMathSymbols(document.getElementById('mathtext').value, pc)
                     document.getElementById('mathjaxDialog').style.display = 'none';
-                } else if(e.keyCode == 27){
+                } else if (e.keyCode == 27) {
                     document.getElementById('mathjaxDialog').style.display = 'none';
-                }
-                else {
-                    document.getElementById('representation').innerHTML = "\\("+document.getElementById('mathtext').value + "\\)";
-                    MathJax.Hub.Queue(['Typeset',MathJax.Hub,'representation']);
+                } else {
+                    document.getElementById('representation').innerHTML = "\\(" + document.getElementById('mathtext').value + "\\)";
+                    MathJax.Hub.Queue(['Typeset', MathJax.Hub, 'representation']);
                 }
             }
         </script>
@@ -725,4 +880,5 @@
         </div>
     </div>
 </body>
+
 </html>
