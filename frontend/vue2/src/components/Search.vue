@@ -9,7 +9,6 @@
                              placeholder="Search..."
                              @input="onSelect"
                              @searchchange="searchArticles"
-                             @input="onSelect"
                              >
             </model-list-select>
      

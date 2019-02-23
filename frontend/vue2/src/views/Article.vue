@@ -119,6 +119,7 @@ blockquote {
 .comments {
   margin: 2%;
   margin-top: 2%;
+  display: none;
 }
 
 @media (max-width: 767px) {
