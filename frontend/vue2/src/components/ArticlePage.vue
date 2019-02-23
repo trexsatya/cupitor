@@ -77,15 +77,7 @@ export default {
           return marked(content);
       },
 
-      getDate: function(x){
-              if(!x ) return "Jan 1, 2018";
-              if(typeof x == 'number') return new Date(x).toDateString();
-        
-              if(typeof x == 'object' && x.$date){
-                  return new Date(x.$date).toDateString()
-              }
-              return x;
-      },
+      
       getBreadcrumbItems: function(article){
           const sub = s => s.startsWith('hidden') ? '>>>' : s;
           return [ {name: "Home", route: "/"}, {name: "articles", route: "/"}, 
@@ -94,6 +86,7 @@ export default {
           {name: "", route: "/" }]
       },
       getDateString: function(d){
+      	  if(!d) return "Jan 01 2008";
           var ds = new Date(d).toDateString()
           if(ds.split(" ").length > 1){
             return ds.split(" ").slice(1).join(" ")

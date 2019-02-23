@@ -119,7 +119,6 @@ blockquote {
 .comments {
   margin: 2%;
   margin-top: 2%;
-  display: none;
 }
 
 @media (max-width: 767px) {
@@ -132,7 +131,7 @@ blockquote {
 
 @media only screen and (min-width: 1000px) {
   .article-container {
-    padding-left: 8%;
+    padding-left: 5%;
     padding-right: 8%;
     margin-right: 15%;
     margin-left: 15%;

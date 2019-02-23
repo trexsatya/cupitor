@@ -50,7 +50,7 @@ export default {
     ...mapGetters(["currentUser", "isAuthenticated"])
   },
   mounted() {
-    $(window).resize(e=>{  $('.search-mobile').hide(); })
+    //$(window).resize(e=>{  $('.search-mobile').hide(); })
   },
   methods: {
     showSearchOnMobile(){
