@@ -7,6 +7,7 @@
                              :custom-text="customName"
                              v-model="selectedArticle"
                              placeholder="Search..."
+                             @input="onSelect"
                              @searchchange="searchArticles"
                              @input="onSelect"
                              >
@@ -37,8 +38,8 @@
         if(!searchText) return;
         this.$store.dispatch(SEARCH_ARTICLES, { text: searchText });
       },
-      onSelect(item){
-        this.$emit('onSelect')
+	    onSelect(item){
+        if(item && item.id) this.$emit('onSelect')
       }
     },
     computed: {
@@ -54,6 +55,7 @@
          this.$router.push("/article/"+this.selectedArticle.id);
          //this.selectedArticle = {}
          
+         if(this.selectedArticle)  this.$emit('selected');
        }
     }
   }
