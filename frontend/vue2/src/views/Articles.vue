@@ -49,4 +49,4 @@ export default {
   padding-top: 3%;
   background-color: #424950;
 }
-<style>
+</style>

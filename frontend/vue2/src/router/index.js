@@ -69,6 +69,12 @@ export default new Router({
       props: true
     },
     {
+      name: "article-preview",
+      path: "/preview/article",
+      component: () => import("@/views/ArticlePreview"),
+      props: true
+    },
+    {
       name: "article-edit",
       path: "/editor/:slug?",
       props: true,

@@ -8,6 +8,7 @@
                              v-model="selectedArticle"
                              placeholder="Search..."
                              @searchchange="searchArticles"
+                             @input="onSelect"
                              >
             </model-list-select>
      
@@ -36,7 +37,9 @@
         if(!searchText) return;
         this.$store.dispatch(SEARCH_ARTICLES, { text: searchText });
       },
-
+      onSelect(item){
+        this.$emit('onSelect')
+      }
     },
     computed: {
       ...mapGetters(["searchResults"])
@@ -50,7 +53,7 @@
          if(!this.selectedArticle || !this.selectedArticle.id) return;
          this.$router.push("/article/"+this.selectedArticle.id);
          //this.selectedArticle = {}
-          this.$emit('selected');
+         
        }
     }
   }

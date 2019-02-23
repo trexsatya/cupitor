@@ -1,65 +1,59 @@
 <template>
-  <div style="padding-top: 10px;padding-top: 3%; padding-bottom: 3%;background-color: #424950;">
-    <ArticlePage :articleId="articleId" :key="articleId" />
-
-    <div class="btn show-comment-btn" v-on:click="showComments()">Show Comments</div>
-    <div class="btn hide-comment-btn" v-on:click="hideComments()">Hide Comments</div>
-    <div class="comments">
-      <vue-disqus shortname="livintolearn" :identifier="articleId" :url="url"></vue-disqus>
-    </div>
-    
-  </div>
-   
+  <div>
+        <div class="article-container">
+            
+               <div class="article" v-if="article">
+               
+                <div>
+                 <!-- <Breadcrumb :items='getBreadcrumbItems(article)' /> -->
+                   <span style="float: right;
+                              margin-top: 10px;
+                              background-color: #85ccf3;
+                              color: white;padding-left: 10px;
+                              padding-right: 10px;
+                              border-radius: 10px;
+                              font-size: 12px;
+                              font-weight: bold;"> Date </span>
+                </div>                  
+                <h2 style="text-align: center;">{{ article.name }}</h2>
+   <hr>
+                
+                <div class="content" v-html="article.content">
+                </div>
+            </div>
+        </div>
+   </div>
 </template>
 
 <script>
-import { mapGetters } from "vuex";
+import { mapGetters, mapState } from "vuex";
 import marked from "marked";
-import store from "@/store";
-import Breadcrumb from "@/components/Breadcrumb"
-import ArticlePage from "@/components/ArticlePage"
-import { FETCH_ARTICLE, FETCH_COMMENTS } from "@/store/actions.type";
 
 export default {
   name: "rwv-article",
   props: {
-    id: {
-      type: String,
-      required: true
-    }
+    
   },
   components: {
-    ArticlePage
+    
   },
-  /*beforeRouteEnter(to, from, next) {
-    Promise.all([
-      store.dispatch(FETCH_ARTICLE, to.params.id)
-      //store.dispatch(FETCH_COMMENTS, to.params.id)
-    ]).then(() => {
-      next();
-    });
-  },*/
-  computed: {
-    articleId(){ return this.$route.params.id; },
-    url(){ return "http://cupitor.online/article/"+this.$route.params.id ; }
-  },
+  computed: mapState({
+    // passing the string value 'count' is same as `state => state.count`
+    countAlias: 'count',
+
+    // to access local state with `this`, a normal function must be used
+    article (state) {
+      return state.article.articlePreview
+    }
+  }),
+
   unmounted(){
-    console.log('unm') 
+    
   },
   updated(){
       
   },
   methods: {
-      showComments(){
-        $('.comments').show();
-        $('.show-comment-btn').hide()
-        $('.hide-comment-btn').show();
-      },
-      hideComments(){
-        $('.comments').hide();
-        $('.show-comment-btn').show()
-        $('.hide-comment-btn').hide();
-      },
   }
 };
 </script>

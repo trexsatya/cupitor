@@ -11,16 +11,16 @@
                
                 <div>
                  <!-- <Breadcrumb :items='getBreadcrumbItems(article)' /> -->
-					<span style="float: right;
+					         <span style="float: right;
                               margin-top: 10px;
-                                 background-color: #85ccf3;
-                                 color: white;padding-left: 10px;
-                                                  padding-right: 10px;
-                                                  border-radius: 10px;
-                                                  font-size: 12px;
-                                                  font-weight: bold;"> {{ getDateString(article.lastUpdated) }}</span>
-				</div>								  
-                 <h2 style="text-align: center;">{{ article.name }}</h2>
+                              background-color: #85ccf3;
+                              color: white;padding-left: 10px;
+                              padding-right: 10px;
+                              border-radius: 10px;
+                              font-size: 12px;
+                              font-weight: bold;"> {{ getDateString(article.lastUpdated) }}</span>
+				        </div>								  
+                <h2 style="text-align: center;">{{ article.name }}</h2>
    <hr>
                 
                 <div class="content" v-html="article.content">
@@ -134,4 +134,15 @@ export default {
 	.article-container {
 		background-color: #fafafa;
 	}
+
+  @media (max-width: 767px) {
+    .article {
+      margin-left: 4%;
+      margin-right: 4%;
+    }
+  }
+
+  .article {
+  
+  }
 </style>

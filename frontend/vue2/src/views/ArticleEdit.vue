@@ -59,22 +59,32 @@
             </fieldset>
             <button
               :disabled="inProgress"
-              class="btn btn-lg pull-xs-right btn-primary"
+              class="btn btn-lg pull-xs-left btn-primary"
               type="submit">
               Publish Article
             </button>
+
+            <span
+              v-on:click="onPreview()"
+              :disabled="inProgress"
+              class="btn btn-lg pull-xs-right btn-primary">
+              Preview
+            </span>
           </form>
         </div>
       </div>
     </div>
+    <br><br>
+    <ArticlePreview/>
   </div>
+
 </template>
 
 <script>
 import { mapGetters } from "vuex";
 import store from "@/store";
 import RwvListErrors from "@/components/ListErrors";
-
+import ArticlePreview from "@/views/ArticlePreview";
 import {
   ARTICLE_PUBLISH,
   ARTICLE_EDIT,
@@ -86,7 +96,10 @@ import {
 
 export default {
   name: "RwvArticleEdit",
-  components: { RwvListErrors: RwvListErrors },
+  components: { 
+    RwvListErrors: RwvListErrors, 
+    ArticlePreview: ArticlePreview 
+  },
   props: {
     previousArticle: {
       type: Object,
@@ -163,6 +176,18 @@ export default {
       this.errors = errors
       return Object.keys(errors).length == 0;
     },
+
+    onPreview() {
+      var name = this.article.name;
+      var subject = this.article.subject;
+      var summary = this.article.summary;
+
+      this.$store.dispatch("articlePreview", {
+        content: CKEDITOR.instances['editor'].getData(),
+        name: name, subject: subject, summary: summary
+      });
+    },
+
     onPublish(slug) {
       if(!this.validate()) return;
 
