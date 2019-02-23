@@ -80,3 +80,13 @@ export default {
   }
 };
 </script>
+
+<style>
+  @media (max-width: 767px) {
+    .articles {
+      margin-left: 4%;
+        margin-right: 2%;
+    }
+    
+  }
+</style>

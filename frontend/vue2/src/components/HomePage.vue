@@ -8,7 +8,7 @@
 					<ul class="noliststyle">
 						<router-link :to="c.route" v-for="c in t.children" :key="c.key">
 							<li class="list-item-2">
-								<img :src="c.img" class="hvr-shadow-radial" style="width:100px; height: 100px;"> </img>
+								<img :src="c.img" class="hvr-shadow-radial" style="width:100px; height: 100px;">
 								<div class="caption" style=""> {{ c.name }} </div>
 							</li>
 						</router-link>
@@ -132,5 +132,11 @@ export default {
     }
     .noliststyle{
         list-style: none;
+    }
+
+    @media (max-width: 767px) {
+    	.list-item-2 {
+    		width: 70%;
+    	}
     }
 </style>

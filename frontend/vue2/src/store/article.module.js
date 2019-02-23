@@ -39,6 +39,14 @@ const initialState = {
     tagList: [],
     subject: ""
   },
+  articlePreview: {
+    author: {},
+    title: "",
+    description: "",
+    body: "",
+    tagList: [],
+    subject: ""
+  },
   comments: []
 };
 
@@ -88,6 +96,9 @@ export const actions = {
   [ARTICLE_PUBLISH]({ state }) {
     return ArticlesService.create(state.article);
   },
+  ["articlePreview"](context, data) {
+    return context.commit("articlePreview", data);
+  },
   [ARTICLE_DELETE](context, slug) {
     return ArticlesService.destroy(slug);
   },
@@ -131,6 +142,9 @@ export const mutations = {
     for (let f in state) {
       Vue.set(state, f, initialState[f]);
     }
+  },
+  ["articlePreview"](state, data) {
+    state.articlePreview = data
   }
 };
 

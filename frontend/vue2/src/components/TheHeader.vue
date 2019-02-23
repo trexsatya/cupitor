@@ -8,7 +8,7 @@
 
       <ul class="search-desktop nav navbar-nav"><Search /> </ul>
 
-      <ul class="nav navbar-nav pull-xs-right"> <div class="search-icon" v-on:click="showSearchOnMobile()"/></ul>
+      <ul class="nav navbar-nav pull-xs-right"> <img class="search-icon" src="http://icons.iconarchive.com/icons/papirus-team/papirus-apps/256/preferences-system-search-icon.png" v-on:click="showSearchOnMobile()"></ul>
 
       <ul v-if="!isAuthenticated" class="nav navbar-nav pull-xs-right">
         <li class="nav-item">
@@ -33,7 +33,7 @@
         </li>
       </ul>
     </div>
-    <div class="search-mobile"> <Search @selected="hideSearchOnMobile()"/> </div>
+    <div class="search-mobile"> <Search @onSelect="hideSearchOnMobile()"/> </div>
   </nav>
 </template>
 
@@ -55,6 +55,8 @@ export default {
   methods: {
     showSearchOnMobile(){
       $('.search-mobile').toggle();
+      $('input.search').focus();
+
     },
     hideSearchOnMobile(){
       $('.search-mobile').hide();
@@ -101,7 +103,6 @@ export default {
   }
 
   .search-icon {
-    background: rgba(237, 237, 237, 0.4) url(https://static.tumblr.com/ftv85bp/MIXmud4tx/search-icon.png) no-repeat 9px center;
     width: 36px;
     height: 36px;
     margin-left: 10px;
