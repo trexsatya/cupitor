@@ -1,5 +1,5 @@
 <template>
-  <div style="padding-top: 10px;padding-top: 3%; padding-bottom: 3%;background-color: #424950;">
+  <div style="padding-top: 10px;padding-top: 3%; padding-bottom: 3%;">
     <ArticlePage :articleId="articleId" :key="articleId" />
 
     <div class="btn show-comment-btn" v-on:click="showComments()">Show Comments</div>
@@ -73,9 +73,9 @@ export default {
       font-weight: 400;
       font-style: normal;
       font-size: 19px;
-      line-height: 1.8;
+      line-height: 2.4;
       letter-spacing: 0.02rem;
-      color: #5f4b4b;
+      color: black;
 }
 
 blockquote {
@@ -132,14 +132,11 @@ blockquote {
 
 @media only screen and (min-width: 1000px) {
   .article-container {
-    padding-left: 5%;
+    padding-left: 8%;
     padding-right: 8%;
     margin-right: 15%;
     margin-left: 15%;
 
-    -webkit-box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
-    -moz-box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
-    box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
   }
 
   .comments {

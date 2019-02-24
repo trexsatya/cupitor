@@ -14,7 +14,8 @@
     "vue-loading-overlay": "^3.0.1",
     "vue-router": "^3.0.1",
     "vue-search-select": "^2.6.2",
-    "vuex": "^3.0.1"
+    "vuex": "^3.0.1",
+    "yarn": "^1.13.0"
   },
   "description": "TodoMVC for the RealWorld™",
   "devDependencies": {
