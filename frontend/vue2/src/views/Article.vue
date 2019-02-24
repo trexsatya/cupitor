@@ -1,5 +1,5 @@
 <template>
-  <div style="padding-top: 10px;padding-top: 3%; padding-bottom: 3%;background-color: #424950;">
+  <div style="padding-top: 10px;padding-top: 3%; padding-bottom: 3%;">
     <ArticlePage :articleId="articleId" :key="articleId" />
 
     <div class="btn show-comment-btn" v-on:click="showComments()">Show Comments</div>
@@ -136,10 +136,9 @@ blockquote {
     padding-right: 8%;
     margin-right: 15%;
     margin-left: 15%;
-
-    -webkit-box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
-    -moz-box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
-    box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
+    -webkit-box-shadow: -1px 1px 134px -42px rgb(187, 216, 202);
+    -moz-box-shadow: -1px 1px 134px -42px rgb(187, 216, 202);
+    box-shadow: -1px 1px 134px -42px rgb(187, 216, 202);
   }
 
   .comments {

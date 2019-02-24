@@ -28,6 +28,7 @@
 <script>
 import { mapGetters, mapState } from "vuex";
 import marked from "marked";
+import { transformArticle } from '@/common/utils'
 
 export default {
   name: "rwv-article",
@@ -51,7 +52,8 @@ export default {
     
   },
   updated(){
-      
+      console.log('updated');
+      transformArticle(this.$router);
   },
   methods: {
   }
@@ -102,7 +104,7 @@ blockquote {
 }
 
 .article-container h2{
-	  font-family: "Source Sans Pro", sans-serif;
+    font-family: "Source Sans Pro", sans-serif;
     font-size: 26px;
     font-weight: 800;
     line-height: 100%;
@@ -126,14 +128,13 @@ blockquote {
 
 @media only screen and (min-width: 1000px) {
   .article-container {
-    padding-left: 8%;
+    padding-left: 5%;
     padding-right: 8%;
     margin-right: 15%;
     margin-left: 15%;
-
-    -webkit-box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
-    -moz-box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
-    box-shadow: -11px -11px 0px 0px rgba(15,209,115,1);
+    -webkit-box-shadow: -1px 1px 134px -42px rgb(187, 216, 202);
+    -moz-box-shadow: -1px 1px 134px -42px rgb(187, 216, 202);
+    box-shadow: -1px 1px 134px -42px rgb(187, 216, 202);
   }
 
   .comments {
