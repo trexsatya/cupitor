@@ -36,6 +36,7 @@ import { FETCH_ARTICLE } from "@/store/actions.type";
 import Breadcrumb from "@/components/Breadcrumb"
 import Loading from 'vue-loading-overlay';
 import 'vue-loading-overlay/dist/vue-loading.css';
+import { transformArticle } from '@/common/utils'
 
 export default {
   name: "ArticlePage",
@@ -61,7 +62,7 @@ export default {
     this.fetchArticle();
   },
   updated(){
-      this.transformArticle()
+      transformArticle(this.$router);
       try {
         const name = this.article && this.article.name || 'LivingToLearn'
         document.title = name;
@@ -85,48 +86,20 @@ export default {
             route: "/articles/"+ sub(article.subject) }, 
           {name: "", route: "/" }]
       },
+
       getDateString: function(d){
       	  if(!d) return "Jan 01 2008";
           var ds = new Date(d).toDateString()
           if(ds.split(" ").length > 1){
             return ds.split(" ").slice(1).join(" ")
           }
-      },
-    transformArticle: function(){
-      var router = this.$router;
-      
-      try {
-        $('.flex-card-listitem').each((i,e) => {
-           $(e).css({ margin: '20px', border: '0.3px solid grey' })
-
-           $(e).click(evt => {
-            router.push($(e).attr('reactlink'))
-           })
-        })
-
-
-        
-        $('a*[reactlink]').each((i,e)=> {
-          $(e).css({ cursor: 'hover'})
-          var to = $(e).attr('reactlink')
-          $(e).click(evt => router.push(to))
-        })
-
-        fixImageUrls()
-        Prism.highlightAll()
-        drawMathematics()
-      } catch(e){
-        console.log(e)
       }
-    }
   }
 };
 </script>
 
 <style>
-	.article-container {
-		background-color: #fafafa;
-	}
+	
 
   @media (max-width: 767px) {
     .article {
