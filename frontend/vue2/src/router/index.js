@@ -46,13 +46,20 @@ export default new Router({
     // Handle child routes with a default, by giving the name to the
     // child.
     // SO: https://github.com/vuejs/vue-router/issues/777
+    ,{
+     name: 'aboutme', 
+     path: '/aboutme',
+     component: () => import("@/views/Aboutme"),
+     props: true
+    },
     {
+      name: 'profile',
       path: "/@:username",
       component: () => import("@/views/Profile"),
       children: [
         {
           path: "",
-          name: "profile",
+          name: "profileArticles",
           component: () => import("@/views/ProfileArticles")
         },
         {
