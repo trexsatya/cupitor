@@ -131,6 +131,17 @@ export default {
     await store.dispatch(ARTICLE_RESET_STATE);
     next();
   },
+
+  beforeRouteLeave(to, from, next){
+    
+    var yes = confirm('Are you sure you want to leave?')
+    if(yes) {
+      localStorage.setItem('articleEditing', CKEDITOR.instances['editor'].getData());
+      return next();
+    }
+    else return next(false)
+  },
+
   data() {
     return {
       tagInput: null,
@@ -148,7 +159,6 @@ export default {
             extraPlugins: 'mathematica,codesnippet',
             allowedContent: true,
         });
-
     }
   },
   mounted() {
@@ -159,8 +169,10 @@ export default {
             allowedContent: true,
         });
     }
+
     window.onbeforeunload = function(){
-  	return 'Are you sure you want to leave?';
+      localStorage.setItem('articleEditing', CKEDITOR.instances['editor'].getData());
+      return 'Are you sure you want to leave?';
     };
   },
   methods: {
@@ -190,6 +202,10 @@ export default {
 
     onPublish(slug) {
       if(!this.validate()) return;
+      if(!window['X-Auth']){
+        window['X-Auth'] = prompt('Enter auth header');
+        if(!window['X-Auth']) return;
+      }
 
       this.article.content = CKEDITOR.instances['editor'].getData()
       let action = slug ? ARTICLE_EDIT : ARTICLE_PUBLISH;

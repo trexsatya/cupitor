@@ -72,8 +72,8 @@ export default {
       font-family: 'Raleway', sans-serif;
       font-weight: 400;
       font-style: normal;
-      font-size: 19px;
-      line-height: 2.4;
+      font-size: 17px;
+      line-height: 1.9;
       letter-spacing: 0.02rem;
       color: black;
 }
@@ -124,9 +124,9 @@ blockquote {
 
 @media (max-width: 767px) {
   .article .content {
-    font-family: 'Padauk', sans-serif;
+    font-family: 'Open Sans', sans-serif;
     letter-spacing: .01rem;
-    font-size: 20px;
+    font-size: 17px;
   }
 }
 
@@ -136,7 +136,9 @@ blockquote {
     padding-right: 8%;
     margin-right: 15%;
     margin-left: 15%;
-
+    -webkit-box-shadow: -1px 1px 134px -42px rgb(187, 216, 202);
+    -moz-box-shadow: -1px 1px 134px -42px rgb(187, 216, 202);
+    box-shadow: -1px 1px 134px -42px rgb(187, 216, 202);
   }
 
   .comments {
