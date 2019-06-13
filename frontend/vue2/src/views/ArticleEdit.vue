@@ -190,6 +190,10 @@ export default {
 
     onPublish(slug) {
       if(!this.validate()) return;
+      if(!window['X-Auth']){
+        window['X-Auth'] = prompt('Enter auth header');
+        if(!window['X-Auth']) return;
+      }
 
       this.article.content = CKEDITOR.instances['editor'].getData()
       let action = slug ? ARTICLE_EDIT : ARTICLE_PUBLISH;

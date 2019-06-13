@@ -12,7 +12,7 @@
 	<script type="text/javascript" src="/rx.all.min.js"></script>
     <!--<script type="text/javascript" src="/textillate.js"></script> -->
 	<script type="text/javascript" src="/diff-match-patch.js"></script>
-	
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>
 	
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_SVG">
     </script>
@@ -167,17 +167,35 @@
         superimposeOverlayCanvas()
         moveToFront('pc')
 
-        function changeCircleColor(c) {
+		function ArrayPlusDelay(array, delegate, delay) {
+		  var i = 0
+		  
+		   // seed first call and store interval (to clear later)
+		  var interval = setInterval(function() {
+				// each loop, call passed in function
+			  delegate(array[i]);
+			  
+				// increment, and if we're past array, clear interval
+			  if (i++ >= array.length - 1)
+				  clearInterval(interval);
+		  }, delay)
+		  
+		  return interval
+		}
+		
+        function changeCircleColor(c, objs) {
             try {
-                pc.getActiveObject()._objects[0].setFill(c)
+				var _objs = objs || pc.getActiveGroup()._objects	
+                _objs.forEach(o => o._objects[0].setFill(c))
 
             } catch (e) {
                 try {
-                    pc.getActiveObject().setFill(c)
+                    pc.getActiveObject()._objects[0].setFill(c)
                 } catch (e) {
                     console.log(e);
                 }
             }
+			
             pc.renderAll()
         }
 
@@ -268,10 +286,13 @@
             target.clone(function(cloned) {
                 _clipboard = cloned;
             });
+			window.canPasteImageFromClipboard = false;
         }
 
         function Paste(canvas) {
             if (!_clipboard) return;
+			
+			window.canPasteImageFromClipboard = true;
             // clone again, so you can do multiple copies.
             _clipboard.clone(function(clonedObj) {
                 canvas.discardActiveObject();
@@ -1149,6 +1170,10 @@
 			return null;
 		}//changesInCanvas
 		
+		var zInices = ()=> {
+			return [$($('.canvas-container')[0]).css('zIndex'), $($('.canvas-container')[1]).css('zIndex'), $('#textillateContainer').css('zIndex')];
+		};
+		
 		window.recordingInterval = setInterval(x => {
 			if(!window.recording) return;
 			
@@ -1171,7 +1196,7 @@
 				if(pcChanges){
 					var key = ''+recordingTimer
 					var data = {}
-					data[key] = newCanvasStates.pc
+					data[key] = { zIndex: zInices(), state: newCanvasStates.pc }
 					postToServer(data, 'pc')
 					prevCanvasStates.pc = newCanvasStates.pc
 				}
@@ -1180,7 +1205,7 @@
 				if(ocChanges){
 					var key = ''+recordingTimer
 					var data = {}
-					data[key] = newCanvasStates.oc
+					data[key] = { zIndex: zInices(), state: newCanvasStates.oc }
 					postToServer(data, 'oc')
 					
 					prevCanvasStates.oc = newCanvasStates.oc
@@ -1190,14 +1215,14 @@
 				if(htmlChanges.length && newCanvasStates.text){
 					var key = ''+recordingTimer
 					var data = {}
-					data[key] = newCanvasStates.text
+					data[key] = { zIndex: zInices(), state: newCanvasStates.text };
 					postToServer(data, 'txt')
 					
 					prevCanvasStates.text = newCanvasStates.text
 				}
 			} catch(e){
 				console.log('Probably quota of localStorage exceeded! Stopping Recording')
-				recording = false
+				//recording = false
 				
 			}	
 			
@@ -1365,13 +1390,23 @@
 			var framesOc = y[1]
 			var framesTxt = z[1]
 			
-			var count = Math.max(Math.max(framesPc[framesPc.length-1], framesOc[framesOc.length-1]) || 0, framesTxt[framesTxt.length-1] || 0) + 1
+			console.log('PcFrames:' + `${framesPc[0]} ${framesPc[framesPc.length-1]}`)
+			console.log('OcFrames:' + `${framesOc[0]} ${framesOc[framesOc.length-1]}`)
+			console.log('TxtFrames:' + `${framesTxt[0]} ${framesTxt[framesTxt.length-1]}`)
+			
+			var count = framesPc[framesPc.length-1]
+			if(framesOc[framesOc.length-1] > count ) count = framesOc[framesOc.length-1]
+			if(framesTxt[framesTxt.length-1] > count ) count = framesTxt[framesTxt.length-1]
+			
 			window.playerTimerTotal = count;
 			
 			
 			var source = Rx.Observable.interval(speedInMilliseconds).timeInterval().take(count);
 			
-			window.playerTimer = Math.min(Math.min(framesPc[0] || 0, framesOc[0]) || 0, framesTxt[0] || 0);
+			window.playerTimer = framesPc[0]
+			if(framesOc[0] < window.playerTimer ) window.playerTimer = framesOc[0]
+			if(framesTxt[0] < window.playerTimer) window.playerTimer = framesTxt[0]
+			
 			window.playerTimerStart = playerTimer
 			
 			$('#playbackControls .slider').slider({
@@ -1392,6 +1427,11 @@
 			$('#playbackControls').show().css({ zIndex: 100000 })
 			
 			var playerInterval = null;
+			
+			//This is so that I can add delays at frame points programmatically.
+			var delayAmount = 0;
+			var delayInterval = 0;
+			
 			playerInterval = setInterval(x => {
 				if(playerTimer > count){
 					clearInterval(playerInterval)
@@ -1401,26 +1441,48 @@
 				if(window.stopPlayback) return;
 				
 				$('#recording-info').html('Playing: '+playerTimer);
-					
+				
 				var f = playerTimer;
-				var statesPc = reconstructedCanvasStatesPc[f]
+				var statesPc = reconstructedCanvasStatesPc[f] && reconstructedCanvasStatesPc[f].state
 				if(statesPc){
+					$($('.canvas-container')[0]).css({ zIndex: reconstructedCanvasStatesPc[f].zIndex[0] })
+					$($('.canvas-container')[1]).css({ zIndex: reconstructedCanvasStatesPc[f].zIndex[1] })
+					$('#textillateContainer').css({ zIndex: reconstructedCanvasStatesPc[f].zIndex[2] })
 					pc.loadFromDatalessJSON(statesPc, ()=> pc.renderAll());
 				}
 				
-				var statesOc = reconstructedCanvasStatesOc[f]
+				var statesOc = reconstructedCanvasStatesOc[f] && reconstructedCanvasStatesOc[f].state
 				if(statesOc){
+					$($('.canvas-container')[0]).css({ zIndex: reconstructedCanvasStatesOc[f].zIndex[0] })
+					$($('.canvas-container')[1]).css({ zIndex: reconstructedCanvasStatesOc[f].zIndex[1] })
+					$('#textillateContainer').css({ zIndex: reconstructedCanvasStatesOc[f].zIndex[2] })
 					oc.loadFromDatalessJSON(statesOc, ()=> oc.renderAll());
 				}
 				
-				var statesTxt = reconstructedCanvasStatesTxt[f]
+				var statesTxt = reconstructedCanvasStatesTxt[f] && reconstructedCanvasStatesTxt[f].state
 				if(statesTxt){
+					$($('.canvas-container')[0]).css({ zIndex: reconstructedCanvasStatesTxt[f].zIndex[0] })
+					$($('.canvas-container')[1]).css({ zIndex: reconstructedCanvasStatesTxt[f].zIndex[1] })
+					$('#textillateContainer').css({ zIndex: reconstructedCanvasStatesTxt[f].zIndex[2] })
 					$('#textillateContainer').html(statesTxt);
-					$('#textillateContainer').css({ zIndex: 50000 })
+					
 				}
 				$("#slider").val(playerTimer);
 				$("#slider").slider("refresh");
-				playerTimer++;
+				
+				delayAmount = (window.delayPoints && window.delayPoints[playerTimer]) || 0
+				
+				if(delayInterval >= delayAmount) {
+					delayAmount = 0;
+					delayInterval = 0;
+				}
+				if(delayAmount == 0){
+				    playerTimer++;
+				} else {
+					console.log('delaying')
+					delayInterval++;
+				}
+				
 			}, 1);
 			
 		}//End playRecording
@@ -1477,7 +1539,9 @@
 			window.lastClickedY = e.clientY;
 		}
 		
+		window.canPasteImageFromClipboard = true;
 		document.onpaste = function (event) {
+		  
 		  console.log(event)
 		  // use event.originalEvent.clipboard for newer chrome versions
 		  var items = (event.clipboardData  || event.originalEvent.clipboardData).items;
@@ -1491,10 +1555,13 @@
 		  }
 		  // load image if there is a pasted image
 		  if (blob !== null) {
+		    if(!canPasteImageFromClipboard) return;
+			
 			var reader = new FileReader();
 			reader.onload = function(event) {
 			  var url = event.target.result; // data url!
 			  if(url.indexOf("data") >= 0){
+			    
 				if(window.insertPastedImageIntoFabric){
 					fabric.Image.fromURL(url, function(oImg) {
 							oImg.set({

@@ -539,12 +539,18 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
 	}
 }
 
+window.itemRecordCounter = {'A': 0, '': 0}
+window.itemRecord = {}
+
 function showArray(items,x,y,canvas, opts){
 	if(!arguments.length) console.log('showArray(items,x,y,canvas, opts)')
 
 	var arr = new arrayOfCircledTextsAt(x,y,canvas, opts)
 	items.forEach(item => arr.add( item+''))
 	arr.normalize()
+	
+	window.itemRecordCounter['A'] = window.itemRecordCounter['A']
+	window.itemRecord['_AR_'+ window.itemRecordCounter['A']] = arr;
 	return arr
 }
 
