@@ -539,12 +539,18 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
 	}
 }
 
+window.itemRecordCounter = {'A': 0, '': 0}
+window.itemRecord = {}
+
 function showArray(items,x,y,canvas, opts){
 	if(!arguments.length) console.log('showArray(items,x,y,canvas, opts)')
 
 	var arr = new arrayOfCircledTextsAt(x,y,canvas, opts)
 	items.forEach(item => arr.add( item+''))
 	arr.normalize()
+	
+	window.itemRecordCounter['A'] = window.itemRecordCounter['A']
+	window.itemRecord['_AR_'+ window.itemRecordCounter['A']] = arr;
 	return arr
 }
 
@@ -687,7 +693,7 @@ function appendTableInto(table, target, opts){
  	</td>
 
     <td>
-      <table class="data" border="1" style="width: ${options.width}; margin-left: -15px; margin-top: 0px; text-align: center; height: ${options.height}">
+      <table class="data" border="1" style="border-collapse: collapse; width: 100%; margin-left: -15px; margin-top: 0px; text-align: center; height: ${options.height}">
 
 	      <tr>
 	          <th style="text-align: center" ></th>
@@ -696,7 +702,7 @@ function appendTableInto(table, target, opts){
 
 	      ${range(0, table.length).map(row =>
 	      		'<tr class="data"> <th style="text-align: center" class="yheader">'+ options.yheaders[row] +'</th>'
-	      			+table[row].map(y => `<td style="width: ${100/options.xheaders.length}%;" >`+ y +'</td>').join('') +'</tr>'
+	      			+table[row].map(y => `<td style="" >`+ y +'</td>').join('') +'</tr>'
 	      ).join('')}
     </table>
     </td>
@@ -705,6 +711,26 @@ function appendTableInto(table, target, opts){
 
 	var table = $(tableHtml)
 	$(target).append(table)
+	
+	table.draggable()
+	table.resizable();
+	
+	$(function() {
+	  var thHeight = table.find("th:first").height();
+	  table.find("th").resizable({
+		  handles: "e",
+		  minHeight: thHeight,
+		  maxHeight: thHeight,
+		  minWidth: 40,
+		  resize: function (event, ui) {
+			var sizerID = "#" + $(event.target).attr("id") + "-sizer";
+			$(sizerID).width(ui.size.width);
+		  }
+	  });
+	  table.find('td').resizable({
+		handles: "s"
+	  });
+	});
 
 	table.find('table.data').css(opts)
 	setTimeout(()=> table.find('.yheader').css({'padding-left': '4%','padding-right': '4%'}), 500);
@@ -962,4 +988,71 @@ function matex(text, callback) {
         setTimeout(display, 1000);
     });
 }
+
+var highlightByZooming = function(object, canvas, opts){
+	var me = object.externalData || {}
+	
+	me.stopAnimation = false;
+
+	var fn = null;
+	
+	var originalZoomY = object.zoomY
+	var originalZoomX = object.zoomX
+	me.originalProps = me.originalProps || {}
+	me.originalProps.zoomX = originalZoomX
+	me.originalProps.zoomY = originalZoomY
+	
+	var range = (x) => [x*2, 2*x/3] //zoomout, zoomin
+	
+	var zoomX = range(originalZoomX)
+	var zoomY = range(originalZoomY)
+	
+	var timer = 0;
+	fn = (prop, values, opts) => {
+		opts = opts || {}
+		object.animate(prop, values[timer], Object.assign({}, 
+												{
+												  duration: 1000,
+												  onChange: canvas.renderAll.bind(canvas),
+												  
+												  abort: () => !object || me.stopAnimation
+												},
+												opts || {},
+												{
+												onComplete: ()=> {fn(prop, values, opts); if(opts.onComplete) opts.onComplete();}
+												}
+												)
+						);
+		
+	}
+
+	me.animating = true;
+	fn('zoomX', zoomX);
+	fn('zoomY', zoomY, { onComplete: ()=> timer = (timer+1)%2 });
+
+	me.animating = true
+	if(opts){
+		me.changeCircle(opts)
+	}
+	object.externalData = me;
+	return me;
+}
+
+function stopAnimation(object, canvas){
+	
+	if(object.externalData) {
+		var me = object.externalData
+		me.stopAnimation = true;
+		if(!me.animating) return null;
+		
+		if(me.originalProps.zoomX)object.zoomX = me.originalProps.zoomX
+		if(me.originalProps.zoomY)object.zoomY = me.originalProps.zoomY
+		
+		canvas.renderAll()
+		me.animating = false;
+		return me;
+	}
+	return null
+}
+
 

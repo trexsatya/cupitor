@@ -1,8 +1,8 @@
 <template>
   <div class="home-page">
-    <div class="banner" style="background: #333;">
+    <div class="banner" style="background: #333; ">
       <div class="container">
-        <h1 class="logo-font">Keep Calm And Learn!</h1>
+        <h1 class="logo-font" style="font-size:2.0rem">Keep Calm And Learn!</h1>
         <p>As much as possible.</p>
       </div>
     </div>
@@ -37,6 +37,6 @@ export default {
 </script>
 <style>
   .banner {
-
+      font-size: 2.0rem;
   }
 </style>
