@@ -124,7 +124,7 @@ export default {
   position: relative;
 }
 .blog-card .photo.photo1 {
-  background: url("http://i62.tinypic.com/34oq4o0.jpg") center no-repeat;
+  
   background-size: cover;
 }
 .blog-card .photo.photo2 {

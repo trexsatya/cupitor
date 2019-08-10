@@ -108,18 +108,23 @@ blockquote {
 }
 
 .article-container h2{
-	  font-family: "Source Sans Pro", sans-serif;
+	font-family: "Source Sans Pro", sans-serif;
     font-size: 26px;
     font-weight: 800;
     line-height: 100%;
     padding-bottom: 1%;
-    color: #404ceb;
+    color: #7d6d6d;
+    margin-top: 2rem;
 }
 
 .comments {
   margin: 2%;
   margin-top: 2%;
   display: none;
+}
+
+pre[class*="language-"] {
+    margin-bottom: 2rem;
 }
 
 @media (max-width: 767px) {
@@ -158,4 +163,23 @@ blockquote {
     border-color: #2e6da4;
  }
 
+.article-name {
+    color: #616161;
+    background: #bababa;
+    text-shadow: #e0e0e0 1px 1px 0;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+
+.last-updated {
+    float: right;
+    margin-top: 10px;
+    background-color: #85ccf3;
+    color: white;padding-left: 10px;
+    padding-right: 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: bold;
+    margin-right: 10px;
+}
 </style>
