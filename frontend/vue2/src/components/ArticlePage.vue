@@ -11,16 +11,9 @@
                
                 <div>
                  <!-- <Breadcrumb :items='getBreadcrumbItems(article)' /> -->
-					         <span style="float: right;
-                              margin-top: 10px;
-                              background-color: #85ccf3;
-                              color: white;padding-left: 10px;
-                              padding-right: 10px;
-                              border-radius: 10px;
-                              font-size: 12px;
-                              font-weight: bold;"> {{ getDateString(article.lastUpdated) }}</span>
+					         <span style="" class="last-updated"> {{ getDateString(article.lastUpdated) }}</span>
 				        </div>								  
-                <h2 style="text-align: center;">{{ article.name }}</h2>
+                <h2 class="article-name" style="text-align: center;">{{ article.name }}</h2>
    <hr>
                 
                 <div class="content" v-html="article.content">

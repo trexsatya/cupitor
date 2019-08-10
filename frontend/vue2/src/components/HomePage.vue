@@ -117,4 +117,9 @@ export default {
 	.slide.current:hover .slide-btn {
 		display: block;
 	}
+
+    
+	.carousel-3d-slide img {
+	    height: 100%;
+	}
 </style>
