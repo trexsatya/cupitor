@@ -520,15 +520,18 @@
 					$('.canvas-container').css({ zIndex: -2000 })
 					$('#textillateContainer').css({ zIndex: -2000 })
 					$($('.canvas-container')[0]).css({ zIndex: 2000 })
+					window.layerOnFront = 'pc'
 					break;
 				case 'oc':
 					$('.canvas-container').css({ zIndex: -2000 })
 					$('#textillateContainer').css({ zIndex: -2000 })
 					$($('.canvas-container')[1]).css({ zIndex: 2000 })
+					window.layerOnFront = 'oc'
 					break;
 				case 'txt':
 					$('.canvas-container').css({ zIndex: -2000 })
 					$('#textillateContainer').css({ zIndex: 2000 })
+					window.layerOnFront = 'txt'
 					break;
 			}
 		}//end moveToFront
@@ -833,7 +836,7 @@
             window.insertRectText = true;
         })
         $('#flip-drawing').click(e => {
-            if (window.overlayCanvasHidden) moveToFront('oc')
+            if (window.layerOnFront  != 'oc') moveToFront('oc')
             else moveToFront('pc')
         })
         pc.on('object:selected', function(e) {
