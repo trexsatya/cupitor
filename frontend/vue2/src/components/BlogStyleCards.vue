@@ -36,7 +36,7 @@ export default {
         return {
             defaultName: 'Satyendra ',
             defaultDate: 'Jan 1, 2018',
-            defaultSummary: 'This articles does not have a summary yet. But soon it will.'
+            defaultSummary: 'This articles is under construction!!'
         }
     },
     updated() {

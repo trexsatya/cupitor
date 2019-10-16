@@ -79,14 +79,17 @@ export default {
 }
 
 blockquote {
-  padding-left: 20px;
-    padding-right: 8px;
-    border-left-width: 5px;
-    font-style: italic;
-    font-family: Georgia, Times, "Times New Roman", serif;
-    border-style: solid;
-    border-color: #ccc;
-    border-width: 0 0 0 10;
+     font-style: italic;
+     font-family: Georgia, Times, "Times New Roman", serif;
+     padding: 2px 0;
+     border-style: solid;
+     border-color: #ccc;
+     border-width: 0;
+     padding-left: 20px;
+     padding-right: 8px;
+     border-left-width: 5px;
+     margin-left: 28px; 
+
 }
 
 .article-container {
@@ -182,4 +185,10 @@ pre[class*="language-"] {
     font-weight: bold;
     margin-right: 10px;
 }
+
+.math {
+    width: 100%;
+    overflow-x: auto;
+}
+
 </style>
