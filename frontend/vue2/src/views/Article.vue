@@ -41,7 +41,7 @@ export default {
   },*/
   computed: {
     articleId(){ return this.$route.params.id; },
-    url(){ return "http://cupitor.online/article/"+this.$route.params.id ; }
+    url(){ return `http://${location.hostname}/article/`+this.$route.params.id ; }
   },
   unmounted(){
     console.log('unm') 
