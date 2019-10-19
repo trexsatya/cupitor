@@ -72,21 +72,24 @@ export default {
       font-family: 'Raleway', sans-serif;
       font-weight: 400;
       font-style: normal;
-      font-size: 19px;
-      line-height: 1.8;
+      font-size: 17px;
+      line-height: 1.9;
       letter-spacing: 0.02rem;
-      color: #5f4b4b;
+      color: black;
 }
 
 blockquote {
-  padding-left: 20px;
-    padding-right: 8px;
-    border-left-width: 5px;
-    font-style: italic;
-    font-family: Georgia, Times, "Times New Roman", serif;
-    border-style: solid;
-    border-color: #ccc;
-    border-width: 0 0 0 10;
+     font-style: italic;
+     font-family: Georgia, Times, "Times New Roman", serif;
+     padding: 2px 0;
+     border-style: solid;
+     border-color: #ccc;
+     border-width: 0;
+     padding-left: 20px;
+     padding-right: 8px;
+     border-left-width: 5px;
+     margin-left: 28px; 
+
 }
 
 .article-container {
@@ -108,12 +111,13 @@ blockquote {
 }
 
 .article-container h2{
-	  font-family: "Source Sans Pro", sans-serif;
+	font-family: "Source Sans Pro", sans-serif;
     font-size: 26px;
     font-weight: 800;
     line-height: 100%;
     padding-bottom: 1%;
-    color: #404ceb;
+    color: #7d6d6d;
+    margin-top: 2rem;
 }
 
 .comments {
@@ -122,17 +126,21 @@ blockquote {
   display: none;
 }
 
+pre[class*="language-"] {
+    margin-bottom: 2rem;
+}
+
 @media (max-width: 767px) {
   .article .content {
-    font-family: 'Padauk', sans-serif;
+    font-family: 'Open Sans', sans-serif;
     letter-spacing: .01rem;
-    font-size: 20px;
+    font-size: 17px;
   }
 }
 
 @media only screen and (min-width: 1000px) {
   .article-container {
-    padding-left: 5%;
+    padding-left: 8%;
     padding-right: 8%;
     margin-right: 15%;
     margin-left: 15%;
@@ -157,5 +165,30 @@ blockquote {
     background-color: #337ab7;
     border-color: #2e6da4;
  }
+
+.article-name {
+    color: #616161;
+    background: #bababa;
+    text-shadow: #e0e0e0 1px 1px 0;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+
+.last-updated {
+    float: right;
+    margin-top: 10px;
+    background-color: #85ccf3;
+    color: white;padding-left: 10px;
+    padding-right: 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+.math {
+    width: 100%;
+    overflow-x: auto;
+}
 
 </style>

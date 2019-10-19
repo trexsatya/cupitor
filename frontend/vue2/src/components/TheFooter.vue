@@ -8,7 +8,9 @@
         :to="{ name: 'aboutme', params: {} }">
         Satyendra Kumar
       </router-link>
-      <span class="attribution"> See this project on <a class="logo-font" href="" target="_blank">Github </a>. </span>
+
+      <span class="attribution"> See this project on <a class="logo-font" href="https://github.com/trexsatya/cupitor" target="_blank">Github </a>. </span>
+
     </div>
   </footer>
 </template>
