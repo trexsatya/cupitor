@@ -1,5 +1,6 @@
 package com.satya
 
+import com.mongodb.MongoClient
 import com.satya.services.CounterService
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
@@ -7,6 +8,8 @@ import org.springframework.boot.CommandLineRunner
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import com.satya.dao.*
 import org.apache.logging.log4j.*
+import org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration
+import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
 import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.web.servlet.FilterRegistrationBean
@@ -14,6 +17,7 @@ import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.PropertySource
 import org.springframework.context.event.ContextRefreshedEvent
+import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories
 import org.springframework.scheduling.annotation.EnableAsync
 import org.springframework.scheduling.annotation.EnableScheduling
@@ -25,7 +29,7 @@ import org.springframework.web.filter.CorsFilter
 
 import java.util.concurrent.Executors;
 
-@SpringBootApplication(scanBasePackages = ["com.satya"])
+@SpringBootApplication(scanBasePackages = ["com.satya"], exclude = [ MongoAutoConfiguration.class, MongoDataAutoConfiguration.class])
 @EnableMongoRepositories(basePackages = ["com.satya.dao"])
 @EnableAsync
 @EnableScheduling
@@ -34,7 +38,7 @@ class Application implements CommandLineRunner {
 
 	private static final Logger logger = LogManager.getLogger(Application.class);
 
-	@Value("\${spring.data.mongodb.uri}")
+	@Value("\${spring.data.mongodb.host}")
 	String mongoUrl
 
 	/** To register a filter for handling CORS for Spring data rest beans **/

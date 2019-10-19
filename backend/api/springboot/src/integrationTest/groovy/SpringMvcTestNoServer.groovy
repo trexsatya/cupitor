@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration
+import org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration
+import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
 import org.springframework.boot.test.autoconfigure.core.AutoConfigureCache
 import org.springframework.boot.test.autoconfigure.data.mongo.AutoConfigureDataMongo;
 import org.springframework.boot.test.autoconfigure.data.mongo.DataMongoTest
@@ -18,6 +20,7 @@ import org.springframework.boot.test.autoconfigure.data.mongo.DataMongoTypeExclu
 import org.springframework.boot.test.autoconfigure.filter.TypeExcludeFilters
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
+import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.http.MediaType;
@@ -46,9 +49,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 //@DataMongoTest
-@WebMvcTest
-@ContextConfiguration(classes = [Application.class, CounterService.class])
+//@WebMvcTest(excludeAutoConfiguration = [MongoAutoConfiguration.class, MongoDataAutoConfiguration.class])
+//@ContextConfiguration(classes = [Application.class, CounterService.class, TestConfig.class])
 //@ExtendWith(SpringExtension.class) //Implicitly added by @WebMvcTest
+@SpringBootTest(classes = [Application.class, TestConfig.class])
 @TestPropertySource(properties = ["users=a:a:USER-ADMIN" ])
 @AutoConfigureMockMvc
 @AutoConfigureCache
@@ -62,8 +66,7 @@ class SpringMvcTestNoServer {
     @Test
     public void test1(@Autowired MongoTemplate mongoTemplate){
         //Given that the DB has the article present
-        MongoOperations mongoOps = new MongoTemplate(MongoClients.create(), "cupitor-db");
-//        mongoOps.insert(new Article(id: 3, name:"Test", subject:"java"));
+        mongoTemplate.save(new Article(subject: "java", id: 1, name: "Hello World"))
 
         //When
         this.mockMvc.perform(get("/api/articles/java")).andDo(print())

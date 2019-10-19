@@ -22,7 +22,6 @@ class TestConfig {
         MongoClient mongoClient = mongo.getObject()
         MongoTemplate mongoTemplate = new MongoTemplate(mongoClient, MONGO_DB_NAME)
 
-        mongoTemplate.save(new Article(subject: "java", id: 1))
         return mongoTemplate
     }
 }
