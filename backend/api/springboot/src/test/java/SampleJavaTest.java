@@ -1,5 +1,5 @@
 import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 /**
  * Created by Anoop Singh on 07/10/2016.

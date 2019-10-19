@@ -1,14 +1,13 @@
 import com.satya.Application
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.context.embedded.LocalServerPort
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.client.TestRestTemplate
+import org.springframework.boot.web.server.LocalServerPort
 import org.springframework.web.context.WebApplicationContext
 import spock.lang.Specification
-import utils.TestHttpClient
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, classes = [Application.class])
-class SpringMvcSpecUsingServer extends Specification{
+class SpringMvcSpecUsingServer extends Specification {
 
     @LocalServerPort
     private int port;
@@ -24,7 +23,7 @@ class SpringMvcSpecUsingServer extends Specification{
         def template = TestHttpClient.springRestTemplate()
         def out = template.getForEntity("http://localhost:" + port +"/api/articles/java", String.class)
 
-        println out
+        println "satya $out"
 
         expect: "web application context exists"
         context != null

@@ -44,7 +44,7 @@ class ArticleController {
 
     @RequestMapping(value = "/article/{id}", method = RequestMethod.GET)
     def @ResponseBody getArticle(@PathVariable Long id) {
-        def resp = articleRepo.findOne(id)
+        def resp = articleRepo.findById(id)
         return resp
     }
 
