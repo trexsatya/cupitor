@@ -23,6 +23,8 @@ import org.springframework.scheduling.annotation.EnableAsync
 import org.springframework.scheduling.annotation.EnableScheduling
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
+import org.springframework.security.crypto.password.NoOpPasswordEncoder
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 import org.springframework.web.filter.CorsFilter
@@ -103,6 +105,11 @@ class Application implements CommandLineRunner {
 	@org.springframework.context.event.EventListener
 	void afterSpringLoaded(ContextRefreshedEvent event) {
 		println "Mongo URL: $mongoUrl"
+	}
+
+	@Bean
+	PasswordEncoder passwordEncoder(){
+		return new NoOpPasswordEncoder();
 	}
 
 }
