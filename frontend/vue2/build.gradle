@@ -1,75 +1,83 @@
 group 'com.satya'
 version '1.0'
 
-task dockerClean
-task yarnBuild
-task dockerBuild
-task dockerRun
+
+tasks.register("dockerClean") {
+
+  doLast {
+    try {
+      exec {
+        commandLine 'chmod', '+x', 'clean.sh'
+      }
+      
+      exec {
+        commandLine './clean.sh'
+      }
+
+    } catch(e){
+     e.printStackTrace()
+    }
+  }
+}
+
+tasks.register("yarnBuild") {
+
+  doLast {
+    exec {
+      commandLine 'npm', 'install', '-g', 'yarn'
+      commandLine  'yarn', 'build'
+    }
+  }
+}
+
+tasks.register("dockerBuild") {
+
+  doLast {
+      copy {
+        from 'dist'
+        into 'docker/dist'
+      }
+      copy {
+        from 'nginx.conf'
+        into 'docker'
+      } 
+
+      copy {
+        from 'Dockerfile'
+        into 'docker'
+      }
+      copy {
+        from 'create-config-file.sh'
+        into 'docker'
+      }
+
+      exec {
+        commandLine "docker", "build", "-t", "frontend:latest", "docker/", "--no-cache", "--rm"
+      }
+  }
+}
+
+tasks.register("dockerRun") {
+
+  doLast {
+       println "Running docker run command"
+       def API_URL = project.properties['API_URL'] ?: '//localhost:8080/api'
+       def imageCdnUrl = project.properties['imageCdnUrl'] ?: '//localhost/images'
+       def port = project.properties['port'] ?: '80'
+
+       exec {
+         commandLine 'docker', 'run', '-p', "${port}:80", '--name=frontend', '--env', 
+        "__js_config__API_URL=${API_URL}", '--env',
+        "__js_config__imageCdnUrl=${imageCdnUrl}",
+        '-d', 'frontend:latest'
+       }
+  }
+}
 
 dockerBuild.dependsOn yarnBuild
 dockerRun.dependsOn dockerBuild
 
-dockerClean << {
-  try {
-    exec {
-      commandLine 'chmod', '+x', 'clean.sh'
-    }
-  exec {
-    commandLine './clean.sh'
-  }
-  }catch(e){
-   e.printStackTrace()
-  }
-}
 
-yarnBuild << {
-  exec {
-    commandLine 'npm', 'install', '-g', 'yarn'
-    commandLine  'yarn', 'build'
-  }
-}
-
-
-dockerBuild << {
-  
-  copy {
-    from 'dist'
-    into 'docker/dist'
-  }
-  copy {
-    from 'nginx.conf'
-    into 'docker'
-  } 
-
-  copy {
-    from 'Dockerfile'
-    into 'docker'
-  }
-  copy {
-    from 'create-config-file.sh'
-    into 'docker'
-  }
-
-  exec {
-    commandLine "docker", "build", "-t", "frontend:latest", "docker/", "--no-cache", "--rm"
-  }
-  //recreateConfigFile( 'docker/dist/config.js')
-}
-
-dockerRun <<  {
-   
-   println "Running docker run command"
-   def API_URL = project.properties['API_URL'] ?: '//localhost:8080/api'
-   def imageCdnUrl = project.properties['imageCdnUrl'] ?: '//localhost/images'
-   def port = project.properties['port'] ?: '80'
-
-   exec {
-     commandLine 'docker', 'run', '-p', "${port}:80", '--name=frontend', '--env', 
-		"__js_config__API_URL=${API_URL}", '--env',
-		"__js_config__imageCdnUrl=${imageCdnUrl}",
-		'-d', 'frontend:latest'
-   }
-}
 
 def recreateConfigFile(path){
     def file = new File(path)
