@@ -25,6 +25,7 @@ task integrationTest(type: Test) {
 }
 
 integrationTest {
+    environment("SPRING_PROFILES_ACTIVE", "integration")
     useJUnitPlatform()
 }
 
