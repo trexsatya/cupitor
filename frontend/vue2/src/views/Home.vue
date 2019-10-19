@@ -39,4 +39,9 @@ export default {
   .banner {
       font-size: 2.0rem;
   }
+
+  .carousel-3d-slide, .carousel-3d-slide img {
+    height: 100% !important;
+  }
+
 </style>

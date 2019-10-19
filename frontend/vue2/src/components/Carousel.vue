@@ -152,11 +152,13 @@
 	  transition: -webkit-transform 0.5s;
 	  transition: transform 0.5s;
 	  transition: transform 0.5s, -webkit-transform 0.5s;
+	  height: 100%;
 	}
 	.carousel figure img {
 	  width: 100%;
 	  box-sizing: border-box;
 	  padding: 0 0px;
+	  height: 100%;
 	}
 	.carousel figure img:not(:first-of-type) {
 	  position: absolute;
