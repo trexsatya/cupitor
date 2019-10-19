@@ -79,6 +79,7 @@ export default {
 		padding: 10px;
 		margin-top: 30px;
 	}
+    
     .list-item-2>img:hover{
 		-webkit-box-shadow: 0px -10px 44px 12px rgba(162,190,232,1);
 		-moz-box-shadow: 0px -10px 44px 12px rgba(162,190,232,1);
