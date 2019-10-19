@@ -1,2 +1,2 @@
-API_URL = "http://cupitor.online:8080/api/"
-imageCdnUrl = "http://cupitor.online:8080/images/"
+API_URL = `http://${location.hostname}:8080/api/`
+imageCdnUrl = `http://${location.hostname}:8080/images/`

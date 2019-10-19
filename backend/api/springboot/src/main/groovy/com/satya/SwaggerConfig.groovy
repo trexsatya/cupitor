@@ -22,6 +22,7 @@ public class SpringFoxConfig {
         aParameters.add(aParameterBuilder.build())
 
         return new Docket(DocumentationType.SWAGGER_2)
+                .ignoredParameterTypes(MetaClass.class)
                 .select()
                 .apis(RequestHandlerSelectors.any())
                 .paths(PathSelectors.any())

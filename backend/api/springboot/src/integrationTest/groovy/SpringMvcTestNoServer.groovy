@@ -48,10 +48,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-//@DataMongoTest
-//@WebMvcTest(excludeAutoConfiguration = [MongoAutoConfiguration.class, MongoDataAutoConfiguration.class])
-//@ContextConfiguration(classes = [Application.class, CounterService.class, TestConfig.class])
-//@ExtendWith(SpringExtension.class) //Implicitly added by @WebMvcTest
 @SpringBootTest(classes = [Application.class, TestConfig.class])
 @TestPropertySource(properties = ["users=a:a:USER-ADMIN" ])
 @AutoConfigureMockMvc
@@ -63,8 +59,10 @@ class SpringMvcTestNoServer {
     @Autowired
     private MockMvc mockMvc
 
+    @Autowired MongoTemplate mongoTemplate
+
     @Test
-    public void test1(@Autowired MongoTemplate mongoTemplate){
+    public void "should fetch articles without errors"(){
         //Given that the DB has the article present
         mongoTemplate.save(new Article(subject: "java", id: 1, name: "Hello World"))
 
@@ -76,36 +74,33 @@ class SpringMvcTestNoServer {
                 .andExpect(content().string(containsString("Hello World")))
     }
 
-    public def "should fetch articles without errors"() {
-        this.mockMvc.perform(get("/api/articles/java")).andDo(print()).andExpect(status().isOk())
-                .andExpect(content().string(containsString("Hello World")))
-    }
+    @Test
+    public void "should not be able to edit article if not authorized"() {
+        //Given: that the article exists
+        mongoTemplate.save(new Article(subject: "java", id: 1, name: "Hello World"))
 
-    def "should not be able to edit article if not authorized"(){
-
+        //And:
         this.mockMvc.perform(
                 post("/api/article").content("{ \"id\": 1 }")
                         .contentType(MediaType.APPLICATION_JSON_UTF8)
-        )
-                .andDo(print()).andExpect(status().is(401))
+        ).andDo(print())
 
-        expect:
-        true
+        //Then:
+                .andExpect(status().is(401))
     }
 
-    def "should be able to edit article if authorized"(){
+    @Test
+    public void  "should be able to edit article if authorized"(){
         this.mockMvc.perform(
                 post("/api/article").content("{\"id\": 1}")
                         .contentType(MediaType.APPLICATION_JSON_UTF8).header("X-Auth", "a-a")
         )
                 .andDo(print()).andExpect(status().is(200))
 
-        expect:
-        true
     }
 
-
-    def "should not be able to access notepad without auth"(){
+    @Test
+    public void  "should not be able to access notepad without auth"(){
         this.mockMvc.perform(
                 get("/api/notepadData")
                         .contentType(MediaType.APPLICATION_JSON_UTF8)
@@ -119,7 +114,8 @@ class SpringMvcTestNoServer {
 
     ObjectMapper objectMapper = new ObjectMapper()
 
-    def "should automatically insert last updated"(){
+    @Test
+    public void  "should automatically insert last updated"(){
         Article article = new Article()
         article.setId(1)
         article.setName("Test")
@@ -128,8 +124,10 @@ class SpringMvcTestNoServer {
                 post("/api/article")
                         .contentType(MediaType.APPLICATION_JSON_UTF8).header("X-Auth", "a-a")
                         .content(objectMapper.writeValueAsString(article))
-        ).andDo(print()).andExpect(jsonPath("\$.lastUpdated", CoreMatchers.is(not(null))))
+        ).andDo(print())
 
-        expect: true
+        //Then:
+                .andExpect(jsonPath("\$.lastUpdated", CoreMatchers.is(not(null))))
+
     }
 }

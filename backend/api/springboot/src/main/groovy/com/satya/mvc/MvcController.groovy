@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Controller
 import org.springframework.web.bind.annotation.*
 import org.springframework.beans.factory.annotation.*
+import springfox.documentation.spring.web.plugins.Docket
 
 import javax.servlet.http.HttpServletRequest
 
@@ -64,25 +65,10 @@ class ArticleController {
     def @ResponseBody updateArticle( @RequestBody Article article, HttpServletRequest request, @PathVariable("id") String id) {
         if(!article.id) throw new ArticleNotFoundException("Id can't be null")
 
-        def resp = articleRepo.findOne(article.id)
+        def resp = articleRepo.findById(article.id)
         if(resp) resp = articleRepo.save(article)
         else throw new ArticleNotFoundException()
-
-        return resp
-    }
-
-    @ApiOperation(notes = "Update An Article", value = "")
-    @ApiImplicitParams(
-            @ApiImplicitParam(name="X-Auth", required = true)
-    )
-    @CrossOrigin(origins = ["*"])
-    @RequestMapping(value = "/notepad/{id}", method = RequestMethod.POST)
-    def @ResponseBody postNotepadNote( @RequestBody String data, HttpServletRequest request,
-                                   @PathVariable("id") String id) {
-        def resp = notepadRepo.findOne(id)
-        if(resp) resp = notepadRepo.save(data)
-        else throw new ArticleNotFoundException()
-
+        
         return resp
     }
 
@@ -104,7 +90,7 @@ class ArticleController {
     def @ResponseBody newArticle( @RequestBody Article article,HttpServletRequest request) {
         def resp
         article.id = counterService.getNextSequence("article")
-        if( article.id) resp =  articleRepo.findOne(article.id)
+        if( article.id) resp =  articleRepo.findById(article.id)
         if(!resp) resp = articleRepo.save(article)
         return resp
     }
