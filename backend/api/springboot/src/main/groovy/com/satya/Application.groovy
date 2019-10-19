@@ -12,6 +12,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.web.servlet.FilterRegistrationBean
 import org.springframework.context.ConfigurableApplicationContext
 import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.PropertySource
 import org.springframework.context.event.ContextRefreshedEvent
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories
 import org.springframework.scheduling.annotation.EnableAsync
@@ -25,7 +26,6 @@ import org.springframework.web.filter.CorsFilter
 import java.util.concurrent.Executors;
 
 @SpringBootApplication(scanBasePackages = ["com.satya"])
-//@EnableAutoConfiguration
 @EnableMongoRepositories(basePackages = ["com.satya.dao"])
 @EnableAsync
 @EnableScheduling
@@ -34,7 +34,7 @@ class Application implements CommandLineRunner {
 
 	private static final Logger logger = LogManager.getLogger(Application.class);
 
-	@Value("\${spring.data.mongodb.uri:}")
+	@Value("\${spring.data.mongodb.uri}")
 	String mongoUrl
 
 	/** To register a filter for handling CORS for Spring data rest beans **/
@@ -67,8 +67,6 @@ class Application implements CommandLineRunner {
 
 	static void main(String[] args) {
 		ConfigurableApplicationContext applicationContext = new SpringApplicationBuilder(Application.class)
-				.properties("spring.config.name:application",
-				"spring.config.location:classpath:/external/properties/")
 				.build().run(args)
 
 	}
