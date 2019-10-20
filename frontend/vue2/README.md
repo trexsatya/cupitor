@@ -1,7 +1,7 @@
 
 Run these commands on command line:
 		npm i -g yarn 
-		gradle dockerBuild
+		./gradlew dockerBuild
 		docker tag frontend:latest trexsatya/cupitor-frontend-vuejs:latest
 		docker push trexsatya/cupitor-frontend-vuejs:latest
 
@@ -9,16 +9,9 @@ Run these commands on command line:
 
 This project is started using RealWorld github repository [RealWorld](https://github.com/gothinkster/realworld) VueJS project.
 
-## Getting started
+VueJS Lifecycle:
+	[![VueJS Documentation](https://vuejs.org/v2/guide/instance.html)]
 
-Before contributing please read the following:
-
-1. [RealWorld guidelines](https://github.com/gothinkster/realworld/tree/master/spec) for implementing a new framework,
-2. [RealWorld frontend instructions](https://github.com/gothinkster/realworld-starter-kit/blob/master/FRONTEND_INSTRUCTIONS.md)
-3. [Realworld API endpoints](https://github.com/gothinkster/realworld/tree/master/api)
-4. [Vue.js styleguide](https://vuejs.org/v2/style-guide/index.html). Priority A and B categories must be respected.
-
-The stack is built using [vue-cli webpack](https://github.com/vuejs-templates/webpack) so to get started all you have to do is:
 
 ``` bash
 # install dependencies

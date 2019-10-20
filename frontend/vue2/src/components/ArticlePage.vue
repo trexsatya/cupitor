@@ -8,15 +8,20 @@
                       :is-full-page="true"></loading>
 
                <div class="article" v-if="article">
-               
-                <div>
-                 <!-- <Breadcrumb :items='getBreadcrumbItems(article)' /> -->
-					         <span style="" class="last-updated"> {{ getDateString(article.lastUpdated) }}</span>
-				        </div>								  
-                <h2 class="article-name" style="text-align: center;">{{ article.name }}</h2>
-   <hr>
+
+               <div class="article-top">
+
+                  <h2 class="article-name" style="text-align: center;">{{ article.name }}</h2>
+                  
+                   <!-- <Breadcrumb :items='getBreadcrumbItems(article)' /> -->
+                     <span style="" class="last-updated">Last Updated: {{ getDateString(article.lastUpdated) }}</span>
+                  
+                  <div class="style">
+
+                  </div>
+               </div>
                 
-                <div class="content" v-html="article.content">
+                <div class="content" style="max-width: 100%; overflow: auto;" v-html="article.content">
                 </div>
             </div>
         </div>
@@ -33,9 +38,11 @@ import { transformArticle } from '@/common/utils'
 
 export default {
   name: "ArticlePage",
+  
   components: {
      Breadcrumb, Loading
   },
+
   props: {
     articleId: {
       type: String,
@@ -51,9 +58,11 @@ export default {
   computed: {
     ...mapGetters(["article", "isLoading", "currentUser", "comments", "isAuthenticated"])
   },
+
   mounted() {
     this.fetchArticle();
   },
+
   updated(){
       transformArticle(this.$router);
       try {
@@ -62,6 +71,7 @@ export default {
 
       } catch(e){}
   },
+
   methods: {
       fetchArticle() {
         this.$store.dispatch(FETCH_ARTICLE,  this.articleId );
@@ -81,10 +91,11 @@ export default {
       },
 
       getDateString: function(d){
-      	  if(!d) return "Jan 01 2008";
+      	  if(!d) return "Jan 01, 2017";
           var ds = new Date(d).toDateString()
           if(ds.split(" ").length > 1){
-            return ds.split(" ").slice(1).join(" ")
+            var [mm, dd, yy] = ds.split(" ").slice(1)
+            return `${mm} ${dd}, ${yy}`
           }
       }
   }
@@ -96,12 +107,9 @@ export default {
 
   @media (max-width: 767px) {
     .article {
-      margin-left: 4%;
-      margin-right: 4%;
+      
     }
   }
 
-  .article {
-  
-  }
+
 </style>

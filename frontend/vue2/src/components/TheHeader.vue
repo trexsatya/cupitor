@@ -1,5 +1,5 @@
 <template>
-  <nav class="navbar navbar-light" style="border-radius: 0;background: #333;">
+  <nav class="navbar navbar-light" style="border-radius: 0;background: #333; padding-right: 0%;">
     <div class="container">
       <router-link class="navbar-brand"
         :to="{ name: 'home' }">
