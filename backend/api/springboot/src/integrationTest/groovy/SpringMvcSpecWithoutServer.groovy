@@ -10,6 +10,7 @@ import org.springframework.core.env.Environment
 import org.springframework.data.mongodb.core.MongoTemplate
 import org.springframework.data.mongodb.core.convert.MongoConverter
 import org.springframework.http.MediaType
+import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.TestPropertySource
 
 import static org.hamcrest.CoreMatchers.not
@@ -29,9 +30,9 @@ import spock.lang.Specification
 @SpringBootTest
 @AutoConfigureMockMvc
 @ContextConfiguration(classes = [Application.class, TestConfig.class])
-//@ActiveProfiles(profiles = "prod")
+//@ActiveProfiles(profiles = "test") //This should have worked along with @Primary annotation on @Bean, but it didn't.
 @TestPropertySource(properties = ["users=a:a:USER-ADMIN" ])
-class SpringMvcSpecWithoutServer extends Specification{
+class SpringMvcSpecWithoutServer extends Specification {
 
     MongoConverter converter = Mockito.mock(MongoConverter.class)
 
@@ -51,7 +52,7 @@ class SpringMvcSpecWithoutServer extends Specification{
         true
     }
 
-    def "should not be able to edit article if not authorized"(){
+    def "should not be able to edit article if not authorized"() {
 
         this.mockMvc.perform(
                     post("/api/article").content("{ \"id\": 1 }")
@@ -63,7 +64,7 @@ class SpringMvcSpecWithoutServer extends Specification{
         true
     }
 
-    def "should be able to edit article if authorized"(){
+    def "should be able to edit article if authorized"() {
         this.mockMvc.perform(
                 post("/api/article").content("{\"id\": 1}")
                         .contentType(MediaType.APPLICATION_JSON_UTF8).header("X-Auth", "a-a")
@@ -75,7 +76,7 @@ class SpringMvcSpecWithoutServer extends Specification{
     }
 
 
-    def "should not be able to access notepad without auth"(){
+    def "should not be able to access notepad without auth"() {
          this.mockMvc.perform(
                     get("/api/notepadData")
                             .contentType(MediaType.APPLICATION_JSON_UTF8)
@@ -89,7 +90,7 @@ class SpringMvcSpecWithoutServer extends Specification{
 
     ObjectMapper objectMapper = new ObjectMapper()
 
-    def "should automatically insert last updated"(){
+    def "should automatically insert last updated"() {
         Article article = new Article()
         article.setId(1)
         article.setName("Test")

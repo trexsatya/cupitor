@@ -26,6 +26,7 @@ task integrationTest(type: Test) {
 
 integrationTest {
     environment("SPRING_PROFILES_ACTIVE", "integration")
+    environment("spring.main.allow-bean-definition-overriding", "true") //So that tests ca override bean definitions
     useJUnitPlatform()
 }
 

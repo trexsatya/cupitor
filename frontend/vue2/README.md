@@ -37,14 +37,6 @@ gradle clean dockerBuild
 clean.sh file is there to make life easy while you are experimenting.
 create-config-file.sh file is there so that it will create a config.js file in target directory which is then included into index.html, so that you can pass API_URL etc from environment variables.
 
-# To know
 
-Current arbitrary choices are:
-
-- Vuex modules for store
-- Vue-axios for ajax requests
-- 'rwv' as prefix for components
-
-These can be changed when the contributors reach a consensus.
 
 

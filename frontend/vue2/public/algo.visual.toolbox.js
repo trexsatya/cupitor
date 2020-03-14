@@ -191,6 +191,20 @@ function textInRect(text, x,y, optsText, optsRect){
 	  top: y
 	});
 
+	group.customData = {
+		type: "textInRect",
+		foreground: function(color) {
+			if(!color) {
+
+			}
+		},
+		background: function(color) {
+			if(!color) {
+
+			}
+		}
+	};
+
 	return group;
 }
 

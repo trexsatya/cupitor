@@ -23,7 +23,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.MongoTemplate
-import org.springframework.http.MediaType;
+import org.springframework.http.MediaType
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit.jupiter.SpringExtension
@@ -48,12 +49,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(classes = [Application.class, TestConfig.class])
-@TestPropertySource(properties = ["users=a:a:USER-ADMIN" ])
+@SpringBootTest
 @AutoConfigureMockMvc
-@AutoConfigureCache
-@AutoConfigureDataMongo
-@ImportAutoConfiguration
+@ContextConfiguration(classes = [Application.class, TestConfig.class])
+@ActiveProfiles(profiles = "test")
+@TestPropertySource(properties = ["users=a:a:USER-ADMIN" ])
 class SpringMvcTestNoServer {
 
     @Autowired
