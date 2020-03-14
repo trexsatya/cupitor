@@ -84,4 +84,25 @@ task dockerBuild(type:Exec) {
   }
 }
 
+task dockerDeployImage(type:Exec) {
+    dependsOn unpack
+    workingDir '.'
+
+    if (Os.isFamily(Os.FAMILY_WINDOWS)) {
+        commandLine 'cmd', '/c', 'stop.bat'
+    } else {
+        //docker tag frontend:latest trexsatya/cupitor-frontend-vuejs:latest
+        commandLine 'docker', 'tag', "cupitor-backend-springboot:${project.version}", 'trexsatya/cupitor-backend-springboot:latest'
+//        docker push trexsatya/cupitor-backend-springboot:latest
+        commandLine 'docker', 'push', "trexsatya/cupitor-backend-springboot:latest"
+    }
+
+    standardOutput = new ByteArrayOutputStream()
+
+    //extension method dockerBuild.output() can be used to obtain the output:
+    ext.output = {
+        return standardOutput.toString()
+    }
+}
+
 apply from: 'tests-config.gradle'

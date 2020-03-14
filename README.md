@@ -12,7 +12,7 @@ Functionality of the application: Currently this application is a simple website
 ## Using Docker and Docker-Compose:
   Install Docker:
   
-    For a debian system easiest way is to download .deb package from https://download.docker.com/linux/ubuntu/dists/<linux-name>/pool/stable/amd64/<version>.deb
+    For a debian system easiest way is to download .deb package from https://download.docker.com/linux/ubuntu/dists/<linux-name>/pool/stable/amd64/<version>.debian
   
    <code>dpkg -i docker-ce..deb </code>
   
@@ -42,3 +42,49 @@ Example:<br>
 <code> docker push trexsatya/cupitor-backend-springboot:latest </code>
 
 <img src="https://docs.microsoft.com/en-us/dotnet/standard/microservices-architecture/docker-application-development-process/media/image20.png">
+
+
+<hr>
+
+Take dump of the mongodb on server and copy it to docker instance after starting up the services
+mongodump --forceTableScan -d cupitor-db -o dump #inside the directory you want to take dump in
+
+docker cp  dump/cupitor-db cupitor-frontend:/var/www
+
+Verify by looking into docker:
+docker exec <containerId> bash #get containerId using docker ps command
+ls /var/ww/cupitor-db
+
+for i in $(ls /var/www/cupitor-db); do echo "http://satyendra.online/cupitor-db/$i"; done; 
+
+http://satyendra.online/cupitor-db/article.bson
+http://satyendra.online/cupitor-db/article.metadata.json
+http://satyendra.online/cupitor-db/counter.bson
+http://satyendra.online/cupitor-db/counter.metadata.json
+http://satyendra.online/cupitor-db/notepadData.bson
+http://satyendra.online/cupitor-db/notepadData.metadata.json
+
+To Restore MongoDB data:
+--------------------------
+docker cp  dump/cupitor-db mongodb-server:/tmp
+docker exec -it [containerId of mongodb-server] bash
+mongorestore -d cupitor-db dump
+
+Configure GCloud
+Create project and instance
+
+gcloud beta compute --project "forward-theorem-261407" ssh --zone "asia-south1-c" "cupitor-vm"
+
+gcloud compute scp --recurse [local_folder] cupitor-vm:/tmp
+
+
+Using GCloud Shell to deploy manually
+-------------------------------------
+ Install gcloud
+ > gcloud auth login
+ > gcloud projects list
+ > gcloud config set project ${project_id}
+ > gcloud compute instances list
+ > gcloud compute ssh ${username}@${instance_name}
+
+ Run Docker commands

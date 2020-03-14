@@ -104,6 +104,69 @@
 		.play.active {
 			border-color: transparent;
 		}
+
+         /* The switch - the box around the slider */
+        .switch {
+          position: relative;
+          display: inline-block;
+          width: 60px;
+          height: 34px;
+        }
+
+        /* Hide default HTML checkbox */
+        .switch input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+
+        /* The slider */
+        .slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: #ccc;
+          -webkit-transition: .4s;
+          transition: .4s;
+        }
+
+        .slider:before {
+          position: absolute;
+          content: "";
+          height: 26px;
+          width: 26px;
+          left: 4px;
+          bottom: 4px;
+          background-color: white;
+          -webkit-transition: .4s;
+          transition: .4s;
+        }
+
+        input:checked + .slider {
+          background-color: #2196F3;
+        }
+
+        input:focus + .slider {
+          box-shadow: 0 0 1px #2196F3;
+        }
+
+        input:checked + .slider:before {
+          -webkit-transform: translateX(26px);
+          -ms-transform: translateX(26px);
+          transform: translateX(26px);
+        }
+
+        /* Rounded sliders */
+        .slider.round {
+          border-radius: 34px;
+        }
+
+        .slider.round:before {
+          border-radius: 50%;
+        } 
     </style>
 </head>
 
@@ -116,6 +179,11 @@
     <script type="text/javascript">
         var API_HOST = 'http://livintolearn.com/api';
         var id = window.location.hash.replace("#", "")
+
+        window.onbeforeunload = function(){
+          return 'Are you sure you want to leave?';
+        };
+
             /*  $.ajax(`${API_HOST}/articleAccessories/${id}`).then(resp => {
       //console.log(resp); //Content loaded
       var speeches = resp.speechTexts
@@ -190,7 +258,7 @@
 
             } catch (e) {
                 try {
-                    pc.getActiveObject()._objects[0].setFill(c)
+                    pc.getActiveObject().setFill(c)
                 } catch (e) {
                     console.log(e);
                 }
@@ -591,12 +659,26 @@
 			
 		  }; //end openFile
     </script>
+ 
+    <div style="display: inline-block;margin-left: 10px;position: absolute;left: 0;top: 8px;z-index: 1000000;height: 0;">
+        <span style=""> <label class="switch">
+          <input type="checkbox" id="eraser">
+          <span class="slider round"></span>
+            </label>
+        </span>
+    </div>
+    
 
     <div id="drawing-toolbar" style="display: inline-block; margin-left: 10px;position: absolute; left: 0; top: 50; z-index: 1000000; height: 0" class="ui-draggable ui-draggable-handle">
         <img id="toolbarToggle1" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#toolbar1-buttons').toggle();" src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png">
 
         <div id="toolbar1-buttons">
-            <button id="flip-drawing" class="btn btn-info">Flip Drawing Mode</button><br><br>
+            Drawing Mode:
+            <label class="switch">
+              <input type="checkbox" id="flip-drawing">
+              <span class="slider round"></span>
+            </label>
+            <br><br>
             <button id="undo" class="btn btn-info" onclick="undoDrawing(event)">Undo</button> <span> &nbsp;&nbsp;&nbsp;</span>
             <button id="redo" class="btn btn-info" onclick="redoDrawing(event)">Redo</button><br>
 
@@ -616,21 +698,25 @@
             </select><br>
             <br>
             <label for="drawing-line-width">Line width:</label>
-            <span class="info">2</span><input type="range" value="2" min="0" max="150" id="drawing-line-width"><br>
+            <span class="info">2</span><input type="number" value="3" id="drawing-line-width"><br>
+            
             <br>
             <label for="drawing-color">Line color:</label>
             <input type="color" value="#005E7A" id="drawing-color"><br>
             <br>
+            <button id="clear-canvas" class="btn btn-info">Clear</button>
+            
+            <br><br>
             <label for="drawing-shadow-color">Shadow color:</label>
             <input type="color" value="#005E7A" id="drawing-shadow-color"><br>
             <br>
             <label for="drawing-shadow-width">Shadow width:</label>
-            <span class="info">0</span><input type="range" value="0" min="0" max="50" id="drawing-shadow-width"><br>
+            <span class="info">0</span><input type="number" value="0" id="drawing-shadow-width"><br>
             
             <br>
             <label for="drawing-shadow-offset">Shadow offset:</label>
-            <span class="info">0</span><input type="range" value="0" min="0" max="50" id="drawing-shadow-offset"><br>
-            <br><button id="clear-canvas" class="btn btn-info">Clear</button>
+            <span class="info">0</span><input type="number" value="0" id="drawing-shadow-offset"><br>
+            <br>
         </div>
     </div>
 
@@ -693,10 +779,17 @@
             <button id="create-rect-text" class="btn btn-info">[]</button>
 
             <br><br>
-            <button id="bluen" class="btn btn-info" onclick="changeCircleColor('blue')">BL</button>
-            <button id="reden" class="btn btn-info" onclick="changeCircleColor('red')">Red</button>
-            <button id="greenen" class="btn btn-info" onclick="changeCircleColor('green')">Gr</button>
-            <button id="whiten" class="btn btn-info" onclick="changeCircleColor('white')">Wh</button>
+            Color: <select onchange="changeCircleColor(this.value)">
+              <option value="">--</option>
+              <option value="blue">Blue</option>
+              <option value="green">Green</option>
+              <option value="red">Red</option>
+              <option value="black">Black</option>
+              <option value="yellow">Yellow</option>
+              <option value="pink">Pink</option>
+              <option value="white">White</option>
+            </select> 
+           
             <br><br>
             <button id="greenen" class="btn btn-info" onclick="zoomSelectedObject(true)" style="margin-right:10px;">+</button>
             <button id="whiten" class="btn btn-info" onclick="zoomSelectedObject(false)" style="margin-right:10px;">-</button>
@@ -710,10 +803,10 @@
 
             <br><br>
 
-            <button id="create-array" class="btn btn-info" onclick="window.insertArray=true" style="margin-right:10px;">Array</button>
+            <button id="create-array" class="btn btn-info" onclick="window.insertArray=true; turnOffDrawing();" style="margin-right:10px;">Array</button>
 
-            <button id="insert-matex" class="btn btn-info" onclick="window.signalMatexInsertion=true;">Matex</button>
-            <button id="insert-image" class="btn btn-info" onclick="window.signalImageInsertion=true;">Image</button>
+            <button id="insert-matex" class="btn btn-info" onclick="window.signalMatexInsertion=true;turnOffDrawing();">Matex</button>
+            <button id="insert-image" class="btn btn-info" onclick="window.signalImageInsertion=true;turnOffDrawing();">Image</button>
             <br><br>
             <button id="save" style="margin-right:10px;" onclick="saveCanvas()">Save</button>
             <button id="newCanvas" onclick="newCanvas()"> New </button>
@@ -733,13 +826,50 @@
               drawingLineWidthEl = $('#drawing-line-width'),
               drawingShadowWidth = $('#drawing-shadow-width'),
               drawingShadowOffset = $('#drawing-shadow-offset'),
-              clearEl = $('#clear-canvas');
+              clearEl = $('#clear-canvas'),
+              eraserEl = $('#eraser');
 
-          clearEl.click(function() { oc.clear() });
+          clearEl.click(function() { 
+              var yes = confirm('Are you sure?');
+              if (yes) oc.clear();
+           });
 
           drawingColorEl.change(function(e) {
               oc.freeDrawingBrush.color = this.value;
           });
+
+          function turnOffDrawing(){
+            if(flipDrawindEl.is(':checked')) {
+                flipDrawindEl.click();
+            }
+          }
+
+          eraserEl.change(e => {
+            if(eraserEl.is(':checked')) {
+                //Store 
+                window.saved = window.saved || {};
+                window.saved.eraserStoredData = window.saved.eraserStoredData || {}
+                
+                window.saved.eraserStoredData.drawingColor = drawingColorEl.val()
+                window.saved.eraserStoredData.drawingLineWidth = drawingLineWidthEl.val()
+
+
+                drawingColorEl.val('#ffffff')
+                oc.freeDrawingBrush.color = drawingColorEl.val();
+
+                drawingLineWidthEl.val(15);
+                oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 15;
+
+            } else {
+                //Restore
+                drawingColorEl.val(window.saved.eraserStoredData.drawingColor);
+                drawingLineWidthEl.val(window.saved.eraserStoredData.drawingLineWidth);
+
+                oc.freeDrawingBrush.color = drawingColorEl.val();
+                oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 5;                
+            }
+          });
+
           drawingShadowColorEl.change(function() {
             oc.freeDrawingBrush.shadow.color = this.value;
           });
@@ -827,17 +957,25 @@
 
         $('#create-text').click(e => {
             window.insertText = true;
+            turnOffDrawing();
         })
         $('#create-small-text').click(e => {
             window.insertSmallText = true;
+            turnOffDrawing();
         })
 
         $('#create-rect-text').click(e => {
             window.insertRectText = true;
+            turnOffDrawing();          
         })
-        $('#flip-drawing').click(e => {
-            if (window.layerOnFront  != 'oc') moveToFront('oc')
-            else moveToFront('pc')
+
+        var flipDrawindEl = $('#flip-drawing');
+        flipDrawindEl.click(e => {
+            if(flipDrawindEl.is(':checked')) {
+                moveToFront('oc')
+            } else {
+                moveToFront('pc')
+            }
         })
         pc.on('object:selected', function(e) {
             var obj = e.target
@@ -1617,7 +1755,7 @@
         <button onclick="handleFileDialogButtons('OK')">OK</button> <button onclick="handleFileDialogButtons('')">Close</button>
     </div>
 
-    <div id="mathjaxDialog" style="background: blue; color: white; display: none; z-index: 500000;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
+    <div id="mathjaxDialog" style="">
         <script>
             function renderMath(e) {
                 if (e.keyCode == 13) {
@@ -1633,7 +1771,281 @@
         </script>
         <input autofocus type="text" id="mathtext" onkeyup="renderMath(event)">
 
-        <div id="representation" style="margin-top: 20; padding: 15;">
+        <div id="representation" style="margin-top: 20; padding: 15;"> </div>
+
+         <div class="keyboard">
+             <div class="key letter">
+                0
+              </div>
+              <div class="key letter">
+                1
+              </div>
+                <div class="key letter">
+                2
+              </div>
+                <div class="key letter">
+                3
+              </div>
+                <div class="key letter">
+                4
+              </div>
+                <div class="key letter">
+                5
+              </div>
+                <div class="key letter">
+                6
+              </div>
+                <div class="key letter">
+                7
+              </div>
+                <div class="key letter">
+                8
+              </div>
+              <div class="key letter">
+                9
+              </div>
+              <div class="key letter">
+                +
+              </div>
+              <div class="key letter">
+                -
+              </div>
+              <div class="key letter">
+                *
+              </div>  
+              <div class="key letter">
+                /
+              </div>
+              <div class="key letter">
+                (
+              </div>
+              <div class="key letter">
+                )
+              </div>
+              <div class="key letter" data-mathjax="\{">
+                {
+              </div>
+              <div class="key letter" data-mathjax="\}">
+                }
+              </div>
+             <div class="key letter">
+                [
+              </div>
+                <div class="key letter">
+                ]
+              </div>
+              <div class="key letter">
+                ^
+              </div>
+              <div class="key letter">
+                !
+              </div>
+              <div class="key letter">
+                @
+              </div>
+              <div class="key letter"  data-mathjax="\#">
+                #
+              </div>
+             <div class="key letter">
+                $
+              </div>
+              <div class="key letter"  data-mathjax="\%">
+                %
+              </div>
+              <div class="key letter"  data-mathjax="\&">
+                &
+              </div>
+              <div class="key letter">
+                ?
+              </div>
+              <div class="key letter">
+                =
+              </div>
+              <div class="key letter">
+                /
+              </div>
+              
+              <div class="key letter">
+                \
+              </div>
+              <div class="key letter">
+                ~
+              </div>
+              <div class="key letter" data-mathjax="\alpha ">
+                &alpha;
+              </div>
+              <div class="key letter" data-mathjax="\beta ">
+                &beta;
+              </div>
+              <div class="key letter" data-mathjax="\gamma ">
+                &gamma;
+              </div>
+              <div class="key letter" data-mathjax="\Gamma ">
+                &Gamma;
+              </div>
+              <div class="key letter" data-mathjax="\delta ">
+                &delta;
+              </div>
+              <div class="key letter" data-mathjax="\Delta ">
+                &Delta;
+              </div>
+              <div class="key letter" data-mathjax="\epsilon ">
+                &epsilon;
+              </div>
+              
+
+              <input type="text" list="mathjaxFunctions" id="mathjaxFunctionInput" onchange="insertMathFromSelect(this)" style="margin-top: 10px;" />
+              <datalist id="mathjaxFunctions">
+                  <option value="\infty">Infinity</option>
+                 
+                  <option value="\sum {}">sum</option>
+                  <option value="\text {}">text</option>
+                  
+                  <option value="\forall">forall</option>
+                  <option value="\exists">exists</option>
+                  <option value="\lor">or</option>
+                  <option value="\land">and</option>
+                  <option value="\pm">plus minus</option>
+                  <option value="\neq">not equal</option>
+                  <option value="\geq">greater eq</option>
+                  <option value="\ll">much less</option>
+                  <option value="\gg">much greater</option>
+                  <option value="\approx">approx</option>
+                  <option value="\supset">proper superset</option>
+                  <option value="\supseteq">superset</option>
+                  <option value="\subset">proper subset</option>
+                  <option value="\subseteq">subset</option>
+                  <option value="\emptyset">empty set</option>
+                  <option value="\cup"> union </option>
+                  <option value="\cap"> intersection </option>
+
+                  <option value="\hat { }"> hat </option>
+                  <option value="\sqrt[root]{ }"> square root </option>
+                  <option value="\partial"> partial </option>
+                  <option value="\cap"> intersection </option>
+                  <option value="\cap"> intersection </option>
+                  <option value="\cap"> intersection </option>
+                  <option value="\cap"> intersection </option>
+                  <option value="\cap"> intersection </option>
+
+                  
+                  <option value="\frac { }{ }">Fraction</option>
+                  <option value="\in">In</option>
+                  <option value="\left">Left</option>
+                  <option value="\right">Right</option>
+                  <option value="\overbrace {}">Overbrace</option>
+                  <option value="\underbrace {}">Underbrace</option>
+                  
+                  <option value="\boldsymbol">Bold</option>
+                  
+              </datalist>  
+            </div>
+            
+            <script type="text/javascript">
+                function insertMathFromSelect(el) {
+                    
+                }
+
+                function insertAtCursor(myField, myValue) {
+                    //IE support
+                    if (document.selection) {
+                        myField.focus();
+                        sel = document.selection.createRange();
+                        sel.text = myValue;
+                    }
+                    //MOZILLA and others
+                    else if (myField.selectionStart || myField.selectionStart == '0') {
+                        var startPos = myField.selectionStart;
+                        var endPos = myField.selectionEnd;
+                        myField.value = myField.value.substring(0, startPos)
+                            + myValue
+                            + myField.value.substring(endPos, myField.value.length);
+                        myField.selectionStart = startPos + myValue.length;
+                        myField.selectionEnd = startPos + myValue.length;
+                    } else {
+                        myField.value += myValue;
+                    }
+
+                    myField.focus();
+                } //end function
+
+
+                $('.keyboard .key').click(e => {
+                    var key = $(e.target).text().trim();
+                    insertAtCursor( $('#mathtext')[0], $(e.target).data('mathjax') || key);
+
+                });
+
+                $('#mathjaxFunctionInput').keyup(e => {
+                    
+                    if(e.keyCode == 13) {
+                        insertAtCursor( $('#mathtext')[0], $(e.target).val());    
+                    }
+
+                });
+
+            </script>
+            <style type="text/css">
+                   #mathjaxDialog {
+                        background: blue; 
+                        color: white; 
+                        display: none; 
+                        z-index: 500000;
+                        position: absolute;
+                        left: 30%;
+                        top: 30%;
+                        width: 400px;
+                        height: 400px;
+                        border: 1px solid black;
+                        padding: 1%;
+                   }
+                   @media (max-width: 767px) {
+                      #mathjaxDialog {
+                        left: 2%;
+                        width: 99%;
+                      }
+                    }
+
+                   .key{
+                      width: 40px; height:40px;
+                      display:block;
+                      background-color:#333;
+                      text-align: left;
+                      padding-left: 8px;
+                      line-height: 29px;
+                      border-radius:2px;
+                      float:left; margin-left: 2px;
+                      margin-bottom:2px;
+                      cursor: pointer;
+                      transition: box-shadow 0.7s ease;
+                    }
+
+                    .section-a{width:650px; height:260px; float:left;}
+                    .section-b{width:150px; height:260px; float:left;}
+
+                    .function{font-size: 12px; width:30px; height:30px; margin-bottom:15px;}
+                    .small{font-size:10px; line-height:13px; text-align: center; padding:0 5px; padding-top:2px; height:28px !important;}
+                    .space1{margin-right: 43px !important;}
+                    .space2{margin-right: 25px !important;}
+                    .dual {font-size: 14px; line-height: 20px; width:30px; }
+                    .backspace {width:84px; font-size: 12px;}
+                    .tab {width: 50px; line-height: 40px; font-size:13px;}
+                    .letter{width:30px;}
+                    .slash{width:64px;}
+                    .caps{width:70px; font-size:12px; line-height:18px;}
+                    .enter{width:92px; line-height:40px; text-align: center; padding-left:0;}
+                    .shift.left{width: 90px;line-height: 40px; font-size:13px;}
+                    .shift.right{width: 104px;line-height: 40px; font-size:13px;}
+                    .ctrl{width: 50px; line-height: 40px; font-size:13px;}
+                    .space{width:234px;}
+                    .arrows{position:relative; top:42px;}
+                    .sec-func .key{width: 32px; font-size:10px; text-align:left; line-height:40px; float:left;}
+                    .sec-func div.dual{line-height:20px;}
+                    .arrows .key{text-align: center; padding-left: 7px; margin-left:2px;}
+                    .hidden{visibility: hidden;}
+
+                    .key:hover{box-shadow:0px 0px 10px #14B524; z-index:1000;}
+            </style>   
         </div>
     </div>
 </body>
