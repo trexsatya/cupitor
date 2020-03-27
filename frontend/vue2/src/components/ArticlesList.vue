@@ -64,7 +64,29 @@ export default {
         ...Array(Math.ceil(this.articlesCount / this.itemsPerPage)).keys()
       ].map(e => e + 1);
     },
-    ...mapGetters(["articlesCount", "isLoading", "articles"])
+    articles() { 
+      var arts = this.$store.getters.articles;
+      arts = arts.sort((a,b) => { 
+        if(a.tags && !b.tags) return -1;
+        if(b.tags && !a.tags) return 1;
+        if(!a.tags && !b.tags) return 0;
+
+        
+          var priorityA = a.tags.find(t => (t+"").indexOf("prity=") >= 0);
+          var priorityB = b.tags.find(t => (t+"").indexOf("prity=") >= 0);
+          priorityA = _try(() => priorityA.split("prity=")[1], null);
+          priorityB = _try(() => priorityB.split("prity=")[1], null);
+          if(priorityA && !priorityB) return -1;
+          if(priorityB && !priorityA) return 1;
+          if(!priorityA && !priorityB) return 0;
+
+          return  parseInt(priorityA) - parseInt(priorityB);
+        
+      });
+
+      return arts; 
+    },
+    ...mapGetters(["articlesCount", "isLoading"])
   },
   mounted() {
     this.fetchArticles();

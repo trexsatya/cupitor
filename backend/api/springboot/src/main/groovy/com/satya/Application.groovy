@@ -88,7 +88,7 @@ class Application implements CommandLineRunner {
 	}
 
 	@Bean
-	taskExecutor() {
+	def taskExecutor() {
 		Executors.newScheduledThreadPool(1);
 	}
 
