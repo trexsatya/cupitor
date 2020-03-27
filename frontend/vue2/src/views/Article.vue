@@ -406,10 +406,6 @@ div.article-top {
     font-family: 'Open Sans', sans-serif;
     letter-spacing: .01rem;
     font-size: 17px;
-    padding-left: 1%;
-    padding-right: 1%;
-    margin-left: 3%;
-    margin-right: 3%;
   }
 
   h2.article-name { 

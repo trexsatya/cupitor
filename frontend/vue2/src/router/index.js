@@ -10,11 +10,6 @@ export default new Router({
       path: "/",
       component: () => import("@/views/Home"),
       children: [
-        {
-          path: "",
-          name: "home",
-          component: () => import("@/views/HomeGlobal")
-        }
         /*{
           path: "my-feed",
           name: "home-my-feed",
@@ -57,16 +52,16 @@ export default new Router({
       path: "/@:username",
       component: () => import("@/views/Profile"),
       children: [
-        {
-          path: "",
-          name: "profileArticles",
-          component: () => import("@/views/ProfileArticles")
-        },
-        {
-          name: "profile-favorites",
-          path: "favorites",
-          component: () => import("@/views/ProfileFavorited")
-        }
+        // {
+        //   path: "",
+        //   name: "profileArticles",
+        //   component: () => import("@/views/ProfileArticles")
+        // },
+        // {
+        //   name: "profile-favorites",
+        //   path: "favorites",
+        //   component: () => import("@/views/ProfileFavorited")
+        // }
       ]
     },
     {

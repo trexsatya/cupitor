@@ -74,6 +74,22 @@ tasks.register("dockerRun") {
   }
 }
 
+task dockerPush() {
+    dependsOn dockerBuild
+
+    doLast {
+        exec {
+            workingDir '.'
+            commandLine 'docker', 'tag', "frontend:latest", 'trexsatya/cupitor-frontend-vuejs:latest'
+        }
+
+        exec {
+            workingDir '.'
+            commandLine 'docker', 'push', "trexsatya/cupitor-frontend-vuejs:latest"
+        }
+    }
+}
+
 dockerBuild.dependsOn yarnBuild
 dockerRun.dependsOn dockerBuild
 

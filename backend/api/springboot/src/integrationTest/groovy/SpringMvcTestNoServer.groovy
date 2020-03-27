@@ -130,4 +130,12 @@ class SpringMvcTestNoServer {
                 .andExpect(jsonPath("\$.lastUpdated", CoreMatchers.is(not(null))))
 
     }
+
+
+    @Test
+    public void  "should be able to get version infor"(){
+        this.mockMvc.perform(
+                get("/api/introspection/build")
+        ).andDo(print()).andExpect(status().is(200))
+    }
 }

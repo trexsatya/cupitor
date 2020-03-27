@@ -56,9 +56,15 @@ dependencies {
 
     compile "io.springfox:springfox-swagger2:2.9.2"
     compile "io.springfox:springfox-swagger-ui:2.9.2"
+
+    // https://mvnrepository.com/artifact/org.jsoup/jsoup
+    compile group: 'org.jsoup', name: 'jsoup', version: '1.13.1'
+
 }
 
-
+processResources {
+    from('version.properties') { into '.'}
+}
 
 task unpack(type: Copy) {
     dependsOn build
@@ -84,24 +90,19 @@ task dockerBuild(type:Exec) {
   }
 }
 
-task dockerDeployImage(type:Exec) {
+task dockerPush() {
     dependsOn unpack
-    workingDir '.'
 
-    if (Os.isFamily(Os.FAMILY_WINDOWS)) {
-        commandLine 'cmd', '/c', 'stop.bat'
-    } else {
-        //docker tag frontend:latest trexsatya/cupitor-frontend-vuejs:latest
-        commandLine 'docker', 'tag', "cupitor-backend-springboot:${project.version}", 'trexsatya/cupitor-backend-springboot:latest'
-//        docker push trexsatya/cupitor-backend-springboot:latest
-        commandLine 'docker', 'push', "trexsatya/cupitor-backend-springboot:latest"
-    }
+    doLast {
+        exec {
+            workingDir '.'
+            commandLine 'docker', 'tag', "cupitor-backend-springboot:${project.version}", 'trexsatya/cupitor-backend-springboot:latest'
+        }
 
-    standardOutput = new ByteArrayOutputStream()
-
-    //extension method dockerBuild.output() can be used to obtain the output:
-    ext.output = {
-        return standardOutput.toString()
+        exec {
+            workingDir '.'
+            commandLine 'docker', 'push', "trexsatya/cupitor-backend-springboot:latest"
+        }
     }
 }
 

@@ -34,6 +34,15 @@ router.beforeEach((to, from, next) => {
   return Promise.all([store.dispatch(CHECK_AUTH)]).then(next);
 });
 
+window._try = function(func, fallbackValue) {
+    try {
+        var value = func();
+        return (value === null || value === undefined) ? fallbackValue : value;
+    } catch (e) {
+        return fallbackValue;
+    }
+}
+
 new Vue({
   router,
   store,

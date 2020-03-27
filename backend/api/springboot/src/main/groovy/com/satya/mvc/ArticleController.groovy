@@ -52,7 +52,7 @@ class ArticleController {
     @RequestMapping(value = "/search/{searchText}", method = RequestMethod.GET)
     def @ResponseBody searchArticles(@PathVariable String searchText){
         articleRepo.searchArticles(searchText).collect {
-             [name: it.name, id: it.id, img: it.img]
+            [name: it.name, id: it.id, img: it.img]
         }
     }
 
@@ -68,7 +68,7 @@ class ArticleController {
         def resp = articleRepo.findById(article.id)
         if(resp) resp = articleRepo.save(article)
         else throw new ArticleNotFoundException()
-        
+
         return resp
     }
 
