@@ -8,4 +8,6 @@ CKEDITOR.editorConfig = function( config ) {
 	// config.language = 'fr';
 	// config.uiColor = '#AADC6E';
 	config.extraPlugins = 'mathematica'
+
+	config.contentsCss = [ '/prism-ghcolors.css', '/katex/katex.min.css'];
 };

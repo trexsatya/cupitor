@@ -91,7 +91,7 @@ task dockerBuild(type:Exec) {
 }
 
 task dockerPush() {
-    dependsOn unpack
+    dependsOn dockerBuild
 
     doLast {
         exec {

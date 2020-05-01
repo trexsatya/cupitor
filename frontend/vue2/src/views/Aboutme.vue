@@ -20,23 +20,19 @@ I am a Software Engineer by profession. But I try not be limited to computers. A
                       <link rel="stylesheet" href="https://d1azc1qln24ryf.cloudfront.net/114779/Socicon/style-cf.css?rd5re8">    
                       <ul class="socicons-list">
                           <li>
-                            <a href='https://www.linkedin.com/in/satyendra-kumar-54671058/' target='_blank'><span class="socicon-linkedin"></span></a> 
+                            <a href='https://www.linkedin.com/in/satyendra-kumar-54671058/' target='_blank'><span class="socicon">Linked In</span></a> 
                           </li>
                             <li>
-                            <a href='https://github.com/trexsatya' target='_blank'><span class="socicon-github"></span></a> 
+                            <a href='https://github.com/trexsatya' target='_blank'><span class="socicon">Github</span></a> 
                           </li> 
                           <li>
-                            <a href='https://stackoverflow.com/users/5332993/satyendra-kumar' target='_blank'><span class="socicon-stackoverflow"></span></a> 
+                            <a href='https://stackoverflow.com/users/5332993/satyendra-kumar' target='_blank'><span class="socicon">StackOverflow</span></a> 
                           </li>
+                             
                           <li>
-                            <a href='https://www.facebook.com/kumarsatya1990' target='_blank'><span class="socicon-facebook"></span></a> 
+                            <a href='https://stackexchange.com/users/5160541/satyendra-kumar' target='_blank'><span class="socicon">StackExchange</span></a> 
                           </li>   
-                          <li>
-                            <a href='https://stackexchange.com/users/5160541/satyendra-kumar' target='_blank'><span class="socicon-stackexchange"></span></a> 
-                          </li>   
-                          <li>
-                            <a href='mailto:kumarsatya1990@gmail.com' target='_blank'><span class="socicon-google"></span></a> 
-                          </li>
+                          
                       </ul>
                   </div>
                   <div class="col-xs-12 col-md-10 offset-md-1" style="margin-top: 3%;">

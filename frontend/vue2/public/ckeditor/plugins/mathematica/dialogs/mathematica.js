@@ -1,4 +1,5 @@
 CKEDITOR.dialog.add( 'mathematicaDialog', function ( editor ) {
+
     return {
         title: 'Abbreviation Properties',
         minWidth: 400,
@@ -26,7 +27,9 @@ CKEDITOR.dialog.add( 'mathematicaDialog', function ( editor ) {
                     ]
              }
         ],
-
+        onLoad: function(){
+            
+        },
         onShow: function(){
             var dialog = this;
             var editing = editor;

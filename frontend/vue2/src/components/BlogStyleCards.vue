@@ -6,9 +6,7 @@
         		<li class="author"><a href="#">{{ eitherOr(item.author, defaultName) }}</a></li>
         		<li class="date">{{ eitherOr( getDate(item.lastUpdated), defaultDate) }}</li>
         		<li class="tags">
-        			<ul>
-        				<li v-for="t in item.tags"><a href="#">{{ t }}</a></li>
-        			</ul>
+        			
         		</li>
         	</ul>
         	<div class="description">

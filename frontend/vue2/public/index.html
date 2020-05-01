@@ -67,45 +67,7 @@
     <script src="/config.js"></script>
     <script type="text/javascript">
         
-      function fixImageUrls(){
-          $('img').each((i,e) => {
-              var href = $(e).attr('src')
-              if(href.startsWith('/images/')){
-                  href = href.replace('/images/', imageCdnUrl)
-                  $(e).attr('src', href)
-              }
-          })
-      };
-
-
-      function drawMathematics(){
-            $('div.math').each((i,e)=>{
-                $(e).css({ padding: 10})
-                if( $(e).attr('bg')){
-                        $(e).css({ background: $(e).attr('bg'), color:  $(e).attr('fg') })
-                }
-                try {  $(e).html(katex.renderToString($(e).text().trim(), { displayMode: true })) } catch(e) { console.log(e); }
-            })
-
-            $('span.math').each((i,e)=>{
-               $(e).css({ padding: 10})
-               if( $(e).attr('bg')){
-                   $(e).css({ background: $(e).attr('bg'), color:  $(e).attr('fg') })
-               }
-
-                try { $(e).html(katex.renderToString($(e).text().trim())) } catch(e){ console.log(e); }
-            })
-      };
-
-      function appendScripts(){
-        var urls = ["/katex/katex.min.js"]
-
-            urls.forEach(url =>{
-                var script = document.createElement('script');
-                script.src = url;
-                document.body.appendChild(script);
-            });
-      }
+  
       
     </script>
     <script type="text/javascript">
@@ -124,6 +86,6 @@
     <!-- built files will be auto injected -->
   </body>
   <script type="text/javascript">
-    appendScripts();
+    appendScripts(["/katex/katex.min.js"]);
   </script>
 </html>

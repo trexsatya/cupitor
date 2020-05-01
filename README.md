@@ -88,3 +88,9 @@ Using GCloud Shell to deploy manually
  > gcloud compute ssh ${username}@${instance_name}
 
  Run Docker commands
+ 
+ 
+Docker Utility Commands:
+To Remove unused images: `docker image prune --all`
+
+To remove all images: `docker rmi $(docker images | awk '{print $3}')`
