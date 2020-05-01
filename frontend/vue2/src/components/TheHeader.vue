@@ -39,12 +39,13 @@
         <div id="mySidenav" class="sidenav">
           <a href="javascript:void(0)" class="closebtn" v-on:click="closeNav()">&times;</a>
           <router-link class="nav-link"
+            v-on:click.native="closeNav()"
             active-class="active"
             exact
             :to="{ name: 'aboutme' }">
             About Me
           </router-link>
-          <a class="nav-link" href="https://github.com/trexsatya/cupitor" target="_blank"> Code
+          <a class="nav-link" href="https://github.com/trexsatya/cupitor" target="_blank" v-on:click="closeNav()"> Github Code
           </a>
         </div>
       </ul>

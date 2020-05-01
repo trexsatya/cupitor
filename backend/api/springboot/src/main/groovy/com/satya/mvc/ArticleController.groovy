@@ -16,7 +16,7 @@ import springfox.documentation.spring.web.plugins.Docket
 import javax.servlet.http.HttpServletRequest
 
 @Controller
-@CrossOrigin
+//@CrossOrigin(allowedHeaders = "*", origins = "*", methods = [RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.OPTIONS, RequestMethod.HEAD])
 @RequestMapping(value = "/api")
 class ArticleController {
 

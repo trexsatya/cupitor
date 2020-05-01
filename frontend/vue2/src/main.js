@@ -3,6 +3,7 @@ import App from "./App.vue";
 import router from "./router";
 import store from "./store";
 import "./registerServiceWorker";
+import { transformArticle } from '@/common/utils'
 
 import { CHECK_AUTH } from "@/store/actions.type";
 import ApiService from "@/common/api.service";

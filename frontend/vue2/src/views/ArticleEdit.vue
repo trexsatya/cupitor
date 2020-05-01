@@ -60,6 +60,7 @@
             <button
               :disabled="inProgress"
               class="btn btn-lg pull-xs-left btn-primary"
+              id="publishArticleButton"
               type="submit">
               Publish Article
             </button>
@@ -85,6 +86,7 @@ import { mapGetters } from "vuex";
 import store from "@/store";
 import RwvListErrors from "@/components/ListErrors";
 import ArticlePreview from "@/views/ArticlePreview";
+import { transformArticle } from '@/common/utils'
 import {
   ARTICLE_PUBLISH,
   ARTICLE_EDIT,
@@ -174,6 +176,46 @@ export default {
       localStorage.setItem('articleEditing', CKEDITOR.instances['editor'].getData());
       return 'Are you sure you want to leave?';
     };
+
+   var editor = CKEDITOR.instances['editor'];
+      var isCtrl = false, isCtrlS = false;
+
+      editor.on( 'key', function(event) {
+          if(event.data.domEvent.$.keyCode == 17) isCtrl=false;
+      });
+
+      editor.on( 'key', function(event) {
+
+          isCtrl = event.data.domEvent.$.keyCode == 17 || event.data.domEvent.$.metaKey || event.data.domEvent.$.ctrlKey;
+          
+          if(!isCtrl) isCtrl = (event.metaKey || event.ctrlKey);
+
+          if(isCtrl && event.key == 's') isCtrlS = true;
+
+          if(isCtrlS || (event.data.domEvent.$.keyCode == 83 && isCtrl == true)) {
+              //The preventDefault() call prevents the browser's save popup to appear.
+              //The try statement fixes a weird IE error.
+              try {
+                  event.data.domEvent.$.preventDefault();
+              } catch(err) {}
+
+              //Call to your save function
+
+              try { $('#publishArticleButton').click(); } catch(e) {}
+
+              isCtrl = false, isCtrlS = false;
+              return false;
+          }
+      });
+
+    window.document.addEventListener("keydown", function(e) {
+      if ((window.navigator.platform.match("Mac") ? e.metaKey : e.ctrlKey)  && e.keyCode == 83) {
+        e.preventDefault();
+        // Process the event here (such as click on submit button)
+        try { $('#publishArticleButton').click(); } catch(e) {}
+      }
+    }, false);  
+
   },
   methods: {
     validate(){
