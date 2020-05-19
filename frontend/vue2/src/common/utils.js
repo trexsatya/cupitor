@@ -39,22 +39,35 @@ window.fixImageUrls = function(){
 
 
 window.drawMathematics = function(){
-      $('div.math').each((i,e)=>{
-          $(e).css({ padding: 10})
-          if( $(e).attr('bg')){
-                  $(e).css({ background: $(e).attr('bg'), color:  $(e).attr('fg') })
-          }
-          try {  $(e).html(katex.renderToString($(e).text().trim(), { displayMode: true })) } catch(e) { console.log(e); }
-      })
+      document.querySelectorAll('.math').forEach(x => {
+      var input = x.innerHTML;  
+      x.innerHTML = '';
+      MathJax.texReset();
+      var options = MathJax.getMetricsFor(x);
+      options.display = x.nodeName === 'DIV';
+      MathJax.tex2chtmlPromise(input, options).then(function (node) {
+            //
+            //  The promise returns the typeset node, which we add to the output
+            //  Then update the document to include the adjusted CSS for the
+            //    content of the new equation.
+            //
+            x.appendChild(node);
+            MathJax.startup.document.clear();
+            MathJax.startup.document.updateDocument();
+          }).catch(function (err) {
+            //
+            //  If there was an error, put the message into the output instead
+            //
+            x.appendChild(document.createElement('pre')).appendChild(document.createTextNode(err.message));
+          }).then(function () {
+            //
+            //  Error or not, re-enable the display and render buttons
+            //
+            console.log('done rendering math')
+          });
+      
+    });
 
-      $('span.math').each((i,e)=>{
-         $(e).css({ padding: 10})
-         if( $(e).attr('bg')){
-             $(e).css({ background: $(e).attr('bg'), color:  $(e).attr('fg') })
-         }
-
-          try { $(e).html(katex.renderToString($(e).text().trim())) } catch(e){ console.log(e); }
-      })
 };
 
 window.appendScripts = function(urls){
