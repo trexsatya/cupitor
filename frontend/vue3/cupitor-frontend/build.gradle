@@ -1,0 +1,112 @@
+group 'com.satya'
+version '1.0'
+
+
+tasks.register("dockerClean") {
+
+  doLast {
+    try {
+      exec {
+        commandLine 'chmod', '+x', 'clean.sh'
+      }
+      
+      exec {
+        commandLine './clean.sh'
+      }
+
+    } catch(e){
+     e.printStackTrace()
+    }
+  }
+}
+
+tasks.register("yarnBuild") {
+
+  doLast {
+    exec {
+      commandLine 'npm', 'install', '-g', 'yarn'
+      commandLine  'yarn', 'build'
+    }
+  }
+}
+
+tasks.register("dockerBuild") {
+
+  doLast {
+      copy {
+        from 'dist'
+        into 'docker/dist'
+      }
+      copy {
+        from 'nginx.conf'
+        into 'docker'
+      } 
+
+      copy {
+        from 'Dockerfile'
+        into 'docker'
+      }
+      copy {
+        from 'create-config-file.sh'
+        into 'docker'
+      }
+
+      exec {
+        commandLine "docker", "build", "-t", "frontend:latest", "docker/", "--no-cache", "--rm"
+      }
+  }
+}
+
+tasks.register("dockerRun") {
+
+  doLast {
+       println "Running docker run command"
+       def API_URL = project.properties['API_URL'] ?: '//localhost:8080/api'
+       def imageCdnUrl = project.properties['imageCdnUrl'] ?: '//localhost/images'
+       def port = project.properties['port'] ?: '80'
+
+       exec {
+         commandLine 'docker', 'run', '-p', "${port}:80", '--name=frontend', '--env', 
+        "__js_config__API_URL=${API_URL}", '--env',
+        "__js_config__imageCdnUrl=${imageCdnUrl}",
+        '-d', 'frontend:latest'
+       }
+  }
+}
+
+task dockerPush() {
+    dependsOn dockerBuild
+
+    doLast {
+        exec {
+            workingDir '.'
+            commandLine 'docker', 'tag', "frontend:latest", 'trexsatya/cupitor-frontend-vuejs:latest'
+        }
+
+        exec {
+            workingDir '.'
+            commandLine 'docker', 'push', "trexsatya/cupitor-frontend-vuejs:latest"
+        }
+    }
+}
+
+dockerBuild.dependsOn yarnBuild
+dockerRun.dependsOn dockerBuild
+
+
+
+def recreateConfigFile(path){
+    def file = new File(path)
+
+    def lines = [""]
+
+    project.properties.each { k,v ->
+        if(k.startsWith("__js_config__")){
+            println k
+            lines << "${k.split("__js_config__")[1]}='$v'"
+        }
+    }
+
+    file.append(lines.join("\n"))
+}
+

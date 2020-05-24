@@ -49,7 +49,7 @@ export default class ArticlesView extends Vue {
   onClick(item) {
     console.log(item);
     this.$router.push({
-      path: '/editor/' + item.id
+      path: '/article/' + item.id
     })
   }
 
