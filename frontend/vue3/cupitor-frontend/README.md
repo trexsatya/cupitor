@@ -32,3 +32,9 @@ yarn lint
 
 ### Customize configuration
 See [Configuration Reference](https://cli.vuejs.org/config/).
+
+
+Run as a docker image using Gradle:
+```
+./gradlew dR -PAPI_URL=http://satyendra.online:8080/api/ -PimageCdnUrl=https://storage.googleapis.com/cupitor-220103.appspot.com/images/
+```
