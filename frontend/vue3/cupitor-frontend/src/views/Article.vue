@@ -269,12 +269,12 @@ background: linear-gradient(to right, #33001b, #ff0084);
   font-family: 'Raleway', sans-serif;
   font-weight: 400;
   font-style: normal;
-  font-size: 17px;
-  line-height: 1.9;
-  letter-spacing: 0.02rem;
-  color: black;
-  margin-right: 15vw;
-  margin-left: 15vw;
+  font-size: 1.25em;
+  line-height: 1.91;
+  letter-spacing: 0.02em;
+  color: #483e3e;
+  margin-right: 23vw;
+  margin-left: 23vw;
 }
 
 blockquote {
@@ -405,8 +405,10 @@ div.article-top {
 @media (max-width: 767px) {
   .article .content {
     font-family: 'Open Sans', sans-serif;
-    letter-spacing: .01rem;
-    font-size: 17px;
+    letter-spacing: -.03em;
+    font-size: 19px;
+    margin-right: 6vw;
+    margin-left: 6vw;
   }
 
   h2.article-name {
