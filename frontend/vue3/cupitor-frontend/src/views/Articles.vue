@@ -152,4 +152,7 @@ export default class ArticlesView extends Vue {
     opacity: 1;
     z-index: 1000;
 }
+.card-title:hover {
+  
+}
 </style>

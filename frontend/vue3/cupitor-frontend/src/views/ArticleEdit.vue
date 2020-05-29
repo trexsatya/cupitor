@@ -67,10 +67,9 @@ export default class ArticleEditView extends Vue {
   IMAGES_BASE_URL = window.imageCdnUrl;
 
   beforeRouteLeave(to, from, next) {
-
     const yes = confirm('Are you sure you want to leave?')
     if (yes) {
-      localStorage.setItem('articleEditing', this.CKEDITOR.instances['editor'].getData());
+      localStorage.setItem('articleEditing', window.CKEDITOR.instances['editor'].getData());
       return next();
     } else return next(false)
   }
@@ -79,37 +78,36 @@ export default class ArticleEditView extends Vue {
     console.log('mounted');
 
     const el = document.createElement('script');
+    el.async = false;
     el.src = "/ckeditor/ckeditor.js";
     document.head.append(el);
 
-    const setup = this.setupEditor;
+    window.onload = (e) => {
+      window.CKEDITOR.replace('editor', {
+        entities: true,
+        extraPlugins: 'mathematica,codesnippet',
+        allowedContent: true,
+      });
 
-    const timeout = this.CKEDITOR ? 0 : 10000;
-
-    setTimeout(() => {
-      setup();
-    }, timeout);
+      this.setupEditor();
+      fetch(this.API_BASE_URL + 'article/' + this.$route.params.id)
+        .then((res) => res.json())
+        .then((article) => {
+          this.article = article;
+          setTimeout(() => {
+            CKEDITOR.instances['editor'].setData(this.article.content);
+          }, 1000);
+        });
+    };
   }
 
   setupEditor() {
-    fetch(this.API_BASE_URL + 'article/' + this.$route.params.id)
-      .then((res) => res.json())
-      .then((article) => {
-        this.article = article;
-        this.CKEDITOR.replace('editor', {
-          entities: true,
-          extraPlugins: 'mathematica,codesnippet',
-          allowedContent: true,
-        });
-      });
-
     window.onbeforeunload = function() {
-      localStorage.setItem('articleEditing', this.CKEDITOR.instances['editor'].getData());
+      localStorage.setItem('articleEditing', window.CKEDITOR.instances['editor'].getData());
       return 'Are you sure you want to leave?';
     };
 
-    let editor = this.CKEDITOR.instances['editor'];
-    if(!editor) editor = { on: (e) => { console.log('dumb'); }};
+    const editor = window.CKEDITOR.instances['editor'];
 
     let isCtrl = false,
       isCtrlS = false;
@@ -136,7 +134,7 @@ export default class ArticleEditView extends Vue {
         //Call to your save function
 
         try {
-          $('#publishArticleButton').click();
+          document.getElementById('publishArticleButton').click();
         } catch (e) {}
 
         isCtrl = false, isCtrlS = false;
@@ -149,7 +147,7 @@ export default class ArticleEditView extends Vue {
         e.preventDefault();
         // Process the event here (such as click on submit button)
         try {
-          $('#publishArticleButton').click();
+          document.getElementById('publishArticleButton').click();
         } catch (e) {}
       }
     }, false);
@@ -168,6 +166,8 @@ export default class ArticleEditView extends Vue {
     return Object.keys(errors).length == 0;
   }
 
+
+
   onPreview() {
     const name = this.article.name;
     const subject = this.article.subject;
@@ -181,35 +181,30 @@ export default class ArticleEditView extends Vue {
     });
   }
 
-  onPublish(slug) {
+  onPublish(id) {
     if (!this.validate()) return;
     if (!window['X-Auth']) {
       window['X-Auth'] = prompt('Enter auth header');
       if (!window['X-Auth']) return;
     }
 
-    this.article.content = this.CKEDITOR.instances['editor'].getData()
-    const action = slug ? ARTICLE_EDIT : ARTICLE_PUBLISH;
+    this.article.content = window.CKEDITOR.instances['editor'].getData()
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? this.API_BASE_URL + "article/" + id : this.API_BASE_URL + "article";
+
     this.inProgress = true;
-    this.$store
-      .dispatch(action)
-      .then(({
-        data
-      }) => {
-        this.inProgress = false;
-        this.$router.push({
-          name: "article",
-          params: {
-            slug: data.article.slug
-          }
-        });
-      })
-      .catch(({
-        response
-      }) => {
-        this.inProgress = false;
-        this.errors = response || {};
-      });
+    fetch(url, {
+      method: method,
+      body: JSON.stringify(this.article),
+      headers: {
+        'X-Auth': window['X-Auth'],
+        'Content-Type': 'application/json'
+      }
+    }).then(response => {
+      this.inProgress = false;
+      return response.json();
+    });
+
   }
 }
 </script>
