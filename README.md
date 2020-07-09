@@ -52,10 +52,14 @@ mongodump --forceTableScan -d cupitor-db -o dump #inside the directory you want 
 docker cp  dump/cupitor-db cupitor-frontend:/var/www
 
 Verify by looking into docker:
+```shell
 docker exec <containerId> bash #get containerId using docker ps command
 ls /var/ww/cupitor-db
+```
 
+```shell
 for i in $(ls /var/www/cupitor-db); do echo "http://satyendra.online/cupitor-db/$i"; done; 
+```
 
 http://satyendra.online/cupitor-db/article.bson
 http://satyendra.online/cupitor-db/article.metadata.json
@@ -66,26 +70,31 @@ http://satyendra.online/cupitor-db/notepadData.metadata.json
 
 To Restore MongoDB data:
 --------------------------
+```shell
 docker cp  dump/cupitor-db mongodb-server:/tmp
 docker exec -it [containerId of mongodb-server] bash
 mongorestore -d cupitor-db dump
+```
 
 Configure GCloud
 Create project and instance
 
+```shell
 gcloud beta compute --project "forward-theorem-261407" ssh --zone "asia-south1-c" "cupitor-vm"
 
 gcloud compute scp --recurse [local_folder] cupitor-vm:/tmp
-
+```
 
 Using GCloud Shell to deploy manually
 -------------------------------------
  Install gcloud
+ ```shell
  > gcloud auth login
  > gcloud projects list
  > gcloud config set project ${project_id}
  > gcloud compute instances list
  > gcloud compute ssh ${username}@${instance_name}
+```
 
  Run Docker commands
  
