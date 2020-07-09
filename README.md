@@ -25,12 +25,13 @@ Functionality of the application: Currently this application is a simple website
   <code> sudo chmod +x /usr/local/bin/docker-compose </code>
   
   Compose is a nice way to define and connect services in a single file; To make communcation happen, environment variables are used e.g. in this project "Which mongo db URL will cupitor-api service will call for database connection?" is defined by environment variable.
-  API_URL is passed on to frontend container. docker-compose file itself uses some environment variables.
+  `API_URL` is passed on to frontend container. docker-compose file itself uses some environment variables.
 
 <code> sudo docker-compose pull </code>
 <code> sudo <env variables> docker-compose up -d </code>
 
-#To shutdown <br>
+<b>To shutdown </b>
+<br>
 <code> sudo docker-compose down </code>
 
 
@@ -47,9 +48,10 @@ Example:<br>
 <hr>
 
 Take dump of the mongodb on server and copy it to docker instance after starting up the services
+```shell
 mongodump --forceTableScan -d cupitor-db -o dump #inside the directory you want to take dump in
-
 docker cp  dump/cupitor-db cupitor-frontend:/var/www
+```
 
 Verify by looking into docker:
 ```shell
