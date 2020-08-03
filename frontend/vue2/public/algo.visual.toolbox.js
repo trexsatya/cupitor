@@ -707,16 +707,16 @@ function appendTableInto(table, target, opts){
  	</td>
 
     <td>
-      <table class="data" border="1" style="border-collapse: collapse; width: 100%; margin-left: -15px; margin-top: 0px; text-align: center; height: ${options.height}">
+      <table class="data" border="1" style="border-collapse: collapse; width: 100%; margin-left: -15px; margin-top: 0px; text-align: center; height: 100%">
 
 	      <tr>
 	          <th style="text-align: center" ></th>
-	          ${options.xheaders.map(x => '<th style="text-align: center" class="xheader">'+ x+'</th>').join('')}
+	          ${options.xheaders.map(x => '<th style="text-align: center" class="xheader"> <span class="item">'+ x+'</span></th>').join('')}
 	      </tr>
 
 	      ${range(0, table.length).map(row =>
-	      		'<tr class="data"> <th style="text-align: center" class="yheader">'+ options.yheaders[row] +'</th>'
-	      			+table[row].map(y => `<td style="" >`+ y +'</td>').join('') +'</tr>'
+	      		'<tr class="data"> <th style="text-align: center" class="yheader"> <span class="item">'+ options.yheaders[row] +'</span></th>'
+	      			+table[row].map(y => `<td style="" > <span class="item"> ${y} </span></td>`).join('') +'</tr>'
 	      ).join('')}
     </table>
     </td>
@@ -746,8 +746,9 @@ function appendTableInto(table, target, opts){
 	  });
 	});
 
-	table.find('table.data').css(opts)
-	setTimeout(()=> table.find('.yheader').css({'padding-left': '4%','padding-right': '4%'}), 500);
+//	table.find('table.data').css(opts)
+//	setTimeout(()=> table.find('.yheader').css({'padding-left': '4%','padding-right': '4%'}), 500);
+
 
 	return {
 		all: table,

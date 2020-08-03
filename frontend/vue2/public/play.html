@@ -13,7 +13,8 @@
     <!--<script type="text/javascript" src="/textillate.js"></script> -->
 	<script type="text/javascript" src="/diff-match-patch.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>
-	
+    <link href="/select2.min.css" rel="stylesheet" />
+    <script src="/select2.min.js"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_SVG">
     </script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
@@ -166,11 +167,136 @@
 
         .slider.round:before {
           border-radius: 50%;
-        } 
+        }
+
+        .dialog {
+            display: none;
+            width: 60%;
+        }
+
+        .context-menu {
+          position: absolute;
+          z-index: 10;
+        }
+        .context-menu {
+          display: none;
+          position: absolute;
+          z-index: 10;
+        }
+
+        .context-menu--active {
+          display: block;
+        }
     </style>
+
+    <script>
+        window.addEventListener("keydown",function (e) {
+            if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+                e.preventDefault();
+                //Control F
+                $('.commands-select').select2('open');
+            }
+        })
+
+    </script>
+
+    <script>
+        function logItem(name, val, type, handlers) {
+            handlers = handlers || {}
+            window['globalVariableNames'][name] = val;
+            var li = $(`<li> <i class="actionable fas fa-trash"></i> ${name}: ${type} </li>`)
+            $(li).find("i").click(e => {
+                handlers.delete(name)
+                $(li).remove()
+            });
+            $('#item-variables').append(li)
+        }
+    </script>
+
+    <script src="/play.js"></script>
+    <link rel="stylesheet" href="/play.css">
+    <link rel="stylesheet" href="/fontawesome-all.css">
+
+    <script>
+
+    </script>
 </head>
 
 <body >
+    <div id="CMOGDAT-dialog" title="Enter required data" class="dialog">
+            <input placeholder="Ex: [1, 2], [2, 3]" name="data" value="[1,2,3]">
+            <button type="submit" onclick="createMatrix('#CMOGDAT-dialog')">OK</button>
+            <br> <br>
+            <input placeholder="Location on screen" value="400,80" name="location">
+    </div>
+
+    <div id="CAOGSD-dialog" title="Enter required data" class="dialog">
+        <input placeholder="Ex: 1, 2, 3" name="data" value="1,2,3">
+        <button type="submit" onclick="createArray('#CAOGSD-dialog')">OK</button>
+        <br> <br>
+        <input placeholder="Location on screen" value="400,80" name="location">
+    </div>
+
+    <div class="top-bar" style="width: 40%; margin-left: auto; margin-right: auto;">
+        <select class="commands-select" name="command" style="width: 100%;">
+            <option value="NULL"></option>
+            <option value="CMOGDAT">Create Matrix Of Given Data</option>
+            <option value="CMOGDIM">Create Matrix Of Given Dimension</option>
+            <option value="CAOGSD">Create Array Of Given Data</option>
+            <option value="CAOGSZ">Create Array Of Given Size</option>
+        </select>
+    </div>
+
+    <div style="position: fixed; right: 0; top: 10%;z-index: 3000;">
+        <ul id="item-variables">
+
+        </ul>
+    </div>
+
+    <nav id="edit-table-cell-toolbar" style="display: none; position: fixed; z-index: 3000; background: #e2dbdb; padding: 10px; ">
+        <ul class="" style="list-style: none;">
+            <li class="">
+                Value: <input type="text" name="value" onchange="">
+            </li>
+            <li class="">
+                BG-Color: <input type="color" name="background" onchange="">
+            </li>
+            <li class="">
+                FG-Color: <input type="color" name="color" onchange="">
+            </li>
+            <li class="">
+                <button onclick="$('#edit-table-cell-toolbar').hide()">Close</button>
+            </li>
+        </ul>
+    </nav>
+
+    <script>
+        // In your Javascript (external .js resource or <script> tag)
+        $(document).ready(function() {
+            $('.commands-select').select2();
+        });
+        $('.commands-select').on('select2:open', function (e) {
+            var data = e.params.data;
+            console.log(data);
+            window.commandSelectionIsGoingOn = true;
+        });
+
+        $('.commands-select').on('select2:close', function (e) {
+            var data = e.params.data;
+            console.log(data);
+            window.commandSelectionIsGoingOn = false;
+        });
+
+        $('.commands-select').on('select2:select', function (e) {
+            var data = e.params.data;
+            console.log(data);
+            $(`#${data.id}-dialog`).dialog({
+                width: 800,
+                height: 400,
+            })
+            window.commandSelectionIsGoingOn = false;
+        });
+    </script>
 	<canvas id="playerCanvas"></canvas>
     <canvas id="overlayCanvas" style="position: absolute;"></canvas>
 	<span id="recording-info" style="    margin-left: 42%;top: 0; position: fixed;"></span>
@@ -184,20 +310,7 @@
           return 'Are you sure you want to leave?';
         };
 
-            /*  $.ajax(`${API_HOST}/articleAccessories/${id}`).then(resp => {
-      //console.log(resp); //Content loaded
-      var speeches = resp.speechTexts
-      var animations = resp.animationScripts
-      console.log(speeches)
-      console.log(animations)
-         var playerCanvas = new fabric.Canvas('playerCanvas')
-         var _ = {}
-         var playerCanvasObjects = _;
-         var _pc = playerCanvas;
-      new timer(Object.keys(speeches).map(x => Number.parseInt(x)).max(), t => {
-            if(animations[t]) eval(animations[t]);
-         });
-    }) */
+
         window.pc = new fabric.Canvas('playerCanvas')
         window._ = {
             textboxes: []
@@ -210,454 +323,11 @@
         oc.setWidth(window.innerWidth)
         oc.setHeight(window.innerHeight)
 
-        function superimposeOverlayCanvas() {
-            var pos = $('#playerCanvas').position()
-            $('#overlayCanvas').css({
-                position: 'absolute',
-                top: pos.top,
-                left: pos.left,
-                width: $('#playerCanvas').width(),
-                height: $('#playerCanvas').height()
-            });
-        }
-
-
-        function showToolbar() {
-            $('#toolbar').show();
-        }
-
-        function hideToolbar() {
-            $('#toolbar').show();
-        }
         $('.canvas-container').css({
             position: 'absolute'
         });
         superimposeOverlayCanvas()
         moveToFront('pc')
-
-		function ArrayPlusDelay(array, delegate, delay) {
-		  var i = 0
-		  
-		   // seed first call and store interval (to clear later)
-		  var interval = setInterval(function() {
-				// each loop, call passed in function
-			  delegate(array[i]);
-			  
-				// increment, and if we're past array, clear interval
-			  if (i++ >= array.length - 1)
-				  clearInterval(interval);
-		  }, delay)
-		  
-		  return interval
-		}
-		
-        function changeCircleColor(c, objs) {
-            try {
-				var _objs = objs || pc.getActiveGroup()._objects	
-                _objs.forEach(o => o._objects[0].setFill(c))
-
-            } catch (e) {
-                try {
-                    pc.getActiveObject().setFill(c)
-                } catch (e) {
-                    console.log(e);
-                }
-            }
-			
-            pc.renderAll()
-        }
-
-        function flipConnectionMode() {
-            var connectionModeOn = window.connectionMode || false;
-
-            window.connectionMode = !connectionModeOn
-            if (window.connectionMode) $('#flipConnectionMode').css({
-                backgroundColor: 'blue'
-            })
-            else $('#flipConnectionMode').css({
-                backgroundColor: ''
-            })
-
-            window.firstOfConnection = null
-        }
-
-        function selectFirstOfConnection(e) {
-            window.firstOfConnection = pc.getActiveObject()
-        }
-
-        function makeConnection(e) {
-            if (window.firstOfConnection) {
-                connect(pc, firstOfConnection, pc.getActiveObject())
-                window.firstOfConnection = null
-            }
-        }
-
-        function getScript(id) {
-            $.ajax(`/api/${id}`).then(resp => {
-                console.log(resp)
-                window.jsToExecute = {
-                    lines: resp,
-                    index: 0
-                }
-            })
-        }
-        var id = window.location.hash.replace("#", "")
-        if (id) getScript(id)
-
-        function executeNextLine() {
-            if (window.jsToExecute) {
-                eval(window.jsToExecute.lines[window.jsToExecute.index])
-                window.jsToExecute.index = window.jsToExecute.index + 1
-            }
-        }
-
-        function zoomSelectedObject(isPlus) {
-            if (!pc.getActiveObject()) return;
-            var amount = 1.5
-
-            if (isPlus) {
-                var activeObject = pc.getActiveObject()
-                activeObject.scaleX = activeObject.scaleX * amount
-                activeObject.scaleY = activeObject.scaleY * amount
-
-            } else {
-                var activeObject = pc.getActiveObject()
-                activeObject.scaleX = activeObject.scaleX / amount
-                activeObject.scaleY = activeObject.scaleY / amount
-
-            }
-            activeObject.setCoords();
-            pc.renderAll()
-        }
-
-        function moveActiveObject(prop, amount) {
-            var activeObject = pc.getActiveObject()
-            activeObject[prop] = activeObject[prop] + amount
-            activeObject.setCoords();
-            pc.renderAll()
-        }
-
-        function deleteSelectedObjects() {
-            pc.remove(pc.getActiveObject())
-            if (pc.getActiveGroup()) {
-                pc.getActiveGroup()._objects.forEach(x => pc.remove(x))
-            }
-            pc.renderAll()
-        }
-
-        function Copy(canvas) {
-            // clone what are you copying since you
-            // may want copy and paste on different moment.
-            // and you do not want the changes happened
-            // later to reflect on the copy.
-            var target = canvas.getActiveObject() || canvas.getActiveGroup();
-            target.clone(function(cloned) {
-                _clipboard = cloned;
-            });
-			window.canPasteImageFromClipboard = false;
-        }
-
-        function Paste(canvas) {
-            if (!_clipboard) return;
-			
-			window.canPasteImageFromClipboard = true;
-            // clone again, so you can do multiple copies.
-            _clipboard.clone(function(clonedObj) {
-                canvas.discardActiveObject();
-                canvas.discardActiveGroup();
-
-                var options = {
-                    left: clonedObj.left + 10,
-                    top: clonedObj.top + 10,
-                    evented: true,
-                };
-
-                clonedObj.set(options);
-
-                if (clonedObj.type === 'activeSelection') {
-                    // active selection needs a reference to the canvas.
-                    clonedObj.canvas = canvas;
-                    clonedObj.forEachObject(function(obj) {
-                        canvas.add(obj);
-                        var tr = obj.calcTransformMatrix()
-                        options.left = obj.left + 10 + tr[4]
-                        options.top = obj.top + 10 + tr[5]
-                        obj.set(options)
-                        obj.setCoords();
-                    });
-
-                } else {
-                    canvas.add(clonedObj);
-                }
-                _clipboard.top += 10;
-                _clipboard.left += 10;
-                //canvas.setActiveObject(clonedObj);
-                canvas.renderAll();
-            });
-        }
-
-        function editSelectedObject() {
-            if (!pc.getActiveObject()) return;
-            var obj = pc.getActiveObject()
-
-            var p = prompt('Enter command')
-            if (!p || !p.split(":").length == 2) return
-
-            var command = p.split(":")[0]
-            var data = p.split(":")[1].trim()
-
-            if (!obj._objects || obj._objects.length < 2) return;
-
-            switch (command) {
-                case 'bg':
-                    obj._objects[0].set({
-                        fill: data
-                    })
-                    break
-                case 'fg':
-                    obj._objects[1].set({
-                        fill: data
-                    })
-                    break
-                case 'text':
-                    obj._objects[1].set({
-                        text: data
-                    })
-                    break
-				case 'anim':
-					highlightByZooming(obj, pc)
-					break
-				case 'stop'	:
-					stopAnimation(obj, pc)
-					break
-				case 'controls':
-					obj.hasControls = data === 'on' ? true: false
-					break;
-				case 'hide': 
-					
-					break;
-				case 'show': 
-					
-					break;
-				case 'rm': 
-					
-					break;
-            }
-            pc.renderAll();
-        }
-
-        function makeLine(coords) {
-            return new fabric.Line(coords, {
-                fill: 'red',
-                stroke: 'red',
-                strokeWidth: 2,
-                selectable: false
-            });
-        }
-
-        function makeSubtree(node, values, pc, opts) {
-            var options = opts || {
-                width: 150,
-                height: 50
-            };
-
-            node.treeConnection = node.treeConnection || {
-                incoming: {},
-                outgoing: {}
-            };
-
-            if (node.oCoords && node.oCoords.mb) {
-                var px = node.oCoords.mb.x,
-                    py = node.oCoords.mb.y;
-                node.treeConnection.outgoing = {
-                    lines: [],
-                    point: 'mb'
-                }
-
-                var mid = Math.ceil(values.length / 2)
-                if (values.length == 1) mid = 0;
-
-                var w = (options.width / 2) / values.length;
-
-                var x = px,
-                    y = py + options.height;
-
-                var addConnection = (x1, y1, x2, y2, text) => {
-                    var circ = textInEllipse(text, x2, y2, {}, {})
-                    pc.add(circ)
-                    var line = makeLine([x1, y1, circ.oCoords.mt.x, circ.oCoords.mt.y])
-                    pc.add(line)
-                    node.treeConnection.outgoing.lines.push(line)
-
-                    circ.treeConnection = {
-                        incoming: {
-                            lines: [line],
-                            point: 'mt'
-                        }
-                    }
-                }
-
-                addConnection(px, py, x, y, values[mid])
-
-                for (var i = mid - 1; i >= 0; i--) {
-                    x = x - w;
-                    addConnection(px, py, x, y, values[i])
-                }
-
-                x = px, y = py;
-
-                for (var i = mid + 1; i < values.length; i++) {
-                    x = x + w;
-                    addConnection(px, py, x, y, values[i])
-                }
-            }
-        }
-
-        function drawMathSymbols(text, canvas) {
-            matex(text, function(svg, width, height) {
-                // Here you have a data url for a svg file
-                // Draw using FabricJS:
-                fabric.Image.fromURL(svg, function(img) {
-                    img.height = height;
-                    img.width = width;
-                    img.left = matexInsertionPoint.left
-                    img.top = matexInsertionPoint.top
-                    canvas.add(img);
-                });
-            });
-        }
-
-        function onMakeTreeClick() {
-            if (!pc.getActiveObject()) {
-                alert('Select an object first');
-                return;
-            }
-            var p = prompt('Enter command')
-            if (!p) return;
-            makeSubtree(pc.getActiveObject(), p.split(','), pc)
-        }
-
-
-        function onRemoveTreeClick() {
-            if (!pc.getActiveObject()) {
-                alert('Select an object first');
-                return;
-            }
-            var obj = pc.getActiveObject()
-
-            if (obj.treeConnection && obj.treeConnection.outgoing) {
-                obj.treeConnection.outgoing.lines.forEach(l => {
-                    pc.remove(l);
-                })
-            }
-            obj.treeConnection = null
-        }
-
-        function arrowButton() {
-            if (!window.arrowButtonClicked) {
-                window.arrowButtonClicked = {}
-            }
-        }
-
-        function degroup(pc) {
-            var grp = pc.getActiveObject()
-            if (grp.type != 'group') return;
-            var items = grp.getObjects() || []
-            grp.destroy();
-            pc.remove(grp);
-            items.forEach(item => pc.add(item));
-            items.forEach(item => item.hasControls = false);
-        }
-
-        window.drawingStack = []
-        function undoDrawing(){
-            var last = oc.getObjects().pop()
-            oc.remove(last)
-            drawingStack.push(last)
-            oc.renderAll();
-        }
-        function redoDrawing(){
-            var last = drawingStack.pop()
-            oc.add(last)
-            oc.renderAll();
-        }
-		
-		function moveToFront(whichOne){
-			switch(whichOne){
-				case 'pc':
-					$('.canvas-container').css({ zIndex: -2000 })
-					$('#textillateContainer').css({ zIndex: -2000 })
-					$($('.canvas-container')[0]).css({ zIndex: 2000 })
-					window.layerOnFront = 'pc'
-					break;
-				case 'oc':
-					$('.canvas-container').css({ zIndex: -2000 })
-					$('#textillateContainer').css({ zIndex: -2000 })
-					$($('.canvas-container')[1]).css({ zIndex: 2000 })
-					window.layerOnFront = 'oc'
-					break;
-				case 'txt':
-					$('.canvas-container').css({ zIndex: -2000 })
-					$('#textillateContainer').css({ zIndex: 2000 })
-					window.layerOnFront = 'txt'
-					break;
-			}
-		}//end moveToFront
-		
-		//play from files
-		var openFile = function(event) {
-			var input = event.target;
-
-			var readFile = (filename) => {
-				if(!filename) return "{}"
-				var promise = new Promise(function(resolve, reject) {
-					var reader = new FileReader();
-					reader.onload = function(){
-					  var text = reader.result;
-					  console.log(reader.result.substring(0, 200));
-					  resolve(text)
-					};
-					reader.readAsText(filename);
-				});
-				
-				return promise
-			} //
-			
-			var len = input.files.length
-			
-			var getFile = nm => {
-				var x = range(0,len).find(i => input.files[i].name.indexOf(nm) > 0);
-				return input.files[x]
-			}
-			
-			Promise.all([
-				readFile(getFile('_pc')),
-				readFile(getFile('_oc')),
-				readFile(getFile('_txt')),
-			]).then(data => {
-				var pcData = JSON.parse(data[0])
-				var ocData = JSON.parse(data[1])
-				var txtData = JSON.parse(data[2])
-				
-				var frames = obj => Object.keys(obj).map(x => Number.parseInt(x)).sort((a,b)=> a-b);
-				
-				playRecording(40, {
-					pc: [pcData, frames(pcData)],
-					oc: [ocData, frames(ocData)],
-					txt: [txtData, frames(txtData)]
-				});
-				stopPlayback = true;
-				
-				moveToFront('pc')
-				$('#toolbar1-buttons').hide()
-				$('#drawing-mode-options').hide()
-				$("#recordingFileChooserDialog" ).dialog('destroy')
-				
-			}).finally(data => {
-				console.log(data)
-			});
-			
-		  }; //end openFile
     </script>
  
     <div style="display: inline-block;margin-left: 10px;position: absolute;left: 0;top: 8px;z-index: 1000000;height: 0;">
@@ -920,39 +590,6 @@
             $('#toolbar').draggable();
         });
 
-        function saveCanvas() {
-            var idx = window.savePoint || 0;
-
-            localStorage.setItem('pc_' + idx, JSON.stringify(pc.toDatalessJSON()))
-            localStorage.setItem('oc_' + idx, JSON.stringify(oc.toDatalessJSON()))
-
-        }
-
-        function restoreCanvas() {
-            var idx = Number.parseInt($('#savePoints').val())
-            saveCanvas()
-            window.savePoint = idx;
-            pc.clear();
-            oc.clear();
-            var data = JSON.parse(localStorage.getItem('pc_' + idx))
-            pc.loadFromDatalessJSON(data)
-
-            pc.renderAll();
-            var data1 = JSON.parse(localStorage.getItem('oc_' + idx))
-            oc.loadFromDatalessJSON(data1)
-            oc.renderAll();
-        }
-
-        function newCanvas() {
-            saveCanvas()
-            var idx = $('#savePoints option').length
-            pc.clear();
-            oc.clear();
-            $('#savePoints').append('<option>' + idx + '</option>')
-            $('#savePoints').val(idx + '')
-
-            window.savePoint = idx;
-        }
 
 
         $('#create-text').click(e => {
@@ -1042,6 +679,9 @@
 
             }
         });
+
+        $('#drawing-mode-options').hide();
+        $('#toolbar1-buttons').hide();
 
         oc.on('mouse:up', function(e) {
             $('#drawing-mode-options').hide();
@@ -1137,6 +777,10 @@
             'w': 'whiten'
         }
         $(document).keyup(e => {
+            if($('.commands-select').is(":focus") || window.commandSelectionIsGoingOn){
+                console.log('select is in focus. returning.')
+                return;
+            }
 			if(e.keyCode == 32 && e.target == document.body) {
 				e.preventDefault();
 			}
@@ -1160,7 +804,7 @@
                 case 37: //left
                     if(pc.getActiveObject())moveActiveObject('left', -10)
 					else {
-						if(playingMode){
+						if(window.playingMode){
 							stopPlayback = true
 							playerTimer -= 10
 							if(playerTimer < playerTimerStart) playerTimer = playerTimerStart;
@@ -1177,7 +821,7 @@
                 case 39: //right
                     if(pc.getActiveObject())moveActiveObject('left', 10)
 					else {
-						if(playingMode){
+						if(window.playingMode){
 							stopPlayback = true
 							playerTimer += 10
 							if(playerTimer > playerTimerTotal) playerTimer = playerTimerTotal;
