@@ -1,0 +1,8 @@
+.data td.highlighted {
+    background-color: cyan;
+}
+
+.actionable {
+    cursor: pointer;
+    margin-right: 5px;
+}
