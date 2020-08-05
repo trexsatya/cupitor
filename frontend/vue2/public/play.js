@@ -72,8 +72,18 @@ function createMatrix(sel) {
         size = eval("[" + size + "]")
     } catch(e) {
     }
-    var table = appendTableInto(tableData, $('#textillateContainer'),
-                    { ytitle: ytitle, xtitle: xtitle, xheaders: xheaders, yheaders: yheaders, width: size[0], height: size[1]})
+
+    var tableOpts = { ytitle: ytitle, xtitle: xtitle, xheaders: xheaders, yheaders: yheaders, width: size[0], height: size[1]}
+
+    if(window.theme == 'black') {
+        tableOpts.backgroundColor = 'black'
+        tableOpts.color = 'white'
+    } else {
+        tableOpts.backgroundColor = 'white'
+        tableOpts.color = 'black'
+    }
+
+    var table = appendTableInto(tableData, $('#textillateContainer'), tableOpts)
 
     table.all.find('table.data td').each((i,el) => {
         contextMenuListener(el);
@@ -93,7 +103,7 @@ function createMatrix(sel) {
 
     window.globalVariableNames['matrices'] += 1
     var varName = "M"+ window.globalVariableNames['matrices']
-    logItem(varName, table, 'Table', {delete: () => globalVariableNames[varName].remove() })
+    logItem(varName, table, 'Table', {delete: () => globalVariableNames[varName].all.remove() })
 
     $(sel).dialog('close');
     moveToFront('txt')
@@ -288,12 +298,18 @@ function moveActiveObject(prop, amount) {
 }
 
 function deleteSelectedObjects() {
-    if(!pc.getActiveObject()) return;
-    pc.remove(pc.getActiveObject())
+    if(pc.getActiveObject())
+        pc.remove(pc.getActiveObject())
     if (pc.getActiveGroup()) {
         pc.getActiveGroup()._objects.forEach(x => pc.remove(x))
     }
     pc.renderAll()
+}
+
+function applyBlackTheme(){
+    $("#textillateContainer").css({ backgroundColor: 'black', color: 'white'});
+    window.theme = 'black';
+
 }
 
 function Copy(canvas) {

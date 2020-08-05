@@ -716,7 +716,7 @@ function appendTableInto(table, target, opts){
 
 	      ${range(0, table.length).map(row =>
 	      		'<tr class="data"> <th style="text-align: center" class="yheader"> <span class="item">'+ options.yheaders[row] +'</span></th>'
-	      			+table[row].map(y => `<td style="" > <span class="item"> ${y} </span></td>`).join('') +'</tr>'
+	      			+ table[row].map((y,col) => `<td style="" data-row="${row}" data-column="${col}" data-value="${y}"> <span class="item"> ${y} </span></td>`).join('') +'</tr>'
 	      ).join('')}
     </table>
     </td>
