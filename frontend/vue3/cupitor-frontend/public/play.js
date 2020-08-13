@@ -1,40 +1,269 @@
 window.globalVariableNames = {
     "matrices": 0,
-    "arrays": 0
+    "arrays": 0,
+    "texts": 0
 }
 
-function contextMenuListener(el) {
+function record() {
+  $("#btnStart").click()
+}
+
+function pause() {
+  $("#btnPause").click()
+}
+
+function resume() {
+  $("#btnResume").click()
+}
+
+function stop() {
+  $("#btnStop").click()
+}
+
+function float(x){
+  return Number.parseFloat(x)
+}
+
+function range(...arr){
+  if(arr.length == 1){
+    return [...Array(arr[0]).keys()]
+  }
+  return [...Array(arr[1] - arr[0]).keys()].map(x => x + arr[0]);
+}
+
+
+
+function typeQuote(text, theme) {
+    if(!theme) theme = 'black'
+
+    if(theme == 'black') {
+        $('#textillateContainer').css({ backgroundColor: '#1a1a1a'})
+        $('#cinemaText').css({ color: 'white'})
+    }
+
+    type(text, '#cinemaText')
+}
+
+function resetTextillateContainer() {
+    $('#textillateContainer').css({ backgroundColor: 'white'})
+    $('#cinemaText').css({ color: 'black'})
+    $('#cinemaText').html('')
+}
+
+function type(strings, elSelector, opts) {
+  var options = {
+    strings: [strings].flat(),
+    typeSpeed: 40
+  };
+
+  options = Object.assign({}, options, opts);
+
+  var typed = new Typed(elSelector, options);
+
+  return typed;
+}
+
+//Accessor for matrix
+function at(matrix, i,j) { return $(matrix.all.find(`table.data td[data-row='${i}']`)[j]); }
+
+window.animationScriptFunction = null
+/**
+* taskRunner => a function that will use data items.
+* data => array of data items or array of functions. If data item is a function it will be used as taskRunner for that interval.
+*     taskRunner can return false to stop the further invocations. taskRunner can return time delay in seconds before next invocation occurs.
+*     taskRunner can return 'WAIT_FOR_SIGNAL' which means that next invocation will occur only when signal is received.
+*/
+function schedule(data, timeInSeconds, taskRunner) {
+  data = data.map(x => x); //clone
+  let fn = null;
+  fn = (x) => setTimeout(() => {
+     let first = data.splice(0,1);
+     if(first.length) {
+       let task = typeof(first[0]) == 'function' ? first[0] : () => taskRunner(first[0])
+       let result = task()
+
+       if(result !== false) {
+          let delay = timeInSeconds*1000
+          if(typeof(result) == 'number') delay = result * 1000
+
+          if(result ===  -1) {
+            if(window.animationScriptFunction) {
+              console.log('There is already a function for animation script!!!')
+            } else {
+              window.animationScriptFunction = () => fn(delay) //Store function
+              console.log("Waiting for signal. Call resumeAnimationScript()")
+              $('#btnResumeAnimation').show();
+            }
+          } else {
+            fn(delay)
+          }
+       } else {
+          console.log("Ended because function returned false!")
+       }
+     }
+  }, x);
+  fn(0);
+}
+
+function resumeAnimationScript() {
+  if(!window.animationScriptFunction) {
+    console.log("No animation function!!!")
+    return
+  }
+  window.animationScriptFunction()
+  window.animationScriptFunction = null
+  $('#btnResumeAnimation').hide();
+}
+
+function scanMatrix(name) {
+  let _scann = []
+  for(var i=1; i <= 4; i++) {
+    for(var j=1; j <= 3; j++) {
+      _scann.push([i,j])
+    }
+  }
+  schedule(_scann, 0.5, (xy) => { globalVariableNames[name].at(xy[0], xy[1]).click(); })
+}
+
+
+function createTextBox(text, css) {
+  css = css || {}
+  css.position = 'absolute'
+  
+  let item = $(`<div class="text"> ${text}</div>`).css(css)
+
+  txt.append(item)
+  $(item).draggable()
+
+  return item;
+}
+
+function bringInText(text, opts) {
+  opts = Object.assign({}, {
+    mode: 'down-up',
+    from: {
+      top: 800,
+      left: 600
+    },
+    to: {
+
+    }
+  }, opts || {})
+
+  let css = { fontSize: 'x-large', color: 'blue'}
+
+  if(opts.mode == 'down-up') {
+    css = Object.assign(css, {left: opts.from.left, top: opts.from.top, position: 'fixed'})
+  }
+
+  if(opts.mode == 'right-left') {
+    css = Object.assign(css, {left: opts.from.left, top: opts.from.top, position: 'fixed' })
+  }
+
+  var item = createTextBox(text, css)
+
+  $(item).velocity(opts.to);
+
+  window.globalVariableNames['texts'] += 1
+  var varName = "T"+ window.globalVariableNames['texts']
+  logItem(varName, item, 'Text', {delete: (nm) => {
+      globalVariableNames[nm].remove()
+  }})
+
+  return item;
+}
+
+function highlightByChangingColor(el) {
+
+}
+
+function highlightByGradientColor(el){
+  $(el).css({ backgroundImage: 'radial-gradient(#ece8e8, green, blue)' })
+}
+
+/**
+ * type => type of change, el => target element
+*/
+function changeTableCell(type, el, value, dataCells) {
+   let applyChange = (target) => {
+     if(type == 'data') {
+       target.find('span.item').html(value)
+     }
+     if(type == 'css') {
+       target.css(value)
+     }
+   }
+
+   applyChange(el)
+
+   //apply same change to all selected elements if there are more than one!
+   if(dataCells) {
+     let highlightedEls = dataCells.filter((i,x) => $(x).hasClass("highlighted"))
+     if(highlightedEls.length > 1) {
+         highlightedEls.each((i,e) => {
+             applyChange($(e))
+         })
+     }
+   }
+   //..................
+}
+
+function resetTableCell(el) {
+  let v = $(el).data("value")
+  let change = changeTableCell;
+  change('css', $(el), { color: 'black', backgroundColor: 'white', backgroundImage: 'none'})
+  change('data', $(el), v);
+}
+
+function resetMatrix(name) {
+  var dataCells = globalVariableNames[name].all.find('.data td');
+  dataCells.each((i, e) => {
+    resetTableCell($(e));
+  });
+}
+
+function contextMenuListener(el, dataCells) {
     el.addEventListener( "contextmenu", function(e) {
-      console.log(e, el);
+//      console.log(e, el);
       e.preventDefault()
+
+      let change = (x,y,z) => changeTableCell(x,y,z, dataCells);
 
       $('#edit-table-cell-toolbar').show().css({ left: e.x, top: e.y});
       $('#edit-table-cell-toolbar input[name="value"]').unbind('change').on('change',e => {
-        console.log(e.target.value)
-        $(el).find('span.item').html(e.target.value)
+//        console.log(e.target.value)
+          change('data', $(el), e.target.value);
       });
       $('#edit-table-cell-toolbar input[name="value"]').unbind('focusout').on('focusout',e => {
-          console.log(e.target.value)
-          $(el).find('span.item').html(e.target.value)
+//          console.log(e.target.value)
+          change('data', $(el), e.target.value);
       });
 
       $('#edit-table-cell-toolbar input[name="background"]').unbind('change').change(e => {
-        console.log(e.target.value)
-        $(el).css({ backgroundColor: e.target.value})
+//        console.log(e.target.value)
+          change('css', $(el), { backgroundColor: e.target.value})
       });
       $('#edit-table-cell-toolbar input[name="color"]').unbind('change').change(e => {
-        console.log(e.target.value)
-        $(el).css({ color: e.target.value})
+//        console.log(e.target.value)
+          change('css', $(el), { color: e.target.value})
       });
+      $('#edit-table-cell-toolbar button.reset').unbind('click').click(e => {
+          resetTableCell($(el))
+       });
+
     });
 }
 
 function addHighlightCapability(el, others){
     $(el).click(e => {
+       if(!e.ctrlKey)
         others.each((i,other) => {
             $(other).removeClass('highlighted')
         });
-        $(el).addClass('highlighted');
+        if(e.ctrlKey && $(el).hasClass('highlighted'))
+          $(el).removeClass('highlighted');
+        else
+          $(el).addClass('highlighted');
     });
 }
 
@@ -42,77 +271,93 @@ function createMatrix(sel) {
 
     var data = $(sel).find('input[name="data"]').val()
     var location = $(sel).find('input[name="location"]').val()
-    var size = $(sel).find('input[name="size"]').val() || '600,400'
+    var size = $(sel).find('input[name="size"]').val()
 
-    var xtitle = $(sel).find('input[name="xtitle"]').val() || 'Columns'
-    var ytitle = $(sel).find('input[name="ytitle"]').val() || 'Rows'
-    var _xheaders = $(sel).find('input[name="xheaders"]').val() || 'indices'
-    var _yheaders = $(sel).find('input[name="yheaders"]').val() || 'indices'
+    var xtitle = $(sel).find('input[name="xtitle"]').val()
+    var ytitle = $(sel).find('input[name="ytitle"]').val()
+    var _xheaders = $(sel).find('input[name="xheaders"]').val()
+    var _yheaders = $(sel).find('input[name="yheaders"]').val()
 
-    var xheaders = null, yheaders = null
+    _createMatrix({sel, data, location, size, xtitle, ytitle, _xheaders, _yheaders})
+}
 
-    var tableData = []
-    try {
-        var _data = eval("["+ data + "]")
-        //TODO: Check data is in correct format
-        tableData = _data;
-        if(_xheaders === 'indices') {
-            xheaders = [...Array(_data[0].length).keys()];
-        } else {
-            xheaders = eval("[" + _xheaders + "]")
-        }
+function _createMatrix(vals){
+  let data = vals.data, location = vals.location || '160,20',
+      size = vals.size || '600,400',
+      sel = vals.sel,
+      xtitle = vals.xtitle || 'Columns',
+      ytitle = vals.ytitle || 'Rows',
+      _xheaders = vals._xheaders || 'indices',
+      _yheaders = vals._yheaders || 'indices';
 
-        if(_yheaders === 'indices') {
-            yheaders = [...Array(_data.length).keys()];
-            console.log(yheaders)
-        } else {
-            yheaders = eval("[" + _yheaders + "]")
-        }
+  var xheaders = null, yheaders = null
 
-        size = eval("[" + size + "]")
-    } catch(e) {
-    }
+      var tableData = []
+      try {
+          var _data = eval("["+ data + "]")
+          //TODO: Check data is in correct format
+          tableData = _data;
+          if(_xheaders === 'indices') {
+              xheaders = [...Array(_data[0].length).keys()];
+          } else {
+              xheaders = eval("[" + _xheaders + "]")
+          }
 
-    var tableOpts = { ytitle: ytitle, xtitle: xtitle, xheaders: xheaders, yheaders: yheaders, width: size[0], height: size[1]}
+          if(_yheaders === 'indices') {
+              yheaders = [...Array(_data.length).keys()];
+              console.log(yheaders)
+          } else {
+              yheaders = eval("[" + _yheaders + "]")
+          }
 
-    if(window.theme == 'black') {
-        tableOpts.backgroundColor = 'black'
-        tableOpts.color = 'white'
-    } else {
-        tableOpts.backgroundColor = 'white'
-        tableOpts.color = 'black'
-    }
+          size = eval("[" + size + "]")
+          location = eval("[" + location + "]")
+      } catch(e) {
+      }
 
-    var table = appendTableInto(tableData, $('#textillateContainer'), tableOpts)
+      var tableOpts = { ytitle: ytitle, xtitle: xtitle, xheaders: xheaders, yheaders: yheaders,
+                        width: size[0], height: size[1],
+                        top: location[0], left: location[1]
+                      }
 
-    table.all.find('table.data td').each((i,el) => {
-        contextMenuListener(el);
-    });
+      if(window.theme == 'black') {
+          tableOpts.backgroundColor = 'black'
+          tableOpts.color = 'white'
+      } else {
+          tableOpts.backgroundColor = 'white'
+          tableOpts.color = 'black'
+      }
 
-    var dataCells = table.all.find('.data td')
+      var table = appendTableInto(tableData, $('#textillateContainer'), tableOpts)
 
-    dataCells.each((i,el) => {
-        addHighlightCapability(el, dataCells)
-    });
+      var dataCells = table.all.find('.data td')
 
-    table.all.find("th:nth(0)").click(e => {
-        dataCells.each((i, td) => {
-             $(td).removeClass('highlighted')
-        });
-    })
+      table.all.find('table.data td').each((i,el) => {
+          contextMenuListener(el, dataCells);
+      });
 
-    if(_xheaders == 'indices'){
-        $(table.all.find('table tr')[0]).css({
-            height: 40
-        })
-    }
+      dataCells.each((i,el) => {
+          addHighlightCapability(el, dataCells)
+      });
 
-    window.globalVariableNames['matrices'] += 1
-    var varName = "M"+ window.globalVariableNames['matrices']
-    logItem(varName, table, 'Table', {delete: () => globalVariableNames[varName].all.remove() })
+      table.all.find("th:nth(0)").click(e => {
+          dataCells.each((i, td) => {
+               $(td).removeClass('highlighted')
+          });
+      })
 
-    $(sel).dialog('close');
-    moveToFront('txt')
+      if(_xheaders == 'indices'){
+          $(table.all.find('table tr')[0]).css({
+              height: 40
+          })
+      }
+
+      window.globalVariableNames['matrices'] += 1
+      var varName = "M"+ window.globalVariableNames['matrices']
+      logItem(varName, table, 'Table', {delete: () => globalVariableNames[varName].all.remove() })
+
+      $(sel).dialog('close');
+      moveToFront('txt')
 }
 
 function createArray(sel) {
@@ -163,11 +408,11 @@ function createArray(sel) {
 
     var table = appendTableInto(tableData, $('#textillateContainer'), tableOpts)
 
-    table.all.find('table.data td').each((i,el) => {
-        contextMenuListener(el);
-    });
-
     var dataCells = table.all.find('.data td')
+
+    table.all.find('table.data td').each((i,el) => {
+        contextMenuListener(el, dataCells);
+    });
 
     dataCells.each((i,el) => {
         addHighlightCapability(el, dataCells)
@@ -334,6 +579,8 @@ function Copy(canvas) {
     // and you do not want the changes happened
     // later to reflect on the copy.
     var target = canvas.getActiveObject() || canvas.getActiveGroup();
+    if(!target) return;
+
     target.clone(function(cloned) {
         _clipboard = cloned;
     });
@@ -341,7 +588,7 @@ function Copy(canvas) {
 }
 
 function Paste(canvas) {
-    if (!_clipboard) return;
+    if (!window._clipboard) return;
 
     window.canPasteImageFromClipboard = true;
     // clone again, so you can do multiple copies.
@@ -1149,7 +1396,7 @@ function handleFileDialogButtons(src) {
 		window.canPasteImageFromClipboard = true;
 		document.onpaste = function (event) {
 
-		  console.log(event)
+//		  console.log(event)
 		  // use event.originalEvent.clipboard for newer chrome versions
 		  var items = (event.clipboardData  || event.originalEvent.clipboardData).items;
 		  console.log(JSON.stringify(items)); // will give you the mime types
