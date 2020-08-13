@@ -31,6 +31,7 @@ function contextMenuListener(el) {
 
 function addHighlightCapability(el, others){
     $(el).click(e => {
+        if(!e.ctrlKey)
         others.each((i,other) => {
             $(other).removeClass('highlighted')
         });

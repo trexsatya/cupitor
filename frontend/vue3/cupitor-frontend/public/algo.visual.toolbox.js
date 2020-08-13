@@ -24,17 +24,17 @@ fabric.LineArrow = fabric.util.createClass(fabric.Line, {
     var xDiff = this.x2 - this.x1;
     var yDiff = this.y2 - this.y1;
     var angle = Math.atan2(this.y2 - this.y1, this.x2 - this.x1) * 180 / Math.PI;
-    
+
 	ctx.translate(this.x2,this.y2)
-	
+
     //ctx.rotate(angle);
     ctx.beginPath();
     //move 10px in front of line to start the arrow so it does not have the square line end showing in front (0,0)
     //ctx.moveTo(10, 0);
-	
+
 	ctx.lineTo(10*Math.cos(angle), 10*Math.sin(angle))
 	ctx.translate(this.x2,this.y2)
-	
+
     ctx.lineTo(-10*Math.cos(angle), -10*Math.sin(angle))
     ctx.closePath();
     ctx.fillStyle = this.stroke;
@@ -131,6 +131,14 @@ var Arrow = (function() {
   return Arrow;
 }());
 
+function changeText(obj, data) {
+  if(!obj) return
+  obj._objects[1].set({
+      text: data
+  });
+
+  if(pc) pc.renderAll()
+}
 
 function textbox(opts){
 	var opts = combined({ top: 100, left: 400, angle: 0, color: 'blue', text: '', width: 300 }, opts);
@@ -255,7 +263,7 @@ function arrow(x1,y1,x2,y2, opts){
 		originX: 'center',
 		originY: 'center'
 	  });
-  
+
 	var slope =  Math.atan2(y2- y1, x2- x1)*180/Math.PI;
 	tri.rotate(90+slope);
 	var line = new fabric.Line([ x1,y1,x2,y2 ], { stroke: options.stroke, strokeWidth: options.strokeWidth})
@@ -562,7 +570,7 @@ function showArray(items,x,y,canvas, opts){
 	var arr = new arrayOfCircledTextsAt(x,y,canvas, opts)
 	items.forEach(item => arr.add( item+''))
 	arr.normalize()
-	
+
 	window.itemRecordCounter['A'] = window.itemRecordCounter['A']
 	window.itemRecord['_AR_'+ window.itemRecordCounter['A']] = arr;
 	return arr
@@ -673,6 +681,9 @@ function appendTableInto(table, target, opts){
     -o-transform: rotate(90deg);
     transform: rotate(90deg);
     color: #8888c1;
+    padding: 0;
+    margin: 0;
+    width: 53px;
 	}
 	.verticalTableHeader p {
 	    margin:0 -100% ;
@@ -696,11 +707,10 @@ function appendTableInto(table, target, opts){
 	}
 
 
-	var tableHtml = `<table style="position: relative">
-
-  <tr> <td> </td>
-	  <td>
-	  	<tr width="100%" style="color: blue;">
+	var tableHtml = `<table style="position: absolute; " class="main-container">
+  <tr>
+    <td>
+	  	<tr width="100%" style="color: blue; height: 20px;">
 	      	<td></td>
 	        <td colspan="${table[0].length}" style="padding: 5px; text-align: center" >
 	        	${options.xtitle}
@@ -713,7 +723,7 @@ function appendTableInto(table, target, opts){
  	<td class="verticalTableHeader">
  		<p>
 	     ${options.ytitle}
-	     </p>
+	  </p>
  	</td>
 
     <td>
@@ -737,11 +747,15 @@ function appendTableInto(table, target, opts){
 	$(target).append(table)
 
 	table.find('table').css({ backgroundColor: opts.backgroundColor, color: opts.color })
-	table.css({ backgroundColor: opts.backgroundColor, color: opts.color })
+	table.css({ backgroundColor: opts.backgroundColor, color: opts.color, width: opts.width, height: opts.height, position: 'absolute',
+            left: opts.left,
+            top: opts.top })
 
 	table.draggable()
 	table.resizable();
-	
+
+//  $(table).find("tr:nth(1)").remove()
+
 	$(function() {
 	  var thHeight = table.find("th:first").height();
 	  table.find("th").resizable({
@@ -941,7 +955,7 @@ function connect(canvas, it, other, opts){
 	} else {
 		x1 = midx1; x2 = midx2;
 	}
-	
+
 	if(other.top > it.top + it.height){
 		y1 = it.top + it.height; y2 = other.top;
 	} else if(other.top + other.height < it.top) {
@@ -949,7 +963,7 @@ function connect(canvas, it, other, opts){
 	} else {
 		y1 = midy1; y2 = midy2;
 	}
-	
+
 	var line = new fabric.LineArrow([x1, y1, x2, y2], {
       strokeWidth: 2,
       fill: 'red',
@@ -957,7 +971,7 @@ function connect(canvas, it, other, opts){
       originX: 'center',
       originY: 'center'
     });
-	
+
 	canvas.add(line)
 
 	return line
@@ -1019,30 +1033,30 @@ function matex(text, callback) {
 
 var highlightByZooming = function(object, canvas, opts){
 	var me = object.externalData || {}
-	
+
 	me.stopAnimation = false;
 
 	var fn = null;
-	
+
 	var originalZoomY = object.zoomY
 	var originalZoomX = object.zoomX
 	me.originalProps = me.originalProps || {}
 	me.originalProps.zoomX = originalZoomX
 	me.originalProps.zoomY = originalZoomY
-	
+
 	var range = (x) => [x*2, 2*x/3] //zoomout, zoomin
-	
+
 	var zoomX = range(originalZoomX)
 	var zoomY = range(originalZoomY)
-	
+
 	var timer = 0;
 	fn = (prop, values, opts) => {
 		opts = opts || {}
-		object.animate(prop, values[timer], Object.assign({}, 
+		object.animate(prop, values[timer], Object.assign({},
 												{
 												  duration: 1000,
 												  onChange: canvas.renderAll.bind(canvas),
-												  
+
 												  abort: () => !object || me.stopAnimation
 												},
 												opts || {},
@@ -1051,7 +1065,7 @@ var highlightByZooming = function(object, canvas, opts){
 												}
 												)
 						);
-		
+
 	}
 
 	me.animating = true;
@@ -1067,15 +1081,15 @@ var highlightByZooming = function(object, canvas, opts){
 }
 
 function stopAnimation(object, canvas){
-	
+
 	if(object.externalData) {
 		var me = object.externalData
 		me.stopAnimation = true;
 		if(!me.animating) return null;
-		
+
 		if(me.originalProps.zoomX)object.zoomX = me.originalProps.zoomX
 		if(me.originalProps.zoomY)object.zoomY = me.originalProps.zoomY
-		
+
 		canvas.renderAll()
 		me.animating = false;
 		return me;

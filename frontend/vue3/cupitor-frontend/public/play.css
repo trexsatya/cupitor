@@ -1,11 +1,20 @@
+table.main-container tr:nth-of-type(1) {
+    height: 0px;
+}
+
+#horizRuler, #vertRuler{
+     width:100%;
+}
+
 #cinemaText {
     margin-left: auto;
     width: 80%;
     margin-right: auto;
-    margin-top: 10%;
-    font-size: xx-large;
+    margin-top: 21%;
+    font-size: 41;
     font-weight: bold;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.04em;
+    line-height: 1.8;
 }
 
 .data td.highlighted::before {
@@ -17,6 +26,26 @@
     top: 0;
     left: 0;
     opacity: 0.5;
+}
+
+.data td.highlighted.slidedDown::before {
+    top: 100%;
+    transition: all .5s ease-in-out;
+}
+
+.data td.highlighted.slidedUp::before {
+    top: -100%;
+    transition: all .5s ease-in-out;
+}
+
+.data td.highlighted.slidedRight::before {
+    left: 100%;
+    transition: all .5s ease-in-out;
+}
+
+.data td.highlighted.slidedLeft::before {
+    left: -100%;
+    transition: all .5s ease-in-out;
 }
 
 .data td {
