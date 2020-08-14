@@ -1,25 +1,21 @@
 
 
 function showTree(_data, id, opts) {
-  var options = opts || {}
+  var options = Object.assign({}, {radius: 20, rootInnerText: ' '}, opts)
 
   // ### DATA MODEL START
 
   var data = _data || {
     type: 'action',
-    name: '1',
+    name: 'root',
     attributes: [],
-    innerText: '0',
-    children: [{
-      type: 'children',
-      name: 'satya',
-      innerText: '1',
-      // attributes: [{
-      //     'source-type-property-value': 'streetlight'
-      // }],
-      children: []
-    }]
+    innerText: options.rootInnerText,
+    children: []
   };
+
+  let idToNodeMap = {
+
+  }
 
   // ### DATA MODEL END
 
@@ -56,6 +52,8 @@ function showTree(_data, id, opts) {
   root.x0 = width / 2;
   root.y0 = 0;
 
+  idToNodeMap.root = root;
+
   update(root);
 
   var selected = null;
@@ -69,30 +67,42 @@ function showTree(_data, id, opts) {
   $("#"+id).prepend(addBtn);
   $("#"+id).prepend(removeBtn);
 
-  var onAdd= function() {
-    console.log(selected);
+  var onAdd= function(node, opts) {
+    let options = Object.assign({}, {name: Date.now()}, opts);
+
+    node = node || selected
+
+    console.log(node);
+
     //creates New OBJECT
     var newNodeObj = {
       type: 'resource-delete',
-      name: new Date().getTime(),
+      name: options.name,
+      innerText: options.innerText,
+      pathText: options.pathText,
+      color: options.color,
+      textColor: options.textColor,
       attributes: [],
       children: []
     };
     //Creates new Node 
     var newNode = d3.hierarchy(newNodeObj);
-    newNode.depth = selected.depth + 1; 
-    newNode.height = selected.height - 1;
-    newNode.parent = selected; 
-    newNode.id = Date.now();
+    newNode.depth = node.depth + 1; 
+    newNode.height = node.height - 1;
+    newNode.parent = node; 
+    newNode.id = options.name + "1";
     
-    if(!selected.children){
-      selected.children = [];
-      selected.data.children = [];
+    if(!node.children){
+      node.children = [];
+      node.data.children = [];
     }
-    selected.children.push(newNode);
-    selected.data.children.push(newNode.data);
+    node.children.push(newNode);
+    node.data.children.push(newNode.data);
     
-    update(selected);
+    update(node);
+
+    idToNodeMap[options.name] = newNode;
+    return options.name;
   };
 
   var onRemove = function() {
@@ -101,6 +111,11 @@ function showTree(_data, id, opts) {
 
   addBtn.click(onAdd)
   removeBtn.click(onRemove)
+
+  if(!options.dynamic) {
+    addBtn.hide();
+    removeBtn.hide();
+  }
 
   function update(source) {
 
@@ -209,23 +224,27 @@ function showTree(_data, id, opts) {
       attr("transform", function(d) {
         return "translate(" + source.x0 + "," + source.y0 + ")";
       }).
-      on('click', options.dynamic ? enableModification : toggleChildren);
+      on('click', options.dynamic ? enableModification : toggleChildren)
+      ;
 
+      nodeEnter.on('dblclick', d => {
+        console.log(nodeEnter)
+      })
 
 
     // Add Circle for the nodes
     nodeEnter.append('circle').
       attr('class', 'node').
-      attr('r', 25).
+      attr('r', options.radius || 20).
       style("fill", function(d) {
-          return "#0e4677";
+          return d.data.color || "#0e4677";
       });
 
      nodeEnter.append("text")
       // .attr("y", function (d) {
       //     return d.children || d._children ? -18 : 18;
       // })
-      .attr("stroke", "white")
+      .attr("stroke", d => d.data.textColor || "white")
       // .attr("y", "50%")
       .attr("stroke-width", "1px")
       .attr("alignment-baseline", "central")
@@ -236,6 +255,39 @@ function showTree(_data, id, opts) {
       })
       .style("fill-opacity", 1e-6);
    
+    nodeEnter.append("text")
+      .attr('class', 'path-text')
+      // .attr("y", function (d) {
+      //     return d.children || d._children ? -18 : 18;
+      // })
+      .attr("stroke", "black")
+      // .attr("y", "50%")
+      // .attr("stroke-width", "1px")
+      // .attr("alignment-baseline", "central")
+      .text(function (d) { 
+        return d.data.pathText || '' 
+      })
+      .style("fill-opacity", 1e-6)
+      .style("transform", (d) => {
+        if(!d.parent) return '';
+
+        let x1 = d.parent.x, y1 = d.parent.y, x2 = d.x , y2 = d.y;
+
+        let midX = (x1+x2)/2, midY = (y1+y2) / 2;
+
+        let dx = midX < x2 ? midX - x2 : x2 - midX;
+        let dy = midY < y2 ? midY - y2 : y2 - midY;
+        console.log([d, dx, dy, midX, midY])
+
+                if(x2 < x1) {
+                  dx = -dx;
+                }
+
+                if(y2 < y1) {
+                  dy = -dy;
+                }
+        return `translate(${dx}px, ${dy}px)`
+      });
 
     // Update
     var nodeUpdate = nodeEnter.merge(node);
@@ -249,14 +301,37 @@ function showTree(_data, id, opts) {
 
     // Update the node attributes and style
     nodeUpdate.select('circle.node').
-      attr('r', 25).
+      attr('r', options.radius).
       style("fill", function(d) {
-          return "#0e4677";
+          return d.data.color || "#0e4677";
       }).
       attr('cursor', 'pointer');
 
     nodeUpdate.select("text")
             .style("fill-opacity", 1);
+
+    nodeUpdate.select("text.path-text")
+            .style("transform", (d) => {
+                if(!d.parent) return '';
+
+                let x1 = d.parent.x, y1 = d.parent.y, x2 = d.x , y2 = d.y;
+
+                let midX = (x1+x2)/2, midY = (y1+y2) / 2;
+
+                let dx = midX < x2 ? midX - x2 : x2 - midX;
+                let dy = midY < y2 ? midY - y2 : y2 - midY;
+                console.log([d, dx, dy, midX, midY])
+
+                if(x2 < x1) {
+                  dx = -dx;
+                }
+
+                if(y2 < y1) {
+                  dy = -dy;
+                }
+
+                return `translate(${dx}px, ${dy}px)`
+              });
 
     // Remove any exiting nodes
     var nodeExit = node.exit().
@@ -304,7 +379,9 @@ function showTree(_data, id, opts) {
   return {
     rootData: root,
     treeNodes: () => { return treemap(root).descendants() },
-    clickNode: (d) => { toggleChildren(d) }
+    toggleChildren: (d) => { toggleChildren(d) },
+    addToNode: (node, options) => { onAdd(node, options) },
+    map: idToNodeMap
   }
 
 }

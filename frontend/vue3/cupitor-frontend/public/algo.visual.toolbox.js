@@ -249,6 +249,39 @@ function textInCircle(text, x,y, optsText, optsCirc){
 	return group;
 }
 
+function addRectangle(opts){
+	opts = opts || {}
+
+	 var rect = new fabric.Rect({
+	  left: 100,
+	  top: 100,
+	  fill: opts.fill || '',
+	  strokeWidth: 1,
+	  stroke: 'red',
+	  width: opts.width || 20,
+	  height: opts.height || 20
+	 });
+
+	 pc.add(rect)
+	 pc.renderAll()
+
+	 return rect
+}
+
+function groupFabricObjects (objs, opts){
+	if(!objs) return
+
+    objs.forEach(o => { pc.remove(o) });
+
+	let G = new fabric.Group(objs, {left: opts.left || 100, top: opts.top || 100 })
+	pc.add(G);
+	G.setCoords()
+
+    pc.renderAll();
+
+    return G
+}
+
 function arrow(x1,y1,x2,y2, opts){
 	var options = combined({},  { strokeWidth: 1, stroke: 'black', fill: 'white', triangleWidth: 10, triangleHeight: 10}, opts)
 	var tri = new fabric.Triangle({
