@@ -33,15 +33,38 @@ function range(...arr){
 
 
 
-function typeQuote(text, theme) {
-    if(!theme) theme = 'black'
+function typeQuote(text, _options) {
+    let options = Object.assign({}, {wait: 0, theme: 'black'}, _options);
 
-    if(theme == 'black') {
-        $('#textillateContainer').css({ backgroundColor: '#1a1a1a'})
+    let savedCssTC = {
+      zIndex: $('#textillateContainer').css('z-index'),
+      color: $('#textillateContainer').css('color'),
+      backgroundColor:  $('#textillateContainer').css('backgroundColor'),
+      font: $('#textillateContainer').css('font')
+    }
+
+    let savedCssCT = {
+      zIndex: $('#cinemaText').css('z-index'),
+      color: $('#cinemaText').css('color'),
+      backgroundColor:  $('#cinemaText').css('backgroundColor'),
+      font: $('#cinemaText').css('font') 
+    }
+
+    let cinemaHtml = $('#cinemaText').html()
+
+    if(options.theme == 'black') {
+        $('#textillateContainer').css({ backgroundColor: '#1a1a1a', zIndex: 900000})
         $('#cinemaText').css({ color: 'white'})
     }
 
-    type(text, '#cinemaText')
+    type(text, '#cinemaText', { onComplete: (self) => {
+        setTimeout(()=> {
+          $('#textillateContainer').css(savedCssTC);
+          $('#cinemaText').css(savedCssCT);
+          $('#cinemaText').html(cinemaHtml);
+
+        }, options.wait * 1000)
+    }})
 }
 
 function resetTextillateContainer() {
@@ -53,7 +76,8 @@ function resetTextillateContainer() {
 function type(strings, elSelector, opts) {
   var options = {
     strings: [strings].flat(),
-    typeSpeed: 40
+    typeSpeed: 40,
+    onComplete: (self) => {}
   };
 
   options = Object.assign({}, options, opts);
@@ -129,7 +153,7 @@ function scanMatrix(name) {
 function createTextBox(text, css) {
   css = css || {}
   css.position = 'absolute'
-  
+
   let item = $(`<div class="text"> ${text}</div>`).css(css)
 
   txt.append(item)
@@ -571,6 +595,16 @@ function applyBlackTheme(){
     $("#textillateContainer").css({ backgroundColor: 'black', color: 'white'});
     window.theme = 'black';
 
+}
+
+function duplicate(obj) {
+  if(!obj) return
+
+  return new Promise((done, error) => {
+    obj.clone(cloned => {
+      done(cloned)
+    });
+  }).then(x => { pc.add(x); return x}); 
 }
 
 function Copy(canvas) {
