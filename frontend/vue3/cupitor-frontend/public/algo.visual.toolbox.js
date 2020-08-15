@@ -779,10 +779,10 @@ function appendTableInto(table, target, opts){
 	var table = $(tableHtml)
 	$(target).append(table)
 
-	table.find('table').css({ backgroundColor: opts.backgroundColor, color: opts.color })
-	table.css({ backgroundColor: opts.backgroundColor, color: opts.color, width: opts.width, height: opts.height, position: 'absolute',
-            left: opts.left,
-            top: opts.top })
+	table.find('table').css({ backgroundColor: options.backgroundColor, color: options.color })
+	table.css({ backgroundColor: options.backgroundColor, color: options.color, width: options.width, height: options.height, position: 'absolute',
+            left: options.left,
+            top: options.top })
 
 	table.draggable()
 	table.resizable();

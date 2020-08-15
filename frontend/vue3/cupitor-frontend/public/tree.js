@@ -167,14 +167,19 @@ function showTree(_data, id, opts) {
       
     var linkUpdate = linkEnter.merge(link);
     
+
+
+    //This is to make line start from radius instead of center!
+    let lineStart = d => {
+      let angle = geometric.lineAngle([[d.parent.x, d.parent.y],[ d.x, d.y]])
+      let px = geometric.pointTranslate([d.parent.x, d.parent.y], angle, options.radius)
+      return px;
+    }
+
     linkUpdate.transition().
       duration(duration).
-      attr('x1', function(d) {
-          return d.parent.x;
-      }).
-      attr('y1', function(d) {
-          return d.parent.y;
-      }).
+      attr('x1', d => lineStart(d)[0]).
+      attr('y1', d => lineStart(d)[1]).
       attr('x2', function(d) {
           return d.x;
       }).
@@ -185,12 +190,8 @@ function showTree(_data, id, opts) {
     // Transition back to the parent element position
     linkUpdate.transition().
       duration(duration).
-      attr('x1', function(d) {
-          return d.parent.x;
-      }).
-      attr('y1', function(d) {
-          return d.parent.y;
-      }).
+      attr('x1', d => lineStart(d)[0]).
+      attr('y1', d => lineStart(d)[1]).
       attr('x2', function(d) {
           return d.x;
       }).
@@ -242,7 +243,7 @@ function showTree(_data, id, opts) {
     // Add Circle for the nodes
     nodeEnter.append('circle').
       attr('class', 'node').
-      attr('r', options.radius || 20).
+      attr('r', options.radius).
       style("fill", function(d) {
           return d.data.color || "#0e4677";
       });
