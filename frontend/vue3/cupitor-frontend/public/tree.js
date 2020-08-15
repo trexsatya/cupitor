@@ -85,6 +85,10 @@ function showTree(_data, id, opts) {
       attributes: [],
       children: []
     };
+
+    delete options.children
+    newNodeObj = Object.assign(newNodeObj, options)
+
     //Creates new Node 
     var newNode = d3.hierarchy(newNodeObj);
     newNode.depth = node.depth + 1; 
@@ -129,6 +133,9 @@ function showTree(_data, id, opts) {
     // Normalize for fixed-depth.
     nodes.forEach(function(d){
       d.y = d.depth * 100
+      if(d.data.jumpDepth) {
+        d.y += 150;
+      }
     });
 
     // ### LINKS
@@ -144,7 +151,7 @@ function showTree(_data, id, opts) {
       append('line').
       attr("class", "link").
       attr("stroke-width", 2).
-      attr("stroke", 'black').
+      attr("stroke", d => d.parent.data.color || 'indigo').
       attr('x1', function(d) {
           return source.x0;
       }).
@@ -305,6 +312,10 @@ function showTree(_data, id, opts) {
       style("fill", function(d) {
           return d.data.color || "#0e4677";
       }).
+      style("opacity", d => { 
+        if(d.data.fade) return 0.2
+        return 1
+      }).
       attr('cursor', 'pointer');
 
     nodeUpdate.select("text")
@@ -376,12 +387,38 @@ function showTree(_data, id, opts) {
     }
 
 
+  function highlight(nodes, opts) {
+    let options = Object.assign({}, {resetAfter: -1}, opts);
+
+    let idsToHighlight = nodes.map(x => x.id)
+
+    Object.keys(idToNodeMap).forEach(id => {
+      let d = idToNodeMap[id];
+      if( idsToHighlight.indexOf(d.id) < 0) d.data.fade = true;
+      update()
+    });
+
+    if(options.resetAfter != -1){
+      setTimeout(removeHighlight, options.resetAfter*1000);  
+    }
+  }
+
+  function removeHighlight(){
+    Object.keys(idToNodeMap).forEach(id => {
+          let d = idToNodeMap[id];
+          d.data.fade = false;
+          update()
+    });    
+  }
+
   return {
     rootData: root,
     treeNodes: () => { return treemap(root).descendants() },
     toggleChildren: (d) => { toggleChildren(d) },
     addToNode: (node, options) => { onAdd(node, options) },
-    map: idToNodeMap
+    map: idToNodeMap,
+    highlight: highlight,
+    removeHighlight: removeHighlight
   }
 
 }

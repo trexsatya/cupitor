@@ -299,10 +299,10 @@ function createMatrix(sel) {
 
     var xtitle = $(sel).find('input[name="xtitle"]').val()
     var ytitle = $(sel).find('input[name="ytitle"]').val()
-    var _xheaders = $(sel).find('input[name="xheaders"]').val()
-    var _yheaders = $(sel).find('input[name="yheaders"]').val()
+    var xheaders = $(sel).find('input[name="xheaders"]').val()
+    var yheaders = $(sel).find('input[name="yheaders"]').val()
 
-    _createMatrix({sel, data, location, size, xtitle, ytitle, _xheaders, _yheaders})
+    _createMatrix({sel, data, location, size, xtitle, ytitle, xheaders, yheaders})
 }
 
 function _createMatrix(vals){
@@ -311,16 +311,18 @@ function _createMatrix(vals){
       sel = vals.sel,
       xtitle = vals.xtitle || 'Columns',
       ytitle = vals.ytitle || 'Rows',
-      _xheaders = vals._xheaders || 'indices',
-      _yheaders = vals._yheaders || 'indices';
+      _xheaders = vals.xheaders || 'indices',
+      _yheaders = vals.yheaders || 'indices';
 
-  var xheaders = null, yheaders = null
+     var xheaders = null, yheaders = null
 
       var tableData = []
       try {
           var _data = eval("["+ data + "]")
           //TODO: Check data is in correct format
+
           tableData = _data;
+
           if(_xheaders === 'indices') {
               xheaders = [...Array(_data[0].length).keys()];
           } else {
@@ -337,6 +339,7 @@ function _createMatrix(vals){
           size = eval("[" + size + "]")
           location = eval("[" + location + "]")
       } catch(e) {
+          console.log(e);
       }
 
       var tableOpts = { ytitle: ytitle, xtitle: xtitle, xheaders: xheaders, yheaders: yheaders,
