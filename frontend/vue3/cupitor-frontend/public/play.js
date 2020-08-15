@@ -32,6 +32,36 @@ function range(...arr){
 }
 
 
+function createArrow(){
+  let arr = $(`<div class="arrow"/>`),
+    line = $(`<div class="line"></div>`),
+    point = $(`<div class="point"></div>`);
+
+  arr.css({width:'120px',
+      margin: '50px auto'});
+  line.css({
+      'margin-top':'14px',
+      width: '90px',
+      background: 'blue',
+      height: '10px',
+      float: 'left'
+  });
+
+  point.css({width: 0,
+    height: 0,
+    'border-top': '20px solid transparent',
+    'border-bottom': '20px solid transparent',
+    'border-left': '30px solid blue',
+    float: 'right'
+  });
+
+  arr.append(line);
+  arr.append(point);
+  txt.append(arr);
+
+  arr.draggable();
+
+}
 
 function typeQuote(text, _options) {
     let options = Object.assign({}, {wait: 0, theme: 'black'}, _options);
@@ -312,7 +342,8 @@ function _createMatrix(vals){
       xtitle = vals.xtitle || 'Columns',
       ytitle = vals.ytitle || 'Rows',
       _xheaders = vals.xheaders || 'indices',
-      _yheaders = vals.yheaders || 'indices';
+      _yheaders = vals.yheaders || 'indices'
+      width = vals.width, height = vals.height;
 
      var xheaders = null, yheaders = null
 
@@ -341,6 +372,9 @@ function _createMatrix(vals){
       } catch(e) {
           console.log(e);
       }
+
+      if(width) size[0] = width;
+      if(height) size[1] = height;
 
       var tableOpts = { ytitle: ytitle, xtitle: xtitle, xheaders: xheaders, yheaders: yheaders,
                         width: size[0], height: size[1],
