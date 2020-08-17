@@ -1,6 +1,6 @@
 <template>
 <div class="home">
-  <div class="img-container" >
+  <div class="img-container" ref="imgContainer">
     <img class="bg" src="https://images.pexels.com/photos/132037/pexels-photo-132037.jpeg" >
   </div>
   <div class="upper-container">
@@ -64,7 +64,7 @@
             <span class="logo">Living to Learn </span>
           </b-col>
     </b-row>
-    <b-container>
+    <b-container ref="cardsContainer">
       <b-card-group columns>
         <b-card no-body
           header="Computer Engineering"
@@ -201,6 +201,23 @@ export default class MainNavbar extends Vue {
 
       //@ts-ignore
       this.$refs.searchIcon.onclick = showSearchBox;
+
+      // @ts-ignore
+      let imgCont = this.$refs.imgContainer
+
+      // @ts-ignore
+      this.$refs.cardsContainer.onmouseover = () => {
+        // @ts-ignore
+        imgCont.classList.add("more-visible")
+      };
+
+      // @ts-ignore
+      this.$refs.cardsContainer.onmouseout = () => {
+        // @ts-ignore
+        imgCont.classList.remove("more-visible")
+      };      
+
+
     } catch(e) {
       console.log(e)
     }
@@ -243,6 +260,8 @@ export default class MainNavbar extends Vue {
 </script>
 
 <style scoped>
+
+
 .multiselect {
     position: absolute;
     width: 50%;
@@ -313,7 +332,12 @@ img.bg {
   left: 0;
   width: 100%;
   height: 100%;
-  opacity: 0.4;
+  opacity: 0.5;
+}
+
+.img-container.more-visible::after {
+  opacity: 0.9;
+  transition: 1s;
 }
 
 .header {
