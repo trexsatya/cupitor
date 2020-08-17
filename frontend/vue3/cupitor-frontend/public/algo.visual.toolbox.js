@@ -764,11 +764,11 @@ function appendTableInto(table, target, opts){
 
 	      <tr>
 	          <th style="text-align: center" ></th>
-	          ${options.xheaders.map(x => '<th style="text-align: center; color: blue" class="xheader"> <span class="item">'+ x+'</span></th>').join('')}
+	          ${options.xheaders.map((x, col) => `<th style="text-align: center; color: blue" data-column="${col}" class="xheader"> <span class="item"> ${x}</span></th>`).join('')}
 	      </tr>
 
 	      ${range(0, table.length).map(row =>
-	      		'<tr class="data"> <th style="text-align: center; color: #8888c1" class="yheader"> <span class="item">'+ options.yheaders[row] +'</span></th>'
+	      		`<tr class="data"> <th style="text-align: center; color: #8888c1" data-row="${row}" class="yheader"> <span class="item"> ${options.yheaders[row]} </span></th>`
 	      			+ table[row].map((y,col) => `<td style="" data-row="${row}" data-column="${col}" data-value="${y}"> <span class="item"> ${y} </span></td>`).join('') +'</tr>'
 	      ).join('')}
     </table>
