@@ -21,8 +21,9 @@ function showTree(_data, id, opts) {
 
   // Set the dimensions and margins of the diagram
   var margin = { top: 40, right: 0, bottom: 0, left: 0 };
-    var width = 1200 - margin.right - margin.left;
-    var height = 1000 - margin.top - margin.bottom;
+
+  var width = 1200 - margin.right - margin.left;
+  var height = 1000 - margin.top - margin.bottom;
 
   var treeContainer = $("<div></div>").attr({id: id})
 
@@ -396,6 +397,7 @@ function showTree(_data, id, opts) {
     Object.keys(idToNodeMap).forEach(id => {
       let d = idToNodeMap[id];
       if( idsToHighlight.indexOf(d.id) < 0) d.data.fade = true;
+      else d.data.fade = false;
       update()
     });
 
@@ -419,7 +421,14 @@ function showTree(_data, id, opts) {
     addToNode: (node, options) => { onAdd(node, options) },
     map: idToNodeMap,
     highlight: highlight,
-    removeHighlight: removeHighlight
+    removeHighlight: removeHighlight,
+    position: () => {
+      let pos = $(`#${id}`).position();
+      pos.top += margin.top;
+      pos.left += margin.left;
+
+      return pos
+    }
   }
 
 }

@@ -1,109 +1,321 @@
 <template>
 <div class="home">
-  <b-container class="top-container">
+  <div class="img-container" >
+    <img class="bg" src="https://images.pexels.com/photos/132037/pexels-photo-132037.jpeg" >
+  </div>
+  <div class="upper-container">
     <b-row class="header">
-      <b-col style="">
-        <span class="prefix"> simply</span>
-        <span class="logo">Living to Learn </span> </b-col>
+          <b-col style="padding-top: 2em; text-align: left; padding-left: 8em;">
+            <div class="search-icon" ref="searchIcon"> <i class="fa fa-search" style="margin-top: 35%; margin-left: 28%;"></i> </div>
+            <multiselect
+              class="search-box-in-nav left"
+              ref="searchBox"
+              id="ajax"
+              label="name"
+              track-by="code"
+              placeholder="Type to search" open-direction="bottom"
+              :options="searchResult"
+              :multiple="true"
+              :searchable="true"
+              :loading="isLoading"
+              :internal-search="false"
+              :clear-on-select="true"
+              :close-on-select="true"
+              :options-limit="300"
+              selectLabel="Select"
+              :limit="3"
+              :max-height="600"
+              :show-no-results="false"
+              :hide-selected="true"
+              group-values="results"
+              group-label="entity"
+              :group-select="false"
+              @select="searchResultSelected"
+              @search-change="asyncFind">
+              <template slot="tag"
+                slot-scope="{ option }">
+                <span class="custom__tag">
+                  <span>{{ option.name }}</span>
+                  <!-- <span class="custom__remove" @click="remove(option)">❌</span> -->
+                </span>
+              </template>
+              <template slot="clear" slot-scope="props">
+                <div class="multiselect__clear" v-if="selectedsearchResult.length" @mousedown.prevent.stop="clearAll(props.search)"></div>
+              </template>
+              <!-- <template slot="singleLabel" slot-scope="props">
+                <img class="option__image" :src="props.option.img" alt="No Man’s Sky">
+                <span class="option__desc">
+                  <span class="option__title">{{ props.option.name }}</span>
+                </span>
+              </template> -->
+              <template slot="option" slot-scope="props">
+                <!-- <img class="option__image" :src="props.option.img" alt="No Man’s Sky"> -->
+                <div class="option__desc">
+                  <span class="option__title" v-if="!props.option.fullSearchLink">{{ searchItemLabel(props) }}</span>
+
+                  <span class="option__title" v-else><a href="/search" style="color: black">Users with name {{props.option.username}}</a></span>
+                  <!-- <span class="option__small">{{ 'desc' }}</span> -->
+                </div>
+              </template>
+              <!-- <span slot="noResult">Oops! No elements found. Consider changing the search query.</span> -->
+            </multiselect>
+          </b-col>
+          <b-col cols="8" style="text-align: left;">
+            <span class="logo">Living to Learn </span>
+          </b-col>
     </b-row>
-    <div role="tablist" class="tablist">
-      <b-card no-body class="mb-1">
-        <b-card-header header-tag="header" class="p-1" role="tab">
-          <b-button block v-b-toggle.accordion-1 variant="info" style="padding:0; margin:0">
-
-            <span class="subject"> Engineering</span>
-          </b-button>
-
-        </b-card-header>
-        <b-collapse id="accordion-1" visible accordion="my-accordion" role="tabpanel">
+    <b-container>
+      <b-card-group columns>
+        <b-card no-body
+          header="Computer Engineering"
+        >
           <b-card-body>
-            <b-card header="Computer Engineering">
-              <b-list-group class="header-minor">
-                <b-list-group-item>
-                  <b-link to="articles/java">Programming </b-link>
-                </b-list-group-item>
-                <b-list-group-item>
-                  <b-link to="articles/algos">Algorithms & Problem-Solving </b-link>
-                </b-list-group-item>
-                <b-list-group-item>
-                  <b-link to="articles/devops">DevOps </b-link>
-                </b-list-group-item>
-                <b-list-group-item>
-                  <b-link to="articles/ai">Artificial Intelligence </b-link>
-                </b-list-group-item>
-                <b-list-group-item>
-                  <b-link to="articles/architecture">Design & Architecture </b-link>
-                </b-list-group-item>
-              </b-list-group>
-              <p class="card-text mt-2">
-              </p>
-            </b-card>
-          </b-card-body>
-        </b-collapse>
-      </b-card>
-
-      <b-card no-body class="mb-1">
-        <b-card-header header-tag="header" class="p-1" role="tab">
-          <b-button block v-b-toggle.accordion-2 variant="info" style="padding:0; margin:0">
-
-            <span class="subject"> Science</span>
-          </b-button>
-        </b-card-header>
-        <b-collapse id="accordion-2" accordion="my-accordion" role="tabpanel">
-          <b-card-body>
-            <b-list-group class="header-minor">
-              <b-list-group-item href="#">
-                <b-link to="articles/life-science">Science of Life </b-link>
-              </b-list-group-item>
-
-              <b-list-group-item href="#">
-                <b-link to="articles/psychology">Science of Psyche</b-link>
-              </b-list-group-item>
-
+            <b-list-group flush>
+              <b-list-group-item > <router-link to="/articles/programming"> Programming </router-link> </b-list-group-item>
+              <b-list-group-item ><router-link to="/articles/algos"> Algorithms & Problem-Solving </router-link></b-list-group-item>
+              <b-list-group-item ><router-link to="/articles/devops"> DevOps </router-link></b-list-group-item>
+              <b-list-group-item > <router-link to="/articles/ai"> Artificial Intelligence </router-link></b-list-group-item>
+              <b-list-group-item > <router-link to="/articles/architecture"> Design & Architecture </router-link></b-list-group-item>
             </b-list-group>
+          </b-card-body>
+        </b-card>
 
-            <p class="card-text mt-2">
+        <b-card header="Science" no-body>
+          <b-card-body>
+            <b-list-group flush>
+              <b-list-group-item > <router-link to="/articles/life-science"> "Science" of Life </router-link> </b-list-group-item>
+              <b-list-group-item > <router-link to="/articles/psychology"> "Science" of Psyche </router-link></b-list-group-item>
+              <b-list-group-item > <router-link to="/articles/natural-science"> Science of Matter </router-link></b-list-group-item>
+            </b-list-group>
+          </b-card-body>
+        </b-card>
+
+
+        <b-card bg-variant="primary" text-variant="white" style="background-color: rgb(0 123 255 / 0.2) !important;">
+          <blockquote class="card-blockquote">
+            <p>Life is a journey, without any destination.
+            <br>To make sense of it is my little ambition.
             </p>
-          </b-card-body>
-        </b-collapse>
-      </b-card>
+            <footer>
+              <small>Anonymous</small>
+            </footer>
+          </blockquote>
+        </b-card>
 
-      <b-card no-body class="mb-1">
-        <b-card-header header-tag="header" class="p-1" role="tab">
-          <b-button block v-b-toggle.accordion-3 variant="info" style="padding:0; margin:0">
-
-            <span class="subject"> Philosophy</span>
-          </b-button>
-
-        </b-card-header>
-        <b-collapse id="accordion-3" accordion="my-accordion" role="tabpanel">
+        <b-card no-body header="Philosophy">
           <b-card-body>
-            <b-list-group class="header-minor">
-
-              <b-list-group-item href="#">
-                <b-link to="articles/philosophy">Miscellaneous</b-link>
-              </b-list-group-item>
+            <b-list-group flush>
+              <b-list-group-item > <router-link to="/articles/philosophy"> Miscelleneous </router-link> </b-list-group-item>
             </b-list-group>
           </b-card-body>
-        </b-collapse>
-      </b-card>
-    </div>
-  </b-container>
+        </b-card>
+
+      </b-card-group>
+    </b-container>
+  </div>
+
 </div>
 </template>
 
-<script>
-// @ is an alias to /src
+<script lang="ts">
+import Vue from 'vue'
 
-export default {
-  name: 'Home',
+
+import Multiselect from 'vue-multiselect'
+import { Component, Prop } from 'vue-property-decorator'
+import "vue-multiselect/dist/vue-multiselect.min.css";
+
+@Component({
   components: {
+    Multiselect
+  }
+})
+export default class MainNavbar extends Vue {
+  selected: string = ''
+  options: Array<string> = []
+  toggleSearchBar = true
+  selectedsearchResult = []
+  searchResult = []
+  isLoading = false
 
-  },
-};
+  showingModalFor: string = "Login"
+  @Prop() transparent?: boolean
+  @Prop() colorOnScroll?: number
+
+  @Prop({default: 'white'}) type? : string
+
+  asyncFind (query) {
+
+    if(!query) return;
+
+    this.isLoading = true
+
+    //debugger
+
+    // @ts-ignore
+    fetch('http://satyendra.online:8080/api/search/' + query)
+    .then(x => x.json())
+    .then(resp => {
+        let apiRes = resp.map(it => ({ name: it.name, id: it.id }))
+        this.searchResult = [
+          {
+            entity: 'articles',
+            results: apiRes
+          }
+        ];
+
+        this.isLoading = false
+      })
+    .catch(e => {
+        this.isLoading = false
+    })
+
+  }
+
+  searchItemLabel(props) {
+    if(props.option.$groupLabel) {
+     return props.option.$groupLabel
+    }
+
+    return props.option.name
+  }
+
+  clearAll () {
+    this.selectedsearchResult = []
+  }
+
+  mounted() {
+    try {
+      //@ts-ignore
+      this.$refs.searchBox.$refs.search.setAttribute("autocomplete", "off")
+      //@ts-ignore
+      this.$refs.searchBox.$refs.tags.style.borderRadius = 0
+
+      let searchBox = this.$refs.searchBox;
+      let showSearchBox = () => {
+        //@ts-ignore
+        let existing = searchBox.$el.style.visibility;
+        //@ts-ignore
+        searchBox.$el.style.visibility = (existing != 'visible' ? 'visible' : 'hidden');
+      }
+
+      //@ts-ignore
+      this.$refs.searchIcon.onclick = showSearchBox;
+    } catch(e) {
+      console.log(e)
+    }
+  }
+
+  async signOut() {
+    // @ts-ignore
+    this.$auth.logout()
+  }
+
+  isLoggedIn(){
+    // @ts-ignore
+    return this.$auth.loggedIn
+  }
+
+  userName() {
+    // @ts-ignore
+    return this.$auth.user.username
+  }
+
+  signinClicked() {
+    this.$bvModal.hide('signup-modal');
+    this.$bvModal.show('signin-modal')
+  }
+
+  profileLink() {
+    // @ts-ignore
+    return '/users/' + this.$auth.user.username
+  }
+
+  searchResultSelected(item){
+      this.$router.push("/article/" + item.id )
+  }
+
+  searchIconClicked() {
+
+  }
+}
+
 </script>
 
 <style scoped>
+.multiselect {
+    position: absolute;
+    width: 50%;
+    height: 40px;
+    display: inline-block;
+    visibility: hidden;
+}
+
+.multiselect .multiselect__tags {
+  max-height: 100% !important;
+  border-radius: 0 !important;
+}
+
+.search-icon {
+  display: inline-block;
+  width: 40px;
+  height: 45px;
+  background: black;
+  cursor: pointer;
+}
+
+.search-icon:hover {
+
+}
+
+.card, .list-group-item {
+  background: none;
+  color: white;
+  text-align: left;
+}
+
+.card {
+  border: none;
+}
+
+.list-group-item a {
+  color: #fedbdb;
+}
+
+.list-group-item {
+  padding-left: 0;
+}
+
+.card-header {
+  font-size: larger;
+  color: aliceblue;
+  font-weight: bold;
+}
+
+img.bg {
+  width: 100%;
+  height: 100%;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+.upper-container {
+  z-index: 2;
+  margin-top: -5em;
+}
+
+.img-container::after {
+  content: '-';
+  background: red;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.4;
+}
+
 .header {
   margin-bottom: 2%;
 }
@@ -117,9 +329,9 @@ export default {
 
 .logo {
   font-family: myFirstFont;
-  font-size: 14vw;
+  font-size: 5vw;
   font-weight: 900;
-  color: #1e5384;
+  color: white;
 }
 
 .subject {

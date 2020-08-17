@@ -204,7 +204,7 @@ function bringInText(text, opts) {
     }
   }, opts || {})
 
-  let css = { fontSize: 'x-large', color: 'blue'}
+  let css = { fontSize: 'x-large', color: 'blue', paddingRight: '1em'}
 
   if(opts.mode == 'down-up') {
     css = Object.assign(css, {left: opts.from.left, top: opts.from.top, position: 'fixed'})
@@ -307,6 +307,24 @@ function contextMenuListener(el, dataCells) {
 
     });
 }
+
+
+function highlightMatrixColumn(num, id){
+  globalVariableNames[id].all.find(`*[data-column=${num}]`).addClass('highlighted')
+}
+
+function unHighlightMatrixColumn(num, id){
+  globalVariableNames[id].all.find(`*[data-column=${num}]`).removeClass('highlighted')
+}
+
+function highlightMatrixRow(num, id){
+  globalVariableNames[id].all.find(`*[data-row=${num}]`).addClass('highlighted')
+}
+
+function unHighlightMatrixRow(num, id){
+  globalVariableNames[id].all.find(`*[data-row=${num}]`).removeClass('highlighted')
+}
+
 
 function addHighlightCapability(el, others){
     $(el).click(e => {
@@ -419,6 +437,8 @@ function _createMatrix(vals){
 
       $(sel).dialog('close');
       moveToFront('txt')
+
+      return table
 }
 
 function createArray(sel) {
