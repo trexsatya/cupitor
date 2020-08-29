@@ -398,10 +398,12 @@ img.bg {
   .logo-col {
     margin-top: -2.5em;
     margin-left: 35%;
+    z-index: 1;
   }
 
   .search-box-col {
     padding-left: 5em;
+    z-index: 2;
   }
 }
 </style>
