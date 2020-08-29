@@ -124,22 +124,19 @@ import Vue from 'vue'
 import Multiselect from 'vue-multiselect'
 import { Component, Prop } from 'vue-property-decorator'
 import "vue-multiselect/dist/vue-multiselect.min.css";
-import {
-  Header
-} from '@/components/Header'
 
 
 @Component({
   components: {
-    Multiselect, Header
+    Multiselect
   }
 })
 export default class MainNavbar extends Vue {
   selected: string = ''
   options: Array<string> = []
   toggleSearchBar = true
-  selectedsearchResult = []
-  searchResult = []
+  selectedsearchResult: Array<any> = []
+  searchResult: Array<any> = []
   isLoading = false
 
   showingModalFor: string = "Login"
@@ -148,7 +145,7 @@ export default class MainNavbar extends Vue {
 
   @Prop({default: 'white'}) type? : string
 
-  asyncFind (query) {
+  asyncFind (query: string) {
 
     if(!query) return;
 
@@ -160,7 +157,7 @@ export default class MainNavbar extends Vue {
     fetch('http://satyendra.online:8080/api/search/' + query)
     .then(x => x.json())
     .then(resp => {
-        let apiRes = resp.map(it => ({ name: it.name, id: it.id }))
+        let apiRes = resp.map((it: any) => ({ name: it.name, id: it.id }))
         this.searchResult = [
           {
             entity: 'articles',
@@ -176,7 +173,7 @@ export default class MainNavbar extends Vue {
 
   }
 
-  searchItemLabel(props) {
+  searchItemLabel(props: any) {
     if(props.option.$groupLabel) {
      return props.option.$groupLabel
     }
@@ -252,7 +249,7 @@ export default class MainNavbar extends Vue {
     return '/users/' + this.$auth.user.username
   }
 
-  searchResultSelected(item){
+  searchResultSelected(item: any){
       this.$router.push("/article/" + item.id )
   }
 
