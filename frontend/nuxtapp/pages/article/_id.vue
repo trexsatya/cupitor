@@ -63,49 +63,6 @@ export default class ArticleView extends Vue {
       transformArticle(this.$router);
       this.randomCss()
     // }import Vue from 'vue'
-import { BootstrapVue, IconsPlugin } from 'bootstrap-vue'
-import 'bootstrap/dist/css/bootstrap.css'
-import 'bootstrap-vue/dist/bootstrap-vue.css'
-import axios from 'axios';
-import "@/assets/scss/custom.scss";
-import "@/plugins/now-ui-kit.js";
-import clickOutside from '../directives/click-outside.js';
-
-
-import '@fortawesome/fontawesome-svg-core/styles.css'
-import { library } from '@fortawesome/fontawesome-svg-core'
-import { fas } from '@fortawesome/free-solid-svg-icons'
-import { fab } from '@fortawesome/free-brands-svg-icons'
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
-
-import { dom } from '@fortawesome/fontawesome-svg-core'
-import AOS from 'aos';
-import 'aos/dist/aos.css'; 
-
-dom.watch() //This is to make <i> tags convert into SVG by font-awesome
-
-library.add(fas)
-
-if (process.client) {
-  AOS.init();
-  //window.onerror = function (message, file, line, col, error) {
-   //alert("Error occurred: " + error.message + " file=" + file);
-   //return false;
-  //};
-}
-
-
-library.add(fab) //TODO: Import specific icons used in the application, because importing fab,fas will create bundle size larger!
-
-Vue.component('font-awesome-icon', FontAwesomeIcon)
-Vue.directive('click-outside', clickOutside);
-
-// Install BootstrapVue
-Vue.use(BootstrapVue)
-// Optionally install the BootstrapVue icon components plugin
-Vue.use(IconsPlugin)
-
-
   }
 
   updated() {
