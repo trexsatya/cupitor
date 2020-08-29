@@ -1,8 +1,9 @@
 function fixImageUrls() {
+  let IMAGES_BASE_URL = "https://storage.googleapis.com/cupitor-220103.appspot.com";
   document.querySelectorAll('img').forEach((e,i) => {
     let href = e.getAttribute('src');
     if (href.startsWith('/images/')) {
-      href = href.replace('/images/', window.imageCdnUrl+"/images/");
+      href = href.replace('/images/', IMAGES_BASE_URL + "/images/");
       e.src = href;
     }
   })
