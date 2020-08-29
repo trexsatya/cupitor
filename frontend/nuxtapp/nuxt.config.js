@@ -37,9 +37,12 @@ export default {
   plugins: [
     "@/plugins/entrypoint.js"
   ],
-
+  bootstrapVue: {
+    bootstrapCSS: false, // Or `css: false`
+    bootstrapVueCSS: false // Or `bvCSS: false`
+  },
   axios: {
-    baseURL:  process.env.API_BASE_URL || "http://satyendra.online:8080/api/"
+    baseURL:  process.env.API_BASE_URL || "https://satyendra.online:8080/api/"
     // proxy: true
   },
 
