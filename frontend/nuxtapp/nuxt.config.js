@@ -42,7 +42,7 @@ export default {
     bootstrapVueCSS: false // Or `bvCSS: false`
   },
   axios: {
-    baseURL:  process.env.API_BASE_URL || "https://satyendra.online:8080/api/"
+    baseURL:  process.env.API_BASE_URL || "https://satyendra.online/api/"
     // proxy: true
   },
 
