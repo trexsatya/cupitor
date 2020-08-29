@@ -55,7 +55,7 @@ export default class ArticleView extends Vue {
   article = null;
   isMathjaxLoaded = false
 
-  API_BASE_URL = "https://satyendra.online:8080/api/";
+  API_BASE_URL = "https://satyendra.online/api/";
   IMAGES_BASE_URL = "https://storage.googleapis.com/cupitor-220103.appspot.com";
 
   mounted() {

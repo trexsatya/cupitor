@@ -53,7 +53,7 @@ export default class SearchArticlesView extends Vue {
   articles = [];
   searchTerm = null;
 
-  API_BASE_URL = "https://satyendra.online:8080/api/";
+  API_BASE_URL = "https://satyendra.online/api/";
   IMAGES_BASE_URL = "https://storage.googleapis.com/cupitor-220103.appspot.com";
 
   onClick(item) {
