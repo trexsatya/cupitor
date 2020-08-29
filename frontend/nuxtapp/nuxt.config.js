@@ -35,7 +35,7 @@ export default {
   ** https://nuxtjs.org/guide/plugins
   */
   plugins: [
-
+    "@/plugins/entrypoint.js"
   ],
 
   axios: {

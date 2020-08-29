@@ -9,11 +9,11 @@ export const state = () => ({
 })
 
 export const mutations = {
-  populateLanguages (state, data) {
+  populateLanguages (state: any, data: any) {
     state.languages = data
   },
 
-  setSearchedArticles(state, payload) {
+  setSearchedArticles(state: any, payload: any) {
     state.searchPage.articles = payload.articles;
     state.searchPage.searchTerm = payload.searchTerm;
   }
