@@ -154,7 +154,7 @@ export default class MainNavbar extends Vue {
     //debugger
 
     // @ts-ignore
-    fetch('http://satyendra.online:8080/api/search/' + query)
+    fetch('https://satyendra.online:8080/api/search/' + query)
     .then(x => x.json())
     .then(resp => {
         let apiRes = resp.map((it: any) => ({ name: it.name, id: it.id }))

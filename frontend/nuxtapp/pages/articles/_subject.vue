@@ -42,7 +42,7 @@ export default class ArticlesView extends Vue {
 
   articles = [];
 
-  API_BASE_URL = "http://satyendra.online:8080/api/";
+  API_BASE_URL = "https://satyendra.online:8080/api/";
   IMAGES_BASE_URL = "https://storage.googleapis.com/cupitor-220103.appspot.com";
 
   onClick(item) {
