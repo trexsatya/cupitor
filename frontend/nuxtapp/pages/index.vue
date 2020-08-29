@@ -1,11 +1,11 @@
 <template>
-<div class="home" style="margin-top: 8em;">
+<div class="home" style="margin-top: 2em;">
   <div class="img-container" ref="imgContainer">
     <img class="bg" src="https://images.pexels.com/photos/132037/pexels-photo-132037.jpeg" >
   </div>
   <div class="upper-container">
     <b-row class="header">
-          <b-col style="padding-top: 2em; text-align: left; padding-left: 8em;">
+          <b-col style="" class="search-box-col">
             <div class="search-icon" ref="searchIcon"> <i class="fa fa-search" style="margin-top: 35%; margin-left: 28%;"></i> </div>
             <multiselect
               class="search-box-in-nav left"
@@ -60,10 +60,11 @@
               <!-- <span slot="noResult">Oops! No elements found. Consider changing the search query.</span> -->
             </multiselect>
           </b-col>
-          <b-col cols="8" style="text-align: left;">
+          <b-col cols="8" style="text-align: left;" class="logo-col">
             <span class="logo">Living to Learn </span>
           </b-col>
     </b-row>
+    <div class="divider"></div>
     <b-container ref="cardsContainer">
       <b-card-group columns>
         <b-card no-body
@@ -343,7 +344,7 @@ img.bg {
 }
 
 .header {
-  margin-bottom: 2%;
+  margin-bottom: 5em;
 }
 
 .prefix {
@@ -357,7 +358,7 @@ img.bg {
   font-family: myFirstFont;
   font-size: 5vw;
   font-weight: 900;
-  color: white;
+  color: #fadfdf;
 }
 
 .subject {
@@ -376,10 +377,31 @@ img.bg {
   margin: auto;
 }
 
+.search-box-col {
+  padding-top: 2em; 
+  text-align: left; 
+  padding-left: 8em;
+}
+
+
+.divider {
+    background: radial-gradient(circle, #1e24d6 0%, #0f151b 100%);
+    height: 3px;
+}
+
 @media (max-width: 767px) {
   .tablist {
     width: 80vw;
     margin: auto;
+  }
+
+  .logo-col {
+    margin-top: -2.5em;
+    margin-left: 35%;
+  }
+
+  .search-box-col {
+    padding-left: 5em;
   }
 }
 </style>
