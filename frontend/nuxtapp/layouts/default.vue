@@ -5,7 +5,7 @@
     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.3/styles/solarized-dark.min.css">
     <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.3/highlight.min.js"></script>
 
-    <Header style=""/>
+    <Header style="" v-if="$route.name != 'index'"/>
     <Nuxt />
   </div>
 </template>
@@ -33,6 +33,10 @@ export default class ArticlesView extends Vue {
     next();
   }
 
+  mounted() {
+    debugger
+    console.log(1)
+  }
 
   head () {
     //We can return title, meta[] for SEO
