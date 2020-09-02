@@ -1,5 +1,5 @@
 <template>
-<div class="home" style="margin-top: 2em;">
+<div class="home" style="margin-top: 6em;">
   <div class="img-container" ref="imgContainer">
     <img class="bg" src="https://images.pexels.com/photos/132037/pexels-photo-132037.jpeg" >
   </div>

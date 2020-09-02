@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Notepad</title>
+<style type="text/css" media="screen">
+    #editor { 
+        position: absolute;
+        top: 50px;
+        right: 0;
+        bottom: 0;
+        left: 0;
+    }
+</style>
+</head>
+<body>
+<div> 
+    <input type="password" name="password">&nbsp;&nbsp;&nbsp;&nbsp;
+    <input type="text" name="fontSize" value="18">px&nbsp;&nbsp;&nbsp;
+    <select id="theme" size="1">
+       <optgroup label="Bright">
+
+          <option value="ace/theme/dreamweaver">Dreamweaver</option>
+          <option value="ace/theme/eclipse">Eclipse</option>
+          <option value="ace/theme/sqlserver">SQL Server</option>
+       </optgroup>
+       <optgroup label="Dark">
+          <option value="ace/theme/ambiance">Ambiance</option>
+          <option value="ace/theme/chaos">Chaos</option>
+          <option value="ace/theme/clouds_midnight">Clouds Midnight</option>
+          <option value="ace/theme/cobalt">Cobalt</option>
+          <option value="ace/theme/gruvbox">Gruvbox</option>
+          <option value="ace/theme/gob">Green on Black</option>
+          <option value="ace/theme/idle_fingers">idle Fingers</option>
+          <option value="ace/theme/kr_theme">krTheme</option>
+          <option value="ace/theme/merbivore">Merbivore</option>
+          <option value="ace/theme/merbivore_soft">Merbivore Soft</option>
+          <option value="ace/theme/mono_industrial">Mono Industrial</option>
+          <option value="ace/theme/monokai">Monokai</option>
+          <option value="ace/theme/pastel_on_dark">Pastel on dark</option>
+          <option value="ace/theme/solarized_dark">Solarized Dark</option>
+          <option value="ace/theme/terminal">Terminal</option>
+          <option value="ace/theme/tomorrow_night">Tomorrow Night</option>
+          <option value="ace/theme/tomorrow_night_blue">Tomorrow Night Blue</option>
+          <option value="ace/theme/tomorrow_night_bright">Tomorrow Night Bright</option>
+          <option value="ace/theme/tomorrow_night_eighties">Tomorrow Night 80s</option>
+          <option selected value="ace/theme/twilight">Twilight</option>
+          <option value="ace/theme/vibrant_ink">Vibrant Ink</option>
+       </optgroup>
+    </select>
+
+    <select id="notepads" name="notepads">
+          
+    </select>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+    <button id="new">New</button>
+
+
+</div>
+<script src="/jquery.js"></script>
+<script type="text/javascript">
+    let notepadsFromLocalStorage = ()=>{
+      return JSON.parse(localStorage.notepads)
+    }
+
+    var API = '//cupitor.online:8080/api/notepadData'
+
+    let createNewNotepadOnServer = () => {
+      return fetch(API,{
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'X-Auth' : $('input[type="password"]').val()
+            },
+            mode: 'cors',
+            method: "POST",
+            body: JSON.stringify({
+                data: 'New'
+            })
+        })
+        .then( res => { 
+            if(!res.ok){
+                throw new Error("Error in saving")
+            }
+            return res.json()
+        })
+    }
+
+    let loadEditor = i => {
+      let data = notepadsFromLocalStorage()[i]
+      editor.setValue(data.data || "")
+      $('#editor').data('api-link',data._links.self.href)
+      if(data.meta){
+        editor.setFontSize(data.meta.fontSize +"px")
+        editor.setTheme(data.meta.theme)
+        $('input[name="fontSize"]').val(data.meta.fontSize)
+        $('#theme').val(data.meta.theme)
+      } else {
+        editor.setFontSize($('input[name="fontSize"]').val()+"px")
+        editor.setTheme($('#theme').val())
+      }
+    }
+
+    let loadNotepads = e => fetch(API, {
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'X-Auth' : e.target.value
+            },
+            mode: 'cors'
+        })
+        .then( res => { 
+            if(!res.ok){
+                throw new Error("Error in getting notepad contents")
+            }
+            return res.json()
+        })
+        .then(data => {
+            var data = data._embedded.notepadData
+            localStorage.notepads = JSON.stringify(data)
+            
+            var $notepads = $("select[name='notepads']")
+
+            $(data).each(function(i, v){ 
+                $notepads.append($("<option>", { value: i, html: i+1 }));
+            });
+
+            loadEditor(0)
+        })
+
+    $('input[type="password"]').on('change', loadNotepads);
+    $('input[name="fontSize"]').on('change', (e)=> {
+        editor.setFontSize(e.target.value+"px")
+    });
+
+    $('select[name="notepads"').on('change', e => loadEditor(e.target.value))
+
+    $('#theme').on('change', e => {
+        editor.setTheme(e.target.value)
+    })
+
+    $('#new').on('click', e => {
+        createNewNotepadOnServer()
+        .then(notepad => {
+          let _notepads = notepadsFromLocalStorage()
+
+          $('#editor').data('api-link', notepad._links.self.href);
+          editor.setValue(notepad.data || "")
+
+          $("select[name='notepads']").append($("<option>", { value: _notepads.length, html: _notepads.length+1, selected: "selected" }));
+
+          _notepads.push(notepad);
+          localStorage.notepads = JSON.stringify(_notepads)
+        })
+    })
+
+</script>
+
+<div id="editor">
+    Notepad
+</div>
+    
+<script src="/ace-min/ace.js"></script>
+<script src="/rx.all.min.js"></script>
+<script>
+    let postNotepad = (text) => {
+      if(!$('#editor').data('api-link')) {
+        console.log('No link')  
+        return Rx.Observable.empty();
+      }
+
+      return fetch($('#editor').data('api-link'),{
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'X-Auth' : $('input[type="password"]').val()
+            },
+            mode: 'cors',
+            method: "PUT",
+            body: JSON.stringify({
+                data: editor.getValue(),
+                meta: {
+                  fontSize: $('input[name="fontSize"]').val(),
+                  theme: $('#theme').val()
+                }
+            })
+        })
+        .then( res => { 
+            if(!res.ok){
+                throw new Error("Error in saving")
+            }
+            return res.json()
+        })
+    }
+
+    let saveIntoLocalStorage = (notepadFromApi)=>{
+      let _notepads = notepadsFromLocalStorage().map(n => {
+        var np = n
+        if(n._links.self.href == notepadFromApi._links.self.href){
+          np.data = notepadFromApi.data
+          np.meta = notepadFromApi.meta
+        }
+        return np
+      })
+      localStorage.notepads = JSON.stringify(_notepads)
+    }
+
+    var editor = ace.edit("editor");
+    editor.setOptions({
+        enableBasicAutocompletion: true
+    });
+    editor.setTheme("ace/theme/twilight");
+    editor.getSession().setMode("ace/mode/html");
+
+    var keyups = Rx.Observable.fromEvent(editor, 'change')
+                  // .pluck('target', 'value')
+                  
+
+    var debounced = keyups.debounce(2*1000 /* ms */);
+
+    // var distinct = debounced.distinctUntilChanged();
+
+    const results = debounced.map(x => editor.getValue())
+                        .flatMapLatest(postNotepad)
+                        .map(x => {
+                          saveIntoLocalStorage(x)
+                        });
+
+    results.subscribe(
+      data => {
+        // console.log(data)
+
+      },
+      error => {
+        console.log(error)
+      });
+
+
+</script>
+</body>
+</html>
