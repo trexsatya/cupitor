@@ -1,5 +1,8 @@
 
 export default {
+  serverMiddleware: [
+    { path: '/reader-api', handler: '~/api/index.js' }
+  ],
   /*
   ** Nuxt rendering mode
   ** See https://nuxtjs.org/api/configuration-mode
