@@ -247,7 +247,11 @@ function readFromURL(url){
        }
 
        let waitTime = str => {
-          return 3*(str.length/200);
+          let time = 3*(str.length/100);
+          if(time < 1) {
+            time = 2; //At least hold for 2 secs
+          }
+          return time;
        }
 
        window.typing = typeQuote(
@@ -280,6 +284,7 @@ function readFromURL(url){
 
      let startTyping = () => {
         if(window.typing) {
+          sched.pause();
           window.typing.start();
         } else {
           let cinemaText = $('#cinemaText');
@@ -304,18 +309,22 @@ function readFromURL(url){
 
      document.onkeypress = e => {
         let code = e.code
-        if(code == 'Space') {
-          if(window.typing) {
-            if(window.spaceCommand == 'stop') {
-              stopTyping();
-            } else {
-              startTyping();
-            }
-          }
-          e.preventDefault();
-          return false;
+        if(code != 'Space') {
+          return true; //bubble event
         }
-        return true;
+        
+        if(window.typing) {
+          if(window.spaceCommand == 'stop') {
+            stopTyping();
+          } else {
+            startTyping();
+          }
+        } else {
+          // startTyping();
+        }
+
+        e.preventDefault();
+        return false;
      }
 
 
@@ -325,11 +334,14 @@ function readFromURL(url){
         max: texts.length,
         min: 1,
         slide: function( event, ui ) {
+          $('#cinemaText').html(texts[ui.value-1].text);
           if(window.typing) {
             window.typing.destroy();
             window.typing = null;
-            $('#cinemaText').html('')
-            sched.resume();
+            
+            // sched.resume();
+            $('#stopBtn').hide();
+            $('#startBtn').show();
           }
           sched.setStep(ui.value);
           

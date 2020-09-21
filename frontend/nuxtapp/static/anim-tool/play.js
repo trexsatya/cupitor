@@ -4,6 +4,7 @@ window.globalVariableNames = {
     "texts": 0
 }
 
+
 function record() {
   $("#btnStart").click()
 }
@@ -108,7 +109,7 @@ function typeQuote(text, _options) {
 
     type(text, '#cinemaText', { onComplete: (self) => {
         setTimeout(()=> {
-          console.log("typed in " + (new Date().getTime() - start)/1000 + "secs")
+          // console.log("typed in " + (new Date().getTime() - start)/1000 + "secs")
           textillateContainer.css(savedCssTC);
           cinemaText.css(savedCssCT);
           cinemaText.html(cinemaHtml);
@@ -157,7 +158,7 @@ function type(strings, elSelector, opts) {
        options.onComplete(self);
     },
     onDestroy: function(self) {
-      console.log("destroyed")
+      // console.log("destroyed")
     }
 
   });
@@ -189,17 +190,17 @@ function schedule(data, timeInSeconds, taskRunner, onComplete) {
 
           if(result ===  -1) {
             if(window.animationScriptFunction) {
-              console.log('There is already a function for animation script!!!')
+              // console.log('There is already a function for animation script!!!')
             } else {
               window.animationScriptFunction = () => fn(delay) //Store function
-              console.log("Waiting for signal. Call resumeAnimationScript()")
+              // console.log("Waiting for signal. Call resumeAnimationScript()")
               $('#btnResumeAnimation').show();
             }
           } else {
             fn(delay)
           }
        } else {
-          console.log("Ended because function returned false!")
+          // console.log("Ended because function returned false!")
        }
      } else {
        if(onComplete) onComplete();
@@ -210,7 +211,7 @@ function schedule(data, timeInSeconds, taskRunner, onComplete) {
 
 function resumeAnimationScript() {
   if(!window.animationScriptFunction) {
-    console.log("No animation function!!!")
+    // console.log("No animation function!!!")
     return
   }
   window.animationScriptFunction()
@@ -236,6 +237,7 @@ function playCode(code) {
   schedule(indices, 0.1, (ln)=> {
     editor.setValue(lines.slice(0, ln+1).join(""));
     editor.getSelection().clearSelection();
+    editor.scrollToLine(ln+3, true, true, function () {});
   }, () => {
     resumeAnimationScript()
   })
@@ -243,13 +245,38 @@ function playCode(code) {
 }
 
 function createTextBox(text, css) {
+
   css = Object.assign({}, css, { padding: 20 })
+  if(css.width) {
+    css.padding = Math.min(css.padding, css.width)
+  }
+
   css.position = 'absolute'
 
   let item = $(`<div class="text"> ${text}</div>`).css(css)
 
   txt.append(item)
-  $(item).draggable()
+
+  window.globalVariableNames['texts'] += 1
+  var varName = "T"+ window.globalVariableNames['texts']
+  logItem(varName, item, 'Text', {delete: () => globalVariableNames[varName].all.remove() })
+
+  item.attr('data-name', varName);
+
+  $(item).draggable({
+    start: function( event, ui ) {
+
+    },
+    stop: function( event, ui ) {
+      console.log(`window.globalVariableNames['${varName}'].animate({left: ${parseInt(item.offset().left)}, top: ${parseInt(item.offset().top)}}, 1000)`)
+    }
+  })
+
+  item[0].ondblclick = e => {
+    editSelectedObject(item, varName)
+  }
+
+  moveToFront('txt')
 
   return item;
 }
@@ -279,6 +306,7 @@ function bringInText(text, opts) {
   var item = createTextBox(text, css)
 
   $(item).velocity(opts.to, {duration: 1000});
+
 
   window.globalVariableNames['texts'] += 1
   var varName = "T"+ window.globalVariableNames['texts']
@@ -340,27 +368,26 @@ function resetMatrix(name) {
 
 function contextMenuListener(el, dataCells) {
     el.addEventListener( "contextmenu", function(e) {
-//      console.log(e, el);
       e.preventDefault()
 
       let change = (x,y,z) => changeTableCell(x,y,z, dataCells);
 
       $('#edit-table-cell-toolbar').show().css({ left: e.x, top: e.y});
       $('#edit-table-cell-toolbar input[name="value"]').unbind('change').on('change',e => {
-//        console.log(e.target.value)
+
           change('data', $(el), e.target.value);
       });
       $('#edit-table-cell-toolbar input[name="value"]').unbind('focusout').on('focusout',e => {
-//          console.log(e.target.value)
+
           change('data', $(el), e.target.value);
       });
 
       $('#edit-table-cell-toolbar input[name="background"]').unbind('change').change(e => {
-//        console.log(e.target.value)
+
           change('css', $(el), { backgroundColor: e.target.value})
       });
       $('#edit-table-cell-toolbar input[name="color"]').unbind('change').change(e => {
-//        console.log(e.target.value)
+
           change('css', $(el), { color: e.target.value})
       });
       $('#edit-table-cell-toolbar button.reset').unbind('click').click(e => {
@@ -416,14 +443,23 @@ function createMatrix(sel) {
 }
 
 function _createMatrix(vals){
+  console.log(`_createMatrix(${JSON.stringify(vals)})`)
+
   let data = vals.data, location = vals.location || vals.position || '160,20',
       size = vals.size || '600,400',
       sel = vals.sel,
-      xtitle = vals.xtitle || 'Columns',
-      ytitle = vals.ytitle || 'Rows',
+      xtitle = vals.xtitle,
+      ytitle = vals.ytitle,
       _xheaders = vals.xheaders || 'indices',
       _yheaders = vals.yheaders || 'indices'
       width = vals.width, height = vals.height;
+
+     if(xtitle === undefined) {
+       xtitle = 'Columns'
+     }
+     if(ytitle === undefined) {
+       ytitle = 'Rows'
+     }
 
      var xheaders = null, yheaders = null
 
@@ -442,7 +478,7 @@ function _createMatrix(vals){
 
           if(_yheaders === 'indices') {
               yheaders = [...Array(_data.length).keys()];
-              console.log(yheaders)
+              // console.log(yheaders)
           } else {
               yheaders = eval("[" + _yheaders + "]")
           }
@@ -477,8 +513,20 @@ function _createMatrix(vals){
           contextMenuListener(el, dataCells);
       });
 
+      window.globalVariableNames['matrices'] += 1
+      var varName = "M"+ window.globalVariableNames['matrices']
+      logItem(varName, table, 'Table', {delete: () => globalVariableNames[varName].all.remove() })
+
+      
+
       dataCells.each((i,el) => {
           addHighlightCapability(el, dataCells)
+          $(el)[0].ondblclick = e => {
+            let r = $(el).data("row") + 1;
+            let c = $(el).data("column") + 1;
+
+            editSelectedObject(el, `globalVariableNames['${varName}'].at(${r}, ${c})`);
+          };
       });
 
       table.all.find("th:nth(0)").click(e => {
@@ -493,11 +541,11 @@ function _createMatrix(vals){
           })
       }
 
-      window.globalVariableNames['matrices'] += 1
-      var varName = "M"+ window.globalVariableNames['matrices']
-      logItem(varName, table, 'Table', {delete: () => globalVariableNames[varName].all.remove() })
+      try {
+        $(sel).dialog('close');
+      } catch(e) {
 
-      $(sel).dialog('close');
+      }
       moveToFront('txt')
 
       return table
@@ -529,7 +577,7 @@ function createArray(sel) {
 
         if(_yheaders === 'indices') {
             yheaders = [...Array(_data.length).keys()];
-            console.log(yheaders)
+            // console.log(yheaders)
         } else {
             yheaders = eval("[" + _yheaders + "]")
         }
@@ -801,54 +849,104 @@ function Paste(canvas) {
     });
 }
 
-function editSelectedObject() {
-    if (!pc.getActiveObject()) return;
-    var obj = pc.getActiveObject()
+function editSelectedObject(el, varName) {
+    // if (!pc.getActiveObject()) return;
+    // var obj = pc.getActiveObject()
+      let translate = txt => {
+        let wh = txt.startsWith('wh=') && txt.split("wh=")[1].split(",")
+        if(wh.length == 2){
+            return {"width": wh[0], height: wh[1]}
+        }
+        
+        wh = txt.startsWith('xy=') && txt.split("xy=")[1].split(",")
+        if(wh.length == 2){
+            return {"left": wh[0], top: wh[1]}
+        }
 
-    var p = prompt('Enter command')
-    if (!p || !p.split(":").length == 2) return
+        wh = txt.startsWith('bg=') && txt.split("bg=")[1]
+        if(wh){
+            return {"background": wh}
+        }
 
-    var command = p.split(":")[0]
-    var data = p.split(":")[1].trim()
+        wh = txt.startsWith('fg=') && txt.split("fg=")[1]
+        if(wh){
+            return {"color": wh}
+        }
 
-    if (!obj._objects || obj._objects.length < 2) return;
+        if(txt.startsWith('circle')){
+            return {'border-radius': '50%'}
+        }
 
-    switch (command) {
-        case 'bg':
-            obj._objects[0].set({
-                fill: data
-            })
-            break
-        case 'fg':
-            obj._objects[1].set({
-                fill: data
-            })
-            break
-        case 'text':
-            obj._objects[1].set({
-                text: data
-            })
-            break
-        case 'anim':
-            highlightByZooming(obj, pc)
-            break
-        case 'stop'	:
-            stopAnimation(obj, pc)
-            break
-        case 'controls':
-            obj.hasControls = data === 'on' ? true: false
-            break;
-        case 'hide':
+        let ret = {}
+        wh = txt.split(":")
+        ret[wh[0]] = wh[1];
 
-            break;
-        case 'show':
+        return ret;
+    };
 
-            break;
-        case 'rm':
+    var commands = prompt('Enter command')
+    
 
-            break;
+    // if (!obj._objects || obj._objects.length < 2) return;
+
+    let executeCommand = (commandStr) => {
+            let command = commandStr.split('=');
+
+            let data = command.length == 2 && command[1];
+
+            switch (command[0]) {
+              case 'bg':
+              case 'fg':
+                  let css = translate(commandStr)
+                  $(el).css(css)
+                  console.log(`${varName}.css(${JSON.stringify(css)})`)
+                  break
+              case 'css':
+                  css = translate(command[1])
+                  $(el).css(css)
+                  console.log(`${varName}.css(${JSON.stringify(css)})`)
+                  break    
+              case 'text':
+                  // obj._objects[1].set({
+                  //     text: data
+                  // })
+                  $(el).html(command[1])
+                  console.log(`${varName}.html(${command[1]})`)
+                  break
+              case 'anim':
+                  // highlightByZooming(obj, pc)
+                  $(el).addClass('zoominout')
+                  console.log(`${varName}.addClass('zoominout')`)
+                  break
+              case 'stop' :
+                  // stopAnimation(obj, pc)
+                  $(el).removeClass('zoominout')
+                  console.log(`${varName}.removeClass('zoominout')`)
+                  break
+              case 'controls':
+                  // obj.hasControls = data === 'on' ? true: false
+                  break;
+              case 'hide':
+                  $(el).hide('slow')
+                  break;
+              case 'show':
+                  $(el).show('slow')
+                  break;
+              case 'dim':
+                  if(!data) data = 0.5
+                  $(el).css({opacity: data})
+                  console.log(`${varName}.css({opacity: ${data}})`)
+                  break;          
+          }
     }
-    pc.renderAll();
+
+    commands.split(";").forEach(c => {
+      executeCommand(c)      
+    })
+    // var command = p.split(":")[0]
+    // var data = p.split(":").length == 2 && p.split(":")[1].trim()
+
+    // pc.renderAll();
 }
 
 function makeLine(coords) {
@@ -1009,628 +1107,43 @@ function moveToFront(whichOne){
     }
 }//end moveToFront
 
-//play from files
-var openFile = function(event) {
-    var input = event.target;
 
-    var readFile = (filename) => {
-        if(!filename) return "{}"
-        var promise = new Promise(function(resolve, reject) {
-            var reader = new FileReader();
-            reader.onload = function(){
-              var text = reader.result;
-              console.log(reader.result.substring(0, 200));
-              resolve(text)
+function arrayOfTexts(texts, opts){
+  texts = texts.split(", ");
+  if(!opts) opts = {}
+  let y = opts.y || 100;
+  let x = opts.x || 100;
+  let gutter = opts.gutter || 30;
+  texts.forEach(t => {
+    let tb = createTextBox(t, {background: 'blue', 'color': 'white', top: y, left: x, fontWeight: 'bolder'})
+    x += tb.outerWidth() + gutter;
+  })
+}
+
+let Playtform = {
+  createArray,
+  createMatrix,
+  createTextBox,
+  duplicate,
+  changeTableCell,
+  highlightMatrixRow,
+  highlightMatrixColumn,
+  unHighlightMatrixRow,
+  unHighlightMatrixColumn
+}
+
+function traceMethodCalls(obj) {
+    const handler = {
+        get(target, propKey, receiver) {
+            const origMethod = target[propKey];
+            return function (...args) {
+                const result = origMethod.apply(this, args);
+                console.log(`${propKey}(${args.map(it => JSON.stringify(it)).join(",")})`);
+                return result;
             };
-            reader.readAsText(filename);
-        });
-
-        return promise
-    } //
-
-    var len = input.files.length
-
-    var getFile = nm => {
-        var x = range(0,len).find(i => input.files[i].name.indexOf(nm) > 0);
-        return input.files[x]
-    }
-
-    Promise.all([
-        readFile(getFile('_pc')),
-        readFile(getFile('_oc')),
-        readFile(getFile('_txt')),
-    ]).then(data => {
-        var pcData = JSON.parse(data[0])
-        var ocData = JSON.parse(data[1])
-        var txtData = JSON.parse(data[2])
-
-        var frames = obj => Object.keys(obj).map(x => Number.parseInt(x)).sort((a,b)=> a-b);
-
-        playRecording(40, {
-            pc: [pcData, frames(pcData)],
-            oc: [ocData, frames(ocData)],
-            txt: [txtData, frames(txtData)]
-        });
-        stopPlayback = true;
-
-        moveToFront('pc')
-        $('#toolbar1-buttons').hide()
-        $('#drawing-mode-options').hide()
-        $("#recordingFileChooserDialog" ).dialog('destroy')
-
-    }).finally(data => {
-        console.log(data)
-    });
-
-  }; //end openFile
-
-function saveCanvas() {
-            var idx = window.savePoint || 0;
-
-            localStorage.setItem('pc_' + idx, JSON.stringify(pc.toDatalessJSON()))
-            localStorage.setItem('oc_' + idx, JSON.stringify(oc.toDatalessJSON()))
-
         }
-
-        function restoreCanvas() {
-            var idx = Number.parseInt($('#savePoints').val())
-            saveCanvas()
-            window.savePoint = idx;
-            pc.clear();
-            oc.clear();
-            var data = JSON.parse(localStorage.getItem('pc_' + idx))
-            pc.loadFromDatalessJSON(data)
-
-            pc.renderAll();
-            var data1 = JSON.parse(localStorage.getItem('oc_' + idx))
-            oc.loadFromDatalessJSON(data1)
-            oc.renderAll();
-        }
-
-        function newCanvas() {
-            saveCanvas()
-            var idx = $('#savePoints option').length
-            pc.clear();
-            oc.clear();
-            $('#savePoints').append('<option>' + idx + '</option>')
-            $('#savePoints').val(idx + '')
-
-            window.savePoint = idx;
-        }
-
-function handleFileDialogButtons(src) {
-            if (src == "OK") {
-                var url = $('#imageInputUrl').val()
-                if (url) {
-                    fabric.Image.fromURL(url, function(oImg) {
-                        oImg.set({
-                            'left': 100
-                        });
-                        oImg.set({
-                            'top': 100
-                        });
-                        pc.add(oImg);
-                        $('#imageInputUrl').val('')
-                    });
-                } else {
-                    //Handle file selection
-                    var file = document.querySelector('#imageInputFile').files[0];
-                    var reader = new FileReader();
-                    reader.addEventListener("load", function() {
-                        fabric.Image.fromURL(reader.result, function(oImg) {
-                            oImg.set({
-                                'left': 100
-                            });
-                            oImg.set({
-                                'top': 100
-                            });
-                            pc.add(oImg);
-                        });
-                    }, false);
-                    if (file) {
-                        reader.readAsDataURL(file);
-                    }
-                }
-                $('#imageInputDialog').hide();
-            } else {
-                $('#imageInputDialog').hide();
-            }
-        }
-
-
-
-	var dmp = new diff_match_patch();
-
-	function toggleRecording(){
-		if(window.playingMode) {
-			if(!window.stopPlayback) window.stopPlayback = true
-			else window.stopPlayback = false;
-
-			return;
-		};
-		window.recording = !window.recording
-		if(!window.recording){
-			$('#recording-info').html('Stopped at: '+recordingTimer)
-		}
-	}
-
-	function initializeRecording(){
-		//if(window.playingMode) return;
-		if(window.playingMode){
-			var conf = confirm('You Are In Playing Mode. U Sure To Record?')
-			if(!conf) return;
-
-			Object.keys(localStorage).filter(x => x.startsWith(`recording_`)).forEach(x => {
-				localStorage.removeItem('recording_pc_'+x);
-				localStorage.removeItem('recording_oc_'+x);
-				localStorage.removeItem('recording_txt_'+x);
-			})
-
-			localStorage.clear();
-		}
-		$('#toolbarToggle').click()
-		$('#toolbarToggle1').click()
-
-		window.playingMode = false
-		window.recording = true;
-		window.prevCanvasStates = {}
-		window.recordingTimer = window.recordingTimer || 0;
-
-		if(!window.recordingName){
-			window.recordingName = prompt('Name of recording?')
-		}
-
-		const changesInCanvas = (prevCanvasState,newCanvasState,name)=> {
-			var diff = dmp.diff_main(JSON.stringify(prevCanvasState), JSON.stringify(newCanvasState), true);
-
-			if(diff.length > 0){
-				if (diff.length > 2) {
-					dmp.diff_cleanupSemantic(diff);
-				}
-
-				var patch_list = dmp.patch_make(JSON.stringify(prevCanvasState), JSON.stringify(newCanvasState), diff);
-				patch_text = dmp.patch_toText(patch_list);
-
-				if(patch_text.length > 0){
-					return patch_text
-				}
-
-			};
-			return null;
-		}//changesInCanvas
-
-		var zInices = ()=> {
-			return [$($('.canvas-container')[0]).css('zIndex'), $($('.canvas-container')[1]).css('zIndex'), $('#textillateContainer').css('zIndex')];
-		};
-
-		window.recordingInterval = setInterval(x => {
-			if(!window.recording) return;
-
-			var postToServer = (data, part) => $.ajax({
-			   url: 'http://localhost:8081/api/recording/push?name='+window.recordingName+"&component="+part,
-			   method: 'post',
-			   data: JSON.stringify(data),
-			   dataType: 'json',
-			   contentType: 'application/json'
-			})
-
-			var newCanvasStates = {
-				pc: pc.toDatalessJSON(),
-				oc: oc.toDatalessJSON(),
-				text: $('#textillateContainer').html()
-			}
-			try {
-
-				var pcChanges = changesInCanvas(prevCanvasStates.pc || {}, newCanvasStates.pc)
-				if(pcChanges){
-					var key = ''+recordingTimer
-					var data = {}
-					data[key] = { zIndex: zInices(), state: newCanvasStates.pc }
-					postToServer(data, 'pc')
-					prevCanvasStates.pc = newCanvasStates.pc
-				}
-
-				var ocChanges = changesInCanvas(prevCanvasStates.oc || {}, newCanvasStates.oc)
-				if(ocChanges){
-					var key = ''+recordingTimer
-					var data = {}
-					data[key] = { zIndex: zInices(), state: newCanvasStates.oc }
-					postToServer(data, 'oc')
-
-					prevCanvasStates.oc = newCanvasStates.oc
-				}
-
-				var htmlChanges = changesInCanvas(prevCanvasStates.text || {}, newCanvasStates.text)
-				if(htmlChanges.length && newCanvasStates.text){
-					var key = ''+recordingTimer
-					var data = {}
-					data[key] = { zIndex: zInices(), state: newCanvasStates.text };
-					postToServer(data, 'txt')
-
-					prevCanvasStates.text = newCanvasStates.text
-				}
-			} catch(e){
-				console.log('Probably quota of localStorage exceeded! Stopping Recording')
-				//recording = false
-
-			}
-
-
-			$('#recording-info').html('Recording: '+window.recordingTimer)
-			recordingTimer++;
-		}, 4) //40 milliseconds
-
-	}
-
-	function closest (num, arr) {
-		var mid;
-		var lo = 0;
-		var hi = arr.length - 1;
-		while (hi - lo > 1) {
-			mid = Math.floor ((lo + hi) / 2);
-			if (arr[mid] < num) {
-				lo = mid;
-			} else {
-				hi = mid;
-			}
-		}
-		if (num - arr[lo] <= arr[hi] - num) {
-			return arr[lo];
-		}
-		return arr[hi];
-	}
-
-	function snapValue(value, values){
-		adjustedValue = closest(value, values) || value;
-		console.log(`${value} snapped to ${adjustedValue}`)
-
-		$( "#rollbackConfirmationDialog .slider" ).slider('value', adjustedValue)
-		return adjustedValue
-	}
-
-	function launchRollbackRecording(){
-		var saved = reconstructCanvasStates('pc')
-		var savedTxt = reconstructCanvasStates('txt')
-		var savedOc = reconstructCanvasStates('oc')
-
-		var frames = saved[1] //sorted
-
-		$( "#rollbackConfirmationDialog" ).dialog({
-			buttons: [
-				{
-				  text: "Ok Rollback",
-				  click: function() {
-					$( this ).dialog( "close" );
-					rollbackRecordingTo({pc: saved, oc: savedOc, txt: savedTxt}, Number.parseInt($('#rollbackConfirmationDialog span.info').html()))
-				  }
-				}
-			]//buttons
-		});
-
-		moveToFront('txt')
-
-		$("#rollbackConfirmationDialog .slider").slider({
-			range: false,
-			min: 0,
-			max: frames[frames.length-1]+1,
-			slide: (x,y) => {
-				var val = snapValue(y.value, frames)
-				$('#rollbackConfirmationDialog span.info').html(val)
-			}
-
-		}); //
-
-	}
-
-	function rollbackRecordingTo(saved,time){
-			if(!time) return;
-
-			pc.loadFromDatalessJSON(saved['pc'][0][time])
-			pc.renderAll()
-			if(saved['oc']){
-				var x = closest(time, saved['oc'][1])
-				oc.loadFromDatalessJSON(saved['oc'][0][x])
-				oc.renderAll()
-			}
-			if(saved['txt']){
-				var x = closest(time, saved['txt'][1])
-				$('#textillateContainer').html(saved['txt'][0][x])
-			}
-			var toRemove = Object.keys(localStorage).filter(x => x.startsWith(`recording_pc_`)).map(x => Number.parseInt(x.split("_")[2])).filter(x => x > time)
-
-			toRemove.forEach(x => localStorage.removeItem('recording_pc_'+x))
-
-			console.log('Removed '+toRemove.length+' frames of pc!')
-
-			toRemove = Object.keys(localStorage).filter(x => x.startsWith(`recording_oc_`)).map(x => Number.parseInt(x.split("_")[2])).filter(x => x > time)
-
-			toRemove.forEach(x => localStorage.removeItem('recording_oc_'+x))
-
-			console.log('Removed '+toRemove.length+' frames of oc!')
-
-			window.recordingTimer = time;
-			$('#recording-info').html('Rollbacked To: '+time);
-
-
-	}
-
-
-
-	function reconstructCanvasStates(name){
-		    var frames = Object.keys(localStorage).filter(x => x.startsWith(`recording_${name}_`)).map(x => Number.parseInt(x.split("_")[2])).sort((a,b)=> a-b);
-
-			var reconstructedCanvasStates = {}
-			var reducer = (initialOrAccumulator, currentValue) => {
-				var patches = dmp.patch_fromText(localStorage[`recording_${name}_${currentValue}`]);
-				var results = dmp.patch_apply(patches, initialOrAccumulator);
-				reconstructedCanvasStates[currentValue] = JSON.parse(results[0]);
-				return results[0]
-			};
-			frames.reduce(reducer, JSON.stringify({}))
-
-			return [reconstructedCanvasStates, frames];
-	}
-
-
-
-	function launchRecordingDialog(){
-		$( "#recordingFileChooserDialog" ).dialog({
-			buttons: [
-				{
-				  text: "Play From LocalStorage",
-				  click: function() {
-					$( this ).dialog( "close" );
-					playRecording(null)
-				  }
-				}
-			]//buttons
-		});
-		moveToFront('txt')
-
-	}
-
-	function playRecording(speedInMilliseconds, data){
-			console.log('Playing')
-			window.recordingMode = false;
-			window.playingMode = true;
-			$('#toolbar1-buttons').hide()
-			$('#drawing-mode-options').hide()
-
-			speedInMilliseconds = speedInMilliseconds || 4;
-			var x = null;
-			var y = null;
-			var z = null;
-
-			if(data){
-				x = data.pc
-				y = data.oc
-				z = data.txt
-			} else {
-				x = reconstructCanvasStates('pc')
-				y = reconstructCanvasStates('oc')
-				z = reconstructCanvasStates('txt')
-			}
-
-
-			var reconstructedCanvasStatesPc = x[0]
-			var reconstructedCanvasStatesOc = y[0]
-			var reconstructedCanvasStatesTxt = z[0]
-			var framesPc = x[1]
-			var framesOc = y[1]
-			var framesTxt = z[1]
-
-			console.log('PcFrames:' + `${framesPc[0]} ${framesPc[framesPc.length-1]}`)
-			console.log('OcFrames:' + `${framesOc[0]} ${framesOc[framesOc.length-1]}`)
-			console.log('TxtFrames:' + `${framesTxt[0]} ${framesTxt[framesTxt.length-1]}`)
-
-			var count = framesPc[framesPc.length-1]
-			if(framesOc[framesOc.length-1] > count ) count = framesOc[framesOc.length-1]
-			if(framesTxt[framesTxt.length-1] > count ) count = framesTxt[framesTxt.length-1]
-
-			window.playerTimerTotal = count;
-
-
-			var source = Rx.Observable.interval(speedInMilliseconds).timeInterval().take(count);
-
-			window.playerTimer = framesPc[0]
-			if(framesOc[0] < window.playerTimer ) window.playerTimer = framesOc[0]
-			if(framesTxt[0] < window.playerTimer) window.playerTimer = framesTxt[0]
-
-			window.playerTimerStart = playerTimer
-
-			$('#playbackControls .slider').slider({
-				min: playerTimer,
-				max: count,
-				step: 10,
-				value: playerTimer,
-				slide: (x,y) => {
-					$('#playbackControls .slider').find(".ui-slider-handle").text(y.value);
-					playerTimer = y.value
-					stopPlayback = true;
-					setTimeout(x => { stopPlayback = false; },2)
-				}
-			})
-			$($('#playbackControls span.time')[0]).html(playerTimer)
-			$($('#playbackControls span.time')[1]).html(count)
-
-			$('#playbackControls').show().css({ zIndex: 100000 })
-
-			var playerInterval = null;
-
-			//This is so that I can add delays at frame points programmatically.
-			var delayAmount = 0;
-			var delayInterval = 0;
-
-			playerInterval = setInterval(x => {
-				if(playerTimer > count){
-					clearInterval(playerInterval)
-					window.recordingTimer = playerTimer;
-					return;
-				}
-				if(window.stopPlayback) return;
-
-				$('#recording-info').html('Playing: '+playerTimer);
-
-				var f = playerTimer;
-				var statesPc = reconstructedCanvasStatesPc[f] && reconstructedCanvasStatesPc[f].state
-				if(statesPc){
-					$($('.canvas-container')[0]).css({ zIndex: reconstructedCanvasStatesPc[f].zIndex[0] })
-					$($('.canvas-container')[1]).css({ zIndex: reconstructedCanvasStatesPc[f].zIndex[1] })
-					$('#textillateContainer').css({ zIndex: reconstructedCanvasStatesPc[f].zIndex[2] })
-					pc.loadFromDatalessJSON(statesPc, ()=> pc.renderAll());
-				}
-
-				var statesOc = reconstructedCanvasStatesOc[f] && reconstructedCanvasStatesOc[f].state
-				if(statesOc){
-					$($('.canvas-container')[0]).css({ zIndex: reconstructedCanvasStatesOc[f].zIndex[0] })
-					$($('.canvas-container')[1]).css({ zIndex: reconstructedCanvasStatesOc[f].zIndex[1] })
-					$('#textillateContainer').css({ zIndex: reconstructedCanvasStatesOc[f].zIndex[2] })
-					oc.loadFromDatalessJSON(statesOc, ()=> oc.renderAll());
-				}
-
-				var statesTxt = reconstructedCanvasStatesTxt[f] && reconstructedCanvasStatesTxt[f].state
-				if(statesTxt){
-					$($('.canvas-container')[0]).css({ zIndex: reconstructedCanvasStatesTxt[f].zIndex[0] })
-					$($('.canvas-container')[1]).css({ zIndex: reconstructedCanvasStatesTxt[f].zIndex[1] })
-					$('#textillateContainer').css({ zIndex: reconstructedCanvasStatesTxt[f].zIndex[2] })
-					$('#textillateContainer').html(statesTxt);
-
-				}
-				$("#slider").val(playerTimer);
-				$("#slider").slider("refresh");
-
-				delayAmount = (window.delayPoints && window.delayPoints[playerTimer]) || 0
-
-				if(delayInterval >= delayAmount) {
-					delayAmount = 0;
-					delayInterval = 0;
-				}
-				if(delayAmount == 0){
-				    playerTimer++;
-				} else {
-					console.log('delaying')
-					delayInterval++;
-				}
-
-			}, 1);
-
-		}//End playRecording
-
-		function saveRecording(){
-			var saved = reconstructCanvasStates('pc')
-			var savedTxt = reconstructCanvasStates('txt')
-			var savedOc = reconstructCanvasStates('oc')
-
-			if(!window.recordingName){
-				var name = prompt('Recording Name?')
-				if(!name) name = new Date().toISOString();
-
-			}
-
-			var num = window.currentRecordingSliceNumber || 1
-			download(JSON.stringify(saved[0]), `recording_pc.${num}.txt`,"plain/text")
-			download(JSON.stringify(savedOc[0]), `recording_oc.${num}.txt`,"plain/text")
-			download(JSON.stringify(savedTxt[0]), `recording_txt.${num}.txt`,"plain/text")
-
-			window.currentRecordingSliceNumber++;
-
-			localStorage.clear()
-		}
-
-		function download(data, filename, type) {
-			var file = new Blob([data], {type: type});
-			if (window.navigator.msSaveOrOpenBlob) // IE10+
-				window.navigator.msSaveOrOpenBlob(file, filename);
-			else { // Others
-				var a = document.createElement("a"),
-						url = URL.createObjectURL(file);
-				a.href = url;
-				a.download = filename;
-				document.body.appendChild(a);
-				a.click();
-				setTimeout(function() {
-					document.body.removeChild(a);
-					window.URL.revokeObjectURL(url);
-				}, 0);
-			}
-		}
-
-		$(document).ready(function() {
-		  var icon = $('.play');
-		  icon.click(function() {
-			 icon.toggleClass('active');
-			 return false;
-		  });
-		});
-
-		document.onclick = e => {
-			window.lastClickedX = e.clientX;
-			window.lastClickedY = e.clientY;
-		}
-
-		window.canPasteImageFromClipboard = true;
-		document.onpaste = function (event) {
-
-//		  console.log(event)
-		  // use event.originalEvent.clipboard for newer chrome versions
-		  var items = (event.clipboardData  || event.originalEvent.clipboardData).items;
-		  console.log(JSON.stringify(items)); // will give you the mime types
-		  // find pasted image among pasted items
-		  var blob = null;
-		  for (var i = 0; i < items.length; i++) {
-			if (items[i].type.indexOf("image") === 0) {
-			  blob = items[i].getAsFile();
-			}
-		  }
-		  // load image if there is a pasted image
-		  if (blob !== null) {
-		    if(!canPasteImageFromClipboard) return;
-
-			var reader = new FileReader();
-			reader.onload = function(event) {
-			  var url = event.target.result; // data url!
-			  if(url.indexOf("data") >= 0){
-
-				if(window.insertPastedImageIntoFabric){
-					fabric.Image.fromURL(url, function(oImg) {
-							oImg.set({
-								'left': window.lastClickedX || 100
-							});
-							oImg.set({
-								'top': window.lastClickedY || 100
-							});
-							oc.add(oImg);
-					});
-				} else {
-				    var id = prompt('Enter id')
-					if(id){
-						var container = $('<div>').css({ display: 'inline-block', position: 'absolute'}).attr({'id': id})
-						window.pastedItems = window.pastedItems || {}
-						window.pastedItems[id] = 1;
-
-						var img = $('<img>').attr({src: url})
-						img.css({ left: window.lastClickedX || 100, top: window.lastClickedY || 100, width: '100%', height: '100%'})
-
-						container.prepend(img)
-						var i = new Image();
-
-						i.onload = function(){
-							console.log( i.width+", "+i.height );
-							$('#textillateContainer').append(container)
-							container.css({ width: i.width, height: i.height })
-							container.resizable()
-							container.draggable()
-							moveToFront('txt')
-						};
-
-						i.src = url;
-					}
-				}
-
-			  }
-			};
-			reader.readAsDataURL(blob);
-		  }
-		}//onpaste
-
-
+    };
+    return new Proxy(obj, handler);
+}
+
+let playtform = traceMethodCalls(Playtform)
