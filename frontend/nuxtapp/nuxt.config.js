@@ -74,5 +74,13 @@ export default {
   ** See https://nuxtjs.org/api/configuration-build/
   */
   build: {
+    loaders:  {
+      vue: {
+         prettify: false
+      }
+    },
+    babel: {
+      compact: true
+    }
   }
 }
