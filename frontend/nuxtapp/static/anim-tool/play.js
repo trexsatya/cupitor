@@ -246,7 +246,7 @@ function playCode(code) {
 
 function createTextBox(text, css) {
 
-  css = Object.assign({}, css, { padding: 20 })
+  css = Object.assign({}, { padding: (css.width && css.height ? 0 : 20) }, css)
   if(css.width) {
     css.padding = Math.min(css.padding, css.width)
   }
@@ -894,10 +894,12 @@ function editSelectedObject(el, varName) {
 
             let data = command.length == 2 && command[1];
 
+            let css = null;
+            
             switch (command[0]) {
               case 'bg':
               case 'fg':
-                  let css = translate(commandStr)
+                  css = translate(commandStr)
                   $(el).css(css)
                   console.log(`${varName}.css(${JSON.stringify(css)})`)
                   break
