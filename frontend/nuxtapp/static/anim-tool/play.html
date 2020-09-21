@@ -110,7 +110,15 @@
             <input placeholder="Ex: [1, 2], [2, 3]" name="data" value="[1,2,3], [4,5,6]" style="width: 80%">
             <button type="submit" onclick="createMatrix('#CMOGDAT-dialog')">OK</button>
             <br> <br>
-            <input placeholder="Location on screen" value="400,80" name="location">
+            Loc(Top,Left):<input placeholder="Location on screen" value="100,80" name="location">
+            Dim(Width,Height):<input placeholder="Dimensions" value="300,100" name="size">
+            <br><br>
+            X-Headers: <input placeholder="X Headers" value="indices" name="xheaders">
+            Y-Headers: <input placeholder="Y Headers" value="indices" name="yheaders">
+            <br><br>
+            X-Title: <input placeholder="X Headers" value="Columns" name="xtitle">
+            Y-Title: <input placeholder="Y Headers" value="Rows" name="ytitle">
+
     </div>
 
     <div id="CAOGSD-dialog" title="Enter required data" class="dialog">
@@ -133,7 +141,13 @@
         <button id="btnStop" style="display: none;">STOP</button>
         <button id="btnPause" style="display: none;">PAUSE</button>
         <button id="btnResume" style="display: none;">RESUME</button>
+        <button id="btnStartAnim">REC-ANIM</button>
+        <button id="btnStopAnim" style="display: none;">STOP-ANIM</button>
+        <button id="btnPauseAnim" style="display: none;">PAUSE-ANIM</button>
+        <button id="btnResumeAnim" style="display: none;">RESUME-ANIM</button>
+
         <button id="btnResumeAnimation" style="display: none" onclick="resumeAnimationScript()">ANIM-SCRIPT</button>
+
     </div>
 
     <div style="position: fixed; right: -37px; top: 10%;z-index: 3000; color: green">
@@ -203,7 +217,7 @@
         </div>
     </div>
 
-    <div id="editor" style="position: absolute;top:0; left: 50%;width: 49%; z-index: 30000; height: 100%; display: none">
+    <div id="editor" style="position: absolute;top:0; left: 45%;width: 55%; z-index: 30000; height: 100%; display: none">
     </div>
     <script>
         var editor = ace.edit("editor");
@@ -512,7 +526,6 @@
         })
         $('#create-small-text').click(e => {
             window.insertSmallText = true;
-            turnOffDrawing();
         })
 
         $('#create-rect-text').click(e => {
@@ -620,18 +633,7 @@
                 _.textboxes.push(tb)
                 window.insertText = false;
             }
-            if (window.insertSmallText) {
-                var tb = textbox({
-                    top: e.e.clientY,
-                    left: e.e.clientX,
-                    width: 25
-                })
-                pc.add(tb)
-
-                pc.setActiveObject(tb)
-                _.textboxes.push(tb)
-                window.insertSmallText = false;
-            }
+            
             if (window.signalMatexInsertion) {
                 window.signalMatexInsertion = false;
                 window.matexInsertionPoint = {
@@ -687,26 +689,103 @@
             'r': 'reden',
             'g': 'greenen',
             'b': 'bluen',
-            'e': 'execute-next',
+            // 'e': 'execute-next',
             'w': 'whiten'
         }
-        $(document).keydown(e => {
+
+        $(document).mouseup(e => {
+            if (window.insertSmallText) {
+                let text = prompt('Enter text')
+
+                let translate = txt => {
+                    let wh = txt.startsWith('wh=') && txt.split("wh=")[1].split(",")
+                    if(wh.length == 2){
+                        return {"width": wh[0], height: wh[1]}
+                    }
+                    
+                    wh = txt.startsWith('xy=') && txt.split("xy=")[1].split(",")
+                    if(wh.length == 2){
+                        return {"left": wh[0], top: wh[1]}
+                    }
+
+                    wh = txt.startsWith('bg=') && txt.split("bg=")[1]
+                    if(wh){
+                        return {"background": wh}
+                    }
+
+                    wh = txt.startsWith('fg=') && txt.split("fg=")[1]
+                    if(wh){
+                        return {"color": wh}
+                    }
+
+                    if(txt.startsWith('circle')){
+                        return {'border-radius': '50%'}
+                    }
+
+                    let ret = {}
+                    wh = txt.split(":")
+                    ret[wh[0]] = wh[1];
+
+                    return ret;
+                };
+
+                if(text) {
+                    let css = prompt('Enter css', `xy=${e.clientX},${e.clientY};`) 
+                    css = css || '';
+
+                    try {
+                        css = JSON.parse(`{${css}}`)
+                    } catch(e) {
+                        let splts = css.split(";");
+                        css = {};
+                        splts.forEach(s => {
+                            css = Object.assign(css, translate(s));
+                        });
+                        
+                        // console.log(css)
+                    }
+
+                    if(css.bg) {
+                        css.background = css.bg;
+                    }
+                    if(css.fg) {
+                        css.color = css.fg;
+                    }
+                    if(css.w) {
+                        css.width = css.w;
+                    }                                
+                    if(css.h) {
+                        css.height = css.h;
+                    }
+                    if(css.x) {
+                        css.left = css.x;
+                    }
+                    if(css.y) {
+                        css.top = css.y;
+                    }                                                
+                    playtform.createTextBox(text, css)
+                }
+                window.insertSmallText = false;
+            }
+        });
+
+        let keyHandler = e => {
             if($('.commands-select').is(":focus") || window.commandSelectionIsGoingOn){
                 console.log('select is in focus. returning.')
             }
-			if(e.keyCode == 32 && e.target == document.body) {
-				e.preventDefault();
-			}
-			
+            if(e.keyCode == 32 && e.target == document.body) {
+                e.preventDefault();
+            }
+            
             if (document.getElementById('mathjaxDialog').style.display == 'block') return false;
             if (pc.getActiveObject() && pc.getActiveObject().type == 'textbox' && pc.getActiveObject().isEditing) return;
             if (mapping[e.key]) $("#" + mapping[e.key]).click()
             if (e.keyCode == 187) { //zoom in
                 zoomSelectedObject(true)
             }
-			if(e.keyCode == 32){
-				toggleRecording()
-			}
+            if(e.keyCode == 32){
+                toggleRecording()
+            }
             if (e.keyCode == 189) { //zoom out
                 zoomSelectedObject(false)
             }
@@ -716,31 +795,31 @@
             switch (e.keyCode) {
                 case 37: //left
                     if(pc.getActiveObject())moveActiveObject('left', -10)
-					else {
-						if(window.playingMode){
-							stopPlayback = true
-							playerTimer -= 10
-							if(playerTimer < playerTimerStart) playerTimer = playerTimerStart;
-							$('#recording-info').html('Jumped To: '+playerTimer)
-						}
-					}
+                    else {
+                        if(window.playingMode){
+                            stopPlayback = true
+                            playerTimer -= 10
+                            if(playerTimer < playerTimerStart) playerTimer = playerTimerStart;
+                            $('#recording-info').html('Jumped To: '+playerTimer)
+                        }
+                    }
                     break
-				case 67:
-					if(e.ctrlKey) Copy(pc)
-					break;
-				case 86:
-					if(e.ctrlKey) Paste(pc)
-					break;				
+                case 67:
+                    if(e.ctrlKey) Copy(pc)
+                    break;
+                case 86:
+                    if(e.ctrlKey) Paste(pc)
+                    break;              
                 case 39: //right
                     if(pc.getActiveObject())moveActiveObject('left', 10)
-					else {
-						if(window.playingMode){
-							stopPlayback = true
-							playerTimer += 10
-							if(playerTimer > playerTimerTotal) playerTimer = playerTimerTotal;
-							$('#recording-info').html('Jumped To: '+playerTimer)
-						}					
-					}
+                    else {
+                        if(window.playingMode){
+                            stopPlayback = true
+                            playerTimer += 10
+                            if(playerTimer > playerTimerTotal) playerTimer = playerTimerTotal;
+                            $('#recording-info').html('Jumped To: '+playerTimer)
+                        }                   
+                    }
                     break
                 case 40: //down
                     moveActiveObject('top', 10)
@@ -749,26 +828,36 @@
                     moveActiveObject('top', -10)
                     break
                 case 69: //'e'
-                    editSelectedObject()
+                    // editSelectedObject()
                     break
-				case 188: //,
-				    if(e.ctrlKey)
+                default:
+                    break
+            }
+        };
+
+        let generocKeys = e => {
+            switch(e.keyCode) {
+                case 188: //,
+                    if(e.ctrlKey)
                     moveToFront('pc')
                     break
-				case 190: //.
-				    if(e.ctrlKey)
+                case 190: //.
+                    if(e.ctrlKey)
                     moveToFront('oc')
                     break
-				case 191: ///
-				    if(e.ctrlKey) {
-				        e.preventDefault()
+                case 191: ///
+                    if(e.ctrlKey) {
+                        e.preventDefault()
                         moveToFront('txt')
-				    }
+                    }
                     return false
                 default:
                     break
             }
-        })
+        }
+        $(document).keydown(generocKeys);
+
+        $(document).keydown(keyHandler)
     </script>
 
 
@@ -1170,6 +1259,36 @@ $('#btnStop').on('click', (ev) => {
     $("#btnPause").hide();
     $("#btnResume").hide();
     $("#btnStart").show();
+});
+
+$('#btnStartAnim').click(e => {
+  window.scriptRecording = true;
+  $('#btnPauseAnim').show();
+  $('#btnStartAnim').hide();
+  $('#btnStopAnim').show();
+});
+
+$('#btnPauseAnim').click(e => {
+  $('#btnPauseAnim').hide();
+  $('#btnResumeAnim').show();
+  $('#btnStopAnim').show();
+});
+
+$('#btnResumeAnim').click(e => {
+  $('#btnPauseAnim').show();
+  $('#btnResumeAnim').hide();
+});
+
+$('#btnStopAnim').click(e => {
+  $('#btnPauseAnim').hide();
+  $('#btnResumeAnim').hide();
+  $('#btnStartAnim').show();
+  $('#btnStopAnim').hide();
+});
+
+var inputs = $('input');
+inputs.on("keypress keydown keyup", function(e) {
+    e.stopPropagation();
 });
 
     </script>
