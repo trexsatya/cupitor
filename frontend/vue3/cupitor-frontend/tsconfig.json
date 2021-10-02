@@ -40,6 +40,9 @@
     "tests/**/*.tsx"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "/Users/satyendra.kumar/Documents/PersonalProjects/cupitor/frontend/vue3/cupitor-frontend/src/shims-tsx.d.ts",
+    "/Users/satyendra.kumar/Documents/PersonalProjects/cupitor/frontend/vue3/cupitor-frontend/node_modules/vue/types/jsx.d.ts",
+    "/Users/satyendra.kumar/Documents/PersonalProjects/cupitor/frontend/vue3/cupitor-frontend/node_modules/vue/types/v3-component-props.d.ts"
   ]
 }

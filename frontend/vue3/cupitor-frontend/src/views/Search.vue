@@ -4,7 +4,7 @@
     <input id="searchText" class="form-control" type="text" :value="searchTerm" placeholder="Search (at least 3 letters)" aria-label="Search" v-on:keyup="fetchArticles()" />
   </b-row>
   <b-row class="">
-    <b-spinner style="width: 3rem; height: 3rem;" label="Large Spinner" v-if="searching" type="grow"></b-spinner>
+    <b-spinner style="width: 3rem; height: 3rem;" label="Large Spinner" v-if="isLoading" type="grow"></b-spinner>
   </b-row>
 
   <div v-if="!articles">
@@ -49,7 +49,7 @@ export default class SearchArticlesView extends Vue {
   }
 
   searched = false;
-  searching = false;
+  isLoading = false;
   articles = [];
   searchTerm = null;
 
@@ -67,17 +67,71 @@ export default class SearchArticlesView extends Vue {
     console.log('mounted');
     this.articles = this.$store.state.searchPage.articles;
     this.searchTerm = this.$store.state.searchPage.searchTerm;
+
+    try {
+      //@ts-ignore
+      if(window.PRELOAD_SEARCH) {
+        fetch(this.API_BASE_URL + 'search')
+          .then(x => x.json())
+          .then(resp => {
+            this.preloadedSearch = resp
+          });
+
+      }
+    } catch(e) {
+      console.log("Couldn't preload search")
+    }
+  }
+
+  asyncFind (query) {
+    if(!query) {
+      this.isLoading = false
+      return;
+    }
+    this.isLoading = true
+
+    //@ts-ignore
+    if(window.PRELOAD_SEARCH) {
+      let apiRes = this.preloadedSearch.filter(it => {
+        return it.name.toLowerCase().indexOf(query.toLowerCase()) > -1
+      }).map(it => ({ name: it.name, id: it.id }))
+      this.articles = apiRes;
+      this.isLoading = false;
+      this.$store.commit("setSearchedArticles", {
+        articles: apiRes,
+        searchTerm: query
+      });
+      this.isLoading = false
+      return
+    }
+    //debugger
+
+    // @ts-ignore
+    fetch(this.API_BASE_URL + 'search?query=' + query)
+      .then(x => x.json())
+      .then(resp => {
+        let apiRes = resp.map(it => ({ name: it.name, id: it.id }))
+        this.articles = apiRes;
+        this.isLoading = false;
+        this.$store.commit("setSearchedArticles", {
+          articles: apiRes,
+          searchTerm: query
+        });
+      })
+      .catch(e => {
+        this.isLoading = false
+      })
   }
 
   fetchArticles() {
     const el = document.getElementById("searchText");
-    this.searching = true;
+    this.isLoading = true;
     this.searchTerm = el.value;
 
     this.searched = true;
     if (!el.value || el.value.trim().length == 0) {
       this.articles = [];
-      this.searching = false;
+      this.isLoading = false;
       this.$store.commit("setSearchedArticles", {
         articles: [],
         searchTerm: ""
@@ -85,23 +139,12 @@ export default class SearchArticlesView extends Vue {
     }
 
     if (el.value.length < 3) {
-      this.searching = false;
+      this.isLoading = false;
       return;
     }
 
     console.log(el.value);
-    fetch(this.API_BASE_URL + 'search/' + el.value)
-      .then((res) => res.json())
-      .then((articles) => {
-        this.articles = articles;
-        this.searching = false;
-        this.$store.commit("setSearchedArticles", {
-          articles: articles,
-          searchTerm: el.value
-        });
-      }).catch((e) => {
-        this.searching = false;
-      });
+    this.asyncFind(el.value.trim())
   }
 
   getDateString(d) {

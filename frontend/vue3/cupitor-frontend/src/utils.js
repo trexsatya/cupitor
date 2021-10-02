@@ -6,7 +6,7 @@ function fixImageUrls() {
       e.src = href;
     }
   })
-};
+}
 
 const MathJax = window.MathJax;
 
@@ -65,7 +65,7 @@ export function transformArticle(router) {
           if (error.name != "NavigationDuplicated") {
             throw error;
           }
-        });;
+        });
       };
     })
 
@@ -89,6 +89,15 @@ export function transformArticle(router) {
   } catch (e) {
     console.log(e);
   }
+
+  (window.transformers || []).forEach(transformer => {
+    try {
+      transformer()
+    } catch (e) {
+      console.log(e);
+    }
+  })
+
 }
 
 

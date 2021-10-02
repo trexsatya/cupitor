@@ -63,9 +63,6 @@ export default class ArticleEditView extends Vue {
   inProgress = false;
   CKEDITOR = window.CKEDITOR;
 
-  API_BASE_URL = window.API_URL;
-  IMAGES_BASE_URL = window.imageCdnUrl;
-
   beforeRouteLeave(to, from, next) {
     const yes = confirm('Are you sure you want to leave?')
     if (yes) {
@@ -90,7 +87,7 @@ export default class ArticleEditView extends Vue {
       });
 
       this.setupEditor();
-      fetch(this.API_BASE_URL + 'article/' + this.$route.params.id)
+      fetch(window.API_URL + 'article/' + this.$route.params.id)
         .then((res) => res.json())
         .then((article) => {
           this.article = article;
@@ -189,12 +186,14 @@ export default class ArticleEditView extends Vue {
     }
 
     this.article.content = window.CKEDITOR.instances['editor'].getData()
-    const method = id ? 'PUT' : 'POST';
-    const url = id ? this.API_BASE_URL + "article/" + id : this.API_BASE_URL + "article";
+    // const method = id ? 'PUT' : 'POST';
+    const method = 'POST';
+    const url = id ? window.WRITE_API_URL + "article/" + id : window.WRITE_API_URL + "article";
 
     this.inProgress = true;
-    fetch(url, {
+    fetch(url + "?x-auth=" + window['X-Auth'], {
       method: method,
+      mode: 'no-cors',
       body: JSON.stringify(this.article),
       headers: {
         'X-Auth': window['X-Auth'],
@@ -204,6 +203,14 @@ export default class ArticleEditView extends Vue {
       this.inProgress = false;
       return response.json();
     });
+
+    // this.callApi(url, method, this.article, resp => {
+    //   this.inProgress = false;
+    //   console.log(resp)
+    // }, err => {
+    //   this.inProgress = false;
+    //   console.log(err)
+    // });
 
   }
 }

@@ -91,21 +91,31 @@
         </b-card>
 
 
+       <!--
         <b-card bg-variant="primary" text-variant="white" style="background-color: rgb(0 123 255 / 0.2) !important;">
           <blockquote class="card-blockquote">
-            <p>Life is a journey, without any destination.
-            <br>To make sense of it is my little ambition.
+            <p>Life is a journey, without any destination,
+            <br>To make sense of it is my little ambition!
             </p>
             <footer>
               <small>Anonymous</small>
             </footer>
           </blockquote>
         </b-card>
+        -->
 
         <b-card no-body header="Philosophy">
           <b-card-body>
             <b-list-group flush>
-              <b-list-group-item > <router-link to="/articles/philosophy"> Miscelleneous </router-link> </b-list-group-item>
+              <b-list-group-item > <router-link to="/articles/philosophy"> Miscellaneous </router-link> </b-list-group-item>
+            </b-list-group>
+          </b-card-body>
+        </b-card>
+
+        <b-card no-body header="Other Literature">
+          <b-card-body>
+            <b-list-group flush>
+              <b-list-group-item > <router-link to="/articles/literature"> Miscellaneous </router-link> </b-list-group-item>
             </b-list-group>
           </b-card-body>
         </b-card>
@@ -137,12 +147,15 @@ export default class MainNavbar extends Vue {
   selectedsearchResult = []
   searchResult = []
   isLoading = false
-
+  preloadedSearch = []
   showingModalFor: string = "Login"
   @Prop() transparent?: boolean
   @Prop() colorOnScroll?: number
 
   @Prop({default: 'white'}) type? : string
+
+  // @ts-ignore
+  API_BASE_URL = window.API_URL;
 
   asyncFind (query) {
 
@@ -150,10 +163,24 @@ export default class MainNavbar extends Vue {
 
     this.isLoading = true
 
+    //@ts-ignore
+    if(window.PRELOAD_SEARCH) {
+      let apiRes = this.preloadedSearch.filter(it => {
+        return it.name.toLowerCase().indexOf(query.toLowerCase()) > -1
+      }).map(it => ({ name: it.name, id: it.id }))
+      this.searchResult = [
+        {
+          entity: 'articles',
+          results: apiRes
+        }
+      ];
+      this.isLoading = false
+      return
+    }
     //debugger
 
     // @ts-ignore
-    fetch('http://satyendra.online:8080/api/search/' + query)
+    fetch(this.API_BASE_URL + 'search?query=' + query)
     .then(x => x.json())
     .then(resp => {
         let apiRes = resp.map(it => ({ name: it.name, id: it.id }))
@@ -215,12 +242,24 @@ export default class MainNavbar extends Vue {
       this.$refs.cardsContainer.onmouseout = () => {
         // @ts-ignore
         imgCont.classList.remove("more-visible")
-      };      
+      };
 
 
     } catch(e) {
       console.log(e)
     }
+
+    try {
+      //@ts-ignore
+      if(window.PRELOAD_SEARCH) {
+        fetch(this.API_BASE_URL + 'search')
+          .then(x => x.json())
+          .then(resp => {
+             this.preloadedSearch = resp
+          });
+
+      }
+    } catch(e) {}
   }
 
   async signOut() {
