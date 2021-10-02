@@ -3,3 +3,45 @@
   src: url(fonts/Beattingvile.woff);
   font-weight: bold;
 }
+
+/* Style the buttons that are used to open and close the accordion panel */
+.accordion {
+  background-color: #eee;
+  color: #7d7676;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  border: none;
+  outline: none;
+  transition: 0.4s;
+  padding-left: 1rem;
+}
+
+div.accordion h2, div.accordion h1, div.accordion h3, div.accordion h4 {
+  padding-bottom: 1%;
+  margin-top: 0;
+  margin-right: 5vw;
+  padding-top: 1rem;
+  padding-left: 1rem;
+}
+
+.accordion.even * {
+  color: #38b8e5;
+}
+
+/* Add a background color to the button if it is clicked on (add the .active class with JS), and when you move the mouse over it (hover) */
+.active, .accordion:hover {
+  background-color: #ccc;
+}
+
+/* Style the accordion panel. Note: hidden by default */
+.accordion + * {
+  padding: 0 18px;
+  background-color: white;
+  display: none;
+  overflow: hidden;
+}
+
+.article {
+  font-size: 0.8rem;
+}
