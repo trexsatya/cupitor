@@ -1,0 +1,1896 @@
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+
+    <script src="/jquery.js"></script>
+    <script></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <script type="text/javascript" src="/fabric.min.js"></script>
+    <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+    <script type="text/javascript" src="/sprite.js"></script>
+
+
+    <script type="text/javascript" src="/jquery.lettering.js"></script>
+    <script type="text/javascript" src="/jquery.fittext.js"></script>
+    <script type="text/javascript" src="/rulez.min.js"></script>
+    <!-- <script type="text/javascript" src="/treant.js"></script> -->
+    <link rel="stylesheet" href="/animate.css">
+    <link rel="stylesheet" href="/treant.css">
+    <link rel="stylesheet" href="/play.css">
+    <script src="/vendor/raphael.js"></script>
+    <script src="https://unpkg.com/geometric@2.2.3/build/geometric.min.js"></script>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script src="/tree.js"></script>
+    <!-- <script src="../../vendor/jquery.min.js"></script> -->
+    <script src="../../vendor/jquery.easing.js"></script>
+
+    <script type="text/javascript" src="/jquery.textillate.js"></script>
+    <!--    <script src="/typed.min.js"></script>-->
+    <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.9"></script>
+    <script type="text/javascript" src="/diff-match-patch.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>
+    <link href="/select2.min.css" rel="stylesheet"/>
+    <script src="/select2.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.ui.min.js"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_SVG">
+    </script>
+    <script src="/ace/src-noconflict/ace.js" type="text/javascript" charSet="utf-8"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript">
+        Array.prototype.max = function () {
+            return Math.max.apply(null, this);
+        };
+    </script>
+    <style>
+        .highlighted {
+            background-color: yellowgreen;
+        }
+    </style>
+
+    <script>
+        //alert(window.innerWidth + " " + window.innerHeight);
+        window.addEventListener("keydown", function (e) {
+            if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+                e.preventDefault();
+                //Control F
+                $('.commands-select').select2('open');
+            }
+        })
+
+    </script>
+
+    <script>
+        function logItem(name, val, type, handlers) {
+            handlers = handlers || {}
+            window['globalVariableNames'][name] = val;
+            var li = $(`<li> <i class="actionable fas fa-trash"></i> ${name}: ${type} </li>`)
+            $(li).find("i").click(e => {
+                handlers.delete(name)
+                $(li).remove()
+            });
+            $('#item-variables').append(li)
+        }
+    </script>
+
+    <script src="/play.js"></script>
+    <!--    <script src="/play2.js"></script>-->
+    <link rel="stylesheet" href="/play.css">
+    <link rel="stylesheet" href="/fontawesome-all.css">
+
+    <script>
+
+    </script>
+
+
+</head>
+
+<body>
+
+
+<script>
+
+</script>
+
+
+<div style="position: fixed; right: -37px; top: 10%;z-index: 3000; color: green">
+    <ul id="item-variables">
+
+    </ul>
+</div>
+
+<!--    <video width="100%" height="100%" style="width: 100%; height: 100%; position: fixed; top: 0; left: 0;" src="/videos/smoke.mp4" autoplay muted>-->
+<!--    </video>-->
+
+
+<script>
+    // In your Javascript (external .js resource or <script> tag)
+    $(document).ready(function () {
+        $('.commands-select').select2();
+    });
+    $('.commands-select').on('select2:open', function (e) {
+        var data = e.params.data;
+        console.log(data);
+        window.commandSelectionIsGoingOn = true;
+    });
+
+    $('.commands-select').on('select2:close', function (e) {
+        var data = e.params.data;
+        console.log(data);
+        window.commandSelectionIsGoingOn = false;
+    });
+
+    $('.commands-select').on('select2:select', function (e) {
+        var data = e.params.data;
+        console.log(data);
+        $(`#${data.id}-dialog`).dialog({
+            width: 800,
+            height: 400,
+        })
+        window.commandSelectionIsGoingOn = false;
+        $('.commands-select').val('NULL')
+        $('.commands-select').trigger('change'); //Reset
+    });
+</script>
+<canvas id="playerCanvas"></canvas>
+<canvas id="overlayCanvas" style="position: absolute;"></canvas>
+<span id="recording-info" style="    margin-left: 42%;top: 0; position: fixed;"></span>
+<div id="textillateContainer" style="width: 100%; height: 100%;position: absolute; top: 0; left: 0;">
+    <div id="cinemaText"></div>
+    <div id="typed-strings" style="display: none">
+        <p>Typed.js is a <strong>JavaScript</strong> library.</p>
+        <p>It <em>types</em> out sentences.</p>
+    </div>
+</div>
+
+<div id="editor" style="position: absolute;top:0; left: 50%;width: 49%; z-index: 30000; height: 100%; display: none">
+</div>
+<script>
+    var editor = ace.edit("editor");
+    editor.setTheme("ace/theme/monokai");
+    editor.session.setMode("ace/mode/python");
+    editor.setFontSize(23);
+</script>
+
+<script type="text/javascript">
+    var API_HOST = 'http://livintolearn.com/api';
+    var id = window.location.hash.replace("#", "")
+
+    window.onbeforeunload = function () {
+        return 'Are you sure you want to leave?';
+    };
+
+
+    window.pc = new fabric.Canvas('playerCanvas')
+    window._ = {
+        textboxes: []
+    }
+    window.oc = new fabric.Canvas('overlayCanvas', {
+        isDrawingMode: true
+    });
+    window.txt = $("#textillateContainer")
+    pc.setWidth(window.innerWidth)
+    pc.setHeight(window.innerHeight)
+    oc.setWidth(window.innerWidth)
+    oc.setHeight(window.innerHeight)
+
+    $('.canvas-container').css({
+        position: 'absolute'
+    });
+    superimposeOverlayCanvas()
+    moveToFront('pc')
+</script>
+
+<div style="display: inline-block;margin-left: 10px;position: absolute;left: 0;top: 8px;z-index: 1000000;height: 0;">
+        <span style=""> <label className="switch">
+          <input type="checkbox" id="eraser">
+          <span className="slider round"></span>
+            </label>
+        </span>
+</div>
+
+<script>
+
+    let clickVicinity = 20;
+    function renderStringsAndFrets() {
+        var strings = []
+        let left = 100;
+        let top =  100;
+        let right = 1300;
+        let verticalGap = 40;
+        let bottom = 300;
+
+        for (var i = 0; i < 6; i++) {
+            let verticalPos = top + i * verticalGap;
+            strings.push(makeLine([left, verticalPos, right, verticalPos]));
+            pc.add(strings[i])
+        }
+
+        var frets = []
+
+        let baseWidth = window.fretDistance || 100;
+        for (var i = 0; i < 18; i++) {
+            let defaultReductionFn = x => x === 0 ? 0 : (14 * Math.log(x)) * x;
+            let reductionFn = window.fretDistanceMultiplier || defaultReductionFn
+            let reduction = reductionFn(i);
+            let offset = i * baseWidth - reduction;
+            frets.push(makeLine([left + offset, top, left + offset, bottom]));
+            pc.add(frets[i])
+        }
+
+        var fretHead = makeLine([98, 98, 98, 352], {strokeWidth: 5})
+        // pc.add(fretHead)
+
+
+
+        return [strings, frets]
+    }
+    let [strings, frets] = [[], []]
+
+    var notes = [
+        ['E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C'],
+        ['B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G'],
+        ['G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' '],
+        ['D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' '],
+        ['A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F'],
+        ['E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C']
+    ];
+
+    let noteTable = appendTableInto(notes, $('#textillateContainer'), {
+        id: 'notes-chart',
+        ytitle: '',
+        xtitle: '',
+        xheaders: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        yheaders: ['E', 'B', 'G', 'D', 'A', 'E'],
+        width: '1200px', height: '300px',
+        marginRight: '1%',
+        marginTop: '5%',
+        top: 100,
+        color: 'blue',
+        cellClicked: (x, y, el) => {
+            $(el).toggleClass('highlighted')
+
+            if ($(el).hasClass('highlighted')) {
+
+            }
+        }
+    })
+
+    var noteLabels = []
+    for(var i=0; i < notes.length; i++) {
+        noteLabels[i] = new Array(notes[i].length)
+        for (j = 0; j < notes[i].length; j++) {
+            noteLabels[i][j] = noteTable.at(i + 1, j + 1)
+        }
+    }
+
+    function showNoteAt(string, fret, toggle) {
+        toggle = toggle || false
+        var i = string - 1, j = fret;
+        if (i < 0 || i > strings.length - 1) {
+            console.log(`string ${string} invalid`);
+            return;
+        }
+        if (j < 0 || j > frets.length - 1) {
+            console.log(`fret ${fret} invalid`);
+            return;
+        }
+        var posX, posY, color;
+
+        if (fret === 0) {
+            posX = frets[0].get('x1') - 30;
+            posY = strings[i].get('y1') - 11;
+            color = 'green';
+        } else {
+            posX = frets[j - 1].get('x1') + 15, posY = strings[i].get('y1') - 11, color = 'blue';
+        }
+
+        let noteLabel = noteLabels[i][j];
+        if (noteLabel) {
+            let flippedOpacity = noteLabel.opacity === 1 ? 0 : 1;
+            noteLabel.setOpacity(toggle ? flippedOpacity : 1);
+            noteLabel.setLeft(posX);
+            noteLabel.setTop(posY);
+            pc.renderAll();
+            return noteLabel;
+        } else {
+            var n = textInCircle(notes[i][j], posX, posY, {fontSize: 14}, {fill: color});
+            n.lockMovementY = true;
+            n.lockMovementX = true;
+            n.lockScalingX = true;
+            n.lockScalingY = true;
+            noteLabels[i][j] = n;
+            pc.add(n);
+            return n;
+        }
+    }
+
+    function hideNoteAt(string, fret) {
+        var i = string - 1, j = fret;
+        if (noteLabels[i][i]) {
+            noteLabels[i][j].setOpacity(0);
+            pc.renderAll();
+        }
+    }
+
+    var maxReach = 12;
+
+    function showAllNotesOf(name) {
+        let shown = []
+        for (let i = 0; i < 6; i++) {
+            for (let j = 0; j < maxReach; j++) {
+                let n = null
+                if (name.startsWith(notes[i][j])) {
+                    if (name.endsWith('#')) {
+                        n = showNoteAt(i + 1, j + 1)
+                        shown.push({string: i + 1, fret: j + 1, label: n});
+                    } else if (name.endsWith('b')) {
+                        n = showNoteAt(i + 1, j - 1)
+                        shown.push({string: i + 1, fret: j - 1, label: n});
+                    } else {
+                        n = showNoteAt(i + 1, j)
+                        shown.push({string: i + 1, fret: j, label: n});
+                    }
+                }
+            }
+        }
+        return shown.filter(x => x);
+    }
+
+    function hideAll() {
+        noteLabels.forEach(row => {
+            row.forEach(it => {
+                if (it) it.removeClass('highlighted')
+            })
+        });
+        pc.renderAll();
+    }
+
+    function fretMarker(fret) {
+        var x = makeLine([frets[fret].get('x1') - 24, strings[5].get('y1'), frets[fret].get('x1') - 24, strings[5].get('y1') + 50]);
+        pc.add(x);
+        var t = textInRect(' ' + fret + ' ', frets[fret].get('x1') - 50, strings[5].get('y1') + 50, {color: 'black'}, {
+            fill: 'transparent',
+            strokeWidth: 2,
+            stroke: 'blue'
+        });
+        t._objects[1].setColor('black');
+        t.lockMovementX = true;
+        t.lockMovementY = true;
+        t.lockScalingX = true;
+        t.lockScalingY = true;
+        pc.add(t);
+    }
+
+    function showFretMarkers() {
+        fretMarker(5);
+        fretMarker(7);
+        fretMarker(9);
+        fretMarker(12);
+        fretMarker(15);
+
+        pc.renderAll();
+    }
+
+    // showFretMarkers();
+
+    var notesToPosMap = {}
+
+    for (var i = 0; i < 6; i++) {
+        for (var j = 0; j < 17; j++) {
+            var pos = notesToPosMap[notes[i][j]] || []
+            pos.push([i, j]);
+            notesToPosMap[notes[i][j]] = pos;
+        }
+    }
+
+    function showRandomAToG() {
+        hideAll();
+        var randomPositions = []
+
+        Object.keys(notesToPosMap).sort().forEach(note => {
+            var array = notesToPosMap[note];
+            var randomElement = array[Math.floor(Math.random() * array.length)];
+            randomPositions.push(randomElement);
+        });
+
+        var prev = null;
+        schedule(randomPositions, document.querySelector("#chordChangeSpeed").value || 20, pos => {
+            if (prev) prev.setOpacity(0.5);
+            prev = showNoteAt(pos[0] + 1, pos[1]);
+        }, () => {
+        });
+    }
+
+    function hideAllNotesOf(name) {
+        for (var i = 0; i < 6; i++) {
+            for (var j = 0; j < notes[i].length; j++) {
+                if (notes[i][j].toLowerCase() === name.toLowerCase()) {
+                    if (noteLabels[i][j]) noteLabels[i][j].setOpacity(0)
+                }
+            }
+        }
+        pc.renderAll()
+    }
+
+    var withinLimit = (val, target, n) => val < target + n && val > target - n;
+    var between = (val, x, y) => val <= y && val >= x;
+
+    function showNoteOnClick(e) {
+        for (i = 0; i < 6; i++) {
+            for (var j = 0; j < 17; j++) {
+                var isNearStringI = withinLimit(e.e.clientY, strings[i].get('y1'), clickVicinity);
+                var isOnFretJ = false;
+
+                if (j === 0) {
+                    isOnFretJ = between(e.e.clientX, frets[0].get('x1') - clickVicinity, frets[0].get('x1'));
+                } else {
+                    isOnFretJ = between(e.e.clientX, frets[j - 1].get('x1'), frets[j].get('x1'));
+                }
+
+                if (isNearStringI && isOnFretJ) {
+                    console.log(`Fret ${j} String ${i + 1}`);
+                    showNoteAt(i + 1, j, true);
+                }
+            }
+        }
+    }
+
+    let majorScales = {
+        'G': 'G - A - B - C - D - E - F#',
+        'Gb': 'Gb - Ab - Bb - Cb - Db - Eb - F',
+        'G#': 'G# - A# - B# - C# - D# - E# - F#',
+        'F': 'F - G - A - Bb - C - D - E',
+        'F#': 'F# - G#- A# - B - C# - D# - E#',
+        'E': 'E - F# - G# - A - B - C# - D#',
+        'Eb': 'Eb - F - G - Ab - Bb - C - D',
+        'D': 'D - E - F# - G - A - B - C#',
+        'Db': 'Db - Eb - F - Gb - Ab - Bb - C',
+        'D#': 'D# - E# - F# - G# - A# - B#- C#',
+        'C': 'C - D - E - F - G - A - B',
+        'C#': 'C# - D# - E# - F# - G# - A# - B#',
+        'B': 'B - C# - D# - E - F# - G# - A#',
+        'Bb': 'Bb - C - D - Eb - F - G - A',
+        'A': 'A - B - C# - D - E - F# - G#',
+        'Ab': 'Ab - Bb - C - Db - Eb - F - G',
+        'A#': 'A# - B# - C# - D# - E# - F# - G#',
+    };
+    let minorScales = {
+        'C': 'C - D - Eb - F - G - Ab - Bb',
+        'C#': 'C# - D# - E - F# - G# - A - B',
+        'D': 'D - E - F - G - A - Bb - C',
+        'Db': 'Db - Eb - Fb - Gb - Ab - Bb - Cb',
+        'D#': 'D# - E# -F# - G# - A# - B - C#',
+        'E': 'E - F# - G - A - B - C - D',
+        'Eb': 'Eb - F - Gb - Ab - Bb - Cb - Db',
+        'F': 'F - G - Ab - Bb - C - Db - Eb',
+        'F#': 'F# - G# - A - B - C# - D - E',
+        'G': 'G - A - Bb - C - D - Eb - F',
+        'Gb': 'Gb - Ab - bb - Cb - Db - Eb - Fb',
+        'G#': 'G# - A# - B - C# - D# - E - F#',
+        'A': 'A - B - C - D - E - F - G',
+        'Ab': 'Ab - Bb - Cb - Db - Eb - Fb - Gb',
+        'A#': 'A# - B# - C# - D# - E# - F# - G#',
+        'B': 'B - C# - D - E - F# - G - A',
+        'Bb': 'Bb - C - Db - Eb - F - Gb - Ab'
+    }
+
+    //Pre-load all notes and hide
+    for (i = 0; i < 7; i++) {
+        for (var j = 0; j < 17; j++) {
+            showNoteAt(i, j);
+        }
+    }
+    // hideAll();
+
+    function findNotesBeingShown() {
+        let notesBeingShown = {}
+        for (let i = 0; i < noteLabels.length; i++) {
+            for (let j = 0; j < noteLabels[i].length; j++) {
+                let noteLabel = noteLabels[i][j];
+                if (!noteLabel) continue
+                let isShown = noteLabel.hasClass('highlighted')
+                // console.log(`isShown ${isShown}`)
+                if (isShown) {
+                    let noteName = noteLabel.text().trim()
+                    if (!noteName.trim()) {
+                        noteName = ''
+                        //Either sharp or flat
+                        if (noteLabels[i][j + 1]) {
+                            let nextNote = noteLabels[i][j + 1].text().trim()
+                            noteName += (nextNote + 'b')
+                        }
+                        if (noteLabels[i][j - 1]) {
+                            let prevNote = noteLabels[i][j - 1].text().trim()
+                            if (prevNote) noteName += ("/" + prevNote + '#')
+                        }
+                    }
+                    notesBeingShown[noteName] = true;
+                }
+            }
+        }
+        return Object.keys(notesBeingShown).flatMap(x => x.split('/')) // as set instead of list
+    }
+
+    let notesInScale = (scales, k) => scales[k].split(' - ');
+
+    function findMatchingFromScales(patternName, pattern, notesBeingShown) {
+        let scales = majorScales;
+        let noteIsBeingShown = noteName => {
+            //Take care of sharp/flat notes
+            return noteName.split("/").some(n =>
+                notesBeingShown.indexOf(n) >= 0
+            )
+        }
+
+        let candidates = {} //Map of {rootNote: [missingCount, missingNote]}
+
+        Object.keys(scales).forEach(rootNote => {
+            let patternNotes = pattern(notesInScale(scales, rootNote));
+            let isCandidate = false;
+            if (patternNotes.length === 3) {
+                //For Triad chords Root, and perfect 3rd are enough
+                isCandidate = noteIsBeingShown(patternNotes[0]) && noteIsBeingShown(patternNotes[1])
+                if (isCandidate) {
+                    let thirdMissing = !noteIsBeingShown(patternNotes[2]);
+                    if (thirdMissing) {
+                        candidates[`${rootNote}${patternName}`] = [1, patternNotes[2]];
+                    } else {
+                        candidates[`${rootNote}${patternName}`] = [0, null];
+                    }
+                }
+                console.log(`${patternName}, Root: ${rootNote}, Pattern: ${patternNotes} Matched: ${isCandidate}`)
+            } else {
+                let matched = patternNotes.filter(noteName => noteIsBeingShown(noteName))
+                let notMatched = patternNotes.filter(noteName => !noteIsBeingShown(noteName))
+                isCandidate = (patternNotes.length - matched.length) <= 1
+                if (isCandidate) {
+                    candidates[`${rootNote}${patternName}`] = [patternNotes.length - matched.length, notMatched.join(", ")];
+                }
+                console.log(`${patternName} Root: ${rootNote}, Pattern: ${patternNotes} Matched: ${matched}`)
+            }
+        })
+
+        return candidates
+    }
+
+    function cartesian(...args) {
+        var r = [], max = args.length - 1;
+
+        function helper(arr, i) {
+            for (var j = 0, l = args[i].length; j < l; j++) {
+                var a = arr.slice(0); // clone arr
+                a.push(args[i][j]);
+                if (i === max)
+                    r.push(a);
+                else
+                    helper(a, i + 1);
+            }
+        }
+
+        helper([], 0);
+        return r;
+    }
+
+    function chord(name, fretsToReach) {
+        fretsToReach = fretsToReach || []
+        console.log(`Chord ${name} nearby frets ${fretsToReach}`)
+
+        let reachable = (fret1, fret2) => {
+            return fret1 === 0 || fret2 === 0 || withinLimit(fret1, fret2, 3)
+        }
+        let find = (scale, name) => {
+            let scaleNotes = scale[name].split(" - ")
+            let notesOfChord = [1, 3, 5].map(i => showAllNotesOf(scaleNotes[i - 1]))
+            let allPossible = cartesian(notesOfChord[0], notesOfChord[1], notesOfChord[2]);
+            let closrByNotes = allPossible.filter(notes => {
+                return fretsToReach.every(f => reachable(f, notes[0].fret)) && reachable(notes[0].fret, notes[1].fret) && reachable(notes[1].fret, notes[2].fret) && reachable(notes[0].fret, notes[2].fret)
+            })
+            // console.log(closrByNotes)
+            hideAll()
+            return closrByNotes.length ? closrByNotes : allPossible
+        };
+
+        if (name.endsWith("m")) {
+            name = name.replace("m", "")
+            //Minor chord
+            return find(minorScales, name)
+        } else {
+            //Major chord
+            return find(majorScales, name)
+        }
+    }
+
+    function guessChord() {
+        let notesBeingShown = findNotesBeingShown();
+
+        let evalSharpsFlats = x => {
+            x = "" + x
+            if (x.length <= 2) return x;
+            if (x.endsWith("#b")) return x.replaceAll("#b", "")
+            if (x.endsWith("b#")) return x.replaceAll("b#", "")
+            return x
+        }
+
+        let roundAt = (lim, x) => x === lim ? x : x % lim;
+
+        let pattern = nums => {
+            nums = nums.map(it => '' + it).map(it => it.split(''))
+            return notesInScale => nums.map(xx => evalSharpsFlats(notesInScale[roundAt(7, xx[0] - 1)] + (xx[1] || ''))).filter(x => x);
+        }
+
+        let chords = {}
+
+        let addToList = candidates => Object.keys(candidates).forEach(c => {
+            chords[c] = candidates[c]
+        });
+
+        addToList(findMatchingFromScales('maj', pattern([1, 3, 5]), notesBeingShown));
+        addToList(findMatchingFromScales('min', pattern([1, '3b', 5]), notesBeingShown));
+        addToList(findMatchingFromScales('aug', pattern([1, 3, '5#']), notesBeingShown));
+        addToList(findMatchingFromScales('dim', pattern([1, '3b', '5b']), notesBeingShown));
+        addToList(findMatchingFromScales('dim7', pattern([1, '3b', '5b', 6]), notesBeingShown));
+        addToList(findMatchingFromScales('sus4', pattern([1, 4, 5]), notesBeingShown));
+        addToList(findMatchingFromScales('+9', pattern([1, 3, 5, 9]), notesBeingShown));
+        addToList(findMatchingFromScales('min+9', pattern([1, '3b', 5, 9]), notesBeingShown));
+        addToList(findMatchingFromScales('5', pattern([1, 5]), notesBeingShown));
+        addToList(findMatchingFromScales('6', pattern([1, 3, 5, 6]), notesBeingShown));
+        addToList(findMatchingFromScales('min6', pattern([1, '3b', 5, 6]), notesBeingShown));
+        addToList(findMatchingFromScales('6+9', pattern([1, 3, 5, 6, 9]), notesBeingShown));
+        addToList(findMatchingFromScales('min6+9', pattern([1, '3b', 5, 6, 9]), notesBeingShown));
+        addToList(findMatchingFromScales('7', pattern([1, '3', 5, '7b']), notesBeingShown));
+        addToList(findMatchingFromScales('min7', pattern([1, '3b', 5, '7b']), notesBeingShown));
+        addToList(findMatchingFromScales('dim7', pattern([1, '3b', '5b', 6]), notesBeingShown));
+        addToList(findMatchingFromScales('7Sus4', pattern([1, '4', '5', '7b']), notesBeingShown));
+        addToList(findMatchingFromScales('9', pattern([1, 3, 5, '7b', 9]), notesBeingShown));
+        addToList(findMatchingFromScales('maj9', pattern([1, 3, 5, 7, 9]), notesBeingShown));
+        addToList(findMatchingFromScales('min9', pattern([1, '3b', 5, '7b', 9]), notesBeingShown));
+
+        console.log('Guessed chord = ' + Object.keys(chords));
+        let solidMatch = []
+        Object.keys(chords).forEach(c => {
+            if (chords[c][0] === 0) {
+                solidMatch.push(c)
+                delete chords[c]
+            }
+        })
+
+        //Tests
+        let toString = chords => {
+            let str = ""
+            Object.keys(chords).forEach(c => {
+                str += `${c} - ${chords[c][1]} <br>`
+            })
+            return str
+        }
+
+        let $guessedChord = $('#guessedChord');
+        $guessedChord.html(
+            $('<span>').css({
+                fontSize: 'larger',
+                color: 'green'
+            }).html(solidMatch.join(", ") + "<br><hr>")
+                .append(
+                    $('<span>').css({
+                        fontSize: 'smaller',
+                        color: 'blue'
+                    }).html(toString(chords))
+                )
+        )
+        setTimeout(() => $guessedChord.html(''), 90000)
+    }
+
+    let chordsToPlay = []
+    let keyChart1 = [
+        ['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim'],
+        ['G', 'Am', 'Bm', 'C', 'D', 'Em', 'F#dim'],
+        ['D', 'Em', 'F#m', 'G', 'A', 'Bm', 'C#dim'],
+        ['A', 'Bm', 'C#m', 'D', 'E', 'F#m', 'G#dim'],
+        ['E', 'F#m', 'G#m', 'A', 'B', 'C#m', 'D#dim'],
+        ['B', 'C#m', 'D#m', 'E', 'F#m', 'G#m', 'A#dim'],
+        ['F#', 'G#m', 'A#m', 'B', 'C#', 'D#m', 'E#dim'],
+    ]
+    let keyTable1 = appendTableInto(keyChart1, $('#textillateContainer'), {
+        id: 'key-chart',
+        ytitle: '',
+        xtitle: '',
+        xheaders: [1, 2, 3, 4, 5, 6, 7],
+        yheaders: ['C', 'G', 'D', 'A', 'E', 'B', 'F#'],
+        width: '600px', height: '300px',
+        marginRight: '20%',
+        color: 'blue',
+        cellClicked: (x, y, el) => {
+            $(el).toggleClass('highlighted')
+
+            if ($(el).hasClass('highlighted')) {
+                chordsToPlay.push(keyChart1[x][y])
+            }
+        }
+    })
+
+    keyTable1.all.css({top: 400, zIndex: 1000000})
+
+    function resetChords() {
+        chordsToPlay = []
+        keyTable1.each((i, j, el) => $(el).removeClass('highlighted'))
+        hideAll()
+    }
+
+    function randomFromArray(cc) {
+        return cc[Math.floor(Math.random() * cc.length)]
+    }
+
+    function playChords() {
+        let uniq = chordsToPlay //[...new Set(chordsToPlay)];
+        console.log('playing ', uniq)
+        let chords = []
+        uniq.forEach(x => {
+            let cc = null
+            if (!chords.length) {
+                cc = chord(x)
+            } else {
+                cc = chord(x, chords[chords.length - 1].map(n => n.fret));
+            }
+            chords.push(randomFromArray(cc))
+        });
+
+        let prev = []
+        schedule(chords, window.delayBetweenNotes || 5, chord => {
+            console.log(chord)
+            if (prev) prev.filter(it => it).forEach(it => it.setOpacity(0.5));
+            prev = []
+            chord.forEach(note => {
+                prev.push(showNoteAt(note.string, note.fret))
+            })
+        }, () => {
+        });
+    }
+
+    if (window.innerWidth < 800 && window.innerHeight < 400) {
+        pc.setZoom(0.6);
+    }
+    console.log(`
+    Progressions:
+        1-4-5
+        1-5-6-4
+        1-4-1-5-1
+        1-6-2-5
+        1-4-7-3-6-2-5-1
+        1-4-5-1
+    `)
+    moveToFront('txt')
+</script>
+<div id="guitar-toolbar"
+     style="display: inline-block; margin-left: 10px;position: absolute; left: 150px; bottom: 150px; z-index: 1000000; height: 0"
+     className="ui-draggable ui-draggable-handle">
+    <div style="position: fixed; top: 20px; left: 4em">
+        <label htmlFor="notes">Choose a note:</label>
+
+        <select name="notes" id="notes">
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D">D</option>
+            <option value="E">E</option>
+            <option value="F">F</option>
+            <option value="G">G</option>
+        </select>
+        <button style="margin-left: 1em;" onClick="showAllNotesOf(document.getElementById('notes').value)">Show All Notes
+        </button>
+
+        <button style="margin-left: 1em;" onClick="hideAll()">Hide All Notes</button>
+
+        <button style="margin-left: 1em;" onClick="showRandomAToG()">Show Random A-G</button>
+
+        <button style="margin-left: 1em;" onClick="hideAllNotesOf(document.getElementById('notes').value)">Hide All Of
+            Selected Note
+        </button>
+        <button style="margin-left: 2em;" onClick="guessChord()">Guess Chord</button>
+        <div id="guessedChord" style="position: fixed; right: 10em; top: 0em;"></div>
+    </div>
+
+
+    <br>
+    <br>
+
+
+    <script>
+        function showLayer(x, e) {
+            $('#txtLayer, #pcLayer, #ocLayer').removeClass('highlighted');
+            moveToFront(x)
+            $(e.target).addClass('highlighted');
+        }
+    </script>
+    <div style="position: fixed; left: 10px; top: 10px">
+        <button id="txtLayer" style="" onClick="showLayer('txt', event)" className="highlighted">TXT</button>
+        <button id="pcLayer" style="" onClick="showLayer('pc', event)">PC</button>
+        <button id="ocLayer" style="" onClick="showLayer('oc', event)">OC</button>
+    </div>
+
+
+
+
+    <div style="position: fixed; right: 40px; top: 250px">
+        <label htmlFor="chordChangeSpeed">Speed:</label>
+        <input type="number" id="chordChangeSpeed" name="chordChangeSpeed" min="10" max="100">
+    </div>
+
+    <button style="position: fixed; right: 40px; top: 300px" onClick="resetChords()">Reset</button>
+    <button style="position: fixed; right: 100px; top: 300px" onClick="playChords()">Play Chords</button>
+
+
+</div>
+
+<div id="drawing-toolbar"
+     style="display: inline-block; margin-left: 10px;position: absolute; left: 0; top: 50; z-index: 1000000; height: 0"
+     className="ui-draggable ui-draggable-handle">
+    <img id="toolbarToggle1" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;"
+         onClick="$('#toolbar1-buttons').toggle();"
+         src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png">
+
+    <div id="toolbar1-buttons">
+        Drawing Mode:
+        <label className="switch">
+            <input type="checkbox" id="flip-drawing">
+            <span className="slider round"></span>
+        </label>
+        <br><br>
+        <button id="undo" className="btn btn-info" onClick="undoDrawing(event)">Undo</button>
+        <span> &nbsp;&nbsp;&nbsp;</span>
+        <button id="redo" className="btn btn-info" onClick="redoDrawing(event)">Redo</button>
+        <br>
+
+        <br>
+        <label htmlFor="drawing-mode-selector">Mode:</label>
+        <select id="drawing-mode-selector">
+            <option>Pencil</option>
+            <option>Circle</option>
+            <option>Spray</option>
+            <option>Pattern</option>
+
+            <option>hline</option>
+            <option>vline</option>
+            <option>square</option>
+            <option>diamond</option>
+            <option>texture</option>
+        </select><br>
+        <br>
+        <label htmlFor="drawing-line-width">Line width:</label>
+        <span className="info">2</span><input type="number" value="3" id="drawing-line-width"><br>
+
+        <br>
+        <label htmlFor="drawing-color">Line color:</label>
+        <input type="color" value="#005E7A" id="drawing-color"><br>
+        <br>
+        <button id="clear-canvas" className="btn btn-info">Clear</button>
+
+        <br><br>
+        <label htmlFor="drawing-shadow-color">Shadow color:</label>
+        <input type="color" value="#005E7A" id="drawing-shadow-color"><br>
+        <br>
+        <label htmlFor="drawing-shadow-width">Shadow width:</label>
+        <span className="info">0</span><input type="number" value="0" id="drawing-shadow-width"><br>
+
+        <br>
+        <label htmlFor="drawing-shadow-offset">Shadow offset:</label>
+        <span className="info">0</span><input type="number" value="0" id="drawing-shadow-offset"><br>
+        <br>
+    </div>
+</div>
+
+<div id="rollbackConfirmationDialog" title="Rollback Recording!" style="display: none;">
+    <p>Select the time where to rollback:</p>
+    <div className="slider"></div>
+    <br><br>
+    <div>
+        Selected Value: <span className="info"></span>
+
+    </div>
+</div>
+
+<div id="recordingFileChooserDialog" title="Choose Recording Files!" style="display: none; z-index: 5000">
+    <p>Choose Files:</p>
+    <input type="file" accept="text/plain" onChange="openFile(event)" id="recordingFiles" multiple="multiple">
+
+    <div>
+        OR
+    </div>
+
+</div>
+
+<div id="playbackControls" style="display: none; position:fixed; bottom:0;width:100%;">
+    <table style="width:100%">
+        <tr>
+            <th style="width: 20%;"><span className="time" style="float: right;margin-right: 30px;"></span></th>
+            <th style="width: 60%;">
+                <div className="slider"></div>
+            </th>
+            <th><span className="time" style="float: left;margin-left:30px"></span></th>
+        </tr>
+    </table>
+
+</div>
+
+<div id="toolbar"
+     style="display: inline-block; margin-left: 10px;position: absolute; right: -10; top: 50; z-index: 1000000; height: 0">
+    <img id="toolbarToggle" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;"
+         onClick="$('#drawing-mode-options').toggle();"
+         src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png"></img>
+
+    <select id="savePoints" style="margin-right: 30px;float: right;" onChange="restoreCanvas()">
+        <option>0</option>
+    </select>
+
+
+    <div id="drawing-mode-options" style="background: rgba(15, 14, 14, 0.4);padding-left: 10px;padding-top: 10px;">
+
+
+        <button id="record-launch" className="btn btn-info" onClick="initializeRecording()">Record</button>
+        <button id="record-play-launch" className="btn btn-info" onClick="launchRecordingDialog()">Play Recording
+        </button>
+        <button id="rollbackRecording" onClick="launchRollbackRecording()">Rollback Recording</button>
+        <br><br>
+        <button id="delete-selected" className="btn btn-info" onClick="deleteSelectedObjects()">Delete</button>
+        <button id="record-play-save" className="btn btn-info" onClick="saveRecording()">Save Recording</button>
+        <br> <br>
+
+        <button className="btn btn-info" onClick="Copy(pc)">Copy</button>
+        <button className="btn btn-info" onClick="Paste(pc)">Paste</button>
+        <button className="btn btn-info" onClick="degroup(pc)">Ungroup</button>
+
+        <br><br>
+
+        <button id="create-text" className="btn btn-info">Text</button>
+        <button id="create-small-text" className="btn btn-info">Small Text</button>
+        <button id="create-rect-text" className="btn btn-info">[]</button>
+
+        <br><br>
+        Color: <select onChange="changeCircleColor(this.value)">
+        <option value="">--</option>
+        <option value="blue">Blue</option>
+        <option value="green">Green</option>
+        <option value="red">Red</option>
+        <option value="black">Black</option>
+        <option value="yellow">Yellow</option>
+        <option value="pink">Pink</option>
+        <option value="white">White</option>
+    </select>
+
+        <br><br>
+        <button id="greenen" className="btn btn-info" onClick="zoomSelectedObject(true)" style="margin-right:10px;">+
+        </button>
+        <button id="whiten" className="btn btn-info" onClick="zoomSelectedObject(false)" style="margin-right:10px;">-
+        </button>
+
+        <button id="arrow" className="btn btn-info" onClick="arrowButton()">--></button>
+        <br><br>
+
+        <button id="flipConnectionMode" className="btn btn-info" onClick="flipConnectionMode(event)" style="">Connect
+        </button>
+        <button id="makeTree" className="btn btn-info" onClick="onMakeTreeClick(event)" style="">MakeTree</button>
+        <button id="removeTree" className="btn btn-info" onClick="onRemoveTreeClick(event)" style="">RemoveTree</button>
+
+        <br><br>
+
+        <button id="create-array" className="btn btn-info" onClick="window.insertArray=true; turnOffDrawing();"
+                style="margin-right:10px;">Array
+        </button>
+
+        <button id="insert-matex" className="btn btn-info" onClick="window.signalMatexInsertion=true;turnOffDrawing();">
+            Matex
+        </button>
+        <button id="insert-image" className="btn btn-info" onClick="window.signalImageInsertion=true;turnOffDrawing();">
+            Image
+        </button>
+        <br><br>
+        <button id="save" style="margin-right:10px;" onClick="saveCanvas()">Save</button>
+        <button id="newCanvas" onClick="newCanvas()"> New</button>
+        <br><br>
+
+        <br><br>
+        <span id="instruction" style="width:150px"></span>
+
+    </div>
+</div>
+<script>
+    $('#txtLayer').click();
+    var drawingModeEl = $('#drawing-mode'),
+        drawingOptionsEl = $('#drawing-mode-options'),
+        drawingColorEl = $('#drawing-color'),
+        drawingShadowColorEl = $('#drawing-shadow-color'),
+        drawingLineWidthEl = $('#drawing-line-width'),
+        drawingShadowWidth = $('#drawing-shadow-width'),
+        drawingShadowOffset = $('#drawing-shadow-offset'),
+        clearEl = $('#clear-canvas'),
+        eraserEl = $('#eraser');
+
+    clearEl.click(function () {
+        var yes = confirm('Are you sure?');
+        if (yes) oc.clear();
+    });
+
+    drawingColorEl.change(function (e) {
+        oc.freeDrawingBrush.color = this.value;
+    });
+
+    function turnOffDrawing() {
+        if (flipDrawindEl.is(':checked')) {
+            flipDrawindEl.click();
+        }
+    }
+
+    eraserEl.change(e => {
+        if (eraserEl.is(':checked')) {
+            //Store
+            window.saved = window.saved || {};
+            window.saved.eraserStoredData = window.saved.eraserStoredData || {}
+
+            window.saved.eraserStoredData.drawingColor = drawingColorEl.val()
+            window.saved.eraserStoredData.drawingLineWidth = drawingLineWidthEl.val()
+
+            if (window.theme == 'black') {
+                drawingColorEl.val('#000000')
+            } else {
+                drawingColorEl.val('#ffffff')
+            }
+            oc.freeDrawingBrush.color = drawingColorEl.val();
+
+            drawingLineWidthEl.val(15);
+            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 15;
+
+        } else {
+            //Restore
+            drawingColorEl.val(window.saved.eraserStoredData.drawingColor);
+            drawingLineWidthEl.val(window.saved.eraserStoredData.drawingLineWidth);
+
+            oc.freeDrawingBrush.color = drawingColorEl.val();
+            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 5;
+        }
+    });
+
+    drawingShadowColorEl.change(function () {
+        oc.freeDrawingBrush.shadow.color = this.value;
+    });
+    drawingLineWidthEl.change(function () {
+        oc.freeDrawingBrush.width = parseInt(this.value, 10) || 1;
+        this.previousSibling.innerHTML = this.value;
+    });
+    drawingShadowWidth.change(function () {
+        oc.freeDrawingBrush.shadow.blur = parseInt(this.value, 10) || 0;
+        this.previousSibling.innerHTML = this.value;
+    });
+    drawingShadowOffset.change(function () {
+        oc.freeDrawingBrush.shadow.offsetX = parseInt(this.value, 10) || 0;
+        oc.freeDrawingBrush.shadow.offsetY = parseInt(this.value, 10) || 0;
+        this.previousSibling.innerHTML = this.value;
+    });
+
+    if (oc.freeDrawingBrush) {
+        oc.freeDrawingBrush.color = drawingColorEl.val() || 'black';
+        oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 1;
+        oc.freeDrawingBrush.shadow = new fabric.Shadow({
+            blur: parseInt(drawingShadowWidth.val(), 10) || 0,
+            offsetX: 0,
+            offsetY: 0,
+            affectStroke: true,
+            color: drawingShadowColorEl.val() || 'black',
+        });
+    }
+    ;
+</script>
+<script type="text/javascript">
+    localStorage.setItem('pc', JSON.stringify({}))
+    localStorage.setItem('oc', JSON.stringify({}))
+    if (location.hash.indexOf('debug') >= 0) alert(window.innerWidth + "," + window.innerHeight)
+    if (window.innerWidth < window.innerHeight) {
+        $('#toolbar').css({
+            position: 'absolute',
+            bottom: 0
+        })
+    }
+
+    $('body').scroll(function (e) {
+        console.log('resized')
+
+    });
+
+    $(document).ready(e => {
+
+        $('#toolbar').draggable();
+    });
+
+
+    $('#create-text').click(e => {
+        window.insertText = true;
+        turnOffDrawing();
+    })
+    $('#create-small-text').click(e => {
+        window.insertSmallText = true;
+        turnOffDrawing();
+    })
+
+    $('#create-rect-text').click(e => {
+        window.insertRectText = true;
+        turnOffDrawing();
+    })
+
+    var flipDrawindEl = $('#flip-drawing');
+    flipDrawindEl.click(e => {
+        if (flipDrawindEl.is(':checked')) {
+            moveToFront('oc')
+        } else {
+            moveToFront('pc')
+        }
+    })
+    pc.on('object:selected', function (e) {
+        var obj = e.target
+        if (window.connectionMode) {
+            if (!window.firstOfConnection) firstOfConnection = obj
+            else {
+                makeConnection(e)
+                flipConnectionMode()
+            }
+
+        }
+    });
+
+    pc.on('object:removed', e => {
+        console.log(e.target);
+        var obj = e.target;
+        if (obj.treeConnection && obj.treeConnection.outgoing) {
+            obj.treeConnection.outgoing.lines.forEach(l => {
+                pc.remove(l);
+            })
+        }
+    })
+    pc.on('object:moving', e => {
+        var t = e.target;
+        var getPointCoords = (obj, pt) => {
+            if (pt == 'mt') {
+                return obj.aCoords.mt || {
+                    y: obj.oCoords.tl.y,
+                    x: obj.oCoords.tl.x + obj.width / 2
+                }
+            }
+            if (pt == 'mb') {
+                return obj.aCoords.mb || {
+                    y: obj.oCoords.bl.y,
+                    x: obj.oCoords.bl.x + obj.width / 2
+                }
+            }
+        }
+
+        if (t.treeConnection) {
+            var inward = t.treeConnection.incoming || {}
+            var outward = t.treeConnection.outgoing || {}
+
+            if (inward.lines && inward.point) {
+                var p = getPointCoords(t, inward.point)
+                inward.lines.forEach(l => {
+                    l.set('x2', p.x);
+                    l.set('y2', p.y);
+                    t.setCoords();
+                    l.setCoords();
+                    pc.renderAll();
+                });
+            }
+            if (outward.lines && outward.point) {
+                var p = getPointCoords(t, outward.point)
+                outward.lines.forEach(l => {
+                    l.set('x1', p.x);
+                    l.set('y1', p.y);
+                    t.setCoords();
+                    l.setCoords();
+                    pc.renderAll();
+                });
+            }
+
+        }
+    });
+
+    $('#drawing-mode-options').hide();
+    $('#toolbar1-buttons').hide();
+
+    oc.on('mouse:up', function (e) {
+        $('#drawing-mode-options').hide();
+        $('#toolbar1-buttons').hide();
+    })
+    pc.on('mouse:up', function (e) {
+        $('#drawing-mode-options').hide();
+        $('#toolbar1-buttons').hide();
+
+        if (!e.e) e.e = {}
+        if (!e.e.clientX) e.e.clientX = 10;
+        if (!e.e.clientY) e.e.clientY = 10;
+
+        // showNoteOnClick(e);
+
+        if (window.insertText) {
+            var tb = textbox({
+                top: e.e.clientY,
+                left: e.e.clientX
+            })
+            pc.add(tb)
+
+            pc.setActiveObject(tb)
+            _.textboxes.push(tb)
+            window.insertText = false;
+        }
+        if (window.insertSmallText) {
+            var tb = textbox({
+                top: e.e.clientY,
+                left: e.e.clientX,
+                width: 25
+            })
+            pc.add(tb)
+
+            pc.setActiveObject(tb)
+            _.textboxes.push(tb)
+            window.insertSmallText = false;
+        }
+        if (window.signalMatexInsertion) {
+            window.signalMatexInsertion = false;
+            window.matexInsertionPoint = {
+                top: e.e.clientY,
+                left: e.e.clientX
+            }
+            document.getElementById('mathjaxDialog').style.display = 'block';
+        }
+        if (window.signalImageInsertion) {
+            window.signalImageInsertion = false;
+            $('#imageInputDialog').show();
+        }
+
+        if (window.insertRectText) {
+            window.insertRectText = false;
+            var text = prompt('Enter text')
+            if (!text) return;
+            var tb = textInRect(text, e.e.clientX, e.e.clientY, pc, {}, {})
+            tb.hasControls = false;
+            pc.add(tb)
+        }
+
+        if (window.insertArray) {
+            window.insertArray = false;
+            var text = prompt('Enter text')
+            if (!text) return;
+
+            var ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc);
+            pc.getObjects().forEach(o => o.hasControls = false);
+        }
+
+        if (window.arrowButtonClicked) {
+            if (window.arrowButtonClicked.first) {
+                var a = window.arrowButtonClicked.first
+                pc.add(arrow(a.x, a.y, e.e.clientX, e.e.clientY, {
+                    stroke: ($('#drawing-color').val() || 'black')
+                }))
+                window.arrowButtonClicked = null;
+            } else {
+                window.arrowButtonClicked.first = {
+                    x: e.e.clientX,
+                    y: e.e.clientY
+                }
+            }
+        }
+    })
+    var mapping = {
+        'l': 'clear-canvas',
+        'Delete': 'delete-selected',
+        'd': 'flip-drawing',
+        't': 'create-small-text',
+        'T': 'create-text',
+        'r': 'reden',
+        'g': 'greenen',
+        'b': 'bluen',
+        'e': 'execute-next',
+        'w': 'whiten'
+    }
+    $(document).keydown(e => {
+        if (e.target.id == 'mathtext' || e.target.id == 'mathjaxFunctionInput') return;
+        if ($('.commands-select').is(":focus") || window.commandSelectionIsGoingOn) {
+            console.log('select is in focus. returning.')
+        }
+        if (e.keyCode == 32 && e.target == document.body) {
+            e.preventDefault();
+        }
+
+        if (document.getElementById('mathjaxDialog').style.display == 'block') return false;
+        if (pc.getActiveObject() && pc.getActiveObject().type == 'textbox' && pc.getActiveObject().isEditing) return;
+        if (mapping[e.key]) $("#" + mapping[e.key]).click()
+        if (e.keyCode == 187) { //zoom in
+            zoomSelectedObject(true)
+        }
+        if (e.keyCode == 32) {
+            toggleRecording()
+        }
+        if (e.keyCode == 189) { //zoom out
+            zoomSelectedObject(false)
+        }
+        if (e.keyCode == 46) {
+            $('#delete-selected').click()
+        }
+        switch (e.keyCode) {
+            case 37: //left
+                if (pc.getActiveObject()) moveActiveObject('left', -10)
+                else {
+                    if (window.playingMode) {
+                        stopPlayback = true
+                        playerTimer -= 10
+                        if (playerTimer < playerTimerStart) playerTimer = playerTimerStart;
+                        $('#recording-info').html('Jumped To: ' + playerTimer)
+                    }
+                }
+                break
+            case 67:
+                if (e.ctrlKey) Copy(pc)
+                break;
+            case 86:
+                if (e.ctrlKey) Paste(pc)
+                break;
+            case 39: //right
+                if (pc.getActiveObject()) moveActiveObject('left', 10)
+                else {
+                    if (window.playingMode) {
+                        stopPlayback = true
+                        playerTimer += 10
+                        if (playerTimer > playerTimerTotal) playerTimer = playerTimerTotal;
+                        $('#recording-info').html('Jumped To: ' + playerTimer)
+                    }
+                }
+                break
+            case 40: //down
+                moveActiveObject('top', 10)
+                break
+            case 38: //up
+                moveActiveObject('top', -10)
+                break
+            case 69: //'e'
+                editSelectedObject()
+                break
+            case 188: //,
+                if (e.ctrlKey)
+                    moveToFront('pc')
+                break
+            case 190: //.
+                if (e.ctrlKey)
+                    moveToFront('oc')
+                break
+            case 191: ///
+                if (e.ctrlKey) {
+                    e.preventDefault()
+                    moveToFront('txt')
+                }
+                return false
+            default:
+                break
+        }
+    })
+</script>
+
+
+<div id="imageInputDialog"
+     style="background: blue; color: white; display: none; z-index: 500000;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
+    <input autoFocus type="text" id="imageInputUrl" onKeyUp="renderMath(event)">
+
+    <input type="file" id="imageInputFile">
+
+    <button onClick="handleFileDialogButtons('OK')">OK</button>
+    <button onClick="handleFileDialogButtons('')">Close</button>
+</div>
+
+<div id="mathjaxDialog" style="">
+    <script>
+        function renderMath(e) {
+            if (e.keyCode == 13) {
+                drawMathSymbols(document.getElementById('mathtext').value, pc)
+                document.getElementById('mathjaxDialog').style.display = 'none';
+            } else if (e.keyCode == 27) {
+                document.getElementById('mathjaxDialog').style.display = 'none';
+            } else {
+                document.getElementById('representation').innerHTML = "\\(" + document.getElementById('mathtext').value + "\\)";
+                MathJax.Hub.Queue(['Typeset', MathJax.Hub, 'representation']);
+            }
+        }
+    </script>
+    <input autoFocus type="text" id="mathtext" onKeyUp="renderMath(event)">
+
+    <div id="representation" style="margin-top: 20; padding: 15;"></div>
+
+    <div className="keyboard">
+        <div className="key letter">
+            0
+        </div>
+        <div className="key letter">
+            1
+        </div>
+        <div className="key letter">
+            2
+        </div>
+        <div className="key letter">
+            3
+        </div>
+        <div className="key letter">
+            4
+        </div>
+        <div className="key letter">
+            5
+        </div>
+        <div className="key letter">
+            6
+        </div>
+        <div className="key letter">
+            7
+        </div>
+        <div className="key letter">
+            8
+        </div>
+        <div className="key letter">
+            9
+        </div>
+        <div className="key letter">
+            +
+        </div>
+        <div className="key letter">
+            -
+        </div>
+        <div className="key letter">
+            *
+        </div>
+        <div className="key letter">
+            /
+        </div>
+        <div className="key letter">
+            (
+        </div>
+        <div className="key letter">
+            )
+        </div>
+        <div className="key letter" data-mathjax="\{">
+            {
+        </div>
+        <div class="key letter" data-mathjax="\}">
+            }
+        </div>
+        <div class="key letter">
+            [
+        </div>
+        <div class="key letter">
+            ]
+        </div>
+        <div class="key letter">
+            ^
+        </div>
+        <div class="key letter">
+            !
+        </div>
+        <div class="key letter">
+            @
+        </div>
+        <div class="key letter" data-mathjax="\#">
+            #
+        </div>
+        <div class="key letter">
+            $
+        </div>
+        <div class="key letter" data-mathjax="\%">
+            %
+        </div>
+        <div class="key letter" data-mathjax="\&">
+            &
+        </div>
+        <div class="key letter">
+            ?
+        </div>
+        <div class="key letter">
+            =
+        </div>
+        <div class="key letter">
+            /
+        </div>
+
+        <div class="key letter">
+            \
+        </div>
+        <div class="key letter">
+            ~
+        </div>
+        <div class="key letter" data-mathjax="\alpha ">
+            &alpha;
+        </div>
+        <div class="key letter" data-mathjax="\beta ">
+            &beta;
+        </div>
+        <div class="key letter" data-mathjax="\gamma ">
+            &gamma;
+        </div>
+        <div class="key letter" data-mathjax="\Gamma ">
+            &Gamma;
+        </div>
+        <div class="key letter" data-mathjax="\delta ">
+            &delta;
+        </div>
+        <div class="key letter" data-mathjax="\Delta ">
+            &Delta;
+        </div>
+        <div class="key letter" data-mathjax="\epsilon ">
+            &epsilon;
+        </div>
+
+
+        <input type="text" list="mathjaxFunctions" id="mathjaxFunctionInput" onchange="insertMathFromSelect(this)"
+               style="margin-top: 10px;"/>
+        <datalist id="mathjaxFunctions">
+            <option value="\infty">Infinity</option>
+
+            <option value="\sum {}">sum</option>
+            <option value="\text {}">text</option>
+
+            <option value="\forall">forall</option>
+            <option value="\exists">exists</option>
+            <option value="\lor">or</option>
+            <option value="\land">and</option>
+            <option value="\pm">plus minus</option>
+            <option value="\neq">not equal</option>
+            <option value="\geq">greater eq</option>
+            <option value="\ll">much less</option>
+            <option value="\gg">much greater</option>
+            <option value="\approx">approx</option>
+            <option value="\supset">proper superset</option>
+            <option value="\supseteq">superset</option>
+            <option value="\subset">proper subset</option>
+            <option value="\subseteq">subset</option>
+            <option value="\emptyset">empty set</option>
+            <option value="\cup"> union</option>
+            <option value="\cap"> intersection</option>
+
+            <option value="\hat { }"> hat</option>
+            <option value="\sqrt[root]{ }"> square root</option>
+            <option value="\partial"> partial</option>
+            <option value="\cap"> intersection</option>
+            <option value="\cap"> intersection</option>
+            <option value="\cap"> intersection</option>
+            <option value="\cap"> intersection</option>
+            <option value="\cap"> intersection</option>
+
+
+            <option value="\frac { }{ }">Fraction</option>
+            <option value="\in">In</option>
+            <option value="\left">Left</option>
+            <option value="\right">Right</option>
+            <option value="\overbrace {}">Overbrace</option>
+            <option value="\underbrace {}">Underbrace</option>
+
+            <option value="\boldsymbol">Bold</option>
+
+        </datalist>
+    </div>
+
+    <script type="text/javascript">
+        function insertMathFromSelect(el) {
+
+        }
+
+        function insertAtCursor(myField, myValue) {
+            //IE support
+            if (document.selection) {
+                myField.focus();
+                sel = document.selection.createRange();
+                sel.text = myValue;
+            }
+            //MOZILLA and others
+            else if (myField.selectionStart || myField.selectionStart == '0') {
+                var startPos = myField.selectionStart;
+                var endPos = myField.selectionEnd;
+                myField.value = myField.value.substring(0, startPos)
+                    + myValue
+                    + myField.value.substring(endPos, myField.value.length);
+                myField.selectionStart = startPos + myValue.length;
+                myField.selectionEnd = startPos + myValue.length;
+            } else {
+                myField.value += myValue;
+            }
+
+            myField.focus();
+        } //end function
+
+
+        $('.keyboard .key').click(e => {
+            var key = $(e.target).text().trim();
+            insertAtCursor($('#mathtext')[0], $(e.target).data('mathjax') || key);
+
+        });
+
+        $('#mathjaxFunctionInput').keyup(e => {
+
+            if (e.keyCode == 13) {
+                insertAtCursor($('#mathtext')[0], $(e.target).val());
+            }
+
+        });
+
+    </script>
+    <style type="text/css">
+        #key-chart {
+            position: absolute;
+            right: 20px;
+        }
+
+        #mathjaxDialog {
+            background: blue;
+            color: white;
+            display: none;
+            z-index: 500000;
+            position: absolute;
+            left: 30%;
+            top: 30%;
+            width: 400px;
+            height: 400px;
+            border: 1px solid black;
+            padding: 1%;
+        }
+
+        @media (max-width: 767px) {
+            #mathjaxDialog {
+                left: 2%;
+                width: 99%;
+            }
+        }
+
+        .key {
+            width: 40px;
+            height: 40px;
+            display: block;
+            background-color: #333;
+            text-align: left;
+            padding-left: 8px;
+            line-height: 29px;
+            border-radius: 2px;
+            float: left;
+            margin-left: 2px;
+            margin-bottom: 2px;
+            cursor: pointer;
+            transition: box-shadow 0.7s ease;
+        }
+
+        .section-a {
+            width: 650px;
+            height: 260px;
+            float: left;
+        }
+
+        .section-b {
+            width: 150px;
+            height: 260px;
+            float: left;
+        }
+
+        .function {
+            font-size: 12px;
+            width: 30px;
+            height: 30px;
+            margin-bottom: 15px;
+        }
+
+        .small {
+            font-size: 10px;
+            line-height: 13px;
+            text-align: center;
+            padding: 0 5px;
+            padding-top: 2px;
+            height: 28px !important;
+        }
+
+        .space1 {
+            margin-right: 43px !important;
+        }
+
+        .space2 {
+            margin-right: 25px !important;
+        }
+
+        .dual {
+            font-size: 14px;
+            line-height: 20px;
+            width: 30px;
+        }
+
+        .backspace {
+            width: 84px;
+            font-size: 12px;
+        }
+
+        .tab {
+            width: 50px;
+            line-height: 40px;
+            font-size: 13px;
+        }
+
+        .letter {
+            width: 30px;
+        }
+
+        .slash {
+            width: 64px;
+        }
+
+        .caps {
+            width: 70px;
+            font-size: 12px;
+            line-height: 18px;
+        }
+
+        .enter {
+            width: 92px;
+            line-height: 40px;
+            text-align: center;
+            padding-left: 0;
+        }
+
+        .shift.left {
+            width: 90px;
+            line-height: 40px;
+            font-size: 13px;
+        }
+
+        .shift.right {
+            width: 104px;
+            line-height: 40px;
+            font-size: 13px;
+        }
+
+        .ctrl {
+            width: 50px;
+            line-height: 40px;
+            font-size: 13px;
+        }
+
+        .space {
+            width: 234px;
+        }
+
+        .arrows {
+            position: relative;
+            top: 42px;
+        }
+
+        .sec-func .key {
+            width: 32px;
+            font-size: 10px;
+            text-align: left;
+            line-height: 40px;
+            float: left;
+        }
+
+        .sec-func div.dual {
+            line-height: 20px;
+        }
+
+        .arrows .key {
+            text-align: center;
+            padding-left: 7px;
+            margin-left: 2px;
+        }
+
+        .hidden {
+            visibility: hidden;
+        }
+
+        .key:hover {
+            box-shadow: 0px 0px 10px #14B524;
+            z-index: 1000;
+        }
+    </style>
+</div>
+</div>
+
+<script>
+    //applyBlackTheme();
+    $('#cinemaText').draggable();
+
+    //---------------------------Screen Recording
+    function startCapture(displayMediaOptions) {
+        let captureStream = null;
+
+        return navigator.mediaDevices.getDisplayMedia(displayMediaOptions)
+            .catch(err => {
+                console.error("Error:" + err);
+                return null;
+            });
+    }
+
+    function stopCapture(evt) {
+        let tracks = videoElem.srcObject.getTracks();
+
+        tracks.forEach(track => track.stop());
+        videoElem.srcObject = null;
+    }
+
+
+    //let start = document.getElementById('btnStart');
+    //let stop = document.getElementById('btnStop');
+    //let vidSave = document.getElementById('vid2');
+
+    window.mediaRecorder = null
+    window.recordingChunks = []
+
+    $('#btnStart').on('click', (ev) => {
+        if (window.mediaRecorder) {
+            window.mediaRecorder.stop()
+            window.mediaRecorder = null;
+            window.recordingChunks = []
+        }
+        startCapture({
+            video: true,
+            audio: true
+        }).then(mediaStreamObj => {
+            window.mediaRecorder = new MediaRecorder(mediaStreamObj);
+            window.mediaRecorder.start();
+            $("#btnStart").hide();
+            $("#btnStop").show();
+            $("#btnPause").show();
+            console.log(window.mediaRecorder.state);
+
+            window.mediaRecorder.ondataavailable = function (ev) {
+                window.recordingChunks.push(ev.data);
+            };
+            window.mediaRecorder.onstop = (ev) => {
+                let blob = new Blob(window.recordingChunks, {'type': window.recordingChunks[0].type});
+                console.log("type=" + window.recordingChunks[0].type)
+                window.recordingChunks = [];
+                var videoURL = window.URL.createObjectURL(blob);
+//            vidSave.src = videoURL;
+                //window.location.replace(videoURL)
+                var link = document.createElement("a"); // Or maybe get it from the current document
+                link.href = videoURL;
+                link.target = "_blank"
+                link.download = "aDefaultFileName.webm";
+                link.innerHTML = "Click here to download the file";
+
+                link.style.position = 'fixed';
+                link.style.bottom = 0;
+                link.style.zIndex = 9000;
+                document.body.appendChild(link);
+            }
+        });
+    });
+
+    $("#btnPause").click(e => {
+        if (window.mediaRecorder) {
+            window.mediaRecorder.pause()
+            console.log(window.mediaRecorder.state);
+            $("#btnPause").hide();
+            $("#btnResume").show();
+        }
+    });
+
+    $("#btnResume").click(e => {
+        if (window.mediaRecorder) {
+            window.mediaRecorder.resume();
+            console.log(window.mediaRecorder.state);
+            $("#btnPause").show();
+            $("#btnResume").hide();
+        }
+    });
+
+
+    $('#btnStop').on('click', (ev) => {
+        if (window.mediaRecorder) window.mediaRecorder.stop();
+        console.log(mediaRecorder.state);
+        $("#btnStop").hide();
+        $("#btnPause").hide();
+        $("#btnResume").hide();
+        $("#btnStart").show();
+    });
+
+</script>
+</body>
+
+</html>

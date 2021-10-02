@@ -314,7 +314,7 @@ blockquote {
   letter-spacing: 4px;
 }
 
-.article-container h2 {
+.article-top h2 {
   font-family: "Source Sans Pro", sans-serif;
   font-size: 26px;
   font-weight: 800;
