@@ -1,1896 +1,716 @@
-<html>
-
+<html lang="en">
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
-
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
+    <title>Guitar</title>
     <script src="/jquery.js"></script>
-    <script></script>
-    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
-    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
     <script type="text/javascript" src="/fabric.min.js"></script>
-    <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
-    <script type="text/javascript" src="/rx.all.min.js"></script>
-    <script type="text/javascript" src="/rx.all.min.js"></script>
-    <script type="text/javascript" src="/sprite.js"></script>
-
-
-    <script type="text/javascript" src="/jquery.lettering.js"></script>
-    <script type="text/javascript" src="/jquery.fittext.js"></script>
-    <script type="text/javascript" src="/rulez.min.js"></script>
-    <!-- <script type="text/javascript" src="/treant.js"></script> -->
-    <link rel="stylesheet" href="/animate.css">
-    <link rel="stylesheet" href="/treant.css">
-    <link rel="stylesheet" href="/play.css">
-    <script src="/vendor/raphael.js"></script>
-    <script src="https://unpkg.com/geometric@2.2.3/build/geometric.min.js"></script>
-
-    <script src="https://d3js.org/d3.v5.min.js"></script>
-    <script src="/tree.js"></script>
-    <!-- <script src="../../vendor/jquery.min.js"></script> -->
-    <script src="../../vendor/jquery.easing.js"></script>
-
-    <script type="text/javascript" src="/jquery.textillate.js"></script>
-    <!--    <script src="/typed.min.js"></script>-->
-    <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.9"></script>
     <script type="text/javascript" src="/diff-match-patch.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>
-    <link href="/select2.min.css" rel="stylesheet"/>
-    <script src="/select2.min.js"></script>
-    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.min.js"></script>
-    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.ui.min.js"></script>
-    <script type="text/javascript"
-            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_SVG">
-    </script>
-    <script src="/ace/src-noconflict/ace.js" type="text/javascript" charSet="utf-8"></script>
-    <script type="text/javascript"
-            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
-    <script type="text/javascript">
-        Array.prototype.max = function () {
-            return Math.max.apply(null, this);
-        };
-    </script>
-    <style>
-        .highlighted {
-            background-color: yellowgreen;
-        }
-    </style>
+    <script src="/opensheetmusicdisplay.min.js"></script>
+    <script type="text/javascript" src="/bootstrap.min.js"></script>
+    <script type="javascript" src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <link rel="stylesheet" href="/bootstrap-grid.min.css">
+    <link rel="stylesheet" href="/select2.min.css">
+    <link rel="stylesheet" href="/bootstrap.min.css">
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+    <script type="text/javascript" src="/play.js"></script>
+    <script type="text/javascript" src="/starfield.js"></script>
+    <script type="text/javascript" src="/select2.min.js"></script>
 
-    <script>
-        //alert(window.innerWidth + " " + window.innerHeight);
-        window.addEventListener("keydown", function (e) {
-            if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
-                e.preventDefault();
-                //Control F
-                $('.commands-select').select2('open');
-            }
-        })
-
-    </script>
-
-    <script>
-        function logItem(name, val, type, handlers) {
-            handlers = handlers || {}
-            window['globalVariableNames'][name] = val;
-            var li = $(`<li> <i class="actionable fas fa-trash"></i> ${name}: ${type} </li>`)
-            $(li).find("i").click(e => {
-                handlers.delete(name)
-                $(li).remove()
-            });
-            $('#item-variables').append(li)
-        }
-    </script>
-
-    <script src="/play.js"></script>
-    <!--    <script src="/play2.js"></script>-->
-    <link rel="stylesheet" href="/play.css">
-    <link rel="stylesheet" href="/fontawesome-all.css">
+    <script type="text/javascript" src="/data-structures.js"></script>
+    <script type="text/javascript" src="/music.js"></script>
+    <script type="text/javascript" src="/musicxml.js"></script>
+    <script type="text/javascript" src="/guitar.js"></script>
 
     <script>
 
     </script>
-
-
 </head>
 
 <body>
 
+<canvas id="stars"></canvas>
+<div class="main container">
+    <div class="col">
+        <div >
+            <div style="display:inline-block;">
+                <ul class="diatonic-chords chord-multiselect" id="diatonic-chords" style="opacity: 0;">
+                    <li class=""></li>
+                </ul>
+            </div>
 
-<script>
+            <div class="button" id="playProgressionBtn" style="opacity: 0;">Play Progression</div>
+            <div class="button" id="stopProgressionBtn" style="opacity: 0;">Stop</div>
+            <div class="button" id="generateMelodyBtn">Generate Melody</div>
+            <select class="progressions" name="activeProgression" style="width: 40%; opacity: 0;">
+            </select>
+            <audio id="melody-audio" controls style="position: absolute; top: 2%;left: 2%;">
+              
+            </audio>
+        </div>
+        <div class="row" style="min-height: 400px;">
+            <div id="circle-of-fifths" class="col-6 col-sm-4">
+                <svg id="app" class="cf" viewBox="0 0 300 300">
+                    <g class="cf-arcs">
+                        <path d="M300.00,150.00A150,150,0,0,1,278.58,227.26L235.72,201.50A100,100,0,0,0,250.00,150.00Z"></path>
+                        <path d="M250.00,150.00A100,100,0,0,1,235.72,201.50L210.00,186.05A70,70,0,0,0,220.00,150.00Z"></path>
+                        <path d="M220.00,150.00A70,70,0,0,1,210.00,186.05L184.29,170.60A40,40,0,0,0,190.00,150.00Z"></path>
+                    </g>
+                    <g transform="translate(260, 0)">
+                        <use width="30" xlink:href="#staff"></use>
 
-</script>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-1"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-2"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-3"></use>
+
+                    </g>
+                    <text x="235" y="153" class="cf-text-middle">A</text>
+                    <text x="205" y="152" class="cf-text-inner">F<tspan baseline-shift="super">#</tspan>m</text>
+
+                    <g class="cf-arcs">
+                        <path d="M279.90,225.00A150,150,0,0,1,222.72,281.19L198.48,237.46A100,100,0,0,0,236.60,200.00Z"></path>
+                        <path d="M236.60,200.00A100,100,0,0,1,198.48,237.46L183.94,211.22A70,70,0,0,0,210.62,185.00Z"></path>
+                        <path d="M210.62,185.00A70,70,0,0,1,183.94,211.22L169.39,184.98A40,40,0,0,0,184.64,170.00Z"></path>
+                    </g>
+                    <g transform="translate(243.25317547305485, 62.5)">
+                        <use width="30" xlink:href="#staff"></use>
+
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-1"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-2"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-3"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-4"></use>
+
+                    </g>
+                    <text x="223.6121593216773" y="195.5" class="cf-text-middle">E</text>
+                    <text x="197.63139720814414" y="179.5" class="cf-text-inner">C<tspan baseline-shift="super">#</tspan>m</text>
+
+                    <g class="cf-arcs">
+                        <path d="M225.00,279.90A150,150,0,0,1,147.38,299.98L148.25,249.98A100,100,0,0,0,200.00,236.60Z"></path>
+                        <path d="M200.00,236.60A100,100,0,0,1,148.25,249.98L148.78,219.99A70,70,0,0,0,185.00,210.62Z"></path>
+                        <path d="M185.00,210.62A70,70,0,0,1,148.78,219.99L149.30,189.99A40,40,0,0,0,170.00,184.64Z"></path>
+                    </g>
+                    <g transform="translate(197.5, 108.25317547305485)">
+                        <use width="30" xlink:href="#staff"></use>
+
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-1"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-2"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-3"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-4"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-5"></use>
+
+                    </g>
+                    <text x="192.5" y="226.61215932167727" class="cf-text-middle">B</text>
+                    <text x="177.5" y="199.6313972081441" class="cf-text-inner">G<tspan baseline-shift="super">#</tspan>m</text>
+
+                    <g class="cf-arcs">
+                        <path d="M150.00,300.00A150,150,0,0,1,72.744,278.58L98.496,235.72A100,100,0,0,0,150.00,250.00Z"></path>
+                        <path d="M150.00,250.00A100,100,0,0,1,98.496,235.72L113.95,210.00A70,70,0,0,0,150.00,220.00Z"></path>
+                        <path d="M150.00,220.00A70,70,0,0,1,113.95,210.00L129.40,184.29A40,40,0,0,0,150.00,190.00Z"></path>
+                    </g>
+                    <g transform="translate(135, 125)">
+                        <use width="30" xlink:href="#staff"></use>
+
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-1"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-2"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-3"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-4"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-5"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-6"></use>
+
+                    </g>
+                    <text x="150" y="238" class="cf-text-middle">G<tspan baseline-shift="super">b</tspan></text>
+                    <text x="150" y="207" class="cf-text-inner">D<tspan baseline-shift="super">#</tspan>m</text>
+
+                    <g class="cf-arcs">
+                        <path d="M75.000,279.90A150,150,0,0,1,18.807,222.72L62.538,198.48A100,100,0,0,0,100.00,236.60Z"></path>
+                        <path d="M100.00,236.60A100,100,0,0,1,62.538,198.48L88.777,183.94A70,70,0,0,0,115.00,210.62Z"></path>
+                        <path d="M115.00,210.62A70,70,0,0,1,88.777,183.94L115.02,169.39A40,40,0,0,0,130.00,184.64Z"></path>
+                    </g>
+                    <g transform="translate(72.50000000000003, 108.25317547305485)">
+                        <use width="30" xlink:href="#staff"></use>
+
+                        <use width="2" xlink:href="#flat" class="cf-flat-1"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-2"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-3"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-4"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-5"></use>
+
+                    </g>
+                    <text x="107.50000000000003" y="226.6121593216773" class="cf-text-middle">D<tspan baseline-shift="super">b</tspan></text>
+                    <text x="122.50000000000001" y="199.63139720814414" class="cf-text-inner">B<tspan baseline-shift="super">b</tspan>m</text>
+
+                    <g class="cf-arcs">
+                        <path d="M20.096,225.00A150,150,0,0,1,0.022846,147.38L50.015,148.25A100,100,0,0,0,63.397,200.00Z"></path>
+                        <path d="M63.397,200.00A100,100,0,0,1,50.015,148.25L80.011,148.78A70,70,0,0,0,89.378,185.00Z"></path>
+                        <path d="M89.378,185.00A70,70,0,0,1,80.011,148.78L110.01,149.30A40,40,0,0,0,115.36,170.00Z"></path>
+                    </g>
+                    <g transform="translate(26.74682452694516, 62.5)">
+                        <use width="30" xlink:href="#staff"></use>
+
+                        <use width="2" xlink:href="#flat" class="cf-flat-1"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-2"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-3"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-4"></use>
+
+                    </g>
+                    <text x="76.3878406783227" y="195.5" class="cf-text-middle">A<tspan baseline-shift="super">b</tspan></text>
+                    <text x="102.36860279185586" y="179.5" class="cf-text-inner">Fm</text>
+
+                    <g class="cf-arcs">
+                        <path d="M0.0000,150.00A150,150,0,0,1,21.425,72.744L64.283,98.496A100,100,0,0,0,50.000,150.00Z"></path>
+                        <path d="M50.000,150.00A100,100,0,0,1,64.283,98.496L89.998,113.95A70,70,0,0,0,80.000,150.00Z"></path>
+                        <path d="M80.000,150.00A70,70,0,0,1,89.998,113.95L115.71,129.40A40,40,0,0,0,110.00,150.00Z"></path>
+                    </g>
+                    <g transform="translate(10, 2.842170943040401e-14)">
+                        <use width="30" xlink:href="#staff"></use>
+
+                        <use width="2" xlink:href="#flat" class="cf-flat-1"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-2"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-3"></use>
+
+                    </g>
+                    <text x="65" y="153" class="cf-text-middle">E<tspan baseline-shift="super">b</tspan></text>
+                    <text x="95" y="152" class="cf-text-inner">Cm</text>
+
+                    <g class="cf-arcs">
+                        <path d="M20.096,75.000A150,150,0,0,1,77.279,18.807L101.52,62.538A100,100,0,0,0,63.397,100.00Z"></path>
+                        <path d="M63.397,100.00A100,100,0,0,1,101.52,62.538L116.06,88.777A70,70,0,0,0,89.378,115.00Z"></path>
+                        <path d="M89.378,115.00A70,70,0,0,1,116.06,88.777L130.61,115.02A40,40,0,0,0,115.36,130.00Z"></path>
+                    </g>
+                    <g transform="translate(26.746824526945176, -62.500000000000014)">
+                        <use width="30" xlink:href="#staff"></use>
+
+                        <use width="2" xlink:href="#flat" class="cf-flat-1"></use>
+                        <use width="2" xlink:href="#flat" class="cf-flat-2"></use>
+
+                    </g>
+                    <text x="76.38784067832272" y="110.5" class="cf-text-middle">B<tspan baseline-shift="super">b</tspan></text>
+                    <text x="102.36860279185588" y="124.5" class="cf-text-inner">Gm</text>
+
+                    <g class="cf-arcs">
+                        <path d="M75.000,20.096A150,150,0,0,1,152.62,0.022846L151.75,50.015A100,100,0,0,0,100.00,63.397Z"></path>
+                        <path d="M100.00,63.397A100,100,0,0,1,151.75,50.015L151.22,80.011A70,70,0,0,0,115.00,89.378Z"></path>
+                        <path d="M115.00,89.378A70,70,0,0,1,151.22,80.011L150.70,110.01A40,40,0,0,0,130.00,115.36Z"></path>
+                    </g>
+                    <g transform="translate(72.49999999999994, -108.25317547305481)">
+                        <use width="30" xlink:href="#staff"></use>
+
+                        <use width="2" xlink:href="#flat" class="cf-flat-1"></use>
+
+                    </g>
+                    <text x="107.49999999999997" y="79.38784067832273" class="cf-text-middle">F</text>
+                    <text x="122.49999999999997" y="104.36860279185589" class="cf-text-inner">Dm</text>
+
+                    <g class="cf-arcs">
+                        <path d="M150.00,0.0000A150,150,0,0,1,227.26,21.425L201.50,64.283A100,100,0,0,0,150.00,50.000Z"></path>
+                        <path d="M150.00,50.000A100,100,0,0,1,201.50,64.283L186.05,89.998A70,70,0,0,0,150.00,80.000Z" class="active"></path>
+                        <path d="M150.00,80.000A70,70,0,0,1,186.05,89.998L170.60,115.71A40,40,0,0,0,150.00,110.00Z"></path>
+                    </g>
+                    <g transform="translate(134.99999999999997, -125)">
+                        <use width="30" xlink:href="#staff"></use>
 
 
-<div style="position: fixed; right: -37px; top: 10%;z-index: 3000; color: green">
-    <ul id="item-variables">
+                    </g>
+                    <text x="149.99999999999997" y="68" class="cf-text-middle">C</text>
+                    <text x="150" y="97" class="cf-text-inner">Am</text>
 
-    </ul>
-</div>
+                    <g class="cf-arcs">
+                        <path d="M225.00,20.096A150,150,0,0,1,281.19,77.279L237.46,101.52A100,100,0,0,0,200.00,63.397Z"></path>
+                        <path d="M200.00,63.397A100,100,0,0,1,237.46,101.52L211.22,116.06A70,70,0,0,0,185.00,89.378Z"></path>
+                        <path d="M185.00,89.378A70,70,0,0,1,211.22,116.06L184.98,130.61A40,40,0,0,0,170.00,115.36Z"></path>
+                    </g>
+                    <g transform="translate(197.5, -108.25317547305482)">
+                        <use width="30" xlink:href="#staff"></use>
 
-<!--    <video width="100%" height="100%" style="width: 100%; height: 100%; position: fixed; top: 0; left: 0;" src="/videos/smoke.mp4" autoplay muted>-->
-<!--    </video>-->
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-1"></use>
+
+                    </g>
+                    <text x="192.5" y="79.38784067832272" class="cf-text-middle">G</text>
+                    <text x="177.5" y="104.36860279185588" class="cf-text-inner">Em</text>
+
+                    <g class="cf-arcs">
+                        <path d="M279.90,75.000A150,150,0,0,1,299.98,152.62L249.98,151.75A100,100,0,0,0,236.60,100.00Z"></path>
+                        <path d="M236.60,100.00A100,100,0,0,1,249.98,151.75L219.99,151.22A70,70,0,0,0,210.62,115.00Z"></path>
+                        <path d="M210.62,115.00A70,70,0,0,1,219.99,151.22L189.99,150.70A40,40,0,0,0,184.64,130.00Z"></path>
+                    </g>
+                    <g transform="translate(243.2531754730548, -62.50000000000006)">
+                        <use width="30" xlink:href="#staff"></use>
+
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-1"></use>
+                        <use width="2" xlink:href="#sharp" class="cf-sharp-2"></use>
+
+                    </g>
+                    <text x="223.61215932167727" y="110.49999999999997" class="cf-text-middle">D</text>
+                    <text x="197.6313972081441" y="124.49999999999997" class="cf-text-inner">Bm</text>
+                </svg>
 
 
-<script>
-    // In your Javascript (external .js resource or <script> tag)
-    $(document).ready(function () {
-        $('.commands-select').select2();
-    });
-    $('.commands-select').on('select2:open', function (e) {
-        var data = e.params.data;
-        console.log(data);
-        window.commandSelectionIsGoingOn = true;
-    });
 
-    $('.commands-select').on('select2:close', function (e) {
-        var data = e.params.data;
-        console.log(data);
-        window.commandSelectionIsGoingOn = false;
-    });
+                <svg style="position: absolute; width: 0; height: 0; overflow: hidden;" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+                    <defs>
+                        <symbol id="staff" viewBox="0 0 203.18 132.08">
+                            <path style="stroke:var(--light);stroke-width:1pt;fill:none" d="m89.253 345.53 177.07.72m-175.63 21.24 177.07.72m-176.35 21.05 177.07.72m-178.87 21.5 177.07.72m-176.35 21.06 177.07.72" transform="matrix(1.1144 0 0 1 -96.674 -331.49)"/>
+                            <path fill="var(--light)" transform="matrix(.907 0 0 .91953 -8.112 -4.363)" d="M39.542 140.49c.022 8.47 18.816 7.39 18.753-6.57.025-13.61-17.954-89.748-18.155-104.31-.211-11.556 6.122-24.509 11.548-24.368 4.299.141 8.338 9.873 8.316 21.986.326 39.173-33.981 36.641-33.981 63.409 0 17.303 14.363 21.873 21.545 21.873 24.32-.16 20.239-29.381 4.734-29.381-9.141-.328-17.139 12.076-5.06 22.359-20.403-8.977-9.467-30.685 6.692-30.848 21.545.163 25.299 39.658-6.366 39.828-18.933.16-26.931-16.488-26.768-29.546 0-25.135 37.051-39.662 36.561-60.881 0-13.384-13.873-7.345-14.2 14.201.327 13.384 17.628 84.056 17.465 94.996 0 22.52-28.89 15.18-28.89 3.75.163-16.32 16.975-4.73 11.752-4.24-4.081 7.18-3.946 7.74-3.946 7.74z"/>
+                            <path fill="var(--light)" transform="matrix(.907 0 0 .91953 -8.112 -4.363)" d="M47.37 133.39c0 3.79-3.161 6.87-7.054 6.87s-7.053-3.08-7.053-6.87 3.16-6.86 7.053-6.86 7.054 3.07 7.054 6.86z"/>
+                        </symbol>
+                        <symbol id="sharp" viewBox="0 0 6 19">
+                            <path fill="var(--light)" d="M1.906 12.154V7.45l2-.552v4.68l-2 .576zm3.938-1.138-1.375.394V6.73l1.375-.384V4.402l-1.375.384V.004h-.563v4.927l-2 .575V.856h-.531v4.827L0 6.068v1.948l1.375-.384v4.671L0 12.686v1.94l1.375-.384v4.755h.531v-4.925l2-.55v4.626h.563v-4.8l1.375-.385v-1.947z"/>
+                        </symbol>
+                        <symbol id="flat" viewBox="0 0 .908 2.512">
+                            <path fill="var(--light)" d="m.216 1.696-.004.264v.044c0 .088.004.176.016.264.18-.152.372-.32.372-.556 0-.132-.056-.268-.172-.268-.124 0-.208.12-.212.252zm-.168.716L0 .032A.212.212 0 0 1 .108 0c.036 0 .076.012.108.032l-.028 1.38a.577.577 0 0 1 .364-.136c.208 0 .356.192.356.408 0 .32-.344.468-.588.676-.06.052-.096.152-.18.152-.052 0-.092-.044-.092-.1z"/>
+                        </symbol>
+                    </defs>
+                </svg>
+            </div>
 
-    $('.commands-select').on('select2:select', function (e) {
-        var data = e.params.data;
-        console.log(data);
-        $(`#${data.id}-dialog`).dialog({
-            width: 800,
-            height: 400,
-        })
-        window.commandSelectionIsGoingOn = false;
-        $('.commands-select').val('NULL')
-        $('.commands-select').trigger('change'); //Reset
-    });
-</script>
-<canvas id="playerCanvas"></canvas>
-<canvas id="overlayCanvas" style="position: absolute;"></canvas>
-<span id="recording-info" style="    margin-left: 42%;top: 0; position: fixed;"></span>
-<div id="textillateContainer" style="width: 100%; height: 100%;position: absolute; top: 0; left: 0;">
-    <div id="cinemaText"></div>
-    <div id="typed-strings" style="display: none">
-        <p>Typed.js is a <strong>JavaScript</strong> library.</p>
-        <p>It <em>types</em> out sentences.</p>
+            <div class="guitar-neck col">
+
+                <div class="fret first"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+                <div class="fret"></div>
+
+                <ul class="dots">
+                    <li></li>
+                    <li></li>
+                    <li></li>
+                    <li></li>
+                    <li></li>
+                    <li></li>
+                </ul>
+                <ul class="strings">
+                    <li></li>
+                    <li></li>
+                    <li></li>
+                    <li></li>
+                    <li></li>
+                    <li></li>
+                </ul>
+            </div>
+
+        </div>
+
+        <div class="row">
+            <div id="key-detail" class="col">
+                <div class="row " id="tips">
+
+                </div>
+                <div class="row">
+                    <div class="col">
+                        <div id="osmdContainer1"></div>
+                        <div id="osmdContainer2"></div>
+                        <div id="osmdContainer3"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+
     </div>
-</div>
+    <div class="col">
+        <div class="row">
 
-<div id="editor" style="position: absolute;top:0; left: 50%;width: 49%; z-index: 30000; height: 100%; display: none">
-</div>
-<script>
-    var editor = ace.edit("editor");
-    editor.setTheme("ace/theme/monokai");
-    editor.session.setMode("ace/mode/python");
-    editor.setFontSize(23);
-</script>
-
-<script type="text/javascript">
-    var API_HOST = 'http://livintolearn.com/api';
-    var id = window.location.hash.replace("#", "")
-
-    window.onbeforeunload = function () {
-        return 'Are you sure you want to leave?';
-    };
-
-
-    window.pc = new fabric.Canvas('playerCanvas')
-    window._ = {
-        textboxes: []
-    }
-    window.oc = new fabric.Canvas('overlayCanvas', {
-        isDrawingMode: true
-    });
-    window.txt = $("#textillateContainer")
-    pc.setWidth(window.innerWidth)
-    pc.setHeight(window.innerHeight)
-    oc.setWidth(window.innerWidth)
-    oc.setHeight(window.innerHeight)
-
-    $('.canvas-container').css({
-        position: 'absolute'
-    });
-    superimposeOverlayCanvas()
-    moveToFront('pc')
-</script>
-
-<div style="display: inline-block;margin-left: 10px;position: absolute;left: 0;top: 8px;z-index: 1000000;height: 0;">
-        <span style=""> <label className="switch">
-          <input type="checkbox" id="eraser">
-          <span className="slider round"></span>
-            </label>
-        </span>
-</div>
-
-<script>
-
-    let clickVicinity = 20;
-    function renderStringsAndFrets() {
-        var strings = []
-        let left = 100;
-        let top =  100;
-        let right = 1300;
-        let verticalGap = 40;
-        let bottom = 300;
-
-        for (var i = 0; i < 6; i++) {
-            let verticalPos = top + i * verticalGap;
-            strings.push(makeLine([left, verticalPos, right, verticalPos]));
-            pc.add(strings[i])
-        }
-
-        var frets = []
-
-        let baseWidth = window.fretDistance || 100;
-        for (var i = 0; i < 18; i++) {
-            let defaultReductionFn = x => x === 0 ? 0 : (14 * Math.log(x)) * x;
-            let reductionFn = window.fretDistanceMultiplier || defaultReductionFn
-            let reduction = reductionFn(i);
-            let offset = i * baseWidth - reduction;
-            frets.push(makeLine([left + offset, top, left + offset, bottom]));
-            pc.add(frets[i])
-        }
-
-        var fretHead = makeLine([98, 98, 98, 352], {strokeWidth: 5})
-        // pc.add(fretHead)
-
-
-
-        return [strings, frets]
-    }
-    let [strings, frets] = [[], []]
-
-    var notes = [
-        ['E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C'],
-        ['B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G'],
-        ['G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' '],
-        ['D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' '],
-        ['A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F'],
-        ['E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C', ' ', 'D', ' ', 'E', 'F', ' ', 'G', ' ', 'A', ' ', 'B', 'C']
-    ];
-
-    let noteTable = appendTableInto(notes, $('#textillateContainer'), {
-        id: 'notes-chart',
-        ytitle: '',
-        xtitle: '',
-        xheaders: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-        yheaders: ['E', 'B', 'G', 'D', 'A', 'E'],
-        width: '1200px', height: '300px',
-        marginRight: '1%',
-        marginTop: '5%',
-        top: 100,
-        color: 'blue',
-        cellClicked: (x, y, el) => {
-            $(el).toggleClass('highlighted')
-
-            if ($(el).hasClass('highlighted')) {
-
-            }
-        }
-    })
-
-    var noteLabels = []
-    for(var i=0; i < notes.length; i++) {
-        noteLabels[i] = new Array(notes[i].length)
-        for (j = 0; j < notes[i].length; j++) {
-            noteLabels[i][j] = noteTable.at(i + 1, j + 1)
-        }
-    }
-
-    function showNoteAt(string, fret, toggle) {
-        toggle = toggle || false
-        var i = string - 1, j = fret;
-        if (i < 0 || i > strings.length - 1) {
-            console.log(`string ${string} invalid`);
-            return;
-        }
-        if (j < 0 || j > frets.length - 1) {
-            console.log(`fret ${fret} invalid`);
-            return;
-        }
-        var posX, posY, color;
-
-        if (fret === 0) {
-            posX = frets[0].get('x1') - 30;
-            posY = strings[i].get('y1') - 11;
-            color = 'green';
-        } else {
-            posX = frets[j - 1].get('x1') + 15, posY = strings[i].get('y1') - 11, color = 'blue';
-        }
-
-        let noteLabel = noteLabels[i][j];
-        if (noteLabel) {
-            let flippedOpacity = noteLabel.opacity === 1 ? 0 : 1;
-            noteLabel.setOpacity(toggle ? flippedOpacity : 1);
-            noteLabel.setLeft(posX);
-            noteLabel.setTop(posY);
-            pc.renderAll();
-            return noteLabel;
-        } else {
-            var n = textInCircle(notes[i][j], posX, posY, {fontSize: 14}, {fill: color});
-            n.lockMovementY = true;
-            n.lockMovementX = true;
-            n.lockScalingX = true;
-            n.lockScalingY = true;
-            noteLabels[i][j] = n;
-            pc.add(n);
-            return n;
-        }
-    }
-
-    function hideNoteAt(string, fret) {
-        var i = string - 1, j = fret;
-        if (noteLabels[i][i]) {
-            noteLabels[i][j].setOpacity(0);
-            pc.renderAll();
-        }
-    }
-
-    var maxReach = 12;
-
-    function showAllNotesOf(name) {
-        let shown = []
-        for (let i = 0; i < 6; i++) {
-            for (let j = 0; j < maxReach; j++) {
-                let n = null
-                if (name.startsWith(notes[i][j])) {
-                    if (name.endsWith('#')) {
-                        n = showNoteAt(i + 1, j + 1)
-                        shown.push({string: i + 1, fret: j + 1, label: n});
-                    } else if (name.endsWith('b')) {
-                        n = showNoteAt(i + 1, j - 1)
-                        shown.push({string: i + 1, fret: j - 1, label: n});
-                    } else {
-                        n = showNoteAt(i + 1, j)
-                        shown.push({string: i + 1, fret: j, label: n});
-                    }
-                }
-            }
-        }
-        return shown.filter(x => x);
-    }
-
-    function hideAll() {
-        noteLabels.forEach(row => {
-            row.forEach(it => {
-                if (it) it.removeClass('highlighted')
-            })
-        });
-        pc.renderAll();
-    }
-
-    function fretMarker(fret) {
-        var x = makeLine([frets[fret].get('x1') - 24, strings[5].get('y1'), frets[fret].get('x1') - 24, strings[5].get('y1') + 50]);
-        pc.add(x);
-        var t = textInRect(' ' + fret + ' ', frets[fret].get('x1') - 50, strings[5].get('y1') + 50, {color: 'black'}, {
-            fill: 'transparent',
-            strokeWidth: 2,
-            stroke: 'blue'
-        });
-        t._objects[1].setColor('black');
-        t.lockMovementX = true;
-        t.lockMovementY = true;
-        t.lockScalingX = true;
-        t.lockScalingY = true;
-        pc.add(t);
-    }
-
-    function showFretMarkers() {
-        fretMarker(5);
-        fretMarker(7);
-        fretMarker(9);
-        fretMarker(12);
-        fretMarker(15);
-
-        pc.renderAll();
-    }
-
-    // showFretMarkers();
-
-    var notesToPosMap = {}
-
-    for (var i = 0; i < 6; i++) {
-        for (var j = 0; j < 17; j++) {
-            var pos = notesToPosMap[notes[i][j]] || []
-            pos.push([i, j]);
-            notesToPosMap[notes[i][j]] = pos;
-        }
-    }
-
-    function showRandomAToG() {
-        hideAll();
-        var randomPositions = []
-
-        Object.keys(notesToPosMap).sort().forEach(note => {
-            var array = notesToPosMap[note];
-            var randomElement = array[Math.floor(Math.random() * array.length)];
-            randomPositions.push(randomElement);
-        });
-
-        var prev = null;
-        schedule(randomPositions, document.querySelector("#chordChangeSpeed").value || 20, pos => {
-            if (prev) prev.setOpacity(0.5);
-            prev = showNoteAt(pos[0] + 1, pos[1]);
-        }, () => {
-        });
-    }
-
-    function hideAllNotesOf(name) {
-        for (var i = 0; i < 6; i++) {
-            for (var j = 0; j < notes[i].length; j++) {
-                if (notes[i][j].toLowerCase() === name.toLowerCase()) {
-                    if (noteLabels[i][j]) noteLabels[i][j].setOpacity(0)
-                }
-            }
-        }
-        pc.renderAll()
-    }
-
-    var withinLimit = (val, target, n) => val < target + n && val > target - n;
-    var between = (val, x, y) => val <= y && val >= x;
-
-    function showNoteOnClick(e) {
-        for (i = 0; i < 6; i++) {
-            for (var j = 0; j < 17; j++) {
-                var isNearStringI = withinLimit(e.e.clientY, strings[i].get('y1'), clickVicinity);
-                var isOnFretJ = false;
-
-                if (j === 0) {
-                    isOnFretJ = between(e.e.clientX, frets[0].get('x1') - clickVicinity, frets[0].get('x1'));
-                } else {
-                    isOnFretJ = between(e.e.clientX, frets[j - 1].get('x1'), frets[j].get('x1'));
-                }
-
-                if (isNearStringI && isOnFretJ) {
-                    console.log(`Fret ${j} String ${i + 1}`);
-                    showNoteAt(i + 1, j, true);
-                }
-            }
-        }
-    }
-
-    let majorScales = {
-        'G': 'G - A - B - C - D - E - F#',
-        'Gb': 'Gb - Ab - Bb - Cb - Db - Eb - F',
-        'G#': 'G# - A# - B# - C# - D# - E# - F#',
-        'F': 'F - G - A - Bb - C - D - E',
-        'F#': 'F# - G#- A# - B - C# - D# - E#',
-        'E': 'E - F# - G# - A - B - C# - D#',
-        'Eb': 'Eb - F - G - Ab - Bb - C - D',
-        'D': 'D - E - F# - G - A - B - C#',
-        'Db': 'Db - Eb - F - Gb - Ab - Bb - C',
-        'D#': 'D# - E# - F# - G# - A# - B#- C#',
-        'C': 'C - D - E - F - G - A - B',
-        'C#': 'C# - D# - E# - F# - G# - A# - B#',
-        'B': 'B - C# - D# - E - F# - G# - A#',
-        'Bb': 'Bb - C - D - Eb - F - G - A',
-        'A': 'A - B - C# - D - E - F# - G#',
-        'Ab': 'Ab - Bb - C - Db - Eb - F - G',
-        'A#': 'A# - B# - C# - D# - E# - F# - G#',
-    };
-    let minorScales = {
-        'C': 'C - D - Eb - F - G - Ab - Bb',
-        'C#': 'C# - D# - E - F# - G# - A - B',
-        'D': 'D - E - F - G - A - Bb - C',
-        'Db': 'Db - Eb - Fb - Gb - Ab - Bb - Cb',
-        'D#': 'D# - E# -F# - G# - A# - B - C#',
-        'E': 'E - F# - G - A - B - C - D',
-        'Eb': 'Eb - F - Gb - Ab - Bb - Cb - Db',
-        'F': 'F - G - Ab - Bb - C - Db - Eb',
-        'F#': 'F# - G# - A - B - C# - D - E',
-        'G': 'G - A - Bb - C - D - Eb - F',
-        'Gb': 'Gb - Ab - bb - Cb - Db - Eb - Fb',
-        'G#': 'G# - A# - B - C# - D# - E - F#',
-        'A': 'A - B - C - D - E - F - G',
-        'Ab': 'Ab - Bb - Cb - Db - Eb - Fb - Gb',
-        'A#': 'A# - B# - C# - D# - E# - F# - G#',
-        'B': 'B - C# - D - E - F# - G - A',
-        'Bb': 'Bb - C - Db - Eb - F - Gb - Ab'
-    }
-
-    //Pre-load all notes and hide
-    for (i = 0; i < 7; i++) {
-        for (var j = 0; j < 17; j++) {
-            showNoteAt(i, j);
-        }
-    }
-    // hideAll();
-
-    function findNotesBeingShown() {
-        let notesBeingShown = {}
-        for (let i = 0; i < noteLabels.length; i++) {
-            for (let j = 0; j < noteLabels[i].length; j++) {
-                let noteLabel = noteLabels[i][j];
-                if (!noteLabel) continue
-                let isShown = noteLabel.hasClass('highlighted')
-                // console.log(`isShown ${isShown}`)
-                if (isShown) {
-                    let noteName = noteLabel.text().trim()
-                    if (!noteName.trim()) {
-                        noteName = ''
-                        //Either sharp or flat
-                        if (noteLabels[i][j + 1]) {
-                            let nextNote = noteLabels[i][j + 1].text().trim()
-                            noteName += (nextNote + 'b')
-                        }
-                        if (noteLabels[i][j - 1]) {
-                            let prevNote = noteLabels[i][j - 1].text().trim()
-                            if (prevNote) noteName += ("/" + prevNote + '#')
-                        }
-                    }
-                    notesBeingShown[noteName] = true;
-                }
-            }
-        }
-        return Object.keys(notesBeingShown).flatMap(x => x.split('/')) // as set instead of list
-    }
-
-    let notesInScale = (scales, k) => scales[k].split(' - ');
-
-    function findMatchingFromScales(patternName, pattern, notesBeingShown) {
-        let scales = majorScales;
-        let noteIsBeingShown = noteName => {
-            //Take care of sharp/flat notes
-            return noteName.split("/").some(n =>
-                notesBeingShown.indexOf(n) >= 0
-            )
-        }
-
-        let candidates = {} //Map of {rootNote: [missingCount, missingNote]}
-
-        Object.keys(scales).forEach(rootNote => {
-            let patternNotes = pattern(notesInScale(scales, rootNote));
-            let isCandidate = false;
-            if (patternNotes.length === 3) {
-                //For Triad chords Root, and perfect 3rd are enough
-                isCandidate = noteIsBeingShown(patternNotes[0]) && noteIsBeingShown(patternNotes[1])
-                if (isCandidate) {
-                    let thirdMissing = !noteIsBeingShown(patternNotes[2]);
-                    if (thirdMissing) {
-                        candidates[`${rootNote}${patternName}`] = [1, patternNotes[2]];
-                    } else {
-                        candidates[`${rootNote}${patternName}`] = [0, null];
-                    }
-                }
-                console.log(`${patternName}, Root: ${rootNote}, Pattern: ${patternNotes} Matched: ${isCandidate}`)
-            } else {
-                let matched = patternNotes.filter(noteName => noteIsBeingShown(noteName))
-                let notMatched = patternNotes.filter(noteName => !noteIsBeingShown(noteName))
-                isCandidate = (patternNotes.length - matched.length) <= 1
-                if (isCandidate) {
-                    candidates[`${rootNote}${patternName}`] = [patternNotes.length - matched.length, notMatched.join(", ")];
-                }
-                console.log(`${patternName} Root: ${rootNote}, Pattern: ${patternNotes} Matched: ${matched}`)
-            }
-        })
-
-        return candidates
-    }
-
-    function cartesian(...args) {
-        var r = [], max = args.length - 1;
-
-        function helper(arr, i) {
-            for (var j = 0, l = args[i].length; j < l; j++) {
-                var a = arr.slice(0); // clone arr
-                a.push(args[i][j]);
-                if (i === max)
-                    r.push(a);
-                else
-                    helper(a, i + 1);
-            }
-        }
-
-        helper([], 0);
-        return r;
-    }
-
-    function chord(name, fretsToReach) {
-        fretsToReach = fretsToReach || []
-        console.log(`Chord ${name} nearby frets ${fretsToReach}`)
-
-        let reachable = (fret1, fret2) => {
-            return fret1 === 0 || fret2 === 0 || withinLimit(fret1, fret2, 3)
-        }
-        let find = (scale, name) => {
-            let scaleNotes = scale[name].split(" - ")
-            let notesOfChord = [1, 3, 5].map(i => showAllNotesOf(scaleNotes[i - 1]))
-            let allPossible = cartesian(notesOfChord[0], notesOfChord[1], notesOfChord[2]);
-            let closrByNotes = allPossible.filter(notes => {
-                return fretsToReach.every(f => reachable(f, notes[0].fret)) && reachable(notes[0].fret, notes[1].fret) && reachable(notes[1].fret, notes[2].fret) && reachable(notes[0].fret, notes[2].fret)
-            })
-            // console.log(closrByNotes)
-            hideAll()
-            return closrByNotes.length ? closrByNotes : allPossible
-        };
-
-        if (name.endsWith("m")) {
-            name = name.replace("m", "")
-            //Minor chord
-            return find(minorScales, name)
-        } else {
-            //Major chord
-            return find(majorScales, name)
-        }
-    }
-
-    function guessChord() {
-        let notesBeingShown = findNotesBeingShown();
-
-        let evalSharpsFlats = x => {
-            x = "" + x
-            if (x.length <= 2) return x;
-            if (x.endsWith("#b")) return x.replaceAll("#b", "")
-            if (x.endsWith("b#")) return x.replaceAll("b#", "")
-            return x
-        }
-
-        let roundAt = (lim, x) => x === lim ? x : x % lim;
-
-        let pattern = nums => {
-            nums = nums.map(it => '' + it).map(it => it.split(''))
-            return notesInScale => nums.map(xx => evalSharpsFlats(notesInScale[roundAt(7, xx[0] - 1)] + (xx[1] || ''))).filter(x => x);
-        }
-
-        let chords = {}
-
-        let addToList = candidates => Object.keys(candidates).forEach(c => {
-            chords[c] = candidates[c]
-        });
-
-        addToList(findMatchingFromScales('maj', pattern([1, 3, 5]), notesBeingShown));
-        addToList(findMatchingFromScales('min', pattern([1, '3b', 5]), notesBeingShown));
-        addToList(findMatchingFromScales('aug', pattern([1, 3, '5#']), notesBeingShown));
-        addToList(findMatchingFromScales('dim', pattern([1, '3b', '5b']), notesBeingShown));
-        addToList(findMatchingFromScales('dim7', pattern([1, '3b', '5b', 6]), notesBeingShown));
-        addToList(findMatchingFromScales('sus4', pattern([1, 4, 5]), notesBeingShown));
-        addToList(findMatchingFromScales('+9', pattern([1, 3, 5, 9]), notesBeingShown));
-        addToList(findMatchingFromScales('min+9', pattern([1, '3b', 5, 9]), notesBeingShown));
-        addToList(findMatchingFromScales('5', pattern([1, 5]), notesBeingShown));
-        addToList(findMatchingFromScales('6', pattern([1, 3, 5, 6]), notesBeingShown));
-        addToList(findMatchingFromScales('min6', pattern([1, '3b', 5, 6]), notesBeingShown));
-        addToList(findMatchingFromScales('6+9', pattern([1, 3, 5, 6, 9]), notesBeingShown));
-        addToList(findMatchingFromScales('min6+9', pattern([1, '3b', 5, 6, 9]), notesBeingShown));
-        addToList(findMatchingFromScales('7', pattern([1, '3', 5, '7b']), notesBeingShown));
-        addToList(findMatchingFromScales('min7', pattern([1, '3b', 5, '7b']), notesBeingShown));
-        addToList(findMatchingFromScales('dim7', pattern([1, '3b', '5b', 6]), notesBeingShown));
-        addToList(findMatchingFromScales('7Sus4', pattern([1, '4', '5', '7b']), notesBeingShown));
-        addToList(findMatchingFromScales('9', pattern([1, 3, 5, '7b', 9]), notesBeingShown));
-        addToList(findMatchingFromScales('maj9', pattern([1, 3, 5, 7, 9]), notesBeingShown));
-        addToList(findMatchingFromScales('min9', pattern([1, '3b', 5, '7b', 9]), notesBeingShown));
-
-        console.log('Guessed chord = ' + Object.keys(chords));
-        let solidMatch = []
-        Object.keys(chords).forEach(c => {
-            if (chords[c][0] === 0) {
-                solidMatch.push(c)
-                delete chords[c]
-            }
-        })
-
-        //Tests
-        let toString = chords => {
-            let str = ""
-            Object.keys(chords).forEach(c => {
-                str += `${c} - ${chords[c][1]} <br>`
-            })
-            return str
-        }
-
-        let $guessedChord = $('#guessedChord');
-        $guessedChord.html(
-            $('<span>').css({
-                fontSize: 'larger',
-                color: 'green'
-            }).html(solidMatch.join(", ") + "<br><hr>")
-                .append(
-                    $('<span>').css({
-                        fontSize: 'smaller',
-                        color: 'blue'
-                    }).html(toString(chords))
-                )
-        )
-        setTimeout(() => $guessedChord.html(''), 90000)
-    }
-
-    let chordsToPlay = []
-    let keyChart1 = [
-        ['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim'],
-        ['G', 'Am', 'Bm', 'C', 'D', 'Em', 'F#dim'],
-        ['D', 'Em', 'F#m', 'G', 'A', 'Bm', 'C#dim'],
-        ['A', 'Bm', 'C#m', 'D', 'E', 'F#m', 'G#dim'],
-        ['E', 'F#m', 'G#m', 'A', 'B', 'C#m', 'D#dim'],
-        ['B', 'C#m', 'D#m', 'E', 'F#m', 'G#m', 'A#dim'],
-        ['F#', 'G#m', 'A#m', 'B', 'C#', 'D#m', 'E#dim'],
-    ]
-    let keyTable1 = appendTableInto(keyChart1, $('#textillateContainer'), {
-        id: 'key-chart',
-        ytitle: '',
-        xtitle: '',
-        xheaders: [1, 2, 3, 4, 5, 6, 7],
-        yheaders: ['C', 'G', 'D', 'A', 'E', 'B', 'F#'],
-        width: '600px', height: '300px',
-        marginRight: '20%',
-        color: 'blue',
-        cellClicked: (x, y, el) => {
-            $(el).toggleClass('highlighted')
-
-            if ($(el).hasClass('highlighted')) {
-                chordsToPlay.push(keyChart1[x][y])
-            }
-        }
-    })
-
-    keyTable1.all.css({top: 400, zIndex: 1000000})
-
-    function resetChords() {
-        chordsToPlay = []
-        keyTable1.each((i, j, el) => $(el).removeClass('highlighted'))
-        hideAll()
-    }
-
-    function randomFromArray(cc) {
-        return cc[Math.floor(Math.random() * cc.length)]
-    }
-
-    function playChords() {
-        let uniq = chordsToPlay //[...new Set(chordsToPlay)];
-        console.log('playing ', uniq)
-        let chords = []
-        uniq.forEach(x => {
-            let cc = null
-            if (!chords.length) {
-                cc = chord(x)
-            } else {
-                cc = chord(x, chords[chords.length - 1].map(n => n.fret));
-            }
-            chords.push(randomFromArray(cc))
-        });
-
-        let prev = []
-        schedule(chords, window.delayBetweenNotes || 5, chord => {
-            console.log(chord)
-            if (prev) prev.filter(it => it).forEach(it => it.setOpacity(0.5));
-            prev = []
-            chord.forEach(note => {
-                prev.push(showNoteAt(note.string, note.fret))
-            })
-        }, () => {
-        });
-    }
-
-    if (window.innerWidth < 800 && window.innerHeight < 400) {
-        pc.setZoom(0.6);
-    }
-    console.log(`
-    Progressions:
-        1-4-5
-        1-5-6-4
-        1-4-1-5-1
-        1-6-2-5
-        1-4-7-3-6-2-5-1
-        1-4-5-1
-    `)
-    moveToFront('txt')
-</script>
-<div id="guitar-toolbar"
-     style="display: inline-block; margin-left: 10px;position: absolute; left: 150px; bottom: 150px; z-index: 1000000; height: 0"
-     className="ui-draggable ui-draggable-handle">
-    <div style="position: fixed; top: 20px; left: 4em">
-        <label htmlFor="notes">Choose a note:</label>
-
-        <select name="notes" id="notes">
-            <option value="A">A</option>
-            <option value="B">B</option>
-            <option value="C">C</option>
-            <option value="D">D</option>
-            <option value="E">E</option>
-            <option value="F">F</option>
-            <option value="G">G</option>
-        </select>
-        <button style="margin-left: 1em;" onClick="showAllNotesOf(document.getElementById('notes').value)">Show All Notes
-        </button>
-
-        <button style="margin-left: 1em;" onClick="hideAll()">Hide All Notes</button>
-
-        <button style="margin-left: 1em;" onClick="showRandomAToG()">Show Random A-G</button>
-
-        <button style="margin-left: 1em;" onClick="hideAllNotesOf(document.getElementById('notes').value)">Hide All Of
-            Selected Note
-        </button>
-        <button style="margin-left: 2em;" onClick="guessChord()">Guess Chord</button>
-        <div id="guessedChord" style="position: fixed; right: 10em; top: 0em;"></div>
-    </div>
-
-
-    <br>
-    <br>
-
-
-    <script>
-        function showLayer(x, e) {
-            $('#txtLayer, #pcLayer, #ocLayer').removeClass('highlighted');
-            moveToFront(x)
-            $(e.target).addClass('highlighted');
-        }
-    </script>
-    <div style="position: fixed; left: 10px; top: 10px">
-        <button id="txtLayer" style="" onClick="showLayer('txt', event)" className="highlighted">TXT</button>
-        <button id="pcLayer" style="" onClick="showLayer('pc', event)">PC</button>
-        <button id="ocLayer" style="" onClick="showLayer('oc', event)">OC</button>
-    </div>
-
-
-
-
-    <div style="position: fixed; right: 40px; top: 250px">
-        <label htmlFor="chordChangeSpeed">Speed:</label>
-        <input type="number" id="chordChangeSpeed" name="chordChangeSpeed" min="10" max="100">
-    </div>
-
-    <button style="position: fixed; right: 40px; top: 300px" onClick="resetChords()">Reset</button>
-    <button style="position: fixed; right: 100px; top: 300px" onClick="playChords()">Play Chords</button>
-
-
-</div>
-
-<div id="drawing-toolbar"
-     style="display: inline-block; margin-left: 10px;position: absolute; left: 0; top: 50; z-index: 1000000; height: 0"
-     className="ui-draggable ui-draggable-handle">
-    <img id="toolbarToggle1" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;"
-         onClick="$('#toolbar1-buttons').toggle();"
-         src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png">
-
-    <div id="toolbar1-buttons">
-        Drawing Mode:
-        <label className="switch">
-            <input type="checkbox" id="flip-drawing">
-            <span className="slider round"></span>
-        </label>
-        <br><br>
-        <button id="undo" className="btn btn-info" onClick="undoDrawing(event)">Undo</button>
-        <span> &nbsp;&nbsp;&nbsp;</span>
-        <button id="redo" className="btn btn-info" onClick="redoDrawing(event)">Redo</button>
-        <br>
-
-        <br>
-        <label htmlFor="drawing-mode-selector">Mode:</label>
-        <select id="drawing-mode-selector">
-            <option>Pencil</option>
-            <option>Circle</option>
-            <option>Spray</option>
-            <option>Pattern</option>
-
-            <option>hline</option>
-            <option>vline</option>
-            <option>square</option>
-            <option>diamond</option>
-            <option>texture</option>
-        </select><br>
-        <br>
-        <label htmlFor="drawing-line-width">Line width:</label>
-        <span className="info">2</span><input type="number" value="3" id="drawing-line-width"><br>
-
-        <br>
-        <label htmlFor="drawing-color">Line color:</label>
-        <input type="color" value="#005E7A" id="drawing-color"><br>
-        <br>
-        <button id="clear-canvas" className="btn btn-info">Clear</button>
-
-        <br><br>
-        <label htmlFor="drawing-shadow-color">Shadow color:</label>
-        <input type="color" value="#005E7A" id="drawing-shadow-color"><br>
-        <br>
-        <label htmlFor="drawing-shadow-width">Shadow width:</label>
-        <span className="info">0</span><input type="number" value="0" id="drawing-shadow-width"><br>
-
-        <br>
-        <label htmlFor="drawing-shadow-offset">Shadow offset:</label>
-        <span className="info">0</span><input type="number" value="0" id="drawing-shadow-offset"><br>
-        <br>
-    </div>
-</div>
-
-<div id="rollbackConfirmationDialog" title="Rollback Recording!" style="display: none;">
-    <p>Select the time where to rollback:</p>
-    <div className="slider"></div>
-    <br><br>
-    <div>
-        Selected Value: <span className="info"></span>
+        </div>
 
     </div>
 </div>
-
-<div id="recordingFileChooserDialog" title="Choose Recording Files!" style="display: none; z-index: 5000">
-    <p>Choose Files:</p>
-    <input type="file" accept="text/plain" onChange="openFile(event)" id="recordingFiles" multiple="multiple">
-
-    <div>
-        OR
-    </div>
-
-</div>
-
-<div id="playbackControls" style="display: none; position:fixed; bottom:0;width:100%;">
-    <table style="width:100%">
-        <tr>
-            <th style="width: 20%;"><span className="time" style="float: right;margin-right: 30px;"></span></th>
-            <th style="width: 60%;">
-                <div className="slider"></div>
-            </th>
-            <th><span className="time" style="float: left;margin-left:30px"></span></th>
-        </tr>
-    </table>
-
-</div>
-
-<div id="toolbar"
-     style="display: inline-block; margin-left: 10px;position: absolute; right: -10; top: 50; z-index: 1000000; height: 0">
-    <img id="toolbarToggle" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;"
-         onClick="$('#drawing-mode-options').toggle();"
-         src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png"></img>
-
-    <select id="savePoints" style="margin-right: 30px;float: right;" onChange="restoreCanvas()">
-        <option>0</option>
-    </select>
-
-
-    <div id="drawing-mode-options" style="background: rgba(15, 14, 14, 0.4);padding-left: 10px;padding-top: 10px;">
-
-
-        <button id="record-launch" className="btn btn-info" onClick="initializeRecording()">Record</button>
-        <button id="record-play-launch" className="btn btn-info" onClick="launchRecordingDialog()">Play Recording
-        </button>
-        <button id="rollbackRecording" onClick="launchRollbackRecording()">Rollback Recording</button>
-        <br><br>
-        <button id="delete-selected" className="btn btn-info" onClick="deleteSelectedObjects()">Delete</button>
-        <button id="record-play-save" className="btn btn-info" onClick="saveRecording()">Save Recording</button>
-        <br> <br>
-
-        <button className="btn btn-info" onClick="Copy(pc)">Copy</button>
-        <button className="btn btn-info" onClick="Paste(pc)">Paste</button>
-        <button className="btn btn-info" onClick="degroup(pc)">Ungroup</button>
-
-        <br><br>
-
-        <button id="create-text" className="btn btn-info">Text</button>
-        <button id="create-small-text" className="btn btn-info">Small Text</button>
-        <button id="create-rect-text" className="btn btn-info">[]</button>
-
-        <br><br>
-        Color: <select onChange="changeCircleColor(this.value)">
-        <option value="">--</option>
-        <option value="blue">Blue</option>
-        <option value="green">Green</option>
-        <option value="red">Red</option>
-        <option value="black">Black</option>
-        <option value="yellow">Yellow</option>
-        <option value="pink">Pink</option>
-        <option value="white">White</option>
-    </select>
-
-        <br><br>
-        <button id="greenen" className="btn btn-info" onClick="zoomSelectedObject(true)" style="margin-right:10px;">+
-        </button>
-        <button id="whiten" className="btn btn-info" onClick="zoomSelectedObject(false)" style="margin-right:10px;">-
-        </button>
-
-        <button id="arrow" className="btn btn-info" onClick="arrowButton()">--></button>
-        <br><br>
-
-        <button id="flipConnectionMode" className="btn btn-info" onClick="flipConnectionMode(event)" style="">Connect
-        </button>
-        <button id="makeTree" className="btn btn-info" onClick="onMakeTreeClick(event)" style="">MakeTree</button>
-        <button id="removeTree" className="btn btn-info" onClick="onRemoveTreeClick(event)" style="">RemoveTree</button>
-
-        <br><br>
-
-        <button id="create-array" className="btn btn-info" onClick="window.insertArray=true; turnOffDrawing();"
-                style="margin-right:10px;">Array
-        </button>
-
-        <button id="insert-matex" className="btn btn-info" onClick="window.signalMatexInsertion=true;turnOffDrawing();">
-            Matex
-        </button>
-        <button id="insert-image" className="btn btn-info" onClick="window.signalImageInsertion=true;turnOffDrawing();">
-            Image
-        </button>
-        <br><br>
-        <button id="save" style="margin-right:10px;" onClick="saveCanvas()">Save</button>
-        <button id="newCanvas" onClick="newCanvas()"> New</button>
-        <br><br>
-
-        <br><br>
-        <span id="instruction" style="width:150px"></span>
-
-    </div>
-</div>
-<script>
-    $('#txtLayer').click();
-    var drawingModeEl = $('#drawing-mode'),
-        drawingOptionsEl = $('#drawing-mode-options'),
-        drawingColorEl = $('#drawing-color'),
-        drawingShadowColorEl = $('#drawing-shadow-color'),
-        drawingLineWidthEl = $('#drawing-line-width'),
-        drawingShadowWidth = $('#drawing-shadow-width'),
-        drawingShadowOffset = $('#drawing-shadow-offset'),
-        clearEl = $('#clear-canvas'),
-        eraserEl = $('#eraser');
-
-    clearEl.click(function () {
-        var yes = confirm('Are you sure?');
-        if (yes) oc.clear();
-    });
-
-    drawingColorEl.change(function (e) {
-        oc.freeDrawingBrush.color = this.value;
-    });
-
-    function turnOffDrawing() {
-        if (flipDrawindEl.is(':checked')) {
-            flipDrawindEl.click();
-        }
-    }
-
-    eraserEl.change(e => {
-        if (eraserEl.is(':checked')) {
-            //Store
-            window.saved = window.saved || {};
-            window.saved.eraserStoredData = window.saved.eraserStoredData || {}
-
-            window.saved.eraserStoredData.drawingColor = drawingColorEl.val()
-            window.saved.eraserStoredData.drawingLineWidth = drawingLineWidthEl.val()
-
-            if (window.theme == 'black') {
-                drawingColorEl.val('#000000')
-            } else {
-                drawingColorEl.val('#ffffff')
-            }
-            oc.freeDrawingBrush.color = drawingColorEl.val();
-
-            drawingLineWidthEl.val(15);
-            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 15;
-
-        } else {
-            //Restore
-            drawingColorEl.val(window.saved.eraserStoredData.drawingColor);
-            drawingLineWidthEl.val(window.saved.eraserStoredData.drawingLineWidth);
-
-            oc.freeDrawingBrush.color = drawingColorEl.val();
-            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 5;
-        }
-    });
-
-    drawingShadowColorEl.change(function () {
-        oc.freeDrawingBrush.shadow.color = this.value;
-    });
-    drawingLineWidthEl.change(function () {
-        oc.freeDrawingBrush.width = parseInt(this.value, 10) || 1;
-        this.previousSibling.innerHTML = this.value;
-    });
-    drawingShadowWidth.change(function () {
-        oc.freeDrawingBrush.shadow.blur = parseInt(this.value, 10) || 0;
-        this.previousSibling.innerHTML = this.value;
-    });
-    drawingShadowOffset.change(function () {
-        oc.freeDrawingBrush.shadow.offsetX = parseInt(this.value, 10) || 0;
-        oc.freeDrawingBrush.shadow.offsetY = parseInt(this.value, 10) || 0;
-        this.previousSibling.innerHTML = this.value;
-    });
-
-    if (oc.freeDrawingBrush) {
-        oc.freeDrawingBrush.color = drawingColorEl.val() || 'black';
-        oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 1;
-        oc.freeDrawingBrush.shadow = new fabric.Shadow({
-            blur: parseInt(drawingShadowWidth.val(), 10) || 0,
-            offsetX: 0,
-            offsetY: 0,
-            affectStroke: true,
-            color: drawingShadowColorEl.val() || 'black',
-        });
-    }
-    ;
-</script>
-<script type="text/javascript">
-    localStorage.setItem('pc', JSON.stringify({}))
-    localStorage.setItem('oc', JSON.stringify({}))
-    if (location.hash.indexOf('debug') >= 0) alert(window.innerWidth + "," + window.innerHeight)
-    if (window.innerWidth < window.innerHeight) {
-        $('#toolbar').css({
-            position: 'absolute',
-            bottom: 0
-        })
-    }
-
-    $('body').scroll(function (e) {
-        console.log('resized')
-
-    });
-
-    $(document).ready(e => {
-
-        $('#toolbar').draggable();
-    });
-
-
-    $('#create-text').click(e => {
-        window.insertText = true;
-        turnOffDrawing();
-    })
-    $('#create-small-text').click(e => {
-        window.insertSmallText = true;
-        turnOffDrawing();
-    })
-
-    $('#create-rect-text').click(e => {
-        window.insertRectText = true;
-        turnOffDrawing();
-    })
-
-    var flipDrawindEl = $('#flip-drawing');
-    flipDrawindEl.click(e => {
-        if (flipDrawindEl.is(':checked')) {
-            moveToFront('oc')
-        } else {
-            moveToFront('pc')
-        }
-    })
-    pc.on('object:selected', function (e) {
-        var obj = e.target
-        if (window.connectionMode) {
-            if (!window.firstOfConnection) firstOfConnection = obj
-            else {
-                makeConnection(e)
-                flipConnectionMode()
-            }
-
-        }
-    });
-
-    pc.on('object:removed', e => {
-        console.log(e.target);
-        var obj = e.target;
-        if (obj.treeConnection && obj.treeConnection.outgoing) {
-            obj.treeConnection.outgoing.lines.forEach(l => {
-                pc.remove(l);
-            })
-        }
-    })
-    pc.on('object:moving', e => {
-        var t = e.target;
-        var getPointCoords = (obj, pt) => {
-            if (pt == 'mt') {
-                return obj.aCoords.mt || {
-                    y: obj.oCoords.tl.y,
-                    x: obj.oCoords.tl.x + obj.width / 2
-                }
-            }
-            if (pt == 'mb') {
-                return obj.aCoords.mb || {
-                    y: obj.oCoords.bl.y,
-                    x: obj.oCoords.bl.x + obj.width / 2
-                }
-            }
-        }
-
-        if (t.treeConnection) {
-            var inward = t.treeConnection.incoming || {}
-            var outward = t.treeConnection.outgoing || {}
-
-            if (inward.lines && inward.point) {
-                var p = getPointCoords(t, inward.point)
-                inward.lines.forEach(l => {
-                    l.set('x2', p.x);
-                    l.set('y2', p.y);
-                    t.setCoords();
-                    l.setCoords();
-                    pc.renderAll();
-                });
-            }
-            if (outward.lines && outward.point) {
-                var p = getPointCoords(t, outward.point)
-                outward.lines.forEach(l => {
-                    l.set('x1', p.x);
-                    l.set('y1', p.y);
-                    t.setCoords();
-                    l.setCoords();
-                    pc.renderAll();
-                });
-            }
-
-        }
-    });
-
-    $('#drawing-mode-options').hide();
-    $('#toolbar1-buttons').hide();
-
-    oc.on('mouse:up', function (e) {
-        $('#drawing-mode-options').hide();
-        $('#toolbar1-buttons').hide();
-    })
-    pc.on('mouse:up', function (e) {
-        $('#drawing-mode-options').hide();
-        $('#toolbar1-buttons').hide();
-
-        if (!e.e) e.e = {}
-        if (!e.e.clientX) e.e.clientX = 10;
-        if (!e.e.clientY) e.e.clientY = 10;
-
-        // showNoteOnClick(e);
-
-        if (window.insertText) {
-            var tb = textbox({
-                top: e.e.clientY,
-                left: e.e.clientX
-            })
-            pc.add(tb)
-
-            pc.setActiveObject(tb)
-            _.textboxes.push(tb)
-            window.insertText = false;
-        }
-        if (window.insertSmallText) {
-            var tb = textbox({
-                top: e.e.clientY,
-                left: e.e.clientX,
-                width: 25
-            })
-            pc.add(tb)
-
-            pc.setActiveObject(tb)
-            _.textboxes.push(tb)
-            window.insertSmallText = false;
-        }
-        if (window.signalMatexInsertion) {
-            window.signalMatexInsertion = false;
-            window.matexInsertionPoint = {
-                top: e.e.clientY,
-                left: e.e.clientX
-            }
-            document.getElementById('mathjaxDialog').style.display = 'block';
-        }
-        if (window.signalImageInsertion) {
-            window.signalImageInsertion = false;
-            $('#imageInputDialog').show();
-        }
-
-        if (window.insertRectText) {
-            window.insertRectText = false;
-            var text = prompt('Enter text')
-            if (!text) return;
-            var tb = textInRect(text, e.e.clientX, e.e.clientY, pc, {}, {})
-            tb.hasControls = false;
-            pc.add(tb)
-        }
-
-        if (window.insertArray) {
-            window.insertArray = false;
-            var text = prompt('Enter text')
-            if (!text) return;
-
-            var ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc);
-            pc.getObjects().forEach(o => o.hasControls = false);
-        }
-
-        if (window.arrowButtonClicked) {
-            if (window.arrowButtonClicked.first) {
-                var a = window.arrowButtonClicked.first
-                pc.add(arrow(a.x, a.y, e.e.clientX, e.e.clientY, {
-                    stroke: ($('#drawing-color').val() || 'black')
-                }))
-                window.arrowButtonClicked = null;
-            } else {
-                window.arrowButtonClicked.first = {
-                    x: e.e.clientX,
-                    y: e.e.clientY
-                }
-            }
-        }
-    })
-    var mapping = {
-        'l': 'clear-canvas',
-        'Delete': 'delete-selected',
-        'd': 'flip-drawing',
-        't': 'create-small-text',
-        'T': 'create-text',
-        'r': 'reden',
-        'g': 'greenen',
-        'b': 'bluen',
-        'e': 'execute-next',
-        'w': 'whiten'
-    }
-    $(document).keydown(e => {
-        if (e.target.id == 'mathtext' || e.target.id == 'mathjaxFunctionInput') return;
-        if ($('.commands-select').is(":focus") || window.commandSelectionIsGoingOn) {
-            console.log('select is in focus. returning.')
-        }
-        if (e.keyCode == 32 && e.target == document.body) {
-            e.preventDefault();
-        }
-
-        if (document.getElementById('mathjaxDialog').style.display == 'block') return false;
-        if (pc.getActiveObject() && pc.getActiveObject().type == 'textbox' && pc.getActiveObject().isEditing) return;
-        if (mapping[e.key]) $("#" + mapping[e.key]).click()
-        if (e.keyCode == 187) { //zoom in
-            zoomSelectedObject(true)
-        }
-        if (e.keyCode == 32) {
-            toggleRecording()
-        }
-        if (e.keyCode == 189) { //zoom out
-            zoomSelectedObject(false)
-        }
-        if (e.keyCode == 46) {
-            $('#delete-selected').click()
-        }
-        switch (e.keyCode) {
-            case 37: //left
-                if (pc.getActiveObject()) moveActiveObject('left', -10)
-                else {
-                    if (window.playingMode) {
-                        stopPlayback = true
-                        playerTimer -= 10
-                        if (playerTimer < playerTimerStart) playerTimer = playerTimerStart;
-                        $('#recording-info').html('Jumped To: ' + playerTimer)
-                    }
-                }
-                break
-            case 67:
-                if (e.ctrlKey) Copy(pc)
-                break;
-            case 86:
-                if (e.ctrlKey) Paste(pc)
-                break;
-            case 39: //right
-                if (pc.getActiveObject()) moveActiveObject('left', 10)
-                else {
-                    if (window.playingMode) {
-                        stopPlayback = true
-                        playerTimer += 10
-                        if (playerTimer > playerTimerTotal) playerTimer = playerTimerTotal;
-                        $('#recording-info').html('Jumped To: ' + playerTimer)
-                    }
-                }
-                break
-            case 40: //down
-                moveActiveObject('top', 10)
-                break
-            case 38: //up
-                moveActiveObject('top', -10)
-                break
-            case 69: //'e'
-                editSelectedObject()
-                break
-            case 188: //,
-                if (e.ctrlKey)
-                    moveToFront('pc')
-                break
-            case 190: //.
-                if (e.ctrlKey)
-                    moveToFront('oc')
-                break
-            case 191: ///
-                if (e.ctrlKey) {
-                    e.preventDefault()
-                    moveToFront('txt')
-                }
-                return false
-            default:
-                break
-        }
-    })
-</script>
-
-
-<div id="imageInputDialog"
-     style="background: blue; color: white; display: none; z-index: 500000;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
-    <input autoFocus type="text" id="imageInputUrl" onKeyUp="renderMath(event)">
-
-    <input type="file" id="imageInputFile">
-
-    <button onClick="handleFileDialogButtons('OK')">OK</button>
-    <button onClick="handleFileDialogButtons('')">Close</button>
-</div>
-
-<div id="mathjaxDialog" style="">
-    <script>
-        function renderMath(e) {
-            if (e.keyCode == 13) {
-                drawMathSymbols(document.getElementById('mathtext').value, pc)
-                document.getElementById('mathjaxDialog').style.display = 'none';
-            } else if (e.keyCode == 27) {
-                document.getElementById('mathjaxDialog').style.display = 'none';
-            } else {
-                document.getElementById('representation').innerHTML = "\\(" + document.getElementById('mathtext').value + "\\)";
-                MathJax.Hub.Queue(['Typeset', MathJax.Hub, 'representation']);
-            }
-        }
-    </script>
-    <input autoFocus type="text" id="mathtext" onKeyUp="renderMath(event)">
-
-    <div id="representation" style="margin-top: 20; padding: 15;"></div>
-
-    <div className="keyboard">
-        <div className="key letter">
-            0
-        </div>
-        <div className="key letter">
-            1
-        </div>
-        <div className="key letter">
-            2
-        </div>
-        <div className="key letter">
-            3
-        </div>
-        <div className="key letter">
-            4
-        </div>
-        <div className="key letter">
-            5
-        </div>
-        <div className="key letter">
-            6
-        </div>
-        <div className="key letter">
-            7
-        </div>
-        <div className="key letter">
-            8
-        </div>
-        <div className="key letter">
-            9
-        </div>
-        <div className="key letter">
-            +
-        </div>
-        <div className="key letter">
-            -
-        </div>
-        <div className="key letter">
-            *
-        </div>
-        <div className="key letter">
-            /
-        </div>
-        <div className="key letter">
-            (
-        </div>
-        <div className="key letter">
-            )
-        </div>
-        <div className="key letter" data-mathjax="\{">
-            {
-        </div>
-        <div class="key letter" data-mathjax="\}">
-            }
-        </div>
-        <div class="key letter">
-            [
-        </div>
-        <div class="key letter">
-            ]
-        </div>
-        <div class="key letter">
-            ^
-        </div>
-        <div class="key letter">
-            !
-        </div>
-        <div class="key letter">
-            @
-        </div>
-        <div class="key letter" data-mathjax="\#">
-            #
-        </div>
-        <div class="key letter">
-            $
-        </div>
-        <div class="key letter" data-mathjax="\%">
-            %
-        </div>
-        <div class="key letter" data-mathjax="\&">
-            &
-        </div>
-        <div class="key letter">
-            ?
-        </div>
-        <div class="key letter">
-            =
-        </div>
-        <div class="key letter">
-            /
-        </div>
-
-        <div class="key letter">
-            \
-        </div>
-        <div class="key letter">
-            ~
-        </div>
-        <div class="key letter" data-mathjax="\alpha ">
-            &alpha;
-        </div>
-        <div class="key letter" data-mathjax="\beta ">
-            &beta;
-        </div>
-        <div class="key letter" data-mathjax="\gamma ">
-            &gamma;
-        </div>
-        <div class="key letter" data-mathjax="\Gamma ">
-            &Gamma;
-        </div>
-        <div class="key letter" data-mathjax="\delta ">
-            &delta;
-        </div>
-        <div class="key letter" data-mathjax="\Delta ">
-            &Delta;
-        </div>
-        <div class="key letter" data-mathjax="\epsilon ">
-            &epsilon;
-        </div>
-
-
-        <input type="text" list="mathjaxFunctions" id="mathjaxFunctionInput" onchange="insertMathFromSelect(this)"
-               style="margin-top: 10px;"/>
-        <datalist id="mathjaxFunctions">
-            <option value="\infty">Infinity</option>
-
-            <option value="\sum {}">sum</option>
-            <option value="\text {}">text</option>
-
-            <option value="\forall">forall</option>
-            <option value="\exists">exists</option>
-            <option value="\lor">or</option>
-            <option value="\land">and</option>
-            <option value="\pm">plus minus</option>
-            <option value="\neq">not equal</option>
-            <option value="\geq">greater eq</option>
-            <option value="\ll">much less</option>
-            <option value="\gg">much greater</option>
-            <option value="\approx">approx</option>
-            <option value="\supset">proper superset</option>
-            <option value="\supseteq">superset</option>
-            <option value="\subset">proper subset</option>
-            <option value="\subseteq">subset</option>
-            <option value="\emptyset">empty set</option>
-            <option value="\cup"> union</option>
-            <option value="\cap"> intersection</option>
-
-            <option value="\hat { }"> hat</option>
-            <option value="\sqrt[root]{ }"> square root</option>
-            <option value="\partial"> partial</option>
-            <option value="\cap"> intersection</option>
-            <option value="\cap"> intersection</option>
-            <option value="\cap"> intersection</option>
-            <option value="\cap"> intersection</option>
-            <option value="\cap"> intersection</option>
-
-
-            <option value="\frac { }{ }">Fraction</option>
-            <option value="\in">In</option>
-            <option value="\left">Left</option>
-            <option value="\right">Right</option>
-            <option value="\overbrace {}">Overbrace</option>
-            <option value="\underbrace {}">Underbrace</option>
-
-            <option value="\boldsymbol">Bold</option>
-
-        </datalist>
-    </div>
-
-    <script type="text/javascript">
-        function insertMathFromSelect(el) {
-
-        }
-
-        function insertAtCursor(myField, myValue) {
-            //IE support
-            if (document.selection) {
-                myField.focus();
-                sel = document.selection.createRange();
-                sel.text = myValue;
-            }
-            //MOZILLA and others
-            else if (myField.selectionStart || myField.selectionStart == '0') {
-                var startPos = myField.selectionStart;
-                var endPos = myField.selectionEnd;
-                myField.value = myField.value.substring(0, startPos)
-                    + myValue
-                    + myField.value.substring(endPos, myField.value.length);
-                myField.selectionStart = startPos + myValue.length;
-                myField.selectionEnd = startPos + myValue.length;
-            } else {
-                myField.value += myValue;
-            }
-
-            myField.focus();
-        } //end function
-
-
-        $('.keyboard .key').click(e => {
-            var key = $(e.target).text().trim();
-            insertAtCursor($('#mathtext')[0], $(e.target).data('mathjax') || key);
-
-        });
-
-        $('#mathjaxFunctionInput').keyup(e => {
-
-            if (e.keyCode == 13) {
-                insertAtCursor($('#mathtext')[0], $(e.target).val());
-            }
-
-        });
-
-    </script>
-    <style type="text/css">
-        #key-chart {
-            position: absolute;
-            right: 20px;
-        }
-
-        #mathjaxDialog {
-            background: blue;
-            color: white;
-            display: none;
-            z-index: 500000;
-            position: absolute;
-            left: 30%;
-            top: 30%;
-            width: 400px;
-            height: 400px;
-            border: 1px solid black;
-            padding: 1%;
-        }
-
-        @media (max-width: 767px) {
-            #mathjaxDialog {
-                left: 2%;
-                width: 99%;
-            }
-        }
-
-        .key {
-            width: 40px;
-            height: 40px;
-            display: block;
-            background-color: #333;
-            text-align: left;
-            padding-left: 8px;
-            line-height: 29px;
-            border-radius: 2px;
-            float: left;
-            margin-left: 2px;
-            margin-bottom: 2px;
-            cursor: pointer;
-            transition: box-shadow 0.7s ease;
-        }
-
-        .section-a {
-            width: 650px;
-            height: 260px;
-            float: left;
-        }
-
-        .section-b {
-            width: 150px;
-            height: 260px;
-            float: left;
-        }
-
-        .function {
-            font-size: 12px;
-            width: 30px;
-            height: 30px;
-            margin-bottom: 15px;
-        }
-
-        .small {
-            font-size: 10px;
-            line-height: 13px;
-            text-align: center;
-            padding: 0 5px;
-            padding-top: 2px;
-            height: 28px !important;
-        }
-
-        .space1 {
-            margin-right: 43px !important;
-        }
-
-        .space2 {
-            margin-right: 25px !important;
-        }
-
-        .dual {
-            font-size: 14px;
-            line-height: 20px;
-            width: 30px;
-        }
-
-        .backspace {
-            width: 84px;
-            font-size: 12px;
-        }
-
-        .tab {
-            width: 50px;
-            line-height: 40px;
-            font-size: 13px;
-        }
-
-        .letter {
-            width: 30px;
-        }
-
-        .slash {
-            width: 64px;
-        }
-
-        .caps {
-            width: 70px;
-            font-size: 12px;
-            line-height: 18px;
-        }
-
-        .enter {
-            width: 92px;
-            line-height: 40px;
-            text-align: center;
-            padding-left: 0;
-        }
-
-        .shift.left {
-            width: 90px;
-            line-height: 40px;
-            font-size: 13px;
-        }
-
-        .shift.right {
-            width: 104px;
-            line-height: 40px;
-            font-size: 13px;
-        }
-
-        .ctrl {
-            width: 50px;
-            line-height: 40px;
-            font-size: 13px;
-        }
-
-        .space {
-            width: 234px;
-        }
-
-        .arrows {
-            position: relative;
-            top: 42px;
-        }
-
-        .sec-func .key {
-            width: 32px;
-            font-size: 10px;
-            text-align: left;
-            line-height: 40px;
-            float: left;
-        }
-
-        .sec-func div.dual {
-            line-height: 20px;
-        }
-
-        .arrows .key {
-            text-align: center;
-            padding-left: 7px;
-            margin-left: 2px;
-        }
-
-        .hidden {
-            visibility: hidden;
-        }
-
-        .key:hover {
-            box-shadow: 0px 0px 10px #14B524;
-            z-index: 1000;
-        }
-    </style>
-</div>
-</div>
-
-<script>
-    //applyBlackTheme();
-    $('#cinemaText').draggable();
-
-    //---------------------------Screen Recording
-    function startCapture(displayMediaOptions) {
-        let captureStream = null;
-
-        return navigator.mediaDevices.getDisplayMedia(displayMediaOptions)
-            .catch(err => {
-                console.error("Error:" + err);
-                return null;
-            });
-    }
-
-    function stopCapture(evt) {
-        let tracks = videoElem.srcObject.getTracks();
-
-        tracks.forEach(track => track.stop());
-        videoElem.srcObject = null;
-    }
-
-
-    //let start = document.getElementById('btnStart');
-    //let stop = document.getElementById('btnStop');
-    //let vidSave = document.getElementById('vid2');
-
-    window.mediaRecorder = null
-    window.recordingChunks = []
-
-    $('#btnStart').on('click', (ev) => {
-        if (window.mediaRecorder) {
-            window.mediaRecorder.stop()
-            window.mediaRecorder = null;
-            window.recordingChunks = []
-        }
-        startCapture({
-            video: true,
-            audio: true
-        }).then(mediaStreamObj => {
-            window.mediaRecorder = new MediaRecorder(mediaStreamObj);
-            window.mediaRecorder.start();
-            $("#btnStart").hide();
-            $("#btnStop").show();
-            $("#btnPause").show();
-            console.log(window.mediaRecorder.state);
-
-            window.mediaRecorder.ondataavailable = function (ev) {
-                window.recordingChunks.push(ev.data);
-            };
-            window.mediaRecorder.onstop = (ev) => {
-                let blob = new Blob(window.recordingChunks, {'type': window.recordingChunks[0].type});
-                console.log("type=" + window.recordingChunks[0].type)
-                window.recordingChunks = [];
-                var videoURL = window.URL.createObjectURL(blob);
-//            vidSave.src = videoURL;
-                //window.location.replace(videoURL)
-                var link = document.createElement("a"); // Or maybe get it from the current document
-                link.href = videoURL;
-                link.target = "_blank"
-                link.download = "aDefaultFileName.webm";
-                link.innerHTML = "Click here to download the file";
-
-                link.style.position = 'fixed';
-                link.style.bottom = 0;
-                link.style.zIndex = 9000;
-                document.body.appendChild(link);
-            }
-        });
-    });
-
-    $("#btnPause").click(e => {
-        if (window.mediaRecorder) {
-            window.mediaRecorder.pause()
-            console.log(window.mediaRecorder.state);
-            $("#btnPause").hide();
-            $("#btnResume").show();
-        }
-    });
-
-    $("#btnResume").click(e => {
-        if (window.mediaRecorder) {
-            window.mediaRecorder.resume();
-            console.log(window.mediaRecorder.state);
-            $("#btnPause").show();
-            $("#btnResume").hide();
-        }
-    });
-
-
-    $('#btnStop').on('click', (ev) => {
-        if (window.mediaRecorder) window.mediaRecorder.stop();
-        console.log(mediaRecorder.state);
-        $("#btnStop").hide();
-        $("#btnPause").hide();
-        $("#btnResume").hide();
-        $("#btnStart").show();
-    });
-
-</script>
 </body>
+<style>
+    @import url(https://fonts.googleapis.com/css?family=Source+Sans+Pro:400);
+    * {
+        margin: 0;
+        padding: 0;
+        list-style-type: none;
+    }
 
+    body {
+        background: linear-gradient(to right, #529DDA, rgba(50, 49, 155, 0.9), #529DDA);
+        font-family: "Source Sans Pro", sans-serif;
+        letter-spacing: 0.05em;
+    }
+
+    canvas {
+        position: absolute;
+        z-index: -10;
+        top: -10px;
+    }
+
+    h1 {
+        text-transform: uppercase;
+        text-align: center;
+        margin-top: 40px;
+        color: #fff;
+        letter-spacing: 0.2em;
+        transition: display 1s ease-in-out;
+    }
+
+    .guitar-neck {
+        z-index: -10;
+        position: relative;
+        margin-top: 20px;
+        margin-bottom: 20px;
+        left: 50%;
+        margin-left: -450px;
+        width: 960px;
+        height: 250px;
+        background: #755628;
+        box-shadow: inset -1px 0px 11px 0px rgba(0, 0, 0, 0.75);
+    }
+    .guitar-neck.hidden {
+        display: none;
+    }
+    .guitar-neck .fret {
+        float: left;
+        width: 3px;
+        height: 250px;
+        background: #d7d6d6;
+        margin-left: 75px;
+        border-right: 2px solid #686868;
+    }
+    .guitar-neck .fret.first {
+        position: absolute;
+        width: 50px;
+        left: -52px;
+        top: 0;
+        margin-left: 0;
+        background: #211f1d;
+    }
+    .guitar-neck .dots {
+        position: absolute;
+        width: 715px;
+        height: 20px;
+        top: 44%;
+        left: 19.5%;
+    }
+    .guitar-neck .dots li {
+        float: left;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #383530;
+        margin-right: 140px;
+    }
+    .guitar-neck .dots li:nth-of-type(6) {
+        position: absolute;
+        float: right;
+        top: 45px;
+        left: 100%;
+    }
+    .guitar-neck .dots li:nth-of-type(5) {
+        position: absolute;
+        top: -45px;
+        left: 100%;
+    }
+    .guitar-neck .strings {
+        position: absolute;
+        left: 0;
+        top: 10px;
+        width: 960px;
+        height: 250px;
+    }
+    .guitar-neck .strings li {
+        height: 1px;
+        display: inline-block;
+        width: 100%;
+        background: #c8bb93;
+        margin-bottom: 38px;
+        border-bottom: 2px solid #958963;
+        box-sizing: border-box;
+    }
+    .guitar-neck .strings li:nth-child(2) {
+        height: 2px;
+    }
+    .guitar-neck .strings li:nth-child(3) {
+        height: 3px;
+    }
+    .guitar-neck .strings li:nth-child(4) {
+        height: 4px;
+    }
+    .guitar-neck .strings li:nth-child(5) {
+        height: 5px;
+    }
+    .guitar-neck .strings li:nth-child(6) {
+        height: 6px;
+    }
+    .guitar-neck .note {
+        position: absolute;
+        background-color: #1E7EA2;
+        height: 50px;
+        width: 50px;
+        border-radius: 100%;
+        text-align: center;
+        line-height: 50px;
+        color: #fff;
+        font-size: 22px;
+        font-weight: bold;
+        opacity: 0;
+        transition: left 0.9s ease, top 0.9s ease, background-color 0.3s ease;
+    }
+    .guitar-neck .note.incorrect {
+        background-color: red;
+    }
+    .guitar-neck .note.correct {
+        background-color: green;
+    }
+
+    #diatonic-chords {
+        position: relative;
+        top: 0;
+        display: inline-block;
+    }
+    #diatonic-chords.active {
+        /*top: 50px;*/
+        /*transition: top 1s ease;*/
+    }
+    #diatonic-chords h2 {
+        margin-left: -35px;
+        color: #fff;
+    }
+    #diatonic-chords ul {
+        display: flex;
+        justify-content: space-around;
+    }
+    #diatonic-chords li {
+        width: 70px;
+        margin: -7px;
+        padding: 0.8em 1.5em;
+        border: 3px solid #fff;
+        border-radius: 20%;
+        background: transparent;
+        color: #fff;
+        font-weight: bold;
+        text-align: center;
+        transition: all 0.3s ease;
+        display: inline-block;
+    }
+    #diatonic-chords li:hover {
+        cursor: pointer;
+        border-color: #F442FF;
+        color: #fff;
+        transform: scale(1.2);
+    }
+    #diatonic-chords li.active {
+        background: #73706c;
+        /*color: #fff;*/
+    }
+
+
+    .button {
+        margin-bottom: 30px;
+        margin-top: 30px;
+        text-align: center;
+        line-height: 30px;
+        border: 1px solid #393b3e;
+        -webkit-box-shadow: #737373 0px 1px 5px;
+        -moz-box-shadow: #737373 0px 1px 5px;
+        box-shadow: #737373 0px 1px 5px;
+        -webkit-border-radius: 23px;
+        -moz-border-radius: 23px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-family: arial, helvetica, sans-serif;
+        padding: 5px 10px 5px 10px;
+        text-decoration: none;
+        display: inline-block;
+        text-shadow: 0px 1px 0 rgba(10, 10, 10, 0.5);
+        font-weight: bold;
+        color: #fff;
+        background-color: #515459;
+        background-image: -webkit-gradient(linear, left top, left bottom, from(#515459), to(#3B3C40));
+        background-image: -webkit-linear-gradient(top, #515459, #3B3C40);
+        background-image: -moz-linear-gradient(top, #515459, #3B3C40);
+        background-image: -ms-linear-gradient(top, #515459, #3B3C40);
+        background-image: -o-linear-gradient(top, #515459, #3B3C40);
+        background-image: linear-gradient(to bottom, #515459, #3B3C40);
+        margin-left: 10px;
+    }
+
+    .select2 {
+        margin-left: 20px
+    }
+
+    .button:hover {
+        border: 1px solid #393b3e;
+        background-color: #3B3C40;
+        cursor: pointer;
+        background-image: -webkit-gradient(linear, left top, left bottom, from(#3B3C40), to(#202124));
+        background-image: -webkit-linear-gradient(top, #3B3C40, #202124);
+        background-image: -moz-linear-gradient(top, #3B3C40, #202124);
+        background-image: -ms-linear-gradient(top, #3B3C40, #202124);
+        background-image: -o-linear-gradient(top, #3B3C40, #202124);
+        background-image: linear-gradient(to bottom, #3B3C40, #202124);
+    }
+
+    @media (min-width: 1550px) {
+        #controls {
+            left: 10%;
+        }
+    }
+    @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');
+    html {
+        display: grid;
+        min-block-size: 100%;
+    }
+    body {
+        --h: 206;
+        --s: 42%;
+        --l: 56%;
+        --bg: radial-gradient(hsla(var(--h), var(--s), calc(var(--l) - 1%), .99), hsla(var(--h), var(--s), calc(var(--l) - 5%), .8)),
+        url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.5' numOctaves='6' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+
+        --dark: hsl(var(--h) var(--s) 10%);
+        --dark-hover: hsl(var(--h) var(--s) 25%);
+        --light: hsl(var(--h) var(--s) 99%);
+
+        --gap: 1.5rem;
+        background: var(--bg);
+        display: grid;
+        height: 100%;
+        margin: unset;
+        place-content: center;
+        padding: var(--gap) unset;
+    }
+    h1 {
+        color: var(--light);
+        display: flex;
+        flex-flow: column;
+        font-family: 'Bebas Neue', cursive;
+        font-size: clamp(4rem, 1.1429rem + 9.1429vw, 8rem);
+        line-height: .85;
+        margin: calc(2 * var(--gap)) auto;
+        width: 50%;
+    }
+    h1 span:last-of-type {
+        align-self: flex-end;
+        color: var(--dark);
+    }
+
+    /* Circle of Ffths */
+    .cf {
+        aspect-ratio: 1;
+        margin-block: var(--gap) 0;
+        width: calc(85vw - (2 * var(--gap)));
+    }
+    .cf-arcs {
+        transform: rotate(-15deg);
+        transform-origin: 50% 50%;;
+    }
+    .cf-arcs path {
+        fill: var(--dark);
+        cursor: pointer;
+        stroke: hsl(var(--h), var(--s), var(--l));
+    }
+    .cf-arcs path:hover {
+        fill: var(--dark-hover);
+    }
+    .cf-arcs path.active {
+        fill: hsl(206deg 81% 42%);
+    }
+    .cf-text-inner,
+    .cf-text-middle {
+        fill: var(--light);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-weight: 500;
+        letter-spacing: -0.065em;
+        pointer-events: none;
+        text-anchor: middle;
+    }
+    .cf-text-inner {
+        font-size: .4em;
+    }
+    .cf-text-middle {
+        font-size: .6em;
+    }
+
+    /* Flat and Sharp Positions */
+    .cf-flat-1 {
+        transform: translate(10px, -2.5px);
+    }
+    .cf-flat-2 {
+        transform: translate(13px, -7.5px);
+    }
+    .cf-flat-3 {
+        transform: translate(16px, -1px);
+    }
+    .cf-flat-4 {
+        transform: translate(19px, -5.5px);
+    }
+    .cf-flat-5{
+        transform: translate(22px, 1px);
+    }
+    .cf-sharp-1 {
+        transform: translate(10px, -7.5px);
+    }
+    .cf-sharp-2 {
+        transform: translate(13px, -3px);
+    }
+    .cf-sharp-3 {
+        transform: translate(16px, -9px);
+    }
+    .cf-sharp-4 {
+        transform: translate(19px, -4.5px);
+    }
+    .cf-sharp-5 {
+        transform: translate(22px, 0.5px);
+    }
+    .cf-sharp-6{
+        transform: translate(25px, -6px);
+    }
+
+    .cf use {
+        pointer-events: none;
+    }
+    .cf [baseline-shift="super"] {
+        font-size: 80%;
+    }
+
+    #app {
+        width: 300px;
+        height: 300px;
+        margin-left: 9%;
+    }
+
+    #app.minimized {
+        width: 30px;
+        height: 30px;
+    }
+
+    #app.minimized:hover {
+        width: 300px;
+        height: 300px;
+        transition: all 0.3s ease;
+    }
+
+    .main {
+         min-width: 1200px;
+     }
+
+     #key-detail {
+
+     }
+
+     #circle-of-fifths {
+         position: absolute;
+     }
+
+     #osmdContainer1 {
+         margin-left: 30%;
+     }
+
+     #tips .highlighted {
+         color: yellow;
+         font-weight: bold;
+     }
+</style>
 </html>
