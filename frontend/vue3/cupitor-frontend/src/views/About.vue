@@ -20,9 +20,11 @@
     <h1>About me</h1>
     <b-row class="">
       <p>
-        I am currently working as a Software Engineer. I am not very passionate about anything.
+        I am currently working as a Software Engineer.
+        <br> This website tells a lot about me (the things I have been interested in, my thoughts etc).
         <br>
-        But I am curious and I want to pursue wisdom.
+        I am not very passionate about anything.
+        But I am curious and I want to pursue wisdom, a very simple and minimalistic lifestyle.
         My goal is to eliminate traces of ego (along with all related vices) from my head,
         and act out of pure energy and serve others if possible.
       </p>
