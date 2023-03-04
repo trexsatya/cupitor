@@ -641,7 +641,7 @@ function range(start, count, filter, fn) {
 
     if(!arguments.length) console.log('range(start, count)')
 
-    if(arguments.length == 3){
+    if(arguments.length === 3){
         fn = filter;
         filter = x => true
     }
