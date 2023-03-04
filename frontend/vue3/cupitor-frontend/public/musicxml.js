@@ -34,7 +34,7 @@ function createXml() {
     <part id="P1">
         <measure number="1">
               <attributes>
-                  <divisions>1</divisions>
+                  <divisions>4</divisions>
                   <key>
                       <fifths>0</fifths>
                   </key>
@@ -124,6 +124,20 @@ function findOctave(note) {
   return predicates.find(it => it.condition(note) === true).result
 }
 
+/**
+ *
+ * @param key {Key}
+ * @returns {string}
+ */
+function sharpsOrFlats(key) {
+  let scale = getScale(key.name());
+  let sharps = scale.filter(it => it.endsWith("#")).length
+  if(sharps > 0) {
+    return sharps
+  }
+  return scale.filter(it => it.endsWith("b")).length * -1
+}
+
 function MusicXml() {
   this.xml = createXml()
   let self = this;
@@ -135,10 +149,13 @@ function MusicXml() {
 
   function getMusicXmlNote(data) {
     let accidental = null
+    let alter = 0
     if(data.name.endsWith("#")) {
       accidental = "sharp"
+      alter = 1
     } else if(data.name.endsWith("b")) {
       accidental = "flat"
+      alter = -1
     }
     let name = data.name
     if(accidental) {
@@ -166,25 +183,38 @@ function MusicXml() {
       number += 1
     }
 
-    let $note = $(`
+    let notations = []
+    if(data.notations) {
+
+    }
+
+    let tie = ''
+    if(data.tie) {
+      tie = `<tie type="${data.tie}"/>`
+      notations.push(`<tied type="${data.tie}"/>`)
+    }
+
+    return $(`
     <note>
         ${data.chord ? '<chord/>' : ''}
         <pitch>
             <step>${name}</step>
+            ${accidental ? '<alter>' + alter + '</alter>' : ''}
             <octave>${data.octave}</octave>
         </pitch>
         <duration>1</duration>
+        ${tie}
         <voice>1</voice>
         ${accidental ? '<accidental>' + accidental + '</accidental>' : ''}
-        <type size="cue">${data.type}</type>
-        ${data.dot ? '<dot/>': ''}
+        <type>${data.type}</type>
+        ${data.dot ? '<dot/>' : ''}
         <stem>up</stem>
-        <notehead color="#8D0000">normal</notehead>
+        <notations>
+            ${notations.join("\n")}
+        </notations>
         ${lyrics}
     </note>
         `.replaceAll("\n", ""), self.xml)
-
-    return $note
   }
 
   this.addRestToLastMeasure = (type) => {
@@ -196,6 +226,7 @@ function MusicXml() {
                 <type>${type}</type>
             </note>`, self.xml)
     self.xml.find('measure').last('measure').append($note)
+    return this
   }
 
   this.addMeasure = (notes) => {
@@ -207,17 +238,19 @@ function MusicXml() {
     }
 
     notes.forEach(note => {
-      let $note = getMusicXmlNote({name: note.name, octave: note.octave, type: note.type, dot: note.dot})
+      let $note = getMusicXmlNote({name: note.name, octave: note.octave, type: note.type, dot: note.dot, tie: note.tie, chordSymbol: note.chordSymbol, chord: note.chord})
       $measure.append($note)
     })
     self.xml.find('part').last('part').append($measure)
     this.numberOfMeasures += 1
     // console.log(self.toString())
+    return this
   }
 
   this.reset = () => {
     this.xml = createXml()
     this.numberOfMeasures = 1
+    return this
   }
 
   this.notes = () => {
@@ -226,6 +259,75 @@ function MusicXml() {
 
   this.measures = () => {
     return this.xml.find("measure").toArray()
+  }
+
+  this.transpose = (newNotes) => {
+    //Just change the pitch and octave
+    newNotes.forEach((m, i) => {
+      m.notes.forEach((n, j) => {
+        let newXmlNote = getMusicXmlNote(n)
+        let $note = $($(this.xml.find("measure")[i]).find("note")[j])
+        $note.find("pitch").replaceWith(
+          this.serialiser.serializeToString(newXmlNote.find("pitch")[0])
+        )
+
+        if(newXmlNote.find("accidental").length)
+        $note.find("accidental").replaceWith(
+          this.serialiser.serializeToString(newXmlNote.find("accidental")[0])
+        )
+      })
+    })
+  }
+
+  this.toArray = () => {
+    return this.xml.find("measure").toArray().map(measure => {
+      return $(measure).find("note").toArray().map(note => {
+        let pitch = $(note).find("pitch")
+        let octave = parseInt(pitch.find("octave").text());
+        let step = pitch.find("step").text();
+        let type = $(note).find("type").text();
+        let dot = $(note).find("dot");
+        let voice = $(note).find("voice").text()
+        let tie = $(note).find("notations").find("tied")
+
+        if(pitch.find("alter").text() === '1') {
+          step += "#"
+        } else if(pitch.find("alter").text() === '-1') {
+          step += "b"
+        }
+        return {
+          name: step,
+          octave: octave,
+          fullName: step + octave,
+          type: type,
+          dot: dot.length > 0,
+          voice: voice,
+          tie: tie.attr("type")
+        }
+      })
+    })
+  }
+
+  this.setKey = (key) => {
+    this.xml.find('fifths').first().text(sharpsOrFlats(key))
+    return this
+  }
+
+  this.setTime = (x, y) => {
+    this.xml.find('time > beats').first().text(x)
+    this.xml.find('time > beat-type').first().text(y)
+    return this
+  }
+
+  this.loadXml = (xml) => {
+    this.xml = $($.parseXML(xml))
+    this.numberOfMeasures = this.xml.find("measure").length
+    return this
+  }
+
+  this.loadMelody = (melody, key, meter) => {
+    this.reset().setKey(key).setTime(meter.x, meter.y)
+    melody.forEach(m => this.addMeasure(m.notes))
   }
   return this
 }

@@ -1,97 +1,215 @@
-let Rhythms = [
-//  Level-1
-  [
-    ['1'],
-    ['1/2', '1/2'],
-    ['1/2', '1/4', '1/4'],
-    ['3/4', '1/4']
-  ].map(it => permutate(it)).flat().filter(uniqueByJsonRepresentation),
+/**
+ * Triads and Seventh chords
+ */
+let getTriadsForNote = (noteName, key) => {
+  let scale = getScale(key);
 
-//  Level-2
-  [
-    ['3/8', '1/8', '1/2']
-  ],
-//  Level-3
-  [
-    ['3/8', '1/8', '1/4', '1/4'],
-    ['3/8', '1/8', '1/4', '1/8', '1/8'],
-    ['3/8', '1/8', '3/4', '1/8']
-  ].map(it => permutate(it)).flat().filter(uniqueByJsonRepresentation),
-//  Level-4
-  [
-    ['1/4', '1/4', '1/8', '1/8', '1/8', '1/8'],
-    ['1/2', '1/8', '1/8', '1/8', '1/8'],
-    ['1/4', '1/8', '1/8', '1/4', '1/4']
-  ].map(it => permutate(it)).flat().filter(uniqueByJsonRepresentation)
-]
+  let buildTriad = note => {
+    let cursor = new CircularCursor(scale)
+    cursor.goTo(note)
+    let third = cursor.next(3 - 1), fifth = cursor.next(3 - 1), seventh = cursor.next(3 - 1)
+    return [note, third, fifth]
+  }
 
-let keyChart = {
-  "C": ['C', 'D', 'E', 'F', 'G', 'A', 'B'],
-  "G": ['G', 'A', 'B', 'C', 'D', 'E', 'F#'],
-  "D": ['D', 'E', 'F#', 'G', 'A', 'B', 'C#'],
-  "A": ['A', 'B', 'C#', 'D', 'E', 'F#', 'G#'],
-  "E": ['E', 'F#', 'G#', 'A', 'B', 'C#', 'D#'],
-  "B": ['B', 'C#', 'D#', 'E', 'F#', 'G#', 'A#'],
-  "F#": ['F#', 'G#', 'A#', 'B', 'C#', 'D#', 'E#'],
-  "Gb": ['Gb', 'Ab', 'Bb', 'Cb', 'Db', 'Eb', 'F'],
-  "Am": ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'A'],
-  "A#m": ['A#', 'B#', 'C#', 'D#', 'E#', 'F#', 'G#', 'A#'],
-  "Bbm": ['Bb', 'C', 'Db', 'Eb', 'F', 'Gb', 'Ab', 'Bb'],
-  "Bm": ['B', 'C#', 'D', 'E', 'F#', 'G', 'A', 'B'],
-  "Cm": ['C', 'D', 'Eb', 'F', 'G', 'Ab', 'Bb', 'C'],
-  "C#m": ['C#', 'D#', 'E', 'F#', 'G#', 'A', 'B', 'C#'],
-  "Dbm": ['Db', 'Eb', 'Fb', 'Gb', 'Ab', 'Bbb', 'Cb', 'Db'],
-  "Dm": ['D', 'E', 'F', 'G', 'A', 'Bb', 'C', 'D'],
-  "D#m": ['D#', 'E#', 'F#', 'G#', 'A#', 'B', 'C#', 'D#'],
-  "Ebm": ['Eb', 'F', 'Gb', 'Ab', 'Bb', 'Cb', 'Db', 'Eb'],
-  "Em": ['E', 'F#', 'G', 'A', 'B', 'C', 'D', 'E'],
-  "Fm": ['F', 'G', 'Ab', 'Bb', 'C', 'Db', 'Eb', 'F'],
-  "F#m": ['F#', 'G#', 'A', 'B', 'C#', 'D', 'E', 'F#'],
-  "Gbm": ['Gb', 'Ab', 'Bbb', 'Cb', 'Db', 'Ebb', 'Fb', 'Gb'],
-  "Gm": ['G', 'A', 'Bb', 'C', 'D', 'Eb', 'F', 'G'],
-  "G#m": ['G#', 'A#', 'B', 'C#', 'D#', 'E', 'F#', 'G#'],
-  "Abm": ['Ab', 'Bb', 'Cb', 'Db', 'Eb', 'Fb', 'Gb', 'Ab']
+  return buildTriad(noteName)
 }
 
-let majorScales = {
-  'G': 'G - A - B - C - D - E - F#',
-  'Gb': 'Gb - Ab - Bb - Cb - Db - Eb - F',
-  'G#': 'G# - A# - B# - C# - D# - E# - F#',
-  'F': 'F - G - A - Bb - C - D - E',
-  'F#': 'F# - G# - A# - B - C# - D# - E#',
-  'E': 'E - F# - G# - A - B - C# - D#',
-  'Eb': 'Eb - F - G - Ab - Bb - C - D',
-  'D': 'D - E - F# - G - A - B - C#',
-  'Db': 'Db - Eb - F - Gb - Ab - Bb - C',
-  'D#': 'D# - E# - F# - G# - A# - B# - C#',
-  'C': 'C - D - E - F - G - A - B',
-  'C#': 'C# - D# - E# - F# - G# - A# - B#',
-  'B': 'B - C# - D# - E - F# - G# - A#',
-  'Bb': 'Bb - C - D - Eb - F - G - A',
-  'A': 'A - B - C# - D - E - F# - G#',
-  'Ab': 'Ab - Bb - C - Db - Eb - F - G',
-  'A#': 'A# - B# - C# - D# - E# - F# - G#',
-};
-let minorScales = {
-  'C': 'C - D - Eb - F - G - Ab - Bb',
-  'C#': 'C# - D# - E - F# - G# - A - B',
-  'D': 'D - E - F - G - A - Bb - C',
-  'Db': 'Db - Eb - Fb - Gb - Ab - Bb - Cb',
-  'D#': 'D# - E# -F# - G# - A# - B - C#',
-  'E': 'E - F# - G - A - B - C - D',
-  'Eb': 'Eb - F - Gb - Ab - Bb - Cb - Db',
-  'F': 'F - G - Ab - Bb - C - Db - Eb',
-  'F#': 'F# - G# - A - B - C# - D - E',
-  'G': 'G - A - Bb - C - D - Eb - F',
-  'Gb': 'Gb - Ab - bb - Cb - Db - Eb - Fb',
-  'G#': 'G# - A# - B - C# - D# - E - F#',
-  'A': 'A - B - C - D - E - F - G',
-  'Ab': 'Ab - Bb - Cb - Db - Eb - Fb - Gb',
-  'A#': 'A# - B# - C# - D# - E# - F# - G#',
-  'B': 'B - C# - D - E - F# - G - A',
-  'Bb': 'Bb - C - Db - Eb - F - Gb - Ab'
+let getChordForRomanNumeral = (romanNumeral, musicKey) => {
+  let chordNumber = Object.keys(romanHash).sort(sortByLength).find(it => romanNumeral.startsWith(it) || romanNumeral.startsWith(it.toLowerCase()));
+
+  let everythingAfterChordNumber = romanNumeral.substr(chordNumber.length)
+  chordNumber = romanNumeral.substr(0, chordNumber.length)
+
+  let isMinor = chordNumber.toLowerCase() === chordNumber
+  let quality = null
+
+  if (everythingAfterChordNumber.startsWith("o7")) {
+    quality = "dim7"
+  } else if (everythingAfterChordNumber.startsWith("o")) {
+    quality = "dim"
+  } else if (everythingAfterChordNumber.startsWith("7")) {
+    quality = isMinor ? "min7" : "7"
+  } else if (everythingAfterChordNumber.startsWith("M7") || everythingAfterChordNumber.startsWith("maj7")) {
+    quality = isMinor ? "minMaj7" : "maj7"
+  } else if (everythingAfterChordNumber.startsWith("sus")) {
+    quality = "sus4"
+  } else if (isMinor) {
+    quality = "min"
+  } else {
+    quality = "maj"
+  }
+  let scaleDegree = romanToInt(chordNumber)
+  let scaleNotes = new Key(musicKey).scale()
+  return {
+    symbol: scaleNotes[scaleDegree - 1],
+    romanNumeral: romanNumeral,
+    quality: quality,
+    inversion: 0,
+    scaleDegree: scaleDegree
+  }
 }
-let notesInScale = (scales, k) => scales[k].split(' - ');
+
+/**
+ * Representation of X/Y meter.
+ * Simple - beat is divided into two x in {2, 3, 4} vs Compound - beat is divided into three  x in {6, 9, 12}
+ * Organisation into 2 or 3 is just for visual assistance!
+ * Duple - bar is divided into two vs Triple - bar is divided into three
+ */
+class Meter {
+  static Cache = {}
+  x = 0
+  y = 0
+
+  static from(name) {
+    let [x, y] = name.split("/").map(it => number(it.trim()))
+    return new Meter(x, y)
+  }
+
+  constructor(x, y) {
+    this.x = x
+    this.y = y
+  }
+
+  name() {
+    return this.x + "/" + this.y
+  }
+
+  /**
+   *
+   * @param numBars {Number}
+   * @param minRhythmValue {Number}
+   * @param maxRhythmValue {Number}
+   */
+  generateRandomRhythm(numBars = 4, minRhythmValue = 1 / 16, maxRhythmValue = 1) {
+    let maxNotesPossible = (1 / minRhythmValue) / this.y * numBars * this.x
+
+    let rhythmValues = {
+      '1/16': '16th',
+      '1/8': '8th',
+      '3/16': 'dotted-16th',
+      '1/4': 'quarter',
+      '3/8': 'dotted-quarter',
+      '1/2': 'half',
+      '3/4': 'dotted-half',
+      '1': 'whole',
+      '3/2': 'dotted-whole'
+    } //sorted
+    let limit = numBars * this.x / this.y
+
+    let value = numBars * this.x / this.y
+
+    let allLevels = [0, 1, 2, 3];
+
+    let r = []
+    let maxLevelUsed = 0
+    for (let i = 0; i < numBars - 1; i++) {
+      let level = randomFromArray(allLevels)
+      r = r.concat(randomFromArray(Rhythms[level]))
+      if (level > maxLevelUsed) maxLevelUsed = level
+    }
+
+    let levelForLastMeasure = randomFromArray(allLevels.filter(i => i < maxLevelUsed))
+    r = r.concat(randomFromArray(Rhythms[levelForLastMeasure]))
+
+    let required = this.x / this.y;
+
+    let measures = []
+    let currentMeasure = [], currentSum = 0
+    for (let i = 0; i < r.length; i++) {
+      let it = number(r[i])
+
+      if (currentSum + it <= required) {
+        currentMeasure.push({pitch: 1, duration: it})
+        currentSum += it
+      } else {
+        //it cannot be added
+        let stillUnfilled = required - currentSum
+        let carryOn = null
+        if (stillUnfilled > 0) {
+          let canBeBroken = Object.keys(rhythmValues).map(number).some(x => x === it - stillUnfilled)
+
+          if (canBeBroken) {
+            currentMeasure.push({pitch: 1, duration: stillUnfilled, tie: 'start'})
+            carryOn = it - stillUnfilled
+          }
+        }
+
+        //Reset
+        measures.push(currentMeasure)
+        currentMeasure = (carryOn ? [{pitch: 1, duration: carryOn, tie: 'stop'}] : [])
+        currentSum = (carryOn ? number(carryOn) : 0)
+      }
+    }
+
+    log("Generated rhythm: ", measures, "sum=" + sum(r), "maxLevelUsed=" + maxLevelUsed, "levelForLastMeasure=" + levelForLastMeasure)
+    return measures.map(m => ({notes: m}))
+  }
+}
+
+// log(new Meter(3, 4).generateRandomRhythm())
+
+function Key(keyName) {
+  let scale = getScale(keyName)
+  this.key = keyName
+  let chords = []
+  this.scale = () => scale
+
+  scale.forEach(note => {
+    chords.push(getTriadsForNote(note, keyName))
+  })
+
+  this.chords = () => {
+    let i = 0
+    return chords.map(it => {
+      let chordName = it[0]
+
+      if (!this.isMinor()) {
+        if ([1, 2, 5].includes(i)) chordName += "min"
+        else if (i === 6) chordName += "dim"
+        else chordName += "maj"
+      } else {
+        if ([0, 3, 4].includes(i)) chordName += "min"
+        else if (i === 1) chordName += "dim"
+        else chordName += "maj"
+      }
+
+      i++
+      return chordName
+    }) //end
+  }
+
+  this.chordTonesForRomanNumeral = (number) => {
+    let c = getChordForRomanNumeral(number, this.key)
+    return chords[c.scaleDegree - 1]
+  }
+
+  this.chordTonesForNote = (note, i) => {
+    if(i === undefined) i =0
+    return chords.filter(it => it[i] === note);
+  }
+
+  this.isMinor = () => this.key.endsWith("m");
+
+  this.name = () => this.key;
+
+  this.contains = (noteName) => {
+    return scale.includes(noteName)
+  }
+}
+
+function getAllChordsInKey(key) {
+  key = key || fretboard.activeKey
+  let allChordsInKey = {}
+  key.scale().forEach(scaleNote => {
+    Object.keys(chordPatterns).forEach(name => {
+      allChordsInKey[scaleNote + name] = {
+        notes: chordPatterns[name](getScale(scaleNote)),
+        root: scaleNote
+      }
+    })
+  })
+  return allChordsInKey;
+}
 
 function constructMeasureFive() {
 
@@ -107,14 +225,6 @@ function constructMeasureSix() {
 
 function constructMeasureSeven() {
 
-}
-
-let Cadences = {
-  Half: 0,
-  IAC: 1,
-  PAC: 2,
-  Plagal: 3,
-  Deceptive: 4
 }
 
 let melodyNotesForCadence = (cadence) => {
@@ -552,38 +662,23 @@ function constructPhraseTwo() {
   return []
 }
 
-let DURATION_TO_NAME = {
-    '1': 'whole',
-    '1/2': 'half',
-    '1/4': 'quarter',
-    '1/8': 'eighth',
-    '1/16': 'sixteenth',
-    '3/4': 'dotted-half',
-    '3/8': 'dotted-quarter',
-    '3/2': 'dotted-whole'
-}
-
-function durationType(numericForm) {
-  return DURATION_TO_NAME[numericForm]
-}
-
 function OctaveMapper() {
   // Restricted range for melody key!
   let referenceOctaves = {
-    '3': ['G','G#','Ab','A', 'A#', 'Bb', 'B', 'Cb'],
+    '3': ['G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B', 'Cb'],
     '4': ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'E#', 'Fb', 'F', 'F#', 'Gb']
   }
 
   this.getOctave = key => {
-      return parseInt(Object.keys(referenceOctaves).find(k => referenceOctaves[k].indexOf(key) >= 0))
+    return parseInt(Object.keys(referenceOctaves).find(k => referenceOctaves[k].indexOf(key) >= 0))
   }
 
   this.isSecondAfterFirst = (x, y, octave) => {
-     let map = referenceOctaves[octave + ""]
-     if(octave + "" === "4") {
-        map = referenceOctaves['4'].concat(referenceOctaves['3'])
-     }
-     return map.indexOf(y) > map.indexOf(x)
+    let map = referenceOctaves[octave + ""]
+    if (octave + "" === "4") {
+      map = referenceOctaves['4'].concat(referenceOctaves['3'])
+    }
+    return map.indexOf(y) > map.indexOf(x)
   }
 }
 
@@ -610,33 +705,23 @@ function randomMelody() {
 /**
  * Returns list of measures/bars. Pitches are converted to note names in given key.
  * @param melody
- * @param key
+ * @param key of type Key
  * @returns {*}
  */
 function melodyInContextOfKey(melody, key) {
-  let scale = null
-  if (key.endsWith("m")) {
-    scale = minorScales[key.replace("m", "")]
-  } else {
-    scale = majorScales[key]
-  }
+  let scale = key.scale()
 
-  key = key.replace("m", "")
+  key = key.name().replace("m", "")
 
   let startingOctave = octaveMapper.getOctave(key)
   let FORWARD = 0, BACKWARDS = 1
-  let geq = (x, y) => x >= y
-  let gt = (x, y) => x > y
-
-  let cmpr = startingOctave === 4 ? geq : gt;
-
   let pitchNumberToNote = x => {
     // Go up by step if it's C increase octave
     // Go down by step, if it's B decrease octave
 
     let octave = startingOctave
     let number = 1
-    let cursor = new CircularCursor(scale.split(' - '))
+    let cursor = new CircularCursor(scale)
     let movement = null
 
     if (x === 1) {
@@ -647,7 +732,7 @@ function melodyInContextOfKey(melody, key) {
     }
     cursor.next() //at first scale degree
     for (let i = 0; i < 200; i++) {
-      let note = null
+      let note = ""
       if (x < 1) {
         number--
         note = cursor.previous()
@@ -658,9 +743,11 @@ function melodyInContextOfKey(melody, key) {
         movement = FORWARD
       }
 
-      if ((movement === BACKWARDS) && (note === 'B' || note === 'Cb' || note === 'Bb')) {
+      let equivalentOfC = scale.find(n => (n === 'C' || n === 'B#' || n === 'C#'))
+      let equivalentOfB = scale.find(n => (n === 'B' || n === 'Cb' || n === 'Bb'))
+      if ((movement === BACKWARDS) && (equivalentOfB === note)) {
         octave--
-      } else if ((movement === FORWARD) && (note === 'C' || note === 'B#' || note === 'C#')) {
+      } else if ((movement === FORWARD) && (equivalentOfC === note)) {
         octave++
       }
 
@@ -677,113 +764,133 @@ function melodyInContextOfKey(melody, key) {
       .map(note => {
         // console.log("note", note)
         let pn = pitchNumberToNote(note.pitch)
-        let type = durationType(note.duration)
+        if (note.alter === +1) pn.name += "#"
+        if (note.alter === -1) pn.name += "b"
+        let type = durationType(note.duration) || ""
         return {
           name: pn.name,
           octave: pn.octave,
           fullName: pn.name + pn.octave,
           type: type.replace("dotted-", ""),
-          dot: type.indexOf("dotted-") >= 0
+          dot: note.dot || type.indexOf("dotted-") >= 0,
+          tie: note.tie //propagate as it is
         }
       })
-      return {notes: notes}
+    return {notes: notes}
   })
 
 }
 
 function melodyWithoutContextOfKey(melody, key) {
-    let scale = null
-    if (key.endsWith("m")) {
-      scale = minorScales[key.replace("m", "")]
-    } else {
-      scale = majorScales[key]
-    }
-    scale = scale.split(' - ')
-    key = key.replace("m", "")
+  let scale = key.scale()
+  key = key.name().replace("m", "")
 
-    let startingOctave = octaveMapper.getOctave(key)
-    let geq = (x, y) => x >= y
-    let gt = (x, y) => x > y
+  let startingOctave = octaveMapper.getOctave(key)
+  let geq = (x, y) => x >= y
+  let gt = (x, y) => x > y
 
-    let cmpr = startingOctave === 4 ? geq : gt;
+  let FORWARD = 0, BACKWARDS = 1
 
-    let FORWARD = 0, BACKWARDS = 1
+  let noteToPitchNumber = note => {
+    // Go up by step if it's C increase octave
+    // Go down by step, if it's B decrease octave
 
-    let noteToPitchNumber = note => {
-        // Go up by step if it's C increase octave
-        // Go down by step, if it's B decrease octave
+    let octave = startingOctave
+    let number = 1
+    let cursor = new CircularCursor(scale)
+    let movement = null
 
-        let octave = startingOctave
-        let number = 1
-        let cursor = new CircularCursor(scale)
-        let movement = null
-
-        if(note.name === key) {
-            if(startingOctave === note.octave) {
-              return {
-                pitch: 1
-              }
-            }
+    if (startingOctave === note.octave) {
+      if (note.name === key) {
+        return {
+          pitch: 1
         }
-
-        cursor.next() //at first scale degree
-        for (let i = 0; i < 200; i++) {
-          let x = null
-
-          if(note.octave === startingOctave) {
-            //Corner cases for B, C
-            if(octaveMapper.isSecondAfterFirst(key, note.name, startingOctave)) {
-                movement = FORWARD
-            } else {
-                movement = BACKWARDS
-            }
-          } else if (note.octave > startingOctave) {
-            movement = FORWARD
-          } else {
-            movement = BACKWARDS
-          }
-
-          if(movement === FORWARD) {
-            number++
-            x = cursor.next()
-          } else if(movement == BACKWARDS) {
-            number--
-            x = cursor.previous()
-          }
-
-          if (movement === FORWARD && (x === 'C' || x === 'B#' || x === 'C#')) {
-            octave++
-          } else if (movement === BACKWARDS && (x === 'B' || x === 'Cb' || x === 'Bb')) {
-            octave--
-          }
-
-          if (x === note.name && octave === note.octave) {
-            return {
-              pitch: number
-            }
-          }
-
+      } else if (note.name !== "B" && note.name === key + "#") {
+        return {
+          pitch: 1,
+          alter: 1
         }
+      } else if (note.name !== "C" && note.name === key + "b") {
+        return {
+          pitch: 1,
+          alter: -1
+        }
+      }
     }
 
-    return melody.map(measure => {
-        let notes = measure.notes.filter(it => it)
-          .map(note => {
-            // console.log("note", note)
-            let pn = noteToPitchNumber(note)
-            let duration = Object.keys(DURATION_TO_NAME).find(k => DURATION_TO_NAME[k] === note.type)
-            return {
-              pitch: pn && pn.pitch,
-              duration: duration
-            }
-          })
-        return {notes: notes}
-    })//end return block
+    cursor.next() //at first scale degree
+    for (let i = 0; i < 200; i++) {
+      let x = ""
+
+      if (note.octave === startingOctave) {
+        //Corner cases for B, C
+        if (octaveMapper.isSecondAfterFirst(key, note.name, startingOctave)) {
+          movement = FORWARD
+        } else {
+          movement = BACKWARDS
+        }
+      } else if (note.octave > startingOctave) {
+        movement = FORWARD
+      } else {
+        movement = BACKWARDS
+      }
+
+      if (movement === FORWARD) {
+        number++
+        x = cursor.next()
+      } else if (movement === BACKWARDS) {
+        number--
+        x = cursor.previous()
+      }
+
+      let equivalentOfC = scale.find(n => (n === 'C' || n === 'B#' || n === 'C#'))
+      let equivalentOfB = scale.find(n => (n === 'B' || n === 'Cb' || n === 'Bb'))
+      if (movement === FORWARD && (equivalentOfC === x)) {
+        octave++
+      } else if (movement === BACKWARDS && (equivalentOfB === x)) {
+        octave--
+      }
+
+      if (octave === note.octave) {
+        if (x === note.name) {
+          return {
+            pitch: number
+          }
+        } else if (x + "#" === note.name) {
+          return {
+            pitch: number,
+            alter: +1
+          }
+        } else if (x + "b" === note.name) {
+          return {
+            pitch: number,
+            alter: -1
+          }
+        }
+      }
+    }
+  }
+
+  return melody.map(measure => {
+    let notes = measure.notes.filter(it => it)
+      .map(note => {
+        // console.log("note", note)
+        let pn = noteToPitchNumber(note)
+        let duration = Object.keys(DURATION_TO_NAME).find(k => DURATION_TO_NAME[k] === note.type)
+        return {
+          pitch: pn && pn.pitch,
+          duration: duration,
+          alter: pn && pn.alter,
+          dot: note.dot || false
+        }
+      })
+    return {notes: notes}
+  })//end return block
 }
 
 /**
  *
- * @param melody : list of measures: [[{name, octave, type, dot}], [{}]]
+ * @param melody : list of measures: ([{notes: [{pitch, ..}]}, ..])
  */
 function diatonicMelodicInversion(melody) {
   let copy = simpleClone(melody)
@@ -793,8 +900,8 @@ function diatonicMelodicInversion(melody) {
   let inverted = [referenceNote]
   let lastNote = referenceNote
 
-  for(let i= 1; i < melodyNotes.length; i++) {
-    let diff = melodyNotes[i].pitch - melodyNotes[i-1].pitch
+  for (let i = 1; i < melodyNotes.length; i++) {
+    let diff = melodyNotes[i].pitch - melodyNotes[i - 1].pitch
     let newNote = simpleClone(melodyNotes[i])
     newNote.pitch = lastNote.pitch - diff
     inverted.push(newNote)
@@ -816,22 +923,22 @@ let melodyToSimpleString = (melody) => {
 
 // TESTING
 let melody = [{
-              notes: [{pitch: 1, duration: '1/8'}, {pitch: 3, duration: '1/8'},
-                      {pitch: 7, duration: '1/8'},
-                      {pitch: 8, duration: '1/8'},
-                      {pitch: 0, duration: '1/8'},  {pitch: -3, duration: '1/8'},
-                      {pitch: -7, duration: '1/8'},
-                      {pitch: -8, duration: '1/8'}]
-              }]
+  notes: [{pitch: 1, duration: '1/8', dot: false}, {pitch: 3, duration: '1/8', dot: false},
+    {pitch: 7, duration: '1/8', dot: false},
+    {pitch: 8, duration: '1/8', dot: false},
+    {pitch: 0, duration: '1/8', dot: false}, {pitch: -3, duration: '1/8', dot: true},
+    {pitch: -7, duration: '1/8', dot: false},
+    {pitch: -8, duration: '1/8', dot: false}]
+}]
 logJson("Tested on melody", melody.flatMap(it => it.notes).map(it => it.pitch))
 
-let keys = ['Am', 'Bm', "Dm", "Cm", "Gm", "C", "G", "A", "F", "Bb", "Eb", "Ab", "E", "Em"]
-for(i in keys) {
+let keys = ['Am', 'Bm', "Dm", "Cm", "Gm", "C", "G", "A", "F", "Bb", "Eb", "Ab", "E", "Em"].map(it => new Key(it))
+for (i in keys) {
   let key = keys[i]
   let x = melodyInContextOfKey(melody, key)
   let y = melodyWithoutContextOfKey(x, key)
 
-  if(!equals(y , melody)) {
+  if (!equals(y, melody)) {
     log(key)
     logJson('melodyInContextOfKey', x.flatMap(it => it.notes).map(it => it.name + it.octave))
 
@@ -840,41 +947,5 @@ for(i in keys) {
 
 }
 
-/**
- * Are enharmonically equal
- */
-let equalNotes = (x, y) => {
-  if(x === y) return true;
-  return [['A#', 'Bb'], ['B', 'Cb'], ['B#', 'C'], ['C#', 'Db'], ['D#', 'Eb'], ['E', 'Fb'], ['E#', 'F'], ['F#', 'Gb'], ['G#', 'Ab']].find(it => it.includes(x) && it.includes(y))
-}
-
-/**
- * chord = [..notes], melody = [..notes]
- */
-let findAppropriateChords = (chords, melody, key) => {
-   let scale = null
-    if (key.endsWith("m")) {
-      scale = minorScales[key.replace("m", "")]
-    } else {
-      scale = majorScales[key]
-    }
-    scale = scale.split(' - ')
-    key = key.replace("m", "")
-
-    let buildTriad = note => {
-        let cursor = new CircularCursor(scale)
-        cursor.goTo(note)
-        let third = cursor.next(3-1), fifth = cursor.next(3-1), seventh = cursor.next(3-1)
-        return [note, third, fifth]
-    }
-
-    let isChordAppropriate = (chord, melodyNote) => {
-        let triad = buildTriad(melodyNote)
-
-        return new Set(intersection(triad, chord)).size >= 2
-    }
-
-    return chords.filter(it => isChordAppropriate(it, melody[0]))
-}
 
 //note.name+note.octave
