@@ -29,10 +29,10 @@ let chordPatterns = {
   'min6': pattern([1, '3b', 5, 6]),
   // '6+9': pattern([1, 3, 5, 6, 9]),
   // 'min6+9': pattern([1, '3b', 5, 6, 9]),
-  '7': pattern([1, '3', 5, '7b']), //a.k.a majMin7 a.k.a. dom7
-  'maj7': pattern([1, '3', 5, 7]),
-  'min7': pattern([1, '3b', 5, '7b']),
-  'minMaj7': pattern([1, '3b', 5, 7]),
+  '7': pattern([1, '3', '5','7b']), //a.k.a majMin7 a.k.a. dom7
+  'maj7': pattern([1, '3', '5',7]),
+  'min7': pattern([1, '3b', '5','7b']),
+  'minMaj7': pattern([1, '3b', '5',7])
   // '7Sus4': pattern([1, '4', '5', '7b']),
   // '9': pattern([1, 3, 5, '7b', 9]),
   // 'maj9': pattern([1, 3, 5, 7, 9]),
@@ -234,6 +234,14 @@ function normaliseChordName(name) {
  return name.replaceAll("maj7", "M7").replaceAll("maj", "").replaceAll("dim", "o").replaceAll("min", "m").replaceAll("aug", "+")
 }
 
+function deNormaliseChordName(name) {
+  if(!["M7", "o", "m", "+"].some(it => name.indexOf(it) > 0)) {
+    return name + "maj"
+  }
+  return name.replaceAll("M7", "maj7").replaceAll("o", "dim").replaceAll("m", "min").replaceAll( "+", "aug")
+}
+
+
 function chromaticScales() {
   let chromaticScale1 = ['A', 'Bb', 'B', 'C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab']
   let chromaticScale2 = ['A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#']
@@ -298,3 +306,33 @@ let flattenNote = n => {
 }
 
 let keyList = ['C', 'Am', 'F', 'Dm', 'Bb', 'Gm', 'Eb', 'Cm', 'Ab', 'Fm', 'Db', 'Bbm', 'Gb', 'D#m', 'B', 'G#m', 'E', 'C#m', 'A', 'F#m', 'D', 'Bm', 'G', 'Em']
+
+function possibleOctaves(noteName) {
+  if(['C', 'D'].includes(noteName)) return [3, 4, 5]
+  return [2, 3, 4, 5]
+}
+
+function allVersionsOfChord(chordName) {
+  let out = []
+  let chordNotesInOrder = allChords[chordName].notes;
+  permutate(chordNotesInOrder).forEach(notes => {
+    cartesian(...notes.map(it => cartesian([it], possibleOctaves(it)))).forEach(_notes => {
+      let inv = ''
+      if(_notes.length === 3) {
+        if(_notes[0][0] === chordNotesInOrder[1]) inv = '(6)'
+        else if(_notes[0][0] === chordNotesInOrder[2]) inv = '(6, 4)'
+      }
+      if(_notes.length === 4) {
+        if(_notes[0][0] === chordNotesInOrder[0]) inv = '(7)'
+        else if(_notes[0][0] === chordNotesInOrder[1]) inv = '(6, 5)'
+        else if(_notes[0][0] === chordNotesInOrder[2]) inv = '(4, 3)'
+        else if(_notes[0][0] === chordNotesInOrder[3]) inv = '(4, 2)'
+      }
+      out.push({name: normaliseChordName(chordName) + inv, notesWithOctave: _notes})
+    })
+  })
+  let versions = _.uniqBy(out, e => Array.from(new Set(e.notesWithOctave.map(it => it.join(',')))).toSorted().join(";") )
+
+  let openStrings = ['E', 'A', 'D', 'G', 'B', 'E']
+  return versions
+}

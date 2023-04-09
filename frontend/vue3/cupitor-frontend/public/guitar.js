@@ -392,6 +392,8 @@ const Fretboard = function () {
 const getHtmlElementsForStaffNoteHeads = (osmd) => {
   let result = []
   let measureLists = osmd.graphic.measureList
+
+  let vfNoteId = 0
   for (let a = 0; a < measureLists.length; a++) {
     let measures = measureLists[a]
     for (let i = 0; i < measures.length; i++) {
@@ -410,6 +412,16 @@ const getHtmlElementsForStaffNoteHeads = (osmd) => {
             let vfpitch = notes[l].vfpitch
 
             let noteHeadEl = $(vfnotes[0].attrs.el).find(".vf-notehead").toArray()[vfnoteIndex];
+            let lyricEntryWithId = Object.values(sourceNote.voiceEntry.lyricsEntries.table).map(Object.values).flat().find(it => it.text && it.text.startsWith("id="));
+            let id = null
+            if(lyricEntryWithId) {
+              id = lyricEntryWithId.text.slice(3)
+              id = number(id)
+              if (vfnotes[0].note_heads.length > 1) {
+                id = id - vfnotes[0].note_heads.length + vfnoteIndex + 1
+              }
+            }
+
             result.push({
               staveNoteEl: vfnotes[0].attrs.el, // vfnotes[1] must be equal to vfnoteIndex
               noteHeadEl: noteHeadEl,
@@ -418,9 +430,10 @@ const getHtmlElementsForStaffNoteHeads = (osmd) => {
               sourceNote: sourceNote, //From sourceNote everything else can be reached e.g.: osmd.rules.GNote(x[43].sourceNote)
               measureList: a,
               measure: i,
-              voice: voice
+              voice: voice,
+              id: id,
+              vfNoteId: vfNoteId++
             })
-
           }
         }
       }
@@ -499,29 +512,42 @@ function populateNoteheadData(osmd, jqueryXml) {
   if (clefChange) clefChange = parseInt(clefChange)
 
   let accMap = {0: "#", 2: '', 1: 'b'}
-  result.filter(it => it.pitch).forEach(it => {
-    let [step, octave] = it.pitch[0].split("/")
+  result.forEach(it => {
+    let step = '', octave = ''
+    if(it.pitch) {
+      step = it.pitch[0].split("/")[0]
+      octave = it.pitch[0].split("/")[1]
+    }
+
     step = step.replace("n", "").toUpperCase()
     octave = parseInt(octave.trim())
+
     if (clefChange) octave += clefChange
-    let accidental = accMap[it.sourceNote.pitch.accidental] || it.pitch[1] || ""
+    let accidental = (it.sourceNote.pitch && accMap[it.sourceNote.pitch.accidental]) || (it.pitch && it.pitch[1]) || ""
     let duration = it.sourceNote.length.numerator + "/" + it.sourceNote.length.denominator
     let voiceId = it.voice.parentVoiceEntry.parentVoice.voiceId
     let $noteheadEl = $(it.noteHeadEl);
     $noteheadEl.css({position: "absolute"})
     let offset = $noteheadEl.offset()
+    let offtop = (offset && offset.top) || 0
     let measurePos = getMeasurePosition(it.measureList, osmd)
+    let mtop = measurePos && measurePos.top
 
     //TODO: use osmd.rules.NoteToGraphicalNoteMap for note data like name, octave, measure, voice etc, that will be more stable
+    let left = offset && Math.floor(offset.left);
     $noteheadEl.data("name", step + accidental)
       .data("octave", octave)
       .data("duration", duration)
       .data("voice", voiceId)
       .data("measure", it.measureList)
-      .data("top", Math.floor(offset.top - measurePos.top))
-      .data("offsetTop", offset.top)
-      .data("left", Math.floor(offset.left))
+      .data("top", Math.floor( offtop - (mtop || 0) ))
+      .data("offsetTop", offtop)
+      .data("left", left)
+      .data("right", Math.ceil(left + $noteheadEl.width()))
+      .data("id", it.id)
   })
+
+  //Add horizontal line info
   let yset = new Set()
   let noteheads = $('.vf-notehead');
   noteheads.toArray().map($).forEach(it => {
@@ -534,11 +560,38 @@ function populateNoteheadData(osmd, jqueryXml) {
   noteheads.toArray().map($).forEach((it, i) => {
     noteheadCache[i] = {el: it, color: it.find("path").attr("fill")}
     it.data("line", map[it.data("top")]).data("cacheIndex", i)
-    // it.removeData("top")
+  })
+
+  //Add vertical line info
+  let xset = new Set()
+  noteheads.toArray().map($).forEach(it => {
+    xset.add([it.data("left"), it.data("right"), it.data("measure")])
+  })
+  map = {}
+  let xlist = Array.from(xset)
+  xlist.sort((a, b) => a[0] - b[0]);
+  xlist.forEach((e, i) => map[e] = i);
+  noteheads.toArray().map($).forEach((it, i) => {
+    let l = it.data("left"), r = it.data("right"), m = it.data("measure")
+    let xId = -1
+    for (let j = 0; j < xlist.length; j++) {
+      let xn = xlist[j]
+      if(xn[2] === m && xn[0] <= l && l <= xn[1]) {
+        xId = j
+        break
+      }
+    }
+    if(xId >= 0) {
+      it.data("x", xId)
+    }
   })
 }
 
-function loadMainOSMD(musicXml, height) {
+function hideIdTexts() {
+  $('text:contains("id=")').parent().css({visibility: 'hidden'})
+}
+
+function loadMainOSMD(musicXml, height,) {
   let osmd = window.osmds[0];
   //TODO: Guess it based on the lowest octave
   osmd.EngravingRules.StaffHeight = height || 25.0
@@ -549,9 +602,11 @@ function loadMainOSMD(musicXml, height) {
   removeTechnicalDetails(jqueryXml)
   // highlightNonChordTones(jqueryXml, fretboard.activeKey)
 
-  osmd.load(mxml.toString()).then(it => {
+  return osmd.load(mxml.toString()).then(it => {
     osmd.render();
     populateNoteheadData(osmd, jqueryXml);
+    hideIdTexts()
+    return jqueryXml
   });
 }
 
@@ -604,6 +659,7 @@ $(function () {
   }
 
   let $keyLabel = $('#keyLabel');
+
   function populateKeyDetail(keyName) {
     $keyLabel.text(keyName)
     populateChordProgressions()
@@ -619,8 +675,8 @@ $(function () {
       $('#scaleContainer').append(`<span>${n}</span>`)
     })
 
-    if(fretboard.activeKey.isMinor()) {
-      scale.slice(scale.length-2).map(raiseNote).filter(it => it).forEach(n => {
+    if (fretboard.activeKey.isMinor()) {
+      scale.slice(scale.length - 2).map(raiseNote).filter(it => it).forEach(n => {
         $('#scaleContainer').append(`<span class="extra">${n}</span>`)
       })
     }
@@ -756,6 +812,9 @@ $(function () {
   }
 
   $('#toggleFretboardBtn').click(toggleFretboard)
+  $('#toggleKeyChartBtn').click(e => {
+    $('#keyChartDialog').toggle()
+  })
 
   $('.chord-multiselect li').click(e => {
     $(e.target).toggleClass("active")
@@ -798,19 +857,30 @@ $(function () {
 
   let $osmdContainer1 = $('#osmdContainer1')
 
-  $osmdContainer1.click(e => {
+  let noteClicked = e => {
     let data = $(e.target).parents(".vf-notehead").data();
     if (!data) return;
     if (!Object.keys(data).length) {
       populateNoteheadData(osmds[0], mxml.xml);
     }
-    logJson(data)
-    let notes = fretboard.findNoteOnFretboard(data)
+    logJson("Notehead data", data)
+    let info = `${data.name}${data.octave}, ${durationType(data.duration)}=${data.duration}, voice:${data.voice}`
+    $('#note-information>.info').html(info)
+    $('#note-information').show()
+
+    if (data.id) {
+      let found = mxml.xml.find("note").toArray().find(it => $(it).text().indexOf("id=" + data.id) >= 0)
+      log(found)
+    }
+    let chordNotes = getNotesFromHtml().filter(it => it.measure === data.measure && it.x === data.x)
+    let notes = chordNotes.map(cn => fretboard.findNoteOnFretboard(cn)).flat()
     if (!notes) {
       return
     }
     fretboard.showOnlyTheseNotes(notes)
-  });
+  }
+
+  $osmdContainer1.click(noteClicked);
 
   $('#generateMelodyBtn').click(e => {
     let melody = randomMelody()
@@ -843,24 +913,78 @@ $(function () {
     // Determine key;
   }
 
-  const extractMelodyFromXml = (xml, voices) => {
-    let doc = $.parseXML(xml)
+  const extractMelodyFromXml = (xmlStr) => {
+    loadMusicFromXmlFile(xmlStr).then(xml => {
+      let noteheadData = getNotesFromHtml()
+      groupBy(noteheadData, it => it.measure + "-" + it.x, (k, v) => {
+        let melNote = v.toSorted((a, b) => a.line - b.line).find(it => it.name.length > 0)
+        if(melNote) {
+          melNote.melodyNote = true
+          if(melNote.id !== undefined) {
+            v.filter(vi => vi.name.length > 0 && vi.id !== melNote.id && vi.voice === melNote.voice).forEach(vi => vi.remove = true)
+            v.filter(vi => vi.name.length > 0 && vi.id !== melNote.id && vi.voice !== melNote.voice).forEach(vi => vi.convertToRest = true)
+          }
+        }
+      })
 
-    $(doc).find("note").toArray().filter(it => $(it).find("chord").length > 0).forEach(it => $(it).remove())
-    $(doc).find("note").toArray().filter(it => {
-      return voices.map(i => $(it).find(`voice:contains(${i})`).length === 0).reduce((a, b) => a && b)
-    }).forEach(it => $(it).remove())
+      let notes = $(xml).find("note")
+      noteheadData.filter(it => it.id !== undefined).forEach(nhd => {
+        let $note = notes.filter((i, n) => $(n).find(`lyric>text`).text().trim() === 'id='+ nhd.id)
+        $note.find("chord").remove()
+        if(nhd.remove) {
+          $note.remove()
+          log(nhd.id, 'removed')
+        }
+        if(nhd.convertToRest) {
+          $note.find("pitch").remove()
+          $note.prepend($('<rest/>', xml))
+          log(nhd.id, 'converted to rest')
+        }
+        console.log(nhd.id, $note[0])
+      })
 
-    let melodyXml = mxml.serialiser.serializeToString(doc)
-    mxml.loadXml(melodyXml)
+      xml = mxml.serialiser.serializeToString(xml[0])
+      loadMainOSMD(xml)
 
-    fretboard.melodyBeingPlayedInKey = mxml.toArray().map(it => ({notes: it}))
-    fretboard.melodyBeingPlayed = melodyWithoutContextOfKey(fretboard.melodyBeingPlayedInKey, fretboard.activeKey)
+      // let modified = $($.parseXML(xml)).find("lyrics:contains('id=')").remove()
+      // log(mxml.serialiser.serializeToString(modified[0]))
 
-    // playMp3(melodyXml, fileName)
+      fretboard.melodyBeingPlayedInKey = mxml.toArray().map(it => ({notes: it}))
+      fretboard.melodyBeingPlayed = melodyWithoutContextOfKey(fretboard.melodyBeingPlayedInKey, fretboard.activeKey)
+    })
+  }
 
-    loadMainOSMD(melodyXml);
-    return melodyXml
+  const extractOuterVoicesFromXml = (xmlStr) => {
+    loadMusicFromXmlFile(xmlStr).then(xml => {
+      let noteheadData = getNotesFromHtml()
+      groupBy(noteheadData, it => it.measure + "-" + it.x, (k, v) => {
+        let sortedByLine = v.toSorted((a, b) => a.line - b.line).filter(it => it.name.length > 0)
+        sortedByLine.forEach((e, i) => {
+          if(i !== 0 && i !== sortedByLine.length - 1) {
+            e.remove = true
+          }
+        })
+      })
+
+      let notes = $(xml).find("note")
+      noteheadData.filter(it => it.id !== undefined).forEach(nhd => {
+        let $note = notes.filter((i, n) => $(n).find(`lyric>text`).text().trim() === 'id='+ nhd.id)
+        if(nhd.remove) {
+          $note.remove()
+          log(nhd.id, 'removed')
+        }
+        console.log(nhd.id, $note[0])
+      })
+
+      xml = mxml.serialiser.serializeToString(xml[0])
+      loadMainOSMD(xml)
+
+      // let modified = $($.parseXML(xml)).find("lyrics:contains('id=')").remove()
+      // log(mxml.serialiser.serializeToString(modified[0]))
+
+      fretboard.melodyBeingPlayedInKey = mxml.toArray().map(it => ({notes: it}))
+      fretboard.melodyBeingPlayed = melodyWithoutContextOfKey(fretboard.melodyBeingPlayedInKey, fretboard.activeKey)
+    })
   }
 
   $('#loadMelodyBtn').click(e => {
@@ -869,8 +993,22 @@ $(function () {
     reader.addEventListener(
       "load",
       () => {
-        let melodyVoices = $('#melodyVoices').val().split(",")
-        extractMelodyFromXml(reader.result, melodyVoices)
+        extractMelodyFromXml(reader.result)
+      },
+      false
+    );
+    if (file) {
+      reader.readAsText(file);
+    }
+  })
+
+  $('#extractOuterVoicesBtn').click(e => {
+    const [file] = document.querySelector("input[type=file]").files;
+    const reader = new FileReader();
+    reader.addEventListener(
+      "load",
+      () => {
+        extractOuterVoicesFromXml(reader.result)
       },
       false
     );
@@ -883,17 +1021,28 @@ $(function () {
     playMp3(mxml.toString(), fretboard.activeKey.name())
   })
 
+  let addIdsToNotes = xml => {
+    xml.find("note").each((i, e) => {
+      let lyric = $(e).find("lyric")
+      let number = lyric.length + 1
+      lyric = $(`<lyric number="${number}">
+                      <syllabic>single</syllabic>
+                      <text>id=${i}</text>
+                  </lyric>`, xml)
+      $(e).append(lyric)
+    })
+  }
+
   const loadMusicFromXmlFile = (xml) => {
     let doc = $.parseXML(xml)
-
+    addIdsToNotes($(doc))
     let musicXml = mxml.serialiser.serializeToString(doc)
     mxml.loadXml(musicXml)
 
     fretboard.melodyBeingPlayedInKey = mxml.toArray().map(it => ({notes: it}))
     fretboard.melodyBeingPlayed = melodyWithoutContextOfKey(fretboard.melodyBeingPlayedInKey, fretboard.activeKey)
 
-    loadMainOSMD(musicXml);
-    return musicXml
+    return loadMainOSMD(musicXml);
   }
 
   $('#loadMusicBtn').click(e => {
@@ -933,7 +1082,18 @@ $(function () {
 
 
   $('#analyseMusicBtn').click(e => {
-    let similarities = analyseRhythmSimilarity(fretboard.melodyBeingPlayedInKey);
+    let noteheadsData = getNotesFromHtml()
+    let notes = groupBy(noteheadsData, it => it.measure + "-" + it.x, (k, notes) => {
+      let sortedByY = notes.toSorted((a, b) => a.line - b.line);
+      let melNote = sortedByY.find(it => it.name.length > 0)
+      if(!melNote) melNote = sortedByY[0]
+      melNote.melodyNote = true
+      $(noteheadCache[melNote.cacheIndex]).data("melodyNote", true)
+      return notes
+    })
+
+    let measures = groupBy(notes.flat().filter(it => it.melodyNote).map(it => ({ name: it.name, type: durationType(it.duration), measure: it.measure})), 'measure', (m, ns) => ({notes: ns}))
+    let similarities = analyseRhythmSimilarity(measures);
     log(similarities)
     // $('#analysisDialog').fadeIn()
     guessChords()
@@ -979,6 +1139,9 @@ $(function () {
     if (!file) {
       name = "unknown_" + new Date().getTime() + ".xml";
     } else name = file.name.split(".")[0] + "_melody_" + new Date().getTime() + ".xml";
+
+    $(mxml.xml).find("lyric:contains('id=')").remove()
+
     saveFile(mxml.toString(), name).then(r => {
     })
   })
@@ -1006,7 +1169,14 @@ $(function () {
     let key = new Key(k)
     let row = $(`<div class="chord-list" data-key="${k}"></div>`)
     key.chords().forEach(c => {
-      row.append(`<span class="chord" data-fullname="${c}"> ${normaliseChordName(c)}</span>`)
+      let $cohrd = $(`<span class="chord" data-fullname="${c}"> ${normaliseChordName(c)}</span>`)
+      if(!allChords[c]) {
+        log(c)
+      }
+      if(allChords[c] && intersection(allChords[c].notes, ['E', 'A', 'D', 'G', 'B']).length > 0) {
+        $cohrd.addClass('open-str')
+      }
+      row.append($cohrd)
     })
     $keyChartDialog.find(".content").append(row)
   })
@@ -1031,17 +1201,44 @@ $(function () {
   $keyChartDialog.find(".chord").dblclick(e => {
     let chordName = e.target.dataset.fullname;
     $chordInput.val($chordInput.val() + "\n" + chordName)
-    mxml.addMeasure(allChords[chordName].notes.map((n, i) => ({name: n, octave: 3, type: 'quarter', chord: i !== 0, chordSymbol: normaliseChordName(chordName)})))
-    loadMainOSMD(null,  10)
+    mxml.setKey(fretboard.activeKey)
+
+    allVersionsOfChord(chordName).forEach(chord => {
+      let chordNotes = chord.notesWithOctave.map((n, i) => ({
+        name: n[0],
+        octave: n[1],
+        type: 'quarter',
+        chord: i !== 0,
+        chordSymbol: chord.name
+      }));
+      mxml.addMeasure(chordNotes)
+    })
+
+    let doc = mxml.xml[0]
+    addIdsToNotes($(doc))
+    let musicXml = mxml.serialiser.serializeToString(doc)
+    mxml.loadXml(musicXml)
+    loadMainOSMD(null, 10)
   })
 
   $chordInput.change(e => {
-    let chords = $chordInput.val().split("\n").map(it => ({chord: allChords[it], name: it})).filter(it => it.chord)
+    let chords = $chordInput.val().split("\n").map(it => ({
+      chord: allChords[it],
+      name: it
+    })).filter(it => it.chord)
     mxml.reset()
+    mxml.setKey(fretboard.activeKey)
     chords.forEach(c => {
-      mxml.addMeasure(c.chord.notes.map((n, i) => ({name: n, octave: 3, type: 'quarter', chord: i !== 0, chordSymbol: normaliseChordName(c.name)})))
+      mxml.addMeasure(c.chord.notes.map((n, i) => ({
+        name: n,
+        octave: 3,
+        type: 'quarter',
+        chord: i !== 0,
+        chordSymbol: normaliseChordName(c.name)
+      })))
     })
-    loadMainOSMD(null,  10)
+    loadMainOSMD(null, 10)
   })
 });
 
+$(window).resize(e => setTimeout(() => hideIdTexts(), 3000))

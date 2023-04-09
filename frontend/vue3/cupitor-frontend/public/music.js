@@ -764,13 +764,20 @@ function melodyInContextOfKey(melody, key) {
       .map(note => {
         // console.log("note", note)
         let pn = pitchNumberToNote(note.pitch)
-        if (note.alter === +1) pn.name += "#"
-        if (note.alter === -1) pn.name += "b"
+
+        let name = '', octave = ''
+        if(pn) {
+          name = pn.name
+          octave = pn.octave
+          if (note.alter === +1) name += "#"
+          if (note.alter === -1) name += "b"
+        }
+
         let type = durationType(note.duration) || ""
         return {
-          name: pn.name,
-          octave: pn.octave,
-          fullName: pn.name + pn.octave,
+          name: name,
+          octave: octave,
+          fullName: name + octave,
           type: type.replace("dotted-", ""),
           dot: note.dot || type.indexOf("dotted-") >= 0,
           tie: note.tie //propagate as it is
