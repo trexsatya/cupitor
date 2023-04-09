@@ -1,5 +1,8 @@
 $('#toggleFretboardBtn').click()
 
+function getNotesFromHtml() {
+  return $('.vf-notehead').toArray().map(it => $(it).data()).filter(it => Object.keys(it).length > 0);
+}
 
 /**
  * Returns syllables based on note duration. Takes care of ties.
@@ -87,13 +90,14 @@ function findInversion(notesScanned, chordNotes) {
  * @param chordsToScan
  */
 function matchingChords(notes, chordsToScan) {
-  //Block vs Broken chords
+  //TODO: Block vs Broken chords
   let matches = []
 
   let noteNames = notes.map(it => it.name)
 
   Object.keys(chordsToScan).forEach(name => {
     let chordNotes = chordsToScan[name].notes
+    if(chordNotes.length === 4) chordNotes.splice(2, 1)
 
     if (chordNotes.every(n => noteNames.includes(n))) {
       matches.push({
@@ -175,10 +179,10 @@ const merge = (items, fn) => {
 };
 
 function guessChords() {
-  let noteheadData = $('.vf-notehead').toArray().map(it => $(it).data()).filter(it => Object.keys(it).length > 0);
+  let noteheadData = getNotesFromHtml()
   if(!noteheadData.length) {
     populateNoteheadData(osmds[0], mxml.xml);
-    noteheadData = $('.vf-notehead').toArray().map(it => $(it).data());
+    noteheadData = getNotesFromHtml()
   }
   let measures = groupBy(noteheadData, 'measure')
 
@@ -312,11 +316,7 @@ function getBoundingBox(measureNumber, pos, color, opacity) {
  */
 function analyseRhythmSimilarity(measures) {
   measureBackgrounds = {}
-  let toAnalyse = measures.map(it => {
-    it.notes = it.notes.filter(n => n.voice === "1")
-    return it
-  })
-  let durations = getRhythmCounting(toAnalyse)
+  let durations = getRhythmCounting(measures)
 
   let encodeDuration = it => {
     let keys = Object.keys(DURATION_TO_SYLLABLE);

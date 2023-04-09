@@ -8,6 +8,7 @@
     <script type="text/javascript" src="/diff-match-patch.js"></script>
     <script type="text/javascript" src="/string-similarity.js"></script>
     <script src="/opensheetmusicdisplay.min.js"></script>
+    <script src="/lodash.js"></script>
     <!--    <script type="text/javascript" src="/bootstrap.min.js"></script>-->
 
     <!--    <link rel="stylesheet" href="/bootstrap-grid.min.css">-->
@@ -40,6 +41,10 @@
 <!--<canvas id="stars"></canvas>-->
 <div class="main container">
     <textarea id="chordInput"></textarea>
+    <div id="note-information">
+        <span class="info"></span>
+        <span class="cross-btn" onclick="$('#note-information').hide()">X</span>
+    </div>
     <div id="circle-of-fifths" class="col-6 col-sm-4">
         <svg id="app" class="cf" viewBox="0 0 300 300">
             <g class="cf-arcs">
@@ -294,13 +299,15 @@
                accept="application/xml, text/xml">
         <button class="btn " id="loadMusicBtn">Load</button>
         <div class="input-group">
-            <input type="text" id="melodyVoices" class="form-control" placeholder="Voices Ex. 1,2" value="1"
-                   aria-label="Measures">
+
             <div class="input-group-append">
                 <button class="btn btn-secondary" type="button" id="loadMelodyBtn">Extract Melody</button>
             </div>
             <div class="">
-                <button class="btn btn-secondary" type="button" id="playMelodyBtn">Play Melody</button>
+                <button class="btn btn-secondary" type="button" id="extractOuterVoicesBtn">Outer Voices</button>
+            </div>
+            <div class="">
+                <button class="btn btn-secondary" type="button" id="playMelodyBtn">Play</button>
             </div>
         </div>
 
@@ -313,6 +320,7 @@
         </button>
         <button class="" id="generateMelodyBtn">Generate Melody</button>
         <button id="toggleFretboardBtn">Toggle Fretboard</button>
+        <button id="toggleKeyChartBtn">Toggle KeyChart</button>
         <button id="saveMusicXmlBtn" type="button" class="btn btn-primary">
             Export
         </button>

@@ -609,6 +609,11 @@ audio {
     border: 1px solid black;
 }
 
+.chord-list .chord.open-str {
+    border: 1px solid blue;
+    border-radius: 10%;
+}
+
 .chord-list .chord.highlighted{
     background-color: #39eb15;
     color: black;
@@ -663,4 +668,20 @@ audio {
 
 #scaleContainer span.extra {
     color: blue;
+}
+
+#note-information {
+    position: absolute;
+    right: 1em;
+    top: 1em;
+}
+
+.cross-btn {
+    cursor: pointer;
+    position: relative;
+    z-index: 800;
+}
+
+.vf-text {
+    cursor: pointer;
 }
