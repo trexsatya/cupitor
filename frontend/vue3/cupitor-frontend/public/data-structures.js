@@ -123,8 +123,8 @@ let intersection = function(a, b) {
 const findDuplicates = arry => arry.filter((item, index) => arry.indexOf(item) !== index)
 
 function cartesian(...args) {
+  if(!args.length) return []
   const r = [], max = args.length - 1;
-
   function helper(arr, i) {
     for (let j = 0, l = args[i].length; j < l; j++) {
       const a = arr.slice(0); // clone arr
@@ -136,7 +136,13 @@ function cartesian(...args) {
     }
   }
 
-  helper([], 0);
+  try{
+    helper([], 0);
+  } catch (e) {
+    log(args)
+    throw e
+  }
+
   return r;
 }
 
@@ -373,4 +379,34 @@ function randomGroupingPreservingOrder(arr, numGroups, min=1) {
   //   }
   // })
   return groups;
+}
+
+/**
+ * For all combinations of all sizes
+ * _.flatMap(collection, (v, i, a) => combinations(a, i + 1))
+ * @param collection
+ * @param n
+ * @returns {[[]]|[]|*[]}
+ */
+function combinations(collection, n) {
+  let array = _.values(collection);
+  if (array.length < n) {
+    return [];
+  }
+  let recur = ((array, n) => {
+    if (--n < 0) {
+      return [[]];
+    }
+    let combinations = [];
+    array = array.slice();
+    while (array.length - n) {
+      let value = array.shift();
+      recur(array, n).forEach((combination) => {
+        combination.unshift(value);
+        combinations.push(combination);
+      });
+    }
+    return combinations;
+  });
+  return recur(array, n);
 }

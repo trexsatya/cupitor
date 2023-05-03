@@ -685,3 +685,33 @@ audio {
 .vf-text {
     cursor: pointer;
 }
+
+.chord-number-btn {
+    padding: 5px;
+    border: 1px solid grey;
+    border-radius: 20%;
+    cursor: pointer;
+    margin-right: 5px;
+    margin-bottom: 5px;
+}
+
+.chord-number-btn.open-chord {
+    border-radius: 50%;
+}
+
+.chord-number-btn.selected {
+    background-color: yellow;
+}
+
+.chord-variation-btn {
+    padding: 5px;
+    border: 1px solid grey;
+    border-radius: 20%;
+    margin-right: 5px;
+    margin-bottom: 5px;
+    cursor: pointer;
+}
+
+.chord-variation-btn.selected {
+    background-color: yellow;
+}

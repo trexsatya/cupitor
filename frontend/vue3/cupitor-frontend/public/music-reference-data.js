@@ -22,7 +22,7 @@ let chordPatterns = {
   'dim': pattern([1, '3b', '5b']),
   'dim7': pattern([1, '3b', '5b', 6]),
   // 'sus4': pattern([1, 4, 5]),
-  // '+9': pattern([1, 3, 5, 9]),
+  '+9': pattern([1, 3, 5, 9]),
   // 'min+9': pattern([1, '3b', 5, 9]),
   // '5': pattern([1, 5]),
   // '6': pattern([1, 3, 5, 6]),
@@ -30,9 +30,9 @@ let chordPatterns = {
   // '6+9': pattern([1, 3, 5, 6, 9]),
   // 'min6+9': pattern([1, '3b', 5, 6, 9]),
   '7': pattern([1, '3', '5','7b']), //a.k.a majMin7 a.k.a. dom7
-  'maj7': pattern([1, '3', '5',7]),
+  'maj7': pattern([1, '3', '5', 7]),
   'min7': pattern([1, '3b', '5','7b']),
-  'minMaj7': pattern([1, '3b', '5',7])
+  'minMaj7': pattern([1, '3b', '5',7]),
   // '7Sus4': pattern([1, '4', '5', '7b']),
   // '9': pattern([1, 3, 5, '7b', 9]),
   // 'maj9': pattern([1, 3, 5, 7, 9]),
@@ -331,8 +331,6 @@ function allVersionsOfChord(chordName) {
       out.push({name: normaliseChordName(chordName) + inv, notesWithOctave: _notes})
     })
   })
-  let versions = _.uniqBy(out, e => Array.from(new Set(e.notesWithOctave.map(it => it.join(',')))).toSorted().join(";") )
-
-  let openStrings = ['E', 'A', 'D', 'G', 'B', 'E']
-  return versions
+  return _.uniqBy(out, e => Array.from(new Set(e.notesWithOctave.map(it => it.join(',')))).toSorted().join(";"))
 }
+

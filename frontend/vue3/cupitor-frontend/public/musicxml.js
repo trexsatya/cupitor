@@ -194,14 +194,19 @@ function MusicXml() {
       notations.push(`<tied type="${data.tie}"/>`)
     }
 
-    return $(`
-    <note>
-        ${data.chord ? '<chord/>' : ''}
-        <pitch>
+    let pitch = `<pitch>
             <step>${name}</step>
             ${accidental ? '<alter>' + alter + '</alter>' : ''}
             <octave>${data.octave}</octave>
-        </pitch>
+        </pitch>`
+
+    if(name.trim().length === 0) {
+      pitch = '<rest/>'
+    }
+    return $(`
+    <note>
+        ${data.chord ? '<chord/>' : ''}
+        ${pitch}
         <duration>1</duration>
         ${tie}
         <voice>1</voice>
