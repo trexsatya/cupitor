@@ -54,4 +54,50 @@ function renderAccordions() {
   }
 }
 
-window.transformers = [makeLinksOpenInNewTab, renderAccordions]
+function showTitlePopup(title, el) {
+  let p = document.querySelector("#title-popup")
+  if (!p) {
+    p = document.createElement("div")
+    p.id = "title-popup"
+    p.onclick = () => {
+      css(p, { display: 'none'})
+    }
+    document.body.appendChild(p)
+  }
+  p.innerHTML = title;
+  const top = el.offsetTop;
+  const left = el.offsetLeft;
+
+  css(p, {
+    position: 'absolute',
+    top: top + "px",
+    left: left + "px",
+    display: 'block',
+    'z-index': 2000,
+    background: '#2f9999',
+    color: 'yellow',
+    padding: '5px',
+    cursor: 'pointer'
+  })
+}
+
+function css(element, style) {
+  for (const property in style)
+    element.style[property] = style[property];
+}
+
+function enablePopups() {
+  try {
+    document.querySelectorAll('.article *[title]').forEach((div, i) => {
+      const title = div.getAttribute('title');
+      div.style.cursor = 'pointer';
+      div.onclick = e => {
+        showTitlePopup(title, e.target)
+      }
+    })
+
+  } catch (e) {
+    console.log(e)
+  }
+}
+window.transformers = [makeLinksOpenInNewTab, renderAccordions, enablePopups]
