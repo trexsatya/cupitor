@@ -207,7 +207,7 @@ function guessChords() {
     let resetAllNotesInMeasure = () => {
       chords.map(c => c.notes).flat().forEach(n => {
         let x = noteheadCache[n['cacheIndex']]
-        x.el.find("path").attr("fill", x.color)
+        x.el.find("path").attr("fill", x.color).css({fill: x.color})
       })
     }
 
@@ -258,12 +258,14 @@ function guessChords() {
         top: y + 10,
         height: 28,
         cursor: 'pointer'
-      })
+      }).addClass('analysed-chord-name')
+
       $osmdContainer1.append(box)
       box.click(e => {
         resetAllNotesInMeasure()
-        let notes = c.notes.map(n => noteheadCache[n['cacheIndex']].el)
-        notes.forEach(n => n.find("path").attr("fill", "blue"))
+        const notes = c.notes.map(n => noteheadCache[n['cacheIndex']].el)
+        notes.forEach(n => n.find("path").attr("fill", "blue").css({fill: 'blue'}))
+        fretboard.showOnlyTheseNotes(c.notes.map(_cn => fretboard.findNoteOnFretboard(_cn)).flat())
       })
       occupied.push({t: y, l: left, w: box.width(), h: 28})
     })

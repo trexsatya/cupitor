@@ -1,8 +1,8 @@
 function fixImageUrls() {
-  document.querySelectorAll('img').forEach((e,i) => {
+  document.querySelectorAll('img').forEach((e, i) => {
     let href = e.getAttribute('src');
     if (href.startsWith('/images/')) {
-      href = href.replace('/images/', window.imageCdnUrl+"/images/");
+      href = href.replace('/images/', window.imageCdnUrl + "/images/");
       e.src = href;
     }
   })
@@ -17,7 +17,7 @@ function drawMathematics() {
     MathJax.texReset();
     const options = MathJax.getMetricsFor(x);
     options.display = x.nodeName === 'DIV';
-    MathJax.tex2chtmlPromise(input, options).then(function(node) {
+    MathJax.tex2chtmlPromise(input, options).then(function (node) {
       //
       //  The promise returns the typeset node, which we add to the output
       //  Then update the document to include the adjusted CSS for the
@@ -26,12 +26,12 @@ function drawMathematics() {
       x.appendChild(node);
       MathJax.startup.document.clear();
       MathJax.startup.document.updateDocument();
-    }).catch(function(err) {
+    }).catch(function (err) {
       //
       //  If there was an error, put the message into the output instead
       //
       x.appendChild(document.createElement('pre')).appendChild(document.createTextNode(err.message));
-    }).then(function() {
+    }).then(function () {
       //
       //  Error or not, re-enable the display and render buttons
       //
@@ -42,6 +42,11 @@ function drawMathematics() {
 
 };
 
+function css(element, style) {
+  for (const property in style)
+    element.style[property] = style[property];
+}
+
 export function transformArticle(router) {
   const $ = document.querySelectorAll;
   try {
@@ -50,10 +55,10 @@ export function transformArticle(router) {
       e.style.cursor = 'pointer';
       e.onclick = () => {
         router.push(to).catch(error => {
-          if (error.name != "NavigationDuplicated") {
+          if (error.name !== "NavigationDuplicated") {
             throw error;
           }
-        });;
+        });
       };
     });
 
@@ -62,7 +67,7 @@ export function transformArticle(router) {
       e.style.cursor = 'pointer';
       e.onclick = () => {
         router.push(to).catch(error => {
-          if (error.name != "NavigationDuplicated") {
+          if (error.name !== "NavigationDuplicated") {
             throw error;
           }
         });
@@ -72,6 +77,7 @@ export function transformArticle(router) {
   } catch (e) {
     console.log(e)
   }
+
   try {
     document.querySelectorAll('pre code').forEach((block) => {
       hljs.highlightBlock(block);
@@ -101,7 +107,7 @@ export function transformArticle(router) {
 }
 
 
-window.appendScripts = function(urls) {
+window.appendScripts = function (urls) {
   urls.forEach(url => {
     const script = document.createElement('script');
     script.src = url;

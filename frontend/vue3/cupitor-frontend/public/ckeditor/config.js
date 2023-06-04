@@ -7,7 +7,7 @@ CKEDITOR.editorConfig = function( config ) {
 	// Define changes to default configuration here. For example:
 	// config.language = 'fr';
 	// config.uiColor = '#AADC6E';
-	config.extraPlugins = 'mathematica'
+	config.extraPlugins = ['mathematica', 'title']
 
 	config.contentsCss = [ '/prism-ghcolors.css', '/katex/katex.min.css'];
 };

@@ -673,7 +673,7 @@ audio {
 #note-information {
     position: absolute;
     right: 1em;
-    top: 1em;
+    top: 2.5em;
 }
 
 .cross-btn {
@@ -714,4 +714,18 @@ audio {
 
 .chord-variation-btn.selected {
     background-color: yellow;
+}
+
+.note-name {
+    color: blue;
+    z-index: 2000;
+    font-weight: bold;
+    background: cyan;
+}
+
+#chordNumbers {
+    max-width: 800px;
+    overflow: scroll;
+    height: 26px;
+    padding-top: 0.5em;
 }

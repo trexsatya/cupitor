@@ -45,3 +45,7 @@ div.accordion h2, div.accordion h1, div.accordion h3, div.accordion h4 {
 .article {
   font-size: 0.8rem;
 }
+
+.title-popup {
+  text-decoration: underline;
+}

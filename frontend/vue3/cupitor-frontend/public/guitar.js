@@ -77,10 +77,21 @@ function chordTonesForHarmony(harmony, key) {
   return chordTones;
 }
 
+function deduplicateChords(chords) {
+  chords = chords.map(c => _.sortBy(c, x => x.string))
+
+  let deduplicated = []
+  chords.forEach(c => {
+    if(!deduplicated.find(d => _.isEqual(c, d))) deduplicated.push(c)
+  })
+  return deduplicated.filter(those => those.map(it => it.fret));
+}
+
 const Fretboard = function () {
   this.init = function (defaults) {
     this.active = defaults.active;
     this.notes = defaults.notes;
+    this.octaves = defaults.octaves;
     this.options = defaults.options;
     this.messageBox = defaults.messageBox;
     this.controls = defaults.controls;
@@ -247,28 +258,33 @@ const Fretboard = function () {
   this.openChords = (chordName) => {
     const notes = allChords[chordName].notes
 
-    const ret = []
-    _.flatMap(openStrings(notes), (v, i, a) => combinations(a, i + 1)).forEach(comb => {
-      const nonOpenNotes = _.difference(notes, comb)
-      const nons = []
-      nonOpenNotes.forEach(non => {
-        nons.push(fretboard.findNoteOnFretboard({name: non}))
-      })
+    const triadStringGroups = [
+      [6, 4, 2], [5, 4, 2],
+      [6, 4, 1], [5, 4, 1],
+      [5, 3, 1], [4, 3, 1],
+      [6, 3, 1], [5, 3, 1],
+      [6, 3, 2], [5, 3, 2],
+      [6, 5, 2], [6, 5, 1],
+      [5, 4, 3], [3, 2, 1],
+      [5, 2, 1], [4, 2, 1], [6, 2, 1], [4, 3, 2]
+    ]
 
-      const nonOpenNotesOnFretboard = cartesian(...nons)
-        .filter(it => combinations(it, 2).every(this.isPlayable))
+    const triadPermutations = permutate(notes)
+    const matches = (strGroup, _notes) => {
+      let positions = []
+      for (let i = 0; i < _notes.length; i++) {
+        const n = _notes[i]
+        let found = this.findNoteOnFretboard({name: n}).filter(it => it.string + '' === strGroup[i] + '')
+        if(found.length) positions.push(found)
+      }
+      return cartesian(...positions).filter(it => combinations(it, 2).every(this.isPlayable))
+    }
 
-      nonOpenNotesOnFretboard.forEach(option => {
-        comb.map(n => fretboard.findNoteOnFretboard({name: n }).filter(it => it.fret === 0)).flat().forEach(openNote => {
-          ret.push([openNote].concat(option).flat())
-        })
-      })
-    })
-    return ret.filter(it => combinations(it, 2).every(this.isPlayable)).filter(notes => {
-      const strs = notes.map(n => n.string)
-      return _.uniq(strs).length === strs.length
-    }).filter(it => it.length > 2)
-      .filter(uniqueByJsonRepresentation)
+    const ret = triadStringGroups.map(strs =>
+        triadPermutations.map(tp => matches(strs, tp)).filter(_it => _it.length > 0)
+    ).flat().flat()
+
+    return ret
   }
 
   /**
@@ -387,7 +403,7 @@ const Fretboard = function () {
     $(".note").removeClass("highlight-as-harmony")
 
     notes.forEach(it => {
-      const marker = fretboard.noteAt(it.string, it.fret)
+      const marker = fretboard.noteAt(it.string, it.fret).el
       if (marker) {
         $(marker).addClass("highlight-as-harmony").css({opacity: 1}).show()
       } else {
@@ -397,7 +413,14 @@ const Fretboard = function () {
   }
 
   this.noteAt = (str, fret) => {
-    return this.noteMarkers[str][fret]
+    const name = this.notes[str][fret]
+    const octave = this.octaves[str][fret]
+
+    if(!this.noteMarkers[str][fret]) return null
+
+    return {
+      name: name, octave: octave, el: this.noteMarkers[str][fret]
+    }
   }
 
   this.showNote = function (string, fret, cls) {
@@ -447,6 +470,7 @@ const getHtmlElementsForStaffNoteHeads = (osmd) => {
     const measures = measureLists[a]
     for (let i = 0; i < measures.length; i++) {
       const measure = measures[i]
+      if(!measure) continue
       const staffEntries = measure.staffEntries
       for (let j = 0; j < staffEntries.length; j++) {
         const staff = staffEntries[j]
@@ -459,8 +483,10 @@ const getHtmlElementsForStaffNoteHeads = (osmd) => {
             const vfnotes = notes[l].vfnote
             const vfnoteIndex = notes[l].vfnoteIndex
             const vfpitch = notes[l].vfpitch
-
-            const noteHeadEl = $(vfnotes[0].attrs.el).find(".vf-notehead").toArray()[vfnoteIndex];
+            if(!vfnotes) continue
+            let nhds = $(vfnotes[0].attrs.el).find(".vf-notehead").toArray();
+            if(!nhds.length) continue
+            const noteHeadEl = nhds[vfnoteIndex];
             const lyricEntryWithId = Object.values(sourceNote.voiceEntry.lyricsEntries.table).map(Object.values).flat().find(it => it.text && it.text.startsWith("id="));
             let id = null
             if(lyricEntryWithId) {
@@ -579,6 +605,7 @@ function populateNoteheadData(osmd, jqueryXml) {
     $noteheadEl.css({position: "absolute"})
     const offset = $noteheadEl.offset()
     const offtop = (offset && offset.top) || 0
+    const offleft = (offset && offset.left) || 0
     const measurePos = getMeasurePosition(it.measureList, osmd)
     const mtop = measurePos && measurePos.top
 
@@ -591,6 +618,7 @@ function populateNoteheadData(osmd, jqueryXml) {
       .data("measure", it.measureList)
       .data("top", Math.floor( offtop - (mtop || 0) ))
       .data("offsetTop", offtop)
+      .data("offsetLeft", offleft)
       .data("left", left)
       .data("right", Math.ceil(left + $noteheadEl.width()))
       .data("id", it.id)
@@ -640,10 +668,22 @@ function hideIdTexts() {
   $('text:contains("id=")').parent().css({visibility: 'hidden'})
 }
 
+function populateNoteNames() {
+  $('.note-name').remove()
+  $('.vf-notehead path').css({fill: 'none', stroke: 'black', strokeWidth: 1})
+
+  const poff = $('#osmdCanvasPage1').offset()
+  getNotesFromHtml().forEach(n => {
+    const $nn = $(`<span>${n.name}</span>`).addClass("note-name").css({position: 'absolute', left: n.offsetLeft - poff.left , top: n.offsetTop - poff.top -5, padding: 0})
+    $('#osmdCanvasPage1').append($nn)
+    if(!window.showNoteNames) $nn.hide()
+  })
+}
+
 function loadMainOSMD(musicXml, height,) {
   const osmd = window.osmds[0];
   //TODO: Guess it based on the lowest octave
-  osmd.EngravingRules.StaffHeight = height || 25.0
+  // osmd.EngravingRules.StaffHeight = height || 25.0
 
   musicXml && mxml.loadXml(musicXml)
   const jqueryXml = mxml.xml
@@ -655,14 +695,18 @@ function loadMainOSMD(musicXml, height,) {
     osmd.render();
     populateNoteheadData(osmd, jqueryXml);
     hideIdTexts()
+    populateNoteNames()
     return jqueryXml
   });
 }
 
 
 function chordExtensions(chordName) {
-  chordName = normaliseChordName(chordName)
-  return ['7', '+9'].map(it => chordName + it).concat(chordName.endsWith("m") ? chordName + 'inMaj7' : chordName + 'maj7');
+  // chordName = normaliseChordName(chordName)
+  const sevenths =  ['7'].map(it => chordName + it).concat(chordName.endsWith("min") ? chordName + 'Maj7' : chordName.replace("maj", "") + '7');
+  const ninths =  chordName + '+9'
+
+  return sevenths.concat(ninths)
 }
 
 function usefulVersionsOfChord(chordName, fretboard) {
@@ -683,6 +727,7 @@ function usefulVersionsOfChord(chordName, fretboard) {
  * @param fretboard
  */
 function populateChordButtons(chordsOnFretboard, fretboard) {
+  chordsOnFretboard = deduplicateChords(chordsOnFretboard)
   let cnt = 1
   const $chordNumbers = $('#chordNumbers');
   $chordNumbers.html('')
@@ -696,9 +741,6 @@ function populateChordButtons(chordsOnFretboard, fretboard) {
       $cnBtn.addClass("open-chord")
     }
     cnt += 1
-    if(cnt % 30 === 0) {
-      $chordNumbers.append("<br/>")
-    }
     $chordNumbers.append($cnBtn)
   })
 
@@ -1138,9 +1180,28 @@ $(function () {
     })
   }
 
+  const addNoteNames = xml => {
+    function extracted(e) {
+      let el = $(e);
+      const accidental = el.find("accidental").text()
+      const name = el.find('pitch>step').text()
+      const noteheadText = $(`<notehead-text>
+          <display-text>${name}</display-text>
+          ${accidental ? '<accidental-text>' + accidental + '</accidental-text>' : ''}
+        </notehead-text>`, e);
+      el.find('stem').after(noteheadText)
+    }
+
+    xml.find("note").each((i, e) => {
+      if($(e).find('notehead-text').length === 0)
+          extracted(e);
+    })
+  }
+
   const loadMusicFromXmlFile = (xml) => {
     const doc = $.parseXML(xml)
     addIdsToNotes($(doc))
+    addNoteNames($(doc))
     const musicXml = mxml.serialiser.serializeToString(doc)
     mxml.loadXml(musicXml)
 
@@ -1269,6 +1330,13 @@ $(function () {
     })
   })
 
+  window.showNoteNames = false
+
+  $('#toggleNoteNamesBtn').click(e => {
+    $('.note-name').toggle()
+    window.showNoteNames = !window.showNoteNames
+  })
+
   const $keyChartDialog = $('#keyChartDialog')
   keyList.forEach(k => {
     const key = new Key(k)
@@ -1369,15 +1437,79 @@ $(function () {
     })
     loadMainOSMD(null, 10)
   })
+
 });
+
+function _randomChords(names) {
+  //Chords in a group will be close to each other on fretboard
+  const chords = []
+  names.forEach(chordName => {
+    const ocs = fretboard.openChords(chordName)
+    let closeOnes = ocs.filter(it => {
+      // Is close to chords collected so far?
+      if(chords.length === 0) return true
+      const  lastChord = chords[chords.length-1]
+      const spanOfLastChord = [Math.min(...lastChord.map(_lc => _lc.fret).filter(x => x!== 0)), Math.max(...lastChord.map(_lc => _lc.fret).filter(x => x!== 0))]
+      const spanOfThisChord = [Math.min(...it.map(_lc => _lc.fret).filter(x => x!== 0)), Math.max(...lastChord.map(_lc => _lc.fret).filter(x => x!== 0))]
+
+      const isClose = Math.abs(spanOfLastChord[0] - spanOfThisChord[0]) < 3 && Math.abs(spanOfLastChord[1] - spanOfThisChord[1]) < 3
+      if(isClose) {
+        log(spanOfLastChord, spanOfThisChord, 'spans', chordName)
+      }
+
+      let isSmoothVoiceLeading = false
+      let commonNote = _.intersectionBy(lastChord, it, (x) => x['string'] + '-' + x['fret']).length > 0
+      isSmoothVoiceLeading = commonNote
+      return isClose && isSmoothVoiceLeading
+    })
+
+    if(closeOnes.length === 0) closeOnes = ocs
+    const items = randomFromArray(closeOnes);
+    chords.push(items)
+
+    log(`${chordName}`, items)
+  })
+
+  return chords
+}
+
+function randomChords(chordGroups) {
+  const groups = $('#chordInput').val().trim().split('-').filter(it => it.length)
+
+  mxml.reset()
+  mxml.setKey(fretboard.activeKey)
+
+  let chords = []
+  groups.forEach(group => {
+    const ccs= _randomChords(group.split('\n').map(it => it.trim()).filter(it => it.length))
+
+    const notes = ccs.map(cnotes => {
+      const nns = cnotes.map(cn => ({...fretboard.noteAt(cn.string, cn.fret), chord: true, type: 'quarter'}))
+      nns[0].chord = false;
+      return nns
+    }).flat()
+    mxml.addMeasure(notes)
+
+    chords = chords.concat(ccs)
+  })
+
+  populateChordButtons(chords, fretboard)
+
+  const doc = mxml.xml[0]
+  const musicXml = mxml.serialiser.serializeToString(doc)
+  mxml.loadXml(musicXml)
+  loadMainOSMD(null, 10)
+}
 
 function allOpenChordsInPos(pos) {
   let chords = []
 
   const chordName = $('.chord-variation-btn.selected').text()
   chords = chords.concat(fretboard.openChords(chordName))
+  chords = chords.filter(those => those.map(it => it.fret).every(i => i <= 5))
 
-  populateChordButtons(chords.filter(those => those.map(it => it.fret).every(i => i <= 5)).filter(uniqueByJsonRepresentation), fretboard)
+  populateChordButtons(chords, fretboard)
 }
 
 $(window).resize(e => setTimeout(() => hideIdTexts(), 3000))
+

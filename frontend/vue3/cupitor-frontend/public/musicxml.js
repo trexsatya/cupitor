@@ -214,6 +214,10 @@ function MusicXml() {
         <type>${data.type}</type>
         ${data.dot ? '<dot/>' : ''}
         <stem>up</stem>
+        <notehead-text>
+          <display-text>${name}</display-text>
+          ${accidental ? '<accidental-text>' + accidental + '</accidental-text>' : ''}
+        </notehead-text>
         <notations>
             ${notations.join("\n")}
         </notations>
