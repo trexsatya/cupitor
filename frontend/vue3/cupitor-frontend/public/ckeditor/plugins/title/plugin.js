@@ -8,5 +8,7 @@ CKEDITOR.plugins.add( 'title', {
             toolbar: 'insert,0'
         });
         CKEDITOR.dialog.add( 'titleDialog', this.path + 'dialogs/title.js' );
+        const pluginDirectory = this.path;
+        editor.addContentsCss( pluginDirectory + 'title.css' );
     }
 });

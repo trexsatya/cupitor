@@ -1,0 +1,353 @@
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+
+    <script src="/jquery.js"></script>
+    <script></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <script type="text/javascript" src="/fabric.min.js"></script>
+    <script type="text/javascript" src="/pagination.min.js"></script>
+    <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+
+    <script type="text/javascript" src="/jquery.lettering.js"></script>
+    <script type="text/javascript" src="/jquery.fittext.js"></script>
+    <script type="text/javascript" src="/rulez.min.js"></script>
+    <!-- <script type="text/javascript" src="/treant.js"></script> -->
+    <link rel="stylesheet" href="/animate.css">
+    <link rel="stylesheet" href="/treant.css">
+    <script src="/vendor/raphael.js"></script>
+    <script src="https://unpkg.com/geometric@2.2.3/build/geometric.min.js"></script>
+
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script src="/tree.js"></script>
+    <!-- <script src="../../vendor/jquery.min.js"></script> -->
+    <script src="../../vendor/jquery.easing.js"></script>
+
+    <script type="text/javascript" src="/jquery.textillate.js"></script>
+    <!--    <script src="/typed.min.js"></script>-->
+    <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.9"></script>
+    <script type="text/javascript" src="/diff-match-patch.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>
+    <link href="/select2.min.css" rel="stylesheet"/>
+    <link href="/pagination.css" rel="stylesheet"/>
+
+    <script src="/select2.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.ui.min.js"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_SVG">
+    </script>
+    <script src="/ace/src-noconflict/ace.js" type="text/javascript" charSet="utf-8"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript">
+        Array.prototype.max = function () {
+            return Math.max.apply(null, this);
+        };
+    </script>
+    <style>
+
+    </style>
+
+    <script src="/play.js"></script>
+    <!--    <script src="/play2.js"></script>-->
+    <link rel="stylesheet" href="/play.css">
+    <link rel="stylesheet" href="/fontawesome-all.css">
+
+    <script>
+        async function loadSubtitle(file) {
+            let text = await file.text();
+            // console.log(text);
+            window.subtitles = JSON.parse(text)
+        }
+
+        function togglePlay(el) {
+            if (!el) el = $('#playBtn')[0]
+
+            if ($(el).text() === 'Play') {
+                videoNode.play()
+                $(el).html("Pause").removeClass('play-btn').addClass('pause-btn')
+            } else {
+                videoNode.pause()
+                $(el).html("Play").removeClass('pause-btn').addClass('play-btn')
+            }
+        }
+    </script>
+    <style>
+        #playBtn {
+            border-radius: 50%;
+            height: 5em;
+            width: 5em;
+            cursor: pointer;
+        }
+
+        .play-btn {
+            background: blue;
+            color: white;
+        }
+
+        .pause-btn {
+            background: red;
+            color: white;
+        }
+    </style>
+</head>
+
+<body>
+
+<div>
+    <iframe width="0" height="0"
+            src="https://www.youtube.com/embed/tgbNymZ7vqY?autoplay=1&mute=1">
+    </iframe>
+
+    Subtitles: <input type="file" onChange="loadSubtitle(this.files[0])" title="Subtitles" accept="application/JSON">
+    <br>
+    <br>
+    Audio: <input id="video-file" type="file" title="Video"/>
+
+    <audio id="video" src="" width="700" height="500"></audio>
+</div>
+<br/>
+<div style="color: grey;">
+    Current: <span id="currentNumber"></span> <span id="currentTime" style="padding-left: 1em;"></span>
+</div>
+
+<div id="subtitle-container" style="min-height: 150px;">
+    <br>
+    <br>
+    <div id="sv-sub" style="font-weight: bold; font-size: large; color: blue"></div>
+    <br>
+    <br>
+    <div id="en-sub" style=""></div>
+</div>
+<div style="margin-top: 8em; width: 100%;">
+
+    <div class="controlgroup">
+        <label for="speed-1">0.5</label>
+        <input type="radio" name="speedOption" id="speed-1" data-speed="0.5">
+        <label for="speed-2">0.7</label>
+        <input type="radio" name="speedOption" id="speed-2" checked data-speed="0.7">
+        <label for="speed-3">0.8</label>
+        <input type="radio" name="speedOption" id="speed-3" data-speed="0.8">
+        <label for="speed-4">0.9</label>
+        <input type="radio" name="speedOption" id="speed-4" data-speed="0.9">
+    </div>
+    <div style="text-align: center; margin-top: 2em;">
+        <div id="pagination"></div>
+        <br>
+        <button id="rewindBtn" style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 5em;height: 9em;" onclick="rewind()"> < </button>
+        <button onclick="togglePlay(this)" id="playBtn" class="play-btn" disabled>Play</button>
+    </div>
+</div>
+<div id="message" style="display: none"></div>
+
+<script>
+    function toSeconds(str) {
+        let splits = str.split(":")
+        let hour = 0, mins = 0, secs = 0
+        if (splits.length === 2) {
+            mins = splits[0]
+            secs = splits[1]
+        }
+        if (splits.length === 3) {
+            hour = splits[0]
+            mins = splits[1]
+            secs = splits[2]
+        }
+        return parseInt(hour) * 3600 + parseInt(mins) * 60 + parseInt(secs)
+    }
+
+    function fromSeconds(number) {
+        let _pad = x => x.length < 2 ? '0' + x : x;
+        let hrs = Math.floor(number / 3600) + ''
+        let mins = Math.floor((number % 3600) / 60) + ''
+        let secs = Math.floor((number % 3600) % 60) + ''
+
+
+        return `${_pad(hrs)}:${_pad(mins)}:${_pad(secs)}`
+    }
+
+    let URL = window.URL || window.webkitURL
+    let displayMessage = function (message, isError) {
+        let element = document.querySelector('#message')
+        element.innerHTML = message
+        element.className = isError ? 'error' : 'info'
+    }
+
+    let videoNode = document.querySelector('audio')
+    window.videoNode = videoNode
+
+    function pauseVideo() {
+        window.videoNode.pause()
+        $('#playBtn').html('Play')
+    }
+    let currentVideoTime = () => {
+        return parseFloat(parseFloat(videoNode.currentTime + '').toFixed(2))
+    }
+    let clearSubtitles = () => {
+        $('#sv-sub').html('')
+        $('#en-sub').html('')
+    }
+
+    let populateSubtitles = (currentSub) => {
+        $('#currentNumber').html(currentSub.number)
+        $('#currentTime').html(fromSeconds(currentVideoTime()) + ' / ' + currentSub.ts_o)
+
+        $('#sv-sub').html('')
+        currentSub.sv.split(" ").map(it => it.trim()).filter(it => it.length > 0).forEach(word => {
+            let sanitizedWord = word
+            if(['-', '–', '!', '.', ','].some(it => sanitizedWord.startsWith(it))) {
+                sanitizedWord = sanitizedWord.substr(1)
+            }
+
+            if(['-', '–', '!', '?', '.', ','].some(it => sanitizedWord.endsWith(it))) {
+                sanitizedWord = sanitizedWord.substr(0, sanitizedWord.length - 1)
+            }
+
+            let wordLink = $(`<span> <a href="https://sv.wiktionary.org/wiki/${encodeURIComponent(sanitizedWord)}" target="_blank">${word}</a></span>`);
+            wordLink.click(e => {
+                pauseVideo()
+            })
+            $('#sv-sub').append(wordLink)
+        })
+
+        $('#en-sub').html(currentSub.en)
+    }
+    let prepareSubs = (pageNumber, allSubs) => {
+        pageNumber = parseInt(pageNumber)
+        // videoNode.pause()
+        //Reset
+        let subs = [allSubs[pageNumber - 1]].flatMap(sub => [
+            {...sub, speed: 1}
+            , {...sub, speed: 0.6}
+            , {...sub, speed: 0.9}
+        ])
+
+        let currentSub = subs.shift()
+        videoNode.currentTime = Math.max(currentSub.ts - 0.01, 0)
+        videoNode.playbackRate = currentSub.speed
+
+        videoNode.ontimeupdate = e => {
+            // console.log(currentSub, videoNode.currentTime)
+            let ct = videoNode.currentTime
+
+            if(window.rewindData) {
+                if(ct >= window.rewindData.from) {
+                    window.rewindData = null
+                } else {
+                    return
+                }
+            }
+
+            populateSubtitles(currentSub)
+
+            if (ct >= currentSub.te + 0.1) {
+                // Go to next subtitle
+                // videoNode.pause()
+                if (subs.length === 0) {
+                    $('#pagination').pagination('go', pageNumber + 1)
+                } else {
+                    currentSub = subs.shift()
+                    videoNode.currentTime = Math.max(currentSub.ts - 0.01, 0)
+
+                    if(currentSub.speed < 1) {
+                        videoNode.playbackRate = $('.controlgroup input:checked').data('speed')
+                    } else {
+                        videoNode.playbackRate = currentSub.speed
+                    }
+
+                    console.log(currentSub)
+                    clearSubtitles()
+
+                    if(currentSub.speed < 1) {
+                       populateSubtitles(currentSub)
+                    }
+                }
+            }
+        }
+
+        videoNode.play()
+        $('#playBtn').html('Pause')
+    }
+
+    let playSelectedFile = function (event) {
+        let file = this.files[0]
+        let type = file.type
+
+        let canPlay = videoNode.canPlayType(type)
+        if (canPlay === '') canPlay = 'no'
+        let message = 'Can play type "' + type + '": ' + canPlay
+        let isError = canPlay === 'no'
+        displayMessage(message, isError)
+
+        if (isError) {
+            return
+        }
+
+        videoNode.src = URL.createObjectURL(file)
+
+        let strategy = "Normal-Slow"
+
+        let originalSubs = window.subtitles.map(it => ({...it}))
+
+        window.subtitles = originalSubs
+        originalSubs.forEach(it => {
+            it['ts_o'] = it['ts']
+            it['ts'] = toSeconds(it['ts'])
+        })
+
+        originalSubs = _.sortBy(originalSubs, it => it.ts)
+
+        for (let i = 0; i < originalSubs.length - 1; i++) {
+            originalSubs[i]['te_o'] = originalSubs[i + 1]['ts_o']
+            originalSubs[i]['te'] = originalSubs[i + 1]['ts'] - 0.009
+            originalSubs[i]['number'] = i + 1
+        }
+
+        $('#pagination').pagination({
+            dataSource: range(1, originalSubs.length + 1),
+            pageSize: 1,
+            // showPrevious: false,
+            // showNext: false,
+            showGoInput: true,
+            showGoButton: true,
+            formatGoInput: 'go to <%= input %> st/rd/th',
+            callback: function (data, pagination) {
+                console.log(data)
+                window.rewindData = null
+                prepareSubs(data, originalSubs)
+            }
+        })
+
+        $('#playBtn').attr('disabled', false)
+        prepareSubs(1, originalSubs)
+
+        console.log(originalSubs.map(it => `${it.number} ${it.ts_o}-${it.te_o} (${it.ts}-${it.te} )-> ${it.sv}`).join("\n"))
+    }
+
+    let inputNode = document.querySelector('#video-file')
+    inputNode.addEventListener('change', playSelectedFile, false)
+
+    function rewind() {
+        window.rewindData = {
+            from: videoNode.currentTime,
+            amount: -3 //seconds
+        }
+        videoNode.currentTime = videoNode.currentTime + window.rewindData.amount
+    }
+
+    $('.controlgroup').controlgroup()
+
+    document.onkeyup = e => {
+        if(e.which === 32) { //Space
+            togglePlay()
+        }
+    }
+</script>
+</body>
+
+</html>

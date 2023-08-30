@@ -1445,10 +1445,11 @@ function _randomChords(names) {
   const chords = []
   names.forEach(chordName => {
     const ocs = fretboard.openChords(chordName)
+    const  lastChord = chords[chords.length-1]
+
     let closeOnes = ocs.filter(it => {
       // Is close to chords collected so far?
       if(chords.length === 0) return true
-      const  lastChord = chords[chords.length-1]
       const spanOfLastChord = [Math.min(...lastChord.map(_lc => _lc.fret).filter(x => x!== 0)), Math.max(...lastChord.map(_lc => _lc.fret).filter(x => x!== 0))]
       const spanOfThisChord = [Math.min(...it.map(_lc => _lc.fret).filter(x => x!== 0)), Math.max(...lastChord.map(_lc => _lc.fret).filter(x => x!== 0))]
 
@@ -1457,13 +1458,16 @@ function _randomChords(names) {
         log(spanOfLastChord, spanOfThisChord, 'spans', chordName)
       }
 
-      let isSmoothVoiceLeading = false
-      let commonNote = _.intersectionBy(lastChord, it, (x) => x['string'] + '-' + x['fret']).length > 0
-      isSmoothVoiceLeading = commonNote
-      return isClose && isSmoothVoiceLeading
+      return isClose
     })
 
     if(closeOnes.length === 0) closeOnes = ocs
+
+    let voiceLeadingOptions = ['COMMON_NOTE_1', 'COMMON_NOTE_2', 'COMMON_NOTE_1']
+    // let isSmoothVoiceLeading = false
+    // let commonNote = _.intersectionBy(lastChord, it, (x) => x['string'] + '-' + x['fret']).length > 0
+    // isSmoothVoiceLeading = commonNote
+
     const items = randomFromArray(closeOnes);
     chords.push(items)
 
