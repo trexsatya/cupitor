@@ -1,3 +1,9 @@
+if(document.querySelectorAll("script[src*='jquery.js']").length === 0) {
+  const jq = document.createElement('script');
+  jq.src = "/jquery.js";
+  document.getElementsByTagName('head')[0].appendChild(jq);
+}
+
 function makeLinksOpenInNewTab() {
   document.querySelectorAll('.article-container a').forEach((e,i) => {
      e.setAttribute('target', '_blank');
@@ -65,8 +71,8 @@ function showTitlePopup(title, el) {
     document.body.appendChild(p)
   }
   p.innerHTML = title;
-  const top = el.offsetTop;
-  const left = el.offsetLeft;
+  const top = $(el).offset().top;
+  const left = $(el).offset().left;
 
   css(p, {
     position: 'absolute',
