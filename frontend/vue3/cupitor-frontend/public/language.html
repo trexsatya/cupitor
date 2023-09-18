@@ -228,8 +228,14 @@
         ])
 
         let currentSub = subs.shift()
+        videoNode.pause()
+        // alert('Going to ' + Math.max(currentSub.ts - 0.01, 0))
         videoNode.currentTime = Math.max(currentSub.ts - 0.01, 0)
         videoNode.playbackRate = currentSub.speed
+
+        videoNode.play()
+
+        // alert(videoNode.currentTime)
 
         videoNode.ontimeupdate = e => {
             // console.log(currentSub, videoNode.currentTime)
@@ -239,6 +245,7 @@
                 if(ct >= window.rewindData.from) {
                     window.rewindData = null
                 } else {
+                    alert("Returning")
                     return
                 }
             }
@@ -264,7 +271,7 @@
                     clearSubtitles()
 
                     if(currentSub.speed < 1) {
-                       populateSubtitles(currentSub)
+                        populateSubtitles(currentSub)
                     }
                 }
             }
