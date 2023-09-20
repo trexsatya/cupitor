@@ -10,5 +10,7 @@ CKEDITOR.plugins.add( 'title', {
         CKEDITOR.dialog.add( 'titleDialog', this.path + 'dialogs/title.js' );
         const pluginDirectory = this.path;
         editor.addContentsCss( pluginDirectory + 'title.css' );
+
+        editor.setKeystroke( CKEDITOR.CTRL + 75 , 'title' );
     }
 });
