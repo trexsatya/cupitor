@@ -1,0 +1,181 @@
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+
+    <script src="/jquery.js"></script>
+    <script></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <script type="text/javascript" src="/fabric.min.js"></script>
+    <script type="text/javascript" src="/pagination.min.js"></script>
+    <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+
+    <script type="text/javascript" src="/jquery.lettering.js"></script>
+    <script type="text/javascript" src="/jquery.fittext.js"></script>
+    <script type="text/javascript" src="/rulez.min.js"></script>
+    <script type="text/javascript" src="/mediaelement.js"></script>
+    <script type="text/javascript" src="/mediaelement-plugins/speed/speed.min.js"></script>
+    <script type="text/javascript" src="/mediaelement-plugins/speed/speed-i18n.js"></script>
+    <!-- <script type="text/javascript" src="/treant.js"></script> -->
+    <link rel="stylesheet" href="/animate.css">
+    <link rel="stylesheet" href="/treant.css">
+    <script src="/vendor/raphael.js"></script>
+
+    <!-- <script src="../../vendor/jquery.min.js"></script> -->
+    <script src="../../vendor/jquery.easing.js"></script>
+
+    <script type="text/javascript" src="/jquery.textillate.js"></script>
+    <!--    <script src="/typed.min.js"></script>-->
+
+    <script type="text/javascript" src="/diff-match-patch.js"></script>
+
+    <link href="/select2.min.css" rel="stylesheet"/>
+    <link href="/pagination.css" rel="stylesheet"/>
+
+    <script src="/select2.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.ui.min.js"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_SVG">
+    </script>
+    <script src="/ace/src-noconflict/ace.js" type="text/javascript" charSet="utf-8"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript">
+      Array.prototype.max = function () {
+        return Math.max.apply(null, this);
+      };
+    </script>
+    <style>
+    .add-prev-btn, .add-next-btn {
+        cursor: pointer;
+    }
+    </style>
+
+    <script src="/play.js"></script>
+    <script src="/lodash.js"></script>
+    <link rel="stylesheet" href="/play.css">
+    <link rel="stylesheet" href="/fontawesome-all.css">
+
+    <script>
+      async function extractMP3(url, request) {
+        let resp = await fetch(url, {
+          method: "POST",
+          body: JSON.stringify(request),
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "application/json",
+          }
+        });
+        console.log(resp)
+      }
+
+      function exportSelection(file, button) {
+        console.log(file)
+        $(button).parent('.srt-file').find(".srt-line").each(async (i, e) => {
+          if ($(e).find("input:checked").length) {
+            let folderName = $('#folderName').val().trim() || window.searchText
+            let fl = $(e).data("file")
+
+            fl = window.searchResult.find(it => it.path._str === fl.path._str)
+
+            let lines = $(e).find(".line").map((i,e) => $(e).data()).toArray()
+                            .map(it => it.index).map(idx => fl.data.find(it => it.index === idx))
+            console.log(fl, lines)
+            let url = 'http://localhost:5000/extract_word_from_subtitle'
+            let request = {
+              srt_path: file,
+              start: lines[0].start.ordinal,
+              end: lines[lines.length-1].end.ordinal,
+              word: folderName,
+              text: lines.map(it => it.text).join(" ")
+            };
+            await extractMP3(url, request);
+          }
+        })
+      }
+
+      function render(list, search) {
+        window.searchResult = list;
+        window.searchText = search;
+
+        $('#result').html('')
+
+        function htmlForSrtLine(line, file, $file) {
+          let text = _.trim(line.text, "-:_");
+
+          return $(`<div class="srt-line" data-index="${line.index}" data-file="${file.path._str}">
+                                    <input type="checkbox"/>
+                                    <span class="add-prev-btn"> + </span>
+                                    <span class="line main-line" data-index="${line.index}"> ${text} </span>
+                                    <span class="add-next-btn"> + </span>
+                                 </div>`).data({line: line, file: file})
+        }
+
+        list.forEach(file => {
+          let parts = file.path._str.split("/")
+          let fileName = parts[parts.length - 1]
+          let $file = $(`<div class="srt-file"> <h4> ${fileName} </h4> <button onclick="exportSelection('${file.path._str}', this)"> Export </button> </div>`)
+          let matchingLines = file.data.filter(it => it.text.toLowerCase().match(search))
+
+          matchingLines.forEach(line => {
+            $file.append(htmlForSrtLine(line, file));
+          })
+
+          $('#result').append($file)
+        })
+
+        $('.add-prev-btn').click(e => {
+          let plusBtn = $(e.target);
+          let dt = plusBtn.parent().data()
+          let nextLine = plusBtn.next('.line').data('index')
+          if(nextLine < 2) return
+
+          let newLn = dt.file.data[nextLine-2]
+          let $newLine = $(`<span class="line" data-index="${newLn.index}"> ${newLn.text}</span>`);
+          $newLine.insertAfter(plusBtn)
+        })
+        $('.add-next-btn').click(e => {
+          let plusBtn = $(e.target);
+          let dt = plusBtn.parent().data()
+          let prevLine = plusBtn.prev('.line').data('index')
+          if(prevLine === dt.file.data.length) return
+
+          let newLn = dt.file.data[prevLine]
+          let $newLine = $(`<span class="line" data-index="${newLn.index}"> ${newLn.text}</span>`);
+          $newLine.insertBefore(plusBtn)
+        })
+
+      } // end render
+
+      function fetchSRTs(el) {
+        let txt = $("#searchText").val().toLowerCase()
+        fetch("http://localhost:5000/find?text=" + txt)
+          .then(it => it.json())
+          .then(it => render(it, txt))
+      }
+
+    </script>
+    <style>
+
+    </style>
+</head>
+
+<body>
+<input type="text" id="searchText" placeholder="Search text" onchange="fetchSRTs(this)">
+
+<input type="text" id="folderName" placeholder="Folder name">
+
+<div id="result">
+
+</div>
+<div>
+
+</div>
+
+</body>
+
+</html>

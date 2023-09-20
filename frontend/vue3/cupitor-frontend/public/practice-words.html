@@ -1,0 +1,369 @@
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+
+    <script src="/jquery.js"></script>
+    <script></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <script type="text/javascript" src="/fabric.min.js"></script>
+    <script type="text/javascript" src="/pagination.min.js"></script>
+    <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+
+    <script type="text/javascript" src="/jquery.lettering.js"></script>
+    <script type="text/javascript" src="/jquery.fittext.js"></script>
+    <script type="text/javascript" src="/rulez.min.js"></script>
+    <script type="text/javascript" src="/mediaelement.js"></script>
+    <script type="text/javascript" src="/mediaelement-plugins/speed/speed.min.js"></script>
+    <script type="text/javascript" src="/mediaelement-plugins/speed/speed-i18n.js"></script>
+    <!-- <script type="text/javascript" src="/treant.js"></script> -->
+    <link rel="stylesheet" href="/animate.css">
+    <link rel="stylesheet" href="/treant.css">
+    <script src="/vendor/raphael.js"></script>
+
+    <!-- <script src="../../vendor/jquery.min.js"></script> -->
+    <script src="../../vendor/jquery.easing.js"></script>
+
+    <script type="text/javascript" src="/jquery.textillate.js"></script>
+    <!--    <script src="/typed.min.js"></script>-->
+
+    <script type="text/javascript" src="/diff-match-patch.js"></script>
+    <script type="text/javascript" src="/data-structures.js"></script>
+<!--    <script src="/underscore.min.js"></script>-->
+    <link href="/select2.min.css" rel="stylesheet"/>
+    <link href="/pagination.css" rel="stylesheet"/>
+    <link href="/index.css" rel="stylesheet"/>
+
+    <script src="/select2.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.ui.min.js"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_SVG">
+    </script>
+    <script src="/ace/src-noconflict/ace.js" type="text/javascript" charSet="utf-8"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
+
+    <script type="text/javascript">
+      Array.prototype.max = function () {
+        return Math.max.apply(null, this);
+      };
+    </script>
+    <style>
+      body {
+        top: 0 !important;
+        position: absolute;
+        padding: 0;
+        margin: 0;
+      }
+
+      #result {
+        font-size: 1.0rem;
+        padding: 2em;
+        margin-top: 2em;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 2em;
+        position: fixed;
+        background: #a3e8a3;
+        padding: 1em;
+        width: 100%;
+        z-index: 3;
+      }
+
+      #date-range {
+        position: fixed;
+        z-index: 4;
+      }
+
+      .highlighted {
+        background-color: cyan;
+        padding: 1em;
+        border-radius: 2em;
+        color: blue;
+      }
+
+      audio {
+        margin-top: 1em;
+      }
+
+      #expected-answer {
+        padding: 1em;
+        border-radius: 2em;
+      }
+
+      input.wrong {
+        border-color: red;
+        border-width: 3px;
+      }
+
+      input.right {
+
+      }
+
+      @media only screen and (max-width: 600px) {
+        .header {
+          padding-top: 3em;
+        }
+      }
+    </style>
+
+    <script src="/lodash.js"></script>
+    <script src="/play.js"></script>
+    <script src="/index.js"></script>
+    <link rel="stylesheet" href="/play.css">
+    <link rel="stylesheet" href="/fontawesome-all.css">
+
+    <script>
+      const stringSimilarity = function (str1, str2, substringLength, caseSensitive) {
+        if (substringLength === void 0) {
+          substringLength = 2;
+        }
+        if (caseSensitive === void 0) {
+          caseSensitive = false;
+        }
+        if (!caseSensitive) {
+          str1 = str1.toLowerCase();
+          str2 = str2.toLowerCase();
+        }
+        if (str1.length < substringLength || str2.length < substringLength)
+          return 0;
+        const map = new Map();
+        for (let i = 0; i < str1.length - (substringLength - 1); i++) {
+          const substr1 = str1.substr(i, substringLength);
+          map.set(substr1, map.has(substr1) ? map.get(substr1) + 1 : 1);
+        }
+        let match = 0;
+        for (let j = 0; j < str2.length - (substringLength - 1); j++) {
+          const substr2 = str2.substr(j, substringLength);
+          const count = map.has(substr2) ? map.get(substr2) : 0;
+          if (count > 0) {
+            map.set(substr2, count - 1);
+            match++;
+          }
+        }
+        return (match * 2) / (str1.length + str2.length - ((substringLength - 1) * 2));
+      };
+
+      window.words = []
+
+      function populateWords(exampleHtml, id) {
+          $(exampleHtml).find("*[title]").toArray().forEach((div, i) => {
+            const title = div.getAttribute('title');
+            title.split(";").map(it => {
+              if(it.indexOf("=") < 0) return null
+              let [sv, en] = it.split("=").map(_it => _it.trim())
+
+              sv = sv.replace("vs. ", "").replace("<br>\n", "")
+              sv = sv.replaceAll(/\[.*?\]/g, "")
+              en = en.replace("vs. ", "").replace("<br>\n", "")
+              en = en.replaceAll(/\[.*?\]/g, "")
+
+              if(!window.words.find(it => it.en.toLowerCase() === en.toLowerCase())) {
+                window.words.push({ sv: sv.trim(), en: en, tested: false, id: id })
+              }
+            })
+          });
+      }
+
+      function render(date_range) {
+        let history = window.wordHistory;
+        let article_html = window.article
+        window.words = []
+
+        if(!date_range) {
+          date_range = [moment().subtract(2, 'days'), moment()]
+          let drp = $('#date-range').data('daterangepicker')
+          drp.setStartDate(date_range[0]);
+          drp.setEndDate(date_range[1])
+        }
+
+        let relevant = history.filter(it => date_range[0].isBefore(Date.parse(it['time'])) &&  date_range[1].isAfter(Date.parse(it['time'])))
+
+        article_html = $.parseHTML(`<body>${article_html}</body>`)
+
+        $('#result').html('')
+        relevant.forEach(word => {
+            let example = article_html.map(it => $(it).find(`div[example-id="${word['word_html_id']}"]`)).filter(it => $(it).length > 0).map(it => $(it).html()).join("<br>")
+            let $div = $('<div></div>').html(example).attr("id", word['word_html_id'])
+            populateWords(example, word['word_html_id'])
+            $('#result').append($div).append('<br>')
+        });
+
+        showNewWord();
+
+        (window.transformers || []).forEach(transformer => {
+          try {
+            transformer()
+          } catch (e) {
+            console.log(e);
+          }
+        });
+
+        // Remove/Cleanup players
+        window.audioPlayers = window.audioPlayers || []
+        window.audioPlayers.forEach(player => {
+          if (!player.paused) {
+            player.pause();
+          }
+          player.remove();
+        });
+
+        $("audio").toArray().forEach(it => {
+          let player = new MediaElement(it, {
+            defaultSpeed: 1.0,
+            features: ['speed'],
+            success: function(mediaElement, originalNode) {
+              console.log('Media element', mediaElement, originalNode)
+            }
+          });
+          window.audioPlayers.push(player);
+        }); //audios
+      }
+
+      $(function() {
+        const start = moment().subtract(2, 'days');
+        const end = moment();
+
+        function cb(start, end) {
+          $('#date-range span').html(start.format('MMMM D, YYYY') + ' - ' + end.format('MMMM D, YYYY'));
+        }
+
+        $('#date-range').daterangepicker({
+          startDate: start,
+          endDate: end,
+          ranges: {
+            'Today': [moment(), moment()],
+            'Yesterday': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+            'Last 7 Days': [moment().subtract(6, 'days'), moment()],
+            'Last 30 Days': [moment().subtract(29, 'days'), moment()],
+            'This Month': [moment().startOf('month'), moment().endOf('month')],
+            'Last Month': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
+          }
+        }, cb);
+
+        cb(start, end);
+        $('#date-range')
+          .css({width: 'auto'})
+          .on('apply.daterangepicker', function(ev, picker) {
+              render([picker.startDate, picker.endDate])
+          });
+      });
+
+       window.onload = async () => {
+         let article = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/14")
+         article = await article.json()
+
+         let history = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/word_history.json")
+         history = await history.json()
+
+         window.wordHistory = history;
+         window.article = article['content'];
+
+         render()
+
+         //Apply date filter
+
+       }
+
+       window.alreadyTested = []
+       window.currentWord = null
+
+       function showNewWord() {
+         let randomWord = null;
+         if(!window.currentWord) {
+           randomWord = _.sample(window.words.filter(it => !it.tested));
+         } else {
+           let sortedBySimilarity = _.sortBy(window.words.filter(it => !it.tested), x => stringSimilarity(x.sv, window.currentWord.sv)).reverse();
+           if(sortedBySimilarity.length === 0) {
+             console.log("No new word");
+             return
+           }
+           randomWord = sortedBySimilarity[0]
+         }
+
+         window.currentWord = randomWord;
+
+         let $test = $('#test-word');
+         $test.html(`${randomWord['en']} = `)
+         $test.data("example-id", randomWord.id)
+         $test.data("en", randomWord.en)
+         randomWord.tested = true;
+
+         let howManyLeft = window.words.filter(it => !it.tested).length;
+         $('#word-counter').html(`( ${howManyLeft} )`)
+         $("#test-answer").val('')
+         $(`.highlighted`).removeClass("highlighted")
+         $('#expected-answer').html('')
+         $("#test-answer").removeClass("wrong")
+       }
+
+       function checkAnswer() {
+         let answer = $("#test-answer").val().trim().toLowerCase()
+
+         if (answer.length === 0) {
+           alert('Write answer first!')
+           return
+         }
+
+         let id = $('#test-word').data()['exampleId']
+         let en = $('#test-word').data()['en']
+
+         let expected = window.words.find(it => it.id === id && it.en === en).sv
+         console.log("Expected", expected, "Got", answer)
+         expected = expected.toLowerCase()
+         expected = expected.replaceAll(" ", " ");
+
+         if(expected.trim() !== answer) {
+           $("#test-answer").addClass("wrong")
+         } else {
+           $("#test-answer").removeClass("wrong")
+         }
+         let highlighted = $(`#${id}`);
+         highlighted.addClass("highlighted")
+
+         $('#expected-answer').html(expected)
+         highlighted[0].scrollIntoView(false);
+       }
+    </script>
+    <style>
+
+    </style>
+</head>
+
+<body class="article-container article">
+
+    <div id="date-range" style="background: #fff; cursor: pointer; padding: 5px 10px; border: 1px solid #ccc; width: 100%">
+        <i class="fa fa-calendar"></i>&nbsp;
+        <span></span> <i class="fa fa-caret-down"></i>
+    </div>
+
+    <div style="text-align: center; margin-bottom: 2em;" class="header">
+        <span id="word-counter"></span>
+        <button onclick="showNewWord(this)" style="margin-right: 2em; margin-bottom: 1em;">Change Word</button>
+        <span id="test-word" style="font-weight: bold;margin-bottom: 1em;"></span> <input id="test-answer" style="margin-bottom: 1em;">
+        <button onclick="checkAnswer(this)" style="margin-bottom: 1em;">Check</button>
+        <span id="expected-answer" style="color: blue; font-weight: bold; margin-left: 2em;margin-bottom: 1em;"></span>
+    </div>
+    <hr style="margin-top: 4em;">
+    <div id="result" style="">
+
+    </div>
+    <div>
+
+    </div>
+</body>
+
+</html>

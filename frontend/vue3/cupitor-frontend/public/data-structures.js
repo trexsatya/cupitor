@@ -2,7 +2,7 @@ function CircularCursor(arr) {
   this.items = arr
   this.currentIndex = -1
   // start at 0
-  let next = (self) => {
+  const next = (self) => {
     if(self.items.length === 0) {
       return null
     }
@@ -17,9 +17,9 @@ function CircularCursor(arr) {
    * Return {number} elements from left, and number elements from right, along with current element wherever the cursor is
    */
   this.triplet = () => {
-      let i = this.next()
-      let iPlusOne = this.next()
-      let iMinusOne = this.previous(2)
+      const i = this.next()
+      const iPlusOne = this.next()
+      const iMinusOne = this.previous(2)
       this.next()
       return [iMinusOne, i, iPlusOne]
   }
@@ -33,7 +33,7 @@ function CircularCursor(arr) {
     return val
   }
 
-  let previous = (self) => {
+  const previous = (self) => {
     if(self.items.length === 0) {
       return null
     }
@@ -69,27 +69,27 @@ function CircularCursor(arr) {
   }
 }
 
-let nthLast = (arr, x) => arr[arr.length - (x || 1)]
+const nthLast = (arr, x) => arr[arr.length - (x || 1)]
 
 function randomFromArray(cc) {
   return cc[Math.floor(Math.random() * cc.length)]
 }
 
-let plus = x => target => target + x
-let minus = x => target => target - x
+const plus = x => target => target + x
+const minus = x => target => target - x
 
-let uniqueByJsonRepresentation = (x, i, a) => a.map(it => JSON.stringify(it)).indexOf(JSON.stringify(x)) === i
+const uniqueByJsonRepresentation = (x, i, a) => a.map(it => JSON.stringify(it)).indexOf(JSON.stringify(x)) === i
 
 const permutate = (inputArr) => {
-  let result = [];
+  const result = [];
 
   const permute = (arr, m = []) => {
     if (arr.length === 0) {
       result.push(m)
     } else {
       for (let i = 0; i < arr.length; i++) {
-        let curr = arr.slice();
-        let next = curr.splice(i, 1);
+        const curr = arr.slice();
+        const next = curr.splice(i, 1);
         permute(curr.slice(), m.concat(next))
       }
     }
@@ -101,11 +101,11 @@ const permutate = (inputArr) => {
 }
 
 
-let equals = (x, y) => JSON.stringify(x) === JSON.stringify(y)
+const equals = (x, y) => JSON.stringify(x) === JSON.stringify(y)
 
-let log = console.log
+const log = console.log
 function logJson(){
-  let args = []
+  const args = []
   for(let i=0; i < arguments.length; i++) {
     args.push(arguments[i])
   }
@@ -116,7 +116,7 @@ function simpleClone(obj) {
   return JSON.parse(JSON.stringify(obj))
 }
 
-let intersection = function(a, b) {
+const intersection = function(a, b) {
   return [a, b].reduce((p,c) => p.filter(e => c.includes(e)));
 }
 
@@ -153,12 +153,12 @@ const sortByLength = (a, b) => b.length - a.length
  * @param measures
  * @returns {number[]}
  */
-let parseRangeInput = (measures)=> {
+const parseRangeInput = (measures)=> {
   let ret = []
   measures = measures.split(",")
   measures = measures.map(it => {
     if(it.indexOf("-") >= 0) {
-      let [i,j] = it.split("-")
+      const [i,j] = it.split("-")
       for (let k = parseInt(i.trim()); k <= parseInt(j.trim()); k++) {
         ret.push(k)
       }
@@ -170,7 +170,7 @@ let parseRangeInput = (measures)=> {
 }
 
 generatePairs = (arr) => {
-  let v = []
+  const v = []
   const num = arr.length
   for (let i=0; i < num; i++) {
     for (let j=i; j < num; j++) {
@@ -181,12 +181,12 @@ generatePairs = (arr) => {
   return v
 }
 
-let groupBy = function(xs, key, consumer) {
+const groupBy = function(xs, key, consumer) {
   let fn = key
   if(typeof key === 'string') {
     fn = it => it[key]
   }
-  let out = xs.reduce(function(rv, x) {
+  const out = xs.reduce(function(rv, x) {
     (rv[fn(x)] = rv[fn(x)] || []).push(x);
     return rv;
   }, {});
@@ -213,10 +213,10 @@ function toGraph(arr) {
 }
 
 function putIntoBuckets(buckets, propertyFn, arr) {
-  let res = new Map()
+  const res = new Map()
   arr.forEach(obj => {
     const category = Object.keys(buckets).find(c => propertyFn(obj) >= buckets[c][0] && propertyFn(obj) < buckets[c][1]);
-    let items = res.get(category) || []
+    const items = res.get(category) || []
     items.push(obj)
     res.set(category, items)
   })
@@ -266,7 +266,7 @@ function choose(arr, k, prefix=[]) {
 
 function number(str) {
   if(typeof str === 'number') return str
-  let [x,y] = str.split("/")
+  const [x,y] = str.split("/")
   if(y) {
     return parseInt(x) / parseInt(y)
   }
@@ -277,8 +277,8 @@ function sum(arr) {
   return arr.map(number).reduce((a, b) => a+b, 0)
 }
 
-let combsWithRep = (k, xs, canBeAdded = ((_comb, _allSoFar) => true)) => {
-  let out = []
+const combsWithRep = (k, xs, canBeAdded = ((_comb, _allSoFar) => true)) => {
+  const out = []
 
   function disp(x) {
     out.push(x.split(" "))
@@ -315,7 +315,7 @@ function until(condition, maxReps, run) {
 }
 
 function nTimes(n, fn) {
-  let res = []
+  const res = []
   for (let i = 0; i < n; i++) {
     res.push(fn())
   }
@@ -336,8 +336,8 @@ function randomGroupingPreservingOrder(arr, numGroups, min=1) {
   // uncomment this line if you don't want the original array to be affected
   assert(numGroups * min <= arr.length, "")
   arr = arr.slice();
-  let groups = range(numGroups).map(_ => [])
-  let hasLessThanRequired = () => groups.some(g => g.length < min)
+  const groups = range(numGroups).map(_ => [])
+  const hasLessThanRequired = () => groups.some(g => g.length < min)
 
   //Fist group must contain min, and because of ordering requirement it will be first min items
   nTimes(min, () => arr.shift()).forEach(it => groups[0].push(it))
@@ -346,7 +346,7 @@ function randomGroupingPreservingOrder(arr, numGroups, min=1) {
   let lastGroupUsed = 0
   for (let i = min-1; i < arr.length - min; i++) {
     let gotoGroup = randomFromArray([lastGroupUsed, lastGroupUsed + 1])
-    let item = arr[i];
+    const item = arr[i];
     // log("lastGroupUsed", lastGroupUsed, "gotoGroup", gotoGroup, "item", item)
 
     if(gotoGroup >= groups.length) {
@@ -361,7 +361,7 @@ function randomGroupingPreservingOrder(arr, numGroups, min=1) {
   }
   nTimes(min, () => arr.pop()).forEach(it => groups[groups.length-1].push(it))
 
-  let cursor = new CircularCursor(groups)
+  const cursor = new CircularCursor(groups)
 
   //Shuffle
   // for (let i = 0; i < randomFromArray(range(10)); i++) {
@@ -389,18 +389,18 @@ function randomGroupingPreservingOrder(arr, numGroups, min=1) {
  * @returns {[[]]|[]|*[]}
  */
 function combinations(collection, n) {
-  let array = _.values(collection);
+  const array = _.values(collection);
   if (array.length < n) {
     return [];
   }
-  let recur = ((array, n) => {
+  const recur = ((array, n) => {
     if (--n < 0) {
       return [[]];
     }
-    let combinations = [];
+    const combinations = [];
     array = array.slice();
     while (array.length - n) {
-      let value = array.shift();
+      const value = array.shift();
       recur(array, n).forEach((combination) => {
         combination.unshift(value);
         combinations.push(combination);
@@ -410,3 +410,4 @@ function combinations(collection, n) {
   });
   return recur(array, n);
 }
+

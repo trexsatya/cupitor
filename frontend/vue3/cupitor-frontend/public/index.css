@@ -48,4 +48,5 @@ div.accordion h2, div.accordion h1, div.accordion h3, div.accordion h4 {
 
 .title-popup {
   text-decoration: underline;
+  cursor: pointer;
 }
