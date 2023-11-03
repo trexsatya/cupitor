@@ -18,7 +18,7 @@
     <script type="text/javascript" src="/rulez.min.js"></script>
     <script type="text/javascript" src="/mediaelement.js"></script>
     <script type="text/javascript" src="/mediaelement-plugins/speed/speed.min.js"></script>
-    <script type="text/javascript" src="/mediaelement-plugins/speed/speed-i18n.js"></script>
+    <script type="text/javascript" src="/mediaelement-plugins/loop/loop.min.js"></script>
     <!-- <script type="text/javascript" src="/treant.js"></script> -->
     <link rel="stylesheet" href="/animate.css">
     <link rel="stylesheet" href="/treant.css">
@@ -32,9 +32,10 @@
 
     <script type="text/javascript" src="/diff-match-patch.js"></script>
     <script type="text/javascript" src="/data-structures.js"></script>
-<!--    <script src="/underscore.min.js"></script>-->
+    <!--    <script src="/underscore.min.js"></script>-->
     <link href="/select2.min.css" rel="stylesheet"/>
     <link href="/pagination.css" rel="stylesheet"/>
+    <link href="https://cdn.jsdelivr.net/npm/mediaelement@latest/build/mediaelementplayer.min.css" rel="stylesheet"/>
     <link href="/index.css" rel="stylesheet"/>
 
     <script src="/select2.min.js"></script>
@@ -48,7 +49,9 @@
             src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
-    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css"/>
+    <link rel="stylesheet" type="text/css" href="/mediaelement-plugins/speed/speed.min.css"/>
+    <link rel="stylesheet" type="text/css" href="/mediaelement-plugins/loop/loop.min.css"/>
 
     <script type="text/javascript">
       Array.prototype.max = function () {
@@ -113,6 +116,10 @@
 
       }
 
+      .ui-dialog {
+        //width: 80%;
+        //height: 80%;
+      }
       @media only screen and (max-width: 600px) {
         .header {
           padding-top: 3em;
@@ -160,22 +167,22 @@
       window.words = []
 
       function populateWords(exampleHtml, id) {
-          $(exampleHtml).find("*[title]").toArray().forEach((div, i) => {
-            const title = div.getAttribute('title');
-            title.split(";").map(it => {
-              if(it.indexOf("=") < 0) return null
-              let [sv, en] = it.split("=").map(_it => _it.trim())
+        $(exampleHtml).find("*[title]").toArray().forEach((div, i) => {
+          const title = div.getAttribute('title');
+          title.split(";").map(it => {
+            if (it.indexOf("=") < 0) return null
+            let [sv, en] = it.split("=").map(_it => _it.trim())
 
-              sv = sv.replace("vs. ", "").replace("<br>\n", "")
-              sv = sv.replaceAll(/\[.*?\]/g, "")
-              en = en.replace("vs. ", "").replace("<br>\n", "")
-              en = en.replaceAll(/\[.*?\]/g, "")
+            sv = sv.replace("vs. ", "").replace("<br>\n", "")
+            sv = sv.replaceAll(/\[.*?\]/g, "")
+            en = en.replace("vs. ", "").replace("<br>\n", "")
+            en = en.replaceAll(/\[.*?\]/g, "")
 
-              if(!window.words.find(it => it.en.toLowerCase() === en.toLowerCase())) {
-                window.words.push({ sv: sv.trim(), en: en, tested: false, id: id })
-              }
-            })
-          });
+            if (!window.words.find(it => it.en.toLowerCase() === en.toLowerCase())) {
+              window.words.push({sv: sv.trim(), en: en, tested: false, id: id})
+            }
+          })
+        });
       }
 
       function render(date_range) {
@@ -183,23 +190,23 @@
         let article_html = window.article
         window.words = []
 
-        if(!date_range) {
+        if (!date_range) {
           date_range = [moment().subtract(2, 'days'), moment()]
           let drp = $('#date-range').data('daterangepicker')
           drp.setStartDate(date_range[0]);
           drp.setEndDate(date_range[1])
         }
 
-        let relevant = history.filter(it => date_range[0].isBefore(Date.parse(it['time'])) &&  date_range[1].isAfter(Date.parse(it['time'])))
+        let relevant = history.filter(it => date_range[0].isBefore(Date.parse(it['time'])) && date_range[1].isAfter(Date.parse(it['time'])))
 
         article_html = $.parseHTML(`<body>${article_html}</body>`)
 
         $('#result').html('')
         relevant.forEach(word => {
-            let example = article_html.map(it => $(it).find(`div[example-id="${word['word_html_id']}"]`)).filter(it => $(it).length > 0).map(it => $(it).html()).join("<br>")
-            let $div = $('<div></div>').html(example).attr("id", word['word_html_id'])
-            populateWords(example, word['word_html_id'])
-            $('#result').append($div).append('<br>')
+          let example = article_html.map(it => $(it).find(`div[example-id="${word['word_html_id']}"]`)).filter(it => $(it).length > 0).map(it => $(it).html()).join("<br>")
+          let $div = $('<div></div>').html(example).attr("id", word['word_html_id']).addClass("example")
+          populateWords(example, word['word_html_id'])
+          $('#result').append($div).append('<br>')
         });
 
         showNewWord();
@@ -212,28 +219,20 @@
           }
         });
 
-        // Remove/Cleanup players
-        window.audioPlayers = window.audioPlayers || []
-        window.audioPlayers.forEach(player => {
-          if (!player.paused) {
-            player.pause();
+        $('div.example a').each((i, e) => {
+          e.onclick = evt => {
+            evt.preventDefault()
+            evt.stopPropagation()
+            window.player.setSrc(evt.target.href);
+            populateSpeeds()
+            window.player.play()
+            $( "#audioPlayerPopup" ).dialog('open')
           }
-          player.remove();
-        });
+        }) //Handle click on Listen
 
-        $("audio").toArray().forEach(it => {
-          let player = new MediaElement(it, {
-            defaultSpeed: 1.0,
-            features: ['speed'],
-            success: function(mediaElement, originalNode) {
-              console.log('Media element', mediaElement, originalNode)
-            }
-          });
-          window.audioPlayers.push(player);
-        }); //audios
       }
 
-      $(function() {
+      $(function () {
         const start = moment().subtract(2, 'days');
         const end = moment();
 
@@ -257,86 +256,86 @@
         cb(start, end);
         $('#date-range')
           .css({width: 'auto'})
-          .on('apply.daterangepicker', function(ev, picker) {
-              render([picker.startDate, picker.endDate])
+          .on('apply.daterangepicker', function (ev, picker) {
+            render([picker.startDate, picker.endDate])
           });
       });
 
-       window.onload = async () => {
-         let article = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/14")
-         article = await article.json()
+      window.onload = async () => {
+        let article = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/14")
+        article = await article.json()
 
-         let history = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/word_history.json")
-         history = await history.json()
+        let history = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/word_history.json")
+        history = await history.json()
 
-         window.wordHistory = history;
-         window.article = article['content'];
+        window.wordHistory = history;
+        window.article = article['content'];
 
-         render()
+        render()
 
-         //Apply date filter
+        //Apply date filter
 
-       }
+      }
 
-       window.alreadyTested = []
-       window.currentWord = null
+      window.alreadyTested = []
+      window.currentWord = null
 
-       function showNewWord() {
-         let randomWord = null;
-         if(!window.currentWord) {
-           randomWord = _.sample(window.words.filter(it => !it.tested));
-         } else {
-           let sortedBySimilarity = _.sortBy(window.words.filter(it => !it.tested), x => stringSimilarity(x.sv, window.currentWord.sv)).reverse();
-           if(sortedBySimilarity.length === 0) {
-             console.log("No new word");
-             return
-           }
-           randomWord = sortedBySimilarity[0]
-         }
+      function showNewWord() {
+        let randomWord = null;
+        if (!window.currentWord) {
+          randomWord = _.sample(window.words.filter(it => !it.tested));
+        } else {
+          let sortedBySimilarity = _.sortBy(window.words.filter(it => !it.tested), x => stringSimilarity(x.sv, window.currentWord.sv)).reverse();
+          if (sortedBySimilarity.length === 0) {
+            console.log("No new word");
+            return
+          }
+          randomWord = sortedBySimilarity[0]
+        }
 
-         window.currentWord = randomWord;
+        window.currentWord = randomWord;
 
-         let $test = $('#test-word');
-         $test.html(`${randomWord['en']} = `)
-         $test.data("example-id", randomWord.id)
-         $test.data("en", randomWord.en)
-         randomWord.tested = true;
+        let $test = $('#test-word');
+        $test.html(`${randomWord['en']} = `)
+        $test.data("example-id", randomWord.id)
+        $test.data("en", randomWord.en)
+        randomWord.tested = true;
 
-         let howManyLeft = window.words.filter(it => !it.tested).length;
-         $('#word-counter').html(`( ${howManyLeft} )`)
-         $("#test-answer").val('')
-         $(`.highlighted`).removeClass("highlighted")
-         $('#expected-answer').html('')
-         $("#test-answer").removeClass("wrong")
-       }
+        let howManyLeft = window.words.filter(it => !it.tested).length;
+        $('#word-counter').html(`( ${howManyLeft} )`)
+        $("#test-answer").val('')
+        $(`.highlighted`).removeClass("highlighted")
+        $('#expected-answer').html('')
+        $("#test-answer").removeClass("wrong")
+      }
 
-       function checkAnswer() {
-         let answer = $("#test-answer").val().trim().toLowerCase()
+      function checkAnswer() {
+        let answer = $("#test-answer").val().trim().toLowerCase()
 
-         if (answer.length === 0) {
-           alert('Write answer first!')
-           return
-         }
+        if (answer.length === 0) {
+          alert('Write answer first!')
+          return
+        }
 
-         let id = $('#test-word').data()['exampleId']
-         let en = $('#test-word').data()['en']
+        let id = $('#test-word').data()['exampleId']
+        let en = $('#test-word').data()['en']
 
-         let expected = window.words.find(it => it.id === id && it.en === en).sv
-         console.log("Expected", expected, "Got", answer)
-         expected = expected.toLowerCase()
-         expected = expected.replaceAll(" ", " ");
+        let expected = window.words.find(it => it.id === id && it.en === en).sv
+        console.log("Expected", expected, "Got", answer)
+        expected = expected.toLowerCase()
+        expected = expected.replaceAll(" ", " ");
 
-         if(expected.trim() !== answer) {
-           $("#test-answer").addClass("wrong")
-         } else {
-           $("#test-answer").removeClass("wrong")
-         }
-         let highlighted = $(`#${id}`);
-         highlighted.addClass("highlighted")
+        if (expected.trim() !== answer) {
+          $("#test-answer").addClass("wrong")
+        } else {
+          $("#test-answer").removeClass("wrong")
+        }
+        let highlighted = $(`#${id}`);
+        highlighted.addClass("highlighted")
 
-         $('#expected-answer').html(expected)
-         highlighted[0].scrollIntoView(false);
-       }
+        $('#expected-answer').html(expected)
+        highlighted[0].scrollIntoView(false);
+      }
     </script>
     <style>
 
@@ -344,26 +343,71 @@
 </head>
 
 <body class="article-container article">
+<div id="audioPlayerPopup" style="padding-top: 6em;">
+    <audio id="audio-player" src="https://storage.googleapis.com/cupitor-220103.appspot.com/audio/sa%CC%88tt/1697184990.11947.mp3">Listen</audio>
+</div>
+<div id="date-range" style="background: #fff; cursor: pointer; padding: 5px 10px; border: 1px solid #ccc; width: 100%">
+    <i class="fa fa-calendar"></i>&nbsp;
+    <span></span> <i class="fa fa-caret-down"></i>
+</div>
 
-    <div id="date-range" style="background: #fff; cursor: pointer; padding: 5px 10px; border: 1px solid #ccc; width: 100%">
-        <i class="fa fa-calendar"></i>&nbsp;
-        <span></span> <i class="fa fa-caret-down"></i>
-    </div>
+<div style="text-align: center; margin-bottom: 2em;" class="header">
+    <span id="word-counter"></span>
+    <button onclick="showNewWord(this)" style="margin-right: 2em; margin-bottom: 1em;">Change Word</button>
+    <span id="test-word" style="font-weight: bold;margin-bottom: 1em;"></span> <input id="test-answer"
+                                                                                      style="margin-bottom: 1em;">
+    <button onclick="checkAnswer(this)" style="margin-bottom: 1em;">Check</button>
+    <span id="expected-answer" style="color: blue; font-weight: bold; margin-left: 2em;margin-bottom: 1em;"></span>
+</div>
+<hr style="margin-top: 4em;">
+<div id="result" style="">
 
-    <div style="text-align: center; margin-bottom: 2em;" class="header">
-        <span id="word-counter"></span>
-        <button onclick="showNewWord(this)" style="margin-right: 2em; margin-bottom: 1em;">Change Word</button>
-        <span id="test-word" style="font-weight: bold;margin-bottom: 1em;"></span> <input id="test-answer" style="margin-bottom: 1em;">
-        <button onclick="checkAnswer(this)" style="margin-bottom: 1em;">Check</button>
-        <span id="expected-answer" style="color: blue; font-weight: bold; margin-left: 2em;margin-bottom: 1em;"></span>
-    </div>
-    <hr style="margin-top: 4em;">
-    <div id="result" style="">
+</div>
+<div>
 
-    </div>
-    <div>
+</div>
 
-    </div>
+<script>
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  $( "#audioPlayerPopup" ).dialog({
+    modal: true,
+    width: 390,
+    height: 400,
+    autoOpen: false,
+    open: function(){
+      $('.ui-widget-overlay').bind('click',function(){
+        $('#audioPlayerPopup').dialog('close');
+      })
+    }
+  });
+
+  function populateSpeeds() {
+    window.playingSpeeds = ['0.75', '1.00', '1.00']
+  }
+
+  populateSpeeds()
+
+  window.player = new MediaElementPlayer('audio-player', {
+    iconSprite: '/img/icons/mejs-controls.svg',
+    defaultSpeed: 0.75,
+    speeds: ['0.50', '0.75', '1.00', '0.75'],
+    features: ['playpause','speed','current','progress','duration', 'loop'],
+    success: function (mediaElement, originalNode, instance) {
+        mediaElement.addEventListener('ended',  e => {
+          const newSpeed = window.playingSpeeds.shift()
+          if(newSpeed) {
+            mediaElement.playbackRate = newSpeed
+            delay(1000).then(() => window.player.play())
+          }
+      })
+      // do things
+    }
+  })
+  window.player.setPlayerSize(300, 50)
+</script>
 </body>
 
 </html>

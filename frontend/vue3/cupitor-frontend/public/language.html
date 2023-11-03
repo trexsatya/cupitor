@@ -11,7 +11,7 @@
     <script type="text/javascript" src="/pagination.min.js"></script>
     <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
     <script type="text/javascript" src="/rx.all.min.js"></script>
-    <script type="text/javascript" src="/rx.all.min.js"></script>
+    <script type="text/javascript" src="/bootstrap.min.js"></script>
 
     <script type="text/javascript" src="/jquery.lettering.js"></script>
     <script type="text/javascript" src="/jquery.fittext.js"></script>
@@ -34,6 +34,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>
     <link href="/select2.min.css" rel="stylesheet"/>
     <link href="/pagination.css" rel="stylesheet"/>
+    <link href="/bootstrap.min.css" rel="stylesheet"/>
+    <link href="/bootstrap-grid.min.css" rel="stylesheet"/>
 
     <script src="/select2.min.js"></script>
     <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.min.js"></script>
@@ -45,9 +47,9 @@
     <script type="text/javascript"
             src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
     <script type="text/javascript">
-        Array.prototype.max = function () {
-            return Math.max.apply(null, this);
-        };
+      Array.prototype.max = function () {
+        return Math.max.apply(null, this);
+      };
     </script>
     <style>
 
@@ -59,65 +61,58 @@
     <link rel="stylesheet" href="/fontawesome-all.css">
 
     <script>
-        async function loadSubtitle(file) {
-            let text = await file.text();
-            // console.log(text);
-            window.subtitles = JSON.parse(text)
+      function togglePlay(el) {
+        if (player.paused) {
+          player.play()
+        } else {
+          player.pause()
         }
+      }
 
-        function togglePlay(el) {
-            if (!el) el = $('#playBtn')[0]
-
-            if ($(el).text() === 'Play') {
-                player.play()
-                $(el).html("Pause").removeClass('play-btn').addClass('pause-btn')
-            } else {
-                player.pause()
-                $(el).html("Play").removeClass('pause-btn').addClass('play-btn')
-            }
-        }
     </script>
     <style>
-        #playBtn {
-            border-radius: 50%;
-            height: 5em;
-            width: 5em;
-            cursor: pointer;
-        }
+      #playBtn {
+        border-radius: 50%;
+        height: 5em;
+        width: 5em;
+        cursor: pointer;
+      }
 
-        .play-btn {
-            background: blue;
-            color: white;
-        }
+      .play-btn {
+        background: blue;
+        color: white;
+      }
 
-        .pause-btn {
-            background: red;
-            color: white;
-        }
+      .pause-btn {
+        background: red;
+        color: white;
+      }
 
-        body {
-            touch-action: manipulation;
-        }
+      body {
+        touch-action: manipulation;
+      }
     </style>
 </head>
 
 <body>
 
 <div>
-    <iframe width="0" height="0"
-            src="https://www.youtube.com/embed/tgbNymZ7vqY?autoplay=1&mute=1">
-    </iframe>
 
-    Subtitles: <input type="file" onChange="loadSubtitle(this.files[0])" title="Subtitles" accept="application/JSON">
-    <br>
-    <br>
-    Audio: <input id="video-file" type="file" title="Video"/>
+    <!--    Subtitles: <input type="file" onChange="loadSubtitle(this.files[0])" title="Subtitles" accept="application/JSON">-->
+    <!--    <br>-->
+    <!--    <br>-->
+    <!--    Audio: <input id="video-file" type="file" title="Video"/>-->
+
+    <select id="mp3Choice">
+        <option value="">-</option>
+    </select>
 
     <audio id="video" src="" width="700" height="500"></audio>
 </div>
 <br/>
 <div style="color: grey;">
-    Current: <span id="currentNumber"></span> <span id="currentTime" style="padding-left: 1em;"></span> <span id="currentSpeed" style="padding-left: 1em;"></span>
+    Current: <span id="currentNumber"></span> <span id="currentTime" style="padding-left: 1em;"></span> <span
+        id="currentSpeed" style="padding-left: 1em;"></span>
 </div>
 
 <div id="subtitle-container" style="min-height: 150px;">
@@ -130,273 +125,389 @@
 </div>
 <div style="margin-top: 8em; width: 100%;">
 
-    <div class="controlgroup">
-        <label for="speed-1">0.5</label>
-        <input type="radio" name="speedOption" id="speed-1" data-speed="0.5">
-        <label for="speed-2">0.7</label>
-        <input type="radio" name="speedOption" id="speed-2" checked data-speed="0.7">
-        <label for="speed-3">0.8</label>
-        <input type="radio" name="speedOption" id="speed-3" data-speed="0.8">
-        <label for="speed-4">0.9</label>
-        <input type="radio" name="speedOption" id="speed-4" data-speed="0.9">
+    <div class="">
+        <div>
+            <div class="controlgroup" id="speed-control">
+                <label for="speed-1">0.5</label>
+                <input type="radio" name="speedOption" id="speed-1" data-speed="0.5">
+                <label for="speed-2">0.7</label>
+                <input type="radio" name="speedOption" id="speed-2" data-speed="0.7">
+                <label for="speed-3">0.8</label>
+                <input type="radio" name="speedOption" id="speed-3" data-speed="0.8">
+                <label for="speed-4">1.0</label>
+                <input type="radio" name="speedOption" id="speed-4" checked data-speed="1.0">
+            </div>
+            <label for="speed-control">x Speed</label>
+        </div>
+        <br>
+        <div class="form-check form-switch">
+            <label class="form-check-label" for="loopSwitch">Loop </label>
+            <input class="form-check-input" type="checkbox" role="switch" id="loopSwitch">
+        </div>
+
     </div>
     <div style="text-align: center; margin-top: 2em;">
         <div id="pagination"></div>
         <br>
-        <button id="rewindBtn" style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 5em;height: 9em;" onclick="rewind()"> < </button>
+        <button id="rewindBtn" style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 5em;height: 9em;"
+                onclick="rewind()"> <
+        </button>
         <button onclick="togglePlay(this)" id="playBtn" class="play-btn" disabled>Play</button>
     </div>
 </div>
 <div id="message" style="display: none"></div>
 
 <script>
-    function toSeconds(str) {
-        let splits = str.split(":")
-        let hour = 0, mins = 0, secs = 0
-        if (splits.length === 2) {
-            mins = splits[0]
-            secs = splits[1]
-        }
-        if (splits.length === 3) {
-            hour = splits[0]
-            mins = splits[1]
-            secs = splits[2]
-        }
-        return parseInt(hour) * 3600 + parseInt(mins) * 60 + parseInt(secs)
+  function toSeconds(str) {
+    let splits = str.split(":")
+    let hour = 0, mins = 0, secs = 0
+    if (splits.length === 2) {
+      mins = splits[0]
+      secs = splits[1]
     }
-
-    function fromSeconds(number) {
-        let _pad = x => x.length < 2 ? '0' + x : x;
-        let hrs = Math.floor(number / 3600) + ''
-        let mins = Math.floor((number % 3600) / 60) + ''
-        let secs = Math.floor((number % 3600) % 60) + ''
-
-
-        return `${_pad(hrs)}:${_pad(mins)}:${_pad(secs)}`
+    if (splits.length === 3) {
+      hour = splits[0]
+      mins = splits[1]
+      secs = splits[2]
     }
+    return parseInt(hour) * 3600 + parseInt(mins) * 60 + parseInt(secs)
+  }
 
-    let URL = window.URL || window.webkitURL
-    let displayMessage = function (message, isError) {
-        let element = document.querySelector('#message')
-        element.innerHTML = message
-        element.className = isError ? 'error' : 'info'
+  function fromSeconds(number) {
+    let _pad = x => x.length < 2 ? '0' + x : x;
+    let hrs = Math.floor(number / 3600) + ''
+    let mins = Math.floor((number % 3600) / 60) + ''
+    let secs = Math.floor((number % 3600) % 60) + ''
+
+
+    return `${_pad(hrs)}:${_pad(mins)}:${_pad(secs)}`
+  }
+
+  let URL = window.URL || window.webkitURL
+  let displayMessage = function (message, isError) {
+    let element = document.querySelector('#message')
+    element.innerHTML = message
+    element.className = isError ? 'error' : 'info'
+  }
+
+  let player = new MediaElement(document.querySelector('audio'), {
+    defaultSpeed: 1.0,
+    features: ['speed'],
+    success: function (mediaElement, originalNode) {
+      console.log('Media element', mediaElement, originalNode)
     }
+  });
 
-    let player = new MediaElement(document.querySelector('audio'), {
-        defaultSpeed: 1.0,
-        features: ['speed'],
-        success: function(mediaElement, originalNode) {
-            console.log('Media element', mediaElement, originalNode)
-        }
-    });
+  window.player = player
+  window.marginStartSubtitle = -0.1
+  window.marginEndSubtitle = 1
 
-    window.player = player
-    window.marginStartSubtitle = - 0.1
-    window.marginEndSubtitle = 1
+  const isIOS = () => {
+    const iosQuirkPresent = function () {
+      const audio = new Audio();
 
-    const isIOS = () => {
-        const iosQuirkPresent = function () {
-            const audio = new Audio();
-
-            audio.volume = 0.5;
-            return audio.volume === 1;   // volume cannot be changed from "1" on iOS 12 and below
-        };
-
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-        const isAppleDevice = navigator.userAgent.includes('Macintosh');
-        const isTouchScreen = navigator.maxTouchPoints >= 1;   // true for iOS 13 (and hopefully beyond)
-
-        return isIOS || (isAppleDevice && (isTouchScreen || iosQuirkPresent()));
+      audio.volume = 0.5;
+      return audio.volume === 1;   // volume cannot be changed from "1" on iOS 12 and below
     };
 
-    if(isIOS()) {
-        window.marginStartSubtitle = -1
-        window.marginEndSubtitle = 0
-    }
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isAppleDevice = navigator.userAgent.includes('Macintosh');
+    const isTouchScreen = navigator.maxTouchPoints >= 1;   // true for iOS 13 (and hopefully beyond)
 
-    window.marginStartSubtitle = 0
+    return isIOS || (isAppleDevice && (isTouchScreen || iosQuirkPresent()));
+  };
+
+  if (isIOS()) {
+    window.marginStartSubtitle = -1
     window.marginEndSubtitle = 0
+  }
 
-    function pauseVideo() {
-        window.player.pause()
-        $('#playBtn').html('Play')
-    }
-    let currentVideoTime = () => {
-        return parseFloat(parseFloat(player.getCurrentTime() + '').toFixed(2))
-    }
-    let clearSubtitles = () => {
-        $('#sv-sub').html('')
-        $('#en-sub').html('')
-    }
+  window.marginStartSubtitle = 0
+  window.marginEndSubtitle = 0
 
-    let populateSubtitles = (currentSub) => {
-        $('#currentNumber').html(currentSub.number)
-        $('#currentTime').html(fromSeconds(currentVideoTime()) + ' / [' + currentSub.ts_o + '-' + currentSub.te_o + ']')
-        $('#currentSpeed').html(player.getPlaybackRate() + ' / ' + currentSub.speed)
+  function pauseVideo() {
+    window.player.pause()
+    $('#playBtn').html('Play')
+  }
 
-        $('#sv-sub').html('')
-        currentSub.sv.split(" ").map(it => it.trim()).filter(it => it.length > 0).forEach(word => {
-            let sanitizedWord = word
-            if(['-', '–', '!', '.', ','].some(it => sanitizedWord.startsWith(it))) {
-                sanitizedWord = sanitizedWord.substr(1)
-            }
+  let currentVideoTime = () => {
+    return parseFloat(parseFloat(player.getCurrentTime() + '').toFixed(2))
+  }
+  let clearSubtitles = () => {
+    $('#sv-sub').html('')
+    $('#en-sub').html('')
+  }
 
-            if(['-', '–', '!', '?', '.', ','].some(it => sanitizedWord.endsWith(it))) {
-                sanitizedWord = sanitizedWord.substr(0, sanitizedWord.length - 1)
-            }
+  let renderSubtitles = (currentSub) => {
+    $('#currentNumber').html(currentSub.number)
+    $('#currentTime').html(fromSeconds(currentVideoTime()) + ' / [' + currentSub.ts_o + '-' + currentSub.te_o + ']')
+    $('#currentSpeed').html(player.getPlaybackRate() + ' / ' + currentSub.speed)
 
-            let wordLink = $(`<span> <a href="https://sv.wiktionary.org/wiki/${encodeURIComponent(sanitizedWord)}" target="_blank">${word}</a></span>`);
-            wordLink.click(e => {
-                pauseVideo()
-            })
-            $('#sv-sub').append(wordLink)
-        })
+    $('#sv-sub').html('')
+    currentSub.sv.replaceAll("\n", " ").split(" ").map(it => it.trim()).filter(it => it.length > 0).forEach(word => {
+      let sanitizedWord = word
+      if (['-', '–', '!', '.', ','].some(it => sanitizedWord.startsWith(it))) {
+        sanitizedWord = sanitizedWord.substr(1)
+      }
 
-        $('#en-sub').html(currentSub.en)
-    }
-    let prepareSubs = (pageNumber, allSubs) => {
-        pageNumber = parseInt(pageNumber)
+      if (['-', '–', '!', '?', '.', ','].some(it => sanitizedWord.endsWith(it))) {
+        sanitizedWord = sanitizedWord.substr(0, sanitizedWord.length - 1)
+      }
 
-        //Reset
-        let subs = [allSubs[pageNumber - 1]].flatMap(sub => [
-            // {...sub, speed: 0.6}
-            // , {...sub, speed: 0.8}
-             {...sub, speed: 1.0}
-        ])
+      let wordLink = $(`<span> <a href="https://sv.wiktionary.org/wiki/${encodeURIComponent(sanitizedWord)}" target="_blank">${word}</a></span>`);
+      wordLink.click(e => {
+        pauseVideo()
+      })
+      $('#sv-sub').append(wordLink)
+    })
 
-        let currentSub = subs.shift()
+    $('#en-sub').html(currentSub.en)
+  }
+  let prepareSubsForPage = (pageNumber, setTime) => {
+    pageNumber = parseInt(pageNumber)
 
-        player.setCurrentTime(Math.max(currentSub.ts + window.marginStartSubtitle, 0))
+    let allSubs = window.subtitles
+    //Reset
+    let subs = [allSubs[pageNumber - 1]].flatMap(sub => [
+      // {...sub, speed: 0.6}
+      // , {...sub, speed: 0.8}
+      {...sub, speed: 1.0}
+    ])
 
-        if(!window.rewindData)
-        player.setPlaybackRate(currentSub.speed)
+    let currentSub = subs.shift()
 
-        player.play()
-
-        window.subs = subs
-        window.currentSub = currentSub
-        window.pageNumber = pageNumber
-
-        $('#playBtn').html('Pause')
+    if (setTime) {
+      player.setCurrentTime(Math.max(currentSub.ts + window.marginStartSubtitle, 0))
     }
 
-    let playSelectedFile = function (event) {
-        let file = this.files[0]
-        let type = file.type
+    // if(!window.rewindData)
+    // player.setPlaybackRate(currentSub.speed)
 
-        let canPlay = player.canPlayType(type)
-        if (canPlay === '') canPlay = 'no'
-        let message = 'Can play type "' + type + '": ' + canPlay
-        let isError = canPlay === 'no'
-        displayMessage(message, isError)
+    // player.play()
 
-        if (isError) {
-            return
-        }
+    window.subs = subs
+    window.currentSub = currentSub
+    window.pageNumber = pageNumber
 
-        player.setSrc(URL.createObjectURL(file))
+    // $('#playBtn').html('Pause')
+  }
 
-        let strategy = "Normal-Slow"
+  let mp3s = [
+    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/45%20sekunder%20om%20AI-verktyg%20som%20hja%CC%88lp%20vid%20riskbedo%CC%88mning%20fo%CC%88r%20va%CC%8Ardpersonal.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/45%20sekunder%20om%20ha%CC%8Allbar%20pendling%20till%20jobbet.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/45%20sekunder%20om%20immigrerade%20kvinnors%20va%CC%88g%20in%20i%20ledarskap%20i%20den%20svenska%20idrottsro%CC%88relsen.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/45%20sekunder%20om%20onlineshoppingens%20sista%20va%CC%88g%20till%20konsumenten.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/63%20questions%20with%20students%20at%20Halmstad%20University.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/63%20snabba%20fra%CC%8Agor%20till%20studenter%20pa%CC%8A%20Ho%CC%88gskolan%20i%20Halmstad.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/ALLA%20MINA%20BILDDAGBOKEN-BILDER.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Algoritmmedvetenhet%20i%20mo%CC%88tet%20mellan%20generationer.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Apropa%CC%8A%20Corona%20%E2%80%93%20Sa%CC%8A%20fattar%20politiker%20beslut%20under%20coronakrisen.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/A%CC%8Arets%20alumn%202019%20%E2%80%93%20A%CC%8Asa%20Ekman%2C%20barnra%CC%88ttskonsult.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/A%CC%8Arets%20alumn%202020%20%E2%80%93%20Rebecka%20Larsson.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/A%CC%8Arets%20alumn%202021%20%E2%80%93%20Ho%CC%88gskolan%20i%20Halmstad.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Bli%20ingenjo%CC%88r%20%E2%80%93%20plugga%20till%20mekatronikingenjo%CC%88r.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Bokma%CC%88ssan%20Book%20Haul%202023.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/DEN%20BLA%CC%8A%20MANNEN.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/David%20tycker%20till%20om%20Halmstads%20studentliv.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Debatt%20i%20Lund%20Fa%CC%8Ar%20dom%20skriva%20hur%20dem%20vill.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Debatt%20i%20Lund%20Hur%20ra%CC%88ttvis%20a%CC%88r%20meritokratin.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Debatt%20i%20Lund%20Svensk%20elfo%CC%88rso%CC%88rjning%20%E2%80%93%20en%20kraftma%CC%88tning.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Den%20Miserabla%20Bergsbestigningen.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Den%20blomstertid%20nu%20kommer%20-%20Trailer%202%20(2018).mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Den%20globala%20adeln%20%E2%80%93%20elitens%20makt%20bakom%20sta%CC%88ngda%20do%CC%88rrar.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Egenskaper%20och%20entiteter.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Elaf%20och%20Kirsty%20underso%CC%88ker%20konsekvenserna%20av%20padelhallarnas%20do%CC%88d.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Elektronikcentrum%20i%20Halmstad%20ECH.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/FRBR%20%E2%80%93%20Functional%20Requirements%20for%20Bibliographic%20Records.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/First%20patient%20receives%20milestone%20stem%20cell-based%20transplant%20for%20Parkinson%E2%80%99s%20Disease.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Flodkra%CC%88fta%20%E2%80%93%20provfiske%202020.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Folkbiblioteket%20och%20den%20digitala%20kompetensen.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Forskare%20ska%20ta%20reda%20pa%CC%8A%20vad%20ma%CC%88nniskor%20tycker%20om%20att%20a%CC%88ta%20ta%CC%8Ang.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Forskarportra%CC%88tt%20%E2%80%93%20Anna%20Isaksson%2C%20docent%20i%20sociologi.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Forskningsprojekt%20AHA%20II%20%E2%80%93%20ho%CC%88r%20forskare%20och%20samverkansparter%20bera%CC%88tta.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Fo%CC%88rdomspanelen%20%E2%80%93%20med%20Jube%CC%88l%20och%20Ho%CC%88gskolan%20i%20Halmstad.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ga%CC%88ngkriminella%20driver%20familje-%20och%20HVB-hem.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Go%CC%88teborgskursen.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Grundforskning%20fo%CC%88r%20en%20klokare%20va%CC%88rld.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ho%CC%88ns%20i%20tra%CC%88dga%CC%8Ard.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/I%20LEARNT%20GREEK.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Informationsfilm%20om%20o%CC%88ppen%20tillga%CC%8Ang%20-%20Bakgrund.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Informationsfilm%20om%20o%CC%88ppen%20tillga%CC%8Ang%20-%20Introduktion.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Introduktion%20till%20Libris%20katalogisering.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Jag%20a%CC%88r%20sa%CC%88mst%20pa%CC%8A%20att%20misslyckas.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Jakten%20pa%CC%8A%20den%20perfekta%20sno%CC%88n%20-%20Sverige%20forskar.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Jimmie%20A%CC%8Akessons%20lilla%20detalj.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Julia%20pluggade%20Spra%CC%8Ak%2C%20textbearbetning%20och%20digital%20kommunikation..mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Katalogisering%20av%20monografi%20%E2%80%93%20o%CC%88versa%CC%88ttning%20%5B201126%5D.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Katalogva%CC%8Ard%20%E2%80%93%20att%20flytta%20besta%CC%8And%20i%20Libris%20katalogisering.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ka%CC%88llkoll%20-%20En%20guide%20till%20fejkva%CC%88rlden.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ka%CC%88llkoll%20-%20Medieetik%20-%20en%20riktig%20mediecirkus.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ka%CC%88llkoll%20-%20Sa%CC%8A%20styr%20algoritmer%20sociala%20medier.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Kombinera%20yrkesliv%20och%20masterutbildning%20genom%20projektbaserad%20master!.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Kommunalpolitik%20och%20folkliga%20uppror%20%E2%80%93%20ett%20samtal%20om%20grundforskning%20i%20praktiken.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88ser%20ur%20min.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20april%202023.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20februari%202023.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20juni%202023.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20maj%202023.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20mars%202023.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20september%202023.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Lisa%20pluggade%20Spra%CC%8Ak%2C%20textbearbetning%20och%20digital%20kommunikation..mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Litteraturhistoria.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Maskinen%20som%20kan%20ra%CC%88dda%20Nooshi%20Dadgostar%20fra%CC%8An%20kritik.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ma%CC%8Anga%20ma%CC%8Att%20ska%20sta%CC%88mma%20na%CC%88r%20man%20bygger%20trappa%20%E2%80%93%20sa%CC%8A%20ha%CC%88r%20gjorde%20jag.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Moa%20bera%CC%88ttar%20om%20studentlivet%20i%20Halmstad.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/NATO%20och%20Warszawapakten%20(Samha%CC%88llskunskap)%20-%20www.binogi.se.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Nakenlekar.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Nazist%20so%CC%88ker%20fru.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/O%CC%88verleva%20i%20rymden%20-%20Sverige%20forskar.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/POESI%20FO%CC%88R%20FISKAR%20-%20De%20Arbetslo%CC%88sa.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/POESI%20FO%CC%88R%20FISKAR%20-%20Gilla.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/POESI%20FO%CC%88R%20FISKAR%20-%20Happy%20Ending.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/POESI%20FO%CC%88R%20FISKAR%20-%20O%CC%88vertidskrig.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/POESI%20FO%CC%88R%20FISKAR%20-%20Se%20Mig.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Plugga%20Professionell%20idrottskarria%CC%88r%20och%20arbetsliv.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Plugga%20och%20idrotta%20samtidigt.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Plugga%20till%20fo%CC%88rskolla%CC%88rare.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Plugga%20till%20ingenjo%CC%88r%20i%20ha%CC%8Allbar%20energi%20%E2%80%93%20mo%CC%88t%20en%20alumn.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Prima%CC%88rkatalogisering%20av%20bok%20med%20icke-latinsk%20alfabet%20%5B201021%5D.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Prima%CC%88rkatalogisering%20av%20bok%20pa%CC%8A%20originalspra%CC%8Ak%20%5B201027%5D.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Professor's%20portrait%20%E2%80%93%20Ying%20Fu%2C%20Professor%20of%20Applied%20Electromagnetics.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Professorsportra%CC%88tt%20%E2%80%93%20Marie%20Mattsson%2C%20professor%20i%20miljo%CC%88vetenskap.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/RDA%20%E2%80%93%20Regler%2C%20praxis%20och%20anvisningar.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Radikala%20o%CC%88stermalmare.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Redigera%2C%20uppgradera%20och%20berika.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Redigering%20av%20importerad%20post%20med%20icke-latinskt%20alfabet%20%5B201021%5D.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Rundtur%20pa%CC%8A%20campus%20med%20Timmie!.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Sa%CC%8A%20pa%CC%8Averkar%20musik%20kroppen%20-%20Sverige%20forskar.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Skapa%20en%20vildare%20tra%CC%88dga%CC%8Ard.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Skra%CC%88ckbo%CC%88cker%20jag%20vill%20la%CC%88sa.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/So%CC%88kning%20i%20Libris%20katalogisering.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Spa%CC%8Angolv%20a%CC%88r%20la%CC%88ttlagda%20men%20det%20ga%CC%8Ar%20att%20go%CC%88ra%20fel.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Statens%20fastighetsverk%20och%20fo%CC%88rfallet%20av%20Stockholms%20kulturinstutioner.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Sta%CC%88rkt%20svensk%20forskningskvalitet%20till%20nytta%20fo%CC%88r%20samha%CC%88llet.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Stephanie%20om%20studentlivet%20i%20Halmstad.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Stephanie%20om%20studentlivet%20i%20Halmstad.srt", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Stephanie%20om%20studentlivet%20i%20Halmstad_EN.srt", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Stockholmskursen.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Studenten%20Julia%20bera%CC%88ttar%20om%20Arbetsvetenskap.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Superpla%CC%8Astret%20som%20la%CC%88ker%20alla%20sa%CC%8Ar%20-%20Sverige%20forskar.mp3", "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Svenska%20nyheter%20med%20Messiah%20Hallberg%20-%20Hamas-fo%CC%88rdo%CC%88manden.mp3"
+  ]
 
-        let originalSubs = window.subtitles.map(it => ({...it}))
+  $('#mp3Choice').html('').append($(`<option>-</option>`).attr('value', ''))
 
-        window.subtitles = originalSubs
-        originalSubs.forEach(it => {
-            it['ts_o'] = it['ts']
-            it['ts'] = toSeconds(it['ts'])
-        })
+  mp3s.forEach(it => {
+    let parts = it.split("/")
+    let $opt = $(`<option>${decodeURI(parts[parts.length - 1])}</option>`).attr('value', it)
+    $('#mp3Choice').append($opt)
+  })
 
-        originalSubs = _.sortBy(originalSubs, it => it.ts)
+  function srtToJson(text, lang) {
+    let parseSrtItem = (x, lang) => {
+      let [id, times, ...rest] = x.split("\n")
+      let [ts, te] = times.split(" --> ")
+      let item = {ts: ts, te: te, id: id}
+      item[lang] = rest.join("\n")
+      return item
+    }
+    return text.trim().split("\n\n").map(it => parseSrtItem(it, lang))
+  }
 
-        for (let i = 0; i < originalSubs.length - 1; i++) {
-            originalSubs[i]['te_o'] = originalSubs[i + 1]['ts_o']
-            originalSubs[i]['te'] = originalSubs[i + 1]['ts'] - 0.009
-            originalSubs[i]['number'] = i + 1
-        }
 
-        $('#pagination').pagination({
-            dataSource: range(1, originalSubs.length + 1),
-            pageSize: 1,
-            // showPrevious: false,
-            // showNext: false,
-            showGoInput: true,
-            showGoButton: true,
-            formatGoInput: 'go to <%= input %> st/rd/th',
-            callback: function (data, pagination) {
-                console.log(data)
-                window.rewindData = null
-                prepareSubs(data, originalSubs)
-            }
-        })
+  function srtNamesFromUrl(url) {
+    //Assumes names are same for MP3 file and SRT files
+    url = url.replace(".mp3", ".srt")
+    let splits = url.split("/")
+    let nm = splits[splits.length - 1]
 
-        $('#playBtn').attr('disabled', false)
-        prepareSubs(1, originalSubs)
+    return {sv: nm, en: nm.replace(".srt", "_EN.srt")}
+  }
 
-        const ontimeupdate = e => {
-            // console.log(currentSub, player.currentTime)
-            let ct = player.getCurrentTime()
+  function srtUrl(srtNm) {
+    return `https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/${srtNm}`
+  }
 
-            let currentSub = window.currentSub
-            let subs = window.subs
+  function storeSubtitles(subs) {
+    let strategy = "Normal-Slow"
 
-            if(window.rewindData) {
-                if(ct >= window.rewindData.from) {
-                    window.rewindData = null
-                    console.log("Resetting speed", ct)
-                    player.setPlaybackRate(currentSub.speed)
-                } else {
-                    // return
-                }
-            }
+    let originalSubs = subs.map(it => ({...it}))
 
-            populateSubtitles(currentSub)
+    originalSubs.forEach(it => {
+      it['ts_o'] = it['ts']
+      it['ts'] = toSeconds(it['ts'])
+    })
 
-            if (!window.rewindData && ct >= currentSub.te + window.marginEndSubtitle) {
-                // Go to next subtitle
-                // player.pause()
-                if (subs.length === 0) {
-                    $('#pagination').pagination('go', window.pageNumber + 1)
-                } else {
-                    currentSub = subs.shift()
-                    window.currentSub = currentSub
-                    player.setCurrentTime(Math.max(currentSub.ts + window.marginStartSubtitle, 0))
+    originalSubs = _.sortBy(originalSubs, it => it.ts)
 
-                    if(currentSub.speed < 1) {
-                        player.setPlaybackRate($('.controlgroup input:checked').data('speed'))
-                    } else if(!window.rewindData){
-                        player.setPlaybackRate(currentSub.speed)
-                    }
+    for (let i = 0; i < originalSubs.length - 1; i++) {
+      originalSubs[i]['te_o'] = originalSubs[i + 1]['ts_o']
+      originalSubs[i]['te'] = originalSubs[i + 1]['ts'] - 0.009
+      originalSubs[i]['number'] = i + 1
+    }
+    window.subtitles = originalSubs
+    return originalSubs;
+  }
 
-                    console.log(currentSub)
-                    clearSubtitles()
-                }
-            }
-        }
-        player.addEventListener('timeupdate', ontimeupdate)
+  $('#mp3Choice').change(async e => {
+    clearSubtitles()
+    player.pause()
+    //Load subtitle
+    let mp3Url = $('#mp3Choice').val()
+    if (mp3Url.indexOf('https://') < 0) return
 
-        console.log(originalSubs.map(it => `${it.number} ${it.ts_o}-${it.te_o} (${it.ts}-${it.te} )-> ${it.sv}`).join("\n"))
+    let srtNames = srtNamesFromUrl(mp3Url)
+
+    let svSrt = await fetch(srtUrl(srtNames.sv), {})
+    if (svSrt.status === 404) {
+      alert('Sv SRT not found')
+      return
+    }
+    let sv = await svSrt.text()
+
+    let enSrt = await fetch(srtUrl(srtNames.en), {})
+    if (enSrt.status === 404) {
+      alert('En SRT not found')
+      return
+    }
+    let en = await enSrt.text()
+
+    sv = srtToJson(sv, 'sv')
+    en = srtToJson(en, 'en')
+
+    let combined = sv.map(svItem => {
+      let enItem = en.find(eni => eni.id === svItem.id)
+      return {...svItem, ...enItem}
+    })
+    // console.log(sv)
+    // console.log(en)
+    console.log(combined)
+
+    storeSubtitles(combined)
+
+    player.setSrc(mp3Url)
+
+    playSelectedFile()
+  })
+
+  function setSpeed() {
+    player.setPlaybackRate($('.controlgroup input:checked').data('speed'))
+  }
+
+  function goToCurrentPageNumber() {
+    let pageNum = $('#pagination').pagination('getCurrentPageNum')
+    window.rewindData = null
+    prepareSubsForPage(pageNum, true)
+  }
+
+  let playSelectedFile = function (event) {
+    try {
+      $('#pagination').pagination('destroy');
+    } catch (e) {
+      console.log(e)
     }
 
-    let inputNode = document.querySelector('#video-file')
+    $('#pagination').pagination({
+      dataSource: range(1, window.subtitles.length + 1),
+      pageSize: 1,
+      // showPrevious: false,
+      // showNext: false,
+      showGoInput: true,
+      showGoButton: true,
+      formatGoInput: 'go to <%= input %> st/rd/th',
+      callback: function (data, pagination) {
+        // console.log(data)
+      }, //page changed
+      afterPageOnClick: e => {
+        // console.log(e)
+        goToCurrentPageNumber();
+      },
+      afterNextOnClick: e => {
+        goToCurrentPageNumber();
+      },
+      afterPreviousOnClick: e => {
+        goToCurrentPageNumber();
+      }
+    })
+
+    $('#playBtn').attr('disabled', false)
+    prepareSubsForPage(1)
+
+    // console.log(originalSubs.map(it => `${it.number} ${it.ts_o}-${it.te_o} (${it.ts}-${it.te} )-> ${it.sv}`).join("\n"))
+  }
+
+  const ontimeupdate = e => {
+    // console.log(currentSub, player.currentTime)
+    let ct = player.getCurrentTime()
+
+    if (window.rewindData) {
+      if (ct >= window.rewindData.from) {
+        window.rewindData = null
+        console.log("Resetting speed", ct)
+        player.setPlaybackRate(window.currentSub.speed)
+      } else {
+        // return
+      }
+    }
+
+    renderSubtitles(window.currentSub)
+    setSpeed();
+
+    if (!window.rewindData && ct >= window.currentSub.te) {
+      // Go to next subtitle
+      // player.pause()
+      $('#pagination').pagination('next', (data, p) => {
+        prepareSubsForPage(data)
+      })
+    }
+  }
+
+  function updatePlayBtn() {
+    let el = $('#playBtn')[0]
+
+    if (player.paused) {
+      $(el).html("Play").removeClass('pause-btn').addClass('play-btn')
+    } else {
+      $(el).html("Pause").removeClass('play-btn').addClass('pause-btn')
+    }
+  }
+
+  player.addEventListener('timeupdate', ontimeupdate)
+  player.addEventListener('pause', updatePlayBtn)
+  player.addEventListener('ended', updatePlayBtn)
+  player.addEventListener('playing', updatePlayBtn)
+
+  player.addEventListener('ended', e => {
+    $('#pagination').pagination('go', 1)
+    goToCurrentPageNumber()
+    if($('#loopSwitch').is(":checked")) {
+      console.log('Replaying')
+      sleep(2).then(() => $('#playBtn').click())
+    }
+  })
+
+  let inputNode = document.querySelector('#video-file')
+  if (inputNode)
     inputNode.addEventListener('change', playSelectedFile, false)
 
-    function rewind() {
-        window.rewindData = window.rewindData || {
-            from: player.getCurrentTime(),
-        }
-
-        console.log("Should come back to", window.rewindData.from)
-        player.setPlaybackRate($('.controlgroup input:checked').data('speed'))
-        player.setCurrentTime(player.currentTime - 3)
+  function rewind() {
+    window.rewindData = window.rewindData || {
+      from: player.getCurrentTime(),
     }
 
-    $('.controlgroup').controlgroup()
+    console.log("Should come back to", window.rewindData.from)
+    player.setPlaybackRate($('.controlgroup input:checked').data('speed'))
+    player.setCurrentTime(player.currentTime - 3)
+  }
 
-    document.onkeyup = e => {
-        if(e.which === 32) { //Space
-            togglePlay()
-        }
+  $('.controlgroup').controlgroup()
+
+  document.onkeyup = e => {
+    if (e.which === 32) { //Space
+      togglePlay()
     }
+  }
 </script>
 </body>
 
