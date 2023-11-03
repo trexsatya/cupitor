@@ -17,7 +17,7 @@
   padding-left: 1rem;
 }
 
-div.accordion h2, div.accordion h1, div.accordion h3, div.accordion h4 {
+div.accordion h2, div.accordion h1, div.accordion h3, div.accordion h4, div.accordion h5, div.accordion h6 {
   padding-bottom: 1%;
   margin-top: 0;
   margin-right: 5vw;
