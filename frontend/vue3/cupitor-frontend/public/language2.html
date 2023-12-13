@@ -1,0 +1,355 @@
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+
+    <script src="/jquery.js"></script>
+    <script></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <script type="text/javascript" src="/fabric.min.js"></script>
+    <script type="text/javascript" src="/pagination.min.js"></script>
+    <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
+    <script type="text/javascript" src="/rx.all.min.js"></script>
+    <script type="text/javascript" src="/bootstrap.min.js"></script>
+
+    <script type="text/javascript" src="/jquery.lettering.js"></script>
+    <script type="text/javascript" src="/jquery.fittext.js"></script>
+    <script type="text/javascript" src="/rulez.min.js"></script>
+    <script type="text/javascript" src="/mediaelement.js"></script>
+    <script type="text/javascript" src="/mediaelement-plugins/speed/speed.min.js"></script>
+    <script type="text/javascript" src="/mediaelement-plugins/speed/speed-i18n.js"></script>
+    <!-- <script type="text/javascript" src="/treant.js"></script> -->
+    <link rel="stylesheet" href="/animate.css">
+    <link rel="stylesheet" href="/treant.css">
+    <script src="/vendor/raphael.js"></script>
+
+    <!-- <script src="../../vendor/jquery.min.js"></script> -->
+    <script src="../../vendor/jquery.easing.js"></script>
+
+    <script type="text/javascript" src="/jquery.textillate.js"></script>
+    <!--    <script src="/typed.min.js"></script>-->
+
+    <script type="text/javascript" src="/diff-match-patch.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>
+    <link href="/select2.min.css" rel="stylesheet"/>
+    <link href="/pagination.css" rel="stylesheet"/>
+    <link href="/bootstrap.min.css" rel="stylesheet"/>
+    <link href="/bootstrap-grid.min.css" rel="stylesheet"/>
+
+    <script src="/select2.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.min.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.ui.min.js"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_SVG">
+    </script>
+    <script src="/ace/src-noconflict/ace.js" type="text/javascript" charSet="utf-8"></script>
+    <script type="text/javascript"
+            src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <script type="text/javascript">
+      Array.prototype.max = function () {
+        return Math.max.apply(null, this);
+      };
+    </script>
+    <style>
+
+    </style>
+
+    <script src="/play.js"></script>
+    <!--    <script src="/play2.js"></script>-->
+    <link rel="stylesheet" href="/play.css">
+    <link rel="stylesheet" href="/fontawesome-all.css">
+
+    <script>
+      function togglePlay(el) {
+        if(window.playingVideo) {
+          if (!ytPlaying) {
+            ytPlayer.playVideo()
+          } else {
+            ytPlayer.pauseVideo()
+          }
+        }  else  {
+          if (player.paused) {
+            player.play()
+          } else {
+            player.pause()
+          }
+        }
+      }
+    </script>
+    <style>
+      #playBtn {
+        border-radius: 50%;
+        height: 5em;
+        width: 5em;
+        cursor: pointer;
+      }
+
+      .play-btn {
+        background: blue;
+        color: white;
+      }
+
+      .pause-btn {
+        background: red;
+        color: white;
+      }
+
+      body {
+        touch-action: manipulation;
+      }
+    </style>
+</head>
+
+<body style="padding: 0.5em;">
+
+<div>
+
+    <!--    Subtitles: <input type="file" onChange="loadSubtitle(this.files[0])" title="Subtitles" accept="application/JSON">-->
+    <!--    <br>-->
+    <!--    <br>-->
+    <!--    Audio: <input id="video-file" type="file" title="Video"/>-->
+
+    <label for="swedishTrackChoice">Select Swedish Track:</label>
+    <select id="swedishTrackChoice">
+        <option value="https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/audios/Swedish-1.mp3">Swedish-1</option>
+        <option value="https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/audios/OregelbundnaVerb.mp3">Oregelbundna Verb - 1</option>
+    </select>
+
+<!--    <label for="musicTrackChoice">Select Background Music:</label>-->
+<!--    <select id="musicTrackChoice">-->
+<!--        <option value="yIzC7RLpDEI">Acoustic Melodies-1</option>-->
+<!--    </select>-->
+
+    <div style="margin-bottom: 1em; margin-top: 1em;">
+        <audio id="mainAudio" src="" width="700" height="500" controls crossorigin="anonymous"></audio>
+        <audio id="backgroundMusicAudio" src="" width="700" height="500" controls style="margin-top: 1em; margin-bottom: 1em;" crossorigin="anonymous"></audio>
+        <div>
+            <input id="backgroundMusicFile" type="file" style="">
+        </div>
+<!--        <select id="bgAudioVolume">-->
+<!--            <option value="0">0</option>-->
+<!--            <option value="0.1">0.1</option>-->
+<!--            <option value="0.5">0.5</option>-->
+<!--        </select>-->
+    </div>
+
+    <div id="ytPlayer"></div>
+</div>
+<br/>
+
+<script>
+  let player = new MediaElement(document.querySelector('audio'), {
+    defaultSpeed: 1.0,
+    features: ['speed'],
+    success: function (mediaElement, originalNode) {
+      console.log('Media element', mediaElement, originalNode)
+    }
+  });
+
+  window.player = player
+
+  const isIOS = () => {
+    const iosQuirkPresent = function () {
+      const audio = new Audio();
+
+      audio.volume = 0.5;
+      return audio.volume === 1;   // volume cannot be changed from "1" on iOS 12 and below
+    };
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isAppleDevice = navigator.userAgent.includes('Macintosh');
+    const isTouchScreen = navigator.maxTouchPoints >= 1;   // true for iOS 13 (and hopefully beyond)
+
+    return isIOS || (isAppleDevice && (isTouchScreen || iosQuirkPresent()));
+  };
+
+  if (isIOS()) {
+    window.marginStartSubtitle = -1
+    window.marginEndSubtitle = 0
+  }
+
+  let mp3s = {
+   }
+
+  let $swedishTrackChoice = $('#swedishTrackChoice');
+
+  function getNameFromUrl(it) {
+    let parts = it.split("/")
+    let name = decodeURI(parts[parts.length - 1]);
+    return name;
+  }
+
+  Object.keys(mp3s).forEach(it => {
+    let name = getNameFromUrl(it);
+    let $opt = $(`<option>${name}</option>`).attr('value', it)
+    $swedishTrackChoice.append($opt)
+  })
+
+  player.setSrc($swedishTrackChoice.val())
+  $swedishTrackChoice.change(async e => {
+    player.setSrc($swedishTrackChoice.val())
+
+    directToAudioContext(mainAudio)
+  })
+
+  backgroundMusicFile.onchange = function() {
+    const files = this.files;
+    let $backgroundMusicAudio = $("#backgroundMusicAudio")[0];
+    let src = URL.createObjectURL(files[0]);
+
+    $backgroundMusicAudio.src = src
+    // window.bgAudioHowler = new Howl({
+    //   src: [src],
+    //   html5: true
+    // });
+    // window.bgAudioHowler.play()
+  }
+
+  // bgAudioVolume.onchange = function () {
+  //   window.bgAudioHowler.volume(parseFloat(this.value))
+  // }
+</script>
+
+<script>
+  // 2. This code loads the IFrame Player API code asynchronously.
+  var tag = document.createElement('script');
+
+  tag.src = "https://www.youtube.com/iframe_api";
+  var firstScriptTag = document.getElementsByTagName('script')[0];
+  firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+  // 3. This function creates an <iframe> (and YouTube player)
+  //    after the API code downloads.
+
+  function loadVideo(videoId) {
+    let iframe = ytPlayer.getIframe()
+    try {
+      let currentVideoId = iframe.src.split("embed/")[1].split("?")[0]
+      iframe.src = `${iframe.src}`.replaceAll(currentVideoId, videoId)
+    } catch (e) {
+      console.log(e)
+    }
+  }
+
+  let wh = $(window).height(), ww = $(window).width();
+
+  let ytVideoWidth = 940, ytHeight = 590;
+  let subWidth = 0;
+
+  if(ww >= 1000) {
+    ytVideoWidth = ww * 0.6;
+    subWidth = $(window).width() - (ytVideoWidth + 40)
+  } else {
+    ytVideoWidth = ww - 10;
+    subWidth = ww - 10;
+    ytHeight = wh/2 - 50;
+    $('#controls').css({width: '100%', bottom: '-15em', right: 0})
+    $('#player-info').hide()
+    $('#speed-control').parent().hide()
+  }
+  function onYouTubeIframeAPIReady() {
+    // window.ytPlayer = new YT.Player('ytPlayer', {
+    //   height: 200,
+    //   width: 500,
+    //   videoId: $('#musicTrackChoice').val(),
+    //   playerVars: {
+    //     'playsinline': 1
+    //   },
+    //   events: {
+    //     'onReady': onPlayerReady,
+    //     'onStateChange': onPlayerStateChange
+    //   }
+    // });
+    // $('#subtitle-container').css({
+    //   left: ytVideoWidth,
+    //   marginLeft: '1em',
+    //   width: subWidth
+    // })
+  }
+
+  // 4. The API will call this function when the video player is ready.
+  function onPlayerReady(event) {
+    event.target.playVideo();
+    event.target.setVolume(6);
+  }
+
+
+  function onPlayerStateChange(event) {
+    if (event.data == YT.PlayerState.PLAYING ) {
+      window.ytPlaying = true
+    } else {
+      window.ytPlaying = false;
+    }
+  }
+  function stopVideo() {
+    window.ytPlayer.stopVideo();
+  }
+
+  setInterval(() => {
+    //Check time
+    if(window.playingVideo && window.ytPlayer) {
+      ontimeupdate()
+    }
+  }, 100)
+
+  function directToAudioContext(audioInput, fn) {
+    // A user interaction happened we can create the audioContext
+    const audioContext = new AudioContext();
+
+    fetch(audioInput.src)
+      .then((response) => response.arrayBuffer())
+      .then((downloadedBuffer) =>
+        audioContext.decodeAudioData(downloadedBuffer)
+      )
+      .then((decodedBuffer) => {
+        // Set up the AudioBufferSourceNode
+        const sourceNode = new AudioBufferSourceNode(audioContext, {
+          buffer: decodedBuffer,
+          loop: true,
+        });
+
+        // Set up the audio analyser and the javascript node
+        const analyserNode = new AnalyserNode(audioContext);
+        const javascriptNode = audioContext.createScriptProcessor(
+          1024,
+          1,
+          1
+        );
+
+        // Connect the nodes together
+        sourceNode.connect(audioContext.destination);
+        sourceNode.connect(analyserNode);
+        analyserNode.connect(javascriptNode);
+        javascriptNode.connect(audioContext.destination);
+
+        // Play the audio
+        sourceNode.start(0, 4); // Play the sound now
+
+        // Set up the event handler that is triggered every time enough samples have been collected
+        // then trigger the audio analysis and draw the results
+        javascriptNode.onaudioprocess = () => {
+          // Read the frequency values
+          const amplitudeArray = new Float32Array(
+            analyserNode.frequencyBinCount
+          );
+
+          // Get the time domain data for this sample
+          analyserNode.getFloatFrequencyData(amplitudeArray);
+
+          let avg = amplitudeArray.reduce((a, b) => a + b) / amplitudeArray.length
+          console.log(avg)
+          // Draw the display when the audio is playing
+          if (audioContext.state === "running") {
+            // Draw the time domain in the canvas
+
+          }
+        };
+      })
+  }
+
+</script>
+</body>
+
+</html>

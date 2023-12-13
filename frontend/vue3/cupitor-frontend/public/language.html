@@ -145,7 +145,7 @@
                         <label for="speed-control">x Speed</label>
                     </div>
                     <br>
-                    <div class="form-check form-switch">
+                    <div class="form-check form-switch" style="display: none;">
                         <label class="form-check-label" for="loopSwitch">Loop </label>
                         <input class="form-check-input" type="checkbox" role="switch" id="loopSwitch">
                     </div>
@@ -164,7 +164,7 @@
     </div>
 </div>
 <br/>
-<div style="color: grey;">
+<div style="color: grey;" id="player-info">
     Current Page: <span id="currentNumber"></span> <span id="currentTime" style="padding-left: 1em;"></span> <span
         id="currentSpeed" style="padding-left: 1em;"></span>
 </div>
@@ -701,10 +701,25 @@
     }
   }
 
-  let ytVideoWidth = 940;
+  let wh = $(window).height(), ww = $(window).width();
+
+  let ytVideoWidth = 940, ytHeight = 590;
+  let subWidth = 0;
+
+  if(ww >= 1000) {
+    ytVideoWidth = ww * 0.6;
+    subWidth = $(window).width() - (ytVideoWidth + 40)
+  } else {
+    ytVideoWidth = ww - 10;
+    subWidth = ww - 10;
+    ytHeight = wh/2 - 50;
+    $('#controls').css({width: '100%', bottom: '-15em', right: 0})
+    $('#player-info').hide()
+    $('#speed-control').parent().hide()
+  }
   function onYouTubeIframeAPIReady() {
     window.ytPlayer = new YT.Player('player', {
-      height: '590',
+      height: ytHeight,
       width: ytVideoWidth,
       videoId: 'JSR5ETrEmIU',
       playerVars: {
@@ -718,7 +733,7 @@
     $('#subtitle-container').css({
       left: ytVideoWidth,
       marginLeft: '1em',
-      width: $(window).width() - 980
+      width: subWidth
     })
   }
 
