@@ -186,7 +186,7 @@
 
           promise.then(x => restoreBgMusic())
         }
-        dampenBgMusic().then(x => play())
+        dampenBgMusic().promise.then(x => play())
       }
 
       function render(list, search) {
@@ -331,7 +331,7 @@
             }
           }
 
-          dampenBgMusic().then(x => play())
+          dampenBgMusic().promise.then(x => play())
 
            // $( "#audioPlayerPopup" ).dialog('open')
            // $('#audioPlayerPopup').css({width: '100%'})
@@ -393,11 +393,15 @@
 </div>
 <div style="float: right; left: 51%; width: 49%; position: fixed;">
     <div>
-        <textarea id="enteredWords" onchange="populateWords()"></textarea>
-        <input id="bgMusicInput" type="file" accept="audio/mpeg" onchange="playBgMusic()">
+        <textarea id="enteredWords" onchange="populateWords()"></textarea> <br>
+        Swedish Audio: <input id="swedishAudioInput" type="file" accept="audio/mpeg" onchange="analyseSoundAndSilence()">
+        <audio id="swedishAudio" controls="controls" ></audio>
+        <br>
+        Background Music: <input id="bgMusicInput" type="file" accept="audio/mpeg" onchange="loadMediaFile(bgMusicAudio, 'bgMusicInput')">
+        <audio id="bgMusicAudio" controls="controls" autoplay></audio>
     </div>
     <div style="">
-        <audio id="bgMusicAudio" controls="controls" ></audio>
+        <audio id="swedishAudioHidden" style="display: none;"></audio>
         <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playSelectedText()">
     </div>
 
@@ -406,43 +410,150 @@
     </div>
 </div>
 <script>
+  let secondsWithSound = new Set()
 
-function playBgMusic() {
-    bgMusicAudio.src = URL.createObjectURL(document.getElementById('bgMusicInput').files[0])
+  window.dampeningInProgress = null
+  window.restoringInProgress = null
+
+  function analyseSoundAndSilence() {
+    let secondsHandled = new Set()
+    swedishAudio.ontimeupdate = e => {
+      let t = mediaTimeInSeconds(swedishAudio);
+      if(secondsHandled.has(t)) return
+
+      console.log(t)
+      secondsHandled.add(t)
+      let shouldDampen = secondsWithSound.has(t + 2)
+      let shouldRestore = [0, -1, -2, +1, +2].every(it => !secondsWithSound.has(t + it))
+      if(shouldDampen) dampenBgMusic()
+      else if(shouldRestore) restoreBgMusic()
+    }
+
+    swedishAudio.onended = e => {
+      secondsHandled = new Set()
+    }
+
+    loadMediaFile(swedishAudio, 'swedishAudioInput')
+    loadMediaFile(swedishAudioHidden, 'swedishAudioInput')
+
+    swedishAudio.controls = false
+    analyseAudio(swedishAudioHidden, x => {
+      swedishAudio.controls = true
+      swedishAudio.play()
+    })
+  }
+  function round(value, p) {
+    let precision = p || 1
+    let multiplier = Math.pow(10, precision || 0);
+    return Math.round(value * multiplier) / multiplier;
+  }
+
+function populateSoundTimes(buffer, el) {
+    buffer = Array.from(buffer)
+    for (let i = 0; i < buffer.length; i++) {
+       if(buffer[i] > -50) secondsWithSound.add(mediaTimeInSeconds(el))
+    }
+    // console.log(a.map(it => it < -50 ? '' : round(it) + '/' + round(bgMusicAudio.currentTime)).join(' '))
+    // console.log(timesWithSound)
 }
 
+function mediaTimeInSeconds(el) {
+  return Math.floor(round(el.currentTime))
+}
+
+function loadMediaFile(el, input) {
+  el.src = URL.createObjectURL(document.getElementById(input).files[0])
+}
+
+  const MIN_DECIBELS = -45;
+  const audioContext = new AudioContext();
+  const audioStreamSource = audioContext.createMediaElementSource(swedishAudio);
+  const analyser = audioContext.createAnalyser();
+  analyser.minDecibels = MIN_DECIBELS;
+  audioStreamSource.connect(analyser);
+
+function analyseAudio(el, callbackWhenMovedEnough) {
+  secondsWithSound = new Set()
+  el.play()
+
+  const bufferLength = analyser.frequencyBinCount;
+  const domainData = new Float32Array(bufferLength);
+
+  const detectSound = () => {
+    analyser.getFloatFrequencyData(domainData);
+    populateSoundTimes(domainData, el)
+
+    if(el.currentTime > 6) {
+      callbackWhenMovedEnough(el.currentTime)
+    }
+
+    if(el.currentTime >= el.duration) {
+      console.log(secondsWithSound)
+      return
+    }
+    window.requestAnimationFrame(detectSound);
+  };
+
+  window.requestAnimationFrame(detectSound);
+}
+
+let bgControl = 1
 function dampenBgMusic() {
+  if(window.dampeningInProgress) return
+
+  let cnt = bgControl++
+  if(restoringInProgress) {
+    clearInterval(restoringInProgress.interval)
+    window.restoringInProgress = null
+  }
+
+
+  let interval = null
   let promise = new Promise((res, rej) => {
     let min = 0.05
 
     let vol = bgMusicAudio.volume;
-    let interval = 200; // 200ms interval
+    let t = 200; // 200ms interval
 
-    let fadeout = setInterval(
+    interval = setInterval(
       function() {
         // Reduce volume by 0.05 as long as it is above 0
         // This works as long as you start with a multiple of 0.05!
         if (vol > min) {
           vol -= 0.05;
           bgMusicAudio.volume = vol;
-        }
-        else {
+          console.log("Dampening", swedishAudio.currentTime, cnt)
+        } else {
           // Stop the setInterval when 0 is reached
-          clearInterval(fadeout);
+          clearInterval(interval);
           res(1)
+          window.dampeningInProgress = null
         }
-      }, interval);
+      }, t);
   })
-  return promise
+
+  let ret = {promise, interval}
+  window.dampeningInProgress = ret
+  return ret
 }
 
 function restoreBgMusic() {
-  return new Promise((res, rej) => {
-    let max = 0.7
-    let vol = bgMusicAudio.volume;
-    let interval = 200; // 200ms interval
+  if(window.restoringInProgress) return
 
-    let fadein = setInterval(
+  let cnt = bgControl++
+
+  if(dampeningInProgress) {
+    clearInterval(dampeningInProgress.interval)
+    window.dampeningInProgress = null
+  }
+
+  let interval = null
+  let promise = new Promise((res, rej) => {
+    let max = 0.5
+    let vol = bgMusicAudio.volume;
+    let t = 200; // 200ms interval
+
+    interval = setInterval(
       function () {
         // Reduce volume by 0.05 as long as it is above 0
         // This works as long as you start with a multiple of 0.05!
@@ -452,13 +563,19 @@ function restoreBgMusic() {
             vol = max
           }
           bgMusicAudio.volume = vol;
+          console.log("Restoring", swedishAudio.currentTime, cnt)
         } else {
           // Stop the setInterval when 0 is reached
-          clearInterval(fadein);
+          clearInterval(interval);
+          window.restoringInProgress = null
           res(1)
         }
-      }, interval);
+      }, t);
   })
+
+  let ret = {promise, interval};
+  window.restoringInProgress = ret
+  return ret
 }
 
 window.wikiScrollPositions = {}
@@ -482,7 +599,7 @@ window.onhashchange = e => {
 function populateWiki() {
   let w = window.location.hash
   w = w.substring(1)
-  fetch("http://localhost:5000/proxy?url=https://sv.wiktionary.org/wiki/"+w)
+  fetch("http://localhost:5000/proxy?url=https://sv.wiktionary.org/wiki/"+ w.toLowerCase())
     .then(it => it.text())
     .then(it => {
       let $result = $('#wikiResult');
