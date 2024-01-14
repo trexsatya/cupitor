@@ -588,7 +588,7 @@ function whenWikiLinkClicked(e) {
   e.stopPropagation()
   if (e.target.href.indexOf("/wiki/") > 0) {
     recordWikiScrollPosition()
-    window.location.hash = e.target.href.split("/wiki/")[1]
+    window.location.hash = e.target.href.split("/wiki/")[1].toLowerCase()
     populateWiki()
   }
 }
@@ -638,7 +638,7 @@ function populateWords() {
   $wordlist.dblclick(e => {
     $('#searchText').val(getSelectionText())
     fetchSRTs()
-    window.location.hash = getSelectionText()
+    window.location.hash = getSelectionText().toLowerCase()
     populateWiki()
     $("*").removeClass("highlighted-selection")
     $(getSelectionParentElement()).addClass("highlighted-selection")

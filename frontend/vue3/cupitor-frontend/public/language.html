@@ -111,9 +111,12 @@
     <!--    Audio: <input id="video-file" type="file" title="Video"/>-->
 
     <label for="mp3Choice">Select Media:</label>
-    <select id="mp3Choice">
+    <select id="mp3Choice" style="width: 100%">
         <option value="">-</option>
     </select>
+    <div style="padding-top: 0.5em; padding-bottom: 0.5em;">
+        Search Text: <input id="searchInput" onchange="searchText()">
+    </div>
     <span class=""><a href="" target="_blank" id="youtube-link" style="display: none;">Search on Youtube</a></span>
     <audio id="video" src="" width="700" height="500"></audio>
 
@@ -173,6 +176,7 @@
 
 <script>
   function toSeconds(str) {
+    str = str + ""
     let splits = str.split(":")
     let hour = 0, mins = 0, secs = 0
     if (splits.length === 2) {
@@ -257,6 +261,9 @@
     if(window.renderedSub === currentSub.number) {
       return
     }
+
+    console.log("Rendering subtitle for ", currentSub)
+
     window.renderedSub = currentSub.number
 
     $('#currentNumber').html(currentSub.number)
@@ -283,27 +290,46 @@
 
     $('#en-sub').html(currentSub.en)
   }
-  let prepareSubsForPage = (pageNumber, setTime) => {
+
+  async function seekToYoutubeTime(t) {
+    console.log("Seek request, target=", fromSeconds(t), "currentTime=", fromSeconds(window.ytPlayer.getCurrentTime()))
+    window.ytPlayer.seekTo(t)
+    window.seekRequestProcessing = true
+    return new Promise((resolve, reject) => {
+      let interval = null
+      interval = setInterval(() => {
+        if(Math.abs(window.ytPlayer.getCurrentTime() - t) <= 6) {
+          clearInterval(interval)
+          console.log("Seek request completed", t, "currentTime=", window.ytPlayer.getCurrentTime())
+          window.seekRequestProcessing = false
+          resolve()
+        } else {
+          window.ytPlayer.seekTo(t)
+        }
+      }, 10)
+    })
+  }
+
+  let prepareSubsForPage = async (pageNumber, setTime) => {
     pageNumber = parseInt(pageNumber)
 
+    pageNumber = window.pageDataSource[pageNumber-1]
     let allSubs = window.subtitles
+
     //Reset
-    let subs = [allSubs[pageNumber - 1]].flatMap(sub => [
+    let subs = [allSubs.find(it => it.id + "" === pageNumber + "")].flatMap(sub => [
       // {...sub, speed: 0.6}
       // , {...sub, speed: 0.8}
       {...sub, speed: 1.0}
     ])
 
     let currentSub = subs.shift()
+    console.log("Preparing subs for page", pageNumber, currentSub)
 
     if (setTime) {
       let newTime = Math.max(currentSub.ts + window.marginStartSubtitle, 0);
       if(window.playingVideo) {
-        window.pauseTimer = true
-        console.log('Seeking to ', newTime)
-        window.seekedTime = newTime
-        window.ytPlayer.seekTo(newTime)
-        setTimeout(() => window.pauseTimer = false, 15)
+        await seekToYoutubeTime(newTime)
       } else {
         player.setCurrentTime(newTime)
       }
@@ -321,142 +347,154 @@
     // $('#playBtn').html('Pause')
   }
 
-  let mp3s = {
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/45%20sekunder%20om%20AI-verktyg%20som%20hja%CC%88lp%20vid%20riskbedo%CC%88mning%20fo%CC%88r%20va%CC%8Ardpersonal.mp3": "wWeXnYIxAsI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/45%20sekunder%20om%20ha%CC%8Allbar%20pendling%20till%20jobbet.mp3": "axYl6Ch7y1g",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/45%20sekunder%20om%20immigrerade%20kvinnors%20va%CC%88g%20in%20i%20ledarskap%20i%20den%20svenska%20idrottsro%CC%88relsen.mp3": "VqXCLeWkWNI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/45%20sekunder%20om%20onlineshoppingens%20sista%20va%CC%88g%20till%20konsumenten.mp3": "COYC5_eBT5s",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/63%20questions%20with%20students%20at%20Halmstad%20University.mp3": "b7AIFaxbpOw",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/63%20snabba%20fra%CC%8Agor%20till%20studenter%20pa%CC%8A%20Ho%CC%88gskolan%20i%20Halmstad.mp3": "jcUpG5kMoFI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/ALLA%20MINA%20BILDDAGBOKEN-BILDER.mp3": "p2PgB9_cKvM",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Algoritmmedvetenhet%20i%20mo%CC%88tet%20mellan%20generationer.mp3": "eCBoCwJ93n8",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Apropa%CC%8A%20Corona%20%E2%80%93%20Sa%CC%8A%20fattar%20politiker%20beslut%20under%20coronakrisen.mp3": "u1lr2TLvDB4",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/A%CC%8Arets%20alumn%202019%20%E2%80%93%20A%CC%8Asa%20Ekman%2C%20barnra%CC%88ttskonsult.mp3": "TDFVdCcNEag",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/A%CC%8Arets%20alumn%202020%20%E2%80%93%20Rebecka%20Larsson.mp3": "nmeHa5dr4tg",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/A%CC%8Arets%20alumn%202021%20%E2%80%93%20Ho%CC%88gskolan%20i%20Halmstad.mp3": "_u-FfQRhYAI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Bli%20ingenjo%CC%88r%20%E2%80%93%20plugga%20till%20mekatronikingenjo%CC%88r.mp3": "lKnSSPMJnMU",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Bokma%CC%88ssan%20Book%20Haul%202023.mp3": "RNPOpRkDvRA",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/DEN%20BLA%CC%8A%20MANNEN.mp3": "htLYoq_CwWw",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/David%20tycker%20till%20om%20Halmstads%20studentliv.mp3": "q5OHb9u-3uM",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Debatt%20i%20Lund%20Fa%CC%8Ar%20dom%20skriva%20hur%20dem%20vill.mp3": "UpKSjETQJyI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Debatt%20i%20Lund%20Hur%20ra%CC%88ttvis%20a%CC%88r%20meritokratin.mp3": "c-7bkULJuak",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Debatt%20i%20Lund%20Svensk%20elfo%CC%88rso%CC%88rjning%20%E2%80%93%20en%20kraftma%CC%88tning.mp3": "-BIb9rMzw10",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Den%20Miserabla%20Bergsbestigningen.mp3": "I2r3xW340f8",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Den%20blomstertid%20nu%20kommer%20-%20Trailer%202%20(2018).mp3": "AoJx6UIwvEc",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Den%20globala%20adeln%20%E2%80%93%20elitens%20makt%20bakom%20sta%CC%88ngda%20do%CC%88rrar.mp3": "E5ySqkEw9KE",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Egenskaper%20och%20entiteter.mp3": "HL01AEhkhYo",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Elaf%20och%20Kirsty%20underso%CC%88ker%20konsekvenserna%20av%20padelhallarnas%20do%CC%88d.mp3": "S0-SNE0L5tQ",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Elektronikcentrum%20i%20Halmstad%20ECH.mp3": "KlAZua8ztmE",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/FRBR%20%E2%80%93%20Functional%20Requirements%20for%20Bibliographic%20Records.mp3": "FHojPwN50Ys",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/First%20patient%20receives%20milestone%20stem%20cell-based%20transplant%20for%20Parkinson%E2%80%99s%20Disease.mp3": "iLoMMHAIyiM",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Flodkra%CC%88fta%20%E2%80%93%20provfiske%202020.mp3": "BCNAWPotZqw",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Folkbiblioteket%20och%20den%20digitala%20kompetensen.mp3": "W7cvqv8dTDI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Forskare%20ska%20ta%20reda%20pa%CC%8A%20vad%20ma%CC%88nniskor%20tycker%20om%20att%20a%CC%88ta%20ta%CC%8Ang.mp3": "Do5mBrVdJwI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Forskarportra%CC%88tt%20%E2%80%93%20Anna%20Isaksson%2C%20docent%20i%20sociologi.mp3": "IS5FqNNdcGA",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Forskningsprojekt%20AHA%20II%20%E2%80%93%20ho%CC%88r%20forskare%20och%20samverkansparter%20bera%CC%88tta.mp3": "GKDwLhEmNAM",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Fo%CC%88rdomspanelen%20%E2%80%93%20med%20Jube%CC%88l%20och%20Ho%CC%88gskolan%20i%20Halmstad.mp3": "nobsdtQIf-0",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ga%CC%88ngkriminella%20driver%20familje-%20och%20HVB-hem.mp3": "qZu6v-KPmVw",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Go%CC%88teborgskursen.mp3": "q1amUMIhCEI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Grundforskning%20fo%CC%88r%20en%20klokare%20va%CC%88rld.mp3": "BCHQBw_q3zg",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ho%CC%88ns%20i%20tra%CC%88dga%CC%8Ard.mp3": "Da1v5Y7PF38",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/I%20LEARNT%20GREEK.mp3": "YVMN73Pg-tk",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Informationsfilm%20om%20o%CC%88ppen%20tillga%CC%8Ang%20-%20Bakgrund.mp3": "zD1qhtttibg",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Informationsfilm%20om%20o%CC%88ppen%20tillga%CC%8Ang%20-%20Introduktion.mp3": "knbK7ODMDNE",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Introduktion%20till%20Libris%20katalogisering.mp3": "2Fn9CwXJcy4",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Jag%20a%CC%88r%20sa%CC%88mst%20pa%CC%8A%20att%20misslyckas.mp3": "onGK49MtJh4",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Jakten%20pa%CC%8A%20den%20perfekta%20sno%CC%88n%20-%20Sverige%20forskar.mp3": "kKVJ87J_N8I",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Jimmie%20A%CC%8Akessons%20lilla%20detalj.mp3": "w7Nb37LpwAw",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Julia%20pluggade%20Spra%CC%8Ak%2C%20textbearbetning%20och%20digital%20kommunikation..mp3": "-s_br9rP9pw",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Katalogisering%20av%20monografi%20%E2%80%93%20o%CC%88versa%CC%88ttning%20%5B201126%5D.mp3": "Xza57Ym20d8",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Katalogva%CC%8Ard%20%E2%80%93%20att%20flytta%20besta%CC%8And%20i%20Libris%20katalogisering.mp3": "7FE3jNZs6Xk",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ka%CC%88llkoll%20-%20En%20guide%20till%20fejkva%CC%88rlden.mp3": "z-vVlmrYQsU",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ka%CC%88llkoll%20-%20Medieetik%20-%20en%20riktig%20mediecirkus.mp3": "HIvkXpPn_kU",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ka%CC%88llkoll%20-%20Sa%CC%8A%20styr%20algoritmer%20sociala%20medier.mp3": "ImHQ9uu62kA",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Kombinera%20yrkesliv%20och%20masterutbildning%20genom%20projektbaserad%20master!.mp3": "EC0sWMWye-k",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Kommunalpolitik%20och%20folkliga%20uppror%20%E2%80%93%20ett%20samtal%20om%20grundforskning%20i%20praktiken.mp3": "KOEbi5SNtL4",
+  let $mp3Choice = $('#mp3Choice');
 
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20april%202023.mp3": "PzPS3ts8g10",
+  function fixSectionBox() {
+    $mp3Choice.select2();
 
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20juni%202023.mp3": "25qeUvjZoMo",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20maj%202023.mp3": "JbMOGoTHaVk",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20mars%202023.mp3": "UNoZ-V_sOR8",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/La%CC%88st%20i%20september%202023.mp3": "RZ9v2dV5pE0",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Lisa%20pluggade%20Spra%CC%8Ak%2C%20textbearbetning%20och%20digital%20kommunikation..mp3": "RvsHJg_fyyE",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Litteraturhistoria.mp3": "qEx_nKamJ7I",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Maskinen%20som%20kan%20ra%CC%88dda%20Nooshi%20Dadgostar%20fra%CC%8An%20kritik.mp3": "HFurQY-1me4",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Ma%CC%8Anga%20ma%CC%8Att%20ska%20sta%CC%88mma%20na%CC%88r%20man%20bygger%20trappa%20%E2%80%93%20sa%CC%8A%20ha%CC%88r%20gjorde%20jag.mp3": "Yd5bJfTMoLM",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Moa%20bera%CC%88ttar%20om%20studentlivet%20i%20Halmstad.mp3": "D7pK_pEfok8",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/NATO%20och%20Warszawapakten%20(Samha%CC%88llskunskap)%20-%20www.binogi.se.mp3": "d3uZ1DZl-40",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Nazist%20so%CC%88ker%20fru.mp3": "C5qfk9wq4IU",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/O%CC%88verleva%20i%20rymden%20-%20Sverige%20forskar.mp3": "DJkJmCJFx-8",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/POESI%20FO%CC%88R%20FISKAR%20-%20Gilla.mp3": "MuweVvnVu2o",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/POESI%20FO%CC%88R%20FISKAR%20-%20Happy%20Ending.mp3": "RKjZwUH9znw",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/POESI%20FO%CC%88R%20FISKAR%20-%20Se%20Mig.mp3": "kjZpk4yTEcg",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Plugga%20Professionell%20idrottskarria%CC%88r%20och%20arbetsliv.mp3": "A3JKar4pLmE",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Plugga%20och%20idrotta%20samtidigt.mp3": "XgIcDZu7q5A",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Plugga%20till%20fo%CC%88rskolla%CC%88rare.mp3": "BLSDWKW16R0",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Plugga%20till%20ingenjo%CC%88r%20i%20ha%CC%8Allbar%20energi%20%E2%80%93%20mo%CC%88t%20en%20alumn.mp3": "3Q8aZZ3PYTI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Prima%CC%88rkatalogisering%20av%20bok%20med%20icke-latinsk%20alfabet%20%5B201021%5D.mp3": "f7zKLtLf9X8",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Prima%CC%88rkatalogisering%20av%20bok%20pa%CC%8A%20originalspra%CC%8Ak%20%5B201027%5D.mp3": "YpR4WUKEQX4",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Professor's%20portrait%20%E2%80%93%20Ying%20Fu%2C%20Professor%20of%20Applied%20Electromagnetics.mp3": "D4i2FsFPc2U",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Professorsportra%CC%88tt%20%E2%80%93%20Marie%20Mattsson%2C%20professor%20i%20miljo%CC%88vetenskap.mp3": "3Axd-G2k1GM",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/RDA%20%E2%80%93%20Regler%2C%20praxis%20och%20anvisningar.mp3": "3SlfjP8c2-w",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Radikala%20o%CC%88stermalmare.mp3": "0wvP5xw3JnE",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Redigera%2C%20uppgradera%20och%20berika.mp3": "YtkSTY4i8po",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Redigering%20av%20importerad%20post%20med%20icke-latinskt%20alfabet%20%5B201021%5D.mp3": "GCT3BBilD_w",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Rundtur%20pa%CC%8A%20campus%20med%20Timmie!.mp3": "bz2t1K1oDgQ",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Sa%CC%8A%20pa%CC%8Averkar%20musik%20kroppen%20-%20Sverige%20forskar.mp3": "tucph_MRn-8",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Skapa%20en%20vildare%20tra%CC%88dga%CC%8Ard.mp3": "Xl08NwMmrPU",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Skra%CC%88ckbo%CC%88cker%20jag%20vill%20la%CC%88sa.mp3": "zN4oU4M9-6c",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/So%CC%88kning%20i%20Libris%20katalogisering.mp3": "zqB67F6raIQ",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Spa%CC%8Angolv%20a%CC%88r%20la%CC%88ttlagda%20men%20det%20ga%CC%8Ar%20att%20go%CC%88ra%20fel.mp3": "TPp-n7pa_uA",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Statens%20fastighetsverk%20och%20fo%CC%88rfallet%20av%20Stockholms%20kulturinstutioner.mp3": "gdptRQ-rfxI",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Sta%CC%88rkt%20svensk%20forskningskvalitet%20till%20nytta%20fo%CC%88r%20samha%CC%88llet.mp3": "dlgaX5rraJo",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Stephanie%20om%20studentlivet%20i%20Halmstad.mp3": "HliTO1592MQ",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Stephanie%20om%20studentlivet%20i%20Halmstad.srt": "HliTO1592MQ",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Stockholmskursen.mp3": "SoDN5aBgL3k",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Studenten%20Julia%20bera%CC%88ttar%20om%20Arbetsvetenskap.mp3": "WDRxpzEabw4",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Superpla%CC%8Astret%20som%20la%CC%88ker%20alla%20sa%CC%8Ar%20-%20Sverige%20forskar.mp3": "ukl0XEJ4mRg",
-    "https://storage.googleapis.com/cupitor-220103.appspot.com/swedish_media/Svenska%20nyheter%20med%20Messiah%20Hallberg%20-%20Hamas-fo%CC%88rdo%CC%88manden.mp3": "0nKaFc5ZzkE"
+    let optgroupState = {};
+
+    $("body").on('click', '.select2-container--open .select2-results__group', function() {
+      $(this).siblings().toggle();
+      let id = $(this).closest('.select2-results__options').attr('id');
+      let index = $('.select2-results__group').index(this);
+      optgroupState[id][index] = !optgroupState[id][index];
+    })
+
+    $mp3Choice.on('select2:open', function() {
+      $('.select2-dropdown--below').css('opacity', 0);
+      setTimeout(() => {
+        let groups = $('.select2-container--open .select2-results__group');
+        let id = $('.select2-results__options').attr('id');
+        if (!optgroupState[id]) {
+          optgroupState[id] = {};
+        }
+        $.each(groups, (index, v) => {
+          optgroupState[id][index] = optgroupState[id][index] || false;
+          optgroupState[id][index] ? $(v).siblings().show() : $(v).siblings().hide();
+        })
+        $('.select2-dropdown--below').css('opacity', 1);
+      }, 0);
+    })
   }
 
-  $('#mp3Choice').html('').append($(`<option>-</option>`).attr('value', ''))
+  $(document).ready(function() {
+    fixSectionBox()
+  });
 
-  function getNameFromUrl(it) {
-    let parts = it.split("/")
-    let name = decodeURI(parts[parts.length - 1]);
-    return name;
+  async function fetchCategorisation() {
+    let categorisation = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/categorisation.txt")
+    categorisation = await categorisation.text()
+    categorisation = categorisation.split("\n")
+    let categories = {}
+    categorisation.forEach(it => {
+      let l = it.split(" || ")
+      let c = '        '
+      if(l.length === 4){
+        c = l[0]
+      }
+      categories[l[l.length-1]] = c
+    })
+    return categories
   }
 
-  Object.keys(mp3s).forEach(it => {
-    let name = getNameFromUrl(it);
-    let $opt = $(`<option>${name}</option>`).attr('value', it)
-    $('#mp3Choice').append($opt)
-  })
+  function populateAllLinks() {
+    let $mp3Choice = $('#mp3Choice');
+    $mp3Choice.html('').append($(`<option>-</option>`).attr('value', ''))
+    let srts = window.srts
+    let srtLinks = Array.from(new Set(window.srts.map(it => it.link)));
+
+    let categories = window.categories
+    srtLinks = _(srtLinks).chain()
+      .sortBy(link => categories[link])
+      // .sortBy(function(link) {
+      //     let srt = srts.find(it => it.link === link)
+      //     return srt.name.split(" || ")[0];
+      // })
+      .reverse()
+      .value()
+
+    let ogs = {}
+    let getOptgroup = category => {
+      if (!ogs[category]) {
+        ogs[category] = $(`<optgroup label="${category}">`)
+      }
+      return ogs[category]
+    }
+    srtLinks.forEach(link => {
+      let item = srts.find(it => it.link === link)
+      let $opt = $(`<option>${item.name.replace(".en.srt", "").replace(".sv.srt", "")}</option>`).attr('value', item.link)
+      getOptgroup(categories[item.link]).append($opt)
+    })
+
+    Object.values(ogs).forEach(it => $mp3Choice.append(it))
+    return srts;
+  }
+
+  async function loadAllSubtitles() {
+    let srts = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/combined.json")
+    srts = await srts.json()
+    window.srts = srts
+    window.categories = await fetchCategorisation()
+
+    populateAllLinks();
+  }
+
+  loadAllSubtitles()
 
   function srtToJson(text, lang) {
-    let parseSrtItem = (x, lang) => {
-      let [id, times, ...rest] = x.split("\n")
-      let [ts, te] = times.split(" --> ")
-      let item = {ts: ts, te: te, id: id}
-      item[lang] = rest.join("\n")
-      return item
+    let items = []
+    let currentItem = {}
+    currentItem[lang] = ''
+    text.split("\n").forEach(line => {
+      line = line.trim()
+      let matchTime = line.match(/(\d\d:\d\d:\d\d,\d\d\d) --> (\d\d:\d\d:\d\d,\d\d\d)/m)
+      let matchId = line.match(/^\d+$/m)
+      if(matchId) {
+        items.push(currentItem)
+        currentItem = {id: line}
+        currentItem[lang] = ''
+      } else if(matchTime) {
+        currentItem['ts'] = matchTime[1]
+        currentItem['te'] = matchTime[2]
+      } else {
+        currentItem[lang] += line
+      }
+    })
+
+    items.push(currentItem)
+    return items.filter(it => it.ts)
+  }
+
+  function searchText() {
+    let searchText = $("#searchInput").val().trim()
+
+    if(searchText.length < 3) {
+      populateAllLinks()
+      return
     }
-    return text.trim().split("\n\n").map(it => parseSrtItem(it, lang))
-  }
+    let items = window.srts.filter(it => it.srt.toLowerCase().indexOf(searchText.toLowerCase()) >= 0)
+    let $mp3Choice = $('#mp3Choice')
+    $mp3Choice.html('<option>--</option>')
 
+    let ogs = {}
+    let getOptgroup = category => {
+      if(!ogs[category]) {
+        ogs[category] = $(`<optgroup label="${category}">`)
+      }
+      return ogs[category]
+    }
 
-  function srtNamesFromUrl(url) {
-    //Assumes names are same for MP3 file and SRT files
-    url = url.replace(".mp3", ".srt")
-    let splits = url.split("/")
-    let nm = splits[splits.length - 1]
+    items.map(item => {
+      let count = (item.srt.toLowerCase().match(new RegExp(searchText,"gi")) || []).length;
+      return ({...item, matches: count})
+    }).toSorted((x,y) => y.matches - x.matches)
+      .forEach(item => {
+      let $opt = $(`<option>(${item.matches}) ${item.name.replace(".en.srt", "").replace(".sv.srt", "")}</option>`).attr('value', item.link)
+      getOptgroup(window.categories[item.link]).append($opt)
+    })
 
-    return {sv: nm, en: nm.replace(".srt", "_EN.srt")}
-  }
-
-  function srtUrl(srtNm) {
-    return `https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/${srtNm}`
+    Object.values(ogs).forEach(it => $mp3Choice.append(it))
   }
 
   function storeSubtitles(subs) {
@@ -480,31 +518,28 @@
     return originalSubs;
   }
 
-  async function loadSubtitles(mp3Url) {
-    if (mp3Url.indexOf('https://') < 0) return
+  function loadSubtitlesForLink(link) {
+    let sv = window.srts.find(it => it.link === link &&  it.name.endsWith(".sv.srt"))
+    let en = window.srts.find(it => it.link === link &&  it.name.endsWith(".en.srt"))
 
-    let srtNames = srtNamesFromUrl(mp3Url)
-
-    let svSrt = await fetch(srtUrl(srtNames.sv), {})
-    if (svSrt.status === 404) {
-      alert('Sv SRT not found')
+    if(!sv) {
+      alert("SV subtitle not found")
       return
     }
-    let sv = await svSrt.text()
 
-    let enSrt = await fetch(srtUrl(srtNames.en), {})
-    if (enSrt.status === 404) {
-      alert('En SRT not found')
-      return
+    if(!en) {
+      en = {...sv}
     }
-    let en = await enSrt.text()
 
-    sv = srtToJson(sv, 'sv')
-    en = srtToJson(en, 'en')
+    window.srtLoaded = sv.srt
+    sv = srtToJson(sv.srt, 'sv')
 
+    en = srtToJson(en.srt, 'en')
     let combined = sv.map(svItem => {
-      let enItem = en.find(eni => eni.id === svItem.id)
-      return {...svItem, ...enItem}
+      let enItem = en.find(eni => eni.ts === svItem.ts)
+      let combinedItem = {...svItem, ...enItem};
+      combinedItem['id'] = svItem.id //Give priority to SV subtitle
+      return combinedItem
     })
     // console.log(sv)
     // console.log(en)
@@ -512,32 +547,34 @@
 
     storeSubtitles(combined)
 
-    player.setSrc(mp3Url)
+    player.setSrc(link)
 
-    playSelectedFile()
-
-    if(!playingVideo){
-      $('#youtube-link').attr('href', `https://www.youtube.com/results?search_query=${getNameFromUrl(mp3Url).replace(".mp3", "")}`).show()
+    let pages = null
+    let searchText = $("#searchInput").val().trim().toLowerCase();
+    if(searchText.length > 0) {
+      pages = sv.filter(it => it.sv.toLowerCase().indexOf(searchText) >= 0).map(it => it.id)
     }
+
+    playSelectedFile(pages)
   }
 
-  $('#mp3Choice').change(async e => {
+  $mp3Choice.change(async e => {
     clearSubtitles()
     player.pause()
     stopVideo()
     //Load subtitle
-    let mp3Url = $('#mp3Choice').val()
-    let youtubeVideoId = mp3s[mp3Url]
+    let link = $mp3Choice.val()
+    let youtubeVideoId = link
     if(youtubeVideoId.trim().length) {
       $('#player').show()
       loadVideo(youtubeVideoId)
       window.playingVideo = true;
       $('#youtube-link').hide()
-      await loadSubtitles(mp3Url);
+      loadSubtitlesForLink(link);
     } else {
       $('#player').hide()
       window.playingVideo = false;
-      await loadSubtitles(mp3Url);
+      loadSubtitlesForLink(link);
     }
   })
 
@@ -551,21 +588,24 @@
   }
 
   function goToCurrentPageNumber() {
-    console.log('Go to current page', new Date())
+    // console.log('Go to current page', new Date())
     let pageNum = $('#pagination').pagination('getCurrentPageNum')
     window.rewindData = null
     prepareSubsForPage(pageNum, true)
   }
 
-  let playSelectedFile = function (event) {
+  let playSelectedFile = function (pages) {
+    let $pagination = $('#pagination');
     try {
-      $('#pagination').pagination('destroy');
+      $pagination.pagination('destroy');
     } catch (e) {
       console.log(e)
     }
 
-    $('#pagination').pagination({
-      dataSource: range(1, window.subtitles.length + 1),
+    let pageDataSource = pages || range(1, window.subtitles.length + 1);
+    window.pageDataSource = pageDataSource
+    $pagination.pagination({
+      dataSource: pageDataSource,
       pageSize: 1,
       // showPrevious: false,
       // showNext: false,
@@ -573,7 +613,7 @@
       showGoButton: true,
       formatGoInput: 'go to <%= input %> st/rd/th',
       callback: function (data, pagination) {
-        // console.log(data)
+        // console.log("Page changed", data)
       }, //page changed
       afterPageOnClick: e => {
         // console.log(e)
@@ -588,21 +628,19 @@
     })
 
     $('#playBtn').attr('disabled', false)
-    prepareSubsForPage(1)
-
+    prepareSubsForPage(1, true)
+    goToCurrentPageNumber()
     // console.log(originalSubs.map(it => `${it.number} ${it.ts_o}-${it.te_o} (${it.ts}-${it.te} )-> ${it.sv}`).join("\n"))
   }
 
   const ontimeupdate = e => {
     // console.log(currentSub, player.currentTime)
+    if(window.seekRequestProcessing) {
+      return
+    }
     let ct = player.getCurrentTime()
     if(window.playingVideo) {
       ct = window.ytPlayer.getCurrentTime()
-    }
-
-    if(window.seekedTime) {
-      ct = window.seekedTime
-      window.seekedTime = null
     }
 
     if (window.rewindData) {
@@ -618,12 +656,12 @@
     renderSubtitles(window.currentSub)
     setSpeed();
 
-    if (!window.rewindData && ct >= window.currentSub.te && !window.pauseTimer) {
+    if (!window.rewindData && ct >= window.currentSub.te) {
       // Go to next subtitle
       // player.pause()
-      $('#pagination').pagination('next', (data, p) => {
-        console.log('Going to next page', new Date(), "Current Time ",ct)
-        prepareSubsForPage(data)
+      $('#pagination').pagination('next', data => {
+        console.log('Ontimeupdate: Going to next page', new Date(), "Current Time ",ct, "Data", data)
+        prepareSubsForPage(window.pageDataSource.findIndex(it => it+"" === data + "") + 1, true)
       })
     }
   }
@@ -716,12 +754,14 @@
     $('#controls').css({width: '100%', bottom: '-15em', right: 0})
     $('#player-info').hide()
     $('#speed-control').parent().hide()
+
+    $('#mp3Choice').parent().css({width: ww - 20})
   }
   function onYouTubeIframeAPIReady() {
     window.ytPlayer = new YT.Player('player', {
       height: ytHeight,
       width: ytVideoWidth,
-      videoId: 'JSR5ETrEmIU',
+      videoId: 'K8P_USOppfs',
       playerVars: {
         'playsinline': 1
       },
