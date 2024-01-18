@@ -11,7 +11,7 @@
     <script type="text/javascript" src="/pagination.min.js"></script>
     <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
     <script type="text/javascript" src="/rx.all.min.js"></script>
-    <script type="text/javascript" src="/rx.all.min.js"></script>
+    <script type="text/javascript" src="/sentence-splitter.js"></script>
 
     <script type="text/javascript" src="/jquery.lettering.js"></script>
     <script type="text/javascript" src="/jquery.fittext.js"></script>
@@ -59,25 +59,34 @@
       };
     </script>
     <style>
-    .btn {
+      .btn {
         cursor: pointer;
-    }
+      }
 
-    .Comment {
-      border-left: 1px solid black;
-      padding-left: 4px;
-    }
-    .btn:hover {
-      background-color: cyan;
-    }
+      .Comment {
+        border-left: 1px solid black;
+        padding-left: 4px;
+      }
 
-    .highlight, .highlighted-selection {
-      background-color: yellow;
-    }
+      .btn:hover {
+        background-color: cyan;
+      }
 
-    .srt-line.selected {
-      background-color: cyan;
-    }
+      .highlight, .highlighted-selection {
+        background-color: yellow;
+      }
+
+      .srt-line.selected {
+        background-color: cyan;
+      }
+
+      .main-line {
+        color: blue;
+      }
+
+      .secondary-line {
+        color: grey;
+      }
     </style>
 
     <script src="/play.js"></script>
@@ -86,15 +95,28 @@
     <link rel="stylesheet" href="/fontawesome-all.css">
 
     <script>
-      async function extractMP3(url, request) {
-        let resp = await fetch(url, {
+      window.onbeforeunload = e => {
+        let yes = confirm('Are you sure you want to leave?')
+        if (!yes) {
+          e.preventDefault()
+          e.stopPropagation()
+          return false
+        }
+      }
+
+      function postRequestConfig(request) {
+        return {
           method: "POST",
-          body: JSON.stringify(request),
+          body: request ? JSON.stringify(request) : null,
           mode: "no-cors",
           headers: {
             "Content-Type": "application/json",
           }
-        });
+        };
+      }
+
+      async function extractMP3(url, body) {
+        let resp = await fetch(url, postRequestConfig(body));
         console.log(resp)
       }
 
@@ -102,11 +124,12 @@
         let words = text.split(" ")
         let res = []
         let current = ""
-        for(let i=0; i < words.length; i++) {
-          let w = words[i]
-          if(current.length + w.length >= max_chars) {
+        let sentences = splitSentences(text).filter(it => it.type === 'Sentence')
+        for (let i = 0; i < sentences.length; i++) {
+          let w = sentences[i].raw
+          if (current.length + w.length >= max_chars) {
             res.push(current)
-            current = w+" "
+            current = w + " "
           } else {
             current += (w + " ")
           }
@@ -122,16 +145,16 @@
             let folderName = $('#folderName').val().trim() || window.searchText
             let fl = $(e).data("file")
 
-            fl = window.searchResult.find(it => it.path._str === fl.path._str)
+            fl = window.searchResult.find(it => it.path === fl.path)
 
-            let lines = $(e).find(".line").map((i,e) => $(e).data()).toArray()
-                            .map(it => it.index).map(idx => fl.data.find(it => it.index === idx))
+            let lines = $(e).find(".line").map((i, e) => $(e).data()).toArray()
+              .map(it => it.index).map(idx => fl.data.find(it => it.index === idx))
             console.log(fl, lines)
             let url = 'http://localhost:5000/extract_word_from_subtitle'
             let request = {
               srt_path: file,
               start: lines[0].start.ordinal,
-              end: lines[lines.length-1].end.ordinal,
+              end: lines[lines.length - 1].end.ordinal,
               word: folderName,
               text: lines.map(it => it.text).join(" ")
             };
@@ -141,22 +164,23 @@
       }
 
       function getTimes(el, fl) {
-        let lines = $(el).find(".line").map((i,e) => $(e).data()).toArray()
+        let lines = $(el).find(".line").map((i, e) => $(e).data()).toArray()
           .map(it => it.index).map(idx => fl.data.find(it => it.index === idx))
 
         return {
-          start: lines[0].start.ordinal, end: lines[lines.length-1].end.ordinal
+          start: lines[0].start.ordinal, end: lines[lines.length - 1].end.ordinal
         }
       }
 
       function highlightedText(text) {
+        text = _.trim(text, "-:_")
         let hText = text
         try {
           let match = text.match(new RegExp(window.searchText, "i"))
           let index = match.index
           hText = text.substring(0, index) + "<span class='highlight'>" + text.substring(index, index + match[0].length) + "</span>" + text.substring(index + match[0].length);
         } catch (e) {
-          console.log(e)
+          // console.log(e)
         }
         return hText;
       }
@@ -165,7 +189,7 @@
         let selTxt = getSelectionText() || ''
 
         function playChunk(_txt) {
-          return new Promise(function(resolve, reject) {
+          return new Promise(function (resolve, reject) {
             let a = new Audio()
             a.src = "http://localhost:5000/tts-proxy?q=" + _txt
             a.preload = "auto";
@@ -189,6 +213,128 @@
         dampenBgMusic().promise.then(x => play())
       }
 
+      function numberOfItemsToShow() {
+        let n = parseInt(numberOfFindingsToShow.value);
+        if (n === -1) {
+          return 1000
+        }
+        return n
+      }
+
+      function getWords(text, searchText) {
+        const segmentor = new Intl.Segmenter([], {granularity: 'word'});
+        const segmentedText = segmentor.segment(text);
+        let words = Array.from(segmentedText, ({segment}) => segment).filter(it => it.trim().length > 1);
+        words.push(searchText)
+        return words;
+      }
+
+      function getMatchingWords(list, search, functionToGetLine) {
+        let wordToItemsMap = {}
+        list.forEach(item => {
+          let matches = functionToGetLine(item).map(it => getWords(it.text, search))
+            .flat().map(it => it.trim().toLowerCase())
+            .filter(it => it.match(new RegExp(search.toLowerCase(), "i")))
+
+          _.uniq(matches).forEach(match => {
+            if (!wordToItemsMap[match]) {
+              wordToItemsMap[match] = []
+            }
+            wordToItemsMap[match].push(item)
+          })
+        })
+        return wordToItemsMap;
+      }
+
+      function populateNonSRTFindings(wordToItemsMap, $result) {
+        Object.keys(wordToItemsMap).toSorted().forEach(word => {
+          let items = wordToItemsMap[word]
+          let wordBlock = $(`<div><h5 class="accordion">${word}</h5></div>`)
+
+          _.take(items, numberOfItemsToShow()).forEach(item => {
+            let parts = item.file.split("/")
+            let fileName = parts[parts.length - 1]
+            let $line = $(`<div class="normal-line" title="${fileName}"></div>`)
+
+            chunkifySentence(item.text, 190).forEach(chunk => {
+              let div = $(`
+    <div class="line-part"> ${highlightedText(chunk)} <img src="/img/icons/play_icon.png"
+        alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn">
+    </div>`);
+              div.data({text: chunk})
+              $line.append(div)
+            })
+            wordBlock.append($line).append('<br>')
+          })
+          $result.append(wordBlock)
+        })
+      }
+
+      function getMainSubAndSecondarySub(file, line) {
+        let mainSub, secondarySub = {};
+        if (file.path.endsWith(".sv.srt")) {
+          mainSub = line;
+          mainSub.text = highlightedText(mainSub.text)
+          let found = window.searchResult.find(it => it['en_subs'] && it['en_subs'].path === file.path.replaceAll(".sv.srt", ".en.srt"));
+          if (found) secondarySub = found.en_subs.data.find(it => it.index === line.index)
+        } else {
+          mainSub = window.searchResult.find(it => it['sv_subs'] && it['sv_subs'].path === file.path.replaceAll(".en.srt", ".sv.srt"))
+            .sv_subs.data.find(it => it.index === line.index)
+          secondarySub = line;
+          secondarySub.text = highlightedText(secondarySub.text)
+        }
+
+        if (!secondarySub) secondarySub = {text: ""}
+        if (!mainSub) mainSub = {text: ""}
+        return {mainSub, secondarySub};
+      }
+
+      function htmlForSrtLine(_line, file, url) {
+        let line = {..._line}
+
+        let {mainSub, secondarySub} = getMainSubAndSecondarySub(file, line);
+
+        return $(`<div class="srt-line" data-index="${line.index}" data-file="${file.path}">
+                                    <span class="add-prev-btn btn"> + </span>
+                                    <span class="remove-next-btn btn"> - </span>
+                                    <span class="line main-line" data-index="${line.index}"> ${mainSub.text} </span>
+                                    <span class="remove-prev-btn btn"> - </span>
+                                    <span class="add-next-btn btn"> + </span>
+                                    <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" data-url="${url}">
+                                    <br>
+                                 </div>
+                                 <div class="line secondary-line" data-index="${line.index}"> ${secondarySub.text} </div>
+                                 <br>`).data({line: line, file: file})
+      }
+
+      function populateSRTFindings(wordToItemsMap, $result) {
+        Object.keys(wordToItemsMap).toSorted().forEach(word => {
+          let items = wordToItemsMap[word]
+          let wordBlock = $(`<div ><h5 class="accordion">${word}</h5></div>`)
+
+          let getSubs = it => it['en_match'] ? it['en_subs'] : it['sv_subs']
+
+          _.take(items, numberOfItemsToShow()).filter(getSubs)
+            .toSorted((x, y) => getSubs(x).path === window.preferredFile ? -1 : 1)
+            .forEach(item => {
+              let file = getSubs(item)
+              let parts = file.path.split("/")
+              let fileName = parts[parts.length - 1]
+              let $file = $(`<div class="srt-file" title="${fileName}">
+                            <h4 data-file="${file.path}" style="display: none;"> ${word} </h4>
+                        </div>`)
+              let matchingLines = file.data.filter(it => it.text.toLowerCase().match(word))
+
+              _.take(matchingLines, numberOfItemsToShow()).forEach(line => {
+                $file.append(htmlForSrtLine(line, file, item.url, items));
+              })
+
+              wordBlock.append($file)
+            })
+          $result.append(wordBlock)
+        })
+      }
+
       function render(list, search) {
         window.searchResult = list;
         window.searchText = search;
@@ -196,61 +342,20 @@
         let $result = $('#result');
         $result.html('')
 
-        function htmlForSrtLine(line, file, url) {
-          let text = _.trim(line.text, "-:_");
-          let hText = highlightedText(text);
-
-          return $(`<div class="srt-line" data-index="${line.index}" data-file="${file.path._str}">
-                                    <input type="checkbox"/>
-                                    <span class="add-prev-btn btn"> + </span>
-                                    <span class="remove-next-btn btn"> - </span>
-                                    <span class="line main-line" data-index="${line.index}"> ${hText} </span>
-                                    <span class="remove-prev-btn btn"> - </span>
-                                    <span class="add-next-btn btn"> + </span>
-                                    <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" data-url="${url}">
-                                 </div>`).data({line: line, file: file})
-        }
-
         $result.append('<br><br>')
 
-
-        list.filter(it => it.text).forEach(item => {
-          let $line = $(`<div class="normal-line"></div>`)
-
-          chunkifySentence(item.text, 190).forEach(chunk => {
-            let div = $(`
-    <div class="line-part"> ${highlightedText(chunk)} <img src="/img/icons/play_icon.png"
-        alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn">
-    </div>`);
-            div.data({text: chunk})
-            $line.append(div)
-          })
-
-          $result.append($line).append('<br>')
-        })
+        let wordToItemsMap = getMatchingWords(list.filter(it => it.sv_subs), search, item => item.sv_subs.data);
+        populateSRTFindings(wordToItemsMap, $result);
 
         $result.append("<hr>")
 
-        list.filter(it => it.subs)
-          .toSorted((x, y) => x.subs.path._str === window.preferredFile ? -1 : 1)
-          .forEach(item => {
-          let file = item.subs
-          let parts = file.path._str.split("/")
-          let fileName = parts[parts.length - 1]
-          let $file = $(`<div class="srt-file">
-                            <h4 data-file="${file.path._str}"> ${fileName} </h4> <button onclick="exportSelection('${file.path._str}', this)"> Export </button>
-                        </div>`)
-          let matchingLines = file.data.filter(it => it.text.toLowerCase().match(search))
+        wordToItemsMap = getMatchingWords(list.filter(it => it.text), search, item => [item]);
+        populateNonSRTFindings(wordToItemsMap, $result);
 
-          matchingLines.forEach(line => {
-            $file.append(htmlForSrtLine(line, file, item.url));
-          })
-
-          $result.append($file)
-        })
+        renderAccordions()
 
         $(".srt-file h4").dblclick(e => {
-            window.preferredFile = $(e.target).data().file
+          window.preferredFile = $(e.target).data().file
         })
 
         $('.add-prev-btn').click(e => {
@@ -261,9 +366,9 @@
           let firstLine = $(lines[0])
 
           let nextLine = firstLine.data('index')
-          if(nextLine < 2) return
+          if (nextLine < 2) return
 
-          let newLn = dt.file.data[nextLine-2]
+          let newLn = dt.file.data[nextLine - 2]
           let $newLine = $(`<span class="line" data-index="${newLn.index}"> ${newLn.text}</span>`);
           $newLine.insertBefore(firstLine)
         })
@@ -271,10 +376,10 @@
           let plusBtn = $(e.target);
           let dt = plusBtn.parent().data()
           let lines = plusBtn.parent().find(".line").toArray()
-          let lastLine = $(lines[lines.length-1])
+          let lastLine = $(lines[lines.length - 1])
 
           let prevLine = lastLine.data('index')
-          if(prevLine === dt.file.data.length) return
+          if (prevLine === dt.file.data.length) return
 
           let newLn = dt.file.data[prevLine]
           let $newLine = $(`<span class="line" data-index="${newLn.index}"> ${newLn.text}</span>`);
@@ -285,7 +390,7 @@
           let btn = $(e.target);
           let dt = btn.parent().data()
           let prevLine = btn.prev('.line')
-          if(prevLine.hasClass("main-line")) return
+          if (prevLine.hasClass("main-line")) return
 
           prevLine.remove()
         })
@@ -294,30 +399,31 @@
           let btn = $(e.target);
           let dt = btn.parent().data()
           let nextLine = btn.next('.line')
-          if(nextLine.hasClass("main-line")) return
+          if (nextLine.hasClass("main-line")) return
 
           nextLine.remove()
         })
 
         $(".srt-line .play-btn").click(e => {
-          if($(e.target).hasClass('disabled')) return
+          if ($(e.target).hasClass('disabled')) return
 
           $('.srt-line').removeClass('selected')
           $(e.target).parents('.srt-line').addClass('selected')
 
-           let url = $(e.target).data("url")
-           let dt = $(e.target).parent().data()
+          let url = $(e.target).data("url")
+          let dt = $(e.target).parent().data()
 
           let times = getTimes($(e.target).parent(), dt.file)
 
           let btn = $(e.target)
           $(btn).addClass('disabled')
 
-          let play = ()=> {
+          let play = () => {
             let st = times.start;
-             console.log(1)
+            console.log(1)
             let a = new Audio()
-            a.src = "http://localhost:5000/mp3_slice?srt_path="+ dt.file.path._str.replace(".srt", ".mp3") + "&start=" + st + "&end=" + times.end
+            let srt_path = dt.file.path.replace(".srt", ".mp3").replace("&", "<%amp%>")
+            a.src = "http://localhost:5000/mp3_slice?srt_path=" + srt_path + "&start=" + st + "&end=" + times.end
             a.play()
             a.currentTime = st
             a.onended = e => {
@@ -326,15 +432,16 @@
             }
 
             a.onerror = e => {
-               console.log("err", e)
-               restoreBgMusic()
+              console.log("err", e)
+              restoreBgMusic()
+              btn.removeClass('disabled')
             }
           }
 
           dampenBgMusic().promise.then(x => play())
 
-           // $( "#audioPlayerPopup" ).dialog('open')
-           // $('#audioPlayerPopup').css({width: '100%'})
+          // $( "#audioPlayerPopup" ).dialog('open')
+          // $('#audioPlayerPopup').css({width: '100%'})
         })
 
         $(".normal-line .play-btn").click(e => {
@@ -352,8 +459,13 @@
         return text;
       }
 
-      function fetchSRTs(el) {
-        let txt = $("#searchText").val().toLowerCase()
+      function fetchSRTs(searchText) {
+        if ((typeof searchText) !== 'string') {
+          searchText = null
+        }
+        let $searchText = $("#searchText");
+        let txt = searchText || $searchText.val().toLowerCase()
+        $searchText.val(txt)
         fetch("http://localhost:5000/find?text=" + txt)
           .then(it => it.json())
           .then(it => render(it, txt))
@@ -362,7 +474,6 @@
       function iframeLoaded(it) {
         console.log("Loaded", it)
       }
-
     </script>
     <style>
 
@@ -377,15 +488,16 @@
 
 
     <div id="wikiResult" style="max-height: 300px; overflow: scroll; position: fixed; height: 380px; width: 50%;">
-        <iframe id="wikiFrame" src="https://sv.wiktionary.org/wiki/upplevelse#Substantiv" width="100%" height="100%" onload="iframeLoaded()">
+        <iframe id="wikiFrame" src="" width="100%" height="100%" onload="iframeLoaded()">
         </iframe>
     </div>
     <div style="position: fixed; top: 382px; width: 50%; ">
         <input type="text" id="searchText" placeholder="Search text"
                onchange="fetchSRTs(this)"
         >
-        <input type="text" id="folderName" placeholder="Folder name">
-
+        <input type="number" id="numberOfFindingsToShow" placeholder="Show X items" value="2">
+        <button onclick="expandAll()">Expand All</button>
+        <button onclick="collapseAll()">Collapse All</button>
         <div id="result" style="overflow: scroll; height: 300px;">
         </div>
     </div>
@@ -393,288 +505,422 @@
 </div>
 <div style="float: right; left: 51%; width: 49%; position: fixed;">
     <div>
-        <textarea id="enteredWords" onchange="populateWords()"></textarea> <br>
-        Swedish Audio: <input id="swedishAudioInput" type="file" accept="audio/mpeg" onchange="analyseSoundAndSilence()">
-        <audio id="swedishAudio" controls="controls" ></audio>
+
+    </div>
+    <div>
+        <textarea id="enteredWords" onchange="populateWords()"></textarea>
+        <span style="margin-left: 2em;">
+            <input type="checkbox" id="searchWordsCheckbox">
+        </span><br>
+        Swedish Audio: <input id="swedishAudioInput" type="file" accept="audio/*" onchange="analyseSoundAndSilence()">
+        <audio id="swedishAudio" controls="controls"></audio>
         <br>
-        Background Music: <input id="bgMusicInput" type="file" accept="audio/mpeg" onchange="loadMediaFile(bgMusicAudio, 'bgMusicInput')">
+        Background Music: <input id="bgMusicInput" type="file" accept="audio/*"
+                                 onchange="loadMediaFile(bgMusicAudio, 'bgMusicInput')">
         <audio id="bgMusicAudio" controls="controls" autoplay></audio>
     </div>
     <div style="">
-        <audio id="swedishAudioHidden" style="display: none;"></audio>
-        <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playSelectedText()">
+        <audio id="swedishAudioHidden" style="display: none;" autoplay=""></audio>
+        <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn"
+             onclick="playSelectedText()">
     </div>
 
-    <div id="wordlist" style="height: 600px; overflow: scroll; margin-top: 1em;">
+    <div id="wordlist" style="height: 500px; overflow: scroll; margin-top: 1em; padding-bottom: 2em;">
 
     </div>
 </div>
 <script>
+  $('#numberOfFindingsToShow')[0].onchange = e => {
+    render(window.searchResult, window.searchText)
+  }
+
+  let swedishAudio = document.getElementById("swedishAudio")
   let secondsWithSound = new Set()
+  let dampenAtSeconds = new Set()
+  let restoreAtSeconds = new Set()
 
   window.dampeningInProgress = null
   window.restoringInProgress = null
 
+  let populateSecondsForBgMusic = secondsWithSound => {
+    let ts = Array.from(secondsWithSound) //normaliseTimestamp(secondsWithSound)
+    range(1, ts[ts.length - 1] + 1).forEach(x => {
+      if (secondsWithSound.has(x + 1)) {
+        dampenAtSeconds.add(x)
+      }
+      if (secondsWithSound.has(x - 1) && !secondsWithSound.has(x) && !secondsWithSound.has(x + 1)) {
+        restoreAtSeconds.add(x)
+      }
+    })
+  }
+
+  function elongateBgMusic(t) {
+    // if(secondsWithSound.has(t)) {
+    //   return
+    // }
+    // let rn = _.random(5, 15)
+    // swedishAudio.pause()
+    // setTimeout(() => {
+    //   swedishAudio.play()
+    // }, rn * 1000)
+  }
+
   function analyseSoundAndSilence() {
     let secondsHandled = new Set()
+
+    function handleTimestampSecond(t) {
+      secondsHandled.add(t)
+      elongateBgMusic(t)
+      let shouldDampen = dampenAtSeconds.has(t)
+      let shouldRestore = restoreAtSeconds.has(t)
+      if (shouldDampen) {
+        dampenBgMusic(t)
+      }
+      if (shouldRestore) restoreBgMusic(t)
+    }
+
     swedishAudio.ontimeupdate = e => {
       let t = mediaTimeInSeconds(swedishAudio);
-      if(secondsHandled.has(t)) return
+      if (secondsHandled.has(t)) return
 
-      console.log(t)
-      secondsHandled.add(t)
-      let shouldDampen = secondsWithSound.has(t + 2)
-      let shouldRestore = [0, -1, -2, +1, +2].every(it => !secondsWithSound.has(t + it))
-      if(shouldDampen) dampenBgMusic()
-      else if(shouldRestore) restoreBgMusic()
+      handleTimestampSecond(t);
     }
 
     swedishAudio.onended = e => {
       secondsHandled = new Set()
+      restoreBgMusic()
+    }
+
+    swedishAudio.oncanplay = e => {
+      recordAudio(swedishAudio.duration + 10)
     }
 
     loadMediaFile(swedishAudio, 'swedishAudioInput')
-    loadMediaFile(swedishAudioHidden, 'swedishAudioInput')
+    swedishAudio.pause()
+
+    // loadMediaFile(swedishAudioHidden, 'swedishAudioInput')
+    function getAudioBuffer() {
+      let blob = document.getElementById("swedishAudioInput").files[0]
+      return new Response(blob).arrayBuffer(); //promise
+    }
 
     swedishAudio.controls = false
-    analyseAudio(swedishAudioHidden, x => {
-      swedishAudio.controls = true
-      swedishAudio.play()
+    swedishAudioHidden.volume = 0
+
+    getAudioBuffer().then(buffer => {
+      analyseAudio(buffer, x => {
+        swedishAudio.controls = true
+        swedishAudio.play()
+      })
     })
   }
+
   function round(value, p) {
     let precision = p || 1
     let multiplier = Math.pow(10, precision || 0);
     return Math.round(value * multiplier) / multiplier;
   }
 
-function populateSoundTimes(buffer, el) {
+  function populateSoundTimes(buffer, el, suspendTime) {
     buffer = Array.from(buffer)
+    let threshold = -50;
+
+    let t = suspendTime;
     for (let i = 0; i < buffer.length; i++) {
-       if(buffer[i] > -50) secondsWithSound.add(mediaTimeInSeconds(el))
+      if (buffer[i] > threshold) {
+        secondsWithSound.add(Math.floor(round(t)))
+        populateSecondsForBgMusic(secondsWithSound)
+      }
     }
-    // console.log(a.map(it => it < -50 ? '' : round(it) + '/' + round(bgMusicAudio.currentTime)).join(' '))
-    // console.log(timesWithSound)
-}
-
-function mediaTimeInSeconds(el) {
-  return Math.floor(round(el.currentTime))
-}
-
-function loadMediaFile(el, input) {
-  el.src = URL.createObjectURL(document.getElementById(input).files[0])
-}
-
-  const MIN_DECIBELS = -45;
-  const audioContext = new AudioContext();
-  const audioStreamSource = audioContext.createMediaElementSource(swedishAudio);
-  const analyser = audioContext.createAnalyser();
-  analyser.minDecibels = MIN_DECIBELS;
-  audioStreamSource.connect(analyser);
-
-function analyseAudio(el, callbackWhenMovedEnough) {
-  secondsWithSound = new Set()
-  el.play()
-
-  const bufferLength = analyser.frequencyBinCount;
-  const domainData = new Float32Array(bufferLength);
-
-  const detectSound = () => {
-    analyser.getFloatFrequencyData(domainData);
-    populateSoundTimes(domainData, el)
-
-    if(el.currentTime > 6) {
-      callbackWhenMovedEnough(el.currentTime)
-    }
-
-    if(el.currentTime >= el.duration) {
-      console.log(secondsWithSound)
-      return
-    }
-    window.requestAnimationFrame(detectSound);
-  };
-
-  window.requestAnimationFrame(detectSound);
-}
-
-let bgControl = 1
-function dampenBgMusic() {
-  if(window.dampeningInProgress) return
-
-  let cnt = bgControl++
-  if(restoringInProgress) {
-    clearInterval(restoringInProgress.interval)
-    window.restoringInProgress = null
+    // console.log(buffer
+    //   .map(it => it < threshold ? '' : round(it) + '/' + round(t))
+    //   .join(' '))
   }
 
+  function mediaTimeInSeconds(el) {
+    return Math.floor(round(el.currentTime))
+  }
 
-  let interval = null
-  let promise = new Promise((res, rej) => {
-    let min = 0.05
+  function loadMediaFile(el, input) {
+    el.src = URL.createObjectURL(document.getElementById(input).files[0])
+  }
 
-    let vol = bgMusicAudio.volume;
-    let t = 200; // 200ms interval
+  function analyseAudio(audioData, callbackWhenMovedEnough) {
+    secondsWithSound = new Set()
+    // el.play()
 
-    interval = setInterval(
-      function() {
-        // Reduce volume by 0.05 as long as it is above 0
-        // This works as long as you start with a multiple of 0.05!
-        if (vol > min) {
-          vol -= 0.05;
-          bgMusicAudio.volume = vol;
-          console.log("Dampening", swedishAudio.currentTime, cnt)
-        } else {
-          // Stop the setInterval when 0 is reached
-          clearInterval(interval);
-          res(1)
-          window.dampeningInProgress = null
+    const seconds = Math.ceil(swedishAudio.duration)
+    const sampleRate = 96000
+    const length = seconds * sampleRate
+    const offlineAudioContext = new OfflineAudioContext({length, sampleRate});
+    offlineAudioContext.decodeAudioData(audioData, buffer => {
+      const audioBufferSourceNode = new AudioBufferSourceNode(offlineAudioContext, {buffer});
+      const analyserNode = new AnalyserNode(offlineAudioContext);
+
+      audioBufferSourceNode.connect(analyserNode);
+      audioBufferSourceNode.start();
+
+      const renderQuantumInSeconds = 128 / sampleRate;
+      const durationInSeconds = length / sampleRate;
+      const frequencyData = new Float32Array(analyserNode.frequencyBinCount);
+
+      const analyze = (index) => {
+        const suspendTime = renderQuantumInSeconds * index;
+        let el = swedishAudioHidden;
+
+        if (suspendTime < durationInSeconds) {
+          offlineAudioContext.suspend(suspendTime).then(() => {
+            analyserNode.getFloatFrequencyData(frequencyData);
+            populateSoundTimes(frequencyData, el, suspendTime)
+
+            if (secondsWithSound.size > 0) {
+              callbackWhenMovedEnough()
+            }
+
+            analyze(index + 1);
+          });
         }
-      }, t);
-  })
 
-  let ret = {promise, interval}
-  window.dampeningInProgress = ret
-  return ret
-}
+        if (index === 1) {
+          offlineAudioContext.startRendering();
+        } else {
+          offlineAudioContext.resume();
+        }
+      };
 
-function restoreBgMusic() {
-  if(window.restoringInProgress) return
-
-  let cnt = bgControl++
-
-  if(dampeningInProgress) {
-    clearInterval(dampeningInProgress.interval)
-    window.dampeningInProgress = null
+      analyze(1);
+    }, x => console.log("error", x))
   }
 
-  let interval = null
-  let promise = new Promise((res, rej) => {
-    let max = 0.5
-    let vol = bgMusicAudio.volume;
-    let t = 200; // 200ms interval
+  let bgControl = 1
 
-    interval = setInterval(
-      function () {
-        // Reduce volume by 0.05 as long as it is above 0
-        // This works as long as you start with a multiple of 0.05!
-        if (vol < max) {
-          vol += 0.05;
-          if (vol > max) {
-            vol = max
+  function dampenBgMusic(t) {
+    if (window.dampeningInProgress) return
+
+    let cnt = bgControl++
+    if (restoringInProgress) {
+      clearInterval(restoringInProgress.interval)
+      window.restoringInProgress = null
+    }
+
+    let interval = null
+    let promise = new Promise((res, rej) => {
+      console.log("Dampening at ", mediaTimeInSeconds(swedishAudio))
+      let min = 0.05
+
+      let vol = bgMusicAudio.volume;
+      let t = 200; // 200ms interval
+
+      interval = setInterval(
+        function () {
+          // Reduce volume by 0.05 as long as it is above 0
+          // This works as long as you start with a multiple of 0.05!
+          if (vol > min) {
+            vol -= 0.08;
+            bgMusicAudio.volume = vol;
+            // console.log("Dampening", swedishAudio.currentTime, cnt)
+          } else {
+            // Stop the setInterval when 0 is reached
+            clearInterval(interval);
+            res(1)
+            window.dampeningInProgress = null
           }
-          bgMusicAudio.volume = vol;
-          console.log("Restoring", swedishAudio.currentTime, cnt)
-        } else {
-          // Stop the setInterval when 0 is reached
-          clearInterval(interval);
-          window.restoringInProgress = null
-          res(1)
-        }
-      }, t);
-  })
+        }, t);
+    })
 
-  let ret = {promise, interval};
-  window.restoringInProgress = ret
-  return ret
-}
+    let ret = {promise, interval}
+    window.dampeningInProgress = ret
+    return ret
+  }
 
-window.wikiScrollPositions = {}
-function recordWikiScrollPosition() {
-  wikiScrollPositions[location.hash] = wikiResult.scrollTop
-}
+  function restoreBgMusic() {
+    if (window.restoringInProgress) return
 
-function whenWikiLinkClicked(e) {
-  e.preventDefault()
-  e.stopPropagation()
-  if (e.target.href.indexOf("/wiki/") > 0) {
-    recordWikiScrollPosition()
-    window.location.hash = e.target.href.split("/wiki/")[1].toLowerCase()
+    let cnt = bgControl++
+
+    if (dampeningInProgress) {
+      clearInterval(dampeningInProgress.interval)
+      window.dampeningInProgress = null
+    }
+
+    let interval = null
+    let promise = new Promise((res, rej) => {
+      let max = 0.5
+      let vol = bgMusicAudio.volume;
+      let t = 200; // 200ms interval
+
+      console.log("Restoring at ", mediaTimeInSeconds(swedishAudio))
+
+      interval = setInterval(
+        function () {
+          // Reduce volume by 0.05 as long as it is above 0
+          // This works as long as you start with a multiple of 0.05!
+          if (vol < max) {
+            vol += 0.08;
+            if (vol > max) {
+              vol = max
+            }
+            bgMusicAudio.volume = vol;
+            // console.log("Restoring", swedishAudio.currentTime, cnt)
+          } else {
+            // Stop the setInterval when 0 is reached
+            clearInterval(interval);
+            window.restoringInProgress = null
+            res(1)
+          }
+        }, t);
+    })
+
+    let ret = {promise, interval};
+    window.restoringInProgress = ret
+    return ret
+  }
+
+  window.wikiScrollPositions = {}
+
+  function recordWikiScrollPosition() {
+    wikiScrollPositions[location.hash] = wikiResult.scrollTop
+  }
+
+  function whenWikiLinkClicked(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.target.href.indexOf("/wiki/") > 0) {
+      recordWikiScrollPosition()
+      window.location.hash = e.target.href.split("/wiki/")[1].toLowerCase()
+      populateWiki()
+    }
+  }
+
+  window.onhashchange = e => {
     populateWiki()
   }
-}
 
-window.onhashchange = e => {
-  populateWiki()
-}
-function populateWiki() {
-  let w = window.location.hash
-  w = w.substring(1)
-  fetch("http://localhost:5000/proxy?url=https://sv.wiktionary.org/wiki/"+ w.toLowerCase())
-    .then(it => it.text())
-    .then(it => {
-      let $result = $('#wikiResult');
-      $result.html(it)
-      $(".noprint").remove()
-      $(".mw-jump-link").remove()
-      $(".mw-headline").parent().remove()
-      $("#toc").remove()
-      $result.find("a").each((i,e) => {
-        // Restore scroll position if applicable
-        if(wikiScrollPositions[location.hash]) {
-          wikiResult.scrollTop = wikiScrollPositions[location.hash]
-        } else {
-          wikiResult.scrollTop = 0
+  function whenWikiWordClicked($result) {
+    $result.find("a").each((i, e) => {
+      // Restore scroll position if applicable
+      if (wikiScrollPositions[location.hash]) {
+        wikiResult.scrollTop = wikiScrollPositions[location.hash]
+      } else {
+        wikiResult.scrollTop = 0
+      }
+      let href = $(e).attr("href") || ''
+      if (href.indexOf("/wiki/") < 0) {
+        $(e).removeAttr("href")
+      } else {
+        $(e).click(linkClicked => {
+          whenWikiLinkClicked(linkClicked);
+        })
+      }
+    }) //find end
+  }
+
+  function populateWiki() {
+    let w = window.location.hash
+    w = w.substring(1)
+    fetch("http://localhost:5000/proxy?url=https://sv.wiktionary.org/wiki/" + w.toLowerCase())
+      .then(it => it.text())
+      .then(it => {
+        let $result = $('#wikiResult');
+        $result.html(it)
+        $(".noprint").remove()
+        $(".mw-jump-link").remove()
+        $(".mw-headline").parent().remove()
+        $("#toc").remove()
+        $('#mw-navigation').remove()
+        $('#footer').remove()
+        $('#wikiResult a').css({'color': 'blue', 'text-decoration': 'underline'})
+        whenWikiWordClicked($result);
+
+        let headers = ['Böjs som']
+        'Som förled i sammansättningar används'.split(" ").forEach(it => headers.push(it))
+
+        let $table = $('table[class*="template-sv-"]');
+        if (!$table.length) {
+          $table = $('table.grammar')
         }
-        let href = $(e).attr("href") || ''
-        if(href.indexOf("/wiki/") < 0) {
-           $(e).removeAttr("href")
-        } else {
-          $(e).click(linkClicked => {
-            whenWikiLinkClicked(linkClicked);
-          })
+        let wordsToSearch = $table.find("td").filter((i, e) => !$(e).hasClass('grammar-warning')).toArray().map(it => $(it).text()).flatMap(it => it.split(/[\n ,]/)).filter(it => it.trim().length && !headers.includes(it.trim()))
+          .filter(it => it.length > 2).filter(it => it.match(/[a-zåäö]/i)).filter(it => it.indexOf('?') < 0)
+
+        wordsToSearch = wordsToSearch.slice(0, 10)
+        // $('grammar.template-sv-subst-').text().split(/[\n ,]/).filter(it => it.trim().length && !headers.includes(it.trim()))
+        //   .forEach(it => wordsToSearch.push(it))
+
+        if ($("#searchWordsCheckbox").is(":checked")) {
+          // fetchSRTs()
+          wordsToSearch = wordsToSearch.map(it => `(${it.trim()})`)
+          if (!wordsToSearch.length) {
+            wordsToSearch = [decodeURIComponent(w)]
+          }
+          searchText.value = wordsToSearch.join("|")
         }
-      }) //find end
-    })
-}
+      })
+  }
 
-function populateWords() {
-  let words = enteredWords.value
-  words = words.split(" ").map(x => `<span>${x}</span>`).join(" ")
-  words = words.replaceAll("\n", "<br>").replaceAll("-", "+")
-
-  let $wordlist = $("#wordlist");
-  $wordlist.html(words)
-
-  $wordlist.dblclick(e => {
-    $('#searchText').val(getSelectionText())
-    fetchSRTs()
-    window.location.hash = getSelectionText().toLowerCase()
-    populateWiki()
-    $("*").removeClass("highlighted-selection")
-    $(getSelectionParentElement()).addClass("highlighted-selection")
-  })
-
-  $("img[alt='User avatar']").remove()
-  $("img[alt='Subreddit Icon']").parent().parent().parent().remove()
-  $("button").remove()
-  $("svg").remove()
-  $("*[data-click-id=\"body\"]").remove()
-  $("span:contains('ConcentrateSlow4119')").remove()
-  $("*[data-testid=\"comment_author_link\"]").parent().parent().parent().parent().remove()
-
-  let commCounter = 0;
-  $("span:contains('level ')").each((i, e) => {
-    let $comment = $('<div> Comment </div>');
-    if($(e).text().trim() === 'level 1') {
-      $comment.html(`#${++commCounter} Comment`)
+  function populateWords() {
+    let words = enteredWords.value
+    let html = []
+    try {
+      html = $(words).toArray()
+    } catch (e) {
+      console.log(e)
     }
-    let $el = $comment.addClass('accordion')
-    $el.insertBefore($(e))
-  })
 
-  renderAccordions()
-}
+    let $wordlist = $("#wordlist");
+
+    if (html.length) {
+      html.forEach(it => $wordlist.append(it))
+    } else {
+      words = words.split(" ").map(x => `<span>${x}</span>`).join(" ")
+      words = words.replaceAll("\n", "<br>").replaceAll("-", "+")
+        .replaceAll(" ", "&nbsp;")
+        .replaceAll("\t", "&nbsp;&nbsp;&nbsp;")
+      $wordlist.html(words)
+    }
+
+    enteredWords.value = ''
+    $wordlist[0].ondblclick = e => {
+      if ($("#searchWordsCheckbox").is(":checked")) {
+        $('#searchText').val(getSelectionText())
+      }
+      // fetchSRTs()
+      window.location.hash = getSelectionText().toLowerCase()
+      populateWiki()
+      $("*").removeClass("highlighted-selection")
+      $(getSelectionParentElement()).addClass("highlighted-selection")
+    }
+
+    $("img[alt='User avatar']").remove()
+    $("img[alt='Subreddit Icon']").parent().parent().parent().remove()
+    $("button").remove()
+    $("svg").remove()
+    $("*[data-click-id=\"body\"]").remove()
+    $("span:contains('ConcentrateSlow4119')").remove()
+    $("*[data-testid=\"comment_author_link\"]").parent().parent().parent().parent().remove()
+
+    let commCounter = 0;
+    $("span:contains('level ')").each((i, e) => {
+      let $comment = $('<div> Comment </div>');
+      if ($(e).text().trim() === 'level 1') {
+        $comment.html(`#${++commCounter} Comment`)
+      }
+      let $el = $comment.addClass('accordion')
+      $el.insertBefore($(e))
+    })
+
+    renderAccordions()
+  }
 </script>
 
 <script>
 
-  $( "#audioPlayerPopup" ).dialog({
+  $("#audioPlayerPopup").dialog({
     modal: true,
     width: 390,
     height: 400,
     autoOpen: false,
-    open: function(){
-      $('.ui-widget-overlay').bind('click',function(){
+    open: function () {
+      $('.ui-widget-overlay').bind('click', function () {
         $('#audioPlayerPopup').dialog('close');
       })
     }
@@ -692,14 +938,14 @@ function populateWords() {
     function fixAccordionPanel(accordionEl) {
       let el = accordionEl.nextElementSibling
       let siblings = []
-      while(el) {
-        if(isAccordion(el)) break
+      while (el) {
+        if (isAccordion(el)) break
 
         siblings.push(el)
         el = el.nextElementSibling
       }
 
-      if(siblings.length > 1) {
+      if (siblings.length > 1) {
         let newEl = document.createElement('div')
         newEl.classList.add('autocreated-panel')
         siblings.forEach(it => newEl.appendChild(it))
@@ -714,10 +960,10 @@ function populateWords() {
     for (i = 0; i < acc.length; i++) {
       acc[i].classList.add(i % 2 === 0 ? 'even' : 'odd')
 
-      if(acc[i].dataset.accordion_rendered === "true") continue;
+      if (acc[i].dataset.accordion_rendered === "true") continue;
 
       fixAccordionPanel(acc[i])
-      acc[i].addEventListener("click", function() {
+      acc[i].addEventListener("click", function () {
         /* Toggle between adding and removing the "active" class,
         to highlight the button that controls the panel */
         this.classList.toggle("active");
@@ -739,14 +985,22 @@ function populateWords() {
       sel = window.getSelection();
       if (sel.rangeCount) {
         parentEl = sel.getRangeAt(0).commonAncestorContainer;
-        if (parentEl.nodeType != 1) {
+        if (parentEl.nodeType !== 1) {
           parentEl = parentEl.parentNode;
         }
       }
-    } else if ( (sel = document.selection) && sel.type != "Control") {
+    } else if ((sel = document.selection) && sel.type !== "Control") {
       parentEl = sel.createRange().parentElement();
     }
     return parentEl;
+  }
+
+  function recordAudio(seconds) {
+    fetch("http://localhost:5000/record?seconds=" + Math.ceil(seconds), postRequestConfig(null))
+      .then(it => it.json())
+      .then(it => {
+        console.log(it)
+      })
   }
 </script>
 
