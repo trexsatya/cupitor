@@ -13,12 +13,21 @@
     <script type="text/javascript" src="/rx.all.min.js"></script>
     <script type="text/javascript" src="/bootstrap.min.js"></script>
     <link href="/index.css" rel="stylesheet"/>
+
     <script type="text/javascript" src="/jquery.lettering.js"></script>
     <script type="text/javascript" src="/jquery.fittext.js"></script>
     <script type="text/javascript" src="/rulez.min.js"></script>
-    <script type="text/javascript" src="/mediaelement.js"></script>
+    <!-- Import Mediaelement CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/mediaelement@latest/build/mediaelementplayer.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/mediaelement-plugins@latest/dist/quality/quality.min.css">
+
+    <!-- Import Mediaelement JS -->
+    <script src="https://cdn.jsdelivr.net/npm/mediaelement@latest/build/mediaelement-and-player.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mediaelement-plugins@latest/dist/quality/quality.min.js"></script>
+
     <script type="text/javascript" src="/mediaelement-plugins/speed/speed.min.js"></script>
     <script type="text/javascript" src="/mediaelement-plugins/speed/speed-i18n.js"></script>
+
     <!-- <script type="text/javascript" src="/treant.js"></script> -->
     <link rel="stylesheet" href="/animate.css">
     <link rel="stylesheet" href="/treant.css">
@@ -31,7 +40,7 @@
     <!--    <script src="/typed.min.js"></script>-->
 
     <script type="text/javascript" src="/diff-match-patch.js"></script>
-<!--    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>-->
+    <!--    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>-->
     <link href="/select2.min.css" rel="stylesheet"/>
     <link href="/pagination.css" rel="stylesheet"/>
     <link href="/bootstrap.min.css" rel="stylesheet"/>
@@ -63,17 +72,23 @@
 
     <script>
       function togglePlay(el) {
-        if (window.playingVideo) {
+        if (window.playingYoutubeVideo) {
           if (ytPlayer.getPlayerState() === 2) {
             ytPlayer.playVideo()
           } else if (ytPlayer.getPlayerState() === 1) {
             ytPlayer.pauseVideo()
           }
-        } else {
-          if (player.paused) {
-            player.play()
+        } else if(window.playingAudio){
+          if (audioPlayer.paused) {
+            audioPlayer.play()
           } else {
-            player.pause()
+            audioPlayer.pause()
+          }
+        } else if(window.playingVideo){
+          if (videoPlayer.paused) {
+            videoPlayer.play()
+          } else {
+            videoPlayer.pause()
           }
         }
       }
@@ -145,12 +160,21 @@
     <!--    <br>-->
     <!--    Audio: <input id="video-file" type="file" title="Video"/>-->
 
-    <label for="mp3Choice">Select Media:</label>
-    <select id="mp3Choice" style="width: 100%">
-        <option value="">-</option>
-    </select>
 
-    <span class=""><a href="" target="_blank" id="youtube-link" style="display: none;">Search on Youtube</a></span>
+    <input type="checkbox" id="useLocalMediaCheckbox"
+           onchange="$('#mp3ChoiceContainer').toggle();$('#localMediaContainer').toggle();">
+    <div id="mp3ChoiceContainer">
+        <label for="mp3Choice">Select Media:</label>
+
+        <select id="mp3Choice" style="width: 100%">
+            <option value="">-</option>
+        </select>
+    </div>
+    <div id="localMediaContainer" style="display: none; ">
+        <input type="file" accept="video/*,audio/*,.srt" multiple="multiple" id="localFiles"
+               onchange="loadLocalFiles()">
+    </div>
+
     <div style="padding-top: 1em;">
         <input type="text" id="searchText" placeholder="Search text"
                onchange="fetchSRTs(this)"
@@ -160,10 +184,15 @@
         <div id="result" style="overflow: scroll; height: 300px;">
         </div>
     </div>
-    <audio id="video" src="" width="700" height="500"></audio>
+
+    <div id="localMedia" style="float: left; margin-top: 1.5em;">
+        <audio id="localAudio" src="" width="700" height="500" style="display: none;"></audio>
+        <video id="localVideo" src="" width="700" height="500" style="display: none;"></video>
+    </div>
 
     <div style="width: 100%;">
-        <div id="player" style="display:none; margin-top: 2em;"></div>
+        <div id="youtubePlayer" style="display:none; margin-top: 2em;"></div>
+        <video id="videoPlayer" style="display:none; margin-top: 2em;"></video>
         <div style="min-height: 150px;float: right;">
             <div id="subtitle-container">
                 <br>
@@ -173,7 +202,7 @@
                 <br>
                 <div id="en-sub" style="display: none;"></div>
                 <div style="margin-top: 2em;">
-                    <span class="btn btn-secondary" id="toggleEnSubBtn" onclick="$('#en-sub').toggle()"> Toggle English Subtitles </span>
+                    <span class="btn btn-light" id="toggleEnSubBtn" onclick="$('#en-sub').toggle()"> Toggle English Subtitles </span>
                 </div>
             </div>
             <div style="margin-top: 8em; width: 30%; position: absolute; bottom: 4em; right: 4em;" id="controls">
@@ -213,18 +242,26 @@
     </div>
 </div>
 <br/>
-<div style="color: grey;" id="player-info">
-    Current Page: <span id="currentNumber"></span> <span id="currentTime" style="padding-left: 1em;"></span> <span
+<div style="color: grey; margin-top: 1em;" id="player-info">
+      <span style="margin-left: 2em;">Page:</span> <span id="currentNumber"></span> <span id="currentTime" style="padding-left: 1em;"></span> <span
         id="currentSpeed" style="padding-left: 1em;"></span>
 </div>
 
 <div id="message" style="display: none"></div>
 
 <script>
+  window.playingYoutubeVideo = false;
+
   function toSeconds(str) {
     str = str + ""
+    let hour = 0, mins = 0, secs = 0, millis = 0
+    if(str.split("[,.]").length === 2) {
+      let splits = str.split("[,.]")
+      str = splits[0]
+      millis = splits[1]
+    }
     let splits = str.split(":")
-    let hour = 0, mins = 0, secs = 0
+
     if (splits.length === 2) {
       mins = splits[0]
       secs = splits[1]
@@ -234,7 +271,7 @@
       mins = splits[1]
       secs = splits[2]
     }
-    return parseInt(hour) * 3600 + parseInt(mins) * 60 + parseInt(secs)
+    return parseInt(hour) * 3600 + parseInt(mins) * 60 + parseInt(secs) + parseInt(millis)/1000
   }
 
   function fromSeconds(number) {
@@ -254,15 +291,87 @@
     element.className = isError ? 'error' : 'info'
   }
 
-  let player = new MediaElement(document.querySelector('audio'), {
-    defaultSpeed: 1.0,
-    features: ['speed'],
-    success: function (mediaElement, originalNode) {
-      console.log('Media element', mediaElement, originalNode)
+  const ontimeupdate = e => {
+    if (isNotPlaying()) {
+      return
     }
-  });
+    // console.log(currentSub, player.currentTime)
 
-  window.player = player
+
+    if (window.seekRequestProcessing) {
+      return
+    }
+
+    updatePlayPauseButton()
+
+    let ct = getCurrentTime()
+
+    if (window.rewindData) {
+      if (ct >= window.rewindData.from) {
+        window.rewindData = null
+        console.log("Resetting speed", ct)
+        // audioPlayer.setDuration(window.currentSub.speed)
+      } else {
+        // return
+      }
+    }
+
+    markIntervalPlayDone(ct);
+
+    renderSubtitles(window.currentSub)
+    setSpeed();
+
+    if (!window.rewindData && window.currentSub && ct >= window.currentSub.te) {
+      // Go to next subtitle
+      // player.pause()
+      $('#pagination').pagination('next', data => {
+        console.log('Ontimeupdate: Going to next page', new Date(), "Current Time ", ct, "Data", data)
+        prepareSubsForPage(window.pageDataSource.findIndex(it => it + "" === data + "") + 1, true)
+      })
+    }
+  }
+
+  let addListeners = it => {
+    it.addEventListener('timeupdate', ontimeupdate)
+    it.addEventListener('pause', updatePlayBtn)
+    it.addEventListener('ended', updatePlayBtn)
+    it.addEventListener('playing', updatePlayBtn)
+
+    it.addEventListener('ended', e => {
+      $('#pagination').pagination('go', 1)
+      goToCurrentPageNumber()
+      if ($('#loopSwitch').is(":checked")) {
+        console.log('Replaying')
+        sleep(2).then(() => $('#playBtn').click())
+      }
+    })
+  }
+
+  let audioPlayer = new MediaElementPlayer('localAudio', {
+    iconSprite: '/img/icons/mejs-controls.svg',
+    defaultSpeed: 0.75,
+    speeds: ['0.50', '0.75', '1.00', '0.75'],
+    features: ['playpause','speed','current','progress','duration', 'loop'],
+    success: function (mediaElement, originalNode, instance) {
+      addListeners(mediaElement)
+    }
+  })
+
+  let videoPlayer = new MediaElementPlayer('localVideo', {
+    iconSprite: '/img/icons/mejs-controls.svg',
+    defaultSpeed: 0.75,
+    speeds: ['0.50', '0.75', '1.00', '0.75'],
+    features: ['playpause','speed','current','progress','duration', 'loop'],
+    success: function (mediaElement, originalNode, instance) {
+      addListeners(mediaElement)
+    }
+  })
+
+  audioPlayer.setPlayerSize(0, 0)
+  videoPlayer.setPlayerSize(0, 0)
+
+  window.audioPlayer = audioPlayer
+  window.videoPlayer = videoPlayer
   window.marginStartSubtitle = -0.1
   window.marginEndSubtitle = 1
 
@@ -290,20 +399,41 @@
   window.marginEndSubtitle = 0
 
   function pauseVideo() {
-    window.player.pause()
+    window.audioPlayer.pause()
     $('#playBtn').html('Play')
   }
 
-  let currentVideoTime = () => {
-    return parseFloat(parseFloat(player.getCurrentTime() + '').toFixed(2))
+  let currentMediaTime = () => {
+    let ct = audioPlayer.getCurrentTime();
+    if (window.playingYoutubeVideo) {
+      ct = window.ytPlayer.getCurrentTime()
+    } else if (window.playingVideo) {
+      ct = videoPlayer.getCurrentTime()
+    }
+    return parseFloat(parseFloat(ct + '').toFixed(2))
   }
   let clearSubtitles = () => {
     $('#sv-sub').html('')
     $('#en-sub').html('')
   }
 
+  function getWikiLink(word, uri = null) {
+    return `<span> <a href="https://sv.wiktionary.org/wiki/${encodeURIComponent(uri || word)}" target="_blank">${word}</a></span>`;
+  }
+
+  function populateWikiLinks(text, $el) {
+    $el.html('')
+    getWords(text).forEach(word => {
+      let wordLink = $(getWikiLink(word));
+      wordLink.click(e => {
+        pauseVideo()
+      })
+      $el.append(wordLink)
+    })
+  }
+
   let renderSubtitles = (currentSub) => {
-    if(!currentSub) return;
+    if (!currentSub) return;
     if (window.renderedSub === currentSub.number) {
       return
     }
@@ -313,26 +443,10 @@
     window.renderedSub = currentSub.number
 
     $('#currentNumber').html(currentSub.number)
-    $('#currentTime').html(fromSeconds(currentVideoTime()) + ' / [' + currentSub.ts_o + '-' + currentSub.te_o + ']')
-    $('#currentSpeed').html(player.getPlaybackRate() + ' / ' + currentSub.speed)
+    $('#currentTime').html(fromSeconds(currentMediaTime()) + ' / [' + currentSub.ts_o + '-' + currentSub.te_o + ']')
+    // $('#currentSpeed').html(audioPlayer.getDuration() + ' / ' + currentSub.speed)
 
-    $('#sv-sub').html('')
-    currentSub.sv.replaceAll("\n", " ").split(" ").map(it => it.trim()).filter(it => it.length > 0).forEach(word => {
-      let sanitizedWord = word
-      if (['-', '–', '!', '.', ','].some(it => sanitizedWord.startsWith(it))) {
-        sanitizedWord = sanitizedWord.substr(1)
-      }
-
-      if (['-', '–', '!', '?', '.', ','].some(it => sanitizedWord.endsWith(it))) {
-        sanitizedWord = sanitizedWord.substr(0, sanitizedWord.length - 1)
-      }
-
-      let wordLink = $(`<span> <a href="https://sv.wiktionary.org/wiki/${encodeURIComponent(sanitizedWord)}" target="_blank">${word}</a></span>`);
-      wordLink.click(e => {
-        pauseVideo()
-      })
-      $('#sv-sub').append(wordLink)
-    })
+    populateWikiLinks(currentSub.sv, $('#sv-sub'));
 
     $('#en-sub').html(currentSub.en)
   }
@@ -341,8 +455,8 @@
     console.log("Seek request, target=", fromSeconds(t), "currentTime=", fromSeconds(window.ytPlayer.getCurrentTime()))
     window.ytPlayer.seekTo(t)
     window.seekRequestProcessing = true
-    let leeway = Math.max(6, Math.abs(window.ytPlayer.getDuration() - t))
-    window.ytPlayer.seekTo(t-4)
+    let leeway = Math.max(6, Math.abs(window.ytPlayer.getCurrentTime() - t))
+    window.ytPlayer.seekTo(t - 4)
 
     return new Promise((resolve, reject) => {
       let interval = null
@@ -363,10 +477,28 @@
     })
   }
 
+  async function setMediaTime(currentSub, manualHandling) {
+    let newTime = Math.max(currentSub.ts + window.marginStartSubtitle, 0);
+    if (window.playingYoutubeVideo) {
+      // Hackish for youtube
+      await seekToYoutubeTime(newTime - (manualHandling ? 2 : 0))
+      if (manualHandling) {
+        ytPlayer.seekTo(newTime)
+      }
+    } else if (window.playingAudio) {
+      audioPlayer.setCurrentTime(newTime)
+    } else if (window.playingVideo) {
+      videoPlayer.setCurrentTime(newTime)
+    }
+  }
+
   let prepareSubsForPage = async (pageNumber, setTime, manualHandling) => {
     pageNumber = parseInt(pageNumber)
 
-    pageNumber = window.pageDataSource[pageNumber - 1]
+    if(window.playingYoutubeVideo) {
+      pageNumber = window.pageDataSource[pageNumber - 1]
+    }
+
     let allSubs = window.subtitles
 
     //Reset
@@ -377,35 +509,22 @@
     ])
 
     let currentSub = subs.shift()
+    if(!currentSub.ts) {
+      return
+    }
     console.log("Preparing subs for page", pageNumber, currentSub)
 
     if (setTime) {
-      let newTime = Math.max(currentSub.ts + window.marginStartSubtitle, 0);
-      if (window.playingVideo) {
-        await seekToYoutubeTime(newTime - (manualHandling ? 2 : 0))
-        if (manualHandling) {
-          ytPlayer.seekTo(newTime)
-        }
-        // ytPlayer.playVideo(newTime)
-      } else {
-        player.setCurrentTime(newTime)
-      }
+      await setMediaTime(currentSub, manualHandling);
     }
-
-    // if(!window.rewindData)
-    // player.setPlaybackRate(currentSub.speed)
-
-    // player.play()
 
     window.subs = subs
     window.currentSub = currentSub
     window.pageNumber = pageNumber
 
-    if(manualHandling) {
+    if (manualHandling) {
       renderSubtitles(currentSub)
     }
-
-    // $('#playBtn').html('Pause')
   }
 
   let $mp3Choice = $('#mp3Choice');
@@ -506,7 +625,7 @@
     srts = await srts.json()
     window.srts = srts
 
-    srts.forEach(it => getSubtitlesForLink(it['link']))
+    srts.forEach(it => getSubtitlesForLink(it['link'], it['source']))
 
     window.categories = await fetchCategorisation()
 
@@ -529,8 +648,8 @@
         currentItem = {index: line, id: line}
         currentItem[lang] = ''
       } else if (matchTime) {
-        currentItem['start'] = { ordinal: toSeconds(matchTime[1]) }
-        currentItem['end'] = { ordinal: toSeconds(matchTime[2]) }
+        currentItem['start'] = {ordinal: toSeconds(matchTime[1])}
+        currentItem['end'] = {ordinal: toSeconds(matchTime[2])}
         currentItem['ts'] = matchTime[1]
         currentItem['te'] = matchTime[2]
       } else {
@@ -627,7 +746,7 @@
   window.allSubtitles = {}
   window.srts = []
 
-  async function getSubtitlesForLink(link) {
+  async function getSubtitlesForLink(link, source) {
     if (window.allSubtitles[link]) {
       return window.allSubtitles[link]
     }
@@ -638,13 +757,29 @@
     let en = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/" + enName)
     en = await en.text()
 
-    window.allSubtitles[link] = {sv, en}
+    window.allSubtitles[link] = {sv, en, source}
     return window.allSubtitles[link]
   }
 
-  async function loadSubtitlesForLink(link) {
-    let {sv, en} = await getSubtitlesForLink(link)
+  hidePlayer(audioPlayer)
+  hidePlayer(videoPlayer)
+  async function loadLocalFiles() {
+    let fileNames = Array.from(localFiles.files);
+    let audioFile = fileNames.find(it => it.name.match(/.mp3$/))
+    let videoFile = fileNames.find(it => it.name.match(/.mp4$/))
+    let svSrtFile = fileNames.find(it => it.name.match(/.sv.srt$/))
+    let enSrtFile = fileNames.find(it => it.name.match(/.en.srt$/))
 
+    let link = _.last((audioFile || videoFile).name.replace(".mp3", "").replaceAll(".mp4", "").split(" || ")).trim()
+    let sv = await new Response(svSrtFile).text()
+    let en = await new Response(enSrtFile).text()
+
+    window.allSubtitles[link] = {sv, en, source: 'local'}
+
+    playNewMedia(link, 'local', videoFile || audioFile)
+  }
+
+  async function loadSubtitlesForLink(sv, en) {
     if (!sv) {
       alert("SV subtitle not found")
       return
@@ -667,30 +802,62 @@
     // console.log(sv)
     // console.log(en)
     console.log(combined)
-
     storeSubtitles(combined)
-
-    player.setSrc(link)
-
-    playSelectedFile()
   }
 
-  function playNewVideo(link) {
+  function hidePlayer(el) {
+    window.audioPlayer.setPlayerSize(0, 0)
+    $('.mejs__controls').hide()
+    $('.mejs__overlay-button').hide()
+  }
+
+  function showAudioPlayer() {
+    window.audioPlayer.setPlayerSize(600, 50)
+    $('.mejs__controls').show()
+  }
+
+  function showVideoPlayer() {
+    let {ytVideoWidth, ytHeight, subWidth} = getDimensionsForPlayer();
+    window.videoPlayer.setPlayerSize(ytVideoWidth, ytHeight)
+    $('.mejs__controls').show()
+    $('.mejs__overlay-button').show()
+    $('#subtitle-container').css({
+      left: ytVideoWidth,
+      marginLeft: '1em',
+      width: subWidth
+    })
+  }
+  async function playNewMedia(link, source, mediaFile) {
     clearSubtitles()
-    stopVideo()
+    stopMedia(source)
+    let {sv, en} = await getSubtitlesForLink(link, source)
     //Load subtitle
-    let youtubeVideoId = link
-    if (youtubeVideoId.trim().length) {
-      $('#player').show()
-      loadVideo(youtubeVideoId)
-      window.playingVideo = true;
-      $('#youtube-link').hide()
-      loadSubtitlesForLink(link);
-    } else {
-      $('#player').hide()
-      window.playingVideo = false;
-      loadSubtitlesForLink(link);
+
+    if (source === 'link') {
+      $('#youtubePlayer').show()
+      loadYoutubeVideo(link)
+      window.playingYoutubeVideo = true;
+    } else if (source === 'local') {
+      $('#youtubePlayer').hide()
+      window.playingYoutubeVideo = false;
+      if (mediaFile.name.endsWith(".mp3")) {
+        audioPlayer.setSrc(URL.createObjectURL(mediaFile))
+        audioPlayer.play()
+        window.playingAudio = true;
+        window.playingVideo = false;
+        showAudioPlayer()
+        hidePlayer(window.videoPlayer)
+      } else if (mediaFile.name.endsWith(".mp4")) {
+        videoPlayer.setSrc(URL.createObjectURL(mediaFile))
+        window.playingAudio = false;
+        window.playingVideo = true;
+        videoPlayer.play()
+        hidePlayer(window.audioPlayer)
+        showVideoPlayer()
+      }
     }
+    loadSubtitlesForLink(sv, en);
+    playSelectedMedia()
   }
 
   function waitUntil(condition) {
@@ -717,18 +884,20 @@
 
   $mp3Choice.change(async e => {
     let link = $mp3Choice.val();
-    if(link) {
+    if (link) {
       window.location.hash = link
-      playNewVideo(link)
+      playNewMedia(link, 'link')
     }
   })
 
   function setSpeed() {
     let newRate = $('.controlgroup input:checked').data('speed');
-    if (playingVideo) {
+    if (window.playingYoutubeVideo) {
       ytPlayer.setPlaybackRate(newRate)
-    } else {
-      player.setPlaybackRate(newRate)
+    } else if (window.playingAudio) {
+      // audioPlayer.setDuration(newRate)
+    } else if (window.playingYoutubeVideo) {
+      // videoPlayer.setDuration(newRate)
     }
   }
 
@@ -739,7 +908,7 @@
     prepareSubsForPage(pageNum, true, manualHandling)
   }
 
-  let playSelectedFile = function (pages) {
+  let playSelectedMedia = function (pages) {
     let $pagination = $('#pagination');
     try {
       $pagination.pagination('destroy');
@@ -779,106 +948,89 @@
   }
 
   function updatePlayPauseButton() {
-    if (ytPlayer.getPlayerState() === 2) {
+    let isPaused, isPlaying;
+    if(window.playingYoutubeVideo) {
+      isPaused = ytPlayer.getPlayerState() === 2;
+      isPlaying = ytPlayer.getPlayerState() === 1;
+    } else if (window.playingAudio){
+      isPaused = audioPlayer.paused
+      isPlaying = !audioPlayer.paused
+    } else if (window.playingVideo) {
+      isPaused = videoPlayer.paused
+      isPlaying = !videoPlayer.paused
+    }
+    
+    if (isPaused) {
       $('#playBtn').html('Play')
-    } else if (ytPlayer.getPlayerState() === 1) {
+    } else if (isPlaying) {
       $('#playBtn').html('Pause')
     }
   }
 
   function getCurrentTime() {
-    return ytPlayer.getCurrentTime()
+    if(window.playingAudio) {
+      return audioPlayer.getCurrentTime()
+    } else if (window.playingVideo) {
+      return videoPlayer.getCurrentTime()
+    } else if (window.playingYoutubeVideo) {
+      return ytPlayer.getCurrentTime()
+    }
   }
-  const ontimeupdate = e => {
-    if(ytPlayer.getPlayerState() !== 1) {
-      return
+
+  function isNotPlaying() {
+    if(window.playingAudio) {
+      return audioPlayer.paused
+    } else if (window.playingVideo) {
+      return videoPlayer.paused
+    } else if (window.playingYoutubeVideo) {
+      return ytPlayer.getPlayerState() !== 1;
     }
-    // console.log(currentSub, player.currentTime)
+  }
 
-
-    if (window.seekRequestProcessing) {
-      return
-    }
-
-    updatePlayPauseButton()
-
-    let ct = player.getCurrentTime()
-    if (window.playingVideo) {
-      ct = getCurrentTime()
-    }
-
-    if (window.rewindData) {
-      if (ct >= window.rewindData.from) {
-        window.rewindData = null
-        console.log("Resetting speed", ct)
-        player.setPlaybackRate(window.currentSub.speed)
-      } else {
-        // return
-      }
-    }
-
-    if(window.youtubePlayInterval) {
+  function markIntervalPlayDone(ct) {
+    if (window.youtubePlayInterval) {
       let s = window.youtubePlayInterval.start
       let e = window.youtubePlayInterval.end
-      if(ct > e) {
+      if (ct > e) {
         ytPlayer.pauseVideo()
         window.youtubePlayInterval = null
       }
-    }
-
-    renderSubtitles(window.currentSub)
-    setSpeed();
-
-    if (!window.rewindData && window.currentSub && ct >= window.currentSub.te) {
-      // Go to next subtitle
-      // player.pause()
-      $('#pagination').pagination('next', data => {
-        console.log('Ontimeupdate: Going to next page', new Date(), "Current Time ", ct, "Data", data)
-        prepareSubsForPage(window.pageDataSource.findIndex(it => it + "" === data + "") + 1, true)
-      })
     }
   }
 
   function updatePlayBtn() {
     let el = $('#playBtn')[0]
+    let isPaused, isPlaying;
+    if(window.playingYoutubeVideo) {
+      isPaused = ytPlayer.getPlayerState() === 2;
+      isPlaying = ytPlayer.getPlayerState() === 1;
+    } else if (window.playingAudio){
+      isPaused = audioPlayer.paused
+      isPlaying = !audioPlayer.paused
+    } else if (window.playingVideo) {
+      isPaused = videoPlayer.paused
+      isPlaying = !videoPlayer.paused
+    }
 
-    if (player.paused) {
+    if (isPaused) {
       $(el).html("Play").removeClass('pause-btn').addClass('play-btn')
-    } else {
+    } else if(isPlaying) {
       $(el).html("Pause").removeClass('play-btn').addClass('pause-btn')
     }
   }
 
-  player.addEventListener('timeupdate', ontimeupdate)
-  player.addEventListener('pause', updatePlayBtn)
-  player.addEventListener('ended', updatePlayBtn)
-  player.addEventListener('playing', updatePlayBtn)
-
-  player.addEventListener('ended', e => {
-    $('#pagination').pagination('go', 1)
-    goToCurrentPageNumber()
-    if ($('#loopSwitch').is(":checked")) {
-      console.log('Replaying')
-      sleep(2).then(() => $('#playBtn').click())
-    }
-  })
-
-  let inputNode = document.querySelector('#video-file')
-  if (inputNode)
-    inputNode.addEventListener('change', playSelectedFile, false)
-
   function rewind() {
     window.rewindData = window.rewindData || {
-      from: window.playingVideo ? ytPlayer.getCurrentTime() : player.getCurrentTime(),
+      from: window.playingYoutubeVideo ? ytPlayer.getCurrentTime() : audioPlayer.getCurrentTime(),
     }
 
     console.log("Should come back to", window.rewindData.from)
-    player.setPlaybackRate($('.controlgroup input:checked').data('speed'))
+    // audioPlayer.setDuration($('.controlgroup input:checked').data('speed'))
 
-    if (window.playingVideo) {
+    if (window.playingYoutubeVideo) {
       ytPlayer.seekTo(ytPlayer.getCurrentTime() - 3)
     } else {
-      player.setCurrentTime(player.currentTime - 3)
+      audioPlayer.setCurrentTime(audioPlayer.currentTime - 3)
     }
   }
 
@@ -912,20 +1064,46 @@
 
   function getTimes(el, fl) {
     let lines = $(el).find(".line").map((i, e) => $(e).data()).toArray()
-      .map(it => it.index).map(idx => fl.data.find(it => it.index +'' === idx +''))
+      .map(it => it.index).map(idx => fl.data.find(it => it.index + '' === idx + ''))
 
     return {
       start: lines[0].start.ordinal, end: lines[lines.length - 1].end.ordinal
     }
   }
 
-  function highlightedText(text) {
+  function highlightedText(text, populateWikiLinks = false) {
     text = _.trim(text, "-:_")
+    text = text.replaceAll("\n", " ")
     let hText = text
     try {
       let match = text.match(new RegExp(window.searchText, "i"))
       let index = match.index
-      hText = text.substring(0, index) + "<span class='highlight'>" + text.substring(index, index + match[0].length) + "</span>" + text.substring(index + match[0].length);
+      let firstPart = text.substring(0, index);
+      let secondPart = text.substring(index + match[0].length);
+      let highlightedPart = text.substring(index, index + match[0].length);
+
+      if (populateWikiLinks) {
+        let regExp = new RegExp(`(.*)[ ]+((.*)${window.searchText})(.*)`)
+        match = text.match(regExp);
+        if (match) {
+          firstPart = match[1]
+          secondPart = match[4]
+          highlightedPart = match[2]
+        } else {
+          regExp = new RegExp(`((.*)${window.searchText})(.*)`)
+          match = text.match(regExp);
+          if (match) {
+            firstPart = ''
+            secondPart = match[3]
+            highlightedPart = match[1]
+          }
+        }
+      }
+
+      firstPart = firstPart.split(" ").flatMap(getWords).map(getWikiLink).join(" ")
+      secondPart = secondPart.split(" ").flatMap(getWords).map(getWikiLink).join(" ")
+      highlightedPart = highlightedPart.split(" ").flatMap(getWords).map(getWikiLink).join(" ")
+      hText = firstPart + " <span class='highlight'>" + highlightedPart + "</span> " + secondPart;
     } catch (e) {
       // console.log(e)
     }
@@ -969,12 +1147,10 @@
     return n
   }
 
-  function getWords(text, searchText) {
+  function getWords(text) {
     const segmentor = new Intl.Segmenter([], {granularity: 'word'});
     const segmentedText = segmentor.segment(text);
-    let words = Array.from(segmentedText, ({segment}) => segment).filter(it => it.trim().length > 1);
-    words.push(searchText)
-    return words;
+    return Array.from(segmentedText, ({segment}) => segment).filter(it => it.trim().length > 1);
   }
 
   function getMatchingWords(list, search, functionToGetLines) {
@@ -993,7 +1169,7 @@
       })
 
       let matchesSearchText = lines.some(it => it.text.toLowerCase().match(new RegExp(search.toLowerCase(), "i")))
-      if(matchesSearchText) {
+      if (matchesSearchText) {
         wordToItemsMap[search] = wordToItemsMap[search] || []
         wordToItemsMap[search].push(item)
       }
@@ -1030,12 +1206,13 @@
     let mainSub, secondarySub = {};
     if (file.path.endsWith(".sv.srt")) {
       mainSub = line;
-      mainSub.text = highlightedText(mainSub.text)
+      mainSub.text = highlightedText(mainSub.text, true)
       let found = window.searchResult.find(it => it['en_subs'] && it['en_subs'].path === file.path.replaceAll(".sv.srt", ".en.srt"));
       if (found) secondarySub = found.en_subs.data.find(it => it.index === line.index)
     } else {
       mainSub = window.searchResult.find(it => it['sv_subs'] && it['sv_subs'].path === file.path.replaceAll(".en.srt", ".sv.srt"))
         .sv_subs.data.find(it => it.index === line.index)
+      mainSub.text = getWords(mainSub.text).map(getWikiLink).join(" ")
       secondarySub = line;
       secondarySub.text = highlightedText(secondarySub.text)
     }
@@ -1047,10 +1224,7 @@
 
   function htmlForSrtLine(_line, file, url) {
     let line = {..._line}
-
     let {mainSub, secondarySub} = getMainSubAndSecondarySub(file, line);
-
-
 
     return $(`<div class="srt-line" data-index="${line.index}" data-file="${file.path}">
                                     <span class="add-prev-btn btn"> + </span>
@@ -1068,7 +1242,18 @@
                                  <br>`).data({line: line, file: file})
   }
 
+  window.showDuplicates = false
+
   function populateSRTFindings(wordToItemsMap, $result) {
+    let alreadyAdded = {}
+
+    function appendIfNotAlreadyAdded($file, line, file, item, items) {
+      let key = `${file.source}-${file.url}-${line.index}`
+      if (alreadyAdded[key] && !window.showDuplicates) return
+      $file.append(htmlForSrtLine(line, file, item.sv_subs.url, items));
+      alreadyAdded[key] = true
+    }
+
     Object.keys(wordToItemsMap).toSorted().forEach(word => {
       let items = wordToItemsMap[word]
       let wordBlock = $(`<div ><h5 class="accordion">${word}</h5></div>`)
@@ -1084,10 +1269,15 @@
           let $file = $(`<div class="srt-file" title="${fileName}">
                             <h4 data-file="${file.path}" style="display: none;"> ${word} </h4>
                         </div>`)
-          let matchingLines = file.data.filter(it => it.text.toLowerCase().match(word))
+          let matchingLines = file.data.filter(it => {
+            if (window.searchText.indexOf(' ') >= 0) {
+              return it.text.toLowerCase().match(word)
+            }
+            return getWords(it.text).includes(word)
+          })
 
           _.take(matchingLines, numberOfItemsToShow()).forEach(line => {
-            $file.append(htmlForSrtLine(line, file, item.sv_subs.url, items));
+            appendIfNotAlreadyAdded($file, line, file, item, items);
           })
 
           wordBlock.append($file)
@@ -1179,10 +1369,22 @@
       // $(btn).addClass('disabled')
 
       let play = () => {
-        loadVideo(url)
+        if(!window.playingAudio && !window.playingVideo) {
+          if (dt.file.source !== 'YouTube') {
+            window.open(`https://www.svtplay.se/video/${url}?position=${times.start}`, '_newtab')
+            return
+          }
+          loadYoutubeVideo(url)
+        } else {
+          if (window.playingVideo) {
+            videoPlayer.setCurrentTime(times.start)
+          } else if(window.playingAudio){
+            audioPlayer.setCurrentTime(times.start)
+          }
+        }
+
         window.youtubePlayInterval = {...times}
         console.log(`Playing from ${fromSeconds(times.start)} to ${fromSeconds(times.end)}`)
-        $('#player').show()
       }
 
       // dampenBgMusic().promise.then(x => play())
@@ -1196,15 +1398,19 @@
     })
   } // end render
 
-  function getSubs(text, file, url) {
-    return {data: srtToJson(text), path: file, url: url}
+  function getSubs(text, file, url, source) {
+    return {data: srtToJson(text), path: file, url, source}
   }
+
   function fetchFromLocal() {
     return Object.keys(window.allSubtitles).map(it => {
       let svMatch = window.allSubtitles[it].sv.match(new RegExp(window.searchText));
       let enMatch = window.allSubtitles[it].en.match(new RegExp(window.searchText));
       if (svMatch || enMatch) {
-        let v = {en_subs: getSubs(window.allSubtitles[it].en, it + ".en.srt", it), sv_subs: getSubs(window.allSubtitles[it].sv, it + ".sv.srt", it)}
+        let v = {
+          en_subs: getSubs(window.allSubtitles[it].en, it + ".en.srt", it, window.allSubtitles[it].source),
+          sv_subs: getSubs(window.allSubtitles[it].sv, it + ".sv.srt", it, window.allSubtitles[it].source)
+        }
         if (svMatch) v.sv_match = true;
         else v.en_match = true;
         return v;
@@ -1218,13 +1424,13 @@
     }
     let $searchText = $("#searchText");
     let txt = searchText || $searchText.val().toLowerCase()
-    $searchText.val(txt)
+    // $searchText.val(txt)
 
-    if(txt.length < 3) return
+    if (txt.length < 3) return
 
     window.searchText = txt;
 
-    if(Object.keys(window.allSubtitles).length) {
+    if (Object.keys(window.allSubtitles).length) {
       console.log("Loading from local")
       window.searchResult = fetchFromLocal()
     } else {
@@ -1298,8 +1504,9 @@
   // 3. This function creates an <iframe> (and YouTube player)
   //    after the API code downloads.
 
-  function loadVideo(videoId) {
+  function loadYoutubeVideo(videoId) {
     let iframe = ytPlayer.getIframe()
+    $('#youtubePlayer').show()
     try {
       let currentVideoId = iframe.src.split("embed/")[1].split("?")[0]
       iframe.src = `${iframe.src}`.replaceAll(currentVideoId, videoId)
@@ -1308,27 +1515,32 @@
     }
   }
 
-  let wh = $(window).height(), ww = $(window).width();
+  function getDimensionsForPlayer() {
+    let wh = $(window).height(), ww = $(window).width();
 
-  let ytVideoWidth = 940, ytHeight = 590;
-  let subWidth = 0;
+    let ytVideoWidth = 940, ytHeight = 590;
+    let subWidth = 0;
 
-  if (ww >= 1000) {
-    ytVideoWidth = ww * 0.6;
-    subWidth = $(window).width() - (ytVideoWidth + 40)
-  } else {
-    ytVideoWidth = ww - 10;
-    subWidth = ww - 10;
-    ytHeight = wh / 2 - 50;
-    $('#controls').css({width: '100%', bottom: '-15em', right: 0})
-    $('#player-info').hide()
-    $('#speed-control').parent().hide()
+    if (ww >= 1000) {
+      ytVideoWidth = ww * 0.6;
+      subWidth = $(window).width() - (ytVideoWidth + 40)
+    } else {
+      ytVideoWidth = ww - 10;
+      subWidth = ww - 10;
+      ytHeight = wh / 2 - 50;
+      $('#controls').css({width: '100%', bottom: '-15em', right: 0})
+      $('#youtubePlayer-info').hide()
+      $('#speed-control').parent().hide()
 
-    $('#mp3Choice').parent().css({width: ww - 20})
+      $('#mp3Choice').parent().css({width: ww - 20})
+    }
+    return {ytVideoWidth, ytHeight, subWidth};
   }
 
+  let {ytVideoWidth, ytHeight, subWidth} = getDimensionsForPlayer();
+
   function onYouTubeIframeAPIReady() {
-    window.ytPlayer = new YT.Player('player', {
+    window.ytPlayer = new YT.Player("youtubePlayer", {
       height: ytHeight,
       width: ytVideoWidth,
       videoId: 'K8P_USOppfs',
@@ -1352,27 +1564,33 @@
     event.target.playVideo();
     window.ytPlayerReady = true
 
-    if(window.youtubePlayInterval) {
+    if (window.youtubePlayInterval) {
       seekToYoutubeTime(window.youtubePlayInterval.start)
     }
   }
 
 
   function onPlayerStateChange(event) {
-    if(event.data === YT.PlayerState.PLAYING) {
+    if (event.data === YT.PlayerState.PLAYING) {
       window.ytPlaying = true
     } else {
       window.ytPlaying = false;
     }
   }
 
-  function stopVideo() {
-    window.ytPlayer.stopVideo();
+  function stopMedia(source) {
+    if(source === 'link' && window.playingYoutubeVideo) {
+      window.ytPlayer.stopMedia();
+    } else if (source === 'local' && window.playingAudio) {
+      audioPlayer.pause()
+    } else if (source === 'local' && window.playingVideo) {
+      videoPlayer.pause()
+    }
   }
 
   setInterval(() => {
     //Check time
-    if (window.playingVideo && window.ytPlayer) {
+    if (window.playingYoutubeVideo && window.ytPlayer) {
       ontimeupdate()
     }
   }, 100)
