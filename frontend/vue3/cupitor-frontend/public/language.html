@@ -78,13 +78,13 @@
           } else if (ytPlayer.getPlayerState() === 1) {
             ytPlayer.pauseVideo()
           }
-        } else if(window.playingAudio){
+        } else if (window.playingAudio) {
           if (audioPlayer.paused) {
             audioPlayer.play()
           } else {
             audioPlayer.pause()
           }
-        } else if(window.playingVideo){
+        } else if (window.playingVideo) {
           if (videoPlayer.paused) {
             videoPlayer.play()
           } else {
@@ -171,7 +171,7 @@
         </select>
     </div>
     <div id="localMediaContainer" style="display: none; ">
-        <input type="file" accept="video/*,audio/*,.srt" multiple="multiple" id="localFiles"
+        <input type="file" accept="video/*,audio/*,.srt,.json" multiple="multiple" id="localFiles"
                onchange="loadLocalFiles()">
     </div>
 
@@ -243,8 +243,10 @@
 </div>
 <br/>
 <div style="color: grey; margin-top: 1em;" id="player-info">
-      <span style="margin-left: 2em;">Page:</span> <span id="currentNumber"></span> <span id="currentTime" style="padding-left: 1em;"></span> <span
-        id="currentSpeed" style="padding-left: 1em;"></span>
+    <span style="margin-left: 2em;">Page:</span> <span id="currentNumber"></span> <span id="currentTime"
+                                                                                        style="padding-left: 1em;"></span>
+    <span
+            id="currentSpeed" style="padding-left: 1em;"></span>
 </div>
 
 <div id="message" style="display: none"></div>
@@ -255,7 +257,7 @@
   function toSeconds(str) {
     str = str + ""
     let hour = 0, mins = 0, secs = 0, millis = 0
-    if(str.split("[,.]").length === 2) {
+    if (str.split("[,.]").length === 2) {
       let splits = str.split("[,.]")
       str = splits[0]
       millis = splits[1]
@@ -271,7 +273,7 @@
       mins = splits[1]
       secs = splits[2]
     }
-    return parseInt(hour) * 3600 + parseInt(mins) * 60 + parseInt(secs) + parseInt(millis)/1000
+    return parseInt(hour) * 3600 + parseInt(mins) * 60 + parseInt(secs) + parseInt(millis) / 1000
   }
 
   function fromSeconds(number) {
@@ -351,7 +353,7 @@
     iconSprite: '/img/icons/mejs-controls.svg',
     defaultSpeed: 0.75,
     speeds: ['0.50', '0.75', '1.00', '0.75'],
-    features: ['playpause','speed','current','progress','duration', 'loop'],
+    features: ['playpause', 'speed', 'current', 'progress', 'duration', 'loop'],
     success: function (mediaElement, originalNode, instance) {
       addListeners(mediaElement)
     }
@@ -361,7 +363,7 @@
     iconSprite: '/img/icons/mejs-controls.svg',
     defaultSpeed: 0.75,
     speeds: ['0.50', '0.75', '1.00', '0.75'],
-    features: ['playpause','speed','current','progress','duration', 'loop'],
+    features: ['playpause', 'speed', 'current', 'progress', 'duration', 'loop'],
     success: function (mediaElement, originalNode, instance) {
       addListeners(mediaElement)
     }
@@ -495,7 +497,7 @@
   let prepareSubsForPage = async (pageNumber, setTime, manualHandling) => {
     pageNumber = parseInt(pageNumber)
 
-    if(window.playingYoutubeVideo) {
+    if (window.playingYoutubeVideo) {
       pageNumber = window.pageDataSource[pageNumber - 1]
     }
 
@@ -509,7 +511,7 @@
     ])
 
     let currentSub = subs.shift()
-    if(!currentSub.ts) {
+    if (!currentSub.ts) {
       return
     }
     console.log("Preparing subs for page", pageNumber, currentSub)
@@ -763,12 +765,26 @@
 
   hidePlayer(audioPlayer)
   hidePlayer(videoPlayer)
+
   async function loadLocalFiles() {
-    let fileNames = Array.from(localFiles.files);
-    let audioFile = fileNames.find(it => it.name.match(/.mp3$/))
-    let videoFile = fileNames.find(it => it.name.match(/.mp4$/))
-    let svSrtFile = fileNames.find(it => it.name.match(/.sv.srt$/))
-    let enSrtFile = fileNames.find(it => it.name.match(/.en.srt$/))
+    let files = Array.from(localFiles.files);
+    let combinedJson = files.find(it => it.name.match(/combined.json$/))
+
+    if (combinedJson) {
+      let json = await new Response(combinedJson).json()
+      json.forEach(it => {
+        let link = it.link
+        let sv = it.sv
+        let en = it.en
+        window.allSubtitles[link] = {sv, en, source: 'local'}
+      })
+
+      return
+    }
+    let audioFile = files.find(it => it.name.match(/.mp3$/))
+    let videoFile = files.find(it => it.name.match(/.mp4$/))
+    let svSrtFile = files.find(it => it.name.match(/.sv.srt$/))
+    let enSrtFile = files.find(it => it.name.match(/.en.srt$/))
 
     let link = _.last((audioFile || videoFile).name.replace(".mp3", "").replaceAll(".mp4", "").split(" || ")).trim()
     let sv = await new Response(svSrtFile).text()
@@ -827,6 +843,7 @@
       width: subWidth
     })
   }
+
   async function playNewMedia(link, source, mediaFile) {
     clearSubtitles()
     stopMedia(source)
@@ -949,17 +966,17 @@
 
   function updatePlayPauseButton() {
     let isPaused, isPlaying;
-    if(window.playingYoutubeVideo) {
+    if (window.playingYoutubeVideo) {
       isPaused = ytPlayer.getPlayerState() === 2;
       isPlaying = ytPlayer.getPlayerState() === 1;
-    } else if (window.playingAudio){
+    } else if (window.playingAudio) {
       isPaused = audioPlayer.paused
       isPlaying = !audioPlayer.paused
     } else if (window.playingVideo) {
       isPaused = videoPlayer.paused
       isPlaying = !videoPlayer.paused
     }
-    
+
     if (isPaused) {
       $('#playBtn').html('Play')
     } else if (isPlaying) {
@@ -968,7 +985,7 @@
   }
 
   function getCurrentTime() {
-    if(window.playingAudio) {
+    if (window.playingAudio) {
       return audioPlayer.getCurrentTime()
     } else if (window.playingVideo) {
       return videoPlayer.getCurrentTime()
@@ -978,7 +995,7 @@
   }
 
   function isNotPlaying() {
-    if(window.playingAudio) {
+    if (window.playingAudio) {
       return audioPlayer.paused
     } else if (window.playingVideo) {
       return videoPlayer.paused
@@ -1001,10 +1018,10 @@
   function updatePlayBtn() {
     let el = $('#playBtn')[0]
     let isPaused, isPlaying;
-    if(window.playingYoutubeVideo) {
+    if (window.playingYoutubeVideo) {
       isPaused = ytPlayer.getPlayerState() === 2;
       isPlaying = ytPlayer.getPlayerState() === 1;
-    } else if (window.playingAudio){
+    } else if (window.playingAudio) {
       isPaused = audioPlayer.paused
       isPlaying = !audioPlayer.paused
     } else if (window.playingVideo) {
@@ -1014,7 +1031,7 @@
 
     if (isPaused) {
       $(el).html("Play").removeClass('pause-btn').addClass('play-btn')
-    } else if(isPlaying) {
+    } else if (isPlaying) {
       $(el).html("Pause").removeClass('play-btn').addClass('pause-btn')
     }
   }
@@ -1369,7 +1386,7 @@
       // $(btn).addClass('disabled')
 
       let play = () => {
-        if(!window.playingAudio && !window.playingVideo) {
+        if (!window.playingAudio && !window.playingVideo) {
           if (dt.file.source !== 'YouTube') {
             window.open(`https://www.svtplay.se/video/${url}?position=${times.start}`, '_newtab')
             return
@@ -1378,7 +1395,7 @@
         } else {
           if (window.playingVideo) {
             videoPlayer.setCurrentTime(times.start)
-          } else if(window.playingAudio){
+          } else if (window.playingAudio) {
             audioPlayer.setCurrentTime(times.start)
           }
         }
@@ -1403,13 +1420,18 @@
   }
 
   function fetchFromLocal() {
-    return Object.keys(window.allSubtitles).map(it => {
-      let svMatch = window.allSubtitles[it].sv.match(new RegExp(window.searchText));
-      let enMatch = window.allSubtitles[it].en.match(new RegExp(window.searchText));
+    return Object.keys(window.allSubtitles)
+      .filter(it => window.allSubtitles[it].sv && window.allSubtitles[it].en)
+      .map(it => {
+      let svText = window.allSubtitles[it].sv;
+      let enText = window.allSubtitles[it].en;
+
+      let svMatch = svText && svText.match(new RegExp(window.searchText));
+      let enMatch = enText && enText.match(new RegExp(window.searchText));
       if (svMatch || enMatch) {
         let v = {
-          en_subs: getSubs(window.allSubtitles[it].en, it + ".en.srt", it, window.allSubtitles[it].source),
-          sv_subs: getSubs(window.allSubtitles[it].sv, it + ".sv.srt", it, window.allSubtitles[it].source)
+          en_subs: getSubs(enText, it + ".en.srt", it, window.allSubtitles[it].source),
+          sv_subs: getSubs(svText, it + ".sv.srt", it, window.allSubtitles[it].source)
         }
         if (svMatch) v.sv_match = true;
         else v.en_match = true;
@@ -1579,7 +1601,7 @@
   }
 
   function stopMedia(source) {
-    if(source === 'link' && window.playingYoutubeVideo) {
+    if (source === 'link' && window.playingYoutubeVideo) {
       window.ytPlayer.stopMedia();
     } else if (source === 'local' && window.playingAudio) {
       audioPlayer.pause()
