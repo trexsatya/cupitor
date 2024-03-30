@@ -1,7 +1,13 @@
 $('#toggleFretboardBtn').click()
 
 function getNotesFromHtml() {
-  return $('.vf-notehead').toArray().map(it => $(it).data()).filter(it => Object.keys(it).length > 0);
+  let fn = () => $('.vf-notehead').toArray().map(it => $(it).data()).filter(it => Object.keys(it).length > 0);
+  let noteheadData =  fn();
+  if(!noteheadData.length) {
+    populateNoteheadData(osmds[0], mxml.xml);
+    noteheadData =  fn()
+  }
+  return noteheadData
 }
 
 /**
@@ -180,10 +186,7 @@ const merge = (items, fn) => {
 
 function guessChords() {
   let noteheadData = getNotesFromHtml()
-  if(!noteheadData.length) {
-    populateNoteheadData(osmds[0], mxml.xml);
-    noteheadData = getNotesFromHtml()
-  }
+
   let measures = groupBy(noteheadData, 'measure')
 
   Object.keys(measures).forEach(mIdx => {

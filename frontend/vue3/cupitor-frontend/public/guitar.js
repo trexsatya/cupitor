@@ -258,6 +258,10 @@ const Fretboard = function () {
   this.openChords = (chordName) => {
     const notes = allChords[chordName].notes
 
+    if(notes.length == 4) {
+      notes.splice(2, 1)
+    }
+
     const triadStringGroups = [
       [6, 4, 2], [5, 4, 2],
       [6, 4, 1], [5, 4, 1],
@@ -307,7 +311,7 @@ const Fretboard = function () {
         let octaveMatches = true
         if (givenOctave) octaveMatches = (defaultSet.octaves[string][j] + "" === givenOctave + "")
         if (equalNotes(frets[j], note.name) && octaveMatches) {
-          out.push({string: string, fret: j})
+          out.push({string: string, fret: j, note: note})
         }
       }
     }
@@ -323,7 +327,7 @@ const Fretboard = function () {
 
     if (!notes) return
     notes.forEach(it => {
-      this.showNote(it.string, it.fret, cls)
+      this.showNote(it.string, it.fret, cls, it.note)
     })
   }
 
@@ -423,8 +427,10 @@ const Fretboard = function () {
     }
   }
 
-  this.showNote = function (string, fret, cls) {
-    const note = this.notes[string][fret];
+  this.showNote = function (string, fret, cls, _note) {
+    let note = this.notes[string][fret];
+    if(_note && _note.name) note = _note.name;
+
     const ss = 7 - string;
     let leftDist, bottomDist;
     if (fret === 0) {
@@ -446,6 +452,7 @@ const Fretboard = function () {
     }
 
     const noteMarker = this.noteMarkers[string][fret]
+    noteMarker.html(note)
 
     $(noteMarker).css('left', leftDist);
     $(noteMarker).css('bottom', bottomDist);
@@ -466,11 +473,17 @@ const getHtmlElementsForStaffNoteHeads = (osmd) => {
   const measureLists = osmd.graphic.measureList
 
   let vfNoteId = 0
+  let prevKeySignature = undefined
   for (let a = 0; a < measureLists.length; a++) {
     const measures = measureLists[a]
     for (let i = 0; i < measures.length; i++) {
       const measure = measures[i]
       if(!measure) continue
+      let ks = measure.stave.modifiers.find(it => it.attrs.type === "KeySignature")
+      ks = ks && ks.keySpec
+      if(!ks) ks = prevKeySignature
+      else prevKeySignature = ks
+
       const staffEntries = measure.staffEntries
       for (let j = 0; j < staffEntries.length; j++) {
         const staff = staffEntries[j]
@@ -507,6 +520,7 @@ const getHtmlElementsForStaffNoteHeads = (osmd) => {
               measure: i,
               voice: voice,
               id: id,
+              keySignature: ks,
               vfNoteId: vfNoteId++
             })
           }
@@ -622,6 +636,7 @@ function populateNoteheadData(osmd, jqueryXml) {
       .data("left", left)
       .data("right", Math.ceil(left + $noteheadEl.width()))
       .data("id", it.id)
+      .data("keySignature", it.keySignature)
   })
 
   //Add horizontal line info
@@ -673,8 +688,21 @@ function populateNoteNames() {
   $('.vf-notehead path').css({fill: 'none', stroke: 'black', strokeWidth: 1})
 
   const poff = $('#osmdCanvasPage1').offset()
+  let voiceColors = [['maroon', 'white'], ['blue', 'white'], ['green', 'black'], ['purple', 'black'], ['orange', 'black'], ['brown', 'white'], ['pink', 'black']]
   getNotesFromHtml().forEach(n => {
-    const $nn = $(`<span>${n.name}</span>`).addClass("note-name").css({position: 'absolute', left: n.offsetLeft - poff.left , top: n.offsetTop - poff.top -5, padding: 0})
+    let left = n.offsetLeft - poff.left;
+    let top = n.offsetTop - poff.top -5;
+    const $nn = $(`<span>${n.name}</span>`).addClass("note-name").css({position: 'absolute', left: left , top: top, padding: 0})
+
+    if(n.keySignature) {
+      let scaleNotes = getScale(n.keySignature)
+      let name = n.name.replace("n", "")
+      if(!scaleNotes.includes(name)) $nn.addClass('non-scale-note').css('color', 'black').css('border', 'thin solid blue').css('border-radius', '50%')
+    }
+
+    let voiceColor = voiceColors[n.voice % voiceColors.length];
+    $nn.css('background-color', voiceColor[0]).css('color', voiceColor[1])
+
     $('#osmdCanvasPage1').append($nn)
     if(!window.showNoteNames) $nn.hide()
   })
@@ -983,7 +1011,7 @@ $(function () {
     success: function (data) {
       log(data);
       const $audio = $('#melody-audio')
-      $audio.html('').append($(`<source>`).attr("src", "http://localhost:5000/mp3/" + data.name).attr('type', 'audio/mpeg'))
+      $audio.html('').append($(`<source>`).attr("src", "http://localhost:5000/mp3?path=" + data.file).attr('type', 'audio/mpeg'))
       $audio[0].load();
       $audio[0].play();
     },
@@ -1043,6 +1071,8 @@ $(function () {
     const inversion = diatonicMelodicInversion(melody)
     const inversionInKey = melodyInContextOfKey(inversion, fretboard.activeKey)
     inversionInKey.forEach(measure => mxml.addMeasure(measure.notes))
+    let tempo = prompt('Enter measure number and tempo', '80')
+    addTempo(tempo)
     log(melodyToSimpleString(inversion))
     log(melodyToSimpleString(inversionInKey))
 
@@ -1136,6 +1166,10 @@ $(function () {
 
   $('#loadMelodyBtn').click(e => {
     const [file] = document.querySelector("input[type=file]").files;
+    if(!file) {
+      extractMelodyFromXml(mxml.toString())
+      return
+    }
     const reader = new FileReader();
     reader.addEventListener(
       "load",
@@ -1333,6 +1367,7 @@ $(function () {
   window.showNoteNames = false
 
   $('#toggleNoteNamesBtn').click(e => {
+    populateNoteNames()
     $('.note-name').toggle()
     window.showNoteNames = !window.showNoteNames
   })
@@ -1517,3 +1552,152 @@ function allOpenChordsInPos(pos) {
 
 $(window).resize(e => setTimeout(() => hideIdTexts(), 3000))
 
+function nameOfInterval(interval, n2, n1) {
+  switch (interval) {
+    case 0:
+      return n2.octave > n1.octave ? 'P8' : 'P1';
+    case 1:
+      return 'm2';
+    case 2:
+      return 'M2';
+    case 3:
+      return 'm3';
+    case 4:
+      return 'M3';
+    case 5:
+      return 'P4';
+    case 6:
+      return 'A4';
+    case 7:
+      return 'P5';
+    case 8:
+      return 'm6';
+    case 9:
+      return 'M6';
+    case 10:
+      return 'm7';
+    case 11:
+      return 'M7';
+    case 12:
+      return 'P8';
+  }
+  return interval
+}
+
+function findIntervals() {
+  let chromaticScaleSharp = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+  let chromaticScaleFlat = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+
+  let intervalBetween = (_n1, _n2) => {
+    let [n1, n2] = [_n1, _n2]
+
+    let scale = chromaticScaleSharp;
+    if(scale.indexOf(n1.name) === -1 || scale.indexOf(n2.name) === -1) {
+      scale = chromaticScaleFlat
+    }
+
+    let i1 = scale.indexOf(n1.name)
+    let i2 = scale.indexOf(n2.name)
+    let interval = i2 - i1
+
+    if(interval < 0) {
+      interval = 12 + interval
+    }
+
+    if(n2.name === n1.name) {
+      interval = 0
+    }
+
+    return nameOfInterval(interval, n2, n1);
+  }
+
+  let output = []
+  let noteheads = getNotesFromHtml()
+  noteheads = _.chain(noteheads).sortBy('left').sortBy('measure').value()
+
+  let measures = Object.values(groupBy(noteheads, 'measure'))
+
+  window.orderedMeasures = measures
+  function calculateIntervals(measure) {
+    let intervals = []
+    measure = measure.filter(it => it.name !== '')
+    for (let i = 1; i < measure.length; i++) {
+      const n1 = measure[i - 1]
+      const n2 = measure[i]
+      n1.name = n1.name.replaceAll("n", "")
+      n2.name = n2.name.replaceAll("n", "")
+
+      const interval = intervalBetween(n1, n2)
+      intervals.push(interval)
+    }
+    return intervals;
+  }
+
+  measures.forEach(measure => {
+    let intervals = calculateIntervals(measure);
+    output.push(intervals)
+  })
+  window.intervals = output
+}
+
+function addTempo(tempo) {
+  let $el = $(`
+   <direction placement="above">
+    <direction-type parentheses="no" default-x="-30.68" relative-y="20.00">
+      <metronome>
+        <beat-unit>quarter</beat-unit>
+        <per-minute>${tempo}</per-minute>
+      </metronome>
+    </direction-type>
+    <sound tempo="${tempo}"/>
+   </direction>`, mxml.xml)
+
+  $el.insertBefore(mxml.xml.find("note").first())
+}
+
+function postMusicXmlAndMetadata(musicXmlStr, metadata) {
+  $.ajax({
+    type: "POST",
+    url: "http://localhost:5000/musicxml",
+    // The key needs to match your method's input parameter (case-sensitive).
+    data: JSON.stringify({key: "intervals", musicxml: musicXmlStr, metadata: metadata}),
+    dataType: 'json',
+    success: function (response) {
+      const $audio = $('#melody-audio')
+      $audio.html('').append($(`<source>`).attr("src", "http://localhost:5000/mp3?path=" + response['file']).attr('type', 'audio/mpeg'))
+      $audio[0].load();
+      // $audio[0].play();
+    },
+    error: function (errMsg) {
+      log(errMsg);
+    }
+  });
+}
+
+function exportIntervals(args) {
+  mxml.reset()
+  let ins = args
+  if(!ins) {
+    ins = prompt('Enter measure number and tempo', '1, 50, 3')
+  }
+  if(!ins) return
+  let [measureNumber, tempo, numberOfNotes] = ins.split(',').map(it => parseInt(it))
+  if(!numberOfNotes) numberOfNotes =  100
+
+  measureNumber = measureNumber - 1
+
+  if(!window.intervals) findIntervals()
+
+  let ints = window.intervals[measureNumber]
+  mxml.addMeasure(window.orderedMeasures[measureNumber].filter(it => it.name !== '').slice(0, numberOfNotes))
+  addTempo(tempo);
+  let musicXmlStr = formatXml(mxml.toString());
+
+  // console.log(musicXmlStr);
+  // loadMainOSMD(musicXmlStr);
+
+  ints = ints.slice(0, numberOfNotes-1)
+    .map(it => it.replace('m', 'minor').replace('M', 'major').replace('A', 'augmented').replace('P', 'perfect'))
+  let intervalsStr = ints.join(" ")
+  postMusicXmlAndMetadata(musicXmlStr, intervalsStr);
+}
