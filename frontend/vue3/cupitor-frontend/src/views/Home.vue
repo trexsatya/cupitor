@@ -83,8 +83,8 @@
         <b-card header="Science" no-body>
           <b-card-body>
             <b-list-group flush>
-              <b-list-group-item > <router-link to="/articles/life-science"> "Science" of Life </router-link> </b-list-group-item>
-              <b-list-group-item > <router-link to="/articles/psychology"> "Science" of Psyche </router-link></b-list-group-item>
+              <b-list-group-item > <router-link to="/articles/life-science"> Science of Life </router-link> </b-list-group-item>
+              <b-list-group-item > <router-link to="/articles/psychology"> Science of Psyche </router-link></b-list-group-item>
               <b-list-group-item > <router-link to="/articles/natural-science"> Science of Matter </router-link></b-list-group-item>
             </b-list-group>
           </b-card-body>
