@@ -56,7 +56,7 @@
 
 
 </div>
-<script src="/jquery.js"></script>
+<script src="/vendor/jquery.js"></script>
 <script type="text/javascript">
     let notepadsFromLocalStorage = ()=>{
       return JSON.parse(localStorage.notepads)
@@ -160,7 +160,7 @@
 </div>
     
 <script src="/ace-min/ace.js"></script>
-<script src="/rx.all.min.js"></script>
+<script src="/vendor/rx.all.min.js"></script>
 <script>
     let postNotepad = (text) => {
       if(!$('#editor').data('api-link')) {

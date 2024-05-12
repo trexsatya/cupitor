@@ -1,3 +1,20 @@
+function range(start, count, filter, fn) {
+
+  if(!arguments.length) console.log('range(start, count)')
+
+  if(arguments.length === 3){
+    fn = filter;
+    filter = x => true
+  }
+
+  const ar = Array.apply(0, Array(count))
+    .map(function (element, index) {
+      return index + start;
+    });
+
+  if(fn) return ar.filter(filter).map(x => fn(x))
+  else return ar;
+}
 function CircularCursor(arr) {
   this.items = arr
   this.currentIndex = -1

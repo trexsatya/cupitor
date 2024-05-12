@@ -76,7 +76,7 @@ export default class ArticleEditView extends Vue {
 
     const el = document.createElement('script');
     el.async = false;
-    el.src = "/ckeditor/ckeditor.js";
+    el.src = "/vendor/ckeditor/ckeditor.js";
     document.head.append(el);
 
     window.onload = (e) => {
