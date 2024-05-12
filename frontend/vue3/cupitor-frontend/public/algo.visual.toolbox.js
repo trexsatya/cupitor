@@ -1,5 +1,34 @@
 
 // Extended fabric line class
+fabric.Image.filters.WhiteToTransparent = fabric.util.createClass({
+
+  type: 'whiteToTransparent',
+
+  applyTo: function(canvasEl) {
+    var context = canvasEl.getContext('2d'),
+      imageData = context.getImageData(0, 0, canvasEl.width, canvasEl.height),
+      pix = imageData.data;
+
+    var newColor = {r:0,g:0,b:0, a:0};
+    for (var i = 0, n = pix.length; i <n; i += 4) {
+      var r = pix[i],
+        g = pix[i+1],
+        b = pix[i+2];
+
+      if(r == 255&& g == 255 && b == 255){
+        // Change the white to the new color.
+        pix[i] = newColor.r;
+        pix[i+1] = newColor.g;
+        pix[i+2] = newColor.b;
+        pix[i+3] = newColor.a;
+      }
+    }
+
+
+    context.putImageData(imageData, 0, 0);
+  }
+});
+
 fabric.LineArrow = fabric.util.createClass(fabric.Line, {
 
     type: 'lineArrow',
@@ -637,24 +666,6 @@ function fabricUpdate(canvas, obj, changes){
     canvas.renderAll()
 }
 
-function range(start, count, filter, fn) {
-
-    if(!arguments.length) console.log('range(start, count)')
-
-    if(arguments.length === 3){
-        fn = filter;
-        filter = x => true
-    }
-
-    const ar = Array.apply(0, Array(count))
-        .map(function (element, index) {
-            return index + start;
-        });
-
-    if(fn) return ar.filter(filter).map(x => fn(x))
-    else return ar;
-}
-
 function visualAlgoMethods(){
     return [
         'range(start, count)',
@@ -960,35 +971,6 @@ function bounds(obj){
     return rect;
 
 }
-
-fabric.Image.filters.WhiteToTransparent = fabric.util.createClass({
-
-    type: 'whiteToTransparent',
-
-    applyTo: function(canvasEl) {
-        var context = canvasEl.getContext('2d'),
-            imageData = context.getImageData(0, 0, canvasEl.width, canvasEl.height),
-            pix = imageData.data;
-
-        var newColor = {r:0,g:0,b:0, a:0};
-        for (var i = 0, n = pix.length; i <n; i += 4) {
-            var r = pix[i],
-                g = pix[i+1],
-                b = pix[i+2];
-
-            if(r == 255&& g == 255 && b == 255){
-                // Change the white to the new color.
-                pix[i] = newColor.r;
-                pix[i+1] = newColor.g;
-                pix[i+2] = newColor.b;
-                pix[i+3] = newColor.a;
-            }
-        }
-
-
-        context.putImageData(imageData, 0, 0);
-    }
-});
 
 function connect(canvas, it, other, opts){
 
