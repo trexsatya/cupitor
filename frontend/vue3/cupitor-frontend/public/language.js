@@ -39,18 +39,26 @@ function playMedia() {
 }
 
 function loadSearches() {
-  let searches = JSON.parse(localStorage.getItem('searches') || '{}')
+  let searches = getSearchesFromStorage()
   $('#searchedWords').html('')
   _.forEach(searches, (count, word) => {
-    let op = new Option( `${word} (${count})`, word, true, true)
+    let op = new Option(`${word} (${count})`, word, true, true)
     $('#searchedWords').append(op)
   })
   $('#toggleSearchesControlCheckbox').click()
 }
 
+function getSearchesFromStorage() {
+  return JSON.parse(localStorage.getItem('searches') || '{}');
+}
+
+function saveSearchesIntoStorage(searches) {
+  localStorage.setItem('searches', JSON.stringify(searches))
+}
+
 function exportSearches() {
-  let searches = JSON.parse(localStorage.getItem('searches') || '[]')
-  export2txt(searches.join("\n"), "searches.txt");
+  let searches = getSearchesFromStorage()
+  export2txt(Object.keys(searches).join("\n"), "searches.txt");
   $('#toggleSearchesControlCheckbox').click()
 }
 
@@ -61,14 +69,14 @@ function importSearches() {
   file.onchange = e => {
     let reader = new FileReader()
     reader.onload = e => {
-      let searches = reader.result.split("\n")
-      localStorage.setItem('searches', JSON.stringify(searches))
+      let searches = {}
+      reader.result.split("\n").forEach(w => searches[w] = '')
+      saveSearchesIntoStorage(searches);
       loadSearches()
     }
     reader.readAsText(file.files[0])
   }
   file.click()
-  $('#toggleSearchesControlCheckbox').click()
 }
 
 function clearSearches() {
@@ -78,13 +86,14 @@ function clearSearches() {
 
 function saveSearch(word, count) {
   count = count || 0
-  let searches = JSON.parse(localStorage.getItem('searches') || '{}')
-  if(searches[word]) {
-    return false
+  let searches = getSearchesFromStorage()
+  let newItem = true
+  if (Object.keys(searches).includes(word)) {
+    newItem = false
   }
   searches[word] = count
-  localStorage.setItem('searches', JSON.stringify(searches))
-  return true
+  saveSearchesIntoStorage(searches)
+  return newItem
 }
 
 async function searchTextChanged(e) {
@@ -96,9 +105,11 @@ async function searchTextChanged(e) {
   let count = wordsToItems[w] && wordsToItems[w].length
   count = count || 0
   let newItem = saveSearch(w, wordsToItems[w] && wordsToItems[w].length)
-  if (newItem) {
-    el.append(new Option(`${w} (${count})`, w, true, true))
+  if (!newItem) {
+    let op = el.find(`option[value="${w}"]`).html(`${w} (${count})`)
+    op.remove()
   }
+  el.append(new Option(`${w} (${count})`, w, true, true))
 }
 
 function searchedWordSelected() {
@@ -238,6 +249,7 @@ function fixMobileView() {
       textAlign: 'center'
     })
 
+    $('.play-btn-container').css({marginLeft: '22%'})
     $('#player-info').css({marginTop: 0, left: '40%'})
   }
 }
@@ -247,6 +259,7 @@ $('document').ready(e => {
     let link = $('#mp3Choice').val();
     if (link) {
       window.location.hash = link
+      window.mediaSelected = {link: link, source: 'link'}
       playNewMedia(link, 'link')
     }
   })
@@ -296,6 +309,8 @@ $('document').ready(e => {
   hidePlayer(audioPlayer)
   hidePlayer(videoPlayer)
 
+  let $searchText = $('#searchText');
+  $searchText.on(`focus`, () => $searchText.val(''));
   fixMobileView()
 })
 
@@ -323,8 +338,9 @@ let clearSubtitles = () => {
 }
 
 function getWikiLink(word, uri = null) {
-  word = word.toLowerCase()
-  return `<span> <a href="https://sv.wiktionary.org/wiki/${encodeURIComponent(uri || word)}" target="_blank">${word}</a></span>`;
+  let uriComponent = uri || word;
+  uriComponent = uriComponent.toLowerCase()
+  return `<span> <a href="https://sv.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}" target="_blank">${word}</a></span>`;
 }
 
 function populateWikiLinks(text, $el) {
@@ -345,6 +361,15 @@ function populateWikiLinks(text, $el) {
   });
 }
 
+function changeMediaIfNeededTo(media) {
+  let notAlradyBeingPlayed = window.playingYoutubeVideo && !_.isEqual(window.mediaBeingPlayed, media);
+  let canBePlayed = window.playingYoutubeVideo && !_.isEqual(window.mediaBeingPlayed, media);
+  if (notAlradyBeingPlayed && window.mediaBeingPlayed.source === 'link') {
+    return loadYoutubeVideo(media.link)
+  }
+  return new Promise(resolve => resolve())
+}
+
 function addStarredLine(index, ts) {
   if (window.starredLines.indexOf(index) >= 0) return
 
@@ -356,11 +381,11 @@ function addStarredLine(index, ts) {
   if (!ts) {
     ts = window.subtitles.find(it => it.index === index).ts
   }
-  x.click(e => {
+  x.click(async e => {
     $('.starred-sub').removeClass('active')
     x.addClass('active')
-    setMediaTime(ts, true)
-    // playMedia()
+    await changeMediaIfNeededTo(window.mediaSelected)
+    await setMediaTime(ts, true)
   })
 
   $('#starredLines').append(x)
@@ -1019,22 +1044,23 @@ function highlightedText(text, populateWikiLinks = false) {
   let fn = getWikiLinks;
 
   try {
+    let i;
     let match = text.match(new RegExp(window.searchText, "i"))
     let index = match.index
 
     let x = -1, y = -1;
-    for (var i = index - 1; i >= 0; i--) {
+    for (i = index - 1; i >= 0; i--) {
       let c = text[i]
-      if (c == " " || c == "\n") {
+      if (c === " " || c === "\n") {
         x = i;
         break;
       }
     }
 
 
-    for (var i = index + 1; i < text.length; i++) {
+    for (i = index + 1; i < text.length; i++) {
       let c = text[i]
-      if (c == " " || c == "\n") {
+      if (c === " " || c === "\n") {
         y = i;
         break;
       }
@@ -1047,6 +1073,7 @@ function highlightedText(text, populateWikiLinks = false) {
     hText = (fn(firstPart) + ' ') + "<span class='highlight'>" + fn(highlightedPart) + "</span>" + (' ' + fn(secondPart));
   } catch (e) {
     // console.log(e)
+    hText = getWikiLinks(hText);
   }
   return hText;
 }
@@ -1094,27 +1121,40 @@ function getWords(text) {
   return Array.from(segmentedText, ({segment}) => segment).filter(it => it.trim().length > 1);
 }
 
+function fileContainsExactWord(file, word) {
+  return file.data.map(it => it.text).map(getWords).flat().map(it => it.toLowerCase()).includes(word.toLowerCase())
+}
+
 function getMatchingWords(list, search) {
   let wordToItemsMap = {}
+  let searchText = search.toLowerCase();
+
   list.forEach(item => {
     let lines = item.data;
-    let matchingWord = lines.map(it => getWords(it.text, search))
-      .flat().map(it => it.trim().toLowerCase())
-      .filter(it => it.match(new RegExp(search.toLowerCase(), "i")))
+    let words = lines.map(it => getWords(it.text, search)).flat().map(it => it.trim().toLowerCase());
+    let matchingWords = words
+      .filter(word => {
+        let endsWith = searchText.endsWith(" ") && !searchText.startsWith(" ") && word.endsWith(searchText.trim());
+        let startsWith = searchText.startsWith(" ") && !searchText.endsWith(" ") && word.startsWith(searchText.trim());
+        return word.match(new RegExp(searchText, "i")) || endsWith || startsWith;
+      })
 
-    _.uniq(matchingWord).forEach(match => {
-      if (!wordToItemsMap[match]) {
-        wordToItemsMap[match] = []
+    _.uniq(matchingWords).forEach(match => {
+      if (fileContainsExactWord(item, match)) {
+        wordToItemsMap[match] = computeIfAbsent(wordToItemsMap, match, it => []).concat(item)
       }
-      wordToItemsMap[match].push(item)
     })
-
-    let matchesSearchText = lines.some(it => it.text.toLowerCase().match(new RegExp(search.toLowerCase(), "i")))
-    if (matchesSearchText) {
-      wordToItemsMap[search] = wordToItemsMap[search] || []
-      wordToItemsMap[search].push(item)
-    }
   })
+
+  if (!wordToItemsMap[searchText]) {
+    list.forEach(item => {
+      let lines = item.data;
+      let matchesSearchText = lines.some(it => it.text.toLowerCase().match(new RegExp(searchText, "i")))
+      if (matchesSearchText) {
+        wordToItemsMap[searchText] = computeIfAbsent(wordToItemsMap, searchText, it => []).concat(item)
+      }
+    })
+  }
 
   return wordToItemsMap;
 }
@@ -1167,57 +1207,127 @@ function getMainSubAndSecondarySub(file, line) {
   return {mainSub, secondarySub};
 }
 
-function htmlForSrtLine(_line, file, url) {
-  let line = {..._line}
-  let {mainSub, secondarySub} = getMainSubAndSecondarySub(file, line);
+let playClickedMedia = (url, times, source) => {
+  if (!window.playingAudio && !window.playingVideo) {
+    if (source !== 'YouTube') {
+      window.open(`https://www.svtplay.se/video/${url}?position=${times.start}`, '_newtab')
+      return
+    }
+    loadYoutubeVideo(url)
+  } else {
+    if (window.playingVideo) {
+      videoPlayer.setCurrentTime(times.start)
+      videoPlayer.play()
+    } else if (window.playingAudio) {
+      audioPlayer.setCurrentTime(times.start)
+      audioPlayer.play()
+    }
+  }
 
-  let source = file.source || '';
-  return $(`<div class="srt-line" data-index="${line.index}" data-file="${file.path}">
-                                    <span class="add-prev-btn btn"> + </span>
-                                    <span class="remove-next-btn btn"> - </span>
-                                    <span class="line main-line" data-index="${line.index}"> ${mainSub.text} </span>
-                                    <span class="remove-prev-btn btn"> - </span>
-                                    <span class="add-next-btn btn"> + </span>
-                                    <span class="play-btn-container">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" fill="currentColor" class="bi bi-info-circle media-info" viewBox="0 0 16 16" style="cursor: pointer;">
-                                              <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
-                                              <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
-                                        </svg>
-                                        <span class="info" style="display: none;">
-                                               <span class="info times"> ${fromSeconds(line.start.ordinal)}-${fromSeconds(line.end.ordinal)} </span>
-                                        </span>
-                                        <img src="/img/icons/play_icon.png" alt="" style="width: 35px;height: 35px;cursor: pointer;background-color: inherit;" class="play-btn" data-url="${url}">
-                                    </span>
-                                    <br>
-                                 </div>
-                                 <div class="line secondary-line" data-index="${line.index}"> ${secondarySub.text} [${source} ${file.fetchedFrom === 'local' ? file.url : ''}]</div>
-                                 <br>`).data({line: line, file: file})
+  window.youtubePlayInterval = {...times}
+  console.log(`Playing from ${fromSeconds(times.start)} to ${fromSeconds(times.end)}`)
+}
+
+function showInfo(id, source, time_start, time_end) {
+  let fileName = window.allSubtitles[id].fileName
+  let url = `https://www.svtplay.se/video/${id}?position=${time_start}`
+  if (source === 'YouTube') {
+    url = `https://www.youtube.com/watch?v=${id}&t=${time_start}&autoplay=1`
+  }
+
+  $('#info-dialog-content').html(`
+    <h3><a href="${url}" target="_blank">${fileName}</a></h3>
+    <h4>${source}</h4>
+    <h4>${fromSeconds(time_start)} - ${fromSeconds(time_end)}</h4>
+  `).dialog()
+}
+
+let changeIndices = (id, from, to) => {
+  $('#' + id).data({fromIndex: from, toIndex: to})
+}
+
+function renderLines(id, url) {
+  let $container = $('#' + id);
+  let fromLineIndex = parseInt($container.data('fromIndex'))
+  let toLineIndex = parseInt($container.data('toIndex'))
+
+  if (fromLineIndex < 0) {
+    fromLineIndex = 0
+  }
+
+  if (toLineIndex < fromLineIndex) {
+    toLineIndex = fromLineIndex;
+  }
+
+  let lang = getSelectedLang()
+  let file = window.searchResult.find(it => it.url === url)[lang === 'sv' ? 'sv_subs' : 'en_subs']
+
+
+  let time_start = parseInt(Math.floor(file.data[fromLineIndex].start.ordinal)); //fromSeconds(line.start.ordinal);
+  let time_end = parseInt(Math.ceil(file.data[toLineIndex].end.ordinal)); //fromSeconds(line.end.ordinal);
+
+  let html = `
+<hr>
+<div class="buttons">
+  <span class="add-prev-btn btn" onclick="changeIndices('${id}', ${fromLineIndex - 1}, ${toLineIndex}); renderLines('${id}', '${url}')"> + </span>
+  <span class="remove-next-btn btn" onclick="changeIndices('${id}', ${fromLineIndex + 1}, ${toLineIndex}); renderLines('${id}', '${url}')"> - </span>
+
+  <span class="play-btn-container" style="text-align: center; margin-left: 46%;">
+     <span class="info">${file.source}</span>
+     <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" fill="currentColor" onclick="showInfo('${file.url}', '${file.source}', '${time_start}', '${time_end}')" class="bi bi-info-circle media-info" viewBox="0 0 16 16" style="cursor: pointer;">
+           <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+           <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
+     </svg>
+     <span class="info" style="display: none;">
+            <span class="info times"> ${time_start}-${time_end} </span>
+     </span>
+  </span>
+  <span style="float: right;">
+    <span class="remove-prev-btn btn" onclick="changeIndices('${id}', ${fromLineIndex}, ${toLineIndex - 1}); renderLines('${id}', '${url}')"> - </span>
+    <span class="add-next-btn btn" onclick="changeIndices('${id}', ${fromLineIndex}, ${toLineIndex + 1}); renderLines('${id}', '${url}')"> + </span>
+  </span>
+</div>
+
+`
+
+  let mainSubText = ''
+  let secondarySubText = ''
+  file.data.slice(fromLineIndex, toLineIndex + 1).forEach(it => {
+    let {mainSub, secondarySub} = getMainSubAndSecondarySub(file, ({...it}));
+    mainSubText += ` ${mainSub.text}`
+    secondarySubText += ` ${secondarySub.text}`
+  })
+
+  html += `
+        <br>
+        <span class="line main-line" > ${mainSubText} </span> <br>
+        <span class="line secondary-line" > ${secondarySubText} </span>
+        `
+
+  html += `
+           <br>
+  `
+
+  $container.html(html)
+
+  if (!isDesktop()) {
+    $('.play-btn-container').css({marginLeft: '22%'})
+  }
 }
 
 function populateSRTFindings(wordToItemsMap, $result) {
-  let alreadyAdded = {}
-  let numberOfResults = 0
-
-  function appendIfNotAlreadyAdded($file, line, file) {
-    let key = `${file.source}-${file.url}-${line.index}`
-    if (alreadyAdded[key] && !window.showDuplicates) return 0
-    $file.append(htmlForSrtLine(line, file, file.url));
-    numberOfResults += 1
-    alreadyAdded[key] = true
-    return 1
-  }
-
   Object.keys(wordToItemsMap).toSorted().forEach(word => {
     let items = wordToItemsMap[word]
     let wordBlock = $(`<div ><h5 class="accordion">${word}</h5></div>`)
+    items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
+    $result.append(wordBlock)
     _.take(items, numberOfItemsToShow())
-      .toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
       .forEach(item => {
         let file = item
         let parts = file.path.split("/")
         let fileName = parts[parts.length - 1]
-        let $file = $(`<div class="srt-file" title="${fileName}">
+        let $fileBlock = $(`<div class="srt-file" title="${fileName}">
                             <h4 data-file="${file.path}" style="display: none;"> ${word} </h4>
                         </div>`)
         let matchingLines = file.data.filter(it => {
@@ -1227,25 +1337,22 @@ function populateSRTFindings(wordToItemsMap, $result) {
           return getWords(it.text.toLowerCase()).includes(word.toLowerCase())
         })
 
-        let n = 0
-        _.take(matchingLines, numberOfItemsToShow()).forEach(line => {
-          n += appendIfNotAlreadyAdded($file, line, file);
+        wordBlock.append($fileBlock)
+
+        matchingLines.forEach(it => {
+          let id = uuid()
+          let $lines = $(`<div id="${id}" style="padding-top: 4px; padding-bottom: 8px;"></div>`)
+          $lines.data({fromIndex: it.index - 1, toIndex: it.index - 1})
+          $fileBlock.append($lines)
+
+          renderLines(id, file.url)
         })
-
-        if (n === 0 && wordBlock.html().indexOf('No results found for ') < 0) {
-          $file.html(`
-                        <h6>No results found for ${window.searchText}</h6>
-                        <div>Try Wiki ${getWikiLinks(window.searchText)}</div>
-                        <br>
-                      `);
-        }
-
-        wordBlock.append($file)
       })
-    $result.append(wordBlock)
-  })
 
-  return numberOfResults
+      if (items.length === 0) {
+        wordBlock.append(resultNotFound(window.searchText))
+      }
+  })
 }
 
 function resultNotFound(search) {
@@ -1265,11 +1372,7 @@ function render(searchResults, search) {
   let $result = $('#result');
   $result.html('')
 
-  let resultSize = 0
-
   let selectedLang = getSelectedLang()
-
-  let functionToGetLines = result => result.sv_match ? result.sv_subs : result.en_subs
 
   let searchResultsFiltered = searchResults.map(it => {
     if (selectedLang === 'sv' && it.sv_match) return it.sv_subs
@@ -1278,68 +1381,23 @@ function render(searchResults, search) {
   }).filter(it => it);
 
   let wordToItemsMap = getMatchingWords(searchResultsFiltered, search);
-  resultSize += populateSRTFindings(wordToItemsMap, $result);
+  populateSRTFindings(wordToItemsMap, $result);
+
+  if (Object.keys(wordToItemsMap).length === 0) {
+    $result.html(resultNotFound(window.searchText))
+  }
 
   $result.append("<hr>")
 
-  wordToItemsMap = getMatchingWords(searchResults.filter(it => it.text), search, item => [item]);
-  resultSize += populateNonSRTFindings(wordToItemsMap, $result);
+  // wordToItemsMap = getMatchingWords(searchResults.filter(it => it.text), search, item => [item]);
+  // resultSize += populateNonSRTFindings(wordToItemsMap, $result);
 
   renderAccordions()
-
-  if (resultSize === 0) {
-    $result.html(resultNotFound(search))
-  }
 
   $(".srt-file h4").dblclick(e => {
     window.preferredFile = $(e.target).data().file
   })
 
-  $('.add-prev-btn').click(e => {
-    let plusBtn = $(e.target);
-    let dt = plusBtn.parent().data()
-
-    let lines = plusBtn.parent().find(".line").toArray()
-    let firstLine = $(lines[0])
-
-    let nextLine = firstLine.data('index')
-    if (nextLine < 2) return
-
-    let newLn = dt.file.data[nextLine - 2]
-    let $newLine = $(`<span class="line" data-index="${newLn.index}"> ${newLn.text}</span>`);
-    $newLine.insertBefore(firstLine)
-  })
-  $('.add-next-btn').click(e => {
-    let plusBtn = $(e.target);
-    let dt = plusBtn.parent().data()
-    let lines = plusBtn.parent().find(".line").toArray()
-    let lastLine = $(lines[lines.length - 1])
-
-    let prevLine = lastLine.data('index')
-    if (prevLine === dt.file.data.length) return
-
-    let newLn = dt.file.data[prevLine]
-    let $newLine = $(`<span class="line" data-index="${newLn.index}"> ${newLn.text}</span>`);
-    $newLine.insertAfter(lastLine)
-  })
-
-  $('.remove-prev-btn').click(e => {
-    let btn = $(e.target);
-    let dt = btn.parent().data()
-    let prevLine = btn.prev('.line')
-    if (prevLine.hasClass("main-line")) return
-
-    prevLine.remove()
-  })
-
-  $('.remove-next-btn').click(e => {
-    let btn = $(e.target);
-    let dt = btn.parent().data()
-    let nextLine = btn.next('.line')
-    if (nextLine.hasClass("main-line")) return
-
-    nextLine.remove()
-  })
 
   $(".srt-line .play-btn").click(e => {
     if ($(e.target).hasClass('disabled')) return
@@ -1352,32 +1410,8 @@ function render(searchResults, search) {
 
     let times = getTimesForSubtitleChunk($(e.target).parents('.srt-line'), dt.file)
 
-    let btn = $(e.target)
-    // $(btn).addClass('disabled')
-
-    let play = () => {
-      if (!window.playingAudio && !window.playingVideo) {
-        if (dt.file.source !== 'YouTube') {
-          window.open(`https://www.svtplay.se/video/${url}?position=${times.start}`, '_newtab')
-          return
-        }
-        loadYoutubeVideo(url)
-      } else {
-        if (window.playingVideo) {
-          videoPlayer.setCurrentTime(times.start)
-          videoPlayer.play()
-        } else if (window.playingAudio) {
-          audioPlayer.setCurrentTime(times.start)
-          audioPlayer.play()
-        }
-      }
-
-      window.youtubePlayInterval = {...times}
-      console.log(`Playing from ${fromSeconds(times.start)} to ${fromSeconds(times.end)}`)
-    }
-
     // dampenBgMusic().promise.then(x => play())
-    play()
+    playClickedMedia(url, times, dt.file.source)
     // $( "#audioPlayerPopup" ).dialog('open')
     // $('#audioPlayerPopup').css({width: '100%'})
   })
@@ -1394,7 +1428,9 @@ function getSubs(text, file, url, source, fetchedFrom) {
 }
 
 class SearchResult {
-  constructor(en_subs, sv_subs, en_match, sv_match) {
+  constructor(source, url, en_subs, sv_subs, en_match, sv_match) {
+    this.source = source
+    this.url = url
     this.en_subs = en_subs;
     this.sv_subs = sv_subs;
     this.sv_match = sv_match;
@@ -1413,6 +1449,8 @@ function fetchFromLocal() {
       let enMatch = enText && enText.match(new RegExp(window.searchText, "i"));
       if (svMatch || enMatch) {
         return new SearchResult(
+          window.allSubtitles[it].source,
+          it,
           getSubs(enText, it + ".en.srt", it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
           getSubs(svText, it + ".sv.srt", it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
           !!enMatch,
@@ -1508,12 +1546,14 @@ firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 function loadYoutubeVideo(videoId) {
   let iframe = ytPlayer.getIframe()
   $('#youtubePlayer').show()
-  try {
-    let currentVideoId = iframe.src.split("embed/")[1].split("?")[0]
-    iframe.src = `${iframe.src}`.replaceAll(currentVideoId, videoId)
-  } catch (e) {
-    console.log(e)
-  }
+  return new Promise((resolve, reject) => {
+    try {
+      let currentVideoId = iframe.src.split("embed/")[1].split("?")[0]
+      iframe.src = `${iframe.src}`.replaceAll(currentVideoId, videoId)
+    } catch (e) {
+      console.log(e)
+    }
+  })
 }
 
 function isDesktop() {
