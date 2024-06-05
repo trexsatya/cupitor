@@ -361,7 +361,7 @@ function not(predicate) {
 }
 
 function assert(bool, error) {
-  if(!bool) throw new Error(error)
+  if(!bool) alert(error)
 }
 
 function randomGroupingPreservingOrder(arr, numGroups, min=1) {
