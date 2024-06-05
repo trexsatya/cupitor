@@ -378,6 +378,15 @@
             </div>
         </div>
 
+        <div id="import-dialog" title="Import Words" style="display: none;">
+            <div id="import-dialog-content">
+                Vocab: <select id="vocabularySelect" style="width: 100%;" onchange="importSearchesFromVocab()">
+                    <option value="">-</option>
+                </select>
+                OR - <button onclick="importSearchesFromFile()" class="button-10">From File</button>
+            </div>
+        </div>
+
         <div id="localMedia" style="float: left; margin-top: 1.5em;">
             <audio id="localAudio" src="" width="700" height="500" style="display: none;"></audio>
 

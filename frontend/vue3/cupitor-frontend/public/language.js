@@ -42,7 +42,7 @@ function loadSearches() {
   let searches = getSearchesFromStorage()
   $('#searchedWords').html('')
   _.forEach(searches, (count, word) => {
-    let op = new Option(`${word} (${count})`, word, true, true)
+    let op = new Option(`${word}`, word, true, true)
     $('#searchedWords').append(op)
   })
   $('#toggleSearchesControlCheckbox').click()
@@ -63,6 +63,20 @@ function exportSearches() {
 }
 
 function importSearches() {
+  $("#import-dialog").dialog()
+}
+
+function importSearchesFromVocab() {
+  let category = $("#vocabularySelect").val()
+  let searches = window.vocabulary[category]
+
+  let words = {}
+  searches.forEach(w => words[w] = '')
+  saveSearchesIntoStorage(words)
+  loadSearches()
+}
+
+function importSearchesFromFile() {
   let file = document.createElement('input')
   file.type = 'file'
   file.accept = '.txt'
@@ -100,16 +114,48 @@ async function searchTextChanged(e) {
   let el = $('#searchedWords')
   let w = $('#searchText').val()
 
-  let wordsToItems = await fetchSRTs(this);
+  await fetchSRTs(this);
+  // let count = wordsToItems[w] && wordsToItems[w].length
+  // count = count || 0
+  // let newItem = saveSearch(w, wordsToItems[w] && wordsToItems[w].length)
+  // if (!newItem) {
+  //   let op = el.find(`option[value="${w}"]`).html(`${w} (${count})`)
+  //   op.remove()
+  // }
+  // el.append(new Option(`${w} (${count})`, w, true, true))
+}
 
-  let count = wordsToItems[w] && wordsToItems[w].length
-  count = count || 0
-  let newItem = saveSearch(w, wordsToItems[w] && wordsToItems[w].length)
-  if (!newItem) {
-    let op = el.find(`option[value="${w}"]`).html(`${w} (${count})`)
-    op.remove()
+function parseVocabularyFile(text) {
+  let lines = text.split("\n")
+  let categories = {}
+  let currentCategory = null
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i]
+    if (line.startsWith("#")) {
+      currentCategory = line.replace("#", "").trim()
+      categories[currentCategory] = []
+    } else {
+      if (line.trim().length > 1) {
+        categories[currentCategory].push(line)
+      }
+    }
   }
-  el.append(new Option(`${w} (${count})`, w, true, true))
+
+  return categories
+}
+
+function fetchVocabulary() {
+  fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/vocabulary.txt")
+    .then(res => res.text())
+    .then(text => {
+      window.vocabulary = parseVocabularyFile(text)
+      let $vocabularySelect = $('#vocabularySelect')
+      $vocabularySelect.html('<option>-</option>')
+      Object.keys(window.vocabulary).forEach(it => {
+        let op = new Option(it, it)
+        $vocabularySelect.append(op)
+      })
+    })
 }
 
 function searchedWordSelected() {
@@ -255,6 +301,8 @@ function fixMobileView() {
 }
 
 $('document').ready(e => {
+  fetchVocabulary()
+
   $('#mp3Choice').change(async e => {
     let link = $('#mp3Choice').val();
     if (link) {
@@ -515,6 +563,7 @@ function fixSectionBox() {
 
 $(document).ready(function () {
   fixSectionBox()
+  $("#vocabularySelect").select2()
 });
 
 async function fetchCategorisation() {
@@ -1110,7 +1159,7 @@ function playSelectedText(e) {
 function numberOfItemsToShow() {
   let n = parseInt(numberOfFindingsToShow.value);
   if (n === -1) {
-    return 1000
+    return 100000
   }
   return n
 }
@@ -1121,8 +1170,13 @@ function getWords(text) {
   return Array.from(segmentedText, ({segment}) => segment).filter(it => it.trim().length > 1);
 }
 
-function fileContainsExactWord(file, word) {
-  return file.data.map(it => it.text).map(getWords).flat().map(it => it.toLowerCase()).includes(word.toLowerCase())
+class MatchResult {
+  constructor(word, line, url, source) {
+    this.url = url;
+    this.line = line;
+    this.word = word;
+    this.source = source;
+  }
 }
 
 function getMatchingWords(list, search) {
@@ -1131,29 +1185,23 @@ function getMatchingWords(list, search) {
 
   list.forEach(item => {
     let lines = item.data;
-    let words = lines.map(it => getWords(it.text, search)).flat().map(it => it.trim().toLowerCase());
-    let matchingWords = words
-      .filter(word => {
-        let endsWith = searchText.endsWith(" ") && !searchText.startsWith(" ") && word.endsWith(searchText.trim());
-        let startsWith = searchText.startsWith(" ") && !searchText.endsWith(" ") && word.startsWith(searchText.trim());
-        return word.match(new RegExp(searchText, "i")) || endsWith || startsWith;
-      })
-
-    _.uniq(matchingWords).forEach(match => {
-      if (fileContainsExactWord(item, match)) {
-        wordToItemsMap[match] = computeIfAbsent(wordToItemsMap, match, it => []).concat(item)
+    lines.forEach(line => {
+      let words = getWords(line.text, search).map(it => it.trim().toLowerCase())
+      let endsWith = word => searchText.endsWith(" ") && !searchText.startsWith(" ") && word.endsWith(searchText.trim());
+      let startsWith = word => searchText.startsWith(" ") && !searchText.endsWith(" ") && word.startsWith(searchText.trim());
+      words.filter(word => word.match(new RegExp(searchText, "i")) || endsWith(word) || startsWith(word))
+        .forEach(word => {
+          wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
+        })
+      let word = searchText.toLowerCase().trim()
+      if (word.indexOf(" ") > 0 && line.text.toLowerCase().indexOf(word) >= 0) {
+        wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
       }
     })
   })
 
-  if (!wordToItemsMap[searchText]) {
-    list.forEach(item => {
-      let lines = item.data;
-      let matchesSearchText = lines.some(it => it.text.toLowerCase().match(new RegExp(searchText, "i")))
-      if (matchesSearchText) {
-        wordToItemsMap[searchText] = computeIfAbsent(wordToItemsMap, searchText, it => []).concat(item)
-      }
-    })
+  if (wordToItemsMap[searchText.trim()] === undefined) {
+    wordToItemsMap[searchText] = []
   }
 
   return wordToItemsMap;
@@ -1251,8 +1299,8 @@ function renderLines(id, url) {
   let fromLineIndex = parseInt($container.data('fromIndex'))
   let toLineIndex = parseInt($container.data('toIndex'))
 
-  if (fromLineIndex < 0) {
-    fromLineIndex = 0
+  if (fromLineIndex < 1) {
+    fromLineIndex = 1
   }
 
   if (toLineIndex < fromLineIndex) {
@@ -1262,9 +1310,11 @@ function renderLines(id, url) {
   let lang = getSelectedLang()
   let file = window.searchResult.find(it => it.url === url)[lang === 'sv' ? 'sv_subs' : 'en_subs']
 
-
-  let time_start = parseInt(Math.floor(file.data[fromLineIndex].start.ordinal)); //fromSeconds(line.start.ordinal);
-  let time_end = parseInt(Math.ceil(file.data[toLineIndex].end.ordinal)); //fromSeconds(line.end.ordinal);
+  let getSub = x => file.data.find(it => it.index + '' === x + '');
+  let st = getSub(fromLineIndex);
+  let end = getSub(toLineIndex)
+  let time_start = parseInt(Math.floor(st.start.ordinal)); //fromSeconds(line.start.ordinal);
+  let time_end = parseInt(Math.ceil(end.end.ordinal)); //fromSeconds(line.end.ordinal);
 
   let html = `
 <hr>
@@ -1292,8 +1342,9 @@ function renderLines(id, url) {
 
   let mainSubText = ''
   let secondarySubText = ''
-  file.data.slice(fromLineIndex, toLineIndex + 1).forEach(it => {
-    let {mainSub, secondarySub} = getMainSubAndSecondarySub(file, ({...it}));
+  range(fromLineIndex, toLineIndex - fromLineIndex + 1).forEach(idx => {
+    let sub = getSub(idx)
+    let {mainSub, secondarySub} = getMainSubAndSecondarySub(file, ({...sub}));
     mainSubText += ` ${mainSub.text}`
     secondarySubText += ` ${secondarySub.text}`
   })
@@ -1325,33 +1376,23 @@ function populateSRTFindings(wordToItemsMap, $result) {
     _.take(items, numberOfItemsToShow())
       .forEach(item => {
         let file = item
-        let parts = file.path.split("/")
-        let fileName = parts[parts.length - 1]
-        let $fileBlock = $(`<div class="srt-file" title="${fileName}">
-                            <h4 data-file="${file.path}" style="display: none;"> ${word} </h4>
+        let $fileBlock = $(`<div class="srt-file" title="${item['name']}">
+                            <h4 data-file="${item.url}" style="display: none;"> ${word} </h4>
                         </div>`)
-        let matchingLines = file.data.filter(it => {
-          if (window.searchText.indexOf(' ') >= 0) {
-            return it.text.toLowerCase().match(word)
-          }
-          return getWords(it.text.toLowerCase()).includes(word.toLowerCase())
-        })
 
         wordBlock.append($fileBlock)
 
-        matchingLines.forEach(it => {
-          let id = uuid()
-          let $lines = $(`<div id="${id}" style="padding-top: 4px; padding-bottom: 8px;"></div>`)
-          $lines.data({fromIndex: it.index - 1, toIndex: it.index - 1})
-          $fileBlock.append($lines)
+        let id = uuid()
+        let $lines = $(`<div id="${id}" style="padding-top: 4px; padding-bottom: 8px;"></div>`)
+        $lines.data({fromIndex: item.line.index, toIndex: item.line.index})
+        $fileBlock.append($lines)
 
-          renderLines(id, file.url)
-        })
+        renderLines(id, file.url)
       })
 
-      if (items.length === 0) {
-        wordBlock.append(resultNotFound(window.searchText))
-      }
+    if (items.length === 0) {
+      wordBlock.html(`<div style="padding: 1em;"> ${getWikiLinks(word)} not found. Try Wiki! </div>`)
+    }
   })
 }
 
@@ -1723,3 +1764,79 @@ if (window.location.hostname === 'localhost') {
   $('#saveRevisionBtn').show()
   $('#saveStarredLinesBtn').show()
 }
+
+
+function tests() {
+  let enSubs = {
+    data: [
+      {
+        index: 1,
+        id: 1,
+        start: {ordinal: 0},
+        end: {ordinal: 1},
+        text: "XYZ!"
+      },
+      {
+        index: 2,
+        id: 2,
+        start: {ordinal: 1},
+        end: {ordinal: 2},
+        text: "abc"
+      }
+    ],
+    path: "path1.en.srt",
+    source: "source1",
+    url: "url1"
+  }
+
+  let svSubs1 = {
+    data: [
+      {
+        index: 1,
+        id: 1,
+        start: {ordinal: 0},
+        end: {ordinal: 1},
+        text: "I grund och botten, är det enkelt!"
+      },
+      {
+        index: 2,
+        id: 2,
+        start: {ordinal: 1},
+        end: {ordinal: 2},
+        text: "Nånstans i världen, finns det en plats!"
+      }
+    ],
+    path: "path1.sv.srt",
+    source: "source1",
+    url: "url1"
+  }
+
+  let svSubs2 = {
+    data: [
+      {
+        index: 1,
+        id: 1,
+        start: {ordinal: 1},
+        end: {ordinal: 2},
+        text: "Grund och botten, ja!"
+      },
+      {
+        index: 2,
+        id: 2,
+        start: {ordinal: 1},
+        end: {ordinal: 2},
+        text: "Ja, det är sant. Grund och botten!"
+      }
+    ],
+    path: "path2.sv.srt",
+    source: "source1",
+    url: "url2"
+  }
+
+  let searchResults = [new SearchResult("source1", "url1", enSubs, svSubs1, false, true)]
+  let wordToItemsMap = getMatchingWords([svSubs1, svSubs2], "grund och botten")
+  log(wordToItemsMap["grund och botten"])
+  assert(wordToItemsMap["grund och botten"].length === 3, "Words with spaces should be matched")
+}
+
+tests()
