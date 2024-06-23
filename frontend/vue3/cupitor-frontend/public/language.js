@@ -5,6 +5,17 @@ Array.prototype.last = function () {
   return _.last(this)
 };
 
+window.onbeforeunload = function (event) {
+  return confirm("Confirm refresh");
+};
+
+async function loadJokes() {
+  let jokes = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/skämts/1.txt")
+  jokes = await jokes.text()
+  jokes = jokes.split(/[0-9]+\.jpg\n     ------------\n/).map(it => it.trim()).filter(it => it.length > 20)
+  window.jokes = jokes
+}
+
 function togglePlay(el) {
   if (window.playingYoutubeVideo) {
     if (ytPlayer.getPlayerState() === 2) {
@@ -117,12 +128,10 @@ async function searchTextChanged(e) {
   await fetchSRTs(this);
   // let count = wordsToItems[w] && wordsToItems[w].length
   // count = count || 0
-  // let newItem = saveSearch(w, wordsToItems[w] && wordsToItems[w].length)
-  // if (!newItem) {
-  //   let op = el.find(`option[value="${w}"]`).html(`${w} (${count})`)
-  //   op.remove()
-  // }
-  // el.append(new Option(`${w} (${count})`, w, true, true))
+  let newItem = saveSearch(w, null)
+  if (newItem) {
+    el.append(new Option(`${w}`, w, false, false))
+  }
 }
 
 function parseVocabularyFile(text) {
@@ -229,7 +238,7 @@ let ontimeupdate = e => {
   //   }
   // }
 
-  if (ct > window.currentSub.te) {
+  if (window.currentSub && ct > window.currentSub.te) {
     window.currentSubIndex += 1;
     window.currentSub = window.subtitles[window.currentSubIndex]
   }
@@ -284,19 +293,40 @@ window.showDuplicates = false
 window.youtubePlayInterval = null
 
 function fixMobileView() {
-  if (!isDesktop()) {
-    $(".fl-left").css({width: '100%', clear: 'both'})
-    $(".fl-right").css({left: 0, width: '100%', marginTop: '0.3em', clear: 'both'})
-    $('#starredLines').parent().css({
-      marginTop: 0,
-      bottom: 0
-    })
-    $('#toggleEnSubBtn').parent().css({
-      textAlign: 'center'
-    })
+  if (isDesktop()) {
+    return
+  }
 
-    $('.play-btn-container').css({marginLeft: '22%'})
-    $('#player-info').css({marginTop: 0, left: '40%'})
+  $(".fl-left").css({width: '100%', clear: 'both'})
+  $(".fl-right").css({left: 0, width: '100%', marginTop: '0.3em', clear: 'both'})
+  $('#starredLines').parent().css({
+    marginTop: 0,
+    bottom: 0
+  })
+  $('#toggleEnSubBtn').parent().css({
+    textAlign: 'center'
+  })
+
+  $('.play-btn-container').css({marginLeft: '22%'})
+  $('#player-info').css({marginTop: 0, left: '40%'})
+
+  $('#btns-2 .select2').css({width: '210px'})
+  $('#mp3ChoiceContainer .select2').css({width: '78%'})
+  $('#btns-2').css({marginBottom: '1em'})
+
+  $('#collapseMainControl').parent().css({top: getTopOffsetForCollapseButton(), left: '48%'})
+  $('#result').parent().css({marginTop: '3.8em'})
+}
+
+function removeHash() {
+  window.location = window.location.href.split('#')[0]
+}
+
+function getTopOffsetForCollapseButton() {
+  if (isDesktop()) {
+    return '8em'
+  } else {
+    return '11.5em'
   }
 }
 
@@ -309,6 +339,17 @@ $('document').ready(e => {
       window.location.hash = link
       window.mediaSelected = {link: link, source: 'link'}
       playNewMedia(link, 'link')
+    } else {
+      removeHash()
+    }
+  })
+
+  $('#onlySubsCheckbox').change(e => {
+    if ($('#onlySubsCheckbox').is(':checked')) {
+      showOnlySubtitle()
+    } else {
+      // $('#playerControls').show()
+      // $('#subControls').hide()
     }
   })
 
@@ -341,7 +382,9 @@ $('document').ready(e => {
       addListeners(mediaElement)
     }
   })
+  let videoWidth = isDesktop() ? -1 : $(window).width();
   let videoPlayer = new MediaElementPlayer('localVideo', {
+    videoWidth: videoWidth,
     iconSprite: '/img/icons/mejs-controls.svg',
     defaultSpeed: 0.75,
     speeds: ['0.50', '0.75', '1.00', '0.75'],
@@ -358,7 +401,25 @@ $('document').ready(e => {
   hidePlayer(videoPlayer)
 
   let $searchText = $('#searchText');
-  $searchText.on(`focus`, () => $searchText.val(''));
+  $searchText.on(`focus`, () => {
+    if ($("#toggleClearTextOnClickCheckbox").is(":checked")) {
+      $searchText.val('')
+    }
+  });
+
+  $('#collapseMainControl').click(e => {
+    $('#mainControlInputs').toggle();
+
+    let $collapseUpSign = $('#collapseUpSign');
+    $collapseUpSign.toggle()
+    $('#collapseDownSign').toggle()
+    if ($collapseUpSign.is(':visible')) {
+      $('#collapseMainControl').parent().css({top: getTopOffsetForCollapseButton()})
+    } else {
+      $('#collapseMainControl').parent().css({top: '0.1em'})
+    }
+  })
+
   fixMobileView()
 })
 
@@ -504,6 +565,8 @@ async function seekToYoutubeTime(t) {
 }
 
 function setCurrentSub(newTime) {
+  if (!window.subtitles) return
+
   for (let i = 0; i < window.subtitles.length; i++) {
     let it = window.subtitles[i]
     if (it.ts <= newTime && newTime < it.te) {
@@ -533,7 +596,6 @@ async function setMediaTime(newTime, manualHandling = false) {
 
 function fixSectionBox() {
   let $mp3Choice = $('#mp3Choice');
-  $mp3Choice.select2();
 
   let optgroupState = {};
 
@@ -630,11 +692,27 @@ async function loadAllSubtitles() {
   srts = await srts.json()
   window.srts = srts
 
-  srts.forEach(it => getSubtitlesForLink(it['link'], it['source']))
+  srts.forEach(async function x(it) {
+    await getSubtitlesForLink(it['link'], it['source'])
+  })
 
   window.categories = await fetchCategorisation()
 
+  await loadJokesAsSubtitles()
   populateAllLinks();
+}
+
+async function loadJokesAsSubtitles() {
+  try {
+    await loadJokes()
+    window.jokes.forEach((joke, i) => {
+      let sv = `1\n00:00:00.001 --> 00:03:00.000\n${joke}`
+      let en = '1\n00:00:00.001 --> 00:03:00.000\n'
+      let link = `joke-${i}`
+      window.allSubtitles[link] = {sv, en, source: 'jokes', fileName: link}
+    })
+  } catch (e) {
+  }
 }
 
 try {
@@ -767,7 +845,10 @@ async function getSubtitlesForLink(link, source) {
   if (window.allSubtitles[link]) {
     return window.allSubtitles[link]
   }
-  let name = window.srts.find(it => it.link === link).name
+  let srt = window.srts.find(it => it.link === link);
+  if (!srt) return
+
+  let name = srt.name
   let svName = name + ".sv.srt"
   let enName = name + ".en.srt"
   let sv = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/" + svName)
@@ -793,11 +874,11 @@ async function loadCombinedSrts(combinedJson) {
 async function loadLocalFiles() {
   let files = Array.from(localFiles.files);
   let combinedJson = files.find(it => it.name.match(/combined.json$/))
-  let indexJson = files.find(it => it.name.match(/index.json$/))
+
 
   if (combinedJson) {
     await loadCombinedSrts(combinedJson);
-
+    let indexJson = files.find(it => it.name.match(/index.json$/))
     if (indexJson) {
       let index = await new Response(indexJson).json()
       index.forEach(it => {
@@ -808,24 +889,29 @@ async function loadLocalFiles() {
     return
   }
 
+  let sv = null, en = null;
   let audioFile = files.find(it => it.name.match(/.mp3$/))
   let videoFile = files.find(it => it.name.match(/.mp4$/))
   let svSrtFile = files.find(it => it.name.match(/.sv.srt$/))
   let enSrtFile = files.find(it => it.name.match(/.en.srt$/))
 
+  sv = svSrtFile && await new Response(svSrtFile).text()
+  en = enSrtFile && await new Response(enSrtFile).text()
+
   if (videoFile) {
     videoPlayer.setSrc(URL.createObjectURL(videoFile))
   }
 
-  let link = _.last((audioFile || videoFile).name.replace(".mp3", "").replaceAll(".mp4", "").split(" || ")).trim()
-  let sv = await new Response(svSrtFile).text()
-  let en = await new Response(enSrtFile).text()
+  let mediaNameWithoutExtension = (audioFile || videoFile).name.replace(".mp3", "").replaceAll(".mp4", "");
+  let link = _.last(mediaNameWithoutExtension.split(/ [|-]{2} /)).trim()
 
-  window.allSubtitles[link] = {
-    sv,
-    en,
-    source: 'local',
-    fileName: svSrtFile.name.replaceAll(".sv.srt", "")
+  if (sv && en) {
+    window.allSubtitles[link] = {
+      sv,
+      en,
+      source: 'local',
+      fileName: mediaNameWithoutExtension
+    }
   }
 
   playNewMedia(link, 'local', videoFile || audioFile)
@@ -855,6 +941,21 @@ async function loadSubtitlesForLink(sv, en) {
   // console.log(en)
   console.log(combined)
   storeSubtitles(combined)
+
+  try {
+    $('#subtitlePagination').pagination('destroy')
+  } catch (e) {
+    // Maybe not initialized
+  }
+  $('#subtitlePagination').pagination({
+    dataSource: range(1, window.subtitles.length),
+    pageSize: 1,
+    callback: function (data, pagination) {
+      let pageNum = data[0]
+      window.currentSub = window.subtitles[pageNum - 1]
+      renderSubtitles()
+    }
+  }) //End pagination
 }
 
 function hidePlayer(player) {
@@ -880,43 +981,71 @@ function showVideoPlayer() {
     marginLeft: '1em',
     width: subWidth,
     maxHeight: '300px',
-    overflow: 'scroll'
+    overflow: 'scroll',
+    paddingRight: '1em'
   })
+}
+
+function showOnlySubtitle() {
+  stopMedia()
+  $('#youtubePlayer').hide()
+  $('#localVideoContainer').hide()
+  $('#localMediaContainer').hide()
+  window.playingYoutubeVideo = false;
+  window.playingVideo = false;
+  window.playingAudio = false;
+  $('#playerControls').hide()
+  $('#subControls').show()
+
+  $('#mediaRelatedContainer').css({minHeight: 530})
 }
 
 async function playNewMedia(link, source, mediaFile) {
   clearSubtitles()
   stopMedia(source)
-  let {sv, en} = await getSubtitlesForLink(link, source)
+
   //Load subtitle
 
-  if (source === 'link') {
-    $('#youtubePlayer').show()
-    $('#localVideoContainer').hide()
-    loadYoutubeVideo(link)
-    window.playingYoutubeVideo = true;
-  } else if (source === 'local') {
-    $('#youtubePlayer').hide()
-    $('#localVideoContainer').show()
-    window.playingYoutubeVideo = false;
-    if (mediaFile.name.endsWith(".mp3")) {
-      audioPlayer.setSrc(URL.createObjectURL(mediaFile))
-      audioPlayer.play()
-      window.playingAudio = true;
-      window.playingVideo = false;
-      hidePlayer(window.videoPlayer)
-      showAudioPlayer()
-    } else if (mediaFile.name.endsWith(".mp4")) {
-      videoPlayer.setSrc(URL.createObjectURL(mediaFile))
-      window.playingAudio = false;
-      window.playingVideo = true;
-      videoPlayer.play()
-      hidePlayer(window.audioPlayer)
-      showVideoPlayer()
+  function _playMedia() {
+    if (source === 'link') {
+      $('#youtubePlayer').show()
+      $('#localVideoContainer').hide()
+      loadYoutubeVideo(link)
+      window.playingYoutubeVideo = true;
+    } else if (source === 'local') {
+      $('#youtubePlayer').hide()
+      $('#localVideoContainer').show()
+      window.playingYoutubeVideo = false;
+      if (mediaFile.name.endsWith(".mp3")) {
+        audioPlayer.setSrc(URL.createObjectURL(mediaFile))
+        audioPlayer.play()
+        window.playingAudio = true;
+        window.playingVideo = false;
+        hidePlayer(window.videoPlayer)
+        showAudioPlayer()
+      } else if (mediaFile.name.endsWith(".mp4")) {
+        videoPlayer.setSrc(URL.createObjectURL(mediaFile))
+        window.playingAudio = false;
+        window.playingVideo = true;
+        videoPlayer.play()
+        hidePlayer(window.audioPlayer)
+        showVideoPlayer()
+      }
     }
+    window.mediaBeingPlayed = {link, source}
+    $('#playerControls').show()
+    $('#subControls').hide()
   }
+
+  $('#result').hide()
+  if (!$('#onlySubsCheckbox').is(':checked')) {
+    _playMedia();
+  } else {
+    showOnlySubtitle();
+  }
+
+  let {sv, en} = await getSubtitlesForLink(link, source)
   loadSubtitlesForLink(sv, en);
-  window.mediaBeingPlayed = {link, source}
 
   $('#currentMedia').html(`${link}, ${source}`)
 
@@ -1316,6 +1445,11 @@ function renderLines(id, url) {
   let time_start = parseInt(Math.floor(st.start.ordinal)); //fromSeconds(line.start.ordinal);
   let time_end = parseInt(Math.ceil(end.end.ordinal)); //fromSeconds(line.end.ordinal);
 
+  let showInfoBtn = `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" fill="currentColor" onclick="showInfo('${file.url}', '${file.source}', '${time_start}', '${time_end}')" class="bi bi-info-circle media-info" viewBox="0 0 16 16" style="cursor: pointer;">
+           <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+           <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
+     </svg>`
+
   let html = `
 <hr>
 <div class="buttons">
@@ -1324,10 +1458,7 @@ function renderLines(id, url) {
 
   <span class="play-btn-container" style="text-align: center; margin-left: 46%;">
      <span class="info">${file.source}</span>
-     <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" fill="currentColor" onclick="showInfo('${file.url}', '${file.source}', '${time_start}', '${time_end}')" class="bi bi-info-circle media-info" viewBox="0 0 16 16" style="cursor: pointer;">
-           <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
-           <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
-     </svg>
+     ${url.startsWith('joke-') ? '' : showInfoBtn}
      <span class="info" style="display: none;">
             <span class="info times"> ${time_start}-${time_end} </span>
      </span>
@@ -1346,7 +1477,9 @@ function renderLines(id, url) {
     let sub = getSub(idx)
     let {mainSub, secondarySub} = getMainSubAndSecondarySub(file, ({...sub}));
     mainSubText += ` ${mainSub.text}`
-    secondarySubText += ` ${secondarySub.text}`
+    if (secondarySub) {
+      secondarySubText += ` ${secondarySub.text}`
+    }
   })
 
   html += `
@@ -1372,6 +1505,9 @@ function populateSRTFindings(wordToItemsMap, $result) {
     let wordBlock = $(`<div ><h5 class="accordion">${word}</h5></div>`)
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
+    wordBlock.append(`<div style=""> Wiki: ${getWikiLinks(word)} 丨
+        <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> </div> <br>`)
+
     $result.append(wordBlock)
     _.take(items, numberOfItemsToShow())
       .forEach(item => {
@@ -1389,10 +1525,6 @@ function populateSRTFindings(wordToItemsMap, $result) {
 
         renderLines(id, file.url)
       })
-
-    if (items.length === 0) {
-      wordBlock.html(`<div style="padding: 1em;"> ${getWikiLinks(word)} not found. Try Wiki! </div>`)
-    }
   })
 }
 
@@ -1411,7 +1543,7 @@ function render(searchResults, search) {
   if (!searchResults) return
 
   let $result = $('#result');
-  $result.html('')
+  $result.html('').show()
 
   let selectedLang = getSelectedLang()
 
@@ -1603,7 +1735,7 @@ function isDesktop() {
 }
 
 function getDimensionsForPlayer() {
-  let wh = $(window).height(), ww = $(window).width();
+  let wh = window.innerHeight, ww = window.innerWidth;
 
   let ytVideoWidth = 940, ytHeight = 590;
   let subWidth = 0;
@@ -1612,10 +1744,10 @@ function getDimensionsForPlayer() {
     ytVideoWidth = ww * 0.6;
     subWidth = $(window).width() - (ytVideoWidth + 40)
   } else {
-    ytVideoWidth = ww - 50;
+    ytVideoWidth = ww - 15;
     subWidth = ww - 10;
     ytHeight = wh / 2 - 150;
-    $('#controls').css({width: '100%', bottom: '-15em', right: 0})
+    $('#mediaControls').css({width: '100%', bottom: '-15em', right: 0})
     $('#youtubePlayer-info').hide()
     $('#speed-control').parent().hide()
 
@@ -1644,7 +1776,8 @@ function onYouTubeIframeAPIReady() {
     marginLeft: '1em',
     width: subWidth,
     maxHeight: '300px',
-    overflow: 'scroll'
+    overflow: 'scroll',
+    paddingRight: '1em'
   })
 }
 
@@ -1668,11 +1801,11 @@ function onPlayerStateChange(event) {
 }
 
 function stopMedia(source) {
-  if (source === 'link' && window.playingYoutubeVideo) {
+  if (window.playingYoutubeVideo) {
     window.ytPlayer.pauseVideo();
-  } else if (source === 'local' && window.playingAudio) {
+  } else if (window.playingAudio) {
     audioPlayer.pause()
-  } else if (source === 'local' && window.playingVideo) {
+  } else if (window.playingVideo) {
     videoPlayer.pause()
   }
 }
