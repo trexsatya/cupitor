@@ -87,6 +87,15 @@
       .secondary-line {
         color: grey;
       }
+
+      .selectable{
+        -webkit-touch-callout: all; /* iOS Safari */
+        -webkit-user-select: all; /* Safari */
+        -khtml-user-select: all; /* Konqueror HTML */
+        -moz-user-select: all; /* Firefox */
+        -ms-user-select: all; /* Internet Explorer/Edge */
+        user-select: all; /* Chrome and Opera */
+      }
     </style>
 
     <script src="/play.js"></script>
@@ -518,6 +527,10 @@
         Background Music: <input id="bgMusicInput" type="file" accept="audio/*"
                                  onchange="loadMediaFile(bgMusicAudio, 'bgMusicInput')">
         <audio id="bgMusicAudio" controls="controls" autoplay></audio>
+        <div style="padding-bottom: 20px;">
+            <div style="margin-bottom: 1em;">Bg Music Volume:</div>
+            <div id="bgMusicVolume" style="max-width: 300px;"></div>
+        </div>
     </div>
     <div style="">
         <audio id="swedishAudioHidden" style="display: none;" autoplay=""></audio>
@@ -534,6 +547,7 @@
     render(window.searchResult, window.searchText)
   }
 
+  $('#bgMusicVolume').slider({ value: 35 })
   let swedishAudio = document.getElementById("swedishAudio")
   let secondsWithSound = new Set()
   let dampenAtSeconds = new Set()
@@ -706,7 +720,7 @@
     let interval = null
     let promise = new Promise((res, rej) => {
       console.log("Dampening at ", mediaTimeInSeconds(swedishAudio))
-      let min = 0.05
+      let min = $('#bgMusicVolume').slider( "option", "value" )/100
 
       let vol = bgMusicAudio.volume;
       let t = 200; // 200ms interval
@@ -867,15 +881,17 @@
     }
 
     let $wordlist = $("#wordlist");
-
+    $wordlist.html('')
     if (html.length) {
       html.forEach(it => $wordlist.append(it))
     } else {
-      words = words.split(" ").map(x => `<span>${x}</span>`).join(" ")
-      words = words.replaceAll("\n", "<br>").replaceAll("-", "+")
-        .replaceAll(" ", "&nbsp;")
-        .replaceAll("\t", "&nbsp;&nbsp;&nbsp;")
-      $wordlist.html(words)
+      words.split("\n").map(it => chunkifySentence(it, 130)).flat().forEach(line => {
+        let ws = line.split(" ").map(x => `<span>${x}</span>`).join(" ")
+        ws = ws.replaceAll("\n", "<br>").replaceAll("-", "+")
+          .replaceAll(" ", "&nbsp;")
+          .replaceAll("\t", "&nbsp;&nbsp;&nbsp;")
+        $wordlist.append(`<div class="selectable">${ws}</div>`)
+      })
     }
 
     enteredWords.value = ''
