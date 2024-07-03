@@ -340,6 +340,17 @@ function resetTextillateContainer() {
   $('#cinemaText').html('')
 }
 
+function waitUntil(condition) {
+  return new Promise((resolve, reject) => {
+    let interval = setInterval(() => {
+      if (condition()) {
+        clearInterval(interval)
+        resolve()
+      }
+    }, 100)
+  })
+}
+
 function type(strings, elSelector, opts) {
   var options = Object.assign({}, {
     strings: [strings].flat(),

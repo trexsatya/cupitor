@@ -96,6 +96,56 @@
         -ms-user-select: all; /* Internet Explorer/Edge */
         user-select: all; /* Chrome and Opera */
       }
+
+      .checkbox-wrapper-22 .switch {
+        display: inline-block;
+        height: 34px;
+        position: relative;
+        width: 60px;
+        top: 12px;
+      }
+
+      .checkbox-wrapper-22 .switch input {
+        display: none;
+      }
+
+      .checkbox-wrapper-22 .slider {
+        background-color: #ccc;
+        bottom: 0;
+        cursor: pointer;
+        left: 0;
+        position: absolute;
+        right: 0;
+        top: 0;
+        transition: .4s;
+      }
+
+      .checkbox-wrapper-22 .slider:before {
+        background-color: #fff;
+        bottom: 4px;
+        content: "";
+        height: 26px;
+        left: 4px;
+        position: absolute;
+        transition: .4s;
+        width: 26px;
+      }
+
+      .checkbox-wrapper-22 input:checked + .slider {
+        background-color: #66bb6a;
+      }
+
+      .checkbox-wrapper-22 input:checked + .slider:before {
+        transform: translateX(26px);
+      }
+
+      .checkbox-wrapper-22 .slider.round {
+        border-radius: 34px;
+      }
+
+      .checkbox-wrapper-22 .slider.round:before {
+        border-radius: 50%;
+      }
     </style>
 
     <script src="/play.js"></script>
@@ -530,6 +580,10 @@
         <div style="padding-bottom: 20px;">
             <div style="margin-bottom: 1em;">Bg Music Volume:</div>
             <div id="bgMusicVolume" style="max-width: 300px;"></div>
+            <label class="switch" style="vertical-align: middle;">
+                <input type="checkbox" id="selectableCheckbox" checked>
+                <span class="slider"></span>
+            </label>
         </div>
     </div>
     <div style="">
@@ -548,6 +602,7 @@
   }
 
   $('#bgMusicVolume').slider({ value: 35 })
+
   let swedishAudio = document.getElementById("swedishAudio")
   let secondsWithSound = new Set()
   let dampenAtSeconds = new Set()
@@ -659,9 +714,10 @@
     el.src = URL.createObjectURL(document.getElementById(input).files[0])
   }
 
-  function analyseAudio(audioData, callbackWhenMovedEnough) {
+  async function analyseAudio(audioData, callbackWhenMovedEnough) {
     secondsWithSound = new Set()
     // el.play()
+    await waitUntil(() => !isNaN(swedishAudio.duration))
 
     const seconds = Math.ceil(swedishAudio.duration)
     const sampleRate = 96000
@@ -890,7 +946,7 @@
         ws = ws.replaceAll("\n", "<br>").replaceAll("-", "+")
           .replaceAll(" ", "&nbsp;")
           .replaceAll("\t", "&nbsp;&nbsp;&nbsp;")
-        $wordlist.append(`<div class="selectable">${ws}</div>`)
+        $wordlist.append(`<div class="selectable line">${ws}</div>`)
       })
     }
 
@@ -1017,6 +1073,15 @@
       .then(it => {
         console.log(it)
       })
+  }
+
+  $('#selectableCheckbox')[0].onchange = e => {
+    let checked = $(e.target).is(":checked")
+    if(checked) {
+      $("#wordlist .line").addClass("selectable")
+    } else {
+      $("#wordlist .line").removeClass("selectable")
+    }
   }
 </script>
 
