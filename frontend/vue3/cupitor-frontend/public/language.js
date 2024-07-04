@@ -10,10 +10,41 @@ window.onbeforeunload = function (event) {
 };
 
 async function loadJokes() {
-  let jokes = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/skämts/1.txt")
-  jokes = await jokes.text()
-  jokes = jokes.split(/[0-9]+\.jpg\n     ------------\n/).map(it => it.trim()).filter(it => it.length > 20)
-  window.jokes = jokes
+  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/jokes/1.txt")
+  response = await response.text()
+  response = response.split(/[0-9]+\.jpg\n     ------------\n/).map(it => it.trim()).filter(it => it.length > 20)
+  window.jokes = response
+}
+
+function _poulateData(where, response) {
+  response.split("---------------").map(it => it.trim()).forEach(it => {
+    let splits = it.split("\n")
+    where.push({
+      name: _.trim(splits[0]),
+      text: _.drop(splits, 1).join("\n")
+    })
+  })
+}
+
+async function loadSayings() {
+  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/sayings/1.txt")
+  response = await response.text()
+  window.sayings = []
+  _poulateData(window.sayings, response)
+}
+
+async function loadMetaphors() {
+  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/metaphors/1.txt")
+  response = await response.text()
+  window.metaphors = []
+  _poulateData(window.metaphors, response)
+}
+
+async function loadIdioms() {
+  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/idioms/1.txt")
+  response = await response.text()
+  window.idioms = []
+  _poulateData(window.idioms, response)
 }
 
 function togglePlay(el) {
@@ -153,18 +184,19 @@ function parseVocabularyFile(text) {
   return categories
 }
 
-function fetchVocabulary() {
-  fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/vocabulary.txt")
-    .then(res => res.text())
-    .then(text => {
-      window.vocabulary = parseVocabularyFile(text)
-      let $vocabularySelect = $('#vocabularySelect')
-      $vocabularySelect.html('<option>-</option>')
-      Object.keys(window.vocabulary).forEach(it => {
-        let op = new Option(it, it)
-        $vocabularySelect.append(op)
-      })
-    })
+function populateVocabulary() {
+  let $vocabularySelect = $('#vocabularySelect')
+  $vocabularySelect.html('<option>-</option>')
+  Object.keys(window.vocabulary).forEach(it => {
+    let op = new Option(it, it)
+    $vocabularySelect.append(op)
+  })
+}
+
+async function fetchVocabulary() {
+  let res = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/vocabulary.txt")
+  res = await res.text()
+  window.vocabulary = parseVocabularyFile(res)
 }
 
 function searchedWordSelected() {
@@ -331,7 +363,6 @@ function getTopOffsetForCollapseButton() {
 }
 
 $('document').ready(e => {
-  fetchVocabulary()
 
   $('#mp3Choice').change(async e => {
     let link = $('#mp3Choice').val();
@@ -396,9 +427,6 @@ $('document').ready(e => {
 
   window.audioPlayer = audioPlayer
   window.videoPlayer = videoPlayer
-
-  hidePlayer(audioPlayer)
-  hidePlayer(videoPlayer)
 
   let $searchText = $('#searchText');
   $searchText.on(`focus`, () => {
@@ -626,10 +654,12 @@ function fixSectionBox() {
 $(document).ready(function () {
   fixSectionBox()
   $("#vocabularySelect").select2()
+  hidePlayer(audioPlayer)
+  hidePlayer(videoPlayer)
 });
 
 async function fetchCategorisation() {
-  let categorisation = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/categorisation.txt")
+  let categorisation = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/categorisation.txt")
   categorisation = await categorisation.text()
   categorisation = categorisation.split("\n")
   let categories = {}
@@ -688,7 +718,7 @@ function populateAllLinks() {
 }
 
 async function loadAllSubtitles() {
-  let srts = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/index.json")
+  let srts = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/index.json")
   srts = await srts.json()
   window.srts = srts
 
@@ -698,18 +728,36 @@ async function loadAllSubtitles() {
 
   window.categories = await fetchCategorisation()
 
-  await loadJokesAsSubtitles()
+  await loadJokes()
+  loadAsSubtitles(window.jokes, 'jokes')
+
+  await loadSayings()
+  loadAsSubtitles(window.sayings, 'sayings')
+
+  await loadMetaphors()
+  loadAsSubtitles(window.metaphors, 'metaphors')
+
+  await loadIdioms()
+  loadAsSubtitles(window.idioms, 'idioms')
+
   populateAllLinks();
+
+  await fetchVocabulary()
+
+  window.vocabulary['Sayings'] = window.sayings.map(it => it.name)
+  window.vocabulary['Metaphors'] = window.metaphors.map(it => it.name)
+  window.vocabulary['Idioms'] = window.idioms.map(it => it.name)
+
+  populateVocabulary()
 }
 
-async function loadJokesAsSubtitles() {
+function loadAsSubtitles(data, tag) {
   try {
-    await loadJokes()
-    window.jokes.forEach((joke, i) => {
-      let sv = `1\n00:00:00.001 --> 00:03:00.000\n${joke}`
+    data.forEach((item, i) => {
+      let sv = `1\n00:00:00.001 --> 00:03:00.000\n${item.text || item}`
       let en = '1\n00:00:00.001 --> 00:03:00.000\n'
-      let link = `joke-${i}`
-      window.allSubtitles[link] = {sv, en, source: 'jokes', fileName: link}
+      let link = `${tag}-${i}`
+      window.allSubtitles[link] = {sv, en, source: tag, fileName: link}
     })
   } catch (e) {
   }
@@ -851,9 +899,9 @@ async function getSubtitlesForLink(link, source) {
   let name = srt.name
   let svName = name + ".sv.srt"
   let enName = name + ".en.srt"
-  let sv = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/" + svName)
+  let sv = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/" + svName)
   sv = await sv.text()
-  let en = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/" + enName)
+  let en = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/" + enName)
   en = await en.text()
 
   window.allSubtitles[link] = {sv, en, source, fileName: name}
@@ -1057,7 +1105,7 @@ async function playNewMedia(link, source, mediaFile) {
 }
 
 async function loadStarredLines(link, source) {
-  let res = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/srts/srt_favorites.json")
+  let res = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/srt_favorites.json")
   res = await res.json()
 
   let d = res.find(it => it.link === link)
@@ -1296,7 +1344,7 @@ function numberOfItemsToShow() {
 function getWords(text) {
   const segmentor = new Intl.Segmenter([], {granularity: 'word'});
   const segmentedText = segmentor.segment(text);
-  return Array.from(segmentedText, ({segment}) => segment).filter(it => it.trim().length > 1);
+  return Array.from(segmentedText, ({segment}) => segment);
 }
 
 class MatchResult {
@@ -1306,6 +1354,12 @@ class MatchResult {
     this.word = word;
     this.source = source;
   }
+}
+
+function expandRegex(txt) {
+  txt = txt.replaceAll("*ngn", "(jag|du|han|hon|ni|de|vi|dom)")
+  txt = txt.replaceAll("*sig", "(mig|dig|honom|henne|er|sig)")
+  return txt
 }
 
 function getMatchingWords(list, search) {
@@ -1332,6 +1386,21 @@ function getMatchingWords(list, search) {
   if (wordToItemsMap[searchText.trim()] === undefined) {
     wordToItemsMap[searchText] = []
   }
+
+  if (wordToItemsMap[searchText].length) {
+    return wordToItemsMap;
+  }
+
+  searchText = expandRegex(searchText)
+  list.forEach(item => {
+    let lines = item.data;
+    lines.forEach(line => {
+      let matches = line.text.match(new RegExp(searchText, "i"))
+      if (matches && !Object.keys(wordToItemsMap).some(it => it.toLowerCase().indexOf(searchText.toLowerCase()) >= 0)) {
+        wordToItemsMap[searchText] = computeIfAbsent(wordToItemsMap, searchText, it => []).concat(new MatchResult(searchText, line, item.url, item.source))
+      }
+    })
+  })
 
   return wordToItemsMap;
 }
@@ -1450,6 +1519,7 @@ function renderLines(id, url) {
            <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
      </svg>`
 
+  let isNotALink = url.startsWith('jokes-') || url.startsWith('sayings-') || url.startsWith('metaphors-') || url.startsWith('idioms-');
   let html = `
 <hr>
 <div class="buttons">
@@ -1458,7 +1528,7 @@ function renderLines(id, url) {
 
   <span class="play-btn-container" style="text-align: center; margin-left: 46%;">
      <span class="info">${file.source}</span>
-     ${url.startsWith('joke-') ? '' : showInfoBtn}
+     ${isNotALink ? '' : showInfoBtn}
      <span class="info" style="display: none;">
             <span class="info times"> ${time_start}-${time_end} </span>
      </span>
@@ -1618,8 +1688,8 @@ function fetchFromLocal() {
       let svText = window.allSubtitles[it].sv;
       let enText = window.allSubtitles[it].en;
 
-      let svMatch = svText && svText.match(new RegExp(window.searchText, "i"));
-      let enMatch = enText && enText.match(new RegExp(window.searchText, "i"));
+      let svMatch = svText && svText.match(new RegExp(expandRegex(window.searchText), "i"));
+      let enMatch = enText && enText.match(new RegExp(expandRegex(window.searchText), "i"));
       if (svMatch || enMatch) {
         return new SearchResult(
           window.allSubtitles[it].source,
@@ -1937,6 +2007,13 @@ function tests() {
         start: {ordinal: 1},
         end: {ordinal: 2},
         text: "Nånstans i världen, finns det en plats!"
+      },
+      {
+        index: 3,
+        id: 3,
+        start: {ordinal: 1},
+        end: {ordinal: 2},
+        text: "Som du var inne på"
       }
     ],
     path: "path1.sv.srt",
@@ -1959,6 +2036,13 @@ function tests() {
         start: {ordinal: 1},
         end: {ordinal: 2},
         text: "Ja, det är sant. Grund och botten!"
+      },
+      {
+        index: 3,
+        id: 3,
+        start: {ordinal: 1},
+        end: {ordinal: 2},
+        text: "Som han var inne på"
       }
     ],
     path: "path2.sv.srt",
@@ -1966,7 +2050,6 @@ function tests() {
     url: "url2"
   }
 
-  let searchResults = [new SearchResult("source1", "url1", enSubs, svSubs1, false, true)]
   let wordToItemsMap = getMatchingWords([svSubs1, svSubs2], "grund och botten")
   log(wordToItemsMap["grund och botten"])
   assert(wordToItemsMap["grund och botten"].length === 3, "Words with spaces should be matched")
