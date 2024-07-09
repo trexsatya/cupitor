@@ -23,6 +23,8 @@
     <link rel="stylesheet" href="/vendor/animate.css">
     <link rel="stylesheet" href="/vendor/treant.css">
     <script src="/vendor/raphael.js"></script>
+    <script src="/data-structures.js"></script>
+    <script src="/vendor/lodash.js"></script>
 
     <!-- <script src="../../vendor/jquery.min.js"></script> -->
     <script src="../../vendor/jquery.easing.js"></script>
@@ -31,7 +33,6 @@
     <!--    <script src="/typed.min.js"></script>-->
 
     <script type="text/javascript" src="/vendor/diff-match-patch.js"></script>
-    <script type="text/javascript" src="/data-structures.js"></script>
     <!--    <script src="/underscore.min.js"></script>-->
     <link href="/vendor/select2.min.css" rel="stylesheet"/>
     <link href="/vendor/pagination.css" rel="stylesheet"/>
@@ -149,8 +150,6 @@
       }
     </style>
 
-    <script src="/data-structures.js"></script>
-    <script src="/vendor/lodash.js"></script>
     <link rel="stylesheet" href="/play.css">
     <link rel="stylesheet" href="/vendor/fontawesome-all.css">
 
@@ -184,9 +183,9 @@
         let words = text.split(" ")
         let res = []
         let current = ""
-        let sentences = splitSentences(text).filter(it => it.type === 'Sentence')
+        let sentences = splitSentences(text); //.filter(it => it.type === 'Sentence')
         for (let i = 0; i < sentences.length; i++) {
-          let w = sentences[i].raw
+          let w = sentences[i]
           if (current.length + w.length >= max_chars) {
             res.push(current)
             current = w + " "
@@ -300,9 +299,16 @@
     </div>
 
 
-    <div id="wikiResult" style="max-height: 300px; overflow: scroll; position: fixed; height: 380px; width: 50%;">
-        <iframe id="wikiFrame" src="" width="100%" height="100%" onload="iframeLoaded()">
-        </iframe>
+    <div style="max-height: 300px; overflow: scroll; position: fixed; height: 380px; width: 50%;">
+        <label class="switch" style="vertical-align: middle;">
+            Search on Dbl Click
+            <input type="checkbox" id="searchOnDblClickWikiCheckbox" checked>
+            <span class="slider"></span>
+        </label>
+        <div id="wikiResult" ondblclick="wikiBlockDblClicked()">
+            <iframe id="wikiFrame" src="" width="100%" height="100%" onload="iframeLoaded()">
+            </iframe>
+        </div>
     </div>
     <div style="position: fixed; top: 382px; width: 50%; ">
         <input type="text" id="searchText" placeholder="Search text"
@@ -346,7 +352,7 @@
              onclick="playSelectedText()">
     </div>
 
-    <div id="wordlist" style="height: 500px; overflow: scroll; margin-top: 1em; padding-bottom: 2em;">
+    <div id="wordlist" style="height: 400px; overflow: scroll; margin-top: 1em; padding-bottom: 4em; margin-bottom: 2em;">
 
     </div>
 </div>
@@ -375,6 +381,13 @@
         restoreAtSeconds.add(x)
       }
     })
+  }
+
+  function wikiBlockDblClicked() {
+    if($("#searchOnDblClickWikiCheckbox").is(":checked")) {
+      $('#searchText').val(getSelectionText())
+      fetchSRTs()
+    }
   }
 
   function elongateBgMusic(t) {
@@ -614,7 +627,8 @@
     e.stopPropagation()
     if (e.target.href.indexOf("/wiki/") > 0) {
       recordWikiScrollPosition()
-      window.location.hash = e.target.href.split("/wiki/")[1].toLowerCase()
+      let linkText = e.target.href.split("/wiki/")[1].toLowerCase();
+      window.location.hash = linkText
       populateWiki()
     }
   }
@@ -679,7 +693,9 @@
           if (!wordsToSearch.length) {
             wordsToSearch = [decodeURIComponent(w)]
           }
-          searchText.value = wordsToSearch.join("|")
+          wordsToSearch.push($('#firstHeading').text().trim())
+          $('#searchText').val(wordsToSearch.join("|"))
+          fetchSRTs()
         }
       })
   }
