@@ -51,6 +51,7 @@
             src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
+    <script type="text/javascript" src="/vendor/string-similarity.js"></script>
     <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css"/>
     <link rel="stylesheet" type="text/css" href="/vendor/mediaelement-plugins/speed/speed.min.css"/>
     <link rel="stylesheet" type="text/css" href="/vendor/mediaelement-plugins/loop/loop.min.css"/>
@@ -90,7 +91,7 @@
         color: grey;
       }
 
-      .selectable{
+      .selectable {
         -webkit-touch-callout: all; /* iOS Safari */
         -webkit-user-select: all; /* Safari */
         -khtml-user-select: all; /* Konqueror HTML */
@@ -352,7 +353,8 @@
              onclick="playSelectedText()">
     </div>
 
-    <div id="wordlist" style="height: 400px; overflow: scroll; margin-top: 1em; padding-bottom: 4em; margin-bottom: 2em;">
+    <div id="wordlist"
+         style="height: 400px; overflow: scroll; margin-top: 1em; padding-bottom: 4em; margin-bottom: 2em;">
 
     </div>
 </div>
@@ -361,7 +363,7 @@
     render(window.searchResult, window.searchText)
   }
 
-  $('#bgMusicVolume').slider({ value: 35 })
+  $('#bgMusicVolume').slider({value: 35})
 
   let swedishAudio = document.getElementById("swedishAudio")
   let secondsWithSound = new Set()
@@ -384,7 +386,7 @@
   }
 
   function wikiBlockDblClicked() {
-    if($("#searchOnDblClickWikiCheckbox").is(":checked")) {
+    if ($("#searchOnDblClickWikiCheckbox").is(":checked")) {
       $('#searchText').val(getSelectionText())
       fetchSRTs()
     }
@@ -484,6 +486,7 @@
   function getSelectedLang() {
     return 'sv'
   }
+
   async function analyseAudio(audioData, callbackWhenMovedEnough) {
     secondsWithSound = new Set()
     // el.play()
@@ -546,7 +549,7 @@
     let interval = null
     let promise = new Promise((res, rej) => {
       console.log("Dampening at ", mediaTimeInSeconds(swedishAudio))
-      let min = $('#bgMusicVolume').slider( "option", "value" )/100
+      let min = $('#bgMusicVolume').slider("option", "value") / 100
 
       let vol = bgMusicAudio.volume;
       let t = 200; // 200ms interval
@@ -622,7 +625,7 @@
     wikiScrollPositions[location.hash] = wikiResult.scrollTop
   }
 
-  function whenWikiLinkClicked(e) {
+  async function whenWikiLinkClicked(e) {
     e.preventDefault()
     e.stopPropagation()
     if (e.target.href.indexOf("/wiki/") > 0) {
@@ -656,48 +659,68 @@
     }) //find end
   }
 
-  function populateWiki() {
+  window.wikiCache = new LRUCache()
+
+  async function populateWiki() {
+    function _populateWikiPage(it) {
+      let $result = $('#wikiResult');
+      $result.html(it)
+      $(".noprint").remove()
+      $(".mw-jump-link").remove()
+      $(".mw-headline").parent().remove()
+      $("#toc").remove()
+      $('#mw-navigation').remove()
+      $('#footer').remove()
+      $('#wikiResult a').css({'color': 'blue', 'text-decoration': 'underline'})
+      whenWikiWordClicked($result);
+
+      let headers = ['Böjs som']
+      'Som förled i sammansättningar används'.split(" ").forEach(it => headers.push(it))
+
+      let $table = $('#Svenska').find('table');
+      if(!$table.length) {
+        $table = $('table[class*="template-sv-"]')
+      }
+      if(!$table.length) {
+        $table = $('table[data-lang="sv"]')
+      }
+      if (!$table.length) {
+        $table = $('table.grammar')
+      }
+      let excludeSome = (i, e) => !$(e).hasClass('grammar-warning')
+        && !$(e).hasClass('note');
+      let wordsToSearch = $table.find("td")
+        .filter(excludeSome).toArray().map(it => $(it).text())
+        .flatMap(it => it.split(/[\n ,]/))
+        .filter(it => it.trim().length && !headers.includes(it.trim()))
+        .filter(it => it.length > 2).filter(it => it.match(/[a-zåäö]/i))
+        .filter(it => it.indexOf('?') < 0)
+        .filter(it => it.indexOf("åld.") < 0)
+
+      // wordsToSearch = wordsToSearch.slice(0, 10)
+      // $('grammar.template-sv-subst-').text().split(/[\n ,]/).filter(it => it.trim().length && !headers.includes(it.trim()))
+      //   .forEach(it => wordsToSearch.push(it))
+
+      if ($("#searchWordsCheckbox").is(":checked")) {
+        wordsToSearch = wordsToSearch.map(it => `${it.trim()}`)
+        if (!wordsToSearch.length) {
+          wordsToSearch = [decodeURIComponent(w)]
+        }
+        wordsToSearch.push($('#firstHeading').text().trim())
+        $('#searchText').val(wordsToSearch.join("|"))
+        fetchSRTs()
+      }
+    }
+
     let w = window.location.hash
-    w = w.substring(1)
-    fetch("http://localhost:5000/proxy?url=https://sv.wiktionary.org/wiki/" + w.toLowerCase())
-      .then(it => it.text())
-      .then(it => {
-        let $result = $('#wikiResult');
-        $result.html(it)
-        $(".noprint").remove()
-        $(".mw-jump-link").remove()
-        $(".mw-headline").parent().remove()
-        $("#toc").remove()
-        $('#mw-navigation').remove()
-        $('#footer').remove()
-        $('#wikiResult a').css({'color': 'blue', 'text-decoration': 'underline'})
-        whenWikiWordClicked($result);
-
-        let headers = ['Böjs som']
-        'Som förled i sammansättningar används'.split(" ").forEach(it => headers.push(it))
-
-        let $table = $('table[class*="template-sv-"]');
-        if (!$table.length) {
-          $table = $('table.grammar')
-        }
-        let wordsToSearch = $table.find("td").filter((i, e) => !$(e).hasClass('grammar-warning')).toArray().map(it => $(it).text()).flatMap(it => it.split(/[\n ,]/)).filter(it => it.trim().length && !headers.includes(it.trim()))
-          .filter(it => it.length > 2).filter(it => it.match(/[a-zåäö]/i)).filter(it => it.indexOf('?') < 0)
-
-        wordsToSearch = wordsToSearch.slice(0, 10)
-        // $('grammar.template-sv-subst-').text().split(/[\n ,]/).filter(it => it.trim().length && !headers.includes(it.trim()))
-        //   .forEach(it => wordsToSearch.push(it))
-
-        if ($("#searchWordsCheckbox").is(":checked")) {
-          // fetchSRTs()
-          wordsToSearch = wordsToSearch.map(it => `(${it.trim()})`)
-          if (!wordsToSearch.length) {
-            wordsToSearch = [decodeURIComponent(w)]
-          }
-          wordsToSearch.push($('#firstHeading').text().trim())
-          $('#searchText').val(wordsToSearch.join("|"))
-          fetchSRTs()
-        }
-      })
+    w = w.substring(1).toLowerCase()
+    let fromCache = wikiCache.get(w)
+    if (!fromCache) {
+      let res = await fetch("http://localhost:5000/proxy?url=https://sv.wiktionary.org/wiki/" + w.toLowerCase())
+      res = await res.text()
+      wikiCache.put(w, res)
+    }
+    _populateWikiPage(wikiCache.get(w))
   }
 
   function populateWords() {
@@ -725,12 +748,10 @@
 
     enteredWords.value = ''
     $wordlist[0].ondblclick = e => {
-      if ($("#searchWordsCheckbox").is(":checked")) {
-        $('#searchText').val(getSelectionText())
-      }
-      // fetchSRTs()
+      // if ($("#searchWordsCheckbox").is(":checked")) {
+      //   $('#searchText').val(getSelectionText())
+      // }
       window.location.hash = getSelectionText().toLowerCase()
-      populateWiki()
       $("*").removeClass("highlighted-selection")
       $(getSelectionParentElement()).addClass("highlighted-selection")
     }
@@ -802,7 +823,7 @@
 
   $('#selectableCheckbox')[0].onchange = e => {
     let checked = $(e.target).is(":checked")
-    if(checked) {
+    if (checked) {
       $("#wordlist .line").addClass("selectable")
     } else {
       $("#wordlist .line").removeClass("selectable")

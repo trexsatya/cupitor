@@ -83,8 +83,18 @@ function playMedia() {
 function loadSearches() {
   let searches = getSearchesFromStorage()
   $('#searchedWords').html('')
-  _.forEach(searches, (count, word) => {
-    let op = new Option(`${word}`, word, true, true)
+  _.forEach(searches, (word) => {
+    let displayText = word
+    let isSeparator = false
+    if (word.trim().length === 0) {
+      displayText = "-------"
+      word = displayText
+      isSeparator = true
+    }
+    let op = new Option(`${displayText}`, word, false, false)
+    if (isSeparator) {
+      op.disabled = true
+    }
     $('#searchedWords').append(op)
   })
   $('#toggleSearchesControlCheckbox').click()
@@ -112,9 +122,7 @@ function importSearchesFromVocab() {
   let category = $("#vocabularySelect").val()
   let searches = window.vocabulary[category]
 
-  let words = {}
-  searches.forEach(w => words[w] = '')
-  saveSearchesIntoStorage(words)
+  saveSearchesIntoStorage(searches)
   loadSearches()
 }
 
@@ -126,8 +134,7 @@ function importSearchesFromFile() {
     let reader = new FileReader()
     reader.onload = e => {
       let searches = {}
-      reader.result.split("\n").forEach(w => searches[w] = '')
-      saveSearchesIntoStorage(searches);
+      saveSearchesIntoStorage(reader.result.split("\n"));
       loadSearches()
     }
     reader.readAsText(file.files[0])
@@ -144,10 +151,13 @@ function saveSearch(word, count) {
   count = count || 0
   let searches = getSearchesFromStorage()
   let newItem = true
-  if (Object.keys(searches).includes(word)) {
+  if (searches.includes(word)) {
     newItem = false
   }
-  searches[word] = count
+  if (newItem) {
+    searches.push(word)
+  }
+
   saveSearchesIntoStorage(searches)
   return newItem
 }
@@ -175,9 +185,7 @@ function parseVocabularyFile(text) {
       currentCategory = line.replace("#", "").trim()
       categories[currentCategory] = []
     } else {
-      if (line.trim().length > 1) {
-        categories[currentCategory].push(line)
-      }
+      categories[currentCategory].push(line)
     }
   }
 
@@ -1364,7 +1372,8 @@ function expandRegex(txt) {
 
 function getMatchingWords(list, search) {
   let wordToItemsMap = {}
-  let searchText = _.trim(search.toLowerCase(), '|');
+  let searchText = _.trim(search.toLowerCase(), '|')
+    .split("|").filter(it => it.length > 0).join("|")
   let transformedSearchText = expandRegex(searchText)
 
   list.forEach(item => {
@@ -1389,10 +1398,6 @@ function getMatchingWords(list, search) {
     wordToItemsMap[searchText] = []
   }
 
-  if (wordToItemsMap[searchText.trim()].length) {
-    return wordToItemsMap;
-  }
-
   let wordToItemsMap2 = {}
   searchText = expandRegex(searchText)
   list.forEach(item => {
@@ -1409,11 +1414,23 @@ function getMatchingWords(list, search) {
     })
   })
 
-  // if(searchText.indexOf("|") > 0) {
-  //   delete wordToItemsMap[searchText.toLowerCase()]
-  // }
+  if (!wordToItemsMap[searchText.trim()] || wordToItemsMap[searchText.trim()].length === 0) {
+    wordToItemsMap = Object.assign(wordToItemsMap, wordToItemsMap2)
+  }
 
-  return Object.assign(wordToItemsMap, wordToItemsMap2);
+  let matchingWords = Object.keys(wordToItemsMap)
+  matchingWords.sort((a, b) => b.length - a.length)
+
+  let _matchResultId = it => ` ${it.url} ${it.source} ${it.line.index}`
+  for (let i = 0; i < matchingWords.length; i++) {
+    let prevMatches = matchingWords.slice(0, i).map(it => wordToItemsMap[it]).flat().map(_matchResultId)
+    let word = matchingWords[i]
+    wordToItemsMap[word] = wordToItemsMap[word].filter(it => {
+      return !prevMatches.includes(_matchResultId(it))
+    })
+  }
+
+  return wordToItemsMap;
 }
 
 function populateNonSRTFindings(wordToItemsMap, $result) {
@@ -1580,12 +1597,27 @@ function renderLines(id, url) {
   }
 }
 
+function getSearchedWords() {
+  return window.searchText.toLowerCase().split("|").filter(it => it.trim().length);
+}
+
 function populateSRTFindings(wordToItemsMap, $result) {
-  let words = _(Object.keys(wordToItemsMap)).chain().sortBy(function(word) {
-    return word;
-  }).sortBy((x, y) => {
-    if(window.searchText.toLowerCase().indexOf(x) >= 0) return -1
-  }).value();
+  let similarity = (x) => {
+    if (!x) return 0
+    return getSearchedWords().map(word => stringSimilarity.compareTwoStrings(x, word)).reduce((a, b) => Math.max(a, b), 0)
+  }
+  let words = _(Object.keys(wordToItemsMap)).chain()
+    .sortBy(function (word) {
+      return word;
+    }).sortBy((x, y) => {
+      return similarity(y) - similarity(x)
+    }).sortBy((x, y) => {
+      let idxX = getSearchedWords().indexOf(x);
+      let idxY = getSearchedWords().indexOf(y);
+      if(idxX >= 0) return idxX - idxY
+    }).sortBy(w => {
+      if (w === window.searchText) return -1
+    }).value();
 
   words.forEach(word => {
     let items = wordToItemsMap[word]
@@ -1792,7 +1824,15 @@ function renderAccordions() {
     });
   }
 
-  $('.accordion').first().click()
+  let isRegex = false;
+  if([".", "*", "|", "?"].some(it => _.includes(window.searchText, it))) {
+    isRegex = true;
+  }
+  if(isRegex) {
+    $('.accordion:nth(1)').click()
+  } else {
+    $('.accordion').first().click()
+  }
 }
 
 // 2. This code loads the IFrame Player API code asynchronously.
@@ -2071,8 +2111,8 @@ function tests() {
 
   wordToItemsMap = getMatchingWords(testData, "bott")
   assert(wordToItemsMap["bott"].length === 2
-            && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("botten") >= 0)
-            && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("prefixedbott") >= 0), "There should be no duplicates")
+    && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("botten") >= 0)
+    && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("prefixedbott") >= 0), "There should be no duplicates")
 }
 
 
