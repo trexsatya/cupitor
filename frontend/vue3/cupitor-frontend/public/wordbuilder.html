@@ -313,7 +313,7 @@
     </div>
     <div style="position: fixed; top: 382px; width: 50%; ">
         <input type="text" id="searchText" placeholder="Search text"
-               onchange="fetchSRTs(this)"
+               onchange="searchInSrts(this)"
         >
         <input type="number" id="numberOfFindingsToShow" placeholder="Show X items" value="200">
         <button onclick="expandAll()">Expand All</button>
@@ -363,6 +363,15 @@
     render(window.searchResult, window.searchText)
   }
 
+  function loadMediaFilenames() {
+    fetch("http://localhost:5000/all_media_files")
+      .then(it => it.json())
+      .then(it => {
+        window.allMediaFileNames = it
+      })
+  }
+  loadMediaFilenames()
+
   $('#bgMusicVolume').slider({value: 35})
 
   let swedishAudio = document.getElementById("swedishAudio")
@@ -388,7 +397,7 @@
   function wikiBlockDblClicked() {
     if ($("#searchOnDblClickWikiCheckbox").is(":checked")) {
       $('#searchText').val(getSelectionText())
-      fetchSRTs()
+      searchInSrts()
     }
   }
 
@@ -537,7 +546,7 @@
 
   let bgControl = 1
 
-  function dampenBgMusic(t) {
+  function dampenBgMusic() {
     if (window.dampeningInProgress) return
 
     let cnt = bgControl++
@@ -659,6 +668,20 @@
     }) //find end
   }
 
+  function searchInSrts() {
+    fetchSRTs()
+  }
+
+  async function playMediaSlice(url, start, end) {
+    let mp3Url = 'http://localhost:5000/mp3_slice?' + new URLSearchParams({url, start, end});
+    let a = new Audio()
+    a.src = mp3Url
+    a.volume = 1.0
+    await dampenBgMusic().promise
+    a.onended = e => restoreBgMusic()
+    a.play()
+  }
+
   window.wikiCache = new LRUCache()
 
   async function populateWiki() {
@@ -678,28 +701,33 @@
       'Som förled i sammansättningar används'.split(" ").forEach(it => headers.push(it))
 
       let $table = $('#Svenska').find('table');
-      if(!$table.length) {
+      if (!$table.length) {
         $table = $('table[class*="template-sv-"]')
       }
-      if(!$table.length) {
+      if (!$table.length) {
         $table = $('table[data-lang="sv"]')
       }
       if (!$table.length) {
         $table = $('table.grammar')
       }
-      let excludeSome = (i, e) => !$(e).hasClass('grammar-warning')
-        && !$(e).hasClass('note');
-      let wordsToSearch = $table.find("td")
-        .filter(excludeSome).toArray().map(it => $(it).text())
+
+      let commonWords = [
+        "och", "att", "i", "en", "jag", "det", "är", "inte", "på", "vi", "har", "de", "med", "för", "du", "mig", "av", "att", "så", "den", "vid", "ut",
+        "om", "ett", "kan", "som", "definition"
+      ];
+      $table.find("td.note").remove()
+      $table.find("td.grammar-warning").remove()
+
+      let wordsToSearch = $table.find("tr").find('td:first')
+        .map((i, e) => $(e).text()).get()
         .flatMap(it => it.split(/[\n ,]/))
         .filter(it => it.trim().length && !headers.includes(it.trim()))
         .filter(it => it.length > 2).filter(it => it.match(/[a-zåäö]/i))
         .filter(it => it.indexOf('?') < 0)
         .filter(it => it.indexOf("åld.") < 0)
+        .filter(it => !commonWords.includes(it.toLowerCase()))
 
-      // wordsToSearch = wordsToSearch.slice(0, 10)
-      // $('grammar.template-sv-subst-').text().split(/[\n ,]/).filter(it => it.trim().length && !headers.includes(it.trim()))
-      //   .forEach(it => wordsToSearch.push(it))
+      //TODO: Remove duplicates, remove common words, Remove unnecessary words
 
       if ($("#searchWordsCheckbox").is(":checked")) {
         wordsToSearch = wordsToSearch.map(it => `${it.trim()}`)
@@ -708,7 +736,7 @@
         }
         wordsToSearch.push($('#firstHeading').text().trim())
         $('#searchText').val(wordsToSearch.join("|"))
-        fetchSRTs()
+        searchInSrts()
       }
     }
 
@@ -737,9 +765,10 @@
     if (html.length) {
       html.forEach(it => $wordlist.append(it))
     } else {
-      words.split("\n").map(it => chunkifySentence(it, 130)).flat().forEach(line => {
+      words.split("\n").forEach(line => {
         let ws = line.split(" ").map(x => `<span>${x}</span>`).join(" ")
-        ws = ws.replaceAll("\n", "<br>").replaceAll("-", "+")
+        ws = ws.replaceAll("\n", "<br>")
+          // .replaceAll("-", "+")
           .replaceAll(" ", "&nbsp;")
           .replaceAll("\t", "&nbsp;&nbsp;&nbsp;")
         $wordlist.append(`<div class="selectable line">${ws}</div>`)

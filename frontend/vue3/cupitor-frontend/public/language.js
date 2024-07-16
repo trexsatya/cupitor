@@ -1554,12 +1554,13 @@ function renderLines(id, url) {
   <span class="add-prev-btn btn" onclick="changeIndices('${id}', ${fromLineIndex - 1}, ${toLineIndex}); renderLines('${id}', '${url}')"> + </span>
   <span class="remove-next-btn btn" onclick="changeIndices('${id}', ${fromLineIndex + 1}, ${toLineIndex}); renderLines('${id}', '${url}')"> - </span>
 
-  <span class="play-btn-container" style="text-align: center; margin-left: 46%;">
+  <span class="play-btn-container" style="text-align: center; margin-left: 46%;" data-id="${id}" data-url="${url}" data-time-start="${time_start}" data-time-end="${time_end}">
      <span class="info">${file.source}</span>
      ${isNotALink ? '' : showInfoBtn}
      <span class="info" style="display: none;">
             <span class="info times"> ${time_start}-${time_end} </span>
      </span>
+     <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}')">
   </span>
   <span style="float: right;">
     <span class="remove-prev-btn btn" onclick="changeIndices('${id}', ${fromLineIndex}, ${toLineIndex - 1}); renderLines('${id}', '${url}')"> - </span>
@@ -1628,7 +1629,13 @@ function populateSRTFindings(wordToItemsMap, $result) {
         <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> </div> <br>`)
 
     $result.append(wordBlock)
+
+    let mediaFileNames = window.allMediaFileNames || []
+
     _.take(items, numberOfItemsToShow())
+      .toSorted((x, y) => {
+        if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
+      })
       .forEach(item => {
         let file = item
         let $fileBlock = $(`<div class="srt-file" title="${item['name']}">
