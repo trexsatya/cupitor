@@ -9,6 +9,61 @@ window.onbeforeunload = function (event) {
   return confirm("Confirm refresh");
 };
 
+function getExpansionForWords() {
+  let list = `ta=ta,tar,tog,tagit
+sig=sig,dig,mig,oss,honom,henne,er,sig
+få=få,får,fick,fått
+lägga=lägga,lägger,lade,lagt
+ha=ha,har,hade,haft
+slappna=slappna,slappnar,slappnade,slappnat
+koppla=koppla,kopplar,kopplade,kopplat
+röra=röra,rör,rörde,rört
+syfta=syfta,syftar,syftade,syftat
+utgå=utgå,utgår,utgick,utgått
+föreställa=föreställa,föreställer,föreställde,föreställt
+ilskna=ilskna,ilsknar,ilsknade,ilsknat
+ge=ge,ger,gav,gett
+bemöda=bemöda,bemödar,bemödade,bemödat
+plats=upp,ner,fram,bak,bort
+se=se,ser,såg,sett
+gå=gå,går,gick,gått
+sätta=sätta,sätter,satte,satt
+slå=slå,slår,slog,slagit
+stiga=stiga,stiger,steg,stigit
+dyka=dyka,dyker,dök,dykt
+befinna=befinna,befinner,befann,befunnit
+riva=riva,river,rev,rivit
+bestå=bestå,består,bestod,bestått
+stänga=stänga,stänger,stängde,stängt
+ställa=ställa,ställer,ställde,ställt
+etsa=etsa,etsar,etsade,etsat
+resa=resa,reser,reste,rest,res
+lyfta=lyfta,lyfter,lyfte,lyft
+förhålla=förhålla,förhåller,förhöll,förhållit
+bete=bete,beter,betedde,betett
+uppföra=uppföra,uppför,uppförde,uppfört
+komma=komma,kommer,kom,kommit
+hinna=hinna,hinner,hann,hunnit
+hålla=hålla,håller,höll,hållit
+infinna=infinna,infinner,infann,infunnit
+slänga=slänga,slänger,slängde,slängt
+göra=göra,gör,gjorde,gjort
+gripa=gripa,griper,grep,gripit
+leda=leda,leder,ledde,lett
+skjuta=skjuta,skjuter,sköt,skjutit
+bli=bli,blir,blev,blivit
+dra=dra,drar,drog,dragit
+trivas=trivas,trivs,trivdes,trivts
+passa=passa,passar,passade,passat`
+
+  let wordsMap = {}
+  list.split("\n").filter(it => it.trim().length > 2).forEach(it => {
+    let splits = it.split("=")
+    wordsMap[splits[0]] = splits[1].split(",")
+  })
+  return wordsMap
+}
+
 async function loadJokes() {
   let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/jokes/1.txt")
   response = await response.text()
@@ -83,15 +138,15 @@ function playMedia() {
 function loadSearches() {
   let searches = getSearchesFromStorage()
   $('#searchedWords').html('')
-  _.forEach(searches, (word) => {
-    let displayText = word
+  _.forEach(searches, (searchTerms) => {
+    let displayText = searchTerms
     let isSeparator = false
-    if (word.trim().length === 0) {
+    if (searchTerms.trim().length === 0) {
       displayText = "-------"
-      word = displayText
+      searchTerms = displayText
       isSeparator = true
     }
-    let op = new Option(`${displayText}`, word, false, false)
+    let op = new Option(`${displayText}`, expandWords(searchTerms), false, false)
     if (isSeparator) {
       op.disabled = true
     }
@@ -1372,7 +1427,7 @@ function expandRegex(txt) {
 
 function getMatchingWords(list, search) {
   let wordToItemsMap = {}
-  let searchText = _.trim(search.toLowerCase(), '|')
+  let searchText = _.trim(search.toLowerCase(), "|")
     .split("|").filter(it => it.length > 0).join("|")
   let transformedSearchText = expandRegex(searchText)
 
@@ -1399,7 +1454,7 @@ function getMatchingWords(list, search) {
   }
 
   let wordToItemsMap2 = {}
-  searchText = expandRegex(searchText)
+  searchText = searchText.trim()
   list.forEach(item => {
     let lines = item.data;
     lines.forEach(line => {
@@ -1548,6 +1603,10 @@ function renderLines(id, url) {
      </svg>`
 
   let isNotALink = url.startsWith('jokes-') || url.startsWith('sayings-') || url.startsWith('metaphors-') || url.startsWith('idioms-');
+  let playMediaBtn = isLocalhost() ?
+      `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}')">`
+      : ''
+
   let html = `
 <hr>
 <div class="buttons">
@@ -1560,7 +1619,7 @@ function renderLines(id, url) {
      <span class="info" style="display: none;">
             <span class="info times"> ${time_start}-${time_end} </span>
      </span>
-     <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}')">
+     ${playMediaBtn}
   </span>
   <span style="float: right;">
     <span class="remove-prev-btn btn" onclick="changeIndices('${id}', ${fromLineIndex}, ${toLineIndex - 1}); renderLines('${id}', '${url}')"> - </span>
@@ -1615,7 +1674,7 @@ function populateSRTFindings(wordToItemsMap, $result) {
     }).sortBy((x, y) => {
       let idxX = getSearchedWords().indexOf(x);
       let idxY = getSearchedWords().indexOf(y);
-      if(idxX >= 0) return idxX - idxY
+      if (idxX >= 0) return idxX - idxY
     }).sortBy(w => {
       if (w === window.searchText) return -1
     }).value();
@@ -1659,6 +1718,23 @@ function resultNotFound(search) {
 <h3>No results found for ${search}</h3>
 Try Wiki ${getWikiLinks(search)}
 `;
+}
+
+function combinedKeys(zEvent) {
+  var keyStr = ["Control", "Shift", "Alt", "Meta"].includes(zEvent.key) ? "" : zEvent.key + "";
+  return (zEvent.ctrlKey ? "Control " : "") +
+    (zEvent.shiftKey ? "Shift " : "") +
+    (zEvent.altKey ? "Alt " : "") +
+    (zEvent.metaKey ? "Meta " : "") +
+    keyStr
+}
+
+function enablePasteForHashChange() {
+  $(document).keydown(function (zEvent) {
+    if (combinedKeys(zEvent) === "Meta v") {
+      navigator.clipboard.readText().then(text => window.location.hash = text)
+    }
+  })
 }
 
 function getSelectedLang() {
@@ -1744,8 +1820,9 @@ function fetchFromLocal() {
       let svText = window.allSubtitles[it].sv;
       let enText = window.allSubtitles[it].en;
 
-      let svMatch = svText && svText.match(new RegExp(expandRegex(window.searchText), "i"));
-      let enMatch = enText && enText.match(new RegExp(expandRegex(window.searchText), "i"));
+      let lookingFor = expandWords(window.searchText.trim())
+      let svMatch = svText && svText.match(new RegExp(lookingFor, "i"))
+      let enMatch = enText && enText.match(new RegExp(lookingFor, "i"))
       if (svMatch || enMatch) {
         return new SearchResult(
           window.allSubtitles[it].source,
@@ -1759,6 +1836,59 @@ function fetchFromLocal() {
     }).filter(it => it);
 }
 
+function fixPlaceholders(txt) {
+  txt = txt.replaceAll("(sl-pl)", "")
+    .replaceAll("(pl)", "")
+    .replaceAll(" (ngt) ", " .*")
+    .replaceAll(" (ngn) ", " .*")
+    .replaceAll(" (ngn)", " [^ ]*")
+    .replaceAll(" (ngt)", " [^ ]*")
+
+  let fn = () => {
+    let matches = txt.match(/.*(\(.*\)).*/)
+    if (matches && matches.length === 2) {
+      txt = txt.replaceAll(matches[1], "")
+    }
+  }
+
+  while (txt.indexOf("(") >= 0) {
+    fn()
+  }
+
+  return txt
+}
+
+function expandWords(txt) {
+  if (txt.indexOf("<*") < 0) {
+    return fixPlaceholders(txt)
+  }
+
+  let expansions = getExpansionForWords()
+  let terms = txt.split("|")
+  let fn = () => {
+    w = terms.shift()
+    if (!w) return
+    let match = w.match(/.*\<\*([^ ]+) .*/)
+    if (match && match.length === 2) {
+      let wordToExpand = match[1]
+      let expandedWords = expansions[wordToExpand] || [wordToExpand]
+      expandedWords.forEach(it => terms.push(w.replace("<*" + wordToExpand, it)))
+    } else if (w.indexOf("<*") < 0) {
+      terms.push(w)
+    }
+  }
+
+  let cnt = 0
+  while (cnt < 5 && terms.some(t => t.indexOf("<*") >= 0)) {
+    fn()
+  }
+
+  return fixPlaceholders(terms.filter(it => it.trim().length > 1).map(it => {
+    if(it.length < 3) return ` ${it} `
+    return it
+  }).join("|"))
+}
+
 async function fetchSRTs(searchText) {
   if ((typeof searchText) !== 'string') {
     searchText = null
@@ -1770,6 +1900,11 @@ async function fetchSRTs(searchText) {
   if (txt.length < 3) return
 
   window.searchText = txt;
+  window.searchText = expandWords(window.searchText)
+  window.searchText = _.trim(window.searchText, "|")
+
+  //To fix the mistakes in vocabulary list with double spaces
+  window.searchText = window.searchText.split(" ").map(it => it.trim()).join(" ")
 
   window.allSubtitles = window.allSubtitles || {}
 
@@ -1832,10 +1967,10 @@ function renderAccordions() {
   }
 
   let isRegex = false;
-  if([".", "*", "|", "?"].some(it => _.includes(window.searchText, it))) {
+  if ([".", "*", "|", "?"].some(it => _.includes(window.searchText, it))) {
     isRegex = true;
   }
-  if(isRegex) {
+  if (isRegex) {
     $('.accordion:nth(1)').click()
   } else {
     $('.accordion').first().click()
@@ -2029,7 +2164,11 @@ async function saveRevision() {
 
 }
 
-if (window.location.hostname === 'localhost') {
+function isLocalhost() {
+  return window.location.hostname === 'localhost'
+}
+
+if (isLocalhost()) {
   $('#saveRevisionBtn').show()
   $('#saveStarredLinesBtn').show()
 }
@@ -2109,8 +2248,8 @@ function tests() {
   log(wordToItemsMap["grund"], wordToItemsMap["grund "])
   assert(wordToItemsMap["grund"].length === 3, "Words ending with spaces should be matched")
 
-  wordToItemsMap = getMatchingWords(testData, "*ngn var inne på")
-  log(wordToItemsMap)
+  // wordToItemsMap = getMatchingWords(testData, "*ngn var inne på")
+  // log(wordToItemsMap)
   // assert(wordToItemsMap["*ngn var inne på"].length === 2, "Words with special regex should be matched")
 
   wordToItemsMap = getMatchingWords(testData, "grund .* botten")
@@ -2122,6 +2261,19 @@ function tests() {
     && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("prefixedbott") >= 0), "There should be no duplicates")
 }
 
+
+async function playMediaSlice(url, start, end) {
+  if(location.href.indexOf('localhost') < 0) {
+    return
+  }
+  let mp3Url = 'http://localhost:5000/mp3_slice?' + new URLSearchParams({url, start, end});
+  let a = new Audio()
+  a.src = mp3Url
+  a.volume = 1.0
+  await dampenBgMusic().promise
+  a.onended = e => restoreBgMusic()
+  a.play()
+}
 
 try {
   tests()
