@@ -181,6 +181,13 @@ function importSearchesFromVocab() {
   loadSearches()
 }
 
+function loadWholeVocabulary() {
+  let searches = Object.values(window.vocabulary).flat()
+
+  saveSearchesIntoStorage(searches)
+  loadSearches()
+}
+
 function importSearchesFromFile() {
   let file = document.createElement('input')
   file.type = 'file'
@@ -426,6 +433,13 @@ function getTopOffsetForCollapseButton() {
 }
 
 $('document').ready(e => {
+  document.addEventListener('long-press', function(e) {
+    if($(e.target).is("a")) {
+      e.preventDefault()
+      let w = $(e.target).text()
+      window.open(`https://www.google.com/search?q=${encodeURI(w)}&udm=2`, '_blank').focus();
+    }
+  });
 
   $('#mp3Choice').change(async e => {
     let link = $('#mp3Choice').val();
@@ -1426,17 +1440,23 @@ function expandRegex(txt) {
 }
 
 function getMatchingWords(list, search) {
+  let startTime = new Date().getTime()
   let wordToItemsMap = {}
   let searchText = _.trim(search.toLowerCase(), "|")
     .split("|").filter(it => it.length > 0).join("|")
   let transformedSearchText = expandRegex(searchText)
 
+  let isNotTooShort = w => w.trim().length > 2
+
   list.forEach(item => {
     let lines = item.data;
     lines.forEach(line => {
+      if(new Date().getTime() - startTime > 20000) {
+        return wordToItemsMap;
+      }
       let words = getWords(line.text, search).map(it => it.trim().toLowerCase())
-      let endsWith = word => transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
-      let startsWith = word => transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
+      let endsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
+      let startsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
       words.filter(word => word.match(new RegExp(transformedSearchText, "i")) || endsWith(word) || startsWith(word))
         .forEach(word => {
           wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
@@ -1454,7 +1474,10 @@ function getMatchingWords(list, search) {
   }
 
   let wordToItemsMap2 = {}
-  searchText = searchText.trim()
+  if(isNotTooShort(searchText)) {
+    searchText = searchText.trim()
+  }
+
   list.forEach(item => {
     let lines = item.data;
     lines.forEach(line => {
@@ -1661,23 +1684,41 @@ function getSearchedWords() {
   return window.searchText.toLowerCase().split("|").filter(it => it.trim().length);
 }
 
+function getWordsOrdered(words) {
+  let ordered = [window.searchText]
+
+  _.remove(words, it => it === window.searchText)
+
+  getSearchedWords().forEach(w => {
+    if(_.remove(words, it => it.trim() === w.trim()).length) {
+      ordered.push(w)
+    }
+  })
+
+  let relatedWords = (w, predicate) =>  {
+    let found = words.filter(predicate)
+    if(found) {
+      found = _.sortBy(found, it => it.length)
+      ordered = ordered.concat(found)
+      _.remove(words, it => _.includes(found, it))
+    }
+  }
+
+  getSearchedWords().forEach(w => {
+    relatedWords(w, it => it.trim().startsWith(w.trim()))
+    relatedWords(w, it => it.trim().endsWith(w.trim()))
+  })
+
+  return ordered
+}
+
 function populateSRTFindings(wordToItemsMap, $result) {
   let similarity = (x) => {
     if (!x) return 0
     return getSearchedWords().map(word => stringSimilarity.compareTwoStrings(x, word)).reduce((a, b) => Math.max(a, b), 0)
   }
-  let words = _(Object.keys(wordToItemsMap)).chain()
-    .sortBy(function (word) {
-      return word;
-    }).sortBy((x, y) => {
-      return similarity(y) - similarity(x)
-    }).sortBy((x, y) => {
-      let idxX = getSearchedWords().indexOf(x);
-      let idxY = getSearchedWords().indexOf(y);
-      if (idxX >= 0) return idxX - idxY
-    }).sortBy(w => {
-      if (w === window.searchText) return -1
-    }).value();
+
+  let words = getWordsOrdered(Object.keys(wordToItemsMap))
 
   words.forEach(word => {
     let items = wordToItemsMap[word]
@@ -1691,10 +1732,11 @@ function populateSRTFindings(wordToItemsMap, $result) {
 
     let mediaFileNames = window.allMediaFileNames || []
 
+    items = items.toSorted((x, y) => {
+      if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
+    })
+
     _.take(items, numberOfItemsToShow())
-      .toSorted((x, y) => {
-        if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
-      })
       .forEach(item => {
         let file = item
         let $fileBlock = $(`<div class="srt-file" title="${item['name']}">
@@ -1859,12 +1901,20 @@ function fixPlaceholders(txt) {
 }
 
 function expandWords(txt) {
+   let t = _expandWords(txt)
+   if(!t || t.trim() === '') {
+     return txt.replaceAll("<*", "")
+   }
+   return t
+}
+
+function _expandWords(txt) {
   if (txt.indexOf("<*") < 0) {
     return fixPlaceholders(txt)
   }
 
   let expansions = getExpansionForWords()
-  let terms = txt.split("|")
+  let terms = txt.split("|").map(it => _.includes(it, "<*") && !_.includes(it, " ")? it + " " : it)
   let fn = () => {
     w = terms.shift()
     if (!w) return
@@ -2259,6 +2309,9 @@ function tests() {
   assert(wordToItemsMap["bott"].length === 2
     && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("botten") >= 0)
     && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("prefixedbott") >= 0), "There should be no duplicates")
+
+  wordToItemsMap = getMatchingWords(testData, " i ")
+  assert(wordToItemsMap[" i "].length === 1, "Small Words with spaces should be matched")
 }
 
 
@@ -2279,4 +2332,5 @@ try {
   tests()
 } catch (e) {
   alert("Error in tests: " + e)
+  console.log(e)
 }
