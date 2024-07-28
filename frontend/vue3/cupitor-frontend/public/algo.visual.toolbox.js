@@ -1,3 +1,4 @@
+window.globalFabricObjId = 0;
 
 // Extended fabric line class
 fabric.Image.filters.WhiteToTransparent = fabric.util.createClass({
@@ -80,6 +81,100 @@ fabric.LineArrow.fromObject = function(object, callback) {
 
 fabric.LineArrow.async = true;
 
+fabric.Canvas.prototype.add = (function (originalFn) {
+  return function (...args) {
+    originalFn.call(this, ...args);
+    globalFabricObjId += 1;
+    args[0].uid = globalFabricObjId;
+    console.log('added obj ' + globalFabricObjId);
+    return this
+  };
+})(fabric.Canvas.prototype.add);
+
+fabric.Sprite = fabric.util.createClass(fabric.Image, {
+
+  type: 'sprite',
+
+  spriteWidth: 50,
+  spriteHeight: 72,
+  spriteIndex: 0,
+  frameTime: 100,
+
+  initialize: function (element, options) {
+    options || (options = {});
+
+    options.width = this.spriteWidth;
+    options.height = this.spriteHeight;
+
+    this.callSuper('initialize', element, options);
+
+    this.createTmpCanvas();
+    this.createSpriteImages();
+  },
+
+  createTmpCanvas: function () {
+    this.tmpCanvasEl = fabric.util.createCanvasElement();
+    this.tmpCanvasEl.width = this.spriteWidth || this.width;
+    this.tmpCanvasEl.height = this.spriteHeight || this.height;
+  },
+
+  createSpriteImages: function () {
+    this.spriteImages = [];
+
+    var steps = this._element.width / this.spriteWidth;
+    for (var i = 0; i < steps; i++) {
+      this.createSpriteImage(i);
+    }
+  },
+
+  createSpriteImage: function (i) {
+    var tmpCtx = this.tmpCanvasEl.getContext('2d');
+    tmpCtx.clearRect(0, 0, this.tmpCanvasEl.width, this.tmpCanvasEl.height);
+    tmpCtx.drawImage(this._element, -i * this.spriteWidth, 0);
+
+    var dataURL = this.tmpCanvasEl.toDataURL('image/png');
+    var tmpImg = fabric.util.createImage();
+
+    tmpImg.src = dataURL;
+    tmpImg.crossOrigin = 'anonymous'
+
+    this.spriteImages.push(tmpImg);
+  },
+
+  _render: function (ctx) {
+    ctx.drawImage(
+      this.spriteImages[this.spriteIndex],
+      -this.width / 2,
+      -this.height / 2
+    );
+  },
+
+  play: function () {
+    var _this = this;
+    this.animInterval = setInterval(function () {
+
+      _this.onPlay && _this.onPlay();
+      _this.dirty = true;
+      _this.spriteIndex++;
+      if (_this.spriteIndex === _this.spriteImages.length) {
+        _this.spriteIndex = 0;
+      }
+    }, this.frameTime);
+  },
+
+  stop: function () {
+    clearInterval(this.animInterval);
+  }
+});
+
+fabric.Sprite.fromURL = function (url, callback, imgOptions) {
+  fabric.util.loadImage(url, function (img) {
+    img.crossOrigin = 'anonymous'
+    callback(new fabric.Sprite(img, imgOptions));
+  });
+};
+
+fabric.Sprite.async = true;
 
 var Arrow = (function() {
     function Arrow(canvas) {
@@ -1148,5 +1243,73 @@ function makeLine(coords, opts) {
         evented: false,
     });
 }
+
+function hide() {
+  var items = Array.prototype.slice.apply(arguments);
+  items.forEach(it => {
+    if (it instanceof fabric.Object) {
+      it.setOpacity(0);
+      update();
+    } else if (it instanceof jQuery) {
+      it.hide()
+    }
+  });
+}
+
+/**
+ *
+ * @param obj
+ * @param id
+ * @param top
+ * @param left
+ * @returns {Promise<unknown>}
+ */
+function addFromJSON(obj, id, top, left) {
+  let ids = [id];
+  if (!obj) return;
+  let canvas = pc;
+
+  let items = [obj]
+
+  return new Promise((myResolve, myReject) => {
+    fabric.util.enlivenObjects(items, function (objects) {
+      var origRenderOnAddRemove = canvas.renderOnAddRemove;
+      canvas.renderOnAddRemove = false;
+
+      let res = []
+      let i = 0;
+      objects.forEach(function (o) {
+        o.set({top: top, left: left});
+        canvas.add(o);
+        res.push(o);
+        if (ids[i] && window._) _[ids[i]] = o;
+        i++;
+      });
+      canvas.renderOnAddRemove = origRenderOnAddRemove;
+      canvas.renderAll();
+      myResolve(res[0]);
+    });
+  })
+}
+
+function Clone(object, id, top, left) {
+  return new Promise((myResolve, myReject) => {
+    object.clone(function (clone) {
+      pc.add(clone.set({
+        left: left || (object.left + 1),
+        top: top || (object.top + 1)
+      }));
+      update();
+      myResolve(clone);
+      if (window._ && id) _[id] = clone;
+    });
+  });
+}
+
+function findById(id, canvas) {
+  if (!canvas) canvas = pc
+  return canvas._objects.find(it => it.uid === id)
+}
+
 
 
