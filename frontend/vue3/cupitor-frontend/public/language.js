@@ -11,6 +11,7 @@ window.onbeforeunload = function (event) {
 
 function getExpansionForWords() {
   let list = `ta=ta,tar,tog,tagit
+en=en,et,na
 sig=sig,dig,mig,oss,honom,henne,er,sig
 få=få,får,fick,fått
 lägga=lägga,lägger,lade,lagt
@@ -138,7 +139,8 @@ function playMedia() {
 function loadSearches() {
   let searches = getSearchesFromStorage()
   $('#searchedWords').html('')
-  _.forEach(searches, (searchTerms) => {
+
+  schedule(searches,.0001, searchTerms => {
     let displayText = searchTerms
     let isSeparator = false
     if (searchTerms.trim().length === 0) {
@@ -152,6 +154,7 @@ function loadSearches() {
     }
     $('#searchedWords').append(op)
   })
+
   $('#toggleSearchesControlCheckbox').click()
 }
 
@@ -176,6 +179,13 @@ function importSearches() {
 function importSearchesFromVocab() {
   let category = $("#vocabularySelect").val()
   let searches = window.vocabulary[category]
+
+  saveSearchesIntoStorage(searches)
+  loadSearches()
+}
+
+function loadWholeVocabulary() {
+  let searches = Object.values(window.vocabulary).flat()
 
   saveSearchesIntoStorage(searches)
   loadSearches()
@@ -426,6 +436,13 @@ function getTopOffsetForCollapseButton() {
 }
 
 $('document').ready(e => {
+  document.addEventListener('long-press', function (e) {
+    if ($(e.target).is("a")) {
+      e.preventDefault()
+      let w = $(e.target).text()
+      window.open(`https://www.google.com/search?q=${encodeURI(w)}&udm=2`, '_blank').focus();
+    }
+  });
 
   $('#mp3Choice').change(async e => {
     let link = $('#mp3Choice').val();
@@ -1426,17 +1443,22 @@ function expandRegex(txt) {
 }
 
 function getMatchingWords(list, search) {
+  let startTime = new Date().getTime()
   let wordToItemsMap = {}
-  let searchText = _.trim(search.toLowerCase(), "|")
-    .split("|").filter(it => it.length > 0).join("|")
-  let transformedSearchText = expandRegex(searchText)
+  let searchText = search
+  let transformedSearchText = search
+
+  let isNotTooShort = w => w.trim().length > 2
 
   list.forEach(item => {
     let lines = item.data;
     lines.forEach(line => {
+      if (new Date().getTime() - startTime > 20000) {
+        return wordToItemsMap;
+      }
       let words = getWords(line.text, search).map(it => it.trim().toLowerCase())
-      let endsWith = word => transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
-      let startsWith = word => transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
+      let endsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
+      let startsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
       words.filter(word => word.match(new RegExp(transformedSearchText, "i")) || endsWith(word) || startsWith(word))
         .forEach(word => {
           wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
@@ -1454,7 +1476,10 @@ function getMatchingWords(list, search) {
   }
 
   let wordToItemsMap2 = {}
-  searchText = searchText.trim()
+  if (isNotTooShort(searchText)) {
+    searchText = searchText.trim()
+  }
+
   list.forEach(item => {
     let lines = item.data;
     lines.forEach(line => {
@@ -1604,8 +1629,8 @@ function renderLines(id, url) {
 
   let isNotALink = url.startsWith('jokes-') || url.startsWith('sayings-') || url.startsWith('metaphors-') || url.startsWith('idioms-');
   let playMediaBtn = isLocalhost() ?
-      `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}')">`
-      : ''
+    `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}')">`
+    : ''
 
   let html = `
 <hr>
@@ -1657,30 +1682,57 @@ function renderLines(id, url) {
   }
 }
 
-function getSearchedWords() {
-  return window.searchText.toLowerCase().split("|").filter(it => it.trim().length);
+function getSearchedTerms(search) {
+  search = search || window.searchText
+  let terms = _.trim(search.toLowerCase(), "|")
+    .split("|")
+    .filter(it => it.trim().length > 0)
+    .map(removeHintsInBrackets)
+    .map(it => {
+      let leftSpace = it.startsWith(" "), rightSpace = it.endsWith(" ");
+      let w = it.trim()
+      if (w.endsWith("en")) {
+        w = w.substring(0, w.length - 2)
+        w = w + "<*en"
+      }
+      return (leftSpace ? " " : "") + w + (rightSpace ? " " : "")
+    });
+  return _.uniq(terms.filter(it => it));
+}
+
+function getWordsOrdered(words) {
+  let ordered = [window.searchText]
+
+  _.remove(words, it => it === window.searchText)
+
+  getSearchedTerms().forEach(w => {
+    if (_.remove(words, it => it.trim() === w.trim()).length) {
+      ordered.push(w.trim())
+    }
+  })
+
+  let relatedWords = (w, predicate) => {
+    let found = words.filter(predicate)
+    if (found) {
+      found = _.sortBy(found, it => it.length)
+      ordered = ordered.concat(found)
+      _.remove(words, it => _.includes(found, it))
+    }
+  }
+
+  getSearchedTerms().forEach(w => {
+    relatedWords(w, it => it.trim().startsWith(w.trim()))
+    relatedWords(w, it => it.trim().endsWith(w.trim()))
+  })
+
+  return _.uniq(ordered)
 }
 
 function populateSRTFindings(wordToItemsMap, $result) {
-  let similarity = (x) => {
-    if (!x) return 0
-    return getSearchedWords().map(word => stringSimilarity.compareTwoStrings(x, word)).reduce((a, b) => Math.max(a, b), 0)
-  }
-  let words = _(Object.keys(wordToItemsMap)).chain()
-    .sortBy(function (word) {
-      return word;
-    }).sortBy((x, y) => {
-      return similarity(y) - similarity(x)
-    }).sortBy((x, y) => {
-      let idxX = getSearchedWords().indexOf(x);
-      let idxY = getSearchedWords().indexOf(y);
-      if (idxX >= 0) return idxX - idxY
-    }).sortBy(w => {
-      if (w === window.searchText) return -1
-    }).value();
+  let words = getWordsOrdered(Object.keys(wordToItemsMap))
 
   words.forEach(word => {
-    let items = wordToItemsMap[word]
+    let items = wordToItemsMap[word] || []
     let wordBlock = $(`<div ><h5 class="accordion">${word}</h5></div>`)
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
@@ -1691,10 +1743,11 @@ function populateSRTFindings(wordToItemsMap, $result) {
 
     let mediaFileNames = window.allMediaFileNames || []
 
+    items = items.toSorted((x, y) => {
+      if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
+    })
+
     _.take(items, numberOfItemsToShow())
-      .toSorted((x, y) => {
-        if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
-      })
       .forEach(item => {
         let file = item
         let $fileBlock = $(`<div class="srt-file" title="${item['name']}">
@@ -1814,13 +1867,14 @@ class SearchResult {
 }
 
 function fetchFromLocal() {
+  let lookingFor = expandWords(window.searchText.trim())
+
   return Object.keys(window.allSubtitles)
     .filter(it => window.allSubtitles[it].sv && window.allSubtitles[it].en)
     .map(it => {
       let svText = window.allSubtitles[it].sv;
       let enText = window.allSubtitles[it].en;
 
-      let lookingFor = expandWords(window.searchText.trim())
       let svMatch = svText && svText.match(new RegExp(lookingFor, "i"))
       let enMatch = enText && enText.match(new RegExp(lookingFor, "i"))
       if (svMatch || enMatch) {
@@ -1836,7 +1890,8 @@ function fetchFromLocal() {
     }).filter(it => it);
 }
 
-function fixPlaceholders(txt) {
+function removeHintsInBrackets(txt) {
+  let original = txt;
   txt = txt.replaceAll("(sl-pl)", "")
     .replaceAll("(pl)", "")
     .replaceAll(" (ngt) ", " .*")
@@ -1845,6 +1900,12 @@ function fixPlaceholders(txt) {
     .replaceAll(" (ngt)", " [^ ]*")
 
   let fn = () => {
+    if(txt.indexOf("(") < 0) return
+    if(txt.indexOf("(") >= 0 && txt.indexOf(")") < 0) {
+      alert("Invalid brackets in" + original)
+      txt = txt.replaceAll("(", "")
+      return
+    }
     let matches = txt.match(/.*(\(.*\)).*/)
     if (matches && matches.length === 2) {
       txt = txt.replaceAll(matches[1], "")
@@ -1859,12 +1920,24 @@ function fixPlaceholders(txt) {
 }
 
 function expandWords(txt) {
+  txt = getSearchedTerms(txt).join("|")
+  let startTime = new Date().getTime()
+
+  let t = _expandWords(txt)
+  if (!t || t.trim() === '') { //Fallback
+    return txt.replaceAll("<*", "")
+  }
+
+  return t
+}
+
+function _expandWords(txt) {
   if (txt.indexOf("<*") < 0) {
-    return fixPlaceholders(txt)
+    return removeHintsInBrackets(txt)
   }
 
   let expansions = getExpansionForWords()
-  let terms = txt.split("|")
+  let terms = txt.split("|").map(it => _.includes(it, "<*") && !_.includes(it, " ") ? it + " " : it)
   let fn = () => {
     w = terms.shift()
     if (!w) return
@@ -1883,10 +1956,12 @@ function expandWords(txt) {
     fn()
   }
 
-  return fixPlaceholders(terms.filter(it => it.trim().length > 1).map(it => {
-    if(it.length < 3) return ` ${it} `
-    return it
-  }).join("|"))
+  return terms
+    .filter(it => it.trim().length > 1)
+    .map(it => {
+      if (it.length < 3) return ` ${it} `
+      return it
+    }).join("|")
 }
 
 async function fetchSRTs(searchText) {
@@ -2259,11 +2334,14 @@ function tests() {
   assert(wordToItemsMap["bott"].length === 2
     && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("botten") >= 0)
     && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("prefixedbott") >= 0), "There should be no duplicates")
+
+  wordToItemsMap = getMatchingWords(testData, " i ")
+  assert(wordToItemsMap[" i "].length === 1, "Small Words with spaces should be matched")
 }
 
 
 async function playMediaSlice(url, start, end) {
-  if(location.href.indexOf('localhost') < 0) {
+  if (location.href.indexOf('localhost') < 0) {
     return
   }
   let mp3Url = 'http://localhost:5000/mp3_slice?' + new URLSearchParams({url, start, end});
@@ -2279,4 +2357,5 @@ try {
   tests()
 } catch (e) {
   alert("Error in tests: " + e)
+  console.log(e)
 }

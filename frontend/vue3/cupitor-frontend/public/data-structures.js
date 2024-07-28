@@ -1,10 +1,16 @@
-function range(start, count, filter, fn) {
-
+function range(start, count, arg3, arg4) {
   if(!arguments.length) console.log('range(start, count)')
 
-  if(arguments.length === 3){
-    fn = filter;
+  let filter, fn;
+  if(arguments.length === 2){
     filter = x => true
+    fn = x => x
+  } else if(arguments.length === 3){
+    fn = arg3;
+    filter = x => true
+  } else {
+    filter = arg3;
+    fn = arg4
   }
 
   const ar = Array.apply(0, Array(count))
@@ -12,8 +18,7 @@ function range(start, count, filter, fn) {
       return index + start;
     });
 
-  if(fn) return ar.filter(filter).map(x => fn(x))
-  else return ar;
+  return ar.filter(filter).map(fn)
 }
 
 function uuid() {
@@ -479,4 +484,37 @@ class LRUCache {
   getMostRecent() {
     return Array.from(this.cache)[this.cache.size - 1];
   }
+}
+
+function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowCondition) {
+  data = data.map(x => x); //clone
+  let totalDataItems = data.length
+  let fn = null;
+  fn = (x, idx) => setTimeout(() => {
+    let first = data.splice(0, 1);
+
+    if (finishNowCondition && finishNowCondition(first)) {
+      //-1 => Finished because finishNowCondition satisfied
+      console.log("Maybe finishing early on index, last consumed data item at index: " + (idx) + " out of total: " + (totalDataItems - 1))
+      return
+    }
+    if (first.length) {
+      let task = typeof (first[0]) == 'function' ? first[0] : () => taskRunner(first[0], idx)
+      let result = task()
+      if (result instanceof Promise) {
+        result.then(it => {
+          fn(100, idx + 1)
+        })
+      } else if(result !== false) {
+        let delay = timeInSeconds * 1000
+        if (typeof (result) == 'number') delay = result * 1000
+        fn(delay, idx + 1)
+      } else {
+        console.log("Ended because function returned false!")
+      }
+    } else {
+      if (onComplete) onComplete();
+    }
+  }, x);
+  fn(0, 0);
 }

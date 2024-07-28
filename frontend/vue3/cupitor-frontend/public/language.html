@@ -15,6 +15,7 @@
     <link href="/vendor/mediaelement-player.css" rel="stylesheet">
     <script type="text/javascript" src="/vendor/mediaelement-plugins/speed/speed.min.js"></script>
     <script type="text/javascript" src="/vendor/mediaelement-plugins/speed/speed-i18n.js"></script>
+    <script type="text/javascript" src="/vendor/long-press-event.min.js"></script>
 
     <script type="text/javascript" src="/vendor/diff-match-patch.js"></script>
     <link href="/vendor/select2.min.css" rel="stylesheet"/>
@@ -463,6 +464,7 @@
                 Vocab: <select id="vocabularySelect" style="width: 100%;" onchange="importSearchesFromVocab()">
                 <option value="">-</option>
             </select>
+                OR  <button onclick="loadWholeVocabulary()" class="button-10">Whole Vocabulary</button>
                 OR -
                 <button onclick="importSearchesFromFile()" class="button-10">From File</button>
             </div>
@@ -508,7 +510,7 @@
 
                 </div>
                 <div id="playerControls"
-                     style="position: fixed; bottom: 0;width: 100%;border-top: 1px solid black;border-radius: 5%;">
+                     style="width: 100%;border-top: 1px solid black;border-radius: 5%;">
                     <div class="" style="">
                         <div style="text-align: center;">
                             <div class="controlgroup" id="speed-control">
