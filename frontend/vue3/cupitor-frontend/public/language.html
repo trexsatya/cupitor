@@ -365,6 +365,11 @@
         text-decoration: none;
       }
 
+      .search-text-info {
+        padding: 1em;
+        color: green;
+        font-size: small;
+      }
     </style>
 </head>
 
@@ -524,7 +529,6 @@
                                 <input type="radio" name="speedOption" id="speed-4" checked data-speed="1.0">
                                 <label for="speed-control">x Speed</label>
                             </div>
-
                         </div>
                         <br>
                         <div class="form-check form-switch" style="display: none;">
@@ -534,6 +538,7 @@
 
                     </div>
                     <div style="text-align: center; ">
+                        <select id="starredLinesSelect" style="display: none; margin-right: 2em;"></select>
                         <button id="rewindBtn"
                                 style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 3em;height: 2em;"
                                 onclick="rewind()"> <

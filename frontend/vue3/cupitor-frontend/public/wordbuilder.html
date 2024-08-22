@@ -328,7 +328,7 @@
         </div>
     </div>
     <div style="position: fixed; width: 50%; " class="bottom-left" id="searchResultContainer">
-        <div style="padding-top: 1em; ">
+        <div style="">
             <div id="btns-1" style="float: left; width: 49%;" class="fl-left">
                 <input type="search" id="searchText" placeholder="Search text" onchange="searchTextChanged()"
                        style="width: 68%;">
@@ -751,8 +751,14 @@
     }) //find end
   }
 
-  function searchInSrts() {
-    fetchSRTs()
+  async function searchInSrts() {
+    await fetchSRTs()
+    let txt = window.location.hash.substring(1).toLowerCase();
+    if(window.vocabularyLines) {
+      let rs = window.vocabularyLines.map((it, i) => ({text: it.text, index: i})).filter(it => it.text.match(new RegExp(window.searchText, "i")))
+      window.searchResult.push({nonSrt: true, data: rs})
+      render(window.searchResult, window.searchText)
+    }
   }
 
   window.wikiCache = new LRUCache()
@@ -760,7 +766,8 @@
   async function populateWiki() {
     function _populateWikiPage(it) {
       let $result = $('#wikiResult');
-      $result.html(it)
+      $result.html('')
+      $.parseHTML(it).forEach(it => $result.append(it))
       $(".noprint").remove()
       $(".mw-jump-link").remove()
       $(".mw-headline").parent().remove()
