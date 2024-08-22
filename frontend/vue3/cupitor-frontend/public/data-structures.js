@@ -518,3 +518,9 @@ function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowConditio
   }, x);
   fn(0, 0);
 }
+
+let debugLog = (...arguments) => {
+  if(window.DEBUG) {
+    console.log(arguments)
+  }
+}

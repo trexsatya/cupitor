@@ -11,7 +11,8 @@ window.onbeforeunload = function (event) {
 
 function getExpansionForWords() {
   let list = `ta=ta,tar,tog,tagit
-en=en,et,na
+as=as,ades,ats
+en=en,et,na,ne
 sig=sig,dig,mig,oss,honom,henne,er,sig
 få=få,får,fick,fått
 lägga=lägga,lägger,lade,lagt
@@ -148,7 +149,7 @@ function loadSearches() {
       searchTerms = displayText
       isSeparator = true
     }
-    let op = new Option(`${displayText}`, expandWords(searchTerms), false, false)
+    let op = new Option(`${displayText}`, searchTerms, false, false)
     if (isSeparator) {
       op.disabled = true
     }
@@ -227,17 +228,23 @@ function saveSearch(word, count) {
   return newItem
 }
 
+async function doSearch(searchThis, el) {
+  await fetchSRTs(searchThis);
+  // let count = wordsToItems[searchThis] && wordsToItems[searchThis].length
+  // count = count || 0
+  if(!el) return
+
+  let newItem = saveSearch(searchThis, null)
+  if (newItem) {
+    el.append(new Option(`${searchThis}`, searchThis, false, false))
+  }
+}
+
 async function searchTextChanged(e) {
   let el = $('#searchedWords')
   let w = $('#searchText').val()
 
-  await fetchSRTs(this);
-  // let count = wordsToItems[w] && wordsToItems[w].length
-  // count = count || 0
-  let newItem = saveSearch(w, null)
-  if (newItem) {
-    el.append(new Option(`${w}`, w, false, false))
-  }
+  await doSearch(this, el);
 }
 
 function parseVocabularyFile(text) {
@@ -272,8 +279,11 @@ async function fetchVocabulary() {
   window.vocabulary = parseVocabularyFile(res)
 }
 
-function searchedWordSelected() {
-  $('#searchText').val($('#searchedWords').val()).trigger('change')
+async function searchedWordSelected() {
+  // $('#searchText').val($('#searchedWords').val()).trigger('change')
+  window.unprocessedSearchText = $('#searchedWords').val()
+  window.searchText = expandWords(window.unprocessedSearchText)
+  await doSearch(window.searchText, null)
 }
 
 window.playingYoutubeVideo = false;
@@ -346,6 +356,7 @@ let ontimeupdate = e => {
   if (window.currentSub && ct > window.currentSub.te) {
     window.currentSubIndex += 1;
     window.currentSub = window.subtitles[window.currentSubIndex]
+    debugLog("Current player time", ct, "Changed to subtitle", toStringSubtitle(window.currentSub))
   }
 
   markIntervalPlayDone(ct);
@@ -404,7 +415,8 @@ function fixMobileView() {
 
   $(".fl-left").css({width: '100%', clear: 'both'})
   $(".fl-right").css({left: 0, width: '100%', marginTop: '0.3em', clear: 'both'})
-  $('#starredLines').parent().css({
+  let $starredLines = $('#starredLines');
+  $starredLines.parent().css({
     marginTop: 0,
     bottom: 0
   })
@@ -421,6 +433,13 @@ function fixMobileView() {
 
   $('#collapseMainControl').parent().css({top: getTopOffsetForCollapseButton(), left: '48%'})
   $('#result').parent().css({marginTop: '3.8em'})
+
+  $('#mediaControls').css({position: 'fixed', bottom: 0, right: 0, width: '100%', zIndex: 1000})
+  $starredLines.hide()
+  let $starredLinesSelect = $('#starredLinesSelect');
+  if($starredLinesSelect.find("option").length > 0) {
+    $starredLinesSelect.show()
+  }
 }
 
 function removeHash() {
@@ -529,6 +548,13 @@ $('document').ready(e => {
   })
 
   fixMobileView()
+
+  $('#starredLinesSelect').change(e => {
+    let index = $('#starredLinesSelect').val()
+    let ts = window.subtitles.find(it => it.index === index).ts
+    let el = $(`.starred-sub[data-index="${index}"]`)
+    starredLineSelected(el, index, ts)()
+  })
 })
 
 function pauseVideo() {
@@ -551,6 +577,7 @@ let clearSubtitles = () => {
   $('#en-sub').html('')
   $('#en-sub-mirror').html('')
   $('#starredLines').html('')
+  $('#starredLinesSelect').html('')
   window.starredLines = []
 }
 
@@ -587,6 +614,18 @@ function changeMediaIfNeededTo(media) {
   return new Promise(resolve => resolve())
 }
 
+function starredLineSelected(el, index, ts) {
+  if (!ts) {
+    ts = window.subtitles.find(it => it.index === index).ts
+  }
+  return async e => {
+    $('.starred-sub').removeClass('active')
+    el.addClass('active')
+    await changeMediaIfNeededTo(window.mediaSelected)
+    await setMediaTime(ts, true)
+  };
+}
+
 function addStarredLine(index, ts) {
   if (window.starredLines.indexOf(index) >= 0) return
 
@@ -595,17 +634,11 @@ function addStarredLine(index, ts) {
   let x = $(`<span data-index="${index}">${index}</span>`)
     .addClass('starred-sub')
 
-  if (!ts) {
-    ts = window.subtitles.find(it => it.index === index).ts
-  }
-  x.click(async e => {
-    $('.starred-sub').removeClass('active')
-    x.addClass('active')
-    await changeMediaIfNeededTo(window.mediaSelected)
-    await setMediaTime(ts, true)
-  })
+  x.click(starredLineSelected(x, index, ts))
 
   $('#starredLines').append(x)
+
+  $('#starredLinesSelect').append(new Option(index, index)).show()
 }
 
 function populateSearchWords(sub, $el) {
@@ -965,8 +998,12 @@ function storeSubtitles(subs) {
   window.currentSubIndex = 0;
   window.currentSub = window.subtitles[0];
 
-  console.log("set currentSub")
+  console.log("set currentSub", toStringSubtitle(window.currentSub))
   return originalSubs;
+}
+
+function toStringSubtitle(sub) {
+  return `${sub.number}\n${sub.ts_o} --> ${sub.te_o}\n${sub.sv.substring(0, 30)}...`
 }
 
 async function getSubtitlesForLink(link, source) {
@@ -1018,7 +1055,7 @@ async function loadLocalFiles() {
   }
 
   let sv = null, en = null;
-  let audioFile = files.find(it => it.name.match(/.mp3$/))
+  let audioFile = files.find(it => it.name.match(/.mp3$/) || it.name.match(/.wav$/))
   let videoFile = files.find(it => it.name.match(/.mp4$/))
   let svSrtFile = files.find(it => it.name.match(/.sv.srt$/))
   let enSrtFile = files.find(it => it.name.match(/.en.srt$/))
@@ -1030,7 +1067,7 @@ async function loadLocalFiles() {
     videoPlayer.setSrc(URL.createObjectURL(videoFile))
   }
 
-  let mediaNameWithoutExtension = (audioFile || videoFile).name.replace(".mp3", "").replaceAll(".mp4", "");
+  let mediaNameWithoutExtension = (audioFile || videoFile).name.replace(".mp3", "").replaceAll(".mp4", "").replaceAll(".wav", "");
   let link = _.last(mediaNameWithoutExtension.split(/ [|-]{2} /)).trim()
 
   if (sv && en) {
@@ -1144,7 +1181,7 @@ async function playNewMedia(link, source, mediaFile) {
       $('#youtubePlayer').hide()
       $('#localVideoContainer').show()
       window.playingYoutubeVideo = false;
-      if (mediaFile.name.endsWith(".mp3")) {
+      if (mediaFile.name.endsWith(".mp3") || mediaFile.name.endsWith(".wav")) {
         audioPlayer.setSrc(URL.createObjectURL(mediaFile))
         audioPlayer.play()
         window.playingAudio = true;
@@ -1190,7 +1227,7 @@ async function loadStarredLines(link, source) {
 
   let d = res.find(it => it.link === link)
   console.log(d)
-  d.lines && d.lines.forEach(it => addStarredLine(it))
+  d && d.lines && d.lines.forEach(it => addStarredLine(it))
 }
 
 function waitUntil(condition) {
@@ -1228,7 +1265,7 @@ function setSpeed() {
   }
 }
 
-window.audioCurrentTimeMargin = -5;
+window.audioCurrentTimeMargin = 0;
 
 function getCurrentTime() {
   if (window.playingAudio) {
@@ -1515,16 +1552,16 @@ function getMatchingWords(list, search) {
 
 function populateNonSRTFindings(wordToItemsMap, $result) {
   let numberOfResults = 0
-  Object.keys(wordToItemsMap).toSorted().forEach(word => {
+  Object.keys(wordToItemsMap).toSorted().filter(word => wordToItemsMap[word].length).forEach(word => {
     let items = wordToItemsMap[word]
-    let wordBlock = $(`<div><h5 class="accordion">${word}</h5></div>`)
+    let wordBlock = $(`<div><h5 class="accordion" style="background-color: #b6d4fe">${word}</h5></div>`)
 
     _.take(items, numberOfItemsToShow()).forEach(item => {
-      let parts = item.file.split("/")
-      let fileName = parts[parts.length - 1]
-      let $line = $(`<div class="normal-line" title="${fileName}"></div>`)
+      // let parts = item.file.split("/")
+      // let fileName = parts[parts.length - 1]
+      let $line = $(`<div class="normal-line" title=""></div>`)
 
-      chunkifySentence(item.text, 190).forEach(chunk => {
+      chunkifySentence(item.line.text, 190).forEach(chunk => {
         let div = $(`
     <div class="line-part"> ${highlightedText(chunk)} <img src="/img/icons/play_icon.png"
         alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn">
@@ -1536,7 +1573,7 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
       numberOfResults += 1
       wordBlock.append($line).append('<br>')
     })
-    $result.append(wordBlock)
+    $result.prepend(wordBlock)
   })
 
   return numberOfResults
@@ -1800,6 +1837,10 @@ function render(searchResults, search) {
   let $result = $('#result');
   $result.html('').show()
 
+  if(window.unprocessedSearchText !== search) {
+    $result.append(`<p class="search-text-info">${window.unprocessedSearchText}</p>`)
+  }
+
   let selectedLang = getSelectedLang()
 
   let searchResultsFiltered = searchResults.map(it => {
@@ -1817,15 +1858,16 @@ function render(searchResults, search) {
 
   $result.append("<hr>")
 
-  // wordToItemsMap = getMatchingWords(searchResults.filter(it => it.text), search, item => [item]);
-  // resultSize += populateNonSRTFindings(wordToItemsMap, $result);
+  if(window.location.pathname.includes("wordbuilder")){
+    wordToItemsMap = getMatchingWords(searchResults.filter(it => it.nonSrt), search, item => [item]);
+    populateNonSRTFindings(wordToItemsMap, $result);
+  }
 
   renderAccordions()
 
   $(".srt-file h4").dblclick(e => {
     window.preferredFile = $(e.target).data().file
   })
-
 
   $(".srt-line .play-btn").click(e => {
     if ($(e.target).hasClass('disabled')) return
@@ -2033,9 +2075,9 @@ function renderAccordions() {
 
       /* Toggle between hiding and showing the active panel */
       let panel = this.nextElementSibling;
-      if (panel.style.display === "block") {
+      if (panel && panel.style.display === "block") {
         panel.style.display = "none";
-      } else {
+      } else if(panel) {
         panel.style.display = "block";
       }
     });
@@ -2093,7 +2135,7 @@ function getDimensionsForPlayer() {
     ytVideoWidth = ww - 15;
     subWidth = ww - 10;
     ytHeight = wh / 2 - 150;
-    $('#mediaControls').css({width: '100%', bottom: '-15em', right: 0})
+    // $('#mediaControls').css({width: '100%', bottom: '-15em', right: 0})
     $('#youtubePlayer-info').hide()
     $('#speed-control').parent().hide()
 
@@ -2236,7 +2278,6 @@ async function saveRevision() {
     console.log(e)
     alert("Failed to save")
   }
-
 }
 
 function isLocalhost() {
@@ -2246,6 +2287,14 @@ function isLocalhost() {
 if (isLocalhost()) {
   $('#saveRevisionBtn').show()
   $('#saveStarredLinesBtn').show()
+
+  setInterval(() => {
+    fetch("http://localhost:5000/vocabulary")
+      .then(it => it.json())
+      .then(it => {
+        window.vocabularyLines = it
+      })
+  }, 5000)
 }
 
 
