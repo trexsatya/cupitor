@@ -331,10 +331,10 @@
         <div style="">
             <div id="btns-1" style="float: left; width: 49%;" class="fl-left">
                 <input type="search" id="searchText" placeholder="Search text" onchange="searchTextChanged()"
-                       style="width: 68%;">
+                       style="width: 58%;line-height: 28px;">
                 <input type="number" id="numberOfFindingsToShow" placeholder="Show X items" value="10"
-                       style="width: 14%;">
-                <button onclick="toggleWikiSection()" class="button-10">Wiki</button>
+                       style="width: 14%;line-height: 28px;">
+                <button onclick="toggleWikiSection()" class="button-10">Toggle Wiki</button>
             </div>
             <div id="btns-2" style="float: left; width: 50%; margin-top: -9px;" class="fl-right">
                 <select id="searchedWords" onchange="searchedWordSelected()" style="width: 220px;">
@@ -373,39 +373,132 @@
     </div>
 
 </div>
-<div style="float: right; left: 51%; width: 49%; position: fixed;">
+<div style="float: right; left: 51%; width: 49%; position: fixed;" id="right-half">
+    <h3>Section 1</h3>
     <div>
-
-    </div>
-    <div>
-        <textarea id="enteredWords" onchange="populateWords()"></textarea>
-        <span style="margin-left: 2em;">
-            <input type="checkbox" id="searchWordsCheckbox">
+        <div>
+            <textarea id="enteredWords" onchange="populateWords()"></textarea>
+            <span style="margin-left: 2em;">
+            <input type="checkbox" id="searchWordsCheckbox" checked>
         </span><br>
-        Swedish Audio: <input id="swedishAudioInput" type="file" accept="audio/*" onchange="analyseSoundAndSilence()">
-        <audio id="swedishAudio" controls="controls"></audio>
-        <br>
-        Background Music: <input id="bgMusicInput" type="file" accept="audio/*"
-                                 onchange="loadMediaFile(bgMusicAudio, 'bgMusicInput')">
-        <audio id="bgMusicAudio" controls="controls" autoplay></audio>
-        <div style="padding-bottom: 20px;">
-            <div style="margin-bottom: 1em;">Bg Music Volume:</div>
-            <div id="bgMusicVolume" style="max-width: 300px;"></div>
-            <label class="switch" style="vertical-align: middle;">
-                <input type="checkbox" id="selectableCheckbox" checked>
-                <span class="slider"></span>
-            </label>
+            Swedish Audio: <input id="swedishAudioInput" type="file" accept="audio/*" onchange="analyseSoundAndSilence()">
+            <audio id="swedishAudio" controls="controls"></audio>
+            <br>
+            Background Music: <input id="bgMusicInput" type="file" accept="audio/*"
+                                     onchange="loadMediaFile(bgMusicAudio, 'bgMusicInput')">
+            <audio id="bgMusicAudio" controls="controls" autoplay></audio>
+            <div style="padding-bottom: 20px;">
+                <div style="margin-bottom: 1em;">Bg Music Volume:</div>
+                <div id="bgMusicVolume" style="max-width: 300px;"></div>
+                <label class="switch" style="vertical-align: middle;">
+                    <input type="checkbox" id="selectableCheckbox" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+        <div style="">
+            <audio id="swedishAudioHidden" style="display: none;" autoplay=""></audio>
+            <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn"
+                 onclick="playSelectedText()">
+        </div>
+
+        <div id="wordlist"
+             style="height: 400px; overflow: scroll; margin-top: 1em; padding-bottom: 4em; margin-bottom: 2em;">
+
         </div>
     </div>
-    <div style="">
-        <audio id="swedishAudioHidden" style="display: none;" autoplay=""></audio>
-        <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn"
-             onclick="playSelectedText()">
-    </div>
+    <h3>Section 2</h3>
+    <div>
+        <div id="mainControlInputs">
+            <input type="checkbox" id="useLocalMediaCheckbox"
+                   onchange="$('#mp3ChoiceContainer').toggle();$('#localMediaContainer').toggle();">
+            <div id="mp3ChoiceContainer">
+                <label for="mp3Choice">Select Media:</label>
 
-    <div id="wordlist"
-         style="height: 400px; overflow: scroll; margin-top: 1em; padding-bottom: 4em; margin-bottom: 2em;">
+                <select id="mp3Choice" style="width: 80%">
+                    <option value="">-</option>
+                </select>
 
+                <label class="switch" style="vertical-align: middle;">
+                    <input type="checkbox" id="onlySubsCheckbox">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div id="localMediaContainer" style="display: none; ">
+                <input type="file" accept="video/*,audio/*,.srt,.json" multiple="multiple" id="localFiles"
+                       onchange="loadLocalFiles()">
+            </div>
+            <div id="localMedia" style="float: left; margin-top: 1.5em;">
+                <audio id="localAudio" src="" width="700" height="500" style="display: none;"></audio>
+
+                <div id="localVideoContainer">
+                    <video id="localVideo" src="" style="display: none;"></video>
+                </div>
+
+            </div>
+
+            <div style="width: 100%;">
+                <div id="youtubePlayer" style="display:none; margin-top: 2em;"></div>
+            </div>
+
+            <div style="min-height: 650px;" id="mediaRelatedContainer">
+                <div id="subtitle-container">
+                    <br>
+                    <br>
+                    <div id="sv-sub" style="font-weight: bold; font-size: large; color: blue"></div>
+                    <div id="sv-sub-mirror" style="font-size: smaller; color: grey"></div>
+                    <br>
+                    <br>
+                    <div id="en-sub" style="display: none;"></div>
+                    <div style="margin-top: 2em;">
+                    <span class="btn btn-light" id="toggleEnSubBtn" onclick="$('#en-sub').toggle()"
+                          style="display: none;"> Toggle English Subtitles </span>
+                    </div>
+
+                </div>
+                <div style="margin-top: 10em; position: absolute; right: 4em;" id="mediaControls">
+                    <div id="subControls" style="padding-left: 1em;">
+                        <div id="subtitlePagination"></div>
+                    </div>
+                    <div style="margin-top: 2em;" id="starredLines">
+
+                    </div>
+                    <div id="playerControls"
+                         style="width: 100%;border-top: 1px solid black;border-radius: 5%;">
+                        <div class="" style="">
+                            <div style="text-align: center;">
+                                <div class="controlgroup" id="speed-control">
+                                    <label for="speed-1">0.5</label>
+                                    <input type="radio" name="speedOption" id="speed-1" data-speed="0.5">
+                                    <label for="speed-2">0.7</label>
+                                    <input type="radio" name="speedOption" id="speed-2" data-speed="0.7">
+                                    <label for="speed-3">0.8</label>
+                                    <input type="radio" name="speedOption" id="speed-3" data-speed="0.8">
+                                    <label for="speed-4">1.0</label>
+                                    <input type="radio" name="speedOption" id="speed-4" checked data-speed="1.0">
+                                    <label for="speed-control">x Speed</label>
+                                </div>
+                            </div>
+                            <br>
+                            <div class="form-check form-switch" style="display: none;">
+                                <label class="form-check-label" for="loopSwitch">Loop </label>
+                                <input class="form-check-input" type="checkbox" role="switch" id="loopSwitch">
+                            </div>
+
+                        </div>
+                        <div style="text-align: center; ">
+                            <select id="starredLinesSelect" style="display: none; margin-right: 2em;"></select>
+                            <button id="rewindBtn"
+                                    style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 3em;height: 2em;"
+                                    onclick="rewind()"> <
+                            </button>
+                            <button onclick="togglePlay(this)" id="playBtn" class="play-btn">Play</button>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 <div id="info-dialog" title="Media Info" style="display: none;">
@@ -416,6 +509,7 @@
         Vocab: <select id="vocabularySelect" style="width: 100%;" onchange="importSearchesFromVocab()">
         <option value="">-</option>
     </select>
+        OR  <button onclick="loadWholeVocabulary()" class="button-10">Whole Vocabulary</button>
         OR -
         <button onclick="importSearchesFromFile()" class="button-10">From File</button>
     </div>
@@ -423,6 +517,8 @@
 
 <script>
   $('#searchedWords').select2({placeholder: 'Searches'});
+
+  $('#right-half').accordion({collapsible: true})
 
   $('#toggleSearchesControlCheckbox').change(e => {
     $('#searchesControl').toggle()
@@ -831,6 +927,26 @@
     _populateWikiPage(wikiCache.get(w))
   }
 
+  function sanitizeInputFromReddit() {
+    $("img[alt='User avatar']").remove()
+    $("img[alt='Subreddit Icon']").parent().parent().parent().remove()
+    $("button").remove()
+    $("svg").remove()
+    $("*[data-click-id=\"body\"]").remove()
+    $("span:contains('ConcentrateSlow4119')").remove()
+    $("*[data-testid=\"comment_author_link\"]").parent().parent().parent().parent().remove()
+
+    let commCounter = 0;
+    $("span:contains('level ')").each((i, e) => {
+      let $comment = $('<div> Comment </div>');
+      if ($(e).text().trim() === 'level 1') {
+        $comment.html(`#${++commCounter} Comment`)
+      }
+      let $el = $comment.addClass('accordion')
+      $el.insertBefore($(e))
+    })
+  }
+
   function populateWords() {
     let words = enteredWords.value
     let html = []
@@ -864,24 +980,7 @@
       $("*").removeClass("highlighted-selection")
       $(getSelectionParentElement()).addClass("highlighted-selection")
     }
-
-    $("img[alt='User avatar']").remove()
-    $("img[alt='Subreddit Icon']").parent().parent().parent().remove()
-    $("button").remove()
-    $("svg").remove()
-    $("*[data-click-id=\"body\"]").remove()
-    $("span:contains('ConcentrateSlow4119')").remove()
-    $("*[data-testid=\"comment_author_link\"]").parent().parent().parent().parent().remove()
-
-    let commCounter = 0;
-    $("span:contains('level ')").each((i, e) => {
-      let $comment = $('<div> Comment </div>');
-      if ($(e).text().trim() === 'level 1') {
-        $comment.html(`#${++commCounter} Comment`)
-      }
-      let $el = $comment.addClass('accordion')
-      $el.insertBefore($(e))
-    })
+    sanitizeInputFromReddit();
 
     renderAccordions()
   }
