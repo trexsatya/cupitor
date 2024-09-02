@@ -214,6 +214,7 @@ function clearSearches() {
 }
 
 function saveSearch(word, count) {
+  if(!word) return
   count = count || 0
   let searches = getSearchesFromStorage()
   let newItem = true
@@ -229,6 +230,9 @@ function saveSearch(word, count) {
 }
 
 async function doSearch(searchThis, el) {
+  if ((typeof searchThis) !== 'string') {
+    searchThis = null
+  }
   await fetchSRTs(searchThis);
   // let count = wordsToItems[searchThis] && wordsToItems[searchThis].length
   // count = count || 0
@@ -243,7 +247,7 @@ async function doSearch(searchThis, el) {
 async function searchTextChanged(e) {
   let el = $('#searchedWords')
   let w = $('#searchText').val()
-
+  window.unprocessedSearchText = null
   await doSearch(this, el);
 }
 
@@ -657,7 +661,12 @@ function populateSearchWords(sub, $el) {
     let wordLink = $(it);
     wordLink.click(e => {
       pauseVideo()
-      $('#searchText').val($(e.target).data('uri')).trigger('change')
+      let word = $(e.target).data('uri')
+      if(isLocalhost()) {
+        window.location.hash = word
+      } else {
+        $('#searchText').val(word).trigger('change')
+      }
       addStarredLine(sub.index, sub.ts)
     })
     $el.append(wordLink)
@@ -1767,10 +1776,18 @@ function getWordsOrdered(words) {
 
 function populateSRTFindings(wordToItemsMap, $result) {
   let words = getWordsOrdered(Object.keys(wordToItemsMap))
+  if(window.searchText.includes("|")) {
+    words = words.filter(it => it.trim() !== window.searchText.trim())
+  }
 
   words.forEach(word => {
     let items = wordToItemsMap[word] || []
-    let wordBlock = $(`<div ><h5 class="accordion">${word}</h5></div>`)
+    let title = word
+    if(word.trim().length !== word.length) {
+      title = `"${word}"`
+    }
+
+    let wordBlock = $(`<div ><h5 class="accordion">${title}</h5></div>`)
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
     wordBlock.append(`<div style=""> Wiki: ${getWikiLinks(word)} 丨
@@ -1837,8 +1854,8 @@ function render(searchResults, search) {
   let $result = $('#result');
   $result.html('').show()
 
-  if(window.unprocessedSearchText !== search) {
-    $result.append(`<p class="search-text-info">${window.unprocessedSearchText}</p>`)
+  if(window.unprocessedSearchText) {
+    $result.append(`<p class="search-text-info">${window.unprocessedSearchText.replaceAll("|", " | ")}</p>`)
   }
 
   let selectedLang = getSelectedLang()
@@ -2084,7 +2101,7 @@ function renderAccordions() {
   }
 
   let isRegex = false;
-  if ([".", "*", "|", "?"].some(it => _.includes(window.searchText, it))) {
+  if ([".", "*", "?"].some(it => _.includes(window.searchText, it))) {
     isRegex = true;
   }
   if (isRegex) {
@@ -2397,7 +2414,11 @@ async function playMediaSlice(url, start, end) {
   let a = new Audio()
   a.src = mp3Url
   a.volume = 1.0
-  await dampenBgMusic().promise
+  try {
+    await dampenBgMusic().promise
+  } catch (e) {
+    console.log(e)
+  }
   a.onended = e => restoreBgMusic()
   a.play()
 }
