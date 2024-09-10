@@ -370,6 +370,24 @@
         color: green;
         font-size: small;
       }
+
+      .vocabulary-line {
+        padding: 0.3em 0.3em 0.3em 1em;
+      }
+
+      .vocabulary-line.highlighted {
+        background-color: #f1f1a7;
+      }
+
+      .vocabulary-segment {
+        max-height: 8rem;
+        overflow: scroll;
+      }
+
+      #vocabularyResult {
+        margin-bottom: 1em;
+        border-top: 1px solid black;
+      }
     </style>
 </head>
 
@@ -440,6 +458,9 @@
                 <!--                    Toggle Search Results-->
                 <!--                </button>-->
                 <div style="padding-top: 1em;margin-top: 1em;">
+                    <div id="vocabularyResult">
+
+                    </div>
                     <div id="result" style="overflow: scroll; height: 300px;clear: both;
                     border: 1px solid green; border-right: none;">
 
@@ -511,7 +532,7 @@
                 <div id="subControls" style="padding-left: 1em;">
                     <div id="subtitlePagination"></div>
                 </div>
-                <div style="margin-top: 2em;" id="starredLines">
+                <div style="margin-top: 2em;display: none;" id="starredLines">
 
                 </div>
                 <div id="playerControls"
