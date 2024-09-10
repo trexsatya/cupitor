@@ -516,6 +516,9 @@
 </div>
 
 <script>
+  $(document).ready(e => {
+    window.audioCurrentTimeMargin=5
+  })
   $('#searchedWords').select2({placeholder: 'Searches'});
 
   $('#right-half').accordion({collapsible: true})
