@@ -5,6 +5,7 @@ Array.prototype.last = function () {
   return _.last(this)
 };
 
+let SEPARATOR_PIPE = '|'
 window.onbeforeunload = function (event) {
   return confirm("Confirm refresh");
 };
@@ -1494,7 +1495,7 @@ function numberOfItemsToShow() {
 function getWords(text) {
   const segmentor = new Intl.Segmenter([], {granularity: 'word'});
   const segmentedText = segmentor.segment(text);
-  return Array.from(segmentedText, ({segment}) => segment);
+  return Array.from(segmentedText, ({segment}) => segment).filter(it => it.trim() !== "|");
 }
 
 class MatchResult {
@@ -1753,9 +1754,11 @@ function renderLines(id, url) {
 }
 
 function getSearchedTerms(search) {
-  search = search || window.searchText
-  let terms = _.trim(search.toLowerCase(), "|")
-    .split("|")
+  if(search === null || search === undefined) {
+    search = window.searchText
+  }
+  let terms = _.trim(search.toLowerCase(), SEPARATOR_PIPE)
+    .split(SEPARATOR_PIPE)
     .filter(it => it.trim().length > 0)
     .map(removeHintsInBrackets)
     .map(it => {
@@ -1800,7 +1803,7 @@ function getWordsOrdered(words) {
 
 function populateSRTFindings(wordToItemsMap, $result) {
   let words = getWordsOrdered(Object.keys(wordToItemsMap))
-  if (window.searchText.includes("|")) {
+  if (window.searchText.includes(SEPARATOR_PIPE)) {
     words = words.filter(it => it.trim() !== window.searchText.trim())
   }
 
@@ -1897,22 +1900,25 @@ function getSurrounding(index, list, size = 5) {
 }
 
 function renderVocabularyFindings(search) {
-  let categories = Object.keys(window.vocabulary).filter(cat => window.vocabulary[cat].find(it => getWords(it).includes("plågor")))
+  let categories = Object.keys(window.vocabulary)
+    .filter(cat => window.vocabulary[cat].find(it => getWords(it).includes(search)))
   let words = categories.map(it => window.vocabulary[it]).flat()
-  let indexesOfAppearance = words.map((e, i) =>
-    getWords(e).map(it => it.toLowerCase()).includes(search.toLowerCase()) ? i : null)
+  let indexesOfAppearance = words.map((vocabLine, i) =>
+    getWords(expandWords(vocabLine)).filter(it => it.trim().length > 2).map(it => it.toLowerCase()).includes(search.toLowerCase()) ? i : null)
     .filter(it => it)
   let vocab = $('#vocabularyResult')
   vocab.html('')
   indexesOfAppearance.forEach(idx => {
     let vocabItem = $('<div class="vocabulary-segment"></div>')
+    let vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
     getSurrounding(idx, words).forEach(it => {
-      let $line = $(`<div class="vocabulary-line">${it.item.replaceAll("|", " | ")}</div>`)
+      let $line = $(`<div class="vocabulary-line">${it.item.replaceAll(SEPARATOR_PIPE, " | ")}</div>`)
       if(it.index === idx) {
         $line.addClass('highlighted')
       }
-      vocabItem.append($line)
+      vocabItemContent.append($line)
     })
+    vocabItem.append(vocabItemContent)
     vocab.append(vocabItem)
   })
   $('.vocabulary-segment').each((i, e) => $(e).find('.highlighted')[0].scrollIntoView())
@@ -1931,7 +1937,7 @@ function render(searchResults, search, className) {
   }
 
   if (window.unprocessedSearchText) {
-    $result.append(`<p class="search-text-info">${window.unprocessedSearchText.replaceAll("|", " | ")}</p>`)
+    $result.append(`<p class="search-text-info">${window.unprocessedSearchText.replaceAll(SEPARATOR_PIPE, " | ")}</p>`)
   }
 
   let searchResultsFiltered = filterByLanguage(searchResults);
@@ -1976,6 +1982,8 @@ function render(searchResults, search, className) {
   $(".normal-line .play-btn").click(e => {
     playSelectedText(e);
   })
+
+  $('#resultsContainer').accordion({collapsible: true})
 
   return wordToItemsMap;
 } // end render
@@ -2048,8 +2056,15 @@ function removeHintsInBrackets(txt) {
   return txt
 }
 
+/**
+ * `<*gå an (something)|göra` becomes `gå an |går an |gick an |gått an |göra`
+ * Extra info in brackets () is removed
+ * and if there is mapping available for word with `<*` then it is replaced with mappings
+ * @returns{string} expanded text
+ * @param{string} txt
+ */
 function expandWords(txt) {
-  txt = getSearchedTerms(txt).join("|")
+  txt = getSearchedTerms(txt).join(SEPARATOR_PIPE)
   let startTime = new Date().getTime()
 
   let t = _expandWords(txt)
@@ -2066,7 +2081,7 @@ function _expandWords(txt) {
   }
 
   let expansions = getExpansionForWords()
-  let terms = txt.split("|").map(it => _.includes(it, "<*") && !_.includes(it, " ") ? it + " " : it)
+  let terms = txt.split(SEPARATOR_PIPE).map(it => _.includes(it, "<*") && !_.includes(it, " ") ? it + " " : it)
   let fn = () => {
     w = terms.shift()
     if (!w) return
@@ -2090,7 +2105,7 @@ function _expandWords(txt) {
     .map(it => {
       if (it.length < 3) return ` ${it} `
       return it
-    }).join("|")
+    }).join(SEPARATOR_PIPE)
 }
 
 async function fetchSRTs(searchText) {
@@ -2105,7 +2120,7 @@ async function fetchSRTs(searchText) {
 
   window.searchText = txt;
   window.searchText = expandWords(window.searchText)
-  window.searchText = _.trim(window.searchText, "|")
+  window.searchText = _.trim(window.searchText, SEPARATOR_PIPE)
 
   //To fix the mistakes in vocabulary list with double spaces
   window.searchText = window.searchText.split(" ").map(it => it.trim()).join(" ")
@@ -2115,7 +2130,7 @@ async function fetchSRTs(searchText) {
   console.log("Loading from local")
   window.searchResult = fetchFromDownloadedFiles(window.searchText.trim());
   let words = render(window.searchResult, window.searchText, "primary")
-  if (window.searchText.trim().length > 4 && Object.values(words).flat().length === 0) {
+  if (!window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && Object.values(words).flat().length === 0) {
     window.searchText = window.searchText.trim().slice(0, -2)
     window.searchResult = fetchFromDownloadedFiles(window.searchText);
     render(window.searchResult, window.searchText, "secondary")
