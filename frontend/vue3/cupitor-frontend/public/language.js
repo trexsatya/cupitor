@@ -237,6 +237,55 @@ function saveSearch(word, count) {
   return newItem
 }
 
+function populateVocabText() {
+   let category = $("#addToVocabularyDialogSelect").val()
+    let text = window.vocabulary[category].join("\n")
+    $("#vocabularySegmentTextarea").val(text)
+}
+
+function openAddToVocabDialog() {
+  let w = window.innerWidth*0.9
+  let h = window.innerHeight*0.8
+  $("#addToVocabularyDialog").dialog({width: w, height: h}).show()
+  populateVocabularyHeadings($('#addToVocabularyDialogSelect'))
+}
+
+function addToVocab() {
+  let text = $("#vocabularySegmentTextarea").val()
+  let category = $("#addToVocabularyDialogSelect").val()
+  window.vocabulary[category] = text.split("\n")
+  populateVocabularyHeadings($('#vocabularySelect'))
+  makeHttpCallToUpdateVocab()
+}
+
+function getXXX() {
+  let xxx = localStorage.getItem("xxx")
+  if(!xxx) {
+    xxx = prompt("Enter the XXX")
+    localStorage.setItem("xxx", xxx)
+  }
+  return xxx
+}
+
+window.AWS_API = "http://ec2-13-60-227-150.eu-north-1.compute.amazonaws.com/api"
+async function makeHttpCallToUpdateVocab() {
+  let data = Object.keys(window.vocabulary)
+    .map(k => `#${k}\n${window.vocabulary[k].join("\n")}`).join("\n")
+  try {
+    let res = await fetch(`${window.AWS_API}/save-vocab`, {
+      method: 'POST',
+      body: data,
+      headers: {
+        'Content-Type': 'text/plain',
+        'X-Auth': getXXX()
+      }
+    })
+    res = await res.text()
+  } catch (e) {
+    localStorage.setItem("xxx", null)
+  }
+}
+
 async function doSearch(searchThis, el) {
   if ((typeof searchThis) !== 'string') {
     searchThis = null
@@ -276,8 +325,8 @@ function parseVocabularyFile(text) {
   return categories
 }
 
-function populateVocabulary() {
-  let $vocabularySelect = $('#vocabularySelect')
+function populateVocabularyHeadings(target) {
+  let $vocabularySelect = target
   $vocabularySelect.html('<option>-</option>')
   Object.keys(window.vocabulary).forEach(it => {
     let op = new Option(it, it)
@@ -365,7 +414,7 @@ let ontimeupdate = e => {
   //   }
   // }
 
-  if (window.currentSub && ct > window.currentSub.te) {
+  if (window.currentSub && ct > window.currentSub.te + window.marginStartSubtitle) {
     window.currentSubIndex += 1;
     window.currentSub = window.subtitles[window.currentSubIndex]
     debugLog("Current player time", ct, "Changed to subtitle", toStringSubtitle(window.currentSub))
@@ -408,9 +457,6 @@ if (isIOS()) {
   window.marginEndSubtitle = 0
 }
 
-window.marginStartSubtitle = 0
-window.marginEndSubtitle = 0
-
 window.marginStartSubtitle = -0.1
 window.marginEndSubtitle = 1
 
@@ -443,8 +489,7 @@ function fixMobileView() {
   $('#mp3ChoiceContainer .select2').css({width: '78%'})
   $('#btns-2').css({marginBottom: '1em'})
 
-  $('#collapseMainControl').parent().css({top: getTopOffsetForCollapseButton(), left: '48%'})
-  $('#result').parent().css({marginTop: '3.8em'})
+  // $('#result').parent().css({marginTop: '3.8em'})
 
   $('#mediaControls').css({position: 'fixed', bottom: 0, right: 0, width: '100%', zIndex: 1000})
   $starredLines.hide()
@@ -558,10 +603,10 @@ $('document').ready(e => {
     let $collapseUpSign = $('#collapseUpSign');
     $collapseUpSign.toggle()
     $('#collapseDownSign').toggle()
-    if ($collapseUpSign.is(':visible')) {
-      $('#collapseMainControl').parent().css({top: getTopOffsetForCollapseButton()})
+    if (!$collapseUpSign.is(':visible') && window.mediaBeingPlayed) {
+      $('#resultContainer').hide()
     } else {
-      $('#collapseMainControl').parent().css({top: '0.1em'})
+      $('#resultContainer').show()
     }
   })
 
@@ -659,6 +704,10 @@ function addStarredLine(index, ts) {
   $('#starredLinesSelect').append(new Option(index, index)).show()
 }
 
+function expandSearchResults() {
+
+}
+
 function populateSearchWords(sub, $el) {
   $el.html('')
   let n = 1;
@@ -676,10 +725,11 @@ function populateSearchWords(sub, $el) {
     wordLink.click(e => {
       pauseVideo()
       let word = $(e.target).data('uri')
-      if (isLocalhost()) {
+      if (window.location.toString().includes("wordbuilder")) {
         window.location.hash = word
       } else {
         $('#searchText').val(word).trigger('change')
+        expandSearchResults()
       }
       addStarredLine(sub.index, sub.ts)
     })
@@ -790,6 +840,9 @@ function fixSectionBox() {
 $(document).ready(function () {
   fixSectionBox()
   $("#vocabularySelect").select2()
+  $("#addToVocabularyDialogSelect").select2().change(e => {
+    populateVocabText()
+  })
   hidePlayer(audioPlayer)
   hidePlayer(videoPlayer)
 });
@@ -887,7 +940,7 @@ async function loadAllSubtitles() {
   window.vocabulary['Metaphors'] = window.metaphors.map(it => it.name)
   window.vocabulary['Idioms'] = window.idioms.map(it => it.name)
 
-  populateVocabulary()
+  populateVocabularyHeadings($('#vocabularySelect'))
 }
 
 function loadAsSubtitles(data, tag) {
@@ -1228,7 +1281,7 @@ async function playNewMedia(link, source, mediaFile) {
     $('#subControls').hide()
   }
 
-  $('#result').hide()
+  $('#resultContainer').hide()
   if (!$('#onlySubsCheckbox').is(':checked')) {
     _playMedia();
   } else {
@@ -1754,7 +1807,7 @@ function renderLines(id, url) {
 }
 
 function getSearchedTerms(search) {
-  if(search === null || search === undefined) {
+  if (search === null || search === undefined) {
     search = window.searchText
   }
   let terms = _.trim(search.toLowerCase(), SEPARATOR_PIPE)
@@ -1896,16 +1949,25 @@ function getSurrounding(index, list, size = 5) {
   list = list.map((item, index) => ({item, index}))
   let idx = list.findIndex(it => it.index === index)
   if (idx < 0) return []
-  return list.slice(Math.max(0, idx - size), Math.min(list.length, idx + (size+1)))
+  return list.slice(Math.max(0, idx - size), Math.min(list.length, idx + (size + 1)))
 }
 
 function renderVocabularyFindings(search) {
+  search = search.toLowerCase().trim()
+
+  function wordIsInVocabularyLine(vocabLine) {
+    return getWords(expandWords(vocabLine)).filter(it => it.trim().length > 2).map(it => it.toLowerCase().trim()).includes(search);
+  }
+
   let categories = Object.keys(window.vocabulary)
-    .filter(cat => window.vocabulary[cat].find(it => getWords(it).includes(search)))
+    .filter(cat => window.vocabulary[cat].find(wordIsInVocabularyLine))
+
   let words = categories.map(it => window.vocabulary[it]).flat()
+
   let indexesOfAppearance = words.map((vocabLine, i) =>
-    getWords(expandWords(vocabLine)).filter(it => it.trim().length > 2).map(it => it.toLowerCase()).includes(search.toLowerCase()) ? i : null)
+    wordIsInVocabularyLine(vocabLine) ? i : null)
     .filter(it => it)
+
   let vocab = $('#vocabularyResult')
   vocab.html('')
   indexesOfAppearance.forEach(idx => {
@@ -1913,7 +1975,7 @@ function renderVocabularyFindings(search) {
     let vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
     getSurrounding(idx, words).forEach(it => {
       let $line = $(`<div class="vocabulary-line">${it.item.replaceAll(SEPARATOR_PIPE, " | ")}</div>`)
-      if(it.index === idx) {
+      if (it.index === idx) {
         $line.addClass('highlighted')
       }
       vocabItemContent.append($line)
@@ -1983,8 +2045,12 @@ function render(searchResults, search, className) {
     playSelectedText(e);
   })
 
-  $('#resultsContainer').accordion({collapsible: true})
-
+  $('#resultContainer').show();
+  let $collapseDownSign = $('#collapseDownSign');
+  if($collapseDownSign.is(':visible')) {
+    $collapseDownSign.hide();
+    $('#collapseUpSign').show();
+  }
   return wordToItemsMap;
 } // end render
 
@@ -2239,7 +2305,7 @@ function getDimensionsForPlayer() {
     ytHeight = wh / 2 - 150;
     // $('#mediaControls').css({width: '100%', bottom: '-15em', right: 0})
     $('#youtubePlayer-info').hide()
-    $('#speed-control').parent().hide()
+    // $('#speed-control').parent().hide()
 
     $('#mp3Choice').parent().css({width: ww - 20})
   }
