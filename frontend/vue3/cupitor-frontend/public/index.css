@@ -50,3 +50,7 @@ div.accordion h2, div.accordion h1, div.accordion h3, div.accordion h4, div.acco
   text-decoration: underline;
   cursor: pointer;
 }
+
+.no-result {
+  color: #cdc0c0;
+}

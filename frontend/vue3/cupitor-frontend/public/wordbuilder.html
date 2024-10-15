@@ -950,6 +950,10 @@
     })
   }
 
+  function searchSelectedText() {
+    window.location.hash = getSelectionText().toLowerCase()
+  }
+
   function populateWords() {
     let words = enteredWords.value
     let html = []
@@ -979,7 +983,7 @@
       // if ($("#searchWordsCheckbox").is(":checked")) {
       //   $('#searchText').val(getSelectionText())
       // }
-      window.location.hash = getSelectionText().toLowerCase()
+      searchSelectedText();
       $("*").removeClass("highlighted-selection")
       $(getSelectionParentElement()).addClass("highlighted-selection")
     }
