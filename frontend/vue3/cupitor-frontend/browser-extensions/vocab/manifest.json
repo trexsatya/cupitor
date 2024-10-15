@@ -1,0 +1,29 @@
+{
+  "description": "Vocabulary extension",
+  "manifest_version": 2,
+  "name": "vocabulary-extension",
+  "version": "1.0",
+  "homepage_url": "https://github.com/mdn/webextensions-examples/tree/master/http-response",
+  "icons": {
+    "48": "pen.svg"
+  },
+
+  "permissions": [
+    "webRequest", "webRequestBlocking", "<all_urls>", "storage","tabs", "webNavigation", "clipboardRead", "clipboardWrite"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["jquery.js", "jquery-ui.js", "select2.min.js", "lodash.js", "data-structures.js", "language.js", "content-script.js"],
+      "css": ["jquery-ui.css", "select2.min.css", "language.css"]
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "strict_min_version": "57.0a1"
+    }
+  }
+}

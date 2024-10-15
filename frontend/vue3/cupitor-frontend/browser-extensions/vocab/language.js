@@ -1848,7 +1848,7 @@ let commonWordsToIgnore = [
   'här', 'där', 'var', 'dit', 'där', 'ditt', 'mitt', 'sitt', 'vårt', 'vem', 'vad', 'vilken', 'vilket', 'vilka', 'någon',
   'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många', 'mycket', 'lite', 'få', 'färre',
   'flera', 'mest', 'minst', 'någon', 'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många'
-  ]
+]
 
 function populateSRTFindings(wordToItemsMap, $result) {
   let words = getWordsOrdered(Object.keys(wordToItemsMap))
@@ -1901,7 +1901,7 @@ function populateSRTFindings(wordToItemsMap, $result) {
       let item = items[i];
 
       if(i < remainingToRender && getSelectedLang() === 'en' && duplicateTranslation(item)) {
-          continue;
+        continue;
       }
 
       let $fileBlock = $(`<div class="srt-file" title="${item['name']}">
