@@ -1,0 +1,28 @@
+{
+  "description": "SVT Player with Translation",
+  "manifest_version": 2,
+  "name": "http-response-filter",
+  "version": "1.0",
+  "homepage_url": "https://github.com/mdn/webextensions-examples/tree/master/http-response",
+  "icons": {
+    "48": "pen.svg"
+  },
+
+  "permissions": [
+    "webRequest", "webRequestBlocking", "<all_urls>", "storage","tabs", "webNavigation", "clipboardRead", "clipboardWrite"
+  ],
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.svtplay.se/*", "https://www.youtube.com/*"],
+      "js": ["jquery.js", "jquery-ui.js", "content-script.js"],
+      "css": ["jquery-ui.css"]
+    }
+  ],
+
+  "browser_specific_settings": {
+    "gecko": {
+      "strict_min_version": "57.0a1"
+    }
+  }
+}
