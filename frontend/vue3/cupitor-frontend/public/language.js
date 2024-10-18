@@ -474,7 +474,7 @@ function fixMobileView() {
   if (isDesktop()) {
     return
   }
-
+  window.showInfoWithoutPopup = false;
   $(".fl-left").css({width: '100%', clear: 'both'})
   $(".fl-right").css({left: 0, width: '100%', marginTop: '0.3em', clear: 'both'})
   let $starredLines = $('#starredLines');
@@ -1881,7 +1881,8 @@ function populateSRTFindings(wordToItemsMap, $result) {
     })
 
     let getEnTranslation = (item) => {
-      return window.searchResult.find(it => it.url === item.url)['sv_subs'].data[item.line.index-1].text
+      let d = window.searchResult.find(it => it.url === item.url)['sv_subs'].data[item.line.index-1]
+      return d && d.text
     }
 
     let rendered = [];
