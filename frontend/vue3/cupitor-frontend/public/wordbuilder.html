@@ -242,6 +242,8 @@
                        style="width: 58%;line-height: 28px;">
                 <input type="number" id="numberOfFindingsToShow" placeholder="Show X items" value="10"
                        style="width: 14%;line-height: 28px;">
+                EN: <input class="tgl tgl-flip" id="toggleLangCb" type="checkbox" data-toggle="toggle"
+                       data-size="small" data-on="EN" data-off="SV" style="width: 14%"/>
                 <button onclick="toggleWikiSection()" class="button-10">Toggle Wiki</button>
             </div>
             <div id="btns-2" style="float: left; width: 50%; margin-top: -9px;" class="fl-right">
@@ -580,10 +582,6 @@
 
   function loadMediaFile(el, input) {
     el.src = URL.createObjectURL(document.getElementById(input).files[0])
-  }
-
-  function getSelectedLang() {
-    return 'sv'
   }
 
   async function analyseAudio(audioData, callbackWhenMovedEnough) {

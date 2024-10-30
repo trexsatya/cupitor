@@ -1612,7 +1612,7 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
   let numberOfResults = 0
   Object.keys(wordToItemsMap).toSorted().filter(word => wordToItemsMap[word].length).forEach(word => {
     let items = wordToItemsMap[word]
-    let wordBlock = $(`<div><h5 class="l-accordion" style="background-color: #b6d4fe">${word}</h5></div>`)
+    let wordBlock = $(`<div><h5 class="l-accordion non-srt" style="background-color: #b6d4fe">${word}</h5></div>`)
 
     _.take(items, numberOfItemsToShow()).forEach(item => {
       // let parts = item.file.split("/")
@@ -2287,7 +2287,7 @@ function renderAccordions(el) {
     });
   }
 
-  $(".accordion").filter((i, it) => !$(it).hasClass("no-result")).first().click()
+  $(".l-accordion").filter((i, it) => !$(it).hasClass("no-result") && !$(it).hasClass("non-srt")).first().click()
 }
 
 // 2. This code loads the IFrame Player API code asynchronously.

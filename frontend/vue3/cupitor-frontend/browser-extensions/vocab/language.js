@@ -2287,7 +2287,7 @@ function renderAccordions(el) {
     });
   }
 
-  $(".accordion").filter((i, it) => !$(it).hasClass("no-result")).first().click()
+  $(".l-accordion").filter((i, it) => !$(it).hasClass("no-result")).first().click()
 }
 
 // 2. This code loads the IFrame Player API code asynchronously.
