@@ -455,8 +455,10 @@
 
   let swedishAudio = document.getElementById("swedishAudio")
   let secondsWithSound = new Set()
+  let silenceAtSeconds = new Set()
   let dampenAtSeconds = new Set()
   let restoreAtSeconds = new Set()
+  let rmsMap = {}
 
   window.dampeningInProgress = null
   window.restoringInProgress = null
@@ -518,20 +520,29 @@
       if (shouldRestore) restoreBgMusic(t)
     }
 
+    let timeHandled = []
+    let mediaEnded = false
     swedishAudio.ontimeupdate = e => {
+      if(mediaEnded) {
+        console.log("Media Ended. Silences: ", findSilencesTimestamps())
+        return
+      }
       let t = mediaTimeInSeconds(swedishAudio);
-      if (secondsHandled.has(t)) return
 
-      handleTimestampSecond(t);
+      if(!timeHandled.includes(t) && findSilencesTimestamps().includes(t)) {
+        console.log("Pausing audio as Silence detected at ", t)
+        swedishAudio.pause()
+        timeHandled.push(t)
+      }
     }
 
     swedishAudio.onended = e => {
       secondsHandled = new Set()
-      restoreBgMusic()
+      mediaEnded = true
     }
 
     swedishAudio.oncanplay = e => {
-      recordAudio(swedishAudio.duration + 10)
+
     }
 
     loadMediaFile(swedishAudio, 'swedishAudioInput')
@@ -554,23 +565,100 @@
     })
   }
 
+  function _round(value, p) {
+      let precision = p || 1; // Default precision to 1 if not provided
+      let multiplier = Math.pow(10, precision); // Use precision directly
+      return Math.round(value * multiplier) / multiplier
+  }
+
   function round(value, p) {
-    let precision = p || 1
-    let multiplier = Math.pow(10, precision || 0);
-    return Math.round(value * multiplier) / multiplier;
+      return Math.floor(_round(value, p));
+  }
+
+  function  calculateRMS(audioData, length) {
+    // Calculate RMS of the audio data (simplified example)
+    let sum = 0;
+    for (let i = 0; i < length; i++) {
+        sum += Math.pow(audioData[i], 2);
+    }
+    return Math.sqrt(sum / length);
+  }
+
+  function silenceThreshold(rmsValues) {
+    let candidates = [];
+    for (let i = 1; i < rmsValues.length - 1; i++) {
+        let n = rmsValues[i];
+        if(n !== Infinity && n > rmsValues[i-1] +1 && n > rmsValues[i+1] +1) {
+            candidates.push(n)
+        }
+    }
+    return _.sortBy(Object.entries(_.countBy(candidates)), it => it[1]).reverse()
+  }
+
+  function oneOfConsecutive(arr) {
+    if(arr.length === 0) {
+        return null
+    }
+    if(arr.length === 1) {
+        return arr[0]
+    }
+    return arr[1]
+  }
+
+  // sorted array as input
+  function removeConsecutive(arr) {
+    let res = []
+    let consecutive = []
+    for (let i = 0; i < arr.length; i++) {
+        if(consecutive.length === 0) {
+            consecutive.push(arr[i])
+        } else {
+            if(consecutive.includes(arr[i] - 1) || consecutive.includes(arr[i] + 1)) {
+                consecutive.push(arr[i])
+            } else {
+                res.push(oneOfConsecutive(consecutive))
+                consecutive = [arr[i]]
+            }
+        }
+    }
+    res.push(oneOfConsecutive(consecutive))
+    return res.filter(it => it !== null)
+  }
+
+  function findSilencesTimestamps(threshold) {
+    let rmsValues = Object.entries(rmsMap)
+    threshold = threshold || silenceThreshold(Object.values(rmsMap))[0][0]
+    let silence = []
+    for (let i = 0; i < rmsValues.length; i++) {
+        if(rmsValues[i][1] >= threshold) {
+            silence.push(i)
+        }
+    }
+    console.log("Silences at with consecutives", silence)
+    return removeConsecutive(silence)
   }
 
   function populateSoundTimes(buffer, el, suspendTime) {
     buffer = Array.from(buffer)
     let threshold = -50;
-
-    let t = suspendTime;
-    for (let i = 0; i < buffer.length; i++) {
-      if (buffer[i] > threshold) {
-        secondsWithSound.add(Math.floor(round(t)))
-        populateSecondsForBgMusic(secondsWithSound)
-      }
+    let st = _round(suspendTime, 1)
+    let upperHalf = Math.ceil(st)/2
+    let lowerHalf = Math.floor(st)
+    if(st > upperHalf) {
+      suspendTime = upperHalf
+    } else {
+      suspendTime = lowerHalf
     }
+    let t = suspendTime;
+    const rms = calculateRMS(buffer, buffer.length);
+    //console.log(rms, suspendTime)
+
+    if(rmsMap[suspendTime]) {
+      rmsMap[suspendTime] = round( (rmsMap[suspendTime] + rms) / 2)
+    } else {
+      rmsMap[suspendTime] = round(rms)
+    }
+
     // console.log(buffer
     //   .map(it => it < threshold ? '' : round(it) + '/' + round(t))
     //   .join(' '))
@@ -613,7 +701,7 @@
             analyserNode.getFloatFrequencyData(frequencyData);
             populateSoundTimes(frequencyData, el, suspendTime)
 
-            if (secondsWithSound.size > 0) {
+            if (suspendTime > 20) {
               callbackWhenMovedEnough()
             }
 
