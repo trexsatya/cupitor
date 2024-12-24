@@ -48,6 +48,14 @@ async function test() {
     window.showInfoWithoutPopup = true;
     window.dontConfirmOnRefresh = true;
 
+    $(document).on('click', function(e) {
+       console.log("click", e)
+       let dialogClicked = $(e.target).parents("#ctl-box").length > 0;
+       dialogClicked = dialogClicked || $(e.target).attr('id') === 'ctl-box';
+       if (!dialogClicked) {
+            getCustomDialogBox().dialog("close");
+       }
+    });
     if(!getCustomDialogBox().length) {
         $('body').append($tlBox);
         getCustomDialogBox().dialog({
