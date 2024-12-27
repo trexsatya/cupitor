@@ -731,10 +731,13 @@ function loadMainOSMD(musicXml, height,) {
 
 function chordExtensions(chordName) {
   // chordName = normaliseChordName(chordName)
-  const sevenths =  ['7'].map(it => chordName + it).concat(chordName.endsWith("min") ? chordName + 'Maj7' : chordName.replace("maj", "") + '7');
+  const cn = chordName.substr(0, 1)
+  const sevenths =  ['7'].map(it => chordName + it).concat(chordName.endsWith("min") ? chordName + 'Maj7' : cn + '7');
   const ninths =  chordName + '+9'
+  const dim = cn + 'dim'
+  const dim7 = cn + 'dim7'
 
-  return sevenths.concat(ninths)
+  return sevenths.concat([ninths, dim, dim7])
 }
 
 function usefulVersionsOfChord(chordName, fretboard) {
@@ -749,6 +752,10 @@ function usefulVersionsOfChord(chordName, fretboard) {
     .toSorted((a, b) => fretboard.usefulChords(b).length - fretboard.usefulChords(a).length);
 }
 
+function isOpenChord(chord) {
+  return chord.find(x => x.fret === 0)
+}
+
 /**
  *
  * @param chordsOnFretboard e.g. [[{string: '6', fret: 12}]]
@@ -759,13 +766,13 @@ function populateChordButtons(chordsOnFretboard, fretboard) {
   let cnt = 1
   const $chordNumbers = $('#chordNumbers');
   $chordNumbers.html('')
-  chordsOnFretboard.forEach(it => {
+  _.sortBy(chordsOnFretboard, it => isOpenChord(it)).forEach(it => {
     const $cnBtn = $(`<span>${cnt}</span>`).addClass("chord-number-btn").data("notes", it).click(e => {
       $('.chord-number-btn').removeClass("selected")
       $cnBtn.addClass("selected")
       fretboard.showOnlyTheseNotes(it)
     })
-    if (it.find(x => x.fret === 0)) {
+    if (isOpenChord(it)) {
       $cnBtn.addClass("open-chord")
     }
     cnt += 1
@@ -1452,6 +1459,15 @@ $(function () {
       })
       $chordVariationsCntnr.append($btn)
     })
+    const $btn = $(`<span>Open</span>`);
+    $chordVariationsCntnr.append($btn)
+    $btn.addClass("chord-variation-btn").click(e => {
+      let ocs = chordExtensions(chordName).map(it => fretboard.openChords(it)).flat()
+      ocs = ocs.concat(fretboard.openChords(chordName))
+      populateChordButtons(ocs.filter(isOpenChord), fretboard)
+      $('.chord-variation-btn').removeClass("selected")
+      $btn.addClass("selected")
+    })
   })
 
   $chordInput.change(e => {
@@ -1540,10 +1556,9 @@ function randomChords(chordGroups) {
   loadMainOSMD(null, 10)
 }
 
-function allOpenChordsInPos(pos) {
+function allOpenChordsInPos(chordName) {
   let chords = []
-
-  const chordName = $('.chord-variation-btn.selected').text()
+  chordName = chordName || $('.chord-variation-btn.selected').text()
   chords = chords.concat(fretboard.openChords(chordName))
   chords = chords.filter(those => those.map(it => it.fret).every(i => i <= 5))
 

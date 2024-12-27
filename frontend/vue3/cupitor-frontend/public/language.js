@@ -1858,6 +1858,10 @@ function populateSRTFindings(wordToItemsMap, $result) {
 
   words.forEach(word => {
     let items = wordToItemsMap[word] || []
+    if(!items.length) {
+       let w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
+       if(w) items =  wordToItemsMap[w]
+    }
     let title = word
     if (word.trim().length !== word.length) {
       title = `"${word}"`
