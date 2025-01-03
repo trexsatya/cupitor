@@ -22,41 +22,18 @@ function sleep (time) {
 }
 
 let $tlBox = $(`
-<div> 
+<div>
     <div><label for="translateToggleButton">Stop</label><input type="checkbox" id="translateToggleButton" /> </div>
-    <div id="tlBoxContent"></div>
+    <div id="tlBoxContent-svt"></div>
 </div>
-`).attr("id", "ctl-box")
+`).attr("id", "ctl-box-svt")
 
-function showAlert(text1, text2) {
-    let $content = $('#tlBoxContent')
-    $content.html(`<div>${text1}</div><br/>`)
-
-    let $sv = $('<p/>')
-    console.log(text1, text2)
-    text2.split(" ").forEach(word => {
-        let wikiWord = word.replaceAll("-", "").replaceAll("–", "").replace(/[^a-zÅÄÖ ]/gi, '')
-        wikiWord = wikiWord.toLowerCase()
-        let url = `https://en.wiktionary.org/wiki/${wikiWord}#Swedish`
-        $sv.append(`<a target="_blank" href="${url}" style="color: blue;"> ${word} </a>`)
-    })
-    $content.append($sv)
-    $content.append($(`<button>Copy Swedish</button>`).click(e => {
-        navigator.clipboard.writeText(text2)
-    }))
-
-    $('#translateToggleButton').button()
-
-    getCustomDialogBox().dialog( "open");
-
-    $('#ctl-box').parent(".ui-dialog").css({left: '80%', width: '20%'})
-}
 
 function getCustomDialogBox() {
-    return $("#ctl-box");
+    return $("#ctl-box-svt")
 }
 
-async function test() {
+async function enableSubtitleRecording() {
     if(isYoutube()) {
 
     } else {
@@ -64,17 +41,8 @@ async function test() {
     }
 
     if(!getCustomDialogBox().length) {
+        $tlBox.css({zIndex: 10000, position: 'absolute', top: 0, right: 0, width: '20%', background: 'white', padding: '10px'});
         $('body').append($tlBox);
-        getCustomDialogBox().dialog({
-            width: '40%',
-            height: 500,
-            close: function( event, ui ) {
-                $("button[title=Spela]").click()
-            }
-        }).css({ fontSize: 'large'});
-        $(".ui-front").css({zIndex: 10000})
-
-        getCustomDialogBox().dialog( "close");
     }
 
     function getSubtitleContainer() {
@@ -107,26 +75,25 @@ async function test() {
 
                     if(lastText !== text) {
                         lastText = text
-                    // console.log($node, text)
-                    // Pause and Translate
-                    if($('#translateToggleButton').is(":checked")) {
-                        $("button[title=Pausa]").click()
-                    }
+                        console.log($node, text)
+                        // Pause and Translate
+                        if($('#translateToggleButton').is(":checked")) {
+                            $("button[title=Pausa]").click()
+                        }
 
-                    let time = $('div[data-rt="video-player-time-indicator"]').text()
-                    time = time.split("/")[0].trim();
+                        let time = $('div[data-rt="video-player-time-indicator"]').text()
+                        time = time.split("/")[0].trim();
 
-                    fetch(`${TRANSLATION_SERVER_API}?q=${text}&src=${location.toString()}&ts=${time}`, {mode: 'no-cors'})
-                        .then(it => it.text())
-                        .then(resp => {
-                            let txt = resp
-                            console.log(txt)
-                            return JSON.parse(txt)
-                        })
-                        .then(it => {
-                            console.log(it);
-                            showAlert(it.eng, text)
-                        })
+                        fetch(`${TRANSLATION_SERVER_API}?q=${text}&src=${location.toString()}&ts=${time}`, {mode: 'no-cors'})
+                            .then(it => it.text())
+                            .then(resp => {
+                                let txt = resp
+                                console.log(txt)
+                                return JSON.parse(txt)
+                            })
+                            .then(it => {
+                                console.log(it);
+                            })
                     }
                 });
             }
@@ -146,4 +113,5 @@ async function test() {
     observer.observe(subtitleNode, config);
 }
 
-test()
+console.log("SVT Player Content Script Loaded")
+enableSubtitleRecording()

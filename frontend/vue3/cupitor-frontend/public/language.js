@@ -148,11 +148,7 @@ function playMedia() {
   }
 }
 
-function loadSearches() {
-  let searches = getSearchesFromStorage()
-  $('#searchedWords').html('')
-
-  schedule(searches, .0001, searchTerms => {
+function createOptionElement(searchTerms, selected = false) {
     let displayText = searchTerms
     let isSeparator = false
     if (searchTerms.trim().length === 0) {
@@ -160,11 +156,20 @@ function loadSearches() {
       searchTerms = displayText
       isSeparator = true
     }
-    let op = new Option(`${displayText}`, searchTerms, false, false)
+    let op = new Option(`${displayText}`, searchTerms, false, selected)
     if (isSeparator) {
       op.disabled = true
     }
-    $('#searchedWords').append(op)
+    op.title = searchTerms
+    return op
+}
+
+function loadSearches() {
+  let searches = getSearchesFromStorage()
+  $('#searchedWords').html('')
+
+  schedule(searches, .0001, searchTerms => {
+    $('#searchedWords').append(createOptionElement(searchTerms))
   })
 
   $('#toggleSearchesControlCheckbox').click()
@@ -339,12 +344,21 @@ function populateVocabularyHeadings(target) {
 }
 
 async function fetchVocabulary() {
-  let res = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/vocabulary.txt")
-  res = await res.text()
+  let res;
+  if(isLocalhost()) {
+    res = await fetch("http://localhost:5000/vocabulary")
+    res = await res.json().text
+  } else {
+      res = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/vocabulary.txt")
+      res = await res.text()
+  }
   window.vocabulary = parseVocabularyFile(res)
 }
 
 async function searchedWordSelected() {
+  if(window.searchedWordsSelectedProgrammatically) {
+    window.searchedWordsSelectedProgrammatically = false; return
+  }
   // $('#searchText').val($('#searchedWords').val()).trigger('change')
   window.unprocessedSearchText = $('#searchedWords').val()
   window.searchText = expandWords(window.unprocessedSearchText)
@@ -740,7 +754,8 @@ function populateSearchWords(sub, $el) {
       pauseVideo()
       let word = $(e.target).data('uri')
       if (window.location.toString().includes("wordbuilder")) {
-        window.location.hash = word
+        if(word.length > 2)
+          window.location.hash = word
       } else {
         $('#searchText').val(word).trigger('change')
         expandSearchResults()
@@ -1608,8 +1623,17 @@ function getMatchingWords(list, search) {
   return wordToItemsMap;
 }
 
+function selectSearchedWord(event) {
+  let text = $(event.target).parent().data('text').replaceAll("\n", "")
+  $('#searchedWords').val(text)
+  window.searchedWordsSelectedProgrammatically = true
+  $('#searchedWords').trigger('change')
+  window.preSelectedSearchedWord = text
+}
+
 function populateNonSRTFindings(wordToItemsMap, $result) {
   let numberOfResults = 0
+
   Object.keys(wordToItemsMap).toSorted().filter(word => wordToItemsMap[word].length).forEach(word => {
     let items = wordToItemsMap[word]
     let wordBlock = $(`<div><h5 class="l-accordion non-srt" style="background-color: #b6d4fe">${word}</h5></div>`)
@@ -1619,21 +1643,22 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
       // let fileName = parts[parts.length - 1]
       let $line = $(`<div class="normal-line" title=""></div>`)
 
-      chunkifySentence(item.line.text, 190).forEach(chunk => {
-        let div = $(`
-    <div class="line-part"> ${highlightedText(chunk)} <img src="/img/icons/play_icon.png"
-        alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn">
-    </div>`);
-        div.data({text: chunk})
-        $line.append(div)
-      })
+      let chunk = item.line.text
+
+      let div = $(`
+  <div class="line-part">
+      <i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;" onclick="selectSearchedWord(event)"></i>
+      ${highlightedText(chunk.replaceAll("|", " | "))}
+      <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn">
+  </div>`);
+      div.data({text: chunk})
+      $line.append(div)
 
       numberOfResults += 1
       wordBlock.append($line).append('<br>')
     })
     $result.prepend(wordBlock)
   })
-
   return numberOfResults
 }
 
@@ -2492,7 +2517,8 @@ if (isLocalhost()) {
     fetch("http://localhost:5000/vocabulary")
       .then(it => it.json())
       .then(it => {
-        window.vocabularyLines = it
+        window.vocabularyLines = it.text.split("\n")
+        window.vocabulary = parseVocabularyFile(it.text)
       })
   }, 5000)
 }

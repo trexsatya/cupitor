@@ -849,10 +849,28 @@
     await fetchSRTs()
     let txt = window.location.hash.substring(1).toLowerCase();
     if(window.vocabularyLines) {
-      let rs = window.vocabularyLines.map((it, i) => ({text: it.text, index: i})).filter(it => it.text.match(new RegExp(window.searchText, "i")))
-      window.searchResult.push({nonSrt: true, data: rs})
+      let rs = window.vocabularyLines.map((it, i) => ({text: it, index: i})).filter(it => it.text.match(new RegExp(window.searchText, "i")))
+      window.searchResult.push({nonSrt: true, data: rs, source: "vocabulary"})
       render(window.searchResult, window.searchText)
     }
+
+      $('#searchedWords').html('')
+
+      let vocabCategoriesToPopulate = new Set()
+
+      Object.entries(vocabulary).forEach(it => {
+          vocabCategoriesToPopulate.add(it[0])
+      })
+
+      vocabCategoriesToPopulate.forEach(it => {
+           let vocabLines = window.vocabulary[it]
+           let heading = new Option(`${it}`, it, false, false)
+           heading.disabled = true
+           $('#searchedWords').append(heading)
+           vocabLines.forEach(line => {
+             $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
+           })
+      })
   }
 
   window.wikiCache = new LRUCache()
@@ -867,6 +885,7 @@
       $(".mw-headline").parent().remove()
       $("#toc").remove()
       $('#mw-navigation').remove()
+      $('.vector-header-container').remove()
       $('#footer').remove()
       $('#wikiResult a').css({'color': 'blue', 'text-decoration': 'underline'})
       whenWikiWordClicked($result);
@@ -912,6 +931,8 @@
         $('#searchText').val(wordsToSearch.join("|"))
         searchInSrts()
       }
+
+     $("#Svenska").scrollIntoView()
     }
 
     let w = window.location.hash
