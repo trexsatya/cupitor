@@ -573,12 +573,21 @@ function getTopOffsetForCollapseButton() {
 
 $('document').ready(e => {
   document.addEventListener('long-press', function (e) {
-    if ($(e.target).is("a")) {
+    if ($(e.target).hasClass("link")) {
       e.preventDefault()
+      e.stopPropagation()
       let w = $(e.target).text()
       window.open(`https://www.google.com/search?q=${encodeURI(w)}&udm=2`, '_blank').focus();
     }
   });
+
+  document.addEventListener('click', function (e) {
+      if ($(e.target).hasClass("link")) {
+        e.preventDefault()
+        let link = $(e.target).attr('href')
+        window.open(link, '_blank').focus();
+      }
+    });
 
   $('#mp3Choice').change(async e => {
     let link = $('#mp3Choice').val();
@@ -717,7 +726,7 @@ let clearSubtitles = () => {
 function getWikiLink(word, uri = null) {
   let uriComponent = uri || word;
   uriComponent = uriComponent.toLowerCase()
-  return `<span> <a href="https://sv.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}" target="_blank">${word}</a></span>`;
+  return `<span> <span class="link" href="https://sv.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${word}</span></span>`;
 }
 
 function populateWikiLinks(text, $el) {
@@ -1668,7 +1677,7 @@ function getMatchingWords(list, search) {
 function selectSearchedWord(event) {
   let text = $(event.target).parent().data('text').replaceAll("\n", "")
   $('#searchedWords').val(text)
-  window.searchedWordsSelectedProgrammatically = true
+  //window.searchedWordsSelectedProgrammatically = true
   $('#searchedWords').trigger('change')
   window.preSelectedSearchedWord = text
 }
@@ -2073,6 +2082,8 @@ function renderVocabularyFindings(search) {
       let $line = $(`<div class="vocabulary-line"></div>`);
       if(txt.trim().length) {
         $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;" onclick="selectSearchedWord(event)"></i>`)
+      } else {
+        txt = "------------------"
       }
       $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, " | ")}</span>`)
       $line.data({text: txt})
@@ -2687,3 +2698,4 @@ try {
   alert("Error in tests: " + e)
   console.log(e)
 }
+
