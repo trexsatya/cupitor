@@ -202,10 +202,26 @@ function importSearchesFromVocab() {
 }
 
 function loadWholeVocabulary() {
-  let searches = Object.values(window.vocabulary).flat()
+  $('#searchedWords').html('')
 
-  saveSearchesIntoStorage(searches)
-  loadSearches()
+  let vocabCategoriesToPopulate = new Set()
+
+  Object.entries(vocabulary).forEach(it => {
+      vocabCategoriesToPopulate.add(it[0])
+  })
+
+  let populateLines = it => {
+       let vocabLines = window.vocabulary[it]
+       let heading = new Option(`${it}`, it, false, false)
+       heading.disabled = true
+       $('#searchedWords').append(heading)
+       vocabLines.forEach(line => {
+         $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
+       })
+  };
+  schedule(Array.from(vocabCategoriesToPopulate), .1, it => {
+    populateLines(it)
+  })
 }
 
 function importSearchesFromFile() {
@@ -347,17 +363,21 @@ async function fetchVocabulary() {
   let res;
   if(isLocalhost()) {
     res = await fetch("http://localhost:5000/vocabulary")
-    res = await res.json().text
+    res = await res.json()
+    if(res) res = res.text
   } else {
       res = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/vocabulary.txt")
       res = await res.text()
   }
+  if(res)
   window.vocabulary = parseVocabularyFile(res)
+  loadWholeVocabulary()
 }
 
 async function searchedWordSelected() {
   if(window.searchedWordsSelectedProgrammatically) {
-    window.searchedWordsSelectedProgrammatically = false; return
+    window.searchedWordsSelectedProgrammatically = false;
+    return
   }
   // $('#searchText').val($('#searchedWords').val()).trigger('change')
   window.unprocessedSearchText = $('#searchedWords').val()
@@ -514,6 +534,28 @@ function fixMobileView() {
   let $starredLinesSelect = $('#starredLinesSelect');
   if ($starredLinesSelect.find("option").length > 0) {
     $starredLinesSelect.show()
+  }
+
+  let downSymbol = '&#x25BC;'
+  let upSymbol = '&#x25B2;'
+  let scrollButton = $("#scrollButton")
+  scrollButton.show()
+  window.onscroll = () => {
+    if (document.body.scrollTop < document.body.scrollHeight/2) {
+      scrollButton.html(downSymbol).data({'direction': 'down'})
+    } else {
+      scrollButton.html(upSymbol).data({'direction': 'up'})
+    }
+  } //onscroll
+
+}
+
+let scrollButtonClicked = e => {
+  let direction = $("#scrollButton").data('direction')
+  if (direction === 'down') {
+    window.scrollTo(0, document.body.scrollHeight)
+  } else {
+    window.scrollTo(0, 0)
   }
 }
 
@@ -2027,7 +2069,14 @@ function renderVocabularyFindings(search) {
     let vocabItem = $('<div class="vocabulary-segment"></div>')
     let vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
     getSurrounding(idx, words).forEach(it => {
-      let $line = $(`<div class="vocabulary-line">${it.item.replaceAll(SEPARATOR_PIPE, " | ")}</div>`)
+      let txt = it.item
+      let $line = $(`<div class="vocabulary-line"></div>`);
+      if(txt.trim().length) {
+        $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;" onclick="selectSearchedWord(event)"></i>`)
+      }
+      $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, " | ")}</span>`)
+      $line.data({text: txt})
+
       if (it.index === idx) {
         $line.addClass('highlighted')
       }
