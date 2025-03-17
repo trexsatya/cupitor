@@ -1,0 +1,158 @@
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+
+    <script src="/vendor/jquery.js"></script>
+    <script></script>
+    <script src="/vendor/jquery-ui.min.js"></script>
+    <link rel="stylesheet" href="/vendor/jquery-ui.min.css">
+    <script type="text/javascript" src="/vendor/pagination.min.js"></script>
+    <script type="text/javascript" src="/vendor/bootstrap.min.js"></script>
+    <link href="/index.css" rel="stylesheet"/>
+    <script type="text/javascript" src="/vendor/string-similarity.js"></script>
+    <script type="text/javascript" src="/vendor/mediaelement.js"></script>
+    <link href="/vendor/mediaelement-player.css" rel="stylesheet">
+    <script type="text/javascript" src="/vendor/mediaelement-plugins/speed/speed.min.js"></script>
+    <script type="text/javascript" src="/vendor/mediaelement-plugins/speed/speed-i18n.js"></script>
+    <script type="text/javascript" src="/vendor/long-press-event.min.js"></script>
+    <script type="text/javascript" src="/vendor/ckeditor/ckeditor.js"></script>
+
+    <script type="text/javascript" src="/vendor/diff-match-patch.js"></script>
+    <link href="/vendor/select2.min.css" rel="stylesheet"/>
+    <link href="/vendor/pagination.css" rel="stylesheet"/>
+    <link href="/vendor/bootstrap.min.css" rel="stylesheet"/>
+    <link href="/vendor/bootstrap-grid.min.css" rel="stylesheet"/>
+    <link href="https://gitcdn.github.io/bootstrap-toggle/2.2.2/css/bootstrap-toggle.min.css" rel="stylesheet">
+    <script src="https://gitcdn.github.io/bootstrap-toggle/2.2.2/js/bootstrap-toggle.min.js"></script>
+
+    <script src="/vendor/select2.min.js"></script>
+    <script src="/vendor/lodash.js"></script>
+    <script src="/data-structures.js"></script>
+    <script src="/language.js"></script>
+    <link href="/language.css" rel="stylesheet"/>
+    <link rel="stylesheet" href="/vendor/fontawesome-all.css">
+    <style>
+
+    </style>
+    <style>
+        #scrollButton {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+            font-size: 18px;
+            border: none;
+            outline: none;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .link {
+          cursor: pointer;
+        }
+    </style>
+</head>
+
+<body style="padding: 0.5em;">
+
+<div >
+    <textarea onchange="fn()"></textarea>
+</div>
+
+<div id="content">
+
+</div>
+<script>
+  function row(text) {
+    let options = `
+Livsstil/land
+Livsstil/Försvar
+Livsstil
+Praktisk kunskap
+Praktisk kuskap/Handla
+Praktisk kunskap/Ekonomi
+Praktisk kunskap/Överlevnad
+Praktisk kunskap/Utbildning
+Praktisk kunskap/kunskap
+Praktisk kunskap/Hälsa
+Praktisk kunskap/motor
+Psykologi
+Literatur
+Litteratur/läsning
+Litteratur/Recension
+Samhällskunskap
+Samhällskunskap/Världsorder
+Samhällskunskap/Svenska
+Samhällskunskap/natur
+Filosofi/Hermeneutik
+Filosofi
+Filosofi/samhälle
+Vlog/Sverige
+Vlog/Kina
+Samhällsproblem
+Samhällsproblem/Brott
+Samhällsproblem/Krig
+Samhällsproblem/Konst
+Ekonomi
+Ekonomi/Företag
+Ekonomi/Marknad
+Ovanlig/UFO
+Ovanlig/Överlevnad
+Ovanlig/NDE
+Stora Händelse/Korona
+Stora Händelse/9-11
+Utbildning
+Utbildning/Musik
+Utbildning/Metod
+Humör
+Humör/Politik
+Humör/Institutioner
+Humör/Sarcasm
+Humör/Sarkasm/Sverige
+Intressanta Saker/Mysterier
+Intressanta Saker
+Underhållning
+Underhållning/Sverige`.split('\n')
+    let selectBox = $(`<select class="form-control" style="width: 18%; float: left;">`)
+
+    let textSpan = $(`<span class="form-control" style="float: right; width: 70%; margin-left: 1%;"></span>`).text(text)
+    let splits = text.split(" || ")
+    if(splits.length > 3){
+      textSpan.css('color', 'grey')
+    }
+    let youtubeLink = splits.last()
+    if(youtubeLink){
+      textSpan.append(`<a href="https://www.youtube.com/watch?v=${youtubeLink}" target="_blank">Youtube</a>`)
+    }
+    $(`<div class="row">`).append(selectBox).append(textSpan).appendTo('#content')
+
+    options.forEach(option => {
+      selectBox.append(`<option>${option}</option>`)
+    })
+
+    selectBox.select2({
+        tags: true,
+        createSearchChoice: function(term, data) {
+            if ($(data).filter(function() {
+                return this.text.localeCompare(term) === 0;
+            }).length === 0) {
+                return { id: term, text: term };
+            }
+        }
+    });
+  }
+
+  function fn(){
+    let text = $('textarea').val()
+    let lines = text.split('\n')
+    $('#content').empty()
+    lines.forEach(row)
+  }
+</script>
+
+</body>
+
+</html>

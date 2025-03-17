@@ -30,7 +30,7 @@ let $tlBox = $(`
                            style="width: 68%;">
        EN:<input class="tgl tgl-flip" id="toggleLangCb" type="checkbox" data-toggle="toggle"
        data-size="small" data-on="EN" data-off="SV" style="width: 8%"/>
-        <button id="searchButton">Search</button>
+        <button id="searchButton-satya">Search</button>
         <div id="resultContainer">
                 <div id="vocabularyResult">
 
@@ -74,7 +74,7 @@ async function test() {
         await fetchSRTs(txt)
         getCustomDialogBox().dialog("open");
     })
-    $('#searchButton').click(async e => {
+    $('#searchButton-satya').click(async e => {
         let txt = $('#searchText').val()
         await fetchSRTs(txt);
     })
