@@ -27,6 +27,7 @@
     <script src="/data-structures.js"></script>
     <script src="/vendor/lodash.js"></script>
 
+    <script src="/vendor/NoSleep.min.js"></script>
     <!-- <script src="../../vendor/jquery.min.js"></script> -->
     <script src="../../vendor/jquery.easing.js"></script>
 
@@ -291,7 +292,7 @@
             <span style="margin-left: 2em;">
             <input type="checkbox" id="searchWordsCheckbox" checked>
         </span><br>
-            Swedish Audio: <input id="swedishAudioInput" type="file" accept="audio/*" onchange="analyseSoundAndSilence()">
+            Swedish Audio: <input id="swedishAudioInput" type="file" accept="audio/*" onchange="muteUnmuteAtIntervals()">
             <audio id="swedishAudio" controls="controls"></audio>
             <br>
             Background Music: <input id="bgMusicInput" type="file" accept="audio/*"
@@ -504,6 +505,44 @@
       $searchResultContainer.addClass('bottom-left').removeClass('top-left')
       $('#result').css({height: 300})
     }
+  }
+
+  var noSleep = new NoSleep();
+
+  function muteUnmuteAtIntervals() {
+     noSleep.enable();
+     let done = {}
+     let mediaEnded = false
+     let interval = 15
+     let lastPausedAt = interval
+     swedishAudio.ontimeupdate = e => {
+          if(mediaEnded) {
+            console.log("Media Ended.")
+            return
+          }
+          let t = mediaTimeInSeconds(swedishAudio);
+
+          if(t > 0 && t % interval === 0) {
+            if(done[t]) {
+              return
+            }
+            done[t] = true
+            if(swedishAudio.muted || swedishAudio.volume === 0) {
+              // set time
+              swedishAudio.currentTime = Math.max(lastPausedAt || (t - interval), 0)
+              swedishAudio.muted = false
+            } else {
+              swedishAudio.muted = true
+              lastPausedAt = swedishAudio.currentTime
+            }
+          }
+      }
+
+      swedishAudio.onended = e => {
+          done = {}
+          mediaEnded = true
+      }
+      loadMediaFile(swedishAudio, 'swedishAudioInput')
   }
 
   function analyseSoundAndSilence() {

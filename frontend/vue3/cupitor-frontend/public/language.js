@@ -1926,6 +1926,22 @@ let commonWordsToIgnore = [
   'flera', 'mest', 'minst', 'någon', 'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många'
   ]
 
+function groupAndArrangeResults(items) {
+    let spl = ['jokes', 'idioms', 'sayings', 'metaphors', 'book-extracts']
+    let gpBySpl = _.groupBy(items, it => spl.includes(it.source) ? it.source : 'other')
+    items = gpBySpl['other'] || []
+    let mediaFileNames = window.allMediaFileNames || []
+    // So that at least one item for each type (e.g. idiom, joke etc.) is included
+    let grouped = _.groupBy(items, it => { let c = categories[it.url]; c = c || ''; c = c.trim(); return  spl.includes(it.source) ? it.source : c})
+    grouped = _.zip(...Object.values(grouped));
+    grouped = _.sortBy(grouped, it => it.filter(it => it).length).reverse()
+    items = grouped.flat().filter(it => it)
+    items = items.toSorted((x, y) => {
+      if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
+    })
+    return [randomFromArray(gpBySpl['jokes'] || [])].concat(items).filter(it => it)
+}
+
 function populateSRTFindings(wordToItemsMap, $result) {
   let words = getWordsOrdered(Object.keys(wordToItemsMap))
   if (window.searchText.includes(SEPARATOR_PIPE)) {
@@ -1951,14 +1967,7 @@ function populateSRTFindings(wordToItemsMap, $result) {
 
     $result.append(wordBlock)
 
-    let mediaFileNames = window.allMediaFileNames || []
-    // So that at least one item for each type (e.g. idiom, joke etc.) is included
-    let grouped = _.zip(...Object.values(_.groupBy(items, 'source')));
-    grouped = _.sortBy(grouped, it => it.filter(it => it).length).reverse()
-    items = grouped.flat().filter(it => it)
-    items = items.toSorted((x, y) => {
-      if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
-    })
+    items = groupAndArrangeResults(items)
 
     let getEnTranslation = (item) => {
       let d = window.searchResult.find(it => it.url === item.url)['sv_subs'].data[item.line.index-1]

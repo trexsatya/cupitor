@@ -545,7 +545,7 @@ $('document').ready(e => {
   })
 
   try {
-    document.onkeyup = result.onkeyup = e => {
+    let onKeyUp = e => {
       if (e.which === 32 && !$(e.target).is('input')) { //Space
         togglePlay()
         e.preventDefault()
@@ -557,7 +557,14 @@ $('document').ready(e => {
       if (e.key === "ArrowRight" || e.which === 39) {
         fastForward()
       }
+
+      if(e.key === "Enter" || e.which === 13) {
+        searchTextChanged()
+      }
     }
+
+    document.onkeyup = onKeyUp
+    result.onkeyup = onKeyUp
   } catch (e) {
     console.error(e)
   }
