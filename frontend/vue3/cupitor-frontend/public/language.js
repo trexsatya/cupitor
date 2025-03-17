@@ -982,6 +982,8 @@ function populateAllLinks() {
     getOptgroup(getCategory(item)).append($opt)
   })
 
+  getOptgroup('Okategoriserad').append($(`<option>JOKES</option>`).attr('value', 'jokes'))
+
   Object.values(ogs).forEach(it => $mp3Choice.append(it))
   return srts;
 }
@@ -992,7 +994,11 @@ async function loadAllSubtitles() {
   window.srts = srts
 
   srts.forEach(async function x(it) {
-    await getSubtitlesForLink(it['link'], it['source'])
+    try {
+      await getSubtitlesForLink(it['link'], it['source'])
+    } catch (e) {
+      console.error(e)
+    }
   })
 
   window.categories = await fetchCategorisation()
@@ -1031,6 +1037,19 @@ function loadAsSubtitles(data, tag) {
       let link = `${tag}-${i}`
       window.allSubtitles[link] = {sv, en, source: tag, fileName: link}
     })
+  } catch (e) {
+  }
+  if(tag !== 'jokes') {
+     return
+  }
+  try {
+      let sv = ''
+      let n = 0
+      data.forEach((item, i) => {
+            sv += `${n+1}\n${fromSeconds(n*60)},000 --> ${fromSeconds(n*60 + 50)},000\n${item.text || item}\n\n`
+            n += 1
+      })
+      window.allSubtitles['jokes'] = {sv, en: '1\n00:00:00.000 --> 00:00:50.000\n', source: tag, fileName: 'jokes'}
   } catch (e) {
   }
 }
