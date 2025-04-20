@@ -64,7 +64,7 @@
         function logItem(name, val, type, handlers) {
             handlers = handlers || {}
             window['globalVariableNames'][name] = val;
-            var li = $(`<li> <i class="actionable fas fa-trash"></i> ${name}: ${type} </li>`)
+            const li = $(`<li> <i class="actionable fas fa-trash"></i> ${name}: ${type} </li>`);
             $(li).find("i").click(e => {
                 handlers.delete(name)
                 $(li).remove()
@@ -92,7 +92,7 @@
     <svg id="vertRuler" xmlns="http://www.w3.org/2000/svg" style="height: 1000px;position: absolute; left: 0;"></svg>
     <script>
         var someSvgElement = document.getElementById('horizRuler');
-        var rulez = new Rulez({
+        let rulez = new Rulez({
             element: someSvgElement,
         });
         rulez.render();
@@ -170,19 +170,19 @@
             $('.commands-select').select2();
         });
         $('.commands-select').on('select2:open', function (e) {
-            var data = e.params.data;
+            const data = e.params.data;
             console.log(data);
             window.commandSelectionIsGoingOn = true;
         });
 
         $('.commands-select').on('select2:close', function (e) {
-            var data = e.params.data;
+            const data = e.params.data;
             console.log(data);
             window.commandSelectionIsGoingOn = false;
         });
 
         $('.commands-select').on('select2:select', function (e) {
-            var data = e.params.data;
+            const data = e.params.data;
             console.log(data);
             $(`#${data.id}-dialog`).dialog({
                 width: 800,
@@ -207,15 +207,15 @@
     <div id="editor" style="position: absolute;top:0; left: 50%;width: 49%; z-index: 30000; height: 100%; display: none">
     </div>
     <script>
-        var editor = ace.edit("editor");
+        const editor = ace.edit("editor");
         editor.setTheme("ace/theme/monokai");
         editor.session.setMode("ace/mode/python");
         editor.setFontSize(23);
     </script>
 
     <script type="text/javascript">
-        var API_HOST = 'http://livintolearn.com/api';
-        var id = window.location.hash.replace("#", "")
+        const API_HOST = 'http://livintolearn.com/api';
+        window.location.hash.replace("#", "");
 
         window.onbeforeunload = function(){
           return 'Are you sure you want to leave?';
@@ -380,7 +380,7 @@
             <br><br>
 
             <button id="flipConnectionMode" class="btn btn-info" onclick="flipConnectionMode(event)" style="">Connect</button>
-            <button id="makeTree" class="btn btn-info" onclick="onMakeTreeClick(event)" style="">MakeTree</button>
+            <button id="makeTree" class="btn btn-info" onclick="onMakeTreeClick(event)" style="">AddTreeNodes</button>
             <button id="removeTree" class="btn btn-info" onclick="onRemoveTreeClick(event)" style="">RemoveTree</button>
 
             <br><br>
@@ -400,19 +400,19 @@
         </div>
     </div>
     <script >
-		  
-          var drawingModeEl = $('#drawing-mode'),
-              drawingOptionsEl = $('#drawing-mode-options'),
-              drawingColorEl = $('#drawing-color'),
-              drawingShadowColorEl = $('#drawing-shadow-color'),
-              drawingLineWidthEl = $('#drawing-line-width'),
-              drawingShadowWidth = $('#drawing-shadow-width'),
-              drawingShadowOffset = $('#drawing-shadow-offset'),
-              clearEl = $('#clear-canvas'),
-              eraserEl = $('#eraser');
 
-          clearEl.click(function() { 
-              var yes = confirm('Are you sure?');
+        const drawingModeEl = $('#drawing-mode'),
+            drawingOptionsEl = $('#drawing-mode-options'),
+            drawingColorEl = $('#drawing-color'),
+            drawingShadowColorEl = $('#drawing-shadow-color'),
+            drawingLineWidthEl = $('#drawing-line-width'),
+            drawingShadowWidth = $('#drawing-shadow-width'),
+            drawingShadowOffset = $('#drawing-shadow-offset'),
+            clearEl = $('#clear-canvas'),
+            eraserEl = $('#eraser');
+
+        clearEl.click(function() {
+              const yes = confirm('Are you sure?');
               if (yes) oc.clear();
            });
 
@@ -521,7 +521,7 @@
             turnOffDrawing();          
         })
 
-        var flipDrawindEl = $('#flip-drawing');
+        const flipDrawindEl = $('#flip-drawing');
         flipDrawindEl.click(e => {
             if(flipDrawindEl.is(':checked')) {
                 moveToFront('oc')
@@ -530,7 +530,7 @@
             }
         })
         pc.on('object:selected', function(e) {
-            var obj = e.target
+            const obj = e.target;
             if (window.connectionMode) {
                 if (!window.firstOfConnection) firstOfConnection = obj
                 else {
@@ -543,7 +543,7 @@
 
         pc.on('object:removed', e => {
             console.log(e.target);
-            var obj = e.target;
+            const obj = e.target;
             if (obj.treeConnection && obj.treeConnection.outgoing) {
                 obj.treeConnection.outgoing.lines.forEach(l => {
                     pc.remove(l);
@@ -551,8 +551,8 @@
             }
         })
         pc.on('object:moving', e => {
-            var t = e.target;
-            var getPointCoords = (obj, pt) => {
+            const t = e.target;
+            const getPointCoords = (obj, pt) => {
                 if (pt == 'mt') {
                     return obj.aCoords.mt || {
                         y: obj.oCoords.tl.y,
@@ -565,11 +565,11 @@
                         x: obj.oCoords.bl.x + obj.width / 2
                     }
                 }
-            }
+            };
 
             if (t.treeConnection) {
-                var inward = t.treeConnection.incoming || {}
-                var outward = t.treeConnection.outgoing || {}
+                const inward = t.treeConnection.incoming || {};
+                const outward = t.treeConnection.outgoing || {};
 
                 if (inward.lines && inward.point) {
                     var p = getPointCoords(t, inward.point)
@@ -660,13 +660,13 @@
                 var text = prompt('Enter text')
                 if (!text) return;
 
-                var ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc);
+                const ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc);
                 pc.getObjects().forEach(o => o.hasControls = false);
             }
 
             if (window.arrowButtonClicked) {
                 if (window.arrowButtonClicked.first) {
-                    var a = window.arrowButtonClicked.first
+                    const a = window.arrowButtonClicked.first;
                     pc.add(arrow(a.x, a.y, e.e.clientX, e.e.clientY, {
                         stroke: ($('#drawing-color').val() || 'black')
                     }))
@@ -679,7 +679,7 @@
                 }
             }
         })
-        var mapping = {
+        const mapping = {
             'l': 'clear-canvas',
             'Delete': 'delete-selected',
             'd': 'flip-drawing',
@@ -690,7 +690,7 @@
             'b': 'bluen',
             'e': 'execute-next',
             'w': 'whiten'
-        }
+        };
         $(document).keydown(e => {
             if($('.commands-select').is(":focus") || window.commandSelectionIsGoingOn){
                 console.log('select is in focus. returning.')
@@ -982,8 +982,8 @@
                     }
                     //MOZILLA and others
                     else if (myField.selectionStart || myField.selectionStart == '0') {
-                        var startPos = myField.selectionStart;
-                        var endPos = myField.selectionEnd;
+                        const startPos = myField.selectionStart;
+                        const endPos = myField.selectionEnd;
                         myField.value = myField.value.substring(0, startPos)
                             + myValue
                             + myField.value.substring(endPos, myField.value.length);
@@ -998,7 +998,7 @@
 
 
                 $('.keyboard .key').click(e => {
-                    var key = $(e.target).text().trim();
+                    const key = $(e.target).text().trim();
                     insertAtCursor( $('#mathtext')[0], $(e.target).data('mathjax') || key);
 
                 });
@@ -1128,10 +1128,10 @@ $('#btnStart').on('click', (ev)=> {
             let blob = new Blob(window.recordingChunks, { 'type' : window.recordingChunks[0].type });
             console.log("type="+window.recordingChunks[0].type)
             window.recordingChunks = [];
-            var videoURL = window.URL.createObjectURL(blob);
+            const videoURL = window.URL.createObjectURL(blob);
 //            vidSave.src = videoURL;
             //window.location.replace(videoURL)
-            var link = document.createElement("a"); // Or maybe get it from the current document
+            const link = document.createElement("a"); // Or maybe get it from the current document
             link.href = videoURL;
             link.target = "_blank"
             link.download = "aDefaultFileName.webm";

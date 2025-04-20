@@ -8,7 +8,7 @@ function globalStore(key, obj) {
   if (!window.globalMapping) window.globalMapping = {}
   if (!globalMapping[key]) globalMapping[key] = 0
 
-  let id = globalMapping[key] + 1;
+  const id = globalMapping[key] + 1;
   globalMapping[key] = id;
   _[key + id] = obj
 
@@ -59,7 +59,7 @@ function range(...arr) {
 
 
 function createArrow() {
-  let arr = $(`<div class="arrow"/>`),
+  const arr = $(`<div class="arrow"/>`),
     line = $(`<div class="line"></div>`),
     point = $(`<div class="point"></div>`);
 
@@ -94,7 +94,7 @@ function createArrow() {
 
 
 function typeQuote(text, _options) {
-  let options = Object.assign({}, {
+  const options = Object.assign({}, {
     wait: 0,
     theme: 'black',
     onComplete: () => {
@@ -107,8 +107,8 @@ function typeQuote(text, _options) {
     options.css.marginTop = 0
   }
 
-  let textillateContainer = $('#textillateContainer');
-  let savedCssTC = {
+  const textillateContainer = $('#textillateContainer');
+  const savedCssTC = {
     zIndex: textillateContainer.css('z-index'),
     color: textillateContainer.css('color'),
     backgroundColor: textillateContainer.css('backgroundColor'),
@@ -117,9 +117,9 @@ function typeQuote(text, _options) {
     left: textillateContainer.css('left')
   }
 
-  let $cinemaText = $('#cinemaText');
-  let cinemaText = $cinemaText;
-  let savedCssCT = {
+  const $cinemaText = $('#cinemaText');
+  const cinemaText = $cinemaText;
+  const savedCssCT = {
     zIndex: cinemaText.css('z-index'),
     color: cinemaText.css('color'),
     backgroundColor: cinemaText.css('backgroundColor'),
@@ -129,7 +129,7 @@ function typeQuote(text, _options) {
     marginTop: cinemaText.css('marginTop')
   }
 
-  let cinemaHtml = cinemaText.html()
+  const cinemaHtml = cinemaText.html()
 
   if (options.theme === 'black') {
     textillateContainer.css({backgroundColor: '#1a1a1a', zIndex: 900000})
@@ -137,7 +137,7 @@ function typeQuote(text, _options) {
   }
   cinemaText.css(options.css)
 
-  let start = new Date().getTime();
+  const start = new Date().getTime();
 
   $cinemaText.html('').css({zIndex: 900010}).show();
 
@@ -162,11 +162,11 @@ function delayExecution(fn, delay) {
 }
 
 function typeAndDisappear(text, top, left, opts) {
-  let options = Object.assign({}, {wait: 100, top: top, left: left}, opts);
+  const options = Object.assign({}, {wait: 100, top: top, left: left}, opts);
 
-  let id = "T" + new Date().getTime();
+  const id = "T" + new Date().getTime();
   // id = "cinemaText"
-  let T = createTextBox('', options).attr('id', id)
+  const T = createTextBox('', options).attr('id', id)
 
   return type(text, '#' + id, options).then(it => delayExecution(() => T.hide(), opts.delay))
 }
@@ -179,7 +179,7 @@ function resetTextillateContainer() {
 
 function waitUntil(condition) {
   return new Promise((resolve, reject) => {
-    let interval = setInterval(() => {
+    const interval = setInterval(() => {
       if (condition()) {
         clearInterval(interval)
         resolve()
@@ -189,7 +189,7 @@ function waitUntil(condition) {
 }
 
 function type(strings, elSelector, opts) {
-  var options = Object.assign({}, {
+  const options = Object.assign({}, {
     strings: [strings].flat(),
     onComplete: (self) => {
     }
@@ -200,12 +200,12 @@ function type(strings, elSelector, opts) {
   $('#typed-strings').html("<p>" + strings + "</p>");
   $('#textillateContainer .typed-cursor').remove()
 
-  let prettyLog = (x) => console.log(x);
+  const prettyLog = (x) => console.log(x);
 
   $(elSelector).html('');
 
   return new Promise((myResolve, myReject) => {
-    var typed = new Typed(elSelector, {
+    const typed = new Typed(elSelector, {
       stringsElement: '#typed-strings',
       typeSpeed: 40,
       backSpeed: 0,
@@ -241,10 +241,10 @@ window.animationScriptFunction = null
  */
 function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowCondition) {
   data = data.map(x => x); //clone
-  let totalDataItems = data.length
+  const totalDataItems = data.length
   let fn = null;
   fn = (x, idx) => setTimeout(() => {
-    let first = data.splice(0, 1);
+    const first = data.splice(0, 1);
 
     if (finishNowCondition && finishNowCondition(first)) {
       //-1 => Finished because finishNowCondition satisfied
@@ -252,8 +252,8 @@ function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowConditio
       return
     }
     if (first.length) {
-      let task = typeof (first[0]) == 'function' ? first[0] : () => taskRunner(first[0], idx)
-      let result = task()
+      const task = typeof (first[0]) == 'function' ? first[0] : () => taskRunner(first[0], idx)
+      const result = task()
       update();
       if (result instanceof Promise) {
         result.then(it => {
@@ -293,16 +293,16 @@ function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowConditio
 
 function speak(msg, name) {
   if (msg.endsWith('.mp3')) {
-    let base_path = window.baseAudioPath || ""
+    const base_path = window.baseAudioPath || ""
 
     return new Promise((myResolve, myReject) => {
-      let a = new Audio(base_path + "/" + msg);
+      const a = new Audio(base_path + "/" + msg);
       a.play()
       a.onended = e => myResolve(e)
     })
   }
-  let speech = new SpeechSynthesisUtterance();
-  let options = Object.assign({
+  const speech = new SpeechSynthesisUtterance();
+  const options = Object.assign({
     name: 'Samantha',
     volume: 0.9,
     rate: 1,
@@ -326,8 +326,8 @@ function speak(msg, name) {
   });
 }
 
-var pos = obj => {
-  let c = obj.aCoords
+const pos = obj => {
+  const c = obj.aCoords
   return {
     ...c,
     ml: {x: c.tl.x, y: c.tl.y + (c.bl.y - c.tl.y) / 2},
@@ -356,9 +356,9 @@ function stopAnimationScript() {
 }
 
 function scanMatrix(name) {
-  let _scann = []
-  for (var i = 1; i <= 4; i++) {
-    for (var j = 1; j <= 3; j++) {
+  const _scann = []
+  for (let i = 1; i <= 4; i++) {
+    for (let j = 1; j <= 3; j++) {
       _scann.push([i, j])
     }
   }
@@ -370,8 +370,8 @@ function scanMatrix(name) {
 function playCode(code) {
 
   $('#editor').show();
-  let lines = code.split("");
-  let indices = [...Array(lines.length).keys()];
+  const lines = code.split("");
+  const indices = [...Array(lines.length).keys()];
   schedule(indices, 0.1, (ln) => {
     editor.setValue(lines.slice(0, ln + 1).join(""));
     editor.getSelection().clearSelection();
@@ -385,7 +385,7 @@ function createTextBox(text, css) {
   css = Object.assign({}, css, {padding: 20})
   css.position = 'absolute'
 
-  let item = $(`<div class="text"> ${text}</div>`).css(css)
+  const item = $(`<div class="text"> ${text}</div>`).css(css)
 
   txt.append(item)
   $(item).draggable()
@@ -413,11 +413,11 @@ function bringInText(text, opts) {
     css = Object.assign(css, {left: opts.from.left, top: opts.from.top, position: 'fixed'}, opts)
   }
 
-  var item = createTextBox(text, css)
+  const item = createTextBox(text, css)
 
   return new Promise((myResolve, myReject) => {
-    let options = {duration: 1000};
-    let fn = opts.complete || (() => {
+    const options = {duration: 1000};
+    const fn = opts.complete || (() => {
     });
     options.complete = (it) => {
       fn(it);
@@ -426,7 +426,7 @@ function bringInText(text, opts) {
     $(item).velocity(opts.to, options);
 
     window.globalVariableNames['texts'] += 1
-    var varName = "T" + window.globalVariableNames['texts']
+    const varName = "T" + window.globalVariableNames['texts']
     logItem(varName, item, 'Text', {
       delete: (nm) => {
         globalVariableNames[nm].remove()
@@ -448,7 +448,7 @@ function highlightByGradientColor(el) {
  * type => type of change, el => target element
  */
 function changeTableCell(type, el, value, dataCells) {
-  let applyChange = (target) => {
+  const applyChange = (target) => {
     if (type == 'data') {
       target.find('span.item').html(value)
     }
@@ -461,7 +461,7 @@ function changeTableCell(type, el, value, dataCells) {
 
   //apply same change to all selected elements if there are more than one!
   if (dataCells) {
-    let highlightedEls = dataCells.filter((i, x) => $(x).hasClass("highlighted"))
+    const highlightedEls = dataCells.filter((i, x) => $(x).hasClass("highlighted"))
     if (highlightedEls.length > 1) {
       highlightedEls.each((i, e) => {
         applyChange($(e))
@@ -472,14 +472,14 @@ function changeTableCell(type, el, value, dataCells) {
 }
 
 function resetTableCell(el) {
-  let v = $(el).data("value")
-  let change = changeTableCell;
+  const v = $(el).data("value")
+  const change = changeTableCell;
   change('css', $(el), {color: 'black', backgroundColor: 'white', backgroundImage: 'none'})
   change('data', $(el), v);
 }
 
 function resetMatrix(name) {
-  var dataCells = globalVariableNames[name].all.find('.data td');
+  const dataCells = globalVariableNames[name].all.find('.data td');
   dataCells.each((i, e) => {
     resetTableCell($(e));
   });
@@ -490,7 +490,7 @@ function contextMenuListener(el, dataCells) {
 //      console.log(e, el);
     e.preventDefault()
 
-    let change = (x, y, z) => changeTableCell(x, y, z, dataCells);
+    const change = (x, y, z) => changeTableCell(x, y, z, dataCells);
 
     $('#edit-table-cell-toolbar').show().css({left: e.x, top: e.y});
     $('#edit-table-cell-toolbar input[name="value"]').unbind('change').on('change', e => {
@@ -550,14 +550,14 @@ function addHighlightCapability(el, others) {
 
 function createMatrix(sel) {
 
-  var data = $(sel).find('input[name="data"]').val()
-  var location = $(sel).find('input[name="location"]').val()
-  var size = $(sel).find('input[name="size"]').val()
+  const data = $(sel).find('input[name="data"]').val()
+  const location = $(sel).find('input[name="location"]').val()
+  const size = $(sel).find('input[name="size"]').val()
 
-  var xtitle = $(sel).find('input[name="xtitle"]').val()
-  var ytitle = $(sel).find('input[name="ytitle"]').val()
-  var xheaders = $(sel).find('input[name="xheaders"]').val()
-  var yheaders = $(sel).find('input[name="yheaders"]').val()
+  const xtitle = $(sel).find('input[name="xtitle"]').val()
+  const ytitle = $(sel).find('input[name="ytitle"]').val()
+  const xheaders = $(sel).find('input[name="xheaders"]').val()
+  const yheaders = $(sel).find('input[name="yheaders"]').val()
 
   _createMatrix({sel, data, location, size, xtitle, ytitle, xheaders, yheaders})
 }
@@ -572,11 +572,11 @@ function _createMatrix(vals) {
     _yheaders = vals.yheaders || 'indices'
   width = vals.width, height = vals.height;
 
-  var xheaders = null, yheaders = null
+  let xheaders = null, yheaders = null
 
-  var tableData = []
+  let tableData = []
   try {
-    var _data = eval("[" + data + "]")
+    const _data = eval("[" + data + "]")
     //TODO: Check data is in correct format
 
     tableData = _data;
@@ -603,7 +603,7 @@ function _createMatrix(vals) {
   if (width) size[0] = width;
   if (height) size[1] = height;
 
-  var tableOpts = {
+  const tableOpts = {
     ytitle: ytitle, xtitle: xtitle, xheaders: xheaders, yheaders: yheaders,
     width: size[0], height: size[1],
     top: location[0], left: location[1]
@@ -617,9 +617,9 @@ function _createMatrix(vals) {
     tableOpts.color = 'black'
   }
 
-  var table = appendTableInto(tableData, $('#textillateContainer'), tableOpts)
+  const table = appendTableInto(tableData, $('#textillateContainer'), tableOpts)
 
-  var dataCells = table.all.find('.data td')
+  const dataCells = table.all.find('.data td')
 
   table.all.find('table.data td').each((i, el) => {
     contextMenuListener(el, dataCells);
@@ -642,7 +642,7 @@ function _createMatrix(vals) {
   }
 
   window.globalVariableNames['matrices'] += 1
-  var varName = "M" + window.globalVariableNames['matrices']
+  const varName = "M" + window.globalVariableNames['matrices']
   logItem(varName, table, 'Table', {delete: () => globalVariableNames[varName].all.remove()})
 
   $(sel).dialog('close');
@@ -653,20 +653,20 @@ function _createMatrix(vals) {
 
 function createArray(sel) {
 
-  var data = $(sel).find('input[name="data"]').val()
-  var location = $(sel).find('input[name="location"]').val()
-  var size = $(sel).find('input[name="size"]').val() || '600,400'
+  const data = $(sel).find('input[name="data"]').val()
+  const location = $(sel).find('input[name="location"]').val()
+  let size = $(sel).find('input[name="size"]').val() || '600,400'
 
-  var xtitle = $(sel).find('input[name="xtitle"]').val() || ''
-  var ytitle = $(sel).find('input[name="ytitle"]').val() || ''
-  var _xheaders = $(sel).find('input[name="xheaders"]').val() || 'indices'
-  var _yheaders = $(sel).find('input[name="yheaders"]').val() || '"Values","Sorted","Reverse"'
+  const xtitle = $(sel).find('input[name="xtitle"]').val() || ''
+  const ytitle = $(sel).find('input[name="ytitle"]').val() || ''
+  const _xheaders = $(sel).find('input[name="xheaders"]').val() || 'indices'
+  const _yheaders = $(sel).find('input[name="yheaders"]').val() || '"Values","Sorted","Reverse"'
 
-  var xheaders = null, yheaders = null
+  let xheaders = null, yheaders = null
 
-  var tableData = []
+  let tableData = []
   try {
-    var _data = eval("[" + data + "]")
+    const _data = eval("[" + data + "]")
     //TODO: Check data is in correct format
     tableData = [_data, _data.map(x => x).sort(), _data.map(x => x).reverse()];
     if (_xheaders === 'indices') {
@@ -687,7 +687,7 @@ function createArray(sel) {
     console.log(e)
   }
 
-  var tableOpts = {
+  const tableOpts = {
     ytitle: ytitle,
     xtitle: xtitle,
     xheaders: xheaders,
@@ -704,9 +704,9 @@ function createArray(sel) {
     tableOpts.color = 'black'
   }
 
-  var table = appendTableInto(tableData, $('#textillateContainer'), tableOpts)
+  const table = appendTableInto(tableData, $('#textillateContainer'), tableOpts)
 
-  var dataCells = table.all.find('.data td')
+  const dataCells = table.all.find('.data td')
 
   table.all.find('table.data td').each((i, el) => {
     contextMenuListener(el, dataCells);
@@ -723,7 +723,7 @@ function createArray(sel) {
   }
 
   window.globalVariableNames['arrays'] += 1
-  var varName = "A" + window.globalVariableNames['matrices']
+  const varName = "A" + window.globalVariableNames['matrices']
   logItem(varName, table, 'Table', {
     delete: (nm) => {
       globalVariableNames[nm].all.remove()
@@ -735,7 +735,7 @@ function createArray(sel) {
 }
 
 function superimposeOverlayCanvas() {
-  var pos = $('#playerCanvas').position()
+  const pos = $('#playerCanvas').position()
   $('#overlayCanvas').css({
     position: 'absolute',
     top: pos.top,
@@ -756,7 +756,7 @@ function hideToolbar() {
 
 
 function ArrayPlusDelay(array, delegate, delay) {
-  var i = 0
+  let i = 0
 
   // seed first call and store interval (to clear later)
   var interval = setInterval(function () {
@@ -773,7 +773,7 @@ function ArrayPlusDelay(array, delegate, delay) {
 
 function changeCircleColor(c, objs) {
   try {
-    var _objs = objs || pc.getActiveGroup()._objects
+    const _objs = objs || pc.getActiveGroup()._objects
     _objs.forEach(o => o._objects[0].setFill(c))
 
   } catch (e) {
@@ -788,7 +788,7 @@ function changeCircleColor(c, objs) {
 }
 
 function flipConnectionMode() {
-  var connectionModeOn = window.connectionMode || false;
+  const connectionModeOn = window.connectionMode || false;
 
   window.connectionMode = !connectionModeOn
   if (window.connectionMode) $('#flipConnectionMode').css({
@@ -822,7 +822,7 @@ function getScript(id) {
   })
 }
 
-var id = window.location.hash.replace("#", "")
+const id = window.location.hash.replace("#", "")
 if (id) getScript(id)
 
 function executeNextLine() {
@@ -834,7 +834,7 @@ function executeNextLine() {
 
 function zoomSelectedObject(isPlus) {
   if (!pc.getActiveObject()) return;
-  var amount = 1.5
+  const amount = 1.5
 
   if (isPlus) {
     var activeObject = pc.getActiveObject()
@@ -852,7 +852,7 @@ function zoomSelectedObject(isPlus) {
 }
 
 function moveActiveObject(prop, amount) {
-  var activeObject = pc.getActiveObject()
+  const activeObject = pc.getActiveObject()
   if (!activeObject) return;
   activeObject[prop] = activeObject[prop] + amount
   activeObject.setCoords();
@@ -860,10 +860,14 @@ function moveActiveObject(prop, amount) {
 }
 
 function deleteSelectedObjects() {
-  if (pc.getActiveObject())
-    pc.remove(pc.getActiveObject())
-  if (pc.getActiveGroup()) {
-    pc.getActiveGroup()._objects.forEach(x => pc.remove(x))
+  const activeObject = pc.getActiveObject();
+  if (activeObject) {
+    activeObject?.treeConnection?.incoming?.lines?.forEach((line) => { line.remove() })
+    pc.remove(activeObject)
+  }
+  const activeGroup = pc.getActiveGroup();
+  if (activeGroup) {
+    activeGroup._objects.forEach(x => pc.remove(x))
   }
   pc.renderAll()
 }
@@ -875,7 +879,7 @@ function applyBlackTheme() {
 }
 
 function mergeDuplicateOfSrcIntoDest(src, dest, onComplete, opts) {
-  let options = Object.assign({}, opts, {delay: 1000})
+  const options = Object.assign({}, opts, {delay: 1000})
   duplicate(src).then(x => {
     $(x).animate({
       top: dest.offset().top,
@@ -892,7 +896,7 @@ function duplicate(obj) {
 
   if (obj instanceof jQuery) {
     return new Promise((done, error) => {
-      let clone = $(obj).clone();
+      const clone = $(obj).clone();
       txt.append(clone);
       $(clone).draggable()
       done(clone);
@@ -914,7 +918,7 @@ function Copy(canvas, obj) {
   // may want copy and paste on different moment.
   // and you do not want the changes happened
   // later to reflect on the copy.
-  var target = obj || canvas.getActiveObject() || canvas.getActiveGroup();
+  const target = obj || canvas.getActiveObject() || canvas.getActiveGroup();
   if (!target) return;
 
   target.clone(function (cloned) {
@@ -933,7 +937,7 @@ function Paste(canvas) {
     canvas.discardActiveObject();
     canvas.discardActiveGroup();
 
-    var options = {
+    const options = {
       left: clonedObj.left + 10,
       top: clonedObj.top + 10,
       evented: true,
@@ -945,10 +949,10 @@ function Paste(canvas) {
       // active selection needs a reference to the canvas.
       clonedObj.canvas = canvas;
       clonedObj.forEachObject(function (obj) {
-        let id = globalStore('clone', obj)
+        const id = globalStore('clone', obj)
         console.log(`Cloned _.${id}`)
         canvas.add(obj);
-        var tr = obj.calcTransformMatrix()
+        const tr = obj.calcTransformMatrix()
         options.left = obj.left + 10 + tr[4]
         options.top = obj.top + 10 + tr[5]
         obj.set(options)
@@ -956,7 +960,7 @@ function Paste(canvas) {
       });
 
     } else {
-      let id = globalStore('clone', clonedObj)
+      const id = globalStore('clone', clonedObj)
       console.log(`Cloned _.${id}`)
       canvas.add(clonedObj);
     }
@@ -972,13 +976,13 @@ function Paste(canvas) {
 
 function editSelectedObject() {
   if (!pc.getActiveObject()) return;
-  var obj = pc.getActiveObject()
+  const obj = pc.getActiveObject()
 
-  var p = prompt('Enter command')
+  const p = prompt('Enter command')
   if (!p || !p.split(":").length == 2) return
 
-  var command = p.split(":")[0]
-  var data = p.split(":")[1].trim()
+  const command = p.split(":")[0]
+  const data = p.split(":")[1].trim()
 
   if (!obj._objects || obj._objects.length < 2) return;
 
@@ -1030,36 +1034,35 @@ function makeLine(coords) {
 }
 
 function makeSubtree(node, values, pc, opts) {
-  var options = opts || {
+  const options = opts || {
     width: 150,
     height: 50
   };
 
   node.treeConnection = node.treeConnection || {
     incoming: {},
-    outgoing: {}
-  };
-
-  if (node.oCoords && node.oCoords.mb) {
-    var px = node.oCoords.mb.x,
-      py = node.oCoords.mb.y;
-    node.treeConnection.outgoing = {
+    outgoing: {
       lines: [],
       point: 'mb'
     }
+  };
 
-    var mid = Math.ceil(values.length / 2)
-    if (values.length == 1) mid = 0;
+  if (node.oCoords && node.oCoords.mb) {
+    const px = node.oCoords.mb.x,
+          py = node.oCoords.mb.y;
 
-    var w = (options.width / 2) / values.length;
+    let mid = Math.ceil(values.length / 2)
+    if (values.length === 1) mid = 0;
 
-    var x = px,
-      y = py + options.height;
+    const w = (options.width / 2) / values.length;
 
-    var addConnection = (x1, y1, x2, y2, text) => {
-      var circ = textInEllipse(text, x2, y2, {}, {})
+    let x = px,
+        y = py + options.height;
+
+    const addConnection = (x1, y1, x2, y2, text) => {
+      const circ = textInEllipse(text, x2, y2, {}, {})
       pc.add(circ)
-      var line = makeLine([x1, y1, circ.oCoords.mt.x, circ.oCoords.mt.y])
+      const line = makeLine([x1, y1, circ.oCoords.mt.x, circ.oCoords.mt.y])
       pc.add(line)
       node.treeConnection.outgoing.lines.push(line)
 
@@ -1073,14 +1076,14 @@ function makeSubtree(node, values, pc, opts) {
 
     addConnection(px, py, x, y, values[mid])
 
-    for (var i = mid - 1; i >= 0; i--) {
+    for (let i = mid - 1; i >= 0; i--) {
       x = x - w;
       addConnection(px, py, x, y, values[i])
     }
 
-    x = px, y = py;
+    x = px; y = py;
 
-    for (var i = mid + 1; i < values.length; i++) {
+    for (let i = mid + 1; i < values.length; i++) {
       x = x + w;
       addConnection(px, py, x, y, values[i])
     }
@@ -1088,7 +1091,7 @@ function makeSubtree(node, values, pc, opts) {
 }
 
 function drawMathSymbols(text, top, left, id) {
-  let matexInsertionPoint = window.matexInsertionPoint || {left: left || 100, top: top || 100}
+  const matexInsertionPoint = window.matexInsertionPoint || {left: left || 100, top: top || 100}
   return new Promise((myResolve, myReject) => {
     matex(text, function (svg, width, height) {
       // Here you have a data url for a svg file
@@ -1114,7 +1117,7 @@ function onMakeTreeClick() {
     alert('Select an object first');
     return;
   }
-  var p = prompt('Enter command')
+  const p = prompt('Enter command')
   if (!p) return;
   makeSubtree(pc.getActiveObject(), p.split(','), pc)
 }
@@ -1125,7 +1128,7 @@ function onRemoveTreeClick() {
     alert('Select an object first');
     return;
   }
-  var obj = pc.getActiveObject()
+  const obj = pc.getActiveObject()
 
   if (obj.treeConnection && obj.treeConnection.outgoing) {
     obj.treeConnection.outgoing.lines.forEach(l => {
@@ -1142,9 +1145,9 @@ function arrowButton() {
 }
 
 function degroup(pc) {
-  var grp = pc.getActiveObject()
+  const grp = pc.getActiveObject()
   if (grp.type != 'group') return;
-  var items = grp.getObjects() || []
+  const items = grp.getObjects() || []
   grp.destroy();
   pc.remove(grp);
   items.forEach(item => pc.add(item));
@@ -1154,14 +1157,14 @@ function degroup(pc) {
 window.drawingStack = []
 
 function undoDrawing() {
-  var last = oc.getObjects().pop()
+  const last = oc.getObjects().pop()
   oc.remove(last)
   drawingStack.push(last)
   oc.renderAll();
 }
 
 function redoDrawing() {
-  var last = drawingStack.pop()
+  const last = drawingStack.pop()
   oc.add(last)
   oc.renderAll();
 }
@@ -1189,15 +1192,15 @@ function moveToFront(whichOne) {
 }//end moveToFront
 
 //play from files
-var openFile = function (event) {
-  var input = event.target;
+const openFile = function (event) {
+  const input = event.target;
 
-  var readFile = (filename) => {
+  const readFile = (filename) => {
     if (!filename) return "{}"
-    var promise = new Promise(function (resolve, reject) {
-      var reader = new FileReader();
+    const promise = new Promise(function (resolve, reject) {
+      const reader = new FileReader();
       reader.onload = function () {
-        var text = reader.result;
+        const text = reader.result;
         console.log(reader.result.substring(0, 200));
         resolve(text)
       };
@@ -1207,10 +1210,10 @@ var openFile = function (event) {
     return promise
   } //
 
-  var len = input.files.length
+  const len = input.files.length
 
-  var getFile = nm => {
-    var x = range(0, len).find(i => input.files[i].name.indexOf(nm) > 0);
+  const getFile = nm => {
+    const x = range(0, len).find(i => input.files[i].name.indexOf(nm) > 0);
     return input.files[x]
   }
 
@@ -1219,11 +1222,11 @@ var openFile = function (event) {
     readFile(getFile('_oc')),
     readFile(getFile('_txt')),
   ]).then(data => {
-    var pcData = JSON.parse(data[0])
-    var ocData = JSON.parse(data[1])
-    var txtData = JSON.parse(data[2])
+    const pcData = JSON.parse(data[0])
+    const ocData = JSON.parse(data[1])
+    const txtData = JSON.parse(data[2])
 
-    var frames = obj => Object.keys(obj).map(x => Number.parseInt(x)).sort((a, b) => a - b);
+    const frames = obj => Object.keys(obj).map(x => Number.parseInt(x)).sort((a, b) => a - b);
 
     playRecording(40, {
       pc: [pcData, frames(pcData)],
@@ -1244,7 +1247,7 @@ var openFile = function (event) {
 }; //end openFile
 
 function saveCanvas() {
-  var idx = window.savePoint || 0;
+  const idx = window.savePoint || 0;
 
   localStorage.setItem('pc_' + idx, JSON.stringify(pc.toDatalessJSON()))
   localStorage.setItem('oc_' + idx, JSON.stringify(oc.toDatalessJSON()))
@@ -1252,23 +1255,23 @@ function saveCanvas() {
 }
 
 function restoreCanvas() {
-  var idx = Number.parseInt($('#savePoints').val())
+  const idx = Number.parseInt($('#savePoints').val())
   saveCanvas()
   window.savePoint = idx;
   pc.clear();
   oc.clear();
-  var data = JSON.parse(localStorage.getItem('pc_' + idx))
+  const data = JSON.parse(localStorage.getItem('pc_' + idx))
   pc.loadFromDatalessJSON(data)
 
   pc.renderAll();
-  var data1 = JSON.parse(localStorage.getItem('oc_' + idx))
+  const data1 = JSON.parse(localStorage.getItem('oc_' + idx))
   oc.loadFromDatalessJSON(data1)
   oc.renderAll();
 }
 
 function newCanvas() {
   saveCanvas()
-  var idx = $('#savePoints option').length
+  const idx = $('#savePoints option').length
   pc.clear();
   oc.clear();
   $('#savePoints').append('<option>' + idx + '</option>')
@@ -1279,7 +1282,7 @@ function newCanvas() {
 
 function handleFileDialogButtons(src) {
   if (src == "OK") {
-    var url = $('#imageInputUrl').val()
+    const url = $('#imageInputUrl').val()
     if (url) {
       fabric.Image.fromURL(url, function (oImg) {
         oImg.set({
@@ -1293,8 +1296,8 @@ function handleFileDialogButtons(src) {
       });
     } else {
       //Handle file selection
-      var file = document.querySelector('#imageInputFile').files[0];
-      var reader = new FileReader();
+      const file = document.querySelector('#imageInputFile').files[0];
+      const reader = new FileReader();
       reader.addEventListener("load", function () {
         fabric.Image.fromURL(reader.result, function (oImg) {
           oImg.set({
@@ -1317,7 +1320,7 @@ function handleFileDialogButtons(src) {
 }
 
 
-var dmp = new diff_match_patch();
+const dmp = new diff_match_patch();
 
 function toggleRecording() {
   if (window.playingMode) {
@@ -1336,7 +1339,7 @@ function toggleRecording() {
 function initializeRecording() {
   //if(window.playingMode) return;
   if (window.playingMode) {
-    var conf = confirm('You Are In Playing Mode. U Sure To Record?')
+    const conf = confirm('You Are In Playing Mode. U Sure To Record?')
     if (!conf) return;
 
     Object.keys(localStorage).filter(x => x.startsWith(`recording_`)).forEach(x => {
@@ -1360,14 +1363,14 @@ function initializeRecording() {
   }
 
   const changesInCanvas = (prevCanvasState, newCanvasState, name) => {
-    var diff = dmp.diff_main(JSON.stringify(prevCanvasState), JSON.stringify(newCanvasState), true);
+    const diff = dmp.diff_main(JSON.stringify(prevCanvasState), JSON.stringify(newCanvasState), true);
 
     if (diff.length > 0) {
       if (diff.length > 2) {
         dmp.diff_cleanupSemantic(diff);
       }
 
-      var patch_list = dmp.patch_make(JSON.stringify(prevCanvasState), JSON.stringify(newCanvasState), diff);
+      const patch_list = dmp.patch_make(JSON.stringify(prevCanvasState), JSON.stringify(newCanvasState), diff);
       patch_text = dmp.patch_toText(patch_list);
 
       if (patch_text.length > 0) {
@@ -1379,14 +1382,14 @@ function initializeRecording() {
     return null;
   }//changesInCanvas
 
-  var zInices = () => {
+  const zInices = () => {
     return [$($('.canvas-container')[0]).css('zIndex'), $($('.canvas-container')[1]).css('zIndex'), $('#textillateContainer').css('zIndex')];
   };
 
   window.recordingInterval = setInterval(x => {
     if (!window.recording) return;
 
-    var postToServer = (data, part) => $.ajax({
+    const postToServer = (data, part) => $.ajax({
       url: 'http://localhost:8081/api/recording/push?name=' + window.recordingName + "&component=" + part,
       method: 'post',
       data: JSON.stringify(data),
@@ -1394,14 +1397,14 @@ function initializeRecording() {
       contentType: 'application/json'
     })
 
-    var newCanvasStates = {
+    const newCanvasStates = {
       pc: pc.toDatalessJSON(),
       oc: oc.toDatalessJSON(),
       text: $('#textillateContainer').html()
     }
     try {
 
-      var pcChanges = changesInCanvas(prevCanvasStates.pc || {}, newCanvasStates.pc)
+      const pcChanges = changesInCanvas(prevCanvasStates.pc || {}, newCanvasStates.pc)
       if (pcChanges) {
         var key = '' + recordingTimer
         var data = {}
@@ -1410,7 +1413,7 @@ function initializeRecording() {
         prevCanvasStates.pc = newCanvasStates.pc
       }
 
-      var ocChanges = changesInCanvas(prevCanvasStates.oc || {}, newCanvasStates.oc)
+      const ocChanges = changesInCanvas(prevCanvasStates.oc || {}, newCanvasStates.oc)
       if (ocChanges) {
         var key = '' + recordingTimer
         var data = {}
@@ -1420,7 +1423,7 @@ function initializeRecording() {
         prevCanvasStates.oc = newCanvasStates.oc
       }
 
-      var htmlChanges = changesInCanvas(prevCanvasStates.text || {}, newCanvasStates.text)
+      const htmlChanges = changesInCanvas(prevCanvasStates.text || {}, newCanvasStates.text)
       if (htmlChanges.length && newCanvasStates.text) {
         var key = '' + recordingTimer
         var data = {}
@@ -1443,9 +1446,9 @@ function initializeRecording() {
 }
 
 function closest(num, arr) {
-  var mid;
-  var lo = 0;
-  var hi = arr.length - 1;
+  let mid;
+  let lo = 0;
+  let hi = arr.length - 1;
   while (hi - lo > 1) {
     mid = Math.floor((lo + hi) / 2);
     if (arr[mid] < num) {
@@ -1469,11 +1472,11 @@ function snapValue(value, values) {
 }
 
 function launchRollbackRecording() {
-  var saved = reconstructCanvasStates('pc')
-  var savedTxt = reconstructCanvasStates('txt')
-  var savedOc = reconstructCanvasStates('oc')
+  const saved = reconstructCanvasStates('pc')
+  const savedTxt = reconstructCanvasStates('txt')
+  const savedOc = reconstructCanvasStates('oc')
 
-  var frames = saved[1] //sorted
+  const frames = saved[1] //sorted
 
   $("#rollbackConfirmationDialog").dialog({
     buttons: [
@@ -1498,7 +1501,7 @@ function launchRollbackRecording() {
     min: 0,
     max: frames[frames.length - 1] + 1,
     slide: (x, y) => {
-      var val = snapValue(y.value, frames)
+      const val = snapValue(y.value, frames)
       $('#rollbackConfirmationDialog span.info').html(val)
     }
 
@@ -1520,7 +1523,7 @@ function rollbackRecordingTo(saved, time) {
     var x = closest(time, saved['txt'][1])
     $('#textillateContainer').html(saved['txt'][0][x])
   }
-  var toRemove = Object.keys(localStorage).filter(x => x.startsWith(`recording_pc_`)).map(x => Number.parseInt(x.split("_")[2])).filter(x => x > time)
+  let toRemove = Object.keys(localStorage).filter(x => x.startsWith(`recording_pc_`)).map(x => Number.parseInt(x.split("_")[2])).filter(x => x > time)
 
   toRemove.forEach(x => localStorage.removeItem('recording_pc_' + x))
 
@@ -1540,12 +1543,12 @@ function rollbackRecordingTo(saved, time) {
 
 
 function reconstructCanvasStates(name) {
-  var frames = Object.keys(localStorage).filter(x => x.startsWith(`recording_${name}_`)).map(x => Number.parseInt(x.split("_")[2])).sort((a, b) => a - b);
+  const frames = Object.keys(localStorage).filter(x => x.startsWith(`recording_${name}_`)).map(x => Number.parseInt(x.split("_")[2])).sort((a, b) => a - b);
 
-  var reconstructedCanvasStates = {}
-  var reducer = (initialOrAccumulator, currentValue) => {
-    var patches = dmp.patch_fromText(localStorage[`recording_${name}_${currentValue}`]);
-    var results = dmp.patch_apply(patches, initialOrAccumulator);
+  const reconstructedCanvasStates = {}
+  const reducer = (initialOrAccumulator, currentValue) => {
+    const patches = dmp.patch_fromText(localStorage[`recording_${name}_${currentValue}`]);
+    const results = dmp.patch_apply(patches, initialOrAccumulator);
     reconstructedCanvasStates[currentValue] = JSON.parse(results[0]);
     return results[0]
   };
@@ -1579,9 +1582,9 @@ function playRecording(speedInMilliseconds, data) {
   $('#drawing-mode-options').hide()
 
   speedInMilliseconds = speedInMilliseconds || 4;
-  var x = null;
-  var y = null;
-  var z = null;
+  let x = null;
+  let y = null;
+  let z = null;
 
   if (data) {
     x = data.pc
@@ -1594,25 +1597,25 @@ function playRecording(speedInMilliseconds, data) {
   }
 
 
-  var reconstructedCanvasStatesPc = x[0]
-  var reconstructedCanvasStatesOc = y[0]
-  var reconstructedCanvasStatesTxt = z[0]
-  var framesPc = x[1]
-  var framesOc = y[1]
-  var framesTxt = z[1]
+  const reconstructedCanvasStatesPc = x[0]
+  const reconstructedCanvasStatesOc = y[0]
+  const reconstructedCanvasStatesTxt = z[0]
+  const framesPc = x[1]
+  const framesOc = y[1]
+  const framesTxt = z[1]
 
   console.log('PcFrames:' + `${framesPc[0]} ${framesPc[framesPc.length - 1]}`)
   console.log('OcFrames:' + `${framesOc[0]} ${framesOc[framesOc.length - 1]}`)
   console.log('TxtFrames:' + `${framesTxt[0]} ${framesTxt[framesTxt.length - 1]}`)
 
-  var count = framesPc[framesPc.length - 1]
+  let count = framesPc[framesPc.length - 1]
   if (framesOc[framesOc.length - 1] > count) count = framesOc[framesOc.length - 1]
   if (framesTxt[framesTxt.length - 1] > count) count = framesTxt[framesTxt.length - 1]
 
   window.playerTimerTotal = count;
 
 
-  var source = Rx.Observable.interval(speedInMilliseconds).timeInterval().take(count);
+  const source = Rx.Observable.interval(speedInMilliseconds).timeInterval().take(count);
 
   window.playerTimer = framesPc[0]
   if (framesOc[0] < window.playerTimer) window.playerTimer = framesOc[0]
@@ -1639,11 +1642,11 @@ function playRecording(speedInMilliseconds, data) {
 
   $('#playbackControls').show().css({zIndex: 100000})
 
-  var playerInterval = null;
+  let playerInterval = null;
 
   //This is so that I can add delays at frame points programmatically.
-  var delayAmount = 0;
-  var delayInterval = 0;
+  let delayAmount = 0;
+  let delayInterval = 0;
 
   playerInterval = setInterval(x => {
     if (playerTimer > count) {
@@ -1655,8 +1658,8 @@ function playRecording(speedInMilliseconds, data) {
 
     $('#recording-info').html('Playing: ' + playerTimer);
 
-    var f = playerTimer;
-    var statesPc = reconstructedCanvasStatesPc[f] && reconstructedCanvasStatesPc[f].state
+    const f = playerTimer;
+    const statesPc = reconstructedCanvasStatesPc[f] && reconstructedCanvasStatesPc[f].state
     if (statesPc) {
       $($('.canvas-container')[0]).css({zIndex: reconstructedCanvasStatesPc[f].zIndex[0]})
       $($('.canvas-container')[1]).css({zIndex: reconstructedCanvasStatesPc[f].zIndex[1]})
@@ -1664,7 +1667,7 @@ function playRecording(speedInMilliseconds, data) {
       pc.loadFromDatalessJSON(statesPc, () => pc.renderAll());
     }
 
-    var statesOc = reconstructedCanvasStatesOc[f] && reconstructedCanvasStatesOc[f].state
+    const statesOc = reconstructedCanvasStatesOc[f] && reconstructedCanvasStatesOc[f].state
     if (statesOc) {
       $($('.canvas-container')[0]).css({zIndex: reconstructedCanvasStatesOc[f].zIndex[0]})
       $($('.canvas-container')[1]).css({zIndex: reconstructedCanvasStatesOc[f].zIndex[1]})
@@ -1672,7 +1675,7 @@ function playRecording(speedInMilliseconds, data) {
       oc.loadFromDatalessJSON(statesOc, () => oc.renderAll());
     }
 
-    var statesTxt = reconstructedCanvasStatesTxt[f] && reconstructedCanvasStatesTxt[f].state
+    const statesTxt = reconstructedCanvasStatesTxt[f] && reconstructedCanvasStatesTxt[f].state
     if (statesTxt) {
       $($('.canvas-container')[0]).css({zIndex: reconstructedCanvasStatesTxt[f].zIndex[0]})
       $($('.canvas-container')[1]).css({zIndex: reconstructedCanvasStatesTxt[f].zIndex[1]})
@@ -1701,17 +1704,17 @@ function playRecording(speedInMilliseconds, data) {
 }//End playRecording
 
 function saveRecording() {
-  var saved = reconstructCanvasStates('pc')
-  var savedTxt = reconstructCanvasStates('txt')
-  var savedOc = reconstructCanvasStates('oc')
+  const saved = reconstructCanvasStates('pc')
+  const savedTxt = reconstructCanvasStates('txt')
+  const savedOc = reconstructCanvasStates('oc')
 
   if (!window.recordingName) {
-    var name = prompt('Recording Name?')
+    let name = prompt('Recording Name?')
     if (!name) name = new Date().toISOString();
 
   }
 
-  var num = window.currentRecordingSliceNumber || 1
+  const num = window.currentRecordingSliceNumber || 1
   download(JSON.stringify(saved[0]), `recording_pc.${num}.txt`, "plain/text")
   download(JSON.stringify(savedOc[0]), `recording_oc.${num}.txt`, "plain/text")
   download(JSON.stringify(savedTxt[0]), `recording_txt.${num}.txt`, "plain/text")
@@ -1722,11 +1725,11 @@ function saveRecording() {
 }
 
 function download(data, filename, type) {
-  var file = new Blob([data], {type: type});
+  const file = new Blob([data], {type: type});
   if (window.navigator.msSaveOrOpenBlob) // IE10+
     window.navigator.msSaveOrOpenBlob(file, filename);
   else { // Others
-    var a = document.createElement("a"),
+    const a = document.createElement("a"),
       url = URL.createObjectURL(file);
     a.href = url;
     a.download = filename;
@@ -1740,7 +1743,7 @@ function download(data, filename, type) {
 }
 
 $(document).ready(function () {
-  var icon = $('.play');
+  const icon = $('.play');
   icon.click(function () {
     icon.toggleClass('active');
     return false;
@@ -1757,11 +1760,11 @@ document.onpaste = function (event) {
 
 //		  console.log(event)
   // use event.originalEvent.clipboard for newer chrome versions
-  var items = (event.clipboardData || event.originalEvent.clipboardData).items;
+  const items = (event.clipboardData || event.originalEvent.clipboardData).items;
   console.log(JSON.stringify(items)); // will give you the mime types
   // find pasted image among pasted items
-  var blob = null;
-  for (var i = 0; i < items.length; i++) {
+  let blob = null;
+  for (let i = 0; i < items.length; i++) {
     if (items[i].type.indexOf("image") === 0) {
       blob = items[i].getAsFile();
     }
@@ -1770,9 +1773,9 @@ document.onpaste = function (event) {
   if (blob !== null) {
     if (!canPasteImageFromClipboard) return;
 
-    var reader = new FileReader();
+    const reader = new FileReader();
     reader.onload = function (event) {
-      var url = event.target.result; // data url!
+      const url = event.target.result; // data url!
       if (url.indexOf("data") >= 0) {
 
         if (window.insertPastedImageIntoFabric) {
@@ -1786,16 +1789,16 @@ document.onpaste = function (event) {
             oc.add(oImg);
           });
         } else {
-          var id = prompt('Enter id')
+          const id = prompt('Enter id')
           if (id) {
-            var container = $('<div>').css({
+            const container = $('<div>').css({
               display: 'inline-block',
               position: 'absolute'
             }).attr({'id': id})
             window.pastedItems = window.pastedItems || {}
             window.pastedItems[id] = 1;
 
-            var img = $('<img>').attr({src: url})
+            const img = $('<img>').attr({src: url})
             img.css({
               left: window.lastClickedX || 100,
               top: window.lastClickedY || 100,
@@ -1804,7 +1807,7 @@ document.onpaste = function (event) {
             })
 
             container.prepend(img)
-            var i = new Image();
+            const i = new Image();
 
             i.onload = function () {
               console.log(i.width + ", " + i.height);
@@ -1827,7 +1830,7 @@ document.onpaste = function (event) {
 
 
 function scrollBackgroundInf() {
-  var x = 0;
+  let x = 0;
   window.bgScroll = setInterval(function () {
     x -= 1;
     $('body').css('background-position', x + 'px 0');
@@ -1838,13 +1841,13 @@ function stopBackgroundScroll() {
   if (window.bgScroll) clearInterval(window.bgScroll)
 }
 
-var checkAndInject = function (name, url) {
+const checkAndInject = function (name, url) {
   if (typeof window[name] != 'undefined') {
     return console.log(name + ' already present: v' + jQuery.fn.jquery);
   }
-  var script = document.createElement('script');
+  const script = document.createElement('script');
   script.src = url;
-  var head = document.getElementsByTagName('head')[0],
+  let head = document.getElementsByTagName('head')[0],
     done = false;
   script.onload = script.onreadystatechange = function () {
     if (!done && (!this.readyState || this.readyState == 'loaded' || this.readyState == 'complete')) {
