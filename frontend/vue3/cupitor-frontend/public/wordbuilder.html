@@ -20,6 +20,7 @@
     <script type="text/javascript" src="/vendor/mediaelement-plugins/speed/speed.min.js"></script>
     <script type="text/javascript" src="/vendor/mediaelement-plugins/loop/loop.min.js"></script>
     <script type="text/javascript" src="/vendor/long-press-event.min.js"></script>
+    <script type="text/javascript" src="vendor/bootstrap.min.js"></script>
     <!-- <script type="text/javascript" src="/treant.js"></script> -->
     <link rel="stylesheet" href="/vendor/animate.css">
     <link rel="stylesheet" href="/vendor/treant.css">
@@ -27,6 +28,12 @@
     <script src="/data-structures.js"></script>
     <script src="/vendor/lodash.js"></script>
 
+    <link rel="stylesheet" href="vendor/jqwidgets/styles/jqx.base.css" type="text/css"/>
+    <link rel="stylesheet" href="vendor/bootstrap.min.css" type="text/css"/>
+    <link rel="stylesheet" href="vendor/bootstrap-grid.min.css" type="text/css"/>
+
+    <script type="text/javascript" src="vendor/jqwidgets/jqxcore.js"></script>
+    <script type="text/javascript" src="vendor/jqwidgets/jqx-all.js"></script>
     <script src="/vendor/NoSleep.min.js"></script>
     <!-- <script src="../../vendor/jquery.min.js"></script> -->
     <script src="../../vendor/jquery.easing.js"></script>
@@ -219,7 +226,8 @@
 </head>
 
 <body>
-<div style="float: left; width: 50%;">
+
+<div style="float: left; width: 50%;" id="left-half">
     <div id="audioPlayerPopup" style="width: 100% !important;">
         <div id="ytPlayerDiv"></div>
     </div>
@@ -285,132 +293,154 @@
 
 </div>
 <div style="float: right; left: 51%; width: 49%; position: fixed;" id="right-half">
-    <h3>Section 1</h3>
-    <div>
-        <div>
-            <textarea id="enteredWords" onchange="populateWords()"></textarea>
-            <span style="margin-left: 2em;">
-            <input type="checkbox" id="searchWordsCheckbox" checked>
-        </span><br>
-            Swedish Audio: <input id="swedishAudioInput" type="file" accept="audio/*" onchange="muteUnmuteAtIntervals()">
-            <audio id="swedishAudio" controls="controls"></audio>
-            <br>
-            Background Music: <input id="bgMusicInput" type="file" accept="audio/*"
-                                     onchange="loadMediaFile(bgMusicAudio, 'bgMusicInput')">
-            <audio id="bgMusicAudio" controls="controls" autoplay></audio>
-            <div style="padding-bottom: 20px;">
-                <div style="margin-bottom: 1em;">Bg Music Volume:</div>
-                <div id="bgMusicVolume" style="max-width: 300px;"></div>
-                <label class="switch" style="vertical-align: middle;">
-                    <input type="checkbox" id="selectableCheckbox" checked>
-                    <span class="slider"></span>
-                </label>
-            </div>
-        </div>
-        <div style="">
-            <audio id="swedishAudioHidden" style="display: none;" autoplay=""></audio>
-            <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn"
-                 onclick="playSelectedText()">
-        </div>
+    <div id="right-1">
+        <h3>Section 1</h3>
+        <div class="row" style="margin-left: 1em;">
+            <div class="row">
+                <textarea id="enteredWords" onchange="populateWords()"></textarea>
+                <span style="margin-left: 2em;">
+                <input type="checkbox" id="searchWordsCheckbox" checked>
+                </span><br>
+                <div class="row">
+                    <div class="row">
+                        <input type="number" placeholder="Sleep After Minutes" id="sleepAfterMins" value="60" style="width: 28%;"/>
+                        <input type="number" placeholder="Pause Interval Secs" id="pauseInterval" value="120" style="width: 28%; margin-left: 1%"/>
+                        <input type="number" placeholder="Play Interval Secs" id="playInterval" value="60" style="width: 28%; margin-left: 1%"/>
+                        <select id="bgAudioFreq" style="">
+                            <option value="alt">ALT</option>
+                            <option value="rand-2">RAND-2</option>
+                            <option value="sim">SIM</option>
+                        </select>
+                    </div>
 
-        <div id="wordlist"
-             style="height: 400px; overflow: scroll; margin-top: 1em; padding-bottom: 4em; margin-bottom: 2em;">
-
-        </div>
-    </div>
-    <h3>Section 2</h3>
-    <div>
-        <div id="mainControlInputs">
-            <input type="checkbox" id="useLocalMediaCheckbox"
-                   onchange="$('#mp3ChoiceContainer').toggle();$('#localMediaContainer').toggle();">
-            <div id="mp3ChoiceContainer">
-                <label for="mp3Choice">Select Media:</label>
-
-                <select id="mp3Choice" style="width: 80%">
-                    <option value="">-</option>
-                </select>
-
-                <label class="switch" style="vertical-align: middle;">
-                    <input type="checkbox" id="onlySubsCheckbox">
-                    <span class="slider"></span>
-                </label>
-            </div>
-            <div id="localMediaContainer" style="display: none; ">
-                <input type="file" accept="video/*,audio/*,.srt,.json" multiple="multiple" id="localFiles"
-                       onchange="loadLocalFiles()">
-            </div>
-            <div id="localMedia" style="float: left; margin-top: 1.5em;">
-                <audio id="localAudio" src="" width="700" height="500" style="display: none;"></audio>
-
-                <div id="localVideoContainer">
-                    <video id="localVideo" src="" style="display: none;"></video>
+                    Main: <input id="swedishAudioInput" type="file" accept="audio/x-m4a,audio/mpeg3,audio/mp3,audio/wav,audio/*" onchange="muteUnmuteAtIntervals()">
+                    <audio id="swedishAudio" controls="controls"></audio>
                 </div>
 
+                <div class="row">
+                    Background: <input id="bgMusicInput" type="file" accept="audio/x-m4a,audio/mpeg3,audio/mp3,audio/wav,audio/*"
+                                       onchange="loadMediaFile(bgMusicAudio, 'bgMusicInput')">
+                    <audio id="bgMusicAudio" controls="controls" autoplay></audio>
+                    <div style="padding-bottom: 20px;">
+                        <div style="margin-bottom: 1em;">Bg Music Volume:</div>
+                        <div id="bgMusicVolume" style="max-width: 300px;"></div>
+                        <label class="switch" style="vertical-align: middle;">
+                            <input type="checkbox" id="selectableCheckbox" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <br>
+
+            </div>
+            <div style="">
+                <audio id="swedishAudioHidden" style="display: none;" autoplay=""></audio>
+                <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn"
+                     onclick="playSelectedText()">
             </div>
 
-            <div style="width: 100%;">
-                <div id="youtubePlayer" style="display:none; margin-top: 2em;"></div>
-            </div>
+            <div id="wordlist"
+                 style="height: 400px; overflow: scroll; margin-top: 1em; padding-bottom: 4em; margin-bottom: 2em;">
 
-            <div style="min-height: 650px;" id="mediaRelatedContainer">
-                <div id="subtitle-container">
-                    <br>
-                    <br>
-                    <div id="sv-sub" style="font-weight: bold; font-size: large; color: blue"></div>
-                    <div id="sv-sub-mirror" style="font-size: smaller; color: grey"></div>
-                    <br>
-                    <br>
-                    <div id="en-sub" style="display: none;"></div>
-                    <div style="margin-top: 2em;">
+            </div>
+        </div>
+    </div>
+    <div id="right-2">
+        <h3>Section 2</h3>
+        <div>
+            <div id="mainControlInputs">
+                <input type="checkbox" id="useLocalMediaCheckbox"
+                       onchange="$('#mp3ChoiceContainer').toggle();$('#localMediaContainer').toggle();">
+                <div id="mp3ChoiceContainer">
+                    <label for="mp3Choice">Select Media:</label>
+
+                    <select id="mp3Choice" style="width: 80%">
+                        <option value="">-</option>
+                    </select>
+
+                    <label class="switch" style="vertical-align: middle;">
+                        <input type="checkbox" id="onlySubsCheckbox">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div id="localMediaContainer" style="display: none; ">
+                    <input type="file" accept="video/*,audio/*,.srt,.json" multiple="multiple" id="localFiles"
+                           onchange="loadLocalFiles()">
+                </div>
+                <div id="localMedia" style="float: left; margin-top: 1.5em;">
+                    <audio id="localAudio" src="" width="700" height="500" style="display: none;"></audio>
+
+                    <div id="localVideoContainer">
+                        <video id="localVideo" src="" style="display: none;"></video>
+                    </div>
+
+                </div>
+
+                <div style="width: 100%;">
+                    <div id="youtubePlayer" style="display:none; margin-top: 2em;"></div>
+                </div>
+
+                <div style="min-height: 650px;" id="mediaRelatedContainer">
+                    <div id="subtitle-container">
+                        <br>
+                        <br>
+                        <div id="sv-sub" style="font-weight: bold; font-size: large; color: blue"></div>
+                        <div id="sv-sub-mirror" style="font-size: smaller; color: grey"></div>
+                        <br>
+                        <br>
+                        <div id="en-sub" style="display: none;"></div>
+                        <div style="margin-top: 2em;">
                     <span class="btn btn-light" id="toggleEnSubBtn" onclick="$('#en-sub').toggle()"
                           style="display: none;"> Toggle English Subtitles </span>
-                    </div>
-
-                </div>
-                <div style="margin-top: 10em; position: absolute; right: 4em;" id="mediaControls">
-                    <div id="subControls" style="padding-left: 1em;">
-                        <div id="subtitlePagination"></div>
-                    </div>
-                    <div style="margin-top: 2em;" id="starredLines">
+                        </div>
 
                     </div>
-                    <div id="playerControls"
-                         style="width: 100%;border-top: 1px solid black;border-radius: 5%;">
-                        <div class="" style="">
-                            <div style="text-align: center;">
-                                <div class="controlgroup" id="speed-control">
-                                    <label for="speed-1">0.5</label>
-                                    <input type="radio" name="speedOption" id="speed-1" data-speed="0.5">
-                                    <label for="speed-2">0.7</label>
-                                    <input type="radio" name="speedOption" id="speed-2" data-speed="0.7">
-                                    <label for="speed-3">0.8</label>
-                                    <input type="radio" name="speedOption" id="speed-3" data-speed="0.8">
-                                    <label for="speed-4">1.0</label>
-                                    <input type="radio" name="speedOption" id="speed-4" checked data-speed="1.0">
-                                    <label for="speed-control">x Speed</label>
+                    <div style="margin-top: 10em; position: absolute; right: 4em;" id="mediaControls">
+                        <div id="subControls" style="padding-left: 1em;">
+                            <div id="subtitlePagination"></div>
+                        </div>
+                        <div style="margin-top: 2em;" id="starredLines">
+
+                        </div>
+                        <div id="playerControls"
+                             style="width: 100%;border-top: 1px solid black;border-radius: 5%;">
+                            <div class="" style="">
+                                <div style="text-align: center;">
+                                    <div class="controlgroup" id="speed-control">
+                                        <label for="speed-1">0.5</label>
+                                        <input type="radio" name="speedOption" id="speed-1" data-speed="0.5">
+                                        <label for="speed-2">0.7</label>
+                                        <input type="radio" name="speedOption" id="speed-2" data-speed="0.7">
+                                        <label for="speed-3">0.8</label>
+                                        <input type="radio" name="speedOption" id="speed-3" data-speed="0.8">
+                                        <label for="speed-4">1.0</label>
+                                        <input type="radio" name="speedOption" id="speed-4" checked data-speed="1.0">
+                                        <label for="speed-control">x Speed</label>
+                                    </div>
                                 </div>
-                            </div>
-                            <br>
-                            <div class="form-check form-switch" style="display: none;">
-                                <label class="form-check-label" for="loopSwitch">Loop </label>
-                                <input class="form-check-input" type="checkbox" role="switch" id="loopSwitch">
-                            </div>
+                                <br>
+                                <div class="form-check form-switch" style="display: none;">
+                                    <label class="form-check-label" for="loopSwitch">Loop </label>
+                                    <input class="form-check-input" type="checkbox" role="switch" id="loopSwitch">
+                                </div>
 
+                            </div>
+                            <div style="text-align: center; ">
+                                <select id="starredLinesSelect" style="display: none; margin-right: 2em;"></select>
+                                <button id="rewindBtn"
+                                        style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 3em;height: 2em;"
+                                        onclick="rewind()"> <
+                                </button>
+                                <button onclick="togglePlay(this)" id="playBtn" class="play-btn">Play</button>
+                            </div>
                         </div>
-                        <div style="text-align: center; ">
-                            <select id="starredLinesSelect" style="display: none; margin-right: 2em;"></select>
-                            <button id="rewindBtn"
-                                    style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 3em;height: 2em;"
-                                    onclick="rewind()"> <
-                            </button>
-                            <button onclick="togglePlay(this)" id="playBtn" class="play-btn">Play</button>
-                        </div>
+
                     </div>
-
                 </div>
             </div>
         </div>
     </div>
+
 </div>
 <div id="info-dialog" title="Media Info" style="display: none;">
     <div id="info-dialog-content"></div>
@@ -427,626 +457,782 @@
 </div>
 
 <script>
-  $(document).ready(e => {
-    window.audioCurrentTimeMargin=5
-  })
-  $('#searchedWords').select2({placeholder: 'Searches'});
+    //$('body').jqxTabs({theme: "arctic", width: '90%', height: 200});
 
-  $('#right-half').accordion({collapsible: true})
+     $('#right-1').jqxExpander()
+     $('#right-2').jqxExpander()
+     $('#right-2').jqxExpander('collapse')
+/*
+    var layout = new jqxSplitLayout("#layout", {
+        dataSource: [{
+                content: `<div id="pane1"></div>`,
+                size: 250
+            },
+            {
+                content: `<div id="pane2"></div>`,
+                size: 250
+        }],
+        ready: function() {
+            $('#pane1').html($('#left-half').html())
+            $('#pane2').html($('#right-half').html())
+            // $('#right-half').accordion({collapsible: true})
+            $('#right-1').jqxExpander()
+            $('#right-2').jqxExpander()
+        }
+    });
 
-  $('#toggleSearchesControlCheckbox').change(e => {
-    $('#searchesControl').toggle()
-  })
+*/
+    if(!isDesktop()) {
+      $('#left-half').hide()
+      $('#right-half').css({width: '100%', left: 0})
+    }
 
-  $('#numberOfFindingsToShow')[0].onchange = e => {
-    render(window.searchResult, window.searchText)
-  }
-
-  function loadMediaFilenames() {
-    fetch("http://localhost:5000/all_media_files")
-      .then(it => it.json())
-      .then(it => {
-        window.allMediaFileNames = it
-      })
-  }
-
-  loadMediaFilenames()
-
-  $('#bgMusicVolume').slider({value: 35})
-
-  let swedishAudio = document.getElementById("swedishAudio")
-  let secondsWithSound = new Set()
-  let silenceAtSeconds = new Set()
-  let dampenAtSeconds = new Set()
-  let restoreAtSeconds = new Set()
-  let rmsMap = {}
-
-  window.dampeningInProgress = null
-  window.restoringInProgress = null
-
-  let populateSecondsForBgMusic = secondsWithSound => {
-    let ts = Array.from(secondsWithSound) //normaliseTimestamp(secondsWithSound)
-    range(1, ts[ts.length - 1] + 1).forEach(x => {
-      if (secondsWithSound.has(x + 1)) {
-        dampenAtSeconds.add(x)
-      }
-      if (secondsWithSound.has(x - 1) && !secondsWithSound.has(x) && !secondsWithSound.has(x + 1)) {
-        restoreAtSeconds.add(x)
-      }
+    $(document).ready(e => {
+      window.audioCurrentTimeMargin=5
     })
-  }
+    $('#searchedWords').select2({placeholder: 'Searches'});
 
-  function wikiBlockDblClicked() {
-    if ($("#searchOnDblClickWikiCheckbox").is(":checked")) {
-      $('#searchText').val(getSelectionText())
-      searchInSrts()
-    }
-  }
-
-  function elongateBgMusic(t) {
-    // if(secondsWithSound.has(t)) {
-    //   return
-    // }
-    // let rn = _.random(5, 15)
-    // swedishAudio.pause()
-    // setTimeout(() => {
-    //   swedishAudio.play()
-    // }, rn * 1000)
-  }
-
-  function toggleWikiSection() {
-    let $wikiContainer = $('#wikiContainer');
-    $wikiContainer.toggle()
-    let $searchResultContainer = $('#searchResultContainer');
-    if (!$wikiContainer.is(':visible')) {
-      $searchResultContainer.removeClass('bottom-left').addClass('top-left')
-      $('#result').css({height: '90%'})
-    } else {
-      $searchResultContainer.addClass('bottom-left').removeClass('top-left')
-      $('#result').css({height: 300})
-    }
-  }
-
-  var noSleep = new NoSleep();
-
-  function muteUnmuteAtIntervals() {
-     noSleep.enable();
-     let done = {}
-     let mediaEnded = false
-     let interval = 15
-     let lastPausedAt = interval
-     swedishAudio.ontimeupdate = e => {
-          if(mediaEnded) {
-            console.log("Media Ended.")
-            return
-          }
-          let t = mediaTimeInSeconds(swedishAudio);
-
-          if(t > 0 && t % interval === 0) {
-            if(done[t]) {
-              return
-            }
-            done[t] = true
-            if(swedishAudio.muted || swedishAudio.volume === 0) {
-              // set time
-              swedishAudio.currentTime = Math.max(lastPausedAt || (t - interval), 0)
-              swedishAudio.muted = false
-            } else {
-              swedishAudio.muted = true
-              lastPausedAt = swedishAudio.currentTime
-            }
-          }
-      }
-
-      swedishAudio.onended = e => {
-          done = {}
-          mediaEnded = true
-      }
-      loadMediaFile(swedishAudio, 'swedishAudioInput')
-  }
-
-  function analyseSoundAndSilence() {
-    let secondsHandled = new Set()
-
-    function handleTimestampSecond(t) {
-      secondsHandled.add(t)
-      elongateBgMusic(t)
-      let shouldDampen = dampenAtSeconds.has(t)
-      let shouldRestore = restoreAtSeconds.has(t)
-      if (shouldDampen) {
-        dampenBgMusic(t)
-      }
-      if (shouldRestore) restoreBgMusic(t)
-    }
-
-    let timeHandled = []
-    let mediaEnded = false
-    swedishAudio.ontimeupdate = e => {
-      if(mediaEnded) {
-        console.log("Media Ended. Silences: ", findSilencesTimestamps())
-        return
-      }
-      let t = mediaTimeInSeconds(swedishAudio);
-
-      if(!timeHandled.includes(t) && findSilencesTimestamps().includes(t)) {
-        console.log("Pausing audio as Silence detected at ", t)
-        alert("Pausing audio as Silence detected at " + t)
-        swedishAudio.pause()
-        timeHandled.push(t)
-      }
-    }
-
-    swedishAudio.onended = e => {
-      secondsHandled = new Set()
-      mediaEnded = true
-    }
-
-    swedishAudio.oncanplay = e => {
-
-    }
-
-    loadMediaFile(swedishAudio, 'swedishAudioInput')
-    swedishAudio.pause()
-
-    // loadMediaFile(swedishAudioHidden, 'swedishAudioInput')
-    function getAudioBuffer() {
-      let blob = document.getElementById("swedishAudioInput").files[0]
-      return new Response(blob).arrayBuffer(); //promise
-    }
-
-    swedishAudio.controls = false
-    swedishAudioHidden.volume = 0
-
-    getAudioBuffer().then(buffer => {
-      analyseAudio(buffer, x => {
-        swedishAudio.controls = true
-        swedishAudio.play()
-      })
-    })
-  }
-
-  function _round(value, p) {
-      let precision = p || 1; // Default precision to 1 if not provided
-      let multiplier = Math.pow(10, precision); // Use precision directly
-      return Math.round(value * multiplier) / multiplier
-  }
-
-  function round(value, p) {
-      return Math.floor(_round(value, p));
-  }
-
-  function  calculateRMS(audioData, length) {
-    // Calculate RMS of the audio data (simplified example)
-    let sum = 0;
-    for (let i = 0; i < length; i++) {
-        sum += Math.pow(audioData[i], 2);
-    }
-    return Math.sqrt(sum / length);
-  }
-
-  function silenceThreshold(rmsValues) {
-    let candidates = [];
-    for (let i = 1; i < rmsValues.length - 1; i++) {
-        let n = rmsValues[i];
-        if(n !== Infinity && n > rmsValues[i-1] +1 && n > rmsValues[i+1] +1) {
-            candidates.push(n)
-        }
-    }
-    return _.sortBy(Object.entries(_.countBy(candidates)), it => it[1]).reverse()
-  }
-
-  function oneOfConsecutive(arr) {
-    if(arr.length === 0) {
-        return null
-    }
-    if(arr.length === 1) {
-        return arr[0]
-    }
-    return arr[1]
-  }
-
-  // sorted array as input
-  function removeConsecutive(arr) {
-    let res = []
-    let consecutive = []
-    for (let i = 0; i < arr.length; i++) {
-        if(consecutive.length === 0) {
-            consecutive.push(arr[i])
-        } else {
-            if(consecutive.includes(arr[i] - 1) || consecutive.includes(arr[i] + 1)) {
-                consecutive.push(arr[i])
-            } else {
-                res.push(oneOfConsecutive(consecutive))
-                consecutive = [arr[i]]
-            }
-        }
-    }
-    res.push(oneOfConsecutive(consecutive))
-    return res.filter(it => it !== null)
-  }
-
-  function findSilencesTimestamps(threshold) {
-    let rmsValues = Object.entries(rmsMap)
-    threshold = threshold || silenceThreshold(Object.values(rmsMap))[0][0]
-    let silence = []
-    for (let i = 0; i < rmsValues.length; i++) {
-        if(rmsValues[i][1] >= threshold) {
-            silence.push(i)
-        }
-    }
-    console.log("Silences at with consecutives", silence)
-    return removeConsecutive(silence)
-  }
-
-  function populateSoundTimes(buffer, el, suspendTime) {
-    buffer = Array.from(buffer)
-    let threshold = -50;
-    let st = _round(suspendTime, 1)
-    let upperHalf = Math.ceil(st)/2
-    let lowerHalf = Math.floor(st)
-    if(st > upperHalf) {
-      suspendTime = upperHalf
-    } else {
-      suspendTime = lowerHalf
-    }
-    let t = suspendTime;
-    const rms = calculateRMS(buffer, buffer.length);
-    //console.log(rms, suspendTime)
-
-    if(rmsMap[suspendTime]) {
-      rmsMap[suspendTime] = round( (rmsMap[suspendTime] + rms) / 2)
-    } else {
-      rmsMap[suspendTime] = round(rms)
-    }
-
-    // console.log(buffer
-    //   .map(it => it < threshold ? '' : round(it) + '/' + round(t))
-    //   .join(' '))
-  }
-
-  function mediaTimeInSeconds(el) {
-    return Math.floor(round(el.currentTime))
-  }
-
-  function loadMediaFile(el, input) {
-    el.src = URL.createObjectURL(document.getElementById(input).files[0])
-  }
-
-  async function analyseAudio(audioData, callbackWhenMovedEnough) {
-    secondsWithSound = new Set()
-    // el.play()
-    await waitUntil(() => !isNaN(swedishAudio.duration))
-
-    const seconds = Math.ceil(swedishAudio.duration)
-    const sampleRate = 96000
-    const length = seconds * sampleRate
-    const offlineAudioContext = new OfflineAudioContext({length, sampleRate});
-    offlineAudioContext.decodeAudioData(audioData, buffer => {
-      const audioBufferSourceNode = new AudioBufferSourceNode(offlineAudioContext, {buffer});
-      const analyserNode = new AnalyserNode(offlineAudioContext);
-
-      audioBufferSourceNode.connect(analyserNode);
-      audioBufferSourceNode.start();
-
-      const renderQuantumInSeconds = 128 / sampleRate;
-      const durationInSeconds = length / sampleRate;
-      const frequencyData = new Float32Array(analyserNode.frequencyBinCount);
-
-      const analyze = (index) => {
-        const suspendTime = renderQuantumInSeconds * index;
-        let el = swedishAudioHidden;
-
-        if (suspendTime < durationInSeconds) {
-          offlineAudioContext.suspend(suspendTime).then(() => {
-            analyserNode.getFloatFrequencyData(frequencyData);
-            populateSoundTimes(frequencyData, el, suspendTime)
-
-            if (suspendTime > 20) {
-              callbackWhenMovedEnough()
-            }
-
-            analyze(index + 1);
-          });
-        }
-
-        if (index === 1) {
-          offlineAudioContext.startRendering();
-        } else {
-          offlineAudioContext.resume();
-        }
-      };
-
-      analyze(1);
-    }, x => console.log("error", x))
-  }
-
-  let bgControl = 1
-
-  function dampenBgMusic() {
-    if (window.dampeningInProgress) return
-
-    let cnt = bgControl++
-    if (restoringInProgress) {
-      clearInterval(restoringInProgress.interval)
-      window.restoringInProgress = null
-    }
-
-    let interval = null
-    let promise = new Promise((res, rej) => {
-      console.log("Dampening at ", mediaTimeInSeconds(swedishAudio))
-      let min = $('#bgMusicVolume').slider("option", "value") / 100
-
-      let vol = bgMusicAudio.volume;
-      let t = 200; // 200ms interval
-
-      interval = setInterval(
-        function () {
-          // Reduce volume by 0.05 as long as it is above 0
-          // This works as long as you start with a multiple of 0.05!
-          if (vol > min) {
-            vol -= 0.08;
-            bgMusicAudio.volume = vol;
-            // console.log("Dampening", swedishAudio.currentTime, cnt)
-          } else {
-            // Stop the setInterval when 0 is reached
-            clearInterval(interval);
-            res(1)
-            window.dampeningInProgress = null
-          }
-        }, t);
+    $('#toggleSearchesControlCheckbox').change(e => {
+      $('#searchesControl').toggle()
     })
 
-    let ret = {promise, interval}
-    window.dampeningInProgress = ret
-    return ret
-  }
-
-  function restoreBgMusic() {
-    if (window.restoringInProgress) return
-
-    let cnt = bgControl++
-
-    if (dampeningInProgress) {
-      clearInterval(dampeningInProgress.interval)
-      window.dampeningInProgress = null
-    }
-
-    let interval = null
-    let promise = new Promise((res, rej) => {
-      let max = 0.5
-      let vol = bgMusicAudio.volume;
-      let t = 200; // 200ms interval
-
-      console.log("Restoring at ", mediaTimeInSeconds(swedishAudio))
-
-      interval = setInterval(
-        function () {
-          // Reduce volume by 0.05 as long as it is above 0
-          // This works as long as you start with a multiple of 0.05!
-          if (vol < max) {
-            vol += 0.08;
-            if (vol > max) {
-              vol = max
-            }
-            bgMusicAudio.volume = vol;
-            // console.log("Restoring", swedishAudio.currentTime, cnt)
-          } else {
-            // Stop the setInterval when 0 is reached
-            clearInterval(interval);
-            window.restoringInProgress = null
-            res(1)
-          }
-        }, t);
-    })
-
-    let ret = {promise, interval};
-    window.restoringInProgress = ret
-    return ret
-  }
-
-  window.wikiScrollPositions = {}
-
-  function recordWikiScrollPosition() {
-    wikiScrollPositions[location.hash] = wikiResult.scrollTop
-  }
-
-  async function whenWikiLinkClicked(e) {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.target.href.indexOf("/wiki/") > 0) {
-      recordWikiScrollPosition()
-      let linkText = e.target.href.split("/wiki/")[1].toLowerCase();
-      window.location.hash = linkText
-      populateWiki()
-    }
-  }
-
-  window.onhashchange = e => {
-    populateWiki()
-  }
-
-  function whenWikiWordClicked($result) {
-    $result.find("a").each((i, e) => {
-      // Restore scroll position if applicable
-      if (wikiScrollPositions[location.hash]) {
-        wikiResult.scrollTop = wikiScrollPositions[location.hash]
-      } else {
-        wikiResult.scrollTop = 0
-      }
-      let href = $(e).attr("href") || ''
-      if (href.indexOf("/wiki/") < 0) {
-        $(e).removeAttr("href")
-      } else {
-        $(e).click(linkClicked => {
-          whenWikiLinkClicked(linkClicked);
-        })
-      }
-    }) //find end
-  }
-
-  async function searchInSrts() {
-    await fetchSRTs()
-    let txt = window.location.hash.substring(1).toLowerCase();
-    if(window.vocabularyLines) {
-      let rs = window.vocabularyLines.map((it, i) => ({text: it, index: i})).filter(it => it.text.match(new RegExp(window.searchText, "i")))
-      window.searchResult.push({nonSrt: true, data: rs, source: "vocabulary"})
+    $('#numberOfFindingsToShow')[0].onchange = e => {
       render(window.searchResult, window.searchText)
     }
 
-      $('#searchedWords').html('')
+    function loadMediaFilenames() {
+      fetch("http://localhost:5000/all_media_files")
+        .then(it => it.json())
+        .then(it => {
+          window.allMediaFileNames = it
+        })
+    }
 
-      let vocabCategoriesToPopulate = new Set()
+    loadMediaFilenames()
 
-      Object.entries(vocabulary).forEach(it => {
-          vocabCategoriesToPopulate.add(it[0])
-      })
+    $('#bgMusicVolume').slider({value: 35})
 
-      vocabCategoriesToPopulate.forEach(it => {
-           let vocabLines = window.vocabulary[it]
-           let heading = new Option(`${it}`, it, false, false)
-           heading.disabled = true
-           $('#searchedWords').append(heading)
-           vocabLines.forEach(line => {
-             $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
-           })
-      })
-  }
+    let swedishAudio = document.getElementById("swedishAudio")
+    let secondsWithSound = new Set()
+    let silenceAtSeconds = new Set()
+    let dampenAtSeconds = new Set()
+    let restoreAtSeconds = new Set()
+    let rmsMap = {}
 
-  window.wikiCache = new LRUCache()
+    window.dampeningInProgress = null
+    window.restoringInProgress = null
 
-  async function populateWiki() {
-    function _populateWikiPage(it) {
-      let $result = $('#wikiResult');
-      $result.html('')
-      $.parseHTML(it).forEach(it => $result.append(it))
-      $(".noprint").remove()
-      $(".mw-jump-link").remove()
-      $(".mw-headline").parent().remove()
-      $("#toc").remove()
-      $('#mw-navigation').remove()
-      $('.vector-header-container').remove()
-      $('#footer').remove()
-      $('#wikiResult a').css({'color': 'blue', 'text-decoration': 'underline'})
-      whenWikiWordClicked($result);
-
-      let headers = ['Böjs som']
-      'Som förled i sammansättningar används'.split(" ").forEach(it => headers.push(it))
-
-      let $table = $('#Svenska').find('table');
-      if (!$table.length) {
-        $table = $('table[class*="template-sv-"]')
-      }
-      if (!$table.length) {
-        $table = $('table[data-lang="sv"]')
-      }
-      if (!$table.length) {
-        $table = $('table.grammar')
-      }
-
-      let commonWords = [
-        "och", "att", "i", "en", "jag", "det", "är", "inte", "på", "vi", "har", "de", "med", "för", "du", "mig", "av", "att", "så", "den", "vid", "ut",
-        "om", "ett", "kan", "som", "definition", "böjs som"
-      ];
-      $table.find("td.note").remove()
-      $table.find("td.grammar-warning").remove()
-
-      let wordsToSearch = $table.find("tr").find('td:first')
-        .map((i, e) => $(e).text()).get()
-        .flatMap(it => it.split(/[\n ,]/))
-        .filter(it => it.trim().length && !headers.includes(it.trim().toLowerCase()))
-        .filter(it => it.length > 2).filter(it => it.match(/[a-zåäö]/i))
-        .filter(it => it.indexOf('?') < 0)
-        .filter(it => it.indexOf("åld.") < 0)
-        .filter(it => !commonWords.includes(it.toLowerCase()))
-
-      //TODO: Remove duplicates, remove common words, Remove unnecessary words
-
-      if ($("#searchWordsCheckbox").is(":checked")) {
-        wordsToSearch = wordsToSearch.map(it => `${it.trim()}`)
-        if (!wordsToSearch.length) {
-          wordsToSearch = [decodeURIComponent(w)]
+    let populateSecondsForBgMusic = secondsWithSound => {
+      let ts = Array.from(secondsWithSound) //normaliseTimestamp(secondsWithSound)
+      range(1, ts[ts.length - 1] + 1).forEach(x => {
+        if (secondsWithSound.has(x + 1)) {
+          dampenAtSeconds.add(x)
         }
-        wordsToSearch.push($('#firstHeading').text().trim())
-        $('#searchText').val(wordsToSearch.join("|"))
+        if (secondsWithSound.has(x - 1) && !secondsWithSound.has(x) && !secondsWithSound.has(x + 1)) {
+          restoreAtSeconds.add(x)
+        }
+      })
+    }
+
+    function wikiBlockDblClicked() {
+      if ($("#searchOnDblClickWikiCheckbox").is(":checked")) {
+        $('#searchText').val(getSelectionText())
         searchInSrts()
       }
-
-     $("#Svenska")[0].scrollIntoView()
     }
 
-    let w = window.location.hash
-    w = w.substring(1).toLowerCase()
-    let fromCache = wikiCache.get(w)
-    if (!fromCache) {
-      let res = await fetch("http://localhost:5000/proxy?url=https://sv.wiktionary.org/wiki/" + w.toLowerCase())
-      res = await res.text()
-      wikiCache.put(w, res)
+    function elongateBgMusic(t) {
+      // if(secondsWithSound.has(t)) {
+      //   return
+      // }
+      // let rn = _.random(5, 15)
+      // swedishAudio.pause()
+      // setTimeout(() => {
+      //   swedishAudio.play()
+      // }, rn * 1000)
     }
-    _populateWikiPage(wikiCache.get(w))
-  }
 
-  function sanitizeInputFromReddit() {
-    $("img[alt='User avatar']").remove()
-    $("img[alt='Subreddit Icon']").parent().parent().parent().remove()
-    $("button").remove()
-    $("svg").remove()
-    $("*[data-click-id=\"body\"]").remove()
-    $("span:contains('ConcentrateSlow4119')").remove()
-    $("*[data-testid=\"comment_author_link\"]").parent().parent().parent().parent().remove()
-
-    let commCounter = 0;
-    $("span:contains('level ')").each((i, e) => {
-      let $comment = $('<div> Comment </div>');
-      if ($(e).text().trim() === 'level 1') {
-        $comment.html(`#${++commCounter} Comment`)
+    function toggleWikiSection() {
+      let $wikiContainer = $('#wikiContainer');
+      $wikiContainer.toggle()
+      let $searchResultContainer = $('#searchResultContainer');
+      if (!$wikiContainer.is(':visible')) {
+        $searchResultContainer.removeClass('bottom-left').addClass('top-left')
+        $('#result').css({height: '90%'})
+      } else {
+        $searchResultContainer.addClass('bottom-left').removeClass('top-left')
+        $('#result').css({height: 300})
       }
-      let $el = $comment.addClass('accordion')
-      $el.insertBefore($(e))
-    })
-  }
-
-  function searchSelectedText() {
-    window.location.hash = getSelectionText().toLowerCase()
-  }
-
-  function populateWords() {
-    let words = enteredWords.value
-    let html = []
-    try {
-      html = $(words).toArray()
-    } catch (e) {
-      console.log(e)
     }
 
-    let $wordlist = $("#wordlist");
-    $wordlist.html('')
-    if (html.length) {
-      html.forEach(it => $wordlist.append(it))
-    } else {
-      words.split("\n").forEach(line => {
-        let ws = line.split(" ").map(x => `<span>${x}</span>`).join(" ")
-        ws = ws.replaceAll("\n", "<br>")
-          // .replaceAll("-", "+")
-          .replaceAll(" ", "&nbsp;")
-          .replaceAll("\t", "&nbsp;&nbsp;&nbsp;")
-        $wordlist.append(`<div class="selectable line">${ws}</div>`)
+    var noSleep = new NoSleep();
+    window.sleepTimeout = null
+
+    document.addEventListener('click', function enableNoSleep() {
+        document.removeEventListener('click', enableNoSleep, false);
+        if (window.sleepTimeout) {
+            clearTimeout(window.sleepTimeout);
+        }
+        noSleep.enable();
+        window.sleepTimeout = setTimeout(function() {
+            noSleep.disable();
+        }, sleepAfterMins.value * 60 * 1000);
+    }, false);
+
+    function calcTimes(playInterval, pauseInterval, maxTime) {
+        let x = 0
+        let times = {0: 'play'}
+        while(x <= maxTime) {
+            x = x + playInterval
+            times[x] = 'pause'
+            x = x + pauseInterval
+            times[x] = 'play'
+        }
+        return times
+    }
+
+    function muteUnmuteAtIntervals() {
+       let done = {}
+       let pauseInterval = parseInt($('#pauseInterval').val())
+       let playInterval = parseInt($('#playInterval').val())
+       let times = calcTimes(playInterval, pauseInterval, swedishAudio.duration + 1)
+       let sleepAfterMins = $('#sleepAfterMins')
+       let lastPausedAtBgMusic = 0
+       let lastPausedAt = 0
+       let next = {action: 'pauseSwedish', time: playInterval}
+
+       console.log("Pause Interval: ", times)
+       bgMusicAudio.muted = true
+       let continuousNotShoulds = 0
+       function shouldResumeBgMusicRand2(t) {
+           let should = getRandomInt(4) % 2 == 0
+
+           if(continuousNotShoulds >= 2) {
+               should = true
+               continuousNotShoulds = 0
+           } else {
+               continuousNotShoulds++
+           }
+           return should
+       }
+
+       swedishAudio.oncanplay = e => {
+           times = calcTimes(playInterval, pauseInterval, swedishAudio.duration + 1)
+           // console.log("Pause Interval: ", times)
+       }
+
+       let bgAudioFreqCounter = 0
+       let bgAudioFreqValues = $('#bgAudioFreq option').map((i, e) => $(e).val()).toArray()
+
+       function resetSwedishAudio() {
+          swedishAudio.currentTime = 0
+          lastPausedAt = 0
+          next = {action: 'pauseSwedish', time: playInterval}
+          done = {}
+          bgAudioFreqCounter = (bgAudioFreqCounter + 1) % bgAudioFreqValues.length
+          $('#bgAudioFreq').val(bgAudioFreqValues[bgAudioFreqCounter])
+       }
+
+       let bgMusicReset = false
+       let swedishAudioReset = false
+       swedishAudio.ontimeupdate = e => {
+            let t = mediaTimeInSeconds(swedishAudio);
+            let tBg = mediaTimeInSeconds(bgMusicAudio);
+
+            let bgAudioFreq = $('#bgAudioFreq').val()
+            if(t > 0) {
+              if(done[t] || next.time != t) {
+                return
+              }
+              done[t] = true
+
+              let resumeBg = shouldResumeBgMusicRand2(t)
+              if(bgAudioFreq == 'alt') {
+                resumeBg = true
+              }
+              if(swedishAudio.muted && next.action == 'playSwedish') {
+                swedishAudio.currentTime = Math.max(lastPausedAt || (t - pauseInterval), 0)
+                next = {action: 'pauseSwedish', time: timeInSeconds(lastPausedAt + playInterval)}
+
+                swedishAudio.muted = false
+                if(bgAudioFreq == 'sim') {
+                    bgMusicAudio.muted = false
+                } else if(!bgMusicAudio.muted) {
+                    bgMusicAudio.muted = true
+                    lastPausedAtBgMusic = bgMusicAudio.currentTime
+                }
+              } else if(!swedishAudio.muted && next.action == 'pauseSwedish') {
+                swedishAudio.muted = true
+                lastPausedAt = swedishAudio.currentTime
+
+                if(bgAudioFreq == 'sim') {
+                    bgMusicAudio.muted = false
+                } else if(resumeBg) {
+                    bgMusicAudio.currentTime = Math.max(lastPausedAtBgMusic, 0)
+                    bgMusicAudio.muted = false
+                }
+                next = {action: 'playSwedish', time: t + pauseInterval}
+                if(next.time > swedishAudio.duration) {
+                  next.time = swedishAudio.duration - 2
+                }
+              }
+
+              next.time = next.time % (swedishAudio.duration + 1)
+              next.time = timeInSeconds(next.time)
+              done[next.time] = false
+              console.log("Next: ", next, "Time", t, "Done: ", done)
+            }
+
+            // Repeat
+            if(isIOS() && !swedishAudioReset && t >= swedishAudio.duration - 2) {
+              resetSwedishAudio()
+              swedishAudioReset = true
+              setTimeout(() => {
+                swedishAudioReset = false
+              }, 1000)
+            }
+        }
+
+        bgMusicAudio.ontimeupdate = e => {
+            let t = mediaTimeInSeconds(bgMusicAudio);
+            // Since iOS does not support controlling media through JS without user action
+            if(isIOS() && !bgMusicReset && t >= bgMusicAudio.duration - 2) {
+              bgMusicAudio.currentTime = 0
+              bgMusicReset = true
+              lastPausedAtBgMusic = 0
+              setTimeout(() => {
+                bgMusicReset = false
+              }, 3000)
+            }
+        }
+
+        bgMusicAudio.onended = e => {
+            if(isIOS()) {
+              return
+            }
+            bgMusicAudio.currentTime = 0
+            bgMusicAudio.play()
+        }
+
+        swedishAudio.onended = e => {
+            resetSwedishAudio()
+            swedishAudio.play()
+        }
+
+        swedishAudio.onseeked = e => {
+          console.log("SEEKED", e)
+        }
+
+        loadMediaFile(swedishAudio, 'swedishAudioInput')
+    }
+
+    function analyseSoundAndSilence() {
+      let secondsHandled = new Set()
+
+      function handleTimestampSecond(t) {
+        secondsHandled.add(t)
+        elongateBgMusic(t)
+        let shouldDampen = dampenAtSeconds.has(t)
+        let shouldRestore = restoreAtSeconds.has(t)
+        if (shouldDampen) {
+          dampenBgMusic(t)
+        }
+        if (shouldRestore) restoreBgMusic(t)
+      }
+
+      let timeHandled = []
+      let mediaEnded = false
+      swedishAudio.ontimeupdate = e => {
+        if(mediaEnded) {
+          console.log("Media Ended. Silences: ", findSilencesTimestamps())
+          return
+        }
+        let t = mediaTimeInSeconds(swedishAudio);
+
+        if(!timeHandled.includes(t) && findSilencesTimestamps().includes(t)) {
+          console.log("Pausing audio as Silence detected at ", t)
+          alert("Pausing audio as Silence detected at " + t)
+          swedishAudio.pause()
+          timeHandled.push(t)
+        }
+      }
+
+      swedishAudio.onended = e => {
+        secondsHandled = new Set()
+        mediaEnded = true
+      }
+
+      swedishAudio.oncanplay = e => {
+
+      }
+
+      loadMediaFile(swedishAudio, 'swedishAudioInput')
+      swedishAudio.pause()
+
+      // loadMediaFile(swedishAudioHidden, 'swedishAudioInput')
+      function getAudioBuffer() {
+        let blob = document.getElementById("swedishAudioInput").files[0]
+        return new Response(blob).arrayBuffer(); //promise
+      }
+
+      swedishAudio.controls = false
+      swedishAudioHidden.volume = 0
+
+      getAudioBuffer().then(buffer => {
+        analyseAudio(buffer, x => {
+          swedishAudio.controls = true
+          swedishAudio.play()
+        })
       })
     }
 
-    enteredWords.value = ''
-    $wordlist[0].ondblclick = e => {
-      // if ($("#searchWordsCheckbox").is(":checked")) {
-      //   $('#searchText').val(getSelectionText())
-      // }
-      searchSelectedText();
-      $("*").removeClass("highlighted-selection")
-      $(getSelectionParentElement()).addClass("highlighted-selection")
+    function _round(value, p) {
+        let precision = p || 1; // Default precision to 1 if not provided
+        let multiplier = Math.pow(10, precision); // Use precision directly
+        return Math.round(value * multiplier) / multiplier
     }
-    sanitizeInputFromReddit();
 
-    renderAccordions()
-  }
+    function round(value, p) {
+        return Math.floor(_round(value, p));
+    }
+
+    function  calculateRMS(audioData, length) {
+      // Calculate RMS of the audio data (simplified example)
+      let sum = 0;
+      for (let i = 0; i < length; i++) {
+          sum += Math.pow(audioData[i], 2);
+      }
+      return Math.sqrt(sum / length);
+    }
+
+    function silenceThreshold(rmsValues) {
+      let candidates = [];
+      for (let i = 1; i < rmsValues.length - 1; i++) {
+          let n = rmsValues[i];
+          if(n !== Infinity && n > rmsValues[i-1] +1 && n > rmsValues[i+1] +1) {
+              candidates.push(n)
+          }
+      }
+      return _.sortBy(Object.entries(_.countBy(candidates)), it => it[1]).reverse()
+    }
+
+    function oneOfConsecutive(arr) {
+      if(arr.length === 0) {
+          return null
+      }
+      if(arr.length === 1) {
+          return arr[0]
+      }
+      return arr[1]
+    }
+
+    // sorted array as input
+    function removeConsecutive(arr) {
+      let res = []
+      let consecutive = []
+      for (let i = 0; i < arr.length; i++) {
+          if(consecutive.length === 0) {
+              consecutive.push(arr[i])
+          } else {
+              if(consecutive.includes(arr[i] - 1) || consecutive.includes(arr[i] + 1)) {
+                  consecutive.push(arr[i])
+              } else {
+                  res.push(oneOfConsecutive(consecutive))
+                  consecutive = [arr[i]]
+              }
+          }
+      }
+      res.push(oneOfConsecutive(consecutive))
+      return res.filter(it => it !== null)
+    }
+
+    function findSilencesTimestamps(threshold) {
+      let rmsValues = Object.entries(rmsMap)
+      threshold = threshold || silenceThreshold(Object.values(rmsMap))[0][0]
+      let silence = []
+      for (let i = 0; i < rmsValues.length; i++) {
+          if(rmsValues[i][1] >= threshold) {
+              silence.push(i)
+          }
+      }
+      console.log("Silences at with consecutives", silence)
+      return removeConsecutive(silence)
+    }
+
+    function populateSoundTimes(buffer, el, suspendTime) {
+      buffer = Array.from(buffer)
+      let threshold = -50;
+      let st = _round(suspendTime, 1)
+      let upperHalf = Math.ceil(st)/2
+      let lowerHalf = Math.floor(st)
+      if(st > upperHalf) {
+        suspendTime = upperHalf
+      } else {
+        suspendTime = lowerHalf
+      }
+      let t = suspendTime;
+      const rms = calculateRMS(buffer, buffer.length);
+      //console.log(rms, suspendTime)
+
+      if(rmsMap[suspendTime]) {
+        rmsMap[suspendTime] = round( (rmsMap[suspendTime] + rms) / 2)
+      } else {
+        rmsMap[suspendTime] = round(rms)
+      }
+
+      // console.log(buffer
+      //   .map(it => it < threshold ? '' : round(it) + '/' + round(t))
+      //   .join(' '))
+    }
+
+    function mediaTimeInSeconds(el) {
+      return timeInSeconds(el.currentTime)
+    }
+
+    function timeInSeconds(t) {
+      return Math.floor(round(t))
+    }
+
+    function loadMediaFile(el, input) {
+      el.src = URL.createObjectURL(document.getElementById(input).files[0])
+    }
+
+    async function analyseAudio(audioData, callbackWhenMovedEnough) {
+      secondsWithSound = new Set()
+      // el.play()
+      await waitUntil(() => !isNaN(swedishAudio.duration))
+
+      const seconds = Math.ceil(swedishAudio.duration)
+      const sampleRate = 96000
+      const length = seconds * sampleRate
+      const offlineAudioContext = new OfflineAudioContext({length, sampleRate});
+      offlineAudioContext.decodeAudioData(audioData, buffer => {
+        const audioBufferSourceNode = new AudioBufferSourceNode(offlineAudioContext, {buffer});
+        const analyserNode = new AnalyserNode(offlineAudioContext);
+
+        audioBufferSourceNode.connect(analyserNode);
+        audioBufferSourceNode.start();
+
+        const renderQuantumInSeconds = 128 / sampleRate;
+        const durationInSeconds = length / sampleRate;
+        const frequencyData = new Float32Array(analyserNode.frequencyBinCount);
+
+        const analyze = (index) => {
+          const suspendTime = renderQuantumInSeconds * index;
+          let el = swedishAudioHidden;
+
+          if (suspendTime < durationInSeconds) {
+            offlineAudioContext.suspend(suspendTime).then(() => {
+              analyserNode.getFloatFrequencyData(frequencyData);
+              populateSoundTimes(frequencyData, el, suspendTime)
+
+              if (suspendTime > 20) {
+                callbackWhenMovedEnough()
+              }
+
+              analyze(index + 1);
+            });
+          }
+
+          if (index === 1) {
+            offlineAudioContext.startRendering();
+          } else {
+            offlineAudioContext.resume();
+          }
+        };
+
+        analyze(1);
+      }, x => console.log("error", x))
+    }
+
+    let bgControl = 1
+
+    function dampenBgMusic() {
+      if (window.dampeningInProgress) return
+
+      let cnt = bgControl++
+      if (restoringInProgress) {
+        clearInterval(restoringInProgress.interval)
+        window.restoringInProgress = null
+      }
+
+      let interval = null
+      let promise = new Promise((res, rej) => {
+        console.log("Dampening at ", mediaTimeInSeconds(swedishAudio))
+        let min = $('#bgMusicVolume').slider("option", "value") / 100
+
+        let vol = bgMusicAudio.volume;
+        let t = 200; // 200ms interval
+
+        interval = setInterval(
+          function () {
+            // Reduce volume by 0.05 as long as it is above 0
+            // This works as long as you start with a multiple of 0.05!
+            if (vol > min) {
+              vol -= 0.08;
+              bgMusicAudio.volume = vol;
+              // console.log("Dampening", swedishAudio.currentTime, cnt)
+            } else {
+              // Stop the setInterval when 0 is reached
+              clearInterval(interval);
+              res(1)
+              window.dampeningInProgress = null
+            }
+          }, t);
+      })
+
+      let ret = {promise, interval}
+      window.dampeningInProgress = ret
+      return ret
+    }
+
+    function restoreBgMusic() {
+      if (window.restoringInProgress) return
+
+      let cnt = bgControl++
+
+      if (dampeningInProgress) {
+        clearInterval(dampeningInProgress.interval)
+        window.dampeningInProgress = null
+      }
+
+      let interval = null
+      let promise = new Promise((res, rej) => {
+        let max = 0.5
+        let vol = bgMusicAudio.volume;
+        let t = 200; // 200ms interval
+
+        console.log("Restoring at ", mediaTimeInSeconds(swedishAudio))
+
+        interval = setInterval(
+          function () {
+            // Reduce volume by 0.05 as long as it is above 0
+            // This works as long as you start with a multiple of 0.05!
+            if (vol < max) {
+              vol += 0.08;
+              if (vol > max) {
+                vol = max
+              }
+              bgMusicAudio.volume = vol;
+              // console.log("Restoring", swedishAudio.currentTime, cnt)
+            } else {
+              // Stop the setInterval when 0 is reached
+              clearInterval(interval);
+              window.restoringInProgress = null
+              res(1)
+            }
+          }, t);
+      })
+
+      let ret = {promise, interval};
+      window.restoringInProgress = ret
+      return ret
+    }
+
+    window.wikiScrollPositions = {}
+
+    function recordWikiScrollPosition() {
+      wikiScrollPositions[location.hash] = wikiResult.scrollTop
+    }
+
+    async function whenWikiLinkClicked(e) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.target.href.indexOf("/wiki/") > 0) {
+        recordWikiScrollPosition()
+        let linkText = e.target.href.split("/wiki/")[1].toLowerCase();
+        window.location.hash = linkText
+        populateWiki()
+      }
+    }
+
+    window.onhashchange = e => {
+      populateWiki()
+    }
+
+    function whenWikiWordClicked($result) {
+      $result.find("a").each((i, e) => {
+        // Restore scroll position if applicable
+        if (wikiScrollPositions[location.hash]) {
+          wikiResult.scrollTop = wikiScrollPositions[location.hash]
+        } else {
+          wikiResult.scrollTop = 0
+        }
+        let href = $(e).attr("href") || ''
+        if (href.indexOf("/wiki/") < 0) {
+          $(e).removeAttr("href")
+        } else {
+          $(e).click(linkClicked => {
+            whenWikiLinkClicked(linkClicked);
+          })
+        }
+      }) //find end
+    }
+
+    async function searchInSrts() {
+      await fetchSRTs()
+      let txt = window.location.hash.substring(1).toLowerCase();
+      if(window.vocabularyLines) {
+        let rs = window.vocabularyLines.map((it, i) => ({text: it, index: i})).filter(it => it.text.match(new RegExp(window.searchText, "i")))
+        window.searchResult.push({nonSrt: true, data: rs, source: "vocabulary"})
+        render(window.searchResult, window.searchText)
+      }
+
+        $('#searchedWords').html('')
+
+        let vocabCategoriesToPopulate = new Set()
+
+        Object.entries(vocabulary).forEach(it => {
+            vocabCategoriesToPopulate.add(it[0])
+        })
+
+        vocabCategoriesToPopulate.forEach(it => {
+             let vocabLines = window.vocabulary[it]
+             let heading = new Option(`${it}`, it, false, false)
+             heading.disabled = true
+             $('#searchedWords').append(heading)
+             vocabLines.forEach(line => {
+               $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
+             })
+        })
+    }
+
+    window.wikiCache = new LRUCache()
+
+    async function populateWiki() {
+      function _populateWikiPage(it) {
+        let $result = $('#wikiResult');
+        $result.html('')
+        $.parseHTML(it).forEach(it => $result.append(it))
+        $(".noprint").remove()
+        $(".mw-jump-link").remove()
+        $(".mw-headline").parent().remove()
+        $("#toc").remove()
+        $('#mw-navigation').remove()
+        $('.vector-header-container').remove()
+        $('#footer').remove()
+        $('#wikiResult a').css({'color': 'blue', 'text-decoration': 'underline'})
+        whenWikiWordClicked($result);
+
+        let headers = ['Böjs som']
+        'Som förled i sammansättningar används'.split(" ").forEach(it => headers.push(it))
+
+        let $table = $('#Svenska').find('table');
+        if (!$table.length) {
+          $table = $('table[class*="template-sv-"]')
+        }
+        if (!$table.length) {
+          $table = $('table[data-lang="sv"]')
+        }
+        if (!$table.length) {
+          $table = $('table.grammar')
+        }
+
+        let commonWords = [
+          "och", "att", "i", "en", "jag", "det", "är", "inte", "på", "vi", "har", "de", "med", "för", "du", "mig", "av", "att", "så", "den", "vid", "ut",
+          "om", "ett", "kan", "som", "definition", "böjs som"
+        ];
+        $table.find("td.note").remove()
+        $table.find("td.grammar-warning").remove()
+
+        let wordsToSearch = $table.find("tr").find('td:first')
+          .map((i, e) => $(e).text()).get()
+          .flatMap(it => it.split(/[\n ,]/))
+          .filter(it => it.trim().length && !headers.includes(it.trim().toLowerCase()))
+          .filter(it => it.length > 2).filter(it => it.match(/[a-zåäö]/i))
+          .filter(it => it.indexOf('?') < 0)
+          .filter(it => it.indexOf("åld.") < 0)
+          .filter(it => !commonWords.includes(it.toLowerCase()))
+
+        //TODO: Remove duplicates, remove common words, Remove unnecessary words
+
+        if ($("#searchWordsCheckbox").is(":checked")) {
+          wordsToSearch = wordsToSearch.map(it => `${it.trim()}`)
+          if (!wordsToSearch.length) {
+            wordsToSearch = [decodeURIComponent(w)]
+          }
+          wordsToSearch.push($('#firstHeading').text().trim())
+          $('#searchText').val(wordsToSearch.join("|"))
+          searchInSrts()
+        }
+
+       $("#Svenska")[0].scrollIntoView()
+      }
+
+      let w = window.location.hash
+      w = w.substring(1).toLowerCase()
+      let fromCache = wikiCache.get(w)
+      if (!fromCache) {
+        let res = await fetch("http://localhost:5000/proxy?url=https://sv.wiktionary.org/wiki/" + w.toLowerCase())
+        res = await res.text()
+        wikiCache.put(w, res)
+      }
+      _populateWikiPage(wikiCache.get(w))
+    }
+
+    function sanitizeInputFromReddit() {
+      $("img[alt='User avatar']").remove()
+      $("img[alt='Subreddit Icon']").parent().parent().parent().remove()
+      $("button").remove()
+      $("svg").remove()
+      $("*[data-click-id=\"body\"]").remove()
+      $("span:contains('ConcentrateSlow4119')").remove()
+      $("*[data-testid=\"comment_author_link\"]").parent().parent().parent().parent().remove()
+
+      let commCounter = 0;
+      $("span:contains('level ')").each((i, e) => {
+        let $comment = $('<div> Comment </div>');
+        if ($(e).text().trim() === 'level 1') {
+          $comment.html(`#${++commCounter} Comment`)
+        }
+        let $el = $comment.addClass('accordion')
+        $el.insertBefore($(e))
+      })
+    }
+
+    function searchSelectedText() {
+      window.location.hash = getSelectionText().toLowerCase()
+    }
+
+    function populateWords() {
+      let words = enteredWords.value
+      let html = []
+      try {
+        html = $(words).toArray()
+      } catch (e) {
+        console.log(e)
+      }
+
+      let $wordlist = $("#wordlist");
+      $wordlist.html('')
+      if (html.length) {
+        html.forEach(it => $wordlist.append(it))
+      } else {
+        words.split("\n").forEach(line => {
+          let ws = line.split(" ").map(x => `<span>${x}</span>`).join(" ")
+          ws = ws.replaceAll("\n", "<br>")
+            // .replaceAll("-", "+")
+            .replaceAll(" ", "&nbsp;")
+            .replaceAll("\t", "&nbsp;&nbsp;&nbsp;")
+          $wordlist.append(`<div class="selectable line">${ws}</div>`)
+        })
+      }
+
+      enteredWords.value = ''
+      $wordlist[0].ondblclick = e => {
+        // if ($("#searchWordsCheckbox").is(":checked")) {
+        //   $('#searchText').val(getSelectionText())
+        // }
+        searchSelectedText();
+        $("*").removeClass("highlighted-selection")
+        $(getSelectionParentElement()).addClass("highlighted-selection")
+      }
+      sanitizeInputFromReddit();
+
+      renderAccordions()
+    }
 </script>
+<div id="layout" style="width: 100%; height: 100%;"></div>
 
 <script>
 
@@ -1102,7 +1288,6 @@
 
   enablePasteForHashChange()
 </script>
-
 
 </body>
 <style>
