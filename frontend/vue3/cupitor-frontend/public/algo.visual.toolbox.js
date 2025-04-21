@@ -6,13 +6,13 @@ fabric.Image.filters.WhiteToTransparent = fabric.util.createClass({
   type: 'whiteToTransparent',
 
   applyTo: function(canvasEl) {
-    var context = canvasEl.getContext('2d'),
+    const context = canvasEl.getContext('2d'),
       imageData = context.getImageData(0, 0, canvasEl.width, canvasEl.height),
       pix = imageData.data;
 
-    var newColor = {r:0,g:0,b:0, a:0};
-    for (var i = 0, n = pix.length; i <n; i += 4) {
-      var r = pix[i],
+    const newColor = {r:0,g:0,b:0, a:0};
+    for (let i = 0, n = pix.length; i <n; i += 4) {
+      const r = pix[i],
         g = pix[i+1],
         b = pix[i+2];
 
@@ -51,9 +51,9 @@ fabric.LineArrow = fabric.util.createClass(fabric.Line, {
 
         ctx.save();
 
-        var xDiff = this.x2 - this.x1;
-        var yDiff = this.y2 - this.y1;
-        var angle = Math.atan2(this.y2 - this.y1, this.x2 - this.x1) * 180 / Math.PI;
+        const xDiff = this.x2 - this.x1;
+        const yDiff = this.y2 - this.y1;
+        const angle = Math.atan2(this.y2 - this.y1, this.x2 - this.x1) * 180 / Math.PI;
 
         ctx.translate(this.x2,this.y2)
 
@@ -121,19 +121,19 @@ fabric.Sprite = fabric.util.createClass(fabric.Image, {
   createSpriteImages: function () {
     this.spriteImages = [];
 
-    var steps = this._element.width / this.spriteWidth;
-    for (var i = 0; i < steps; i++) {
+    const steps = this._element.width / this.spriteWidth;
+    for (let i = 0; i < steps; i++) {
       this.createSpriteImage(i);
     }
   },
 
   createSpriteImage: function (i) {
-    var tmpCtx = this.tmpCanvasEl.getContext('2d');
+    const tmpCtx = this.tmpCanvasEl.getContext('2d');
     tmpCtx.clearRect(0, 0, this.tmpCanvasEl.width, this.tmpCanvasEl.height);
     tmpCtx.drawImage(this._element, -i * this.spriteWidth, 0);
 
-    var dataURL = this.tmpCanvasEl.toDataURL('image/png');
-    var tmpImg = fabric.util.createImage();
+    const dataURL = this.tmpCanvasEl.toDataURL('image/png');
+    const tmpImg = fabric.util.createImage();
 
     tmpImg.src = dataURL;
     tmpImg.crossOrigin = 'anonymous'
@@ -150,7 +150,7 @@ fabric.Sprite = fabric.util.createClass(fabric.Image, {
   },
 
   play: function () {
-    var _this = this;
+    const _this = this;
     this.animInterval = setInterval(function () {
 
       _this.onPlay && _this.onPlay();
@@ -176,7 +176,7 @@ fabric.Sprite.fromURL = function (url, callback, imgOptions) {
 
 fabric.Sprite.async = true;
 
-var Arrow = (function() {
+const Arrow = (function() {
     function Arrow(canvas) {
         this.canvas = canvas;
         this.className = 'Arrow';
@@ -185,7 +185,7 @@ var Arrow = (function() {
     }
 
     Arrow.prototype.bindEvents = function() {
-        var inst = this;
+        const inst = this;
         inst.canvas.on('mouse:down', function(o) {
             inst.onMouseDown(o);
         });
@@ -201,18 +201,18 @@ var Arrow = (function() {
     }
 
     Arrow.prototype.onMouseUp = function(o) {
-        var inst = this;
+        const inst = this;
         inst.disable();
     };
 
     Arrow.prototype.onMouseMove = function(o) {
-        var inst = this;
+        const inst = this;
         if (!inst.isEnable()) {
             return;
         }
 
-        var pointer = inst.canvas.getPointer(o.e);
-        var activeObj = inst.canvas.getActiveObject();
+        const pointer = inst.canvas.getPointer(o.e);
+        const activeObj = inst.canvas.getActiveObject();
         activeObj.set({
             x2: pointer.x,
             y2: pointer.y
@@ -222,12 +222,12 @@ var Arrow = (function() {
     };
 
     Arrow.prototype.onMouseDown = function(o) {
-        var inst = this;
+        const inst = this;
         inst.enable();
-        var pointer = inst.canvas.getPointer(o.e);
+        const pointer = inst.canvas.getPointer(o.e);
 
-        var points = [pointer.x, pointer.y, pointer.x, pointer.y];
-        var line = new fabric.LineArrow(points, {
+        const points = [pointer.x, pointer.y, pointer.x, pointer.y];
+        const line = new fabric.LineArrow(points, {
             strokeWidth: 5,
             fill: 'red',
             stroke: 'red',
@@ -267,7 +267,7 @@ function changeText(obj, data) {
 function textbox(opts){
     var opts = combined({ top: 100, left: 400, angle: 0, color: 'blue', text: '', width: 300 }, opts);
 
-    var textSample = new fabric.Textbox(opts.text, {
+    const textSample = new fabric.Textbox(opts.text, {
         fontSize: 20,
         left: opts.left,
         top: opts.top,
@@ -280,7 +280,7 @@ function textbox(opts){
         hasRotatingPoint: true,
         centerTransform: true
     });
-    let id = globalStore('tb', textSample)
+    const id = globalStore('tb', textSample)
 
     console.log(`_.${id} = textbox(${JSON.stringify(opts)})`)
     return textSample
@@ -289,7 +289,7 @@ function textbox(opts){
 function textInRect(text, x,y, optsText, optsRect){
     if(!arguments.length) console.log('textInRect(text, x,y, optsText, optsRect)')
 
-    var op = Object.assign({}, {
+    const op = Object.assign({}, {
         fontSize: 20,
         originX: 'center',
         originY: 'center',
@@ -304,11 +304,11 @@ function textInRect(text, x,y, optsText, optsRect){
         fill: 'white'
     });
 
-    var dwidth = 20, dheight = 20
+    let dwidth = 20, dheight = 20
     if(optsRect && optsRect.padx) dwidth = optsRect.padx;
     if(optsRect && optsRect.pady) dheight = optsRect.pady;
 
-    var options = Object.assign({},{
+    const options = Object.assign({},{
         width: text.width + dwidth,
         height: text.height + dheight,
         fill: 'red',
@@ -319,9 +319,9 @@ function textInRect(text, x,y, optsText, optsRect){
 
     if(optsRect.rectColor) options.fill = optsRect.rectColor;
 
-    var rect = new fabric.Rect(options);
+    const rect = new fabric.Rect(options);
 
-    var group = new fabric.Group([ rect, text ], {
+    const group = new fabric.Group([ rect, text ], {
         left: x,
         top: y
     });
@@ -347,7 +347,7 @@ function textInCircle(text, x,y, optsText, optsCirc){
     if(!arguments.length) console.log('textInCircle(text, x,y, optsText, optsCirc)')
     if(!text) return null;
 
-    var op = Object.assign({}, {
+    const op = Object.assign({}, {
         fontSize: 20,
         originX: 'center',
         originY: 'center',
@@ -357,7 +357,7 @@ function textInCircle(text, x,y, optsText, optsCirc){
 
     var text = new fabric.Text( text, op);
 
-    var options = Object.assign({},{
+    const options = Object.assign({},{
         radius: text.width,
         fill: 'red',
         originX: 'center',
@@ -366,9 +366,9 @@ function textInCircle(text, x,y, optsText, optsCirc){
 
     if(optsCirc.circleColor) options.fill = optsCirc.circleColor;
 
-    var circle = new fabric.Circle(options);
+    const circle = new fabric.Circle(options);
 
-    var group = new fabric.Group([ circle, text ], {
+    const group = new fabric.Group([ circle, text ], {
         left: x,
         top: y
     });
@@ -376,10 +376,52 @@ function textInCircle(text, x,y, optsText, optsCirc){
     return group;
 }
 
+function textInEllipse(text, x, y, optsText, optsCirc){
+  if(!arguments.length) console.log('textInEllipse(text, x,y, optsText, optsCirc)')
+  if(!text) return null;
+
+  const op = Object.assign({}, {
+    fontSize: 20,
+    originX: 'center',
+    originY: 'center',
+    fill: 'white'
+  }, optsText);
+  if(optsText.textColor) op.fill = optsText.textColor;
+
+  var text = new fabric.Text( text, op);
+
+  const options = Object.assign({},{
+    rx: text.width,
+    ry: text.height,
+    fill: 'red',
+    originX: 'center',
+    originY: 'center'
+  },optsCirc);
+
+  if(optsCirc.circleColor) options.fill = optsCirc.circleColor;
+
+  const circle = new fabric.Ellipse(options);
+
+  const group = new fabric.Group([ circle, text ], {
+    left: x,
+    top: y
+  });
+
+  return group;
+}
+
+function boundedText(type) {
+  switch (type) {
+    case 'rect': return textInRect;
+    case 'circ': return textInCircle;
+    case 'elli': return textInEllipse;
+  }
+}
+
 function addRectangle(opts){
     opts = opts || {}
 
-    var rect = new fabric.Rect({
+    const rect = new fabric.Rect({
         left: 100,
         top: 100,
         fill: opts.fill || '',
@@ -400,7 +442,7 @@ function groupFabricObjects (objs, opts){
 
     objs.forEach(o => { pc.remove(o) });
 
-    let G = new fabric.Group(objs, {left: opts.left || 100, top: opts.top || 100 })
+    const G = new fabric.Group(objs, {left: opts.left || 100, top: opts.top || 100 })
     pc.add(G);
     G.setCoords()
 
@@ -410,8 +452,8 @@ function groupFabricObjects (objs, opts){
 }
 
 function arrow(x1,y1,x2,y2, opts){
-    var options = combined({},  { strokeWidth: 1, stroke: 'black', fill: 'white', triangleWidth: 10, triangleHeight: 10}, opts)
-    var tri = new fabric.Triangle({
+    const options = combined({},  { strokeWidth: 1, stroke: 'black', fill: 'white', triangleWidth: 10, triangleHeight: 10}, opts)
+    const tri = new fabric.Triangle({
         left: x2,
         top: y2,
         strokeWidth: options.strokeWidth,
@@ -424,11 +466,11 @@ function arrow(x1,y1,x2,y2, opts){
         originY: 'center'
     });
 
-    var slope =  Math.atan2(y2- y1, x2- x1)*180/Math.PI;
+    const slope =  Math.atan2(y2- y1, x2- x1)*180/Math.PI;
     tri.rotate(90+slope);
-    var line = new fabric.Line([ x1,y1,x2,y2 ], { stroke: options.stroke, strokeWidth: options.strokeWidth})
+    const line = new fabric.Line([ x1,y1,x2,y2 ], { stroke: options.stroke, strokeWidth: options.strokeWidth})
 
-    var group = new fabric.Group([ line, tri ], {
+    const group = new fabric.Group([ line, tri ], {
         left: x1,
         top: y1
     });
@@ -436,42 +478,8 @@ function arrow(x1,y1,x2,y2, opts){
     return group
 }
 
-function textInEllipse(text, x,y, optsText, optsCirc){
-    if(!arguments.length) console.log('textInEllipse(text, x,y, optsText, optsCirc)')
-    if(!text) return null;
-
-    var op = Object.assign({}, {
-        fontSize: 20,
-        originX: 'center',
-        originY: 'center',
-        fill: 'white'
-    }, optsText);
-    if(optsText.textColor) op.fill = optsText.textColor;
-
-    var text = new fabric.Text( text, op);
-
-    var options = Object.assign({},{
-        rx: text.width,
-        ry: text.height,
-        fill: 'red',
-        originX: 'center',
-        originY: 'center'
-    },optsCirc);
-
-    if(optsCirc.circleColor) options.fill = optsCirc.circleColor;
-
-    var circle = new fabric.Ellipse(options);
-
-    var group = new fabric.Group([ circle, text ], {
-        left: x,
-        top: y
-    });
-
-    return group;
-}
-
 function text(text){
-    var txt = new fabric.Text( text+"", {
+    const txt = new fabric.Text( text+"", {
         fontSize: 20,
         originX: 'center',
         originY: 'center',
@@ -483,10 +491,10 @@ function text(text){
 function arrayOfCircledTextsAt(x,y, canvas, opts){
     if(!arguments.length) console.log('arrayOfCircledTextsAt(x,y, canvas, opts)')
 
-    var nextx = x, nexty = y;
-    var addedObjects = []
-    var options = Object.assign({},{ gapx: 3/2, gapy: 3/2 }, opts)
-    var texts = []
+    let nextx = x, nexty = y;
+    let addedObjects = []
+    const options = Object.assign({},{ gapx: 3/2, gapy: 3/2 }, opts)
+    const texts = []
 
     function Item(item){
         this.stopAnimation = false;
@@ -499,7 +507,7 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
 
         this.originalProps = { fill: item.item(0).fill, radius: item.item(0).radius}
 
-        var me = this;
+        const me = this;
         this.animateCircleInLoop = function(x,y,z){
 
             me.circle.animate(x,y(), Object.assign({}, {
@@ -542,7 +550,7 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
         }
 
         this.moveToPoint = function (x,y, opts){
-            var options = Object.assign({}, {
+            const options = Object.assign({}, {
                 duration: 1000,
                 onChange: canvas.renderAll.bind(canvas),
                 onComplete: function() {}
@@ -553,12 +561,12 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
         }
 
         this.moveBy = function (fn, opts){
-            var pxy = fn(this)
+            const pxy = fn(this)
             this.moveToPoint(pxy[0], pxy[1], opts)
         }
 
         this.move = function(where, other, opts){
-            var options = combined({}, { gap: 0, dx: 0, dy: 0}, opts)
+            const options = combined({}, { gap: 0, dx: 0, dy: 0}, opts)
 
             cases = ['toLeftOf', 'below', 'above', 'toRightOf']
 
@@ -588,11 +596,11 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
         this.stopRightNow = function(){ me.stopRightNow = true; }
 
         this.highlightByZooming = function(opts){
-            var size = 'original';
+            const size = 'original';
 
             me.stopAnimation = false;
 
-            var fn = null;
+            let fn = null;
             fn = () => {
                 me.animateCircle('radius',
                     (me.circle.radius == me.originalProps.radius ? '-=8' : '+=8'),
@@ -613,10 +621,10 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
         }
         this.connections = []
         this.connectTo = function (other, opts){
-            var line = null;
+            let line = null;
 
             var opts = opts || { dx:0, dy: 0 }
-            var options = combined({
+            const options = combined({
                 fill: 'red',
                 stroke: 'red',
                 strokeWidth: 3
@@ -676,7 +684,7 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
         opts1 = combined({},{dx: 0, dy: 0}, opts1)
         opts2 = combined({},{dx: 0, dy: 0}, opts2)
 
-        var tmp = [this.at(x).all.left, this.at(x).all.top]
+        const tmp = [this.at(x).all.left, this.at(x).all.top]
         this.at(x).moveToPoint(this.at(y).all.left + opts1.dx, this.at(y).all.top + opts1.dy)
 
         this.at(y).moveToPoint(tmp[0] + opts2.dx, tmp[1] + opts2.dy)
@@ -694,18 +702,18 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
     }
 
     this.normalize = function(){
-        var max = 0;
+        let max = 0;
         texts.forEach(t => {
-            var txt = text(t);
+            const txt = text(t);
             if(txt.width > max) max = txt.width;
         });
-        var radius = options.radius || max
+        const radius = options.radius || max
 
         this.reset();
         const specificSizes = options.specificSizes || {}
 
         texts.forEach((t,i )=> {
-            var group = textInCircle(t, nextx,nexty, options, combined({ radius: specificSizes[i] || radius}, options));
+            const group = textInCircle(t, nextx,nexty, options, combined({ radius: specificSizes[i] || radius}, options));
             canvas.add(group);
 
             nextx = nextx + group.width*options.gapx
@@ -727,7 +735,7 @@ window.itemRecord = {}
 function showArray(items,x,y,canvas, opts){
     if(!arguments.length) console.log('showArray(items,x,y,canvas, opts)')
 
-    var arr = new arrayOfCircledTextsAt(x,y,canvas, opts)
+    const arr = new arrayOfCircledTextsAt(x,y,canvas, opts)
     items.forEach(item => arr.add( item+''))
     arr.normalize()
 
@@ -739,12 +747,12 @@ function showArray(items,x,y,canvas, opts){
 function showMatrix(arryOfItems, x,y,canvas, opts){
     if(!arguments.length) console.log('showMatrix(arryOfItems, x,y,canvas, opts)')
 
-    var rad = arryOfItems.reduce((a,b) => a.concat(b)).reduce( (mx,a) => Math.max(mx, text(a).width) )
-    var options = Object.assign({}, { gapx: 3/2, gapy: 3/2, radius: rad}, opts)
+    const rad = arryOfItems.reduce((a,b) => a.concat(b)).reduce( (mx,a) => Math.max(mx, text(a).width) )
+    const options = Object.assign({}, { gapx: 3/2, gapy: 3/2, radius: rad}, opts)
 
-    var matrix = []
+    const matrix = []
     arryOfItems.forEach( items => {
-        var arr = showArray(items,x,y, canvas, options)
+        const arr = showArray(items,x,y, canvas, options)
         matrix.push(arr)
         y += arr.at(1).all.height*options.gapy
     });
@@ -771,15 +779,18 @@ function visualAlgoMethods(){
     ]
 }
 
-function animate(obj, props,opts){
-    let canvas = pc;
-    let options = Object.assign({}, {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function animate(obj, props, opts){
+    if(!obj) return
+    const canvas = pc;
+    const objSpecificUpdate = obj?.onAnimationChange || (() => {});
+    const options = Object.assign({}, {
         duration: 1000,
-        onChange: canvas.renderAll.bind(canvas),
+        onChange: () => { canvas.renderAll.bind(canvas); objSpecificUpdate(); canvas.renderAll(); },
         onComplete: function() {}
     },opts);
 
-    let fn = options.onComplete;
+    const fn = options.onComplete;
 
     return new Promise(function(myResolve, myReject) {
         options.onComplete = (e) => {
@@ -807,7 +818,7 @@ function positionTogether(first, second){
 }
 
 function appendTableInto(table, target, opts){
-    var options = combined({}, {
+    const options = combined({}, {
         xtitle: '', ytitle: '',
         xheaders: [], yheaders: [],
         width: 100, height: 60,
@@ -821,7 +832,7 @@ function appendTableInto(table, target, opts){
         table = range(0,options.yheaders.length).map(i => range(0, options.xheaders.length).map(j => ' '))
     }
 
-    var css = `
+    const css = `
 .verticalTableHeader {
     text-align:center;
     white-space:nowrap;
@@ -858,7 +869,7 @@ function appendTableInto(table, target, opts){
     }
 
 
-    var tableHtml = `<table id="${options.id}" style="position: absolute; " class="main-container">
+    const tableHtml = `<table id="${options.id}" style="position: absolute; " class="main-container">
   <tr>
     <td>
 	  	<tr width="100%" style="color: blue; height: 20px;">
@@ -908,14 +919,14 @@ function appendTableInto(table, target, opts){
 //  $(table).find("tr:nth(1)").remove()
 
     $(function() {
-        var thHeight = table.find("th:first").height();
+        const thHeight = table.find("th:first").height();
         table.find("th").resizable({
             handles: "e",
             minHeight: thHeight,
             maxHeight: thHeight,
             minWidth: 40,
             resize: function (event, ui) {
-                var sizerID = "#" + $(event.target).attr("id") + "-sizer";
+                const sizerID = "#" + $(event.target).attr("id") + "-sizer";
                 $(sizerID).width(ui.size.width);
             }
         });
@@ -927,10 +938,10 @@ function appendTableInto(table, target, opts){
 //	table.find('table.data').css(opts)
 //	setTimeout(()=> table.find('.yheader').css({'padding-left': '4%','padding-right': '4%'}), 500);
 
-    let each = fn => {
+    const each = fn => {
         for(let i = 0; i < opts.yheaders.length; i++) {
             for(let j = 0; j < opts.xheaders.length; j++) {
-                let el = $($(table.find('tr.data')[i]).find('td')[j]);
+                const el = $($(table.find('tr.data')[i]).find('td')[j]);
                 fn(i, j, el)
             }
         }
@@ -958,11 +969,11 @@ function appendTableInto(table, target, opts){
 }
 
 function midOf(obj){
-    var rect = {x: null, y: null,w: null, h: null}
+    const rect = {x: null, y: null,w: null, h: null}
 
     if(!obj.left) {
         try {
-            var tl = $(obj).position();
+            const tl = $(obj).position();
             rect.x = tl.left; rect.y = tl.top;
         } catch(e){ console.log(e); }
     } else {
@@ -980,13 +991,13 @@ function midOf(obj){
 }
 
 function centerFirstToSecond(obj, obj2){
-    var c2 = midOf(obj2);
+    const c2 = midOf(obj2);
 
-    var rect = {x: null, y: null,w: null, h: null}
+    const rect = {x: null, y: null,w: null, h: null}
 
     if(!obj.left) {
         try {
-            var tl = $(obj).position();
+            const tl = $(obj).position();
             rect.x = tl.left; rect.y = tl.top;
         } catch(e){ console.log(e); }
     } else {
@@ -1003,9 +1014,9 @@ function centerFirstToSecond(obj, obj2){
 
 window.curry = fn => { // (1)
 
-    let arity = fn.length; //(2) number of arguments fn expects
+    const arity = fn.length; //(2) number of arguments fn expects
     return (...args) => { // (3)
-        let firstArgs = args.length; // (4)
+        const firstArgs = args.length; // (4)
         if (firstArgs >= arity) { //correct number of arguments
 
             return fn(...args); // (5)
@@ -1020,7 +1031,7 @@ window.curry = fn => { // (1)
 
 window.Accordion = {
     createAll: function(className){
-        var titles = [];
+        const titles = [];
         $("."+ className +" .title").each((i,e) => titles.push(e))
 
         const clickHandler = (target) => {
@@ -1043,11 +1054,11 @@ window.Accordion = {
 
 function bounds(obj){
 
-    var rect = {x: null, y: null,w: null, h: null, right: null, bottom: null}
+    const rect = {x: null, y: null,w: null, h: null, right: null, bottom: null}
 
     if(!obj.left) {
         try {
-            var tl = $(obj).position();
+            const tl = $(obj).position();
             rect.x = tl.left; rect.y = tl.top;
         } catch(e){ console.log(e); }
     } else {
@@ -1072,7 +1083,7 @@ function connect(canvas, it, other, opts){
     var line = null;
 
     var opts = opts || { dx:0, dy: 0 }
-    var options = combined({
+    const options = combined({
         fill: 'black',
         stroke: 'black',
         strokeWidth: 2
@@ -1082,8 +1093,8 @@ function connect(canvas, it, other, opts){
         other = other(this)
     }
 
-    var x1,y1,x2,y2;
-    var midx1 = it.left+it.width/2, midy1 = it.top+it.height/2, midx2 = other.left+other.width/2, midy2 = other.top + other.height/2
+    let x1,y1,x2,y2;
+    const midx1 = it.left+it.width/2, midy1 = it.top+it.height/2, midx2 = other.left+other.width/2, midy2 = other.top + other.height/2
     if(other.left > it.left + it.width){
         x1 = it.left+it.width; x2 = other.left;
     } else if(other.left + other.width < it.left) {
@@ -1117,11 +1128,11 @@ function connect(canvas, it, other, opts){
 // This function does the actual work
 function matex(text, callback) {
     // Create a script element with the LaTeX code
-    var div = document.createElement("div");
+    const div = document.createElement("div");
     div.style.position = "absolute";
     div.style.left = "-1000px";
     document.body.appendChild(div);
-    var se = document.createElement("script");
+    const se = document.createElement("script");
     se.setAttribute("type", "math/tex");
     se.innerHTML = text;
     div.appendChild(se);
@@ -1133,29 +1144,29 @@ function matex(text, callback) {
         // actually displaying the output
         var display = function() {
             // Get the frame where the current Math is displayed
-            var frame = document.getElementById(se.id + "-Frame");
+            const frame = document.getElementById(se.id + "-Frame");
             if(!frame) {
                 setTimeout(display, 500);
                 return;
             }
 
             // Load the SVG
-            var svg = frame.getElementsByTagName("svg")[0];
+            const svg = frame.getElementsByTagName("svg")[0];
             svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
             svg.setAttribute("version", "1.1");
-            var height = svg.parentNode.offsetHeight;
-            var width = svg.parentNode.offsetWidth;
+            const height = svg.parentNode.offsetHeight;
+            const width = svg.parentNode.offsetWidth;
             svg.setAttribute("height", height);
             svg.setAttribute("width", width);
             svg.removeAttribute("style");
 
             // Embed the global MathJAX elements to it
-            var mathJaxGlobal = document.getElementById("MathJax_SVG_glyphs");
+            const mathJaxGlobal = document.getElementById("MathJax_SVG_glyphs");
             svg.appendChild(mathJaxGlobal.cloneNode(true));
 
             // Create a data URL
-            var svgSource = '<?xml version="1.0" encoding="UTF-8"?>' + "\n" + '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">' + "\n" + svg.outerHTML;
-            var retval = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgSource)));
+            const svgSource = '<?xml version="1.0" encoding="UTF-8"?>' + "\n" + '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">' + "\n" + svg.outerHTML;
+            const retval = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgSource)));
 
             // Remove the temporary elements
             document.body.removeChild(div);
@@ -1167,25 +1178,25 @@ function matex(text, callback) {
     });
 }
 
-var highlightByZooming = function(object, canvas, opts){
-    var me = object.externalData || {}
+const highlightByZooming = function(object, canvas, opts){
+    const me = object.externalData || {}
 
     me.stopAnimation = false;
 
-    var fn = null;
+    let fn = null;
 
-    var originalZoomY = object.zoomY
-    var originalZoomX = object.zoomX
+    const originalZoomY = object.zoomY
+    const originalZoomX = object.zoomX
     me.originalProps = me.originalProps || {}
     me.originalProps.zoomX = originalZoomX
     me.originalProps.zoomY = originalZoomY
 
-    var range = (x) => [x*2, 2*x/3] //zoomout, zoomin
+    const range = (x) => [x*2, 2*x/3] //zoomout, zoomin
 
-    var zoomX = range(originalZoomX)
-    var zoomY = range(originalZoomY)
+    const zoomX = range(originalZoomX)
+    const zoomY = range(originalZoomY)
 
-    var timer = 0;
+    let timer = 0;
     fn = (prop, values, opts) => {
         opts = opts || {}
         object.animate(prop, values[timer], Object.assign({},
@@ -1219,7 +1230,7 @@ var highlightByZooming = function(object, canvas, opts){
 function stopAnimation(object, canvas){
 
     if(object.externalData) {
-        var me = object.externalData
+        const me = object.externalData
         me.stopAnimation = true;
         if(!me.animating) return null;
 
@@ -1245,7 +1256,7 @@ function makeLine(coords, opts) {
 }
 
 function hide() {
-  var items = Array.prototype.slice.apply(arguments);
+  const items = Array.prototype.slice.apply(arguments);
   items.forEach(it => {
     if (it instanceof fabric.Object) {
       it.setOpacity(0);
@@ -1265,18 +1276,18 @@ function hide() {
  * @returns {Promise<unknown>}
  */
 function addFromJSON(obj, id, top, left) {
-  let ids = [id];
+  const ids = [id];
   if (!obj) return;
-  let canvas = pc;
+  const canvas = pc;
 
-  let items = [obj]
+  const items = [obj]
 
   return new Promise((myResolve, myReject) => {
     fabric.util.enlivenObjects(items, function (objects) {
-      var origRenderOnAddRemove = canvas.renderOnAddRemove;
+      const origRenderOnAddRemove = canvas.renderOnAddRemove;
       canvas.renderOnAddRemove = false;
 
-      let res = []
+      const res = []
       let i = 0;
       objects.forEach(function (o) {
         o.set({top: top, left: left});
