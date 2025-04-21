@@ -550,49 +550,10 @@
                 })
             }
         })
+
         pc.on('object:moving', e => {
             const t = e.target;
-            const getPointCoords = (obj, pt) => {
-                if (pt == 'mt') {
-                    return obj.aCoords.mt || {
-                        y: obj.oCoords.tl.y,
-                        x: obj.oCoords.tl.x + obj.width / 2
-                    }
-                }
-                if (pt == 'mb') {
-                    return obj.aCoords.mb || {
-                        y: obj.oCoords.bl.y,
-                        x: obj.oCoords.bl.x + obj.width / 2
-                    }
-                }
-            };
-
-            if (t.treeConnection) {
-                const inward = t.treeConnection.incoming || {};
-                const outward = t.treeConnection.outgoing || {};
-
-                if (inward.lines && inward.point) {
-                    var p = getPointCoords(t, inward.point)
-                    inward.lines.forEach(l => {
-                        l.set('x2', p.x);
-                        l.set('y2', p.y);
-                        t.setCoords();
-                        l.setCoords();
-                        pc.renderAll();
-                    });
-                }
-                if (outward.lines && outward.point) {
-                    var p = getPointCoords(t, outward.point)
-                    outward.lines.forEach(l => {
-                        l.set('x1', p.x);
-                        l.set('y1', p.y);
-                        t.setCoords();
-                        l.setCoords();
-                        pc.renderAll();
-                    });
-                }
-
-            }
+            updateTreeItem(t);
         });
 
         $('#drawing-mode-options').hide();
@@ -682,8 +643,8 @@
         const mapping = {
             'l': 'clear-canvas',
             'Delete': 'delete-selected',
+            'Backspace': 'delete-selected',
             'd': 'flip-drawing',
-            't': 'create-small-text',
             'T': 'create-text',
             'r': 'reden',
             'g': 'greenen',
@@ -695,23 +656,30 @@
             if($('.commands-select').is(":focus") || window.commandSelectionIsGoingOn){
                 console.log('select is in focus. returning.')
             }
-			if(e.keyCode == 32 && e.target == document.body) {
+			if(e.keyCode === 32 && e.target === document.body) {
 				e.preventDefault();
 			}
 			
-            if (document.getElementById('mathjaxDialog').style.display == 'block') return false;
-            if (pc.getActiveObject() && pc.getActiveObject().type == 'textbox' && pc.getActiveObject().isEditing) return;
+            if (document.getElementById('mathjaxDialog').style.display === 'block') return false;
+            if (pc.getActiveObject() && pc.getActiveObject().type === 'textbox' && pc.getActiveObject().isEditing) return;
             if (mapping[e.key]) $("#" + mapping[e.key]).click()
-            if (e.keyCode == 187) { //zoom in
+            if (e.keyCode === 187) { //zoom in
                 zoomSelectedObject(true)
             }
-			if(e.keyCode == 32){
+            if(e.key === 't') {
+                if(pc.getActiveObject()) {
+                    $('#makeTree').click()
+                } else {
+                    $('#create-small-text').click()
+                }
+            }
+			if(e.keyCode === 32){
 				toggleRecording()
 			}
-            if (e.keyCode == 189) { //zoom out
+            if (e.keyCode === 189) { //zoom out
                 zoomSelectedObject(false)
             }
-            if (e.keyCode == 46) {
+            if (e.keyCode === 46) {
                 $('#delete-selected').click()
             }
             switch (e.keyCode) {

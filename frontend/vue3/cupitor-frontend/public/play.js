@@ -4,6 +4,9 @@ window.globalVariableNames = {
   "texts": 0
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function it() { return pc.getActiveObject() }
+
 function globalStore(key, obj) {
   if (!window.globalMapping) window.globalMapping = {}
   if (!globalMapping[key]) globalMapping[key] = 0
@@ -856,6 +859,7 @@ function moveActiveObject(prop, amount) {
   if (!activeObject) return;
   activeObject[prop] = activeObject[prop] + amount
   activeObject.setCoords();
+  updateTreeItem(activeObject)
   pc.renderAll()
 }
 
@@ -979,7 +983,7 @@ function editSelectedObject() {
   const obj = pc.getActiveObject()
 
   const p = prompt('Enter command')
-  if (!p || !p.split(":").length == 2) return
+  if (!p || p.split(":").length !== 2) return
 
   const command = p.split(":")[0]
   const data = p.split(":")[1].trim()
@@ -1009,7 +1013,7 @@ function editSelectedObject() {
       stopAnimation(obj, pc)
       break
     case 'controls':
-      obj.hasControls = data === 'on' ? true : false
+      obj.hasControls = data === 'on'
       break;
     case 'hide':
 
@@ -1033,7 +1037,30 @@ function makeLine(coords) {
   });
 }
 
+/***
+  values
+    ex. "child1, child2, child3",
+        "rect; child1, child2"
+        "shape:rect,bg:red,fg:white; child1, child2" --TODO
+ */
 function makeSubtree(node, values, pc, opts) {
+  const split = values.split(";")
+  let cmds = ''
+  if(split.length === 2) {
+    cmds = split[0]
+    values = split[1]
+  } else if(split.length === 1) {
+    cmds = 'elli';
+    values = split[0]
+  }
+
+  values = values.split(',')
+  if(values.length === 0) {
+    return
+  }
+
+  const shape = cmds.trim()
+
   const options = opts || {
     width: 150,
     height: 50
@@ -1060,18 +1087,19 @@ function makeSubtree(node, values, pc, opts) {
         y = py + options.height;
 
     const addConnection = (x1, y1, x2, y2, text) => {
-      const circ = textInEllipse(text, x2, y2, {}, {})
-      pc.add(circ)
-      const line = makeLine([x1, y1, circ.oCoords.mt.x, circ.oCoords.mt.y])
+      const textNode = boundedText(shape)(text, x2, y2, {}, {})
+      pc.add(textNode)
+      const line = makeLine([x1, y1, textNode.oCoords.mt.x, textNode.oCoords.mt.y])
       pc.add(line)
       node.treeConnection.outgoing.lines.push(line)
 
-      circ.treeConnection = {
+      textNode.treeConnection = {
         incoming: {
           lines: [line],
           point: 'mt'
         }
       }
+      textNode.onAnimationChange = () => updateTreeItem(textNode)
     }
 
     addConnection(px, py, x, y, values[mid])
@@ -1086,6 +1114,49 @@ function makeSubtree(node, values, pc, opts) {
     for (let i = mid + 1; i < values.length; i++) {
       x = x + w;
       addConnection(px, py, x, y, values[i])
+    }
+  }
+}
+
+function updateTreeItem(t) {
+  const getPointCoords = (obj, pt) => {
+    if (pt === 'mt') {
+      return obj.aCoords.mt || {
+        y: obj.oCoords.tl.y,
+        x: obj.oCoords.tl.x + obj.width / 2
+      }
+    }
+    if (pt === 'mb') {
+      return obj.aCoords.mb || {
+        y: obj.oCoords.bl.y,
+        x: obj.oCoords.bl.x + obj.width / 2
+      }
+    }
+  };
+
+  if (t.treeConnection) {
+    const inward = t.treeConnection.incoming || {};
+    const outward = t.treeConnection.outgoing || {};
+
+    if (inward.lines && inward.point) {
+      var p = getPointCoords(t, inward.point)
+      inward.lines.forEach(l => {
+        l.set('x2', p.x);
+        l.set('y2', p.y);
+        t.setCoords();
+        l.setCoords();
+        pc.renderAll();
+      });
+    }
+    if (outward.lines && outward.point) {
+      var p = getPointCoords(t, outward.point)
+      outward.lines.forEach(l => {
+        l.set('x1', p.x);
+        l.set('y1', p.y);
+        t.setCoords();
+        l.setCoords();
+        pc.renderAll();
+      });
     }
   }
 }
@@ -1117,9 +1188,9 @@ function onMakeTreeClick() {
     alert('Select an object first');
     return;
   }
-  const p = prompt('Enter command')
+  const p = prompt('Enter command. E.g. child1, child2, child3 OR rect; child1, child2')
   if (!p) return;
-  makeSubtree(pc.getActiveObject(), p.split(','), pc)
+  makeSubtree(pc.getActiveObject(), p, pc)
 }
 
 
