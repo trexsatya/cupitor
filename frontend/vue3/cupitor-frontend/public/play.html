@@ -86,7 +86,10 @@
 </head>
 
 <body >
-    
+    <span style="position:fixed;top:2rem;right: 1rem">
+        Lyr: <span id="layerInfo" style="color: blue">PC</span>;
+        Uid: <span id="selectedObjId" style="color: blue"></span>;
+    </span>
 
     <svg id="horizRuler" xmlns="http://www.w3.org/2000/svg" style="height: 40px; position: fixed; top: 0;"></svg>
     <svg id="vertRuler" xmlns="http://www.w3.org/2000/svg" style="height: 1000px;position: absolute; left: 0;"></svg>
@@ -531,6 +534,7 @@
         })
         pc.on('object:selected', function(e) {
             const obj = e.target;
+            $('#selectedObjId').html(obj.uid)
             if (window.connectionMode) {
                 if (!window.firstOfConnection) firstOfConnection = obj
                 else {
@@ -553,6 +557,14 @@
 
         pc.on('object:moving', e => {
             const t = e.target;
+            t._objects?.forEach(updateTreeItem)
+            updateTreeItem(t);
+        });
+
+        pc.on('object:modified', function(e) {
+            const t = e.target;
+            console.log(t, "modified");
+            t._objects?.forEach(l => updateTreeItem(l, t.aCoords))
             updateTreeItem(t);
         });
 
@@ -646,7 +658,6 @@
             'Backspace': 'delete-selected',
             'd': 'flip-drawing',
             'T': 'create-text',
-            'r': 'reden',
             'g': 'greenen',
             'b': 'bluen',
             'e': 'execute-next',
@@ -672,6 +683,10 @@
                 } else {
                     $('#create-small-text').click()
                 }
+            }
+            if(e.key === 'r') {
+                $('#horizRuler').toggle()
+                $('#vertRuler').toggle()
             }
 			if(e.keyCode === 32){
 				toggleRecording()
@@ -720,15 +735,15 @@
                 case 69: //'e'
                     editSelectedObject()
                     break
-				case 188: //,
+				case 188: //Comma,
 				    if(e.ctrlKey)
                     moveToFront('pc')
                     break
-				case 190: //.
+				case 190: //Dot.
 				    if(e.ctrlKey)
                     moveToFront('oc')
                     break
-				case 191: ///
+				case 84: //t
 				    if(e.ctrlKey) {
 				        e.preventDefault()
                         moveToFront('txt')

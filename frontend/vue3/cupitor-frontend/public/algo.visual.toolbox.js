@@ -286,8 +286,9 @@ function textbox(opts){
     return textSample
 }
 
-function textInRect(text, x,y, optsText, optsRect){
+function textInRect(textStr, x, y, optsText, optsRect){
     if(!arguments.length) console.log('textInRect(text, x,y, optsText, optsRect)')
+    if(!textStr) return null;
 
     const op = Object.assign({}, {
         fontSize: 20,
@@ -297,11 +298,11 @@ function textInRect(text, x,y, optsText, optsRect){
     }, optsText);
     if(optsText.textColor) op.fill = optsText.textColor;
 
-    var text = new fabric.Text( " "+text+" ", {
-        fontSize: 20,
-        originX: 'center',
-        originY: 'center',
-        fill: 'white'
+    const text = new fabric.Text(" " + textStr + " ", {
+      fontSize: 20,
+      originX: 'center',
+      originY: 'center',
+      fill: op.fill
     });
 
     let dwidth = 20, dheight = 20
@@ -328,6 +329,7 @@ function textInRect(text, x,y, optsText, optsRect){
 
     group.customData = {
         type: "textInRect",
+        text: textStr,
         foreground: function(color) {
             if(!color) {
 
@@ -343,9 +345,9 @@ function textInRect(text, x,y, optsText, optsRect){
     return group;
 }
 
-function textInCircle(text, x,y, optsText, optsCirc){
+function textInCircle(textStr, x,y, optsText, optsCirc){
     if(!arguments.length) console.log('textInCircle(text, x,y, optsText, optsCirc)')
-    if(!text) return null;
+    if(!textStr) return null;
 
     const op = Object.assign({}, {
         fontSize: 20,
@@ -355,7 +357,7 @@ function textInCircle(text, x,y, optsText, optsCirc){
     }, optsText);
     if(optsText.textColor) op.fill = optsText.textColor;
 
-    var text = new fabric.Text( text, op);
+    const text = new fabric.Text( textStr, op);
 
     const options = Object.assign({},{
         radius: text.width,
@@ -373,12 +375,17 @@ function textInCircle(text, x,y, optsText, optsCirc){
         top: y
     });
 
+    group.customData = {
+      type: "textInCircle",
+      text: textStr
+    }
+
     return group;
 }
 
-function textInEllipse(text, x, y, optsText, optsCirc){
+function textInEllipse(textStr, x, y, optsText, optsCirc){
   if(!arguments.length) console.log('textInEllipse(text, x,y, optsText, optsCirc)')
-  if(!text) return null;
+  if(!textStr) return null;
 
   const op = Object.assign({}, {
     fontSize: 20,
@@ -388,7 +395,7 @@ function textInEllipse(text, x, y, optsText, optsCirc){
   }, optsText);
   if(optsText.textColor) op.fill = optsText.textColor;
 
-  var text = new fabric.Text( text, op);
+  const text = new fabric.Text( textStr, op);
 
   const options = Object.assign({},{
     rx: text.width,
@@ -407,9 +414,15 @@ function textInEllipse(text, x, y, optsText, optsCirc){
     top: y
   });
 
+  group.customData = {
+    type: "textInEllipse",
+    text: textStr
+  }
+
   return group;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function boundedText(type) {
   switch (type) {
     case 'rect': return textInRect;
@@ -485,6 +498,11 @@ function text(text){
         originY: 'center',
         fill: 'white'
     });
+    txt.customData = {
+      type: "text",
+      text: text
+    }
+
     return txt
 }
 
