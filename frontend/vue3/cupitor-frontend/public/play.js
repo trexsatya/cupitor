@@ -852,6 +852,7 @@ function zoomSelectedObject(isPlus) {
   }
   activeObject.setCoords();
   pc.renderAll()
+  updateTreeItem(activeObject)
 }
 
 function moveActiveObject(prop, amount) {
@@ -1029,12 +1030,16 @@ function editSelectedObject() {
 }
 
 function makeLine(coords) {
-  return new fabric.Line(coords, {
+  let line = new fabric.Line(coords, {
     fill: 'red',
     stroke: 'red',
     strokeWidth: 2,
     selectable: false
   });
+  line.customData = {
+    type: "makeLine",
+  }
+  return line;
 }
 
 /***
@@ -1050,7 +1055,7 @@ function makeSubtree(node, values, pc, opts) {
     cmds = split[0]
     values = split[1]
   } else if(split.length === 1) {
-    cmds = 'elli';
+    cmds = 'none';
     values = split[0]
   }
 
@@ -1066,12 +1071,13 @@ function makeSubtree(node, values, pc, opts) {
     height: 50
   };
 
+  let defaultOutgoing = () => ({
+    lines: [],
+    point: 'mb'
+  });
   node.treeConnection = node.treeConnection || {
     incoming: {},
-    outgoing: {
-      lines: [],
-      point: 'mb'
-    }
+    outgoing: defaultOutgoing()
   };
 
   if (node.oCoords && node.oCoords.mb) {
@@ -1087,10 +1093,13 @@ function makeSubtree(node, values, pc, opts) {
         y = py + options.height;
 
     const addConnection = (x1, y1, x2, y2, text) => {
-      const textNode = boundedText(shape)(text, x2, y2, {}, {})
+      const textNode = shape === 'none' ?
+          textInRect(text, x2, y2, {fill: 'black'}, {fill: 'white' })
+          : boundedText(shape)(text, x2, y2, {}, {})
       pc.add(textNode)
       const line = makeLine([x1, y1, textNode.oCoords.mt.x, textNode.oCoords.mt.y])
       pc.add(line)
+      node.treeConnection.outgoing = node.treeConnection.outgoing || defaultOutgoing()
       node.treeConnection.outgoing.lines.push(line)
 
       textNode.treeConnection = {
@@ -1118,18 +1127,27 @@ function makeSubtree(node, values, pc, opts) {
   }
 }
 
+//Returns calculated top(y), left(x) works even if object is in group
+let calculateActualPosition = (object) => {
+  let mat = object.calcTransformMatrix(false);
+  // Assuming objects origin x/y is 'left'/'top'; TODO for others
+  return  {x: mat[4] - object.width/2, y: mat[5] - object.height/2}
+};
+
 function updateTreeItem(t) {
   const getPointCoords = (obj, pt) => {
     if (pt === 'mt') {
-      return obj.aCoords.mt || {
-        y: obj.oCoords.tl.y,
-        x: obj.oCoords.tl.x + obj.width / 2
+      const c = calculateActualPosition(obj)
+      return {
+        y: c.y,
+        x: c.x + obj.width / 2
       }
     }
     if (pt === 'mb') {
-      return obj.aCoords.mb || {
-        y: obj.oCoords.bl.y,
-        x: obj.oCoords.bl.x + obj.width / 2
+      const c = calculateActualPosition(obj)
+      return {
+        y: c.y + obj.height,
+        x: c.x + obj.width / 2
       }
     }
   };
@@ -1260,6 +1278,7 @@ function moveToFront(whichOne) {
       window.layerOnFront = 'txt'
       break;
   }
+  $('#layerInfo').html(window.layerOnFront)
 }//end moveToFront
 
 //play from files
