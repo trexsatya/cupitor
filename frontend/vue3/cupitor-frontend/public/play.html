@@ -131,6 +131,7 @@
             <option value="CMOGDIM">Create Matrix Of Given Dimension</option>
             <option value="CAOGSD">Create Array Of Given Data</option>
             <option value="CAOGSZ">Create Array Of Given Size</option>
+            <option value="LDANIM">Load Animation</option>
         </select>
 
         <button id="btnStart">REC</button>
@@ -187,6 +188,14 @@
         $('.commands-select').on('select2:select', function (e) {
             const data = e.params.data;
             console.log(data);
+            if(data.id === 'LDANIM') {
+                fetch("http://localhost:5000/animation-script")
+                    .then(res => res.json())
+                    .then(data => {
+                        console.log(data);
+                    })
+                return
+            }
             $(`#${data.id}-dialog`).dialog({
                 width: 800,
                 height: 400,
@@ -689,7 +698,7 @@
                 $('#vertRuler').toggle()
             }
 			if(e.keyCode === 32){
-				toggleRecording()
+				// toggleRecording()
 			}
             if (e.keyCode === 189) { //zoom out
                 zoomSelectedObject(false)
