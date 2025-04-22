@@ -1,11 +1,11 @@
 function range(start, count, arg3, arg4) {
-  if(!arguments.length) console.log('range(start, count)')
+  if (!arguments.length) console.log('range(start, count)')
 
   let filter, fn;
-  if(arguments.length === 2){
+  if (arguments.length === 2) {
     filter = x => true
     fn = x => x
-  } else if(arguments.length === 3){
+  } else if (arguments.length === 3) {
     fn = arg3;
     filter = x => true
   } else {
@@ -14,9 +14,9 @@ function range(start, count, arg3, arg4) {
   }
 
   const ar = Array.apply(0, Array(count))
-    .map(function (element, index) {
-      return index + start;
-    });
+      .map(function (element, index) {
+        return index + start;
+      });
 
   return ar.filter(filter).map(fn)
 }
@@ -25,11 +25,11 @@ function uuid() {
   const S4 = function () {
     return (((1 + Math.random()) * 0x10000) | 0).toString(16).substring(1);
   };
-  return (S4()+S4()+"-"+S4()+"-"+S4()+"-"+S4()+"-"+S4()+S4()+S4());
+  return (S4() + S4() + "-" + S4() + "-" + S4() + "-" + S4() + "-" + S4() + S4() + S4());
 }
 
 function computeIfAbsent(map, key, fn) {
-  if(!map[key]) {
+  if (!map[key]) {
     map[key] = fn()
   }
   return map[key]
@@ -40,7 +40,7 @@ function CircularCursor(arr) {
   this.currentIndex = -1
   // start at 0
   const next = (self) => {
-    if(self.items.length === 0) {
+    if (self.items.length === 0) {
       return null
     }
     self.currentIndex++
@@ -54,24 +54,24 @@ function CircularCursor(arr) {
    * Return {number} elements from left, and number elements from right, along with current element wherever the cursor is
    */
   this.triplet = () => {
-      const i = this.next()
-      const iPlusOne = this.next()
-      const iMinusOne = this.previous(2)
-      this.next()
-      return [iMinusOne, i, iPlusOne]
+    const i = this.next()
+    const iPlusOne = this.next()
+    const iMinusOne = this.previous(2)
+    this.next()
+    return [iMinusOne, i, iPlusOne]
   }
 
   this.next = (number) => {
     number = number || 1
     let val = null
-    for(let i = 0; i < number; i++) {
+    for (let i = 0; i < number; i++) {
       val = next(this)
     }
     return val
   }
 
   const previous = (self) => {
-    if(self.items.length === 0) {
+    if (self.items.length === 0) {
       return null
     }
     self.currentIndex--;
@@ -84,7 +84,7 @@ function CircularCursor(arr) {
   this.previous = (number) => {
     number = number || 1
     let val = null
-    for(let i = 0; i < number; i++) {
+    for (let i = 0; i < number; i++) {
       val = previous(this)
     }
     return val
@@ -96,8 +96,8 @@ function CircularCursor(arr) {
   }
 
   this.goTo = (elem) => {
-    for(let i = 0; i < this.items.length; i++) {
-      if(this.items[i] === elem) {
+    for (let i = 0; i < this.items.length; i++) {
+      if (this.items[i] === elem) {
         this.currentIndex = i;
         return i
       }
@@ -141,9 +141,10 @@ const permutate = (inputArr) => {
 const equals = (x, y) => JSON.stringify(x) === JSON.stringify(y)
 
 const log = console.log
-function logJson(){
+
+function logJson() {
   const args = []
-  for(let i=0; i < arguments.length; i++) {
+  for (let i = 0; i < arguments.length; i++) {
     args.push(arguments[i])
   }
   console.log.apply(null, args.map(it => JSON.stringify(it)), arguments.callee.caller && arguments.callee.caller.name)
@@ -153,15 +154,16 @@ function simpleClone(obj) {
   return JSON.parse(JSON.stringify(obj))
 }
 
-const intersection = function(a, b) {
-  return [a, b].reduce((p,c) => p.filter(e => c.includes(e)));
+const intersection = function (a, b) {
+  return [a, b].reduce((p, c) => p.filter(e => c.includes(e)));
 }
 
 const findDuplicates = arry => arry.filter((item, index) => arry.indexOf(item) !== index)
 
 function cartesian(...args) {
-  if(!args.length) return []
+  if (!args.length) return []
   const r = [], max = args.length - 1;
+
   function helper(arr, i) {
     for (let j = 0, l = args[i].length; j < l; j++) {
       const a = arr.slice(0); // clone arr
@@ -173,7 +175,7 @@ function cartesian(...args) {
     }
   }
 
-  try{
+  try {
     helper([], 0);
   } catch (e) {
     log(args)
@@ -190,44 +192,44 @@ const sortByLength = (a, b) => b.length - a.length
  * @param measures
  * @returns {number[]}
  */
-const parseRangeInput = (measures)=> {
+const parseRangeInput = (measures) => {
   let ret = []
   measures = measures.split(",")
   measures = measures.map(it => {
-    if(it.indexOf("-") >= 0) {
-      const [i,j] = it.split("-")
+    if (it.indexOf("-") >= 0) {
+      const [i, j] = it.split("-")
       for (let k = parseInt(i.trim()); k <= parseInt(j.trim()); k++) {
         ret.push(k)
       }
     } else ret.push(it)
     return it
   })
-  ret = ret.map(it => parseInt((it+"").trim()))
-  return Array.from(new Set(ret)).sort((a, b) => a-b)
+  ret = ret.map(it => parseInt((it + "").trim()))
+  return Array.from(new Set(ret)).sort((a, b) => a - b)
 }
 
 generatePairs = (arr) => {
   const v = []
   const num = arr.length
-  for (let i=0; i < num; i++) {
-    for (let j=i; j < num; j++) {
-      v.push([{index: i, item: arr[i]}, {index:j, item: arr[j]}])
+  for (let i = 0; i < num; i++) {
+    for (let j = i; j < num; j++) {
+      v.push([{index: i, item: arr[i]}, {index: j, item: arr[j]}])
     }
   }
 
   return v
 }
 
-const groupBy = function(xs, key, consumer) {
+const groupBy = function (xs, key, consumer) {
   let fn = key
-  if(typeof key === 'string') {
+  if (typeof key === 'string') {
     fn = it => it[key]
   }
-  const out = xs.reduce(function(rv, x) {
+  const out = xs.reduce(function (rv, x) {
     (rv[fn(x)] = rv[fn(x)] || []).push(x);
     return rv;
   }, {});
-  if(consumer) {
+  if (consumer) {
     return Object.keys(out).map(k => {
       return consumer(k, out[k])
     })
@@ -293,25 +295,25 @@ function dfs(graph, node, visited) {
  * @param prefix
  * @returns {*[][]|*}
  */
-function choose(arr, k, prefix=[]) {
+function choose(arr, k, prefix = []) {
   if (k === 0) return [prefix];
   return arr.flatMap((v, i) =>
-    choose(arr.slice(i+1), k-1, [...prefix, v])
+      choose(arr.slice(i + 1), k - 1, [...prefix, v])
   );
 }
 
 
 function number(str) {
-  if(typeof str === 'number') return str
-  const [x,y] = str.split("/")
-  if(y) {
+  if (typeof str === 'number') return str
+  const [x, y] = str.split("/")
+  if (y) {
     return parseInt(x) / parseInt(y)
   }
   return parseInt(x)
 }
 
 function sum(arr) {
-  return arr.map(number).reduce((a, b) => a+b, 0)
+  return arr.map(number).reduce((a, b) => a + b, 0)
 }
 
 const combsWithRep = (k, xs, canBeAdded = ((_comb, _allSoFar) => true)) => {
@@ -343,7 +345,7 @@ const combsWithRep = (k, xs, canBeAdded = ((_comb, _allSoFar) => true)) => {
 function until(condition, maxReps, run) {
   for (let i = 0; i < maxReps; i++) {
     run()
-    if(condition()) {
+    if (condition()) {
       return true
     }
   }
@@ -366,10 +368,10 @@ function not(predicate) {
 }
 
 function assert(bool, error) {
-  if(!bool) alert(error)
+  if (!bool) alert(error)
 }
 
-function randomGroupingPreservingOrder(arr, numGroups, min=1) {
+function randomGroupingPreservingOrder(arr, numGroups, min = 1) {
   // uncomment this line if you don't want the original array to be affected
   assert(numGroups * min <= arr.length, "")
   arr = arr.slice();
@@ -381,22 +383,22 @@ function randomGroupingPreservingOrder(arr, numGroups, min=1) {
 
   //Assign each item to some group
   let lastGroupUsed = 0
-  for (let i = min-1; i < arr.length - min; i++) {
+  for (let i = min - 1; i < arr.length - min; i++) {
     let gotoGroup = randomFromArray([lastGroupUsed, lastGroupUsed + 1])
     const item = arr[i];
     // log("lastGroupUsed", lastGroupUsed, "gotoGroup", gotoGroup, "item", item)
 
-    if(gotoGroup >= groups.length) {
-      gotoGroup = groups.length-1
-      groups[groups.length-1].push(item)
+    if (gotoGroup >= groups.length) {
+      gotoGroup = groups.length - 1
+      groups[groups.length - 1].push(item)
     } else {
-      if(gotoGroup === lastGroupUsed) groups[gotoGroup].push(item)
+      if (gotoGroup === lastGroupUsed) groups[gotoGroup].push(item)
       else groups[gotoGroup].unshift(item)
     }
 
     lastGroupUsed = gotoGroup
   }
-  nTimes(min, () => arr.pop()).forEach(it => groups[groups.length-1].push(it))
+  nTimes(min, () => arr.pop()).forEach(it => groups[groups.length - 1].push(it))
 
   const cursor = new CircularCursor(groups)
 
@@ -457,7 +459,7 @@ class LRUCache {
   get(key) {
     if (!this.cache.has(key)) return null;
 
-    let val = this.cache.get(key);
+    const val = this.cache.get(key);
 
     this.cache.delete(key);
     this.cache.set(key, val);
@@ -486,31 +488,66 @@ class LRUCache {
   }
 }
 
+/**
+ * waitForKeyboardInput(" ")
+ * @param key
+ * @returns {Promise<unknown>}
+ */
+function waitForKeyboardInput(key) {
+  const id = uuid()
+  return new Promise(resolve => {
+     $(document).on('keyup.ns' + id, (e) => {
+       if (e.key === key) {
+         $(document).off('keyup.ns' + id);
+         resolve(id)
+       }
+     })
+  })
+}
+
+/**
+ * schedule(["simple data",
+ *            () => { console.log("do this"); },
+ *            () => { console.log("then do this"); return 0; },
+ *            () => { console.log("this will be run immediately following the previous"); }
+ *          ], 2, data => console.log("Consumed ", data))
+ * @param data
+ * @param timeInSeconds
+ * @param taskRunner
+ * @param onComplete
+ * @param finishNowCondition
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowCondition) {
   data = data.map(x => x); //clone
-  let totalDataItems = data.length
+  const totalDataItems = data.length
   let fn = null;
   fn = (x, idx) => setTimeout(() => {
-    let first = data.splice(0, 1);
+    console.log("Processing item at index", idx, " at ", new Date());
+    const first = data.splice(0, 1);
 
     if (finishNowCondition && finishNowCondition(first)) {
       //-1 => Finished because finishNowCondition satisfied
       console.log("Maybe finishing early on index, last consumed data item at index: " + (idx) + " out of total: " + (totalDataItems - 1))
       return
     }
+
     if (first.length) {
-      let task = typeof (first[0]) == 'function' ? first[0] : () => taskRunner(first[0], idx)
-      let result = task()
+      const item = first[0]
+      const task = typeof (item) == 'function' ? item : () => taskRunner(item, idx)
+      const result = task()
       if (result instanceof Promise) {
+        // Wait for promise to fulfill before consuming next item
         result.then(it => {
-          fn(100, idx + 1)
+          fn && fn(100, idx + 1)
         })
-      } else if(result !== false) {
+      } else if (result !== false) {
+        // If the item is just a number, we assume that you want to sleep for that amount of seconds
         let delay = timeInSeconds * 1000
         if (typeof (result) == 'number') delay = result * 1000
-        fn(delay, idx + 1)
+        fn && fn(delay, idx + 1)
       } else {
-        console.log("Ended because function returned false!")
+        console.log("Terminated because function at index: " + idx + " returned false!")
       }
     } else {
       if (onComplete) onComplete();
@@ -519,8 +556,9 @@ function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowConditio
   fn(0, 0);
 }
 
-let debugLog = (...arguments) => {
-  if(window.DEBUG) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const debugLog = (...arguments) => {
+  if (window.DEBUG) {
     console.log(arguments)
   }
 }

@@ -18,6 +18,7 @@ function globalStore(key, obj) {
   return key + id
 }
 
+// Update canvas, re-render everything
 function update(canvas) {
   if (!canvas && window.pc === undefined) return
   if (!canvas) canvas = pc;
@@ -27,6 +28,12 @@ function update(canvas) {
   }
 }
 
+/**
+ * sleep(seconds).then(doSomething) where doSomething = () => {...}
+ * or, await sleep(seconds)
+ * @param x
+ * @returns {Promise<unknown>}
+ */
 function sleep(x) {
   return new Promise((suc, fail) => {
     setTimeout(() => suc(), x * 1000)
@@ -60,7 +67,9 @@ function range(...arr) {
   return [...Array(arr[1] - arr[0]).keys()].map(x => x + arr[0]);
 }
 
-
+/**
+ * Creates horizontal arrow using html/css; TODO: Enahnce or delete
+ */
 function createArrow() {
   const arr = $(`<div class="arrow"/>`),
     line = $(`<div class="line"></div>`),
@@ -95,7 +104,13 @@ function createArrow() {
 
 }
 
-
+/**
+ * To print on top of everything, like a cinema text.
+ * typeQuote("Hi this will be typed as per css given or defaults", {css: {left: '10%', top: '5%'}, theme: 'white'})
+ * @param text
+ * @param _options
+ * @returns {*}
+ */
 function typeQuote(text, _options) {
   const options = Object.assign({}, {
     wait: 0,
@@ -155,15 +170,23 @@ function typeQuote(text, _options) {
   })
 }
 
-function delayExecution(fn, delay) {
+function delayExecution(fn, delayInMillis) {
   return new Promise((myResolve, myReject) => {
     setTimeout(() => {
       fn();
       myResolve()
-    }, delay)
+    }, delayInMillis)
   })
 }
 
+/**
+ *
+ * @param text
+ * @param top
+ * @param left
+ * @param opts
+ * @returns {*}
+ */
 function typeAndDisappear(text, top, left, opts) {
   const options = Object.assign({}, {wait: 100, top: top, left: left}, opts);
 
