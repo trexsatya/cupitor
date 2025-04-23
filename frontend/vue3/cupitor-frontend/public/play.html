@@ -194,12 +194,13 @@
                     .then(data => {
                         console.log(data);
                     })
-                return
+            } else {
+                $(`#${data.id}-dialog`).dialog({
+                    width: 800,
+                    height: 400,
+                })
             }
-            $(`#${data.id}-dialog`).dialog({
-                width: 800,
-                height: 400,
-            })
+
             window.commandSelectionIsGoingOn = false;
             $('.commands-select').val('NULL')
             $('.commands-select').trigger('change'); //Reset
@@ -362,8 +363,8 @@
 			<button id="record-play-save" class="btn btn-info" onclick="saveRecording()">Save Recording</button>
 			<br> <br>
 			
-            <button class="btn btn-info" onclick="Copy(pc)">Copy</button>
-            <button class="btn btn-info" onclick="Paste(pc)">Paste</button>
+            <button class="btn btn-info" onclick="copy(pc)">Copy</button>
+            <button class="btn btn-info" onclick="paste(pc)">Paste</button>
             <button class="btn btn-info" onclick="degroup(pc)">Ungroup</button>
 
             <br><br>
@@ -425,7 +426,7 @@
 
         clearEl.click(function() {
               const yes = confirm('Are you sure?');
-              if (yes) oc.clear();
+              if (yes) clear('oc');
            });
 
           drawingColorEl.change(function(e) {
@@ -564,6 +565,20 @@
             }
         })
 
+        window.isFabricObjectMoving = false
+        pc.on('object:moving', function (e) {
+            window.isFabricObjectMoving = true;
+            window.movingFabricObject = e.target;
+        });
+
+        pc.on('mouse:up', function (event) {
+            if (window.isFabricObjectMoving) {
+                window.isFabricObjectMoving = false;
+                // Your code to handle the end of the move event
+                recordScript(`animate(${movingFabricObject.uid}, ${JSON.stringify(getActualProperties(movingFabricObject))}, {})`)
+            }
+        });
+
         pc.on('object:moving', e => {
             const t = e.target;
             t._objects?.forEach(updateTreeItem)
@@ -572,7 +587,7 @@
 
         pc.on('object:modified', function(e) {
             const t = e.target;
-            console.log(t, "modified");
+            //console.log(t, "modified");
             t._objects?.forEach(l => updateTreeItem(l, t.aCoords))
             updateTreeItem(t);
         });
@@ -632,7 +647,7 @@
                 window.insertRectText = false;
                 var text = prompt('Enter text')
                 if (!text) return;
-                var tb = textInRect(text, e.e.clientX, e.e.clientY, pc, {}, {})
+                var tb = textInRect(text, e.e.clientX, e.e.clientY, {}, {})
                 tb.hasControls = false;
                 pc.add(tb)
             }
@@ -642,7 +657,7 @@
                 var text = prompt('Enter text')
                 if (!text) return;
 
-                const ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc);
+                const ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc, {});
                 pc.getObjects().forEach(o => o.hasControls = false);
             }
 
@@ -719,10 +734,10 @@
 					}
                     break
 				case 67:
-					if(e.ctrlKey) Copy(pc)
+					if(e.ctrlKey) copy(pc)
 					break;
 				case 86:
-					if(e.ctrlKey) Paste(pc)
+					if(e.ctrlKey) paste(pc)
 					break;				
                 case 39: //right
                     if(pc.getActiveObject())moveActiveObject('left', 10)

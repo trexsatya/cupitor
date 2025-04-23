@@ -56,17 +56,6 @@ function stop() {
   $("#btnStop").click()
 }
 
-function float(x) {
-  return Number.parseFloat(x)
-}
-
-function range(...arr) {
-  if (arr.length === 1) {
-    return [...Array(arr[0]).keys()]
-  }
-  return [...Array(arr[1] - arr[0]).keys()].map(x => x + arr[0]);
-}
-
 /**
  * Creates horizontal arrow using html/css; TODO: Enahnce or delete
  */
@@ -197,10 +186,22 @@ function typeAndDisappear(text, top, left, opts) {
   return type(text, '#' + id, options).then(it => delayExecution(() => T.hide(), opts.delay))
 }
 
-function resetTextillateContainer() {
-  $('#textillateContainer').css({backgroundColor: 'white'})
-  $('#cinemaText').css({color: 'black'})
-  $('#cinemaText').html('')
+function clear(layer) {
+  const clearPc = !layer || (layer === 'pc')
+  const clearOc = !layer || (layer === 'oc')
+  const clearTxt = !layer || (layer === 'txt')
+
+  if (clearPc) {
+    pc.clear();
+  }
+  if (clearOc) {
+    oc.clear()
+  }
+  if (clearTxt) {
+    $('#textillateContainer').css({backgroundColor: 'white'})
+    $('#cinemaText').css({color: 'black'})
+    $('#cinemaText').html('')
+  }
 }
 
 function waitUntil(condition) {
@@ -230,7 +231,7 @@ function type(strings, elSelector, opts) {
 
   $(elSelector).html('');
 
-  return new Promise((myResolve, myReject) => {
+  return new Promise((myResolve) => {
     const typed = new Typed(elSelector, {
       stringsElement: '#typed-strings',
       typeSpeed: 40,
@@ -258,64 +259,6 @@ function at(matrix, i, j) {
 }
 
 window.animationScriptFunction = null
-
-/**
- * taskRunner => a function that will use data items.
- * data => array of data items or array of functions. If data item is a function it will be used as taskRunner for that interval.
- *     taskRunner can return false to stop the further invocations. taskRunner can return time delay in seconds before next invocation occurs.
- *     taskRunner can return 'WAIT_FOR_SIGNAL' which means that next invocation will occur only when signal is received.
- */
-function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowCondition) {
-  data = data.map(x => x); //clone
-  const totalDataItems = data.length
-  let fn = null;
-  fn = (x, idx) => setTimeout(() => {
-    const first = data.splice(0, 1);
-
-    if (finishNowCondition && finishNowCondition(first)) {
-      //-1 => Finished because finishNowCondition satisfied
-      console.log("Maybe finishing early on index, last consumed data item at index: " + (idx) + " out of total: " + (totalDataItems - 1))
-      return
-    }
-    if (first.length) {
-      const task = typeof (first[0]) == 'function' ? first[0] : () => taskRunner(first[0], idx)
-      const result = task()
-      update();
-      if (result instanceof Promise) {
-        result.then(it => {
-          if (window.stopAnimationSignal) {
-            window.animationScriptFunction = () => fn(100, idx) //Store function
-            console.log("Waiting for signal. Call resumeAnimationScript()")
-          } else {
-            fn(100, idx + 1)
-          }
-
-        })
-      } else if (result !== false) {
-        let delay = timeInSeconds * 1000
-        if (typeof (result) == 'number') delay = result * 1000
-
-        if (result === -1 || window.stopAnimationSignal) {
-          if (window.animationScriptFunction) {
-            console.log('There is already a function for animation script!!!')
-          } else {
-            window.animationScriptFunction = () => fn(delay, idx + 1) //Store function
-            console.log("Waiting for signal. Call resumeAnimationScript()")
-            $('#btnResumeAnimation').show();
-          }
-        } else {
-          fn(delay, idx + 1)
-        }
-      } else {
-        console.log("Ended because function returned false!")
-      }
-    } else {
-      if (onComplete) onComplete();
-    }
-  }, x);
-  fn(0, 0);
-}
-
 
 function speak(msg, name) {
   if (msg.endsWith('.mp3')) {
@@ -345,7 +288,7 @@ function speak(msg, name) {
 
   window.speechSynthesis.speak(speech);
 
-  return new Promise(function (myResolve, myReject) {
+  return new Promise(function (myResolve) {
     speech.onend = e => {
       myResolve()
     }
@@ -780,23 +723,6 @@ function hideToolbar() {
   $('#toolbar').show();
 }
 
-
-function ArrayPlusDelay(array, delegate, delay) {
-  let i = 0
-
-  // seed first call and store interval (to clear later)
-  var interval = setInterval(function () {
-    // each loop, call passed in function
-    delegate(array[i]);
-
-    // increment, and if we're past array, clear interval
-    if (i++ >= array.length - 1)
-      clearInterval(interval);
-  }, delay)
-
-  return interval
-}
-
 function changeCircleColor(c, objs) {
   try {
     const _objs = objs || pc.getActiveGroup()._objects
@@ -941,7 +867,7 @@ function duplicate(obj) {
   });
 }
 
-function Copy(canvas, obj) {
+function copy(canvas, obj) {
   // clone what are you copying since you
   // may want copy and paste on different moment.
   // and you do not want the changes happened
@@ -956,7 +882,7 @@ function Copy(canvas, obj) {
 }
 
 
-function Paste(canvas) {
+function paste(canvas) {
   if (!window._clipboard) return;
 
   window.canPasteImageFromClipboard = true;
@@ -1002,15 +928,13 @@ function Paste(canvas) {
 }
 
 
-function editSelectedObject() {
-  if (!pc.getActiveObject()) return;
-  const obj = pc.getActiveObject()
+function editFabricjsObject(txt, obj, objId) {
+  if(!obj) {
+    obj = findById(objId);
+  }
 
-  const p = prompt('Enter command')
-  if (!p || p.split(":").length !== 2) return
-
-  const command = p.split(":")[0]
-  const data = p.split(":")[1].trim()
+  const command = txt.split(":")[0]
+  const data = txt.split(":")[1].trim()
 
   if (!obj._objects || obj._objects.length < 2) return;
 
@@ -1052,6 +976,17 @@ function editSelectedObject() {
   pc.renderAll();
 }
 
+function editSelectedObject() {
+  if (!pc.getActiveObject()) return;
+  let obj = pc.getActiveObject()
+
+  const promptStr = prompt('Enter command')
+  if (!promptStr || promptStr.split(":").length !== 2) return
+
+  editFabricjsObject(promptStr, obj, obj.uid);
+  recordScript(`editSelectedObject(${JSON.stringify(promptStr)}, null, ${obj.uid});`)
+}
+
 function makeLine(coords) {
   let line = new fabric.Line(coords, {
     fill: 'red',
@@ -1065,25 +1000,20 @@ function makeLine(coords) {
   return line;
 }
 
-/***
-  values
-    ex. "child1, child2, child3",
-        "rect; child1, child2"
-        "shape:rect,bg:red,fg:white; child1, child2" --TODO
- */
-function makeSubtree(node, values, pc, opts) {
+function renderSubtree(values, opts, node) {
+  node = findIfRequired(node)
   const split = values.split(";")
   let cmds = ''
-  if(split.length === 2) {
+  if (split.length === 2) {
     cmds = split[0]
     values = split[1]
-  } else if(split.length === 1) {
+  } else if (split.length === 1) {
     cmds = 'none';
     values = split[0]
   }
 
   values = values.split(',')
-  if(values.length === 0) {
+  if (values.length === 0) {
     return
   }
 
@@ -1105,7 +1035,7 @@ function makeSubtree(node, values, pc, opts) {
 
   if (node.oCoords && node.oCoords.mb) {
     const px = node.oCoords.mb.x,
-          py = node.oCoords.mb.y;
+        py = node.oCoords.mb.y;
 
     let mid = Math.ceil(values.length / 2)
     if (values.length === 1) mid = 0;
@@ -1117,7 +1047,7 @@ function makeSubtree(node, values, pc, opts) {
 
     const addConnection = (x1, y1, x2, y2, text) => {
       const textNode = shape === 'none' ?
-          textInRect(text, x2, y2, {fill: 'black'}, {fill: 'white' })
+          textInRect(text, x2, y2, {fill: 'black'}, {fill: 'white'})
           : boundedText(shape)(text, x2, y2, {}, {})
       pc.add(textNode)
       const line = makeLine([x1, y1, textNode.oCoords.mt.x, textNode.oCoords.mt.y])
@@ -1141,7 +1071,8 @@ function makeSubtree(node, values, pc, opts) {
       addConnection(px, py, x, y, values[i])
     }
 
-    x = px; y = py;
+    x = px;
+    y = py;
 
     for (let i = mid + 1; i < values.length; i++) {
       x = x + w;
@@ -1150,24 +1081,47 @@ function makeSubtree(node, values, pc, opts) {
   }
 }
 
+/***
+  values
+    ex. "child1, child2, child3",
+        "rect; child1, child2"
+        "shape:rect,bg:red,fg:white; child1, child2" --TODO
+ */
+function makeSubtree(node, values, opts) {
+  renderSubtree(values, opts, node);
+  recordScript(`renderSubtree(${JSON.stringify(values)}, ${JSON.stringify(opts)}, ${node.uid})`)
+}
+
 //Returns calculated top(y), left(x) works even if object is in group
-let calculateActualPosition = (object) => {
+let getActualProperties = (object) => {
   let mat = object.calcTransformMatrix(false);
   // Assuming objects origin x/y is 'left'/'top'; TODO for others
-  return  {x: mat[4] - object.width/2, y: mat[5] - object.height/2}
+  return  {
+    x: mat[4] - object.width/2,
+    y: mat[5] - object.height/2,
+    w: object.width,
+    h: object.height,
+    fill: object.fill,
+    angle: object.angle,
+    skewX: object.skewX,
+    skewY: object.skewY,
+    scaleX: object.scaleX,
+    scaleY: object.scaleY,
+    opacity: object.opacity
+  }
 };
 
 function updateTreeItem(t) {
   const getPointCoords = (obj, pt) => {
     if (pt === 'mt') {
-      const c = calculateActualPosition(obj)
+      const c = getActualProperties(obj)
       return {
         y: c.y,
         x: c.x + obj.width / 2
       }
     }
     if (pt === 'mb') {
-      const c = calculateActualPosition(obj)
+      const c = getActualProperties(obj)
       return {
         y: c.y + obj.height,
         x: c.x + obj.width / 2

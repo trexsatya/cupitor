@@ -1,5 +1,15 @@
 window.globalFabricObjId = 0;
 
+function combined(){
+  return Object.assign(...arguments)
+}
+
+function recordScript(str) {
+  if(window.recordScriptFn) {
+    window.recordScriptFn(str);
+  }
+}
+
 // Extended fabric line class
 fabric.Image.filters.WhiteToTransparent = fabric.util.createClass({
 
@@ -90,6 +100,18 @@ fabric.Canvas.prototype.add = (function (originalFn) {
     return this
   };
 })(fabric.Canvas.prototype.add);
+
+function findById(id, canvas) {
+  if (!canvas) canvas = pc
+  return canvas._objects.find(it => it.uid === id)
+}
+
+function findIfRequired(idOrObj) {
+  if(typeof node === 'number') {
+    return  findById(node);
+  }
+  return idOrObj
+}
 
 fabric.Sprite = fabric.util.createClass(fabric.Image, {
 
@@ -257,15 +279,15 @@ const Arrow = (function() {
 
 function changeText(obj, data) {
     if(!obj) return
-    obj._objects[1].set({
+    obj?._objects?.find(it => it.text !== null && it.text !== undefined)?.set({
         text: data
     });
 
-    if(pc) pc.renderAll()
+    pc?.renderAll()
 }
 
 function textbox(opts){
-    var opts = combined({ top: 100, left: 400, angle: 0, color: 'blue', text: '', width: 300 }, opts);
+    opts = combined({ top: 100, left: 400, angle: 0, color: 'blue', text: '', width: 300 }, opts);
 
     const textSample = new fabric.Textbox(opts.text, {
         fontSize: 20,
@@ -282,13 +304,14 @@ function textbox(opts){
     });
     const id = globalStore('tb', textSample)
 
-    console.log(`_.${id} = textbox(${JSON.stringify(opts)})`)
+    recordScript(`_['${id}'] = textbox(${JSON.stringify(opts)})`)
     return textSample
 }
 
 function textInRect(textStr, x, y, optsText, optsRect){
     if(!arguments.length) console.log('textInRect(text, x,y, optsText, optsRect)')
     if(!textStr) return null;
+    recordScript(`textInRect(${JSON.stringify(textStr)}, ${x}, ${y}, ${JSON.stringify(optsText)}, ${JSON.stringify(optsRect)});`)
 
     const op = Object.assign({}, {
         fontSize: 20,
@@ -348,6 +371,7 @@ function textInRect(textStr, x, y, optsText, optsRect){
 function textInCircle(textStr, x,y, optsText, optsCirc){
     if(!arguments.length) console.log('textInCircle(text, x,y, optsText, optsCirc)')
     if(!textStr) return null;
+    recordScript(`textInCircle(${JSON.stringify(textStr)}, ${x}, ${y}, ${JSON.stringify(optsText)}, ${JSON.stringify(optsCirc)});`)
 
     const op = Object.assign({}, {
         fontSize: 20,
@@ -386,6 +410,7 @@ function textInCircle(textStr, x,y, optsText, optsCirc){
 function textInEllipse(textStr, x, y, optsText, optsCirc){
   if(!arguments.length) console.log('textInEllipse(text, x,y, optsText, optsCirc)')
   if(!textStr) return null;
+  recordScript(`textInEllipse(${JSON.stringify(textStr)}, ${x}, ${y}, ${JSON.stringify(optsText)}, ${JSON.stringify(optsCirc)});`)
 
   const op = Object.assign({}, {
     fontSize: 20,
@@ -434,6 +459,7 @@ function boundedText(type) {
 function addRectangle(opts){
     opts = opts || {}
 
+    recordScript(`addRectangle(${JSON.stringify(opts)});`)
     const rect = new fabric.Rect({
         left: 100,
         top: 100,
@@ -461,6 +487,7 @@ function groupFabricObjects (objs, opts){
 
     pc.renderAll();
 
+    recordScript(`groupFabricObjects(${JSON.stringify(objs)}, ${JSON.stringify(opts)});`)
     return G
 }
 
@@ -488,6 +515,7 @@ function arrow(x1,y1,x2,y2, opts){
         top: y1
     });
 
+    recordScript(`arrow(${x1}, ${y1}, ${x2}, ${y2}, ${JSON.stringify(opts)});`)
     return group
 }
 
@@ -503,12 +531,18 @@ function text(text){
       text: text
     }
 
+    recordScript(`text(${JSON.stringify(text)});`)
     return txt
 }
 
+/**
+ * TODO: Support other shapes like rect, ellipse
+ *
+ **/
 function arrayOfCircledTextsAt(x,y, canvas, opts){
     if(!arguments.length) console.log('arrayOfCircledTextsAt(x,y, canvas, opts)')
 
+    recordScript(`arrayOfCircledTextsAt(${x}, ${y}, pc, ${JSON.stringify(opts)});`)
     let nextx = x, nexty = y;
     let addedObjects = []
     const options = Object.assign({},{ gapx: 3/2, gapy: 3/2 }, opts)
@@ -750,9 +784,10 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
 window.itemRecordCounter = {'A': 0, '': 0}
 window.itemRecord = {}
 
-function showArray(items,x,y,canvas, opts){
+function showArray(items, x, y, canvas, opts){
     if(!arguments.length) console.log('showArray(items,x,y,canvas, opts)')
 
+    recordScript(`showArray(${items}, ${x}, ${y}, pc, ${JSON.stringify(opts)});`)
     const arr = new arrayOfCircledTextsAt(x,y,canvas, opts)
     items.forEach(item => arr.add( item+''))
     arr.normalize()
@@ -778,9 +813,6 @@ function showMatrix(arryOfItems, x,y,canvas, opts){
     return matrix;
 }
 
-function combined(){
-    return Object.assign(...arguments)
-}
 
 function fabricUpdate(canvas, obj, changes){
     obj.set(changes)
@@ -800,17 +832,20 @@ function visualAlgoMethods(){
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function animate(obj, props, opts){
     if(!obj) return
+    obj = findIfRequired(obj)
+
     const canvas = pc;
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
     const objSpecificUpdate = obj?.onAnimationChange || (() => {});
     const options = Object.assign({}, {
         duration: 1000,
         onChange: () => { canvas.renderAll.bind(canvas); objSpecificUpdate(); canvas.renderAll(); },
         onComplete: function() {}
-    },opts);
+    }, opts);
 
     const fn = options.onComplete;
 
-    return new Promise(function(myResolve, myReject) {
+    return new Promise(function(myResolve) {
         options.onComplete = (e) => {
             fn(e);
             myResolve()
@@ -846,7 +881,7 @@ function appendTableInto(table, target, opts){
         id: `table-autogen-${new Date().getTime()}`
     }, opts)
 
-    if(table.length == 0 && options.xheaders.length != 0){
+    if(table.length === 0 && options.xheaders.length !== 0){
         table = range(0,options.yheaders.length).map(i => range(0, options.xheaders.length).map(j => ' '))
     }
 
@@ -923,7 +958,7 @@ function appendTableInto(table, target, opts){
   </tr>
 </table>`
 
-    var table = $(tableHtml)
+    table = $(tableHtml)
     $(target).append(table)
 
     table.find('table').css({ backgroundColor: options.backgroundColor, color: options.color })
@@ -986,6 +1021,11 @@ function appendTableInto(table, target, opts){
     }
 }
 
+/**
+ * TODO: Make it work for both fabrics js and html
+ * @param obj
+ * @returns {*[]}
+ */
 function midOf(obj){
     const rect = {x: null, y: null,w: null, h: null}
 
@@ -1096,6 +1136,15 @@ function bounds(obj){
 
 }
 
+/**
+ * Connect using a line.
+ * TODO: Make it sticky just like treeConnections
+ * @param canvas
+ * @param it
+ * @param other
+ * @param opts
+ * @returns {*}
+ */
 function connect(canvas, it, other, opts){
 
     var line = null;
@@ -1333,11 +1382,6 @@ function Clone(object, id, top, left) {
       if (window._ && id) _[id] = clone;
     });
   });
-}
-
-function findById(id, canvas) {
-  if (!canvas) canvas = pc
-  return canvas._objects.find(it => it.uid === id)
 }
 
 
