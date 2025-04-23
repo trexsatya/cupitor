@@ -927,11 +927,30 @@ function paste(canvas) {
   });
 }
 
+function setObjVisibility(obj, visibility) {
+  obj?.visible = visibility;
+  obj?.treeConnection?.incoming?.lines?.forEach((line) => {
+    line.visible = visibility;
+  });
+  pc?.renderAll();
+}
 
-function editFabricjsObject(txt, obj, objId) {
-  if(!obj) {
-    obj = findById(objId);
-  }
+function hideObject(obj) {
+  if(obj === undefined || obj === null) return;
+
+  obj = findIfRequired(obj)
+  setObjVisibility(obj, true);
+}
+
+function showObject(obj) {
+  if(obj === undefined || obj === null) return;
+
+  obj = findIfRequired(obj)
+  setObjVisibility(obj, false);
+}
+
+function editFabricjsObject(txt, obj) {
+  obj = findIfRequired(obj)
 
   const command = txt.split(":")[0]
   const data = txt.split(":")[1].trim()
@@ -983,8 +1002,8 @@ function editSelectedObject() {
   const promptStr = prompt('Enter command')
   if (!promptStr || promptStr.split(":").length !== 2) return
 
-  editFabricjsObject(promptStr, obj, obj.uid);
-  recordScript(`editSelectedObject(${JSON.stringify(promptStr)}, null, ${obj.uid});`)
+  editFabricjsObject(promptStr, obj);
+  recordScript(`editFabricjsObject(${JSON.stringify(promptStr)}, ${obj.uid});`)
 }
 
 function makeLine(coords) {
@@ -1021,7 +1040,7 @@ function renderSubtree(values, opts, node) {
 
   const options = opts || {
     width: 150,
-    height: 50
+    height: 60
   };
 
   let defaultOutgoing = () => ({
@@ -1183,9 +1202,9 @@ function onMakeTreeClick() {
     alert('Select an object first');
     return;
   }
-  const p = prompt('Enter command. E.g. child1, child2, child3 OR rect; child1, child2')
-  if (!p) return;
-  makeSubtree(pc.getActiveObject(), p, pc)
+  const promptStr = prompt('Enter command. E.g. child1, child2, child3 OR rect; child1, child2')
+  if (!promptStr) return;
+  makeSubtree(pc.getActiveObject(), promptStr)
 }
 
 
