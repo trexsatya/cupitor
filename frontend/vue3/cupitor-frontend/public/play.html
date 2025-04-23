@@ -682,7 +682,7 @@
             'Backspace': 'delete-selected',
             'd': 'flip-drawing',
             'T': 'create-text',
-            'g': 'greenen',
+            'h': 'hide',
             'b': 'bluen',
             'e': 'execute-next',
             'w': 'whiten'
@@ -711,6 +711,11 @@
             if(e.key === 'r') {
                 $('#horizRuler').toggle()
                 $('#vertRuler').toggle()
+            }
+            if(e.key === 'h') {
+                let objId = it()?.uid;
+                hideObject(objId)
+                recordScript(`hideObject(${objId})`)
             }
 			if(e.keyCode === 32){
 				// toggleRecording()

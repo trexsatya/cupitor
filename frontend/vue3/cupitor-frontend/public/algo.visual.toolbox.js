@@ -107,7 +107,7 @@ function findById(id, canvas) {
 }
 
 function findIfRequired(idOrObj) {
-  if(typeof node === 'number') {
+  if(typeof node !== 'object') {
     return  findById(node);
   }
   return idOrObj
