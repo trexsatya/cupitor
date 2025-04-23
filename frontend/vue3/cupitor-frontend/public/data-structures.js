@@ -1,3 +1,7 @@
+function float(x) {
+  return Number.parseFloat(x)
+}
+
 function range(start, count, arg3, arg4) {
   if (!arguments.length) console.log('range(start, count)')
 
@@ -486,6 +490,22 @@ class LRUCache {
   getMostRecent() {
     return Array.from(this.cache)[this.cache.size - 1];
   }
+}
+
+function ArrayPlusDelay(array, consumer, delay) {
+  let i = 0
+
+  // seed first call and store interval (to clear later)
+  var interval = setInterval(function () {
+    // each loop, call passed in function
+    consumer(array[i]);
+
+    // increment, and if we're past array, clear interval
+    if (i++ >= array.length - 1)
+      clearInterval(interval);
+  }, delay)
+
+  return interval
 }
 
 /**
