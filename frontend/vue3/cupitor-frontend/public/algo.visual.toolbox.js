@@ -1384,5 +1384,57 @@ function Clone(object, id, top, left) {
   });
 }
 
+function waitUntil(condition) {
+  return new Promise((resolve, reject) => {
+    const interval = setInterval(() => {
+      if (condition()) {
+        clearInterval(interval)
+        resolve()
+      }
+    }, 100)
+  })
+}
 
+function type(strings, elSelector, opts) {
+  const options = Object.assign({}, {
+    strings: [strings].flat(),
+    onComplete: (self) => {
+    }
+  }, opts);
+
+  $(elSelector).css(options);
+
+  $('#typed-strings').html("<p>" + strings + "</p>");
+  $('#textillateContainer .typed-cursor').remove()
+
+  const prettyLog = (x) => console.log(x);
+
+  $(elSelector).html('');
+
+  return new Promise((myResolve) => {
+    const typed = new Typed(elSelector, {
+      stringsElement: '#typed-strings',
+      typeSpeed: 40,
+      backSpeed: 0,
+      backDelay: 500,
+      startDelay: 1000,
+      loop: false,
+      onComplete: function (self) {
+        // prettyLog('onCmplete ' + self); self.destroy();
+        options.onComplete(self);
+        myResolve(self);
+      },
+      onDestroy: function (self) {
+        console.log("destroyed");
+        myResolve(self);
+      }
+
+    });
+  });//promise
+}
+
+//Accessor for matrix
+function at(matrix, i, j) {
+  return $(matrix.all.find(`table.data td[data-row='${i}']`)[j]);
+}
 

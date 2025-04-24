@@ -582,3 +582,21 @@ const debugLog = (...arguments) => {
     console.log(arguments)
   }
 }
+
+function closest(num, arr) {
+  let mid;
+  let lo = 0;
+  let hi = arr.length - 1;
+  while (hi - lo > 1) {
+    mid = Math.floor((lo + hi) / 2);
+    if (arr[mid] < num) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  if (num - arr[lo] <= arr[hi] - num) {
+    return arr[lo];
+  }
+  return arr[hi];
+}

@@ -1,38 +1,29 @@
 <html>
 
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
 
     <script src="/vendor/jquery.js"></script>
     <script></script>
     <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
-	<link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <script type="text/javascript" src="/vendor/diff-match-patch.js"></script>
     <script type="text/javascript" src="/vendor/fabric.min.js"></script>
-    <script type="text/javascript" src="/data-structures.js"></script>
-    <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
-	<script type="text/javascript" src="/vendor/rx.all.min.js"></script>
     <script type="text/javascript" src="/vendor/rx.all.min.js"></script>
-
+    <script type="text/javascript" src="/vendor/rx.all.min.js"></script>
     <script type="text/javascript" src="/vendor/jquery.lettering.js"></script>
     <script type="text/javascript" src="/vendor/jquery.fittext.js"></script>
     <script type="text/javascript" src="/vendor/rulez.min.js"></script>
-    <!-- <script type="text/javascript" src="/treant.js"></script> -->
-    <link rel="stylesheet" href="/vendor/animate.css">
-    <link rel="stylesheet" href="/vendor/treant.css">
     <script src="/vendor/raphael.js"></script>
     <script src="https://unpkg.com/geometric@2.2.3/build/geometric.min.js"></script>
-    
-     <script src="https://d3js.org/d3.v5.min.js"></script>
-     <script src="/vendor/tree.js"></script>
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+    <script src="/vendor/tree.js"></script>
     <!-- <script src="../../vendor/jquery.min.js"></script> -->
     <script src="/vendor/jquery.easing.js"></script>
-
     <script type="text/javascript" src="/vendor/jquery.textillate.js"></script>
-<!--    <script src="/typed.min.js"></script>-->
+    <!--    <script src="/typed.min.js"></script>-->
     <script src="https://cdn.jsdelivr.net/npm/typed.js@2.0.9"></script>
-	<script type="text/javascript" src="/vendor/diff-match-patch.js"></script>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>
-    <link href="/vendor/select2.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js"></script>
     <script src="/vendor/select2.min.js"></script>
     <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.min.js"></script>
     <script src="//cdn.jsdelivr.net/npm/velocity-animate@2.0/velocity.ui.min.js"></script>
@@ -40,17 +31,194 @@
     </script>
     <script src="/vendor/ace/src-noconflict/ace.js" type="text/javascript" charset="utf-8"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+
+    <script type="text/javascript" src="/data-structures.js"></script>
+    <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
+    <script type="text/javascript" src="/fabric.play.js"></script>
+    <script type="text/javascript" src="/jquery.play.js"></script>
+    <script type="text/javascript" src="/play.js"></script>
+    <!-- <script type="text/javascript" src="/treant.js"></script> -->
+
+    <link rel="stylesheet" href="/vendor/animate.css">
+    <link rel="stylesheet" href="/vendor/treant.css">
+    <link href="/vendor/select2.min.css" rel="stylesheet"/>
+    <link rel="stylesheet" href="/play.css">
+    <link rel="stylesheet" href="/vendor/fontawesome-all.css">
+
     <script type="text/javascript">
-        Array.prototype.max = function() {
+        Array.prototype.max = function () {
             return Math.max.apply(null, this);
         };
     </script>
     <style>
+        #mathjaxDialog {
+            background: blue;
+            color: white;
+            display: none;
+            z-index: 500000;
+            position: absolute;
+            left: 30%;
+            top: 30%;
+            width: 400px;
+            height: 400px;
+            border: 1px solid black;
+            padding: 1%;
+        }
 
+        @media (max-width: 767px) {
+            #mathjaxDialog {
+                left: 2%;
+                width: 99%;
+            }
+        }
+
+        .key {
+            width: 40px;
+            height: 40px;
+            display: block;
+            background-color: #333;
+            text-align: left;
+            padding-left: 8px;
+            line-height: 29px;
+            border-radius: 2px;
+            float: left;
+            margin-left: 2px;
+            margin-bottom: 2px;
+            cursor: pointer;
+            transition: box-shadow 0.7s ease;
+        }
+
+        .section-a {
+            width: 650px;
+            height: 260px;
+            float: left;
+        }
+
+        .section-b {
+            width: 150px;
+            height: 260px;
+            float: left;
+        }
+
+        .function {
+            font-size: 12px;
+            width: 30px;
+            height: 30px;
+            margin-bottom: 15px;
+        }
+
+        .small {
+            font-size: 10px;
+            line-height: 13px;
+            text-align: center;
+            padding: 0 5px;
+            padding-top: 2px;
+            height: 28px !important;
+        }
+
+        .space1 {
+            margin-right: 43px !important;
+        }
+
+        .space2 {
+            margin-right: 25px !important;
+        }
+
+        .dual {
+            font-size: 14px;
+            line-height: 20px;
+            width: 30px;
+        }
+
+        .backspace {
+            width: 84px;
+            font-size: 12px;
+        }
+
+        .tab {
+            width: 50px;
+            line-height: 40px;
+            font-size: 13px;
+        }
+
+        .letter {
+            width: 30px;
+        }
+
+        .slash {
+            width: 64px;
+        }
+
+        .caps {
+            width: 70px;
+            font-size: 12px;
+            line-height: 18px;
+        }
+
+        .enter {
+            width: 92px;
+            line-height: 40px;
+            text-align: center;
+            padding-left: 0;
+        }
+
+        .shift.left {
+            width: 90px;
+            line-height: 40px;
+            font-size: 13px;
+        }
+
+        .shift.right {
+            width: 104px;
+            line-height: 40px;
+            font-size: 13px;
+        }
+
+        .ctrl {
+            width: 50px;
+            line-height: 40px;
+            font-size: 13px;
+        }
+
+        .space {
+            width: 234px;
+        }
+
+        .arrows {
+            position: relative;
+            top: 42px;
+        }
+
+        .sec-func .key {
+            width: 32px;
+            font-size: 10px;
+            text-align: left;
+            line-height: 40px;
+            float: left;
+        }
+
+        .sec-func div.dual {
+            line-height: 20px;
+        }
+
+        .arrows .key {
+            text-align: center;
+            padding-left: 7px;
+            margin-left: 2px;
+        }
+
+        .hidden {
+            visibility: hidden;
+        }
+
+        .key:hover {
+            box-shadow: 0px 0px 10px #14B524;
+            z-index: 1000;
+        }
     </style>
 
     <script>
-        window.addEventListener("keydown",function (e) {
+        window.addEventListener("keydown", function (e) {
             if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
                 e.preventDefault();
                 //Control F
@@ -72,1120 +240,1066 @@
             $('#item-variables').append(li)
         }
     </script>
-
-    <script src="/play.js"></script>
-<!--    <script src="/play2.js"></script>-->
-    <link rel="stylesheet" href="/play.css">
-    <link rel="stylesheet" href="/vendor/fontawesome-all.css">
-
+    <!--    <script src="/play2.js"></script>-->
     <script>
 
     </script>
-    
-    
+
+
 </head>
 
-<body >
-    <span style="position:fixed;top:2rem;right: 1rem">
+<body>
+<span style="position:fixed;top:2rem;right: 1rem">
         Lyr: <span id="layerInfo" style="color: blue">PC</span>;
         Uid: <span id="selectedObjId" style="color: blue"></span>;
     </span>
 
-    <svg id="horizRuler" xmlns="http://www.w3.org/2000/svg" style="height: 40px; position: fixed; top: 0;"></svg>
-    <svg id="vertRuler" xmlns="http://www.w3.org/2000/svg" style="height: 1000px;position: absolute; left: 0;"></svg>
-    <script>
-        var someSvgElement = document.getElementById('horizRuler');
-        let rulez = new Rulez({
-            element: someSvgElement,
-        });
-        rulez.render();
+<svg id="horizRuler" xmlns="http://www.w3.org/2000/svg" style="height: 40px; position: fixed; top: 0;"></svg>
+<svg id="vertRuler" xmlns="http://www.w3.org/2000/svg" style="height: 1000px;position: absolute; left: 0;"></svg>
+<script>
+    var someSvgElement = document.getElementById('horizRuler');
+    let rulez = new Rulez({
+        element: someSvgElement,
+    });
+    rulez.render();
 
-        var someSvgElement = document.getElementById('vertRuler');
-        rulez = new Rulez({
-            element: someSvgElement,
-            layout: 'vertical',
-            textDefaults:{
-                rotation: 90
-            }
-        });
-        rulez.render();
-    </script>
-    <div id="CMOGDAT-dialog" title="Enter required data" class="dialog">
-            <input placeholder="Ex: [1, 2], [2, 3]" name="data" value="[1,2,3], [4,5,6]" style="width: 80%">
-            <button type="submit" onclick="createMatrix('#CMOGDAT-dialog')">OK</button>
-            <br> <br>
-            <input placeholder="Location on screen" value="400,80" name="location">
-    </div>
+    var someSvgElement = document.getElementById('vertRuler');
+    rulez = new Rulez({
+        element: someSvgElement,
+        layout: 'vertical',
+        textDefaults: {
+            rotation: 90
+        }
+    });
+    rulez.render();
+</script>
+<div id="CMOGDAT-dialog" title="Enter required data" class="dialog">
+    <input placeholder="Ex: [1, 2], [2, 3]" name="data" value="[1,2,3], [4,5,6]" style="width: 80%">
+    <button type="submit" onclick="createMatrix('#CMOGDAT-dialog')">OK</button>
+    <br> <br>
+    <input placeholder="Location on screen" value="400,80" name="location">
+</div>
 
-    <div id="CAOGSD-dialog" title="Enter required data" class="dialog">
-        <input placeholder="Ex: 1, 2, 3" name="data" value="1,2,3" style="width: 80%">
-        <button type="submit" onclick="createArray('#CAOGSD-dialog')">OK</button>
-        <br> <br>
-        <input placeholder="Location on screen" value="400,80" name="location">
-    </div>
+<div id="CAOGSD-dialog" title="Enter required data" class="dialog">
+    <input placeholder="Ex: 1, 2, 3" name="data" value="1,2,3" style="width: 80%">
+    <button type="submit" onclick="createArray('#CAOGSD-dialog')">OK</button>
+    <br> <br>
+    <input placeholder="Location on screen" value="400,80" name="location">
+</div>
 
-    <div class="top-bar" style="width: 40%; z-index: 3400; position: fixed; top: 0; left: 25%; opacity: 0.5;">
-        <select class="commands-select" name="command" style="width: 100%;">
-            <option value="NULL"></option>
-            <option value="CMOGDAT">Create Matrix Of Given Data</option>
-            <option value="CMOGDIM">Create Matrix Of Given Dimension</option>
-            <option value="CAOGSD">Create Array Of Given Data</option>
-            <option value="CAOGSZ">Create Array Of Given Size</option>
-            <option value="LDANIM">Load Animation</option>
-        </select>
+<div class="top-bar" style="width: 40%; z-index: 3400; position: fixed; top: 0; left: 25%; opacity: 0.5;">
+    <select class="commands-select" name="command" style="width: 100%;">
+        <option value="NULL"></option>
+        <option value="CMOGDAT">Create Matrix Of Given Data</option>
+        <option value="CMOGDIM">Create Matrix Of Given Dimension</option>
+        <option value="CAOGSD">Create Array Of Given Data</option>
+        <option value="CAOGSZ">Create Array Of Given Size</option>
+        <option value="LDANIM">Load Animation</option>
+    </select>
 
-        <button id="btnStart">REC</button>
-        <button id="btnStop" style="display: none;">STOP</button>
-        <button id="btnPause" style="display: none;">PAUSE</button>
-        <button id="btnResume" style="display: none;">RESUME</button>
-        <button id="btnResumeAnimation" style="display: none" onclick="resumeAnimationScript()">ANIM-SCRIPT</button>
-    </div>
+    <button id="btnStart">REC</button>
+    <button id="btnStop" style="display: none;">STOP</button>
+    <button id="btnPause" style="display: none;">PAUSE</button>
+    <button id="btnResume" style="display: none;">RESUME</button>
+    <button id="btnResumeAnimation" style="display: none" onclick="resumeAnimationScript()">ANIM-SCRIPT</button>
+</div>
 
-    <div style="position: fixed; right: -37px; top: 10%;z-index: 3000; color: green">
-        <ul id="item-variables">
+<div style="position: fixed; right: -37px; top: 10%;z-index: 3000; color: green">
+    <ul id="item-variables">
 
-        </ul>
-    </div>
+    </ul>
+</div>
 
 <!--    <video width="100%" height="100%" style="width: 100%; height: 100%; position: fixed; top: 0; left: 0;" src="/videos/smoke.mp4" autoplay muted>-->
 <!--    </video>-->
-    <nav id="edit-table-cell-toolbar" style="display: none; position: fixed; z-index: 3000; background: #e2dbdb; padding: 10px; ">
-        <ul class="" style="list-style: none;">
-            <li class="">
-                Value: <input type="text" name="value" onchange="">
-            </li>
-            <li class="">
-                BG-Color: <input type="color" name="background" onchange="">
-            </li>
-            <li class="">
-                FG-Color: <input type="color" name="color" onchange="">
-            </li>
-            <li class="">
-                <button onclick="$('#edit-table-cell-toolbar').hide()">Close</button>
-                <button onclick="" class="reset">Reset</button>
-            </li>
+<nav id="edit-table-cell-toolbar" style="display: none; position: fixed; z-index: 3000; background: #e2dbdb; padding: 10px; ">
+    <ul class="" style="list-style: none;">
+        <li class="">
+            Value: <input type="text" name="value" onchange="">
+        </li>
+        <li class="">
+            BG-Color: <input type="color" name="background" onchange="">
+        </li>
+        <li class="">
+            FG-Color: <input type="color" name="color" onchange="">
+        </li>
+        <li class="">
+            <button onclick="$('#edit-table-cell-toolbar').hide()">Close</button>
+            <button onclick="" class="reset">Reset</button>
+        </li>
 
-        </ul>
-    </nav>
+    </ul>
+</nav>
 
-    <script>
-        // In your Javascript (external .js resource or <script> tag)
-        $(document).ready(function() {
-            $('.commands-select').select2();
-        });
-        $('.commands-select').on('select2:open', function (e) {
-            const data = e.params.data;
-            console.log(data);
-            window.commandSelectionIsGoingOn = true;
-        });
+<script>
+    // In your Javascript (external .js resource or <script> tag)
+    $(document).ready(function () {
+        $('.commands-select').select2();
+    });
+    $('.commands-select').on('select2:open', function (e) {
+        const data = e.params.data;
+        console.log(data);
+        window.commandSelectionIsGoingOn = true;
+    });
 
-        $('.commands-select').on('select2:close', function (e) {
-            const data = e.params.data;
-            console.log(data);
-            window.commandSelectionIsGoingOn = false;
-        });
+    $('.commands-select').on('select2:close', function (e) {
+        const data = e.params.data;
+        console.log(data);
+        window.commandSelectionIsGoingOn = false;
+    });
 
-        $('.commands-select').on('select2:select', function (e) {
-            const data = e.params.data;
-            console.log(data);
-            if(data.id === 'LDANIM') {
-                fetch("http://localhost:5000/animation-script")
-                    .then(res => res.json())
-                    .then(data => {
-                        console.log(data);
-                    })
-            } else {
-                $(`#${data.id}-dialog`).dialog({
-                    width: 800,
-                    height: 400,
+    $('.commands-select').on('select2:select', function (e) {
+        const data = e.params.data;
+        console.log(data);
+        if (data.id === 'LDANIM') {
+            fetch("http://localhost:5000/animation-script")
+                .then(res => res.json())
+                .then(data => {
+                    console.log(data);
                 })
-            }
-
-            window.commandSelectionIsGoingOn = false;
-            $('.commands-select').val('NULL')
-            $('.commands-select').trigger('change'); //Reset
-        });
-    </script>
-	<canvas id="playerCanvas"></canvas>
-    <canvas id="overlayCanvas" style="position: absolute;"></canvas>
-	<span id="recording-info" style="    margin-left: 42%;top: 0; position: fixed;"></span>
-	<div id="textillateContainer" style="width: 100%; height: 100%;position: absolute; top: 0; left: 0;">
-        <div id="cinemaText"></div>
-        <div id="typed-strings" style="display: none">
-            <p>Typed.js is a <strong>JavaScript</strong> library.</p>
-            <p>It <em>types</em> out sentences.</p>
-        </div>
-    </div>
-
-    <div id="editor" style="position: absolute;top:0; left: 50%;width: 49%; z-index: 30000; height: 100%; display: none">
-    </div>
-    <script>
-        const editor = ace.edit("editor");
-        editor.setTheme("ace/theme/monokai");
-        editor.session.setMode("ace/mode/python");
-        editor.setFontSize(23);
-    </script>
-
-    <script type="text/javascript">
-        const API_HOST = 'http://livintolearn.com/api';
-        window.location.hash.replace("#", "");
-
-        window.onbeforeunload = function(){
-          return 'Are you sure you want to leave?';
-        };
-
-
-        window.pc = new fabric.Canvas('playerCanvas')
-        window._ = {
-            textboxes: []
+        } else {
+            $(`#${data.id}-dialog`).dialog({
+                width: 800,
+                height: 400,
+            })
         }
-        window.oc = new fabric.Canvas('overlayCanvas', {
-            isDrawingMode: true
-        });
-        window.txt = $("#textillateContainer")
-        pc.setWidth(window.innerWidth)
-        pc.setHeight(window.innerHeight)
-        oc.setWidth(window.innerWidth)
-        oc.setHeight(window.innerHeight)
 
-        $('.canvas-container').css({
-            position: 'absolute'
-        });
-        superimposeOverlayCanvas()
-        moveToFront('pc')
-    </script>
- 
-    <div style="display: inline-block;margin-left: 10px;position: absolute;left: 0;top: 8px;z-index: 1000000;height: 0;">
+        window.commandSelectionIsGoingOn = false;
+        $('.commands-select').val('NULL')
+        $('.commands-select').trigger('change'); //Reset
+    });
+</script>
+<canvas id="playerCanvas"></canvas>
+<canvas id="overlayCanvas" style="position: absolute;"></canvas>
+<span id="recording-info" style="    margin-left: 42%;top: 0; position: fixed;"></span>
+<div id="textillateContainer" style="width: 100%; height: 100%;position: absolute; top: 0; left: 0;">
+    <div id="cinemaText"></div>
+    <div id="typed-strings" style="display: none">
+        <p>Typed.js is a <strong>JavaScript</strong> library.</p>
+        <p>It <em>types</em> out sentences.</p>
+    </div>
+</div>
+
+<div id="editor" style="position: absolute;top:0; left: 50%;width: 49%; z-index: 30000; height: 100%; display: none">
+</div>
+<script>
+    const editor = ace.edit("editor");
+    editor.setTheme("ace/theme/monokai");
+    editor.session.setMode("ace/mode/python");
+    editor.setFontSize(23);
+</script>
+
+<script type="text/javascript">
+    const API_HOST = 'http://livintolearn.com/api';
+    window.location.hash.replace("#", "");
+
+    window.onbeforeunload = function () {
+        return 'Are you sure you want to leave?';
+    };
+
+
+    window.pc = new fabric.Canvas('playerCanvas')
+    window._ = {
+        textboxes: []
+    }
+    window.oc = new fabric.Canvas('overlayCanvas', {
+        isDrawingMode: true
+    });
+    window.txt = $("#textillateContainer")
+    pc.setWidth(window.innerWidth)
+    pc.setHeight(window.innerHeight)
+    oc.setWidth(window.innerWidth)
+    oc.setHeight(window.innerHeight)
+
+    $('.canvas-container').css({
+        position: 'absolute'
+    });
+    superimposeOverlayCanvas()
+    moveToFront('pc')
+</script>
+
+<div style="display: inline-block;margin-left: 10px;position: absolute;left: 0;top: 8px;z-index: 1000000;height: 0;">
         <span style=""> <label class="switch">
           <input type="checkbox" id="eraser">
           <span class="slider round"></span>
             </label>
         </span>
+</div>
+
+
+<div id="drawing-toolbar" style="display: inline-block; margin-left: 10px;position: absolute; left: 0; top: 50; z-index: 1000000; height: 0"
+     class="ui-draggable ui-draggable-handle">
+    <img id="toolbarToggle1" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#toolbar1-buttons').toggle();"
+         src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png">
+
+    <div id="toolbar1-buttons">
+        Drawing Mode:
+        <label class="switch">
+            <input type="checkbox" id="flip-drawing">
+            <span class="slider round"></span>
+        </label>
+        <br><br>
+        <button id="undo" class="btn btn-info" onclick="undoDrawing(event)">Undo</button>
+        <span> &nbsp;&nbsp;&nbsp;</span>
+        <button id="redo" class="btn btn-info" onclick="redoDrawing(event)">Redo</button>
+        <br>
+
+        <br>
+        <label for="drawing-mode-selector">Mode:</label>
+        <select id="drawing-mode-selector">
+            <option>Pencil</option>
+            <option>Circle</option>
+            <option>Spray</option>
+            <option>Pattern</option>
+
+            <option>hline</option>
+            <option>vline</option>
+            <option>square</option>
+            <option>diamond</option>
+            <option>texture</option>
+        </select><br>
+        <br>
+        <label for="drawing-line-width">Line width:</label>
+        <span class="info">2</span><input type="number" value="3" id="drawing-line-width"><br>
+
+        <br>
+        <label for="drawing-color">Line color:</label>
+        <input type="color" value="#005E7A" id="drawing-color"><br>
+        <br>
+        <button id="clear-canvas" class="btn btn-info">Clear</button>
+
+        <br><br>
+        <label for="drawing-shadow-color">Shadow color:</label>
+        <input type="color" value="#005E7A" id="drawing-shadow-color"><br>
+        <br>
+        <label for="drawing-shadow-width">Shadow width:</label>
+        <span class="info">0</span><input type="number" value="0" id="drawing-shadow-width"><br>
+
+        <br>
+        <label for="drawing-shadow-offset">Shadow offset:</label>
+        <span class="info">0</span><input type="number" value="0" id="drawing-shadow-offset"><br>
+        <br>
     </div>
-    
+</div>
 
-    <div id="drawing-toolbar" style="display: inline-block; margin-left: 10px;position: absolute; left: 0; top: 50; z-index: 1000000; height: 0" class="ui-draggable ui-draggable-handle">
-        <img id="toolbarToggle1" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#toolbar1-buttons').toggle();" src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png">
+<div id="rollbackConfirmationDialog" title="Rollback Recording!" style="display: none;">
+    <p>Select the time where to rollback:</p>
+    <div class="slider"></div>
+    <br><br>
+    <div>
+        Selected Value: <span class="info"></span>
 
-        <div id="toolbar1-buttons">
-            Drawing Mode:
-            <label class="switch">
-              <input type="checkbox" id="flip-drawing">
-              <span class="slider round"></span>
-            </label>
-            <br><br>
-            <button id="undo" class="btn btn-info" onclick="undoDrawing(event)">Undo</button> <span> &nbsp;&nbsp;&nbsp;</span>
-            <button id="redo" class="btn btn-info" onclick="redoDrawing(event)">Redo</button><br>
+    </div>
+</div>
 
-            <br>
-            <label for="drawing-mode-selector">Mode:</label>
-            <select id="drawing-mode-selector">
-                <option>Pencil</option>
-                <option>Circle</option>
-                <option>Spray</option>
-                <option>Pattern</option>
+<div id="recordingFileChooserDialog" title="Choose Recording Files!" style="display: none; z-index: 5000">
+    <p>Choose Files:</p>
+    <input type="file" accept="text/plain" onchange="openFile(event)" id="recordingFiles" multiple="multiple">
 
-                <option>hline</option>
-                <option>vline</option>
-                <option>square</option>
-                <option>diamond</option>
-                <option>texture</option>
-            </select><br>
-            <br>
-            <label for="drawing-line-width">Line width:</label>
-            <span class="info">2</span><input type="number" value="3" id="drawing-line-width"><br>
-            
-            <br>
-            <label for="drawing-color">Line color:</label>
-            <input type="color" value="#005E7A" id="drawing-color"><br>
-            <br>
-            <button id="clear-canvas" class="btn btn-info">Clear</button>
-            
-            <br><br>
-            <label for="drawing-shadow-color">Shadow color:</label>
-            <input type="color" value="#005E7A" id="drawing-shadow-color"><br>
-            <br>
-            <label for="drawing-shadow-width">Shadow width:</label>
-            <span class="info">0</span><input type="number" value="0" id="drawing-shadow-width"><br>
-            
-            <br>
-            <label for="drawing-shadow-offset">Shadow offset:</label>
-            <span class="info">0</span><input type="number" value="0" id="drawing-shadow-offset"><br>
-            <br>
-        </div>
+    <div>
+        OR
     </div>
 
-	<div id="rollbackConfirmationDialog" title="Rollback Recording!" style="display: none;">
-	  <p>Select the time where to rollback:</p>
-	  <div class="slider"></div>
-	  <br><br>
-	  <div>
-		Selected Value: <span class="info"></span>
-		
-	  </div>
-	</div>
-	
-	<div id="recordingFileChooserDialog" title="Choose Recording Files!" style="display: none; z-index: 5000">
-	  <p>Choose Files:</p>
-	  <input type="file" accept="text/plain" onchange="openFile(event)" id="recordingFiles" multiple="multiple">
-	  
-	  <div>
-		OR
-	  </div>
-	  
-	</div>
-	
-	<div id="playbackControls" style="display: none; position:fixed; bottom:0;width:100%;">
-		<table style="width:100%">
-		  <tr>
-			<th style="width: 20%;"><span class="time"style="float: right;margin-right: 30px;"></span></th>
-			<th style="width: 60%;"> <div class="slider"></div> </th> 
-			<th><span class="time" style="float: left;margin-left:30px"></span></th>
-		  </tr>
-		</table>
-		 
-	</div>
-	
-    <div id="toolbar" style="display: inline-block; margin-left: 10px;position: absolute; right: -10; top: 50; z-index: 1000000; height: 0">
-        <img id="toolbarToggle" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#drawing-mode-options').toggle();" src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png"></img>
+</div>
 
-        <select id="savePoints" style="margin-right: 30px;float: right;" onchange="restoreCanvas()"><option >0</option></select>
+<div id="playbackControls" style="display: none; position:fixed; bottom:0;width:100%;">
+    <table style="width:100%">
+        <tr>
+            <th style="width: 20%;"><span class="time" style="float: right;margin-right: 30px;"></span></th>
+            <th style="width: 60%;">
+                <div class="slider"></div>
+            </th>
+            <th><span class="time" style="float: left;margin-left:30px"></span></th>
+        </tr>
+    </table>
+
+</div>
+
+<div id="toolbar" style="display: inline-block; margin-left: 10px;position: absolute; right: -10; top: 50; z-index: 1000000; height: 0">
+    <img id="toolbarToggle" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#drawing-mode-options').toggle();"
+         src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png"></img>
+
+    <select id="savePoints" style="margin-right: 30px;float: right;" onchange="restoreCanvas()">
+        <option>0</option>
+    </select>
 
 
-        <div id="drawing-mode-options" style="background: rgba(15, 14, 14, 0.4);padding-left: 10px;padding-top: 10px;">
+    <div id="drawing-mode-options" style="background: rgba(15, 14, 14, 0.4);padding-left: 10px;padding-top: 10px;">
 
-			
-			<button id="record-launch" class="btn btn-info" onclick="initializeRecording()">Record</button>
-			<button id="record-play-launch" class="btn btn-info" onclick="launchRecordingDialog()">Play Recording</button>
-			<button id="rollbackRecording" onclick="launchRollbackRecording()">Rollback Recording</button>
-            <br><br>
-			<button id="delete-selected" class="btn btn-info" onclick="deleteSelectedObjects()">Delete</button>
-			<button id="record-play-save" class="btn btn-info" onclick="saveRecording()">Save Recording</button>
-			<br> <br>
-			
-            <button class="btn btn-info" onclick="copy(pc)">Copy</button>
-            <button class="btn btn-info" onclick="paste(pc)">Paste</button>
-            <button class="btn btn-info" onclick="degroup(pc)">Ungroup</button>
 
-            <br><br>
+        <button id="record-launch" class="btn btn-info" onclick="initializeRecording()">Record</button>
+        <button id="record-play-launch" class="btn btn-info" onclick="launchRecordingDialog()">Play Recording</button>
+        <button id="rollbackRecording" onclick="launchRollbackRecording()">Rollback Recording</button>
+        <br><br>
+        <button id="delete-selected" class="btn btn-info" onclick="deleteSelectedObjects()">Delete</button>
+        <button id="record-play-save" class="btn btn-info" onclick="saveRecording()">Save Recording</button>
+        <br> <br>
 
-            <button id="create-text" class="btn btn-info">Text</button>
-            <button id="create-small-text" class="btn btn-info">Small Text</button>
-            <button id="create-rect-text" class="btn btn-info">[]</button>
+        <button class="btn btn-info" onclick="copy(pc)">Copy</button>
+        <button class="btn btn-info" onclick="paste(pc)">Paste</button>
+        <button class="btn btn-info" onclick="degroup(pc)">Ungroup</button>
 
-            <br><br>
-            Color: <select onchange="changeCircleColor(this.value)">
-              <option value="">--</option>
-              <option value="blue">Blue</option>
-              <option value="green">Green</option>
-              <option value="red">Red</option>
-              <option value="black">Black</option>
-              <option value="yellow">Yellow</option>
-              <option value="pink">Pink</option>
-              <option value="white">White</option>
-            </select> 
-           
-            <br><br>
-            <button id="greenen" class="btn btn-info" onclick="zoomSelectedObject(true)" style="margin-right:10px;">+</button>
-            <button id="whiten" class="btn btn-info" onclick="zoomSelectedObject(false)" style="margin-right:10px;">-</button>
+        <br><br>
 
-            <button id="arrow" class="btn btn-info" onclick="arrowButton()">--></button>
-            <br><br>
+        <button id="create-text" class="btn btn-info">Text</button>
+        <button id="create-small-text" class="btn btn-info">Small Text</button>
+        <button id="create-rect-text" class="btn btn-info">[]</button>
 
-            <button id="flipConnectionMode" class="btn btn-info" onclick="flipConnectionMode(event)" style="">Connect</button>
-            <button id="makeTree" class="btn btn-info" onclick="onMakeTreeClick(event)" style="">AddTreeNodes</button>
-            <button id="removeTree" class="btn btn-info" onclick="onRemoveTreeClick(event)" style="">RemoveTree</button>
+        <br><br>
+        Color: <select onchange="changeCircleColor(this.value)">
+        <option value="">--</option>
+        <option value="blue">Blue</option>
+        <option value="green">Green</option>
+        <option value="red">Red</option>
+        <option value="black">Black</option>
+        <option value="yellow">Yellow</option>
+        <option value="pink">Pink</option>
+        <option value="white">White</option>
+    </select>
 
-            <br><br>
+        <br><br>
+        <button id="greenen" class="btn btn-info" onclick="zoomSelectedObject(true)" style="margin-right:10px;">+</button>
+        <button id="whiten" class="btn btn-info" onclick="zoomSelectedObject(false)" style="margin-right:10px;">-</button>
 
-            <button id="create-array" class="btn btn-info" onclick="window.insertArray=true; turnOffDrawing();" style="margin-right:10px;">Array</button>
+        <button id="arrow" class="btn btn-info" onclick="arrowButton()">--></button>
+        <br><br>
 
-            <button id="insert-matex" class="btn btn-info" onclick="window.signalMatexInsertion=true;turnOffDrawing();">Matex</button>
-            <button id="insert-image" class="btn btn-info" onclick="window.signalImageInsertion=true;turnOffDrawing();">Image</button>
-            <br><br>
-            <button id="save" style="margin-right:10px;" onclick="saveCanvas()">Save</button>
-            <button id="newCanvas" onclick="newCanvas()"> New </button>
-            <br><br>
+        <button id="flipConnectionMode" class="btn btn-info" onclick="flipConnectionMode(event)" style="">Connect</button>
+        <button id="makeTree" class="btn btn-info" onclick="onMakeTreeClick(event)" style="">AddTreeNodes</button>
+        <button id="removeTree" class="btn btn-info" onclick="onRemoveTreeClick(event)" style="">RemoveTree</button>
 
-            <br><br>
-            <span id="instruction" style="width:150px"></span>
+        <br><br>
 
-        </div>
+        <button id="create-array" class="btn btn-info" onclick="window.insertArray=true; turnOffDrawing();" style="margin-right:10px;">Array</button>
+
+        <button id="insert-matex" class="btn btn-info" onclick="window.signalMatexInsertion=true;turnOffDrawing();">Matex</button>
+        <button id="insert-image" class="btn btn-info" onclick="window.signalImageInsertion=true;turnOffDrawing();">Image</button>
+        <br><br>
+        <button id="save" style="margin-right:10px;" onclick="saveCanvas()">Save</button>
+        <button id="newCanvas" onclick="newCanvas()"> New</button>
+        <br><br>
+
+        <br><br>
+        <span id="instruction" style="width:150px"></span>
+
     </div>
-    <script >
+</div>
+<script>
 
-        const drawingModeEl = $('#drawing-mode'),
-            drawingOptionsEl = $('#drawing-mode-options'),
-            drawingColorEl = $('#drawing-color'),
-            drawingShadowColorEl = $('#drawing-shadow-color'),
-            drawingLineWidthEl = $('#drawing-line-width'),
-            drawingShadowWidth = $('#drawing-shadow-width'),
-            drawingShadowOffset = $('#drawing-shadow-offset'),
-            clearEl = $('#clear-canvas'),
-            eraserEl = $('#eraser');
+    const drawingModeEl = $('#drawing-mode'),
+        drawingOptionsEl = $('#drawing-mode-options'),
+        drawingColorEl = $('#drawing-color'),
+        drawingShadowColorEl = $('#drawing-shadow-color'),
+        drawingLineWidthEl = $('#drawing-line-width'),
+        drawingShadowWidth = $('#drawing-shadow-width'),
+        drawingShadowOffset = $('#drawing-shadow-offset'),
+        clearEl = $('#clear-canvas'),
+        eraserEl = $('#eraser');
 
-        clearEl.click(function() {
-              const yes = confirm('Are you sure?');
-              if (yes) clear('oc');
-           });
+    clearEl.click(function () {
+        const yes = confirm('Are you sure?');
+        if (yes) clear('oc');
+    });
 
-          drawingColorEl.change(function(e) {
-              oc.freeDrawingBrush.color = this.value;
-          });
+    drawingColorEl.change(function (e) {
+        oc.freeDrawingBrush.color = this.value;
+    });
 
-          function turnOffDrawing(){
-            if(flipDrawindEl.is(':checked')) {
-                flipDrawindEl.click();
-            }
-          }
+    function turnOffDrawing() {
+        if (flipDrawindEl.is(':checked')) {
+            flipDrawindEl.click();
+        }
+    }
 
-          eraserEl.change(e => {
-            if(eraserEl.is(':checked')) {
-                //Store 
-                window.saved = window.saved || {};
-                window.saved.eraserStoredData = window.saved.eraserStoredData || {}
-                
-                window.saved.eraserStoredData.drawingColor = drawingColorEl.val()
-                window.saved.eraserStoredData.drawingLineWidth = drawingLineWidthEl.val()
+    eraserEl.change(e => {
+        if (eraserEl.is(':checked')) {
+            //Store
+            window.saved = window.saved || {};
+            window.saved.eraserStoredData = window.saved.eraserStoredData || {}
 
-                if(window.theme == 'black') {
-                    drawingColorEl.val('#000000')
-                } else {
-                    drawingColorEl.val('#ffffff')
-                }
-                oc.freeDrawingBrush.color = drawingColorEl.val();
+            window.saved.eraserStoredData.drawingColor = drawingColorEl.val()
+            window.saved.eraserStoredData.drawingLineWidth = drawingLineWidthEl.val()
 
-                drawingLineWidthEl.val(15);
-                oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 15;
-
+            if (window.theme == 'black') {
+                drawingColorEl.val('#000000')
             } else {
-                //Restore
-                drawingColorEl.val(window.saved.eraserStoredData.drawingColor);
-                drawingLineWidthEl.val(window.saved.eraserStoredData.drawingLineWidth);
-
-                oc.freeDrawingBrush.color = drawingColorEl.val();
-                oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 5;                
+                drawingColorEl.val('#ffffff')
             }
-          });
+            oc.freeDrawingBrush.color = drawingColorEl.val();
 
-          drawingShadowColorEl.change(function() {
-            oc.freeDrawingBrush.shadow.color = this.value;
-          });
-          drawingLineWidthEl.change( function() {
-            oc.freeDrawingBrush.width = parseInt(this.value, 10) || 1;
-            this.previousSibling.innerHTML = this.value;
-          });
-          drawingShadowWidth.change(function() {
-            oc.freeDrawingBrush.shadow.blur = parseInt(this.value, 10) || 0;
-            this.previousSibling.innerHTML = this.value;
-          });
-          drawingShadowOffset.change( function() {
-            oc.freeDrawingBrush.shadow.offsetX = parseInt(this.value, 10) || 0;
-            oc.freeDrawingBrush.shadow.offsetY = parseInt(this.value, 10) || 0;
-            this.previousSibling.innerHTML = this.value;
-          });
+            drawingLineWidthEl.val(15);
+            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 15;
 
-          if (oc.freeDrawingBrush) {
-            oc.freeDrawingBrush.color = drawingColorEl.val() || 'black';
-            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 1;
-            oc.freeDrawingBrush.shadow = new fabric.Shadow({
-              blur: parseInt(drawingShadowWidth.val(), 10) || 0,
-              offsetX: 0,
-              offsetY: 0,
-              affectStroke: true,
-              color: drawingShadowColorEl.val() || 'black',
-            });
-          };
-    </script>
-    <script type="text/javascript">
-        localStorage.setItem('pc', JSON.stringify({}))
-        localStorage.setItem('oc', JSON.stringify({}))
-        if (location.hash.indexOf('debug') >= 0) alert(window.innerWidth + "," + window.innerHeight)
-        if (window.innerWidth < window.innerHeight) {
-            $('#toolbar').css({
-                position: 'absolute',
-                bottom: 0
+        } else {
+            //Restore
+            drawingColorEl.val(window.saved.eraserStoredData.drawingColor);
+            drawingLineWidthEl.val(window.saved.eraserStoredData.drawingLineWidth);
+
+            oc.freeDrawingBrush.color = drawingColorEl.val();
+            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 5;
+        }
+    });
+
+    drawingShadowColorEl.change(function () {
+        oc.freeDrawingBrush.shadow.color = this.value;
+    });
+    drawingLineWidthEl.change(function () {
+        oc.freeDrawingBrush.width = parseInt(this.value, 10) || 1;
+        this.previousSibling.innerHTML = this.value;
+    });
+    drawingShadowWidth.change(function () {
+        oc.freeDrawingBrush.shadow.blur = parseInt(this.value, 10) || 0;
+        this.previousSibling.innerHTML = this.value;
+    });
+    drawingShadowOffset.change(function () {
+        oc.freeDrawingBrush.shadow.offsetX = parseInt(this.value, 10) || 0;
+        oc.freeDrawingBrush.shadow.offsetY = parseInt(this.value, 10) || 0;
+        this.previousSibling.innerHTML = this.value;
+    });
+
+    if (oc.freeDrawingBrush) {
+        oc.freeDrawingBrush.color = drawingColorEl.val() || 'black';
+        oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 1;
+        oc.freeDrawingBrush.shadow = new fabric.Shadow({
+            blur: parseInt(drawingShadowWidth.val(), 10) || 0,
+            offsetX: 0,
+            offsetY: 0,
+            affectStroke: true,
+            color: drawingShadowColorEl.val() || 'black',
+        });
+    }
+    ;
+</script>
+<script type="text/javascript">
+    localStorage.setItem('pc', JSON.stringify({}))
+    localStorage.setItem('oc', JSON.stringify({}))
+    if (location.hash.indexOf('debug') >= 0) alert(window.innerWidth + "," + window.innerHeight)
+    if (window.innerWidth < window.innerHeight) {
+        $('#toolbar').css({
+            position: 'absolute',
+            bottom: 0
+        })
+    }
+
+    $('body').scroll(function (e) {
+        console.log('resized')
+
+    });
+
+    $(document).ready(e => {
+
+        $('#toolbar').draggable();
+    });
+
+
+    $('#create-text').click(e => {
+        window.insertText = true;
+        turnOffDrawing();
+    })
+    $('#create-small-text').click(e => {
+        window.insertSmallText = true;
+        turnOffDrawing();
+    })
+
+    $('#create-rect-text').click(e => {
+        window.insertRectText = true;
+        turnOffDrawing();
+    })
+
+    const flipDrawindEl = $('#flip-drawing');
+    flipDrawindEl.click(e => {
+        if (flipDrawindEl.is(':checked')) {
+            moveToFront('oc')
+        } else {
+            moveToFront('pc')
+        }
+    })
+    pc.on('object:selected', function (e) {
+        const obj = e.target;
+        $('#selectedObjId').html(obj.uid)
+        if (window.connectionMode) {
+            if (!window.firstOfConnection) firstOfConnection = obj
+            else {
+                makeConnection(e)
+                flipConnectionMode()
+            }
+
+        }
+    });
+
+    pc.on('object:removed', e => {
+        console.log(e.target);
+        const obj = e.target;
+        if (obj.treeConnection && obj.treeConnection.outgoing) {
+            obj.treeConnection.outgoing.lines.forEach(l => {
+                pc.remove(l);
             })
         }
+    })
 
-        $('body').scroll(function(e) {
-            console.log('resized')
+    window.isFabricObjectMoving = false
+    pc.on('object:moving', function (e) {
+        window.isFabricObjectMoving = true;
+        window.movingFabricObject = e.target;
+    });
 
-        });
+    pc.on('mouse:up', function (event) {
+        if (window.isFabricObjectMoving) {
+            window.isFabricObjectMoving = false;
+            // Your code to handle the end of the move event
+            recordScript(`animate(${movingFabricObject.uid}, ${JSON.stringify(getActualProperties(movingFabricObject))}, {})`)
+        }
+    });
 
-        $(document).ready(e => {
+    pc.on('object:moving', e => {
+        const t = e.target;
+        t._objects?.forEach(updateTreeItem)
+        updateTreeItem(t);
+    });
 
-            $('#toolbar').draggable();
-        });
+    pc.on('object:modified', function (e) {
+        const t = e.target;
+        //console.log(t, "modified");
+        t._objects?.forEach(l => updateTreeItem(l, t.aCoords))
+        updateTreeItem(t);
+    });
 
+    $('#drawing-mode-options').hide();
+    $('#toolbar1-buttons').hide();
 
-
-        $('#create-text').click(e => {
-            window.insertText = true;
-            turnOffDrawing();
-        })
-        $('#create-small-text').click(e => {
-            window.insertSmallText = true;
-            turnOffDrawing();
-        })
-
-        $('#create-rect-text').click(e => {
-            window.insertRectText = true;
-            turnOffDrawing();          
-        })
-
-        const flipDrawindEl = $('#flip-drawing');
-        flipDrawindEl.click(e => {
-            if(flipDrawindEl.is(':checked')) {
-                moveToFront('oc')
-            } else {
-                moveToFront('pc')
-            }
-        })
-        pc.on('object:selected', function(e) {
-            const obj = e.target;
-            $('#selectedObjId').html(obj.uid)
-            if (window.connectionMode) {
-                if (!window.firstOfConnection) firstOfConnection = obj
-                else {
-                    makeConnection(e)
-                    flipConnectionMode()
-                }
-
-            }
-        });
-
-        pc.on('object:removed', e => {
-            console.log(e.target);
-            const obj = e.target;
-            if (obj.treeConnection && obj.treeConnection.outgoing) {
-                obj.treeConnection.outgoing.lines.forEach(l => {
-                    pc.remove(l);
-                })
-            }
-        })
-
-        window.isFabricObjectMoving = false
-        pc.on('object:moving', function (e) {
-            window.isFabricObjectMoving = true;
-            window.movingFabricObject = e.target;
-        });
-
-        pc.on('mouse:up', function (event) {
-            if (window.isFabricObjectMoving) {
-                window.isFabricObjectMoving = false;
-                // Your code to handle the end of the move event
-                recordScript(`animate(${movingFabricObject.uid}, ${JSON.stringify(getActualProperties(movingFabricObject))}, {})`)
-            }
-        });
-
-        pc.on('object:moving', e => {
-            const t = e.target;
-            t._objects?.forEach(updateTreeItem)
-            updateTreeItem(t);
-        });
-
-        pc.on('object:modified', function(e) {
-            const t = e.target;
-            //console.log(t, "modified");
-            t._objects?.forEach(l => updateTreeItem(l, t.aCoords))
-            updateTreeItem(t);
-        });
-
+    oc.on('mouse:up', function (e) {
+        $('#drawing-mode-options').hide();
+        $('#toolbar1-buttons').hide();
+    })
+    pc.on('mouse:up', function (e) {
         $('#drawing-mode-options').hide();
         $('#toolbar1-buttons').hide();
 
-        oc.on('mouse:up', function(e) {
-            $('#drawing-mode-options').hide();
-            $('#toolbar1-buttons').hide();
-        })
-        pc.on('mouse:up', function(e) {
-            $('#drawing-mode-options').hide();
-            $('#toolbar1-buttons').hide();
+        if (!e.e) e.e = {}
+        if (!e.e.clientX) e.e.clientX = 10;
+        if (!e.e.clientY) e.e.clientY = 10;
 
-            if (!e.e) e.e = {}
-            if (!e.e.clientX) e.e.clientX = 10;
-            if (!e.e.clientY) e.e.clientY = 10;
+        if (window.insertText) {
+            var tb = textbox({
+                top: e.e.clientY,
+                left: e.e.clientX
+            })
+            pc.add(tb)
 
-            if (window.insertText) {
-                var tb = textbox({
-                    top: e.e.clientY,
-                    left: e.e.clientX
-                })
-                pc.add(tb)
-
-                pc.setActiveObject(tb)
-                _.textboxes.push(tb)
-                window.insertText = false;
-            }
-            if (window.insertSmallText) {
-                var tb = textbox({
-                    top: e.e.clientY,
-                    left: e.e.clientX,
-                    width: 25
-                })
-                pc.add(tb)
-
-                pc.setActiveObject(tb)
-                _.textboxes.push(tb)
-                window.insertSmallText = false;
-            }
-            if (window.signalMatexInsertion) {
-                window.signalMatexInsertion = false;
-                window.matexInsertionPoint = {
-                    top: e.e.clientY,
-                    left: e.e.clientX
-                }
-                document.getElementById('mathjaxDialog').style.display = 'block';
-            }
-            if (window.signalImageInsertion) {
-                window.signalImageInsertion = false;
-                $('#imageInputDialog').show();
-            }
-
-            if (window.insertRectText) {
-                window.insertRectText = false;
-                var text = prompt('Enter text')
-                if (!text) return;
-                var tb = textInRect(text, e.e.clientX, e.e.clientY, {}, {})
-                tb.hasControls = false;
-                pc.add(tb)
-            }
-
-            if (window.insertArray) {
-                window.insertArray = false;
-                var text = prompt('Enter text')
-                if (!text) return;
-
-                const ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc, {});
-                pc.getObjects().forEach(o => o.hasControls = false);
-            }
-
-            if (window.arrowButtonClicked) {
-                if (window.arrowButtonClicked.first) {
-                    const a = window.arrowButtonClicked.first;
-                    pc.add(arrow(a.x, a.y, e.e.clientX, e.e.clientY, {
-                        stroke: ($('#drawing-color').val() || 'black')
-                    }))
-                    window.arrowButtonClicked = null;
-                } else {
-                    window.arrowButtonClicked.first = {
-                        x: e.e.clientX,
-                        y: e.e.clientY
-                    }
-                }
-            }
-        })
-        const mapping = {
-            'l': 'clear-canvas',
-            'Delete': 'delete-selected',
-            'Backspace': 'delete-selected',
-            'd': 'flip-drawing',
-            'T': 'create-text',
-            'h': 'hide',
-            'b': 'bluen',
-            'e': 'execute-next',
-            'w': 'whiten'
-        };
-        $(document).keydown(e => {
-            if($('.commands-select').is(":focus") || window.commandSelectionIsGoingOn){
-                console.log('select is in focus. returning.')
-            }
-			if(e.keyCode === 32 && e.target === document.body) {
-				e.preventDefault();
-			}
-			
-            if (document.getElementById('mathjaxDialog').style.display === 'block') return false;
-            if (pc.getActiveObject() && pc.getActiveObject().type === 'textbox' && pc.getActiveObject().isEditing) return;
-            if (mapping[e.key]) $("#" + mapping[e.key]).click()
-            if (e.keyCode === 187) { //zoom in
-                zoomSelectedObject(true)
-            }
-            if(e.key === 't') {
-                if(pc.getActiveObject()) {
-                    $('#makeTree').click()
-                } else {
-                    $('#create-small-text').click()
-                }
-            }
-            if(e.key === 'r') {
-                $('#horizRuler').toggle()
-                $('#vertRuler').toggle()
-            }
-            if(e.key === 'h') {
-                let objId = it()?.uid;
-                hideObject(objId)
-                recordScript(`hideObject(${objId})`)
-            }
-			if(e.keyCode === 32){
-				// toggleRecording()
-			}
-            if (e.keyCode === 189) { //zoom out
-                zoomSelectedObject(false)
-            }
-            if (e.keyCode === 46) {
-                $('#delete-selected').click()
-            }
-            switch (e.keyCode) {
-                case 37: //left
-                    if(pc.getActiveObject())moveActiveObject('left', -10)
-					else {
-						if(window.playingMode){
-							stopPlayback = true
-							playerTimer -= 10
-							if(playerTimer < playerTimerStart) playerTimer = playerTimerStart;
-							$('#recording-info').html('Jumped To: '+playerTimer)
-						}
-					}
-                    break
-				case 67:
-					if(e.ctrlKey) copy(pc)
-					break;
-				case 86:
-					if(e.ctrlKey) paste(pc)
-					break;				
-                case 39: //right
-                    if(pc.getActiveObject())moveActiveObject('left', 10)
-					else {
-						if(window.playingMode){
-							stopPlayback = true
-							playerTimer += 10
-							if(playerTimer > playerTimerTotal) playerTimer = playerTimerTotal;
-							$('#recording-info').html('Jumped To: '+playerTimer)
-						}					
-					}
-                    break
-                case 40: //down
-                    moveActiveObject('top', 10)
-                    break
-                case 38: //up
-                    moveActiveObject('top', -10)
-                    break
-                case 69: //'e'
-                    editSelectedObject()
-                    break
-				case 188: //Comma,
-				    if(e.ctrlKey)
-                    moveToFront('pc')
-                    break
-				case 190: //Dot.
-				    if(e.ctrlKey)
-                    moveToFront('oc')
-                    break
-				case 84: //t
-				    if(e.ctrlKey) {
-				        e.preventDefault()
-                        moveToFront('txt')
-				    }
-                    return false
-                default:
-                    break
-            }
-        })
-    </script>
-
-
-
-    <div id="imageInputDialog" style="background: blue; color: white; display: none; z-index: 500000;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
-        <input autofocus type="text" id="imageInputUrl" onkeyup="renderMath(event)">
-
-        <input type="file" id="imageInputFile">
-
-        <button onclick="handleFileDialogButtons('OK')">OK</button> <button onclick="handleFileDialogButtons('')">Close</button>
-    </div>
-
-    <div id="mathjaxDialog" style="">
-        <script>
-            function renderMath(e) {
-                if (e.keyCode == 13) {
-                    drawMathSymbols(document.getElementById('mathtext').value, pc)
-                    document.getElementById('mathjaxDialog').style.display = 'none';
-                } else if (e.keyCode == 27) {
-                    document.getElementById('mathjaxDialog').style.display = 'none';
-                } else {
-                    document.getElementById('representation').innerHTML = "\\(" + document.getElementById('mathtext').value + "\\)";
-                    MathJax.Hub.Queue(['Typeset', MathJax.Hub, 'representation']);
-                }
-            }
-        </script>
-        <input autofocus type="text" id="mathtext" onkeyup="renderMath(event)">
-
-        <div id="representation" style="margin-top: 20; padding: 15;"> </div>
-
-         <div class="keyboard">
-             <div class="key letter">
-                0
-              </div>
-              <div class="key letter">
-                1
-              </div>
-                <div class="key letter">
-                2
-              </div>
-                <div class="key letter">
-                3
-              </div>
-                <div class="key letter">
-                4
-              </div>
-                <div class="key letter">
-                5
-              </div>
-                <div class="key letter">
-                6
-              </div>
-                <div class="key letter">
-                7
-              </div>
-                <div class="key letter">
-                8
-              </div>
-              <div class="key letter">
-                9
-              </div>
-              <div class="key letter">
-                +
-              </div>
-              <div class="key letter">
-                -
-              </div>
-              <div class="key letter">
-                *
-              </div>  
-              <div class="key letter">
-                /
-              </div>
-              <div class="key letter">
-                (
-              </div>
-              <div class="key letter">
-                )
-              </div>
-              <div class="key letter" data-mathjax="\{">
-                {
-              </div>
-              <div class="key letter" data-mathjax="\}">
-                }
-              </div>
-             <div class="key letter">
-                [
-              </div>
-                <div class="key letter">
-                ]
-              </div>
-              <div class="key letter">
-                ^
-              </div>
-              <div class="key letter">
-                !
-              </div>
-              <div class="key letter">
-                @
-              </div>
-              <div class="key letter"  data-mathjax="\#">
-                #
-              </div>
-             <div class="key letter">
-                $
-              </div>
-              <div class="key letter"  data-mathjax="\%">
-                %
-              </div>
-              <div class="key letter"  data-mathjax="\&">
-                &
-              </div>
-              <div class="key letter">
-                ?
-              </div>
-              <div class="key letter">
-                =
-              </div>
-              <div class="key letter">
-                /
-              </div>
-              
-              <div class="key letter">
-                \
-              </div>
-              <div class="key letter">
-                ~
-              </div>
-              <div class="key letter" data-mathjax="\alpha ">
-                &alpha;
-              </div>
-              <div class="key letter" data-mathjax="\beta ">
-                &beta;
-              </div>
-              <div class="key letter" data-mathjax="\gamma ">
-                &gamma;
-              </div>
-              <div class="key letter" data-mathjax="\Gamma ">
-                &Gamma;
-              </div>
-              <div class="key letter" data-mathjax="\delta ">
-                &delta;
-              </div>
-              <div class="key letter" data-mathjax="\Delta ">
-                &Delta;
-              </div>
-              <div class="key letter" data-mathjax="\epsilon ">
-                &epsilon;
-              </div>
-              
-
-              <input type="text" list="mathjaxFunctions" id="mathjaxFunctionInput" onchange="insertMathFromSelect(this)" style="margin-top: 10px;" />
-              <datalist id="mathjaxFunctions">
-                  <option value="\infty">Infinity</option>
-                 
-                  <option value="\sum {}">sum</option>
-                  <option value="\text {}">text</option>
-                  
-                  <option value="\forall">forall</option>
-                  <option value="\exists">exists</option>
-                  <option value="\lor">or</option>
-                  <option value="\land">and</option>
-                  <option value="\pm">plus minus</option>
-                  <option value="\neq">not equal</option>
-                  <option value="\geq">greater eq</option>
-                  <option value="\ll">much less</option>
-                  <option value="\gg">much greater</option>
-                  <option value="\approx">approx</option>
-                  <option value="\supset">proper superset</option>
-                  <option value="\supseteq">superset</option>
-                  <option value="\subset">proper subset</option>
-                  <option value="\subseteq">subset</option>
-                  <option value="\emptyset">empty set</option>
-                  <option value="\cup"> union </option>
-                  <option value="\cap"> intersection </option>
-
-                  <option value="\hat { }"> hat </option>
-                  <option value="\sqrt[root]{ }"> square root </option>
-                  <option value="\partial"> partial </option>
-                  <option value="\cap"> intersection </option>
-                  <option value="\cap"> intersection </option>
-                  <option value="\cap"> intersection </option>
-                  <option value="\cap"> intersection </option>
-                  <option value="\cap"> intersection </option>
-
-                  
-                  <option value="\frac { }{ }">Fraction</option>
-                  <option value="\in">In</option>
-                  <option value="\left">Left</option>
-                  <option value="\right">Right</option>
-                  <option value="\overbrace {}">Overbrace</option>
-                  <option value="\underbrace {}">Underbrace</option>
-                  
-                  <option value="\boldsymbol">Bold</option>
-                  
-              </datalist>  
-            </div>
-            
-            <script type="text/javascript">
-                function insertMathFromSelect(el) {
-                    
-                }
-
-                function insertAtCursor(myField, myValue) {
-                    //IE support
-                    if (document.selection) {
-                        myField.focus();
-                        sel = document.selection.createRange();
-                        sel.text = myValue;
-                    }
-                    //MOZILLA and others
-                    else if (myField.selectionStart || myField.selectionStart == '0') {
-                        const startPos = myField.selectionStart;
-                        const endPos = myField.selectionEnd;
-                        myField.value = myField.value.substring(0, startPos)
-                            + myValue
-                            + myField.value.substring(endPos, myField.value.length);
-                        myField.selectionStart = startPos + myValue.length;
-                        myField.selectionEnd = startPos + myValue.length;
-                    } else {
-                        myField.value += myValue;
-                    }
-
-                    myField.focus();
-                } //end function
-
-
-                $('.keyboard .key').click(e => {
-                    const key = $(e.target).text().trim();
-                    insertAtCursor( $('#mathtext')[0], $(e.target).data('mathjax') || key);
-
-                });
-
-                $('#mathjaxFunctionInput').keyup(e => {
-                    
-                    if(e.keyCode == 13) {
-                        insertAtCursor( $('#mathtext')[0], $(e.target).val());    
-                    }
-
-                });
-
-            </script>
-            <style type="text/css">
-                   #mathjaxDialog {
-                        background: blue; 
-                        color: white; 
-                        display: none; 
-                        z-index: 500000;
-                        position: absolute;
-                        left: 30%;
-                        top: 30%;
-                        width: 400px;
-                        height: 400px;
-                        border: 1px solid black;
-                        padding: 1%;
-                   }
-                   @media (max-width: 767px) {
-                      #mathjaxDialog {
-                        left: 2%;
-                        width: 99%;
-                      }
-                    }
-
-                   .key{
-                      width: 40px; height:40px;
-                      display:block;
-                      background-color:#333;
-                      text-align: left;
-                      padding-left: 8px;
-                      line-height: 29px;
-                      border-radius:2px;
-                      float:left; margin-left: 2px;
-                      margin-bottom:2px;
-                      cursor: pointer;
-                      transition: box-shadow 0.7s ease;
-                    }
-
-                    .section-a{width:650px; height:260px; float:left;}
-                    .section-b{width:150px; height:260px; float:left;}
-
-                    .function{font-size: 12px; width:30px; height:30px; margin-bottom:15px;}
-                    .small{font-size:10px; line-height:13px; text-align: center; padding:0 5px; padding-top:2px; height:28px !important;}
-                    .space1{margin-right: 43px !important;}
-                    .space2{margin-right: 25px !important;}
-                    .dual {font-size: 14px; line-height: 20px; width:30px; }
-                    .backspace {width:84px; font-size: 12px;}
-                    .tab {width: 50px; line-height: 40px; font-size:13px;}
-                    .letter{width:30px;}
-                    .slash{width:64px;}
-                    .caps{width:70px; font-size:12px; line-height:18px;}
-                    .enter{width:92px; line-height:40px; text-align: center; padding-left:0;}
-                    .shift.left{width: 90px;line-height: 40px; font-size:13px;}
-                    .shift.right{width: 104px;line-height: 40px; font-size:13px;}
-                    .ctrl{width: 50px; line-height: 40px; font-size:13px;}
-                    .space{width:234px;}
-                    .arrows{position:relative; top:42px;}
-                    .sec-func .key{width: 32px; font-size:10px; text-align:left; line-height:40px; float:left;}
-                    .sec-func div.dual{line-height:20px;}
-                    .arrows .key{text-align: center; padding-left: 7px; margin-left:2px;}
-                    .hidden{visibility: hidden;}
-
-                    .key:hover{box-shadow:0px 0px 10px #14B524; z-index:1000;}
-            </style>   
-        </div>
-    </div>
-
-    <script>
-        //applyBlackTheme();
-        $('#cinemaText').draggable();
-
-        //---------------------------Screen Recording
-function startCapture(displayMediaOptions) {
- let captureStream = null;
-
- return navigator.mediaDevices.getDisplayMedia(displayMediaOptions)
-    .catch(err => { console.error("Error:" + err); return null; });
-}
-
-function stopCapture(evt) {
-  let tracks = videoElem.srcObject.getTracks();
-
-  tracks.forEach(track => track.stop());
-  videoElem.srcObject = null;
-}
-
-
-
-//let start = document.getElementById('btnStart');
-//let stop = document.getElementById('btnStop');
-//let vidSave = document.getElementById('vid2');
-
-window.mediaRecorder = null
-window.recordingChunks = []
-
-$('#btnStart').on('click', (ev)=> {
-    if(window.mediaRecorder) {
-        window.mediaRecorder.stop()
-        window.mediaRecorder = null;
-        window.recordingChunks = []
-    }
-    startCapture({
-       video: true,
-       audio: true
-     }).then(mediaStreamObj => {
-        window.mediaRecorder = new MediaRecorder(mediaStreamObj);
-        window.mediaRecorder.start();
-        $("#btnStart").hide();
-        $("#btnStop").show();
-        $("#btnPause").show();
-        console.log(window.mediaRecorder.state);
-
-        window.mediaRecorder.ondataavailable = function(ev) {
-            window.recordingChunks.push(ev.data);
-        };
-        window.mediaRecorder.onstop = (ev)=> {
-            let blob = new Blob(window.recordingChunks, { 'type' : window.recordingChunks[0].type });
-            console.log("type="+window.recordingChunks[0].type)
-            window.recordingChunks = [];
-            const videoURL = window.URL.createObjectURL(blob);
-//            vidSave.src = videoURL;
-            //window.location.replace(videoURL)
-            const link = document.createElement("a"); // Or maybe get it from the current document
-            link.href = videoURL;
-            link.target = "_blank"
-            link.download = "aDefaultFileName.webm";
-            link.innerHTML = "Click here to download the file";
-
-            link.style.position = 'fixed';
-            link.style.bottom = 0;
-            link.style.zIndex = 9000;
-            document.body.appendChild(link);
+            pc.setActiveObject(tb)
+            _.textboxes.push(tb)
+            window.insertText = false;
         }
-     });
-});
+        if (window.insertSmallText) {
+            var tb = textbox({
+                top: e.e.clientY,
+                left: e.e.clientX,
+                width: 25
+            })
+            pc.add(tb)
 
-$("#btnPause").click(e => {
-    if(window.mediaRecorder) {
-        window.mediaRecorder.pause()
-        console.log(window.mediaRecorder.state);
-        $("#btnPause").hide();
-        $("#btnResume").show();
-    }
-});
+            pc.setActiveObject(tb)
+            _.textboxes.push(tb)
+            window.insertSmallText = false;
+        }
+        if (window.signalMatexInsertion) {
+            window.signalMatexInsertion = false;
+            window.matexInsertionPoint = {
+                top: e.e.clientY,
+                left: e.e.clientX
+            }
+            document.getElementById('mathjaxDialog').style.display = 'block';
+        }
+        if (window.signalImageInsertion) {
+            window.signalImageInsertion = false;
+            $('#imageInputDialog').show();
+        }
 
-$("#btnResume").click(e => {
-    if(window.mediaRecorder) {
-        window.mediaRecorder.resume();
-        console.log(window.mediaRecorder.state);
-        $("#btnPause").show();
-        $("#btnResume").hide();
-    }
-});
+        if (window.insertRectText) {
+            window.insertRectText = false;
+            var text = prompt('Enter text')
+            if (!text) return;
+            var tb = textInRect(text, e.e.clientX, e.e.clientY, {}, {})
+            tb.hasControls = false;
+            pc.add(tb)
+        }
+
+        if (window.insertArray) {
+            window.insertArray = false;
+            var text = prompt('Enter text')
+            if (!text) return;
+
+            const ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc, {});
+            pc.getObjects().forEach(o => o.hasControls = false);
+        }
+
+        if (window.arrowButtonClicked) {
+            if (window.arrowButtonClicked.first) {
+                const a = window.arrowButtonClicked.first;
+                pc.add(arrow(a.x, a.y, e.e.clientX, e.e.clientY, {
+                    stroke: ($('#drawing-color').val() || 'black')
+                }))
+                window.arrowButtonClicked = null;
+            } else {
+                window.arrowButtonClicked.first = {
+                    x: e.e.clientX,
+                    y: e.e.clientY
+                }
+            }
+        }
+    })
+    const mapping = {
+        'l': 'clear-canvas',
+        'Delete': 'delete-selected',
+        'Backspace': 'delete-selected',
+        'd': 'flip-drawing',
+        'T': 'create-text',
+        'h': 'hide',
+        'b': 'bluen',
+        'e': 'execute-next',
+        'w': 'whiten'
+    };
+    $(document).keydown(e => {
+        if ($('.commands-select').is(":focus") || window.commandSelectionIsGoingOn) {
+            console.log('select is in focus. returning.')
+        }
+        if (e.keyCode === 32 && e.target === document.body) {
+            e.preventDefault();
+        }
+
+        if (document.getElementById('mathjaxDialog').style.display === 'block') return false;
+        if (pc.getActiveObject() && pc.getActiveObject().type === 'textbox' && pc.getActiveObject().isEditing) return;
+        if (mapping[e.key]) $("#" + mapping[e.key]).click()
+        if (e.keyCode === 187) { //zoom in
+            zoomSelectedObject(true)
+        }
+        if (e.key === 't') {
+            if (pc.getActiveObject()) {
+                $('#makeTree').click()
+            } else {
+                $('#create-small-text').click()
+            }
+        }
+        if (e.key === 'r') {
+            $('#horizRuler').toggle()
+            $('#vertRuler').toggle()
+        }
+        if (e.key === 'h') {
+            let objId = it()?.uid;
+            hideObject(objId)
+            recordScript(`hideObject(${objId})`)
+        }
+        if (e.keyCode === 32) {
+            // toggleRecording()
+        }
+        if (e.keyCode === 189) { //zoom out
+            zoomSelectedObject(false)
+        }
+        if (e.keyCode === 46) {
+            $('#delete-selected').click()
+        }
+        switch (e.keyCode) {
+            case 37: //left
+                if (pc.getActiveObject()) moveActiveObject('left', -10)
+                else {
+                    if (window.playingMode) {
+                        stopPlayback = true
+                        playerTimer -= 10
+                        if (playerTimer < playerTimerStart) playerTimer = playerTimerStart;
+                        $('#recording-info').html('Jumped To: ' + playerTimer)
+                    }
+                }
+                break
+            case 67:
+                if (e.ctrlKey) copy(pc)
+                break;
+            case 86:
+                if (e.ctrlKey) paste(pc)
+                break;
+            case 39: //right
+                if (pc.getActiveObject()) moveActiveObject('left', 10)
+                else {
+                    if (window.playingMode) {
+                        stopPlayback = true
+                        playerTimer += 10
+                        if (playerTimer > playerTimerTotal) playerTimer = playerTimerTotal;
+                        $('#recording-info').html('Jumped To: ' + playerTimer)
+                    }
+                }
+                break
+            case 40: //down
+                moveActiveObject('top', 10)
+                break
+            case 38: //up
+                moveActiveObject('top', -10)
+                break
+            case 69: //'e'
+                editSelectedObject()
+                break
+            case 188: //Comma,
+                if (e.ctrlKey)
+                    moveToFront('pc')
+                break
+            case 190: //Dot.
+                if (e.ctrlKey)
+                    moveToFront('oc')
+                break
+            case 84: //t
+                if (e.ctrlKey) {
+                    e.preventDefault()
+                    moveToFront('txt')
+                }
+                return false
+            default:
+                break
+        }
+    })
+</script>
 
 
-$('#btnStop').on('click', (ev) => {
-    if(window.mediaRecorder) window.mediaRecorder.stop();
-    console.log(mediaRecorder.state);
-    $("#btnStop").hide();
-    $("#btnPause").hide();
-    $("#btnResume").hide();
-    $("#btnStart").show();
-});
+<div id="imageInputDialog"
+     style="background: blue; color: white; display: none; z-index: 500000;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
+    <input autofocus type="text" id="imageInputUrl" onkeyup="renderMath(event)">
+
+    <input type="file" id="imageInputFile">
+
+    <button onclick="handleFileDialogButtons('OK')">OK</button>
+    <button onclick="handleFileDialogButtons('')">Close</button>
+</div>
+
+<div id="mathjaxDialog" style="">
+    <script>
+        function renderMath(e) {
+            if (e.keyCode == 13) {
+                drawMathSymbols(document.getElementById('mathtext').value, pc)
+                document.getElementById('mathjaxDialog').style.display = 'none';
+            } else if (e.keyCode == 27) {
+                document.getElementById('mathjaxDialog').style.display = 'none';
+            } else {
+                document.getElementById('representation').innerHTML = "\\(" + document.getElementById('mathtext').value + "\\)";
+                MathJax.Hub.Queue(['Typeset', MathJax.Hub, 'representation']);
+            }
+        }
+    </script>
+    <input autofocus type="text" id="mathtext" onkeyup="renderMath(event)">
+
+    <div id="representation" style="margin-top: 20; padding: 15;"></div>
+
+    <div class="keyboard">
+        <div class="key letter">
+            0
+        </div>
+        <div class="key letter">
+            1
+        </div>
+        <div class="key letter">
+            2
+        </div>
+        <div class="key letter">
+            3
+        </div>
+        <div class="key letter">
+            4
+        </div>
+        <div class="key letter">
+            5
+        </div>
+        <div class="key letter">
+            6
+        </div>
+        <div class="key letter">
+            7
+        </div>
+        <div class="key letter">
+            8
+        </div>
+        <div class="key letter">
+            9
+        </div>
+        <div class="key letter">
+            +
+        </div>
+        <div class="key letter">
+            -
+        </div>
+        <div class="key letter">
+            *
+        </div>
+        <div class="key letter">
+            /
+        </div>
+        <div class="key letter">
+            (
+        </div>
+        <div class="key letter">
+            )
+        </div>
+        <div class="key letter" data-mathjax="\{">
+            {
+        </div>
+        <div class="key letter" data-mathjax="\}">
+            }
+        </div>
+        <div class="key letter">
+            [
+        </div>
+        <div class="key letter">
+            ]
+        </div>
+        <div class="key letter">
+            ^
+        </div>
+        <div class="key letter">
+            !
+        </div>
+        <div class="key letter">
+            @
+        </div>
+        <div class="key letter" data-mathjax="\#">
+            #
+        </div>
+        <div class="key letter">
+            $
+        </div>
+        <div class="key letter" data-mathjax="\%">
+            %
+        </div>
+        <div class="key letter" data-mathjax="\&">
+            &
+        </div>
+        <div class="key letter">
+            ?
+        </div>
+        <div class="key letter">
+            =
+        </div>
+        <div class="key letter">
+            /
+        </div>
+
+        <div class="key letter">
+            \
+        </div>
+        <div class="key letter">
+            ~
+        </div>
+        <div class="key letter" data-mathjax="\alpha ">
+            &alpha;
+        </div>
+        <div class="key letter" data-mathjax="\beta ">
+            &beta;
+        </div>
+        <div class="key letter" data-mathjax="\gamma ">
+            &gamma;
+        </div>
+        <div class="key letter" data-mathjax="\Gamma ">
+            &Gamma;
+        </div>
+        <div class="key letter" data-mathjax="\delta ">
+            &delta;
+        </div>
+        <div class="key letter" data-mathjax="\Delta ">
+            &Delta;
+        </div>
+        <div class="key letter" data-mathjax="\epsilon ">
+            &epsilon;
+        </div>
+
+
+        <input type="text" list="mathjaxFunctions" id="mathjaxFunctionInput" onchange="insertMathFromSelect(this)" style="margin-top: 10px;"/>
+        <datalist id="mathjaxFunctions">
+            <option value="\infty">Infinity</option>
+
+            <option value="\sum {}">sum</option>
+            <option value="\text {}">text</option>
+
+            <option value="\forall">forall</option>
+            <option value="\exists">exists</option>
+            <option value="\lor">or</option>
+            <option value="\land">and</option>
+            <option value="\pm">plus minus</option>
+            <option value="\neq">not equal</option>
+            <option value="\geq">greater eq</option>
+            <option value="\ll">much less</option>
+            <option value="\gg">much greater</option>
+            <option value="\approx">approx</option>
+            <option value="\supset">proper superset</option>
+            <option value="\supseteq">superset</option>
+            <option value="\subset">proper subset</option>
+            <option value="\subseteq">subset</option>
+            <option value="\emptyset">empty set</option>
+            <option value="\cup"> union</option>
+            <option value="\cap"> intersection</option>
+
+            <option value="\hat { }"> hat</option>
+            <option value="\sqrt[root]{ }"> square root</option>
+            <option value="\partial"> partial</option>
+            <option value="\cap"> intersection</option>
+            <option value="\cap"> intersection</option>
+            <option value="\cap"> intersection</option>
+            <option value="\cap"> intersection</option>
+            <option value="\cap"> intersection</option>
+
+
+            <option value="\frac { }{ }">Fraction</option>
+            <option value="\in">In</option>
+            <option value="\left">Left</option>
+            <option value="\right">Right</option>
+            <option value="\overbrace {}">Overbrace</option>
+            <option value="\underbrace {}">Underbrace</option>
+
+            <option value="\boldsymbol">Bold</option>
+
+        </datalist>
+    </div>
+
+    <script type="text/javascript">
+        function insertMathFromSelect(el) {
+
+        }
+
+        function insertAtCursor(myField, myValue) {
+            //IE support
+            if (document.selection) {
+                myField.focus();
+                sel = document.selection.createRange();
+                sel.text = myValue;
+            }
+            //MOZILLA and others
+            else if (myField.selectionStart || myField.selectionStart == '0') {
+                const startPos = myField.selectionStart;
+                const endPos = myField.selectionEnd;
+                myField.value = myField.value.substring(0, startPos)
+                    + myValue
+                    + myField.value.substring(endPos, myField.value.length);
+                myField.selectionStart = startPos + myValue.length;
+                myField.selectionEnd = startPos + myValue.length;
+            } else {
+                myField.value += myValue;
+            }
+
+            myField.focus();
+        } //end function
+
+
+        $('.keyboard .key').click(e => {
+            const key = $(e.target).text().trim();
+            insertAtCursor($('#mathtext')[0], $(e.target).data('mathjax') || key);
+
+        });
+
+        $('#mathjaxFunctionInput').keyup(e => {
+
+            if (e.keyCode == 13) {
+                insertAtCursor($('#mathtext')[0], $(e.target).val());
+            }
+
+        });
 
     </script>
+</div>
+</div>
+
+<script>
+    //applyBlackTheme();
+    $('#cinemaText').draggable();
+
+    //---------------------------Screen Recording
+    function startCapture(displayMediaOptions) {
+        let captureStream = null;
+
+        return navigator.mediaDevices.getDisplayMedia(displayMediaOptions)
+            .catch(err => {
+                console.error("Error:" + err);
+                return null;
+            });
+    }
+
+    function stopCapture(evt) {
+        let tracks = videoElem.srcObject.getTracks();
+
+        tracks.forEach(track => track.stop());
+        videoElem.srcObject = null;
+    }
+
+
+    //let start = document.getElementById('btnStart');
+    //let stop = document.getElementById('btnStop');
+    //let vidSave = document.getElementById('vid2');
+
+    window.mediaRecorder = null
+    window.recordingChunks = []
+
+    $('#btnStart').on('click', (ev) => {
+        if (window.mediaRecorder) {
+            window.mediaRecorder.stop()
+            window.mediaRecorder = null;
+            window.recordingChunks = []
+        }
+        startCapture({
+            video: true,
+            audio: true
+        }).then(mediaStreamObj => {
+            window.mediaRecorder = new MediaRecorder(mediaStreamObj);
+            window.mediaRecorder.start();
+            $("#btnStart").hide();
+            $("#btnStop").show();
+            $("#btnPause").show();
+            console.log(window.mediaRecorder.state);
+
+            window.mediaRecorder.ondataavailable = function (ev) {
+                window.recordingChunks.push(ev.data);
+            };
+            window.mediaRecorder.onstop = (ev) => {
+                let blob = new Blob(window.recordingChunks, {'type': window.recordingChunks[0].type});
+                console.log("type=" + window.recordingChunks[0].type)
+                window.recordingChunks = [];
+                const videoURL = window.URL.createObjectURL(blob);
+//            vidSave.src = videoURL;
+                //window.location.replace(videoURL)
+                const link = document.createElement("a"); // Or maybe get it from the current document
+                link.href = videoURL;
+                link.target = "_blank"
+                link.download = "aDefaultFileName.webm";
+                link.innerHTML = "Click here to download the file";
+
+                link.style.position = 'fixed';
+                link.style.bottom = 0;
+                link.style.zIndex = 9000;
+                document.body.appendChild(link);
+            }
+        });
+    });
+
+    $("#btnPause").click(e => {
+        if (window.mediaRecorder) {
+            window.mediaRecorder.pause()
+            console.log(window.mediaRecorder.state);
+            $("#btnPause").hide();
+            $("#btnResume").show();
+        }
+    });
+
+    $("#btnResume").click(e => {
+        if (window.mediaRecorder) {
+            window.mediaRecorder.resume();
+            console.log(window.mediaRecorder.state);
+            $("#btnPause").show();
+            $("#btnResume").hide();
+        }
+    });
+
+
+    $('#btnStop').on('click', (ev) => {
+        if (window.mediaRecorder) window.mediaRecorder.stop();
+        console.log(mediaRecorder.state);
+        $("#btnStop").hide();
+        $("#btnPause").hide();
+        $("#btnResume").hide();
+        $("#btnStart").show();
+    });
+
+</script>
 </body>
 
 </html>
