@@ -558,8 +558,8 @@
     </select>
 
         <br><br>
-        <button id="greenen" class="btn btn-info" onclick="zoomSelectedObject(true)" style="margin-right:10px;">+</button>
-        <button id="whiten" class="btn btn-info" onclick="zoomSelectedObject(false)" style="margin-right:10px;">-</button>
+        <button id="greenen" class="btn btn-info" onclick="zoomSelectedObject(pc.getActiveObject(), true)" style="margin-right:10px;">+</button>
+        <button id="whiten" class="btn btn-info" onclick="zoomSelectedObject(pc.getActiveObject(), false)" style="margin-right:10px;">-</button>
 
         <button id="arrow" class="btn btn-info" onclick="arrowButton()">--></button>
         <br><br>
@@ -620,7 +620,7 @@
             window.saved.eraserStoredData.drawingColor = drawingColorEl.val()
             window.saved.eraserStoredData.drawingLineWidth = drawingLineWidthEl.val()
 
-            if (window.theme == 'black') {
+            if (window.theme === 'black') {
                 drawingColorEl.val('#000000')
             } else {
                 drawingColorEl.val('#ffffff')
@@ -859,7 +859,11 @@
         'e': 'execute-next',
         'w': 'whiten'
     };
+
     $(document).keydown(e => {
+        const selectedObj = pc.getActiveObject()
+        const selectedObjId = selectedObj?.uid;
+
         if ($('.commands-select').is(":focus") || window.commandSelectionIsGoingOn) {
             console.log('select is in focus. returning.')
         }
@@ -868,13 +872,32 @@
         }
 
         if (document.getElementById('mathjaxDialog').style.display === 'block') return false;
-        if (pc.getActiveObject() && pc.getActiveObject().type === 'textbox' && pc.getActiveObject().isEditing) return;
+        if (selectedObj?.type === 'textbox' && selectedObj.isEditing) return;
+
         if (mapping[e.key]) $("#" + mapping[e.key]).click()
+
         if (e.keyCode === 187) { //zoom in
-            zoomSelectedObject(true)
+            if(selectedObj.treeConnection) {
+                recordScript(`expandTreeItems(${selectedObjId})`)
+                expandTreeItems(selectedObj)
+            } else {
+                recordScript(`zoomSelectedObject(${selectedObjId}, true)`)
+                zoomSelectedObject(selectedObj, true)
+            }
         }
+
+        if (e.keyCode === 189) { //zoom out
+            if(selectedObj.treeConnection) {
+                recordScript(`collapseTreeItems(${selectedObjId})`)
+                collapseTreeItems(selectedObj)
+            } else {
+                recordScript(`zoomSelectedObject(${selectedObjId}, false)`)
+                zoomSelectedObject(false)
+            }
+        }
+
         if (e.key === 't') {
-            if (pc.getActiveObject()) {
+            if (selectedObj) {
                 $('#makeTree').click()
             } else {
                 $('#create-small-text').click()
@@ -885,22 +908,19 @@
             $('#vertRuler').toggle()
         }
         if (e.key === 'h') {
-            let objId = it()?.uid;
-            hideObject(objId)
-            recordScript(`hideObject(${objId})`)
+            hideObject(selectedObj)
+            recordScript(`hideObject(${selectedObjId})`)
         }
         if (e.keyCode === 32) {
             // toggleRecording()
         }
-        if (e.keyCode === 189) { //zoom out
-            zoomSelectedObject(false)
-        }
+
         if (e.keyCode === 46) {
             $('#delete-selected').click()
         }
         switch (e.keyCode) {
             case 37: //left
-                if (pc.getActiveObject()) moveActiveObject('left', -10)
+                if (selectedObj) moveActiveObject('left', -10)
                 else {
                     if (window.playingMode) {
                         stopPlayback = true
@@ -917,7 +937,7 @@
                 if (e.ctrlKey) paste(pc)
                 break;
             case 39: //right
-                if (pc.getActiveObject()) moveActiveObject('left', 10)
+                if (selectedObj) moveActiveObject('left', 10)
                 else {
                     if (window.playingMode) {
                         stopPlayback = true

@@ -7,6 +7,14 @@ window.globalVariableNames = {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function it() { return pc.getActiveObject() }
 
+function customData(obj) {
+  return obj.customData || {}
+}
+
+fabric.Object.prototype.getZIndex = function() {
+  return this.canvas.getObjects().indexOf(this);
+}
+
 function globalStore(key, obj) {
   if (!window.globalMapping) window.globalMapping = {}
   if (!globalMapping[key]) globalMapping[key] = 0
@@ -271,8 +279,9 @@ function executeNextLine() {
   }
 }
 
-function zoomSelectedObject(isPlus) {
-  if (!pc.getActiveObject()) return;
+function zoomSelectedObject(obj, isPlus) {
+  obj = findIfRequired(obj);
+  if (!obj) return;
   const amount = 1.5
 
   if (isPlus) {
@@ -450,37 +459,41 @@ function hideObject(obj) {
   if(obj === undefined || obj === null) return;
 
   obj = findIfRequired(obj)
-  setObjVisibility(obj, true);
+  setObjVisibility(obj, false);
 }
 
 function showObject(obj) {
   if(obj === undefined || obj === null) return;
 
   obj = findIfRequired(obj)
-  setObjVisibility(obj, false);
+  setObjVisibility(obj, true);
 }
 
 function editFabricjsObject(txt, obj) {
   obj = findIfRequired(obj)
 
-  const command = txt.split(":")[0]
-  const data = txt.split(":")[1].trim()
+  //TODO: Support multiple commands
+  const splits = txt.split(":");
+  const command = splits[0]
+  const data = splits[1].trim()
 
-  if (!obj._objects || obj._objects.length < 2) return;
+  const setFill = it => it.set({
+    fill: data
+  })
 
+  let targetObj = obj
   switch (command) {
     case 'bg':
-      obj._objects[0].set({
-        fill: data
-      })
+      if(obj?._objects?.length > 1) targetObj = obj._objects[0]
+      setFill(targetObj)
       break
     case 'fg':
-      obj._objects[1].set({
-        fill: data
-      })
+      if(obj?._objects?.length > 1) targetObj = obj._objects[1]
+      setFill(targetObj)
       break
     case 'text':
-      obj._objects[1].set({
+      if(obj?._objects?.length > 1) targetObj = obj._objects[1]
+      targetObj.set({
         text: data
       })
       break
@@ -556,7 +569,7 @@ function renderSubtree(values, opts, node) {
 
   let defaultOutgoing = () => ({
     lines: [],
-    point: 'mb'
+    point: 'centre'
   });
   node.treeConnection = node.treeConnection || {
     incoming: {},
@@ -564,8 +577,9 @@ function renderSubtree(values, opts, node) {
   };
 
   if (node.oCoords && node.oCoords.mb) {
-    const px = node.oCoords.mb.x,
-        py = node.oCoords.mb.y;
+    // p => parent
+    const px = node.getCenterPoint().x,
+        py = node.getCenterPoint().y;
 
     let mid = Math.ceil(values.length / 2)
     if (values.length === 1) mid = 0;
@@ -576,22 +590,25 @@ function renderSubtree(values, opts, node) {
         y = py + options.height;
 
     const addConnection = (x1, y1, x2, y2, text) => {
-      const textNode = shape === 'none' ?
+      const targetNode = shape === 'none' ?
           textInRect(text, x2, y2, {fill: 'black'}, {fill: 'white'})
           : boundedText(shape)(text, x2, y2, {}, {})
-      pc.add(textNode)
-      const line = makeLine([x1, y1, textNode.oCoords.mt.x, textNode.oCoords.mt.y])
+      pc.add(targetNode)
+      const line = makeLine([x1, y1, targetNode.getCenterPoint().x, targetNode.getCenterPoint().y])
+      customData(line).source = node
+      customData(line).target = targetNode
       pc.add(line)
+      pc.sendToBack(line)
       node.treeConnection.outgoing = node.treeConnection.outgoing || defaultOutgoing()
       node.treeConnection.outgoing.lines.push(line)
 
-      textNode.treeConnection = {
+      targetNode.treeConnection = {
         incoming: {
           lines: [line],
-          point: 'mt'
+          point: 'centre'
         }
       }
-      textNode.onAnimationChange = () => updateTreeItem(textNode)
+      targetNode.onAnimationChange = () => updateTreeItem(targetNode)
     }
 
     addConnection(px, py, x, y, values[mid])
@@ -611,6 +628,52 @@ function renderSubtree(values, opts, node) {
   }
 }
 
+function getAllOutgoingTargets(obj) {
+  obj = findIfRequired(obj)
+  if(!obj) return []
+  const res = []
+  _getAllOutgoingTargets(obj, res)
+  return res.flat()
+}
+
+function _getAllOutgoingTargets(obj, out) {
+    const lines = obj?.treeConnection?.outgoing?.lines;
+    if(!lines) {
+      return;
+    }
+    const targets = lines?.map(it => customData(it).target)
+    out.push(targets)
+    targets.forEach(it => {
+      _getAllOutgoingTargets(it, out)
+    })
+}
+
+function expandTreeItems(obj) {
+  obj = findIfRequired(obj)
+  if(!obj) return;
+
+  getAllOutgoingTargets(obj).forEach(target => {
+    showObject(target)
+    let prevProps = customData(target).prevProps
+    animate(target, {top: prevProps.top, left: prevProps.left}, {onComplete: e => {
+        //pc.moveTo(target, prevProps.zIndex)
+        pc.bringToFront(target)
+      }})
+  })
+}
+
+function collapseTreeItems(obj) {
+  obj = findIfRequired(obj)
+  if(!obj) return;
+  getAllOutgoingTargets(obj).forEach(target => {
+    customData(target).prevProps = getActualProperties(target)
+    animate(target, {top: obj.top, left: obj.left}, {onComplete: e => {
+        hideObject(target)
+      }})
+    pc.sendToBack(target)
+  })
+}
+
 /***
   values
     ex. "child1, child2, child3",
@@ -626,7 +689,7 @@ function makeSubtree(node, values, opts) {
 let getActualProperties = (object) => {
   let mat = object.calcTransformMatrix(false);
   // Assuming objects origin x/y is 'left'/'top'; TODO for others
-  return  {
+  let props =  {
     x: mat[4] - object.width/2,
     y: mat[5] - object.height/2,
     w: object.width,
@@ -637,8 +700,13 @@ let getActualProperties = (object) => {
     skewY: object.skewY,
     scaleX: object.scaleX,
     scaleY: object.scaleY,
-    opacity: object.opacity
+    opacity: object.opacity,
+    center: object.getCenterPoint(),
   }
+  props.left = props.x;
+  props.top = props.y;
+  props.zIndex = object.getZIndex();
+  return props;
 };
 
 function updateTreeItem(t) {
@@ -657,6 +725,7 @@ function updateTreeItem(t) {
         x: c.x + obj.width / 2
       }
     }
+    return obj.getCenterPoint()
   };
 
   if (t.treeConnection) {
