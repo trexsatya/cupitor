@@ -543,7 +543,7 @@ function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowConditio
   const totalDataItems = data.length
   let fn = null;
   fn = (x, idx) => setTimeout(() => {
-    console.log("Processing item at index", idx, " at ", new Date());
+    // console.log("Processing item at index", idx, " at ", new Date());
     const first = data.splice(0, 1);
 
     if (finishNowCondition && finishNowCondition(first)) {

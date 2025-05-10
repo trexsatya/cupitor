@@ -87,6 +87,19 @@ function deduplicateChords(chords) {
   return deduplicated.filter(those => those.map(it => it.fret));
 }
 
+$(document).ready(ignore => {
+  $(it).keydown(e => {
+     if (e.shiftKey) {
+         window.isShiftKeyDown = true
+     }
+  })
+  $(it).keyup(e => {
+       if (e.shiftKey) {
+           window.isShiftKeyDown = false
+       }
+  })
+})
+
 const Fretboard = function () {
   this.init = function (defaults) {
     this.active = defaults.active;
@@ -1447,7 +1460,9 @@ $(function () {
   }
 
   $keyChartDialog.find(".chord").dblclick(e => {
+  if(!window.isShiftKeyDown) {
     $chordVariationsCntnr.html('')
+  }
 
     const chordName = e.target.dataset.fullname;
     [chordName, chordExtensions(chordName)].flat().forEach(it => {
