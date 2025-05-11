@@ -686,30 +686,41 @@ function makeSubtree(node, values, opts) {
 }
 
 //Returns calculated top(y), left(x) works even if object is in group
-let getActualProperties = (object) => {
+let getActualProperties = (object, round) => {
+  obj = findIfRequired(object)
+  let roundFn = x => x
+  if(round) {
+    roundFn = x => Math.round(x * 100) / 100
+  }
   let mat = object.calcTransformMatrix(false);
   // Assuming objects origin x/y is 'left'/'top'; TODO for others
   let props =  {
-    x: mat[4] - object.width/2,
-    y: mat[5] - object.height/2,
-    w: object.width,
-    h: object.height,
+    x: roundFn(mat[4] - object.width/2),
+    y: roundFn(mat[5] - object.height/2),
+    w: roundFn(object.width),
+    h: roundFn(object.height),
     fill: object.fill,
-    angle: object.angle,
-    skewX: object.skewX,
-    skewY: object.skewY,
-    scaleX: object.scaleX,
-    scaleY: object.scaleY,
+    angle: roundFn(object.angle),
+    skewX: roundFn(object.skewX),
+    skewY: roundFn(object.skewY),
+    scaleX: roundFn(object.scaleX),
+    scaleY: roundFn(object.scaleY),
     opacity: object.opacity,
     center: object.getCenterPoint(),
   }
+  props.center.x = roundFn(props.center.x)
+  props.center.y = roundFn(props.center.y)
   props.left = props.x;
   props.top = props.y;
   props.zIndex = object.getZIndex();
   return props;
 };
 
-function updateTreeItem(t) {
+function updateTreeItem(obj) {
+  obj = findIfRequired(obj)
+  if(!obj || !obj.treeConnection) return;
+
+  let p;
   const getPointCoords = (obj, pt) => {
     if (pt === 'mt') {
       const c = getActualProperties(obj)
@@ -725,33 +736,33 @@ function updateTreeItem(t) {
         x: c.x + obj.width / 2
       }
     }
-    return obj.getCenterPoint()
+    let p = getActualProperties(obj)
+    p.x = p.x + obj.width / 2
+    p.y = p.y + obj.height / 2
+    return p
   };
 
-  if (t.treeConnection) {
-    const inward = t.treeConnection.incoming || {};
-    const outward = t.treeConnection.outgoing || {};
-
-    if (inward.lines && inward.point) {
-      var p = getPointCoords(t, inward.point)
-      inward.lines.forEach(l => {
-        l.set('x2', p.x);
-        l.set('y2', p.y);
-        t.setCoords();
-        l.setCoords();
-        pc.renderAll();
-      });
-    }
-    if (outward.lines && outward.point) {
-      var p = getPointCoords(t, outward.point)
-      outward.lines.forEach(l => {
-        l.set('x1', p.x);
-        l.set('y1', p.y);
-        t.setCoords();
-        l.setCoords();
-        pc.renderAll();
-      });
-    }
+  const inward = obj.treeConnection.incoming || {};
+  const outward = obj.treeConnection.outgoing || {};
+  if (inward.lines && inward.point) {
+    p = getPointCoords(obj, null);
+    inward.lines.forEach(l => {
+      l.set('x2', p.x);
+      l.set('y2', p.y);
+      obj.setCoords();
+      l.setCoords();
+      pc.renderAll();
+    });
+  }
+  if (outward.lines && outward.point) {
+    p = getPointCoords(obj, null);
+    outward.lines.forEach(l => {
+      l.set('x1', p.x);
+      l.set('y1', p.y);
+      obj.setCoords();
+      l.setCoords();
+      pc.renderAll();
+    });
   }
 }
 

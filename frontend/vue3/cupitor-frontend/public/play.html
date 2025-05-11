@@ -741,13 +741,26 @@
     pc.on('object:moving', function (e) {
         window.isFabricObjectMoving = true;
         window.movingFabricObject = e.target;
+        if(!window.movingFabricObject.uid) {
+            // Assume it's a selection/group of objects
+            window.movingFabricGroup = e.target;
+            window.movingFabricObject = null
+        }
     });
 
     pc.on('mouse:up', function (event) {
         if (window.isFabricObjectMoving) {
             window.isFabricObjectMoving = false;
             // Your code to handle the end of the move event
-            recordScript(`animate(${movingFabricObject.uid}, ${JSON.stringify(getActualProperties(movingFabricObject))}, {})`)
+            if(window.movingFabricGroup) {
+                let allAnimations = window.movingFabricGroup._objects.map(it => `animate(${it.uid}, ${JSON.stringify(getActualProperties(it, true))}, {})`)
+                recordScript(`Promise.all(${allAnimations.join(",")})`)
+            } else {
+                recordScript(`animate(${movingFabricObject.uid}, ${JSON.stringify(getActualProperties(movingFabricObject, true))}, {})`)
+            }
+
+            window.movingFabricObject = null;
+            window.movingFabricGroup = null;
         }
     });
 
