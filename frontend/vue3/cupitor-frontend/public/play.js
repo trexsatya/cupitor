@@ -76,7 +76,7 @@ const openFile = function (event) {
 
 }; //end openFile
 
-function handleFileDialogButtons(src) {
+function handleImageInputDialogButtons(src) {
   if (src === "OK") {
     const url = $('#imageInputUrl').val()
     if (url) {
@@ -103,6 +103,23 @@ function handleFileDialogButtons(src) {
     $('#imageInputDialog').hide();
   } else {
     $('#imageInputDialog').hide();
+  }
+}
+
+function handleImportDialogButtons(src) {
+  if (src === "OK") {
+    //Handle file selection
+    const file = document.querySelector('#importInputFile').files[0];
+    const reader = new FileReader();
+    reader.addEventListener("load", function () {
+      importIntoCanvas(reader.result)
+    }, false);
+    if (file) {
+      reader.readAsText(file);
+    }
+    $('#importDialog').hide();
+  } else {
+    $('#importDialog').hide();
   }
 }
 

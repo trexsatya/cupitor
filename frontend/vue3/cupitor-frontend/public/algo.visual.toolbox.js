@@ -94,23 +94,33 @@ fabric.LineArrow.async = true;
 fabric.Canvas.prototype.add = (function (originalFn) {
   return function (...args) {
     originalFn.call(this, ...args);
-    globalFabricObjId += 1;
-    args[0].uid = globalFabricObjId;
-    console.log('added obj ' + globalFabricObjId);
+    if(!args[0].uid) {
+      const globalFabricObjId = uuid();
+      args[0].uid = globalFabricObjId;
+      customData(args[0]).uid = globalFabricObjId;
+      console.log('added obj ' + globalFabricObjId);
+    } else {
+      console.log('Id already exist');
+    }
+
     return this
   };
 })(fabric.Canvas.prototype.add);
 
 function findById(id, canvas) {
   if (!canvas) canvas = pc
-  return canvas._objects.find(it => it.uid === id)
+  return canvas._objects.find(it => it.uid + '' === id + '' || it.customData?.uid + '' === id + '');
 }
 
 function findIfRequired(idOrObj) {
   if(typeof idOrObj !== 'object') {
     return  findById(idOrObj);
   }
-  return idOrObj
+  const obj = idOrObj
+  if(obj.uid && !(obj instanceof fabric.Object)) {
+    return findById(obj.uid)
+  }
+  return obj
 }
 
 fabric.Sprite = fabric.util.createClass(fabric.Image, {
@@ -302,16 +312,13 @@ function textbox(opts){
         hasRotatingPoint: true,
         centerTransform: true
     });
-    const id = globalStore('tb', textSample)
-
-    recordScript(`_['${id}'] = textbox(${JSON.stringify(opts)})`)
+    if(opts.uid) textSample.uid = opts.uid;
     return textSample
 }
 
-function textInRect(textStr, x, y, optsText, optsRect){
+function textInRect(textStr, x, y, optsText, optsRect, uid){
     if(!arguments.length) console.log('textInRect(text, x,y, optsText, optsRect)')
     if(!textStr) return null;
-    recordScript(`textInRect(${JSON.stringify(textStr)}, ${x}, ${y}, ${JSON.stringify(optsText)}, ${JSON.stringify(optsRect)});`)
 
     const op = Object.assign({}, {
         fontSize: 20,
@@ -365,13 +372,15 @@ function textInRect(textStr, x, y, optsText, optsRect){
         }
     };
 
+    if(uid) {
+      group.uid = uid;
+    }
     return group;
 }
 
 function textInCircle(textStr, x,y, optsText, optsCirc){
     if(!arguments.length) console.log('textInCircle(text, x,y, optsText, optsCirc)')
     if(!textStr) return null;
-    recordScript(`textInCircle(${JSON.stringify(textStr)}, ${x}, ${y}, ${JSON.stringify(optsText)}, ${JSON.stringify(optsCirc)});`)
 
     const op = Object.assign({}, {
         fontSize: 20,
@@ -403,14 +412,12 @@ function textInCircle(textStr, x,y, optsText, optsCirc){
       type: "textInCircle",
       text: textStr
     }
-
     return group;
 }
 
 function textInEllipse(textStr, x, y, optsText, optsCirc){
   if(!arguments.length) console.log('textInEllipse(text, x,y, optsText, optsCirc)')
   if(!textStr) return null;
-  recordScript(`textInEllipse(${JSON.stringify(textStr)}, ${x}, ${y}, ${JSON.stringify(optsText)}, ${JSON.stringify(optsCirc)});`)
 
   const op = Object.assign({}, {
     fontSize: 20,
@@ -443,7 +450,6 @@ function textInEllipse(textStr, x, y, optsText, optsCirc){
     type: "textInEllipse",
     text: textStr
   }
-
   return group;
 }
 
@@ -458,8 +464,6 @@ function boundedText(type) {
 
 function addRectangle(opts){
     opts = opts || {}
-
-    recordScript(`addRectangle(${JSON.stringify(opts)});`)
     const rect = new fabric.Rect({
         left: 100,
         top: 100,
@@ -472,22 +476,18 @@ function addRectangle(opts){
 
     pc.add(rect)
     pc.renderAll()
-
     return rect
 }
 
 function groupFabricObjects (objs, opts){
     if(!objs) return
-
     objs.forEach(o => { pc.remove(o) });
 
     const G = new fabric.Group(objs, {left: opts.left || 100, top: opts.top || 100 })
     pc.add(G);
     G.setCoords()
-
     pc.renderAll();
 
-    recordScript(`groupFabricObjects(${JSON.stringify(objs)}, ${JSON.stringify(opts)});`)
     return G
 }
 
@@ -510,13 +510,12 @@ function arrow(x1,y1,x2,y2, opts){
     tri.rotate(90+slope);
     const line = new fabric.Line([ x1,y1,x2,y2 ], { stroke: options.stroke, strokeWidth: options.strokeWidth})
 
-    const group = new fabric.Group([ line, tri ], {
-        left: x1,
-        top: y1
+    let group = new fabric.Group([line, tri], {
+      left: x1,
+      top: y1
     });
-
-    recordScript(`arrow(${x1}, ${y1}, ${x2}, ${y2}, ${JSON.stringify(opts)});`)
-    return group
+    if(opts.uid) group.uid = opts.uid
+  return group
 }
 
 function text(text){
@@ -531,7 +530,6 @@ function text(text){
       text: text
     }
 
-    recordScript(`text(${JSON.stringify(text)});`)
     return txt
 }
 
@@ -1332,42 +1330,6 @@ function hide() {
       it.hide()
     }
   });
-}
-
-/**
- *
- * @param obj
- * @param id
- * @param top
- * @param left
- * @returns {Promise<unknown>}
- */
-function addFromJSON(obj, id, top, left) {
-  const ids = [id];
-  if (!obj) return;
-  const canvas = pc;
-
-  const items = [obj]
-
-  return new Promise((myResolve, myReject) => {
-    fabric.util.enlivenObjects(items, function (objects) {
-      const origRenderOnAddRemove = canvas.renderOnAddRemove;
-      canvas.renderOnAddRemove = false;
-
-      const res = []
-      let i = 0;
-      objects.forEach(function (o) {
-        o.set({top: top, left: left});
-        canvas.add(o);
-        res.push(o);
-        if (ids[i] && window._) _[ids[i]] = o;
-        i++;
-      });
-      canvas.renderOnAddRemove = origRenderOnAddRemove;
-      canvas.renderAll();
-      myResolve(res[0]);
-    });
-  })
 }
 
 function Clone(object, id, top, left) {

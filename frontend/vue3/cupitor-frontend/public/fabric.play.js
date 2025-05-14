@@ -7,13 +7,27 @@ window.globalVariableNames = {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function it() { return pc.getActiveObject() }
 
-function customData(obj) {
-  return obj.customData || {}
-}
-
 fabric.Object.prototype.getZIndex = function() {
   return this.canvas.getObjects().indexOf(this);
 }
+
+fabric.Object.prototype.toObject = (function (toObject) {
+  return function () {
+    let props = {
+    };
+    if(this.customData)
+      props.customData = this.customData
+    if(this.uid)
+      props.uid = this.uid
+    if(this.treeConnection)
+      props.treeConnection = this.treeConnection
+    if(this.text)
+      props.text = this.text
+    return fabric.util.object.extend(toObject.call(this), props);
+  };
+})(fabric.Object.prototype.toObject);
+
+fabric.Object.prototype.stateProperties = fabric.Object.prototype.stateProperties.concat('customData', 'uid', 'treeConnection');
 
 function globalStore(key, obj) {
   if (!window.globalMapping) window.globalMapping = {}
@@ -272,13 +286,6 @@ function makeConnection(e) {
   }
 }
 
-function executeNextLine() {
-  if (window.jsToExecute) {
-    eval(window.jsToExecute.lines[window.jsToExecute.index])
-    window.jsToExecute.index = window.jsToExecute.index + 1
-  }
-}
-
 function zoomSelectedObject(obj, isPlus) {
   obj = findIfRequired(obj);
   if (!obj) return;
@@ -315,15 +322,17 @@ function moveActiveObject(prop, amount) {
  */
 function deleteFabricObject(obj) {
   obj = findIfRequired(obj)
-  if (obj) {
-    obj?.treeConnection?.incoming?.lines?.forEach((line) => {
-      line.remove()
-    })
-    obj?.treeConnection?.outgoing?.lines?.forEach((line) => {
-      line.remove()
-    })
-    pc.remove(obj)
+  if (!obj) {
+    return
   }
+  obj.treeConnection?.incoming?.lines?.map(findIfRequired)?.forEach((line) => {
+    line.remove()
+  })
+  obj.treeConnection?.outgoing?.lines?.map(findIfRequired)?.forEach((line) => {
+    line.remove()
+  })
+
+  pc.remove(obj)
   pc.renderAll()
 }
 
@@ -332,13 +341,13 @@ function deleteSelectedObjects() {
   const activeObject = pc.getActiveObject();
   if(activeObject) {
     deleteFabricObject(activeObject);
-    recordScript(`deleteFabricObject(${activeObject.uid})`)
+    recordScript(`deleteFabricObject('${activeObject.uid}')`)
   } else {
     const activeGroup = pc.getActiveGroup();
     if (activeGroup) {
       activeGroup._objects.forEach(x => {
         deleteFabricObject(x)
-        recordScript(`deleteFabricObject(${x.uid})`)
+        recordScript(`deleteFabricObject('${x.uid}')`)
       })
     }
   }
@@ -446,10 +455,10 @@ function paste(canvas) {
 
 function setObjVisibility(obj, visibility) {
   obj && (obj.visible = visibility);
-  obj?.treeConnection?.incoming?.lines?.forEach((line) => {
+  obj?.treeConnection?.incoming?.lines?.map(findIfRequired)?.forEach((line) => {
     line.visible = visibility;
   });
-  obj?.treeConnection?.outgoing?.lines?.forEach((line) => {
+  obj?.treeConnection?.outgoing?.lines?.map(findIfRequired)?.forEach((line) => {
     line.visible = visibility;
   });
   pc?.renderAll();
@@ -527,7 +536,7 @@ function editSelectedObject() {
   if (!promptStr || promptStr.split(":").length !== 2) return
 
   editFabricjsObject(promptStr, obj);
-  recordScript(`editFabricjsObject(${JSON.stringify(promptStr)}, ${obj.uid});`)
+  recordScript(`editFabricjsObject(${JSON.stringify(promptStr)}, '${obj.uid}');`)
 }
 
 function makeLine(coords) {
@@ -545,6 +554,8 @@ function makeLine(coords) {
 
 function renderSubtree(values, opts, node) {
   node = findIfRequired(node)
+  if(!node) return;
+
   const split = values.split(";")
   let cmds = ''
   if (split.length === 2) {
@@ -595,12 +606,12 @@ function renderSubtree(values, opts, node) {
           : boundedText(shape)(text, x2, y2, {}, {})
       pc.add(targetNode)
       const line = makeLine([x1, y1, targetNode.getCenterPoint().x, targetNode.getCenterPoint().y])
-      customData(line).source = node
-      customData(line).target = targetNode
+      customData(line).source = node.uid ? node.uid: node
+      customData(line).target = targetNode.uid ? targetNode.uid : targetNode
       pc.add(line)
       pc.sendToBack(line)
       node.treeConnection.outgoing = node.treeConnection.outgoing || defaultOutgoing()
-      node.treeConnection.outgoing.lines.push(line)
+      node.treeConnection.outgoing.lines.push(line.uid)
 
       targetNode.treeConnection = {
         incoming: {
@@ -641,7 +652,7 @@ function _getAllOutgoingTargets(obj, out) {
     if(!lines) {
       return;
     }
-    const targets = lines?.map(it => customData(it).target)
+    const targets = lines?.map(findIfRequired)?.map(it => customData(it).target)?.map(findIfRequired)
     out.push(targets)
     targets.forEach(it => {
       _getAllOutgoingTargets(it, out)
@@ -682,7 +693,7 @@ function collapseTreeItems(obj) {
  */
 function makeSubtree(node, values, opts) {
   renderSubtree(values, opts, node);
-  recordScript(`renderSubtree(${JSON.stringify(values)}, ${JSON.stringify(opts)}, ${node.uid})`)
+  recordScript(`renderSubtree(${JSON.stringify(values)}, ${JSON.stringify(opts)}, '${node.uid}')`)
 }
 
 //Returns calculated top(y), left(x) works even if object is in group
@@ -746,7 +757,7 @@ function updateTreeItem(obj) {
   const outward = obj.treeConnection.outgoing || {};
   if (inward.lines && inward.point) {
     p = getPointCoords(obj, null);
-    inward.lines.forEach(l => {
+    inward.lines.map(findIfRequired).forEach(l => {
       l.set('x2', p.x);
       l.set('y2', p.y);
       obj.setCoords();
@@ -756,7 +767,7 @@ function updateTreeItem(obj) {
   }
   if (outward.lines && outward.point) {
     p = getPointCoords(obj, null);
-    outward.lines.forEach(l => {
+    outward.lines.map(findIfRequired).forEach(l => {
       l.set('x1', p.x);
       l.set('y1', p.y);
       obj.setCoords();
@@ -806,7 +817,7 @@ function onRemoveTreeClick() {
   const obj = pc.getActiveObject()
 
   if (obj.treeConnection && obj.treeConnection.outgoing) {
-    obj.treeConnection.outgoing.lines.forEach(l => {
+    obj.treeConnection.outgoing.lines.map(findIfRequired).forEach(l => {
       pc.remove(l);
     })
   }
@@ -876,6 +887,78 @@ function newCanvas() {
   $('#savePoints').val(idx + '')
 
   window.savePoint = idx;
+}
+
+function exportCanvas() {
+  const data = JSON.stringify(pc.toJSON());
+  const blob = new Blob([data], { type: 'text/plain' });
+  const url = window.URL.createObjectURL(blob);
+  const downloadLink = document.createElement('a');
+  downloadLink.href = url;
+  downloadLink.download = `canvas_${new Date().toLocaleString().replaceAll(/[/, :]/g, "")}.txt`;
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  window.URL.revokeObjectURL(url);
+}
+
+function exportScript() {
+  let executables = window.recordedScriptLines.map(line => {
+    line = line.trim()
+    let executable = `${line}`;
+    if(line.startsWith('animate') || line.startsWith('Promise')) {
+      executable = `return ${line};`
+    }
+    return `() => { ${executable} }`
+  })
+  const data = JSON.stringify(executables);
+  const blob = new Blob([data], { type: 'text/plain' });
+  const url = window.URL.createObjectURL(blob);
+  const downloadLink = document.createElement('a');
+  downloadLink.href = url;
+  downloadLink.download = `script_${new Date().toLocaleString().replaceAll(/[/, :]/g, "")}.txt`;
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  window.URL.revokeObjectURL(url);
+}
+
+/**
+ *
+ * @param obj
+ * @param id
+ * @param top
+ * @param left
+ * @returns {Promise<unknown>}
+ */
+function addFromJSON(obj, top, left) {
+  if (!obj) return Promise.resolve();
+  const canvas = pc;
+
+  const items = [obj]
+
+  return new Promise((myResolve, myReject) => {
+    fabric.util.enlivenObjects(items, function (objects) {
+      const origRenderOnAddRemove = canvas.renderOnAddRemove;
+      canvas.renderOnAddRemove = false;
+
+      const res = []
+      let i = 0;
+      objects.forEach(function (o) {
+        o.set({top: top || obj.top, left: left || obj.left});
+        canvas.add(o);
+        res.push(o);
+      });
+      canvas.renderOnAddRemove = origRenderOnAddRemove;
+      canvas.renderAll();
+      myResolve(res[0]);
+    });
+  })
+}
+
+function importIntoCanvas(txt) {
+  const json = JSON.parse(txt);
+  json.objects?.forEach((obj) => {
+    addFromJSON(obj)
+  })
 }
 
 function loadFabricImage(url) {
