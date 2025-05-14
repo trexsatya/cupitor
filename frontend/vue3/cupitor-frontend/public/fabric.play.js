@@ -573,12 +573,15 @@ function renderSubtree(values, opts, node) {
 
   const shape = cmds.trim()
 
-  const options = opts || {
+  opts = opts || {}
+  const options = combined({
     width: 150,
     height: 60
-  };
+  }, opts);
 
-  let defaultOutgoing = () => ({
+  const idMappings = options.idMappings || {}
+
+  const defaultOutgoing = () => ({
     lines: [],
     point: 'centre'
   });
@@ -600,10 +603,13 @@ function renderSubtree(values, opts, node) {
     let x = px,
         y = py + options.height;
 
-    const addConnection = (x1, y1, x2, y2, text) => {
+    const addConnection = (x1, y1, x2, y2, text, valuesIndex) => {
       const targetNode = shape === 'none' ?
           textInRect(text, x2, y2, {fill: 'black'}, {fill: 'white'})
           : boundedText(shape)(text, x2, y2, {}, {})
+      if(idMappings[valuesIndex]) {
+        targetNode.uid = idMappings[valuesIndex]
+      }
       pc.add(targetNode)
       const line = makeLine([x1, y1, targetNode.getCenterPoint().x, targetNode.getCenterPoint().y])
       customData(line).source = node.uid ? node.uid: node
@@ -620,13 +626,16 @@ function renderSubtree(values, opts, node) {
         }
       }
       targetNode.onAnimationChange = () => updateTreeItem(targetNode)
+      return targetNode
     }
 
-    addConnection(px, py, x, y, values[mid])
+    let t = addConnection(px, py, x, y, values[mid], mid)
+    idMappings[mid] = t.uid
 
     for (let i = mid - 1; i >= 0; i--) {
       x = x - w;
-      addConnection(px, py, x, y, values[i])
+      t = addConnection(px, py, x, y, values[i], i)
+      idMappings[i] = t.uid
     }
 
     x = px;
@@ -634,16 +643,20 @@ function renderSubtree(values, opts, node) {
 
     for (let i = mid + 1; i < values.length; i++) {
       x = x + w;
-      addConnection(px, py, x, y, values[i])
+      t = addConnection(px, py, x, y, values[i], i)
+      idMappings[i] = t.uid
     }
+
+    return idMappings;
   }
 }
 
-function getAllOutgoingTargets(obj) {
+function getAllOutgoingTargets(obj, noFlat) {
   obj = findIfRequired(obj)
   if(!obj) return []
   const res = []
   _getAllOutgoingTargets(obj, res)
+  if(noFlat) return res
   return res.flat()
 }
 
@@ -692,13 +705,16 @@ function collapseTreeItems(obj) {
         "shape:rect,bg:red,fg:white; child1, child2" --TODO
  */
 function makeSubtree(node, values, opts) {
-  renderSubtree(values, opts, node);
+  opts = opts || {}
+  opts.idMappings = renderSubtree(values, opts, node)
+  //TODO: Find the closest obj which was recorded so we know its uid,
+  // and find the relation to that i.e (level, index, data); And use that in the record script
   recordScript(`renderSubtree(${JSON.stringify(values)}, ${JSON.stringify(opts)}, '${node.uid}')`)
 }
 
-//Returns calculated top(y), left(x) works even if object is in group
+//Returns calculated top(y), left(x) which works even if the object is in group
 let getActualProperties = (object, round) => {
-  obj = findIfRequired(object)
+  object = findIfRequired(object)
   let roundFn = x => x
   if(round) {
     roundFn = x => Math.round(x * 100) / 100
@@ -718,6 +734,10 @@ let getActualProperties = (object, round) => {
     scaleY: roundFn(object.scaleY),
     opacity: object.opacity,
     center: object.getCenterPoint(),
+  }
+  if(object._objects && object._objects.length > 1) {
+    //It's a group
+    delete props['fill']
   }
   props.center.x = roundFn(props.center.x)
   props.center.y = roundFn(props.center.y)

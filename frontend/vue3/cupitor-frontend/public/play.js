@@ -112,7 +112,9 @@ function handleImportDialogButtons(src) {
     const file = document.querySelector('#importInputFile').files[0];
     const reader = new FileReader();
     reader.addEventListener("load", function () {
-      importIntoCanvas(reader.result)
+      //importIntoCanvas(reader.result)
+      const script = eval(reader.result + '').map(eval)
+      schedule(script, 1)
     }, false);
     if (file) {
       reader.readAsText(file);
