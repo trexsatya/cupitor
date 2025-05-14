@@ -764,7 +764,7 @@
             // Your code to handle the end of the move event
             if(window.movingFabricGroup) {
                 let allAnimations = window.movingFabricGroup._objects.map(it => `animate('${it.uid}', ${JSON.stringify(getActualProperties(it, true))}, {})`)
-                recordScript(`Promise.all(${allAnimations.join(",")})`)
+                recordScript(`Promise.all([${allAnimations.join(",")}])`)
             } else {
                 recordScript(`animate('${movingFabricObject.uid}', ${JSON.stringify(getActualProperties(movingFabricObject, true))}, {})`)
             }
