@@ -11,6 +11,191 @@ fabric.Object.prototype.getZIndex = function() {
   return this.canvas.getObjects().indexOf(this);
 }
 
+// Extended fabric line class
+fabric.Image.filters.WhiteToTransparent = fabric.util.createClass({
+
+  type: 'whiteToTransparent',
+
+  applyTo: function(canvasEl) {
+    const context = canvasEl.getContext('2d'),
+        imageData = context.getImageData(0, 0, canvasEl.width, canvasEl.height),
+        pix = imageData.data;
+
+    const newColor = {r:0,g:0,b:0, a:0};
+    for (let i = 0, n = pix.length; i <n; i += 4) {
+      const r = pix[i],
+          g = pix[i+1],
+          b = pix[i+2];
+
+      if(r == 255&& g == 255 && b == 255){
+        // Change the white to the new color.
+        pix[i] = newColor.r;
+        pix[i+1] = newColor.g;
+        pix[i+2] = newColor.b;
+        pix[i+3] = newColor.a;
+      }
+    }
+
+
+    context.putImageData(imageData, 0, 0);
+  }
+});
+
+fabric.LineArrow = fabric.util.createClass(fabric.Line, {
+
+  type: 'lineArrow',
+
+  initialize: function(element, options) {
+    options || (options = {});
+    this.callSuper('initialize', element, options);
+  },
+
+  toObject: function() {
+    return fabric.util.object.extend(this.callSuper('toObject'));
+  },
+
+  _render: function(ctx) {
+    this.callSuper('_render', ctx);
+
+    // do not render if width/height are zeros or object is not visible
+    if (this.width === 0 || this.height === 0 || !this.visible) return;
+
+    ctx.save();
+
+    const xDiff = this.x2 - this.x1;
+    const yDiff = this.y2 - this.y1;
+    const angle = Math.atan2(this.y2 - this.y1, this.x2 - this.x1) * 180 / Math.PI;
+
+    ctx.translate(this.x2,this.y2)
+
+    //ctx.rotate(angle);
+    ctx.beginPath();
+    //move 10px in front of line to start the arrow so it does not have the square line end showing in front (0,0)
+    //ctx.moveTo(10, 0);
+
+    ctx.lineTo(10*Math.cos(angle), 10*Math.sin(angle))
+    ctx.translate(this.x2,this.y2)
+
+    ctx.lineTo(-10*Math.cos(angle), -10*Math.sin(angle))
+    ctx.closePath();
+    ctx.fillStyle = this.stroke;
+    //ctx.fill();
+
+    ctx.restore();
+
+  }
+});
+
+fabric.LineArrow.fromObject = function(object, callback) {
+  callback && callback(new fabric.LineArrow([object.x1, object.y1, object.x2, object.y2], object));
+};
+
+fabric.LineArrow.async = true;
+
+fabric.Canvas.prototype.add = (function (originalFn) {
+  return function (...args) {
+    originalFn.call(this, ...args);
+    if(!args[0].uid) {
+      const uid = uuid();
+      args[0].uid = uid;
+      customData(args[0]).uid = uid;
+      console.log('added obj ' + uid);
+      const type = ' ' + customData(args[0]).type || ''
+      window.objectIds.add({uid: uid, type: 'fabric.js' + type});
+      updateObjectIdsUi()
+    } else {
+      console.log('Id already exist');
+    }
+
+    return this
+  };
+})(fabric.Canvas.prototype.add);
+
+fabric.Sprite = fabric.util.createClass(fabric.Image, {
+
+  type: 'sprite',
+
+  spriteWidth: 50,
+  spriteHeight: 72,
+  spriteIndex: 0,
+  frameTime: 100,
+
+  initialize: function (element, options) {
+    options || (options = {});
+
+    options.width = this.spriteWidth;
+    options.height = this.spriteHeight;
+
+    this.callSuper('initialize', element, options);
+
+    this.createTmpCanvas();
+    this.createSpriteImages();
+  },
+
+  createTmpCanvas: function () {
+    this.tmpCanvasEl = fabric.util.createCanvasElement();
+    this.tmpCanvasEl.width = this.spriteWidth || this.width;
+    this.tmpCanvasEl.height = this.spriteHeight || this.height;
+  },
+
+  createSpriteImages: function () {
+    this.spriteImages = [];
+
+    const steps = this._element.width / this.spriteWidth;
+    for (let i = 0; i < steps; i++) {
+      this.createSpriteImage(i);
+    }
+  },
+
+  createSpriteImage: function (i) {
+    const tmpCtx = this.tmpCanvasEl.getContext('2d');
+    tmpCtx.clearRect(0, 0, this.tmpCanvasEl.width, this.tmpCanvasEl.height);
+    tmpCtx.drawImage(this._element, -i * this.spriteWidth, 0);
+
+    const dataURL = this.tmpCanvasEl.toDataURL('image/png');
+    const tmpImg = fabric.util.createImage();
+
+    tmpImg.src = dataURL;
+    tmpImg.crossOrigin = 'anonymous'
+
+    this.spriteImages.push(tmpImg);
+  },
+
+  _render: function (ctx) {
+    ctx.drawImage(
+        this.spriteImages[this.spriteIndex],
+        -this.width / 2,
+        -this.height / 2
+    );
+  },
+
+  play: function () {
+    const _this = this;
+    this.animInterval = setInterval(function () {
+
+      _this.onPlay && _this.onPlay();
+      _this.dirty = true;
+      _this.spriteIndex++;
+      if (_this.spriteIndex === _this.spriteImages.length) {
+        _this.spriteIndex = 0;
+      }
+    }, this.frameTime);
+  },
+
+  stop: function () {
+    clearInterval(this.animInterval);
+  }
+});
+
+fabric.Sprite.fromURL = function (url, callback, imgOptions) {
+  fabric.util.loadImage(url, function (img) {
+    img.crossOrigin = 'anonymous'
+    callback(new fabric.Sprite(img, imgOptions));
+  });
+};
+
+fabric.Sprite.async = true;
+
 fabric.Object.prototype.toObject = (function (toObject) {
   return function () {
     let props = {
@@ -453,31 +638,6 @@ function paste(canvas) {
   });
 }
 
-function setObjVisibility(obj, visibility) {
-  obj && (obj.visible = visibility);
-  obj?.treeConnection?.incoming?.lines?.map(findIfRequired)?.forEach((line) => {
-    line.visible = visibility;
-  });
-  obj?.treeConnection?.outgoing?.lines?.map(findIfRequired)?.forEach((line) => {
-    line.visible = visibility;
-  });
-  pc?.renderAll();
-}
-
-function hideObject(obj) {
-  if(obj === undefined || obj === null) return;
-
-  obj = findIfRequired(obj)
-  setObjVisibility(obj, false);
-}
-
-function showObject(obj) {
-  if(obj === undefined || obj === null) return;
-
-  obj = findIfRequired(obj)
-  setObjVisibility(obj, true);
-}
-
 function editFabricjsObject(txt, obj) {
   obj = findIfRequired(obj)
 
@@ -626,14 +786,24 @@ function renderSubtree(values, opts, node) {
         }
       }
       targetNode.onAnimationChange = () => updateTreeItem(targetNode)
+
+      if(options.overlapOnRoot) {
+        pc.bringToFront(targetNode)
+      }
       return targetNode
     }
 
+    if(options.overlapOnRoot) {
+      x = px; y = py;
+    }
     let t = addConnection(px, py, x, y, values[mid], mid)
     idMappings[mid] = t.uid
 
     for (let i = mid - 1; i >= 0; i--) {
       x = x - w;
+      if(options.overlapOnRoot) {
+        x = px; y = py;
+      }
       t = addConnection(px, py, x, y, values[i], i)
       idMappings[i] = t.uid
     }
@@ -643,6 +813,9 @@ function renderSubtree(values, opts, node) {
 
     for (let i = mid + 1; i < values.length; i++) {
       x = x + w;
+      if(options.overlapOnRoot) {
+        x = px; y = py;
+      }
       t = addConnection(px, py, x, y, values[i], i)
       idMappings[i] = t.uid
     }
@@ -676,12 +849,14 @@ function expandTreeItems(obj) {
   obj = findIfRequired(obj)
   if(!obj) return;
 
-  getAllOutgoingTargets(obj).forEach(target => {
+  getAllOutgoingTargets(obj).filter(it => customData(it).collapsedInto === obj.uid).forEach(target => {
     showObject(target)
     let prevProps = customData(target).prevProps
     animate(target, {top: prevProps.top, left: prevProps.left}, {onComplete: e => {
         //pc.moveTo(target, prevProps.zIndex)
         pc.bringToFront(target)
+        customData(target).prevProps = null
+        customData(target).collapsedInto = null
       }})
   })
 }
@@ -689,13 +864,32 @@ function expandTreeItems(obj) {
 function collapseTreeItems(obj) {
   obj = findIfRequired(obj)
   if(!obj) return;
-  getAllOutgoingTargets(obj).forEach(target => {
-    customData(target).prevProps = getActualProperties(target)
-    animate(target, {top: obj.top, left: obj.left}, {onComplete: e => {
-        hideObject(target)
-      }})
-    pc.sendToBack(target)
+
+  const nonCollapsedChildren = getAllOutgoingTargets(obj).filter(it => !customData(it).collapsedInto);
+  nonCollapsedChildren
+      .filter(it => it.uid !== obj.uid)
+      .forEach(target => {
+          customData(target).prevProps = getActualProperties(target)
+          //Take note of which children were collapsed directly into this obj
+          customData(target).collapsedInto = obj.uid
+          animate(target, {top: obj.top, left: obj.left}, {onComplete: e => {
+              hideObject(target)
+            }})
+          pc.sendToBack(target)
   })
+
+  if(!nonCollapsedChildren.length) {
+    const parent = findIfRequired(obj.treeConnection?.incoming?.lines[0]?.customData?.source)
+    if(parent) {
+      customData(obj).prevProps = getActualProperties(obj)
+      animate(obj, {top: parent.top, left: parent.left}, {
+        onComplete: e => {
+          hideObject(obj)
+        }
+      })
+      customData(obj).collapsedInto = parent.uid
+    }
+  }
 }
 
 /***
@@ -706,6 +900,7 @@ function collapseTreeItems(obj) {
  */
 function makeSubtree(node, values, opts) {
   opts = opts || {}
+  opts.overlapOnRoot = true
   opts.idMappings = renderSubtree(values, opts, node)
   //TODO: Find the closest obj which was recorded so we know its uid,
   // and find the relation to that i.e (level, index, data); And use that in the record script
@@ -777,7 +972,7 @@ function updateTreeItem(obj) {
   const outward = obj.treeConnection.outgoing || {};
   if (inward.lines && inward.point) {
     p = getPointCoords(obj, null);
-    inward.lines.map(findIfRequired).forEach(l => {
+    inward.lines.map(findIfRequired).filter(it => it).forEach(l => {
       l.set('x2', p.x);
       l.set('y2', p.y);
       obj.setCoords();
@@ -787,7 +982,7 @@ function updateTreeItem(obj) {
   }
   if (outward.lines && outward.point) {
     p = getPointCoords(obj, null);
-    outward.lines.map(findIfRequired).forEach(l => {
+    outward.lines.map(findIfRequired).filter(it => it).forEach(l => {
       l.set('x1', p.x);
       l.set('y1', p.y);
       obj.setCoords();

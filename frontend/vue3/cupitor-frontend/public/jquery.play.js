@@ -1,14 +1,3 @@
-function waitUntil(condition) {
-  return new Promise((resolve, reject) => {
-    const interval = setInterval(() => {
-      if (condition()) {
-        clearInterval(interval)
-        resolve()
-      }
-    }, 100)
-  })
-}
-
 function type(strings, elSelector, opts) {
   const options = Object.assign({}, {
     strings: [strings].flat(),
@@ -43,6 +32,46 @@ function type(strings, elSelector, opts) {
         myResolve(self);
       }
 
+    });
+  });//promise
+}
+
+function write(strings, elSelector, opts) {
+  const options = Object.assign({}, {
+    strings: [strings].flat(),
+    x: 100,
+    y: 100,
+    width: '100%',
+    height: '100%',
+    color: 'black',
+    onComplete: (self) => {
+    }
+  }, opts);
+
+  const uid = 't' + (options.uid || uuid());
+  $(elSelector).css(options);
+
+  const div = $('<div></div>').addClass('written-text').attr({id: uid}).attr({'data-uid': uid})
+      .css({position: 'absolute', top: options.y, left: options.x, width: options.width, height: options.height});
+
+  window.objectIds.add({uid: uid, type: 'written-text'});
+  updateObjectIdsUi()
+
+  //$('#textillateContainer .written-text').remove()
+  $('#textillateContainer').append(div)
+
+  return new Promise((myResolve) => {
+    new Vara("#" + uid, "SatisfySL.json",[{
+      text: options.strings.join("\n"),
+      color: options.color,
+      fromCurrentPosition:{y:false},
+      id: uid
+    }],{
+      fontSize:36,
+      strokeWidth:2
+    }).animationEnd((it) =>  {
+      console.log(it, "writing ended");
+      myResolve(it);
     });
   });//promise
 }

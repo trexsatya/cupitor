@@ -14,6 +14,8 @@
     <script type="text/javascript" src="/vendor/jquery.lettering.js"></script>
     <script type="text/javascript" src="/vendor/jquery.fittext.js"></script>
     <script type="text/javascript" src="/vendor/rulez.min.js"></script>
+    <script type="text/javascript" src="/vendor/varajs/vara.js"></script>
+    <script type="text/javascript" src="/vendor/gsap/minified/gsap.min.js"></script>
     <script src="/vendor/raphael.js"></script>
     <script src="https://unpkg.com/geometric@2.2.3/build/geometric.min.js"></script>
     <script src="https://d3js.org/d3.v5.min.js"></script>
@@ -215,6 +217,30 @@
             box-shadow: 0px 0px 10px #14B524;
             z-index: 1000;
         }
+
+        #overlay {
+            --x: 50px;
+            --y: 50px;
+            --h: 100px;
+            --w: 100px;
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgb(56 46 46 / 70%);
+            clip-path: polygon(0% 0%,
+            0% 100%,
+            var(--x) 100%,
+            var(--x) var(--y),
+            calc(var(--x) + var(--w)) var(--y),
+            calc(var(--x) + var(--w)) calc(var(--y) + var(--h)),
+            var(--x) calc(var(--y) + var(--h)),
+            var(--x) 100%,
+            100% 100%,
+            100% 0%);
+        }
     </style>
 
     <script>
@@ -285,6 +311,19 @@
     <button type="submit" onclick="createArray('#CAOGSD-dialog')">OK</button>
     <br> <br>
     <input placeholder="Location on screen" value="400,80" name="location">
+</div>
+
+<div id="overlay"></div>
+<div id="inspector-dialog" title="Inspector" class="dialog">
+    <select id="objectIdsSelect" onchange="selectObject(selectedObjectId())"></select>
+    <div>
+        <div>UID: <span id="uid-span"></span></div>
+        <div>
+            <button id="" onclick="hideObject(selectedObjectId())">Hide</button>
+            &nbsp;&nbsp;<button id="" onclick="showObject(selectedObjectId())">Show</button>
+            &nbsp;&nbsp;<button id="" onclick="deleteObject(selectedObjectId())">Delete</button>
+        </div>
+    </div>
 </div>
 
 <div class="top-bar" style="width: 40%; z-index: 3400; position: fixed; top: 0; left: 25%; opacity: 0.5;">
@@ -397,7 +436,7 @@
         return 'Are you sure you want to leave?';
     };
 
-
+    window.objectIds = new Set()
     window.pc = new fabric.Canvas('playerCanvas')
     window._ = {
         textboxes: []
@@ -956,6 +995,12 @@
             hideObject(selectedObj)
             recordScript(`hideObject(${selectedObjId})`)
         }
+        if(e.key === 'i' && e.ctrlKey) {
+            $('#inspector-dialog').dialog({
+                width: 400,
+                height: 400,
+            })
+        }
         if (e.keyCode === 32) {
             // toggleRecording()
         }
@@ -1371,7 +1416,7 @@
         $("#btnResume").hide();
         $("#btnStart").show();
     });
-
+    canvas = pc;
 </script>
 </body>
 

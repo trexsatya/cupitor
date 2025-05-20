@@ -32,6 +32,17 @@ function uuid() {
   return (S4() + S4() + "-" + S4() + "-" + S4() + "-" + S4() + "-" + S4() + S4() + S4());
 }
 
+function waitUntil(condition) {
+  return new Promise((resolve, reject) => {
+    const interval = setInterval(() => {
+      if (condition()) {
+        clearInterval(interval)
+        resolve()
+      }
+    }, 100)
+  })
+}
+
 function computeIfAbsent(map, key, fn) {
   if (!map[key]) {
     map[key] = fn()
