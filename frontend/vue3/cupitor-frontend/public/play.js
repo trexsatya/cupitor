@@ -645,3 +645,141 @@ document.onclick = e => {
 }
 
 const dmp = new diff_match_patch();
+
+function updateObjectIdsUi() {
+  const $objectIdsSelect = $('#objectIdsSelect');
+
+  $objectIdsSelect.html(`<option value="">-</option>`)
+  window.objectIds.forEach(it => {
+    $objectIdsSelect.append(`<option value="${it.uid}">${it.uid.substr(-5)}(${it.type})</option>`);
+  })
+}
+
+function setObjVisibility(obj, visibility) {
+  obj && (obj.visible = visibility);
+  obj?.treeConnection?.incoming?.lines?.map(findIfRequired)?.forEach((line) => {
+    line.visible = visibility;
+  });
+  obj?.treeConnection?.outgoing?.lines?.map(findIfRequired)?.forEach((line) => {
+    line.visible = visibility;
+  });
+  pc?.renderAll();
+}
+
+function hideObject(obj) {
+  obj = findIfRequired(obj)
+  if(obj === undefined || obj === null) return;
+  setObjVisibility(obj, false);
+}
+
+function showObject(obj) {
+  obj = findIfRequired(obj)
+  if(obj === undefined || obj === null) return;
+  setObjVisibility(obj, true);
+}
+
+function deleteObject(obj) {
+  obj = findIfRequired(obj)
+  if(obj === undefined || obj === null) return;
+  const uid = obj.uid || $(obj).attr('data-uid') || $(obj).attr('id') ;
+  if(isFabricObject(obj)) {
+    deleteFabricObject(obj)
+  } else {
+    $(obj).remove();
+  }
+  const item = [...window.objectIds].find(it => it.uid === uid)
+  window.objectIds.delete(item);
+  updateObjectIdsUi()
+}
+
+function selectedObjectId() {
+  return $('#objectIdsSelect').val();
+}
+
+function selectObject(obj) {
+  obj = findIfRequired(obj)
+  if(obj === undefined || obj === null) return;
+  if(isFabricObject(obj)) {
+    pc.setActiveObject(obj)
+  } else {
+    highlightElementWithTransparentCircle($(obj));
+  }
+
+  function highlightElement(el) {
+    //Assuming we get a jquery obj
+    if(!el || el.length === 0) return;
+    el = el[0]
+    $('.highlight-target').removeClass('highlight-target');
+    $(el).addClass('highlight-target');
+    const overlay = document.getElementById('overlay');
+    const rect = el.getBoundingClientRect();
+
+    const padding = 10;
+    const left = rect.left - padding;
+    const top = rect.top - padding;
+    const right = rect.right + padding;
+    const bottom = rect.bottom + padding;
+
+    $('#overlay').show()
+    // Define the rectangle hole using clip-path polygon
+    overlay.style.clipPath = `polygon(
+      0% 0%, 100% 0%, 100% 100%, 0% 100%,
+      0% 100%, 0% 0%,
+      ${left}px ${top}px,
+      ${left}px ${bottom}px,
+      ${right}px ${bottom}px,
+      ${right}px ${top}px,
+      ${left}px ${top}px
+    )`;
+
+    setTimeout(function () { $('#overlay').hide() }, 5000)
+  }
+}
+
+function highlightElementWithTransparentCircle(rect, padding = 20) {
+  //$(el).addClass('highlight-target');
+
+  //const rect = el.getBoundingClientRect();
+
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const left = rect.left;
+  const top = rect.top;
+  const width = rect.width;
+  const height = rect.height;
+
+  const mask = document.querySelector('#overlay');
+  const {mapRange} = gsap.utils;
+
+  // Calculate mouse position in %.
+  let x = mapRange(
+      0, window.innerWidth,
+      0, 100,
+      left
+  );
+  let y = mapRange(
+      0, window.innerHeight,
+      0, 100,
+      top
+  );
+
+  // Update the custom property values.
+  gsap.set(mask,{
+    '--x': left,
+    '--y': top,
+    '--w': 0,
+    '--h': height,
+  })
+
+  gsap.set(mask,{
+    'display': 'block'
+  })
+
+
+  setTimeout(function () {
+    gsap.set(mask,{
+      'display': 'none'
+    })
+  }, 10000)
+}
+

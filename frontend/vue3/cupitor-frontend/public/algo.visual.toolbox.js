@@ -10,106 +10,19 @@ function recordScript(str) {
   }
 }
 
-// Extended fabric line class
-fabric.Image.filters.WhiteToTransparent = fabric.util.createClass({
-
-  type: 'whiteToTransparent',
-
-  applyTo: function(canvasEl) {
-    const context = canvasEl.getContext('2d'),
-      imageData = context.getImageData(0, 0, canvasEl.width, canvasEl.height),
-      pix = imageData.data;
-
-    const newColor = {r:0,g:0,b:0, a:0};
-    for (let i = 0, n = pix.length; i <n; i += 4) {
-      const r = pix[i],
-        g = pix[i+1],
-        b = pix[i+2];
-
-      if(r == 255&& g == 255 && b == 255){
-        // Change the white to the new color.
-        pix[i] = newColor.r;
-        pix[i+1] = newColor.g;
-        pix[i+2] = newColor.b;
-        pix[i+3] = newColor.a;
-      }
-    }
-
-
-    context.putImageData(imageData, 0, 0);
-  }
-});
-
-fabric.LineArrow = fabric.util.createClass(fabric.Line, {
-
-    type: 'lineArrow',
-
-    initialize: function(element, options) {
-        options || (options = {});
-        this.callSuper('initialize', element, options);
-    },
-
-    toObject: function() {
-        return fabric.util.object.extend(this.callSuper('toObject'));
-    },
-
-    _render: function(ctx) {
-        this.callSuper('_render', ctx);
-
-        // do not render if width/height are zeros or object is not visible
-        if (this.width === 0 || this.height === 0 || !this.visible) return;
-
-        ctx.save();
-
-        const xDiff = this.x2 - this.x1;
-        const yDiff = this.y2 - this.y1;
-        const angle = Math.atan2(this.y2 - this.y1, this.x2 - this.x1) * 180 / Math.PI;
-
-        ctx.translate(this.x2,this.y2)
-
-        //ctx.rotate(angle);
-        ctx.beginPath();
-        //move 10px in front of line to start the arrow so it does not have the square line end showing in front (0,0)
-        //ctx.moveTo(10, 0);
-
-        ctx.lineTo(10*Math.cos(angle), 10*Math.sin(angle))
-        ctx.translate(this.x2,this.y2)
-
-        ctx.lineTo(-10*Math.cos(angle), -10*Math.sin(angle))
-        ctx.closePath();
-        ctx.fillStyle = this.stroke;
-        //ctx.fill();
-
-        ctx.restore();
-
-    }
-});
-
-fabric.LineArrow.fromObject = function(object, callback) {
-    callback && callback(new fabric.LineArrow([object.x1, object.y1, object.x2, object.y2], object));
-};
-
-fabric.LineArrow.async = true;
-
-fabric.Canvas.prototype.add = (function (originalFn) {
-  return function (...args) {
-    originalFn.call(this, ...args);
-    if(!args[0].uid) {
-      const globalFabricObjId = uuid();
-      args[0].uid = globalFabricObjId;
-      customData(args[0]).uid = globalFabricObjId;
-      console.log('added obj ' + globalFabricObjId);
-    } else {
-      console.log('Id already exist');
-    }
-
-    return this
-  };
-})(fabric.Canvas.prototype.add);
-
 function findById(id, canvas) {
   if (!canvas) canvas = pc
-  return canvas._objects.find(it => it.uid + '' === id + '' || it.customData?.uid + '' === id + '');
+  const fabricObj = canvas._objects.find(it => it.uid + '' === id + '' || it.customData?.uid + '' === id + '');
+  if(!fabricObj) {
+    let obj = $(`*[data-uid='${id}']`)
+    if(!obj.length) obj = $(`#${id}`)
+    return obj
+  }
+  return fabricObj;
+}
+
+function isFabricObject(obj) {
+  return obj instanceof fabric.Object;
 }
 
 function findIfRequired(idOrObj) {
@@ -117,96 +30,11 @@ function findIfRequired(idOrObj) {
     return  findById(idOrObj);
   }
   const obj = idOrObj
-  if(obj.uid && !(obj instanceof fabric.Object)) {
+  if(obj.uid && !isFabricObject(obj)) {
     return findById(obj.uid)
   }
   return obj
 }
-
-fabric.Sprite = fabric.util.createClass(fabric.Image, {
-
-  type: 'sprite',
-
-  spriteWidth: 50,
-  spriteHeight: 72,
-  spriteIndex: 0,
-  frameTime: 100,
-
-  initialize: function (element, options) {
-    options || (options = {});
-
-    options.width = this.spriteWidth;
-    options.height = this.spriteHeight;
-
-    this.callSuper('initialize', element, options);
-
-    this.createTmpCanvas();
-    this.createSpriteImages();
-  },
-
-  createTmpCanvas: function () {
-    this.tmpCanvasEl = fabric.util.createCanvasElement();
-    this.tmpCanvasEl.width = this.spriteWidth || this.width;
-    this.tmpCanvasEl.height = this.spriteHeight || this.height;
-  },
-
-  createSpriteImages: function () {
-    this.spriteImages = [];
-
-    const steps = this._element.width / this.spriteWidth;
-    for (let i = 0; i < steps; i++) {
-      this.createSpriteImage(i);
-    }
-  },
-
-  createSpriteImage: function (i) {
-    const tmpCtx = this.tmpCanvasEl.getContext('2d');
-    tmpCtx.clearRect(0, 0, this.tmpCanvasEl.width, this.tmpCanvasEl.height);
-    tmpCtx.drawImage(this._element, -i * this.spriteWidth, 0);
-
-    const dataURL = this.tmpCanvasEl.toDataURL('image/png');
-    const tmpImg = fabric.util.createImage();
-
-    tmpImg.src = dataURL;
-    tmpImg.crossOrigin = 'anonymous'
-
-    this.spriteImages.push(tmpImg);
-  },
-
-  _render: function (ctx) {
-    ctx.drawImage(
-      this.spriteImages[this.spriteIndex],
-      -this.width / 2,
-      -this.height / 2
-    );
-  },
-
-  play: function () {
-    const _this = this;
-    this.animInterval = setInterval(function () {
-
-      _this.onPlay && _this.onPlay();
-      _this.dirty = true;
-      _this.spriteIndex++;
-      if (_this.spriteIndex === _this.spriteImages.length) {
-        _this.spriteIndex = 0;
-      }
-    }, this.frameTime);
-  },
-
-  stop: function () {
-    clearInterval(this.animInterval);
-  }
-});
-
-fabric.Sprite.fromURL = function (url, callback, imgOptions) {
-  fabric.util.loadImage(url, function (img) {
-    img.crossOrigin = 'anonymous'
-    callback(new fabric.Sprite(img, imgOptions));
-  });
-};
-
-fabric.Sprite.async = true;
 
 const Arrow = (function() {
     function Arrow(canvas) {
