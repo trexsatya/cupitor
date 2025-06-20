@@ -16,6 +16,7 @@
     <script type="text/javascript" src="/vendor/rulez.min.js"></script>
     <script type="text/javascript" src="/vendor/varajs/vara.js"></script>
     <script type="text/javascript" src="/vendor/gsap/minified/gsap.min.js"></script>
+    <script type="text/javascript" src="/vendor/ckeditor/ckeditor.js"></script>
     <script src="/vendor/raphael.js"></script>
     <script src="https://unpkg.com/geometric@2.2.3/build/geometric.min.js"></script>
     <script src="https://d3js.org/d3.v5.min.js"></script>
@@ -241,6 +242,15 @@
             100% 100%,
             100% 0%);
         }
+
+        * {
+            --node-content-bg: #282b2e;
+            --node-content-fg: white;
+        }
+
+        .cke_panel {
+            z-index: 500000 !important;
+        }
     </style>
 
     <script>
@@ -299,6 +309,21 @@
     });
     rulez.render();
 </script>
+<div id="node-content-holder" style="display: none;position: absolute;right: 0;z-index: 500000; width: 50%;height: 100%;background-color: var(--node-content-bg)">
+    <div>
+        Edit Mode: <input type="checkbox" id="editContentCheckbox" name="editMode_NodeContent" value="editMode" onchange="handleEditContentCheckbox(this)">
+        &nbsp;&nbsp;<button onclick="saveNodeContent();$('#node-content-holder').hide()">Done</button>
+        &nbsp;&nbsp;<button onclick="$('#node-content-holder').hide()">Cancel</button>
+    </div>
+    <div style="">
+        <div id="node-content-editor-container">
+            <textarea id="node-content-editor" style="height: 100%;"></textarea>
+        </div>
+
+        <div id="node-content" style="height: 100%;color: var(--node-content-fg)"></div>
+    </div>
+</div>
+
 <div id="CMOGDAT-dialog" title="Enter required data" class="dialog">
     <input placeholder="Ex: [1, 2], [2, 3]" name="data" value="[1,2,3], [4,5,6]" style="width: 80%">
     <button type="submit" onclick="createMatrix('#CMOGDAT-dialog')">OK</button>
@@ -322,6 +347,9 @@
             <button id="" onclick="hideObject(selectedObjectId())">Hide</button>
             &nbsp;&nbsp;<button id="" onclick="showObject(selectedObjectId())">Show</button>
             &nbsp;&nbsp;<button id="" onclick="deleteObject(selectedObjectId())">Delete</button>
+        </div>
+        <div>
+
         </div>
     </div>
 </div>
@@ -459,6 +487,25 @@
     function customData(obj) {
         return obj.customData || {}
     }
+
+    window.CKEDITOR.replace('node-content-editor', {
+        entities: true,
+        extraPlugins: 'mathematica,codesnippet,title',
+        allowedContent: true,
+    });
+
+    const element = document.documentElement;
+    const colorBg = getComputedStyle(element).getPropertyValue('--node-content-bg');
+    const colorFg = getComputedStyle(element).getPropertyValue('--node-content-fg');
+
+    CKEDITOR.on('instanceReady', function(e) {
+        // First time
+        e.editor.document.getBody().setStyle('background-color', colorBg).setStyle('color', colorFg);
+        // in case the user switches to source and back
+        e.editor.on('contentDom', function() {
+            e.editor.document.getBody().setStyle('background-color', colorBg).setStyle('color', colorFg);
+        });
+    });
 </script>
 
 <div style="display: inline-block;margin-left: 10px;position: absolute;left: 0;top: 8px;z-index: 1000000;height: 0;">
@@ -1000,6 +1047,18 @@
                 width: 400,
                 height: 400,
             })
+        }
+        if(e.key === 'c' && e.ctrlKey) {
+            const  selected = pc.getActiveObject()
+            if(selected) {
+                window.nodeContents = window.nodeContents || {};
+                const content = window.nodeContents[selected.uid] || ''
+                CKEDITOR.instances['node-content-editor'].setData(content)
+                $('#node-content-holder').show()
+                let $editContentCheckbox = $('#editContentCheckbox')[0];
+                $editContentCheckbox.checked = false
+                updateNodeContentAsPerCheckbox($editContentCheckbox)
+            }
         }
         if (e.keyCode === 32) {
             // toggleRecording()

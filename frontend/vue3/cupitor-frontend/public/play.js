@@ -783,3 +783,25 @@ function highlightElementWithTransparentCircle(rect, padding = 20) {
   }, 10000)
 }
 
+function updateNodeContentAsPerCheckbox(el) {
+  if (el.checked) {
+    $('#node-content-editor-container').show()
+    $('#node-content').hide()
+  } else {
+    $('#node-content-editor-container').hide()
+    const content = CKEDITOR.instances['node-content-editor'].getData()
+    $('#node-content').html(content).show()
+  }
+}
+
+function handleEditContentCheckbox(el) {
+  updateNodeContentAsPerCheckbox(el);
+}
+
+function saveNodeContent() {
+  const obj = pc.getActiveObject()
+  if(!obj) return;
+  const content = CKEDITOR.instances['node-content-editor'].getData()
+  window.nodeContents = window.nodeContents || {};
+  window.nodeContents[obj.uid] = content
+}
