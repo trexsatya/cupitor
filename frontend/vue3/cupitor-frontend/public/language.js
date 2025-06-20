@@ -13,13 +13,18 @@ window.onbeforeunload = function (event) {
   return confirm("Confirm refresh");
 };
 
+window.addEventListener('filterData', (e) => {
+  const text = e.detail;
+  fetchSRTs(text)
+});
+
 function getExpansionForWords() {
   let list = `ta=ta,tar,tog,tagit
 as=as,ades,ats
 en=en,et,na,ne
 sig=sig,dig,mig,oss,honom,henne,er,sig
 få=få,får,fick,fått
-lägga=lägga,lägger,lade,lagt
+lägga=lägga,lägger,lade,lagtpa
 ha=ha,har,hade,haft
 slappna=slappna,slappnar,slappnade,slappnat
 koppla=koppla,kopplar,kopplade,kopplat
@@ -82,6 +87,14 @@ async function loadBookExtracts() {
   response = await response.text()
   response = response.split("---------------").map(it => it.trim()).filter(it => it.length > 20)
   window.bookExtracts = response
+}
+
+async function loadSnippets() {
+  //let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/snippets/1.html")
+  let response = await fetch("http://localhost:5000/static?name=1.html")
+  response = await response.text()
+  response = response.split("---------------").map(it => it.trim()).filter(it => it.length > 20)
+  window.snippets = response
 }
 
 function _populateData(where, response) {
@@ -729,19 +742,82 @@ function getWikiLink(word, uri = null) {
   return `<span> <span class="link" href="https://sv.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${word}</span></span>`;
 }
 
+function decodeHtmlEntities(html) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  return doc.body.textContent;
+}
+
+function removeHtmlTags(text) {
+  return decodeHtmlEntities(text.replace(/<\/?[^>]+>/g, ''));
+}
+
+function encodeHtmlTags(text) {
+  const m = text.matchAll(/<[^<>]+>/g)
+  const encodings = {}
+  Array.from(new Set(m.toArray().filter(it => it.length > 0).map(it => it[0]))).forEach(it => {
+    encodings[it] = `_${uuid().replaceAll('-', '_')}_`
+  })
+  Object.keys(encodings).forEach(key => {
+    const enc = encodings[key]
+    text = text.replaceAll(key, enc)
+  })
+  return [decodeHtmlEntities(text), encodings]
+}
+
+function decodeHtmlTags(text, encodings) {
+  Object.keys(encodings).forEach(key => {
+    const enc = encodings[key]
+    text = text.replaceAll(enc, key)
+  })
+  return text
+}
+
 function populateWikiLinks(text, $el) {
   $el.html('')
+  let [encoded, encodings] = encodeHtmlTags(text)
 
-  text.split(/[ \n]/).flatMap(it => {
+  let fn = it => {
+    if(Object.values(encodings).includes(it)) return it
+    return getWikiLink(it)
+  }
+  let withLinks = encoded.split(/[ \n]/).flatMap(it => {
     let ws = getWords(it)
     if (ws.length > 1) {
-      return ws.map(_w => getWikiLink(_w))
+      return ws.map(_w => fn(_w))
     }
-    return getWikiLink(it, ws[0])
+    return fn(it, ws[0])
+  }).join(' ');
+
+  $el.append(decodeHtmlTags(withLinks, encodings))
+}
+
+function populateSearchWords(sub, $el) {
+  $el.html('')
+
+  let wordLink = (word, uri = null) => {
+    return $(`<span style="cursor: pointer;" data-uri="${uri || word}"> ${word}</span>`)
+  };
+
+  removeHtmlTags(sub.sv).split(/[ \n]/).flatMap(it => {
+    let ws = getWords(it)
+    if (ws.length > 1) {
+      return ws.map(_w => wordLink(_w))
+    }
+    return wordLink(it, ws[0])
   }).forEach(it => {
     let wordLink = $(it);
     wordLink.click(e => {
       pauseVideo()
+      let word = $(e.target).data('uri')
+      if (window.location.toString().includes("wordbuilder")) {
+        if(word.length > 2)
+          window.location.hash = word
+      } else {
+        $('#searchText').val(word).trigger('change')
+        expandSearchResults()
+      }
+      addStarredLine(sub.index, sub.ts)
     })
     $el.append(wordLink)
   });
@@ -785,37 +861,6 @@ function addStarredLine(index, ts) {
 
 function expandSearchResults() {
 
-}
-
-function populateSearchWords(sub, $el) {
-  $el.html('')
-  let n = 1;
-
-  let wordLink = (word, uri = null) => $(`<span style="cursor: pointer;" data-uri="${uri || word}"> ${word}</span>`);
-
-  sub.sv.split(/[ \n]/).flatMap(it => {
-    let ws = getWords(it)
-    if (ws.length > 1) {
-      return ws.map(_w => wordLink(_w))
-    }
-    return wordLink(it, ws[0])
-  }).forEach(it => {
-    let wordLink = $(it);
-    wordLink.click(e => {
-      pauseVideo()
-      let word = $(e.target).data('uri')
-      if (window.location.toString().includes("wordbuilder")) {
-        if(word.length > 2)
-          window.location.hash = word
-      } else {
-        $('#searchText').val(word).trigger('change')
-        expandSearchResults()
-      }
-      addStarredLine(sub.index, sub.ts)
-    })
-    $el.append(wordLink)
-    n++;
-  });
 }
 
 let lastSub = null
@@ -983,6 +1028,7 @@ function populateAllLinks() {
   })
 
   getOptgroup('Okategoriserad').append($(`<option>JOKES</option>`).attr('value', 'jokes'))
+  getOptgroup('Okategoriserad').append($(`<option>Snippets</option>`).attr('value', 'snippets'))
 
   Object.values(ogs).forEach(it => $mp3Choice.append(it))
   return srts;
@@ -1008,6 +1054,9 @@ async function loadAllSubtitles() {
 
   await loadBookExtracts()
   loadAsSubtitles(window.bookExtracts, 'book-extracts')
+
+  await loadSnippets()
+  loadAsSubtitles(window.snippets, 'snippets')
 
   await loadSayings()
   loadAsSubtitles(window.sayings, 'sayings')
@@ -1038,8 +1087,9 @@ function loadAsSubtitles(data, tag) {
       window.allSubtitles[link] = {sv, en, source: tag, fileName: link}
     })
   } catch (e) {
+    console.error(e)
   }
-  if(tag !== 'jokes') {
+  if(!['jokes', 'snippets'].includes(tag)) {
      return
   }
   try {
@@ -1049,8 +1099,9 @@ function loadAsSubtitles(data, tag) {
             sv += `${n+1}\n${fromSeconds(n*60)},000 --> ${fromSeconds(n*60 + 50)},000\n${item.text || item}\n\n`
             n += 1
       })
-      window.allSubtitles['jokes'] = {sv, en: '1\n00:00:00.000 --> 00:00:50.000\n', source: tag, fileName: 'jokes'}
+      window.allSubtitles[tag] = {sv, en: '1\n00:00:00.000 --> 00:00:50.000\n', source: tag, fileName: tag}
   } catch (e) {
+    console.error(e)
   }
 }
 
@@ -1085,7 +1136,7 @@ function srtToJson(text, lang) {
   })
 
   items.push(currentItem)
-  return items.filter(it => it.start && it.start.ordinal)
+  return items.filter(it => it.start && it.start.ordinal != null)
 }
 
 function getCategory(item) {
@@ -1239,6 +1290,8 @@ async function loadSubtitlesForLink(sv, en) {
   $('#subtitlePagination').pagination({
     dataSource: range(1, window.subtitles.length),
     pageSize: 1,
+    showGoInput: true,
+    showGoButton: true,
     callback: function (data, pagination) {
       let pageNum = data[0]
       window.currentSub = window.subtitles[pageNum - 1]
@@ -1516,8 +1569,6 @@ function highlightedText(text, populateWikiLinks = false) {
   text = text.replaceAll("\n", " ")
   let hText = text
 
-  let fn = getWikiLinks;
-
   try {
     let i;
     let match = text.match(new RegExp(window.searchText, "i"))
@@ -1545,7 +1596,7 @@ function highlightedText(text, populateWikiLinks = false) {
     let secondPart = text.substring(y);
     let highlightedPart = text.substring(x, y);
 
-    hText = (fn(firstPart) + ' ') + "<span class='highlight'>" + fn(highlightedPart) + "</span>" + (' ' + fn(secondPart));
+    hText = (getWikiLinks(firstPart) + ' ') + "<span class='highlight'>" + getWikiLinks(highlightedPart) + "</span>" + (' ' + getWikiLinks(secondPart));
   } catch (e) {
     // console.log(e)
     hText = getWikiLinks(hText);
@@ -1946,7 +1997,7 @@ let commonWordsToIgnore = [
   ]
 
 function groupAndArrangeResults(items) {
-    let spl = ['jokes', 'idioms', 'sayings', 'metaphors', 'book-extracts']
+    let spl = ['jokes', 'idioms', 'sayings', 'metaphors', 'book-extracts', 'snippets']
     let gpBySpl = _.groupBy(items, it => spl.includes(it.source) ? it.source : 'other')
     items = gpBySpl['other'] || []
     let mediaFileNames = window.allMediaFileNames || []

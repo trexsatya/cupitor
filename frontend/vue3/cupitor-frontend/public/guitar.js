@@ -88,12 +88,12 @@ function deduplicateChords(chords) {
 }
 
 $(document).ready(ignore => {
-  $(it).keydown(e => {
+  $(document).keydown(e => {
      if (e.shiftKey) {
          window.isShiftKeyDown = true
      }
   })
-  $(it).keyup(e => {
+  $(document).keyup(e => {
        if (e.shiftKey) {
            window.isShiftKeyDown = false
        }
@@ -440,6 +440,20 @@ const Fretboard = function () {
     }
   }
 
+  this.showAllForNoteName = function (name) {
+    const notes = []
+    Object.keys(this.notes).forEach(string => {
+      for (let fret = 0; fret < this.notes[string].length; fret++) {
+        const note = this.notes[string][fret]
+        if(equalNotes(name, note)) {
+          const n = this.showNote(string, fret, '', {name: name})
+          notes.push(n)
+        }
+      }
+    })
+    return notes;
+  }
+
   this.showNote = function (string, fret, cls, _note) {
     let note = this.notes[string][fret];
     if(_note && _note.name) note = _note.name;
@@ -472,6 +486,7 @@ const Fretboard = function () {
 
 
     $(noteMarker).css({opacity: 1}).show();
+    return $(noteMarker)
   }
 
 };
