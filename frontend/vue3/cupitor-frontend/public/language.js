@@ -1061,13 +1061,18 @@ async function loadAllSubtitles() {
   srts = await srts.json()
   window.srts = srts
 
+  let notFound = []
   srts.forEach(async function x(it) {
     try {
       await getSubtitlesForLink(it['link'], it['source'])
     } catch (e) {
-      console.error(e)
+      notFound.push(it['link'])
     }
   })
+
+  if(notFound.length > 0) {
+    console.log("Not found",notFound.join('\n'))
+  }
 
   window.categories = await fetchCategorisation()
 
@@ -2007,6 +2012,7 @@ function getWordsOrdered(words) {
     relatedWords(w, it => it.trim().endsWith(w.trim()))
   })
 
+  words.filter(it => !_.includes(ordered, it)).forEach(it => ordered.push(it))
   return _.uniq(ordered)
 }
 
