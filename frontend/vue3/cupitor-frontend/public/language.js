@@ -76,21 +76,21 @@ passa=passa,passar,passade,passat`
 }
 
 async function loadJokes() {
-  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/jokes/1.txt")
+  let response = await fetch(`${getResourceUrl()}/jokes/1.txt`)
   response = await response.text()
-  response = response.split(/[0-9]+\.jpg\n     ------------\n/).map(it => it.trim()).filter(it => it.length > 20)
+  response = response.split(/[0-9]+\.jpg\n {5}------------\n/).map(it => it.trim()).filter(it => it.length > 20)
   window.jokes = response
 }
 
 async function loadBookExtracts() {
-  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/book-extracts/1.txt")
+  let response = await fetch(`${getResourceUrl()}/book-extracts/1.txt`)
   response = await response.text()
   response = response.split("---------------").map(it => it.trim()).filter(it => it.length > 20)
   window.bookExtracts = response
 }
 
 async function loadSnippets() {
-  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/14")
+  let response = await fetch(`https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/14`)
   //let response = await fetch("http://localhost:5000/static?name=1.html")
   response = await response.json()
   response = await response.content
@@ -109,21 +109,21 @@ function _populateData(where, response) {
 }
 
 async function loadSayings() {
-  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/sayings/1.txt")
+  let response = await fetch(`${getResourceUrl()}/sayings/1.txt`)
   response = await response.text()
   window.sayings = []
   _populateData(window.sayings, response)
 }
 
 async function loadMetaphors() {
-  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/metaphors/1.txt")
+  let response = await fetch(`${getResourceUrl()}/metaphors/1.txt`)
   response = await response.text()
   window.metaphors = []
   _populateData(window.metaphors, response)
 }
 
 async function loadIdioms() {
-  let response = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/idioms/1.txt")
+  let response = await fetch(`${getResourceUrl()}/idioms/1.txt`)
   response = await response.text()
   window.idioms = []
   _populateData(window.idioms, response)
@@ -380,7 +380,7 @@ async function fetchVocabulary() {
     res = await res.json()
     if(res) res = res.text
   } else {
-      res = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/vocabulary.txt")
+      res = await fetch(`${getResourceUrl()}/vocabulary.txt`)
       res = await res.text()
   }
   if(res)
@@ -740,7 +740,7 @@ const clearSubtitles = () => {
 function getWikiLink(word, uri = null, cls='link') {
   let uriComponent = uri || word;
   uriComponent = uriComponent.toLowerCase()
-  return `<span> <span class="${cls}" href="https://sv.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${word}</span></span>`;
+  return `<span> <span class="${cls}" href="https://${getLangFromUrl().code}.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${word}</span></span>`;
 }
 
 function getWikiLinkSpecial(word, uri = null) {
@@ -846,9 +846,8 @@ function populateSearchWords(sub, $el) {
 }
 
 function changeMediaIfNeededTo(media) {
-  const notAlradyBeingPlayed = window.playingYoutubeVideo && !_.isEqual(window.mediaBeingPlayed, media);
-  const canBePlayed = window.playingYoutubeVideo && !_.isEqual(window.mediaBeingPlayed, media);
-  if (notAlradyBeingPlayed && window.mediaBeingPlayed.source === 'link') {
+  const alreadyBeingPlayed = window.playingYoutubeVideo && _.isEqual(window.mediaBeingPlayed, media);
+  if (!alreadyBeingPlayed && media.source === 'link') {
     return loadYoutubeVideo(media.link)
   }
   return new Promise(resolve => resolve())
@@ -995,7 +994,7 @@ $(document).ready(function () {
 });
 
 async function fetchCategorisation() {
-  let categorisation = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/categorisation.txt")
+  let categorisation = await fetch(`${getResourceUrl()}/srts/categorisation.txt`)
   categorisation = await categorisation.text()
   categorisation = categorisation.split("\n")
   const categories = {}
@@ -1045,7 +1044,7 @@ function populateAllLinks() {
   }
   srtLinks.forEach(link => {
     const item = srts.find(it => it.link === link)
-    const $opt = $(`<option>${item.name.replace(".en.srt", "").replace(".sv.srt", "")}</option>`).attr('value', item.link)
+    const $opt = $(`<option>${item.name.replace(".en.srt", "").replace(getTargetLangSrtSuffix(), "")}</option>`).attr('value', item.link)
     getOptgroup(getCategory(item)).append($opt)
   })
 
@@ -1057,14 +1056,14 @@ function populateAllLinks() {
 }
 
 async function loadAllSubtitles() {
-  let srts = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/index.json")
+  let srts = await fetch(`${getResourceUrl()}/srts/index.json`)
   srts = await srts.json()
   window.srts = srts
 
   let notFound = []
   srts.forEach(async function x(it) {
     try {
-      await getSubtitlesForLink(it['link'], it['source'])
+      let res = await getSubtitlesForLink(it['link'], it['source'])
     } catch (e) {
       notFound.push(it['link'])
     }
@@ -1216,11 +1215,11 @@ async function getSubtitlesForLink(link, source) {
   if (!srt) return
 
   const name = srt.name
-  const svName = name + ".sv.srt"
+  const svName = name + getTargetLangSrtSuffix()
   const enName = name + ".en.srt"
-  let sv = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/" + svName)
+  let sv = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(svName)}`)
   sv = await sv.text()
-  let en = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/" + enName)
+  let en = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(enName)}`)
   en = await en.text()
 
   window.allSubtitles[link] = {sv, en, source, fileName: name}
@@ -1259,7 +1258,7 @@ async function loadLocalFiles() {
   let sv = null, en = null;
   const audioFile = files.find(it => it.name.match(/.mp3$/) || it.name.match(/.wav$/))
   const videoFile = files.find(it => it.name.match(/.mp4$/))
-  const svSrtFile = files.find(it => it.name.match(/.sv.srt$/))
+  const svSrtFile = files.find(it => it.name.match(new RegExp(getTargetLangSrtSuffix() + "$")))
   const enSrtFile = files.find(it => it.name.match(/.en.srt$/))
 
   sv = svSrtFile && await new Response(svSrtFile).text()
@@ -1281,7 +1280,7 @@ async function loadLocalFiles() {
     }
   }
 
-  playNewMedia(link, 'local', videoFile || audioFile)
+  await playNewMedia(link, 'local', videoFile || audioFile)
 }
 
 async function loadSubtitlesForLink(sv, en) {
@@ -1425,8 +1424,38 @@ async function playNewMedia(link, source, mediaFile) {
   $('#toggleSearchBtn').show()
 }
 
+function getLangFromUrl() {
+  function alpha2Code(lang) {
+    switch (lang) {
+      case 'swedish':
+        return 'sv'
+      case 'spanish':
+        return 'es'
+      default:
+        return null
+    }
+  }
+
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams(url.search);
+  let value = params.get('lang');
+  if (!value) {
+    value = 'swedish'
+  }
+  return {fullName: value, code: alpha2Code(value)};
+}
+
+function getResourceUrl() {
+  const value = getLangFromUrl();
+  return `https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/${value.fullName}`
+}
+
+function getTargetLangSrtSuffix() {
+  return "." + getLangFromUrl().code + ".srt"
+}
+
 async function loadStarredLines(link, source) {
-  let res = await fetch("https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/srt_favorites.json")
+  let res = await fetch(`${getResourceUrl()}/srts/srt_favorites.json`)
   res = await res.json()
 
   const d = res.find(it => it.link === link)
@@ -1812,13 +1841,13 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
 
 function getMainSubAndSecondarySub(file, line) {
   let mainSub = {text: ""}, secondarySub = {text: ""};
-  if (file.path.endsWith(".sv.srt")) {
+  if (file.path.endsWith(getTargetLangSrtSuffix())) {
     mainSub = {...line};
     mainSub.text = highlightedText(mainSub.text, true)
-    const found = window.searchResult.find(it => it['en_subs'] && it['en_subs'].path === file.path.replaceAll(".sv.srt", ".en.srt"));
+    const found = window.searchResult.find(it => it['en_subs'] && it['en_subs'].path === file.path.replaceAll(getTargetLangSrtSuffix(), ".en.srt"));
     if (found) secondarySub = found.en_subs.data.find(it => it.index === line.index)
   } else {
-    mainSub = window.searchResult.find(it => it['sv_subs'] && it['sv_subs'].path === file.path.replaceAll(".en.srt", ".sv.srt"))
+    mainSub = window.searchResult.find(it => it['sv_subs'] && it['sv_subs'].path === file.path.replaceAll(".en.srt", getTargetLangSrtSuffix()))
       .sv_subs.data.find(it => it.index === line.index)
     mainSub = {...mainSub}
     mainSub.text = getWikiLinks(mainSub.text)
@@ -1906,9 +1935,8 @@ function renderLines(id, url) {
     </span>`
 
   const isNotALink = url.startsWith('jokes-') || url.startsWith('sayings-') || url.startsWith('metaphors-') || url.startsWith('idioms-');
-  const playMediaBtn = isLocalhost() ?
-    `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}')">`
-    : ''
+  const playMediaBtn =
+    `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}', '${subtitleFile.source}')">`
 
   function truncate(str, n){
     return (str.length > n) ? str.slice(0, n-1) + '&hellip;' : str;
@@ -2309,7 +2337,7 @@ function fetchFromDownloadedFiles(lookingFor) {
           window.allSubtitles[it].source,
           it,
           getSubs(enText, it + ".en.srt", it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
-          getSubs(svText, it + ".sv.srt", it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
+          getSubs(svText, it + getTargetLangSrtSuffix(), it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
           !!enMatch,
           !!svMatch,
         )
@@ -2499,12 +2527,15 @@ firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 function loadYoutubeVideo(videoId) {
   const iframe = ytPlayer.getIframe()
   $('#youtubePlayer').show()
+  $('#mediaRelatedContainer').show()
   return new Promise((resolve, reject) => {
     try {
       const currentVideoId = iframe.src.split("embed/")[1].split("?")[0]
       iframe.src = `${iframe.src}`.replaceAll(currentVideoId, videoId)
+      iframe.onload = resolve()
     } catch (e) {
       console.log(e)
+      reject(e)
     }
   })
 }
@@ -2782,7 +2813,17 @@ function tests() {
 }
 
 
-async function playMediaSlice(url, start, end) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function playMediaSlice(url, start, end, source) {
+  if(source === 'YouTube') {
+    if(ytPlayer.getVideoUrl().indexOf(url) < 0) {
+      window.mediaSelected = {link: url, source: 'link'}
+      window.playingYoutubeVideo = true
+      await changeMediaIfNeededTo(window.mediaSelected)
+    }
+    await seekToYoutubeTime(start)
+    return
+  }
   if (location.href.indexOf('localhost') < 0) {
     return
   }
@@ -2796,7 +2837,7 @@ async function playMediaSlice(url, start, end) {
     console.log(e)
   }
   a.onended = e => restoreBgMusic()
-  a.play()
+  await a.play()
 }
 
 try {
