@@ -7,7 +7,7 @@ Array.prototype.last = function () {
 
 const SEPARATOR_PIPE = '|'
 window.onbeforeunload = function (event) {
-  if(window.dontConfirmOnRefresh) {
+  if (window.dontConfirmOnRefresh) {
     return null
   }
   return confirm("Confirm refresh");
@@ -167,19 +167,19 @@ function playMedia() {
 }
 
 function createOptionElement(searchTerms, selected = false) {
-    let displayText = searchTerms
-    let isSeparator = false
-    if (searchTerms.trim().length === 0) {
-      displayText = "-------"
-      searchTerms = displayText
-      isSeparator = true
-    }
-    const op = new Option(`${displayText}`, searchTerms, false, selected)
-    if (isSeparator) {
-      op.disabled = true
-    }
-    op.title = searchTerms
-    return op
+  let displayText = searchTerms
+  let isSeparator = false
+  if (searchTerms.trim().length === 0) {
+    displayText = "-------"
+    searchTerms = displayText
+    isSeparator = true
+  }
+  const op = new Option(`${displayText}`, searchTerms, false, selected)
+  if (isSeparator) {
+    op.disabled = true
+  }
+  op.title = searchTerms
+  return op
 }
 
 function loadSearches() {
@@ -225,17 +225,17 @@ function loadWholeVocabulary() {
   const vocabCategoriesToPopulate = new Set()
 
   Object.entries(vocabulary).forEach(it => {
-      vocabCategoriesToPopulate.add(it[0])
+    vocabCategoriesToPopulate.add(it[0])
   })
 
   const populateLines = it => {
-       const vocabLines = window.vocabulary[it]
-       const heading = new Option(`${it}`, it, false, false)
-       heading.disabled = true
-       $('#searchedWords').append(heading)
-       vocabLines.forEach(line => {
-         $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
-       })
+    const vocabLines = window.vocabulary[it]
+    const heading = new Option(`${it}`, it, false, false)
+    heading.disabled = true
+    $('#searchedWords').append(heading)
+    vocabLines.forEach(line => {
+      $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
+    })
   };
   schedule(Array.from(vocabCategoriesToPopulate), .1, it => {
     populateLines(it)
@@ -313,7 +313,7 @@ window.AWS_API = "https://api.satyendra.website/api"
 
 async function makeHttpCallToUpdateVocab() {
   const data = Object.keys(window.vocabulary)
-    .map(k => `#${k}\n${window.vocabulary[k].join("\n")}`).join("\n")
+      .map(k => `#${k}\n${window.vocabulary[k].join("\n")}`).join("\n")
   try {
     let res = await fetch(`${window.AWS_API}/save-vocab`, {
       method: 'POST',
@@ -379,21 +379,21 @@ function populateVocabularyHeadings(target) {
 
 async function fetchVocabulary() {
   let res;
-  if(isLocalhost()) {
+  if (isLocalhost()) {
     res = await fetch("http://localhost:5000/vocabulary")
     res = await res.json()
-    if(res) res = res.text
+    if (res) res = res.text
   } else {
-      res = await fetch(`${getResourceUrl()}/vocabulary.txt`)
-      res = await res.text()
+    res = await fetch(`${getResourceUrl()}/vocabulary.txt`)
+    res = await res.text()
   }
-  if(res)
-  window.vocabulary = parseVocabularyFile(res)
+  if (res)
+    window.vocabulary = parseVocabularyFile(res)
   loadWholeVocabulary()
 }
 
 async function searchedWordSelected() {
-  if(window.searchedWordsSelectedProgrammatically) {
+  if (window.searchedWordsSelectedProgrammatically) {
     window.searchedWordsSelectedProgrammatically = false;
     return
   }
@@ -446,6 +446,8 @@ const displayMessage = function (message, isError) {
 
 
 const ontimeupdate = e => {
+  updatePlayBtn()
+
   if (isNotPlaying()) {
     return
   }
@@ -455,8 +457,6 @@ const ontimeupdate = e => {
   if (window.seekRequestProcessing) {
     return
   }
-
-  updatePlayBtn()
 
   const ct = getCurrentTime()
 
@@ -559,7 +559,7 @@ function fixMobileView() {
   const scrollButton = $("#scrollButton")
   scrollButton.show()
   window.onscroll = () => {
-    if (document.body.scrollTop < document.body.scrollHeight/2) {
+    if (document.body.scrollTop < document.body.scrollHeight / 2) {
       scrollButton.html(downSymbol).data({'direction': 'down'})
     } else {
       scrollButton.html(upSymbol).data({'direction': 'up'})
@@ -600,12 +600,12 @@ $('document').ready(e => {
   });
 
   document.addEventListener('click', function (e) {
-      if ($(e.target).hasClass("link")) {
-        e.preventDefault()
-        const link = $(e.target).attr('href')
-        window.open(link, '_blank').focus();
-      }
-    });
+    if ($(e.target).hasClass("link")) {
+      e.preventDefault()
+      const link = $(e.target).attr('href')
+      window.open(link, '_blank').focus();
+    }
+  });
 
   $('#mp3Choice').change(async e => {
     const link = $('#mp3Choice').val();
@@ -741,7 +741,7 @@ const clearSubtitles = () => {
   window.starredLines = []
 }
 
-function getWikiLink(word, uri = null, cls='link') {
+function getWikiLink(word, uri = null, cls = 'link') {
   let uriComponent = uri || word;
   uriComponent = uriComponent.toLowerCase()
   return `<span> <span class="${cls}" href="https://${getLangFromUrl().code}.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${word}</span></span>`;
@@ -787,8 +787,8 @@ function populateWikiLinks(text, $el) {
   const [encoded, encodings] = encodeHtmlTags(text)
 
   const fn = (it, second) => {
-    if(it.trim().length < 2) return it
-    if(Object.values(encodings).map(it => it.trim()).includes(it)) return it
+    if (it.trim().length < 2) return it
+    if (Object.values(encodings).map(it => it.trim()).includes(it)) return it
     return getWikiLinkSpecial(it, second)
   }
   const withLinks = encoded.split(/[ \n]/).flatMap(it => {
@@ -805,7 +805,7 @@ function populateWikiLinks(text, $el) {
   $el && $el.find(".link-special").click(e => {
     pauseVideo()
     let $target = $(e.target);
-    if($target.attr('data-clicked') === 'yes') {
+    if ($target.attr('data-clicked') === 'yes') {
       window.open($target.attr('href'), '_blank');
       $target.removeAttr('data-clicked')
     } else {
@@ -837,7 +837,7 @@ function populateSearchWords(sub, $el) {
       pauseVideo()
       const word = $(e.target).data('uri')
       if (window.location.toString().includes("wordbuilder")) {
-        if(word.length > 2)
+        if (word.length > 2)
           window.location.hash = word
       } else {
         $('#searchText').val(word).trigger('change')
@@ -875,7 +875,7 @@ function addStarredLine(index, ts) {
   window.starredLines.push(index)
 
   const x = $(`<span data-index="${index}">${index}</span>`)
-    .addClass('starred-sub')
+      .addClass('starred-sub')
 
   x.click(starredLineSelected(x, index, ts))
 
@@ -1020,15 +1020,14 @@ function populateAllLinks() {
   const srts = window.srts
   let srtLinks = Array.from(new Set(window.srts.map(it => it.link)));
 
-  const categories = window.categories
   srtLinks = _(srtLinks).chain()
-    .sortBy(link => getCategory({link}))
-    // .sortBy(function(link) {
-    //     let srt = srts.find(it => it.link === link)
-    //     return srt.name.split(" || ")[0];
-    // })
-    .reverse()
-    .value()
+      .sortBy(link => getCategory({link}))
+      // .sortBy(function(link) {
+      //     let srt = srts.find(it => it.link === link)
+      //     return srt.name.split(" || ")[0];
+      // })
+      .reverse()
+      .value()
 
   const ogs = {}
   const getOptgroup = category => {
@@ -1052,8 +1051,8 @@ function populateAllLinks() {
     getOptgroup(getCategory(item)).append($opt)
   })
 
-  getOptgroup('Okategoriserad').append($(`<option>JOKES</option>`).attr('value', 'jokes'))
-  getOptgroup('Okategoriserad').append($(`<option>Snippets</option>`).attr('value', 'snippets'))
+  getOptgroup('Uncategorized').append($(`<option>JOKES</option>`).attr('value', 'jokes'))
+  getOptgroup('Uncategorized').append($(`<option>Snippets</option>`).attr('value', 'snippets'))
 
   Object.values(ogs).forEach(it => $mp3Choice.append(it))
   return srts;
@@ -1073,8 +1072,8 @@ async function loadAllSubtitles() {
     }
   })
 
-  if(notFound.length > 0) {
-    console.log("Not found",notFound.join('\n'))
+  if (notFound.length > 0) {
+    console.log("Not found", notFound.join('\n'))
   }
 
   window.categories = await fetchCategorisation()
@@ -1108,6 +1107,8 @@ async function loadAllSubtitles() {
   populateVocabularyHeadings($('#vocabularySelect'))
 }
 
+const specialLinks = ['jokes', 'idioms', 'sayings', 'metaphors', 'book-extracts', 'snippets', 'poems']
+
 function loadAsSubtitles(data, tag) {
   try {
     data.forEach((item, i) => {
@@ -1119,17 +1120,22 @@ function loadAsSubtitles(data, tag) {
   } catch (e) {
     console.error(e)
   }
-  if(!['jokes', 'snippets'].includes(tag)) {
-     return
+  if (!specialLinks.includes(tag)) {
+    return
   }
   try {
-      let sv = ''
-      let n = 0
-      data.forEach((item, i) => {
-            sv += `${n+1}\n${fromSeconds(n*60)},000 --> ${fromSeconds(n*60 + 50)},000\n${item.text || item}\n\n`
-            n += 1
-      })
-      window.allSubtitles[tag] = {sv, en: '1\n00:00:00.000 --> 00:00:50.000\n', source: tag, fileName: tag}
+    let sv = ''
+    let n = 0
+    data.forEach((item, i) => {
+      sv += `${n + 1}\n${fromSeconds(n * 60)},000 --> ${fromSeconds(n * 60 + 50)},000\n${item.text || item}\n\n`
+      n += 1
+    })
+    window.allSubtitles[tag] = {
+      sv,
+      en: '1\n00:00:00.000 --> 00:00:50.000\n',
+      source: tag,
+      fileName: tag
+    }
   } catch (e) {
     console.error(e)
   }
@@ -1360,7 +1366,7 @@ function showVideoPlayer() {
 
 function showOnlySubtitle() {
   stopMedia()
-  $('#youtubePlayer').hide()
+  $('#youtubePlayer').parent().hide()
   $('#localVideoContainer').hide()
   $('#localMediaContainer').hide()
   window.playingYoutubeVideo = false;
@@ -1372,6 +1378,10 @@ function showOnlySubtitle() {
   $('#mediaRelatedContainer').css({minHeight: 530})
 }
 
+function togglePlayerControls() {
+   $('#playerControls').toggle()
+}
+
 async function playNewMedia(link, source, mediaFile) {
   clearSubtitles()
   stopMedia(source)
@@ -1380,12 +1390,13 @@ async function playNewMedia(link, source, mediaFile) {
 
   function _playMedia() {
     if (source === 'link') {
-      $('#youtubePlayer').show()
+      $('#youtubePlayer').parent().show()
       $('#localVideoContainer').hide()
+      $('#mediaRelatedContainer').show()
       loadYoutubeVideo(link)
       window.playingYoutubeVideo = true;
     } else if (source === 'local') {
-      $('#youtubePlayer').hide()
+      $('#youtubePlayer').parent().hide()
       $('#localVideoContainer').show()
       window.playingYoutubeVideo = false;
       if (mediaFile.name.endsWith(".mp3") || mediaFile.name.endsWith(".wav")) {
@@ -1410,11 +1421,12 @@ async function playNewMedia(link, source, mediaFile) {
   }
 
   $('#resultContainer').hide()
-  if (!$('#onlySubsCheckbox').is(':checked')) {
-    _playMedia();
-  } else {
+  if ($('#onlySubsCheckbox').is(':checked') || specialLinks.includes(link)) {
     showOnlySubtitle();
+  } else {
+    _playMedia();
   }
+  $('#mediaRelatedContainer').show()
 
   const {sv, en} = await getSubtitlesForLink(link, source)
   loadSubtitlesForLink(sv, en);
@@ -1424,7 +1436,6 @@ async function playNewMedia(link, source, mediaFile) {
   loadStarredLines(link, source)
 
   $('#toggleEnSubBtn').show()
-  $('#mediaRelatedContainer').show()
   $('#toggleSearchBtn').show()
 }
 
@@ -1482,10 +1493,10 @@ window.onload = e => {
   const link = window.location.hash.replace("#", "")
   if (link.length > 2) {
     waitUntil(() => window.ytPlayerReady)
-      .then(() => {
-        console.log("Playing video", link)
-        $('#mp3Choice').val(link).trigger('change')
-      })
+        .then(() => {
+          console.log("Playing video", link)
+          $('#mp3Choice').val(link).trigger('change')
+        })
   }
 }
 
@@ -1607,7 +1618,7 @@ function chunkifySentence(text, max_chars) {
 
 function getTimesForSubtitleChunk(el, fl) {
   const lines = $(el).find(".line").map((i, e) => $(e).data()).toArray()
-    .map(it => it.index).map(idx => fl.data.find(it => it.index + '' === idx + ''))
+      .map(it => it.index).map(idx => fl.data.find(it => it.index + '' === idx + ''))
 
   return {
     start: lines[0].start.ordinal, end: lines[lines.length - 1].end.ordinal
@@ -1745,9 +1756,9 @@ function getMatchingWords(list, search) {
       const endsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
       const startsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
       words.filter(word => word.match(new RegExp(transformedSearchText, "i")) || endsWith(word) || startsWith(word))
-        .forEach(word => {
-          wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
-        })
+          .forEach(word => {
+            wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
+          })
       // Whole search text as a word
       const word = searchText.toLowerCase().trim()
       if (word.indexOf(" ") > 0 && line.text.toLowerCase().indexOf(word) >= 0) {
@@ -1770,7 +1781,7 @@ function getMatchingWords(list, search) {
     lines.forEach(line => {
       const matches = line.text.match(new RegExp(searchText, "i"))
       const alreadyIncludedInResults = it => it.toLowerCase().indexOf(searchText.toLowerCase()) >= 0
-        && wordToItemsMap[it.toLowerCase()].length > 0;
+          && wordToItemsMap[it.toLowerCase()].length > 0;
 
       if (matches && !Object.keys(wordToItemsMap).some(alreadyIncludedInResults)) {
         const matchedPart = matches[0].toLowerCase()
@@ -1852,7 +1863,7 @@ function getMainSubAndSecondarySub(file, line) {
     if (found) secondarySub = found.en_subs.data.find(it => it.index === line.index)
   } else {
     mainSub = window.searchResult.find(it => it['sv_subs'] && it['sv_subs'].path === file.path.replaceAll(".en.srt", getTargetLangSrtSuffix()))
-      .sv_subs.data.find(it => it.index === line.index)
+        .sv_subs.data.find(it => it.index === line.index)
     mainSub = {...mainSub}
     mainSub.text = getWikiLinks(mainSub.text)
     secondarySub = {...line};
@@ -1940,15 +1951,15 @@ function renderLines(id, url) {
 
   const isNotALink = url.startsWith('jokes-') || url.startsWith('sayings-') || url.startsWith('metaphors-') || url.startsWith('idioms-');
   const playMediaBtn =
-    `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}', '${subtitleFile.source}')">`
+      `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}', '${subtitleFile.source}')">`
 
-  function truncate(str, n){
-    return (str.length > n) ? str.slice(0, n-1) + '&hellip;' : str;
+  function truncate(str, n) {
+    return (str.length > n) ? str.slice(0, n - 1) + '&hellip;' : str;
   };
 
   const infoButton = () => {
-    if(isNotALink) return '';
-    if(window.showInfoWithoutPopup) {
+    if (isNotALink) return '';
+    if (window.showInfoWithoutPopup) {
       const {fileName, url} = getInfoAboutMedia(subtitleFile.url, subtitleFile.source, time_start);
       return `<a href="${url}" target="_blank" title="${fileName}">${truncate(fileName, 20)}</a>`
     }
@@ -2008,14 +2019,14 @@ function getSearchedTerms(search) {
   }
   if (!search) return []
   const terms = _.trim(search.toLowerCase(), SEPARATOR_PIPE)
-    .split(SEPARATOR_PIPE)
-    .filter(it => it.trim().length > 0)
-    .map(removeHintsInBrackets)
-    .map(it => {
-      const leftSpace = it.startsWith(" "), rightSpace = it.endsWith(" ");
-      const w = it.trim()
-      return (leftSpace ? " " : "") + w + (rightSpace ? " " : "")
-    });
+      .split(SEPARATOR_PIPE)
+      .filter(it => it.trim().length > 0)
+      .map(removeHintsInBrackets)
+      .map(it => {
+        const leftSpace = it.startsWith(" "), rightSpace = it.endsWith(" ");
+        const w = it.trim()
+        return (leftSpace ? " " : "") + w + (rightSpace ? " " : "")
+      });
   return _.uniq(terms.filter(it => it));
 }
 
@@ -2049,27 +2060,31 @@ function getWordsOrdered(words) {
 }
 
 const commonWordsToIgnore = [
-  'den', 'det','är', 'och', 'att', 'i', 'en', 'jag', 'hon', 'som', 'han', 'på', 'den', 'med', 'var', 'sig', 'för', 'så',
+  'den', 'det', 'är', 'och', 'att', 'i', 'en', 'jag', 'hon', 'som', 'han', 'på', 'den', 'med', 'var', 'sig', 'för', 'så',
   'var', 'vart', 'vem', 'vilken', 'vilka', 'åt', 'heller', 'eller', 'när', 'in', 'inne', 'up', 'uppe', 'ner', 'nere',
   'här', 'där', 'var', 'dit', 'där', 'ditt', 'mitt', 'sitt', 'vårt', 'vem', 'vad', 'vilken', 'vilket', 'vilka', 'någon',
   'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många', 'mycket', 'lite', 'få', 'färre',
   'flera', 'mest', 'minst', 'någon', 'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många'
-  ]
+]
 
 function groupAndArrangeResults(items) {
-    const spl = ['jokes', 'idioms', 'sayings', 'metaphors', 'book-extracts', 'snippets']
-    const gpBySpl = _.groupBy(items, it => spl.includes(it.source) ? it.source : 'other')
-    items = gpBySpl['other'] || []
-    const mediaFileNames = window.allMediaFileNames || []
-    // So that at least one item for each type (e.g. idiom, joke etc.) is included
-    let grouped = _.groupBy(items, it => { let c = categories[it.url]; c = c || ''; c = c.trim(); return  spl.includes(it.source) ? it.source : c})
-    grouped = _.zip(...Object.values(grouped));
-    grouped = _.sortBy(grouped, it => it.filter(it => it).length).reverse()
-    items = grouped.flat().filter(it => it)
-    items = items.toSorted((x, y) => {
-      if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
-    })
-    return [randomFromArray(gpBySpl['jokes'] || [])].concat(items).filter(it => it)
+  const gpBySpl = _.groupBy(items, it => specialLinks.includes(it.source) ? it.source : 'other')
+  items = gpBySpl['other'] || []
+  const mediaFileNames = window.allMediaFileNames || []
+  // So that at least one item for each type (e.g. idiom, joke etc.) is included
+  let grouped = _.groupBy(items, it => {
+    let c = categories[it.url];
+    c = c || '';
+    c = c.trim();
+    return specialLinks.includes(it.source) ? it.source : c
+  })
+  grouped = _.zip(...Object.values(grouped));
+  grouped = _.sortBy(grouped, it => it.filter(it => it).length).reverse()
+  items = grouped.flat().filter(it => it)
+  items = items.toSorted((x, y) => {
+    if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
+  })
+  return [randomFromArray(gpBySpl['jokes'] || [])].concat(items).filter(it => it)
 }
 
 function populateSRTFindings(wordToItemsMap, $result) {
@@ -2080,16 +2095,16 @@ function populateSRTFindings(wordToItemsMap, $result) {
 
   words.forEach(word => {
     let items = wordToItemsMap[word] || []
-    if(!items.length) {
-       const w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
-       if(w) items =  wordToItemsMap[w]
+    if (!items.length) {
+      const w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
+      if (w) items = wordToItemsMap[w]
     }
     let title = word
     if (word.trim().length !== word.length) {
       title = `"${word}"`
     }
 
-    const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '': 'no-result'}">${title}</h5></div>`)
+    const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}">${title}</h5></div>`)
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
     wordBlock.append(`<div style=""> Wiki: ${getWikiLinks(word)} 丨
@@ -2100,7 +2115,7 @@ function populateSRTFindings(wordToItemsMap, $result) {
     items = groupAndArrangeResults(items)
 
     const getEnTranslation = (item) => {
-      const d = window.searchResult.find(it => it.url === item.url)['sv_subs'].data[item.line.index-1]
+      const d = window.searchResult.find(it => it.url === item.url)['sv_subs'].data[item.line.index - 1]
       return d && d.text
     }
 
@@ -2112,7 +2127,7 @@ function populateSRTFindings(wordToItemsMap, $result) {
     }
 
     for (let i = 0; i < items.length; i++) {
-      if(rendered.length >= numberOfItemsToShow()) {
+      if (rendered.length >= numberOfItemsToShow()) {
         break;
       }
 
@@ -2120,8 +2135,8 @@ function populateSRTFindings(wordToItemsMap, $result) {
 
       const item = items[i];
 
-      if(i < remainingToRender && getSelectedLang() === 'en' && duplicateTranslation(item)) {
-          continue;
+      if (i < remainingToRender && getSelectedLang() === 'en' && duplicateTranslation(item)) {
+        continue;
       }
 
       const $fileBlock = $(`<div class="srt-file" title="${item['name']}">
@@ -2151,10 +2166,10 @@ Try Wiki ${getWikiLinks(search)}
 function combinedKeys(zEvent) {
   const keyStr = ["Control", "Shift", "Alt", "Meta"].includes(zEvent.key) ? "" : zEvent.key + "";
   return (zEvent.ctrlKey ? "Control " : "") +
-    (zEvent.shiftKey ? "Shift " : "") +
-    (zEvent.altKey ? "Alt " : "") +
-    (zEvent.metaKey ? "Meta " : "") +
-    keyStr
+      (zEvent.shiftKey ? "Shift " : "") +
+      (zEvent.altKey ? "Alt " : "") +
+      (zEvent.metaKey ? "Meta " : "") +
+      keyStr
 }
 
 function enablePasteForHashChange() {
@@ -2203,13 +2218,13 @@ function renderVocabularyFindings(search) {
   }
 
   const categories = Object.keys(window.vocabulary)
-    .filter(cat => window.vocabulary[cat].find(wordIsInVocabularyLine))
+      .filter(cat => window.vocabulary[cat].find(wordIsInVocabularyLine))
 
   const words = categories.map(it => window.vocabulary[it]).flat()
 
   const indexesOfAppearance = words.map((vocabLine, i) =>
-    wordIsInVocabularyLine(vocabLine) ? i : null)
-    .filter(it => it)
+      wordIsInVocabularyLine(vocabLine) ? i : null)
+      .filter(it => it)
 
   const vocab = $('#vocabularyResult')
   vocab.html('')
@@ -2219,7 +2234,7 @@ function renderVocabularyFindings(search) {
     getSurrounding(idx, words).forEach(it => {
       let txt = it.item
       const $line = $(`<div class="vocabulary-line"></div>`);
-      if(txt.trim().length) {
+      if (txt.trim().length) {
         $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;" onclick="selectSearchedWord(event)"></i>`)
       } else {
         txt = "------------------"
@@ -2252,7 +2267,7 @@ function render(searchResults, search, className) {
 
   if (window.unprocessedSearchText) {
     $result.append(`<p class="search-text-info">${
-      unprocessedSearchText.split(SEPARATOR_PIPE).map(it => getWikiLink(it)).join(" | ")
+        unprocessedSearchText.split(SEPARATOR_PIPE).map(it => getWikiLink(it)).join(" | ")
     }</p>`)
   }
 
@@ -2329,34 +2344,34 @@ function fetchFromDownloadedFiles(lookingFor) {
   lookingFor = expandWords(lookingFor)
 
   return Object.keys(window.allSubtitles)
-    .filter(it => window.allSubtitles[it].sv && window.allSubtitles[it].en)
-    .map(it => {
-      const svText = window.allSubtitles[it].sv;
-      const enText = window.allSubtitles[it].en;
+      .filter(it => window.allSubtitles[it].sv && window.allSubtitles[it].en)
+      .map(it => {
+        const svText = window.allSubtitles[it].sv;
+        const enText = window.allSubtitles[it].en;
 
-      const svMatch = svText && svText.match(new RegExp(lookingFor, "i"))
-      const enMatch = enText && enText.match(new RegExp(lookingFor, "i"))
-      if (svMatch || enMatch) {
-        return new SearchResult(
-          window.allSubtitles[it].source,
-          it,
-          getSubs(enText, it + ".en.srt", it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
-          getSubs(svText, it + getTargetLangSrtSuffix(), it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
-          !!enMatch,
-          !!svMatch,
-        )
-      }
-    }).filter(it => it);
+        const svMatch = svText && svText.match(new RegExp(lookingFor, "i"))
+        const enMatch = enText && enText.match(new RegExp(lookingFor, "i"))
+        if (svMatch || enMatch) {
+          return new SearchResult(
+              window.allSubtitles[it].source,
+              it,
+              getSubs(enText, it + ".en.srt", it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
+              getSubs(svText, it + getTargetLangSrtSuffix(), it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
+              !!enMatch,
+              !!svMatch,
+          )
+        }
+      }).filter(it => it);
 }
 
 function removeHintsInBrackets(txt) {
   const original = txt;
   txt = txt.replaceAll("(sl-pl)", "")
-    .replaceAll("(pl)", "")
-    .replaceAll(" (ngt) ", " .*")
-    .replaceAll(" (ngn) ", " .*")
-    .replaceAll(" (ngn)", " [^ ]*")
-    .replaceAll(" (ngt)", " [^ ]*")
+      .replaceAll("(pl)", "")
+      .replaceAll(" (ngt) ", " .*")
+      .replaceAll(" (ngn) ", " .*")
+      .replaceAll(" (ngn)", " [^ ]*")
+      .replaceAll(" (ngt)", " [^ ]*")
 
   const fn = () => {
     if (txt.indexOf("(") < 0) return
@@ -2423,11 +2438,11 @@ function _expandWords(txt) {
   }
 
   return terms
-    .filter(it => it.trim().length > 1)
-    .map(it => {
-      if (it.length < 3) return ` ${it} `
-      return it
-    }).join(SEPARATOR_PIPE)
+      .filter(it => it.trim().length > 1)
+      .map(it => {
+        if (it.length < 3) return ` ${it} `
+        return it
+      }).join(SEPARATOR_PIPE)
 }
 
 async function fetchSRTs(searchText) {
@@ -2530,7 +2545,7 @@ firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
 function loadYoutubeVideo(videoId) {
   const iframe = ytPlayer.getIframe()
-  $('#youtubePlayer').show()
+  $('#youtubePlayer').parent().show()
   $('#mediaRelatedContainer').show()
   return new Promise((resolve, reject) => {
     try {
@@ -2717,11 +2732,11 @@ if (isLocalhost()) {
 
   setInterval(() => {
     fetch("http://localhost:5000/vocabulary")
-      .then(it => it.json())
-      .then(it => {
-        window.vocabularyLines = it.text.split("\n")
-        window.vocabulary = parseVocabularyFile(it.text)
-      })
+        .then(it => it.json())
+        .then(it => {
+          window.vocabularyLines = it.text.split("\n")
+          window.vocabulary = parseVocabularyFile(it.text)
+        })
   }, 5000)
 }
 
@@ -2809,8 +2824,8 @@ function tests() {
 
   wordToItemsMap = getMatchingWords(testData, "bott")
   assert(wordToItemsMap["bott"].length === 2
-    && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("botten") >= 0)
-    && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("prefixedbott") >= 0), "There should be no duplicates")
+      && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("botten") >= 0)
+      && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("prefixedbott") >= 0), "There should be no duplicates")
 
   wordToItemsMap = getMatchingWords(testData, " i ")
   assert(wordToItemsMap[" i "].length === 1, "Small Words with spaces should be matched")
@@ -2819,8 +2834,8 @@ function tests() {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function playMediaSlice(url, start, end, source) {
-  if(source === 'YouTube') {
-    if(ytPlayer.getVideoUrl().indexOf(url) < 0) {
+  if (source === 'YouTube') {
+    if (ytPlayer.getVideoUrl().indexOf(url) < 0) {
       window.mediaSelected = {link: url, source: 'link'}
       window.playingYoutubeVideo = true
       await changeMediaIfNeededTo(window.mediaSelected)
