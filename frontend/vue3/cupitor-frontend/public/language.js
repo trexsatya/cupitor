@@ -90,7 +90,11 @@ async function loadBookExtracts() {
 }
 
 async function loadSnippets() {
-  let response = await fetch(`https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/14`)
+  const articleIds = {
+    'sv': 14,
+    'es': 23
+  }
+  let response = await fetch(`https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/${articleIds[getLangFromUrl().code]}`)
   //let response = await fetch("http://localhost:5000/static?name=1.html")
   response = await response.json()
   response = await response.content
