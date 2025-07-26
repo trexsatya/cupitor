@@ -448,7 +448,7 @@ const displayMessage = function (message, isError) {
 const ontimeupdate = e => {
   updatePlayBtn()
 
-  if (isNotPlaying()) {
+  if (isNotPlaying() || !window.syncSubtitle) {
     return
   }
   // console.log(currentSub, player.currentTime)
@@ -612,6 +612,7 @@ $('document').ready(e => {
     if (link) {
       window.location.hash = link
       window.mediaSelected = {link: link, source: 'link'}
+      window.syncSubtitle = true
       playNewMedia(link, 'link')
     } else {
       removeHash()
@@ -2838,6 +2839,7 @@ async function playMediaSlice(url, start, end, source) {
     if (ytPlayer.getVideoUrl().indexOf(url) < 0) {
       window.mediaSelected = {link: url, source: 'link'}
       window.playingYoutubeVideo = true
+      window.syncSubtitle = false
       await changeMediaIfNeededTo(window.mediaSelected)
     }
     await seekToYoutubeTime(start)
