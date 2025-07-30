@@ -4,6 +4,10 @@ Array.prototype.max = function () {
 Array.prototype.last = function () {
   return _.last(this)
 };
+function isDesktop() {
+  const ww = $(window).width()
+  return ww >= 1000
+}
 
 const SEPARATOR_PIPE = '|'
 window.onbeforeunload = function (event) {
@@ -1986,26 +1990,32 @@ function renderLines(id, url) {
 
 `
 
-  let mainSubText = ''
-  let secondarySubText = ''
+  let subForLines = ''
+  const mainSubPanel = $('<div>')
+  const secondarySubPanel = $('<div>')
+
+
   range(fromLineIndex, toLineIndex - fromLineIndex + 1).forEach(idx => {
     const sub = getSub(idx)
     const {mainSub, secondarySub} = getMainSubAndSecondarySub(subtitleFile, ({...sub}));
-    mainSubText += ` ${mainSub.text}`
-    if (secondarySub) {
-      secondarySubText += ` ${secondarySub.text}`
+    const lineMain = `<div class="line main-line" >${mainSub.text}</div>`;
+    subForLines += lineMain
+    mainSubPanel.append(lineMain)
+    if (secondarySub && secondarySub.text) {
+      const lineSec = `<div class="line secondary-line" >${secondarySub.text}</div>`;
+      subForLines += lineSec
+      secondarySubPanel.append(lineSec)
     }
   })
 
-  html += `
-        <br>
-        <span class="line main-line" > ${mainSubText} </span> <br>
-        <span class="line secondary-line" > ${secondarySubText} </span>
-        `
+  if (isDesktop()) {
+    subForLines = `<div style="display: flex; margin-top: 5px;">
+                      <div style="border-right: 2px solid #000; padding-right: 5px; margin-right: 5px;">${mainSubPanel.html()}</div>
+                      <div>${secondarySubPanel.html()}</div>
+                    </div>`
+  }
 
-  html += `
-           <br>
-  `
+  html += `${subForLines}<br>`
 
   $container.html(html)
 
@@ -2558,11 +2568,6 @@ function loadYoutubeVideo(videoId) {
       reject(e)
     }
   })
-}
-
-function isDesktop() {
-  const ww = $(window).width()
-  return ww >= 1000
 }
 
 function getDimensionsForPlayer() {
