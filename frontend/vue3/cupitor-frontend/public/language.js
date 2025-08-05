@@ -4,6 +4,7 @@ Array.prototype.max = function () {
 Array.prototype.last = function () {
   return _.last(this)
 };
+
 function isDesktop() {
   const ww = $(window).width()
   return ww >= 1000
@@ -593,6 +594,31 @@ function getTopOffsetForCollapseButton() {
   }
 }
 
+function updateToggleButton(button, newState) {
+  const targetView = $('#' + button.data('viewId'));
+
+  if (newState === 'expanded') {
+    button.find('svg[data-role="collapseUpSign"]').show()
+    button.find('svg[data-role="expandDownSign"]').hide()
+  } else {
+    button.find('svg[data-role="collapseUpSign"]').hide()
+    button.find('svg[data-role="expandDownSign"]').show()
+  }
+}
+
+function updateToggleButtonView(viewId) {
+  const $button = $(`button[data-view-id="${viewId}"]`)
+  let newState = ''
+  if($('#' + viewId).is(':hidden')) {
+    newState = 'collapsed'
+    $button.data('toggleState', newState);
+  } else {
+    newState = 'expanded'
+    $button.data('toggleState', newState);
+  }
+  updateToggleButton($button, newState)
+}
+
 $('document').ready(e => {
   document.addEventListener('long-press', function (e) {
     if ($(e.target).hasClass("link")) {
@@ -650,7 +676,7 @@ $('document').ready(e => {
     console.error(e)
   }
 
-  $('#speed-control').change(e => {
+  $('#speed-control input').checkboxradio().change(e => {
     setSpeed()
   })
 
@@ -699,17 +725,18 @@ $('document').ready(e => {
     }
   });
 
-  $('#collapseMainControl').click(e => {
-    $('#mainControlInputs').toggle();
-
-    const $collapseUpSign = $('#collapseUpSign');
-    $collapseUpSign.toggle()
-    $('#collapseDownSign').toggle()
-    if (!$collapseUpSign.is(':visible') && window.mediaBeingPlayed) {
-      $('#resultContainer').hide()
+  $('button[data-toggle-state]').click(e => {
+    const button = $(e.target).is('button') ? $(e.target) : $(e.target).parents('button').first();
+    const targetView = $('#' + button.data('viewId'));
+    const state = button.data('toggleState');
+    const newState = state === 'expanded' ? 'collapsed' : 'expanded';
+    button.data('toggleState', newState);
+    if (newState === 'expanded') {
+      targetView.show()
     } else {
-      $('#resultContainer').show()
+      targetView.hide()
     }
+    updateToggleButton(button, newState);
   })
 
   fixMobileView()
@@ -1363,7 +1390,7 @@ function showVideoPlayer() {
     left: ytVideoWidth,
     marginLeft: '1em',
     width: subWidth,
-    maxHeight: '300px',
+    maxHeight: '85%',
     overflow: 'scroll',
     paddingRight: '1em'
   })
@@ -1371,20 +1398,48 @@ function showVideoPlayer() {
 
 function showOnlySubtitle() {
   stopMedia()
-  $('#youtubePlayer').parent().hide()
+  hideMediaContainer()
   $('#localVideoContainer').hide()
   $('#localMediaContainer').hide()
   window.playingYoutubeVideo = false;
   window.playingVideo = false;
   window.playingAudio = false;
-  $('#playerControls').hide()
   $('#subControls').show()
-
-  $('#mediaRelatedContainer').css({minHeight: 530})
 }
 
 function togglePlayerControls() {
-   $('#playerControls').toggle()
+  $('#playerControls').toggle()
+}
+
+
+
+function showResultContainer() {
+  $('#resultContainer').show();
+  updateToggleButtonView('resultContainer')
+}
+function hideResultContainer() {
+  $('#resultContainer').hide()
+  updateToggleButtonView('resultContainer')
+}
+
+function showMediaRelatedContainer() {
+  $('#mediaRelatedContainer').show()
+  updateToggleButtonView('mediaRelatedContainer')
+}
+
+function hideMediaRelatedContainer() {
+  $('#mediaRelatedContainer').hide()
+  updateToggleButtonView('mediaRelatedContainer')
+}
+
+function showMediaContainer() {
+  $('#mediaContainer').show()
+  updateToggleButtonView('mediaContainer')
+}
+
+function hideMediaContainer() {
+  $('#mediaContainer').hide()
+  updateToggleButtonView('mediaContainer')
 }
 
 async function playNewMedia(link, source, mediaFile) {
@@ -1395,13 +1450,13 @@ async function playNewMedia(link, source, mediaFile) {
 
   function _playMedia() {
     if (source === 'link') {
-      $('#youtubePlayer').parent().show()
+      showMediaContainer()
       $('#localVideoContainer').hide()
-      $('#mediaRelatedContainer').show()
+      showMediaRelatedContainer()
       loadYoutubeVideo(link)
       window.playingYoutubeVideo = true;
     } else if (source === 'local') {
-      $('#youtubePlayer').parent().hide()
+      hideMediaContainer()
       $('#localVideoContainer').show()
       window.playingYoutubeVideo = false;
       if (mediaFile.name.endsWith(".mp3") || mediaFile.name.endsWith(".wav")) {
@@ -1421,17 +1476,16 @@ async function playNewMedia(link, source, mediaFile) {
       }
     }
     window.mediaBeingPlayed = {link, source}
-    $('#playerControls').show()
-    $('#subControls').hide()
+    //$('#subControls').hide()
   }
 
-  $('#resultContainer').hide()
+  hideResultContainer();
   if ($('#onlySubsCheckbox').is(':checked') || specialLinks.includes(link)) {
     showOnlySubtitle();
   } else {
     _playMedia();
+    showMediaRelatedContainer()
   }
-  $('#mediaRelatedContainer').show()
 
   const {sv, en} = await getSubtitlesForLink(link, source)
   loadSubtitlesForLink(sv, en);
@@ -1506,7 +1560,7 @@ window.onload = e => {
 }
 
 function setSpeed() {
-  let newRate = $('.controlgroup input:checked').data('speed');
+  let newRate = $("#speed-control input[type='radio']:checked").data('speed')
   newRate = parseFloat(newRate);
 
   if (window.playingYoutubeVideo) {
@@ -1922,8 +1976,12 @@ const changeIndices = (id, from, to) => {
   $('#' + id).data({fromIndex: from, toIndex: to})
 }
 
+function collapseSubLines(el) {
+  $(el).parents('.lines-cntnr').find('.sub-lines-cntnr').slideToggle('slow')
+}
+
 function renderLines(id, url) {
-  const $container = $('#' + id);
+  const $container = $('#' + id).addClass('lines-cntnr');
   let fromLineIndex = parseInt($container.data('fromIndex'))
   let toLineIndex = parseInt($container.data('toIndex'))
 
@@ -1978,6 +2036,7 @@ function renderLines(id, url) {
   <span class="remove-next-btn btn" onclick="changeIndices('${id}', ${fromLineIndex + 1}, ${toLineIndex}); renderLines('${id}', '${url}')"> - </span>
 
   <span class="play-btn-container" style="text-align: center;" data-id="${id}" data-url="${url}" data-time-start="${time_start}" data-time-end="${time_end}">
+     <span class="info btn" onclick="collapseSubLines(this)"> 🗖 </span>
      <span class="info">${subtitleFile.source}</span>
      ${infoButton()}
      ${playMediaBtn}
@@ -2009,10 +2068,12 @@ function renderLines(id, url) {
   })
 
   if (isDesktop()) {
-    subForLines = `<div style="display: flex; margin-top: 5px;">
+    subForLines = `<div style="display: flex; margin-top: 5px;" class="sub-lines-cntnr">
                       <div style="border-right: 2px solid #000; padding-right: 5px; margin-right: 5px;">${mainSubPanel.html()}</div>
                       <div>${secondarySubPanel.html()}</div>
                     </div>`
+  } else {
+    subForLines = `<div class="sub-lines-cntnr"> ${subForLines} </div>`
   }
 
   html += `${subForLines}<br>`
@@ -2020,7 +2081,7 @@ function renderLines(id, url) {
   $container.html(html)
 
   if (!isDesktop()) {
-    $('.play-btn-container').css({marginLeft: '22%'})
+    $('.play-btn-container').css({marginLeft: '3%'})
   }
 }
 
@@ -2269,7 +2330,8 @@ function render(searchResults, search, className) {
   if (!searchResults) return {}
 
   const $result = $('#result');
-  $result.html('').show()
+  $result.html('')
+
   if (className === "secondary") {
     $result.css({backgroundColor: '#e3cece'})
   } else {
@@ -2326,12 +2388,8 @@ function render(searchResults, search, className) {
     playSelectedText(e);
   })
 
-  $('#resultContainer').show();
-  const $collapseDownSign = $('#collapseDownSign');
-  if ($collapseDownSign.is(':visible')) {
-    $collapseDownSign.hide();
-    $('#collapseUpSign').show();
-  }
+  showResultContainer();
+
   // return Object.assign({}, wordToItemsMap, wordToItemsMapNonSrt);
   return wordToItemsMap;
 } // end render
@@ -2556,13 +2614,16 @@ firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
 
 function loadYoutubeVideo(videoId) {
   const iframe = ytPlayer.getIframe()
-  $('#youtubePlayer').parent().show()
-  $('#mediaRelatedContainer').show()
+  showMediaContainer()
+  showMediaRelatedContainer()
   return new Promise((resolve, reject) => {
     try {
       const currentVideoId = iframe.src.split("embed/")[1].split("?")[0]
       iframe.src = `${iframe.src}`.replaceAll(currentVideoId, videoId)
-      iframe.onload = resolve()
+      iframe.onload = () => {
+        setSpeed();
+        resolve()
+      }
     } catch (e) {
       console.log(e)
       reject(e)
@@ -2611,7 +2672,7 @@ function onYouTubeIframeAPIReady() {
     left: ytVideoWidth,
     marginLeft: '1em',
     width: subWidth,
-    maxHeight: '300px',
+    maxHeight: '85%',
     overflow: 'scroll',
     paddingRight: '1em'
   })
@@ -2837,10 +2898,11 @@ function tests() {
   assert(wordToItemsMap[" i "].length === 1, "Small Words with spaces should be matched")
 }
 
-
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function playMediaSlice(url, start, end, source) {
   if (source === 'YouTube') {
+    showMediaContainer()
+    showMediaRelatedContainer();
     if (ytPlayer.getVideoUrl().indexOf(url) < 0) {
       window.mediaSelected = {link: url, source: 'link'}
       window.playingYoutubeVideo = true
