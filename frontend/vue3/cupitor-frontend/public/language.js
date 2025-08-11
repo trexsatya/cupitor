@@ -138,6 +138,13 @@ async function loadIdioms() {
   _populateData(window.idioms, response)
 }
 
+async function loadPoems() {
+    let response = await fetch(`${getResourceUrl()}/poems/1.txt`)
+    response = await response.text()
+    window.poems = []
+    _populateData(window.poems, response)
+}
+
 function togglePlay(el) {
   if (window.playingYoutubeVideo) {
     if (ytPlayer.getPlayerState() === 2) {
@@ -1127,6 +1134,9 @@ async function loadAllSubtitles() {
 
   await loadIdioms()
   loadAsSubtitles(window.idioms, 'idioms')
+
+    await loadPoems()
+    loadAsSubtitles(window.poems, 'poems')
 
   populateAllLinks();
 
