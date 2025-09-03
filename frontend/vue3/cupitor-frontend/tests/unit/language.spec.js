@@ -38,7 +38,7 @@ describe('expandWords', () => {
   })
 
   it('expands words using conjugateTableSpanish for Spanish', () => {
-    const result = expandWords('det <*gå')
+    const result = expandWords('det <*gå', 'es')
     expect(conjugateTableSpanishStub.calledOnce).to.be.true;
   })
 
