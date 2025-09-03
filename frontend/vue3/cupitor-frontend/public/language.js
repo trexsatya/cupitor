@@ -2529,13 +2529,13 @@ function _expandWords(txt, lang) {
   const fn = () => {
     const w = terms.shift()
     if (!w) return
-    const match = w.match(/<\*(?:\(([^)]+)\))?([^\s>]*) .*/)
+    const match = w.match(/<\*(?:\{([^)]+)\})?([^\s>]*) .*/)
     if (match && match.length === 3) {
       const ref = match[1]
       const wordToExpand = match[2]
       let expandedWords = [];
       if(lang === 'es') {
-        expandedWords = conjugateTableSpanish(wordToExpand).flat()
+        expandedWords = conjugateTableSpanish(wordToExpand, ref).flat()
       } else {
         expandedWords = expansions[wordToExpand] || [wordToExpand]
       }
@@ -2550,7 +2550,7 @@ function _expandWords(txt, lang) {
     fn()
   }
 
-  return terms
+  return _.uniq(terms)
       .filter(it => it.trim().length > 1)
       .map(it => {
         if (it.length < 3) return ` ${it} `
