@@ -14,13 +14,14 @@ function makeLinksOpenInNewTab() {
 function renderAccordions() {
   console.log('Rendering accordions')
 
-  let isAccordion = it => Array.from(it.classList.values()).indexOf('accordion') >= 0
+  const isAccordion = it => Array.from(it.classList.values()).indexOf('accordion') >= 0;
+  let isAccordionEnd = it => Array.from(it.classList.values()).indexOf('accordion-end') >= 0
 
   function fixAccordionPanel(accordionEl) {
     var el = accordionEl.nextElementSibling
     var siblings = []
     while(el) {
-      if(isAccordion(el)) break
+      if(isAccordion(el) || isAccordionEnd(el)) break
 
       siblings.push(el)
       el = el.nextElementSibling

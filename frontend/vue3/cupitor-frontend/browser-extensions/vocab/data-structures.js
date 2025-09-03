@@ -519,8 +519,8 @@ function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowConditio
   fn(0, 0);
 }
 
-let debugLog = (...arguments) => {
+let debugLog = (...args) => {
   if(window.DEBUG) {
-    console.log(arguments)
+    console.log(args)
   }
 }

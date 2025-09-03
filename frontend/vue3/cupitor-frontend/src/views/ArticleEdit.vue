@@ -83,6 +83,7 @@ export default class ArticleEditView extends Vue {
       window.CKEDITOR.replace('editor', {
         entities: true,
         extraPlugins: 'mathematica,codesnippet,title',
+        contentsCss: [ '/vendor/ckeditor/contents.css'],
         allowedContent: true,
       });
 

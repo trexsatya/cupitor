@@ -43,7 +43,7 @@ function waitUntil(condition) {
   })
 }
 
-function computeIfAbsent(map, key, fn) {
+export function computeIfAbsent(map, key, fn) {
   if (!map[key]) {
     map[key] = fn()
   }
@@ -223,7 +223,7 @@ const parseRangeInput = (measures) => {
   return Array.from(new Set(ret)).sort((a, b) => a - b)
 }
 
-generatePairs = (arr) => {
+let generatePairs = (arr) => {
   const v = []
   const num = arr.length
   for (let i = 0; i < num; i++) {
@@ -585,13 +585,6 @@ function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowConditio
     }
   }, x);
   fn(0, 0);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const debugLog = (...arguments) => {
-  if (window.DEBUG) {
-    console.log(arguments)
-  }
 }
 
 function closest(num, arr) {
