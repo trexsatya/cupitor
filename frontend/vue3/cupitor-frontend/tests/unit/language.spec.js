@@ -10,7 +10,6 @@ beforeAll(() => {
   sinon.stub(window, 'alert').callsFake(() => {});
   global.conjugateTableSpanish = conjugateTableSpanish
   global.computeIfAbsent = computeIfAbsent
-  conjugateTableSpanishStub = sinon.stub(global, 'conjugateTableSpanish').returns([]);
 });
 
 describe('expandWords', () => {
@@ -38,8 +37,8 @@ describe('expandWords', () => {
   })
 
   it('expands words using conjugateTableSpanish for Spanish', () => {
-    const result = expandWords('det <*gå', 'es')
-    expect(conjugateTableSpanishStub.calledOnce).to.be.true;
+    const result = expandWords('tu <*entender mi', 'es')
+    expect(result).contains('entiende')
   })
 
   it('returns original if expansion not found', () => {
@@ -51,6 +50,10 @@ describe('expandWords', () => {
     const result = expandWords('A <*run fast|B <*run slow')
 
   })
+})
+
+describe('conjugateTableSpanish', () => {
+
 })
 
 afterAll(() => {
