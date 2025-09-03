@@ -1,12 +1,14 @@
-let $, alert, _;
+let $, alert, _, fetch;
 if (typeof window !== 'undefined' && window.$) {
   $ = window.$; // Use global jQuery in HTML
   alert = window.alert;
   _ = window._;
+  fetch = window.fetch;
 } else {
   $ = require('jquery'); // Use jQuery from npm in Node.js/testing
   alert = () => {};
   _ = require('lodash');
+  fetch = require('node-fetch');
 }
 
 
