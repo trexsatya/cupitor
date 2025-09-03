@@ -1,3 +1,15 @@
+let $, alert, _;
+if (typeof window !== 'undefined' && window.$) {
+  $ = window.$; // Use global jQuery in HTML
+  alert = window.alert;
+  _ = window._;
+} else {
+  $ = require('jquery'); // Use jQuery from npm in Node.js/testing
+  alert = () => {};
+  _ = require('lodash');
+}
+
+
 Array.prototype.max = function () {
   return Math.max.apply(null, this);
 };
@@ -94,17 +106,28 @@ async function loadBookExtracts() {
   window.bookExtracts = response
 }
 
+async function loadFromArticle(articleIds) {
+  let response = await fetch(`https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/${articleIds[getLangFromUrl().code]}`)
+  //let response = await fetch("http://localhost:5000/static?name=1.html")
+  response = await response.json()
+  response = await response.content
+  return response.split("---------------").map(it => it.trim()).filter(it => it.length > 20)
+}
+
 async function loadSnippets() {
   const articleIds = {
     'sv': 14,
     'es': 23
   }
-  let response = await fetch(`https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/${articleIds[getLangFromUrl().code]}`)
-  //let response = await fetch("http://localhost:5000/static?name=1.html")
-  response = await response.json()
-  response = await response.content
-  response = response.split("---------------").map(it => it.trim()).filter(it => it.length > 20)
-  window.snippets = response
+  window.snippets = await loadFromArticle(articleIds)
+}
+
+async function loadPoems() {
+  const articleIds = {
+    'sv': 141,
+    'es': 76
+  }
+  window.poems = await loadFromArticle(articleIds)
 }
 
 function _populateData(where, response) {
@@ -136,13 +159,6 @@ async function loadIdioms() {
   response = await response.text()
   window.idioms = []
   _populateData(window.idioms, response)
-}
-
-async function loadPoems() {
-    let response = await fetch(`${getResourceUrl()}/poems/1.txt`)
-    response = await response.text()
-    window.poems = []
-    _populateData(window.poems, response)
 }
 
 function togglePlay(el) {
@@ -411,7 +427,7 @@ async function searchedWordSelected() {
   }
   // $('#searchText').val($('#searchedWords').val()).trigger('change')
   window.unprocessedSearchText = $('#searchedWords').val()
-  window.searchText = expandWords(window.unprocessedSearchText)
+  window.searchText = expandWords(window.unprocessedSearchText, getLangFromUrl().code)
   await doSearch(window.searchText, null)
 }
 
@@ -616,7 +632,7 @@ function updateToggleButton(button, newState) {
 function updateToggleButtonView(viewId) {
   const $button = $(`button[data-view-id="${viewId}"]`)
   let newState = ''
-  if($('#' + viewId).is(':hidden')) {
+  if ($('#' + viewId).is(':hidden')) {
     newState = 'collapsed'
     $button.data('toggleState', newState);
   } else {
@@ -938,6 +954,7 @@ const renderSubtitles = () => {
     $('#en-sub').html(currentSub.en)
     $('#currentTime').html(currentSub.index)
   }
+  renderAccordions($('#sv-sub')[0])
   lastSub = currentSub
 }
 
@@ -1092,6 +1109,7 @@ function populateAllLinks() {
 
   getOptgroup('Uncategorized').append($(`<option>JOKES</option>`).attr('value', 'jokes'))
   getOptgroup('Uncategorized').append($(`<option>Snippets</option>`).attr('value', 'snippets'))
+  getOptgroup('Uncategorized').append($(`<option>Poems</option>`).attr('value', 'poems'))
 
   Object.values(ogs).forEach(it => $mp3Choice.append(it))
   return srts;
@@ -1135,8 +1153,8 @@ async function loadAllSubtitles() {
   await loadIdioms()
   loadAsSubtitles(window.idioms, 'idioms')
 
-    await loadPoems()
-    loadAsSubtitles(window.poems, 'poems')
+  await loadPoems()
+  loadAsSubtitles(window.poems, 'poems')
 
   populateAllLinks();
 
@@ -1422,11 +1440,11 @@ function togglePlayerControls() {
 }
 
 
-
 function showResultContainer() {
   $('#resultContainer').show();
   updateToggleButtonView('resultContainer')
 }
+
 function hideResultContainer() {
   $('#resultContainer').hide()
   updateToggleButtonView('resultContainer')
@@ -1492,9 +1510,18 @@ async function playNewMedia(link, source, mediaFile) {
   hideResultContainer();
   if ($('#onlySubsCheckbox').is(':checked') || specialLinks.includes(link)) {
     showOnlySubtitle();
+    if (specialLinks.includes(link)) {
+      $('#sv-sub-mirror').hide()
+      $('#toggleEnSubBtn').hide()
+    } else {
+      $('#sv-sub-mirror').show()
+      $('#toggleEnSubBtn').show()
+    }
   } else {
     _playMedia();
     showMediaRelatedContainer()
+    $('#sv-sub-mirror').show()
+    $('#toggleEnSubBtn').show()
   }
 
   const {sv, en} = await getSubtitlesForLink(link, source)
@@ -1504,7 +1531,6 @@ async function playNewMedia(link, source, mediaFile) {
 
   loadStarredLines(link, source)
 
-  $('#toggleEnSubBtn').show()
   $('#toggleSearchBtn').show()
 }
 
@@ -2443,7 +2469,7 @@ function fetchFromDownloadedFiles(lookingFor) {
       }).filter(it => it);
 }
 
-function removeHintsInBrackets(txt) {
+export function removeHintsInBrackets(txt) {
   const original = txt;
   txt = txt.replaceAll("(sl-pl)", "")
       .replaceAll("(pl)", "")
@@ -2479,11 +2505,11 @@ function removeHintsInBrackets(txt) {
  * @returns{string} expanded text
  * @param{string} txt
  */
-function expandWords(txt) {
+export function expandWords(txt, lang='sv') {
   txt = getSearchedTerms(txt).join(SEPARATOR_PIPE)
   const startTime = new Date().getTime()
 
-  const t = _expandWords(txt)
+  const t = _expandWords(txt, lang)
   if (!t || t.trim() === '') { //Fallback
     return txt.replaceAll("<*", "")
   }
@@ -2491,7 +2517,7 @@ function expandWords(txt) {
   return t
 }
 
-function _expandWords(txt) {
+function _expandWords(txt, lang) {
   if (txt.indexOf("<*") < 0) {
     return removeHintsInBrackets(txt)
   }
@@ -2499,12 +2525,18 @@ function _expandWords(txt) {
   const expansions = getExpansionForWords()
   const terms = txt.split(SEPARATOR_PIPE).map(it => _.includes(it, "<*") && !it.endsWith(" ") ? it + " " : it)
   const fn = () => {
-    w = terms.shift()
+    const w = terms.shift()
     if (!w) return
-    const match = w.match(/.*\<\*([^ ]+) .*/)
-    if (match && match.length === 2) {
-      const wordToExpand = match[1]
-      const expandedWords = expansions[wordToExpand] || [wordToExpand]
+    const match = w.match(/<\*(?:\(([^)]+)\))?([^\s>]*) .*/)
+    if (match && match.length === 3) {
+      const ref = match[1]
+      const wordToExpand = match[2]
+      let expandedWords = [];
+      if(lang === 'es') {
+        expandedWords = conjugateTableSpanish(wordToExpand).flat()
+      } else {
+        expandedWords = expansions[wordToExpand] || [wordToExpand]
+      }
       expandedWords.forEach(it => terms.push(w.replace("<*" + wordToExpand, it)))
     } else if (w.indexOf("<*") < 0) {
       terms.push(w)
@@ -2565,12 +2597,16 @@ function renderAccordions(el) {
   console.log('Rendering accordions')
   el = el || document
   const isAccordion = it => Array.from(it.classList.values()).indexOf('accordion') >= 0
+  const isAccordionEnd = it => Array.from(it.classList.values()).indexOf('accordion-end') >= 0
 
   function fixAccordionPanel(accordionEl) {
+    if (accordionEl.hasAttribute("accordion-rendered")) {
+      return
+    }
     let el = accordionEl.nextElementSibling
     const siblings = []
     while (el) {
-      if (isAccordion(el)) break
+      if (isAccordion(el) || isAccordionEnd(el)) break
 
       siblings.push(el)
       el = el.nextElementSibling
@@ -2583,9 +2619,15 @@ function renderAccordions(el) {
 
       accordionEl.insertAdjacentElement('afterend', newEl)
     }
+    accordionEl.setAttribute('accordion-rendered', 'true')
   }
 
-  const acc = el.getElementsByClassName("l-accordion");
+  $(el).find('td').each((i, e) => $(e).css({verticalAlign: 'top'}))
+
+  let acc = el.getElementsByClassName("l-accordion");
+  if (acc.length === 0) {
+    acc = el.getElementsByClassName("accordion");
+  }
   let i;
 
   for (i = 0; i < acc.length; i++) {
@@ -2617,7 +2659,7 @@ const tag = document.createElement('script');
 
 tag.src = "https://www.youtube.com/iframe_api";
 const firstScriptTag = document.getElementsByTagName('script')[0];
-firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 
 // 3. This function creates an <iframe> (and YouTube player)
 //    after the API code downloads.
@@ -2881,33 +2923,6 @@ function test_data() {
   return [svSubs1, svSubs2];
 }
 
-function tests() {
-  const testData = test_data();
-
-  let wordToItemsMap = getMatchingWords(testData, "grund och botten")
-  log(wordToItemsMap["grund och botten"])
-  assert(wordToItemsMap["grund och botten"].length === 3, "Words with spaces should be matched")
-
-  wordToItemsMap = getMatchingWords(testData, "grund ")
-  log(wordToItemsMap["grund"], wordToItemsMap["grund "])
-  assert(wordToItemsMap["grund"].length === 3, "Words ending with spaces should be matched")
-
-  // wordToItemsMap = getMatchingWords(testData, "*ngn var inne på")
-  // log(wordToItemsMap)
-  // assert(wordToItemsMap["*ngn var inne på"].length === 2, "Words with special regex should be matched")
-
-  wordToItemsMap = getMatchingWords(testData, "grund .* botten")
-  assert(wordToItemsMap["grund och botten"].length === 3, "Search by regex should be matched")
-
-  wordToItemsMap = getMatchingWords(testData, "bott")
-  assert(wordToItemsMap["bott"].length === 2
-      && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("botten") >= 0)
-      && !wordToItemsMap["bott"].some(it => it.line.text.indexOf("prefixedbott") >= 0), "There should be no duplicates")
-
-  wordToItemsMap = getMatchingWords(testData, " i ")
-  assert(wordToItemsMap[" i "].length === 1, "Small Words with spaces should be matched")
-}
-
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function playMediaSlice(url, start, end, source) {
   if (source === 'YouTube') {
@@ -2938,10 +2953,4 @@ async function playMediaSlice(url, start, end, source) {
   await a.play()
 }
 
-try {
-  tests()
-} catch (e) {
-  alert("Error in tests: " + e)
-  console.log(e)
-}
 
