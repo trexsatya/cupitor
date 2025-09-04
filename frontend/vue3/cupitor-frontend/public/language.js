@@ -1,3 +1,6 @@
+import { schedule, computeIfAbsent, randomFromArray, uuid, range } from './data-structures.js';
+import {conjugateTableSpanish} from './spanish.js';
+
 let $, alert, _, fetch;
 if (typeof window !== 'undefined' && window.$) {
   $ = window.$; // Use global jQuery in HTML
@@ -204,7 +207,8 @@ function createOptionElement(searchTerms, selected = false) {
     searchTerms = displayText
     isSeparator = true
   }
-  const op = new Option(`${displayText}`, searchTerms, false, selected)
+  const optValue = JSON.stringify({o: searchTerms, e: expandWords(searchTerms, getLangFromUrl().code) })
+  const op = new Option(`${displayText}`, optValue, false, selected)
   if (isSeparator) {
     op.disabled = true
   }
@@ -258,16 +262,16 @@ function loadWholeVocabulary() {
     vocabCategoriesToPopulate.add(it[0])
   })
 
-  const populateLines = it => {
-    const vocabLines = window.vocabulary[it]
-    const heading = new Option(`${it}`, it, false, false)
+  const populateLines = category => {
+    const vocabLines = window.vocabulary[category]
+    const heading = new Option(`${category}`, category, false, false)
     heading.disabled = true
     $('#searchedWords').append(heading)
     vocabLines.forEach(line => {
       $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
     })
   };
-  schedule(Array.from(vocabCategoriesToPopulate), .1, it => {
+  schedule(Array.from(vocabCategoriesToPopulate), .5, it => {
     populateLines(it)
   })
 }
@@ -374,9 +378,11 @@ async function doSearch(searchThis, el) {
   }
 }
 
-async function searchTextChanged(e) {
+const $searchText1 = $('#searchText');
+
+export async function searchTextChanged() {
   const el = $('#searchedWords')
-  const w = $('#searchText').val()
+  const w = $searchText1.val()
   window.unprocessedSearchText = null
   await doSearch(this, el);
 }
@@ -410,7 +416,7 @@ function populateVocabularyHeadings(target) {
 async function fetchVocabulary() {
   let res;
   if (isLocalhost()) {
-    res = await fetch("http://localhost:5000/vocabulary")
+    res = await fetch("http://localhost:5000/vocabulary?lang=" + getLangFromUrl().fullName)
     res = await res.json()
     if (res) res = res.text
   } else {
@@ -422,14 +428,15 @@ async function fetchVocabulary() {
   loadWholeVocabulary()
 }
 
-async function searchedWordSelected() {
+async function vocabularyLineSelected() {
   if (window.searchedWordsSelectedProgrammatically) {
     window.searchedWordsSelectedProgrammatically = false;
     return
   }
   // $('#searchText').val($('#searchedWords').val()).trigger('change')
-  window.unprocessedSearchText = $('#searchedWords').val()
-  window.searchText = expandWords(window.unprocessedSearchText, getLangFromUrl().code)
+  const vocabOptionVal = JSON.parse($('#searchedWords').val());
+  window.unprocessedSearchText = vocabOptionVal.o
+  window.searchText = vocabOptionVal.e //expandWords(window.unprocessedSearchText, getLangFromUrl().code)
   await doSearch(window.searchText, null)
 }
 
@@ -662,6 +669,14 @@ $('document').ready(e => {
     }
   });
 
+  $searchText1.change(function (e) {
+    searchTextChanged(e).then(r => {})
+  })
+
+  $('#searchedWords').change(e => {
+    vocabularyLineSelected()
+  })
+
   $('#mp3Choice').change(async e => {
     const link = $('#mp3Choice').val();
     if (link) {
@@ -743,7 +758,7 @@ $('document').ready(e => {
     window.videoPlayer = $('#localVideo')[0]
   }
 
-  const $searchText = $('#searchText');
+  const $searchText = $searchText1;
   $searchText.on(`focus`, () => {
     if ($("#toggleClearTextOnClickCheckbox").is(":checked")) {
       $searchText.val('')
@@ -867,7 +882,7 @@ function populateWikiLinks(text, $el) {
       $target.removeAttr('data-clicked')
     } else {
       const word = $target.text()
-      $('#searchText').val(word).trigger('change')
+      $searchText1.val(word).trigger('change')
       expandSearchResults()
       $target.attr('data-clicked', 'yes')
     }
@@ -897,7 +912,7 @@ function populateSearchWords(sub, $el) {
         if (word.length > 2)
           window.location.hash = word
       } else {
-        $('#searchText').val(word).trigger('change')
+        $searchText1.val(word).trigger('change')
         expandSearchResults()
       }
       addStarredLine(sub.index, sub.ts)
@@ -1913,10 +1928,16 @@ function getMatchingWords(list, search) {
 }
 
 function selectSearchedWord(event) {
-  const text = $(event.target).parent().data('text').replaceAll("\n", "")
-  $('#searchedWords').val(text)
-  //window.searchedWordsSelectedProgrammatically = true
-  $('#searchedWords').trigger('change')
+  const textToMatch = $(event.target).parent().data('text').replaceAll("\n", "")
+  // Find the option with text containing the textToMatch string
+  const $option = $('#searchedWords option').filter(function() {
+    return $(this).text().toLowerCase().includes(textToMatch.toLowerCase());
+  }).first();
+
+  if ($option.length) {
+    $('#searchedWords').val($option.val()).trigger('change');
+  }
+
   window.preSelectedSearchedWord = text
 }
 
@@ -1936,10 +1957,11 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
 
       const div = $(`
   <div class="line-part">
-      <i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;" onclick="selectSearchedWord(event)"></i>
+      <i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;"></i>
       ${highlightedText(chunk.replaceAll("|", " | "))}
       <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn">
   </div>`);
+      $(div).find("i.fa").click(selectSearchedWord)
       div.data({text: chunk})
       $line.append(div)
 
@@ -2320,7 +2342,7 @@ function renderVocabularyFindings(search) {
 
   function wordIsInVocabularyLine(vocabLine) {
     try {
-      return getWords(expandWords(vocabLine)).filter(it => it.trim().length > 2).map(it => it.toLowerCase().trim()).includes(search);
+      return getWords(expandWords(vocabLine, getLangFromUrl().code)).filter(it => it.trim().length > 2).map(it => it.toLowerCase().trim()).includes(search);
     } catch (e) {
       console.log(vocabLine, e)
       return false
@@ -2345,7 +2367,8 @@ function renderVocabularyFindings(search) {
       let txt = it.item
       const $line = $(`<div class="vocabulary-line"></div>`);
       if (txt.trim().length) {
-        $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;" onclick="selectSearchedWord(event)"></i>`)
+        $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`)
+        $line.find("i.fa").click(selectSearchedWord)
       } else {
         txt = "------------------"
       }
@@ -2852,7 +2875,7 @@ if (isLocalhost()) {
   $('#saveStarredLinesBtn').show()
 
   setInterval(() => {
-    fetch("http://localhost:5000/vocabulary")
+    fetch("http://localhost:5000/vocabulary?lang=" + getLangFromUrl().fullName)
         .then(it => it.json())
         .then(it => {
           window.vocabularyLines = it.text.split("\n")

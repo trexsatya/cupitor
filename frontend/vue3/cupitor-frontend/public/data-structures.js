@@ -2,7 +2,7 @@ function float(x) {
   return Number.parseFloat(x)
 }
 
-function range(start, count, arg3, arg4) {
+export function range(start, count, arg3, arg4) {
   if (!arguments.length) console.log('range(start, count)')
 
   let filter, fn;
@@ -25,7 +25,7 @@ function range(start, count, arg3, arg4) {
   return ar.filter(filter).map(fn)
 }
 
-function uuid() {
+export function uuid() {
   const S4 = function () {
     return (((1 + Math.random()) * 0x10000) | 0).toString(16).substring(1);
   };
@@ -123,7 +123,7 @@ function CircularCursor(arr) {
 
 const nthLast = (arr, x) => arr[arr.length - (x || 1)]
 
-function randomFromArray(cc) {
+export function randomFromArray(cc) {
   return cc[Math.floor(Math.random() * cc.length)]
 }
 
@@ -549,7 +549,7 @@ function waitForKeyboardInput(key) {
  * @param finishNowCondition
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowCondition) {
+export function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowCondition) {
   data = data.map(x => x); //clone
   const totalDataItems = data.length
   let fn = null;
