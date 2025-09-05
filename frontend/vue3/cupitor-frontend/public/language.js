@@ -1,6 +1,8 @@
 import { schedule, computeIfAbsent, randomFromArray, uuid, range } from './data-structures.js';
 import {conjugateTableSpanish} from './spanish.js';
 
+/* eslint-disable @typescript-eslint/no-use-before-define */
+
 let $, alert, _, fetch;
 if (typeof window !== 'undefined' && window.$) {
   $ = window.$; // Use global jQuery in HTML
@@ -21,11 +23,6 @@ Array.prototype.max = function () {
 Array.prototype.last = function () {
   return _.last(this)
 };
-
-function isDesktop() {
-  const ww = $(window).width()
-  return ww >= 1000
-}
 
 const SEPARATOR_PIPE = '|'
 window.onbeforeunload = function (event) {
@@ -167,6 +164,7 @@ async function loadIdioms() {
 }
 
 function togglePlay(el) {
+  const ytPlayer = window.ytPlayer
   if (window.playingYoutubeVideo) {
     if (ytPlayer.getPlayerState() === 2) {
       ytPlayer.playVideo()
@@ -191,7 +189,7 @@ function togglePlay(el) {
 
 function playMedia() {
   if (window.playingYoutubeVideo) {
-    ytPlayer.playVideo()
+    window.ytPlayer.playVideo()
   } else if (window.playingAudio) {
     audioPlayer.play()
   } else if (window.playingVideo) {
@@ -677,6 +675,15 @@ $('document').ready(e => {
     vocabularyLineSelected()
   })
 
+  $('#rewindBtn').click(rewind)
+  $('#hideMediaRelatedContainer').click(hideMediaRelatedContainer)
+  $('#hidePlayer').click(() => {
+    hideMediaContainer();
+    hideMediaRelatedContainer()
+  })
+  $('#scrollButton').click(scrollButtonClicked)
+  $('#togglePlayerControlsBtn').click(showMediaRelatedContainer)
+
   $('#mp3Choice').change(async e => {
     const link = $('#mp3Choice').val();
     if (link) {
@@ -697,6 +704,8 @@ $('document').ready(e => {
       // $('#subControls').hide()
     }
   })
+
+  $('#playBtn').click(togglePlay)
 
   try {
     document.onkeyup = result.onkeyup = e => {
@@ -1019,7 +1028,7 @@ async function setMediaTime(newTime, manualHandling = false) {
     // Hackish for youtube
     await seekToYoutubeTime(newTime - (manualHandling ? 2 : 0))
     if (manualHandling) {
-      ytPlayer.seekTo(newTime)
+      window.ytPlayer.seekTo(newTime)
     }
   } else if (window.playingAudio) {
     audioPlayer.setCurrentTime(newTime)
@@ -1617,7 +1626,7 @@ function setSpeed() {
   newRate = parseFloat(newRate);
 
   if (window.playingYoutubeVideo) {
-    ytPlayer.setPlaybackRate(newRate)
+    window.ytPlayer.setPlaybackRate(newRate)
   } else if (window.playingAudio) {
     localAudio.playbackRate = newRate
   } else if (window.playingVideo) {
@@ -1633,7 +1642,7 @@ function getCurrentTime() {
   } else if (window.playingVideo) {
     return videoPlayer.getCurrentTime()
   } else if (window.playingYoutubeVideo) {
-    return ytPlayer.getCurrentTime()
+    return window.ytPlayer.getCurrentTime()
   }
 }
 
@@ -1643,7 +1652,7 @@ function isNotPlaying() {
   } else if (window.playingVideo) {
     return videoPlayer.paused
   } else if (window.playingYoutubeVideo) {
-    return ytPlayer.getPlayerState() !== 1;
+    return window.ytPlayer.getPlayerState() !== 1;
   }
 }
 
@@ -1652,7 +1661,7 @@ function markIntervalPlayDone(ct) {
     const s = window.youtubePlayInterval.start
     const e = window.youtubePlayInterval.end
     if (ct > e) {
-      ytPlayer.pauseVideo()
+      window.ytPlayer.pauseVideo()
       window.youtubePlayInterval = null
     }
   }
@@ -1662,8 +1671,8 @@ function updatePlayBtn() {
   const el = $('#playBtn')[0]
   let isPaused, isPlaying;
   if (window.playingYoutubeVideo) {
-    isPaused = ytPlayer.getPlayerState() === 2;
-    isPlaying = ytPlayer.getPlayerState() === 1;
+    isPaused = window.ytPlayer.getPlayerState() === 2;
+    isPlaying = window.ytPlayer.getPlayerState() === 1;
   } else if (window.playingAudio) {
     isPaused = audioPlayer.paused
     isPlaying = !audioPlayer.paused
@@ -1681,7 +1690,7 @@ function updatePlayBtn() {
 
 function changePlaybackTimestamp(amount) {
   if (window.playingYoutubeVideo) {
-    ytPlayer.seekTo(ytPlayer.getCurrentTime() + amount)
+    window.ytPlayer.seekTo(window.ytPlayer.getCurrentTime() + amount)
   } else if (window.playingAudio) {
     audioPlayer.setCurrentTime(audioPlayer.currentTime + amount)
   } else if (window.playingVideo) {
@@ -1938,7 +1947,7 @@ function selectSearchedWord(event) {
     $('#searchedWords').val($option.val()).trigger('change');
   }
 
-  window.preSelectedSearchedWord = text
+  window.preSelectedSearchedWord = textToMatch
 }
 
 function populateNonSRTFindings(wordToItemsMap, $result) {
@@ -2059,22 +2068,23 @@ function renderLines(id, url) {
   const getSub = x => subtitleFile.data.find(it => it.index + '' === x + '');
   const st = getSub(fromLineIndex);
   const end = getSub(toLineIndex)
-  const time_start = parseInt(Math.floor(st.start.ordinal)); //fromSeconds(line.start.ordinal);
-  const time_end = parseInt(Math.ceil(end.end.ordinal)); //fromSeconds(line.end.ordinal);
+  const timeStart = parseInt(Math.floor(st.start.ordinal)); //fromSeconds(line.start.ordinal);
+  const timeEnd = parseInt(Math.ceil(end.end.ordinal)); //fromSeconds(line.end.ordinal);
 
   const showInfoBtn = `<span>
-    <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" fill="currentColor" onclick="showInfo('${subtitleFile.url}', '${subtitleFile.source}', '${time_start}', '${time_end}')" class="bi bi-info-circle media-info" viewBox="0 0 16 16" style="cursor: pointer;">
+    <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" fill="currentColor" class="bi bi-info-circle media-info" viewBox="0 0 16 16" style="cursor: pointer;">
            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
            <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
      </svg>
      <span class="info" style="display: none;">
-            <span class="info times"> ${time_start}-${time_end} </span>
+            <span class="info times"> ${timeStart}-${timeEnd} </span>
      </span>
     </span>`
 
   const isNotALink = url.startsWith('jokes-') || url.startsWith('sayings-') || url.startsWith('metaphors-') || url.startsWith('idioms-');
   const playMediaBtn =
-      `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn" onclick="playMediaSlice('${url}', '${time_start}', '${time_end}', '${subtitleFile.source}')">`
+      `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn">`
+
 
   function truncate(str, n) {
     return (str.length > n) ? str.slice(0, n - 1) + '&hellip;' : str;
@@ -2083,7 +2093,7 @@ function renderLines(id, url) {
   const infoButton = () => {
     if (isNotALink) return '';
     if (window.showInfoWithoutPopup) {
-      const {fileName, url} = getInfoAboutMedia(subtitleFile.url, subtitleFile.source, time_start);
+      const {fileName, url} = getInfoAboutMedia(subtitleFile.url, subtitleFile.source, timeStart);
       return `<a href="${url}" target="_blank" title="${fileName}">${truncate(fileName, 20)}</a>`
     }
     return showInfoBtn;
@@ -2092,18 +2102,18 @@ function renderLines(id, url) {
   let html = `
 <hr>
 <div class="buttons" style="text-align: center;">
-  <span class="add-prev-btn btn" onclick="changeIndices('${id}', ${fromLineIndex - 1}, ${toLineIndex}); renderLines('${id}', '${url}')"> + </span>
-  <span class="remove-next-btn btn" onclick="changeIndices('${id}', ${fromLineIndex + 1}, ${toLineIndex}); renderLines('${id}', '${url}')"> - </span>
+  <span class="add-prev-btn btn" > + </span>
+  <span class="remove-next-btn btn"> - </span>
 
-  <span class="play-btn-container" style="text-align: center;" data-id="${id}" data-url="${url}" data-time-start="${time_start}" data-time-end="${time_end}">
-     <span class="info btn" onclick="collapseSubLines(this)"> 🗖 </span>
+  <span class="play-btn-container" style="text-align: center;" data-id="${id}" data-url="${url}" data-time-start="${timeStart}" data-time-end="${timeEnd}">
+     <span class="info btn collapse-sub-lines"> 🗖 </span>
      <span class="info">${subtitleFile.source}</span>
      ${infoButton()}
      ${playMediaBtn}
   </span>
   <span style="float: right;">
-    <span class="remove-prev-btn btn" onclick="changeIndices('${id}', ${fromLineIndex}, ${toLineIndex - 1}); renderLines('${id}', '${url}')"> - </span>
-    <span class="add-next-btn btn" onclick="changeIndices('${id}', ${fromLineIndex}, ${toLineIndex + 1}); renderLines('${id}', '${url}')"> + </span>
+    <span class="remove-prev-btn btn" > - </span>
+    <span class="add-next-btn btn"> + </span>
   </span>
 </div>
 
@@ -2139,6 +2149,22 @@ function renderLines(id, url) {
   html += `${subForLines}<br>`
 
   $container.html(html)
+  $($container).find('.play-btn').click(() => playMediaSlice(url + '', timeStart+'', timeEnd+'', subtitleFile.source+''))
+  $($container).find('.media-info').click(e => showInfo(subtitleFile.url + '', subtitleFile.source+'', timeStart+'', timeEnd+''))
+  $($container).find('.collapse-sub-lines').click(collapseSubLines)
+
+  $($container).find('.add-prev-btn').click(e => {
+    changeIndices(''+id, fromLineIndex - 1, toLineIndex); renderLines(''+id, ''+url);
+  })
+  $($container).find('.remove-next-btn').click(e => {
+    changeIndices(''+id, fromLineIndex + 1, toLineIndex); renderLines(''+id, ''+url);
+  })
+  $($container).find('.remove-prev-btn').click(e => {
+    changeIndices(''+id, fromLineIndex, toLineIndex - 1); renderLines(''+id, ''+url);
+  })
+  $($container).find('.add-next-btn').click(e => {
+    changeIndices(''+id, fromLineIndex, toLineIndex + 1); renderLines(''+id, ''+url);
+  })
 
   if (!isDesktop()) {
     $('.play-btn-container').css({marginLeft: '3%'})
@@ -2356,7 +2382,7 @@ function renderVocabularyFindings(search) {
 
   const indexesOfAppearance = words.map((vocabLine, i) =>
       wordIsInVocabularyLine(vocabLine) ? i : null)
-      .filter(it => it)
+      .filter(it => it !== null)
 
   const vocab = $('#vocabularyResult')
   vocab.html('')
@@ -2552,7 +2578,7 @@ function _expandWords(txt, lang) {
   const fn = () => {
     const w = terms.shift()
     if (!w) return
-    const match = w.match(/<\*(?:\{([^)]+)\})?([^\s>]*) .*/)
+    const match = w.match(/<\*(?:\{([^)]+)})?([^\s>]*) .*/)
     if (match && match.length === 3) {
       const ref = match[1]
       const wordToExpand = match[2]
@@ -2562,7 +2588,7 @@ function _expandWords(txt, lang) {
       } else {
         expandedWords = expansions[wordToExpand] || [wordToExpand]
       }
-      expandedWords.forEach(it => terms.push(w.replace("<*" + wordToExpand, it)))
+      expandedWords.forEach(it => terms.push(w.replace(`<*${ref ? '{' + ref + '}' : ''}` + wordToExpand, it)))
     } else if (w.indexOf("<*") < 0) {
       terms.push(w)
     }
@@ -2690,7 +2716,7 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 //    after the API code downloads.
 
 function loadYoutubeVideo(videoId) {
-  const iframe = ytPlayer.getIframe()
+  const iframe = window.ytPlayer.getIframe()
   showMediaContainer()
   showMediaRelatedContainer()
   return new Promise((resolve, reject) => {
@@ -2706,72 +2732,6 @@ function loadYoutubeVideo(videoId) {
       reject(e)
     }
   })
-}
-
-function getDimensionsForPlayer() {
-  const wh = window.innerHeight, ww = window.innerWidth;
-
-  let ytVideoWidth = 940, ytHeight = 590;
-  let subWidth = 0;
-
-  if (isDesktop()) {
-    ytVideoWidth = ww * 0.6;
-    subWidth = $(window).width() - (ytVideoWidth + 40)
-  } else {
-    ytVideoWidth = ww - 15;
-    subWidth = ww - 10;
-    ytHeight = wh / 2 - 150;
-    // $('#mediaControls').css({width: '100%', bottom: '-15em', right: 0})
-    $('#youtubePlayer-info').hide()
-    // $('#speed-control').parent().hide()
-
-    $('#mp3Choice').parent().css({width: ww - 20})
-  }
-  return {ytVideoWidth, ytHeight, subWidth};
-}
-
-const {ytVideoWidth, ytHeight, subWidth} = getDimensionsForPlayer();
-
-function onYouTubeIframeAPIReady() {
-  window.ytPlayer = new YT.Player("youtubePlayer", {
-    height: ytHeight,
-    width: ytVideoWidth,
-    videoId: 'K8P_USOppfs',
-    playerVars: {
-      'playsinline': 1
-    },
-    events: {
-      'onReady': onPlayerReady,
-      'onStateChange': onPlayerStateChange
-    }
-  });
-  $('#subtitle-container').css({
-    left: ytVideoWidth,
-    marginLeft: '1em',
-    width: subWidth,
-    maxHeight: '85%',
-    overflow: 'scroll',
-    paddingRight: '1em'
-  })
-}
-
-// 4. The API will call this function when the video player is ready.
-function onPlayerReady(event) {
-  event.target.playVideo();
-  window.ytPlayerReady = true
-
-  if (window.youtubePlayInterval) {
-    seekToYoutubeTime(window.youtubePlayInterval.start)
-  }
-}
-
-
-function onPlayerStateChange(event) {
-  if (event.data === YT.PlayerState.PLAYING) {
-    window.ytPlaying = true
-  } else {
-    window.ytPlaying = false;
-  }
 }
 
 function stopMedia(source) {
@@ -2953,7 +2913,7 @@ async function playMediaSlice(url, start, end, source) {
   if (source === 'YouTube') {
     showMediaContainer()
     showMediaRelatedContainer();
-    if (ytPlayer.getVideoUrl().indexOf(url) < 0) {
+    if (window.ytPlayer.getVideoUrl().indexOf(url) < 0) {
       window.mediaSelected = {link: url, source: 'link'}
       window.playingYoutubeVideo = true
       window.syncSubtitle = false

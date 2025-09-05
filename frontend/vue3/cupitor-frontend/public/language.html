@@ -37,6 +37,76 @@
     <style>
 
     </style>
+    <script>
+        function isDesktop() {
+            const ww = $(window).width()
+            return ww >= 1000
+        }
+
+        function getDimensionsForPlayer() {
+            const wh = window.innerHeight, ww = window.innerWidth;
+
+            let ytVideoWidth = 940, ytHeight = 590;
+            let subWidth = 0;
+
+            if (isDesktop()) {
+                ytVideoWidth = ww * 0.6;
+                subWidth = $(window).width() - (ytVideoWidth + 40)
+            } else {
+                ytVideoWidth = ww - 15;
+                subWidth = ww - 10;
+                ytHeight = wh / 2 - 150;
+                // $('#mediaControls').css({width: '100%', bottom: '-15em', right: 0})
+                $('#youtubePlayer-info').hide()
+                // $('#speed-control').parent().hide()
+
+                $('#mp3Choice').parent().css({width: ww - 20})
+            }
+            return {ytVideoWidth, ytHeight, subWidth};
+        }
+
+        const {ytVideoWidth, ytHeight, subWidth} = getDimensionsForPlayer();
+        // 4. The API will call this function when the video player is ready.
+        function onPlayerReady(event) {
+            event.target.playVideo();
+            window.ytPlayerReady = true
+
+            if (window.youtubePlayInterval) {
+                seekToYoutubeTime(window.youtubePlayInterval.start)
+            }
+        }
+
+        function onPlayerStateChange(event) {
+            if (event.data === YT.PlayerState.PLAYING) {
+                window.ytPlaying = true
+            } else {
+                window.ytPlaying = false;
+            }
+        }
+
+        window.onYouTubeIframeAPIReady = () => {
+            window.ytPlayer = new YT.Player("youtubePlayer", {
+                height: ytHeight,
+                width: ytVideoWidth,
+                videoId: 'K8P_USOppfs',
+                playerVars: {
+                    'playsinline': 1
+                },
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange
+                }
+            });
+            $('#subtitle-container').css({
+                left: ytVideoWidth,
+                marginLeft: '1em',
+                width: subWidth,
+                maxHeight: '85%',
+                overflow: 'scroll',
+                paddingRight: '1em'
+            })
+        }
+    </script>
     <style>
         #scrollButton {
             position: fixed;
@@ -60,7 +130,7 @@
 
 <body style="padding: 0.5em;">
 
-<button id="scrollButton" style="display: none;" onclick="scrollButtonClicked(event)" data-direction="down">&#x25BC;</button>
+<button id="scrollButton" style="display: none;"  data-direction="down">&#x25BC;</button>
 <div>
     <div style="float: left; width: 59%; position: relative;" class="fl-left">
         <div id="mainControlInputs">
@@ -174,7 +244,7 @@
                     </svg>
                 </button>
             </div>
-            <div id="resultContainer" style="display: none;">
+            <div id="resultContainer" style="display: none;margin-top: 2em;">
                 <div id="vocabularyResult">
 
                 </div>
@@ -218,8 +288,8 @@
         </div>
 
         <div id="mediaContainer" style="width: 100%;display:none;">
-            <button id="togglePlayerControlsBtn" onclick="showMediaRelatedContainer()">...</button>
-            <button id="hidePlayer" onclick="hideMediaContainer();hideMediaRelatedContainer()">[X]</button>
+            <button id="togglePlayerControlsBtn">...</button>
+            <button id="hidePlayer">[X]</button>
             <div id="youtubePlayer" style="margin-top: 2em;">
 
             </div>
@@ -260,13 +330,11 @@
                     <div style="text-align: center; ">
                         <select id="starredLinesSelect" style="display: none; margin-right: 2em;"></select>
                         <button id="rewindBtn"
-                                style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 3em;height: 2em;"
-                                onclick="rewind()"> <
+                                style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 3em;height: 2em;"> <
                         </button>
-                        <button onclick="togglePlay(this)" id="playBtn" class="play-btn">Play</button>
-                        <button
-                            style="font-weight: bolder;font-size: larger; margin-left: 3em;width: 3em;height: 2em;"
-                            onclick="hideMediaRelatedContainer();"> X
+                        <button id="playBtn" class="play-btn">Play</button>
+                        <button id="hideMediaRelatedContainer"
+                            style="font-weight: bolder;font-size: larger; margin-left: 3em;width: 3em;height: 2em;"> X
                         </button>
                     </div>
                 </div>
