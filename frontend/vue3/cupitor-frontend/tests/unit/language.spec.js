@@ -37,8 +37,10 @@ describe('expandWords', () => {
   })
 
   it('expands words using conjugateTableSpanish for Spanish', () => {
-    const result = expandWords('tu <*entender mi', 'es')
-    expect(result).contains('entiende')
+    const result = expandWords('<*{sentir}requerir', 'es')
+    'requiere\trequiera\trequiramos\trequerid\trequieran'.split('\t').forEach(it=> {
+      expect(result).contains(it)
+    })
   })
 
   it('returns original if expansion not found', () => {
