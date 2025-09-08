@@ -2,7 +2,7 @@ import {expect} from "chai";
 import sinon from 'sinon'
 import _ from 'lodash'
 import {computeIfAbsent}  from '../../public/data-structures.js'
-import  {expandWords} from '../../public/language'
+import  {expandWords, renderVocabularyFindings} from '../../public/language.js'
 import {conjugateTableSpanish} from "../../public/spanish";
 
 let conjugateTableSpanishStub;
@@ -10,6 +10,7 @@ beforeAll(() => {
   sinon.stub(window, 'alert').callsFake(() => {});
   global.conjugateTableSpanish = conjugateTableSpanish
   global.computeIfAbsent = computeIfAbsent
+  window.HTMLElement.prototype.scrollIntoView = function() {};
 });
 
 describe('expandWords', () => {
@@ -37,10 +38,19 @@ describe('expandWords', () => {
   })
 
   it('expands words using conjugateTableSpanish for Spanish', () => {
-    const result = expandWords('<*{sentir}requerir', 'es')
-    'requiere\trequiera\trequiramos\trequerid\trequieran'.split('\t').forEach(it=> {
+    let result = expandWords('<*{sentir}requerir', 'es')
+    'requerir\trequiere\trequiera\trequiramos\trequerid\trequieran'.split('\t').forEach(it=> {
       expect(result).contains(it)
     })
+
+    expect(expandWords('(sit)|<*{pensar}sentar|sentarse|estar sentado|', 'es').split('|').map(it => it.trim())).includes('sentar')
+    window.vocabulary = {
+      'Phases, Motion': ['(sit)|<*{pensar}sentar|sentarse|estar sentado|']
+    }
+    document.body.innerHTML = `<div id="vocabularyResult"> </div>`
+    global.getLangFromUrl = () => ({fullName: 'spanish', code: 'es'})
+    renderVocabularyFindings('sentar')
+    expect(document.body.innerHTML).contains('(sit) | &lt;*{pensar}sentar | sentarse | estar sentado | ')
   })
 
   it('returns original if expansion not found', () => {
@@ -61,4 +71,5 @@ describe('conjugateTableSpanish', () => {
 afterAll(() => {
   window.alert.restore();
   conjugateTableSpanishStub.restore();
+  document.body.innerHTML = ''
 });

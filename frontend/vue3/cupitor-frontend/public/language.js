@@ -2363,25 +2363,25 @@ function getSurrounding(index, list, size = 5) {
   return list.slice(Math.max(0, idx - size), Math.min(list.length, idx + (size + 1)))
 }
 
-function renderVocabularyFindings(search) {
+export function wordIsInVocabularyLine(vocabLine, search) {
+  try {
+    return getWords(expandWords(vocabLine, getLangFromUrl().code)).filter(it => it.trim().length > 2).map(it => it.toLowerCase().trim()).includes(search);
+  } catch (e) {
+    console.log(vocabLine, e)
+    return false
+  }
+}
+
+export function renderVocabularyFindings(search) {
   search = search.toLowerCase().trim()
 
-  function wordIsInVocabularyLine(vocabLine) {
-    try {
-      return getWords(expandWords(vocabLine, getLangFromUrl().code)).filter(it => it.trim().length > 2).map(it => it.toLowerCase().trim()).includes(search);
-    } catch (e) {
-      console.log(vocabLine, e)
-      return false
-    }
-  }
-
   const categories = Object.keys(window.vocabulary)
-      .filter(cat => window.vocabulary[cat].find(wordIsInVocabularyLine))
+      .filter(cat => window.vocabulary[cat].find(ln => wordIsInVocabularyLine(ln, search)))
 
   const words = categories.map(it => window.vocabulary[it]).flat()
 
   const indexesOfAppearance = words.map((vocabLine, i) =>
-      wordIsInVocabularyLine(vocabLine) ? i : null)
+      wordIsInVocabularyLine(vocabLine, search) ? i : null)
       .filter(it => it !== null)
 
   const vocab = $('#vocabularyResult')
