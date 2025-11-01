@@ -142,11 +142,11 @@ const equals = (x, y) => JSON.stringify(x) === JSON.stringify(y)
 
 const log = console.log
 function logJson(){
-  const args = []
+  /*const args = []
   for(let i=0; i < arguments.length; i++) {
     args.push(arguments[i])
-  }
-  console.log.apply(null, args.map(it => JSON.stringify(it)), arguments.callee.caller && arguments.callee.caller.name)
+  }*/
+  //console.log.apply(null, args.map(it => JSON.stringify(it)), arguments.callee.caller && arguments.callee.caller.name)
 }
 
 function simpleClone(obj) {

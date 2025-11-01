@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Sequence Search</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script type="module" src="music_search.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 2em;
+        }
+
+        body {
+            font-family: sans-serif;
+            padding: 1rem;
+        }
+
+        .passing {
+            background: #a0d8ef; /* light blue */
+            border-radius: 3px;
+            padding: 0 2px;
+        }
+
+        .text-xl {
+            font-size: 1.25rem;
+            font-weight: bold;
+        }
+
+        .font-bold {
+            font-weight: bold;
+        }
+
+        .bg-blue-600 {
+            background-color: #2563eb;
+        }
+
+        .text-white {
+            color: #fff;
+        }
+
+        .px-3 {
+            padding-left: .75rem;
+            padding-right: .75rem;
+        }
+
+        .py-1 {
+            padding-top: .25rem;
+            padding-bottom: .25rem;
+        }
+
+        .rounded {
+            border-radius: .5rem;
+        }
+
+        .mt-4 {
+            margin-top: 1rem;
+        }
+
+        .text-green-600 {
+            color: #16a34a;
+        }
+
+        .text-red-600 {
+            color: #dc2626;
+        }
+
+        .font-semibold {
+            font-weight: 600;
+        }
+
+        .highlight {
+            background: yellow;
+            border-radius: 3px;
+            padding: 0 2px;
+        }
+
+        .accordion {
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .accordion summary {
+            cursor: pointer;
+            padding: 6px;
+            font-weight: bold;
+        }
+
+        .accordion pre {
+            white-space: pre-wrap;
+            margin: 0;
+            padding: 6px;
+        }
+
+        .controls {
+            margin-bottom: 1em;
+        }
+
+        .accordion-container {
+            width: 100%;
+            font-family: system-ui, sans-serif;
+        }
+
+        .accordion-header {
+            width: 100%;
+            text-align: left;
+            padding: 12px 16px;
+            background: #f3f3f3;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.25s, color 0.25s;
+        }
+
+        .accordion-header:hover {
+            background: #e6e6e6;
+        }
+
+        .accordion-header.active {
+            background: #ccc;
+            color: #222;
+        }
+
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease, padding 0.3s ease;
+            background: #fafafa;
+            border: 1px solid #ddd;
+            border-top: none;
+            padding: 0 16px;
+        }
+
+        .accordion-content.open {
+            padding: 10px 16px;
+            max-height: 100%; /* or adjust as needed */
+        }
+    </style>
+</head>
+<body>
+<h1>Music Sequence Search (Vanilla JS/jQuery)</h1>
+<div class="controls">
+    <input id="query" placeholder="Enter notes e.g. E D C" style="width:250px;">
+    <label>Tolerance: <input id="tolerance" type="number" value="0" min="0" max="6" style="width:60px;"></label>
+    <label><input type="checkbox" id="allowRepetition" checked> Allow repetition</label>
+    <label><input type="checkbox" id="allowPassing" checked> Allow passing notes</label>
+    <button id="searchBtn">Search</button>
+</div>
+<div id="results"></div>
+
+<script type="module">
+    import {extractPitchesFromText, findIntervalMatches, highlightMatchesInText} from './music_search.js'
+
+    $(async function () {
+        const index = await fetch('data/music_index.json').then(r => r.json());
+        const files = {};
+        for (const f of index) {
+            try {
+                files[f] = await fetch('data/' + f).then(r => r.text());
+            } catch (e) {
+                files[f] = '';
+            }
+        }
+        $('#searchBtn').click(() => searchNow(index, files));
+    });
+
+    function createAccordion(containerId, items) {
+        const container = document.getElementById(containerId);
+        if (!container) {
+            console.error(`Container #${containerId} not found.`);
+            return;
+        }
+
+        container.innerHTML = "";
+        container.classList.add("accordion-container");
+
+        items.forEach((item, index) => {
+            const section = document.createElement("div");
+            section.className = "accordion-section";
+
+            const header = document.createElement("button");
+            header.className = "accordion-header";
+            header.textContent = item.title || `Section ${index + 1}`;
+
+            const content = document.createElement("div");
+            content.className = "accordion-content";
+            content.innerHTML = item.content || "";
+
+            // Toggle behavior — only one open at a time
+            header.addEventListener("click", () => {
+                const isOpen = content.classList.contains("open");
+
+                // Close all other sections
+                container.querySelectorAll(".accordion-content").forEach(c => {
+                    c.classList.remove("open");
+                    c.previousElementSibling.classList.remove("active");
+                });
+
+                // Open this one (if it was previously closed)
+                if (!isOpen) {
+                    content.classList.add("open");
+                    header.classList.add("active");
+                }
+            });
+
+            section.appendChild(header);
+            section.appendChild(content);
+            container.appendChild(section);
+        });
+    }
+
+    function searchNow(index, files) {
+        const query = $('#query').val().trim();
+        if (!query) return;
+
+        const results = []
+        Object.keys(files).forEach(x => {
+            const fileText = files[x]
+            const withHighlights = [`<a target="_blank" href="https://www.youtube.com/results?search_query=${x.replace('-', ' ').replace('.txt', '')}">YouTube</a>`]
+            let matchCount = 0
+            fileText.split(/\r?\n/).forEach(line => {
+                const pitches = extractPitchesFromText(line, { defaultOctave: 4 })
+                const melodyNotes = pitches[0];
+                if(typeof melodyNotes === "string") {
+                    withHighlights.push(line)
+                } else {
+                    const matches = findIntervalMatches(melodyNotes, extractPitchesFromText(query, { defaultOctave: 4 })[0])
+                    withHighlights.push(highlightMatchesInText(line, matches))
+                    matchCount += matches.length
+                }
+            })
+
+            if(matchCount > 0) {
+                results.push({title: `${x} (${matchCount})`, content: withHighlights.join("<br>")})
+            }
+        })
+
+        createAccordion('results', results);
+    }
+</script>
+</body>
+</html>

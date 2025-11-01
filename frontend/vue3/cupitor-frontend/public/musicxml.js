@@ -1,5 +1,7 @@
+import {getScale} from "./music-reference-data.js";
+
 function createXml() {
-  let template = `<?xml version="1.0" encoding="UTF-8"?>
+  const template = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
 <score-partwise version="4.0">
     <identification>
@@ -56,13 +58,13 @@ function createXml() {
 }
 
 function findOctave(note) {
-  let predicate = (string, fretX, fretY) => {
+  const predicate = (string, fretX, fretY) => {
     return n => {
       return (n.string + '' === string+'') && (n.fret >= fretX && n.fret <= fretY)
     };
   }
 
-  let predicates = [
+  const predicates = [
     {
       condition: predicate(6, 0, 7),
       result: 2
@@ -130,17 +132,17 @@ function findOctave(note) {
  * @returns {string}
  */
 function sharpsOrFlats(key) {
-  let scale = getScale(key.name());
-  let sharps = scale.filter(it => it.endsWith("#")).length
+  const scale = getScale(key.name());
+  const sharps = scale.filter(it => it.endsWith("#")).length
   if(sharps > 0) {
     return sharps
   }
   return scale.filter(it => it.endsWith("b")).length * -1
 }
 
-function MusicXml() {
+export function MusicXml() {
   this.xml = createXml()
-  let self = this;
+  const self = this;
   this.serialiser = new XMLSerializer()
   this.numberOfMeasures = 1
   this.toString = () => {
@@ -183,7 +185,7 @@ function MusicXml() {
       number += 1
     }
 
-    let notations = []
+    const notations = []
     if(data.notations) {
 
     }
@@ -228,7 +230,7 @@ function MusicXml() {
 
   this.addRestToLastMeasure = (type) => {
     if(!type) type = 'quarter'
-    let $note = $(`<note>
+    const $note = $(`<note>
                 <rest/>
                 <duration>1</duration>
                 <voice>1</voice>
@@ -247,7 +249,7 @@ function MusicXml() {
     }
 
     notes.forEach(note => {
-      let $note = getMusicXmlNote({name: note.name, octave: note.octave, type: note.type, dot: note.dot, tie: note.tie, chordSymbol: note.chordSymbol, chord: note.chord})
+      const $note = getMusicXmlNote({name: note.name, octave: note.octave, type: note.type, dot: note.dot, tie: note.tie, chordSymbol: note.chordSymbol, chord: note.chord})
       $measure.append($note)
     })
     self.xml.find('part').last('part').append($measure)
@@ -274,8 +276,8 @@ function MusicXml() {
     //Just change the pitch and octave
     newNotes.forEach((m, i) => {
       m.notes.forEach((n, j) => {
-        let newXmlNote = getMusicXmlNote(n)
-        let $note = $($(this.xml.find("measure")[i]).find("note")[j])
+        const newXmlNote = getMusicXmlNote(n)
+        const $note = $($(this.xml.find("measure")[i]).find("note")[j])
         $note.find("pitch").replaceWith(
           this.serialiser.serializeToString(newXmlNote.find("pitch")[0])
         )
@@ -291,13 +293,13 @@ function MusicXml() {
   this.toArray = () => {
     return this.xml.find("measure").toArray().map(measure => {
       return $(measure).find("note").toArray().map(note => {
-        let pitch = $(note).find("pitch")
-        let octave = parseInt(pitch.find("octave").text());
+        const pitch = $(note).find("pitch")
+        const octave = parseInt(pitch.find("octave").text());
         let step = pitch.find("step").text();
-        let type = $(note).find("type").text();
-        let dot = $(note).find("dot");
-        let voice = $(note).find("voice").text()
-        let tie = $(note).find("notations").find("tied")
+        const type = $(note).find("type").text();
+        const dot = $(note).find("dot");
+        const voice = $(note).find("voice").text()
+        const tie = $(note).find("notations").find("tied")
 
         if(pitch.find("alter").text() === '1') {
           step += "#"
@@ -341,7 +343,7 @@ function MusicXml() {
   return this
 }
 
-function formatXml(xml, tab) { // tab = optional indent value, default is tab (\t)
+export function formatXml(xml, tab) { // tab = optional indent value, default is tab (\t)
   let formatted = '', indent = '';
   tab = tab || '\t';
   xml.split(/>\s*</).forEach(function(node) {

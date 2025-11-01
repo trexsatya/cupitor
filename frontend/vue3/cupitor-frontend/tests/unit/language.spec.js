@@ -21,6 +21,8 @@ describe('expandWords', () => {
     expect(result).contains('det gå inte an ')
     expect(result).contains('det går inte an ')
     expect(result).contains('det gick inte an ')
+
+    expect(expandWords('(nedsättande)patrask|slödder|avskum|avskrap|pöbel|mobb|rötägg|')).contains('pöbel')
   })
 
   it('expands words using getExpansionForWords for Swedish - beginning', () => {
@@ -44,6 +46,8 @@ describe('expandWords', () => {
     })
 
     expect(expandWords('(sit)|<*{pensar}sentar|sentarse|estar sentado|', 'es').split('|').map(it => it.trim())).includes('sentar')
+    expect(expandWords('gritarle', 'es').split('|').map(it => it.trim())).includes('gritar', 'gritarle')
+
     window.vocabulary = {
       'Phases, Motion': ['(sit)|<*{pensar}sentar|sentarse|estar sentado|']
     }
