@@ -1,26 +1,29 @@
+import {permutate, logJson, number, schedule, uuid, CircularCursor, equals} from './data-structures.js';
+import {getScale, durationType, DURATION_TO_NAME} from './music-reference-data.js';
+
 /**
  * Triads and Seventh chords
  */
-let getTriadsForNote = (noteName, key) => {
-  let scale = getScale(key);
+const getTriadsForNote = (noteName, key) => {
+  const scale = getScale(key);
 
-  let buildTriad = note => {
-    let cursor = new CircularCursor(scale)
+  const buildTriad = note => {
+    const cursor = new CircularCursor(scale)
     cursor.goTo(note)
-    let third = cursor.next(3 - 1), fifth = cursor.next(3 - 1), seventh = cursor.next(3 - 1)
+    const third = cursor.next(3 - 1), fifth = cursor.next(3 - 1), seventh = cursor.next(3 - 1)
     return [note, third, fifth]
   }
 
   return buildTriad(noteName)
 }
 
-let getChordForRomanNumeral = (romanNumeral, musicKey) => {
+const getChordForRomanNumeral = (romanNumeral, musicKey) => {
   let chordNumber = Object.keys(romanHash).sort(sortByLength).find(it => romanNumeral.startsWith(it) || romanNumeral.startsWith(it.toLowerCase()));
 
-  let everythingAfterChordNumber = romanNumeral.substr(chordNumber.length)
+  const everythingAfterChordNumber = romanNumeral.substr(chordNumber.length)
   chordNumber = romanNumeral.substr(0, chordNumber.length)
 
-  let isMinor = chordNumber.toLowerCase() === chordNumber
+  const isMinor = chordNumber.toLowerCase() === chordNumber
   let quality = null
 
   if (everythingAfterChordNumber.startsWith("o7")) {
@@ -38,8 +41,8 @@ let getChordForRomanNumeral = (romanNumeral, musicKey) => {
   } else {
     quality = "maj"
   }
-  let scaleDegree = romanToInt(chordNumber)
-  let scaleNotes = new Key(musicKey).scale()
+  const scaleDegree = romanToInt(chordNumber)
+  const scaleNotes = new Key(musicKey).scale()
   return {
     symbol: scaleNotes[scaleDegree - 1],
     romanNumeral: romanNumeral,
@@ -61,7 +64,7 @@ class Meter {
   y = 0
 
   static from(name) {
-    let [x, y] = name.split("/").map(it => number(it.trim()))
+    const [x, y] = name.split("/").map(it => number(it.trim()))
     return new Meter(x, y)
   }
 
@@ -81,9 +84,9 @@ class Meter {
    * @param maxRhythmValue {Number}
    */
   generateRandomRhythm(numBars = 4, minRhythmValue = 1 / 16, maxRhythmValue = 1) {
-    let maxNotesPossible = (1 / minRhythmValue) / this.y * numBars * this.x
+    const maxNotesPossible = (1 / minRhythmValue) / this.y * numBars * this.x
 
-    let rhythmValues = {
+    const rhythmValues = {
       '1/16': '16th',
       '1/8': '8th',
       '3/16': 'dotted-16th',
@@ -94,39 +97,39 @@ class Meter {
       '1': 'whole',
       '3/2': 'dotted-whole'
     } //sorted
-    let limit = numBars * this.x / this.y
+    const limit = numBars * this.x / this.y
 
-    let value = numBars * this.x / this.y
+    const value = numBars * this.x / this.y
 
-    let allLevels = [0, 1, 2, 3];
+    const allLevels = [0, 1, 2, 3];
 
     let r = []
     let maxLevelUsed = 0
     for (let i = 0; i < numBars - 1; i++) {
-      let level = randomFromArray(allLevels)
+      const level = randomFromArray(allLevels)
       r = r.concat(randomFromArray(Rhythms[level]))
       if (level > maxLevelUsed) maxLevelUsed = level
     }
 
-    let levelForLastMeasure = randomFromArray(allLevels.filter(i => i < maxLevelUsed))
+    const levelForLastMeasure = randomFromArray(allLevels.filter(i => i < maxLevelUsed))
     r = r.concat(randomFromArray(Rhythms[levelForLastMeasure]))
 
-    let required = this.x / this.y;
+    const required = this.x / this.y;
 
-    let measures = []
+    const measures = []
     let currentMeasure = [], currentSum = 0
     for (let i = 0; i < r.length; i++) {
-      let it = number(r[i])
+      const it = number(r[i])
 
       if (currentSum + it <= required) {
         currentMeasure.push({pitch: 1, duration: it})
         currentSum += it
       } else {
         //it cannot be added
-        let stillUnfilled = required - currentSum
+        const stillUnfilled = required - currentSum
         let carryOn = null
         if (stillUnfilled > 0) {
-          let canBeBroken = Object.keys(rhythmValues).map(number).some(x => x === it - stillUnfilled)
+          const canBeBroken = Object.keys(rhythmValues).map(number).some(x => x === it - stillUnfilled)
 
           if (canBeBroken) {
             currentMeasure.push({pitch: 1, duration: stillUnfilled, tie: 'start'})
@@ -148,10 +151,10 @@ class Meter {
 
 // log(new Meter(3, 4).generateRandomRhythm())
 
-function Key(keyName) {
-  let scale = getScale(keyName)
+export function Key(keyName) {
+  const scale = getScale(keyName)
   this.key = keyName
-  let chords = []
+  const chords = []
   this.scale = () => scale
 
   scale.forEach(note => {
@@ -179,7 +182,7 @@ function Key(keyName) {
   }
 
   this.chordTonesForRomanNumeral = (number) => {
-    let c = getChordForRomanNumeral(number, this.key)
+    const c = getChordForRomanNumeral(number, this.key)
     return chords[c.scaleDegree - 1]
   }
 
@@ -199,7 +202,7 @@ function Key(keyName) {
 
 function getAllChordsInKey(key) {
   key = key || fretboard.activeKey
-  let allChordsInKey = {}
+  const allChordsInKey = {}
   key.scale().forEach(scaleNote => {
     Object.keys(chordPatterns).forEach(name => {
       allChordsInKey[scaleNote + name] = {
@@ -227,7 +230,7 @@ function constructMeasureSeven() {
 
 }
 
-let melodyNotesForCadence = (cadence) => {
+const melodyNotesForCadence = (cadence) => {
   switch (cadence) {
     case Cadences.Half:
       return [randomFromArray([1, 2, 3, 4, 5, 6, 7]), randomFromArray([5, 7, 2])]
@@ -239,13 +242,13 @@ let melodyNotesForCadence = (cadence) => {
       return [randomFromArray([5, 7, 2]), randomFromArray([1])]
   }
 }
-let motions = [[0, +1, -1], [+2, -2, +4, -4, +7, -7]]
-let motionTypes = [0, 1] //step, leap
-let ascendingStepwiseMotion = x => x + randomFromArray(motions[0].filter(it => it > 0))
-let descendingStepwiseMotion = x => x + randomFromArray(motions[0].filter(it => it <= 0))
-let ascendingLeap = x => x + randomFromArray(motions[1].filter(it => it > 0))
-let descendingLeap = x => x + randomFromArray(motions[1].filter(it => it <= 0))
-let canLeapFromFirstToSecond = (x, y) => motions[1].find(it => x + it === y)
+const motions = [[0, +1, -1], [+2, -2, +4, -4, +7, -7]]
+const motionTypes = [0, 1] //step, leap
+const ascendingStepwiseMotion = x => x + randomFromArray(motions[0].filter(it => it > 0))
+const descendingStepwiseMotion = x => x + randomFromArray(motions[0].filter(it => it <= 0))
+const ascendingLeap = x => x + randomFromArray(motions[1].filter(it => it > 0))
+const descendingLeap = x => x + randomFromArray(motions[1].filter(it => it <= 0))
+const canLeapFromFirstToSecond = (x, y) => motions[1].find(it => x + it === y)
 
 function constructPhraseOne() {
   let extremePitch = null
@@ -254,8 +257,8 @@ function constructPhraseOne() {
   let phraseLevelLeapsApplied = 0
 
   function constructMeasureOne() {
-    let rhythmLevel = randomFromArray([1, 2])
-    let startingNote = randomFromArray([1, 2, 3, 4, 5, 6])
+    const rhythmLevel = randomFromArray([1, 2])
+    const startingNote = randomFromArray([1, 2, 3, 4, 5, 6])
     let containsExtremePitch = false
     let canStepUp = true, canStepDown = true, canLeapUp = true, canLeapDown = true
     let shouldStepUp = false, shouldStepDown = false, shouldLeapUp = false, shouldLeapDown = false
@@ -268,7 +271,7 @@ function constructPhraseOne() {
     let previousNotePitch = startingNote
     let lastMotion = null
 
-    let getNewNote = () => {
+    const getNewNote = () => {
       if (lastMotion === ascendingLeap) {
         shouldStepDown = true
       }
@@ -292,7 +295,7 @@ function constructPhraseOne() {
         if (canLeapDown) motions.push(descendingLeap)
       }
 
-      let fn = randomFromArray(motions)
+      const fn = randomFromArray(motions)
       console.log(`Measure-1: ${fn.name} from ${previousNotePitch} `)
       lastMotion = fn
       if (fn === ascendingLeap || fn === descendingLeap) {
@@ -302,7 +305,7 @@ function constructPhraseOne() {
         canLeapDown = false;
         canLeapUp = false;
       }
-      let newRelativePitch = fn(previousNotePitch)
+      const newRelativePitch = fn(previousNotePitch)
 
       if (newRelativePitch === extremePitch) {
         containsExtremePitch = true
@@ -318,8 +321,8 @@ function constructPhraseOne() {
       return newRelativePitch
     }
 
-    let rhythm = randomFromArray(Rhythms[rhythmLevel])
-    let notes = [{pitch: startingNote, duration: rhythm[0]}]
+    const rhythm = randomFromArray(Rhythms[rhythmLevel])
+    const notes = [{pitch: startingNote, duration: rhythm[0]}]
     for (let i = 1; i < rhythm.length; i++) {
       notes[i] = {pitch: getNewNote(), duration: rhythm[i]}
       previousNotePitch = notes[i].pitch
@@ -344,11 +347,11 @@ function constructPhraseOne() {
       console.log(`${this.name} tried ${recursionDepth} times. Giving up!`)
       return []
     }
-    let rhythmLevel = randomFromArray([1, 2])
-    let cadence = randomFromArray([Cadences.Half, Cadences.IAC, Cadences.Plagal])
-    let cadenceNotes = melodyNotesForCadence(cadence)
+    const rhythmLevel = randomFromArray([1, 2])
+    const cadence = randomFromArray([Cadences.Half, Cadences.IAC, Cadences.Plagal])
+    const cadenceNotes = melodyNotesForCadence(cadence)
 
-    let endingNote = cadenceNotes[1]
+    const endingNote = cadenceNotes[1]
     let containsExtremePitch = false
     let canStepUp = true, canStepDown = true, canLeapUp = true, canLeapDown = true
     let shouldStepUp = false, shouldStepDown = false, shouldLeapUp = false, shouldLeapDown = false
@@ -361,7 +364,7 @@ function constructPhraseOne() {
     let nextNotePitch = endingNote
     let nextMotion = null
 
-    let getNewNote = () => {
+    const getNewNote = () => {
 
       if (nextMotion === descendingStepwiseMotion) {
         canLeapUp = true
@@ -391,7 +394,7 @@ function constructPhraseOne() {
         if (canLeapDown) motions.push(descendingLeap)
       }
 
-      let fn = randomFromArray(motions)
+      const fn = randomFromArray(motions)
       console.log(`Measure-4: ${fn.name} from ${nextNotePitch} `)
       nextMotion = fn
       if (fn === ascendingLeap || fn === descendingLeap) {
@@ -400,7 +403,7 @@ function constructPhraseOne() {
         canLeapDown = false;
         canLeapUp = false;
       }
-      let newRelativePitch = fn(nextNotePitch)
+      const newRelativePitch = fn(nextNotePitch)
 
       if (measureOne.containsExtremePitch &&
         (newRelativePitch === extremePitch
@@ -424,14 +427,14 @@ function constructPhraseOne() {
       return newRelativePitch
     }
 
-    let rhythm = randomFromArray(Rhythms[rhythmLevel])
+    const rhythm = randomFromArray(Rhythms[rhythmLevel])
     if (rhythm.length === 1) {
       // To keep it simple it's required to have cadence in last measure itself
       console.log("This rhythm is too much for cadential measure! Trying again")
       return constructMeasureFour(recursionDepth + 1)
     }
 
-    let notes = new Array(rhythm.length)
+    const notes = new Array(rhythm.length)
     notes[notes.length - 1] = {pitch: nthLast(cadenceNotes), duration: nthLast(rhythm)}
     notes[notes.length - 2] = {pitch: nthLast(cadenceNotes, 2), duration: nthLast(rhythm, 2)}
 
@@ -457,7 +460,7 @@ function constructPhraseOne() {
   }
 
   function constructMeasureTwo(measureOne, measureFour) {
-    let rhythmLevel = randomFromArray([0, 1, 2, 3])
+    const rhythmLevel = randomFromArray([0, 1, 2, 3])
 
     let containsExtremePitch = false
     let canStepUp = true, canStepDown = true, canLeapUp = true, canLeapDown = true
@@ -476,7 +479,7 @@ function constructPhraseOne() {
       canLeapDown = false
     }
 
-    let getNewNote = () => {
+    const getNewNote = () => {
       if (lastMotion === ascendingLeap) {
         shouldStepDown = true
       }
@@ -500,7 +503,7 @@ function constructPhraseOne() {
         if (canLeapDown) motions.push(descendingLeap)
       }
 
-      let fn = randomFromArray(motions)
+      const fn = randomFromArray(motions)
       console.log(`Measure-2: ${fn.name} from ${previousNotePitch} `)
       lastMotion = fn
       if (fn === ascendingLeap || fn === descendingLeap) {
@@ -512,10 +515,10 @@ function constructPhraseOne() {
       return fn(previousNotePitch)
     }
 
-    let rhythm = randomFromArray(Rhythms[rhythmLevel])
-    let notes = []
+    const rhythm = randomFromArray(Rhythms[rhythmLevel])
+    const notes = []
     for (let i = 0; i < rhythm.length; i++) {
-      let newRelativePitch = getNewNote()
+      const newRelativePitch = getNewNote()
       if (newRelativePitch === extremePitch) {
         containsExtremePitch = true
         phraseExtremeReached = true
@@ -550,7 +553,7 @@ function constructPhraseOne() {
       console.log(`${this.name} tried ${recursionDepth} times. Giving up!`)
       return []
     }
-    let rhythmLevel = randomFromArray([0, 1, 2, 3])
+    const rhythmLevel = randomFromArray([0, 1, 2, 3])
 
     let containsExtremePitch = false
     let canStepUp = true, canStepDown = true, canLeapUp = true, canLeapDown = true
@@ -569,7 +572,7 @@ function constructPhraseOne() {
       canLeapDown = false
     }
 
-    let getNewNote = () => {
+    const getNewNote = () => {
       if (lastMotion === ascendingLeap) {
         shouldStepDown = true
       }
@@ -593,7 +596,7 @@ function constructPhraseOne() {
         if (canLeapDown) motions.push(descendingLeap)
       }
 
-      let fn = randomFromArray(motions)
+      const fn = randomFromArray(motions)
       console.log(`Measure-3: ${fn.name} from ${previousNotePitch} `)
       lastMotion = fn
       if (fn === ascendingLeap || fn === descendingLeap) {
@@ -605,10 +608,10 @@ function constructPhraseOne() {
       return fn(previousNotePitch)
     }
 
-    let rhythm = randomFromArray(Rhythms[rhythmLevel])
-    let notes = []
+    const rhythm = randomFromArray(Rhythms[rhythmLevel])
+    const notes = []
     for (let i = 0; i < rhythm.length; i++) {
-      let newRelativePitch = getNewNote()
+      const newRelativePitch = getNewNote()
       if (newRelativePitch === extremePitch) {
         containsExtremePitch = true
         phraseExtremeReached = true
@@ -623,7 +626,7 @@ function constructPhraseOne() {
       previousNotePitch = notes[i].pitch
     }
 
-    let requiresLeapToNextNote = Math.abs(Math.abs(measureFour.notes[0].pitch) - Math.abs(nthLast(notes).pitch)) !== 1
+    const requiresLeapToNextNote = Math.abs(Math.abs(measureFour.notes[0].pitch) - Math.abs(nthLast(notes).pitch)) !== 1
     if (requiresLeapToNextNote && !canLeapFromFirstToSecond(measureFour.notes[0].pitch, nthLast(notes).pitch)) {
       console.log("Next note requires a leap and leap not allowed, trying again!")
       return constructMeasureThree(measureTwo, measureFour, recursionDepth + 1)
@@ -643,12 +646,12 @@ function constructPhraseOne() {
     }
   }
 
-  let measureOne = constructMeasureOne()
-  let measureFour = constructMeasureFour(measureOne)
-  let measureTwo = constructMeasureTwo(measureOne, measureFour);
-  let measureThree = constructMeasureThree(measureTwo, measureFour);
+  const measureOne = constructMeasureOne()
+  const measureFour = constructMeasureFour(measureOne)
+  const measureTwo = constructMeasureTwo(measureOne, measureFour);
+  const measureThree = constructMeasureThree(measureTwo, measureFour);
 
-  let phrase = [measureOne, measureTwo, measureThree, measureFour];
+  const phrase = [measureOne, measureTwo, measureThree, measureFour];
   console.log("Phrase-1", phrase)
   return phrase
 }
@@ -664,7 +667,7 @@ function constructPhraseTwo() {
 
 function OctaveMapper() {
   // Restricted range for melody key!
-  let referenceOctaves = {
+  const referenceOctaves = {
     '3': ['G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B', 'Cb'],
     '4': ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'E#', 'Fb', 'F', 'F#', 'Gb']
   }
@@ -682,22 +685,22 @@ function OctaveMapper() {
   }
 }
 
-let octaveMapper = new OctaveMapper()
+const octaveMapper = new OctaveMapper()
 
 /**
  * Returns list of measures/bars. Pitches are relative to 1.
  * 1 => First scale degree, 0 => 7th scale degree, ...
  * @returns list of measures
  */
-function randomMelody() {
-  let measures = 8;
+export function randomMelody() {
+  const measures = 8;
 
   // 4/4 Time only
   // No accidental yet!
   // Fixed voice range
 
-  let phrase1 = constructPhraseOne()
-  let phrase2 = constructPhraseTwo(phrase1)
+  const phrase1 = constructPhraseOne()
+  const phrase2 = constructPhraseTwo(phrase1)
 
   return phrase1
 }
@@ -708,20 +711,20 @@ function randomMelody() {
  * @param key of type Key
  * @returns {*}
  */
-function melodyInContextOfKey(melody, key) {
-  let scale = key.scale()
+export function melodyInContextOfKey(melody, key) {
+  const scale = key.scale()
 
   key = key.name().replace("m", "")
 
-  let startingOctave = octaveMapper.getOctave(key)
-  let FORWARD = 0, BACKWARDS = 1
-  let pitchNumberToNote = x => {
+  const startingOctave = octaveMapper.getOctave(key)
+  const FORWARD = 0, BACKWARDS = 1
+  const pitchNumberToNote = x => {
     // Go up by step if it's C increase octave
     // Go down by step, if it's B decrease octave
 
     let octave = startingOctave
     let number = 1
-    let cursor = new CircularCursor(scale)
+    const cursor = new CircularCursor(scale)
     let movement = null
 
     if (x === 1) {
@@ -743,8 +746,8 @@ function melodyInContextOfKey(melody, key) {
         movement = FORWARD
       }
 
-      let equivalentOfC = scale.find(n => (n === 'C' || n === 'B#' || n === 'C#'))
-      let equivalentOfB = scale.find(n => (n === 'B' || n === 'Cb' || n === 'Bb'))
+      const equivalentOfC = scale.find(n => (n === 'C' || n === 'B#' || n === 'C#'))
+      const equivalentOfB = scale.find(n => (n === 'B' || n === 'Cb' || n === 'Bb'))
       if ((movement === BACKWARDS) && (equivalentOfB === note)) {
         octave--
       } else if ((movement === FORWARD) && (equivalentOfC === note)) {
@@ -760,10 +763,10 @@ function melodyInContextOfKey(melody, key) {
     }
   }
   return melody.filter(it => it.notes).map(measure => {
-    let notes = measure.notes.filter(it => it)
+    const notes = measure.notes.filter(it => it)
       .map(note => {
         // console.log("note", note)
-        let pn = pitchNumberToNote(note.pitch)
+        const pn = pitchNumberToNote(note.pitch)
 
         let name = '', octave = ''
         if(pn) {
@@ -773,7 +776,7 @@ function melodyInContextOfKey(melody, key) {
           if (note.alter === -1) name += "b"
         }
 
-        let type = durationType(note.duration) || ""
+        const type = durationType(note.duration) || ""
         return {
           name: name,
           octave: octave,
@@ -788,23 +791,23 @@ function melodyInContextOfKey(melody, key) {
 
 }
 
-function melodyWithoutContextOfKey(melody, key) {
-  let scale = key.scale()
+export function melodyWithoutContextOfKey(melody, key) {
+  const scale = key.scale()
   key = key.name().replace("m", "")
 
-  let startingOctave = octaveMapper.getOctave(key)
-  let geq = (x, y) => x >= y
-  let gt = (x, y) => x > y
+  const startingOctave = octaveMapper.getOctave(key)
+  const geq = (x, y) => x >= y
+  const gt = (x, y) => x > y
 
-  let FORWARD = 0, BACKWARDS = 1
+  const FORWARD = 0, BACKWARDS = 1
 
-  let noteToPitchNumber = note => {
+  const noteToPitchNumber = note => {
     // Go up by step if it's C increase octave
     // Go down by step, if it's B decrease octave
 
     let octave = startingOctave
     let number = 1
-    let cursor = new CircularCursor(scale)
+    const cursor = new CircularCursor(scale)
     let movement = null
 
     if (startingOctave === note.octave) {
@@ -850,8 +853,8 @@ function melodyWithoutContextOfKey(melody, key) {
         x = cursor.previous()
       }
 
-      let equivalentOfC = scale.find(n => (n === 'C' || n === 'B#' || n === 'C#'))
-      let equivalentOfB = scale.find(n => (n === 'B' || n === 'Cb' || n === 'Bb'))
+      const equivalentOfC = scale.find(n => (n === 'C' || n === 'B#' || n === 'C#'))
+      const equivalentOfB = scale.find(n => (n === 'B' || n === 'Cb' || n === 'Bb'))
       if (movement === FORWARD && (equivalentOfC === x)) {
         octave++
       } else if (movement === BACKWARDS && (equivalentOfB === x)) {
@@ -879,11 +882,11 @@ function melodyWithoutContextOfKey(melody, key) {
   }
 
   return melody.map(measure => {
-    let notes = measure.notes.filter(it => it)
+    const notes = measure.notes.filter(it => it)
       .map(note => {
         // console.log("note", note)
-        let pn = noteToPitchNumber(note)
-        let duration = Object.keys(DURATION_TO_NAME).find(k => DURATION_TO_NAME[k] === note.type)
+        const pn = noteToPitchNumber(note)
+        const duration = Object.keys(DURATION_TO_NAME).find(k => DURATION_TO_NAME[k] === note.type)
         return {
           pitch: pn && pn.pitch,
           duration: duration,
@@ -899,17 +902,17 @@ function melodyWithoutContextOfKey(melody, key) {
  *
  * @param melody : list of measures: ([{notes: [{pitch, ..}]}, ..])
  */
-function diatonicMelodicInversion(melody) {
-  let copy = simpleClone(melody)
-  let melodyNotes = melody.flatMap(it => it.notes)
+export function diatonicMelodicInversion(melody) {
+  const copy = simpleClone(melody)
+  const melodyNotes = melody.flatMap(it => it.notes)
 
-  let referenceNote = melodyNotes[0]
+  const referenceNote = melodyNotes[0]
   let inverted = [referenceNote]
   let lastNote = referenceNote
 
   for (let i = 1; i < melodyNotes.length; i++) {
-    let diff = melodyNotes[i].pitch - melodyNotes[i - 1].pitch
-    let newNote = simpleClone(melodyNotes[i])
+    const diff = melodyNotes[i].pitch - melodyNotes[i - 1].pitch
+    const newNote = simpleClone(melodyNotes[i])
     newNote.pitch = lastNote.pitch - diff
     inverted.push(newNote)
     lastNote = newNote
@@ -924,12 +927,12 @@ function diatonicMelodicInversion(melody) {
   return copy
 }
 
-let melodyToSimpleString = (melody) => {
+export const melodyToSimpleString = (melody) => {
   return melody.flatMap(it => it.notes).map(it => it.fullName || it.pitch).join(",")
 }
 
 // TESTING
-let melody = [{
+const melody = [{
   notes: [{pitch: 1, duration: '1/8', dot: false}, {pitch: 3, duration: '1/8', dot: false},
     {pitch: 7, duration: '1/8', dot: false},
     {pitch: 8, duration: '1/8', dot: false},
@@ -939,11 +942,11 @@ let melody = [{
 }]
 logJson("Tested on melody", melody.flatMap(it => it.notes).map(it => it.pitch))
 
-let keys = ['Am', 'Bm', "Dm", "Cm", "Gm", "C", "G", "A", "F", "Bb", "Eb", "Ab", "E", "Em"].map(it => new Key(it))
-for (i in keys) {
-  let key = keys[i]
-  let x = melodyInContextOfKey(melody, key)
-  let y = melodyWithoutContextOfKey(x, key)
+const keys = ['Am', 'Bm', "Dm", "Cm", "Gm", "C", "G", "A", "F", "Bb", "Eb", "Ab", "E", "Em"].map(it => new Key(it))
+for (const i in keys) {
+  const key = keys[i]
+  const x = melodyInContextOfKey(melody, key)
+  const y = melodyWithoutContextOfKey(x, key)
 
   if (!equals(y, melody)) {
     log(key)

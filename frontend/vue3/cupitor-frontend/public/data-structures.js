@@ -50,7 +50,7 @@ export function computeIfAbsent(map, key, fn) {
   return map[key]
 }
 
-function CircularCursor(arr) {
+export function CircularCursor(arr) {
   this.items = arr
   this.currentIndex = -1
   // start at 0
@@ -130,9 +130,9 @@ export function randomFromArray(cc) {
 const plus = x => target => target + x
 const minus = x => target => target - x
 
-const uniqueByJsonRepresentation = (x, i, a) => a.map(it => JSON.stringify(it)).indexOf(JSON.stringify(x)) === i
+export const uniqueByJsonRepresentation = (x, i, a) => a.map(it => JSON.stringify(it)).indexOf(JSON.stringify(x)) === i
 
-const permutate = (inputArr) => {
+export const permutate = (inputArr) => {
   const result = [];
 
   const permute = (arr, m = []) => {
@@ -153,29 +153,29 @@ const permutate = (inputArr) => {
 }
 
 
-const equals = (x, y) => JSON.stringify(x) === JSON.stringify(y)
+export const equals = (x, y) => JSON.stringify(x) === JSON.stringify(y)
 
-const log = console.log
+export const log = console.log
 
-function logJson() {
-  const args = []
+export function logJson() {
+  /*const args = []
   for (let i = 0; i < arguments.length; i++) {
     args.push(arguments[i])
   }
-  console.log.apply(null, args.map(it => JSON.stringify(it)), arguments.callee.caller && arguments.callee.caller.name)
+  console.log.apply(null, args.map(it => JSON.stringify(it)), arguments.callee.caller && arguments.callee.caller.name)*/
 }
 
 function simpleClone(obj) {
   return JSON.parse(JSON.stringify(obj))
 }
 
-const intersection = function (a, b) {
+export const intersection = function (a, b) {
   return [a, b].reduce((p, c) => p.filter(e => c.includes(e)));
 }
 
 const findDuplicates = arry => arry.filter((item, index) => arry.indexOf(item) !== index)
 
-function cartesian(...args) {
+export function cartesian(...args) {
   if (!args.length) return []
   const r = [], max = args.length - 1;
 
@@ -223,7 +223,7 @@ const parseRangeInput = (measures) => {
   return Array.from(new Set(ret)).sort((a, b) => a - b)
 }
 
-let generatePairs = (arr) => {
+export const generatePairs = (arr) => {
   const v = []
   const num = arr.length
   for (let i = 0; i < num; i++) {
@@ -235,7 +235,7 @@ let generatePairs = (arr) => {
   return v
 }
 
-const groupBy = function (xs, key, consumer) {
+export function groupBy(xs, key, consumer) {
   let fn = key
   if (typeof key === 'string') {
     fn = it => it[key]
@@ -250,7 +250,8 @@ const groupBy = function (xs, key, consumer) {
     })
   }
   return out
-};
+}
+
 
 function toGraph(arr) {
   const graph = {}; // this will hold the node "IDs"
@@ -277,18 +278,6 @@ function putIntoBuckets(buckets, propertyFn, arr) {
   return res
 }
 
-// to be called after getting the result from toGraph(arr)
-function connectedComponents(graph) {
-  const subGraphs = []; // array of connected vertices
-  const visited = {};
-  for (const i in graph) { // for every node...
-    const subGraph = dfs(graph, i, visited); // ... we call dfs
-    if (subGraph != null) // if vertex is not added yet in another graph
-      subGraphs.push(subGraph);
-  }
-  return subGraphs;
-}
-
 // it will return an array of all connected nodes in a subgraph
 function dfs(graph, node, visited) {
   if (visited[node]) return null; // node is already visited, get out of here.
@@ -301,6 +290,18 @@ function dfs(graph, node, visited) {
     subGraph = subGraph.concat(result);
   }
   return subGraph;
+}
+
+// to be called after getting the result from toGraph(arr)
+function connectedComponents(graph) {
+  const subGraphs = []; // array of connected vertices
+  const visited = {};
+  for (const i in graph) { // for every node...
+    const subGraph = dfs(graph, i, visited); // ... we call dfs
+    if (subGraph != null) // if vertex is not added yet in another graph
+      subGraphs.push(subGraph);
+  }
+  return subGraphs;
 }
 
 /**
@@ -318,7 +319,7 @@ function choose(arr, k, prefix = []) {
 }
 
 
-function number(str) {
+export function number(str) {
   if (typeof str === 'number') return str
   const [x, y] = str.split("/")
   if (y) {
@@ -368,7 +369,7 @@ function until(condition, maxReps, run) {
   return false
 }
 
-function nTimes(n, fn) {
+export function nTimes(n, fn) {
   const res = []
   for (let i = 0; i < n; i++) {
     res.push(fn())
@@ -442,7 +443,7 @@ function randomGroupingPreservingOrder(arr, numGroups, min = 1) {
  * @param n
  * @returns {[[]]|[]|*[]}
  */
-function combinations(collection, n) {
+export function combinations(collection, n) {
   const array = _.values(collection);
   if (array.length < n) {
     return [];
@@ -507,7 +508,7 @@ function ArrayPlusDelay(array, consumer, delay) {
   let i = 0
 
   // seed first call and store interval (to clear later)
-  var interval = setInterval(function () {
+  const interval = setInterval(function () {
     // each loop, call passed in function
     consumer(array[i]);
 

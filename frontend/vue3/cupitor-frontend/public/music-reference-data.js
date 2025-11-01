@@ -1,4 +1,48 @@
-let evalSharpsFlats = x => {
+import {permutate, logJson, number, schedule, uuid, uniqueByJsonRepresentation, CircularCursor, cartesian} from './data-structures.js';
+
+export const majorScales = {
+  'G': 'G - A - B - C - D - E - F#',
+  'Gb': 'Gb - Ab - Bb - Cb - Db - Eb - F',
+  'G#': 'G# - A# - B# - C# - D# - E# - F#',
+  'F': 'F - G - A - Bb - C - D - E',
+  'F#': 'F# - G# - A# - B - C# - D# - E#',
+  'E': 'E - F# - G# - A - B - C# - D#',
+  'Eb': 'Eb - F - G - Ab - Bb - C - D',
+  'D': 'D - E - F# - G - A - B - C#',
+  'Db': 'Db - Eb - F - Gb - Ab - Bb - C',
+  'D#': 'D# - E# - F# - G# - A# - B# - C#',
+  'C': 'C - D - E - F - G - A - B',
+  'C#': 'C# - D# - E# - F# - G# - A# - B#',
+  'B': 'B - C# - D# - E - F# - G# - A#',
+  'Bb': 'Bb - C - D - Eb - F - G - A',
+  'A': 'A - B - C# - D - E - F# - G#',
+  'Ab': 'Ab - Bb - C - Db - Eb - F - G',
+  'A#': 'A# - B# - C# - D# - E# - F# - G#',
+};
+
+const minorScales = {
+  'C': 'C - D - Eb - F - G - Ab - Bb',
+  'C#': 'C# - D# - E - F# - G# - A - B',
+  'D': 'D - E - F - G - A - Bb - C',
+  'Db': 'Db - Eb - Fb - Gb - Ab - Bb - Cb',
+  'D#': 'D# - E# - F# - G# - A# - B - C#',
+  'E': 'E - F# - G - A - B - C - D',
+  'Eb': 'Eb - F - Gb - Ab - Bb - Cb - Db',
+  'F': 'F - G - Ab - Bb - C - Db - Eb',
+  'F#': 'F# - G# - A - B - C# - D - E',
+  'G': 'G - A - Bb - C - D - Eb - F',
+  'Gb': 'Gb - Ab - bb - Cb - Db - Eb - Fb',
+  'G#': 'G# - A# - B - C# - D# - E - F#',
+  'A': 'A - B - C - D - E - F - G',
+  'Ab': 'Ab - Bb - Cb - Db - Eb - Fb - Gb',
+  'A#': 'A# - B# - C# - D# - E# - F# - G#',
+  'B': 'B - C# - D - E - F# - G - A',
+  'Bb': 'Bb - C - Db - Eb - F - Gb - Ab'
+}
+
+export const notesInScale = (scales, k) => scales[k].split(' - ');
+
+const evalSharpsFlats = x => {
   x = "" + x
   if (x.length <= 2) return x;
   if (x.endsWith("#b")) return x.replaceAll("#b", "")
@@ -6,14 +50,14 @@ let evalSharpsFlats = x => {
   return x
 }
 
-let roundAt = (lim, x) => x === lim ? x : x % lim;
+const roundAt = (lim, x) => x === lim ? x : x % lim;
 
-let pattern = nums => {
+const pattern = nums => {
   nums = nums.map(it => '' + it).map(it => it.split(''))
   return notesInScale => nums.map(xx => evalSharpsFlats(notesInScale[roundAt(7, xx[0] - 1)] + (xx[1] || ''))).filter(x => x);
 }
 
-let chordPatterns = {
+export const chordPatterns = {
   'maj': pattern([1, 3, 5]),
   // 'maj(-5)': pattern([1, 3]),
   'min': pattern([1, '3b', 5]),
@@ -50,11 +94,11 @@ const romanHash = {
   'VII': 7
 };
 
-function romanToInt(s) {
+export function romanToInt(s) {
   return romanHash[s.toUpperCase()]
 }
 
-let Rhythms = [
+const Rhythms = [
 //  Level-1
   [
     ['1'],
@@ -81,7 +125,7 @@ let Rhythms = [
   ].map(it => permutate(it)).flat().filter(uniqueByJsonRepresentation)
 ]
 
-let DURATION_TO_NAME = {
+export const DURATION_TO_NAME = {
   '1': 'whole',
   '1/2': 'half',
   '1/4': 'quarter',
@@ -93,7 +137,7 @@ let DURATION_TO_NAME = {
   '3/16': 'dotted-eighth'
 }
 
-let DURATION_TO_SYLLABLE = {
+export const DURATION_TO_SYLLABLE = {
   '16th': 'b',
   'eighth': 'ba',
   'quarter': 'bum',
@@ -105,58 +149,16 @@ let DURATION_TO_SYLLABLE = {
   'dotted-whole': 'bu-u-u-u-u-m'
 }
 
-function durationTypeToNumber(type) {
+export function durationTypeToNumber(type) {
   return number(Object.keys(DURATION_TO_NAME).find(it => DURATION_TO_NAME[it] === type))
 }
 
-function durationType(numericForm) {
-  let k = Object.keys(DURATION_TO_NAME).find(it => number(it) === number(numericForm))
+export function durationType(numericForm) {
+  const k = Object.keys(DURATION_TO_NAME).find(it => number(it) === number(numericForm))
   return DURATION_TO_NAME[k]
 }
 
-let majorScales = {
-  'G': 'G - A - B - C - D - E - F#',
-  'Gb': 'Gb - Ab - Bb - Cb - Db - Eb - F',
-  'G#': 'G# - A# - B# - C# - D# - E# - F#',
-  'F': 'F - G - A - Bb - C - D - E',
-  'F#': 'F# - G# - A# - B - C# - D# - E#',
-  'E': 'E - F# - G# - A - B - C# - D#',
-  'Eb': 'Eb - F - G - Ab - Bb - C - D',
-  'D': 'D - E - F# - G - A - B - C#',
-  'Db': 'Db - Eb - F - Gb - Ab - Bb - C',
-  'D#': 'D# - E# - F# - G# - A# - B# - C#',
-  'C': 'C - D - E - F - G - A - B',
-  'C#': 'C# - D# - E# - F# - G# - A# - B#',
-  'B': 'B - C# - D# - E - F# - G# - A#',
-  'Bb': 'Bb - C - D - Eb - F - G - A',
-  'A': 'A - B - C# - D - E - F# - G#',
-  'Ab': 'Ab - Bb - C - Db - Eb - F - G',
-  'A#': 'A# - B# - C# - D# - E# - F# - G#',
-};
-
-let minorScales = {
-  'C': 'C - D - Eb - F - G - Ab - Bb',
-  'C#': 'C# - D# - E - F# - G# - A - B',
-  'D': 'D - E - F - G - A - Bb - C',
-  'Db': 'Db - Eb - Fb - Gb - Ab - Bb - Cb',
-  'D#': 'D# - E# - F# - G# - A# - B - C#',
-  'E': 'E - F# - G - A - B - C - D',
-  'Eb': 'Eb - F - Gb - Ab - Bb - Cb - Db',
-  'F': 'F - G - Ab - Bb - C - Db - Eb',
-  'F#': 'F# - G# - A - B - C# - D - E',
-  'G': 'G - A - Bb - C - D - Eb - F',
-  'Gb': 'Gb - Ab - bb - Cb - Db - Eb - Fb',
-  'G#': 'G# - A# - B - C# - D# - E - F#',
-  'A': 'A - B - C - D - E - F - G',
-  'Ab': 'Ab - Bb - Cb - Db - Eb - Fb - Gb',
-  'A#': 'A# - B# - C# - D# - E# - F# - G#',
-  'B': 'B - C# - D - E - F# - G - A',
-  'Bb': 'Bb - C - Db - Eb - F - Gb - Ab'
-}
-
-let notesInScale = (scales, k) => scales[k].split(' - ');
-
-let Cadences = {
+const Cadences = {
   Half: 0,
   IAC: 1,
   PAC: 2,
@@ -167,12 +169,12 @@ let Cadences = {
 /**
  * Are enharmonically equal
  */
-let equalNotes = (x, y) => {
+export const equalNotes = (x, y) => {
   if (x === y) return true;
   return [['A#', 'Bb'], ['B', 'Cb'], ['B#', 'C'], ['C#', 'Db'], ['D#', 'Eb'], ['E', 'Fb'], ['E#', 'F'], ['F#', 'Gb'], ['G#', 'Ab']].find(it => it.includes(x) && it.includes(y))
 }
 
-function getScale(key) {
+export function getScale(key) {
   key = key.replaceAll("\n", "").replaceAll(" ", "")
   let scale = null
   if (key.endsWith("m")) {
@@ -184,7 +186,7 @@ function getScale(key) {
   return scale;
 }
 
-let majorChordProgressions = {
+export const majorChordProgressions = {
   "Primary": [{
     data: 'I-IV-V-I'
   }],
@@ -193,7 +195,7 @@ let majorChordProgressions = {
   }]
 }
 
-let minorChordProgressions = {
+export const minorChordProgressions = {
   "Primary": [{
     data: 'i-iv-v-i'
   }],
@@ -208,10 +210,19 @@ let minorChordProgressions = {
   }]
 }
 
-let getTritoneNote = (note) => {
-  let {cc1, cc2} = chromaticScales();
+function chromaticScales() {
+  const chromaticScale1 = ['A', 'Bb', 'B', 'C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab']
+  const chromaticScale2 = ['A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#']
 
-  let nIdx = cc1.goTo(note);
+  const cc1 = new CircularCursor(chromaticScale1)
+  const cc2 = new CircularCursor(chromaticScale2)
+  return {cc1, cc2};
+}
+
+export const getTritoneNote = (note) => {
+  const {cc1, cc2} = chromaticScales();
+
+  const nIdx = cc1.goTo(note);
   let found = nIdx >= 0 && cc1.next(6)
   if(!found) {
     cc2.goTo(note)
@@ -221,7 +232,7 @@ let getTritoneNote = (note) => {
 }
 
 
-let allChords = {}
+export const allChords = {}
 Object.keys(majorScales).forEach(k => {
   Object.keys(chordPatterns).forEach(cpk => {
     allChords[k + cpk] = {
@@ -231,11 +242,11 @@ Object.keys(majorScales).forEach(k => {
   })
 })
 
-function normaliseChordName(name) {
+export function normaliseChordName(name) {
  return name.replaceAll("maj7", "M7").replaceAll("maj", "").replaceAll("dim", "o").replaceAll("min", "m").replaceAll("aug", "+")
 }
 
-function deNormaliseChordName(name) {
+export function deNormaliseChordName(name) {
   if(!["M7", "o", "m", "+"].some(it => name.indexOf(it) > 0)) {
     return name + "maj"
   }
@@ -243,47 +254,38 @@ function deNormaliseChordName(name) {
 }
 
 
-function chromaticScales() {
-  let chromaticScale1 = ['A', 'Bb', 'B', 'C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab']
-  let chromaticScale2 = ['A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#']
-
-  let cc1 = new CircularCursor(chromaticScale1)
-  let cc2 = new CircularCursor(chromaticScale2)
-  return {cc1, cc2};
-}
-
-let findChordsWithAChromaticNote = chordTones => {
-  let {cc1, cc2} = chromaticScales();
+export const findChordsWithAChromaticNote = chordTones => {
+  const {cc1, cc2} = chromaticScales();
 
   let neighboringNotes = new Set()
   chordTones.forEach(n => {
     let i = cc1.goTo(n)
     if(i >= 0) {
-      let [a, b, c] = cc1.triplet()
+      const [a, b, c] = cc1.triplet()
       neighboringNotes.add(a)
       neighboringNotes.add(c)
     }
 
     i = cc2.goTo(n)
     if(i >= 0) {
-      let [a, b, c] = cc2.triplet()
+      const [a, b, c] = cc2.triplet()
       neighboringNotes.add(a)
       neighboringNotes.add(c)
     }
   })
 
   neighboringNotes = Array.from(neighboringNotes)
-  let out = []
+  const out = []
   Object.keys(allChords).forEach(c => {
-    let hasSomethingCommon = allChords[c].notes.some(n => neighboringNotes.find(nt => equalNotes(nt, n)))
+    const hasSomethingCommon = allChords[c].notes.some(n => neighboringNotes.find(nt => equalNotes(nt, n)))
     if(hasSomethingCommon) out.push(c)
   })
 
   return out
 }
 
-let raiseNote = n => {
-  let {cc1, cc2} = chromaticScales();
+export const raiseNote = n => {
+  const {cc1, cc2} = chromaticScales();
   let i = cc1.goTo(n)
   if(i >= 0) {
     return cc1.next()
@@ -294,8 +296,8 @@ let raiseNote = n => {
   }
 }
 
-let flattenNote = n => {
-  let {cc1, cc2} = chromaticScales();
+const flattenNote = n => {
+  const {cc1, cc2} = chromaticScales();
   let i = cc1.goTo(n)
   if(i >= 0) {
     return cc1.previous()
@@ -306,16 +308,16 @@ let flattenNote = n => {
   }
 }
 
-let keyList = ['C', 'Am', 'F', 'Dm', 'Bb', 'Gm', 'Eb', 'Cm', 'Ab', 'Fm', 'Db', 'Bbm', 'Gb', 'D#m', 'B', 'G#m', 'E', 'C#m', 'A', 'F#m', 'D', 'Bm', 'G', 'Em']
+export const keyList = ['C', 'Am', 'F', 'Dm', 'Bb', 'Gm', 'Eb', 'Cm', 'Ab', 'Fm', 'Db', 'Bbm', 'Gb', 'D#m', 'B', 'G#m', 'E', 'C#m', 'A', 'F#m', 'D', 'Bm', 'G', 'Em']
 
 function possibleOctaves(noteName) {
   if(['C', 'D'].includes(noteName)) return [3, 4, 5]
   return [2, 3, 4, 5]
 }
 
-function allVersionsOfChord(chordName) {
-  let out = []
-  let chordNotesInOrder = allChords[chordName].notes;
+export function allVersionsOfChord(chordName) {
+  const out = []
+  const chordNotesInOrder = allChords[chordName].notes;
   permutate(chordNotesInOrder).forEach(notes => {
     cartesian(...notes.map(it => cartesian([it], possibleOctaves(it)))).forEach(_notes => {
       let inv = ''

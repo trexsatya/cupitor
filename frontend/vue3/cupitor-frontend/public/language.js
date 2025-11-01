@@ -1,4 +1,4 @@
-import { schedule, computeIfAbsent, randomFromArray, uuid, range } from './data-structures.js';
+import {computeIfAbsent, randomFromArray, range, schedule, uuid} from './data-structures.js';
 import {conjugateTableSpanish} from './spanish.js';
 
 /* eslint-disable @typescript-eslint/no-use-before-define */
@@ -2045,8 +2045,8 @@ const changeIndices = (id, from, to) => {
   $('#' + id).data({fromIndex: from, toIndex: to})
 }
 
-function collapseSubLines(el) {
-  $(el).parents('.lines-cntnr').find('.sub-lines-cntnr').slideToggle('slow')
+function collapseSubLines(evt) {
+  $(evt.target).parents('.lines-cntnr').find('.sub-lines-cntnr').slideToggle('slow')
 }
 
 function renderLines(id, url) {
@@ -2557,7 +2557,15 @@ export function removeHintsInBrackets(txt) {
  * @param{string} txt
  */
 export function expandWords(txt, lang='sv') {
-  txt = getSearchedTerms(txt).join(SEPARATOR_PIPE)
+  const terms = getSearchedTerms(txt)
+  const final = []
+  terms.forEach(term => {
+    if (lang === 'es' && ['lo', 'le', 'la'].some(it => term.trim().endsWith(it))) {
+      final.push(term.substring(0, term.length - 2))
+    }
+    final.push(term)
+  })
+  txt = final.join(SEPARATOR_PIPE)
   const startTime = new Date().getTime()
 
   const t = _expandWords(txt, lang)

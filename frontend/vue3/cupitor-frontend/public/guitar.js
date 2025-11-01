@@ -1,3 +1,38 @@
+/* eslint-disable @typescript-eslint/camelcase */
+
+import {
+  getScale,
+  durationType,
+  durationTypeToNumber,
+  equalNotes,
+  allVersionsOfChord,
+  chordPatterns,
+  majorChordProgressions,
+  normaliseChordName,
+  romanToInt,
+  getTritoneNote,
+  keyList,
+  allChords,
+  findChordsWithAChromaticNote,
+  notesInScale, majorScales, minorChordProgressions, raiseNote
+} from './music-reference-data.js';
+import {intersection, log, cartesian, combinations, uniqueByJsonRepresentation, permutate, number, groupBy} from './data-structures.js';
+import {
+  diatonicMelodicInversion,
+  Key,
+  melodyInContextOfKey,
+  melodyToSimpleString,
+  melodyWithoutContextOfKey,
+  randomMelody
+} from './music.js';
+import {
+  getNotesFromHtml,
+  analyseRhythmSimilarity,
+  populateNoteheadData,
+  guessChords
+} from './music-analysis.js';
+import {formatXml, MusicXml} from './musicxml.js';
+
 const debug = false; //Enable/disable debug
 const defaultSet = { //vars}
   notes: { //1-based string, 1st string highest
@@ -80,7 +115,7 @@ function chordTonesForHarmony(harmony, key) {
 function deduplicateChords(chords) {
   chords = chords.map(c => _.sortBy(c, x => x.string))
 
-  let deduplicated = []
+  const deduplicated = []
   chords.forEach(c => {
     if(!deduplicated.find(d => _.isEqual(c, d))) deduplicated.push(c)
   })
@@ -288,10 +323,10 @@ const Fretboard = function () {
 
     const triadPermutations = permutate(notes)
     const matches = (strGroup, _notes) => {
-      let positions = []
+      const positions = []
       for (let i = 0; i < _notes.length; i++) {
         const n = _notes[i]
-        let found = this.findNoteOnFretboard({name: n}).filter(it => it.string + '' === strGroup[i] + '')
+        const found = this.findNoteOnFretboard({name: n}).filter(it => it.string + '' === strGroup[i] + '')
         if(found.length) positions.push(found)
       }
       return cartesian(...positions).filter(it => combinations(it, 2).every(this.isPlayable))
@@ -491,74 +526,6 @@ const Fretboard = function () {
 
 };
 
-/**
- *
- * @param osmd OSMD object
- * @returns {*[]}
- */
-const getHtmlElementsForStaffNoteHeads = (osmd) => {
-  const result = []
-  const measureLists = osmd.graphic.measureList
-
-  let vfNoteId = 0
-  let prevKeySignature = undefined
-  for (let a = 0; a < measureLists.length; a++) {
-    const measures = measureLists[a]
-    for (let i = 0; i < measures.length; i++) {
-      const measure = measures[i]
-      if(!measure) continue
-      let ks = measure.stave.modifiers.find(it => it.attrs.type === "KeySignature")
-      ks = ks && ks.keySpec
-      if(!ks) ks = prevKeySignature
-      else prevKeySignature = ks
-
-      const staffEntries = measure.staffEntries
-      for (let j = 0; j < staffEntries.length; j++) {
-        const staff = staffEntries[j]
-        const voices = staff.graphicalVoiceEntries
-        for (let k = 0; k < voices.length; k++) {
-          const voice = voices[k]
-          const notes = voice.notes
-          for (let l = 0; l < notes.length; l++) {
-            const sourceNote = notes[l].sourceNote
-            const vfnotes = notes[l].vfnote
-            const vfnoteIndex = notes[l].vfnoteIndex
-            const vfpitch = notes[l].vfpitch
-            if(!vfnotes) continue
-            let nhds = $(vfnotes[0].attrs.el).find(".vf-notehead").toArray();
-            if(!nhds.length) continue
-            const noteHeadEl = nhds[vfnoteIndex];
-            const lyricEntryWithId = Object.values(sourceNote.voiceEntry.lyricsEntries.table).map(Object.values).flat().find(it => it.text && it.text.startsWith("id="));
-            let id = null
-            if(lyricEntryWithId) {
-              id = lyricEntryWithId.text.slice(3)
-              id = number(id)
-              if (vfnotes[0].note_heads.length > 1) {
-                id = id - vfnotes[0].note_heads.length + vfnoteIndex + 1
-              }
-            }
-
-            result.push({
-              staveNoteEl: vfnotes[0].attrs.el, // vfnotes[1] must be equal to vfnoteIndex
-              noteHeadEl: noteHeadEl,
-              key: vfnotes[0].keys[vfnoteIndex], //Assuming ordered from below to up
-              pitch: vfpitch, //undefined for rests
-              sourceNote: sourceNote, //From sourceNote everything else can be reached e.g.: osmd.rules.GNote(x[43].sourceNote)
-              measureList: a,
-              measure: i,
-              voice: voice,
-              id: id,
-              keySignature: ks,
-              vfNoteId: vfNoteId++
-            })
-          }
-        }
-      }
-    }
-  }
-  return result
-}
-
 function colorVoices(xml) {
   const colors = {
     "1": "#000000",
@@ -599,21 +566,6 @@ function highlightNonChordTones(xml, key) {
   })
 }
 
-/**
- * Use OSMD internal details to find the screen position of measure. Position is relative to the OSMD page div
- * @param measureNumber
- * @param osmd
- * @returns {{top, left: (number|*), width: null, height}}
- */
-function getMeasurePosition(measureNumber, osmd) {
-  osmd = osmd || osmds[0]
-  const st = osmd.graphic.measureList[measureNumber][0].stave
-  const off = $(st.context.element).offset()
-  let w = null
-  if (st.end_x) w = st.end_x - st.start_x
-  else w = st.width
-  return {top: st.y, left: st.start_x, width: w, height: st.height}
-}
 
 function removeTechnicalDetails(xml) {
   xml.find("technical").remove()
@@ -621,91 +573,6 @@ function removeTechnicalDetails(xml) {
 }
 
 window.noteheadCache = {}
-
-function populateNoteheadData(osmd, jqueryXml) {
-  window.noteheadCache = {}
-  const result = getHtmlElementsForStaffNoteHeads(osmd)
-  let clefChange = jqueryXml.find("clef-octave-change").text()
-  if (clefChange) clefChange = parseInt(clefChange)
-
-  const accMap = {0: "#", 2: '', 1: 'b'}
-  result.forEach(it => {
-    let step = '', octave = ''
-    if(it.pitch) {
-      step = it.pitch[0].split("/")[0]
-      octave = it.pitch[0].split("/")[1]
-    }
-
-    step = step.replace("n", "").toUpperCase()
-    octave = parseInt(octave.trim())
-
-    if (clefChange) octave += clefChange
-    const accidental = (it.sourceNote.pitch && accMap[it.sourceNote.pitch.accidental]) || (it.pitch && it.pitch[1]) || ""
-    const duration = it.sourceNote.length.numerator + "/" + it.sourceNote.length.denominator
-    const voiceId = it.voice.parentVoiceEntry.parentVoice.voiceId
-    const $noteheadEl = $(it.noteHeadEl);
-    $noteheadEl.css({position: "absolute"})
-    const offset = $noteheadEl.offset()
-    const offtop = (offset && offset.top) || 0
-    const offleft = (offset && offset.left) || 0
-    const measurePos = getMeasurePosition(it.measureList, osmd)
-    const mtop = measurePos && measurePos.top
-
-    //TODO: use osmd.rules.NoteToGraphicalNoteMap for note data like name, octave, measure, voice etc, that will be more stable
-    const left = offset && Math.floor(offset.left);
-    $noteheadEl.data("name", step + accidental)
-      .data("octave", octave)
-      .data("duration", duration)
-      .data("voice", voiceId)
-      .data("measure", it.measureList)
-      .data("top", Math.floor( offtop - (mtop || 0) ))
-      .data("offsetTop", offtop)
-      .data("offsetLeft", offleft)
-      .data("left", left)
-      .data("right", Math.ceil(left + $noteheadEl.width()))
-      .data("id", it.id)
-      .data("keySignature", it.keySignature)
-  })
-
-  //Add horizontal line info
-  const yset = new Set()
-  const noteheads = $('.vf-notehead');
-  noteheads.toArray().map($).forEach(it => {
-    yset.add(it.data("top"))
-  })
-  let map = {}
-  const ylist = Array.from(yset)
-  ylist.sort();
-  ylist.forEach((e, i) => map[e] = i);
-  noteheads.toArray().map($).forEach((it, i) => {
-    noteheadCache[i] = {el: it, color: it.find("path").attr("fill")}
-    it.data("line", map[it.data("top")]).data("cacheIndex", i)
-  })
-
-  //Add vertical line info
-  const xset = new Set()
-  noteheads.toArray().map($).forEach(it => {
-    xset.add([it.data("left"), it.data("right"), it.data("measure")])
-  })
-  map = {}
-  const xlist = Array.from(xset)
-  xlist.sort((a, b) => a[0] - b[0]);
-  xlist.forEach((e, i) => map[e] = i);
-  noteheads.toArray().map($).forEach((it, i) => {
-    const l = it.data("left"), r = it.data("right"), m = it.data("measure")
-    let xId = -1
-    for (let j = 0; j < xlist.length; j++) {
-      const xn = xlist[j]
-      if(xn[2] === m && xn[0] <= l && l <= xn[1]) {
-        xId = j
-        break
-      }
-    }
-    if(xId >= 0) {
-      it.data("x", xId)
-    }
-  })
-}
 
 function hideIdTexts() {
   $('text:contains("id=")').parent().css({visibility: 'hidden'})
@@ -716,19 +583,19 @@ function populateNoteNames() {
   $('.vf-notehead path').css({fill: 'none', stroke: 'black', strokeWidth: 1})
 
   const poff = $('#osmdCanvasPage1').offset()
-  let voiceColors = [['maroon', 'white'], ['blue', 'white'], ['green', 'black'], ['purple', 'black'], ['orange', 'black'], ['brown', 'white'], ['pink', 'black']]
+  const voiceColors = [['maroon', 'white'], ['blue', 'white'], ['green', 'black'], ['purple', 'black'], ['orange', 'black'], ['brown', 'white'], ['pink', 'black']]
   getNotesFromHtml().forEach(n => {
-    let left = n.offsetLeft - poff.left;
-    let top = n.offsetTop - poff.top -5;
+    const left = n.offsetLeft - poff.left;
+    const top = n.offsetTop - poff.top -5;
     const $nn = $(`<span>${n.name}</span>`).addClass("note-name").css({position: 'absolute', left: left , top: top, padding: 0})
 
     if(n.keySignature) {
-      let scaleNotes = getScale(n.keySignature)
-      let name = n.name.replace("n", "")
+      const scaleNotes = getScale(n.keySignature)
+      const name = n.name.replace("n", "")
       if(!scaleNotes.includes(name)) $nn.addClass('non-scale-note').css('color', 'black').css('border', 'thin solid blue').css('border-radius', '50%')
     }
 
-    let voiceColor = voiceColors[n.voice % voiceColors.length];
+    const voiceColor = voiceColors[n.voice % voiceColors.length];
     $nn.css('background-color', voiceColor[0]).css('color', voiceColor[1])
 
     $('#osmdCanvasPage1').append($nn)
@@ -1106,7 +973,7 @@ $(function () {
     const inversion = diatonicMelodicInversion(melody)
     const inversionInKey = melodyInContextOfKey(inversion, fretboard.activeKey)
     inversionInKey.forEach(measure => mxml.addMeasure(measure.notes))
-    let tempo = prompt('Enter measure number and tempo', '80')
+    const tempo = prompt('Enter measure number and tempo', '80')
     addTempo(tempo)
     log(melodyToSimpleString(inversion))
     log(melodyToSimpleString(inversionInKey))
@@ -1251,7 +1118,7 @@ $(function () {
 
   const addNoteNames = xml => {
     function extracted(e) {
-      let el = $(e);
+      const el = $(e);
       const accidental = el.find("accidental").text()
       const name = el.find('pitch>step').text()
       const noteheadText = $(`<notehead-text>
@@ -1544,7 +1411,7 @@ function _randomChords(names) {
 
     if(closeOnes.length === 0) closeOnes = ocs
 
-    let voiceLeadingOptions = ['COMMON_NOTE_1', 'COMMON_NOTE_2', 'COMMON_NOTE_1']
+    const voiceLeadingOptions = ['COMMON_NOTE_1', 'COMMON_NOTE_2', 'COMMON_NOTE_1']
     // let isSmoothVoiceLeading = false
     // let commonNote = _.intersectionBy(lastChord, it, (x) => x['string'] + '-' + x['fret']).length > 0
     // isSmoothVoiceLeading = commonNote
@@ -1630,19 +1497,19 @@ function nameOfInterval(interval, n2, n1) {
 }
 
 function findIntervals() {
-  let chromaticScaleSharp = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-  let chromaticScaleFlat = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+  const chromaticScaleSharp = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+  const chromaticScaleFlat = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
 
-  let intervalBetween = (_n1, _n2) => {
-    let [n1, n2] = [_n1, _n2]
+  const intervalBetween = (_n1, _n2) => {
+    const [n1, n2] = [_n1, _n2]
 
     let scale = chromaticScaleSharp;
     if(scale.indexOf(n1.name) === -1 || scale.indexOf(n2.name) === -1) {
       scale = chromaticScaleFlat
     }
 
-    let i1 = scale.indexOf(n1.name)
-    let i2 = scale.indexOf(n2.name)
+    const i1 = scale.indexOf(n1.name)
+    const i2 = scale.indexOf(n2.name)
     let interval = i2 - i1
 
     if(interval < 0) {
@@ -1656,15 +1523,15 @@ function findIntervals() {
     return nameOfInterval(interval, n2, n1);
   }
 
-  let output = []
+  const output = []
   let noteheads = getNotesFromHtml()
   noteheads = _.chain(noteheads).sortBy('left').sortBy('measure').value()
 
-  let measures = Object.values(groupBy(noteheads, 'measure'))
+  const measures = Object.values(groupBy(noteheads, 'measure'))
 
   window.orderedMeasures = measures
   function calculateIntervals(measure) {
-    let intervals = []
+    const intervals = []
     measure = measure.filter(it => it.name !== '')
     for (let i = 1; i < measure.length; i++) {
       const n1 = measure[i - 1]
@@ -1679,14 +1546,14 @@ function findIntervals() {
   }
 
   measures.forEach(measure => {
-    let intervals = calculateIntervals(measure);
+    const intervals = calculateIntervals(measure);
     output.push(intervals)
   })
   window.intervals = output
 }
 
 function addTempo(tempo) {
-  let $el = $(`
+  const $el = $(`
    <direction placement="above">
     <direction-type parentheses="no" default-x="-30.68" relative-y="20.00">
       <metronome>
@@ -1736,13 +1603,13 @@ function exportIntervals(args) {
   let ints = window.intervals[measureNumber]
   mxml.addMeasure(window.orderedMeasures[measureNumber].filter(it => it.name !== '').slice(0, numberOfNotes))
   addTempo(tempo);
-  let musicXmlStr = formatXml(mxml.toString());
+  const musicXmlStr = formatXml(mxml.toString());
 
   // console.log(musicXmlStr);
   // loadMainOSMD(musicXmlStr);
 
   ints = ints.slice(0, numberOfNotes-1)
     .map(it => it.replace('m', 'minor').replace('M', 'major').replace('A', 'augmented').replace('P', 'perfect'))
-  let intervalsStr = ints.join(" ")
+  const intervalsStr = ints.join(" ")
   postMusicXmlAndMetadata(musicXmlStr, intervalsStr);
 }
