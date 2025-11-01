@@ -65,23 +65,23 @@ export const chordPatterns = {
   'aug': pattern([1, 3, '5#']),
   'dim': pattern([1, '3b', '5b']),
   'dim7': pattern([1, '3b', '5b', 6]),
-  // 'sus4': pattern([1, 4, 5]),
+  'sus4': pattern([1, 4, 5]),
   'min+9': pattern([1, '3b', 5, 9]),
   'maj+9': pattern([1, 3, 5, 9]),
   // 'min+9': pattern([1, '3b', 5, 9]),
   // '5': pattern([1, 5]),
-  // '6': pattern([1, 3, 5, 6]),
+  '6': pattern([1, 3, 5, 6]),
   'min6': pattern([1, '3b', 5, 6]),
-  // '6+9': pattern([1, 3, 5, 6, 9]),
-  // 'min6+9': pattern([1, '3b', 5, 6, 9]),
+  '6+9': pattern([1, 3, 5, 6, 9]),
+  'min6+9': pattern([1, '3b', 5, 6, 9]),
   '7': pattern([1, '3', '5','7b']), //a.k.a majMin7 a.k.a. dom7
   'maj7': pattern([1, '3', '5', 7]),
   'min7': pattern([1, '3b', '5','7b']),
   'minMaj7': pattern([1, '3b', '5',7]),
-  // '7Sus4': pattern([1, '4', '5', '7b']),
-  // '9': pattern([1, 3, 5, '7b', 9]),
-  // 'maj9': pattern([1, 3, 5, 7, 9]),
-  // 'min9': pattern([1, '3b', 5, '7b', 9])
+  '7Sus4': pattern([1, '4', '5', '7b']),
+  '9': pattern([1, 3, 5, '7b', 9]),
+  'maj9': pattern([1, 3, 5, 7, 9]),
+  'min9': pattern([1, '3b', 5, '7b', 9])
 }
 
 const romanHash = {
