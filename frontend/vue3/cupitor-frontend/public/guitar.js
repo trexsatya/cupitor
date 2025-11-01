@@ -16,7 +16,7 @@ import {
   findChordsWithAChromaticNote,
   notesInScale, majorScales, minorChordProgressions, raiseNote
 } from './music-reference-data.js';
-import {intersection, log, cartesian, combinations, uniqueByJsonRepresentation, permutate, number, groupBy} from './data-structures.js';
+import {intersection, log, cartesian, combinations, uniqueByJsonRepresentation, permutate, number, groupBy, schedule} from './data-structures.js';
 import {
   diatonicMelodicInversion,
   Key,
@@ -370,12 +370,12 @@ const Fretboard = function () {
    *
    * @param notes [*{string, fret}]
    */
-  this.showOnlyTheseNotes = (notes, cls) => {
+  this.showOnlyTheseNotes = (notes, style) => {
     $('.note').hide().removeClass("highlight-as-harmony")
 
     if (!notes) return
     notes.forEach(it => {
-      this.showNote(it.string, it.fret, cls, it.note)
+      this.showNote(it.string, it.fret, style, it.note)
     })
   }
 
@@ -481,7 +481,7 @@ const Fretboard = function () {
       for (let fret = 0; fret < this.notes[string].length; fret++) {
         const note = this.notes[string][fret]
         if(equalNotes(name, note)) {
-          const n = this.showNote(string, fret, '', {name: name})
+          const n = this.showNote(string, fret, {}, {name: name})
           notes.push(n)
         }
       }
@@ -489,7 +489,7 @@ const Fretboard = function () {
     return notes;
   }
 
-  this.showNote = function (string, fret, cls, _note) {
+  this.showNote = function (string, fret, style, _note) {
     let note = this.notes[string][fret];
     if(_note && _note.name) note = _note.name;
 
@@ -521,6 +521,7 @@ const Fretboard = function () {
 
 
     $(noteMarker).css({opacity: 1}).show();
+    if(style && typeof style === 'object') $(noteMarker).css(style)
     return $(noteMarker)
   }
 
@@ -675,6 +676,30 @@ function populateChordButtons(chordsOnFretboard, fretboard) {
   })
 
   fretboard.showOnlyTheseNotes(chordsOnFretboard[0])
+}
+
+function analyseSheetMusic() {
+  const noteheadsData = getNotesFromHtml()
+  const notes = groupBy(noteheadsData, it => it.measure + "-" + it.x, (k, notes) => {
+    const sortedByY = notes.toSorted((a, b) => a.line - b.line);
+    let melNote = sortedByY.find(it => it.name.length > 0)
+    if (!melNote) melNote = sortedByY[0]
+    melNote.melodyNote = true
+    $(noteheadCache[melNote.cacheIndex]).data("melodyNote", true)
+    return notes
+  })
+
+  const measures = groupBy(notes.flat().filter(it => it.melodyNote).map(it => ({
+    name: it.name,
+    type: durationType(it.duration),
+    measure: it.measure
+  })), 'measure', (m, ns) => ({notes: ns}))
+
+  if(!document.fullscreenElement) {
+    const similarities = analyseRhythmSimilarity(measures);
+    log(similarities)
+  }
+  guessChords()
 }
 
 /*** Contollers ***/
@@ -1184,21 +1209,7 @@ $(function () {
 
 
   $('#analyseMusicBtn').click(e => {
-    const noteheadsData = getNotesFromHtml()
-    const notes = groupBy(noteheadsData, it => it.measure + "-" + it.x, (k, notes) => {
-      const sortedByY = notes.toSorted((a, b) => a.line - b.line);
-      let melNote = sortedByY.find(it => it.name.length > 0)
-      if(!melNote) melNote = sortedByY[0]
-      melNote.melodyNote = true
-      $(noteheadCache[melNote.cacheIndex]).data("melodyNote", true)
-      return notes
-    })
-
-    const measures = groupBy(notes.flat().filter(it => it.melodyNote).map(it => ({ name: it.name, type: durationType(it.duration), measure: it.measure})), 'measure', (m, ns) => ({notes: ns}))
-    const similarities = analyseRhythmSimilarity(measures);
-    log(similarities)
-    // $('#analysisDialog').fadeIn()
-    guessChords()
+    analyseSheetMusic();
   })
 
   setTimeout(() => minimizeCircleOfFifth(), 4000)
@@ -1266,6 +1277,14 @@ $(function () {
     })
   })
 
+  $(document).ready(() => {
+    $(document).keyup(e => {
+      //If 'a'
+      if(e.ctrlKey && e.key.toLowerCase() === "a" ) {
+        analyseSheetMusic()
+      }
+    })
+  })
   window.showNoteNames = false
 
   $('#toggleNoteNamesBtn').click(e => {
