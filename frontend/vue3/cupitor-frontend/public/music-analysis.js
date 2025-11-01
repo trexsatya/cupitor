@@ -280,7 +280,7 @@ function matchingChords(notes, chordsToScan) {
 
   Object.keys(chordsToScan).forEach(name => {
     const chordNotes = chordsToScan[name].notes
-    if(chordNotes.length === 4) chordNotes.splice(2, 1)
+    //if(chordNotes.length === 4) chordNotes.splice(2, 1)
 
     if (chordNotes.every(n => noteNames.includes(n))) {
       matches.push({
@@ -361,13 +361,21 @@ const merge = (items, fn) => {
   return result;
 };
 
+let clickTimer = null;
+
 export function guessChords() {
   const noteheadData = getNotesFromHtml()
 
   const measures = groupBy(noteheadData, 'measure')
 
+  function markNotesInSheet(c) {
+    const notes = c.notes.map(n => noteheadCache[n['cacheIndex']].el)
+    notes.forEach(n => n.find("path").attr("fill", "blue").css({fill: 'blue'}))
+  }
+
   Object.keys(measures).forEach(mIdx => {
-    let chords = guessChordsForMeasure(mIdx, measures[mIdx]).map(it => it.chords).flat()
+    const notesInMeasure = measures[mIdx]
+    let chords = guessChordsForMeasure(mIdx, notesInMeasure).map(it => it.chords).flat()
 
     chords.forEach(c => {
       c.notes.sort((a, b) => a.step - b.step)
@@ -407,7 +415,6 @@ export function guessChords() {
 
     const occupied = []
     final.forEach(c => {
-      const m = mIdx
       const mp = $osmdContainer1.offset()
       let inv = findInversion(c.notes, c.chordTones)
       c.inversion = inv
@@ -442,10 +449,23 @@ export function guessChords() {
 
       $osmdContainer1.append(box)
       box.click(e => {
-        resetAllNotesInMeasure()
-        const notes = c.notes.map(n => noteheadCache[n['cacheIndex']].el)
-        notes.forEach(n => n.find("path").attr("fill", "blue").css({fill: 'blue'}))
-        fretboard.showOnlyTheseNotes(c.notes.map(_cn => fretboard.findNoteOnFretboard(_cn)).flat())
+        if (clickTimer) return; // already waiting for potential double click
+        clickTimer = setTimeout(() => {
+          resetAllNotesInMeasure()
+          markNotesInSheet(c);
+          fretboard.showOnlyTheseNotes(notesInMeasure.filter(it => c.notes.map(x => x.name).contains(it.name)).map(_cn => fretboard.findNoteOnFretboard(_cn)).flat())
+          clickTimer = null;
+        }, 250); // wait a bit to see if dblclick happens
+      })
+      box.dblclick(e => {
+        clearTimeout(clickTimer);
+        clickTimer = null;
+
+        markNotesInSheet(c)
+        const notesToShow = notesInMeasure.filter(it => c.notes.map(x => x.name).contains(it.name)).map(_cn => fretboard.findNoteOnFretboard(_cn)).flat();
+        notesToShow.forEach(it => {
+          fretboard.showNote(it.string, it.fret, {opacity: 0.5}, it.note)
+        })
       })
       occupied.push({t: y, l: left, w: box.width(), h: 28})
     })

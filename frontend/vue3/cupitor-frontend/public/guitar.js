@@ -370,12 +370,12 @@ const Fretboard = function () {
    *
    * @param notes [*{string, fret}]
    */
-  this.showOnlyTheseNotes = (notes, cls) => {
+  this.showOnlyTheseNotes = (notes, style) => {
     $('.note').hide().removeClass("highlight-as-harmony")
 
     if (!notes) return
     notes.forEach(it => {
-      this.showNote(it.string, it.fret, cls, it.note)
+      this.showNote(it.string, it.fret, style, it.note)
     })
   }
 
@@ -481,7 +481,7 @@ const Fretboard = function () {
       for (let fret = 0; fret < this.notes[string].length; fret++) {
         const note = this.notes[string][fret]
         if(equalNotes(name, note)) {
-          const n = this.showNote(string, fret, '', {name: name})
+          const n = this.showNote(string, fret, {}, {name: name})
           notes.push(n)
         }
       }
@@ -489,7 +489,7 @@ const Fretboard = function () {
     return notes;
   }
 
-  this.showNote = function (string, fret, cls, _note) {
+  this.showNote = function (string, fret, style, _note) {
     let note = this.notes[string][fret];
     if(_note && _note.name) note = _note.name;
 
@@ -521,6 +521,7 @@ const Fretboard = function () {
 
 
     $(noteMarker).css({opacity: 1}).show();
+    if(style && typeof style === 'object') $(noteMarker).css(style)
     return $(noteMarker)
   }
 
