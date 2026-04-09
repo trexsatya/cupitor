@@ -8,7 +8,7 @@
     <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
     <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
     <script type="text/javascript" src="/vendor/diff-match-patch.js"></script>
-    <script type="text/javascript" src="/vendor/fabric.min.js"></script>
+    <script type="text/javascript" src="/vendor/fabric.v6.js"></script>
     <script type="text/javascript" src="/vendor/rx.all.min.js"></script>
     <script type="text/javascript" src="/vendor/rx.all.min.js"></script>
     <script type="text/javascript" src="/vendor/jquery.lettering.js"></script>
@@ -35,17 +35,24 @@
     <script src="/vendor/ace/src-noconflict/ace.js" type="text/javascript" charset="utf-8"></script>
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
 
-    <script type="text/javascript" src="/data-structures.js"></script>
+    <script type="module">
+        import * as DS from '/data-structures.js';
+        Object.assign(window, DS);
+    </script>
     <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
     <script type="text/javascript" src="/fabric.play.js"></script>
     <script type="text/javascript" src="/jquery.play.js"></script>
     <script type="text/javascript" src="/play.js"></script>
+    <script type="text/javascript" src="/whiteboard.js"></script>
+    <script type="text/javascript" src="/whiteboard.undo.js"></script>
+    <script type="text/javascript" src="/whiteboard.tools.js"></script>
     <!-- <script type="text/javascript" src="/treant.js"></script> -->
 
     <link rel="stylesheet" href="/vendor/animate.css">
     <link rel="stylesheet" href="/vendor/treant.css">
     <link href="/vendor/select2.min.css" rel="stylesheet"/>
     <link rel="stylesheet" href="/play.css">
+    <link rel="stylesheet" href="/whiteboard.css">
     <link rel="stylesheet" href="/vendor/fontawesome-all.css">
 
     <script type="text/javascript">
@@ -485,7 +492,8 @@
     moveToFront('pc')
 
     function customData(obj) {
-        return obj.customData || {}
+        if (!obj.customData) obj.customData = {};
+        return obj.customData
     }
 
     window.CKEDITOR.replace('node-content-editor', {
@@ -627,6 +635,7 @@
 
         <button class="btn btn-info" onclick="copy(pc)">Copy</button>
         <button class="btn btn-info" onclick="paste(pc)">Paste</button>
+        <button class="btn btn-info" onclick="group(pc)">Group</button>
         <button class="btn btn-info" onclick="degroup(pc)">Ungroup</button>
 
         <br><br>
@@ -810,8 +819,11 @@
             moveToFront('pc')
         }
     })
-    pc.on('object:selected', function (e) {
-        const obj = e.target;
+    pc.on('selection:created', handleSelection);
+    pc.on('selection:updated', handleSelection);
+    function handleSelection(e) {
+        const obj = e.selected ? e.selected[0] : e.target;
+        if (!obj) return;
         $('#selectedObjId').html(obj.uid)
         if (window.connectionMode) {
             if (!window.firstOfConnection) firstOfConnection = obj
@@ -819,9 +831,8 @@
                 makeConnection(e)
                 flipConnectionMode()
             }
-
         }
-    });
+    }
 
     pc.on('object:removed', e => {
         console.log(e.target);
@@ -1005,9 +1016,74 @@
         if (document.getElementById('mathjaxDialog').style.display === 'block') return false;
         if (selectedObj?.type === 'textbox' && selectedObj.isEditing) return;
 
+        // Escape: release current tool → select
+        if (e.key === 'Escape') {
+            if (window.toolManager) window.toolManager.activate('select');
+            return;
+        }
+
+        // --- Enhanced keyboard shortcuts ---
+        // Undo: Ctrl+Z
+        if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+            e.preventDefault();
+            undoManager.undo();
+            return;
+        }
+        // Redo: Ctrl+Shift+Z or Ctrl+Y
+        if ((e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey) ||
+            (e.key === 'y' && (e.ctrlKey || e.metaKey))) {
+            e.preventDefault();
+            undoManager.redo();
+            return;
+        }
+        // Select all: Ctrl+A
+        if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            pc.discardActiveObject();
+            const objs = pc.getObjects().filter(o => o.selectable !== false);
+            if (objs.length > 0) {
+                const sel = new fabric.ActiveSelection(objs, { canvas: pc });
+                pc.setActiveObject(sel);
+                pc.requestRenderAll();
+            }
+            return;
+        }
+        // Group: Ctrl+G
+        if (e.key === 'g' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            group(pc);
+            return;
+        }
+        // Tool hotkeys (only when no text editing and no modifier keys)
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+            switch (e.key.toLowerCase()) {
+                case 'v': toolManager.activate('select'); return;
+                case 'h': if (!selectedObj) { toolManager.activate('hand'); return; } break;
+                case 'p': toolManager.activate('pen'); return;
+                case 's': if (!selectedObj) { toolManager.activate('rect'); return; } break;
+                case 'n': toolManager.activate('sticky'); return;
+                case 'g': gridManager.toggle(); return;
+            }
+        }
+        // Zoom canvas when no object selected: +/-
+        if (!selectedObj && (e.key === '=' || e.key === '+') && !e.ctrlKey) {
+            viewportManager.zoomToPoint({x: innerWidth/2, y: innerHeight/2}, viewportManager.zoom * 1.2);
+            return;
+        }
+        if (!selectedObj && e.key === '-' && !e.ctrlKey) {
+            viewportManager.zoomToPoint({x: innerWidth/2, y: innerHeight/2}, viewportManager.zoom * 0.8);
+            return;
+        }
+        // Ctrl+0: Reset zoom
+        if (e.key === '0' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            viewportManager.resetView();
+            return;
+        }
+
         if (mapping[e.key]) $("#" + mapping[e.key]).click()
 
-        if (e.keyCode === 187) { //zoom in
+        if (e.keyCode === 187 && selectedObj) { //zoom in selected
             if(selectedObj.treeConnection) {
                 recordScript(`expandTreeItems(${selectedObjId})`)
                 expandTreeItems(selectedObj)
@@ -1017,7 +1093,7 @@
             }
         }
 
-        if (e.keyCode === 189) { //zoom out
+        if (e.keyCode === 189 && selectedObj) { //zoom out selected
             if(selectedObj.treeConnection) {
                 recordScript(`collapseTreeItems(${selectedObjId})`)
                 collapseTreeItems(selectedObj)
@@ -1476,6 +1552,318 @@
         $("#btnStart").show();
     });
     canvas = pc;
+</script>
+
+<!-- Whiteboard Toolbar -->
+<div id="whiteboard-toolbar">
+    <button class="wb-tool active" data-tool="select" title="Select (V)" onclick="toolManager.activate('select')">
+        <i class="fas fa-mouse-pointer"></i>
+    </button>
+    <button class="wb-tool" data-tool="hand" title="Hand / Pan (H)" onclick="toolManager.activate('hand')">
+        <i class="fas fa-hand-paper"></i>
+    </button>
+    <button class="wb-tool" data-tool="pen" title="Pen (P)" onclick="toolManager.activate('pen')">
+        <i class="fas fa-pen"></i>
+    </button>
+    <button class="wb-tool" data-tool="shape" title="Shapes (S)" onclick="toggleShapeMenu()">
+        <i class="fas fa-shapes"></i>
+        <div class="wb-shape-menu" id="shape-menu">
+            <button onclick="event.stopPropagation(); toolManager.activate('rect'); closeShapeMenu()"><i class="fas fa-square"></i> </button>
+            <button onclick="event.stopPropagation(); toolManager.activate('circle'); closeShapeMenu()"><i class="fas fa-circle"></i> </button>
+            <button onclick="event.stopPropagation(); toolManager.activate('diamond'); closeShapeMenu()"><i class="fas fa-diamond"></i></button>
+        </div>
+    </button>
+    <button class="wb-tool" data-tool="sticky" title="Sticky Note (N)" onclick="toolManager.activate('sticky')">
+        <i class="fas fa-sticky-note"></i>
+    </button>
+    <button class="wb-tool" data-tool="text" title="Text (T)" onclick="toolManager.activate('text')">
+        <i class="fas fa-font"></i>
+    </button>
+    <button class="wb-tool" data-tool="connector" title="Connector (C)" onclick="toolManager.activate('connector')">
+        <i class="fas fa-project-diagram"></i>
+    </button>
+    <button class="wb-tool" data-tool="eraser" title="Eraser (E)" onclick="toolManager.activate('eraser')">
+        <i class="fas fa-eraser"></i>
+    </button>
+    <button class="wb-tool" title="Add Label to Shape" onclick="openLabelPicker()">
+        <i class="fas fa-tag"></i>
+    </button>
+    <div class="wb-separator"></div>
+    <button class="wb-tool" title="Undo (Ctrl+Z)" onclick="undoManager.undo()">
+        <i class="fas fa-undo"></i>
+    </button>
+    <button class="wb-tool" title="Redo (Ctrl+Y)" onclick="undoManager.redo()">
+        <i class="fas fa-redo"></i>
+    </button>
+    <div class="wb-separator"></div>
+    <button class="wb-tool" title="Toggle Grid (G)" onclick="gridManager.toggle()">
+        <i class="fas fa-th"></i>
+    </button>
+</div>
+
+<!-- Zoom Controls -->
+<div id="zoom-controls">
+    <button onclick="viewportManager.zoomToPoint({x: innerWidth/2, y: innerHeight/2}, viewportManager.zoom * 1.2)" title="Zoom In">+</button>
+    <span id="zoom-level">100%</span>
+    <button onclick="viewportManager.zoomToPoint({x: innerWidth/2, y: innerHeight/2}, viewportManager.zoom * 0.8)" title="Zoom Out">-</button>
+    <button onclick="viewportManager.fitToContent()" title="Fit to Content" style="font-size: 11px;">Fit</button>
+    <button onclick="viewportManager.resetView()" title="Reset Zoom" style="font-size: 11px;">1:1</button>
+</div>
+
+<!-- Minimap -->
+<div id="minimap-container">
+    <canvas id="minimap" width="180" height="120"></canvas>
+</div>
+
+<!-- Property Panel -->
+<div id="property-panel">
+    <div class="prop-header">Properties</div>
+    <div class="prop-row">
+        <label>Fill</label>
+        <input type="color" id="prop-fill" value="#333333" onchange="applyProperty('fill', this.value)">
+    </div>
+    <div class="prop-row">
+        <label>Stroke</label>
+        <input type="color" id="prop-stroke" value="#000000" onchange="applyProperty('stroke', this.value)">
+    </div>
+    <div class="prop-row">
+        <label>Opacity</label>
+        <input type="range" id="prop-opacity" min="0" max="1" step="0.1" value="1" oninput="applyProperty('opacity', parseFloat(this.value))">
+    </div>
+</div>
+
+<!-- Context Menu -->
+<div id="wb-context-menu">
+    <div class="ctx-item" onclick="copy(pc); closeContextMenu()"><i class="fas fa-copy"></i> Copy <span class="shortcut">Ctrl+C</span></div>
+    <div class="ctx-item" onclick="paste(pc); closeContextMenu()"><i class="fas fa-paste"></i> Paste <span class="shortcut">Ctrl+V</span></div>
+    <div class="ctx-item" onclick="duplicateSelected(); closeContextMenu()"><i class="fas fa-clone"></i> Duplicate</div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item" onclick="deleteSelectedAndClose()"><i class="fas fa-trash"></i> Delete <span class="shortcut">Del</span></div>
+    <div class="ctx-item" onclick="openLabelPicker(); closeContextMenu()"><i class="fas fa-tag"></i> Add Label</div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item" onclick="bringToFrontSelected(); closeContextMenu()"><i class="fas fa-layer-group"></i> Bring to Front</div>
+    <div class="ctx-item" onclick="sendToBackSelected(); closeContextMenu()"><i class="fas fa-layer-group"></i> Send to Back</div>
+</div>
+
+<!-- Shape Label Position Picker -->
+<div id="label-picker">
+    <!-- Row 0: outside top -->
+    <div class="lp-empty"></div>
+    <div class="lp-cell" data-pos="outside-nw" title="Outside top-left">↖</div>
+    <div class="lp-cell" data-pos="outside-n"  title="Outside top">↑</div>
+    <div class="lp-cell" data-pos="outside-ne" title="Outside top-right">↗</div>
+    <div class="lp-empty"></div>
+    <!-- Row 1: inside top -->
+    <div class="lp-empty"></div>
+    <div class="lp-cell inside" data-pos="inside-nw" title="Inside top-left">⌜</div>
+    <div class="lp-cell inside" data-pos="inside-n"  title="Inside top">▲</div>
+    <div class="lp-cell inside" data-pos="inside-ne" title="Inside top-right">⌝</div>
+    <div class="lp-empty"></div>
+    <!-- Row 2: center (outside-w/e + inside center row) -->
+    <div class="lp-cell" data-pos="outside-w"     title="Outside left">←</div>
+    <div class="lp-cell inside" data-pos="inside-w"      title="Inside left">◄</div>
+    <div class="lp-cell inside" data-pos="inside-center" title="Inside center">●</div>
+    <div class="lp-cell inside" data-pos="inside-e"      title="Inside right">►</div>
+    <div class="lp-cell" data-pos="outside-e"     title="Outside right">→</div>
+    <!-- Row 3: inside bottom -->
+    <div class="lp-empty"></div>
+    <div class="lp-cell inside" data-pos="inside-sw" title="Inside bottom-left">⌞</div>
+    <div class="lp-cell inside" data-pos="inside-s"  title="Inside bottom">▼</div>
+    <div class="lp-cell inside" data-pos="inside-se" title="Inside bottom-right">⌟</div>
+    <div class="lp-empty"></div>
+    <!-- Row 4: outside bottom -->
+    <div class="lp-empty"></div>
+    <div class="lp-cell" data-pos="outside-sw" title="Outside bottom-left">↙</div>
+    <div class="lp-cell" data-pos="outside-s"  title="Outside bottom">↓</div>
+    <div class="lp-cell" data-pos="outside-se" title="Outside bottom-right">↘</div>
+    <div class="lp-empty"></div>
+</div>
+
+<script>
+    // --- Initialize whiteboard features ---
+    window.viewportManager = new ViewportManager([pc, oc], $('#textillateContainer'));
+    window.undoManager = new UndoManager();
+    window.toolManager = new ToolManager();
+    window.gridManager = new GridManager(pc);
+
+    // Pan/zoom
+    initWhiteboardPanZoom(viewportManager, pc);
+
+    // Minimap
+    viewportManager.initMinimap('minimap');
+
+    // Undo/redo integration
+    initUndoRedo(pc, undoManager);
+
+    // Tools registration
+    registerTools(toolManager, pc, oc);
+
+    // Shape drawing
+    initShapeDrawingTool(pc, toolManager);
+
+    // Alignment guides
+    window.alignmentGuides = initAlignmentGuides(pc);
+
+    // Sticky note editing
+    enableStickyNoteEditing(pc);
+
+    // Sticky note + eraser handlers
+    initStickyAndEraserHandlers(pc, toolManager, undoManager);
+
+    // Shape label manager
+    window.shapeTextManager = new ShapeTextManager(pc);
+    shapeTextManager.attachToCanvas();
+
+    // Wire up label picker cells
+    document.querySelectorAll('#label-picker .lp-cell[data-pos]').forEach(cell => {
+        cell.addEventListener('click', function() {
+            const pos = this.dataset.pos;
+            const shape = pc.getActiveObject();
+            if (!shape) return;
+            shapeTextManager.addLabel(shape, pos);
+            document.getElementById('label-picker').classList.remove('visible');
+        });
+    });
+
+    function openLabelPicker() {
+        const shape = pc.getActiveObject();
+        if (!shape) return;
+        const picker = document.getElementById('label-picker');
+        // Position picker near the shape center on screen
+        const center = shape.getCenterPoint();
+        const vt = pc.viewportTransform;
+        const screenX = vt[0] * center.x + vt[4];
+        const screenY = vt[3] * center.y + vt[5];
+        picker.style.left = (screenX - 80) + 'px';
+        picker.style.top  = (screenY - 80) + 'px';
+        picker.classList.add('visible');
+    }
+
+    document.addEventListener('click', function(e) {
+        const picker = document.getElementById('label-picker');
+        if (picker && !e.target.closest('#label-picker') && !e.target.closest('.wb-tool[title="Add Label to Shape"]')) {
+            picker.classList.remove('visible');
+        }
+    });
+
+    // Grid snapping on move
+    pc.on('object:moving', function(e) {
+        gridManager.snapObject(e.target);
+    });
+
+    // Property panel show/hide
+    pc.on('selection:created', showPropertyPanel);
+    pc.on('selection:updated', showPropertyPanel);
+    pc.on('selection:cleared', function() {
+        document.getElementById('property-panel').classList.remove('visible');
+    });
+
+    function showPropertyPanel(e) {
+        const obj = e.selected ? e.selected[0] : null;
+        if (!obj) return;
+        const panel = document.getElementById('property-panel');
+        panel.classList.add('visible');
+        document.getElementById('prop-fill').value = obj.fill || '#333333';
+        document.getElementById('prop-stroke').value = obj.stroke || '#000000';
+        document.getElementById('prop-opacity').value = obj.opacity || 1;
+    }
+
+    function applyProperty(prop, value) {
+        const obj = pc.getActiveObject();
+        if (!obj) return;
+        const prevState = {};
+        prevState[prop] = obj[prop];
+        obj.set(prop, value);
+        pc.requestRenderAll();
+        const newState = {};
+        newState[prop] = value;
+        undoManager.push(Commands.modifyObject(pc, obj, prevState, newState));
+    }
+
+    // Make property panel draggable
+    let isDragging = false;
+    let dragOffset = { x: 0, y: 0 };
+
+    const panel = document.getElementById('property-panel');
+    const header = panel.querySelector('.prop-header');
+
+    header.addEventListener('mousedown', function(e) {
+        isDragging = true;
+        const rect = panel.getBoundingClientRect();
+        dragOffset.x = e.clientX - rect.left;
+        dragOffset.y = e.clientY - rect.top;
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!isDragging) return;
+        const x = e.clientX - dragOffset.x;
+        const y = e.clientY - dragOffset.y;
+        panel.style.left = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, x)) + 'px';
+        panel.style.top = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, y)) + 'px';
+        panel.style.right = 'auto'; // Remove right positioning when dragged
+    });
+
+    document.addEventListener('mouseup', function() {
+        isDragging = false;
+    });
+
+    // Context menu
+    pc.on('mouse:down', function(e) {
+        if (e.e && e.e.button === 2) {
+            e.e.preventDefault();
+            const menu = document.getElementById('wb-context-menu');
+            menu.style.left = e.e.clientX + 'px';
+            menu.style.top = e.e.clientY + 'px';
+            menu.classList.add('visible');
+        } else {
+            closeContextMenu();
+        }
+    });
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('#wb-context-menu')) closeContextMenu();
+    });
+    // Prevent browser context menu on canvas
+    document.querySelector('.canvas-container')?.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
+    function closeContextMenu() {
+        document.getElementById('wb-context-menu').classList.remove('visible');
+    }
+
+    function duplicateSelected() {
+        const obj = pc.getActiveObject();
+        if (obj) duplicate(obj);
+    }
+
+    function deleteSelectedAndClose() {
+        const obj = pc.getActiveObject();
+        if (obj) {
+            undoManager.push(Commands.removeObject(pc, obj));
+            deleteFabricObject(obj);
+        }
+        closeContextMenu();
+    }
+
+    function bringToFrontSelected() {
+        const obj = pc.getActiveObject();
+        if (obj) { pc.bringObjectToFront(obj); pc.requestRenderAll(); }
+    }
+
+    function sendToBackSelected() {
+        const obj = pc.getActiveObject();
+        if (obj) { pc.sendObjectToBack(obj); pc.requestRenderAll(); }
+    }
+
+    // Shape menu
+    function toggleShapeMenu() {
+        document.getElementById('shape-menu').classList.toggle('open');
+    }
+    function closeShapeMenu() {
+        document.getElementById('shape-menu').classList.remove('open');
+    }
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('[data-tool="shape"]')) closeShapeMenu();
+    });
 </script>
 </body>
 

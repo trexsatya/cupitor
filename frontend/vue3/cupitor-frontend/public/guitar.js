@@ -579,7 +579,46 @@ function hideIdTexts() {
   $('text:contains("id=")').parent().css({visibility: 'hidden'})
 }
 
-function populateNoteNames() {
+function getActiveKey() {
+  return $('#circle-of-fifths').find('path.active').parents('g.cf-arcs').next().next().text().trim()
+}
+
+function getSargam(note, tonic) {
+  const pitchClass = {
+    "C": 0, "C#": 1, "Db": 1,
+    "D": 2, "D#": 3, "Eb": 3,
+    "E": 4,
+    "F": 5, "F#": 6, "Gb": 6,
+    "G": 7, "G#": 8, "Ab": 8,
+    "A": 9, "A#": 10, "Bb": 10,
+    "B": 11
+  };
+
+  const sargamMap = {
+    0: "S",
+    1: "r",
+    2: "R",
+    3: "g",
+    4: "G",
+    5: "m",
+    6: "M",
+    7: "P",
+    8: "d",
+    9: "D",
+    10: "n",
+    11: "N"
+  };
+
+  const n = pitchClass[note];
+  const t = pitchClass[tonic];
+  if (n === undefined || t === undefined) return note
+
+  const diff = (n - t + 12) % 12;
+  return sargamMap[diff];
+}
+
+
+function populateNoteNames(sargam=false) {
   $('.note-name').remove()
   $('.vf-notehead path').css({fill: 'none', stroke: 'black', strokeWidth: 1})
 
@@ -588,11 +627,13 @@ function populateNoteNames() {
   getNotesFromHtml().forEach(n => {
     const left = n.offsetLeft - poff.left;
     const top = n.offsetTop - poff.top -5;
-    const $nn = $(`<span>${n.name}</span>`).addClass("note-name").css({position: 'absolute', left: left , top: top, padding: 0})
+    const noteName = n.name;
+    const sargameNoteName = getSargam(noteName, getActiveKey());
+    const $nn = $(`<span>${sargam ? sargameNoteName : noteName}</span>`).addClass("note-name").css({position: 'absolute', left: left , top: top, padding: 0})
 
     if(n.keySignature) {
       const scaleNotes = getScale(n.keySignature)
-      const name = n.name.replace("n", "")
+      const name = noteName.replace("n", "")
       if(!scaleNotes.includes(name)) $nn.addClass('non-scale-note').css('color', 'black').css('border', 'thin solid blue').css('border-radius', '50%')
     }
 
@@ -1289,6 +1330,12 @@ $(function () {
 
   $('#toggleNoteNamesBtn').click(e => {
     populateNoteNames()
+    $('.note-name').toggle()
+    window.showNoteNames = !window.showNoteNames
+  })
+
+  $('#toggleSargameNotesBtn').click(e => {
+    populateNoteNames(true)
     $('.note-name').toggle()
     window.showNoteNames = !window.showNoteNames
   })

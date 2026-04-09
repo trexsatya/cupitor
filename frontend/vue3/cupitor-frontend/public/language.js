@@ -33,8 +33,16 @@ window.onbeforeunload = function (event) {
 };
 
 window.addEventListener('filterData', (e) => {
-  const text = e.detail;
-  fetchSRTs(text)
+  const text = e.detail?.text;
+  // The native app can pass a GitHub token alongside the search text.
+  // It is stored in memory only (never persisted) and used for vocab commits.
+  if (e.detail?.token) {
+    //window.GitHubUtils?.setGHToken(e.detail.token)
+  }
+  if (text) {
+    fetchSRTs(text)
+    $("#searchText").val(text);
+  }
 });
 
 function getExpansionForWords() {
@@ -217,9 +225,11 @@ function createOptionElement(searchTerms, selected = false) {
 function loadSearches() {
   const searches = getSearchesFromStorage()
   $('#searchedWords').html('')
+  $('addToVocabularyDialogSelect').html('')
 
   schedule(searches, .0001, searchTerms => {
-    $('#searchedWords').append(createOptionElement(searchTerms))
+    $('#searchedWords').append(createOptionElement(searchTerms));
+    $('#addToVocabularyDialogSelect').append(createOptionElement(searchTerms));
   })
 
   $('#toggleSearchesControlCheckbox').click()
@@ -253,6 +263,7 @@ function importSearchesFromVocab() {
 
 function loadWholeVocabulary() {
   $('#searchedWords').html('')
+  $('#addToVocabularyDialogSelect').html('')
 
   const vocabCategoriesToPopulate = new Set()
 
@@ -265,8 +276,10 @@ function loadWholeVocabulary() {
     const heading = new Option(`${category}`, category, false, false)
     heading.disabled = true
     $('#searchedWords').append(heading)
+    $('#addToVocabularyDialogSelect').append(heading.cloneNode(true))
     vocabLines.forEach(line => {
       $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
+      $('#addToVocabularyDialogSelect').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
     })
   };
   schedule(Array.from(vocabCategoriesToPopulate), .5, it => {
@@ -311,25 +324,118 @@ function saveSearch(word, count) {
   return newItem
 }
 
-function populateVocabText() {
-  const category = $("#addToVocabularyDialogSelect").val()
-  const text = window.vocabulary[category].join("\n")
-  $("#vocabularySegmentTextarea").val(text)
-}
 
 function openAddToVocabDialog() {
   const w = window.innerWidth * 0.9
   const h = window.innerHeight * 0.8
-  $("#addToVocabularyDialog").dialog({width: w, height: h}).show()
-  populateVocabularyHeadings($('#addToVocabularyDialogSelect'))
+
+  // Defer opening until after the current click event has finished bubbling.
+  // Without this, the document-level "close on outside click" handler fires
+  // on the same click and immediately closes the dialog.
+  setTimeout(() => {
+    const $dialog = $("#addToVocabularyDialog")
+    if ($dialog.hasClass('ui-dialog-content')) {
+      $dialog.dialog('option', { width: w, height: h }).dialog('open')
+    } else {
+      $dialog.dialog({ width: w, height: h, modal: false })
+    }
+  }, 0)
 }
 
 function addToVocab() {
-  const text = $("#vocabularySegmentTextarea").val()
-  const category = $("#addToVocabularyDialogSelect").val()
-  window.vocabulary[category] = text.split("\n")
-  populateVocabularyHeadings($('#vocabularySelect'))
-  makeHttpCallToUpdateVocab()
+  const newText = $("#vocabularySegmentTextarea").val().trim()
+  if (!newText) return
+
+  const selectedVal = $("#addToVocabularyDialogSelect").val()
+  if (!selectedVal) return
+
+  let category, refWord
+  try {
+    const parsed = JSON.parse(selectedVal)
+    // createOptionElement stores {o, e}; openAddToVocabDialog stored {category, word}
+    refWord = parsed.o || parsed.word
+    category = parsed.category
+    // If no category in the value, find it by scanning vocabulary
+    if (!category && refWord) {
+      for (const [cat, words] of Object.entries(window.vocabulary || {})) {
+        if (words.includes(refWord)) { category = cat; break }
+      }
+    }
+  } catch (_) {
+    return
+  }
+
+  const position = $("#vocabInsertPosition").val() // 'above', 'below', or 'inline'
+  const newWords = newText.split("\n").map(w => w.trim()).filter(w => w.length > 0)
+
+  const categoryWords = window.vocabulary[category] || []
+  const idx = categoryWords.indexOf(refWord)
+
+  if (position === 'inline') {
+    // Replace the reference word in-place
+    if (idx >= 0) {
+      categoryWords.splice(idx, 1, ...newWords)
+    } else {
+      categoryWords.push(...newWords)
+    }
+  } else {
+    const insertAt = position === 'above'
+      ? (idx >= 0 ? idx : 0)
+      : (idx >= 0 ? idx + 1 : categoryWords.length)
+    categoryWords.splice(insertAt, 0, ...newWords)
+  }
+  window.vocabulary[category] = categoryWords
+
+  // Refresh both select boxes with updated vocabulary
+  loadWholeVocabulary()
+
+  // Commit vocabulary file to GitHub
+  commitVocabularyToGithub()
+
+  $("#addToVocabularyDialog").dialog("close")
+}
+
+function onVocabInsertPositionChange(select) {
+  const $textarea = $('#vocabularySegmentTextarea')
+  if (select.value === 'inline') {
+    // Pre-populate with the reference word so the user can edit it in place
+    try {
+      const parsed = JSON.parse($('#addToVocabularyDialogSelect').val())
+      $textarea.val(parsed.o || parsed.word)
+    } catch (_) {}
+  } else {
+    // Clear only if the textarea still contains the auto-filled reference word
+    try {
+      const parsed = JSON.parse($('#addToVocabularyDialogSelect').val())
+      const refWord = parsed.o || parsed.word
+      if ($textarea.val().trim() === (refWord || '').trim()) {
+        $textarea.val('')
+      }
+    } catch (_) {}
+  }
+}
+
+async function commitVocabularyToGithub() {
+  const vocabText = Object.keys(window.vocabulary)
+    .map(k => `#${k}\n${window.vocabulary[k].join("\n")}`).join("\n")
+
+  const lang = getLangFromUrl()
+  const filePath = `db/language/${lang.fullName}/vocabulary.txt`
+
+  try {
+    await window.GitHubUtils.putFileWithContent({
+      owner: 'trexsatya',
+      repo: 'trexsatya.github.io',
+      filePath,
+      content: vocabText,
+      commitMessage: 'vocab: update vocabulary via language tool',
+      branch: 'gh-pages'
+    })
+    console.log('Vocabulary committed to GitHub')
+  } catch (e) {
+    console.error('Failed to commit vocabulary to GitHub:', e)
+    alert('Saved in memory but GitHub commit failed: ' + e.message)
+  }
 }
 
 function getXXX() {
@@ -664,6 +770,12 @@ $('document').ready(e => {
       e.preventDefault()
       const link = $(e.target).attr('href')
       window.open(link, '_blank').focus();
+    }
+  });
+
+  $(document).on("click", function(e) {
+    if ($(".ui-dialog:visible").length && !$(e.target).closest(".ui-dialog,.show-info-btn").length) {
+      $(".ui-dialog-content:visible").dialog("close");
     }
   });
 
@@ -1073,7 +1185,13 @@ $(document).ready(function () {
   fixSectionBox()
   $("#vocabularySelect").select2()
   $("#addToVocabularyDialogSelect").select2().change(e => {
-    populateVocabText()
+    // When inline is selected, keep the textarea in sync with the chosen reference word
+    if ($('#vocabInsertPosition').val() === 'inline') {
+      try {
+        const parsed = JSON.parse($(e.target).val())
+        $('#vocabularySegmentTextarea').val(parsed.o || parsed.word)
+      } catch (_) {}
+    }
   })
   audioPlayer && hidePlayer(audioPlayer)
   videoPlayer && hidePlayer(videoPlayer)
@@ -2071,7 +2189,7 @@ function renderLines(id, url) {
   const timeStart = parseInt(Math.floor(st.start.ordinal)); //fromSeconds(line.start.ordinal);
   const timeEnd = parseInt(Math.ceil(end.end.ordinal)); //fromSeconds(line.end.ordinal);
 
-  const showInfoBtn = `<span>
+  const showInfoBtn = `<span class="show-info-btn">
     <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" fill="currentColor" class="bi bi-info-circle media-info" viewBox="0 0 16 16" style="cursor: pointer;">
            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
            <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
@@ -2369,6 +2487,66 @@ export function wordIsInVocabularyLine(vocabLine, search) {
   } catch (e) {
     console.log(vocabLine, e)
     return false
+  }
+}
+
+/**
+ * Returns true if any pipe-separated word in vocabLine is a prefix of searchText
+ * e.g. vocabLine="xyz|abc", searchText="xyzw" → true ("xyzw".startsWith("xyz"))
+ */
+function vocabLineMatchesPrefix(vocabLine, searchText) {
+  const st = searchText.toLowerCase().trim()
+  if (!st || st.length < 4) return false
+  const parts = vocabLine.split(SEPARATOR_PIPE).map(p => p.toLowerCase().trim()).filter(p => p.length >= 4)
+  return parts.some(p => st.startsWith(p) || p.startsWith(st))
+}
+
+function searchVocabularyByPrefix() {
+  const searchText = $('#searchText').val().trim()
+  if (!searchText || !window.vocabulary) return
+
+  // Gather all vocab words flat, keeping track of which match by prefix
+  const allWords = Object.values(window.vocabulary).flat()
+  const indexesOfAppearance = allWords
+    .map((vocabLine, i) => vocabLineMatchesPrefix(vocabLine, searchText) ? i : null)
+    .filter(it => it !== null)
+
+  const $vocab = $('#vocabularyResult')
+  $vocab.html('')
+
+  if (indexesOfAppearance.length === 0) {
+    $vocab.html(`<div style="color:grey;padding:4px;">No prefix matches for "${_.escape(searchText)}"</div>`)
+  } else {
+    indexesOfAppearance.forEach(idx => {
+      const vocabItem = $('<div class="vocabulary-segment"></div>')
+      const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
+      getSurrounding(idx, allWords).forEach(it => {
+        let txt = it.item
+        const $line = $(`<div class="vocabulary-line"></div>`)
+        if (txt.trim().length) {
+          $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`)
+          $line.find('i.fa').click(selectSearchedWord)
+        } else {
+          txt = '------------------'
+        }
+        $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, ' | ')}</span>`)
+        $line.data({ text: txt })
+        if (it.index === idx) {
+          $line.addClass('highlighted')
+        }
+        vocabItemContent.append($line)
+      })
+      vocabItem.append(vocabItemContent)
+      $vocab.append(vocabItem)
+    })
+    $('.vocabulary-segment').each((i, e) => $(e).find('.highlighted')[0].scrollIntoView())
+  }
+
+  // Ensure the result container is visible
+  const $rc = $('#resultContainer')
+  if ($rc.is(':hidden')) {
+    $rc.show()
+    updateToggleButtonView('resultContainer')
   }
 }
 
@@ -2945,5 +3123,19 @@ async function playMediaSlice(url, start, end, source) {
   a.onended = e => restoreBgMusic()
   await a.play()
 }
+
+// Expose functions that are called from inline HTML onclick/onchange handlers.
+// Required because this file is loaded as type="module" which is scoped by default.
+window.openAddToVocabDialog = openAddToVocabDialog;
+window.addToVocab = addToVocab;
+window.onVocabInsertPositionChange = onVocabInsertPositionChange;
+window.searchVocabularyByPrefix = searchVocabularyByPrefix;
+window.importSearches = importSearches;
+window.importSearchesFromVocab = importSearchesFromVocab;
+window.importSearchesFromFile = importSearchesFromFile;
+window.loadWholeVocabulary = loadWholeVocabulary;
+window.loadLocalFiles = loadLocalFiles;
+window.saveStarredLines = saveStarredLines;
+window.saveRevision = saveRevision;
 
 

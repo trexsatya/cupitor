@@ -1152,7 +1152,7 @@ function hide() {
   const items = Array.prototype.slice.apply(arguments);
   items.forEach(it => {
     if (it instanceof fabric.Object) {
-      it.setOpacity(0);
+      it.set({ opacity: 0 });
       update();
     } else if (it instanceof jQuery) {
       it.hide()
@@ -1161,16 +1161,14 @@ function hide() {
 }
 
 function Clone(object, id, top, left) {
-  return new Promise((myResolve, myReject) => {
-    object.clone(function (clone) {
-      pc.add(clone.set({
-        left: left || (object.left + 1),
-        top: top || (object.top + 1)
-      }));
-      update();
-      myResolve(clone);
-      if (window._ && id) _[id] = clone;
-    });
+  return object.clone().then(function (clone) {
+    pc.add(clone.set({
+      left: left || (object.left + 1),
+      top: top || (object.top + 1)
+    }));
+    update();
+    if (window._ && id) _[id] = clone;
+    return clone;
   });
 }
 
