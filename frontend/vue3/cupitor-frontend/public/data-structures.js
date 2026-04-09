@@ -605,3 +605,5 @@ function closest(num, arr) {
   }
   return arr[hi];
 }
+
+window.uuid = uuid;

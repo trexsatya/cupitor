@@ -11,86 +11,68 @@ fabric.Object.prototype.getZIndex = function() {
   return this.canvas.getObjects().indexOf(this);
 }
 
-// Extended fabric line class
-fabric.Image.filters.WhiteToTransparent = fabric.util.createClass({
+// --- Fabric.js v6 custom filter: WhiteToTransparent ---
+class WhiteToTransparent extends fabric.filters.BaseFilter {
+  static type = 'WhiteToTransparent';
 
-  type: 'whiteToTransparent',
-
-  applyTo: function(canvasEl) {
-    const context = canvasEl.getContext('2d'),
-        imageData = context.getImageData(0, 0, canvasEl.width, canvasEl.height),
-        pix = imageData.data;
-
-    const newColor = {r:0,g:0,b:0, a:0};
-    for (let i = 0, n = pix.length; i <n; i += 4) {
-      const r = pix[i],
-          g = pix[i+1],
-          b = pix[i+2];
-
-      if(r == 255&& g == 255 && b == 255){
-        // Change the white to the new color.
-        pix[i] = newColor.r;
-        pix[i+1] = newColor.g;
-        pix[i+2] = newColor.b;
-        pix[i+3] = newColor.a;
+  applyTo2d({ imageData }) {
+    const pix = imageData.data;
+    for (let i = 0, n = pix.length; i < n; i += 4) {
+      if (pix[i] === 255 && pix[i+1] === 255 && pix[i+2] === 255) {
+        pix[i] = 0;
+        pix[i+1] = 0;
+        pix[i+2] = 0;
+        pix[i+3] = 0;
       }
     }
-
-
-    context.putImageData(imageData, 0, 0);
   }
-});
+}
+fabric.filters.WhiteToTransparent = WhiteToTransparent;
+fabric.classRegistry.setClass(WhiteToTransparent, 'filters.WhiteToTransparent');
 
-fabric.LineArrow = fabric.util.createClass(fabric.Line, {
+// --- Fabric.js v6 custom class: LineArrow ---
+class LineArrow extends fabric.Line {
+  static type = 'LineArrow';
 
-  type: 'lineArrow',
+  constructor(points, options) {
+    super(points, options || {});
+  }
 
-  initialize: function(element, options) {
-    options || (options = {});
-    this.callSuper('initialize', element, options);
-  },
+  toObject(propertiesToInclude) {
+    return super.toObject(propertiesToInclude);
+  }
 
-  toObject: function() {
-    return fabric.util.object.extend(this.callSuper('toObject'));
-  },
-
-  _render: function(ctx) {
-    this.callSuper('_render', ctx);
+  _render(ctx) {
+    super._render(ctx);
 
     // do not render if width/height are zeros or object is not visible
     if (this.width === 0 || this.height === 0 || !this.visible) return;
 
     ctx.save();
 
-    const xDiff = this.x2 - this.x1;
-    const yDiff = this.y2 - this.y1;
     const angle = Math.atan2(this.y2 - this.y1, this.x2 - this.x1) * 180 / Math.PI;
 
-    ctx.translate(this.x2,this.y2)
+    ctx.translate(this.x2, this.y2);
 
-    //ctx.rotate(angle);
     ctx.beginPath();
-    //move 10px in front of line to start the arrow so it does not have the square line end showing in front (0,0)
-    //ctx.moveTo(10, 0);
 
-    ctx.lineTo(10*Math.cos(angle), 10*Math.sin(angle))
-    ctx.translate(this.x2,this.y2)
+    ctx.lineTo(10 * Math.cos(angle), 10 * Math.sin(angle));
+    ctx.translate(this.x2, this.y2);
 
-    ctx.lineTo(-10*Math.cos(angle), -10*Math.sin(angle))
+    ctx.lineTo(-10 * Math.cos(angle), -10 * Math.sin(angle));
     ctx.closePath();
     ctx.fillStyle = this.stroke;
-    //ctx.fill();
 
     ctx.restore();
-
   }
-});
 
-fabric.LineArrow.fromObject = function(object, callback) {
-  callback && callback(new fabric.LineArrow([object.x1, object.y1, object.x2, object.y2], object));
-};
-
-fabric.LineArrow.async = true;
+  static fromObject(object) {
+    return Promise.resolve(new LineArrow([object.x1, object.y1, object.x2, object.y2], object));
+  }
+}
+fabric.LineArrow = LineArrow;
+fabric.classRegistry.setClass(LineArrow);
+fabric.classRegistry.setClass(LineArrow, 'LineArrow');
 
 fabric.Canvas.prototype.add = (function (originalFn) {
   return function (...args) {
@@ -111,108 +93,93 @@ fabric.Canvas.prototype.add = (function (originalFn) {
   };
 })(fabric.Canvas.prototype.add);
 
-fabric.Sprite = fabric.util.createClass(fabric.Image, {
+// --- Fabric.js v6 custom class: Sprite ---
+class Sprite extends fabric.Image {
+  static type = 'Sprite';
+  spriteWidth = 50;
+  spriteHeight = 72;
+  spriteIndex = 0;
+  frameTime = 100;
 
-  type: 'sprite',
-
-  spriteWidth: 50,
-  spriteHeight: 72,
-  spriteIndex: 0,
-  frameTime: 100,
-
-  initialize: function (element, options) {
-    options || (options = {});
-
-    options.width = this.spriteWidth;
-    options.height = this.spriteHeight;
-
-    this.callSuper('initialize', element, options);
-
+  constructor(element, options = {}) {
+    options.width = options.spriteWidth || 50;
+    options.height = options.spriteHeight || 72;
+    super(element, options);
+    this.spriteWidth = options.spriteWidth || this.spriteWidth;
+    this.spriteHeight = options.spriteHeight || this.spriteHeight;
     this.createTmpCanvas();
     this.createSpriteImages();
-  },
+  }
 
-  createTmpCanvas: function () {
-    this.tmpCanvasEl = fabric.util.createCanvasElement();
+  createTmpCanvas() {
+    this.tmpCanvasEl = document.createElement('canvas');
     this.tmpCanvasEl.width = this.spriteWidth || this.width;
     this.tmpCanvasEl.height = this.spriteHeight || this.height;
-  },
+  }
 
-  createSpriteImages: function () {
+  createSpriteImages() {
     this.spriteImages = [];
-
     const steps = this._element.width / this.spriteWidth;
     for (let i = 0; i < steps; i++) {
       this.createSpriteImage(i);
     }
-  },
+  }
 
-  createSpriteImage: function (i) {
+  createSpriteImage(i) {
     const tmpCtx = this.tmpCanvasEl.getContext('2d');
     tmpCtx.clearRect(0, 0, this.tmpCanvasEl.width, this.tmpCanvasEl.height);
     tmpCtx.drawImage(this._element, -i * this.spriteWidth, 0);
-
     const dataURL = this.tmpCanvasEl.toDataURL('image/png');
-    const tmpImg = fabric.util.createImage();
-
+    const tmpImg = new Image();
     tmpImg.src = dataURL;
-    tmpImg.crossOrigin = 'anonymous'
-
+    tmpImg.crossOrigin = 'anonymous';
     this.spriteImages.push(tmpImg);
-  },
+  }
 
-  _render: function (ctx) {
+  _render(ctx) {
     ctx.drawImage(
-        this.spriteImages[this.spriteIndex],
-        -this.width / 2,
-        -this.height / 2
+      this.spriteImages[this.spriteIndex],
+      -this.width / 2,
+      -this.height / 2
     );
-  },
+  }
 
-  play: function () {
-    const _this = this;
-    this.animInterval = setInterval(function () {
-
-      _this.onPlay && _this.onPlay();
-      _this.dirty = true;
-      _this.spriteIndex++;
-      if (_this.spriteIndex === _this.spriteImages.length) {
-        _this.spriteIndex = 0;
+  play() {
+    this.animInterval = setInterval(() => {
+      this.onPlay && this.onPlay();
+      this.dirty = true;
+      this.spriteIndex++;
+      if (this.spriteIndex === this.spriteImages.length) {
+        this.spriteIndex = 0;
       }
     }, this.frameTime);
-  },
+  }
 
-  stop: function () {
+  stop() {
     clearInterval(this.animInterval);
   }
-});
 
-fabric.Sprite.fromURL = function (url, callback, imgOptions) {
-  fabric.util.loadImage(url, function (img) {
-    img.crossOrigin = 'anonymous'
-    callback(new fabric.Sprite(img, imgOptions));
-  });
-};
-
-fabric.Sprite.async = true;
+  static async fromURL(url, imgOptions) {
+    const img = await fabric.util.loadImage(url, { crossOrigin: 'anonymous' });
+    return new Sprite(img, imgOptions);
+  }
+}
+fabric.Sprite = Sprite;
+fabric.classRegistry.setClass(Sprite);
+fabric.classRegistry.setClass(Sprite, 'Sprite');
 
 fabric.Object.prototype.toObject = (function (toObject) {
-  return function () {
-    let props = {
-    };
-    if(this.customData)
-      props.customData = this.customData
-    if(this.uid)
-      props.uid = this.uid
-    if(this.treeConnection)
-      props.treeConnection = this.treeConnection
-    if(this.text)
-      props.text = this.text
-    return fabric.util.object.extend(toObject.call(this), props);
+  return function (propertiesToInclude) {
+    const obj = toObject.call(this, propertiesToInclude);
+    if (this.customData) obj.customData = this.customData;
+    if (this.uid) obj.uid = this.uid;
+    if (this.treeConnection) obj.treeConnection = this.treeConnection;
+    if (this.text) obj.text = this.text;
+    return obj;
   };
 })(fabric.Object.prototype.toObject);
 
-fabric.Object.prototype.stateProperties = fabric.Object.prototype.stateProperties.concat('customData', 'uid', 'treeConnection');
+fabric.Object.customProperties = ['customData', 'uid', 'treeConnection'];
 
 function globalStore(key, obj) {
   if (!window.globalMapping) window.globalMapping = {}
@@ -432,14 +399,16 @@ function hideToolbar() {
 
 function changeCircleColor(c, objs) {
   try {
-    const _objs = objs || pc.getActiveGroup()._objects
-    _objs.forEach(o => o._objects[0].setFill(c))
-
+    const _objs = objs || pc.getActiveObjects()
+    _objs.forEach(o => {
+      if (o._objects && o._objects[0]) o._objects[0].set({ fill: c });
+      else o.set({ fill: c });
+    })
   } catch (e) {
     try {
-      pc.getActiveObject().setFill(c)
-    } catch (e) {
-      console.log(e);
+      pc.getActiveObject().set({ fill: c })
+    } catch (e2) {
+      console.log(e2);
     }
   }
 
@@ -523,17 +492,18 @@ function deleteFabricObject(obj) {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function deleteSelectedObjects() {
-  const activeObject = pc.getActiveObject();
-  if(activeObject) {
-    deleteFabricObject(activeObject);
-    recordScript(`deleteFabricObject('${activeObject.uid}')`)
+  const activeObjects = pc.getActiveObjects();
+  if (activeObjects.length > 1) {
+    activeObjects.forEach(x => {
+      deleteFabricObject(x)
+      recordScript(`deleteFabricObject('${x.uid}')`)
+    })
+    pc.discardActiveObject();
   } else {
-    const activeGroup = pc.getActiveGroup();
-    if (activeGroup) {
-      activeGroup._objects.forEach(x => {
-        deleteFabricObject(x)
-        recordScript(`deleteFabricObject('${x.uid}')`)
-      })
+    const activeObject = pc.getActiveObject();
+    if (activeObject) {
+      deleteFabricObject(activeObject);
+      recordScript(`deleteFabricObject('${activeObject.uid}')`)
     }
   }
 }
@@ -569,13 +539,9 @@ function duplicate(obj) {
     })
   }
 
-  return new Promise((done, error) => {
-    obj.clone(cloned => {
-      done(cloned)
-    });
-  }).then(x => {
-    pc.add(x);
-    return x
+  return obj.clone().then(cloned => {
+    pc.add(cloned);
+    return cloned;
   });
 }
 
@@ -584,10 +550,10 @@ function copy(canvas, obj) {
   // may want copy and paste on different moment.
   // and you do not want the changes happened
   // later to reflect on the copy.
-  const target = obj || canvas.getActiveObject() || canvas.getActiveGroup();
+  const target = obj || canvas.getActiveObject();
   if (!target) return;
 
-  target.clone(function (cloned) {
+  target.clone().then(function (cloned) {
     _clipboard = cloned;
   });
   window.canPasteImageFromClipboard = false;
@@ -598,9 +564,8 @@ function paste(canvas) {
 
   window.canPasteImageFromClipboard = true;
   // clone again, so you can do multiple copies.
-  _clipboard.clone(function (clonedObj) {
+  _clipboard.clone().then(function (clonedObj) {
     canvas.discardActiveObject();
-    canvas.discardActiveGroup();
 
     const options = {
       left: clonedObj.left + 10,
@@ -632,8 +597,6 @@ function paste(canvas) {
     _clipboard.top += 10;
     _clipboard.left += 10;
 
-
-    //canvas.setActiveObject(clonedObj);
     canvas.renderAll();
   });
 }
@@ -775,7 +738,7 @@ function renderSubtree(values, opts, node) {
       customData(line).source = node.uid ? node.uid: node
       customData(line).target = targetNode.uid ? targetNode.uid : targetNode
       pc.add(line)
-      pc.sendToBack(line)
+      pc.sendObjectToBack(line)
       node.treeConnection.outgoing = node.treeConnection.outgoing || defaultOutgoing()
       node.treeConnection.outgoing.lines.push(line.uid)
 
@@ -788,7 +751,7 @@ function renderSubtree(values, opts, node) {
       targetNode.onAnimationChange = () => updateTreeItem(targetNode)
 
       if(options.overlapOnRoot) {
-        pc.bringToFront(targetNode)
+        pc.bringObjectToFront(targetNode)
       }
       return targetNode
     }
@@ -854,7 +817,7 @@ function expandTreeItems(obj) {
     let prevProps = customData(target).prevProps
     animate(target, {top: prevProps.top, left: prevProps.left}, {onComplete: e => {
         //pc.moveTo(target, prevProps.zIndex)
-        pc.bringToFront(target)
+        pc.bringObjectToFront(target)
         customData(target).prevProps = null
         customData(target).collapsedInto = null
       }})
@@ -875,7 +838,7 @@ function collapseTreeItems(obj) {
           animate(target, {top: obj.top, left: obj.left}, {onComplete: e => {
               hideObject(target)
             }})
-          pc.sendToBack(target)
+          pc.sendObjectToBack(target)
   })
 
   if(!nonCollapsedChildren.length) {
@@ -998,7 +961,7 @@ function drawMathSymbols(text, top, left, id) {
     matex(text, function (svg, width, height) {
       // Here you have a data url for a svg file
       // Draw using FabricJS:
-      fabric.Image.fromURL(svg, function (img) {
+      fabric.Image.fromURL(svg).then(function (img) {
         img.height = height;
         img.width = width;
         img.left = matexInsertionPoint.left
@@ -1047,12 +1010,23 @@ function arrowButton() {
 
 function degroup(pc) {
   const grp = pc.getActiveObject()
-  if (grp.type !== 'group') return;
+  if (grp.type !== 'group' && grp.type !== 'activeSelection') return;
   const items = grp.getObjects() || []
-  grp.destroy();
   pc.remove(grp);
-  items.forEach(item => pc.add(item));
-  items.forEach(item => item.hasControls = false);
+  items.forEach(item => {
+    pc.add(item);
+    item.hasControls = false;
+  });
+  pc.discardActiveObject();
+  pc.renderAll();
+}
+
+function group(pc) {
+  const sel = pc.getActiveObject();
+  if (!sel || sel.type !== 'activeSelection') return;
+  const grp = sel.toGroup();
+  pc.setActiveObject(grp);
+  pc.requestRenderAll();
 }
 
 window.drawingStack = []
@@ -1073,23 +1047,22 @@ function redoDrawing() {
 function saveCanvas() {
   const idx = window.savePoint || 0;
 
-  localStorage.setItem('pc_' + idx, JSON.stringify(pc.toDatalessJSON()))
-  localStorage.setItem('oc_' + idx, JSON.stringify(oc.toDatalessJSON()))
+  localStorage.setItem('pc_' + idx, JSON.stringify(pc.toJSON()))
+  localStorage.setItem('oc_' + idx, JSON.stringify(oc.toJSON()))
 
 }
 
-function restoreCanvas() {
+async function restoreCanvas() {
   const idx = Number.parseInt($('#savePoints').val())
   saveCanvas()
   window.savePoint = idx;
   pc.clear();
   oc.clear();
   const data = JSON.parse(localStorage.getItem('pc_' + idx))
-  pc.loadFromDatalessJSON(data)
-
+  await pc.loadFromJSON(data)
   pc.renderAll();
   const data1 = JSON.parse(localStorage.getItem('oc_' + idx))
-  oc.loadFromDatalessJSON(data1)
+  await oc.loadFromJSON(data1)
   oc.renderAll();
 }
 
@@ -1144,29 +1117,23 @@ function exportScript() {
  * @param left
  * @returns {Promise<unknown>}
  */
-function addFromJSON(obj, top, left) {
-  if (!obj) return Promise.resolve();
+async function addFromJSON(obj, top, left) {
+  if (!obj) return;
   const canvas = pc;
 
-  const items = [obj]
+  const objects = await fabric.util.enlivenObjects([obj]);
+  const origRenderOnAddRemove = canvas.renderOnAddRemove;
+  canvas.renderOnAddRemove = false;
 
-  return new Promise((myResolve, myReject) => {
-    fabric.util.enlivenObjects(items, function (objects) {
-      const origRenderOnAddRemove = canvas.renderOnAddRemove;
-      canvas.renderOnAddRemove = false;
-
-      const res = []
-      let i = 0;
-      objects.forEach(function (o) {
-        o.set({top: top || obj.top, left: left || obj.left});
-        canvas.add(o);
-        res.push(o);
-      });
-      canvas.renderOnAddRemove = origRenderOnAddRemove;
-      canvas.renderAll();
-      myResolve(res[0]);
-    });
-  })
+  const res = [];
+  objects.forEach(function (o) {
+    o.set({top: top || obj.top, left: left || obj.left});
+    canvas.add(o);
+    res.push(o);
+  });
+  canvas.renderOnAddRemove = origRenderOnAddRemove;
+  canvas.renderAll();
+  return res[0];
 }
 
 function importIntoCanvas(txt) {
@@ -1177,13 +1144,8 @@ function importIntoCanvas(txt) {
 }
 
 function loadFabricImage(url) {
-  fabric.Image.fromURL(url, function (oImg) {
-    oImg.set({
-      'left': 100
-    });
-    oImg.set({
-      'top': 100
-    });
+  fabric.Image.fromURL(url).then(function (oImg) {
+    oImg.set({ left: 100, top: 100 });
     pc.add(oImg);
     $('#imageInputUrl').val('')
   });

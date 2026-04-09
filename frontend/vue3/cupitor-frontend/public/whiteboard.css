@@ -1,0 +1,359 @@
+/* whiteboard.css - Miro-like whiteboard UI styles */
+
+/* --- Floating Bottom Toolbar --- */
+#whiteboard-toolbar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000001;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  padding: 6px 8px;
+  user-select: none;
+}
+
+#whiteboard-toolbar .wb-tool {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: #555;
+  transition: background 0.15s, color 0.15s;
+  position: relative;
+}
+
+#whiteboard-toolbar .wb-tool:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+#whiteboard-toolbar .wb-tool.active {
+  background: #e3f2fd;
+  color: #1976D2;
+}
+
+#whiteboard-toolbar .wb-separator {
+  width: 1px;
+  height: 24px;
+  background: #ddd;
+  margin: 0 4px;
+}
+
+#whiteboard-toolbar .wb-tool[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  margin-bottom: 6px;
+  pointer-events: none;
+}
+
+/* --- Shape Submenu --- */
+.wb-shape-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 8px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  padding: 4px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wb-shape-menu.open {
+  display: flex;
+}
+
+.wb-shape-menu button {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  color: #555;
+}
+
+.wb-shape-menu button:hover {
+  background: #f0f0f0;
+}
+
+/* --- Sticky Note Color Palette --- */
+.wb-sticky-palette {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 8px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  padding: 8px;
+  display: none;
+  gap: 4px;
+  flex-wrap: wrap;
+  width: 80px;
+}
+
+.wb-sticky-palette.open {
+  display: flex;
+}
+
+.wb-sticky-palette .color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.wb-sticky-palette .color-swatch:hover {
+  border-color: #999;
+}
+
+.wb-sticky-palette .color-swatch.selected {
+  border-color: #333;
+}
+
+/* --- Zoom Controls --- */
+#zoom-controls {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000001;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  padding: 4px;
+}
+
+#zoom-controls button {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#zoom-controls button:hover {
+  background: #f0f0f0;
+}
+
+#zoom-level {
+  font-size: 12px;
+  color: #555;
+  min-width: 36px;
+  text-align: center;
+  font-family: system-ui, sans-serif;
+}
+
+/* --- Minimap --- */
+#minimap-container {
+  position: fixed;
+  bottom: 70px;
+  right: 20px;
+  z-index: 1000001;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  overflow: hidden;
+  width: 180px;
+  height: 120px;
+}
+
+#minimap-container canvas {
+  display: block;
+}
+
+/* --- Property Panel --- */
+#property-panel {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  z-index: 1000001;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  min-width: 200px;
+  display: none;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  border: 1px solid #ddd;
+}
+
+#property-panel.visible {
+  display: block;
+}
+
+#property-panel .prop-header {
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+  padding: 8px 12px;
+  margin: -1px -1px 8px -1px;
+  border-radius: 7px 7px 0 0;
+  cursor: move;
+  font-weight: 500;
+  font-size: 12px;
+  color: #666;
+  user-select: none;
+}
+
+#property-panel .prop-header:hover {
+  background: #eee;
+}
+
+#property-panel label {
+  display: block;
+  margin-bottom: 2px;
+  color: #888;
+  font-size: 11px;
+}
+
+#property-panel .prop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 8px 12px;
+}
+
+#property-panel input[type="color"] {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+
+#property-panel input[type="range"],
+#property-panel input[type="number"] {
+  flex: 1;
+  font-size: 12px;
+}
+
+/* --- Context Menu (right-click) --- */
+#wb-context-menu {
+  position: fixed;
+  z-index: 1000002;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+  padding: 4px 0;
+  min-width: 160px;
+  display: none;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+}
+
+#wb-context-menu.visible {
+  display: block;
+}
+
+#wb-context-menu .ctx-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#wb-context-menu .ctx-item:hover {
+  background: #f5f5f5;
+}
+
+#wb-context-menu .ctx-separator {
+  height: 1px;
+  background: #eee;
+  margin: 4px 0;
+}
+
+#wb-context-menu .ctx-item .shortcut {
+  margin-left: auto;
+  color: #999;
+  font-size: 11px;
+}
+
+/* --- Shape Label Picker --- */
+#label-picker {
+  position: fixed;
+  z-index: 1000002;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.2);
+  padding: 8px;
+  display: none;
+  grid-template-columns: repeat(5, 28px);
+  grid-template-rows: repeat(5, 28px);
+  gap: 3px;
+  font-family: system-ui, sans-serif;
+}
+
+#label-picker.visible {
+  display: grid;
+}
+
+#label-picker .lp-cell {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  cursor: pointer;
+  background: #f9f9f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  color: #888;
+  line-height: 1;
+  text-align: center;
+  transition: background 0.12s, color 0.12s;
+}
+
+#label-picker .lp-cell.inside {
+  background: #e8f4fd;
+  border-color: #b3d9f7;
+  color: #1565c0;
+}
+
+#label-picker .lp-cell:hover {
+  background: #1976D2;
+  color: #fff;
+  border-color: #1976D2;
+}
+
+#label-picker .lp-empty {
+  width: 28px;
+  height: 28px;
+}

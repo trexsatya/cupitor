@@ -86,13 +86,8 @@ function handleImageInputDialogButtons(src) {
       const file = document.querySelector('#imageInputFile').files[0];
       const reader = new FileReader();
       reader.addEventListener("load", function () {
-        fabric.Image.fromURL(reader.result, function (oImg) {
-          oImg.set({
-            'left': 100
-          });
-          oImg.set({
-            'top': 100
-          });
+        fabric.Image.fromURL(reader.result).then(function (oImg) {
+          oImg.set({ left: 100, top: 100 });
           pc.add(oImg);
         });
       }, false);
@@ -201,8 +196,8 @@ function initializeRecording() {
     })
 
     const newCanvasStates = {
-      pc: pc.toDatalessJSON(),
-      oc: oc.toDatalessJSON(),
+      pc: pc.toJSON(),
+      oc: oc.toJSON(),
       text: $('#textillateContainer').html()
     }
     try {
@@ -294,14 +289,14 @@ function launchRollbackRecording() {
 
 }
 
-function rollbackRecordingTo(saved, time) {
+async function rollbackRecordingTo(saved, time) {
   if (!time) return;
 
-  pc.loadFromDatalessJSON(saved['pc'][0][time])
+  await pc.loadFromJSON(saved['pc'][0][time])
   pc.renderAll()
   if (saved['oc']) {
     var x = closest(time, saved['oc'][1])
-    oc.loadFromDatalessJSON(saved['oc'][0][x])
+    await oc.loadFromJSON(saved['oc'][0][x])
     oc.renderAll()
   }
   if (saved['txt']) {
@@ -415,6 +410,8 @@ function playRecording(speedInMilliseconds, data) {
   //This is so that I can add delays at frame points programmatically.
   let delayAmount = 0;
   let delayInterval = 0;
+  let pcLoading = false;
+  let ocLoading = false;
 
   playerInterval = setInterval(x => {
     if (playerTimer > count) {
@@ -428,19 +425,21 @@ function playRecording(speedInMilliseconds, data) {
 
     const f = playerTimer;
     const statesPc = reconstructedCanvasStatesPc[f] && reconstructedCanvasStatesPc[f].state
-    if (statesPc) {
+    if (statesPc && !pcLoading) {
       $($('.canvas-container')[0]).css({zIndex: reconstructedCanvasStatesPc[f].zIndex[0]})
       $($('.canvas-container')[1]).css({zIndex: reconstructedCanvasStatesPc[f].zIndex[1]})
       $('#textillateContainer').css({zIndex: reconstructedCanvasStatesPc[f].zIndex[2]})
-      pc.loadFromDatalessJSON(statesPc, () => pc.renderAll());
+      pcLoading = true;
+      pc.loadFromJSON(statesPc).then(() => { pc.renderAll(); pcLoading = false; });
     }
 
     const statesOc = reconstructedCanvasStatesOc[f] && reconstructedCanvasStatesOc[f].state
-    if (statesOc) {
+    if (statesOc && !ocLoading) {
       $($('.canvas-container')[0]).css({zIndex: reconstructedCanvasStatesOc[f].zIndex[0]})
       $($('.canvas-container')[1]).css({zIndex: reconstructedCanvasStatesOc[f].zIndex[1]})
       $('#textillateContainer').css({zIndex: reconstructedCanvasStatesOc[f].zIndex[2]})
-      oc.loadFromDatalessJSON(statesOc, () => oc.renderAll());
+      ocLoading = true;
+      oc.loadFromJSON(statesOc).then(() => { oc.renderAll(); ocLoading = false; });
     }
 
     const statesTxt = reconstructedCanvasStatesTxt[f] && reconstructedCanvasStatesTxt[f].state
@@ -590,13 +589,8 @@ document.onpaste = function (event) {
       if (url.indexOf("data") >= 0) {
 
         if (window.insertPastedImageIntoFabric) {
-          fabric.Image.fromURL(url, function (oImg) {
-            oImg.set({
-              'left': window.lastClickedX || 100
-            });
-            oImg.set({
-              'top': window.lastClickedY || 100
-            });
+          fabric.Image.fromURL(url).then(function (oImg) {
+            oImg.set({ left: window.lastClickedX || 100, top: window.lastClickedY || 100 });
             oc.add(oImg);
           });
         } else {
