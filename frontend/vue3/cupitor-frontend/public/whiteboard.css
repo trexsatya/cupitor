@@ -297,6 +297,57 @@ canvas {
   font-size: 12px;
 }
 
+#property-panel select {
+  flex: 1;
+  font-size: 12px;
+  padding: 3px 4px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+}
+
+/* --- Text formatting section --- */
+.prop-section-divider {
+  height: 1px;
+  background: #eee;
+  margin: 8px 12px;
+}
+
+.prop-text-buttons {
+  gap: 4px !important;
+}
+
+.prop-toggle {
+  width: 30px;
+  height: 28px;
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: normal;
+  color: #555;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.prop-toggle:hover {
+  background: #f0f0f0;
+  border-color: #bbb;
+}
+
+.prop-toggle.active {
+  background: #e3f2fd;
+  border-color: #1976D2;
+  color: #1976D2;
+}
+
+#prop-bold {
+  font-weight: bold;
+}
+
 /* --- Context Menu (right-click) --- */
 #wb-context-menu {
   position: fixed;

@@ -162,39 +162,45 @@ class WhiteToTransparent extends fabric.filters.BaseFilter {
 fabric.filters.WhiteToTransparent = WhiteToTransparent;
 fabric.classRegistry.setClass(WhiteToTransparent, 'filters.WhiteToTransparent');
 
-// --- Fabric.js v6 custom class: LineArrow ---
+// --- Fabric.js v6 custom class: LineArrow (Miro-style) ---
 class LineArrow extends fabric.Line {
   static type = 'LineArrow';
 
+  // arrowSize: length of arrowhead wings (default 8)
   constructor(points, options) {
-    super(points, options || {});
+    const opts = Object.assign({ arrowSize: 8 }, options || {});
+    super(points, opts);
+    this.arrowSize = opts.arrowSize;
   }
 
   toObject(propertiesToInclude) {
-    return super.toObject(propertiesToInclude);
+    const obj = super.toObject(propertiesToInclude);
+    obj.arrowSize = this.arrowSize;
+    return obj;
   }
 
   _render(ctx) {
     super._render(ctx);
+    if ((this.width === 0 && this.height === 0) || !this.visible) return;
 
-    // do not render if width/height are zeros or object is not visible
-    if (this.width === 0 || this.height === 0 || !this.visible) return;
+    // Draw arrowhead at the end point (x2,y2)
+    const xDiff = this.x2 - this.x1;
+    const yDiff = this.y2 - this.y1;
+    const angle = Math.atan2(yDiff, xDiff);
+    const sz = this.arrowSize || 8;
 
     ctx.save();
-
-    const angle = Math.atan2(this.y2 - this.y1, this.x2 - this.x1) * 180 / Math.PI;
-
-    ctx.translate(this.x2, this.y2);
-
+    ctx.translate((this.x2 - this.x1) / 2, (this.y2 - this.y1) / 2);
+    ctx.rotate(angle);
     ctx.beginPath();
-
-    ctx.lineTo(10 * Math.cos(angle), 10 * Math.sin(angle));
-    ctx.translate(this.x2, this.y2);
-
-    ctx.lineTo(-10 * Math.cos(angle), -10 * Math.sin(angle));
-    ctx.closePath();
-    ctx.fillStyle = this.stroke;
-
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-sz, -sz * 0.5);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-sz, sz * 0.5);
+    ctx.strokeStyle = this.stroke;
+    ctx.lineWidth = this.strokeWidth;
+    ctx.lineCap = 'round';
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -208,19 +214,20 @@ fabric.classRegistry.setClass(LineArrow, 'LineArrow');
 
 fabric.Canvas.prototype.add = (function (originalFn) {
   return function (...args) {
+    const obj = args[0];
+    // Skip tracking for internal re-adds (object already on this canvas)
+    const alreadyOnCanvas = obj && obj.canvas === this;
     originalFn.call(this, ...args);
-    if(!args[0].uid) {
-      const uid = uuid();
-      args[0].uid = uid;
-      customData(args[0]).uid = uid;
-      console.log('added obj ' + uid);
-      const type = ' ' + customData(args[0]).type || ''
-      window.objectIds.add({uid: uid, type: 'fabric.js' + type});
-      updateObjectIdsUi()
-    } else {
-      console.log('Id already exist');
+    if (!alreadyOnCanvas && obj) {
+      if (!obj.uid) {
+        const uid = uuid();
+        obj.uid = uid;
+        customData(obj).uid = uid;
+        const type = ' ' + (customData(obj).type || '');
+        window.objectIds.add({uid: uid, type: 'fabric.js' + type});
+        updateObjectIdsUi()
+      }
     }
-
     return this
   };
 })(fabric.Canvas.prototype.add);
@@ -794,12 +801,14 @@ function editSelectedObject() {
   recordScript(`editFabricjsObject(${JSON.stringify(promptStr)}, '${obj.uid}');`)
 }
 
-function makeLine(coords) {
+function makeLine(coords, opts) {
+  const options = Object.assign({ stroke: '#888', strokeWidth: 1.5 }, opts);
   const line = new fabric.Line(coords, {
-    fill: 'red',
-    stroke: 'red',
-    strokeWidth: 2,
-    selectable: false
+    fill: '',
+    stroke: options.stroke,
+    strokeWidth: options.strokeWidth,
+    selectable: false,
+    padding: 4
   });
   line.customData = {
     type: "makeLine",
@@ -883,9 +892,9 @@ function renderSubtree(values, opts, node) {
         case 'out':
           return makeLine([x1, y1, x2, y2]);
         case 'in':
-          return arrow(x2, y2, x1, y1, { strokeWidth: 2 });
+          return arrow(x2, y2, x1, y1, {});
         case 'bi':
-          return bidirectionalArrow(x1, y1, x2, y2, { strokeWidth: 2 });
+          return bidirectionalArrow(x1, y1, x2, y2, {});
         default:
           return makeLine([x1, y1, x2, y2]);
       }

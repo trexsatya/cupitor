@@ -68,10 +68,33 @@ const Commands = {
       redo() { obj.set(newState); obj.setCoords(); canvas.requestRenderAll(); },
       undo() { obj.set(prevState); obj.setCoords(); canvas.requestRenderAll(); }
     };
+  },
+  // Add support for freehand paths (overlay canvas)
+  addPath(canvas, pathObj) {
+    return {
+      redo() { canvas.add(pathObj); canvas.requestRenderAll(); },
+      undo() { canvas.remove(pathObj); canvas.requestRenderAll(); }
+    };
+  },
+  removePath(canvas, pathObj) {
+    return {
+      redo() { canvas.remove(pathObj); canvas.requestRenderAll(); },
+      undo() { canvas.add(pathObj); canvas.requestRenderAll(); }
+    };
   }
 };
 
-function initUndoRedo(canvas, undoManager) {
+function initUndoRedo(canvas, undoManager, overlayCanvas) {
+  // Initialize for main canvas
+  initCanvasUndoRedo(canvas, undoManager);
+
+  // Initialize for overlay canvas (freehand drawings) if provided
+  if (overlayCanvas) {
+    initCanvasUndoRedo(overlayCanvas, undoManager);
+  }
+}
+
+function initCanvasUndoRedo(canvas, undoManager) {
   // Track object state before modification
   let objectBeforeState = null;
 
@@ -104,7 +127,21 @@ function initUndoRedo(canvas, undoManager) {
       width: target.width,
       height: target.height
     };
-    undoManager.push(Commands.modifyObject(canvas, target, objectBeforeState, newState));
+
+    // Use appropriate command based on canvas type
+    const commandType = canvas.isDrawingMode ? Commands.modifyObject : Commands.modifyObject;
+    undoManager.push(commandType(canvas, target, objectBeforeState, newState));
     objectBeforeState = null;
+  });
+
+  // Handle object deletion
+  canvas.on('before:object:removed', function(e) {
+    if (undoManager.isPerformingAction) return;
+    const target = e.target;
+    if (target) {
+      // Use appropriate command based on canvas type or object type
+      const commandType = (canvas.isDrawingMode || target.type === 'path') ? Commands.removePath : Commands.removeObject;
+      undoManager.push(commandType(canvas, target));
+    }
   });
 }

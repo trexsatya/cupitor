@@ -88,11 +88,10 @@ const Arrow = (function() {
 
         const points = [pointer.x, pointer.y, pointer.x, pointer.y];
         const line = new fabric.LineArrow(points, {
-            strokeWidth: 5,
-            fill: 'red',
-            stroke: 'red',
-            originX: 'center',
-            originY: 'center',
+            strokeWidth: 1.5,
+            fill: '',
+            stroke: '#555',
+            padding: 4,
             hasBorders: false,
             hasControls: false
         });
@@ -490,79 +489,98 @@ function groupFabricObjects (objs, opts){
     return G
 }
 
-function arrow(x1,y1,x2,y2, opts){
-    const options = combined({},  { strokeWidth: 1, stroke: 'black', fill: 'white', triangleWidth: 10, triangleHeight: 10}, opts)
-    const tri = new fabric.Triangle({
-        left: x2,
-        top: y2,
-        strokeWidth: options.strokeWidth,
-        width: options.triangleWidth,
-        height: options.triangleHeight,
+function arrow(x1, y1, x2, y2, opts) {
+    const options = combined({}, { strokeWidth: 1.5, stroke: '#555', arrowSize: 8 }, opts);
+    const line = new fabric.LineArrow([x1, y1, x2, y2], {
         stroke: options.stroke,
-        fill: options.fillTriangle,
-        selectable: true,
-        originX: 'center',
-        originY: 'center'
+        strokeWidth: options.strokeWidth,
+        fill: '',
+        arrowSize: options.arrowSize,
+        padding: 4,
+        selectable: true
     });
-
-    const slope =  Math.atan2(y2- y1, x2- x1)*180/Math.PI;
-    tri.rotate(90+slope);
-    const line = new fabric.Line([ x1,y1,x2,y2 ], { stroke: options.stroke, strokeWidth: options.strokeWidth})
-
-    let group = new fabric.Group([line, tri], {
-      left: x1,
-      top: y1
-    });
-    if(opts.uid) group.uid = opts.uid
-  return group
+    if (opts && opts.uid) line.uid = opts.uid;
+    return line;
 }
 
 function bidirectionalArrow(x1, y1, x2, y2, opts) {
-    const options = combined({}, { strokeWidth: 2, stroke: 'black', triangleWidth: 8, triangleHeight: 8 }, opts);
+    const options = combined({}, { strokeWidth: 1.5, stroke: '#555', arrowSize: 8 }, opts);
 
-    // Create main line
-    const line = new fabric.Line([x1, y1, x2, y2], {
+    // Use a custom Line that renders arrowheads at both ends
+    const line = new BiLineArrow([x1, y1, x2, y2], {
         stroke: options.stroke,
-        strokeWidth: options.strokeWidth
-    });
-
-    // Create triangles for both ends
-    const tri1 = new fabric.Triangle({
-        left: x2,
-        top: y2,
         strokeWidth: options.strokeWidth,
-        width: options.triangleWidth,
-        height: options.triangleHeight,
-        stroke: options.stroke,
-        fill: options.stroke,
-        originX: 'center',
-        originY: 'center'
+        fill: '',
+        arrowSize: options.arrowSize,
+        padding: 4,
+        selectable: true
     });
 
-    const tri2 = new fabric.Triangle({
-        left: x1,
-        top: y1,
-        strokeWidth: options.strokeWidth,
-        width: options.triangleWidth,
-        height: options.triangleHeight,
-        stroke: options.stroke,
-        fill: options.stroke,
-        originX: 'center',
-        originY: 'center'
-    });
-
-    const slope = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
-    tri1.rotate(90 + slope);
-    tri2.rotate(270 + slope);
-
-    const group = new fabric.Group([line, tri1, tri2], {
-        left: Math.min(x1, x2),
-        top: Math.min(y1, y2)
-    });
-
-    if (opts && opts.uid) group.uid = opts.uid;
-    return group;
+    if (opts && opts.uid) line.uid = opts.uid;
+    return line;
 }
+
+// Bidirectional arrow: arrowheads at both ends
+class BiLineArrow extends fabric.Line {
+  static type = 'BiLineArrow';
+
+  constructor(points, options) {
+    const opts = Object.assign({ arrowSize: 8 }, options || {});
+    super(points, opts);
+    this.arrowSize = opts.arrowSize;
+  }
+
+  toObject(propertiesToInclude) {
+    const obj = super.toObject(propertiesToInclude);
+    obj.arrowSize = this.arrowSize;
+    return obj;
+  }
+
+  _render(ctx) {
+    super._render(ctx);
+    if ((this.width === 0 && this.height === 0) || !this.visible) return;
+
+    const xDiff = this.x2 - this.x1;
+    const yDiff = this.y2 - this.y1;
+    const angle = Math.atan2(yDiff, xDiff);
+    const sz = this.arrowSize || 8;
+
+    ctx.save();
+    ctx.strokeStyle = this.stroke;
+    ctx.lineWidth = this.strokeWidth;
+    ctx.lineCap = 'round';
+
+    // Arrowhead at end (x2,y2)
+    ctx.translate((this.x2 - this.x1) / 2, (this.y2 - this.y1) / 2);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-sz, -sz * 0.5);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-sz, sz * 0.5);
+    ctx.stroke();
+
+    // Reset and draw arrowhead at start (x1,y1)
+    ctx.rotate(-angle);
+    ctx.translate(-(this.x2 - this.x1), -(this.y2 - this.y1));
+    ctx.rotate(angle + Math.PI);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-sz, -sz * 0.5);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-sz, sz * 0.5);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  static fromObject(object) {
+    return Promise.resolve(new BiLineArrow([object.x1, object.y1, object.x2, object.y2], object));
+  }
+}
+fabric.BiLineArrow = BiLineArrow;
+fabric.classRegistry.setClass(BiLineArrow);
+fabric.classRegistry.setClass(BiLineArrow, 'BiLineArrow');
 
 function text(text){
     const txt = new fabric.Text( text+"", {
@@ -721,9 +739,10 @@ function arrayOfCircledTextsAt(x,y, canvas, opts){
 
             var opts = opts || { dx:0, dy: 0 }
             const options = combined({
-                fill: 'red',
-                stroke: 'red',
-                strokeWidth: 3
+                fill: '',
+                stroke: '#888',
+                strokeWidth: 1.5,
+                padding: 4
             }, opts);
 
             if(typeof other == 'function'){
@@ -1195,9 +1214,8 @@ function connect(canvas, it, other, opts){
 
     var opts = opts || { dx:0, dy: 0 }
     const options = combined({
-        fill: 'black',
-        stroke: 'black',
-        strokeWidth: 2
+        stroke: '#555',
+        strokeWidth: 1.5
     }, opts);
 
     if(typeof other == 'function'){
@@ -1223,11 +1241,10 @@ function connect(canvas, it, other, opts){
     }
 
     var line = new fabric.LineArrow([x1, y1, x2, y2], {
-        strokeWidth: 2,
-        fill: 'red',
-        stroke: 'red',
-        originX: 'center',
-        originY: 'center'
+        strokeWidth: 1.5,
+        fill: '',
+        stroke: '#555',
+        padding: 4
     });
 
     canvas.add(line)
@@ -1356,13 +1373,14 @@ function stopAnimation(object, canvas){
 }
 
 function makeLine(coords, opts) {
-    opts = Object.assign({}, {fill: 'red', stroke: 'red', strokeWidth: 2}, opts);
+    opts = Object.assign({}, {stroke: '#888', strokeWidth: 1.5}, opts);
     return new fabric.Line(coords, {
-        fill: opts.fill,
+        fill: '',
         stroke: opts.stroke,
         strokeWidth: opts.strokeWidth,
         selectable: false,
         evented: false,
+        padding: 4
     });
 }
 

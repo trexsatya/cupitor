@@ -297,7 +297,8 @@ class GridManager {
     this.canvas = canvas;
     this.enabled = false;
     this.size = 20;
-    this.lines = [];
+    this.gridCanvas = window.gridCanvas;
+    this.gridCtx = window.gridCtx;
   }
 
   toggle() {
@@ -311,35 +312,58 @@ class GridManager {
   }
 
   draw() {
+    if (!this.gridCanvas || !this.gridCtx) return;
+
     this.clear();
-    const w = 4000;
-    const h = 4000;
-    const offset = -2000;
-    for (let x = offset; x <= w + offset; x += this.size) {
-      const line = new fabric.Line([x, offset, x, h + offset], {
-        stroke: '#e0e0e0', strokeWidth: 0.5,
-        selectable: false, evented: false, excludeFromExport: true
-      });
-      this.lines.push(line);
-      this.canvas.add(line);
-      this.canvas.sendObjectToBack(line);
+
+    // Get canvas dimensions and viewport transform
+    const canvasWidth = this.canvas.width;
+    const canvasHeight = this.canvas.height;
+    const vt = this.canvas.viewportTransform;
+
+    // Set grid canvas size to match main canvas
+    this.gridCanvas.width = canvasWidth;
+    this.gridCanvas.height = canvasHeight;
+
+    // Calculate visible area bounds accounting for zoom and pan
+    const zoom = vt[0]; // scale
+    const panX = vt[4];  // translate X
+    const panY = vt[5];  // translate Y
+
+    // Calculate the world coordinate bounds of what's visible
+    const startX = Math.floor((-panX) / zoom / this.size) * this.size;
+    const startY = Math.floor((-panY) / zoom / this.size) * this.size;
+    const endX = startX + Math.ceil(canvasWidth / zoom / this.size) * this.size + this.size;
+    const endY = startY + Math.ceil(canvasHeight / zoom / this.size) * this.size + this.size;
+
+    // Set drawing style
+    this.gridCtx.strokeStyle = '#e0e0e0';
+    this.gridCtx.lineWidth = 0.5 / zoom; // Adjust line width for zoom
+    this.gridCtx.globalAlpha = Math.max(0.3, Math.min(1, zoom)); // Fade out when zoomed out
+
+    // Apply the same transform as the main canvas
+    this.gridCtx.setTransform(zoom, 0, 0, zoom, panX, panY);
+
+    this.gridCtx.beginPath();
+
+    // Draw vertical lines
+    for (let x = startX; x <= endX; x += this.size) {
+      this.gridCtx.moveTo(x, startY);
+      this.gridCtx.lineTo(x, endY);
     }
-    for (let y = offset; y <= h + offset; y += this.size) {
-      const line = new fabric.Line([offset, y, w + offset, y], {
-        stroke: '#e0e0e0', strokeWidth: 0.5,
-        selectable: false, evented: false, excludeFromExport: true
-      });
-      this.lines.push(line);
-      this.canvas.add(line);
-      this.canvas.sendObjectToBack(line);
+
+    // Draw horizontal lines
+    for (let y = startY; y <= endY; y += this.size) {
+      this.gridCtx.moveTo(startX, y);
+      this.gridCtx.lineTo(endX, y);
     }
-    this.canvas.requestRenderAll();
+
+    this.gridCtx.stroke();
   }
 
   clear() {
-    this.lines.forEach(l => this.canvas.remove(l));
-    this.lines = [];
-    this.canvas.requestRenderAll();
+    if (!this.gridCanvas || !this.gridCtx) return;
+    this.gridCtx.clearRect(0, 0, this.gridCanvas.width, this.gridCanvas.height);
   }
 
   snapObject(obj) {
@@ -348,5 +372,12 @@ class GridManager {
       left: Math.round(obj.left / this.size) * this.size,
       top: Math.round(obj.top / this.size) * this.size
     });
+  }
+
+  // Add method to update grid when viewport changes
+  updateGrid() {
+    if (this.enabled) {
+      this.draw();
+    }
   }
 }
