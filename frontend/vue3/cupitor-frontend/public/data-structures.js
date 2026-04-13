@@ -553,6 +553,10 @@ function waitForKeyboardInput(key) {
 export function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowCondition) {
   data = data.map(x => x); //clone
   const totalDataItems = data.length
+
+  // Set playback flag for animation
+  window.isRecordingPlayback = true;
+
   let fn = null;
   fn = (x, idx) => setTimeout(() => {
     // console.log("Processing item at index", idx, " at ", new Date());
@@ -561,6 +565,8 @@ export function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowC
     if (finishNowCondition && finishNowCondition(first)) {
       //-1 => Finished because finishNowCondition satisfied
       console.log("Maybe finishing early on index, last consumed data item at index: " + (idx) + " out of total: " + (totalDataItems - 1))
+      // Clear playback flag when finishing early
+      window.isRecordingPlayback = false;
       return
     }
 
@@ -580,8 +586,12 @@ export function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowC
         fn && fn(delay, idx + 1)
       } else {
         console.log("Terminated because function at index: " + idx + " returned false!")
+        // Clear playback flag when terminated
+        window.isRecordingPlayback = false;
       }
     } else {
+      // Clear playback flag when completed normally
+      window.isRecordingPlayback = false;
       if (onComplete) onComplete();
     }
   }, x);

@@ -7,6 +7,138 @@ window.globalVariableNames = {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function it() { return pc.getActiveObject() }
 
+// Create freehand path for recording playback
+function createFreehandPath(pathString, opts = {}) {
+  const path = new fabric.Path(pathString, {
+    left: opts.left || 0,
+    top: opts.top || 0,
+    fill: opts.fill || '',
+    stroke: opts.stroke || '#000000',
+    strokeWidth: opts.strokeWidth || 1,
+    strokeLineCap: opts.strokeLineCap || 'butt',
+    strokeLineJoin: opts.strokeLineJoin || 'miter',
+    strokeDashArray: opts.strokeDashArray || null,
+    opacity: opts.opacity || 1,
+    scaleX: opts.scaleX || 1,
+    scaleY: opts.scaleY || 1,
+    angle: opts.angle || 0
+  });
+
+  if (opts.uid) {
+    path.uid = opts.uid;
+  }
+
+  // Add drawing animation during playback
+  if (window.isRecordingPlayback) {
+    animatePathDrawing(path);
+  }
+
+  return path;
+}
+
+function animatePathDrawing(path) {
+  // Estimate path length for animation
+  const pathLength = estimatePathLength(path.path);
+
+  if (pathLength <= 0) return; // Skip animation for very short paths
+
+  // Set up initial dash array to hide the entire path
+  const originalDashArray = path.strokeDashArray;
+  path.set({
+    strokeDashArray: [pathLength, pathLength],
+    strokeDashOffset: pathLength
+  });
+
+  // Animation duration based on path length (min 200ms, max 2000ms)
+  const duration = Math.min(Math.max(pathLength / 2, 200), 2000);
+
+  // Animate the path drawing
+  const startTime = Date.now();
+
+  function animateFrame() {
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+
+    // Ease-out animation for smoother effect
+    const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+    const newOffset = pathLength * (1 - easeProgress);
+    path.set({ strokeDashOffset: newOffset });
+
+    if (path.canvas) {
+      path.canvas.requestRenderAll();
+    }
+
+    if (progress < 1) {
+      requestAnimationFrame(animateFrame);
+    } else {
+      // Animation complete - restore original dash array
+      path.set({
+        strokeDashArray: originalDashArray,
+        strokeDashOffset: 0
+      });
+      if (path.canvas) {
+        path.canvas.requestRenderAll();
+      }
+    }
+  }
+
+  // Start animation on next frame
+  requestAnimationFrame(animateFrame);
+}
+
+function estimatePathLength(pathData) {
+  // Simple path length estimation from path commands
+  if (!pathData || typeof pathData !== 'string') return 0;
+
+  let totalLength = 0;
+  let currentX = 0, currentY = 0;
+
+  // Parse path commands to estimate length
+  const commands = pathData.match(/[MLCQTSZmlcqtsz][^MLCQTSZmlcqtsz]*/g) || [];
+
+  for (const command of commands) {
+    const type = command[0];
+    const coords = command.slice(1).trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+
+    switch (type.toLowerCase()) {
+      case 'm': // moveto
+        if (coords.length >= 2) {
+          if (type === 'm') { // relative
+            currentX += coords[0];
+            currentY += coords[1];
+          } else { // absolute
+            currentX = coords[0];
+            currentY = coords[1];
+          }
+        }
+        break;
+
+      case 'l': // lineto
+        if (coords.length >= 2) {
+          const newX = type === 'l' ? currentX + coords[0] : coords[0];
+          const newY = type === 'l' ? currentY + coords[1] : coords[1];
+          totalLength += Math.sqrt(Math.pow(newX - currentX, 2) + Math.pow(newY - currentY, 2));
+          currentX = newX;
+          currentY = newY;
+        }
+        break;
+
+      case 'c': // curveto (approximate as straight line for simplicity)
+        if (coords.length >= 6) {
+          const newX = type === 'c' ? currentX + coords[4] : coords[4];
+          const newY = type === 'c' ? currentY + coords[5] : coords[5];
+          totalLength += Math.sqrt(Math.pow(newX - currentX, 2) + Math.pow(newY - currentY, 2));
+          currentX = newX;
+          currentY = newY;
+        }
+        break;
+    }
+  }
+
+  return totalLength;
+}
+
 fabric.Object.prototype.getZIndex = function() {
   return this.canvas.getObjects().indexOf(this);
 }
@@ -480,10 +612,10 @@ function deleteFabricObject(obj) {
     return
   }
   obj.treeConnection?.incoming?.lines?.map(findIfRequired)?.forEach((line) => {
-    line.remove()
+    pc.remove(line)
   })
   obj.treeConnection?.outgoing?.lines?.map(findIfRequired)?.forEach((line) => {
-    line.remove()
+    pc.remove(line)
   })
 
   pc.remove(obj)
@@ -653,7 +785,7 @@ function editFabricjsObject(txt, obj) {
 
 function editSelectedObject() {
   if (!pc.getActiveObject()) return;
-  let obj = pc.getActiveObject()
+  const obj = pc.getActiveObject()
 
   const promptStr = prompt('Enter command')
   if (!promptStr || promptStr.split(":").length !== 2) return
@@ -663,7 +795,7 @@ function editSelectedObject() {
 }
 
 function makeLine(coords) {
-  let line = new fabric.Line(coords, {
+  const line = new fabric.Line(coords, {
     fill: 'red',
     stroke: 'red',
     strokeWidth: 2,
@@ -681,6 +813,8 @@ function renderSubtree(values, opts, node) {
 
   const split = values.split(";")
   let cmds = ''
+  let arrowDir = 'out' // default to outgoing arrows
+
   if (split.length === 2) {
     cmds = split[0]
     values = split[1]
@@ -689,12 +823,30 @@ function renderSubtree(values, opts, node) {
     values = split[0]
   }
 
-  values = values.split(',')
-  if (values.length === 0) {
+  // Parse arrow direction from commands (arrow:out, arrow:in, arrow:bi)
+  if (cmds.includes('arrow:')) {
+    const arrowMatch = cmds.match(/arrow:(out|in|bi)/);
+    if (arrowMatch) {
+      arrowDir = arrowMatch[1];
+      cmds = cmds.replace(/arrow:(out|in|bi),?/, '').trim();
+    }
+  }
+
+  // Parse individual child specifications
+  const childSpecs = values.split(',').map(child => {
+    const trimmed = child.trim();
+    if (trimmed.includes(':')) {
+      const [name, shape] = trimmed.split(':');
+      return { name: name.trim(), shape: shape.trim() };
+    }
+    return { name: trimmed, shape: cmds.trim() || 'rect' };
+  });
+
+  if (childSpecs.length === 0) {
     return
   }
 
-  const shape = cmds.trim()
+  const defaultShape = cmds.trim() || 'rect'
 
   opts = opts || {}
   const options = combined({
@@ -718,29 +870,51 @@ function renderSubtree(values, opts, node) {
     const px = node.getCenterPoint().x,
         py = node.getCenterPoint().y;
 
-    let mid = Math.ceil(values.length / 2)
-    if (values.length === 1) mid = 0;
+    let mid = Math.ceil(childSpecs.length / 2)
+    if (childSpecs.length === 1) mid = 0;
 
-    const w = (options.width / 2) / values.length;
+    const w = (options.width / 2) / childSpecs.length;
 
     let x = px,
         y = py + options.height;
 
-    const addConnection = (x1, y1, x2, y2, text, valuesIndex) => {
+    const createArrowLine = (x1, y1, x2, y2, direction) => {
+      switch (direction) {
+        case 'out':
+          return makeLine([x1, y1, x2, y2]);
+        case 'in':
+          return arrow(x2, y2, x1, y1, { strokeWidth: 2 });
+        case 'bi':
+          return bidirectionalArrow(x1, y1, x2, y2, { strokeWidth: 2 });
+        default:
+          return makeLine([x1, y1, x2, y2]);
+      }
+    };
+
+    const addConnection = (x1, y1, x2, y2, childSpec, valuesIndex) => {
+      const { name, shape } = childSpec;
+
+      // Create target node with specified shape
       const targetNode = shape === 'none' ?
-          textInRect(text, x2, y2, {fill: 'black'}, {fill: 'white'})
-          : boundedText(shape)(text, x2, y2, {}, {})
+          textInRect(name, x2, y2, {fill: 'black'}, {fill: 'white'})
+          : boundedText(shape)(name, x2, y2, {}, {})
+
       if(idMappings[valuesIndex]) {
         targetNode.uid = idMappings[valuesIndex]
       }
       pc.add(targetNode)
-      const line = makeLine([x1, y1, targetNode.getCenterPoint().x, targetNode.getCenterPoint().y])
+
+      // Create directional line/arrow
+      const line = createArrowLine(x1, y1, targetNode.getCenterPoint().x, targetNode.getCenterPoint().y, arrowDir);
+
       customData(line).source = node.uid ? node.uid: node
       customData(line).target = targetNode.uid ? targetNode.uid : targetNode
+      customData(line).direction = arrowDir
+
       pc.add(line)
       pc.sendObjectToBack(line)
       node.treeConnection.outgoing = node.treeConnection.outgoing || defaultOutgoing()
-      node.treeConnection.outgoing.lines.push(line.uid)
+      node.treeConnection.outgoing.lines.push(line.uid || line)
 
       targetNode.treeConnection = {
         incoming: {
@@ -759,7 +933,7 @@ function renderSubtree(values, opts, node) {
     if(options.overlapOnRoot) {
       x = px; y = py;
     }
-    let t = addConnection(px, py, x, y, values[mid], mid)
+    let t = addConnection(px, py, x, y, childSpecs[mid], mid)
     idMappings[mid] = t.uid
 
     for (let i = mid - 1; i >= 0; i--) {
@@ -767,19 +941,19 @@ function renderSubtree(values, opts, node) {
       if(options.overlapOnRoot) {
         x = px; y = py;
       }
-      t = addConnection(px, py, x, y, values[i], i)
+      t = addConnection(px, py, x, y, childSpecs[i], i)
       idMappings[i] = t.uid
     }
 
     x = px;
     y = py;
 
-    for (let i = mid + 1; i < values.length; i++) {
+    for (let i = mid + 1; i < childSpecs.length; i++) {
       x = x + w;
       if(options.overlapOnRoot) {
         x = px; y = py;
       }
-      t = addConnection(px, py, x, y, values[i], i)
+      t = addConnection(px, py, x, y, childSpecs[i], i)
       idMappings[i] = t.uid
     }
 
@@ -814,7 +988,7 @@ function expandTreeItems(obj) {
 
   getAllOutgoingTargets(obj).filter(it => customData(it).collapsedInto === obj.uid).forEach(target => {
     showObject(target)
-    let prevProps = customData(target).prevProps
+    const prevProps = customData(target).prevProps
     animate(target, {top: prevProps.top, left: prevProps.left}, {onComplete: e => {
         //pc.moveTo(target, prevProps.zIndex)
         pc.bringObjectToFront(target)
@@ -856,10 +1030,16 @@ function collapseTreeItems(obj) {
 }
 
 /***
-  values
-    ex. "child1, child2, child3",
-        "rect; child1, child2"
-        "shape:rect,bg:red,fg:white; child1, child2" --TODO
+ * Enhanced makeSubtree function that supports:
+ * 1. Individual shape specifications: child1:rect, child2:circle, child3:diamond
+ * 2. Directional arrows: arrow:out, arrow:in, arrow:bi
+ * 3. Miro-like shapes: diamond, hexagon, star, cloud
+ *
+ * Examples:
+ *    "child1, child2, child3"
+ *    "rect; child1, child2"
+ *    "arrow:bi; child1:diamond, child2:star"
+ *    "arrow:out; Task:rect, Decision:diamond, Process:circ"
  */
 function makeSubtree(node, values, opts) {
   opts = opts || {}
@@ -871,15 +1051,15 @@ function makeSubtree(node, values, opts) {
 }
 
 //Returns calculated top(y), left(x) which works even if the object is in group
-let getActualProperties = (object, round) => {
+const getActualProperties = (object, round) => {
   object = findIfRequired(object)
   let roundFn = x => x
   if(round) {
     roundFn = x => Math.round(x * 100) / 100
   }
-  let mat = object.calcTransformMatrix(false);
+  const mat = object.calcTransformMatrix(false);
   // Assuming objects origin x/y is 'left'/'top'; TODO for others
-  let props =  {
+  const props =  {
     x: roundFn(mat[4] - object.width/2),
     y: roundFn(mat[5] - object.height/2),
     w: roundFn(object.width),
@@ -925,7 +1105,7 @@ function updateTreeItem(obj) {
         x: c.x + obj.width / 2
       }
     }
-    let p = getActualProperties(obj)
+    const p = getActualProperties(obj)
     p.x = p.x + obj.width / 2
     p.y = p.y + obj.height / 2
     return p
@@ -982,7 +1162,28 @@ function onMakeTreeClick() {
     alert('Select an object first');
     return;
   }
-  const promptStr = prompt('Enter command. E.g. child1, child2, child3 OR rect; child1, child2')
+  const promptStr = prompt(`Enter command. Examples:
+
+Basic shapes:
+• child1, child2, child3
+• rect; child1, child2
+
+Individual shapes:
+• child1:rect, child2:circ, child3:diamond
+• Task:rect, Decision:diamond, Process:elli
+
+Directional arrows:
+• arrow:out; child1, child2 (outgoing arrows)
+• arrow:in; child1, child2 (incoming arrows)
+• arrow:bi; child1, child2 (bidirectional)
+
+Miro shapes:
+• child1:hexagon, child2:star, child3:cloud
+• Ideas:cloud, Action:rect, Goal:star
+
+Combined:
+• arrow:bi; Idea:cloud, Plan:rect, Execute:diamond`);
+
   if (!promptStr) return;
   makeSubtree(pc.getActiveObject(), promptStr)
 }
@@ -1010,7 +1211,7 @@ function arrowButton() {
 
 function degroup(pc) {
   const grp = pc.getActiveObject()
-  if (grp.type !== 'group' && grp.type !== 'activeSelection') return;
+  if (grp.type !== 'group' && grp.type !== 'activeselection') return;
   const items = grp.getObjects() || []
   pc.remove(grp);
   items.forEach(item => {
@@ -1023,9 +1224,19 @@ function degroup(pc) {
 
 function group(pc) {
   const sel = pc.getActiveObject();
-  if (!sel || sel.type !== 'activeSelection') return;
-  const grp = sel.toGroup();
-  pc.setActiveObject(grp);
+  if (!sel || sel.type !== 'activeselection') return;
+
+  // Create a new Group from the selected objects
+  const objectsToGroup = [...sel._objects];
+  const group = new fabric.Group(objectsToGroup);
+
+  // Remove the individual objects and add the group
+  objectsToGroup.forEach(obj => pc.remove(obj));
+  pc.add(group);
+
+  // Discard current selection and set the group as active
+  pc.discardActiveObject();
+  pc.setActiveObject(group);
   pc.requestRenderAll();
 }
 
@@ -1090,7 +1301,7 @@ function exportCanvas() {
 }
 
 function exportScript() {
-  let executables = window.recordedScriptLines.map(line => {
+  const executables = window.recordedScriptLines.map(line => {
     line = line.trim()
     let executable = `${line}`;
     if(line.startsWith('animate') || line.startsWith('Promise')) {

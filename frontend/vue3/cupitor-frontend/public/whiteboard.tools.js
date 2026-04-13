@@ -391,12 +391,17 @@ function registerTools(toolManager, primaryCanvas, overlayCanvas) {
     activate() {
       moveToFront('oc');
       overlayCanvas.isDrawingMode = true;
-      overlayCanvas.freeDrawingBrush.width = parseInt($('#drawing-line-width').val()) || 3;
-      overlayCanvas.freeDrawingBrush.color = $('#drawing-color').val() || '#000';
+      if (overlayCanvas.freeDrawingBrush) {
+        overlayCanvas.freeDrawingBrush.width = parseInt($('#drawing-line-width').val()) || 3;
+        overlayCanvas.freeDrawingBrush.color = $('#drawing-color').val() || '#000';
+      }
+      // Store reference for layer checking
+      window._penToolActive = true;
     },
     deactivate() {
       overlayCanvas.isDrawingMode = false;
       moveToFront('pc');
+      window._penToolActive = false;
     }
   });
 

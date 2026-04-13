@@ -287,7 +287,178 @@ function boundedText(type) {
     case 'rect': return textInRect;
     case 'circ': return textInCircle;
     case 'elli': return textInEllipse;
+    case 'diamond': return textInDiamond;
+    case 'hexagon': return textInHexagon;
+    case 'star': return textInStar;
+    case 'cloud': return textInCloud;
   }
+}
+
+// Miro-like shape functions
+function textInDiamond(textStr, x, y, optsText, optsShape) {
+  if (!textStr) return null;
+
+  const op = Object.assign({}, {
+    fontSize: 20,
+    originX: 'center',
+    originY: 'center',
+    fill: 'white'
+  }, optsText);
+
+  const text = new fabric.Text(textStr, op);
+
+  const size = Math.max(text.width + 40, text.height + 40);
+  const points = [
+    { x: size/2, y: 0 },      // top
+    { x: size, y: size/2 },   // right
+    { x: size/2, y: size },   // bottom
+    { x: 0, y: size/2 }       // left
+  ];
+
+  const options = Object.assign({}, {
+    points: points,
+    fill: 'orange',
+    originX: 'center',
+    originY: 'center'
+  }, optsShape);
+
+  const diamond = new fabric.Polygon(points, options);
+
+  const group = new fabric.Group([diamond, text], {
+    left: x,
+    top: y
+  });
+
+  group.customData = { type: "textInDiamond", text: textStr };
+  return group;
+}
+
+function textInHexagon(textStr, x, y, optsText, optsShape) {
+  if (!textStr) return null;
+
+  const op = Object.assign({}, {
+    fontSize: 20,
+    originX: 'center',
+    originY: 'center',
+    fill: 'white'
+  }, optsText);
+
+  const text = new fabric.Text(textStr, op);
+
+  const radius = Math.max(text.width, text.height) / 2 + 20;
+  const points = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = (i * Math.PI) / 3;
+    points.push({
+      x: radius + radius * Math.cos(angle),
+      y: radius + radius * Math.sin(angle)
+    });
+  }
+
+  const options = Object.assign({}, {
+    points: points,
+    fill: 'purple',
+    originX: 'center',
+    originY: 'center'
+  }, optsShape);
+
+  const hexagon = new fabric.Polygon(points, options);
+
+  const group = new fabric.Group([hexagon, text], {
+    left: x,
+    top: y
+  });
+
+  group.customData = { type: "textInHexagon", text: textStr };
+  return group;
+}
+
+function textInStar(textStr, x, y, optsText, optsShape) {
+  if (!textStr) return null;
+
+  const op = Object.assign({}, {
+    fontSize: 20,
+    originX: 'center',
+    originY: 'center',
+    fill: 'white'
+  }, optsText);
+
+  const text = new fabric.Text(textStr, op);
+
+  const outerRadius = Math.max(text.width, text.height) / 2 + 25;
+  const innerRadius = outerRadius * 0.5;
+  const points = [];
+
+  for (let i = 0; i < 10; i++) {
+    const angle = (i * Math.PI) / 5;
+    const radius = i % 2 === 0 ? outerRadius : innerRadius;
+    points.push({
+      x: outerRadius + radius * Math.cos(angle - Math.PI/2),
+      y: outerRadius + radius * Math.sin(angle - Math.PI/2)
+    });
+  }
+
+  const options = Object.assign({}, {
+    points: points,
+    fill: 'gold',
+    originX: 'center',
+    originY: 'center'
+  }, optsShape);
+
+  const star = new fabric.Polygon(points, options);
+
+  const group = new fabric.Group([star, text], {
+    left: x,
+    top: y
+  });
+
+  group.customData = { type: "textInStar", text: textStr };
+  return group;
+}
+
+function textInCloud(textStr, x, y, optsText, optsShape) {
+  if (!textStr) return null;
+
+  const op = Object.assign({}, {
+    fontSize: 20,
+    originX: 'center',
+    originY: 'center',
+    fill: 'black'
+  }, optsText);
+
+  const text = new fabric.Text(textStr, op);
+
+  // Create cloud shape using multiple circles
+  const baseWidth = text.width + 60;
+  const baseHeight = text.height + 40;
+
+  const circles = [
+    new fabric.Circle({ radius: baseHeight/3, left: -baseWidth/4, top: 0 }),
+    new fabric.Circle({ radius: baseHeight/2.5, left: -baseWidth/6, top: -baseHeight/4 }),
+    new fabric.Circle({ radius: baseHeight/2, left: baseWidth/6, top: -baseHeight/3 }),
+    new fabric.Circle({ radius: baseHeight/3, left: baseWidth/3, top: -baseHeight/6 }),
+    new fabric.Circle({ radius: baseHeight/4, left: baseWidth/2, top: baseHeight/6 })
+  ];
+
+  const options = Object.assign({}, {
+    fill: 'lightblue',
+    originX: 'center',
+    originY: 'center'
+  }, optsShape);
+
+  circles.forEach(circle => {
+    circle.fill = options.fill;
+    circle.originX = 'center';
+    circle.originY = 'center';
+  });
+
+  const group = new fabric.Group([...circles, text], {
+    left: x,
+    top: y
+  });
+
+  group.customData = { type: "textInCloud", text: textStr };
+  return group;
 }
 
 function addRectangle(opts){
@@ -344,6 +515,53 @@ function arrow(x1,y1,x2,y2, opts){
     });
     if(opts.uid) group.uid = opts.uid
   return group
+}
+
+function bidirectionalArrow(x1, y1, x2, y2, opts) {
+    const options = combined({}, { strokeWidth: 2, stroke: 'black', triangleWidth: 8, triangleHeight: 8 }, opts);
+
+    // Create main line
+    const line = new fabric.Line([x1, y1, x2, y2], {
+        stroke: options.stroke,
+        strokeWidth: options.strokeWidth
+    });
+
+    // Create triangles for both ends
+    const tri1 = new fabric.Triangle({
+        left: x2,
+        top: y2,
+        strokeWidth: options.strokeWidth,
+        width: options.triangleWidth,
+        height: options.triangleHeight,
+        stroke: options.stroke,
+        fill: options.stroke,
+        originX: 'center',
+        originY: 'center'
+    });
+
+    const tri2 = new fabric.Triangle({
+        left: x1,
+        top: y1,
+        strokeWidth: options.strokeWidth,
+        width: options.triangleWidth,
+        height: options.triangleHeight,
+        stroke: options.stroke,
+        fill: options.stroke,
+        originX: 'center',
+        originY: 'center'
+    });
+
+    const slope = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+    tri1.rotate(90 + slope);
+    tri2.rotate(270 + slope);
+
+    const group = new fabric.Group([line, tri1, tri2], {
+        left: Math.min(x1, x2),
+        top: Math.min(y1, y2)
+    });
+
+    if (opts && opts.uid) group.uid = opts.uid;
+    return group;
 }
 
 function text(text){
