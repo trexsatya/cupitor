@@ -479,6 +479,10 @@
     window.oc = new fabric.Canvas('overlayCanvas', {
         isDrawingMode: true
     });
+    // Initialize free drawing brush for overlay canvas
+    window.oc.freeDrawingBrush = new fabric.PencilBrush(window.oc);
+    window.oc.freeDrawingBrush.width = 3;
+    window.oc.freeDrawingBrush.color = '#000000';
     window.txt = $("#textillateContainer")
     pc.setWidth(window.innerWidth)
     pc.setHeight(window.innerHeight)
@@ -516,21 +520,17 @@
     });
 </script>
 
-<div style="display: inline-block;margin-left: 10px;position: absolute;left: 0;top: 8px;z-index: 1000000;height: 0;">
-        <span style=""> <label class="switch">
-          <input type="checkbox" id="eraser">
-          <span class="slider round"></span>
-            </label>
-        </span>
-</div>
-
-
 <div id="drawing-toolbar" style="display: inline-block; margin-left: 10px;position: absolute; left: 0; top: 50; z-index: 1000000; height: 0"
      class="ui-draggable ui-draggable-handle">
     <img id="toolbarToggle1" style="margin-bottom: 20px;margin-right: 10px;width:25px; height: 25px;" onclick="$('#toolbar1-buttons').toggle();"
          src="https://storage.googleapis.com/cupitor-220103.appspot.com/images/drawer_icon.png">
 
     <div id="toolbar1-buttons">
+        Eraser:<span style=""> <label class="switch">
+          <input type="checkbox" id="eraser">
+          <span class="slider round"></span>
+            </label>
+        </span>
         Drawing Mode:
         <label class="switch">
             <input type="checkbox" id="flip-drawing">
@@ -707,7 +707,9 @@
     });
 
     drawingColorEl.change(function (e) {
-        oc.freeDrawingBrush.color = this.value;
+        if (oc.freeDrawingBrush) {
+            oc.freeDrawingBrush.color = this.value;
+        }
     });
 
     function turnOffDrawing() {
@@ -730,35 +732,49 @@
             } else {
                 drawingColorEl.val('#ffffff')
             }
-            oc.freeDrawingBrush.color = drawingColorEl.val();
+            if (oc.freeDrawingBrush) {
+                oc.freeDrawingBrush.color = drawingColorEl.val();
+            }
 
             drawingLineWidthEl.val(15);
-            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 15;
+            if (oc.freeDrawingBrush) {
+                oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 15;
+            }
 
         } else {
             //Restore
             drawingColorEl.val(window.saved.eraserStoredData.drawingColor);
             drawingLineWidthEl.val(window.saved.eraserStoredData.drawingLineWidth);
 
-            oc.freeDrawingBrush.color = drawingColorEl.val();
-            oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 5;
+            if (oc.freeDrawingBrush) {
+                oc.freeDrawingBrush.color = drawingColorEl.val();
+                oc.freeDrawingBrush.width = parseInt(drawingLineWidthEl.val(), 10) || 5;
+            }
         }
     });
 
     drawingShadowColorEl.change(function () {
-        oc.freeDrawingBrush.shadow.color = this.value;
+        if (oc.freeDrawingBrush && oc.freeDrawingBrush.shadow) {
+            oc.freeDrawingBrush.shadow.color = this.value;
+        }
     });
     drawingLineWidthEl.change(function () {
-        oc.freeDrawingBrush.width = parseInt(this.value, 10) || 1;
+        if (oc.freeDrawingBrush) {
+            oc.freeDrawingBrush.width = parseInt(this.value, 10) || 1;
+        }
         this.previousSibling.innerHTML = this.value;
     });
     drawingShadowWidth.change(function () {
-        oc.freeDrawingBrush.shadow.blur = parseInt(this.value, 10) || 0;
+        if (oc.freeDrawingBrush && oc.freeDrawingBrush.shadow) {
+            oc.freeDrawingBrush.shadow.blur = parseInt(this.value, 10) || 0;
+        }
         this.previousSibling.innerHTML = this.value;
     });
     drawingShadowOffset.change(function () {
-        oc.freeDrawingBrush.shadow.offsetX = parseInt(this.value, 10) || 0;
-        oc.freeDrawingBrush.shadow.offsetY = parseInt(this.value, 10) || 0;
+        if (oc.freeDrawingBrush && oc.freeDrawingBrush.shadow) {
+            oc.freeDrawingBrush.shadow.offsetX = parseInt(this.value, 10) || 0;
+            oc.freeDrawingBrush.shadow.offsetY = parseInt(this.value, 10) || 0;
+        }
         this.previousSibling.innerHTML = this.value;
     });
 
@@ -891,6 +907,48 @@
         $('#drawing-mode-options').hide();
         $('#toolbar1-buttons').hide();
     })
+
+    // Record freehand drawings
+    oc.on('path:created', function (e) {
+        if (e.path && window.recordScriptFn) {
+            const path = e.path;
+            const pathData = {
+                left: path.left,
+                top: path.top,
+                fill: path.fill,
+                stroke: path.stroke,
+                strokeWidth: path.strokeWidth,
+                strokeLineCap: path.strokeLineCap,
+                strokeLineJoin: path.strokeLineJoin,
+                strokeDashArray: path.strokeDashArray,
+                opacity: path.opacity,
+                scaleX: path.scaleX || 1,
+                scaleY: path.scaleY || 1,
+                angle: path.angle || 0,
+                uid: path.uid
+            };
+
+            recordScript(`oc.add(createFreehandPath('${path.path}', ${JSON.stringify(pathData)}));`);
+        }
+    });
+
+    // Ensure drawing only works when overlay canvas is in front
+    function updateDrawingState() {
+        if (window._penToolActive && window.oc) {
+            if (window.layerOnFront === 'oc') {
+                window.oc.isDrawingMode = true;
+            } else {
+                window.oc.isDrawingMode = false;
+            }
+        }
+    }
+
+    // Override moveToFront to control drawing mode
+    const originalMoveToFront = window.moveToFront;
+    window.moveToFront = function(layer) {
+        originalMoveToFront(layer);
+        updateDrawingState();
+    };
     pc.on('mouse:up', function (e) {
         $('#drawing-mode-options').hide();
         $('#toolbar1-buttons').hide();
@@ -1565,14 +1623,14 @@
     <button class="wb-tool" data-tool="pen" title="Pen (P)" onclick="toolManager.activate('pen')">
         <i class="fas fa-pen"></i>
     </button>
-    <button class="wb-tool" data-tool="shape" title="Shapes (S)" onclick="toggleShapeMenu()">
+    <div class="wb-tool" data-tool="shape" title="Shapes (S)" onclick="toggleShapeMenu()">
         <i class="fas fa-shapes"></i>
         <div class="wb-shape-menu" id="shape-menu">
             <button onclick="event.stopPropagation(); toolManager.activate('rect'); closeShapeMenu()"><i class="fas fa-square"></i> </button>
             <button onclick="event.stopPropagation(); toolManager.activate('circle'); closeShapeMenu()"><i class="fas fa-circle"></i> </button>
             <button onclick="event.stopPropagation(); toolManager.activate('diamond'); closeShapeMenu()"><i class="fas fa-diamond"></i></button>
         </div>
-    </button>
+    </div>
     <button class="wb-tool" data-tool="sticky" title="Sticky Note (N)" onclick="toolManager.activate('sticky')">
         <i class="fas fa-sticky-note"></i>
     </button>

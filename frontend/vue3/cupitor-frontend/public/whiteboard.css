@@ -1,12 +1,36 @@
 /* whiteboard.css - Miro-like whiteboard UI styles */
 
 /* --- Floating Bottom Toolbar --- */
+/* --- Fix canvas overlay issues --- */
+.canvas-container {
+  pointer-events: auto;
+  position: relative;
+}
+
+.upper-canvas {
+  pointer-events: auto;
+}
+
+/* Ensure no canvas interferes with toolbar */
+.canvas-container canvas {
+  max-height: calc(100vh - 120px); /* Leave space for toolbar */
+}
+
+/* Force any overlapping elements to stay below toolbar */
+.canvas-container,
+.upper-canvas,
+.lower-canvas,
+canvas {
+  /* z-index: auto !important; */
+}
+
+/* Ensure toolbar area is never blocked by canvas */
 #whiteboard-toolbar {
   position: fixed;
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 1000001;
+  z-index: 999999 !important;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -15,6 +39,14 @@
   box-shadow: 0 2px 12px rgba(0,0,0,0.15);
   padding: 6px 8px;
   user-select: none;
+  pointer-events: auto;
+}
+
+/* Additional insurance for toolbar visibility */
+#whiteboard-toolbar * {
+  pointer-events: auto !important;
+  position: relative;
+  z-index: inherit;
 }
 
 #whiteboard-toolbar .wb-tool {
@@ -31,6 +63,8 @@
   color: #555;
   transition: background 0.15s, color 0.15s;
   position: relative;
+  z-index: 9999999 !important;
+  pointer-events: auto !important;
 }
 
 #whiteboard-toolbar .wb-tool:hover {
@@ -201,7 +235,7 @@
   position: fixed;
   top: 60px;
   right: 20px;
-  z-index: 1000001;
+  z-index: 999998 !important;
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.15);
@@ -210,6 +244,7 @@
   font-family: system-ui, sans-serif;
   font-size: 13px;
   border: 1px solid #ddd;
+  pointer-events: auto;
 }
 
 #property-panel.visible {
@@ -265,7 +300,7 @@
 /* --- Context Menu (right-click) --- */
 #wb-context-menu {
   position: fixed;
-  z-index: 1000002;
+  z-index: 999997 !important;
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.18);
@@ -274,6 +309,7 @@
   display: none;
   font-family: system-ui, sans-serif;
   font-size: 13px;
+  pointer-events: auto;
 }
 
 #wb-context-menu.visible {
@@ -308,7 +344,7 @@
 /* --- Shape Label Picker --- */
 #label-picker {
   position: fixed;
-  z-index: 1000002;
+  z-index: 999996 !important;
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 2px 16px rgba(0,0,0,0.2);
@@ -318,6 +354,7 @@
   grid-template-rows: repeat(5, 28px);
   gap: 3px;
   font-family: system-ui, sans-serif;
+  pointer-events: auto;
 }
 
 #label-picker.visible {
