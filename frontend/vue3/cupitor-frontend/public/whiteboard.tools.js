@@ -522,17 +522,26 @@ class ShapeTextManager {
     }
   }
 
-  addLabel(shape, position, text) {
+  addLabel(shape, position, text, style) {
     const pos = this.getLabelPosition(shape, position);
     const isOutside = position.startsWith('outside-');
+    const opts = Object.assign({
+      fontSize: 13,
+      fill: '#222',
+      fontWeight: 'normal',
+      fontStyle: 'normal',
+      fontFamily: 'Arial, sans-serif',
+    }, style);
     const label = new fabric.Textbox(text || 'Label', {
       left: pos.x,
       top: pos.y,
       originX: 'center',
       originY: 'center',
-      fontSize: 13,
-      fontFamily: 'Arial, sans-serif',
-      fill: '#222',
+      fontSize: opts.fontSize,
+      fontFamily: opts.fontFamily,
+      fill: opts.fill,
+      fontWeight: opts.fontWeight,
+      fontStyle: opts.fontStyle,
       textAlign: 'center',
       width: 80,
       editable: true,

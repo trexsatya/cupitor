@@ -258,6 +258,20 @@
         .cke_panel {
             z-index: 500000 !important;
         }
+
+        /* Background grid canvas styling */
+        #gridCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: -100;
+            pointer-events: none;
+        }
+
+        /* Canvas layering */
+        .canvas-container {
+            position: absolute;
+        }
     </style>
 
     <script>
@@ -443,6 +457,7 @@
         $('.commands-select').trigger('change'); //Reset
     });
 </script>
+<canvas id="gridCanvas"></canvas>
 <canvas id="playerCanvas"></canvas>
 <canvas id="overlayCanvas" style="position: absolute;"></canvas>
 <span id="recording-info" style="    margin-left: 42%;top: 0; position: fixed;"></span>
@@ -479,6 +494,11 @@
     window.oc = new fabric.Canvas('overlayCanvas', {
         isDrawingMode: true
     });
+    // Initialize grid canvas
+    window.gridCanvas = document.getElementById('gridCanvas');
+    window.gridCtx = gridCanvas.getContext('2d');
+    gridCanvas.width = window.innerWidth;
+    gridCanvas.height = window.innerHeight;
     // Initialize free drawing brush for overlay canvas
     window.oc.freeDrawingBrush = new fabric.PencilBrush(window.oc);
     window.oc.freeDrawingBrush.width = 3;
@@ -851,7 +871,7 @@
     }
 
     pc.on('object:removed', e => {
-        console.log(e.target);
+        //console.log(e.target);
         const obj = e.target;
         if (obj.treeConnection && obj.treeConnection.outgoing) {
             obj.treeConnection.outgoing.lines.forEach(l => {
@@ -910,25 +930,39 @@
 
     // Record freehand drawings
     oc.on('path:created', function (e) {
-        if (e.path && window.recordScriptFn) {
+        if (e.path) {
             const path = e.path;
-            const pathData = {
-                left: path.left,
-                top: path.top,
-                fill: path.fill,
-                stroke: path.stroke,
-                strokeWidth: path.strokeWidth,
-                strokeLineCap: path.strokeLineCap,
-                strokeLineJoin: path.strokeLineJoin,
-                strokeDashArray: path.strokeDashArray,
-                opacity: path.opacity,
-                scaleX: path.scaleX || 1,
-                scaleY: path.scaleY || 1,
-                angle: path.angle || 0,
-                uid: path.uid
-            };
 
-            recordScript(`oc.add(createFreehandPath('${path.path}', ${JSON.stringify(pathData)}));`);
+            // Ensure path has a UID for tracking
+            if (!path.uid) {
+                path.uid = typeof uuid === 'function' ? uuid() : Math.random().toString(36).slice(2);
+            }
+
+            // Add to undo manager (only if not performing undo/redo action)
+            if (window.undoManager && !window.undoManager.isPerformingAction) {
+                window.undoManager.push(Commands.addPath(oc, path));
+            }
+
+            // Record for playback (if recording is active)
+            if (window.recordScriptFn) {
+                const pathData = {
+                    left: path.left,
+                    top: path.top,
+                    fill: path.fill,
+                    stroke: path.stroke,
+                    strokeWidth: path.strokeWidth,
+                    strokeLineCap: path.strokeLineCap,
+                    strokeLineJoin: path.strokeLineJoin,
+                    strokeDashArray: path.strokeDashArray,
+                    opacity: path.opacity,
+                    scaleX: path.scaleX || 1,
+                    scaleY: path.scaleY || 1,
+                    angle: path.angle || 0,
+                    uid: path.uid
+                };
+
+                recordScript(`oc.add(createFreehandPath('${path.path}', ${JSON.stringify(pathData)}));`);
+            }
         }
     });
 
@@ -1676,17 +1710,49 @@
 <!-- Property Panel -->
 <div id="property-panel">
     <div class="prop-header">Properties</div>
-    <div class="prop-row">
-        <label>Fill</label>
-        <input type="color" id="prop-fill" value="#333333" onchange="applyProperty('fill', this.value)">
+    <div id="prop-shape-section">
+        <div class="prop-row">
+            <label>Fill</label>
+            <input type="color" id="prop-fill" value="#333333" onchange="applyProperty('fill', this.value)">
+        </div>
+        <div class="prop-row">
+            <label>Stroke</label>
+            <input type="color" id="prop-stroke" value="#000000" onchange="applyProperty('stroke', this.value)">
+        </div>
+        <div class="prop-row">
+            <label>Opacity</label>
+            <input type="range" id="prop-opacity" min="0" max="1" step="0.1" value="1" oninput="applyProperty('opacity', parseFloat(this.value))">
+        </div>
     </div>
-    <div class="prop-row">
-        <label>Stroke</label>
-        <input type="color" id="prop-stroke" value="#000000" onchange="applyProperty('stroke', this.value)">
-    </div>
-    <div class="prop-row">
-        <label>Opacity</label>
-        <input type="range" id="prop-opacity" min="0" max="1" step="0.1" value="1" oninput="applyProperty('opacity', parseFloat(this.value))">
+    <!-- Text formatting section (shown only for text/label objects) -->
+    <div id="prop-text-section" style="display:none;">
+        <div class="prop-section-divider"></div>
+        <div class="prop-row">
+            <label>Color</label>
+            <input type="color" id="prop-text-color" value="#222222" onchange="applyProperty('fill', this.value)">
+        </div>
+        <div class="prop-row">
+            <label>Size</label>
+            <input type="number" id="prop-font-size" value="13" min="6" max="120" step="1"
+                   onchange="applyProperty('fontSize', parseInt(this.value))">
+        </div>
+        <div class="prop-row prop-text-buttons">
+            <button id="prop-bold" class="prop-toggle" onclick="toggleTextProp('fontWeight', 'bold', 'normal')" title="Bold">B</button>
+            <button id="prop-italic" class="prop-toggle" onclick="toggleTextProp('fontStyle', 'italic', 'normal')" title="Italic"><i>I</i></button>
+            <button id="prop-underline" class="prop-toggle" onclick="toggleTextProp('underline', true, false)" title="Underline"><u>U</u></button>
+        </div>
+        <div class="prop-row">
+            <label>Font</label>
+            <select id="prop-font-family" onchange="applyProperty('fontFamily', this.value)">
+                <option value="Arial, sans-serif">Arial</option>
+                <option value="Helvetica, sans-serif">Helvetica</option>
+                <option value="Georgia, serif">Georgia</option>
+                <option value="Times New Roman, serif">Times</option>
+                <option value="Courier New, monospace">Courier</option>
+                <option value="Verdana, sans-serif">Verdana</option>
+                <option value="system-ui, sans-serif">System</option>
+            </select>
+        </div>
     </div>
 </div>
 
@@ -1744,6 +1810,24 @@
     window.toolManager = new ToolManager();
     window.gridManager = new GridManager(pc);
 
+    // Update grid when viewport changes (pan/zoom)
+    pc.on('after:render', function() {
+        if (gridManager.enabled) {
+            gridManager.updateGrid();
+        }
+    });
+
+    // Update grid canvas size when window resizes
+    window.addEventListener('resize', function() {
+        if (window.gridCanvas && window.gridCtx) {
+            window.gridCanvas.width = window.innerWidth;
+            window.gridCanvas.height = window.innerHeight;
+            if (gridManager.enabled) {
+                gridManager.updateGrid();
+            }
+        }
+    });
+
     // Pan/zoom
     initWhiteboardPanZoom(viewportManager, pc);
 
@@ -1751,7 +1835,7 @@
     viewportManager.initMinimap('minimap');
 
     // Undo/redo integration
-    initUndoRedo(pc, undoManager);
+    initUndoRedo(pc, undoManager, oc);
 
     // Tools registration
     registerTools(toolManager, pc, oc);
@@ -1816,14 +1900,71 @@
         document.getElementById('property-panel').classList.remove('visible');
     });
 
+    function isTextObject(obj) {
+        if (!obj) return false;
+        return obj.type === 'textbox' || obj.type === 'text' || obj.type === 'i-text' ||
+               (obj.customData && obj.customData.type === 'shapeLabel');
+    }
+
     function showPropertyPanel(e) {
         const obj = e.selected ? e.selected[0] : null;
         if (!obj) return;
         const panel = document.getElementById('property-panel');
         panel.classList.add('visible');
-        document.getElementById('prop-fill').value = obj.fill || '#333333';
-        document.getElementById('prop-stroke').value = obj.stroke || '#000000';
-        document.getElementById('prop-opacity').value = obj.opacity || 1;
+
+        const shapeSection = document.getElementById('prop-shape-section');
+        const textSection = document.getElementById('prop-text-section');
+        const isText = isTextObject(obj);
+
+        // Shape properties: show for non-text objects
+        if (isText) {
+            shapeSection.style.display = 'none';
+        } else {
+            shapeSection.style.display = '';
+            document.getElementById('prop-fill').value = colorToHex(obj.fill) || '#333333';
+            document.getElementById('prop-stroke').value = colorToHex(obj.stroke) || '#000000';
+            document.getElementById('prop-opacity').value = obj.opacity != null ? obj.opacity : 1;
+        }
+
+        // Text section: show only for text-like objects
+        if (isText) {
+            textSection.style.display = '';
+            document.getElementById('prop-text-color').value = colorToHex(obj.fill) || '#222222';
+            document.getElementById('prop-font-size').value = obj.fontSize || 13;
+            document.getElementById('prop-bold').classList.toggle('active', obj.fontWeight === 'bold');
+            document.getElementById('prop-italic').classList.toggle('active', obj.fontStyle === 'italic');
+            document.getElementById('prop-underline').classList.toggle('active', !!obj.underline);
+            // Match font family in dropdown
+            const fontSelect = document.getElementById('prop-font-family');
+            const family = obj.fontFamily || 'Arial, sans-serif';
+            let matched = false;
+            for (let i = 0; i < fontSelect.options.length; i++) {
+                if (family.indexOf(fontSelect.options[i].value.split(',')[0]) >= 0) {
+                    fontSelect.selectedIndex = i;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) fontSelect.selectedIndex = 0;
+        } else {
+            textSection.style.display = 'none';
+        }
+    }
+
+    // Convert css color to hex for <input type="color">
+    function colorToHex(color) {
+        if (!color) return null;
+        if (color.charAt(0) === '#') {
+            // Ensure 7-char hex
+            if (color.length === 4) {
+                return '#' + color[1]+color[1] + color[2]+color[2] + color[3]+color[3];
+            }
+            return color.slice(0, 7);
+        }
+        // rgb(...) or named color -> use canvas trick
+        const ctx = document.createElement('canvas').getContext('2d');
+        ctx.fillStyle = color;
+        return ctx.fillStyle; // returns hex
     }
 
     function applyProperty(prop, value) {
@@ -1836,6 +1977,24 @@
         const newState = {};
         newState[prop] = value;
         undoManager.push(Commands.modifyObject(pc, obj, prevState, newState));
+    }
+
+    function toggleTextProp(prop, onVal, offVal) {
+        const obj = pc.getActiveObject();
+        if (!obj) return;
+        const current = obj[prop];
+        const newValue = current === onVal ? offVal : onVal;
+        const prevState = {};
+        prevState[prop] = current;
+        obj.set(prop, newValue);
+        pc.requestRenderAll();
+        const newState = {};
+        newState[prop] = newValue;
+        undoManager.push(Commands.modifyObject(pc, obj, prevState, newState));
+        // Update button state
+        if (prop === 'fontWeight') document.getElementById('prop-bold').classList.toggle('active', newValue === 'bold');
+        if (prop === 'fontStyle') document.getElementById('prop-italic').classList.toggle('active', newValue === 'italic');
+        if (prop === 'underline') document.getElementById('prop-underline').classList.toggle('active', !!newValue);
     }
 
     // Make property panel draggable
