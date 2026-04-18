@@ -2056,6 +2056,7 @@ function getMatchingWords(list, search) {
 
 function selectSearchedWord(event) {
   const textToMatch = $(event.target).parent().data('text').replaceAll("\n", "")
+  window.forceMainLangForNextSearch = true
   // Find the option with text containing the textToMatch string
   const $option = $('#searchedWords option').filter(function() {
     return $(this).text().toLowerCase().includes(textToMatch.toLowerCase());
@@ -2457,6 +2458,7 @@ function enablePasteForHashChange() {
 }
 
 function getSelectedLang() {
+  if (window.forceMainLangForNextSearch) return 'sv';
   return $('#toggleLangCb').prop('checked') ? 'en' : 'sv';
 }
 
@@ -2793,32 +2795,135 @@ function _expandWords(txt, lang) {
       }).join(SEPARATOR_PIPE)
 }
 
-async function fetchSRTs(searchText) {
-  if ((typeof searchText) !== 'string') {
-    searchText = null
+const STEM_RULES = {
+  sv: [
+    ['ningarna', ['']],
+    ['ningar', ['']],
+    ['ningen', ['']],
+    ['ning', ['']],
+    ['ande', ['a']],
+    ['ende', ['a']],
+    ['arna', ['a', '']],
+    ['erna', ['']],
+    ['orna', ['a']],
+    ['ades', ['a']],
+    ['ade', ['a']],
+    ['ats', ['a']],
+    ['at', ['a']],
+    ['ar', ['a', '']],
+    ['or', ['a']],
+    ['er', ['', 'a']],
+    ['en', ['']],
+    ['et', ['']],
+    ['de', ['']],
+    ['te', ['']],
+    ['ts', ['']],
+    ['s', ['']],
+  ],
+  es: [
+    ['iendo', ['er', 'ir']],
+    ['yendo', ['er', 'ir']],
+    ['ando', ['ar']],
+    ['ieron', ['er', 'ir']],
+    ['aron', ['ar']],
+    ['aban', ['ar']],
+    ['aba', ['ar']],
+    ['amos', ['ar']],
+    ['emos', ['er']],
+    ['imos', ['ir']],
+    ['aste', ['ar']],
+    ['iste', ['er', 'ir']],
+    ['ado', ['ar']],
+    ['ido', ['er', 'ir']],
+    ['ías', ['er', 'ir']],
+    ['ía', ['er', 'ir']],
+    ['es', ['']],
+    ['as', ['a']],
+    ['os', ['o']],
+    ['s', ['']],
+  ],
+  en: [
+    ['ational', ['ate']],
+    ['tional', ['tion']],
+    ['ization', ['ize']],
+    ['ations', ['ate']],
+    ['ation', ['ate', '']],
+    ['ments', ['ment']],
+    ['ment', ['']],
+    ['ness', ['']],
+    ['ously', ['ous']],
+    ['fully', ['ful']],
+    ['sses', ['ss']],
+    ['ies', ['y']],
+    ['ied', ['y']],
+    ['ying', ['y']],
+    ['ing', ['', 'e']],
+    ['edly', ['', 'e']],
+    ['ed', ['', 'e']],
+    ['ly', ['']],
+    ['est', ['', 'e']],
+    ['er', ['', 'e']],
+    ['es', ['e', '']],
+    ['s', ['']],
+  ],
+}
+
+function guessStems(word, lang) {
+  if (!word) return []
+  word = word.toLowerCase().trim()
+  if (word.length < 4) return []
+  const langsToTry = _.uniq([lang, 'en'].filter(Boolean))
+  const stems = []
+  for (const l of langsToTry) {
+    const langRules = STEM_RULES[l]
+    if (!langRules) continue
+    for (const [suffix, repls] of langRules) {
+      if (word.endsWith(suffix) && word.length - suffix.length >= 3) {
+        const base = word.slice(0, word.length - suffix.length)
+        repls.forEach(r => {
+          const s = base + r
+          if (s !== word) stems.push(s)
+        })
+        break
+      }
+    }
   }
-  const $searchText = $("#searchText");
-  const txt = searchText || $searchText.val().toLowerCase()
-  // $searchText.val(txt)
+  return _.uniq(stems)
+}
 
-  if (txt.length < 3) return
+async function fetchSRTs(searchText) {
+  try {
+    if ((typeof searchText) !== 'string') {
+      searchText = null
+    }
+    const $searchText = $("#searchText");
+    const txt = searchText || $searchText.val().toLowerCase()
+    // $searchText.val(txt)
 
-  window.searchText = txt;
-  window.searchText = expandWords(window.searchText)
-  window.searchText = _.trim(window.searchText, SEPARATOR_PIPE)
+    if (txt.length < 3) return
 
-  //To fix the mistakes in vocabulary list with double spaces
-  window.searchText = window.searchText.split(" ").map(it => it.trim()).join(" ")
+    window.searchText = txt;
+    window.searchText = expandWords(window.searchText)
+    window.searchText = _.trim(window.searchText, SEPARATOR_PIPE)
 
-  window.allSubtitles = window.allSubtitles || {}
+    //To fix the mistakes in vocabulary list with double spaces
+    window.searchText = window.searchText.split(" ").map(it => it.trim()).join(" ")
 
-  console.log("Loading from local")
-  window.searchResult = fetchFromDownloadedFiles(window.searchText.trim());
-  const words = render(window.searchResult, window.searchText, "primary")
-  if (!window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && Object.values(words).flat().length === 0) {
-    window.searchText = window.searchText + "|" + window.searchText.trim().slice(0, -2)
-    window.searchResult = fetchFromDownloadedFiles(window.searchText);
-    render(window.searchResult, window.searchText, "secondary")
+    window.allSubtitles = window.allSubtitles || {}
+
+    console.log("Loading from local")
+    window.searchResult = fetchFromDownloadedFiles(window.searchText.trim());
+    const words = render(window.searchResult, window.searchText, "primary")
+    if (!window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && Object.values(words).flat().length === 0) {
+      const stems = guessStems(window.searchText.trim(), getLangFromUrl().code)
+      if (stems.length) {
+        window.searchText = [window.searchText, ...stems].join(SEPARATOR_PIPE)
+        window.searchResult = fetchFromDownloadedFiles(window.searchText);
+        render(window.searchResult, window.searchText, "secondary")
+      }
+    }
+  } finally {
+    window.forceMainLangForNextSearch = false
   }
 }
 

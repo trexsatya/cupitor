@@ -4,7 +4,112 @@
     font-weight: bold;
 }
 
-/* Style the buttons that are used to open and close the accordion panel */
+/* ── Toolbar ──────────────────────────────────────── */
+.lang-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 4px 0;
+}
+
+.lang-search-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    flex: 0 0 100%;
+    width: 100%;
+    margin-top: 4px;
+}
+
+.lang-search-top-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+}
+
+.lang-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.lang-search-input {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 130px;
+    padding: 4px 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 0.95em;
+}
+
+.lang-search-select-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.lang-search-select-row .select2,
+.lang-search-select-row .select2-container {
+    width: 100% !important;
+}
+
+.lang-tool-btn {
+    padding: 5px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: #f8f9fa;
+    cursor: pointer;
+    font-size: 0.85em;
+    line-height: 1.5;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.lang-tool-btn:hover {
+    background: #e2e6ea;
+    border-color: #adb5bd;
+}
+
+.lang-tool-btn--icon {
+    padding: 5px 7px;
+    display: inline-flex;
+    align-items: center;
+}
+
+.lang-toolbar-separator {
+    width: 1px;
+    height: 22px;
+    background: #ced4da;
+    margin: 0 2px;
+    flex-shrink: 0;
+}
+
+/* ── Drop-down panels ─────────────────────────────── */
+.lang-panel {
+    margin-top: 4px;
+    padding: 8px 12px 2em;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    font-size: 0.88em;
+}
+
+.lang-panel-label {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.88em;
+    color: #495057;
+    cursor: default;
+    gap: 4px;
+    user-select: none;
+}
+
+
 .l-accordion {
     background-color: #eee;
     color: #7d7676;

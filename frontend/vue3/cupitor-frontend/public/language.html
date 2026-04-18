@@ -135,65 +135,115 @@
 <div>
     <div style="float: left; width: 59%; position: relative;" class="fl-left">
         <div id="mainControlInputs" style="clear: both">
-            <input type="checkbox" id="useLocalMediaCheckbox"
-                   onchange="$('#mp3ChoiceContainer').toggle();$('#localMediaContainer').toggle();">
-            <div id="mp3ChoiceContainer">
-                <label for="mp3Choice">Select Media:</label>
-
-                <select id="mp3Choice" style="width: 80%">
-                    <option value="">-</option>
-                </select>
-
-                <label class="switch" style="vertical-align: middle;">
-                    <input type="checkbox" id="onlySubsCheckbox">
-                    <span class="slider"></span>
-                </label>
+            <!-- Primary toolbar: always visible -->
+            <div class="lang-toolbar">
+                <!-- Settings gear button -->
+                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleSettingsPanelBtn" title="Settings" onclick="$('#settingsPanel').slideToggle(120)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492M5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0"/>
+                        <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.47l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115z"/>
+                    </svg>
+                </button>
+                <!-- Media film-reel button -->
+                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleMediaPanelBtn" title="Media" onclick="$('#mediaControlPanel').slideToggle(120)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M0 1a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1zm4 0v6h8V1zm8 8H4v6h8zM1 1v2h2V1zm2 3H1v2h2zM1 7v2h2V7zm2 3H1v2h2zm-2 3v2h2v-2zM15 1h-2v2h2zm-2 3v2h2V4zm2 3h-2v2h2zm-2 3v2h2v-2zm2 3h-2v2h2z"/>
+                    </svg>
+                </button>
+                <!-- Section toggle buttons -->
+                <span class="lang-toolbar-separator"></span>
+                <button id="toggleMainControl" class="lang-tool-btn lang-tool-btn--icon" title="Toggle controls" data-toggle-state="expanded" data-view-id="mainControlBody">
+                    <svg width="18" data-role="collapseUpSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
+                    <svg width="18" data-role="expandDownSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
+                </button>
+                <button id="toggleResultContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle results" data-toggle-state="collapsed" data-view-id="resultContainer">
+                    <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
+                    <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
+                </button>
+                <button id="toggleMediaRelatedContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle player" data-toggle-state="collapsed" data-view-id="mediaRelatedContainer">
+                    <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
+                    <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
+                </button>
+                <button id="toggleMediaContainer" class="lang-tool-btn lang-tool-btn--icon" title="Toggle video" data-toggle-state="collapsed" data-view-id="mediaContainer">
+                    <svg width="18" data-role="collapseUpSign" style="display:none" height="18" viewBox="0 0 24 24" role="presentation"><use href="#collapseUpPath"/></svg>
+                    <svg width="18" data-role="expandDownSign" height="18" viewBox="0 0 24 24" role="presentation"><use href="#expandDownPath"/></svg>
+                </button>
             </div>
-            <div id="localMediaContainer" style="display: none; ">
-                <input type="file" accept="video/*,audio/*,.srt,.json" multiple="multiple" id="localFiles"
-                       onchange="loadLocalFiles()">
-            </div>
-            <div style="padding-top: 1em; ">
-                <div id="btns-1" style="float: left; width: 49%;" class="fl-left">
-                    <input type="search" id="searchText" placeholder="Search text" style="width: 68%;">
-                    <input type="number" id="numberOfFindingsToShow" placeholder="Show X items" value="10"
-                           style="width: 14%;">
 
-                    <input class="tgl tgl-flip" id="toggleLangCb" type="checkbox" data-toggle="toggle"
-                           data-size="small" data-on="EN" data-off="SV" style="width: 14%"/>
-                </div>
-                <div id="btns-2" style="float: left; width: 50%; margin-top: -9px;" class="fl-right">
-                    <select id="searchedWords" style="width: 220px;">
-                    </select>
-
-                    <div class="checkbox-wrapper-22" style="display: inline;">
-                        <label class="switch" for="toggleSearchesControlCheckbox">
-                            <input type="checkbox" id="toggleSearchesControlCheckbox" aria-label="searches">
-                            <div class="slider round"></div>
-                        </label>
+            <div id="mainControlBody">
+                <div class="lang-search-row">
+                    <div class="lang-search-top-row">
+                        <input type="search" id="searchText" placeholder="Search…" class="lang-search-input">
+                        <button class="lang-tool-btn" id="searchVocabularyByPrefixBtn" onclick="searchVocabularyByPrefix()" title="Prefix search">…</button>
                     </div>
-
-                    <div class="checkbox-wrapper-22" style="display: inline;">
-                        <label class="switch" for="toggleClearTextOnClickCheckbox">
-                            <input type="checkbox" id="toggleClearTextOnClickCheckbox" aria-label="clear on click">
-                            <div class="slider round"></div>
-                        </label>
+                    <div id="btns-2" class="lang-search-select-row" style="margin-bottom: 0;">
+                        <select id="searchedWords" style="width: 100%;"></select>
                     </div>
-                    <span class="btn btn-info" id="searchVocabularyByPrefixBtn" onclick="searchVocabularyByPrefix()">...</span>
                 </div>
 
-                <div id="searchesControl" style="display: none; padding-top: 3px;">
+                <!-- Settings panel: hidden by default -->
+                <div id="settingsPanel" class="lang-panel" style="display: none;">
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                    <label class="lang-panel-label">
+                        Show
+                        <input type="number" id="numberOfFindingsToShow" value="10" style="width: 46px; margin-left: 4px;">
+                    </label>
+                    <label class="lang-panel-label">
+                        Lang
+                        <input class="tgl tgl-flip" id="toggleLangCb" type="checkbox" data-toggle="toggle"
+                               data-size="small" data-on="EN" data-off="SV" style="margin-left: 4px;"/>
+                    </label>
+                    <label class="lang-panel-label" title="Searches control">
+                        Searches
+                        <div class="checkbox-wrapper-22" style="display: inline; margin-left: 4px;">
+                            <label class="switch" for="toggleSearchesControlCheckbox">
+                                <input type="checkbox" id="toggleSearchesControlCheckbox" aria-label="searches">
+                                <div class="slider round"></div>
+                            </label>
+                        </div>
+                    </label>
+                    <label class="lang-panel-label" title="Clear search text on click">
+                        Clear on click
+                        <div class="checkbox-wrapper-22" style="display: inline; margin-left: 4px;">
+                            <label class="switch" for="toggleClearTextOnClickCheckbox">
+                                <input type="checkbox" id="toggleClearTextOnClickCheckbox" aria-label="clear on click">
+                                <div class="slider round"></div>
+                            </label>
+                        </div>
+                    </label>
+                </div>
+                <div id="searchesControl" style="display: none; padding-top: 6px;">
                     <button onclick="importSearches()" class="button-62">Import Searches</button>
                     <button onclick="openAddToVocabDialog()" class="button-62">Add To Vocab</button>
                 </div>
-                <br>
-                <br>
+                </div>
+
+                <!-- Media panel: hidden by default -->
+                <div id="mediaControlPanel" class="lang-panel" style="display: none;">
+                <label class="lang-panel-label" style="margin-bottom: 6px;">
+                    <input type="checkbox" id="useLocalMediaCheckbox"
+                           onchange="$('#mp3ChoiceContainer').toggle();$('#localMediaContainer').toggle();">
+                    Local file
+                </label>
+                <div id="mp3ChoiceContainer" style="margin-top: 4px;">
+                    <label for="mp3Choice">Select Media:</label>
+                    <select id="mp3Choice" style="width: 80%">
+                        <option value="">-</option>
+                    </select>
+                    <label class="switch" style="vertical-align: middle;">
+                        <input type="checkbox" id="onlySubsCheckbox">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div id="localMediaContainer" style="display: none; margin-top: 4px;">
+                    <input type="file" accept="video/*,audio/*,.srt,.json" multiple="multiple" id="localFiles"
+                           onchange="loadLocalFiles()">
+                </div>
+                </div>
+
                 <div id="info-dialog" title="Media Info" style="display: none;">
                     <div id="info-dialog-content"></div>
                 </div>
-                <!--                <button onclick="$('#result').toggle()" class="btn btn-light" style="visibility: hidden;" id="toggleSearchBtn">-->
-                <!--                    Toggle Search Results-->
-                <!--                </button>-->
             </div>
         </div>
 
@@ -212,40 +262,6 @@
                     </symbol>
                 </defs>
             </svg>
-            <div style="text-align: center;position: fixed; top: 2px;margin-left: 27%;">
-                <button id="toggleMainControl" style="border: none;" data-toggle-state="expanded" data-view-id="mainControlInputs">
-                    <svg width="24" data-role="collapseUpSign" height="24" viewBox="0 0 24 24" role="presentation">
-                        <use href="#collapseUpPath"/>
-                    </svg>
-                    <svg width="24" data-role="expandDownSign" style="display: none;" height="24" viewBox="0 0 24 24" role="presentation">
-                        <use href="#expandDownPath"/>
-                    </svg>
-                </button>
-                <button id="toggleResultContainer" style="border: none;" data-toggle-state="collapsed" data-view-id="resultContainer">
-                    <svg width="24" data-role="collapseUpSign" style="display: none;" height="24" viewBox="0 0 24 24" role="presentation">
-                        <use href="#collapseUpPath"/>
-                    </svg>
-                    <svg width="24" data-role="expandDownSign" height="24" viewBox="0 0 24 24" role="presentation">
-                        <use href="#expandDownPath"/>
-                    </svg>
-                </button>
-                <button id="toggleMediaRelatedContainer" style="border: none;" data-toggle-state="collapsed" data-view-id="mediaRelatedContainer">
-                    <svg width="24" data-role="collapseUpSign" style="display: none;" height="24" viewBox="0 0 24 24" role="presentation">
-                        <use href="#collapseUpPath"/>
-                    </svg>
-                    <svg width="24" data-role="expandDownSign" height="24" viewBox="0 0 24 24" role="presentation">
-                        <use href="#expandDownPath"/>
-                    </svg>
-                </button>
-                <button id="toggleMediaContainer" style="border: none;" data-toggle-state="collapsed" data-view-id="mediaContainer">
-                    <svg width="24" data-role="collapseUpSign" style="display: none;" height="24" viewBox="0 0 24 24" role="presentation">
-                        <use href="#collapseUpPath"/>
-                    </svg>
-                    <svg width="24" data-role="expandDownSign" height="24" viewBox="0 0 24 24" role="presentation">
-                        <use href="#expandDownPath"/>
-                    </svg>
-                </button>
-            </div>
             <div id="resultContainer" style="display: none;margin-top: 2em;">
                 <div id="vocabularyResult">
 
