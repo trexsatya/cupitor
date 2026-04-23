@@ -784,6 +784,7 @@ $('document').ready(e => {
   })
 
   $('#searchedWords').change(e => {
+    window.forceMainLangForNextSearch = true;
     vocabularyLineSelected()
   })
 
@@ -2056,7 +2057,6 @@ function getMatchingWords(list, search) {
 
 function selectSearchedWord(event) {
   const textToMatch = $(event.target).parent().data('text').replaceAll("\n", "")
-  window.forceMainLangForNextSearch = true
   // Find the option with text containing the textToMatch string
   const $option = $('#searchedWords option').filter(function() {
     return $(this).text().toLowerCase().includes(textToMatch.toLowerCase());
@@ -2872,20 +2872,17 @@ function guessStems(word, lang) {
   if (!word) return []
   word = word.toLowerCase().trim()
   if (word.length < 4) return []
-  const langsToTry = _.uniq([lang, 'en'].filter(Boolean))
+  const langRules = STEM_RULES[lang]
+  if (!langRules) return []
   const stems = []
-  for (const l of langsToTry) {
-    const langRules = STEM_RULES[l]
-    if (!langRules) continue
-    for (const [suffix, repls] of langRules) {
-      if (word.endsWith(suffix) && word.length - suffix.length >= 3) {
-        const base = word.slice(0, word.length - suffix.length)
-        repls.forEach(r => {
-          const s = base + r
-          if (s !== word) stems.push(s)
-        })
-        break
-      }
+  for (const [suffix, repls] of langRules) {
+    if (word.endsWith(suffix) && word.length - suffix.length >= 3) {
+      const base = word.slice(0, word.length - suffix.length)
+      repls.forEach(r => {
+        const s = base + r
+        if (s !== word) stems.push(s)
+      })
+      break
     }
   }
   return _.uniq(stems)
@@ -2914,12 +2911,18 @@ async function fetchSRTs(searchText) {
     console.log("Loading from local")
     window.searchResult = fetchFromDownloadedFiles(window.searchText.trim());
     const words = render(window.searchResult, window.searchText, "primary")
-    if (!window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && Object.values(words).flat().length === 0) {
-      const stems = guessStems(window.searchText.trim(), getLangFromUrl().code)
+    const primaryHits = Object.values(words).flat().length
+    console.log("[stem-fallback] primary hits:", primaryHits, "searchText:", window.searchText)
+    if (!window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && primaryHits === 0) {
+      const stemLang = $('#toggleLangCb').prop('checked') ? 'en' : getLangFromUrl().code
+      const stems = guessStems(window.searchText.trim(), stemLang)
+      console.log("[stem-fallback] stems:", stems)
       if (stems.length) {
         window.searchText = [window.searchText, ...stems].join(SEPARATOR_PIPE)
         window.searchResult = fetchFromDownloadedFiles(window.searchText);
+        console.log("[stem-fallback] secondary results:", window.searchResult.length)
         render(window.searchResult, window.searchText, "secondary")
+        searchVocabularyByPrefix()
       }
     }
   } finally {
