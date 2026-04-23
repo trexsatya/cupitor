@@ -348,6 +348,92 @@ canvas {
   font-weight: bold;
 }
 
+/* --- Tree Node Panel --- */
+#tree-node-panel {
+  position: fixed;
+  top: 60px;
+  right: 230px;
+  z-index: 999998 !important;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  min-width: 200px;
+  display: none;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  border: 1px solid #ddd;
+  pointer-events: auto;
+  padding-bottom: 10px;
+}
+
+#tree-node-panel.visible {
+  display: block;
+}
+
+#tree-node-panel .prop-header {
+  background: #f0f4ff;
+  border-bottom: 1px solid #ddd;
+  padding: 8px 12px;
+  margin: -1px -1px 8px -1px;
+  border-radius: 7px 7px 0 0;
+  cursor: move;
+  font-weight: 500;
+  font-size: 12px;
+  color: #555;
+  user-select: none;
+}
+
+#tree-node-panel .prop-header:hover {
+  background: #e0e8ff;
+}
+
+#tree-node-panel .prop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 8px 12px;
+}
+
+#tree-node-panel label {
+  display: block;
+  margin-bottom: 2px;
+  color: #888;
+  font-size: 11px;
+}
+
+#tree-children-select {
+  flex: 1;
+  width: 100%;
+  font-size: 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fafafa;
+  min-height: 90px;
+}
+
+#tree-node-panel input[type="range"] {
+  flex: 1;
+}
+
+.tree-node-buttons {
+  gap: 6px !important;
+}
+
+.tree-node-buttons button {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f5f5f5;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tree-node-buttons button:hover {
+  background: #e8e8e8;
+  border-color: #bbb;
+}
+
 /* --- Context Menu (right-click) --- */
 #wb-context-menu {
   position: fixed;

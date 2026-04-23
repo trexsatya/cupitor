@@ -1057,6 +1057,22 @@ function makeSubtree(node, values, opts) {
   //TODO: Find the closest obj which was recorded so we know its uid,
   // and find the relation to that i.e (level, index, data); And use that in the record script
   recordScript(`renderSubtree(${JSON.stringify(values)}, ${JSON.stringify(opts)}, '${node.uid}')`)
+
+  // Hide all immediate children and their connector lines, then show the Tree Node panel
+  const outgoingLines = node.treeConnection?.outgoing?.lines || [];
+  outgoingLines
+    .map(findIfRequired)
+    .filter(Boolean)
+    .forEach(line => {
+      hideObject(line);
+      const child = findIfRequired(line.customData?.target);
+      if (child) hideObject(child);
+    });
+
+  // Open the Tree Node panel focused on this node
+  if (typeof showTreeNodePanel === 'function') {
+    showTreeNodePanel(node);
+  }
 }
 
 //Returns calculated top(y), left(x) which works even if the object is in group
@@ -1219,16 +1235,55 @@ function arrowButton() {
 }
 
 function degroup(pc) {
-  const grp = pc.getActiveObject()
-  if (grp.type !== 'group' && grp.type !== 'activeselection') return;
-  const items = grp.getObjects() || []
+  const grp = pc.getActiveObject();
+  if (!grp || (grp.type !== 'group' && grp.type !== 'activeselection')) return;
+  const items = grp.getObjects() || [];
+
+  // Snapshot absolute world-space transforms for every item BEFORE any mutation,
+  // while the group is still on canvas and item.group references are intact.
+  const groupMatrix = grp.calcTransformMatrix();
+  const absDecomposed = items.map(item =>
+    fabric.util.qrDecompose(
+      fabric.util.multiplyTransformMatrices(groupMatrix, item.calcOwnMatrix())
+    )
+  );
+
   pc.remove(grp);
-  items.forEach(item => {
+
+  items.forEach((item, i) => {
+    const d = absDecomposed[i];
+
+    // Clear ALL parent back-references. Fabric v6 uses both `group` and `parent`
+    // in calcTransformMatrix(). Leaving either set causes wrong rendering/hit-testing.
+    item.group = undefined;
+    item.parent = undefined;
+
+    // Re-enable interactivity — items inside a group have these disabled
+    // so only the group itself is selectable/evented.
+    item.selectable = true;
+    item.evented = true;
+    item.hasControls = true;
+
+    item.set({
+      originX: 'center',
+      originY: 'center',
+      left:   d.translateX,
+      top:    d.translateY,
+      angle:  d.angle,
+      scaleX: d.scaleX,
+      scaleY: d.scaleY,
+      skewX:  d.skewX,
+      skewY:  0,
+    });
+
     pc.add(item);
-    item.hasControls = false;
+    // setCoords AFTER add so the canvas viewportTransform is available
+    item.setCoords();
   });
-  pc.discardActiveObject();
-  pc.renderAll();
+
+  const sel = new fabric.ActiveSelection(items, { canvas: pc });
+  pc.setActiveObject(sel);
+  pc.requestRenderAll();
 }
 
 function group(pc) {

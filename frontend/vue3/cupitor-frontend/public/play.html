@@ -1720,6 +1720,21 @@
             <input type="color" id="prop-stroke" value="#000000" onchange="applyProperty('stroke', this.value)">
         </div>
         <div class="prop-row">
+            <label>Stroke W</label>
+            <input type="number" id="prop-stroke-width" value="1" min="0" max="50" step="0.5" style="width:60px;"
+                   onchange="applyProperty('strokeWidth', parseFloat(this.value))">
+        </div>
+        <div class="prop-row">
+            <label>Stroke Type</label>
+            <select id="prop-stroke-type" onchange="applyStrokeType(this.value)">
+                <option value="solid">Solid</option>
+                <option value="dashed">Dashed</option>
+                <option value="dotted">Dotted</option>
+                <option value="dash-dot">Dash-dot</option>
+                <option value="long-dash">Long dash</option>
+            </select>
+        </div>
+        <div class="prop-row">
             <label>Opacity</label>
             <input type="range" id="prop-opacity" min="0" max="1" step="0.1" value="1" oninput="applyProperty('opacity', parseFloat(this.value))">
         </div>
@@ -1753,6 +1768,25 @@
                 <option value="system-ui, sans-serif">System</option>
             </select>
         </div>
+    </div>
+</div>
+
+<!-- Tree Node Panel -->
+<div id="tree-node-panel">
+    <div class="prop-header">Tree Node</div>
+    <div class="prop-row">
+        <label style="width:100%;">Children</label>
+    </div>
+    <div class="prop-row">
+        <select id="tree-children-select" multiple size="5"></select>
+    </div>
+    <div class="prop-row tree-node-buttons">
+        <button onclick="toggleSelectedTreeChildren()" title="Toggle visibility of selected children">Show/Hide</button>
+    </div>
+    <div class="prop-row">
+        <label>Visibility</label>
+        <input type="range" id="tree-visibility-input" min="0" max="1" step="0.05" value="1"
+               oninput="applyVisibilityToSelectedChildren(parseFloat(this.value))">
     </div>
 </div>
 
@@ -1898,6 +1932,7 @@
     pc.on('selection:updated', showPropertyPanel);
     pc.on('selection:cleared', function() {
         document.getElementById('property-panel').classList.remove('visible');
+        document.getElementById('tree-node-panel').classList.remove('visible');
     });
 
     function isTextObject(obj) {
@@ -1923,7 +1958,20 @@
             shapeSection.style.display = '';
             document.getElementById('prop-fill').value = colorToHex(obj.fill) || '#333333';
             document.getElementById('prop-stroke').value = colorToHex(obj.stroke) || '#000000';
+            document.getElementById('prop-stroke-width').value = obj.strokeWidth != null ? obj.strokeWidth : 1;
+            document.getElementById('prop-stroke-type').value = detectStrokeType(obj.strokeDashArray);
             document.getElementById('prop-opacity').value = obj.opacity != null ? obj.opacity : 1;
+        }
+
+        // Tree node panel — only show when there are outgoing children
+        const _treeChildCount = (obj.treeConnection &&
+            obj.treeConnection.outgoing &&
+            obj.treeConnection.outgoing.lines &&
+            obj.treeConnection.outgoing.lines.length) || 0;
+        if (_treeChildCount > 0) {
+            showTreeNodePanel(obj);
+        } else {
+            document.getElementById('tree-node-panel').classList.remove('visible');
         }
 
         // Text section: show only for text-like objects
@@ -1997,6 +2045,105 @@
         if (prop === 'underline') document.getElementById('prop-underline').classList.toggle('active', !!newValue);
     }
 
+    // ---- Stroke type helpers ----
+    const STROKE_DASH_PRESETS = {
+        solid:     null,
+        dashed:    [8, 5],
+        dotted:    [2, 5],
+        'dash-dot': [10, 5, 2, 5],
+        'long-dash': [20, 6]
+    };
+
+    function detectStrokeType(dashArray) {
+        if (!dashArray || dashArray.length === 0) return 'solid';
+        const len = dashArray.length;
+        if (len >= 4) return 'dash-dot';
+        const dash = dashArray[0], gap = dashArray[1];
+        if (dash <= 2) return 'dotted';
+        if (dash >= 18) return 'long-dash';
+        return 'dashed';
+    }
+
+    function applyStrokeType(type) {
+        const obj = pc.getActiveObject();
+        if (!obj) return;
+        const prev = obj.strokeDashArray ? [...obj.strokeDashArray] : null;
+        const value = STROKE_DASH_PRESETS[type] ? [...STROKE_DASH_PRESETS[type]] : null;
+        obj.set('strokeDashArray', value);
+        pc.requestRenderAll();
+        undoManager.push(Commands.modifyObject(pc, obj,
+            { strokeDashArray: prev }, { strokeDashArray: value }));
+    }
+
+    // ---- Tree Node Panel ----
+    function getNodeLabel(node) {
+        if (!node) return '';
+        return node.text ||
+               (node.customData && node.customData.text) ||
+               node.uid ||
+               '(unknown)';
+    }
+
+    function getImmediateChildren(obj) {
+        const lines = obj.treeConnection && obj.treeConnection.outgoing
+            ? obj.treeConnection.outgoing.lines : [];
+        return lines
+            .map(findIfRequired)
+            .filter(Boolean)
+            .map(line => findIfRequired(line.customData && line.customData.target))
+            .filter(Boolean);
+    }
+
+    function showTreeNodePanel(obj) {
+        const treePanel = document.getElementById('tree-node-panel');
+        const select = document.getElementById('tree-children-select');
+        const children = getImmediateChildren(obj);
+        select.innerHTML = '';
+        children.forEach(child => {
+            const option = document.createElement('option');
+            option.value = child.uid;
+            option.textContent = getNodeLabel(child);
+            if (!child.visible) option.style.color = '#aaa';
+            select.appendChild(option);
+        });
+        treePanel.classList.add('visible');
+    }
+
+    function getSelectedChildren() {
+        const select = document.getElementById('tree-children-select');
+        return Array.from(select.selectedOptions)
+            .map(opt => findIfRequired(opt.value))
+            .filter(Boolean);
+    }
+
+    function toggleSelectedTreeChildren() {
+        const targets = getSelectedChildren();
+        if (!targets.length) return;
+        // If any visible, hide all; otherwise show all
+        const anyVisible = targets.some(c => c.visible !== false);
+        targets.forEach(c => {
+            if (anyVisible) hideObject(c); else showObject(c);
+        });
+        // Re-sync option colours
+        const select = document.getElementById('tree-children-select');
+        Array.from(select.options).forEach(opt => {
+            const node = findIfRequired(opt.value);
+            opt.style.color = (node && node.visible === false) ? '#aaa' : '';
+        });
+        pc.requestRenderAll();
+    }
+
+    function applyVisibilityToSelectedChildren(value) {
+        const targets = getSelectedChildren();
+        if (!targets.length) return;
+        targets.forEach(c => {
+            c.set('opacity', value);
+            if (value === 0) c.set('visible', false);
+            else c.set('visible', true);
+        });
+        pc.requestRenderAll();
+    }
+
     // Make property panel draggable
     let isDragging = false;
     let dragOffset = { x: 0, y: 0 };
@@ -2024,6 +2171,28 @@
     document.addEventListener('mouseup', function() {
         isDragging = false;
     });
+
+    // Make tree node panel draggable
+    let isDraggingTree = false;
+    let dragOffsetTree = { x: 0, y: 0 };
+    const treePanel = document.getElementById('tree-node-panel');
+    const treePanelHeader = treePanel.querySelector('.prop-header');
+    treePanelHeader.addEventListener('mousedown', function(e) {
+        isDraggingTree = true;
+        const rect = treePanel.getBoundingClientRect();
+        dragOffsetTree.x = e.clientX - rect.left;
+        dragOffsetTree.y = e.clientY - rect.top;
+        e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+        if (!isDraggingTree) return;
+        const x = e.clientX - dragOffsetTree.x;
+        const y = e.clientY - dragOffsetTree.y;
+        treePanel.style.left = Math.max(0, Math.min(window.innerWidth - treePanel.offsetWidth, x)) + 'px';
+        treePanel.style.top = Math.max(0, Math.min(window.innerHeight - treePanel.offsetHeight, y)) + 'px';
+        treePanel.style.right = 'auto';
+    });
+    document.addEventListener('mouseup', function() { isDraggingTree = false; });
 
     // Context menu
     pc.on('mouse:down', function(e) {
