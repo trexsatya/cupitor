@@ -32,10 +32,7 @@ function handleImageInputDialogButtons(src) {
       const file = document.querySelector('#imageInputFile').files[0];
       const reader = new FileReader();
       reader.addEventListener("load", function () {
-        fabric.Image.fromURL(reader.result).then(function (oImg) {
-          oImg.set({ left: 100, top: 100 });
-          pc.add(oImg);
-        });
+        addImage(reader.result, 100, 100);
       }, false);
       if (file) {
         reader.readAsDataURL(file);

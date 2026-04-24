@@ -909,15 +909,30 @@
         updateTreeItem(t);
     });
 
+    // Capture text edits on IText/Textbox (including sticky-note inner text).
+    // editing:exited fires once per edit session with the final text on e.target.
+    pc.on('text:editing:exited', function (e) {
+        const t = e.target;
+        if (!t || !t.uid) return;
+        recordScript(`setText(${JSON.stringify(t.uid)}, ${JSON.stringify(t.text)})`);
+    });
+
     pc.on('object:modified', function (e) {
         const t = e.target;
         //console.log(t, "modified");
         t._objects?.forEach(l => updateTreeItem(l, t.aCoords))
         updateTreeItem(t);
-        // Record scale / rotate (moves are already recorded via mouse:up)
+        // Record scale / rotate / vertex-edit (moves are already captured via mouse:up)
         if (t.uid && e.action && e.action !== 'drag') {
+            const r2 = n => typeof n === 'number' ? Math.round(n * 100) / 100 : n;
             if (t.customData && t.customData.type === 'textInQuad') {
                 recordScript(`reshapeQuad('${t.uid}', ${JSON.stringify(t.points)}, ${JSON.stringify(getActualProperties(t, true))})`);
+            } else if (t instanceof fabric.CurvableLine) {
+                // Store absolute scene coords so replay is independent of any prior body-drag.
+                const sceneOf = (px, py) => new fabric.Point(px - t.pathOffset.x, py - t.pathOffset.y)
+                    .transform(t.calcTransformMatrix());
+                const s1 = sceneOf(t.x1, t.y1), s2 = sceneOf(t.x2, t.y2), sc = sceneOf(t.cx, t.cy);
+                recordScript(`reshapeLine('${t.uid}', [${r2(s1.x)},${r2(s1.y)},${r2(s2.x)},${r2(s2.y)}], ${r2(sc.x)}, ${r2(sc.y)})`);
             } else {
                 recordScript(`animate('${t.uid}', ${JSON.stringify(getActualProperties(t, true))}, {})`);
             }
@@ -1344,7 +1359,8 @@
     <script>
         function renderMath(e) {
             if (e.keyCode == 13) {
-                drawMathSymbols(document.getElementById('mathtext').value, pc)
+                const pt = window.matexInsertionPoint || { left: 100, top: 100 };
+                addMath(document.getElementById('mathtext').value, pt.left, pt.top);
                 document.getElementById('mathjaxDialog').style.display = 'none';
             } else if (e.keyCode == 27) {
                 document.getElementById('mathjaxDialog').style.display = 'none';
@@ -2200,7 +2216,7 @@
         }, { once: true });
     }
 
-    // Close overlay on Escape key
+    // Close overlay on Escape key; open the script editor with Ctrl/Cmd+Shift+S.
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
             if (document.getElementById('media-overlay').style.display === 'flex') {
@@ -2208,6 +2224,16 @@
             }
             if (document.getElementById('scriptViewerDialog').style.display === 'flex') {
                 closeScriptDialog();
+            }
+        }
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+            // Don't swallow the shortcut while the user is editing an IText
+            // or typing inside the script editor itself.
+            const inTextarea = e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT');
+            const inScriptDialog = document.getElementById('scriptViewerDialog').style.display === 'flex';
+            if (!inTextarea && !inScriptDialog) {
+                e.preventDefault();
+                openScriptDialog();
             }
         }
     });
@@ -2418,6 +2444,7 @@
         const obj = pc.getActiveObject();
         if (obj) {
             undoManager.push(Commands.removeObject(pc, obj));
+            if (obj.uid) recordScript(`removeByUid(${JSON.stringify(obj.uid)})`);
             deleteFabricObject(obj);
         }
         closeContextMenu();
@@ -2425,12 +2452,20 @@
 
     function bringToFrontSelected() {
         const obj = pc.getActiveObject();
-        if (obj) { pc.bringObjectToFront(obj); pc.requestRenderAll(); }
+        if (obj) {
+            pc.bringObjectToFront(obj);
+            pc.requestRenderAll();
+            if (obj.uid) recordScript(`bringToFront(${JSON.stringify(obj.uid)})`);
+        }
     }
 
     function sendToBackSelected() {
         const obj = pc.getActiveObject();
-        if (obj) { pc.sendObjectToBack(obj); pc.requestRenderAll(); }
+        if (obj) {
+            pc.sendObjectToBack(obj);
+            pc.requestRenderAll();
+            if (obj.uid) recordScript(`sendToBack(${JSON.stringify(obj.uid)})`);
+        }
     }
 
     // Shape menu
