@@ -10,6 +10,84 @@ function recordScript(str) {
   }
 }
 
+// Semantic UID generator — e.g. T1, T2 for textboxes; R1, R2 for rects etc.
+const _SEMANTIC_PREFIXES = {
+  textbox: 'T', text: 'T', 'i-text': 'T',
+  textrect: 'R', rect: 'R',
+  textcircle: 'C', circle: 'C',
+  textellipse: 'E', ellipse: 'E',
+  diamond: 'D',
+  quad: 'Q', textinquad: 'Q',
+  hexagon: 'H',
+  star: 'ST',
+  cloud: 'CL',
+  polygon: 'P',
+  triangle: 'TR',
+  arrow: 'A', linearrow: 'A',
+  biarrow: 'BA', bilinearrow: 'BA',
+  path: 'PH',
+  image: 'IMG',
+  group: 'G',
+  line: 'L', curvableline: 'L',
+};
+
+// Collect every name that's already "taken" — both canvas object uids and
+// names the user's imported script may have claimed via `_.T1 = ...`, so a
+// freshly-generated uid never shadows or gets shadowed by script references.
+function _collectTakenUids() {
+  const taken = new Set();
+  if (window._ && typeof window._ === 'object') {
+    Object.keys(window._).forEach(k => taken.add(k));
+  }
+  [window.pc, window.oc].forEach(c => {
+    if (c && typeof c.getObjects === 'function') {
+      c.getObjects().forEach(o => { if (o && o.uid) taken.add(o.uid); });
+    }
+  });
+  return taken;
+}
+
+function semanticUid(type) {
+  const prefix = _SEMANTIC_PREFIXES[(type || '').toLowerCase()] || 'OBJ';
+  window._uidCounters = window._uidCounters || {};
+  const taken = _collectTakenUids();
+  let candidate;
+  do {
+    window._uidCounters[prefix] = (window._uidCounters[prefix] || 0) + 1;
+    candidate = prefix + window._uidCounters[prefix];
+  } while (taken.has(candidate));
+  return candidate;
+}
+
+// After loading canvas JSON, sync counters so new IDs don't collide with loaded ones
+function syncUidCounters() {
+  const _pattern = /^([A-Za-z]+)(\d+)$/;
+  const canvases = [window.pc, window.oc].filter(Boolean);
+  canvases.forEach(canvas => {
+    (canvas._objects || []).forEach(obj => {
+      const uid = obj.uid;
+      if (!uid) return;
+      const m = uid.match(_pattern);
+      if (!m) return;
+      const prefix = m[1];
+      const num = parseInt(m[2], 10);
+      window._uidCounters = window._uidCounters || {};
+      if (!(prefix in window._uidCounters) || window._uidCounters[prefix] < num) {
+        window._uidCounters[prefix] = num;
+      }
+    });
+  });
+}
+
+// Helper for script playback: set a property on an object by uid
+function setProp(uid, prop, value) {
+  const obj = findById(uid);
+  if (obj && typeof obj.set === 'function') {
+    obj.set(prop, value);
+    if (window.pc) window.pc.requestRenderAll();
+  }
+}
+
 function findById(id, canvas) {
   if (!canvas) canvas = pc
   const fabricObj = canvas._objects.find(it => it.uid + '' === id + '' || it.customData?.uid + '' === id + '');
@@ -139,7 +217,7 @@ function textbox(opts){
         hasRotatingPoint: true,
         centerTransform: true
     });
-    if(opts.uid) textSample.uid = opts.uid;
+    textSample.uid = opts.uid || semanticUid('textbox');
     return textSample
 }
 
@@ -199,9 +277,7 @@ function textInRect(textStr, x, y, optsText, optsRect, uid){
         }
     };
 
-    if(uid) {
-      group.uid = uid;
-    }
+    group.uid = uid || semanticUid('textrect');
     return group;
 }
 
@@ -239,6 +315,7 @@ function textInCircle(textStr, x,y, optsText, optsCirc){
       type: "textInCircle",
       text: textStr
     }
+    group.uid = semanticUid('textcircle');
     return group;
 }
 
@@ -277,6 +354,7 @@ function textInEllipse(textStr, x, y, optsText, optsCirc){
     type: "textInEllipse",
     text: textStr
   }
+  group.uid = semanticUid('textellipse');
   return group;
 }
 
@@ -329,6 +407,7 @@ function textInDiamond(textStr, x, y, optsText, optsShape) {
   });
 
   group.customData = { type: "textInDiamond", text: textStr };
+  group.uid = semanticUid('diamond');
   return group;
 }
 
@@ -369,7 +448,298 @@ function textInHexagon(textStr, x, y, optsText, optsShape) {
   });
 
   group.customData = { type: "textInHexagon", text: textStr };
+  group.uid = semanticUid('hexagon');
   return group;
+}
+
+// Tiltable quadrilateral with a centered text label. Returned as {quad, text}
+// where both must be added to the canvas. Dragging any of the 4 corner handles
+// reshapes the polygon (producing a perspective-looking tilt); the label
+// re-centers on the polygon's centroid automatically. Double-click on the
+// quad to edit the label inline.
+function textInQuad(textStr, x, y, width, height, optsText, optsShape) {
+  const w = width || 160, h = height || 100;
+  const points = (optsShape && optsShape.points) || [
+    { x: 0, y: 0 },
+    { x: w, y: 0 },
+    { x: w, y: h },
+    { x: 0, y: h }
+  ];
+  const shapeOpts = Object.assign({}, {
+    left: x, top: y,
+    fill: 'rgba(100, 150, 220, 0.35)',
+    stroke: '#1976D2',
+    strokeWidth: 2,
+    objectCaching: false
+  }, optsShape);
+  delete shapeOpts.points;
+
+  const quad = new fabric.Polygon(points, shapeOpts);
+
+  const text = new fabric.IText(textStr || '', Object.assign({}, {
+    fontSize: 18,
+    fill: '#111',
+    originX: 'center',
+    originY: 'center',
+    selectable: false,
+    evented: false,
+    hasControls: false,
+    hasBorders: false,
+    lockMovementX: true,
+    lockMovementY: true,
+    editable: true
+  }, optsText));
+
+  attachQuadBehavior(quad, text);
+  quad.uid = semanticUid('quad');
+  quad.customData = { type: 'textInQuad', text: textStr };
+  return { quad, text };
+}
+
+function attachQuadBehavior(polygon, labelText) {
+  const positionText = () => {
+    const pts = polygon.points;
+    if (!pts || pts.length < 1) return;
+    let cx = 0, cy = 0;
+    pts.forEach(p => { cx += p.x; cy += p.y; });
+    cx = cx / pts.length - polygon.pathOffset.x;
+    cy = cy / pts.length - polygon.pathOffset.y;
+    const world = fabric.util.transformPoint({ x: cx, y: cy }, polygon.calcTransformMatrix());
+    labelText.set({ left: world.x, top: world.y });
+    labelText.setCoords();
+    if (polygon.canvas) polygon.canvas.requestRenderAll();
+  };
+
+  polygon.on('moving', positionText);
+  polygon.on('scaling', positionText);
+  polygon.on('rotating', positionText);
+  polygon.on('modified', positionText);
+  // So replay through animate() (which calls obj.onAnimationChange each frame)
+  // also keeps the label glued to the polygon's centroid.
+  polygon.onAnimationChange = positionText;
+
+  // Double-click the polygon → inline IText edit mode.
+  polygon.on('mousedblclick', () => {
+    const canvas = polygon.canvas;
+    if (!canvas) return;
+    labelText.set({ selectable: true, evented: true });
+    canvas.setActiveObject(labelText);
+    labelText.enterEditing();
+    labelText.selectAll();
+    canvas.requestRenderAll();
+  });
+
+  labelText.on('editing:exited', () => {
+    labelText.set({ selectable: false, evented: false });
+    const newText = labelText.text;
+    const changed = polygon.customData.text !== newText;
+    polygon.customData.text = newText;
+    if (polygon.canvas) {
+      polygon.canvas.setActiveObject(polygon);
+      polygon.canvas.requestRenderAll();
+    }
+    if (changed && typeof recordScript === 'function') {
+      recordScript(`setQuadLabel('${polygon.uid}', ${JSON.stringify(newText)})`);
+    }
+  });
+
+  // Linked lifecycle — removing either takes the other with it. Each handler
+  // is guarded by `.canvas` because fabric nulls it on removal, so the
+  // reciprocal remove becomes a no-op and we avoid a loop.
+  polygon.on('removed', () => {
+    if (labelText.canvas) labelText.canvas.remove(labelText);
+  });
+  labelText.on('removed', () => {
+    if (polygon.canvas) polygon.canvas.remove(polygon);
+  });
+
+  attachVertexControls(polygon, positionText);
+
+  polygon._labelText = labelText;
+  labelText._parentQuad = polygon;
+
+  // Re-center label once initial transform is known (after add()).
+  setTimeout(positionText, 0);
+}
+
+function setQuadLabel(uidOrObj, text) {
+  const quad = findIfRequired(uidOrObj);
+  if (!quad || !quad._labelText) return;
+  quad._labelText.set({ text: text == null ? '' : String(text) });
+  if (quad.customData) quad.customData.text = quad._labelText.text;
+  quad._labelText.setCoords();
+  if (quad.canvas) quad.canvas.requestRenderAll();
+}
+
+// Replay helper — resets a quad's vertices (and any transform props) and
+// re-centers its label. Recorded on vertex-drag; see play.html object:modified.
+function reshapeQuad(uidOrObj, points, transformProps) {
+  const quad = findIfRequired(uidOrObj);
+  if (!quad || !points) return;
+  quad.set({ points: points });
+  if (typeof quad.setDimensions === 'function') quad.setDimensions();
+  if (transformProps) quad.set(transformProps);
+  quad.setCoords();
+  quad.fire('modified'); // triggers our positionText handler
+  if (quad.canvas) quad.canvas.requestRenderAll();
+}
+
+function attachVertexControls(polygon, onChange) {
+  // Fabric v6 ships a polygon-editor utility that builds per-vertex controls
+  // with the correct world↔local math and keeps the polygon anchored. We just
+  // piggy-back on the 'modifyPoly' event it fires during the drag.
+  polygon.controls = fabric.controlsUtils.createPolyControls(polygon);
+  if (onChange) polygon.on('modifyPoly', onChange);
+}
+
+// Replace a fabric.Line's default bbox-scaling controls with two endpoint
+// handles. Dragging either handle moves just that endpoint along the cursor
+// — no more "messy" diagonal scaling when the line is tilted inside its bbox.
+function attachLineEndpointControls(line) {
+  const endpointPositionHandler = (which) => function (dim, finalMatrix, fabricObject) {
+    const sx = which === 'start' ? fabricObject.x1 : fabricObject.x2;
+    const sy = which === 'start' ? fabricObject.y1 : fabricObject.y2;
+    return new fabric.Point(sx, sy).transform(fabricObject.getViewportTransform());
+  };
+
+  const endpointActionHandler = (which) => function (eventData, transform, x, y) {
+    const ln = transform.target;
+    if (which === 'start') { ln.x1 = x; ln.y1 = y; }
+    else { ln.x2 = x; ln.y2 = y; }
+    ln._setWidthHeight();
+    ln.setCoords();
+    ln.fire('modifyLine');
+    return true;
+  };
+
+  line.controls = {
+    p1: new fabric.Control({
+      actionName: 'modifyLine',
+      positionHandler: endpointPositionHandler('start'),
+      actionHandler: endpointActionHandler('start'),
+      render: fabric.controlsUtils.renderCircleControl,
+      cornerSize: 12
+    }),
+    p2: new fabric.Control({
+      actionName: 'modifyLine',
+      positionHandler: endpointPositionHandler('end'),
+      actionHandler: endpointActionHandler('end'),
+      render: fabric.controlsUtils.renderCircleControl,
+      cornerSize: 12
+    })
+  };
+  // Hide rotation; rotation doesn't mean much for a two-point line.
+  line.hasRotatingPoint = false;
+}
+
+// Convenience constructor used by recorded scripts. Creates a CurvableLine,
+// applies the supplied uid (if any), and adds it to the primary canvas.
+function addLine(points, opts) {
+  opts = opts || {};
+  const line = new fabric.CurvableLine(points, opts);
+  if (opts.uid) line.uid = opts.uid;
+  pc.add(line);
+  return line;
+}
+
+// Miro-style: 2 endpoint handles + 1 midpoint "bend" handle. Path coords
+// (x1,y1,x2,y2,cx,cy) live in the object's path-coord space (relative to
+// pathOffset) — so position handlers transform through (viewport × object
+// matrix), and action handlers translate pointer→local→pathSpace and then
+// re-anchor an unchanged point so setBoundingBox doesn't snap the line.
+function attachCurvableLineControls(line) {
+  const pathSpaceToScreen = (fabricObject, px, py) =>
+    new fabric.Point(px - fabricObject.pathOffset.x, py - fabricObject.pathOffset.y)
+      .transform(fabric.util.multiplyTransformMatrices(
+        fabricObject.getViewportTransform(),
+        fabricObject.calcTransformMatrix()
+      ));
+
+  // Applies a mutation (endpoint/midpoint change), rebuilds the path, and
+  // shifts left/top to preserve the given anchor's scene position — same
+  // recipe fabric uses for polygon vertex drags.
+  const applyAnchored = (ln, anchorX, anchorY, mutate) => {
+    const anchor = new fabric.Point(anchorX, anchorY);
+    const anchorInParent = anchor.subtract(ln.pathOffset).transform(ln.calcOwnMatrix());
+    mutate();
+    const cpx = 2 * ln.cx - (ln.x1 + ln.x2) / 2;
+    const cpy = 2 * ln.cy - (ln.y1 + ln.y2) / 2;
+    ln.path = fabric.util.parsePath(
+      `M ${ln.x1} ${ln.y1} Q ${cpx} ${cpy} ${ln.x2} ${ln.y2}`
+    );
+    ln.setBoundingBox(false);
+    const newAnchorInParent = anchor.subtract(ln.pathOffset).transform(ln.calcOwnMatrix());
+    const diff = newAnchorInParent.subtract(anchorInParent);
+    ln.left -= diff.x;
+    ln.top -= diff.y;
+    ln.setCoords();
+    ln.fire('modifyLine');
+    if (ln.canvas) ln.canvas.requestRenderAll();
+  };
+
+  const endpointPos = (which) => function (dim, finalMatrix, fabricObject) {
+    const px = which === 'start' ? fabricObject.x1 : fabricObject.x2;
+    const py = which === 'start' ? fabricObject.y1 : fabricObject.y2;
+    return pathSpaceToScreen(fabricObject, px, py);
+  };
+  const midPos = function (dim, finalMatrix, fabricObject) {
+    return pathSpaceToScreen(fabricObject, fabricObject.cx, fabricObject.cy);
+  };
+  const endpointAction = (which) => function (eventData, transform, x, y) {
+    const ln = transform.target;
+    const anchorX = which === 'start' ? ln.x2 : ln.x1;
+    const anchorY = which === 'start' ? ln.y2 : ln.y1;
+    applyAnchored(ln, anchorX, anchorY, () => {
+      const mouseLocal = fabric.util.sendPointToPlane(
+        new fabric.Point(x, y), undefined, ln.calcOwnMatrix()
+      );
+      const newPx = mouseLocal.x + ln.pathOffset.x;
+      const newPy = mouseLocal.y + ln.pathOffset.y;
+      const oldMidX = (ln.x1 + ln.x2) / 2, oldMidY = (ln.y1 + ln.y2) / 2;
+      if (which === 'start') { ln.x1 = newPx; ln.y1 = newPy; }
+      else { ln.x2 = newPx; ln.y2 = newPy; }
+      const newMidX = (ln.x1 + ln.x2) / 2, newMidY = (ln.y1 + ln.y2) / 2;
+      ln.cx += (newMidX - oldMidX);
+      ln.cy += (newMidY - oldMidY);
+    });
+    return true;
+  };
+  const midAction = function (eventData, transform, x, y) {
+    const ln = transform.target;
+    applyAnchored(ln, ln.x1, ln.y1, () => {
+      const mouseLocal = fabric.util.sendPointToPlane(
+        new fabric.Point(x, y), undefined, ln.calcOwnMatrix()
+      );
+      ln.cx = mouseLocal.x + ln.pathOffset.x;
+      ln.cy = mouseLocal.y + ln.pathOffset.y;
+    });
+    return true;
+  };
+
+  line.controls = {
+    p1: new fabric.Control({
+      actionName: 'modifyLine',
+      positionHandler: endpointPos('start'),
+      actionHandler: endpointAction('start'),
+      render: fabric.controlsUtils.renderCircleControl,
+      cornerSize: 12
+    }),
+    p2: new fabric.Control({
+      actionName: 'modifyLine',
+      positionHandler: endpointPos('end'),
+      actionHandler: endpointAction('end'),
+      render: fabric.controlsUtils.renderCircleControl,
+      cornerSize: 12
+    }),
+    pm: new fabric.Control({
+      actionName: 'modifyLine',
+      positionHandler: midPos,
+      actionHandler: midAction,
+      render: fabric.controlsUtils.renderCircleControl,
+      cornerSize: 10
+    })
+  };
+  line.hasRotatingPoint = false;
 }
 
 function textInStar(textStr, x, y, optsText, optsShape) {
@@ -412,6 +782,7 @@ function textInStar(textStr, x, y, optsText, optsShape) {
   });
 
   group.customData = { type: "textInStar", text: textStr };
+  group.uid = semanticUid('star');
   return group;
 }
 
@@ -457,6 +828,7 @@ function textInCloud(textStr, x, y, optsText, optsShape) {
   });
 
   group.customData = { type: "textInCloud", text: textStr };
+  group.uid = semanticUid('cloud');
   return group;
 }
 
@@ -472,6 +844,7 @@ function addRectangle(opts){
         height: opts.height || 20
     });
 
+    rect.uid = semanticUid('rect');
     pc.add(rect)
     pc.renderAll()
     return rect
@@ -499,7 +872,7 @@ function arrow(x1, y1, x2, y2, opts) {
         padding: 4,
         selectable: true
     });
-    if (opts && opts.uid) line.uid = opts.uid;
+    line.uid = (opts && opts.uid) || semanticUid('arrow');
     return line;
 }
 
@@ -516,7 +889,7 @@ function bidirectionalArrow(x1, y1, x2, y2, opts) {
         selectable: true
     });
 
-    if (opts && opts.uid) line.uid = opts.uid;
+    line.uid = (opts && opts.uid) || semanticUid('biarrow');
     return line;
 }
 
@@ -917,6 +1290,28 @@ function animate(obj, props, opts){
     });
 }
 
+// Replay a recorded curved drag. `samples` is [{left, top, t}, ...] captured
+// during object:moving. Segments animate at their captured pace unless
+// `opts.duration` is given, in which case the whole path is rescaled to fit.
+async function animatePath(uidOrObj, samples, opts) {
+    if (!uidOrObj || !samples || samples.length < 2) return
+    const obj = findIfRequired(uidOrObj)
+    if (!obj) return
+    opts = opts || {}
+    const capturedTotal = Math.max(1, samples[samples.length - 1].t - samples[0].t)
+    const scale = opts.duration ? opts.duration / capturedTotal : 1
+    const onComplete = opts.onComplete
+    const perStepOpts = {...opts}
+    delete perStepOpts.onComplete
+    delete perStepOpts.duration
+    for (let i = 1; i < samples.length; i++) {
+        const a = samples[i - 1], b = samples[i]
+        const dt = Math.max(1, (b.t - a.t) * scale)
+        await animate(obj, {left: b.left, top: b.top}, {...perStepOpts, duration: dt})
+    }
+    if (onComplete) onComplete()
+}
+
 function centerOf(obj){
     return {
         x: obj.left + obj.width/2,
@@ -1247,6 +1642,7 @@ function connect(canvas, it, other, opts){
         padding: 4
     });
 
+    attachLineEndpointControls(line);
     canvas.add(line)
 
     return line

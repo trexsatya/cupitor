@@ -264,12 +264,19 @@ function importSearchesFromVocab() {
 function loadWholeVocabulary() {
   $('#searchedWords').html('')
   $('#addToVocabularyDialogSelect').html('')
+  $('#addToVocabBtn').prop('disabled', true)
 
   const vocabCategoriesToPopulate = new Set()
 
   Object.entries(vocabulary).forEach(it => {
     vocabCategoriesToPopulate.add(it[0])
   })
+
+  const categories = Array.from(vocabCategoriesToPopulate)
+  const total = categories.length
+  let done = 0
+  $('#vocabLoadingBarFill').css('width', '0%')
+  $('#vocabLoadingBar').show()
 
   const populateLines = category => {
     const vocabLines = window.vocabulary[category]
@@ -281,9 +288,14 @@ function loadWholeVocabulary() {
       $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
       $('#addToVocabularyDialogSelect').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
     })
+    done += 1
+    $('#vocabLoadingBarFill').css('width', `${(done / total) * 100}%`)
   };
-  schedule(Array.from(vocabCategoriesToPopulate), .5, it => {
+  schedule(categories, .5, it => {
     populateLines(it)
+  }, () => {
+    $('#addToVocabBtn').prop('disabled', false)
+    $('#vocabLoadingBar').hide()
   })
 }
 

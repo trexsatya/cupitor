@@ -212,6 +212,64 @@ fabric.LineArrow = LineArrow;
 fabric.classRegistry.setClass(LineArrow);
 fabric.classRegistry.setClass(LineArrow, 'LineArrow');
 
+// --- Miro-style curvable line ---
+// Underlying shape is a quadratic Bezier path. The three exposed handles:
+//   (x1,y1)   start endpoint
+//   (x2,y2)   end endpoint
+//   (cx,cy)   the point on the curve at t=0.5 — "grab the middle and bend".
+// When (cx,cy) sits at the midpoint of (x1,y1)-(x2,y2) the curve collapses to
+// a straight line. When endpoints move, (cx,cy) is translated by the same
+// delta so the bend "rides along" with the line, matching Miro's feel.
+class CurvableLine extends fabric.Path {
+  static type = 'CurvableLine';
+
+  constructor(pts, options) {
+    const [x1, y1, x2, y2] = pts;
+    const opts = Object.assign({
+      fill: '',
+      stroke: '#333',
+      strokeWidth: 2,
+      strokeLineCap: 'round',
+      objectCaching: false
+    }, options || {});
+    const cx = (options && options.cx !== undefined) ? options.cx : (x1 + x2) / 2;
+    const cy = (options && options.cy !== undefined) ? options.cy : (y1 + y2) / 2;
+    const cpx = 2 * cx - (x1 + x2) / 2;
+    const cpy = 2 * cy - (y1 + y2) / 2;
+    super(`M ${x1} ${y1} Q ${cpx} ${cpy} ${x2} ${y2}`, opts);
+    this.x1 = x1; this.y1 = y1;
+    this.x2 = x2; this.y2 = y2;
+    this.cx = cx; this.cy = cy;
+  }
+
+  // Rebuild the path array from (x1,y1,x2,y2,cx,cy) and re-fit the bbox.
+  rebuild() {
+    const cpx = 2 * this.cx - (this.x1 + this.x2) / 2;
+    const cpy = 2 * this.cy - (this.y1 + this.y2) / 2;
+    this.path = fabric.util.parsePath(
+      `M ${this.x1} ${this.y1} Q ${cpx} ${cpy} ${this.x2} ${this.y2}`
+    );
+    this.setBoundingBox(true);
+    this.setCoords();
+    if (this.canvas) this.canvas.requestRenderAll();
+  }
+
+  toObject(propertiesToInclude) {
+    return Object.assign({}, super.toObject(propertiesToInclude), {
+      x1: this.x1, y1: this.y1,
+      x2: this.x2, y2: this.y2,
+      cx: this.cx, cy: this.cy
+    });
+  }
+
+  static fromObject(object) {
+    return Promise.resolve(new CurvableLine([object.x1, object.y1, object.x2, object.y2], object));
+  }
+}
+fabric.CurvableLine = CurvableLine;
+fabric.classRegistry.setClass(CurvableLine);
+fabric.classRegistry.setClass(CurvableLine, 'CurvableLine');
+
 fabric.Canvas.prototype.add = (function (originalFn) {
   return function (...args) {
     const obj = args[0];
@@ -220,12 +278,21 @@ fabric.Canvas.prototype.add = (function (originalFn) {
     originalFn.call(this, ...args);
     if (!alreadyOnCanvas && obj) {
       if (!obj.uid) {
-        const uid = uuid();
+        const uid = semanticUid(obj.type || '');
         obj.uid = uid;
         customData(obj).uid = uid;
         const type = ' ' + (customData(obj).type || '');
         window.objectIds.add({uid: uid, type: 'fabric.js' + type});
         updateObjectIdsUi()
+      }
+      // Lines get endpoint-drag handles (fixes tilted-line distortion on
+      // resize). CurvableLines get the 3-handle bend controls instead.
+      if (obj instanceof fabric.CurvableLine && !obj._hasEndpointControls) {
+        attachCurvableLineControls(obj);
+        obj._hasEndpointControls = true;
+      } else if (obj instanceof fabric.Line && !obj._hasEndpointControls) {
+        attachLineEndpointControls(obj);
+        obj._hasEndpointControls = true;
       }
     }
     return this
@@ -579,10 +646,9 @@ function makeConnection(e) {
   }
 }
 
-function zoomSelectedObject(obj, isPlus) {
+function zoomSelectedObject(obj, isPlus = true, amount = 1.5) {
   obj = findIfRequired(obj);
   if (!obj) return;
-  const amount = 1.5
 
   if (isPlus) {
     var activeObject = pc.getActiveObject()
@@ -1339,6 +1405,8 @@ async function restoreCanvas() {
   const data1 = JSON.parse(localStorage.getItem('oc_' + idx))
   await oc.loadFromJSON(data1)
   oc.renderAll();
+  // Sync semantic UID counters so new objects don't collide with loaded ones
+  if (typeof syncUidCounters === 'function') syncUidCounters();
 }
 
 function newCanvas() {
