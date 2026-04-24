@@ -270,9 +270,11 @@ function initShapeDrawingTool(canvas, toolManager) {
   let shapeStartPoint = null;
   let currentShape = null;
 
+  const SHAPE_TOOLS = ['rect', 'circle', 'diamond', 'quad', 'line'];
+
   canvas.on('mouse:down', function(e) {
     const tool = toolManager.getActive();
-    if (tool !== 'rect' && tool !== 'circle' && tool !== 'diamond') return;
+    if (!SHAPE_TOOLS.includes(tool)) return;
     if (e.target) return; // clicked on an existing object
 
     isDrawingShape = true;
@@ -294,6 +296,22 @@ function initShapeDrawingTool(canvas, toolManager) {
         left: pointer.x, top: pointer.y, width: 0, height: 0,
         fill: 'transparent', stroke: '#333', strokeWidth: 2, angle: 45
       });
+    } else if (tool === 'quad') {
+      currentShape = new fabric.Polygon(
+        [{x:0,y:0},{x:0,y:0},{x:0,y:0},{x:0,y:0}],
+        {
+          left: pointer.x, top: pointer.y,
+          fill: 'rgba(100, 150, 220, 0.35)',
+          stroke: '#1976D2', strokeWidth: 2,
+          objectCaching: false
+        }
+      );
+    } else if (tool === 'line') {
+      currentShape = new fabric.CurvableLine(
+        [pointer.x, pointer.y, pointer.x, pointer.y],
+        { stroke: '#333', strokeWidth: 2, strokeLineCap: 'round',
+          selectable: false, evented: false }
+      );
     }
 
     if (currentShape) {
@@ -323,6 +341,30 @@ function initShapeDrawingTool(canvas, toolManager) {
         top: Math.min(pointer.y, shapeStartPoint.y),
         rx: rx, ry: ry
       });
+    } else if (tool === 'quad') {
+      const w = Math.abs(pointer.x - shapeStartPoint.x);
+      const h = Math.abs(pointer.y - shapeStartPoint.y);
+      currentShape.set({
+        left: Math.min(pointer.x, shapeStartPoint.x),
+        top: Math.min(pointer.y, shapeStartPoint.y),
+        points: [
+          { x: 0, y: 0 },
+          { x: w, y: 0 },
+          { x: w, y: h },
+          { x: 0, y: h }
+        ],
+        width: w,
+        height: h,
+        pathOffset: { x: w / 2, y: h / 2 },
+        dirty: true
+      });
+    } else if (tool === 'line') {
+      // During the initial drag the curve is straight; keep cx/cy at midpoint.
+      currentShape.x2 = pointer.x;
+      currentShape.y2 = pointer.y;
+      currentShape.cx = (currentShape.x1 + currentShape.x2) / 2;
+      currentShape.cy = (currentShape.y1 + currentShape.y2) / 2;
+      currentShape.rebuild();
     }
     canvas.requestRenderAll();
   });
@@ -331,7 +373,7 @@ function initShapeDrawingTool(canvas, toolManager) {
     if (!isDrawingShape) return;
     isDrawingShape = false;
     const tool = toolManager.getActive();
-    if (tool !== 'rect' && tool !== 'circle' && tool !== 'diamond') {
+    if (!SHAPE_TOOLS.includes(tool)) {
       // Tool switched mid-draw (e.g. Escape pressed while dragging) — discard shape
       if (currentShape) { canvas.remove(currentShape); currentShape = null; }
       shapeStartPoint = null;
@@ -339,16 +381,67 @@ function initShapeDrawingTool(canvas, toolManager) {
     }
     if (currentShape) {
       currentShape.setCoords();
-      // If too small, remove it
-      if ((currentShape.width || 0) < 5 && (currentShape.height || 0) < 5 &&
-          (currentShape.rx || 0) < 5) {
+      const isQuad = tool === 'quad';
+      const isLine = tool === 'line';
+      const tooSmall = isLine
+        ? (Math.hypot(currentShape.x2 - currentShape.x1, currentShape.y2 - currentShape.y1) < 5)
+        : isQuad
+        ? ((currentShape.width || 0) < 5 && (currentShape.height || 0) < 5)
+        : ((currentShape.width || 0) < 5 && (currentShape.height || 0) < 5 && (currentShape.rx || 0) < 5);
+      if (tooSmall) {
         canvas.remove(currentShape);
         currentShape = null;
       } else {
         currentShape.selectable = true;
         currentShape.evented = true;
+        let labelText = null;
+        if (isLine && typeof recordScript === 'function') {
+          const c = currentShape;
+          const r2 = n => Math.round(n * 100) / 100;
+          const opts = {
+            uid: c.uid, // already assigned by canvas add hook
+            stroke: c.stroke, strokeWidth: c.strokeWidth, strokeLineCap: c.strokeLineCap,
+            cx: r2(c.cx), cy: r2(c.cy)
+          };
+          recordScript(
+            `addLine([${r2(c.x1)},${r2(c.y1)},${r2(c.x2)},${r2(c.y2)}],${JSON.stringify(opts)})`
+          );
+        }
+        if (isQuad) {
+          // Empty label by default; user double-clicks the quad to edit it.
+          labelText = new fabric.IText('', {
+            fontSize: 18, fill: '#111',
+            originX: 'center', originY: 'center',
+            selectable: false, evented: false,
+            hasControls: false, hasBorders: false,
+            lockMovementX: true, lockMovementY: true,
+            editable: true
+          });
+          canvas.add(labelText);
+          attachQuadBehavior(currentShape, labelText);
+          currentShape.uid = semanticUid('quad');
+          currentShape.customData = { type: 'textInQuad', text: '' };
+          // Record creation so export/replay reproduces the quad. The tilt is
+          // captured separately via object:modified → reshapeQuad.
+          if (typeof recordScript === 'function') {
+            const L = currentShape.left, T = currentShape.top;
+            const W = currentShape.width, H = currentShape.height;
+            const uid = currentShape.uid;
+            recordScript(
+              `{const r=textInQuad('',${L},${T},${W},${H});r.quad.uid=${JSON.stringify(uid)};pc.add(r.quad);pc.add(r.text);}`
+            );
+          }
+        }
         if (window.undoManager) {
-          window.undoManager.push(Commands.addObject(canvas, currentShape));
+          if (labelText) {
+            const shapeRef = currentShape;
+            window.undoManager.push({
+              redo() { canvas.add(shapeRef); canvas.add(labelText); canvas.requestRenderAll(); },
+              undo() { canvas.remove(shapeRef); canvas.remove(labelText); canvas.requestRenderAll(); }
+            });
+          } else {
+            window.undoManager.push(Commands.addObject(canvas, currentShape));
+          }
         }
         const drawnShape = currentShape;
         currentShape = null;
@@ -448,7 +541,7 @@ function registerTools(toolManager, primaryCanvas, overlayCanvas) {
   });
 
   // Shape tools
-  ['rect', 'circle', 'diamond'].forEach(shape => {
+  ['rect', 'circle', 'diamond', 'quad', 'line'].forEach(shape => {
     toolManager.register(shape, {
       activate() {
         primaryCanvas.isDrawingMode = false;

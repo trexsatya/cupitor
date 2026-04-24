@@ -643,49 +643,14 @@
 
 
     <div id="drawing-mode-options" style="background: rgba(15, 14, 14, 0.4);padding-left: 10px;padding-top: 10px;">
-
-
-        <button id="record-launch" class="btn btn-info" onclick="initializeRecording()">Record</button>
-        <button id="record-play-launch" class="btn btn-info" onclick="launchRecordingDialog()">Play Recording</button>
-        <button id="rollbackRecording" onclick="launchRollbackRecording()">Rollback Recording</button>
-        <br><br>
         <button id="delete-selected" class="btn btn-info" onclick="deleteSelectedObjects()">Delete</button>
-        <button id="record-play-save" class="btn btn-info" onclick="saveRecording()">Save Recording</button>
+    
         <br> <br>
 
         <button class="btn btn-info" onclick="copy(pc)">Copy</button>
         <button class="btn btn-info" onclick="paste(pc)">Paste</button>
         <button class="btn btn-info" onclick="group(pc)">Group</button>
         <button class="btn btn-info" onclick="degroup(pc)">Ungroup</button>
-
-        <br><br>
-
-        <button id="create-text" class="btn btn-info">Text</button>
-        <button id="create-small-text" class="btn btn-info">Small Text</button>
-        <button id="create-rect-text" class="btn btn-info">[]</button>
-
-        <br><br>
-        Color: <select onchange="changeCircleColor(this.value)">
-        <option value="">--</option>
-        <option value="blue">Blue</option>
-        <option value="green">Green</option>
-        <option value="red">Red</option>
-        <option value="black">Black</option>
-        <option value="yellow">Yellow</option>
-        <option value="pink">Pink</option>
-        <option value="white">White</option>
-    </select>
-
-        <br><br>
-        <button id="greenen" class="btn btn-info" onclick="zoomSelectedObject(pc.getActiveObject(), true)" style="margin-right:10px;">+</button>
-        <button id="whiten" class="btn btn-info" onclick="zoomSelectedObject(pc.getActiveObject(), false)" style="margin-right:10px;">-</button>
-
-        <button id="arrow" class="btn btn-info" onclick="arrowButton()">--></button>
-        <br><br>
-
-        <button id="flipConnectionMode" class="btn btn-info" onclick="flipConnectionMode(event)" style="">Connect</button>
-        <button id="makeTree" class="btn btn-info" onclick="onMakeTreeClick(event)" style="">AddTreeNodes</button>
-        <button id="removeTree" class="btn btn-info" onclick="onRemoveTreeClick(event)" style="">RemoveTree</button>
 
         <br><br>
 
@@ -696,8 +661,12 @@
         <br><br>
         <button id="save" style="margin-right:10px;" onclick="saveCanvas()">Save</button>
         <button id="newCanvas" onclick="newCanvas()"> New</button>
-        <button id="exportScript" onclick="exportScript()"> Export</button>
-        <button id="importScript" onclick="$('#importDialog').show()"> Import</button>
+        <button id="viewScript" onclick="openScriptDialog()">&#128196; Script</button>
+        <div>
+            <label style="font-size:0.9em;margin-left:6px;"><input type="checkbox" id="recordScriptToggle" checked onchange="toggleRecordScript(this.checked)"> Record Script</label>
+            <label style="font-size:0.9em;margin-left:6px;" title="Sample intermediate positions during a drag so replay follows the curved path you drew, not a straight line."><input type="checkbox" id="recordPathToggle"> Record Path</label>
+        </div>
+        
         <br><br>
 
         <br><br>
@@ -706,9 +675,14 @@
     </div>
 </div>
 <script>
-    window.recordedScriptLines = []
-    window.recordScriptFn = x => {
+    window.recordedScriptLines = window.recordedScriptLines || []
+    const pushRecordedScriptLine = x => {
+        if (!Array.isArray(window.recordedScriptLines)) window.recordedScriptLines = [];
         window.recordedScriptLines.push(x);
+    }
+    window.recordScriptFn = pushRecordedScriptLine
+    function toggleRecordScript(on) {
+        window.recordScriptFn = on ? pushRecordedScriptLine : null;
     }
 
     const drawingModeEl = $('#drawing-mode'),
@@ -881,6 +855,8 @@
     })
 
     window.isFabricObjectMoving = false
+    window.currentPathSamples = null
+    const PATH_SAMPLE_MIN_DIST = 3 // px between samples
     pc.on('object:moving', function (e) {
         window.isFabricObjectMoving = true;
         window.movingFabricObject = e.target;
@@ -888,6 +864,19 @@
             // Assume it's a selection/group of objects
             window.movingFabricGroup = e.target;
             window.movingFabricObject = null
+        }
+        // Record path samples for single-object drags when toggle is on
+        if (window.movingFabricObject && $('#recordPathToggle').is(':checked')) {
+            const t = window.movingFabricObject
+            if (!window.currentPathSamples) {
+                window.currentPathSamples = [{left: t.left, top: t.top, t: Date.now()}]
+            } else {
+                const last = window.currentPathSamples[window.currentPathSamples.length - 1]
+                const dx = t.left - last.left, dy = t.top - last.top
+                if (dx*dx + dy*dy >= PATH_SAMPLE_MIN_DIST*PATH_SAMPLE_MIN_DIST) {
+                    window.currentPathSamples.push({left: t.left, top: t.top, t: Date.now()})
+                }
+            }
         }
     });
 
@@ -898,12 +887,19 @@
             if(window.movingFabricGroup) {
                 let allAnimations = window.movingFabricGroup._objects.map(it => `animate('${it.uid}', ${JSON.stringify(getActualProperties(it, true))}, {})`)
                 recordScript(`Promise.all([${allAnimations.join(",")}])`)
+            } else if (window.currentPathSamples && window.currentPathSamples.length >= 2) {
+                const samples = window.currentPathSamples
+                // Append final resting position so replay lands exactly where the user released
+                const finalProps = getActualProperties(movingFabricObject, true)
+                samples.push({left: finalProps.left, top: finalProps.top, t: Date.now()})
+                recordScript(`animatePath('${movingFabricObject.uid}', ${JSON.stringify(samples)}, {})`)
             } else {
                 recordScript(`animate('${movingFabricObject.uid}', ${JSON.stringify(getActualProperties(movingFabricObject, true))}, {})`)
             }
 
             window.movingFabricObject = null;
             window.movingFabricGroup = null;
+            window.currentPathSamples = null;
         }
     });
 
@@ -918,6 +914,14 @@
         //console.log(t, "modified");
         t._objects?.forEach(l => updateTreeItem(l, t.aCoords))
         updateTreeItem(t);
+        // Record scale / rotate (moves are already recorded via mouse:up)
+        if (t.uid && e.action && e.action !== 'drag') {
+            if (t.customData && t.customData.type === 'textInQuad') {
+                recordScript(`reshapeQuad('${t.uid}', ${JSON.stringify(t.points)}, ${JSON.stringify(getActualProperties(t, true))})`);
+            } else {
+                recordScript(`animate('${t.uid}', ${JSON.stringify(getActualProperties(t, true))}, {})`);
+            }
+        }
     });
 
     $('#drawing-mode-options').hide();
@@ -935,7 +939,7 @@
 
             // Ensure path has a UID for tracking
             if (!path.uid) {
-                path.uid = typeof uuid === 'function' ? uuid() : Math.random().toString(36).slice(2);
+                path.uid = semanticUid('path');
             }
 
             // Add to undo manager (only if not performing undo/redo action)
@@ -996,7 +1000,7 @@
                 top: e.e.clientY,
                 left: e.e.clientX
             };
-            opts_.uid = uuid()
+            opts_.uid = semanticUid('textbox')
             const tb = textbox(opts_)
             pc.add(tb)
             let id = tb.uid
@@ -1011,7 +1015,7 @@
                 left: e.e.clientX,
                 width: 25
             };
-            opts.uid = uuid()
+            opts.uid = semanticUid('textbox')
             let tb = textbox(opts)
             pc.add(tb)
             pc.setActiveObject(tb)
@@ -1041,7 +1045,7 @@
             let optsRect = {}
             let x = e.e.clientX;
             let y = e.e.clientY;
-            let id = uuid();
+            let id = semanticUid('textrect');
             const tb = textInRect(text, x, y, optsText, optsRect, id)
             tb.hasControls = false;
             pc.add(tb)
@@ -1068,7 +1072,7 @@
                 let opts_ = {
                     stroke: ($('#drawing-color').val() || 'black')
                 };
-                opts_.uid = uuid()
+                opts_.uid = semanticUid('arrow')
                 let arrow_ = arrow(x1, y1, x2, y2, opts_);
                 pc.add(arrow_)
                 window.arrowButtonClicked = null;
@@ -1177,21 +1181,21 @@
 
         if (e.keyCode === 187 && selectedObj) { //zoom in selected
             if(selectedObj.treeConnection) {
-                recordScript(`expandTreeItems(${selectedObjId})`)
+                recordScript(`expandTreeItems('${selectedObjId}')`)
                 expandTreeItems(selectedObj)
             } else {
-                recordScript(`zoomSelectedObject(${selectedObjId}, true)`)
+                recordScript(`zoomSelectedObject('${selectedObjId}', true)`)
                 zoomSelectedObject(selectedObj, true)
             }
         }
 
         if (e.keyCode === 189 && selectedObj) { //zoom out selected
             if(selectedObj.treeConnection) {
-                recordScript(`collapseTreeItems(${selectedObjId})`)
+                recordScript(`collapseTreeItems('${selectedObjId}')`)
                 collapseTreeItems(selectedObj)
             } else {
-                recordScript(`zoomSelectedObject(${selectedObjId}, false)`)
-                zoomSelectedObject(false)
+                recordScript(`zoomSelectedObject('${selectedObjId}', false)`)
+                zoomSelectedObject(selectedObj, false)
             }
         }
 
@@ -1208,7 +1212,7 @@
         }
         if (e.key === 'h') {
             hideObject(selectedObj)
-            recordScript(`hideObject(${selectedObjId})`)
+            recordScript(`hideObject('${selectedObjId}')`)
         }
         if(e.key === 'i' && e.ctrlKey) {
             $('#inspector-dialog').dialog({
@@ -1302,6 +1306,30 @@
 
     <button onclick="handleImageInputDialogButtons('OK')">OK</button>
     <button onclick="handleImageInputDialogButtons('')">Close</button>
+</div>
+
+<!-- Script Viewer / Editor Dialog -->
+<div id="scriptViewerDialog" style="display:none;position:fixed;inset:0;z-index:9999998;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.35);width:96vw;height:94vh;display:flex;flex-direction:column;font-family:system-ui,sans-serif;">
+        <div style="background:#f5f5f5;border-bottom:1px solid #ddd;padding:12px 16px;border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-weight:600;font-size:14px;color:#333;">&#128196; Recorded Script</span>
+            <div style="display:flex;gap:8px;">
+                <button onclick="exportScript()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Export</button>
+                <button onclick="$('#importDialog').show()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Import</button>
+                <button onclick="clearScriptDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Clear</button>
+                <button onclick="copyScriptDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Copy All</button>
+                <button onclick="saveScriptEdits()" style="padding:4px 10px;border:1px solid #1976D2;border-radius:4px;background:#1976D2;color:#fff;font-size:12px;cursor:pointer;">Save Edits</button>
+                <button onclick="closeScriptDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;font-size:16px;line-height:1;">&times;</button>
+            </div>
+        </div>
+        <div style="padding:12px 16px;font-size:11px;color:#888;border-bottom:1px solid #eee;">
+            Each line is one recorded operation. Edit freely — click <em>Save Edits</em> to apply changes back to the recording.
+        </div>
+        <div id="scriptViewerEditor" style="flex:1;min-height:350px;width:100%;"></div>
+        <div style="padding:10px 16px;background:#f9f9f9;border-top:1px solid #eee;border-radius:0 0 10px 10px;font-size:11px;color:#aaa;">
+            <span id="scriptLineCount">0 lines</span>
+        </div>
+    </div>
 </div>
 
 <div id="importDialog"
@@ -1663,6 +1691,8 @@
             <button onclick="event.stopPropagation(); toolManager.activate('rect'); closeShapeMenu()"><i class="fas fa-square"></i> </button>
             <button onclick="event.stopPropagation(); toolManager.activate('circle'); closeShapeMenu()"><i class="fas fa-circle"></i> </button>
             <button onclick="event.stopPropagation(); toolManager.activate('diamond'); closeShapeMenu()"><i class="fas fa-diamond"></i></button>
+            <button onclick="event.stopPropagation(); toolManager.activate('quad'); closeShapeMenu()" title="Tiltable quad (drag corners for 3D effect)"><i class="fas fa-vector-square"></i></button>
+            <button onclick="event.stopPropagation(); toolManager.activate('line'); closeShapeMenu()" title="Line (drag to draw; handles extend endpoints)"><i class="fas fa-minus"></i></button>
         </div>
     </div>
     <button class="wb-tool" data-tool="sticky" title="Sticky Note (N)" onclick="toolManager.activate('sticky')">
@@ -1739,6 +1769,23 @@
             <input type="range" id="prop-opacity" min="0" max="1" step="0.1" value="1" oninput="applyProperty('opacity', parseFloat(this.value))">
         </div>
     </div>
+    <!-- Media section -->
+    <div class="prop-section-divider"></div>
+    <div class="prop-row" style="flex-direction:column;align-items:flex-start;gap:4px;">
+        <label style="margin-bottom:0;">Media URL</label>
+        <input type="text" id="prop-media-url" placeholder="https://..."
+               style="width:100%;box-sizing:border-box;font-size:11px;padding:3px 5px;border:1px solid #ddd;border-radius:4px;"
+               onchange="applyMediaData()">
+    </div>
+    <div class="prop-row">
+        <label>Type</label>
+        <select id="prop-media-type" onchange="applyMediaData()" style="flex:1;">
+            <option value="image">Image</option>
+            <option value="video">Video</option>
+        </select>
+        <button onclick="openMediaOverlay()" title="Open media"
+                style="padding:3px 8px;font-size:12px;border:1px solid #ddd;border-radius:4px;background:#f5f5f5;cursor:pointer;white-space:nowrap;">&#9654; Open</button>
+    </div>
     <!-- Text formatting section (shown only for text/label objects) -->
     <div id="prop-text-section" style="display:none;">
         <div class="prop-section-divider"></div>
@@ -1788,6 +1835,13 @@
         <input type="range" id="tree-visibility-input" min="0" max="1" step="0.05" value="1"
                oninput="applyVisibilityToSelectedChildren(parseFloat(this.value))">
     </div>
+</div>
+
+<!-- Media Overlay -->
+<div id="media-overlay">
+    <button id="media-overlay-close" onclick="closeMediaOverlay()" title="Close">&times;</button>
+    <img id="media-overlay-img" src="" alt="" style="display:none;max-width:90vw;max-height:90vh;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,0.5);">
+    <video id="media-overlay-video" controls style="display:none;max-width:90vw;max-height:90vh;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,0.5);"></video>
 </div>
 
 <!-- Context Menu -->
@@ -1974,6 +2028,11 @@
             document.getElementById('tree-node-panel').classList.remove('visible');
         }
 
+        // Media fields — populate from customData
+        const _cd = obj.customData || {};
+        document.getElementById('prop-media-url').value = _cd.mediaUrl || '';
+        document.getElementById('prop-media-type').value = _cd.mediaType || 'image';
+
         // Text section: show only for text-like objects
         if (isText) {
             textSection.style.display = '';
@@ -2025,6 +2084,7 @@
         const newState = {};
         newState[prop] = value;
         undoManager.push(Commands.modifyObject(pc, obj, prevState, newState));
+        if (obj.uid) recordScript(`setProp('${obj.uid}', '${prop}', ${JSON.stringify(value)})`);
     }
 
     function toggleTextProp(prop, onVal, offVal) {
@@ -2073,6 +2133,139 @@
         pc.requestRenderAll();
         undoManager.push(Commands.modifyObject(pc, obj,
             { strokeDashArray: prev }, { strokeDashArray: value }));
+        if (obj.uid) recordScript(`setProp('${obj.uid}', 'strokeDashArray', ${JSON.stringify(value)})`);
+    }
+
+    // ---- Media overlay ----
+    function applyMediaData() {
+        const obj = pc.getActiveObject();
+        if (!obj) return;
+        const cd = customData(obj);
+        cd.mediaUrl = document.getElementById('prop-media-url').value.trim();
+        cd.mediaType = document.getElementById('prop-media-type').value;
+    }
+
+    function openMediaOverlay() {
+        const obj = pc.getActiveObject();
+        if (!obj) return;
+        const cd = obj.customData || {};
+        const url = cd.mediaUrl;
+        if (!url) return;
+
+        const overlay = document.getElementById('media-overlay');
+        const img = document.getElementById('media-overlay-img');
+        const video = document.getElementById('media-overlay-video');
+
+        // Compute object center in screen/viewport coordinates
+        const vpt = pc.viewportTransform;
+        const center = obj.getCenterPoint();
+        const screenX = center.x * vpt[0] + vpt[4];
+        const screenY = center.y * vpt[3] + vpt[5];
+        const xPct = ((screenX / window.innerWidth) * 100).toFixed(2) + '%';
+        const yPct = ((screenY / window.innerHeight) * 100).toFixed(2) + '%';
+
+        // Set media content
+        const type = cd.mediaType || 'image';
+        if (type === 'video') {
+            img.style.display = 'none';
+            img.src = '';
+            video.src = url;
+            video.style.display = '';
+        } else {
+            video.style.display = 'none';
+            video.src = '';
+            img.src = url;
+            img.style.display = '';
+        }
+
+        // Animate from object centre outward
+        overlay.style.clipPath = `circle(0% at ${xPct} ${yPct})`;
+        overlay._closeOrigin = `${xPct} ${yPct}`;
+        overlay.style.display = 'flex';
+        // Force reflow so the initial clip-path is applied before transitioning
+        overlay.offsetHeight; // eslint-disable-line no-unused-expressions
+        overlay.style.clipPath = `circle(150% at ${xPct} ${yPct})`;
+    }
+
+    function closeMediaOverlay() {
+        const overlay = document.getElementById('media-overlay');
+        const origin = overlay._closeOrigin || '50% 50%';
+        overlay.style.clipPath = `circle(0% at ${origin})`;
+        overlay.addEventListener('transitionend', function handler() {
+            overlay.style.display = 'none';
+            const video = document.getElementById('media-overlay-video');
+            video.pause();
+            video.src = '';
+            overlay.removeEventListener('transitionend', handler);
+        }, { once: true });
+    }
+
+    // Close overlay on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            if (document.getElementById('media-overlay').style.display === 'flex') {
+                closeMediaOverlay();
+            }
+            if (document.getElementById('scriptViewerDialog').style.display === 'flex') {
+                closeScriptDialog();
+            }
+        }
+    });
+
+    // Stop keyboard events inside the script editor dialog from bubbling to
+    // document-level handlers that drive the canvas. Escape still closes the
+    // dialog because it's handled here before propagation is stopped.
+    ['keydown', 'keyup', 'keypress'].forEach(type => {
+        document.getElementById('scriptViewerDialog').addEventListener(type, e => {
+            if (type === 'keydown' && e.key === 'Escape') closeScriptDialog();
+            e.stopPropagation();
+        });
+    });
+
+    // ---- Script Viewer Dialog ----
+    function ensureScriptEditor() {
+        if (window._scriptEditor) return window._scriptEditor;
+        const ed = ace.edit("scriptViewerEditor");
+        ed.setTheme("ace/theme/monokai");
+        ed.session.setMode("ace/mode/javascript");
+        ed.setFontSize(13);
+        ed.session.setUseWrapMode(true);
+        ed.setOption('showPrintMargin', false);
+        window._scriptEditor = ed;
+        return ed;
+    }
+
+    function openScriptDialog() {
+        const lines = window.recordedScriptLines || [];
+        document.getElementById('scriptViewerDialog').style.display = 'flex';
+        const ed = ensureScriptEditor();
+        ed.setValue(lines.join('\n'), -1);
+        ed.resize(true);
+        document.getElementById('scriptLineCount').textContent = lines.length + ' line' + (lines.length !== 1 ? 's' : '');
+        ed.focus();
+    }
+
+    function closeScriptDialog() {
+        document.getElementById('scriptViewerDialog').style.display = 'none';
+    }
+
+    function saveScriptEdits() {
+        const ed = ensureScriptEditor();
+        const lines = ed.getValue().split('\n').filter(l => l.trim() !== '');
+        window.recordedScriptLines = lines;
+        document.getElementById('scriptLineCount').textContent = lines.length + ' line' + (lines.length !== 1 ? 's' : '');
+    }
+
+    function clearScriptDialog() {
+        if (!confirm('Clear all recorded script lines?')) return;
+        window.recordedScriptLines = [];
+        if (window._scriptEditor) window._scriptEditor.setValue('', -1);
+        document.getElementById('scriptLineCount').textContent = '0 lines';
+    }
+
+    function copyScriptDialog() {
+        const text = window._scriptEditor ? window._scriptEditor.getValue() : '';
+        navigator.clipboard.writeText(text);
     }
 
     // ---- Tree Node Panel ----
