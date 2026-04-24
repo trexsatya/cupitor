@@ -5,7 +5,9 @@ function combined(){
 }
 
 function recordScript(str) {
-  if(window.recordScriptFn) {
+  // isRecordingPlayback is flipped on by schedule() during import. Helpers
+  // that self-record (addImage, addMath, etc.) need to stay quiet then.
+  if (window.recordScriptFn && !window.isRecordingPlayback) {
     window.recordScriptFn(str);
   }
 }
@@ -29,6 +31,8 @@ const _SEMANTIC_PREFIXES = {
   image: 'IMG',
   group: 'G',
   line: 'L', curvableline: 'L',
+  stickynote: 'SN',
+  ellipse: 'E',
 };
 
 // Collect every name that's already "taken" — both canvas object uids and
@@ -632,14 +636,136 @@ function attachLineEndpointControls(line) {
   line.hasRotatingPoint = false;
 }
 
-// Convenience constructor used by recorded scripts. Creates a CurvableLine,
-// applies the supplied uid (if any), and adds it to the primary canvas.
+// Convenience constructors used by recorded scripts. Each creates the shape,
+// applies the supplied uid (if any), adds it to the primary canvas, and
+// returns the object so chained calls in scripts work naturally.
 function addLine(points, opts) {
   opts = opts || {};
   const line = new fabric.CurvableLine(points, opts);
   if (opts.uid) line.uid = opts.uid;
   pc.add(line);
   return line;
+}
+
+function addRect(left, top, width, height, opts) {
+  opts = opts || {};
+  const rect = new fabric.Rect(Object.assign({
+    fill: 'transparent', stroke: '#333', strokeWidth: 2
+  }, opts, { left, top, width, height }));
+  if (opts.uid) rect.uid = opts.uid;
+  pc.add(rect);
+  return rect;
+}
+
+function addEllipse(left, top, rx, ry, opts) {
+  opts = opts || {};
+  const ell = new fabric.Ellipse(Object.assign({
+    fill: 'transparent', stroke: '#333', strokeWidth: 2
+  }, opts, { left, top, rx, ry }));
+  if (opts.uid) ell.uid = opts.uid;
+  pc.add(ell);
+  return ell;
+}
+
+function addDiamond(left, top, width, height, opts) {
+  opts = opts || {};
+  const rect = new fabric.Rect(Object.assign({
+    fill: 'transparent', stroke: '#333', strokeWidth: 2, angle: 45
+  }, opts, { left, top, width, height }));
+  if (opts.uid) rect.uid = opts.uid;
+  pc.add(rect);
+  return rect;
+}
+
+function addStickyNote(x, y, opts) {
+  opts = opts || {};
+  // createStickyNote lives in whiteboard.tools.js and takes (x, y, options).
+  const note = typeof createStickyNote === 'function'
+    ? createStickyNote(x, y, opts)
+    : null;
+  if (!note) return null;
+  if (opts.uid) note.uid = opts.uid;
+  pc.add(note);
+  return note;
+}
+
+// Replay helper — resets the endpoints/bend of a CurvableLine. Coords are
+// stored in absolute scene space so this is a drop-in refresh regardless of
+// any prior body-drag that shifted left/top.
+function reshapeLine(uidOrObj, points, cx, cy) {
+  const line = findIfRequired(uidOrObj);
+  if (!line || typeof line.rebuild !== 'function') return;
+  line.x1 = points[0]; line.y1 = points[1];
+  line.x2 = points[2]; line.y2 = points[3];
+  line.cx = cx; line.cy = cy;
+  line.rebuild(); // uses setBoundingBox(true) → left/top aligns to new bbox center
+  line.fire('modifyLine');
+}
+
+// Async — resolves to the added image. Records itself so callers don't need to.
+function addImage(url, left, top, opts) {
+  opts = opts || {};
+  return fabric.Image.fromURL(url).then(function (img) {
+    img.set({ left: left == null ? 100 : left, top: top == null ? 100 : top });
+    if (opts.uid) img.uid = opts.uid;
+    pc.add(img);
+    const r2 = n => Math.round(n * 100) / 100;
+    recordScript(
+      `addImage(${JSON.stringify(url)},${r2(img.left)},${r2(img.top)},${JSON.stringify({uid: img.uid})})`
+    );
+    return img;
+  });
+}
+
+// Async — resolves to the added math image. Uses drawMathSymbols under the hood.
+function addMath(text, left, top, opts) {
+  opts = opts || {};
+  window.matexInsertionPoint = { left: left == null ? 100 : left, top: top == null ? 100 : top };
+  return drawMathSymbols(text, top, left, opts.uid).then(function (img) {
+    if (opts.uid) img.uid = opts.uid;
+    const r2 = n => Math.round(n * 100) / 100;
+    recordScript(
+      `addMath(${JSON.stringify(text)},${r2(img.left)},${r2(img.top)},${JSON.stringify({uid: img.uid})})`
+    );
+    return img;
+  });
+}
+
+function setText(uidOrObj, text) {
+  const obj = findIfRequired(uidOrObj);
+  if (!obj) return;
+  obj.set({ text: text == null ? '' : String(text) });
+  obj.setCoords();
+  if (obj.canvas) obj.canvas.requestRenderAll();
+}
+
+function bringToFront(uidOrObj) {
+  const obj = findIfRequired(uidOrObj);
+  if (!obj || !obj.canvas) return;
+  obj.canvas.bringObjectToFront(obj);
+  obj.canvas.requestRenderAll();
+}
+
+function sendToBack(uidOrObj) {
+  const obj = findIfRequired(uidOrObj);
+  if (!obj || !obj.canvas) return;
+  obj.canvas.sendObjectToBack(obj);
+  obj.canvas.requestRenderAll();
+}
+
+function removeByUid(uidOrObj) {
+  const obj = findIfRequired(uidOrObj);
+  if (!obj || !obj.canvas) return;
+  obj.canvas.remove(obj);
+  obj.canvas.requestRenderAll();
+}
+
+function setObjectProps(uidOrObj, props) {
+  const obj = findIfRequired(uidOrObj);
+  if (!obj) return;
+  obj.set(props);
+  obj.setCoords();
+  if (obj.canvas) obj.canvas.requestRenderAll();
 }
 
 // Miro-style: 2 endpoint handles + 1 midpoint "bend" handle. Path coords

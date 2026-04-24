@@ -79,7 +79,9 @@ function createStickyNote(x, y, options) {
     subTargetCheck: true
   });
 
-  group.uid = typeof uuid === 'function' ? uuid() : Math.random().toString(36).slice(2);
+  group.uid = typeof semanticUid === 'function'
+    ? semanticUid('stickynote')
+    : (typeof uuid === 'function' ? uuid() : Math.random().toString(36).slice(2));
   group.customData = { type: 'stickyNote', color: opts.fill };
 
   return group;
@@ -395,9 +397,9 @@ function initShapeDrawingTool(canvas, toolManager) {
         currentShape.selectable = true;
         currentShape.evented = true;
         let labelText = null;
+        const r2 = n => Math.round(n * 100) / 100;
         if (isLine && typeof recordScript === 'function') {
           const c = currentShape;
-          const r2 = n => Math.round(n * 100) / 100;
           const opts = {
             uid: c.uid, // already assigned by canvas add hook
             stroke: c.stroke, strokeWidth: c.strokeWidth, strokeLineCap: c.strokeLineCap,
@@ -405,6 +407,19 @@ function initShapeDrawingTool(canvas, toolManager) {
           };
           recordScript(
             `addLine([${r2(c.x1)},${r2(c.y1)},${r2(c.x2)},${r2(c.y2)}],${JSON.stringify(opts)})`
+          );
+        } else if ((tool === 'rect' || tool === 'diamond') && typeof recordScript === 'function') {
+          const c = currentShape;
+          const opts = { uid: c.uid, fill: c.fill, stroke: c.stroke, strokeWidth: c.strokeWidth };
+          const fn = tool === 'diamond' ? 'addDiamond' : 'addRect';
+          recordScript(
+            `${fn}(${r2(c.left)},${r2(c.top)},${r2(c.width)},${r2(c.height)},${JSON.stringify(opts)})`
+          );
+        } else if (tool === 'circle' && typeof recordScript === 'function') {
+          const c = currentShape;
+          const opts = { uid: c.uid, fill: c.fill, stroke: c.stroke, strokeWidth: c.strokeWidth };
+          recordScript(
+            `addEllipse(${r2(c.left)},${r2(c.top)},${r2(c.rx)},${r2(c.ry)},${JSON.stringify(opts)})`
           );
         }
         if (isQuad) {
@@ -707,14 +722,23 @@ function initStickyAndEraserHandlers(canvas, toolManager, undoManager) {
   canvas.on('mouse:up', function(e) {
     if (window._insertStickyNote && e.e) {
       const pointer = canvas.getPointer(e.e);
-      const note = createStickyNote(pointer.x - 100, pointer.y - 100);
+      const x = pointer.x - 100, y = pointer.y - 100;
+      const note = createStickyNote(x, y);
       canvas.add(note);
       if (undoManager) undoManager.push(Commands.addObject(canvas, note));
+      if (typeof recordScript === 'function') {
+        const r2 = n => Math.round(n * 100) / 100;
+        const opts = { uid: note.uid, fill: note.customData && note.customData.color };
+        recordScript(`addStickyNote(${r2(x)},${r2(y)},${JSON.stringify(opts)})`);
+      }
       canvas.requestRenderAll();
       // Stay in sticky mode for rapid placement, user can switch tool when done
     }
     if (window._eraserMode && e.target) {
       if (undoManager) undoManager.push(Commands.removeObject(canvas, e.target));
+      if (typeof recordScript === 'function' && e.target.uid) {
+        recordScript(`pc.remove(findIfRequired(${JSON.stringify(e.target.uid)}))`);
+      }
       canvas.remove(e.target);
       canvas.requestRenderAll();
     }

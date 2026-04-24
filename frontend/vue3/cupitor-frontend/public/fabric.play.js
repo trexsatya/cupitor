@@ -1487,9 +1487,7 @@ function importIntoCanvas(txt) {
 }
 
 function loadFabricImage(url) {
-  fabric.Image.fromURL(url).then(function (oImg) {
-    oImg.set({ left: 100, top: 100 });
-    pc.add(oImg);
-    $('#imageInputUrl').val('')
+  addImage(url, 100, 100).then(function () {
+    $('#imageInputUrl').val('');
   });
 }
