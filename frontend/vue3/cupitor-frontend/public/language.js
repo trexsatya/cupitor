@@ -280,10 +280,16 @@ function loadWholeVocabulary() {
 
   const populateLines = category => {
     const vocabLines = window.vocabulary[category]
-    const heading = new Option(`${category}`, category, false, false)
-    heading.disabled = true
-    $('#searchedWords').append(heading)
-    $('#addToVocabularyDialogSelect').append(heading.cloneNode(true))
+    // searchedWords: category is selectable (value prefixed with __cat__:) and
+    // styled via the .vocab-category-option class so select2 can render it
+    // grey + italic.
+    const searchHeading = new Option(`${category}`, '__cat__:' + category, false, false)
+    searchHeading.className = 'vocab-category-option'
+    $('#searchedWords').append(searchHeading)
+    // addToVocabularyDialogSelect: keep the heading as a non-selectable label.
+    const dialogHeading = new Option(`${category}`, category, false, false)
+    dialogHeading.disabled = true
+    $('#addToVocabularyDialogSelect').append(dialogHeading)
     vocabLines.forEach(line => {
       $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
       $('#addToVocabularyDialogSelect').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
@@ -549,11 +555,51 @@ async function vocabularyLineSelected() {
     window.searchedWordsSelectedProgrammatically = false;
     return
   }
+  const rawVal = $('#searchedWords').val();
+  if (typeof rawVal === 'string' && rawVal.startsWith('__cat__:')) {
+    renderVocabularyCategory(rawVal.substring('__cat__:'.length));
+    return;
+  }
   // $('#searchText').val($('#searchedWords').val()).trigger('change')
-  const vocabOptionVal = JSON.parse($('#searchedWords').val());
+  const vocabOptionVal = JSON.parse(rawVal);
   window.unprocessedSearchText = vocabOptionVal.o
   window.searchText = vocabOptionVal.e //expandWords(window.unprocessedSearchText, getLangFromUrl().code)
   await doSearch(window.searchText, null)
+}
+
+export function renderVocabularyCategory(category) {
+  const lines = window.vocabulary && window.vocabulary[category];
+  if (!lines) return;
+  const vocab = $('#vocabularyResult');
+  vocab.html('');
+
+  vocab.append(
+    `<div class="vocabulary-category-header" style="color:grey;font-style:italic;font-weight:bold;padding:6px 0;">${category}</div>`
+  );
+
+  const vocabItem = $('<div class="vocabulary-segment"></div>');
+  const vocabItemContent = $('<div class="vocabulary-segment-content"></div>');
+  lines.forEach(line => {
+    let txt = line;
+    const $line = $(`<div class="vocabulary-line"></div>`);
+    if (txt.trim().length) {
+      $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`);
+      $line.find("i.fa").click(selectSearchedWord);
+    } else {
+      txt = "------------------";
+    }
+    $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, " | ")}</span>`);
+    $line.data({ text: txt });
+    vocabItemContent.append($line);
+  });
+  vocabItem.append(vocabItemContent);
+  vocab.append(vocabItem);
+
+  const $rc = $('#resultContainer');
+  if ($rc.is(':hidden')) {
+    $rc.show();
+    if (typeof updateToggleButtonView === 'function') updateToggleButtonView('resultContainer');
+  }
 }
 
 window.playingYoutubeVideo = false;

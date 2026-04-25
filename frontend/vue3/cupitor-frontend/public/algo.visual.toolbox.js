@@ -768,6 +768,13 @@ function setObjectProps(uidOrObj, props) {
   if (obj.canvas) obj.canvas.requestRenderAll();
 }
 
+function setCustomData(uidOrObj, data) {
+  const obj = findIfRequired(uidOrObj);
+  if (!obj || !data) return;
+  if (!obj.customData) obj.customData = {};
+  Object.assign(obj.customData, data);
+}
+
 // Miro-style: 2 endpoint handles + 1 midpoint "bend" handle. Path coords
 // (x1,y1,x2,y2,cx,cy) live in the object's path-coord space (relative to
 // pathOffset) — so position handlers transform through (viewport × object

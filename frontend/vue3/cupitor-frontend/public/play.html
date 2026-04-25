@@ -2115,6 +2115,7 @@
         const newState = {};
         newState[prop] = newValue;
         undoManager.push(Commands.modifyObject(pc, obj, prevState, newState));
+        if (obj.uid) recordScript(`setProp('${obj.uid}', '${prop}', ${JSON.stringify(newValue)})`);
         // Update button state
         if (prop === 'fontWeight') document.getElementById('prop-bold').classList.toggle('active', newValue === 'bold');
         if (prop === 'fontStyle') document.getElementById('prop-italic').classList.toggle('active', newValue === 'italic');
@@ -2159,6 +2160,9 @@
         const cd = customData(obj);
         cd.mediaUrl = document.getElementById('prop-media-url').value.trim();
         cd.mediaType = document.getElementById('prop-media-type').value;
+        if (obj.uid) {
+            recordScript(`setCustomData('${obj.uid}', {mediaUrl: ${JSON.stringify(cd.mediaUrl)}, mediaType: ${JSON.stringify(cd.mediaType)}})`);
+        }
     }
 
     function openMediaOverlay() {
