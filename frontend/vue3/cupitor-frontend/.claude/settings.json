@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node /tmp/claude/vocab-test.mjs)",
+      "Bash(node /tmp/claude/segmenter-test.mjs)",
+      "Bash(grep -n 'vocabularyResult.*html\\\\|vocab.html\\\\|\\\\$vocab.html' /Users/satyendra.kumar/Documents/PersonalProjects/cupitor/frontend/vue3/cupitor-frontend/public/language.js)",
+      "Bash(node /tmp/claude/bracket-test.mjs)",
+      "Bash(node -e 'const txt = \"\\(was i so \\(vajaså\\)\\)\"; const m = txt.match\\(/.*\\(\\\\\\(.*\\\\\\)\\).*/\\); console.log\\(\"match:\", m && m[1]\\); const replaced = txt.replaceAll\\(m[1], \"\"\\); console.log\\(\"after:\", JSON.stringify\\(replaced\\)\\);')",
+      "Bash(node -e ' *)"
+    ],
+    "additionalDirectories": [
+      "/tmp/claude",
+      "/private/tmp/claude"
+    ]
+  }
+}

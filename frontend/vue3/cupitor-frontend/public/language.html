@@ -301,6 +301,12 @@
                     <option value="inline">inline selected word</option>
                 </select>
             </div>
+            <div style="margin-top: 0.5em;display:flex;gap:4px;flex-wrap:wrap;">
+                <button type="button" onclick="insertIntoVocabSegment('|')" style="font-family:monospace;min-width:32px;">|</button>
+                <button type="button" onclick="insertIntoVocabSegment('(', ')')" style="font-family:monospace;min-width:36px;">( )</button>
+                <button type="button" onclick="insertIntoVocabSegment('[', ']')" style="font-family:monospace;min-width:36px;">[ ]</button>
+                <button type="button" onclick="insertIntoVocabSegment('<*')" style="font-family:monospace;min-width:36px;" title="Expansion token (e.g. &lt;*jobba)">&lt;*</button>
+            </div>
             <div style="margin-top: 0.5em;">
                 <input id="vocabularySegmentTextarea" style="height: 50%;width: 98%;" placeholder="New word(s), one per line"></input>
             </div>
