@@ -297,7 +297,7 @@ function loadWholeVocabulary() {
     done += 1
     $('#vocabLoadingBarFill').css('width', `${(done / total) * 100}%`)
   };
-  schedule(categories, .5, it => {
+  schedule(categories, .4, it => {
     populateLines(it)
   }, () => {
     $('#addToVocabBtn').prop('disabled', false)
@@ -347,6 +347,12 @@ function openAddToVocabDialog() {
   const w = window.innerWidth * 0.9
   const h = window.innerHeight * 0.8
 
+  // Discard any in-progress text so the new dialog starts blank — saves only
+  // happen on the Save button via addToVocab(); closing the dialog (via the
+  // X, Escape, or click-outside) must NOT carry over typed words.
+  const discardSegment = () => $('#vocabularySegmentTextarea').val('');
+  discardSegment();
+
   // Defer opening until after the current click event has finished bubbling.
   // Without this, the document-level "close on outside click" handler fires
   // on the same click and immediately closes the dialog.
@@ -355,10 +361,55 @@ function openAddToVocabDialog() {
     if ($dialog.hasClass('ui-dialog-content')) {
       $dialog.dialog('option', { width: w, height: h }).dialog('open')
     } else {
-      $dialog.dialog({ width: w, height: h, modal: false })
+      $dialog.dialog({
+        width: w,
+        height: h,
+        modal: false,
+        close: discardSegment
+      })
     }
   }, 0)
 }
+
+// Insert `before` (optionally wrapping the selection with `after`) at the
+// caret of the vocab-segment input. Lets the dialog buttons drop |, (), []
+// without forcing the user to hunt for those keys on a virtual keyboard.
+function insertIntoVocabSegment(before, after) {
+  after = after || '';
+  const el = document.getElementById('vocabularySegmentTextarea');
+  if (!el) return;
+  const start = typeof el.selectionStart === 'number' ? el.selectionStart : el.value.length;
+  const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : start;
+  const value = el.value;
+  const selected = value.slice(start, end);
+  el.value = value.slice(0, start) + before + selected + after + value.slice(end);
+  el.focus();
+  // Place the caret right after the inserted opener (and inside the pair when
+  // there's a closer) so the next keystroke continues naturally.
+  const caret = after ? start + before.length + selected.length : start + before.length;
+  el.selectionStart = el.selectionEnd = caret;
+}
+window.insertIntoVocabSegment = insertIntoVocabSegment;
+
+// Validate that each pipe-separated part of a vocab line has balanced
+// brackets. Reject e.g. "(x|y)" because splitting on `|` produces "(x" and
+// "y)" — unbalanced parts, which break downstream pipe-separated processing.
+// Nested parens within a single segment, like "(x(a))", are fine.
+function isProperlyBracketed(line) {
+  const parts = line.split('|');
+  const closeToOpen = { ')': '(', ']': '[', '}': '{' };
+  return parts.every(part => {
+    const stack = [];
+    for (const ch of part) {
+      if ('([{'.includes(ch)) stack.push(ch);
+      else if (')]}'.includes(ch)) {
+        if (stack.pop() !== closeToOpen[ch]) return false;
+      }
+    }
+    return stack.length === 0;
+  });
+}
+window.isProperlyBracketed = isProperlyBracketed;
 
 function addToVocab() {
   const newText = $("#vocabularySegmentTextarea").val().trim()
@@ -385,6 +436,17 @@ function addToVocab() {
 
   const position = $("#vocabInsertPosition").val() // 'above', 'below', or 'inline'
   const newWords = newText.split("\n").map(w => w.trim()).filter(w => w.length > 0)
+
+  const invalidLine = newWords.find(w => !isProperlyBracketed(w));
+  if (invalidLine) {
+    alert(
+      'Invalid line — brackets must be balanced within each pipe-separated word.\n\n' +
+      'Offending line:\n' + invalidLine + '\n\n' +
+      'Note: a pipe `|` cannot appear inside parentheses/brackets/braces, since that ' +
+      'splits the bracket pair across two separate words.'
+    );
+    return;
+  }
 
   const categoryWords = window.vocabulary[category] || []
   const idx = categoryWords.indexOf(refWord)
@@ -489,6 +551,10 @@ async function doSearch(searchThis, el) {
   if ((typeof searchThis) !== 'string') {
     searchThis = null
   }
+  if (!window.vocabulary || !window._subtitlesLoaded) {
+    console.log('[search] data not loaded yet, deferring until vocabulary + subtitles ready…');
+    await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]);
+  }
   await fetchSRTs(searchThis);
   // let count = wordsToItems[searchThis] && wordsToItems[searchThis].length
   // count = count || 0
@@ -535,19 +601,57 @@ function populateVocabularyHeadings(target) {
   })
 }
 
+// Promise that resolves once window.vocabulary is set (or the fetch fails and
+// we fall back to an empty vocabulary). Searches that fire before this
+// resolves get awaited in doSearch so they run as soon as the vocabulary is
+// available, rather than crashing renderVocabularyFindings on an undefined
+// window.vocabulary.
+window._vocabularyReadyPromise = new Promise(resolve => {
+  window._vocabularyReadyResolve = resolve;
+});
+
+// Resolves once loadAllSubtitles has finished — both the parallel SRT fetches
+// and the sequential (jokes/sayings/idioms/etc.) loads. Hard-capped with a
+// timeout so a hung network never freezes searches indefinitely.
+window._subtitlesReadyPromise = Promise.race([
+  new Promise(resolve => { window._subtitlesReadyResolve = resolve; }),
+  new Promise(resolve => setTimeout(() => {
+    if (!window._subtitlesLoaded) {
+      console.warn('[search] subtitles ready promise timed out after 60s — proceeding with whatever loaded');
+    }
+    resolve();
+  }, 60000))
+]);
+
+// Wraps a promise in a per-call timeout so one hung fetch doesn't stall the
+// entire Promise.allSettled batch.
+function _withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout: ' + label)), ms))
+  ]);
+}
+
 async function fetchVocabulary() {
-  let res;
-  if (isLocalhost()) {
-    res = await fetch("http://localhost:5000/vocabulary?lang=" + getLangFromUrl().fullName)
-    res = await res.json()
-    if (res) res = res.text
-  } else {
-    res = await fetch(`${getResourceUrl()}/vocabulary.txt`)
-    res = await res.text()
+  try {
+    let res;
+    if (isLocalhost()) {
+      res = await fetch("http://localhost:5000/vocabulary?lang=" + getLangFromUrl().fullName)
+      res = await res.json()
+      if (res) res = res.text
+    } else {
+      res = await fetch(`${getResourceUrl()}/vocabulary.txt`)
+      res = await res.text()
+    }
+    if (res)
+      window.vocabulary = parseVocabularyFile(res)
+  } catch (e) {
+    console.warn('Vocabulary fetch failed', e);
+  } finally {
+    if (!window.vocabulary) window.vocabulary = {};
+    loadWholeVocabulary()
+    window._vocabularyReadyResolve();
   }
-  if (res)
-    window.vocabulary = parseVocabularyFile(res)
-  loadWholeVocabulary()
 }
 
 async function vocabularyLineSelected() {
@@ -564,7 +668,50 @@ async function vocabularyLineSelected() {
   const vocabOptionVal = JSON.parse(rawVal);
   window.unprocessedSearchText = vocabOptionVal.o
   window.searchText = vocabOptionVal.e //expandWords(window.unprocessedSearchText, getLangFromUrl().code)
+  // render() now branches on window.unprocessedSearchText — when set, it
+  // anchors the vocab list on the original line instead of the expanded
+  // pipe form. So no need to render anything here ourselves.
   await doSearch(window.searchText, null)
+}
+
+// Render the vocabulary list anchored on a specific line (the user's exact
+// click). Avoids `renderVocabularyFindings`' word-equality matcher, which
+// misses for expanded pipe-separated forms like "ge|gav|ger|...".
+export function renderVocabularyLineByText(lineText) {
+  if (!window.vocabulary || !lineText) return false;
+  const allLines = Object.values(window.vocabulary).flat();
+  const idx = allLines.findIndex(l => l === lineText);
+  if (idx < 0) return false;
+
+  const vocab = $('#vocabularyResult');
+  vocab.html('');
+  const vocabItem = $('<div class="vocabulary-segment"></div>');
+  const vocabItemContent = $('<div class="vocabulary-segment-content"></div>');
+  getSurrounding(idx, allLines).forEach(it => {
+    let txt = it.item;
+    const $line = $(`<div class="vocabulary-line"></div>`);
+    if (txt.trim().length) {
+      $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`);
+      $line.find("i.fa").click(selectSearchedWord);
+    } else {
+      txt = "------------------";
+    }
+    $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, " | ")}</span>`);
+    $line.data({ text: txt });
+    if (it.index === idx) $line.addClass('highlighted');
+    vocabItemContent.append($line);
+  });
+  vocabItem.append(vocabItemContent);
+  vocab.append(vocabItem);
+
+  const $rc = $('#resultContainer');
+  if ($rc.is(':hidden')) {
+    $rc.show();
+    if (typeof updateToggleButtonView === 'function') updateToggleButtonView('resultContainer');
+  }
+  const highlighted = $('.vocabulary-segment .highlighted')[0];
+  if (highlighted) highlighted.scrollIntoView();
+  return true;
 }
 
 export function renderVocabularyCategory(category) {
@@ -1319,55 +1466,70 @@ function populateAllLinks() {
 }
 
 async function loadAllSubtitles() {
-  let srts = await fetch(`${getResourceUrl()}/srts/index.json`)
-  srts = await srts.json()
-  window.srts = srts
+  try {
+    let srts = await fetch(`${getResourceUrl()}/srts/index.json`)
+    srts = await srts.json()
+    window.srts = srts
 
-  let notFound = []
-  srts.forEach(async function x(it) {
-    try {
-      let res = await getSubtitlesForLink(it['link'], it['source'])
-    } catch (e) {
-      notFound.push(it['link'])
+    const notFound = []
+    // Kick off SRT fetches in parallel; capture the aggregate promise so we
+    // can wait on them at the end without blocking the sequential loads
+    // below (they don't depend on srt content). Each fetch is bounded by a
+    // 15s timeout so a hung connection counts as "not found" instead of
+    // freezing the readiness promise.
+    const srtLoadingDone = Promise.allSettled(srts.map(async (it) => {
+      try {
+        await _withTimeout(getSubtitlesForLink(it['link'], it['source']), 15000, it['link'])
+      } catch (e) {
+        notFound.push(it['link'])
+      }
+    }))
+
+    window.categories = await fetchCategorisation()
+
+    await loadJokes()
+    loadAsSubtitles(window.jokes, 'jokes')
+
+    await loadBookExtracts()
+    loadAsSubtitles(window.bookExtracts, 'book-extracts')
+
+    await loadSnippets()
+    loadAsSubtitles(window.snippets, 'snippets')
+
+    await loadSayings()
+    loadAsSubtitles(window.sayings, 'sayings')
+
+    await loadMetaphors()
+    loadAsSubtitles(window.metaphors, 'metaphors')
+
+    await loadIdioms()
+    loadAsSubtitles(window.idioms, 'idioms')
+
+    await loadPoems()
+    loadAsSubtitles(window.poems, 'poems')
+
+    populateAllLinks();
+
+    await fetchVocabulary()
+
+    window.vocabulary['Sayings'] = window.sayings.map(it => it.name)
+    window.vocabulary['Metaphors'] = window.metaphors.map(it => it.name)
+    window.vocabulary['Idioms'] = window.idioms.map(it => it.name)
+
+    populateVocabularyHeadings($('#vocabularySelect'))
+
+    // Now make sure any still-in-flight SRT fetches have settled before we
+    // declare subtitles ready — searches deferred in doSearch will fire here.
+    await srtLoadingDone
+    if (notFound.length > 0) {
+      console.log("Not found", notFound.join('\n'))
     }
-  })
-
-  if (notFound.length > 0) {
-    console.log("Not found", notFound.join('\n'))
+  } catch (e) {
+    console.warn('loadAllSubtitles error', e);
+  } finally {
+    window._subtitlesLoaded = true;
+    window._subtitlesReadyResolve();
   }
-
-  window.categories = await fetchCategorisation()
-
-  await loadJokes()
-  loadAsSubtitles(window.jokes, 'jokes')
-
-  await loadBookExtracts()
-  loadAsSubtitles(window.bookExtracts, 'book-extracts')
-
-  await loadSnippets()
-  loadAsSubtitles(window.snippets, 'snippets')
-
-  await loadSayings()
-  loadAsSubtitles(window.sayings, 'sayings')
-
-  await loadMetaphors()
-  loadAsSubtitles(window.metaphors, 'metaphors')
-
-  await loadIdioms()
-  loadAsSubtitles(window.idioms, 'idioms')
-
-  await loadPoems()
-  loadAsSubtitles(window.poems, 'poems')
-
-  populateAllLinks();
-
-  await fetchVocabulary()
-
-  window.vocabulary['Sayings'] = window.sayings.map(it => it.name)
-  window.vocabulary['Metaphors'] = window.metaphors.map(it => it.name)
-  window.vocabulary['Idioms'] = window.idioms.map(it => it.name)
-
-  populateVocabularyHeadings($('#vocabularySelect'))
 }
 
 const specialLinks = ['jokes', 'idioms', 'sayings', 'metaphors', 'book-extracts', 'snippets', 'poems']
@@ -2122,6 +2284,11 @@ function selectSearchedWord(event) {
 
   if ($option.length) {
     $('#searchedWords').val($option.val()).trigger('change');
+  } else {
+    // No matching dropdown option (e.g. the line came from a category that
+    // hasn't been populated yet) — render the clicked line directly so the
+    // arrow button always produces visible feedback.
+    renderVocabularyLineByText(textToMatch);
   }
 
   window.preSelectedSearchedWord = textToMatch
@@ -2543,7 +2710,26 @@ function getSurrounding(index, list, size = 5) {
 
 export function wordIsInVocabularyLine(vocabLine, search) {
   try {
-    return getWords(expandWords(vocabLine, getLangFromUrl().code)).filter(it => it.trim().length > 2).map(it => it.toLowerCase().trim()).includes(search);
+    const lang = getLangFromUrl().code;
+    const vocabWords = getWords(expandWords(vocabLine, lang))
+        .filter(it => it.trim().length > 2)
+        .map(it => it.toLowerCase().trim());
+    const s = (search || '').toLowerCase().trim();
+    if (!s) return false;
+    if (vocabWords.includes(s)) return true;
+
+    // Stem-aware match (bidirectional). E.g. vocab "förvärva" + search
+    // "förvärvat" should match — and vice versa — by reducing both sides
+    // to a common stem.
+    const fn = typeof guessStems === 'function' ? guessStems : null;
+    if (!fn) return false;
+    const searchVariants = new Set([s, ...fn(s, lang)]);
+    for (const w of vocabWords) {
+      if (searchVariants.has(w)) return true;
+      const wStems = fn(w, lang);
+      for (const ws of wStems) if (searchVariants.has(ws) || ws === s) return true;
+    }
+    return false;
   } catch (e) {
     console.log(vocabLine, e)
     return false
@@ -2651,7 +2837,21 @@ export function renderVocabularyFindings(search) {
 }
 
 function render(searchResults, search, className) {
-  renderVocabularyFindings(search)
+  // The vocab list is rendered once on the primary pass. The secondary pass
+  // (fired by fetchSRTs' stem fallback) gets a multi-pipe `search` like
+  // "förvärvad|förvärva|förvärv" which never satisfies word-equality and
+  // would clear the vocab list — skip it here so the primary's matches stay.
+  if (className !== "secondary") {
+    // For dropdown-driven searches, `search` is the expanded pipe form which
+    // never satisfies word-equality in renderVocabularyFindings — anchor on
+    // the original line instead. For typed searches (unprocessedSearchText is
+    // null) the regular finder is the right tool.
+    if (window.unprocessedSearchText && renderVocabularyLineByText(window.unprocessedSearchText)) {
+      // rendered
+    } else {
+      renderVocabularyFindings(search)
+    }
+  }
   if (!searchResults) return {}
 
   const $result = $('#result');
@@ -2774,9 +2974,17 @@ export function removeHintsInBrackets(txt) {
       txt = txt.replaceAll("(", "")
       return
     }
-    const matches = txt.match(/.*(\(.*\)).*/)
-    if (matches && matches.length === 2) {
-      txt = txt.replaceAll(matches[1], "")
+    // Match the innermost balanced pair (no nested parens inside) and strip
+    // it by position. Greedy matching previously over-consumed for nested
+    // pairs like "(was i so (vajaså))", trimming "(vajaså))" — leaving an
+    // orphan "(" that triggered a false "Invalid brackets" alert.
+    const m = txt.match(/\([^()]*\)/)
+    if (m) {
+      txt = txt.slice(0, m.index) + txt.slice(m.index + m[0].length)
+    } else {
+      // No innermost pair exists despite both '(' and ')' being present —
+      // structurally broken (e.g. ")foo("). Bail to avoid an infinite loop.
+      txt = txt.replace(/[()]/g, "")
     }
   }
 
@@ -2868,6 +3076,10 @@ const STEM_RULES = {
     ['ade', ['a']],
     ['ats', ['a']],
     ['at', ['a']],
+    // Past participle: "förvärvad" → "förvärva" (group 1/4) or root "förvärv".
+    ['ad', ['a', '']],
+    // Group-3 supinum ("köpit" → "köpa") and past participle "köpt" → "köpa".
+    ['it', ['a']],
     ['ar', ['a', '']],
     ['or', ['a']],
     ['er', ['', 'a']],
@@ -2946,6 +3158,11 @@ function guessStems(word, lang) {
   return _.uniq(stems)
 }
 
+// Expose for console debugging — module-scoped functions aren't on window otherwise.
+window.guessStems = guessStems;
+window.wordIsInVocabularyLine = wordIsInVocabularyLine;
+window.renderVocabularyFindings = renderVocabularyFindings;
+
 async function fetchSRTs(searchText) {
   try {
     if ((typeof searchText) !== 'string') {
@@ -2980,7 +3197,11 @@ async function fetchSRTs(searchText) {
         window.searchResult = fetchFromDownloadedFiles(window.searchText);
         console.log("[stem-fallback] secondary results:", window.searchResult.length)
         render(window.searchResult, window.searchText, "secondary")
-        searchVocabularyByPrefix()
+        // Removed: searchVocabularyByPrefix() — it would overwrite the
+        // primary's stem-aware vocab matches with prefix-only matches,
+        // dropping rows like "förvärvat" that don't share a prefix with
+        // the typed search term. Stem matching in renderVocabularyFindings
+        // already subsumes the useful cases.
       }
     }
   } finally {
