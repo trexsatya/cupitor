@@ -933,6 +933,9 @@
                     .transform(t.calcTransformMatrix());
                 const s1 = sceneOf(t.x1, t.y1), s2 = sceneOf(t.x2, t.y2), sc = sceneOf(t.cx, t.cy);
                 recordScript(`reshapeLine('${t.uid}', [${r2(s1.x)},${r2(s1.y)},${r2(s2.x)},${r2(s2.y)}], ${r2(sc.x)}, ${r2(sc.y)})`);
+            } else if (t instanceof fabric.Line) {
+                // fabric.Line / LineArrow (tree connectors): record raw endpoints.
+                recordScript(`reshapeLineXY('${t.uid}', ${r2(t.x1)}, ${r2(t.y1)}, ${r2(t.x2)}, ${r2(t.y2)})`);
             } else {
                 recordScript(`animate('${t.uid}', ${JSON.stringify(getActualProperties(t, true))}, {})`);
             }
@@ -1215,10 +1218,13 @@
         }
 
         if (e.key === 't') {
+            // The legacy #makeTree / #create-small-text buttons were removed
+            // from the toolbar; call the underlying handlers directly.
             if (selectedObj) {
-                $('#makeTree').click()
+                if (typeof onMakeTreeClick === 'function') onMakeTreeClick();
             } else {
-                $('#create-small-text').click()
+                window.insertSmallText = true;
+                if (typeof turnOffDrawing === 'function') turnOffDrawing();
             }
         }
         if (e.key === 'r') {
@@ -1329,6 +1335,7 @@
         <div style="background:#f5f5f5;border-bottom:1px solid #ddd;padding:12px 16px;border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:space-between;">
             <span style="font-weight:600;font-size:14px;color:#333;">&#128196; Recorded Script</span>
             <div style="display:flex;gap:8px;">
+                <button onclick="playScriptFromDialog()" style="padding:4px 10px;border:1px solid #2e7d32;border-radius:4px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer;">&#9654; Play</button>
                 <button onclick="exportScript()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Export</button>
                 <button onclick="$('#importDialog').show()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Import</button>
                 <button onclick="clearScriptDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Clear</button>
@@ -1838,13 +1845,14 @@
 <div id="tree-node-panel">
     <div class="prop-header">Tree Node</div>
     <div class="prop-row">
-        <label style="width:100%;">Children</label>
+        <label style="width:100%;">Children &amp; Connections</label>
     </div>
-    <div class="prop-row">
-        <select id="tree-children-select" multiple size="5"></select>
-    </div>
+    <div id="tree-children-list" style="margin:0 10px 8px 10px;display:flex;flex-direction:column;gap:4px;max-height:240px;overflow-y:auto;"></div>
+    <!-- legacy hidden select kept for getSelectedChildren() compat -->
+    <select id="tree-children-select" multiple style="display:none;"></select>
     <div class="prop-row tree-node-buttons">
         <button onclick="toggleSelectedTreeChildren()" title="Toggle visibility of selected children">Show/Hide</button>
+        <button onclick="deleteSelectedTreeChildren()" title="Delete selected connections" style="color:#c00;">Delete</button>
     </div>
     <div class="prop-row">
         <label>Visibility</label>
@@ -2298,6 +2306,13 @@
         navigator.clipboard.writeText(text);
     }
 
+    function playScriptFromDialog() {
+        // Flush any unsaved edits in the ACE editor so the user plays what they see.
+        if (window._scriptEditor) saveScriptEdits();
+        closeScriptDialog();
+        playScript();
+    }
+
     // ---- Tree Node Panel ----
     function getNodeLabel(node) {
         if (!node) return '';
@@ -2317,26 +2332,113 @@
             .filter(Boolean);
     }
 
+    // Returns [{line, child}] pairs for the currently active tree-node-panel node
+    function _getTreePairs(obj) {
+        const rawLines = (obj && obj.treeConnection && obj.treeConnection.outgoing)
+            ? obj.treeConnection.outgoing.lines : [];
+        return rawLines.map(findIfRequired).filter(Boolean).map(line => ({
+            line,
+            child: findIfRequired(line.customData && line.customData.target)
+        })).filter(p => p.child);
+    }
+
+    let _treePanelNode = null; // track which node the panel is showing
+
     function showTreeNodePanel(obj) {
+        _treePanelNode = obj;
         const treePanel = document.getElementById('tree-node-panel');
-        const select = document.getElementById('tree-children-select');
-        const children = getImmediateChildren(obj);
-        select.innerHTML = '';
-        children.forEach(child => {
-            const option = document.createElement('option');
-            option.value = child.uid;
-            option.textContent = getNodeLabel(child);
-            if (!child.visible) option.style.color = '#aaa';
-            select.appendChild(option);
-        });
+        _renderTreeChildrenList(obj);
         treePanel.classList.add('visible');
     }
 
+    function _renderTreeChildrenList(obj) {
+        const list = document.getElementById('tree-children-list');
+        const hiddenSelect = document.getElementById('tree-children-select');
+        list.innerHTML = '';
+        hiddenSelect.innerHTML = '';
+        if (!obj) return;
+
+        const pairs = _getTreePairs(obj);
+        pairs.forEach(({ line, child }) => {
+            // Keep hidden select in sync for getSelectedChildren()
+            const opt = document.createElement('option');
+            opt.value = child.uid;
+            opt.textContent = getNodeLabel(child);
+            hiddenSelect.appendChild(opt);
+
+            // Build visible row
+            const row = document.createElement('div');
+            row.className = 'tree-child-row';
+            row.dataset.childUid = child.uid;
+            row.dataset.lineUid = line.uid || '';
+
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.title = 'Select';
+            chk.addEventListener('change', () => {
+                row.classList.toggle('selected', chk.checked);
+                opt.selected = chk.checked;
+            });
+
+            const lbl = document.createElement('span');
+            lbl.className = 'tree-child-label';
+            lbl.textContent = getNodeLabel(child);
+            if (child.visible === false) lbl.style.opacity = '0.4';
+
+            const btnLine = document.createElement('button');
+            btnLine.textContent = '↗ Line';
+            btnLine.title = 'Select connector line on canvas';
+            btnLine.className = 'tree-row-btn';
+            btnLine.onclick = () => selectTreeLine(line.uid);
+
+            const btnDel = document.createElement('button');
+            btnDel.textContent = '✕';
+            btnDel.title = 'Delete this connection';
+            btnDel.className = 'tree-row-btn tree-row-btn-del';
+            btnDel.onclick = () => {
+                deleteTreeConnection(_treePanelNode, line.uid, child.uid);
+                _renderTreeChildrenList(_treePanelNode);
+            };
+
+            row.appendChild(chk);
+            row.appendChild(lbl);
+            row.appendChild(btnLine);
+            row.appendChild(btnDel);
+            list.appendChild(row);
+        });
+    }
+
     function getSelectedChildren() {
-        const select = document.getElementById('tree-children-select');
-        return Array.from(select.selectedOptions)
-            .map(opt => findIfRequired(opt.value))
-            .filter(Boolean);
+        // Read from visible rows' checkboxes
+        const rows = document.querySelectorAll('#tree-children-list .tree-child-row');
+        const result = [];
+        rows.forEach(row => {
+            const chk = row.querySelector('input[type=checkbox]');
+            if (chk && chk.checked) {
+                const obj = findIfRequired(row.dataset.childUid);
+                if (obj) result.push(obj);
+            }
+        });
+        return result;
+    }
+
+    function deleteSelectedTreeChildren() {
+        if (!_treePanelNode) return;
+        const rows = document.querySelectorAll('#tree-children-list .tree-child-row');
+        rows.forEach(row => {
+            const chk = row.querySelector('input[type=checkbox]');
+            if (chk && chk.checked) {
+                deleteTreeConnection(_treePanelNode, row.dataset.lineUid, row.dataset.childUid);
+            }
+        });
+        _renderTreeChildrenList(_treePanelNode);
+    }
+
+    function selectTreeLine(lineUid) {
+        const line = findIfRequired(lineUid);
+        if (!line) return;
+        pc.setActiveObject(line);
+        pc.requestRenderAll();
     }
 
     function toggleSelectedTreeChildren() {
@@ -2347,13 +2449,9 @@
         targets.forEach(c => {
             if (anyVisible) hideObject(c); else showObject(c);
         });
-        // Re-sync option colours
-        const select = document.getElementById('tree-children-select');
-        Array.from(select.options).forEach(opt => {
-            const node = findIfRequired(opt.value);
-            opt.style.color = (node && node.visible === false) ? '#aaa' : '';
-        });
         pc.requestRenderAll();
+        // Re-render rows so opacity hint updates
+        if (_treePanelNode) _renderTreeChildrenList(_treePanelNode);
     }
 
     function applyVisibilityToSelectedChildren(value) {

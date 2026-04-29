@@ -2566,7 +2566,8 @@ const commonWordsToIgnore = [
   'var', 'vart', 'vem', 'vilken', 'vilka', 'åt', 'heller', 'eller', 'när', 'in', 'inne', 'up', 'uppe', 'ner', 'nere',
   'här', 'där', 'var', 'dit', 'där', 'ditt', 'mitt', 'sitt', 'vårt', 'vem', 'vad', 'vilken', 'vilket', 'vilka', 'någon',
   'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många', 'mycket', 'lite', 'få', 'färre',
-  'flera', 'mest', 'minst', 'någon', 'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många'
+  'flera', 'mest', 'minst', 'någon', 'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många',
+  'dig', 'mig', 'oss', 'er', 'dem', 'honom', 'henne'
 ]
 
 function groupAndArrangeResults(items) {
@@ -2610,7 +2611,8 @@ function populateSRTFindings(wordToItemsMap, $result) {
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
     wordBlock.append(`<div style=""> Wiki: ${getWikiLinks(word)} 丨
-        <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> </div> <br>`)
+        <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> 丨
+        <a href="https://filmot.com/search/%22${word}%22/1?lang=${getLangFromUrl().code}" target="_blank">Filmot</a> </div> <br>`)
 
     $result.append(wordBlock)
 
@@ -2708,6 +2710,19 @@ function getSurrounding(index, list, size = 5) {
   return list.slice(Math.max(0, idx - size), Math.min(list.length, idx + (size + 1)))
 }
 
+function wordIsExactInVocabularyLine(vocabLine, search) {
+  try {
+    const vocabWords = getWords(vocabLine)
+        .filter(it => it.trim().length > 2)
+        .map(it => it.toLowerCase().trim());
+    const s = (search || '').toLowerCase().trim();
+    if (!s) return false;
+    return vocabWords.includes(s);
+  } catch (e) {
+    return false;
+  }
+}
+
 export function wordIsInVocabularyLine(vocabLine, search) {
   try {
     const lang = getLangFromUrl().code;
@@ -2799,13 +2814,25 @@ function searchVocabularyByPrefix() {
 export function renderVocabularyFindings(search) {
   search = search.toLowerCase().trim()
 
-  const categories = Object.keys(window.vocabulary)
-      .filter(cat => window.vocabulary[cat].find(ln => wordIsInVocabularyLine(ln, search)))
+  if (commonWordsToIgnore.includes(search)) {
+    $('#vocabularyResult').html('')
+    return
+  }
+
+  let matcher = (ln) => wordIsExactInVocabularyLine(ln, search)
+  let categories = Object.keys(window.vocabulary)
+      .filter(cat => window.vocabulary[cat].find(matcher))
+
+  if (categories.length === 0) {
+    matcher = (ln) => wordIsInVocabularyLine(ln, search)
+    categories = Object.keys(window.vocabulary)
+        .filter(cat => window.vocabulary[cat].find(matcher))
+  }
 
   const words = categories.map(it => window.vocabulary[it]).flat()
 
   const indexesOfAppearance = words.map((vocabLine, i) =>
-      wordIsInVocabularyLine(vocabLine, search) ? i : null)
+      matcher(vocabLine) ? i : null)
       .filter(it => it !== null)
 
   const vocab = $('#vocabularyResult')
@@ -2841,6 +2868,8 @@ function render(searchResults, search, className) {
   // (fired by fetchSRTs' stem fallback) gets a multi-pipe `search` like
   // "förvärvad|förvärva|förvärv" which never satisfies word-equality and
   // would clear the vocab list — skip it here so the primary's matches stay.
+  $('#vocabularyResult').html('');
+  
   if (className !== "secondary") {
     // For dropdown-driven searches, `search` is the expanded pipe form which
     // never satisfies word-equality in renderVocabularyFindings — anchor on

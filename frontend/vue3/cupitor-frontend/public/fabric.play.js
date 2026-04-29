@@ -695,6 +695,45 @@ function deleteFabricObject(obj) {
   pc.renderAll()
 }
 
+/**
+ * Remove a single tree connection: the connector line + clean up
+ * treeConnection metadata on both parent and child.
+ * @param {object|string} parentNode - the parent fabric object or its uid
+ * @param {string} lineUid  - uid of the connector line
+ * @param {string} childUid - uid of the child node
+ */
+function deleteTreeConnection(parentNode, lineUid, childUid) {
+  parentNode = findIfRequired(parentNode);
+  const line  = findIfRequired(lineUid);
+  const child = findIfRequired(childUid);
+
+  // Remove line uid from parent's outgoing list
+  if (parentNode && parentNode.treeConnection && parentNode.treeConnection.outgoing) {
+    parentNode.treeConnection.outgoing.lines =
+      parentNode.treeConnection.outgoing.lines.filter(l => {
+        const id = (typeof l === 'object') ? (l.uid || l) : l;
+        return id !== lineUid && id !== line;
+      });
+  }
+
+  // Clear child's incoming reference
+  if (child && child.treeConnection && child.treeConnection.incoming) {
+    child.treeConnection.incoming.lines =
+      (child.treeConnection.incoming.lines || []).filter(l => {
+        const id = (typeof l === 'object') ? (l.uid || l) : l;
+        return id !== lineUid && id !== line;
+      });
+  }
+
+  // Remove line from canvas
+  if (line) {
+    pc.remove(line);
+  }
+
+  pc.requestRenderAll();
+  recordScript(`deleteTreeConnection('${parentNode && parentNode.uid}', '${lineUid}', '${childUid}')`);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function deleteSelectedObjects() {
   const activeObjects = pc.getActiveObjects();
@@ -1432,15 +1471,24 @@ function exportCanvas() {
   window.URL.revokeObjectURL(url);
 }
 
-function exportScript() {
-  const executables = window.recordedScriptLines.map(line => {
+function buildScriptExecutables() {
+  return (window.recordedScriptLines || []).map(line => {
     line = line.trim()
-    let executable = `${line}`;
-    if(line.startsWith('animate') || line.startsWith('Promise')) {
-      executable = `return ${line};`
-    }
+    const executable = (line.startsWith('animate') || line.startsWith('Promise'))
+      ? `return ${line};`
+      : line
     return `() => { ${executable} }`
   })
+}
+
+function playScript() {
+  const fns = buildScriptExecutables().map(eval)
+  if (!fns.length) return
+  schedule(fns, 1)
+}
+
+function exportScript() {
+  const executables = buildScriptExecutables();
   const data = JSON.stringify(executables);
   const blob = new Blob([data], { type: 'text/plain' });
   const url = window.URL.createObjectURL(blob);
