@@ -689,6 +689,20 @@ function addStickyNote(x, y, opts) {
   return note;
 }
 
+// Replay helper — resets the endpoints of a fabric.Line / LineArrow (the
+// connector lines used in trees). x1..y2 are the same scene-ish coords the
+// constructor takes. _setWidthHeight rebuilds the bbox + repositions left/top
+// so the rendered line lands exactly where the user dragged it.
+function reshapeLineXY(uidOrObj, x1, y1, x2, y2) {
+  const ln = findIfRequired(uidOrObj);
+  if (!ln) return;
+  ln.x1 = x1; ln.y1 = y1;
+  ln.x2 = x2; ln.y2 = y2;
+  if (typeof ln._setWidthHeight === 'function') ln._setWidthHeight();
+  ln.setCoords();
+  if (ln.canvas) ln.canvas.requestRenderAll();
+}
+
 // Replay helper — resets the endpoints/bend of a CurvableLine. Coords are
 // stored in absolute scene space so this is a drop-in refresh regardless of
 // any prior body-drag that shifted left/top.
