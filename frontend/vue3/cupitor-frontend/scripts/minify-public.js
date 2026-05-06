@@ -20,6 +20,21 @@ let totalAfter = 0
 let processed = 0
 let skipped = 0
 
+// Terser 4 has a synchronous API and reports errors via result.error (no
+// throw); Terser 5 returns a Promise and throws. Bridge both: await the
+// returned value (await on a plain object resolves to the object; await on
+// a Promise resolves normally) and treat result.error as a thrown error.
+async function callMinify(code, opts) {
+  let result
+  try {
+    result = await minify(code, opts)
+  } catch (e) {
+    return { error: e }
+  }
+  if (result && result.error) return { error: result.error }
+  return result
+}
+
 async function processFile(file) {
   const rel = path.relative(DIST, file)
   if (!file.endsWith('.js')) return
@@ -28,29 +43,24 @@ async function processFile(file) {
   const code = fs.readFileSync(file, 'utf8')
   if (!code.trim()) return
 
+  // `output` is the terser 4 option name and is still accepted by terser 5
+  // (which also exposes `format` as an alias). Using `output` works on both.
+  const baseOpts = {
+    compress: { passes: 2 },
+    mangle: true,
+    output: { comments: /^!|@preserve|@license|@cc_on/i },
+  }
+
   // Try module mode first (handles ESM `export`/`import`); fall back to
   // script mode if a vendor file rejects module-only constructs.
-  let result
-  try {
-    result = await minify(code, {
-      module: true,
-      compress: { passes: 2 },
-      mangle: true,
-      format: { comments: /^!|@preserve|@license|@cc_on/i },
-    })
-  } catch (e) {
-    try {
-      result = await minify(code, {
-        module: false,
-        compress: { passes: 2 },
-        mangle: true,
-        format: { comments: /^!|@preserve|@license|@cc_on/i },
-      })
-    } catch (e2) {
-      console.warn(`skip ${rel}: ${e2.message}`)
-      skipped++
-      return
-    }
+  let result = await callMinify(code, { ...baseOpts, module: true })
+  if (result.error) {
+    result = await callMinify(code, { ...baseOpts, module: false })
+  }
+  if (result.error) {
+    console.warn(`skip ${rel}: ${result.error.message || result.error}`)
+    skipped++
+    return
   }
 
   if (!result || typeof result.code !== 'string') {

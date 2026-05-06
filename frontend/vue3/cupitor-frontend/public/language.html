@@ -187,7 +187,10 @@
             <div id="mainControlBody">
                 <div class="lang-search-row">
                     <div class="lang-search-top-row">
-                        <input type="search" id="searchText" placeholder="Search…" class="lang-search-input">
+                        <span class="lang-search-input-wrap">
+                            <input type="search" id="searchText" placeholder="Search…" class="lang-search-input">
+                            <button type="button" id="searchTextClearBtn" class="lang-search-input-clear" title="Clear" aria-label="Clear" style="display:none;">×</button>
+                        </span>
                         <div class="search-vocab-popover-wrap">
                             <button class="lang-tool-btn" id="searchVocabularyByPrefixBtn" title="Search vocabulary…">…</button>
                             <div id="searchVocabularyMenu" class="search-vocab-menu" style="display:none;">
@@ -220,15 +223,7 @@
                         <input class="tgl tgl-flip" id="toggleLangCb" type="checkbox" data-toggle="toggle"
                                data-size="small" data-on="EN" data-off="SV" style="margin-left: 4px;"/>
                     </label>
-                    <label class="lang-panel-label" title="Searches control">
-                        Searches
-                        <div class="checkbox-wrapper-22" style="display: inline; margin-left: 4px;">
-                            <label class="switch" for="toggleSearchesControlCheckbox">
-                                <input type="checkbox" id="toggleSearchesControlCheckbox" aria-label="searches">
-                                <div class="slider round"></div>
-                            </label>
-                        </div>
-                    </label>
+                    
                     <label class="lang-panel-label" title="Clear search text on click">
                         Clear on click
                         <div class="checkbox-wrapper-22" style="display: inline; margin-left: 4px;">
@@ -239,8 +234,7 @@
                         </div>
                     </label>
                 </div>
-                <div id="searchesControl" style="display: none; padding-top: 6px;">
-                    <button onclick="importSearches()" class="button-62">Import Searches</button>
+                <div id="searchesControl" style="padding-top: 16px;">
                     <button id="addToVocabBtn" onclick="openAddToVocabDialog()" class="button-62" disabled>Add To Vocab</button>
                 </div>
                 </div>
@@ -334,8 +328,10 @@
             <div style="margin-top: 0.5em;">
                 <input id="vocabularySegmentTextarea" style="height: 50%;width: 98%;" placeholder="New word(s), one per line"></input>
             </div>
-            <div style="margin-top: 0.5em;">
-                <button onclick="addToVocab()">Save</button>
+            <div style="margin-top: 0.5em; display: flex; gap: 6px; align-items: center;">
+                <button type="button" onclick="addToVocab(false)" title="Apply this entry and clear the textarea so you can add another. Nothing is committed until you Save &amp; Close.">Add another</button>
+                <button type="button" onclick="addToVocab(true)">Save &amp; Close</button>
+                <span id="vocabPendingHint" style="display:none;font-size:0.75em;color:#a06000;">unsaved changes pending — Save &amp; Close to commit</span>
             </div>
         </div>
         <div id="localMedia" style="float: left; margin-top: 1.5em;">
@@ -446,6 +442,7 @@
         }
         $('#searchedWords').select2({
             placeholder: 'Searches',
+            allowClear: true,
             templateResult: styleCategory,
             templateSelection: styleCategory
         });

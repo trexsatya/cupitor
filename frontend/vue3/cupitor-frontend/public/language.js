@@ -329,6 +329,10 @@ function importSearchesFromVocab() {
 function loadWholeVocabulary() {
   $('#searchedWords').html('')
   $('#addToVocabularyDialogSelect').html('')
+  // Empty leading option so select2's allowClear (X) has something to reset
+  // the selection to. The placeholder text on each select2 fills the visual.
+  $('#searchedWords').append(new Option('', '', false, false))
+  $('#addToVocabularyDialogSelect').append(new Option('', '', false, false))
   $('#addToVocabBtn').prop('disabled', true)
 
   const vocabCategoriesToPopulate = new Set()
@@ -417,6 +421,42 @@ function openAddToVocabDialog() {
   // X, Escape, or click-outside) must NOT carry over typed words.
   const discardSegment = () => $('#vocabularySegmentTextarea').val('');
   discardSegment();
+  $('#vocabPendingHint').hide();
+
+  // Mirror the main select's current line into the dialog's reference select
+  // so the user starts on the line they were already inspecting. Skip
+  // category headings (`__cat__:foo`) — those aren't valid reference words.
+  try {
+    const mainVal = $('#searchedWords').val()
+    let dialogVal = null
+    if (typeof mainVal === 'string' && mainVal && !mainVal.startsWith('__cat__:')) {
+      dialogVal = mainVal
+    } else if (window.preSelectedSearchedWord) {
+      // Fallback: scan the dialog select for a matching {o:line} value.
+      $('#addToVocabularyDialogSelect option').each(function () {
+        if (dialogVal) return
+        try {
+          const parsed = JSON.parse(this.value)
+          if (parsed && parsed.o === window.preSelectedSearchedWord) dialogVal = this.value
+        } catch (_) { /* heading or unparseable — skip */ }
+      })
+    }
+    if (dialogVal) {
+      $('#addToVocabularyDialogSelect').val(dialogVal).trigger('change.select2')
+    }
+  } catch (_) { /* leave dialog selection as-is */ }
+
+  // If the user closes the dialog while there are staged-but-uncommitted
+  // changes, commit them before tearing the dialog down so multi-add
+  // sessions never silently lose work.
+  const onDialogClose = () => {
+    discardSegment()
+    if (window._vocabHasPendingChanges) {
+      commitVocabularyToGithub()
+      window._vocabHasPendingChanges = false
+    }
+    $('#vocabPendingHint').hide()
+  }
 
   // Defer opening until after the current click event has finished bubbling.
   // Without this, the document-level "close on outside click" handler fires
@@ -424,13 +464,13 @@ function openAddToVocabDialog() {
   setTimeout(() => {
     const $dialog = $("#addToVocabularyDialog")
     if ($dialog.hasClass('ui-dialog-content')) {
-      $dialog.dialog('option', { width: w, height: h }).dialog('open')
+      $dialog.dialog('option', { width: w, height: h, close: onDialogClose }).dialog('open')
     } else {
       $dialog.dialog({
         width: w,
         height: h,
         modal: false,
-        close: discardSegment
+        close: onDialogClose
       })
     }
   }, 0)
@@ -476,9 +516,23 @@ function isProperlyBracketed(line) {
 }
 window.isProperlyBracketed = isProperlyBracketed;
 
-function addToVocab() {
+function addToVocab(commitAndClose) {
+  // Backwards-compat: legacy onclick="addToVocab()" calls land with no arg —
+  // treat that as the old single-shot Save behaviour.
+  if (commitAndClose === undefined) commitAndClose = true
+
   const newText = $("#vocabularySegmentTextarea").val().trim()
-  if (!newText) return
+  if (!newText) {
+    // "Save & Close" pressed with an empty textarea: if there are already
+    // staged additions from earlier rounds, commit them and close.
+    if (commitAndClose && window._vocabHasPendingChanges) {
+      commitVocabularyToGithub()
+      window._vocabHasPendingChanges = false
+      $('#vocabPendingHint').hide()
+      $("#addToVocabularyDialog").dialog("close")
+    }
+    return
+  }
 
   const selectedVal = $("#addToVocabularyDialogSelect").val()
   if (!selectedVal) return
@@ -543,13 +597,23 @@ function addToVocab() {
     }
   } catch (_) { /* leave preSelectedSearchedWord untouched */ }
 
-  // Refresh both select boxes with updated vocabulary
+  // Refresh both select boxes with updated vocabulary so the just-added
+  // line is reachable as a reference word for the next round.
   loadWholeVocabulary()
 
-  // Commit vocabulary file to GitHub
-  commitVocabularyToGithub()
+  window._vocabHasPendingChanges = true
 
-  $("#addToVocabularyDialog").dialog("close")
+  if (commitAndClose) {
+    commitVocabularyToGithub()
+    window._vocabHasPendingChanges = false
+    $('#vocabPendingHint').hide()
+    $("#addToVocabularyDialog").dialog("close")
+  } else {
+    // Stage-only: clear textarea, surface the pending-changes hint, and
+    // leave the dialog open so the user can add more entries.
+    $("#vocabularySegmentTextarea").val('')
+    $('#vocabPendingHint').show()
+  }
 }
 
 function onVocabInsertPositionChange(select) {
@@ -797,6 +861,11 @@ async function vocabularyLineSelected() {
     return
   }
   const rawVal = $('#searchedWords').val();
+  if (!rawVal) {
+    // Cleared via select2's X — drop tracking state and stop here.
+    window.preSelectedSearchedWord = null
+    return
+  }
   if (typeof rawVal === 'string' && rawVal.startsWith('__cat__:')) {
     renderVocabularyCategory(rawVal.substring('__cat__:'.length));
     return;
@@ -1123,6 +1192,46 @@ $('document').ready(e => {
 
   $searchText1.change(function (e) {
     searchTextChanged(e).then(r => {})
+  })
+
+  // X-clear button on the search input — show only when there's text;
+  // clicking clears the input and re-fires the search-changed flow.
+  const $searchTextClearBtn = $('#searchTextClearBtn')
+  const updateSearchTextClearBtn = () => {
+    if (($searchText1.val() || '').length > 0) $searchTextClearBtn.show()
+    else $searchTextClearBtn.hide()
+  }
+  $searchText1.on('input change', updateSearchTextClearBtn)
+  $searchTextClearBtn.click(() => {
+    $searchText1.val('').trigger('change')
+    $searchText1.focus()
+    updateSearchTextClearBtn()
+  })
+  updateSearchTextClearBtn()
+
+  // X-clear button injected into the typeahead input of every open select2
+  // dropdown. The dropdown is appended to body on open and torn down on
+  // close, so we re-inject (idempotently) on each `select2:open`.
+  $(document).on('select2:open', '#searchedWords, #addToVocabularyDialogSelect, #vocabularySelect', () => {
+    setTimeout(() => {
+      const $field = $('.select2-container--open .select2-search__field')
+      if (!$field.length) return
+      const $wrap = $field.parent()
+      let $clear = $wrap.find('.select2-search-clear')
+      if (!$clear.length) {
+        $clear = $('<button type="button" class="select2-search-clear" title="Clear" aria-label="Clear">×</button>')
+        $wrap.append($clear)
+        $clear.on('mousedown', e => {
+          // mousedown fires before blur, so the dropdown stays open.
+          e.preventDefault()
+          e.stopPropagation()
+          $field.val('').trigger('input').focus()
+        })
+      }
+      const update = () => $clear.toggleClass('is-visible', ($field.val() || '').length > 0)
+      $field.off('input.s2x').on('input.s2x', update)
+      update()
+    }, 0)
   })
 
   $('#searchedWords').change(e => {
@@ -1546,7 +1655,10 @@ function fixSectionBox() {
 $(document).ready(function () {
   fixSectionBox()
   $("#vocabularySelect").select2()
-  $("#addToVocabularyDialogSelect").select2().change(e => {
+  $("#addToVocabularyDialogSelect").select2({
+    placeholder: 'Reference word',
+    allowClear: true
+  }).change(e => {
     // When inline is selected, keep the textarea in sync with the chosen reference word
     if ($('#vocabInsertPosition').val() === 'inline') {
       try {
@@ -2485,7 +2597,6 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
   <div class="line-part">
       <i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;"></i>
       ${highlightedText(chunk.replaceAll("|", " | "))}
-      <img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn">
   </div>`);
       $(div).find("i.fa").click(selectSearchedWord)
       div.data({text: chunk})
@@ -3314,9 +3425,9 @@ async function render(searchResults, search, className, token) {
   // (fired by fetchSRTs' stem fallback) gets a multi-pipe `search` like
   // "förvärvad|förvärva|förvärv" which never satisfies word-equality and
   // would clear the vocab list — skip it here so the primary's matches stay.
-  $('#vocabularyResult').html('');
-  
   if (className !== "secondary") {
+    $('#vocabularyResult').html('');
+
     // For dropdown-driven searches, `search` is the expanded pipe form which
     // never satisfies word-equality in renderVocabularyFindings — anchor on
     // the original line instead. For typed searches (unprocessedSearchText is
@@ -3330,7 +3441,9 @@ async function render(searchResults, search, className, token) {
   if (!searchResults) return {}
 
   const $result = $('#result');
-  $result.html('')
+  // Keep a "Loading…" placeholder visible during the slow getMatchingWords /
+  // populate phase so the result area never goes blank mid-search.
+  $result.html('<div style="color:grey;padding:6px;">Loading…</div>')
 
   if (className === "secondary") {
     $result.css({backgroundColor: '#e3cece'})
@@ -3338,16 +3451,19 @@ async function render(searchResults, search, className, token) {
     $result.css({backgroundColor: 'white'})
   }
 
+  const searchResultsFiltered = filterByLanguage(searchResults);
+
+  const wordToItemsMap = await getMatchingWords(searchResultsFiltered, search, token);
+  if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
+
+  // Matches are ready — swap out the loader for the real content.
+  $result.html('')
   if (window.unprocessedSearchText) {
     $result.append(`<p class="search-text-info">${
         unprocessedSearchText.split(SEPARATOR_PIPE).map(it => getWikiLink(it)).join(" | ")
     }</p>`)
   }
 
-  const searchResultsFiltered = filterByLanguage(searchResults);
-
-  const wordToItemsMap = await getMatchingWords(searchResultsFiltered, search, token);
-  if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
   await populateSRTFindings(wordToItemsMap, $result, token);
   if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
 
@@ -3567,9 +3683,14 @@ const STEM_RULES = {
     ['at', ['a']],
     // Past participle: "förvärvad" → "förvärva" (group 1/4) or root "förvärv".
     ['ad', ['a', '']],
+    ['ång', ['å']],
+    ['else', ['a']],
+    ['elser', ['a']],
     // Group-3 supinum ("köpit" → "köpa") and past participle "köpt" → "köpa".
     ['it', ['a']],
+    ['arn', ['are']],
     ['ar', ['a', '']],
+    ['na', ['en', 'et']],
     ['or', ['a']],
     ['er', ['', 'a']],
     ['en', ['']],
@@ -3578,6 +3699,10 @@ const STEM_RULES = {
     ['te', ['']],
     ['ts', ['']],
     ['s', ['']],
+    ['et', ['en']],
+    ['en', ['et']],
+    ['t', ['a', 'd']],
+    ['a', ['']],
   ],
   es: [
     ['iendo', ['er', 'ir']],
@@ -3706,7 +3831,7 @@ async function fetchSRTs(searchText) {
     window._subtitleSearchToken = (window._subtitleSearchToken || 0) + 1
     const myToken = window._subtitleSearchToken
 
-    $('#result').html('<div style="color:grey;padding:6px;">Searching subtitles…</div>')
+    $('#result').html('<div style="color:grey;padding:6px;">Loading…</div>')
 
     console.log("Loading from local")
     window.searchResult = await fetchFromDownloadedFiles(window.searchText.trim(), myToken);
