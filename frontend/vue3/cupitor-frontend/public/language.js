@@ -92,7 +92,72 @@ skjuta=skjuta,skjuter,sköt,skjutit
 bli=bli,blir,blev,blivit
 dra=dra,drar,drog,dragit
 trivas=trivas,trivs,trivdes,trivts
-passa=passa,passar,passade,passat`
+passa=passa,passar,passade,passat
+äga=äga,äger,ägde,ägt
+bära=bära,bär,bar,burit
+be=be,ber,bad,bett
+bita=bita,biter,bet,bitit
+bjuda=bjuda,bjuder,bjöd,bjudit
+blomma=blomma,blommar,blommade,blommat
+bry=bry,bryr,brydde,brytt
+bryta=bryta,bryter,bröt,brutit
+delta=delta,deltar,deltog,deltagit
+driva=driva,driver,drev,drivit
+falla=falla,faller,föll,fallit
+finna=finna,finner,fann,funnit
+föra=föra,för,förde,fört
+förklä=förklä,förkläder,förklädde,förklätt
+fylla=fylla,fyller,fyllde,fyllt
+ga=ga,gar,gade,gat
+gifta=gifta,gifter,gifte,gift
+glida=glida,glider,gled,glidit
+gnugga=gnugga,gnuggar,gnuggade,gnuggat
+grippa=gripa,griper,grep,gripit
+handla=handla,handlar,handlade,handlat
+känna=känna,känner,kände,känt
+kasta=kasta,kastar,kastade,kastat
+kikna=kikna,kiknar,kiknade,kiknat
+klämma=klämma,klämmer,klämde,klämt
+knyta=knyta,knyter,knöt,knutit
+köra=köra,kör,körde,kört
+läsa=läsa,läser,läste,läst
+leva=leva,lever,levde,levt
+ligga=ligga,ligger,låg,legat
+lista=lista,listar,listade,listat
+lösa=lösa,löser,löste,löst
+lysa=lysa,lyser,lyste,lyst
+mala=mala,mal,malde,malt
+öka=öka,ökar,ökade,ökat
+prata=prata,pratar,pratade,pratat
+rå=rå,rår,rådde,rått
+såga=såga,sågar,sågade,sågat
+säga=säga,säger,sade,sa,sagt
+sitta=sitta,sitter,satt,suttit
+skriva=skriva,skriver,skrev,skrivit
+släppa=släppa,släpper,släppte,släppt
+släta=släta,slätar,slätade,slätat
+sluta=sluta,slutar,slutade,slutat
+söka=söka,söker,sökte,sökt
+sopa=sopa,sopar,sopade,sopat
+sova=sova,sover,sov,sovit
+spilla=spilla,spiller,spillde,spillt
+springa=springa,springer,sprang,sprungit
+stå=stå,står,stod,stått
+stämma=stämma,stämmer,stämde,stämt
+sticka=sticka,sticker,stack,stuckit
+stödja=stödja,stödjer,stödde,stött
+stöta=stöta,stöter,stötte,stött
+stryka=stryka,stryker,strök,strukit
+tala=tala,talar,talade,talat
+tränga=tränga,tränger,trängde,trängt
+trycka=trycka,trycker,tryckte,tryckt
+tycka=tycka,tycker,tyckte,tyckt
+utbilda=utbilda,utbildar,utbildade,utbildat
+vända=vända,vänder,vände,vänt
+vara=vara,är,var,varit
+växa=växa,växer,växte,vuxit
+vetta=vetta,vetter,vette,vettat
+visa=visa,visar,visade,visat`
 
   const wordsMap = {}
   list.split("\n").filter(it => it.trim().length > 2).forEach(it => {
@@ -466,6 +531,18 @@ function addToVocab() {
   }
   window.vocabulary[category] = categoryWords
 
+  // Preserve the currently-selected line across the rebuild. Both selects
+  // honour window.preSelectedSearchedWord in createOptionElement.
+  try {
+    const rawVal = $('#searchedWords').val()
+    if (typeof rawVal === 'string' && rawVal && !rawVal.startsWith('__cat__:')) {
+      const parsed = JSON.parse(rawVal)
+      if (parsed && typeof parsed.o === 'string') {
+        window.preSelectedSearchedWord = parsed.o
+      }
+    }
+  } catch (_) { /* leave preSelectedSearchedWord untouched */ }
+
   // Refresh both select boxes with updated vocabulary
   loadWholeVocabulary()
 
@@ -564,6 +641,66 @@ async function doSearch(searchThis, el) {
   if (newItem) {
     el.append(new Option(`${searchThis}`, searchThis, false, false))
   }
+}
+
+const SEARCH_NAV_HISTORY_KEY = 'searchNavHistory'
+const SEARCH_NAV_HISTORY_MAX = 200
+
+function loadNavHistoryFromStorage() {
+  try {
+    const raw = localStorage.getItem(SEARCH_NAV_HISTORY_KEY)
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.filter(it => typeof it === 'string') : []
+  } catch (e) { return [] }
+}
+
+function saveNavHistoryToStorage(list) {
+  try { localStorage.setItem(SEARCH_NAV_HISTORY_KEY, JSON.stringify(list)) } catch (e) {}
+}
+
+window.sessionSearchHistory = window.sessionSearchHistory || loadNavHistoryFromStorage()
+// Always start at -1 on a fresh page load: the user isn't "on" any past
+// entry, so the first Prev should go to the most recent entry.
+if (typeof window.sessionHistoryIndex !== 'number') window.sessionHistoryIndex = -1
+
+function recordSessionSearch(term) {
+  if (window._navigatingHistory) return
+  if (typeof term !== 'string') return
+  term = term.trim()
+  if (!term) return
+  const list = window.sessionSearchHistory
+  if (list[list.length - 1] === term) return
+  list.push(term)
+  if (list.length > SEARCH_NAV_HISTORY_MAX) {
+    list.splice(0, list.length - SEARCH_NAV_HISTORY_MAX)
+  }
+  window.sessionHistoryIndex = list.length - 1
+  saveNavHistoryToStorage(list)
+}
+
+function navigateSearchHistory(direction) {
+  const list = window.sessionSearchHistory
+  if (!list || list.length === 0) return
+  const cur = (typeof window.sessionHistoryIndex === 'number') ? window.sessionHistoryIndex : -1
+  let newIdx
+  if (cur === -1) {
+    // Fresh load / not on any entry. Prev jumps to the most recent; Next is a no-op.
+    if (direction < 0) newIdx = list.length - 1
+    else return
+  } else {
+    newIdx = cur + direction
+  }
+  if (newIdx < 0 || newIdx > list.length - 1) return
+  if (newIdx === cur) return
+  window.sessionHistoryIndex = newIdx
+  const term = list[newIdx]
+  if (typeof term !== 'string' || !term) return
+  window._navigatingHistory = true
+  $('#searchText').val(term)
+  window.unprocessedSearchText = null
+  Promise.resolve(doSearch(term, $('#searchedWords')))
+      .finally(() => { window._navigatingHistory = false })
 }
 
 const $searchText1 = $('#searchText');
@@ -991,6 +1128,25 @@ $('document').ready(e => {
   $('#searchedWords').change(e => {
     window.forceMainLangForNextSearch = true;
     vocabularyLineSelected()
+  })
+
+  $('#prevSearchBtn').click(() => navigateSearchHistory(-1))
+  $('#nextSearchBtn').click(() => navigateSearchHistory(1))
+
+  $('#searchVocabularyByPrefixBtn').click(e => {
+    e.stopPropagation()
+    $('#searchVocabularyMenu').toggle()
+  })
+  $('#searchVocabularyMenu').on('click', '.search-vocab-menu-item', e => {
+    const mode = $(e.currentTarget).data('mode')
+    $('#searchVocabularyMenu').hide()
+    if (mode === 'prefix') searchVocabularyByPrefix()
+    else if (mode === 'similar') searchVocabularyBySimilarity()
+  })
+  $(document).on('click', e => {
+    if (!$(e.target).closest('#searchVocabularyMenu, #searchVocabularyByPrefixBtn').length) {
+      $('#searchVocabularyMenu').hide()
+    }
   })
 
   $('#rewindBtn').click(rewind)
@@ -2198,34 +2354,44 @@ function expandRegex(txt) {
   return txt
 }
 
-function getMatchingWords(list, search) {
+async function getMatchingWords(list, search, token) {
   const startTime = new Date().getTime()
   let wordToItemsMap = {}
   let searchText = search
   const transformedSearchText = search
 
   const isNotTooShort = w => w.trim().length > 2
+  const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
+  const ITEM_CHUNK = 25
 
-  list.forEach(item => {
-    const lines = item.data;
-    lines.forEach(line => {
-      if (new Date().getTime() - startTime > 20000) {
-        return wordToItemsMap;
+  const transformedRe = new RegExp(transformedSearchText, "i")
+
+  for (let start = 0; start < list.length; start += ITEM_CHUNK) {
+    if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
+    const end = Math.min(start + ITEM_CHUNK, list.length)
+    for (let ix = start; ix < end; ix++) {
+      const item = list[ix]
+      const lines = item.data;
+      for (const line of lines) {
+        if (new Date().getTime() - startTime > 20000) {
+          return wordToItemsMap;
+        }
+        const words = getWords(line.text, search).map(it => it.trim().toLowerCase())
+        const endsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
+        const startsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
+        words.filter(word => word.match(transformedRe) || endsWith(word) || startsWith(word))
+            .forEach(word => {
+              wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
+            })
+        // Whole search text as a word
+        const word = searchText.toLowerCase().trim()
+        if (word.indexOf(" ") > 0 && line.text.toLowerCase().indexOf(word) >= 0) {
+          wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
+        }
       }
-      const words = getWords(line.text, search).map(it => it.trim().toLowerCase())
-      const endsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
-      const startsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
-      words.filter(word => word.match(new RegExp(transformedSearchText, "i")) || endsWith(word) || startsWith(word))
-          .forEach(word => {
-            wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
-          })
-      // Whole search text as a word
-      const word = searchText.toLowerCase().trim()
-      if (word.indexOf(" ") > 0 && line.text.toLowerCase().indexOf(word) >= 0) {
-        wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
-      }
-    })
-  })
+    }
+    await yieldToUI()
+  }
 
   if (wordToItemsMap[searchText.trim()] === undefined) {
     wordToItemsMap[searchText] = []
@@ -2236,19 +2402,26 @@ function getMatchingWords(list, search) {
     searchText = searchText.trim()
   }
 
-  list.forEach(item => {
-    const lines = item.data;
-    lines.forEach(line => {
-      const matches = line.text.match(new RegExp(searchText, "i"))
-      const alreadyIncludedInResults = it => it.toLowerCase().indexOf(searchText.toLowerCase()) >= 0
-          && wordToItemsMap[it.toLowerCase()].length > 0;
+  const searchRe = new RegExp(searchText, "i")
+  for (let start = 0; start < list.length; start += ITEM_CHUNK) {
+    if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
+    const end = Math.min(start + ITEM_CHUNK, list.length)
+    for (let ix = start; ix < end; ix++) {
+      const item = list[ix]
+      const lines = item.data;
+      for (const line of lines) {
+        const matches = line.text.match(searchRe)
+        const alreadyIncludedInResults = it => it.toLowerCase().indexOf(searchText.toLowerCase()) >= 0
+            && wordToItemsMap[it.toLowerCase()].length > 0;
 
-      if (matches && !Object.keys(wordToItemsMap).some(alreadyIncludedInResults)) {
-        const matchedPart = matches[0].toLowerCase()
-        wordToItemsMap2[matchedPart] = computeIfAbsent(wordToItemsMap2, matchedPart, it => []).concat(new MatchResult(matchedPart, line, item.url, item.source))
+        if (matches && !Object.keys(wordToItemsMap).some(alreadyIncludedInResults)) {
+          const matchedPart = matches[0].toLowerCase()
+          wordToItemsMap2[matchedPart] = computeIfAbsent(wordToItemsMap2, matchedPart, it => []).concat(new MatchResult(matchedPart, line, item.url, item.source))
+        }
       }
-    })
-  })
+    }
+    await yieldToUI()
+  }
 
   if (!wordToItemsMap[searchText.trim()] || wordToItemsMap[searchText.trim()].length === 0) {
     wordToItemsMap = Object.assign(wordToItemsMap, wordToItemsMap2)
@@ -2590,13 +2763,20 @@ function groupAndArrangeResults(items) {
   return [randomFromArray(gpBySpl['jokes'] || [])].concat(items).filter(it => it)
 }
 
-function populateSRTFindings(wordToItemsMap, $result) {
+async function populateSRTFindings(wordToItemsMap, $result, token) {
   let words = getWordsOrdered(Object.keys(wordToItemsMap))
   if (window.searchText.includes(SEPARATOR_PIPE)) {
     words = words.filter(it => it.trim() !== window.searchText.trim())
   }
 
-  words.forEach(word => {
+  const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
+  const WORD_CHUNK = 5
+
+  for (let wStart = 0; wStart < words.length; wStart += WORD_CHUNK) {
+    if (token !== undefined && token !== window._subtitleSearchToken) return
+    const wEnd = Math.min(wStart + WORD_CHUNK, words.length)
+    const slice = words.slice(wStart, wEnd)
+    slice.forEach(word => {
     let items = wordToItemsMap[word] || []
     if (!items.length) {
       const w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
@@ -2610,7 +2790,11 @@ function populateSRTFindings(wordToItemsMap, $result) {
     const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}">${title}</h5></div>`)
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
-    wordBlock.append(`<div style=""> Wiki: ${getWikiLinks(word)} 丨
+    const isMultiWord = word.trim().split(/\s+/).length > 1
+    const wikiPart = isMultiWord
+        ? `<a class="link" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}" target="_blank">${word}</a>`
+        : getWikiLinks(word)
+    wordBlock.append(`<div style=""> Wiki: ${wikiPart} 丨
         <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> 丨
         <a href="https://filmot.com/search/%22${word}%22/1?lang=${getLangFromUrl().code}" target="_blank">Filmot</a> </div> <br>`)
 
@@ -2658,6 +2842,8 @@ function populateSRTFindings(wordToItemsMap, $result) {
       rendered.push(getEnTranslation(item))
     }//end for
   })
+    await yieldToUI()
+  }
 }
 
 function resultNotFound(search) {
@@ -2762,25 +2948,285 @@ function vocabLineMatchesPrefix(vocabLine, searchText) {
   return parts.some(p => st.startsWith(p) || p.startsWith(st))
 }
 
+const SIMILARITY_VOWELS = new Set(['a', 'e', 'i', 'o', 'u', 'y', 'å', 'ä', 'ö'])
+
+function _isVowel(ch) {
+  return SIMILARITY_VOWELS.has((ch || '').toLowerCase())
+}
+
+// Compares two equal-length strings: returns {count, allVowel, allConsonant}
+// where flags are true only when ALL differing positions are of that class.
+function _classifyCharDiffs(a, b) {
+  let count = 0, allVowel = true, allConsonant = true
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === b[i]) continue
+    count++
+    const aV = _isVowel(a[i]), bV = _isVowel(b[i])
+    if (!aV || !bV) allVowel = false
+    if (aV || bV) allConsonant = false
+  }
+  return { count, allVowel: allVowel && count > 0, allConsonant: allConsonant && count > 0 }
+}
+
+function _levenshtein(a, b) {
+  const m = a.length, n = b.length
+  if (m === 0) return n
+  if (n === 0) return m
+  let prev = new Array(n + 1)
+  let curr = new Array(n + 1)
+  for (let j = 0; j <= n; j++) prev[j] = j
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i
+    for (let j = 1; j <= n; j++) {
+      curr[j] = a[i - 1] === b[j - 1]
+          ? prev[j - 1]
+          : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1])
+    }
+    const tmp = prev; prev = curr; curr = tmp;
+  }
+  return prev[n]
+}
+
+// Tier 1: same length, exactly one differing char that's vowel-vs-vowel.
+// Tier 2: same length, exactly one differing char that's consonant-vs-consonant.
+// Tier 3: edit distance ≤ 2 (and > 0). Returns null if not similar enough.
+function _scoreSimilarity(searchWord, candidate) {
+  if (!searchWord || !candidate || searchWord === candidate) return null
+  if (searchWord.length === candidate.length) {
+    const diff = _classifyCharDiffs(searchWord, candidate)
+    if (diff.count === 1 && diff.allVowel) return { tier: 1, distance: 1 }
+    if (diff.count === 1 && diff.allConsonant) return { tier: 2, distance: 1 }
+  }
+  const d = _levenshtein(searchWord, candidate)
+  if (d > 0 && d <= 2) return { tier: 3, distance: d }
+  return null
+}
+
+async function searchVocabularyBySimilarity() {
+  const raw = window.searchText || ''
+  if (!raw || !window.vocabulary) return
+
+  const searchWords = raw.toLowerCase()
+      .split(SEPARATOR_PIPE)
+      .map(w => w.trim())
+      .filter(w => w.length >= 2)
+  if (!searchWords.length) return
+
+  // Build flat-line array along with each line's category so we can group
+  // matches by category later for round-robin selection.
+  const allLines = []
+  const lineCategory = []
+  Object.entries(window.vocabulary).forEach(([cat, lines]) => {
+    if (!Array.isArray(lines)) return
+    lines.forEach(line => {
+      allLines.push(line)
+      lineCategory.push(cat)
+    })
+  })
+  const matches = []
+  const swLens = searchWords.map(w => w.length)
+
+  // Cancellation: each invocation gets a fresh token; older runs bail when
+  // they see a newer token.
+  window._similarityRunToken = (window._similarityRunToken || 0) + 1
+  const myToken = window._similarityRunToken
+
+  const $vocab = $('#vocabularyResult')
+  $vocab.html(`<div style="color:grey;padding:4px;">Searching similar words…</div>`)
+  const $rc = $('#resultContainer')
+  if ($rc.is(':hidden')) {
+    $rc.show()
+    updateToggleButtonView('resultContainer')
+  }
+
+  // Reuse a single Intl.Segmenter — re-creating it per line is expensive.
+  const segmenter = new Intl.Segmenter([], { granularity: 'word' })
+  const extractWords = text => {
+    const seen = new Set()
+    for (const seg of segmenter.segment(text)) {
+      const w = seg.segment.toLowerCase().trim()
+      if (w.length >= 2 && /\p{L}/u.test(w)) seen.add(w)
+    }
+    return seen
+  }
+
+  const CHUNK = 250
+  const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
+
+  for (let start = 0; start < allLines.length; start += CHUNK) {
+    if (myToken !== window._similarityRunToken) return  // newer run took over
+    const end = Math.min(start + CHUNK, allLines.length)
+    for (let lineIdx = start; lineIdx < end; lineIdx++) {
+      const line = allLines[lineIdx]
+      if (typeof line !== 'string' || !line.trim()) continue
+      const wordsInLine = extractWords(line)
+      for (const cw of wordsInLine) {
+        const cwLen = cw.length
+        for (let si = 0; si < searchWords.length; si++) {
+          // Cheap O(1) length filter: tiers 1/2 need equal length;
+          // tier 3 needs edit distance ≤ 2 → length diff ≤ 2.
+          if (Math.abs(cwLen - swLens[si]) > 2) continue
+          const sw = searchWords[si]
+          if (cw === sw) continue
+          const score = _scoreSimilarity(sw, cw)
+          if (score) matches.push({ lineIdx, candidate: cw, searchWord: sw, ...score })
+        }
+      }
+    }
+    await yieldToUI()
+  }
+
+  if (myToken !== window._similarityRunToken) return
+
+  matches.sort((a, b) =>
+      a.tier - b.tier
+      || a.distance - b.distance
+      || Math.abs(a.candidate.length - a.searchWord.length) - Math.abs(b.candidate.length - b.searchWord.length)
+      || a.candidate.localeCompare(b.candidate))
+
+  console.log('[similar] search words:', searchWords, '— total scored matches:', matches.length)
+  // console.table(matches.slice(0, 25).map(m => ({
+  //   searchWord: m.searchWord,
+  //   candidate: m.candidate,
+  //   tier: m.tier,
+  //   tierLabel: m.tier === 1 ? 'vowel' : m.tier === 2 ? 'consonant' : 'edit-dist',
+  //   distance: m.distance,
+  //   line: allLines[m.lineIdx]
+  // })))
+
+  const limitRaw = parseInt($('#numberOfSimilarFindings').val(), 10)
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 10
+
+  // Step 1: dedupe by line — keep best-scoring match per vocab line.
+  const seenLine = new Set()
+  const uniquePerLine = []
+  for (const m of matches) {
+    if (seenLine.has(m.lineIdx)) continue
+    seenLine.add(m.lineIdx)
+    uniquePerLine.push(m)
+  }
+
+  // Step 2: group by category, preserving the score-sorted order within each
+  // group. The first inserted category is the one whose top match scored best.
+  const byCategory = new Map()
+  for (const m of uniquePerLine) {
+    const cat = lineCategory[m.lineIdx] || '(uncategorized)'
+    if (!byCategory.has(cat)) byCategory.set(cat, [])
+    byCategory.get(cat).push(m)
+  }
+
+  // Step 3: round-robin — take the best from each category, then the second
+  // best, and so on, until the limit fills up.
+  const top = []
+  const categoryLists = Array.from(byCategory.values())
+  for (let round = 0; top.length < limit; round++) {
+    let added = false
+    for (const list of categoryLists) {
+      if (round < list.length) {
+        top.push({ ...list[round], category: lineCategory[list[round].lineIdx] })
+        added = true
+        if (top.length >= limit) break
+      }
+    }
+    if (!added) break
+  }
+
+  console.log(`[similar] top ${top.length} (limit=${limit}, ${categoryLists.length} categories, round-robin):`, top.map(m =>
+      `[${m.category}] ${m.searchWord} ≈ ${m.candidate} [tier=${m.tier} dist=${m.distance}]`).join(' | '))
+
+  $vocab.html('')
+
+  if (top.length === 0) {
+    $vocab.html(`<div style="color:grey;padding:4px;">No similar matches for "${_.escape(raw)}"</div>`)
+  } else {
+    top.forEach(({ lineIdx, candidate, searchWord, tier, distance, category }) => {
+      const tierLabel = tier === 1 ? 'vowel diff' : tier === 2 ? 'consonant diff' : `edit dist ${distance}`
+      const tierClass = tier === 1 ? 'similar-tier-1'
+          : tier === 2 ? 'similar-tier-2'
+          : `similar-tier-3-d${distance}`
+      const vocabItem = $(`<div class="vocabulary-segment ${tierClass}"></div>`)
+      const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
+      vocabItemContent.append(
+          `<div style="font-size:0.75em;color:#666;padding:2px 4px;">[${_.escape(category || '?')}] ≈ <b>${_.escape(candidate)}</b> ↔ ${_.escape(searchWord)} (${tierLabel})</div>`)
+      getSurrounding(lineIdx, allLines).forEach(it => {
+        let txt = it.item
+        const $line = $(`<div class="vocabulary-line"></div>`)
+        if (txt.trim().length) {
+          $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`)
+          $line.find('i.fa').click(selectSearchedWord)
+        } else {
+          txt = '------------------'
+        }
+        $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, ' | ')}</span>`)
+        $line.data({ text: txt })
+        if (it.index === lineIdx) $line.addClass('highlighted')
+        vocabItemContent.append($line)
+      })
+      vocabItem.append(vocabItemContent)
+      $vocab.append(vocabItem)
+    })
+    $('.vocabulary-segment').each((i, e) => {
+      const h = $(e).find('.highlighted')[0]
+      if (h) h.scrollIntoView()
+    })
+  }
+}
+
 function searchVocabularyByPrefix() {
   const searchText = $('#searchText').val().trim()
   if (!searchText || !window.vocabulary) return
 
-  // Gather all vocab words flat, keeping track of which match by prefix
-  const allWords = Object.values(window.vocabulary).flat()
+  // Build flat-line array along with each line's category so we can group
+  // matches by category later for round-robin ordering (mirrors similarity search).
+  const allWords = []
+  const lineCategory = []
+  Object.entries(window.vocabulary).forEach(([cat, lines]) => {
+    if (!Array.isArray(lines)) return
+    lines.forEach(line => {
+      allWords.push(line)
+      lineCategory.push(cat)
+    })
+  })
+
   const indexesOfAppearance = allWords
     .map((vocabLine, i) => vocabLineMatchesPrefix(vocabLine, searchText) ? i : null)
     .filter(it => it !== null)
 
+  // Group matches by category, preserving first-seen order; then round-robin
+  // so each category contributes its first hit before any contributes its second.
+  const byCategory = new Map()
+  for (const idx of indexesOfAppearance) {
+    const cat = lineCategory[idx] || '(uncategorized)'
+    if (!byCategory.has(cat)) byCategory.set(cat, [])
+    byCategory.get(cat).push(idx)
+  }
+  const categoryLists = Array.from(byCategory.values())
+  const ordered = []
+  for (let round = 0; ; round++) {
+    let added = false
+    for (const list of categoryLists) {
+      if (round < list.length) {
+        ordered.push(list[round])
+        added = true
+      }
+    }
+    if (!added) break
+  }
+
+  console.log(`[prefix] ${ordered.length} matches across ${categoryLists.length} categories (round-robin)`)
+
   const $vocab = $('#vocabularyResult')
   $vocab.html('')
 
-  if (indexesOfAppearance.length === 0) {
+  if (ordered.length === 0) {
     $vocab.html(`<div style="color:grey;padding:4px;">No prefix matches for "${_.escape(searchText)}"</div>`)
   } else {
-    indexesOfAppearance.forEach(idx => {
+    ordered.forEach(idx => {
+      const category = lineCategory[idx] || '?'
       const vocabItem = $('<div class="vocabulary-segment"></div>')
       const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
+      vocabItemContent.append(
+          `<div style="font-size:0.75em;color:#666;padding:2px 4px;">[${_.escape(category)}]</div>`)
       getSurrounding(idx, allWords).forEach(it => {
         let txt = it.item
         const $line = $(`<div class="vocabulary-line"></div>`)
@@ -2863,7 +3309,7 @@ export function renderVocabularyFindings(search) {
   $('.vocabulary-segment').each((i, e) => $(e).find('.highlighted')[0].scrollIntoView())
 }
 
-function render(searchResults, search, className) {
+async function render(searchResults, search, className, token) {
   // The vocab list is rendered once on the primary pass. The secondary pass
   // (fired by fetchSRTs' stem fallback) gets a multi-pipe `search` like
   // "förvärvad|förvärva|förvärv" which never satisfies word-equality and
@@ -2900,8 +3346,10 @@ function render(searchResults, search, className) {
 
   const searchResultsFiltered = filterByLanguage(searchResults);
 
-  const wordToItemsMap = getMatchingWords(searchResultsFiltered, search);
-  populateSRTFindings(wordToItemsMap, $result);
+  const wordToItemsMap = await getMatchingWords(searchResultsFiltered, search, token);
+  if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
+  await populateSRTFindings(wordToItemsMap, $result, token);
+  if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
 
   if (Object.keys(wordToItemsMap).length === 0) {
     $result.html(resultNotFound(window.searchText))
@@ -2911,7 +3359,8 @@ function render(searchResults, search, className) {
 
   let wordToItemsMapNonSrt = {}
   if (window.location.pathname.includes("wordbuilder")) {
-    wordToItemsMapNonSrt = getMatchingWords(searchResults.filter(it => it.nonSrt), search, item => [item]);
+    wordToItemsMapNonSrt = await getMatchingWords(searchResults.filter(it => it.nonSrt), search, token);
+    if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
     populateNonSRTFindings(wordToItemsMapNonSrt, $result);
   }
 
@@ -2963,28 +3412,39 @@ class SearchResult {
   }
 }
 
-function fetchFromDownloadedFiles(lookingFor) {
+async function fetchFromDownloadedFiles(lookingFor, token) {
   lookingFor = expandWords(lookingFor)
 
-  return Object.keys(window.allSubtitles)
+  const keys = Object.keys(window.allSubtitles)
       .filter(it => window.allSubtitles[it].sv && window.allSubtitles[it].en)
-      .map(it => {
-        const svText = window.allSubtitles[it].sv;
-        const enText = window.allSubtitles[it].en;
+  const out = []
+  const re = new RegExp(lookingFor, "i")
+  const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
+  const CHUNK = 100
 
-        const svMatch = svText && svText.match(new RegExp(lookingFor, "i"))
-        const enMatch = enText && enText.match(new RegExp(lookingFor, "i"))
-        if (svMatch || enMatch) {
-          return new SearchResult(
-              window.allSubtitles[it].source,
-              it,
-              getSubs(enText, it + ".en.srt", it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
-              getSubs(svText, it + getTargetLangSrtSuffix(), it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
-              !!enMatch,
-              !!svMatch,
-          )
-        }
-      }).filter(it => it);
+  for (let start = 0; start < keys.length; start += CHUNK) {
+    if (token !== undefined && token !== window._subtitleSearchToken) return out
+    const end = Math.min(start + CHUNK, keys.length)
+    for (let i = start; i < end; i++) {
+      const it = keys[i]
+      const svText = window.allSubtitles[it].sv
+      const enText = window.allSubtitles[it].en
+      const svMatch = svText && svText.match(re)
+      const enMatch = enText && enText.match(re)
+      if (svMatch || enMatch) {
+        out.push(new SearchResult(
+            window.allSubtitles[it].source,
+            it,
+            getSubs(enText, it + ".en.srt", it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
+            getSubs(svText, it + getTargetLangSrtSuffix(), it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
+            !!enMatch,
+            !!svMatch,
+        ))
+      }
+    }
+    await yieldToUI()
+  }
+  return out
 }
 
 export function removeHintsInBrackets(txt) {
@@ -3187,10 +3647,35 @@ function guessStems(word, lang) {
   return _.uniq(stems)
 }
 
+function findUnknownExpansionRefs() {
+  const expansions = getExpansionForWords()
+  const known = new Set(Object.keys(expansions))
+  const unknown = new Map()
+  // Only Unicode letters count as the expansion key — stop at pipes, parens,
+  // brackets, punctuation, whitespace, etc.
+  const re = /<\*(?:\{[^}]*\})?(\p{L}+)/gu
+  Object.values(window.vocabulary || {}).flat().forEach(line => {
+    if (typeof line !== 'string') return
+    let m
+    re.lastIndex = 0
+    while ((m = re.exec(line)) !== null) {
+      const word = m[1] && m[1].toLowerCase()
+      if (!word || known.has(word)) continue
+      if (!unknown.has(word)) unknown.set(word, new Set())
+      unknown.get(word).add(line)
+    }
+  })
+  return Array.from(unknown.entries())
+      .map(([word, lines]) => ({ word, lines: Array.from(lines) }))
+      .sort((a, b) => a.word.localeCompare(b.word))
+}
+
 // Expose for console debugging — module-scoped functions aren't on window otherwise.
 window.guessStems = guessStems;
 window.wordIsInVocabularyLine = wordIsInVocabularyLine;
 window.renderVocabularyFindings = renderVocabularyFindings;
+window.findUnknownExpansionRefs = findUnknownExpansionRefs;
+window.searchVocabularyBySimilarity = searchVocabularyBySimilarity;
 
 async function fetchSRTs(searchText) {
   try {
@@ -3203,6 +3688,9 @@ async function fetchSRTs(searchText) {
 
     if (txt.length < 3) return
 
+    const _historyTerm = (window.unprocessedSearchText && window.unprocessedSearchText.trim()) || txt.trim()
+    recordSessionSearch(_historyTerm)
+
     window.searchText = txt;
     window.searchText = expandWords(window.searchText)
     window.searchText = _.trim(window.searchText, SEPARATOR_PIPE)
@@ -3212,9 +3700,19 @@ async function fetchSRTs(searchText) {
 
     window.allSubtitles = window.allSubtitles || {}
 
+    // Cancellation: each fetchSRTs invocation gets a fresh token; older runs
+    // bail out as soon as they observe a newer token, so the UI stays responsive
+    // when the user types quickly.
+    window._subtitleSearchToken = (window._subtitleSearchToken || 0) + 1
+    const myToken = window._subtitleSearchToken
+
+    $('#result').html('<div style="color:grey;padding:6px;">Searching subtitles…</div>')
+
     console.log("Loading from local")
-    window.searchResult = fetchFromDownloadedFiles(window.searchText.trim());
-    const words = render(window.searchResult, window.searchText, "primary")
+    window.searchResult = await fetchFromDownloadedFiles(window.searchText.trim(), myToken);
+    if (myToken !== window._subtitleSearchToken) return
+    const words = await render(window.searchResult, window.searchText, "primary", myToken)
+    if (myToken !== window._subtitleSearchToken) return
     const primaryHits = Object.values(words).flat().length
     console.log("[stem-fallback] primary hits:", primaryHits, "searchText:", window.searchText)
     if (!window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && primaryHits === 0) {
@@ -3223,9 +3721,10 @@ async function fetchSRTs(searchText) {
       console.log("[stem-fallback] stems:", stems)
       if (stems.length) {
         window.searchText = [window.searchText, ...stems].join(SEPARATOR_PIPE)
-        window.searchResult = fetchFromDownloadedFiles(window.searchText);
+        window.searchResult = await fetchFromDownloadedFiles(window.searchText, myToken);
+        if (myToken !== window._subtitleSearchToken) return
         console.log("[stem-fallback] secondary results:", window.searchResult.length)
-        render(window.searchResult, window.searchText, "secondary")
+        await render(window.searchResult, window.searchText, "secondary", myToken)
         // Removed: searchVocabularyByPrefix() — it would overwrite the
         // primary's stem-aware vocab matches with prefix-only matches,
         // dropping rows like "förvärvat" that don't share a prefix with
