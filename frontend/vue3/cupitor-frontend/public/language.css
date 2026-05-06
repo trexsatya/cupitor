@@ -14,6 +14,15 @@
     padding: 4px 0;
 }
 
+.lang-toolbar-center {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+    flex: 1 1 auto;
+}
+
 .lang-search-row {
     display: flex;
     flex-direction: column;
@@ -49,7 +58,8 @@
 
 .lang-search-select-row {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     width: 100%;
 }
 
@@ -88,6 +98,37 @@
     margin: 0 2px;
     flex-shrink: 0;
 }
+
+.search-vocab-popover-wrap {
+    position: relative;
+    display: inline-block;
+}
+
+.search-vocab-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: #fff;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    min-width: 160px;
+    padding: 4px;
+    gap: 2px;
+}
+
+.search-vocab-menu-item {
+    text-align: left;
+    width: 100%;
+}
+
+.vocabulary-segment.similar-tier-2 { background: #e8f1fb; }
+.vocabulary-segment.similar-tier-3-d1 { background: #fff7d6; }
+.vocabulary-segment.similar-tier-3-d2 { background: #fde9e3; }
 
 /* ── Drop-down panels ─────────────────────────────── */
 .lang-panel {

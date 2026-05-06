@@ -1791,6 +1791,15 @@
             <label>Opacity</label>
             <input type="range" id="prop-opacity" min="0" max="1" step="0.1" value="1" oninput="applyProperty('opacity', parseFloat(this.value))">
         </div>
+        <div class="prop-row prop-text-buttons">
+            <label>Layer</label>
+            <button class="prop-toggle" onclick="bringToFrontSelected()" title="Bring to Front">
+                <i class="fas fa-angles-up"></i>
+            </button>
+            <button class="prop-toggle" onclick="sendToBackSelected()" title="Send to Back">
+                <i class="fas fa-angles-down"></i>
+            </button>
+        </div>
     </div>
     <!-- Media section -->
     <div class="prop-section-divider"></div>
