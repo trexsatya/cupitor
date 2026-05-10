@@ -911,9 +911,12 @@
 
     // Capture text edits on IText/Textbox (including sticky-note inner text).
     // editing:exited fires once per edit session with the final text on e.target.
+    // Skip when a more specific handler already records the edit (e.g. textInQuad
+    // labels record via setQuadLabel).
     pc.on('text:editing:exited', function (e) {
         const t = e.target;
         if (!t || !t.uid) return;
+        if (t.customData && t.customData.skipSetTextRecording) return;
         recordScript(`setText(${JSON.stringify(t.uid)}, ${JSON.stringify(t.text)})`);
     });
 
@@ -1130,8 +1133,13 @@
         if (document.getElementById('mathjaxDialog').style.display === 'block') return false;
         if (selectedObj?.type === 'textbox' && selectedObj.isEditing) return;
 
-        // Escape: release current tool → select
+        // Escape: stop any in-flight anim/spotlight first, then release tool.
         if (e.key === 'Escape') {
+            if (window._activeAnim) {
+                stopActiveAnim();
+            } else {
+                if (typeof stopAnim === 'function') stopAnim();
+            }
             if (window.toolManager) window.toolManager.activate('select');
             return;
         }
@@ -1329,6 +1337,35 @@
     <button onclick="handleImageInputDialogButtons('')">Close</button>
 </div>
 
+<!-- Clear Before Play Dialog -->
+<div id="clearBeforePlayDialog" style="display:none;position:fixed;inset:0;z-index:9999998;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.35);min-width:320px;padding:18px 22px;font-family:system-ui,sans-serif;">
+        <div style="font-weight:600;font-size:14px;margin-bottom:12px;">Clear before playing?</div>
+        <label style="display:block;margin:6px 0;font-size:13px;"><input type="checkbox" id="clearBeforePlay-pc" checked> Player canvas</label>
+        <label style="display:block;margin:6px 0;font-size:13px;"><input type="checkbox" id="clearBeforePlay-oc" checked> Overlay drawings</label>
+        <label style="display:block;margin:6px 0;font-size:13px;"><input type="checkbox" id="clearBeforePlay-txt" checked> Text layer</label>
+        <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;">
+            <button onclick="closeClearBeforePlayDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Cancel</button>
+            <button onclick="confirmClearAndPlayStepwise()" style="padding:4px 10px;border:1px solid #1976D2;border-radius:4px;background:#fff;color:#1976D2;font-size:12px;cursor:pointer;">&#9197; Play Stepwise</button>
+            <button onclick="confirmClearAndPlay()" style="padding:4px 10px;border:1px solid #2e7d32;border-radius:4px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer;">&#9654; Play</button>
+        </div>
+    </div>
+</div>
+
+<!-- Stepwise Playback Panel -->
+<div id="stepwisePlayDialog" style="display:none;position:fixed;right:20px;bottom:20px;z-index:9999998;background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.35);width:520px;max-height:60vh;flex-direction:column;font-family:system-ui,sans-serif;border:1px solid #ddd;">
+    <div style="background:#f5f5f5;border-bottom:1px solid #ddd;padding:10px 14px;border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-weight:600;font-size:13px;color:#333;">&#9197; Stepwise &mdash; <span id="stepwiseIndex">0</span> / <span id="stepwiseTotal">0</span></span>
+        <button onclick="closeStepwiseDialog()" style="border:none;background:transparent;font-size:18px;cursor:pointer;line-height:1;" title="Close">&times;</button>
+    </div>
+    <div id="stepwiseLines" style="overflow:auto;padding:8px 12px;font-family:ui-monospace,Menlo,monospace;font-size:11px;flex:1;background:#fafafa;border-bottom:1px solid #eee;max-height:40vh;"></div>
+    <div style="padding:10px 14px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
+        <span id="stepwiseStatus" style="font-size:11px;color:#888;margin-right:auto;"></span>
+        <button onclick="stepwiseRunToEnd()" style="padding:5px 12px;border:1px solid #1976D2;border-radius:4px;background:#fff;color:#1976D2;font-size:12px;cursor:pointer;">&#9654; Run to End</button>
+        <button id="stepwiseNextBtn" onclick="stepwiseNext()" style="padding:5px 12px;border:1px solid #2e7d32;border-radius:4px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer;">&#9193; Next</button>
+    </div>
+</div>
+
 <!-- Script Viewer / Editor Dialog -->
 <div id="scriptViewerDialog" style="display:none;position:fixed;inset:0;z-index:9999998;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;">
     <div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.35);width:96vw;height:94vh;display:flex;flex-direction:column;font-family:system-ui,sans-serif;">
@@ -1355,7 +1392,7 @@
 </div>
 
 <div id="importDialog"
-     style="background: blue; color: white; display: none; z-index: 500000;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
+     style="background: blue; color: white; display: none; z-index: 9999999;position: absolute;left: 30%;top: 30%;width: 400px;height: 400px;border: 1px solid black;padding: 1%;">
     <input type="file" id="importInputFile">
 
     <button onclick="handleImportDialogButtons('OK')">OK</button>
@@ -1800,6 +1837,16 @@
                 <i class="fas fa-angles-down"></i>
             </button>
         </div>
+        <div class="prop-row">
+            <label>Animate</label>
+            <select id="prop-anim-type" style="flex:1;">
+                <option value="highlight">Highlight (zoom)</option>
+                <option value="spotlight">Spotlight (auto)</option>
+                <option value="spotlight:circle">Spotlight (circle)</option>
+                <option value="spotlight:rect">Spotlight (rect)</option>
+            </select>
+            <button id="prop-anim-toggle" class="prop-toggle" onclick="toggleSelectedAnim()" title="Start/Stop animation">&#9654; Start</button>
+        </div>
     </div>
     <!-- Media section -->
     <div class="prop-section-divider"></div>
@@ -1823,7 +1870,7 @@
         <div class="prop-section-divider"></div>
         <div class="prop-row">
             <label>Color</label>
-            <input type="color" id="prop-text-color" value="#222222" onchange="applyProperty('fill', this.value)">
+            <input type="color" id="prop-text-color" value="#222222" onchange="applyTextFill(this.value)">
         </div>
         <div class="prop-row">
             <label>Size</label>
@@ -2037,17 +2084,35 @@
         const shapeSection = document.getElementById('prop-shape-section');
         const textSection = document.getElementById('prop-text-section');
         const isText = isTextObject(obj);
+        const isSticky = _isStickyNote(obj);
+        // Sticky notes are a Group(rect, textbox) — read the paper colour
+        // from customData/inner rect, and the text props from inner text.
+        const stickyInnerText = isSticky && typeof obj.getObjects === 'function'
+            ? obj.getObjects().find(o => o.type === 'textbox' || o.type === 'i-text' || o.type === 'text')
+            : null;
+        const stickyInnerRect = isSticky && typeof obj.getObjects === 'function'
+            ? obj.getObjects().find(o => o.type === 'rect')
+            : null;
 
-        // Shape properties: show for non-text objects
+        // Shape properties: show for non-text objects (and for stickies —
+        // they expose paper colour + opacity but no stroke).
         if (isText) {
             shapeSection.style.display = 'none';
         } else {
             shapeSection.style.display = '';
-            document.getElementById('prop-fill').value = colorToHex(obj.fill) || '#333333';
-            document.getElementById('prop-stroke').value = colorToHex(obj.stroke) || '#000000';
-            document.getElementById('prop-stroke-width').value = obj.strokeWidth != null ? obj.strokeWidth : 1;
-            document.getElementById('prop-stroke-type').value = detectStrokeType(obj.strokeDashArray);
-            document.getElementById('prop-opacity').value = obj.opacity != null ? obj.opacity : 1;
+            if (isSticky) {
+                const paperFill = (obj.customData && obj.customData.color)
+                    || (stickyInnerRect && stickyInnerRect.fill)
+                    || '#FFE082';
+                document.getElementById('prop-fill').value = colorToHex(paperFill) || '#FFE082';
+                document.getElementById('prop-opacity').value = obj.opacity != null ? obj.opacity : 1;
+            } else {
+                document.getElementById('prop-fill').value = colorToHex(obj.fill) || '#333333';
+                document.getElementById('prop-stroke').value = colorToHex(obj.stroke) || '#000000';
+                document.getElementById('prop-stroke-width').value = obj.strokeWidth != null ? obj.strokeWidth : 1;
+                document.getElementById('prop-stroke-type').value = detectStrokeType(obj.strokeDashArray);
+                document.getElementById('prop-opacity').value = obj.opacity != null ? obj.opacity : 1;
+            }
         }
 
         // Tree node panel — only show when there are outgoing children
@@ -2066,17 +2131,19 @@
         document.getElementById('prop-media-url').value = _cd.mediaUrl || '';
         document.getElementById('prop-media-type').value = _cd.mediaType || 'image';
 
-        // Text section: show only for text-like objects
-        if (isText) {
+        // Text section: show for text-like objects AND for sticky notes
+        // (so users can tune the inner textbox's font/colour/alignment).
+        const textSrc = isSticky ? stickyInnerText : (isText ? obj : null);
+        if (textSrc) {
             textSection.style.display = '';
-            document.getElementById('prop-text-color').value = colorToHex(obj.fill) || '#222222';
-            document.getElementById('prop-font-size').value = obj.fontSize || 13;
-            document.getElementById('prop-bold').classList.toggle('active', obj.fontWeight === 'bold');
-            document.getElementById('prop-italic').classList.toggle('active', obj.fontStyle === 'italic');
-            document.getElementById('prop-underline').classList.toggle('active', !!obj.underline);
+            document.getElementById('prop-text-color').value = colorToHex(textSrc.fill) || '#222222';
+            document.getElementById('prop-font-size').value = textSrc.fontSize || 13;
+            document.getElementById('prop-bold').classList.toggle('active', textSrc.fontWeight === 'bold');
+            document.getElementById('prop-italic').classList.toggle('active', textSrc.fontStyle === 'italic');
+            document.getElementById('prop-underline').classList.toggle('active', !!textSrc.underline);
             // Match font family in dropdown
             const fontSelect = document.getElementById('prop-font-family');
-            const family = obj.fontFamily || 'Arial, sans-serif';
+            const family = textSrc.fontFamily || 'Arial, sans-serif';
             let matched = false;
             for (let i = 0; i < fontSelect.options.length; i++) {
                 if (family.indexOf(fontSelect.options[i].value.split(',')[0]) >= 0) {
@@ -2107,9 +2174,30 @@
         return ctx.fillStyle; // returns hex
     }
 
+    // For sticky notes, the active object is a Group whose paper colour
+    // and text props live on inner children — route those through
+    // setStickyProp so the right child is mutated and replay can use the
+    // same helper.
+    function _isStickyNote(obj) {
+        return !!(obj && obj.customData && obj.customData.type === 'stickyNote');
+    }
+    function _stickyPropMap(prop) {
+        // Translate panel-level prop names to setStickyProp prop names.
+        // (Text colour input shares the 'fill' prop name with paper colour
+        // on the panel, but we know which one it was by the input id.)
+        return prop === 'fill-text' ? 'textFill' : prop;
+    }
+
     function applyProperty(prop, value) {
         const obj = pc.getActiveObject();
         if (!obj) return;
+        if (_isStickyNote(obj)) {
+            const sp = _stickyPropMap(prop);
+            setStickyProp(obj, sp, value);
+            pc.requestRenderAll();
+            if (obj.uid) recordScript(`setStickyProp(${JSON.stringify(obj.uid)}, ${JSON.stringify(sp)}, ${JSON.stringify(value)})`);
+            return;
+        }
         const prevState = {};
         prevState[prop] = obj[prop];
         obj.set(prop, value);
@@ -2120,19 +2208,43 @@
         if (obj.uid) recordScript(`setProp('${obj.uid}', '${prop}', ${JSON.stringify(value)})`);
     }
 
+    function applyTextFill(value) {
+        const obj = pc.getActiveObject();
+        if (!obj) return;
+        if (_isStickyNote(obj)) {
+            setStickyProp(obj, 'textFill', value);
+            pc.requestRenderAll();
+            if (obj.uid) recordScript(`setStickyProp(${JSON.stringify(obj.uid)}, "textFill", ${JSON.stringify(value)})`);
+            return;
+        }
+        // For plain text objects, "fill" IS the text colour.
+        applyProperty('fill', value);
+    }
+
     function toggleTextProp(prop, onVal, offVal) {
         const obj = pc.getActiveObject();
         if (!obj) return;
-        const current = obj[prop];
+        const sticky = _isStickyNote(obj);
+        // For sticky notes, read current value from the inner textbox.
+        const innerText = sticky && typeof obj.getObjects === 'function'
+            ? obj.getObjects().find(o => o.type === 'textbox' || o.type === 'i-text' || o.type === 'text')
+            : null;
+        const current = sticky ? (innerText && innerText[prop]) : obj[prop];
         const newValue = current === onVal ? offVal : onVal;
-        const prevState = {};
-        prevState[prop] = current;
-        obj.set(prop, newValue);
-        pc.requestRenderAll();
-        const newState = {};
-        newState[prop] = newValue;
-        undoManager.push(Commands.modifyObject(pc, obj, prevState, newState));
-        if (obj.uid) recordScript(`setProp('${obj.uid}', '${prop}', ${JSON.stringify(newValue)})`);
+        if (sticky) {
+            setStickyProp(obj, prop, newValue);
+            pc.requestRenderAll();
+            if (obj.uid) recordScript(`setStickyProp(${JSON.stringify(obj.uid)}, ${JSON.stringify(prop)}, ${JSON.stringify(newValue)})`);
+        } else {
+            const prevState = {};
+            prevState[prop] = current;
+            obj.set(prop, newValue);
+            pc.requestRenderAll();
+            const newState = {};
+            newState[prop] = newValue;
+            undoManager.push(Commands.modifyObject(pc, obj, prevState, newState));
+            if (obj.uid) recordScript(`setProp('${obj.uid}', '${prop}', ${JSON.stringify(newValue)})`);
+        }
         // Update button state
         if (prop === 'fontWeight') document.getElementById('prop-bold').classList.toggle('active', newValue === 'bold');
         if (prop === 'fontStyle') document.getElementById('prop-italic').classList.toggle('active', newValue === 'italic');
@@ -2319,7 +2431,126 @@
         // Flush any unsaved edits in the ACE editor so the user plays what they see.
         if (window._scriptEditor) saveScriptEdits();
         closeScriptDialog();
+        openClearBeforePlayDialog();
+    }
+
+    function openClearBeforePlayDialog() {
+        $('#clearBeforePlay-pc').prop('checked', true);
+        $('#clearBeforePlay-oc').prop('checked', true);
+        $('#clearBeforePlay-txt').prop('checked', true);
+        $('#clearBeforePlayDialog').css('display', 'flex');
+    }
+
+    function closeClearBeforePlayDialog() {
+        $('#clearBeforePlayDialog').hide();
+    }
+
+    function confirmClearAndPlay() {
+        if ($('#clearBeforePlay-pc').is(':checked')) clear('pc');
+        if ($('#clearBeforePlay-oc').is(':checked')) clear('oc');
+        if ($('#clearBeforePlay-txt').is(':checked')) clear('txt');
+        closeClearBeforePlayDialog();
         playScript();
+    }
+
+    function confirmClearAndPlayStepwise() {
+        if ($('#clearBeforePlay-pc').is(':checked')) clear('pc');
+        if ($('#clearBeforePlay-oc').is(':checked')) clear('oc');
+        if ($('#clearBeforePlay-txt').is(':checked')) clear('txt');
+        closeClearBeforePlayDialog();
+        playScriptStepwise();
+    }
+
+    // ---- Stepwise Playback ----
+    window._stepwiseState = null;
+
+    function playScriptStepwise() {
+        const lines = (window.recordedScriptLines || []).map(s => (s + '').trim()).filter(Boolean);
+        if (!lines.length) return;
+        const fns = (typeof buildScriptExecutables === 'function')
+            ? buildScriptExecutables().map(eval)
+            : lines.map(l => {
+                const exec = (l.startsWith('animate') || l.startsWith('Promise')) ? 'return ' + l + ';' : l;
+                return eval('(() => { ' + exec + ' })');
+              });
+        window._stepwiseState = { lines: lines, fns: fns, index: 0, busy: false };
+        window.isRecordingPlayback = true;
+        $('#stepwisePlayDialog').css('display', 'flex');
+        renderStepwiseLines();
+    }
+
+    function closeStepwiseDialog() {
+        $('#stepwisePlayDialog').hide();
+        window._stepwiseState = null;
+        window.isRecordingPlayback = false;
+    }
+
+    function _stepwiseEscapeHtml(s) {
+        return (s + '').replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    function renderStepwiseLines() {
+        const s = window._stepwiseState;
+        if (!s) return;
+        const el = document.getElementById('stepwiseLines');
+        const total = s.lines.length;
+        document.getElementById('stepwiseIndex').textContent = Math.min(s.index, total);
+        document.getElementById('stepwiseTotal').textContent = total;
+        el.innerHTML = s.lines.map(function (line, i) {
+            const isCurrent = i === s.index;
+            const isDone = i < s.index;
+            const bg = isCurrent ? '#fff59d' : (isDone ? '#e8f5e9' : 'transparent');
+            const color = isDone ? '#888' : '#222';
+            const prefix = isCurrent ? '&#9654; ' : (isDone ? '&#10003; ' : '&nbsp;&nbsp;');
+            return '<div style="padding:2px 4px;background:' + bg + ';color:' + color +
+                ';white-space:pre-wrap;word-break:break-all;">' + prefix +
+                (i + 1).toString().padStart(3, ' ') + ': ' + _stepwiseEscapeHtml(line) + '</div>';
+        }).join('');
+        const nextBtn = document.getElementById('stepwiseNextBtn');
+        if (s.index >= total) {
+            nextBtn.disabled = true;
+            nextBtn.textContent = '✓ Done';
+            document.getElementById('stepwiseStatus').textContent = 'Finished';
+        } else {
+            nextBtn.disabled = !!s.busy;
+            nextBtn.innerHTML = '&#9193; Next';
+            document.getElementById('stepwiseStatus').textContent = s.busy ? 'Running…' : '';
+        }
+        const cur = el.children[s.index] || el.children[total - 1];
+        if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'center' });
+    }
+
+    function stepwiseNext() {
+        const s = window._stepwiseState;
+        if (!s || s.busy) return;
+        if (s.index >= s.fns.length) return;
+        const fn = s.fns[s.index];
+        s.busy = true;
+        renderStepwiseLines();
+        let result;
+        try { result = fn(); } catch (e) {
+            console.error('Stepwise error at line ' + (s.index + 1) + ':', e);
+        }
+        const advance = function () {
+            s.index += 1;
+            s.busy = false;
+            renderStepwiseLines();
+        };
+        if (result && typeof result.then === 'function') {
+            result.then(advance, advance);
+        } else {
+            advance();
+        }
+    }
+
+    function stepwiseRunToEnd() {
+        const s = window._stepwiseState;
+        if (!s) return;
+        const remaining = s.fns.slice(s.index);
+        closeStepwiseDialog();
+        if (remaining.length) schedule(remaining, 1);
     }
 
     // ---- Tree Node Panel ----
@@ -2456,7 +2687,16 @@
         // If any visible, hide all; otherwise show all
         const anyVisible = targets.some(c => c.visible !== false);
         targets.forEach(c => {
-            if (anyVisible) hideObject(c); else showObject(c);
+            if (anyVisible) {
+                hideObject(c);
+            } else {
+                showObject(c);
+                // Lift newly-revealed nodes above any overlapping objects so
+                // they're actually visible after Show.
+                if (c.canvas && typeof c.canvas.bringObjectToFront === 'function') {
+                    c.canvas.bringObjectToFront(c);
+                }
+            }
         });
         pc.requestRenderAll();
         // Re-render rows so opacity hint updates
@@ -2568,6 +2808,79 @@
             pc.requestRenderAll();
             if (obj.uid) recordScript(`bringToFront(${JSON.stringify(obj.uid)})`);
         }
+    }
+
+    // ---- Animate / Spotlight controls ----
+    // Tracks the currently-running Properties-panel-initiated anim so we can
+    // (a) toggle the button between Start/Stop, (b) stop on ESC, and
+    // (c) record the full start→stop cycle with the elapsed duration baked in.
+    window._activeAnim = null;
+
+    function _animBtn() { return document.getElementById('prop-anim-toggle'); }
+
+    function _setAnimBtnRunning(running) {
+        const btn = _animBtn();
+        if (!btn) return;
+        if (running) {
+            btn.innerHTML = '&#9209; Stop';
+            btn.classList.add('active');
+            btn.style.background = '#c62828';
+            btn.style.color = '#fff';
+        } else {
+            btn.innerHTML = '&#9654; Start';
+            btn.classList.remove('active');
+            btn.style.background = '';
+            btn.style.color = '';
+        }
+    }
+
+    function toggleSelectedAnim() {
+        if (window._activeAnim) {
+            stopActiveAnim();
+            return;
+        }
+        const obj = pc.getActiveObject();
+        if (!obj) return;
+        // Multi-select (activeSelection) has no uid of its own — gather
+        // every child's uid so we drive the animation across the whole
+        // selection. Single-object case becomes a 1-element list.
+        const isSelection = obj.type === 'activeSelection' && Array.isArray(obj._objects);
+        const uids = isSelection
+            ? obj._objects.map(o => o.uid).filter(Boolean)
+            : (obj.uid ? [obj.uid] : []);
+        if (!uids.length) return;
+        // Select value encodes type plus optional shape sub-choice, e.g.
+        // 'spotlight:circle'. Bare 'spotlight' = auto.
+        const raw = document.getElementById('prop-anim-type').value || 'highlight';
+        const colon = raw.indexOf(':');
+        const type = colon === -1 ? raw : raw.slice(0, colon);
+        const shape = colon === -1 ? null : raw.slice(colon + 1);
+        const opts = shape ? { shape: shape } : null;
+        // anim() accepts an array, an activeSelection, or a single uid.
+        anim(uids, type, opts || undefined);
+        window._activeAnim = { uids: uids, type: type, opts: opts, startedAt: Date.now() };
+        _setAnimBtnRunning(true);
+    }
+
+    function stopActiveAnim() {
+        const a = window._activeAnim;
+        if (!a) return;
+        const elapsedMs = Math.max(0, Date.now() - a.startedAt);
+        stopAnim(a.uids);
+        // Record as a single Promise-chained line so playback waits the same
+        // duration the user kept the anim running before invoking stop.
+        // Prefix `Promise.` is what buildScriptExecutables looks for to wrap
+        // the line with `return …;` and let schedule() await it.
+        const animArgs = a.opts
+            ? `${JSON.stringify(a.uids)}, ${JSON.stringify(a.type)}, ${JSON.stringify(a.opts)}`
+            : `${JSON.stringify(a.uids)}, ${JSON.stringify(a.type)}`;
+        recordScript(
+            `Promise.resolve(anim(${animArgs}))` +
+            `.then(()=>new Promise(r=>setTimeout(r,${elapsedMs})))` +
+            `.then(()=>stopAnim(${JSON.stringify(a.uids)}))`
+        );
+        window._activeAnim = null;
+        _setAnimBtnRunning(false);
     }
 
     function sendToBackSelected() {

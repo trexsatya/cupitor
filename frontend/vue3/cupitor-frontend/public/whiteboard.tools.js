@@ -89,88 +89,111 @@ function createStickyNote(x, y, options) {
 
 function enableStickyNoteEditing(canvas) {
   canvas.on('mouse:dblclick', function(e) {
-    const target = e.target;
-    if (!target || !target.customData || target.customData.type !== 'stickyNote') return;
-
-    // Find the textbox inside the group
-    const objects = target.getObjects();
-    const textObj = objects.find(o => o.type === 'textbox');
-    if (!textObj) return;
-
-    // Store group position
-    const groupLeft = target.left;
-    const groupTop = target.top;
-    const groupWidth = target.width * target.scaleX;
-    const groupHeight = target.height * target.scaleY;
-
-    // Remove group, add individual items
-    const rectObj = objects.find(o => o.type === 'rect');
-    canvas.remove(target);
-
-    rectObj.set({
-      left: groupLeft,
-      top: groupTop,
-      width: groupWidth,
-      height: groupHeight,
-      selectable: false,
-      evented: false
-    });
-    canvas.add(rectObj);
-
-    textObj.set({
-      left: groupLeft + 10,
-      top: groupTop + 10,
-      width: groupWidth - 20,
-      editable: true,
-      selectable: true
-    });
-    canvas.add(textObj);
-    canvas.setActiveObject(textObj);
-    textObj.enterEditing();
-
-    // When editing ends, regroup
-    const finishEditing = function() {
-      textObj.exitEditing();
-      canvas.remove(rectObj);
-      canvas.remove(textObj);
-
-      const newRect = new fabric.Rect({
-        width: groupWidth,
-        height: groupHeight,
-        fill: target.customData.color,
-        rx: 4,
-        ry: 4,
-        shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.2)', blur: 8, offsetX: 2, offsetY: 2 }),
-        originX: 'center',
-        originY: 'center'
-      });
-      const newText = new fabric.Textbox(textObj.text, {
-        width: groupWidth - 20,
-        fontSize: textObj.fontSize,
-        originX: 'center',
-        originY: 'center',
-        textAlign: 'left',
-        fill: '#333',
-        fontFamily: 'Arial, sans-serif',
-        editable: false
-      });
-      const newGroup = new fabric.Group([newRect, newText], {
-        left: groupLeft,
-        top: groupTop,
-        subTargetCheck: true
-      });
-      newGroup.uid = target.uid;
-      newGroup.customData = target.customData;
-      canvas.add(newGroup);
-      canvas.setActiveObject(newGroup);
-      canvas.requestRenderAll();
-
-      textObj.off('editing:exited', finishEditing);
-    };
-
-    textObj.on('editing:exited', finishEditing);
-    canvas.requestRenderAll();
+    // With subTargetCheck:true on the sticky group, fabric may set
+    // e.target to a child instead of the group. Walk up to find the
+    // sticky-note group.
+    let target = e.target;
+    while (target && (!target.customData || target.customData.type !== 'stickyNote')) {
+      target = target.group;
+    }
+    if (!target) return;
+    _showStickyTextEditor(canvas, target);
   });
+}
+
+// Floating HTML <textarea> overlaid on top of the sticky note. We avoid
+// ungroup-and-edit-in-fabric because fabric v6's group-child transforms
+// don't cleanly survive being re-added to the canvas — children retain
+// group-relative coords and end up far off / invisible. An HTML editor
+// sidesteps that entirely. On commit we route the new text through
+// `setText(uid, …)` so the existing replay path (and recording) is reused.
+function _showStickyTextEditor(canvas, group) {
+  if (!group || typeof group.getObjects !== 'function') return;
+  const inner = group.getObjects().find(o =>
+    o.type === 'textbox' || o.type === 'i-text' || o.type === 'text');
+  if (!inner) return;
+
+  // Tear down any prior editor (rapid double-clicks).
+  const existing = document.getElementById('_sticky-html-editor');
+  if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+  const c = group.getCenterPoint();
+  const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
+  const screen = fabric.util.transformPoint({ x: c.x, y: c.y }, vpt);
+  const canvasEl = canvas.lowerCanvasEl || canvas.upperCanvasEl;
+  const rect = canvasEl.getBoundingClientRect();
+  const w = group.width * group.scaleX * Math.abs(vpt[0]);
+  const h = group.height * group.scaleY * Math.abs(vpt[3]);
+  const inset = 10;
+
+  const ta = document.createElement('textarea');
+  ta.id = '_sticky-html-editor';
+  ta.value = inner.text || '';
+  ta.style.position = 'fixed';
+  ta.style.left  = (rect.left + screen.x - w / 2 + inset) + 'px';
+  ta.style.top   = (rect.top  + screen.y - h / 2 + inset) + 'px';
+  ta.style.width  = Math.max(20, w - inset * 2) + 'px';
+  ta.style.height = Math.max(20, h - inset * 2) + 'px';
+  ta.style.background = 'transparent';
+  ta.style.color = inner.fill || '#333';
+  ta.style.fontSize = (inner.fontSize || 16) + 'px';
+  ta.style.fontFamily = inner.fontFamily || 'Arial, sans-serif';
+  ta.style.fontWeight = inner.fontWeight || 'normal';
+  ta.style.fontStyle = inner.fontStyle || 'normal';
+  ta.style.textAlign = inner.textAlign || 'left';
+  ta.style.border = '2px solid #1976D2';
+  ta.style.borderRadius = '4px';
+  ta.style.padding = '2px 4px';
+  ta.style.boxSizing = 'border-box';
+  ta.style.zIndex = '999999';
+  ta.style.resize = 'none';
+  ta.style.outline = 'none';
+  ta.style.lineHeight = '1.2';
+
+  // Hide the inner textbox while editing so the overlay isn't doubled up.
+  const prevVisible = inner.visible;
+  inner.visible = false;
+  group.dirty = true;
+  canvas.requestRenderAll();
+
+  document.body.appendChild(ta);
+  // Defer focus so the dblclick's own focus shifts don't immediately blur it.
+  setTimeout(() => { ta.focus(); ta.select(); }, 0);
+
+  let done = false;
+  const cleanup = (commit) => {
+    if (done) return;
+    done = true;
+    inner.visible = prevVisible;
+    if (commit) {
+      const newText = ta.value;
+      if (newText !== inner.text) {
+        inner.set({ text: newText });
+        group.dirty = true;
+        if (typeof recordScript === 'function') {
+          recordScript('setText(' + JSON.stringify(group.uid) + ', ' + JSON.stringify(newText) + ')');
+        }
+      }
+    }
+    if (ta.parentNode) ta.parentNode.removeChild(ta);
+    canvas.requestRenderAll();
+  };
+
+  ta.addEventListener('blur', () => cleanup(true));
+  // Keep keystrokes inside the textarea: the page wires several document-
+  // and window-level keydown handlers (undo/redo, Ctrl+A, Delete, space
+  // for canvas pan, etc.). Without stopPropagation, typing 'a' or 'z' or
+  // hitting Backspace/Delete in the editor would also fire those canvas
+  // shortcuts. We still let Escape run our cancel before stopping it.
+  ta.addEventListener('keydown', (ke) => {
+    ke.stopPropagation();
+    if (ke.key === 'Escape') {
+      ke.preventDefault();
+      cleanup(false);
+    }
+  });
+  ta.addEventListener('keyup',    (ke) => ke.stopPropagation());
+  ta.addEventListener('keypress', (ke) => ke.stopPropagation());
 }
 
 // --- Alignment Guides ---
@@ -640,7 +663,8 @@ class ShapeTextManager {
       fontStyle: 'normal',
       fontFamily: 'Arial, sans-serif',
     }, style);
-    const label = new fabric.Textbox(text || 'Label', {
+    const labelText = text || 'Label';
+    const label = new fabric.Textbox(labelText, {
       left: pos.x,
       top: pos.y,
       originX: 'center',
@@ -657,7 +681,11 @@ class ShapeTextManager {
       backgroundColor: isOutside ? 'rgba(255,255,255,0.85)' : '',
       padding: 2
     });
-    label.uid = typeof uuid === 'function' ? uuid() : Math.random().toString(36).slice(2);
+    // Use a semantic uid (T<n>) so script recordings — including the global
+    // text:editing:exited setText handler — reference a stable, replay-safe id.
+    label.uid = (style && style.uid)
+      || (typeof semanticUid === 'function' ? semanticUid('textbox')
+          : (typeof uuid === 'function' ? uuid() : Math.random().toString(36).slice(2)));
     label.customData = { type: 'shapeLabel', shapeUid: shape.uid, position };
 
     if (!this._labels.has(shape.uid)) this._labels.set(shape.uid, []);
@@ -665,6 +693,13 @@ class ShapeTextManager {
     this.canvas.add(label);
     this.canvas.setActiveObject(label);
     this.canvas.requestRenderAll();
+
+    if (typeof recordScript === 'function') {
+      const recOpts = Object.assign({}, style || {}, { uid: label.uid });
+      recordScript(
+        `addShapeLabel(${JSON.stringify(shape.uid)},${JSON.stringify(position)},${JSON.stringify(labelText)},${JSON.stringify(recOpts)})`
+      );
+    }
     return label;
   }
 
@@ -720,7 +755,11 @@ class ShapeTextManager {
 // --- Sticky note + eraser click handling ---
 function initStickyAndEraserHandlers(canvas, toolManager, undoManager) {
   canvas.on('mouse:up', function(e) {
-    if (window._insertStickyNote && e.e) {
+    // Only place a fresh sticky when the click landed on empty canvas. With
+    // the tool sticky-active across clicks (rapid-placement UX), an
+    // unguarded handler would also drop a duplicate every time the user
+    // clicked or double-clicked an existing note to select/edit it.
+    if (window._insertStickyNote && e.e && !e.target) {
       const pointer = canvas.getPointer(e.e);
       const x = pointer.x - 100, y = pointer.y - 100;
       const note = createStickyNote(x, y);
@@ -728,7 +767,23 @@ function initStickyAndEraserHandlers(canvas, toolManager, undoManager) {
       if (undoManager) undoManager.push(Commands.addObject(canvas, note));
       if (typeof recordScript === 'function') {
         const r2 = n => Math.round(n * 100) / 100;
-        const opts = { uid: note.uid, fill: note.customData && note.customData.color };
+        // Capture the full creation state — paper colour, dimensions,
+        // initial text, font props — so replay can reconstruct a
+        // non-default-sized / pre-filled sticky exactly. Subsequent moves
+        // and resizes are recorded via animate(), and customizations via
+        // setStickyProp(), so this snapshot only needs to cover *initial*
+        // properties.
+        const innerKids = typeof note.getObjects === 'function' ? note.getObjects() : [];
+        const innerRect = innerKids.find(o => o.type === 'rect');
+        const innerText = innerKids.find(o => o.type === 'textbox' || o.type === 'i-text' || o.type === 'text');
+        const opts = {
+          uid: note.uid,
+          fill: (note.customData && note.customData.color) || (innerRect && innerRect.fill),
+          width:  innerRect ? innerRect.width  : 200,
+          height: innerRect ? innerRect.height : 200,
+          text:     innerText ? (innerText.text || '') : '',
+          fontSize: innerText ? innerText.fontSize : 16
+        };
         recordScript(`addStickyNote(${r2(x)},${r2(y)},${JSON.stringify(opts)})`);
       }
       canvas.requestRenderAll();

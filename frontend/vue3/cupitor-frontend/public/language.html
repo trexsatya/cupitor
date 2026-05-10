@@ -216,7 +216,7 @@
                     </label>
                     <label class="lang-panel-label" title="Max results for Search Similar">
                         Similar
-                        <input type="number" id="numberOfSimilarFindings" value="10" min="1" max="200" style="width: 46px; margin-left: 4px;">
+                        <input type="number" id="numberOfSimilarFindings" value="30" min="1" max="200" style="width: 46px; margin-left: 4px;">
                     </label>
                     <label class="lang-panel-label">
                         Lang
@@ -233,10 +233,14 @@
                             </label>
                         </div>
                     </label>
+                    <button id="addToVocabBtn" onclick="openAddToVocabDialog()" class="button-62" disabled>Add To Vocab</button>
+                    <button id="saveStarredLinesBtn" onclick="saveStarredLines()" style="display: none;">Save Starred Lines</button>
+                    <button id="saveRevisionBtn" onclick="saveRevision()" style="display: none;">Save Revision</button>
                 </div>
                 <div id="searchesControl" style="padding-top: 16px;">
-                    <button id="addToVocabBtn" onclick="openAddToVocabDialog()" class="button-62" disabled>Add To Vocab</button>
+                    
                 </div>
+                
                 </div>
 
                 <!-- Media panel: hidden by default -->
@@ -283,7 +287,7 @@
                     </symbol>
                 </defs>
             </svg>
-            <div id="resultContainer" style="display: none;margin-top: 2em;">
+            <div id="resultContainer" style="display: none;">
                 <div id="vocabularyResult">
 
                 </div>
@@ -318,6 +322,10 @@
                     <option value="below" selected>below selected word</option>
                     <option value="inline">inline selected word</option>
                 </select>
+            </div>
+            <div style="margin-top: 0.5em;">
+                <label style="font-size:0.85em;" title="Append the lines below to this category (creating it if it doesn't exist). When set, the reference word and Insert position are ignored.">Or new/existing category: </label>
+                <input id="vocabNewCategory" type="text" placeholder="leave empty to use selected reference" style="width: 60%;">
             </div>
             <div style="margin-top: 0.5em;display:flex;gap:4px;flex-wrap:wrap;">
                 <button type="button" onclick="insertIntoVocabSegment('|')" style="font-family:monospace;min-width:32px;">|</button>
@@ -383,14 +391,14 @@
                         </div>
 
                     </div>
-                    <div style="text-align: center; ">
+                    <div style="text-align: center; padding-right: 2em;">
                         <select id="starredLinesSelect" style="display: none; margin-right: 2em;"></select>
                         <button id="rewindBtn"
-                                style="font-weight: bolder;font-size: larger; margin-right: 3em;width: 3em;height: 2em;"> <
+                                style="font-weight: bolder;font-size: larger; margin-right: 1em;width: 3em;height: 2.5em;"> <
                         </button>
                         <button id="playBtn" class="play-btn">Play</button>
                         <button id="hideMediaRelatedContainer"
-                            style="font-weight: bolder;font-size: larger; margin-left: 3em;width: 3em;height: 2em;"> X
+                            style="font-weight: bolder;font-size: larger; margin-left: 10px;width: 3em;height: 2.5em;"> X
                         </button>
                     </div>
                 </div>
@@ -401,7 +409,6 @@
             <br>
             <br>
             <div id="sv-sub" style="font-size: large;"></div>
-            <div id="sv-sub-mirror" style="font-size: smaller; color: grey"></div>
             <br>
             <br>
             <div id="en-sub" style="display: none;"></div>
@@ -418,13 +425,11 @@
 
 </div>
 <br/>
-<div style="z-index: -1;color: grey; margin-top: 1em; position: absolute; top: 1px; left: 60%;" id="player-info">
+<div style="z-index: -1;color: grey; margin-top: 1em; position: absolute; top: 1px; left: 60%;display: none;" id="player-info">
     <span style="margin-left: 2em;display: none;">Media:</span> <span id="currentMedia"></span> <span id="currentTime"
                                                                                         style="padding-left: 1em;"></span>
     <span
         id="currentSpeed" style="padding-left: 1em;"></span>
-    <button id="saveStarredLinesBtn" onclick="saveStarredLines()" style="display: none;">Save Starred Lines</button>
-    <button id="saveRevisionBtn" onclick="saveRevision()" style="display: none;">Save Revision</button>
 </div>
 
 <div id="message" style="display: none"></div>

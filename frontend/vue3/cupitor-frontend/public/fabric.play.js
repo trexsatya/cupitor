@@ -874,10 +874,10 @@ function editFabricjsObject(txt, obj) {
       })
       break
     case 'anim':
-      highlightByZooming(obj, pc)
+      anim(obj, data || 'highlight')
       break
     case 'stop'  :
-      stopAnimation(obj, pc)
+      stopAnim(obj)
       break
     case 'controls':
       obj.hasControls = data === 'on'

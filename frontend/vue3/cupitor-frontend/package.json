@@ -51,6 +51,7 @@
     "eslint-plugin-import": "^2.20.2",
     "eslint-plugin-vue": "^6.2.2",
     "terser": "^5.31.0",
+    "terser5": "npm:terser@^5.31.0",
     "typescript": "~3.8.3",
     "vue-template-compiler": "^2.6.11"
   }

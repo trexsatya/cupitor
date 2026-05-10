@@ -497,6 +497,10 @@ function textInQuad(textStr, x, y, width, height, optsText, optsShape) {
   attachQuadBehavior(quad, text);
   quad.uid = semanticUid('quad');
   quad.customData = { type: 'textInQuad', text: textStr };
+  // Inner label is recorded via setQuadLabel against the polygon's uid; flag
+  // it so the canvas-level text:editing:exited handler skips a duplicate
+  // (and uid-incorrect) setText recording.
+  text.customData = Object.assign({}, text.customData, { skipSetTextRecording: true });
   return { quad, text };
 }
 
@@ -747,10 +751,99 @@ function addMath(text, left, top, opts) {
 
 function setText(uidOrObj, text) {
   const obj = findIfRequired(uidOrObj);
-  if (!obj) return;
-  obj.set({ text: text == null ? '' : String(text) });
+  // findById falls back to a jQuery selection when no fabric object matches;
+  // an empty/jQuery result means there's nothing to update — bail loudly so
+  // playback continues instead of crashing on `obj.set is not a function`.
+  if (!obj || !isFabricObject(obj)) {
+    console.warn('setText: no fabric object found for', uidOrObj);
+    return;
+  }
+  const newText = text == null ? '' : String(text);
+  // Sticky-note groups carry the stable semantic uid (SN<n>); the editable
+  // text lives as a child of the group, so route the update there.
+  const isStickyGroup = obj.customData && obj.customData.type === 'stickyNote'
+    && typeof obj.getObjects === 'function';
+  if (isStickyGroup) {
+    const inner = obj.getObjects().find(o =>
+      o.type === 'textbox' || o.type === 'i-text' || o.type === 'text');
+    if (inner) {
+      inner.set({ text: newText });
+      obj.dirty = true;
+    }
+  } else {
+    obj.set({ text: newText });
+  }
   obj.setCoords();
   if (obj.canvas) obj.canvas.requestRenderAll();
+}
+
+// Sticky-note property helper used by the Properties panel and replay.
+// A sticky note is a Group(rect + textbox); each prop targets the right
+// child so e.g. "fill" updates the paper colour (inner rect) rather than
+// no-op'ing on the group itself, and font props update the inner textbox.
+//
+// Recognised props: 'fill' (paper), 'textFill' (text colour), 'fontSize',
+// 'fontFamily', 'fontWeight', 'fontStyle', 'underline', 'textAlign',
+// 'width', 'height', 'opacity'.
+function setStickyProp(uidOrObj, prop, value) {
+  const obj = findIfRequired(uidOrObj);
+  if (!obj || !isFabricObject(obj)) return;
+  if (!(obj.customData && obj.customData.type === 'stickyNote')) return;
+  if (typeof obj.getObjects !== 'function') return;
+  const children = obj.getObjects();
+  const innerRect = children.find(o => o.type === 'rect');
+  const innerText = children.find(o => o.type === 'textbox' || o.type === 'i-text' || o.type === 'text');
+
+  switch (prop) {
+    case 'fill': // paper colour
+      if (innerRect) innerRect.set({ fill: value });
+      obj.customData.color = value;
+      break;
+    case 'opacity':
+      obj.set({ opacity: value });
+      break;
+    case 'width':
+    case 'height':
+      // Update the underlying group dimension; rect/textbox child
+      // dimensions are recomputed on next regroup.
+      obj.set(prop, value);
+      if (innerRect) innerRect.set(prop, value);
+      if (innerText && prop === 'width') innerText.set('width', Math.max(20, value - 20));
+      break;
+    case 'textFill':
+      if (innerText) innerText.set({ fill: value });
+      break;
+    case 'fontSize':
+    case 'fontFamily':
+    case 'fontWeight':
+    case 'fontStyle':
+    case 'underline':
+    case 'textAlign':
+      if (innerText) innerText.set(prop, value);
+      break;
+    default:
+      return;
+  }
+  obj.dirty = true;
+  if (innerRect) innerRect.dirty = true;
+  if (innerText) innerText.dirty = true;
+  if (obj.canvas) obj.canvas.requestRenderAll();
+}
+
+// Replay-side helper: recreate a shape label that was added via the label
+// picker. The shape must already exist on the canvas (its addRect / addEllipse
+// line should run earlier in the script).
+function addShapeLabel(shapeUid, position, text, opts) {
+  const shape = findIfRequired(shapeUid);
+  if (!shape || !isFabricObject(shape)) {
+    console.warn('addShapeLabel: shape not found for uid', shapeUid);
+    return;
+  }
+  if (!window.shapeTextManager || typeof window.shapeTextManager.addLabel !== 'function') {
+    console.warn('addShapeLabel: shapeTextManager not initialized');
+    return;
+  }
+  return window.shapeTextManager.addLabel(shape, position, text, opts || {});
 }
 
 function bringToFront(uidOrObj) {
@@ -1850,52 +1943,325 @@ function matex(text, callback) {
 }
 
 const highlightByZooming = function(object, canvas, opts){
-    const me = object.externalData || {}
-
+    // Pulse the object's scale up and down so it draws the eye. Uses
+    // scaleX/scaleY (universal fabric.Object props) — the previous version
+    // used zoomX/zoomY which only exist on fabric.Image and were undefined
+    // for rect/ellipse/group/textbox, so the animation silently no-op'd.
+    opts = opts || {};
+    const me = object.externalData || {};
     me.stopAnimation = false;
 
-    let fn = null;
+    const origScaleX = object.scaleX != null ? object.scaleX : 1;
+    const origScaleY = object.scaleY != null ? object.scaleY : 1;
+    me.originalProps = me.originalProps || {};
+    me.originalProps.scaleX = origScaleX;
+    me.originalProps.scaleY = origScaleY;
 
-    const originalZoomY = object.zoomY
-    const originalZoomX = object.zoomX
-    me.originalProps = me.originalProps || {}
-    me.originalProps.zoomX = originalZoomX
-    me.originalProps.zoomY = originalZoomY
+    const factor = opts.factor || 1.18;
+    const duration = opts.duration || 600;
+    const targets = [
+        { scaleX: origScaleX * factor, scaleY: origScaleY * factor },
+        { scaleX: origScaleX,          scaleY: origScaleY          }
+    ];
 
-    const range = (x) => [x*2, 2*x/3] //zoomout, zoomin
-
-    const zoomX = range(originalZoomX)
-    const zoomY = range(originalZoomY)
-
-    let timer = 0;
-    fn = (prop, values, opts) => {
-        opts = opts || {}
-        object.animate(prop, values[timer], Object.assign({},
-            {
-                duration: 1000,
-                onChange: canvas.renderAll.bind(canvas),
-
-                abort: () => !object || me.stopAnimation
-            },
-            opts || {},
-            {
-                onComplete: ()=> {fn(prop, values, opts); if(opts.onComplete) opts.onComplete();}
+    let phase = 0;
+    const tick = () => {
+        if (me.stopAnimation || !object) return;
+        const target = targets[phase];
+        // fabric v6 only exposes the object form of animate; passing two
+        // keys fans out into two animations, so onComplete fires twice. Wait
+        // for both before advancing phase or we'd skip the rest cycle.
+        const totalKeys = Object.keys(target).length;
+        let done = 0;
+        object.animate(target, {
+            duration: duration,
+            onChange: () => { canvas.renderAll(); },
+            abort: () => !object || me.stopAnimation,
+            onComplete: () => {
+                if (++done < totalKeys) return;
+                object.setCoords && object.setCoords();
+                phase = (phase + 1) % targets.length;
+                if (!me.stopAnimation) tick();
             }
-            )
-        );
-
-    }
+        });
+    };
 
     me.animating = true;
-    fn('zoomX', zoomX);
-    fn('zoomY', zoomY, { onComplete: ()=> timer = (timer+1)%2 });
-
-    me.animating = true
-    if(opts){
-        me.changeCircle(opts)
-    }
+    tick();
     object.externalData = me;
     return me;
+}
+
+// ---- Spotlight effect ----------------------------------------------------
+// A DOM/SVG overlay positioned over the lower fabric canvas. The veil fills
+// the canvas with a translucent dark fill; one ellipse per target is masked
+// out so the underlying object reads as "lit" while everything else dims.
+// Animation = fade-in + a gentle veil pulse driven by CSS keyframes.
+
+const _SPOTLIGHT_NS = 'http://www.w3.org/2000/svg';
+const _SPOTLIGHT_STYLE_ID = 'spotlight-style';
+const _SPOTLIGHT_OVERLAY_ID = 'spotlight-overlay';
+
+function _spotlightInjectStyle() {
+  if (document.getElementById(_SPOTLIGHT_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = _SPOTLIGHT_STYLE_ID;
+  style.textContent =
+    '#' + _SPOTLIGHT_OVERLAY_ID + '{position:fixed;pointer-events:none;z-index:99998;opacity:0;transition:opacity .35s ease;}' +
+    '#' + _SPOTLIGHT_OVERLAY_ID + '.on{opacity:1;}' +
+    '#' + _SPOTLIGHT_OVERLAY_ID + ' .veil{animation:spotlightPulse 1.6s ease-in-out infinite;}' +
+    '@keyframes spotlightPulse{0%,100%{fill-opacity:.62;}50%{fill-opacity:.82;}}';
+  document.head.appendChild(style);
+}
+
+function _spotlightTargets(t) {
+  return (t && t.type === 'activeSelection' && Array.isArray(t._objects))
+    ? t._objects.slice()
+    : [t];
+}
+
+function _spotlightWorldBox(obj, canvas) {
+  // Compute bounding box on the lower canvas in pixel coords, accounting for
+  // viewportTransform (so spotlight tracks pan/zoom).
+  const ac = obj.aCoords || (typeof obj.calcACoords === 'function' ? obj.calcACoords() : null);
+  if (!ac) return null;
+  const corners = [ac.tl, ac.tr, ac.br, ac.bl];
+  const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
+  const tx = corners.map(p => fabric.util.transformPoint({ x: p.x, y: p.y }, vpt));
+  const xs = tx.map(p => p.x), ys = tx.map(p => p.y);
+  return {
+    minX: Math.min.apply(null, xs),
+    maxX: Math.max.apply(null, xs),
+    minY: Math.min.apply(null, ys),
+    maxY: Math.max.apply(null, ys)
+  };
+}
+
+function spotlight(uidOrObjOrList, opts) {
+  opts = opts || {};
+  const padding = opts.padding != null ? opts.padding : 30;
+
+  // Resolve to a flat list of fabric objects (handles a single uid/object,
+  // an array of uids/objects, and an activeSelection — flattened to its
+  // children so per-child cutouts work in the same code path).
+  const inputs = Array.isArray(uidOrObjOrList) ? uidOrObjOrList : [uidOrObjOrList];
+  const targets = [];
+  inputs.forEach(inp => {
+    const obj = findIfRequired(inp);
+    if (!obj || !isFabricObject(obj)) return;
+    if (obj.type === 'activeSelection' && Array.isArray(obj._objects)) {
+      obj._objects.forEach(c => targets.push(c));
+    } else {
+      targets.push(obj);
+    }
+  });
+  if (!targets.length) return null;
+
+  const canvas = targets[0].canvas || window.pc;
+  if (!canvas) return null;
+
+  _spotlightInjectStyle();
+
+  const canvasEl = canvas.lowerCanvasEl || canvas.upperCanvasEl;
+  const rect = canvasEl.getBoundingClientRect();
+  const cssW = canvas.getWidth();
+  const cssH = canvas.getHeight();
+
+  let overlay = document.getElementById(_SPOTLIGHT_OVERLAY_ID);
+  if (overlay) overlay.remove();
+  overlay = document.createElementNS(_SPOTLIGHT_NS, 'svg');
+  overlay.setAttribute('id', _SPOTLIGHT_OVERLAY_ID);
+  // viewBox locks the SVG's internal coord system to canvas-internal units
+  // so cx/cy values computed in fabric pixels land in the correct screen
+  // spot regardless of any CSS scaling between fabric units and DOM size.
+  overlay.setAttribute('viewBox', '0 0 ' + cssW + ' ' + cssH);
+  overlay.setAttribute('preserveAspectRatio', 'none');
+  overlay.setAttribute('width', rect.width);
+  overlay.setAttribute('height', rect.height);
+  overlay.style.left = rect.left + 'px';
+  overlay.style.top = rect.top + 'px';
+  overlay.style.width = rect.width + 'px';
+  overlay.style.height = rect.height + 'px';
+
+  const defs = document.createElementNS(_SPOTLIGHT_NS, 'defs');
+  const mask = document.createElementNS(_SPOTLIGHT_NS, 'mask');
+  mask.setAttribute('id', 'spotlight-cutout');
+  const maskBg = document.createElementNS(_SPOTLIGHT_NS, 'rect');
+  maskBg.setAttribute('width', '100%');
+  maskBg.setAttribute('height', '100%');
+  maskBg.setAttribute('fill', 'white');
+  mask.appendChild(maskBg);
+
+  // Use the rendered AABB (post-viewportTransform) as both the size *and*
+  // the position source. Its midpoint is the true visual centre — which
+  // matches what the user sees — even for rotated objects, groups whose
+  // origin point is offset, or shapes with strokes/shadows. This avoids
+  // the upward-bias seen when using getCenterPoint() (the transform-origin
+  // centre, not the visible centre).
+  // Shape: 'circle' | 'rect' | 'auto' (default). Auto picks circle for
+  // roughly-square bboxes and rect for elongated ones.
+  const requestedShape = (opts.shape || 'auto') + '';
+  const cornerRadius = opts.cornerRadius != null ? opts.cornerRadius : 12;
+  targets.forEach(t => {
+    if (!t || typeof t.getBoundingRect !== 'function') return;
+    // absolute=false → coords are already viewport-transformed (canvas
+    // pixel space, which the SVG viewBox is locked to).
+    const br = t.getBoundingRect(false, true);
+    if (!br || !br.width || !br.height) return;
+    const w = br.width, h = br.height;
+    const cx = br.left + w / 2;
+    const cy = br.top  + h / 2;
+    const aspect = Math.max(w, h) / Math.max(1, Math.min(w, h));
+    const shape = requestedShape === 'auto'
+      ? (aspect < 1.4 ? 'circle' : 'rect')
+      : requestedShape;
+    if (shape === 'rect') {
+      const r = document.createElementNS(_SPOTLIGHT_NS, 'rect');
+      r.setAttribute('x', cx - w / 2 - padding);
+      r.setAttribute('y', cy - h / 2 - padding);
+      r.setAttribute('width',  w + padding * 2);
+      r.setAttribute('height', h + padding * 2);
+      r.setAttribute('rx', cornerRadius);
+      r.setAttribute('ry', cornerRadius);
+      r.setAttribute('fill', 'black');
+      mask.appendChild(r);
+    } else {
+      // True circle, radius = half the longer side + padding, centred on
+      // the AABB midpoint so the object sits dead centre.
+      const radius = Math.max(w, h) / 2 + padding;
+      const ell = document.createElementNS(_SPOTLIGHT_NS, 'circle');
+      ell.setAttribute('cx', cx);
+      ell.setAttribute('cy', cy);
+      ell.setAttribute('r', radius);
+      ell.setAttribute('fill', 'black');
+      mask.appendChild(ell);
+    }
+  });
+  defs.appendChild(mask);
+  overlay.appendChild(defs);
+
+  const veil = document.createElementNS(_SPOTLIGHT_NS, 'rect');
+  veil.setAttribute('class', 'veil');
+  veil.setAttribute('width', '100%');
+  veil.setAttribute('height', '100%');
+  veil.setAttribute('fill', opts.color || '#000');
+  veil.setAttribute('mask', 'url(#spotlight-cutout)');
+  overlay.appendChild(veil);
+
+  document.body.appendChild(overlay);
+  // Force layout, then add the .on class to trigger fade-in.
+  overlay.getBoundingClientRect();
+  overlay.classList.add('on');
+
+  // Tag every target so stopSpotlight() can find any of them and tear down
+  // the shared overlay. Use the same overlay/startedAt object so a single
+  // entry in window.pc tracks the whole batch.
+  const sharedState = { overlay: overlay, startedAt: Date.now() };
+  targets.forEach(t => {
+    t.externalData = t.externalData || {};
+    t.externalData.spotlight = sharedState;
+    t.externalData.spotlightActive = true;
+    t.externalData.animating = true;
+  });
+  return sharedState;
+}
+
+function stopSpotlight(uidOrObjOrList) {
+  // Accept array / activeSelection / single uid / single object.
+  const candidates = [];
+  const collect = (input) => {
+    if (input == null) {
+      if (!window.pc) return;
+      window.pc.getObjects().forEach(o => {
+        if (o.externalData && o.externalData.spotlightActive) candidates.push(o);
+      });
+      return;
+    }
+    const obj = findIfRequired(input);
+    if (!obj) return;
+    if (obj.type === 'activeSelection' && Array.isArray(obj._objects)) {
+      obj._objects.forEach(c => {
+        if (c.externalData && c.externalData.spotlightActive) candidates.push(c);
+      });
+    } else if (obj.externalData && obj.externalData.spotlightActive) {
+      candidates.push(obj);
+    }
+  };
+  if (Array.isArray(uidOrObjOrList)) uidOrObjOrList.forEach(collect);
+  else collect(uidOrObjOrList);
+  candidates.forEach(t => {
+    const sp = t.externalData && t.externalData.spotlight;
+    if (!sp) return;
+    if (sp.overlay) {
+      sp.overlay.classList.remove('on');
+      const el = sp.overlay;
+      setTimeout(() => { if (el && el.parentNode) el.parentNode.removeChild(el); }, 400);
+    }
+    delete t.externalData.spotlight;
+    t.externalData.spotlightActive = false;
+    t.externalData.animating = false;
+  });
+  // Belt-and-braces: if we somehow lost the per-object reference, kill any
+  // stray overlay still in the DOM.
+  if (!candidates.length) {
+    const stray = document.getElementById(_SPOTLIGHT_OVERLAY_ID);
+    if (stray) stray.parentNode && stray.parentNode.removeChild(stray);
+  }
+}
+
+// Unified entry point used by recordings and the Properties panel button.
+// Accepts a single uid/object, an array, or an activeSelection — flattens
+// to a list of fabric objects internally.
+// type defaults to 'highlight' (highlightByZooming); 'spotlight' uses the
+// SVG overlay defined above.
+function _animResolveList(input) {
+  const inputs = Array.isArray(input) ? input : [input];
+  const list = [];
+  inputs.forEach(inp => {
+    const obj = findIfRequired(inp);
+    if (!obj || !isFabricObject(obj)) return;
+    if (obj.type === 'activeSelection' && Array.isArray(obj._objects)) {
+      obj._objects.forEach(c => list.push(c));
+    } else {
+      list.push(obj);
+    }
+  });
+  return list;
+}
+
+function anim(uidOrObjOrList, type, opts) {
+  const list = _animResolveList(uidOrObjOrList);
+  if (!list.length) return null;
+  type = (type || 'highlight') + '';
+  if (type === 'spotlight') return spotlight(list, opts);
+  // Highlight: animate each object independently. Animating an
+  // activeSelection's scale doesn't always render reliably across all
+  // children in fabric v6, so we operate per-child.
+  list.forEach(o => highlightByZooming(o, o.canvas || window.pc, opts));
+  return list;
+}
+
+function stopAnim(uidOrObjOrList) {
+  if (uidOrObjOrList == null) {
+    // Stop everything.
+    stopSpotlight();
+    if (window.pc) {
+      window.pc.getObjects().forEach(o => {
+        if (o.externalData && o.externalData.animating) stopAnimation(o, window.pc);
+      });
+    }
+    return;
+  }
+  const list = _animResolveList(uidOrObjOrList);
+  if (!list.length) return;
+  // One stopSpotlight call drops the shared overlay for every spotlit
+  // object in the list.
+  stopSpotlight(list);
+  list.forEach(obj => {
+    if (obj.externalData && obj.externalData.animating) {
+      stopAnimation(obj, obj.canvas || window.pc);
+    }
+  });
 }
 
 function stopAnimation(object, canvas){
@@ -1905,8 +2271,13 @@ function stopAnimation(object, canvas){
         me.stopAnimation = true;
         if(!me.animating) return null;
 
-        if(me.originalProps.zoomX)object.zoomX = me.originalProps.zoomX
-        if(me.originalProps.zoomY)object.zoomY = me.originalProps.zoomY
+        const orig = me.originalProps || {};
+        if (orig.scaleX != null) object.scaleX = orig.scaleX;
+        if (orig.scaleY != null) object.scaleY = orig.scaleY;
+        // Legacy zoom props (in case some older recordings still set them).
+        if (orig.zoomX != null) object.zoomX = orig.zoomX;
+        if (orig.zoomY != null) object.zoomY = orig.zoomY;
+        object.setCoords && object.setCoords();
 
         canvas.renderAll()
         me.animating = false;
