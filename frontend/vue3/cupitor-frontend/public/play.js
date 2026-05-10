@@ -51,7 +51,9 @@ function handleImportDialogButtons(src) {
     const reader = new FileReader();
     reader.addEventListener("load", function () {
       //importIntoCanvas(reader.result)
-      const script = eval(reader.result + '').map(eval)
+      let lines = eval(reader.result + '')
+      if (Array.isArray(lines)) lines = remapImportedUidsToAvoidConflicts(lines)
+      const script = lines.map(eval)
       schedule(script, 1)
     }, false);
     if (file) {
@@ -61,6 +63,59 @@ function handleImportDialogButtons(src) {
   } else {
     $('#importDialog').hide();
   }
+}
+
+// Imported scripts hard-code semantic UIDs (T1, R2, IMG3, …). If the canvas
+// already has an object with that UID, the imported commands would mutate the
+// existing object instead of creating a fresh one. Remap conflicting UIDs to
+// fresh ones (same prefix) before evaluating.
+function remapImportedUidsToAvoidConflicts(lines) {
+  const idPattern = /(['"])([A-Z]+\d+)\1/g
+  const found = new Set()
+  lines.forEach(function (line) {
+    if (typeof line !== 'string') return
+    idPattern.lastIndex = 0
+    let m
+    while ((m = idPattern.exec(line)) !== null) found.add(m[2])
+  })
+  if (found.size === 0) return lines
+
+  const taken = new Set()
+  const canvases = [window.pc, window.oc].filter(Boolean)
+  canvases.forEach(function (c) {
+    (c._objects || []).forEach(function (o) {
+      if (!o) return
+      if (o.uid != null) taken.add(o.uid + '')
+      if (o.customData && o.customData.uid != null) taken.add(o.customData.uid + '')
+    })
+  })
+
+  const remap = {}
+  const usedNew = new Set()
+  found.forEach(function (uid) {
+    if (!taken.has(uid)) return
+    const m = uid.match(/^([A-Z]+)(\d+)$/)
+    if (!m) return
+    const prefix = m[1]
+    let n = 1
+    let candidate
+    do {
+      candidate = prefix + n
+      n++
+    } while (taken.has(candidate) || found.has(candidate) || usedNew.has(candidate))
+    remap[uid] = candidate
+    usedNew.add(candidate)
+  })
+
+  if (Object.keys(remap).length === 0) return lines
+  console.log('Import: remapping conflicting UIDs', remap)
+
+  return lines.map(function (line) {
+    if (typeof line !== 'string') return line
+    return line.replace(idPattern, function (full, q, uid) {
+      return remap[uid] ? (q + remap[uid] + q) : full
+    })
+  })
 }
 
 function snapValue(value, values) {

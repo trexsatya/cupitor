@@ -33,6 +33,8 @@ window.onbeforeunload = function (event) {
 };
 
 window.addEventListener('filterData', (e) => {
+  $('#saveRevisionBtn').show();
+  $('#saveStarredLinesBtn').show();
   const text = e.detail?.text;
   // The native app can pass a GitHub token alongside the search text.
   // It is stored in memory only (never persisted) and used for vocab commits.
@@ -40,8 +42,13 @@ window.addEventListener('filterData', (e) => {
     //window.GitHubUtils?.setGHToken(e.detail.token)
   }
   if (text) {
-    fetchSRTs(text)
-    $("#searchText").val(text);
+    // Trigger 'change' so we go through searchTextChanged → doSearch →
+    // fetchSRTs, which clears window.unprocessedSearchText first. Calling
+    // fetchSRTs directly would leak any stale unprocessedSearchText from a
+    // previous dropdown click and route vocab rendering through
+    // renderVocabularyLineByText with the wrong line, leaving the panel
+    // empty (or showing the old line) for the new search term.
+    $("#searchText").val(text).trigger('change');
   }
 });
 
@@ -164,6 +171,31 @@ visa=visa,visar,visade,visat`
     const splits = it.split("=")
     wordsMap[splits[0]] = splits[1].split(",")
   })
+
+  // Merge user-defined expansions from the vocabulary file. Any line in a
+  // category named "expansions" / "Expansions" / "_expansions" that follows
+  // the `key=val1,val2,...` shape contributes to (or overrides) the
+  // hardcoded map above. Other lines in that category (including comments
+  // or stray content) are ignored.
+  try {
+    const userLines = (window.vocabulary && (
+      window.vocabulary['expansions']
+      || window.vocabulary['Expansions']
+      || window.vocabulary['_expansions']
+    )) || []
+    userLines.forEach(line => {
+      if (typeof line !== 'string') return
+      const t = line.trim()
+      if (!t || t.indexOf('=') < 1) return
+      const eq = t.indexOf('=')
+      const key = t.substring(0, eq).trim()
+      const valStr = t.substring(eq + 1).trim()
+      if (!key || !valStr) return
+      const vals = valStr.split(',').map(v => v.trim()).filter(Boolean)
+      if (vals.length) wordsMap[key] = vals
+    })
+  } catch (e) { console.warn('[expansions] failed to merge user-defined expansions', e) }
+
   return wordsMap
 }
 
@@ -419,7 +451,10 @@ function openAddToVocabDialog() {
   // Discard any in-progress text so the new dialog starts blank — saves only
   // happen on the Save button via addToVocab(); closing the dialog (via the
   // X, Escape, or click-outside) must NOT carry over typed words.
-  const discardSegment = () => $('#vocabularySegmentTextarea').val('');
+  const discardSegment = () => {
+    $('#vocabularySegmentTextarea').val('')
+    $('#vocabNewCategory').val('')
+  };
   discardSegment();
   $('#vocabPendingHint').hide();
 
@@ -534,23 +569,32 @@ function addToVocab(commitAndClose) {
     return
   }
 
-  const selectedVal = $("#addToVocabularyDialogSelect").val()
-  if (!selectedVal) return
-
+  // If the user filled the "new/existing category" input, append to that
+  // category — creating it if missing — and skip the reference-word/Insert
+  // path entirely. This is the way to add a brand-new entry (e.g. seed
+  // the `expansions` category for the first time).
+  const newCategoryInput = ($("#vocabNewCategory").val() || '').trim()
   let category, refWord
-  try {
-    const parsed = JSON.parse(selectedVal)
-    // createOptionElement stores {o, e}; openAddToVocabDialog stored {category, word}
-    refWord = parsed.o || parsed.word
-    category = parsed.category
-    // If no category in the value, find it by scanning vocabulary
-    if (!category && refWord) {
-      for (const [cat, words] of Object.entries(window.vocabulary || {})) {
-        if (words.includes(refWord)) { category = cat; break }
+  if (newCategoryInput) {
+    category = newCategoryInput
+    refWord = null
+  } else {
+    const selectedVal = $("#addToVocabularyDialogSelect").val()
+    if (!selectedVal) return
+    try {
+      const parsed = JSON.parse(selectedVal)
+      // createOptionElement stores {o, e}; openAddToVocabDialog stored {category, word}
+      refWord = parsed.o || parsed.word
+      category = parsed.category
+      // If no category in the value, find it by scanning vocabulary
+      if (!category && refWord) {
+        for (const [cat, words] of Object.entries(window.vocabulary || {})) {
+          if (words.includes(refWord)) { category = cat; break }
+        }
       }
+    } catch (_) {
+      return
     }
-  } catch (_) {
-    return
   }
 
   const position = $("#vocabInsertPosition").val() // 'above', 'below', or 'inline'
@@ -568,20 +612,20 @@ function addToVocab(commitAndClose) {
   }
 
   const categoryWords = window.vocabulary[category] || []
-  const idx = categoryWords.indexOf(refWord)
-
-  if (position === 'inline') {
-    // Replace the reference word in-place
-    if (idx >= 0) {
-      categoryWords.splice(idx, 1, ...newWords)
-    } else {
-      categoryWords.push(...newWords)
-    }
+  if (!refWord) {
+    // No reference word — just append to the (possibly new) category.
+    categoryWords.push(...newWords)
   } else {
-    const insertAt = position === 'above'
-      ? (idx >= 0 ? idx : 0)
-      : (idx >= 0 ? idx + 1 : categoryWords.length)
-    categoryWords.splice(insertAt, 0, ...newWords)
+    const idx = categoryWords.indexOf(refWord)
+    if (position === 'inline') {
+      if (idx >= 0) categoryWords.splice(idx, 1, ...newWords)
+      else categoryWords.push(...newWords)
+    } else {
+      const insertAt = position === 'above'
+        ? (idx >= 0 ? idx : 0)
+        : (idx >= 0 ? idx + 1 : categoryWords.length)
+      categoryWords.splice(insertAt, 0, ...newWords)
+    }
   }
   window.vocabulary[category] = categoryWords
 
@@ -761,8 +805,16 @@ function navigateSearchHistory(direction) {
   const term = list[newIdx]
   if (typeof term !== 'string' || !term) return
   window._navigatingHistory = true
-  $('#searchText').val(term)
-  window.unprocessedSearchText = null
+  // Trigger 'input' (not 'change') so the X-clear button visibility updates
+  // without re-firing the typed-search flow on top of our explicit doSearch
+  // call below.
+  $('#searchText').val(term).trigger('input')
+  // Set unprocessedSearchText to the term itself so render() can anchor on
+  // the original line via renderVocabularyLineByText for history items
+  // that were originally vocab-line clicks. Typed-term history items just
+  // fall through (renderVocabularyLineByText returns false → the regular
+  // renderVocabularyFindings path runs).
+  window.unprocessedSearchText = term
   Promise.resolve(doSearch(term, $('#searchedWords')))
       .finally(() => { window._navigatingHistory = false })
 }
@@ -885,38 +937,48 @@ async function vocabularyLineSelected() {
 // misses for expanded pipe-separated forms like "ge|gav|ger|...".
 export function renderVocabularyLineByText(lineText) {
   if (!window.vocabulary || !lineText) return false;
-  const allLines = Object.values(window.vocabulary).flat();
+  // Walk vocabulary preserving category info so we can show which category
+  // the matched line came from in the collapsible header.
+  const allLines = [];
+  const lineCategory = [];
+  Object.entries(window.vocabulary).forEach(([cat, lines]) => {
+    if (!Array.isArray(lines)) return;
+    lines.forEach(line => { allLines.push(line); lineCategory.push(cat); });
+  });
   const idx = allLines.findIndex(l => l === lineText);
   if (idx < 0) return false;
+  const category = lineCategory[idx] || '?';
 
   const vocab = $('#vocabularyResult');
   vocab.html('');
   const vocabItem = $('<div class="vocabulary-segment"></div>');
   const vocabItemContent = $('<div class="vocabulary-segment-content"></div>');
-  getSurrounding(idx, allLines).forEach(it => {
-    let txt = it.item;
-    const $line = $(`<div class="vocabulary-line"></div>`);
-    if (txt.trim().length) {
-      $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`);
-      $line.find("i.fa").click(selectSearchedWord);
-    } else {
-      txt = "------------------";
-    }
-    $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, " | ")}</span>`);
-    $line.data({ text: txt });
+  const surroundings = getSurrounding(idx, allLines);
+  const matchEntry = surroundings.find(it => it.index === idx) || { item: allLines[idx], index: idx };
+  const $header = _buildVocabLine(matchEntry);
+  $header.addClass('highlighted similar-segment-header');
+  $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>');
+  $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}]</span>`);
+  vocabItemContent.append($header);
+  const $body = $('<div class="similar-segment-body" hidden></div>');
+  // Keep the matched line at its original position inside the body so the
+  // surrounding-context ordering is preserved when expanded.
+  surroundings.forEach(it => {
+    const $line = _buildVocabLine(it);
     if (it.index === idx) $line.addClass('highlighted');
-    vocabItemContent.append($line);
+    $body.append($line);
   });
+  vocabItemContent.append($body);
   vocabItem.append(vocabItemContent);
   vocab.append(vocabItem);
+
+  _attachAccordionDelegate(vocab);
 
   const $rc = $('#resultContainer');
   if ($rc.is(':hidden')) {
     $rc.show();
     if (typeof updateToggleButtonView === 'function') updateToggleButtonView('resultContainer');
   }
-  const highlighted = $('.vocabulary-segment .highlighted')[0];
-  if (highlighted) highlighted.scrollIntoView();
   return true;
 }
 
@@ -1167,21 +1229,39 @@ function updateToggleButtonView(viewId) {
 }
 
 $('document').ready(e => {
-  document.addEventListener('long-press', function (e) {
-    if ($(e.target).hasClass("link")) {
-      e.preventDefault()
-      e.stopPropagation()
-      const w = $(e.target).text()
-      window.open(`https://www.google.com/search?q=${encodeURI(w)}&udm=2`, '_blank').focus();
+  // Click on a subtitle-word `.link` opens a small option popover with
+  // "Search here" (populates the search box) and "Search on wiki" (opens
+  // the Wiktionary URL). Real `<a class="link">` anchors keep the
+  // direct-open behaviour for the header "Wiki:" / "Images" / "Filmot"
+  // shortcut links, since the popover doesn't make sense there.
+  document.addEventListener('click', function (e) {
+    if (!$(e.target).hasClass("link") && !$(e.target).hasClass('link-special')) return
+    e.preventDefault()
+    if (e.target.tagName === 'A') {
+      const link = $(e.target).attr('href')
+      if (link) window.open(link, '_blank').focus();
+      return
+    }
+    const word = ($(e.target).text() || '').trim()
+    const href = $(e.target).attr('href') || ''
+
+    if($(e.target).hasClass('link-special')) {
+        stopMedia()
+        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, $(e.target).attr('data-index'))
+    } else if($(e.target).hasClass('link')) {
+        stopMedia() //otherswise the popover might open and close immediately due to the click bubbling to the document listener below
+        _showSubtitleWordPopover(e.pageX, e.pageY, word, href)
     }
   });
 
-  document.addEventListener('click', function (e) {
-    if ($(e.target).hasClass("link")) {
-      e.preventDefault()
-      const link = $(e.target).attr('href')
-      window.open(link, '_blank').focus();
-    }
+  // Close the subtitle-word popover when the user clicks anywhere outside
+  // it (and outside another `.link` that would just reopen it).
+  $(document).on('click', function (e) {
+    const $pop = $('#subtitleWordPopover')
+    if ($pop.length === 0) return
+    if ($pop.attr('hidden') !== undefined) return
+    if ($(e.target).closest('#subtitleWordPopover, .link').length) return
+    $pop.attr('hidden', '')
   });
 
   $(document).on("click", function(e) {
@@ -1353,7 +1433,7 @@ $('document').ready(e => {
   const $searchText = $searchText1;
   $searchText.on(`focus`, () => {
     if ($("#toggleClearTextOnClickCheckbox").is(":checked")) {
-      $searchText.val('')
+      $searchText.val('').trigger('input')
     }
   });
 
@@ -1405,14 +1485,65 @@ const clearSubtitles = () => {
   window.starredLines = []
 }
 
-function getWikiLink(word, uri = null, cls = 'link') {
+function getWikiLink(word, uri = null, cls = 'link', index = null) {
   let uriComponent = uri || word;
   uriComponent = uriComponent.toLowerCase()
-  return `<span> <span class="${cls}" href="https://${getLangFromUrl().code}.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${word}</span></span>`;
+  return `<span> <span data-index="${index}" class="${cls}" href="https://${getLangFromUrl().code}.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${word}</span></span>`;
 }
 
-function getWikiLinkSpecial(word, uri = null) {
-  return getWikiLink(word, uri, 'link-special')
+// Lazy-create + show the small popover that lets the user choose between
+// "Search here" (populate the search box) and "Search on wiki" (open the
+// stored Wiktionary URL) for a clicked subtitle word.
+function _showSubtitleWordPopover(pageX, pageY, word, href, index = null) {
+  let $pop = $('#subtitleWordPopover')
+  let addStaredLine = true
+  if(window.starredLines.find(it => it === index)) {
+      addStaredLine = false
+  }
+
+  if ($pop.length === 0) {
+    $pop = $(`<div id="subtitleWordPopover" class="subtitle-word-popover" hidden>
+      <button type="button" data-action="search-here">Search here</button>
+      <button type="button" data-action="search-wiki">Search on wiki</button>
+      ${index !== null && addStaredLine ? `<button type="button" data-action="add-favorite">Mark (${word})</button>` : ''}
+      ${index !== null && !addStaredLine ? `<button type="button" data-action="remove-favorite">Unmark (${word})</button>` : ''}
+    </div>`)
+    $('body').append($pop)
+  }
+  let fn = (e) => {
+    e.preventDefault(); e.stopPropagation()
+    $pop.attr('hidden', '')
+  }
+  $pop.find('button').off('click.swp')
+  $pop.find('[data-action="search-here"]').on('click.swp', e => {
+    fn(e)
+    if (word) $('#searchText').val(word).trigger('change')
+  })
+  $pop.find('[data-action="search-wiki"]').on('click.swp', e => {
+    fn(e)
+    if (href) window.open(href, '_blank').focus()
+  })
+  $pop.find('[data-action="add-favorite"]').on('click.swp', e => {
+    fn(e)
+    addStarredLine(index)
+  })
+  $pop.find('[data-action="remove-favorite"]').on('click.swp', e => {
+    fn(e)
+    removeStarredLine(index)
+  })
+  // Position next to the click, then clamp to the viewport.
+  $pop.removeAttr('hidden').css({ position: 'absolute', left: 0, top: 0, visibility: 'hidden' })
+  const pw = $pop.outerWidth(), ph = $pop.outerHeight()
+  const ww = window.innerWidth, wh = window.innerHeight
+  let left = pageX + 4
+  let top = pageY + 4
+  if (left + pw > window.scrollX + ww) left = window.scrollX + ww - pw - 6
+  if (top + ph > window.scrollY + wh) top = pageY - ph - 6
+  $pop.css({ left: Math.max(2, left), top: Math.max(2, top), visibility: 'visible' })
+}
+
+function getWikiLinkSpecial(word, uri = null, index = null) {
+  return getWikiLink(word, uri, 'link-special', index)
 }
 
 function decodeHtmlEntities(html) {
@@ -1446,14 +1577,14 @@ function decodeHtmlTags(text, encodings) {
   return text
 }
 
-function populateWikiLinks(text, $el) {
+function populateWikiLinks(text, $el, index = null) {
   $el && $el.html('')
   const [encoded, encodings] = encodeHtmlTags(text)
 
   const fn = (it, second) => {
     if (it.trim().length < 2) return it
     if (Object.values(encodings).map(it => it.trim()).includes(it)) return it
-    return getWikiLinkSpecial(it, second)
+    return getWikiLinkSpecial(it, second, index)
   }
   const withLinks = encoded.split(/[ \n]/).flatMap(it => {
     const ws = getWords(it)
@@ -1466,19 +1597,7 @@ function populateWikiLinks(text, $el) {
   const finalHtml = decodeHtmlTags(withLinks, encodings);
   $el && $el.append(finalHtml)
 
-  $el && $el.find(".link-special").click(e => {
-    pauseVideo()
-    let $target = $(e.target);
-    if ($target.attr('data-clicked') === 'yes') {
-      window.open($target.attr('href'), '_blank');
-      $target.removeAttr('data-clicked')
-    } else {
-      const word = $target.text()
-      $searchText1.val(word).trigger('change')
-      expandSearchResults()
-      $target.attr('data-clicked', 'yes')
-    }
-  })
+  
   return finalHtml
 }
 
@@ -1535,17 +1654,31 @@ function starredLineSelected(el, index, ts) {
 
 function addStarredLine(index, ts) {
   if (window.starredLines.indexOf(index) >= 0) return
-
   window.starredLines.push(index)
 
-  const x = $(`<span data-index="${index}">${index}</span>`)
+  renderStarredLines()
+}
+
+function removeStarredLine(index) {
+  window.starredLines = window.starredLines.filter(i => i !== index)
+  renderStarredLines()
+}
+
+function renderStarredLines() {
+  $('#starredLines').html('')
+  $('#starredLinesSelect').html('')
+
+  window.starredLines.forEach(index => {
+    const ts = window.subtitles.find(it => it.index === index).ts
+    const x = $(`<span data-index="${index}">${index}</span>`)
       .addClass('starred-sub')
 
-  x.click(starredLineSelected(x, index, ts))
+    x.click(starredLineSelected(x, index, ts))
 
-  $('#starredLines').append(x)
+    $('#starredLines').append(x)
 
-  $('#starredLinesSelect').append(new Option(index, index)).show()
+    $('#starredLinesSelect').append(new Option(index, index)).show()
+  })
 }
 
 function expandSearchResults() {
@@ -1557,7 +1690,7 @@ const renderSubtitles = () => {
   const currentSub = window.currentSub
 
   if (lastSub && currentSub !== lastSub) {
-    populateWikiLinks(currentSub.sv, $('#sv-sub'));
+    populateWikiLinks(currentSub.sv, $('#sv-sub'), currentSub.index);
     populateSearchWords(currentSub, $('#sv-sub-mirror'));
 
     $('#en-sub').html(currentSub.en)
@@ -2898,7 +3031,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
       title = `"${word}"`
     }
 
-    const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}">${title}</h5></div>`)
+    const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}"><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${title}</h5></div>`)
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
     const isMultiWord = word.trim().split(/\s+/).length > 1
@@ -3053,10 +3186,133 @@ export function wordIsInVocabularyLine(vocabLine, search) {
  * e.g. vocabLine="xyz|abc", searchText="xyzw" → true ("xyzw".startsWith("xyz"))
  */
 function vocabLineMatchesPrefix(vocabLine, searchText) {
-  const st = searchText.toLowerCase().trim()
-  if (!st || st.length < 4) return false
-  const parts = vocabLine.split(SEPARATOR_PIPE).map(p => p.toLowerCase().trim()).filter(p => p.length >= 4)
-  return parts.some(p => st.startsWith(p) || p.startsWith(st))
+  const stRaw = (searchText || '').toLowerCase().trim()
+  if (!stRaw) return false
+  // Split BOTH sides on `|` so a search like "ångra|säkra" hits lines
+  // containing "ångra…" OR "säkra…", and each pipe-separated alternative
+  // in the vocab line is tested independently.
+  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim()).filter(s => s.length >= 4)
+  if (searchParts.length === 0) return false
+  const vocabParts = vocabLine.split(SEPARATOR_PIPE).map(p => p.toLowerCase().trim()).filter(p => p.length >= 4)
+  return vocabParts.some(p => searchParts.some(s => s.startsWith(p) || p.startsWith(s)))
+}
+
+// Common derivational prefixes per language. Sorted longest-first so that
+// stripping picks `under` before `un`, `genom` before `ge`, `på` before
+// `på`-vs-`å`, etc.
+const COMMON_PREFIXES = {
+  sv: ['tillbaka', 'genom', 'efter', 'under', 'över', 'fram', 'före', 'kvar', 'fast', 'sam', 'för', 'upp', 'miss', 'till', 'mot', 'ned', 'an', 'om', 'be', 'er', 'bi', 'av', 'ut', 'in', 'på', 'å'],
+  en: ['under', 'over', 'after', 'fore', 'with', 'pre', 'pro', 'sub', 'super', 'mis', 'mid', 'dis', 'non', 'out', 'off', 'in', 're', 'un', 'de', 'be'],
+  es: ['contra', 'extra', 'inter', 'entre', 'sobre', 'bajo', 'des', 'pre', 'sub', 'sin', 'con', 'mal', 're', 'in']
+}
+
+// Strip the longest matching prefix from `word` using the supplied list.
+// Requires the residual stem to be ≥ 3 chars so we don't reduce e.g. "be"
+// to "" or "bevis" to "vis".
+function _stripPrefix(word, prefixList) {
+  for (const p of prefixList) {
+    if (word.length - p.length >= 3 && word.startsWith(p)) {
+      return { prefix: p, stem: word.substring(p.length) }
+    }
+  }
+  return { prefix: '', stem: word }
+}
+
+// For a search like "bevara" (sv), strip the leading prefix to get the stem
+// "vara" and then look across the vocabulary for lines that contain words
+// formed by attaching a DIFFERENT prefix to the same stem (e.g. "förvara",
+// "anvara", "bevara"…). Returns { stem, origPrefix, results: [{prefix,
+// candidate, lineIdx, category}, …] }.
+function _findDifferentPrefixMatches(searchText, lang) {
+  const lc = (searchText || '').toLowerCase().trim()
+  if (!lc) return { stem: '', origPrefix: '', results: [] }
+  const prefixes = (COMMON_PREFIXES[lang] || COMMON_PREFIXES.sv).slice().sort((a, b) => b.length - a.length)
+  const { prefix: origPrefix, stem } = _stripPrefix(lc, prefixes)
+  if (!stem || stem.length < 3) return { stem, origPrefix, results: [] }
+
+  const allWords = []
+  const lineCategory = []
+  Object.entries(window.vocabulary || {}).forEach(([cat, lines]) => {
+    if (!Array.isArray(lines)) return
+    lines.forEach(l => { allWords.push(l); lineCategory.push(cat) })
+  })
+
+  const seen = new Set()
+  const results = []
+  for (const p of prefixes) {
+    if (p === origPrefix) continue
+    const candidate = p + stem
+    if (candidate.length < 4) continue
+    allWords.forEach((vocabLine, idx) => {
+      if (seen.has(idx)) return
+      if (typeof vocabLine !== 'string') return
+      const parts = vocabLine.split(SEPARATOR_PIPE).map(s => s.toLowerCase().trim()).filter(s => s.length >= candidate.length)
+      // Strict: a vocab word starts with the candidate (so derived forms
+      // like "förvarar"/"förvarade" still hit, but a random short word
+      // doesn't get spuriously included).
+      if (parts.some(part => part.startsWith(candidate))) {
+        seen.add(idx)
+        results.push({ prefix: p, candidate, lineIdx: idx, category: lineCategory[idx] || '?' })
+      }
+    })
+  }
+  return { stem, origPrefix, results, allWords }
+}
+
+function _openDifferentPrefixDialog(searchText, lang) {
+  const { stem, origPrefix, results, allWords } = _findDifferentPrefixMatches(searchText, lang)
+
+  let $dlg = $('#diffPrefixDialog')
+  if ($dlg.length === 0) {
+    $dlg = $('<div id="diffPrefixDialog" title="Different-prefix matches"></div>')
+    $('body').append($dlg)
+  }
+  $dlg.empty()
+
+  const headerLine = `Stem: <b>${_.escape(stem || '?')}</b>${origPrefix ? `, original prefix <b>${_.escape(origPrefix)}-</b>` : ''} — search "${_.escape(searchText || '')}"`
+  $dlg.append(`<div style="font-size:0.85em;color:#666;margin-bottom:6px;">${headerLine}</div>`)
+
+  const $list = $('<div class="diff-prefix-list"></div>')
+  $dlg.append($list)
+
+  if (!stem || stem.length < 3) {
+    $list.append(`<div style="color:grey;padding:4px;">Search term is too short to derive a stem.</div>`)
+  } else if (!results || results.length === 0) {
+    $list.append(`<div style="color:grey;padding:4px;">No different-prefix matches for stem "${_.escape(stem)}".</div>`)
+  } else {
+    results.forEach(({ prefix, candidate, lineIdx, category }) => {
+      const surroundings = getSurrounding(lineIdx, allWords)
+      const matchEntry = surroundings.find(it => it.index === lineIdx) || { item: allWords[lineIdx], index: lineIdx }
+      const vocabItem = $('<div class="vocabulary-segment"></div>')
+      const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
+      // Highlight the prefix-swapped candidate inside the matched line.
+      const $header = _buildVocabLine(matchEntry, candidate)
+      $header.addClass('highlighted similar-segment-header')
+      $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
+      $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}] (${_.escape(prefix)}-)</span>`)
+      vocabItemContent.append($header)
+      const $body = $('<div class="similar-segment-body" hidden></div>')
+      surroundings.forEach(it => {
+        const $line = _buildVocabLine(it)
+        if (it.index === lineIdx) $line.addClass('highlighted')
+        $body.append($line)
+      })
+      vocabItemContent.append($body)
+      vocabItem.append(vocabItemContent)
+      $list.append(vocabItem)
+    })
+    _attachAccordionDelegate($list)
+  }
+
+  const w = Math.round(window.innerWidth * 0.95)
+  const h = Math.round(window.innerHeight * 0.90)
+  const position = { my: 'left top', at: 'left+2.5% top+5%', of: window }
+  if ($dlg.hasClass('ui-dialog-content')) {
+    $dlg.dialog('option', { width: w, height: h, position }).dialog('open')
+  } else {
+    $dlg.dialog({ width: w, height: h, position, modal: false, autoOpen: true })
+  }
+  _pinDialogToViewport($dlg)
 }
 
 const SIMILARITY_VOWELS = new Set(['a', 'e', 'i', 'o', 'u', 'y', 'å', 'ä', 'ö'])
@@ -3098,11 +3354,73 @@ function _levenshtein(a, b) {
   return prev[n]
 }
 
+// Map a word to a coarse phonetic key for the given language. Two words are
+// candidate homophones (in this app's sense) when they reduce to the same
+// key. Rules are intentionally conservative — false positives only show up
+// in tier 0, which is the most prominent in the UI, so the substitutions
+// stick to spellings that genuinely overlap in pronunciation.
+function _phoneticKey(word, lang) {
+  if (!word) return ''
+  let w = word.toLowerCase()
+  try { w = w.normalize('NFC') } catch (_) {}
+
+  if (lang === 'sv') {
+    // /ɧ/ family — sj-sound. Order matters: longer patterns first.
+    w = w.replace(/skj|stj|ssj|sch/g, 'Ç')
+    w = w.replace(/sj/g, 'Ç')
+    w = w.replace(/sk(?=[eiyäö])/g, 'Ç')
+    // /ɕ/ family — tj-sound.
+    w = w.replace(/tj|kj/g, 'C')
+    w = w.replace(/k(?=[eiyäö])/g, 'C')
+    // /j/ family — silent-letter onsets, soft g, plain j.
+    // hjul/jul, gjuta/juta etc. all collapse to a leading J.
+    w = w.replace(/gj|hj|lj|dj/g, 'J')
+    w = w.replace(/g(?=[eiyäö])/g, 'J')
+    w = w.replace(/j/g, 'J')
+    // c before front vowels = /s/, otherwise = /k/.
+    w = w.replace(/c(?=[eiyäö])/g, 's')
+    w = w.replace(/c/g, 'k')
+    // Misc.
+    w = w.replace(/w/g, 'v')
+    w = w.replace(/ng/g, 'N')
+    w = w.replace(/ck/g, 'k')
+    w = w.replace(/qu/g, 'kv')
+    w = w.replace(/x/g, 'ks')
+    w = w.replace(/z/g, 's')
+  } else if (lang === 'en') {
+    w = w.replace(/ph/g, 'f')
+    w = w.replace(/^(kn|gn|pn|wr)/g, m => m[1])  // silent leading letter
+    w = w.replace(/ck/g, 'k')
+    w = w.replace(/qu/g, 'kw')
+    w = w.replace(/c(?=[eiy])/g, 's')
+    w = w.replace(/c/g, 'k')
+    w = w.replace(/^x/g, 'z')
+    w = w.replace(/x/g, 'ks')
+  } else if (lang === 'es') {
+    w = w.replace(/ll/g, 'y')
+    w = w.replace(/h/g, '')
+    w = w.replace(/v/g, 'b')
+    w = w.replace(/qu(?=[ei])/g, 'k')
+    w = w.replace(/qu/g, 'kw')
+    w = w.replace(/c(?=[ei])/g, 's')
+    w = w.replace(/z/g, 's')
+    w = w.replace(/c/g, 'k')
+    w = w.replace(/g(?=[ei])/g, 'x')
+    w = w.replace(/j/g, 'x')
+  }
+  return w
+}
+
+// Tier 0: phonetic key match (language-aware homophone).
 // Tier 1: same length, exactly one differing char that's vowel-vs-vowel.
 // Tier 2: same length, exactly one differing char that's consonant-vs-consonant.
 // Tier 3: edit distance ≤ 2 (and > 0). Returns null if not similar enough.
-function _scoreSimilarity(searchWord, candidate) {
+function _scoreSimilarity(searchWord, candidate, lang) {
   if (!searchWord || !candidate || searchWord === candidate) return null
+  // Phonetic homophone — strongest signal. Cheap O(len) substitution.
+  const sk = _phoneticKey(searchWord, lang)
+  const ck = _phoneticKey(candidate, lang)
+  if (sk && sk === ck) return { tier: 0, distance: 0 }
   if (searchWord.length === candidate.length) {
     const diff = _classifyCharDiffs(searchWord, candidate)
     if (diff.count === 1 && diff.allVowel) return { tier: 1, distance: 1 }
@@ -3136,6 +3454,10 @@ async function searchVocabularyBySimilarity() {
   })
   const matches = []
   const swLens = searchWords.map(w => w.length)
+  const lang = (typeof getLangFromUrl === 'function' ? getLangFromUrl().code : null) || 'sv'
+  // Pre-compute phonetic keys for every search word so the per-candidate
+  // loop reuses the result instead of recomputing on each comparison.
+  const swPhonetic = searchWords.map(w => _phoneticKey(w, lang))
 
   // Cancellation: each invocation gets a fresh token; older runs bail when
   // they see a newer token.
@@ -3170,16 +3492,23 @@ async function searchVocabularyBySimilarity() {
     for (let lineIdx = start; lineIdx < end; lineIdx++) {
       const line = allLines[lineIdx]
       if (typeof line !== 'string' || !line.trim()) continue
-      const wordsInLine = extractWords(line)
+      // Strip parenthesised hints/notes ("(ngn)", "(pl)", "(sl-pl)", etc.)
+      // before extracting words — those are annotations, not part of the
+      // vocabulary token, so they shouldn't be candidates for similarity.
+      const cleaned = line.replace(/\([^)]*\)/g, ' ')
+      const wordsInLine = extractWords(cleaned)
       for (const cw of wordsInLine) {
         const cwLen = cw.length
+        const cwKey = _phoneticKey(cw, lang)
         for (let si = 0; si < searchWords.length; si++) {
-          // Cheap O(1) length filter: tiers 1/2 need equal length;
-          // tier 3 needs edit distance ≤ 2 → length diff ≤ 2.
-          if (Math.abs(cwLen - swLens[si]) > 2) continue
           const sw = searchWords[si]
           if (cw === sw) continue
-          const score = _scoreSimilarity(sw, cw)
+          // Cheap O(1) length filter: tiers 1/2 need equal length; tier 3
+          // needs edit distance ≤ 2 (length diff ≤ 2). Tier 0 (homophone)
+          // can have any length, so skip the filter when phonetic keys
+          // already match.
+          if (Math.abs(cwLen - swLens[si]) > 2 && cwKey !== swPhonetic[si]) continue
+          const score = _scoreSimilarity(sw, cw, lang)
           if (score) matches.push({ lineIdx, candidate: cw, searchWord: sw, ...score })
         }
       }
@@ -3208,83 +3537,307 @@ async function searchVocabularyBySimilarity() {
   const limitRaw = parseInt($('#numberOfSimilarFindings').val(), 10)
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 10
 
-  // Step 1: dedupe by line — keep best-scoring match per vocab line.
-  const seenLine = new Set()
-  const uniquePerLine = []
+  // Group matches by candidate (matched word). Within a group, dedupe by
+  // lineIdx — same line shouldn't appear twice for the same candidate even
+  // if multiple search words hit it. The first time a candidate is seen
+  // (in score-sorted order) defines that group's "bestMatch", which drives
+  // ordering across groups.
+  const groupMap = new Map()
+  const seenLinesPerGroup = new Map()
   for (const m of matches) {
-    if (seenLine.has(m.lineIdx)) continue
-    seenLine.add(m.lineIdx)
-    uniquePerLine.push(m)
-  }
-
-  // Step 2: group by category, preserving the score-sorted order within each
-  // group. The first inserted category is the one whose top match scored best.
-  const byCategory = new Map()
-  for (const m of uniquePerLine) {
-    const cat = lineCategory[m.lineIdx] || '(uncategorized)'
-    if (!byCategory.has(cat)) byCategory.set(cat, [])
-    byCategory.get(cat).push(m)
-  }
-
-  // Step 3: round-robin — take the best from each category, then the second
-  // best, and so on, until the limit fills up.
-  const top = []
-  const categoryLists = Array.from(byCategory.values())
-  for (let round = 0; top.length < limit; round++) {
-    let added = false
-    for (const list of categoryLists) {
-      if (round < list.length) {
-        top.push({ ...list[round], category: lineCategory[list[round].lineIdx] })
-        added = true
-        if (top.length >= limit) break
-      }
+    if (!groupMap.has(m.candidate)) {
+      groupMap.set(m.candidate, { bestMatch: m, lines: [], candidate: m.candidate })
+      seenLinesPerGroup.set(m.candidate, new Set())
     }
-    if (!added) break
+    const seen = seenLinesPerGroup.get(m.candidate)
+    if (seen.has(m.lineIdx)) continue
+    seen.add(m.lineIdx)
+    const enriched = { ...m, category: lineCategory[m.lineIdx] || '?' }
+    groupMap.get(m.candidate).lines.push(enriched)
   }
 
-  console.log(`[similar] top ${top.length} (limit=${limit}, ${categoryLists.length} categories, round-robin):`, top.map(m =>
-      `[${m.category}] ${m.searchWord} ≈ ${m.candidate} [tier=${m.tier} dist=${m.distance}]`).join(' | '))
+  // Insertion order = score order of each group's best match → that's how
+  // we want groups ordered globally too.
+  const allGroups = Array.from(groupMap.values())
+  const tier1Groups = allGroups.filter(g => g.bestMatch.tier <= 1)
+  const otherGroupsFull = allGroups.filter(g => g.bestMatch.tier > 1)
+  const tier1Top = tier1Groups.slice(0, limit)
 
+  console.log(`[similar] tier-1 groups ${tier1Top.length}/${tier1Groups.length}, other groups ${otherGroupsFull.length}, limit=${limit}`)
+
+  _renderSimilarMatches($vocab, tier1Top, otherGroupsFull, limit, allLines, raw)
+}
+
+// Wrap every (case-insensitive) occurrence of `word` in `text` with a bold
+// blue `<b>` tag. Caller must have already escaped any HTML in `text`. The
+// regex special chars in `word` are escaped so candidates like ".*" or
+// "knäböja(d)" don't blow up.
+function _highlightWordInLine(text, word) {
+  if (!word) return text
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // \b doesn't behave nicely with Unicode (Swedish å/ä/ö); use lookarounds
+  // around \p{L} so a candidate "växa" only highlights the whole word, not
+  // a substring inside e.g. "växande". Falls back to plain match if the
+  // engine doesn't support it.
+  let re
+  try {
+    re = new RegExp(`(?<![\\p{L}])(${escaped})(?![\\p{L}])`, 'giu')
+  } catch (_) {
+    re = new RegExp(`(${escaped})`, 'gi')
+  }
+  return text.replace(re, '<b style="color:#1565c0">$1</b>')
+}
+
+// Group items so entries that share the same key end up adjacent. The
+// relative order across keys is determined by the first occurrence of each
+// key in the input, and the relative order within a key is preserved
+// (stable sort). Used to cluster vocab matches that share a "word" (first
+// pipe-segment) but happen to live in different categories.
+function _clusterByKey(items, getKey) {
+  const order = new Map()
+  items.forEach(it => {
+    const k = getKey(it)
+    if (!order.has(k)) order.set(k, order.size)
+  })
+  return [...items].sort((a, b) => (order.get(getKey(a)) ?? 0) - (order.get(getKey(b)) ?? 0))
+}
+
+// First pipe-separated word of a vocabulary line, lowercased and trimmed.
+// Used as the clustering key so duplicates of the same head-word across
+// different categories show up next to each other in search results.
+function _vocabLineFirstWord(line) {
+  if (!line) return ''
+  const parts = (line + '').split(SEPARATOR_PIPE).map(p => p.toLowerCase().trim()).filter(p => p)
+  return parts[0] || ''
+}
+
+// Build a single `<div class="vocabulary-line">` for a getSurrounding entry.
+// Centralised so renderVocabularyFindings, renderVocabularyLineByText, and
+// _buildSimilarSegment all share the same line shape (icon + escaped text +
+// data-text). `highlight` may be a candidate word to bold-blue inside the
+// matched line.
+function _buildVocabLine(it, highlight) {
+  let txt = it.item
+  const $line = $('<div class="vocabulary-line"></div>')
+  if (txt.trim().length) {
+    $line.append('<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>')
+    $line.find('i.fa').click(selectSearchedWord)
+  } else {
+    txt = '------------------'
+  }
+  let displayTxt = _.escape(txt).replaceAll(SEPARATOR_PIPE, ' | ')
+  if (highlight) displayTxt = _highlightWordInLine(displayTxt, highlight)
+  $line.append(`<span>${displayTxt}</span>`)
+  $line.data({ text: txt })
+  return $line
+}
+
+// Idempotently attach an accordion delegate to a container holding
+// `.similar-segment-header` / `.similar-segment-body` pairs. Single-open:
+// clicking a header collapses any other open one and toggles the clicked
+// segment. Clicks that originate on the `i.fa` arrow inside a header pass
+// through to selectSearchedWord without triggering the toggle.
+function _attachAccordionDelegate($container) {
+  if (!$container || !$container.length) return
+  if ($container.data('accordionBound')) return
+  $container.data('accordionBound', true)
+  $container.on('click', '.similar-segment-header', function (e) {
+    // The matched-line header may also contain a red `<i class="fa-mouse-pointer">`
+    // arrow that re-anchors the search via selectSearchedWord — let those
+    // clicks pass through. Other icons inside the header (e.g. the
+    // `.similar-chevron` itself) should still toggle the accordion.
+    if ($(e.target).closest('.fa-mouse-pointer').length) return
+    const $this = $(this)
+    const $body = $this.siblings('.similar-segment-body')
+    const wasOpen = !$body.is('[hidden]')
+    $container.find('.similar-segment-body').not($body).attr('hidden', '')
+    $container.find('.similar-segment-header').not(this).removeClass('is-open')
+    if (wasOpen) {
+      $body.attr('hidden', '')
+      $this.removeClass('is-open')
+    } else {
+      $body.removeAttr('hidden')
+      $this.addClass('is-open')
+    }
+  })
+}
+
+function _buildSimilarSegment({ lineIdx, candidate, searchWord, tier, distance, category }, allLines, opts = {}) {
+  const tierLabel = tier === 0 ? 'homophone'
+      : tier === 1 ? 'vowel diff'
+      : tier === 2 ? 'consonant diff'
+      : `edit dist ${distance}`
+  const tierClass = tier === 0 ? 'similar-tier-0'
+      : tier === 1 ? 'similar-tier-1'
+      : tier === 2 ? 'similar-tier-2'
+      : `similar-tier-3-d${distance}`
+  const collapsible = !!opts.collapsible
+  const vocabItem = $(`<div class="vocabulary-segment ${tierClass}"></div>`)
+  const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
+
+  const headerInner = `[${_.escape(category || '?')}] ≈ <b>${_.escape(candidate)}</b> ↔ ${_.escape(searchWord)} (${tierLabel})`
+  const $header = collapsible
+      ? $(`<div class="similar-segment-header" style="font-size:0.75em;color:#666;padding:2px 4px;"><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i><span>${headerInner}</span></div>`)
+      : $(`<div style="font-size:0.75em;color:#666;padding:2px 4px;">${headerInner}</div>`)
+  vocabItemContent.append($header)
+
+  // Body container: the surrounding-line context. In collapsible mode it
+  // sits in its own wrapper so the click handler can hide/show it without
+  // touching the header.
+  const $body = collapsible
+      ? $('<div class="similar-segment-body" hidden></div>')
+      : vocabItemContent
+
+  getSurrounding(lineIdx, allLines).forEach(it => {
+    let txt = it.item
+    const $line = $(`<div class="vocabulary-line"></div>`)
+    if (txt.trim().length) {
+      $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`)
+      $line.find('i.fa').click(selectSearchedWord)
+    } else {
+      txt = '------------------'
+    }
+    let displayTxt = _.escape(txt).replaceAll(SEPARATOR_PIPE, ' | ')
+    if (it.index === lineIdx) {
+      displayTxt = _highlightWordInLine(displayTxt, candidate)
+    }
+    $line.append(`<span>${displayTxt}</span>`)
+    $line.data({ text: txt })
+    if (it.index === lineIdx) $line.addClass('highlighted')
+    $body.append($line)
+  })
+  if (collapsible) vocabItemContent.append($body)
+  vocabItem.append(vocabItemContent)
+  return vocabItem
+}
+
+// Build a candidate-grouped block: a header announcing the matched word
+// plus one collapsible per-line segment for every vocab line that hit it.
+function _buildSimilarGroup(group, allLines) {
+  const { bestMatch, lines, candidate } = group
+  const tierLabel = bestMatch.tier === 0 ? 'homophone'
+      : bestMatch.tier === 1 ? 'vowel diff'
+      : bestMatch.tier === 2 ? 'consonant diff'
+      : `edit dist ${bestMatch.distance}`
+  const tierClass = bestMatch.tier === 0 ? 'similar-tier-0'
+      : bestMatch.tier === 1 ? 'similar-tier-1'
+      : bestMatch.tier === 2 ? 'similar-tier-2'
+      : `similar-tier-3-d${bestMatch.distance}`
+  const $group = $(`<div class="similar-group ${tierClass}"></div>`)
+  $group.append(
+      `<div class="similar-group-header" style="font-size:0.85em;font-weight:600;padding:4px 6px;border-top:1px solid #ddd;margin-top:6px;">≈ <b style="color:#1565c0">${_.escape(candidate)}</b> ↔ ${_.escape(bestMatch.searchWord)} (${tierLabel}) — ${lines.length} line${lines.length === 1 ? '' : 's'}</div>`)
+  lines.forEach(m => $group.append(_buildSimilarSegment(m, allLines, { collapsible: true })))
+  return $group
+}
+
+function _renderSimilarMatches($vocab, tier1Top, otherFull, limit, allLines, raw) {
   $vocab.html('')
 
-  if (top.length === 0) {
+  if (tier1Top.length === 0 && otherFull.length === 0) {
     $vocab.html(`<div style="color:grey;padding:4px;">No similar matches for "${_.escape(raw)}"</div>`)
-  } else {
-    top.forEach(({ lineIdx, candidate, searchWord, tier, distance, category }) => {
-      const tierLabel = tier === 1 ? 'vowel diff' : tier === 2 ? 'consonant diff' : `edit dist ${distance}`
-      const tierClass = tier === 1 ? 'similar-tier-1'
-          : tier === 2 ? 'similar-tier-2'
-          : `similar-tier-3-d${distance}`
-      const vocabItem = $(`<div class="vocabulary-segment ${tierClass}"></div>`)
-      const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
-      vocabItemContent.append(
-          `<div style="font-size:0.75em;color:#666;padding:2px 4px;">[${_.escape(category || '?')}] ≈ <b>${_.escape(candidate)}</b> ↔ ${_.escape(searchWord)} (${tierLabel})</div>`)
-      getSurrounding(lineIdx, allLines).forEach(it => {
-        let txt = it.item
-        const $line = $(`<div class="vocabulary-line"></div>`)
-        if (txt.trim().length) {
-          $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`)
-          $line.find('i.fa').click(selectSearchedWord)
-        } else {
-          txt = '------------------'
-        }
-        $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, ' | ')}</span>`)
-        $line.data({ text: txt })
-        if (it.index === lineIdx) $line.addClass('highlighted')
-        vocabItemContent.append($line)
-      })
-      vocabItem.append(vocabItemContent)
-      $vocab.append(vocabItem)
-    })
-    $('.vocabulary-segment').each((i, e) => {
-      const h = $(e).find('.highlighted')[0]
-      if (h) h.scrollIntoView()
-    })
+    return
   }
+
+  if (tier1Top.length === 0) {
+    $vocab.append(`<div style="color:grey;padding:4px;">No homophone / vowel-diff matches for "${_.escape(raw)}"</div>`)
+  } else {
+    tier1Top.forEach(g => $vocab.append(_buildSimilarGroup(g, allLines)))
+    _attachAccordionDelegate($vocab)
+  }
+
+  if (otherFull.length > 0) {
+    const initialBatch = Math.min(limit, otherFull.length)
+    const $more = $(`<button type="button" class="lang-tool-btn" id="showMoreSimilarBtn" style="margin-top:6px;">Show ${initialBatch} more groups (consonant diff / edit dist) →</button>`)
+    // Stop propagation: a document-level click handler in the search-vocab
+    // setup closes any visible jQuery-UI dialog when the click target is
+    // outside `.ui-dialog`. Without this, the dialog opens and is closed
+    // by the same click event on the very next bubbling step.
+    $more.on('click', e => {
+      e.preventDefault()
+      e.stopPropagation()
+      _openSimilarMoreDialog(otherFull, limit, allLines, raw)
+    })
+    $vocab.append($more)
+  }
+
+}
+
+function _openSimilarMoreDialog(otherFull, limit, allLines, raw) {
+  let $dlg = $('#similarMoreDialog')
+  if ($dlg.length === 0) {
+    $dlg = $('<div id="similarMoreDialog" title="Other similar matches"></div>')
+    $('body').append($dlg)
+  }
+  $dlg.empty()
+  const $header = $(`<div style="font-size:0.85em;color:#666;margin-bottom:6px;">Tier 2 / 3 groups for "${_.escape(raw)}" — <span class="similar-shown-count">0</span> of ${otherFull.length} shown:</div>`)
+  $dlg.append($header)
+  const $list = $('<div class="similar-more-list"></div>')
+  $dlg.append($list)
+  const $loadMore = $(`<button type="button" class="lang-tool-btn" style="margin-top:8px;display:none;"></button>`)
+  $dlg.append($loadMore)
+
+  // Single-open accordion: clicking a header collapses any other open one
+  // and toggles the clicked segment. Delegated, so future "Show N more"
+  // batches inherit the behaviour without rebinding.
+  _attachAccordionDelegate($list)
+
+  let shown = 0
+  const updateLoadMore = () => {
+    const remaining = otherFull.length - shown
+    $header.find('.similar-shown-count').text(shown)
+    if (remaining > 0) {
+      const next = Math.min(limit, remaining)
+      $loadMore.text(`Show ${next} more groups (${remaining} remaining) →`).show()
+    } else {
+      $loadMore.hide()
+    }
+  }
+  const renderMore = () => {
+    const slice = otherFull.slice(shown, shown + limit)
+    slice.forEach(g => $list.append(_buildSimilarGroup(g, allLines)))
+    shown += slice.length
+    updateLoadMore()
+  }
+  $loadMore.on('click', e => {
+    // Match the outer button's stop-propagation logic: the document-level
+    // click handler closes any visible dialog when the click target is
+    // outside `.ui-dialog`. The button is inside `.ui-dialog`, so this is
+    // belt-and-suspenders, but consistent.
+    e.preventDefault()
+    e.stopPropagation()
+    renderMore()
+  })
+
+  renderMore()  // initial batch
+
+  const w = Math.round(window.innerWidth * 0.95)
+  const h = Math.round(window.innerHeight * 0.90)
+  // top ≈ 5% of viewport
+  const position = { my: 'left top', at: 'left+2.5% top+5%', of: window }
+  if ($dlg.hasClass('ui-dialog-content')) {
+    $dlg.dialog('option', { width: w, height: h, position }).dialog('open')
+  } else {
+    $dlg.dialog({ width: w, height: h, position, modal: false, autoOpen: true })
+  }
+  _pinDialogToViewport($dlg)
+}
+
+// jQuery UI computes dialog position with `of: window` as absolute document
+// coordinates (scrollY-included). Forcing position:fixed afterwards would
+// reinterpret those pixels as viewport-relative, pushing the dialog off-screen
+// on a scrolled page. So we explicitly set position:fixed AND replace top/left
+// with viewport-relative values so the dialog actually shows up at the
+// intended spot regardless of scroll.
+function _pinDialogToViewport($dlg) {
+  const $wrap = $dlg.closest('.ui-dialog')
+  if (!$wrap.length) return
+  const top = Math.round(window.innerHeight * 0.05)
+  const left = Math.round(window.innerWidth * 0.025)
+  $wrap.css({ position: 'fixed', top: top + 'px', left: left + 'px' })
 }
 
 function searchVocabularyByPrefix() {
-  const searchText = $('#searchText').val().trim()
+  const searchText = window.searchText ? window.searchText.toLowerCase().trim() : ''
   if (!searchText || !window.vocabulary) return
 
   // Build flat-line array along with each line's category so we can group
@@ -3312,19 +3865,23 @@ function searchVocabularyByPrefix() {
     byCategory.get(cat).push(idx)
   }
   const categoryLists = Array.from(byCategory.values())
-  const ordered = []
+  const roundRobin = []
   for (let round = 0; ; round++) {
     let added = false
     for (const list of categoryLists) {
       if (round < list.length) {
-        ordered.push(list[round])
+        roundRobin.push(list[round])
         added = true
       }
     }
     if (!added) break
   }
+  // After round-robin across categories, cluster by the line's first word
+  // so the same head-word appearing in multiple categories ends up shown
+  // back-to-back instead of scattered through the result list.
+  const ordered = _clusterByKey(roundRobin, idx => _vocabLineFirstWord(allWords[idx]))
 
-  console.log(`[prefix] ${ordered.length} matches across ${categoryLists.length} categories (round-robin)`)
+  console.log(`[prefix] ${ordered.length} matches across ${categoryLists.length} categories (round-robin + word-clustering)`)
 
   const $vocab = $('#vocabularyResult')
   $vocab.html('')
@@ -3336,29 +3893,49 @@ function searchVocabularyByPrefix() {
       const category = lineCategory[idx] || '?'
       const vocabItem = $('<div class="vocabulary-segment"></div>')
       const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
-      vocabItemContent.append(
-          `<div style="font-size:0.75em;color:#666;padding:2px 4px;">[${_.escape(category)}]</div>`)
-      getSurrounding(idx, allWords).forEach(it => {
-        let txt = it.item
-        const $line = $(`<div class="vocabulary-line"></div>`)
-        if (txt.trim().length) {
-          $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`)
-          $line.find('i.fa').click(selectSearchedWord)
-        } else {
-          txt = '------------------'
-        }
-        $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, ' | ')}</span>`)
-        $line.data({ text: txt })
-        if (it.index === idx) {
-          $line.addClass('highlighted')
-        }
-        vocabItemContent.append($line)
+
+      const surroundings = getSurrounding(idx, allWords)
+      const matchEntry = surroundings.find(it => it.index === idx) || { item: allWords[idx], index: idx }
+      // Matched line as collapsible header. The category badge is appended
+      // to the right of the matched-line text so the header keeps its
+      // original look while still showing the category.
+      const $header = _buildVocabLine(matchEntry)
+      $header.addClass('highlighted similar-segment-header')
+      $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
+      $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}]</span>`)
+      vocabItemContent.append($header)
+
+      // Body keeps every surrounding line (including the matched one at its
+      // original index) so the user sees the full context with original
+      // ordering when they expand.
+      const $body = $('<div class="similar-segment-body" hidden></div>')
+      surroundings.forEach(it => {
+        const $line = _buildVocabLine(it)
+        if (it.index === idx) $line.addClass('highlighted')
+        $body.append($line)
       })
+      vocabItemContent.append($body)
+
       vocabItem.append(vocabItemContent)
       $vocab.append(vocabItem)
     })
-    $('.vocabulary-segment').each((i, e) => $(e).find('.highlighted')[0].scrollIntoView())
+    _attachAccordionDelegate($vocab)
   }
+
+  // "Different prefixes" button — strips the leading prefix from the
+  // search term and looks for vocabulary lines containing words formed by
+  // attaching a different prefix to the same stem (e.g. "bevara" → stem
+  // "vara" → matches "förvara"). Shown regardless of whether the primary
+  // prefix search produced hits, since the user might want suggestions
+  // even when there are zero direct matches.
+  const lang = (typeof getLangFromUrl === 'function' ? getLangFromUrl().code : null) || 'sv'
+  const $diffBtn = $(`<button type="button" class="lang-tool-btn" id="showDiffPrefixesBtn" style="margin-top:6px;">Different prefixes →</button>`)
+  $diffBtn.on('click', e => {
+    e.preventDefault()
+    e.stopPropagation()
+    _openDifferentPrefixDialog(searchText, lang)
+  })
+  $vocab.append($diffBtn)
 
   // Ensure the result container is visible
   const $rc = $('#resultContainer')
@@ -3386,38 +3963,48 @@ export function renderVocabularyFindings(search) {
         .filter(cat => window.vocabulary[cat].find(matcher))
   }
 
-  const words = categories.map(it => window.vocabulary[it]).flat()
+  // Build words alongside per-line category so the collapsible header can
+  // show which category the matched line came from.
+  const words = []
+  const lineCategory = []
+  categories.forEach(cat => {
+    (window.vocabulary[cat] || []).forEach(line => {
+      words.push(line)
+      lineCategory.push(cat)
+    })
+  })
 
-  const indexesOfAppearance = words.map((vocabLine, i) =>
-      matcher(vocabLine) ? i : null)
-      .filter(it => it !== null)
+  const indexesOfAppearance = _clusterByKey(
+      words.map((vocabLine, i) => matcher(vocabLine) ? i : null).filter(it => it !== null),
+      idx => _vocabLineFirstWord(words[idx]))
 
   const vocab = $('#vocabularyResult')
   vocab.html('')
   indexesOfAppearance.forEach(idx => {
+    const category = lineCategory[idx] || '?'
     const vocabItem = $('<div class="vocabulary-segment"></div>')
     const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
-    getSurrounding(idx, words).forEach(it => {
-      let txt = it.item
-      const $line = $(`<div class="vocabulary-line"></div>`);
-      if (txt.trim().length) {
-        $line.append(`<i class="fa fa-mouse-pointer" style="color: red; cursor: pointer;margin-right: 3px;"></i>`)
-        $line.find("i.fa").click(selectSearchedWord)
-      } else {
-        txt = "------------------"
-      }
-      $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, " | ")}</span>`)
-      $line.data({text: txt})
-
-      if (it.index === idx) {
-        $line.addClass('highlighted')
-      }
-      vocabItemContent.append($line)
+    const surroundings = getSurrounding(idx, words)
+    const matchEntry = surroundings.find(it => it.index === idx) || { item: words[idx], index: idx }
+    // Matched line acts as the collapsible header.
+    const $header = _buildVocabLine(matchEntry)
+    $header.addClass('highlighted similar-segment-header')
+    $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
+    $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}]</span>`)
+    vocabItemContent.append($header)
+    // Surrounding context (including the matched line at its original
+    // position so ordering is preserved) goes into the collapsible body.
+    const $body = $('<div class="similar-segment-body" hidden></div>')
+    surroundings.forEach(it => {
+      const $line = _buildVocabLine(it)
+      if (it.index === idx) $line.addClass('highlighted')
+      $body.append($line)
     })
+    vocabItemContent.append($body)
     vocabItem.append(vocabItemContent)
     vocab.append(vocabItem)
   })
-  $('.vocabulary-segment').each((i, e) => $(e).find('.highlighted')[0].scrollIntoView())
+  _attachAccordionDelegate(vocab)
 }
 
 async function render(searchResults, search, className, token) {
@@ -3701,8 +4288,8 @@ const STEM_RULES = {
     ['s', ['']],
     ['et', ['en']],
     ['en', ['et']],
-    ['t', ['a', 'd']],
-    ['a', ['']],
+    ['t', ['a', 'd', '']], // "köpt" → "köpa" or root "köp"; "förvärvat" → "förvärva" or root "förvärv".
+    ['a', ['']], // edge case: "knassiga" → "knassig" (adj declension) or root "knass" (noun)
   ],
   es: [
     ['iendo', ['er', 'ir']],
@@ -3871,7 +4458,7 @@ function isRegExp(text) {
 }
 
 function renderAccordions(el) {
-  console.log('Rendering accordions')
+  //console.log('Rendering accordions')
   el = el || document
   const isAccordion = it => Array.from(it.classList.values()).indexOf('accordion') >= 0
   const isAccordionEnd = it => Array.from(it.classList.values()).indexOf('accordion-end') >= 0
@@ -3914,6 +4501,18 @@ function renderAccordions(el) {
 
     fixAccordionPanel(acc[i])
     acc[i].addEventListener("click", function () {
+      // Single-open: collapse any other expanded sibling in this accordion
+      // group before toggling the clicked one.
+      const group = (el.getElementsByClassName("l-accordion").length
+          ? el.getElementsByClassName("l-accordion")
+          : el.getElementsByClassName("accordion"))
+      for (const other of group) {
+        if (other === this) continue
+        other.classList.remove("active")
+        const op = other.nextElementSibling
+        if (op && op.classList && op.classList.contains('autocreated-panel')) op.style.display = "none"
+      }
+
       /* Toggle between adding and removing the "active" class,
       to highlight the button that controls the panel */
       this.classList.toggle("active");
@@ -3990,36 +4589,44 @@ function export2txt(data, fileName) {
 }
 
 async function saveStarredLines() {
-  let nm = window.allSubtitles[window.mediaBeingPlayed.link].fileName
-  nm += ".starred.json"
   const lines = $('.starred-sub').map((i, e) => $(e).text()).toArray()
 
-  const _ms = window.mediaBeingPlayed.source
-
-  if (_ms === 'local') {
+  if (window.mediaBeingPlayed.source === 'local') {
     const s = prompt('Source of media:')
     if (!s || !s.trim()) return
-    window.mediaBeingPlayed['source'] = s.trim()
+    window.mediaBeingPlayed.source = s.trim()
   }
 
-  const data = JSON.stringify({...window.mediaBeingPlayed, lines})
+  const lang = getLangFromUrl()
+  const filePath = `db/language/${lang.fullName}/srts/srt_favorites.json`
+
+  // Read the existing array (if any) and upsert this video's record by link.
+  let existing = []
+  try {
+    const r = await fetch(`${getResourceUrl()}/srts/srt_favorites.json`, { cache: 'no-cache' })
+    if (r.ok) existing = await r.json()
+  } catch (_) { /* file may not exist yet */ }
+  if (!Array.isArray(existing)) existing = []
+
+  const record = { ...window.mediaBeingPlayed, lines }
+  const idx = existing.findIndex(it => it.link === window.mediaBeingPlayed.link)
+  if (idx >= 0) existing[idx] = record
+  else existing.push(record)
 
   try {
-    const r = await fetch('http://localhost:5000/srt-favorites', {
-      method: 'POST',
-      body: data,
-      headers: {'Accept': 'application/json', 'Content-Type': 'application/json'}
+    await window.GitHubUtils.putFileWithContent({
+      owner: 'trexsatya',
+      repo: 'trexsatya.github.io',
+      filePath,
+      content: JSON.stringify(existing, null, 2),
+      commitMessage: `srt: update starred lines for ${window.mediaBeingPlayed.link}`,
+      branch: 'gh-pages'
     })
-    // console.log(await r.json())
-    // export2txt(data, nm)
-    if (r.status != 200) {
-      alert("Failed to save. Status=" + r.status)
-    }
+    console.log('Starred lines committed to GitHub')
   } catch (e) {
-    console.log(e)
-    alert("Failed to save")
+    console.error('Failed to commit starred lines to GitHub:', e)
+    alert('Failed to save starred lines: ' + e.message)
   }
-
 }
 
 async function saveRevision() {
