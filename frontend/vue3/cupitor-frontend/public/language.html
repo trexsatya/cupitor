@@ -56,7 +56,7 @@
             } else {
                 ytVideoWidth = ww - 15;
                 subWidth = ww - 10;
-                ytHeight = wh / 2 - 150;
+                ytHeight = wh / 2;
                 // $('#mediaControls').css({width: '100%', bottom: '-15em', right: 0})
                 $('#youtubePlayer-info').hide()
                 // $('#speed-control').parent().hide()
@@ -145,14 +145,14 @@
                 </button>
                 <div class="lang-toolbar-center">
                 <!-- Settings gear button -->
-                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleSettingsPanelBtn" title="Settings" onclick="$('#settingsPanel').slideToggle(120)">
+                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleSettingsPanelBtn" title="Settings" onclick="toggleControlPanel('settingsPanel')">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492M5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0"/>
                         <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.47l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115z"/>
                     </svg>
                 </button>
                 <!-- Media film-reel button -->
-                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleMediaPanelBtn" title="Media" onclick="$('#mediaControlPanel').slideToggle(120)">
+                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleMediaPanelBtn" title="Media" onclick="toggleControlPanel('mediaControlPanel')">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M0 1a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1zm4 0v6h8V1zm8 8H4v6h8zM1 1v2h2V1zm2 3H1v2h2zM1 7v2h2V7zm2 3H1v2h2zm-2 3v2h2v-2zM15 1h-2v2h2zm-2 3v2h2V4zm2 3h-2v2h2zm-2 3v2h2v-2zm2 3h-2v2h2z"/>
                     </svg>
@@ -235,7 +235,6 @@
                     </label>
                     <button id="addToVocabBtn" onclick="openAddToVocabDialog()" class="button-62" disabled>Add To Vocab</button>
                     <button id="saveStarredLinesBtn" onclick="saveStarredLines()" style="display: none;">Save Starred Lines</button>
-                    <button id="saveRevisionBtn" onclick="saveRevision()" style="display: none;">Save Revision</button>
                 </div>
                 <div id="searchesControl" style="padding-top: 16px;">
                     
@@ -352,12 +351,7 @@
         </div>
 
         <div id="mediaContainer" style="width: 100%;display:none;">
-            <button id="togglePlayerControlsBtn">...</button>
-            <button id="hidePlayer">[X]</button>
-            <div id="youtubePlayer" style="margin-top: 2em;">
-
-            </div>
-
+            <div id="youtubePlayer" style="margin-top: 2em;"></div>
         </div>
     </div>
 
@@ -381,7 +375,6 @@
                                 <input type="radio" name="speedOption" id="speed-3" data-speed="0.8">
                                 <label for="speed-4">1.0</label>
                                 <input type="radio" name="speedOption" id="speed-4" checked data-speed="1.0">
-                                <label for="speed-control">x Speed</label>
                             </div>
                         </div>
                         <br>

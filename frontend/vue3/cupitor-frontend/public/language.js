@@ -1,6 +1,12 @@
 import {computeIfAbsent, randomFromArray, range, schedule, uuid} from './data-structures.js';
 import {conjugateTableSpanish} from './spanish.js';
 
+function debugLog(x) {
+  if (window.DEBUG) {
+    console.log(x)
+  }
+}
+
 /* eslint-disable @typescript-eslint/no-use-before-define */
 
 let $, alert, _, fetch;
@@ -1227,6 +1233,24 @@ function updateToggleButtonView(viewId) {
   }
   updateToggleButton($button, newState)
 }
+window.updateToggleButtonView = updateToggleButtonView
+
+// Shared handler for the Settings / Media toolbar buttons. If mainControlBody
+// is collapsed, expanding it can also make a panel with a stale display:block
+// reappear — so a plain slideToggle would slide it shut on the first click.
+function toggleControlPanel(panelId) {
+  const $main = $('#mainControlBody')
+  const $panel = $('#' + panelId)
+  const mainWasHidden = $main.is(':hidden')
+  if (mainWasHidden) {
+    $main.show()
+    updateToggleButtonView('mainControlBody')
+    if ($panel.css('display') === 'none') $panel.slideDown(120)
+  } else {
+    $panel.slideToggle(120)
+  }
+}
+window.toggleControlPanel = toggleControlPanel
 
 $('document').ready(e => {
   // Click on a subtitle-word `.link` opens a small option popover with
@@ -1254,19 +1278,26 @@ $('document').ready(e => {
     }
   });
 
+  let closePopover = (popoverId) => {
+    const $pop = $('#' + popoverId)
+    if ($pop.length === 0) return
+    if ($pop.attr('hidden') !== undefined) return
+    if ($(e.target).closest('#' + popoverId + ', .link').length) return
+    $pop.attr('hidden', '')
+  }
   // Close the subtitle-word popover when the user clicks anywhere outside
   // it (and outside another `.link` that would just reopen it).
   $(document).on('click', function (e) {
-    const $pop = $('#subtitleWordPopover')
-    if ($pop.length === 0) return
-    if ($pop.attr('hidden') !== undefined) return
-    if ($(e.target).closest('#subtitleWordPopover, .link').length) return
-    $pop.attr('hidden', '')
+    closePopover('subtitleWordPopover')
+    closePopover('subtitleWordPopoverSpecial')
   });
 
   $(document).on("click", function(e) {
     if ($(".ui-dialog:visible").length && !$(e.target).closest(".ui-dialog,.show-info-btn").length) {
-      $(".ui-dialog-content:visible").dialog("close");
+      // The add-vocabulary dialog stages user input (typed words, picked
+      // category) that's easy to lose to a stray outside click — keep it
+      // open and require an explicit X / Escape / Save to dismiss.
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog").dialog("close");
     }
   });
 
@@ -1353,6 +1384,7 @@ $('document').ready(e => {
       window.location.hash = link
       window.mediaSelected = {link: link, source: 'link'}
       window.syncSubtitle = true
+      $('#toggleMainControl').click()
       playNewMedia(link, 'link')
     } else {
       removeHash()
@@ -1451,6 +1483,26 @@ $('document').ready(e => {
     updateToggleButton(button, newState);
   })
 
+  // Swipe-down on #mediaControls acts as a tap on #toggleMediaRelatedContainer.
+  const mediaControlsEl = document.getElementById('mediaControls')
+  if (mediaControlsEl) {
+    let swipeStartX = 0, swipeStartY = 0, swipeActive = false
+    mediaControlsEl.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) { swipeActive = false; return }
+      swipeStartX = e.touches[0].clientX
+      swipeStartY = e.touches[0].clientY
+      swipeActive = true
+    }, { passive: true })
+    mediaControlsEl.addEventListener('touchend', e => {
+      if (!swipeActive) return
+      swipeActive = false
+      const t = e.changedTouches[0]
+      const dy = t.clientY - swipeStartY
+      const dx = Math.abs(t.clientX - swipeStartX)
+      if (dy > 50 && dy > dx) $('#toggleMediaRelatedContainer').click()
+    })
+  }
+
   fixMobileView()
 
   $('#starredLinesSelect').change(e => {
@@ -1495,21 +1547,32 @@ function getWikiLink(word, uri = null, cls = 'link', index = null) {
 // "Search here" (populate the search box) and "Search on wiki" (open the
 // stored Wiktionary URL) for a clicked subtitle word.
 function _showSubtitleWordPopover(pageX, pageY, word, href, index = null) {
-  let $pop = $('#subtitleWordPopover')
+  let popoverId = 'subtitleWordPopover'
+  if(index != null) {
+    popoverId = 'subtitleWordPopoverSpecial'
+  }
+  let $pop = $('#' + popoverId)
   let addStaredLine = true
   if(window.starredLines.find(it => it === index)) {
       addStaredLine = false
   }
 
   if ($pop.length === 0) {
-    $pop = $(`<div id="subtitleWordPopover" class="subtitle-word-popover" hidden>
+    $pop = $(`<div id="${popoverId}" class="subtitle-word-popover" hidden>
       <button type="button" data-action="search-here">Search here</button>
       <button type="button" data-action="search-wiki">Search on wiki</button>
-      ${index !== null && addStaredLine ? `<button type="button" data-action="add-favorite">Mark (${word})</button>` : ''}
-      ${index !== null && !addStaredLine ? `<button type="button" data-action="remove-favorite">Unmark (${word})</button>` : ''}
+      ${index !== null ? `<button type="button" id="${popoverId}-add-favorite" data-action="add-favorite">Mark (${word})</button>` : ''}
     </div>`)
     $('body').append($pop)
   }
+  if(index != null) {
+    if(addStaredLine) {
+      $(`#${popoverId}-add-favorite`).attr('data-action', 'add-favorite').html(`Mark (${word})`)
+    } else {
+      $(`#${popoverId}-add-favorite`).attr('data-action', 'remove-favorite').html(`Unmark (${word})`)
+    }
+  }
+
   let fn = (e) => {
     e.preventDefault(); e.stopPropagation()
     $pop.attr('hidden', '')
@@ -2392,6 +2455,9 @@ function isNotPlaying() {
   } else if (window.playingVideo) {
     return videoPlayer.paused
   } else if (window.playingYoutubeVideo) {
+    if(!window.ytPlayer.getPlayerState) {
+      return true
+    }
     return window.ytPlayer.getPlayerState() !== 1;
   }
 }
@@ -2411,6 +2477,9 @@ function updatePlayBtn() {
   const el = $('#playBtn')[0]
   let isPaused, isPlaying;
   if (window.playingYoutubeVideo) {
+    if(!window.ytPlayer.getPlayerState) {
+      return
+    }
     isPaused = window.ytPlayer.getPlayerState() === 2;
     isPlaying = window.ytPlayer.getPlayerState() === 1;
   } else if (window.playingAudio) {
@@ -2599,6 +2668,19 @@ function expandRegex(txt) {
   return txt
 }
 
+// Wrap a search pattern in regex word boundaries so a multi-word phrase like
+// "ta efter" doesn't match inside "tänkta efter" / "leta efter". Uses
+// lookarounds (\w on either side) rather than \b because Swedish letters like
+// å/ä/ö are non-\w in JS — \b would put a boundary inside a Swedish word and
+// cause spurious mismatches there too. Patterns the user explicitly padded
+// with whitespace (their convention for literal-space prefix/suffix matching)
+// are left alone.
+function withWordBoundaries(pattern) {
+  if (!pattern) return pattern
+  if (/^\s|\s$/.test(pattern)) return pattern
+  return `(?<!\\w)(?:${pattern})(?!\\w)`
+}
+
 async function getMatchingWords(list, search, token) {
   const startTime = new Date().getTime()
   let wordToItemsMap = {}
@@ -2630,7 +2712,7 @@ async function getMatchingWords(list, search, token) {
             })
         // Whole search text as a word
         const word = searchText.toLowerCase().trim()
-        if (word.indexOf(" ") > 0 && line.text.toLowerCase().indexOf(word) >= 0) {
+        if (word.indexOf(" ") > 0 && new RegExp(withWordBoundaries(word), "i").test(line.text)) {
           wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
         }
       }
@@ -2647,7 +2729,7 @@ async function getMatchingWords(list, search, token) {
     searchText = searchText.trim()
   }
 
-  const searchRe = new RegExp(searchText, "i")
+  const searchRe = new RegExp(withWordBoundaries(searchText), "i")
   for (let start = 0; start < list.length; start += ITEM_CHUNK) {
     if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
     const end = Math.min(start + ITEM_CHUNK, list.length)
@@ -3010,7 +3092,12 @@ function groupAndArrangeResults(items) {
 async function populateSRTFindings(wordToItemsMap, $result, token) {
   let words = getWordsOrdered(Object.keys(wordToItemsMap))
   if (window.searchText.includes(SEPARATOR_PIPE)) {
-    words = words.filter(it => it.trim() !== window.searchText.trim())
+    const filtered = words.filter(it => it.trim() !== window.searchText.trim())
+    // If the filter strips the only key (no per-line matches AND the
+    // expansion contained regex-syntax terms that getMatchingWords skipped
+    // as placeholders), fall back to the individual expanded terms so the
+    // user still gets a "no-result" header per form instead of a blank pane.
+    words = filtered.length > 0 ? filtered : getSearchedTerms(window.searchText)
   }
 
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -3411,8 +3498,23 @@ function _phoneticKey(word, lang) {
   return w
 }
 
+// Compound match: shorter word appears at the start or end of the longer
+// one. Minimum 4-char shorter avoids spurious 2/3-letter substring noise
+// ("is" inside dozens of unrelated words). Returns the length gap so we
+// can rank tight compounds above sprawling ones.
+function _compoundOverlap(a, b) {
+  const shorter = a.length <= b.length ? a : b
+  const longer = a.length <= b.length ? b : a
+  if (shorter.length < 4 || longer.length === shorter.length) return 0
+  if (longer.startsWith(shorter) || longer.endsWith(shorter)) {
+    return longer.length - shorter.length
+  }
+  return 0
+}
+
 // Tier 0: phonetic key match (language-aware homophone).
-// Tier 1: same length, exactly one differing char that's vowel-vs-vowel.
+// Tier 1: same length, exactly one differing char that's vowel-vs-vowel,
+//         OR compound match (e.g. "gnista" ⊂ "livsgnista").
 // Tier 2: same length, exactly one differing char that's consonant-vs-consonant.
 // Tier 3: edit distance ≤ 2 (and > 0). Returns null if not similar enough.
 function _scoreSimilarity(searchWord, candidate, lang) {
@@ -3426,6 +3528,8 @@ function _scoreSimilarity(searchWord, candidate, lang) {
     if (diff.count === 1 && diff.allVowel) return { tier: 1, distance: 1 }
     if (diff.count === 1 && diff.allConsonant) return { tier: 2, distance: 1 }
   }
+  const gap = _compoundOverlap(searchWord, candidate)
+  if (gap > 0) return { tier: 1, distance: gap }
   const d = _levenshtein(searchWord, candidate)
   if (d > 0 && d <= 2) return { tier: 3, distance: d }
   return null
@@ -3507,7 +3611,12 @@ async function searchVocabularyBySimilarity() {
           // needs edit distance ≤ 2 (length diff ≤ 2). Tier 0 (homophone)
           // can have any length, so skip the filter when phonetic keys
           // already match.
-          if (Math.abs(cwLen - swLens[si]) > 2 && cwKey !== swPhonetic[si]) continue
+          if (Math.abs(cwLen - swLens[si]) > 2 && cwKey !== swPhonetic[si]) {
+            // Length differs too much for vowel/consonant/edit-distance tiers,
+            // and phonetic keys don't match — but a compound match (one word
+            // starts/ends with the other) might still apply.
+            if (_compoundOverlap(sw, cw) === 0) continue
+          }
           const score = _scoreSimilarity(sw, cw, lang)
           if (score) matches.push({ lineIdx, candidate: cw, searchWord: sw, ...score })
         }
@@ -4220,11 +4329,14 @@ function _expandWords(txt, lang) {
   }
 
   const expansions = getExpansionForWords()
-  const terms = txt.split(SEPARATOR_PIPE).map(it => _.includes(it, "<*") && !it.endsWith(" ") ? it + " " : it)
+  const terms = txt.split(SEPARATOR_PIPE)
   const fn = () => {
     const w = terms.shift()
     if (!w) return
-    const match = w.match(/<\*(?:\{([^)]+)})?([^\s>]*) .*/)
+    // Trailing whitespace is optional so the synthetic space we used to add
+    // doesn't end up baked into the expanded term — that space made
+    // "<*gå rätt till" miss subtitles like "gå rätt till." (punctuation, no space).
+    const match = w.match(/<\*(?:\{([^)]+)})?([^\s>]*)(?:\s.*)?$/)
     if (match && match.length === 3) {
       const ref = match[1]
       const wordToExpand = match[2]
@@ -4540,7 +4652,8 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 // 3. This function creates an <iframe> (and YouTube player)
 //    after the API code downloads.
 
-function loadYoutubeVideo(videoId) {
+async function loadYoutubeVideo(videoId) {
+  await waitUntil(() => window.ytPlayerReady && window.ytPlayer.getIframe())
   const iframe = window.ytPlayer.getIframe()
   showMediaContainer()
   showMediaRelatedContainer()
