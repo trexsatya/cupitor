@@ -1337,6 +1337,14 @@
     <button onclick="handleImageInputDialogButtons('')">Close</button>
 </div>
 
+<!-- Screen Recording Indicator -->
+<div id="screenRecIndicator" style="display:none;position:fixed;top:14px;right:14px;z-index:9999999;background:#b71c1c;color:#fff;padding:6px 12px;border-radius:18px;font-family:system-ui,sans-serif;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.3);align-items:center;gap:8px;">
+    <span style="display:inline-block;width:8px;height:8px;background:#fff;border-radius:50%;animation:screenRecPulse 1s infinite;"></span>
+    <span>REC <span id="screenRecElapsed">0s</span></span>
+    <button onclick="stopScreenRecording()" style="margin-left:4px;background:#fff;color:#b71c1c;border:none;border-radius:10px;padding:2px 8px;font-size:11px;cursor:pointer;font-weight:600;">Stop</button>
+</div>
+<style>@keyframes screenRecPulse { 0%,100% { opacity:1 } 50% { opacity:0.3 } }</style>
+
 <!-- Clear Before Play Dialog -->
 <div id="clearBeforePlayDialog" style="display:none;position:fixed;inset:0;z-index:9999998;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;">
     <div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.35);min-width:320px;padding:18px 22px;font-family:system-ui,sans-serif;">
@@ -1344,6 +1352,8 @@
         <label style="display:block;margin:6px 0;font-size:13px;"><input type="checkbox" id="clearBeforePlay-pc" checked> Player canvas</label>
         <label style="display:block;margin:6px 0;font-size:13px;"><input type="checkbox" id="clearBeforePlay-oc" checked> Overlay drawings</label>
         <label style="display:block;margin:6px 0;font-size:13px;"><input type="checkbox" id="clearBeforePlay-txt" checked> Text layer</label>
+        <hr style="border:none;border-top:1px solid #eee;margin:10px 0;">
+        <label style="display:block;margin:6px 0;font-size:13px;"><input type="checkbox" id="recordPlayback"> &#128264; Record screen while playing (.webm)</label>
         <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;">
             <button onclick="closeClearBeforePlayDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Cancel</button>
             <button onclick="confirmClearAndPlayStepwise()" style="padding:4px 10px;border:1px solid #1976D2;border-radius:4px;background:#fff;color:#1976D2;font-size:12px;cursor:pointer;">&#9197; Play Stepwise</button>
@@ -2449,16 +2459,126 @@
         if ($('#clearBeforePlay-pc').is(':checked')) clear('pc');
         if ($('#clearBeforePlay-oc').is(':checked')) clear('oc');
         if ($('#clearBeforePlay-txt').is(':checked')) clear('txt');
+        const wantsRecording = $('#recordPlayback').is(':checked');
         closeClearBeforePlayDialog();
-        playScript();
+        if (wantsRecording) {
+            startScreenRecording().then(function (started) {
+                if (started) watchPlaybackEndThenStop();
+                playScript();
+            });
+        } else {
+            playScript();
+        }
     }
 
     function confirmClearAndPlayStepwise() {
         if ($('#clearBeforePlay-pc').is(':checked')) clear('pc');
         if ($('#clearBeforePlay-oc').is(':checked')) clear('oc');
         if ($('#clearBeforePlay-txt').is(':checked')) clear('txt');
+        const wantsRecording = $('#recordPlayback').is(':checked');
         closeClearBeforePlayDialog();
-        playScriptStepwise();
+        if (wantsRecording) {
+            startScreenRecording().then(function () {
+                playScriptStepwise();
+            });
+        } else {
+            playScriptStepwise();
+        }
+    }
+
+    // ---- Screen recording ----
+    window._screenRec = null;
+
+    async function startScreenRecording() {
+        if (window._screenRec) return true;
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+            alert('Screen recording is not supported in this browser.');
+            return false;
+        }
+        let stream;
+        try {
+            stream = await navigator.mediaDevices.getDisplayMedia({
+                video: { frameRate: 30 },
+                audio: false,
+            });
+        } catch (e) {
+            console.warn('Screen capture cancelled or denied:', e);
+            return false;
+        }
+        const mimeCandidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+        const mimeType = mimeCandidates.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+        const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        const chunks = [];
+        rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+        rec.onstop = () => {
+            stream.getTracks().forEach(t => t.stop());
+            const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'playback_' + new Date().toISOString().replace(/[:.]/g, '-') + '.webm';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+            hideScreenRecIndicator();
+            window._screenRec = null;
+        };
+        // If user clicks the browser's "Stop sharing" button, end gracefully.
+        stream.getVideoTracks()[0].addEventListener('ended', () => {
+            if (window._screenRec && window._screenRec.recorder.state !== 'inactive') {
+                window._screenRec.recorder.stop();
+            }
+        });
+        rec.start();
+        window._screenRec = { recorder: rec, startedAt: Date.now() };
+        showScreenRecIndicator();
+        return true;
+    }
+
+    function stopScreenRecording() {
+        const s = window._screenRec;
+        if (!s) return;
+        if (s.recorder.state !== 'inactive') s.recorder.stop();
+    }
+
+    function showScreenRecIndicator() {
+        const el = document.getElementById('screenRecIndicator');
+        if (!el) return;
+        el.style.display = 'inline-flex';
+        clearInterval(window._screenRecTimer);
+        window._screenRecTimer = setInterval(() => {
+            if (!window._screenRec) return;
+            const secs = Math.floor((Date.now() - window._screenRec.startedAt) / 1000);
+            const m = Math.floor(secs / 60);
+            const s = secs % 60;
+            const label = m ? (m + 'm ' + s + 's') : (s + 's');
+            const span = document.getElementById('screenRecElapsed');
+            if (span) span.textContent = label;
+        }, 500);
+    }
+
+    function hideScreenRecIndicator() {
+        const el = document.getElementById('screenRecIndicator');
+        if (el) el.style.display = 'none';
+        clearInterval(window._screenRecTimer);
+        window._screenRecTimer = null;
+    }
+
+    // Poll the playback flag set by schedule() in data-structures.js.
+    // It is true during playback, false on completion/termination.
+    function watchPlaybackEndThenStop() {
+        let sawActive = false;
+        const startedAt = Date.now();
+        const interval = setInterval(() => {
+            if (!window._screenRec) { clearInterval(interval); return; }
+            if (window.isRecordingPlayback) { sawActive = true; return; }
+            // Give schedule() ~600ms to flip the flag on.
+            if (!sawActive && Date.now() - startedAt < 600) return;
+            clearInterval(interval);
+            // Tail a bit so the final frame is captured.
+            setTimeout(stopScreenRecording, 400);
+        }, 120);
     }
 
     // ---- Stepwise Playback ----
@@ -2483,6 +2603,7 @@
         $('#stepwisePlayDialog').hide();
         window._stepwiseState = null;
         window.isRecordingPlayback = false;
+        if (window._screenRec) stopScreenRecording();
     }
 
     function _stepwiseEscapeHtml(s) {
