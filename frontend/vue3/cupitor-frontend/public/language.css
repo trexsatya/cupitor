@@ -290,6 +290,19 @@
     position: fixed !important;
 }
 
+/* Ensure jQuery UI dialogs sit above page chrome. The default z-index of
+   100 isn't enough on language.html — the toolbar / result panel can sit
+   on top and visually swallow the dialog. */
+.ui-dialog {
+    z-index: 100000 !important;
+}
+
+/* Pin the captured-subtitles review dialog to the viewport so a scrolled
+   page doesn't render it above the fold (top:0 in document coords). */
+.ui-dialog:has(> #captured-subtitles-dialog) {
+    position: fixed !important;
+}
+
 /* ── Drop-down panels ─────────────────────────────── */
 .lang-panel {
     margin-top: 4px;

@@ -629,7 +629,7 @@ function populateNoteNames(sargam=false) {
     const top = n.offsetTop - poff.top -5;
     const noteName = n.name;
     const sargameNoteName = getSargam(noteName, getActiveKey());
-    const $nn = $(`<span>${sargam ? sargameNoteName : noteName}</span>`).addClass("note-name").css({position: 'absolute', left: left , top: top, padding: 0})
+    const $nn = $(`<span>${sargam ? sargameNoteName : noteName}</span>`).addClass("note-name").attr('data-voice', n.voice).css({position: 'absolute', left: left , top: top, padding: 0})
 
     if(n.keySignature) {
       const scaleNotes = getScale(n.keySignature)
@@ -642,6 +642,52 @@ function populateNoteNames(sargam=false) {
 
     $('#osmdCanvasPage1').append($nn)
     if(!window.showNoteNames) $nn.hide()
+  })
+}
+
+const VOICE_TOGGLE_COLORS = [['maroon', 'white'], ['blue', 'white'], ['green', 'black'], ['purple', 'black'], ['orange', 'black'], ['brown', 'white'], ['pink', 'black']]
+
+function getVoiceIdsFromXml(xml) {
+  if (!xml || !xml.find) return []
+  const set = new Set()
+  xml.find('note > voice').each((i, e) => {
+    const v = $(e).text().trim()
+    if (v) set.add(v)
+  })
+  return Array.from(set).sort((a, b) => parseInt(a) - parseInt(b))
+}
+
+function applyVoiceVisibility() {
+  const hidden = new Set(
+    $('#voiceToggles input[type=checkbox]').toArray()
+      .filter(cb => !cb.checked)
+      .map(cb => String(cb.dataset.voice))
+  )
+  $('.vf-notehead').each((i, el) => {
+    const voice = String($(el).data('voice') ?? '')
+    const $stave = $(el).closest('.vf-stavenote')
+    const $target = $stave.length ? $stave : $(el)
+    $target.css('visibility', hidden.has(voice) ? 'hidden' : '')
+  })
+  $('.note-name').each((i, el) => {
+    const voice = String($(el).attr('data-voice') ?? '')
+    if (hidden.has(voice)) $(el).hide()
+    else if (window.showNoteNames) $(el).show()
+  })
+}
+
+function renderVoiceToggles(xml) {
+  const $container = $('#voiceToggles')
+  if (!$container.length) return
+  $container.empty()
+  const voiceIds = getVoiceIdsFromXml(xml)
+  if (voiceIds.length < 2) return
+  $container.append('<span class="voice-toggles-label">Voices:</span>')
+  voiceIds.forEach((vid, i) => {
+    const [bg, fg] = VOICE_TOGGLE_COLORS[i % VOICE_TOGGLE_COLORS.length]
+    const $label = $(`<label class="voice-toggle" style="margin-left:6px;cursor:pointer;"><input type="checkbox" data-voice="${vid}" checked> <span style="background:${bg};color:${fg};padding:0 6px;border-radius:3px;">V${vid}</span></label>`)
+    $label.find('input').on('change', applyVoiceVisibility)
+    $container.append($label)
   })
 }
 
@@ -661,6 +707,8 @@ function loadMainOSMD(musicXml, height,) {
     populateNoteheadData(osmd, jqueryXml);
     hideIdTexts()
     populateNoteNames()
+    renderVoiceToggles(jqueryXml)
+    applyVoiceVisibility()
     return jqueryXml
   });
 }

@@ -58,6 +58,16 @@ window.addEventListener('filterData', (e) => {
   }
 });
 
+window.addEventListener('capturedSubtitle', (e) => {
+  if (!e.detail) return
+  console.log('capturedSubtitle event buffered', e.detail);
+  try {
+    bufferCapturedSubtitle(e.detail)
+  } catch (err) {
+    console.error('Failed to buffer capturedSubtitle', err)
+  }
+});
+
 function getExpansionForWords() {
   const list = `ta=ta,tar,tog,tagit
 as=as,ades,ats
@@ -1293,11 +1303,14 @@ $('document').ready(e => {
   });
 
   $(document).on("click", function(e) {
-    if ($(".ui-dialog:visible").length && !$(e.target).closest(".ui-dialog,.show-info-btn").length) {
+    if ($(".ui-dialog:visible").length && !$(e.target).closest(".ui-dialog,.show-info-btn,#reviewCapturedBtn").length) {
       // The add-vocabulary dialog stages user input (typed words, picked
       // category) that's easy to lose to a stray outside click — keep it
-      // open and require an explicit X / Escape / Save to dismiss.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog").dialog("close");
+      // open and require an explicit X / Escape / Save to dismiss. Same
+      // for the captured-subtitles review: each row has a Delete / Push
+      // action we don't want clobbered, plus the trigger button click
+      // itself shouldn't immediately re-close the dialog it just opened.
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog").dialog("close");
     }
   });
 
@@ -2635,9 +2648,10 @@ function playSelectedText(e) {
 }
 
 function numberOfItemsToShow() {
-  const n = 10;
+  let n = 10
   try {
-    parseInt($('#numberOfFindingsToShow').val());
+    const parsed = parseInt($('#numberOfFindingsToShow').val(), 10)
+    if (!Number.isNaN(parsed)) n = parsed
   } catch (e) {
     console.log(e)
   }
@@ -2692,6 +2706,33 @@ async function getMatchingWords(list, search, token) {
   const ITEM_CHUNK = 25
 
   const transformedRe = new RegExp(transformedSearchText, "i")
+  // Per-word matching test: alternatives like " ber ", " be ", " bad " (the
+  // user's convention for forcing word-boundary semantics) can never match a
+  // bare segmented word like "ber" because the literal spaces have to be in
+  // the test string. Build a parallel regex with each alternative trimmed so
+  // those individual words still produce per-word accordions. The whole-line
+  // regex below keeps the spaced form for phrase-level matching.
+  const perWordRe = new RegExp(
+    '^(?:' +
+    transformedSearchText
+      .split(SEPARATOR_PIPE)
+      .map(s => s.trim())
+      .filter(s => s.length > 0)
+      .join(SEPARATOR_PIPE) +
+    ')$',
+    "i"
+  )
+
+  // Multi-word phrase terms (e.g. expansion of "<*göra susen" produces
+  // "göra susen|gör susen|gjorde susen|gjort susen"). The per-word filter
+  // above can't match these (segmenter gives single words), and the
+  // combined whole-pipe key would later be filtered out at render. So we
+  // tag each phrase term independently here.
+  const phraseTerms = (transformedSearchText || '')
+    .split(SEPARATOR_PIPE)
+    .map(s => s.trim().toLowerCase())
+    .filter(s => s.length > 1 && s.indexOf(' ') > 0)
+  const phraseRes = phraseTerms.map(t => ({ term: t, re: new RegExp(withWordBoundaries(t), "i") }))
 
   for (let start = 0; start < list.length; start += ITEM_CHUNK) {
     if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
@@ -2706,7 +2747,7 @@ async function getMatchingWords(list, search, token) {
         const words = getWords(line.text, search).map(it => it.trim().toLowerCase())
         const endsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
         const startsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
-        words.filter(word => word.match(transformedRe) || endsWith(word) || startsWith(word))
+        words.filter(word => word.match(perWordRe) || word.match(transformedRe) || endsWith(word) || startsWith(word))
             .forEach(word => {
               wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
             })
@@ -2714,6 +2755,14 @@ async function getMatchingWords(list, search, token) {
         const word = searchText.toLowerCase().trim()
         if (word.indexOf(" ") > 0 && new RegExp(withWordBoundaries(word), "i").test(line.text)) {
           wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
+        }
+        // Per-phrase terms (so each expansion of "<*göra susen" gets its
+        // own accordion key, instead of all collapsing into the whole-pipe
+        // key that populateSRTFindings drops).
+        for (const { term, re } of phraseRes) {
+          if (re.test(line.text)) {
+            wordToItemsMap[term] = computeIfAbsent(wordToItemsMap, term, it => []).concat(new MatchResult(term, line, item.url, item.source))
+          }
         }
       }
     }
@@ -2754,7 +2803,15 @@ async function getMatchingWords(list, search, token) {
     wordToItemsMap = Object.assign(wordToItemsMap, wordToItemsMap2)
   }
 
-  const matchingWords = Object.keys(wordToItemsMap)
+  // The dedup pass below removes lines that already appeared under a longer
+  // word-key, so we keep the most specific match per line. But the synthetic
+  // "whole search text" key — added above when the entire pipe / multi-word
+  // search matches a line — is by far the longest key, so without exclusion it
+  // would absorb every line and then get filtered out at render time
+  // (populateSRTFindings drops the exact-window.searchText key), leaving every
+  // per-word accordion empty. Skip it here so per-word keys keep their items.
+  const wholeSearchKey = (searchText || '').toLowerCase().trim()
+  const matchingWords = Object.keys(wordToItemsMap).filter(w => w !== wholeSearchKey)
   matchingWords.sort((a, b) => b.length - a.length)
 
   const _matchResultId = it => ` ${it.url} ${it.source} ${it.line.index}`
@@ -2846,7 +2903,7 @@ function getMainSubAndSecondarySub(file, line) {
 
 const playClickedMedia = (url, times, source) => {
   if (!window.playingAudio && !window.playingVideo) {
-    if (source !== 'YouTube') {
+    if (source?.toLowerCase() == 'svt') {
       window.open(`https://www.svtplay.se/video/${url}?position=${times.start}`, '_newtab')
       return
     }
@@ -2867,9 +2924,9 @@ const playClickedMedia = (url, times, source) => {
 
 function getInfoAboutMedia(mediaId, source, time_start) {
   const fileName = window.allSubtitles[mediaId].fileName
-  let url = `https://www.svtplay.se/video/${mediaId}?position=${time_start}`
-  if (source === 'YouTube') {
-    url = `https://www.youtube.com/watch?v=${mediaId}&t=${time_start}&autoplay=1`
+  let url = `https://www.youtube.com/watch?v=${mediaId}&t=${time_start}&autoplay=1`
+  if (source?.toLowerCase() == 'svt') {
+    url = `https://www.svtplay.se/video/${mediaId}?position=${time_start}`
   }
   return {fileName, url};
 }
@@ -3090,6 +3147,8 @@ function groupAndArrangeResults(items) {
 }
 
 async function populateSRTFindings(wordToItemsMap, $result, token) {
+  // Expose for debugging: inspect via `window._lastWordToItemsMap` in console.
+  window._lastWordToItemsMap = wordToItemsMap
   let words = getWordsOrdered(Object.keys(wordToItemsMap))
   if (window.searchText.includes(SEPARATOR_PIPE)) {
     const filtered = words.filter(it => it.trim() !== window.searchText.trim())
@@ -3099,6 +3158,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
     // user still gets a "no-result" header per form instead of a blank pane.
     words = filtered.length > 0 ? filtered : getSearchedTerms(window.searchText)
   }
+  window._lastRenderedWords = words
 
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
   const WORD_CHUNK = 5
@@ -3229,12 +3289,25 @@ function getSurrounding(index, list, size = 5) {
 
 function wordIsExactInVocabularyLine(vocabLine, search) {
   try {
+    const vocabLineLower = (vocabLine || '').toLowerCase();
     const vocabWords = getWords(vocabLine)
         .filter(it => it.trim().length > 2)
         .map(it => it.toLowerCase().trim());
     const s = (search || '').toLowerCase().trim();
     if (!s) return false;
-    return vocabWords.includes(s);
+    if (vocabWords.includes(s)) return true;
+    // Pipe-expanded search: try each term. Multi-word phrases get a
+    // substring check against the un-expanded vocab line so a vocab line
+    // like "(x)|<*göra susen|<*ta skruv" still matches "göra susen".
+    const terms = s.split(SEPARATOR_PIPE).map(t => t.trim()).filter(Boolean);
+    for (const t of terms) {
+      if (t.indexOf(' ') > 0) {
+        if (vocabLineLower.includes(t)) return true;
+      } else if (vocabWords.includes(t)) {
+        return true;
+      }
+    }
+    return false;
   } catch (e) {
     return false;
   }
@@ -3243,23 +3316,43 @@ function wordIsExactInVocabularyLine(vocabLine, search) {
 export function wordIsInVocabularyLine(vocabLine, search) {
   try {
     const lang = getLangFromUrl().code;
-    const vocabWords = getWords(expandWords(vocabLine, lang))
+    const expandedVocab = expandWords(vocabLine, lang);
+    const expandedVocabLower = expandedVocab.toLowerCase();
+    const vocabWords = getWords(expandedVocab)
         .filter(it => it.trim().length > 2)
         .map(it => it.toLowerCase().trim());
     const s = (search || '').toLowerCase().trim();
     if (!s) return false;
     if (vocabWords.includes(s)) return true;
 
+    // The search can be a pipe-expanded form (e.g. "<*göra susen" becomes
+    // "göra susen|gör susen|gjorde susen|gjort susen"). Try each alternative
+    // independently — a single-token equality on the joined string will
+    // never match, and multi-word phrases need a substring check against
+    // the expanded vocab line.
+    const terms = s.split(SEPARATOR_PIPE).map(t => t.trim()).filter(Boolean);
+    for (const t of terms) {
+      if (t.indexOf(' ') > 0) {
+        if (expandedVocabLower.includes(t)) return true;
+      } else if (vocabWords.includes(t)) {
+        return true;
+      }
+    }
+
     // Stem-aware match (bidirectional). E.g. vocab "förvärva" + search
     // "förvärvat" should match — and vice versa — by reducing both sides
-    // to a common stem.
+    // to a common stem. Run per single-word term so a pipe-expanded query
+    // still gets stem coverage.
     const fn = typeof guessStems === 'function' ? guessStems : null;
     if (!fn) return false;
-    const searchVariants = new Set([s, ...fn(s, lang)]);
-    for (const w of vocabWords) {
-      if (searchVariants.has(w)) return true;
-      const wStems = fn(w, lang);
-      for (const ws of wStems) if (searchVariants.has(ws) || ws === s) return true;
+    const singleTerms = terms.length ? terms.filter(t => t.indexOf(' ') < 0) : [s];
+    for (const t of singleTerms) {
+      const searchVariants = new Set([t, ...fn(t, lang)]);
+      for (const w of vocabWords) {
+        if (searchVariants.has(w)) return true;
+        const wStems = fn(w, lang);
+        for (const ws of wStems) if (searchVariants.has(ws) || ws === t) return true;
+      }
     }
     return false;
   } catch (e) {
@@ -4772,6 +4865,557 @@ async function saveRevision() {
   }
 }
 
+function srtTimeFromValue(v) {
+  if (v == null) return '00:00:00,000'
+  if (typeof v === 'object') {
+    if (v.ordinal != null) return srtTimeFromValue(v.ordinal)
+    if (v.seconds != null) return srtTimeFromValue(v.seconds)
+    return '00:00:00,000'
+  }
+  if (typeof v === 'string') {
+    const m = v.match(/^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/)
+    if (m) {
+      const ms = (m[4] + '000').slice(0, 3)
+      return `${m[1].padStart(2, '0')}:${m[2]}:${m[3]},${ms}`
+    }
+    const n = Number(v)
+    if (!Number.isNaN(n)) return srtTimeFromValue(n)
+    return '00:00:00,000'
+  }
+  const total = Math.max(0, Number(v) || 0)
+  const hrs = Math.floor(total / 3600)
+  const mins = Math.floor((total % 3600) / 60)
+  const secs = Math.floor(total % 60)
+  const ms = Math.round((total - Math.floor(total)) * 1000)
+  const pad = (n, w) => String(n).padStart(w, '0')
+  return `${pad(hrs, 2)}:${pad(mins, 2)}:${pad(secs, 2)},${pad(ms, 3)}`
+}
+
+function srtTimeToSeconds(ts) {
+  // Accepts "HH:MM:SS,mmm" or "HH:MM:SS.mmm"
+  const m = String(ts).match(/^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/)
+  if (!m) return 0
+  return parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10) + parseInt((m[4] + '000').slice(0, 3), 10) / 1000
+}
+
+function parseSrtEntries(text) {
+  if (!text || typeof text !== 'string') return []
+  const blocks = text.replace(/\r/g, '').split(/\n\s*\n/)
+  const entries = []
+  blocks.forEach(block => {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean)
+    if (lines.length < 2) return
+    let startIdx = 0
+    if (/^\d+$/.test(lines[0])) startIdx = 1
+    const timeLine = lines[startIdx]
+    const m = timeLine && timeLine.match(/(\d\d:\d\d:\d\d[,.]\d{1,3})\s*-->\s*(\d\d:\d\d:\d\d[,.]\d{1,3})/)
+    if (!m) return
+    const textLines = lines.slice(startIdx + 1)
+    entries.push({
+      start: srtTimeFromValue(m[1]),
+      end: srtTimeFromValue(m[2]),
+      text: textLines.join('\n')
+    })
+  })
+  return entries
+}
+
+function entriesToSrtText(entries) {
+  return entries.map((it, i) => {
+    return `${i + 1}\n${it.start} --> ${it.end}\n${it.text}`
+  }).join('\n\n') + '\n'
+}
+
+function linesToSrtText(items) {
+  const entries = (items || []).map(it => ({
+    start: srtTimeFromValue(it.start),
+    end: srtTimeFromValue(it.end),
+    text: (it.text || '').replace(/\r\n/g, '\n')
+  }))
+  entries.sort((a, b) => srtTimeToSeconds(a.start) - srtTimeToSeconds(b.start))
+  return entriesToSrtText(entries)
+}
+
+function mergeSrtWithNewEntries(existingText, newItems) {
+  const existing = parseSrtEntries(existingText)
+  const incoming = (newItems || []).map(it => ({
+    start: srtTimeFromValue(it.start),
+    end: srtTimeFromValue(it.end),
+    text: (it.text || '').replace(/\r\n/g, '\n')
+  }))
+  const all = existing.concat(incoming)
+  // Dedupe by start+text in case the same captured chunk is sent twice.
+  const seen = new Set()
+  const deduped = []
+  all.forEach(e => {
+    const key = `${e.start}|${e.text}`
+    if (seen.has(key)) return
+    seen.add(key)
+    deduped.push(e)
+  })
+  deduped.sort((a, b) => srtTimeToSeconds(a.start) - srtTimeToSeconds(b.start))
+  return entriesToSrtText(deduped)
+}
+
+// Strip characters that make filenames URL-unfriendly: filesystem-reserved
+// chars (\ / : * ? " < > |), the fullwidth colon U+FF1A that sneaks in from
+// SVT/YouTube metadata, whitespace, and control chars. Swedish å/ä/ö are
+// retained — they encode fine via encodeURIComponent.
+function sanitizeFilenameSegment(s, maxLen) {
+  if (!s) return ''
+  // Strip filesystem/URL-reserved chars and the fullwidth colon U+FF1A
+  // (which slips in from SVT/YouTube metadata and is ugly when URL-encoded).
+  // Preserve ordinary spaces and Swedish letters — the existing " || "
+  // naming convention has spaces inside each piece, and they encode fine.
+  let out = String(s)
+    .replace(/[\\/:*?"<>|：]/g, '_')
+    .replace(/[\r\n\t\f\v]+/g, ' ')
+    .replace(/ +/g, ' ')
+    .replace(/_+/g, '_')
+    .replace(/^[\s_]+|[\s_]+$/g, '')
+  if (maxLen && out.length > maxLen) out = out.slice(0, maxLen).replace(/[\s_]+$/, '')
+  return out
+}
+
+function buildCapturedSubtitleBaseName(detail) {
+  const id = detail.videoId
+  const title = detail.videoTitle || id
+  const channel = detail.channel || detail.channelTitle || detail.videoChannel || detail.uploader || title
+  // Keep the established `channel || title || id` convention — other code
+  // (fetchCategorisation, local-file media-name parsing) and downstream
+  // tooling expects this separator. Each piece is sanitized (no FS/URL
+  // reserved chars, no fullwidth colon, no internal pipe) and capped so the
+  // full filename stays well under FS / URL limits.
+  const safeChannel = sanitizeFilenameSegment(channel, 40)
+  const safeTitle = sanitizeFilenameSegment(title, 60)
+  return [safeChannel, safeTitle, id].filter(Boolean).join(' || ')
+}
+
+// Look up an entry in the deployed index.json by videoId. Uses
+// api.github.com (real-time, uncached) instead of raw.githubusercontent.com
+// so we get the latest state even right after a previous push.
+async function fetchSrtIndexEntry(videoId) {
+  const lang = getLangFromUrl()
+  const filePath = `db/language/${lang.fullName}/srts/index.json`
+  try {
+    const file = await window.GitHubUtils.getFile(
+      'trexsatya', 'trexsatya.github.io', filePath, '', 'gh-pages'
+    )
+    const arr = JSON.parse(file.content)
+    if (Array.isArray(arr)) {
+      return arr.find(it => it.link === videoId) || null
+    }
+  } catch (e) {
+    console.warn('fetchSrtIndexEntry failed', e)
+  }
+  return null
+}
+
+function inferSubtitleSource(detail) {
+  if (detail.source) return detail.source
+  const url = detail.videoUrl || ''
+  if (/youtu\.?be/.test(url)) return 'youtube'
+  if (/svtplay\.se/.test(url)) return 'SVT'
+  return 'captured'
+}
+
+async function uploadSrtToGithub(baseName, langCode, content, commitMessage) {
+  const lang = getLangFromUrl()
+  const fileName = `${baseName}.${langCode}.srt`
+  const filePath = `db/language/${lang.fullName}/srts/${encodeURIComponent(fileName)}`
+  await window.GitHubUtils.putFileWithContent({
+    owner: 'trexsatya',
+    repo: 'trexsatya.github.io',
+    filePath,
+    content,
+    commitMessage,
+    branch: 'gh-pages'
+  })
+}
+
+async function upsertSrtIndexEntry(videoId, baseName, source) {
+  const lang = getLangFromUrl()
+  const filePath = `db/language/${lang.fullName}/srts/index.json`
+
+  // Read via api.github.com (real-time) instead of raw.githubusercontent.com,
+  // which has a ~5-minute CDN cache — two captures in quick succession would
+  // otherwise read a stale index and clobber each other's entries.
+  let existing = []
+  let sha
+  try {
+    const file = await window.GitHubUtils.getFile(
+      'trexsatya', 'trexsatya.github.io', filePath, '', 'gh-pages'
+    )
+    existing = JSON.parse(file.content)
+    sha = file.sha
+  } catch (e) {
+    console.warn('upsertSrtIndexEntry: failed to read index.json — assuming empty', e)
+  }
+  if (!Array.isArray(existing)) existing = []
+
+  const record = { link: videoId, name: baseName, source }
+  const idx = existing.findIndex(it => it.link === videoId)
+  if (idx >= 0) existing[idx] = { ...existing[idx], ...record }
+  else existing.push(record)
+
+  await window.GitHubUtils.putFile(
+    'trexsatya',
+    'trexsatya.github.io',
+    filePath,
+    JSON.stringify(existing, null, 2),
+    `srts: upsert index entry for ${videoId}`,
+    sha,
+    '',
+    'gh-pages'
+  )
+}
+
+// --- Captured subtitle buffer (localStorage) ---
+const CAPTURED_SUBTITLES_KEY = 'cupitor:capturedSubtitles'
+
+function loadCapturedBuffer() {
+  try {
+    const raw = localStorage.getItem(CAPTURED_SUBTITLES_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr : []
+  } catch (_) { return [] }
+}
+
+function saveCapturedBuffer(buf) {
+  try {
+    localStorage.setItem(CAPTURED_SUBTITLES_KEY, JSON.stringify(buf))
+  } catch (e) {
+    console.error('Failed to persist captured subtitles', e)
+  }
+}
+
+function updateCapturedBtn() {
+  const $btn = $('#reviewCapturedBtn')
+  if (!$btn.length) return
+  const n = loadCapturedBuffer().length
+  if (n === 0) $btn.hide()
+  else $btn.text(`Review Captured (${n})`).show()
+}
+
+function bufferCapturedSubtitle(detail) {
+  const buf = loadCapturedBuffer()
+  buf.push({ id: uuid(), capturedAt: Date.now(), detail })
+  saveCapturedBuffer(buf)
+  updateCapturedBtn()
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function renderCapturedReviewBody() {
+  const buf = loadCapturedBuffer()
+  const $body = $('#captured-subtitles-dialog-content').empty()
+  if (buf.length === 0) {
+    $body.append('<p>No captured subtitles pending.</p>')
+    return
+  }
+  buf.forEach(item => {
+    const d = item.detail || {}
+    const exists = !!(window.allSubtitles && window.allSubtitles[d.videoId])
+    const status = exists
+      ? '<span style="color:#a60;">merge into existing</span>'
+      : '<span style="color:#070;">new file</span>'
+    const $row = $(`
+      <div class="captured-item" data-id="${escapeHtml(item.id)}" style="border:1px solid #ccc;border-radius:4px;padding:8px;margin-bottom:8px;">
+        <div style="font-weight:bold;">${escapeHtml(d.videoTitle || d.videoId || 'unknown')}</div>
+        <div style="font-size:12px;color:#555;">
+          ${escapeHtml(d.videoId || '')} ·
+          ${escapeHtml(d.sourceLang || '?')}→${escapeHtml(d.targetLang || '?')} ·
+          ${(d.lines || []).length} src / ${(d.translation || []).length} tgt lines ·
+          ${status}
+        </div>
+        ${d.query ? `<div style="font-size:12px;">query: <code>${escapeHtml(d.query)}</code> @${escapeHtml(d.matchIndex)}</div>` : ''}
+        <div style="margin-top:4px;">
+          <button data-action="preview" class="cap-btn">Preview SRT</button>
+          <button data-action="push" class="cap-btn">Push This</button>
+          <button data-action="delete" class="cap-btn" style="color:#a00;">Delete</button>
+        </div>
+        <pre data-role="preview" style="display:none;max-height:240px;overflow:auto;background:#f7f7f7;padding:6px;font-size:11px;white-space:pre-wrap;"></pre>
+      </div>
+    `)
+    $body.append($row)
+  })
+}
+
+function ensureCapturedDialogDom() {
+  let $dlg = $('#captured-subtitles-dialog')
+  if (!$dlg.length) {
+    $dlg = $('<div id="captured-subtitles-dialog" title="Captured Subtitles"><div id="captured-subtitles-dialog-content"></div></div>')
+    $('body').append($dlg)
+  } else if (!$dlg.hasClass('ui-dialog-content') && $dlg.parent('body').length === 0) {
+    // Not yet initialized and not directly under <body>: move it so the dialog
+    // wrapper isn't buried inside a parent that's display:none.
+    $dlg.appendTo('body')
+  }
+  // Strip any inline display:none left over from the static HTML so jQuery UI
+  // can manage visibility cleanly.
+  $dlg.css('display', '')
+  return $dlg
+}
+
+window.openCapturedSubtitlesReview = function () {
+  try {
+    ensureCapturedDialogDom()
+  } catch (e) {
+    console.error('openCapturedSubtitlesReview: ensureCapturedDialogDom failed', e)
+  }
+  console.log('openCapturedSubtitlesReview invoked; buffer size =', loadCapturedBuffer().length)
+  renderCapturedReviewBody()
+  const $body = $('#captured-subtitles-dialog-content')
+  if (!$body.data('handlers-bound')) {
+    $body.on('click', '.cap-btn', async function () {
+      const $row = $(this).closest('.captured-item')
+      const id = $row.data('id')
+      const action = $(this).data('action')
+      const buf = loadCapturedBuffer()
+      const idx = buf.findIndex(b => b.id === id)
+      if (idx < 0) return
+      const d = buf[idx].detail || {}
+
+      if (action === 'delete') {
+        buf.splice(idx, 1)
+        saveCapturedBuffer(buf)
+        $row.remove()
+        updateCapturedBtn()
+        return
+      }
+
+      if (action === 'preview') {
+        const existing = window.allSubtitles[d.videoId]
+        const src = existing && existing.sv
+          ? mergeSrtWithNewEntries(existing.sv, d.lines || [])
+          : linesToSrtText(d.lines || [])
+        const tgt = existing && existing.en
+          ? mergeSrtWithNewEntries(existing.en, d.translation || [])
+          : linesToSrtText(d.translation || [])
+        const $pre = $row.find('[data-role=preview]')
+        if ($pre.is(':visible')) {
+          $pre.hide()
+        } else {
+          $pre.text(
+            `# ${d.sourceLang || 'source'}\n${src}\n\n# ${d.targetLang || 'target'}\n${tgt}`
+          ).show()
+        }
+        return
+      }
+
+      if (action === 'push') {
+        const $btn = $(this)
+        $btn.prop('disabled', true).text('Pushing…')
+        try {
+          await handleCapturedSubtitle(d)
+          const buf2 = loadCapturedBuffer()
+          const idx2 = buf2.findIndex(b => b.id === id)
+          if (idx2 >= 0) {
+            buf2.splice(idx2, 1)
+            saveCapturedBuffer(buf2)
+          }
+          $row.remove()
+          updateCapturedBtn()
+        } catch (err) {
+          console.error('Push failed', err)
+          alert('Push failed: ' + err.message)
+          $btn.prop('disabled', false).text('Push This')
+        }
+      }
+    })
+    $body.data('handlers-bound', true)
+  }
+
+  const $dlg = $('#captured-subtitles-dialog')
+  if (!$dlg.length) {
+    console.error('#captured-subtitles-dialog not found in DOM after ensure')
+    alert('Captured-subtitles dialog div missing; check console.')
+    return
+  }
+
+  const winW = $(window).width()
+  const winH = $(window).height()
+  const opts = {
+    title: 'Captured Subtitles',
+    width: Math.min(720, winW - 40),
+    height: Math.min(620, winH - 40),
+    modal: false,
+    autoOpen: true,
+    appendTo: 'body',
+    position: { my: 'center top', at: 'center top+20', of: window },
+    buttons: {
+      'Push All': async function () {
+        const startBuf = loadCapturedBuffer()
+        if (!startBuf.length) { $(this).dialog('close'); return }
+        if (!confirm(`Push ${startBuf.length} captured subtitle(s) to GitHub?`)) return
+        const $self = $(this)
+        let pushedCount = 0
+        const failed = []
+        for (const item of startBuf) {
+          try {
+            await handleCapturedSubtitle(item.detail)
+            // Drop just this item from the live buffer so concurrent captures aren't clobbered.
+            saveCapturedBuffer(loadCapturedBuffer().filter(b => b.id !== item.id))
+            $('#captured-subtitles-dialog-content').find(`.captured-item[data-id="${item.id}"]`).remove()
+            updateCapturedBtn()
+            pushedCount += 1
+          } catch (err) {
+            console.error('Push failed for', item.detail && item.detail.videoId, err)
+            failed.push(item)
+          }
+        }
+        if (failed.length) {
+          alert(`${pushedCount} pushed, ${failed.length} failed (see console).`)
+        } else {
+          $self.dialog('close')
+        }
+      },
+      'Close': function () { $(this).dialog('close') }
+    }
+  }
+
+  try {
+    if ($dlg.hasClass('ui-dialog-content')) {
+      $dlg.dialog('option', opts).dialog('open')
+    } else {
+      $dlg.dialog(opts)
+    }
+    // Defensive: force the wrapper visible + viewport-anchored + on top.
+    // Pin to the top of the viewport (user prefers it doesn't drift mid-page).
+    const $wrap = $dlg.closest('.ui-dialog')
+    const targetLeft = Math.max(20, ($(window).width() - $wrap.outerWidth()) / 2)
+    $wrap.css({
+      display: 'block',
+      visibility: 'visible',
+      position: 'fixed',
+      top: '20px',
+      left: targetLeft + 'px',
+      zIndex: 100000
+    })
+    $dlg.css({ display: 'block', visibility: 'visible' })
+    try { $dlg.dialog('moveToTop') } catch (_) {}
+    // Log ancestor visibility chain so we can spot a display:none parent.
+    const chain = []
+    let el = $wrap[0] && $wrap[0].parentNode
+    while (el && el !== document) {
+      const cs = getComputedStyle(el)
+      chain.push({
+        tag: el.tagName,
+        id: el.id || null,
+        cls: el.className || null,
+        display: cs.display,
+        visibility: cs.visibility,
+        opacity: cs.opacity
+      })
+      el = el.parentNode
+    }
+    console.log('wrapper :visible=', $wrap.is(':visible'),
+      'ancestorChain=', chain,
+      'wrapperOpacity=', $wrap.css('opacity'),
+      'wrapperTransform=', $wrap.css('transform'))
+    console.log('Captured-subtitles dialog opened',
+      'wrapper=', $wrap.length,
+      'wrapperDisplay=', $wrap.css('display'),
+      'wrapperVisibility=', $wrap.css('visibility'),
+      'wrapperPos=', $wrap.offset(),
+      'wrapperSize=', { w: $wrap.outerWidth(), h: $wrap.outerHeight() },
+      'zIndex=', $wrap.css('z-index')
+    )
+  } catch (e) {
+    console.error('Failed to open captured-subtitles dialog', e)
+    alert('Could not open Review dialog: ' + (e && e.message))
+  }
+}
+
+async function handleCapturedSubtitle(detail) {
+  if (!detail || !detail.videoId) {
+    console.warn('capturedSubtitle: missing videoId', detail)
+    return
+  }
+  const { videoId, sourceLang, targetLang, lines = [], translation = [] } = detail
+
+  // Authoritative: check index.json on github. window.allSubtitles can be
+  // misleading — it gets populated even by purely-local files / re-pushes —
+  // whereas the index is the single source of truth for what's deployed.
+  const indexEntry = await fetchSrtIndexEntry(videoId)
+  const isNew = !indexEntry
+
+  // For existing entries, reuse the deployed filename (existing .sv.srt /
+  // .en.srt on gh-pages already use it). For new entries, build a fresh,
+  // URL-safe, length-capped name. Both languages use the same baseName so
+  // the .sv / .en pair share a filesystem-friendly prefix.
+  const baseName = indexEntry
+    ? indexEntry.name
+    : buildCapturedSubtitleBaseName(detail)
+  const source = indexEntry && indexEntry.source
+    ? indexEntry.source
+    : inferSubtitleSource(detail)
+
+  // Existing SRT content for merging: prefer in-memory if loaded; otherwise
+  // fetch from gh-pages. Skip the fetch entirely for new entries.
+  let existingSourceText = null
+  let existingTargetText = null
+  if (!isNew) {
+    const cached = window.allSubtitles[videoId]
+    if (cached && cached.sv) existingSourceText = cached.sv
+    if (cached && cached.en) existingTargetText = cached.en
+    if ((!existingSourceText && sourceLang) || (!existingTargetText && targetLang)) {
+      try {
+        if (!existingSourceText && sourceLang) {
+          const srcName = `${baseName}.${sourceLang}.srt`
+          const r = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(srcName)}`, { cache: 'no-cache' })
+          if (r.ok) existingSourceText = await r.text()
+        }
+        if (!existingTargetText && targetLang) {
+          const tgtName = `${baseName}.${targetLang}.srt`
+          const r = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(tgtName)}`, { cache: 'no-cache' })
+          if (r.ok) existingTargetText = await r.text()
+        }
+      } catch (e) { console.warn('failed to fetch existing srt for merge', e) }
+    }
+  }
+
+  // sourceLang corresponds to the language being studied (stored under `sv` in allSubtitles),
+  // targetLang corresponds to the translation (stored under `en`).
+  const sourceText = existingSourceText
+    ? mergeSrtWithNewEntries(existingSourceText, lines)
+    : linesToSrtText(lines)
+  const targetText = existingTargetText
+    ? mergeSrtWithNewEntries(existingTargetText, translation)
+    : linesToSrtText(translation)
+
+  window.allSubtitles[videoId] = {
+    ...(window.allSubtitles[videoId] || {}),
+    sv: sourceText,
+    en: targetText,
+    source,
+    fileName: baseName
+  }
+
+  if (sourceLang) {
+    await uploadSrtToGithub(baseName, sourceLang, sourceText,
+      `srt: ${isNew ? 'add' : 'merge'} ${sourceLang} subtitle for ${videoId}`)
+  }
+  if (targetLang) {
+    await uploadSrtToGithub(baseName, targetLang, targetText,
+      `srt: ${isNew ? 'add' : 'merge'} ${targetLang} subtitle for ${videoId}`)
+  }
+
+  // Only touch index.json when the entry actually needs to be added.
+  if (isNew) {
+    await upsertSrtIndexEntry(videoId, baseName, source)
+    if (Array.isArray(window.srts) && !window.srts.find(it => it.link === videoId)) {
+      window.srts.push({ link: videoId, name: baseName, source })
+    }
+  }
+}
+
 function isLocalhost() {
   return window.location.hostname === 'localhost'
 }
@@ -4897,5 +5541,19 @@ window.loadWholeVocabulary = loadWholeVocabulary;
 window.loadLocalFiles = loadLocalFiles;
 window.saveStarredLines = saveStarredLines;
 window.saveRevision = saveRevision;
+
+// openCapturedSubtitlesReview is already assigned to window above; re-affirm here
+// alongside the other inline-handler exposures so the pattern stays uniform.
+$(function () {
+  try { updateCapturedBtn() } catch (_) {}
+  // Defensive: if anything earlier failed before the assignment ran, define a
+  // last-resort stub so the inline onclick at least produces a visible error.
+  if (typeof window.openCapturedSubtitlesReview !== 'function') {
+    window.openCapturedSubtitlesReview = function () {
+      console.error('openCapturedSubtitlesReview was never defined — language.js may have failed to load.')
+      alert('Review dialog unavailable — language.js failed to load. See console.')
+    }
+  }
+});
 
 

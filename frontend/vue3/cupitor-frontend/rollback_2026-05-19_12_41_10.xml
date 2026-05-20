@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<rollback>
+   <list classname="java.util.ArrayList" name="rollbacklist">
+      <storable name="0" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1615801126333"/>
+         <string name="name" value="dates_apl"/>
+      </storable>
+      <storable name="1" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1570697138391"/>
+         <string name="name" value="python3"/>
+      </storable>
+      <storable name="2" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1567606570292"/>
+         <string name="name" value="cleanup"/>
+      </storable>
+      <storable name="3" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1615801126133"/>
+         <string name="name" value="dates"/>
+      </storable>
+      <storable name="4" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1597929344331"/>
+         <string name="name" value="db"/>
+      </storable>
+      <storable name="5" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564149668303"/>
+         <string name="name" value="diff"/>
+      </storable>
+      <storable name="6" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="DR1666785027297"/>
+         <string name="name" value="dr_ds_utils"/>
+      </storable>
+      <storable name="7" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1615801219238"/>
+         <string name="name" value="events"/>
+      </storable>
+      <storable name="8" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564140338946"/>
+         <string name="name" value="files"/>
+      </storable>
+      <storable name="9" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="DR1668151697713"/>
+         <string name="name" value="httpd"/>
+      </storable>
+      <storable name="10" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="DR1770106853197"/>
+         <string name="name" value="kafka_admin"/>
+      </storable>
+      <storable name="11" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="DR1759398576324"/>
+         <string name="name" value="logging"/>
+      </storable>
+      <storable name="12" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1567604432498"/>
+         <string name="name" value="matcher"/>
+      </storable>
+      <storable name="13" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1613730948174"/>
+         <string name="name" value="metrics_functions"/>
+      </storable>
+      <storable name="14" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1575895736161"/>
+         <string name="name" value="pico"/>
+      </storable>
+      <storable name="15" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1573554980092"/>
+         <string name="name" value="rcp"/>
+      </storable>
+      <storable name="16" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1615803781804"/>
+         <string name="name" value="skip"/>
+      </storable>
+      <storable name="17" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="DR1776761634315"/>
+         <string name="name" value="tcp_proxy"/>
+      </storable>
+      <storable name="18" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1576491376174"/>
+         <string name="name" value="testkit2"/>
+      </storable>
+      <storable name="19" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1574780675481"/>
+         <string name="name" value="ultrax"/>
+      </storable>
+      <storable name="20" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1597923562129"/>
+         <string name="name" value="userserver"/>
+      </storable>
+      <storable name="21" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564141550625"/>
+         <string name="name" value="asserts"/>
+      </storable>
+      <storable name="22" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1585723290784"/>
+         <string name="name" value="config"/>
+      </storable>
+      <storable name="23" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564145375339"/>
+         <string name="name" value="thread"/>
+      </storable>
+      <storable name="24" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1567604314973"/>
+         <string name="name" value="timeout"/>
+      </storable>
+      <storable name="25" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564148260906"/>
+         <string name="name" value="httpclient"/>
+      </storable>
+      <storable name="26" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564144715634"/>
+         <string name="name" value="streams"/>
+      </storable>
+      <storable name="27" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1567601573323"/>
+         <string name="name" value="syslog"/>
+      </storable>
+      <storable name="28" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1573576445644"/>
+         <string name="name" value="tcpip"/>
+      </storable>
+      <storable name="29" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1567605869913"/>
+         <string name="name" value="workflow"/>
+      </storable>
+      <storable name="30" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1567605730792"/>
+         <string name="name" value="init"/>
+      </storable>
+      <storable name="31" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564142884159"/>
+         <string name="name" value="process"/>
+      </storable>
+      <storable name="32" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564144372821"/>
+         <string name="name" value="redirect"/>
+      </storable>
+      <storable name="33" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564149356317"/>
+         <string name="name" value="restclient"/>
+      </storable>
+      <storable name="34" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1569488239750"/>
+         <string name="name" value="event"/>
+      </storable>
+      <storable name="35" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1568124702969"/>
+         <string name="name" value="simulators"/>
+      </storable>
+      <storable name="36" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564128267387"/>
+         <string name="name" value="__init__"/>
+      </storable>
+      <storable name="37" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564992056044"/>
+         <string name="name" value="asserts"/>
+      </storable>
+      <storable name="38" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564992109168"/>
+         <string name="name" value="files"/>
+      </storable>
+      <storable name="39" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564992127222"/>
+         <string name="name" value="httpclient"/>
+      </storable>
+      <storable name="40" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1575900646055"/>
+         <string name="name" value="pico"/>
+      </storable>
+      <storable name="41" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564992142339"/>
+         <string name="name" value="process"/>
+      </storable>
+      <storable name="42" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564992154132"/>
+         <string name="name" value="redirect"/>
+      </storable>
+      <storable name="43" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564992168622"/>
+         <string name="name" value="restclient"/>
+      </storable>
+      <storable name="44" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564992179690"/>
+         <string name="name" value="streams"/>
+      </storable>
+      <storable name="45" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1564992191067"/>
+         <string name="name" value="thread"/>
+      </storable>
+      <storable name="46" storable-id="dr.RollbackAddItem" ver="1.0">
+         <string name="key" value="MZ1597923952227"/>
+         <string name="name" value="userserver"/>
+      </storable>
+   </list>
+</rollback>
