@@ -297,6 +297,13 @@
     z-index: 100000 !important;
 }
 
+/* Select2 attaches its open dropdown to <body>, so it must outrank
+   .ui-dialog above — otherwise dropdowns opened from inside a dialog
+   (e.g. "Reference word" in #addToVocabularyDialog) render behind it. */
+.select2-container--open {
+    z-index: 100001 !important;
+}
+
 /* Pin the captured-subtitles review dialog to the viewport so a scrolled
    page doesn't render it above the fold (top:0 in document coords). */
 .ui-dialog:has(> #captured-subtitles-dialog) {

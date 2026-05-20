@@ -1867,9 +1867,29 @@ function fixSectionBox() {
 $(document).ready(function () {
   fixSectionBox()
   $("#vocabularySelect").select2()
+  // Default select2 matcher strips diacritics, so typing "a" matches "ä"
+  // and vice-versa — wrong for Swedish vocab where ä/ö/å are distinct
+  // letters. This matcher does a plain case-insensitive substring match
+  // on the raw text, and preserves the optgroup-children traversal.
+  const diacriticAwareMatcher = (params, data) => {
+    if ($.trim(params.term) === '') return data
+    if (data.children && data.children.length) {
+      const filtered = []
+      for (const child of data.children) {
+        const m = diacriticAwareMatcher(params, child)
+        if (m) filtered.push(m)
+      }
+      if (filtered.length) return $.extend({}, data, { children: filtered })
+      return null
+    }
+    if (typeof data.text === 'undefined') return null
+    if (data.text.toLowerCase().indexOf(params.term.toLowerCase()) > -1) return data
+    return null
+  }
   $("#addToVocabularyDialogSelect").select2({
     placeholder: 'Reference word',
-    allowClear: true
+    allowClear: true,
+    matcher: diacriticAwareMatcher
   }).change(e => {
     // When inline is selected, keep the textarea in sync with the chosen reference word
     if ($('#vocabInsertPosition').val() === 'inline') {
@@ -2937,11 +2957,19 @@ function getInfoAboutMedia(mediaId, source, time_start) {
 function showInfo(id, source, time_start, time_end) {
   const {fileName, url} = getInfoAboutMedia(id, source, time_start);
 
-  $('#info-dialog-content').html(`
+  const $dlg = $('#info-dialog-content').html(`
     <h3><a href="${url}" target="_blank">${fileName}</a></h3>
     <h4>${source}</h4>
     <h4>${fromSeconds(time_start)} - ${fromSeconds(time_end)}</h4>
-  `).dialog()
+  `)
+  // Pin to the top of the viewport — by default jQuery UI centers in the
+  // window, which on a scrolled page can land it below the fold.
+  const position = { my: 'center top', at: 'center top+20', of: window }
+  if ($dlg.hasClass('ui-dialog-content')) {
+    $dlg.dialog('option', 'position', position).dialog('open')
+  } else {
+    $dlg.dialog({ position })
+  }
 }
 
 const changeIndices = (id, from, to) => {
