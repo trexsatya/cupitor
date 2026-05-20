@@ -865,8 +865,13 @@
             window.movingFabricGroup = e.target;
             window.movingFabricObject = null
         }
-        // Record path samples for single-object drags when toggle is on
-        if (window.movingFabricObject && $('#recordPathToggle').is(':checked')) {
+        // Record path samples for single-object drags when either the
+        // global toolbar toggle is on, or the per-object Properties-panel
+        // toggle (customData.recordPath) is on for this object.
+        const _perObjRecordPath = window.movingFabricObject
+            && window.movingFabricObject.customData
+            && window.movingFabricObject.customData.recordPath;
+        if (window.movingFabricObject && (_perObjRecordPath || $('#recordPathToggle').is(':checked'))) {
             const t = window.movingFabricObject
             if (!window.currentPathSamples) {
                 window.currentPathSamples = [{left: t.left, top: t.top, t: Date.now()}]
@@ -1857,6 +1862,10 @@
             </select>
             <button id="prop-anim-toggle" class="prop-toggle" onclick="toggleSelectedAnim()" title="Start/Stop animation">&#9654; Start</button>
         </div>
+        <div class="prop-row" title="When checked, drags on this object sample intermediate positions so replay follows the curved path you drew, not a straight line.">
+            <label>Record Path</label>
+            <input type="checkbox" id="prop-record-path" onchange="applyRecordPath(this.checked)" style="margin-left:0;">
+        </div>
     </div>
     <!-- Media section -->
     <div class="prop-section-divider"></div>
@@ -2140,6 +2149,7 @@
         const _cd = obj.customData || {};
         document.getElementById('prop-media-url').value = _cd.mediaUrl || '';
         document.getElementById('prop-media-type').value = _cd.mediaType || 'image';
+        document.getElementById('prop-record-path').checked = !!_cd.recordPath;
 
         // Text section: show for text-like objects AND for sticky notes
         // (so users can tune the inner textbox's font/colour/alignment).
@@ -2301,6 +2311,19 @@
         cd.mediaType = document.getElementById('prop-media-type').value;
         if (obj.uid) {
             recordScript(`setCustomData('${obj.uid}', {mediaUrl: ${JSON.stringify(cd.mediaUrl)}, mediaType: ${JSON.stringify(cd.mediaType)}})`);
+        }
+    }
+
+    // Per-object Record Path toggle. When on, drags on this object sample
+    // intermediate positions so replay calls animatePath instead of animate.
+    // OR-ed with the global #recordPathToggle in the object:moving handler.
+    function applyRecordPath(value) {
+        const obj = pc.getActiveObject();
+        if (!obj) return;
+        const cd = customData(obj);
+        cd.recordPath = !!value;
+        if (obj.uid) {
+            recordScript(`setCustomData('${obj.uid}', {recordPath: ${JSON.stringify(cd.recordPath)}})`);
         }
     }
 

@@ -6,7 +6,11 @@
       "Bash(grep -n 'vocabularyResult.*html\\\\|vocab.html\\\\|\\\\$vocab.html' /Users/satyendra.kumar/Documents/PersonalProjects/cupitor/frontend/vue3/cupitor-frontend/public/language.js)",
       "Bash(node /tmp/claude/bracket-test.mjs)",
       "Bash(node -e 'const txt = \"\\(was i so \\(vajaså\\)\\)\"; const m = txt.match\\(/.*\\(\\\\\\(.*\\\\\\)\\).*/\\); console.log\\(\"match:\", m && m[1]\\); const replaced = txt.replaceAll\\(m[1], \"\"\\); console.log\\(\"after:\", JSON.stringify\\(replaced\\)\\);')",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "WebFetch(domain:trexsatya.github.io)",
+      "WebFetch(domain:satyendra.website)",
+      "Bash(~/.claude/skills/cupitor-deploy/deploy.sh \"language: vocab matchers handle pipe-expanded search + multi-word phrase terms\")",
+      "Bash(echo \"EXIT=$?\")"
     ],
     "additionalDirectories": [
       "/tmp/claude",
