@@ -61,6 +61,9 @@ window.addEventListener('filterData', (e) => {
 window.addEventListener('capturedSubtitle', (e) => {
   if (!e.detail) return
   console.log('capturedSubtitle event buffered', e.detail);
+  // Auth is handled out-of-band (e.g. Flutter GitHubProxy), so suppress the
+  // in-page PAT prompt for the rest of this session.
+  window._suppressGHTokenPrompt = true
   try {
     bufferCapturedSubtitle(e.detail)
   } catch (err) {

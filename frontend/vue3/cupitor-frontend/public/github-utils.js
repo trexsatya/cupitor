@@ -20,6 +20,12 @@
 
   function getGHToken() {
     if (!_cachedToken) {
+      // Skip the prompt when auth is provided out-of-band (e.g. Flutter
+      // GitHubProxy injects the token server-side, or a captured-subtitle
+      // event flagged that we should not prompt in-page).
+      if (typeof GitHubProxy !== 'undefined' || global._suppressGHTokenPrompt) {
+        return null;
+      }
       const token = prompt("Enter your GitHub personal access token (PAT) with repo scope:");
       if (token) _cachedToken = token.trim();
     }
