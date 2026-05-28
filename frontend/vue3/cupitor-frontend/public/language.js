@@ -185,6 +185,8 @@ function togglePlay(el) {
 }
 
 function playMedia() {
+  showMediaRelatedContainer()
+  showMediaContainer()
   if (window.playingYoutubeVideo) {
     window.ytPlayer.playVideo()
   } else if (window.playingAudio) {
@@ -212,10 +214,23 @@ function _suppressYoutubeAutoplay() {
   setTimeout(tick, 150)
 }
 
-// Start playback of the currently selected media (used by the "Play" button,
-// since selecting a media now only loads it without auto-playing).
-function playSelectedMedia() {
-  playMedia()
+// Start playback of the currently selected media (used by the "Play" button).
+// Selecting media via #mp3Choice intentionally does NOT load subtitles — the
+// user only sees Play Starred / Practice Starred (which lazy-load on demand)
+// until they explicitly press Play. At that point we run the full load:
+// playNewMedia fetches the SRT, parses it via storeSubtitles, and starts the
+// video. clearSubtitles inside playNewMedia wipes window.starredLines, so we
+// re-fetch them afterwards to keep the Save / Play Starred buttons accurate.
+async function playSelectedMedia() {
+  const sel = window.mediaSelected || {}
+  if (!sel.link) { playMedia(); return }
+  try {
+    await playNewMedia(sel.link, sel.source || 'link', null, true)
+  } catch (e) {
+    console.warn('playSelectedMedia: playNewMedia failed', e)
+    playMedia()
+  }
+  try { await loadStarredLines(sel.link, 'youtube') } catch (_) {}
 }
 window.playSelectedMedia = playSelectedMedia
 
@@ -1977,14 +1992,15 @@ $('document').ready(e => {
   $('#mp3Choice').change(async e => {
     const link = $('#mp3Choice').val();
     if (link) {
-      window.location.hash = link
+      //window.location.hash = link
       window.mediaSelected = {link: link, source: 'link'}
       window.syncSubtitle = true
       // Keep the media panel open: selecting a media only loads it now, and the
       // user still has to choose an action (Play / Play Starred / Practice
       // Starred), so collapsing the controls here would hide those buttons.
       // Load the media + subtitles but don't auto-start.
-      playNewMedia(link, 'link', null, false)
+      // playNewMedia(link, 'link', null, false)
+      loadStarredLines(link, 'youtube')
       $('#playSelectedMediaBtn').show()
     } else {
       removeHash()
@@ -2342,14 +2358,35 @@ function changeMediaIfNeededTo(media) {
 }
 
 function starredLineSelected(el, index, ts) {
-  if (!ts) {
-    ts = window.subtitles.find(it => it.index === index).ts
-  }
   return async e => {
+    // ts may be null at render time (mp3Choice loads starred indices before
+    // any subtitle SRT is fetched). Resolve it lazily on click — first from
+    // window.subtitles if it's already there, otherwise by fetching+parsing
+    // the per-link SRT via getSubtitlesForLink.
+    let resolvedTs = ts
+    if (resolvedTs == null && Array.isArray(window.subtitles)) {
+      const s = window.subtitles.find(it => it && it.index === index)
+      if (s && typeof s.ts === 'number') resolvedTs = s.ts
+    }
+    if (resolvedTs == null) {
+      try {
+        const media = window.mediaSelected || {}
+        if (media.link) {
+          const stored = await getSubtitlesForLink(media.link, media.source)
+          if (stored) {
+            if (!stored._parsedSv && stored.sv) stored._parsedSv = srtToJson(stored.sv)
+            const hit = (stored._parsedSv || []).find(it => it && it.index === index)
+            if (hit && hit.start && typeof hit.start.ordinal === 'number') {
+              resolvedTs = hit.start.ordinal
+            }
+          }
+        }
+      } catch (err) { console.warn('starredLineSelected: lazy ts resolve failed', err) }
+    }
     $('.starred-sub').removeClass('active')
     el.addClass('active')
     await changeMediaIfNeededTo(window.mediaSelected)
-    await setMediaTime(ts, true)
+    if (resolvedTs != null) await setMediaTime(resolvedTs, true)
   };
 }
 
@@ -2386,10 +2423,13 @@ window._updateStarredLinesBtns = _updateStarredLinesBtns
 
 // Build a transient queue from the currently-starred lines of the active
 // media. Shared by Play Starred (play mode) and Practice Starred (practice
-// mode) — neither persists anything. Returns null (after alerting) if the
-// media isn't a supported YouTube source or there's nothing playable.
-function _buildStarredQueue() {
-  const subs = window.subtitles || []
+// mode) — neither persists anything. Async because subtitles for the
+// selected media may not be in memory yet (Play/Practice Starred is reachable
+// straight from the media picker, before any subtitle load); the queue
+// needs timestamps, so we lazy-fetch+parse the SRT on demand. Returns null
+// (after alerting) if the media isn't a supported YouTube source or there's
+// nothing playable.
+async function _buildStarredQueue() {
   const media = window.mediaBeingPlayed || window.mediaSelected || {}
   const id = media.link
   const source = (media.source || '').toLowerCase()
@@ -2398,14 +2438,38 @@ function _buildStarredQueue() {
   const isYouTube = window.playingYoutubeVideo || source === 'link' || source === 'youtube'
   if (!id) { alert('No media loaded to use starred lines from.'); return null }
   if (!isYouTube) { alert('Starred-line playback currently supports YouTube media only.'); return null }
+
+  // Prefer the in-memory window.subtitles (numeric ts/te from storeSubtitles).
+  // Otherwise lazy-fetch the SRT for this link and parse it — buttons show
+  // before any playback happens, so this is often the first time the SRT is
+  // touched. Field shape differs (string ts vs number) so we read seconds via
+  // start.ordinal / end.ordinal which both code paths expose.
+  let subs = window.subtitles || []
+  if (!subs.length) {
+    try {
+      const stored = await getSubtitlesForLink(id, source)
+      if (stored) {
+        if (!stored._parsedSv && stored.sv) stored._parsedSv = srtToJson(stored.sv)
+        subs = stored._parsedSv || []
+      }
+    } catch (err) {
+      console.warn('_buildStarredQueue: subtitle lazy-load failed', err)
+    }
+  }
+
   const queue = []
   ;(window.starredLines || []).forEach(index => {
-    const sub = subs.find(it => it.index === index)
-    if (!sub || typeof sub.ts !== 'number') return
+    const sub = subs.find(it => it && it.index === index)
+    if (!sub) return
+    const startSec = (sub.start && typeof sub.start.ordinal === 'number') ? sub.start.ordinal
+                   : (typeof sub.ts === 'number' ? sub.ts : null)
+    const endSec   = (sub.end && typeof sub.end.ordinal === 'number') ? sub.end.ordinal
+                   : (typeof sub.te === 'number' ? sub.te : null)
+    if (startSec == null) return
     queue.push({
       id, source: 'YouTube',
-      timeStart: Math.floor(sub.ts),
-      timeEnd: Math.ceil(sub.te != null ? sub.te : sub.ts + 4),
+      timeStart: Math.floor(startSec),
+      timeEnd: Math.ceil(endSec != null ? endSec : startSec + 4),
       lineIndex: index,
       word: '',
       searchText: 'Starred',
@@ -2417,15 +2481,15 @@ function _buildStarredQueue() {
 }
 
 // Play the currently-starred lines as an ad-hoc playlist in play mode.
-function playStarredLines() {
-  const queue = _buildStarredQueue()
+async function playStarredLines() {
+  const queue = await _buildStarredQueue()
   if (queue) playRecording({ queue })
 }
 window.playStarredLines = playStarredLines
 
 // Practice the currently-starred lines as ad-hoc cards in practice mode.
-function practiceStarredLines() {
-  const queue = _buildStarredQueue()
+async function practiceStarredLines() {
+  const queue = await _buildStarredQueue()
   if (queue) openPracticeMode({ queue })
 }
 window.practiceStarredLines = practiceStarredLines
@@ -2434,8 +2498,14 @@ function renderStarredLines() {
   $('#starredLines').html('')
   $('#starredLinesSelect').html('')
 
+  // window.subtitles isn't always loaded when this runs — loadStarredLines
+  // fires from app init before any subtitle SRT is fetched. Fall back to an
+  // empty list so the starred index round-trips even without timestamps;
+  // a later renderStarredLines() (post-subtitle-load) will pick up the ts.
+  const subs = Array.isArray(window.subtitles) ? window.subtitles : []
   window.starredLines.forEach(index => {
-    const ts = window.subtitles.find(it => it.index === index).ts
+    const hit = subs.find(it => it && it.index === index)
+    const ts = hit ? hit.ts : null
     const x = $(`<span data-index="${index}">${index}</span>`)
       .addClass('starred-sub')
 
@@ -3179,9 +3249,6 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   loadSubtitlesForLink(sv, en);
 
   $('#currentMedia').html(`${link}, ${source}`)
-
-  loadStarredLines(link, source)
-
   $('#toggleSearchBtn').show()
 }
 
@@ -3216,6 +3283,15 @@ function getTargetLangSrtSuffix() {
 }
 
 async function loadStarredLines(link, source) {
+  // Reset first — addStarredLine dedupes by index value but doesn't know
+  // which video an index belongs to, so without this, switching media via
+  // #mp3Choice would leave the previous video's starred indices in place
+  // and the Play/Practice Starred buttons would lie about what's actually
+  // available for the new video.
+  window.starredLines = []
+  $('#starredLines').html('')
+  $('#starredLinesSelect').html('')
+
   let res = await fetch(`${getResourceUrl()}/srts/srt_favorites.json`)
   res = await res.json()
 
@@ -9712,6 +9788,8 @@ function stopPlayingRecording() {
   } catch (_) {}
   window._recTTS = null
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+  $('#toggleMediaContainer').click() 
+  $('#mediaRelatedContainer').hide()
 }
 
 // ─── Practice (flashcard) mode ───────────────────────────────────────────
@@ -9905,6 +9983,7 @@ function closePracticeMode() {
   // regular search-result / recording playback after the session ends.
   try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+  $('#toggleMediaContainer').click() 
 }
 window.closePracticeMode = closePracticeMode
 
@@ -9964,6 +10043,7 @@ function minimizePracticeMode() {
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
   _updatePracticeRestoreCount()
+  $('#toggleMediaContainer').click()  
 }
 function restorePracticeMode() {
   window._practiceMinimized = false
