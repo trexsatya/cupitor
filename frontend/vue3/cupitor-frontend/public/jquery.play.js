@@ -76,6 +76,102 @@ function write(strings, elSelector, opts) {
   });//promise
 }
 
+// Renders a list of text lines, each in its own DOM textbox inside
+// #textillateContainer, stacked vertically from (x, y). `animator` picks the
+// per-line effect ('write' = Vara handwriting, 'type' = Typed.js typewriter);
+// `ordered` prefixes each item with `N. ` for numbered lists. Alignment is
+// relative to x: 'left' anchors each box's left edge at x, 'center' anchors
+// the midpoint, 'right' anchors the right edge. Records itself once so
+// playback re-creates all lines from a single script entry.
+function _renderTextList(animator, lines, x, y, opts, ordered) {
+  opts = Object.assign({}, {
+    align: 'left',
+    lineHeight: 50,
+    width: 600,
+    color: 'black',
+    fontSize: 36,
+    strokeWidth: 2
+  }, opts);
+  // Typed.js reads from the shared #typed-strings element, so parallel typing
+  // would clobber itself. Default type variants to sequential; write variants
+  // can animate in parallel.
+  if (opts.sequential === undefined) opts.sequential = (animator === 'type');
+
+  const fnName = (animator === 'write' ? 'writeText' : 'typeText')
+    + (ordered ? 'ListOrdered' : 'List');
+  recordScript(
+    `${fnName}(${JSON.stringify(lines)},${x},${y},${JSON.stringify(opts)})`
+  );
+
+  const items = (lines || []).map((line, i) =>
+    ordered ? `${i + 1}. ${line}` : line
+  );
+
+  const lineLeft = (() => {
+    if (opts.align === 'center') return x - opts.width / 2;
+    if (opts.align === 'right')  return x - opts.width;
+    return x;
+  })();
+
+  const runOne = (text, idx) => {
+    const top = y + idx * opts.lineHeight;
+    if (animator === 'write') {
+      // write() positions a Vara <div> inside #textillateContainer using
+      // opts.x / opts.y; we leave SVG left-aligned inside that box and rely
+      // on the box's own left to honour alignment.
+      const lineOpts = Object.assign({}, opts, {
+        x: lineLeft, y: top, width: opts.width,
+        color: opts.color
+      });
+      return write(text, '#textillateContainer', lineOpts);
+    }
+    // type variant: build a sibling div per line and target it explicitly.
+    const uid = 't' + uuid();
+    const el = $('<div></div>')
+      .addClass('typed-text-line')
+      .attr({ id: uid, 'data-uid': uid })
+      .css({
+        position: 'absolute',
+        top: top,
+        left: lineLeft,
+        width: opts.width,
+        textAlign: opts.align,
+        color: opts.color,
+        fontSize: (typeof opts.fontSize === 'number' ? opts.fontSize + 'px' : opts.fontSize)
+      });
+    if (window.objectIds && typeof window.objectIds.add === 'function') {
+      window.objectIds.add({ uid: uid, type: 'typed-text' });
+      if (typeof updateObjectIdsUi === 'function') updateObjectIdsUi();
+    }
+    $('#textillateContainer').append(el);
+    return type(text, '#' + uid, opts);
+  };
+
+  if (opts.sequential) {
+    return items.reduce(
+      (p, text, i) => p.then(() => runOne(text, i)),
+      Promise.resolve()
+    );
+  }
+  return Promise.all(items.map((text, i) => runOne(text, i)));
+}
+
+function writeTextList(lines, x, y, opts) {
+  return _renderTextList('write', lines, x, y, opts, false);
+}
+
+function writeTextListOrdered(lines, x, y, opts) {
+  return _renderTextList('write', lines, x, y, opts, true);
+}
+
+function typeTextList(lines, x, y, opts) {
+  return _renderTextList('type', lines, x, y, opts, false);
+}
+
+function typeTextListOrdered(lines, x, y, opts) {
+  return _renderTextList('type', lines, x, y, opts, true);
+}
+
 //Accessor for matrix
 function at(matrix, i, j) {
   return $(matrix.all.find(`table.data td[data-row='${i}']`)[j]);

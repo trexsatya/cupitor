@@ -1,4 +1,4 @@
-import {computeIfAbsent, randomFromArray, range, schedule, uuid} from './data-structures.js';
+import {computeIfAbsent, range, schedule, uuid} from './data-structures.js';
 import {conjugateTableSpanish} from './spanish.js';
 
 function debugLog(x) {
@@ -30,6 +30,58 @@ Array.prototype.last = function () {
   return _.last(this)
 };
 
+// Console-tap: mirror console.* into an in-memory ring buffer so the
+// in-app Log Viewer can show what would otherwise only be visible in
+// DevTools (which we can't open on mobile). Kept tiny — 500 entries —
+// to bound memory. Each entry is { t, level, args } where args is the
+// already-stringified message so we don't hold live references.
+window.__logBuffer = window.__logBuffer || []
+const LOG_BUFFER_MAX = 500
+function _serializeLogArg(a) {
+  if (a instanceof Error) return a.stack || (a.name + ': ' + a.message)
+  if (typeof a === 'string') return a
+  try { return JSON.stringify(a) } catch (_) { return String(a) }
+}
+;['log', 'info', 'warn', 'error', 'debug'].forEach(level => {
+  const orig = console[level] ? console[level].bind(console) : null
+  console[level] = function (...args) {
+    try {
+      window.__logBuffer.push({
+        t: Date.now(),
+        level,
+        msg: args.map(_serializeLogArg).join(' ')
+      })
+      if (window.__logBuffer.length > LOG_BUFFER_MAX) {
+        window.__logBuffer.splice(0, window.__logBuffer.length - LOG_BUFFER_MAX)
+      }
+    } catch (_) {}
+    if (orig) orig(...args)
+  }
+})
+// Surface uncaught errors and unhandled promise rejections too —
+// these are the ones a mobile user most needs to see and can't.
+window.addEventListener('error', (e) => {
+  try {
+    window.__logBuffer.push({
+      t: Date.now(),
+      level: 'error',
+      msg: '[window.error] ' + (e.message || e.type) +
+        (e.filename ? ` @ ${e.filename}:${e.lineno}:${e.colno}` : '') +
+        (e.error && e.error.stack ? '\n' + e.error.stack : '')
+    })
+  } catch (_) {}
+})
+window.addEventListener('unhandledrejection', (e) => {
+  try {
+    const r = e.reason
+    window.__logBuffer.push({
+      t: Date.now(),
+      level: 'error',
+      msg: '[unhandledrejection] ' + (r && r.stack ? r.stack : _serializeLogArg(r))
+    })
+  } catch (_) {}
+})
+
 const SEPARATOR_PIPE = '|'
 window.onbeforeunload = function (event) {
   if (window.dontConfirmOnRefresh) {
@@ -40,7 +92,8 @@ window.onbeforeunload = function (event) {
 
 window.addEventListener('filterData', (e) => {
   $('#saveRevisionBtn').show();
-  $('#saveStarredLinesBtn').show();
+  // Save/Play-starred visibility is driven by whether any line is starred —
+  // see _updateStarredLinesBtns(). Don't force them visible here.
   const text = e.detail?.text;
   // The native app can pass a GitHub token alongside the search text.
   // It is stored in memory only (never persisted) and used for vocab commits.
@@ -72,118 +125,7 @@ window.addEventListener('capturedSubtitle', (e) => {
 });
 
 function getExpansionForWords() {
-  const list = `ta=ta,tar,tog,tagit
-as=as,ades,ats
-en=en,et,na,ne
-sig=sig,dig,mig,oss,honom,henne,er,sig
-få=få,får,fick,fått
-lägga=lägga,lägger,lade,lagtpa
-ha=ha,har,hade,haft
-slappna=slappna,slappnar,slappnade,slappnat
-koppla=koppla,kopplar,kopplade,kopplat
-röra=röra,rör,rörde,rört
-syfta=syfta,syftar,syftade,syftat
-utgå=utgå,utgår,utgick,utgått
-föreställa=föreställa,föreställer,föreställde,föreställt
-ilskna=ilskna,ilsknar,ilsknade,ilsknat
-ge=ge,ger,gav,gett
-bemöda=bemöda,bemödar,bemödade,bemödat
-plats=upp,ner,fram,bak,bort
-se=se,ser,såg,sett
-gå=gå,går,gick,gått
-sätta=sätta,sätter,satte,satt
-slå=slå,slår,slog,slagit
-stiga=stiga,stiger,steg,stigit
-dyka=dyka,dyker,dök,dykt
-befinna=befinna,befinner,befann,befunnit
-riva=riva,river,rev,rivit
-bestå=bestå,består,bestod,bestått
-stänga=stänga,stänger,stängde,stängt
-ställa=ställa,ställer,ställde,ställt
-etsa=etsa,etsar,etsade,etsat
-resa=resa,reser,reste,rest,res
-lyfta=lyfta,lyfter,lyfte,lyft
-förhålla=förhålla,förhåller,förhöll,förhållit
-bete=bete,beter,betedde,betett
-uppföra=uppföra,uppför,uppförde,uppfört
-komma=komma,kommer,kom,kommit
-hinna=hinna,hinner,hann,hunnit
-hålla=hålla,håller,höll,hållit
-infinna=infinna,infinner,infann,infunnit
-slänga=slänga,slänger,slängde,slängt
-göra=göra,gör,gjorde,gjort
-gripa=gripa,griper,grep,gripit
-leda=leda,leder,ledde,lett
-skjuta=skjuta,skjuter,sköt,skjutit
-bli=bli,blir,blev,blivit
-dra=dra,drar,drog,dragit
-trivas=trivas,trivs,trivdes,trivts
-passa=passa,passar,passade,passat
-äga=äga,äger,ägde,ägt
-bära=bära,bär,bar,burit
-be=be,ber,bad,bett
-bita=bita,biter,bet,bitit
-bjuda=bjuda,bjuder,bjöd,bjudit
-blomma=blomma,blommar,blommade,blommat
-bry=bry,bryr,brydde,brytt
-bryta=bryta,bryter,bröt,brutit
-delta=delta,deltar,deltog,deltagit
-driva=driva,driver,drev,drivit
-falla=falla,faller,föll,fallit
-finna=finna,finner,fann,funnit
-föra=föra,för,förde,fört
-förklä=förklä,förkläder,förklädde,förklätt
-fylla=fylla,fyller,fyllde,fyllt
-ga=ga,gar,gade,gat
-gifta=gifta,gifter,gifte,gift
-glida=glida,glider,gled,glidit
-gnugga=gnugga,gnuggar,gnuggade,gnuggat
-grippa=gripa,griper,grep,gripit
-handla=handla,handlar,handlade,handlat
-känna=känna,känner,kände,känt
-kasta=kasta,kastar,kastade,kastat
-kikna=kikna,kiknar,kiknade,kiknat
-klämma=klämma,klämmer,klämde,klämt
-knyta=knyta,knyter,knöt,knutit
-köra=köra,kör,körde,kört
-läsa=läsa,läser,läste,läst
-leva=leva,lever,levde,levt
-ligga=ligga,ligger,låg,legat
-lista=lista,listar,listade,listat
-lösa=lösa,löser,löste,löst
-lysa=lysa,lyser,lyste,lyst
-mala=mala,mal,malde,malt
-öka=öka,ökar,ökade,ökat
-prata=prata,pratar,pratade,pratat
-rå=rå,rår,rådde,rått
-såga=såga,sågar,sågade,sågat
-säga=säga,säger,sade,sa,sagt
-sitta=sitta,sitter,satt,suttit
-skriva=skriva,skriver,skrev,skrivit
-släppa=släppa,släpper,släppte,släppt
-släta=släta,slätar,slätade,slätat
-sluta=sluta,slutar,slutade,slutat
-söka=söka,söker,sökte,sökt
-sopa=sopa,sopar,sopade,sopat
-sova=sova,sover,sov,sovit
-spilla=spilla,spiller,spillde,spillt
-springa=springa,springer,sprang,sprungit
-stå=stå,står,stod,stått
-stämma=stämma,stämmer,stämde,stämt
-sticka=sticka,sticker,stack,stuckit
-stödja=stödja,stödjer,stödde,stött
-stöta=stöta,stöter,stötte,stött
-stryka=stryka,stryker,strök,strukit
-tala=tala,talar,talade,talat
-tränga=tränga,tränger,trängde,trängt
-trycka=trycka,trycker,tryckte,tryckt
-tycka=tycka,tycker,tyckte,tyckt
-utbilda=utbilda,utbildar,utbildade,utbildat
-vända=vända,vänder,vände,vänt
-vara=vara,är,var,varit
-växa=växa,växer,växte,vuxit
-vetta=vetta,vetter,vette,vettat
-visa=visa,visar,visade,visat`
+  const list = ``
 
   const wordsMap = {}
   list.split("\n").filter(it => it.trim().length > 2).forEach(it => {
@@ -216,75 +158,6 @@ visa=visa,visar,visade,visat`
   } catch (e) { console.warn('[expansions] failed to merge user-defined expansions', e) }
 
   return wordsMap
-}
-
-async function loadJokes() {
-  let response = await fetch(`${getResourceUrl()}/jokes/1.txt`)
-  response = await response.text()
-  response = response.split(/[0-9]+\.jpg\n {5}------------\n/).map(it => it.trim()).filter(it => it.length > 20)
-  window.jokes = response
-}
-
-async function loadBookExtracts() {
-  let response = await fetch(`${getResourceUrl()}/book-extracts/1.txt`)
-  response = await response.text()
-  response = response.split("---------------").map(it => it.trim()).filter(it => it.length > 20)
-  window.bookExtracts = response
-}
-
-async function loadFromArticle(articleIds) {
-  let response = await fetch(`https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/article/${articleIds[getLangFromUrl().code]}`)
-  //let response = await fetch("http://localhost:5000/static?name=1.html")
-  response = await response.json()
-  response = await response.content
-  return response.split("---------------").map(it => it.trim()).filter(it => it.length > 20)
-}
-
-async function loadSnippets() {
-  const articleIds = {
-    'sv': 14,
-    'es': 23
-  }
-  window.snippets = await loadFromArticle(articleIds)
-}
-
-async function loadPoems() {
-  const articleIds = {
-    'sv': 141,
-    'es': 76
-  }
-  window.poems = await loadFromArticle(articleIds)
-}
-
-function _populateData(where, response) {
-  response.split("---------------").map(it => it.trim()).forEach(it => {
-    const splits = it.split("\n")
-    where.push({
-      name: _.trim(splits[0]),
-      text: _.drop(splits, 1).join("\n")
-    })
-  })
-}
-
-async function loadSayings() {
-  let response = await fetch(`${getResourceUrl()}/sayings/1.txt`)
-  response = await response.text()
-  window.sayings = []
-  _populateData(window.sayings, response)
-}
-
-async function loadMetaphors() {
-  let response = await fetch(`${getResourceUrl()}/metaphors/1.txt`)
-  response = await response.text()
-  window.metaphors = []
-  _populateData(window.metaphors, response)
-}
-
-async function loadIdioms() {
-  let response = await fetch(`${getResourceUrl()}/idioms/1.txt`)
-  response = await response.text()
-  window.idioms = []
-  _populateData(window.idioms, response)
 }
 
 function togglePlay(el) {
@@ -321,6 +194,31 @@ function playMedia() {
   }
 }
 
+// Swapping the YouTube iframe src often triggers autoplay. When we only want
+// to *load* the video (user starts it manually via the Play button), poll the
+// player for a short window and pause it as soon as it starts playing.
+function _suppressYoutubeAutoplay() {
+  const deadline = Date.now() + 3000
+  const tick = () => {
+    try {
+      if (window.ytPlayer && typeof window.ytPlayer.getPlayerState === 'function') {
+        // 1 = playing, 3 = buffering -> force back to paused
+        const st = window.ytPlayer.getPlayerState()
+        if (st === 1 || st === 3) window.ytPlayer.pauseVideo()
+      }
+    } catch (_) {}
+    if (Date.now() < deadline) setTimeout(tick, 150)
+  }
+  setTimeout(tick, 150)
+}
+
+// Start playback of the currently selected media (used by the "Play" button,
+// since selecting a media now only loads it without auto-playing).
+function playSelectedMedia() {
+  playMedia()
+}
+window.playSelectedMedia = playSelectedMedia
+
 function createOptionElement(searchTerms, selected = false) {
   let displayText = searchTerms
   let isSeparator = false
@@ -352,7 +250,18 @@ function loadSearches() {
 }
 
 function getSearchesFromStorage() {
-  return JSON.parse(localStorage.getItem('searches') || '{}');
+  // Canonical shape: array of search strings. An older code path defaulted
+  // to `{}` here, which broke `saveSearch` (calls .includes / .push) every
+  // time the user searched on a fresh device. Migrate any legacy object
+  // shape on read so old localStorage values still load.
+  try {
+    const v = JSON.parse(localStorage.getItem('searches') || '[]')
+    if (Array.isArray(v)) return v
+    if (v && typeof v === 'object') return Object.keys(v)
+    return []
+  } catch (_) {
+    return []
+  }
 }
 
 function saveSearchesIntoStorage(searches) {
@@ -361,13 +270,171 @@ function saveSearchesIntoStorage(searches) {
 
 function exportSearches() {
   const searches = getSearchesFromStorage()
-  export2txt(Object.keys(searches).join("\n"), "searches.txt");
+  export2txt(searches.join("\n"), "searches.txt");
   $('#toggleSearchesControlCheckbox').click()
 }
 
 function importSearches() {
   $("#import-dialog").dialog()
 }
+
+// --- Rare / unused vocabulary finder -------------------------------------
+// Scans every vocabulary line against all loaded subtitles and lists the
+// ones that appear in fewer than the chosen number of subtitles (a threshold
+// of 1 means "never matched anywhere"). Results are paginated; clicking a
+// word runs it through the main search box.
+window._rareWords = window._rareWords || []
+window._rareWordsPage = 0
+window._rareWordsScanToken = 0
+const RARE_WORDS_PAGE_SIZE = 60
+
+function openRareWordsDialog() {
+  $('#rareWordsDialog').dialog({
+    width: Math.min(560, $(window).width() - 24),
+    modal: false,
+    open: function () {
+      // jQuery UI auto-focuses the first tabbable element (the threshold
+      // number input), which pops up the on-screen keyboard on mobile.
+      // Move focus to the dialog wrapper instead so no keyboard appears.
+      $(this).closest('.ui-dialog').attr('tabindex', -1).trigger('focus')
+    }
+  })
+}
+window.openRareWordsDialog = openRareWordsDialog
+
+async function scanRareWords() {
+  if (!window._subtitlesLoaded || !window.vocabulary) {
+    $('#rareWordsStatus').text('Subtitles/vocabulary still loading…')
+    return
+  }
+  const threshold = Math.max(1, parseInt($('#rareWordsThreshold').val(), 10) || 1)
+  const token = ++window._rareWordsScanToken
+
+  // Precompute cleaned subtitle text once per scan (sv + en kept separate so a
+  // word counts as "present" when it appears in either, mirroring the main
+  // search's file-level filter).
+  const subs = Object.values(window.allSubtitles || {})
+    .filter(s => s && (s.sv || s.en))
+    .map(s => ({
+      sv: s.sv ? _cleanSrtForMatch(s.sv) : '',
+      en: s.en ? _cleanSrtForMatch(s.en) : ''
+    }))
+
+  // Flatten vocabulary into unique lines (keep first category seen).
+  const seen = new Map()
+  Object.entries(window.vocabulary || {}).forEach(([cat, lines]) => {
+    if (!Array.isArray(lines)) return
+    lines.forEach(line => {
+      const l = (line || '').trim()
+      if (l.length < 2) return
+      if (!seen.has(l)) seen.set(l, cat)
+    })
+  })
+  const entries = Array.from(seen.entries()) // [line, category]
+
+  const found = []
+  const total = entries.length
+  $('#rareWordsProgress').show()
+  $('#rareWordsProgressFill').css('width', '0%')
+  $('#rareWordsScanBtn').prop('disabled', true)
+  $('#rareWordsStatus').text(`Scanning ${total} words…`)
+
+  // Time-sliced so the main thread is never held longer than SLICE_MS at a
+  // stretch — the scan stays fully non-blocking no matter how big the
+  // vocabulary / subtitle set is. We yield on a time budget rather than a
+  // fixed word count because per-word cost varies wildly (a rare word scans
+  // every subtitle; a common one early-exits almost immediately).
+  const yieldToUI = () => new Promise(r => setTimeout(r, 0))
+  const SLICE_MS = 25
+  const now = () => (window.performance && performance.now) ? performance.now() : Date.now()
+  let lastYield = now()
+  for (let i = 0; i < total; i++) {
+    if (token !== window._rareWordsScanToken) { $('#rareWordsScanBtn').prop('disabled', false); return }
+    const [line, cat] = entries[i]
+    let re
+    try {
+      const expanded = expandWords(line, getLangFromUrl().code)
+      re = new RegExp(_relaxSpaces(expanded), 'i')
+    } catch (e) { re = null }
+    if (re) {
+      let count = 0
+      for (const sub of subs) {
+        if ((sub.sv && re.test(sub.sv)) || (sub.en && re.test(sub.en))) {
+          count++
+          if (count >= threshold) break // can't be "fewer than threshold" any more
+        }
+      }
+      if (count < threshold) found.push({ line, category: cat, count })
+    }
+    if (now() - lastYield > SLICE_MS) {
+      $('#rareWordsProgressFill').css('width', `${Math.round(((i + 1) / total) * 100)}%`)
+      await yieldToUI()
+      if (token !== window._rareWordsScanToken) { $('#rareWordsScanBtn').prop('disabled', false); return }
+      lastYield = now()
+    }
+  }
+
+  found.sort((a, b) => (a.count - b.count) || a.line.localeCompare(b.line))
+  window._rareWords = found
+  window._rareWordsPage = 0
+  $('#rareWordsProgress').hide()
+  $('#rareWordsScanBtn').prop('disabled', false)
+  $('#rareWordsStatus').text(`${found.length} word(s) match in fewer than ${threshold} subtitle(s).`)
+  _renderRareWordsPage()
+}
+window.scanRareWords = scanRareWords
+
+function _renderRareWordsPage() {
+  const all = window._rareWords || []
+  const pageSize = RARE_WORDS_PAGE_SIZE
+  const pages = Math.max(1, Math.ceil(all.length / pageSize))
+  const page = Math.min(window._rareWordsPage || 0, pages - 1)
+  window._rareWordsPage = page
+  const slice = all.slice(page * pageSize, page * pageSize + pageSize)
+
+  const $list = $('#rareWordsResults').empty()
+  if (!all.length) {
+    $list.html('<div class="rare-words-empty">Nothing to show yet — set a threshold and click Scan.</div>')
+    $('#rareWordsPager').empty()
+    return
+  }
+  slice.forEach(it => {
+    const $row = $('<button type="button" class="rare-word-item"></button>')
+    $row.attr('title', `${it.line} — ${it.count} match(es) · ${it.category}`)
+    $row.append($('<span class="rare-word-text"></span>').text(it.line))
+    $row.append($('<span class="rare-word-count"></span>').text(it.count))
+    $row.on('click', () => rareWordSearch(it.line))
+    $list.append($row)
+  })
+
+  const $pager = $('#rareWordsPager').empty()
+  if (pages > 1) {
+    // stopPropagation: this handler re-renders and detaches the clicked
+    // button before the click bubbles to the document-level outside-click
+    // handler (~L1877). Without it, the orphaned target reads as "outside
+    // the dialog" and the dialog gets closed. Mirrors the $loadMore fix.
+    const $prev = $('<button type="button" class="lang-tool-btn">‹ Prev</button>')
+      .prop('disabled', page === 0)
+      .on('click', e => { e.stopPropagation(); window._rareWordsPage = page - 1; _renderRareWordsPage() })
+    const $next = $('<button type="button" class="lang-tool-btn">Next ›</button>')
+      .prop('disabled', page >= pages - 1)
+      .on('click', e => { e.stopPropagation(); window._rareWordsPage = page + 1; _renderRareWordsPage() })
+    $pager.append($prev)
+    $pager.append($(`<span class="rare-words-pageinfo">Page ${page + 1} / ${pages}</span>`))
+    $pager.append($next)
+  }
+}
+
+// Run a rare-word click through the main search box (mirrors vocabularyLineSelected).
+function rareWordSearch(line) {
+  window.forceMainLangForNextSearch = true
+  window.unprocessedSearchText = line
+  window.searchText = expandWords(line, getLangFromUrl().code)
+  $('#searchText').val(line).trigger('input')
+  try { $('#rareWordsDialog').dialog('close') } catch (_) {}
+  doSearch(window.searchText, null)
+}
+window.rareWordSearch = rareWordSearch
 
 function importSearchesFromVocab() {
   const category = $("#vocabularySelect").val()
@@ -475,7 +542,10 @@ function openAddToVocabDialog() {
     $('#vocabNewCategory').val('')
   };
   discardSegment();
-  $('#vocabPendingHint').hide();
+  // Restore the pending-hint when reopening — staged-but-uncommitted
+  // edits survive a dialog close (we no longer auto-commit on close).
+  if (window._vocabHasPendingChanges) $('#vocabPendingHint').show()
+  else $('#vocabPendingHint').hide()
 
   // Mirror the main select's current line into the dialog's reference select
   // so the user starts on the line they were already inspecting. Skip
@@ -500,15 +570,19 @@ function openAddToVocabDialog() {
     }
   } catch (_) { /* leave dialog selection as-is */ }
 
-  // If the user closes the dialog while there are staged-but-uncommitted
-  // changes, commit them before tearing the dialog down so multi-add
-  // sessions never silently lose work.
+  // If Insert position is sticky on "inline" (e.g. from a prior session),
+  // pre-fill the textarea with the chosen reference word so the user can
+  // edit in place — matches the behaviour of switching to inline manually.
+  try {
+    const posSel = document.getElementById('vocabInsertPosition')
+    if (posSel && posSel.value === 'inline') onVocabInsertPositionChange(posSel)
+  } catch (_) {}
+
+  // Closing the dialog does NOT commit to GitHub — only the explicit save
+  // buttons do. Staged edits remain in window.vocabulary; reopening the
+  // dialog restores the pending-hint and a later save commits them.
   const onDialogClose = () => {
     discardSegment()
-    if (window._vocabHasPendingChanges) {
-      commitVocabularyToGithub()
-      window._vocabHasPendingChanges = false
-    }
     $('#vocabPendingHint').hide()
   }
 
@@ -527,7 +601,33 @@ function openAddToVocabDialog() {
         close: onDialogClose
       })
     }
+    _wireVocabKeyboardScroll()
   }, 0)
+}
+
+// On mobile, the soft keyboard slides up from the bottom and shrinks the
+// visible (visualViewport) area, so the textarea — which sits in the lower
+// half of the dialog — ends up hidden under the keyboard. Re-anchor it on
+// focus and again on visualViewport resize so the user can see what they're
+// typing. Bound once per session; idempotent on repeated dialog opens.
+let _vocabKeyboardScrollBound = false
+function _wireVocabKeyboardScroll() {
+  if (_vocabKeyboardScrollBound) return
+  _vocabKeyboardScrollBound = true
+
+  const scrollIntoView = () => {
+    const el = document.getElementById('vocabularySegmentTextarea')
+    if (!el || document.activeElement !== el) return
+    // Slight delay so the visualViewport has finished resizing on iOS.
+    setTimeout(() => {
+      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }) } catch (_) {}
+    }, 80)
+  }
+
+  $(document).on('focus', '#vocabularySegmentTextarea', scrollIntoView)
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', scrollIntoView)
+  }
 }
 
 // Insert `before` (optionally wrapping the selection with `after`) at the
@@ -578,12 +678,15 @@ function addToVocab(commitAndClose) {
   const newText = $("#vocabularySegmentTextarea").val().trim()
   if (!newText) {
     // "Save & Close" pressed with an empty textarea: if there are already
-    // staged additions from earlier rounds, commit them and close.
+    // staged additions from earlier rounds, refresh the selects (we held
+    // off during "Add another"), then commit and close.
     if (commitAndClose && window._vocabHasPendingChanges) {
+      loadWholeVocabulary()
       commitVocabularyToGithub()
       window._vocabHasPendingChanges = false
       $('#vocabPendingHint').hide()
       $("#addToVocabularyDialog").dialog("close")
+      autoHideSettingsPanel()
     }
     return
   }
@@ -660,20 +763,23 @@ function addToVocab(commitAndClose) {
     }
   } catch (_) { /* leave preSelectedSearchedWord untouched */ }
 
-  // Refresh both select boxes with updated vocabulary so the just-added
-  // line is reachable as a reference word for the next round.
-  loadWholeVocabulary()
-
   window._vocabHasPendingChanges = true
 
   if (commitAndClose) {
+    // Rebuild the selects to reflect everything staged across this session,
+    // then commit + close. Held off during "Add another" so multi-add
+    // doesn't churn the (expensive) select repopulation on every iteration.
+    loadWholeVocabulary()
     commitVocabularyToGithub()
     window._vocabHasPendingChanges = false
     $('#vocabPendingHint').hide()
     $("#addToVocabularyDialog").dialog("close")
+    autoHideSettingsPanel()
   } else {
     // Stage-only: clear textarea, surface the pending-changes hint, and
-    // leave the dialog open so the user can add more entries.
+    // leave the dialog open so the user can add more entries. The select
+    // boxes intentionally aren't refreshed yet — that happens on Save &
+    // Close (or dialog close with pending changes).
     $("#vocabularySegmentTextarea").val('')
     $('#vocabPendingHint').show()
   }
@@ -699,22 +805,301 @@ function onVocabInsertPositionChange(select) {
   }
 }
 
-async function commitVocabularyToGithub() {
-  const vocabText = Object.keys(window.vocabulary)
-    .map(k => `#${k}\n${window.vocabulary[k].join("\n")}`).join("\n")
+function vocabularyToText(vocab) {
+  return Object.keys(vocab)
+    .map(k => `#${k}\n${vocab[k].join("\n")}`).join("\n")
+}
 
+// Open the settings panel as a jQuery UI dialog. Reusing the existing
+// #settingsPanel div lets us keep the inputs and their wiring intact —
+// jQuery UI just relocates the element into a dialog wrapper on first
+// open. Clicking the gear again closes the dialog (toggle).
+function openSettingsDialog() {
+  const $panel = $('#settingsPanel')
+  if ($panel.hasClass('ui-dialog-content') && $panel.dialog('isOpen')) {
+    $panel.dialog('close')
+    return
+  }
+  // Don't clear the original `display:none` inline style here — jQuery
+  // UI's .dialog() relocates the element into a wrapper and handles
+  // visibility itself. Clearing it synchronously caused a one-frame
+  // flash where the panel rendered inline before being moved.
+  const w = Math.min(760, $(window).width() - 40)
+  const opts = {
+    title: 'Settings',
+    width: w,
+    modal: false,
+    autoOpen: true,
+    position: { my: 'center top', at: 'center top+20', of: window },
+    // jQuery UI auto-focuses the first tabbable element — on mobile that's
+    // typically the first <input> in the panel, which pops the on-screen
+    // keyboard. Re-target focus to the dialog wrapper (non-editable) and
+    // blur any input that already grabbed focus during the open sequence.
+    open: function () {
+      const $wrap = $(this).closest('.ui-dialog')
+      const active = document.activeElement
+      if (active && typeof active.blur === 'function') active.blur()
+      if ($wrap.length) $wrap.attr('tabindex', '-1').focus()
+    }
+  }
+  // Defer the open so the current click event finishes bubbling first.
+  // Otherwise the document-level "close visible dialogs on outside click"
+  // handler fires on this same click and immediately closes the dialog
+  // we just opened. Same pattern as openAddToVocabDialog.
+  setTimeout(() => {
+    if ($panel.hasClass('ui-dialog-content')) {
+      $panel.dialog('option', opts).dialog('open')
+    } else {
+      $panel.dialog(opts)
+    }
+  }, 0)
+}
+window.openSettingsDialog = openSettingsDialog
+
+// ──────────────────────────────────────────────────────────────────────
+// Build info + in-app Log Viewer
+// ──────────────────────────────────────────────────────────────────────
+// Show when /language.js was last modified on the server (HEAD request)
+// plus the HTML's document.lastModified as a fallback / cross-check.
+// Lets the user confirm a deploy actually shipped without opening DevTools.
+function _fmtLocal(d) {
+  try {
+    return d.toLocaleString(undefined, { hour12: false })
+  } catch (_) { return d.toISOString() }
+}
+async function populateBuildInfo() {
+  const $el = $('#buildInfo')
+  if (!$el.length) return
+  const htmlLM = document.lastModified ? new Date(document.lastModified) : null
+  let jsLM = null
+  try {
+    const r = await fetch('/language.js', { method: 'HEAD', cache: 'no-cache' })
+    const h = r.headers.get('Last-Modified')
+    if (h) jsLM = new Date(h)
+  } catch (_) {}
+  const jsTxt   = jsLM   ? `js ${_fmtLocal(jsLM)}`   : null
+  const htmlTxt = htmlLM ? `html ${_fmtLocal(htmlLM)}` : null
+  const parts = [jsTxt, htmlTxt].filter(Boolean)
+  $el.text(parts.length ? 'Built: ' + parts.join(' · ') : 'Built: unknown')
+}
+window.populateBuildInfo = populateBuildInfo
+
+function _renderLogViewer() {
+  const $body  = $('#logViewerBody')
+  if (!$body.length) return
+  const level  = $('#logViewerLevel').val() || 'all'
+  const q      = ($('#logViewerSearch').val() || '').toLowerCase()
+  const order  = { error: 0, warn: 1, info: 2, log: 3, debug: 4 }
+  const minOrd = level === 'all' ? 99 : order[level]
+  const rows = (window.__logBuffer || []).filter(e => {
+    if (level !== 'all' && (order[e.level] ?? 99) > minOrd) return false
+    if (q && !e.msg.toLowerCase().includes(q)) return false
+    return true
+  })
+  // Build with DOM rather than innerHTML to avoid an XSS-ish surprise
+  // if a log message contains markup.
+  $body.empty()
+  rows.forEach(e => {
+    const ts = new Date(e.t).toISOString().substring(11, 23)
+    const line = document.createElement('span')
+    line.className = 'log-line'
+    line.setAttribute('data-level', e.level)
+    const tsSpan = document.createElement('span')
+    tsSpan.className = 'log-ts'
+    tsSpan.textContent = ts
+    const lvSpan = document.createElement('span')
+    lvSpan.className = 'log-level'
+    lvSpan.textContent = e.level
+    const msgSpan = document.createElement('span')
+    msgSpan.className = 'log-msg'
+    msgSpan.textContent = e.msg
+    line.appendChild(tsSpan)
+    line.appendChild(lvSpan)
+    line.appendChild(msgSpan)
+    $body.append(line)
+  })
+  // Auto-scroll to bottom — newest entries are most relevant.
+  const el = $body[0]
+  if (el) el.scrollTop = el.scrollHeight
+}
+
+let _logViewerInterval = null
+function openLogViewer() {
+  // Close the settings dialog so the log viewer isn't competing for screen
+  // real estate on mobile. The gear button re-opens settings.
+  try { autoHideSettingsPanel() } catch (_) {}
+  const $dlg = $('#logViewerDialog')
+  if (!$dlg.length) { alert('Log viewer DOM is missing'); return }
+  const winW = $(window).width(), winH = $(window).height()
+  const opts = {
+    title: 'Logs',
+    width: Math.min(820, winW - 20),
+    height: Math.min(640, winH - 20),
+    modal: false,
+    autoOpen: true,
+    position: { my: 'center top', at: 'center top+10', of: window },
+    close: function () {
+      if (_logViewerInterval) { clearInterval(_logViewerInterval); _logViewerInterval = null }
+    }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) {
+    $dlg.dialog('option', opts).dialog('open')
+  } else {
+    $dlg.dialog(opts)
+    // Wire toolbar once — jQuery UI keeps the same DOM across opens.
+    $('#logViewerLevel, #logViewerSearch').on('input change', _renderLogViewer)
+    $('#logViewerCopy').on('click', async () => {
+      const text = (window.__logBuffer || []).map(e =>
+        `${new Date(e.t).toISOString()} [${e.level}] ${e.msg}`
+      ).join('\n')
+      try {
+        await navigator.clipboard.writeText(text)
+        $('#logViewerCopy').text('Copied').delay(900).queue(function (n) { $(this).text('Copy'); n() })
+      } catch (_) {
+        // Clipboard API blocked (no HTTPS / no gesture chain): fall back to
+        // selecting the body so the user can long-press → copy on mobile.
+        const el = $('#logViewerBody')[0]
+        if (el) {
+          const r = document.createRange(); r.selectNodeContents(el)
+          const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r)
+          alert('Clipboard blocked — text is selected, long-press to copy.')
+        }
+      }
+    })
+    $('#logViewerClear').on('click', () => {
+      window.__logBuffer.length = 0
+      _renderLogViewer()
+    })
+  }
+  _renderLogViewer()
+  if ($('#logViewerAutoRefresh').is(':checked')) {
+    if (_logViewerInterval) clearInterval(_logViewerInterval)
+    _logViewerInterval = setInterval(_renderLogViewer, 1000)
+  }
+}
+window.openLogViewer = openLogViewer
+
+// Populate Built info once the DOM is ready (independent of any user
+// action so the value is visible as soon as Settings is first opened).
+$(function () { try { populateBuildInfo() } catch (_) {} })
+
+// Close the settings dialog after a completed action (save dictionary,
+// save starred lines, etc.) so it doesn't linger on top of the results.
+// The gear button re-opens it on demand.
+function autoHideSettingsPanel() {
+  const $panel = $('#settingsPanel')
+  if ($panel.hasClass('ui-dialog-content') && $panel.dialog('isOpen')) {
+    $panel.dialog('close')
+  }
+}
+window.autoHideSettingsPanel = autoHideSettingsPanel
+
+// Generic read-merge-conditional-put-retry for any file on
+// trexsatya/trexsatya.github.io@gh-pages. The merge callback receives the
+// real-time remote content (or null if the file doesn't exist) and returns
+// the text we want committed. If GitHub rejects the PUT because someone
+// else updated the file between our read and write (409/422 on sha), we
+// re-read and re-merge — so the caller's merge function MUST be safe to
+// re-run with a different `remoteText`.
+async function commitWithMerge({ filePath, branch = 'gh-pages', commitMessage, merge, maxAttempts = 5 }) {
+  const owner = 'trexsatya'
+  const repo = 'trexsatya.github.io'
+  let lastErr
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let remoteContent = null
+    let sha
+    try {
+      const file = await window.GitHubUtils.getFile(owner, repo, filePath, '', branch)
+      remoteContent = file.content
+      sha = file.sha
+    } catch (_) {
+      // File doesn't exist on remote yet — we'll create it.
+    }
+    const merged = await merge(remoteContent)
+    if (merged === null || merged === undefined) {
+      throw new Error(`commitWithMerge: merge returned no content for ${filePath}`)
+    }
+    try {
+      await window.GitHubUtils.putFile(owner, repo, filePath, merged, commitMessage, sha, '', branch)
+      return merged
+    } catch (e) {
+      lastErr = e
+      // GitHub returns 409 (sha mismatch / conflict) or 422 (stale sha)
+      // when another writer beat us to it. Re-read and retry.
+      if (attempt < maxAttempts - 1 && /GitHub API error (409|422)\b/.test(String(e && e.message))) {
+        console.warn(`commitWithMerge: conflict on ${filePath}, retrying (${attempt + 2}/${maxAttempts})`)
+        continue
+      }
+      throw e
+    }
+  }
+  throw lastErr || new Error(`commitWithMerge: exhausted retries on ${filePath}`)
+}
+
+// 3-way merge of categorised vocab files. base = text we loaded, localVocab =
+// in-memory current state, remoteText = latest from api.github.com. Lines
+// added locally are kept; lines removed locally (in base, absent in local)
+// are dropped; remote-only additions are appended; remote-only deletions
+// (in base, absent in remote, unchanged locally) are also dropped.
+function mergeVocabulary(baseText, localVocab, remoteText) {
+  const base = parseVocabularyFile(baseText || '#__empty__\n')
+  const remote = parseVocabularyFile(remoteText || '#__empty__\n')
+  const local = localVocab || {}
+  const merged = {}
+  const allCats = new Set([
+    ...Object.keys(base),
+    ...Object.keys(remote),
+    ...Object.keys(local)
+  ])
+  for (const cat of allCats) {
+    if (cat === '__empty__') continue
+    const baseLines = base[cat] || []
+    const remoteLines = remote[cat] || []
+    const localLines = local[cat] || []
+    const baseSet = new Set(baseLines)
+    const remoteSet = new Set(remoteLines)
+    const localSet = new Set(localLines)
+
+    const out = []
+    const seen = new Set()
+    // Local order first: keep user-added lines and base lines still on remote;
+    // drop base lines the remote has removed (we didn't intentionally re-add them).
+    for (const l of localLines) {
+      const userAdded = !baseSet.has(l)
+      const stillInRemote = remoteSet.has(l)
+      if ((userAdded || stillInRemote) && !seen.has(l)) {
+        seen.add(l); out.push(l)
+      }
+    }
+    // Then append remote-only additions, skipping ones we intentionally removed.
+    for (const l of remoteLines) {
+      if (seen.has(l)) continue
+      const removedLocally = baseSet.has(l) && !localSet.has(l)
+      if (!removedLocally) { seen.add(l); out.push(l) }
+    }
+    merged[cat] = out
+  }
+  return merged
+}
+
+async function commitVocabularyToGithub() {
   const lang = getLangFromUrl()
   const filePath = `db/language/${lang.fullName}/vocabulary.txt`
+  const baselineText = window._vocabularyBaselineText || ''
+  const localVocab = window.vocabulary
 
   try {
-    await window.GitHubUtils.putFileWithContent({
-      owner: 'trexsatya',
-      repo: 'trexsatya.github.io',
+    const finalText = await commitWithMerge({
       filePath,
-      content: vocabText,
       commitMessage: 'vocab: update vocabulary via language tool',
-      branch: 'gh-pages'
+      merge: (remoteText) => {
+        const merged = mergeVocabulary(baselineText, localVocab, remoteText || '')
+        return vocabularyToText(merged)
+      }
     })
+    // Adopt what we just pushed as the new baseline + UI state.
+    window.vocabulary = parseVocabularyFile(finalText)
+    window._vocabularyBaselineText = finalText
     console.log('Vocabulary committed to GitHub')
   } catch (e) {
     console.error('Failed to commit vocabulary to GitHub:', e)
@@ -845,6 +1230,12 @@ export async function searchTextChanged() {
   const w = $searchText1.val()
   window.unprocessedSearchText = null
   await doSearch(this, el);
+  // Optional auto-prefix-search: when the toggle in the settings panel is
+  // on (default), run a vocabulary prefix search on the same term so the
+  // user doesn't have to click the "…" → "Search by prefix" menu item.
+  if ($('#toggleAutoPrefixSearchCheckbox').is(':checked')) {
+    try { searchVocabularyByPrefix() } catch (e) { console.warn('Auto prefix search failed', e) }
+  }
 }
 
 function parseVocabularyFile(text) {
@@ -882,9 +1273,9 @@ window._vocabularyReadyPromise = new Promise(resolve => {
   window._vocabularyReadyResolve = resolve;
 });
 
-// Resolves once loadAllSubtitles has finished — both the parallel SRT fetches
-// and the sequential (jokes/sayings/idioms/etc.) loads. Hard-capped with a
-// timeout so a hung network never freezes searches indefinitely.
+// Resolves once loadAllSubtitles has finished — the parallel SRT fetches
+// plus vocabulary / app-settings load. Hard-capped with a timeout so a
+// hung network never freezes searches indefinitely.
 window._subtitlesReadyPromise = Promise.race([
   new Promise(resolve => { window._subtitlesReadyResolve = resolve; }),
   new Promise(resolve => setTimeout(() => {
@@ -904,6 +1295,183 @@ function _withTimeout(promise, ms, label) {
   ]);
 }
 
+// Apply `fn` to each item with a bounded concurrency window. Used for the
+// initial SRT load so Chrome doesn't choke on hundreds of simultaneous
+// fetches (net::ERR_INSUFFICIENT_RESOURCES). Each item's promise is fully
+// settled (success or failure swallowed by the caller) before the slot is
+// reused, so a single slow / hung fetch can't starve the rest if it has
+// its own per-call timeout — which `_withTimeout` provides upstream.
+// Boot-time SRT progress banner. With the index running into the hundreds,
+// the parallel-but-bounded loader can take 10+ seconds; without UI the user
+// thinks the page is frozen. Banner appears at the top of the viewport,
+// updates as each SRT pair settles, and auto-hides on completion.
+function _srtProgressShow(total) {
+  let $b = $('#srtLoadingBanner')
+  if (!$b.length) {
+    $b = $(`<div id="srtLoadingBanner">
+      <span id="srtLoadingText">Loading subtitles 0 / ${total}…</span>
+      <div class="srt-loading-track"><span id="srtLoadingFill"></span></div>
+    </div>`).appendTo('body')
+  }
+  $('#srtLoadingText').text(`Loading subtitles 0 / ${total}…`)
+  $('#srtLoadingFill').css('width', '0%')
+  $b.show()
+}
+function _srtProgressUpdate(done, total) {
+  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0
+  $('#srtLoadingFill').css('width', pct + '%')
+  $('#srtLoadingText').text(`Loading subtitles ${done} / ${total}… (${pct}%)`)
+}
+function _srtProgressHide() {
+  // Briefly show 100% before hiding so the user gets a confirmation flash.
+  $('#srtLoadingFill').css('width', '100%')
+  $('#srtLoadingText').text('Subtitles loaded')
+  setTimeout(() => $('#srtLoadingBanner').fadeOut(400), 600)
+}
+
+async function _runInBatches(items, fn, concurrency = 8, onProgress) {
+  if (!Array.isArray(items) || !items.length) return []
+  const total = items.length
+  const results = new Array(total)
+  let next = 0
+  let done = 0
+  const worker = async () => {
+    while (true) {
+      const i = next++
+      if (i >= total) return
+      try {
+        results[i] = { status: 'fulfilled', value: await fn(items[i], i) }
+      } catch (e) {
+        results[i] = { status: 'rejected', reason: e }
+      }
+      done++
+      if (typeof onProgress === 'function') {
+        try { onProgress(done, total) } catch (_) {}
+      }
+    }
+  }
+  const lanes = Math.max(1, Math.min(concurrency, total))
+  await Promise.all(Array.from({ length: lanes }, () => worker()))
+  return results
+}
+
+// Retry a fetch up to `tries` times with exponential backoff and a per-attempt
+// timeout. Used for the boot-critical fetches (srts/index.json, vocabulary.txt)
+// because raw.githubusercontent.com occasionally returns 5xx / empty bodies on
+// the very first hit after a deploy — a single failure currently strands the
+// whole app with no data.
+// Force NFC normalization on any string that goes into a GitHub SRT path or
+// gets stored in window.srts / index.json. Without this, captured filenames
+// can drift between NFC ("å" precomposed) and NFD ("a"+◌̊ decomposed) — git
+// treats them as different paths, so the same SRT ends up on remote twice
+// and the local working tree fights with the index. macOS APFS is the usual
+// culprit; YouTube metadata strings come in NFC, native filesystem ops can
+// surface them as NFD on read. Normalizing to NFC at every boundary makes
+// the storage layer monomorphic.
+function _nfc(s) {
+  return String(s == null ? '' : s).normalize('NFC')
+}
+
+async function _fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init = {} } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await _withTimeout(fetch(url, init), timeoutMs, url);
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (i === tries - 1) break;
+      const backoff = 400 * Math.pow(2, i) + Math.random() * 200;  // 0.4s, 0.8s, 1.6s...
+      console.warn('[boot] fetch failed (attempt', i + 1, 'of', tries, ')', url, e && e.message);
+      await new Promise(r => setTimeout(r, backoff));
+    }
+  }
+  throw lastErr;
+}
+
+// In-memory copy of user preferences that are persisted on GitHub at
+// db/language/${lang.fullName}/settings.json. Mutated by the UI inputs in
+// #settingsPanel and pushed via saveAppSettings (debounced). Defaults are
+// applied when the file is missing or malformed.
+window._appSettings = {
+  contextLinesBefore: 2,
+  contextLinesAfter: 2,
+  // Channel names whose subtitles are demoted to fallback — shown ONLY when
+  // a word has no match from a non-blocked channel.
+  blockedChannels: [],
+  // Seconds the recording-playback waits between items.
+  recPlayGapSeconds: 30,
+  // Playlist-style playback modes for recordings.
+  // recPlayShuffle: items are reordered with Fisher-Yates before playback.
+  // recPlayLoop:    'off'      — play through once then stop (default)
+  //                 'one'      — repeat the current item indefinitely
+  //                 'playlist' — repeat the current playlist indefinitely
+  //                 'all'      — cycle through every playlist's items indefinitely
+  recPlayShuffle: false,
+  recPlayLoop: 'off',
+  // Practice flashcard reveal behaviour:
+  //   'flip' — Reveal triggers a card-flip animation that replaces the source
+  //            text with the target translation (click again to flip back) — default
+  //   'both' — back shown alongside the front from the start, no Reveal button
+  //   'hide' — back appears below the front when Reveal is clicked
+  practiceRevealMode: 'flip'
+}
+
+function appSettingsFilePath() {
+  const lang = getLangFromUrl()
+  return `db/language/${lang.fullName}/settings.json`
+}
+
+async function loadAppSettings() {
+  try {
+    const url = `${getResourceUrl()}/settings.json`
+    const r = await _fetchWithRetry(url, { init: { cache: 'no-cache' }, tries: 3 })
+    if (r.ok) {
+      const json = await r.json()
+      if (json && typeof json === 'object') {
+        window._appSettings = { ...window._appSettings, ...json }
+      }
+    }
+  } catch (e) {
+    console.warn('loadAppSettings failed — using defaults', e)
+  }
+  // Reflect into the UI inputs (which may already exist by the time this resolves).
+  $('#contextLinesBefore').val(window._appSettings.contextLinesBefore)
+  $('#contextLinesAfter').val(window._appSettings.contextLinesAfter)
+  $('#recPlayGapSeconds').val(
+    parseInt(window._appSettings.recPlayGapSeconds, 10) || 30
+  )
+  $('#practiceRevealMode').val(window._appSettings.practiceRevealMode || 'flip')
+}
+
+let _saveSettingsTimer = null
+function saveAppSettings() {
+  // Debounce — typing in the number input fires many change events. Wait
+  // for the user to settle before pushing to GitHub.
+  if (_saveSettingsTimer) clearTimeout(_saveSettingsTimer)
+  _saveSettingsTimer = setTimeout(async () => {
+    _saveSettingsTimer = null
+    try {
+      await commitWithMerge({
+        filePath: appSettingsFilePath(),
+        commitMessage: 'settings: update user preferences',
+        merge: (remoteText) => {
+          let remote = {}
+          try { remote = remoteText ? JSON.parse(remoteText) : {} } catch (_) {}
+          if (!remote || typeof remote !== 'object') remote = {}
+          // Local values win on conflict — the user just edited them.
+          const merged = { ...remote, ...window._appSettings }
+          return JSON.stringify(merged, null, 2) + '\n'
+        }
+      })
+    } catch (e) {
+      console.error('Failed to persist app settings to GitHub:', e)
+    }
+  }, 600)
+}
+window.saveAppSettings = saveAppSettings
+
 async function fetchVocabulary() {
   try {
     let res;
@@ -912,11 +1480,19 @@ async function fetchVocabulary() {
       res = await res.json()
       if (res) res = res.text
     } else {
-      res = await fetch(`${getResourceUrl()}/vocabulary.txt`)
+      // Retry — raw.githubusercontent.com sometimes returns transient 5xx
+      // right after a deploy, and a single failed read leaves vocabulary
+      // empty for the whole session.
+      res = await _fetchWithRetry(`${getResourceUrl()}/vocabulary.txt`)
       res = await res.text()
     }
-    if (res)
+    if (res) {
       window.vocabulary = parseVocabularyFile(res)
+      // Baseline of the file as it was when we loaded it. Used by
+      // commitVocabularyToGithub for a 3-way merge against the live remote
+      // so concurrent edits on GitHub aren't clobbered by our push.
+      window._vocabularyBaselineText = res
+    }
   } catch (e) {
     console.warn('Vocabulary fetch failed', e);
   } finally {
@@ -1151,6 +1727,10 @@ window.marginEndSubtitle = 1
 
 window.starredLines = []
 window.allSubtitles = {}
+// Safety default — set early so a flaky boot (failed srts/index.json fetch)
+// doesn't leave us with `undefined` when groupAndArrangeResults runs.
+// fetchCategorisation overwrites this in loadAllSubtitles when it succeeds.
+if (!window.categories) window.categories = {}
 window.srts = []
 window.showDuplicates = false
 window.youtubePlayInterval = null
@@ -1313,7 +1893,7 @@ $('document').ready(e => {
       // for the captured-subtitles review: each row has a Delete / Push
       // action we don't want clobbered, plus the trigger button click
       // itself shouldn't immediately re-close the dialog it just opened.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog").dialog("close");
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog").dialog("close");
     }
   });
 
@@ -1400,10 +1980,15 @@ $('document').ready(e => {
       window.location.hash = link
       window.mediaSelected = {link: link, source: 'link'}
       window.syncSubtitle = true
-      $('#toggleMainControl').click()
-      playNewMedia(link, 'link')
+      // Keep the media panel open: selecting a media only loads it now, and the
+      // user still has to choose an action (Play / Play Starred / Practice
+      // Starred), so collapsing the controls here would hide those buttons.
+      // Load the media + subtitles but don't auto-start.
+      playNewMedia(link, 'link', null, false)
+      $('#playSelectedMediaBtn').show()
     } else {
       removeHash()
+      $('#playSelectedMediaBtn').hide()
     }
   })
 
@@ -1442,6 +2027,39 @@ $('document').ready(e => {
 
   $('#numberOfFindingsToShow').change(e => {
     render(window.searchResult, window.searchText)
+  })
+
+  // Context-lines settings: update the in-memory copy, re-render the
+  // current results so the new window takes effect, and debounce-save to
+  // GitHub. Clamped to a reasonable [0..20] range; bad input falls back
+  // to the existing value.
+  const _onContextChange = () => {
+    const before = parseInt($('#contextLinesBefore').val(), 10)
+    const after = parseInt($('#contextLinesAfter').val(), 10)
+    if (Number.isFinite(before)) window._appSettings.contextLinesBefore = Math.max(0, Math.min(20, before))
+    if (Number.isFinite(after)) window._appSettings.contextLinesAfter = Math.max(0, Math.min(20, after))
+    if (window.searchResult) render(window.searchResult, window.searchText)
+    saveAppSettings()
+  }
+  $('#contextLinesBefore').on('change input', _onContextChange)
+  $('#contextLinesAfter').on('change input', _onContextChange)
+
+  $('#recPlayGapSeconds').on('change input', e => {
+    const v = parseInt($(e.target).val(), 10)
+    if (Number.isFinite(v)) {
+      window._appSettings.recPlayGapSeconds = Math.max(0, Math.min(600, v))
+      saveAppSettings()
+    }
+  })
+
+  $('#practiceRevealMode').on('change', e => {
+    const v = String($(e.target).val() || 'hide')
+    if (['hide', 'both', 'flip'].indexOf(v) >= 0) {
+      window._appSettings.practiceRevealMode = v
+      saveAppSettings()
+      // Re-render the current card so the change is felt immediately.
+      if (window._practiceActive) _renderPracticeCard()
+    }
   })
 
   $('#toggleLangCb').change(e => {
@@ -1551,6 +2169,10 @@ const clearSubtitles = () => {
   $('#starredLines').html('')
   $('#starredLinesSelect').html('')
   window.starredLines = []
+  // New media: reset the "saved" baseline so Save only reappears once the
+  // freshly-loaded favourites are actually changed.
+  window._starredBaseline = ''
+  try { _updateStarredLinesBtns() } catch (_) {}
 }
 
 function getWikiLink(word, uri = null, cls = 'link', index = null) {
@@ -1743,6 +2365,71 @@ function removeStarredLine(index) {
   renderStarredLines()
 }
 
+// Order-independent signature of the current starred set, for diffing
+// against the last-saved baseline.
+function _starredSignature() {
+  return (window.starredLines || []).map(String).sort().join('|')
+}
+
+// "Save Starred Lines" appears ONLY when the current set differs from what's
+// already saved (the baseline captured on load / after a save) — so it
+// doesn't nag when the loaded favourites are untouched. "Play Starred"
+// appears whenever there's at least one starred line.
+function _updateStarredLinesBtns() {
+  const n = (window.starredLines || []).length
+  const changed = _starredSignature() !== (window._starredBaseline || '')
+  $('#saveStarredLinesBtn').toggle(changed)
+  $('#playStarredLinesBtn').toggle(n > 0)
+  $('#practiceStarredLinesBtn').toggle(n > 0)
+}
+window._updateStarredLinesBtns = _updateStarredLinesBtns
+
+// Build a transient queue from the currently-starred lines of the active
+// media. Shared by Play Starred (play mode) and Practice Starred (practice
+// mode) — neither persists anything. Returns null (after alerting) if the
+// media isn't a supported YouTube source or there's nothing playable.
+function _buildStarredQueue() {
+  const subs = window.subtitles || []
+  const media = window.mediaBeingPlayed || window.mediaSelected || {}
+  const id = media.link
+  const source = (media.source || '').toLowerCase()
+  // A live YouTube video is played with source 'link' (and playingYoutubeVideo=true);
+  // captured/recording items use source 'youtube'. Anything else (local files) isn't supported.
+  const isYouTube = window.playingYoutubeVideo || source === 'link' || source === 'youtube'
+  if (!id) { alert('No media loaded to use starred lines from.'); return null }
+  if (!isYouTube) { alert('Starred-line playback currently supports YouTube media only.'); return null }
+  const queue = []
+  ;(window.starredLines || []).forEach(index => {
+    const sub = subs.find(it => it.index === index)
+    if (!sub || typeof sub.ts !== 'number') return
+    queue.push({
+      id, source: 'YouTube',
+      timeStart: Math.floor(sub.ts),
+      timeEnd: Math.ceil(sub.te != null ? sub.te : sub.ts + 4),
+      lineIndex: index,
+      word: '',
+      searchText: 'Starred',
+      enabled: true
+    })
+  })
+  if (!queue.length) { alert('No playable starred lines.'); return null }
+  return queue
+}
+
+// Play the currently-starred lines as an ad-hoc playlist in play mode.
+function playStarredLines() {
+  const queue = _buildStarredQueue()
+  if (queue) playRecording({ queue })
+}
+window.playStarredLines = playStarredLines
+
+// Practice the currently-starred lines as ad-hoc cards in practice mode.
+function practiceStarredLines() {
+  const queue = _buildStarredQueue()
+  if (queue) openPracticeMode({ queue })
+}
+window.practiceStarredLines = practiceStarredLines
+
 function renderStarredLines() {
   $('#starredLines').html('')
   $('#starredLinesSelect').html('')
@@ -1758,6 +2445,7 @@ function renderStarredLines() {
 
     $('#starredLinesSelect').append(new Option(index, index)).show()
   })
+  _updateStarredLinesBtns()
 }
 
 function expandSearchResults() {
@@ -1774,34 +2462,63 @@ const renderSubtitles = () => {
 
     $('#en-sub').html(currentSub.en)
     $('#currentTime').html(currentSub.index)
+    // Show the subtitle's start-end timestamp above the line so the
+    // user can see where in the media they are without checking the player.
+    if (typeof currentSub.ts === 'number' && typeof currentSub.te === 'number') {
+      $('#subtitle-timestamp').text(`${fromSeconds(currentSub.ts)} - ${fromSeconds(currentSub.te)}`)
+    } else {
+      $('#subtitle-timestamp').text('')
+    }
   }
   renderAccordions($('#sv-sub')[0])
   lastSub = currentSub
 }
 
 async function seekToYoutubeTime(t) {
-  console.log("Seek request, target=", fromSeconds(t), "currentTime=", fromSeconds(window.ytPlayer.getCurrentTime()))
-  window.ytPlayer.seekTo(t)
+  if (!window.ytPlayer || typeof window.ytPlayer.seekTo !== 'function') return
+  const target = Number(t) || 0
+  let beforeCt = 0
+  try { beforeCt = window.ytPlayer.getCurrentTime() || 0 } catch (_) {}
+  console.log('Seek request, target=', fromSeconds(target), 'currentTime=', fromSeconds(beforeCt))
   window.seekRequestProcessing = true
-  const leeway = Math.max(6, Math.abs(window.ytPlayer.getCurrentTime() - t))
-  window.ytPlayer.seekTo(t - 4)
+  try { window.ytPlayer.seekTo(target, true) } catch (_) {}
 
-  return new Promise((resolve, reject) => {
-    let interval = null
-    interval = setInterval(() => {
-      let delta = 0
-      if (Math.abs(window.ytPlayer.getCurrentTime() - t) < leeway) {
-        clearInterval(interval)
-        console.log("Seek request completed", fromSeconds(t), "currentTime=", fromSeconds(window.ytPlayer.getCurrentTime()))
-        window.ytPlayer.seekTo(t)
-        resolve()
+  // Bounded poll: every 100ms for up to 3s, looking for the playhead to land
+  // within TOLERANCE of the target. The old code used `Math.max(6, |gap|)`
+  // for tolerance — when the initial gap was huge that made the "close
+  // enough" check pass instantly (apparent success, no actual seek). Also
+  // dropped the "delta nudge" loop that walked the seek target backwards by
+  // 1s per tick; YouTube's own seek is reliable enough without it. On
+  // timeout we RESOLVE (not reject) so callers like playMediaSlice keep
+  // moving — better to proceed slightly off-target than to throw and abort
+  // the whole playback.
+  const TICK_MS = 100
+  const MAX_TICKS = 30        // 3s overall budget
+  const TOLERANCE = 1.5       // seconds — close enough that playback will be visibly at the right spot
+  const REISSUE_AT = 10       // ticks (~1s): if still far, re-issue the seek once
+  return new Promise(resolve => {
+    let ticks = 0
+    const id = setInterval(() => {
+      ticks++
+      let ct = 0
+      try { ct = window.ytPlayer.getCurrentTime() || 0 } catch (_) {}
+      if (Math.abs(ct - target) <= TOLERANCE) {
+        clearInterval(id)
         window.seekRequestProcessing = false
-        window.proxyYoutubeCurrentTime = t
-      } else {
-        window.ytPlayer.seekTo(t - delta)
-        delta += 1
+        window.proxyYoutubeCurrentTime = target
+        console.log('Seek request completed', fromSeconds(target), 'currentTime=', fromSeconds(ct))
+        return resolve()
       }
-    }, 10)
+      if (ticks === REISSUE_AT) {
+        try { window.ytPlayer.seekTo(target, true) } catch (_) {}
+      }
+      if (ticks >= MAX_TICKS) {
+        clearInterval(id)
+        window.seekRequestProcessing = false
+        console.warn('seekToYoutubeTime: timed out without converging — proceeding anyway', { target, currentTime: ct })
+        return resolve()
+      }
+    }, TICK_MS)
   })
 }
 
@@ -1866,6 +2583,23 @@ function fixSectionBox() {
 
 $(document).ready(function () {
   fixSectionBox()
+  // Globally pin every jQuery UI dialog to the top of the viewport with
+  // position:fixed. jQuery UI defaults to position:absolute anchored on the
+  // current scroll position, so a dialog opened after the user scrolled
+  // lands offscreen. Fixed + a small top offset keeps every dialog
+  // consistent without per-call _pinDialogToViewport sprinkles.
+  $(document).on('dialogopen', function (e) {
+    const $wrap = $(e.target).closest('.ui-dialog')
+    if (!$wrap.length) return
+    const w = $wrap.outerWidth() || 0
+    const left = Math.max(10, Math.round((window.innerWidth - w) / 2))
+    $wrap.css({
+      position: 'fixed',
+      top: '20px',
+      left: left + 'px',
+      margin: '0'
+    })
+  })
   $("#vocabularySelect").select2()
   // Default select2 matcher strips diacritics, so typing "a" matches "ä"
   // and vice-versa — wrong for Swedish vocab where ä/ö/å are distinct
@@ -1957,64 +2691,57 @@ function populateAllLinks() {
     getOptgroup(getCategory(item)).append($opt)
   })
 
-  getOptgroup('Uncategorized').append($(`<option>JOKES</option>`).attr('value', 'jokes'))
-  getOptgroup('Uncategorized').append($(`<option>Snippets</option>`).attr('value', 'snippets'))
-  getOptgroup('Uncategorized').append($(`<option>Poems</option>`).attr('value', 'poems'))
-
   Object.values(ogs).forEach(it => $mp3Choice.append(it))
   return srts;
 }
 
 async function loadAllSubtitles() {
   try {
-    let srts = await fetch(`${getResourceUrl()}/srts/index.json`)
-    srts = await srts.json()
+    // Kick the vocabulary fetch off in parallel so a flaky srts/index.json
+    // can't strand it. Used to live inside this try-block, where any earlier
+    // throw skipped over it and left window.vocabulary undefined for the
+    // rest of the session.
+    const vocabReady = fetchVocabulary()
+    const settingsReady = loadAppSettings()
+    let srtsRes = await _fetchWithRetry(`${getResourceUrl()}/srts/index.json`)
+    let srts = await srtsRes.json()
+    // Normalize names to NFC on read so every downstream consumer sees a
+    // single canonical encoding regardless of how the entry was committed.
+    if (Array.isArray(srts)) srts = srts.map(it => it ? { ...it, name: _nfc(it.name) } : it)
     window.srts = srts
 
+    // 404s — the file genuinely isn't there, so never retried.
     const notFound = []
-    // Kick off SRT fetches in parallel; capture the aggregate promise so we
-    // can wait on them at the end without blocking the sequential loads
-    // below (they don't depend on srt content). Each fetch is bounded by a
-    // 15s timeout so a hung connection counts as "not found" instead of
-    // freezing the readiness promise.
-    const srtLoadingDone = Promise.allSettled(srts.map(async (it) => {
+    // Transient failures (rate limiting / 5xx / network blip / timeout) — these
+    // are queued for a background retry after subtitles are declared ready, so
+    // a flaky load doesn't permanently leave gaps in window.allSubtitles.
+    const transientFailures = []
+    // Cap concurrent SRT fetches at SRT_FETCH_CONCURRENCY. Earlier we kicked
+    // off every pair in parallel via srts.map(async …), which on bigger
+    // indexes (hundreds of entries × 2 files each) flooded Chrome with
+    // requests and triggered net::ERR_INSUFFICIENT_RESOURCES. The pool keeps
+    // the in-flight count bounded so the browser doesn't bail out. The host
+    // (raw.githubusercontent.com) is HTTP/2, so this isn't the old 6-per-host
+    // cap — the practical ceiling is the host's rate limiter.
+    const SRT_FETCH_CONCURRENCY = 20
+    _srtProgressShow(srts.length)
+    const srtLoadingDone = _runInBatches(srts, async (it) => {
       try {
         await _withTimeout(getSubtitlesForLink(it['link'], it['source']), 15000, it['link'])
       } catch (e) {
-        notFound.push(it['link'])
+        // A timeout from _withTimeout carries no .kind — treat it as transient.
+        if (e && e.kind === 'notfound') notFound.push(it['link'])
+        else transientFailures.push(it)
       }
-    }))
+    }, SRT_FETCH_CONCURRENCY, (done, total) => _srtProgressUpdate(done, total))
+      .finally(() => _srtProgressHide())
 
     window.categories = await fetchCategorisation()
 
-    await loadJokes()
-    loadAsSubtitles(window.jokes, 'jokes')
-
-    await loadBookExtracts()
-    loadAsSubtitles(window.bookExtracts, 'book-extracts')
-
-    await loadSnippets()
-    loadAsSubtitles(window.snippets, 'snippets')
-
-    await loadSayings()
-    loadAsSubtitles(window.sayings, 'sayings')
-
-    await loadMetaphors()
-    loadAsSubtitles(window.metaphors, 'metaphors')
-
-    await loadIdioms()
-    loadAsSubtitles(window.idioms, 'idioms')
-
-    await loadPoems()
-    loadAsSubtitles(window.poems, 'poems')
-
     populateAllLinks();
 
-    await fetchVocabulary()
-
-    window.vocabulary['Sayings'] = window.sayings.map(it => it.name)
-    window.vocabulary['Metaphors'] = window.metaphors.map(it => it.name)
-    window.vocabulary['Idioms'] = window.idioms.map(it => it.name)
+    await vocabReady
+    await settingsReady
 
     populateVocabularyHeadings($('#vocabularySelect'))
 
@@ -2024,6 +2751,12 @@ async function loadAllSubtitles() {
     if (notFound.length > 0) {
       console.log("Not found", notFound.join('\n'))
     }
+    if (transientFailures.length > 0) {
+      console.warn(`[srt] ${transientFailures.length} subtitle(s) failed transiently — retrying in background`)
+      // Intentionally not awaited: search becomes available immediately with
+      // whatever loaded, and the retry tops up window.allSubtitles behind it.
+      _retrySrtsInBackground(transientFailures)
+    }
   } catch (e) {
     console.warn('loadAllSubtitles error', e);
   } finally {
@@ -2032,37 +2765,59 @@ async function loadAllSubtitles() {
   }
 }
 
-const specialLinks = ['jokes', 'idioms', 'sayings', 'metaphors', 'book-extracts', 'snippets', 'poems']
-
-function loadAsSubtitles(data, tag) {
-  try {
-    data.forEach((item, i) => {
-      const sv = `1\n00:00:00.001 --> 00:03:00.000\n${item.text || item}`
-      const en = '1\n00:00:00.001 --> 00:03:00.000\n'
-      const link = `${tag}-${i}`
-      window.allSubtitles[link] = {sv, en, source: tag, fileName: link}
-    })
-  } catch (e) {
-    console.error(e)
-  }
-  if (!specialLinks.includes(tag)) {
+// Background top-up for SRTs that failed transiently during the initial bulk
+// load (rate limiting, 5xx, network blips, timeouts). Genuine 404s are never
+// passed here. Runs *after* subtitles are declared ready, so it never blocks
+// search. Each round uses a gentler concurrency window and a growing delay to
+// stay under raw.githubusercontent.com's rate limiter; anything that recovers
+// lands in window.allSubtitles and becomes searchable immediately. Re-entrancy
+// is guarded so overlapping invocations don't double-fetch.
+async function _retrySrtsInBackground(items, maxRounds = 4) {
+  if (window._srtRetryRunning) {
+    // Fold new items into the in-flight retry set and let it pick them up.
+    window._srtRetryPending = (window._srtRetryPending || []).concat(items || [])
     return
   }
+  window._srtRetryRunning = true
   try {
-    let sv = ''
-    let n = 0
-    data.forEach((item, i) => {
-      sv += `${n + 1}\n${fromSeconds(n * 60)},000 --> ${fromSeconds(n * 60 + 50)},000\n${item.text || item}\n\n`
-      n += 1
-    })
-    window.allSubtitles[tag] = {
-      sv,
-      en: '1\n00:00:00.000 --> 00:00:50.000\n',
-      source: tag,
-      fileName: tag
+    let pending = (items || []).slice()
+    for (let round = 1; round <= maxRounds; round++) {
+      // Absorb anything queued by a concurrent caller.
+      if (window._srtRetryPending && window._srtRetryPending.length) {
+        pending = pending.concat(window._srtRetryPending)
+        window._srtRetryPending = []
+      }
+      if (!pending.length) break
+      // Backoff before each round, growing: 2s, 4s, 8s, 16s.
+      await new Promise(r => setTimeout(r, 2000 * Math.pow(2, round - 1)))
+
+      const stillFailing = []
+      await _runInBatches(pending, async (it) => {
+        // Skip ones a prior round (or a normal search) already recovered.
+        if (window.allSubtitles[it['link']]) return
+        try {
+          // A touch more patience per attempt than the initial 15s.
+          await _withTimeout(getSubtitlesForLink(it['link'], it['source']), 20000, it['link'])
+        } catch (e) {
+          // A 404 surfacing on retry means the file truly isn't there — drop it.
+          if (!(e && e.kind === 'notfound')) stillFailing.push(it)
+        }
+      }, 4 /* gentle concurrency to avoid re-tripping rate limits */)
+
+      const recovered = pending.length - stillFailing.length
+      if (recovered > 0) {
+        console.log(`[srt] background retry round ${round}: recovered ${recovered}, ${stillFailing.length} still pending`)
+      }
+      pending = stillFailing
     }
-  } catch (e) {
-    console.error(e)
+    if (pending.length) {
+      console.warn(`[srt] background retry gave up on ${pending.length} subtitle(s) after ${maxRounds} rounds:`,
+        pending.map(it => it.link).join(', '))
+    } else if (items && items.length) {
+      console.log('[srt] background retry: all transient failures recovered')
+    }
+  } finally {
+    window._srtRetryRunning = false
   }
 }
 
@@ -2142,6 +2897,34 @@ function toStringSubtitle(sub) {
   return `${sub.number}\n${sub.ts_o} --> ${sub.te_o}\n${sub.sv.substring(0, 30)}...`
 }
 
+// Tag a failed SRT fetch so the loader can tell a genuine miss from a
+// recoverable one:
+//   'notfound'  — HTTP 404: the file really isn't there, never retry.
+//   'transient' — rate limiting (429), 5xx, network blip, or timeout: retry.
+function _srtError(kind, message) {
+  const e = new Error(message || kind)
+  e.kind = kind
+  e.isSrtError = true
+  return e
+}
+
+// Fetch one SRT file, checking the HTTP status so a 404/429/5xx body never
+// gets silently stored as subtitle text (the old code did `await res.text()`
+// unconditionally, persisting "404: Not Found" as content). Throws a
+// classified _srtError on failure.
+async function _fetchSrtFile(url) {
+  let res
+  try {
+    res = await fetch(url)
+  } catch (e) {
+    // Network error / DNS / connection reset — all worth retrying.
+    throw _srtError('transient', 'network: ' + (e && e.message))
+  }
+  if (res.status === 404) throw _srtError('notfound', 'HTTP 404 ' + url)
+  if (!res.ok) throw _srtError('transient', 'HTTP ' + res.status + ' ' + url)
+  return res.text()
+}
+
 async function getSubtitlesForLink(link, source) {
   if (window.allSubtitles[link]) {
     return window.allSubtitles[link]
@@ -2149,13 +2932,11 @@ async function getSubtitlesForLink(link, source) {
   const srt = window.srts.find(it => it.link === link);
   if (!srt) return
 
-  const name = srt.name
+  const name = _nfc(srt.name)
   const svName = name + getTargetLangSrtSuffix()
   const enName = name + ".en.srt"
-  let sv = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(svName)}`)
-  sv = await sv.text()
-  let en = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(enName)}`)
-  en = await en.text()
+  const sv = await _fetchSrtFile(`${getResourceUrl()}/srts/${encodeURIComponent(svName)}`)
+  const en = await _fetchSrtFile(`${getResourceUrl()}/srts/${encodeURIComponent(enName)}`)
 
   window.allSubtitles[link] = {sv, en, source, fileName: name}
   return window.allSubtitles[link]
@@ -2335,7 +3116,7 @@ function hideMediaContainer() {
   updateToggleButtonView('mediaContainer')
 }
 
-async function playNewMedia(link, source, mediaFile) {
+async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   clearSubtitles()
   stopMedia(source)
 
@@ -2348,13 +3129,14 @@ async function playNewMedia(link, source, mediaFile) {
       showMediaRelatedContainer()
       loadYoutubeVideo(link)
       window.playingYoutubeVideo = true;
+      if (!autoPlay) _suppressYoutubeAutoplay()
     } else if (source === 'local') {
       hideMediaContainer()
       $('#localVideoContainer').show()
       window.playingYoutubeVideo = false;
       if (mediaFile.name.endsWith(".mp3") || mediaFile.name.endsWith(".wav")) {
         audioPlayer.setSrc(URL.createObjectURL(mediaFile))
-        audioPlayer.play()
+        if (autoPlay) audioPlayer.play()
         window.playingAudio = true;
         window.playingVideo = false;
         hidePlayer(window.videoPlayer)
@@ -2363,7 +3145,7 @@ async function playNewMedia(link, source, mediaFile) {
         videoPlayer.setSrc(URL.createObjectURL(mediaFile))
         window.playingAudio = false;
         window.playingVideo = true;
-        videoPlayer.play()
+        if (autoPlay) videoPlayer.play()
         hidePlayer(window.audioPlayer)
         showVideoPlayer()
       }
@@ -2373,15 +3155,10 @@ async function playNewMedia(link, source, mediaFile) {
   }
 
   hideResultContainer();
-  if ($('#onlySubsCheckbox').is(':checked') || specialLinks.includes(link)) {
+  if ($('#onlySubsCheckbox').is(':checked')) {
     showOnlySubtitle();
-    if (specialLinks.includes(link)) {
-      $('#sv-sub-mirror').hide()
-      $('#toggleEnSubBtn').hide()
-    } else {
-      $('#sv-sub-mirror').show()
-      $('#toggleEnSubBtn').show()
-    }
+    $('#sv-sub-mirror').show()
+    $('#toggleEnSubBtn').show()
   } else {
     _playMedia();
     showMediaRelatedContainer()
@@ -2389,7 +3166,16 @@ async function playNewMedia(link, source, mediaFile) {
     $('#toggleEnSubBtn').show()
   }
 
-  const {sv, en} = await getSubtitlesForLink(link, source)
+  // getSubtitlesForLink now throws a classified error on a failed fetch
+  // (missing file / rate-limited / network). Degrade gracefully so playback
+  // isn't aborted by an unavailable subtitle; a transient miss will be topped
+  // up by the background retry and the next selection will pick it up.
+  let sv = '', en = ''
+  try {
+    ({sv = '', en = ''} = (await getSubtitlesForLink(link, source)) || {})
+  } catch (e) {
+    console.warn('subtitles unavailable for', link, e && e.message)
+  }
   loadSubtitlesForLink(sv, en);
 
   $('#currentMedia').html(`${link}, ${source}`)
@@ -2436,6 +3222,10 @@ async function loadStarredLines(link, source) {
   const d = res.find(it => it.link === link)
   console.log(d)
   d && d.lines && d.lines.forEach(it => addStarredLine(it))
+  // Snapshot the loaded set as the saved baseline — Save stays hidden until
+  // the user adds/removes a star.
+  window._starredBaseline = _starredSignature()
+  try { _updateStarredLinesBtns() } catch (_) {}
 }
 
 function waitUntil(condition) {
@@ -2608,10 +3398,19 @@ function highlightedText(text, populateWikiLinks = false) {
 
   try {
     let i;
-    const match = text.match(new RegExp(window.searchText, "i"))
+    // Use the same whitespace-relaxed regex as the search itself so a
+    // multi-word query like "x y" highlights the whole phrase rather than
+    // just the first word, even when the subtitle has extra spaces.
+    const match = text.match(new RegExp(_relaxSpaces(window.searchText), "i"))
     const index = match.index
+    // The original code walked right from `index + 1`, which stopped at the
+    // first space inside the match — for "x y" it landed on the space
+    // between "x" and "y" and highlighted just "x". Walk from `matchEnd`
+    // (the position immediately after the match) instead so the right-hand
+    // word boundary sits past the entire matched run.
+    const matchEnd = index + match[0].length
 
-    let x = -1, y = -1;
+    let x = -1, y = text.length;
     for (i = index - 1; i >= 0; i--) {
       const c = text[i]
       if (c === " " || c === "\n") {
@@ -2620,8 +3419,7 @@ function highlightedText(text, populateWikiLinks = false) {
       }
     }
 
-
-    for (i = index + 1; i < text.length; i++) {
+    for (i = matchEnd; i < text.length; i++) {
       const c = text[i]
       if (c === " " || c === "\n") {
         y = i;
@@ -2629,9 +3427,12 @@ function highlightedText(text, populateWikiLinks = false) {
       }
     }
 
-    const firstPart = text.substring(0, x);
+    // x stays at -1 when the match is anchored at text start. Clamp so
+    // firstPart / highlightedPart don't go negative on substring().
+    const xClamped = x < 0 ? 0 : x;
+    const firstPart = text.substring(0, xClamped);
     const secondPart = text.substring(y);
-    const highlightedPart = text.substring(x, y);
+    const highlightedPart = text.substring(xClamped, y);
 
     hText = (getWikiLinks(firstPart) + ' ') + "<span class='highlight'>" + getWikiLinks(highlightedPart) + "</span>" + (' ' + getWikiLinks(secondPart));
   } catch (e) {
@@ -2718,6 +3519,14 @@ function withWordBoundaries(pattern) {
   return `(?<!\\w)(?:${pattern})(?!\\w)`
 }
 
+// Treat any run of literal spaces in a user-supplied pattern as `\s+`, so
+// the search is whitespace-insensitive — "a b", "a  b" and "a\nb" all
+// match the user's "a b" query. Applied to every RegExp we build from
+// search input downstream (file filter, per-word, phrase, whole-text).
+function _relaxSpaces(pattern) {
+  return String(pattern || '').replace(/ +/g, '\\s+')
+}
+
 async function getMatchingWords(list, search, token) {
   const startTime = new Date().getTime()
   let wordToItemsMap = {}
@@ -2728,7 +3537,7 @@ async function getMatchingWords(list, search, token) {
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
   const ITEM_CHUNK = 25
 
-  const transformedRe = new RegExp(transformedSearchText, "i")
+  const transformedRe = new RegExp(_relaxSpaces(transformedSearchText), "i")
   // Per-word matching test: alternatives like " ber ", " be ", " bad " (the
   // user's convention for forcing word-boundary semantics) can never match a
   // bare segmented word like "ber" because the literal spaces have to be in
@@ -2755,7 +3564,7 @@ async function getMatchingWords(list, search, token) {
     .split(SEPARATOR_PIPE)
     .map(s => s.trim().toLowerCase())
     .filter(s => s.length > 1 && s.indexOf(' ') > 0)
-  const phraseRes = phraseTerms.map(t => ({ term: t, re: new RegExp(withWordBoundaries(t), "i") }))
+  const phraseRes = phraseTerms.map(t => ({ term: t, re: new RegExp(_relaxSpaces(withWordBoundaries(t)), "i") }))
 
   for (let start = 0; start < list.length; start += ITEM_CHUNK) {
     if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
@@ -2776,7 +3585,7 @@ async function getMatchingWords(list, search, token) {
             })
         // Whole search text as a word
         const word = searchText.toLowerCase().trim()
-        if (word.indexOf(" ") > 0 && new RegExp(withWordBoundaries(word), "i").test(line.text)) {
+        if (word.indexOf(" ") > 0 && new RegExp(_relaxSpaces(withWordBoundaries(word)), "i").test(line.text)) {
           wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
         }
         // Per-phrase terms (so each expansion of "<*göra susen" gets its
@@ -2786,6 +3595,28 @@ async function getMatchingWords(list, search, token) {
           if (re.test(line.text)) {
             wordToItemsMap[term] = computeIfAbsent(wordToItemsMap, term, it => []).concat(new MatchResult(term, line, item.url, item.source))
           }
+        }
+      }
+      // Cross-line phrase match: catch phrases like "a b" where "a" sits
+      // at the end of line N and "b" at the start of line N+1. The regex
+      // already treats spaces as \s+ (via _relaxSpaces), so joining with a
+      // newline preserves intent. Only register when neither line alone
+      // matched, so we don't double-count the easy single-line case.
+      const wholeWord = searchText.toLowerCase().trim()
+      const wholeRe = wholeWord.indexOf(" ") > 0
+          ? new RegExp(_relaxSpaces(withWordBoundaries(wholeWord)), "i")
+          : null
+      for (let i = 0; i + 1 < lines.length; i++) {
+        const a = lines[i], b = lines[i + 1]
+        if (!a || !b || !a.text || !b.text) continue
+        const combined = a.text + '\n' + b.text
+        for (const { term, re } of phraseRes) {
+          if (re.test(combined) && !re.test(a.text) && !re.test(b.text)) {
+            wordToItemsMap[term] = computeIfAbsent(wordToItemsMap, term, it => []).concat(new MatchResult(term, a, item.url, item.source))
+          }
+        }
+        if (wholeRe && wholeRe.test(combined) && !wholeRe.test(a.text) && !wholeRe.test(b.text)) {
+          wordToItemsMap[wholeWord] = computeIfAbsent(wordToItemsMap, wholeWord, it => []).concat(new MatchResult(wholeWord, a, item.url, item.source))
         }
       }
     }
@@ -2801,7 +3632,7 @@ async function getMatchingWords(list, search, token) {
     searchText = searchText.trim()
   }
 
-  const searchRe = new RegExp(withWordBoundaries(searchText), "i")
+  const searchRe = new RegExp(_relaxSpaces(withWordBoundaries(searchText)), "i")
   for (let start = 0; start < list.length; start += ITEM_CHUNK) {
     if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
     const end = Math.min(start + ITEM_CHUNK, list.length)
@@ -2947,7 +3778,12 @@ const playClickedMedia = (url, times, source) => {
 
 function getInfoAboutMedia(mediaId, source, time_start) {
   const fileName = window.allSubtitles[mediaId].fileName
-  let url = `https://www.youtube.com/watch?v=${mediaId}&t=${time_start}&autoplay=1`
+  // Mobile browsers force-mute autoplay when a tab is opened via
+  // target="_blank" — the new tab has no user gesture so YouTube's
+  // autoplay starts silently. Desktop browsers are lenient enough that
+  // `&autoplay=1` plays with sound, so keep it there.
+  const autoplay = isDesktop() ? '&autoplay=1' : ''
+  let url = `https://www.youtube.com/watch?v=${mediaId}&t=${time_start}${autoplay}`
   if (source?.toLowerCase() == 'svt') {
     url = `https://www.svtplay.se/video/${mediaId}?position=${time_start}`
   }
@@ -2980,10 +3816,342 @@ function collapseSubLines(evt) {
   $(evt.target).parents('.lines-cntnr').find('.sub-lines-cntnr').slideToggle('slow')
 }
 
+// Inline SVG/glyph for the media source. Falls back to the literal name
+// for unknown sources so we never silently drop a source label.
+function _sourceBadgeHtml(source) {
+  const s = (source || '').toLowerCase()
+  if (s === 'youtube') {
+    return `<svg class="src-ico src-ico-yt" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="14" aria-label="YouTube" fill="#FF0000">
+      <path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1 31 31 0 0 0 .5-5.8 31 31 0 0 0-.5-5.8z"/>
+      <path d="M9.6 15.6 15.8 12 9.6 8.4z" fill="#fff"/>
+    </svg>`
+  }
+  if (s === 'svt') {
+    return `<span class="src-ico src-ico-svt" aria-label="SVT">SVT</span>`
+  }
+  return _.escape(source || '')
+}
+
+// Path on gh-pages for a given (link, langCode) — `code` is 'en' or the
+// current target language (sv / es). Falls back to allSubtitles[link].fileName
+// if the srts index lookup misses (e.g. local-loaded files).
+function _srtPathFor(link, langCode) {
+  const lang = getLangFromUrl()
+  const srt = window.srts && window.srts.find(it => it.link === link)
+  const baseName = _nfc((srt && srt.name) || (window.allSubtitles[link] && window.allSubtitles[link].fileName))
+  if (!baseName) return null
+  const suffix = langCode === 'en' ? '.en.srt' : ('.' + lang.code + '.srt')
+  return `db/language/${lang.fullName}/srts/${baseName}${suffix}`
+}
+
+// Replace the text body of the SRT block whose first line is `lineIndex`.
+// Block surgery instead of parse/rebuild so timestamp formatting (comma vs
+// dot, trailing newlines) survives the round-trip verbatim. Returns null
+// if the index isn't found so the caller can surface a clear error.
+function _replaceSrtLine(rawSrt, lineIndex, newText) {
+  if (!rawSrt) return null
+  const target = String(lineIndex).trim()
+  const blocks = rawSrt.split(/\r?\n\r?\n/)
+  for (let i = 0; i < blocks.length; i++) {
+    const lines = blocks[i].split(/\r?\n/)
+    if (lines[0] && lines[0].trim() === target && lines[1] && /-->/.test(lines[1])) {
+      const cleaned = String(newText || '').replace(/\r?\n+$/, '')
+      blocks[i] = [lines[0], lines[1], cleaned].join('\n')
+      return blocks.join('\n\n')
+    }
+  }
+  return null
+}
+
+// Persist an edited subtitle line back to GitHub and refresh in-memory caches
+// so the UI updates without a re-search. Concurrent-safe: commitWithMerge
+// re-runs `merge` on a 409/422, so the line-edit is re-applied against the
+// latest remote text.
+async function _saveSubtitleEdit(link, langCode, lineIndex, newText) {
+  const filePath = _srtPathFor(link, langCode)
+  if (!filePath) throw new Error('No SRT path for ' + link)
+  const key = langCode === 'en' ? 'en' : 'sv'
+  const stored = window.allSubtitles[link]
+  if (!stored || !stored[key]) throw new Error('SRT not loaded for ' + link)
+
+  const updated = _replaceSrtLine(stored[key], lineIndex, newText)
+  if (!updated) throw new Error(`Line ${lineIndex} not found in ${filePath}`)
+
+  // Optimistic local update — render immediately and let the network catch up.
+  stored[key] = updated
+  if (key === 'sv' && stored._parsedSv) stored._parsedSv = srtToJson(updated, 'sv')
+  if (key === 'en' && stored._parsedEn) stored._parsedEn = srtToJson(updated, 'en')
+  if (window.searchResult) {
+    const hit = window.searchResult.find(it => it && it.url === link)
+    if (hit) {
+      const sk = key === 'sv' ? 'sv_subs' : 'en_subs'
+      if (hit[sk]) hit[sk].data = srtToJson(updated, key)
+    }
+  }
+
+  // Queue this edit instead of pushing a per-line commit. A debounced
+  // background flush (or the manual Sync-Edits button in Settings) groups
+  // multiple edits across files into a single commit via commitMultipleFiles.
+  _queueSubtitleEdit(filePath, lineIndex, newText)
+  return true
+}
+
+// ── Batched inline SRT edits ─────────────────────────────────────────────
+// Each save buffers a (filePath, lineIndex, newText) entry to localStorage.
+// A debounced timer (or an explicit `Sync Edits` button) flushes the whole
+// buffer in one commit using GitHubUtils.commitMultipleFiles. This stops
+// per-line edits from racking up dozens of commits when the user fixes
+// translations in bulk.
+const SRT_EDITS_KEY = 'cupitor:pendingSrtEdits'
+const SRT_EDITS_FLUSH_MS = 10000  // 10s after the last edit
+let _srtEditsFlushTimer = null
+
+function _loadPendingSrtEdits() {
+  try {
+    const raw = localStorage.getItem(SRT_EDITS_KEY)
+    if (!raw) return {}
+    const obj = JSON.parse(raw)
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
+  } catch (_) { return {} }
+}
+function _savePendingSrtEdits(edits) {
+  try {
+    if (!edits || !Object.keys(edits).length) localStorage.removeItem(SRT_EDITS_KEY)
+    else localStorage.setItem(SRT_EDITS_KEY, JSON.stringify(edits))
+  } catch (_) {}
+}
+function _pendingSrtEditCount(edits) {
+  edits = edits || _loadPendingSrtEdits()
+  return Object.values(edits).reduce((n, perFile) => n + Object.keys(perFile || {}).length, 0)
+}
+function _queueSubtitleEdit(filePath, lineIndex, newText) {
+  const edits = _loadPendingSrtEdits()
+  if (!edits[filePath]) edits[filePath] = {}
+  edits[filePath][String(lineIndex)] = { newText, ts: Date.now() }
+  _savePendingSrtEdits(edits)
+  _updateSrtEditsUi()
+  // Auto-flush was previously firing 10s after the last edit. Now that the
+  // Sync button opens a Review dialog instead of pushing directly, we wait
+  // for explicit user action — no silent pushes.
+}
+async function flushPendingSrtEdits() {
+  const edits = _loadPendingSrtEdits()
+  const paths = Object.keys(edits)
+  if (!paths.length) return { committed: false, reason: 'empty' }
+  const totalLines = _pendingSrtEditCount(edits)
+  const files = paths.map(filePath => ({
+    path: filePath,
+    getContent: (current) => {
+      // No remote file → skip (don't create a fresh SRT from edits alone).
+      if (!current) {
+        console.warn(`flushPendingSrtEdits: ${filePath} not on remote; skipping`)
+        return null
+      }
+      let updated = current
+      Object.entries(edits[filePath]).forEach(([lineIndex, entry]) => {
+        const next = _replaceSrtLine(updated, lineIndex, entry.newText)
+        if (next) updated = next
+        else console.warn(`flushPendingSrtEdits: line ${lineIndex} not in ${filePath}; edit dropped`)
+      })
+      return updated
+    }
+  }))
+  const msg = `srt: batch edit — ${paths.length} file${paths.length === 1 ? '' : 's'}, ${totalLines} line${totalLines === 1 ? '' : 's'}`
+  const result = await window.GitHubUtils.commitMultipleFiles({
+    owner: 'trexsatya',
+    repo: 'trexsatya.github.io',
+    branch: 'gh-pages',
+    commitMessage: msg,
+    files
+  })
+  // Clear the buffer if the commit landed OR if nothing actually changed
+  // (every queued edit already matched remote — buffer is stale, drop it).
+  if (!result || result.committed !== false || result.reason === 'no-changes') {
+    _savePendingSrtEdits({})
+  }
+  _updateSrtEditsUi()
+  return result
+}
+window.flushPendingSrtEdits = flushPendingSrtEdits
+
+function _updateSrtEditsUi() {
+  const n = _pendingSrtEditCount()
+  const $btn = $('#syncSrtEditsBtn')
+  if (!$btn.length) return
+  $btn.attr('data-count', n)
+  $btn.text(n ? `Sync edits (${n})` : 'Sync edits')
+  $btn.toggleClass('has-pending', n > 0)
+}
+window._updateSrtEditsUi = _updateSrtEditsUi
+
+// Wire the Settings "Sync edits" button (rendered in language.html) and
+// surface the initial pending count once the DOM is ready.
+$(function () {
+  // The Sync button now opens a Review dialog instead of pushing straight to
+  // GitHub. The user picks which edits to keep, tweaks any text they want,
+  // then explicitly pushes — far less scary for bulk fixes.
+  $(document).on('click', '#syncSrtEditsBtn', function () {
+    const n = _pendingSrtEditCount()
+    if (!n) { alert('No pending subtitle edits to push.'); return }
+    openSrtEditsReviewDialog()
+  })
+  // In-dialog actions: select all / none, discard checked, push checked.
+  $(document).on('click', '#srtEditsSelectAll',  function () { $('#srtEditsReviewList .srt-review-keep').prop('checked', true) })
+  $(document).on('click', '#srtEditsSelectNone', function () { $('#srtEditsReviewList .srt-review-keep').prop('checked', false) })
+  $(document).on('click', '#srtEditsDiscardSelected', _onSrtEditsDiscardSelected)
+  $(document).on('click', '#srtEditsPushSelected',    _onSrtEditsPushSelected)
+  try { _updateSrtEditsUi() } catch (_) {}
+})
+
+// Build a per-(file,line) row inside the review list. The textarea is
+// editable so the user can refine the text right before pushing.
+function _renderSrtEditsReviewList() {
+  const $list = $('#srtEditsReviewList').empty()
+  const edits = _loadPendingSrtEdits()
+  const paths = Object.keys(edits).sort()
+  if (!paths.length) {
+    $list.append('<div class="srt-review-empty">No pending edits.</div>')
+    return
+  }
+  paths.forEach(filePath => {
+    const lines = edits[filePath] || {}
+    const lineKeys = Object.keys(lines).sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+    if (!lineKeys.length) return
+    const $group = $(`<div class="srt-review-file"></div>`)
+    // Trim the long `db/language/<Lang>/srts/` prefix to keep the header
+    // readable; full path lives in the title attribute for hover.
+    const shortName = filePath.replace(/^db\/language\/[^/]+\/srts\//, '')
+    $group.append($('<div class="srt-review-file-head"></div>')
+      .attr('title', filePath)
+      .text(`${shortName} — ${lineKeys.length} edit${lineKeys.length === 1 ? '' : 's'}`))
+    lineKeys.forEach(li => {
+      const entry = lines[li] || {}
+      const ageMs = Math.max(0, Date.now() - (entry.ts || 0))
+      const ageMin = Math.round(ageMs / 60000)
+      const $row = $(`<div class="srt-review-row" data-file="${escapeHtml(filePath)}" data-line="${escapeHtml(li)}">
+          <label class="srt-review-keep-wrap">
+            <input type="checkbox" class="srt-review-keep" checked>
+            <span class="srt-review-meta">#${escapeHtml(li)} <span class="srt-review-age">${ageMin < 1 ? 'just now' : ageMin + 'm ago'}</span></span>
+          </label>
+          <textarea class="srt-review-text" rows="2"></textarea>
+        </div>`)
+      $row.find('.srt-review-text').val(String(entry.newText || ''))
+      $group.append($row)
+    })
+    $list.append($group)
+  })
+}
+
+// Collect (filePath, lineIndex, newText) tuples from rows whose checkbox is
+// in `state`. Reading values from the textareas means the user's in-dialog
+// tweaks come along for the ride.
+function _collectSrtEditsByCheckbox(checked) {
+  const out = []
+  $('#srtEditsReviewList .srt-review-row').each(function () {
+    const $row = $(this)
+    if ($row.find('.srt-review-keep').is(':checked') !== !!checked) return
+    out.push({
+      filePath: $row.attr('data-file'),
+      lineIndex: $row.attr('data-line'),
+      newText: String($row.find('.srt-review-text').val() || '')
+    })
+  })
+  return out
+}
+
+function openSrtEditsReviewDialog() {
+  _renderSrtEditsReviewList()
+  const $dlg = $('#srtEditsReviewDialog')
+  const opts = {
+    width: Math.min(680, Math.round(window.innerWidth * 0.95)),
+    height: Math.min(640, Math.round(window.innerHeight * 0.85)),
+    modal: false,
+    open: function () {
+      // Keep focus off the first textarea so the soft keyboard doesn't pop
+      // up immediately — mirrors the rare-words dialog fix.
+      $(this).closest('.ui-dialog').attr('tabindex', -1).trigger('focus')
+    }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) {
+    $dlg.dialog('option', opts).dialog('open')
+  } else {
+    $dlg.dialog(opts)
+  }
+}
+window.openSrtEditsReviewDialog = openSrtEditsReviewDialog
+
+async function _onSrtEditsPushSelected() {
+  const keep = _collectSrtEditsByCheckbox(true)
+  if (!keep.length) { alert('Select at least one edit to push.'); return }
+  // Persist the user's in-dialog text tweaks back into the buffer first —
+  // discard everything that's unchecked, then flush.
+  const next = {}
+  keep.forEach(({ filePath, lineIndex, newText }) => {
+    if (!next[filePath]) next[filePath] = {}
+    next[filePath][String(lineIndex)] = { newText, ts: Date.now() }
+  })
+  _savePendingSrtEdits(next)
+  _updateSrtEditsUi()
+  const $btn = $('#srtEditsPushSelected').prop('disabled', true).text('Pushing…')
+  try {
+    const r = await flushPendingSrtEdits()
+    if (r && r.committed === false) {
+      alert('No commit produced: ' + (r.reason || 'remote already matches'))
+    }
+    try { $('#srtEditsReviewDialog').dialog('close') } catch (_) {}
+  } catch (e) {
+    alert('Push failed: ' + (e && e.message || e))
+  } finally {
+    $btn.prop('disabled', false).text('Push selected')
+    _updateSrtEditsUi()
+  }
+}
+
+function _onSrtEditsDiscardSelected() {
+  const drop = _collectSrtEditsByCheckbox(true)
+  if (!drop.length) { alert('Select at least one edit to discard.'); return }
+  if (!confirm(`Discard ${drop.length} edit${drop.length === 1 ? '' : 's'}? This can't be undone.`)) return
+  const buf = _loadPendingSrtEdits()
+  drop.forEach(({ filePath, lineIndex }) => {
+    if (buf[filePath]) {
+      delete buf[filePath][String(lineIndex)]
+      if (!Object.keys(buf[filePath]).length) delete buf[filePath]
+    }
+  })
+  _savePendingSrtEdits(buf)
+  _updateSrtEditsUi()
+  _renderSrtEditsReviewList()
+  if (!_pendingSrtEditCount()) {
+    try { $('#srtEditsReviewDialog').dialog('close') } catch (_) {}
+  }
+}
+
+// Get the current plain text for a given (link, langCode, lineIndex) by
+// parsing the raw SRT we have in memory. Used to seed the textarea so
+// the editor starts with the actual stored text (not the highlight-marked
+// HTML version).
+function _getRawSubtitleLineText(link, langCode, lineIndex) {
+  const key = langCode === 'en' ? 'en' : 'sv'
+  const stored = window.allSubtitles[link]
+  if (!stored || !stored[key]) return ''
+  const target = String(lineIndex).trim()
+  const blocks = stored[key].split(/\r?\n\r?\n/)
+  for (const block of blocks) {
+    const lines = block.split(/\r?\n/)
+    if (lines[0] && lines[0].trim() === target && lines[1] && /-->/.test(lines[1])) {
+      return lines.slice(2).join('\n').trim()
+    }
+  }
+  return ''
+}
+
 function renderLines(id, url) {
   const $container = $('#' + id).addClass('lines-cntnr');
   let fromLineIndex = parseInt($container.data('fromIndex'))
   let toLineIndex = parseInt($container.data('toIndex'))
+  // Set by populateSRTFindings; survives +/- adjustments. May be NaN for
+  // legacy paths that don't supply it.
+  const matchLineIndex = parseInt($container.data('matchLineIndex'))
 
   if (fromLineIndex < 1) {
     fromLineIndex = 1
@@ -2995,6 +4163,15 @@ function renderLines(id, url) {
 
   const lang = getSelectedLang()
   const subtitleFile = window.searchResult.find(it => it.url === url)[lang === 'sv' ? 'sv_subs' : 'en_subs']
+
+  // Clamp toLineIndex to the file's last index so a default-context window
+  // (or repeated "+" clicks) that overshoots doesn't crash on getSub() →
+  // undefined.end.ordinal.
+  if (subtitleFile && subtitleFile.data && subtitleFile.data.length) {
+    const lastIdx = subtitleFile.data.reduce((m, it) => Math.max(m, it.index), 0)
+    if (toLineIndex > lastIdx) toLineIndex = lastIdx
+    if (fromLineIndex > lastIdx) fromLineIndex = lastIdx
+  }
 
   const getSub = x => subtitleFile.data.find(it => it.index + '' === x + '');
   const st = getSub(fromLineIndex);
@@ -3012,9 +4189,8 @@ function renderLines(id, url) {
      </span>
     </span>`
 
-  const isNotALink = url.startsWith('jokes-') || url.startsWith('sayings-') || url.startsWith('metaphors-') || url.startsWith('idioms-');
   const playMediaBtn =
-      `<img src="/img/icons/play_icon.png" alt="" style="width: 20px;height: 20px;cursor: pointer;" class="play-btn">`
+      `<img src="/img/icons/play_icon.png" alt="" style="display:none; width: 20px;height: 20px;cursor: pointer;" class="play-btn">`
 
 
   function truncate(str, n) {
@@ -3022,7 +4198,6 @@ function renderLines(id, url) {
   };
 
   const infoButton = () => {
-    if (isNotALink) return '';
     if (window.showInfoWithoutPopup) {
       const {fileName, url} = getInfoAboutMedia(subtitleFile.url, subtitleFile.source, timeStart);
       return `<a href="${url}" target="_blank" title="${fileName}">${truncate(fileName, 20)}</a>`
@@ -3036,12 +4211,12 @@ function renderLines(id, url) {
   <span class="add-prev-btn btn" > + </span>
   <span class="remove-next-btn btn"> - </span>
 
-  <span class="play-btn-container" style="text-align: center;" data-id="${id}" data-url="${url}" data-time-start="${timeStart}" data-time-end="${timeEnd}">
+  <span class="play-btn-container" style="text-align: center;" data-id="${id}" data-url="${url}" data-source="${subtitleFile.source || ''}" data-time-start="${timeStart}" data-time-end="${timeEnd}" data-match-line-index="${Number.isFinite(matchLineIndex) ? matchLineIndex : ''}">
      <span class="info btn collapse-sub-lines"> 🗖 </span>
-     <span class="info">${subtitleFile.source}</span>
+     <span class="info source-tag" data-source="${(subtitleFile.source || '').toLowerCase()}" title="${_.escape(subtitleFile.source || '')}">${_sourceBadgeHtml(subtitleFile.source)}</span>
      ${infoButton()}
-     ${playMediaBtn}
   </span>
+  <span class="capture-btn btn" title="Add this match to the current recording">●</span>
   <span style="float: right;">
     <span class="remove-prev-btn btn" > - </span>
     <span class="add-next-btn btn"> + </span>
@@ -3055,14 +4230,16 @@ function renderLines(id, url) {
   const secondarySubPanel = $('<div>')
 
 
+  const mainLangCode = getLangFromUrl().code  // sv / es / …
   range(fromLineIndex, toLineIndex - fromLineIndex + 1).forEach(idx => {
     const sub = getSub(idx)
     const {mainSub, secondarySub} = getMainSubAndSecondarySub(subtitleFile, ({...sub}));
-    const lineMain = `<div class="line main-line" >${mainSub.text}</div>`;
+    const subIdx = (sub && sub.index != null) ? String(sub.index) : ''
+    const lineMain = `<div class="line main-line" data-url="${url}" data-line-index="${subIdx}" data-lang-code="${mainLangCode}"><span class="line-text">${mainSub.text}</span><span class="edit-line-btn" title="Edit translation">✎</span></div>`;
     subForLines += lineMain
     mainSubPanel.append(lineMain)
     if (secondarySub && secondarySub.text) {
-      const lineSec = `<div class="line secondary-line" >${secondarySub.text}</div>`;
+      const lineSec = `<div class="line secondary-line" data-url="${url}" data-line-index="${subIdx}" data-lang-code="en"><span class="line-text">${secondarySub.text}</span><span class="edit-line-btn" title="Edit translation">✎</span></div>`;
       subForLines += lineSec
       secondarySubPanel.append(lineSec)
     }
@@ -3084,21 +4261,67 @@ function renderLines(id, url) {
   $($container).find('.media-info').click(e => showInfo(subtitleFile.url + '', subtitleFile.source+'', timeStart+'', timeEnd+''))
   $($container).find('.collapse-sub-lines').click(collapseSubLines)
 
+  // After +/- shifts the visible window, the displayed time range changes.
+  // If this match is already in the recording, mutate the stored entry's
+  // timeStart/timeEnd to follow the new window — otherwise the recording
+  // would replay the original (stale) range. Also re-mark the capture
+  // button (already done inside renderLines, but harmless to repeat).
+  const _syncOnWindowChange = () => {
+    try {
+      _syncCapturedItemTimes('' + id, '' + url)
+      _markCapturedButtons()
+    } catch (_) {}
+  }
   $($container).find('.add-prev-btn').click(e => {
-    changeIndices(''+id, fromLineIndex - 1, toLineIndex); renderLines(''+id, ''+url);
+    changeIndices(''+id, fromLineIndex - 1, toLineIndex); renderLines(''+id, ''+url); _syncOnWindowChange();
   })
   $($container).find('.remove-next-btn').click(e => {
-    changeIndices(''+id, fromLineIndex + 1, toLineIndex); renderLines(''+id, ''+url);
+    changeIndices(''+id, fromLineIndex + 1, toLineIndex); renderLines(''+id, ''+url); _syncOnWindowChange();
   })
   $($container).find('.remove-prev-btn').click(e => {
-    changeIndices(''+id, fromLineIndex, toLineIndex - 1); renderLines(''+id, ''+url);
+    changeIndices(''+id, fromLineIndex, toLineIndex - 1); renderLines(''+id, ''+url); _syncOnWindowChange();
   })
   $($container).find('.add-next-btn').click(e => {
-    changeIndices(''+id, fromLineIndex, toLineIndex + 1); renderLines(''+id, ''+url);
+    changeIndices(''+id, fromLineIndex, toLineIndex + 1); renderLines(''+id, ''+url); _syncOnWindowChange();
   })
 
   if (!isDesktop()) {
     $('.play-btn-container').css({marginLeft: '3%'})
+  }
+  // Reflect already-captured state on the newly rendered capture button.
+  try { _markCapturedButtons() } catch (_) {}
+}
+
+// After a window shift via +/-, mirror the new (timeStart, timeEnd) into
+// any recording entry that matches (searchText, word, id, lineIndex) for
+// the given .lines-cntnr. No-op when nothing in the recording matches.
+function _syncCapturedItemTimes(containerId, url) {
+  const $container = $('#' + containerId)
+  if (!$container.length) return
+  const $pbc = $container.find('.play-btn-container').first()
+  const newTimeStart = parseInt($pbc.attr('data-time-start'), 10)
+  const newTimeEnd   = parseInt($pbc.attr('data-time-end'),   10)
+  const lineIndex    = parseInt($pbc.attr('data-match-line-index'), 10)
+  if (!Number.isFinite(newTimeStart) || !Number.isFinite(newTimeEnd) || !Number.isFinite(lineIndex)) return
+  const word       = ($container.closest('.srt-file').find('h4[data-file]').first().text() || '').trim()
+  const searchText = (window.searchText || '').trim()
+  if (!word || !searchText) return
+  const items = window._recording && window._recording.items
+  const arr = items && items[searchText] && items[searchText][word]
+  if (!arr || !arr.length) return
+  let modified = false
+  arr.forEach(it => {
+    if (it && it.id === url && parseInt(it.lineIndex, 10) === lineIndex) {
+      if (it.timeStart !== newTimeStart || it.timeEnd !== newTimeEnd) {
+        it.timeStart = newTimeStart
+        it.timeEnd   = newTimeEnd
+        modified = true
+      }
+    }
+  })
+  if (modified) {
+    try { _saveRecording() } catch (_) {}
+    try { _updateRecordingUI() } catch (_) {}
   }
 }
 
@@ -3157,16 +4380,54 @@ const commonWordsToIgnore = [
   'dig', 'mig', 'oss', 'er', 'dem', 'honom', 'henne'
 ]
 
+// Extract the channel name from an SRT base name. Capture/upload paths
+// stamp the file as `${channel} || ${title} || ${id}`, so split on " || "
+// and take the first segment. Falls back to "(unknown)" so the channel
+// dialog has a sensible bucket for legacy entries that lack the channel
+// prefix.
+function _channelOfItem(item) {
+  if (!item) return null
+  const link = item.url || item.id || item.link
+  if (!link) return null
+  const srt = window.srts && window.srts.find(s => s && s.link === link)
+  if (!srt) return null
+  const name = String(srt.name || '')
+  const idx = name.indexOf(' || ')
+  return (idx > 0 ? name.slice(0, idx) : name).trim() || null
+}
+
+function _isChannelBlocked(channel) {
+  if (!channel) return false
+  const blocked = (window._appSettings && window._appSettings.blockedChannels) || []
+  return blocked.includes(channel)
+}
+
+// Demote items from blocked channels to fallback: keep them only when no
+// non-blocked items survive the rest of the filter pipeline for this word.
+function _applyBlockedChannelFallback(items) {
+  const blocked = new Set((window._appSettings && window._appSettings.blockedChannels) || [])
+  if (!blocked.size) return items
+  const allowed = items.filter(it => !blocked.has(_channelOfItem(it)))
+  return allowed.length ? allowed : items
+}
+
 function groupAndArrangeResults(items) {
-  const gpBySpl = _.groupBy(items, it => specialLinks.includes(it.source) ? it.source : 'other')
-  items = gpBySpl['other'] || []
+  // Source filtering was removed — only YouTube is supported now, so every
+  // result is kept. Blocked-channel demotion still applies: if every
+  // surviving item is from a blocked channel, we fall back to showing them
+  // so the word doesn't render empty.
+  items = _applyBlockedChannelFallback(items)
   const mediaFileNames = window.allMediaFileNames || []
-  // So that at least one item for each type (e.g. idiom, joke etc.) is included
+  // Use a defensive read on window.categories: it's set by fetchCategorisation
+  // late in loadAllSubtitles, so a flaky boot (failed srts/index.json fetch,
+  // for example) can leave it undefined. Touching it as a free variable
+  // would ReferenceError in module strict mode and kill the whole render.
+  const _cats = window.categories || {}
   let grouped = _.groupBy(items, it => {
-    let c = categories[it.url];
+    let c = _cats[it.url];
     c = c || '';
     c = c.trim();
-    return specialLinks.includes(it.source) ? it.source : c
+    return c
   })
   grouped = _.zip(...Object.values(grouped));
   grouped = _.sortBy(grouped, it => it.filter(it => it).length).reverse()
@@ -3174,7 +4435,7 @@ function groupAndArrangeResults(items) {
   items = items.toSorted((x, y) => {
     if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
   })
-  return [randomFromArray(gpBySpl['jokes'] || [])].concat(items).filter(it => it)
+  return items.filter(it => it)
 }
 
 async function populateSRTFindings(wordToItemsMap, $result, token) {
@@ -3199,6 +4460,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
     const wEnd = Math.min(wStart + WORD_CHUNK, words.length)
     const slice = words.slice(wStart, wEnd)
     slice.forEach(word => {
+    try {
     let items = wordToItemsMap[word] || []
     if (!items.length) {
       const w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
@@ -3209,7 +4471,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
       title = `"${word}"`
     }
 
-    const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}"><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${title}</h5></div>`)
+    const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}"><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${title} <span class="match-count"></span></h5></div>`)
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
     const isMultiWord = word.trim().split(/\s+/).length > 1
@@ -3218,11 +4480,15 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         : getWikiLinks(word)
     wordBlock.append(`<div style=""> Wiki: ${wikiPart} 丨
         <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> 丨
-        <a href="https://filmot.com/search/%22${word}%22/1?lang=${getLangFromUrl().code}" target="_blank">Filmot</a> </div> <br>`)
+        <a href="https://filmot.com/search/%22${word}%22/1?lang=${getLangFromUrl().code}" target="_blank">YouTube (Filmot)</a> </div> <br>`)
 
     $result.append(wordBlock)
 
     items = groupAndArrangeResults(items)
+    // Total available matches after source-filter / dedup grouping. Shown
+    // in the accordion header so the user knows how many hits a word has,
+    // even when only `numberOfItemsToShow()` are rendered below.
+    const totalMatches = items.length
 
     const getEnTranslation = (item) => {
       const d = window.searchResult.find(it => it.url === item.url)['sv_subs'].data[item.line.index - 1]
@@ -3249,22 +4515,84 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         continue;
       }
 
-      const $fileBlock = $(`<div class="srt-file" title="${item['name']}">
-                            <h4 data-file="${item.url}" style="display: none;"> ${word} </h4>
-                        </div>`)
+      try {
+        const $fileBlock = $(`<div class="srt-file" title="${item['name']}">
+                              <h4 data-file="${item.url}" style="display: none;"> ${word} </h4>
+                          </div>`)
 
-      wordBlock.append($fileBlock)
+        wordBlock.append($fileBlock)
 
-      const id = uuid()
-      const $lines = $(`<div id="${id}" style="padding-top: 4px; padding-bottom: 8px;"></div>`)
-      $lines.data({fromIndex: item.line.index, toIndex: item.line.index})
-      $fileBlock.append($lines)
+        const id = uuid()
+        const $lines = $(`<div id="${id}" style="padding-top: 4px; padding-bottom: 8px;"></div>`)
+        // Expand the visible window by the user-configured context. renderLines
+        // clamps fromIndex to >= 1 and (with the new clamp below) toIndex to
+        // the file's last index, so passing out-of-range values is safe.
+        // Coerce everything to Number: the SRT parser stores `line.index` as a
+        // string, so `index + _after` would concatenate ("103" + 2 → "1032"),
+        // ballooning toIndex so the renderLines file-end clamp shows every line
+        // from the match to EOF — i.e. "more than configured lines after match".
+        // Subtraction (used for fromIndex) always coerces numerically, which is
+        // why _before never tripped this. Also defensively coerce the settings.
+        const _before = parseInt((window._appSettings && window._appSettings.contextLinesBefore), 10) || 0
+        const _after = parseInt((window._appSettings && window._appSettings.contextLinesAfter), 10) || 0
+        const matchIdx = parseInt(item.line.index, 10) || 0
+        // Stash the matched line's SRT index so renderLines can expose it
+        // to the capture button (the +/- buttons mutate from/toIndex, but
+        // the underlying matched line never changes).
+        $lines.data({fromIndex: matchIdx - _before, toIndex: matchIdx + _after, matchLineIndex: matchIdx})
+        $fileBlock.append($lines)
 
-      renderLines(id, item.url)
-      rendered.push(getEnTranslation(item))
+        renderLines(id, item.url)
+        rendered.push(getEnTranslation(item))
+      } catch (perItemErr) {
+        // One bad item shouldn't kill the whole word block. Log and move on.
+        console.error('populateSRTFindings: failed to render item for', word, item, perItemErr)
+      }
     }//end for
+
+    // Header bookkeeping: show a match count, and grey the header out if
+    // the post-filter pipeline produced nothing (sources disabled, all
+    // duplicates, etc.) so the user can tell apart "no hits" from
+    // "hits, just collapsed".
+    if (totalMatches > 0) {
+      wordBlock.find('.match-count').text(`(${totalMatches})`)
+    }
+    if (rendered.length === 0) {
+      wordBlock.find('.l-accordion').addClass('no-result')
+    }
+    } catch (perWordErr) {
+      // Per-word failures (missing categories, bad item shape, …) used to
+      // break the entire results render. Log and continue so the user
+      // still sees results for the other words.
+      console.error('populateSRTFindings: failed for word', word, perWordErr)
+    }
   })
     await yieldToUI()
+    // Measure the sticky accordion height once we've rendered enough chunks
+    // for one to be on the page, and feed it back as a CSS variable so
+    // `.lines-cntnr .buttons`' sticky `top` parks flush against it (instead
+    // of the previous 2.5rem gap that revealed scrolling content). Re-measure
+    // on resize via a one-time listener.
+    try { _refreshAccordionStickyHeight() } catch (_) {}
+  }
+}
+
+let _accordionResizeBound = false
+function _refreshAccordionStickyHeight() {
+  const el = document.querySelector('#result .l-accordion:not(.no-result)') ||
+             document.querySelector('#result .l-accordion')
+  if (!el) return
+  const h = el.getBoundingClientRect().height
+  if (h > 0) {
+    document.documentElement.style.setProperty('--accordion-h', h + 'px')
+  }
+  if (!_accordionResizeBound) {
+    _accordionResizeBound = true
+    window.addEventListener('resize', () => {
+      // Debounce: only re-measure after the resize settles.
+      clearTimeout(window._accordionMeasureT)
+      window._accordionMeasureT = setTimeout(_refreshAccordionStickyHeight, 150)
+    })
   }
 }
 
@@ -3393,19 +4721,24 @@ export function wordIsInVocabularyLine(vocabLine, search) {
 }
 
 /**
- * Returns true if any pipe-separated word in vocabLine is a prefix of searchText
- * e.g. vocabLine="xyz|abc", searchText="xyzw" → true ("xyzw".startsWith("xyz"))
+ * Returns true if any pipe-separated word in vocabLine shares a prefix OR
+ * suffix with any pipe-separated alternative in searchText, in either
+ * direction. So `cd` matches `bcd` (bcd ends with cd), and conversely
+ * `bcd` matches `cd` for the same reason. `xyz` matches `xyzw` (prefix)
+ * and `xyzw` matches `xyz` (also prefix) — the four combinations cover
+ * every "one is a prefix/suffix of the other" relationship.
  */
 function vocabLineMatchesPrefix(vocabLine, searchText) {
   const stRaw = (searchText || '').toLowerCase().trim()
   if (!stRaw) return false
-  // Split BOTH sides on `|` so a search like "ångra|säkra" hits lines
-  // containing "ångra…" OR "säkra…", and each pipe-separated alternative
-  // in the vocab line is tested independently.
-  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim()).filter(s => s.length >= 4)
+  // Split BOTH sides on `|`. Length floor is 3: anything shorter is noise
+  // (a 1- or 2-letter term would match nearly every line).
+  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim()).filter(s => s.length >= 3)
   if (searchParts.length === 0) return false
-  const vocabParts = vocabLine.split(SEPARATOR_PIPE).map(p => p.toLowerCase().trim()).filter(p => p.length >= 4)
-  return vocabParts.some(p => searchParts.some(s => s.startsWith(p) || p.startsWith(s)))
+  const vocabParts = vocabLine.split(SEPARATOR_PIPE).map(p => p.toLowerCase().trim()).filter(p => p.length >= 2)
+  return vocabParts.some(p => searchParts.some(s =>
+    s.startsWith(p) || p.startsWith(s) || s.endsWith(p) || p.endsWith(s)
+  ))
 }
 
 // Common derivational prefixes per language. Sorted longest-first so that
@@ -4348,13 +5681,28 @@ class SearchResult {
   }
 }
 
+// Strip SRT framing (block indices, timestamp lines) and collapse all
+// whitespace so phrase regexes like /a b/i can match across consecutive
+// subtitle lines. Without this, an "a" at the end of one entry and a "b"
+// at the start of the next would be split by an index + timestamp block
+// and never match. The cleaned text only feeds the file-inclusion filter
+// here; per-line attribution still uses the parsed entries below.
+function _cleanSrtForMatch(rawSrt) {
+  if (!rawSrt) return ''
+  return rawSrt
+    .replace(/^\d+\s*$/gm, '')
+    .replace(/^\d\d:\d\d:\d\d[,.]\d{3} --> \d\d:\d\d:\d\d[,.]\d{3}.*$/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 async function fetchFromDownloadedFiles(lookingFor, token) {
   lookingFor = expandWords(lookingFor)
 
   const keys = Object.keys(window.allSubtitles)
       .filter(it => window.allSubtitles[it].sv && window.allSubtitles[it].en)
   const out = []
-  const re = new RegExp(lookingFor, "i")
+  const re = new RegExp(_relaxSpaces(lookingFor), "i")
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
   const CHUNK = 100
 
@@ -4365,8 +5713,11 @@ async function fetchFromDownloadedFiles(lookingFor, token) {
       const it = keys[i]
       const svText = window.allSubtitles[it].sv
       const enText = window.allSubtitles[it].en
-      const svMatch = svText && svText.match(re)
-      const enMatch = enText && enText.match(re)
+      // Match on the cleaned-text variants so multi-word phrases that
+      // straddle two consecutive subtitle lines are kept (e.g. "a b"
+      // across ".... a" then "b ....").
+      const svMatch = svText && _cleanSrtForMatch(svText).match(re)
+      const enMatch = enText && _cleanSrtForMatch(enText).match(re)
       if (svMatch || enMatch) {
         out.push(new SearchResult(
             window.allSubtitles[it].source,
@@ -4780,7 +6131,10 @@ async function loadYoutubeVideo(videoId) {
   await waitUntil(() => window.ytPlayerReady && window.ytPlayer.getIframe())
   const iframe = window.ytPlayer.getIframe()
   showMediaContainer()
-  showMediaRelatedContainer()
+  // Play / practice modes drive everything through their own floating overlay,
+  // so the side player panel (speed controls, starred lines, etc.) just gets in
+  // the way — keep it hidden while either mode is active.
+  if (!window._playingRecording && !window._practiceActive) showMediaRelatedContainer()
   return new Promise((resolve, reject) => {
     try {
       const currentVideoId = iframe.src.split("embed/")[1].split("?")[0]
@@ -4836,30 +6190,27 @@ async function saveStarredLines() {
 
   const lang = getLangFromUrl()
   const filePath = `db/language/${lang.fullName}/srts/srt_favorites.json`
-
-  // Read the existing array (if any) and upsert this video's record by link.
-  let existing = []
-  try {
-    const r = await fetch(`${getResourceUrl()}/srts/srt_favorites.json`, { cache: 'no-cache' })
-    if (r.ok) existing = await r.json()
-  } catch (_) { /* file may not exist yet */ }
-  if (!Array.isArray(existing)) existing = []
-
   const record = { ...window.mediaBeingPlayed, lines }
-  const idx = existing.findIndex(it => it.link === window.mediaBeingPlayed.link)
-  if (idx >= 0) existing[idx] = record
-  else existing.push(record)
 
   try {
-    await window.GitHubUtils.putFileWithContent({
-      owner: 'trexsatya',
-      repo: 'trexsatya.github.io',
+    await commitWithMerge({
       filePath,
-      content: JSON.stringify(existing, null, 2),
       commitMessage: `srt: update starred lines for ${window.mediaBeingPlayed.link}`,
-      branch: 'gh-pages'
+      merge: (remoteText) => {
+        let arr = []
+        try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
+        if (!Array.isArray(arr)) arr = []
+        const idx = arr.findIndex(it => it.link === window.mediaBeingPlayed.link)
+        if (idx >= 0) arr[idx] = record
+        else arr.push(record)
+        return JSON.stringify(arr, null, 2)
+      }
     })
     console.log('Starred lines committed to GitHub')
+    // The current set is now the saved baseline → hide Save until next change.
+    window._starredBaseline = _starredSignature()
+    try { _updateStarredLinesBtns() } catch (_) {}
+    autoHideSettingsPanel()
   } catch (e) {
     console.error('Failed to commit starred lines to GitHub:', e)
     alert('Failed to save starred lines: ' + e.message)
@@ -4968,13 +6319,38 @@ function linesToSrtText(items) {
 }
 
 function mergeSrtWithNewEntries(existingText, newItems) {
+  return mergeSrtWithResolution(existingText, newItems, null)
+}
+
+// Conflict-aware merge. `resolution` is a Map<startTimeStr, {action, text}>
+// where action is 'keep' | 'use-new' | 'edit'. For every existing entry
+// whose start matches a 'use-new' / 'edit' decision, the existing entry
+// is dropped so the incoming one takes its place. For 'keep' decisions
+// the incoming entry is dropped instead. Re-applied verbatim on every
+// commit retry so the user's resolution survives 409/422 retries even if
+// the remote text drifted between attempts.
+function mergeSrtWithResolution(existingText, newItems, resolution) {
   const existing = parseSrtEntries(existingText)
-  const incoming = (newItems || []).map(it => ({
+  let incoming = (newItems || []).map(it => ({
     start: srtTimeFromValue(it.start),
     end: srtTimeFromValue(it.end),
     text: (it.text || '').replace(/\r\n/g, '\n')
   }))
-  const all = existing.concat(incoming)
+  let filteredExisting = existing
+  if (resolution && resolution.size) {
+    filteredExisting = existing.filter(e => {
+      const r = resolution.get(e.start)
+      return !r || r.action === 'keep'
+    })
+    incoming = incoming.flatMap(e => {
+      const r = resolution.get(e.start)
+      if (!r) return [e]
+      if (r.action === 'keep') return []
+      if (r.action === 'edit') return [{ ...e, text: r.text }]
+      return [e]   // 'use-new': keep as-is, existing already filtered out
+    })
+  }
+  const all = filteredExisting.concat(incoming)
   // Dedupe by start+text in case the same captured chunk is sent twice.
   const seen = new Set()
   const deduped = []
@@ -4986,6 +6362,120 @@ function mergeSrtWithNewEntries(existingText, newItems) {
   })
   deduped.sort((a, b) => srtTimeToSeconds(a.start) - srtTimeToSeconds(b.start))
   return entriesToSrtText(deduped)
+}
+
+// Show the merge dialog for the given conflicts. Resolves with a
+// Map<startTime, {action: 'keep' | 'use-new' | 'edit', text?}> picked by
+// the user, or `null` if they cancel. Modal so any caller (e.g. Push All
+// loop in the captured-subtitles dialog) pauses until the user decides.
+function presentSrtMergeDialog(label, conflicts) {
+  return new Promise((resolve) => {
+    let $dlg = $('#srt-merge-dialog')
+    if (!$dlg.length) {
+      $dlg = $('<div id="srt-merge-dialog"></div>').appendTo('body')
+    }
+    const escId = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, '_')
+    const rows = conflicts.map((c, i) => {
+      const rid = escId(c.start) + '-' + i
+      return `
+        <div class="srt-conflict" data-start="${_.escape(c.start)}" data-rid="${rid}">
+          <div class="srt-conflict-time">${_.escape(c.start)} → ${_.escape(c.end)}</div>
+          <div class="srt-conflict-cols">
+            <div class="srt-conflict-side srt-conflict-existing">
+              <div class="srt-conflict-head">Existing</div>
+              <div class="srt-conflict-text">${_.escape(c.existingText)}</div>
+            </div>
+            <div class="srt-conflict-side srt-conflict-incoming">
+              <div class="srt-conflict-head">New (captured)</div>
+              <div class="srt-conflict-text">${_.escape(c.incomingText)}</div>
+            </div>
+          </div>
+          <div class="srt-conflict-actions">
+            <label><input type="radio" name="rsl-${rid}" value="keep" checked> ← Keep existing</label>
+            <label><input type="radio" name="rsl-${rid}" value="use-new"> Use new →</label>
+            <label><input type="radio" name="rsl-${rid}" value="edit"> Edit ✎</label>
+          </div>
+          <textarea class="srt-conflict-edit" rows="3" hidden>${_.escape(c.incomingText)}</textarea>
+        </div>`
+    }).join('')
+
+    $dlg.html(`
+      <p class="srt-merge-intro">The captured subtitle conflicts with <b>${_.escape(label)}</b> at ${conflicts.length} timestamp${conflicts.length === 1 ? '' : 's'}. Pick what to keep for each, then Apply.</p>
+      <div class="srt-merge-list">${rows}</div>
+    `)
+
+    // Toggle the textarea when "Edit" is picked.
+    $dlg.off('change', '.srt-conflict-actions input').on('change', '.srt-conflict-actions input', function () {
+      const $c = $(this).closest('.srt-conflict')
+      const isEdit = $(this).val() === 'edit'
+      $c.find('.srt-conflict-edit').prop('hidden', !isEdit)
+      if (isEdit) $c.find('.srt-conflict-edit').focus()
+    })
+
+    let settled = false
+    const finalize = (result) => {
+      if (settled) return; settled = true
+      try { $dlg.dialog('close') } catch (_) {}
+      resolve(result)
+    }
+
+    const opts = {
+      title: 'Resolve subtitle conflicts',
+      width: Math.min(720, $(window).width() - 40),
+      height: Math.min(560, $(window).height() - 40),
+      modal: true,
+      autoOpen: true,
+      position: { my: 'center top', at: 'center top+20', of: window },
+      buttons: {
+        'Apply': function () {
+          const resolution = new Map()
+          $dlg.find('.srt-conflict').each(function () {
+            const $c = $(this)
+            const start = $c.data('start')
+            const action = $c.find('input[type=radio]:checked').val() || 'keep'
+            const entry = { action }
+            if (action === 'edit') {
+              entry.text = String($c.find('.srt-conflict-edit').val() || '').trim()
+            }
+            resolution.set(start, entry)
+          })
+          finalize(resolution)
+        },
+        'Cancel': function () { finalize(null) }
+      },
+      close: function () { finalize(null) }   // covers ESC / X-button
+    }
+    if ($dlg.hasClass('ui-dialog-content')) {
+      $dlg.dialog('option', opts).dialog('open')
+    } else {
+      $dlg.dialog(opts)
+    }
+  })
+}
+
+// Find entries where existing and incoming disagree on the same start time.
+// Returns an array of {start, end, existingText, incomingText} — empty if
+// the merge would be a clean union with no conflict resolution needed.
+function detectSrtConflicts(existingText, newItems) {
+  if (!existingText) return []
+  const existing = parseSrtEntries(existingText)
+  const byStart = new Map(existing.map(e => [e.start, e]))
+  const conflicts = []
+  ;(newItems || []).forEach(it => {
+    const start = srtTimeFromValue(it.start)
+    const end   = srtTimeFromValue(it.end)
+    const incomingText = String(it.text || '').replace(/\r\n/g, '\n').trim()
+    const ex = byStart.get(start)
+    if (!ex) return
+    if ((ex.text || '').trim() === incomingText) return
+    conflicts.push({
+      start,
+      end,
+      existingText: (ex.text || ''),
+      incomingText
+    })
+  })
+  return conflicts
 }
 
 // Strip characters that make filenames URL-unfriendly: filesystem-reserved
@@ -5019,7 +6509,7 @@ function buildCapturedSubtitleBaseName(detail) {
   // full filename stays well under FS / URL limits.
   const safeChannel = sanitizeFilenameSegment(channel, 40)
   const safeTitle = sanitizeFilenameSegment(title, 60)
-  return [safeChannel, safeTitle, id].filter(Boolean).join(' || ')
+  return _nfc([safeChannel, safeTitle, id].filter(Boolean).join(' || '))
 }
 
 // Look up an entry in the deployed index.json by videoId. Uses
@@ -5034,7 +6524,8 @@ async function fetchSrtIndexEntry(videoId) {
     )
     const arr = JSON.parse(file.content)
     if (Array.isArray(arr)) {
-      return arr.find(it => it.link === videoId) || null
+      const hit = arr.find(it => it.link === videoId)
+      return hit ? { ...hit, name: _nfc(hit.name) } : null
     }
   } catch (e) {
     console.warn('fetchSrtIndexEntry failed', e)
@@ -5050,55 +6541,363 @@ function inferSubtitleSource(detail) {
   return 'captured'
 }
 
-async function uploadSrtToGithub(baseName, langCode, content, commitMessage) {
+// Upload new SRT entries, merging them into whatever is currently on remote
+// (read real-time via api.github.com). This is the only writer; concurrent
+// captures from another client are preserved because we re-read + re-merge
+// + re-PUT on sha conflict via commitWithMerge.
+async function uploadSrtToGithub(baseName, langCode, newEntries, commitMessage, conflictResolution) {
   const lang = getLangFromUrl()
+  baseName = _nfc(baseName)
   const fileName = `${baseName}.${langCode}.srt`
   const filePath = `db/language/${lang.fullName}/srts/${encodeURIComponent(fileName)}`
-  await window.GitHubUtils.putFileWithContent({
-    owner: 'trexsatya',
-    repo: 'trexsatya.github.io',
+  const entries = newEntries || []
+  await commitWithMerge({
     filePath,
-    content,
     commitMessage,
-    branch: 'gh-pages'
+    merge: (remoteText) => {
+      return remoteText
+        ? mergeSrtWithResolution(remoteText, entries, conflictResolution || null)
+        : linesToSrtText(entries)
+    }
   })
 }
+
+// Delete the media currently selected in #mp3Choice: drops both source-lang
+// and en SRT files from gh-pages and removes the entry from index.json.
+// In-memory state (window.srts, #mp3Choice options, window.allSubtitles) is
+// pruned too so the UI reflects the deletion immediately.
+async function deleteSelectedMedia() {
+  const link = $('#mp3Choice').val()
+  if (!link) { alert('Pick a media to delete first.'); return }
+  const srt = (window.srts || []).find(it => it.link === link)
+  const baseName = _nfc(srt && srt.name)
+  if (!baseName) {
+    alert('No index entry found for the selected media — nothing to delete on GitHub.')
+    return
+  }
+  const label = baseName.replace(/\.(en|sv|es|de|fr)\.srt$/i, '')
+  if (!confirm(`Delete "${label}" from GitHub?\n\nThis removes both SRT files and the index.json entry. The deletion cannot be undone from the UI.`)) return
+
+  const lang = getLangFromUrl()
+  const srtsDir = `db/language/${lang.fullName}/srts`
+  const srcCode = lang.code
+  // Most files are stored as `${baseName}.${langCode}.srt`. Try the source
+  // language and English (target translation). 404 is treated as "already gone".
+  const candidates = [`${baseName}.${srcCode}.srt`]
+  if (srcCode !== 'en') candidates.push(`${baseName}.en.srt`)
+  const owner = 'trexsatya', repo = 'trexsatya.github.io'
+  for (const fileName of candidates) {
+    const filePath = `${srtsDir}/${encodeURIComponent(fileName)}`
+    try {
+      await window.GitHubUtils.deleteFileWithLookup({
+        owner, repo, filePath,
+        commitMessage: `srt: delete ${fileName}`,
+        branch: 'gh-pages'
+      })
+    } catch (e) {
+      console.warn(`Failed to delete ${fileName}:`, e)
+    }
+  }
+
+  // Remove the entry from index.json with the conflict-safe merge helper.
+  try {
+    await commitWithMerge({
+      filePath: `${srtsDir}/index.json`,
+      commitMessage: `srts: remove index entry for ${link}`,
+      merge: (remoteText) => {
+        let arr = []
+        try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
+        if (!Array.isArray(arr)) arr = []
+        const filtered = arr.filter(it => it.link !== link)
+        return JSON.stringify(filtered, null, 2)
+      }
+    })
+  } catch (e) {
+    console.error('Failed to update index.json:', e)
+    alert('SRTs may have been deleted but index.json update failed: ' + e.message)
+  }
+
+  // Local-state cleanup so the UI matches GitHub.
+  window.srts = (window.srts || []).filter(it => it.link !== link)
+  if (window.allSubtitles && window.allSubtitles[link]) delete window.allSubtitles[link]
+  $(`#mp3Choice option[value="${link}"]`).remove()
+  $('#mp3Choice').val('').trigger('change')
+
+  // The video is gone — drop every playlist item that still points at it so
+  // playback never tries to load a deleted video. (`link` is the videoId,
+  // which is exactly what recorded items store in `id`.)
+  try {
+    const removed = removeVideoFromAllPlaylists(link)
+    if (removed > 0) {
+      alert(`Also removed ${removed} item(s) referencing this video from your playlists.`)
+    }
+  } catch (e) { console.warn('playlist cleanup after media delete failed', e) }
+
+  autoHideSettingsPanel()
+}
+window.deleteSelectedMedia = deleteSelectedMedia
 
 async function upsertSrtIndexEntry(videoId, baseName, source) {
   const lang = getLangFromUrl()
   const filePath = `db/language/${lang.fullName}/srts/index.json`
+  const record = { link: videoId, name: _nfc(baseName), source }
 
-  // Read via api.github.com (real-time) instead of raw.githubusercontent.com,
-  // which has a ~5-minute CDN cache — two captures in quick succession would
-  // otherwise read a stale index and clobber each other's entries.
-  let existing = []
-  let sha
-  try {
-    const file = await window.GitHubUtils.getFile(
-      'trexsatya', 'trexsatya.github.io', filePath, '', 'gh-pages'
-    )
-    existing = JSON.parse(file.content)
-    sha = file.sha
-  } catch (e) {
-    console.warn('upsertSrtIndexEntry: failed to read index.json — assuming empty', e)
-  }
-  if (!Array.isArray(existing)) existing = []
-
-  const record = { link: videoId, name: baseName, source }
-  const idx = existing.findIndex(it => it.link === videoId)
-  if (idx >= 0) existing[idx] = { ...existing[idx], ...record }
-  else existing.push(record)
-
-  await window.GitHubUtils.putFile(
-    'trexsatya',
-    'trexsatya.github.io',
+  await commitWithMerge({
     filePath,
-    JSON.stringify(existing, null, 2),
-    `srts: upsert index entry for ${videoId}`,
-    sha,
-    '',
-    'gh-pages'
-  )
+    commitMessage: `srts: upsert index entry for ${videoId}`,
+    merge: (remoteText) => {
+      let arr = []
+      try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
+      if (!Array.isArray(arr)) arr = []
+      const idx = arr.findIndex(it => it.link === videoId)
+      if (idx >= 0) arr[idx] = { ...arr[idx], ...record }
+      else arr.push(record)
+      return JSON.stringify(arr, null, 2)
+    }
+  })
+}
+
+// ── One-shot NFC migration ──────────────────────────────────────────────
+// Some legacy SRT entries were committed with NFD-encoded å / ä / ö in
+// their filenames (typical macOS APFS artifact). The app now always writes
+// NFC, so over time the two encodings drift apart on remote and end up
+// stored as DUPLICATE files. This walks index.json, renames every NFD
+// file to its NFC equivalent, drops the NFD copies (and any pre-existing
+// NFC dupes' content is kept), and rewrites index.json — all in a single
+// batched commit. Idempotent: re-running on an already-normalized index
+// reports "nothing to do" and exits without committing.
+async function migrateSrtPathsToNFC() {
+  const lang = getLangFromUrl()
+  const srtsDir = `db/language/${lang.fullName}/srts`
+  const indexPath = `${srtsDir}/index.json`
+
+  // Pull the live index from GitHub (uncached real-time read).
+  const file = await window.GitHubUtils.getFile('trexsatya', 'trexsatya.github.io', indexPath, '', 'gh-pages')
+  let entries
+  try { entries = JSON.parse(file.content) } catch (e) { throw new Error('index.json is not valid JSON: ' + e.message) }
+  if (!Array.isArray(entries)) throw new Error('index.json is not an array')
+
+  // Find entries whose name is not already NFC.
+  const drift = entries
+    .map((e, i) => ({ e, i, nfd: e.name || '', nfc: _nfc(e.name || '') }))
+    .filter(x => x.nfd !== x.nfc)
+
+  if (!drift.length) {
+    console.log('migrateSrtPathsToNFC: index.json already fully NFC — nothing to do.')
+    return { migrated: 0 }
+  }
+
+  // For each drifted entry, prepare a (delete NFD path, write NFC path) pair
+  // per language. We fetch the canonical content from raw.github — prefer
+  // NFD (matches the current index) and fall back to NFC if the file was
+  // already renamed manually. If neither exists we just skip that lang.
+  const files = []
+  let renamed = 0
+  for (const x of drift) {
+    for (const langCode of ['sv', 'en']) {
+      const baseNfd = x.nfd, baseNfc = x.nfc
+      const fileNameNfd = `${baseNfd}.${langCode}.srt`
+      const fileNameNfc = `${baseNfc}.${langCode}.srt`
+      const url = (n) => `${getResourceUrl()}/srts/${encodeURIComponent(n)}`
+      let content = null
+      try {
+        const r = await fetch(url(fileNameNfd), { cache: 'no-cache' })
+        if (r.ok) content = await r.text()
+      } catch (_) {}
+      if (content === null) {
+        try {
+          const r = await fetch(url(fileNameNfc), { cache: 'no-cache' })
+          if (r.ok) content = await r.text()
+        } catch (_) {}
+      }
+      if (content === null) continue   // file missing entirely
+      files.push({ path: `${srtsDir}/${fileNameNfc}`, getContent: () => content })
+      files.push({ path: `${srtsDir}/${fileNameNfd}`, delete: true })
+      renamed++
+    }
+  }
+
+  // Always rewrite the index, even if no file content was successfully fetched,
+  // so the name fields are canonicalized.
+  files.push({
+    path: indexPath,
+    getContent: (current) => {
+      let arr
+      try { arr = JSON.parse(current || '[]') } catch (_) { arr = entries }
+      if (!Array.isArray(arr)) arr = entries
+      const normalized = arr.map(it => it ? { ...it, name: _nfc(it.name) } : it)
+      return JSON.stringify(normalized, null, 2) + '\n'
+    }
+  })
+
+  await window.GitHubUtils.commitMultipleFiles({
+    owner: 'trexsatya',
+    repo: 'trexsatya.github.io',
+    branch: 'gh-pages',
+    commitMessage: `srts: normalize ${drift.length} index entr${drift.length === 1 ? 'y' : 'ies'} + ${renamed} file rename(s) to NFC`,
+    files
+  })
+
+  // Refresh window.srts so subsequent reads see canonical NFC names.
+  if (Array.isArray(window.srts)) {
+    window.srts = window.srts.map(it => it ? { ...it, name: _nfc(it.name) } : it)
+  }
+
+  console.log(`migrateSrtPathsToNFC: migrated ${drift.length} index entries, renamed ${renamed} files`)
+  return { migrated: drift.length, renamed }
+}
+
+// ── Channel management ──────────────────────────────────────────────────
+// Channels are extracted from window.srts entries: the `name` field is
+// "${channel} || ${title} || ${id}" (set by buildCapturedSubtitleBaseName).
+// The user can block a channel (subtitles from it only show as fallback)
+// or delete it (all SRT files + the index.json entries are removed in one
+// batched commit via commitMultipleFiles).
+
+function listChannels() {
+  const counts = new Map()
+  ;(window.srts || []).forEach(s => {
+    if (!s || !s.name) return
+    const idx = s.name.indexOf(' || ')
+    const ch = (idx > 0 ? s.name.slice(0, idx) : s.name).trim() || '(unknown)'
+    if (!counts.has(ch)) counts.set(ch, { videos: 0, source: s.source || '' })
+    counts.get(ch).videos += 1
+  })
+  return [...counts.entries()]
+    .map(([channel, meta]) => ({ channel, videos: meta.videos, source: meta.source }))
+    .sort((a, b) => b.videos - a.videos || a.channel.localeCompare(b.channel))
+}
+
+function setChannelBlocked(channel, blocked) {
+  if (!channel) return
+  const list = (window._appSettings.blockedChannels || []).slice()
+  const idx = list.indexOf(channel)
+  if (blocked && idx < 0) list.push(channel)
+  if (!blocked && idx >= 0) list.splice(idx, 1)
+  window._appSettings.blockedChannels = list
+  saveAppSettings()
+  // Re-render any active result so the new block takes effect immediately.
+  if (window.searchResult && typeof render === 'function') {
+    try { render(window.searchResult, window.searchText) } catch (_) {}
+  }
+}
+
+// Delete every SRT file belonging to the given channel and prune the
+// matching index.json entries — all in a single GitHub commit via the
+// new commitMultipleFiles helper.
+async function deleteChannel(channel) {
+  if (!channel) return
+  const videos = (window.srts || []).filter(s => {
+    if (!s || !s.name) return false
+    const i = s.name.indexOf(' || ')
+    return (i > 0 ? s.name.slice(0, i) : s.name).trim() === channel
+  })
+  if (!videos.length) { alert(`No videos found for channel "${channel}".`); return }
+  if (!confirm(`Delete channel "${channel}" — ${videos.length} video${videos.length === 1 ? '' : 's'}?\n\nThis removes every .sv.srt and .en.srt file from gh-pages and updates index.json. Cannot be undone from the UI.`)) return
+
+  const lang = getLangFromUrl()
+  const srtsDir = `db/language/${lang.fullName}/srts`
+  const code = lang.code
+  const files = []
+  videos.forEach(v => {
+    const n = _nfc(v.name)
+    files.push({ path: `${srtsDir}/${n}.${code}.srt`, delete: true })
+    if (code !== 'en') files.push({ path: `${srtsDir}/${n}.en.srt`, delete: true })
+  })
+  files.push({
+    path: `${srtsDir}/index.json`,
+    getContent: (current) => {
+      let arr = []
+      try { arr = current ? JSON.parse(current) : [] } catch (_) {}
+      if (!Array.isArray(arr)) arr = []
+      const linksToDrop = new Set(videos.map(v => v.link))
+      const filtered = arr.filter(it => !linksToDrop.has(it.link))
+      return JSON.stringify(filtered, null, 2) + '\n'
+    }
+  })
+
+  await window.GitHubUtils.commitMultipleFiles({
+    owner: 'trexsatya',
+    repo: 'trexsatya.github.io',
+    branch: 'gh-pages',
+    commitMessage: `channel: delete "${channel}" (${videos.length} video${videos.length === 1 ? '' : 's'})`,
+    files
+  })
+
+  // Local cleanup so the UI matches gh-pages without a reload.
+  videos.forEach(v => {
+    try { delete window.allSubtitles[v.link] } catch (_) {}
+  })
+  window.srts = (window.srts || []).filter(s => !videos.includes(s))
+  // Also drop from the optional block-list (deleted channel can't be matched).
+  setChannelBlocked(channel, false)
+}
+
+function openChannelManagerDialog() {
+  let $dlg = $('#channelManagerDialog')
+  if (!$dlg.length) {
+    $dlg = $('<div id="channelManagerDialog"></div>').appendTo('body')
+  }
+  const channels = listChannels()
+  const blocked = new Set((window._appSettings.blockedChannels || []))
+  let html = `<p class="ch-mgr-intro">Block a channel to demote its subtitles to fallback (used only when a word has no other match). Delete removes every SRT for the channel and updates index.json in a single commit.</p>`
+  if (!channels.length) {
+    html += '<p style="color:#888;">No channels found in this language.</p>'
+  } else {
+    html += '<div class="ch-mgr-list">'
+    channels.forEach(c => {
+      const id = 'ch-' + encodeURIComponent(c.channel).replace(/[^A-Za-z0-9_-]/g, '_')
+      const isBlocked = blocked.has(c.channel)
+      html += `
+        <div class="ch-row" data-channel="${_.escape(c.channel)}">
+          <label class="rec-toggle ch-block" title="Block channel">
+            <input type="checkbox" class="ch-block-cb" ${isBlocked ? 'checked' : ''}>
+            <span class="rec-toggle-track"><span class="rec-toggle-knob"></span></span>
+          </label>
+          <span class="ch-name${isBlocked ? ' ch-name-blocked' : ''}">${_.escape(c.channel)}</span>
+          <span class="ch-count">${c.videos}</span>
+          <button type="button" class="btn ch-delete rec-rec-danger" title="Delete channel"><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
+        </div>`
+    })
+    html += '</div>'
+  }
+  $dlg.html(html)
+
+  $dlg.off('change', '.ch-block-cb').on('change', '.ch-block-cb', function () {
+    const $row = $(this).closest('.ch-row')
+    const ch = String($row.data('channel') || '')
+    setChannelBlocked(ch, $(this).is(':checked'))
+    $row.find('.ch-name').toggleClass('ch-name-blocked', $(this).is(':checked'))
+  })
+  $dlg.off('click', '.ch-delete').on('click', '.ch-delete', async function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const $btn = $(this)
+    const ch = String($btn.closest('.ch-row').data('channel') || '')
+    $btn.prop('disabled', true).find('.rec-rec-lbl').text('Deleting…')
+    try {
+      await deleteChannel(ch)
+      openChannelManagerDialog()   // refresh list
+    } catch (err) {
+      console.error('deleteChannel failed', err)
+      alert('Delete failed: ' + (err && err.message || err))
+      $btn.prop('disabled', false).find('.rec-rec-lbl').text('Delete')
+    }
+  })
+
+  const opts = {
+    title: `Manage channels (${channels.length})`,
+    width: Math.min(640, $(window).width() - 40),
+    height: Math.min(560, $(window).height() - 40),
+    modal: false,
+    autoOpen: true,
+    position: { my: 'center top', at: 'center top+20', of: window },
+    buttons: { 'Close': function () { $(this).dialog('close') } }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) {
+    $dlg.dialog('option', opts).dialog('open')
+  } else {
+    $dlg.dialog(opts)
+  }
 }
 
 // --- Captured subtitle buffer (localStorage) ---
@@ -5143,19 +6942,19 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;')
 }
 
-function renderCapturedReviewBody() {
+async function renderCapturedReviewBody() {
   const buf = loadCapturedBuffer()
   const $body = $('#captured-subtitles-dialog-content').empty()
   if (buf.length === 0) {
     $body.append('<p>No captured subtitles pending.</p>')
     return
   }
+  // Render rows immediately with a "checking…" status so the dialog opens
+  // fast, then resolve each row's true status against the authoritative
+  // index.json. window.allSubtitles can be a false positive (purely-local
+  // entries / re-pushes), so it's not enough on its own.
   buf.forEach(item => {
     const d = item.detail || {}
-    const exists = !!(window.allSubtitles && window.allSubtitles[d.videoId])
-    const status = exists
-      ? '<span style="color:#a60;">merge into existing</span>'
-      : '<span style="color:#070;">new file</span>'
     const $row = $(`
       <div class="captured-item" data-id="${escapeHtml(item.id)}" style="border:1px solid #ccc;border-radius:4px;padding:8px;margin-bottom:8px;">
         <div style="font-weight:bold;">${escapeHtml(d.videoTitle || d.videoId || 'unknown')}</div>
@@ -5163,7 +6962,7 @@ function renderCapturedReviewBody() {
           ${escapeHtml(d.videoId || '')} ·
           ${escapeHtml(d.sourceLang || '?')}→${escapeHtml(d.targetLang || '?')} ·
           ${(d.lines || []).length} src / ${(d.translation || []).length} tgt lines ·
-          ${status}
+          <span data-role="srt-status" style="color:#888;">checking…</span>
         </div>
         ${d.query ? `<div style="font-size:12px;">query: <code>${escapeHtml(d.query)}</code> @${escapeHtml(d.matchIndex)}</div>` : ''}
         <div style="margin-top:4px;">
@@ -5176,6 +6975,33 @@ function renderCapturedReviewBody() {
     `)
     $body.append($row)
   })
+
+  // Resolve each row's status against index.json. Cache per videoId so
+  // duplicate captures of the same video only fetch once.
+  const cache = new Map()
+  for (const item of buf) {
+    const d = item.detail || {}
+    if (!d.videoId) continue
+    const $row = $body.find(`.captured-item[data-id="${$.escapeSelector ? $.escapeSelector(item.id) : item.id}"]`)
+    const $status = $row.find('[data-role=srt-status]')
+    if (!$status.length) continue
+    try {
+      if (!cache.has(d.videoId)) {
+        cache.set(d.videoId, fetchSrtIndexEntry(d.videoId))
+      }
+      const entry = await cache.get(d.videoId)
+      if (entry) {
+        $row.attr('data-srt-state', 'modify')
+        $status.html(`<span style="color:#a60;font-weight:bold;">modifying existing SRT</span> <span style="color:#777;">(${escapeHtml(entry.name || '')})</span>`)
+        $row.find('button[data-action="push"]').text('Push (merge)')
+      } else {
+        $row.attr('data-srt-state', 'new')
+        $status.html('<span style="color:#070;font-weight:bold;">new SRT</span>')
+      }
+    } catch (e) {
+      $status.html('<span style="color:#a00;">status unknown</span>')
+    }
+  }
 }
 
 function ensureCapturedDialogDom() {
@@ -5244,13 +7070,23 @@ window.openCapturedSubtitlesReview = function () {
         const $btn = $(this)
         $btn.prop('disabled', true).text('Pushing…')
         try {
-          await handleCapturedSubtitle(d)
-          const buf2 = loadCapturedBuffer()
-          const idx2 = buf2.findIndex(b => b.id === id)
-          if (idx2 >= 0) {
-            buf2.splice(idx2, 1)
+          // Route through the batched path with a single-item array so all
+          // captures go through the same code (one commit, same conflict
+          // handling). Cheaper than the legacy per-file commitWithMerge path.
+          const result = await pushCapturedSubtitlesBatched([{ id, detail: d }])
+          if (result && result.committed === false) {
+            alert(result.reason === 'no-files'
+              ? 'No commit: this capture has no source/target language and the index already has it.'
+              : 'No commit: this capture already matches what is on GitHub.')
+            // The capture is effectively on remote already — clear it.
+            const buf2 = loadCapturedBuffer().filter(b => b.id !== id)
             saveCapturedBuffer(buf2)
+            $row.remove()
+            updateCapturedBtn()
+            return
           }
+          const buf2 = loadCapturedBuffer().filter(b => b.id !== id)
+          saveCapturedBuffer(buf2)
           $row.remove()
           updateCapturedBtn()
         } catch (err) {
@@ -5284,27 +7120,54 @@ window.openCapturedSubtitlesReview = function () {
       'Push All': async function () {
         const startBuf = loadCapturedBuffer()
         if (!startBuf.length) { $(this).dialog('close'); return }
-        if (!confirm(`Push ${startBuf.length} captured subtitle(s) to GitHub?`)) return
+        if (!confirm(`Push ${startBuf.length} captured subtitle(s) to GitHub in a single commit?`)) return
         const $self = $(this)
-        let pushedCount = 0
-        const failed = []
-        for (const item of startBuf) {
-          try {
-            await handleCapturedSubtitle(item.detail)
-            // Drop just this item from the live buffer so concurrent captures aren't clobbered.
-            saveCapturedBuffer(loadCapturedBuffer().filter(b => b.id !== item.id))
-            $('#captured-subtitles-dialog-content').find(`.captured-item[data-id="${item.id}"]`).remove()
-            updateCapturedBtn()
-            pushedCount += 1
-          } catch (err) {
-            console.error('Push failed for', item.detail && item.detail.videoId, err)
-            failed.push(item)
+        const $rows = $('#captured-subtitles-dialog-content').find('.captured-item')
+        $rows.find('button[data-action="push"]').prop('disabled', true).text('Pushing…')
+        const $pushAllBtn = $self.dialog('widget').find('.ui-dialog-buttonpane button:contains("Push All")')
+        const setStatus = (s) => { try { $pushAllBtn.text(s) } catch (_) {} }
+        setStatus('Preparing…')
+        try {
+          const result = await pushCapturedSubtitlesBatched(startBuf, (p) => {
+            if (p.stage === 'fetching-index')    setStatus('Reading index…')
+            else if (p.stage === 'prefetching-srts') setStatus(`Fetching SRTs ${p.done}/${p.total}`)
+            else if (p.stage === 'committing')   setStatus(`Committing ${p.files} files…`)
+          })
+          // If commitMultipleFiles produced no commit (captures already on
+          // remote, or no SRT files to push), tell the user instead of
+          // silently clearing the buffer — otherwise it looks like nothing
+          // happened.
+          if (result && result.committed === false) {
+            const msg = result.reason === 'no-files'
+              ? 'No commit: captures had no source/target language and the index already has these videos.'
+              : 'No commit produced: the captured subtitles already match what is on GitHub. Nothing to push.'
+            setStatus('Push All')
+            alert(msg)
+            $rows.find('button[data-action="push"]').prop('disabled', false).text('Push This')
+            // Still clear them from the buffer — they are already on remote.
+            const pushedIds = new Set(result.pushedIds || [])
+            if (pushedIds.size) {
+              saveCapturedBuffer(loadCapturedBuffer().filter(b => !pushedIds.has(b.id)))
+              pushedIds.forEach(id => {
+                $(`#captured-subtitles-dialog-content .captured-item[data-id="${id}"]`).remove()
+              })
+              updateCapturedBtn()
+            }
+            return
           }
-        }
-        if (failed.length) {
-          alert(`${pushedCount} pushed, ${failed.length} failed (see console).`)
-        } else {
+          // Drop pushed items from the buffer (concurrent captures preserved).
+          const pushedIds = new Set(result.pushedIds || startBuf.map(b => b.id))
+          saveCapturedBuffer(loadCapturedBuffer().filter(b => !pushedIds.has(b.id)))
+          pushedIds.forEach(id => {
+            $(`#captured-subtitles-dialog-content .captured-item[data-id="${id}"]`).remove()
+          })
+          updateCapturedBtn()
           $self.dialog('close')
+        } catch (err) {
+          console.error('Batch push failed', err)
+          setStatus('Push All')
+          alert('Batch push failed: ' + (err && err.message || err))
+          $rows.find('button[data-action="push"]').prop('disabled', false).text('Push This')
         }
       },
       'Close': function () { $(this).dialog('close') }
@@ -5364,6 +7227,217 @@ window.openCapturedSubtitlesReview = function () {
   }
 }
 
+// Batch-push every captured-subtitle item in `items` as a single git commit.
+// Groups captures by videoId so multiple chunks of the same video collapse
+// into one merged .sv.srt and .en.srt update. Conflicts are resolved up-front
+// via the merge dialog; the resolution is then re-applied inside the
+// commitMultipleFiles retry loop, so a 422 (someone else pushed) doesn't lose
+// the user's decisions.
+//
+// Returns { pushedIds }. Throws if the user cancels a conflict dialog or the
+// commit ultimately fails after retries.
+async function pushCapturedSubtitlesBatched(items, onProgress) {
+  const _report = (stage, extra) => {
+    try { if (typeof onProgress === 'function') onProgress({ stage, ...(extra || {}) }) } catch (_) {}
+  }
+  if (!items || !items.length) return { pushedIds: [] }
+  const lang = getLangFromUrl()
+  const srtsDir = `db/language/${lang.fullName}/srts`
+  const indexPath = `${srtsDir}/index.json`
+
+  // Group by videoId so multiple captures on the same video collapse into a
+  // single merged update per language file.
+  const byVideo = new Map()
+  for (const it of items) {
+    const vid = it && it.detail && it.detail.videoId
+    if (!vid) continue
+    if (!byVideo.has(vid)) byVideo.set(vid, { details: [], ids: [] })
+    const slot = byVideo.get(vid)
+    slot.details.push(it.detail)
+    slot.ids.push(it.id)
+  }
+  if (!byVideo.size) return { pushedIds: [] }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Fetch index.json ONCE up-front instead of per-video — for 55 captures
+  // across many videos this was firing 55+ GitHub API calls each pulling
+  // the full index, which caused the timeouts the user hit on Push All.
+  // ──────────────────────────────────────────────────────────────────────
+  _report('fetching-index')
+  let indexArr = []
+  try {
+    const file = await window.GitHubUtils.getFile(
+      'trexsatya', 'trexsatya.github.io', indexPath, '', 'gh-pages'
+    )
+    indexArr = JSON.parse(file.content)
+    if (!Array.isArray(indexArr)) indexArr = []
+  } catch (e) {
+    console.warn('pushCapturedSubtitlesBatched: index.json fetch failed', e)
+  }
+  const indexByLink = new Map(indexArr.map(it => [it.link, it]))
+
+  // Per (videoId, langCode): collect aggregate entries, pick a baseName +
+  // source, prompt for conflict resolution if needed. The resolution
+  // surfaces here (once) and is reused on every retry inside commitMultipleFiles.
+  const fileSpecs = []          // [{path, getContent}]
+  const indexAdditions = []     // [{link, name, source}] for index.json
+  const allIds = []             // ids to drop from the buffer on success
+  const inMemoryUpdates = []    // [{videoId, baseName, source, sv, en}] for window.allSubtitles
+
+  // Pre-compute per-video specs (everything needed before remote prefetch).
+  const videoSpecs = []
+  for (const [videoId, slot] of byVideo.entries()) {
+    allIds.push(...slot.ids)
+    const indexEntry = indexByLink.get(videoId)
+      ? { ...indexByLink.get(videoId), name: _nfc(indexByLink.get(videoId).name) }
+      : null
+    const baseName = _nfc(indexEntry ? indexEntry.name : buildCapturedSubtitleBaseName(slot.details[0]))
+    const source = indexEntry && indexEntry.source ? indexEntry.source : inferSubtitleSource(slot.details[0])
+    if (!indexEntry) indexAdditions.push({ link: videoId, name: baseName, source })
+
+    const allLines = []
+    const allTranslations = []
+    const sourceLang = slot.details[0].sourceLang
+    const targetLang = slot.details[0].targetLang
+    slot.details.forEach(d => {
+      if (Array.isArray(d.lines))       allLines.push(...d.lines)
+      if (Array.isArray(d.translation)) allTranslations.push(...d.translation)
+    })
+
+    videoSpecs.push({ videoId, slot, baseName, source, sourceLang, targetLang, allLines, allTranslations })
+  }
+
+  // Prefetch existing remote text for every (video × lang) in parallel via
+  // raw.githubusercontent.com. Bounded concurrency so a 55-capture push
+  // doesn't blow Chrome's `ERR_INSUFFICIENT_RESOURCES` ceiling. We use the
+  // raw CDN because index.json's name is the only authority we need — no PAT.
+  const prefetchTargets = []
+  for (const v of videoSpecs) {
+    if (v.sourceLang) prefetchTargets.push({ key: `${v.videoId}|src`, baseName: v.baseName, suffix: v.sourceLang })
+    if (v.targetLang) prefetchTargets.push({ key: `${v.videoId}|tgt`, baseName: v.baseName, suffix: v.targetLang })
+  }
+  const prefetchMap = new Map()
+  const concurrency = Math.min(8, prefetchTargets.length || 1)
+  let prefetchDone = 0
+  _report('prefetching-srts', { done: 0, total: prefetchTargets.length })
+  await _runInBatches(prefetchTargets, async (t) => {
+    try {
+      const r = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(t.baseName + '.' + t.suffix + '.srt')}`, { cache: 'no-cache' })
+      if (r.ok) prefetchMap.set(t.key, await r.text())
+      else prefetchMap.set(t.key, null)
+    } catch (_) {
+      prefetchMap.set(t.key, null)
+    }
+    prefetchDone++
+    _report('prefetching-srts', { done: prefetchDone, total: prefetchTargets.length })
+  }, concurrency)
+
+  // Now resolve conflicts serially (each dialog is modal) and build fileSpecs.
+  for (const v of videoSpecs) {
+    let srcResolution = null
+    let tgtResolution = null
+    const { videoId, baseName, source, sourceLang, targetLang, allLines, allTranslations } = v
+
+    if (sourceLang) {
+      const existingSrc = prefetchMap.get(`${videoId}|src`)
+      if (existingSrc) {
+        const conflicts = detectSrtConflicts(existingSrc, allLines)
+        if (conflicts.length) {
+          srcResolution = await presentSrtMergeDialog(`${sourceLang.toUpperCase()} subtitle (${baseName})`, conflicts)
+          if (srcResolution === null) throw new Error('Merge cancelled by user')
+        }
+      }
+      fileSpecs.push({
+        path: `${srtsDir}/${baseName}.${sourceLang}.srt`,
+        getContent: (current) => current
+          ? mergeSrtWithResolution(current, allLines, srcResolution)
+          : linesToSrtText(allLines)
+      })
+    }
+    if (targetLang) {
+      const existingTgt = prefetchMap.get(`${videoId}|tgt`)
+      if (existingTgt) {
+        const conflicts = detectSrtConflicts(existingTgt, allTranslations)
+        if (conflicts.length) {
+          tgtResolution = await presentSrtMergeDialog(`${targetLang.toUpperCase()} translation (${baseName})`, conflicts)
+          if (tgtResolution === null) throw new Error('Merge cancelled by user')
+        }
+      }
+      fileSpecs.push({
+        path: `${srtsDir}/${baseName}.${targetLang}.srt`,
+        getContent: (current) => current
+          ? mergeSrtWithResolution(current, allTranslations, tgtResolution)
+          : linesToSrtText(allTranslations)
+      })
+    }
+
+    inMemoryUpdates.push({ videoId, baseName, source, sourceLang, targetLang, allLines, allTranslations, srcResolution, tgtResolution })
+  }
+
+  // Diagnostic: log everything we'll send to commitMultipleFiles so we can
+  // see why a "no commit" outcome happened (often: every file's merged text
+  // equals the current remote text → tree entries empty → no commit).
+  console.log('[pushCapturedSubtitlesBatched] preparing commit',
+    'videos=', byVideo.size,
+    'items=', items.length,
+    'fileSpecs=', fileSpecs.map(f => f.path),
+    'indexAdditions=', indexAdditions.length)
+
+  // Add a single index.json update if any new entries.
+  if (indexAdditions.length) {
+    fileSpecs.push({
+      path: indexPath,
+      getContent: (current) => {
+        let arr = []
+        try { arr = current ? JSON.parse(current) : [] } catch (_) {}
+        if (!Array.isArray(arr)) arr = []
+        indexAdditions.forEach(ne => {
+          if (!arr.find(it => it.link === ne.link)) arr.push(ne)
+        })
+        return JSON.stringify(arr, null, 2) + '\n'
+      }
+    })
+  }
+
+  if (!fileSpecs.length) {
+    console.warn('pushCapturedSubtitlesBatched: no files to commit — captures had no sourceLang/targetLang and indexEntry already exists')
+    return { pushedIds: allIds, committed: false, reason: 'no-files' }
+  }
+
+  const commitMessage = `srt: batch update — ${byVideo.size} video${byVideo.size === 1 ? '' : 's'}, ${items.length} capture${items.length === 1 ? '' : 's'}`
+  _report('committing', { files: fileSpecs.length })
+  const commitResult = await window.GitHubUtils.commitMultipleFiles({
+    owner: 'trexsatya',
+    repo: 'trexsatya.github.io',
+    branch: 'gh-pages',
+    commitMessage,
+    files: fileSpecs
+  })
+  // commitMultipleFiles returns { committed: false, reason: 'no-changes' } when
+  // every file's merged content equals what's already on remote (e.g. a
+  // re-push of duplicates, or captures fully subsumed by an existing SRT).
+  // We surface that so the caller doesn't silently clear the buffer thinking
+  // the commit happened.
+  if (commitResult && commitResult.committed === false) {
+    console.warn('pushCapturedSubtitlesBatched: no commit produced', commitResult)
+    return { pushedIds: allIds, committed: false, reason: commitResult.reason || 'no-changes' }
+  }
+
+  // Best-effort in-memory updates so the UI reflects the new state without
+  // a reload. Mirrors what the per-item handleCapturedSubtitle used to do.
+  for (const u of inMemoryUpdates) {
+    const cached = window.allSubtitles[u.videoId] || {}
+    const sv = cached.sv ? mergeSrtWithResolution(cached.sv, u.allLines, u.srcResolution)        : linesToSrtText(u.allLines)
+    const en = cached.en ? mergeSrtWithResolution(cached.en, u.allTranslations, u.tgtResolution) : linesToSrtText(u.allTranslations)
+    window.allSubtitles[u.videoId] = { ...cached, sv, en, source: u.source, fileName: u.baseName }
+    if (Array.isArray(window.srts) && !window.srts.find(it => it.link === u.videoId)) {
+      window.srts.push({ link: u.videoId, name: u.baseName, source: u.source })
+    }
+  }
+
+  return { pushedIds: allIds }
+}
+
 async function handleCapturedSubtitle(detail) {
   if (!detail || !detail.videoId) {
     console.warn('capturedSubtitle: missing videoId', detail)
@@ -5381,9 +7455,9 @@ async function handleCapturedSubtitle(detail) {
   // .en.srt on gh-pages already use it). For new entries, build a fresh,
   // URL-safe, length-capped name. Both languages use the same baseName so
   // the .sv / .en pair share a filesystem-friendly prefix.
-  const baseName = indexEntry
+  const baseName = _nfc(indexEntry
     ? indexEntry.name
-    : buildCapturedSubtitleBaseName(detail)
+    : buildCapturedSubtitleBaseName(detail))
   const source = indexEntry && indexEntry.source
     ? indexEntry.source
     : inferSubtitleSource(detail)
@@ -5412,13 +7486,34 @@ async function handleCapturedSubtitle(detail) {
     }
   }
 
+  // Detect conflicting entries (same start, different text) before merging
+  // anything. If any exist, show the merge dialog so the user picks per
+  // timestamp; we thread the resolution into uploadSrtToGithub so it's
+  // re-applied on every retry of the commit (in case of 409/422).
+  let sourceResolution = null
+  let targetResolution = null
+  if (existingSourceText) {
+    const conflicts = detectSrtConflicts(existingSourceText, lines)
+    if (conflicts.length) {
+      sourceResolution = await presentSrtMergeDialog(`${(sourceLang || 'source').toUpperCase()} subtitle`, conflicts)
+      if (sourceResolution === null) throw new Error('Merge cancelled by user')
+    }
+  }
+  if (existingTargetText) {
+    const conflicts = detectSrtConflicts(existingTargetText, translation)
+    if (conflicts.length) {
+      targetResolution = await presentSrtMergeDialog(`${(targetLang || 'target').toUpperCase()} translation`, conflicts)
+      if (targetResolution === null) throw new Error('Merge cancelled by user')
+    }
+  }
+
   // sourceLang corresponds to the language being studied (stored under `sv` in allSubtitles),
   // targetLang corresponds to the translation (stored under `en`).
   const sourceText = existingSourceText
-    ? mergeSrtWithNewEntries(existingSourceText, lines)
+    ? mergeSrtWithResolution(existingSourceText, lines, sourceResolution)
     : linesToSrtText(lines)
   const targetText = existingTargetText
-    ? mergeSrtWithNewEntries(existingTargetText, translation)
+    ? mergeSrtWithResolution(existingTargetText, translation, targetResolution)
     : linesToSrtText(translation)
 
   window.allSubtitles[videoId] = {
@@ -5429,13 +7524,18 @@ async function handleCapturedSubtitle(detail) {
     fileName: baseName
   }
 
+  // Push only the new entries; uploadSrtToGithub re-fetches the real-time
+  // remote and merges them in (with the user's conflict resolution
+  // re-applied), so concurrent captures on another client are preserved.
   if (sourceLang) {
-    await uploadSrtToGithub(baseName, sourceLang, sourceText,
-      `srt: ${isNew ? 'add' : 'merge'} ${sourceLang} subtitle for ${videoId}`)
+    await uploadSrtToGithub(baseName, sourceLang, lines,
+      `srt: ${isNew ? 'add' : 'merge'} ${sourceLang} subtitle for ${videoId}`,
+      sourceResolution)
   }
   if (targetLang) {
-    await uploadSrtToGithub(baseName, targetLang, targetText,
-      `srt: ${isNew ? 'add' : 'merge'} ${targetLang} subtitle for ${videoId}`)
+    await uploadSrtToGithub(baseName, targetLang, translation,
+      `srt: ${isNew ? 'add' : 'merge'} ${targetLang} subtitle for ${videoId}`,
+      targetResolution)
   }
 
   // Only touch index.json when the entry actually needs to be added.
@@ -5453,7 +7553,6 @@ function isLocalhost() {
 
 if (isLocalhost()) {
   $('#saveRevisionBtn').show()
-  $('#saveStarredLinesBtn').show()
 
   setInterval(() => {
     fetch("http://localhost:5000/vocabulary?lang=" + getLangFromUrl().fullName)
@@ -5559,8 +7658,2802 @@ async function playMediaSlice(url, start, end, source) {
   await a.play()
 }
 
+// ─── Search-recording feature ────────────────────────────────────────────
+//
+// Lets the user collect a playlist of subtitle matches across multiple
+// searches, then replay them back-to-back as a YouTube reel. Storage
+// lives in localStorage (per-browser, no GitHub round-trip on every
+// capture) under the shape:
+//   { [searchText]: { [word]: [ { searchText, word, id, source, timeStart, timeEnd } ] } }
+// where `id` is the video URL/id (matches `play-btn-container[data-url]`).
+//
+// State machine: idle → recording ⇄ paused → idle. Stop drops back to idle
+// but keeps the buffer. "Clear All" wipes the buffer.
+
+// Storage for the multi-playlist model:
+//   cupitor:recordings        — { [name]: { items, createdAt, updatedAt } }
+//   cupitor:recording:current — name of the currently-active recording
+//   cupitor:recording:state   — idle | recording | paused
+//   cupitor:recording (legacy)— single buffer; migrated to "Default" on load
+const REC_KEY            = 'cupitor:recording'           // legacy
+const REC_STATE_KEY      = 'cupitor:recording:state'
+const REC_COLLECTION_KEY = 'cupitor:recordings'
+const REC_CURRENT_KEY    = 'cupitor:recording:current'
+const REC_DEFAULT_NAME   = 'Default'
+
+window._recordings = { [REC_DEFAULT_NAME]: { items: {}, createdAt: Date.now(), updatedAt: Date.now() } }
+window._recording  = { state: 'idle', currentName: REC_DEFAULT_NAME, items: window._recordings[REC_DEFAULT_NAME].items }
+
+// Make sure every item has `enabled` defined. Used during load + after any
+// data import.
+function _backfillEnabled(items) {
+  Object.values(items || {}).forEach(byWord => {
+    Object.values(byWord).forEach(arr => arr.forEach(it => {
+      if (it && typeof it === 'object' && it.enabled == null) it.enabled = true
+    }))
+  })
+}
+
+function _loadRecording() {
+  try {
+    const state = localStorage.getItem(REC_STATE_KEY) || 'idle'
+    let coll = {}
+    let raw = localStorage.getItem(REC_COLLECTION_KEY)
+    if (raw) {
+      try { coll = JSON.parse(raw) } catch (_) { coll = {} }
+    }
+    // Migrate from the legacy single-buffer key if the collection key is empty.
+    if (!coll || typeof coll !== 'object' || !Object.keys(coll).length) {
+      try {
+        const legacy = JSON.parse(localStorage.getItem(REC_KEY) || '{}')
+        if (legacy && typeof legacy === 'object' && Object.keys(legacy).length) {
+          coll = { [REC_DEFAULT_NAME]: { items: legacy, createdAt: Date.now(), updatedAt: Date.now() } }
+        }
+      } catch (_) {}
+    }
+    if (!coll || typeof coll !== 'object') coll = {}
+    if (!Object.keys(coll).length) {
+      coll[REC_DEFAULT_NAME] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }
+    }
+    // Normalise each entry: ensure shape and backfill `enabled`. Virtual
+    // playlists carry only a `members` array, no items.
+    Object.keys(coll).forEach(name => {
+      const r = coll[name]
+      if (!r || typeof r !== 'object') { coll[name] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }; return }
+      if (r.virtual) {
+        if (!Array.isArray(r.members)) r.members = []
+        delete r.items   // ensure no stale materialised items linger
+        return
+      }
+      if (!r.items || typeof r.items !== 'object') r.items = {}
+      _backfillEnabled(r.items)
+    })
+
+    const currentName = localStorage.getItem(REC_CURRENT_KEY)
+    const activeName = (currentName && coll[currentName]) ? currentName : Object.keys(coll)[0]
+
+    window._recordings = coll
+    const activeVirtual = !!(coll[activeName] && coll[activeName].virtual)
+    window._recording = {
+      state: ['idle','recording','paused'].includes(state) ? state : 'idle',
+      currentName: activeName,
+      virtual: activeVirtual,
+      items: activeVirtual ? _resolveVirtualItems(activeName) : coll[activeName].items
+    }
+  } catch (_) {
+    window._recordings = { [REC_DEFAULT_NAME]: { items: {}, createdAt: Date.now(), updatedAt: Date.now() } }
+    window._recording = { state: 'idle', currentName: REC_DEFAULT_NAME, items: window._recordings[REC_DEFAULT_NAME].items }
+  }
+}
+
+// True if at least one entry for (searchText, word, id, lineIndex) exists
+// in the recording. Items can be added multiple times (repetition, different
+// timestamps); the capture-btn stays marked as long as any entry for this
+// specific line remains, and only unmarks when the last duplicate is gone.
+function _isCaptured(searchText, word, url, lineIndex) {
+  const items = window._recording && window._recording.items
+  const arr = items && items[searchText] && items[searchText][word]
+  if (!arr || !arr.length) return false
+  const li = parseInt(lineIndex, 10)
+  return arr.some(it => it && it.id === url && parseInt(it.lineIndex, 10) === li)
+}
+
+// Walk every `.capture-btn` in the document and add/remove the persistent
+// `.is-captured` class based on the current recording buffer. Call after
+// renderLines, after capture/remove, and after clearRecording.
+function _markCapturedButtons() {
+  $('.capture-btn').each(function () {
+    const $btn = $(this)
+    const $linesCntnr = $btn.closest('.lines-cntnr')
+    const $pbc = $linesCntnr.find('.play-btn-container').first()
+    const url       = ($pbc.attr('data-url') || '').toString()
+    const lineIndex = parseInt($pbc.attr('data-match-line-index'), 10)
+    const word      = ($linesCntnr.closest('.srt-file').find('h4[data-file]').first().text() || '').trim()
+    const searchText= (window.searchText || '').trim()
+    const yes = url && Number.isFinite(lineIndex) && _isCaptured(searchText, word, url, lineIndex)
+    $btn.toggleClass('is-captured', !!yes)
+  })
+}
+window._markCapturedButtons = _markCapturedButtons
+
+const REC_DIRTY_KEY = 'cupitor:recordings:dirty'
+
+function _saveRecording() {
+  try {
+    // Keep the active recording's items pointer in sync with the collection
+    // entry — capture/remove/reorder mutate window._recording.items by
+    // reference, and the collection entry is the same object, so this just
+    // bumps updatedAt and serialises.
+    const name = window._recording.currentName
+    if (window._recordings[name]) {
+      // Never write resolved items back into a virtual playlist — that would
+      // materialise (and duplicate) the union, defeating the whole point.
+      if (!window._recordings[name].virtual) {
+        window._recordings[name].items = window._recording.items
+      }
+      window._recordings[name].updatedAt = Date.now()
+    }
+    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(window._recordings))
+    localStorage.setItem(REC_CURRENT_KEY, name)
+    localStorage.setItem(REC_STATE_KEY, window._recording.state)
+    // Best-effort cleanup of the legacy single-buffer key once we've fully
+    // moved to the collection model.
+    try { localStorage.removeItem(REC_KEY) } catch (_) {}
+    // Mark dirty so the Sync button in the review dialog lights up. Cleared
+    // on a successful sync to GitHub.
+    window._recordingsDirty = true
+    try { localStorage.setItem(REC_DIRTY_KEY, '1') } catch (_) {}
+    _refreshRecordingSyncBtn()
+  } catch (e) { console.warn('saveRecording failed', e) }
+}
+
+// ── GitHub sync for recordings ───────────────────────────────────────────
+// Recordings live primarily in localStorage so they're free and instant.
+// The Sync button in the review dialog pushes the local collection to
+// db/language/${lang}/recordings.json so the same playlists show up on
+// other devices. Conflict resolution is union-by-item: on commit, the
+// merge callback unions remote+local per (recordingName, searchText, word)
+// keyed by (id, lineIndex), so concurrent captures from another device
+// are preserved.
+
+function recordingsFilePath() {
+  const lang = getLangFromUrl()
+  return `db/language/${lang.fullName}/recordings.json`
+}
+
+function mergeRecordingCollections(localColl, remoteColl) {
+  const out = {}
+  const allNames = new Set([...Object.keys(localColl || {}), ...Object.keys(remoteColl || {})])
+  allNames.forEach(name => {
+    const a = (localColl && localColl[name]) || null
+    const b = (remoteColl && remoteColl[name]) || null
+    if (!a) { out[name] = b; return }
+    if (!b) { out[name] = a; return }
+    // Virtual playlists carry no items — merge them by unioning members
+    // (newer's order first). If only one side is virtual, prefer the newer.
+    if (a.virtual || b.virtual) {
+      const aNewerV = (a.updatedAt || 0) >= (b.updatedAt || 0)
+      const newer = aNewerV ? a : b
+      const older = aNewerV ? b : a
+      if (newer.virtual) {
+        const members = []
+        const seen = new Set()
+        ;[].concat(newer.members || [], older.virtual ? (older.members || []) : []).forEach(m => {
+          if (m && !seen.has(m)) { seen.add(m); members.push(m) }
+        })
+        out[name] = {
+          virtual: true,
+          members,
+          createdAt: Math.min(a.createdAt || Date.now(), b.createdAt || Date.now()),
+          updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0)
+        }
+      } else {
+        out[name] = newer   // newer side is a real playlist — it wins
+      }
+      return
+    }
+    // Merge items: union by (id, lineIndex) within each (searchText, word).
+    const mergedItems = {}
+    const stKeys = new Set([...Object.keys(a.items || {}), ...Object.keys(b.items || {})])
+    const aNewer = (a.updatedAt || 0) >= (b.updatedAt || 0)
+    const first = aNewer ? a : b
+    const second = aNewer ? b : a
+    stKeys.forEach(st => {
+      mergedItems[st] = {}
+      const fByW = (first.items && first.items[st]) || {}
+      const sByW = (second.items && second.items[st]) || {}
+      const wKeys = new Set([...Object.keys(fByW), ...Object.keys(sByW)])
+      wKeys.forEach(w => {
+        const seen = new Set()
+        const dest = []
+        const push = (arr) => (arr || []).forEach(it => {
+          if (!it) return
+          const k = `${it.id}|${it.lineIndex}`
+          if (seen.has(k)) return
+          seen.add(k)
+          dest.push(it)
+        })
+        push(fByW[w])    // newer wins on order
+        push(sByW[w])
+        mergedItems[st][w] = dest
+      })
+    })
+    out[name] = {
+      items: mergedItems,
+      createdAt: Math.min(a.createdAt || Date.now(), b.createdAt || Date.now()),
+      updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0)
+    }
+  })
+  return out
+}
+
+async function loadRecordingsFromGithub() {
+  try {
+    const r = await fetch(`${getResourceUrl()}/recordings.json`, { cache: 'no-cache' })
+    if (!r.ok) return null
+    const text = await r.text()
+    if (!text || !text.trim()) return null
+    const parsed = JSON.parse(text)
+    if (!parsed || typeof parsed !== 'object') return null
+    return parsed
+  } catch (e) {
+    console.warn('loadRecordingsFromGithub failed', e)
+    return null
+  }
+}
+
+// Merge whatever's currently on github into the local in-memory collection.
+// Called once during boot so the user's other-device captures show up. Does
+// NOT clear the dirty flag — local captures since last sync stay dirty.
+async function _mergeRemoteRecordingsIntoLocal() {
+  const remote = await loadRecordingsFromGithub()
+  if (!remote) return
+  const merged = mergeRecordingCollections(window._recordings || {}, remote)
+  window._recordings = merged
+  // Keep the active recording's items pointer in sync with the merged entry.
+  const cur = window._recording.currentName
+  if (merged[cur]) window._recording.items = merged[cur].items
+  // Persist without bumping dirty.
+  try {
+    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(window._recordings))
+  } catch (_) {}
+  _updateRecordingUI()
+  _markCapturedButtons()
+}
+
+async function syncRecordingsToGithub() {
+  const filePath = recordingsFilePath()
+  const $btn = $('#recRecSync')
+  $btn.prop('disabled', true).addClass('syncing')
+  try {
+    await commitWithMerge({
+      filePath,
+      commitMessage: 'recordings: sync via language tool',
+      merge: (remoteText) => {
+        let remote = {}
+        try { remote = remoteText ? JSON.parse(remoteText) : {} } catch (_) {}
+        if (!remote || typeof remote !== 'object') remote = {}
+        const merged = mergeRecordingCollections(window._recordings || {}, remote)
+        // Adopt the merge result so subsequent local edits start from the
+        // post-sync baseline, and a 409/422 retry sees fresh state.
+        window._recordings = merged
+        const cur = window._recording.currentName
+        if (merged[cur]) window._recording.items = merged[cur].items
+        try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(merged)) } catch (_) {}
+        return JSON.stringify(merged, null, 2) + '\n'
+      }
+    })
+    window._recordingsDirty = false
+    try { localStorage.removeItem(REC_DIRTY_KEY) } catch (_) {}
+  } catch (e) {
+    console.error('syncRecordingsToGithub failed', e)
+    alert('Sync failed: ' + (e && e.message || e))
+    throw e
+  } finally {
+    $btn.prop('disabled', false).removeClass('syncing')
+    _refreshRecordingSyncBtn()
+    _updateRecordingUI()
+  }
+}
+
+function _refreshRecordingSyncBtn() {
+  const $btn = $('#recRecSync')
+  if (!$btn.length) return
+  $btn.toggleClass('rec-rec-dirty', !!window._recordingsDirty)
+  $btn.find('.rec-rec-lbl').text(window._recordingsDirty ? 'Sync*' : 'Sync')
+  $btn.attr('title', window._recordingsDirty
+    ? 'Push local recordings to GitHub (unsynced changes)'
+    : 'Push local recordings to GitHub (in sync)')
+}
+
+// ── Multi-recording CRUD ────────────────────────────────────────────────
+// `recordings` here means named playlists. The currently active one is the
+// target of all capture / remove / play / reorder operations.
+
+function listRecordings() {
+  return Object.keys(window._recordings || {}).sort((a, b) => a.localeCompare(b))
+}
+
+// A virtual playlist stores no items of its own — only a `members` list of
+// real-playlist names. Its items are resolved on demand (select / play /
+// review) as the union of its members'. This keeps combinations free in
+// storage. `members` is filtered to existing, non-virtual playlists so a
+// deleted/renamed member silently drops out.
+function _isVirtual(name) {
+  const r = window._recordings && window._recordings[name]
+  return !!(r && r.virtual)
+}
+function _virtualMembers(name) {
+  const r = window._recordings && window._recordings[name]
+  if (!r || !r.virtual || !Array.isArray(r.members)) return []
+  return r.members.filter(m => window._recordings[m] && !window._recordings[m].virtual)
+}
+
+// Resolve a virtual playlist's items to a single items-map (the same
+// { [searchText]: { [word]: [items] } } shape as a real playlist). Item
+// objects are REFERENCED, not copied, so this stays memory-cheap. Order
+// follows the members list, then each member's own order, unioned by
+// (id, lineIndex) within each (searchText, word).
+function _resolveVirtualItems(name) {
+  const out = {}
+  _virtualMembers(name).forEach(m => {
+    const items = (window._recordings[m] && window._recordings[m].items) || {}
+    Object.keys(items).forEach(st => {
+      if (!out[st]) out[st] = {}
+      Object.keys(items[st]).forEach(w => {
+        if (!out[st][w]) out[st][w] = []
+        const seen = new Set(out[st][w].map(it => `${it.id}|${it.lineIndex}`))
+        ;(items[st][w] || []).forEach(it => {
+          if (!it) return
+          const k = `${it.id}|${it.lineIndex}`
+          if (seen.has(k)) return
+          seen.add(k)
+          out[st][w].push(it)
+        })
+      })
+    })
+  })
+  return out
+}
+
+// Items-map for any playlist by name — resolves virtual ones.
+function _itemsForRecording(name) {
+  if (_isVirtual(name)) return _resolveVirtualItems(name)
+  return (window._recordings[name] && window._recordings[name].items) || {}
+}
+
+function _recordingItemCountIn(items) {
+  return Object.values(items || {}).reduce(
+    (sum, words) => sum + Object.values(words).reduce((s2, arr) => s2 + arr.length, 0), 0)
+}
+function _recordingItemCountByName(name) {
+  return _recordingItemCountIn(_itemsForRecording(name))
+}
+
+function selectRecording(name) {
+  if (!window._recordings[name]) return false
+  window._recording.currentName = name
+  window._recording.virtual = _isVirtual(name)
+  // For a virtual playlist, items is a freshly-resolved union (read-only —
+  // capture/edit is blocked while a virtual playlist is active). For a real
+  // one, we point at the live items object so captures mutate it in place.
+  window._recording.items = window._recording.virtual
+    ? _resolveVirtualItems(name)
+    : window._recordings[name].items
+  _saveRecording()
+  _updateRecordingUI()
+  _markCapturedButtons()
+  return true
+}
+
+function createRecording(name) {
+  name = String(name || '').trim()
+  if (!name) return false
+  if (window._recordings[name]) {
+    alert(`A recording named "${name}" already exists.`)
+    return false
+  }
+  window._recordings[name] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }
+  selectRecording(name)
+  return true
+}
+
+// Create a virtual playlist that combines the given real-playlist members.
+function createVirtualRecording(name, members) {
+  name = String(name || '').trim()
+  if (!name) return false
+  if (window._recordings[name]) {
+    alert(`A recording named "${name}" already exists.`)
+    return false
+  }
+  const valid = (members || []).filter(m => window._recordings[m] && !window._recordings[m].virtual)
+  if (!valid.length) {
+    alert('Pick at least one real playlist to combine.')
+    return false
+  }
+  window._recordings[name] = {
+    virtual: true,
+    members: valid,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  }
+  selectRecording(name)
+  return true
+}
+window.createVirtualRecording = createVirtualRecording
+
+// Update an existing virtual playlist's member list.
+function setVirtualMembers(name, members) {
+  const r = window._recordings && window._recordings[name]
+  if (!r || !r.virtual) return false
+  const valid = (members || []).filter(m => window._recordings[m] && !window._recordings[m].virtual)
+  if (!valid.length) { alert('A virtual playlist needs at least one member.'); return false }
+  r.members = valid
+  r.updatedAt = Date.now()
+  // Re-resolve if it's the active one.
+  if (window._recording.currentName === name) {
+    window._recording.items = _resolveVirtualItems(name)
+  }
+  _saveRecording()
+  return true
+}
+window.setVirtualMembers = setVirtualMembers
+
+function renameRecording(oldName, newName) {
+  oldName = String(oldName || '')
+  newName = String(newName || '').trim()
+  if (!newName || !window._recordings[oldName]) return false
+  if (newName === oldName) return true
+  if (window._recordings[newName]) {
+    alert(`A recording named "${newName}" already exists.`)
+    return false
+  }
+  window._recordings[newName] = window._recordings[oldName]
+  delete window._recordings[oldName]
+  if (window._recording.currentName === oldName) {
+    window._recording.currentName = newName
+  }
+  _saveRecording()
+  return true
+}
+
+function deleteRecording(name) {
+  if (!window._recordings[name]) return false
+  const isV = _isVirtual(name)
+  const count = isV ? _recordingItemCountByName(name) : _recordingItemCountIn(window._recordings[name].items)
+  const kind = isV ? 'virtual playlist' : 'recording'
+  if (!confirm(`Delete ${kind} "${name}"${count ? ` (${count} item${count === 1 ? '' : 's'})` : ''}? This cannot be undone.`)) return false
+  delete window._recordings[name]
+  if (!Object.keys(window._recordings).length) {
+    window._recordings[REC_DEFAULT_NAME] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }
+  }
+  // If we deleted the active one, switch to the first remaining (resolving
+  // virtual items if that happens to be a virtual playlist).
+  if (window._recording.currentName === name) {
+    const next = Object.keys(window._recordings)[0]
+    window._recording.currentName = next
+    window._recording.virtual = _isVirtual(next)
+    window._recording.items = window._recording.virtual
+      ? _resolveVirtualItems(next)
+      : window._recordings[next].items
+  }
+  _saveRecording()
+  _updateRecordingUI()
+  _markCapturedButtons()
+  return true
+}
+
+function duplicateRecording(name, newName) {
+  if (!window._recordings[name]) return false
+  newName = String(newName || (name + ' (copy)')).trim()
+  if (window._recordings[newName]) {
+    alert(`A recording named "${newName}" already exists.`)
+    return false
+  }
+  if (window._recordings[name].virtual) {
+    // Duplicating a virtual playlist copies its member list, not items.
+    window._recordings[newName] = {
+      virtual: true,
+      members: (window._recordings[name].members || []).slice(),
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }
+  } else {
+    // Deep clone so the copy doesn't share array refs with the source.
+    const copy = JSON.parse(JSON.stringify(window._recordings[name].items || {}))
+    window._recordings[newName] = { items: copy, createdAt: Date.now(), updatedAt: Date.now() }
+  }
+  selectRecording(newName)
+  return true
+}
+
+function _recordingItemCount() {
+  return Object.values(window._recording.items || {}).reduce(
+    (sum, words) => sum + Object.values(words).reduce((s2, arr) => s2 + arr.length, 0), 0)
+}
+
+function _updateRecordingUI() {
+  const s = window._recording.state
+  $('#recStartBtn').toggle(s === 'idle').toggleClass('is-recording', false)
+  $('#recPauseBtn').toggle(s === 'recording')
+  $('#recResumeBtn').toggle(s === 'paused')
+  $('#recStopBtn').toggle(s !== 'idle')
+  $('body').toggleClass('rec-active', s !== 'idle')
+  $('body').toggleClass('rec-paused', s === 'paused')
+  const n = _recordingItemCount()
+  const name = window._recording.currentName || REC_DEFAULT_NAME
+  $('#recStatus').text(
+    s === 'idle'      ? (n ? `[${name}] · ${n} item${n===1?'':'s'} saved` : `[${name}]`)
+    : s === 'paused'  ? `[${name}] · paused · ${n} item${n===1?'':'s'}`
+    :                   `[${name}] · recording · ${n} item${n===1?'':'s'}`
+  )
+}
+
+function startRecording()  {
+  // Can't capture into a virtual playlist — it's just a view over real ones.
+  if (window._recording.virtual) {
+    alert(`"${window._recording.currentName}" is a virtual playlist (a combination of others). Switch to a real playlist to record into.`)
+    return
+  }
+  window._recording.state = 'recording'
+  _saveRecording()
+  _updateRecordingUI()
+  // Close the settings dialog so the user can see the capture buttons
+  // appear next to each match on the results page (especially relevant
+  // on mobile where the dialog covers the whole viewport).
+  try { autoHideSettingsPanel() } catch (_) {}
+}
+function pauseRecording()  { if (window._recording.state === 'recording') { window._recording.state = 'paused';    _saveRecording(); _updateRecordingUI() } }
+function resumeRecording() { if (window._recording.state === 'paused')    { window._recording.state = 'recording'; _saveRecording(); _updateRecordingUI() } }
+function stopRecording()   { window._recording.state = 'idle'; _saveRecording(); _updateRecordingUI() }
+function clearRecording()  {
+  if (window._recording.virtual) {
+    alert('A virtual playlist has no items of its own — clear its member playlists instead.')
+    return
+  }
+  if (!confirm(`Discard all items in "${window._recording.currentName}"?`)) return
+  // Clear in place — items is a live reference to the active recording's
+  // bucket inside window._recordings, so replacing with {} would orphan it.
+  Object.keys(window._recording.items).forEach(k => delete window._recording.items[k])
+  _saveRecording()
+  _updateRecordingUI()
+  _markCapturedButtons()
+}
+
+// Click handler for `.capture-btn` next to a match's .buttons row. Walks
+// up to the surrounding .lines-cntnr to pull out url / source / times,
+// then up to .srt-file > h4[data-file] to recover the `word` heading.
+function _captureMatchFromButton($capBtn) {
+  if (window._recording.state !== 'recording') return
+  const $linesCntnr = $capBtn.closest('.lines-cntnr')
+  if (!$linesCntnr.length) return
+  const $pbc = $linesCntnr.find('.play-btn-container').first()
+  if (!$pbc.length) return
+  const url       = ($pbc.attr('data-url')        || '').toString()
+  const source    = ($pbc.attr('data-source')     || '').toString()
+  const timeStart = parseInt($pbc.attr('data-time-start'), 10)
+  const timeEnd   = parseInt($pbc.attr('data-time-end'),   10)
+  const lineIndex = parseInt($pbc.attr('data-match-line-index'), 10)
+  const word      = ($linesCntnr.closest('.srt-file').find('h4[data-file]').first().text() || '').trim()
+  const searchText= (window.searchText || '').trim()
+  if (!searchText || !word || !url || !Number.isFinite(timeStart) || !Number.isFinite(lineIndex)) {
+    console.warn('captureMatch: missing required field', { searchText, word, url, timeStart, lineIndex })
+    return
+  }
+
+  const items = window._recording.items
+  if (!items[searchText])       items[searchText]       = {}
+  if (!items[searchText][word]) items[searchText][word] = []
+  // Duplicates are intentionally allowed: same (id, lineIndex) can repeat
+  // for playback repetition; same id with a different lineIndex is a
+  // different timestamp on the same video. Both add a fresh entry.
+  items[searchText][word].push({ searchText, word, id: url, source, timeStart, timeEnd, lineIndex, enabled: true })
+  _saveRecording()
+  _updateRecordingUI()
+  // Brief flash on the clicked button, then rewalk everything so any other
+  // capture-btn for the same (st, w, id) also picks up the is-captured
+  // state (e.g. other line-matches of the same video for this search).
+  $capBtn.addClass('captured')
+  setTimeout(() => {
+    $capBtn.removeClass('captured')
+    _markCapturedButtons()
+  }, 500)
+}
+
+function removeRecordedItem(searchText, word, idx) {
+  const items = window._recording.items
+  if (!items[searchText] || !items[searchText][word]) return
+  items[searchText][word].splice(idx, 1)
+  if (items[searchText][word].length === 0) delete items[searchText][word]
+  if (Object.keys(items[searchText]).length === 0) delete items[searchText]
+  _saveRecording()
+  _updateRecordingUI()
+  _markCapturedButtons()
+}
+
+// Purge every recorded item that references `videoId` (item.id) from ALL
+// real playlists. Called when a video is deleted from the media library, or
+// when the user confirms deletion of an unavailable video during playback.
+// Virtual playlists hold no items of their own (they resolve their members
+// on demand), so cleaning the real playlists is sufficient — but we refresh
+// the active playlist's live items pointer afterwards so the open UI matches.
+// Returns the number of items removed.
+function removeVideoFromAllPlaylists(videoId) {
+  if (!videoId || !window._recordings) return 0
+  let removed = 0
+  Object.keys(window._recordings).forEach(name => {
+    const pl = window._recordings[name]
+    if (!pl || pl.virtual || !pl.items) return
+    const items = pl.items
+    Object.keys(items).forEach(st => {
+      Object.keys(items[st]).forEach(w => {
+        const before = items[st][w].length
+        items[st][w] = items[st][w].filter(it => it && it.id !== videoId)
+        removed += before - items[st][w].length
+        if (items[st][w].length === 0) delete items[st][w]
+      })
+      if (Object.keys(items[st]).length === 0) delete items[st]
+    })
+  })
+  if (removed > 0) {
+    // Re-sync the active recording's items view (real → same object ref;
+    // virtual → re-resolve the union now that a member changed).
+    const cur = window._recording && window._recording.currentName
+    if (cur && window._recordings[cur]) {
+      window._recording.items = _isVirtual(cur)
+        ? _resolveVirtualItems(cur)
+        : window._recordings[cur].items
+    }
+    _saveRecording()
+    try { _updateRecordingUI() } catch (_) {}
+    try { _markCapturedButtons() } catch (_) {}
+  }
+  return removed
+}
+window.removeVideoFromAllPlaylists = removeVideoFromAllPlaylists
+
+// Toggle include/exclude on a single recorded item (used by review-dialog
+// checkboxes). Doesn't refresh the dialog — the checkbox state is already
+// reflected in the DOM by the user's click.
+function _setRecordedItemEnabled(searchText, word, idx, enabled) {
+  const items = window._recording.items
+  const arr = items && items[searchText] && items[searchText][word]
+  if (!arr || !arr[idx]) return
+  arr[idx].enabled = !!enabled
+  _saveRecording()
+}
+
+// Reorder helpers — Sortable lets the user drag rows within a word group.
+// We rewrite the (searchText, word) array in the order the DOM presents,
+// keyed by data-idx so the original indices stay intact regardless of order.
+function _reorderWordItems(searchText, word, newOrderIdxs) {
+  const items = window._recording.items
+  const arr = items && items[searchText] && items[searchText][word]
+  if (!arr) return
+  const next = newOrderIdxs.map(i => arr[i]).filter(Boolean)
+  items[searchText][word] = next
+  _saveRecording()
+}
+
+// Insert a duplicate of the item at (st, w, idx) immediately AFTER the
+// original. Useful for repetition without leaving the review dialog.
+// Returns true on success.
+function duplicateRecordedItem(st, w, idx) {
+  const items = window._recording && window._recording.items
+  const arr = items && items[st] && items[st][w]
+  if (!arr || !arr[idx]) return false
+  const copy = { ...arr[idx] }
+  arr.splice(idx + 1, 0, copy)
+  _saveRecording()
+  _updateRecordingUI()
+  try { _markCapturedButtons() } catch (_) {}
+  return true
+}
+window.duplicateRecordedItem = duplicateRecordedItem
+
+// Truncate a single-line preview string. Collapses internal whitespace so
+// multi-line SRT entries render as one line in the review dialog.
+function _truncatePreview(s, n) {
+  s = String(s || '').replace(/\s+/g, ' ').trim()
+  return s.length > n ? s.slice(0, n - 1) + '…' : s
+}
+
+// Resolve the source-language line text for an item. Returns '' if the
+// subtitles aren't in memory yet — the caller can either show a
+// placeholder or trigger an async fetch via _lazyLoadRecItemPreviews.
+function _previewTextForRecItem(it) {
+  if (!it || it.lineIndex == null) return ''
+  const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv'
+  try { return _getRawSubtitleLineText(it.id, lang, it.lineIndex) || '' } catch (_) { return '' }
+}
+
+// After the review dialog renders, lazy-fetch subtitles for any items
+// whose source SRT wasn't already in window.allSubtitles. We dedupe by
+// videoId so 20 items pointing at the same video make one fetch.
+async function _lazyLoadRecItemPreviews($dlg) {
+  const $pending = $dlg.find('.rec-item-preview[data-pending="1"]')
+  if (!$pending.length) return
+  const ids = new Set()
+  $pending.each(function () {
+    const id = String($(this).attr('data-id') || '')
+    if (id) ids.add(id)
+  })
+  const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv'
+  await Promise.all(Array.from(ids).map(async id => {
+    try { await getSubtitlesForLink(id) } catch (_) {}
+  }))
+  $pending.each(function () {
+    const $p = $(this)
+    const id   = String($p.attr('data-id') || '')
+    const line = String($p.attr('data-line') || '')
+    const text = _getRawSubtitleLineText(id, lang, line)
+    $p.removeAttr('data-pending')
+    if (text) {
+      $p.text(_truncatePreview(text, 80))
+    } else {
+      $p.text('(no preview available)').addClass('rec-item-preview-missing')
+    }
+  })
+}
+
+// Copy a single recorded item from one playlist (recording) to another.
+// The source entry is left intact — useful for sharing a clip across
+// playlists without losing the original. Returns true on success.
+function copyItemToPlaylist(srcRecName, st, w, idx, destRecName) {
+  if (!srcRecName || !destRecName || srcRecName === destRecName) return false
+  const src = window._recordings && window._recordings[srcRecName]
+  const dst = window._recordings && window._recordings[destRecName]
+  if (!src || !dst) return false
+  if (dst.virtual) { alert('Cannot copy into a virtual playlist — add the source playlist as a member instead.'); return false }
+  const it = src.items && src.items[st] && src.items[st][w] && src.items[st][w][idx]
+  if (!it) return false
+  if (!dst.items[st])       dst.items[st]       = {}
+  if (!dst.items[st][w])    dst.items[st][w]    = []
+  dst.items[st][w].push({ ...it })
+  dst.updatedAt = Date.now()
+  try {
+    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(window._recordings))
+    window._recordingsDirty = true
+    localStorage.setItem(REC_DIRTY_KEY, '1')
+    try { _refreshRecordingSyncBtn() } catch (_) {}
+  } catch (_) {}
+  return true
+}
+window.copyItemToPlaylist = copyItemToPlaylist
+
+// Cycle helper for the loop button: off → one → playlist → all → off.
+const REC_LOOP_ORDER = ['off', 'one', 'playlist', 'all']
+function _nextLoopMode(cur) {
+  const i = REC_LOOP_ORDER.indexOf(cur || 'off')
+  return REC_LOOP_ORDER[(i + 1) % REC_LOOP_ORDER.length]
+}
+
+// Player-overlay toggles for shuffle and loop. They mutate _appSettings so
+// the choices persist across sessions, and they update the LIVE queue when
+// possible so the change is felt without restarting playback.
+function toggleRecPlayShuffle() {
+  const cur = !!(window._appSettings && window._appSettings.recPlayShuffle)
+  window._appSettings.recPlayShuffle = !cur
+  try { saveAppSettings() } catch (_) {}
+  // If we're already playing, re-shuffle the queue tail (everything AFTER
+  // the currently-playing item) so the change is heard immediately. We
+  // don't touch the item the user is hearing right now. Turning shuffle
+  // off mid-playback doesn't try to "unshuffle" — that history isn't
+  // recoverable cheaply; the next play session will reflect the new flag.
+  if (!cur && window._playingRecording && Array.isArray(window._recPlayQueue)) {
+    const q = window._recPlayQueue
+    const i = window._recPlayIndex || 0
+    const tail = q.slice(i + 1)
+    _shuffleQueue(tail)
+    tail.forEach((it, k) => { q[i + 1 + k] = it })
+  }
+  _refreshRecPlayModeBtns()
+}
+function cycleRecPlayLoopMode() {
+  const next = _nextLoopMode((window._appSettings && window._appSettings.recPlayLoop) || 'off')
+  window._appSettings.recPlayLoop = next
+  try { saveAppSettings() } catch (_) {}
+  _refreshRecPlayModeBtns()
+}
+function _refreshRecPlayModeBtns() {
+  const sh = !!(window._appSettings && window._appSettings.recPlayShuffle)
+  const lm = (window._appSettings && window._appSettings.recPlayLoop) || 'off'
+  const $sh = $('#recPlayingShuffleBtn')
+  if ($sh.length) {
+    $sh.toggleClass('active', sh).attr('aria-pressed', sh)
+      .attr('title', sh ? 'Shuffle: on (tap to turn off)' : 'Shuffle: off (tap to shuffle the queue)')
+  }
+  const $lp = $('#recPlayingLoopBtn')
+  if ($lp.length) {
+    let icon = '↪', label = 'no loop'
+    if      (lm === 'one')      { icon = '🔂'; label = 'one' }
+    else if (lm === 'playlist') { icon = '🔁'; label = 'list' }
+    else if (lm === 'all')      { icon = '∞';  label = 'all' }
+    $lp.attr('data-loop', lm).attr('title', `Loop: ${label} (tap to cycle)`).text(icon)
+    $lp.toggleClass('active', lm !== 'off')
+  }
+}
+window.toggleRecPlayShuffle = toggleRecPlayShuffle
+window.cycleRecPlayLoopMode = cycleRecPlayLoopMode
+
+// Member-picker for creating / editing a virtual playlist. `existingName`
+// null → create mode (asks for a name); otherwise edit that virtual
+// playlist's members. Only REAL playlists are offered as members.
+function _openVirtualPlaylistEditor(existingName) {
+  const realNames = listRecordings().filter(n => !_isVirtual(n))
+  if (!realNames.length) { alert('Create at least one real playlist first.'); return }
+  const current = existingName ? _virtualMembers(existingName) : []
+  const currentSet = new Set(current)
+
+  let $d = $('#virtualPlaylistEditor')
+  if ($d.length) { try { $d.dialog('destroy') } catch (_) {} $d.remove() }
+  $d = $('<div id="virtualPlaylistEditor"></div>').appendTo('body')
+
+  let inner = ''
+  if (!existingName) {
+    inner += `<label class="vpe-name-label">Name
+      <input type="text" id="vpeName" placeholder="e.g. Week 1 + Week 2" />
+    </label>`
+  }
+  inner += `<div class="vpe-hint">Pick the playlists to combine:</div><div class="vpe-list">`
+  realNames.forEach(n => {
+    const cnt = _recordingItemCountByName(n)
+    const chk = currentSet.has(n) ? 'checked' : ''
+    inner += `<label class="vpe-row">
+      <input type="checkbox" class="vpe-member" value="${_.escape(n)}" ${chk}>
+      <span class="vpe-row-name">${_.escape(n)}</span>
+      <span class="vpe-row-count">${cnt}</span>
+    </label>`
+  })
+  inner += `</div>`
+  $d.html(inner)
+
+  const finish = () => {
+    const members = $d.find('.vpe-member:checked').map(function () { return String($(this).val()) }).get()
+    if (!members.length) { alert('Pick at least one playlist.'); return false }
+    if (existingName) {
+      if (setVirtualMembers(existingName, members)) { selectRecording(existingName); return true }
+      return false
+    }
+    const name = String($d.find('#vpeName').val() || '').trim()
+    if (!name) { alert('Enter a name for the virtual playlist.'); return false }
+    return createVirtualRecording(name, members)
+  }
+
+  $d.dialog({
+    title: existingName ? `Edit "${existingName}"` : 'New Virtual Playlist',
+    width: Math.min(420, $(window).width() - 40),
+    modal: true,
+    autoOpen: true,
+    buttons: {
+      'Save': function () { if (finish()) { try { $(this).dialog('close') } catch (_) {} openRecordingReviewDialog() } },
+      'Cancel': function () { try { $(this).dialog('close') } catch (_) {} }
+    }
+  })
+}
+window._openVirtualPlaylistEditor = _openVirtualPlaylistEditor
+
+function openRecordingReviewDialog() {
+  let $dlg = $('#recordingReviewDialog')
+  if (!$dlg.length) {
+    $dlg = $('<div id="recordingReviewDialog"></div>').appendTo('body')
+  }
+  const items = window._recording.items || {}
+  const searchTexts = Object.keys(items).sort()
+  const currentName = window._recording.currentName || REC_DEFAULT_NAME
+  const isVirtualCurrent = _isVirtual(currentName)
+  const allNames = listRecordings()
+  // Last-played item (for highlighting). Only highlight when the displayed
+  // playlist matches where the item came from.
+  const _lp = _loadLastPlayed()
+  const _lpHere = _lp && _lp.recName === currentName ? _lp : null
+  let html = ''
+  // ── Header: switch / create / new-virtual / rename / duplicate / delete ──
+  html += `<div class="rec-rec-header" style="margin-bottom:10px;padding:6px 6px 8px;border-bottom:1px solid #ddd;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+    <label style="font-size:12px;color:#555;">Playlist:</label>
+    <select id="recRecSelect" style="flex:1;min-width:140px;max-width:260px;">`
+  allNames.forEach(n => {
+    const count = _recordingItemCountByName(n)
+    const marker = _isVirtual(n) ? '🔗 ' : ''
+    html += `<option value="${_.escape(n)}"${n === currentName ? ' selected' : ''}>${marker}${_.escape(n)} (${count})</option>`
+  })
+  html += `</select>
+    <button type="button" id="recRecNew"       class="btn rec-rec-btn" title="Create a new playlist" aria-label="Create a new playlist"><span class="rec-rec-ico">＋</span><span class="rec-rec-lbl">New</span></button>
+    <button type="button" id="recRecNewVirtual" class="btn rec-rec-btn" title="Create a virtual playlist (combine existing playlists)" aria-label="Create a virtual playlist"><span class="rec-rec-ico">🔗</span><span class="rec-rec-lbl">Virtual</span></button>
+    <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
+    <button type="button" id="recRecDuplicate" class="btn rec-rec-btn" title="Duplicate this playlist" aria-label="Duplicate this playlist"><span class="rec-rec-ico">⎘</span><span class="rec-rec-lbl">Duplicate</span></button>
+    <button type="button" id="recRecDelete"    class="btn rec-rec-btn rec-rec-danger" title="Delete this playlist" aria-label="Delete this playlist"><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
+    <button type="button" id="recRecSync"      class="btn rec-rec-btn" title="Push local playlists to GitHub" aria-label="Sync to GitHub"><span class="rec-rec-ico">⤴</span><span class="rec-rec-lbl">Sync</span></button>
+  </div>`
+  // Virtual playlist banner: shows members + an "Edit members" affordance,
+  // and signals that the item list below is read-only.
+  if (isVirtualCurrent) {
+    const members = _virtualMembers(currentName)
+    html += `<div class="rec-virtual-banner">
+      🔗 <b>Virtual playlist</b> — a live combination of:
+      ${members.length ? members.map(m => `<span class="rec-virtual-member">${_.escape(m)}</span>`).join(' ') : '<span style="color:#a00;">(no valid members)</span>'}
+      <button type="button" id="recVirtualEdit" class="btn rec-rec-btn" style="margin-left:8px;">Edit members</button>
+      <div class="rec-virtual-note">Items are read-only here. Edit them in their source playlists.</div>
+    </div>`
+  }
+  if (!searchTexts.length) {
+    html += isVirtualCurrent
+      ? '<p style="color:#888;">This virtual playlist resolves to no items — its members may be empty.</p>'
+      : '<p style="color:#888;">No recorded items yet. Click ● Record, then the capture button next to a match.</p>'
+  } else {
+    searchTexts.forEach(st => {
+      html += `<div class="rec-grp" style="margin-bottom:10px;padding:6px;border:1px solid #eee;border-radius:4px;">
+        <div style="font-weight:bold;font-size:14px;">🔎 ${_.escape(st)}</div>`
+      Object.keys(items[st]).sort().forEach(w => {
+        const wEsc = _.escape(w)
+        const stEsc = _.escape(st)
+        html += `<div style="margin-left:10px;margin-top:4px;">
+          <div style="color:#555;font-style:italic;font-size:13px;">${wEsc}</div>
+          <div class="rec-item-list" data-st="${stEsc}" data-w="${wEsc}" style="margin-left:6px;">`
+        items[st][w].forEach((it, idx) => {
+          const checked = (it.enabled !== false) ? 'checked' : ''
+          // "Copy to…" picker — lists every other REAL recording (can't copy
+          // into a virtual one). Hidden when current playlist is virtual
+          // (read-only) or there are no eligible targets.
+          const otherNames = allNames.filter(n => n !== currentName && !_isVirtual(n))
+          const copyOptions = (!isVirtualCurrent && otherNames.length)
+            ? `<select class="rec-copy-to" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Copy this item to another playlist">
+                <option value="">Copy to…</option>
+                ${otherNames.map(n => `<option value="${_.escape(n)}">${_.escape(n)}</option>`).join('')}
+              </select>`
+            : ''
+          // Subtitle preview — try sync first (subs already in memory), else
+          // mark pending and let _lazyLoadRecItemPreviews fill it in after
+          // the dialog renders.
+          const _initialPreview = _previewTextForRecItem(it)
+          const _previewText = _initialPreview ? _truncatePreview(_initialPreview, 80) : '…'
+          const _pendingAttr = _initialPreview ? '' : ' data-pending="1"'
+          // On a virtual playlist the list is read-only: only ▶ Play-from is
+          // offered; drag / toggle / duplicate / copy / delete are omitted.
+          const editControls = isVirtualCurrent ? '' : `
+              <span class="rec-drag" title="Drag to reorder">⋮⋮</span>
+              <label class="rec-toggle" title="Include in Play All">
+                <input type="checkbox" class="rec-enable" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" ${checked}>
+                <span class="rec-toggle-track"><span class="rec-toggle-knob"></span></span>
+              </label>`
+          const dupBtn = isVirtualCurrent ? '' : `<button type="button" class="rec-dup" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Duplicate this item">⎘</button>`
+          const delBtn = isVirtualCurrent ? '' : `<button type="button" class="rec-del" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Remove this item">✕</button>`
+          const _isLast = _lpHere && _lpHere.st === st && _lpHere.w === w && _lpHere.idx === idx
+          html += `<div class="rec-item${isVirtualCurrent ? ' rec-item-readonly' : ''}${_isLast ? ' rec-item-lastplayed' : ''}" data-idx="${idx}">
+            <div class="rec-item-row1">
+              ${editControls}
+              <button type="button" class="rec-play-from" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Play from this item">▶</button>
+              ${dupBtn}
+              <span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${_.escape(it.source||'?')} · ${it.timeStart}s–${it.timeEnd}s</span>
+              ${copyOptions}
+              ${delBtn}
+            </div>
+            <div class="rec-item-preview"${_pendingAttr} data-id="${_.escape(it.id)}" data-line="${_.escape(String(it.lineIndex == null ? '' : it.lineIndex))}" title="Source subtitle line">${_.escape(_previewText)}</div>
+          </div>`
+        })
+        html += `</div></div>`
+      })
+      html += `</div>`
+    })
+  }
+  $dlg.html(html)
+
+  $dlg.off('click', '.rec-del').on('click', '.rec-del', function (e) {
+    // Stop the click from bubbling to the document-level outside-click
+    // handler, which would otherwise see a detached e.target (we replace
+    // $dlg's HTML below) and close every visible dialog.
+    e.preventDefault()
+    e.stopPropagation()
+    const st  = String($(this).data('st'))
+    const w   = String($(this).data('w'))
+    const idx = parseInt($(this).data('idx'), 10)
+    removeRecordedItem(st, w, idx)
+    openRecordingReviewDialog()  // refresh
+  })
+
+  $dlg.off('change', '.rec-enable').on('change', '.rec-enable', function (e) {
+    e.stopPropagation()
+    const st  = String($(this).data('st'))
+    const w   = String($(this).data('w'))
+    const idx = parseInt($(this).data('idx'), 10)
+    const on  = $(this).is(':checked')
+    _setRecordedItemEnabled(st, w, idx, on)
+    // Visually dim the row without re-rendering, to keep scroll/focus.
+    $(this).closest('.rec-item').find('.rec-item-text').toggleClass('rec-item-off', !on)
+  })
+
+  // Play from a specific item — builds the same queue and rotates so this
+  // item is index 0. Honours the user's current shuffle/loop settings.
+  $dlg.off('click', '.rec-play-from').on('click', '.rec-play-from', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const st  = String($(this).data('st'))
+    const w   = String($(this).data('w'))
+    const idx = parseInt($(this).data('idx'), 10)
+    const recName = window._recording.currentName
+    try { $dlg.dialog('close') } catch (_) {}
+    playRecording({ startItem: { recName, st, w, idx } })
+  })
+
+  // Duplicate a single item — inserts a copy right after the original.
+  $dlg.off('click', '.rec-dup').on('click', '.rec-dup', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const st  = String($(this).data('st'))
+    const w   = String($(this).data('w'))
+    const idx = parseInt($(this).data('idx'), 10)
+    if (duplicateRecordedItem(st, w, idx)) openRecordingReviewDialog()
+  })
+
+  // Copy a single item to another playlist via the inline select.
+  $dlg.off('change', '.rec-copy-to').on('change', '.rec-copy-to', function (e) {
+    e.stopPropagation()
+    const dest = String($(this).val() || '')
+    if (!dest) return
+    const st  = String($(this).data('st'))
+    const w   = String($(this).data('w'))
+    const idx = parseInt($(this).data('idx'), 10)
+    const src = window._recording.currentName
+    const ok = copyItemToPlaylist(src, st, w, idx, dest)
+    // Reset the select either way so the same target can be reused.
+    $(this).val('')
+    if (!ok) { alert('Copy failed — destination playlist not found.'); return }
+    // Refresh dialog so the destination's item count in the dropdown is current.
+    openRecordingReviewDialog()
+  })
+
+  // ── Recordings-header CRUD handlers ──────────────────────────────────
+  $dlg.off('change', '#recRecSelect').on('change', '#recRecSelect', function (e) {
+    e.stopPropagation()
+    const name = String($(this).val() || '')
+    if (selectRecording(name)) openRecordingReviewDialog()
+  })
+  $dlg.off('click', '#recRecNew').on('click', '#recRecNew', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const name = prompt('Name for the new recording:')
+    if (name && createRecording(name)) openRecordingReviewDialog()
+  })
+  $dlg.off('click', '#recRecNewVirtual').on('click', '#recRecNewVirtual', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    _openVirtualPlaylistEditor(null)
+  })
+  $dlg.off('click', '#recVirtualEdit').on('click', '#recVirtualEdit', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    _openVirtualPlaylistEditor(window._recording.currentName)
+  })
+  $dlg.off('click', '#recRecRename').on('click', '#recRecRename', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const oldN = window._recording.currentName
+    const newN = prompt('Rename recording:', oldN)
+    if (newN && renameRecording(oldN, newN)) openRecordingReviewDialog()
+  })
+  $dlg.off('click', '#recRecDuplicate').on('click', '#recRecDuplicate', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const src = window._recording.currentName
+    const newN = prompt('Name for the duplicate:', src + ' (copy)')
+    if (newN && duplicateRecording(src, newN)) openRecordingReviewDialog()
+  })
+  $dlg.off('click', '#recRecDelete').on('click', '#recRecDelete', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    if (deleteRecording(window._recording.currentName)) openRecordingReviewDialog()
+  })
+  $dlg.off('click', '#recRecSync').on('click', '#recRecSync', async function (e) {
+    e.preventDefault(); e.stopPropagation()
+    try {
+      await syncRecordingsToGithub()
+      // Re-render so the count in the selector reflects the merged remote.
+      openRecordingReviewDialog()
+    } catch (_) { /* already alerted */ }
+  })
+  // Reflect dirty state on the button as soon as the header is in the DOM.
+  _refreshRecordingSyncBtn()
+
+  // Drag-to-reorder within each word group. Falls back gracefully if jQuery
+  // UI isn't loaded — the checkbox + delete actions still work. Skipped for
+  // virtual playlists, whose item list is read-only.
+  if ($.fn.sortable && !isVirtualCurrent) {
+    $dlg.find('.rec-item-list').each(function () {
+      const $list = $(this)
+      try { $list.sortable('destroy') } catch (_) {}
+      $list.sortable({
+        items: '> .rec-item',
+        handle: '.rec-drag',
+        axis: 'y',
+        tolerance: 'pointer',
+        forcePlaceholderSize: true,
+        placeholder: 'rec-item-placeholder',
+        update: function () {
+          const st = String($list.data('st'))
+          const w  = String($list.data('w'))
+          const order = $list.find('> .rec-item').map(function () {
+            return parseInt($(this).data('idx'), 10)
+          }).get()
+          _reorderWordItems(st, w, order)
+          // Refresh data-idx attrs so subsequent removes/edits hit the right
+          // entries without a full re-render.
+          $list.find('> .rec-item').each(function (i) {
+            $(this).attr('data-idx', i).find('[data-idx]').attr('data-idx', i)
+          })
+        }
+      })
+    })
+  }
+
+  const opts = {
+    title: 'Recorded Searches',
+    width: Math.min(720, $(window).width() - 40),
+    height: Math.min(560, $(window).height() - 60),
+    modal: false,
+    autoOpen: true,
+    buttons: {
+      // Belt-and-suspenders close: jQuery UI's dialog('close') sometimes
+      // races with focus / async render work and leaves the wrapper
+      // visible behind the next view. Force-hide the wrapper as a backup so
+      // the user doesn't see the Recorded Searches panel floating over the
+      // Practice card or the playing recording.
+      'Play All':  function () {
+        const $w = $(this).closest('.ui-dialog')
+        try { $(this).dialog('close') } catch (_) {}
+        $w.hide()
+        try { autoHideSettingsPanel() } catch (_) {}
+        playRecording()
+      },
+      'Practice':  function () {
+        const $w = $(this).closest('.ui-dialog')
+        try { $(this).dialog('close') } catch (_) {}
+        $w.hide()
+        try { autoHideSettingsPanel() } catch (_) {}
+        openPracticeMode()
+      },
+      'Close':     function () {
+        const $w = $(this).closest('.ui-dialog')
+        try { $(this).dialog('close') } catch (_) {}
+        $w.hide()
+      }
+    }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) {
+    $dlg.dialog('option', opts).dialog('open')
+  } else {
+    $dlg.dialog(opts)
+  }
+  // After the dialog renders, fetch any missing subtitles in the background
+  // and populate the per-row preview spans. Fire-and-forget — if it fails
+  // the row just shows "(no preview available)".
+  _lazyLoadRecItemPreviews($dlg).catch(e => console.warn('preview lazy-load failed', e))
+  // Scroll the last-played row into view so the user resumes where they left off.
+  setTimeout(() => {
+    const el = $dlg.find('.rec-item-lastplayed')[0]
+    if (el && typeof el.scrollIntoView === 'function') {
+      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }) } catch (_) {}
+    }
+  }, 60)
+}
+
+// Wait until YouTube's currentTime crosses `timeEnd`, then pause it. Bails
+// out early if:
+//   • the user stopped playback,
+//   • the playhead never started moving within the load-grace window
+//     (video failed to load — typical when the video is private/removed
+//     or the embed errors silently),
+//   • the playhead stopped advancing for `stallMs` after it had been
+//     advancing (paused mid-clip due to network / 403 / ads bailout),
+//   • or a generous overall cap of (clip-dur + 15s) elapses.
+// Optional `onTick` is invoked every ~500ms so the caller can refresh UI.
+function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
+  const dur          = Math.max(2, (parseFloat(timeEnd) || 0) - (parseFloat(timeStart) || 0))
+  const maxWaitMs    = (dur + 15) * 1000     // clip length + buffer
+  const loadGraceMs  = 12000                  // time we give the player to actually start
+  const stallMs      = 6000                   // post-start, how long a frozen playhead means dead
+  // Pause fast & insistently — YT pauseVideo is best-effort and a single
+  // call sometimes loses to a buffering / state transition. Two paired
+  // calls (immediate + a 50ms follow-up) virtually always sticks.
+  const hardPause = () => {
+    try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+    setTimeout(() => {
+      try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+    }, 50)
+  }
+  return new Promise(resolve => {
+    const begin = Date.now()
+    let lastCt = -1
+    let lastChangeAt = begin
+    let everPlayed = false
+    let pausedAccum = 0          // ms accumulated while user-paused
+    let lastTickAt = begin
+    const tick = () => {
+      if (!window._playingRecording) return resolve()
+      // Bail immediately on a prev/next request so the navigation feels
+      // responsive — the outer loop in playRecording reads the flag and
+      // routes to the right index.
+      if (window._recNavRequest) {
+        hardPause()
+        return resolve()
+      }
+      const now = Date.now()
+      // While the user has paused, don't accrue stall/load/max time. Just
+      // bookkeep how long we've been paused so we can subtract it below.
+      if (window._recPlayPaused) {
+        pausedAccum += (now - lastTickAt)
+        lastTickAt = now
+        return setTimeout(tick, 300)
+      }
+      lastTickAt = now
+      try {
+        if (window.ytPlayer && typeof window.ytPlayer.getCurrentTime === 'function') {
+          const ct = window.ytPlayer.getCurrentTime() || 0
+          if (ct >= timeEnd) {
+            // Snap the playhead to timeEnd so a slow pause doesn't bleed an
+            // extra few frames of audio after the clip's nominal end.
+            try { window.ytPlayer.seekTo && window.ytPlayer.seekTo(timeEnd, true) } catch (_) {}
+            hardPause()
+            return resolve()
+          }
+          if (ct > 0.1 && Math.abs(ct - lastCt) > 0.05) {
+            lastCt = ct
+            lastChangeAt = now
+            everPlayed = true
+          }
+        }
+      } catch (_) {}
+      if (typeof onTick === 'function') { try { onTick() } catch (_) {} }
+      const elapsed = (now - begin) - pausedAccum
+      if (!everPlayed && elapsed > loadGraceMs) {
+        console.warn('playRecording: video failed to start within', loadGraceMs, 'ms — skipping')
+        return resolve()
+      }
+      if (everPlayed && (now - lastChangeAt) > stallMs) {
+        console.warn('playRecording: playhead stalled — skipping')
+        return resolve()
+      }
+      if (elapsed > maxWaitMs) {
+        console.warn('playRecording: max wait exceeded — skipping')
+        return resolve()
+      }
+      // 100ms keeps the playhead-overrun ≤ 100ms in the steady state, which
+      // is well below the perceptual threshold for "video kept playing past
+      // the end". Cost is ~10 ticks/sec vs ~2/sec — negligible.
+      setTimeout(tick, 100)
+    }
+    tick()
+  })
+}
+
+// Speak `text` aloud, resolving when playback ends. Tries Google's
+// translate_tts endpoint first (sounds much better than the OS voices),
+// and falls back to the browser's SpeechSynthesis on failure. The current
+// audio/utterance is exposed on window._recTTS so the pause button can
+// pause/resume it alongside the YouTube player.
+// Replace vocab-formatting glyphs that the TTS engines mangle (".*" placeholder,
+// "[. ]^" annotation, "<...>" tags). Pipe forms get spoken as "x, y, z".
+function _sanitizeWordForTTS(text) {
+  if (text == null) return ''
+  let s = String(text)
+  s = s.replace(/<[^>]*>/g, '')           // strip <annotation> markers
+  s = s.replace(/\[\^[^\]]*\][*+?]?/g, ' nåt ') // negated char-class "[^]*", "[^ ]*", "[^a]+" → "nåt"
+  s = s.replace(/\.[*+]/g, ' nåt ')        // ".*" / ".+" → "nåt"
+  s = s.replace(/\s*\|\s*/g, ', ')         // pipe → comma, so forms get pauses
+  s = s.replace(/\s+/g, ' ').trim()
+  return s
+}
+
+function _speakWord(text) {
+  const clean = _sanitizeWordForTTS(text)
+  if (!clean) return Promise.resolve()
+  return _speakWordGoogle(clean).catch(() => _speakWordBrowser(clean))
+}
+
+function _ttsLangCode() {
+  const code = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv'
+  return code === 'sv' ? 'sv' : code === 'es' ? 'es' : 'en'
+}
+
+function _speakWordGoogle(text) {
+  return new Promise((resolve, reject) => {
+    try {
+      const q = String(text).trim()
+      if (!q) return resolve()
+      // Google Translate's TTS endpoint. Works as an <audio> source from a
+      // regular browser tab (CORS doesn't apply to media playback). Has a
+      // ~200 char limit per call which is well within the single-word use.
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${_ttsLangCode()}&client=tw-ob&q=${encodeURIComponent(q)}`
+      const audio = new Audio()
+      audio.crossOrigin = 'anonymous'  // best-effort; ignored if server doesn't send CORS
+      audio.src = url
+      audio.volume = 1.0
+      let settled = false
+      const done = (err) => {
+        if (settled) return; settled = true
+        audio.onended = null; audio.onerror = null
+        if (window._recTTS && window._recTTS.audio === audio) window._recTTS = null
+        err ? reject(err) : resolve()
+      }
+      audio.onended = () => done()
+      audio.onerror = () => done(new Error('Google TTS audio error'))
+      window._recTTS = { kind: 'audio', audio }
+      const p = audio.play()
+      if (p && typeof p.then === 'function') p.catch(err => done(err))
+      // Bail out if the request hangs (no audio progress within 8s).
+      setTimeout(() => { if (!settled && (audio.paused || !audio.duration)) done(new Error('Google TTS timeout')) }, 8000)
+    } catch (e) { reject(e) }
+  })
+}
+
+function _speakWordBrowser(text) {
+  return new Promise(resolve => {
+    if (typeof window.speechSynthesis === 'undefined' ||
+        typeof window.SpeechSynthesisUtterance === 'undefined') return resolve()
+    try {
+      const u = new SpeechSynthesisUtterance(String(text).trim())
+      const code = _ttsLangCode()
+      u.lang = code === 'sv' ? 'sv-SE' : code === 'es' ? 'es-ES' : 'en-US'
+      u.rate = 0.9
+      u.volume = 1.0
+      let settled = false
+      const done = () => {
+        if (settled) return; settled = true
+        if (window._recTTS && window._recTTS.utterance === u) window._recTTS = null
+        resolve()
+      }
+      u.onend = done
+      u.onerror = done
+      window.speechSynthesis.cancel()
+      window._recTTS = { kind: 'speech', utterance: u }
+      window.speechSynthesis.speak(u)
+      // Some engines never fire onend if the utterance is short or interrupted.
+      setTimeout(done, 6000)
+    } catch (_) { resolve() }
+  })
+}
+
+// Render / refresh the play-mode info banner with the current item's
+// context. Since search results aren't deterministic (remote data, ranking,
+// vocab state can shift), we don't try to locate the match in the live
+// #result DOM — we draw a self-contained banner from the recorded fields.
+function _renderPlayingBanner(it, idx, total) {
+  let $b = $('#recPlayingBanner')
+  if (!$b.length) {
+    // Top row is the compact mobile view: count, progress, gap stepper, info
+    // toggle. Head + meta live below and are hidden on narrow viewports
+    // until the user taps the ℹ button. Desktop CSS keeps everything visible.
+    $b = $(`<div id="recPlayingBanner">
+      <div class="rec-pb-top">
+        <span class="rec-pb-count"></span>
+        <div class="rec-pb-progress"><span class="rec-pb-bar"></span></div>
+        <span class="rec-pb-gap" title="Inter-item gap (seconds) — click ± or tap the value to type">
+          <button type="button" class="rec-pb-gap-dec" aria-label="Decrease gap">−</button>
+          <span class="rec-pb-gap-val" tabindex="0" role="button" title="Tap to set gap">30s</span>
+          <button type="button" class="rec-pb-gap-inc" aria-label="Increase gap">+</button>
+        </span>
+        <button type="button" class="rec-pb-info-btn" title="Show details" aria-label="Show details" aria-expanded="false">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
+            <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/>
+          </svg>
+        </button>
+      </div>
+      <div class="rec-pb-details">
+        <div class="rec-pb-head"></div>
+        <div class="rec-pb-meta"></div>
+      </div>
+    </div>`).appendTo('body')
+    $b.on('click', '.rec-pb-info-btn', function () {
+      const open = !$b.hasClass('rec-pb-expanded')
+      $b.toggleClass('rec-pb-expanded', open)
+      $(this).attr('aria-expanded', open ? 'true' : 'false')
+    })
+    const GAP_STEP = 5
+    const GAP_MIN  = 0
+    const GAP_MAX  = 600
+    const _setGap = (v) => {
+      const next = Math.max(GAP_MIN, Math.min(GAP_MAX, parseInt(v, 10) || 0))
+      window._appSettings.recPlayGapSeconds = next
+      // Keep the Settings input in sync if it's mounted.
+      try { $('#recPlayGapSeconds').val(next) } catch (_) {}
+      saveAppSettings()
+      $b.find('.rec-pb-gap-val').text(next + 's')
+    }
+    $b.on('click', '.rec-pb-gap-dec', (e) => {
+      e.preventDefault(); e.stopPropagation()
+      const cur = parseInt(window._appSettings.recPlayGapSeconds, 10) || 0
+      _setGap(cur - GAP_STEP)
+    })
+    $b.on('click', '.rec-pb-gap-inc', (e) => {
+      e.preventDefault(); e.stopPropagation()
+      const cur = parseInt(window._appSettings.recPlayGapSeconds, 10) || 0
+      _setGap(cur + GAP_STEP)
+    })
+    $b.on('click', '.rec-pb-gap-val', (e) => {
+      e.preventDefault(); e.stopPropagation()
+      const cur = parseInt(window._appSettings.recPlayGapSeconds, 10) || 0
+      const raw = prompt('Gap between items (seconds, 0–600):', String(cur))
+      if (raw == null) return
+      _setGap(raw)
+    })
+  }
+  $b.find('.rec-pb-count').text(`${idx + 1}/${total}`)
+  $b.find('.rec-pb-head').text(`▶ "${it.searchText}" → ${it.word}`)
+  $b.find('.rec-pb-meta').text(`${it.id} · ${it.source || '?'} · ${it.timeStart}s – ${it.timeEnd}s`)
+  $b.find('.rec-pb-bar').css('width', '0%')
+  // Reflect the current gap setting every time we render the banner — covers
+  // changes made via the Settings panel between items.
+  const _gap = parseInt(window._appSettings && window._appSettings.recPlayGapSeconds, 10)
+  $b.find('.rec-pb-gap-val').text((Number.isFinite(_gap) ? _gap : 30) + 's')
+
+  // Big prominent word display so the user always sees what word the
+  // current item belongs to. Lazily created; reused across iterations.
+  let $w = $('#recPlayingWord')
+  if (!$w.length) $w = $('<div id="recPlayingWord"></div>').appendTo('body')
+  $w.text(it.word || '')
+}
+
+function _updatePlayingProgress(timeStart, timeEnd) {
+  const dur = Math.max(1, timeEnd - timeStart)
+  let ct = timeStart
+  try { ct = (window.ytPlayer && window.ytPlayer.getCurrentTime && window.ytPlayer.getCurrentTime()) || timeStart } catch (_) {}
+  const pct = Math.max(0, Math.min(100, ((ct - timeStart) / dur) * 100))
+  $('#recPlayingBanner .rec-pb-bar').css('width', pct.toFixed(1) + '%')
+}
+
+// Resolve sv+en parsed subtitle entries for the recorded videoId, reusing
+// whatever's already in memory. Three tiers, cheapest first:
+//   1. window.searchResult — last search already parsed `sv_subs.data` /
+//      `en_subs.data` via getSubs(); use it as-is.
+//   2. window.allSubtitles[id] — raw text already fetched; reuse cached
+//      _parsedSv / _parsedEn or parse once and stash there.
+//   3. fall back to getSubtitlesForLink (network) and parse.
+async function _loadSubtitlesForItem(item) {
+  if (!window.allSubtitles) window.allSubtitles = {}
+
+  // (1) Last search's parsed entries.
+  const sr = window.searchResult || []
+  const hit = sr.find(it => it && it.url === item.id)
+  if (hit && ((hit.sv_subs && hit.sv_subs.data && hit.sv_subs.data.length) ||
+              (hit.en_subs && hit.en_subs.data && hit.en_subs.data.length))) {
+    return {
+      sv: (hit.sv_subs && hit.sv_subs.data) || [],
+      en: (hit.en_subs && hit.en_subs.data) || []
+    }
+  }
+
+  // (2) In-memory raw text, with on-demand parse (cached on the entry).
+  let stored = window.allSubtitles[item.id]
+  if (!stored || (!stored.sv && !stored.en)) {
+    try { await getSubtitlesForLink(item.id, item.source) } catch (e) {
+      console.warn('playRecording: getSubtitlesForLink failed for', item.id, e)
+    }
+    stored = window.allSubtitles[item.id]
+  }
+  if (!stored || (!stored.sv && !stored.en)) return null
+  if (stored.sv && !stored._parsedSv) stored._parsedSv = srtToJson(stored.sv)
+  if (stored.en && !stored._parsedEn) stored._parsedEn = srtToJson(stored.en)
+  return { sv: stored._parsedSv || [], en: stored._parsedEn || [] }
+}
+
+// Find the line whose [start, end) brackets t; fall back to first line at-or-after t.
+// Used for the live playhead refresh, where t is a precise float.
+function _findLineByTime(lines, t) {
+  if (!lines || !lines.length) return -1
+  let i = lines.findIndex(l => l && l.start && l.end && l.start.ordinal <= t && l.end.ordinal > t)
+  if (i < 0) i = lines.findIndex(l => l && l.start && l.start.ordinal >= t)
+  return i
+}
+
+// Build the subtitle context overlay for the playing item — matched line
+// plus configured before/after context, with the secondary-language pairing
+// matched by SRT index. Returns metadata used by _refreshPlayingSubtitles
+// to keep the highlighted row in sync with the playhead.
+async function _renderPlayingSubtitles(item) {
+  let $sub = $('#recPlayingSubs')
+  if (!$sub.length) {
+    $sub = $('<div id="recPlayingSubs"></div>').appendTo('body')
+  }
+  $sub.html('<div class="rec-ps-loading">Loading subtitles…</div>')
+
+  const parsed = await _loadSubtitlesForItem(item)
+  if (!parsed || (!parsed.sv.length && !parsed.en.length)) {
+    $sub.html('<div class="rec-ps-err">Subtitles unavailable for this video.</div>')
+    return null
+  }
+
+  const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
+  const primary   = lang === 'sv' ? parsed.sv : parsed.en
+  const secondary = lang === 'sv' ? parsed.en : parsed.sv
+  if (!primary.length) {
+    $sub.html('<div class="rec-ps-err">Primary subtitle missing.</div>')
+    return null
+  }
+
+  // Locate the recorded match by its SRT line index — the recorder always
+  // stamps this on capture, so we get exact centering with no time-math
+  // off-by-one. _refreshPlayingSubtitles still handles the live playhead.
+  const want = String(item.lineIndex)
+  const matchIdx = primary.findIndex(l => l && l.index != null && String(l.index) === want)
+  if (matchIdx < 0) {
+    $sub.html('<div class="rec-ps-err">Matched line not found in subtitle file.</div>')
+    return null
+  }
+  const before = parseInt(window._appSettings && window._appSettings.contextLinesBefore, 10) || 0
+  const after  = parseInt(window._appSettings && window._appSettings.contextLinesAfter,  10) || 0
+  const from = Math.max(0, matchIdx - before)
+  const to   = Math.min(primary.length - 1, matchIdx + after)
+
+  const secById = new Map()
+  if (secondary) secondary.forEach(s => { if (s && s.index != null) secById.set(s.index + '', s) })
+
+  const $list = $('<div class="rec-ps-list"></div>')
+  for (let i = from; i <= to; i++) {
+    const line = primary[i]
+    const sec = line && line.index != null ? secById.get(line.index + '') : null
+    const mainText = line && (line.text || line[lang] || '') || ''
+    const secText  = sec  && (sec.text  || sec[lang === 'sv' ? 'en' : 'sv'] || '') || ''
+    const $row = $('<div class="rec-ps-row" data-line-i="' + i + '"></div>')
+    if (i === matchIdx) $row.addClass('rec-ps-active')
+    $row.append($('<div class="rec-ps-main"></div>').text(mainText.trim()))
+    if (secText.trim()) $row.append($('<div class="rec-ps-sec"></div>').text(secText.trim()))
+    $list.append($row)
+  }
+  $sub.html($list)
+  // Defer one tick so the panel has its final layout before we measure.
+  setTimeout(_scrollActiveSubIntoView, 0)
+  return { primary, from, to }
+}
+
+// Scroll the active row to the vertical center of the #recPlayingSubs
+// panel. Adjusts only the panel's scrollTop (not the page) so mobile
+// scroll behaviour stays predictable. Used after initial render and on
+// every active-row change.
+function _scrollActiveSubIntoView() {
+  const subEl = document.getElementById('recPlayingSubs')
+  if (!subEl) return
+  const rowEl = subEl.querySelector('.rec-ps-active')
+  if (!rowEl) return
+  const target = rowEl.offsetTop - (subEl.clientHeight / 2) + (rowEl.clientHeight / 2)
+  const clamped = Math.max(0, Math.min(subEl.scrollHeight - subEl.clientHeight, target))
+  if (typeof subEl.scrollTo === 'function') {
+    subEl.scrollTo({ top: clamped, behavior: 'smooth' })
+  } else {
+    subEl.scrollTop = clamped
+  }
+}
+
+// Keep `.rec-ps-active` on whichever subtitle row brackets the current
+// playhead. Called from _waitYTUntilEnd's onTick.
+function _refreshPlayingSubtitles(ctx) {
+  if (!ctx) return
+  let ct = 0
+  try { ct = window.ytPlayer && window.ytPlayer.getCurrentTime ? window.ytPlayer.getCurrentTime() : 0 } catch (_) {}
+  const i = _findLineByTime(ctx.primary, ct)
+  if (i < ctx.from || i > ctx.to) return  // outside the rendered window
+  const $sub = $('#recPlayingSubs')
+  if (!$sub.length) return
+  const $rows = $sub.find('.rec-ps-row')
+  const $cur = $rows.filter('[data-line-i="' + i + '"]')
+  if (!$cur.length || $cur.hasClass('rec-ps-active')) return
+  $rows.removeClass('rec-ps-active')
+  $cur.addClass('rec-ps-active')
+  _scrollActiveSubIntoView()
+}
+
+// Build the playback queue from the current recording (or every recording
+// when loop='all'). Each entry is annotated with its origin (_recName, _st,
+// _w, _idx) so per-item actions like "play from here" can rebuild the same
+// queue and locate the starting item.
+function _buildPlayQueue(loop) {
+  const queue = []
+  const pushFrom = (recName, items) => {
+    if (!items) return
+    for (const st of Object.keys(items)) {
+      const byW = items[st] || {}
+      for (const w of Object.keys(byW)) {
+        const arr = byW[w] || []
+        arr.forEach((it, idx) => {
+          if (!it || it.enabled === false) return
+          queue.push({ ...it, _recName: recName, _st: st, _w: w, _idx: idx })
+        })
+      }
+    }
+  }
+  if (loop === 'all') {
+    // Skip virtual playlists here — their items are duplicates of the real
+    // members, which are already iterated, so including them would replay
+    // the same clips twice.
+    Object.keys(window._recordings || {}).sort().forEach(n => {
+      const rec = window._recordings[n]
+      if (!rec || rec.virtual) return
+      pushFrom(n, rec.items)
+    })
+  } else {
+    // window._recording.items is already the resolved union for a virtual
+    // current playlist, so this works unchanged for both kinds.
+    pushFrom(window._recording.currentName, window._recording.items || {})
+  }
+  return queue
+}
+
+// Fisher-Yates shuffle, in place.
+function _shuffleQueue(q) {
+  for (let i = q.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = q[i]; q[i] = q[j]; q[j] = tmp
+  }
+}
+
+// Remember the last-played queue item so the review dialog can highlight it
+// once the player is closed. Persisted so it survives a reload.
+const REC_LAST_PLAYED_KEY = 'cupitor:recLastPlayed'
+function _setLastPlayed(it) {
+  if (!it) return
+  window._recLastPlayed = {
+    recName: it._recName, st: it._st, w: it._w, idx: it._idx,
+    id: it.id, lineIndex: it.lineIndex
+  }
+  try { localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(window._recLastPlayed)) } catch (_) {}
+}
+function _loadLastPlayed() {
+  if (window._recLastPlayed) return window._recLastPlayed
+  try {
+    const raw = localStorage.getItem(REC_LAST_PLAYED_KEY)
+    if (raw) window._recLastPlayed = JSON.parse(raw)
+  } catch (_) {}
+  return window._recLastPlayed || null
+}
+
+// YouTube IFrame API error codes that mean the video can't be played:
+//   2   — invalid videoId / parameter
+//   5   — HTML5 player error
+//   100 — video removed or marked private ("not available")
+//   101, 150 — owner disallowed embedded playback
+// 101 and 150 are functionally identical per the YT docs.
+const YT_UNAVAILABLE_ERROR_CODES = new Set([2, 5, 100, 101, 150])
+
+// Wired to the YT player's onError event (see language.html). When a video
+// fails to play DURING recording playback, offer to delete it everywhere —
+// this is also how dangling playlist references to already-deleted videos
+// get cleaned up: playback hits the error, we prompt, the user confirms.
+function handleYoutubePlayerError(code) {
+  if (!window._playingRecording) return            // only nag during playback
+  if (!YT_UNAVAILABLE_ERROR_CODES.has(Number(code))) return
+  const it = window._recPlayCurrentItem
+  const vid = (it && it.id) || (window._recLastPlayed && window._recLastPlayed.id)
+  if (!vid) return
+  // Prompt at most once per video per playback session.
+  if (window._recPlayErrorPromptedFor === vid) return
+  window._recPlayErrorPromptedFor = vid
+  // Skip past the broken item right away so playback doesn't hang on it
+  // (_waitYTUntilEnd bails on _recNavRequest).
+  window._recNavRequest = 'next'
+  const label = (it && (it.word || it.searchText)) ? ` for "${it.word || it.searchText}"` : ''
+  // Defer the blocking confirm so it doesn't run inside the YT event tick.
+  setTimeout(() => {
+    if (confirm(`This video is not available${label}.\n\nDelete this video and remove it from all playlists?`)) {
+      const n = removeVideoFromAllPlaylists(vid)
+      alert(n > 0
+        ? `Removed ${n} item(s) referencing this video.`
+        : 'No playlist items referenced this video.')
+    }
+  }, 0)
+}
+window.handleYoutubePlayerError = handleYoutubePlayerError
+
+// opts:
+//   startItem: { recName, st, w, idx }  — play from this item first
+//   shuffle  : boolean                  — override settings.recPlayShuffle
+//   loop     : 'off' | 'one' | 'playlist' | 'all'  — override settings.recPlayLoop
+//   queue    : pre-built item array      — play these instead of the current
+//                                          playlist (e.g. starred lines)
+async function playRecording(opts) {
+  opts = opts || {}
+  const settings = window._appSettings || {}
+  const shuffle = (opts.shuffle != null) ? !!opts.shuffle : !!settings.recPlayShuffle
+  const loop    = opts.loop || settings.recPlayLoop || 'off'
+  let queue = Array.isArray(opts.queue) ? opts.queue.slice() : _buildPlayQueue(loop)
+  if (!queue.length) { alert('No items to play (all excluded?).'); return }
+  if (shuffle) _shuffleQueue(queue)
+  // Rotate so the requested start item is at index 0 (preserves the
+  // shuffled order afterwards). Falls back to no-op if not found.
+  if (opts.startItem) {
+    const s = opts.startItem
+    const i0 = queue.findIndex(q =>
+      q && q._st === s.st && q._w === s.w && q._idx === s.idx &&
+      (s.recName == null || q._recName === s.recName))
+    if (i0 > 0) queue = queue.slice(i0).concat(queue.slice(0, i0))
+  }
+  // Expose for prev/next/loop-aware UI status.
+  window._recPlayLoopMode = loop
+
+  // Read the gap LIVE on each sleep so the inline gap-control in the
+  // playback overlay can change the wait between items mid-playback.
+  const currentGapMs = () => {
+    const raw = (window._appSettings && window._appSettings.recPlayGapSeconds)
+    const sec = parseInt(raw != null ? raw : $('#recPlayGapSeconds').val(), 10)
+    return Math.max(0, Number.isFinite(sec) ? sec : 30) * 1000
+  }
+
+  // Enter play mode: close lingering dialogs, hide page chrome, surface the
+  // floating Stop button. Stop button is created lazily so it doesn't
+  // pollute the DOM until needed.
+  $('.ui-dialog-content:visible').each(function () {
+    try { $(this).dialog('close') } catch (_) {}
+  })
+  // The side player panel is redundant in play mode (the floating overlay owns
+  // the controls). `body.rec-playing #mediaRelatedContainer { display:none
+  // !important }` already hides it for the duration — no need to set inline
+  // display:none here. Doing so would leave the panel stuck-hidden after the
+  // user closes playback, since the inline style outlives the body class.
+  // (loadYoutubeVideo's re-show is already guarded by _playingRecording.)
+  if (!$('#recPlayingStopBtn').length) {
+    $(`<button id="recPlayingStopBtn" type="button" title="Stop playback (Esc)" aria-label="Stop playback">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <rect x="3" y="3" width="10" height="10" rx="1.5"/>
+        </svg>
+      </button>`)
+      .appendTo('body')
+      .on('click', stopPlayingRecording)
+  }
+  if (!$('#recPlayingPauseBtn').length) {
+    $(`<button id="recPlayingPauseBtn" type="button" title="Pause / Resume" aria-label="Pause / Resume">
+        <svg class="rec-icon-pause" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <rect x="4" y="3" width="3" height="10" rx="1"/>
+          <rect x="9" y="3" width="3" height="10" rx="1"/>
+        </svg>
+        <svg class="rec-icon-play" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="display:none;">
+          <path d="M4 3l9 5-9 5z"/>
+        </svg>
+      </button>`)
+      .appendTo('body')
+      .on('click', togglePlayingRecordingPause)
+  }
+  if (!$('#recPlayingPrevBtn').length) {
+    $(`<button id="recPlayingPrevBtn" type="button" title="Previous (←)" aria-label="Previous item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M3.5 3a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-1 0v-9a.5.5 0 0 1 .5-.5z"/>
+          <path d="M12.5 3.5v9a.5.5 0 0 1-.79.407L5.5 8.407V12.5a.5.5 0 0 1-1 0v-9a.5.5 0 0 1 1 0v4.093l6.21-4.5A.5.5 0 0 1 12.5 3.5z"/>
+        </svg>
+      </button>`)
+      .appendTo('body')
+      .on('click', () => navigateRecordingPlayback('prev'))
+  }
+  if (!$('#recPlayingNextBtn').length) {
+    $(`<button id="recPlayingNextBtn" type="button" title="Next (→)" aria-label="Next item">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M12.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 1 0v-9a.5.5 0 0 0-.5-.5z"/>
+          <path d="M3.5 3.5v9a.5.5 0 0 0 .79.407L10.5 8.407V12.5a.5.5 0 0 0 1 0v-9a.5.5 0 0 0-1 0v4.093l-6.21-4.5A.5.5 0 0 0 3.5 3.5z"/>
+        </svg>
+      </button>`)
+      .appendTo('body')
+      .on('click', () => navigateRecordingPlayback('next'))
+  }
+  // Shuffle + Loop are playback-state toggles, so they live in the player
+  // overlay (not the review dialog). The review dialog stays as the
+  // authoritative item list; these buttons just change how the current
+  // playback session traverses it.
+  if (!$('#recPlayingShuffleBtn').length) {
+    const $sh = $(`<button id="recPlayingShuffleBtn" type="button" title="Shuffle (re-randomise the queue)" aria-label="Shuffle" aria-pressed="false">🔀</button>`)
+      .appendTo('body')
+      .on('click', toggleRecPlayShuffle)
+    _refreshRecPlayModeBtns()
+  }
+  if (!$('#recPlayingLoopBtn').length) {
+    $(`<button id="recPlayingLoopBtn" type="button" title="Loop mode" aria-label="Loop mode">↪</button>`)
+      .appendTo('body')
+      .on('click', cycleRecPlayLoopMode)
+    _refreshRecPlayModeBtns()
+  }
+  _refreshRecPlayModeBtns()
+  window._recPlayPaused = false
+  $('body').addClass('rec-playing').removeClass('rec-paused')
+
+  window._playingRecording = true
+  window._recNavRequest = null
+  window._recPlaySlowdown = false
+  // Per-session "video unavailable" prompt tracking (see
+  // handleYoutubePlayerError). Reset so a fresh session can re-prompt.
+  window._recPlayErrorPromptedFor = null
+  window._recPlayCurrentItem = null
+  // Expose the queue so the player-overlay Shuffle button can re-randomise
+  // the unplayed tail without restarting playback.
+  window._recPlayQueue = queue
+  // Read loop / isLooping LIVE so the in-player Loop button takes effect
+  // mid-playback (without these closures the captured `loop` would freeze
+  // at session start).
+  const _curLoop     = () => (window._appSettings && window._appSettings.recPlayLoop) || 'off'
+  const _curLooping  = () => { const l = _curLoop(); return l === 'one' || l === 'playlist' || l === 'all' }
+  let prevWord = null
+  let i = 0
+  while (window._playingRecording) {
+    // Boundary handling: with no loop we exit at queue end; otherwise wrap.
+    if (i >= queue.length) {
+      if (_curLooping()) i = 0
+      else break
+    }
+    if (i < 0) {
+      i = _curLooping() ? queue.length - 1 : 0
+    }
+    window._recPlayIndex = i
+    window._recPlayQueueLen = queue.length
+    const it = queue[i]
+    if (it.source && it.source.toLowerCase() !== 'youtube') {
+      console.warn('playRecording: skipping non-YouTube item', it)
+      i++
+      continue
+    }
+
+    _renderPlayingBanner(it, i, queue.length)
+    // Remember the item currently playing so the review dialog can highlight
+    // it after the player is closed. Keyed by origin (recName/st/w/idx).
+    _setLastPlayed(it)
+    // Also expose the live item object so the YT onError handler knows which
+    // video failed (and can label the delete prompt).
+    window._recPlayCurrentItem = it
+    if (it.word && it.word !== prevWord) {
+      // Speak the word once before its first item plays. Re-runs whenever
+      // the queue moves on to a new word — including when the user
+      // navigates prev/next and the new item belongs to a different word.
+      await _speakWord(it.word)
+      if (!window._playingRecording) break
+      prevWord = it.word
+    }
+    // Render the subtitle overlay in PARALLEL with playback. Awaiting it
+    // here would block the video on a (potentially slow) SRT fetch via
+    // getSubtitlesForLink. Stash the promise's resolved value in a holder
+    // so _refreshPlayingSubtitles can pick it up once it arrives.
+    const subHolder = { ctx: null }
+    _renderPlayingSubtitles(it)
+      .then(c => { subHolder.ctx = c })
+      .catch(e => console.warn('playRecording: subtitle render failed', it, e))
+
+    // Set the end boundary for the existing markIntervalPlayDone() hook
+    // (defensive — _waitYTUntilEnd also pauses).
+    window.youtubePlayInterval = { start: it.timeStart, end: it.timeEnd }
+    window.playingYoutubeVideo = true
+    // Play media directly via playMediaSlice — search results aren't
+    // deterministic so we deliberately don't drive playback via the live
+    // DOM. playMediaSlice loads/seeks the YouTube player with the
+    // recorded url + timeStart, which is all we need.
+    const _src = (it.source || '').toLowerCase() === 'youtube' ? 'YouTube' : (it.source || 'YouTube')
+    try {
+      await playMediaSlice(it.id, it.timeStart, it.timeEnd, _src)
+    } catch (e) {
+      console.warn('playRecording: playMediaSlice failed for', it, e)
+      i++
+      continue
+    }
+    // _waitYTUntilEnd pauses the player when ct >= timeEnd, so when the next
+    // item reuses the same video, playMediaSlice short-circuits to just a
+    // seek — leaving the player paused and the clip never starts. Kick it
+    // back into play explicitly here so consecutive same-video items work.
+    try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
+    // If the user navigated backwards, play this item at 0.75x so they can
+    // catch what they missed. Restored to 1x as soon as the wait resolves.
+    const slowedThisRound = !!window._recPlaySlowdown
+    if (slowedThisRound) {
+      try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(0.75) } catch (_) {}
+    }
+    await _waitYTUntilEnd(it.timeStart, it.timeEnd, () => {
+      _updatePlayingProgress(it.timeStart, it.timeEnd)
+      _refreshPlayingSubtitles(subHolder.ctx)
+    })
+    if (slowedThisRound) {
+      try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
+      window._recPlaySlowdown = false
+    }
+
+    // Honour any prev/next request queued while this item was playing.
+    // Prev re-plays the previous item with slowdown; next advances forward.
+    // Wraps around in any looping mode; stays clamped otherwise.
+    if (window._recNavRequest === 'prev') {
+      window._recNavRequest = null
+      i = (i > 0) ? (i - 1) : (_curLooping() ? queue.length - 1 : 0)
+      window._recPlaySlowdown = true
+      continue
+    }
+    if (window._recNavRequest === 'next') {
+      window._recNavRequest = null
+      i = (i + 1 < queue.length) ? (i + 1) : (_curLooping() ? 0 : queue.length)
+      continue
+    }
+
+    // Loop=one: replay this same item indefinitely (until prev/next/stop).
+    if (_curLoop() === 'one') {
+      if (window._playingRecording) await _sleepRespectingPause(currentGapMs())
+      continue
+    }
+    // Natural advance — gap between items, including before a wrap.
+    const willHaveNext = (i + 1 < queue.length) || _curLooping()
+    if (willHaveNext && window._playingRecording) {
+      await _sleepRespectingPause(currentGapMs())
+    }
+    i++
+  }
+  window._recPlayQueue = null
+  window._playingRecording = false
+  window._recPlaySlowdown = false
+  window._recNavRequest = null
+  window._recPlayCurrentItem = null
+  $('body').removeClass('rec-playing rec-paused')
+  $('#recPlayingBanner').remove()
+  $('#recPlayingSubs').remove()
+  $('#recPlayingWord').remove()
+  $('#recPlayingPauseBtn').remove()
+  $('#recPlayingPrevBtn').remove()
+  $('#recPlayingNextBtn').remove()
+  $('#recPlayingShuffleBtn').remove()
+  $('#recPlayingLoopBtn').remove()
+  $('#recPlayNavToast').remove()
+  $('#recPlayingStopBtn').remove()
+  try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
+  try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+}
+
+// Flash a temporary "Will play x/y next" toast when the user taps prev/next.
+// Mirrors the playback loop's wrap-around logic (see ~L9293) so the index
+// shown matches where playback will actually land, looping included.
+let _recPlayNavToastTimer = null
+function _showRecPlayNavToast(direction) {
+  const q = window._recPlayQueue
+  const total = Array.isArray(q) ? q.length : 0
+  if (!total) return
+  const i = window._recPlayIndex || 0
+  const looping = ((window._appSettings && window._appSettings.recPlayLoop) || 'off') !== 'off'
+  let target
+  if (direction === 'prev') {
+    target = (i > 0) ? (i - 1) : (looping ? total - 1 : 0)
+  } else {
+    target = (i + 1 < total) ? (i + 1) : (looping ? 0 : total)
+  }
+
+  let msg
+  if (target >= total) {
+    msg = 'End of queue'   // next at the last item, not looping → playback ends
+  } else {
+    const word = q[target] && q[target].word
+    msg = `Will play ${target + 1}/${total} next` + (word ? ` · "${word}"` : '')
+  }
+
+  let $t = $('#recPlayNavToast')
+  if (!$t.length) $t = $('<div id="recPlayNavToast" role="status" aria-live="polite"></div>').appendTo('body')
+  $t.text(msg).addClass('visible')
+  if (_recPlayNavToastTimer) clearTimeout(_recPlayNavToastTimer)
+  _recPlayNavToastTimer = setTimeout(() => { $t.removeClass('visible') }, 1600)
+}
+
+// Queue a prev/next navigation request for the playback loop. The loop
+// checks it after each item finishes — either naturally or interrupted
+// via the same flag inside _waitYTUntilEnd. When paused, also unpause so
+// the new item actually starts.
+function navigateRecordingPlayback(direction) {
+  if (!window._playingRecording) return false
+  if (direction !== 'prev' && direction !== 'next') return false
+  window._recNavRequest = direction
+  _showRecPlayNavToast(direction)
+  // Stop the currently-playing video and any in-flight TTS RIGHT NOW so the
+  // transition into the next item is clean. The playback loop will see
+  // _recNavRequest and route to the right index — but without this the
+  // user hears the old clip continue for up to one poll-tick (~100ms) and,
+  // worse, any active TTS audio overlaps the next item.
+  try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+  try {
+    const t = window._recTTS
+    if (t && t.kind === 'audio' && t.audio) { t.audio.pause(); t.audio.src = '' }
+    if (window.speechSynthesis && typeof window.speechSynthesis.cancel === 'function') {
+      window.speechSynthesis.cancel()
+    }
+  } catch (_) {}
+  window._recTTS = null
+  if (window._recPlayPaused) togglePlayingRecordingPause()
+  return true
+}
+
+// Pause/resume both the YouTube player and the active TTS (Google audio or
+// browser speech). Toggled by the floating pause button. The wait loops
+// (_waitYTUntilEnd, _sleepRespectingPause) check window._recPlayPaused and
+// extend their deadlines so paused time doesn't count against stall/cap.
+function togglePlayingRecordingPause() {
+  if (!window._playingRecording) return
+  if (window._recPlayPaused) {
+    window._recPlayPaused = false
+    $('body').removeClass('rec-paused')
+    $('#recPlayingPauseBtn .rec-icon-pause').show()
+    $('#recPlayingPauseBtn .rec-icon-play').hide()
+    try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
+    try {
+      const t = window._recTTS
+      if (t && t.kind === 'audio' && t.audio) t.audio.play().catch(() => {})
+      else if (t && t.kind === 'speech') window.speechSynthesis && window.speechSynthesis.resume()
+    } catch (_) {}
+  } else {
+    window._recPlayPaused = true
+    $('body').addClass('rec-paused')
+    $('#recPlayingPauseBtn .rec-icon-pause').hide()
+    $('#recPlayingPauseBtn .rec-icon-play').show()
+    try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+    try {
+      const t = window._recTTS
+      if (t && t.kind === 'audio' && t.audio) t.audio.pause()
+      else if (t && t.kind === 'speech') window.speechSynthesis && window.speechSynthesis.pause()
+    } catch (_) {}
+  }
+}
+
+// Sleep `ms` milliseconds, but stretch the wall-clock wait whenever
+// the user has paused playback so the inter-item gap doesn't tick down
+// while paused. Bails out if playback is stopped.
+function _sleepRespectingPause(ms) {
+  return new Promise(resolve => {
+    let remaining = ms
+    let lastTick = Date.now()
+    const id = setInterval(() => {
+      if (!window._playingRecording) { clearInterval(id); return resolve() }
+      const now = Date.now()
+      const elapsed = now - lastTick
+      lastTick = now
+      if (!window._recPlayPaused) remaining -= elapsed
+      if (remaining <= 0) { clearInterval(id); resolve() }
+    }, 200)
+  })
+}
+
+function stopPlayingRecording() {
+  window._playingRecording = false
+  window._recPlayPaused = false
+  $('body').removeClass('rec-playing rec-paused')
+  $('#recPlayingBanner').remove()
+  $('#recPlayingSubs').remove()
+  $('#recPlayingWord').remove()
+  $('#recPlayingPauseBtn').remove()
+  $('#recPlayingPrevBtn').remove()
+  $('#recPlayingNextBtn').remove()
+  $('#recPlayingShuffleBtn').remove()
+  $('#recPlayingLoopBtn').remove()
+  $('#recPlayNavToast').remove()
+  try { window.speechSynthesis && window.speechSynthesis.cancel() } catch (_) {}
+  try {
+    const t = window._recTTS
+    if (t && t.kind === 'audio' && t.audio) { t.audio.pause(); t.audio.src = '' }
+  } catch (_) {}
+  window._recTTS = null
+  try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+}
+
+// ─── Practice (flashcard) mode ───────────────────────────────────────────
+// Card-based, no timer. Each card is a shuffled playlist item showing the
+// matched subtitle line in the "front" language, a Reveal button for the
+// other language, and the YouTube clip cued (NOT auto-played) at the item's
+// timeStart. Navigate by swipe, arrow keys, or the prev/next buttons.
+// opts.queue: pre-built item array (e.g. starred lines) to practice instead of
+// the current playlist. Falls back to the current playlist when omitted.
+function openPracticeMode(opts) {
+  opts = opts || {}
+  const queue = Array.isArray(opts.queue) ? opts.queue.slice() : _buildPlayQueue('off')
+  if (!queue.length) {
+    alert(opts.queue ? 'No starred lines to practice.' : 'No items to practice (all excluded?).')
+    return
+  }
+  _shuffleQueue(queue)
+  window._practiceCards = queue
+  window._practiceIdx = 0
+  if (window._practiceFrontIsSource == null) window._practiceFrontIsSource = true
+  window._practiceCtxBefore = 0
+  window._practiceCtxAfter = 0
+  window._practicePlaybackRate = 1
+  window._practiceFlipped = false
+  window._practiceMinimized = false
+  window._practiceActive = true
+  // `body.practice-mode #mediaRelatedContainer { display:none !important }`
+  // already hides the side player panel while practice is open — no need to
+  // set inline display:none here, which would otherwise outlive the body
+  // class and leave the panel stuck-hidden after close.
+
+  let $p = $('#practiceMode')
+  if (!$p.length) {
+    // The card area is a CSS 3D card-flipper: .practice-front-face holds the
+    // source side (word + ctx controls + source lines + reveal button), and
+    // .practice-back-face holds the target translation. In 'flip' reveal mode
+    // we toggle a .flipped class on .practice-flipper for the rotateY anim;
+    // in 'hide'/'both' modes the back-face is hidden via display:none and the
+    // legacy .practice-back div under the front handles reveal-below layout.
+    $p = $(`<div id="practiceMode">
+      <div class="practice-topbar">
+        <span class="practice-count"></span>
+        <button type="button" class="practice-dir" title="Flip which language is shown first"></button>
+        <button type="button" class="practice-minimize" aria-label="Minimize" title="Minimize">⌄</button>
+        <button type="button" class="practice-close" aria-label="Close practice" title="Close">✕</button>
+      </div>
+      <div class="practice-card">
+        <div class="practice-flipper">
+          <div class="practice-face practice-front-face">
+            <div class="practice-word"></div>
+            <div class="practice-ctx-ctrl">
+              <button type="button" class="practice-ctx-before" title="Show one more line before" aria-label="Show one more line before">↑＋</button>
+              <button type="button" class="practice-ctx-after" title="Show one more line after" aria-label="Show one more line after">↓＋</button>
+              <button type="button" class="practice-ctx-reset" title="Reset to the matched line only" aria-label="Reset context">↺</button>
+            </div>
+            <div class="practice-front"></div>
+            <button type="button" class="practice-reveal" title="Reveal (R)" aria-label="Reveal">👁</button>
+            <div class="practice-back" style="display:none;"></div>
+          </div>
+          <div class="practice-face practice-back-face">
+            <div class="practice-back-target"></div>
+            <button type="button" class="practice-unflip" title="Show source again" aria-label="Show source again">↶</button>
+          </div>
+        </div>
+      </div>
+      <div class="practice-nav">
+        <button type="button" class="practice-prev" aria-label="Previous (←)" title="Previous (←)">‹</button>
+        <button type="button" class="practice-play" aria-label="Play clip" title="Play clip">▶</button>
+        <button type="button" class="practice-speed" aria-label="Playback speed" title="Cycle playback speed">1×</button>
+        <button type="button" class="practice-next" aria-label="Next (→)" title="Next (→)">›</button>
+      </div>
+      <div class="practice-restore">
+        <span class="practice-restore-count"></span>
+        <button type="button" class="practice-restore-btn" aria-label="Restore practice" title="Restore">⌃</button>
+        <button type="button" class="practice-restore-close" aria-label="Close practice" title="Close">✕</button>
+      </div>
+    </div>`).appendTo('body')
+
+    $p.on('click', '.practice-close', closePracticeMode)
+    $p.on('click', '.practice-restore-close', closePracticeMode)
+    $p.on('click', '.practice-minimize', minimizePracticeMode)
+    $p.on('click', '.practice-restore-btn', restorePracticeMode)
+    $p.on('click', '.practice-prev', () => practiceNav(-1))
+    $p.on('click', '.practice-next', () => practiceNav(1))
+    $p.on('click', '.practice-reveal', revealPracticeCard)
+    $p.on('click', '.practice-unflip', revealPracticeCard)   // toggles flip back
+    $p.on('click', '.practice-dir', togglePracticeDir)
+    $p.on('click', '.practice-play', playPracticeClip)
+    $p.on('click', '.practice-speed', cyclePracticePlaybackRate)
+    $p.on('click', '.practice-ctx-before', () => { window._practiceCtxBefore++; _renderPracticeCard() })
+    $p.on('click', '.practice-ctx-after',  () => { window._practiceCtxAfter++;  _renderPracticeCard() })
+    $p.on('click', '.practice-ctx-reset',  () => { window._practiceCtxBefore = 0; window._practiceCtxAfter = 0; _renderPracticeCard() })
+    // Inline edit a subtitle line from the card.
+    $p.on('click', '.practice-line-edit', _practiceBeginEdit)
+    $p.on('click', '.practice-edit-save', _practiceCommitEdit)
+    $p.on('click', '.practice-edit-cancel', function () { _renderPracticeCard() })
+    // Mobile: when the inline-edit textarea is focused, the on-screen
+    // keyboard would cover the bottom of the card. Scroll the textarea
+    // into the centre of the visible viewport once layout settles.
+    $p.on('focus', '.practice-edit-input', function () {
+      const el = this
+      setTimeout(() => {
+        try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }) } catch (_) {}
+      }, 250)
+    })
+
+    // Horizontal swipe / drag on the card: left → next, right → prev. Uses
+    // Pointer Events so it covers touch, mouse and pen. The card follows the
+    // pointer for feedback, then either navigates (past threshold) or snaps
+    // back. Ignored when starting on an interactive element (edit box, button,
+    // textarea) so those keep working. Direction is locked in on first move so
+    // a vertical scroll isn't hijacked.
+    const card = $p.find('.practice-card')[0]
+    if (card) {
+      let sx = 0, sy = 0, dragging = false, decided = false, horizontal = false
+      const THRESH = 55
+      const settle = (animate) => {
+        card.style.transition = animate ? 'transform .18s ease' : 'none'
+        card.style.transform = ''
+        if (animate) setTimeout(() => { card.style.transition = '' }, 220)
+      }
+      card.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return
+        if ($(e.target).closest('.practice-edit-box, button, textarea, input, a').length) { dragging = false; return }
+        sx = e.clientX; sy = e.clientY
+        dragging = true; decided = false; horizontal = false
+        card.style.transition = 'none'
+      })
+      card.addEventListener('pointermove', (e) => {
+        if (!dragging) return
+        const dx = e.clientX - sx, dy = e.clientY - sy
+        if (!decided) {
+          if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+          decided = true
+          horizontal = Math.abs(dx) > Math.abs(dy)
+          if (horizontal) { try { card.setPointerCapture(e.pointerId) } catch (_) {} }
+        }
+        if (horizontal) {
+          e.preventDefault()
+          // The card is centred with translateX(-50%) in CSS, so the drag
+          // offset has to be layered on top of that base.
+          card.style.transform = `translateX(calc(-50% + ${dx}px))`
+        }
+      })
+      const end = (e) => {
+        if (!dragging) return
+        dragging = false
+        const dx = e.clientX - sx, dy = e.clientY - sy
+        if (horizontal && Math.abs(dx) > THRESH && Math.abs(dx) > Math.abs(dy) * 1.2) {
+          // practiceNav re-renders the card; clear the transform so the new
+          // card is centred rather than inheriting the drag offset.
+          practiceNav(dx < 0 ? 1 : -1)
+          settle(false)
+        } else {
+          settle(true)
+        }
+      }
+      card.addEventListener('pointerup', end)
+      card.addEventListener('pointercancel', end)
+    }
+  }
+  $('body').addClass('practice-mode')
+  // Always clear the minimized class on (re-)open — a previous session may
+  // have left the panel collapsed, and the DOM is reused across sessions.
+  // Without this, re-entering practice mode (e.g. Review → Practice) would
+  // re-pin the YT player but leave the topbar/card/nav hidden.
+  $p.removeClass('minimized')
+  // Listen for keyboard show/hide on mobile so we can lift the card above it.
+  if (window.visualViewport && !window._practiceViewportWired) {
+    window.visualViewport.addEventListener('resize', _onPracticeViewportChange)
+    window.visualViewport.addEventListener('scroll', _onPracticeViewportChange)
+    window._practiceViewportWired = true
+  }
+  _renderPracticeCard()
+}
+window.openPracticeMode = openPracticeMode
+
+function closePracticeMode() {
+  window._practiceActive = false
+  window._practiceMinimized = false
+  window._practiceClipToken = (window._practiceClipToken || 0) + 1
+  if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
+  if (window.visualViewport && window._practiceViewportWired) {
+    window.visualViewport.removeEventListener('resize', _onPracticeViewportChange)
+    window.visualViewport.removeEventListener('scroll', _onPracticeViewportChange)
+    window._practiceViewportWired = false
+  }
+  $('body').removeClass('practice-mode')
+  $('#practiceMode').remove()
+  // Restore normal playback rate — a practice slowdown shouldn't bleed into
+  // regular search-result / recording playback after the session ends.
+  try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
+  try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+}
+window.closePracticeMode = closePracticeMode
+
+function practiceNav(dir) {
+  if (!window._practiceActive || !window._practiceCards || !window._practiceCards.length) return
+  const n = window._practiceCards.length
+  window._practiceIdx = (window._practiceIdx + dir + n) % n
+  // A new card is a fresh attempt — drop any per-card overrides so the user
+  // isn't surprised by half-speed playback or extra context lines that were
+  // meant for the previous card.
+  window._practiceCtxBefore = 0
+  window._practiceCtxAfter = 0
+  window._practicePlaybackRate = 1
+  window._practiceFlipped = false
+  _renderPracticeCard()
+}
+
+// Cycle playback speed for the practice clip. The button label reflects the
+// active rate; the rate is applied next time .practice-play is hit.
+const PRACTICE_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5]
+function cyclePracticePlaybackRate() {
+  const cur = parseFloat(window._practicePlaybackRate) || 1
+  const i = PRACTICE_SPEED_OPTIONS.indexOf(cur)
+  const next = PRACTICE_SPEED_OPTIONS[(i + 1) % PRACTICE_SPEED_OPTIONS.length]
+  window._practicePlaybackRate = next
+  _updatePracticeSpeedBtn()
+  // If the clip is currently playing, apply the new rate immediately.
+  try {
+    if (window._practiceClipTimer && window.ytPlayer && window.ytPlayer.setPlaybackRate) {
+      window.ytPlayer.setPlaybackRate(next)
+    }
+  } catch (_) {}
+}
+function _updatePracticeSpeedBtn() {
+  const r = parseFloat(window._practicePlaybackRate) || 1
+  $('#practiceMode .practice-speed').text(`${r}×`)
+}
+
+// Collapse the practice UI to a tiny pill so the user can interact with the
+// page underneath without losing position. The restore pill is shown in its
+// place; everything else (topbar, card, nav, pinned YT player, hidden main
+// UI) is taken down until restored.
+//
+// Dropping body.practice-mode is what gives the main view back — that class
+// is what (a) pins the YT player to the top of the viewport, (b) hides
+// #mainControlInputs / #vocabularyResult / #result / #mediaRelatedContainer.
+// Pause the clip too so audio doesn't keep playing while the user is doing
+// something else.
+function minimizePracticeMode() {
+  if (!window._practiceActive) return
+  window._practiceMinimized = true
+  $('#practiceMode').addClass('minimized')
+  $('body').removeClass('practice-mode')
+  // Cancel any running stop-watcher so it doesn't fire on the restored clip
+  // with stale state, and pause the player.
+  window._practiceClipToken = (window._practiceClipToken || 0) + 1
+  if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
+  try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+  _updatePracticeRestoreCount()
+}
+function restorePracticeMode() {
+  window._practiceMinimized = false
+  $('#practiceMode').removeClass('minimized')
+  $('body').addClass('practice-mode')
+  // Re-cue the current card's video so playback is ready when the user hits
+  // Play (the practice-mode class flip above re-pins the YT player; we want
+  // it parked at the right timestamp again).
+  const it = (window._practiceCards || [])[window._practiceIdx]
+  if (it) { try { _cuePracticeVideo(it) } catch (_) {} }
+}
+function _updatePracticeRestoreCount() {
+  const cards = window._practiceCards || []
+  $('#practiceMode .practice-restore-count').text(`${(window._practiceIdx || 0) + 1}/${cards.length}`)
+}
+window.minimizePracticeMode = minimizePracticeMode
+window.restorePracticeMode = restorePracticeMode
+window.cyclePracticePlaybackRate = cyclePracticePlaybackRate
+
+// Push the practice card and bottom nav above the on-screen keyboard while it
+// is open. The visualViewport API reports the viewport size MINUS the
+// keyboard, so the difference vs window.innerHeight is the keyboard's
+// height — we use that to bump the card's `bottom` value.
+function _onPracticeViewportChange() {
+  if (!window._practiceActive) return
+  const vv = window.visualViewport
+  if (!vv) return
+  const keyboard = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
+  const $p = $('#practiceMode')
+  // Only act when the keyboard is clearly open (browser chrome alone usually
+  // accounts for ≤ 60px of inset). Otherwise restore the defaults.
+  const open = keyboard > 80
+  const liftCard = open ? (keyboard + 16) + 'px' : ''
+  const liftNav  = open ? (keyboard + 8)  + 'px' : ''
+  $p.find('.practice-card').css('bottom', liftCard)
+  $p.find('.practice-nav').css('bottom', liftNav)
+}
+window._onPracticeViewportChange = _onPracticeViewportChange
+function togglePracticeDir() {
+  window._practiceFrontIsSource = !window._practiceFrontIsSource
+  _renderPracticeCard()
+}
+function revealPracticeCard() {
+  const $p = $('#practiceMode')
+  const mode = (window._appSettings && window._appSettings.practiceRevealMode) || 'flip'
+  // In target→source mode the word itself is the answer (hidden until
+  // reveal). Once revealed, show it — for any reveal mode.
+  if (!window._practiceFrontIsSource) $p.find('.practice-word').css('visibility', 'visible')
+  if (mode === 'flip') {
+    // Toggle the flip-state — same handler is wired to .practice-unflip,
+    // so a click on either side rotates the card back/forth.
+    window._practiceFlipped = !window._practiceFlipped
+    $p.find('.practice-flipper').toggleClass('flipped', !!window._practiceFlipped)
+    return
+  }
+  // 'hide' (and the legacy fallback): reveal-below behaviour.
+  $p.find('.practice-back').show()
+  $p.find('.practice-reveal').hide()
+}
+// Where the practice clip should stop: the END of the subtitle line *after*
+// the shown one (i+1), so the clip plays one line past what's displayed. Falls
+// back to the shown line's own end, then to the item's timeEnd. Times are in
+// seconds (SRT ordinals).
+async function _practiceClipStopTime(it) {
+  let stop = (typeof it.timeEnd === 'number') ? it.timeEnd : (it.timeStart + 4)
+  try {
+    const parsed = await _loadSubtitlesForItem(it)
+    const src = (parsed && parsed.sv) || []
+    const want = String(it.lineIndex)
+    const pos = src.findIndex(x => x && x.index != null && String(x.index) === want)
+    if (pos >= 0) {
+      const next = src[pos + 1]
+      const endOf = l => (l && l.end && typeof l.end.ordinal === 'number') ? l.end.ordinal : null
+      const e = endOf(next) != null ? endOf(next) : endOf(src[pos])
+      if (e != null) stop = e
+    }
+  } catch (err) { console.warn('practice: stop-time resolve failed', err) }
+  return stop
+}
+
+// Poll the YouTube playhead and pause once it passes `stop`. Practice mode runs
+// with syncSubtitle=false, so the global ontimeupdate interval-stopper is
+// inactive — this is the practice-specific equivalent. Cancelled when a newer
+// clip starts, the card changes, or practice closes (via the token).
+function _watchPracticeClipEnd(stop, token) {
+  if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
+  window._practiceClipTimer = setInterval(() => {
+    if (!window._practiceActive || token !== window._practiceClipToken) {
+      clearInterval(window._practiceClipTimer); window._practiceClipTimer = null
+      return
+    }
+    let ct = 0
+    try { ct = (window.ytPlayer && window.ytPlayer.getCurrentTime && window.ytPlayer.getCurrentTime()) || 0 } catch (_) {}
+    if (ct >= stop) {
+      try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+      clearInterval(window._practiceClipTimer); window._practiceClipTimer = null
+    }
+  }, 150)
+}
+
+async function playPracticeClip() {
+  const idx = window._practiceIdx
+  const it = window._practiceCards && window._practiceCards[idx]
+  if (!it) return
+  // Each clip gets a token so a stale stop-watcher (or a card switch mid-load)
+  // can't pause a later clip.
+  const token = (window._practiceClipToken = (window._practiceClipToken || 0) + 1)
+  try {
+    const stop = await _practiceClipStopTime(it)
+    if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
+    // The cue normally already loaded the right video; reload only if needed.
+    let needLoad = true
+    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
+    if (needLoad) {
+      window.mediaSelected = { link: it.id, source: 'link' }
+      await changeMediaIfNeededTo(window.mediaSelected)
+    }
+    await seekToYoutubeTime(it.timeStart)
+    if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
+    // Apply the user's chosen playback rate just before play — must happen
+    // AFTER the video has been loaded/seeked, else YT silently snaps it
+    // back to 1× when the new video kicks in.
+    const rate = parseFloat(window._practicePlaybackRate) || 1
+    try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(rate) } catch (_) {}
+    try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
+    _watchPracticeClipEnd(stop, token)
+  } catch (e) { console.warn('practice: play failed', e) }
+}
+
+// Render the front/back as a column of subtitle lines (matched ± context).
+// Each line carries data so the inline editor can target the right SRT line.
+function _practiceRenderLines($container, rows, langKey) {
+  $container.empty()
+  rows.forEach(r => {
+    const text = (langKey === 'source') ? r.source : r.target
+    const $row = $(`<div class="practice-line${r.isMatch ? ' practice-line-match' : ''}" data-line-index="${r.lineIndex}"></div>`)
+    $row.append($('<span class="practice-line-text"></span>').text(text || '(empty)'))
+    $row.append($(`<button type="button" class="practice-line-edit" title="Edit this line" data-lang="${langKey === 'source' ? 'src' : 'en'}" data-line-index="${r.lineIndex}">✎</button>`))
+    $container.append($row)
+  })
+}
+
+async function _renderPracticeCard() {
+  const $p = $('#practiceMode')
+  if (!$p.length) return
+  // Switching cards invalidates any running clip stop-watcher so it can't pause
+  // the freshly-cued clip.
+  window._practiceClipToken = (window._practiceClipToken || 0) + 1
+  if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
+  const idx = window._practiceIdx
+  const cards = window._practiceCards || []
+  const it = cards[idx]
+  if (!it) return
+  const srcCode = ((typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv').toUpperCase()
+  const frontIsSource = window._practiceFrontIsSource
+  const mode = (window._appSettings && window._appSettings.practiceRevealMode) || 'flip'
+  $p.find('.practice-count').text(`${idx + 1}/${cards.length}`)
+  $p.find('.practice-dir').text(frontIsSource ? `${srcCode} → EN` : `EN → ${srcCode}`)
+  // Word: shown upfront only when the front IS the source (you see source
+  // text and recall its meaning). In target→source mode the word is the
+  // thing to recall, so hide it until Reveal.
+  const $word = $p.find('.practice-word').text(it.word || '')
+  $word.css('visibility', frontIsSource ? 'visible' : 'hidden')
+  $p.find('.practice-front').html('<div class="practice-loading">Loading…</div>')
+  $p.find('.practice-back').hide().empty()
+  $p.find('.practice-back-target').empty()
+  $p.find('.practice-reveal').show()
+  // Reset the flip-state for a freshly rendered card (practiceNav also
+  // zeroes _practiceFlipped, but a dir-toggle / setting change also re-renders).
+  $p.find('.practice-flipper').toggleClass('flipped', !!window._practiceFlipped)
+  // Reveal mode shapes the card:
+  //   'both' — no Reveal button, back shown beside front always
+  //   'flip' — Reveal button toggles a 3D rotateY; back-face content is the target
+  //   'hide' — legacy behaviour: back hidden until Reveal click
+  $p.removeClass('reveal-flip reveal-both reveal-hide').addClass(`reveal-${mode}`)
+  if (mode === 'both') $p.find('.practice-reveal').hide()
+  $p.data('item', it)
+  _updatePracticeSpeedBtn()
+  _updatePracticeRestoreCount()
+
+  // Cue the clip (paused — it must NOT auto-play in practice mode).
+  _cuePracticeVideo(it)
+
+  const rows = await _practiceCardLines(it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0)
+  if (window._practiceIdx !== idx) return   // user moved on while we awaited
+  if (!rows || !rows.length) {
+    $p.find('.practice-front').html('<div class="practice-loading">(subtitle text unavailable)</div>')
+    return
+  }
+  _practiceRenderLines($p.find('.practice-front'), rows, frontIsSource ? 'source' : 'target')
+  // 'both' renders the target right below the front (inside the front-face);
+  // 'hide' uses the same .practice-back div but keeps it hidden until reveal;
+  // 'flip' also fills .practice-back as a fallback AND fills the back-face.
+  _practiceRenderLines($p.find('.practice-back'),  rows, frontIsSource ? 'target' : 'source')
+  _practiceRenderLines($p.find('.practice-back-target'), rows, frontIsSource ? 'target' : 'source')
+  if (mode === 'both') $p.find('.practice-back').show()
+}
+
+// Begin inline-editing a practice line: swap the row for a textarea + actions.
+function _practiceBeginEdit(e) {
+  e.preventDefault(); e.stopPropagation()
+  const $btn = $(this)
+  const $row = $btn.closest('.practice-line')
+  const cur = $row.find('.practice-line-text').text()
+  const lang = $btn.attr('data-lang')          // 'src' | 'en'
+  const lineIndex = $btn.attr('data-line-index')
+  const $box = $(`<div class="practice-edit-box" data-lang="${lang}" data-line-index="${lineIndex}">
+      <textarea class="practice-edit-input" rows="2"></textarea>
+      <div class="practice-edit-actions">
+        <button type="button" class="practice-edit-save">Save</button>
+        <button type="button" class="practice-edit-cancel">Cancel</button>
+      </div>
+    </div>`)
+  $box.find('.practice-edit-input').val(cur === '(empty)' ? '' : cur)
+  $row.replaceWith($box)
+  $box.find('.practice-edit-input').focus()
+}
+
+// Commit an inline practice edit — reuses the batched SRT-edit pipeline, so
+// the change is buffered and pushed in one commit like search-result edits.
+async function _practiceCommitEdit(e) {
+  e.preventDefault(); e.stopPropagation()
+  const $box = $(this).closest('.practice-edit-box')
+  const lang = $box.attr('data-lang') === 'en' ? 'en' : (getLangFromUrl().code || 'sv')
+  const lineIndex = $box.attr('data-line-index')
+  const newText = String($box.find('.practice-edit-input').val() || '').trim()
+  const it = $('#practiceMode').data('item')
+  if (!it || !newText) { _renderPracticeCard(); return }
+  const $save = $(this).prop('disabled', true).text('Saving…')
+  try {
+    await _saveSubtitleEdit(it.id, lang, lineIndex, newText)
+  } catch (err) {
+    console.error('practice: save edit failed', err)
+    alert('Failed to save: ' + (err && err.message || err))
+  }
+  _renderPracticeCard()
+}
+
+async function _cuePracticeVideo(it) {
+  try {
+    showMediaContainer()
+    window.mediaSelected = { link: it.id, source: 'link' }
+    window.playingYoutubeVideo = true
+    window.syncSubtitle = false
+    let needLoad = true
+    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
+    if (needLoad) await changeMediaIfNeededTo(window.mediaSelected)
+    await seekToYoutubeTime(it.timeStart)
+    // Pause insistently so the cued clip doesn't run on its own.
+    try { window.ytPlayer.pauseVideo() } catch (_) {}
+    setTimeout(() => { try { window.ytPlayer.pauseVideo() } catch (_) {} }, 120)
+  } catch (e) { console.warn('practice: cue video failed', e) }
+}
+
+// Matched line ± context, in both languages, keyed off the source SRT
+// (whose line index is what the recorder stamps as item.lineIndex).
+async function _practiceCardLines(it, before, after) {
+  const parsed = await _loadSubtitlesForItem(it)
+  if (!parsed) return null
+  const src = parsed.sv || []
+  const tgt = parsed.en || []
+  const tgtById = new Map()
+  tgt.forEach(s => { if (s && s.index != null) tgtById.set(String(s.index), s) })
+  const want = String(it.lineIndex)
+  const matchPos = src.findIndex(x => x && x.index != null && String(x.index) === want)
+  if (matchPos < 0) return null
+  const from = Math.max(0, matchPos - (before || 0))
+  const to   = Math.min(src.length - 1, matchPos + (after || 0))
+  const rows = []
+  for (let i = from; i <= to; i++) {
+    const line = src[i]
+    const li = line.index
+    const sec = tgtById.get(String(li))
+    rows.push({
+      lineIndex: li,
+      isMatch: i === matchPos,
+      source: String(line.text || '').trim(),
+      target: sec ? String(sec.text || '').trim() : ''
+    })
+  }
+  return rows
+}
+
+// Keyboard: arrows navigate, R reveals, Esc closes — only while practicing
+// and not while typing in the inline editor.
+$(document).on('keydown', function (e) {
+  if (!window._practiceActive) return
+  const tag = (e.target && e.target.tagName || '').toLowerCase()
+  if (tag === 'input' || tag === 'textarea') return
+  if (e.key === 'Escape')          { e.preventDefault(); closePracticeMode() }
+  else if (e.key === 'ArrowLeft')  { e.preventDefault(); practiceNav(-1) }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); practiceNav(1) }
+  else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); revealPracticeCard() }
+})
+
+// Delegated handlers — wired once at document ready below.
+$(document).on('click', '#recStartBtn',  startRecording)
+$(document).on('click', '#recPauseBtn',  pauseRecording)
+$(document).on('click', '#recResumeBtn', resumeRecording)
+$(document).on('click', '#recStopBtn',   stopRecording)
+$(document).on('click', '#recReviewBtn', openRecordingReviewDialog)
+$(document).on('click', '.capture-btn', function (e) {
+  e.preventDefault()
+  e.stopPropagation()
+  _captureMatchFromButton($(this))
+})
+
+// ── Inline subtitle line edit ────────────────────────────────────────────
+// Pencil icon next to each main/secondary line opens a textarea + Save/Cancel.
+// Save commits the edited line back to the matching SRT on gh-pages via
+// _saveSubtitleEdit, then re-renders the .line content in place.
+$(document).on('click', '.edit-line-btn', function (e) {
+  e.preventDefault(); e.stopPropagation()
+  const $line = $(this).closest('.line')
+  if (!$line.length || $line.hasClass('editing')) return
+  const link      = $line.attr('data-url') || ''
+  const langCode  = $line.attr('data-lang-code') || 'sv'
+  const lineIndex = $line.attr('data-line-index') || ''
+  if (!link || !lineIndex) { alert('Cannot edit — missing line metadata.'); return }
+  const raw = _getRawSubtitleLineText(link, langCode, lineIndex)
+  // Stash the existing HTML so Cancel can restore (highlights survive).
+  const $textSpan = $line.find('.line-text')
+  $line.data('prevHtml', $textSpan.html())
+  $line.addClass('editing')
+  const lines = (raw.match(/\n/g) || []).length + 1
+  $textSpan.html(
+    `<textarea class="edit-line-input" rows="${Math.max(2, Math.min(6, lines))}">${_.escape(raw)}</textarea>` +
+    `<span class="edit-line-actions">
+       <button type="button" class="btn edit-line-save"   title="Save (Ctrl+Enter)">Save</button>
+       <button type="button" class="btn edit-line-cancel" title="Cancel (Esc)">Cancel</button>
+     </span>`
+  )
+  const $ta = $line.find('.edit-line-input').focus()
+  // Place caret at the end on focus
+  const tlen = $ta.val().length
+  try { $ta[0].setSelectionRange(tlen, tlen) } catch (_) {}
+})
+
+$(document).on('click', '.edit-line-cancel', function (e) {
+  e.preventDefault(); e.stopPropagation()
+  const $line = $(this).closest('.line')
+  const prev = $line.data('prevHtml')
+  if (prev != null) $line.find('.line-text').html(prev)
+  $line.removeClass('editing')
+})
+
+$(document).on('click', '.edit-line-save', async function (e) {
+  e.preventDefault(); e.stopPropagation()
+  const $btn = $(this)
+  if ($btn.prop('disabled')) return
+  const $line = $btn.closest('.line')
+  const link      = $line.attr('data-url') || ''
+  const langCode  = $line.attr('data-lang-code') || 'sv'
+  const lineIndex = $line.attr('data-line-index') || ''
+  const $ta = $line.find('.edit-line-input')
+  const newText = String($ta.val() || '').trim()
+  if (!newText) { alert('Text cannot be empty.'); return }
+  $btn.prop('disabled', true).text('Saving…')
+  try {
+    await _saveSubtitleEdit(link, langCode, lineIndex, newText)
+    // Replace the editor with the (escaped) plain text. Highlights are gone
+    // on the just-edited line — they'll come back on the next search render.
+    $line.find('.line-text').text(newText)
+    $line.removeClass('editing')
+  } catch (err) {
+    console.error('save subtitle edit failed', err)
+    alert('Failed to save: ' + (err && err.message || err))
+    $btn.prop('disabled', false).text('Save')
+  }
+})
+
+// Keyboard shortcuts inside the inline editor.
+$(document).on('keydown', '.edit-line-input', function (e) {
+  if (e.key === 'Escape') {
+    e.preventDefault(); e.stopPropagation()
+    $(this).closest('.line').find('.edit-line-cancel').click()
+  } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault(); e.stopPropagation()
+    $(this).closest('.line').find('.edit-line-save').click()
+  }
+})
+
+// ESC stops playback; Space toggles pause. Only active when playback is on,
+// and Space is ignored while focus is in a text input so the user can still
+// type in dialogs that happen to be open.
+$(document).on('keydown', function (e) {
+  if (!window._playingRecording) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    stopPlayingRecording()
+    return
+  }
+  if (e.key === ' ' || e.code === 'Space') {
+    const tag = (e.target && e.target.tagName || '').toLowerCase()
+    const editable = tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)
+    if (editable) return
+    e.preventDefault()
+    togglePlayingRecordingPause()
+  }
+  // Arrow keys also navigate when playback is on (handy on desktop).
+  if (e.key === 'ArrowLeft') {
+    const tag = (e.target && e.target.tagName || '').toLowerCase()
+    if (tag === 'input' || tag === 'textarea') return
+    e.preventDefault()
+    navigateRecordingPlayback('prev')
+  } else if (e.key === 'ArrowRight') {
+    const tag = (e.target && e.target.tagName || '').toLowerCase()
+    if (tag === 'input' || tag === 'textarea') return
+    e.preventDefault()
+    navigateRecordingPlayback('next')
+  }
+})
+
+// External media keys (Bluetooth headset, OS media controls, the host
+// webview's hardware keys) dispatch a `cupitorMediaKey` CustomEvent with
+// detail.key ∈ {'previous', 'next', 'play_pause'}. Wiring them through
+// the same navigation/pause path keeps the inline-script contract from
+// language.html honoured.
+window.addEventListener('cupitorMediaKey', function (ev) {
+  if (!ev || !ev.detail) return
+  switch (ev.detail.key) {
+    case 'previous':
+      if (typeof ev.preventDefault === 'function') ev.preventDefault()
+      navigateRecordingPlayback('prev')
+      break
+    case 'next':
+      if (typeof ev.preventDefault === 'function') ev.preventDefault()
+      navigateRecordingPlayback('next')
+      break
+    case 'play_pause':
+      if (typeof ev.preventDefault === 'function') ev.preventDefault()
+      togglePlayingRecordingPause()
+      break
+  }
+})
+
+$(function () {
+  _loadRecording()
+  // Restore dirty marker so a page refresh after a local edit still shows
+  // the Sync* indicator until the user actually pushes.
+  try { window._recordingsDirty = localStorage.getItem(REC_DIRTY_KEY) === '1' } catch (_) {}
+  _updateRecordingUI()
+  // Merge whatever's on GitHub into local — bring in playlists captured
+  // from another device. Fire-and-forget; failures are logged.
+  _mergeRemoteRecordingsIntoLocal().catch(e => console.warn('merge remote recordings failed', e))
+})
+
 // Expose functions that are called from inline HTML onclick/onchange handlers.
 // Required because this file is loaded as type="module" which is scoped by default.
+// Inline <script> in language.html (onPlayerReady) calls seekToYoutubeTime
+// when window.youtubePlayInterval is set at the moment the YT player
+// becomes ready — but this file is loaded as type="module", so module-
+// scoped function refs are invisible to inline handlers. Bridge it here.
+window.seekToYoutubeTime        = seekToYoutubeTime
+window.startRecording           = startRecording
+window.pauseRecording           = pauseRecording
+window.resumeRecording          = resumeRecording
+window.stopRecording            = stopRecording
+window.clearRecording           = clearRecording
+window.openRecordingReviewDialog= openRecordingReviewDialog
+window.playRecording            = playRecording
+window.stopPlayingRecording     = stopPlayingRecording
+window.togglePlayingRecordingPause = togglePlayingRecordingPause
+window.navigateRecordingPlayback = navigateRecordingPlayback
+window.listRecordings           = listRecordings
+window.selectRecording          = selectRecording
+window.createRecording          = createRecording
+window.renameRecording          = renameRecording
+window.deleteRecording          = deleteRecording
+window.duplicateRecording       = duplicateRecording
+window.syncRecordingsToGithub   = syncRecordingsToGithub
+window.loadRecordingsFromGithub = loadRecordingsFromGithub
+window.openChannelManagerDialog = openChannelManagerDialog
+window.listChannels             = listChannels
+window.setChannelBlocked        = setChannelBlocked
+window.deleteChannel            = deleteChannel
+window.migrateSrtPathsToNFC     = migrateSrtPathsToNFC
+
+// Captured-subtitles helpers — exposed so the in-browser test recipe and
+// the external capture extension can both reach them without re-importing
+// the module.
+window.updateCapturedBtn        = updateCapturedBtn
+window.loadCapturedBuffer       = loadCapturedBuffer
+window.saveCapturedBuffer       = saveCapturedBuffer
+window.handleCapturedSubtitle   = handleCapturedSubtitle
+window.pushCapturedSubtitlesBatched = pushCapturedSubtitlesBatched
+window.detectSrtConflicts       = detectSrtConflicts
+window.presentSrtMergeDialog    = presentSrtMergeDialog
+window.mergeSrtWithResolution   = mergeSrtWithResolution
+
 window.openAddToVocabDialog = openAddToVocabDialog;
 window.addToVocab = addToVocab;
 window.onVocabInsertPositionChange = onVocabInsertPositionChange;

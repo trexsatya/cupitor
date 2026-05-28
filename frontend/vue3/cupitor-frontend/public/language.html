@@ -85,6 +85,17 @@
             }
         }
 
+        // Fired when a video can't be played (removed, private, embedding
+        // disabled, bad id…). During recording playback this lets us offer
+        // to delete the dead video from all playlists. Defined in language.js.
+        function onPlayerError(event) {
+            try {
+                if (typeof window.handleYoutubePlayerError === 'function') {
+                    window.handleYoutubePlayerError(event && event.data)
+                }
+            } catch (e) { console.warn('onPlayerError handler failed', e) }
+        }
+
         window.onYouTubeIframeAPIReady = () => {
             window.ytPlayer = new YT.Player("youtubePlayer", {
                 height: ytHeight,
@@ -95,7 +106,8 @@
                 },
                 events: {
                     'onReady': onPlayerReady,
-                    'onStateChange': onPlayerStateChange
+                    'onStateChange': onPlayerStateChange,
+                    'onError': onPlayerError
                 }
             });
             $('#subtitle-container').css({
@@ -145,7 +157,7 @@
                 </button>
                 <div class="lang-toolbar-center">
                 <!-- Settings gear button -->
-                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleSettingsPanelBtn" title="Settings" onclick="toggleControlPanel('settingsPanel')">
+                <button class="lang-tool-btn lang-tool-btn--icon" id="toggleSettingsPanelBtn" title="Settings" onclick="openSettingsDialog()">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492M5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0"/>
                         <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.47l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115z"/>
@@ -218,6 +230,14 @@
                         Similar
                         <input type="number" id="numberOfSimilarFindings" value="30" min="1" max="200" style="width: 46px; margin-left: 4px;">
                     </label>
+                    <label class="lang-panel-label" title="Subtitle lines shown before the matched line (persisted on GitHub)">
+                        Before
+                        <input type="number" id="contextLinesBefore" value="2" min="0" max="20" style="width: 46px; margin-left: 4px;">
+                    </label>
+                    <label class="lang-panel-label" title="Subtitle lines shown after the matched line (persisted on GitHub)">
+                        After
+                        <input type="number" id="contextLinesAfter" value="2" min="0" max="20" style="width: 46px; margin-left: 4px;">
+                    </label>
                     <label class="lang-panel-label">
                         Lang
                         <input class="tgl tgl-flip" id="toggleLangCb" type="checkbox" data-toggle="toggle"
@@ -233,14 +253,80 @@
                             </label>
                         </div>
                     </label>
+                    <label class="lang-panel-label" title="Run prefix vocabulary search automatically on every text search">
+                        Auto prefix
+                        <div class="checkbox-wrapper-22" style="display: inline; margin-left: 4px;">
+                            <label class="switch" for="toggleAutoPrefixSearchCheckbox">
+                                <input type="checkbox" id="toggleAutoPrefixSearchCheckbox" aria-label="auto prefix search" checked>
+                                <div class="slider round"></div>
+                            </label>
+                        </div>
+                    </label>
+                    <button type="button" id="manageChannelsBtn" class="lang-tool-btn" onclick="openChannelManagerDialog()" title="Block or delete channels">Channels…</button>
+                    <button type="button" id="rareWordsBtn" class="lang-tool-btn" onclick="openRareWordsDialog()" title="Find vocabulary words that are absent or rare across all subtitles">Rare words…</button>
+                    <span class="lang-panel-label" title="Record search-result selections and replay them as a YouTube playlist" style="border-left: 1px solid #ddd; padding-left: 10px;">
+                        <button type="button" id="recStartBtn"  class="lang-tool-btn" style="margin-left:4px;">● Record</button>
+                        <button type="button" id="recPauseBtn"  class="lang-tool-btn" style="display:none; margin-left:4px;">⏸</button>
+                        <button type="button" id="recResumeBtn" class="lang-tool-btn" style="display:none; margin-left:4px;">▶</button>
+                        <button type="button" id="recStopBtn"   class="lang-tool-btn" style="display:none; margin-left:4px;">⏹</button>
+                        <button type="button" id="recReviewBtn" class="lang-tool-btn" style="margin-left:4px;">Review</button>
+                        <span id="recStatus" style="margin-left:6px;font-size:12px;color:#888;"></span>
+                    </span>
+                    <label class="lang-panel-label" title="Seconds to wait between items during playback (persisted on GitHub)">
+                        Gap (s)
+                        <input type="number" id="recPlayGapSeconds" value="30" min="0" max="600" style="width: 50px; margin-left: 4px;">
+                    </label>
+                    <label class="lang-panel-label" title="How the translation is revealed on a Practice flashcard">
+                        Reveal
+                        <select id="practiceRevealMode" style="margin-left: 4px;">
+                            <option value="flip">Flip to target</option>
+                            <option value="both">Show both</option>
+                            <option value="hide">Hide until click</option>
+                        </select>
+                    </label>
                     <button id="addToVocabBtn" onclick="openAddToVocabDialog()" class="button-62" disabled>Add To Vocab</button>
                     <button id="saveStarredLinesBtn" onclick="saveStarredLines()" style="display: none;">Save Starred Lines</button>
                     <button id="reviewCapturedBtn" onclick="openCapturedSubtitlesReview()" style="display: none;">Review Captured</button>
                 </div>
                 <div id="searchesControl" style="padding-top: 16px;">
-                    
+
                 </div>
-                
+                <div id="settingsFooter" class="settings-footer">
+                    <button type="button" id="viewLogsBtn" class="lang-tool-btn" onclick="openLogViewer()" title="Show captured console logs">Logs</button>
+                    <button type="button" id="syncSrtEditsBtn" class="lang-tool-btn" title="Push buffered inline SRT edits to GitHub in one commit">Sync edits</button>
+                    <span id="buildInfo" class="build-info" title="Last-Modified of /language.js (and the HTML)">Built: …</span>
+                </div>
+                <div id="srtEditsReviewDialog" title="Review pending SRT edits" style="display: none;">
+                    <div class="srt-review-info"></div>
+                    <div id="srtEditsReviewList" class="srt-review-list"></div>
+                    <div class="srt-review-actions">
+                        <button type="button" id="srtEditsPushSelected" class="lang-tool-btn">Push selected</button>
+                        <button type="button" id="srtEditsDiscardSelected" class="lang-tool-btn">Discard selected</button>
+                        <button type="button" id="srtEditsSelectAll" class="lang-tool-btn">Select all</button>
+                        <button type="button" id="srtEditsSelectNone" class="lang-tool-btn">Select none</button>
+                    </div>
+                </div>
+                <div id="logViewerDialog" title="Logs" style="display: none;">
+                    <div class="log-viewer-toolbar">
+                        <label class="log-viewer-filter">
+                            Level
+                            <select id="logViewerLevel">
+                                <option value="all">All</option>
+                                <option value="error">error</option>
+                                <option value="warn">warn+</option>
+                                <option value="info">info+</option>
+                            </select>
+                        </label>
+                        <input type="search" id="logViewerSearch" placeholder="filter…" class="log-viewer-search">
+                        <button type="button" id="logViewerCopy" class="lang-tool-btn">Copy</button>
+                        <button type="button" id="logViewerClear" class="lang-tool-btn">Clear</button>
+                        <label class="log-viewer-filter" title="Re-render automatically as new logs arrive">
+                            <input type="checkbox" id="logViewerAutoRefresh" checked>
+                            Auto
+                        </label>
+                    </div>
+                    <pre id="logViewerBody" class="log-viewer-body"></pre>
+                </div>
                 </div>
 
                 <!-- Media panel: hidden by default -->
@@ -259,6 +345,12 @@
                         <input type="checkbox" id="onlySubsCheckbox">
                         <span class="slider"></span>
                     </label>
+                    <button id="deleteMediaBtn" type="button" onclick="deleteSelectedMedia()" class="button-10" title="Delete the selected media's SRTs and its index.json entry on GitHub" style="margin-left:6px;">Delete</button>
+                    <button id="playSelectedMediaBtn" type="button" onclick="playSelectedMedia()" class="lang-tool-btn" title="Play the selected media" style="display: none; margin-left:6px;">▶ Play</button>
+                    <span style="display:inline-flex; flex-direction:column; align-items:flex-start; gap:6px; vertical-align:top; margin-left:6px;">
+                        <button id="playStarredLinesBtn" type="button" onclick="playStarredLines()" class="lang-tool-btn" title="Play the starred lines of this media as a playlist" style="display: none;">▶ Play Starred</button>
+                        <button id="practiceStarredLinesBtn" type="button" onclick="practiceStarredLines()" class="lang-tool-btn" title="Practice the starred lines of this media as flashcards" style="display: none;">🎴 Practice Starred</button>
+                    </span>
                 </div>
                 <div id="localMediaContainer" style="display: none; margin-top: 4px;">
                     <input type="file" accept="video/*,audio/*,.srt,.json" multiple="multiple" id="localFiles"
@@ -302,6 +394,25 @@
             </div>
         </div>
 
+        <div id="rareWordsDialog" title="Rare / Unused Vocabulary" style="display: none;">
+            <div class="rare-words-toolbar">
+                <label class="rare-words-threshold-label">
+                    Matching in fewer than
+                    <input type="number" id="rareWordsThreshold" value="1" min="1" max="50" style="width: 52px; margin: 0 4px;">
+                    subtitle(s)
+                </label>
+                <button type="button" id="rareWordsScanBtn" class="lang-tool-btn" onclick="scanRareWords()">Scan</button>
+                <span id="rareWordsStatus" class="rare-words-status"></span>
+            </div>
+            <div id="rareWordsProgress" class="rare-words-progress" style="display:none;">
+                <div id="rareWordsProgressFill" class="rare-words-progress-fill"></div>
+            </div>
+            <div id="rareWordsResults" class="rare-words-results">
+                <div class="rare-words-empty">Set a threshold and click Scan.</div>
+            </div>
+            <div id="rareWordsPager" class="rare-words-pager"></div>
+        </div>
+
         <div id="import-dialog" title="Import Words" style="display: none;">
             <div id="import-dialog-content">
                 Vocab: <select id="vocabularySelect" style="width: 100%;" onchange="importSearchesFromVocab()">
@@ -338,7 +449,7 @@
                 <button type="button" onclick="insertIntoVocabSegment('<*')" style="font-family:monospace;min-width:36px;" title="Expansion token (e.g. &lt;*jobba)">&lt;*</button>
             </div>
             <div style="margin-top: 0.5em;">
-                <input id="vocabularySegmentTextarea" style="height: 50%;width: 98%;" placeholder="New word(s), one per line"></input>
+                <textarea id="vocabularySegmentTextarea" rows="5" style="width: 98%; min-height: 4em; resize: vertical; font-family: inherit;" placeholder="New word(s), one per line"></textarea>
             </div>
             <div style="margin-top: 0.5em; display: flex; gap: 6px; align-items: center;">
                 <button type="button" onclick="addToVocab(false)" title="Apply this entry and clear the textarea so you can add another. Nothing is committed until you Save &amp; Close.">Add another</button>
@@ -406,6 +517,7 @@
         <div id="subtitle-container" style="min-height: 600px;">
             <br>
             <br>
+            <div id="subtitle-timestamp" style="font-size: 0.8em; color: #888; font-family: monospace;"></div>
             <div id="sv-sub" style="font-size: large;"></div>
             <br>
             <br>
@@ -444,7 +556,7 @@
             return option.text;
         }
         $('#searchedWords').select2({
-            placeholder: 'Searches',
+            placeholder: 'Vocabulary',
             allowClear: true,
             templateResult: styleCategory,
             templateSelection: styleCategory
