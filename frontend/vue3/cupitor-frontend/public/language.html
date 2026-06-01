@@ -262,8 +262,15 @@
                             </label>
                         </div>
                     </label>
-                    <button type="button" id="manageChannelsBtn" class="lang-tool-btn" onclick="openChannelManagerDialog()" title="Block or delete channels">Channels…</button>
-                    <button type="button" id="rareWordsBtn" class="lang-tool-btn" onclick="openRareWordsDialog()" title="Find vocabulary words that are absent or rare across all subtitles">Rare words…</button>
+                    <span class="manage-wrap" style="position:relative;display:inline-block;">
+                        <button type="button" id="manageBtn" class="lang-tool-btn" title="Channels / Rare words / Duplicate SRTs">Manage…</button>
+                        <div id="manageMenu" class="manage-popover" style="display:none;">
+                            <button type="button" class="manage-item" onclick="closeManageMenu(); openChannelManagerDialog()" title="Block or delete channels">Channels…</button>
+                            <button type="button" class="manage-item" onclick="closeManageMenu(); openRareWordsDialog()" title="Find vocabulary words that are absent or rare across all subtitles">Rare words…</button>
+                            <button type="button" class="manage-item" onclick="closeManageMenu(); openDuplicateSrtsDialog()" title="Find SRT index entries that share a video id and remove the extras">Duplicate SRTs…</button>
+                            <button type="button" class="manage-item" onclick="closeManageMenu(); openUnavailableVideosDialog()" title="Find YouTube videos whose thumbnail no longer resolves (removed/private/embedding-disabled)">Unavailable…</button>
+                        </div>
+                    </span>
                     <span class="lang-panel-label" title="Record search-result selections and replay them as a YouTube playlist" style="border-left: 1px solid #ddd; padding-left: 10px;">
                         <button type="button" id="recStartBtn"  class="lang-tool-btn" style="margin-left:4px;">● Record</button>
                         <button type="button" id="recPauseBtn"  class="lang-tool-btn" style="display:none; margin-left:4px;">⏸</button>
@@ -402,6 +409,12 @@
                     subtitle(s)
                 </label>
                 <button type="button" id="rareWordsScanBtn" class="lang-tool-btn" onclick="scanRareWords()">Scan</button>
+                <label class="rare-words-threshold-label" title="Filter the result list to a single vocabulary category">
+                    Category
+                    <select id="rareWordsCategory" style="margin-left:4px;">
+                        <option value="">All categories</option>
+                    </select>
+                </label>
                 <span id="rareWordsStatus" class="rare-words-status"></span>
             </div>
             <div id="rareWordsProgress" class="rare-words-progress" style="display:none;">
@@ -411,6 +424,37 @@
                 <div class="rare-words-empty">Set a threshold and click Scan.</div>
             </div>
             <div id="rareWordsPager" class="rare-words-pager"></div>
+        </div>
+
+        <div id="unavailableVideosDialog" title="Unavailable YouTube videos" style="display: none;">
+            <div class="dup-srts-info">
+                YouTube videos which are (most likely) unavailable. For each, the vocabulary
+                words that would be left without any matching SRT after
+                deletion are listed. Pick which to delete.
+            </div>
+            <div id="unavailableVideosStatus" class="rare-words-status"></div>
+            <div id="unavailableVideosProgress" class="rare-words-progress" style="display:none;">
+                <div id="unavailableVideosProgressFill" class="rare-words-progress-fill"></div>
+            </div>
+            <div id="unavailableVideosList" class="dup-srts-list"></div>
+            <div class="dup-srts-actions">
+                <button type="button" id="unavailableVideosSelectAll" class="lang-tool-btn">Select all</button>
+                <button type="button" id="unavailableVideosSelectNone" class="lang-tool-btn">Select none</button>
+                <button type="button" id="unavailableVideosDelete" class="lang-tool-btn dup-srts-del">Delete selected</button>
+                <button type="button" id="unavailableVideosRescan" class="lang-tool-btn">Re-scan</button>
+            </div>
+        </div>
+
+        <div id="duplicateSrtsDialog" title="Duplicate SRTs" style="display: none;">
+            <div class="dup-srts-info">
+                Index entries that share the same video id. Pick one entry per
+                group to keep — delete the rest (the matching SRT files on
+                GitHub are also removed).
+            </div>
+            <div id="duplicateSrtsList" class="dup-srts-list"></div>
+            <div class="dup-srts-actions">
+                <button type="button" id="duplicateSrtsRescan" class="lang-tool-btn">Re-scan</button>
+            </div>
         </div>
 
         <div id="import-dialog" title="Import Words" style="display: none;">

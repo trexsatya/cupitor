@@ -1553,6 +1553,124 @@ body.rec-paused .lines-cntnr .buttons .capture-btn { opacity: 0.4; pointer-event
     opacity: 0.45;
     text-decoration: line-through;
 }
+#recordingReviewDialog .rec-item-text.rec-item-manual {
+    font-family: inherit;
+    color: #333;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 0;             /* allow flex shrink past intrinsic content width */
+}
+/* Mobile: the flex row has too many fixed-width buttons + a wide "Copy to…"
+   select for the manual text to share the line. Stack the manual row so
+   the source → target text gets the full row width above the controls.
+   We only re-flow rows that contain a manual text node — captured items
+   (id · timestamps) keep the single-line layout. */
+@media (max-width: 600px) {
+    #recordingReviewDialog .rec-item-row1:has(.rec-item-manual) {
+        flex-wrap: wrap;
+        row-gap: 4px;
+    }
+    #recordingReviewDialog .rec-item-row1:has(.rec-item-manual) .rec-item-text.rec-item-manual {
+        flex: 1 1 100%;
+        order: -1;            /* text first, controls below */
+        font-size: 14px;
+        line-height: 1.35;
+    }
+    /* The "Copy to…" select is ~120px and the biggest space-eater. Drop it
+       to icon-only width on the manual row; the option labels still expand
+       on tap. */
+    #recordingReviewDialog .rec-item-row1:has(.rec-item-manual) .rec-copy-to {
+        max-width: 88px;
+    }
+}
+#recordingReviewDialog .rec-item-media {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #e8eef6;
+    color: #36507a;
+    text-decoration: none;
+    font-size: 12px;
+    margin-left: 4px;
+    margin-right: 2px;
+}
+#recordingReviewDialog .rec-item-media:hover { background: #d6e1ef; }
+#recordingReviewDialog .rec-manual-edit {
+    background: none;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 4px;
+    line-height: 1;
+}
+#recordingReviewDialog .rec-manual-edit:hover { color: #000; }
+
+/* Manual-entry editor dialog */
+#manualEntryEditor .mee-row { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+#manualEntryEditor .mee-lbl { font-size: 12px; color: #555; font-weight: 600; }
+#manualEntryEditor .mee-lbl-hint { font-weight: 400; color: #888; }
+#manualEntryEditor .mee-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    font: inherit;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+#manualEntryEditor textarea.mee-input { resize: vertical; min-height: 44px; }
+
+/* Practice manual card text + media button.
+   The parent .practice-front has no explicit width/display rule, but the
+   3D-transformed flipper chain on mobile sometimes lets the child collapse
+   to its intrinsic min-content width (one character per "line"). Force
+   the parent .practice-front to behave as a full-width block too, and pin
+   the manual text node to the face's content width directly so neither
+   the front nor its child can collapse. */
+#practiceMode .practice-front:has(.practice-manual-text),
+#practiceMode .practice-back:has(.practice-manual-text) {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+}
+#practiceMode .practice-manual-text {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 6px 4px;
+    margin: 0;
+    font-size: 18px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+    text-align: center;
+}
+#practiceMode .practice-back .practice-manual-text,
+#practiceMode .practice-back-target .practice-manual-text { color: #80cbc4; }
+@media (max-width: 480px) {
+    #practiceMode .practice-manual-text {
+        font-size: 16px;
+        padding: 4px 2px;
+    }
+}
+#practiceMode .practice-media-link {
+    background: #36507a;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+    cursor: pointer;
+    margin: 0 4px;
+}
+#practiceMode .practice-media-link:hover { background: #2a3f60; }
 #recordingReviewDialog .rec-del {
     color: #a00;
     background: none;
@@ -1951,33 +2069,161 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 }
 #practiceMode .practice-line-edit:hover { background: rgba(255,255,255,0.25); }
 /* Inline editor box replacing a line while editing. */
-#practiceMode .practice-edit-box { padding: 4px 0; }
-#practiceMode .practice-edit-input {
+/* Manage popover — opens beneath the "Manage…" button, holds the three
+   maintenance entry-points (Channels, Rare words, Duplicate SRTs). Closes
+   on outside click via JS. */
+.manage-popover {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    min-width: 180px;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+}
+.manage-popover .manage-item {
+    background: transparent;
+    border: none;
+    text-align: left;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: #24292f;
+    cursor: pointer;
+}
+.manage-popover .manage-item:hover { background: #f6f8fa; }
+
+/* Rare words category headers (when no category filter is active). */
+.rare-words-cat-hdr {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #57606a;
+    border-bottom: 1px solid #d0d7de;
+    padding: 6px 4px 3px;
+    margin: 6px 0 2px;
+    font-weight: 600;
+}
+
+/* Duplicate SRTs dialog. */
+#duplicateSrtsDialog .dup-srts-info {
+    padding: 4px 4px 8px;
+    font-size: 12px;
+    color: #57606a;
+}
+.dup-srts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.dup-srts-empty {
+    padding: 24px 8px;
+    text-align: center;
+    color: #888;
+}
+.dup-srts-group {
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    background: #fafbfc;
+    padding: 8px 10px;
+}
+.dup-srts-head {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #24292f;
+    font-weight: 600;
+    padding-bottom: 4px;
+    border-bottom: 1px dashed #d0d7de;
+    margin-bottom: 6px;
+}
+.dup-srts-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+.dup-srts-row:not(:last-child) { border-bottom: 1px dotted #e1e4e8; }
+.dup-srts-name {
+    flex: 1;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #24292f;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.dup-srts-keep {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 1px 6px;
+    font-size: 10px;
+    background: #e7f3e7;
+    color: #1b5e20;
+    border-radius: 8px;
+    text-transform: uppercase;
+}
+.dup-srts-del {
+    background: #c62828;
+    color: #fff;
+    border-color: #c62828;
+}
+.dup-srts-del:hover { background: #b71c1c; border-color: #b71c1c; }
+.dup-srts-actions { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Unavailable-videos dialog — orphan-word chips under each row. */
+.unavail-uniq-hdr {
+    font-size: 11px;
+    color: #57606a;
+    padding: 4px 0 4px;
+}
+.unavail-uniq-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.unavail-uniq-word {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 11px;
+    background: #fff1d6;
+    border: 1px solid #d4a72c;
+    color: #4d3800;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+/* Lift any jQuery UI dialog above the Practice overlay (z-index 100002 +
+   100004 for topbar/nav). Without this, dialogs opened while practice is
+   active render behind the card. !important beats the inline z-index that
+   jQuery UI may stamp on the wrapper during focus management. */
+.ui-dialog.above-practice-mode {
+    z-index: 100020 !important;
+}
+
+/* Practice line edit dialog — replaces the previous inline edit so the
+   on-screen keyboard doesn't cover the textarea. */
+#practiceLineEditDialog .practice-edit-meta {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #57606a;
+    padding-bottom: 6px;
+}
+#practiceLineEditDialog .practice-edit-input {
     width: 100%;
     box-sizing: border-box;
     font-size: 15px;
-    padding: 6px 8px;
+    padding: 8px 10px;
     border: 1px solid #1976d2;
     border-radius: 4px;
-    background: #11161c;
-    color: #f5f5f5;
     resize: vertical;
+    min-height: 4em;
+    font-family: inherit;
 }
-#practiceMode .practice-edit-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 6px;
-    justify-content: flex-end;
-}
-#practiceMode .practice-edit-actions button {
-    font-size: 12px;
-    padding: 4px 12px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-}
-#practiceMode .practice-edit-save { background: #2e7d32; color: #fff; }
-#practiceMode .practice-edit-cancel { background: #555; color: #fff; }
 #practiceMode .practice-word[style*="hidden"] { /* keep layout height while hidden */ }
 #practiceMode .practice-reveal {
     margin-top: 12px;

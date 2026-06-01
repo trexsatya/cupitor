@@ -395,12 +395,43 @@ async function scanRareWords() {
   $('#rareWordsProgress').hide()
   $('#rareWordsScanBtn').prop('disabled', false)
   $('#rareWordsStatus').text(`${found.length} word(s) match in fewer than ${threshold} subtitle(s).`)
+  // Refresh the per-category filter with the categories actually seen in
+  // this scan's results. Keep the previous selection if it still applies.
+  _populateRareWordsCategoryFilter(found)
   _renderRareWordsPage()
 }
 window.scanRareWords = scanRareWords
 
+// Build the Category dropdown from the categories present in `found`. Items
+// are grouped by category, so the user can drill into one slice at a time.
+function _populateRareWordsCategoryFilter(found) {
+  const $sel = $('#rareWordsCategory')
+  if (!$sel.length) return
+  const prev = $sel.val() || ''
+  const counts = {}
+  ;(found || []).forEach(it => { counts[it.category || ''] = (counts[it.category || ''] || 0) + 1 })
+  const cats = Object.keys(counts).sort((a, b) => a.localeCompare(b))
+  $sel.empty()
+  $sel.append(`<option value="">All categories (${(found || []).length})</option>`)
+  cats.forEach(c => {
+    $sel.append(`<option value="${_.escape(c)}">${_.escape(c || '(uncategorised)')} — ${counts[c]}</option>`)
+  })
+  // Restore previous selection if still valid; else default to "all".
+  if (cats.indexOf(prev) >= 0) $sel.val(prev); else $sel.val('')
+}
+// Re-render the list when the category filter changes.
+$(function () {
+  $(document).on('change', '#rareWordsCategory', function () {
+    window._rareWordsPage = 0
+    _renderRareWordsPage()
+  })
+})
+
 function _renderRareWordsPage() {
-  const all = window._rareWords || []
+  const raw = window._rareWords || []
+  const catFilter = ($('#rareWordsCategory').val() || '').trim()
+  // Filter to the selected category, if any. Empty value = no filter.
+  const all = catFilter ? raw.filter(it => (it.category || '') === catFilter) : raw
   const pageSize = RARE_WORDS_PAGE_SIZE
   const pages = Math.max(1, Math.ceil(all.length / pageSize))
   const page = Math.min(window._rareWordsPage || 0, pages - 1)
@@ -408,12 +439,27 @@ function _renderRareWordsPage() {
   const slice = all.slice(page * pageSize, page * pageSize + pageSize)
 
   const $list = $('#rareWordsResults').empty()
-  if (!all.length) {
+  if (!raw.length) {
     $list.html('<div class="rare-words-empty">Nothing to show yet — set a threshold and click Scan.</div>')
     $('#rareWordsPager').empty()
     return
   }
+  if (!all.length) {
+    $list.html('<div class="rare-words-empty">No matches in this category.</div>')
+    $('#rareWordsPager').empty()
+    return
+  }
+  // When no category filter, group by category with sticky-ish headers so
+  // the user can scan groups even without filtering. With a filter active
+  // the list is already homogenous — skip the headers for a flatter view.
+  let currentCat = null
   slice.forEach(it => {
+    if (!catFilter && it.category !== currentCat) {
+      currentCat = it.category
+      const $hdr = $('<div class="rare-words-cat-hdr"></div>')
+        .text(currentCat || '(uncategorised)')
+      $list.append($hdr)
+    }
     const $row = $('<button type="button" class="rare-word-item"></button>')
     $row.attr('title', `${it.line} — ${it.count} match(es) · ${it.category}`)
     $row.append($('<span class="rare-word-text"></span>').text(it.line))
@@ -1908,7 +1954,7 @@ $('document').ready(e => {
       // for the captured-subtitles review: each row has a Delete / Push
       // action we don't want clobbered, plus the trigger button click
       // itself shouldn't immediately re-close the dialog it just opened.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog").dialog("close");
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor").dialog("close");
     }
   });
 
@@ -2897,27 +2943,37 @@ try {
 } catch (e) {
 }
 
+// Parse an SRT into an array of subtitle objects. Each object always carries
+// the line text on `item.text` — that's the canonical field every reader
+// should use. When a `lang` argument is supplied (e.g. 'sv', 'en'), the same
+// text is ALSO mirrored under `item[lang]` so the few legacy consumers that
+// read item.sv / item.en (the combined sv+en merge in loadSubtitlesForLink;
+// the search-result `sv_subs.data` / `en_subs.data` per-row rendering) keep
+// working. Previously the lang variant stored text ONLY under item[lang],
+// which is what caused practice edits to render as "(empty)" — the practice
+// renderer reads item.text exclusively.
 function srtToJson(text, lang) {
-  if (!lang) lang = 'text'
+  const mirror = lang && lang !== 'text'   // legacy callers that read item[lang]
   text = text.replaceAll('<c.huvudpratare>', '')
   const items = []
-  let currentItem = {}
-  currentItem[lang] = ''
+  let currentItem = { text: '' }
+  if (mirror) currentItem[lang] = ''
   text.split("\n").forEach(line => {
     line = line.trim()
     const matchTime = line.match(/(\d\d:\d\d:\d\d[,.]\d\d\d) --> (\d\d:\d\d:\d\d[,.]\d\d\d)/m)
     const matchId = line.match(/^\d+$/m)
     if (matchId) {
       items.push(currentItem)
-      currentItem = {index: line, id: line}
-      currentItem[lang] = ''
+      currentItem = { index: line, id: line, text: '' }
+      if (mirror) currentItem[lang] = ''
     } else if (matchTime) {
       currentItem['start'] = {ordinal: toSeconds(matchTime[1])}
       currentItem['end'] = {ordinal: toSeconds(matchTime[2])}
       currentItem['ts'] = matchTime[1]
       currentItem['te'] = matchTime[2]
     } else {
-      currentItem[lang] += (line + "\n")
+      currentItem.text += (line + "\n")
+      if (mirror) currentItem[lang] += (line + "\n")
     }
   })
 
@@ -3954,6 +4010,8 @@ async function _saveSubtitleEdit(link, langCode, lineIndex, newText) {
   if (!updated) throw new Error(`Line ${lineIndex} not found in ${filePath}`)
 
   // Optimistic local update — render immediately and let the network catch up.
+  // srtToJson now populates item.text on every parse (and mirrors to
+  // item[lang] when lang is given), so the lang argument is safe here.
   stored[key] = updated
   if (key === 'sv' && stored._parsedSv) stored._parsedSv = srtToJson(updated, 'sv')
   if (key === 'en' && stored._parsedEn) stored._parsedEn = srtToJson(updated, 'en')
@@ -6713,6 +6771,487 @@ async function deleteSelectedMedia() {
 }
 window.deleteSelectedMedia = deleteSelectedMedia
 
+// ─── Manage menu (Channels / Rare words / Duplicate SRTs) ───────────────
+// Tiny dropdown launcher hidden behind a single "Manage…" button to keep the
+// settings panel chrome lean. Open on click; close on outside-click or
+// after a menu item runs.
+function toggleManageMenu() {
+  const $m = $('#manageMenu')
+  if (!$m.length) return
+  $m.toggle()
+}
+function closeManageMenu() { $('#manageMenu').hide() }
+window.toggleManageMenu = toggleManageMenu
+window.closeManageMenu  = closeManageMenu
+$(function () {
+  $(document).on('click', '#manageBtn', function (e) {
+    e.stopPropagation()
+    toggleManageMenu()
+  })
+  $(document).on('click', function (e) {
+    if (!$(e.target).closest('.manage-wrap').length) closeManageMenu()
+  })
+})
+
+// ─── Duplicate SRT cleanup ──────────────────────────────────────────────
+// Groups window.srts by `link` (videoId). Index entries should normally be
+// 1:1 with videoId — duplicates only show up when the writes raced or the
+// JSON was edited by hand. The dialog lists each group and lets the user
+// delete the extras one by one (the first row in each group is treated as
+// the canonical "keep" entry and has no Delete button).
+function _findDuplicateSrtGroups() {
+  const groups = new Map()
+  ;(window.srts || []).forEach(it => {
+    if (!it || !it.link) return
+    if (!groups.has(it.link)) groups.set(it.link, [])
+    groups.get(it.link).push({ name: _nfc(it.name), source: it.source || '' })
+  })
+  return Array.from(groups.entries())
+    .filter(([, names]) => names.length > 1)
+    .map(([link, entries]) => ({ link, entries }))
+}
+
+function openDuplicateSrtsDialog() {
+  const $dlg = $('#duplicateSrtsDialog')
+  _renderDuplicateSrtsList()
+  const opts = {
+    width: Math.min(720, Math.round(window.innerWidth * 0.95)),
+    height: Math.min(560, Math.round(window.innerHeight * 0.85)),
+    modal: false,
+    open: function () {
+      $(this).closest('.ui-dialog').attr('tabindex', -1).trigger('focus')
+    }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) $dlg.dialog('option', opts).dialog('open')
+  else $dlg.dialog(opts)
+}
+window.openDuplicateSrtsDialog = openDuplicateSrtsDialog
+
+function _renderDuplicateSrtsList() {
+  const $list = $('#duplicateSrtsList').empty()
+  const groups = _findDuplicateSrtGroups()
+  if (!groups.length) {
+    $list.append('<div class="dup-srts-empty">No duplicate index entries found.</div>')
+    return
+  }
+  groups.forEach(g => {
+    const $g = $('<div class="dup-srts-group"></div>')
+    $g.append($('<div class="dup-srts-head"></div>').text(`${g.link} — ${g.entries.length} entries`))
+    g.entries.forEach((e, idx) => {
+      const $row = $('<div class="dup-srts-row"></div>')
+      const tag  = idx === 0 ? '<span class="dup-srts-keep">keep</span>' : ''
+      $row.append($(`<span class="dup-srts-name">${tag}${_.escape(e.name)}</span>`))
+      if (idx > 0) {
+        const $btn = $('<button type="button" class="lang-tool-btn dup-srts-del">Delete</button>')
+          .on('click', async () => {
+            if (!confirm(`Delete "${e.name}" (${g.link})?\n\nThis removes both SRT files and the index entry on GitHub.`)) return
+            $btn.prop('disabled', true).text('Deleting…')
+            try {
+              await _deleteDuplicateSrtEntry(g.link, e.name)
+              _renderDuplicateSrtsList()
+            } catch (err) {
+              console.error('dup-srt delete failed', err)
+              alert('Failed to delete: ' + (err && err.message || err))
+              $btn.prop('disabled', false).text('Delete')
+            }
+          })
+        $row.append($btn)
+      }
+      $g.append($row)
+    })
+    $list.append($g)
+  })
+}
+
+// Like deleteSelectedMedia but scoped to ONE (link, baseName) tuple — used
+// by the duplicate cleanup so unrelated entries for the same link are
+// preserved. Also skips removeVideoFromAllPlaylists: if other srt entries
+// for this link survive, playlist items pointing at the videoId are still
+// valid.
+async function _deleteDuplicateSrtEntry(link, baseName) {
+  baseName = _nfc(baseName)
+  const lang = getLangFromUrl()
+  const srtsDir = `db/language/${lang.fullName}/srts`
+  const srcCode = lang.code
+  const candidates = [`${baseName}.${srcCode}.srt`]
+  if (srcCode !== 'en') candidates.push(`${baseName}.en.srt`)
+  const owner = 'trexsatya', repo = 'trexsatya.github.io'
+  for (const fileName of candidates) {
+    const filePath = `${srtsDir}/${encodeURIComponent(fileName)}`
+    try {
+      await window.GitHubUtils.deleteFileWithLookup({
+        owner, repo, filePath,
+        commitMessage: `srt: delete duplicate ${fileName}`,
+        branch: 'gh-pages'
+      })
+    } catch (e) { console.warn(`Failed to delete ${fileName}:`, e) }
+  }
+  // Remove only the FIRST matching (link, name) so other duplicates remain
+  // for explicit deletion (otherwise a single click would wipe the group).
+  await commitWithMerge({
+    filePath: `${srtsDir}/index.json`,
+    commitMessage: `srts: remove duplicate index entry for ${link} / ${baseName}`,
+    merge: (remoteText) => {
+      let arr = []
+      try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
+      if (!Array.isArray(arr)) arr = []
+      const idx = arr.findIndex(it => it && it.link === link && _nfc(it.name) === baseName)
+      if (idx >= 0) arr.splice(idx, 1)
+      return JSON.stringify(arr, null, 2)
+    }
+  })
+  // Local-state cleanup: drop the first matching entry only.
+  if (Array.isArray(window.srts)) {
+    const i = window.srts.findIndex(it => it && it.link === link && _nfc(it.name) === baseName)
+    if (i >= 0) window.srts.splice(i, 1)
+  }
+}
+$(function () {
+  $(document).on('click', '#duplicateSrtsRescan', _renderDuplicateSrtsList)
+})
+
+// ─── Unavailable YouTube videos cleanup ────────────────────────────────
+// Two-stage detection so YouTube changing internal behavior doesn't silently
+// break us:
+//  1) Fast thumbnail pre-filter — mqdefault.jpg returns a 120×90 placeholder
+//     for removed/private/embedding-disabled videos. Cheap (~200ms per id,
+//     CORS-friendly, no API key). But it's an undocumented quirk that could
+//     change anytime.
+//  2) IFrame Player API confirmation — for each thumbnail-suspect, actually
+//     try to instantiate a YT.Player and read its onError code (100, 101,
+//     150 = canonical unavailability signals). Slow per-id (~2–4s) but it's
+//     the documented contract YouTube itself depends on, so it's the source
+//     of truth. If the player confirms "available", we drop the candidate.
+// Per confirmed-unavailable video we then compute the "uniquely covered"
+// vocabulary words — those that would lose ALL their SRT matches if the
+// user deletes the video.
+function _checkYoutubeAvailable(videoId) {
+  return new Promise(resolve => {
+    if (!videoId) return resolve(true)
+    const img = new Image()
+    let done = false
+    const finish = (ok) => { if (!done) { done = true; resolve(ok) } }
+    img.onload  = () => finish(img.naturalWidth !== 120)
+    img.onerror = () => finish(false)
+    img.src = `https://img.youtube.com/vi/${encodeURIComponent(videoId)}/mqdefault.jpg`
+    // Safety timeout — if YouTube is slow / network drops, don't hang.
+    setTimeout(() => finish(true), 7000)
+  })
+}
+
+// Resolves to:
+//   'unavailable' — player reported error 100/101/150 (canonical signals)
+//   'available'   — player onReady fired (video plays)
+//   'unknown'     — API missing, timeout, or ambiguous error code (2, 5, …)
+// Caller treats 'available' as a refutation of the thumbnail verdict; the
+// other two keep the candidate in the unavailable list (conservative: don't
+// silently drop suspects when we can't get a definitive signal).
+function _confirmUnavailableViaPlayer(videoId) {
+  return new Promise(resolve => {
+    if (!videoId)                       return resolve('unknown')
+    if (!window.YT || !window.YT.Player) return resolve('unknown')
+    const host = document.createElement('div')
+    host.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;visibility:hidden;'
+    document.body.appendChild(host)
+    const node = document.createElement('div')
+    host.appendChild(node)
+    let done = false, player = null
+    const cleanup = () => {
+      try { if (player && typeof player.destroy === 'function') player.destroy() } catch (_) {}
+      try { host.remove() } catch (_) {}
+    }
+    const finish = (verdict) => {
+      if (done) return
+      done = true
+      cleanup()
+      resolve(verdict)
+    }
+    try {
+      player = new YT.Player(node, {
+        videoId,
+        width: 1, height: 1,
+        playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, modestbranding: 1 },
+        events: {
+          onReady: () => finish('available'),
+          onError: (e) => {
+            const code = e && e.data
+            if (code === 100 || code === 101 || code === 150) finish('unavailable')
+            else finish('unknown')
+          }
+        }
+      })
+    } catch (_) {
+      finish('unknown')
+    }
+    // Each iframe is expensive; cap wall-clock per probe so a stuck player
+    // doesn't block the whole scan. 'unknown' on timeout keeps the candidate.
+    setTimeout(() => finish('unknown'), 6000)
+  })
+}
+
+// Build {word -> Set<videoId>} for every vocabulary entry that matches at
+// least one in-memory SRT. Re-uses _cleanSrtForMatch + expandWords +
+// _relaxSpaces from the rare-words pipeline so the matching rules stay
+// consistent. Time-sliced to keep the UI responsive on large vocabularies.
+async function _buildVocabToVideosMap(progressFn) {
+  const subs = Object.entries(window.allSubtitles || {})
+    .filter(([, s]) => s && (s.sv || s.en))
+    .map(([link, s]) => ({
+      link,
+      sv: s.sv ? _cleanSrtForMatch(s.sv) : '',
+      en: s.en ? _cleanSrtForMatch(s.en) : ''
+    }))
+  const seen = new Map()
+  Object.entries(window.vocabulary || {}).forEach(([cat, lines]) => {
+    if (!Array.isArray(lines)) return
+    lines.forEach(line => {
+      const l = (line || '').trim()
+      if (l.length < 2) return
+      if (!seen.has(l)) seen.set(l, cat)
+    })
+  })
+  const entries = Array.from(seen.keys())
+  const out = new Map()  // word -> Set<videoId>
+  const yieldToUI = () => new Promise(r => setTimeout(r, 0))
+  const SLICE_MS = 25
+  const now = () => (window.performance && performance.now) ? performance.now() : Date.now()
+  let lastYield = now()
+  for (let i = 0; i < entries.length; i++) {
+    const line = entries[i]
+    let re = null
+    try {
+      const expanded = expandWords(line, getLangFromUrl().code)
+      re = new RegExp(_relaxSpaces(expanded), 'i')
+    } catch (_) {}
+    if (re) {
+      const set = new Set()
+      for (const sub of subs) {
+        if ((sub.sv && re.test(sub.sv)) || (sub.en && re.test(sub.en))) set.add(sub.link)
+      }
+      if (set.size) out.set(line, set)
+    }
+    if (now() - lastYield > SLICE_MS) {
+      if (progressFn) progressFn((i + 1) / entries.length)
+      await yieldToUI()
+      lastYield = now()
+    }
+  }
+  if (progressFn) progressFn(1)
+  return out
+}
+
+function _uniqueWordsForVideo(videoId, wordMap) {
+  const out = []
+  wordMap.forEach((set, word) => {
+    if (set.size === 1 && set.has(videoId)) out.push(word)
+  })
+  return out.sort((a, b) => a.localeCompare(b))
+}
+
+async function openUnavailableVideosDialog() {
+  const $dlg = $('#unavailableVideosDialog')
+  $('#unavailableVideosList').empty()
+  $('#unavailableVideosStatus').text('')
+  const opts = {
+    width:  Math.min(720, Math.round(window.innerWidth * 0.95)),
+    height: Math.min(620, Math.round(window.innerHeight * 0.85)),
+    modal:  false,
+    open: function () {
+      $(this).closest('.ui-dialog').attr('tabindex', -1).trigger('focus')
+    }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) $dlg.dialog('option', opts).dialog('open')
+  else $dlg.dialog(opts)
+  await _scanUnavailableVideos()
+}
+window.openUnavailableVideosDialog = openUnavailableVideosDialog
+
+async function _scanUnavailableVideos() {
+  const $list   = $('#unavailableVideosList').empty()
+  const $status = $('#unavailableVideosStatus').text('Loading…')
+  const $prog   = $('#unavailableVideosProgress').show()
+  const $fill   = $('#unavailableVideosProgressFill').css('width', '0%')
+
+  // Gather unique YouTube videoIds. window.srts only has video metadata for
+  // already-known entries; that's exactly the set we can delete.
+  const ids = Array.from(new Set((window.srts || []).map(it => it && it.link).filter(Boolean)))
+  if (!ids.length) {
+    $status.text('No videos to scan.')
+    $prog.hide()
+    return
+  }
+
+  // Probe availability with bounded concurrency so we don't kick off 200
+  // image loads at once on a slow connection.
+  $status.text(`Probing ${ids.length} video(s)…`)
+  const unavailable = []
+  const POOL = 6
+  let i = 0
+  let done = 0
+  await Promise.all(Array.from({length: POOL}, async () => {
+    while (true) {
+      const my = i++
+      if (my >= ids.length) return
+      const id = ids[my]
+      const ok = await _checkYoutubeAvailable(id)
+      if (!ok) unavailable.push(id)
+      done++
+      $fill.css('width', `${Math.round((done / ids.length) * 100)}%`)
+    }
+  }))
+
+  if (!unavailable.length) {
+    $prog.hide()
+    $status.text(`All ${ids.length} video(s) are reachable.`)
+    return
+  }
+
+  // Stage 2: confirm each thumbnail-suspect with the IFrame Player API. If
+  // YouTube ever changes the thumbnail-placeholder behavior we'd start
+  // getting false positives from the cheap probe; the player step rejects
+  // those before they appear in the list. Concurrency stays low because
+  // each probe spawns a real iframe.
+  $status.text(`Confirming ${unavailable.length} candidate(s) via player…`)
+  $fill.css('width', '0%')
+  const confirmed = []
+  {
+    const POOL2 = 3
+    let j = 0, cdone = 0
+    await Promise.all(Array.from({length: POOL2}, async () => {
+      while (true) {
+        const my = j++
+        if (my >= unavailable.length) return
+        const id = unavailable[my]
+        const verdict = await _confirmUnavailableViaPlayer(id)
+        // 'available' refutes the thumbnail; anything else keeps the
+        // candidate (conservative: better to show a false-positive that
+        // the user can dismiss than silently drop a real unavailable).
+        if (verdict !== 'available') confirmed.push(id)
+        cdone++
+        $fill.css('width', `${Math.round((cdone / unavailable.length) * 100)}%`)
+      }
+    }))
+  }
+
+  if (!confirmed.length) {
+    $prog.hide()
+    $status.text(`All ${ids.length} video(s) appear reachable after player confirmation.`)
+    return
+  }
+  // From here on, `unavailable` refers to the confirmed set only.
+  unavailable.length = 0
+  Array.prototype.push.apply(unavailable, confirmed)
+
+  // Build the orphan-word map only when we actually have unavailable videos.
+  $status.text(`${unavailable.length} unavailable. Computing unique vocabulary…`)
+  $fill.css('width', '0%')
+  const wordMap = await _buildVocabToVideosMap(p => $fill.css('width', `${Math.round(p * 100)}%`))
+  $prog.hide()
+  $status.text(`${unavailable.length} unavailable video(s).`)
+
+  // Render rows: checkbox + id + baseName + list of uniquely-covered words.
+  unavailable.sort()
+  unavailable.forEach(id => {
+    const baseName = (((window.srts || []).find(s => s && s.link === id) || {}).name) || '(unknown)'
+    const uniqWords = _uniqueWordsForVideo(id, wordMap)
+    const $row = $(`
+      <div class="dup-srts-group" data-id="${_.escape(id)}">
+        <label class="dup-srts-head" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" class="unavail-pick">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;">${_.escape(id)} — ${_.escape(baseName)}</span>
+        </label>
+        <div class="unavail-uniq-hdr">${uniqWords.length} vocab word${uniqWords.length === 1 ? '' : 's'} uniquely covered by this video:</div>
+        <div class="unavail-uniq-list">${
+          uniqWords.length
+            ? uniqWords.map(w => `<span class="unavail-uniq-word">${_.escape(w)}</span>`).join('')
+            : '<span class="dup-srts-empty" style="padding:4px 0;">none — safe to delete</span>'
+        }</div>
+      </div>
+    `)
+    $list.append($row)
+  })
+}
+
+async function _onUnavailableVideosDelete() {
+  const ids = $('#unavailableVideosList .dup-srts-group').toArray()
+    .filter(g => $(g).find('.unavail-pick').is(':checked'))
+    .map(g => $(g).attr('data-id'))
+  if (!ids.length) { alert('Select at least one video to delete.'); return }
+  // Surface orphaned-word counts in the confirm so the user isn't surprised
+  // by suddenly losing vocab coverage they were relying on.
+  const orphanCount = ids.reduce((n, id) => {
+    return n + $(`#unavailableVideosList .dup-srts-group[data-id="${$.escapeSelector ? $.escapeSelector(id) : id}"] .unavail-uniq-word`).length
+  }, 0)
+  if (!confirm(
+    `Delete ${ids.length} video(s) from GitHub?\n\n` +
+    `${orphanCount} vocabulary word(s) will be left without any matching SRT after deletion. ` +
+    `This removes the SRT files and the index entries; the deletion can't be undone from the UI.`
+  )) return
+  const $btn = $('#unavailableVideosDelete').prop('disabled', true).text('Deleting…')
+  let okCount = 0, failCount = 0
+  for (const id of ids) {
+    try {
+      await _deleteVideoByLink(id)
+      okCount++
+      $(`#unavailableVideosList .dup-srts-group[data-id="${$.escapeSelector ? $.escapeSelector(id) : id}"]`).remove()
+    } catch (e) {
+      failCount++
+      console.error('Failed to delete', id, e)
+    }
+  }
+  $btn.prop('disabled', false).text('Delete selected')
+  alert(`Deleted ${okCount}${failCount ? ` — ${failCount} failed (see console)` : ''}.`)
+}
+
+// Library-style sibling of deleteSelectedMedia: deletes by videoId without
+// reading from the #mp3Choice picker and without per-call user confirmation.
+// Used by the bulk "Unavailable" cleanup which batches confirmations into
+// a single prompt before looping.
+async function _deleteVideoByLink(link) {
+  const srt = (window.srts || []).find(it => it && it.link === link)
+  const baseName = _nfc(srt && srt.name)
+  if (!baseName) throw new Error(`No index entry for ${link}`)
+  const lang = getLangFromUrl()
+  const srtsDir = `db/language/${lang.fullName}/srts`
+  const srcCode = lang.code
+  const candidates = [`${baseName}.${srcCode}.srt`]
+  if (srcCode !== 'en') candidates.push(`${baseName}.en.srt`)
+  const owner = 'trexsatya', repo = 'trexsatya.github.io'
+  for (const fileName of candidates) {
+    const filePath = `${srtsDir}/${encodeURIComponent(fileName)}`
+    try {
+      await window.GitHubUtils.deleteFileWithLookup({
+        owner, repo, filePath,
+        commitMessage: `srt: delete ${fileName} (unavailable)`,
+        branch: 'gh-pages'
+      })
+    } catch (e) { console.warn(`Failed to delete ${fileName}:`, e) }
+  }
+  await commitWithMerge({
+    filePath: `${srtsDir}/index.json`,
+    commitMessage: `srts: remove index entry for ${link} (unavailable)`,
+    merge: (remoteText) => {
+      let arr = []
+      try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
+      if (!Array.isArray(arr)) arr = []
+      const filtered = arr.filter(it => it.link !== link)
+      return JSON.stringify(filtered, null, 2)
+    }
+  })
+  // Local-state mirror.
+  window.srts = (window.srts || []).filter(it => it.link !== link)
+  if (window.allSubtitles && window.allSubtitles[link]) delete window.allSubtitles[link]
+  $(`#mp3Choice option[value="${link}"]`).remove()
+  try { removeVideoFromAllPlaylists(link) } catch (_) {}
+}
+
+$(function () {
+  $(document).on('click', '#unavailableVideosRescan',     _scanUnavailableVideos)
+  $(document).on('click', '#unavailableVideosDelete',     _onUnavailableVideosDelete)
+  $(document).on('click', '#unavailableVideosSelectAll',  () => $('#unavailableVideosList .unavail-pick').prop('checked', true))
+  $(document).on('click', '#unavailableVideosSelectNone', () => $('#unavailableVideosList .unavail-pick').prop('checked', false))
+})
+
 async function upsertSrtIndexEntry(videoId, baseName, source) {
   const lang = getLangFromUrl()
   const filePath = `db/language/${lang.fullName}/srts/index.json`
@@ -8059,6 +8598,28 @@ function _isVirtual(name) {
   const r = window._recordings && window._recordings[name]
   return !!(r && r.virtual)
 }
+// Stable id for a manual entry — identity used for resume reconstitution
+// (must survive playlist reorder / sync merge). Prefixed `mc-` to keep it
+// distinct from YouTube videoIds (which are 11 chars, no dashes).
+function _newManualId() {
+  return 'mc-' + Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 5)
+}
+function _isManualItem(it) { return !!(it && it.manual) }
+// Parse a media URL into a discriminator + an extractable id where one
+// applies. Returns null for blank input; otherwise:
+//   { kind: 'youtube', id: '<videoId>', url }
+//   { kind: 'link',    url }
+// Falls back to 'link' for anything we don't recognise as YouTube so a
+// user can paste any URL (Vimeo, an article, an mp3) and the Practice
+// view will open it in a new tab.
+function _parseMediaUrl(raw) {
+  const url = String(raw == null ? '' : raw).trim()
+  if (!url) return null
+  // youtu.be/<id> or youtube.com/watch?v=<id> or /embed/<id> or /shorts/<id>
+  const yt = url.match(/(?:youtube\.com\/(?:watch\?(?:[^&]*&)*v=|embed\/|shorts\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/)
+  if (yt && yt[1]) return { kind: 'youtube', id: yt[1], url }
+  return { kind: 'link', url }
+}
 function _virtualMembers(name) {
   const r = window._recordings && window._recordings[name]
   if (!r || !r.virtual || !Array.isArray(r.members)) return []
@@ -8132,6 +8693,73 @@ function createRecording(name) {
   window._recordings[name] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }
   selectRecording(name)
   return true
+}
+
+// Add a manual entry to a real playlist. Manual entries live in the same
+// `items[st][w]` map as captured items so they mix freely; they're put
+// under a dedicated bucket `items['Manual']['Card']` (created lazily) so
+// the existing st/w grouping in the Review dialog still applies. Media is
+// optional — when present, Practice cues YouTube videos via the player
+// and opens generic web links in a new tab.
+const MANUAL_ST = 'Manual'
+const MANUAL_W  = 'Card'
+function addManualEntry(playlistName, opts) {
+  opts = opts || {}
+  const rec = window._recordings && window._recordings[playlistName]
+  if (!rec || rec.virtual) {
+    alert(`"${playlistName}" is a virtual playlist (or doesn't exist). Switch to a real playlist to add manual entries.`)
+    return null
+  }
+  const source = String(opts.source == null ? '' : opts.source).trim()
+  const target = String(opts.target == null ? '' : opts.target).trim()
+  if (!source && !target) { alert('At least one of Source / Target must be filled in.'); return null }
+  const media = _parseMediaUrl(opts.mediaUrl)
+  const it = {
+    manual: true,
+    id: _newManualId(),
+    source,
+    target,
+    enabled: true
+  }
+  if (media) {
+    it.mediaUrl = media.url
+    it.mediaKind = media.kind                // 'youtube' | 'link'
+    if (media.kind === 'youtube') it.mediaVideoId = media.id
+  }
+  if (!rec.items)                          rec.items = {}
+  if (!rec.items[MANUAL_ST])               rec.items[MANUAL_ST] = {}
+  if (!Array.isArray(rec.items[MANUAL_ST][MANUAL_W])) rec.items[MANUAL_ST][MANUAL_W] = []
+  rec.items[MANUAL_ST][MANUAL_W].push(it)
+  rec.updatedAt = Date.now()
+  _saveRecording()
+  // Refresh the live items pointer if this is the active playlist (so the
+  // Review dialog and play-queue builder see the new entry immediately).
+  if (window._recording && window._recording.currentName === playlistName && !window._recording.virtual) {
+    window._recording.items = rec.items
+  }
+  return it
+}
+function updateManualEntry(playlistName, manualId, patch) {
+  const rec = window._recordings && window._recordings[playlistName]
+  if (!rec || !rec.items) return false
+  for (const st of Object.keys(rec.items)) {
+    for (const w of Object.keys(rec.items[st] || {})) {
+      const arr = rec.items[st][w] || []
+      const it = arr.find(x => x && x.manual && x.id === manualId)
+      if (!it) continue
+      if (Object.prototype.hasOwnProperty.call(patch, 'source')) it.source = String(patch.source || '').trim()
+      if (Object.prototype.hasOwnProperty.call(patch, 'target')) it.target = String(patch.target || '').trim()
+      if (Object.prototype.hasOwnProperty.call(patch, 'mediaUrl')) {
+        const m = _parseMediaUrl(patch.mediaUrl)
+        if (m) { it.mediaUrl = m.url; it.mediaKind = m.kind; if (m.kind === 'youtube') it.mediaVideoId = m.id; else delete it.mediaVideoId }
+        else   { delete it.mediaUrl; delete it.mediaKind; delete it.mediaVideoId }
+      }
+      rec.updatedAt = Date.now()
+      _saveRecording()
+      return true
+    }
+  }
+  return false
 }
 
 // Create a virtual playlist that combines the given real-playlist members.
@@ -8299,6 +8927,9 @@ function clearRecording()  {
 // Click handler for `.capture-btn` next to a match's .buttons row. Walks
 // up to the surrounding .lines-cntnr to pull out url / source / times,
 // then up to .srt-file > h4[data-file] to recover the `word` heading.
+// Toggles: if no matching (id, lineIndex) entry exists for this (st, w),
+// it adds one; if any do, it removes them all. Duplicating the same line
+// is now an explicit action (the rec-dup icon in the review dialog).
 function _captureMatchFromButton($capBtn) {
   if (window._recording.state !== 'recording') return
   const $linesCntnr = $capBtn.closest('.lines-cntnr')
@@ -8320,14 +8951,23 @@ function _captureMatchFromButton($capBtn) {
   const items = window._recording.items
   if (!items[searchText])       items[searchText]       = {}
   if (!items[searchText][word]) items[searchText][word] = []
-  // Duplicates are intentionally allowed: same (id, lineIndex) can repeat
-  // for playback repetition; same id with a different lineIndex is a
-  // different timestamp on the same video. Both add a fresh entry.
-  items[searchText][word].push({ searchText, word, id: url, source, timeStart, timeEnd, lineIndex, enabled: true })
+  const arr = items[searchText][word]
+  const before = arr.length
+  // Toggle: remove every existing entry that matches (id, lineIndex), or
+  // add a fresh one if there were none.
+  const filtered = arr.filter(it => !(it && it.id === url && parseInt(it.lineIndex, 10) === lineIndex))
+  if (filtered.length < before) {
+    // Was captured — strip it.
+    items[searchText][word] = filtered
+    if (!filtered.length) delete items[searchText][word]
+    if (!Object.keys(items[searchText]).length) delete items[searchText]
+  } else {
+    arr.push({ searchText, word, id: url, source, timeStart, timeEnd, lineIndex, enabled: true })
+  }
   _saveRecording()
   _updateRecordingUI()
   // Brief flash on the clicked button, then rewalk everything so any other
-  // capture-btn for the same (st, w, id) also picks up the is-captured
+  // capture-btn for the same (st, w, id) also picks up the new captured
   // state (e.g. other line-matches of the same video for this search).
   $capBtn.addClass('captured')
   setTimeout(() => {
@@ -8609,6 +9249,52 @@ function _openVirtualPlaylistEditor(existingName) {
 }
 window._openVirtualPlaylistEditor = _openVirtualPlaylistEditor
 
+// Add or edit a manual flashcard entry inside the named real playlist.
+// `existing` is the live item object (mutated in place via updateManualEntry)
+// when editing, or null when adding a new card. Modal so the user finishes
+// the form before returning to the review dialog.
+function _openManualEntryEditor(playlistName, existing) {
+  let $d = $('#manualEntryEditor')
+  if (!$d.length) $d = $('<div id="manualEntryEditor"></div>').appendTo('body')
+  const isEdit = !!existing
+  $d.html(`
+    <div class="mee-row"><label class="mee-lbl">Source</label>
+      <textarea id="meeSource" class="mee-input" rows="2" placeholder="Question, source text, prompt…"></textarea></div>
+    <div class="mee-row"><label class="mee-lbl">Target</label>
+      <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation…"></textarea></div>
+    <div class="mee-row"><label class="mee-lbl">Media URL <span class="mee-lbl-hint">(optional — YouTube link or any web link)</span></label>
+      <input id="meeMedia" class="mee-input" type="url" placeholder="https://…"></div>
+    <div class="mee-hint" style="font-size:12px;color:#666;">YouTube URLs are recognised automatically and will play in the embedded player during Practice / Play. Other URLs open in a new tab.</div>
+  `)
+  $d.find('#meeSource').val(existing ? existing.source || '' : '')
+  $d.find('#meeTarget').val(existing ? existing.target || '' : '')
+  $d.find('#meeMedia').val(existing ? existing.mediaUrl || '' : '')
+
+  const finish = () => {
+    const source   = $d.find('#meeSource').val()
+    const target   = $d.find('#meeTarget').val()
+    const mediaUrl = $d.find('#meeMedia').val()
+    if (isEdit) {
+      return updateManualEntry(playlistName, existing.id, { source, target, mediaUrl })
+    }
+    return !!addManualEntry(playlistName, { source, target, mediaUrl })
+  }
+
+  $d.dialog({
+    title: isEdit ? 'Edit card' : 'Add manual card',
+    width: Math.min(480, $(window).width() - 40),
+    modal: true,
+    autoOpen: true,
+    buttons: {
+      [isEdit ? 'Save' : 'Add']: function () {
+        if (finish()) { try { $(this).dialog('close') } catch (_) {} openRecordingReviewDialog() }
+      },
+      'Cancel': function () { try { $(this).dialog('close') } catch (_) {} }
+    }
+  })
+}
+window._openManualEntryEditor = _openManualEntryEditor
+
 function openRecordingReviewDialog() {
   let $dlg = $('#recordingReviewDialog')
   if (!$dlg.length) {
@@ -8636,6 +9322,7 @@ function openRecordingReviewDialog() {
   html += `</select>
     <button type="button" id="recRecNew"       class="btn rec-rec-btn" title="Create a new playlist" aria-label="Create a new playlist"><span class="rec-rec-ico">＋</span><span class="rec-rec-lbl">New</span></button>
     <button type="button" id="recRecNewVirtual" class="btn rec-rec-btn" title="Create a virtual playlist (combine existing playlists)" aria-label="Create a virtual playlist"><span class="rec-rec-ico">🔗</span><span class="rec-rec-lbl">Virtual</span></button>
+    <button type="button" id="recRecAddManual"  class="btn rec-rec-btn" title="Add a manual flashcard entry (source/target + optional media link)" aria-label="Add manual entry"${isVirtualCurrent ? ' disabled' : ''}><span class="rec-rec-ico">📝</span><span class="rec-rec-lbl">Add card</span></button>
     <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
     <button type="button" id="recRecDuplicate" class="btn rec-rec-btn" title="Duplicate this playlist" aria-label="Duplicate this playlist"><span class="rec-rec-ico">⎘</span><span class="rec-rec-lbl">Duplicate</span></button>
     <button type="button" id="recRecDelete"    class="btn rec-rec-btn rec-rec-danger" title="Delete this playlist" aria-label="Delete this playlist"><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
@@ -8695,16 +9382,31 @@ function openRecordingReviewDialog() {
           const dupBtn = isVirtualCurrent ? '' : `<button type="button" class="rec-dup" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Duplicate this item">⎘</button>`
           const delBtn = isVirtualCurrent ? '' : `<button type="button" class="rec-del" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Remove this item">✕</button>`
           const _isLast = _lpHere && _lpHere.st === st && _lpHere.w === w && _lpHere.idx === idx
+          // Manual entries: render the source/target text on the main row
+          // and the optional media link as a small badge instead of the
+          // YT id · timestamps that captured items show.
+          let _itemTextHtml
+          if (_isManualItem(it)) {
+            const src = _.escape(it.source || '')
+            const tgt = _.escape(it.target || '')
+            const mediaBadge = it.mediaUrl
+              ? ` <a class="rec-item-media" href="${_.escape(it.mediaUrl)}" target="_blank" rel="noopener" title="Open media (${_.escape(it.mediaKind || 'link')})">${it.mediaKind === 'youtube' ? '▶︎' : '🔗'}</a>`
+              : ''
+            _itemTextHtml = `<span class="rec-item-text rec-item-manual${it.enabled === false ? ' rec-item-off' : ''}">📝 ${src}${tgt ? ` → ${tgt}` : ''}</span>${mediaBadge}` +
+                            `<button type="button" class="rec-manual-edit" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Edit this card">✎</button>`
+          } else {
+            _itemTextHtml = `<span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${it.timeStart}s–${it.timeEnd}s</span>`
+          }
           html += `<div class="rec-item${isVirtualCurrent ? ' rec-item-readonly' : ''}${_isLast ? ' rec-item-lastplayed' : ''}" data-idx="${idx}">
             <div class="rec-item-row1">
               ${editControls}
               <button type="button" class="rec-play-from" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Play from this item">▶</button>
               ${dupBtn}
-              <span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${_.escape(it.source||'?')} · ${it.timeStart}s–${it.timeEnd}s</span>
+              ${_itemTextHtml}
               ${copyOptions}
               ${delBtn}
             </div>
-            <div class="rec-item-preview"${_pendingAttr} data-id="${_.escape(it.id)}" data-line="${_.escape(String(it.lineIndex == null ? '' : it.lineIndex))}" title="Source subtitle line">${_.escape(_previewText)}</div>
+            ${_isManualItem(it) ? '' : `<div class="rec-item-preview"${_pendingAttr} data-id="${_.escape(it.id)}" data-line="${_.escape(String(it.lineIndex == null ? '' : it.lineIndex))}" title="Source subtitle line">${_.escape(_previewText)}</div>`}
           </div>`
         })
         html += `</div></div>`
@@ -8791,6 +9493,21 @@ function openRecordingReviewDialog() {
     e.preventDefault(); e.stopPropagation()
     _openVirtualPlaylistEditor(null)
   })
+  $dlg.off('click', '#recRecAddManual').on('click', '#recRecAddManual', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    _openManualEntryEditor(window._recording.currentName, null)
+  })
+  $dlg.off('click', '.rec-manual-edit').on('click', '.rec-manual-edit', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const st  = String($(this).data('st'))
+    const w   = String($(this).data('w'))
+    const idx = parseInt($(this).data('idx'), 10)
+    const items = window._recording.items || {}
+    const arr = (items[st] && items[st][w]) || []
+    const it = arr[idx]
+    if (!it || !_isManualItem(it)) return
+    _openManualEntryEditor(window._recording.currentName, it)
+  })
   $dlg.off('click', '#recVirtualEdit').on('click', '#recVirtualEdit', function (e) {
     e.preventDefault(); e.stopPropagation()
     _openVirtualPlaylistEditor(window._recording.currentName)
@@ -8861,23 +9578,29 @@ function openRecordingReviewDialog() {
     autoOpen: true,
     buttons: {
       // Belt-and-suspenders close: jQuery UI's dialog('close') sometimes
-      // races with focus / async render work and leaves the wrapper
-      // visible behind the next view. Force-hide the wrapper as a backup so
-      // the user doesn't see the Recorded Searches panel floating over the
+      // races with focus / async render work and leaves the wrapper visible
+      // behind the next view. Force-hide the wrapper as a backup so the
+      // user doesn't see the Recorded Searches panel floating over the
       // Practice card or the playing recording.
+      //
+      // Both action buttons prompt to resume-or-restart when there's a
+      // recoverable last-played item on THIS playlist (see
+      // _maybeResumeStartItem). Cancel in the confirm = start fresh.
       'Play All':  function () {
         const $w = $(this).closest('.ui-dialog')
         try { $(this).dialog('close') } catch (_) {}
         $w.hide()
         try { autoHideSettingsPanel() } catch (_) {}
-        playRecording()
+        const resumeQueue = _maybeResumeStartItem()
+        playRecording(resumeQueue ? { resumeQueue } : undefined)
       },
       'Practice':  function () {
         const $w = $(this).closest('.ui-dialog')
         try { $(this).dialog('close') } catch (_) {}
         $w.hide()
         try { autoHideSettingsPanel() } catch (_) {}
-        openPracticeMode()
+        const resumeQueue = _maybeResumeStartItem()
+        openPracticeMode(resumeQueue ? { resumeQueue } : undefined)
       },
       'Close':     function () {
         const $w = $(this).closest('.ui-dialog')
@@ -9146,8 +9869,16 @@ function _renderPlayingBanner(it, idx, total) {
     })
   }
   $b.find('.rec-pb-count').text(`${idx + 1}/${total}`)
-  $b.find('.rec-pb-head').text(`▶ "${it.searchText}" → ${it.word}`)
-  $b.find('.rec-pb-meta').text(`${it.id} · ${it.source || '?'} · ${it.timeStart}s – ${it.timeEnd}s`)
+  if (_isManualItem(it)) {
+    // Manual card — show the typed source/target plus an optional media
+    // hint. There's no clip metadata to put on the meta line.
+    const linkLbl = it.mediaUrl ? ` · ${it.mediaKind === 'youtube' ? '▶ YouTube' : '🔗 link'}` : ''
+    $b.find('.rec-pb-head').text(`📝 ${it.source || '(empty)'}`)
+    $b.find('.rec-pb-meta').text(`${it.target || '(empty)'}${linkLbl}`)
+  } else {
+    $b.find('.rec-pb-head').text(`▶ "${it.searchText}" → ${it.word}`)
+    $b.find('.rec-pb-meta').text(`${it.id} · ${it.source || '?'} · ${it.timeStart}s – ${it.timeEnd}s`)
+  }
   $b.find('.rec-pb-bar').css('width', '0%')
   // Reflect the current gap setting every time we render the banner — covers
   // changes made via the Settings panel between items.
@@ -9353,14 +10084,36 @@ function _shuffleQueue(q) {
   }
 }
 
-// Remember the last-played queue item so the review dialog can highlight it
-// once the player is closed. Persisted so it survives a reload.
+// Remember the last play/practice session so a follow-up Play All / Practice
+// on the same playlist can offer to resume from exactly where we stopped —
+// not just the same item, but the SAME order (so already-played items don't
+// reappear before unplayed ones). Persisted so it survives a reload.
+//
+// Shape:
+//   recName, st, w, idx, id, lineIndex — the per-item cursor (for highlight)
+//   mode                                — 'play' | 'practice' (prompt label)
+//   queueKeys                           — identity tuples for every item in
+//                                         the active queue, in order
+//   queuePos                            — index of the current item in keys
+//
+// We key items by (recName, st, w, id, lineIndex) rather than array index
+// so playlist reorders / inserts between sessions don't mis-resolve to the
+// wrong item. Items deleted or disabled since are dropped on reconstitute.
 const REC_LAST_PLAYED_KEY = 'cupitor:recLastPlayed'
-function _setLastPlayed(it) {
+function _setLastPlayed(it, mode, pos) {
   if (!it) return
+  // Ad-hoc queues built from starred lines have no recording origin
+  // (_recName/_st/_w/_idx are undefined). Skip those so they don't clobber a
+  // resumable recording-session target — starred-lines sessions aren't
+  // resumable as "playlists" by design.
+  if (!it._recName) return
+  const prev = window._recLastPlayed || {}
   window._recLastPlayed = {
+    ...prev,
     recName: it._recName, st: it._st, w: it._w, idx: it._idx,
-    id: it.id, lineIndex: it.lineIndex
+    id: it.id, lineIndex: it.lineIndex,
+    mode: mode || prev.mode || 'play',
+    queuePos: (typeof pos === 'number') ? pos : prev.queuePos
   }
   try { localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(window._recLastPlayed)) } catch (_) {}
 }
@@ -9371,6 +10124,82 @@ function _loadLastPlayed() {
     if (raw) window._recLastPlayed = JSON.parse(raw)
   } catch (_) {}
   return window._recLastPlayed || null
+}
+
+// Called once when a fresh play/practice session starts. Snapshots the
+// queue order (as identity tuples) and resets queuePos to 0 so subsequent
+// _setLastPlayed updates have a queue to anchor against.
+function _saveQueueOrder(queue, mode) {
+  if (!Array.isArray(queue) || !queue.length) return
+  const keys = []
+  for (const it of queue) {
+    if (!it || !it._recName) continue
+    keys.push({
+      recName: it._recName, st: it._st, w: it._w,
+      id: it.id, lineIndex: it.lineIndex
+    })
+  }
+  if (!keys.length) return
+  const prev = window._recLastPlayed || {}
+  window._recLastPlayed = {
+    ...prev,
+    mode: mode || prev.mode || 'play',
+    queueKeys: keys,
+    queuePos: 0
+  }
+  try { localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(window._recLastPlayed)) } catch (_) {}
+}
+
+// Reverse of _saveQueueOrder: rebuild a live queue from the saved identity
+// tuples. Skips keys whose item no longer exists or is now disabled.
+function _reconstituteQueue(keys) {
+  const out = []
+  if (!Array.isArray(keys)) return out
+  for (const k of keys) {
+    if (!k || !k.recName) continue
+    const rec = window._recordings && window._recordings[k.recName]
+    if (!rec) continue
+    const items = rec.virtual ? _resolveVirtualItems(k.recName) : rec.items
+    const arr = items && items[k.st] && items[k.st][k.w]
+    if (!Array.isArray(arr)) continue
+    let liveIdx = -1, live = null
+    for (let i = 0; i < arr.length; i++) {
+      const it = arr[i]
+      if (it && it.id === k.id && it.lineIndex === k.lineIndex) {
+        liveIdx = i; live = it; break
+      }
+    }
+    if (!live || live.enabled === false) continue
+    out.push({ ...live, _recName: k.recName, _st: k.st, _w: k.w, _idx: liveIdx })
+  }
+  return out
+}
+
+// If we have a recoverable last-played session on the CURRENT playlist,
+// ask the user whether to resume (saved queue + position) or start fresh.
+// Returns { queue, pos } when resuming, null otherwise. The prior session's
+// mode only shapes the prompt label — the caller chooses which mode to
+// dispatch (Play All / Practice), so the same queue can be resumed in
+// either mode.
+function _maybeResumeStartItem() {
+  const lp = _loadLastPlayed()
+  const cur = window._recording && window._recording.currentName
+  if (!lp || !lp.recName || lp.recName !== cur) return null
+  if (!window._recordings || !window._recordings[lp.recName]) return null
+  if (!Array.isArray(lp.queueKeys) || !lp.queueKeys.length) return null
+  const live = _reconstituteQueue(lp.queueKeys)
+  if (!live.length) return null
+  const pos = Math.min(Math.max(0, lp.queuePos || 0), live.length - 1)
+  const modeLabel = lp.mode === 'practice' ? 'practice' : 'play'
+  const remaining = live.length - pos
+  const resume = confirm(
+    `Resume your last ${modeLabel} session in "${lp.recName}"?\n\n` +
+    `${remaining} of ${live.length} item(s) remaining (same order).\n\n` +
+    `OK = continue from where you left off\n` +
+    `Cancel = start fresh (re-shuffles if shuffle is on)`
+  )
+  if (!resume) return null
+  return { queue: live, pos }
 }
 
 // YouTube IFrame API error codes that mean the video can't be played:
@@ -9421,17 +10250,30 @@ async function playRecording(opts) {
   const settings = window._appSettings || {}
   const shuffle = (opts.shuffle != null) ? !!opts.shuffle : !!settings.recPlayShuffle
   const loop    = opts.loop || settings.recPlayLoop || 'off'
-  let queue = Array.isArray(opts.queue) ? opts.queue.slice() : _buildPlayQueue(loop)
-  if (!queue.length) { alert('No items to play (all excluded?).'); return }
-  if (shuffle) _shuffleQueue(queue)
-  // Rotate so the requested start item is at index 0 (preserves the
-  // shuffled order afterwards). Falls back to no-op if not found.
-  if (opts.startItem) {
-    const s = opts.startItem
-    const i0 = queue.findIndex(q =>
-      q && q._st === s.st && q._w === s.w && q._idx === s.idx &&
-      (s.recName == null || q._recName === s.recName))
-    if (i0 > 0) queue = queue.slice(i0).concat(queue.slice(0, i0))
+  let queue
+  let startIdx = 0
+  if (opts.resumeQueue && Array.isArray(opts.resumeQueue.queue) && opts.resumeQueue.queue.length) {
+    // Resume path — use the saved queue verbatim. Skip shuffle (the saved
+    // order IS the order we left off in) and the queue-snapshot save (it
+    // would just rewrite the same data with queuePos reset to 0).
+    queue = opts.resumeQueue.queue.slice()
+    startIdx = Math.min(Math.max(0, opts.resumeQueue.pos || 0), queue.length - 1)
+  } else {
+    queue = Array.isArray(opts.queue) ? opts.queue.slice() : _buildPlayQueue(loop)
+    if (!queue.length) { alert('No items to play (all excluded?).'); return }
+    if (shuffle) _shuffleQueue(queue)
+    // Rotate so the requested start item is at index 0 (preserves the
+    // shuffled order afterwards). Falls back to no-op if not found.
+    if (opts.startItem) {
+      const s = opts.startItem
+      const i0 = queue.findIndex(q =>
+        q && q._st === s.st && q._w === s.w && q._idx === s.idx &&
+        (s.recName == null || q._recName === s.recName))
+      if (i0 > 0) queue = queue.slice(i0).concat(queue.slice(0, i0))
+    }
+    // Snapshot for a future Resume — must run AFTER shuffle/rotate so the
+    // saved order matches what we're about to play.
+    _saveQueueOrder(queue, 'play')
   }
   // Expose for prev/next/loop-aware UI status.
   window._recPlayLoopMode = loop
@@ -9534,7 +10376,7 @@ async function playRecording(opts) {
   const _curLoop     = () => (window._appSettings && window._appSettings.recPlayLoop) || 'off'
   const _curLooping  = () => { const l = _curLoop(); return l === 'one' || l === 'playlist' || l === 'all' }
   let prevWord = null
-  let i = 0
+  let i = startIdx
   while (window._playingRecording) {
     // Boundary handling: with no loop we exit at queue end; otherwise wrap.
     if (i >= queue.length) {
@@ -9555,11 +10397,49 @@ async function playRecording(opts) {
 
     _renderPlayingBanner(it, i, queue.length)
     // Remember the item currently playing so the review dialog can highlight
-    // it after the player is closed. Keyed by origin (recName/st/w/idx).
-    _setLastPlayed(it)
+    // it after the player is closed (and so a follow-up Play All / Practice
+    // on this playlist can offer to resume from this exact item, in the
+    // same queue order). The `i` advances queuePos so Resume picks up here.
+    _setLastPlayed(it, 'play', i)
     // Also expose the live item object so the YT onError handler knows which
     // video failed (and can label the delete prompt).
     window._recPlayCurrentItem = it
+    // Manual entries: no clip to play. If the media is a YouTube link we
+    // still cue it into the embedded player at t=0 (so the user can hit
+    // play manually if they want) but never auto-play — the playlist's
+    // own timing comes from the inter-item gap, which doubles as the
+    // hold-on-text duration. Non-YT links are ignored here (opening them
+    // in a new tab mid-playlist would break flow); the user can click
+    // the link badge in the Review dialog instead.
+    if (_isManualItem(it)) {
+      if (it.mediaKind === 'youtube' && it.mediaVideoId) {
+        try {
+          window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
+          await changeMediaIfNeededTo(window.mediaSelected)
+        } catch (e) { console.warn('playRecording: manual YT cue failed', it, e) }
+      }
+      // Hold for the inter-item gap so the user reads the text, honoring
+      // pause / stop. Then handle prev/next/loop the same way video items
+      // do, except we skip the trailing _sleepRespectingPause (the hold
+      // already consumed the gap).
+      if (window._playingRecording) await _sleepRespectingPause(currentGapMs())
+      if (window._recNavRequest === 'prev') {
+        window._recNavRequest = null
+        i = (i > 0) ? (i - 1) : (_curLooping() ? queue.length - 1 : 0)
+        window._recPlaySlowdown = true
+        continue
+      }
+      if (window._recNavRequest === 'next') {
+        window._recNavRequest = null
+        i = (i + 1 < queue.length) ? (i + 1) : (_curLooping() ? 0 : queue.length)
+        continue
+      }
+      if (_curLoop() === 'one') continue
+      const willHaveNext = (i + 1 < queue.length) || _curLooping()
+      if (!willHaveNext) { i++; continue }
+      i++
+      continue
+    }
     if (it.word && it.word !== prevWord) {
       // Speak the word once before its first item plays. Re-runs whenever
       // the queue moves on to a new word — including when the user
@@ -9801,14 +10681,42 @@ function stopPlayingRecording() {
 // the current playlist. Falls back to the current playlist when omitted.
 function openPracticeMode(opts) {
   opts = opts || {}
-  const queue = Array.isArray(opts.queue) ? opts.queue.slice() : _buildPlayQueue('off')
-  if (!queue.length) {
-    alert(opts.queue ? 'No starred lines to practice.' : 'No items to practice (all excluded?).')
-    return
+  let queue
+  let startIdx = 0
+  if (opts.resumeQueue && Array.isArray(opts.resumeQueue.queue) && opts.resumeQueue.queue.length) {
+    // Resume path — use the saved queue verbatim, start at saved index.
+    // Skips the shuffle + startItem rotation since the saved order IS the
+    // order we left off in.
+    queue = opts.resumeQueue.queue.slice()
+    startIdx = Math.min(Math.max(0, opts.resumeQueue.pos || 0), queue.length - 1)
+  } else {
+    queue = Array.isArray(opts.queue) ? opts.queue.slice() : _buildPlayQueue('off')
+    if (!queue.length) {
+      alert(opts.queue ? 'No starred lines to practice.' : 'No items to practice (all excluded?).')
+      return
+    }
+    _shuffleQueue(queue)
+    // Optional startItem rotation — rotates the freshly-shuffled queue so the
+    // requested card lands at index 0. Used by per-item launch points (the
+    // review dialog's "Play from this item" button doesn't invoke practice,
+    // but keeping the path symmetric with playRecording).
+    if (opts.startItem) {
+      const s = opts.startItem
+      const i0 = queue.findIndex(q =>
+        q && q._st === s.st && q._w === s.w && q._idx === s.idx &&
+        (s.recName == null || q._recName === s.recName))
+      if (i0 > 0) {
+        const head = queue.slice(i0), tail = queue.slice(0, i0)
+        queue.length = 0
+        Array.prototype.push.apply(queue, head.concat(tail))
+      }
+    }
+    // Snapshot for a future Resume — saved after shuffle/rotate so the
+    // saved order matches what's about to be practiced.
+    _saveQueueOrder(queue, 'practice')
   }
-  _shuffleQueue(queue)
   window._practiceCards = queue
-  window._practiceIdx = 0
+  window._practiceIdx = startIdx
   if (window._practiceFrontIsSource == null) window._practiceFrontIsSource = true
   window._practiceCtxBefore = 0
   window._practiceCtxAfter = 0
@@ -9882,19 +10790,10 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-ctx-before', () => { window._practiceCtxBefore++; _renderPracticeCard() })
     $p.on('click', '.practice-ctx-after',  () => { window._practiceCtxAfter++;  _renderPracticeCard() })
     $p.on('click', '.practice-ctx-reset',  () => { window._practiceCtxBefore = 0; window._practiceCtxAfter = 0; _renderPracticeCard() })
-    // Inline edit a subtitle line from the card.
+    // Edit a subtitle line via #practiceLineEditDialog (a jQuery UI dialog —
+    // see _practiceBeginEdit). Inline editing was replaced because the
+    // on-screen keyboard covered the bottom of the card on mobile.
     $p.on('click', '.practice-line-edit', _practiceBeginEdit)
-    $p.on('click', '.practice-edit-save', _practiceCommitEdit)
-    $p.on('click', '.practice-edit-cancel', function () { _renderPracticeCard() })
-    // Mobile: when the inline-edit textarea is focused, the on-screen
-    // keyboard would cover the bottom of the card. Scroll the textarea
-    // into the centre of the visible viewport once layout settles.
-    $p.on('focus', '.practice-edit-input', function () {
-      const el = this
-      setTimeout(() => {
-        try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }) } catch (_) {}
-      }, 250)
-    })
 
     // Horizontal swipe / drag on the card: left → next, right → prev. Uses
     // Pointer Events so it covers touch, mouse and pen. The card follows the
@@ -10003,7 +10902,7 @@ function practiceNav(dir) {
 
 // Cycle playback speed for the practice clip. The button label reflects the
 // active rate; the rate is applied next time .practice-play is hit.
-const PRACTICE_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5]
+const PRACTICE_SPEED_OPTIONS = [0.75, 1]
 function cyclePracticePlaybackRate() {
   const cur = parseFloat(window._practicePlaybackRate) || 1
   const i = PRACTICE_SPEED_OPTIONS.indexOf(cur)
@@ -10197,9 +11096,24 @@ async function _renderPracticeCard() {
   const cards = window._practiceCards || []
   const it = cards[idx]
   if (!it) return
+  // Persist resume-target on every card change. Mode='practice' so the
+  // next Play All / Practice click on this playlist offers to resume here.
+  // `idx` advances queuePos so the saved queue tracks where we are.
+  try { _setLastPlayed(it, 'practice', idx) } catch (_) {}
   const srcCode = ((typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv').toUpperCase()
   const frontIsSource = window._practiceFrontIsSource
   const mode = (window._appSettings && window._appSettings.practiceRevealMode) || 'flip'
+  // Manual card branch: no SRT, no clip — just render source/target text
+  // and surface an optional media link. Reuses the same flip/hide/both
+  // reveal modes and the same .practice-front / .practice-back faces.
+  if (_isManualItem(it)) {
+    _renderPracticeManualCard($p, it, idx, cards.length, frontIsSource, mode, srcCode)
+    return
+  }
+  // Video card path follows — first restore any controls the manual path hides.
+  $p.find('.practice-ctx-ctrl').show()
+  $p.find('.practice-play, .practice-speed').show()
+  $p.find('.practice-media-link').remove()
   $p.find('.practice-count').text(`${idx + 1}/${cards.length}`)
   $p.find('.practice-dir').text(frontIsSource ? `${srcCode} → EN` : `EN → ${srcCode}`)
   // Word: shown upfront only when the front IS the source (you see source
@@ -10242,7 +11156,64 @@ async function _renderPracticeCard() {
   if (mode === 'both') $p.find('.practice-back').show()
 }
 
-// Begin inline-editing a practice line: swap the row for a textarea + actions.
+// Render a manual flashcard into the existing practice DOM. Same flip/hide
+// /both reveal modes as a video card — the difference is the content is
+// the user-typed source/target text and there's no clip / SRT lookup.
+function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcCode) {
+  // Hide controls that only apply to video clips. Removed when the next
+  // (video) card renders by the restore-block at the top of _renderPracticeCard.
+  $p.find('.practice-ctx-ctrl').hide()
+  $p.find('.practice-play, .practice-speed').hide()
+
+  const frontText = frontIsSource ? (it.source || '') : (it.target || '')
+  const backText  = frontIsSource ? (it.target || '') : (it.source || '')
+  $p.find('.practice-count').text(`${idx + 1}/${total}`)
+  $p.find('.practice-dir').text(frontIsSource ? `${srcCode} → EN` : `EN → ${srcCode}`)
+  // The "word" slot becomes a manual badge so the user can see at a glance
+  // that this is a typed card vs a captured clip.
+  $p.find('.practice-word').text('📝 manual').css('visibility', 'visible')
+
+  const $front = $p.find('.practice-front').empty()
+  $front.append($('<div class="practice-manual-text"></div>').text(frontText || '(empty)'))
+  const $back  = $p.find('.practice-back').hide().empty()
+  $back.append($('<div class="practice-manual-text"></div>').text(backText || '(empty)'))
+  const $backFace = $p.find('.practice-back-target').empty()
+  $backFace.append($('<div class="practice-manual-text"></div>').text(backText || '(empty)'))
+
+  // Optional media link — YouTube cues in the embedded player, anything
+  // else opens in a new tab. Appended to the practice-nav row so it sits
+  // alongside prev/next where the hidden play-clip button used to be.
+  $p.find('.practice-media-link').remove()
+  if (it.mediaUrl) {
+    const isYT = it.mediaKind === 'youtube' && it.mediaVideoId
+    const $btn = $(`<button type="button" class="practice-media-link" title="${isYT ? 'Play the linked YouTube video' : 'Open the linked media in a new tab'}" aria-label="Open linked media">${isYT ? '▶' : '🔗'}</button>`)
+    $btn.on('click', (ev) => {
+      ev.preventDefault(); ev.stopPropagation()
+      if (isYT) {
+        // Cue into the embedded player at t=0. Don't auto-play (Practice
+        // mode is for studying — the user clicks again to play).
+        window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
+        try { changeMediaIfNeededTo(window.mediaSelected) } catch (_) {}
+      } else {
+        window.open(it.mediaUrl, '_blank', 'noopener')
+      }
+    })
+    $p.find('.practice-nav .practice-play').after($btn)
+  }
+
+  $p.find('.practice-reveal').show()
+  $p.find('.practice-flipper').toggleClass('flipped', !!window._practiceFlipped)
+  $p.removeClass('reveal-flip reveal-both reveal-hide').addClass(`reveal-${mode}`)
+  if (mode === 'both') { $p.find('.practice-back').show(); $p.find('.practice-reveal').hide() }
+  $p.data('item', it)
+  _updatePracticeSpeedBtn()
+  _updatePracticeRestoreCount()
+}
+
+// Open a jQuery UI dialog to edit a practice line. Centred on the viewport
+// (and lifted by a small open-callback so the on-screen keyboard, when it
+// pops, leaves the textarea visible) — replaces the previous inline
+// edit-box that got covered by the keyboard on mobile.
 function _practiceBeginEdit(e) {
   e.preventDefault(); e.stopPropagation()
   const $btn = $(this)
@@ -10250,35 +11221,80 @@ function _practiceBeginEdit(e) {
   const cur = $row.find('.practice-line-text').text()
   const lang = $btn.attr('data-lang')          // 'src' | 'en'
   const lineIndex = $btn.attr('data-line-index')
-  const $box = $(`<div class="practice-edit-box" data-lang="${lang}" data-line-index="${lineIndex}">
-      <textarea class="practice-edit-input" rows="2"></textarea>
-      <div class="practice-edit-actions">
-        <button type="button" class="practice-edit-save">Save</button>
-        <button type="button" class="practice-edit-cancel">Cancel</button>
-      </div>
-    </div>`)
-  $box.find('.practice-edit-input').val(cur === '(empty)' ? '' : cur)
-  $row.replaceWith($box)
-  $box.find('.practice-edit-input').focus()
+
+  // Build (or reuse) the dialog node — jQuery UI mutates the element into
+  // an `ui-dialog-content`, so we want to keep the same element across edits.
+  let $dlg = $('#practiceLineEditDialog')
+  if (!$dlg.length) {
+    $dlg = $(`<div id="practiceLineEditDialog" title="Edit line" style="display:none;">
+        <div class="practice-edit-meta"></div>
+        <textarea class="practice-edit-input" rows="3"></textarea>
+      </div>`).appendTo('body')
+  }
+  $dlg.data('lang', lang).data('lineIndex', lineIndex)
+  $dlg.find('.practice-edit-meta').text(`#${lineIndex}  ·  ${lang === 'en' ? 'EN' : 'source'}`)
+  $dlg.find('.practice-edit-input').val(cur === '(empty)' ? '' : cur)
+
+  const opts = {
+    width:  Math.min(560, Math.round(window.innerWidth * 0.95)),
+    modal:  false,
+    // Top-anchored so the dialog sits well above the on-screen keyboard
+    // on mobile. visualViewport adjusts in _onPracticeViewportChange too,
+    // but the explicit position prevents the dialog from centring into
+    // the keyboard's footprint in the first place.
+    position: { my: 'center top', at: 'center top+12%', of: window },
+    buttons: {
+      'Save':   _practiceCommitEdit,
+      'Cancel': function () { try { $(this).dialog('close') } catch (_) {} }
+    },
+    open: function () {
+      // #practiceMode sits at z-index 100002 (and its topbar/nav at 100004);
+      // jQuery UI dialogs default to ~100. Triple-belt the lift:
+      //   (1) move the wrapper to the END of <body> so it's last in paint
+      //       order — sidesteps any nested stacking-context confusion.
+      //   (2) add a class with `!important` z-index in CSS (wins over inline).
+      //   (3) also stamp inline z-index with setProperty(..., 'important') in
+      //       case the stylesheet isn't loaded yet on first open.
+      const $w = $(this).closest('.ui-dialog')
+      $w.appendTo('body').addClass('above-practice-mode')
+      const el = $w[0]
+      if (el) el.style.setProperty('z-index', '100020', 'important')
+      // Focus the textarea after the dialog is fully rendered so the keyboard
+      // raises predictably; place the cursor at end of existing text.
+      setTimeout(() => {
+        const ta = $(this).find('.practice-edit-input').focus()[0]
+        if (ta) try { ta.setSelectionRange(ta.value.length, ta.value.length) } catch (_) {}
+      }, 50)
+    }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) {
+    $dlg.dialog('option', opts).dialog('open')
+  } else {
+    $dlg.dialog(opts)
+  }
 }
 
-// Commit an inline practice edit — reuses the batched SRT-edit pipeline, so
-// the change is buffered and pushed in one commit like search-result edits.
-async function _practiceCommitEdit(e) {
-  e.preventDefault(); e.stopPropagation()
-  const $box = $(this).closest('.practice-edit-box')
-  const lang = $box.attr('data-lang') === 'en' ? 'en' : (getLangFromUrl().code || 'sv')
-  const lineIndex = $box.attr('data-line-index')
-  const newText = String($box.find('.practice-edit-input').val() || '').trim()
+// Commit the dialog-edited line — buffers via _saveSubtitleEdit (queued for
+// the next Sync push) and re-renders the practice card with the new text.
+async function _practiceCommitEdit() {
+  const $dlg = $('#practiceLineEditDialog')
+  if (!$dlg.length) return
+  const lang = $dlg.data('lang') === 'en' ? 'en' : (getLangFromUrl().code || 'sv')
+  const lineIndex = $dlg.data('lineIndex')
+  const newText = String($dlg.find('.practice-edit-input').val() || '').trim()
   const it = $('#practiceMode').data('item')
-  if (!it || !newText) { _renderPracticeCard(); return }
-  const $save = $(this).prop('disabled', true).text('Saving…')
+  if (!it || !newText) { try { $dlg.dialog('close') } catch (_) {} ; _renderPracticeCard(); return }
+  // Disable the dialog's Save button while the optimistic write runs.
+  const $saveBtn = $dlg.dialog('widget').find('.ui-dialog-buttonpane button:contains("Save")')
+  $saveBtn.prop('disabled', true).text('Saving…')
   try {
     await _saveSubtitleEdit(it.id, lang, lineIndex, newText)
   } catch (err) {
     console.error('practice: save edit failed', err)
     alert('Failed to save: ' + (err && err.message || err))
   }
+  $saveBtn.prop('disabled', false).text('Save')
+  try { $dlg.dialog('close') } catch (_) {}
   _renderPracticeCard()
 }
 
