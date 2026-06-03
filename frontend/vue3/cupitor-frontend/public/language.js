@@ -336,12 +336,16 @@ async function scanRareWords() {
     }))
 
   // Flatten vocabulary into unique lines (keep first category seen).
+  // Skip very short lines outright — single/double-char tokens are almost
+  // always function words ("se", "ha", "be", "i") that appear everywhere
+  // and bring no signal to the rare-words list.
+  const MIN_LINE_LEN = 3
   const seen = new Map()
   Object.entries(window.vocabulary || {}).forEach(([cat, lines]) => {
     if (!Array.isArray(lines)) return
     lines.forEach(line => {
       const l = (line || '').trim()
-      if (l.length < 2) return
+      if (l.length < MIN_LINE_LEN) return
       if (!seen.has(l)) seen.set(l, cat)
     })
   })
@@ -363,13 +367,44 @@ async function scanRareWords() {
   const SLICE_MS = 25
   const now = () => (window.performance && performance.now) ? performance.now() : Date.now()
   let lastYield = now()
+  // Per-alternative minimum length. The vocab uses `|` to list alternatives
+  // for a concept; some entries include very short forms ("lev" alongside
+  // "leva|lever|levde", " be " alongside "lyssna|höra") that, when fed into
+  // the alternation regex below, swallow the line by matching as substrings
+  // of unrelated words (lev → "level", "love", "alleviate", …). Drop those
+  // short alternatives from the regex so they don't drag the whole line out
+  // of the rare list.
+  const MIN_ALT_LEN = 3
   for (let i = 0; i < total; i++) {
     if (token !== window._rareWordsScanToken) { $('#rareWordsScanBtn').prop('disabled', false); return }
     const [line, cat] = entries[i]
     let re
     try {
       const expanded = expandWords(line, getLangFromUrl().code)
-      re = new RegExp(_relaxSpaces(expanded), 'i')
+      // Drop alternatives shorter than MIN_ALT_LEN before composing the
+      // final regex. Preserve the existing _relaxSpaces step (run on the
+      // already-stripped string) so multi-word alternatives still match
+      // across whitespace.
+      const stripped = String(expanded || '')
+        .split(SEPARATOR_PIPE)
+        .filter(p => p.trim().length >= MIN_ALT_LEN)
+        .join(SEPARATOR_PIPE)
+      if (!stripped) { /* nothing left to test against; treat as absent */ continue }
+      const relaxed = _relaxSpaces(stripped)
+      // The original regex lacked word boundaries, so a normal-length form
+      // like "fanatisk" matched every subtitle containing "fanatiskt" /
+      // "fanatiska" — counted as covered when the exact form is absent.
+      // Anchor with Unicode boundary lookarounds so a hit requires real
+      // word edges. \b is ASCII-only (treats å/ä/ö as boundaries), so we
+      // use [\p{L}\p{N}] lookarounds with /u instead.
+      try {
+        re = new RegExp('(?<![\\p{L}\\p{N}])(?:' + relaxed + ')(?![\\p{L}\\p{N}])', 'iu')
+      } catch (eU) {
+        // Pattern can't be promoted to Unicode mode (vocab line contains a
+        // /u-unsafe construct). Fall back to the unanchored regex so we
+        // still produce a signal for the line rather than zero-matching it.
+        re = new RegExp(relaxed, 'i')
+      }
     } catch (e) { re = null }
     if (re) {
       let count = 0
@@ -825,6 +860,11 @@ function addToVocab(commitAndClose) {
   } catch (_) { /* leave preSelectedSearchedWord untouched */ }
 
   window._vocabHasPendingChanges = true
+  // Buffer this category's post-edit snapshot to localStorage so an app
+  // close/refresh before commit doesn't lose the user's work.
+  if (!window._vocabDirtyCategories) window._vocabDirtyCategories = {}
+  window._vocabDirtyCategories[category] = true
+  _savePendingVocab()
 
   if (commitAndClose) {
     // Rebuild the selects to reflect everything staged across this session,
@@ -1158,15 +1198,89 @@ async function commitVocabularyToGithub() {
         return vocabularyToText(merged)
       }
     })
-    // Adopt what we just pushed as the new baseline + UI state.
+    // Adopt what we just pushed as the new baseline + UI state. The
+    // pending-edit buffer is now stale (everything we cached is on remote);
+    // drop it so a future page-load doesn't re-apply the same edits.
     window.vocabulary = parseVocabularyFile(finalText)
     window._vocabularyBaselineText = finalText
+    _clearPendingVocab()
     console.log('Vocabulary committed to GitHub')
   } catch (e) {
     console.error('Failed to commit vocabulary to GitHub:', e)
     alert('Saved in memory but GitHub commit failed: ' + e.message)
   }
 }
+
+// ─── Unpushed vocab buffer (parallel to pendingSrtEdits) ─────────────────
+// Captures every locally-modified category so the user doesn't lose
+// uncommitted edits if they close the tab before the next sync. On boot
+// we replay the buffer onto the freshly-fetched remote vocabulary; on a
+// successful commit we drop it. The buffer is keyed by language so opening
+// a different language tab doesn't replay foreign categories.
+const PENDING_VOCAB_KEY = 'cupitor:pendingVocab'
+function _loadPendingVocab() {
+  try {
+    const raw = localStorage.getItem(PENDING_VOCAB_KEY)
+    if (!raw) return null
+    const obj = JSON.parse(raw)
+    if (!obj || typeof obj !== 'object' || !obj.categories) return null
+    return obj
+  } catch (_) { return null }
+}
+function _savePendingVocab() {
+  try {
+    const dirty = window._vocabDirtyCategories || {}
+    const dirtyNames = Object.keys(dirty)
+    if (!dirtyNames.length || !window.vocabulary) {
+      localStorage.removeItem(PENDING_VOCAB_KEY)
+      return
+    }
+    const categories = {}
+    dirtyNames.forEach(cat => {
+      if (Array.isArray(window.vocabulary[cat])) {
+        categories[cat] = window.vocabulary[cat].slice()
+      }
+    })
+    if (!Object.keys(categories).length) {
+      localStorage.removeItem(PENDING_VOCAB_KEY)
+      return
+    }
+    const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || ''
+    localStorage.setItem(PENDING_VOCAB_KEY, JSON.stringify({ lang, categories, ts: Date.now() }))
+  } catch (_) {}
+}
+function _clearPendingVocab() {
+  try { localStorage.removeItem(PENDING_VOCAB_KEY) } catch (_) {}
+  window._vocabDirtyCategories = {}
+  window._vocabHasPendingChanges = false
+  $('#vocabPendingHint').hide()
+}
+// Called once after the initial vocabulary fetch parses into window.vocabulary.
+// Replays any locally-cached category snapshots so the user's unpushed work
+// is back in memory + visible in the UI ready for another Sync.
+function _replayPendingVocab() {
+  const buf = _loadPendingVocab()
+  if (!buf || !buf.categories) return
+  const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || ''
+  if (buf.lang && buf.lang !== lang) return
+  if (!window.vocabulary) window.vocabulary = {}
+  if (!window._vocabDirtyCategories) window._vocabDirtyCategories = {}
+  const cats = Object.keys(buf.categories)
+  let any = 0
+  cats.forEach(cat => {
+    if (Array.isArray(buf.categories[cat])) {
+      window.vocabulary[cat] = buf.categories[cat]
+      window._vocabDirtyCategories[cat] = true
+      any++
+    }
+  })
+  if (any) {
+    window._vocabHasPendingChanges = true
+    $('#vocabPendingHint').show()
+    console.log(`Replayed ${any} pending vocab categor${any === 1 ? 'y' : 'ies'} from local cache — push via Save & Close to sync.`)
+  }
+}
+window._replayPendingVocab = _replayPendingVocab
 
 function getXXX() {
   let xxx = localStorage.getItem("xxx")
@@ -1434,17 +1548,28 @@ function _nfc(s) {
 }
 
 async function _fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init = {} } = {}) {
+  // raw.githubusercontent.com sends Cache-Control on error responses too, so
+  // Chrome will cheerfully serve a stale 429 / 5xx from disk cache for the next
+  // few minutes and never re-ask the server — fatal during boot. Two defenses:
+  //   1) cache: 'no-store' on every attempt so the browser doesn't consult the
+  //      disk cache in the first place.
+  //   2) ?_cb=<random> appended on each retry as a belt-and-braces cache-buster
+  //      in case an intermediary (CDN, service worker) ignores no-store.
+  const baseInit = { cache: 'no-store', ...init };
   let lastErr;
   for (let i = 0; i < tries; i++) {
+    const reqUrl = i === 0
+      ? url
+      : url + (url.indexOf('?') === -1 ? '?' : '&') + '_cb=' + Date.now() + '-' + i;
     try {
-      const res = await _withTimeout(fetch(url, init), timeoutMs, url);
-      if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
+      const res = await _withTimeout(fetch(reqUrl, baseInit), timeoutMs, reqUrl);
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + reqUrl);
       return res;
     } catch (e) {
       lastErr = e;
       if (i === tries - 1) break;
       const backoff = 400 * Math.pow(2, i) + Math.random() * 200;  // 0.4s, 0.8s, 1.6s...
-      console.warn('[boot] fetch failed (attempt', i + 1, 'of', tries, ')', url, e && e.message);
+      console.warn('[boot] fetch failed (attempt', i + 1, 'of', tries, ')', reqUrl, e && e.message);
       await new Promise(r => setTimeout(r, backoff));
     }
   }
@@ -1558,6 +1683,10 @@ async function fetchVocabulary() {
     console.warn('Vocabulary fetch failed', e);
   } finally {
     if (!window.vocabulary) window.vocabulary = {};
+    // Re-apply any unpushed local edits cached from a previous session.
+    // Must run BEFORE loadWholeVocabulary() so the rebuilt selects already
+    // include the buffered categories.
+    try { _replayPendingVocab() } catch (_) {}
     loadWholeVocabulary()
     window._vocabularyReadyResolve();
   }
@@ -1954,7 +2083,7 @@ $('document').ready(e => {
       // for the captured-subtitles review: each row has a Delete / Push
       // action we don't want clobbered, plus the trigger button click
       // itself shouldn't immediately re-close the dialog it just opened.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor").dialog("close");
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#playingQueueDialog").dialog("close");
     }
   });
 
@@ -2839,7 +2968,7 @@ async function loadAllSubtitles() {
     // the in-flight count bounded so the browser doesn't bail out. The host
     // (raw.githubusercontent.com) is HTTP/2, so this isn't the old 6-per-host
     // cap — the practical ceiling is the host's rate limiter.
-    const SRT_FETCH_CONCURRENCY = 20
+    const SRT_FETCH_CONCURRENCY = 15
     _srtProgressShow(srts.length)
     const srtLoadingDone = _runInBatches(srts, async (it) => {
       try {
@@ -3705,9 +3834,25 @@ async function getMatchingWords(list, search, token) {
       const item = list[ix]
       const lines = item.data;
       for (const line of lines) {
-        if (new Date().getTime() - startTime > 20000) {
+        if (new Date().getTime() - startTime > 60000) {
           return wordToItemsMap;
         }
+        // Fast-skip lines that can't contain a match. getWords() runs
+        // Intl.Segmenter on every line, which is the single most expensive
+        // step in this loop — for a search that file-matches in 180 SRTs
+        // with ~100 lines each, the bulk of the 18k segmentations are on
+        // lines that never had a chance of matching. Every downstream
+        // matcher (perWordRe, withWordBoundaries(searchText), phraseRes)
+        // is strictly more restrictive than transformedRe, so if
+        // transformedRe doesn't match this line, none of them can either.
+        // Skipping here lets the loop finish in a small fraction of the
+        // old wall-clock budget, so the timeout below never fires under
+        // realistic search loads. (Was hitting the 20s ceiling and
+        // returning before reaching files later in the iteration order —
+        // user-visible symptom: a search for a rare word that genuinely
+        // appears in some file but the file doesn't show up because the
+        // loop bailed before processing it.)
+        if (!transformedRe.test(line.text)) continue
         const words = getWords(line.text, search).map(it => it.trim().toLowerCase())
         const endsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
         const startsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
@@ -8615,6 +8760,9 @@ function _isManualItem(it) { return !!(it && it.manual) }
 function _parseMediaUrl(raw) {
   const url = String(raw == null ? '' : raw).trim()
   if (!url) return null
+  // file:// — a Cupitor-saved audio recording (mediaUrl doubles as the audio
+  // reference; playback routes through AudioBridge instead of opening it).
+  if (url.startsWith('file://')) return { kind: 'audio', url }
   // youtu.be/<id> or youtube.com/watch?v=<id> or /embed/<id> or /shorts/<id>
   const yt = url.match(/(?:youtube\.com\/(?:watch\?(?:[^&]*&)*v=|embed\/|shorts\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/)
   if (yt && yt[1]) return { kind: 'youtube', id: yt[1], url }
@@ -8723,7 +8871,7 @@ function addManualEntry(playlistName, opts) {
   }
   if (media) {
     it.mediaUrl = media.url
-    it.mediaKind = media.kind                // 'youtube' | 'link'
+    it.mediaKind = media.kind                // 'youtube' | 'link' | 'audio'
     if (media.kind === 'youtube') it.mediaVideoId = media.id
   }
   if (!rec.items)                          rec.items = {}
@@ -8985,6 +9133,36 @@ function removeRecordedItem(searchText, word, idx) {
   _saveRecording()
   _updateRecordingUI()
   _markCapturedButtons()
+}
+
+// Remove an item by its queue-row identity (origin recName/st/w + id/lineIndex).
+// Used by the Practice view's delete button — the active recording may not be
+// the row's source (loop='all' crosses recordings), so we resolve the right
+// playlist via _recName and match by identity tuple, not by stored _idx
+// (which may have drifted if other items were removed since).
+function _removeQueueItem(it) {
+  if (!it || !it._recName) return false
+  const rec = window._recordings && window._recordings[it._recName]
+  if (!rec || rec.virtual || !rec.items) return false
+  const st = it._st, w = it._w
+  const arr = rec.items[st] && rec.items[st][w]
+  if (!Array.isArray(arr)) return false
+  let i = arr.findIndex(x => x && x.id === it.id && x.lineIndex === it.lineIndex)
+  if (i < 0) i = (typeof it._idx === 'number') ? it._idx : -1
+  if (i < 0 || i >= arr.length) return false
+  arr.splice(i, 1)
+  if (arr.length === 0) delete rec.items[st][w]
+  if (rec.items[st] && Object.keys(rec.items[st]).length === 0) delete rec.items[st]
+  rec.updatedAt = Date.now()
+  _saveRecording()
+  // If the active recording is the one we just mutated, sync the live
+  // pointer + repaint capture buttons; otherwise just save and move on.
+  if (window._recording && window._recording.currentName === it._recName && !window._recording.virtual) {
+    window._recording.items = rec.items
+    _markCapturedButtons()
+  }
+  _updateRecordingUI()
+  return true
 }
 
 // Purge every recorded item that references `videoId` (item.id) from ALL
@@ -9253,10 +9431,168 @@ window._openVirtualPlaylistEditor = _openVirtualPlaylistEditor
 // `existing` is the live item object (mutated in place via updateManualEntry)
 // when editing, or null when adding a new card. Modal so the user finishes
 // the form before returning to the review dialog.
+// Per-entry audio recordings.
+//
+// Audio is persisted on the device file system via the Cupitor app's
+// AudioBridge JS channel. The entry stores just the resulting `file://...`
+// URL in its `mediaUrl` field (with `mediaKind: 'audio'`); the bytes
+// themselves never live inside the _recordings JSON. The recorder UI is
+// only shown when the bridge is present — there is no browser fallback.
+//
+// JS API (Promise-based, all resolve to null on failure rather than throw):
+//   const url      = await saveManualAudioBlob(id, dataUrl)   // → file://...
+//   const dataUrl  = await loadManualAudioData(fileUrl)       // → data:...
+//   await deleteManualAudio(fileUrl)
+//
+// The file:// URL is opaque to JS — never feed it directly to new Audio(),
+// always round-trip through loadManualAudioData().
+
+const _AUDIO_PENDING = Object.create(null)
+let _audioReqSeq = 1
+function _nextAudioRid() { return 'a' + (_audioReqSeq++) + '_' + Date.now().toString(36) }
+function _haveAudioBridge() { return !!(window.AudioBridge && typeof window.AudioBridge.postMessage === 'function') }
+
+// Dart calls this with {op, rid, result?, error?}. Resolves the matching
+// Promise we registered when we sent the request.
+window.__cupAudio = function (envelope) {
+  if (!envelope || !envelope.rid) return
+  const pending = _AUDIO_PENDING[envelope.rid]
+  if (!pending) return
+  delete _AUDIO_PENDING[envelope.rid]
+  if (envelope.error) pending.reject(new Error(envelope.error))
+  else                pending.resolve(envelope.result)
+}
+
+function _audioRpc(op, payload) {
+  if (!_haveAudioBridge()) return Promise.reject(new Error('no-bridge'))
+  return new Promise((resolve, reject) => {
+    const rid = _nextAudioRid()
+    _AUDIO_PENDING[rid] = { resolve, reject }
+    try {
+      window.AudioBridge.postMessage(JSON.stringify(Object.assign({ op, rid }, payload || {})))
+    } catch (e) {
+      delete _AUDIO_PENDING[rid]
+      reject(e)
+    }
+  })
+}
+
+async function saveManualAudioBlob(id, dataUrl) {
+  if (!id || !dataUrl || !_haveAudioBridge()) return null
+  try { return await _audioRpc('save', { id, dataUrl }) }
+  catch (e) { console.warn('[manualAudio] bridge save failed', e); alert('Could not save audio: ' + (e && e.message || e)); return null }
+}
+
+async function loadManualAudioData(url) {
+  if (!url || !url.startsWith('file://') || !_haveAudioBridge()) return null
+  try { return await _audioRpc('load', { url }) }
+  catch (e) { console.warn('[manualAudio] bridge load failed', e); return null }
+}
+
+async function deleteManualAudio(url) {
+  if (!url || !url.startsWith('file://') || !_haveAudioBridge()) return
+  try { await _audioRpc('delete', { url }) }
+  catch (e) { console.warn('[manualAudio] delete failed', e) }
+}
+
+// Ask Dart to make sure the host app holds Android's RECORD_AUDIO runtime
+// permission, prompting the user if needed. Returns one of:
+//   'granted'   — RECORD_AUDIO is now held (or was already)
+//   'denied'    — user said no (or denied permanently)
+//   'unknown'   — bridge call failed / op not recognised (older app build)
+// The recorder treats 'unknown' the same as 'granted' for the purpose of
+// blocking — we fall through to getUserMedia, which will fire WebView's
+// own onPermissionRequest path. That keeps users on a partial upgrade
+// (new JS, old APK) from being locked out.
+async function ensureMicPermissionViaBridge() {
+  if (!_haveAudioBridge()) return 'unknown'   // plain browser — let getUserMedia prompt
+  try {
+    const r = await _audioRpc('ensureMicPerm', {})
+    return r === 'granted' ? 'granted' : 'denied'
+  } catch (e) {
+    console.warn('[manualAudio] ensureMicPerm bridge call failed, falling through', e)
+    return 'unknown'
+  }
+}
+
+// True when a mediaUrl is one of our recorded audio files.
+function _isAudioMediaUrl(u) { return typeof u === 'string' && u.startsWith('file://') }
+
+// ─── Native recording (via AudioBridge / Android MediaRecorder) ──────────
+// The editor's $rec/$stop handlers call `_audioRpc('recordStart' | 'recordStop')`
+// directly so they can inspect the PlatformException code (in particular
+// 'permission-denied'). `nativeRecordCancel()` is exposed as a wrapper
+// because the cleanup path wants to fire-and-forget without caring about
+// outcome — it just needs the in-progress MediaRecorder torn down on
+// dialog dismissal.
+async function nativeRecordCancel() {
+  if (!_haveAudioBridge()) return
+  try { await _audioRpc('recordCancel', {}) }
+  catch (e) { console.warn('[manualAudio] nativeRecordCancel failed', e) }
+}
+
+// ─── Manual-audio preview singleton ──────────────────────────────────────
+// Only one clip plays at a time across the page (recording-review badge,
+// practice media-link button). Clicking the same button while playing
+// stops it; clicking a different button stops the first and starts the
+// second. Practice navigation/close also stop playback via
+// _stopManualAudioPreview() so audio doesn't outlive the card on screen.
+//
+// State on window so it survives function-scope re-renders (the practice
+// card DOM is rebuilt on every navigation).
+//   window._manualAudioPreview = { audio, $btn, restoreLabel, restoreTitle }
+window._manualAudioPreview = window._manualAudioPreview || null
+
+function _stopManualAudioPreview() {
+  const p = window._manualAudioPreview
+  if (!p) return
+  window._manualAudioPreview = null
+  try { p.audio.pause() } catch (_) {}
+  try { p.audio.currentTime = 0 } catch (_) {}
+  if (p.$btn && p.$btn.length) {
+    try { p.$btn.html(p.restoreLabel) } catch (_) {}
+    if (p.restoreTitle != null) { try { p.$btn.attr('title', p.restoreTitle) } catch (_) {} }
+  }
+}
+
+// Toggle-style entry point used by every "play this audio mediaUrl" button
+// outside the manual-entry editor. Returns immediately; logs+gives up on
+// failure rather than alerting (these are casual previews, not saves).
+async function _startManualAudioPreview(url, $btn) {
+  if (!url) return
+  // Same button clicked again → stop.
+  const cur = window._manualAudioPreview
+  if (cur && cur.$btn && $btn && cur.$btn.is($btn)) { _stopManualAudioPreview(); return }
+  // Different button: stop the old clip first so we don't double-play.
+  _stopManualAudioPreview()
+  const dataUrl = await loadManualAudioData(url)
+  if (!dataUrl) { console.warn('[manualAudio] could not load', url); return }
+  const a = new Audio(dataUrl)
+  const restoreLabel = $btn ? $btn.html() : null
+  const restoreTitle = $btn ? $btn.attr('title') : null
+  if ($btn && $btn.length) {
+    $btn.html('■')
+    $btn.attr('title', 'Stop playback')
+  }
+  const state = { audio: a, $btn, restoreLabel, restoreTitle }
+  window._manualAudioPreview = state
+  const settle = () => { if (window._manualAudioPreview === state) _stopManualAudioPreview() }
+  a.addEventListener('ended', settle)
+  a.addEventListener('error', settle)
+  try { await a.play() } catch (e) { console.warn('[manualAudio] play failed', e); settle() }
+}
+window._stopManualAudioPreview = _stopManualAudioPreview
+
 function _openManualEntryEditor(playlistName, existing) {
   let $d = $('#manualEntryEditor')
   if (!$d.length) $d = $('<div id="manualEntryEditor"></div>').appendTo('body')
   const isEdit = !!existing
+  // Audio recording requires the Cupitor app's AudioBridge so we can persist
+  // the bytes on the device file system. In a plain browser there's no such
+  // bridge, and we deliberately don't fall back to localStorage here — audio
+  // is too big for it and users would silently lose recordings on quota
+  // errors. Just hide the section instead.
+  const showAudio = _haveAudioBridge()
   $d.html(`
     <div class="mee-row"><label class="mee-lbl">Source</label>
       <textarea id="meeSource" class="mee-input" rows="2" placeholder="Question, source text, prompt…"></textarea></div>
@@ -9265,19 +9601,267 @@ function _openManualEntryEditor(playlistName, existing) {
     <div class="mee-row"><label class="mee-lbl">Media URL <span class="mee-lbl-hint">(optional — YouTube link or any web link)</span></label>
       <input id="meeMedia" class="mee-input" type="url" placeholder="https://…"></div>
     <div class="mee-hint" style="font-size:12px;color:#666;">YouTube URLs are recognised automatically and will play in the embedded player during Practice / Play. Other URLs open in a new tab.</div>
+    ${showAudio ? `
+    <div class="mee-row" style="margin-top:10px;border-top:1px solid #eee;padding-top:8px;">
+      <label class="mee-lbl">Audio <span class="mee-lbl-hint">(optional — recorded pronunciation, saved on device)</span></label>
+      <div id="meeAudioBar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <button type="button" id="meeAudioRec"    class="btn" title="Start recording">● Record</button>
+        <button type="button" id="meeAudioStop"   class="btn" title="Stop recording" disabled>■ Stop</button>
+        <button type="button" id="meeAudioPlay"   class="btn" title="Play recording" disabled>▶ Play</button>
+        <button type="button" id="meeAudioDel"    class="btn" title="Delete recording" disabled style="color:#a00;">🗑</button>
+        <span id="meeAudioStatus" style="font-size:12px;color:#666;margin-left:4px;">(no audio)</span>
+      </div>
+    </div>` : ''}
   `)
   $d.find('#meeSource').val(existing ? existing.source || '' : '')
   $d.find('#meeTarget').val(existing ? existing.target || '' : '')
-  $d.find('#meeMedia').val(existing ? existing.mediaUrl || '' : '')
+  // Don't surface a file:// URL in the Media URL text input — the audio
+  // recorder section below represents it instead. Showing the raw file://
+  // path would let the user accidentally edit it into nonsense.
+  {
+    const mu = existing ? existing.mediaUrl || '' : ''
+    $d.find('#meeMedia').val(_isAudioMediaUrl(mu) ? '' : mu)
+  }
 
-  const finish = () => {
-    const source   = $d.find('#meeSource').val()
-    const target   = $d.find('#meeTarget').val()
-    const mediaUrl = $d.find('#meeMedia').val()
-    if (isEdit) {
-      return updateManualEntry(playlistName, existing.id, { source, target, mediaUrl })
+  // ── Audio recorder state (scoped to this dialog instance) ──
+  // Only wired up when `showAudio` is true (i.e. we're inside the Cupitor
+  // app's WebView, where AudioBridge can persist to the device file system).
+  // In a plain browser the audio UI isn't rendered and these stay unused.
+  let audioUrl = null
+  // True when `audioUrl` points to a just-recorded native file that hasn't
+  // been committed to the entry yet — used by cleanup()/del to know whether
+  // to delete it on cancel. Existing-entry audio left in place has this
+  // false: the file belongs to the saved entry, not to this dialog.
+  let audioUrlIsNew = false
+  // Recording state for the native MediaRecorder path (via AudioBridge).
+  // We don't keep a MediaRecorder/getUserMedia stream around any more — the
+  // Android side owns those. We just track whether a recording is in flight
+  // and tick the visible duration off the wall clock.
+  let nativeRecording = false
+  let recStartMs = 0
+  let recTimerId = null
+  // Active <Audio> element during preview playback. Tracked so a second Play
+  // click stops the current playback (toggle), and so syncAudioUI can flip
+  // the button label between ▶ Play / ■ Stop.
+  let playbackAudio = null
+
+  if (showAudio) {
+    audioUrl = _isAudioMediaUrl(existing && existing.mediaUrl) ? existing.mediaUrl : null
+
+    const $rec  = $d.find('#meeAudioRec')
+    const $stop = $d.find('#meeAudioStop')
+    const $play = $d.find('#meeAudioPlay')
+    const $del  = $d.find('#meeAudioDel')
+    const $stat = $d.find('#meeAudioStatus')
+    function _hasAudio() { return !!audioUrl }
+    function _isPlaying() { return !!(playbackAudio && !playbackAudio.paused && !playbackAudio.ended) }
+    function _stopPlayback() {
+      if (playbackAudio) {
+        try { playbackAudio.pause() } catch (_) {}
+        try { playbackAudio.currentTime = 0 } catch (_) {}
+        playbackAudio = null
+      }
     }
-    return !!addManualEntry(playlistName, { source, target, mediaUrl })
+    function syncAudioUI(extra) {
+      const recording = nativeRecording
+      const playing = _isPlaying()
+      $rec.prop('disabled',  recording || playing)
+      $stop.prop('disabled', !recording)
+      $play.prop('disabled', recording || !_hasAudio())
+      $play.text(playing ? '■ Stop' : '▶ Play')
+      $del.prop('disabled',  recording || playing || !_hasAudio())
+      if (recording) {
+        const secs = Math.floor((Date.now() - recStartMs) / 1000)
+        $stat.text(`recording… ${secs}s`).css('color', '#a00')
+      } else if (playing) {
+        $stat.text('playing…').css('color', '#06a')
+      } else if (extra) {
+        $stat.text(extra).css('color', '#070')
+      } else if (audioUrl && audioUrlIsNew) {
+        $stat.text('recorded (unsaved)').css('color', '#a60')
+      } else if (audioUrl) {
+        $stat.text('saved on device').css('color', '#070')
+      } else {
+        $stat.text('(no audio)').css('color', '#666')
+      }
+    }
+    syncAudioUI()
+
+    $rec.on('click', async () => {
+      // Native recording path: ask Dart to open Android's MediaRecorder
+      // and write directly to <docs>/manual_audio/<id>.m4a. Bypasses the
+      // WebView's getUserMedia entirely — that path races with
+      // speech_to_text on Android and surfaces NotReadableError.
+      if (nativeRecording) return
+      // If there's an unsaved just-recorded file from an earlier attempt
+      // this dialog, throw it away — we're about to overwrite it.
+      if (audioUrl && audioUrlIsNew) {
+        const stale = audioUrl
+        audioUrl = null
+        audioUrlIsNew = false
+        deleteManualAudio(stale)   // fire-and-forget
+      }
+      const id = 'rec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+      let result
+      try { result = await _audioRpc('recordStart', { id }) }
+      catch (e) {
+        console.warn('[manualAudio] recordStart failed', e)
+        const msg = (e && e.message) || String(e)
+        // Dart surfaces 'permission-denied' separately so we can show the
+        // settings hint.
+        if (/permission/i.test(msg)) {
+          alert('Microphone permission was denied. Enable it in Settings → Apps → Cupitor → Permissions.')
+        } else {
+          alert('Could not start audio recording.\n' + msg)
+        }
+        return
+      }
+      // Dart returns the file:// URL the recording is being written to.
+      audioUrl = result
+      audioUrlIsNew = true
+      nativeRecording = true
+      recStartMs = Date.now()
+      syncAudioUI()
+      recTimerId = setInterval(syncAudioUI, 1000)
+    })
+    $stop.on('click', async () => {
+      if (!nativeRecording) return
+      let result
+      try { result = await _audioRpc('recordStop', {}) }
+      catch (e) {
+        console.warn('[manualAudio] recordStop failed', e)
+        // Whatever happened, we're no longer recording — clear UI state.
+        nativeRecording = false
+        if (recTimerId) { clearInterval(recTimerId); recTimerId = null }
+        // Drop any half-written file we can't trust.
+        if (audioUrl && audioUrlIsNew) {
+          deleteManualAudio(audioUrl)
+          audioUrl = null; audioUrlIsNew = false
+        }
+        syncAudioUI('(recording failed)')
+        return
+      }
+      nativeRecording = false
+      if (recTimerId) { clearInterval(recTimerId); recTimerId = null }
+      // Dart returns null if the recording was too short to keep (MediaRecorder
+      // refuses to stop cleanly before any audio was captured); treat that as
+      // a cancelled recording.
+      if (!result) {
+        if (audioUrl && audioUrlIsNew) {
+          deleteManualAudio(audioUrl)
+          audioUrl = null; audioUrlIsNew = false
+        }
+        syncAudioUI('(too short to keep — hold longer)')
+        return
+      }
+      audioUrl = result
+      audioUrlIsNew = true
+      syncAudioUI()
+    })
+    $play.on('click', async () => {
+      // Toggle: click while playing stops playback (so the user can quickly
+      // re-record without waiting for the clip to finish).
+      if (_isPlaying()) { _stopPlayback(); syncAudioUI(); return }
+      let dataUrl
+      try {
+        dataUrl = audioUrl ? await loadManualAudioData(audioUrl) : null
+      } catch (e) {
+        console.warn('[manualAudio] load failed', e)
+      }
+      if (!dataUrl) { syncAudioUI('(could not load audio)'); return }
+      const a = new Audio(dataUrl)
+      playbackAudio = a
+      a.addEventListener('ended', () => { if (playbackAudio === a) { playbackAudio = null; syncAudioUI() } })
+      a.addEventListener('error', () => { if (playbackAudio === a) { playbackAudio = null; syncAudioUI('(playback failed)') } })
+      try {
+        await a.play()
+        syncAudioUI()
+      } catch (e) {
+        console.warn('[manualAudio] play failed', e)
+        if (playbackAudio === a) playbackAudio = null
+        syncAudioUI('(playback failed)')
+      }
+    })
+    $del.on('click', () => {
+      if (!_hasAudio()) return
+      if (!confirm('Delete this recording?')) return
+      _stopPlayback()
+      // If this is a newly-recorded native file (uncommitted), drop the
+      // file from disk now — it has no parent entry to clean it up later.
+      // For an existing-entry audio file, just clear the local reference;
+      // finish() will delete the original on disk when the user saves.
+      if (audioUrl && audioUrlIsNew) deleteManualAudio(audioUrl)
+      audioUrl = null
+      audioUrlIsNew = false
+      syncAudioUI()
+    })
+  }
+
+  const finish = async () => {
+    const source       = $d.find('#meeSource').val()
+    const target       = $d.find('#meeTarget').val()
+    const typedMediaUrl = $d.find('#meeMedia').val()
+
+    // Audio-and-media write order, when the audio UI is on:
+    //  1. The recording (if any) is already on disk via the native
+    //     MediaRecorder path — `audioUrl` is the file:// URL.
+    //  2. If we have an audio URL it becomes the entry's mediaUrl,
+    //     overriding whatever the user typed in the Media URL box.
+    //     Recording is the more recent, explicit declaration of media.
+    //  3. Otherwise the entry takes the typed Media URL.
+    let finalMediaUrl = audioUrl ? audioUrl : typedMediaUrl
+    // Original audio file we may need to delete (replaced or removed).
+    const originalAudioUrl = _isAudioMediaUrl(existing && existing.mediaUrl) ? existing.mediaUrl : null
+
+    let saved
+    if (isEdit) {
+      saved = updateManualEntry(playlistName, existing.id, { source, target, mediaUrl: finalMediaUrl })
+    } else {
+      const it = addManualEntry(playlistName, { source, target, mediaUrl: finalMediaUrl })
+      saved = !!it
+    }
+
+    if (showAudio) {
+      if (saved) {
+        // Audio is now committed to the entry — disarm the cancel-cleanup.
+        audioUrlIsNew = false
+        // Clean up the replaced/removed original audio file.
+        if (originalAudioUrl && originalAudioUrl !== finalMediaUrl) {
+          await deleteManualAudio(originalAudioUrl)
+        }
+      } else if (audioUrl && audioUrlIsNew) {
+        // Entry save failed — don't leak the just-written audio file.
+        await deleteManualAudio(audioUrl)
+        audioUrl = null; audioUrlIsNew = false
+      }
+    }
+    return saved
+  }
+
+  function cleanup() {
+    if (recTimerId) { clearInterval(recTimerId); recTimerId = null }
+    // If the user closes the dialog mid-recording, tell Dart to throw
+    // away the partial recording (stop the MediaRecorder, delete file).
+    if (nativeRecording) {
+      nativeRecording = false
+      nativeRecordCancel()  // fire-and-forget
+      // The file may have been written; mark for deletion below.
+      audioUrlIsNew = true
+    }
+    // Delete any newly-recorded native file that was never committed via
+    // Save — uncommitted recordings shouldn't survive dialog dismissal.
+    if (audioUrl && audioUrlIsNew) {
+      deleteManualAudio(audioUrl)   // fire-and-forget
+      audioUrl = null; audioUrlIsNew = false
+    }
+    // Also stop any in-progress preview playback — otherwise the <Audio>
+    // element keeps playing after the dialog closes.
+    try {
+      if (playbackAudio) {
+        try { playbackAudio.pause() } catch (_) {}
+        playbackAudio = null
+      }
+    } catch (_) {}
   }
 
   $d.dialog({
@@ -9285,15 +9869,25 @@ function _openManualEntryEditor(playlistName, existing) {
     width: Math.min(480, $(window).width() - 40),
     modal: true,
     autoOpen: true,
+    close: cleanup,
     buttons: {
-      [isEdit ? 'Save' : 'Add']: function () {
-        if (finish()) { try { $(this).dialog('close') } catch (_) {} openRecordingReviewDialog() }
+      // The Save button is async — `finish()` may need to round-trip through
+      // the AudioBridge to write the recording before the entry is saved.
+      [isEdit ? 'Save' : 'Add']: async function () {
+        const $btn = $(this)
+        const ok = await finish()
+        if (ok) { try { $btn.dialog('close') } catch (_) {} openRecordingReviewDialog() }
       },
       'Cancel': function () { try { $(this).dialog('close') } catch (_) {} }
     }
   })
 }
 window._openManualEntryEditor = _openManualEntryEditor
+// Exposed so the recording-review row and other UI can play/refresh audio
+// without re-implementing the bridge plumbing.
+window.saveManualAudioBlob = saveManualAudioBlob
+window.loadManualAudioData = loadManualAudioData
+window.deleteManualAudio   = deleteManualAudio
 
 function openRecordingReviewDialog() {
   let $dlg = $('#recordingReviewDialog')
@@ -9389,8 +9983,14 @@ function openRecordingReviewDialog() {
           if (_isManualItem(it)) {
             const src = _.escape(it.source || '')
             const tgt = _.escape(it.target || '')
+            const _isAudio = it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)
             const mediaBadge = it.mediaUrl
-              ? ` <a class="rec-item-media" href="${_.escape(it.mediaUrl)}" target="_blank" rel="noopener" title="Open media (${_.escape(it.mediaKind || 'link')})">${it.mediaKind === 'youtube' ? '▶︎' : '🔗'}</a>`
+              ? (_isAudio
+                  // Play in place via AudioBridge — file:// can't be opened
+                  // as a normal link. data-audio-url is read by a delegated
+                  // click handler installed once on the review dialog.
+                  ? ` <button type="button" class="rec-item-media rec-item-audio" data-audio-url="${_.escape(it.mediaUrl)}" title="Play recorded audio">🎙</button>`
+                  : ` <a class="rec-item-media" href="${_.escape(it.mediaUrl)}" target="_blank" rel="noopener" title="Open media (${_.escape(it.mediaKind || 'link')})">${it.mediaKind === 'youtube' ? '▶︎' : '🔗'}</a>`)
               : ''
             _itemTextHtml = `<span class="rec-item-text rec-item-manual${it.enabled === false ? ' rec-item-off' : ''}">📝 ${src}${tgt ? ` → ${tgt}` : ''}</span>${mediaBadge}` +
                             `<button type="button" class="rec-manual-edit" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Edit this card">✎</button>`
@@ -9508,6 +10108,16 @@ function openRecordingReviewDialog() {
     if (!it || !_isManualItem(it)) return
     _openManualEntryEditor(window._recording.currentName, it)
   })
+  // Inline playback for the 🎙 badge — file:// URLs can't be opened as
+  // normal links so we round-trip through the AudioBridge. Uses the shared
+  // preview singleton so the button toggles (🎙 ↔ ■), errors don't fail
+  // silently, and starting another row's audio stops this one first.
+  $dlg.off('click', '.rec-item-audio').on('click', '.rec-item-audio', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const url = $(this).attr('data-audio-url') || ''
+    if (!url) return
+    _startManualAudioPreview(url, $(this))
+  })
   $dlg.off('click', '#recVirtualEdit').on('click', '#recVirtualEdit', function (e) {
     e.preventDefault(); e.stopPropagation()
     _openVirtualPlaylistEditor(window._recording.currentName)
@@ -9591,7 +10201,7 @@ function openRecordingReviewDialog() {
         try { $(this).dialog('close') } catch (_) {}
         $w.hide()
         try { autoHideSettingsPanel() } catch (_) {}
-        const resumeQueue = _maybeResumeStartItem()
+        const resumeQueue = _maybeResumeStartItem('play')
         playRecording(resumeQueue ? { resumeQueue } : undefined)
       },
       'Practice':  function () {
@@ -9599,7 +10209,7 @@ function openRecordingReviewDialog() {
         try { $(this).dialog('close') } catch (_) {}
         $w.hide()
         try { autoHideSettingsPanel() } catch (_) {}
-        const resumeQueue = _maybeResumeStartItem()
+        const resumeQueue = _maybeResumeStartItem('practice')
         openPracticeMode(resumeQueue ? { resumeQueue } : undefined)
       },
       'Close':     function () {
@@ -9660,10 +10270,10 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
     let lastTickAt = begin
     const tick = () => {
       if (!window._playingRecording) return resolve()
-      // Bail immediately on a prev/next request so the navigation feels
-      // responsive — the outer loop in playRecording reads the flag and
-      // routes to the right index.
-      if (window._recNavRequest) {
+      // Bail immediately on a prev/next/goto request so the navigation
+      // feels responsive — the outer loop in playRecording reads the
+      // flag and routes to the right index.
+      if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) {
         hardPause()
         return resolve()
       }
@@ -9695,16 +10305,23 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
       } catch (_) {}
       if (typeof onTick === 'function') { try { onTick() } catch (_) {} }
       const elapsed = (now - begin) - pausedAccum
+      // hardPause() on every bail — without it a video that finally starts
+      // AFTER we've decided to skip (e.g. load-grace expired but the player
+      // resolves a few seconds later) keeps playing audio through the gap
+      // period until the next item's playMediaSlice() resets it.
       if (!everPlayed && elapsed > loadGraceMs) {
         console.warn('playRecording: video failed to start within', loadGraceMs, 'ms — skipping')
+        hardPause()
         return resolve()
       }
       if (everPlayed && (now - lastChangeAt) > stallMs) {
         console.warn('playRecording: playhead stalled — skipping')
+        hardPause()
         return resolve()
       }
       if (elapsed > maxWaitMs) {
         console.warn('playRecording: max wait exceeded — skipping')
+        hardPause()
         return resolve()
       }
       // 100ms keeps the playhead-overrun ≤ 100ms in the steady state, which
@@ -9815,8 +10432,10 @@ function _renderPlayingBanner(it, idx, total) {
     // until the user taps the ℹ button. Desktop CSS keeps everything visible.
     $b = $(`<div id="recPlayingBanner">
       <div class="rec-pb-top">
-        <span class="rec-pb-count"></span>
-        <div class="rec-pb-progress"><span class="rec-pb-bar"></span></div>
+        <div class="rec-pb-progress">
+          <span class="rec-pb-bar"></span>
+          <span class="rec-pb-count"></span>
+        </div>
         <span class="rec-pb-gap" title="Inter-item gap (seconds) — click ± or tap the value to type">
           <button type="button" class="rec-pb-gap-dec" aria-label="Decrease gap">−</button>
           <span class="rec-pb-gap-val" tabindex="0" role="button" title="Tap to set gap">30s</span>
@@ -9890,6 +10509,52 @@ function _renderPlayingBanner(it, idx, total) {
   let $w = $('#recPlayingWord')
   if (!$w.length) $w = $('<div id="recPlayingWord"></div>').appendTo('body')
   $w.text(it.word || '')
+}
+
+// Drain the progress bar from full → empty over `ms`, visually signalling
+// the remaining inter-item gap time. The bar gets a `.gap` class so it
+// shows in a warm color (vs the green clip-progress fill) and the count
+// element switches to a "next-up" hint while the gap is running.
+let _gapCountdownTimerId = null
+function _startGapCountdown(ms) {
+  _stopGapCountdown()
+  const $banner = $('#recPlayingBanner')
+  if (!$banner.length) return
+  const $bar   = $banner.find('.rec-pb-bar').addClass('gap')
+  const $count = $banner.find('.rec-pb-count')
+  // Cache the original count text so we can put it back when the gap ends.
+  if ($count.length) $count.data('preGapText', $count.text())
+  const begin = Date.now()
+  let lastTick = begin
+  let remaining = ms
+  $bar.css('width', '100%')
+  const queue = window._recPlayQueue || []
+  const i = (window._recPlayIndex == null) ? 0 : window._recPlayIndex
+  const nextIdx = (i + 1 < queue.length) ? (i + 1) : 0
+  _gapCountdownTimerId = setInterval(() => {
+    if (!window._playingRecording) { _stopGapCountdown(); return }
+    if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) { _stopGapCountdown(); return }
+    const now = Date.now()
+    const elapsed = now - lastTick
+    lastTick = now
+    if (!window._recPlayPaused) remaining -= elapsed
+    const pct = Math.max(0, Math.min(100, (remaining / ms) * 100))
+    $bar.css('width', pct + '%')
+    const secsLeft = Math.max(0, Math.ceil(remaining / 1000))
+    if ($count.length) $count.text(`next in ${secsLeft}s · ${nextIdx + 1}/${queue.length}`)
+    if (remaining <= 0) _stopGapCountdown()
+  }, 200)
+}
+function _stopGapCountdown() {
+  if (_gapCountdownTimerId) { clearInterval(_gapCountdownTimerId); _gapCountdownTimerId = null }
+  const $banner = $('#recPlayingBanner')
+  if (!$banner.length) return
+  $banner.find('.rec-pb-bar').removeClass('gap')
+  const $count = $banner.find('.rec-pb-count')
+  if ($count.length) {
+    const pre = $count.data('preGapText')
+    if (pre != null) $count.text(pre)
+  }
 }
 
 function _updatePlayingProgress(timeStart, timeEnd) {
@@ -10099,7 +10764,44 @@ function _shuffleQueue(q) {
 // We key items by (recName, st, w, id, lineIndex) rather than array index
 // so playlist reorders / inserts between sessions don't mis-resolve to the
 // wrong item. Items deleted or disabled since are dropped on reconstitute.
+// Storage layout: { [playlistName]: { play?: <entry>, practice?: <entry> } }
+// Each entry: { recName, st, w, idx, id, lineIndex, mode, queueKeys, queuePos, ts }
+// Two entries per playlist (play + practice) — so resuming Play vs Practice
+// on the same playlist tracks independent positions. Legacy (single object)
+// shape is migrated on first load.
 const REC_LAST_PLAYED_KEY = 'cupitor:recLastPlayed'
+function _loadLastPlayedMap() {
+  if (window._recLastPlayedMap) return window._recLastPlayedMap
+  try {
+    const raw = localStorage.getItem(REC_LAST_PLAYED_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object') {
+        // Legacy: a single cursor object with .recName at the top level.
+        // Migrate into the new map shape, keyed by recName + mode.
+        if (parsed.recName) {
+          const m = {}
+          const mode = parsed.mode === 'practice' ? 'practice' : 'play'
+          m[parsed.recName] = {}
+          m[parsed.recName][mode] = parsed
+          window._recLastPlayedMap = m
+          try { localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(m)) } catch (_) {}
+          return m
+        }
+        window._recLastPlayedMap = parsed
+        return parsed
+      }
+    }
+  } catch (_) {}
+  window._recLastPlayedMap = {}
+  return window._recLastPlayedMap
+}
+function _saveLastPlayedMap(map) {
+  try {
+    if (!map || !Object.keys(map).length) localStorage.removeItem(REC_LAST_PLAYED_KEY)
+    else localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(map))
+  } catch (_) {}
+}
 function _setLastPlayed(it, mode, pos) {
   if (!it) return
   // Ad-hoc queues built from starred lines have no recording origin
@@ -10107,28 +10809,37 @@ function _setLastPlayed(it, mode, pos) {
   // resumable recording-session target — starred-lines sessions aren't
   // resumable as "playlists" by design.
   if (!it._recName) return
-  const prev = window._recLastPlayed || {}
-  window._recLastPlayed = {
+  const map = _loadLastPlayedMap()
+  if (!map[it._recName]) map[it._recName] = {}
+  const m = (mode === 'practice') ? 'practice' : 'play'
+  const prev = map[it._recName][m] || {}
+  map[it._recName][m] = {
     ...prev,
     recName: it._recName, st: it._st, w: it._w, idx: it._idx,
     id: it.id, lineIndex: it.lineIndex,
-    mode: mode || prev.mode || 'play',
-    queuePos: (typeof pos === 'number') ? pos : prev.queuePos
+    mode: m,
+    queuePos: (typeof pos === 'number') ? pos : prev.queuePos,
+    ts: prev.ts || 0  // not bumped on per-item ticks; updated by _saveQueueOrder at session start
   }
-  try { localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(window._recLastPlayed)) } catch (_) {}
+  _saveLastPlayedMap(map)
 }
+// Compatibility shim — some callers (review-dialog highlight, YT-error
+// handler) just want "any last-played cursor for the active playlist". Pick
+// the newer of (play, practice) for that playlist.
 function _loadLastPlayed() {
-  if (window._recLastPlayed) return window._recLastPlayed
-  try {
-    const raw = localStorage.getItem(REC_LAST_PLAYED_KEY)
-    if (raw) window._recLastPlayed = JSON.parse(raw)
-  } catch (_) {}
-  return window._recLastPlayed || null
+  const map = _loadLastPlayedMap()
+  const cur = window._recording && window._recording.currentName
+  if (!cur || !map[cur]) return null
+  const p = map[cur].play, q = map[cur].practice
+  if (p && q) return ((p.ts || 0) >= (q.ts || 0)) ? p : q
+  return p || q || null
 }
 
 // Called once when a fresh play/practice session starts. Snapshots the
 // queue order (as identity tuples) and resets queuePos to 0 so subsequent
-// _setLastPlayed updates have a queue to anchor against.
+// _setLastPlayed updates have a queue to anchor against. Stored under the
+// ACTIVE playlist's name + the chosen mode, so the same playlist tracks
+// independent positions in Play vs Practice.
 function _saveQueueOrder(queue, mode) {
   if (!Array.isArray(queue) || !queue.length) return
   const keys = []
@@ -10140,14 +10851,26 @@ function _saveQueueOrder(queue, mode) {
     })
   }
   if (!keys.length) return
-  const prev = window._recLastPlayed || {}
-  window._recLastPlayed = {
-    ...prev,
-    mode: mode || prev.mode || 'play',
+  const recName = (window._recording && window._recording.currentName) || queue[0]._recName
+  const map = _loadLastPlayedMap()
+  if (!map[recName]) map[recName] = {}
+  const m = (mode === 'practice') ? 'practice' : 'play'
+  map[recName][m] = {
+    ...(map[recName][m] || {}),
+    mode: m,
     queueKeys: keys,
-    queuePos: 0
+    queuePos: 0,
+    ts: (map[recName][m] && map[recName][m].ts) || 1   // bumped below
   }
-  try { localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(window._recLastPlayed)) } catch (_) {}
+  // Hand-roll a monotonic timestamp so picking "newest" across modes works
+  // without relying on Date.now (which is fine in browsers, but kept
+  // deterministic-ish in case the harness ever blocks it).
+  let maxTs = 0
+  Object.values(map).forEach(byMode => {
+    Object.values(byMode || {}).forEach(e => { if (e && e.ts > maxTs) maxTs = e.ts })
+  })
+  map[recName][m].ts = maxTs + 1
+  _saveLastPlayedMap(map)
 }
 
 // Reverse of _saveQueueOrder: rebuild a live queue from the saved identity
@@ -10181,19 +10904,20 @@ function _reconstituteQueue(keys) {
 // mode only shapes the prompt label — the caller chooses which mode to
 // dispatch (Play All / Practice), so the same queue can be resumed in
 // either mode.
-function _maybeResumeStartItem() {
-  const lp = _loadLastPlayed()
+function _maybeResumeStartItem(mode) {
   const cur = window._recording && window._recording.currentName
-  if (!lp || !lp.recName || lp.recName !== cur) return null
-  if (!window._recordings || !window._recordings[lp.recName]) return null
-  if (!Array.isArray(lp.queueKeys) || !lp.queueKeys.length) return null
+  if (!cur) return null
+  if (!window._recordings || !window._recordings[cur]) return null
+  const m = (mode === 'practice') ? 'practice' : 'play'
+  const map = _loadLastPlayedMap()
+  const lp = map[cur] && map[cur][m]
+  if (!lp || !Array.isArray(lp.queueKeys) || !lp.queueKeys.length) return null
   const live = _reconstituteQueue(lp.queueKeys)
   if (!live.length) return null
   const pos = Math.min(Math.max(0, lp.queuePos || 0), live.length - 1)
-  const modeLabel = lp.mode === 'practice' ? 'practice' : 'play'
   const remaining = live.length - pos
   const resume = confirm(
-    `Resume your last ${modeLabel} session in "${lp.recName}"?\n\n` +
+    `Resume your last ${m} session in "${cur}"?\n\n` +
     `${remaining} of ${live.length} item(s) remaining (same order).\n\n` +
     `OK = continue from where you left off\n` +
     `Cancel = start fresh (re-shuffles if shuffle is on)`
@@ -10218,7 +10942,8 @@ function handleYoutubePlayerError(code) {
   if (!window._playingRecording) return            // only nag during playback
   if (!YT_UNAVAILABLE_ERROR_CODES.has(Number(code))) return
   const it = window._recPlayCurrentItem
-  const vid = (it && it.id) || (window._recLastPlayed && window._recLastPlayed.id)
+  const lp = _loadLastPlayed()
+  const vid = (it && it.id) || (lp && lp.id)
   if (!vid) return
   // Prompt at most once per video per playback session.
   if (window._recPlayErrorPromptedFor === vid) return
@@ -10298,10 +11023,23 @@ async function playRecording(opts) {
   // display:none here. Doing so would leave the panel stuck-hidden after the
   // user closes playback, since the inline style outlives the body class.
   // (loadYoutubeVideo's re-show is already guarded by _playingRecording.)
-  if (!$('#recPlayingStopBtn').length) {
-    $(`<button id="recPlayingStopBtn" type="button" title="Stop playback (Esc)" aria-label="Stop playback">
+  if (!$('#recPlayingQueueBtn').length) {
+    // Sits in the middle of the transport row where the old Stop button
+    // used to live. The real Close (✕) is now in the top-right corner.
+    $(`<button id="recPlayingQueueBtn" type="button" title="Show playback queue" aria-label="Show playback queue">
         <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <rect x="3" y="3" width="10" height="10" rx="1.5"/>
+          <rect x="2" y="3"  width="10" height="2" rx="1"/>
+          <rect x="2" y="7"  width="10" height="2" rx="1"/>
+          <rect x="2" y="11" width="10" height="2" rx="1"/>
+        </svg>
+      </button>`)
+      .appendTo('body')
+      .on('click', openPlayingQueueDialog)
+  }
+  if (!$('#recPlayingCloseBtn').length) {
+    $(`<button id="recPlayingCloseBtn" type="button" title="Stop playback" aria-label="Stop playback">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
         </svg>
       </button>`)
       .appendTo('body')
@@ -10356,12 +11094,52 @@ async function playRecording(opts) {
       .on('click', cycleRecPlayLoopMode)
     _refreshRecPlayModeBtns()
   }
+  // Minimize button — collapses the play UI so the user can interact with
+  // the main page while the session is paused. Restore re-pins everything.
+  if (!$('#recPlayingMinimizeBtn').length) {
+    $(`<button id="recPlayingMinimizeBtn" type="button" title="Minimize" aria-label="Minimize">⌄</button>`)
+      .appendTo('body')
+      .on('click', minimizePlayingRecording)
+  }
+  if (!$('#recPlayingRestorePill').length) {
+    $(`<div id="recPlayingRestorePill" style="display:none;">
+        <span class="rec-pill-count"></span>
+        <button type="button" class="rec-pill-restore" aria-label="Restore playback" title="Restore">⌃</button>
+        <button type="button" class="rec-pill-close" aria-label="Stop playback" title="Stop">✕</button>
+      </div>`)
+      .appendTo('body')
+      .on('click', '.rec-pill-restore', restorePlayingRecording)
+      .on('click', '.rec-pill-close', stopPlayingRecording)
+  }
   _refreshRecPlayModeBtns()
   window._recPlayPaused = false
-  $('body').addClass('rec-playing').removeClass('rec-paused')
+  window._recPlayMinimized = false
+  // Gap-guard: a single shared interval running for the whole session
+  // that re-pauses the YT player whenever it slips back to PLAYING during
+  // a gap window. The per-item loop arms/disarms via window._recPlayGapGuard.
+  // Bug being fixed: when a video failed to start within _waitYTUntilEnd's
+  // load-grace, _waitYTUntilEnd resolved but the player kept loading; when
+  // it finally resolved, autoplay kicked in and audio bled through the
+  // entire inter-item gap until the next playMediaSlice() reset it.
+  if (!window._recPlayGapGuardId) {
+    window._recPlayGapGuard = false
+    window._recPlayGapGuardId = setInterval(() => {
+      if (!window._recPlayGapGuard) return
+      if (window._recPlayPaused) return
+      try {
+        const p = window.ytPlayer
+        // YT.PlayerState.PLAYING === 1
+        if (p && typeof p.getPlayerState === 'function' && p.getPlayerState() === 1) {
+          p.pauseVideo && p.pauseVideo()
+        }
+      } catch (_) {}
+    }, 200)
+  }
+  $('body').addClass('rec-playing').removeClass('rec-paused rec-playing-minimized')
 
   window._playingRecording = true
   window._recNavRequest = null
+  window._recNavGotoIndex = null
   window._recPlaySlowdown = false
   // Per-session "video unavailable" prompt tracking (see
   // handleYoutubePlayerError). Reset so a fresh session can re-prompt.
@@ -10419,10 +11197,16 @@ async function playRecording(opts) {
         } catch (e) { console.warn('playRecording: manual YT cue failed', it, e) }
       }
       // Hold for the inter-item gap so the user reads the text, honoring
-      // pause / stop. Then handle prev/next/loop the same way video items
-      // do, except we skip the trailing _sleepRespectingPause (the hold
+      // pause / stop. The gap-countdown progress bar shows time-until-next.
+      // Then handle prev/next/goto/loop the same way video items do,
+      // except we skip the trailing _sleepRespectingPause (the hold
       // already consumed the gap).
-      if (window._playingRecording) await _sleepRespectingPause(currentGapMs())
+      if (window._playingRecording) {
+        const _gapMs = currentGapMs()
+        if (_gapMs > 0) _startGapCountdown(_gapMs)
+        await _sleepRespectingPause(_gapMs)
+        _stopGapCountdown()
+      }
       if (window._recNavRequest === 'prev') {
         window._recNavRequest = null
         i = (i > 0) ? (i - 1) : (_curLooping() ? queue.length - 1 : 0)
@@ -10433,6 +11217,11 @@ async function playRecording(opts) {
         window._recNavRequest = null
         i = (i + 1 < queue.length) ? (i + 1) : (_curLooping() ? 0 : queue.length)
         continue
+      }
+      if (Number.isInteger(window._recNavGotoIndex)) {
+        const g = window._recNavGotoIndex
+        window._recNavGotoIndex = null
+        if (g >= 0 && g < queue.length) { i = g; continue }
       }
       if (_curLoop() === 'one') continue
       const willHaveNext = (i + 1 < queue.length) || _curLooping()
@@ -10465,6 +11254,9 @@ async function playRecording(opts) {
     // deterministic so we deliberately don't drive playback via the live
     // DOM. playMediaSlice loads/seeks the YouTube player with the
     // recorded url + timeStart, which is all we need.
+    // Lift the gap-guard before playing — without this the guard would
+    // immediately re-pause the player we just asked to start.
+    window._recPlayGapGuard = false
     const _src = (it.source || '').toLowerCase() === 'youtube' ? 'YouTube' : (it.source || 'YouTube')
     try {
       await playMediaSlice(it.id, it.timeStart, it.timeEnd, _src)
@@ -10492,9 +11284,15 @@ async function playRecording(opts) {
       try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
       window._recPlaySlowdown = false
     }
+    // Clip is done — arm the gap-guard so a slow-loaded clip that finally
+    // resolves AFTER we bailed (or any YT autoplay weirdness) doesn't
+    // bleed audio through the inter-item gap. Cleared right before the
+    // next playMediaSlice() above.
+    window._recPlayGapGuard = true
 
-    // Honour any prev/next request queued while this item was playing.
-    // Prev re-plays the previous item with slowdown; next advances forward.
+    // Honour any prev/next/goto request queued while this item was playing.
+    // Prev re-plays the previous item with slowdown; next advances forward;
+    // goto jumps to an arbitrary index (set by the queue dialog).
     // Wraps around in any looping mode; stays clamped otherwise.
     if (window._recNavRequest === 'prev') {
       window._recNavRequest = null
@@ -10507,16 +11305,29 @@ async function playRecording(opts) {
       i = (i + 1 < queue.length) ? (i + 1) : (_curLooping() ? 0 : queue.length)
       continue
     }
+    if (Number.isInteger(window._recNavGotoIndex)) {
+      const g = window._recNavGotoIndex
+      window._recNavGotoIndex = null
+      if (g >= 0 && g < queue.length) { i = g; continue }
+    }
 
     // Loop=one: replay this same item indefinitely (until prev/next/stop).
     if (_curLoop() === 'one') {
-      if (window._playingRecording) await _sleepRespectingPause(currentGapMs())
+      if (window._playingRecording) {
+        const _gapMs = currentGapMs()
+        if (_gapMs > 0) _startGapCountdown(_gapMs)
+        await _sleepRespectingPause(_gapMs)
+        _stopGapCountdown()
+      }
       continue
     }
     // Natural advance — gap between items, including before a wrap.
     const willHaveNext = (i + 1 < queue.length) || _curLooping()
     if (willHaveNext && window._playingRecording) {
-      await _sleepRespectingPause(currentGapMs())
+      const _gapMs = currentGapMs()
+      if (_gapMs > 0) _startGapCountdown(_gapMs)
+      await _sleepRespectingPause(_gapMs)
+      _stopGapCountdown()
     }
     i++
   }
@@ -10525,7 +11336,10 @@ async function playRecording(opts) {
   window._recPlaySlowdown = false
   window._recNavRequest = null
   window._recPlayCurrentItem = null
-  $('body').removeClass('rec-playing rec-paused')
+  window._recPlayMinimized = false
+  window._recPlayGapGuard = false
+  if (window._recPlayGapGuardId) { clearInterval(window._recPlayGapGuardId); window._recPlayGapGuardId = null }
+  $('body').removeClass('rec-playing rec-paused rec-playing-minimized')
   $('#recPlayingBanner').remove()
   $('#recPlayingSubs').remove()
   $('#recPlayingWord').remove()
@@ -10534,8 +11348,11 @@ async function playRecording(opts) {
   $('#recPlayingNextBtn').remove()
   $('#recPlayingShuffleBtn').remove()
   $('#recPlayingLoopBtn').remove()
+  $('#recPlayingMinimizeBtn').remove()
+  $('#recPlayingCloseBtn').remove()
+  $('#recPlayingQueueBtn').remove()
+  $('#recPlayingRestorePill').remove()
   $('#recPlayNavToast').remove()
-  $('#recPlayingStopBtn').remove()
   try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
 }
@@ -10630,6 +11447,100 @@ function togglePlayingRecordingPause() {
   }
 }
 
+// Open a modeless dialog listing the queue in play order with the current
+// item highlighted. Click ▶ on any row to jump there mid-session — the loop
+// reads window._recNavGotoIndex on its next iteration boundary and dispatches.
+function openPlayingQueueDialog() {
+  const queue = window._recPlayQueue || []
+  if (!queue.length) { alert('Queue is empty.'); return }
+  let $dlg = $('#playingQueueDialog')
+  if (!$dlg.length) $dlg = $('<div id="playingQueueDialog"></div>').appendTo('body')
+  const curIdx = (window._recPlayIndex == null) ? -1 : window._recPlayIndex
+  let html = '<div class="pqd-list">'
+  queue.forEach((it, i) => {
+    const isCur = i === curIdx
+    const label = it.manual
+      ? `📝 ${(it.source || '').trim() || '(empty)'}`
+      : `${it.id} · ${it.timeStart}s–${it.timeEnd}s`
+    const sub = it.manual
+      ? ((it.target || '').trim() || '')
+      : (it._st && it._w ? `"${it._st}" → ${it._w}` : '')
+    html += `<div class="pqd-row${isCur ? ' pqd-current' : ''}" data-idx="${i}">
+      <span class="pqd-num">${i + 1}</span>
+      <div class="pqd-body">
+        <div class="pqd-text">${_.escape(label)}</div>
+        ${sub ? `<div class="pqd-sub">${_.escape(sub)}</div>` : ''}
+      </div>
+      <button type="button" class="pqd-play" data-idx="${i}" title="Play from here" aria-label="Play from here">▶</button>
+    </div>`
+  })
+  html += '</div>'
+  $dlg.html(html)
+
+  const jumpTo = (i) => {
+    if (!Number.isInteger(i) || i < 0 || i >= queue.length) return
+    window._recNavGotoIndex = i
+    try { $dlg.dialog('close') } catch (_) {}
+  }
+  $dlg.off('click', '.pqd-play').on('click', '.pqd-play', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    jumpTo(parseInt($(this).data('idx'), 10))
+  })
+  $dlg.off('click', '.pqd-row').on('click', '.pqd-row', function (e) {
+    if ($(e.target).closest('.pqd-play').length) return
+    jumpTo(parseInt($(this).data('idx'), 10))
+  })
+
+  const opts = {
+    title: `Playback queue (${queue.length} item${queue.length === 1 ? '' : 's'})`,
+    width: Math.min(560, $(window).width() - 32),
+    height: Math.min(560, $(window).height() - 60),
+    modal: false,
+    autoOpen: true
+  }
+  if ($dlg.hasClass('ui-dialog-content')) $dlg.dialog('option', opts).dialog('open')
+  else $dlg.dialog(opts)
+  // Force the wrapper above the play overlay (banner/transport sit at
+  // 100002–100004). CSS handles this via :has() but not every browser
+  // supports it yet, so set inline as a fallback.
+  try { $dlg.dialog('widget').css('z-index', 100010) } catch (_) {}
+  // Scroll the current row into view.
+  setTimeout(() => {
+    const el = $dlg.find('.pqd-current')[0]
+    if (el && el.scrollIntoView) try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }) } catch (_) {}
+  }, 80)
+}
+window.openPlayingQueueDialog = openPlayingQueueDialog
+
+// Minimize the play UI so the user can interact with the main page while
+// the session is paused. The playback loop keeps running but
+// _sleepRespectingPause + _waitYTUntilEnd respect _recPlayPaused, so they
+// won't advance until restore. The restore pill is the single visible
+// hook back into the session.
+function minimizePlayingRecording() {
+  if (!window._playingRecording) return
+  window._recPlayMinimized = true
+  // Pause playback so audio/video doesn't keep playing while the user is
+  // doing something else on the main page.
+  if (!window._recPlayPaused) togglePlayingRecordingPause()
+  $('body').removeClass('rec-playing').addClass('rec-playing-minimized')
+  const cur = window._recPlayCurrentItem
+  const queue = window._recPlayQueue || []
+  const idx = (window._recPlayIndex == null) ? 0 : window._recPlayIndex
+  $('#recPlayingRestorePill .rec-pill-count').text(`${idx + 1}/${queue.length}`)
+  $('#recPlayingRestorePill').show()
+}
+function restorePlayingRecording() {
+  if (!window._playingRecording) return
+  window._recPlayMinimized = false
+  $('body').addClass('rec-playing').removeClass('rec-playing-minimized')
+  $('#recPlayingRestorePill').hide()
+  // Don't auto-resume — leave it paused so the user can scrub / read before
+  // continuing. They can hit Pause/Resume button (▶) to actually play.
+}
+window.minimizePlayingRecording = minimizePlayingRecording
+window.restorePlayingRecording = restorePlayingRecording
+
 // Sleep `ms` milliseconds, but stretch the wall-clock wait whenever
 // the user has paused playback so the inter-item gap doesn't tick down
 // while paused. Bails out if playback is stopped.
@@ -10639,6 +11550,11 @@ function _sleepRespectingPause(ms) {
     let lastTick = Date.now()
     const id = setInterval(() => {
       if (!window._playingRecording) { clearInterval(id); return resolve() }
+      // Bail the gap-sleep on any nav request so jumping via the queue
+      // dialog or prev/next feels instant rather than waiting out the gap.
+      if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) {
+        clearInterval(id); return resolve()
+      }
       const now = Date.now()
       const elapsed = now - lastTick
       lastTick = now
@@ -10651,7 +11567,11 @@ function _sleepRespectingPause(ms) {
 function stopPlayingRecording() {
   window._playingRecording = false
   window._recPlayPaused = false
-  $('body').removeClass('rec-playing rec-paused')
+  window._recPlayMinimized = false
+  window._recPlayGapGuard = false
+  if (window._recPlayGapGuardId) { clearInterval(window._recPlayGapGuardId); window._recPlayGapGuardId = null }
+  try { _stopGapCountdown() } catch (_) {}
+  $('body').removeClass('rec-playing rec-paused rec-playing-minimized')
   $('#recPlayingBanner').remove()
   $('#recPlayingSubs').remove()
   $('#recPlayingWord').remove()
@@ -10660,6 +11580,8 @@ function stopPlayingRecording() {
   $('#recPlayingNextBtn').remove()
   $('#recPlayingShuffleBtn').remove()
   $('#recPlayingLoopBtn').remove()
+  $('#recPlayingMinimizeBtn').remove()
+  $('#recPlayingRestorePill').remove()
   $('#recPlayNavToast').remove()
   try { window.speechSynthesis && window.speechSynthesis.cancel() } catch (_) {}
   try {
@@ -10717,7 +11639,12 @@ function openPracticeMode(opts) {
   }
   window._practiceCards = queue
   window._practiceIdx = startIdx
-  if (window._practiceFrontIsSource == null) window._practiceFrontIsSource = true
+  // Restore direction toggle from persisted settings on first entry of the
+  // session; subsequent re-opens keep whatever the user toggled to.
+  if (window._practiceFrontIsSource == null) {
+    const stored = window._appSettings && window._appSettings.practiceFrontIsSource
+    window._practiceFrontIsSource = (stored == null) ? true : !!stored
+  }
   window._practiceCtxBefore = 0
   window._practiceCtxAfter = 0
   window._practicePlaybackRate = 1
@@ -10740,9 +11667,32 @@ function openPracticeMode(opts) {
     $p = $(`<div id="practiceMode">
       <div class="practice-topbar">
         <span class="practice-count"></span>
-        <button type="button" class="practice-dir" title="Flip which language is shown first"></button>
+        <button type="button" class="practice-info" aria-label="Show item details" title="Show item details" aria-expanded="false">ℹ</button>
+        <button type="button" class="practice-settings" aria-label="Practice settings" title="Reveal mode / direction / delete" aria-expanded="false">⋯</button>
         <button type="button" class="practice-minimize" aria-label="Minimize" title="Minimize">⌄</button>
         <button type="button" class="practice-close" aria-label="Close practice" title="Close">✕</button>
+      </div>
+      <div class="practice-info-panel" style="display:none;">
+        <div class="practice-info-head"></div>
+        <div class="practice-info-meta"></div>
+      </div>
+      <div class="practice-settings-panel" style="display:none;">
+        <label class="practice-settings-row">
+          <span class="practice-settings-lbl">Reveal</span>
+          <select class="practice-reveal-select">
+            <option value="flip">Flip to target</option>
+            <option value="both">Show both</option>
+            <option value="hide">Hide until click</option>
+          </select>
+        </label>
+        <div class="practice-settings-row">
+          <span class="practice-settings-lbl">Direction</span>
+          <button type="button" class="practice-dir" title="Flip which language is shown first"></button>
+        </div>
+        <div class="practice-settings-row">
+          <span class="practice-settings-lbl">Item</span>
+          <button type="button" class="practice-delete" aria-label="Delete this item from the playlist" title="Delete this card from the playlist">🗑 Delete this card</button>
+        </div>
       </div>
       <div class="practice-card">
         <div class="practice-flipper">
@@ -10780,6 +11730,18 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-restore-close', closePracticeMode)
     $p.on('click', '.practice-minimize', minimizePracticeMode)
     $p.on('click', '.practice-restore-btn', restorePracticeMode)
+    $p.on('click', '.practice-delete', _deleteCurrentPracticeCard)
+    $p.on('click', '.practice-info', _togglePracticeInfoPanel)
+    $p.on('click', '.practice-settings', _togglePracticeSettingsPanel)
+    $p.on('change', '.practice-reveal-select', function () {
+      const v = String($(this).val() || 'flip')
+      if (['flip', 'both', 'hide'].indexOf(v) < 0) return
+      if (!window._appSettings) window._appSettings = {}
+      window._appSettings.practiceRevealMode = v
+      try { saveAppSettings() } catch (_) {}
+      // Re-render so the reveal-mode change takes effect on the visible card.
+      _renderPracticeCard()
+    })
     $p.on('click', '.practice-prev', () => practiceNav(-1))
     $p.on('click', '.practice-next', () => practiceNav(1))
     $p.on('click', '.practice-reveal', revealPracticeCard)
@@ -10871,6 +11833,7 @@ function closePracticeMode() {
   window._practiceMinimized = false
   window._practiceClipToken = (window._practiceClipToken || 0) + 1
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
+  try { _stopManualAudioPreview() } catch (_) {}
   if (window.visualViewport && window._practiceViewportWired) {
     window.visualViewport.removeEventListener('resize', _onPracticeViewportChange)
     window.visualViewport.removeEventListener('scroll', _onPracticeViewportChange)
@@ -10981,8 +11944,110 @@ function _onPracticeViewportChange() {
   $p.find('.practice-nav').css('bottom', liftNav)
 }
 window._onPracticeViewportChange = _onPracticeViewportChange
+// Delete the card currently shown in practice from its source playlist.
+// Removes the matching item via _removeQueueItem (so virtual playlists and
+// loop='all' cross-playlist queues all work), drops it from the live
+// practice queue, and advances to the next card (or closes practice if the
+// queue is now empty). For manual cards with an attached local audio
+// recording (mediaUrl=file://…), deletes the underlying audio file via the
+// AudioBridge so it doesn't leak in the host app's storage. Playlist-side
+// SRT/index files are NOT touched — those are managed via the Manage
+// dialogs, not by card removal.
+function _deleteCurrentPracticeCard() {
+  const cards = window._practiceCards
+  const idx = window._practiceIdx
+  if (!Array.isArray(cards) || idx < 0 || idx >= cards.length) return
+  const it = cards[idx]
+  if (!it || !it._recName) return
+  const isManual = !!it.manual
+  const label = isManual
+    ? `"${(it.source || '').slice(0, 40)}${(it.source || '').length > 40 ? '…' : ''}"`
+    : `${it.id} @ ${it.timeStart}s–${it.timeEnd}s`
+  if (!confirm(`Delete this card (${label}) from "${it._recName}"?\n\nThis cannot be undone from the UI.`)) return
+  // Capture the local-audio URL BEFORE removing the item — _removeQueueItem
+  // mutates the playlist, after which we couldn't tell whether the deleted
+  // card had its own audio. Only act on file:// urls; YouTube / generic
+  // links don't have a local-storage counterpart to clean up.
+  const audioUrl = (isManual && it.mediaUrl && _isAudioMediaUrl(it.mediaUrl)) ? it.mediaUrl : null
+  const ok = _removeQueueItem(it)
+  if (!ok) { alert('Could not delete — the item is no longer in the playlist (maybe already removed).'); return }
+  if (audioUrl) {
+    deleteManualAudio(audioUrl).catch(e => console.warn('deleteManualAudio failed for', audioUrl, e))
+  }
+  // Drop from the in-memory queue too, then re-render. If we deleted the
+  // last card, fall back one position so we don't render an empty slot.
+  cards.splice(idx, 1)
+  if (!cards.length) { closePracticeMode(); return }
+  if (window._practiceIdx >= cards.length) window._practiceIdx = cards.length - 1
+  // Reset per-card overrides like practiceNav does, since we're effectively
+  // showing a fresh card.
+  window._practiceCtxBefore = 0
+  window._practiceCtxAfter = 0
+  window._practicePlaybackRate = 1
+  window._practiceFlipped = false
+  _renderPracticeCard()
+}
+
+function _togglePracticeInfoPanel() {
+  const $p = $('#practiceMode')
+  const $panel = $p.find('.practice-info-panel')
+  const $btn = $p.find('.practice-info')
+  const open = !$panel.is(':visible')
+  $panel.toggle(open)
+  $btn.attr('aria-expanded', open ? 'true' : 'false').toggleClass('active', open)
+  if (open) {
+    // Two slide-down panels share the same topbar — close the other one
+    // so they don't stack and eat the card area on small screens.
+    $p.find('.practice-settings-panel').hide()
+    $p.find('.practice-settings').attr('aria-expanded', 'false').removeClass('active')
+    _updatePracticeInfo()
+  }
+}
+function _togglePracticeSettingsPanel() {
+  const $p = $('#practiceMode')
+  const $panel = $p.find('.practice-settings-panel')
+  const $btn = $p.find('.practice-settings')
+  const open = !$panel.is(':visible')
+  $panel.toggle(open)
+  $btn.attr('aria-expanded', open ? 'true' : 'false').toggleClass('active', open)
+  if (open) {
+    // Close the sibling info panel; seed the reveal select with current setting.
+    $p.find('.practice-info-panel').hide()
+    $p.find('.practice-info').attr('aria-expanded', 'false').removeClass('active')
+    const mode = (window._appSettings && window._appSettings.practiceRevealMode) || 'flip'
+    $panel.find('.practice-reveal-select').val(mode)
+  }
+}
+
+// Populate the practice info panel with the current card's metadata —
+// mirrors what the play-mode banner shows so the user always knows where
+// the current item came from (recording name, video id + timestamps for
+// captured clips, source/target + media link for manual cards).
+function _updatePracticeInfo() {
+  const $p = $('#practiceMode')
+  if (!$p.length) return
+  const cards = window._practiceCards || []
+  const it = cards[window._practiceIdx]
+  if (!it) return
+  const $head = $p.find('.practice-info-head')
+  const $meta = $p.find('.practice-info-meta')
+  if (it.manual) {
+    const linkLbl = it.mediaUrl ? ` · ${it.mediaKind === 'youtube' ? '▶ YouTube' : '🔗 link'}` : ''
+    $head.text(`📝 Manual — ${it._recName || '?'}`)
+    $meta.text(`${it.source || '(empty)'}  →  ${it.target || '(empty)'}${linkLbl}`)
+  } else {
+    $head.text(`${it._recName || '?'} — "${it._st || ''}" → ${it._w || ''}`)
+    $meta.text(`${it.id} · ${it.source || '?'} · ${it.timeStart}s – ${it.timeEnd}s`)
+  }
+}
+
 function togglePracticeDir() {
   window._practiceFrontIsSource = !window._practiceFrontIsSource
+  // Persist so the next session opens with the user's preferred direction.
+  if (window._appSettings) {
+    window._appSettings.practiceFrontIsSource = window._practiceFrontIsSource
+    try { saveAppSettings() } catch (_) {}
+  }
   _renderPracticeCard()
 }
 function revealPracticeCard() {
@@ -11092,6 +12157,10 @@ async function _renderPracticeCard() {
   // the freshly-cued clip.
   window._practiceClipToken = (window._practiceClipToken || 0) + 1
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
+  // Any manual-audio preview is tied to the *previous* card's media-link
+  // button (which is about to be removed and rebuilt). Stop it so the clip
+  // doesn't keep playing under the new card.
+  try { _stopManualAudioPreview() } catch (_) {}
   const idx = window._practiceIdx
   const cards = window._practiceCards || []
   const it = cards[idx]
@@ -11100,6 +12169,8 @@ async function _renderPracticeCard() {
   // next Play All / Practice click on this playlist offers to resume here.
   // `idx` advances queuePos so the saved queue tracks where we are.
   try { _setLastPlayed(it, 'practice', idx) } catch (_) {}
+  // Keep the info panel in sync as the user navigates cards, if it's open.
+  if ($p.find('.practice-info-panel').is(':visible')) _updatePracticeInfo()
   const srcCode = ((typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv').toUpperCase()
   const frontIsSource = window._practiceFrontIsSource
   const mode = (window._appSettings && window._appSettings.practiceRevealMode) || 'flip'
@@ -11185,15 +12256,24 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   // alongside prev/next where the hidden play-clip button used to be.
   $p.find('.practice-media-link').remove()
   if (it.mediaUrl) {
-    const isYT = it.mediaKind === 'youtube' && it.mediaVideoId
-    const $btn = $(`<button type="button" class="practice-media-link" title="${isYT ? 'Play the linked YouTube video' : 'Open the linked media in a new tab'}" aria-label="Open linked media">${isYT ? '▶' : '🔗'}</button>`)
-    $btn.on('click', (ev) => {
+    const isYT    = it.mediaKind === 'youtube' && it.mediaVideoId
+    const isAudio = it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)
+    const icon    = isYT ? '▶' : (isAudio ? '🎙' : '🔗')
+    const title   = isYT    ? 'Play the linked YouTube video'
+                  : isAudio ? 'Play the recorded audio'
+                  : 'Open the linked media in a new tab'
+    const $btn = $(`<button type="button" class="practice-media-link" title="${title}" aria-label="Open linked media">${icon}</button>`)
+    $btn.on('click', async (ev) => {
       ev.preventDefault(); ev.stopPropagation()
       if (isYT) {
         // Cue into the embedded player at t=0. Don't auto-play (Practice
         // mode is for studying — the user clicks again to play).
         window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
         try { changeMediaIfNeededTo(window.mediaSelected) } catch (_) {}
+      } else if (isAudio) {
+        // Bridge-loaded preview with toggle: click while playing stops it;
+        // navigating away or closing Practice also stops it.
+        _startManualAudioPreview(it.mediaUrl, $btn)
       } else {
         window.open(it.mediaUrl, '_blank', 'noopener')
       }

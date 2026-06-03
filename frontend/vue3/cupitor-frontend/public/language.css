@@ -1918,8 +1918,97 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     border-radius: 50%;
     cursor: pointer;
 }
+#practiceMode .practice-minimize { margin-left: auto; }
 #practiceMode .practice-minimize:hover,
 #practiceMode .practice-close:hover { background: rgba(0,0,0,0.85); }
+#practiceMode .practice-info,
+#practiceMode .practice-settings {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+    border: none;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    border-radius: 50%;
+    cursor: pointer;
+}
+#practiceMode .practice-info.active,
+#practiceMode .practice-settings.active { background: rgba(25, 118, 210, 0.85); }
+#practiceMode .practice-info:hover,
+#practiceMode .practice-settings:hover { background: rgba(0,0,0,0.85); }
+/* Slide-down panels under the topbar. Both info + settings share the same
+   anchor + animation; only one is open at a time (see _togglePracticeInfoPanel
+   / _togglePracticeSettingsPanel). */
+#practiceMode .practice-info-panel,
+#practiceMode .practice-settings-panel {
+    position: fixed;
+    top: 46px;
+    left: 8px;
+    right: 8px;
+    z-index: 100004;
+    background: rgba(33, 33, 33, 0.94);
+    color: #f5f5f5;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+    pointer-events: auto;
+}
+#practiceMode .practice-info-head { font-weight: bold; margin-bottom: 4px; }
+#practiceMode .practice-info-meta { color: #ccc; font-family: monospace; word-break: break-all; }
+#practiceMode.minimized .practice-info-panel,
+#practiceMode.minimized .practice-settings-panel { display: none !important; }
+
+/* Settings-panel rows. Each row is a label + control; rows stack so they
+   read top-to-bottom on the narrow phone width. */
+#practiceMode .practice-settings-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+}
+#practiceMode .practice-settings-row + .practice-settings-row {
+    border-top: 1px solid rgba(255,255,255,0.08);
+}
+#practiceMode .practice-settings-lbl {
+    flex: 0 0 80px;
+    color: #aaa;
+    font-size: 12px;
+}
+#practiceMode .practice-reveal-select {
+    flex: 1;
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.2);
+    padding: 4px 6px;
+    border-radius: 4px;
+    font: inherit;
+}
+/* The dir button + delete button live inside the settings panel now;
+   they need the same baseline visual as the old chip-style buttons but
+   sized to be readable + tappable on phones. */
+#practiceMode .practice-settings-panel .practice-dir {
+    flex: 1;
+    padding: 6px 10px;
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px;
+    cursor: pointer;
+    font: inherit;
+}
+#practiceMode .practice-settings-panel .practice-dir:hover { background: rgba(255,255,255,0.15); }
+#practiceMode .practice-settings-panel .practice-delete {
+    flex: 1;
+    padding: 6px 10px;
+    background: #b71c1c;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font: inherit;
+}
+#practiceMode .practice-settings-panel .practice-delete:hover { background: #d32f2f; }
 /* The card content sits below the fixed video (video bottom ≈ 64px +
    56.25% of min(100vw,900px)). */
 #practiceMode .practice-card {
@@ -2315,12 +2404,65 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 #practiceMode.minimized .practice-nav { display: none; }
 #practiceMode.minimized .practice-restore { display: flex; }
 
-/* Floating Stop-Playback control: always-clickable escape hatch while
-   the page chrome is hidden. Parked just below the YouTube player so
-   it doesn't cover the picture. Player bottom = 64px (top) +
-   min(100vw, 900px) * 9/16 (aspect-ratio 16:9); button top sits 12px
-   under that across viewport widths. */
-#recPlayingStopBtn {
+/* Playback queue dialog — shows the ordered queue with the current item
+   highlighted. Click anywhere on a row (or its ▶) to jump there. */
+#playingQueueDialog .pqd-list { display: flex; flex-direction: column; gap: 4px; }
+#playingQueueDialog .pqd-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #fff;
+}
+#playingQueueDialog .pqd-row:hover { background: #f5f7fa; }
+#playingQueueDialog .pqd-row.pqd-current {
+    background: #e3f2fd;
+    border-color: #90caf9;
+}
+#playingQueueDialog .pqd-num {
+    flex: 0 0 auto;
+    width: 28px;
+    text-align: right;
+    font-family: monospace;
+    font-size: 12px;
+    color: #555;
+}
+#playingQueueDialog .pqd-body { flex: 1; min-width: 0; }
+#playingQueueDialog .pqd-text {
+    font-size: 14px;
+    overflow-wrap: anywhere;
+    color: #222;
+}
+#playingQueueDialog .pqd-sub {
+    font-size: 11px;
+    color: #777;
+    margin-top: 2px;
+}
+#playingQueueDialog .pqd-play {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 50%;
+    background: #1976d2;
+    color: #fff;
+    cursor: pointer;
+    font-size: 14px;
+}
+#playingQueueDialog .pqd-play:hover { background: #1565c0; }
+#playingQueueDialog .pqd-row.pqd-current .pqd-play { background: #2e7d32; }
+/* jQuery UI dialogs default to z-index ~100, but the play overlay sits at
+   100002–100004 (banner, transport, corner buttons). Bump the queue dialog
+   above all of them so it doesn't render behind the banner. */
+.ui-dialog:has(> #playingQueueDialog) { z-index: 100010 !important; }
+
+/* Queue / playlist button: sits in the middle of the transport row where
+   the old Stop button used to live. Stop has moved up to a Close (✕)
+   button in the top-right corner. */
+#recPlayingQueueBtn {
     position: fixed;
     top: calc(76px + min(100vw, 900px) * 0.5625);
     left: 50%;
@@ -2332,16 +2474,16 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     display: none;
     align-items: center;
     justify-content: center;
-    background: #b71c1c;
+    background: #424242;
     color: #fff;
     border: none;
     border-radius: 50%;
     cursor: pointer;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
 }
-body.rec-playing #recPlayingStopBtn { display: inline-flex; }
-#recPlayingStopBtn:hover { background: #d32f2f; }
-#recPlayingStopBtn svg { display: block; }
+body.rec-playing #recPlayingQueueBtn { display: inline-flex; }
+#recPlayingQueueBtn:hover { background: #616161; }
+#recPlayingQueueBtn svg { display: block; }
 
 /* Pause / Resume — sits to the left of the Stop button at the lower edge
    of the YouTube player. Same vertical anchor as #recPlayingStopBtn so
@@ -2393,6 +2535,92 @@ body.rec-paused #recPlayingPauseBtn:hover { background: #388e3c; }
 #recPlayingNextBtn { left: calc(50% + 56px); }
 body.rec-playing #recPlayingPrevBtn,
 body.rec-playing #recPlayingNextBtn { display: inline-flex; }
+
+/* Top-right corner: [Minimize ⌄] [Close ✕]. Both sit above the YT player
+   chrome with a tight gap; banner sits to their left or below. Only
+   visible during normal play (not while minimized). */
+#recPlayingMinimizeBtn,
+#recPlayingCloseBtn {
+    position: fixed;
+    top: 12px;
+    z-index: 100004;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    font-size: 18px;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+#recPlayingMinimizeBtn { right: 56px; background: rgba(0,0,0,0.65); }
+#recPlayingCloseBtn    { right: 12px; background: #b71c1c; }
+body.rec-playing #recPlayingMinimizeBtn,
+body.rec-playing #recPlayingCloseBtn { display: inline-flex; }
+#recPlayingMinimizeBtn:hover { background: rgba(0,0,0,0.85); }
+#recPlayingCloseBtn:hover { background: #d32f2f; }
+#recPlayingCloseBtn svg { display: block; }
+
+/* Restore pill — shown only while play mode is minimized. Compact bar at
+   the bottom of the viewport with the queue cursor and two buttons:
+   ⌃ restore (re-enters play overlay) and ✕ stop (cancels the session). */
+#recPlayingRestorePill {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100005;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 6px 14px;
+    background: rgba(33, 33, 33, 0.94);
+    color: #f5f5f5;
+    border-radius: 24px;
+    font-size: 14px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+body.rec-playing-minimized #recPlayingRestorePill { display: inline-flex; }
+#recPlayingRestorePill .rec-pill-count {
+    font-family: monospace;
+    font-weight: 700;
+    padding-right: 4px;
+}
+#recPlayingRestorePill .rec-pill-restore,
+#recPlayingRestorePill .rec-pill-close {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+}
+#recPlayingRestorePill .rec-pill-restore:hover { background: rgba(255,255,255,0.3); }
+#recPlayingRestorePill .rec-pill-close { background: #b71c1c; }
+#recPlayingRestorePill .rec-pill-close:hover { background: #d32f2f; }
+
+/* While minimized, the play overlay hides itself but the body class is
+   still flipped on (rec-playing-minimized). Make sure the various
+   "show during play" rules don't keep stale UI visible. */
+body.rec-playing-minimized #mediaContainer,
+body.rec-playing-minimized #recPlayingBanner,
+body.rec-playing-minimized #recPlayingWord,
+body.rec-playing-minimized #recPlayingSubs,
+body.rec-playing-minimized #recPlayingQueueBtn,
+body.rec-playing-minimized #recPlayingPauseBtn,
+body.rec-playing-minimized #recPlayingPrevBtn,
+body.rec-playing-minimized #recPlayingNextBtn,
+body.rec-playing-minimized #recPlayingShuffleBtn,
+body.rec-playing-minimized #recPlayingLoopBtn,
+body.rec-playing-minimized #recPlayingMinimizeBtn,
+body.rec-playing-minimized #recPlayingCloseBtn { display: none !important; }
 #recPlayingPrevBtn:hover,
 #recPlayingNextBtn:hover { background: #616161; }
 #recPlayingPrevBtn svg,
@@ -2517,7 +2745,11 @@ body.rec-playing #recPlayingWord { display: block; }
    ℹ expands the head + meta below. */
 #recPlayingBanner {
     position: fixed;
-    top: 16px;
+    /* Pushed down from top:16 so the top-right corner buttons
+       (Minimize / Close) have room. Anchored left so banner spans
+       toward the middle without sitting under the corner controls. */
+    top: 58px;
+    left: 16px;
     right: 16px;
     z-index: 100002;
     background: rgba(33, 33, 33, 0.92);
@@ -2525,8 +2757,8 @@ body.rec-playing #recPlayingWord { display: block; }
     padding: 10px 14px;
     border-radius: 6px;
     font-size: 13px;
-    max-width: 360px;
-    min-width: 240px;
+    max-width: 720px;
+    margin: 0 auto;
     box-shadow: 0 4px 12px rgba(0,0,0,0.35);
 }
 #recPlayingBanner .rec-pb-head { font-weight: bold; margin-bottom: 4px; }
@@ -2536,18 +2768,15 @@ body.rec-playing #recPlayingWord { display: block; }
     align-items: center;
     gap: 8px;
 }
-#recPlayingBanner .rec-pb-count {
-    font-family: monospace;
-    font-size: 12px;
-    font-weight: 700;
-    opacity: 0.95;
-    white-space: nowrap;
-}
 #recPlayingBanner .rec-pb-progress {
+    /* Taller bar so the count text reads on top of it. The count is
+       absolutely-positioned + centered so it stays put as the fill
+       grows/shrinks behind it. */
     flex: 1 1 auto;
-    height: 4px;
-    background: rgba(255,255,255,0.18);
-    border-radius: 2px;
+    position: relative;
+    height: 22px;
+    background: rgba(255,255,255,0.14);
+    border-radius: 11px;
     overflow: hidden;
 }
 #recPlayingBanner .rec-pb-bar {
@@ -2556,6 +2785,24 @@ body.rec-playing #recPlayingWord { display: block; }
     width: 0;
     background: #4caf50;
     transition: width 0.4s linear;
+}
+/* During the inter-item gap the bar starts full and drains to 0 — visually
+   distinguished by a warm color so the user can tell at a glance that the
+   bar is "time-until-next" instead of "clip-progress". */
+#recPlayingBanner .rec-pb-bar.gap { background: #ff9800; }
+#recPlayingBanner .rec-pb-count {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    pointer-events: none;
+    white-space: nowrap;
 }
 #recPlayingBanner .rec-pb-info-btn {
     flex: 0 0 auto;
@@ -2623,7 +2870,10 @@ body.rec-playing #recPlayingWord { display: block; }
 @media (max-width: 999px) {
     #recPlayingBanner {
         top: 4px;
-        right: 4px;
+        /* Clear the top-right corner pair (Minimize at right:56 + Close at
+           right:12, each 36px wide). Without this the gap stepper at the
+           right edge of the banner sits underneath them. */
+        right: 100px;
         left: 4px;
         max-width: none;
         min-width: 0;
