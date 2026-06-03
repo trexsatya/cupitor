@@ -269,6 +269,7 @@
                             <button type="button" class="manage-item" onclick="closeManageMenu(); openRareWordsDialog()" title="Find vocabulary words that are absent or rare across all subtitles">Rare words…</button>
                             <button type="button" class="manage-item" onclick="closeManageMenu(); openDuplicateSrtsDialog()" title="Find SRT index entries that share a video id and remove the extras">Duplicate SRTs…</button>
                             <button type="button" class="manage-item" onclick="closeManageMenu(); openUnavailableVideosDialog()" title="Find YouTube videos whose thumbnail no longer resolves (removed/private/embedding-disabled)">Unavailable…</button>
+                            <button type="button" class="manage-item" onclick="closeManageMenu(); refreshSubtitlesCache()" title="Clear the local subtitle cache and re-fetch every SRT pair from GitHub. Use after editing subtitles on GitHub directly.">Refresh subtitles…</button>
                         </div>
                     </span>
                     <span class="lang-panel-label" title="Record search-result selections and replay them as a YouTube playlist" style="border-left: 1px solid #ddd; padding-left: 10px;">

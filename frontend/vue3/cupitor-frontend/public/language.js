@@ -2955,6 +2955,36 @@ async function loadAllSubtitles() {
     if (Array.isArray(srts)) srts = srts.map(it => it ? { ...it, name: _nfc(it.name) } : it)
     window.srts = srts
 
+    // Cache pass: populate window.allSubtitles from IndexedDB before queuing
+    // any network fetches. Hits are searchable instantly; only entries that
+    // aren't in the cache go to the SRT fetch pool below. Entries cached but
+    // no longer in index.json are evicted in the background. The cache layer
+    // silently no-ops if IDB is unavailable (private mode, quota, etc.), so
+    // a first boot or a degraded environment falls back to the old behavior.
+    const cached = await _cacheReadAll().catch(() => new Map())
+    const cacheHits = []
+    const deadLinks = []
+    if (cached.size) {
+      const indexLinks = new Set(srts.map(s => s.link))
+      for (const [link, entry] of cached) {
+        if (!indexLinks.has(link)) { deadLinks.push(link); continue }
+        if (entry && entry.sv && entry.en && !window.allSubtitles[link]) {
+          window.allSubtitles[link] = {
+            sv: entry.sv,
+            en: entry.en,
+            source: entry.source,
+            fileName: entry.name,
+            fetchedFrom: 'cache',
+          }
+          cacheHits.push(link)
+        }
+      }
+      if (deadLinks.length) {
+        // Evict in the background — never block subtitle readiness on this.
+        _cacheDeleteMany(deadLinks).catch(e => console.warn('[cache] evict failed', e))
+      }
+    }
+
     // 404s — the file genuinely isn't there, so never retried.
     const notFound = []
     // Transient failures (rate limiting / 5xx / network blip / timeout) — these
@@ -2969,8 +2999,15 @@ async function loadAllSubtitles() {
     // (raw.githubusercontent.com) is HTTP/2, so this isn't the old 6-per-host
     // cap — the practical ceiling is the host's rate limiter.
     const SRT_FETCH_CONCURRENCY = 15
-    _srtProgressShow(srts.length)
-    const srtLoadingDone = _runInBatches(srts, async (it) => {
+    // Only fetch what the cache didn't satisfy. On a steady-state boot this
+    // is typically empty (everything came from IDB); on first boot it's the
+    // whole corpus; on a deploy that added videos it's just the new ones.
+    const toFetch = srts.filter(it => !window.allSubtitles[it.link])
+    if (cacheHits.length || deadLinks.length || toFetch.length !== srts.length) {
+      console.log(`[cache] boot: ${cacheHits.length} hits, ${toFetch.length} to fetch, ${deadLinks.length} evicted`)
+    }
+    _srtProgressShow(toFetch.length)
+    const srtLoadingDone = _runInBatches(toFetch, async (it) => {
       try {
         await _withTimeout(getSubtitlesForLink(it['link'], it['source']), 15000, it['link'])
       } catch (e) {
@@ -3163,6 +3200,212 @@ function _srtError(kind, message) {
   return e
 }
 
+// ─── IndexedDB cache for SRT subtitle pairs ─────────────────────────────────
+// Stores `{link, name, sv, en, source, cachedAt}` records keyed by `link`.
+//
+// Versioning model is intentionally opaque: once an SRT is cached, the app
+// trusts it forever. Boot reads the cache, populates window.allSubtitles for
+// hits, fetches the remaining entries from GitHub, and evicts cache entries
+// whose link no longer appears in srts/index.json. To pull fresh server-side
+// content, the user clicks "Refresh subtitles" in the Manage menu (which
+// clears the store and reloads).
+//
+// All failure modes (IDB unavailable, open errored, quota exceeded, tx
+// aborted) silently fall back to no-cache mode — the cache is purely a
+// performance optimization, never a correctness dependency. A flaky IDB
+// layer must NOT keep the app from booting.
+const CUPITOR_CACHE_DB_PREFIX = 'cupitor-cache-v1'
+const CUPITOR_CACHE_STORE = 'subtitles'
+const CUPITOR_CACHE_SCHEMA = 1
+
+let _cacheDbPromise = null
+let _cacheDbDisabled = false
+
+function _cacheDbName() {
+  // Per-language DB so swedish/spanish caches don't trample each other.
+  const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || 'default'
+  return `${CUPITOR_CACHE_DB_PREFIX}-${lang}`
+}
+
+function _openSubtitlesCache() {
+  if (_cacheDbDisabled) return Promise.resolve(null)
+  if (_cacheDbPromise) return _cacheDbPromise
+  if (typeof indexedDB === 'undefined') {
+    console.warn('[cache] IndexedDB unavailable — running in no-cache mode')
+    _cacheDbDisabled = true
+    return Promise.resolve(null)
+  }
+  _cacheDbPromise = new Promise((resolve) => {
+    let req
+    try { req = indexedDB.open(_cacheDbName(), CUPITOR_CACHE_SCHEMA) }
+    catch (e) {
+      console.warn('[cache] indexedDB.open threw — running in no-cache mode', e)
+      _cacheDbDisabled = true
+      resolve(null); return
+    }
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result
+      if (!db.objectStoreNames.contains(CUPITOR_CACHE_STORE)) {
+        db.createObjectStore(CUPITOR_CACHE_STORE, { keyPath: 'link' })
+      }
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => {
+      console.warn('[cache] indexedDB.open errored — running in no-cache mode', req.error)
+      _cacheDbDisabled = true
+      resolve(null)
+    }
+    // onblocked fires when another tab holds an older-version connection
+    // open. We don't need to act — the success/error handler will still
+    // resolve once the other tab releases.
+    req.onblocked = () => console.warn('[cache] indexedDB.open blocked (another tab is holding an older version)')
+  })
+  return _cacheDbPromise
+}
+
+function _cacheStore(db, mode) {
+  return db.transaction(CUPITOR_CACHE_STORE, mode).objectStore(CUPITOR_CACHE_STORE)
+}
+
+async function _cacheReadAll() {
+  const db = await _openSubtitlesCache()
+  if (!db) return new Map()
+  return new Promise((resolve) => {
+    const map = new Map()
+    try {
+      const req = _cacheStore(db, 'readonly').openCursor()
+      req.onsuccess = (e) => {
+        const cur = e.target.result
+        if (!cur) { resolve(map); return }
+        const v = cur.value
+        if (v && v.link) map.set(v.link, v)
+        cur.continue()
+      }
+      req.onerror = () => resolve(map)
+    } catch (e) { resolve(map) }
+  })
+}
+
+async function _cacheWriteMany(entries) {
+  if (!entries || !entries.length) return
+  const db = await _openSubtitlesCache()
+  if (!db) return
+  await new Promise((resolve) => {
+    try {
+      const store = _cacheStore(db, 'readwrite')
+      const tx = store.transaction
+      const now = Date.now()
+      for (const e of entries) {
+        if (!e || !e.link) continue
+        try { store.put({ link: e.link, name: e.name, sv: e.sv, en: e.en, source: e.source, cachedAt: now }) } catch (_) {}
+      }
+      tx.oncomplete = () => resolve()
+      tx.onerror = (ev) => {
+        console.warn('[cache] writeMany tx error', ev.target && ev.target.error)
+        resolve()
+      }
+      tx.onabort = (ev) => {
+        const err = ev.target && ev.target.error
+        if (err && err.name === 'QuotaExceededError') {
+          console.warn('[cache] quota exceeded — disabling cache for the rest of this session')
+          _cacheDbDisabled = true
+        } else {
+          console.warn('[cache] writeMany tx aborted', err)
+        }
+        resolve()
+      }
+    } catch (e) {
+      console.warn('[cache] writeMany threw', e)
+      resolve()
+    }
+  })
+}
+
+async function _cacheWriteOne(entry) {
+  return _cacheWriteMany([entry])
+}
+
+async function _cacheDeleteMany(links) {
+  if (!links || !links.length) return
+  const db = await _openSubtitlesCache()
+  if (!db) return
+  await new Promise((resolve) => {
+    try {
+      const store = _cacheStore(db, 'readwrite')
+      const tx = store.transaction
+      for (const link of links) {
+        try { store.delete(link) } catch (_) {}
+      }
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()
+      tx.onabort = () => resolve()
+    } catch (e) { resolve() }
+  })
+}
+
+async function _cacheDeleteOne(link) {
+  return _cacheDeleteMany([link])
+}
+
+async function _cacheClear() {
+  const db = await _openSubtitlesCache()
+  if (!db) return
+  await new Promise((resolve) => {
+    try {
+      const req = _cacheStore(db, 'readwrite').clear()
+      req.onsuccess = () => resolve()
+      req.onerror = () => resolve()
+    } catch (e) { resolve() }
+  })
+}
+
+async function _cacheStats() {
+  const db = await _openSubtitlesCache()
+  if (!db) return { count: 0, approxBytes: 0 }
+  return new Promise((resolve) => {
+    try {
+      const countReq = _cacheStore(db, 'readonly').count()
+      countReq.onsuccess = () => {
+        let approxBytes = 0
+        const curReq = _cacheStore(db, 'readonly').openCursor()
+        curReq.onsuccess = (e) => {
+          const cur = e.target.result
+          if (!cur) { resolve({ count: countReq.result, approxBytes }); return }
+          const v = cur.value
+          approxBytes += (v.sv ? v.sv.length : 0) + (v.en ? v.en.length : 0)
+          cur.continue()
+        }
+        curReq.onerror = () => resolve({ count: countReq.result, approxBytes })
+      }
+      countReq.onerror = () => resolve({ count: 0, approxBytes: 0 })
+    } catch (e) { resolve({ count: 0, approxBytes: 0 }) }
+  })
+}
+
+// Expose debug helpers so a user (or this dev) can inspect / clear via
+// the browser console: cupitorCacheStats(), cupitorClearCache().
+window.cupitorCacheStats = _cacheStats
+window.cupitorClearCache = _cacheClear
+
+// User-facing "Refresh subtitles" entry in the Manage menu. Clears the
+// IndexedDB store and reloads the page, which forces the next boot to
+// refetch every SRT from raw.githubusercontent.com. The whole point of
+// option-D versioning is that the cache is otherwise trusted forever —
+// this button is the escape hatch for "I edited subtitles on GitHub
+// directly and want the local app to see the changes."
+async function refreshSubtitlesCache() {
+  const stats = await _cacheStats().catch(() => ({ count: 0, approxBytes: 0 }))
+  const mb = (stats.approxBytes / (1024 * 1024)).toFixed(1)
+  const detail = stats.count
+    ? `Clear ${stats.count} cached subtitle pair${stats.count === 1 ? '' : 's'} (~${mb} MB) and re-fetch from GitHub?\n\nThe page will reload.`
+    : 'The cache is empty. Reload anyway to re-fetch from GitHub?'
+  if (!confirm(detail)) return
+  await _cacheClear().catch(e => console.warn('[cache] clear failed', e))
+  // Reload so the freshly-empty cache forces a full network refetch.
+  location.reload()
+}
+window.refreshSubtitlesCache = refreshSubtitlesCache
+
 // Fetch one SRT file, checking the HTTP status so a 404/429/5xx body never
 // gets silently stored as subtitle text (the old code did `await res.text()`
 // unconditionally, persisting "404: Not Found" as content). Throws a
@@ -3194,6 +3437,10 @@ async function getSubtitlesForLink(link, source) {
   const en = await _fetchSrtFile(`${getResourceUrl()}/srts/${encodeURIComponent(enName)}`)
 
   window.allSubtitles[link] = {sv, en, source, fileName: name}
+  // Write the freshly-fetched pair to IndexedDB so the next boot can skip
+  // this network round-trip. Fire-and-forget — failures are swallowed inside
+  // the cache layer; a flaky cache must never break this critical path.
+  _cacheWriteOne({ link, name, sv, en, source }).catch(e => console.warn('[cache] write failed for', link, e))
   return window.allSubtitles[link]
 }
 
@@ -4213,11 +4460,34 @@ function _queueSubtitleEdit(filePath, lineIndex, newText) {
   // Sync button opens a Review dialog instead of pushing directly, we wait
   // for explicit user action — no silent pushes.
 }
+// Map an SRT file path back to its index.json `link` (videoId). The file
+// naming convention is `<basename>.<langCode>.srt` and `srts/index.json`
+// stores `{link, name=basename}`. Used by flushPendingSrtEdits below to
+// invalidate the IndexedDB cache for any video whose SRT just got rewritten.
+function _filePathToLink(filePath) {
+  if (!filePath) return null
+  try {
+    const m = String(filePath).match(/\/srts\/(.+?)\.[a-z]{2,3}\.srt$/i)
+    if (!m) return null
+    const baseName = _nfc(decodeURIComponent(m[1]))
+    const srt = (window.srts || []).find(s => s && _nfc(s.name) === baseName)
+    return srt ? srt.link : null
+  } catch (_) { return null }
+}
+
 async function flushPendingSrtEdits() {
   const edits = _loadPendingSrtEdits()
   const paths = Object.keys(edits)
   if (!paths.length) return { committed: false, reason: 'empty' }
   const totalLines = _pendingSrtEditCount(edits)
+  // Pre-derive links so we can invalidate the cache after a successful
+  // commit, even if the commit re-fetches the merged content lazily inside
+  // getContent (we want to invalidate by link, not by filePath).
+  const editedLinks = new Set()
+  for (const filePath of paths) {
+    const link = _filePathToLink(filePath)
+    if (link) editedLinks.add(link)
+  }
   const files = paths.map(filePath => ({
     path: filePath,
     getContent: (current) => {
@@ -4247,6 +4517,12 @@ async function flushPendingSrtEdits() {
   // (every queued edit already matched remote — buffer is stale, drop it).
   if (!result || result.committed !== false || result.reason === 'no-changes') {
     _savePendingSrtEdits({})
+    // The commit just rewrote one or more server-side SRTs; any cached
+    // pair for those links is now stale. Drop them so a subsequent
+    // getSubtitlesForLink (or the next boot's cache pass) refetches.
+    if (editedLinks.size) {
+      _cacheDeleteMany([...editedLinks]).catch(e => console.warn('[cache] post-edit evict failed', e))
+    }
   }
   _updateSrtEditsUi()
   return result
@@ -6899,6 +7175,11 @@ async function deleteSelectedMedia() {
   // Local-state cleanup so the UI matches GitHub.
   window.srts = (window.srts || []).filter(it => it.link !== link)
   if (window.allSubtitles && window.allSubtitles[link]) delete window.allSubtitles[link]
+  // Drop the cached pair too so a future boot doesn't resurrect the deleted
+  // entry's subtitles into window.allSubtitles. (Boot would also evict it
+  // since it's no longer in srts/index.json, but cleaning up here keeps the
+  // cache and in-memory state in sync this session.)
+  _cacheDeleteOne(link).catch(e => console.warn('[cache] delete failed for', link, e))
   $(`#mp3Choice option[value="${link}"]`).remove()
   $('#mp3Choice').val('').trigger('change')
 
@@ -7386,6 +7667,7 @@ async function _deleteVideoByLink(link) {
   // Local-state mirror.
   window.srts = (window.srts || []).filter(it => it.link !== link)
   if (window.allSubtitles && window.allSubtitles[link]) delete window.allSubtitles[link]
+  _cacheDeleteOne(link).catch(e => console.warn('[cache] delete failed for', link, e))
   $(`#mp3Choice option[value="${link}"]`).remove()
   try { removeVideoFromAllPlaylists(link) } catch (_) {}
 }
@@ -7589,6 +7871,11 @@ async function deleteChannel(channel) {
     try { delete window.allSubtitles[v.link] } catch (_) {}
   })
   window.srts = (window.srts || []).filter(s => !videos.includes(s))
+  // Drop cached pairs for every deleted video in one batched IDB tx.
+  const deletedLinks = videos.map(v => v && v.link).filter(Boolean)
+  if (deletedLinks.length) {
+    _cacheDeleteMany(deletedLinks).catch(e => console.warn('[cache] batch delete failed', e))
+  }
   // Also drop from the optional block-list (deleted channel can't be matched).
   setChannelBlocked(channel, false)
 }
