@@ -307,7 +307,8 @@ function openRareWordsDialog() {
   // Hide the minimize-restore pill if it's lingering — opening the dialog
   // implicitly restores it.
   $('#rareWordsRestorePill').css('display', 'none')
-  $('#rareWordsDialog').dialog({
+  const $dlg = $('#rareWordsDialog')
+  const opts = {
     width: Math.min(560, $(window).width() - 24),
     modal: false,
     open: function () {
@@ -316,7 +317,17 @@ function openRareWordsDialog() {
       // Move focus to the dialog wrapper instead so no keyboard appears.
       $(this).closest('.ui-dialog').attr('tabindex', -1).trigger('focus')
     }
-  })
+  }
+  // If the dialog widget has already been initialized (true on every call
+  // after the first — including a restore-from-pill), `.dialog({options})`
+  // only updates options without opening. Explicitly call .dialog('open')
+  // to bring it back. The first call has to use the {options} form to
+  // initialize the widget; subsequent calls take the open() branch.
+  if ($dlg.hasClass('ui-dialog-content')) {
+    $dlg.dialog('option', opts).dialog('open')
+  } else {
+    $dlg.dialog(opts)
+  }
 }
 window.openRareWordsDialog = openRareWordsDialog
 
