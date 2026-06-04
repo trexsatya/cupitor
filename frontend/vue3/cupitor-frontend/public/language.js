@@ -304,6 +304,9 @@ window._rareWordsScanToken = 0
 const RARE_WORDS_PAGE_SIZE = 60
 
 function openRareWordsDialog() {
+  // Hide the minimize-restore pill if it's lingering — opening the dialog
+  // implicitly restores it.
+  $('#rareWordsRestorePill').css('display', 'none')
   $('#rareWordsDialog').dialog({
     width: Math.min(560, $(window).width() - 24),
     modal: false,
@@ -522,15 +525,57 @@ function _renderRareWordsPage() {
 }
 
 // Run a rare-word click through the main search box (mirrors vocabularyLineSelected).
+// The dialog is minimized (not closed) so the user can keep scanning more rare
+// words after seeing this one's results — the pager position, category filter,
+// and the whole result list are preserved, and a small restore pill brings
+// the full dialog back in one click.
 function rareWordSearch(line) {
   window.forceMainLangForNextSearch = true
   window.unprocessedSearchText = line
   window.searchText = expandWords(line, getLangFromUrl().code)
   $('#searchText').val(line).trigger('input')
-  try { $('#rareWordsDialog').dialog('close') } catch (_) {}
+  try { _minimizeRareWordsDialog() } catch (_) {}
   doSearch(window.searchText, null)
 }
 window.rareWordSearch = rareWordSearch
+
+// Hide the rare-words dialog (state preserved by jQuery UI's close) and show
+// a compact restore pill so the user can resume scanning where they left off.
+// Mirrors the pattern used by the play overlay's restore pill.
+function _minimizeRareWordsDialog() {
+  try { $('#rareWordsDialog').dialog('close') } catch (_) {}
+  let $pill = $('#rareWordsRestorePill')
+  if (!$pill.length) {
+    $pill = $(`<div id="rareWordsRestorePill" role="button" tabindex="0" title="Restore rare words dialog">
+      <span class="rare-pill-icon" aria-hidden="true">🔎</span>
+      <span class="rare-pill-label">Rare words</span>
+      <button type="button" class="rare-pill-close" aria-label="Close">✕</button>
+    </div>`).appendTo('body')
+    $pill.on('click', function (e) {
+      if ($(e.target).closest('.rare-pill-close').length) return
+      _restoreRareWordsDialog()
+    })
+    $pill.on('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _restoreRareWordsDialog() }
+    })
+    $pill.on('click', '.rare-pill-close', function (e) {
+      e.stopPropagation()
+      $pill.css('display', 'none')
+    })
+  }
+  // The pill is `display: none` by default in CSS; jQuery's .show() would
+  // pick `block`, but the pill needs flex for its row layout. Set the
+  // display value explicitly so the icon/label/close button align.
+  $pill.css('display', 'inline-flex')
+}
+
+// Re-open the dialog and hide the pill. jQuery UI re-uses the underlying
+// dialog instance, so result list, page, and category filter survive.
+function _restoreRareWordsDialog() {
+  $('#rareWordsRestorePill').css('display', 'none')
+  try { openRareWordsDialog() } catch (_) {}
+}
+window._restoreRareWordsDialog = _restoreRareWordsDialog
 
 function importSearchesFromVocab() {
   const category = $("#vocabularySelect").val()
