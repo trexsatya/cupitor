@@ -2459,6 +2459,42 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
    above all of them so it doesn't render behind the banner. */
 .ui-dialog:has(> #playingQueueDialog) { z-index: 100010 !important; }
 
+/* Restore pill for the minimized rare-words dialog. Floats above the page
+   in the bottom-right so it doesn't sit on top of the play-mode pill
+   (which is bottom-center) when both are visible. Clicking re-opens the
+   dialog with all state preserved (page, category filter, results). */
+#rareWordsRestorePill {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    z-index: 100005;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 6px 14px;
+    background: rgba(33, 33, 33, 0.94);
+    color: #f5f5f5;
+    border-radius: 24px;
+    font-size: 14px;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+#rareWordsRestorePill .rare-pill-icon { font-size: 16px; }
+#rareWordsRestorePill .rare-pill-label { font-weight: 600; }
+#rareWordsRestorePill .rare-pill-close {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #b71c1c;
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+}
+#rareWordsRestorePill .rare-pill-close:hover { background: #d32f2f; }
+#rareWordsRestorePill:hover { background: rgba(33, 33, 33, 1); }
+
 /* Queue / playlist button: sits in the middle of the transport row where
    the old Stop button used to live. Stop has moved up to a Close (✕)
    button in the top-right corner. */
