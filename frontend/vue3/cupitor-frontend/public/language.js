@@ -564,10 +564,19 @@ function _minimizeRareWordsDialog() {
     </div>`).appendTo('body')
     $pill.on('click', function (e) {
       if ($(e.target).closest('.rare-pill-close').length) return
+      // Stop propagation — the document-level outside-click handler at
+      // L2086 closes any visible non-whitelisted dialog, and the rare-words
+      // dialog isn't on that list. Without this, the click would re-open
+      // the dialog and then immediately close it back.
+      e.stopPropagation()
       _restoreRareWordsDialog()
     })
     $pill.on('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _restoreRareWordsDialog() }
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        e.stopPropagation()
+        _restoreRareWordsDialog()
+      }
     })
     $pill.on('click', '.rare-pill-close', function (e) {
       e.stopPropagation()
@@ -2139,7 +2148,7 @@ $('document').ready(e => {
       // for the captured-subtitles review: each row has a Delete / Push
       // action we don't want clobbered, plus the trigger button click
       // itself shouldn't immediately re-close the dialog it just opened.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#playingQueueDialog").dialog("close");
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#playingQueueDialog,#rareWordsDialog").dialog("close");
     }
   });
 
