@@ -2148,7 +2148,7 @@ $('document').ready(e => {
       // for the captured-subtitles review: each row has a Delete / Push
       // action we don't want clobbered, plus the trigger button click
       // itself shouldn't immediately re-close the dialog it just opened.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#playingQueueDialog,#rareWordsDialog").dialog("close");
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog").dialog("close");
     }
   });
 
@@ -4621,6 +4621,7 @@ $(function () {
   $(document).on('click', '#srtEditsDiscardSelected', _onSrtEditsDiscardSelected)
   $(document).on('click', '#srtEditsPushSelected',    _onSrtEditsPushSelected)
   try { _updateSrtEditsUi() } catch (_) {}
+  try { _updatePlayUnavailableBadge() } catch (_) {}
 })
 
 // Build a per-(file,line) row inside the review list. The textarea is
@@ -11286,33 +11287,200 @@ function _maybeResumeStartItem(mode) {
 // 101 and 150 are functionally identical per the YT docs.
 const YT_UNAVAILABLE_ERROR_CODES = new Set([2, 5, 100, 101, 150])
 
+// Persistent record of videos that have failed to play during recording
+// playback. Used to surface a "broken videos" review UI in the Settings
+// dialog so the user can clean up at their own pace, instead of getting
+// nagged with a confirm() in the middle of a play session.
+//
+// Shape: { [videoId]: { firstSeenAt, lastSeenAt, count, code, label? } }
+const PLAY_UNAVAILABLE_KEY = 'cupitor:playUnavailable'
+function _loadPlayUnavailable() {
+  try {
+    const raw = localStorage.getItem(PLAY_UNAVAILABLE_KEY)
+    if (!raw) return {}
+    const obj = JSON.parse(raw)
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
+  } catch (_) { return {} }
+}
+function _savePlayUnavailable(map) {
+  try {
+    if (!map || !Object.keys(map).length) localStorage.removeItem(PLAY_UNAVAILABLE_KEY)
+    else localStorage.setItem(PLAY_UNAVAILABLE_KEY, JSON.stringify(map))
+  } catch (_) {}
+}
+function _recordPlayUnavailable(videoId, code, label) {
+  if (!videoId) return
+  const m = _loadPlayUnavailable()
+  const now = Date.now()
+  const prev = m[videoId] || {}
+  m[videoId] = {
+    firstSeenAt: prev.firstSeenAt || now,
+    lastSeenAt: now,
+    count: (prev.count || 0) + 1,
+    code: code != null ? Number(code) : prev.code,
+    label: label || prev.label || null,
+  }
+  _savePlayUnavailable(m)
+  try { _updatePlayUnavailableBadge() } catch (_) {}
+}
+function _forgetPlayUnavailable(videoId) {
+  const m = _loadPlayUnavailable()
+  if (m[videoId]) {
+    delete m[videoId]
+    _savePlayUnavailable(m)
+    try { _updatePlayUnavailableBadge() } catch (_) {}
+  }
+}
+function _clearPlayUnavailable() {
+  _savePlayUnavailable({})
+  try { _updatePlayUnavailableBadge() } catch (_) {}
+}
+
+// Keep the "Unavailable (N)" button label in sync with the stored count.
+// Hides the button entirely when the list is empty — no point taking up
+// settings-footer space if there's nothing to review.
+function _updatePlayUnavailableBadge() {
+  const m = _loadPlayUnavailable()
+  const n = Object.keys(m).length
+  const $btn = $('#playUnavailableBtn')
+  if (!$btn.length) return
+  $btn.text(n ? `Unavailable (${n})` : 'Unavailable')
+  $btn.toggle(n > 0)
+}
+
+// Look up a human-friendly label for a videoId from the SRT index — falls
+// back to the recorded label (the search word that originally surfaced
+// this video), then to the bare videoId.
+function _labelForVideoId(videoId, recordedLabel) {
+  if (!videoId) return ''
+  try {
+    const srt = (window.srts || []).find(s => s && s.link === videoId)
+    if (srt && srt.name) {
+      // SRT names are "<channel> || <title> || <id>"; the title segment is
+      // the most useful for a human review list.
+      const parts = String(srt.name).split(' || ')
+      if (parts.length >= 2) return parts[1] || srt.name
+      return srt.name
+    }
+  } catch (_) {}
+  if (recordedLabel) return recordedLabel
+  return videoId
+}
+
+// Settings → "Unavailable (N)…" → review dialog. Lists every video that
+// has failed to play during a recording session, with per-entry actions:
+//   - Open on YouTube (sanity-check)
+//   - Remove from all playlists (drops references; doesn't delete SRTs)
+//   - Forget (just clear it from this list; leaves playlists/SRTs alone)
+// A footer "Clear all" wipes the list in one go without touching playlists.
+function openPlayUnavailableDialog() {
+  let $dlg = $('#playUnavailableDialog')
+  if (!$dlg.length) {
+    $dlg = $(`<div id="playUnavailableDialog" title="Videos that failed to play">
+      <div class="pud-info">Videos that errored out during playback. Cleaning a video up is optional — the play loop already skips past it automatically next time.</div>
+      <div id="playUnavailableList" class="pud-list"></div>
+      <div class="pud-footer">
+        <button type="button" id="playUnavailableClearAll" class="lang-tool-btn">Clear all (forget)</button>
+      </div>
+    </div>`).appendTo('body')
+    $dlg.on('click', '#playUnavailableClearAll', function () {
+      const m = _loadPlayUnavailable()
+      const n = Object.keys(m).length
+      if (!n) return
+      if (!confirm(`Forget all ${n} unavailable video${n === 1 ? '' : 's'}?\n\nThis only clears the review list; it doesn't touch playlists or SRTs.`)) return
+      _clearPlayUnavailable()
+      _renderPlayUnavailableList()
+    })
+    $dlg.on('click', '.pud-forget', function () {
+      const id = $(this).data('id')
+      if (!id) return
+      _forgetPlayUnavailable(id)
+      _renderPlayUnavailableList()
+    })
+    $dlg.on('click', '.pud-remove', function () {
+      const id = $(this).data('id')
+      if (!id) return
+      const label = _labelForVideoId(id)
+      if (!confirm(`Remove "${label}" from all playlists?\n\nThis drops every playlist item that references this video. SRT files and the index entry are NOT touched.`)) return
+      const n = removeVideoFromAllPlaylists(id)
+      _forgetPlayUnavailable(id)
+      _renderPlayUnavailableList()
+      alert(n > 0
+        ? `Removed ${n} item${n === 1 ? '' : 's'} referencing this video.`
+        : 'No playlist items referenced this video.')
+    })
+  }
+  _renderPlayUnavailableList()
+  const opts = {
+    width: Math.min(640, $(window).width() - 32),
+    height: Math.min(560, $(window).height() - 60),
+    modal: false,
+    open: function () {
+      $(this).closest('.ui-dialog').attr('tabindex', -1).trigger('focus')
+    }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) $dlg.dialog('option', opts).dialog('open')
+  else $dlg.dialog(opts)
+}
+window.openPlayUnavailableDialog = openPlayUnavailableDialog
+
+function _renderPlayUnavailableList() {
+  const $list = $('#playUnavailableList').empty()
+  const m = _loadPlayUnavailable()
+  const ids = Object.keys(m)
+  if (!ids.length) {
+    $list.append('<div class="pud-empty">No unavailable videos recorded.</div>')
+    return
+  }
+  // Most-recently-broken first so the list is actionable on every visit.
+  ids.sort((a, b) => (m[b].lastSeenAt || 0) - (m[a].lastSeenAt || 0))
+  const fmtTime = (t) => {
+    if (!t) return ''
+    const d = new Date(t)
+    return d.toLocaleString()
+  }
+  ids.forEach(id => {
+    const entry = m[id]
+    const label = _labelForVideoId(id, entry.label)
+    const codeText = entry.code != null ? `YT code ${entry.code}` : ''
+    const seen = entry.count > 1 ? `${entry.count}× — last ${fmtTime(entry.lastSeenAt)}` : `at ${fmtTime(entry.lastSeenAt)}`
+    const $row = $(`<div class="pud-row">
+      <div class="pud-body">
+        <div class="pud-label"></div>
+        <div class="pud-sub"></div>
+      </div>
+      <div class="pud-actions">
+        <a class="pud-open lang-tool-btn" target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=${encodeURIComponent(id)}">Open</a>
+        <button type="button" class="pud-remove lang-tool-btn" data-id="${id}" title="Remove this video from every playlist">Remove from playlists</button>
+        <button type="button" class="pud-forget lang-tool-btn" data-id="${id}" title="Clear this entry from the review list">Forget</button>
+      </div>
+    </div>`)
+    $row.find('.pud-label').text(label)
+    $row.find('.pud-sub').text([id, codeText, seen].filter(Boolean).join(' · '))
+    $list.append($row)
+  })
+}
+
 // Wired to the YT player's onError event (see language.html). When a video
-// fails to play DURING recording playback, offer to delete it everywhere —
-// this is also how dangling playlist references to already-deleted videos
-// get cleaned up: playback hits the error, we prompt, the user confirms.
+// fails to play DURING recording playback, silently log it to a persistent
+// list and advance to the next item — no modal interruption. The user can
+// review and clean up via Settings → "Unavailable (N)…" at a calm moment.
 function handleYoutubePlayerError(code) {
-  if (!window._playingRecording) return            // only nag during playback
+  if (!window._playingRecording) return            // only record during playback
   if (!YT_UNAVAILABLE_ERROR_CODES.has(Number(code))) return
   const it = window._recPlayCurrentItem
   const lp = _loadLastPlayed()
   const vid = (it && it.id) || (lp && lp.id)
   if (!vid) return
-  // Prompt at most once per video per playback session.
+  // Record at most once per video per playback session.
   if (window._recPlayErrorPromptedFor === vid) return
   window._recPlayErrorPromptedFor = vid
   // Skip past the broken item right away so playback doesn't hang on it
   // (_waitYTUntilEnd bails on _recNavRequest).
   window._recNavRequest = 'next'
-  const label = (it && (it.word || it.searchText)) ? ` for "${it.word || it.searchText}"` : ''
-  // Defer the blocking confirm so it doesn't run inside the YT event tick.
-  setTimeout(() => {
-    if (confirm(`This video is not available${label}.\n\nDelete this video and remove it from all playlists?`)) {
-      const n = removeVideoFromAllPlaylists(vid)
-      alert(n > 0
-        ? `Removed ${n} item(s) referencing this video.`
-        : 'No playlist items referenced this video.')
-    }
-  }, 0)
+  const label = (it && (it.word || it.searchText)) || null
+  _recordPlayUnavailable(vid, code, label)
+  console.warn(`[play] video ${vid} unavailable (YT code ${code}) — recorded for review`)
 }
 window.handleYoutubePlayerError = handleYoutubePlayerError
 
