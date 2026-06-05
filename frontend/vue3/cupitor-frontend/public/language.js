@@ -2910,11 +2910,12 @@ $(document).ready(function () {
       margin: '0'
     })
   })
-  $("#vocabularySelect").select2()
   // Default select2 matcher strips diacritics, so typing "a" matches "ä"
   // and vice-versa — wrong for Swedish vocab where ä/ö/å are distinct
   // letters. This matcher does a plain case-insensitive substring match
   // on the raw text, and preserves the optgroup-children traversal.
+  // Defined before any select2() call below so both #vocabularySelect and
+  // #addToVocabularyDialogSelect can pass it in.
   const diacriticAwareMatcher = (params, data) => {
     if ($.trim(params.term) === '') return data
     if (data.children && data.children.length) {
@@ -2930,6 +2931,7 @@ $(document).ready(function () {
     if (data.text.toLowerCase().indexOf(params.term.toLowerCase()) > -1) return data
     return null
   }
+  $("#vocabularySelect").select2({ matcher: diacriticAwareMatcher })
   $("#addToVocabularyDialogSelect").select2({
     placeholder: 'Reference word',
     allowClear: true,
