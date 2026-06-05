@@ -2495,6 +2495,69 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 #rareWordsRestorePill .rare-pill-close:hover { background: #d32f2f; }
 #rareWordsRestorePill:hover { background: rgba(33, 33, 33, 1); }
 
+/* Settings → "Unavailable (N)…" review dialog. Lists every video that
+   errored out during a play session, with per-row "Open / Remove / Forget"
+   actions. Layout mirrors the playback-queue dialog (.pqd-row) so the two
+   maintenance dialogs feel consistent. */
+#playUnavailableDialog .pud-info {
+    color: #555;
+    font-size: 13px;
+    padding-bottom: 8px;
+}
+#playUnavailableDialog .pud-list { display: flex; flex-direction: column; gap: 6px; }
+#playUnavailableDialog .pud-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    background: #fff;
+}
+#playUnavailableDialog .pud-row:hover { background: #f5f7fa; }
+#playUnavailableDialog .pud-body { flex: 1; min-width: 0; }
+#playUnavailableDialog .pud-label {
+    font-size: 14px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+    color: #222;
+}
+#playUnavailableDialog .pud-sub {
+    font-size: 11px;
+    color: #777;
+    margin-top: 2px;
+    font-family: monospace;
+    overflow-wrap: anywhere;
+}
+#playUnavailableDialog .pud-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+#playUnavailableDialog .pud-actions .lang-tool-btn {
+    font-size: 12px;
+    padding: 4px 8px;
+}
+#playUnavailableDialog .pud-empty {
+    padding: 16px;
+    text-align: center;
+    color: #888;
+    font-style: italic;
+}
+#playUnavailableDialog .pud-footer {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+    text-align: right;
+}
+/* Narrow viewports: wrap action buttons under the label rather than
+   squeezing them into a column that gets cropped. */
+@media (max-width: 600px) {
+    #playUnavailableDialog .pud-row { flex-wrap: wrap; }
+    #playUnavailableDialog .pud-actions { width: 100%; justify-content: flex-end; }
+}
+
 /* Queue / playlist button: sits in the middle of the transport row where
    the old Stop button used to live. Stop has moved up to a Close (✕)
    button in the top-right corner. */
