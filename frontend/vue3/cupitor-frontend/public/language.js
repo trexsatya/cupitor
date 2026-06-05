@@ -11282,12 +11282,21 @@ function _maybeResumeStartItem(mode) {
 }
 
 // YouTube IFrame API error codes that mean the video can't be played:
-//   2   — invalid videoId / parameter
-//   5   — HTML5 player error
-//   100 — video removed or marked private ("not available")
-//   101, 150 — owner disallowed embedded playback
-// 101 and 150 are functionally identical per the YT docs.
-const YT_UNAVAILABLE_ERROR_CODES = new Set([2, 5, 100, 101, 150])
+//   2   — invalid videoId / parameter (can also fire on a momentary glitch)
+//   5   — HTML5 player error / another error related to the HTML5 player
+//          has occurred — frequently fires transiently when an ad fails to
+//          load or the player has a codec hiccup, even for available videos
+//   100 — video removed or marked private ("not available") — canonical
+//   101, 150 — owner disallowed embedded playback — canonical (identical
+//          per the YT docs)
+//
+// We only treat 100/101/150 as immediate skip+record. For 2/5 we let
+// _waitYTUntilEnd's 12s load-grace decide: the player gets a chance to
+// recover, and if it doesn't, the natural skip path still moves the loop
+// forward without permanently marking the video as broken. Empirically a
+// lot of "video didn't play but it's actually fine" reports trace back to
+// a transient code 5 from an ad/codec issue.
+const YT_UNAVAILABLE_CANONICAL_CODES = new Set([100, 101, 150])
 
 // Persistent record of videos that have failed to play during recording
 // playback. Used to surface a "broken videos" review UI in the Settings
@@ -11469,7 +11478,15 @@ function _renderPlayUnavailableList() {
 // review and clean up via Settings → "Unavailable (N)…" at a calm moment.
 function handleYoutubePlayerError(code) {
   if (!window._playingRecording) return            // only record during playback
-  if (!YT_UNAVAILABLE_ERROR_CODES.has(Number(code))) return
+  const n = Number(code)
+  if (!YT_UNAVAILABLE_CANONICAL_CODES.has(n)) {
+    // Transient code (2 / 5 / anything else). Don't immediately skip and
+    // don't record; the load-grace timeout in _waitYTUntilEnd will handle
+    // it if the player genuinely can't recover. Logging only so the user
+    // can trace "why didn't this video play?" via devtools.
+    if (n) console.warn(`[play] non-canonical YT error code ${n} — letting load-grace handle it`)
+    return
+  }
   const it = window._recPlayCurrentItem
   const lp = _loadLastPlayed()
   const vid = (it && it.id) || (lp && lp.id)
@@ -11481,8 +11498,8 @@ function handleYoutubePlayerError(code) {
   // (_waitYTUntilEnd bails on _recNavRequest).
   window._recNavRequest = 'next'
   const label = (it && (it.word || it.searchText)) || null
-  _recordPlayUnavailable(vid, code, label)
-  console.warn(`[play] video ${vid} unavailable (YT code ${code}) — recorded for review`)
+  _recordPlayUnavailable(vid, n, label)
+  console.warn(`[play] video ${vid} unavailable (YT code ${n}) — recorded for review`)
 }
 window.handleYoutubePlayerError = handleYoutubePlayerError
 
