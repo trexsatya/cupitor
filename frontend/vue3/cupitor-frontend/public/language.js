@@ -1641,10 +1641,10 @@ async function _fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init = {} } 
   throw lastErr;
 }
 
-// In-memory copy of user preferences that are persisted on GitHub at
-// db/language/${lang.fullName}/settings.json. Mutated by the UI inputs in
-// #settingsPanel and pushed via saveAppSettings (debounced). Defaults are
-// applied when the file is missing or malformed.
+// In-memory copy of user preferences. Persisted to localStorage under
+// `cupitor:appSettings:${lang}` (per-language, per-device). Mutated by the
+// UI inputs in #settingsPanel and written via saveAppSettings. Defaults
+// below apply when no localStorage entry exists yet.
 window._appSettings = {
   contextLinesBefore: 2,
   contextLinesAfter: 2,
@@ -1669,57 +1669,41 @@ window._appSettings = {
   practiceRevealMode: 'flip'
 }
 
-function appSettingsFilePath() {
+function appSettingsLocalKey() {
   const lang = getLangFromUrl()
-  return `db/language/${lang.fullName}/settings.json`
+  return `cupitor:appSettings:${lang.fullName}`
 }
 
-async function loadAppSettings() {
+function loadAppSettings() {
+  // Settings are personal preferences — no cross-device sync. Live entirely
+  // in localStorage so changes don't generate a commit-per-keystroke on the
+  // GitHub repo. (Returns a Promise so existing callers can await it.)
   try {
-    const url = `${getResourceUrl()}/settings.json`
-    const r = await _fetchWithRetry(url, { init: { cache: 'no-cache' }, tries: 3 })
-    if (r.ok) {
-      const json = await r.json()
+    const raw = localStorage.getItem(appSettingsLocalKey())
+    if (raw) {
+      const json = JSON.parse(raw)
       if (json && typeof json === 'object') {
         window._appSettings = { ...window._appSettings, ...json }
       }
     }
   } catch (e) {
-    console.warn('loadAppSettings failed — using defaults', e)
+    console.warn('loadAppSettings: failed to read localStorage — using defaults', e)
   }
-  // Reflect into the UI inputs (which may already exist by the time this resolves).
   $('#contextLinesBefore').val(window._appSettings.contextLinesBefore)
   $('#contextLinesAfter').val(window._appSettings.contextLinesAfter)
   $('#recPlayGapSeconds').val(
     parseInt(window._appSettings.recPlayGapSeconds, 10) || 30
   )
   $('#practiceRevealMode').val(window._appSettings.practiceRevealMode || 'flip')
+  return Promise.resolve()
 }
 
-let _saveSettingsTimer = null
 function saveAppSettings() {
-  // Debounce — typing in the number input fires many change events. Wait
-  // for the user to settle before pushing to GitHub.
-  if (_saveSettingsTimer) clearTimeout(_saveSettingsTimer)
-  _saveSettingsTimer = setTimeout(async () => {
-    _saveSettingsTimer = null
-    try {
-      await commitWithMerge({
-        filePath: appSettingsFilePath(),
-        commitMessage: 'settings: update user preferences',
-        merge: (remoteText) => {
-          let remote = {}
-          try { remote = remoteText ? JSON.parse(remoteText) : {} } catch (_) {}
-          if (!remote || typeof remote !== 'object') remote = {}
-          // Local values win on conflict — the user just edited them.
-          const merged = { ...remote, ...window._appSettings }
-          return JSON.stringify(merged, null, 2) + '\n'
-        }
-      })
-    } catch (e) {
-      console.error('Failed to persist app settings to GitHub:', e)
-    }
-  }, 600)
+  try {
+    localStorage.setItem(appSettingsLocalKey(), JSON.stringify(window._appSettings))
+  } catch (e) {
+    console.warn('saveAppSettings: localStorage write failed', e)
+  }
 }
 window.saveAppSettings = saveAppSettings
 
@@ -3867,7 +3851,17 @@ function markIntervalPlayDone(ct) {
   if (window.youtubePlayInterval && window.playingYoutubeVideo) {
     const s = window.youtubePlayInterval.start
     const e = window.youtubePlayInterval.end
-    if (ct > e) {
+    const want = window.youtubePlayInterval.videoId || null
+    let loadedId = null
+    try { loadedId = window.ytPlayer && window.ytPlayer.getVideoData && window.ytPlayer.getVideoData().video_id } catch (_) {}
+    // Gate on videoId so a stale ct from the PREVIOUS clip (which would
+    // typically be loaded under the OLD videoId) can't pause the new clip.
+    // Also bound how far past `e` we'll act on, so a wildly stale reading
+    // doesn't fire pauseVideo() either. _waitYTUntilEnd's hardPause()
+    // already handles the genuine end-of-clip case — this is just a
+    // safety net.
+    const idOk = !want || !loadedId || loadedId === want
+    if (idOk && ct > e && ct <= e + 5) {
       window.ytPlayer.pauseVideo()
       window.youtubePlayInterval = null
     }
@@ -8520,22 +8514,56 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
   }
 
   const commitMessage = `srt: batch update — ${byVideo.size} video${byVideo.size === 1 ? '' : 's'}, ${items.length} capture${items.length === 1 ? '' : 's'}`
-  _report('committing', { files: fileSpecs.length })
-  const commitResult = await window.GitHubUtils.commitMultipleFiles({
-    owner: 'trexsatya',
-    repo: 'trexsatya.github.io',
-    branch: 'gh-pages',
-    commitMessage,
-    files: fileSpecs
-  })
-  // commitMultipleFiles returns { committed: false, reason: 'no-changes' } when
-  // every file's merged content equals what's already on remote (e.g. a
-  // re-push of duplicates, or captures fully subsumed by an existing SRT).
-  // We surface that so the caller doesn't silently clear the buffer thinking
-  // the commit happened.
-  if (commitResult && commitResult.committed === false) {
-    console.warn('pushCapturedSubtitlesBatched: no commit produced', commitResult)
-    return { pushedIds: allIds, committed: false, reason: commitResult.reason || 'no-changes' }
+
+  // Chunk into batches so a huge push doesn't trip GitHub's secondary
+  // rate limit (≈ 180 writes/min) or stall in one super-long commit.
+  // index.json gets attached to the LAST chunk only — if an earlier chunk
+  // fails, the index doesn't claim ownership of files that aren't there
+  // yet, and a retry will re-merge correctly.
+  const CHUNK_SIZE = 300
+  const INTER_CHUNK_SLEEP_MS = 2000
+  const indexSpecIdx = fileSpecs.findIndex(f => f.path === indexPath)
+  const indexSpec = indexSpecIdx >= 0 ? fileSpecs[indexSpecIdx] : null
+  const dataSpecs = indexSpec ? fileSpecs.filter((_, i) => i !== indexSpecIdx) : fileSpecs
+  const chunks = []
+  for (let i = 0; i < dataSpecs.length; i += CHUNK_SIZE) {
+    chunks.push(dataSpecs.slice(i, i + CHUNK_SIZE))
+  }
+  if (!chunks.length) chunks.push([])
+  if (indexSpec) chunks[chunks.length - 1].push(indexSpec)
+  const nonEmpty = chunks.filter(c => c.length)
+
+  let anyCommitted = false
+  let lastNoCommitReason = null
+  for (let ci = 0; ci < nonEmpty.length; ci++) {
+    const chunk = nonEmpty[ci]
+    const chunkMsg = nonEmpty.length === 1
+      ? commitMessage
+      : `${commitMessage} [chunk ${ci + 1}/${nonEmpty.length}]`
+    _report('committing', { files: chunk.length, chunk: ci + 1, totalChunks: nonEmpty.length })
+    const r = await window.GitHubUtils.commitMultipleFiles({
+      owner: 'trexsatya',
+      repo: 'trexsatya.github.io',
+      branch: 'gh-pages',
+      commitMessage: chunkMsg,
+      files: chunk
+    })
+    if (r && r.committed === false) {
+      console.warn(`pushCapturedSubtitlesBatched: chunk ${ci + 1}/${nonEmpty.length} produced no commit`, r)
+      lastNoCommitReason = r.reason || 'no-changes'
+    } else {
+      anyCommitted = true
+    }
+    // Space out chunks so the per-minute secondary rate limit (writes) has
+    // time to drain before the next blob barrage starts.
+    if (ci < nonEmpty.length - 1) {
+      await new Promise(res => setTimeout(res, INTER_CHUNK_SLEEP_MS))
+    }
+  }
+  // If every chunk was a no-op, surface that so the caller doesn't silently
+  // clear the buffer thinking the commit happened.
+  if (!anyCommitted) {
+    return { pushedIds: allIds, committed: false, reason: lastNoCommitReason || 'no-changes' }
   }
 
   // Best-effort in-memory updates so the UI reflects the new state without
@@ -10602,7 +10630,10 @@ function openRecordingReviewDialog() {
 //     advancing (paused mid-clip due to network / 403 / ads bailout),
 //   • or a generous overall cap of (clip-dur + 15s) elapses.
 // Optional `onTick` is invoked every ~500ms so the caller can refresh UI.
-function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
+// `expectedVideoId` (optional) gates ct-reads on the player actually having
+// the right video loaded — without it, a slow-loading transition can let the
+// previous clip's playhead satisfy this clip's end-check.
+function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
   const dur          = Math.max(2, (parseFloat(timeEnd) || 0) - (parseFloat(timeStart) || 0))
   const maxWaitMs    = (dur + 15) * 1000     // clip length + buffer
   const loadGraceMs  = 12000                  // time we give the player to actually start
@@ -10621,8 +10652,9 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
     let lastCt = -1
     let lastChangeAt = begin
     let everPlayed = false
-    let observedValidCt = false   // have we seen ct land inside this clip's window?
+    let observedBelowEnd = false  // seen ct STRICTLY below timeEnd while videoId matches — proves playhead entered the clip
     let pausedAccum = 0          // ms accumulated while user-paused
+    let bufferingAccum = 0       // ms accumulated while YT player reported BUFFERING (state 3)
     let lastTickAt = begin
     const tick = () => {
       if (!window._playingRecording) return resolve()
@@ -10641,38 +10673,49 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
         lastTickAt = now
         return setTimeout(tick, 300)
       }
+      // Same accounting for any non-playing state — YT often sits in
+      // BUFFERING (3), UNSTARTED (-1) or CUED (5) for many seconds on a
+      // slow connection while it fetches segments. Without this the
+      // stall detector would skip the clip the moment playback pauses
+      // to refill the buffer. PLAYING (1) is the only state in which
+      // the playhead is supposed to be advancing.
+      let playerState = 1
+      try { if (window.ytPlayer && window.ytPlayer.getPlayerState) playerState = window.ytPlayer.getPlayerState() } catch (_) {}
+      const NON_PLAYING = (playerState === -1 || playerState === 3 || playerState === 5)
+      if (NON_PLAYING) {
+        bufferingAccum += (now - lastTickAt)
+        lastChangeAt = now    // don't let buffering count against the stall window either
+      }
       lastTickAt = now
       try {
         if (window.ytPlayer && typeof window.ytPlayer.getCurrentTime === 'function') {
+          // Stale-ct guard. Until the player reports the expected videoId
+          // AND ct has been seen strictly below timeEnd inside this clip,
+          // refuse to trust ct for end/progress. Without this, a slow load
+          // leaves getCurrentTime() returning the PREVIOUS clip's playhead,
+          // which can fall inside the new window (e.g. prev ended at 55,
+          // new clip is 45→55 — stale ct=55 satisfies ct≥timeEnd on the
+          // first tick and fires a bogus natural-end. The progress bar
+          // animates to 100% via its CSS width-transition and the clip
+          // never plays.) The load-grace timer below still skips for-real
+          // unplayable clips.
+          const loadedId = (window.ytPlayer.getVideoData && window.ytPlayer.getVideoData().video_id) || null
+          const idOk = !expectedVideoId || !loadedId || loadedId === expectedVideoId
           const ct = window.ytPlayer.getCurrentTime() || 0
-          // Stale-ct guard. When playMediaSlice asked YT to load a new video
-          // (or seek within the same one), getCurrentTime() can briefly
-          // return the PREVIOUS clip's playhead — often a value far past
-          // the new clip's timeEnd, e.g. last clip ended at ct=180 and
-          // the new clip is 5→15s. Without this guard the very first tick
-          // would read ct=180, see 180 >= 15, and fire the "natural end"
-          // exit before the new clip ever played a frame. The user sees
-          // the progress bar snap to 100% and the video skipped.
-          //
-          // Cure: don't trust ct for end/progress until we've observed at
-          // least one reading inside the new clip's plausible window
-          // ([0, timeEnd + 5s]). Until then the tick loop just keeps
-          // polling; if the player never settles into a valid window the
-          // existing 12s load-grace below still produces a clean skip.
-          const inWindow = ct >= 0 && ct <= timeEnd + 5
-          if (inWindow) observedValidCt = true
-          if (observedValidCt && ct >= timeEnd) {
+          if (idOk && ct >= 0 && ct < timeEnd - 0.05 && ct <= timeEnd + 5) {
+            observedBelowEnd = true
+          }
+          if (idOk && observedBelowEnd && ct >= timeEnd && ct <= timeEnd + 5) {
             // Snap the playhead to timeEnd so a slow pause doesn't bleed an
             // extra few frames of audio after the clip's nominal end.
             try { window.ytPlayer.seekTo && window.ytPlayer.seekTo(timeEnd, true) } catch (_) {}
             hardPause()
             return resolve()
           }
-          // Also gate the everPlayed tracker on a valid window — a stale
-          // reading that's wildly past the clip's end shouldn't satisfy
-          // the load-grace check, otherwise a permanently-stuck stale ct
-          // would never get skipped.
-          if (observedValidCt && ct > 0.1 && Math.abs(ct - lastCt) > 0.05) {
+          // Also gate the everPlayed tracker — a stale reading wildly past
+          // the clip's end shouldn't satisfy the load-grace check, otherwise
+          // a permanently-stuck stale ct would never get skipped.
+          if (idOk && observedBelowEnd && ct > 0.1 && Math.abs(ct - lastCt) > 0.05) {
             lastCt = ct
             lastChangeAt = now
             everPlayed = true
@@ -10680,12 +10723,19 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
         }
       } catch (_) {}
       if (typeof onTick === 'function') { try { onTick() } catch (_) {} }
-      const elapsed = (now - begin) - pausedAccum
+      // Active elapsed excludes user-pause AND buffering — used by the
+      // load-grace check so a slow CDN can finish prebuffering without
+      // tripping the "video failed to start" skip.
+      const activeElapsed = (now - begin) - pausedAccum - bufferingAccum
+      // Raw elapsed only excludes user-pause — used by maxWaitMs as a
+      // true hard ceiling so a dead-stuck buffering state can't keep us
+      // here forever.
+      const rawElapsed = (now - begin) - pausedAccum
       // hardPause() on every bail — without it a video that finally starts
       // AFTER we've decided to skip (e.g. load-grace expired but the player
       // resolves a few seconds later) keeps playing audio through the gap
       // period until the next item's playMediaSlice() resets it.
-      if (!everPlayed && elapsed > loadGraceMs) {
+      if (!everPlayed && activeElapsed > loadGraceMs) {
         console.warn('playRecording: video failed to start within', loadGraceMs, 'ms — skipping')
         hardPause()
         return resolve()
@@ -10695,7 +10745,9 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
         hardPause()
         return resolve()
       }
-      if (elapsed > maxWaitMs) {
+      // maxWait uses raw elapsed PLUS a buffering ceiling — even an
+      // ever-buffering clip eventually gives up.
+      if (rawElapsed > maxWaitMs + 30000) {
         console.warn('playRecording: max wait exceeded — skipping')
         hardPause()
         return resolve()
@@ -10933,18 +10985,19 @@ function _stopGapCountdown() {
   }
 }
 
-function _updatePlayingProgress(timeStart, timeEnd) {
+function _updatePlayingProgress(timeStart, timeEnd, expectedVideoId) {
   const dur = Math.max(1, timeEnd - timeStart)
   let ct = timeStart
   try { ct = (window.ytPlayer && window.ytPlayer.getCurrentTime && window.ytPlayer.getCurrentTime()) || timeStart } catch (_) {}
-  // Stale-ct guard. During the transition between clips, getCurrentTime()
-  // can briefly return the previous clip's playhead — often a value far
-  // past the new clip's timeEnd. Computing pct from that snaps the bar
-  // to 100% before the new clip has played a single frame. Treat any
-  // out-of-window reading as "still loading" and hold the bar at 0% until
-  // the player settles into the real window. Mirrors the gate in
-  // _waitYTUntilEnd that suppresses the corresponding bogus end-of-clip.
-  if (ct < timeStart - 1 || ct > timeEnd + 5) ct = timeStart
+  // Stale-ct guard. Until the right video is loaded AND ct lands strictly
+  // inside [timeStart, timeEnd], hold the bar at 0%. Otherwise a stale ct
+  // from the previous clip that coincidentally falls in this clip's window
+  // (e.g. prev ended at 55, new clip is 45→55) animates the bar smoothly
+  // to 100% via the CSS width-transition before the clip ever plays.
+  let loadedId = null
+  try { loadedId = window.ytPlayer && window.ytPlayer.getVideoData && window.ytPlayer.getVideoData().video_id } catch (_) {}
+  const idOk = !expectedVideoId || !loadedId || loadedId === expectedVideoId
+  if (!idOk || ct < timeStart || ct > timeEnd) ct = timeStart
   const pct = Math.max(0, Math.min(100, ((ct - timeStart) / dur) * 100))
   $('#recPlayingBanner .rec-pb-bar').css('width', pct.toFixed(1) + '%')
 }
@@ -11815,9 +11868,17 @@ async function playRecording(opts) {
       .catch(e => console.warn('playRecording: subtitle render failed', it, e))
 
     // Set the end boundary for the existing markIntervalPlayDone() hook
-    // (defensive — _waitYTUntilEnd also pauses).
-    window.youtubePlayInterval = { start: it.timeStart, end: it.timeEnd }
+    // (defensive — _waitYTUntilEnd also pauses). videoId lets the hook
+    // ignore stale ct reads that belong to the PREVIOUS clip's video.
+    window.youtubePlayInterval = { start: it.timeStart, end: it.timeEnd, videoId: it.id }
     window.playingYoutubeVideo = true
+    // Reset the progress bar without the width-transition so it doesn't
+    // visibly drain from 100% → 0% over 400ms at every clip boundary; the
+    // bar should already read 0 when the next clip begins.
+    $('#recPlayingBanner .rec-pb-bar')
+      .css('transition', 'none').css('width', '0%')
+      .each(function () { void this.offsetWidth })
+      .css('transition', '')
     // Play media directly via playMediaSlice — search results aren't
     // deterministic so we deliberately don't drive playback via the live
     // DOM. playMediaSlice loads/seeks the YouTube player with the
@@ -11845,9 +11906,9 @@ async function playRecording(opts) {
       try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(0.75) } catch (_) {}
     }
     await _waitYTUntilEnd(it.timeStart, it.timeEnd, () => {
-      _updatePlayingProgress(it.timeStart, it.timeEnd)
+      _updatePlayingProgress(it.timeStart, it.timeEnd, it.id)
       _refreshPlayingSubtitles(subHolder.ctx)
-    })
+    }, it.id)
     if (slowedThisRound) {
       try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
       window._recPlaySlowdown = false
