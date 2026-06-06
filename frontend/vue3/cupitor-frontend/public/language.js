@@ -1398,12 +1398,30 @@ async function doSearch(searchThis, el) {
 const SEARCH_NAV_HISTORY_KEY = 'searchNavHistory'
 const SEARCH_NAV_HISTORY_MAX = 200
 
+// Storage shape: Array<string | { t: string, l: 'en' }>. Plain strings are
+// main-language (sv) searches — keeping them as bare strings preserves
+// backward compatibility with previously-saved history AND saves ~10 bytes
+// per entry vs an object wrapper. Objects only appear for non-main langs.
+function _normLangFor(lang) {
+  return lang === 'en' ? 'en' : null
+}
+function _historyEntryTerm(entry) {
+  return (typeof entry === 'string') ? entry : (entry && entry.t) || null
+}
+function _historyEntryLang(entry) {
+  return (typeof entry === 'string') ? null : ((entry && entry.l) || null)
+}
+
 function loadNavHistoryFromStorage() {
   try {
     const raw = localStorage.getItem(SEARCH_NAV_HISTORY_KEY)
     if (!raw) return []
     const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr.filter(it => typeof it === 'string') : []
+    if (!Array.isArray(arr)) return []
+    return arr.filter(it =>
+      typeof it === 'string' ||
+      (it && typeof it === 'object' && typeof it.t === 'string')
+    )
   } catch (e) { return [] }
 }
 
@@ -1416,14 +1434,17 @@ window.sessionSearchHistory = window.sessionSearchHistory || loadNavHistoryFromS
 // entry, so the first Prev should go to the most recent entry.
 if (typeof window.sessionHistoryIndex !== 'number') window.sessionHistoryIndex = -1
 
-function recordSessionSearch(term) {
+function recordSessionSearch(term, lang) {
   if (window._navigatingHistory) return
   if (typeof term !== 'string') return
   term = term.trim()
   if (!term) return
+  const normLang = _normLangFor(lang)
+  const entry = normLang ? { t: term, l: normLang } : term
   const list = window.sessionSearchHistory
-  if (list[list.length - 1] === term) return
-  list.push(term)
+  const last = list[list.length - 1]
+  if (_historyEntryTerm(last) === term && _historyEntryLang(last) === normLang) return
+  list.push(entry)
   if (list.length > SEARCH_NAV_HISTORY_MAX) {
     list.splice(0, list.length - SEARCH_NAV_HISTORY_MAX)
   }
@@ -1446,9 +1467,19 @@ function navigateSearchHistory(direction) {
   if (newIdx < 0 || newIdx > list.length - 1) return
   if (newIdx === cur) return
   window.sessionHistoryIndex = newIdx
-  const term = list[newIdx]
+  const entry = list[newIdx]
+  const term = _historyEntryTerm(entry)
+  const lang = _historyEntryLang(entry)
   if (typeof term !== 'string' || !term) return
   window._navigatingHistory = true
+  // Replay in the language the search was originally in, regardless of the
+  // current UI toggle. Cleared in fetchSRTs's finally block.
+  window.forceLangForNextSearch = lang === 'en' ? 'en' : 'sv'
+  // Sync the toggle visually so the user can see which language the replayed
+  // search is in (prop() without trigger doesn't fire the change handler, so
+  // no double-search). After forceLang is cleared, the next typed search
+  // will follow this toggle position, which matches user intent.
+  $('#toggleLangCb').prop('checked', lang === 'en')
   // Trigger 'input' (not 'change') so the X-clear button visibility updates
   // without re-firing the typed-search flow on top of our explicit doSearch
   // call below.
@@ -2100,13 +2131,27 @@ $('document').ready(e => {
     }
     const word = ($(e.target).text() || '').trim()
     const href = $(e.target).attr('href') || ''
+    // Detect which language the clicked word belongs to, so "Search here"
+    // can search in that language regardless of the UI toggle. Order:
+    //   1. nearest ancestor .line[data-lang-code] (search results)
+    //   2. #sv-sub / #en-sub container (subtitle overlay)
+    //   3. fallback: main lang from the URL
+    let wordLang = $(e.target).closest('.line[data-lang-code]').attr('data-lang-code') || ''
+    if (!wordLang) {
+      if ($(e.target).closest('#en-sub, #en-sub-mirror').length) wordLang = 'en'
+      else if ($(e.target).closest('#sv-sub, #sv-sub-mirror').length) wordLang = 'sv'
+    }
+    if (!wordLang) wordLang = getLangFromUrl().code
+    // Only sv / en are actually wired into the search path; anything else
+    // would silently degrade to "sv-or-en via the toggle", so clamp here.
+    if (wordLang !== 'sv' && wordLang !== 'en') wordLang = 'sv'
 
     if($(e.target).hasClass('link-special')) {
         stopMedia()
-        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, $(e.target).attr('data-index'))
+        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, $(e.target).attr('data-index'), wordLang)
     } else if($(e.target).hasClass('link')) {
         stopMedia() //otherswise the popover might open and close immediately due to the click bubbling to the document listener below
-        _showSubtitleWordPopover(e.pageX, e.pageY, word, href)
+        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, null, wordLang)
     }
   });
 
@@ -2424,7 +2469,7 @@ function getWikiLink(word, uri = null, cls = 'link', index = null) {
 // Lazy-create + show the small popover that lets the user choose between
 // "Search here" (populate the search box) and "Search on wiki" (open the
 // stored Wiktionary URL) for a clicked subtitle word.
-function _showSubtitleWordPopover(pageX, pageY, word, href, index = null) {
+function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLang = null) {
   let popoverId = 'subtitleWordPopover'
   if(index != null) {
     popoverId = 'subtitleWordPopoverSpecial'
@@ -2458,7 +2503,14 @@ function _showSubtitleWordPopover(pageX, pageY, word, href, index = null) {
   $pop.find('button').off('click.swp')
   $pop.find('[data-action="search-here"]').on('click.swp', e => {
     fn(e)
-    if (word) $('#searchText').val(word).trigger('change')
+    if (word) {
+      // Pin the search language to whichever the clicked word was in, so a
+      // word from an EN subtitle is searched against EN SRTs even when the
+      // toggle is on SV (and vice-versa). Cleared in searchTextChanged's
+      // finally block.
+      if (wordLang === 'sv' || wordLang === 'en') window.forceLangForNextSearch = wordLang
+      $('#searchText').val(word).trigger('change')
+    }
   })
   $pop.find('[data-action="search-wiki"]').on('click.swp', e => {
     fn(e)
@@ -4327,7 +4379,15 @@ function getMainSubAndSecondarySub(file, line) {
     mainSub = {...line};
     mainSub.text = highlightedText(mainSub.text, true)
     const found = window.searchResult.find(it => it['en_subs'] && it['en_subs'].path === file.path.replaceAll(getTargetLangSrtSuffix(), ".en.srt"));
-    if (found) secondarySub = found.en_subs.data.find(it => it.index === line.index)
+    const counterpart = found && found.en_subs.data.find(it => it.index === line.index)
+    if (counterpart) {
+      // Match parity with the other branch: wrap the secondary EN text via
+      // highlightedText so every word is a clickable .link. Without this the
+      // EN side of an SV search renders as plain text — inconsistent with
+      // the SV side, which is fully clickable.
+      secondarySub = {...counterpart}
+      secondarySub.text = highlightedText(secondarySub.text)
+    }
   } else {
     mainSub = window.searchResult.find(it => it['sv_subs'] && it['sv_subs'].path === file.path.replaceAll(".en.srt", getTargetLangSrtSuffix()))
         .sv_subs.data.find(it => it.index === line.index)
@@ -5107,30 +5167,23 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
     // even when only `numberOfItemsToShow()` are rendered below.
     const totalMatches = items.length
 
-    const getEnTranslation = (item) => {
-      const d = window.searchResult.find(it => it.url === item.url)['sv_subs'].data[item.line.index - 1]
-      return d && d.text
-    }
-
+    // (Previously: when toggle=EN, dedup items whose parallel-index SV text
+    // shared any non-common word with an already-rendered item's SV side.
+    // That was designed for "viewing EN translations of SV searches", but the
+    // search pipeline always runs *in* the selected language — for a direct
+    // EN search every hit's parallel SV line shares a form of the searched
+    // word, so item #2..N all looked like duplicates and got dropped. The
+    // header count showed the true total, the body showed only one row.
+    // Removing the dedup; the per-result list is short enough that genuine
+    // duplicates aren't a real UX problem.)
     const rendered = [];
-    const _getWords = (it) => getWords(it.text).map(it => it.trim().toLowerCase()).filter(it => it.length > 2)
-    const duplicateTranslation = (item) => {
-      const enTranslation = _getWords(getEnTranslation(item))
-      return rendered.map(it => _getWords(it)).find(it => _.difference(_.intersection(it, enTranslation), commonWordsToIgnore).length > 0)
-    }
 
     for (let i = 0; i < items.length; i++) {
       if (rendered.length >= numberOfItemsToShow()) {
         break;
       }
 
-      const remainingToRender = numberOfItemsToShow() - rendered.length;
-
       const item = items[i];
-
-      if (i < remainingToRender && getSelectedLang() === 'en' && duplicateTranslation(item)) {
-        continue;
-      }
 
       try {
         const $fileBlock = $(`<div class="srt-file" title="${item['name']}">
@@ -5160,7 +5213,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         $fileBlock.append($lines)
 
         renderLines(id, item.url)
-        rendered.push(getEnTranslation(item))
+        rendered.push(item)
       } catch (perItemErr) {
         // One bad item shouldn't kill the whole word block. Log and move on.
         console.error('populateSRTFindings: failed to render item for', word, item, perItemErr)
@@ -5238,6 +5291,13 @@ function enablePasteForHashChange() {
 }
 
 function getSelectedLang() {
+  // forceLangForNextSearch overrides the UI toggle for one search — used by
+  // "Search here" on a clicked subtitle word (search in whichever language
+  // the word was in, regardless of the toggle) and by rare-word / vocab
+  // searches (always main lang).
+  if (window.forceLangForNextSearch === 'sv' || window.forceLangForNextSearch === 'en') {
+    return window.forceLangForNextSearch
+  }
   if (window.forceMainLangForNextSearch) return 'sv';
   return $('#toggleLangCb').prop('checked') ? 'en' : 'sv';
 }
@@ -6605,7 +6665,11 @@ async function fetchSRTs(searchText) {
     if (txt.length < 3) return
 
     const _historyTerm = (window.unprocessedSearchText && window.unprocessedSearchText.trim()) || txt.trim()
-    recordSessionSearch(_historyTerm)
+    // Capture the lang at record time so Prev/Next can replay the search in
+    // the same language the user originally ran it (independent of the
+    // current UI toggle). getSelectedLang() already honors any
+    // forceLangForNextSearch override from "Search here".
+    recordSessionSearch(_historyTerm, getSelectedLang())
 
     window.searchText = txt;
     window.searchText = expandWords(window.searchText)
@@ -6632,7 +6696,12 @@ async function fetchSRTs(searchText) {
     const primaryHits = Object.values(words).flat().length
     console.log("[stem-fallback] primary hits:", primaryHits, "searchText:", window.searchText)
     if (!window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && primaryHits === 0) {
-      const stemLang = $('#toggleLangCb').prop('checked') ? 'en' : getLangFromUrl().code
+      // Honor forceLangForNextSearch via getSelectedLang() so a "Search here"
+      // on an EN word stems against English even when the UI toggle is on SV
+      // (and vice-versa). Non-en uses the URL's lang for language-specific
+      // stemmers.
+      const sel = getSelectedLang()
+      const stemLang = sel === 'en' ? 'en' : getLangFromUrl().code
       const stems = guessStems(window.searchText.trim(), stemLang)
       console.log("[stem-fallback] stems:", stems)
       if (stems.length) {
@@ -6650,6 +6719,7 @@ async function fetchSRTs(searchText) {
     }
   } finally {
     window.forceMainLangForNextSearch = false
+    window.forceLangForNextSearch = null
   }
 }
 
