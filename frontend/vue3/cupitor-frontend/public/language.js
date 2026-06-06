@@ -2968,6 +2968,29 @@ $(document).ready(function () {
     return null
   }
   $("#vocabularySelect").select2({ matcher: diacriticAwareMatcher })
+  // #searchedWords is pre-initialised in language.html (inline script) so the
+  // dropdown is interactive before this module loads — but that init does NOT
+  // pass the matcher, so a search for "a" still matched "ä/å" via select2's
+  // default diacritic-stripping. Tear down and re-init here with the matcher
+  // bolted on, keeping the same styleCategory templates the inline init used.
+  const _searchedWordsStyleCategory = (option) => {
+    if (!option || !option.id) return option && option.text
+    if (typeof option.id === 'string' && option.id.indexOf('__cat__:') === 0) {
+      return $(`<span style="color:#888;font-style:italic;">${option.text}</span>`)
+    }
+    return option.text
+  }
+  const $sw = $('#searchedWords')
+  if ($sw.length) {
+    if ($sw.hasClass('select2-hidden-accessible')) $sw.select2('destroy')
+    $sw.select2({
+      placeholder: 'Vocabulary',
+      allowClear: true,
+      templateResult: _searchedWordsStyleCategory,
+      templateSelection: _searchedWordsStyleCategory,
+      matcher: diacriticAwareMatcher
+    })
+  }
   $("#addToVocabularyDialogSelect").select2({
     placeholder: 'Reference word',
     allowClear: true,
