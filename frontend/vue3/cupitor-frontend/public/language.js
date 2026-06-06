@@ -10621,6 +10621,7 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
     let lastCt = -1
     let lastChangeAt = begin
     let everPlayed = false
+    let observedValidCt = false   // have we seen ct land inside this clip's window?
     let pausedAccum = 0          // ms accumulated while user-paused
     let lastTickAt = begin
     const tick = () => {
@@ -10644,14 +10645,34 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick) {
       try {
         if (window.ytPlayer && typeof window.ytPlayer.getCurrentTime === 'function') {
           const ct = window.ytPlayer.getCurrentTime() || 0
-          if (ct >= timeEnd) {
+          // Stale-ct guard. When playMediaSlice asked YT to load a new video
+          // (or seek within the same one), getCurrentTime() can briefly
+          // return the PREVIOUS clip's playhead — often a value far past
+          // the new clip's timeEnd, e.g. last clip ended at ct=180 and
+          // the new clip is 5→15s. Without this guard the very first tick
+          // would read ct=180, see 180 >= 15, and fire the "natural end"
+          // exit before the new clip ever played a frame. The user sees
+          // the progress bar snap to 100% and the video skipped.
+          //
+          // Cure: don't trust ct for end/progress until we've observed at
+          // least one reading inside the new clip's plausible window
+          // ([0, timeEnd + 5s]). Until then the tick loop just keeps
+          // polling; if the player never settles into a valid window the
+          // existing 12s load-grace below still produces a clean skip.
+          const inWindow = ct >= 0 && ct <= timeEnd + 5
+          if (inWindow) observedValidCt = true
+          if (observedValidCt && ct >= timeEnd) {
             // Snap the playhead to timeEnd so a slow pause doesn't bleed an
             // extra few frames of audio after the clip's nominal end.
             try { window.ytPlayer.seekTo && window.ytPlayer.seekTo(timeEnd, true) } catch (_) {}
             hardPause()
             return resolve()
           }
-          if (ct > 0.1 && Math.abs(ct - lastCt) > 0.05) {
+          // Also gate the everPlayed tracker on a valid window — a stale
+          // reading that's wildly past the clip's end shouldn't satisfy
+          // the load-grace check, otherwise a permanently-stuck stale ct
+          // would never get skipped.
+          if (observedValidCt && ct > 0.1 && Math.abs(ct - lastCt) > 0.05) {
             lastCt = ct
             lastChangeAt = now
             everPlayed = true
@@ -10916,6 +10937,14 @@ function _updatePlayingProgress(timeStart, timeEnd) {
   const dur = Math.max(1, timeEnd - timeStart)
   let ct = timeStart
   try { ct = (window.ytPlayer && window.ytPlayer.getCurrentTime && window.ytPlayer.getCurrentTime()) || timeStart } catch (_) {}
+  // Stale-ct guard. During the transition between clips, getCurrentTime()
+  // can briefly return the previous clip's playhead — often a value far
+  // past the new clip's timeEnd. Computing pct from that snaps the bar
+  // to 100% before the new clip has played a single frame. Treat any
+  // out-of-window reading as "still loading" and hold the bar at 0% until
+  // the player settles into the real window. Mirrors the gate in
+  // _waitYTUntilEnd that suppresses the corresponding bogus end-of-clip.
+  if (ct < timeStart - 1 || ct > timeEnd + 5) ct = timeStart
   const pct = Math.max(0, Math.min(100, ((ct - timeStart) / dur) * 100))
   $('#recPlayingBanner .rec-pb-bar').css('width', pct.toFixed(1) + '%')
 }
