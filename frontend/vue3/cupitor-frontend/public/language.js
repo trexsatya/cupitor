@@ -11189,9 +11189,12 @@ async function _renderPlayingSubtitles(item) {
     const secText  = sec  && (sec.text  || sec[lang === 'sv' ? 'en' : 'sv'] || '') || ''
     const $row = $('<div class="rec-ps-row" data-line-i="' + i + '"></div>')
     if (i === matchIdx) $row.addClass('rec-ps-active')
-    // Only the matched line gets the word highlight; surrounding context
-    // lines render as plain text so the user's eye lands on the actual hit.
-    if (i === matchIdx && item && item.word) {
+    // Run the highlighter on every visible row, not just the matched one:
+    // a phrase like "i förväg" can be split across two SRT rows (".. ser i"
+    // on row N, "förväg .." on row N+1), and we want both halves to light up.
+    // The helper itself returns plain text when nothing matches, so context
+    // rows without the word stay clean.
+    if (item && item.word) {
       $row.append($('<div class="rec-ps-main"></div>').html(_highlightWordHtml(mainText, item.word)))
     } else {
       $row.append($('<div class="rec-ps-main"></div>').text(mainText.trim()))
@@ -11222,30 +11225,60 @@ function _highlightWordHtml(text, word) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
   if (!w) return esc(t)
-  const reEsc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  let re
-  try {
-    re = new RegExp(`(?<![\\p{L}\\p{N}])(${reEsc})(?![\\p{L}\\p{N}])`, 'giu')
-  } catch (_) {
-    // Older engines without lookbehind / \p — fall back to a non-bounded match.
-    re = new RegExp(`(${reEsc})`, 'gi')
+  const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const buildRe = (pattern) => {
+    try {
+      return new RegExp(`(?<![\\p{L}\\p{N}])(${pattern})(?![\\p{L}\\p{N}])`, 'giu')
+    } catch (_) {
+      // Older engines without lookbehind / \p — fall back to unbounded.
+      return new RegExp(`(${pattern})`, 'gi')
+    }
   }
-  let out = ''
-  let lastIdx = 0
-  let m
-  let hit = false
-  re.lastIndex = 0
-  while ((m = re.exec(t)) !== null) {
-    hit = true
-    out += esc(t.slice(lastIdx, m.index))
-    out += `<mark class="hl-word">${esc(m[1])}</mark>`
-    lastIdx = m.index + m[0].length
-    // Zero-length-match guard
-    if (m.index === re.lastIndex) re.lastIndex++
+  // Splice <mark> around every match position from a precomputed list of
+  // {start, end} spans (assumed non-overlapping, ordered).
+  const splice = (spans) => {
+    if (!spans.length) return esc(t)
+    let out = ''
+    let lastIdx = 0
+    for (const sp of spans) {
+      out += esc(t.slice(lastIdx, sp.start))
+      out += `<mark class="hl-word">${esc(t.slice(sp.start, sp.end))}</mark>`
+      lastIdx = sp.end
+    }
+    out += esc(t.slice(lastIdx))
+    return out
   }
-  if (!hit) return esc(t)
-  out += esc(t.slice(lastIdx))
-  return out
+  const collectSpans = (re) => {
+    const spans = []
+    let m
+    re.lastIndex = 0
+    while ((m = re.exec(t)) !== null) {
+      spans.push({ start: m.index, end: m.index + m[0].length })
+      if (m.index === re.lastIndex) re.lastIndex++
+    }
+    return spans
+  }
+  // First try the whole phrase as a single match — preserves "i förväg"
+  // highlight when both words sit on the same line.
+  const fullSpans = collectSpans(buildRe(reEsc(w)))
+  if (fullSpans.length) return splice(fullSpans)
+  // Fall back to per-token: SRT lines can split a phrase across rows, so
+  // "i förväg" might land as "...man ser i" on one row and "förväg ..." on
+  // the next. Highlight each token separately. Unicode word boundaries keep
+  // a token like "i" from matching inside "vi"/"is".
+  const tokens = w.split(/\s+/).map(s => s.trim()).filter(Boolean)
+  if (tokens.length <= 1) return esc(t)
+  const tokenRe = buildRe(tokens.map(reEsc).join('|'))
+  const tokenSpans = collectSpans(tokenRe)
+  // Merge overlapping/touching spans, just in case.
+  tokenSpans.sort((a, b) => a.start - b.start)
+  const merged = []
+  for (const sp of tokenSpans) {
+    const last = merged[merged.length - 1]
+    if (last && sp.start <= last.end) last.end = Math.max(last.end, sp.end)
+    else merged.push({ ...sp })
+  }
+  return splice(merged)
 }
 
 // Scroll the active row to the vertical center of the #recPlayingSubs
@@ -12910,17 +12943,18 @@ async function playPracticeClip() {
 
 // Render the front/back as a column of subtitle lines (matched ± context).
 // Each line carries data so the inline editor can target the right SRT line.
-// `highlightWord` is the captured word for this card; the matched SOURCE line
-// gets it wrapped in <mark class="hl-word"> for bold+yellow. We only do it
-// for the source side because the target (EN translation) won't generally
-// contain the SV/source word verbatim.
+// `highlightWord` is the captured word for this card; the source side runs
+// through the word highlighter on EVERY row (not just the match), so a
+// phrase split across SRT rows still lights up on both halves. The target
+// side stays plain since it's a translation and won't generally contain the
+// source word verbatim.
 function _practiceRenderLines($container, rows, langKey, highlightWord) {
   $container.empty()
   rows.forEach(r => {
     const text = (langKey === 'source') ? r.source : r.target
     const $row = $(`<div class="practice-line${r.isMatch ? ' practice-line-match' : ''}" data-line-index="${r.lineIndex}"></div>`)
     const $text = $('<span class="practice-line-text"></span>')
-    if (r.isMatch && langKey === 'source' && highlightWord) {
+    if (langKey === 'source' && highlightWord) {
       $text.html(_highlightWordHtml(text || '(empty)', highlightWord))
     } else {
       $text.text(text || '(empty)')
