@@ -11189,7 +11189,13 @@ async function _renderPlayingSubtitles(item) {
     const secText  = sec  && (sec.text  || sec[lang === 'sv' ? 'en' : 'sv'] || '') || ''
     const $row = $('<div class="rec-ps-row" data-line-i="' + i + '"></div>')
     if (i === matchIdx) $row.addClass('rec-ps-active')
-    $row.append($('<div class="rec-ps-main"></div>').text(mainText.trim()))
+    // Only the matched line gets the word highlight; surrounding context
+    // lines render as plain text so the user's eye lands on the actual hit.
+    if (i === matchIdx && item && item.word) {
+      $row.append($('<div class="rec-ps-main"></div>').html(_highlightWordHtml(mainText, item.word)))
+    } else {
+      $row.append($('<div class="rec-ps-main"></div>').text(mainText.trim()))
+    }
     if (secText.trim()) $row.append($('<div class="rec-ps-sec"></div>').text(secText.trim()))
     $list.append($row)
   }
@@ -11197,6 +11203,49 @@ async function _renderPlayingSubtitles(item) {
   // Defer one tick so the panel has its final layout before we measure.
   setTimeout(_scrollActiveSubIntoView, 0)
   return { primary, from, to }
+}
+
+// Build HTML for a subtitle line where every occurrence of `word` is wrapped
+// in <mark class="hl-word"> for the bold+yellow highlight. Falls back to the
+// plain text if `word` is empty or doesn't match — callers should still set
+// the element via .html() so the wrapped markup renders. Unicode-aware word
+// boundaries keep "design" from matching inside "designing".
+function _highlightWordHtml(text, word) {
+  const t = (text == null ? '' : String(text)).trim()
+  const w = (word == null ? '' : String(word)).trim()
+  // Escape the input for use as an HTML text node — we'll splice markup in
+  // around the match positions after, so we're never injecting user text.
+  const esc = (s) => String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+  if (!w) return esc(t)
+  const reEsc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  let re
+  try {
+    re = new RegExp(`(?<![\\p{L}\\p{N}])(${reEsc})(?![\\p{L}\\p{N}])`, 'giu')
+  } catch (_) {
+    // Older engines without lookbehind / \p — fall back to a non-bounded match.
+    re = new RegExp(`(${reEsc})`, 'gi')
+  }
+  let out = ''
+  let lastIdx = 0
+  let m
+  let hit = false
+  re.lastIndex = 0
+  while ((m = re.exec(t)) !== null) {
+    hit = true
+    out += esc(t.slice(lastIdx, m.index))
+    out += `<mark class="hl-word">${esc(m[1])}</mark>`
+    lastIdx = m.index + m[0].length
+    // Zero-length-match guard
+    if (m.index === re.lastIndex) re.lastIndex++
+  }
+  if (!hit) return esc(t)
+  out += esc(t.slice(lastIdx))
+  return out
 }
 
 // Scroll the active row to the vertical center of the #recPlayingSubs
@@ -12861,12 +12910,22 @@ async function playPracticeClip() {
 
 // Render the front/back as a column of subtitle lines (matched ± context).
 // Each line carries data so the inline editor can target the right SRT line.
-function _practiceRenderLines($container, rows, langKey) {
+// `highlightWord` is the captured word for this card; the matched SOURCE line
+// gets it wrapped in <mark class="hl-word"> for bold+yellow. We only do it
+// for the source side because the target (EN translation) won't generally
+// contain the SV/source word verbatim.
+function _practiceRenderLines($container, rows, langKey, highlightWord) {
   $container.empty()
   rows.forEach(r => {
     const text = (langKey === 'source') ? r.source : r.target
     const $row = $(`<div class="practice-line${r.isMatch ? ' practice-line-match' : ''}" data-line-index="${r.lineIndex}"></div>`)
-    $row.append($('<span class="practice-line-text"></span>').text(text || '(empty)'))
+    const $text = $('<span class="practice-line-text"></span>')
+    if (r.isMatch && langKey === 'source' && highlightWord) {
+      $text.html(_highlightWordHtml(text || '(empty)', highlightWord))
+    } else {
+      $text.text(text || '(empty)')
+    }
+    $row.append($text)
     $row.append($(`<button type="button" class="practice-line-edit" title="Edit this line" data-lang="${langKey === 'source' ? 'src' : 'en'}" data-line-index="${r.lineIndex}">✎</button>`))
     $container.append($row)
   })
@@ -12940,12 +12999,12 @@ async function _renderPracticeCard() {
     $p.find('.practice-front').html('<div class="practice-loading">(subtitle text unavailable)</div>')
     return
   }
-  _practiceRenderLines($p.find('.practice-front'), rows, frontIsSource ? 'source' : 'target')
+  _practiceRenderLines($p.find('.practice-front'), rows, frontIsSource ? 'source' : 'target', it.word)
   // 'both' renders the target right below the front (inside the front-face);
   // 'hide' uses the same .practice-back div but keeps it hidden until reveal;
   // 'flip' also fills .practice-back as a fallback AND fills the back-face.
-  _practiceRenderLines($p.find('.practice-back'),  rows, frontIsSource ? 'target' : 'source')
-  _practiceRenderLines($p.find('.practice-back-target'), rows, frontIsSource ? 'target' : 'source')
+  _practiceRenderLines($p.find('.practice-back'),  rows, frontIsSource ? 'target' : 'source', it.word)
+  _practiceRenderLines($p.find('.practice-back-target'), rows, frontIsSource ? 'target' : 'source', it.word)
   if (mode === 'both') $p.find('.practice-back').show()
 }
 
