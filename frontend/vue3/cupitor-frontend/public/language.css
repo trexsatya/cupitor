@@ -3030,3 +3030,16 @@ body.rec-playing #recPlayingSubs { display: block; }
 }
 #recPlayingSubs .rec-ps-err,
 #recPlayingSubs .rec-ps-loading { color: #ffcdd2; font-size: 14px; }
+
+/* Highlight the captured word in Player + Practice views: bold + yellow.
+   <mark> defaults to a yellow background in browsers but with black text on
+   white — keep it readable on the dark Player panel and on the light Practice
+   card by pinning colors explicitly. */
+#recPlayingSubs mark.hl-word,
+#practiceMode mark.hl-word {
+    background: #ffeb3b;
+    color: #111;
+    font-weight: 700;
+    padding: 0 2px;
+    border-radius: 2px;
+}
