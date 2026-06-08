@@ -8277,10 +8277,10 @@ window.openCapturedSubtitlesReview = function () {
           // handling). Cheaper than the legacy per-file commitWithMerge path.
           const result = await pushCapturedSubtitlesBatched([{ id, detail: d }])
           if (result && result.committed === false) {
-            alert(result.reason === 'no-files'
-              ? 'No commit: this capture has no source/target language and the index already has it.'
-              : 'No commit: this capture already matches what is on GitHub.')
-            // The capture is effectively on remote already — clear it.
+            // Nothing to update (already on remote, or no SRT to write) is
+            // effectively success — the buffer is stale, just clear the row
+            // without nagging the user with an alert.
+            console.log('[push-this] no commit needed', result.reason)
             const buf2 = loadCapturedBuffer().filter(b => b.id !== id)
             saveCapturedBuffer(buf2)
             $row.remove()
@@ -8335,26 +8335,19 @@ window.openCapturedSubtitlesReview = function () {
             else if (p.stage === 'prefetching-srts') setStatus(`Fetching SRTs ${p.done}/${p.total}`)
             else if (p.stage === 'committing')   setStatus(`Committing ${p.files} files…`)
           })
-          // If commitMultipleFiles produced no commit (captures already on
-          // remote, or no SRT files to push), tell the user instead of
-          // silently clearing the buffer — otherwise it looks like nothing
-          // happened.
+          // No commit produced (captures already on remote, or no SRT files
+          // to push) is effectively success — silently clear the buffer and
+          // close the dialog, same as a real commit. Logging only so the
+          // diagnostic isn't lost.
           if (result && result.committed === false) {
-            const msg = result.reason === 'no-files'
-              ? 'No commit: captures had no source/target language and the index already has these videos.'
-              : 'No commit produced: the captured subtitles already match what is on GitHub. Nothing to push.'
-            setStatus('Push All')
-            alert(msg)
-            $rows.find('button[data-action="push"]').prop('disabled', false).text('Push This')
-            // Still clear them from the buffer — they are already on remote.
-            const pushedIds = new Set(result.pushedIds || [])
-            if (pushedIds.size) {
-              saveCapturedBuffer(loadCapturedBuffer().filter(b => !pushedIds.has(b.id)))
-              pushedIds.forEach(id => {
-                $(`#captured-subtitles-dialog-content .captured-item[data-id="${id}"]`).remove()
-              })
-              updateCapturedBtn()
-            }
+            console.log('[push-all] no commit needed', result.reason)
+            const pushedIds = new Set(result.pushedIds || startBuf.map(b => b.id))
+            saveCapturedBuffer(loadCapturedBuffer().filter(b => !pushedIds.has(b.id)))
+            pushedIds.forEach(id => {
+              $(`#captured-subtitles-dialog-content .captured-item[data-id="${id}"]`).remove()
+            })
+            updateCapturedBtn()
+            $self.dialog('close')
             return
           }
           // Drop pushed items from the buffer (concurrent captures preserved).
