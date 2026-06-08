@@ -366,32 +366,54 @@
         //    public, so no auth is needed for a GET on /git/ref. If the
         //    direct fetch also fails (CORS / network), we fall back to the
         //    proxy GET — better than no verification.
+        //
+        //    Retry with backoff: GitHub's REST replicas can lag the PATCH
+        //    by a couple of seconds, and a chunked push hammers the API
+        //    fast enough that the first GET often hits a stale replica.
+        //    A cache-buster query param sidesteps any intermediate cache.
+        const verifyDelays = [0, 600, 1200, 2000, 3000, 4000]
         let actualSha;
         let verifySource = 'direct';
-        try {
-          const url = `${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/${branch}`;
-          const res = await fetch(url, {
-            cache: 'no-cache',
-            headers: { Accept: 'application/vnd.github+json' }
-          });
-          const json = await res.json();
-          if (!res.ok) throw new Error(`direct verify GET status=${res.status}`);
-          actualSha = json && json.object && json.object.sha;
-        } catch (e) {
-          console.warn(`[commitMultipleFiles] direct verify failed (${e.message}); falling back to proxy`);
-          verifySource = 'proxy';
-          const verifyRef = await _githubRequest("GET", `/repos/${owner}/${repo}/git/ref/heads/${branch}`, null, token);
-          actualSha = verifyRef && verifyRef.object && verifyRef.object.sha;
+        for (let v = 0; v < verifyDelays.length; v++) {
+          if (verifyDelays[v]) await new Promise(r => setTimeout(r, verifyDelays[v]))
+          try {
+            const url = `${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/${branch}?_=${Date.now()}`;
+            const res = await fetch(url, {
+              cache: 'no-store',
+              headers: { Accept: 'application/vnd.github+json' }
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(`direct verify GET status=${res.status}`);
+            actualSha = json && json.object && json.object.sha;
+            verifySource = 'direct';
+          } catch (e) {
+            try {
+              verifySource = 'proxy';
+              const verifyRef = await _githubRequest("GET", `/repos/${owner}/${repo}/git/ref/heads/${branch}`, null, token);
+              actualSha = verifyRef && verifyRef.object && verifyRef.object.sha;
+            } catch (e2) {
+              console.warn(`[commitMultipleFiles] verify attempt ${v + 1} failed: ${e2.message || e.message}`)
+              actualSha = null
+            }
+          }
+          if (actualSha === newCommit.sha) break;
+          // Anything other than "still on old parent" is a hard fail — if
+          // the ref advanced to a DIFFERENT sha, someone else pushed and
+          // retrying our verify won't change that.
+          if (actualSha && actualSha !== headSha && actualSha !== newCommit.sha) {
+            console.warn(`[commitMultipleFiles] verify saw foreign sha ${actualSha.slice(0, 8)} — another writer landed in between, not retrying`)
+            break
+          }
         }
         if (actualSha !== newCommit.sha) {
           console.error(
-            `[commitMultipleFiles] verification FAILED (via ${verifySource}): expected ref to advance to ${newCommit.sha}, ` +
-            `but origin/${branch} is at ${actualSha}. The native proxy returned success but the commit did NOT land on GitHub.`
+            `[commitMultipleFiles] verification FAILED (via ${verifySource}) after retries: expected ref to advance to ${newCommit.sha}, ` +
+            `but origin/${branch} is at ${actualSha}.`
           );
           throw new Error(
-            `Commit not persisted on GitHub: proxy returned success but ref didn't advance ` +
+            `Commit not persisted on GitHub: ref didn't advance ` +
             `(expected ${newCommit.sha && newCommit.sha.slice(0, 8)}, got ${(actualSha || 'unknown').slice(0, 8)}). ` +
-            `Native GitHubProxy is likely stubbing write responses — check the app/proxy implementation.`
+            `If the commit IS visible on github.com, this is a stale-replica verify — increase the retry budget.`
           );
         }
         console.log(`[commitMultipleFiles] verified (${verifySource}): ${branch} → ${newCommit.sha.slice(0, 8)}`);
