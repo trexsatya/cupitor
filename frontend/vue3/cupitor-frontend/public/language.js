@@ -10806,15 +10806,19 @@ function openRecordingReviewDialog() {
 // `expectedVideoId` (optional) gates ct-reads on the player actually having
 // the right video loaded — without it, a slow-loading transition can let the
 // previous clip's playhead satisfy this clip's end-check.
+// Threshold (seconds) above which a clip's recorded [timeStart, timeEnd]
+// is considered malformed — typically the result of a context window
+// straddling a temporal discontinuity in a sparse SRT. Anything longer
+// is either skipped (in _waitYTUntilEnd) or repaired to a ~20s window
+// around the matched line (in playRecording via _repairMalformedClip).
+const MAX_REASONABLE_CLIP_S = 600
+
 function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
   let _effectiveTimeEnd = parseFloat(timeEnd) || 0
   const _timeStartNum   = parseFloat(timeStart) || 0
-  // Malformed-clip guard. If the recorded clip is absurdly long (e.g. an
-  // SRT index goof that produced timeEnd far past the video's actual end),
-  // the loop would otherwise wait the full clip-length + 15s before
-  // bailing — for a 3.7h clip that's ~3.7h of "video keeps playing and the
-  // progress bar barely moves" with no way out except manual skip.
-  const MAX_REASONABLE_CLIP_S = 600
+  // Malformed-clip safety net. playRecording tries to repair these into a
+  // 20s window first (see _repairMalformedClip); we only reach this skip
+  // when the repair couldn't find a matched-line anchor in the SRT.
   if ((_effectiveTimeEnd - _timeStartNum) > MAX_REASONABLE_CLIP_S) {
     console.warn(
       `[_waitYTUntilEnd] skipping malformed clip: dur=${(_effectiveTimeEnd - _timeStartNum).toFixed(0)}s > ${MAX_REASONABLE_CLIP_S}s ` +
@@ -11202,6 +11206,47 @@ function _updatePlayingProgress(timeStart, timeEnd, expectedVideoId) {
   if (!idOk || ct < timeStart || ct > timeEnd) ct = timeStart
   const pct = Math.max(0, Math.min(100, ((ct - timeStart) / dur) * 100))
   $('#recPlayingBanner .rec-pb-bar').css('width', pct.toFixed(1) + '%')
+}
+
+// If a recorded clip's [timeStart, timeEnd] looks malformed (duration
+// > MAX_REASONABLE_CLIP_S), try to recover a sane ~20s window by
+// looking up the matched line in the SRT and anchoring the play
+// window around its real timestamps. Returns { timeStart, timeEnd }
+// on success, null if recovery isn't possible (no lineIndex, no SRT,
+// matched line missing, or unparseable timestamps).
+//
+// The malformation typically happens when an older capture's context
+// window straddled a temporal discontinuity in a sparse SRT (e.g.
+// line 5 at 00:38:17 followed by line 6 at 04:20:52 → recorded
+// timeStart from segment A and timeEnd from segment B, a 3.7h "clip"
+// that's actually two disjoint regions). renderLines now prevents
+// future captures from doing this, but existing recordings still
+// carry the bad bounds — this helper lets us play them as a short
+// clip around the matched line instead of skipping them outright.
+async function _repairMalformedClip(item) {
+  if (!item || item.lineIndex == null) return null
+  try {
+    const parsed = await _loadSubtitlesForItem(item)
+    if (!parsed) return null
+    const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
+    const primary = lang === 'sv' ? parsed.sv : parsed.en
+    if (!primary || !primary.length) return null
+    const want = String(item.lineIndex)
+    const line = primary.find(l => l && l.index != null && String(l.index) === want)
+    if (!line || !line.start || !line.end) return null
+    const lineStart = Number(line.start.ordinal)
+    const lineEnd   = Number(line.end.ordinal)
+    if (!Number.isFinite(lineStart) || !Number.isFinite(lineEnd)) return null
+    // 5s of pre-roll, then enough post-roll to cover the matched line plus
+    // ~15s of trailing context — gives the user time to recognise the
+    // word in context without making the clip drag on.
+    const newStart = Math.max(0, lineStart - 5)
+    const newEnd   = Math.max(lineEnd + 5, newStart + 20)
+    return { timeStart: newStart, timeEnd: newEnd }
+  } catch (e) {
+    console.warn('[_repairMalformedClip] failed', item, e)
+    return null
+  }
 }
 
 // Resolve sv+en parsed subtitle entries for the recorded videoId, reusing
@@ -12151,10 +12196,32 @@ async function playRecording(opts) {
       .then(c => { subHolder.ctx = c })
       .catch(e => console.warn('playRecording: subtitle render failed', it, e))
 
+    // Recover a sane play window for malformed clips (recorded duration
+    // > MAX_REASONABLE_CLIP_S, almost always from an old capture whose
+    // context window straddled a sparse-SRT discontinuity). Falls through
+    // to the original bounds when there's nothing to repair against —
+    // _waitYTUntilEnd's final safety-net skip still catches the
+    // unrecoverable case.
+    let _playStart = it.timeStart
+    let _playEnd   = it.timeEnd
+    const _rawDur = (parseFloat(_playEnd) || 0) - (parseFloat(_playStart) || 0)
+    if (Number.isFinite(_rawDur) && _rawDur > MAX_REASONABLE_CLIP_S) {
+      const repaired = await _repairMalformedClip(it)
+      if (repaired) {
+        console.warn(
+          `[playRecording] malformed clip ${it.id} dur=${_rawDur.toFixed(0)}s — playing ` +
+          `${(repaired.timeEnd - repaired.timeStart).toFixed(1)}s around lineIndex ${it.lineIndex} ` +
+          `(${repaired.timeStart.toFixed(1)}→${repaired.timeEnd.toFixed(1)})`
+        )
+        _playStart = repaired.timeStart
+        _playEnd   = repaired.timeEnd
+      }
+    }
+
     // Set the end boundary for the existing markIntervalPlayDone() hook
     // (defensive — _waitYTUntilEnd also pauses). videoId lets the hook
     // ignore stale ct reads that belong to the PREVIOUS clip's video.
-    window.youtubePlayInterval = { start: it.timeStart, end: it.timeEnd, videoId: it.id }
+    window.youtubePlayInterval = { start: _playStart, end: _playEnd, videoId: it.id }
     window.playingYoutubeVideo = true
     // Reset the progress bar without the width-transition so it doesn't
     // visibly drain from 100% → 0% over 400ms at every clip boundary; the
@@ -12172,7 +12239,7 @@ async function playRecording(opts) {
     window._recPlayGapGuard = false
     const _src = (it.source || '').toLowerCase() === 'youtube' ? 'YouTube' : (it.source || 'YouTube')
     try {
-      await playMediaSlice(it.id, it.timeStart, it.timeEnd, _src)
+      await playMediaSlice(it.id, _playStart, _playEnd, _src)
     } catch (e) {
       console.warn('playRecording: playMediaSlice failed for', it, e)
       i++
@@ -12189,8 +12256,8 @@ async function playRecording(opts) {
     if (slowedThisRound) {
       try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(0.75) } catch (_) {}
     }
-    await _waitYTUntilEnd(it.timeStart, it.timeEnd, () => {
-      _updatePlayingProgress(it.timeStart, it.timeEnd, it.id)
+    await _waitYTUntilEnd(_playStart, _playEnd, () => {
+      _updatePlayingProgress(_playStart, _playEnd, it.id)
       _refreshPlayingSubtitles(subHolder.ctx)
     }, it.id)
     if (slowedThisRound) {
