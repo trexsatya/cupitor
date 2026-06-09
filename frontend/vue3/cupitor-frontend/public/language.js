@@ -4038,52 +4038,81 @@ function getWikiLinks(text) {
 function highlightedText(text, populateWikiLinks = false) {
   text = _.trim(text, "-:_")
   text = text.replaceAll("\n", " ")
-  let hText = text
+  // Same structure as _highlightWordHtml (Player/Practice): try the whole
+  // pattern first, fall back to per-token; collect ALL occurrences and
+  // merge overlapping spans. The previous single-match implementation
+  // missed cases where (a) the line had more than one matching variant,
+  // (b) the regex threw on an exotic input and the whole highlight got
+  // dropped, or (c) a multi-word phrase got split across SRT rows. The
+  // search-result-specific bits live here: window.searchText is already
+  // a |-alternation regex source (no escaping); each match expands to
+  // its enclosing whitespace boundaries so a stem match like "design"
+  // still highlights the whole word "designing".
+  const pattern = window.searchText || ''
+  const tokens = pattern.split(SEPARATOR_PIPE).map(s => s.trim()).filter(Boolean)
+  if (!tokens.length) return getWikiLinks(text)
 
-  try {
-    let i;
-    // Use the same whitespace-relaxed regex as the search itself so a
-    // multi-word query like "x y" highlights the whole phrase rather than
-    // just the first word, even when the subtitle has extra spaces.
-    const match = text.match(new RegExp(_relaxSpaces(window.searchText), "i"))
-    const index = match.index
-    // The original code walked right from `index + 1`, which stopped at the
-    // first space inside the match — for "x y" it landed on the space
-    // between "x" and "y" and highlighted just "x". Walk from `matchEnd`
-    // (the position immediately after the match) instead so the right-hand
-    // word boundary sits past the entire matched run.
-    const matchEnd = index + match[0].length
-
-    let x = -1, y = text.length;
-    for (i = index - 1; i >= 0; i--) {
-      const c = text[i]
-      if (c === " " || c === "\n") {
-        x = i;
-        break;
-      }
-    }
-
-    for (i = matchEnd; i < text.length; i++) {
-      const c = text[i]
-      if (c === " " || c === "\n") {
-        y = i;
-        break;
-      }
-    }
-
-    // x stays at -1 when the match is anchored at text start. Clamp so
-    // firstPart / highlightedPart don't go negative on substring().
-    const xClamped = x < 0 ? 0 : x;
-    const firstPart = text.substring(0, xClamped);
-    const secondPart = text.substring(y);
-    const highlightedPart = text.substring(xClamped, y);
-
-    hText = (getWikiLinks(firstPart) + ' ') + "<span class='highlight'>" + getWikiLinks(highlightedPart) + "</span>" + (' ' + getWikiLinks(secondPart));
-  } catch (e) {
-    // console.log(e)
-    hText = getWikiLinks(hText);
+  const tryRe = (src) => { try { return new RegExp(src, 'gi') } catch (_) { return null } }
+  const tryBoundedRe = (src) => {
+    try { return new RegExp(`(?<![\\p{L}\\p{N}])(?:${src})(?![\\p{L}\\p{N}])`, 'giu') }
+    catch (_) { return tryRe(src) }
   }
-  return hText;
+  const collect = (re) => {
+    const spans = []
+    if (!re) return spans
+    let m
+    re.lastIndex = 0
+    while ((m = re.exec(text)) !== null) {
+      if (m[0].length === 0) { re.lastIndex++; continue }
+      // Expand to enclosing whitespace so a stem match like "design"
+      // highlights the whole word "designing".
+      let x = m.index
+      while (x > 0 && text[x - 1] !== ' ' && text[x - 1] !== '\n') x--
+      let y = m.index + m[0].length
+      while (y < text.length && text[y] !== ' ' && text[y] !== '\n') y++
+      spans.push({ start: x, end: y })
+      if (m.index === re.lastIndex) re.lastIndex++
+    }
+    return spans
+  }
+
+  // 1) Whole pattern (all alternatives, each with relaxed spaces).
+  let spans = collect(tryRe(tokens.map(_relaxSpaces).join('|')))
+  // 2) If nothing hit and any alt was multi-word, split each alt into
+  //    sub-words and try a flat alternation. Mirrors the per-token
+  //    fallback in _highlightWordHtml — lets a phrase split across SRT
+  //    rows still highlight at least one half on the surviving row.
+  //    Use Unicode word boundaries here so short tokens like "i" don't
+  //    light up inside "vi"/"vilk"/etc.
+  if (!spans.length && tokens.some(t => /\s/.test(t))) {
+    const sub = tokens.flatMap(t => t.split(/\s+/)).map(s => s.trim()).filter(Boolean)
+    if (sub.length) spans = collect(tryBoundedRe(sub.join('|')))
+  }
+  if (!spans.length) return getWikiLinks(text)
+
+  spans.sort((a, b) => a.start - b.start)
+  const merged = []
+  for (const sp of spans) {
+    const last = merged[merged.length - 1]
+    if (last && sp.start <= last.end) last.end = Math.max(last.end, sp.end)
+    else merged.push({ ...sp })
+  }
+
+  // Trim each segment so getWikiLinks doesn't emit empty <span> wrappers
+  // for the stray spaces produced by slice() at segment boundaries.
+  const wikiSeg = (s) => {
+    const t = s.replace(/\s+/g, ' ').trim()
+    return t ? getWikiLinks(t) : ''
+  }
+  const parts = []
+  let last = 0
+  for (const sp of merged) {
+    if (sp.start > last) parts.push(wikiSeg(text.slice(last, sp.start)))
+    parts.push("<span class='highlight'>" + wikiSeg(text.slice(sp.start, sp.end)) + "</span>")
+    last = sp.end
+  }
+  if (last < text.length) parts.push(wikiSeg(text.slice(last)))
+  return parts.filter(Boolean).join(' ')
 }
 
 function playSelectedText(e) {
@@ -4876,8 +4905,46 @@ function renderLines(id, url) {
   const getSub = x => subtitleFile.data.find(it => it.index + '' === x + '');
   const st = getSub(fromLineIndex);
   const end = getSub(toLineIndex)
-  const timeStart = parseInt(Math.floor(st.start.ordinal)); //fromSeconds(line.start.ordinal);
-  const timeEnd = parseInt(Math.ceil(end.end.ordinal)); //fromSeconds(line.end.ordinal);
+  // Contract the play-bounds to the contiguous temporal segment that
+  // contains matchLineIndex. SRTs in this app are SPARSE — multiple captures
+  // across distant moments of the same video get stitched into one file, so
+  // a context window (matchIdx ± N) can straddle a multi-hour gap (e.g.
+  // line 5 at 38:17 followed by line 6 at 4:20:52). Spanning that gap with
+  // {timeStart=segA.start, timeEnd=segB.end} produces a 3.7h "clip" that
+  // never terminates in playback. Detection: any consecutive-line gap
+  // larger than `MAX_GAP_S` is a discontinuity; stop walking outward when
+  // we encounter one. Display still shows the full window — only the
+  // play-button's time bounds get contracted.
+  const MAX_GAP_S = 60
+  let _playFromIdx = fromLineIndex
+  let _playToIdx   = toLineIndex
+  if (Number.isFinite(matchLineIndex) && matchLineIndex >= fromLineIndex && matchLineIndex <= toLineIndex) {
+    let cur = getSub(matchLineIndex)
+    if (cur && cur.start && cur.end) {
+      // Walk backward while adjacent lines are temporally contiguous.
+      let prev = cur
+      for (let i = matchLineIndex - 1; i >= fromLineIndex; i--) {
+        const s = getSub(i)
+        if (!s || !s.end || !s.start) break
+        if ((prev.start.ordinal - s.end.ordinal) > MAX_GAP_S) break
+        _playFromIdx = i
+        prev = s
+      }
+      // Walk forward similarly.
+      let next = cur
+      for (let i = matchLineIndex + 1; i <= toLineIndex; i++) {
+        const s = getSub(i)
+        if (!s || !s.start || !s.end) break
+        if ((s.start.ordinal - next.end.ordinal) > MAX_GAP_S) break
+        _playToIdx = i
+        next = s
+      }
+    }
+  }
+  const _playSt  = getSub(_playFromIdx) || st
+  const _playEnd = getSub(_playToIdx)   || end
+  const timeStart = parseInt(Math.floor(_playSt.start.ordinal));
+  const timeEnd   = parseInt(Math.ceil(_playEnd.end.ordinal));
 
   const showInfoBtn = `<span class="show-info-btn">
     <svg xmlns="http://www.w3.org/2000/svg" width="25" height="25" fill="currentColor" class="bi bi-info-circle media-info" viewBox="0 0 16 16" style="cursor: pointer;">
@@ -10720,7 +10787,23 @@ function openRecordingReviewDialog() {
 // the right video loaded — without it, a slow-loading transition can let the
 // previous clip's playhead satisfy this clip's end-check.
 function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
-  const dur          = Math.max(2, (parseFloat(timeEnd) || 0) - (parseFloat(timeStart) || 0))
+  let _effectiveTimeEnd = parseFloat(timeEnd) || 0
+  const _timeStartNum   = parseFloat(timeStart) || 0
+  // Malformed-clip guard. If the recorded clip is absurdly long (e.g. an
+  // SRT index goof that produced timeEnd far past the video's actual end),
+  // the loop would otherwise wait the full clip-length + 15s before
+  // bailing — for a 3.7h clip that's ~3.7h of "video keeps playing and the
+  // progress bar barely moves" with no way out except manual skip.
+  const MAX_REASONABLE_CLIP_S = 600
+  if ((_effectiveTimeEnd - _timeStartNum) > MAX_REASONABLE_CLIP_S) {
+    console.warn(
+      `[_waitYTUntilEnd] skipping malformed clip: dur=${(_effectiveTimeEnd - _timeStartNum).toFixed(0)}s > ${MAX_REASONABLE_CLIP_S}s ` +
+      `(start=${_timeStartNum} end=${_effectiveTimeEnd}). Likely a bad capture — manually fix the recorded times or re-capture.`
+    )
+    try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+    return Promise.resolve()
+  }
+  const dur          = Math.max(2, _effectiveTimeEnd - _timeStartNum)
   const maxWaitMs    = (dur + 15) * 1000     // clip length + buffer
   const loadGraceMs  = 12000                  // time we give the player to actually start
   const stallMs      = 6000                   // post-start, how long a frozen playhead means dead
@@ -10788,13 +10871,26 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
           const loadedId = (window.ytPlayer.getVideoData && window.ytPlayer.getVideoData().video_id) || null
           const idOk = !expectedVideoId || !loadedId || loadedId === expectedVideoId
           const ct = window.ytPlayer.getCurrentTime() || 0
-          if (idOk && ct >= 0 && ct < timeEnd - 0.05 && ct <= timeEnd + 5) {
+          // Once the video has loaded and reports a duration, clamp the
+          // effective end to it. Otherwise a clip whose recorded timeEnd
+          // overshoots the video's natural end (e.g. SRT timestamps
+          // extending past EOF) would wait forever for ct≥timeEnd.
+          if (idOk && loadedId === expectedVideoId) {
+            try {
+              const vDur = window.ytPlayer.getDuration && window.ytPlayer.getDuration()
+              if (vDur && Number.isFinite(vDur) && vDur > 0 && _effectiveTimeEnd > vDur + 1) {
+                console.warn(`[_waitYTUntilEnd] clamping timeEnd ${_effectiveTimeEnd}s → video duration ${vDur}s for ${expectedVideoId}`)
+                _effectiveTimeEnd = vDur
+              }
+            } catch (_) {}
+          }
+          if (idOk && ct >= 0 && ct < _effectiveTimeEnd - 0.05 && ct <= _effectiveTimeEnd + 5) {
             observedBelowEnd = true
           }
-          if (idOk && observedBelowEnd && ct >= timeEnd && ct <= timeEnd + 5) {
+          if (idOk && observedBelowEnd && ct >= _effectiveTimeEnd && ct <= _effectiveTimeEnd + 5) {
             // Snap the playhead to timeEnd so a slow pause doesn't bleed an
             // extra few frames of audio after the clip's nominal end.
-            try { window.ytPlayer.seekTo && window.ytPlayer.seekTo(timeEnd, true) } catch (_) {}
+            try { window.ytPlayer.seekTo && window.ytPlayer.seekTo(_effectiveTimeEnd, true) } catch (_) {}
             hardPause()
             return resolve()
           }
