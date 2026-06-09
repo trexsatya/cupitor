@@ -4076,17 +4076,37 @@ function highlightedText(text, populateWikiLinks = false) {
     return spans
   }
 
-  // 1) Whole pattern (all alternatives, each with relaxed spaces).
-  let spans = collect(tryRe(tokens.map(_relaxSpaces).join('|')))
-  // 2) If nothing hit and any alt was multi-word, split each alt into
-  //    sub-words and try a flat alternation. Mirrors the per-token
-  //    fallback in _highlightWordHtml — lets a phrase split across SRT
-  //    rows still highlight at least one half on the surviving row.
-  //    Use Unicode word boundaries here so short tokens like "i" don't
-  //    light up inside "vi"/"vilk"/etc.
-  if (!spans.length && tokens.some(t => /\s/.test(t))) {
-    const sub = tokens.flatMap(t => t.split(/\s+/)).map(s => s.trim()).filter(Boolean)
-    if (sub.length) spans = collect(tryBoundedRe(sub.join('|')))
+  // Split alternatives by shape — multi-word "phrases" have priority over
+  // their constituent single words. If any phrase matches we use ONLY the
+  // phrase spans; otherwise we fall back to single-word matching. This
+  // prevents the pathological "x y z|x|y|z" pattern from lighting up both
+  // the whole phrase AND every standalone "x"/"y"/"z" on the line.
+  const multiWord  = tokens.filter(t => /\s/.test(t))
+  const singleWord = tokens.filter(t => !/\s/.test(t))
+
+  // 1) Multi-word phrases. Each one's internal spaces are relaxed to \s+.
+  let spans = multiWord.length
+    ? collect(tryRe(multiWord.map(_relaxSpaces).join('|')))
+    : []
+  // 2) Fall back to single-word matches when no phrase was found. Two
+  //    rule-sets, merged:
+  //      • original-single-word alts (typically stem expansions from
+  //        expandWords) — UNBOUNDED so a stem like "design" still
+  //        highlights its derived form "designing".
+  //      • sub-words SPLIT from multi-word phrases (e.g. "i" + "förväg"
+  //        from "i förväg") — BOUNDED via Unicode lookaround so short
+  //        tokens like "i" don't light up inside "vi"/"vilk".
+  if (!spans.length) {
+    if (singleWord.length) {
+      spans = spans.concat(collect(tryRe(singleWord.join('|'))))
+    }
+    const subFromMulti = multiWord
+      .flatMap(t => t.split(/\s+/))
+      .map(s => s.trim())
+      .filter(Boolean)
+    if (subFromMulti.length) {
+      spans = spans.concat(collect(tryBoundedRe(subFromMulti.join('|'))))
+    }
   }
   if (!spans.length) return getWikiLinks(text)
 
