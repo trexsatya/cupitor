@@ -10784,13 +10784,6 @@ function openRecordingReviewDialog() {
   // and populate the per-row preview spans. Fire-and-forget — if it fails
   // the row just shows "(no preview available)".
   _lazyLoadRecItemPreviews($dlg).catch(e => console.warn('preview lazy-load failed', e))
-  // Scroll the last-played row into view so the user resumes where they left off.
-  setTimeout(() => {
-    const el = $dlg.find('.rec-item-lastplayed')[0]
-    if (el && typeof el.scrollIntoView === 'function') {
-      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }) } catch (_) {}
-    }
-  }, 60)
 }
 
 // Wait until YouTube's currentTime crosses `timeEnd`, then pause it. Bails
