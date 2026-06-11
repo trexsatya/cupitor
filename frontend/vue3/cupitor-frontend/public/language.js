@@ -9399,6 +9399,71 @@ function createRecording(name) {
   return true
 }
 
+// Reserved playlist name for the random-sample playlist — only ever one
+// of these in the collection. Re-running the action regenerates it (with
+// a confirm prompt when it already exists).
+const RANDOM_REC_NAME = 'Random From All'
+
+// Build a fresh "Random From All" playlist by sampling items across every
+// real, non-virtual playlist (excluding the random one itself to avoid
+// recursion). Items are deep-copied so subsequent edits / deletes in the
+// source playlists don't quietly mutate this snapshot.
+//
+// `count` — max items in the resulting playlist. Defaults to 50; bumped
+// down if the union has fewer than that.
+// Returns true on success, false if there's nothing to sample.
+function createRandomFromAllPlaylist({ count = 50 } = {}) {
+  const sourceNames = Object.keys(window._recordings || {}).filter(n =>
+    n !== RANDOM_REC_NAME && !_isVirtual(n)
+  )
+  const flat = []
+  const seen = new Set()
+  sourceNames.forEach(name => {
+    const items = (window._recordings[name] && window._recordings[name].items) || {}
+    Object.keys(items).forEach(st => {
+      Object.keys(items[st] || {}).forEach(w => {
+        ;(items[st][w] || []).forEach(it => {
+          if (!it) return
+          // Dedupe across playlists by (id, lineIndex, manual-tag).
+          const k = `${it.id || ''}|${it.lineIndex == null ? '' : it.lineIndex}|${it.manual ? 'm' : ''}`
+          if (seen.has(k)) return
+          seen.add(k)
+          flat.push({ st, w, it })
+        })
+      })
+    })
+  })
+  if (!flat.length) {
+    alert('No items in any playlist to sample from.')
+    return false
+  }
+  // Fisher-Yates shuffle.
+  for (let i = flat.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[flat[i], flat[j]] = [flat[j], flat[i]]
+  }
+  const pick = flat.slice(0, Math.min(count, flat.length))
+
+  const grouped = {}
+  pick.forEach(({ st, w, it }) => {
+    if (!grouped[st]) grouped[st] = {}
+    if (!grouped[st][w]) grouped[st][w] = []
+    // Deep copy so source-playlist mutations don't bleed through.
+    grouped[st][w].push(JSON.parse(JSON.stringify(it)))
+  })
+
+  const prev = window._recordings[RANDOM_REC_NAME]
+  window._recordings[RANDOM_REC_NAME] = {
+    items: grouped,
+    createdAt: (prev && prev.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+    random: true
+  }
+  selectRecording(RANDOM_REC_NAME)
+  return true
+}
+window.createRandomFromAllPlaylist = createRandomFromAllPlaylist
+
 // Add a manual entry to a real playlist. Manual entries live in the same
 // `items[st][w]` map as captured items so they mix freely; they're put
 // under a dedicated bucket `items['Manual']['Card']` (created lazily) so
@@ -10472,6 +10537,7 @@ function openRecordingReviewDialog() {
   html += `</select>
     <button type="button" id="recRecNew"       class="btn rec-rec-btn" title="Create a new playlist" aria-label="Create a new playlist"><span class="rec-rec-ico">＋</span><span class="rec-rec-lbl">New</span></button>
     <button type="button" id="recRecNewVirtual" class="btn rec-rec-btn" title="Create a virtual playlist (combine existing playlists)" aria-label="Create a virtual playlist"><span class="rec-rec-ico">🔗</span><span class="rec-rec-lbl">Virtual</span></button>
+    <button type="button" id="recRecRandom"     class="btn rec-rec-btn" title="Build a random-sample playlist from all real playlists" aria-label="Practice Random"><span class="rec-rec-ico">🎲</span><span class="rec-rec-lbl">Practice Random</span></button>
     <button type="button" id="recRecAddManual"  class="btn rec-rec-btn" title="Add a manual flashcard entry (source/target + optional media link)" aria-label="Add manual entry"${isVirtualCurrent ? ' disabled' : ''}><span class="rec-rec-ico">📝</span><span class="rec-rec-lbl">Add card</span></button>
     <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
     <button type="button" id="recRecDuplicate" class="btn rec-rec-btn" title="Duplicate this playlist" aria-label="Duplicate this playlist"><span class="rec-rec-ico">⎘</span><span class="rec-rec-lbl">Duplicate</span></button>
@@ -10648,6 +10714,18 @@ function openRecordingReviewDialog() {
   $dlg.off('click', '#recRecNewVirtual').on('click', '#recRecNewVirtual', function (e) {
     e.preventDefault(); e.stopPropagation()
     _openVirtualPlaylistEditor(null)
+  })
+  // Practice Random: build a fresh "Random From All" playlist. Confirm
+  // overwrite if one already exists so the user doesn't accidentally lose
+  // a curated random session.
+  $dlg.off('click', '#recRecRandom').on('click', '#recRecRandom', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const exists = !!(window._recordings && window._recordings[RANDOM_REC_NAME])
+    if (exists) {
+      const ok = confirm(`"${RANDOM_REC_NAME}" already exists. Replace it with a fresh random sample?`)
+      if (!ok) return
+    }
+    if (createRandomFromAllPlaylist()) openRecordingReviewDialog()
   })
   $dlg.off('click', '#recRecAddManual').on('click', '#recRecAddManual', function (e) {
     e.preventDefault(); e.stopPropagation()
