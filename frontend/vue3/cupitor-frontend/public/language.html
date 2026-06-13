@@ -493,8 +493,8 @@
                 <textarea id="vocabularySegmentTextarea" rows="5" style="width: 98%; min-height: 4em; resize: vertical; font-family: inherit;" placeholder="New word(s), one per line"></textarea>
             </div>
             <div style="margin-top: 0.5em; display: flex; gap: 6px; align-items: center;">
-                <button type="button" onclick="addToVocab(false)" title="Apply this entry and clear the textarea so you can add another. Nothing is committed until you Save &amp; Close.">Add another</button>
-                <button type="button" onclick="addToVocab(true)">Save &amp; Close</button>
+                <button type="button" id="addVocabAddAnotherBtn" onclick="addToVocab(false)" title="Apply this entry and clear the textarea so you can add another. Nothing is committed until you Save &amp; Close.">Add another</button>
+                <button type="button" id="addVocabSaveCloseBtn" onclick="addToVocab(true)">Save &amp; Close</button>
                 <span id="vocabPendingHint" style="display:none;font-size:0.75em;color:#a06000;">unsaved changes pending — Save &amp; Close to commit</span>
             </div>
         </div>
