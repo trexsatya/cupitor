@@ -705,8 +705,7 @@ function openAddToVocabDialog() {
   discardSegment();
   // Restore the pending-hint when reopening — staged-but-uncommitted
   // edits survive a dialog close (we no longer auto-commit on close).
-  if (window._vocabHasPendingChanges) $('#vocabPendingHint').show()
-  else $('#vocabPendingHint').hide()
+  _refreshVocabPendingHint()
 
   // Mirror the main select's current line into the dialog's reference select
   // so the user starts on the line they were already inspecting. Skip
@@ -845,7 +844,8 @@ function addToVocab(commitAndClose) {
       loadWholeVocabulary()
       commitVocabularyToGithub()
       window._vocabHasPendingChanges = false
-      $('#vocabPendingHint').hide()
+      window._vocabPendingCount = 0
+      _refreshVocabPendingHint()
       $("#addToVocabularyDialog").dialog("close")
       autoHideSettingsPanel()
     }
@@ -925,29 +925,34 @@ function addToVocab(commitAndClose) {
   } catch (_) { /* leave preSelectedSearchedWord untouched */ }
 
   window._vocabHasPendingChanges = true
+  // Bump the session-pending counter so the hint can show "N new entries".
+  // Counts every newly-added word from THIS session (resets on commit).
+  window._vocabPendingCount = (parseInt(window._vocabPendingCount, 10) || 0) + newWords.length
   // Buffer this category's post-edit snapshot to localStorage so an app
   // close/refresh before commit doesn't lose the user's work.
   if (!window._vocabDirtyCategories) window._vocabDirtyCategories = {}
   window._vocabDirtyCategories[category] = true
   _savePendingVocab()
 
+  // Rebuild the selects so the in-dialog dropdowns reflect what's already
+  // been staged this session — otherwise "Add another" leaves the picker
+  // showing pre-edit state, which makes it look as if the entry didn't
+  // land. GitHub push is still deferred until Save & Close.
+  loadWholeVocabulary()
   if (commitAndClose) {
-    // Rebuild the selects to reflect everything staged across this session,
-    // then commit + close. Held off during "Add another" so multi-add
-    // doesn't churn the (expensive) select repopulation on every iteration.
-    loadWholeVocabulary()
     commitVocabularyToGithub()
     window._vocabHasPendingChanges = false
-    $('#vocabPendingHint').hide()
+    window._vocabPendingCount = 0
+    _refreshVocabPendingHint()
     $("#addToVocabularyDialog").dialog("close")
     autoHideSettingsPanel()
   } else {
-    // Stage-only: clear textarea, surface the pending-changes hint, and
-    // leave the dialog open so the user can add more entries. The select
-    // boxes intentionally aren't refreshed yet — that happens on Save &
-    // Close (or dialog close with pending changes).
+    // Stage-only: clear textarea and surface the pending-changes hint, but
+    // leave the dialog open so the user can add more entries. The selects
+    // were already refreshed above so the user sees their new entry in the
+    // picker.
     $("#vocabularySegmentTextarea").val('')
-    $('#vocabPendingHint').show()
+    _refreshVocabPendingHint()
   }
 }
 
@@ -1318,7 +1323,22 @@ function _clearPendingVocab() {
   try { localStorage.removeItem(PENDING_VOCAB_KEY) } catch (_) {}
   window._vocabDirtyCategories = {}
   window._vocabHasPendingChanges = false
-  $('#vocabPendingHint').hide()
+  window._vocabPendingCount = 0
+  _refreshVocabPendingHint()
+}
+
+// Re-render the in-dialog "unsaved changes pending" hint with the current
+// pending-entry count. Counter is in-session only — added-lines since the
+// last commit, reset on Save & Close. Falls back to a count-less message
+// when no count is known (e.g. categories replayed from localStorage on
+// boot).
+function _refreshVocabPendingHint() {
+  const $h = $('#vocabPendingHint')
+  if (!$h.length) return
+  if (!window._vocabHasPendingChanges) { $h.hide(); return }
+  const n = parseInt(window._vocabPendingCount, 10) || 0
+  const countPart = n > 0 ? ` — ${n} new entr${n === 1 ? 'y' : 'ies'}` : ''
+  $h.text(`unsaved changes pending${countPart} — Save & Close to commit`).show()
 }
 // Called once after the initial vocabulary fetch parses into window.vocabulary.
 // Replays any locally-cached category snapshots so the user's unpushed work
@@ -1341,7 +1361,12 @@ function _replayPendingVocab() {
   })
   if (any) {
     window._vocabHasPendingChanges = true
-    $('#vocabPendingHint').show()
+    // The number of *added entries* isn't recoverable from a localStorage
+    // snapshot (we'd need the pre-edit baseline to compute it). Leave the
+    // count at 0 so the hint just says "unsaved changes pending" without
+    // a misleading number.
+    window._vocabPendingCount = 0
+    _refreshVocabPendingHint()
     console.log(`Replayed ${any} pending vocab categor${any === 1 ? 'y' : 'ies'} from local cache — push via Save & Close to sync.`)
   }
 }
