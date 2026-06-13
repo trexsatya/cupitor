@@ -3047,6 +3047,19 @@ body.rec-playing #recPlayingSubs { display: block; }
     border-radius: 2px;
 }
 
+/* Search-term highlight inside the #searchedWords select2 dropdown,
+   AND inside .vocabulary-line entries in the result panel. Applied by
+   _highlightMatchInText (dropdown) and _highlightSearchInVocabLine
+   (vocabulary results) — same CSS class so the visual is consistent. */
+.select2-results__option mark.vocab-hl,
+.vocabulary-line mark.vocab-hl {
+    background: #fff59d;
+    color: inherit;
+    font-weight: 600;
+    padding: 0 1px;
+    border-radius: 2px;
+}
+
 /* ── Practice Log / Schedule dialog ─────────────────────────────── */
 /* jQuery UI manages height + overflow:auto on the .ui-dialog-content via its
    maxHeight option (set in openPracticeLogDialog). We only add inner padding
@@ -3054,6 +3067,9 @@ body.rec-playing #recPlayingSubs { display: block; }
    "Add custom item" row clear of the actions bar when the content scrolls. */
 #practiceLogDialog {
     padding-bottom: 64px;
+    -webkit-overflow-scrolling: touch; /* momentum scrolling on older iOS */
+    touch-action: pan-y;               /* allow native vertical pan/scroll */
+    overscroll-behavior: contain;      /* don't bubble scroll to body */
 }
 .practice-log-front-btn {
     background: #1e7e34;

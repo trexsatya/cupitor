@@ -605,6 +605,12 @@ function importSearchesFromVocab() {
   loadSearches()
 }
 
+// Categories whose entries are NOT actual searchable vocabulary — they
+// configure how word expansion works (used by getExpansionForWords()).
+// Hidden from both the search picker and the add-to-vocab reference
+// picker so they don't pollute the user-facing word list.
+const VOCAB_HIDDEN_CATEGORIES = new Set(['expansions', 'Expansions', '_expansions'])
+
 function loadWholeVocabulary(onDone) {
   $('#searchedWords').html('')
   $('#addToVocabularyDialogSelect').html('')
@@ -617,6 +623,7 @@ function loadWholeVocabulary(onDone) {
   const vocabCategoriesToPopulate = new Set()
 
   Object.entries(vocabulary).forEach(it => {
+    if (VOCAB_HIDDEN_CATEGORIES.has(it[0])) return
     vocabCategoriesToPopulate.add(it[0])
   })
 
@@ -645,7 +652,7 @@ function loadWholeVocabulary(onDone) {
     done += 1
     $('#vocabLoadingBarFill').css('width', `${(done / total) * 100}%`)
   };
-  schedule(categories, .4, it => {
+  schedule(categories, .005 , it => {
     populateLines(it)
   }, () => {
     $('#addToVocabBtn').prop('disabled', false)
@@ -1339,7 +1346,8 @@ function _savePendingVocab() {
       return
     }
     const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || ''
-    localStorage.setItem(PENDING_VOCAB_KEY, JSON.stringify({ lang, categories, ts: Date.now() }))
+    const pendingCount = parseInt(window._vocabPendingCount, 10) || 0
+    localStorage.setItem(PENDING_VOCAB_KEY, JSON.stringify({ lang, categories, pendingCount, ts: Date.now() }))
   } catch (_) {}
 }
 function _clearPendingVocab() {
@@ -1384,13 +1392,12 @@ function _replayPendingVocab() {
   })
   if (any) {
     window._vocabHasPendingChanges = true
-    // The number of *added entries* isn't recoverable from a localStorage
-    // snapshot (we'd need the pre-edit baseline to compute it). Leave the
-    // count at 0 so the hint just says "unsaved changes pending" without
-    // a misleading number.
-    window._vocabPendingCount = 0
+    // Restore the entry counter persisted alongside the buffer. Older payloads
+    // didn't include it — fall back to 0 so the hint just says "unsaved
+    // changes pending" without a misleading number.
+    window._vocabPendingCount = parseInt(buf.pendingCount, 10) || 0
     _refreshVocabPendingHint()
-    console.log(`Replayed ${any} pending vocab categor${any === 1 ? 'y' : 'ies'} from local cache — push via Save & Close to sync.`)
+    console.log(`Replayed ${any} pending vocab categor${any === 1 ? 'y' : 'ies'} (${window._vocabPendingCount} new entries) from local cache — push via Save & Close to sync.`)
   }
 }
 window._replayPendingVocab = _replayPendingVocab
@@ -1539,6 +1546,14 @@ function navigateSearchHistory(direction) {
   // renderVocabularyFindings path runs).
   window.unprocessedSearchText = term
   Promise.resolve(doSearch(term, $('#searchedWords')))
+      .then(() => {
+        // Mirror searchTextChanged's auto-prefix branch — navigating history
+        // bypasses that handler entirely, so without this the prefix pane is
+        // never refreshed when stepping Prev/Next.
+        if ($('#toggleAutoPrefixSearchCheckbox').is(':checked')) {
+          try { searchVocabularyByPrefix() } catch (e) { console.warn('Auto prefix search failed', e) }
+        }
+      })
       .finally(() => { window._navigatingHistory = false })
 }
 
@@ -1552,6 +1567,8 @@ export async function searchTextChanged() {
   // Optional auto-prefix-search: when the toggle in the settings panel is
   // on (default), run a vocabulary prefix search on the same term so the
   // user doesn't have to click the "…" → "Search by prefix" menu item.
+  // (Mirrored inside navigateSearchHistory so Prev/Next replays also refresh
+  // the prefix pane.)
   if ($('#toggleAutoPrefixSearchCheckbox').is(':checked')) {
     try { searchVocabularyByPrefix() } catch (e) { console.warn('Auto prefix search failed', e) }
   }
@@ -1963,26 +1980,29 @@ function _refreshPracticeLogPendingHint() {
   _refreshPracticeLogBtnHighlight()
 }
 
-// "Has the user planned something for `weekLabel`?" — true if any item in
-// that week has a non-default status OR non-empty notes. Auto-inserted
-// not_started rows with blank notes don't count as planning.
-function _practiceLogWeekTouched(data, weekLabel) {
-  const week = (data && data.weeks && data.weeks[weekLabel]) || null
-  if (!week) return false
-  return Object.values(week).some(it =>
-    it && ((it.status && it.status !== 'not_started') || (it.notes && it.notes.trim()))
-  )
+// "Does `weekLabel` have any item still on its default not_started status?"
+// Items missing from the week record are implicitly not_started, so a week
+// that's never been touched also returns true. Used to surface a reminder
+// while there's still anything left to plan/log for the week.
+function _practiceLogWeekHasUntouchedItem(data, weekLabel) {
+  const items = (data && data.customItems) || PRACTICE_LOG_DEFAULT_ITEMS
+  const week = (data && data.weeks && data.weeks[weekLabel]) || {}
+  return items.some(name => {
+    const it = week[name]
+    return !it || !it.status || it.status === 'not_started'
+  })
 }
 
-// Surface a "please plan your week" cue on the entry buttons when NEITHER
-// the current nor the next ISO week has any content. Reads straight from
-// localStorage so it works before the dialog has ever been opened.
+// Surface a "still has items left to plan/log" cue on the entry buttons
+// whenever either the current OR the next ISO week has any item whose
+// status is still not_started. Reads straight from localStorage so it
+// works before the dialog has ever been opened.
 function _refreshPracticeLogBtnHighlight() {
   let needs = false
   try {
     const data = window._practiceLog || _loadPracticeLogLocal()
     const cur = _currentWeekLabel(), nxt = _nextWeekLabel()
-    needs = !_practiceLogWeekTouched(data, cur) && !_practiceLogWeekTouched(data, nxt)
+    needs = _practiceLogWeekHasUntouchedItem(data, cur) || _practiceLogWeekHasUntouchedItem(data, nxt)
   } catch (_) { needs = true }
   $('#practiceLogFrontBtn, #practiceLogSettingsBtn').toggleClass('practice-log-needs-attention', needs)
 }
@@ -2122,7 +2142,14 @@ async function openPracticeLogDialog() {
   // top:20px with no bottom bound — without maxHeight the content extends
   // past the screen and the inner element can't be scrolled. Recompute on
   // every open in case the window was resized since last time.
-  const dialogMaxH = Math.max(240, $(window).height() - 80)
+  //
+  // Mobile-aware viewport read: visualViewport.height excludes the dynamic
+  // address bar / keyboard so we don't size taller than what's actually
+  // visible; falls back to window.innerHeight then jQuery on very old UAs.
+  const _vh = (window.visualViewport && window.visualViewport.height)
+           || window.innerHeight
+           || $(window).height()
+  const dialogMaxH = Math.max(240, _vh - 80)
   if (!$dlg.hasClass('ui-dialog-content')) {
     $dlg.dialog({
       title: 'Practice Log / Schedule',
@@ -2130,6 +2157,11 @@ async function openPracticeLogDialog() {
       maxHeight: dialogMaxH,
       modal: false,
       autoOpen: false,
+      // Dragging steals touchmove on mobile — without this the content
+      // can't be scrolled because jQuery UI's drag handler captures the
+      // gesture as a drag-the-dialog operation.
+      draggable: false,
+      resizable: false,
       position: { my: 'center top', at: 'center top+30', of: window }
     })
     $dlg.on('click', '.practice-log-tab', function () { _setPracticeLogTab($(this).data('tab')) })
@@ -3466,12 +3498,44 @@ $(document).ready(function () {
     return null
   }
   $("#vocabularySelect").select2({ matcher: diacriticAwareMatcher })
+  // Track the current select2 search term so templateResult can highlight the
+  // matched substring. select2's templateResult only receives the option
+  // (no term); peek the search field's value instead. One global is enough
+  // because at most one select2 dropdown can be open at a time.
+  $(document).on('input', '.select2-search__field', function () {
+    window._lastSelect2Term = $(this).val() || ''
+  })
+  $(document).on('select2:close', function () {
+    window._lastSelect2Term = ''
+  })
   // #searchedWords is pre-initialised in language.html (inline script) so the
   // dropdown is interactive before this module loads — but that init does NOT
   // pass the matcher, so a search for "a" still matched "ä/å" via select2's
   // default diacritic-stripping. Tear down and re-init here with the matcher
   // bolted on, keeping the same styleCategory templates the inline init used.
+  const _escapeHtmlForVocab = (s) => String(s).replace(/[&<>"']/g, c => (
+    { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
+  ))
+  const _highlightMatchInText = (text) => {
+    const term = (window._lastSelect2Term || '').trim()
+    if (!term || !text) return _escapeHtmlForVocab(text || '')
+    const lower = String(text).toLowerCase()
+    const idx = lower.indexOf(term.toLowerCase())
+    if (idx < 0) return _escapeHtmlForVocab(text)
+    return _escapeHtmlForVocab(text.slice(0, idx)) +
+           '<mark class="vocab-hl">' + _escapeHtmlForVocab(text.slice(idx, idx + term.length)) + '</mark>' +
+           _escapeHtmlForVocab(text.slice(idx + term.length))
+  }
   const _searchedWordsStyleCategory = (option) => {
+    if (!option || !option.id) return option && option.text
+    if (typeof option.id === 'string' && option.id.indexOf('__cat__:') === 0) {
+      // Category heading — italic grey + highlight match.
+      return $(`<span style="color:#888;font-style:italic;">${_highlightMatchInText(option.text)}</span>`)
+    }
+    return $('<span>').html(_highlightMatchInText(option.text))
+  }
+  // Selection (closed-state) doesn't need highlighting — the search term is gone.
+  const _searchedWordsStyleSelection = (option) => {
     if (!option || !option.id) return option && option.text
     if (typeof option.id === 'string' && option.id.indexOf('__cat__:') === 0) {
       return $(`<span style="color:#888;font-style:italic;">${option.text}</span>`)
@@ -3485,8 +3549,9 @@ $(document).ready(function () {
       placeholder: 'Vocabulary',
       allowClear: true,
       templateResult: _searchedWordsStyleCategory,
-      templateSelection: _searchedWordsStyleCategory,
-      matcher: diacriticAwareMatcher
+      templateSelection: _searchedWordsStyleSelection,
+      matcher: diacriticAwareMatcher,
+      escapeMarkup: m => m
     })
   }
   $("#addToVocabularyDialogSelect").select2({
@@ -6020,7 +6085,16 @@ function vocabLineMatchesPrefix(vocabLine, searchText) {
   // (a 1- or 2-letter term would match nearly every line).
   const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim()).filter(s => s.length >= 3)
   if (searchParts.length === 0) return false
-  const vocabParts = vocabLine.split(SEPARATOR_PIPE).map(p => p.toLowerCase().trim()).filter(p => p.length >= 2)
+  // Strip parenthetical annotations from vocab parts before comparing.
+  // Entries like "stoft(-et)" carry an optional-suffix hint that has to be
+  // removed or else `searchText.startsWith("stoft(-et)")` fails on a word
+  // like "stoftskyarna" that should clearly hit the "stoft" stem.
+  const vocabParts = vocabLine.split(SEPARATOR_PIPE)
+    .map(p => p.toLowerCase().trim())
+    .map(p => {
+      try { return removeHintsInBrackets(p).trim() } catch (_) { return p }
+    })
+    .filter(p => p.length >= 2)
   return vocabParts.some(p => searchParts.some(s =>
     s.startsWith(p) || p.startsWith(s) || s.endsWith(p) || p.endsWith(s)
   ))
@@ -6439,6 +6513,57 @@ function _highlightWordInLine(text, word) {
   return text.replace(re, '<b style="color:#1565c0">$1</b>')
 }
 
+// Render a vocab line (raw, possibly pipe-separated) with the portion of
+// each `|`-segment that matches the current search wrapped in
+// <mark class="vocab-hl">. The "matched portion" is the longest common
+// prefix or suffix (>= 3 chars) between any search part and the segment
+// AFTER its bracketed hints are stripped (so `stoft(-et)` matches
+// "stoftskyarna" via the bare stem "stoft" yet still highlights "stoft"
+// in the displayed text with brackets intact).
+//
+// Returns an HTML-safe string — does NOT need additional _.escape by the
+// caller; non-matching slices are passed through _.escape inside.
+function _highlightSearchInVocabLine(rawText, searchText) {
+  if (!rawText) return ''
+  if (!searchText) return _.escape(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
+  const searchParts = String(searchText).toLowerCase()
+    .split(SEPARATOR_PIPE).map(s => s.trim()).filter(s => s.length >= 3)
+  if (!searchParts.length) return _.escape(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
+
+  const segments = String(rawText).split(SEPARATOR_PIPE)
+  const html = segments.map(seg => {
+    let stripped
+    try { stripped = removeHintsInBrackets(seg.toLowerCase()).trim() }
+    catch (_) { stripped = seg.toLowerCase().trim() }
+    if (stripped.length < 2) return _.escape(seg)
+
+    // Pick the longest prefix-OR-suffix overlap (>= 3 chars) across all
+    // search parts. Keeps things visually consistent with the prefix-match
+    // logic in vocabLineMatchesPrefix.
+    let bestLen = 0
+    let bestKind = null   // 'prefix' | 'suffix'
+    for (const s of searchParts) {
+      const lenP = Math.min(stripped.length, s.length)
+      let lcp = 0
+      while (lcp < lenP && stripped.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
+      if (lcp >= 3 && lcp > bestLen) { bestLen = lcp; bestKind = 'prefix' }
+      let lcs = 0
+      while (lcs < lenP && stripped.charCodeAt(stripped.length - 1 - lcs) === s.charCodeAt(s.length - 1 - lcs)) lcs++
+      if (lcs >= 3 && lcs > bestLen) { bestLen = lcs; bestKind = 'suffix' }
+    }
+    if (!bestLen) return _.escape(seg)
+
+    const matched = bestKind === 'prefix' ? stripped.slice(0, bestLen) : stripped.slice(stripped.length - bestLen)
+    const segLower = seg.toLowerCase()
+    const idx = bestKind === 'prefix' ? segLower.indexOf(matched) : segLower.lastIndexOf(matched)
+    if (idx < 0) return _.escape(seg)
+    return _.escape(seg.slice(0, idx)) +
+           '<mark class="vocab-hl">' + _.escape(seg.slice(idx, idx + bestLen)) + '</mark>' +
+           _.escape(seg.slice(idx + bestLen))
+  })
+  return html.join(' | ')
+}
+
 // Group items so entries that share the same key end up adjacent. The
 // relative order across keys is determined by the first occurrence of each
 // key in the input, and the relative order within a key is preserved
@@ -6476,9 +6601,17 @@ function _buildVocabLine(it, highlight) {
   } else {
     txt = '------------------'
   }
-  let displayTxt = _.escape(txt).replaceAll(SEPARATOR_PIPE, ' | ')
-  if (highlight) displayTxt = _highlightWordInLine(displayTxt, highlight)
-  $line.append(`<span>${displayTxt}</span>`)
+  let displayHtml
+  if (highlight) {
+    // Whole-word highlight (similarity search passes the candidate here).
+    displayHtml = _highlightWordInLine(_.escape(txt).replaceAll(SEPARATOR_PIPE, ' | '), highlight)
+  } else {
+    // Default mode: highlight the prefix/suffix portion of each |-segment
+    // that overlaps with the current search term — same logic that drove
+    // the prefix match upstream, so the user sees *why* the line matched.
+    displayHtml = _highlightSearchInVocabLine(txt, window.searchText || '')
+  }
+  $line.append(`<span>${displayHtml}</span>`)
   $line.data({ text: txt })
   return $line
 }
