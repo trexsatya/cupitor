@@ -197,6 +197,12 @@
             </div>
 
             <div id="mainControlBody">
+                <!-- Front-page Practice Log/Schedule banner. JS reveals this on first ever
+                     load (no opens recorded yet) and hides it once the dialog has been
+                     opened at least once — after that the same feature lives in Settings. -->
+                <div id="practiceLogFrontBanner" style="display: none; margin: 6px 0 8px 0;">
+                    <button type="button" id="practiceLogFrontBtn" class="lang-tool-btn practice-log-front-btn" onclick="openPracticeLogDialog()" title="Plan your week of language practice (Reading, Writing, Listening, …) and track what got done.">📋 Practice Log/Schedule</button>
+                </div>
                 <div class="lang-search-row">
                     <div class="lang-search-top-row">
                         <span class="lang-search-input-wrap">
@@ -262,6 +268,7 @@
                             </label>
                         </div>
                     </label>
+                    <button type="button" id="practiceLogSettingsBtn" class="lang-tool-btn" onclick="openPracticeLogDialog()" title="Plan your week of language practice (Reading, Writing, Listening, …) and track what got done.">📋 Practice Log</button>
                     <span class="manage-wrap" style="position:relative;display:inline-block;">
                         <button type="button" id="manageBtn" class="lang-tool-btn" title="Channels / Rare words / Duplicate SRTs">Manage…</button>
                         <div id="manageMenu" class="manage-popover" style="display:none;">
@@ -491,6 +498,37 @@
                 <span id="vocabPendingHint" style="display:none;font-size:0.75em;color:#a06000;">unsaved changes pending — Save &amp; Close to commit</span>
             </div>
         </div>
+        <div id="practiceLogDialog" title="Practice Log / Schedule" style="display: none;">
+            <div class="practice-log-tabs">
+                <button type="button" class="practice-log-tab" data-tab="current">Current week</button>
+                <button type="button" class="practice-log-tab" data-tab="next">Next week</button>
+                <button type="button" class="practice-log-tab" data-tab="history">History</button>
+            </div>
+            <div id="practiceLogWeekLabel" class="practice-log-week-label"></div>
+            <div id="practiceLogPlanView" class="practice-log-plan">
+                <div id="practiceLogItems"></div>
+                <div class="practice-log-add-row">
+                    <input type="text" id="practiceLogNewItemName" placeholder="Add custom item (e.g. Pronunciation, Watching news)…" style="flex:1;">
+                    <button type="button" id="practiceLogAddItemBtn" class="lang-tool-btn">Add</button>
+                </div>
+            </div>
+            <div id="practiceLogHistoryView" class="practice-log-history" style="display:none;">
+                <div class="practice-log-history-config">
+                    <label title="How many weeks to keep in history. Older weeks are pruned the next time you Save & Push. Default 100.">Keep last
+                        <input type="number" id="practiceLogHistoryWeeks" min="1" max="9999" value="100" style="width:60px;">
+                        weeks of history
+                    </label>
+                </div>
+                <div id="practiceLogHistoryList"></div>
+            </div>
+            <div class="practice-log-actions">
+                <button type="button" id="practiceLogSaveBtn" class="lang-tool-btn">Save &amp; Push</button>
+                <button type="button" id="practiceLogCloseBtn" class="lang-tool-btn">Close</button>
+                <span id="practiceLogPendingHint" style="display:none;font-size:0.75em;color:#a06000;margin-left:8px;">unsaved changes pending — Save &amp; Push to commit</span>
+                <span id="practiceLogStatus" style="font-size:0.75em;color:#666;margin-left:8px;"></span>
+            </div>
+        </div>
+
         <div id="localMedia" style="float: left; margin-top: 1.5em;">
             <audio id="localAudio" src="" width="700" height="500" style="display: none;"></audio>
 
