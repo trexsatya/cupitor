@@ -11751,7 +11751,13 @@ function _maybeResumeStartItem(mode) {
   if (!lp || !Array.isArray(lp.queueKeys) || !lp.queueKeys.length) return null
   const live = _reconstituteQueue(lp.queueKeys)
   if (!live.length) return null
-  const pos = Math.min(Math.max(0, lp.queuePos || 0), live.length - 1)
+  // queuePos >= queueKeys.length means the previous session played the
+  // whole queue to the end — no resume target, start fresh next time so
+  // the user doesn't see a "1 of N remaining" prompt that just replays
+  // the last item.
+  const rawPos = lp.queuePos || 0
+  if (rawPos >= lp.queueKeys.length) return null
+  const pos = Math.min(Math.max(0, rawPos), live.length - 1)
   const remaining = live.length - pos
   const resume = confirm(
     `Resume your last ${m} session in "${cur}"?\n\n` +
@@ -12382,6 +12388,22 @@ async function playRecording(opts) {
     }
     i++
   }
+  // If we exited the loop because i >= queue.length AND looping is off,
+  // the session played to natural completion. Mark queuePos past the end
+  // so the next Play All doesn't pop the "1 of N remaining" resume
+  // prompt for what was actually a finished session.
+  try {
+    if (!_curLooping() && queue.length && i >= queue.length) {
+      const recName = (window._recording && window._recording.currentName) || (queue[0] && queue[0]._recName)
+      if (recName) {
+        const map = _loadLastPlayedMap()
+        if (map[recName] && map[recName].play) {
+          map[recName].play.queuePos = queue.length
+          _saveLastPlayedMap(map)
+        }
+      }
+    }
+  } catch (_) {}
   window._recPlayQueue = null
   window._playingRecording = false
   window._recPlaySlowdown = false
@@ -12668,11 +12690,16 @@ function openPracticeMode(opts) {
       alert(opts.queue ? 'No starred lines to practice.' : 'No items to practice (all excluded?).')
       return
     }
-    _shuffleQueue(queue)
-    // Optional startItem rotation — rotates the freshly-shuffled queue so the
-    // requested card lands at index 0. Used by per-item launch points (the
-    // review dialog's "Play from this item" button doesn't invoke practice,
-    // but keeping the path symmetric with playRecording).
+    // Match Player's order semantics: respect the recPlayShuffle setting.
+    // Default off → natural playlist order, same as Player when shuffle is
+    // off. The in-practice shuffle button (top bar) flips this same setting.
+    if (window._appSettings && window._appSettings.recPlayShuffle) {
+      _shuffleQueue(queue)
+    }
+    // Optional startItem rotation — rotates the queue so the requested card
+    // lands at index 0. Used by per-item launch points (the review dialog's
+    // "Play from this item" button doesn't invoke practice, but keeping the
+    // path symmetric with playRecording).
     if (opts.startItem) {
       const s = opts.startItem
       const i0 = queue.findIndex(q =>
@@ -12719,6 +12746,7 @@ function openPracticeMode(opts) {
       <div class="practice-topbar">
         <span class="practice-count"></span>
         <button type="button" class="practice-info" aria-label="Show item details" title="Show item details" aria-expanded="false">ℹ</button>
+        <button type="button" class="practice-shuffle" aria-label="Shuffle" title="Shuffle order" aria-pressed="false">🔀</button>
         <button type="button" class="practice-settings" aria-label="Practice settings" title="Reveal mode / direction / delete" aria-expanded="false">⋯</button>
         <button type="button" class="practice-minimize" aria-label="Minimize" title="Minimize">⌄</button>
         <button type="button" class="practice-close" aria-label="Close practice" title="Close">✕</button>
@@ -12783,6 +12811,7 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-restore-btn', restorePracticeMode)
     $p.on('click', '.practice-delete', _deleteCurrentPracticeCard)
     $p.on('click', '.practice-info', _togglePracticeInfoPanel)
+    $p.on('click', '.practice-shuffle', _togglePracticeShuffle)
     $p.on('click', '.practice-settings', _togglePracticeSettingsPanel)
     $p.on('change', '.practice-reveal-select', function () {
       const v = String($(this).val() || 'flip')
@@ -12869,6 +12898,8 @@ function openPracticeMode(opts) {
   // Without this, re-entering practice mode (e.g. Review → Practice) would
   // re-pin the YT player but leave the topbar/card/nav hidden.
   $p.removeClass('minimized')
+  // Reflect current shuffle state on the top-bar button.
+  _refreshPracticeShuffleBtn()
   // Listen for keyboard show/hide on mobile so we can lift the card above it.
   if (window.visualViewport && !window._practiceViewportWired) {
     window.visualViewport.addEventListener('resize', _onPracticeViewportChange)
@@ -13037,6 +13068,43 @@ function _deleteCurrentPracticeCard() {
   window._practicePlaybackRate = 1
   window._practiceFlipped = false
   _renderPracticeCard()
+}
+
+// Reflect the current recPlayShuffle state on the practice top-bar button.
+function _refreshPracticeShuffleBtn() {
+  const $btn = $('#practiceMode').find('.practice-shuffle')
+  if (!$btn.length) return
+  const on = !!(window._appSettings && window._appSettings.recPlayShuffle)
+  $btn.toggleClass('active', on).attr('aria-pressed', on ? 'true' : 'false')
+    .attr('title', on ? 'Shuffle: on (tap to restore order)' : 'Shuffle: off (tap to randomise)')
+}
+
+// Toggle shuffle for the practice queue — flips the same recPlayShuffle
+// setting the player overlay uses, then re-derives the queue in the new
+// order. Preserves the currently visible card's identity so the user
+// doesn't get teleported to a different one when toggling.
+function _togglePracticeShuffle() {
+  if (!window._appSettings) window._appSettings = {}
+  const next = !window._appSettings.recPlayShuffle
+  window._appSettings.recPlayShuffle = next
+  try { saveAppSettings() } catch (_) {}
+  if (window._practiceActive && Array.isArray(window._practiceCards) && window._practiceCards.length) {
+    const cur = window._practiceCards[window._practiceIdx] || null
+    // Rebuild from the playlist in natural order, then shuffle if enabled.
+    // This restores order when shuffle is being turned OFF.
+    const fresh = _buildPlayQueue('off')
+    if (next) _shuffleQueue(fresh)
+    if (fresh.length) {
+      const newIdx = cur
+        ? fresh.findIndex(q => q && q._recName === cur._recName && q._st === cur._st && q._w === cur._w && q._idx === cur._idx)
+        : 0
+      window._practiceCards = fresh
+      window._practiceIdx = Math.max(0, newIdx)
+      try { _saveQueueOrder(fresh, 'practice') } catch (_) {}
+      try { _renderPracticeCard() } catch (_) {}
+    }
+  }
+  _refreshPracticeShuffleBtn()
 }
 
 function _togglePracticeInfoPanel() {

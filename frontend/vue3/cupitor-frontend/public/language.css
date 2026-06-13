@@ -1922,6 +1922,7 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 #practiceMode .practice-minimize:hover,
 #practiceMode .practice-close:hover { background: rgba(0,0,0,0.85); }
 #practiceMode .practice-info,
+#practiceMode .practice-shuffle,
 #practiceMode .practice-settings {
     width: 32px;
     height: 32px;
@@ -1933,8 +1934,10 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     cursor: pointer;
 }
 #practiceMode .practice-info.active,
+#practiceMode .practice-shuffle.active,
 #practiceMode .practice-settings.active { background: rgba(25, 118, 210, 0.85); }
 #practiceMode .practice-info:hover,
+#practiceMode .practice-shuffle:hover,
 #practiceMode .practice-settings:hover { background: rgba(0,0,0,0.85); }
 /* Slide-down panels under the topbar. Both info + settings share the same
    anchor + animation; only one is open at a time (see _togglePracticeInfoPanel
