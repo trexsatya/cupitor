@@ -605,7 +605,7 @@ function importSearchesFromVocab() {
   loadSearches()
 }
 
-function loadWholeVocabulary() {
+function loadWholeVocabulary(onDone) {
   $('#searchedWords').html('')
   $('#addToVocabularyDialogSelect').html('')
   // Empty leading option so select2's allowClear (X) has something to reset
@@ -650,6 +650,9 @@ function loadWholeVocabulary() {
   }, () => {
     $('#addToVocabBtn').prop('disabled', false)
     $('#vocabLoadingBar').hide()
+    if (typeof onDone === 'function') {
+      try { onDone() } catch (e) { console.warn('loadWholeVocabulary onDone failed', e) }
+    }
   })
 }
 
@@ -841,7 +844,14 @@ function addToVocab(commitAndClose) {
     // staged additions from earlier rounds, refresh the selects (we held
     // off during "Add another"), then commit and close.
     if (commitAndClose && window._vocabHasPendingChanges) {
-      loadWholeVocabulary()
+      const $addAnother = $('#addVocabAddAnotherBtn')
+      const $saveClose  = $('#addVocabSaveCloseBtn')
+      $addAnother.prop('disabled', true)
+      $saveClose.prop('disabled', true)
+      loadWholeVocabulary(() => {
+        $addAnother.prop('disabled', false)
+        $saveClose.prop('disabled', false)
+      })
       commitVocabularyToGithub()
       window._vocabHasPendingChanges = false
       window._vocabPendingCount = 0
@@ -938,7 +948,20 @@ function addToVocab(commitAndClose) {
   // been staged this session — otherwise "Add another" leaves the picker
   // showing pre-edit state, which makes it look as if the entry didn't
   // land. GitHub push is still deferred until Save & Close.
-  loadWholeVocabulary()
+  //
+  // The rebuild is async (loadWholeVocabulary uses schedule()), so the
+  // dialog buttons get disabled while it runs to (a) give the user visual
+  // feedback that the picker is refreshing and (b) prevent a double-click
+  // from racing the rebuild. Re-enabled in the onDone callback.
+  const $addAnother = $('#addVocabAddAnotherBtn')
+  const $saveClose  = $('#addVocabSaveCloseBtn')
+  const origAddLabel = $addAnother.text()
+  $addAnother.prop('disabled', true).text('Updating…')
+  $saveClose.prop('disabled', true)
+  loadWholeVocabulary(() => {
+    $addAnother.prop('disabled', false).text(origAddLabel)
+    $saveClose.prop('disabled', false)
+  })
   if (commitAndClose) {
     commitVocabularyToGithub()
     window._vocabHasPendingChanges = false
