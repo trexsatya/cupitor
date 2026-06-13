@@ -11406,23 +11406,30 @@ async function _renderPlayingSubtitles(item) {
   const secById = new Map()
   if (secondary) secondary.forEach(s => { if (s && s.index != null) secById.set(s.index + '', s) })
 
+  // Pre-collect main texts so the highlighter can decide once whether to
+  // allow per-token fallback: if the whole phrase is already present on at
+  // least one row, the fallback would otherwise light up standalone parts
+  // on neighbouring rows. Tokens only kick in when the phrase is truly
+  // split across rows (= absent from every single row).
+  const mainTexts = []
+  for (let i = from; i <= to; i++) {
+    const line = primary[i]
+    mainTexts.push((line && (line.text || line[lang] || '')) || '')
+  }
+  const allowTokens = !!(item && item.word) && !_phraseFoundInTexts(mainTexts, item.word)
+
   const $list = $('<div class="rec-ps-list"></div>')
   for (let i = from; i <= to; i++) {
     const line = primary[i]
     const sec = line && line.index != null ? secById.get(line.index + '') : null
-    const mainText = line && (line.text || line[lang] || '') || ''
+    const mainText = mainTexts[i - from]
     const secText  = sec  && (sec.text  || sec[lang === 'sv' ? 'en' : 'sv'] || '') || ''
     const $row = $('<div class="rec-ps-row" data-line-i="' + i + '"></div>')
     if (i === matchIdx) $row.addClass('rec-ps-active')
-    // Run the highlighter on every visible row, not just the matched one:
-    // a phrase like "i förväg" can be split across two SRT rows (".. ser i"
-    // on row N, "förväg .." on row N+1), and we want both halves to light up.
-    // The helper itself returns plain text when nothing matches, so context
-    // rows without the word stay clean.
     if (item && item.word) {
-      $row.append($('<div class="rec-ps-main"></div>').html(_highlightWordHtml(mainText, item.word)))
+      $row.append($('<div class="rec-ps-main"></div>').html(_highlightWordHtml(mainText, item.word, { allowTokens })))
     } else {
-      $row.append($('<div class="rec-ps-main"></div>').text(mainText.trim()))
+      $row.append($('<div class="rec-ps-main"></div>').text(String(mainText).trim()))
     }
     if (secText.trim()) $row.append($('<div class="rec-ps-sec"></div>').text(secText.trim()))
     $list.append($row)
@@ -11438,9 +11445,46 @@ async function _renderPlayingSubtitles(item) {
 // plain text if `word` is empty or doesn't match — callers should still set
 // the element via .html() so the wrapped markup renders. Unicode-aware word
 // boundaries keep "design" from matching inside "designing".
-function _highlightWordHtml(text, word) {
+// Build a Unicode-bounded regex from `pattern` (already a regex source,
+// caller is responsible for escaping). Falls back to unbounded for old
+// engines without lookbehind / \p. Shared by _highlightWordHtml and the
+// pre-scan in _phraseFoundInTexts.
+function _buildBoundedWordRe(pattern, flags = 'giu') {
+  try {
+    return new RegExp(`(?<![\\p{L}\\p{N}])(${pattern})(?![\\p{L}\\p{N}])`, flags)
+  } catch (_) {
+    return new RegExp(`(${pattern})`, flags.replace('u', ''))
+  }
+}
+
+// True if `word` (treated as a literal phrase) appears in any of `texts`.
+// Used by the multi-row highlight callers (Player + Practice) to decide
+// whether to allow per-token fallback: when the WHOLE phrase is present
+// on at least one rendered row, suppress fallback everywhere — otherwise
+// a composite word like "x y z" would also light up its standalone parts
+// on neighbouring rows.
+function _phraseFoundInTexts(texts, word) {
+  const w = String(word == null ? '' : word).trim()
+  if (!w || !Array.isArray(texts) || !texts.length) return false
+  const reEsc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = _buildBoundedWordRe(reEsc)
+  for (const t of texts) {
+    if (!t) continue
+    re.lastIndex = 0
+    if (re.test(String(t))) return true
+  }
+  return false
+}
+
+// opts.allowTokens (default true): when false, the per-token fallback is
+// suppressed and only the whole-phrase match is highlighted. Callers that
+// pre-scan a corpus (Player / Practice) pass `false` whenever the whole
+// phrase was found on at least one row, so the standalone parts on other
+// rows don't also light up.
+function _highlightWordHtml(text, word, opts) {
   const t = (text == null ? '' : String(text)).trim()
   const w = (word == null ? '' : String(word)).trim()
+  const allowTokens = !opts || opts.allowTokens !== false
   // Escape the input for use as an HTML text node — we'll splice markup in
   // around the match positions after, so we're never injecting user text.
   const esc = (s) => String(s)
@@ -11451,14 +11495,7 @@ function _highlightWordHtml(text, word) {
     .replace(/'/g, '&#39;')
   if (!w) return esc(t)
   const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const buildRe = (pattern) => {
-    try {
-      return new RegExp(`(?<![\\p{L}\\p{N}])(${pattern})(?![\\p{L}\\p{N}])`, 'giu')
-    } catch (_) {
-      // Older engines without lookbehind / \p — fall back to unbounded.
-      return new RegExp(`(${pattern})`, 'gi')
-    }
-  }
+  const buildRe = (pattern) => _buildBoundedWordRe(pattern)
   // Splice <mark> around every match position from a precomputed list of
   // {start, end} spans (assumed non-overlapping, ordered).
   const splice = (spans) => {
@@ -11487,10 +11524,12 @@ function _highlightWordHtml(text, word) {
   // highlight when both words sit on the same line.
   const fullSpans = collectSpans(buildRe(reEsc(w)))
   if (fullSpans.length) return splice(fullSpans)
-  // Fall back to per-token: SRT lines can split a phrase across rows, so
-  // "i förväg" might land as "...man ser i" on one row and "förväg ..." on
-  // the next. Highlight each token separately. Unicode word boundaries keep
-  // a token like "i" from matching inside "vi"/"is".
+  // Token fallback covers the case where the SRT split a phrase across
+  // rows (".. man ser i" on row N, "förväg .." on row N+1). Callers that
+  // already saw the whole phrase on some OTHER row pass allowTokens=false
+  // to suppress this — otherwise a composite "x y z" would also light up
+  // standalone "x" / "y" / "z" on neighbouring rows.
+  if (!allowTokens) return esc(t)
   const tokens = w.split(/\s+/).map(s => s.trim()).filter(Boolean)
   if (tokens.length <= 1) return esc(t)
   const tokenRe = buildRe(tokens.map(reEsc).join('|'))
@@ -13265,12 +13304,23 @@ async function playPracticeClip() {
 // source word verbatim.
 function _practiceRenderLines($container, rows, langKey, highlightWord) {
   $container.empty()
+  // Pre-scan source texts so per-token fallback is suppressed when the
+  // whole phrase appears on any row — keeps a multi-word "x y z" from
+  // also lighting up standalone parts on neighbouring rows. Token
+  // fallback still kicks in when the phrase is genuinely split across
+  // rows (= absent from every single row).
+  const sourceTexts = (langKey === 'source' && highlightWord)
+    ? rows.map(r => (r.source || ''))
+    : []
+  const allowTokens = (langKey === 'source' && highlightWord)
+    ? !_phraseFoundInTexts(sourceTexts, highlightWord)
+    : false
   rows.forEach(r => {
     const text = (langKey === 'source') ? r.source : r.target
     const $row = $(`<div class="practice-line${r.isMatch ? ' practice-line-match' : ''}" data-line-index="${r.lineIndex}"></div>`)
     const $text = $('<span class="practice-line-text"></span>')
     if (langKey === 'source' && highlightWord) {
-      $text.html(_highlightWordHtml(text || '(empty)', highlightWord))
+      $text.html(_highlightWordHtml(text || '(empty)', highlightWord, { allowTokens }))
     } else {
       $text.text(text || '(empty)')
     }
