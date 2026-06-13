@@ -3046,3 +3046,190 @@ body.rec-playing #recPlayingSubs { display: block; }
     padding: 0 2px;
     border-radius: 2px;
 }
+
+/* ── Practice Log / Schedule dialog ─────────────────────────────── */
+/* jQuery UI manages height + overflow:auto on the .ui-dialog-content via its
+   maxHeight option (set in openPracticeLogDialog). We only add inner padding
+   so the last row doesn't hug the scrollbar. Extra padding-bottom keeps the
+   "Add custom item" row clear of the actions bar when the content scrolls. */
+#practiceLogDialog {
+    padding-bottom: 64px;
+}
+.practice-log-front-btn {
+    background: #1e7e34;
+    color: #fff;
+    border: 1px solid #185c27;
+    padding: 6px 14px;
+    font-size: 0.95em;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.practice-log-front-btn:hover { background: #1c7430; }
+
+/* "Plan your week" cue: applied to both #practiceLogFrontBtn and
+   #practiceLogSettingsBtn by _refreshPracticeLogBtnHighlight whenever
+   neither the current nor next ISO week has any planned content. */
+@keyframes practice-log-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.55); }
+    70%  { box-shadow: 0 0 0 8px rgba(255, 152, 0, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0); }
+}
+.practice-log-needs-attention {
+    animation: practice-log-pulse 1.6s ease-out infinite;
+    background: #ff9800 !important;
+    color: #111 !important;
+    border-color: #c66900 !important;
+    font-weight: 600;
+}
+
+#practiceLogDialog .practice-log-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid #ddd;
+    margin-bottom: 8px;
+}
+#practiceLogDialog .practice-log-tab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 0.9em;
+    color: #555;
+    border-radius: 4px 4px 0 0;
+}
+#practiceLogDialog .practice-log-tab.active {
+    background: #fff;
+    border-color: #ddd;
+    color: #222;
+    font-weight: 600;
+    position: relative;
+    top: 1px;
+}
+#practiceLogDialog .practice-log-week-label {
+    font-size: 0.8em;
+    color: #888;
+    margin-bottom: 6px;
+}
+#practiceLogDialog .practice-log-item {
+    display: grid;
+    grid-template-columns: 130px 130px 1fr auto;
+    gap: 6px;
+    align-items: start;
+    padding: 6px 0;
+    border-bottom: 1px dashed #eee;
+}
+#practiceLogDialog .practice-log-item-name {
+    font-weight: 600;
+    font-size: 0.92em;
+    padding-top: 4px;
+}
+#practiceLogDialog .practice-log-item-status {
+    font-size: 0.85em;
+    padding: 3px 4px;
+}
+#practiceLogDialog .practice-log-item-notes {
+    font-family: inherit;
+    font-size: 0.85em;
+    width: 100%;
+    min-height: 2.4em;
+    resize: vertical;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 3px 5px;
+    box-sizing: border-box;
+}
+#practiceLogDialog .practice-log-item-remove {
+    background: transparent;
+    border: 1px solid #ccc;
+    color: #c33;
+    cursor: pointer;
+    border-radius: 3px;
+    width: 22px;
+    height: 22px;
+    font-size: 0.85em;
+    padding: 0;
+    line-height: 1;
+}
+#practiceLogDialog .practice-log-item-remove:hover { background: #fee; }
+#practiceLogDialog .practice-log-add-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+    margin-bottom: 12px;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+}
+#practiceLogDialog .practice-log-add-row input {
+    padding: 4px 6px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+#practiceLogDialog .practice-log-history-config {
+    font-size: 0.85em;
+    color: #555;
+    margin-bottom: 8px;
+}
+#practiceLogDialog .practice-log-history-week {
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-bottom: 6px;
+    background: #fafafa;
+}
+#practiceLogDialog .practice-log-history-week-header {
+    font-weight: 600;
+    font-size: 0.88em;
+    margin-bottom: 4px;
+    color: #333;
+}
+#practiceLogDialog .practice-log-history-item {
+    font-size: 0.82em;
+    padding: 2px 0;
+    color: #444;
+}
+#practiceLogDialog .practice-log-history-item .pl-status {
+    display: inline-block;
+    min-width: 90px;
+    font-weight: 600;
+}
+#practiceLogDialog .practice-log-notes-toggle {
+    background: transparent;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    padding: 0 4px;
+    margin-left: 6px;
+    cursor: pointer;
+    font-size: 0.85em;
+    line-height: 1.2;
+}
+#practiceLogDialog .practice-log-notes-toggle:hover { background: #f0f0f0; }
+#practiceLogDialog .practice-log-history-notes {
+    margin: 4px 0 6px 100px;
+    padding: 5px 8px;
+    background: #fff;
+    border-left: 3px solid #ffc107;
+    color: #555;
+    font-size: 0.85em;
+    white-space: pre-wrap;
+}
+#practiceLogDialog .pl-status-done       { color: #1e7e34; }
+#practiceLogDialog .pl-status-progress   { color: #b8860b; }
+#practiceLogDialog .pl-status-skipped    { color: #999; text-decoration: line-through; }
+#practiceLogDialog .pl-status-notstarted { color: #888; }
+#practiceLogDialog .practice-log-actions {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #ddd;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+    #practiceLogDialog .practice-log-item {
+        grid-template-columns: 1fr;
+    }
+    #practiceLogDialog .practice-log-item-name { padding-top: 0; }
+}
