@@ -527,9 +527,35 @@
     font-size: 0.85em;
 }
 .similar-segment-header.is-open .similar-chevron,
-.l-accordion.active .similar-chevron {
+.l-accordion.active .similar-chevron,
+.prefix-group-header.is-open .prefix-group-chevron {
     transform: rotate(90deg);
 }
+
+/* Outer collapsible that groups prefix-search results by which search part
+   they matched (e.g. "kvällstysta" → a "kväll" group and a "tyst" group). */
+.prefix-group { margin-top: 4px; border: 1px solid #e2e2e2; border-radius: 4px; }
+.prefix-group-header {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: #f7f7f7;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+.prefix-group-header .prefix-group-count { color: #777; font-weight: normal; margin-left: 6px; font-size: 0.85em; }
+.prefix-group-header .prefix-group-part { color: #1565c0; }
+.prefix-group-chevron {
+    color: #444;
+    flex: 0 0 auto;
+    transition: transform 0.12s ease;
+    transform-origin: 35% 50%;
+    font-size: 0.85em;
+}
+.prefix-group-body { padding: 4px 6px; }
 
 /* Sticky headings for the SRT findings accordion (#result). z-index has to
    beat `.lines-cntnr .buttons` (which is also sticky inside the panel) so

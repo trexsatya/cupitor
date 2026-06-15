@@ -124,6 +124,13 @@ window.addEventListener('capturedSubtitle', (e) => {
   }
 });
 
+window.addEventListener('cupitorDialog1Closed', () => {
+  // Close all dialogs
+  $('.ui-dialog-content').each(function () {
+    try { $(this).dialog('close') } catch (_) {}
+  })
+});
+
 function getExpansionForWords() {
   const list = ``
 
@@ -1762,7 +1769,11 @@ window._appSettings = {
   //            text with the target translation (click again to flip back) — default
   //   'both' — back shown alongside the front from the start, no Reveal button
   //   'hide' — back appears below the front when Reveal is clicked
-  practiceRevealMode: 'flip'
+  practiceRevealMode: 'flip',
+  // Max rows shown upfront in the prefix-search vocabulary panel. The rest
+  // (strongest matches that overflow this cap) move into the "Different
+  // prefixes" dialog at the top so they're still reachable in one click.
+  prefixResultsMax: 5
 }
 
 function appSettingsLocalKey() {
@@ -1791,7 +1802,15 @@ function loadAppSettings() {
     parseInt(window._appSettings.recPlayGapSeconds, 10) || 30
   )
   $('#practiceRevealMode').val(window._appSettings.practiceRevealMode || 'flip')
+  $('#numberOfPrefixFindings').val(
+    parseInt(window._appSettings.prefixResultsMax, 10) || 5
+  )
   return Promise.resolve()
+}
+
+function _getPrefixResultsMax() {
+  const n = parseInt(window._appSettings && window._appSettings.prefixResultsMax, 10)
+  return Number.isFinite(n) && n > 0 ? n : 5
 }
 
 function saveAppSettings() {
@@ -2873,6 +2892,18 @@ $('document').ready(e => {
       saveAppSettings()
       // Re-render the current card so the change is felt immediately.
       if (window._practiceActive) _renderPracticeCard()
+    }
+  })
+
+  $('#numberOfPrefixFindings').on('change input', e => {
+    const v = parseInt($(e.target).val(), 10)
+    if (Number.isFinite(v) && v > 0) {
+      window._appSettings.prefixResultsMax = Math.min(200, v)
+      saveAppSettings()
+      // Re-run the prefix search so the new cap takes effect immediately.
+      if ($('#toggleAutoPrefixSearchCheckbox').is(':checked') && window.searchText) {
+        try { searchVocabularyByPrefix() } catch (_) {}
+      }
     }
   })
 
@@ -6078,26 +6109,303 @@ export function wordIsInVocabularyLine(vocabLine, search) {
  * and `xyzw` matches `xyz` (also prefix) — the four combinations cover
  * every "one is a prefix/suffix of the other" relationship.
  */
-function vocabLineMatchesPrefix(vocabLine, searchText) {
+// Returns the longest prefix/suffix overlap (in chars) between any vocab-line
+// pipe-segment and any search part, or 0 if none. Lets callers tier matches:
+// >= 3 is a "strong" hit; 2 is a "weak" hit (e.g. searching "gråt" hitting a
+// "åt" segment via 2-char suffix overlap). Same bracket-stripping as the
+// boolean matcher below.
+// Common Swedish stop-words & inflectional clitics that we never want to
+// anchor a prefix/suffix overlap on (otherwise vocab lines containing the
+// word "det" would match every "*-det" search, "et" would match every
+// neuter-definite, etc.). Built on top of `commonWordsToIgnore` plus a
+// small list of bare inflection markers that aren't standalone words.
+const VOCAB_OVERLAP_STOP_WORDS = new Set([
+  ...commonWordsToIgnore.map(w => w.toLowerCase()),
+  'et', 'ett', 'en', 'arna', 'erna', 'orna', 'are', 'ade', 'ar', 'or', 'er',
+  'av', 'om', 'och', 'att',
+  // Possessives & demonstratives that shouldn't anchor a prefix overlap.
+  'sin', 'sitt', 'sina', 'din', 'dina', 'min', 'mina', 'vår', 'våra', 'era',
+  'ert', 'denna', 'detta', 'dessa', 'samma', 'andra', 'samt'
+])
+
+// Common Swedish noun/verb inflections that get stripped when probing
+// compound decomposition. "trollguldet" → strip "et" → "trollguld" →
+// split into known words "troll" + "guld". The empty-string entry lets
+// the second half be a bare known word (no inflection).
+const VOCAB_COMPOUND_SUFFIXES = ['ningarna', 'ningar', 'ningen', 'ning', 'else', 'heten', 'het', 'arna', 'erna', 'orna', 'ande', 'ende', 'ade', 'ats', 'at', 'et', 'en', 'ar', 'or', 'er', 'na', 'ad', 'as', 'a', 's', '']
+
+// Lazy-built set of every word that appears in some non-hidden vocabulary
+// line and isn't a stop-word — used as the lexicon for compound splits.
+// Rebuilt when the number of categories changes (signal that vocabulary
+// was reloaded). Module-scoped cache stays in sync with window.vocabulary.
+function _vocabKnownWordSet() {
+  const vocab = window.vocabulary || {}
+  const key = Object.keys(vocab).length + ':' + Object.values(vocab).reduce((n, ls) => n + (Array.isArray(ls) ? ls.length : 0), 0)
+  if (window._vocabKnownWordsCache && window._vocabKnownWordsCacheKey === key) {
+    return window._vocabKnownWordsCache
+  }
+  const set = new Set()
+  for (const [cat, lines] of Object.entries(vocab)) {
+    if (!Array.isArray(lines)) continue
+    if (VOCAB_HIDDEN_CATEGORIES.has(cat)) continue
+    for (const line of lines) {
+      if (typeof line !== 'string') continue
+      for (const seg of line.split(SEPARATOR_PIPE)) {
+        let stripped
+        try { stripped = removeHintsInBrackets(seg.toLowerCase()).trim() }
+        catch (_) { stripped = seg.toLowerCase().trim() }
+        if (!stripped) continue
+        for (const w of stripped.split(/[\s,/<>*]+/)) {
+          const t = w.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '')
+          if (t.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(t)) set.add(t)
+        }
+      }
+    }
+  }
+  window._vocabKnownWordsCache = set
+  window._vocabKnownWordsCacheKey = key
+  return set
+}
+
+// Cached set of substrings that occur as a length-≥4 prefix of some known
+// vocab token. Used to surface morphemes whose only vocab presence is via a
+// longer derived form — e.g. "promen" appears in vocab via "promenera", so
+// "aftonpromenad" can still decompose to surface that line.
+function _vocabPrefixSet() {
+  const vocab = window.vocabulary || {}
+  const key = Object.keys(vocab).length + ':' + Object.values(vocab).reduce((n, ls) => n + (Array.isArray(ls) ? ls.length : 0), 0)
+  if (window._vocabPrefixSetCache && window._vocabPrefixSetCacheKey === key) {
+    return window._vocabPrefixSetCache
+  }
+  const known = _vocabKnownWordSet()
+  const set = new Set()
+  for (const t of known) {
+    for (let k = 4; k <= t.length; k++) set.add(t.slice(0, k))
+  }
+  window._vocabPrefixSetCache = set
+  window._vocabPrefixSetCacheKey = key
+  return set
+}
+
+// Decompose a (Swedish) compound word into morphemes that have a presence
+// in the vocabulary. Walks the input left-to-right, picking the longest
+// substring at each position that is either:
+//   (a) a known vocab token,
+//   (b) a known token + a common Swedish suffix (e.g. "huset" = hus + et),
+//   (c) a length-≥4 prefix of some known token (e.g. "promen" appears as
+//       the leading 6 chars of "promenera").
+// "trollguldet" → ["troll", "guld"]; "sinnesstämning" → ["sinne", "stämning"];
+// "fågelhuset" → ["fågel", "hus"]; "aftonpromenad" → ["promen"]. Bails out
+// when the input itself (or its suffix-stripped stem) is already known, so
+// regular inflections like "sparvarna" don't get split into "spar+varna".
+function vocabCompoundParts(word) {
+  if (!word || word.length < 6) return []
+  const w = word.toLowerCase()
+  const known = _vocabKnownWordSet()
+  if (known.has(w)) return []
+  for (const sfx of VOCAB_COMPOUND_SUFFIXES) {
+    if (!sfx) continue
+    if (!w.endsWith(sfx)) continue
+    const stem = w.slice(0, w.length - sfx.length)
+    if (stem.length >= 3 && known.has(stem)) return []
+  }
+  const prefixSet = _vocabPrefixSet()
+  const parts = []
+  const seen = new Set()
+  const N = w.length
+  let i = 0
+  while (i <= N - 3) {
+    let bestSub = null
+    let consumed = 0
+    // (a)/(b) combined: longest l where w[i..i+l] is a known token, OR
+    // strips down via a common suffix to a known token. (b) wins when the
+    // bare substring isn't a token but the morpheme is — e.g. "huset" → "hus".
+    for (let l = N - i; l >= 3; l--) {
+      const sub = w.slice(i, i + l)
+      if (sub === w) continue
+      if (known.has(sub)) { bestSub = sub; consumed = l; break }
+      let stripped = null
+      for (const sfx of VOCAB_COMPOUND_SUFFIXES) {
+        if (!sfx) continue
+        if (!sub.endsWith(sfx)) continue
+        const stem = sub.slice(0, sub.length - sfx.length)
+        if (stem.length >= 3 && known.has(stem)) { stripped = stem; break }
+      }
+      if (stripped) { bestSub = stripped; consumed = l; break }
+    }
+    // (c) Prefix-of-known fallback — substrings like "promen" that aren't
+    // themselves vocab tokens but lead into one ("promenera"). Skipped when
+    // (a)/(b) already produced a hit at this i.
+    if (!bestSub) {
+      for (let l = N - i; l >= 4; l--) {
+        const sub = w.slice(i, i + l)
+        if (sub === w) continue
+        if (prefixSet.has(sub) && !VOCAB_OVERLAP_STOP_WORDS.has(sub)) {
+          bestSub = sub
+          consumed = l
+          break
+        }
+      }
+    }
+    // Require either a substantial morpheme (≥4 chars) OR a 3-char stem that
+    // gets extended by an inflectional suffix to ≥5 chars. Stops coincidental
+    // 3-char hits like "ton" inside "aftonpromenad" from showing up.
+    const lenOk = bestSub && (bestSub.length >= 4 || consumed >= 5)
+    if (lenOk && !VOCAB_OVERLAP_STOP_WORDS.has(bestSub)) {
+      if (!seen.has(bestSub)) { parts.push(bestSub); seen.add(bestSub) }
+      i += Math.max(consumed, 1)
+    } else {
+      i++
+    }
+  }
+  return parts
+}
+
+// Like vocabPrefixOverlapLen but returns { len, bestPart, matched } —
+// `matched` is the actual common-prefix substring that was matched (used as
+// the group label in the UI), `bestPart` is the search part that produced
+// it. So a token "stor" matching the search "stoft" with LCP=3 surfaces
+// under a "sto" group, not "stoft".
+function vocabPrefixOverlapDetail(vocabLine, searchText) {
   const stRaw = (searchText || '').toLowerCase().trim()
-  if (!stRaw) return false
-  // Split BOTH sides on `|`. Length floor is 3: anything shorter is noise
-  // (a 1- or 2-letter term would match nearly every line).
-  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim()).filter(s => s.length >= 3)
-  if (searchParts.length === 0) return false
-  // Strip parenthetical annotations from vocab parts before comparing.
-  // Entries like "stoft(-et)" carry an optional-suffix hint that has to be
-  // removed or else `searchText.startsWith("stoft(-et)")` fails on a word
-  // like "stoftskyarna" that should clearly hit the "stoft" stem.
+  if (!stRaw) return { len: 0, bestPart: '', matched: '' }
+  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim())
+    .filter(s => s.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(s))
+  if (searchParts.length === 0) return { len: 0, bestPart: '', matched: '' }
   const vocabParts = vocabLine.split(SEPARATOR_PIPE)
     .map(p => p.toLowerCase().trim())
-    .map(p => {
-      try { return removeHintsInBrackets(p).trim() } catch (_) { return p }
-    })
+    .map(p => { try { return removeHintsInBrackets(p).trim() } catch (_) { return p } })
     .filter(p => p.length >= 2)
-  return vocabParts.some(p => searchParts.some(s =>
-    s.startsWith(p) || p.startsWith(s) || s.endsWith(p) || p.endsWith(s)
-  ))
+  let bestLen = 0
+  let bestPart = ''
+  let bestToken = ''
+  for (const p of vocabParts) {
+    const tokens = []
+    if (!VOCAB_OVERLAP_STOP_WORDS.has(p)) tokens.push(p)
+    if (/\s/.test(p)) {
+      for (const w of p.split(/\s+/)) {
+        if (w.length >= 2 && !VOCAB_OVERLAP_STOP_WORDS.has(w)) tokens.push(w)
+      }
+    }
+    for (const s of searchParts) {
+      for (const t of tokens) {
+        const lim = Math.min(t.length, s.length)
+        const needed = Math.max(1, lim - 1)
+        let lcp = 0
+        while (lcp < lim && t.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
+        if (lcp >= needed && lcp > bestLen) {
+          bestLen = lcp; bestPart = s; bestToken = t
+        }
+      }
+    }
+  }
+  // Matched substring = the common-prefix portion of the winning token.
+  const matched = bestLen > 0 ? bestToken.slice(0, bestLen) : ''
+  return { len: bestLen, bestPart, matched }
+}
+
+function vocabPrefixOverlapLen(vocabLine, searchText) {
+  const stRaw = (searchText || '').toLowerCase().trim()
+  if (!stRaw) return 0
+  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim())
+    .filter(s => s.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(s))
+  if (searchParts.length === 0) return 0
+  const vocabParts = vocabLine.split(SEPARATOR_PIPE)
+    .map(p => p.toLowerCase().trim())
+    .map(p => { try { return removeHintsInBrackets(p).trim() } catch (_) { return p } })
+    .filter(p => p.length >= 2)
+  let max = 0
+  for (const p of vocabParts) {
+    // Per-word tokens for multi-word segments — "rik som ett troll" still
+    // matches a "trollguldet" search via "troll", and "Det flyger inga
+    // stekta sparvar i munnen på en" matches "sparv" via "sparvar". Common
+    // stop-words ("det", "som", "att", "i", inflection clitics, …) are
+    // filtered out so they don't anchor spurious matches.
+    const tokens = []
+    if (!VOCAB_OVERLAP_STOP_WORDS.has(p)) tokens.push(p)
+    if (/\s/.test(p)) {
+      for (const w of p.split(/\s+/)) {
+        if (w.length >= 2 && !VOCAB_OVERLAP_STOP_WORDS.has(w)) tokens.push(w)
+      }
+    }
+    for (const s of searchParts) {
+      // "Near-containment": the shorter must be consumed by the longer with
+      // at most 1 char of divergence. Accepts inflection-style siblings
+      // ("trolla" + "trollguldet" share 5 of 6) but rejects coincidental
+      // prefix neighbours ("tropic" + "trollguldet" share only 3 of 6).
+      for (const t of tokens) {
+        const lim = Math.min(t.length, s.length)
+        const needed = Math.max(1, lim - 1)
+        let lcp = 0
+        while (lcp < lim && t.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
+        if (lcp >= needed && lcp > max) max = lcp
+      }
+    }
+  }
+  return max
+}
+
+// Longest common suffix between a vocab line's segments and the search.
+// Separated from the prefix path because suffix-only overlaps are noisy in
+// the main panel (every Swedish "-det", "-en", "-arna" matches across
+// unrelated words) — they're only useful in the Different-prefixes dialog's
+// weak-overlap fallback (the `overlap === 2` "åt" + "gråt" case).
+//
+// Only returns an LCS when the vocab segment is *entirely* consumed by the
+// suffix. Otherwise a 3-char segment like "bet" inside "(injure)|...|bet|"
+// would surface for any search ending in "-et" (trollguldet, kabinettet,
+// …) just because the last 2 chars happen to coincide.
+function vocabSuffixOverlapLen(vocabLine, searchText) {
+  const stRaw = (searchText || '').toLowerCase().trim()
+  if (!stRaw) return 0
+  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim())
+    .filter(s => s.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(s))
+  if (searchParts.length === 0) return 0
+  // Vocab parts are NOT stop-word filtered here — the dialog (b) pass needs
+  // to surface "äta|åt|ätit" for "gråt" via "åt" (a common word that would
+  // fail a stop filter). The `lcs === p.length` rule and the caller's strict
+  // `overlap === 2` are what hold the line: only fully-consumed 2-char
+  // segments contribute, and in this vocab those happen to be real words
+  // (ål, vy, sy, ro, nå, la, kö, få, åt), never bare inflection clitics.
+  const vocabParts = vocabLine.split(SEPARATOR_PIPE)
+    .map(p => p.toLowerCase().trim())
+    .map(p => { try { return removeHintsInBrackets(p).trim() } catch (_) { return p } })
+    .filter(p => p.length >= 2)
+  let max = 0
+  for (const p of vocabParts) {
+    for (const s of searchParts) {
+      const lim = Math.min(p.length, s.length)
+      let lcs = 0
+      while (lcs < lim && p.charCodeAt(p.length - 1 - lcs) === s.charCodeAt(s.length - 1 - lcs)) lcs++
+      // Require the vocab segment to be entirely the suffix — preserves the
+      // "åt" + "gråt" 2-char case but blocks "bet" + "trollguldet" (where
+      // only the last 2 of 3 chars line up).
+      if (lcs === p.length && lcs > max) max = lcs
+    }
+  }
+  return max
+}
+
+// Does any pipe-segment in the vocabulary corpus contain `word` as an exact
+// (case-insensitive) word? Used to gate weak (overlap < 3) prefix matches:
+// they're shown only when there's a strong anchor — i.e. the vocab actually
+// has the user's typed term as a word — so noisy 2-char overlaps like
+// "gråt" → "åt" don't leak through when there's nothing real to anchor on.
+function vocabHasExactWord(allWords, word) {
+  if (!word) return false
+  const w = word.toLowerCase().trim()
+  if (!w) return false
+  return allWords.some(line => {
+    if (typeof line !== 'string') return false
+    return line.toLowerCase().split(SEPARATOR_PIPE).some(p => {
+      let s
+      try { s = removeHintsInBrackets(p).trim() } catch (_) { s = p.trim() }
+      if (!s) return false
+      if (s === w) return true
+      // Multi-word segments (e.g. "kräla i stoftet") — match as a token.
+      return s.split(/\s+/).includes(w)
+    })
+  })
 }
 
 // Common derivational prefixes per language. Sorted longest-first so that
@@ -6137,11 +6445,13 @@ function _findDifferentPrefixMatches(searchText, lang) {
   const lineCategory = []
   Object.entries(window.vocabulary || {}).forEach(([cat, lines]) => {
     if (!Array.isArray(lines)) return
+    if (VOCAB_HIDDEN_CATEGORIES.has(cat)) return
     lines.forEach(l => { allWords.push(l); lineCategory.push(cat) })
   })
 
   const seen = new Set()
   const results = []
+  // (a) Different-prefix-same-stem matches — the original behaviour.
   for (const p of prefixes) {
     if (p === origPrefix) continue
     const candidate = p + stem
@@ -6155,10 +6465,24 @@ function _findDifferentPrefixMatches(searchText, lang) {
       // doesn't get spuriously included).
       if (parts.some(part => part.startsWith(candidate))) {
         seen.add(idx)
-        results.push({ prefix: p, candidate, lineIdx: idx, category: lineCategory[idx] || '?' })
+        results.push({ kind: 'prefix', prefix: p, candidate, lineIdx: idx, category: lineCategory[idx] || '?' })
       }
     })
   }
+  // (b) Weak overlap matches — pipe-segments that share a 2-char full-segment
+  // suffix/prefix with the search (e.g. "äta|åt|ätit" hitting "gråt" via the
+  // bare "åt" segment). These are filtered from the main prefix panel as
+  // noise, but it's useful to surface them here when the user explicitly
+  // wants to see loose lexical neighbours.
+  allWords.forEach((vocabLine, idx) => {
+    if (seen.has(idx)) return
+    if (typeof vocabLine !== 'string') return
+    const overlap = vocabSuffixOverlapLen(vocabLine, lc)
+    if (overlap === 2) {
+      seen.add(idx)
+      results.push({ kind: 'overlap', lineIdx: idx, category: lineCategory[idx] || '?' })
+    }
+  })
   return { stem, origPrefix, results, allWords }
 }
 
@@ -6178,21 +6502,89 @@ function _openDifferentPrefixDialog(searchText, lang) {
   const $list = $('<div class="diff-prefix-list"></div>')
   $dlg.append($list)
 
+  // Overflow from the main prefix panel — same strong matches that were
+  // capped off by `prefixResultsMax`. Rendered as the same kind of
+  // per-search-part collapsible groups so the dialog mirrors the main
+  // panel's layout.
+  const overflow = window._prefixOverflow
+  const hasOverflow = overflow && overflow.searchText === searchText && overflow.groups && overflow.groups.size > 0
+  if (hasOverflow) {
+    $list.append(`<div style="font-size:0.85em;color:#666;margin:4px 0;">More prefix matches (capped at upfront limit):</div>`)
+    for (const part of overflow.partOrder) {
+      const idxs = overflow.groups.get(part)
+      if (!idxs || idxs.length === 0) continue
+      const $group = $('<div class="prefix-group"></div>')
+      const $gh = $(`<div class="prefix-group-header"><i class="fa fa-chevron-right prefix-group-chevron" aria-hidden="true"></i><span class="prefix-group-part">${_.escape(part)}</span><span class="prefix-group-count">(${idxs.length})</span></div>`)
+      const $gb = $('<div class="prefix-group-body" hidden></div>')
+      idxs.forEach(idx => {
+        const line = overflow.allWords[idx]
+        const cat = overflow.lineCategory[idx] || '?'
+        const ov = overflow.overlapByIdx && overflow.overlapByIdx.get
+          ? overflow.overlapByIdx.get(idx)
+          : null
+        const surroundings = getSurrounding(idx, overflow.allWords)
+        const matchEntry = surroundings.find(it => it.index === idx) || { item: line, index: idx }
+        const vocabItem = $('<div class="vocabulary-segment"></div>')
+        const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
+        const $header = _buildVocabLine(matchEntry)
+        $header.addClass('highlighted similar-segment-header')
+        $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
+        const ovBadge = ov != null ? ` (overlap ${ov})` : ''
+        $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(cat)}]${ovBadge}</span>`)
+        vocabItemContent.append($header)
+        const $body = $('<div class="similar-segment-body" hidden></div>')
+        surroundings.forEach(it => {
+          const $line = _buildVocabLine(it)
+          if (it.index === idx) $line.addClass('highlighted')
+          $body.append($line)
+        })
+        vocabItemContent.append($body)
+        vocabItem.append(vocabItemContent)
+        $gb.append(vocabItem)
+      })
+      $gh.on('click', () => {
+        const open = $gh.hasClass('is-open')
+        if (open) { $gb.attr('hidden', ''); $gh.removeClass('is-open') }
+        else { $gb.removeAttr('hidden'); $gh.addClass('is-open') }
+      })
+      $group.append($gh)
+      $group.append($gb)
+      $list.append($group)
+    }
+    if (results && results.length > 0) {
+      $list.append(`<div style="font-size:0.85em;color:#666;margin:10px 0 4px 0;border-top:1px solid #eee;padding-top:8px;">Different-prefix / weak-overlap matches:</div>`)
+    }
+    _attachAccordionDelegate($list)
+  }
+
   if (!stem || stem.length < 3) {
-    $list.append(`<div style="color:grey;padding:4px;">Search term is too short to derive a stem.</div>`)
+    if (!hasOverflow) $list.append(`<div style="color:grey;padding:4px;">Search term is too short to derive a stem.</div>`)
   } else if (!results || results.length === 0) {
-    $list.append(`<div style="color:grey;padding:4px;">No different-prefix matches for stem "${_.escape(stem)}".</div>`)
+    if (!hasOverflow) $list.append(`<div style="color:grey;padding:4px;">No different-prefix or suffix-overlap matches for "${_.escape(searchText)}".</div>`)
   } else {
-    results.forEach(({ prefix, candidate, lineIdx, category }) => {
+    results.forEach(({ kind, prefix, candidate, lineIdx, category }) => {
       const surroundings = getSurrounding(lineIdx, allWords)
       const matchEntry = surroundings.find(it => it.index === lineIdx) || { item: allWords[lineIdx], index: lineIdx }
       const vocabItem = $('<div class="vocabulary-segment"></div>')
       const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
-      // Highlight the prefix-swapped candidate inside the matched line.
-      const $header = _buildVocabLine(matchEntry, candidate)
+      // Prefix matches: build the line normally (default highlight is a
+      // no-op here because the typed stem usually doesn't overlap the
+      // candidate-matched segment) then override the rendered span with
+      // _highlightStemInPrefixMatch so only the stem portion is marked
+      // (e.g. "för<mark>råt</mark>a") instead of the synthetic candidate.
+      // Overlap matches: default mode picks up the matched short segment
+      // (e.g. "åt" for "gråt") via the live window.searchText.
+      const $header = _buildVocabLine(matchEntry)
+      if (kind === 'prefix') {
+        const customHtml = _highlightStemInPrefixMatch(matchEntry.item, candidate, stem)
+        $header.children('span').first().html(customHtml)
+      }
       $header.addClass('highlighted similar-segment-header')
       $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
-      $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}] (${_.escape(prefix)}-)</span>`)
+      const badge = kind === 'prefix'
+        ? `(${_.escape(prefix)}-)`
+        : '(suffix overlap)'
+      $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}] ${badge}</span>`)
       vocabItemContent.append($header)
       const $body = $('<div class="similar-segment-body" hidden></div>')
       surroundings.forEach(it => {
@@ -6367,6 +6759,7 @@ async function searchVocabularyBySimilarity() {
   const lineCategory = []
   Object.entries(window.vocabulary).forEach(([cat, lines]) => {
     if (!Array.isArray(lines)) return
+    if (VOCAB_HIDDEN_CATEGORIES.has(cat)) return
     lines.forEach(line => {
       allLines.push(line)
       lineCategory.push(cat)
@@ -6523,7 +6916,13 @@ function _highlightWordInLine(text, word) {
 //
 // Returns an HTML-safe string — does NOT need additional _.escape by the
 // caller; non-matching slices are passed through _.escape inside.
-function _highlightSearchInVocabLine(rawText, searchText) {
+function _highlightSearchInVocabLine(rawText, searchText, opts = {}) {
+  // exactPrefix mode (used by the Different-prefixes dialog's prefix-match
+  // rows): highlight ONLY when a search part is fully a prefix or suffix
+  // of the vocab segment. Without this, a candidate like "förråt" would
+  // also highlight the 5-char "förrå" portion of an unrelated "förråd"
+  // segment because of LCP overlap.
+  const exactPrefix = opts.exactPrefix === true
   if (!rawText) return ''
   if (!searchText) return _.escape(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
   const searchParts = String(searchText).toLowerCase()
@@ -6536,30 +6935,101 @@ function _highlightSearchInVocabLine(rawText, searchText) {
     try { stripped = removeHintsInBrackets(seg.toLowerCase()).trim() }
     catch (_) { stripped = seg.toLowerCase().trim() }
     if (stripped.length < 2) return _.escape(seg)
+    const segLower = seg.toLowerCase()
 
-    // Pick the longest prefix-OR-suffix overlap (>= 3 chars) across all
-    // search parts. Keeps things visually consistent with the prefix-match
-    // logic in vocabLineMatchesPrefix.
+    // Build candidate tokens with their offset inside seg/segLower. We
+    // consider the whole stripped segment AND each whitespace-separated
+    // word inside it, so a multi-word segment like "Rik som ett troll"
+    // can highlight "troll" when the search is "trollguldet". Per-word
+    // tokens are positioned in segLower using a forward cursor so
+    // brackets and other punctuation between words don't break offsets.
+    const candidates = []
+    const fullIdx = segLower.indexOf(stripped)
+    if (fullIdx >= 0) candidates.push({ token: stripped, idx: fullIdx })
+    if (/\s/.test(stripped)) {
+      let cursor = 0
+      for (const w of stripped.split(/\s+/)) {
+        if (w.length < 2) continue
+        const wIdx = segLower.indexOf(w, cursor)
+        if (wIdx < 0) continue
+        candidates.push({ token: w, idx: wIdx })
+        cursor = wIdx + w.length
+      }
+    }
+
+    // Pick the longest prefix-OR-suffix overlap across all (token, search)
+    // pairs. Default mode accepts when:
+    //   • overlap >= 3, OR
+    //   • overlap === token.length  (whole token matched — covers tiny
+    //     full-token hits like "åt" matching "gråt" via its 2-char suffix;
+    //     a 2-char overlap that's only PART of a longer token is noise).
+    // exactPrefix mode further requires overlap === bestSearch.length.
     let bestLen = 0
     let bestKind = null   // 'prefix' | 'suffix'
-    for (const s of searchParts) {
-      const lenP = Math.min(stripped.length, s.length)
-      let lcp = 0
-      while (lcp < lenP && stripped.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
-      if (lcp >= 3 && lcp > bestLen) { bestLen = lcp; bestKind = 'prefix' }
-      let lcs = 0
-      while (lcs < lenP && stripped.charCodeAt(stripped.length - 1 - lcs) === s.charCodeAt(s.length - 1 - lcs)) lcs++
-      if (lcs >= 3 && lcs > bestLen) { bestLen = lcs; bestKind = 'suffix' }
+    let bestSearch = null
+    let bestToken = null
+    let bestTokenIdx = -1
+    for (const { token, idx: tokIdx } of candidates) {
+      for (const s of searchParts) {
+        const lenP = Math.min(token.length, s.length)
+        let lcp = 0
+        while (lcp < lenP && token.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
+        if (lcp > bestLen) {
+          bestLen = lcp; bestKind = 'prefix'; bestSearch = s
+          bestToken = token; bestTokenIdx = tokIdx
+        }
+        let lcs = 0
+        while (lcs < lenP && token.charCodeAt(token.length - 1 - lcs) === s.charCodeAt(s.length - 1 - lcs)) lcs++
+        if (lcs > bestLen) {
+          bestLen = lcs; bestKind = 'suffix'; bestSearch = s
+          bestToken = token; bestTokenIdx = tokIdx
+        }
+      }
     }
-    if (!bestLen) return _.escape(seg)
+    if (bestLen < 2) return _.escape(seg)
+    const isFullToken = bestToken && bestLen === bestToken.length
+    const isFullSearch = bestSearch && bestLen === bestSearch.length
+    if (exactPrefix) {
+      if (!isFullSearch) return _.escape(seg)
+    } else {
+      if (bestLen < 3 && !isFullToken) return _.escape(seg)
+    }
 
-    const matched = bestKind === 'prefix' ? stripped.slice(0, bestLen) : stripped.slice(stripped.length - bestLen)
+    const markStart = bestKind === 'prefix' ? bestTokenIdx : bestTokenIdx + bestToken.length - bestLen
+    const markEnd = markStart + bestLen
+    return _.escape(seg.slice(0, markStart)) +
+           '<mark class="vocab-hl">' + _.escape(seg.slice(markStart, markEnd)) + '</mark>' +
+           _.escape(seg.slice(markEnd))
+  })
+  return html.join(' | ')
+}
+
+// Render a vocab line, highlighting just the `stem` portion of each
+// |-segment that fully starts with `candidate` (= newPrefix + stem).
+// Used by the Different-prefixes dialog: the user typed the stem, the
+// dialog probes synthetic candidates like "förråt", and we want only the
+// stem ("råt") to be marked in matched segments like "förråta" / "förrått".
+// Segments that DON'T start with the candidate are left un-highlighted.
+function _highlightStemInPrefixMatch(rawText, candidate, stem) {
+  if (!rawText) return ''
+  if (!candidate || !stem) return _.escape(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
+  const candLower = String(candidate).toLowerCase()
+  const stemLen = stem.length
+  const stemOffsetInCand = candidate.length - stemLen
+  if (stemOffsetInCand < 0) return _.escape(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
+  const segments = String(rawText).split(SEPARATOR_PIPE)
+  const html = segments.map(seg => {
+    let stripped
+    try { stripped = removeHintsInBrackets(seg.toLowerCase()).trim() }
+    catch (_) { stripped = seg.toLowerCase().trim() }
+    if (!stripped.startsWith(candLower)) return _.escape(seg)
     const segLower = seg.toLowerCase()
-    const idx = bestKind === 'prefix' ? segLower.indexOf(matched) : segLower.lastIndexOf(matched)
-    if (idx < 0) return _.escape(seg)
-    return _.escape(seg.slice(0, idx)) +
-           '<mark class="vocab-hl">' + _.escape(seg.slice(idx, idx + bestLen)) + '</mark>' +
-           _.escape(seg.slice(idx + bestLen))
+    const candIdx = segLower.indexOf(candLower)
+    if (candIdx < 0) return _.escape(seg)
+    const stemIdx = candIdx + stemOffsetInCand
+    return _.escape(seg.slice(0, stemIdx)) +
+           '<mark class="vocab-hl">' + _.escape(seg.slice(stemIdx, stemIdx + stemLen)) + '</mark>' +
+           _.escape(seg.slice(stemIdx + stemLen))
   })
   return html.join(' | ')
 }
@@ -6592,7 +7062,7 @@ function _vocabLineFirstWord(line) {
 // _buildSimilarSegment all share the same line shape (icon + escaped text +
 // data-text). `highlight` may be a candidate word to bold-blue inside the
 // matched line.
-function _buildVocabLine(it, highlight) {
+function _buildVocabLine(it, highlight, searchOverride) {
   let txt = it.item
   const $line = $('<div class="vocabulary-line"></div>')
   if (txt.trim().length) {
@@ -6606,10 +7076,17 @@ function _buildVocabLine(it, highlight) {
     // Whole-word highlight (similarity search passes the candidate here).
     displayHtml = _highlightWordInLine(_.escape(txt).replaceAll(SEPARATOR_PIPE, ' | '), highlight)
   } else {
-    // Default mode: highlight the prefix/suffix portion of each |-segment
-    // that overlaps with the current search term — same logic that drove
-    // the prefix match upstream, so the user sees *why* the line matched.
-    displayHtml = _highlightSearchInVocabLine(txt, window.searchText || '')
+    // Default: highlight the prefix/suffix portion of each |-segment that
+    // overlaps with the search term. searchOverride lets callers (e.g. the
+    // Different-prefixes dialog) anchor the highlight on a synthetic term
+    // like "förråt" instead of the live window.searchText — useful when
+    // the candidate is a *prefix* of the matched segment ("förråta"),
+    // which the whole-word `_highlightWordInLine` would miss. Passing an
+    // override also flips the highlighter into strict full-search mode so
+    // partial overlaps (e.g. "förrå" of "förråd") don't get a false hit.
+    const hasOverride = (searchOverride !== undefined && searchOverride !== null)
+    const searchTerm = hasOverride ? searchOverride : (window.searchText || '')
+    displayHtml = _highlightSearchInVocabLine(txt, searchTerm, { exactPrefix: hasOverride })
   }
   $line.append(`<span>${displayHtml}</span>`)
   $line.data({ text: txt })
@@ -6821,8 +7298,32 @@ function _pinDialogToViewport($dlg) {
 }
 
 function searchVocabularyByPrefix() {
-  const searchText = window.searchText ? window.searchText.toLowerCase().trim() : ''
-  if (!searchText || !window.vocabulary) return
+  const rawSearchText = window.searchText ? window.searchText.toLowerCase().trim() : ''
+  if (!rawSearchText || !window.vocabulary) return
+
+  // Compound-word expansion. For each pipe-alternative in the raw search,
+  // try to split it into known vocabulary words (e.g. "trollguldet" →
+  // "troll" + "guld") and append the parts as additional search terms.
+  // The expanded form is the one used for overlap matching and highlights;
+  // the closure keeps the raw form so the Different-prefixes dialog still
+  // strips a meaningful prefix off the original word.
+  const decomp = new Set()
+  for (const part of rawSearchText.split(SEPARATOR_PIPE).map(s => s.trim()).filter(Boolean)) {
+    for (const w of vocabCompoundParts(part)) decomp.add(w)
+  }
+  // Compound parts go FIRST so that on equal-LCP ties (e.g. a vocab segment
+  // "kväll" matches both "kväll" and "kvällstysta" with LCP=5) the compound
+  // part wins — bestPart in vocabPrefixOverlapDetail uses `>`, so the first
+  // search alternative to hit a given length sticks.
+  const searchText = decomp.size > 0
+    ? [...decomp, rawSearchText].join(SEPARATOR_PIPE)
+    : rawSearchText
+  if (decomp.size > 0) {
+    // Expose for highlights — _buildVocabLine reads window.searchText by
+    // default. Mirrors the existing pattern used by the stem-fallback.
+    window.searchText = searchText
+    console.log(`[prefix] compound parts: ${Array.from(decomp).join(', ')}`)
+  }
 
   // Build flat-line array along with each line's category so we can group
   // matches by category later for round-robin ordering (mirrors similarity search).
@@ -6830,79 +7331,115 @@ function searchVocabularyByPrefix() {
   const lineCategory = []
   Object.entries(window.vocabulary).forEach(([cat, lines]) => {
     if (!Array.isArray(lines)) return
+    if (VOCAB_HIDDEN_CATEGORIES.has(cat)) return
     lines.forEach(line => {
       allWords.push(line)
       lineCategory.push(cat)
     })
   })
 
-  const indexesOfAppearance = allWords
-    .map((vocabLine, i) => vocabLineMatchesPrefix(vocabLine, searchText) ? i : null)
-    .filter(it => it !== null)
-
-  // Group matches by category, preserving first-seen order; then round-robin
-  // so each category contributes its first hit before any contributes its second.
-  const byCategory = new Map()
-  for (const idx of indexesOfAppearance) {
-    const cat = lineCategory[idx] || '(uncategorized)'
-    if (!byCategory.has(cat)) byCategory.set(cat, [])
-    byCategory.get(cat).push(idx)
-  }
-  const categoryLists = Array.from(byCategory.values())
-  const roundRobin = []
-  for (let round = 0; ; round++) {
-    let added = false
-    for (const list of categoryLists) {
-      if (round < list.length) {
-        roundRobin.push(list[round])
-        added = true
-      }
+  // Per-line overlap detail: max overlap length + matched substring (the
+  // actual common-prefix portion, used as the group label). The matched
+  // substring is the group key so e.g. a "stor" token matching "stoft"
+  // (LCP=3) goes under a "sto" group, not a "stoft" group.
+  const overlapByIdx = new Map()
+  const matchedByIdx = new Map()
+  allWords.forEach((line, i) => {
+    const { len, matched } = vocabPrefixOverlapDetail(line, searchText)
+    if (len >= 3) {
+      overlapByIdx.set(i, len)
+      matchedByIdx.set(i, matched)
     }
-    if (!added) break
-  }
-  // After round-robin across categories, cluster by the line's first word
-  // so the same head-word appearing in multiple categories ends up shown
-  // back-to-back instead of scattered through the result list.
-  const ordered = _clusterByKey(roundRobin, idx => _vocabLineFirstWord(allWords[idx]))
+  })
 
-  console.log(`[prefix] ${ordered.length} matches across ${categoryLists.length} categories (round-robin + word-clustering)`)
+  // Bucket lines by their matched substring. Within each bucket, sort by
+  // overlap desc so the strongest line shows first when the group opens.
+  const groupsByPart = new Map()
+  for (const [idx, m] of matchedByIdx) {
+    if (!groupsByPart.has(m)) groupsByPart.set(m, [])
+    groupsByPart.get(m).push(idx)
+  }
+  for (const list of groupsByPart.values()) {
+    list.sort((a, b) => (overlapByIdx.get(b) || 0) - (overlapByIdx.get(a) || 0))
+  }
+
+  // Order groups by matched length desc — longer matched substring = more
+  // specific / stronger signal — with ties broken alphabetically for a
+  // stable display.
+  const partOrder = Array.from(groupsByPart.keys()).sort((a, b) => {
+    if (b.length !== a.length) return b.length - a.length
+    return a.localeCompare(b)
+  })
+
+  // Cap applies to TOTAL lines: walk groups in priority order, take up to
+  // maxRows lines total, and dispatch the rest as overflow into the dialog.
+  const maxRows = _getPrefixResultsMax()
+  const shownByPart = new Map()
+  const overflowByPart = new Map()
+  let shownCount = 0
+  for (const part of partOrder) {
+    const lines = groupsByPart.get(part) || []
+    const head = []
+    const tail = []
+    for (const idx of lines) {
+      if (shownCount < maxRows) { head.push(idx); shownCount++ }
+      else { tail.push(idx) }
+    }
+    if (head.length) shownByPart.set(part, head)
+    if (tail.length) overflowByPart.set(part, tail)
+  }
+
+  window._prefixOverflow = overflowByPart.size > 0
+    ? { searchText: rawSearchText, allWords, lineCategory, groups: overflowByPart, partOrder, overlapByIdx }
+    : null
+
+  const totalMatches = overlapByIdx.size
+  console.log(`[prefix] ${totalMatches} matches across ${groupsByPart.size} group(s) — showing ${shownCount} upfront, ${totalMatches - shownCount} in dialog`)
 
   const $vocab = $('#vocabularyResult')
   $vocab.html('')
 
-  if (ordered.length === 0) {
+  if (shownByPart.size === 0) {
     $vocab.html(`<div style="color:grey;padding:4px;">No prefix matches for "${_.escape(searchText)}"</div>`)
   } else {
-    ordered.forEach(idx => {
-      const category = lineCategory[idx] || '?'
-      const vocabItem = $('<div class="vocabulary-segment"></div>')
-      const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
-
-      const surroundings = getSurrounding(idx, allWords)
-      const matchEntry = surroundings.find(it => it.index === idx) || { item: allWords[idx], index: idx }
-      // Matched line as collapsible header. The category badge is appended
-      // to the right of the matched-line text so the header keeps its
-      // original look while still showing the category.
-      const $header = _buildVocabLine(matchEntry)
-      $header.addClass('highlighted similar-segment-header')
-      $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
-      $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}]</span>`)
-      vocabItemContent.append($header)
-
-      // Body keeps every surrounding line (including the matched one at its
-      // original index) so the user sees the full context with original
-      // ordering when they expand.
-      const $body = $('<div class="similar-segment-body" hidden></div>')
-      surroundings.forEach(it => {
-        const $line = _buildVocabLine(it)
-        if (it.index === idx) $line.addClass('highlighted')
-        $body.append($line)
+    for (const part of partOrder) {
+      const head = shownByPart.get(part) || []
+      const overflow = overflowByPart.get(part) || []
+      if (head.length === 0) continue
+      const totalForPart = head.length + overflow.length
+      const $group = $('<div class="prefix-group"></div>')
+      const $gh = $(`<div class="prefix-group-header"><i class="fa fa-chevron-right prefix-group-chevron" aria-hidden="true"></i><span class="prefix-group-part">${_.escape(part)}</span><span class="prefix-group-count">(${head.length}${overflow.length ? ` of ${totalForPart}` : ''})</span></div>`)
+      const $gb = $('<div class="prefix-group-body" hidden></div>')
+      head.forEach(idx => {
+        const category = lineCategory[idx] || '?'
+        const surroundings = getSurrounding(idx, allWords)
+        const matchEntry = surroundings.find(it => it.index === idx) || { item: allWords[idx], index: idx }
+        const vocabItem = $('<div class="vocabulary-segment"></div>')
+        const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
+        const $header = _buildVocabLine(matchEntry)
+        $header.addClass('highlighted similar-segment-header')
+        $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
+        $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}]</span>`)
+        vocabItemContent.append($header)
+        const $body = $('<div class="similar-segment-body" hidden></div>')
+        surroundings.forEach(it => {
+          const $line = _buildVocabLine(it)
+          if (it.index === idx) $line.addClass('highlighted')
+          $body.append($line)
+        })
+        vocabItemContent.append($body)
+        vocabItem.append(vocabItemContent)
+        $gb.append(vocabItem)
       })
-      vocabItemContent.append($body)
-
-      vocabItem.append(vocabItemContent)
-      $vocab.append(vocabItem)
-    })
+      $gh.on('click', () => {
+        const open = $gh.hasClass('is-open')
+        if (open) { $gb.attr('hidden', ''); $gh.removeClass('is-open') }
+        else { $gb.removeAttr('hidden'); $gh.addClass('is-open') }
+      })
+      $group.append($gh)
+      $group.append($gb)
+      $vocab.append($group)
+    }
     _attachAccordionDelegate($vocab)
   }
 
@@ -6913,11 +7450,16 @@ function searchVocabularyByPrefix() {
   // prefix search produced hits, since the user might want suggestions
   // even when there are zero direct matches.
   const lang = (typeof getLangFromUrl === 'function' ? getLangFromUrl().code : null) || 'sv'
-  const $diffBtn = $(`<button type="button" class="lang-tool-btn" id="showDiffPrefixesBtn" style="margin-top:6px;">Different prefixes →</button>`)
+  let overflowCount = 0
+  for (const list of overflowByPart.values()) overflowCount += list.length
+  const overflowLabel = overflowCount > 0 ? ` (+${overflowCount} more)` : ''
+  const $diffBtn = $(`<button type="button" class="lang-tool-btn" id="showDiffPrefixesBtn" style="margin-top:6px;">Different prefixes${overflowLabel} →</button>`)
   $diffBtn.on('click', e => {
     e.preventDefault()
     e.stopPropagation()
-    _openDifferentPrefixDialog(searchText, lang)
+    // Pass the raw search (not the compound-expanded form) so prefix-strip
+    // logic in _findDifferentPrefixMatches keeps working on a real word.
+    _openDifferentPrefixDialog(rawSearchText, lang)
   })
   $vocab.append($diffBtn)
 
@@ -6937,14 +7479,14 @@ export function renderVocabularyFindings(search) {
     return
   }
 
+  const visibleCategories = Object.keys(window.vocabulary)
+      .filter(cat => !VOCAB_HIDDEN_CATEGORIES.has(cat))
   let matcher = (ln) => wordIsExactInVocabularyLine(ln, search)
-  let categories = Object.keys(window.vocabulary)
-      .filter(cat => window.vocabulary[cat].find(matcher))
+  let categories = visibleCategories.filter(cat => window.vocabulary[cat].find(matcher))
 
   if (categories.length === 0) {
     matcher = (ln) => wordIsInVocabularyLine(ln, search)
-    categories = Object.keys(window.vocabulary)
-        .filter(cat => window.vocabulary[cat].find(matcher))
+    categories = visibleCategories.filter(cat => window.vocabulary[cat].find(matcher))
   }
 
   // Build words alongside per-line category so the collapsible header can
