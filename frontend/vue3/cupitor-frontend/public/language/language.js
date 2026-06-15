@@ -172,6 +172,16 @@ import {
   renderCapturedReviewList,
   applyCapturedRowStatus,
 } from './renderer/captured-review-render.js';
+import {
+  channelOfItem as _coreChannelOfItem,
+  applyBlockedChannelFallback as _coreApplyBlockedChannelFallback,
+  groupAndArrangeResults as _coreGroupAndArrangeResults,
+} from './renderer/search-results-vm.js';
+import {
+  buildHighlightSpans as _buildHighlightSpans,
+  sliceByHighlightSpans as _sliceByHighlightSpans,
+} from './renderer/highlight-spans-vm.js';
+import { renderAccordions as _coreRenderAccordions } from './renderer/accordion-render.js';
 
 function debugLog(x) {
   if (window.DEBUG) {
@@ -4241,101 +4251,25 @@ function getWikiLinks(text) {
 function highlightedText(text, populateWikiLinks = false) {
   text = _.trim(text, "-:_")
   text = text.replaceAll("\n", " ")
-  // Same structure as _highlightWordHtml (Player/Practice): try the whole
-  // pattern first, fall back to per-token; collect ALL occurrences and
-  // merge overlapping spans. The previous single-match implementation
-  // missed cases where (a) the line had more than one matching variant,
-  // (b) the regex threw on an exotic input and the whole highlight got
-  // dropped, or (c) a multi-word phrase got split across SRT rows. The
-  // search-result-specific bits live here: window.searchText is already
-  // a |-alternation regex source (no escaping); each match expands to
-  // its enclosing whitespace boundaries so a stem match like "design"
-  // still highlights the whole word "designing".
-  const pattern = window.searchText || ''
-  const tokens = pattern.split(SEPARATOR_PIPE).map(s => s.trim()).filter(Boolean)
-  if (!tokens.length) return getWikiLinks(text)
-
-  const tryRe = (src) => { try { return new RegExp(src, 'gi') } catch (_) { return null } }
-  const tryBoundedRe = (src) => {
-    try { return new RegExp(`(?<![\\p{L}\\p{N}])(?:${src})(?![\\p{L}\\p{N}])`, 'giu') }
-    catch (_) { return tryRe(src) }
-  }
-  const collect = (re) => {
-    const spans = []
-    if (!re) return spans
-    let m
-    re.lastIndex = 0
-    while ((m = re.exec(text)) !== null) {
-      if (m[0].length === 0) { re.lastIndex++; continue }
-      // Expand to enclosing whitespace so a stem match like "design"
-      // highlights the whole word "designing".
-      let x = m.index
-      while (x > 0 && text[x - 1] !== ' ' && text[x - 1] !== '\n') x--
-      let y = m.index + m[0].length
-      while (y < text.length && text[y] !== ' ' && text[y] !== '\n') y++
-      spans.push({ start: x, end: y })
-      if (m.index === re.lastIndex) re.lastIndex++
-    }
-    return spans
-  }
-
-  // Split alternatives by shape — multi-word "phrases" have priority over
-  // their constituent single words. If any phrase matches we use ONLY the
-  // phrase spans; otherwise we fall back to single-word matching. This
-  // prevents the pathological "x y z|x|y|z" pattern from lighting up both
-  // the whole phrase AND every standalone "x"/"y"/"z" on the line.
-  const multiWord  = tokens.filter(t => /\s/.test(t))
-  const singleWord = tokens.filter(t => !/\s/.test(t))
-
-  // 1) Multi-word phrases. Each one's internal spaces are relaxed to \s+.
-  let spans = multiWord.length
-    ? collect(tryRe(multiWord.map(_relaxSpaces).join('|')))
-    : []
-  // 2) Fall back to single-word matches when no phrase was found. Two
-  //    rule-sets, merged:
-  //      • original-single-word alts (typically stem expansions from
-  //        expandWords) — UNBOUNDED so a stem like "design" still
-  //        highlights its derived form "designing".
-  //      • sub-words SPLIT from multi-word phrases (e.g. "i" + "förväg"
-  //        from "i förväg") — BOUNDED via Unicode lookaround so short
-  //        tokens like "i" don't light up inside "vi"/"vilk".
-  if (!spans.length) {
-    if (singleWord.length) {
-      spans = spans.concat(collect(tryRe(singleWord.join('|'))))
-    }
-    const subFromMulti = multiWord
-      .flatMap(t => t.split(/\s+/))
-      .map(s => s.trim())
-      .filter(Boolean)
-    if (subFromMulti.length) {
-      spans = spans.concat(collect(tryBoundedRe(subFromMulti.join('|'))))
-    }
-  }
+  // Pure span computation lives in renderer/highlight-spans-vm.js — see
+  // there for the multi-word-priority + bounded-sub-word rules. We add the
+  // search-result-specific HTML emit here: wrap matches in
+  // <span class='highlight'>, run getWikiLinks over both halves, and
+  // trim each segment so stray boundary spaces don't produce empty spans.
+  const spans = _buildHighlightSpans(text, window.searchText || '')
   if (!spans.length) return getWikiLinks(text)
 
-  spans.sort((a, b) => a.start - b.start)
-  const merged = []
-  for (const sp of spans) {
-    const last = merged[merged.length - 1]
-    if (last && sp.start <= last.end) last.end = Math.max(last.end, sp.end)
-    else merged.push({ ...sp })
-  }
-
-  // Trim each segment so getWikiLinks doesn't emit empty <span> wrappers
-  // for the stray spaces produced by slice() at segment boundaries.
   const wikiSeg = (s) => {
     const t = s.replace(/\s+/g, ' ').trim()
     return t ? getWikiLinks(t) : ''
   }
-  const parts = []
-  let last = 0
-  for (const sp of merged) {
-    if (sp.start > last) parts.push(wikiSeg(text.slice(last, sp.start)))
-    parts.push("<span class='highlight'>" + wikiSeg(text.slice(sp.start, sp.end)) + "</span>")
-    last = sp.end
-  }
-  if (last < text.length) parts.push(wikiSeg(text.slice(last)))
-  return parts.filter(Boolean).join(' ')
+  return _sliceByHighlightSpans(text, spans).map(chunk => {
+    const inner = wikiSeg(chunk.text)
+    if (!inner) return ''
+    return chunk.kind === 'match'
+      ? "<span class='highlight'>" + inner + '</span>'
+      : inner
+  }).filter(Boolean).join(' ')
 }
 
 function playSelectedText(e) {
@@ -5259,14 +5193,7 @@ function getWordsOrdered(words) {
 // dialog has a sensible bucket for legacy entries that lack the channel
 // prefix.
 function _channelOfItem(item) {
-  if (!item) return null
-  const link = item.url || item.id || item.link
-  if (!link) return null
-  const srt = window.srts && window.srts.find(s => s && s.link === link)
-  if (!srt) return null
-  const name = String(srt.name || '')
-  const idx = name.indexOf(' || ')
-  return (idx > 0 ? name.slice(0, idx) : name).trim() || null
+  return _coreChannelOfItem(item, window.srts || [])
 }
 
 function _isChannelBlocked(channel) {
@@ -5275,40 +5202,21 @@ function _isChannelBlocked(channel) {
   return blocked.includes(channel)
 }
 
-// Demote items from blocked channels to fallback: keep them only when no
-// non-blocked items survive the rest of the filter pipeline for this word.
 function _applyBlockedChannelFallback(items) {
-  const blocked = new Set((window._appSettings && window._appSettings.blockedChannels) || [])
-  if (!blocked.size) return items
-  const allowed = items.filter(it => !blocked.has(_channelOfItem(it)))
-  return allowed.length ? allowed : items
+  return _coreApplyBlockedChannelFallback(items, {
+    blockedChannels: (window._appSettings && window._appSettings.blockedChannels) || [],
+    srts: window.srts || [],
+  })
 }
 
 function groupAndArrangeResults(items) {
-  // Source filtering was removed — only YouTube is supported now, so every
-  // result is kept. Blocked-channel demotion still applies: if every
-  // surviving item is from a blocked channel, we fall back to showing them
-  // so the word doesn't render empty.
-  items = _applyBlockedChannelFallback(items)
-  const mediaFileNames = window.allMediaFileNames || []
-  // Use a defensive read on window.categories: it's set by fetchCategorisation
-  // late in loadAllSubtitles, so a flaky boot (failed srts/index.json fetch,
-  // for example) can leave it undefined. Touching it as a free variable
-  // would ReferenceError in module strict mode and kill the whole render.
-  const _cats = window.categories || {}
-  let grouped = _.groupBy(items, it => {
-    let c = _cats[it.url];
-    c = c || '';
-    c = c.trim();
-    return c
+  return _coreGroupAndArrangeResults(items, {
+    lodash: _,
+    categories: window.categories || {},
+    mediaFileNames: window.allMediaFileNames || [],
+    blockedChannels: (window._appSettings && window._appSettings.blockedChannels) || [],
+    srts: window.srts || [],
   })
-  grouped = _.zip(...Object.values(grouped));
-  grouped = _.sortBy(grouped, it => it.filter(it => it).length).reverse()
-  items = grouped.flat().filter(it => it)
-  items = items.toSorted((x, y) => {
-    if (mediaFileNames.some(it => _.includes(it, x.url))) return -1
-  })
-  return items.filter(it => it)
 }
 
 async function populateSRTFindings(wordToItemsMap, $result, token) {
@@ -6772,76 +6680,7 @@ async function fetchSRTs(searchText) {
 // isRegExp lives in ./search-text.js.
 
 function renderAccordions(el) {
-  //console.log('Rendering accordions')
-  el = el || document
-  const isAccordion = it => Array.from(it.classList.values()).indexOf('accordion') >= 0
-  const isAccordionEnd = it => Array.from(it.classList.values()).indexOf('accordion-end') >= 0
-
-  function fixAccordionPanel(accordionEl) {
-    if (accordionEl.hasAttribute("accordion-rendered")) {
-      return
-    }
-    let el = accordionEl.nextElementSibling
-    const siblings = []
-    while (el) {
-      if (isAccordion(el) || isAccordionEnd(el)) break
-
-      siblings.push(el)
-      el = el.nextElementSibling
-    }
-
-    if (siblings.length > 1) {
-      const newEl = document.createElement('div')
-      newEl.classList.add('autocreated-panel')
-      siblings.forEach(it => newEl.appendChild(it))
-
-      accordionEl.insertAdjacentElement('afterend', newEl)
-    }
-    accordionEl.setAttribute('accordion-rendered', 'true')
-  }
-
-  $(el).find('td').each((i, e) => $(e).css({verticalAlign: 'top'}))
-
-  let acc = el.getElementsByClassName("l-accordion");
-  if (acc.length === 0) {
-    acc = el.getElementsByClassName("accordion");
-  }
-  let i;
-
-  for (i = 0; i < acc.length; i++) {
-    acc[i].classList.add(i % 2 === 0 ? 'even' : 'odd')
-
-    if (acc[i].dataset.accordion_rendered === "true") continue;
-
-    fixAccordionPanel(acc[i])
-    acc[i].addEventListener("click", function () {
-      // Single-open: collapse any other expanded sibling in this accordion
-      // group before toggling the clicked one.
-      const group = (el.getElementsByClassName("l-accordion").length
-          ? el.getElementsByClassName("l-accordion")
-          : el.getElementsByClassName("accordion"))
-      for (const other of group) {
-        if (other === this) continue
-        other.classList.remove("active")
-        const op = other.nextElementSibling
-        if (op && op.classList && op.classList.contains('autocreated-panel')) op.style.display = "none"
-      }
-
-      /* Toggle between adding and removing the "active" class,
-      to highlight the button that controls the panel */
-      this.classList.toggle("active");
-
-      /* Toggle between hiding and showing the active panel */
-      const panel = this.nextElementSibling;
-      if (panel && panel.style.display === "block") {
-        panel.style.display = "none";
-      } else if (panel) {
-        panel.style.display = "block";
-      }
-    });
-  }
-
-  $(".l-accordion").filter((i, it) => !$(it).hasClass("no-result") && !$(it).hasClass("non-srt")).first().click()
+  return _coreRenderAccordions(el)
 }
 
 // 2. This code loads the IFrame Player API code asynchronously.
