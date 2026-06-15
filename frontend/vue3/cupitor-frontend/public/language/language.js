@@ -1,5 +1,177 @@
-import {computeIfAbsent, range, schedule, uuid} from './data-structures.js';
+import {computeIfAbsent, range, schedule, uuid} from '../data-structures.js';
 import {conjugateTableSpanish} from './spanish.js';
+import {
+  VOCAB_OVERLAP_STOP_WORDS,
+  VOCAB_COMPOUND_SUFFIXES,
+  commonWordsToIgnore,
+  vocabPrefixOverlapLen,
+  vocabSuffixOverlapLen,
+  vocabPrefixOverlapDetail,
+  buildKnownWordSet,
+  buildPrefixSet,
+  vocabCompoundParts as _coreVocabCompoundParts,
+} from './vocab-search.js';
+import { STEM_RULES, guessStems } from './stemming.js';
+import {
+  COMMON_PREFIXES,
+  _stripPrefix,
+  findDifferentPrefixMatches as _coreFindDifferentPrefixMatches,
+} from './different-prefix.js';
+import {
+  highlightWordInLine as _coreHighlightWordInLine,
+  highlightSearchInVocabLine as _coreHighlightSearchInVocabLine,
+  highlightStemInPrefixMatch as _coreHighlightStemInPrefixMatch,
+} from './highlight.js';
+import {
+  PRACTICE_LOG_DEFAULT_ITEMS,
+  PRACTICE_LOG_STATUSES,
+  PRACTICE_LOG_DEFAULT_RETAIN,
+  defaultPracticeLog as _defaultPracticeLog,
+  normalizePracticeLog,
+  isoWeekLabel as _isoWeekLabel,
+  addDays as _addDays,
+  prunePracticeLogWeeks as _corePrunePracticeLogWeeks,
+  ensurePracticeLogWeek as _ensurePracticeLogWeek,
+  weekHasUntouchedItem as _practiceLogWeekHasUntouchedItem,
+  mergePracticeLog as _mergePracticeLog,
+} from './practice-log.js';
+import {
+  SIMILARITY_VOWELS,
+  isVowel as _isVowel,
+  classifyCharDiffs as _classifyCharDiffs,
+  levenshtein as _levenshtein,
+  phoneticKey as _phoneticKey,
+  compoundOverlap as _compoundOverlap,
+  scoreSimilarity as _scoreSimilarity,
+} from './similarity.js';
+import { toSeconds, fromSeconds } from './time-format.js';
+import {
+  srtError as _srtError,
+  srtToJson,
+  toStringSubtitle,
+  srtTimeFromValue,
+  srtTimeToSeconds,
+  parseSrtEntries,
+  entriesToSrtText,
+  linesToSrtText,
+  mergeSrtWithNewEntries,
+  mergeSrtWithResolution,
+  detectSrtConflicts,
+} from './srt-parser.js';
+import {
+  splitSentences,
+  chunkifySentence,
+  getWords,
+  expandRegex,
+  withWordBoundaries,
+  relaxSpaces as _relaxSpaces,
+  isRegExp,
+  getSurrounding,
+  cleanSrtForMatch as _cleanSrtForMatch,
+  getSearchedTerms as _coreGetSearchedTerms,
+  getWordsOrdered as _coreGetWordsOrdered,
+  searchSubtitleText as _coreSearchSubtitleText,
+  filterByLanguage as _coreFilterByLanguage,
+  wordIsExactInVocabularyLine,
+  vocabHasExactWord as _coreVocabHasExactWord,
+} from './search-text.js';
+import {
+  withTimeout as _withTimeout,
+  nfc as _nfc,
+  runInBatches as _runInBatches,
+  fetchWithRetry,
+  commitWithMerge as _coreCommitWithMerge,
+} from './net.js';
+import {
+  isVirtual as _coreIsVirtual,
+  isManualItem as _isManualItem,
+  newManualId as _coreNewManualId,
+  parseMediaUrl as _parseMediaUrl,
+  virtualMembers as _coreVirtualMembers,
+  resolveVirtualItems as _coreResolveVirtualItems,
+  itemsForRecording as _coreItemsForRecording,
+  recordingItemCountIn as _recordingItemCountIn,
+  recordingItemCountByName as _coreRecordingItemCountByName,
+  mergeRecordingCollections as _coreMergeRecordingCollections,
+} from './recordings-merge.js';
+import {
+  buildPlayQueue as _coreBuildPlayQueue,
+  shuffleQueue as _coreShuffleQueue,
+  migrateLegacyLastPlayedMap,
+  setLastPlayedEntry,
+  getNewestEntry,
+  saveQueueOrderInto,
+  computeResumePoint,
+} from './play-queue.js';
+import {
+  parseVocabularyFile,
+  vocabularyToText,
+  isProperlyBracketed,
+  mergeVocabulary,
+} from './vocab-merge.js';
+import {
+  escapeHtml,
+  decodeHtmlEntities,
+  removeHtmlTags,
+  encodeHtmlTags as _coreEncodeHtmlTags,
+  decodeHtmlTags,
+} from './html-utils.js';
+import {
+  LOG_BUFFER_MAX,
+  pushLog,
+  installConsoleTap,
+  makeWindowErrorEntry,
+  makeUnhandledRejectionEntry,
+} from './log-buffer.js';
+import { filterLogs, formatLogsAsText } from './renderer/log-viewer-vm.js';
+import { renderLogViewerBody } from './renderer/log-viewer-render.js';
+import {
+  RARE_WORDS_PAGE_SIZE,
+  buildCategoryOptions,
+  buildRareWordsPageVM,
+} from './renderer/rare-words-vm.js';
+import {
+  renderRareWordsList,
+  renderRareWordsPager,
+  renderRareWordsCategorySelect,
+} from './renderer/rare-words-render.js';
+import {
+  pendingSrtEditCount as _pendingSrtEditCountCore,
+  buildSrtEditsReviewVM,
+} from './renderer/srt-edits-review-vm.js';
+import {
+  renderSrtEditsReviewList,
+  collectSrtEditsByCheckbox,
+} from './renderer/srt-edits-review-render.js';
+import {
+  buildPracticeLogPlanVM,
+  buildPracticeLogHistoryVM,
+} from './renderer/practice-log-render-vm.js';
+import {
+  renderPracticeLogPlan,
+  renderPracticeLogHistory,
+} from './renderer/practice-log-render.js';
+import {
+  tierLabel as _tierLabel,
+  tierClass as _tierClass,
+  diffPrefixRowBadge,
+} from './renderer/similar-matches-vm.js';
+import {
+  buildBoundedWordRe as _buildBoundedWordRe,
+  phraseFoundInTexts as _phraseFoundInTexts,
+  highlightWordHtml as _highlightWordHtml,
+  findLineByTime as _findLineByTime,
+  buildPlayingBannerVM,
+  buildPlayingSubsVM,
+} from './renderer/playing-ui-vm.js';
+import {
+  renderPlayingSubsList,
+  updatePlayingBanner,
+} from './renderer/playing-ui-render.js';
+import {
+  renderCapturedReviewList,
+  applyCapturedRowStatus,
+} from './renderer/captured-review-render.js';
 
 function debugLog(x) {
   if (window.DEBUG) {
@@ -30,56 +202,18 @@ Array.prototype.last = function () {
   return _.last(this)
 };
 
-// Console-tap: mirror console.* into an in-memory ring buffer so the
-// in-app Log Viewer can show what would otherwise only be visible in
-// DevTools (which we can't open on mobile). Kept tiny — 500 entries —
-// to bound memory. Each entry is { t, level, args } where args is the
-// already-stringified message so we don't hold live references.
+// Console-tap + uncaught-error capture. Pure helpers live in ./log-buffer.js;
+// this block just wires the singleton window.__logBuffer to the global
+// console and to the window error/unhandledrejection events.
 window.__logBuffer = window.__logBuffer || []
-const LOG_BUFFER_MAX = 500
-function _serializeLogArg(a) {
-  if (a instanceof Error) return a.stack || (a.name + ': ' + a.message)
-  if (typeof a === 'string') return a
-  try { return JSON.stringify(a) } catch (_) { return String(a) }
-}
-;['log', 'info', 'warn', 'error', 'debug'].forEach(level => {
-  const orig = console[level] ? console[level].bind(console) : null
-  console[level] = function (...args) {
-    try {
-      window.__logBuffer.push({
-        t: Date.now(),
-        level,
-        msg: args.map(_serializeLogArg).join(' ')
-      })
-      if (window.__logBuffer.length > LOG_BUFFER_MAX) {
-        window.__logBuffer.splice(0, window.__logBuffer.length - LOG_BUFFER_MAX)
-      }
-    } catch (_) {}
-    if (orig) orig(...args)
-  }
-})
-// Surface uncaught errors and unhandled promise rejections too —
-// these are the ones a mobile user most needs to see and can't.
+installConsoleTap(window.__logBuffer, console, { max: LOG_BUFFER_MAX })
 window.addEventListener('error', (e) => {
-  try {
-    window.__logBuffer.push({
-      t: Date.now(),
-      level: 'error',
-      msg: '[window.error] ' + (e.message || e.type) +
-        (e.filename ? ` @ ${e.filename}:${e.lineno}:${e.colno}` : '') +
-        (e.error && e.error.stack ? '\n' + e.error.stack : '')
-    })
-  } catch (_) {}
+  try { pushLog(window.__logBuffer, makeWindowErrorEntry(e), LOG_BUFFER_MAX) }
+  catch (_) {}
 })
 window.addEventListener('unhandledrejection', (e) => {
-  try {
-    const r = e.reason
-    window.__logBuffer.push({
-      t: Date.now(),
-      level: 'error',
-      msg: '[unhandledrejection] ' + (r && r.stack ? r.stack : _serializeLogArg(r))
-    })
-  } catch (_) {}
+  try { pushLog(window.__logBuffer, makeUnhandledRejectionEntry(e), LOG_BUFFER_MAX) }
+  catch (_) {}
 })
 
 const SEPARATOR_PIPE = '|'
@@ -308,7 +442,7 @@ function importSearches() {
 window._rareWords = window._rareWords || []
 window._rareWordsPage = 0
 window._rareWordsScanToken = 0
-const RARE_WORDS_PAGE_SIZE = 60
+// RARE_WORDS_PAGE_SIZE imported from ./renderer/rare-words-vm.js
 
 function openRareWordsDialog() {
   // Hide the minimize-restore pill if it's lingering — opening the dialog
@@ -458,22 +592,16 @@ async function scanRareWords() {
 }
 window.scanRareWords = scanRareWords
 
-// Build the Category dropdown from the categories present in `found`. Items
-// are grouped by category, so the user can drill into one slice at a time.
+// Thin shim — option list comes from buildCategoryOptions; renderer emits
+// the <option> children; we then restore the previous selection if it
+// still matches one of the new options.
 function _populateRareWordsCategoryFilter(found) {
   const $sel = $('#rareWordsCategory')
   if (!$sel.length) return
   const prev = $sel.val() || ''
-  const counts = {}
-  ;(found || []).forEach(it => { counts[it.category || ''] = (counts[it.category || ''] || 0) + 1 })
-  const cats = Object.keys(counts).sort((a, b) => a.localeCompare(b))
-  $sel.empty()
-  $sel.append(`<option value="">All categories (${(found || []).length})</option>`)
-  cats.forEach(c => {
-    $sel.append(`<option value="${_.escape(c)}">${_.escape(c || '(uncategorised)')} — ${counts[c]}</option>`)
-  })
-  // Restore previous selection if still valid; else default to "all".
-  if (cats.indexOf(prev) >= 0) $sel.val(prev); else $sel.val('')
+  const options = buildCategoryOptions(found)
+  renderRareWordsCategorySelect(options, $sel[0])
+  $sel.val(options.some(o => o.value === prev) ? prev : '')
 }
 // Re-render the list when the category filter changes.
 $(function () {
@@ -483,63 +611,21 @@ $(function () {
   })
 })
 
+// Thin shim — VM lives in ./renderer/rare-words-vm.js, DOM emit in
+// ./renderer/rare-words-render.js. Restores the clamped page back into
+// the global cursor so the pager and re-renders agree.
 function _renderRareWordsPage() {
-  const raw = window._rareWords || []
-  const catFilter = ($('#rareWordsCategory').val() || '').trim()
-  // Filter to the selected category, if any. Empty value = no filter.
-  const all = catFilter ? raw.filter(it => (it.category || '') === catFilter) : raw
-  const pageSize = RARE_WORDS_PAGE_SIZE
-  const pages = Math.max(1, Math.ceil(all.length / pageSize))
-  const page = Math.min(window._rareWordsPage || 0, pages - 1)
-  window._rareWordsPage = page
-  const slice = all.slice(page * pageSize, page * pageSize + pageSize)
-
-  const $list = $('#rareWordsResults').empty()
-  if (!raw.length) {
-    $list.html('<div class="rare-words-empty">Nothing to show yet — set a threshold and click Scan.</div>')
-    $('#rareWordsPager').empty()
-    return
-  }
-  if (!all.length) {
-    $list.html('<div class="rare-words-empty">No matches in this category.</div>')
-    $('#rareWordsPager').empty()
-    return
-  }
-  // When no category filter, group by category with sticky-ish headers so
-  // the user can scan groups even without filtering. With a filter active
-  // the list is already homogenous — skip the headers for a flatter view.
-  let currentCat = null
-  slice.forEach(it => {
-    if (!catFilter && it.category !== currentCat) {
-      currentCat = it.category
-      const $hdr = $('<div class="rare-words-cat-hdr"></div>')
-        .text(currentCat || '(uncategorised)')
-      $list.append($hdr)
-    }
-    const $row = $('<button type="button" class="rare-word-item"></button>')
-    $row.attr('title', `${it.line} — ${it.count} match(es) · ${it.category}`)
-    $row.append($('<span class="rare-word-text"></span>').text(it.line))
-    $row.append($('<span class="rare-word-count"></span>').text(it.count))
-    $row.on('click', () => rareWordSearch(it.line))
-    $list.append($row)
+  const vm = buildRareWordsPageVM(window._rareWords || [], {
+    categoryFilter: ($('#rareWordsCategory').val() || '').trim(),
+    page: window._rareWordsPage || 0,
+    pageSize: RARE_WORDS_PAGE_SIZE,
   })
-
-  const $pager = $('#rareWordsPager').empty()
-  if (pages > 1) {
-    // stopPropagation: this handler re-renders and detaches the clicked
-    // button before the click bubbles to the document-level outside-click
-    // handler (~L1877). Without it, the orphaned target reads as "outside
-    // the dialog" and the dialog gets closed. Mirrors the $loadMore fix.
-    const $prev = $('<button type="button" class="lang-tool-btn">‹ Prev</button>')
-      .prop('disabled', page === 0)
-      .on('click', e => { e.stopPropagation(); window._rareWordsPage = page - 1; _renderRareWordsPage() })
-    const $next = $('<button type="button" class="lang-tool-btn">Next ›</button>')
-      .prop('disabled', page >= pages - 1)
-      .on('click', e => { e.stopPropagation(); window._rareWordsPage = page + 1; _renderRareWordsPage() })
-    $pager.append($prev)
-    $pager.append($(`<span class="rare-words-pageinfo">Page ${page + 1} / ${pages}</span>`))
-    $pager.append($next)
-  }
+  window._rareWordsPage = vm.page
+  renderRareWordsList(vm, $('#rareWordsResults')[0], rareWordSearch)
+  renderRareWordsPager(vm, $('#rareWordsPager')[0], {
+    onPrev: () => { window._rareWordsPage = vm.page - 1; _renderRareWordsPage() },
+    onNext: () => { window._rareWordsPage = vm.page + 1; _renderRareWordsPage() },
+  })
 }
 
 // Run a rare-word click through the main search box (mirrors vocabularyLineSelected).
@@ -831,20 +917,7 @@ window.insertIntoVocabSegment = insertIntoVocabSegment;
 // brackets. Reject e.g. "(x|y)" because splitting on `|` produces "(x" and
 // "y)" — unbalanced parts, which break downstream pipe-separated processing.
 // Nested parens within a single segment, like "(x(a))", are fine.
-function isProperlyBracketed(line) {
-  const parts = line.split('|');
-  const closeToOpen = { ')': '(', ']': '[', '}': '{' };
-  return parts.every(part => {
-    const stack = [];
-    for (const ch of part) {
-      if ('([{'.includes(ch)) stack.push(ch);
-      else if (')]}'.includes(ch)) {
-        if (stack.pop() !== closeToOpen[ch]) return false;
-      }
-    }
-    return stack.length === 0;
-  });
-}
+// isProperlyBracketed lives in ./vocab-merge.js (imported at the top).
 window.isProperlyBracketed = isProperlyBracketed;
 
 function addToVocab(commitAndClose) {
@@ -1013,10 +1086,7 @@ function onVocabInsertPositionChange(select) {
   }
 }
 
-function vocabularyToText(vocab) {
-  return Object.keys(vocab)
-    .map(k => `#${k}\n${vocab[k].join("\n")}`).join("\n")
-}
+// vocabularyToText lives in ./vocab-merge.js (imported at the top).
 
 // Open the settings panel as a jQuery UI dialog. Reusing the existing
 // #settingsPanel div lets us keep the inputs and their wiring intact —
@@ -1067,9 +1137,10 @@ window.openSettingsDialog = openSettingsDialog
 // ──────────────────────────────────────────────────────────────────────
 // Build info + in-app Log Viewer
 // ──────────────────────────────────────────────────────────────────────
-// Show when /language.js was last modified on the server (HEAD request)
-// plus the HTML's document.lastModified as a fallback / cross-check.
-// Lets the user confirm a deploy actually shipped without opening DevTools.
+// Show when /language/language.js was last modified on the server (HEAD
+// request) plus the HTML's document.lastModified as a fallback /
+// cross-check. Lets the user confirm a deploy actually shipped without
+// opening DevTools.
 function _fmtLocal(d) {
   try {
     return d.toLocaleString(undefined, { hour12: false })
@@ -1081,7 +1152,7 @@ async function populateBuildInfo() {
   const htmlLM = document.lastModified ? new Date(document.lastModified) : null
   let jsLM = null
   try {
-    const r = await fetch('/language.js', { method: 'HEAD', cache: 'no-cache' })
+    const r = await fetch('/language/language.js', { method: 'HEAD', cache: 'no-cache' })
     const h = r.headers.get('Last-Modified')
     if (h) jsLM = new Date(h)
   } catch (_) {}
@@ -1092,43 +1163,16 @@ async function populateBuildInfo() {
 }
 window.populateBuildInfo = populateBuildInfo
 
+// Thin shim — reads filter inputs, delegates to the pure VM + DOM emitter
+// in ./renderer/log-viewer-*.js.
 function _renderLogViewer() {
-  const $body  = $('#logViewerBody')
+  const $body = $('#logViewerBody')
   if (!$body.length) return
-  const level  = $('#logViewerLevel').val() || 'all'
-  const q      = ($('#logViewerSearch').val() || '').toLowerCase()
-  const order  = { error: 0, warn: 1, info: 2, log: 3, debug: 4 }
-  const minOrd = level === 'all' ? 99 : order[level]
-  const rows = (window.__logBuffer || []).filter(e => {
-    if (level !== 'all' && (order[e.level] ?? 99) > minOrd) return false
-    if (q && !e.msg.toLowerCase().includes(q)) return false
-    return true
+  const rows = filterLogs(window.__logBuffer || [], {
+    level: $('#logViewerLevel').val() || 'all',
+    query: $('#logViewerSearch').val() || '',
   })
-  // Build with DOM rather than innerHTML to avoid an XSS-ish surprise
-  // if a log message contains markup.
-  $body.empty()
-  rows.forEach(e => {
-    const ts = new Date(e.t).toISOString().substring(11, 23)
-    const line = document.createElement('span')
-    line.className = 'log-line'
-    line.setAttribute('data-level', e.level)
-    const tsSpan = document.createElement('span')
-    tsSpan.className = 'log-ts'
-    tsSpan.textContent = ts
-    const lvSpan = document.createElement('span')
-    lvSpan.className = 'log-level'
-    lvSpan.textContent = e.level
-    const msgSpan = document.createElement('span')
-    msgSpan.className = 'log-msg'
-    msgSpan.textContent = e.msg
-    line.appendChild(tsSpan)
-    line.appendChild(lvSpan)
-    line.appendChild(msgSpan)
-    $body.append(line)
-  })
-  // Auto-scroll to bottom — newest entries are most relevant.
-  const el = $body[0]
-  if (el) el.scrollTop = el.scrollHeight
+  renderLogViewerBody(rows, $body[0])
 }
 
 let _logViewerInterval = null
@@ -1157,9 +1201,7 @@ function openLogViewer() {
     // Wire toolbar once — jQuery UI keeps the same DOM across opens.
     $('#logViewerLevel, #logViewerSearch').on('input change', _renderLogViewer)
     $('#logViewerCopy').on('click', async () => {
-      const text = (window.__logBuffer || []).map(e =>
-        `${new Date(e.t).toISOString()} [${e.level}] ${e.msg}`
-      ).join('\n')
+      const text = formatLogsAsText(window.__logBuffer || [])
       try {
         await navigator.clipboard.writeText(text)
         $('#logViewerCopy').text('Copied').delay(900).queue(function (n) { $(this).text('Copy'); n() })
@@ -1202,46 +1244,9 @@ function autoHideSettingsPanel() {
 }
 window.autoHideSettingsPanel = autoHideSettingsPanel
 
-// Generic read-merge-conditional-put-retry for any file on
-// trexsatya/trexsatya.github.io@gh-pages. The merge callback receives the
-// real-time remote content (or null if the file doesn't exist) and returns
-// the text we want committed. If GitHub rejects the PUT because someone
-// else updated the file between our read and write (409/422 on sha), we
-// re-read and re-merge — so the caller's merge function MUST be safe to
-// re-run with a different `remoteText`.
-async function commitWithMerge({ filePath, branch = 'gh-pages', commitMessage, merge, maxAttempts = 5 }) {
-  const owner = 'trexsatya'
-  const repo = 'trexsatya.github.io'
-  let lastErr
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    let remoteContent = null
-    let sha
-    try {
-      const file = await window.GitHubUtils.getFile(owner, repo, filePath, '', branch)
-      remoteContent = file.content
-      sha = file.sha
-    } catch (_) {
-      // File doesn't exist on remote yet — we'll create it.
-    }
-    const merged = await merge(remoteContent)
-    if (merged === null || merged === undefined) {
-      throw new Error(`commitWithMerge: merge returned no content for ${filePath}`)
-    }
-    try {
-      await window.GitHubUtils.putFile(owner, repo, filePath, merged, commitMessage, sha, '', branch)
-      return merged
-    } catch (e) {
-      lastErr = e
-      // GitHub returns 409 (sha mismatch / conflict) or 422 (stale sha)
-      // when another writer beat us to it. Re-read and retry.
-      if (attempt < maxAttempts - 1 && /GitHub API error (409|422)\b/.test(String(e && e.message))) {
-        console.warn(`commitWithMerge: conflict on ${filePath}, retrying (${attempt + 2}/${maxAttempts})`)
-        continue
-      }
-      throw e
-    }
-  }
-  throw lastErr || new Error(`commitWithMerge: exhausted retries on ${filePath}`)
+// Thin wrapper — pure core in ./net.js takes GitHubUtils as a parameter.
+function commitWithMerge(opts) {
+  return _coreCommitWithMerge(opts, { githubUtils: window.GitHubUtils })
 }
 
 // 3-way merge of categorised vocab files. base = text we loaded, localVocab =
@@ -1249,46 +1254,7 @@ async function commitWithMerge({ filePath, branch = 'gh-pages', commitMessage, m
 // added locally are kept; lines removed locally (in base, absent in local)
 // are dropped; remote-only additions are appended; remote-only deletions
 // (in base, absent in remote, unchanged locally) are also dropped.
-function mergeVocabulary(baseText, localVocab, remoteText) {
-  const base = parseVocabularyFile(baseText || '#__empty__\n')
-  const remote = parseVocabularyFile(remoteText || '#__empty__\n')
-  const local = localVocab || {}
-  const merged = {}
-  const allCats = new Set([
-    ...Object.keys(base),
-    ...Object.keys(remote),
-    ...Object.keys(local)
-  ])
-  for (const cat of allCats) {
-    if (cat === '__empty__') continue
-    const baseLines = base[cat] || []
-    const remoteLines = remote[cat] || []
-    const localLines = local[cat] || []
-    const baseSet = new Set(baseLines)
-    const remoteSet = new Set(remoteLines)
-    const localSet = new Set(localLines)
-
-    const out = []
-    const seen = new Set()
-    // Local order first: keep user-added lines and base lines still on remote;
-    // drop base lines the remote has removed (we didn't intentionally re-add them).
-    for (const l of localLines) {
-      const userAdded = !baseSet.has(l)
-      const stillInRemote = remoteSet.has(l)
-      if ((userAdded || stillInRemote) && !seen.has(l)) {
-        seen.add(l); out.push(l)
-      }
-    }
-    // Then append remote-only additions, skipping ones we intentionally removed.
-    for (const l of remoteLines) {
-      if (seen.has(l)) continue
-      const removedLocally = baseSet.has(l) && !localSet.has(l)
-      if (!removedLocally) { seen.add(l); out.push(l) }
-    }
-    merged[cat] = out
-  }
-  return merged
-}
+// mergeVocabulary lives in ./vocab-merge.js (imported at the top).
 
 async function commitVocabularyToGithub() {
   const lang = getLangFromUrl()
@@ -1581,22 +1547,7 @@ export async function searchTextChanged() {
   }
 }
 
-function parseVocabularyFile(text) {
-  const lines = text.split("\n")
-  const categories = {}
-  let currentCategory = null
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (line.startsWith("#")) {
-      currentCategory = line.replace("#", "").trim()
-      categories[currentCategory] = []
-    } else {
-      categories[currentCategory].push(line)
-    }
-  }
-
-  return categories
-}
+// parseVocabularyFile lives in ./vocab-merge.js (imported at the top).
 
 function populateVocabularyHeadings(target) {
   const $vocabularySelect = target
@@ -1629,14 +1580,7 @@ window._subtitlesReadyPromise = Promise.race([
   }, 60000))
 ]);
 
-// Wraps a promise in a per-call timeout so one hung fetch doesn't stall the
-// entire Promise.allSettled batch.
-function _withTimeout(promise, ms, label) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout: ' + label)), ms))
-  ]);
-}
+// _withTimeout lives in ./net.js (imported at the top).
 
 // Apply `fn` to each item with a bounded concurrency window. Used for the
 // initial SRT load so Chrome doesn't choke on hundreds of simultaneous
@@ -1672,31 +1616,7 @@ function _srtProgressHide() {
   setTimeout(() => $('#srtLoadingBanner').fadeOut(400), 600)
 }
 
-async function _runInBatches(items, fn, concurrency = 8, onProgress) {
-  if (!Array.isArray(items) || !items.length) return []
-  const total = items.length
-  const results = new Array(total)
-  let next = 0
-  let done = 0
-  const worker = async () => {
-    while (true) {
-      const i = next++
-      if (i >= total) return
-      try {
-        results[i] = { status: 'fulfilled', value: await fn(items[i], i) }
-      } catch (e) {
-        results[i] = { status: 'rejected', reason: e }
-      }
-      done++
-      if (typeof onProgress === 'function') {
-        try { onProgress(done, total) } catch (_) {}
-      }
-    }
-  }
-  const lanes = Math.max(1, Math.min(concurrency, total))
-  await Promise.all(Array.from({ length: lanes }, () => worker()))
-  return results
-}
+// _runInBatches lives in ./net.js (imported at the top).
 
 // Retry a fetch up to `tries` times with exponential backoff and a per-attempt
 // timeout. Used for the boot-critical fetches (srts/index.json, vocabulary.txt)
@@ -1711,38 +1631,9 @@ async function _runInBatches(items, fn, concurrency = 8, onProgress) {
 // culprit; YouTube metadata strings come in NFC, native filesystem ops can
 // surface them as NFD on read. Normalizing to NFC at every boundary makes
 // the storage layer monomorphic.
-function _nfc(s) {
-  return String(s == null ? '' : s).normalize('NFC')
-}
-
-async function _fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init = {} } = {}) {
-  // raw.githubusercontent.com sends Cache-Control on error responses too, so
-  // Chrome will cheerfully serve a stale 429 / 5xx from disk cache for the next
-  // few minutes and never re-ask the server — fatal during boot. Two defenses:
-  //   1) cache: 'no-store' on every attempt so the browser doesn't consult the
-  //      disk cache in the first place.
-  //   2) ?_cb=<random> appended on each retry as a belt-and-braces cache-buster
-  //      in case an intermediary (CDN, service worker) ignores no-store.
-  const baseInit = { cache: 'no-store', ...init };
-  let lastErr;
-  for (let i = 0; i < tries; i++) {
-    const reqUrl = i === 0
-      ? url
-      : url + (url.indexOf('?') === -1 ? '?' : '&') + '_cb=' + Date.now() + '-' + i;
-    try {
-      const res = await _withTimeout(fetch(reqUrl, baseInit), timeoutMs, reqUrl);
-      if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + reqUrl);
-      return res;
-    } catch (e) {
-      lastErr = e;
-      if (i === tries - 1) break;
-      const backoff = 400 * Math.pow(2, i) + Math.random() * 200;  // 0.4s, 0.8s, 1.6s...
-      console.warn('[boot] fetch failed (attempt', i + 1, 'of', tries, ')', reqUrl, e && e.message);
-      await new Promise(r => setTimeout(r, backoff));
-    }
-  }
-  throw lastErr;
-}
+// _nfc and fetchWithRetry live in ./net.js (imported at the top).
+// Local alias preserves the old name used at callsites in this file.
+const _fetchWithRetry = fetchWithRetry
 
 // In-memory copy of user preferences. Persisted to localStorage under
 // `cupitor:appSettings:${lang}` (per-language, per-device). Mutated by the
@@ -1843,13 +1734,6 @@ window.saveAppSettings = saveAppSettings
 // GitHub file:        db/language/<lang>/practice-log.json
 // First-open flag:    cupitor:practiceLog:openedOnce  (global, not per-lang)
 
-const PRACTICE_LOG_DEFAULT_ITEMS = ['Reading', 'Writing', 'Listening', 'Speaking', 'Vocabulary', 'Grammar']
-const PRACTICE_LOG_STATUSES = [
-  { value: 'not_started', label: 'Not started', cls: 'pl-status-notstarted' },
-  { value: 'in_progress', label: 'In progress', cls: 'pl-status-progress' },
-  { value: 'done',        label: 'Done',        cls: 'pl-status-done' },
-  { value: 'skipped',     label: 'Skipped',     cls: 'pl-status-skipped' }
-]
 const PRACTICE_LOG_OPENED_KEY = 'cupitor:practiceLog:openedOnce'
 
 function _practiceLogLocalKey() {
@@ -1862,53 +1746,20 @@ function _practiceLogGithubPath() {
   return `db/language/${lang}/practice-log.json`
 }
 
-// ISO 8601 week label (e.g. "2026-W24"). Week starts Monday — same convention
-// Sweden uses, so the user can compare against any printed Swedish calendar.
-function _isoWeekLabel(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
-  const dayNum = d.getUTCDay() || 7
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
-  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7)
-  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`
-}
-
 function _currentWeekLabel() { return _isoWeekLabel(new Date()) }
-function _nextWeekLabel() {
-  const d = new Date()
-  d.setDate(d.getDate() + 7)
-  return _isoWeekLabel(d)
-}
-
-const PRACTICE_LOG_DEFAULT_RETAIN = 100
-
-function _defaultPracticeLog() {
-  return { customItems: PRACTICE_LOG_DEFAULT_ITEMS.slice(), weeks: {}, historyRetainWeeks: PRACTICE_LOG_DEFAULT_RETAIN }
-}
+function _nextWeekLabel() { return _isoWeekLabel(_addDays(new Date(), 7)) }
 
 function _loadPracticeLogLocal() {
   try {
     const raw = localStorage.getItem(_practiceLogLocalKey())
     if (!raw) return _defaultPracticeLog()
-    const j = JSON.parse(raw)
-    if (!j || typeof j !== 'object') return _defaultPracticeLog()
-    if (!Array.isArray(j.customItems) || !j.customItems.length) j.customItems = PRACTICE_LOG_DEFAULT_ITEMS.slice()
-    if (!j.weeks || typeof j.weeks !== 'object') j.weeks = {}
-    if (!Number.isFinite(j.historyRetainWeeks) || j.historyRetainWeeks < 1) j.historyRetainWeeks = PRACTICE_LOG_DEFAULT_RETAIN
-    return j
+    return normalizePracticeLog(JSON.parse(raw)) || _defaultPracticeLog()
   } catch (_) { return _defaultPracticeLog() }
 }
 
-// Drop weeks older than the retention horizon (keep the most-recent N by
-// ISO label, which sorts chronologically). Always keeps the current and
-// next week even if N is tiny — those are the actively edited rows.
+// Thin wrapper — pure pruner takes the labels so it stays testable.
 function _prunePracticeLogWeeks(data) {
-  const N = Math.max(1, parseInt(data.historyRetainWeeks, 10) || PRACTICE_LOG_DEFAULT_RETAIN)
-  const keep = new Set(Object.keys(data.weeks).sort().slice(-N))
-  keep.add(_currentWeekLabel())
-  keep.add(_nextWeekLabel())
-  Object.keys(data.weeks).forEach(wk => { if (!keep.has(wk)) delete data.weeks[wk] })
-  return data
+  return _corePrunePracticeLogWeeks(data, _currentWeekLabel(), _nextWeekLabel())
 }
 
 function _savePracticeLogLocal(data) {
@@ -1920,55 +1771,8 @@ async function _fetchPracticeLogRemote() {
     const url = `${getResourceUrl()}/practice-log.json?_=${Date.now()}`
     const r = await fetch(url, { cache: 'no-cache' })
     if (!r.ok) return null
-    const j = await r.json()
-    if (!j || typeof j !== 'object') return null
-    if (!Array.isArray(j.customItems) || !j.customItems.length) j.customItems = PRACTICE_LOG_DEFAULT_ITEMS.slice()
-    if (!j.weeks || typeof j.weeks !== 'object') j.weeks = {}
-    if (!Number.isFinite(j.historyRetainWeeks) || j.historyRetainWeeks < 1) j.historyRetainWeeks = PRACTICE_LOG_DEFAULT_RETAIN
-    return j
+    return normalizePracticeLog(await r.json())
   } catch (_) { return null }
-}
-
-// Three-way merge: remote ∪ local on weeks (per-item last-write-wins is hard
-// without timestamps — we keep whichever side has a non-empty notes/status).
-// customItems is unioned in remote-first order so a previously added custom
-// item doesn't get reordered by another device.
-function _mergePracticeLog(remote, local) {
-  if (!remote) return local
-  if (!local)  return remote
-  const out = {
-    customItems: [],
-    weeks: {},
-    historyRetainWeeks: Math.max(
-      parseInt(remote.historyRetainWeeks, 10) || PRACTICE_LOG_DEFAULT_RETAIN,
-      parseInt(local.historyRetainWeeks,  10) || PRACTICE_LOG_DEFAULT_RETAIN
-    )
-  }
-  const seen = new Set()
-  ;[remote.customItems, local.customItems].forEach(list => {
-    if (!Array.isArray(list)) return
-    list.forEach(n => { if (n && !seen.has(n)) { seen.add(n); out.customItems.push(n) } })
-  })
-  const weekKeys = new Set([...Object.keys(remote.weeks || {}), ...Object.keys(local.weeks || {})])
-  weekKeys.forEach(wk => {
-    const r = (remote.weeks && remote.weeks[wk]) || {}
-    const l = (local.weeks  && local.weeks[wk])  || {}
-    const merged = {}
-    const itemKeys = new Set([...Object.keys(r), ...Object.keys(l)])
-    itemKeys.forEach(it => {
-      const rv = r[it] || {}, lv = l[it] || {}
-      // Prefer the side with more information (any non-default status, or
-      // non-empty notes). When both have content, local wins — that's the
-      // device the user just edited on.
-      const lvHas = (lv.status && lv.status !== 'not_started') || (lv.notes && lv.notes.trim())
-      const rvHas = (rv.status && rv.status !== 'not_started') || (rv.notes && rv.notes.trim())
-      merged[it] = lvHas ? { status: lv.status || 'not_started', notes: lv.notes || '' }
-                  : rvHas ? { status: rv.status || 'not_started', notes: rv.notes || '' }
-                          : { status: 'not_started', notes: '' }
-    })
-    out.weeks[wk] = merged
-  })
-  return out
 }
 
 // In-memory state used by the dialog. _practiceLogPending tracks whether the
@@ -1982,14 +1786,6 @@ function _practiceLogActiveWeekLabel() {
   return _currentWeekLabel()
 }
 
-function _ensurePracticeLogWeek(data, weekLabel) {
-  if (!data.weeks[weekLabel]) data.weeks[weekLabel] = {}
-  data.customItems.forEach(it => {
-    if (!data.weeks[weekLabel][it]) data.weeks[weekLabel][it] = { status: 'not_started', notes: '' }
-  })
-  return data.weeks[weekLabel]
-}
-
 function _refreshPracticeLogPendingHint() {
   const $h = $('#practiceLogPendingHint')
   if ($h.length) $h.toggle(!!window._practiceLogPending)
@@ -1997,19 +1793,6 @@ function _refreshPracticeLogPendingHint() {
   // edit/save callsite that already updates the pending hint also updates
   // the "needs planning" cue without scattering separate hooks.
   _refreshPracticeLogBtnHighlight()
-}
-
-// "Does `weekLabel` have any item still on its default not_started status?"
-// Items missing from the week record are implicitly not_started, so a week
-// that's never been touched also returns true. Used to surface a reminder
-// while there's still anything left to plan/log for the week.
-function _practiceLogWeekHasUntouchedItem(data, weekLabel) {
-  const items = (data && data.customItems) || PRACTICE_LOG_DEFAULT_ITEMS
-  const week = (data && data.weeks && data.weeks[weekLabel]) || {}
-  return items.some(name => {
-    const it = week[name]
-    return !it || !it.status || it.status === 'not_started'
-  })
 }
 
 // Surface a "still has items left to plan/log" cue on the entry buttons
@@ -2026,108 +1809,50 @@ function _refreshPracticeLogBtnHighlight() {
   $('#practiceLogFrontBtn, #practiceLogSettingsBtn').toggleClass('practice-log-needs-attention', needs)
 }
 
+// Thin shim — VM in ./renderer/practice-log-render-vm.js, DOM emit in
+// ./renderer/practice-log-render.js. The wrapper owns the data mutation
+// + persistence side-effects via the callback bag.
 function _renderPracticeLogPlan() {
   const data = window._practiceLog
   if (!data) return
   const weekLabel = _practiceLogActiveWeekLabel()
   const week = _ensurePracticeLogWeek(data, weekLabel)
-  $('#practiceLogWeekLabel').text(`Week ${weekLabel}`)
-  const $items = $('#practiceLogItems').empty()
-  data.customItems.forEach((name, idx) => {
-    const it = week[name] || { status: 'not_started', notes: '' }
-    const $row = $('<div class="practice-log-item">')
-    $row.append($('<div class="practice-log-item-name">').text(name))
-    const $sel = $('<select class="practice-log-item-status">')
-    PRACTICE_LOG_STATUSES.forEach(s => {
-      const $opt = $('<option>').attr('value', s.value).text(s.label)
-      if (s.value === it.status) $opt.attr('selected', 'selected')
-      $sel.append($opt)
-    })
-    $sel.on('change', function () {
-      week[name] = { ...week[name], status: $(this).val() }
-      window._practiceLogPending = true
-      _savePracticeLogLocal(data)
-      _refreshPracticeLogPendingHint()
-    })
-    $row.append($sel)
-    const $notes = $('<textarea class="practice-log-item-notes" placeholder="Notes (resources, time spent, what worked)…">').val(it.notes || '')
-    $notes.on('input', function () {
-      week[name] = { ...week[name], notes: $(this).val() }
-      window._practiceLogPending = true
-      _savePracticeLogLocal(data)
-      _refreshPracticeLogPendingHint()
-    })
-    $row.append($notes)
-    const isDefault = PRACTICE_LOG_DEFAULT_ITEMS.indexOf(name) !== -1
-    if (!isDefault) {
-      const $rm = $('<button type="button" class="practice-log-item-remove" title="Remove this custom item">×</button>')
-      $rm.on('click', function () {
-        if (!confirm(`Remove "${name}" from the practice log? Existing history for this item will be kept but the item won't show on new weeks.`)) return
-        data.customItems = data.customItems.filter(n => n !== name)
-        delete week[name]
-        window._practiceLogPending = true
-        _savePracticeLogLocal(data)
-        _renderPracticeLogPlan()
-        _refreshPracticeLogPendingHint()
-      })
-      $row.append($rm)
-    } else {
-      $row.append($('<div></div>'))
-    }
-    $items.append($row)
-  })
+  const vm = buildPracticeLogPlanVM(data.customItems, week, weekLabel)
+  const markDirty = () => {
+    window._practiceLogPending = true
+    _savePracticeLogLocal(data)
+    _refreshPracticeLogPendingHint()
+  }
+  renderPracticeLogPlan(vm, $('#practiceLogItems')[0], {
+    onStatusChange: (name, value) => {
+      week[name] = { ...week[name], status: value }
+      markDirty()
+    },
+    onNotesChange: (name, notes) => {
+      week[name] = { ...week[name], notes }
+      markDirty()
+    },
+    onRemoveItem: (name) => {
+      if (!confirm(`Remove "${name}" from the practice log? Existing history for this item will be kept but the item won't show on new weeks.`)) return
+      data.customItems = data.customItems.filter(n => n !== name)
+      delete week[name]
+      markDirty()
+      _renderPracticeLogPlan()
+    },
+  }, $('#practiceLogWeekLabel')[0])
 }
 
+// Thin shim — VM in ./renderer/practice-log-render-vm.js, DOM emit in
+// ./renderer/practice-log-render.js. The retention input is synced from
+// data here (not in the VM) because we skip the update while the user
+// is editing it.
 function _renderPracticeLogHistory() {
   const data = window._practiceLog
   if (!data) return
-  // Sync the retention input from data on render. The input drives both
-  // display count AND on-save pruning — one setting, persisted with the log.
   const $ret = $('#practiceLogHistoryWeeks')
   if (!$ret.is(':focus')) $ret.val(data.historyRetainWeeks || PRACTICE_LOG_DEFAULT_RETAIN)
-  const N = Math.max(1, parseInt($ret.val(), 10) || PRACTICE_LOG_DEFAULT_RETAIN)
-  const $list = $('#practiceLogHistoryList').empty()
-  const allWeeks = Object.keys(data.weeks).sort().reverse()
-  if (!allWeeks.length) {
-    $list.append($('<div style="color:#888;font-size:0.85em;">').text('No history yet — set a plan for the current or next week and it will show up here.'))
-    return
-  }
-  const slice = allWeeks.slice(0, N)
-  slice.forEach(wk => {
-    const $w = $('<div class="practice-log-history-week">')
-    $w.append($('<div class="practice-log-history-week-header">').text(`Week ${wk}`))
-    const week = data.weeks[wk] || {}
-    const itemNames = Object.keys(week)
-    if (!itemNames.length) {
-      $w.append($('<div class="practice-log-history-item" style="color:#aaa;">').text('(no items)'))
-    } else {
-      itemNames.forEach(name => {
-        const it = week[name] || {}
-        const s = PRACTICE_LOG_STATUSES.find(x => x.value === (it.status || 'not_started')) || PRACTICE_LOG_STATUSES[0]
-        const $row = $('<div class="practice-log-history-item">')
-        $row.append($(`<span class="pl-status ${s.cls}">`).text(s.label))
-        $row.append($('<span>').text(' · ' + name))
-        const notes = (it.notes || '').trim()
-        if (notes) {
-          // Notes hidden by default — keep history compact. 💬 toggles a
-          // collapsible row underneath. Title gives the user a peek before
-          // they click.
-          const $toggle = $('<button type="button" class="practice-log-notes-toggle" title="Show notes">💬</button>')
-          const $notes = $('<div class="practice-log-history-notes" style="display:none;">').text(notes)
-          $toggle.on('click', function (e) {
-            e.preventDefault()
-            const open = $notes.is(':visible')
-            $notes.toggle(!open)
-            $toggle.attr('title', open ? 'Show notes' : 'Hide notes')
-          })
-          $row.append($toggle)
-          $row.append($notes)
-        }
-        $w.append($row)
-      })
-    }
-    $list.append($w)
-  })
+  const vm = buildPracticeLogHistoryVM(data)
+  renderPracticeLogHistory(vm, $('#practiceLogHistoryList')[0])
 }
 
 function _setPracticeLogTab(tab) {
@@ -2432,37 +2157,7 @@ export function renderVocabularyCategory(category) {
 
 window.playingYoutubeVideo = false;
 
-function toSeconds(str) {
-  str = str + ""
-  let hour = 0, mins = 0, secs = 0, millis = 0
-  if (str.split(/[,.]/).length === 2) {
-    const splits = str.split(/[,.]/)
-    str = splits[0]
-    millis = splits[1]
-  }
-  const splits = str.split(":")
-
-  if (splits.length === 2) {
-    mins = splits[0]
-    secs = splits[1]
-  }
-  if (splits.length === 3) {
-    hour = splits[0]
-    mins = splits[1]
-    secs = splits[2]
-  }
-  return parseInt(hour) * 3600 + parseInt(mins) * 60 + parseInt(secs) + parseInt(millis) / 1000
-}
-
-function fromSeconds(number) {
-  const _pad = x => x.length < 2 ? '0' + x : x;
-  const hrs = Math.floor(number / 3600) + ''
-  const mins = Math.floor((number % 3600) / 60) + ''
-  const secs = Math.floor((number % 3600) % 60) + ''
-
-
-  return `${_pad(hrs)}:${_pad(mins)}:${_pad(secs)}`
-}
+// toSeconds / fromSeconds live in ./time-format.js (imported at the top).
 
 const URL = window.URL || window.webkitURL
 const displayMessage = function (message, isError) {
@@ -3099,35 +2794,11 @@ function getWikiLinkSpecial(word, uri = null, index = null) {
   return getWikiLink(word, uri, 'link-special', index)
 }
 
-function decodeHtmlEntities(html) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-  return doc.body.textContent;
-}
-
-function removeHtmlTags(text) {
-  return decodeHtmlEntities(text.replace(/<\/?[^>]+>/g, ''));
-}
-
+// decodeHtmlEntities / removeHtmlTags / decodeHtmlTags live in ./html-utils.js
+// (imported at the top). encodeHtmlTags is wrapped here so we can pass the
+// project's `uuid` generator (from data-structures.js) for sturdier ids.
 function encodeHtmlTags(text) {
-  const m = text.matchAll(/<[^<>]+>/g)
-  const encodings = {}
-  Array.from(new Set(m.toArray().filter(it => it.length > 0).map(it => it[0]))).forEach(it => {
-    encodings[it] = ` _${uuid().replaceAll('-', '_')}_ `
-  })
-  Object.keys(encodings).forEach(key => {
-    const enc = encodings[key]
-    text = text.replaceAll(key, enc)
-  })
-  return [decodeHtmlEntities(text), encodings]
-}
-
-function decodeHtmlTags(text, encodings) {
-  Object.keys(encodings).forEach(key => {
-    const enc = encodings[key]
-    text = text.replaceAll(enc.trim(), key)
-  })
-  return text
+  return _coreEncodeHtmlTags(text, uuid)
 }
 
 function populateWikiLinks(text, $el, index = null) {
@@ -3838,34 +3509,7 @@ try {
 // working. Previously the lang variant stored text ONLY under item[lang],
 // which is what caused practice edits to render as "(empty)" — the practice
 // renderer reads item.text exclusively.
-function srtToJson(text, lang) {
-  const mirror = lang && lang !== 'text'   // legacy callers that read item[lang]
-  text = text.replaceAll('<c.huvudpratare>', '')
-  const items = []
-  let currentItem = { text: '' }
-  if (mirror) currentItem[lang] = ''
-  text.split("\n").forEach(line => {
-    line = line.trim()
-    const matchTime = line.match(/(\d\d:\d\d:\d\d[,.]\d\d\d) --> (\d\d:\d\d:\d\d[,.]\d\d\d)/m)
-    const matchId = line.match(/^\d+$/m)
-    if (matchId) {
-      items.push(currentItem)
-      currentItem = { index: line, id: line, text: '' }
-      if (mirror) currentItem[lang] = ''
-    } else if (matchTime) {
-      currentItem['start'] = {ordinal: toSeconds(matchTime[1])}
-      currentItem['end'] = {ordinal: toSeconds(matchTime[2])}
-      currentItem['ts'] = matchTime[1]
-      currentItem['te'] = matchTime[2]
-    } else {
-      currentItem.text += (line + "\n")
-      if (mirror) currentItem[lang] += (line + "\n")
-    }
-  })
-
-  items.push(currentItem)
-  return items.filter(it => it.start && it.start.ordinal != null)
-}
+// srtToJson lives in ./srt-parser.js (imported at the top).
 
 function getCategory(item) {
   const link = item.link;
@@ -3905,20 +3549,7 @@ function storeSubtitles(subs) {
   return originalSubs;
 }
 
-function toStringSubtitle(sub) {
-  return `${sub.number}\n${sub.ts_o} --> ${sub.te_o}\n${sub.sv.substring(0, 30)}...`
-}
-
-// Tag a failed SRT fetch so the loader can tell a genuine miss from a
-// recoverable one:
-//   'notfound'  — HTTP 404: the file really isn't there, never retry.
-//   'transient' — rate limiting (429), 5xx, network blip, or timeout: retry.
-function _srtError(kind, message) {
-  const e = new Error(message || kind)
-  e.kind = kind
-  e.isSrtError = true
-  return e
-}
+// toStringSubtitle + srtError live in ./srt-parser.js (imported at the top).
 
 // ─── IndexedDB cache for SRT subtitle pairs ─────────────────────────────────
 // Stores `{link, name, sv, en, source, cachedAt}` records keyed by `link`.
@@ -4586,29 +4217,7 @@ window.addEventListener('keydown', e => {
   }
 })
 
-function splitSentences(text) {
-  const segmentor = new Intl.Segmenter([], {granularity: 'sentence'});
-  const segmentedText = segmentor.segment(text);
-  return Array.from(segmentedText, ({segment}) => segment).filter(it => it.trim().length > 1);
-}
-
-function chunkifySentence(text, max_chars) {
-  const words = text.split(" ")
-  const res = []
-  let current = ""
-  const sentences = splitSentences(text).filter(it => it.type === 'Sentence')
-  for (let i = 0; i < sentences.length; i++) {
-    const w = sentences[i].raw
-    if (current.length + w.length >= max_chars) {
-      res.push(current)
-      current = w + " "
-    } else {
-      current += (w + " ")
-    }
-  }
-  res.push(current)
-  return res
-}
+// splitSentences + chunkifySentence live in ./search-text.js.
 
 function getTimesForSubtitleChunk(el, fl) {
   const lines = $(el).find(".line").map((i, e) => $(e).data()).toArray()
@@ -4772,11 +4381,7 @@ function numberOfItemsToShow() {
   return n
 }
 
-function getWords(text) {
-  const segmentor = new Intl.Segmenter([], {granularity: 'word'});
-  const segmentedText = segmentor.segment(text);
-  return Array.from(segmentedText, ({segment}) => segment).filter(it => it.trim() !== "|");
-}
+// getWords lives in ./search-text.js.
 
 class MatchResult {
   constructor(word, line, url, source) {
@@ -4787,32 +4392,7 @@ class MatchResult {
   }
 }
 
-function expandRegex(txt) {
-  txt = txt.replaceAll("*ngn", "(jag|du|han|hon|ni|de|vi|dom)")
-  txt = txt.replaceAll("*sig", "(mig|dig|honom|henne|er|sig)")
-  return txt
-}
-
-// Wrap a search pattern in regex word boundaries so a multi-word phrase like
-// "ta efter" doesn't match inside "tänkta efter" / "leta efter". Uses
-// lookarounds (\w on either side) rather than \b because Swedish letters like
-// å/ä/ö are non-\w in JS — \b would put a boundary inside a Swedish word and
-// cause spurious mismatches there too. Patterns the user explicitly padded
-// with whitespace (their convention for literal-space prefix/suffix matching)
-// are left alone.
-function withWordBoundaries(pattern) {
-  if (!pattern) return pattern
-  if (/^\s|\s$/.test(pattern)) return pattern
-  return `(?<!\\w)(?:${pattern})(?!\\w)`
-}
-
-// Treat any run of literal spaces in a user-supplied pattern as `\s+`, so
-// the search is whitespace-insensitive — "a b", "a  b" and "a\nb" all
-// match the user's "a b" query. Applied to every RegExp we build from
-// search input downstream (file filter, per-word, phrase, whole-text).
-function _relaxSpaces(pattern) {
-  return String(pattern || '').replace(/ +/g, '\\s+')
-}
+// expandRegex, withWordBoundaries, _relaxSpaces live in ./search-text.js.
 
 async function getMatchingWords(list, search, token) {
   const startTime = new Date().getTime()
@@ -5234,8 +4814,7 @@ function _savePendingSrtEdits(edits) {
   } catch (_) {}
 }
 function _pendingSrtEditCount(edits) {
-  edits = edits || _loadPendingSrtEdits()
-  return Object.values(edits).reduce((n, perFile) => n + Object.keys(perFile || {}).length, 0)
+  return _pendingSrtEditCountCore(edits || _loadPendingSrtEdits())
 }
 function _queueSubtitleEdit(filePath, lineIndex, newText) {
   const edits = _loadPendingSrtEdits()
@@ -5346,60 +4925,15 @@ $(function () {
   try { _updatePlayUnavailableBadge() } catch (_) {}
 })
 
-// Build a per-(file,line) row inside the review list. The textarea is
-// editable so the user can refine the text right before pushing.
+// Thin shims — VM in ./renderer/srt-edits-review-vm.js, DOM emit/read in
+// ./renderer/srt-edits-review-render.js.
 function _renderSrtEditsReviewList() {
-  const $list = $('#srtEditsReviewList').empty()
-  const edits = _loadPendingSrtEdits()
-  const paths = Object.keys(edits).sort()
-  if (!paths.length) {
-    $list.append('<div class="srt-review-empty">No pending edits.</div>')
-    return
-  }
-  paths.forEach(filePath => {
-    const lines = edits[filePath] || {}
-    const lineKeys = Object.keys(lines).sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
-    if (!lineKeys.length) return
-    const $group = $(`<div class="srt-review-file"></div>`)
-    // Trim the long `db/language/<Lang>/srts/` prefix to keep the header
-    // readable; full path lives in the title attribute for hover.
-    const shortName = filePath.replace(/^db\/language\/[^/]+\/srts\//, '')
-    $group.append($('<div class="srt-review-file-head"></div>')
-      .attr('title', filePath)
-      .text(`${shortName} — ${lineKeys.length} edit${lineKeys.length === 1 ? '' : 's'}`))
-    lineKeys.forEach(li => {
-      const entry = lines[li] || {}
-      const ageMs = Math.max(0, Date.now() - (entry.ts || 0))
-      const ageMin = Math.round(ageMs / 60000)
-      const $row = $(`<div class="srt-review-row" data-file="${escapeHtml(filePath)}" data-line="${escapeHtml(li)}">
-          <label class="srt-review-keep-wrap">
-            <input type="checkbox" class="srt-review-keep" checked>
-            <span class="srt-review-meta">#${escapeHtml(li)} <span class="srt-review-age">${ageMin < 1 ? 'just now' : ageMin + 'm ago'}</span></span>
-          </label>
-          <textarea class="srt-review-text" rows="2"></textarea>
-        </div>`)
-      $row.find('.srt-review-text').val(String(entry.newText || ''))
-      $group.append($row)
-    })
-    $list.append($group)
-  })
+  const vm = buildSrtEditsReviewVM(_loadPendingSrtEdits())
+  renderSrtEditsReviewList(vm, $('#srtEditsReviewList')[0])
 }
 
-// Collect (filePath, lineIndex, newText) tuples from rows whose checkbox is
-// in `state`. Reading values from the textareas means the user's in-dialog
-// tweaks come along for the ride.
 function _collectSrtEditsByCheckbox(checked) {
-  const out = []
-  $('#srtEditsReviewList .srt-review-row').each(function () {
-    const $row = $(this)
-    if ($row.find('.srt-review-keep').is(':checked') !== !!checked) return
-    out.push({
-      filePath: $row.attr('data-file'),
-      lineIndex: $row.attr('data-line'),
-      newText: String($row.find('.srt-review-text').val() || '')
-    })
-  })
-  return out
+  return collectSrtEditsByCheckbox($('#srtEditsReviewList')[0], checked)
 }
 
 function openSrtEditsReviewDialog() {
@@ -5706,60 +5240,18 @@ function _syncCapturedItemTimes(containerId, url) {
   }
 }
 
+// Thin wrappers — pure cores in ./search-text.js take searchText + bracket
+// stripper as args; here we fall back to window.searchText if omitted.
 function getSearchedTerms(search) {
-  if (search === null || search === undefined) {
-    search = window.searchText
-  }
-  if (!search) return []
-  const terms = _.trim(search.toLowerCase(), SEPARATOR_PIPE)
-      .split(SEPARATOR_PIPE)
-      .filter(it => it.trim().length > 0)
-      .map(removeHintsInBrackets)
-      .map(it => {
-        const leftSpace = it.startsWith(" "), rightSpace = it.endsWith(" ");
-        const w = it.trim()
-        return (leftSpace ? " " : "") + w + (rightSpace ? " " : "")
-      });
-  return _.uniq(terms.filter(it => it));
+  const s = (search === null || search === undefined) ? window.searchText : search
+  return _coreGetSearchedTerms(s, removeHintsInBrackets)
 }
 
 function getWordsOrdered(words) {
-  let ordered = [window.searchText]
-
-  _.remove(words, it => it === window.searchText)
-
-  getSearchedTerms().forEach(w => {
-    if (_.remove(words, it => it.trim() === w.trim()).length) {
-      ordered.push(w.trim())
-    }
-  })
-
-  const relatedWords = (w, predicate) => {
-    let found = words.filter(predicate)
-    if (found) {
-      found = _.sortBy(found, it => it.length)
-      ordered = ordered.concat(found)
-      _.remove(words, it => _.includes(found, it))
-    }
-  }
-
-  getSearchedTerms().forEach(w => {
-    relatedWords(w, it => it.trim().startsWith(w.trim()))
-    relatedWords(w, it => it.trim().endsWith(w.trim()))
-  })
-
-  words.filter(it => !_.includes(ordered, it)).forEach(it => ordered.push(it))
-  return _.uniq(ordered)
+  return _coreGetWordsOrdered(words, window.searchText, removeHintsInBrackets)
 }
 
-const commonWordsToIgnore = [
-  'den', 'det', 'är', 'och', 'att', 'i', 'en', 'jag', 'hon', 'som', 'han', 'på', 'den', 'med', 'var', 'sig', 'för', 'så',
-  'var', 'vart', 'vem', 'vilken', 'vilka', 'åt', 'heller', 'eller', 'när', 'in', 'inne', 'up', 'uppe', 'ner', 'nere',
-  'här', 'där', 'var', 'dit', 'där', 'ditt', 'mitt', 'sitt', 'vårt', 'vem', 'vad', 'vilken', 'vilket', 'vilka', 'någon',
-  'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många', 'mycket', 'lite', 'få', 'färre',
-  'flera', 'mest', 'minst', 'någon', 'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många',
-  'dig', 'mig', 'oss', 'er', 'dem', 'honom', 'henne'
-]
+// commonWordsToIgnore is now imported from ./vocab-search.js
 
 // Extract the channel name from an SRT base name. Capture/upload paths
 // stamp the file as `${channel} || ${title} || ${id}`, so split on " || "
@@ -6006,52 +5498,19 @@ function getSelectedLang() {
   return $('#toggleLangCb').prop('checked') ? 'en' : 'sv';
 }
 
+// Thin wrappers — pure cores in ./search-text.js take the subtitle map
+// and selected language as args.
 function searchSubtitleText(text, key) {
-  key = key || 'sv'
-  return Object.values(allSubtitles).map(it => it[key]).filter(it => it.includes(text))
+  return _coreSearchSubtitleText(typeof allSubtitles !== 'undefined' ? allSubtitles : {}, text, key || 'sv')
 }
 
 function filterByLanguage(searchResults) {
-  const selectedLang = getSelectedLang()
-  return searchResults.map(it => {
-    if (selectedLang === 'sv' && it.sv_match) return it.sv_subs
-    if (selectedLang === 'en' && it.en_match) return it.en_subs
-    return null
-  }).filter(it => it);
+  return _coreFilterByLanguage(searchResults, getSelectedLang())
 }
 
-function getSurrounding(index, list, size = 5) {
-  list = list.map((item, index) => ({item, index}))
-  const idx = list.findIndex(it => it.index === index)
-  if (idx < 0) return []
-  return list.slice(Math.max(0, idx - size), Math.min(list.length, idx + (size + 1)))
-}
+// getSurrounding is imported directly from ./search-text.js.
 
-function wordIsExactInVocabularyLine(vocabLine, search) {
-  try {
-    const vocabLineLower = (vocabLine || '').toLowerCase();
-    const vocabWords = getWords(vocabLine)
-        .filter(it => it.trim().length > 2)
-        .map(it => it.toLowerCase().trim());
-    const s = (search || '').toLowerCase().trim();
-    if (!s) return false;
-    if (vocabWords.includes(s)) return true;
-    // Pipe-expanded search: try each term. Multi-word phrases get a
-    // substring check against the un-expanded vocab line so a vocab line
-    // like "(x)|<*göra susen|<*ta skruv" still matches "göra susen".
-    const terms = s.split(SEPARATOR_PIPE).map(t => t.trim()).filter(Boolean);
-    for (const t of terms) {
-      if (t.indexOf(' ') > 0) {
-        if (vocabLineLower.includes(t)) return true;
-      } else if (vocabWords.includes(t)) {
-        return true;
-      }
-    }
-    return false;
-  } catch (e) {
-    return false;
-  }
-}
+// wordIsExactInVocabularyLine lives in ./search-text.js.
 
 export function wordIsInVocabularyLine(vocabLine, search) {
   try {
@@ -6109,281 +5568,37 @@ export function wordIsInVocabularyLine(vocabLine, search) {
  * and `xyzw` matches `xyz` (also prefix) — the four combinations cover
  * every "one is a prefix/suffix of the other" relationship.
  */
-// Returns the longest prefix/suffix overlap (in chars) between any vocab-line
-// pipe-segment and any search part, or 0 if none. Lets callers tier matches:
-// >= 3 is a "strong" hit; 2 is a "weak" hit (e.g. searching "gråt" hitting a
-// "åt" segment via 2-char suffix overlap). Same bracket-stripping as the
-// boolean matcher below.
-// Common Swedish stop-words & inflectional clitics that we never want to
-// anchor a prefix/suffix overlap on (otherwise vocab lines containing the
-// word "det" would match every "*-det" search, "et" would match every
-// neuter-definite, etc.). Built on top of `commonWordsToIgnore` plus a
-// small list of bare inflection markers that aren't standalone words.
-const VOCAB_OVERLAP_STOP_WORDS = new Set([
-  ...commonWordsToIgnore.map(w => w.toLowerCase()),
-  'et', 'ett', 'en', 'arna', 'erna', 'orna', 'are', 'ade', 'ar', 'or', 'er',
-  'av', 'om', 'och', 'att',
-  // Possessives & demonstratives that shouldn't anchor a prefix overlap.
-  'sin', 'sitt', 'sina', 'din', 'dina', 'min', 'mina', 'vår', 'våra', 'era',
-  'ert', 'denna', 'detta', 'dessa', 'samma', 'andra', 'samt'
-])
-
-// Common Swedish noun/verb inflections that get stripped when probing
-// compound decomposition. "trollguldet" → strip "et" → "trollguld" →
-// split into known words "troll" + "guld". The empty-string entry lets
-// the second half be a bare known word (no inflection).
-const VOCAB_COMPOUND_SUFFIXES = ['ningarna', 'ningar', 'ningen', 'ning', 'else', 'heten', 'het', 'arna', 'erna', 'orna', 'ande', 'ende', 'ade', 'ats', 'at', 'et', 'en', 'ar', 'or', 'er', 'na', 'ad', 'as', 'a', 's', '']
-
-// Lazy-built set of every word that appears in some non-hidden vocabulary
-// line and isn't a stop-word — used as the lexicon for compound splits.
-// Rebuilt when the number of categories changes (signal that vocabulary
-// was reloaded). Module-scoped cache stays in sync with window.vocabulary.
+// Pure prefix/suffix overlap helpers, the stop-word/suffix lists and the
+// compound-decomposition algorithm all live in ./vocab-search.js so they
+// can be unit-tested without dragging in jQuery / DOM. The wrappers below
+// keep an on-window cache of the lexicon sets so we don't rebuild them per
+// keystroke; they invalidate when window.vocabulary changes shape.
 function _vocabKnownWordSet() {
   const vocab = window.vocabulary || {}
   const key = Object.keys(vocab).length + ':' + Object.values(vocab).reduce((n, ls) => n + (Array.isArray(ls) ? ls.length : 0), 0)
   if (window._vocabKnownWordsCache && window._vocabKnownWordsCacheKey === key) {
     return window._vocabKnownWordsCache
   }
-  const set = new Set()
-  for (const [cat, lines] of Object.entries(vocab)) {
-    if (!Array.isArray(lines)) continue
-    if (VOCAB_HIDDEN_CATEGORIES.has(cat)) continue
-    for (const line of lines) {
-      if (typeof line !== 'string') continue
-      for (const seg of line.split(SEPARATOR_PIPE)) {
-        let stripped
-        try { stripped = removeHintsInBrackets(seg.toLowerCase()).trim() }
-        catch (_) { stripped = seg.toLowerCase().trim() }
-        if (!stripped) continue
-        for (const w of stripped.split(/[\s,/<>*]+/)) {
-          const t = w.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '')
-          if (t.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(t)) set.add(t)
-        }
-      }
-    }
-  }
+  const set = buildKnownWordSet(vocab, VOCAB_HIDDEN_CATEGORIES)
   window._vocabKnownWordsCache = set
   window._vocabKnownWordsCacheKey = key
   return set
 }
 
-// Cached set of substrings that occur as a length-≥4 prefix of some known
-// vocab token. Used to surface morphemes whose only vocab presence is via a
-// longer derived form — e.g. "promen" appears in vocab via "promenera", so
-// "aftonpromenad" can still decompose to surface that line.
 function _vocabPrefixSet() {
   const vocab = window.vocabulary || {}
   const key = Object.keys(vocab).length + ':' + Object.values(vocab).reduce((n, ls) => n + (Array.isArray(ls) ? ls.length : 0), 0)
   if (window._vocabPrefixSetCache && window._vocabPrefixSetCacheKey === key) {
     return window._vocabPrefixSetCache
   }
-  const known = _vocabKnownWordSet()
-  const set = new Set()
-  for (const t of known) {
-    for (let k = 4; k <= t.length; k++) set.add(t.slice(0, k))
-  }
+  const set = buildPrefixSet(_vocabKnownWordSet())
   window._vocabPrefixSetCache = set
   window._vocabPrefixSetCacheKey = key
   return set
 }
 
-// Decompose a (Swedish) compound word into morphemes that have a presence
-// in the vocabulary. Walks the input left-to-right, picking the longest
-// substring at each position that is either:
-//   (a) a known vocab token,
-//   (b) a known token + a common Swedish suffix (e.g. "huset" = hus + et),
-//   (c) a length-≥4 prefix of some known token (e.g. "promen" appears as
-//       the leading 6 chars of "promenera").
-// "trollguldet" → ["troll", "guld"]; "sinnesstämning" → ["sinne", "stämning"];
-// "fågelhuset" → ["fågel", "hus"]; "aftonpromenad" → ["promen"]. Bails out
-// when the input itself (or its suffix-stripped stem) is already known, so
-// regular inflections like "sparvarna" don't get split into "spar+varna".
 function vocabCompoundParts(word) {
-  if (!word || word.length < 6) return []
-  const w = word.toLowerCase()
-  const known = _vocabKnownWordSet()
-  if (known.has(w)) return []
-  for (const sfx of VOCAB_COMPOUND_SUFFIXES) {
-    if (!sfx) continue
-    if (!w.endsWith(sfx)) continue
-    const stem = w.slice(0, w.length - sfx.length)
-    if (stem.length >= 3 && known.has(stem)) return []
-  }
-  const prefixSet = _vocabPrefixSet()
-  const parts = []
-  const seen = new Set()
-  const N = w.length
-  let i = 0
-  while (i <= N - 3) {
-    let bestSub = null
-    let consumed = 0
-    // (a)/(b) combined: longest l where w[i..i+l] is a known token, OR
-    // strips down via a common suffix to a known token. (b) wins when the
-    // bare substring isn't a token but the morpheme is — e.g. "huset" → "hus".
-    for (let l = N - i; l >= 3; l--) {
-      const sub = w.slice(i, i + l)
-      if (sub === w) continue
-      if (known.has(sub)) { bestSub = sub; consumed = l; break }
-      let stripped = null
-      for (const sfx of VOCAB_COMPOUND_SUFFIXES) {
-        if (!sfx) continue
-        if (!sub.endsWith(sfx)) continue
-        const stem = sub.slice(0, sub.length - sfx.length)
-        if (stem.length >= 3 && known.has(stem)) { stripped = stem; break }
-      }
-      if (stripped) { bestSub = stripped; consumed = l; break }
-    }
-    // (c) Prefix-of-known fallback — substrings like "promen" that aren't
-    // themselves vocab tokens but lead into one ("promenera"). Skipped when
-    // (a)/(b) already produced a hit at this i.
-    if (!bestSub) {
-      for (let l = N - i; l >= 4; l--) {
-        const sub = w.slice(i, i + l)
-        if (sub === w) continue
-        if (prefixSet.has(sub) && !VOCAB_OVERLAP_STOP_WORDS.has(sub)) {
-          bestSub = sub
-          consumed = l
-          break
-        }
-      }
-    }
-    // Require either a substantial morpheme (≥4 chars) OR a 3-char stem that
-    // gets extended by an inflectional suffix to ≥5 chars. Stops coincidental
-    // 3-char hits like "ton" inside "aftonpromenad" from showing up.
-    const lenOk = bestSub && (bestSub.length >= 4 || consumed >= 5)
-    if (lenOk && !VOCAB_OVERLAP_STOP_WORDS.has(bestSub)) {
-      if (!seen.has(bestSub)) { parts.push(bestSub); seen.add(bestSub) }
-      i += Math.max(consumed, 1)
-    } else {
-      i++
-    }
-  }
-  return parts
-}
-
-// Like vocabPrefixOverlapLen but returns { len, bestPart, matched } —
-// `matched` is the actual common-prefix substring that was matched (used as
-// the group label in the UI), `bestPart` is the search part that produced
-// it. So a token "stor" matching the search "stoft" with LCP=3 surfaces
-// under a "sto" group, not "stoft".
-function vocabPrefixOverlapDetail(vocabLine, searchText) {
-  const stRaw = (searchText || '').toLowerCase().trim()
-  if (!stRaw) return { len: 0, bestPart: '', matched: '' }
-  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim())
-    .filter(s => s.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(s))
-  if (searchParts.length === 0) return { len: 0, bestPart: '', matched: '' }
-  const vocabParts = vocabLine.split(SEPARATOR_PIPE)
-    .map(p => p.toLowerCase().trim())
-    .map(p => { try { return removeHintsInBrackets(p).trim() } catch (_) { return p } })
-    .filter(p => p.length >= 2)
-  let bestLen = 0
-  let bestPart = ''
-  let bestToken = ''
-  for (const p of vocabParts) {
-    const tokens = []
-    if (!VOCAB_OVERLAP_STOP_WORDS.has(p)) tokens.push(p)
-    if (/\s/.test(p)) {
-      for (const w of p.split(/\s+/)) {
-        if (w.length >= 2 && !VOCAB_OVERLAP_STOP_WORDS.has(w)) tokens.push(w)
-      }
-    }
-    for (const s of searchParts) {
-      for (const t of tokens) {
-        const lim = Math.min(t.length, s.length)
-        const needed = Math.max(1, lim - 1)
-        let lcp = 0
-        while (lcp < lim && t.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
-        if (lcp >= needed && lcp > bestLen) {
-          bestLen = lcp; bestPart = s; bestToken = t
-        }
-      }
-    }
-  }
-  // Matched substring = the common-prefix portion of the winning token.
-  const matched = bestLen > 0 ? bestToken.slice(0, bestLen) : ''
-  return { len: bestLen, bestPart, matched }
-}
-
-function vocabPrefixOverlapLen(vocabLine, searchText) {
-  const stRaw = (searchText || '').toLowerCase().trim()
-  if (!stRaw) return 0
-  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim())
-    .filter(s => s.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(s))
-  if (searchParts.length === 0) return 0
-  const vocabParts = vocabLine.split(SEPARATOR_PIPE)
-    .map(p => p.toLowerCase().trim())
-    .map(p => { try { return removeHintsInBrackets(p).trim() } catch (_) { return p } })
-    .filter(p => p.length >= 2)
-  let max = 0
-  for (const p of vocabParts) {
-    // Per-word tokens for multi-word segments — "rik som ett troll" still
-    // matches a "trollguldet" search via "troll", and "Det flyger inga
-    // stekta sparvar i munnen på en" matches "sparv" via "sparvar". Common
-    // stop-words ("det", "som", "att", "i", inflection clitics, …) are
-    // filtered out so they don't anchor spurious matches.
-    const tokens = []
-    if (!VOCAB_OVERLAP_STOP_WORDS.has(p)) tokens.push(p)
-    if (/\s/.test(p)) {
-      for (const w of p.split(/\s+/)) {
-        if (w.length >= 2 && !VOCAB_OVERLAP_STOP_WORDS.has(w)) tokens.push(w)
-      }
-    }
-    for (const s of searchParts) {
-      // "Near-containment": the shorter must be consumed by the longer with
-      // at most 1 char of divergence. Accepts inflection-style siblings
-      // ("trolla" + "trollguldet" share 5 of 6) but rejects coincidental
-      // prefix neighbours ("tropic" + "trollguldet" share only 3 of 6).
-      for (const t of tokens) {
-        const lim = Math.min(t.length, s.length)
-        const needed = Math.max(1, lim - 1)
-        let lcp = 0
-        while (lcp < lim && t.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
-        if (lcp >= needed && lcp > max) max = lcp
-      }
-    }
-  }
-  return max
-}
-
-// Longest common suffix between a vocab line's segments and the search.
-// Separated from the prefix path because suffix-only overlaps are noisy in
-// the main panel (every Swedish "-det", "-en", "-arna" matches across
-// unrelated words) — they're only useful in the Different-prefixes dialog's
-// weak-overlap fallback (the `overlap === 2` "åt" + "gråt" case).
-//
-// Only returns an LCS when the vocab segment is *entirely* consumed by the
-// suffix. Otherwise a 3-char segment like "bet" inside "(injure)|...|bet|"
-// would surface for any search ending in "-et" (trollguldet, kabinettet,
-// …) just because the last 2 chars happen to coincide.
-function vocabSuffixOverlapLen(vocabLine, searchText) {
-  const stRaw = (searchText || '').toLowerCase().trim()
-  if (!stRaw) return 0
-  const searchParts = stRaw.split(SEPARATOR_PIPE).map(s => s.trim())
-    .filter(s => s.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(s))
-  if (searchParts.length === 0) return 0
-  // Vocab parts are NOT stop-word filtered here — the dialog (b) pass needs
-  // to surface "äta|åt|ätit" for "gråt" via "åt" (a common word that would
-  // fail a stop filter). The `lcs === p.length` rule and the caller's strict
-  // `overlap === 2` are what hold the line: only fully-consumed 2-char
-  // segments contribute, and in this vocab those happen to be real words
-  // (ål, vy, sy, ro, nå, la, kö, få, åt), never bare inflection clitics.
-  const vocabParts = vocabLine.split(SEPARATOR_PIPE)
-    .map(p => p.toLowerCase().trim())
-    .map(p => { try { return removeHintsInBrackets(p).trim() } catch (_) { return p } })
-    .filter(p => p.length >= 2)
-  let max = 0
-  for (const p of vocabParts) {
-    for (const s of searchParts) {
-      const lim = Math.min(p.length, s.length)
-      let lcs = 0
-      while (lcs < lim && p.charCodeAt(p.length - 1 - lcs) === s.charCodeAt(s.length - 1 - lcs)) lcs++
-      // Require the vocab segment to be entirely the suffix — preserves the
-      // "åt" + "gråt" 2-char case but blocks "bet" + "trollguldet" (where
-      // only the last 2 of 3 chars line up).
-      if (lcs === p.length && lcs > max) max = lcs
-    }
-  }
-  return max
+  return _coreVocabCompoundParts(word, _vocabKnownWordSet(), _vocabPrefixSet())
 }
 
 // Does any pipe-segment in the vocabulary corpus contain `word` as an exact
@@ -6391,56 +5606,18 @@ function vocabSuffixOverlapLen(vocabLine, searchText) {
 // they're shown only when there's a strong anchor — i.e. the vocab actually
 // has the user's typed term as a word — so noisy 2-char overlaps like
 // "gråt" → "åt" don't leak through when there's nothing real to anchor on.
+// Thin wrapper — pure core in ./search-text.js takes the bracket stripper.
 function vocabHasExactWord(allWords, word) {
-  if (!word) return false
-  const w = word.toLowerCase().trim()
-  if (!w) return false
-  return allWords.some(line => {
-    if (typeof line !== 'string') return false
-    return line.toLowerCase().split(SEPARATOR_PIPE).some(p => {
-      let s
-      try { s = removeHintsInBrackets(p).trim() } catch (_) { s = p.trim() }
-      if (!s) return false
-      if (s === w) return true
-      // Multi-word segments (e.g. "kräla i stoftet") — match as a token.
-      return s.split(/\s+/).includes(w)
-    })
-  })
+  return _coreVocabHasExactWord(allWords, word, removeHintsInBrackets)
 }
 
 // Common derivational prefixes per language. Sorted longest-first so that
 // stripping picks `under` before `un`, `genom` before `ge`, `på` before
 // `på`-vs-`å`, etc.
-const COMMON_PREFIXES = {
-  sv: ['tillbaka', 'genom', 'efter', 'under', 'över', 'fram', 'före', 'kvar', 'fast', 'sam', 'för', 'upp', 'miss', 'till', 'mot', 'ned', 'an', 'om', 'be', 'er', 'bi', 'av', 'ut', 'in', 'på', 'å'],
-  en: ['under', 'over', 'after', 'fore', 'with', 'pre', 'pro', 'sub', 'super', 'mis', 'mid', 'dis', 'non', 'out', 'off', 'in', 're', 'un', 'de', 'be'],
-  es: ['contra', 'extra', 'inter', 'entre', 'sobre', 'bajo', 'des', 'pre', 'sub', 'sin', 'con', 'mal', 're', 'in']
-}
-
-// Strip the longest matching prefix from `word` using the supplied list.
-// Requires the residual stem to be ≥ 3 chars so we don't reduce e.g. "be"
-// to "" or "bevis" to "vis".
-function _stripPrefix(word, prefixList) {
-  for (const p of prefixList) {
-    if (word.length - p.length >= 3 && word.startsWith(p)) {
-      return { prefix: p, stem: word.substring(p.length) }
-    }
-  }
-  return { prefix: '', stem: word }
-}
-
-// For a search like "bevara" (sv), strip the leading prefix to get the stem
-// "vara" and then look across the vocabulary for lines that contain words
-// formed by attaching a DIFFERENT prefix to the same stem (e.g. "förvara",
-// "anvara", "bevara"…). Returns { stem, origPrefix, results: [{prefix,
-// candidate, lineIdx, category}, …] }.
+// COMMON_PREFIXES and _stripPrefix are now imported from ./different-prefix.js.
+// _findDifferentPrefixMatches stays here as a thin wrapper that walks the
+// live window.vocabulary and delegates to the pure core.
 function _findDifferentPrefixMatches(searchText, lang) {
-  const lc = (searchText || '').toLowerCase().trim()
-  if (!lc) return { stem: '', origPrefix: '', results: [] }
-  const prefixes = (COMMON_PREFIXES[lang] || COMMON_PREFIXES.sv).slice().sort((a, b) => b.length - a.length)
-  const { prefix: origPrefix, stem } = _stripPrefix(lc, prefixes)
-  if (!stem || stem.length < 3) return { stem, origPrefix, results: [] }
-
   const allWords = []
   const lineCategory = []
   Object.entries(window.vocabulary || {}).forEach(([cat, lines]) => {
@@ -6448,41 +5625,9 @@ function _findDifferentPrefixMatches(searchText, lang) {
     if (VOCAB_HIDDEN_CATEGORIES.has(cat)) return
     lines.forEach(l => { allWords.push(l); lineCategory.push(cat) })
   })
-
-  const seen = new Set()
-  const results = []
-  // (a) Different-prefix-same-stem matches — the original behaviour.
-  for (const p of prefixes) {
-    if (p === origPrefix) continue
-    const candidate = p + stem
-    if (candidate.length < 4) continue
-    allWords.forEach((vocabLine, idx) => {
-      if (seen.has(idx)) return
-      if (typeof vocabLine !== 'string') return
-      const parts = vocabLine.split(SEPARATOR_PIPE).map(s => s.toLowerCase().trim()).filter(s => s.length >= candidate.length)
-      // Strict: a vocab word starts with the candidate (so derived forms
-      // like "förvarar"/"förvarade" still hit, but a random short word
-      // doesn't get spuriously included).
-      if (parts.some(part => part.startsWith(candidate))) {
-        seen.add(idx)
-        results.push({ kind: 'prefix', prefix: p, candidate, lineIdx: idx, category: lineCategory[idx] || '?' })
-      }
-    })
-  }
-  // (b) Weak overlap matches — pipe-segments that share a 2-char full-segment
-  // suffix/prefix with the search (e.g. "äta|åt|ätit" hitting "gråt" via the
-  // bare "åt" segment). These are filtered from the main prefix panel as
-  // noise, but it's useful to surface them here when the user explicitly
-  // wants to see loose lexical neighbours.
-  allWords.forEach((vocabLine, idx) => {
-    if (seen.has(idx)) return
-    if (typeof vocabLine !== 'string') return
-    const overlap = vocabSuffixOverlapLen(vocabLine, lc)
-    if (overlap === 2) {
-      seen.add(idx)
-      results.push({ kind: 'overlap', lineIdx: idx, category: lineCategory[idx] || '?' })
-    }
-  })
+  const { stem, origPrefix, results } = _coreFindDifferentPrefixMatches(
+    searchText, lang, allWords, lineCategory, vocabSuffixOverlapLen
+  )
   return { stem, origPrefix, results, allWords }
 }
 
@@ -6581,10 +5726,8 @@ function _openDifferentPrefixDialog(searchText, lang) {
       }
       $header.addClass('highlighted similar-segment-header')
       $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
-      const badge = kind === 'prefix'
-        ? `(${_.escape(prefix)}-)`
-        : '(suffix overlap)'
-      $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}] ${badge}</span>`)
+      const { category: cat, badge } = diffPrefixRowBadge({ kind, prefix, category })
+      $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(cat)}] ${_.escape(badge)}</span>`)
       vocabItemContent.append($header)
       const $body = $('<div class="similar-segment-body" hidden></div>')
       surroundings.forEach(it => {
@@ -6610,138 +5753,8 @@ function _openDifferentPrefixDialog(searchText, lang) {
   _pinDialogToViewport($dlg)
 }
 
-const SIMILARITY_VOWELS = new Set(['a', 'e', 'i', 'o', 'u', 'y', 'å', 'ä', 'ö'])
-
-function _isVowel(ch) {
-  return SIMILARITY_VOWELS.has((ch || '').toLowerCase())
-}
-
-// Compares two equal-length strings: returns {count, allVowel, allConsonant}
-// where flags are true only when ALL differing positions are of that class.
-function _classifyCharDiffs(a, b) {
-  let count = 0, allVowel = true, allConsonant = true
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] === b[i]) continue
-    count++
-    const aV = _isVowel(a[i]), bV = _isVowel(b[i])
-    if (!aV || !bV) allVowel = false
-    if (aV || bV) allConsonant = false
-  }
-  return { count, allVowel: allVowel && count > 0, allConsonant: allConsonant && count > 0 }
-}
-
-function _levenshtein(a, b) {
-  const m = a.length, n = b.length
-  if (m === 0) return n
-  if (n === 0) return m
-  let prev = new Array(n + 1)
-  let curr = new Array(n + 1)
-  for (let j = 0; j <= n; j++) prev[j] = j
-  for (let i = 1; i <= m; i++) {
-    curr[0] = i
-    for (let j = 1; j <= n; j++) {
-      curr[j] = a[i - 1] === b[j - 1]
-          ? prev[j - 1]
-          : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1])
-    }
-    const tmp = prev; prev = curr; curr = tmp;
-  }
-  return prev[n]
-}
-
-// Map a word to a coarse phonetic key for the given language. Two words are
-// candidate homophones (in this app's sense) when they reduce to the same
-// key. Rules are intentionally conservative — false positives only show up
-// in tier 0, which is the most prominent in the UI, so the substitutions
-// stick to spellings that genuinely overlap in pronunciation.
-function _phoneticKey(word, lang) {
-  if (!word) return ''
-  let w = word.toLowerCase()
-  try { w = w.normalize('NFC') } catch (_) {}
-
-  if (lang === 'sv') {
-    // /ɧ/ family — sj-sound. Order matters: longer patterns first.
-    w = w.replace(/skj|stj|ssj|sch/g, 'Ç')
-    w = w.replace(/sj/g, 'Ç')
-    w = w.replace(/sk(?=[eiyäö])/g, 'Ç')
-    // /ɕ/ family — tj-sound.
-    w = w.replace(/tj|kj/g, 'C')
-    w = w.replace(/k(?=[eiyäö])/g, 'C')
-    // /j/ family — silent-letter onsets, soft g, plain j.
-    // hjul/jul, gjuta/juta etc. all collapse to a leading J.
-    w = w.replace(/gj|hj|lj|dj/g, 'J')
-    w = w.replace(/g(?=[eiyäö])/g, 'J')
-    w = w.replace(/j/g, 'J')
-    // c before front vowels = /s/, otherwise = /k/.
-    w = w.replace(/c(?=[eiyäö])/g, 's')
-    w = w.replace(/c/g, 'k')
-    // Misc.
-    w = w.replace(/w/g, 'v')
-    w = w.replace(/ng/g, 'N')
-    w = w.replace(/ck/g, 'k')
-    w = w.replace(/qu/g, 'kv')
-    w = w.replace(/x/g, 'ks')
-    w = w.replace(/z/g, 's')
-  } else if (lang === 'en') {
-    w = w.replace(/ph/g, 'f')
-    w = w.replace(/^(kn|gn|pn|wr)/g, m => m[1])  // silent leading letter
-    w = w.replace(/ck/g, 'k')
-    w = w.replace(/qu/g, 'kw')
-    w = w.replace(/c(?=[eiy])/g, 's')
-    w = w.replace(/c/g, 'k')
-    w = w.replace(/^x/g, 'z')
-    w = w.replace(/x/g, 'ks')
-  } else if (lang === 'es') {
-    w = w.replace(/ll/g, 'y')
-    w = w.replace(/h/g, '')
-    w = w.replace(/v/g, 'b')
-    w = w.replace(/qu(?=[ei])/g, 'k')
-    w = w.replace(/qu/g, 'kw')
-    w = w.replace(/c(?=[ei])/g, 's')
-    w = w.replace(/z/g, 's')
-    w = w.replace(/c/g, 'k')
-    w = w.replace(/g(?=[ei])/g, 'x')
-    w = w.replace(/j/g, 'x')
-  }
-  return w
-}
-
-// Compound match: shorter word appears at the start or end of the longer
-// one. Minimum 4-char shorter avoids spurious 2/3-letter substring noise
-// ("is" inside dozens of unrelated words). Returns the length gap so we
-// can rank tight compounds above sprawling ones.
-function _compoundOverlap(a, b) {
-  const shorter = a.length <= b.length ? a : b
-  const longer = a.length <= b.length ? b : a
-  if (shorter.length < 4 || longer.length === shorter.length) return 0
-  if (longer.startsWith(shorter) || longer.endsWith(shorter)) {
-    return longer.length - shorter.length
-  }
-  return 0
-}
-
-// Tier 0: phonetic key match (language-aware homophone).
-// Tier 1: same length, exactly one differing char that's vowel-vs-vowel,
-//         OR compound match (e.g. "gnista" ⊂ "livsgnista").
-// Tier 2: same length, exactly one differing char that's consonant-vs-consonant.
-// Tier 3: edit distance ≤ 2 (and > 0). Returns null if not similar enough.
-function _scoreSimilarity(searchWord, candidate, lang) {
-  if (!searchWord || !candidate || searchWord === candidate) return null
-  // Phonetic homophone — strongest signal. Cheap O(len) substitution.
-  const sk = _phoneticKey(searchWord, lang)
-  const ck = _phoneticKey(candidate, lang)
-  if (sk && sk === ck) return { tier: 0, distance: 0 }
-  if (searchWord.length === candidate.length) {
-    const diff = _classifyCharDiffs(searchWord, candidate)
-    if (diff.count === 1 && diff.allVowel) return { tier: 1, distance: 1 }
-    if (diff.count === 1 && diff.allConsonant) return { tier: 2, distance: 1 }
-  }
-  const gap = _compoundOverlap(searchWord, candidate)
-  if (gap > 0) return { tier: 1, distance: gap }
-  const d = _levenshtein(searchWord, candidate)
-  if (d > 0 && d <= 2) return { tier: 3, distance: d }
-  return null
-}
+// Similarity helpers extracted to ./similarity.js — see the imports at the
+// top of this file.
 
 async function searchVocabularyBySimilarity() {
   const raw = window.searchText || ''
@@ -6886,152 +5899,25 @@ async function searchVocabularyBySimilarity() {
   _renderSimilarMatches($vocab, tier1Top, otherGroupsFull, limit, allLines, raw)
 }
 
-// Wrap every (case-insensitive) occurrence of `word` in `text` with a bold
-// blue `<b>` tag. Caller must have already escaped any HTML in `text`. The
-// regex special chars in `word` are escaped so candidates like ".*" or
-// "knäböja(d)" don't blow up.
+// Thin wrapper delegating to highlight.js. See module docstring there.
 function _highlightWordInLine(text, word) {
-  if (!word) return text
-  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  // \b doesn't behave nicely with Unicode (Swedish å/ä/ö); use lookarounds
-  // around \p{L} so a candidate "växa" only highlights the whole word, not
-  // a substring inside e.g. "växande". Falls back to plain match if the
-  // engine doesn't support it.
-  let re
-  try {
-    re = new RegExp(`(?<![\\p{L}])(${escaped})(?![\\p{L}])`, 'giu')
-  } catch (_) {
-    re = new RegExp(`(${escaped})`, 'gi')
-  }
-  return text.replace(re, '<b style="color:#1565c0">$1</b>')
+  return _coreHighlightWordInLine(text, word)
 }
 
-// Render a vocab line (raw, possibly pipe-separated) with the portion of
-// each `|`-segment that matches the current search wrapped in
-// <mark class="vocab-hl">. The "matched portion" is the longest common
-// prefix or suffix (>= 3 chars) between any search part and the segment
-// AFTER its bracketed hints are stripped (so `stoft(-et)` matches
-// "stoftskyarna" via the bare stem "stoft" yet still highlights "stoft"
-// in the displayed text with brackets intact).
-//
-// Returns an HTML-safe string — does NOT need additional _.escape by the
-// caller; non-matching slices are passed through _.escape inside.
+// Thin wrapper — delegates to highlight.js, injecting removeHintsInBrackets
+// so the pure module never reaches back into language.js globals.
 function _highlightSearchInVocabLine(rawText, searchText, opts = {}) {
-  // exactPrefix mode (used by the Different-prefixes dialog's prefix-match
-  // rows): highlight ONLY when a search part is fully a prefix or suffix
-  // of the vocab segment. Without this, a candidate like "förråt" would
-  // also highlight the 5-char "förrå" portion of an unrelated "förråd"
-  // segment because of LCP overlap.
-  const exactPrefix = opts.exactPrefix === true
-  if (!rawText) return ''
-  if (!searchText) return _.escape(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
-  const searchParts = String(searchText).toLowerCase()
-    .split(SEPARATOR_PIPE).map(s => s.trim()).filter(s => s.length >= 3)
-  if (!searchParts.length) return _.escape(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
-
-  const segments = String(rawText).split(SEPARATOR_PIPE)
-  const html = segments.map(seg => {
-    let stripped
-    try { stripped = removeHintsInBrackets(seg.toLowerCase()).trim() }
-    catch (_) { stripped = seg.toLowerCase().trim() }
-    if (stripped.length < 2) return _.escape(seg)
-    const segLower = seg.toLowerCase()
-
-    // Build candidate tokens with their offset inside seg/segLower. We
-    // consider the whole stripped segment AND each whitespace-separated
-    // word inside it, so a multi-word segment like "Rik som ett troll"
-    // can highlight "troll" when the search is "trollguldet". Per-word
-    // tokens are positioned in segLower using a forward cursor so
-    // brackets and other punctuation between words don't break offsets.
-    const candidates = []
-    const fullIdx = segLower.indexOf(stripped)
-    if (fullIdx >= 0) candidates.push({ token: stripped, idx: fullIdx })
-    if (/\s/.test(stripped)) {
-      let cursor = 0
-      for (const w of stripped.split(/\s+/)) {
-        if (w.length < 2) continue
-        const wIdx = segLower.indexOf(w, cursor)
-        if (wIdx < 0) continue
-        candidates.push({ token: w, idx: wIdx })
-        cursor = wIdx + w.length
-      }
-    }
-
-    // Pick the longest prefix-OR-suffix overlap across all (token, search)
-    // pairs. Default mode accepts when:
-    //   • overlap >= 3, OR
-    //   • overlap === token.length  (whole token matched — covers tiny
-    //     full-token hits like "åt" matching "gråt" via its 2-char suffix;
-    //     a 2-char overlap that's only PART of a longer token is noise).
-    // exactPrefix mode further requires overlap === bestSearch.length.
-    let bestLen = 0
-    let bestKind = null   // 'prefix' | 'suffix'
-    let bestSearch = null
-    let bestToken = null
-    let bestTokenIdx = -1
-    for (const { token, idx: tokIdx } of candidates) {
-      for (const s of searchParts) {
-        const lenP = Math.min(token.length, s.length)
-        let lcp = 0
-        while (lcp < lenP && token.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
-        if (lcp > bestLen) {
-          bestLen = lcp; bestKind = 'prefix'; bestSearch = s
-          bestToken = token; bestTokenIdx = tokIdx
-        }
-        let lcs = 0
-        while (lcs < lenP && token.charCodeAt(token.length - 1 - lcs) === s.charCodeAt(s.length - 1 - lcs)) lcs++
-        if (lcs > bestLen) {
-          bestLen = lcs; bestKind = 'suffix'; bestSearch = s
-          bestToken = token; bestTokenIdx = tokIdx
-        }
-      }
-    }
-    if (bestLen < 2) return _.escape(seg)
-    const isFullToken = bestToken && bestLen === bestToken.length
-    const isFullSearch = bestSearch && bestLen === bestSearch.length
-    if (exactPrefix) {
-      if (!isFullSearch) return _.escape(seg)
-    } else {
-      if (bestLen < 3 && !isFullToken) return _.escape(seg)
-    }
-
-    const markStart = bestKind === 'prefix' ? bestTokenIdx : bestTokenIdx + bestToken.length - bestLen
-    const markEnd = markStart + bestLen
-    return _.escape(seg.slice(0, markStart)) +
-           '<mark class="vocab-hl">' + _.escape(seg.slice(markStart, markEnd)) + '</mark>' +
-           _.escape(seg.slice(markEnd))
+  return _coreHighlightSearchInVocabLine(rawText, searchText, {
+    exactPrefix: opts.exactPrefix === true,
+    stripBracketHints: removeHintsInBrackets,
   })
-  return html.join(' | ')
 }
 
-// Render a vocab line, highlighting just the `stem` portion of each
-// |-segment that fully starts with `candidate` (= newPrefix + stem).
-// Used by the Different-prefixes dialog: the user typed the stem, the
-// dialog probes synthetic candidates like "förråt", and we want only the
-// stem ("råt") to be marked in matched segments like "förråta" / "förrått".
-// Segments that DON'T start with the candidate are left un-highlighted.
+// Thin wrapper — delegates to highlight.js.
 function _highlightStemInPrefixMatch(rawText, candidate, stem) {
-  if (!rawText) return ''
-  if (!candidate || !stem) return _.escape(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
-  const candLower = String(candidate).toLowerCase()
-  const stemLen = stem.length
-  const stemOffsetInCand = candidate.length - stemLen
-  if (stemOffsetInCand < 0) return _.escape(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
-  const segments = String(rawText).split(SEPARATOR_PIPE)
-  const html = segments.map(seg => {
-    let stripped
-    try { stripped = removeHintsInBrackets(seg.toLowerCase()).trim() }
-    catch (_) { stripped = seg.toLowerCase().trim() }
-    if (!stripped.startsWith(candLower)) return _.escape(seg)
-    const segLower = seg.toLowerCase()
-    const candIdx = segLower.indexOf(candLower)
-    if (candIdx < 0) return _.escape(seg)
-    const stemIdx = candIdx + stemOffsetInCand
-    return _.escape(seg.slice(0, stemIdx)) +
-           '<mark class="vocab-hl">' + _.escape(seg.slice(stemIdx, stemIdx + stemLen)) + '</mark>' +
-           _.escape(seg.slice(stemIdx + stemLen))
+  return _coreHighlightStemInPrefixMatch(rawText, candidate, stem, {
+    stripBracketHints: removeHintsInBrackets,
   })
-  return html.join(' | ')
 }
 
 // Group items so entries that share the same key end up adjacent. The
@@ -7124,19 +6010,13 @@ function _attachAccordionDelegate($container) {
 }
 
 function _buildSimilarSegment({ lineIdx, candidate, searchWord, tier, distance, category }, allLines, opts = {}) {
-  const tierLabel = tier === 0 ? 'homophone'
-      : tier === 1 ? 'vowel diff'
-      : tier === 2 ? 'consonant diff'
-      : `edit dist ${distance}`
-  const tierClass = tier === 0 ? 'similar-tier-0'
-      : tier === 1 ? 'similar-tier-1'
-      : tier === 2 ? 'similar-tier-2'
-      : `similar-tier-3-d${distance}`
+  const tLabel = _tierLabel(tier, distance)
+  const tClass = _tierClass(tier, distance)
   const collapsible = !!opts.collapsible
-  const vocabItem = $(`<div class="vocabulary-segment ${tierClass}"></div>`)
+  const vocabItem = $(`<div class="vocabulary-segment ${tClass}"></div>`)
   const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
 
-  const headerInner = `[${_.escape(category || '?')}] ≈ <b>${_.escape(candidate)}</b> ↔ ${_.escape(searchWord)} (${tierLabel})`
+  const headerInner = `[${_.escape(category || '?')}] ≈ <b>${_.escape(candidate)}</b> ↔ ${_.escape(searchWord)} (${tLabel})`
   const $header = collapsible
       ? $(`<div class="similar-segment-header" style="font-size:0.75em;color:#666;padding:2px 4px;"><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i><span>${headerInner}</span></div>`)
       : $(`<div style="font-size:0.75em;color:#666;padding:2px 4px;">${headerInner}</div>`)
@@ -7176,17 +6056,11 @@ function _buildSimilarSegment({ lineIdx, candidate, searchWord, tier, distance, 
 // plus one collapsible per-line segment for every vocab line that hit it.
 function _buildSimilarGroup(group, allLines) {
   const { bestMatch, lines, candidate } = group
-  const tierLabel = bestMatch.tier === 0 ? 'homophone'
-      : bestMatch.tier === 1 ? 'vowel diff'
-      : bestMatch.tier === 2 ? 'consonant diff'
-      : `edit dist ${bestMatch.distance}`
-  const tierClass = bestMatch.tier === 0 ? 'similar-tier-0'
-      : bestMatch.tier === 1 ? 'similar-tier-1'
-      : bestMatch.tier === 2 ? 'similar-tier-2'
-      : `similar-tier-3-d${bestMatch.distance}`
-  const $group = $(`<div class="similar-group ${tierClass}"></div>`)
+  const tLabel = _tierLabel(bestMatch.tier, bestMatch.distance)
+  const tClass = _tierClass(bestMatch.tier, bestMatch.distance)
+  const $group = $(`<div class="similar-group ${tClass}"></div>`)
   $group.append(
-      `<div class="similar-group-header" style="font-size:0.85em;font-weight:600;padding:4px 6px;border-top:1px solid #ddd;margin-top:6px;">≈ <b style="color:#1565c0">${_.escape(candidate)}</b> ↔ ${_.escape(bestMatch.searchWord)} (${tierLabel}) — ${lines.length} line${lines.length === 1 ? '' : 's'}</div>`)
+      `<div class="similar-group-header" style="font-size:0.85em;font-weight:600;padding:4px 6px;border-top:1px solid #ddd;margin-top:6px;">≈ <b style="color:#1565c0">${_.escape(candidate)}</b> ↔ ${_.escape(bestMatch.searchWord)} (${tLabel}) — ${lines.length} line${lines.length === 1 ? '' : 's'}</div>`)
   lines.forEach(m => $group.append(_buildSimilarSegment(m, allLines, { collapsible: true })))
   return $group
 }
@@ -7647,14 +6521,7 @@ class SearchResult {
 // at the start of the next would be split by an index + timestamp block
 // and never match. The cleaned text only feeds the file-inclusion filter
 // here; per-line attribution still uses the parsed entries below.
-function _cleanSrtForMatch(rawSrt) {
-  if (!rawSrt) return ''
-  return rawSrt
-    .replace(/^\d+\s*$/gm, '')
-    .replace(/^\d\d:\d\d:\d\d[,.]\d{3} --> \d\d:\d\d:\d\d[,.]\d{3}.*$/gm, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+// _cleanSrtForMatch lives in ./search-text.js (imported at the top).
 
 async function fetchFromDownloadedFiles(lookingFor, token) {
   lookingFor = expandWords(lookingFor)
@@ -7800,111 +6667,7 @@ function _expandWords(txt, lang) {
       }).join(SEPARATOR_PIPE)
 }
 
-const STEM_RULES = {
-  sv: [
-    ['ningarna', ['']],
-    ['ningar', ['']],
-    ['ningen', ['']],
-    ['ning', ['']],
-    ['ande', ['a']],
-    ['ende', ['a']],
-    ['arna', ['a', '']],
-    ['erna', ['']],
-    ['orna', ['a']],
-    ['ades', ['a']],
-    ['ade', ['a']],
-    ['ats', ['a']],
-    ['at', ['a']],
-    // Past participle: "förvärvad" → "förvärva" (group 1/4) or root "förvärv".
-    ['ad', ['a', '']],
-    ['ång', ['å']],
-    ['else', ['a']],
-    ['elser', ['a']],
-    // Group-3 supinum ("köpit" → "köpa") and past participle "köpt" → "köpa".
-    ['it', ['a']],
-    ['arn', ['are']],
-    ['ar', ['a', '']],
-    ['na', ['en', 'et']],
-    ['or', ['a']],
-    ['er', ['', 'a']],
-    ['en', ['']],
-    ['et', ['']],
-    ['de', ['']],
-    ['te', ['']],
-    ['ts', ['']],
-    ['s', ['']],
-    ['et', ['en']],
-    ['en', ['et']],
-    ['t', ['a', 'd', '']], // "köpt" → "köpa" or root "köp"; "förvärvat" → "förvärva" or root "förvärv".
-    ['a', ['']], // edge case: "knassiga" → "knassig" (adj declension) or root "knass" (noun)
-  ],
-  es: [
-    ['iendo', ['er', 'ir']],
-    ['yendo', ['er', 'ir']],
-    ['ando', ['ar']],
-    ['ieron', ['er', 'ir']],
-    ['aron', ['ar']],
-    ['aban', ['ar']],
-    ['aba', ['ar']],
-    ['amos', ['ar']],
-    ['emos', ['er']],
-    ['imos', ['ir']],
-    ['aste', ['ar']],
-    ['iste', ['er', 'ir']],
-    ['ado', ['ar']],
-    ['ido', ['er', 'ir']],
-    ['ías', ['er', 'ir']],
-    ['ía', ['er', 'ir']],
-    ['es', ['']],
-    ['as', ['a']],
-    ['os', ['o']],
-    ['s', ['']],
-  ],
-  en: [
-    ['ational', ['ate']],
-    ['tional', ['tion']],
-    ['ization', ['ize']],
-    ['ations', ['ate']],
-    ['ation', ['ate', '']],
-    ['ments', ['ment']],
-    ['ment', ['']],
-    ['ness', ['']],
-    ['ously', ['ous']],
-    ['fully', ['ful']],
-    ['sses', ['ss']],
-    ['ies', ['y']],
-    ['ied', ['y']],
-    ['ying', ['y']],
-    ['ing', ['', 'e']],
-    ['edly', ['', 'e']],
-    ['ed', ['', 'e']],
-    ['ly', ['']],
-    ['est', ['', 'e']],
-    ['er', ['', 'e']],
-    ['es', ['e', '']],
-    ['s', ['']],
-  ],
-}
-
-function guessStems(word, lang) {
-  if (!word) return []
-  word = word.toLowerCase().trim()
-  if (word.length < 4) return []
-  const langRules = STEM_RULES[lang]
-  if (!langRules) return []
-  const stems = []
-  for (const [suffix, repls] of langRules) {
-    if (word.endsWith(suffix) && word.length - suffix.length >= 3) {
-      const base = word.slice(0, word.length - suffix.length)
-      repls.forEach(r => {
-        const s = base + r
-        if (s !== word) stems.push(s)
-      })
-      break
-    }
-  }
-  return _.uniq(stems)
-}
+// STEM_RULES and guessStems are now imported from ./stemming.js
 
 function findUnknownExpansionRefs() {
   const expansions = getExpansionForWords()
@@ -8006,13 +6769,7 @@ async function fetchSRTs(searchText) {
   }
 }
 
-function isRegExp(text) {
-  let isRegex = false;
-  if ([".", "*", "?"].some(it => _.includes(text, it))) {
-    isRegex = true;
-  }
-  return isRegex;
-}
+// isRegExp lives in ./search-text.js.
 
 function renderAccordions(el) {
   //console.log('Rendering accordions')
@@ -8217,122 +6974,9 @@ async function saveRevision() {
   }
 }
 
-function srtTimeFromValue(v) {
-  if (v == null) return '00:00:00,000'
-  if (typeof v === 'object') {
-    if (v.ordinal != null) return srtTimeFromValue(v.ordinal)
-    if (v.seconds != null) return srtTimeFromValue(v.seconds)
-    return '00:00:00,000'
-  }
-  if (typeof v === 'string') {
-    const m = v.match(/^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/)
-    if (m) {
-      const ms = (m[4] + '000').slice(0, 3)
-      return `${m[1].padStart(2, '0')}:${m[2]}:${m[3]},${ms}`
-    }
-    const n = Number(v)
-    if (!Number.isNaN(n)) return srtTimeFromValue(n)
-    return '00:00:00,000'
-  }
-  const total = Math.max(0, Number(v) || 0)
-  const hrs = Math.floor(total / 3600)
-  const mins = Math.floor((total % 3600) / 60)
-  const secs = Math.floor(total % 60)
-  const ms = Math.round((total - Math.floor(total)) * 1000)
-  const pad = (n, w) => String(n).padStart(w, '0')
-  return `${pad(hrs, 2)}:${pad(mins, 2)}:${pad(secs, 2)},${pad(ms, 3)}`
-}
-
-function srtTimeToSeconds(ts) {
-  // Accepts "HH:MM:SS,mmm" or "HH:MM:SS.mmm"
-  const m = String(ts).match(/^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/)
-  if (!m) return 0
-  return parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10) + parseInt((m[4] + '000').slice(0, 3), 10) / 1000
-}
-
-function parseSrtEntries(text) {
-  if (!text || typeof text !== 'string') return []
-  const blocks = text.replace(/\r/g, '').split(/\n\s*\n/)
-  const entries = []
-  blocks.forEach(block => {
-    const lines = block.split('\n').map(l => l.trim()).filter(Boolean)
-    if (lines.length < 2) return
-    let startIdx = 0
-    if (/^\d+$/.test(lines[0])) startIdx = 1
-    const timeLine = lines[startIdx]
-    const m = timeLine && timeLine.match(/(\d\d:\d\d:\d\d[,.]\d{1,3})\s*-->\s*(\d\d:\d\d:\d\d[,.]\d{1,3})/)
-    if (!m) return
-    const textLines = lines.slice(startIdx + 1)
-    entries.push({
-      start: srtTimeFromValue(m[1]),
-      end: srtTimeFromValue(m[2]),
-      text: textLines.join('\n')
-    })
-  })
-  return entries
-}
-
-function entriesToSrtText(entries) {
-  return entries.map((it, i) => {
-    return `${i + 1}\n${it.start} --> ${it.end}\n${it.text}`
-  }).join('\n\n') + '\n'
-}
-
-function linesToSrtText(items) {
-  const entries = (items || []).map(it => ({
-    start: srtTimeFromValue(it.start),
-    end: srtTimeFromValue(it.end),
-    text: (it.text || '').replace(/\r\n/g, '\n')
-  }))
-  entries.sort((a, b) => srtTimeToSeconds(a.start) - srtTimeToSeconds(b.start))
-  return entriesToSrtText(entries)
-}
-
-function mergeSrtWithNewEntries(existingText, newItems) {
-  return mergeSrtWithResolution(existingText, newItems, null)
-}
-
-// Conflict-aware merge. `resolution` is a Map<startTimeStr, {action, text}>
-// where action is 'keep' | 'use-new' | 'edit'. For every existing entry
-// whose start matches a 'use-new' / 'edit' decision, the existing entry
-// is dropped so the incoming one takes its place. For 'keep' decisions
-// the incoming entry is dropped instead. Re-applied verbatim on every
-// commit retry so the user's resolution survives 409/422 retries even if
-// the remote text drifted between attempts.
-function mergeSrtWithResolution(existingText, newItems, resolution) {
-  const existing = parseSrtEntries(existingText)
-  let incoming = (newItems || []).map(it => ({
-    start: srtTimeFromValue(it.start),
-    end: srtTimeFromValue(it.end),
-    text: (it.text || '').replace(/\r\n/g, '\n')
-  }))
-  let filteredExisting = existing
-  if (resolution && resolution.size) {
-    filteredExisting = existing.filter(e => {
-      const r = resolution.get(e.start)
-      return !r || r.action === 'keep'
-    })
-    incoming = incoming.flatMap(e => {
-      const r = resolution.get(e.start)
-      if (!r) return [e]
-      if (r.action === 'keep') return []
-      if (r.action === 'edit') return [{ ...e, text: r.text }]
-      return [e]   // 'use-new': keep as-is, existing already filtered out
-    })
-  }
-  const all = filteredExisting.concat(incoming)
-  // Dedupe by start+text in case the same captured chunk is sent twice.
-  const seen = new Set()
-  const deduped = []
-  all.forEach(e => {
-    const key = `${e.start}|${e.text}`
-    if (seen.has(key)) return
-    seen.add(key)
-    deduped.push(e)
-  })
-  deduped.sort((a, b) => srtTimeToSeconds(a.start) - srtTimeToSeconds(b.start))
-  return entriesToSrtText(deduped)
-}
+// srtTimeFromValue, srtTimeToSeconds, parseSrtEntries, entriesToSrtText,
+// linesToSrtText, mergeSrtWithNewEntries, mergeSrtWithResolution all live
+// in ./srt-parser.js (imported at the top).
 
 // Show the merge dialog for the given conflicts. Resolves with a
 // Map<startTime, {action: 'keep' | 'use-new' | 'edit', text?}> picked by
@@ -8423,30 +7067,7 @@ function presentSrtMergeDialog(label, conflicts) {
   })
 }
 
-// Find entries where existing and incoming disagree on the same start time.
-// Returns an array of {start, end, existingText, incomingText} — empty if
-// the merge would be a clean union with no conflict resolution needed.
-function detectSrtConflicts(existingText, newItems) {
-  if (!existingText) return []
-  const existing = parseSrtEntries(existingText)
-  const byStart = new Map(existing.map(e => [e.start, e]))
-  const conflicts = []
-  ;(newItems || []).forEach(it => {
-    const start = srtTimeFromValue(it.start)
-    const end   = srtTimeFromValue(it.end)
-    const incomingText = String(it.text || '').replace(/\r\n/g, '\n').trim()
-    const ex = byStart.get(start)
-    if (!ex) return
-    if ((ex.text || '').trim() === incomingText) return
-    conflicts.push({
-      start,
-      end,
-      existingText: (ex.text || ''),
-      incomingText
-    })
-  })
-  return conflicts
-}
+// detectSrtConflicts lives in ./srt-parser.js (imported at the top).
 
 // Strip characters that make filenames URL-unfriendly: filesystem-reserved
 // chars (\ / : * ? " < > |), the fullwidth colon U+FF1A that sneaks in from
@@ -9396,72 +8017,32 @@ function bufferCapturedSubtitle(detail) {
   updateCapturedBtn()
 }
 
-function escapeHtml(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
+// escapeHtml lives in ./html-utils.js (re-exported from ./highlight.js).
+// The shared version also escapes `'` → `&#39;`, which is a strict superset
+// of the previous local impl — output is identical when input lacks `'`.
 
 async function renderCapturedReviewBody() {
   const buf = loadCapturedBuffer()
-  const $body = $('#captured-subtitles-dialog-content').empty()
-  if (buf.length === 0) {
-    $body.append('<p>No captured subtitles pending.</p>')
-    return
-  }
-  // Render rows immediately with a "checking…" status so the dialog opens
-  // fast, then resolve each row's true status against the authoritative
-  // index.json. window.allSubtitles can be a false positive (purely-local
-  // entries / re-pushes), so it's not enough on its own.
-  buf.forEach(item => {
-    const d = item.detail || {}
-    const $row = $(`
-      <div class="captured-item" data-id="${escapeHtml(item.id)}" style="border:1px solid #ccc;border-radius:4px;padding:8px;margin-bottom:8px;">
-        <div style="font-weight:bold;">${escapeHtml(d.videoTitle || d.videoId || 'unknown')}</div>
-        <div style="font-size:12px;color:#555;">
-          ${escapeHtml(d.videoId || '')} ·
-          ${escapeHtml(d.sourceLang || '?')}→${escapeHtml(d.targetLang || '?')} ·
-          ${(d.lines || []).length} src / ${(d.translation || []).length} tgt lines ·
-          <span data-role="srt-status" style="color:#888;">checking…</span>
-        </div>
-        ${d.query ? `<div style="font-size:12px;">query: <code>${escapeHtml(d.query)}</code> @${escapeHtml(d.matchIndex)}</div>` : ''}
-        <div style="margin-top:4px;">
-          <button data-action="preview" class="cap-btn">Preview SRT</button>
-          <button data-action="push" class="cap-btn">Push This</button>
-          <button data-action="delete" class="cap-btn" style="color:#a00;">Delete</button>
-        </div>
-        <pre data-role="preview" style="display:none;max-height:240px;overflow:auto;background:#f7f7f7;padding:6px;font-size:11px;white-space:pre-wrap;"></pre>
-      </div>
-    `)
-    $body.append($row)
-  })
-
-  // Resolve each row's status against index.json. Cache per videoId so
+  const body = $('#captured-subtitles-dialog-content')[0]
+  // Initial render with "checking…" status so the dialog opens fast.
+  renderCapturedReviewList(buf, body)
+  if (buf.length === 0) return
+  // Resolve each row's true status against the authoritative index.json.
+  // window.allSubtitles can be a false positive (purely-local entries /
+  // re-pushes), so it's not enough on its own. Cache per videoId so
   // duplicate captures of the same video only fetch once.
   const cache = new Map()
   for (const item of buf) {
     const d = item.detail || {}
     if (!d.videoId) continue
-    const $row = $body.find(`.captured-item[data-id="${$.escapeSelector ? $.escapeSelector(item.id) : item.id}"]`)
-    const $status = $row.find('[data-role=srt-status]')
-    if (!$status.length) continue
+    const rowEl = body && body.querySelector(`.captured-item[data-id="${(window.CSS && CSS.escape) ? CSS.escape(item.id) : item.id}"]`)
+    if (!rowEl) continue
     try {
-      if (!cache.has(d.videoId)) {
-        cache.set(d.videoId, fetchSrtIndexEntry(d.videoId))
-      }
+      if (!cache.has(d.videoId)) cache.set(d.videoId, fetchSrtIndexEntry(d.videoId))
       const entry = await cache.get(d.videoId)
-      if (entry) {
-        $row.attr('data-srt-state', 'modify')
-        $status.html(`<span style="color:#a60;font-weight:bold;">modifying existing SRT</span> <span style="color:#777;">(${escapeHtml(entry.name || '')})</span>`)
-        $row.find('button[data-action="push"]').text('Push (merge)')
-      } else {
-        $row.attr('data-srt-state', 'new')
-        $status.html('<span style="color:#070;font-weight:bold;">new SRT</span>')
-      }
-    } catch (e) {
-      $status.html('<span style="color:#a00;">status unknown</span>')
+      applyCapturedRowStatus(rowEl, entry ? 'modify' : 'new', entry && entry.name)
+    } catch (_) {
+      applyCapturedRowStatus(rowEl, 'error')
     }
   }
 }
@@ -10310,70 +8891,9 @@ function recordingsFilePath() {
   return `db/language/${lang.fullName}/recordings.json`
 }
 
+// Thin wrapper — pure core in ./recordings-merge.js.
 function mergeRecordingCollections(localColl, remoteColl) {
-  const out = {}
-  const allNames = new Set([...Object.keys(localColl || {}), ...Object.keys(remoteColl || {})])
-  allNames.forEach(name => {
-    const a = (localColl && localColl[name]) || null
-    const b = (remoteColl && remoteColl[name]) || null
-    if (!a) { out[name] = b; return }
-    if (!b) { out[name] = a; return }
-    // Virtual playlists carry no items — merge them by unioning members
-    // (newer's order first). If only one side is virtual, prefer the newer.
-    if (a.virtual || b.virtual) {
-      const aNewerV = (a.updatedAt || 0) >= (b.updatedAt || 0)
-      const newer = aNewerV ? a : b
-      const older = aNewerV ? b : a
-      if (newer.virtual) {
-        const members = []
-        const seen = new Set()
-        ;[].concat(newer.members || [], older.virtual ? (older.members || []) : []).forEach(m => {
-          if (m && !seen.has(m)) { seen.add(m); members.push(m) }
-        })
-        out[name] = {
-          virtual: true,
-          members,
-          createdAt: Math.min(a.createdAt || Date.now(), b.createdAt || Date.now()),
-          updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0)
-        }
-      } else {
-        out[name] = newer   // newer side is a real playlist — it wins
-      }
-      return
-    }
-    // Merge items: union by (id, lineIndex) within each (searchText, word).
-    const mergedItems = {}
-    const stKeys = new Set([...Object.keys(a.items || {}), ...Object.keys(b.items || {})])
-    const aNewer = (a.updatedAt || 0) >= (b.updatedAt || 0)
-    const first = aNewer ? a : b
-    const second = aNewer ? b : a
-    stKeys.forEach(st => {
-      mergedItems[st] = {}
-      const fByW = (first.items && first.items[st]) || {}
-      const sByW = (second.items && second.items[st]) || {}
-      const wKeys = new Set([...Object.keys(fByW), ...Object.keys(sByW)])
-      wKeys.forEach(w => {
-        const seen = new Set()
-        const dest = []
-        const push = (arr) => (arr || []).forEach(it => {
-          if (!it) return
-          const k = `${it.id}|${it.lineIndex}`
-          if (seen.has(k)) return
-          seen.add(k)
-          dest.push(it)
-        })
-        push(fByW[w])    // newer wins on order
-        push(sByW[w])
-        mergedItems[st][w] = dest
-      })
-    })
-    out[name] = {
-      items: mergedItems,
-      createdAt: Math.min(a.createdAt || Date.now(), b.createdAt || Date.now()),
-      updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0)
-    }
-  })
-  return out
+  return _coreMergeRecordingCollections(localColl, remoteColl)
 }
 
 async function loadRecordingsFromGithub() {
@@ -10468,81 +8988,17 @@ function listRecordings() {
 // review) as the union of its members'. This keeps combinations free in
 // storage. `members` is filtered to existing, non-virtual playlists so a
 // deleted/renamed member silently drops out.
-function _isVirtual(name) {
-  const r = window._recordings && window._recordings[name]
-  return !!(r && r.virtual)
-}
-// Stable id for a manual entry — identity used for resume reconstitution
-// (must survive playlist reorder / sync merge). Prefixed `mc-` to keep it
-// distinct from YouTube videoIds (which are 11 chars, no dashes).
-function _newManualId() {
-  return 'mc-' + Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 5)
-}
-function _isManualItem(it) { return !!(it && it.manual) }
-// Parse a media URL into a discriminator + an extractable id where one
-// applies. Returns null for blank input; otherwise:
-//   { kind: 'youtube', id: '<videoId>', url }
-//   { kind: 'link',    url }
-// Falls back to 'link' for anything we don't recognise as YouTube so a
-// user can paste any URL (Vimeo, an article, an mp3) and the Practice
-// view will open it in a new tab.
-function _parseMediaUrl(raw) {
-  const url = String(raw == null ? '' : raw).trim()
-  if (!url) return null
-  // file:// — a Cupitor-saved audio recording (mediaUrl doubles as the audio
-  // reference; playback routes through AudioBridge instead of opening it).
-  if (url.startsWith('file://')) return { kind: 'audio', url }
-  // youtu.be/<id> or youtube.com/watch?v=<id> or /embed/<id> or /shorts/<id>
-  const yt = url.match(/(?:youtube\.com\/(?:watch\?(?:[^&]*&)*v=|embed\/|shorts\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/)
-  if (yt && yt[1]) return { kind: 'youtube', id: yt[1], url }
-  return { kind: 'link', url }
-}
-function _virtualMembers(name) {
-  const r = window._recordings && window._recordings[name]
-  if (!r || !r.virtual || !Array.isArray(r.members)) return []
-  return r.members.filter(m => window._recordings[m] && !window._recordings[m].virtual)
-}
-
-// Resolve a virtual playlist's items to a single items-map (the same
-// { [searchText]: { [word]: [items] } } shape as a real playlist). Item
-// objects are REFERENCED, not copied, so this stays memory-cheap. Order
-// follows the members list, then each member's own order, unioned by
-// (id, lineIndex) within each (searchText, word).
-function _resolveVirtualItems(name) {
-  const out = {}
-  _virtualMembers(name).forEach(m => {
-    const items = (window._recordings[m] && window._recordings[m].items) || {}
-    Object.keys(items).forEach(st => {
-      if (!out[st]) out[st] = {}
-      Object.keys(items[st]).forEach(w => {
-        if (!out[st][w]) out[st][w] = []
-        const seen = new Set(out[st][w].map(it => `${it.id}|${it.lineIndex}`))
-        ;(items[st][w] || []).forEach(it => {
-          if (!it) return
-          const k = `${it.id}|${it.lineIndex}`
-          if (seen.has(k)) return
-          seen.add(k)
-          out[st][w].push(it)
-        })
-      })
-    })
-  })
-  return out
-}
-
-// Items-map for any playlist by name — resolves virtual ones.
-function _itemsForRecording(name) {
-  if (_isVirtual(name)) return _resolveVirtualItems(name)
-  return (window._recordings[name] && window._recordings[name].items) || {}
-}
-
-function _recordingItemCountIn(items) {
-  return Object.values(items || {}).reduce(
-    (sum, words) => sum + Object.values(words).reduce((s2, arr) => s2 + arr.length, 0), 0)
-}
+// Thin wrappers — pure cores in ./recordings-merge.js take the collection
+// as an arg; here we hand them window._recordings.
+function _isVirtual(name) { return _coreIsVirtual(window._recordings, name) }
+function _newManualId() { return _coreNewManualId() }
+function _virtualMembers(name) { return _coreVirtualMembers(window._recordings, name) }
+function _resolveVirtualItems(name) { return _coreResolveVirtualItems(window._recordings, name) }
+function _itemsForRecording(name) { return _coreItemsForRecording(window._recordings, name) }
 function _recordingItemCountByName(name) {
-  return _recordingItemCountIn(_itemsForRecording(name))
+  return _coreRecordingItemCountByName(window._recordings, name)
 }
+// _isManualItem, _parseMediaUrl, _recordingItemCountIn imported directly.
 
 function selectRecording(name) {
   if (!window._recordings[name]) return false
@@ -12365,28 +10821,12 @@ function _renderPlayingBanner(it, idx, total) {
       _setGap(raw)
     })
   }
-  $b.find('.rec-pb-count').text(`${idx + 1}/${total}`)
-  if (_isManualItem(it)) {
-    // Manual card — show the typed source/target plus an optional media
-    // hint. There's no clip metadata to put on the meta line.
-    const linkLbl = it.mediaUrl ? ` · ${it.mediaKind === 'youtube' ? '▶ YouTube' : '🔗 link'}` : ''
-    $b.find('.rec-pb-head').text(`📝 ${it.source || '(empty)'}`)
-    $b.find('.rec-pb-meta').text(`${it.target || '(empty)'}${linkLbl}`)
-  } else {
-    $b.find('.rec-pb-head').text(`▶ "${it.searchText}" → ${it.word}`)
-    $b.find('.rec-pb-meta').text(`${it.id} · ${it.source || '?'} · ${it.timeStart}s – ${it.timeEnd}s`)
-  }
-  $b.find('.rec-pb-bar').css('width', '0%')
-  // Reflect the current gap setting every time we render the banner — covers
-  // changes made via the Settings panel between items.
-  const _gap = parseInt(window._appSettings && window._appSettings.recPlayGapSeconds, 10)
-  $b.find('.rec-pb-gap-val').text((Number.isFinite(_gap) ? _gap : 30) + 's')
-
-  // Big prominent word display so the user always sees what word the
-  // current item belongs to. Lazily created; reused across iterations.
+  // Per-item updates delegated to the pure VM + DOM updater. The static
+  // skeleton (and its one-shot click wiring above) stays in this file.
   let $w = $('#recPlayingWord')
   if (!$w.length) $w = $('<div id="recPlayingWord"></div>').appendTo('body')
-  $w.text(it.word || '')
+  const gap = window._appSettings && window._appSettings.recPlayGapSeconds
+  updatePlayingBanner(buildPlayingBannerVM(it, idx, total, gap), $b[0], $w[0])
 }
 
 // Drain the progress bar from full → empty over `ms`, visually signalling
@@ -12528,24 +10968,16 @@ async function _loadSubtitlesForItem(item) {
   return { sv: stored._parsedSv || [], en: stored._parsedEn || [] }
 }
 
-// Find the line whose [start, end) brackets t; fall back to first line at-or-after t.
-// Used for the live playhead refresh, where t is a precise float.
-function _findLineByTime(lines, t) {
-  if (!lines || !lines.length) return -1
-  let i = lines.findIndex(l => l && l.start && l.end && l.start.ordinal <= t && l.end.ordinal > t)
-  if (i < 0) i = lines.findIndex(l => l && l.start && l.start.ordinal >= t)
-  return i
-}
+// _findLineByTime lives in ./renderer/playing-ui-vm.js.
 
-// Build the subtitle context overlay for the playing item — matched line
-// plus configured before/after context, with the secondary-language pairing
-// matched by SRT index. Returns metadata used by _refreshPlayingSubtitles
-// to keep the highlighted row in sync with the playhead.
+// Build the subtitle context overlay for the playing item. Thin shim:
+// pull subtitles + settings + selected lang from app state, hand off to
+// the pure VM + DOM emitter in ./renderer/playing-ui-*.js. The non-pure
+// bits — subtitle fetching, language selection, scroll positioning — stay
+// here. Returns metadata used by _refreshPlayingSubtitles.
 async function _renderPlayingSubtitles(item) {
   let $sub = $('#recPlayingSubs')
-  if (!$sub.length) {
-    $sub = $('<div id="recPlayingSubs"></div>').appendTo('body')
-  }
+  if (!$sub.length) $sub = $('<div id="recPlayingSubs"></div>').appendTo('body')
   $sub.html('<div class="rec-ps-loading">Loading subtitles…</div>')
 
   const parsed = await _loadSubtitlesForItem(item)
@@ -12555,62 +10987,21 @@ async function _renderPlayingSubtitles(item) {
   }
 
   const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
-  const primary   = lang === 'sv' ? parsed.sv : parsed.en
-  const secondary = lang === 'sv' ? parsed.en : parsed.sv
-  if (!primary.length) {
+  const before = (window._appSettings && window._appSettings.contextLinesBefore) || 0
+  const after  = (window._appSettings && window._appSettings.contextLinesAfter)  || 0
+  const vm = buildPlayingSubsVM({ parsed, lang, item, before, after })
+
+  if (vm.state === 'no-primary') {
     $sub.html('<div class="rec-ps-err">Primary subtitle missing.</div>')
     return null
   }
-
-  // Locate the recorded match by its SRT line index — the recorder always
-  // stamps this on capture, so we get exact centering with no time-math
-  // off-by-one. _refreshPlayingSubtitles still handles the live playhead.
-  const want = String(item.lineIndex)
-  const matchIdx = primary.findIndex(l => l && l.index != null && String(l.index) === want)
-  if (matchIdx < 0) {
+  if (vm.state === 'no-match') {
     $sub.html('<div class="rec-ps-err">Matched line not found in subtitle file.</div>')
     return null
   }
-  const before = parseInt(window._appSettings && window._appSettings.contextLinesBefore, 10) || 0
-  const after  = parseInt(window._appSettings && window._appSettings.contextLinesAfter,  10) || 0
-  const from = Math.max(0, matchIdx - before)
-  const to   = Math.min(primary.length - 1, matchIdx + after)
-
-  const secById = new Map()
-  if (secondary) secondary.forEach(s => { if (s && s.index != null) secById.set(s.index + '', s) })
-
-  // Pre-collect main texts so the highlighter can decide once whether to
-  // allow per-token fallback: if the whole phrase is already present on at
-  // least one row, the fallback would otherwise light up standalone parts
-  // on neighbouring rows. Tokens only kick in when the phrase is truly
-  // split across rows (= absent from every single row).
-  const mainTexts = []
-  for (let i = from; i <= to; i++) {
-    const line = primary[i]
-    mainTexts.push((line && (line.text || line[lang] || '')) || '')
-  }
-  const allowTokens = !!(item && item.word) && !_phraseFoundInTexts(mainTexts, item.word)
-
-  const $list = $('<div class="rec-ps-list"></div>')
-  for (let i = from; i <= to; i++) {
-    const line = primary[i]
-    const sec = line && line.index != null ? secById.get(line.index + '') : null
-    const mainText = mainTexts[i - from]
-    const secText  = sec  && (sec.text  || sec[lang === 'sv' ? 'en' : 'sv'] || '') || ''
-    const $row = $('<div class="rec-ps-row" data-line-i="' + i + '"></div>')
-    if (i === matchIdx) $row.addClass('rec-ps-active')
-    if (item && item.word) {
-      $row.append($('<div class="rec-ps-main"></div>').html(_highlightWordHtml(mainText, item.word, { allowTokens })))
-    } else {
-      $row.append($('<div class="rec-ps-main"></div>').text(String(mainText).trim()))
-    }
-    if (secText.trim()) $row.append($('<div class="rec-ps-sec"></div>').text(secText.trim()))
-    $list.append($row)
-  }
-  $sub.html($list)
-  // Defer one tick so the panel has its final layout before we measure.
+  renderPlayingSubsList(vm, $sub[0])
   setTimeout(_scrollActiveSubIntoView, 0)
-  return { primary, from, to }
+  return { primary: vm.primary, from: vm.from, to: vm.to }
 }
 
 // Build HTML for a subtitle line where every occurrence of `word` is wrapped
@@ -12622,101 +11013,8 @@ async function _renderPlayingSubtitles(item) {
 // caller is responsible for escaping). Falls back to unbounded for old
 // engines without lookbehind / \p. Shared by _highlightWordHtml and the
 // pre-scan in _phraseFoundInTexts.
-function _buildBoundedWordRe(pattern, flags = 'giu') {
-  try {
-    return new RegExp(`(?<![\\p{L}\\p{N}])(${pattern})(?![\\p{L}\\p{N}])`, flags)
-  } catch (_) {
-    return new RegExp(`(${pattern})`, flags.replace('u', ''))
-  }
-}
-
-// True if `word` (treated as a literal phrase) appears in any of `texts`.
-// Used by the multi-row highlight callers (Player + Practice) to decide
-// whether to allow per-token fallback: when the WHOLE phrase is present
-// on at least one rendered row, suppress fallback everywhere — otherwise
-// a composite word like "x y z" would also light up its standalone parts
-// on neighbouring rows.
-function _phraseFoundInTexts(texts, word) {
-  const w = String(word == null ? '' : word).trim()
-  if (!w || !Array.isArray(texts) || !texts.length) return false
-  const reEsc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const re = _buildBoundedWordRe(reEsc)
-  for (const t of texts) {
-    if (!t) continue
-    re.lastIndex = 0
-    if (re.test(String(t))) return true
-  }
-  return false
-}
-
-// opts.allowTokens (default true): when false, the per-token fallback is
-// suppressed and only the whole-phrase match is highlighted. Callers that
-// pre-scan a corpus (Player / Practice) pass `false` whenever the whole
-// phrase was found on at least one row, so the standalone parts on other
-// rows don't also light up.
-function _highlightWordHtml(text, word, opts) {
-  const t = (text == null ? '' : String(text)).trim()
-  const w = (word == null ? '' : String(word)).trim()
-  const allowTokens = !opts || opts.allowTokens !== false
-  // Escape the input for use as an HTML text node — we'll splice markup in
-  // around the match positions after, so we're never injecting user text.
-  const esc = (s) => String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-  if (!w) return esc(t)
-  const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const buildRe = (pattern) => _buildBoundedWordRe(pattern)
-  // Splice <mark> around every match position from a precomputed list of
-  // {start, end} spans (assumed non-overlapping, ordered).
-  const splice = (spans) => {
-    if (!spans.length) return esc(t)
-    let out = ''
-    let lastIdx = 0
-    for (const sp of spans) {
-      out += esc(t.slice(lastIdx, sp.start))
-      out += `<mark class="hl-word">${esc(t.slice(sp.start, sp.end))}</mark>`
-      lastIdx = sp.end
-    }
-    out += esc(t.slice(lastIdx))
-    return out
-  }
-  const collectSpans = (re) => {
-    const spans = []
-    let m
-    re.lastIndex = 0
-    while ((m = re.exec(t)) !== null) {
-      spans.push({ start: m.index, end: m.index + m[0].length })
-      if (m.index === re.lastIndex) re.lastIndex++
-    }
-    return spans
-  }
-  // First try the whole phrase as a single match — preserves "i förväg"
-  // highlight when both words sit on the same line.
-  const fullSpans = collectSpans(buildRe(reEsc(w)))
-  if (fullSpans.length) return splice(fullSpans)
-  // Token fallback covers the case where the SRT split a phrase across
-  // rows (".. man ser i" on row N, "förväg .." on row N+1). Callers that
-  // already saw the whole phrase on some OTHER row pass allowTokens=false
-  // to suppress this — otherwise a composite "x y z" would also light up
-  // standalone "x" / "y" / "z" on neighbouring rows.
-  if (!allowTokens) return esc(t)
-  const tokens = w.split(/\s+/).map(s => s.trim()).filter(Boolean)
-  if (tokens.length <= 1) return esc(t)
-  const tokenRe = buildRe(tokens.map(reEsc).join('|'))
-  const tokenSpans = collectSpans(tokenRe)
-  // Merge overlapping/touching spans, just in case.
-  tokenSpans.sort((a, b) => a.start - b.start)
-  const merged = []
-  for (const sp of tokenSpans) {
-    const last = merged[merged.length - 1]
-    if (last && sp.start <= last.end) last.end = Math.max(last.end, sp.end)
-    else merged.push({ ...sp })
-  }
-  return splice(merged)
-}
+// _buildBoundedWordRe / _phraseFoundInTexts / _highlightWordHtml live in
+// ./renderer/playing-ui-vm.js (imported at the top).
 
 // Scroll the active row to the vertical center of the #recPlayingSubs
 // panel. Adjusts only the panel's scrollTop (not the page) so mobile
@@ -12758,45 +11056,16 @@ function _refreshPlayingSubtitles(ctx) {
 // when loop='all'). Each entry is annotated with its origin (_recName, _st,
 // _w, _idx) so per-item actions like "play from here" can rebuild the same
 // queue and locate the starting item.
+// Thin wrappers — pure cores in ./play-queue.js.
 function _buildPlayQueue(loop) {
-  const queue = []
-  const pushFrom = (recName, items) => {
-    if (!items) return
-    for (const st of Object.keys(items)) {
-      const byW = items[st] || {}
-      for (const w of Object.keys(byW)) {
-        const arr = byW[w] || []
-        arr.forEach((it, idx) => {
-          if (!it || it.enabled === false) return
-          queue.push({ ...it, _recName: recName, _st: st, _w: w, _idx: idx })
-        })
-      }
-    }
-  }
-  if (loop === 'all') {
-    // Skip virtual playlists here — their items are duplicates of the real
-    // members, which are already iterated, so including them would replay
-    // the same clips twice.
-    Object.keys(window._recordings || {}).sort().forEach(n => {
-      const rec = window._recordings[n]
-      if (!rec || rec.virtual) return
-      pushFrom(n, rec.items)
-    })
-  } else {
-    // window._recording.items is already the resolved union for a virtual
-    // current playlist, so this works unchanged for both kinds.
-    pushFrom(window._recording.currentName, window._recording.items || {})
-  }
-  return queue
+  return _coreBuildPlayQueue({
+    loop,
+    recordings: window._recordings,
+    currentName: window._recording && window._recording.currentName,
+    currentItems: window._recording && window._recording.items,
+  })
 }
-
-// Fisher-Yates shuffle, in place.
-function _shuffleQueue(q) {
-  for (let i = q.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const tmp = q[i]; q[i] = q[j]; q[j] = tmp
-  }
-}
+function _shuffleQueue(q) { _coreShuffleQueue(q) }
 
 // Remember the last play/practice session so a follow-up Play All / Practice
 // on the same playlist can offer to resume from exactly where we stopped —
@@ -12819,31 +11088,27 @@ function _shuffleQueue(q) {
 // on the same playlist tracks independent positions. Legacy (single object)
 // shape is migrated on first load.
 const REC_LAST_PLAYED_KEY = 'cupitor:recLastPlayed'
+// Thin wrappers — pure cores in ./play-queue.js. localStorage I/O and
+// confirm() stay here; the cores take/return plain JS objects.
 function _loadLastPlayedMap() {
   if (window._recLastPlayedMap) return window._recLastPlayedMap
+  let map = {}
   try {
     const raw = localStorage.getItem(REC_LAST_PLAYED_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object') {
-        // Legacy: a single cursor object with .recName at the top level.
-        // Migrate into the new map shape, keyed by recName + mode.
-        if (parsed.recName) {
-          const m = {}
-          const mode = parsed.mode === 'practice' ? 'practice' : 'play'
-          m[parsed.recName] = {}
-          m[parsed.recName][mode] = parsed
-          window._recLastPlayedMap = m
-          try { localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(m)) } catch (_) {}
-          return m
+      const migrated = migrateLegacyLastPlayedMap(parsed)
+      if (migrated) {
+        // Re-persist migrated legacy entries so the next load is clean.
+        if (parsed && parsed.recName) {
+          try { localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(migrated)) } catch (_) {}
         }
-        window._recLastPlayedMap = parsed
-        return parsed
+        map = migrated
       }
     }
   } catch (_) {}
-  window._recLastPlayedMap = {}
-  return window._recLastPlayedMap
+  window._recLastPlayedMap = map
+  return map
 }
 function _saveLastPlayedMap(map) {
   try {
@@ -12852,133 +11117,32 @@ function _saveLastPlayedMap(map) {
   } catch (_) {}
 }
 function _setLastPlayed(it, mode, pos) {
-  if (!it) return
-  // Ad-hoc queues built from starred lines have no recording origin
-  // (_recName/_st/_w/_idx are undefined). Skip those so they don't clobber a
-  // resumable recording-session target — starred-lines sessions aren't
-  // resumable as "playlists" by design.
-  if (!it._recName) return
   const map = _loadLastPlayedMap()
-  if (!map[it._recName]) map[it._recName] = {}
-  const m = (mode === 'practice') ? 'practice' : 'play'
-  const prev = map[it._recName][m] || {}
-  map[it._recName][m] = {
-    ...prev,
-    recName: it._recName, st: it._st, w: it._w, idx: it._idx,
-    id: it.id, lineIndex: it.lineIndex,
-    mode: m,
-    queuePos: (typeof pos === 'number') ? pos : prev.queuePos,
-    ts: prev.ts || 0  // not bumped on per-item ticks; updated by _saveQueueOrder at session start
+  const next = setLastPlayedEntry(map, it, mode, pos)
+  if (next !== map) {
+    window._recLastPlayedMap = next
+    _saveLastPlayedMap(next)
   }
-  _saveLastPlayedMap(map)
 }
-// Compatibility shim — some callers (review-dialog highlight, YT-error
-// handler) just want "any last-played cursor for the active playlist". Pick
-// the newer of (play, practice) for that playlist.
 function _loadLastPlayed() {
-  const map = _loadLastPlayedMap()
-  const cur = window._recording && window._recording.currentName
-  if (!cur || !map[cur]) return null
-  const p = map[cur].play, q = map[cur].practice
-  if (p && q) return ((p.ts || 0) >= (q.ts || 0)) ? p : q
-  return p || q || null
+  return getNewestEntry(_loadLastPlayedMap(), window._recording && window._recording.currentName)
 }
-
-// Called once when a fresh play/practice session starts. Snapshots the
-// queue order (as identity tuples) and resets queuePos to 0 so subsequent
-// _setLastPlayed updates have a queue to anchor against. Stored under the
-// ACTIVE playlist's name + the chosen mode, so the same playlist tracks
-// independent positions in Play vs Practice.
 function _saveQueueOrder(queue, mode) {
   if (!Array.isArray(queue) || !queue.length) return
-  const keys = []
-  for (const it of queue) {
-    if (!it || !it._recName) continue
-    keys.push({
-      recName: it._recName, st: it._st, w: it._w,
-      id: it.id, lineIndex: it.lineIndex
-    })
-  }
-  if (!keys.length) return
   const recName = (window._recording && window._recording.currentName) || queue[0]._recName
   const map = _loadLastPlayedMap()
-  if (!map[recName]) map[recName] = {}
-  const m = (mode === 'practice') ? 'practice' : 'play'
-  map[recName][m] = {
-    ...(map[recName][m] || {}),
-    mode: m,
-    queueKeys: keys,
-    queuePos: 0,
-    ts: (map[recName][m] && map[recName][m].ts) || 1   // bumped below
+  const next = saveQueueOrderInto(map, queue, mode, recName)
+  if (next !== map) {
+    window._recLastPlayedMap = next
+    _saveLastPlayedMap(next)
   }
-  // Hand-roll a monotonic timestamp so picking "newest" across modes works
-  // without relying on Date.now (which is fine in browsers, but kept
-  // deterministic-ish in case the harness ever blocks it).
-  let maxTs = 0
-  Object.values(map).forEach(byMode => {
-    Object.values(byMode || {}).forEach(e => { if (e && e.ts > maxTs) maxTs = e.ts })
-  })
-  map[recName][m].ts = maxTs + 1
-  _saveLastPlayedMap(map)
 }
-
-// Reverse of _saveQueueOrder: rebuild a live queue from the saved identity
-// tuples. Skips keys whose item no longer exists or is now disabled.
-function _reconstituteQueue(keys) {
-  const out = []
-  if (!Array.isArray(keys)) return out
-  for (const k of keys) {
-    if (!k || !k.recName) continue
-    const rec = window._recordings && window._recordings[k.recName]
-    if (!rec) continue
-    const items = rec.virtual ? _resolveVirtualItems(k.recName) : rec.items
-    const arr = items && items[k.st] && items[k.st][k.w]
-    if (!Array.isArray(arr)) continue
-    let liveIdx = -1, live = null
-    for (let i = 0; i < arr.length; i++) {
-      const it = arr[i]
-      if (it && it.id === k.id && it.lineIndex === k.lineIndex) {
-        liveIdx = i; live = it; break
-      }
-    }
-    if (!live || live.enabled === false) continue
-    out.push({ ...live, _recName: k.recName, _st: k.st, _w: k.w, _idx: liveIdx })
-  }
-  return out
-}
-
-// If we have a recoverable last-played session on the CURRENT playlist,
-// ask the user whether to resume (saved queue + position) or start fresh.
-// Returns { queue, pos } when resuming, null otherwise. The prior session's
-// mode only shapes the prompt label — the caller chooses which mode to
-// dispatch (Play All / Practice), so the same queue can be resumed in
-// either mode.
 function _maybeResumeStartItem(mode) {
   const cur = window._recording && window._recording.currentName
-  if (!cur) return null
-  if (!window._recordings || !window._recordings[cur]) return null
-  const m = (mode === 'practice') ? 'practice' : 'play'
-  const map = _loadLastPlayedMap()
-  const lp = map[cur] && map[cur][m]
-  if (!lp || !Array.isArray(lp.queueKeys) || !lp.queueKeys.length) return null
-  const live = _reconstituteQueue(lp.queueKeys)
-  if (!live.length) return null
-  // queuePos >= queueKeys.length means the previous session played the
-  // whole queue to the end — no resume target, start fresh next time so
-  // the user doesn't see a "1 of N remaining" prompt that just replays
-  // the last item.
-  const rawPos = lp.queuePos || 0
-  if (rawPos >= lp.queueKeys.length) return null
-  const pos = Math.min(Math.max(0, rawPos), live.length - 1)
-  const remaining = live.length - pos
-  const resume = confirm(
-    `Resume your last ${m} session in "${cur}"?\n\n` +
-    `${remaining} of ${live.length} item(s) remaining (same order).\n\n` +
-    `OK = continue from where you left off\n` +
-    `Cancel = start fresh (re-shuffles if shuffle is on)`
-  )
-  if (!resume) return null
-  return { queue: live, pos }
+  const point = computeResumePoint(_loadLastPlayedMap(), window._recordings, cur, mode)
+  if (!point) return null
+  if (!confirm(point.message)) return null
+  return { queue: point.queue, pos: point.pos }
 }
 
 // YouTube IFrame API error codes that mean the video can't be played:
