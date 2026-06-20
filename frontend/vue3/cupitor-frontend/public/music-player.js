@@ -47,6 +47,16 @@ export function parseYouTubeId(url) {
   return null;
 }
 
+// Pure: map a (free-text) instrument name to a playback voice category.
+export function instrumentVoiceKey(name) {
+  const s = String(name || '').toLowerCase();
+  if (/piano|keyboard|harpsichord|clav/.test(s)) return 'piano';
+  if (/guitar|pluck|lute|harp|mandolin|banjo/.test(s)) return 'guitar';
+  if (/violin|viola|cello|bass|string|fiddle/.test(s)) return 'strings';
+  if (/organ|accordion|harmonium/.test(s)) return 'organ';
+  return 'synth';
+}
+
 // Browser glue: drive Tone.js from a buildSchedule() result and follow with the OSMD cursor.
 // opts.Tone defaults to the global Tone (vendored UMD). opts.getCursor returns the OSMD
 // cursor (or null) lazily so the player isn't coupled to a specific renderer instance.

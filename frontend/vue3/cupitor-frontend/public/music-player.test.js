@@ -1,5 +1,5 @@
 // public/music-player.test.js
-import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId } from './music-player.js';
+import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
 
 // Primary voice = the one with the most notes. midi=pitch, duration=<type> string|null, measureIndex 1-based.
 function voice(pitch, duration, measureIndex) {
@@ -66,5 +66,22 @@ describe('parseYouTubeId', () => {
     expect(parseYouTubeId('https://example.com/video')).toBeNull();
     expect(parseYouTubeId('')).toBeNull();
     expect(parseYouTubeId(null)).toBeNull();
+  });
+});
+
+describe('instrumentVoiceKey', () => {
+  test('maps instrument names to a voice category', () => {
+    expect(instrumentVoiceKey('Piano')).toBe('piano');
+    expect(instrumentVoiceKey('Harpsichord')).toBe('piano');
+    expect(instrumentVoiceKey('Acoustic Guitar')).toBe('guitar');
+    expect(instrumentVoiceKey('Violin')).toBe('strings');
+    expect(instrumentVoiceKey('Cello')).toBe('strings');
+    expect(instrumentVoiceKey('Pipe Organ')).toBe('organ');
+  });
+  test('unknown / empty / null → synth', () => {
+    expect(instrumentVoiceKey('Trumpet')).toBe('synth');
+    expect(instrumentVoiceKey('')).toBe('synth');
+    expect(instrumentVoiceKey(null)).toBe('synth');
+    expect(instrumentVoiceKey(undefined)).toBe('synth');
   });
 });
