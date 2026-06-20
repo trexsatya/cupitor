@@ -35,6 +35,13 @@ export function buildSchedule(voices, opts = {}) {
   return out;
 }
 
+// Pure: end time (seconds) of a buildSchedule() result — last event's end, or 0 if empty.
+export function scheduleEnd(schedule) {
+  if (!schedule || !schedule.length) return 0;
+  const last = schedule[schedule.length - 1];
+  return Number(((last.time || 0) + (last.duration || 0)).toFixed(6));
+}
+
 // Pure: extract a YouTube video id from watch / youtu.be / embed / music URLs. Null if none.
 export function parseYouTubeId(url) {
   if (!url || typeof url !== 'string') return null;
@@ -78,8 +85,13 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   let synth = makeVoice('synth');
   let part = null;
   let schedule = [];
+  let loop = false;
+  let stopId = null;   // Tone.Transport.scheduleOnce id for the boundary stop
 
   function disposePart() { if (part) { part.stop(); part.dispose(); part = null; } }
+  function clearStopTimer() {
+    if (stopId !== null) { try { T.Transport.clear(stopId); } catch (_) {} stopId = null; }
+  }
 
   function buildPart() {
     disposePart();
@@ -89,14 +101,23 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
       if (cursor) T.Draw.schedule(() => { try { cursor.next(); } catch (_) {} }, time);
     }, schedule.map(e => [e.time, e]));
-    const last = schedule[schedule.length - 1];
-    part.loopEnd = last ? last.time + last.duration : 0;
+    part.loop = loop;
+    part.loopStart = 0;
+    part.loopEnd = scheduleEnd(schedule);
     return part;
+  }
+
+  function stop() {
+    clearStopTimer();
+    T.Transport.stop();
+    if (part) part.stop();
+    const c = getCursor && getCursor();
+    if (c) { try { c.reset(); c.hide(); } catch (_) {} }
   }
 
   return {
     setSchedule(s) { schedule = s || []; buildPart(); },
-    setLoop(on) { if (part) part.loop = !!on; },
+    setLoop(on) { loop = !!on; if (part) part.loop = loop; },
     setInstrument(category) {
       const next = makeVoice(category);
       if (synth && synth.dispose) synth.dispose();
@@ -105,16 +126,17 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
     async play() {
       await T.start();
       if (!part) buildPart();
+      clearStopTimer();
+      T.Transport.stop();   // reset position to 0 so part.start(0)'s events are in the future
       T.Transport.start();
       part.start(0);
+      if (!loop) {
+        const end = scheduleEnd(schedule);
+        if (end > 0) stopId = T.Transport.scheduleOnce(() => stop(), end);
+      }
     },
     pause() { T.Transport.pause(); },
-    stop() {
-      T.Transport.stop();
-      if (part) part.stop();
-      const c = getCursor && getCursor();
-      if (c) { try { c.reset(); c.hide(); } catch (_) {} }
-    },
+    stop,
   };
 }
 

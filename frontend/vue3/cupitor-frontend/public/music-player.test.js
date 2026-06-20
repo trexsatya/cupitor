@@ -1,5 +1,5 @@
 // public/music-player.test.js
-import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
+import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd } from './music-player.js';
 
 // Primary voice = the one with the most notes. midi=pitch, duration=<type> string|null, measureIndex 1-based.
 function voice(pitch, duration, measureIndex) {
@@ -83,5 +83,19 @@ describe('instrumentVoiceKey', () => {
     expect(instrumentVoiceKey('')).toBe('synth');
     expect(instrumentVoiceKey(null)).toBe('synth');
     expect(instrumentVoiceKey(undefined)).toBe('synth');
+  });
+});
+
+describe('scheduleEnd', () => {
+  test('end = last event time + duration', () => {
+    expect(scheduleEnd([
+      { midi: 60, time: 0,   duration: 0.5 },
+      { midi: 62, time: 0.5, duration: 0.25 },
+    ])).toBe(0.75);
+  });
+  test('empty / nullish schedule → 0', () => {
+    expect(scheduleEnd([])).toBe(0);
+    expect(scheduleEnd(null)).toBe(0);
+    expect(scheduleEnd(undefined)).toBe(0);
   });
 });
