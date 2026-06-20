@@ -1,5 +1,5 @@
 // public/music-player.test.js
-import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd, buildScheduleFromMusicXml } from './music-player.js';
+import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd, buildScheduleFromMusicXml, gmInstrumentForVoice, soundfontSampleMap } from './music-player.js';
 
 // Primary voice = the one with the most notes. midi=pitch, duration=<type> string|null, measureIndex 1-based.
 function voice(pitch, duration, measureIndex) {
@@ -188,5 +188,34 @@ describe('buildScheduleFromMusicXml', () => {
     expect(buildScheduleFromMusicXml('', { tempo: 120 })).toEqual([]);
     expect(buildScheduleFromMusicXml(null)).toEqual([]);
     expect(buildScheduleFromMusicXml('<score-partwise></score-partwise>', { tempo: 120 })).toEqual([]);
+  });
+});
+
+describe('gmInstrumentForVoice', () => {
+  test('maps each category to a General MIDI instrument', () => {
+    expect(gmInstrumentForVoice('guitar')).toBe('acoustic_guitar_nylon');
+    expect(gmInstrumentForVoice('strings')).toBe('string_ensemble_1');
+    expect(gmInstrumentForVoice('organ')).toBe('church_organ');
+    expect(gmInstrumentForVoice('piano')).toBe('acoustic_grand_piano');
+  });
+  test('synth / unknown → acoustic grand piano', () => {
+    expect(gmInstrumentForVoice('synth')).toBe('acoustic_grand_piano');
+    expect(gmInstrumentForVoice('whatever')).toBe('acoustic_grand_piano');
+  });
+});
+
+describe('soundfontSampleMap', () => {
+  test('builds {pitch: url}; sharps use "s" in the filename only', () => {
+    const m = soundfontSampleMap('acoustic_grand_piano', { baseUrl: 'B/', format: 'mp3', notes: ['C4', 'F#4'] });
+    expect(m).toEqual({
+      'C4': 'B/acoustic_grand_piano-mp3/C4.mp3',
+      'F#4': 'B/acoustic_grand_piano-mp3/Fs4.mp3',   // key keeps '#', filename uses 's'
+    });
+  });
+  test('defaults to the FluidR3_GM CDN and a sparse central note set', () => {
+    const m = soundfontSampleMap('church_organ');
+    expect(m['C4']).toBe('https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/church_organ-mp3/C4.mp3');
+    expect(Object.keys(m)).toContain('F#4');
+    expect(m['F#4'].endsWith('church_organ-mp3/Fs4.mp3')).toBe(true);
   });
 });

@@ -204,7 +204,7 @@
   <div style="margin-bottom:.5rem">
     <strong id="previewTitle"></strong>
     <button id="previewFullBtn">Full</button>
-    <label>Segment measures
+    <label>Measures:
       <input id="segFrom" type="number" min="1" style="width:4em" placeholder="from">–
       <input id="segTo" type="number" min="1" style="width:4em" placeholder="to">
     </label>
@@ -387,8 +387,10 @@
     p.setInstrument(document.getElementById('instrSel').value);
     p.setSchedule(schedule);
     p.setLoop(document.getElementById('loopChk').checked);
-    p.play();
-    document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes`;
+    document.getElementById('transportMsg').textContent = 'Loading instrument…';
+    p.play()
+      .then(() => { document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes`; })
+      .catch(() => { document.getElementById('transportMsg').textContent = 'Playback error.'; });
   }
   let ytMonitor = null;
   let ytLoadedId = null;   // video id currently loaded in the player (avoid reloading on replay)
