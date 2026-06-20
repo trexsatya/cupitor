@@ -41,6 +41,17 @@ export function upsertVocab(vocab, entry) {
   return out;
 }
 
+// Pure: group vocab entries by category (sorted), preserving each group's entry order.
+export function groupVocabByCategory(vocab) {
+  const byCat = new Map();
+  for (const e of (vocab || [])) {
+    const cat = e.category || 'uncategorized';
+    if (!byCat.has(cat)) byCat.set(cat, []);
+    byCat.get(cat).push(e);
+  }
+  return Array.from(byCat.keys()).sort().map(category => ({ category, entries: byCat.get(category) }));
+}
+
 // Integration: fetch the per-system vocab.json (empty array if missing/unreachable).
 export async function loadVocab(system) {
   const res = await fetch(`${getMusicResourceUrl(system)}/vocab.json`);

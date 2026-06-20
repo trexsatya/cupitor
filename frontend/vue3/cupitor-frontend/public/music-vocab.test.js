@@ -1,5 +1,5 @@
 // public/music-vocab.test.js
-import { buildSnapshot, buildVocabEntry, upsertVocab } from './music-vocab.js';
+import { buildSnapshot, buildVocabEntry, upsertVocab, groupVocabByCategory } from './music-vocab.js';
 
 function detailWith(pitch, chordSymbol, measureIndex) {
   return { meta: { id: 'p' }, format: 'musicxml', source: '<x/>',
@@ -85,5 +85,22 @@ describe('saveVocabAndPush', () => {
     const res = await saveVocabAndPush({ system: 'western', vocab: [], committer });
     expect(res.pushed).toBe(false);
     expect(res.pushError).toBe('offline');
+  });
+});
+
+describe('groupVocabByCategory', () => {
+  test('groups by category, sorts categories, preserves entry order', () => {
+    const vocab = [
+      { id: 'a', category: 'licks' }, { id: 'b', category: 'cadences' },
+      { id: 'c', category: 'licks' }, { id: 'd' },  // no category → uncategorized
+    ];
+    const groups = groupVocabByCategory(vocab);
+    expect(groups.map(g => g.category)).toEqual(['cadences', 'licks', 'uncategorized']);
+    expect(groups.find(g => g.category === 'licks').entries.map(e => e.id)).toEqual(['a', 'c']);
+    expect(groups.find(g => g.category === 'uncategorized').entries.map(e => e.id)).toEqual(['d']);
+  });
+  test('empty / missing input → []', () => {
+    expect(groupVocabByCategory([])).toEqual([]);
+    expect(groupVocabByCategory(null)).toEqual([]);
   });
 });
