@@ -163,6 +163,9 @@ function matchSeq(qDec, pieceDec, query, qi, prevIdx, anchor) {
   return null;
 }
 
+// Note: M1's index collapses consecutive identical chords in `search.chords`, so an
+// adjacent-duplicate query like [C, C] never matches contiguously (max_gap=0) against
+// real index data — it only matches when a different chord sits between (max_gap>=1).
 export function matchChordQuery(query, pieceChordsStr) {
   const pieceSyms = (pieceChordsStr || '').split(/\s+/).filter(Boolean);
   if (pieceSyms.length === 0) return null;
