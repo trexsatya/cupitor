@@ -7,6 +7,7 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
 // Map a primary-voice note-index range to a 1-based [startMeasure, endMeasure].
 export function measureRangeFromNoteRange(detail, noteRange) {
+  if (!noteRange) return null;
   const v = primaryVoice(detail);
   const n = v.pitch.length;
   if (!n) return null;
@@ -39,13 +40,21 @@ export function collapsedChordSpans(detail) {
 }
 
 // Convert a Phase-1 chord match range (indices into the collapsed chord list) to a
-// 1-based [startMeasure, endMeasure].
+// non-inverted 1-based [startMeasure, endMeasure]. For multi-voice pieces the collapsed
+// list spans several voices whose measures aren't globally monotonic, so we take the
+// MIN start / MAX end across the matched spans — a valid covering range (never inverted).
+// Single-voice pieces (the common case) collapse to the exact tight range.
 export function measureRangeFromChordMatch(detail, chordRange) {
   const spans = collapsedChordSpans(detail);
-  if (!spans.length) return null;
+  if (!spans.length || !chordRange) return null;
   const lo = clamp(chordRange[0], 0, spans.length - 1);
   const hi = clamp(chordRange[1], 0, spans.length - 1);
-  return [spans[lo].measureStart, spans[hi].measureEnd];
+  let start = Infinity, end = -Infinity;
+  for (let i = Math.min(lo, hi); i <= Math.max(lo, hi); i++) {
+    if (spans[i].measureStart < start) start = spans[i].measureStart;
+    if (spans[i].measureEnd > end) end = spans[i].measureEnd;
+  }
+  return [start, end];
 }
 
 // OSMD zoom factor from viewport width: 1.0 at >= BASELINE px, scaling down to a 0.4 floor.
