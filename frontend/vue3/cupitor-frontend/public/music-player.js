@@ -91,3 +91,22 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
     },
   };
 }
+
+// Browser glue: control a linked YouTube video via the IFrame API. `container` is an
+// element or element id. opts.YT defaults to the global YT (loaded via iframe_api).
+export function createYouTubeController(container, { YT } = {}) {
+  const Y = YT || (typeof globalThis !== 'undefined' ? globalThis.YT : undefined);
+  let player = null;
+  return {
+    load(videoId) {
+      if (!Y || !Y.Player) throw new Error('YouTube IFrame API not loaded');
+      if (player && typeof player.cueVideoById === 'function') { player.cueVideoById(videoId); return; }
+      player = new Y.Player(container, { videoId, events: {} });
+    },
+    play() { if (player) player.playVideo(); },
+    pause() { if (player) player.pauseVideo(); },
+    seekTo(seconds) { if (player) player.seekTo(seconds, true); },
+    getDuration() { return player && player.getDuration ? player.getDuration() : 0; },
+    get raw() { return player; },
+  };
+}
