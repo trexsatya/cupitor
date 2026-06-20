@@ -76,6 +76,25 @@ export function mergeIndex(existing, entries) {
   return Array.from(byId.values());
 }
 
+// Pure: overlay local store records onto the remote index for display.
+// Local unpushed (synced:false) records override remote (they are newer) and are
+// flagged in `unpushedIds`. Local synced records fill gaps the remote fetch missed.
+export function mergeLocalRemote(remoteIndex = [], localRecords = []) {
+  const byId = new Map((remoteIndex || []).map(e => [e.id, e]));
+  const unpushedIds = new Set();
+  for (const rec of (localRecords || [])) {
+    const e = rec && rec.entry;
+    if (!e) continue;
+    if (rec.synced === false) {
+      byId.set(e.id, e);
+      unpushedIds.add(e.id);
+    } else if (!byId.has(e.id)) {
+      byId.set(e.id, e);
+    }
+  }
+  return { index: Array.from(byId.values()), unpushedIds };
+}
+
 function encodePiece(piece) {
   const meta = { id: piece.id, title: piece.title, system: piece.system, key: piece.key,
                  sourceUrl: piece.sourceUrl, youtube: piece.youtube, instrument: piece.instrument };

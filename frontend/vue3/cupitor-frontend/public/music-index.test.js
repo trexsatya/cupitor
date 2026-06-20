@@ -1,6 +1,6 @@
 // public/music-index.test.js
 import { encodeNoteText, primaryVoice } from './music-encoding.js';
-import { fnv1a, buildIndexEntry, splitTiers, getSystemFromUrl, getMusicResourceUrl, mergeIndex, rebuildAndPush, computeChanges } from './music-index.js';
+import { fnv1a, buildIndexEntry, splitTiers, getSystemFromUrl, getMusicResourceUrl, mergeIndex, rebuildAndPush, computeChanges, mergeLocalRemote } from './music-index.js';
 
 const txt = 'G4# D5# D5 C5#\nB4 C5# B4 A4# G4#';
 
@@ -134,5 +134,43 @@ describe('computeChanges (pure)', () => {
     expect(second.changed).toEqual([]);
     const forced = computeChanges({ ...args, currentIndex: first.index, force: true });
     expect(forced.changed).toEqual(['x']);
+  });
+});
+
+describe('mergeLocalRemote (pure)', () => {
+  const remote = [{ id: 'a', title: 'A-remote' }, { id: 'b', title: 'B-remote' }];
+
+  test('remote-only: passes through, no unpushed', () => {
+    const { index, unpushedIds } = mergeLocalRemote(remote, []);
+    expect(index.map(e => e.id).sort()).toEqual(['a', 'b']);
+    expect(unpushedIds.size).toBe(0);
+  });
+
+  test('local unpushed overrides remote and is flagged', () => {
+    const local = [{ entry: { id: 'a', title: 'A-local' }, synced: false }];
+    const { index, unpushedIds } = mergeLocalRemote(remote, local);
+    expect(index.find(e => e.id === 'a').title).toBe('A-local');
+    expect(unpushedIds.has('a')).toBe(true);
+    expect(unpushedIds.size).toBe(1);
+  });
+
+  test('local synced absent from remote is included as pushed', () => {
+    const local = [{ entry: { id: 'c', title: 'C-local' }, synced: true }];
+    const { index, unpushedIds } = mergeLocalRemote(remote, local);
+    expect(index.map(e => e.id).sort()).toEqual(['a', 'b', 'c']);
+    expect(unpushedIds.size).toBe(0);
+  });
+
+  test('local synced already in remote: remote wins, not flagged', () => {
+    const local = [{ entry: { id: 'a', title: 'A-stale-local' }, synced: true }];
+    const { index, unpushedIds } = mergeLocalRemote(remote, local);
+    expect(index.find(e => e.id === 'a').title).toBe('A-remote');
+    expect(unpushedIds.size).toBe(0);
+  });
+
+  test('handles empty / missing inputs', () => {
+    const { index, unpushedIds } = mergeLocalRemote([], []);
+    expect(index).toEqual([]);
+    expect(unpushedIds.size).toBe(0);
   });
 });
