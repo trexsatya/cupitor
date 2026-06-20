@@ -2,6 +2,7 @@ import { measureRangeFromNoteRange } from './music-render.js';
 import { collapsedChordSpans } from './music-render.js';
 import { measureRangeFromChordMatch } from './music-render.js';
 import { responsiveZoom } from './music-render.js';
+import { createMusicRenderer } from './music-render.js';
 import { encodeMusicXml, inferChords } from './music-encoding.js';
 import { buildIndexEntry } from './music-index.js';
 import fs from 'fs';
@@ -123,5 +124,77 @@ describe('responsiveZoom', () => {
   });
   test('clamps to a 0.4 floor on very narrow viewports', () => {
     expect(responsiveZoom(200)).toBeCloseTo(0.4);
+  });
+});
+
+// Minimal fake OSMD that records calls.
+function fakeOsmd() {
+  return {
+    calls: [],
+    Zoom: 1.0,
+    Sheet: { SourceMeasures: [{}, {}, {}, {}] },  // 4 measures
+    setOptions(o) { this.calls.push(['setOptions', o]); },
+    load(src) { this.calls.push(['load', src]); return Promise.resolve(); },
+    render() { this.calls.push(['render']); }
+  };
+}
+
+describe('createMusicRenderer', () => {
+  test('initialises OSMD with svg/compact options', () => {
+    const osmd = fakeOsmd();
+    createMusicRenderer({}, { osmdFactory: () => osmd });
+    expect(osmd.calls.find(c => c[0] === 'setOptions' && c[1].backend === 'svg')).toBeTruthy();
+  });
+
+  test('loadDetail loads musicxml source, renders, reports total measures', async () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    const res = await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
+    expect(res).toEqual({ ok: true, totalMeasures: 4 });
+    expect(osmd.calls.some(c => c[0] === 'load' && c[1] === '<xml/>')).toBe(true);
+    expect(osmd.calls.some(c => c[0] === 'render')).toBe(true);
+  });
+
+  test('loadDetail refuses note-text pieces', async () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    const res = await r.loadDetail({ format: 'note-text', source: 'C D E' });
+    expect(res).toEqual({ ok: false, reason: 'not-musicxml' });
+    expect(osmd.calls.some(c => c[0] === 'load')).toBe(false);
+  });
+
+  test('showSegment sets the measure window and re-renders', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.showSegment([2, 3]);
+    const opt = osmd.calls.filter(c => c[0] === 'setOptions').pop()[1];
+    expect(opt.drawFromMeasureNumber).toBe(2);
+    expect(opt.drawUpToMeasureNumber).toBe(3);
+    expect(osmd.calls.some(c => c[0] === 'render')).toBe(true);
+  });
+
+  test('showFull resets the measure window from measure 1', async () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
+    r.showFull();
+    const opt = osmd.calls.filter(c => c[0] === 'setOptions').pop()[1];
+    expect(opt.drawFromMeasureNumber).toBe(1);
+    expect(opt.drawUpToMeasureNumber).toBe(4);
+  });
+
+  test('setZoom sets OSMD Zoom and re-renders', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.setZoom(0.5);
+    expect(osmd.Zoom).toBe(0.5);
+    expect(osmd.calls.some(c => c[0] === 'render')).toBe(true);
+  });
+
+  test('applyResponsiveZoom derives zoom from viewport width', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.applyResponsiveZoom(450);
+    expect(osmd.Zoom).toBeCloseTo(0.5);
   });
 });

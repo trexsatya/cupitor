@@ -62,3 +62,36 @@ const ZOOM_BASELINE_PX = 900;
 export function responsiveZoom(viewportWidth) {
   return clamp(viewportWidth / ZOOM_BASELINE_PX, 0.4, 1.0);
 }
+
+// Thin OSMD wrapper. opts.osmdFactory(container) lets tests inject a spy; in the browser
+// it defaults to the global OpenSheetMusicDisplay. Visual output is browser-verified;
+// this wrapper's method/argument contract is unit-tested via an injected fake.
+export function createMusicRenderer(container, opts = {}) {
+  const factory = opts.osmdFactory || ((c) => new opensheetmusicdisplay.OpenSheetMusicDisplay(c));
+  const osmd = factory(container);
+  osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false });
+  let totalMeasures = 0;
+
+  return {
+    osmd,
+    async loadDetail(detail) {
+      if (!detail || detail.format !== 'musicxml' || !detail.source) {
+        return { ok: false, reason: 'not-musicxml' };
+      }
+      await osmd.load(detail.source);
+      osmd.render();
+      totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
+      return { ok: true, totalMeasures };
+    },
+    showFull() {
+      osmd.setOptions({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: totalMeasures || Number.MAX_SAFE_INTEGER });
+      osmd.render();
+    },
+    showSegment(measureRange) {
+      osmd.setOptions({ drawFromMeasureNumber: measureRange[0], drawUpToMeasureNumber: measureRange[1] });
+      osmd.render();
+    },
+    setZoom(factor) { osmd.Zoom = factor; osmd.render(); },
+    applyResponsiveZoom(viewportWidth) { this.setZoom(responsiveZoom(viewportWidth)); }
+  };
+}
