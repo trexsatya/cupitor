@@ -80,6 +80,11 @@ export function normExtToken(token) {
   return EXT_ALIASES[t] || t;
 }
 
+// Note: a few verbose pattern keys normalise to the same symbol — e.g. both '9' and
+// 'maj9' become "<root>9" via normaliseChordName. First-write-wins keeps the dominant
+// reading ({'7','9'}); 'maj9' is not separately retrievable. This is fine because M1's
+// chord inference normalises identically, so query and index symbols stay consistent.
+
 // Build a lookup: normalised symbol -> {rootPc, quality, ext:Set}. Done once.
 const CHORD_TABLE = (() => {
   const table = new Map();
@@ -108,9 +113,12 @@ export function decomposeChord(symbol) {
   const rootPc = pitchClass(m[1]);
   if (rootPc === undefined) return null;
   const suffix = m[2];
+  // Query input may arrive in verbose spelling (e.g. "Cdim", "Caug") as well as the
+  // canonical "Co"/"C+"; handle both. (Real index symbols are always CHORD_TABLE keys,
+  // so this fallback is effectively a query-side safety net.)
   let quality = 'maj';
-  if (suffix.startsWith('o')) quality = 'dim';
-  else if (suffix.startsWith('+')) quality = 'aug';
+  if (suffix.startsWith('o') || suffix.startsWith('dim')) quality = 'dim';
+  else if (suffix.startsWith('+') || suffix.startsWith('aug')) quality = 'aug';
   else if (suffix.startsWith('m') && !suffix.startsWith('maj') && !suffix.startsWith('M')) quality = 'min';
   return { rootPc, quality, ext: new Set() };
 }
