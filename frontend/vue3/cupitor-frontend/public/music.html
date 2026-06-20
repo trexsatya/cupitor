@@ -233,7 +233,9 @@
 
 <script type="module">
   import { getSystemFromUrl, getMusicResourceUrl, loadLibrary, rebuildAndPush, retryPush } from './music-index.js';
-  import { createMusicRenderer } from './music-render.js';
+  import { runQuery } from './music-query.js';
+  import { createMusicRenderer, resolveMatchMeasures } from './music-render.js';
+  import { buildChordQuery, buildMelodyQuery, matchSummary } from './music-search-ui.js';
   import { createMusicStore } from './music-local-store.js';
   import { buildSchedule, createMusicPlayer, createYouTubeController, parseYouTubeId } from './music-player.js';
   import { guessSegmentStart, linkYouTubeAndPush } from './music-media.js';
@@ -473,6 +475,117 @@
     if (player) player.stop();
     document.getElementById('musicPreview').style.display = 'none';
   };
+
+  // ---- Search UI (Layout C) ----
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const QUALITIES = ['maj', 'min', 'dim', 'aug'];
+  const EXTENSIONS = ['add9', '7', 'maj7', '6', '9', 'sus4'];
+
+  function addChip() {
+    const chip = document.createElement('div');
+    chip.className = 'chordChip';
+    const rootSel = document.createElement('select');
+    NOTE_NAMES.forEach(n => rootSel.add(new Option(n, n)));
+    const qualSel = document.createElement('select');
+    QUALITIES.forEach(q => qualSel.add(new Option(q, q)));
+    chip.appendChild(rootSel);
+    chip.appendChild(qualSel);
+    EXTENSIONS.forEach(ext => {
+      const pill = document.createElement('button');
+      pill.type = 'button'; pill.className = 'extPill'; pill.textContent = ext; pill.dataset.ext = ext;
+      pill.onclick = () => pill.classList.toggle('active');
+      chip.appendChild(pill);
+    });
+    const del = document.createElement('button');
+    del.type = 'button'; del.textContent = '×'; del.onclick = () => chip.remove();
+    chip.appendChild(del);
+    document.getElementById('chips').appendChild(chip);
+  }
+  function readChips() {
+    return Array.from(document.querySelectorAll('#chips .chordChip')).map(chip => {
+      const sels = chip.querySelectorAll('select');
+      return {
+        root: sels[0].value, quality: sels[1].value,
+        extensions: Array.from(chip.querySelectorAll('.extPill.active')).map(p => p.dataset.ext),
+      };
+    });
+  }
+  function buildNoteButtons() {
+    const box = document.getElementById('noteButtons');
+    const append = (tok) => { const t = document.getElementById('melodyTokens'); t.value = (t.value ? t.value + ' ' : '') + tok; };
+    [...NOTE_NAMES, '.'].forEach(tok => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = tok; b.onclick = () => append(tok);
+      box.appendChild(b);
+    });
+    const clr = document.createElement('button');
+    clr.type = 'button'; clr.textContent = 'clear'; clr.onclick = () => { document.getElementById('melodyTokens').value = ''; };
+    box.appendChild(clr);
+  }
+  function currentMode() {
+    return document.querySelector('input[name="searchMode"]:checked').value;
+  }
+  function maxResultsVal() {
+    const n = parseInt(document.getElementById('maxResults').value, 10);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  }
+  function buildQuery() {
+    if (currentMode() === 'chord') {
+      return buildChordQuery(readChips(), {
+        strict_extensions: document.getElementById('strictExt').checked,
+        max_gap: parseInt(document.getElementById('maxGap').value, 10) || 0,
+        transpose_invariant: document.getElementById('transposeInv').checked,
+        max_results: maxResultsVal(),
+      });
+    }
+    const tokens = document.getElementById('melodyTokens').value.trim().split(/\s+/).filter(Boolean);
+    return buildMelodyQuery(tokens, {
+      search_by_interval: document.getElementById('byInterval').checked,
+      pitch_tolerance: parseInt(document.getElementById('pitchTol').value, 10) || 0,
+      max_results: maxResultsVal(),
+    });
+  }
+  function renderResults(results) {
+    const box = document.getElementById('results');
+    if (!results.length) { box.innerHTML = '<em>No matches.</em>'; return; }
+    box.innerHTML = '';
+    results.forEach(r => {
+      const title = (index.find(e => e.id === r.pieceId) || {}).title || r.pieceId;
+      const row = document.createElement('div');
+      row.className = 'resultRow';
+      row.innerHTML = `<strong>${title}</strong><br><small>${matchSummary(r)}</small>`;
+      row.onclick = () => openResult(r);
+      box.appendChild(row);
+    });
+  }
+  async function openResult(result) {
+    await openPreview(result.pieceId);
+    if (!currentDetail) return;   // note-text or failed render: detail pane shows its own message
+    const mr = resolveMatchMeasures(currentDetail, result.match);
+    if (mr) {
+      document.getElementById('segFrom').value = mr[0];
+      document.getElementById('segTo').value = mr[1];
+      if (renderer) renderer.showSegment(mr);
+    }
+  }
+  document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
+    radio.onchange = () => {
+      document.getElementById('chordMode').style.display = currentMode() === 'chord' ? '' : 'none';
+      document.getElementById('melodyMode').style.display = currentMode() === 'melody' ? '' : 'none';
+    };
+  });
+  document.getElementById('addChipBtn').onclick = addChip;
+  document.getElementById('searchBtn').onclick = () => {
+    let query;
+    try { query = buildQuery(); } catch (e) { document.getElementById('searchMsg').textContent = e.message; return; }
+    let results;
+    try { results = runQuery(query, index); }
+    catch (e) { document.getElementById('searchMsg').textContent = 'Invalid query: ' + e.message; return; }
+    document.getElementById('searchMsg').textContent = `${results.length} match${results.length === 1 ? '' : 'es'}`;
+    renderResults(results);
+  };
+  addChip();            // start with one chord chip
+  buildNoteButtons();   // populate the melody note-picker
 
   (async () => {
     try { const lib = await loadLibrary(system, store); index = lib.index; unpushedIds = lib.unpushedIds; }
