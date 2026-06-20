@@ -257,4 +257,20 @@ describe('createMusicRenderer voice colors', () => {
     r.setVoiceColors(true);
     expect(osmd.calls.filter(c => c[0] === 'render').length).toBe(before + 1);
   });
+
+  test('setVoiceColors sets NoteheadColor per voice and resets to black on toggle-off', () => {
+    const noteA = {}, noteB = {};
+    const osmd = fakeOsmd();
+    osmd.Sheet.Instruments = [
+      { Voices: [{ VoiceEntries: [{ Notes: [noteA] }] }] },
+      { Voices: [{ VoiceEntries: [{ Notes: [noteB] }] }] },
+    ];
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.setVoiceColors(true);
+    expect(noteA.NoteheadColor).toBe(voiceColor(0));
+    expect(noteB.NoteheadColor).toBe(voiceColor(1));   // global voice index increments across instruments
+    r.setVoiceColors(false);
+    expect(noteA.NoteheadColor).toBe('#000000');
+    expect(noteB.NoteheadColor).toBe('#000000');
+  });
 });
