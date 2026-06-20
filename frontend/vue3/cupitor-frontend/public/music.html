@@ -143,6 +143,7 @@
   <input type="file" id="xmlFile" accept=".xml,.musicxml,application/xml,text/xml" style="display:none" multiple>
   <button id="addTextBtn">Add note-text…</button>
   <button id="rebuildBtn">Rebuild &amp; Push selected/new</button>
+  <button id="retryBtn" style="display:none"></button>
   <span id="status"></span>
 </div>
 <textarea id="textInput" placeholder="Paste note-text, first line = title" style="display:none;width:100%;height:6em"></textarea>
@@ -163,14 +164,17 @@
 </div>
 
 <script type="module">
-  import { getSystemFromUrl, getMusicResourceUrl, loadIndex, rebuildAndPush } from './music-index.js';
+  import { getSystemFromUrl, getMusicResourceUrl, loadLibrary, rebuildAndPush, retryPush } from './music-index.js';
   import { createMusicRenderer } from './music-render.js';
+  import { createMusicStore } from './music-local-store.js';
 
   const system = getSystemFromUrl().name;
   document.getElementById('systemLabel').textContent = system;
 
   // jQuery is already global in music.html (loaded via <script>); musicxml.js needs it.
   let index = [];
+  let unpushedIds = new Set();
+  const store = createMusicStore();
   const pending = [];  // newly added pieces not yet pushed: {id,title,format,source,key}
 
   function idFromName(name) {
@@ -178,10 +182,23 @@
   }
   function setStatus(s) { document.getElementById('status').textContent = s; }
 
+  function updateRetryBtn() {
+    const btn = document.getElementById('retryBtn');
+    if (unpushedIds.size) { btn.style.display = ''; btn.textContent = `Retry push (${unpushedIds.size})`; }
+    else { btn.style.display = 'none'; }
+  }
+
+  function makeCommitter(label) {
+    return (files) => window.GitHubUtils.commitMultipleFiles({
+      owner: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages',
+      commitMessage: `music(${system}): rebuild ${label}`, files
+    });
+  }
+
   function render() {
     const rows = [];
     index.forEach(e => rows.push(
-      `<label style="display:block"><input type="checkbox" class="sel" data-id="${e.id}"> ${e.title || e.id} <small>(${e.noteCount} notes, ${e.channels.join('/')})</small> <button class="previewBtn" data-id="${e.id}">Preview</button></label>`));
+      `<label style="display:block"><input type="checkbox" class="sel" data-id="${e.id}"> ${e.title || e.id} <small>(${e.noteCount} notes, ${e.channels.join('/')})</small> <button class="previewBtn" data-id="${e.id}">Preview</button>${unpushedIds.has(e.id) ? ' <span style="color:#c00;font-weight:600">● not pushed</span>' : ''}</label>`));
     pending.forEach(p => rows.push(
       `<label style="display:block;color:#a06000"><input type="checkbox" class="sel" data-id="${p.id}" checked disabled> ${p.title} <small>(new — will be pushed)</small></label>`));
     document.getElementById('pieceList').innerHTML = rows.join('') || '<em>No pieces yet.</em>';
@@ -211,25 +228,38 @@
     const reselected = index
       .filter(e => selectedIds.has(e.id))
       .map(e => ({ id: e.id, title: e.title, format: e.format, source: null, key: e.key }));
-    // For already-indexed pieces we need their source; fetch the detail file on demand.
+    // For already-indexed pieces we need their source; prefer the local store, else fetch the detail file.
     for (const r of reselected) {
-      const detail = await fetch(`${getMusicResourceUrl(system)}/details/${r.id}.json`).then(x => x.json());
+      let detail = await store.getDetail(system, r.id).catch(() => null);
+      if (!detail) detail = await fetch(`${getMusicResourceUrl(system)}/details/${r.id}.json`).then(x => x.json());
       r.source = detail.source; r.format = detail.format;
     }
     const pieces = [...pending, ...reselected];
     if (!pieces.length) { setStatus('Nothing selected.'); return; }
-    setStatus('Pushing…');
-    const committer = (files) => window.GitHubUtils.commitMultipleFiles({
-      owner: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages',
-      commitMessage: `music(${system}): rebuild ${pieces.map(p => p.id).join(', ')}`,
-      files
-    });
+    setStatus('Saving…');
+    const committer = makeCommitter(pieces.map(p => p.id).join(', '));
     try {
-      const res = await rebuildAndPush({ system, pieces, currentIndex: index, committer, force: selectedIds.size > 0,
-        updatedAt: new Date().toISOString().slice(0, 10) });
-      index = res.index; pending.length = 0; render();
-      setStatus(res.pushed ? `Pushed: ${res.changed.join(', ')}` : 'No changes.');
-    } catch (e) { setStatus('Push failed: ' + e.message); }
+      const res = await rebuildAndPush({ system, pieces, currentIndex: index, committer, store,
+        force: selectedIds.size > 0, updatedAt: new Date().toISOString().slice(0, 10) });
+      index = res.index; pending.length = 0;
+      res.changed.forEach(id => { if (res.pushed) unpushedIds.delete(id); else unpushedIds.add(id); });
+      render(); updateRetryBtn();
+      let msg = res.pushed ? `Pushed: ${res.changed.join(', ')}`
+              : (res.changed.length ? `Saved locally; push failed: ${res.pushError}` : 'No changes.');
+      if (res.localError) msg += ` (local save error: ${res.localError})`;
+      setStatus(msg);
+    } catch (e) { setStatus('Error: ' + e.message); }
+  };
+
+  document.getElementById('retryBtn').onclick = async () => {
+    setStatus('Retrying push…');
+    try {
+      const res = await retryPush({ system, currentIndex: index, committer: makeCommitter('retry unpushed'), store });
+      res.changed.forEach(id => unpushedIds.delete(id));
+      render(); updateRetryBtn();
+      setStatus(res.pushed ? `Pushed: ${res.changed.join(', ')}`
+              : (res.pushError ? 'Retry failed: ' + res.pushError : 'Nothing to retry.'));
+    } catch (e) { setStatus('Retry failed: ' + e.message); }
   };
 
   let renderer = null;
@@ -244,7 +274,10 @@
     document.getElementById('musicPreview').style.display = 'block';
     let detail;
     try {
-      detail = await fetch(`${getMusicResourceUrl(system)}/details/${id}.json`).then(x => x.json());
+      detail = unpushedIds.has(id)
+        ? await store.getDetail(system, id)
+        : await fetch(`${getMusicResourceUrl(system)}/details/${id}.json`).then(x => x.json());
+      if (!detail) throw new Error('detail not found');
     } catch (e) { document.getElementById('previewMsg').textContent = 'Failed to load detail.'; return; }
     let res;
     try {
@@ -267,7 +300,11 @@
   };
   document.getElementById('previewCloseBtn').onclick = () => { document.getElementById('musicPreview').style.display = 'none'; };
 
-  (async () => { try { index = await loadIndex(system); } catch (_) { index = []; } render(); })();
+  (async () => {
+    try { const lib = await loadLibrary(system, store); index = lib.index; unpushedIds = lib.unpushedIds; }
+    catch (_) { index = []; unpushedIds = new Set(); }
+    render(); updateRetryBtn();
+  })();
 </script>
 </body>
 </html>
