@@ -179,16 +179,42 @@ export function instrumentVoiceKey(name) {
   return 'synth';
 }
 
+// Public CDN of General MIDI soundfont samples (the gleitz MIDI.js / FluidR3_GM set).
+export const SOUNDFONT_BASE = 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/';
+// A sparse, central set of pitches; Tone.Sampler pitch-shifts between them (≤ a tritone).
+const SOUNDFONT_NOTES = ['C3', 'F#3', 'C4', 'F#4', 'C5'];
+
+// Pure: map a playback-voice category to a General MIDI instrument (soundfont folder name).
+export function gmInstrumentForVoice(category) {
+  switch (category) {
+    case 'guitar':  return 'acoustic_guitar_nylon';
+    case 'strings': return 'string_ensemble_1';
+    case 'organ':   return 'church_organ';
+    case 'piano':
+    case 'synth':
+    default:        return 'acoustic_grand_piano';
+  }
+}
+
+// Pure: build the { note: url } sample map for Tone.Sampler from the FluidR3_GM soundfont.
+// Keys are Tone-parseable pitches ('F#4'); the CDN filenames spell sharps with 's' ('Fs4').
+export function soundfontSampleMap(instrument, { baseUrl = SOUNDFONT_BASE, format = 'mp3', notes = SOUNDFONT_NOTES } = {}) {
+  const dir = `${baseUrl}${instrument}-${format}/`;
+  const map = {};
+  for (const n of notes) map[n] = `${dir}${n.replace('#', 's')}.${format}`;
+  return map;
+}
+
 // Browser glue: drive Tone.js from a buildSchedule() result and follow with the OSMD cursor.
 // opts.Tone defaults to the global Tone (vendored UMD). opts.getCursor returns the OSMD
 // cursor (or null) lazily so the player isn't coupled to a specific renderer instance.
 export function createMusicPlayer({ Tone, getCursor } = {}) {
   const T = Tone || (typeof globalThis !== 'undefined' ? globalThis.Tone : undefined);
   if (!T) throw new Error('Tone.js is not available');
-  // Distinct timbres per category using standard Tone voices (no samples). All are
-  // PolySynth-based so chords and overlapping voices actually sound (guitar gets a short,
-  // plucky envelope rather than the monophonic PluckSynth, which can't play polyphony).
-  function makeVoice(category) {
+  // Fallback timbres (no samples) — used offline or if the soundfont can't load. All are
+  // PolySynth-based so chords and overlapping voices sound (guitar gets a short plucky
+  // envelope; the monophonic PluckSynth can't play polyphony).
+  function makeSynthVoice(category) {
     switch (category) {
       case 'guitar': {
         const g = new T.PolySynth(T.Synth).toDestination();
@@ -200,6 +226,22 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       case 'piano':
       case 'synth':
       default:        return new T.PolySynth(T.Synth).toDestination();
+    }
+  }
+  // Sampled (SoundFont) voice for realistic timbre; falls back to the synth on load error
+  // (offline / blocked / 404) so playback always works.
+  function makeVoice(category) {
+    const urls = soundfontSampleMap(gmInstrumentForVoice(category));
+    try {
+      return new T.Sampler({
+        urls,
+        onerror: () => {
+          try { if (synth && synth.dispose) synth.dispose(); } catch (_) {}
+          synth = makeSynthVoice(category);
+        },
+      }).toDestination();
+    } catch (_) {
+      return makeSynthVoice(category);
     }
   }
   let synth = makeVoice('synth');
@@ -253,6 +295,8 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
     },
     async play() {
       await T.start();
+      // Wait for sampled-instrument buffers (resolves even if a load errored → synth fallback).
+      try { if (T.loaded) await T.loaded(); } catch (_) {}
       if (!part) buildPart();
       clearStopTimer();
       T.Transport.stop();   // reset position to 0 so part.start(0)'s events are in the future
