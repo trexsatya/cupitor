@@ -1,6 +1,6 @@
 // public/music-index.test.js
 import { encodeNoteText, primaryVoice } from './music-encoding.js';
-import { fnv1a, buildIndexEntry, splitTiers } from './music-index.js';
+import { fnv1a, buildIndexEntry, splitTiers, getSystemFromUrl, getMusicResourceUrl } from './music-index.js';
 
 const txt = 'G4# D5# D5 C5#\nB4 C5# B4 A4# G4#';
 
@@ -37,5 +37,20 @@ describe('index assembly', () => {
     expect(detail.format).toBe('note-text');
     expect(detail.source).toBe(txt);
     expect(detail.voices[0].pitch.length).toBe(9);
+  });
+});
+
+describe('system routing (mirrors ?lang=)', () => {
+  test('defaults to western when ?system is absent', () => {
+    expect(getSystemFromUrl('https://x/music.html').name).toBe('western');
+  });
+  test('reads ?system=sargam', () => {
+    expect(getSystemFromUrl('https://x/music.html?system=sargam').name).toBe('sargam');
+  });
+  test('resource url points at db/music/<system> on gh-pages', () => {
+    expect(getMusicResourceUrl('western'))
+      .toBe('https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/music/western');
+    expect(getMusicResourceUrl('sargam'))
+      .toBe('https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/music/sargam');
   });
 });
