@@ -3,6 +3,7 @@ import { decomposeChord, normExtToken } from './music-query.js';
 import { matchChordQuery } from './music-query.js';
 import { parseMelodyTokens, matchMelodyPitchClasses } from './music-query.js';
 import { matchMelodyIntervals } from './music-query.js';
+import { runQuery } from './music-query.js';
 import { findIntervalMatches } from './music_search.js';
 import { intervalsOf } from './music-encoding.js';
 
@@ -309,5 +310,50 @@ describe('matchMelodyIntervals', () => {
   });
   test('negative tolerance matches nothing', () => {
     expect(matchMelodyIntervals(['C', 'D'], contour, { pitch_tolerance: -1 })).toBeNull();
+  });
+});
+
+const entry = (id, search) => ({ id, system: 'western', search });
+
+describe('runQuery', () => {
+  const entries = [
+    entry('alpha', { chords: 'C G Am F', pitchClasses: 'C E G', contour: '4,3' }),
+    entry('beta',  { chords: 'Dm G7 C', pitchClasses: 'D F A', contour: '3,4' })
+  ];
+
+  test('chord query returns matching pieces with chord ranges', () => {
+    const res = runQuery({ type: 'chord', chords: [{ chord: 'C' }, { chord: 'G' }] }, entries);
+    expect(res.map(r => r.pieceId)).toEqual(['alpha']);
+    expect(res[0].match.kind).toBe('chord');
+    expect(res[0].match.range).toEqual([0, 1]);
+    expect(res[0].match.symbols).toEqual(['C', 'G']);
+    expect(res[0].score).toBeCloseTo(1.0);
+  });
+
+  test('melody pitch-class query (octave-agnostic)', () => {
+    const res = runQuery({ type: 'melody', notes: ['C', 'E', 'G'] }, entries);
+    expect(res.map(r => r.pieceId)).toEqual(['alpha']);
+    expect(res[0].match.kind).toBe('note');
+    expect(res[0].match.range).toEqual([0, 2]);
+  });
+
+  test('melody interval query is transposition-invariant', () => {
+    // shape +4,+3 (major then minor third) appears in alpha (C E G)
+    const res = runQuery({ type: 'melody', notes: ['C', 'E', 'G'], search_by_interval: true }, entries);
+    expect(res.map(r => r.pieceId)).toContain('alpha');
+  });
+
+  test('max_results caps output', () => {
+    const many = [entry('a', { chords: 'C G' }), entry('b', { chords: 'C G' })];
+    const res = runQuery({ type: 'chord', chords: [{ chord: 'C' }, { chord: 'G' }], max_results: 1 }, many);
+    expect(res.length).toBe(1);
+  });
+
+  test('throws on invalid query', () => {
+    expect(() => runQuery({ type: 'chord', chords: [] }, entries)).toThrow();
+  });
+
+  test('no matches returns empty array', () => {
+    expect(runQuery({ type: 'chord', chords: [{ chord: 'F#' }] }, entries)).toEqual([]);
   });
 });
