@@ -72,6 +72,8 @@ export function createMusicRenderer(container, opts = {}) {
   osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false });
   let totalMeasures = 0;
 
+  function setZoom(factor) { osmd.Zoom = factor; osmd.render(); }
+
   return {
     osmd,
     async loadDetail(detail) {
@@ -91,7 +93,7 @@ export function createMusicRenderer(container, opts = {}) {
       osmd.setOptions({ drawFromMeasureNumber: measureRange[0], drawUpToMeasureNumber: measureRange[1] });
       osmd.render();
     },
-    setZoom(factor) { osmd.Zoom = factor; osmd.render(); },
-    applyResponsiveZoom(viewportWidth) { this.setZoom(responsiveZoom(viewportWidth)); }
+    setZoom,
+    applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };
 }
