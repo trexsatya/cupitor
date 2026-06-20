@@ -2,6 +2,9 @@ import { parseQuery, validateQuery } from './music-query.js';
 import { decomposeChord, normExtToken } from './music-query.js';
 import { matchChordQuery } from './music-query.js';
 import { parseMelodyTokens, matchMelodyPitchClasses } from './music-query.js';
+import { matchMelodyIntervals } from './music-query.js';
+import { findIntervalMatches } from './music_search.js';
+import { intervalsOf } from './music-encoding.js';
 
 describe('validateQuery', () => {
   test('rejects unknown type', () => {
@@ -253,5 +256,44 @@ describe('matchMelodyPitchClasses', () => {
   });
   test('flat query spelling matches compact sharp spelling (Db -> Cs)', () => {
     expect(matchMelodyPitchClasses(['Db'], 'C Cs D')).toEqual({ start: 1, end: 1 });
+  });
+});
+
+describe('matchMelodyIntervals', () => {
+  // piece: C D E C  (midi 60 62 64 60) -> intervals [2, 2, -4]
+  const contour = intervalsOf([60, 62, 64, 60]); // [2,2,-4]
+  test('matches an ascending whole-tone pair regardless of key', () => {
+    // query G A (intervals [2]) -> should match the C->D and D->E steps
+    const m = matchMelodyIntervals(['G', 'A'], contour, { pitch_tolerance: 0 });
+    expect(m).toEqual({ start: 0, end: 1 });
+  });
+  test('matches a 3-note ascending shape', () => {
+    const m = matchMelodyIntervals(['C', 'D', 'E'], contour, { pitch_tolerance: 0 });
+    expect(m).toEqual({ start: 0, end: 2 });
+  });
+  test('wildcard frees the second interval', () => {
+    // query C . E : first interval = +2 (C->.), but "." frees both touching intervals
+    const m = matchMelodyIntervals(['C', '.', 'C'], contour, { pitch_tolerance: 0 });
+    expect(m).not.toBeNull();
+  });
+  test('pitch_tolerance widens the interval', () => {
+    // query asking +3 won't match +2 exactly, but tolerance 1 makes it match
+    expect(matchMelodyIntervals(['C', 'Eb'], contour, { pitch_tolerance: 0 })).toBeNull();
+    expect(matchMelodyIntervals(['C', 'Eb'], contour, { pitch_tolerance: 1 })).not.toBeNull();
+  });
+  test('no match returns null', () => {
+    expect(matchMelodyIntervals(['C', 'F#'], contour, { pitch_tolerance: 0 })).toBeNull(); // +6 absent
+  });
+  test('agrees with findIntervalMatches on a no-wildcard, zero-tolerance case', () => {
+    const melodyPitches = [60, 62, 64, 60];
+    const queryPitches = [67, 69, 71]; // G A B -> intervals [2,2]
+    const ref = findIntervalMatches(melodyPitches, queryPitches);
+    const mine = matchMelodyIntervals(['G', 'A', 'B'], intervalsOf(melodyPitches), { pitch_tolerance: 0 });
+    // both find the C-D-E window at note index 0
+    expect(ref.length > 0).toBe(true);
+    expect(mine).toEqual({ start: 0, end: 2 });
+  });
+  test('single-note query returns null (interval mode needs >= 2 notes)', () => {
+    expect(matchMelodyIntervals(['C'], contour, { pitch_tolerance: 0 })).toBeNull();
   });
 });
