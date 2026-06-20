@@ -143,7 +143,7 @@ describe('createMusicRenderer', () => {
   test('initialises OSMD with svg/compact options', () => {
     const osmd = fakeOsmd();
     createMusicRenderer({}, { osmdFactory: () => osmd });
-    expect(osmd.calls.find(c => c[0] === 'setOptions' && c[1].backend === 'svg')).toBeTruthy();
+    expect(osmd.calls[0]).toEqual(['setOptions', { backend: 'svg', drawingParameters: 'compacttight', drawTitle: false }]);
   });
 
   test('loadDetail loads musicxml source, renders, reports total measures', async () => {
@@ -195,6 +195,23 @@ describe('createMusicRenderer', () => {
     const osmd = fakeOsmd();
     const r = createMusicRenderer({}, { osmdFactory: () => osmd });
     r.applyResponsiveZoom(450);
+    expect(osmd.Zoom).toBeCloseTo(0.5);
+  });
+
+  test('showFull before loadDetail falls back to an open-ended window', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.showFull();
+    const opt = osmd.calls.filter(c => c[0] === 'setOptions').pop()[1];
+    expect(opt.drawFromMeasureNumber).toBe(1);
+    expect(opt.drawUpToMeasureNumber).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  test('applyResponsiveZoom works when destructured (no this-binding)', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    const { applyResponsiveZoom } = r;   // destructured — would throw if it used `this`
+    applyResponsiveZoom(450);
     expect(osmd.Zoom).toBeCloseTo(0.5);
   });
 });
