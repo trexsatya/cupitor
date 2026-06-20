@@ -30,3 +30,32 @@ export function applyYouTubeLink(entry, detail, url) {
     detail: { ...detail, meta: { ...detail.meta, youtube: url } },
   };
 }
+
+// Integration: link a YouTube URL to piece `id` and persist it. Patches the Tier-1
+// entry + Tier-2 detail, writes them to the local store first (synced:false), then
+// pushes index.json + the detail. Never rethrows a push failure (mirrors rebuildAndPush).
+export async function linkYouTubeAndPush({ system, id, url, currentIndex = [], store, committer }) {
+  const prevEntry = currentIndex.find(e => e.id === id);
+  if (!prevEntry) return { pushed: false, index: currentIndex, error: 'piece not found' };
+  const detail = await store.getDetail(system, id);
+  if (!detail) return { pushed: false, index: currentIndex, error: 'detail not found' };
+
+  const { entry, detail: patched } = applyYouTubeLink(prevEntry, detail, url);
+  const index = mergeIndex(currentIndex, [entry]);
+
+  let localError = null;
+  try { await store.putPieces(system, [{ entry, detail: patched }]); }
+  catch (e) { localError = e.message; }
+
+  const files = [
+    { path: `db/music/${system}/index.json`, getContent: () => JSON.stringify(index, null, 2) },
+    { path: `db/music/${system}/details/${id}.json`, getContent: () => JSON.stringify(patched) },
+  ];
+
+  let pushed = false, pushError = null;
+  try { await committer(files); pushed = true; }
+  catch (e) { pushError = e.message; }
+  if (pushed) { try { await store.markSynced(system, [id]); } catch (e) { if (!localError) localError = e.message; } }
+
+  return { index, pushed, pushError, localError };
+}
