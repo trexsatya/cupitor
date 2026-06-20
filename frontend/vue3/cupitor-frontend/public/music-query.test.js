@@ -174,4 +174,34 @@ describe('matchChordQuery', () => {
   test('empty piece chords -> null', () => {
     expect(matchChordQuery(Q([{ chord: 'C' }]), '')).toBeNull();
   });
+  test('backtracks past an early false start', () => {
+    // first C (idx 0) cannot reach G adjacently; second C (idx 2) can
+    const m = matchChordQuery(Q([{ chord: 'C' }, { chord: 'G' }]), 'C Am C G');
+    expect(m).not.toBeNull();
+    expect(m.start).toBe(2);
+    expect(m.end).toBe(3);
+  });
+  test('max_gap=2 allows two intervening chords', () => {
+    const two = 'C Am Dm G';   // two chords between C and G
+    expect(matchChordQuery(Q([{ chord: 'C' }, { chord: 'G' }], { max_gap: 1 }), two)).toBeNull();
+    const m = matchChordQuery(Q([{ chord: 'C' }, { chord: 'G' }], { max_gap: 2 }), two);
+    expect(m).not.toBeNull();
+    expect(m.start).toBe(0);
+    expect(m.end).toBe(3);
+  });
+  test('transpose_invariant re-anchors after a false start', () => {
+    // query shape C->G->C (interval +7 then back). Piece "F D A D": F is a false start,
+    // re-anchors on D and matches D A D.
+    const m = matchChordQuery(Q([{ chord: 'C' }, { chord: 'G' }, { chord: 'C' }], { transpose_invariant: true }), 'F D A D');
+    expect(m).not.toBeNull();
+    expect(m.symbols).toEqual(['D', 'A', 'D']);
+    expect(m.start).toBe(1);
+  });
+  test('adjacent-duplicate query reflects index collapse', () => {
+    expect(matchChordQuery(Q([{ chord: 'C' }, { chord: 'C' }]), 'C G')).toBeNull();          // collapsed away
+    const m = matchChordQuery(Q([{ chord: 'C' }, { chord: 'C' }], { max_gap: 1 }), 'C Am C'); // C ... C
+    expect(m).not.toBeNull();
+    expect(m.start).toBe(0);
+    expect(m.end).toBe(2);
+  });
 });
