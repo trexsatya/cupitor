@@ -72,12 +72,12 @@ A prerequisite tweak to M1's `encodeMusicXml` in [public/music-encoding.js](../.
   - The query sequence must appear as a **sub-sequence** of the progression: contiguous when `max_gap=0`, else up to `max_gap` intervening chords between consecutive matches.
   - `transpose_invariant=false` → roots match literally; `true` → match by root-interval shape (qualities preserved) in any key.
 - **Melody** — `search_by_interval=false`: match a window in the entry's `search.pitchClasses` where each non-`.` token equals the piece note's pitch class (octave-agnostic), `.` skips a position. Comparison is by **pitch-class number (0–11)**, so query spellings (`C#`, `Db`) and the index's compact spelling (`Cs`, …) are normalised on both sides before comparing. `search_by_interval=true`: match the entry's `search.contour` via the existing `findIntervalMatches` from [public/music_search.js](../../../public/music_search.js) (handles transposition, passing notes, repetition); `.` = a free step; `pitch_tolerance` widens interval slop.
-- **Score & output:** rank by fraction matched / closeness. Each result: `{ pieceId, system, score, matchNoteRange: [startIdx, endIdx] }`.
+- **Score & output:** rank by fraction matched / closeness. Each result: `{ pieceId, system, type, score, match }`, where `match` is `{ kind: 'note', range: [startNoteIdx, endNoteIdx] }` for melody (primary-voice note indices) or `{ kind: 'chord', range: [startChordIdx, endChordIdx], symbols: [...] }` for chords. Chords use chord-list indices (into the duplicate-collapsed `search.chords`) plus the matched symbols, because collapsed chords don't map to single note indices; Phase 2 resolves chord matches to measures via the detail's full `chordSymbol[]`.
 
 ### Execution flow
 1. `loadIndex(system)` (M1) → all Tier-1 entries (with `search.*` fields).
 2. `music-query` runs the matcher over each entry's search fields → ranked results with `matchNoteRange` (note indices in the primary voice).
-3. On selecting a result, fetch the Tier-2 `details/<id>.json`; use its primary-voice `measureIndex` to convert `matchNoteRange` → **measure range** for rendering/playback/capture.
+3. On selecting a result, fetch the Tier-2 `details/<id>.json`. For melody (`kind:'note'`), use the primary-voice `measureIndex` to convert the note range → **measure range**. For chords (`kind:'chord'`), locate `match.symbols` in the detail's full `chordSymbol[]` to derive the measure range — used for rendering/playback/capture.
 
 ## 5. Phase 2 — Rendering (`music-render.js`)
 
