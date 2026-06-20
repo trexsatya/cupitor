@@ -1,7 +1,7 @@
 // public/music-query.js
 // Pure client-side search engine over the M1 Tier-1 index (search.* fields).
 // No DOM, no fetch — all inputs are plain data.
-import { pitchClass, intervalsOf, unpackContour } from './music-encoding.js';
+import { pitchClass, unpackContour } from './music-encoding.js';
 import { allChords, normaliseChordName } from './music-reference-data.js';
 
 // ---------- query parse / validate ----------
@@ -41,6 +41,9 @@ export function parseQuery(input) {
     notes: raw.notes.slice(),
     search_by_interval: raw.search_by_interval === true,
     pitch_tolerance: Number.isFinite(raw.pitch_tolerance) ? raw.pitch_tolerance : 0,
+    // Reserved: passing-note / repetition tolerance is not yet consumed by the matchers
+    // (both use contiguous windows). Kept in the parsed shape for forward compatibility;
+    // see the spec deferrals. Phase 6 UI should not expose these until implemented.
     allow_passing: raw.allow_passing !== false,
     allow_repetition: raw.allow_repetition !== false,
     max_results: (Number.isFinite(raw.max_results) && raw.max_results > 0) ? Math.floor(raw.max_results) : undefined

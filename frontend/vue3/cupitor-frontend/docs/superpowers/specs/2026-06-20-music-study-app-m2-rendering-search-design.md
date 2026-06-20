@@ -133,6 +133,7 @@ A prerequisite tweak to M1's `encodeMusicXml` in [public/music-encoding.js](../.
 - Soundfont/sampled instruments (Tone.js synth voices for M2; samples a later upgrade).
 - Multi-piece "playlist"/practice-set playback and the Practice Log (a later milestone).
 - Automatic audio-to-score alignment (timestamps are a guess + manual edit, not detected).
+- Passing-note / repetition-tolerant melody matching. The melody matchers use contiguous windows; available flexibility is the `.` wildcard, interval (transposition-invariant) mode, and `pitch_tolerance`. The `allow_passing` / `allow_repetition` knobs are parsed and reserved but not yet consumed — deferred to a later enhancement (likely reusing `findIntervalMatches`'s repeat/skip logic). The Phase 6 UI should not expose them until then.
 
 ## 13. Resolved review items
 
