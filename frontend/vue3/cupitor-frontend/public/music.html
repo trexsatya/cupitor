@@ -243,6 +243,7 @@
   <div id="viewOptions" style="margin:.25rem 0">
     <label><input type="checkbox" id="voiceColorChk"> Color voices</label>
     <label><input type="checkbox" id="noteNameChk"> Note names</label>
+    <label><input type="checkbox" id="chordChk"> Show chords</label>
   </div>
   <div id="osmdPreview"></div>
   <div id="ytPlayer" style="display:none"></div>
@@ -557,6 +558,7 @@
   document.getElementById('previewFullBtn').onclick = () => renderer && renderer.showFull();
   document.getElementById('voiceColorChk').onchange = (e) => { if (renderer) renderer.setVoiceColors(e.target.checked); };
   document.getElementById('noteNameChk').onchange = (e) => { if (renderer) renderer.setNoteNames(e.target.checked); };
+  document.getElementById('chordChk').onchange = (e) => { if (renderer) renderer.setChords(e.target.checked); };
   document.getElementById('previewSegBtn').onclick = () => {
     const from = parseInt(document.getElementById('segFrom').value, 10);
     const to = parseInt(document.getElementById('segTo').value, 10);

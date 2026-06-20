@@ -101,6 +101,8 @@ export function createMusicRenderer(container, opts = {}) {
   let totalMeasures = 0;
   let colorVoices = false;
   let noteNames = false;
+  let chordsOn = false;
+  let loadedDetail = null;   // kept so the chord overlay can read collapsedChordSpans
 
   // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
   // No-op on a sheet without instruments (e.g. the test fake / before load).
@@ -163,11 +165,64 @@ export function createMusicRenderer(container, opts = {}) {
     svg.appendChild(layer);
   }
 
+  // First rendered notehead element within a graphical measure (or null) — anchor for chords.
+  function firstNoteheadOf(measure) {
+    for (const se of (measure && measure.staffEntries) || []) {
+      for (const gve of (se.graphicalVoiceEntries || [])) {
+        for (const gnote of (gve.notes || [])) {
+          const vf = gnote.vfnote;
+          const el = vf && vf[0] && vf[0].attrs && vf[0].attrs.el;
+          if (el && el.querySelectorAll) { const h = el.querySelectorAll('.vf-notehead'); if (h[0]) return h[0]; }
+        }
+      }
+    }
+    return null;
+  }
+
+  // Overlay the (possibly inferred) chord symbol above the first notehead of each chord
+  // span's start measure. Rebuilt every render; no-op without a rendered graphic / DOM.
+  function applyChords() {
+    if (!container || !container.querySelectorAll) return;
+    container.querySelectorAll('.chord-layer').forEach((n) => n.remove());
+    if (!chordsOn) return;
+    const measureList = osmd.graphic && osmd.graphic.measureList;
+    const svg = container.querySelector('svg');
+    if (!measureList || !measureList.forEach || !svg) return;
+    const symbolByMeasure = {};
+    collapsedChordSpans(loadedDetail || { voices: [] }).forEach((s) => {
+      if (symbolByMeasure[s.measureStart] == null) symbolByMeasure[s.measureStart] = s.symbol;
+    });
+    const layer = document.createElementNS(SVG_NS, 'g');
+    layer.setAttribute('class', 'chord-layer');
+    const labeled = new Set();
+    measureList.forEach((measures) => {
+      (measures || []).forEach((measure) => {
+        const sm = measure && measure.parentSourceMeasure;
+        const num = sm && sm.MeasureNumber;
+        if (num == null || labeled.has(num) || !symbolByMeasure[num]) return;
+        const head = firstNoteheadOf(measure);
+        if (!head || !head.getBBox) return;
+        labeled.add(num);
+        const b = head.getBBox();
+        const t = document.createElementNS(SVG_NS, 'text');
+        t.setAttribute('x', b.x);
+        t.setAttribute('y', b.y - 12);            // above the staff
+        t.setAttribute('font-size', '10');
+        t.setAttribute('font-weight', '600');
+        t.setAttribute('fill', '#1565c0');
+        t.textContent = symbolByMeasure[num];
+        layer.appendChild(t);
+      });
+    });
+    svg.appendChild(layer);
+  }
+
   // One render pass: apply model colors, render, then (re)build overlays.
   function redraw() {
     applyVoiceColors();
     osmd.render();
     applyNoteNames();
+    applyChords();
   }
 
   function setZoom(factor) { osmd.Zoom = factor; redraw(); }
@@ -178,6 +233,7 @@ export function createMusicRenderer(container, opts = {}) {
       if (!detail || detail.format !== 'musicxml' || !detail.source) {
         return { ok: false, reason: 'not-musicxml' };
       }
+      loadedDetail = detail;
       await osmd.load(detail.source);
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
       redraw();
@@ -194,6 +250,7 @@ export function createMusicRenderer(container, opts = {}) {
     setZoom,
     setVoiceColors(on) { colorVoices = !!on; redraw(); },
     setNoteNames(on) { noteNames = !!on; redraw(); },
+    setChords(on) { chordsOn = !!on; redraw(); },
     applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };
 }
