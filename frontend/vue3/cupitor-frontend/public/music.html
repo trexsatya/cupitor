@@ -221,7 +221,6 @@
     <select id="srcSel"><option value="midi">MIDI</option><option value="youtube">YouTube</option></select>
     <button id="playBtn">▶ Play</button>
     <button id="pauseBtn">⏸ Pause</button>
-    <button id="stopBtn">⏹ Stop</button>
     <label><input type="checkbox" id="loopChk"> Loop segment</label>
     <label>Tempo <input id="tempoInput" type="number" min="20" max="300" style="width:4em"></label>
     <label>Instrument
@@ -484,17 +483,23 @@
     } catch (e) { document.getElementById('transportMsg').textContent = 'YouTube error: ' + e.message; }
   }
   document.getElementById('instrSel').onchange = () => { if (player) player.setInstrument(document.getElementById('instrSel').value); };
-  document.getElementById('playBtn').onclick = () =>
+  // Two-button transport: Play always (re)starts from the segment start; Pause toggles to Resume.
+  let paused = false;
+  function updatePauseLabel() { document.getElementById('pauseBtn').textContent = paused ? '▶ Resume' : '⏸ Pause'; }
+  document.getElementById('playBtn').onclick = () => {
+    paused = false; updatePauseLabel();
     (document.getElementById('srcSel').value === 'youtube' ? playYouTube() : playMidi());
-  document.getElementById('pauseBtn').onclick = () => {
-    if (document.getElementById('srcSel').value === 'youtube') { clearYtMonitor(); if (yt) yt.pause(); }
-    else if (player) player.pause();
   };
-  document.getElementById('stopBtn').onclick = () => {
-    if (player) player.stop();
-    clearYtMonitor();
-    if (yt) yt.pause();
-    document.getElementById('transportMsg').textContent = '';
+  document.getElementById('pauseBtn').onclick = () => {
+    const isYt = document.getElementById('srcSel').value === 'youtube';
+    if (!paused) {
+      if (isYt) { if (yt) yt.pause(); } else if (player) player.pause();
+      paused = true;
+    } else {
+      if (isYt) { if (yt) yt.play(); } else if (player) player.resume();
+      paused = false;
+    }
+    updatePauseLabel();
   };
   document.getElementById('segFrom').oninput = () => {
     const f = parseInt(document.getElementById('segFrom').value, 10);   // auto-set end = start + 1
@@ -544,6 +549,7 @@
       youtube: (currentDetail.meta && currentDetail.meta.youtube) || null,
       startSeconds: Number.isFinite(startRaw) ? startRaw : null,
       endSeconds: Number.isFinite(endRaw) ? endRaw : null,
+      chord: (renderer && renderer.getSelectedChord && renderer.getSelectedChord()) || null,
       snapshot: buildSnapshot(currentDetail, [from, to]),
       category: document.getElementById('vocabCat').value.trim() || 'uncategorized',
       createdAt: (updating && currentVocabEntry.createdAt) || new Date().toISOString().slice(0, 10),
@@ -626,6 +632,8 @@
   document.getElementById('endNextBtn').onclick = () => adjustSegment('to', 1);
   document.getElementById('previewCloseBtn').onclick = () => {
     if (player) player.stop();
+    clearYtMonitor(); if (yt) yt.pause();
+    paused = false; updatePauseLabel();
     document.getElementById('musicPreview').style.display = 'none';
   };
 
@@ -732,6 +740,12 @@
     if (entry.startSeconds != null) document.getElementById('guessSec').value = entry.startSeconds;
     if (entry.endSeconds != null) document.getElementById('guessEndSec').value = entry.endSeconds;
     if (renderer) { renderer.showSegment([from, to]); renderer.highlightMeasures([from, to]); }
+    // Restore the manually-picked chord: show the overlay and pre-select that label.
+    if (entry.chord && renderer) {
+      document.getElementById('chordChk').checked = true;
+      renderer.setShowChords(true);
+      renderer.setSelectedChord(entry.chord);
+    }
     updateAddVocabLabel();
   }
   function renderVocab() {

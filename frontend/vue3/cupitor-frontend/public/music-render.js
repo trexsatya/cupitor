@@ -105,6 +105,7 @@ export function createMusicRenderer(container, opts = {}) {
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
   let noteNames = false;
   let showChords = false;        // draw stacked chord-candidate labels above each chord area
+  let selectedChord = null;      // the manually-picked "best match" chord name (persisted per vocab item)
   let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
   let shownFrom = 1;             // 1-based first measure of the currently drawn window
   let shownTo = Number.MAX_SAFE_INTEGER;   // ...and the last (chords/highlight clip to this)
@@ -263,21 +264,29 @@ export function createMusicRenderer(container, opts = {}) {
     if (!areas.length) return;
     const layer = document.createElementNS(SVG_NS, 'g');
     layer.setAttribute('class', CHORD_LAYER_CLASS);
+    let selectedNotes = null;
     areas.forEach((area) => {
       area.chords.forEach((ch, k) => {
+        const isSel = selectedChord != null && ch.name === selectedChord;
+        if (isSel) selectedNotes = ch.notes;
         const t = document.createElementNS(SVG_NS, 'text');
         t.setAttribute('x', area.x);
         t.setAttribute('y', area.top - 6 - k * 11);   // stack upward; best (k=0) nearest the notes
-        t.setAttribute('font-size', '9');
-        t.setAttribute('font-weight', '600');
-        t.setAttribute('fill', '#1565c0');
+        t.setAttribute('font-size', isSel ? '11' : '9');
+        t.setAttribute('font-weight', '700');
+        t.setAttribute('fill', isSel ? '#c62828' : '#1565c0');
+        t.setAttribute('text-decoration', isSel ? 'underline' : 'none');
         t.setAttribute('style', 'cursor:pointer');
-        t.textContent = ch.name;
-        t.addEventListener('click', () => highlightChord(ch.notes));
+        t.textContent = (isSel ? '✓ ' : '') + ch.name;
+        t.addEventListener('click', () => {
+          selectedChord = (selectedChord === ch.name) ? null : ch.name;   // toggle the manual pick
+          applyChordOverlay();
+        });
         layer.appendChild(t);
       });
     });
     svg.appendChild(layer);
+    if (selectedNotes) highlightChord(selectedNotes); else clearHighlight();
   }
 
   // Absolute 1-based measure number for the a-th measure in the rendered measureList. Trust
@@ -360,6 +369,7 @@ export function createMusicRenderer(container, opts = {}) {
       await osmd.load(detail.source);
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
       shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
+      selectedChord = null;   // a fresh piece carries no manual chord pick
       redraw();
       return { ok: true, totalMeasures };
     },
@@ -378,6 +388,10 @@ export function createMusicRenderer(container, opts = {}) {
     setNoteNames(on) { noteNames = !!on; redraw(); },
     // Toggle the in-score chord-candidate overlay (stacked labels above each chord area).
     setShowChords(on) { showChords = !!on; redraw(); },
+    // The manually-picked best-match chord name (or null) — read at vocab-save time.
+    getSelectedChord() { return selectedChord; },
+    // Pre-select a chord by name (e.g. restoring a saved vocab item) and re-draw the overlay.
+    setSelectedChord(name) { selectedChord = name || null; applyChordOverlay(); },
     // Guessed chords for the currently-rendered measures: [{ measure, name, notes:[{el,...}] }].
     getGuessedChords() { return guessChords(renderedNotesByMeasure()); },
     highlightChord,

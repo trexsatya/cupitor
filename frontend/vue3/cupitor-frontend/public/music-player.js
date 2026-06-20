@@ -350,6 +350,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       }
     },
     pause() { T.Transport.pause(); },
+    resume() { T.Transport.start(); },   // continue from the paused position (no reset to 0)
     stop,
   };
 }
