@@ -120,19 +120,35 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
 
 // Browser glue: control a linked YouTube video via the IFrame API. `container` is an
 // element or element id. opts.YT defaults to the global YT (loaded via iframe_api).
-export function createYouTubeController(container, { YT } = {}) {
+export function createYouTubeController(container, { YT, onReady } = {}) {
   const Y = YT || (typeof globalThis !== 'undefined' ? globalThis.YT : undefined);
   let player = null;
+  let ready = false;
+  const pending = [];
+  const run = (fn) => { if (ready && player) fn(); else pending.push(fn); };
+  const flush = () => { while (pending.length) { try { pending.shift()(); } catch (_) {} } };
   return {
-    load(videoId) {
+    // First call constructs the player (methods exist only after onReady, so play/seek are
+    // queued until then); later calls swap the video via loadVideoById (loads + plays).
+    load(videoId, startSeconds) {
       if (!Y || !Y.Player) throw new Error('YouTube IFrame API not loaded');
-      if (player && typeof player.cueVideoById === 'function') { player.cueVideoById(videoId); return; }
-      player = new Y.Player(container, { videoId, events: {} });
+      const start = Math.floor(startSeconds || 0);
+      if (player && typeof player.loadVideoById === 'function') {
+        player.loadVideoById({ videoId, startSeconds: start });
+        return;
+      }
+      ready = false;
+      player = new Y.Player(container, {
+        videoId,
+        playerVars: { start },
+        events: { onReady: () => { ready = true; if (onReady) { try { onReady(); } catch (_) {} } flush(); } },
+      });
     },
-    play() { if (player) player.playVideo(); },
-    pause() { if (player) player.pauseVideo(); },
-    seekTo(seconds) { if (player) player.seekTo(seconds, true); },
-    getDuration() { return player && player.getDuration ? player.getDuration() : 0; },
+    play() { run(() => player.playVideo()); },
+    pause() { run(() => player.pauseVideo()); },
+    seekTo(seconds) { run(() => player.seekTo(seconds, true)); },
+    getDuration() { return (ready && player && player.getDuration) ? player.getDuration() : 0; },
+    isReady() { return ready; },
     get raw() { return player; },
   };
 }
