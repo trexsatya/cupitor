@@ -197,6 +197,11 @@ function matchChord(pcSet) {
   return best ? best.symbol : null;
 }
 
+export function primaryVoice(doc) {
+  if (!doc.voices || !doc.voices.length) return { pitch:[],interval:[],sargam:[],duration:[],chordSymbol:[],lyric:[],measureIndex:[] };
+  return doc.voices.reduce((best, v) => (v.pitch.length > best.pitch.length ? v : best), doc.voices[0]);
+}
+
 // Fills only null chordSymbol slots with the inferred chord for that note's measure.
 export function inferChords(doc) {
   const pcByMeasure = {};
