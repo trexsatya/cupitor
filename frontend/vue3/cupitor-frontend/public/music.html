@@ -7,6 +7,8 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="/github-utils.js"></script>
     <script src="/vendor/opensheetmusicdisplay.min.js"></script>
+    <script src="/vendor/tone.js"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
     <style>
         body {
             font-family: sans-serif;
@@ -160,13 +162,24 @@
     <button id="previewCloseBtn">Close</button>
     <span id="previewMsg"></span>
   </div>
+  <div id="transport" style="margin:.5rem 0">
+    <select id="srcSel"><option value="midi">MIDI</option><option value="youtube">YouTube</option></select>
+    <button id="playBtn">▶ Play</button>
+    <button id="pauseBtn">⏸ Pause</button>
+    <button id="stopBtn">⏹ Stop</button>
+    <label><input type="checkbox" id="loopChk"> Loop segment</label>
+    <label>Tempo <input id="tempoInput" type="number" min="20" max="300" style="width:4em"></label>
+    <span id="transportMsg"></span>
+  </div>
   <div id="osmdPreview"></div>
+  <div id="ytPlayer" style="display:none"></div>
 </div>
 
 <script type="module">
   import { getSystemFromUrl, getMusicResourceUrl, loadLibrary, rebuildAndPush, retryPush } from './music-index.js';
   import { createMusicRenderer } from './music-render.js';
   import { createMusicStore } from './music-local-store.js';
+  import { buildSchedule, createMusicPlayer, createYouTubeController, parseYouTubeId } from './music-player.js';
 
   const system = getSystemFromUrl().name;
   document.getElementById('systemLabel').textContent = system;
@@ -267,6 +280,51 @@
     if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'));
     return renderer;
   }
+
+  let player = null, yt = null, currentDetail = null;
+  function ensurePlayer() {
+    if (!player) player = createMusicPlayer({ getCursor: () => (renderer && renderer.osmd ? renderer.osmd.cursor : null) });
+    return player;
+  }
+  function segmentRange() {
+    const from = parseInt(document.getElementById('segFrom').value, 10);
+    const to = parseInt(document.getElementById('segTo').value, 10);
+    return (Number.isFinite(from) && Number.isFinite(to)) ? { fromMeasure: from, toMeasure: to } : {};
+  }
+  function currentTempo() {
+    const t = parseInt(document.getElementById('tempoInput').value, 10);
+    return Number.isFinite(t) && t > 0 ? t : 90;
+  }
+  function playMidi() {
+    if (!currentDetail) return;
+    const schedule = buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...segmentRange() });
+    if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
+    const p = ensurePlayer();
+    p.setSchedule(schedule);
+    p.setLoop(document.getElementById('loopChk').checked);
+    p.play();
+    document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes`;
+  }
+  function playYouTube() {
+    const url = currentDetail && currentDetail.meta && currentDetail.meta.youtube;
+    const id = parseYouTubeId(url);
+    if (!id) { document.getElementById('transportMsg').textContent = 'No linked YouTube video.'; return; }
+    document.getElementById('ytPlayer').style.display = '';
+    if (!yt) yt = createYouTubeController('ytPlayer');
+    try { yt.load(id); yt.play(); document.getElementById('transportMsg').textContent = 'Playing YouTube'; }
+    catch (e) { document.getElementById('transportMsg').textContent = 'YouTube error: ' + e.message; }
+  }
+  document.getElementById('playBtn').onclick = () =>
+    (document.getElementById('srcSel').value === 'youtube' ? playYouTube() : playMidi());
+  document.getElementById('pauseBtn').onclick = () => {
+    if (document.getElementById('srcSel').value === 'youtube') { if (yt) yt.pause(); }
+    else if (player) player.pause();
+  };
+  document.getElementById('stopBtn').onclick = () => {
+    if (player) player.stop();
+    if (yt) yt.pause();
+    document.getElementById('transportMsg').textContent = '';
+  };
   async function openPreview(id) {
     const title = (index.find(e => e.id === id) || {}).title || id;
     document.getElementById('previewTitle').textContent = title;
@@ -284,6 +342,9 @@
       res = await ensureRenderer().loadDetail(detail);
     } catch (e) { document.getElementById('previewMsg').textContent = 'Render error: ' + e.message; return; }
     if (!res.ok) { document.getElementById('previewMsg').textContent = 'Cannot render (note-text piece).'; return; }
+    currentDetail = detail;
+    document.getElementById('tempoInput').value = (detail.meta && detail.meta.tempo) || 90;
+    if (player) player.stop();
     renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
     renderer.showFull();
     document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
@@ -298,7 +359,10 @@
     const to = parseInt(document.getElementById('segTo').value, 10);
     if (renderer && Number.isFinite(from) && Number.isFinite(to)) renderer.showSegment([from, to]);
   };
-  document.getElementById('previewCloseBtn').onclick = () => { document.getElementById('musicPreview').style.display = 'none'; };
+  document.getElementById('previewCloseBtn').onclick = () => {
+    if (player) player.stop();
+    document.getElementById('musicPreview').style.display = 'none';
+  };
 
   (async () => {
     try { const lib = await loadLibrary(system, store); index = lib.index; unpushedIds = lib.unpushedIds; }
