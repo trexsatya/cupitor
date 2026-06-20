@@ -165,3 +165,32 @@ export async function loadIndex(system) {
   if (!res.ok) return [];
   return res.json();
 }
+
+// Re-push pieces still sitting in the local store as synced:false. Pushes the full
+// current index plus one detail file per unpushed piece. Never rethrows.
+export async function retryPush({ system, currentIndex = [], committer, store }) {
+  const unpushed = await store.getUnpushed(system);
+  if (!unpushed.length) return { pushed: false, changed: [] };
+  const files = [
+    { path: `db/music/${system}/index.json`, getContent: () => JSON.stringify(currentIndex, null, 2) },
+    ...unpushed.map(({ entry, detail }) => ({
+      path: `db/music/${system}/details/${entry.id}.json`,
+      getContent: () => JSON.stringify(detail)
+    }))
+  ];
+  const ids = unpushed.map(u => u.entry.id);
+  try {
+    await committer(files);
+    await store.markSynced(system, ids);
+    return { pushed: true, changed: ids };
+  } catch (e) {
+    return { pushed: false, pushError: e.message, changed: [] };
+  }
+}
+
+// Merge the remote index with the local store for the Manager's initial render.
+export async function loadLibrary(system, store) {
+  const remote = await loadIndex(system).catch(() => []);
+  const local = await store.getEntries(system).catch(() => []);
+  return mergeLocalRemote(remote, local);
+}
