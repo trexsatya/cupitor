@@ -295,6 +295,33 @@ export function createMusicRenderer(container, opts = {}) {
     return top === Infinity ? null : { top, bottom };
   }
 
+  // Per-stave [{top,bottom}] in svg-user space (one per rendered staff/line), so a label can be
+  // placed relative to the note's OWN staff instead of the global extent across all systems.
+  function staffBoxes() {
+    const out = [];
+    container.querySelectorAll('.vf-stave').forEach((el) => {
+      if (!el.getBBox) return;
+      const b = el.getBBox();
+      const m = el.getCTM && el.getCTM();
+      const top = m ? (m.b * b.x + m.d * b.y + m.f) : b.y;
+      const bottom = m ? (m.b * b.x + m.d * (b.y + b.height) + m.f) : (b.y + b.height);
+      out.push({ top, bottom });
+    });
+    out.sort((a, b) => a.top - b.top);
+    return out;
+  }
+
+  // Index of the staff whose vertical band contains (or is nearest to) y.
+  function nearestStaffIdx(boxes, y) {
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < boxes.length; i++) {
+      const s = boxes[i];
+      const d = (y >= s.top && y <= s.bottom) ? 0 : Math.min(Math.abs(y - s.top), Math.abs(y - s.bottom));
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+
   function applyChordOverlay() {
     if (!container || !container.querySelectorAll) return;
     container.querySelectorAll('.' + CHORD_LAYER_CLASS).forEach((n) => n.remove());
@@ -313,19 +340,27 @@ export function createMusicRenderer(container, opts = {}) {
     }));
     const layer = document.createElementNS(SVG_NS, 'g');
     layer.setAttribute('class', CHORD_LAYER_CLASS);
-    // Two even rows — above the top staff line and below the bottom one — with columns
-    // alternating sides so adjacent labels never collide. A per-side min-gap de-crowds.
-    const bounds = systemBounds();
-    const aboveY = bounds ? bounds.top - 8 : 0;
-    const belowY = bounds ? bounds.bottom + 16 : 0;
-    const cols = areas.map((area) => ({ area, x: chordAnchorXY(area).x })).sort((a, b) => a.x - b.x);
-    const lastBySide = [-Infinity, -Infinity];   // last placed x for [above, below]
-    let placed = 0;
-    cols.forEach(({ area, x }) => {
-      const side = placed % 2;                    // 0 = above, 1 = below
-      if (x - lastBySide[side] < MIN_LABEL_GAP) return;   // too close on this row → skip
-      lastBySide[side] = x;
-      placed++;
+    // Place each label on an even row above/below ITS OWN staff (multi-system safe), columns
+    // alternating sides per staff so adjacent labels don't collide, with a per-row min-gap.
+    const staves = staffBoxes();
+    const fallback = systemBounds();   // used when no .vf-stave is found
+    const cols = areas
+      .map((area) => { const a = chordAnchorXY(area); return { area, x: a.x, mid: (a.top + a.bottom) / 2 }; })
+      .sort((a, b) => a.x - b.x);
+    const lastX = new Map();           // `${staffIdx}:${side}` → last placed x
+    const countPerStaff = new Map();   // staffIdx → labels placed (drives per-staff alternation)
+    cols.forEach(({ area, x, mid }) => {
+      let idx = 0, sTop = mid, sBottom = mid;
+      if (staves.length) { idx = nearestStaffIdx(staves, mid); sTop = staves[idx].top; sBottom = staves[idx].bottom; }
+      else if (fallback) { sTop = fallback.top; sBottom = fallback.bottom; }
+      const cnt = countPerStaff.get(idx) || 0;
+      const side = cnt % 2;            // 0 = above, 1 = below — alternate within each staff
+      const key = idx + ':' + side;
+      const prev = lastX.has(key) ? lastX.get(key) : -Infinity;
+      if (x - prev < MIN_LABEL_GAP) return;   // too close on this row → skip
+      lastX.set(key, x);
+      countPerStaff.set(idx, cnt + 1);
+      const aboveY = sTop - 8, belowY = sBottom + 16;
       area.chords.forEach((ch, k) => {
         const isSel = selectedChords.has(ch.name);
         const t = document.createElementNS(SVG_NS, 'text');
