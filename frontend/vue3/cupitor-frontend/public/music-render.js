@@ -57,6 +57,13 @@ export function measureRangeFromChordMatch(detail, chordRange) {
   return [start, end];
 }
 
+// Map a query result's match to a 1-based measure range, dispatching on match.kind.
+export function resolveMatchMeasures(detail, match) {
+  if (!detail || !match) return null;
+  if (match.kind === 'chord') return measureRangeFromChordMatch(detail, match.range);
+  return measureRangeFromNoteRange(detail, match.range);
+}
+
 // OSMD zoom factor from viewport width: 1.0 at >= BASELINE px, scaling down to a 0.4 floor.
 const ZOOM_BASELINE_PX = 900;
 export function responsiveZoom(viewportWidth) {
