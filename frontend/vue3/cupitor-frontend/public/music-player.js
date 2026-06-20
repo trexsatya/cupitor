@@ -273,17 +273,22 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
     disposePart();
     const cursor = getCursor && getCursor();
     if (cursor) { try { cursor.reset(); cursor.show(); } catch (_) {} }
-    // Advance the OSMD cursor once per distinct onset (not per note) so chords and
-    // overlapping voices don't over-step it.
+    // Advance the OSMD cursor once per distinct onset (not per note) so chords and overlapping
+    // voices don't over-step it. The earliest onset re-homes the cursor (reset) instead of
+    // advancing — so it lands on the first note and, crucially, snaps back to the start on
+    // every loop pass instead of staying parked at the end.
     const seenTimes = new Set();
+    const firstTime = schedule.length ? schedule[0].time : 0;
     const events = schedule.map((e) => {
       const step = !seenTimes.has(e.time);
       seenTimes.add(e.time);
-      return [e.time, { ...e, _step: step }];
+      return [e.time, { ...e, _step: step, _first: e.time === firstTime }];
     });
     part = new T.Part((time, ev) => {
       synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
-      if (cursor && ev._step) T.Draw.schedule(() => { try { cursor.next(); } catch (_) {} }, time);
+      if (cursor && ev._step) T.Draw.schedule(() => {
+        try { if (ev._first) { cursor.reset(); cursor.show(); } else cursor.next(); } catch (_) {}
+      }, time);
     }, events);
     part.loop = false;   // looping is driven by the Transport (reliable) — see play()/setLoop
     return part;
