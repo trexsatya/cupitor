@@ -3,6 +3,7 @@ import { collapsedChordSpans } from './music-render.js';
 import { measureRangeFromChordMatch } from './music-render.js';
 import { responsiveZoom } from './music-render.js';
 import { createMusicRenderer } from './music-render.js';
+import { resolveMatchMeasures } from './music-render.js';
 import { encodeMusicXml, inferChords } from './music-encoding.js';
 import { buildIndexEntry } from './music-index.js';
 import fs from 'fs';
@@ -213,5 +214,24 @@ describe('createMusicRenderer', () => {
     const { applyResponsiveZoom } = r;   // destructured — would throw if it used `this`
     applyResponsiveZoom(450);
     expect(osmd.Zoom).toBeCloseTo(0.5);
+  });
+});
+
+describe('resolveMatchMeasures', () => {
+  const detail = {
+    meta: { id: 'x', format: 'musicxml' }, format: 'musicxml',
+    voices: [{
+      pitch: [60, 62, 64, 65], interval: [], sargam: [], duration: [],
+      chordSymbol: ['C', 'C', 'G', 'G'], lyric: [], measureIndex: [1, 1, 2, 2],
+    }],
+  };
+  test('note match → measure range via note indices', () => {
+    expect(resolveMatchMeasures(detail, { kind: 'note', range: [0, 2] })).toEqual([1, 2]);
+  });
+  test('chord match → measure range via collapsed chord spans', () => {
+    expect(resolveMatchMeasures(detail, { kind: 'chord', range: [0, 1], symbols: ['C', 'G'] })).toEqual([1, 2]);
+  });
+  test('null match → null', () => {
+    expect(resolveMatchMeasures(detail, null)).toBeNull();
   });
 });
