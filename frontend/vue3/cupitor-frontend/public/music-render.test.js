@@ -300,11 +300,19 @@ describe('createMusicRenderer note names', () => {
     expect(osmd.calls.filter(c => c[0] === 'render').length).toBe(before + 1);
   });
 
-  test('setChords re-renders and does not throw without a rendered graphic', () => {
+  test('getGuessedChords / highlightChord / clearHighlight are safe without a rendered graphic', () => {
     const osmd = fakeOsmd();
     const r = createMusicRenderer({}, { osmdFactory: () => osmd });
-    const before = osmd.calls.filter(c => c[0] === 'render').length;
-    r.setChords(true);
-    expect(osmd.calls.filter(c => c[0] === 'render').length).toBe(before + 1);
+    expect(r.getGuessedChords()).toEqual([]);          // no graphic → no chords, no throw
+    expect(() => r.highlightChord([])).not.toThrow();
+    expect(() => r.clearHighlight()).not.toThrow();
+  });
+
+  test('onAfterRender is invoked after each render', () => {
+    const osmd = fakeOsmd();
+    let calls = 0;
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd, onAfterRender: () => { calls++; } });
+    r.showSegment([1, 2]);
+    expect(calls).toBeGreaterThan(0);
   });
 });

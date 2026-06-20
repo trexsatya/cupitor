@@ -2,6 +2,7 @@
 // Rendering for the music study app: pure measure-mapping helpers (TDD) +
 // a thin OSMD wrapper (injectable factory) for whole-piece / segment rendering.
 import { primaryVoice } from './music-encoding.js';
+import { guessChords } from './music-chords.js';
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -98,11 +99,10 @@ export function createMusicRenderer(container, opts = {}) {
   const factory = opts.osmdFactory || ((c) => new opensheetmusicdisplay.OpenSheetMusicDisplay(c));
   const osmd = factory(container);
   osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false });
+  const onAfterRender = opts.onAfterRender;   // called after each render (lets the UI rebuild chord chips)
   let totalMeasures = 0;
   let colorVoices = false;
   let noteNames = false;
-  let chordsOn = false;
-  let loadedDetail = null;   // kept so the chord overlay can read collapsedChordSpans
 
   // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
   // No-op on a sheet without instruments (e.g. the test fake / before load).
@@ -165,64 +165,63 @@ export function createMusicRenderer(container, opts = {}) {
     svg.appendChild(layer);
   }
 
-  // First rendered notehead element within a graphical measure (or null) — anchor for chords.
-  function firstNoteheadOf(measure) {
-    for (const se of (measure && measure.staffEntries) || []) {
-      for (const gve of (se.graphicalVoiceEntries || [])) {
-        for (const gnote of (gve.notes || [])) {
-          const vf = gnote.vfnote;
-          const el = vf && vf[0] && vf[0].attrs && vf[0].attrs.el;
-          if (el && el.querySelectorAll) { const h = el.querySelectorAll('.vf-notehead'); if (h[0]) return h[0]; }
-        }
-      }
-    }
-    return null;
+  // A VexFlow key ("c#/4") → pitch-class name ("C#"), preserving the notated accidental so
+  // it matches the key-spelled chord tones in allChords.
+  function vexKeyToPitchClass(key) {
+    if (!key || typeof key !== 'string') return null;
+    const pc = key.split('/')[0];
+    return pc ? pc[0].toUpperCase() + pc.slice(1) : null;
   }
 
-  // Overlay the (possibly inferred) chord symbol above the first notehead of each chord
-  // span's start measure. Rebuilt every render; no-op without a rendered graphic / DOM.
-  function applyChords() {
-    if (!container || !container.querySelectorAll) return;
-    container.querySelectorAll('.chord-layer').forEach((n) => n.remove());
-    if (!chordsOn) return;
+  // Walk the rendered SVG → { measureNumber: [{ name, left, el }] }, where `el` is the
+  // notehead group element (so chord chips can highlight the notes that formed them).
+  function renderedNotesByMeasure() {
+    const byMeasure = {};
     const measureList = osmd.graphic && osmd.graphic.measureList;
-    const svg = container.querySelector('svg');
-    if (!measureList || !measureList.forEach || !svg) return;
-    const symbolByMeasure = {};
-    collapsedChordSpans(loadedDetail || { voices: [] }).forEach((s) => {
-      if (symbolByMeasure[s.measureStart] == null) symbolByMeasure[s.measureStart] = s.symbol;
-    });
-    const layer = document.createElementNS(SVG_NS, 'g');
-    layer.setAttribute('class', 'chord-layer');
-    const labeled = new Set();
+    if (!measureList || !measureList.forEach) return byMeasure;
     measureList.forEach((measures) => {
       (measures || []).forEach((measure) => {
         const sm = measure && measure.parentSourceMeasure;
         const num = sm && sm.MeasureNumber;
-        if (num == null || labeled.has(num) || !symbolByMeasure[num]) return;
-        const head = firstNoteheadOf(measure);
-        if (!head || !head.getBBox) return;
-        labeled.add(num);
-        const b = head.getBBox();
-        const t = document.createElementNS(SVG_NS, 'text');
-        t.setAttribute('x', b.x);
-        t.setAttribute('y', b.y - 12);            // above the staff
-        t.setAttribute('font-size', '10');
-        t.setAttribute('font-weight', '600');
-        t.setAttribute('fill', '#1565c0');
-        t.textContent = symbolByMeasure[num];
-        layer.appendChild(t);
+        if (num == null) return;
+        ((measure.staffEntries) || []).forEach((se) => {
+          (se.graphicalVoiceEntries || []).forEach((gve) => {
+            (gve.notes || []).forEach((gnote) => {
+              const vf = gnote.vfnote;
+              const root = vf && vf[0] && vf[0].attrs && vf[0].attrs.el;
+              if (!root || !root.querySelectorAll) return;
+              const idx = gnote.vfnoteIndex || 0;
+              const heads = root.querySelectorAll('.vf-notehead');
+              const el = heads[idx] || heads[0];
+              const name = vexKeyToPitchClass(vf[0].keys && vf[0].keys[idx]);
+              if (!el || !name) return;
+              const b = el.getBBox ? el.getBBox() : { x: 0 };
+              (byMeasure[num] = byMeasure[num] || []).push({ name, left: b.x, el });
+            });
+          });
+        });
       });
     });
-    svg.appendChild(layer);
+    return byMeasure;
   }
 
-  // One render pass: apply model colors, render, then (re)build overlays.
+  // Restore any notehead paths recolored by a previous chord highlight.
+  function clearHighlight() {
+    if (!container || !container.querySelectorAll) return;
+    container.querySelectorAll('path[data-chord-orig]').forEach((p) => {
+      p.setAttribute('fill', p.getAttribute('data-chord-orig'));
+      p.removeAttribute('data-chord-orig');
+    });
+  }
+
+  // One render pass: apply model colors, render, then (re)build the note-name overlay and
+  // notify the UI (which rebuilds chord chips against the fresh render).
   function redraw() {
+    clearHighlight();
     applyVoiceColors();
     osmd.render();
     applyNoteNames();
-    applyChords();
+    if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
   function setZoom(factor) { osmd.Zoom = factor; redraw(); }
@@ -233,7 +232,6 @@ export function createMusicRenderer(container, opts = {}) {
       if (!detail || detail.format !== 'musicxml' || !detail.source) {
         return { ok: false, reason: 'not-musicxml' };
       }
-      loadedDetail = detail;
       await osmd.load(detail.source);
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
       redraw();
@@ -250,7 +248,21 @@ export function createMusicRenderer(container, opts = {}) {
     setZoom,
     setVoiceColors(on) { colorVoices = !!on; redraw(); },
     setNoteNames(on) { noteNames = !!on; redraw(); },
-    setChords(on) { chordsOn = !!on; redraw(); },
+    // Guessed chords for the currently-rendered measures: [{ measure, name, notes:[{el,...}] }].
+    getGuessedChords() { return guessChords(renderedNotesByMeasure()); },
+    // Highlight (recolor) the noteheads that formed a chord; replaces any prior highlight.
+    highlightChord(notes) {
+      clearHighlight();
+      (notes || []).forEach((nt) => {
+        const el = nt && nt.el;
+        if (!el || !el.querySelectorAll) return;
+        el.querySelectorAll('path').forEach((p) => {
+          if (!p.hasAttribute('data-chord-orig')) p.setAttribute('data-chord-orig', p.getAttribute('fill') || '');
+          p.setAttribute('fill', '#e8590c');
+        });
+      });
+    },
+    clearHighlight,
     applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };
 }

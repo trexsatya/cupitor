@@ -209,6 +209,8 @@
       <input id="segTo" type="number" min="1" style="width:4em" placeholder="to">
     </label>
     <button id="previewSegBtn">Show segment</button>
+    <button id="segPrevBtn" title="show one fewer measure">◀ Prev</button>
+    <button id="segNextBtn" title="show one more measure">Next ▶</button>
     <button id="previewCloseBtn">Close</button>
     <span id="previewMsg"></span>
   </div>
@@ -245,6 +247,7 @@
     <label><input type="checkbox" id="noteNameChk"> Note names</label>
     <label><input type="checkbox" id="chordChk"> Show chords</label>
   </div>
+  <div id="chordChips" style="margin:.25rem 0"></div>
   <div id="osmdPreview"></div>
   <div id="ytPlayer" style="display:none"></div>
 </div>
@@ -356,9 +359,25 @@
   };
 
   let renderer = null;
+  let totalMeasures = 0;
   function ensureRenderer() {
-    if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'));
+    if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'), { onAfterRender: refreshChords });
     return renderer;
+  }
+  // Rebuild the clickable chord chips against the freshly-rendered measures (called after
+  // every render via onAfterRender). Each chip highlights the notes that formed its chord.
+  function refreshChords() {
+    const box = document.getElementById('chordChips');
+    if (!box) return;
+    box.textContent = '';
+    if (!renderer || !document.getElementById('chordChk').checked) { if (renderer) renderer.clearHighlight(); return; }
+    renderer.getGuessedChords().forEach((ch) => {
+      const b = document.createElement('button');
+      b.textContent = `m${ch.measure}: ${ch.name}`;
+      b.style.cssText = 'margin:2px;padding:2px 6px;cursor:pointer;border:1px solid #ccc;border-radius:6px;background:#fff';
+      b.onclick = () => renderer.highlightChord(ch.notes);
+      box.appendChild(b);
+    });
   }
 
   let player = null, yt = null, currentDetail = null;
@@ -541,6 +560,7 @@
     if (!res.ok) { document.getElementById('previewMsg').textContent = 'Cannot render (note-text piece).'; return; }
     currentDetail = detail;
     currentPreviewId = id;
+    totalMeasures = res.totalMeasures || 0;
     document.getElementById('instrSel').value = instrumentVoiceKey(detail.meta && detail.meta.instrument);
     if (player) player.setInstrument(document.getElementById('instrSel').value);
     document.getElementById('ytUrl').value = (detail.meta && detail.meta.youtube) || '';
@@ -558,12 +578,26 @@
   document.getElementById('previewFullBtn').onclick = () => renderer && renderer.showFull();
   document.getElementById('voiceColorChk').onchange = (e) => { if (renderer) renderer.setVoiceColors(e.target.checked); };
   document.getElementById('noteNameChk').onchange = (e) => { if (renderer) renderer.setNoteNames(e.target.checked); };
-  document.getElementById('chordChk').onchange = (e) => { if (renderer) renderer.setChords(e.target.checked); };
+  document.getElementById('chordChk').onchange = () => refreshChords();
   document.getElementById('previewSegBtn').onclick = () => {
     const from = parseInt(document.getElementById('segFrom').value, 10);
     const to = parseInt(document.getElementById('segTo').value, 10);
     if (renderer && Number.isFinite(from) && Number.isFinite(to)) renderer.showSegment([from, to]);
   };
+  // Prev/Next extend the shown window: Next adds a measure to the end, Prev removes one.
+  function stepSegment(delta) {
+    if (!renderer) return;
+    let from = parseInt(document.getElementById('segFrom').value, 10);
+    let to = parseInt(document.getElementById('segTo').value, 10);
+    if (!Number.isFinite(from)) from = 1;
+    if (!Number.isFinite(to)) to = from;
+    to = Math.max(from, Math.min(totalMeasures || to + 1, to + delta));
+    document.getElementById('segFrom').value = from;
+    document.getElementById('segTo').value = to;
+    renderer.showSegment([from, to]);
+  }
+  document.getElementById('segNextBtn').onclick = () => stepSegment(1);
+  document.getElementById('segPrevBtn').onclick = () => stepSegment(-1);
   document.getElementById('previewCloseBtn').onclick = () => {
     if (player) player.stop();
     document.getElementById('musicPreview').style.display = 'none';
