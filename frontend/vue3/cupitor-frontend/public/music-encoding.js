@@ -103,6 +103,10 @@ export function encodeMusicXml(xmlString, meta = {}) {
   const time = (beats && beatType) ? `${beats}/${beatType}` : null;
   const instrument = $xml.find('instrument-name').first().text() ||
                      $xml.find('part-name').first().text() || null;
+  const tempoAttr = $xml.find('sound[tempo]').first().attr('tempo');
+  const tempo = (tempoAttr != null && tempoAttr !== '' && !Number.isNaN(parseFloat(tempoAttr)))
+    ? parseFloat(tempoAttr)
+    : null;
 
   // Harmony per measure (M1: explicit <harmony> only). Index by measure number.
   const harmonyByMeasure = {};
@@ -159,7 +163,7 @@ export function encodeMusicXml(xmlString, meta = {}) {
       id: meta.id || null, title: meta.title || meta.id || null,
       system: meta.system || 'western', format: 'musicxml',
       sourceUrl: meta.sourceUrl || null, youtube: meta.youtube || null,
-      key, time, tempo: null, instrument
+      key, time, tempo, instrument
     },
     voices: voices.length ? voices : [{ pitch:[],interval:[],sargam:[],duration:[],chordSymbol:[],lyric:[],measureIndex:[] }]
   };

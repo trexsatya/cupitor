@@ -124,6 +124,42 @@ describe('inferChords (pure, per-measure)', () => {
   });
 });
 
+// --- Phase 0: tempo parsing (needs jQuery global for the MusicXML parse) ---
+describe('encodeMusicXml tempo parsing', () => {
+  beforeAll(() => { global.$ = global.jQuery = require('jquery'); });
+
+  const xmlWith = (soundEl) => `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Guitar</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time></attributes>
+      ${soundEl}
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+  </part>
+</score-partwise>`;
+
+  test('reads <sound tempo> into meta.tempo as a number', () => {
+    const { encodeMusicXml } = require('./music-encoding.js');
+    const doc = encodeMusicXml(xmlWith('<direction><sound tempo="120"/></direction>'));
+    expect(doc.meta.tempo).toBe(120);
+  });
+
+  test('parses fractional tempo', () => {
+    const { encodeMusicXml } = require('./music-encoding.js');
+    const doc = encodeMusicXml(xmlWith('<direction><sound tempo="42.5"/></direction>'));
+    expect(doc.meta.tempo).toBe(42.5);
+  });
+
+  test('meta.tempo is null when no <sound tempo> present', () => {
+    const { encodeMusicXml } = require('./music-encoding.js');
+    const doc = encodeMusicXml(xmlWith(''));
+    expect(doc.meta.tempo).toBeNull();
+  });
+});
+
 describe('robustness: unknown/edge keys', () => {
   test('toSargam returns null (does not throw) for an unknown key', () => {
     expect(toSargam('C', 'Zz')).toBe(null);
