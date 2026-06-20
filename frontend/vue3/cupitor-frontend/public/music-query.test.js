@@ -1,5 +1,6 @@
 import { parseQuery, validateQuery } from './music-query.js';
 import { decomposeChord, normExtToken } from './music-query.js';
+import { matchChordQuery } from './music-query.js';
 
 describe('validateQuery', () => {
   test('rejects unknown type', () => {
@@ -123,5 +124,54 @@ describe('normExtToken', () => {
     expect(normExtToken('maj7')).toBe('maj7');
     expect(normExtToken('dom7')).toBe('7');
     expect(normExtToken('7')).toBe('7');
+  });
+});
+
+const Q = (chords, extra = {}) => ({ type: 'chord', chords, strict_extensions: false, max_gap: 0, transpose_invariant: false, ...extra });
+
+describe('matchChordQuery', () => {
+  test('contiguous match returns the chord range', () => {
+    const m = matchChordQuery(Q([{ chord: 'C' }, { chord: 'G' }]), 'Am C G F');
+    expect(m).not.toBeNull();
+    expect(m.symbols).toEqual(['C', 'G']);
+    expect(m.start).toBe(1);
+    expect(m.end).toBe(2);
+  });
+  test('no contiguous match when chords are separated and max_gap=0', () => {
+    expect(matchChordQuery(Q([{ chord: 'C' }, { chord: 'G' }]), 'C Am G')).toBeNull();
+  });
+  test('max_gap allows intervening chords', () => {
+    const m = matchChordQuery(Q([{ chord: 'C' }, { chord: 'G' }], { max_gap: 1 }), 'C Am G');
+    expect(m).not.toBeNull();
+    expect(m.start).toBe(0);
+    expect(m.end).toBe(2);
+  });
+  test('extension tolerated by default: query C matches piece CM7', () => {
+    expect(matchChordQuery(Q([{ chord: 'C' }]), 'CM7 G')).not.toBeNull();
+  });
+  test('strict_extensions rejects unlisted extension', () => {
+    const strict = Q([{ chord: 'C', extensions_allowed: [] }], { strict_extensions: true });
+    expect(matchChordQuery(strict, 'CM7 G')).toBeNull();           // CM7 has maj7, not allowed
+    expect(matchChordQuery(strict, 'C G')).not.toBeNull();         // plain triad ok
+  });
+  test('strict_extensions accepts a listed extension', () => {
+    const strict = Q([{ chord: 'G', extensions_allowed: ['7'] }], { strict_extensions: true });
+    expect(matchChordQuery(strict, 'C G7')).not.toBeNull();
+  });
+  test('quality must match: query Am does not match piece A', () => {
+    expect(matchChordQuery(Q([{ chord: 'Am' }]), 'A C')).toBeNull();
+  });
+  test('transpose_invariant matches the same shape in another key', () => {
+    // C -> G is +7; D -> A is also +7, same qualities (maj, maj)
+    const m = matchChordQuery(Q([{ chord: 'C' }, { chord: 'G' }], { transpose_invariant: true }), 'D A E');
+    expect(m).not.toBeNull();
+    expect(m.symbols).toEqual(['D', 'A']);
+  });
+  test('transpose_invariant rejects a different shape', () => {
+    // query interval C->G is +7; piece D->F is +3, no match
+    expect(matchChordQuery(Q([{ chord: 'C' }, { chord: 'G' }], { transpose_invariant: true }), 'D F')).toBeNull();
+  });
+  test('empty piece chords -> null', () => {
+    expect(matchChordQuery(Q([{ chord: 'C' }]), '')).toBeNull();
   });
 });
