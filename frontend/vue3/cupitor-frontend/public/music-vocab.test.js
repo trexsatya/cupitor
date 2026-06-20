@@ -23,3 +23,34 @@ describe('buildSnapshot', () => {
     expect(buildSnapshot({ voices: [] }, [1, 2])).toEqual({ pitches: [], chords: [] });
   });
 });
+
+describe('buildVocabEntry', () => {
+  test('assembles a categorized entry with id = pieceId_start_end and the given fields', () => {
+    const entry = buildVocabEntry({
+      pieceId: 'chopin op9', system: 'western', measureRange: [5, 8],
+      youtube: 'https://youtu.be/abc', startSeconds: 42.5,
+      snapshot: { pitches: [60, 62], chords: ['C'] }, category: 'cadences', createdAt: '2026-06-20',
+    });
+    expect(entry).toEqual({
+      id: 'chopin_op9_5_8',
+      category: 'cadences',
+      pieceId: 'chopin op9',
+      system: 'western',
+      measureStart: 5,
+      measureEnd: 8,
+      youtube: 'https://youtu.be/abc',
+      startSeconds: 42.5,
+      snapshot: { pitches: [60, 62], chords: ['C'] },
+      createdAt: '2026-06-20',
+    });
+  });
+
+  test('defaults: category=uncategorized, youtube/startSeconds null, empty snapshot', () => {
+    const entry = buildVocabEntry({ pieceId: 'p', system: 'sargam', measureRange: [1, 1], createdAt: '2026-06-20' });
+    expect(entry.category).toBe('uncategorized');
+    expect(entry.youtube).toBeNull();
+    expect(entry.startSeconds).toBeNull();
+    expect(entry.snapshot).toEqual({ pitches: [], chords: [] });
+    expect(entry.id).toBe('p_1_1');
+  });
+});
