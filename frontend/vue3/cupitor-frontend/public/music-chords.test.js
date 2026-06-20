@@ -51,6 +51,15 @@ describe('guessChords (flat, per-measure, de-duplicated)', () => {
     expect(m2).toEqual(['Am']);
     expect(out[0].notes.length).toBeGreaterThanOrEqual(3); // contributing notes preserved for highlighting
   });
+
+  test('a scale-rich measure is capped, not flooded with every diatonic chord', () => {
+    // A full diatonic scale spread across onsets matches most of the diatonic chord family;
+    // the per-measure cap must keep the chip count sane (real dictionary).
+    const byMeasure = { 1: ['C', 'D', 'E', 'F', 'G', 'A', 'B'].map((name, i) => n(name, i * 10)) };
+    const out = guessChords(byMeasure);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.length).toBeLessThanOrEqual(3);
+  });
 });
 
 describe('integration with the real chord dictionary', () => {
