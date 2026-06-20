@@ -1,4 +1,5 @@
 import { parseQuery, validateQuery } from './music-query.js';
+import { decomposeChord, normExtToken } from './music-query.js';
 
 describe('validateQuery', () => {
   test('rejects unknown type', () => {
@@ -53,5 +54,61 @@ describe('parseQuery', () => {
   test('coerces a non-array extensions_allowed to []', () => {
     const q = parseQuery({ type: 'chord', chords: [{ chord: 'G', extensions_allowed: '7' }] });
     expect(q.chords[0].extensions_allowed).toEqual([]);
+  });
+});
+
+describe('decomposeChord', () => {
+  const pc = { C: 0, G: 7, A: 9 };
+  test('plain major triad', () => {
+    const d = decomposeChord('C');
+    expect(d.rootPc).toBe(pc.C);
+    expect(d.quality).toBe('maj');
+    expect([...d.ext]).toEqual([]);
+  });
+  test('minor triad spelled with m', () => {
+    const d = decomposeChord('Am');
+    expect(d.rootPc).toBe(pc.A);
+    expect(d.quality).toBe('min');
+  });
+  test('dominant seventh', () => {
+    const d = decomposeChord('G7');
+    expect(d.rootPc).toBe(pc.G);
+    expect(d.quality).toBe('maj');
+    expect(d.ext.has('7')).toBe(true);
+  });
+  test('major seventh normalises to M7', () => {
+    const d = decomposeChord('CM7');
+    expect(d.quality).toBe('maj');
+    expect(d.ext.has('maj7')).toBe(true);
+  });
+  test('diminished spelled with o', () => {
+    expect(decomposeChord('Co').quality).toBe('dim');
+  });
+  test('augmented spelled with +', () => {
+    expect(decomposeChord('C+').quality).toBe('aug');
+  });
+  test('sharp root parses', () => {
+    expect(decomposeChord('F#m').rootPc).toBe(pitchClassOf('F#'));
+  });
+  test('unknown symbol falls back to root + quality', () => {
+    const d = decomposeChord('Dm13');
+    expect(d.rootPc).toBe(pitchClassOf('D'));
+    expect(d.quality).toBe('min');
+  });
+});
+
+function pitchClassOf(name) {
+  const map = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
+  return map[name];
+}
+
+describe('normExtToken', () => {
+  test('aliases map to canonical tokens', () => {
+    expect(normExtToken('+9')).toBe('add9');
+    expect(normExtToken('add9')).toBe('add9');
+    expect(normExtToken('M7')).toBe('maj7');
+    expect(normExtToken('maj7')).toBe('maj7');
+    expect(normExtToken('dom7')).toBe('7');
+    expect(normExtToken('7')).toBe('7');
   });
 });
