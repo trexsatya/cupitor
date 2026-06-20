@@ -239,6 +239,10 @@
     <button id="addVocabBtn">Add to vocab</button>
     <span id="mediaMsg"></span>
   </div>
+  <div id="viewOptions" style="margin:.25rem 0">
+    <label><input type="checkbox" id="voiceColorChk"> Color voices</label>
+    <label><input type="checkbox" id="noteNameChk"> Note names</label>
+  </div>
   <div id="osmdPreview"></div>
   <div id="ytPlayer" style="display:none"></div>
 </div>
@@ -500,6 +504,8 @@
     if (btn) { ev.preventDefault(); openPreview(btn.dataset.id); }
   });
   document.getElementById('previewFullBtn').onclick = () => renderer && renderer.showFull();
+  document.getElementById('voiceColorChk').onchange = (e) => { if (renderer) renderer.setVoiceColors(e.target.checked); };
+  document.getElementById('noteNameChk').onchange = (e) => { if (renderer) renderer.setNoteNames(e.target.checked); };
   document.getElementById('previewSegBtn').onclick = () => {
     const from = parseInt(document.getElementById('segFrom').value, 10);
     const to = parseInt(document.getElementById('segTo').value, 10);
