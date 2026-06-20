@@ -28,7 +28,7 @@ describe('buildVocabEntry', () => {
   test('assembles a categorized entry with id = pieceId_start_end and the given fields', () => {
     const entry = buildVocabEntry({
       pieceId: 'chopin op9', system: 'western', measureRange: [5, 8],
-      youtube: 'https://youtu.be/abc', startSeconds: 42.5, endSeconds: 55.0, chord: 'Cmaj',
+      youtube: 'https://youtu.be/abc', startSeconds: 42.5, endSeconds: 55.0, chords: ['Cmaj', 'Am'],
       snapshot: { pitches: [60, 62], chords: ['C'] }, category: 'cadences', createdAt: '2026-06-20',
     });
     expect(entry).toEqual({
@@ -41,7 +41,7 @@ describe('buildVocabEntry', () => {
       youtube: 'https://youtu.be/abc',
       startSeconds: 42.5,
       endSeconds: 55.0,
-      chord: 'Cmaj',
+      chords: ['Cmaj', 'Am'],
       snapshot: { pitches: [60, 62], chords: ['C'] },
       createdAt: '2026-06-20',
     });
@@ -53,7 +53,7 @@ describe('buildVocabEntry', () => {
     expect(entry.youtube).toBeNull();
     expect(entry.startSeconds).toBeNull();
     expect(entry.endSeconds).toBeNull();
-    expect(entry.chord).toBeNull();
+    expect(entry.chords).toEqual([]);
     expect(entry.snapshot).toEqual({ pitches: [], chords: [] });
     expect(entry.id).toBe('p_1_1');
   });

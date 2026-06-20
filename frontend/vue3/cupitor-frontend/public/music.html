@@ -362,8 +362,22 @@
   let renderer = null;
   let totalMeasures = 0;
   function ensureRenderer() {
-    if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'));
+    if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'), { onChordSelect: syncVocabChords });
     return renderer;
+  }
+  // Auto-persist chord picks while a saved vocab item is on screen (push debounced to coalesce
+  // rapid toggles). No-op when capturing a fresh segment (use Add/update to vocab for that).
+  let chordSaveTimer = null;
+  function syncVocabChords(names) {
+    if (!currentVocabEntry) return;
+    currentVocabEntry.chords = names || [];
+    vocab = upsertVocab(vocab, currentVocabEntry);
+    renderVocab();
+    setMediaMsg('Chords updated', 'ok');
+    if (chordSaveTimer) clearTimeout(chordSaveTimer);
+    chordSaveTimer = setTimeout(() => {
+      saveVocabAndPush({ system, vocab, store, committer: makeCommitter(`vocab ${currentVocabEntry.id}`) });
+    }, 800);
   }
 
   let player = null, yt = null, currentDetail = null, currentVocabEntry = null;
@@ -549,7 +563,7 @@
       youtube: (currentDetail.meta && currentDetail.meta.youtube) || null,
       startSeconds: Number.isFinite(startRaw) ? startRaw : null,
       endSeconds: Number.isFinite(endRaw) ? endRaw : null,
-      chord: (renderer && renderer.getSelectedChord && renderer.getSelectedChord()) || null,
+      chords: (renderer && renderer.getSelectedChords && renderer.getSelectedChords()) || [],
       snapshot: buildSnapshot(currentDetail, [from, to]),
       category: document.getElementById('vocabCat').value.trim() || 'uncategorized',
       createdAt: (updating && currentVocabEntry.createdAt) || new Date().toISOString().slice(0, 10),
@@ -740,11 +754,12 @@
     if (entry.startSeconds != null) document.getElementById('guessSec').value = entry.startSeconds;
     if (entry.endSeconds != null) document.getElementById('guessEndSec').value = entry.endSeconds;
     if (renderer) { renderer.showSegment([from, to]); renderer.highlightMeasures([from, to]); }
-    // Restore the manually-picked chord: show the overlay and pre-select that label.
-    if (entry.chord && renderer) {
+    // Restore the manually-picked chords: show the overlay and pre-select those labels.
+    const savedChords = entry.chords || (entry.chord ? [entry.chord] : []);   // back-compat with old single-chord entries
+    if (savedChords.length && renderer) {
       document.getElementById('chordChk').checked = true;
       renderer.setShowChords(true);
-      renderer.setSelectedChord(entry.chord);
+      renderer.setSelectedChords(savedChords);
     }
     updateAddVocabLabel();
   }
