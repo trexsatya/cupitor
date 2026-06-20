@@ -27,8 +27,18 @@ export function matchingChords(notes, chordsToScan = allChords) {
   return matches;
 }
 
+// Pick the single best match for a window: the chord that explains the most notes, breaking
+// ties toward the simpler (fewer-tone) chord. Without this every subset/superset that fits a
+// scale-rich window is emitted, flooding the result.
+function pickBestChord(matches) {
+  return matches.slice().sort((a, b) =>
+    (b.notes.length - a.notes.length) || (a.chordTones.length - b.chordTones.length)
+  )[0];
+}
+
 // Pure: chords found within one measure's notes. Each note is { name, left, ... }; `left`
-// (x-position) ranks notes into onset steps. Slides a 2-step window (matching the original).
+// (x-position) ranks notes into onset steps. Slides a 2-step window (matching the original)
+// and records only the single best chord per matched window.
 export function guessChordsForMeasure(notes, chordsToScan = allChords) {
   if (!notes || !notes.length) return [];
   const xs = [...new Set(notes.map((n) => n.left))].sort((a, b) => a - b);
@@ -39,27 +49,37 @@ export function guessChordsForMeasure(notes, chordsToScan = allChords) {
   while (start < steps.length) {
     scanned = scanned.concat(steps.slice(start, start + 2).flat());
     const matches = matchingChords(scanned, chordsToScan);
-    if (matches.length) { out.push({ range: [start, start + 2], notes: scanned, chords: matches }); scanned = []; }
+    if (matches.length) {
+      const best = pickBestChord(matches);
+      out.push({ range: [start, start + 2], notes: best.notes, chords: [best] });
+      scanned = [];
+    }
     start += 1;
   }
   return out;
 }
 
-// Pure: flat, per-measure de-duplicated chord list. `notesByMeasure` maps a measure number
-// to its notes. Returns [{ measure, name, notes }] — `notes` are the contributing note
-// objects (which carry whatever ref the caller attached, e.g. a notehead element).
-export function guessChords(notesByMeasure, chordsToScan = allChords) {
+// Pure: flat, per-measure chord list, ranked + capped. `notesByMeasure` maps a measure number
+// to its notes. For each measure we keep each distinct chord once (with its richest set of
+// contributing notes) and return only the best `maxPerMeasure` by coverage — without the cap a
+// scale-like measure matches most of the diatonic family and floods the UI with chips.
+// Returns [{ measure, name, notes }]; `notes` are the contributing note objects (which carry
+// whatever ref the caller attached, e.g. a notehead element, for highlighting).
+export function guessChords(notesByMeasure, chordsToScan = allChords, { maxPerMeasure = 3 } = {}) {
   const result = [];
   Object.keys(notesByMeasure).forEach((mk) => {
     const measure = Number(mk);
-    const seen = new Set();
+    const byName = new Map();
     guessChordsForMeasure(notesByMeasure[mk], chordsToScan).forEach((g) => {
       g.chords.forEach((c) => {
-        if (seen.has(c.name)) return;
-        seen.add(c.name);
-        result.push({ measure, name: c.name, notes: c.notes });
+        const prev = byName.get(c.name);
+        if (!prev || c.notes.length > prev.notes.length) byName.set(c.name, c);
       });
     });
+    [...byName.values()]
+      .sort((a, b) => (b.notes.length - a.notes.length) || (a.chordTones.length - b.chordTones.length))
+      .slice(0, maxPerMeasure)
+      .forEach((c) => result.push({ measure, name: c.name, notes: c.notes }));
   });
   return result;
 }
