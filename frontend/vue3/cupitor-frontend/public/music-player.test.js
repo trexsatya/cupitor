@@ -53,3 +53,18 @@ describe('buildSchedule', () => {
     expect(s.map(e => e.midi)).toEqual([62, 64, 65]);
   });
 });
+
+describe('parseYouTubeId', () => {
+  test('extracts the 11-char id from common URL shapes', () => {
+    expect(parseYouTubeId('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
+    expect(parseYouTubeId('https://youtu.be/dQw4w9WgXcQ?t=42')).toBe('dQw4w9WgXcQ');
+    expect(parseYouTubeId('https://www.youtube.com/embed/dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
+    expect(parseYouTubeId('https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=xyz')).toBe('dQw4w9WgXcQ');
+  });
+
+  test('returns null for non-YouTube or id-less input', () => {
+    expect(parseYouTubeId('https://example.com/video')).toBeNull();
+    expect(parseYouTubeId('')).toBeNull();
+    expect(parseYouTubeId(null)).toBeNull();
+  });
+});

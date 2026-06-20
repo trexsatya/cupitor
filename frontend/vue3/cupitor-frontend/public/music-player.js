@@ -34,3 +34,15 @@ export function buildSchedule(voices, opts = {}) {
   }
   return out;
 }
+
+// Pure: extract a YouTube video id from watch / youtu.be / embed / music URLs. Null if none.
+export function parseYouTubeId(url) {
+  if (!url || typeof url !== 'string') return null;
+  let m = url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+  if (m) return m[1];
+  m = url.match(/youtube\.com\/embed\/([A-Za-z0-9_-]{11})/);
+  if (m) return m[1];
+  m = url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+  if (m) return m[1];
+  return null;
+}
