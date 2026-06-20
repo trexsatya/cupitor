@@ -96,6 +96,21 @@ describe('measureRangeFromChordMatch', () => {
   test('returns null when no chords', () => {
     expect(measureRangeFromChordMatch({ voices: [{ chordSymbol: [], measureIndex: [] }] }, [0, 0])).toBeNull();
   });
+  test('multi-voice: returns a non-inverted covering range (regression)', () => {
+    // voice 2 measures are not globally monotonic vs voice 1; the old endpoint-only
+    // logic returned an inverted/shrunk [1,2]. Covering min/max must give [1,3].
+    const d = { voices: [
+      { chordSymbol: ['C', 'C', 'G', 'Am'], measureIndex: [1, 1, 2, 3], pitch: [1, 2, 3, 4], interval: [], sargam: [], duration: [], lyric: [] },
+      { chordSymbol: ['Am', 'F'],           measureIndex: [1, 2],       pitch: [9, 9],       interval: [], sargam: [], duration: [], lyric: [] }
+    ]};
+    const r = measureRangeFromChordMatch(d, [0, 3]);
+    expect(r[0]).toBeLessThanOrEqual(r[1]);   // never inverted
+    expect(r).toEqual([1, 3]);
+  });
+  test('missing range args return null (no throw)', () => {
+    const d = { voices: [{ chordSymbol: ['C'], measureIndex: [1], pitch: [1], interval: [], sargam: [], duration: [], lyric: [] }] };
+    expect(measureRangeFromChordMatch(d, undefined)).toBeNull();
+  });
 });
 
 describe('responsiveZoom', () => {
