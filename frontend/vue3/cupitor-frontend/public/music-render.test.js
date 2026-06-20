@@ -1,0 +1,112 @@
+import { measureRangeFromNoteRange } from './music-render.js';
+import { collapsedChordSpans } from './music-render.js';
+import { measureRangeFromChordMatch } from './music-render.js';
+import { responsiveZoom } from './music-render.js';
+import { encodeMusicXml, inferChords } from './music-encoding.js';
+import { buildIndexEntry } from './music-index.js';
+import fs from 'fs';
+import jQuery from 'jquery';
+
+const detail = {
+  meta: { id: 'x', format: 'musicxml' },
+  format: 'musicxml',
+  voices: [{
+    pitch: [60, 62, 64, 65, 67],
+    interval: [], sargam: [], duration: [], chordSymbol: [], lyric: [],
+    measureIndex: [1, 1, 2, 2, 3]
+  }]
+};
+
+describe('measureRangeFromNoteRange', () => {
+  test('maps a note-index range to a measure range', () => {
+    expect(measureRangeFromNoteRange(detail, [1, 3])).toEqual([1, 2]);
+  });
+  test('single note maps to its measure', () => {
+    expect(measureRangeFromNoteRange(detail, [4, 4])).toEqual([3, 3]);
+  });
+  test('clamps out-of-bounds indices', () => {
+    expect(measureRangeFromNoteRange(detail, [0, 99])).toEqual([1, 3]);
+  });
+  test('returns null when there are no notes', () => {
+    expect(measureRangeFromNoteRange({ voices: [{ pitch: [], measureIndex: [] }] }, [0, 0])).toBeNull();
+  });
+});
+
+describe('collapsedChordSpans', () => {
+  test('collapses consecutive duplicate chords and tracks measure spans', () => {
+    const d = {
+      voices: [{
+        pitch: [1, 2, 3, 4, 5],
+        chordSymbol: ['C', 'C', 'G', 'G', 'Am'],
+        measureIndex: [1, 1, 2, 2, 3],
+        interval: [], sargam: [], duration: [], lyric: []
+      }]
+    };
+    expect(collapsedChordSpans(d)).toEqual([
+      { symbol: 'C', measureStart: 1, measureEnd: 1 },
+      { symbol: 'G', measureStart: 2, measureEnd: 2 },
+      { symbol: 'Am', measureStart: 3, measureEnd: 3 }
+    ]);
+  });
+  test('skips null chord slots', () => {
+    const d = {
+      voices: [{
+        pitch: [1, 2, 3],
+        chordSymbol: [null, 'C', null],
+        measureIndex: [1, 1, 2],
+        interval: [], sargam: [], duration: [], lyric: []
+      }]
+    };
+    expect(collapsedChordSpans(d).map(s => s.symbol)).toEqual(['C']);
+  });
+});
+
+const CHOPIN = '/Users/satyendra.kumar/Documents/MuseScore3/Scores/Chopin_Nocturne_Op.9_No.2_for_Solo_Guitar.xml';
+const haveChopin = (() => { try { return fs.existsSync(CHOPIN); } catch (_) { return false; } })();
+
+(haveChopin ? describe : describe.skip)('collapsedChordSpans pins buildIndexEntry collapse', () => {
+  beforeAll(() => { global.$ = global.jQuery = jQuery; });
+  test('symbol sequence matches search.chords on real data', () => {
+    const xml = fs.readFileSync(CHOPIN, 'utf8');
+    const doc = inferChords(encodeMusicXml(xml, { id: 'chopin', system: 'western' }));
+    const entry = buildIndexEntry(doc, xml);
+    const spans = collapsedChordSpans(doc);
+    expect(spans.map(s => s.symbol).join(' ')).toBe(entry.search.chords);
+  });
+});
+
+describe('measureRangeFromChordMatch', () => {
+  const detail2 = {
+    voices: [{
+      pitch: [1, 2, 3, 4, 5, 6],
+      chordSymbol: ['C', 'C', 'G', 'Am', 'Am', 'F'],
+      measureIndex: [1, 1, 2, 3, 3, 4],
+      interval: [], sargam: [], duration: [], lyric: []
+    }]
+  };
+  test('maps a chord-index range to a measure range', () => {
+    expect(measureRangeFromChordMatch(detail2, [0, 1])).toEqual([1, 2]);
+  });
+  test('maps a single chord index', () => {
+    expect(measureRangeFromChordMatch(detail2, [2, 2])).toEqual([3, 3]);
+  });
+  test('spans across the whole progression', () => {
+    expect(measureRangeFromChordMatch(detail2, [0, 3])).toEqual([1, 4]);
+  });
+  test('returns null when no chords', () => {
+    expect(measureRangeFromChordMatch({ voices: [{ chordSymbol: [], measureIndex: [] }] }, [0, 0])).toBeNull();
+  });
+});
+
+describe('responsiveZoom', () => {
+  test('full zoom at/above the baseline width', () => {
+    expect(responsiveZoom(900)).toBeCloseTo(1.0);
+    expect(responsiveZoom(1800)).toBeCloseTo(1.0);
+  });
+  test('scales down on narrower viewports', () => {
+    expect(responsiveZoom(450)).toBeCloseTo(0.5);
+  });
+  test('clamps to a 0.4 floor on very narrow viewports', () => {
+    expect(responsiveZoom(200)).toBeCloseTo(0.4);
+  });
+});
