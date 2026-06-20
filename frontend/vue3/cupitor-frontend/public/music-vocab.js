@@ -52,16 +52,33 @@ export function groupVocabByCategory(vocab) {
   return Array.from(byCat.keys()).sort().map(category => ({ category, entries: byCat.get(category) }));
 }
 
-// Integration: fetch the per-system vocab.json (empty array if missing/unreachable).
-export async function loadVocab(system) {
-  const res = await fetch(`${getMusicResourceUrl(system)}/vocab.json`);
-  if (!res.ok) return [];
-  return res.json();
+// Integration: load the per-system vocabulary, merging the local cache over the remote
+// vocab.json so locally-captured entries survive reload even when their push failed (or
+// hasn't propagated). Local wins on id collisions; remote-only entries are kept. Tolerates
+// an unreachable remote and a missing/erroring store. `store` is optional (back-compat).
+export async function loadVocab(system, store) {
+  let remote = [];
+  try { const res = await fetch(`${getMusicResourceUrl(system)}/vocab.json`); if (res.ok) remote = await res.json(); }
+  catch (_) { remote = []; }
+  if (!store || !store.getVocab) return remote;
+  let local = [];
+  try { local = (await store.getVocab(system)) || []; } catch (_) { local = []; }
+  let merged = remote;
+  for (const e of local) merged = upsertVocab(merged, e);
+  return merged;
 }
 
-// Integration: push the full vocab array to vocab.json. Never rethrows a push failure.
-export async function saveVocabAndPush({ system, vocab, committer }) {
+// Integration: persist the full vocab array. Writes the local store FIRST (so captures
+// survive reload regardless of the push), then pushes vocab.json. Never rethrows either
+// failure. `store` is optional (back-compat); reports {pushed, pushError, localError}.
+export async function saveVocabAndPush({ system, vocab, store, committer }) {
+  let localError = null;
+  if (store && store.putVocab) {
+    try { await store.putVocab(system, vocab); } catch (e) { localError = e.message; }
+  }
   const files = [{ path: `db/music/${system}/vocab.json`, getContent: () => JSON.stringify(vocab, null, 2) }];
-  try { await committer(files); return { pushed: true }; }
-  catch (e) { return { pushed: false, pushError: e.message }; }
+  let pushed = false, pushError = null;
+  try { await committer(files); pushed = true; }
+  catch (e) { pushError = e.message; }
+  return { pushed, pushError, localError };
 }
