@@ -1,5 +1,5 @@
 // public/music-player.test.js
-import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd } from './music-player.js';
+import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd, buildScheduleFromMusicXml } from './music-player.js';
 
 // Primary voice = the one with the most notes. midi=pitch, duration=<type> string|null, measureIndex 1-based.
 function voice(pitch, duration, measureIndex) {
@@ -97,5 +97,96 @@ describe('scheduleEnd', () => {
     expect(scheduleEnd([])).toBe(0);
     expect(scheduleEnd(null)).toBe(0);
     expect(scheduleEnd(undefined)).toBe(0);
+  });
+});
+
+describe('buildScheduleFromMusicXml', () => {
+  // Helpers to assemble minimal MusicXML. 120 BPM → 0.5s per quarter beat.
+  const wrap = (inner) => `<?xml version="1.0"?><score-partwise><part id="P1">${inner}</part></score-partwise>`;
+  const attrs = (div) => `<attributes><divisions>${div}</divisions></attributes>`;
+  const pn = (step, oct, dur, { chord = false, alter = null, tie = null, voice = null } = {}) => {
+    const v = voice != null ? `<voice>${voice}</voice>` : '';
+    const c = chord ? '<chord/>' : '';
+    const a = alter != null ? `<alter>${alter}</alter>` : '';
+    const t = tie ? `<tie type="${tie}"/>` : '';
+    return `<note>${c}${v}<pitch><step>${step}</step>${a}<octave>${oct}</octave></pitch><duration>${dur}</duration>${t}</note>`;
+  };
+  const rest = (dur) => `<note><rest/><duration>${dur}</duration></note>`;
+  const backup = (dur) => `<backup><duration>${dur}</duration></backup>`;
+
+  test('sequential notes get cumulative onsets and real durations', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}</measure>` +
+                     `<measure number="2">${pn('G', 4, 2)}</measure>`);
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
+      { midi: 60, time: 0,   duration: 0.5 },
+      { midi: 64, time: 0.5, duration: 0.5 },
+      { midi: 67, time: 1,   duration: 1 },
+    ]);
+  });
+
+  test('chord notes stack at the same onset (no arpeggio, no time inflation)', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1, { chord: true })}` +
+                     `${pn('G', 4, 1, { chord: true })}${pn('D', 4, 1)}</measure>`);
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
+      { midi: 60, time: 0,   duration: 0.5 },
+      { midi: 64, time: 0,   duration: 0.5 },
+      { midi: 67, time: 0,   duration: 0.5 },
+      { midi: 62, time: 0.5, duration: 0.5 },
+    ]);
+  });
+
+  test('rests advance time without sounding (the gap is preserved)', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${rest(1)}${pn('E', 4, 1)}</measure>`);
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
+      { midi: 60, time: 0, duration: 0.5 },
+      { midi: 64, time: 1, duration: 0.5 },
+    ]);
+  });
+
+  test('two voices align in time via <backup>', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 5, 2, { voice: 1 })}${backup(2)}` +
+                     `${pn('C', 4, 1, { voice: 2 })}${pn('E', 4, 1, { voice: 2 })}</measure>`);
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
+      { midi: 72, time: 0,   duration: 1 },
+      { midi: 60, time: 0,   duration: 0.5 },
+      { midi: 64, time: 0.5, duration: 0.5 },
+    ]);
+  });
+
+  test('a tie-stop extends the prior same-pitch note instead of retriggering', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1, { tie: 'start' })}` +
+                     `${pn('C', 4, 1, { tie: 'stop' })}</measure>`);
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
+      { midi: 60, time: 0, duration: 1 },
+    ]);
+  });
+
+  test('divisions scale duration to beats', () => {
+    const xml = wrap(`<measure number="1">${attrs(2)}${pn('C', 4, 2)}${pn('D', 4, 1)}</measure>`);
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
+      { midi: 60, time: 0,   duration: 0.5 },
+      { midi: 62, time: 0.5, duration: 0.25 },
+    ]);
+  });
+
+  test('alter raises/lowers the pitch (F# = 66)', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('F', 4, 1, { alter: 1 })}</measure>`);
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
+      { midi: 66, time: 0, duration: 0.5 },
+    ]);
+  });
+
+  test('measure range filters then re-zeroes the segment to t=0', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}</measure>` +
+                     `<measure number="2">${pn('G', 4, 2)}</measure>`);
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120, fromMeasure: 2, toMeasure: 2 })).toEqual([
+      { midi: 67, time: 0, duration: 1 },
+    ]);
+  });
+
+  test('empty / unparseable / note-less input → []', () => {
+    expect(buildScheduleFromMusicXml('', { tempo: 120 })).toEqual([]);
+    expect(buildScheduleFromMusicXml(null)).toEqual([]);
+    expect(buildScheduleFromMusicXml('<score-partwise></score-partwise>', { tempo: 120 })).toEqual([]);
   });
 });
