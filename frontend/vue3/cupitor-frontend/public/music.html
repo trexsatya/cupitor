@@ -194,6 +194,10 @@
       </div>
     </div>
     <div id="results"></div>
+    <details id="vocabSection" style="margin-top:1rem">
+      <summary style="cursor:pointer;font-weight:600">Vocabulary</summary>
+      <div id="vocabList"></div>
+    </details>
   </div>
 <div id="musicPreview" style="display:none;border-top:1px solid #ddd;padding-top:1rem">
   <div style="margin-bottom:.5rem">
@@ -247,7 +251,7 @@
   import { createMusicStore } from './music-local-store.js';
   import { buildSchedule, createMusicPlayer, createYouTubeController, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
   import { guessSegmentStart, linkYouTubeAndPush } from './music-media.js';
-  import { buildSnapshot, buildVocabEntry, upsertVocab, loadVocab, saveVocabAndPush } from './music-vocab.js';
+  import { buildSnapshot, buildVocabEntry, upsertVocab, loadVocab, saveVocabAndPush, groupVocabByCategory } from './music-vocab.js';
 
   const system = getSystemFromUrl().name;
   document.getElementById('systemLabel').textContent = system;
@@ -437,6 +441,7 @@
       createdAt: new Date().toISOString().slice(0, 10),
     });
     vocab = upsertVocab(vocab, entry);
+    renderVocab();
     document.getElementById('mediaMsg').textContent = 'Saving vocab…';
     const res = await saveVocabAndPush({ system, vocab, committer: makeCommitter(`vocab ${entry.id}`) });
     document.getElementById('mediaMsg').textContent = res.pushed
@@ -580,6 +585,33 @@
       if (renderer) renderer.showSegment(mr);
     }
   }
+  async function openVocabEntry(pieceId, from, to) {
+    await openPreview(pieceId);
+    if (!currentDetail) return;
+    document.getElementById('segFrom').value = from;
+    document.getElementById('segTo').value = to;
+    if (renderer) renderer.showSegment([from, to]);
+  }
+  function renderVocab() {
+    const box = document.getElementById('vocabList');
+    const groups = groupVocabByCategory(vocab);
+    if (!groups.length) { box.innerHTML = '<em>No vocabulary yet.</em>'; return; }
+    box.innerHTML = '';
+    groups.forEach(g => {
+      const h = document.createElement('div');
+      h.innerHTML = `<strong>${g.category}</strong>`;
+      box.appendChild(h);
+      g.entries.forEach(e => {
+        const title = (index.find(x => x.id === e.pieceId) || {}).title || e.pieceId;
+        const mark = (e.startSeconds != null || e.youtube) ? ' ▶' : '';
+        const row = document.createElement('div');
+        row.className = 'resultRow';
+        row.innerHTML = `${title} <small>m${e.measureStart}–${e.measureEnd}${mark}</small>`;
+        row.onclick = () => openVocabEntry(e.pieceId, e.measureStart, e.measureEnd);
+        box.appendChild(row);
+      });
+    });
+  }
   document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
     radio.onchange = () => {
       document.getElementById('chordMode').style.display = currentMode() === 'chord' ? '' : 'none';
@@ -603,7 +635,7 @@
     try { const lib = await loadLibrary(system, store); index = lib.index; unpushedIds = lib.unpushedIds; }
     catch (_) { index = []; unpushedIds = new Set(); }
     try { vocab = await loadVocab(system); } catch (_) { vocab = []; }
-    render(); updateRetryBtn();
+    render(); updateRetryBtn(); renderVocab();
   })();
 </script>
 </body>
