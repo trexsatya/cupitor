@@ -55,7 +55,8 @@ function pitchToMidi(noteEl) {
   if (!(step in PITCH_STEP_SEMITONES) || Number.isNaN(octave)) return null;
   const alterEl = p.querySelector('alter');
   const alter = alterEl ? (parseInt(alterEl.textContent, 10) || 0) : 0;
-  return 12 * (octave + 1) + PITCH_STEP_SEMITONES[step] + alter; // C4 → 60
+  const midi = 12 * (octave + 1) + PITCH_STEP_SEMITONES[step] + alter; // C4 → 60
+  return (midi < 0 || midi > 127) ? null : midi; // drop out-of-MIDI-range notes
 }
 
 // Tie types on a note: prefer the sounded <tie>, fall back to the notational <tied>.
