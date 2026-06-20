@@ -42,6 +42,120 @@ export function scheduleEnd(schedule) {
   return Number(((last.time || 0) + (last.duration || 0)).toFixed(6));
 }
 
+const PITCH_STEP_SEMITONES = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+
+function pitchToMidi(noteEl) {
+  const p = noteEl.querySelector('pitch');
+  if (!p) return null;
+  const stepEl = p.querySelector('step');
+  const octEl = p.querySelector('octave');
+  if (!stepEl || !octEl) return null;
+  const step = stepEl.textContent.trim().toUpperCase();
+  const octave = parseInt(octEl.textContent, 10);
+  if (!(step in PITCH_STEP_SEMITONES) || Number.isNaN(octave)) return null;
+  const alterEl = p.querySelector('alter');
+  const alter = alterEl ? (parseInt(alterEl.textContent, 10) || 0) : 0;
+  return 12 * (octave + 1) + PITCH_STEP_SEMITONES[step] + alter; // C4 → 60
+}
+
+// Tie types on a note: prefer the sounded <tie>, fall back to the notational <tied>.
+function tieTypesOf(noteEl) {
+  const types = [];
+  noteEl.querySelectorAll('tie').forEach((t) => { const v = t.getAttribute('type'); if (v) types.push(v); });
+  if (!types.length) noteEl.querySelectorAll('tied').forEach((t) => { const v = t.getAttribute('type'); if (v) types.push(v); });
+  return types;
+}
+
+// Pure: build a time-accurate, polyphonic schedule from a MusicXML string. Reads every
+// part/voice with ABSOLUTE onsets, honoring <divisions>, <duration> (authoritative — bakes
+// in dotted values), <chord/> (stacked at the same onset), <rest> (advances time, no note),
+// <backup>/<forward> (voice alignment), and ties (a tie-stop extends the prior same-pitch
+// note). Returns [{midi,time,duration}] in seconds, restricted to [fromMeasure,toMeasure]
+// and re-zeroed so the segment starts at t=0. Returns [] for empty/unparseable input.
+export function buildScheduleFromMusicXml(xmlString, opts = {}) {
+  if (!xmlString || typeof xmlString !== 'string') return [];
+  let doc;
+  try { doc = new DOMParser().parseFromString(xmlString, 'application/xml'); }
+  catch (_) { return []; }
+  if (!doc || doc.getElementsByTagName('parsererror').length) return [];
+
+  const bpm = (opts.tempo && opts.tempo > 0) ? opts.tempo : 90;
+  const spb = 60 / bpm; // seconds per quarter-note beat
+  const from = (opts.fromMeasure == null) ? -Infinity : opts.fromMeasure;
+  const to = (opts.toMeasure == null) ? Infinity : opts.toMeasure;
+
+  const events = []; // { midi, beats (onset), durBeats, measure }
+  const parts = doc.getElementsByTagName('part');
+  for (let pi = 0; pi < parts.length; pi++) {
+    let divisions = 1;        // current <divisions> for this part (quarter = `divisions` ticks)
+    let cursor = 0;           // running onset in beats from the part start
+    let lastOnset = 0;        // onset of the previous non-chord note (the chord anchor)
+    const openTies = new Map(); // `${voice}:${midi}` → event object awaiting its tie-stop
+    const measures = parts[pi].getElementsByTagName('measure');
+    for (let mi = 0; mi < measures.length; mi++) {
+      const measure = measures[mi];
+      const parsedNum = parseInt(measure.getAttribute('number'), 10);
+      const mNum = Number.isNaN(parsedNum) ? (mi + 1) : parsedNum;
+      const kids = measure.children;
+      for (let ci = 0; ci < kids.length; ci++) {
+        const el = kids[ci];
+        const tag = el.tagName;
+        if (tag === 'attributes') {
+          const d = el.querySelector('divisions');
+          if (d) { const dv = parseInt(d.textContent, 10); if (dv > 0) divisions = dv; }
+        } else if (tag === 'backup') {
+          const d = parseInt((el.querySelector('duration') || {}).textContent, 10);
+          if (!Number.isNaN(d)) cursor -= d / divisions;
+        } else if (tag === 'forward') {
+          const d = parseInt((el.querySelector('duration') || {}).textContent, 10);
+          if (!Number.isNaN(d)) cursor += d / divisions;
+        } else if (tag === 'note') {
+          const durEl = el.querySelector('duration');
+          const durDiv = durEl ? parseInt(durEl.textContent, 10) : 0;
+          const durBeats = (durDiv > 0 ? durDiv : 0) / divisions;
+          const isChord = !!el.querySelector('chord');
+          const isRest = !!el.querySelector('rest');
+          const voice = ((el.querySelector('voice') || {}).textContent) || '1';
+
+          if (isRest) { cursor += durBeats; lastOnset = cursor; continue; }
+
+          const midi = pitchToMidi(el);
+          if (midi == null) { if (!isChord) { cursor += durBeats; lastOnset = cursor; } continue; }
+          if (durBeats <= 0) continue; // grace note: no duration, occupies no time
+
+          const onset = isChord ? lastOnset : cursor;
+          const tieTypes = tieTypesOf(el);
+          const hasStop = tieTypes.indexOf('stop') !== -1;
+          const hasStart = tieTypes.indexOf('start') !== -1;
+          const key = voice + ':' + midi;
+
+          if (hasStop && openTies.has(key)) {
+            openTies.get(key).durBeats += durBeats;     // extend the held note
+            if (!hasStart) openTies.delete(key);
+            if (!isChord) { cursor += durBeats; lastOnset = onset; }
+            continue;                                    // no new note for a tie continuation
+          }
+
+          const ev = { midi, beats: onset, durBeats, measure: mNum };
+          events.push(ev);
+          if (hasStart) openTies.set(key, ev);
+          if (!isChord) { cursor += durBeats; lastOnset = onset; }
+        }
+      }
+    }
+  }
+
+  const out = events
+    .filter((e) => e.measure >= from && e.measure <= to)
+    .map((e) => ({ midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb }));
+  out.sort((a, b) => a.time - b.time); // stable: chord/aligned notes keep emission order
+  if (out.length) {
+    const t0 = out[0].time;
+    for (const e of out) { e.time = Number((e.time - t0).toFixed(6)); e.duration = Number(e.duration.toFixed(6)); }
+  }
+  return out;
+}
+
 // Pure: extract a YouTube video id from watch / youtu.be / embed / music URLs. Null if none.
 export function parseYouTubeId(url) {
   if (!url || typeof url !== 'string') return null;
@@ -70,11 +184,16 @@ export function instrumentVoiceKey(name) {
 export function createMusicPlayer({ Tone, getCursor } = {}) {
   const T = Tone || (typeof globalThis !== 'undefined' ? globalThis.Tone : undefined);
   if (!T) throw new Error('Tone.js is not available');
-  // Distinct timbres per category using standard Tone voices (no samples). Guitar uses
-  // the monophonic PluckSynth — fine for the melodic primary voice we schedule.
+  // Distinct timbres per category using standard Tone voices (no samples). All are
+  // PolySynth-based so chords and overlapping voices actually sound (guitar gets a short,
+  // plucky envelope rather than the monophonic PluckSynth, which can't play polyphony).
   function makeVoice(category) {
     switch (category) {
-      case 'guitar':  return new T.PluckSynth().toDestination();
+      case 'guitar': {
+        const g = new T.PolySynth(T.Synth).toDestination();
+        g.set({ envelope: { attack: 0.005, decay: 0.4, sustain: 0, release: 0.4 } });
+        return g;
+      }
       case 'strings': return new T.PolySynth(T.AMSynth).toDestination();
       case 'organ':   return new T.PolySynth(T.FMSynth).toDestination();
       case 'piano':
@@ -97,10 +216,18 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
     disposePart();
     const cursor = getCursor && getCursor();
     if (cursor) { try { cursor.reset(); cursor.show(); } catch (_) {} }
+    // Advance the OSMD cursor once per distinct onset (not per note) so chords and
+    // overlapping voices don't over-step it.
+    const seenTimes = new Set();
+    const events = schedule.map((e) => {
+      const step = !seenTimes.has(e.time);
+      seenTimes.add(e.time);
+      return [e.time, { ...e, _step: step }];
+    });
     part = new T.Part((time, ev) => {
       synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
-      if (cursor) T.Draw.schedule(() => { try { cursor.next(); } catch (_) {} }, time);
-    }, schedule.map(e => [e.time, e]));
+      if (cursor && ev._step) T.Draw.schedule(() => { try { cursor.next(); } catch (_) {} }, time);
+    }, events);
     part.loop = loop;
     part.loopStart = 0;
     part.loopEnd = scheduleEnd(schedule);
@@ -170,6 +297,7 @@ export function createYouTubeController(container, { YT, onReady } = {}) {
     pause() { run(() => player.pauseVideo()); },
     seekTo(seconds) { run(() => player.seekTo(seconds, true)); },
     getDuration() { return (ready && player && player.getDuration) ? player.getDuration() : 0; },
+    getCurrentTime() { return (ready && player && player.getCurrentTime) ? player.getCurrentTime() : 0; },
     isReady() { return ready; },
     get raw() { return player; },
   };
