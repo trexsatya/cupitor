@@ -139,13 +139,12 @@ export function encodeMusicXml(xmlString, meta = {}) {
     });
   });
 
-  const noteNameAt = (midi) => ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][((midi%12)+12)%12];
   const voices = Object.keys(voicesMap).map(k => {
     const v = voicesMap[k];
     return {
       pitch: v.pitch,
       interval: intervalsOf(v.pitch),
-      sargam: v.pitch.map(m => toSargam(noteNameAt(m), key)),
+      sargam: v.pitch.map(m => toSargam(midiToName(m), key)),
       duration: v.duration,
       chordSymbol: v.chordSymbol,
       lyric: v.lyric,
