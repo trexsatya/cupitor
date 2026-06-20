@@ -233,8 +233,9 @@
   <div id="mediaRow" style="margin:.25rem 0">
     <input id="ytUrl" type="text" placeholder="YouTube URL" style="width:18em">
     <button id="ytSaveBtn">Link YouTube</button>
-    <button id="guessBtn">Guess segment start</button>
-    <input id="guessSec" type="number" step="0.1" style="width:6em" placeholder="sec">
+    <button id="guessBtn">Guess segment times</button>
+    <input id="guessSec" type="number" step="0.1" style="width:5em" placeholder="start s">
+    <input id="guessEndSec" type="number" step="0.1" style="width:5em" placeholder="end s">
     <input id="vocabCat" type="text" placeholder="category" style="width:8em">
     <button id="addVocabBtn">Add to vocab</button>
     <span id="mediaMsg"></span>
@@ -254,7 +255,7 @@
   import { createMusicRenderer, resolveMatchMeasures } from './music-render.js';
   import { buildChordQuery, buildMelodyQuery, matchSummary } from './music-search-ui.js';
   import { createMusicStore } from './music-local-store.js';
-  import { buildSchedule, createMusicPlayer, createYouTubeController, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
+  import { buildSchedule, buildScheduleFromMusicXml, createMusicPlayer, createYouTubeController, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
   import { guessSegmentStart, linkYouTubeAndPush } from './music-media.js';
   import { buildSnapshot, buildVocabEntry, upsertVocab, loadVocab, saveVocabAndPush, groupVocabByCategory } from './music-vocab.js';
 
@@ -375,7 +376,12 @@
   }
   function playMidi() {
     if (!currentDetail) return;
-    const schedule = buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...segmentRange() });
+    // MusicXML pieces get a time-accurate, polyphonic schedule from the source; note-text
+    // pieces (no real timing) fall back to the simple per-note sequential builder.
+    const useXml = currentDetail.format === 'musicxml' && currentDetail.source;
+    const schedule = useXml
+      ? buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), ...segmentRange() })
+      : buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...segmentRange() });
     if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
     const p = ensurePlayer();
     p.setInstrument(document.getElementById('instrSel').value);
@@ -384,42 +390,74 @@
     p.play();
     document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes`;
   }
+  let ytMonitor = null;
+  function clearYtMonitor() { if (ytMonitor) { clearInterval(ytMonitor); ytMonitor = null; } }
+  // Bound YouTube playback to [startSec, endSec]: poll currentTime and, on reaching the end,
+  // loop back to the start (when Loop is checked) or pause. No-op if the range is degenerate.
+  function startYtMonitor(startSec, endSec) {
+    clearYtMonitor();
+    if (!(endSec > startSec)) return;
+    ytMonitor = setInterval(() => {
+      if (!yt || !yt.isReady()) return;
+      if (yt.getCurrentTime() >= endSec) {
+        if (document.getElementById('loopChk').checked) yt.seekTo(startSec);
+        else { yt.pause(); clearYtMonitor(); }
+      }
+    }, 200);
+  }
   function playYouTube() {
     const url = currentDetail && currentDetail.meta && currentDetail.meta.youtube;
     const id = parseYouTubeId(url);
     if (!id) { document.getElementById('transportMsg').textContent = 'No linked YouTube video.'; return; }
     document.getElementById('ytPlayer').style.display = '';
     const range = segmentRange();
+    const hasSeg = Number.isFinite(range.fromMeasure) && Number.isFinite(range.toMeasure);
     const from = range.fromMeasure || 1, to = range.toMeasure || from;
-    const edited = parseFloat(document.getElementById('guessSec').value);
+    const editedStart = parseFloat(document.getElementById('guessSec').value);
+    const editedEnd = parseFloat(document.getElementById('guessEndSec').value);
     const startFor = () => {
-      if (Number.isFinite(edited)) return edited;
+      if (Number.isFinite(editedStart)) return editedStart;
       const g = guessSegmentStart(currentDetail, [from, to], yt.getDuration());
       document.getElementById('guessSec').value = g.toFixed(1);
       return g;
     };
+    const endFor = () => {
+      if (Number.isFinite(editedEnd)) return editedEnd;
+      const g = guessSegmentStart(currentDetail, [to + 1, to + 1], yt.getDuration());
+      document.getElementById('guessEndSec').value = g.toFixed(1);
+      return g;
+    };
+    const begin = () => {
+      const s = startFor(); yt.seekTo(s); yt.play();
+      if (hasSeg) startYtMonitor(s, endFor()); else clearYtMonitor();
+    };
     try {
       if (!yt) {
-        yt = createYouTubeController('ytPlayer', { onReady: () => { const s = startFor(); yt.seekTo(s); yt.play(); } });
-        yt.load(id, Number.isFinite(edited) ? edited : 0);
+        yt = createYouTubeController('ytPlayer', { onReady: () => begin() });
+        yt.load(id, Number.isFinite(editedStart) ? editedStart : 0);
       } else {
-        yt.load(id, Number.isFinite(edited) ? edited : 0);
-        const s = startFor(); yt.seekTo(s); yt.play();
+        yt.load(id, Number.isFinite(editedStart) ? editedStart : 0);
+        begin();
       }
-      document.getElementById('transportMsg').textContent = 'Playing YouTube';
+      document.getElementById('transportMsg').textContent = 'Playing YouTube' + (hasSeg ? ' (segment)' : '');
     } catch (e) { document.getElementById('transportMsg').textContent = 'YouTube error: ' + e.message; }
   }
   document.getElementById('instrSel').onchange = () => { if (player) player.setInstrument(document.getElementById('instrSel').value); };
   document.getElementById('playBtn').onclick = () =>
     (document.getElementById('srcSel').value === 'youtube' ? playYouTube() : playMidi());
   document.getElementById('pauseBtn').onclick = () => {
-    if (document.getElementById('srcSel').value === 'youtube') { if (yt) yt.pause(); }
+    if (document.getElementById('srcSel').value === 'youtube') { clearYtMonitor(); if (yt) yt.pause(); }
     else if (player) player.pause();
   };
   document.getElementById('stopBtn').onclick = () => {
     if (player) player.stop();
+    clearYtMonitor();
     if (yt) yt.pause();
     document.getElementById('transportMsg').textContent = '';
+  };
+  document.getElementById('segFrom').oninput = () => {
+    const f = parseInt(document.getElementById('segFrom').value, 10);   // auto-set end = start + 1
+    if (Number.isFinite(f)) document.getElementById('segTo').value = f + 1;
   };
 
   let currentPreviewId = null;
@@ -443,9 +481,11 @@
     if (!dur) { document.getElementById('mediaMsg').textContent = 'Load the YouTube video first (▶ on YouTube source).'; return; }
     const range = segmentRange();
     const from = range.fromMeasure || 1, to = range.toMeasure || from;
-    const sec = guessSegmentStart(currentDetail, [from, to], dur);
-    document.getElementById('guessSec').value = sec.toFixed(1);
-    document.getElementById('mediaMsg').textContent = `Guess: ${sec.toFixed(1)}s of ${dur.toFixed(0)}s`;
+    const start = guessSegmentStart(currentDetail, [from, to], dur);
+    const end = guessSegmentStart(currentDetail, [to + 1, to + 1], dur);  // start of the next measure
+    document.getElementById('guessSec').value = start.toFixed(1);
+    document.getElementById('guessEndSec').value = end.toFixed(1);
+    document.getElementById('mediaMsg').textContent = `Segment: ${start.toFixed(1)}–${end.toFixed(1)}s of ${dur.toFixed(0)}s`;
   };
 
   document.getElementById('addVocabBtn').onclick = async () => {
@@ -464,7 +504,7 @@
     vocab = upsertVocab(vocab, entry);
     renderVocab();
     document.getElementById('mediaMsg').textContent = 'Saving vocab…';
-    const res = await saveVocabAndPush({ system, vocab, committer: makeCommitter(`vocab ${entry.id}`) });
+    const res = await saveVocabAndPush({ system, vocab, store, committer: makeCommitter(`vocab ${entry.id}`) });
     document.getElementById('mediaMsg').textContent = res.pushed
       ? `Added "${entry.id}" (${vocab.length} total)`
       : `Saved locally; push failed: ${res.pushError}`;
@@ -657,7 +697,7 @@
   (async () => {
     try { const lib = await loadLibrary(system, store); index = lib.index; unpushedIds = lib.unpushedIds; }
     catch (_) { index = []; unpushedIds = new Set(); }
-    try { vocab = await loadVocab(system); } catch (_) { vocab = []; }
+    try { vocab = await loadVocab(system, store); } catch (_) { vocab = []; }
     render(); updateRetryBtn(); renderVocab();
   })();
 </script>
