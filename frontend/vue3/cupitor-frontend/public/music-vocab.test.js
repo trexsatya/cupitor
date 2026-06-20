@@ -86,6 +86,40 @@ describe('saveVocabAndPush', () => {
     expect(res.pushed).toBe(false);
     expect(res.pushError).toBe('offline');
   });
+
+  test('writes the local store before pushing, so a failed push still persists the vocab', async () => {
+    let saved = null;
+    const store = { putVocab: async (_sys, v) => { saved = v; } };
+    const committer = async () => { throw new Error('offline'); };
+    const vocab = [{ id: 'x_1_2', category: 'a' }];
+    const res = await saveVocabAndPush({ system: 'western', vocab, store, committer });
+    expect(saved).toEqual(vocab);       // persisted locally despite the push failing
+    expect(res.pushed).toBe(false);
+    expect(res.localError).toBeNull();
+  });
+});
+
+import { loadVocab } from './music-vocab.js';
+
+describe('loadVocab', () => {
+  const okFetch = (data) => async () => ({ ok: true, json: async () => data });
+
+  test('merges local cache over remote so local additions survive (local wins on id)', async () => {
+    global.fetch = okFetch([{ id: 'r1', category: 'remote' }, { id: 'shared', category: 'remote' }]);
+    const store = { getVocab: async () => [{ id: 'local1', category: 'mine' }, { id: 'shared', category: 'mine' }] };
+    const merged = await loadVocab('western', store);
+    expect(merged.find(e => e.id === 'r1').category).toBe('remote');   // remote-only kept
+    expect(merged.find(e => e.id === 'local1').category).toBe('mine'); // local-only kept
+    expect(merged.find(e => e.id === 'shared').category).toBe('mine'); // local wins
+    expect(merged).toHaveLength(3);
+  });
+
+  test('tolerates an unreachable remote and a missing store', async () => {
+    global.fetch = async () => { throw new Error('network'); };
+    expect(await loadVocab('western')).toEqual([]);                    // no store, fetch fails → []
+    const store = { getVocab: async () => [{ id: 'local1' }] };
+    expect(await loadVocab('western', store)).toEqual([{ id: 'local1' }]);
+  });
 });
 
 describe('groupVocabByCategory', () => {

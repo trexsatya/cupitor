@@ -75,4 +75,12 @@ describe('createMusicStore', () => {
     const unpushed = await store.getUnpushed('western');
     expect(unpushed).toEqual([{ entry: entryB, detail: detailB }]);
   });
+
+  test('putVocab then getVocab round-trips per system; missing system → []', async () => {
+    const store = freshStore();
+    const vocab = [{ id: 'x_1_2', category: 'licks' }];
+    await store.putVocab('western', vocab);
+    expect(await store.getVocab('western')).toEqual(vocab);
+    expect(await store.getVocab('sargam')).toEqual([]);   // isolated per system
+  });
 });
