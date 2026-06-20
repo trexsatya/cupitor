@@ -122,3 +122,62 @@ export function decomposeChord(symbol) {
   else if (suffix.startsWith('m') && !suffix.startsWith('maj') && !suffix.startsWith('M')) quality = 'min';
   return { rootPc, quality, ext: new Set() };
 }
+
+// ---------- chord matching ----------
+
+const mod12 = n => ((n % 12) + 12) % 12;
+
+// Does query chord q match piece chord p, given anchor (null for the first match)?
+function chordMatchesAt(q, p, query, anchor) {
+  if (!q || !p) return false;
+  if (q.quality !== p.quality) return false;
+  if (query.transpose_invariant) {
+    if (anchor) {
+      const want = mod12(q.rootPc - anchor.qRoot);
+      const got = mod12(p.rootPc - anchor.pRoot);
+      if (want !== got) return false;
+    }
+  } else if (q.rootPc !== p.rootPc) {
+    return false;
+  }
+  if (query.strict_extensions) {
+    const allowed = q.allowed; // Set of canonical tokens
+    for (const e of p.ext) if (!allowed.has(e)) return false;
+  }
+  return true;
+}
+
+// Recursive constrained sub-sequence search. Returns array of matched indices, or null.
+function matchSeq(qDec, pieceDec, query, qi, prevIdx, anchor) {
+  if (qi === qDec.length) return [];
+  const from = prevIdx + 1;
+  const to = (qi === 0) ? pieceDec.length - 1 : Math.min(pieceDec.length - 1, prevIdx + 1 + (query.max_gap || 0));
+  for (let j = from; j <= to; j++) {
+    const p = pieceDec[j];
+    if (chordMatchesAt(qDec[qi], p, query, qi === 0 ? null : anchor)) {
+      const nextAnchor = anchor || { qRoot: qDec[qi].rootPc, pRoot: p.rootPc };
+      const tail = matchSeq(qDec, pieceDec, query, qi + 1, j, nextAnchor);
+      if (tail) return [j, ...tail];
+    }
+  }
+  return null;
+}
+
+export function matchChordQuery(query, pieceChordsStr) {
+  const pieceSyms = (pieceChordsStr || '').split(/\s+/).filter(Boolean);
+  if (pieceSyms.length === 0) return null;
+  const pieceDec = pieceSyms.map(decomposeChord);
+  const qDec = query.chords.map(c => {
+    const d = decomposeChord(c.chord);
+    return d && { ...d, allowed: new Set((c.extensions_allowed || []).map(normExtToken)) };
+  });
+  if (qDec.some(d => !d)) return null;
+  const indices = matchSeq(qDec, pieceDec, query, 0, -1, null);
+  if (!indices) return null;
+  return {
+    start: indices[0],
+    end: indices[indices.length - 1],
+    indices,
+    symbols: indices.map(i => pieceSyms[i])
+  };
+}
