@@ -1,5 +1,5 @@
 // public/music-encoding.test.js
-import { nameToMidi, intervalsOf, toSargam, packContour, unpackContour } from './music-encoding.js';
+import { nameToMidi, intervalsOf, toSargam, packContour, unpackContour, encodeNoteText } from './music-encoding.js';
 
 describe('pitch helpers', () => {
   test('nameToMidi: C4 = 60, A4 = 69, C#5 = 73', () => {
@@ -36,5 +36,24 @@ describe('contour packing', () => {
   test('empty intervals -> empty string -> empty array', () => {
     expect(packContour([])).toBe('');
     expect(unpackContour('')).toEqual([]);
+  });
+});
+
+describe('encodeNoteText', () => {
+  const txt = 'G4# D5# D5 C5#\nB4 C5# B4 A4# G4#';
+
+  test('builds one voice with pitch/interval/sargam; rhythm+lyric+chord null', () => {
+    const doc = encodeNoteText(txt, { id: 'jethalal_bgm', title: 'Jethalal BGM', system: 'western', key: 'G#m' });
+    expect(doc.meta.format).toBe('note-text');
+    expect(doc.meta.id).toBe('jethalal_bgm');
+    expect(doc.voices).toHaveLength(1);
+    const v = doc.voices[0];
+    expect(v.pitch).toEqual([68, 75, 74, 73, 71, 73, 71, 70, 68]);
+    expect(v.interval).toEqual([7, -1, -1, -2, 2, -2, -1, -2]);
+    expect(v.duration.every(d => d === null)).toBe(true);
+    expect(v.lyric.every(l => l === null)).toBe(true);
+    expect(v.chordSymbol.every(c => c === null)).toBe(true);
+    expect(v.sargam).toHaveLength(v.pitch.length);
+    expect(v.measureIndex).toHaveLength(v.pitch.length);
   });
 });
