@@ -101,8 +101,9 @@ export function createMusicRenderer(container, opts = {}) {
   osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false });
   const onAfterRender = opts.onAfterRender;   // called after each render (lets the UI rebuild chord chips)
   let totalMeasures = 0;
-  let colorVoices = false;
+  let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
   let noteNames = false;
+  let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
 
   // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
   // No-op on a sheet without instruments (e.g. the test fake / before load).
@@ -170,7 +171,11 @@ export function createMusicRenderer(container, opts = {}) {
   function vexKeyToPitchClass(key) {
     if (!key || typeof key !== 'string') return null;
     const pc = key.split('/')[0];
-    return pc ? pc[0].toUpperCase() + pc.slice(1) : null;
+    if (!pc) return null;
+    // Uppercase the letter, keep the accidental, and drop VexFlow's explicit natural marker
+    // ("cn" → "C") so the name matches the key-spelled tones in allChords.
+    const name = (pc[0].toUpperCase() + pc.slice(1)).replace(/n/g, '');
+    return name || null;
   }
 
   // Walk the rendered SVG → { measureNumber: [{ name, left, el }] }, where `el` is the
@@ -179,11 +184,14 @@ export function createMusicRenderer(container, opts = {}) {
     const byMeasure = {};
     const measureList = osmd.graphic && osmd.graphic.measureList;
     if (!measureList || !measureList.forEach) return byMeasure;
+    // measureList is [measureIndex][staffIndex]; fall back to a running 1-based count when
+    // the source measure number is unavailable, so grouping never collapses to empty.
+    let fallbackNum = 0;
     measureList.forEach((measures) => {
+      fallbackNum += 1;
       (measures || []).forEach((measure) => {
         const sm = measure && measure.parentSourceMeasure;
-        const num = sm && sm.MeasureNumber;
-        if (num == null) return;
+        const num = (sm && sm.MeasureNumber != null) ? sm.MeasureNumber : fallbackNum;
         ((measure.staffEntries) || []).forEach((se) => {
           (se.graphicalVoiceEntries || []).forEach((gve) => {
             (gve.notes || []).forEach((gnote) => {
@@ -214,13 +222,51 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
-  // One render pass: apply model colors, render, then (re)build the note-name overlay and
-  // notify the UI (which rebuilds chord chips against the fresh render).
+  // Shade the captured measure range behind the notes (a translucent rect spanning the union
+  // of its noteheads). Removed + rebuilt on every render. No-op without a DOM svg / range.
+  const MEASURE_HL_CLASS = 'measure-hl-layer';
+  function applyMeasureHighlight() {
+    if (!container || !container.querySelectorAll) return;
+    container.querySelectorAll('.' + MEASURE_HL_CLASS).forEach((n) => n.remove());
+    if (!measureHighlight) return;
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+    const [from, to] = measureHighlight;
+    const byMeasure = renderedNotesByMeasure();
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, found = false;
+    for (let m = from; m <= to; m++) {
+      (byMeasure[m] || []).forEach((nt) => {
+        if (!nt.el || !nt.el.getBBox) return;
+        const b = nt.el.getBBox();
+        found = true;
+        if (b.x < x1) x1 = b.x;
+        if (b.y < y1) y1 = b.y;
+        if (b.x + b.width > x2) x2 = b.x + b.width;
+        if (b.y + b.height > y2) y2 = b.y + b.height;
+      });
+    }
+    if (!found) return;
+    const padX = 6, padY = 24;
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('class', MEASURE_HL_CLASS);
+    rect.setAttribute('x', x1 - padX);
+    rect.setAttribute('y', y1 - padY);
+    rect.setAttribute('width', (x2 - x1) + 2 * padX);
+    rect.setAttribute('height', (y2 - y1) + 2 * padY);
+    rect.setAttribute('fill', '#ffe9a8');
+    rect.setAttribute('opacity', '0.5');
+    rect.setAttribute('pointer-events', 'none');
+    svg.insertBefore(rect, svg.firstChild);   // first child → painted behind the notes
+  }
+
+  // One render pass: apply model colors, render, then (re)build the note-name overlay, the
+  // captured-measure shading, and notify the UI (which rebuilds chord chips).
   function redraw() {
     clearHighlight();
     applyVoiceColors();
     osmd.render();
     applyNoteNames();
+    applyMeasureHighlight();
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
@@ -263,6 +309,10 @@ export function createMusicRenderer(container, opts = {}) {
       });
     },
     clearHighlight,
+    // Shade a captured measure range [from,to] behind the notes; persists across re-renders
+    // (zoom / segment changes) until cleared. Used to mark a vocab item's original measures.
+    highlightMeasures(range) { measureHighlight = (range && range.length === 2) ? [range[0], range[1]] : null; applyMeasureHighlight(); },
+    clearMeasureHighlight() { measureHighlight = null; applyMeasureHighlight(); },
     applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };
 }
