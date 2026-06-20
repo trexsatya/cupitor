@@ -46,3 +46,48 @@ export function parseYouTubeId(url) {
   if (m) return m[1];
   return null;
 }
+
+// Browser glue: drive Tone.js from a buildSchedule() result and follow with the OSMD cursor.
+// opts.Tone defaults to the global Tone (vendored UMD). opts.getCursor returns the OSMD
+// cursor (or null) lazily so the player isn't coupled to a specific renderer instance.
+export function createMusicPlayer({ Tone, getCursor } = {}) {
+  const T = Tone || (typeof globalThis !== 'undefined' ? globalThis.Tone : undefined);
+  if (!T) throw new Error('Tone.js is not available');
+  const synth = new T.PolySynth(T.Synth).toDestination();
+  let part = null;
+  let schedule = [];
+
+  function disposePart() { if (part) { part.stop(); part.dispose(); part = null; } }
+
+  function buildPart() {
+    disposePart();
+    const cursor = getCursor && getCursor();
+    if (cursor) { try { cursor.reset(); cursor.show(); } catch (_) {} }
+    part = new T.Part((time, ev) => {
+      synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
+      if (cursor) T.Draw.schedule(() => { try { cursor.next(); } catch (_) {} }, time);
+    }, schedule.map(e => [e.time, e]));
+    const last = schedule[schedule.length - 1];
+    part.loopEnd = last ? last.time + last.duration : 0;
+    return part;
+  }
+
+  return {
+    synth,
+    setSchedule(s) { schedule = s || []; buildPart(); },
+    setLoop(on) { if (part) part.loop = !!on; },
+    async play() {
+      await T.start();
+      if (!part) buildPart();
+      T.Transport.start();
+      part.start(0);
+    },
+    pause() { T.Transport.pause(); },
+    stop() {
+      T.Transport.stop();
+      if (part) part.stop();
+      const c = getCursor && getCursor();
+      if (c) { try { c.reset(); c.hide(); } catch (_) {} }
+    },
+  };
+}
