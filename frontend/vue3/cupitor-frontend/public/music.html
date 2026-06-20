@@ -393,6 +393,24 @@
     const btn = document.getElementById('addVocabBtn');
     if (btn) btn.textContent = currentVocabEntry ? 'Add/update to vocab' : 'Add to vocab';
   }
+  // Transient status pill for media/vocab actions: styled by tone, fades out + clears itself.
+  let mediaMsgTimer = null;
+  function setMediaMsg(text, tone) {
+    const el = document.getElementById('mediaMsg');
+    if (!el) return;
+    if (mediaMsgTimer) { clearTimeout(mediaMsgTimer); mediaMsgTimer = null; }
+    if (!text) { el.textContent = ''; el.style.cssText = ''; return; }
+    const palette = { info: ['#eef2ff', '#3730a3'], ok: ['#e7f6ec', '#1b7f3b'], err: ['#fdecec', '#b42318'] };
+    const [bg, fg] = palette[tone] || palette.info;
+    el.textContent = text;
+    el.style.cssText = `display:inline-block;margin-left:.5rem;padding:2px 10px;border-radius:999px;`
+      + `font-size:.85em;background:${bg};color:${fg};transition:opacity .4s;opacity:1`;
+    const ms = tone === 'err' ? 8000 : 4000;   // give errors longer to read
+    mediaMsgTimer = setTimeout(() => {
+      el.style.opacity = '0';
+      mediaMsgTimer = setTimeout(() => { el.textContent = ''; el.style.cssText = ''; }, 400);
+    }, ms);
+  }
   function ensurePlayer() {
     if (!player) player = createMusicPlayer({ getCursor: () => (renderer && renderer.osmd ? renderer.osmd.cursor : null) });
     return player;
@@ -506,33 +524,32 @@
   let currentPreviewId = null;
   document.getElementById('ytSaveBtn').onclick = async () => {
     const url = document.getElementById('ytUrl').value.trim();
-    if (!currentPreviewId || !url) { document.getElementById('mediaMsg').textContent = 'Preview a piece and enter a URL.'; return; }
-    document.getElementById('mediaMsg').textContent = 'Saving link…';
+    if (!currentPreviewId || !url) { setMediaMsg('Preview a piece and enter a URL.', 'info'); return; }
+    setMediaMsg('Saving link…');
     const res = await linkYouTubeAndPush({ system, id: currentPreviewId, url, currentIndex: index,
       store, committer: makeCommitter(`link ${currentPreviewId}`) });
-    if (res.error) { document.getElementById('mediaMsg').textContent = res.error; return; }
+    if (res.error) { setMediaMsg(res.error, 'err'); return; }
     index = res.index;
     if (currentDetail && currentDetail.meta) currentDetail.meta.youtube = url;
     if (!res.pushed) unpushedIds.add(currentPreviewId); else unpushedIds.delete(currentPreviewId);
     render(); updateRetryBtn();
-    document.getElementById('mediaMsg').textContent = res.pushed ? 'Linked + pushed.'
-      : `Saved locally; push failed: ${res.pushError}`;
+    setMediaMsg(res.pushed ? 'Linked + pushed.' : `Saved locally; push failed: ${res.pushError}`, res.pushed ? 'ok' : 'err');
   };
   document.getElementById('guessBtn').onclick = () => {
-    if (!currentDetail) { document.getElementById('mediaMsg').textContent = 'Preview a piece first.'; return; }
+    if (!currentDetail) { setMediaMsg('Preview a piece first.', 'info'); return; }
     const dur = yt && yt.getDuration ? yt.getDuration() : 0;
-    if (!dur) { document.getElementById('mediaMsg').textContent = 'Load the YouTube video first (▶ on YouTube source).'; return; }
+    if (!dur) { setMediaMsg('Load the YouTube video first (▶ on YouTube source).', 'info'); return; }
     const range = segmentRange();
     const from = range.fromMeasure || 1, to = range.toMeasure || from;
     const start = guessSegmentStart(currentDetail, [from, to], dur);
     const end = guessSegmentStart(currentDetail, [to + 1, to + 1], dur);  // start of the next measure
     document.getElementById('guessSec').value = start.toFixed(1);
     document.getElementById('guessEndSec').value = end.toFixed(1);
-    document.getElementById('mediaMsg').textContent = `Segment: ${start.toFixed(1)}–${end.toFixed(1)}s of ${dur.toFixed(0)}s`;
+    setMediaMsg(`Segment: ${start.toFixed(1)}–${end.toFixed(1)}s of ${dur.toFixed(0)}s`, 'ok');
   };
 
   document.getElementById('addVocabBtn').onclick = async () => {
-    if (!currentDetail || !currentPreviewId) { document.getElementById('mediaMsg').textContent = 'Preview a piece first.'; return; }
+    if (!currentDetail || !currentPreviewId) { setMediaMsg('Preview a piece first.', 'info'); return; }
     const range = segmentRange();
     const from = range.fromMeasure || 1, to = range.toMeasure || from;
     const startRaw = parseFloat(document.getElementById('guessSec').value);
@@ -556,11 +573,11 @@
     currentVocabEntry = entry;                        // now showing the saved (possibly new) item
     updateAddVocabLabel();
     renderVocab();
-    document.getElementById('mediaMsg').textContent = updating ? 'Updating vocab…' : 'Saving vocab…';
+    setMediaMsg(updating ? 'Updating vocab…' : 'Saving vocab…');
     const res = await saveVocabAndPush({ system, vocab, store, committer: makeCommitter(`vocab ${entry.id}`) });
-    document.getElementById('mediaMsg').textContent = res.pushed
+    setMediaMsg(res.pushed
       ? `${updating ? 'Updated' : 'Added'} "${entry.id}" (${vocab.length} total)`
-      : `Saved locally; push failed: ${res.pushError}`;
+      : `Saved locally; push failed: ${res.pushError}`, res.pushed ? 'ok' : 'err');
   };
   async function openPreview(id) {
     const title = (index.find(e => e.id === id) || {}).title || id;
