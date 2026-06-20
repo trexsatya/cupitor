@@ -43,7 +43,7 @@ export function parseQuery(input) {
     pitch_tolerance: Number.isFinite(raw.pitch_tolerance) ? raw.pitch_tolerance : 0,
     allow_passing: raw.allow_passing !== false,
     allow_repetition: raw.allow_repetition !== false,
-    max_results: raw.max_results
+    max_results: (Number.isFinite(raw.max_results) && raw.max_results > 0) ? Math.floor(raw.max_results) : undefined
   };
 }
 
