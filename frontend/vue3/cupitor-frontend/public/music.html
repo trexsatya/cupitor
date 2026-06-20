@@ -171,6 +171,13 @@
     <label>Tempo <input id="tempoInput" type="number" min="20" max="300" style="width:4em"></label>
     <span id="transportMsg"></span>
   </div>
+  <div id="mediaRow" style="margin:.25rem 0">
+    <input id="ytUrl" type="text" placeholder="YouTube URL" style="width:18em">
+    <button id="ytSaveBtn">Link YouTube</button>
+    <button id="guessBtn">Guess segment start</button>
+    <input id="guessSec" type="number" step="0.1" style="width:6em" placeholder="sec">
+    <span id="mediaMsg"></span>
+  </div>
   <div id="osmdPreview"></div>
   <div id="ytPlayer" style="display:none"></div>
 </div>
@@ -180,6 +187,7 @@
   import { createMusicRenderer } from './music-render.js';
   import { createMusicStore } from './music-local-store.js';
   import { buildSchedule, createMusicPlayer, createYouTubeController, parseYouTubeId } from './music-player.js';
+  import { guessSegmentStart, linkYouTubeAndPush } from './music-media.js';
 
   const system = getSystemFromUrl().name;
   document.getElementById('systemLabel').textContent = system;
@@ -325,6 +333,32 @@
     if (yt) yt.pause();
     document.getElementById('transportMsg').textContent = '';
   };
+
+  let currentPreviewId = null;
+  document.getElementById('ytSaveBtn').onclick = async () => {
+    const url = document.getElementById('ytUrl').value.trim();
+    if (!currentPreviewId || !url) { document.getElementById('mediaMsg').textContent = 'Preview a piece and enter a URL.'; return; }
+    document.getElementById('mediaMsg').textContent = 'Saving link…';
+    const res = await linkYouTubeAndPush({ system, id: currentPreviewId, url, currentIndex: index,
+      store, committer: makeCommitter(`link ${currentPreviewId}`) });
+    if (res.error) { document.getElementById('mediaMsg').textContent = res.error; return; }
+    index = res.index;
+    if (currentDetail && currentDetail.meta) currentDetail.meta.youtube = url;
+    if (!res.pushed) unpushedIds.add(currentPreviewId); else unpushedIds.delete(currentPreviewId);
+    render(); updateRetryBtn();
+    document.getElementById('mediaMsg').textContent = res.pushed ? 'Linked + pushed.'
+      : `Saved locally; push failed: ${res.pushError}`;
+  };
+  document.getElementById('guessBtn').onclick = () => {
+    if (!currentDetail) { document.getElementById('mediaMsg').textContent = 'Preview a piece first.'; return; }
+    const dur = yt && yt.getDuration ? yt.getDuration() : 0;
+    if (!dur) { document.getElementById('mediaMsg').textContent = 'Load the YouTube video first (▶ on YouTube source).'; return; }
+    const range = segmentRange();
+    const from = range.fromMeasure || 1, to = range.toMeasure || from;
+    const sec = guessSegmentStart(currentDetail, [from, to], dur);
+    document.getElementById('guessSec').value = sec.toFixed(1);
+    document.getElementById('mediaMsg').textContent = `Guess: ${sec.toFixed(1)}s of ${dur.toFixed(0)}s`;
+  };
   async function openPreview(id) {
     const title = (index.find(e => e.id === id) || {}).title || id;
     document.getElementById('previewTitle').textContent = title;
@@ -343,6 +377,9 @@
     } catch (e) { document.getElementById('previewMsg').textContent = 'Render error: ' + e.message; return; }
     if (!res.ok) { document.getElementById('previewMsg').textContent = 'Cannot render (note-text piece).'; return; }
     currentDetail = detail;
+    currentPreviewId = id;
+    document.getElementById('ytUrl').value = (detail.meta && detail.meta.youtube) || '';
+    document.getElementById('guessSec').value = '';
     document.getElementById('tempoInput').value = (detail.meta && detail.meta.tempo) || 90;
     if (player) player.stop();
     renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
