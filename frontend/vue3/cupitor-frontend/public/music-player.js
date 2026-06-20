@@ -181,8 +181,15 @@ export function instrumentVoiceKey(name) {
 
 // Public CDN of General MIDI soundfont samples (the gleitz MIDI.js / FluidR3_GM set).
 export const SOUNDFONT_BASE = 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/';
-// A sparse, central set of pitches; Tone.Sampler pitch-shifts between them (≤ a tritone).
-const SOUNDFONT_NOTES = ['C3', 'F#3', 'C4', 'F#4', 'C5'];
+// Sparse samples every minor third (C/Eb/Gb/A) across the central range; Tone.Sampler
+// pitch-shifts between them. These exact files exist for all the instruments we map to.
+const SOUNDFONT_NOTES = ['C3', 'Eb3', 'Gb3', 'A3', 'C4', 'Eb4', 'Gb4', 'A4', 'C5'];
+// FluidR3_GM filenames spell black keys as FLATS (Gb4), not sharps (Fs4/F#4).
+const SHARP_TO_FLAT = { 'C#': 'Db', 'D#': 'Eb', 'F#': 'Gb', 'G#': 'Ab', 'A#': 'Bb' };
+function soundfontNoteFile(note) {
+  const m = /^([A-G]#?)(-?\d+)$/.exec(note);
+  return m ? (SHARP_TO_FLAT[m[1]] || m[1]) + m[2] : note;
+}
 
 // Pure: map a playback-voice category to a General MIDI instrument (soundfont folder name).
 export function gmInstrumentForVoice(category) {
@@ -201,7 +208,7 @@ export function gmInstrumentForVoice(category) {
 export function soundfontSampleMap(instrument, { baseUrl = SOUNDFONT_BASE, format = 'mp3', notes = SOUNDFONT_NOTES } = {}) {
   const dir = `${baseUrl}${instrument}-${format}/`;
   const map = {};
-  for (const n of notes) map[n] = `${dir}${n.replace('#', 's')}.${format}`;
+  for (const n of notes) map[n] = `${dir}${soundfontNoteFile(n)}.${format}`;
   return map;
 }
 
