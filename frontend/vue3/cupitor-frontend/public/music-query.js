@@ -255,3 +255,37 @@ export function matchMelodyIntervals(notes, contour, opts = {}) {
   }
   return null;
 }
+
+
+// ---------- top-level engine ----------
+
+function runMelody(query, search) {
+  const useInterval = query.search_by_interval && query.notes.length >= 2;
+  if (useInterval) {
+    const contour = unpackContour(search.contour);
+    const m = matchMelodyIntervals(query.notes, contour, { pitch_tolerance: query.pitch_tolerance });
+    return m && { kind: 'note', range: [m.start, m.end], score: 1.0 };
+  }
+  const m = matchMelodyPitchClasses(query.notes, search.pitchClasses);
+  return m && { kind: 'note', range: [m.start, m.end], score: 1.0 };
+}
+
+function runChord(query, search) {
+  const m = matchChordQuery(query, search.chords);
+  if (!m) return null;
+  const span = m.end - m.start + 1;
+  const score = query.chords.length / span;
+  return { kind: 'chord', range: [m.start, m.end], symbols: m.symbols, score };
+}
+
+export function runQuery(input, entries) {
+  const query = parseQuery(input);
+  const results = [];
+  for (const e of entries) {
+    const search = e.search || {};
+    const m = query.type === 'chord' ? runChord(query, search) : runMelody(query, search);
+    if (m) results.push({ pieceId: e.id, system: e.system, type: query.type, score: m.score, match: m });
+  }
+  results.sort((a, b) => (b.score - a.score) || a.pieceId.localeCompare(b.pieceId));
+  return query.max_results ? results.slice(0, query.max_results) : results;
+}

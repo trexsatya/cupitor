@@ -3,6 +3,7 @@ import fs from 'fs';
 import jQuery from 'jquery';
 import { encodeMusicXml, inferChords } from './music-encoding.js';
 import { buildIndexEntry } from './music-index.js';
+import { runQuery } from './music-query.js';
 
 beforeAll(() => { global.$ = global.jQuery = jQuery; });
 
@@ -23,6 +24,30 @@ const have = (p) => { try { return fs.existsSync(p); } catch (_) { return false;
     expect(entry.channels).toContain('chordSymbol');   // inference produced chords
     expect(entry.search.chords.length).toBeGreaterThan(0);
     expect(entry.search.contour.length).toBeGreaterThan(0);
+  });
+
+  test('runQuery finds a chord that the index actually contains', () => {
+    const xml = fs.readFileSync(CHOPIN, 'utf8');
+    const doc = inferChords(encodeMusicXml(xml, { id: 'Chopin_Nocturne_Op.9_No.2_for_Solo_Guitar', system: 'western' }));
+    const entry = buildIndexEntry(doc, xml);
+    const firstChord = entry.search.chords.split(/\s+/).filter(Boolean)[0];
+    expect(firstChord).toBeTruthy();
+    const res = runQuery({ type: 'chord', chords: [{ chord: firstChord }] }, [entry]);
+    expect(res.length).toBe(1);
+    expect(res[0].pieceId).toBe('Chopin_Nocturne_Op.9_No.2_for_Solo_Guitar');
+  });
+
+  test('runQuery finds the opening melodic pitch classes', () => {
+    const xml = fs.readFileSync(CHOPIN, 'utf8');
+    const doc = inferChords(encodeMusicXml(xml, { id: 'Chopin_Nocturne_Op.9_No.2_for_Solo_Guitar', system: 'western' }));
+    const entry = buildIndexEntry(doc, xml);
+    const firstThree = entry.search.pitchClasses.split(/\s+/).filter(Boolean).slice(0, 3);
+    // convert compact spelling back to query spelling: Cs->C#, etc.
+    const toQuery = { Cs: 'C#', Ds: 'D#', Fs: 'F#', Gs: 'G#', As: 'A#' };
+    const notes = firstThree.map(t => toQuery[t] || t);
+    const res = runQuery({ type: 'melody', notes }, [entry]);
+    expect(res.length).toBe(1);
+    expect(res[0].match.range[0]).toBe(0);
   });
 });
 
