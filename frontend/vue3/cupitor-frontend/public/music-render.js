@@ -5,6 +5,16 @@ import { primaryVoice } from './music-encoding.js';
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
+// Readable, deterministic palette for coloring voices in the rendered sheet.
+const VOICE_COLORS = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf'];
+const DEFAULT_NOTE_COLOR = '#000000';
+// Pure: a stable color for a 0-based voice index, cycling past the palette length.
+export function voiceColor(index) {
+  const n = VOICE_COLORS.length;
+  const i = (((index | 0) % n) + n) % n;
+  return VOICE_COLORS[i];
+}
+
 // Map a primary-voice note-index range to a 1-based [startMeasure, endMeasure].
 export function measureRangeFromNoteRange(detail, noteRange) {
   if (!noteRange) return null;
@@ -78,8 +88,32 @@ export function createMusicRenderer(container, opts = {}) {
   const osmd = factory(container);
   osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false });
   let totalMeasures = 0;
+  let colorVoices = false;
 
-  function setZoom(factor) { osmd.Zoom = factor; osmd.render(); }
+  // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
+  // No-op on a sheet without instruments (e.g. the test fake / before load).
+  function applyVoiceColors() {
+    const instruments = osmd.Sheet && osmd.Sheet.Instruments;
+    if (!instruments || !instruments.forEach) return;
+    let vi = 0;
+    instruments.forEach((instr) => {
+      (instr.Voices || []).forEach((voice) => {
+        const color = colorVoices ? voiceColor(vi) : DEFAULT_NOTE_COLOR;
+        (voice.VoiceEntries || []).forEach((ve) => {
+          (ve.Notes || []).forEach((note) => { note.NoteheadColor = color; });
+        });
+        vi++;
+      });
+    });
+  }
+
+  // One render pass: apply model colors, render, then (re)build overlays.
+  function redraw() {
+    applyVoiceColors();
+    osmd.render();
+  }
+
+  function setZoom(factor) { osmd.Zoom = factor; redraw(); }
 
   return {
     osmd,
@@ -88,19 +122,20 @@ export function createMusicRenderer(container, opts = {}) {
         return { ok: false, reason: 'not-musicxml' };
       }
       await osmd.load(detail.source);
-      osmd.render();
+      redraw();
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
       return { ok: true, totalMeasures };
     },
     showFull() {
       osmd.setOptions({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: totalMeasures || Number.MAX_SAFE_INTEGER });
-      osmd.render();
+      redraw();
     },
     showSegment(measureRange) {
       osmd.setOptions({ drawFromMeasureNumber: measureRange[0], drawUpToMeasureNumber: measureRange[1] });
-      osmd.render();
+      redraw();
     },
     setZoom,
+    setVoiceColors(on) { colorVoices = !!on; redraw(); },
     applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };
 }

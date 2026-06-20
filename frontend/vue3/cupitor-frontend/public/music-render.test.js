@@ -4,6 +4,7 @@ import { measureRangeFromChordMatch } from './music-render.js';
 import { responsiveZoom } from './music-render.js';
 import { createMusicRenderer } from './music-render.js';
 import { resolveMatchMeasures } from './music-render.js';
+import { voiceColor } from './music-render.js';
 import { encodeMusicXml, inferChords } from './music-encoding.js';
 import { buildIndexEntry } from './music-index.js';
 import fs from 'fs';
@@ -233,5 +234,27 @@ describe('resolveMatchMeasures', () => {
   });
   test('null match → null', () => {
     expect(resolveMatchMeasures(detail, null)).toBeNull();
+  });
+});
+
+describe('voiceColor', () => {
+  test('distinct, stable colors for the first voices', () => {
+    expect(typeof voiceColor(0)).toBe('string');
+    expect(voiceColor(0)).not.toBe(voiceColor(1));
+    expect(voiceColor(0)).toBe(voiceColor(0));
+  });
+  test('cycles past the palette length', () => {
+    expect(voiceColor(6)).toBe(voiceColor(0));
+    expect(voiceColor(-1)).toBe(voiceColor(5));
+  });
+});
+
+describe('createMusicRenderer voice colors', () => {
+  test('setVoiceColors re-renders and does not throw on a sheet without instruments', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    const before = osmd.calls.filter(c => c[0] === 'render').length;
+    r.setVoiceColors(true);
+    expect(osmd.calls.filter(c => c[0] === 'render').length).toBe(before + 1);
   });
 });
