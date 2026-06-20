@@ -123,10 +123,23 @@ export function computeChanges({ system, pieces, currentIndex = [], force = fals
   return { changed, changedPieces, index };
 }
 
+const NOOP_STORE = {
+  async putPieces() {}, async markSynced() {},
+  async getEntries() { return []; }, async getDetail() { return null; }, async getUnpushed() { return []; }
+};
+
 // committer: async (files:[{path, getContent(current)}]) => any   (wraps GitHubUtils.commitMultipleFiles)
-export async function rebuildAndPush({ system, pieces, currentIndex = [], committer, force = false, updatedAt = null }) {
+// store: created via createMusicStore() (music-local-store.js); defaults to a no-op
+//        so callers/tests that don't care about local persistence still work.
+// Writes changed pieces to the local store BEFORE pushing, so a push failure never
+// loses data. Never rethrows a push failure — reports it via { pushed:false, pushError }.
+export async function rebuildAndPush({ system, pieces, currentIndex = [], committer, store = NOOP_STORE, force = false, updatedAt = null }) {
   const { changed, changedPieces, index } = computeChanges({ system, pieces, currentIndex, force, updatedAt });
   if (changed.length === 0) return { changed, index, pushed: false };
+
+  let localError = null;
+  try { await store.putPieces(system, changedPieces); }
+  catch (e) { localError = e.message; }
 
   const files = [
     { path: `db/music/${system}/index.json`, getContent: () => JSON.stringify(index, null, 2) },
@@ -135,8 +148,16 @@ export async function rebuildAndPush({ system, pieces, currentIndex = [], commit
       getContent: () => JSON.stringify(detail)
     }))
   ];
-  await committer(files);
-  return { changed, index, pushed: true };
+
+  let pushed = false, pushError = null;
+  try { await committer(files); pushed = true; }
+  catch (e) { pushError = e.message; }
+
+  if (pushed) {
+    try { await store.markSynced(system, changed); }
+    catch (e) { if (!localError) localError = e.message; }
+  }
+  return { changed, index, pushed, pushError, localError };
 }
 
 export async function loadIndex(system) {
