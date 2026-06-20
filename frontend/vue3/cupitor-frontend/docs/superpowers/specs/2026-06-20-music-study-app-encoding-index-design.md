@@ -103,7 +103,7 @@ Per voice, channel arrays are index-aligned (entry *i* of every array describes 
   interval:     [+7, -1, -1, …],        // contour vs previous note (length = pitch.length - 1) — CROSS-SYSTEM bridge
   sargam:       ["Pa","Dha", …],        // key-relative scale degree
   duration:     ["q","e","e", …],       // rhythm channel (MusicXML only; null for note-text)
-  chordSymbol:  [null,"A#m",null, …],   // INFERRED via guessChords (test files carry no <harmony>); null where none
+  chordSymbol:  [null,"A#m",null, …],   // explicit <harmony> if present, else INFERRED per-measure (new pure matcher); null where none
   lyric:        ["a","gar", …],         // aligned (MusicXML only; null for note-text)
   measureIndex: [1,1,1,2, …]            // note → measure number, for context rendering later
 }
@@ -116,7 +116,7 @@ Channel producers (all already in the repo):
 | pitch / interval | `musicxml.js` `.toArray()` + `music_search.js` `getIntervals` |
 | sargam / degree | `music.js` `melodyInContextOfKey` |
 | duration / rhythm | `music-analysis.js` `getRhythmCounting` |
-| chordSymbol | `music-analysis.js` `guessChords` (inferred — no `<harmony>` in source) |
+| chordSymbol | explicit `<harmony>` if present; else **inferred** by a new pure per-measure matcher (`inferChords`) built on `music-reference-data.js` `allChords` + `normaliseChordName`. *Not* the existing `guessChords` — that reads OSMD pixel geometry (`n.left`/`n.line`) and can't run without rendering. Sub-measure (per-beat) chord resolution is a later refinement. |
 | key inference | `music.js` `Key()`, `music-reference-data.js` |
 
 ## 7. Two encoders, one schema
