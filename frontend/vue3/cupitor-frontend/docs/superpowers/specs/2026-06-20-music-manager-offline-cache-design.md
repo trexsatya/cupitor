@@ -73,7 +73,7 @@ No `deletePiece` for now (YAGNI).
 ### `public/music-index.js` (refactor + additions)
 
 - **Extract** today's rebuild loop into pure
-  `computeChanges({ pieces, currentIndex, force })` →
+  `computeChanges({ system, pieces, currentIndex, force, updatedAt })` →
   `{ changed, changedPieces, index }`, where `changed` is `[id]`, `changedPieces` is
   `[{ entry, detail }]` (paired, so both `putPieces` and the file builder consume one
   shape), and `index` is `mergeIndex(currentIndex, changedPieces.map(p => p.entry))`.
@@ -98,7 +98,7 @@ No `deletePiece` for now (YAGNI).
   5. `try { await committer(files); pushed = true } catch (e) { pushed = false; pushError = e.message }` — **never rethrow.**
   6. On `pushed`, `await store.markSynced(system, changed)`.
   7. Return `{ changed, index, pushed, pushError, localError }`.
-- **Add** `retryPush({ system, currentIndex, committer, store, updatedAt })`:
+- **Add** `retryPush({ system, currentIndex, committer, store })`:
   - `const unpushed = await store.getUnpushed(system)`; if empty → `{ pushed: false, changed: [] }`.
   - Build `files`: `index.json` = `JSON.stringify(currentIndex, null, 2)` (the full
     merged index the Manager already holds), plus a detail file per unpushed piece.
