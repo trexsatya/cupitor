@@ -174,3 +174,52 @@ describe('mergeLocalRemote (pure)', () => {
     expect(unpushedIds.size).toBe(0);
   });
 });
+
+describe('rebuildAndPush with local store', () => {
+  function fakeStore() {
+    const calls = { put: [], synced: [] };
+    return {
+      calls,
+      async putPieces(system, items) { calls.put.push({ system, ids: items.map(i => i.entry.id) }); },
+      async markSynced(system, ids) { calls.synced.push({ system, ids }); },
+      async getEntries() { return []; },
+      async getDetail() { return null; },
+      async getUnpushed() { return []; },
+    };
+  }
+  const piece = { id: 'p1', format: 'note-text', source: 'C4 E4 G4', key: 'C' };
+
+  test('writes to the store before pushing, then marks synced on success', async () => {
+    const order = [];
+    const store = fakeStore();
+    const origPut = store.putPieces;
+    store.putPieces = async (...a) => { order.push('put'); return origPut(...a); };
+    const committer = async () => { order.push('push'); };
+    const res = await rebuildAndPush({ system: 'western', pieces: [piece], currentIndex: [], committer, store });
+    expect(res.pushed).toBe(true);
+    expect(order).toEqual(['put', 'push']);
+    expect(store.calls.put[0].ids).toEqual(['p1']);
+    expect(store.calls.synced[0].ids).toEqual(['p1']);
+  });
+
+  test('push failure: returns pushed:false + pushError, store still written, no rethrow, NOT marked synced', async () => {
+    const store = fakeStore();
+    const committer = async () => { throw new Error('offline'); };
+    const res = await rebuildAndPush({ system: 'western', pieces: [piece], currentIndex: [], committer, store });
+    expect(res.pushed).toBe(false);
+    expect(res.pushError).toBe('offline');
+    expect(store.calls.put[0].ids).toEqual(['p1']); // saved locally
+    expect(store.calls.synced).toEqual([]);         // never marked synced
+  });
+
+  test('local write failure: surfaces localError but still attempts push', async () => {
+    const store = fakeStore();
+    store.putPieces = async () => { throw new Error('quota'); };
+    let pushed = false;
+    const committer = async () => { pushed = true; };
+    const res = await rebuildAndPush({ system: 'western', pieces: [piece], currentIndex: [], committer, store });
+    expect(res.localError).toBe('quota');
+    expect(pushed).toBe(true);
+    expect(res.pushed).toBe(true);
+  });
+});
