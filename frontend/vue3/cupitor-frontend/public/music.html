@@ -205,12 +205,15 @@
     <strong id="previewTitle"></strong>
     <button id="previewFullBtn">Full</button>
     <label>Measures:
-      <input id="segFrom" type="number" min="1" style="width:4em" placeholder="from">–
+      <button id="startPrevBtn" title="extend the window to an earlier measure">◀</button>
+      <input id="segFrom" type="number" min="1" style="width:4em" placeholder="from">
+      <button id="startNextBtn" title="move the start later">▶</button>
+      –
+      <button id="endPrevBtn" title="move the end earlier">◀</button>
       <input id="segTo" type="number" min="1" style="width:4em" placeholder="to">
+      <button id="endNextBtn" title="extend the window to a later measure">▶</button>
     </label>
     <button id="previewSegBtn">Show segment</button>
-    <button id="segPrevBtn" title="show one fewer measure">◀ Prev</button>
-    <button id="segNextBtn" title="show one more measure">Next ▶</button>
     <button id="previewCloseBtn">Close</button>
     <span id="previewMsg"></span>
   </div>
@@ -243,7 +246,7 @@
     <span id="mediaMsg"></span>
   </div>
   <div id="viewOptions" style="margin:.25rem 0">
-    <label><input type="checkbox" id="voiceColorChk"> Color voices</label>
+    <label><input type="checkbox" id="voiceColorChk" checked> Color voices</label>
     <label><input type="checkbox" id="noteNameChk"> Note names</label>
     <label><input type="checkbox" id="chordChk"> Show chords</label>
   </div>
@@ -371,7 +374,11 @@
     if (!box) return;
     box.textContent = '';
     if (!renderer || !document.getElementById('chordChk').checked) { if (renderer) renderer.clearHighlight(); return; }
-    renderer.getGuessedChords().forEach((ch) => {
+    let chords = [];
+    try { chords = renderer.getGuessedChords(); }
+    catch (e) { box.innerHTML = '<small style="color:#c00">Chord scan error: ' + e.message + '</small>'; return; }
+    if (!chords.length) { box.innerHTML = '<small style="color:#888">No chords detected in the shown measures.</small>'; return; }
+    chords.forEach((ch) => {
       const b = document.createElement('button');
       b.textContent = `m${ch.measure}: ${ch.name}`;
       b.style.cssText = 'margin:2px;padding:2px 6px;cursor:pointer;border:1px solid #ccc;border-radius:6px;background:#fff';
@@ -380,7 +387,12 @@
     });
   }
 
-  let player = null, yt = null, currentDetail = null;
+  let player = null, yt = null, currentDetail = null, currentVocabEntry = null;
+  // The "Add to vocab" button doubles as "Add/update" while a saved vocab item is on screen.
+  function updateAddVocabLabel() {
+    const btn = document.getElementById('addVocabBtn');
+    if (btn) btn.textContent = currentVocabEntry ? 'Add/update to vocab' : 'Add to vocab';
+  }
   function ensurePlayer() {
     if (!player) player = createMusicPlayer({ getCursor: () => (renderer && renderer.osmd ? renderer.osmd.cursor : null) });
     return player;
@@ -523,21 +535,31 @@
     if (!currentDetail || !currentPreviewId) { document.getElementById('mediaMsg').textContent = 'Preview a piece first.'; return; }
     const range = segmentRange();
     const from = range.fromMeasure || 1, to = range.toMeasure || from;
-    const secRaw = parseFloat(document.getElementById('guessSec').value);
+    const startRaw = parseFloat(document.getElementById('guessSec').value);
+    const endRaw = parseFloat(document.getElementById('guessEndSec').value);
+    // While a saved vocab item is on screen, confirm whether to update it or add a new item.
+    let updating = false;
+    if (currentVocabEntry) {
+      updating = window.confirm(`This is the saved vocab item “${currentVocabEntry.id}”.\n\nOK = update that item · Cancel = add as a new item`);
+    }
     const entry = buildVocabEntry({
       pieceId: currentPreviewId, system, measureRange: [from, to],
       youtube: (currentDetail.meta && currentDetail.meta.youtube) || null,
-      startSeconds: Number.isFinite(secRaw) ? secRaw : null,
+      startSeconds: Number.isFinite(startRaw) ? startRaw : null,
+      endSeconds: Number.isFinite(endRaw) ? endRaw : null,
       snapshot: buildSnapshot(currentDetail, [from, to]),
       category: document.getElementById('vocabCat').value.trim() || 'uncategorized',
-      createdAt: new Date().toISOString().slice(0, 10),
+      createdAt: (updating && currentVocabEntry.createdAt) || new Date().toISOString().slice(0, 10),
     });
+    if (updating) entry.id = currentVocabEntry.id;   // keep the original identity even if the measures changed
     vocab = upsertVocab(vocab, entry);
+    currentVocabEntry = entry;                        // now showing the saved (possibly new) item
+    updateAddVocabLabel();
     renderVocab();
-    document.getElementById('mediaMsg').textContent = 'Saving vocab…';
+    document.getElementById('mediaMsg').textContent = updating ? 'Updating vocab…' : 'Saving vocab…';
     const res = await saveVocabAndPush({ system, vocab, store, committer: makeCommitter(`vocab ${entry.id}`) });
     document.getElementById('mediaMsg').textContent = res.pushed
-      ? `Added "${entry.id}" (${vocab.length} total)`
+      ? `${updating ? 'Updated' : 'Added'} "${entry.id}" (${vocab.length} total)`
       : `Saved locally; push failed: ${res.pushError}`;
   };
   async function openPreview(id) {
@@ -545,7 +567,8 @@
     document.getElementById('previewTitle').textContent = title;
     document.getElementById('previewMsg').textContent = 'Loading…';
     document.getElementById('musicPreview').style.display = 'block';
-    currentDetail = null; currentPreviewId = null;   // cleared until a piece fully renders
+    currentDetail = null; currentPreviewId = null; currentVocabEntry = null;   // cleared until a piece fully renders
+    updateAddVocabLabel();
     let detail;
     try {
       detail = unpushedIds.has(id)
@@ -565,8 +588,10 @@
     if (player) player.setInstrument(document.getElementById('instrSel').value);
     document.getElementById('ytUrl').value = (detail.meta && detail.meta.youtube) || '';
     document.getElementById('guessSec').value = '';
+    document.getElementById('guessEndSec').value = '';
     document.getElementById('tempoInput').value = (detail.meta && detail.meta.tempo) || 90;
     if (player) player.stop();
+    renderer.clearMeasureHighlight();   // a plain piece preview carries no captured-range shading
     renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
     renderer.showFull();
     document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
@@ -584,20 +609,24 @@
     const to = parseInt(document.getElementById('segTo').value, 10);
     if (renderer && Number.isFinite(from) && Number.isFinite(to)) renderer.showSegment([from, to]);
   };
-  // Prev/Next extend the shown window: Next adds a measure to the end, Prev removes one.
-  function stepSegment(delta) {
+  // Prev/Next on each boundary: the start pair (◀▶ left) moves segFrom, the end pair (◀▶
+  // right) moves segTo. ◀ on the start and ▶ on the end grow the window; the inner arrows shrink it.
+  function adjustSegment(which, delta) {
     if (!renderer) return;
     let from = parseInt(document.getElementById('segFrom').value, 10);
     let to = parseInt(document.getElementById('segTo').value, 10);
     if (!Number.isFinite(from)) from = 1;
     if (!Number.isFinite(to)) to = from;
-    to = Math.max(from, Math.min(totalMeasures || to + 1, to + delta));
+    if (which === 'from') from = Math.min(to, Math.max(1, from + delta));
+    else to = Math.max(from, Math.min(totalMeasures || (to + Math.max(delta, 0)), to + delta));
     document.getElementById('segFrom').value = from;
     document.getElementById('segTo').value = to;
     renderer.showSegment([from, to]);
   }
-  document.getElementById('segNextBtn').onclick = () => stepSegment(1);
-  document.getElementById('segPrevBtn').onclick = () => stepSegment(-1);
+  document.getElementById('startPrevBtn').onclick = () => adjustSegment('from', -1);
+  document.getElementById('startNextBtn').onclick = () => adjustSegment('from', 1);
+  document.getElementById('endPrevBtn').onclick = () => adjustSegment('to', -1);
+  document.getElementById('endNextBtn').onclick = () => adjustSegment('to', 1);
   document.getElementById('previewCloseBtn').onclick = () => {
     if (player) player.stop();
     document.getElementById('musicPreview').style.display = 'none';
@@ -695,12 +724,18 @@
       if (renderer) renderer.showSegment(mr);
     }
   }
-  async function openVocabEntry(pieceId, from, to) {
-    await openPreview(pieceId);
+  async function openVocabEntry(entry) {
+    await openPreview(entry.pieceId);
     if (!currentDetail) return;
+    currentVocabEntry = entry;
+    const from = entry.measureStart, to = entry.measureEnd;
     document.getElementById('segFrom').value = from;
     document.getElementById('segTo').value = to;
-    if (renderer) renderer.showSegment([from, to]);
+    document.getElementById('vocabCat').value = (entry.category && entry.category !== 'uncategorized') ? entry.category : '';
+    if (entry.startSeconds != null) document.getElementById('guessSec').value = entry.startSeconds;
+    if (entry.endSeconds != null) document.getElementById('guessEndSec').value = entry.endSeconds;
+    if (renderer) { renderer.showSegment([from, to]); renderer.highlightMeasures([from, to]); }
+    updateAddVocabLabel();
   }
   function renderVocab() {
     const box = document.getElementById('vocabList');
@@ -717,7 +752,7 @@
         const row = document.createElement('div');
         row.className = 'resultRow';
         row.innerHTML = `${title} <small>m${e.measureStart}–${e.measureEnd}${mark}</small>`;
-        row.onclick = () => openVocabEntry(e.pieceId, e.measureStart, e.measureEnd);
+        row.onclick = () => openVocabEntry(e);
         box.appendChild(row);
       });
     });

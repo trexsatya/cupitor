@@ -23,12 +23,12 @@ export function buildSnapshot(detail, measureRange) {
 
 // Pure: build a categorized vocab entry. id follows M1 (pieceId + measure range, spaces→_).
 export function buildVocabEntry({ pieceId, system, measureRange, youtube = null, startSeconds = null,
-                                  snapshot = null, category = 'uncategorized', createdAt = null }) {
+                                  endSeconds = null, snapshot = null, category = 'uncategorized', createdAt = null }) {
   const [measureStart, measureEnd] = measureRange;
   const id = `${pieceId}_${measureStart}_${measureEnd}`.replace(/\s+/g, '_');
   return {
     id, category, pieceId, system, measureStart, measureEnd,
-    youtube, startSeconds,
+    youtube, startSeconds, endSeconds,
     snapshot: snapshot || { pitches: [], chords: [] },
     createdAt,
   };
