@@ -268,10 +268,31 @@ export function createMusicRenderer(container, opts = {}) {
     if (anchor && anchor.el && anchor.el.getBBox) {
       const b = anchor.el.getBBox();
       const m = anchor.el.getCTM && anchor.el.getCTM();
-      if (m) return { x: m.a * b.x + m.c * b.y + m.e, y: m.b * b.x + m.d * b.y + m.f };
-      return { x: b.x, y: b.y };
+      if (m) {
+        const map = (px, py) => ({ x: m.a * px + m.c * py + m.e, y: m.b * px + m.d * py + m.f });
+        return { x: map(b.x, b.y).x, top: map(b.x, b.y).y, bottom: map(b.x, b.y + b.height).y };
+      }
+      return { x: b.x, top: b.y, bottom: b.y + b.height };
     }
-    return { x: area.x, y: area.top };
+    return { x: area.x, top: area.top, bottom: area.top };
+  }
+
+  // Top/bottom of the rendered staff lines in svg-user space (falls back to the notehead
+  // extent), so chord labels can sit on even rows above/below the staff rather than per-note.
+  function systemBounds() {
+    const staves = container.querySelectorAll('.vf-stave');
+    const els = staves.length ? staves : container.querySelectorAll('.vf-notehead');
+    let top = Infinity, bottom = -Infinity;
+    els.forEach((el) => {
+      if (!el.getBBox) return;
+      const b = el.getBBox();
+      const m = el.getCTM && el.getCTM();
+      const ty = m ? (m.b * b.x + m.d * b.y + m.f) : b.y;
+      const by = m ? (m.b * b.x + m.d * (b.y + b.height) + m.f) : (b.y + b.height);
+      if (ty < top) top = ty;
+      if (by > bottom) bottom = by;
+    });
+    return top === Infinity ? null : { top, bottom };
   }
 
   function applyChordOverlay() {
@@ -292,17 +313,24 @@ export function createMusicRenderer(container, opts = {}) {
     }));
     const layer = document.createElementNS(SVG_NS, 'g');
     layer.setAttribute('class', CHORD_LAYER_CLASS);
-    // Lay out columns left→right, skipping any that would crowd the previous one.
-    const cols = areas.map((area) => ({ area, ...chordAnchorXY(area) })).sort((a, b) => a.x - b.x);
-    let lastX = -Infinity;
-    cols.forEach(({ area, x, y }) => {
-      if (x - lastX < MIN_LABEL_GAP) return;   // too close → skip to de-crowd
-      lastX = x;
+    // Two even rows — above the top staff line and below the bottom one — with columns
+    // alternating sides so adjacent labels never collide. A per-side min-gap de-crowds.
+    const bounds = systemBounds();
+    const aboveY = bounds ? bounds.top - 8 : 0;
+    const belowY = bounds ? bounds.bottom + 16 : 0;
+    const cols = areas.map((area) => ({ area, x: chordAnchorXY(area).x })).sort((a, b) => a.x - b.x);
+    const lastBySide = [-Infinity, -Infinity];   // last placed x for [above, below]
+    let placed = 0;
+    cols.forEach(({ area, x }) => {
+      const side = placed % 2;                    // 0 = above, 1 = below
+      if (x - lastBySide[side] < MIN_LABEL_GAP) return;   // too close on this row → skip
+      lastBySide[side] = x;
+      placed++;
       area.chords.forEach((ch, k) => {
         const isSel = selectedChords.has(ch.name);
         const t = document.createElementNS(SVG_NS, 'text');
         t.setAttribute('x', x);
-        t.setAttribute('y', y - 6 - k * 11);   // stack upward; best (k=0) nearest the notes
+        t.setAttribute('y', side === 0 ? (aboveY - k * 11) : (belowY + k * 11));
         t.setAttribute('font-size', isSel ? '11' : '9');
         t.setAttribute('font-weight', '700');
         t.setAttribute('fill', isSel ? '#c62828' : '#1565c0');
