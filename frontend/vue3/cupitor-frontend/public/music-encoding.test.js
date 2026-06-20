@@ -1,5 +1,5 @@
 // public/music-encoding.test.js
-import { nameToMidi, intervalsOf, toSargam, packContour, unpackContour, encodeNoteText, encodeMusicXml } from './music-encoding.js';
+import { nameToMidi, intervalsOf, toSargam, packContour, unpackContour, encodeNoteText, encodeMusicXml, inferChords } from './music-encoding.js';
 import jQuery from 'jquery';
 
 // musicxml.js relies on a global `$`; provide it for jsdom.
@@ -99,5 +99,27 @@ describe('encodeMusicXml', () => {
     expect(v.sargam[0]).toBe('Sa');                 // E is tonic of E major
     expect(v.chordSymbol[0]).toBe('E');             // from <harmony> in measure 1
     expect(v.chordSymbol[2]).toBe(null);
+  });
+});
+
+describe('inferChords (pure, per-measure)', () => {
+  test('fills null chordSymbol with the best per-measure triad', () => {
+    // For note-text, each line is one measure.
+    const doc = encodeNoteText('C4 E4 G4\nA4 C5 E5', { id: 't', key: 'C' });
+    const out = inferChords(doc);
+    expect(out.voices[0].chordSymbol).toEqual(['C', 'C', 'C', 'Am', 'Am', 'Am']);
+  });
+
+  test('returns null for a measure with no clear triad', () => {
+    const doc = encodeNoteText('C4 D4', { id: 't', key: 'C' });
+    expect(inferChords(doc).voices[0].chordSymbol).toEqual([null, null]);
+  });
+
+  test('does not overwrite an existing (harmony) chordSymbol', () => {
+    const doc = encodeNoteText('C4 E4 G4', { id: 't', key: 'C' });
+    doc.voices[0].chordSymbol[0] = 'Csus4';           // pretend a <harmony> tag set this
+    const out = inferChords(doc);
+    expect(out.voices[0].chordSymbol[0]).toBe('Csus4'); // preserved
+    expect(out.voices[0].chordSymbol[1]).toBe('C');     // null slots filled with the measure chord
   });
 });

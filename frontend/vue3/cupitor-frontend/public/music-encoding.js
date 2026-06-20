@@ -1,5 +1,5 @@
 // public/music-encoding.js
-import { getScale } from './music-reference-data.js';
+import { getScale, allChords, normaliseChordName } from './music-reference-data.js';
 import { extractPitchesFromText } from './music_search.js';
 import { MusicXml } from './musicxml.js';
 
@@ -161,4 +161,53 @@ export function encodeMusicXml(xmlString, meta = {}) {
     },
     voices: voices.length ? voices : [{ pitch:[],interval:[],sargam:[],duration:[],chordSymbol:[],lyric:[],measureIndex:[] }]
   };
+}
+
+// Build chord candidates (pitch-class sets) once. Triads and larger only.
+const CHORD_CANDIDATES = (() => {
+  const seen = new Set(), out = [];
+  Object.keys(allChords).forEach(key => {
+    const c = allChords[key];
+    const rootPc = pitchClass(c.root);
+    if (rootPc === undefined) return;
+    const tonePcs = new Set(c.notes.map(pitchClass).filter(pc => pc !== undefined));
+    if (tonePcs.size < 3) return;
+    const symbol = normaliseChordName(key);
+    const sig = rootPc + ':' + [...tonePcs].sort((a, b) => a - b).join(',') + ':' + symbol;
+    if (seen.has(sig)) return;
+    seen.add(sig);
+    out.push({ symbol, rootPc, tonePcs });
+  });
+  return out;
+})();
+
+function matchChord(pcSet) {
+  let best = null, bestScore = -Infinity;
+  for (const c of CHORD_CANDIDATES) {
+    if (!pcSet.has(c.rootPc)) continue;
+    let present = 0; c.tonePcs.forEach(t => { if (pcSet.has(t)) present++; });
+    if (present < 3) continue;
+    let extra = 0; pcSet.forEach(p => { if (!c.tonePcs.has(p)) extra++; });
+    const score = present * 2 - extra - (c.tonePcs.size - present);
+    const better = score > bestScore || (score === bestScore && best &&
+      (c.tonePcs.size < best.tonePcs.size ||
+       (c.tonePcs.size === best.tonePcs.size && c.symbol.localeCompare(best.symbol) < 0)));
+    if (better) { best = c; bestScore = score; }
+  }
+  return best ? best.symbol : null;
+}
+
+// Fills only null chordSymbol slots with the inferred chord for that note's measure.
+export function inferChords(doc) {
+  const pcByMeasure = {};
+  doc.voices.forEach(v => v.pitch.forEach((m, i) => {
+    const meas = v.measureIndex[i];
+    (pcByMeasure[meas] = pcByMeasure[meas] || new Set()).add(((m % 12) + 12) % 12);
+  }));
+  const chordByMeasure = {};
+  Object.keys(pcByMeasure).forEach(meas => { chordByMeasure[meas] = matchChord(pcByMeasure[meas]); });
+  doc.voices.forEach(v => v.pitch.forEach((m, i) => {
+    if (v.chordSymbol[i] == null) v.chordSymbol[i] = chordByMeasure[v.measureIndex[i]] || null;
+  }));
+  return doc;
 }
