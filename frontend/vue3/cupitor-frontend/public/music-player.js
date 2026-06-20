@@ -285,14 +285,26 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
       if (cursor && ev._step) T.Draw.schedule(() => { try { cursor.next(); } catch (_) {} }, time);
     }, events);
-    part.loop = loop;
-    part.loopStart = 0;
-    part.loopEnd = scheduleEnd(schedule);
+    part.loop = false;   // looping is driven by the Transport (reliable) — see play()/setLoop
     return part;
+  }
+
+  // Configure the Transport's loop window to the segment, or disable it. Looping the Transport
+  // re-fires the Part's events on every pass (Part.loop alone proved unreliable in-browser).
+  function applyLoop() {
+    const end = scheduleEnd(schedule);
+    if (loop && end > 0) {
+      T.Transport.loopStart = 0;
+      T.Transport.loopEnd = end;
+      T.Transport.loop = true;
+    } else {
+      T.Transport.loop = false;
+    }
   }
 
   function stop() {
     clearStopTimer();
+    T.Transport.loop = false;   // clear the loop window so a later non-loop play isn't left looping
     T.Transport.stop();
     if (part) { try { part.stop(0); } catch (_) {} }
     const c = getCursor && getCursor();
@@ -301,7 +313,17 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
 
   return {
     setSchedule(s) { schedule = s || []; buildPart(); },
-    setLoop(on) { loop = !!on; if (part) part.loop = loop; if (loop) clearStopTimer(); },
+    setLoop(on) {
+      loop = !!on;
+      applyLoop();
+      if (loop) {
+        clearStopTimer();   // a pending one-shot boundary stop would kill the loop
+      } else if (T.Transport.state === 'started') {
+        // turned off mid-playback: still end at the segment boundary
+        const end = scheduleEnd(schedule);
+        if (end > 0) { clearStopTimer(); stopId = T.Transport.scheduleOnce(() => stop(), end); }
+      }
+    },
     setInstrument(category) {
       const next = makeVoice(category);
       if (synth && synth.dispose) synth.dispose();
@@ -314,6 +336,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       if (!part) buildPart();
       clearStopTimer();
       T.Transport.stop();   // reset position to 0 so part.start(0)'s events are in the future
+      applyLoop();
       T.Transport.start();
       part.start(0);
       if (!loop) {
