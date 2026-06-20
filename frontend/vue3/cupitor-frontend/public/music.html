@@ -364,6 +364,7 @@
     document.getElementById('previewTitle').textContent = title;
     document.getElementById('previewMsg').textContent = 'Loading…';
     document.getElementById('musicPreview').style.display = 'block';
+    currentDetail = null; currentPreviewId = null;   // cleared until a piece fully renders
     let detail;
     try {
       detail = unpushedIds.has(id)
