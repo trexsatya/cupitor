@@ -254,6 +254,26 @@ export function createMusicRenderer(container, opts = {}) {
   // best few chords (closest to the staff = best); clicking a label highlights that chord's
   // notes. Removed + rebuilt every render. No-op without a DOM svg (test fakes, jsdom).
   const CHORD_LAYER_CLASS = 'chord-area-layer';
+  const MIN_LABEL_GAP = 30;        // min horizontal spacing between label columns (de-crowd)
+  const MAX_LABELS_PER_AREA = 2;   // cap the vertical stack so labels don't pile up
+
+  // svg-user-space anchor for an area's labels: its leftmost contributing notehead mapped
+  // through the element's CTM, so labels line up even when OSMD applies a zoom/translate
+  // transform (raw getBBox coords are in the notehead's local space, not the svg root's).
+  function chordAnchorXY(area) {
+    let anchor = null;
+    area.chords.forEach((ch) => (ch.notes || []).forEach((n) => {
+      if (n && n.el && (anchor === null || (n.left || 0) < (anchor.left || 0))) anchor = n;
+    }));
+    if (anchor && anchor.el && anchor.el.getBBox) {
+      const b = anchor.el.getBBox();
+      const m = anchor.el.getCTM && anchor.el.getCTM();
+      if (m) return { x: m.a * b.x + m.c * b.y + m.e, y: m.b * b.x + m.d * b.y + m.f };
+      return { x: b.x, y: b.y };
+    }
+    return { x: area.x, y: area.top };
+  }
+
   function applyChordOverlay() {
     if (!container || !container.querySelectorAll) return;
     container.querySelectorAll('.' + CHORD_LAYER_CLASS).forEach((n) => n.remove());
@@ -263,18 +283,26 @@ export function createMusicRenderer(container, opts = {}) {
     const byMeasure = renderedNotesByMeasure();
     const stream = [];
     Object.keys(byMeasure).forEach((m) => { stream.push(...byMeasure[m]); });
-    const areas = guessChordAreas(stream);
+    const areas = guessChordAreas(stream, undefined, { maxPerArea: MAX_LABELS_PER_AREA });
     if (!areas.length) return;
+    // Highlight the selected chords' notes regardless of which labels we end up drawing.
+    let selectedNotes = [];
+    areas.forEach((area) => area.chords.forEach((ch) => {
+      if (selectedChords.has(ch.name)) selectedNotes = selectedNotes.concat(ch.notes);
+    }));
     const layer = document.createElementNS(SVG_NS, 'g');
     layer.setAttribute('class', CHORD_LAYER_CLASS);
-    let selectedNotes = [];
-    areas.forEach((area) => {
+    // Lay out columns left→right, skipping any that would crowd the previous one.
+    const cols = areas.map((area) => ({ area, ...chordAnchorXY(area) })).sort((a, b) => a.x - b.x);
+    let lastX = -Infinity;
+    cols.forEach(({ area, x, y }) => {
+      if (x - lastX < MIN_LABEL_GAP) return;   // too close → skip to de-crowd
+      lastX = x;
       area.chords.forEach((ch, k) => {
         const isSel = selectedChords.has(ch.name);
-        if (isSel) selectedNotes = selectedNotes.concat(ch.notes);
         const t = document.createElementNS(SVG_NS, 'text');
-        t.setAttribute('x', area.x);
-        t.setAttribute('y', area.top - 6 - k * 11);   // stack upward; best (k=0) nearest the notes
+        t.setAttribute('x', x);
+        t.setAttribute('y', y - 6 - k * 11);   // stack upward; best (k=0) nearest the notes
         t.setAttribute('font-size', isSel ? '11' : '9');
         t.setAttribute('font-weight', '700');
         t.setAttribute('fill', isSel ? '#c62828' : '#1565c0');
