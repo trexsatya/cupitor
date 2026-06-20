@@ -250,7 +250,14 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   let loop = false;
   let stopId = null;   // Tone.Transport.scheduleOnce id for the boundary stop
 
-  function disposePart() { if (part) { part.stop(); part.dispose(); part = null; } }
+  // Stop at an explicit transport time 0: calling part.stop() bare resolves to "now", which
+  // after a Transport.stop() can be a tiny negative float that Tone rejects (RangeError).
+  function disposePart() {
+    if (!part) return;
+    try { part.stop(0); } catch (_) {}
+    try { part.dispose(); } catch (_) {}
+    part = null;
+  }
   function clearStopTimer() {
     if (stopId !== null) { try { T.Transport.clear(stopId); } catch (_) {} stopId = null; }
   }
@@ -280,7 +287,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   function stop() {
     clearStopTimer();
     T.Transport.stop();
-    if (part) part.stop();
+    if (part) { try { part.stop(0); } catch (_) {} }
     const c = getCursor && getCursor();
     if (c) { try { c.reset(); c.hide(); } catch (_) {} }
   }
