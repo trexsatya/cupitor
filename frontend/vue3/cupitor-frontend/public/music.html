@@ -365,19 +365,18 @@
     if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'), { onChordSelect: syncVocabChords });
     return renderer;
   }
-  // Auto-persist chord picks while a saved vocab item is on screen (push debounced to coalesce
-  // rapid toggles). No-op when capturing a fresh segment (use Add/update to vocab for that).
-  let chordSaveTimer = null;
+  // Auto-update chord picks while a saved vocab item is on screen. Writes the LOCAL cache only
+  // (survives reload) — it does NOT push to GitHub, which would spam commits on every toggle.
+  // The push happens later via "Add/update to vocab". No-op when capturing a fresh segment.
   function syncVocabChords(names) {
     if (!currentVocabEntry) return;
     currentVocabEntry.chords = names || [];
     vocab = upsertVocab(vocab, currentVocabEntry);
     renderVocab();
-    setMediaMsg('Chords updated', 'ok');
-    if (chordSaveTimer) clearTimeout(chordSaveTimer);
-    chordSaveTimer = setTimeout(() => {
-      saveVocabAndPush({ system, vocab, store, committer: makeCommitter(`vocab ${currentVocabEntry.id}`) });
-    }, 800);
+    if (store && store.putVocab) {
+      try { const p = store.putVocab(system, vocab); if (p && p.catch) p.catch(() => {}); } catch (_) {}
+    }
+    setMediaMsg('Chords saved locally — Add/update to vocab to push', 'ok');
   }
 
   let player = null, yt = null, currentDetail = null, currentVocabEntry = null;
