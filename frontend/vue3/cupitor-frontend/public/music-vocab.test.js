@@ -54,3 +54,36 @@ describe('buildVocabEntry', () => {
     expect(entry.id).toBe('p_1_1');
   });
 });
+
+import { saveVocabAndPush } from './music-vocab.js';
+
+describe('upsertVocab', () => {
+  test('appends a new entry and replaces an existing one by id', () => {
+    const a = { id: 'x_1_2', category: 'a' };
+    const b = { id: 'y_1_1', category: 'b' };
+    const list1 = upsertVocab([a], b);
+    expect(list1.map(e => e.id)).toEqual(['x_1_2', 'y_1_1']);
+    const list2 = upsertVocab(list1, { id: 'x_1_2', category: 'updated' });
+    expect(list2.find(e => e.id === 'x_1_2').category).toBe('updated');
+    expect(list2).toHaveLength(2);
+  });
+});
+
+describe('saveVocabAndPush', () => {
+  test('pushes vocab.json with the full array; returns pushed:true', async () => {
+    let files = null;
+    const committer = async (f) => { files = f; };
+    const vocab = [{ id: 'x_1_2', category: 'a' }];
+    const res = await saveVocabAndPush({ system: 'western', vocab, committer });
+    expect(res.pushed).toBe(true);
+    expect(files[0].path).toBe('db/music/western/vocab.json');
+    expect(JSON.parse(await files[0].getContent(null))).toEqual(vocab);
+  });
+
+  test('push failure: pushed:false + pushError, no rethrow', async () => {
+    const committer = async () => { throw new Error('offline'); };
+    const res = await saveVocabAndPush({ system: 'western', vocab: [], committer });
+    expect(res.pushed).toBe(false);
+    expect(res.pushError).toBe('offline');
+  });
+});

@@ -33,3 +33,24 @@ export function buildVocabEntry({ pieceId, system, measureRange, youtube = null,
     createdAt,
   };
 }
+
+// Pure: add or replace a vocab entry by id, returning a new array.
+export function upsertVocab(vocab, entry) {
+  const out = (vocab || []).filter(e => e.id !== entry.id);
+  out.push(entry);
+  return out;
+}
+
+// Integration: fetch the per-system vocab.json (empty array if missing/unreachable).
+export async function loadVocab(system) {
+  const res = await fetch(`${getMusicResourceUrl(system)}/vocab.json`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+// Integration: push the full vocab array to vocab.json. Never rethrows a push failure.
+export async function saveVocabAndPush({ system, vocab, committer }) {
+  const files = [{ path: `db/music/${system}/vocab.json`, getContent: () => JSON.stringify(vocab, null, 2) }];
+  try { await committer(files); return { pushed: true }; }
+  catch (e) { return { pushed: false, pushError: e.message }; }
+}
