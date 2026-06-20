@@ -45,3 +45,72 @@ export function parseQuery(input) {
     max_results: raw.max_results
   };
 }
+
+// ---------- chord decomposition ----------
+
+// Base triad quality per chordPattern key (see music-reference-data.js chordPatterns).
+const QUALITY_BY_CPK = {
+  'maj': 'maj', 'min': 'min', 'aug': 'aug', 'dim': 'dim', 'dim7': 'dim',
+  'sus4': 'maj', '7Sus4': 'maj',
+  'min+9': 'min', 'maj+9': 'maj',
+  '6': 'maj', 'min6': 'min', '6+9': 'maj', 'min6+9': 'min',
+  '7': 'maj', 'maj7': 'maj', 'min7': 'min', 'minMaj7': 'min',
+  '9': 'maj', 'maj9': 'maj', 'min9': 'min'
+};
+
+// Extension tokens beyond the base triad, per chordPattern key. Canonical tokens only.
+const EXT_BY_CPK = {
+  'maj': [], 'min': [], 'aug': [], 'dim': [],
+  'dim7': ['7'], 'sus4': ['sus4'], '7Sus4': ['7', 'sus4'],
+  'min+9': ['add9'], 'maj+9': ['add9'],
+  '6': ['6'], 'min6': ['6'], '6+9': ['6', 'add9'], 'min6+9': ['6', 'add9'],
+  '7': ['7'], 'maj7': ['maj7'], 'min7': ['7'], 'minMaj7': ['maj7'],
+  '9': ['7', '9'], 'maj9': ['maj7', '9'], 'min9': ['7', '9']
+};
+
+const EXT_ALIASES = {
+  '+9': 'add9', 'add9': 'add9', '9add': 'add9',
+  'M7': 'maj7', 'maj7': 'maj7',
+  'dom7': '7', '7': '7', 'b7': '7',
+  '6': '6', 'sus4': 'sus4', 'sus': 'sus4', '9': '9'
+};
+
+export function normExtToken(token) {
+  const t = String(token).trim();
+  return EXT_ALIASES[t] || t;
+}
+
+// Build a lookup: normalised symbol -> {rootPc, quality, ext:Set}. Done once.
+const CHORD_TABLE = (() => {
+  const table = new Map();
+  Object.keys(allChords).forEach(key => {
+    const root = allChords[key].root;
+    const cpk = key.slice(root.length);
+    const quality = QUALITY_BY_CPK[cpk];
+    if (!quality) return;
+    const rootPc = pitchClass(root);
+    if (rootPc === undefined) return;
+    const sym = normaliseChordName(key);
+    if (!table.has(sym)) table.set(sym, { rootPc, quality, ext: new Set(EXT_BY_CPK[cpk] || []) });
+  });
+  return table;
+})();
+
+export function decomposeChord(symbol) {
+  const sym = String(symbol).trim();
+  if (CHORD_TABLE.has(sym)) {
+    const e = CHORD_TABLE.get(sym);
+    return { rootPc: e.rootPc, quality: e.quality, ext: new Set(e.ext) };
+  }
+  // Fallback: root + simple quality marker; extensions best-effort empty.
+  const m = /^([A-G][#b]?)(.*)$/.exec(sym);
+  if (!m) return null;
+  const rootPc = pitchClass(m[1]);
+  if (rootPc === undefined) return null;
+  const suffix = m[2];
+  let quality = 'maj';
+  if (suffix.startsWith('o')) quality = 'dim';
+  else if (suffix.startsWith('+')) quality = 'aug';
+  else if (suffix.startsWith('m') && !suffix.startsWith('maj') && !suffix.startsWith('M')) quality = 'min';
+  return { rootPc, quality, ext: new Set() };
+}
