@@ -150,7 +150,6 @@
     </style>
 </head>
 <body>
-<h1>Music Library — Manager (<span id="systemLabel"></span>)</h1>
 <details id="managerSection">
   <summary>Manage library (add / rebuild / push pieces)</summary>
   <div class="controls">
@@ -215,6 +214,15 @@
     <button id="stopBtn">⏹ Stop</button>
     <label><input type="checkbox" id="loopChk"> Loop segment</label>
     <label>Tempo <input id="tempoInput" type="number" min="20" max="300" style="width:4em"></label>
+    <label>Instrument
+      <select id="instrSel">
+        <option value="piano">Piano</option>
+        <option value="guitar">Guitar</option>
+        <option value="strings">Strings</option>
+        <option value="organ">Organ</option>
+        <option value="synth">Synth</option>
+      </select>
+    </label>
     <span id="transportMsg"></span>
   </div>
   <div id="mediaRow" style="margin:.25rem 0">
@@ -237,7 +245,7 @@
   import { createMusicRenderer, resolveMatchMeasures } from './music-render.js';
   import { buildChordQuery, buildMelodyQuery, matchSummary } from './music-search-ui.js';
   import { createMusicStore } from './music-local-store.js';
-  import { buildSchedule, createMusicPlayer, createYouTubeController, parseYouTubeId } from './music-player.js';
+  import { buildSchedule, createMusicPlayer, createYouTubeController, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
   import { guessSegmentStart, linkYouTubeAndPush } from './music-media.js';
   import { buildSnapshot, buildVocabEntry, upsertVocab, loadVocab, saveVocabAndPush } from './music-vocab.js';
 
@@ -361,6 +369,7 @@
     const schedule = buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...segmentRange() });
     if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
     const p = ensurePlayer();
+    p.setInstrument(document.getElementById('instrSel').value);
     p.setSchedule(schedule);
     p.setLoop(document.getElementById('loopChk').checked);
     p.play();
@@ -375,6 +384,7 @@
     try { yt.load(id); yt.play(); document.getElementById('transportMsg').textContent = 'Playing YouTube'; }
     catch (e) { document.getElementById('transportMsg').textContent = 'YouTube error: ' + e.message; }
   }
+  document.getElementById('instrSel').onchange = () => { if (player) player.setInstrument(document.getElementById('instrSel').value); };
   document.getElementById('playBtn').onclick = () =>
     (document.getElementById('srcSel').value === 'youtube' ? playYouTube() : playMidi());
   document.getElementById('pauseBtn').onclick = () => {
@@ -453,6 +463,8 @@
     if (!res.ok) { document.getElementById('previewMsg').textContent = 'Cannot render (note-text piece).'; return; }
     currentDetail = detail;
     currentPreviewId = id;
+    document.getElementById('instrSel').value = instrumentVoiceKey(detail.meta && detail.meta.instrument);
+    if (player) player.setInstrument(document.getElementById('instrSel').value);
     document.getElementById('ytUrl').value = (detail.meta && detail.meta.youtube) || '';
     document.getElementById('guessSec').value = '';
     document.getElementById('tempoInput').value = (detail.meta && detail.meta.tempo) || 90;
