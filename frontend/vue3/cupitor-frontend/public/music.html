@@ -391,6 +391,7 @@
     document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes`;
   }
   let ytMonitor = null;
+  let ytLoadedId = null;   // video id currently loaded in the player (avoid reloading on replay)
   function clearYtMonitor() { if (ytMonitor) { clearInterval(ytMonitor); ytMonitor = null; } }
   // Bound YouTube playback to [startSec, endSec]: poll currentTime and, on reaching the end,
   // loop back to the start (when Loop is checked) or pause. No-op if the range is degenerate.
@@ -433,10 +434,18 @@
     };
     try {
       if (!yt) {
+        // First ever play: build the player; seek+play once it's ready.
         yt = createYouTubeController('ytPlayer', { onReady: () => begin() });
+        ytLoadedId = id;
         yt.load(id, Number.isFinite(editedStart) ? editedStart : 0);
+      } else if (ytLoadedId !== id) {
+        // Switched to a different video: reload it, then seek+play.
+        ytLoadedId = id;
+        yt.load(id, Number.isFinite(editedStart) ? editedStart : 0);
+        begin();
       } else {
-        yt.load(id, Number.isFinite(editedStart) ? editedStart : 0);
+        // Same video already loaded: just seek to the segment start + play (no reload —
+        // reloading mid-play raced with the immediate seek and restarted from 0).
         begin();
       }
       document.getElementById('transportMsg').textContent = 'Playing YouTube' + (hasSeg ? ' (segment)' : '');
