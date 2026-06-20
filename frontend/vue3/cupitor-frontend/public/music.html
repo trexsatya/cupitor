@@ -384,9 +384,25 @@
     const id = parseYouTubeId(url);
     if (!id) { document.getElementById('transportMsg').textContent = 'No linked YouTube video.'; return; }
     document.getElementById('ytPlayer').style.display = '';
-    if (!yt) yt = createYouTubeController('ytPlayer');
-    try { yt.load(id); yt.play(); document.getElementById('transportMsg').textContent = 'Playing YouTube'; }
-    catch (e) { document.getElementById('transportMsg').textContent = 'YouTube error: ' + e.message; }
+    const range = segmentRange();
+    const from = range.fromMeasure || 1, to = range.toMeasure || from;
+    const edited = parseFloat(document.getElementById('guessSec').value);
+    const startFor = () => {
+      if (Number.isFinite(edited)) return edited;
+      const g = guessSegmentStart(currentDetail, [from, to], yt.getDuration());
+      document.getElementById('guessSec').value = g.toFixed(1);
+      return g;
+    };
+    try {
+      if (!yt) {
+        yt = createYouTubeController('ytPlayer', { onReady: () => { const s = startFor(); yt.seekTo(s); yt.play(); } });
+        yt.load(id, Number.isFinite(edited) ? edited : 0);
+      } else {
+        yt.load(id, Number.isFinite(edited) ? edited : 0);
+        const s = startFor(); yt.seekTo(s); yt.play();
+      }
+      document.getElementById('transportMsg').textContent = 'Playing YouTube';
+    } catch (e) { document.getElementById('transportMsg').textContent = 'YouTube error: ' + e.message; }
   }
   document.getElementById('instrSel').onchange = () => { if (player) player.setInstrument(document.getElementById('instrSel').value); };
   document.getElementById('playBtn').onclick = () =>
