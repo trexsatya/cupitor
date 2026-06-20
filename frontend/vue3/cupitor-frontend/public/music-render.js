@@ -382,8 +382,11 @@ export function createMusicRenderer(container, opts = {}) {
   // after each render (osmd.render() repaints them black); a no-op when off / without a DOM svg.
   function applyDimConnectors() {
     if (!dimConnectors || !container || !container.querySelectorAll) return;
-    container.querySelectorAll('.vf-beam, .vf-stem, .vf-slur, .vf-tie, .vf-stavetie').forEach((g) => {
-      g.querySelectorAll('path, rect, polygon, line').forEach((el) => {
+    // Beams/stems/slurs/ties + the numeric annotations (string numbers, fret-hand fingerings).
+    const groups = '.vf-beam, .vf-stem, .vf-slur, .vf-tie, .vf-stavetie, .vf-stringnumber, .vf-frethandfinger, .vf-fingering';
+    container.querySelectorAll(groups).forEach((g) => {
+      // Recolor the group itself (in case the class sits on the text/shape) and its drawables.
+      [g, ...g.querySelectorAll('path, rect, polygon, line, text, tspan, circle')].forEach((el) => {
         const stroke = el.getAttribute('stroke');
         const fill = el.getAttribute('fill');
         const strokes = stroke && stroke !== 'none';
