@@ -1,5 +1,9 @@
 // public/music-encoding.test.js
-import { nameToMidi, intervalsOf, toSargam, packContour, unpackContour, encodeNoteText } from './music-encoding.js';
+import { nameToMidi, intervalsOf, toSargam, packContour, unpackContour, encodeNoteText, encodeMusicXml } from './music-encoding.js';
+import jQuery from 'jquery';
+
+// musicxml.js relies on a global `$`; provide it for jsdom.
+beforeAll(() => { global.$ = global.jQuery = jQuery; });
 
 describe('pitch helpers', () => {
   test('nameToMidi: C4 = 60, A4 = 69, C#5 = 73', () => {
@@ -55,5 +59,45 @@ describe('encodeNoteText', () => {
     expect(v.chordSymbol.every(c => c === null)).toBe(true);
     expect(v.sargam).toHaveLength(v.pitch.length);
     expect(v.measureIndex).toHaveLength(v.pitch.length);
+  });
+});
+
+// Minimal but valid MusicXML: key=E (4 sharps), 4/4, two measures,
+// notes E4 G#4 | B4, plus a <harmony> in measure 1 and a lyric on E4.
+const SAMPLE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Guitar</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><key><fifths>4</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef></attributes>
+      <harmony><root><root-step>E</root-step></root><kind>major</kind></harmony>
+      <note><pitch><step>E</step><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>half</type>
+        <lyric number="1"><syllabic>single</syllabic><text>la</text></lyric></note>
+      <note><pitch><step>G</step><alter>1</alter><octave>4</octave></pitch><duration>2</duration><voice>1</voice><type>half</type></note>
+    </measure>
+    <measure number="2">
+      <note><pitch><step>B</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type></note>
+    </measure>
+  </part>
+</score-partwise>`;
+
+describe('encodeMusicXml', () => {
+  test('populates all channels with correct measureIndex', () => {
+    const doc = encodeMusicXml(SAMPLE_XML, { id: 'sample', title: 'Sample', system: 'western' });
+    expect(doc.meta.format).toBe('musicxml');
+    expect(doc.meta.key).toBe('E');                 // <fifths>4</fifths> -> E major
+    expect(doc.meta.time).toBe('4/4');
+    expect(doc.voices).toHaveLength(1);
+    const v = doc.voices[0];
+    expect(v.pitch).toEqual([64, 68, 71]);          // E4, G#4, B4
+    expect(v.interval).toEqual([4, 3]);
+    expect(v.duration).toEqual(['half', 'half', 'whole']);
+    expect(v.measureIndex).toEqual([1, 1, 2]);
+    expect(v.lyric[0]).toBe('la');
+    expect(v.sargam[0]).toBe('Sa');                 // E is tonic of E major
+    expect(v.chordSymbol[0]).toBe('E');             // from <harmony> in measure 1
+    expect(v.chordSymbol[2]).toBe(null);
   });
 });

@@ -1,6 +1,7 @@
 // public/music-encoding.js
 import { getScale } from './music-reference-data.js';
 import { extractPitchesFromText } from './music_search.js';
+import { MusicXml } from './musicxml.js';
 
 const BASE_PC = {
   "C":0,"C#":1,"Db":1,"D":2,"D#":3,"Eb":3,"E":4,"E#":5,"Fb":4,
@@ -81,5 +82,84 @@ export function encodeNoteText(txt, meta = {}) {
       key, time: null, tempo: null, instrument: meta.instrument || null
     },
     voices: [voice]
+  };
+}
+
+// Map key-signature fifths (sharps +, flats -) to a major key name.
+const FIFTHS_TO_KEY = { '-7':'Cb','-6':'Gb','-5':'Db','-4':'Ab','-3':'Eb','-2':'Bb','-1':'F',
+  '0':'C','1':'G','2':'D','3':'A','4':'E','5':'B','6':'F#','7':'C#' };
+
+export function encodeMusicXml(xmlString, meta = {}) {
+  const mx = new MusicXml().loadXml(xmlString);
+  const measures = mx.toArray();                  // [[{name,octave,type,dot,voice,tie}, ...], ...]
+
+  const $xml = mx.xml;
+  const fifths = $xml.find('fifths').first().text();
+  const key = FIFTHS_TO_KEY[String(parseInt(fifths || '0', 10))] || 'C';
+  const beats = $xml.find('time > beats').first().text();
+  const beatType = $xml.find('time > beat-type').first().text();
+  const time = (beats && beatType) ? `${beats}/${beatType}` : null;
+  const instrument = $xml.find('instrument-name').first().text() ||
+                     $xml.find('part-name').first().text() || null;
+
+  // Harmony per measure (M1: explicit <harmony> only). Index by measure number.
+  const harmonyByMeasure = {};
+  $xml.find('measure').each(function () {
+    const num = parseInt($(this).attr('number'), 10);
+    const h = $(this).find('harmony root root-step').first().text();
+    if (h) {
+      const kind = $(this).find('harmony kind').first().text();
+      harmonyByMeasure[num] = h + (kind === 'minor' ? 'm' : '');
+    }
+  });
+  // Lyrics per note, in document order (aligned to sounded notes below).
+  const lyricByNoteOrder = [];
+  $xml.find('part > measure > note').each(function () {
+    const hasPitch = $(this).find('pitch').length > 0;
+    if (hasPitch) lyricByNoteOrder.push($(this).find('lyric text').first().text() || null);
+  });
+
+  // Build per-voice streams over sounded notes (rests dropped).
+  const voicesMap = {};
+  let soundedOrder = 0;
+  measures.forEach((notes, mIdx) => {
+    const measureNumber = mIdx + 1;
+    notes.forEach(n => {
+      if (!n.name || n.name.trim() === '' || Number.isNaN(n.octave)) return; // rest
+      const realMidi = nameToMidi(n.name, n.octave);
+      if (realMidi === null) return;
+      const vKey = n.voice || '1';
+      const v = (voicesMap[vKey] = voicesMap[vKey] || { pitch:[], duration:[], lyric:[], chordSymbol:[], measureIndex:[] });
+      v.pitch.push(realMidi);
+      v.duration.push(n.type || null);
+      v.lyric.push(lyricByNoteOrder[soundedOrder] || null);
+      v.chordSymbol.push(harmonyByMeasure[measureNumber] || null);
+      v.measureIndex.push(measureNumber);
+      soundedOrder += 1;
+    });
+  });
+
+  const noteNameAt = (midi) => ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][((midi%12)+12)%12];
+  const voices = Object.keys(voicesMap).map(k => {
+    const v = voicesMap[k];
+    return {
+      pitch: v.pitch,
+      interval: intervalsOf(v.pitch),
+      sargam: v.pitch.map(m => toSargam(noteNameAt(m), key)),
+      duration: v.duration,
+      chordSymbol: v.chordSymbol,
+      lyric: v.lyric,
+      measureIndex: v.measureIndex
+    };
+  });
+
+  return {
+    meta: {
+      id: meta.id || null, title: meta.title || meta.id || null,
+      system: meta.system || 'western', format: 'musicxml',
+      sourceUrl: meta.sourceUrl || null, youtube: meta.youtube || null,
+      key, time, tempo: null, instrument
+    },
+    voices: voices.length ? voices : [{ pitch:[],interval:[],sargam:[],duration:[],chordSymbol:[],lyric:[],measureIndex:[] }]
   };
 }
