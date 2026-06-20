@@ -218,12 +218,16 @@ export function matchMelodyPitchClasses(notes, pitchClassesStr) {
 
 // ---------- melody: interval (transposition-invariant) matching ----------
 
-// Build query intervals with a "free" flag. notes -> [{value, free}].
-// "." makes any interval touching it free (value ignored).
+// Build query intervals with a "free" flag. notes -> [{value, free}], or null if any
+// token is unrecognised. "." (null pitch) makes any interval touching it free; an
+// unrecognised token (undefined pitch) invalidates the whole query so it never matches.
+// A wildcard frees BOTH adjacent intervals, so e.g. ['C','.','E'] constrains nothing in
+// interval mode — use pitch-class mode for anchored wildcards.
 // KNOWN LIMITATION: query intervals are pitch-class deltas (0-11), so an octave-crossing
 // leap in the contour (e.g. +16) won't match a small query interval like +4. Fine for M2.
 function queryIntervals(notes) {
   const pcs = notes.map(n => (n === '.' ? null : pitchClass(n)));
+  if (pcs.some(p => p === undefined)) return null;   // unrecognised token -> no match
   const out = [];
   for (let i = 1; i < pcs.length; i++) {
     const a = pcs[i - 1], b = pcs[i];
@@ -239,6 +243,7 @@ export function matchMelodyIntervals(notes, contour, opts = {}) {
   if (notes.length < 2) return null;       // need at least one interval; single notes use pc mode
   const tol = opts.pitch_tolerance || 0;
   const q = queryIntervals(notes);
+  if (q === null) return null;              // unrecognised token
   const k = q.length;                       // intervals to match
   for (let start = 0; start + k <= contour.length; start++) {
     let ok = true;

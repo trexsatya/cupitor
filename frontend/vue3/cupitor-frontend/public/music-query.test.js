@@ -296,4 +296,18 @@ describe('matchMelodyIntervals', () => {
   test('single-note query returns null (interval mode needs >= 2 notes)', () => {
     expect(matchMelodyIntervals(['C'], contour, { pitch_tolerance: 0 })).toBeNull();
   });
+  test('unrecognised token in interval mode returns null', () => {
+    expect(matchMelodyIntervals(['C', 'Q'], contour, { pitch_tolerance: 0 })).toBeNull();
+  });
+  test('matches an interval at the very end of the contour', () => {
+    // query E C -> interval -4, which is the LAST contour interval [2,2,-4]
+    expect(matchMelodyIntervals(['E', 'C'], contour, { pitch_tolerance: 0 })).toEqual({ start: 2, end: 3 });
+  });
+  test('octave-crossing leap is not matched (pitch-class delta limitation)', () => {
+    // query C E = +4 (pc delta); a +16 leap in the contour will not match
+    expect(matchMelodyIntervals(['C', 'E'], [16], { pitch_tolerance: 0 })).toBeNull();
+  });
+  test('negative tolerance matches nothing', () => {
+    expect(matchMelodyIntervals(['C', 'D'], contour, { pitch_tolerance: -1 })).toBeNull();
+  });
 });
