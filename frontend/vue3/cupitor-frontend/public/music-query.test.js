@@ -20,6 +20,10 @@ describe('validateQuery', () => {
     expect(validateQuery(42).ok).toBe(false);
     expect(validateQuery('chord').ok).toBe(false);
   });
+  test('rejects melody queries with unrecognised note tokens', () => {
+    expect(validateQuery({ type: 'melody', notes: ['H'] }).ok).toBe(false);
+    expect(validateQuery({ type: 'melody', notes: ['C', '.', 'E'] }).ok).toBe(true);
+  });
 });
 
 describe('parseQuery', () => {
@@ -237,5 +241,17 @@ describe('matchMelodyPitchClasses', () => {
   test('returns the earliest match', () => {
     const m = matchMelodyPitchClasses(['C'], 'C D C');
     expect(m).toEqual({ start: 0, end: 0 });
+  });
+  test('unknown query token never matches', () => {
+    expect(matchMelodyPitchClasses(['H'], 'C D')).toBeNull();
+  });
+  test('all-wildcard query matches the first window of its length', () => {
+    expect(matchMelodyPitchClasses(['.', '.'], 'C D E')).toEqual({ start: 0, end: 1 });
+  });
+  test('query longer than the piece returns null', () => {
+    expect(matchMelodyPitchClasses(['C', 'D', 'E', 'F'], 'C D')).toBeNull();
+  });
+  test('flat query spelling matches compact sharp spelling (Db -> Cs)', () => {
+    expect(matchMelodyPitchClasses(['Db'], 'C Cs D')).toEqual({ start: 1, end: 1 });
   });
 });

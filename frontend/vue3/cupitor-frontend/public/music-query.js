@@ -16,6 +16,7 @@ export function validateQuery(q) {
   if (q.type === 'melody') {
     if (!Array.isArray(q.notes) || q.notes.length === 0) return { ok: false, error: 'melody query needs a non-empty notes array' };
     if (!q.notes.every(n => typeof n === 'string' && n.length)) return { ok: false, error: 'each note must be a string' };
+    if (!q.notes.every(n => n === '.' || pitchClass(n) !== undefined)) return { ok: false, error: 'unrecognised note token' };
     return { ok: true };
   }
   return { ok: false, error: `unknown query type: ${q.type}` };
@@ -188,17 +189,11 @@ export function matchChordQuery(query, pieceChordsStr) {
 
 // ---------- melody: pitch-class matching ----------
 
-// Query token spelling (sharps/flats) -> pitch class number.
-const QUERY_PC = {
-  C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, 'E#': 5, Fb: 4,
-  F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10,
-  B: 11, 'B#': 0, Cb: 11
-};
 // Index compact spelling ("Cs"=1 ...) -> pitch class number.
 const COMPACT_PC = { C: 0, Cs: 1, D: 2, Ds: 3, E: 4, F: 5, Fs: 6, G: 7, Gs: 8, A: 9, As: 10, B: 11 };
 
 export function parseMelodyTokens(notes) {
-  return notes.map(n => (n === '.' ? null : QUERY_PC[n]));
+  return notes.map(n => (n === '.' ? null : pitchClass(n)));
 }
 
 function pitchClassesToNumbers(pcStr) {
@@ -212,8 +207,8 @@ export function matchMelodyPitchClasses(notes, pitchClassesStr) {
   for (let start = 0; start + len <= seq.length; start++) {
     let ok = true;
     for (let i = 0; i < len; i++) {
-      if (q[i] === null) continue;       // wildcard
-      if (seq[start + i] !== q[i]) { ok = false; break; }
+      if (q[i] === null) continue;                                                // wildcard
+      if (q[i] === undefined || seq[start + i] !== q[i]) { ok = false; break; }   // unknown token never matches
     }
     if (ok) return { start, end: start + len - 1 };
   }
