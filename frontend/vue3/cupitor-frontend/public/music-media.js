@@ -22,3 +22,11 @@ export function guessSegmentStart(detail, measureRange, mediaSeconds) {
   }
   return total > 0 ? (before / total) * mediaSeconds : 0;
 }
+
+// Pure: return copies of the Tier-1 entry and Tier-2 detail with meta.youtube set.
+export function applyYouTubeLink(entry, detail, url) {
+  return {
+    entry: { ...entry, youtube: url },
+    detail: { ...detail, meta: { ...detail.meta, youtube: url } },
+  };
+}
