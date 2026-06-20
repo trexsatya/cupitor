@@ -47,3 +47,47 @@ describe('applyYouTubeLink', () => {
     expect(out.detail.source).toBe('<x/>');
   });
 });
+
+import { linkYouTubeAndPush } from './music-media.js';
+
+describe('linkYouTubeAndPush', () => {
+  function fakeStore(detail) {
+    const calls = { put: [], synced: [] };
+    return {
+      calls,
+      async getDetail() { return detail; },
+      async putPieces(system, items) { calls.put.push({ system, items }); },
+      async markSynced(system, ids) { calls.synced.push({ system, ids }); },
+    };
+  }
+  const detail = { meta: { id: 'p', youtube: null }, voices: [], format: 'musicxml', source: '<x/>' };
+  const currentIndex = [{ id: 'p', title: 'P', youtube: null }, { id: 'other', title: 'O' }];
+  const url = 'https://youtu.be/dQw4w9WgXcQ';
+
+  test('patches both tiers, pushes index.json + the detail, writes local + marks synced on success', async () => {
+    let pushed = null;
+    const committer = async (files) => { pushed = files; };
+    const store = fakeStore(detail);
+    const res = await linkYouTubeAndPush({ system: 'western', id: 'p', url, currentIndex, store, committer });
+    expect(res.pushed).toBe(true);
+    expect(res.index.find(e => e.id === 'p').youtube).toBe(url);
+    expect(res.index.find(e => e.id === 'other').youtube).toBeUndefined();
+    const paths = pushed.map(f => f.path);
+    expect(paths).toContain('db/music/western/index.json');
+    expect(paths).toContain('db/music/western/details/p.json');
+    const savedDetail = JSON.parse(await pushed.find(f => f.path === 'db/music/western/details/p.json').getContent(null));
+    expect(savedDetail.meta.youtube).toBe(url);
+    expect(store.calls.put[0].items[0].entry.youtube).toBe(url);
+    expect(store.calls.synced[0].ids).toEqual(['p']);
+  });
+
+  test('push failure: pushed:false + pushError, no rethrow, not marked synced (local copy kept)', async () => {
+    const store = fakeStore(detail);
+    const committer = async () => { throw new Error('offline'); };
+    const res = await linkYouTubeAndPush({ system: 'western', id: 'p', url, currentIndex, store, committer });
+    expect(res.pushed).toBe(false);
+    expect(res.pushError).toBe('offline');
+    expect(store.calls.put.length).toBe(1);
+    expect(store.calls.synced).toEqual([]);
+  });
+});
