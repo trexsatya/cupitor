@@ -299,4 +299,12 @@ describe('createMusicRenderer note names', () => {
     r.setNoteNames(true);
     expect(osmd.calls.filter(c => c[0] === 'render').length).toBe(before + 1);
   });
+
+  test('setChords re-renders and does not throw without a rendered graphic', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    const before = osmd.calls.filter(c => c[0] === 'render').length;
+    r.setChords(true);
+    expect(osmd.calls.filter(c => c[0] === 'render').length).toBe(before + 1);
+  });
 });
