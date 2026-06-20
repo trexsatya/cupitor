@@ -32,3 +32,14 @@ export function toSargam(name, keyName) {
   const idx = scale.findIndex(n => BASE_PC[n] === pc);
   return idx === -1 ? null : SARGAM[idx];
 }
+
+// Comma-separated signed integers. Compact, lossless, trivially decodable.
+// (A byte-packing scheme is a later optimization; correctness first.)
+export function packContour(intervals) {
+  return intervals.join(',');
+}
+
+export function unpackContour(str) {
+  if (!str) return [];
+  return str.split(',').map(s => parseInt(s, 10));
+}
