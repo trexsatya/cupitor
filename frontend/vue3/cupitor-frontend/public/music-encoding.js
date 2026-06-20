@@ -30,7 +30,9 @@ export function intervalsOf(pitches) {
 export function toSargam(name, keyName) {
   const pc = BASE_PC[name];
   if (pc === undefined) return null;
-  const scale = getScale(keyName);            // e.g. ["C","D","E","F","G","A","B"]
+  let scale;
+  try { scale = getScale(keyName); } catch (_) { return null; }
+  if (!Array.isArray(scale)) return null;
   const idx = scale.findIndex(n => BASE_PC[n] === pc);
   return idx === -1 ? null : SARGAM[idx];
 }
@@ -86,7 +88,7 @@ export function encodeNoteText(txt, meta = {}) {
 }
 
 // Map key-signature fifths (sharps +, flats -) to a major key name.
-const FIFTHS_TO_KEY = { '-7':'Cb','-6':'Gb','-5':'Db','-4':'Ab','-3':'Eb','-2':'Bb','-1':'F',
+const FIFTHS_TO_KEY = { '-7':'B','-6':'Gb','-5':'Db','-4':'Ab','-3':'Eb','-2':'Bb','-1':'F',
   '0':'C','1':'G','2':'D','3':'A','4':'E','5':'B','6':'F#','7':'C#' };
 
 export function encodeMusicXml(xmlString, meta = {}) {
