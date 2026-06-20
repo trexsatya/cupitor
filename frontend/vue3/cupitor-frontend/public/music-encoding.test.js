@@ -123,3 +123,30 @@ describe('inferChords (pure, per-measure)', () => {
     expect(out.voices[0].chordSymbol[1]).toBe('C');     // null slots filled with the measure chord
   });
 });
+
+describe('robustness: unknown/edge keys', () => {
+  test('toSargam returns null (does not throw) for an unknown key', () => {
+    expect(toSargam('C', 'Zz')).toBe(null);
+    expect(toSargam('C', '')).toBe(null);
+  });
+
+  test('encodeMusicXml handles a 7-flat key signature without throwing', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Guitar</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><key><fifths>-7</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>B</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type></note>
+    </measure>
+  </part>
+</score-partwise>`;
+    let doc;
+    expect(() => { doc = encodeMusicXml(xml, { id: 'flat7', system: 'western' }); }).not.toThrow();
+    expect(doc.voices[0].pitch).toEqual([71]); // B4
+    // key must resolve to a scale that actually exists in majorScales
+    expect(['B', 'Cb']).toContain(doc.meta.key);
+  });
+});
