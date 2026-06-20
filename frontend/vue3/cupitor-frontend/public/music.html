@@ -241,6 +241,7 @@
     <input id="guessSec" type="number" step="0.1" style="width:5em" placeholder="start s">
     <input id="guessEndSec" type="number" step="0.1" style="width:5em" placeholder="end s">
     <input id="vocabCat" type="text" placeholder="category" style="width:8em">
+    <input id="vocabNote" type="text" placeholder="note" style="width:14em">
     <button id="addVocabBtn">Add to vocab</button>
     <span id="mediaMsg"></span>
   </div>
@@ -386,6 +387,7 @@
     const btn = document.getElementById('addVocabBtn');
     if (btn) btn.textContent = currentVocabEntry ? 'Add/update to vocab' : 'Add to vocab';
   }
+  const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // Transient status pill for media/vocab actions: styled by tone, fades out + clears itself.
   let mediaMsgTimer = null;
   function setMediaMsg(text, tone) {
@@ -564,6 +566,7 @@
       startSeconds: Number.isFinite(startRaw) ? startRaw : null,
       endSeconds: Number.isFinite(endRaw) ? endRaw : null,
       chords: (renderer && renderer.getSelectedChords && renderer.getSelectedChords()) || [],
+      note: document.getElementById('vocabNote').value.trim(),
       snapshot: buildSnapshot(currentDetail, [from, to]),
       category: document.getElementById('vocabCat').value.trim() || 'uncategorized',
       createdAt: (updating && currentVocabEntry.createdAt) || new Date().toISOString().slice(0, 10),
@@ -606,6 +609,7 @@
     document.getElementById('ytUrl').value = (detail.meta && detail.meta.youtube) || '';
     document.getElementById('guessSec').value = '';
     document.getElementById('guessEndSec').value = '';
+    document.getElementById('vocabNote').value = '';
     document.getElementById('tempoInput').value = (detail.meta && detail.meta.tempo) || 90;
     if (player) player.stop();
     renderer.clearMeasureHighlight();   // a plain piece preview carries no captured-range shading
@@ -622,6 +626,15 @@
   document.getElementById('noteNameChk').onchange = (e) => { if (renderer) renderer.setNoteNames(e.target.checked); };
   document.getElementById('chordChk').onchange = (e) => { if (renderer) renderer.setShowChords(e.target.checked); };
   document.getElementById('dimConnChk').onchange = (e) => { if (renderer) renderer.setDimConnectors(e.target.checked); };
+  // Editing the note auto-updates a saved vocab item (local cache only; push via Add/update).
+  document.getElementById('vocabNote').onchange = () => {
+    if (!currentVocabEntry) return;   // fresh capture: saved when you click Add/update to vocab
+    currentVocabEntry.note = document.getElementById('vocabNote').value.trim();
+    vocab = upsertVocab(vocab, currentVocabEntry);
+    renderVocab();
+    if (store && store.putVocab) { try { const p = store.putVocab(system, vocab); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
+    setMediaMsg('Note saved locally — Add/update to vocab to push', 'ok');
+  };
   document.getElementById('previewSegBtn').onclick = () => {
     const from = parseInt(document.getElementById('segFrom').value, 10);
     const to = parseInt(document.getElementById('segTo').value, 10);
@@ -752,6 +765,7 @@
     document.getElementById('segFrom').value = from;
     document.getElementById('segTo').value = to;
     document.getElementById('vocabCat').value = (entry.category && entry.category !== 'uncategorized') ? entry.category : '';
+    document.getElementById('vocabNote').value = entry.note || '';
     if (entry.startSeconds != null) document.getElementById('guessSec').value = entry.startSeconds;
     if (entry.endSeconds != null) document.getElementById('guessEndSec').value = entry.endSeconds;
     if (renderer) { renderer.showSegment([from, to]); renderer.highlightMeasures([from, to]); }
@@ -778,7 +792,8 @@
         const mark = (e.startSeconds != null || e.youtube) ? ' ▶' : '';
         const row = document.createElement('div');
         row.className = 'resultRow';
-        row.innerHTML = `${title} <small>m${e.measureStart}–${e.measureEnd}${mark}</small>`;
+        const noteHtml = e.note ? ` <small style="color:#666">— ${escapeHtml(e.note)}</small>` : '';
+        row.innerHTML = `${title} <small>m${e.measureStart}–${e.measureEnd}${mark}</small>${noteHtml}`;
         row.onclick = () => openVocabEntry(e);
         box.appendChild(row);
       });
