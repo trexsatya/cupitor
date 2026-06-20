@@ -5,6 +5,7 @@ import { responsiveZoom } from './music-render.js';
 import { createMusicRenderer } from './music-render.js';
 import { resolveMatchMeasures } from './music-render.js';
 import { voiceColor } from './music-render.js';
+import { noteName } from './music-render.js';
 import { encodeMusicXml, inferChords } from './music-encoding.js';
 import { buildIndexEntry } from './music-index.js';
 import fs from 'fs';
@@ -272,5 +273,30 @@ describe('createMusicRenderer voice colors', () => {
     r.setVoiceColors(false);
     expect(noteA.NoteheadColor).toBe('#000000');
     expect(noteB.NoteheadColor).toBe('#000000');
+  });
+});
+
+describe('noteName', () => {
+  test('middle C (MIDI 60) → C4', () => { expect(noteName(60)).toBe('C4'); });
+  test('sharps and octave boundaries', () => {
+    expect(noteName(61)).toBe('C#4');
+    expect(noteName(69)).toBe('A4');
+    expect(noteName(72)).toBe('C5');
+    expect(noteName(48)).toBe('C3');
+  });
+  test('null / NaN → empty string', () => {
+    expect(noteName(null)).toBe('');
+    expect(noteName(undefined)).toBe('');
+    expect(noteName(NaN)).toBe('');
+  });
+});
+
+describe('createMusicRenderer note names', () => {
+  test('setNoteNames re-renders and does not throw without a rendered graphic', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    const before = osmd.calls.filter(c => c[0] === 'render').length;
+    r.setNoteNames(true);
+    expect(osmd.calls.filter(c => c[0] === 'render').length).toBe(before + 1);
   });
 });
