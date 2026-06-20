@@ -214,3 +214,39 @@ export function matchMelodyPitchClasses(notes, pitchClassesStr) {
   }
   return null;
 }
+
+
+// ---------- melody: interval (transposition-invariant) matching ----------
+
+// Build query intervals with a "free" flag. notes -> [{value, free}].
+// "." makes any interval touching it free (value ignored).
+// KNOWN LIMITATION: query intervals are pitch-class deltas (0-11), so an octave-crossing
+// leap in the contour (e.g. +16) won't match a small query interval like +4. Fine for M2.
+function queryIntervals(notes) {
+  const pcs = notes.map(n => (n === '.' ? null : pitchClass(n)));
+  const out = [];
+  for (let i = 1; i < pcs.length; i++) {
+    const a = pcs[i - 1], b = pcs[i];
+    if (a === null || b === null) out.push({ value: 0, free: true });
+    else out.push({ value: b - a, free: false });   // pitch-class delta is fine for contour shape
+  }
+  return out;
+}
+
+const within = (a, b, tol) => Math.abs(a - b) <= tol;
+
+export function matchMelodyIntervals(notes, contour, opts = {}) {
+  if (notes.length < 2) return null;       // need at least one interval; single notes use pc mode
+  const tol = opts.pitch_tolerance || 0;
+  const q = queryIntervals(notes);
+  const k = q.length;                       // intervals to match
+  for (let start = 0; start + k <= contour.length; start++) {
+    let ok = true;
+    for (let i = 0; i < k; i++) {
+      if (q[i].free) continue;
+      if (!within(contour[start + i], q[i].value, tol)) { ok = false; break; }
+    }
+    if (ok) return { start, end: start + k };  // note window spans k+1 notes: [start, start+k]
+  }
+  return null;
+}
