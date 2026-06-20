@@ -31,3 +31,19 @@ describe('guessSegmentStart', () => {
     expect(guessSegmentStart(d, [1, 1], 0)).toBe(0);
   });
 });
+
+describe('applyYouTubeLink', () => {
+  test('sets youtube on both the entry and the detail meta, without mutating inputs', () => {
+    const entry = { id: 'p', title: 'P', youtube: null };
+    const detail = { meta: { id: 'p', youtube: null, title: 'P' }, voices: [], format: 'musicxml', source: '<x/>' };
+    const url = 'https://youtu.be/dQw4w9WgXcQ';
+    const out = applyYouTubeLink(entry, detail, url);
+    expect(out.entry.youtube).toBe(url);
+    expect(out.detail.meta.youtube).toBe(url);
+    expect(entry.youtube).toBeNull();
+    expect(detail.meta.youtube).toBeNull();
+    expect(out.entry.title).toBe('P');
+    expect(out.detail.meta.title).toBe('P');
+    expect(out.detail.source).toBe('<x/>');
+  });
+});
