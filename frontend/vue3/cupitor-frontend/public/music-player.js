@@ -117,7 +117,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
 
   return {
     setSchedule(s) { schedule = s || []; buildPart(); },
-    setLoop(on) { loop = !!on; if (part) part.loop = loop; },
+    setLoop(on) { loop = !!on; if (part) part.loop = loop; if (loop) clearStopTimer(); },
     setInstrument(category) {
       const next = makeVoice(category);
       if (synth && synth.dispose) synth.dispose();
