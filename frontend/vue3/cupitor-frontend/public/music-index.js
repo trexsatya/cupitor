@@ -57,3 +57,15 @@ export function splitTiers(doc, source) {
   const detail = { meta: doc.meta, voices: doc.voices, format: doc.meta.format, source };
   return { entry, detail };
 }
+
+export function getSystemFromUrl(href) {
+  const url = new URL(href || (typeof window !== 'undefined' ? window.location.href : 'https://x/'));
+  let value = new URLSearchParams(url.search).get('system');
+  if (value !== 'sargam') value = 'western';   // default western, mirrors lang default 'swedish'
+  return { name: value };
+}
+
+export function getMusicResourceUrl(system) {
+  const name = system || getSystemFromUrl().name;
+  return `https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/music/${name}`;
+}
