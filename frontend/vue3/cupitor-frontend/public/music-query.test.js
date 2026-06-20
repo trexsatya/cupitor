@@ -65,6 +65,11 @@ describe('parseQuery', () => {
     const q = parseQuery({ type: 'chord', chords: [{ chord: 'G', extensions_allowed: '7' }] });
     expect(q.chords[0].extensions_allowed).toEqual([]);
   });
+  test('normalises max_results on melody queries too', () => {
+    expect(parseQuery({ type: 'melody', notes: ['C', 'E'], max_results: 2.7 }).max_results).toBe(2);
+    expect(parseQuery({ type: 'melody', notes: ['C', 'E'], max_results: 'all' }).max_results).toBeUndefined();
+    expect(parseQuery({ type: 'melody', notes: ['C', 'E'], max_results: 0 }).max_results).toBeUndefined();
+  });
 });
 
 describe('decomposeChord', () => {
@@ -355,5 +360,16 @@ describe('runQuery', () => {
 
   test('no matches returns empty array', () => {
     expect(runQuery({ type: 'chord', chords: [{ chord: 'F#' }] }, entries)).toEqual([]);
+  });
+
+  test('ranks contiguous matches above gapped ones (score desc)', () => {
+    const entries = [
+      entry('gapped', { chords: 'C Am G' }),   // C..G with one chord between -> gapped
+      entry('tight',  { chords: 'C G' })        // C G contiguous -> score 1.0
+    ];
+    const res = runQuery({ type: 'chord', chords: [{ chord: 'C' }, { chord: 'G' }], max_gap: 1 }, entries);
+    expect(res.map(r => r.pieceId)).toEqual(['tight', 'gapped']);   // higher score first
+    expect(res[0].score).toBeCloseTo(1.0);
+    expect(res[1].score).toBeCloseTo(2 / 3);                         // 2 query chords / span 3
   });
 });
