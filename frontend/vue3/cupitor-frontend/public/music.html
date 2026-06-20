@@ -6,6 +6,7 @@
     <title>Music Sequence Search</title>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="/github-utils.js"></script>
+    <script src="/vendor/opensheetmusicdisplay.min.js"></script>
     <style>
         body {
             font-family: sans-serif;
@@ -146,9 +147,24 @@
 </div>
 <textarea id="textInput" placeholder="Paste note-text, first line = title" style="display:none;width:100%;height:6em"></textarea>
 <div id="pieceList"></div>
+<div id="musicPreview" style="display:none;margin-top:1rem;border-top:1px solid #ddd;padding-top:1rem">
+  <div style="margin-bottom:.5rem">
+    <strong id="previewTitle"></strong>
+    <button id="previewFullBtn">Full</button>
+    <label>Segment measures
+      <input id="segFrom" type="number" min="1" style="width:4em" placeholder="from">–
+      <input id="segTo" type="number" min="1" style="width:4em" placeholder="to">
+    </label>
+    <button id="previewSegBtn">Show segment</button>
+    <button id="previewCloseBtn">Close</button>
+    <span id="previewMsg"></span>
+  </div>
+  <div id="osmdPreview"></div>
+</div>
 
 <script type="module">
   import { getSystemFromUrl, getMusicResourceUrl, loadIndex, rebuildAndPush } from './music-index.js';
+  import { createMusicRenderer } from './music-render.js';
 
   const system = getSystemFromUrl().name;
   document.getElementById('systemLabel').textContent = system;
@@ -165,7 +181,7 @@
   function render() {
     const rows = [];
     index.forEach(e => rows.push(
-      `<label style="display:block"><input type="checkbox" class="sel" data-id="${e.id}"> ${e.title || e.id} <small>(${e.noteCount} notes, ${e.channels.join('/')})</small></label>`));
+      `<label style="display:block"><input type="checkbox" class="sel" data-id="${e.id}"> ${e.title || e.id} <small>(${e.noteCount} notes, ${e.channels.join('/')})</small> <button class="previewBtn" data-id="${e.id}">Preview</button></label>`));
     pending.forEach(p => rows.push(
       `<label style="display:block;color:#a06000"><input type="checkbox" class="sel" data-id="${p.id}" checked disabled> ${p.title} <small>(new — will be pushed)</small></label>`));
     document.getElementById('pieceList').innerHTML = rows.join('') || '<em>No pieces yet.</em>';
@@ -215,6 +231,41 @@
       setStatus(res.pushed ? `Pushed: ${res.changed.join(', ')}` : 'No changes.');
     } catch (e) { setStatus('Push failed: ' + e.message); }
   };
+
+  let renderer = null;
+  function ensureRenderer() {
+    if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'));
+    return renderer;
+  }
+  async function openPreview(id) {
+    const title = (index.find(e => e.id === id) || {}).title || id;
+    document.getElementById('previewTitle').textContent = title;
+    document.getElementById('previewMsg').textContent = 'Loading…';
+    document.getElementById('musicPreview').style.display = 'block';
+    let detail;
+    try {
+      detail = await fetch(`${getMusicResourceUrl(system)}/details/${id}.json`).then(x => x.json());
+    } catch (e) { document.getElementById('previewMsg').textContent = 'Failed to load detail.'; return; }
+    let res;
+    try {
+      res = await ensureRenderer().loadDetail(detail);
+    } catch (e) { document.getElementById('previewMsg').textContent = 'Render error: ' + e.message; return; }
+    if (!res.ok) { document.getElementById('previewMsg').textContent = 'Cannot render (note-text piece).'; return; }
+    renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
+    renderer.showFull();
+    document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
+  }
+  document.getElementById('pieceList').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.previewBtn');
+    if (btn) { ev.preventDefault(); openPreview(btn.dataset.id); }
+  });
+  document.getElementById('previewFullBtn').onclick = () => renderer && renderer.showFull();
+  document.getElementById('previewSegBtn').onclick = () => {
+    const from = parseInt(document.getElementById('segFrom').value, 10);
+    const to = parseInt(document.getElementById('segTo').value, 10);
+    if (renderer && Number.isFinite(from) && Number.isFinite(to)) renderer.showSegment([from, to]);
+  };
+  document.getElementById('previewCloseBtn').onclick = () => { document.getElementById('musicPreview').style.display = 'none'; };
 
   (async () => { try { index = await loadIndex(system); } catch (_) { index = []; } render(); })();
 </script>
