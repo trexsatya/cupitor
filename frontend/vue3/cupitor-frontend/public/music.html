@@ -136,21 +136,67 @@
             padding: 10px 16px;
             max-height: 100%; /* or adjust as needed */
         }
+
+        #appLayout { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+        #searchView { flex: 1 1 320px; min-width: 280px; }
+        #musicPreview { flex: 2 1 460px; min-width: 280px; }
+        #results .resultRow { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; margin: 4px 0; cursor: pointer; }
+        #results .resultRow:hover { background: #f3f3f3; }
+        .chordChip { display: inline-flex; gap: 4px; align-items: center; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; margin: 2px; }
+        .extPill { border: 1px solid #bbb; border-radius: 10px; padding: 0 8px; cursor: pointer; background: #fff; }
+        .extPill.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+        #managerSection { margin-bottom: 1rem; }
+        #managerSection > summary { cursor: pointer; font-weight: 600; }
     </style>
 </head>
 <body>
 <h1>Music Library — Manager (<span id="systemLabel"></span>)</h1>
-<div class="controls">
-  <button id="addXmlBtn">Add MusicXML…</button>
-  <input type="file" id="xmlFile" accept=".xml,.musicxml,application/xml,text/xml" style="display:none" multiple>
-  <button id="addTextBtn">Add note-text…</button>
-  <button id="rebuildBtn">Rebuild &amp; Push selected/new</button>
-  <button id="retryBtn" style="display:none"></button>
-  <span id="status"></span>
-</div>
-<textarea id="textInput" placeholder="Paste note-text, first line = title" style="display:none;width:100%;height:6em"></textarea>
-<div id="pieceList"></div>
-<div id="musicPreview" style="display:none;margin-top:1rem;border-top:1px solid #ddd;padding-top:1rem">
+<details id="managerSection">
+  <summary>Manage library (add / rebuild / push pieces)</summary>
+  <div class="controls">
+    <button id="addXmlBtn">Add MusicXML…</button>
+    <input type="file" id="xmlFile" accept=".xml,.musicxml,application/xml,text/xml" style="display:none" multiple>
+    <button id="addTextBtn">Add note-text…</button>
+    <button id="rebuildBtn">Rebuild &amp; Push selected/new</button>
+    <button id="retryBtn" style="display:none"></button>
+    <span id="status"></span>
+  </div>
+  <textarea id="textInput" placeholder="Paste note-text, first line = title" style="display:none;width:100%;height:6em"></textarea>
+  <div id="pieceList"></div>
+</details>
+<div id="appLayout">
+  <div id="searchView">
+    <div id="searchPanel">
+      <div>
+        <label><input type="radio" name="searchMode" value="chord" checked> Chord</label>
+        <label><input type="radio" name="searchMode" value="melody"> Melody</label>
+      </div>
+      <div id="chordMode">
+        <div id="chips"></div>
+        <button id="addChipBtn">+ Add chord</button>
+        <div>
+          <label><input type="checkbox" id="strictExt"> strict extensions</label>
+          <label>max gap <input id="maxGap" type="number" min="0" value="0" style="width:3em"></label>
+          <label><input type="checkbox" id="transposeInv"> transpose-invariant</label>
+        </div>
+      </div>
+      <div id="melodyMode" style="display:none">
+        <div id="noteButtons"></div>
+        <input id="melodyTokens" type="text" placeholder="C . . E G" style="width:16em">
+        <div>
+          <label><input type="checkbox" id="byInterval"> by interval</label>
+          <label>tolerance <input id="pitchTol" type="number" min="0" value="0" style="width:3em"></label>
+        </div>
+      </div>
+      <div>
+        <label>max results <input id="maxResults" type="number" min="1" value="20" style="width:4em"></label>
+        <button id="searchBtn">Search</button>
+        <span id="searchMsg"></span>
+      </div>
+    </div>
+    <div id="results"></div>
+  </div>
+<div id="musicPreview" style="display:none;border-top:1px solid #ddd;padding-top:1rem">
   <div style="margin-bottom:.5rem">
     <strong id="previewTitle"></strong>
     <button id="previewFullBtn">Full</button>
@@ -182,6 +228,7 @@
   </div>
   <div id="osmdPreview"></div>
   <div id="ytPlayer" style="display:none"></div>
+</div>
 </div>
 
 <script type="module">
