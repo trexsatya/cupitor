@@ -85,8 +85,8 @@ export function guessChords(notesByMeasure, chordsToScan = allChords, { maxPerMe
 }
 
 // Pure: chord "areas" over a single note stream. Notes are { name, left, el? }. Slides an
-// OVERLAPPING window of `windowSize` consecutive notes (ordered by onset x); each window that
-// matches contributes its chords. Consecutive overlapping windows merge into one area — so
+// OVERLAPPING window that grows (from each onset, by x) until it spans `windowSize` DISTINCT
+// pitch classes (octaves/repeats ignored); each window that matches contributes its chords. Consecutive overlapping windows merge into one area — so
 // proximal candidates for the same place (n1,n2,n3→chord1 and n2,n3,n4→chord2) land together —
 // while a window that matches nothing (a melodic gap) ends the current area. Per area we keep
 // the best `maxPerArea` distinct chords by coverage. Returns
@@ -98,7 +98,12 @@ export function guessChordAreas(notes, chordsToScan = allChords, { windowSize = 
   const areas = [];
   let cur = null;   // { startIdx, endIdx, matches: [] }
   for (let i = 0; i + 1 < sorted.length; i++) {
-    const win = sorted.slice(i, i + windowSize);
+    // Expand from i until the window spans `windowSize` DISTINCT pitch classes (octaves and
+    // repeats don't count), so the window holds enough harmony to name a chord.
+    const seen = new Set();
+    let j = i;
+    while (j < sorted.length) { seen.add(sorted[j].name); j++; if (seen.size >= windowSize) break; }
+    const win = sorted.slice(i, j);
     const matches = matchingChords(win, chordsToScan);
     if (!matches.length) { if (cur) { areas.push(cur); cur = null; } continue; }
     if (cur && i <= cur.endIdx) {            // overlaps the current run → same area
