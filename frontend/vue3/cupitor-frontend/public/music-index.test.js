@@ -1,6 +1,6 @@
 // public/music-index.test.js
 import { encodeNoteText, primaryVoice } from './music-encoding.js';
-import { fnv1a, buildIndexEntry, splitTiers, getSystemFromUrl, getMusicResourceUrl, mergeIndex, rebuildAndPush, computeChanges, mergeLocalRemote } from './music-index.js';
+import { fnv1a, buildIndexEntry, splitTiers, getSystemFromUrl, getMusicResourceUrl, mergeIndex, rebuildAndPush, computeChanges, mergeLocalRemote, retryPush } from './music-index.js';
 
 const txt = 'G4# D5# D5 C5#\nB4 C5# B4 A4# G4#';
 
@@ -221,5 +221,46 @@ describe('rebuildAndPush with local store', () => {
     expect(res.localError).toBe('quota');
     expect(pushed).toBe(true);
     expect(res.pushed).toBe(true);
+  });
+});
+
+describe('retryPush', () => {
+  const unpushedFixture = [
+    { entry: { id: 'u1', title: 'U1' }, detail: { meta: { id: 'u1' }, format: 'note-text', source: 'x' } },
+  ];
+  function storeWithUnpushed(list) {
+    const calls = { synced: [] };
+    return {
+      calls,
+      async getUnpushed() { return list; },
+      async markSynced(system, ids) { calls.synced.push({ system, ids }); },
+    };
+  }
+
+  test('pushes index.json (full current index) + a detail file per unpushed piece, then marks synced', async () => {
+    let pushedFiles = null;
+    const committer = async (files) => { pushedFiles = files; };
+    const store = storeWithUnpushed(unpushedFixture);
+    const currentIndex = [{ id: 'u1', title: 'U1' }, { id: 'already', title: 'Already' }];
+    const res = await retryPush({ system: 'western', currentIndex, committer, store });
+    expect(res.pushed).toBe(true);
+    expect(res.changed).toEqual(['u1']);
+    const paths = pushedFiles.map(f => f.path);
+    expect(paths).toContain('db/music/western/index.json');
+    expect(paths).toContain('db/music/western/details/u1.json');
+    expect(paths).not.toContain('db/music/western/details/already.json');
+    const idx = JSON.parse(await pushedFiles.find(f => f.path === 'db/music/western/index.json').getContent(null));
+    expect(idx.map(e => e.id).sort()).toEqual(['already', 'u1']);
+    expect(store.calls.synced[0].ids).toEqual(['u1']);
+  });
+
+  test('committer throws: returns pushed:false + pushError, does not mark synced, no rethrow', async () => {
+    const store = storeWithUnpushed(unpushedFixture);
+    const committer = async () => { throw new Error('rate limit'); };
+    const res = await retryPush({ system: 'western', currentIndex: [{ id: 'u1' }], committer, store });
+    expect(res.pushed).toBe(false);
+    expect(res.pushError).toBe('rate limit');
+    expect(res.changed).toEqual([]);
+    expect(store.calls.synced).toEqual([]);
   });
 });
