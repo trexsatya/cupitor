@@ -83,3 +83,48 @@ export function guessChords(notesByMeasure, chordsToScan = allChords, { maxPerMe
   });
   return result;
 }
+
+// Pure: chord "areas" over a single note stream. Notes are { name, left, el? }. Slides an
+// OVERLAPPING window of `windowSize` consecutive notes (ordered by onset x); each window that
+// matches contributes its chords. Consecutive overlapping windows merge into one area — so
+// proximal candidates for the same place (n1,n2,n3→chord1 and n2,n3,n4→chord2) land together —
+// while a window that matches nothing (a melodic gap) ends the current area. Per area we keep
+// the best `maxPerArea` distinct chords by coverage. Returns
+// [{ x, top, chords: [{ name, notes, chordTones }] }] where x/top anchor the area (min left /
+// min notehead top of its notes) for placing stacked labels in the score.
+export function guessChordAreas(notes, chordsToScan = allChords, { windowSize = 4, maxPerArea = 3 } = {}) {
+  if (!notes || notes.length < 2) return [];
+  const sorted = notes.slice().sort((a, b) => (a.left - b.left));
+  const areas = [];
+  let cur = null;   // { startIdx, endIdx, matches: [] }
+  for (let i = 0; i + 1 < sorted.length; i++) {
+    const win = sorted.slice(i, i + windowSize);
+    const matches = matchingChords(win, chordsToScan);
+    if (!matches.length) { if (cur) { areas.push(cur); cur = null; } continue; }
+    if (cur && i <= cur.endIdx) {            // overlaps the current run → same area
+      cur.endIdx = i + win.length - 1;
+      cur.matches.push(...matches);
+    } else {
+      if (cur) areas.push(cur);
+      cur = { startIdx: i, endIdx: i + win.length - 1, matches: matches.slice() };
+    }
+  }
+  if (cur) areas.push(cur);
+
+  const topOf = (n) => (n.el && n.el.getBBox ? n.el.getBBox().y : 0);
+  return areas.map((area) => {
+    const areaNotes = sorted.slice(area.startIdx, area.endIdx + 1);
+    const x = Math.min(...areaNotes.map((n) => n.left));
+    const top = Math.min(...areaNotes.map(topOf));
+    const byName = new Map();
+    area.matches.forEach((m) => {
+      const prev = byName.get(m.name);
+      if (!prev || m.notes.length > prev.notes.length) byName.set(m.name, m);
+    });
+    const chords = [...byName.values()]
+      .sort((a, b) => (b.notes.length - a.notes.length) || (a.chordTones.length - b.chordTones.length))
+      .slice(0, maxPerArea)
+      .map((m) => ({ name: m.name, notes: m.notes, chordTones: m.chordTones }));
+    return { x, top, chords };
+  }).filter((a) => a.chords.length);
+}

@@ -2,7 +2,7 @@
 // Rendering for the music study app: pure measure-mapping helpers (TDD) +
 // a thin OSMD wrapper (injectable factory) for whole-piece / segment rendering.
 import { primaryVoice } from './music-encoding.js';
-import { guessChords } from './music-chords.js';
+import { guessChords, guessChordAreas } from './music-chords.js';
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -104,6 +104,7 @@ export function createMusicRenderer(container, opts = {}) {
   let totalMeasures = 0;
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
   let noteNames = false;
+  let showChords = false;        // draw stacked chord-candidate labels above each chord area
   let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
   let shownFrom = 1;             // 1-based first measure of the currently drawn window
   let shownTo = Number.MAX_SAFE_INTEGER;   // ...and the last (chords/highlight clip to this)
@@ -227,6 +228,58 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
+  // Recolor (in yellow) the noteheads that formed a chord; replaces any prior highlight. Sets
+  // both the fill attribute and the inline style so it wins over OSMD's voice-color style.
+  function highlightChord(notes) {
+    clearHighlight();
+    (notes || []).forEach((nt) => {
+      const el = nt && nt.el;
+      if (!el || !el.querySelectorAll) return;
+      el.querySelectorAll('path').forEach((p) => {
+        if (!p.hasAttribute('data-chord-orig')) {
+          p.setAttribute('data-chord-orig', p.getAttribute('fill') || '');
+          p.setAttribute('data-chord-orig-style', p.style.fill || '');
+        }
+        p.setAttribute('fill', CHORD_HL_COLOR);
+        p.style.fill = CHORD_HL_COLOR;
+      });
+    });
+  }
+
+  // Overlay stacked chord-candidate labels above each detected chord area. Each area shows its
+  // best few chords (closest to the staff = best); clicking a label highlights that chord's
+  // notes. Removed + rebuilt every render. No-op without a DOM svg (test fakes, jsdom).
+  const CHORD_LAYER_CLASS = 'chord-area-layer';
+  function applyChordOverlay() {
+    if (!container || !container.querySelectorAll) return;
+    container.querySelectorAll('.' + CHORD_LAYER_CLASS).forEach((n) => n.remove());
+    if (!showChords) return;
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+    const byMeasure = renderedNotesByMeasure();
+    const stream = [];
+    Object.keys(byMeasure).forEach((m) => { stream.push(...byMeasure[m]); });
+    const areas = guessChordAreas(stream);
+    if (!areas.length) return;
+    const layer = document.createElementNS(SVG_NS, 'g');
+    layer.setAttribute('class', CHORD_LAYER_CLASS);
+    areas.forEach((area) => {
+      area.chords.forEach((ch, k) => {
+        const t = document.createElementNS(SVG_NS, 'text');
+        t.setAttribute('x', area.x);
+        t.setAttribute('y', area.top - 6 - k * 11);   // stack upward; best (k=0) nearest the notes
+        t.setAttribute('font-size', '9');
+        t.setAttribute('font-weight', '600');
+        t.setAttribute('fill', '#1565c0');
+        t.setAttribute('style', 'cursor:pointer');
+        t.textContent = ch.name;
+        t.addEventListener('click', () => highlightChord(ch.notes));
+        layer.appendChild(t);
+      });
+    });
+    svg.appendChild(layer);
+  }
+
   // Absolute 1-based measure number for the a-th measure in the rendered measureList. Trust
   // the source measure's MeasureNumber; otherwise infer from whether the whole piece or just
   // a window is drawn (measureList holds either all measures or only the drawn ones).
@@ -285,13 +338,14 @@ export function createMusicRenderer(container, opts = {}) {
   }
 
   // One render pass: apply model colors, render, then (re)build the note-name overlay, the
-  // captured-measure shading, and notify the UI (which rebuilds chord chips).
+  // captured-measure shading, the chord-candidate overlay, and notify the UI.
   function redraw() {
     clearHighlight();
     applyVoiceColors();
     osmd.render();
     applyNoteNames();
     applyMeasureHighlight();
+    applyChordOverlay();
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
@@ -322,24 +376,11 @@ export function createMusicRenderer(container, opts = {}) {
     setZoom,
     setVoiceColors(on) { colorVoices = !!on; redraw(); },
     setNoteNames(on) { noteNames = !!on; redraw(); },
+    // Toggle the in-score chord-candidate overlay (stacked labels above each chord area).
+    setShowChords(on) { showChords = !!on; redraw(); },
     // Guessed chords for the currently-rendered measures: [{ measure, name, notes:[{el,...}] }].
     getGuessedChords() { return guessChords(renderedNotesByMeasure()); },
-    // Highlight (recolor) the noteheads that formed a chord; replaces any prior highlight.
-    highlightChord(notes) {
-      clearHighlight();
-      (notes || []).forEach((nt) => {
-        const el = nt && nt.el;
-        if (!el || !el.querySelectorAll) return;
-        el.querySelectorAll('path').forEach((p) => {
-          if (!p.hasAttribute('data-chord-orig')) {
-            p.setAttribute('data-chord-orig', p.getAttribute('fill') || '');
-            p.setAttribute('data-chord-orig-style', p.style.fill || '');
-          }
-          p.setAttribute('fill', CHORD_HL_COLOR);
-          p.style.fill = CHORD_HL_COLOR;   // inline style beats the voice-color style/attribute
-        });
-      });
-    },
+    highlightChord,
     clearHighlight,
     // Shade a captured measure range [from,to] behind the notes; persists across re-renders
     // (zoom / segment changes) until cleared. Used to mark a vocab item's original measures.
