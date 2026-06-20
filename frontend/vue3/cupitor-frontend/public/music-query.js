@@ -28,11 +28,11 @@ export function parseQuery(input) {
   if (raw.type === 'chord') {
     return {
       type: 'chord',
-      chords: raw.chords.map(c => ({ chord: c.chord, extensions_allowed: c.extensions_allowed || [] })),
+      chords: raw.chords.map(c => ({ chord: c.chord, extensions_allowed: Array.isArray(c.extensions_allowed) ? c.extensions_allowed : [] })),
       strict_extensions: raw.strict_extensions === true,
       max_gap: Number.isFinite(raw.max_gap) ? raw.max_gap : 0,
       transpose_invariant: raw.transpose_invariant === true,
-      max_results: raw.max_results
+      max_results: (Number.isFinite(raw.max_results) && raw.max_results > 0) ? Math.floor(raw.max_results) : undefined
     };
   }
   return {
