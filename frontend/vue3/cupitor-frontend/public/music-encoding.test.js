@@ -1,5 +1,5 @@
 // public/music-encoding.test.js
-import { nameToMidi, intervalsOf, toSargam } from './music-encoding.js';
+import { nameToMidi, intervalsOf, toSargam, packContour, unpackContour } from './music-encoding.js';
 
 describe('pitch helpers', () => {
   test('nameToMidi: C4 = 60, A4 = 69, C#5 = 73', () => {
@@ -22,5 +22,19 @@ describe('pitch helpers', () => {
     expect(toSargam('Gb', 'C')).toBe(null);   // chromatic in C major
     // Minor key uses its own scale; A minor: A->Sa
     expect(toSargam('A', 'Am')).toBe('Sa');
+  });
+});
+
+describe('contour packing', () => {
+  test('round-trips intervals through a compact string', () => {
+    const intervals = [7, -1, -1, 0, 12, -12];
+    const packed = packContour(intervals);
+    expect(typeof packed).toBe('string');
+    expect(unpackContour(packed)).toEqual(intervals);
+  });
+
+  test('empty intervals -> empty string -> empty array', () => {
+    expect(packContour([])).toBe('');
+    expect(unpackContour('')).toEqual([]);
   });
 });
