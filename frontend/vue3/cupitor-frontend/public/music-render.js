@@ -10,6 +10,7 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const VOICE_COLORS = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf'];
 const DEFAULT_NOTE_COLOR = '#000000';
 const CHORD_HL_COLOR = '#ffcc00';   // notes of a clicked chord chip, highlighted in yellow
+const DIM_CONNECTOR_COLOR = '#b3b3b3';   // dimmed beams/stems/slurs so noteheads stand out
 // Pure: a stable color for a 0-based voice index, cycling past the palette length.
 export function voiceColor(index) {
   const n = VOICE_COLORS.length;
@@ -106,6 +107,7 @@ export function createMusicRenderer(container, opts = {}) {
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
   let noteNames = false;
   let showChords = false;        // draw stacked chord-candidate labels above each chord area
+  let dimConnectors = false;     // grey out beams/stems/slurs to cut visual noise
   const selectedChords = new Set();   // manually-picked best-match chord names (multi-select; persisted per vocab item)
   let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
   let shownFrom = 1;             // 1-based first measure of the currently drawn window
@@ -348,12 +350,29 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
-  // One render pass: apply model colors, render, then (re)build the note-name overlay, the
-  // captured-measure shading, the chord-candidate overlay, and notify the UI.
+  // Grey out the beams/stems/slurs (VexFlow vf-* groups) so the noteheads stand out. Re-applied
+  // after each render (osmd.render() repaints them black); a no-op when off / without a DOM svg.
+  function applyDimConnectors() {
+    if (!dimConnectors || !container || !container.querySelectorAll) return;
+    container.querySelectorAll('.vf-beam, .vf-stem, .vf-slur, .vf-tie, .vf-stavetie').forEach((g) => {
+      g.querySelectorAll('path, rect, polygon, line').forEach((el) => {
+        const stroke = el.getAttribute('stroke');
+        const fill = el.getAttribute('fill');
+        const strokes = stroke && stroke !== 'none';
+        const fills = fill && fill !== 'none';
+        if (strokes || (!strokes && !fills)) { el.setAttribute('stroke', DIM_CONNECTOR_COLOR); el.style.stroke = DIM_CONNECTOR_COLOR; }
+        if (fills || (!strokes && !fills)) { el.setAttribute('fill', DIM_CONNECTOR_COLOR); el.style.fill = DIM_CONNECTOR_COLOR; }
+      });
+    });
+  }
+
+  // One render pass: apply model colors, render, dim connectors, then (re)build the note-name
+  // overlay, the captured-measure shading, the chord-candidate overlay, and notify the UI.
   function redraw() {
     clearHighlight();
     applyVoiceColors();
     osmd.render();
+    applyDimConnectors();
     applyNoteNames();
     applyMeasureHighlight();
     applyChordOverlay();
@@ -390,6 +409,8 @@ export function createMusicRenderer(container, opts = {}) {
     setNoteNames(on) { noteNames = !!on; redraw(); },
     // Toggle the in-score chord-candidate overlay (stacked labels above each chord area).
     setShowChords(on) { showChords = !!on; redraw(); },
+    // Toggle dimming of beams/stems/slurs (reduces visual noise; noteheads stay black).
+    setDimConnectors(on) { dimConnectors = !!on; redraw(); },
     // The manually-picked best-match chord names — read at vocab-save time.
     getSelectedChords() { return [...selectedChords]; },
     // Pre-select chords by name (e.g. restoring a saved vocab item) and re-draw the overlay.
