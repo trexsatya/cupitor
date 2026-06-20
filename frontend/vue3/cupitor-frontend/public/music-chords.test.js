@@ -1,5 +1,5 @@
 // public/music-chords.test.js
-import { matchingChords, guessChordsForMeasure, guessChords } from './music-chords.js';
+import { matchingChords, guessChordsForMeasure, guessChords, guessChordAreas } from './music-chords.js';
 
 const DICT = {
   Cmaj: { notes: ['C', 'E', 'G'] },
@@ -59,6 +59,27 @@ describe('guessChords (flat, per-measure, de-duplicated)', () => {
     const out = guessChords(byMeasure);
     expect(out.length).toBeGreaterThan(0);
     expect(out.length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe('guessChordAreas (overlapping windows → proximal areas, best N per area)', () => {
+  test('overlapping windows in one proximal run merge into a single area', () => {
+    const notes = [n('C', 10), n('E', 10), n('G', 10), n('B', 40)];
+    const areas = guessChordAreas(notes, DICT, { windowSize: 4, maxPerArea: 3 });
+    expect(areas.length).toBe(1);
+    expect(areas[0].chords.map((c) => c.name)).toContain('Cmaj');
+    expect(areas[0].x).toBe(10);
+  });
+  test('a melodic gap between chord clusters yields separate areas', () => {
+    const notes = [n('C', 10), n('E', 10), n('G', 10), n('D', 20), n('F', 22), n('A', 40), n('C', 40), n('E', 40)];
+    const areas = guessChordAreas(notes, DICT, { windowSize: 4 });
+    expect(areas.length).toBe(2);
+    expect(areas[0].chords[0].name).toBe('Cmaj');
+    expect(areas[1].chords[0].name).toBe('Am');
+  });
+  test('empty / single-note input → []', () => {
+    expect(guessChordAreas([], DICT)).toEqual([]);
+    expect(guessChordAreas([n('C', 0)], DICT)).toEqual([]);
   });
 });
 
