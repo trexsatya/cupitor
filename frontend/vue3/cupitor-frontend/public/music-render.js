@@ -122,8 +122,8 @@ export function createMusicRenderer(container, opts = {}) {
         return { ok: false, reason: 'not-musicxml' };
       }
       await osmd.load(detail.source);
-      redraw();
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
+      redraw();
       return { ok: true, totalMeasures };
     },
     showFull() {
