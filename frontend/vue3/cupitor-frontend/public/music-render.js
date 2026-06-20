@@ -15,6 +15,17 @@ export function voiceColor(index) {
   return VOICE_COLORS[i];
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const PITCH_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+// Pure: MIDI number → English/scientific note name with sharps, e.g. 60 → 'C4'. '' for null/NaN.
+export function noteName(midi) {
+  if (midi == null || !Number.isFinite(midi)) return '';
+  const m = Math.round(midi);
+  const pc = ((m % 12) + 12) % 12;
+  const octave = Math.floor(m / 12) - 1;
+  return PITCH_NAMES[pc] + octave;
+}
+
 // Map a primary-voice note-index range to a 1-based [startMeasure, endMeasure].
 export function measureRangeFromNoteRange(detail, noteRange) {
   if (!noteRange) return null;
@@ -89,6 +100,7 @@ export function createMusicRenderer(container, opts = {}) {
   osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false });
   let totalMeasures = 0;
   let colorVoices = false;
+  let noteNames = false;
 
   // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
   // No-op on a sheet without instruments (e.g. the test fake / before load).
@@ -107,10 +119,55 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
+  // Overlay English/scientific note names on the rendered SVG. Removed + rebuilt on every
+  // render. No-op when there's no DOM container / rendered graphic (test fakes, jsdom).
+  // OSMD's Pitch.getHalfTone() + 12 is the MIDI number (C4 → 48 + 12 = 60).
+  function applyNoteNames() {
+    if (!container || !container.querySelectorAll) return;
+    container.querySelectorAll('.note-name-layer').forEach((n) => n.remove());
+    if (!noteNames) return;
+    const measureList = osmd.graphic && osmd.graphic.measureList;
+    const svg = container.querySelector('svg');
+    if (!measureList || !measureList.forEach || !svg) return;
+    const layer = document.createElementNS(SVG_NS, 'g');
+    layer.setAttribute('class', 'note-name-layer');
+    measureList.forEach((measures) => {
+      (measures || []).forEach((measure) => {
+        ((measure && measure.staffEntries) || []).forEach((se) => {
+          (se.graphicalVoiceEntries || []).forEach((gve) => {
+            (gve.notes || []).forEach((gnote) => {
+              const pitch = gnote.sourceNote && gnote.sourceNote.Pitch;
+              if (!pitch || typeof pitch.getHalfTone !== 'function') return; // rest / no pitch
+              const label = noteName(pitch.getHalfTone() + 12);
+              if (!label) return;
+              const vf = gnote.vfnote;
+              const el = vf && vf[0] && vf[0].attrs && vf[0].attrs.el;
+              if (!el || !el.querySelectorAll) return;
+              const heads = el.querySelectorAll('.vf-notehead');
+              const head = heads[gnote.vfnoteIndex || 0] || heads[0];
+              if (!head || !head.getBBox) return;
+              const b = head.getBBox();
+              const t = document.createElementNS(SVG_NS, 'text');
+              t.setAttribute('x', b.x + b.width / 2);
+              t.setAttribute('y', b.y - 2);
+              t.setAttribute('text-anchor', 'middle');
+              t.setAttribute('font-size', '7');
+              t.setAttribute('fill', '#444');
+              t.textContent = label;
+              layer.appendChild(t);
+            });
+          });
+        });
+      });
+    });
+    svg.appendChild(layer);
+  }
+
   // One render pass: apply model colors, render, then (re)build overlays.
   function redraw() {
     applyVoiceColors();
     osmd.render();
+    applyNoteNames();
   }
 
   function setZoom(factor) { osmd.Zoom = factor; redraw(); }
@@ -136,6 +193,7 @@ export function createMusicRenderer(container, opts = {}) {
     },
     setZoom,
     setVoiceColors(on) { colorVoices = !!on; redraw(); },
+    setNoteNames(on) { noteNames = !!on; redraw(); },
     applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };
 }
