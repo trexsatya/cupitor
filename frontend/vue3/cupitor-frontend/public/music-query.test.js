@@ -95,6 +95,19 @@ describe('decomposeChord', () => {
     expect(d.rootPc).toBe(pitchClassOf('D'));
     expect(d.quality).toBe('min');
   });
+  test('full extension set for a dominant ninth', () => {
+    expect([...decomposeChord('C9').ext].sort()).toEqual(['7', '9']);
+  });
+  test('add9 chord ext aligns with the +9 query alias', () => {
+    const ext = decomposeChord('C+9').ext;   // maj add9 normalises to "C+9"
+    expect([...ext]).toEqual(['add9']);
+    expect(ext.has(normExtToken('+9'))).toBe(true);   // query '+9' -> 'add9' matches piece ext
+  });
+  test('fallback infers dim/aug from verbose query spelling', () => {
+    expect(decomposeChord('Cdim').quality).toBe('dim');
+    expect(decomposeChord('Caug').quality).toBe('aug');
+    expect(decomposeChord('Gdim7').quality).toBe('dim');
+  });
 });
 
 function pitchClassOf(name) {
