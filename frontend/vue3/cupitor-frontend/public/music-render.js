@@ -9,6 +9,7 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 // Readable, deterministic palette for coloring voices in the rendered sheet.
 const VOICE_COLORS = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf'];
 const DEFAULT_NOTE_COLOR = '#000000';
+const CHORD_HL_COLOR = '#ffcc00';   // notes of a clicked chord chip, highlighted in yellow
 // Pure: a stable color for a 0-based voice index, cycling past the palette length.
 export function voiceColor(index) {
   const n = VOICE_COLORS.length;
@@ -105,6 +106,7 @@ export function createMusicRenderer(container, opts = {}) {
   let noteNames = false;
   let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
   let shownFrom = 1;             // 1-based first measure of the currently drawn window
+  let shownTo = Number.MAX_SAFE_INTEGER;   // ...and the last (chords/highlight clip to this)
 
   // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
   // No-op on a sheet without instruments (e.g. the test fake / before load).
@@ -185,14 +187,13 @@ export function createMusicRenderer(container, opts = {}) {
     const byMeasure = {};
     const measureList = osmd.graphic && osmd.graphic.measureList;
     if (!measureList || !measureList.forEach) return byMeasure;
-    // measureList is [measureIndex][staffIndex]; fall back to a running 1-based count when
-    // the source measure number is unavailable, so grouping never collapses to empty.
-    let fallbackNum = 0;
-    measureList.forEach((measures) => {
-      fallbackNum += 1;
+    // measureList is [measureIndex][staffIndex]. Key by each measure's absolute number and keep
+    // only the currently rendered window — OSMD's measureList can hold every measure even when
+    // just a segment is drawn, so chords must be restricted to [shownFrom, shownTo].
+    measureList.forEach((measures, a) => {
+      const num = absoluteMeasureNumber(measures, a, measureList.length);
+      if (num < shownFrom || num > shownTo) return;
       (measures || []).forEach((measure) => {
-        const sm = measure && measure.parentSourceMeasure;
-        const num = (sm && sm.MeasureNumber != null) ? sm.MeasureNumber : fallbackNum;
         ((measure.staffEntries) || []).forEach((se) => {
           (se.graphicalVoiceEntries || []).forEach((gve) => {
             (gve.notes || []).forEach((gnote) => {
@@ -214,12 +215,15 @@ export function createMusicRenderer(container, opts = {}) {
     return byMeasure;
   }
 
-  // Restore any notehead paths recolored by a previous chord highlight.
+  // Restore any notehead paths recolored by a previous chord highlight — both the fill
+  // attribute and the inline style (OSMD's voice colors set the inline style, which wins).
   function clearHighlight() {
     if (!container || !container.querySelectorAll) return;
     container.querySelectorAll('path[data-chord-orig]').forEach((p) => {
       p.setAttribute('fill', p.getAttribute('data-chord-orig'));
+      p.style.fill = p.getAttribute('data-chord-orig-style') || '';
       p.removeAttribute('data-chord-orig');
+      p.removeAttribute('data-chord-orig-style');
     });
   }
 
@@ -301,18 +305,18 @@ export function createMusicRenderer(container, opts = {}) {
       }
       await osmd.load(detail.source);
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
-      shownFrom = 1;
+      shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
       redraw();
       return { ok: true, totalMeasures };
     },
     showFull() {
       osmd.setOptions({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: totalMeasures || Number.MAX_SAFE_INTEGER });
-      shownFrom = 1;
+      shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
       redraw();
     },
     showSegment(measureRange) {
       osmd.setOptions({ drawFromMeasureNumber: measureRange[0], drawUpToMeasureNumber: measureRange[1] });
-      shownFrom = measureRange[0];
+      shownFrom = measureRange[0]; shownTo = measureRange[1];
       redraw();
     },
     setZoom,
@@ -327,8 +331,12 @@ export function createMusicRenderer(container, opts = {}) {
         const el = nt && nt.el;
         if (!el || !el.querySelectorAll) return;
         el.querySelectorAll('path').forEach((p) => {
-          if (!p.hasAttribute('data-chord-orig')) p.setAttribute('data-chord-orig', p.getAttribute('fill') || '');
-          p.setAttribute('fill', '#e8590c');
+          if (!p.hasAttribute('data-chord-orig')) {
+            p.setAttribute('data-chord-orig', p.getAttribute('fill') || '');
+            p.setAttribute('data-chord-orig-style', p.style.fill || '');
+          }
+          p.setAttribute('fill', CHORD_HL_COLOR);
+          p.style.fill = CHORD_HL_COLOR;   // inline style beats the voice-color style/attribute
         });
       });
     },
