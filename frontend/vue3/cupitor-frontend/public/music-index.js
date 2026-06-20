@@ -85,13 +85,11 @@ function encodePiece(piece) {
   return inferChords(doc);   // fill chordSymbol (harmony tags already win — inferChords only fills nulls)
 }
 
-// committer: async (files:[{path, getContent(current)}]) => any   (wraps GitHubUtils.commitMultipleFiles)
-export async function rebuildAndPush({ system, pieces, currentIndex = [], committer, force = false, updatedAt = null }) {
+// Pure: encode + diff pieces against the current index. No network, no storage.
+export function computeChanges({ system, pieces, currentIndex = [], force = false, updatedAt = null }) {
   const currentById = new Map(currentIndex.map(e => [e.id, e]));
-  const changedEntries = [];
-  const changedDetails = [];   // {id, detail}
+  const changedPieces = [];   // [{ entry, detail }]
   const changed = [];
-
   for (const piece of pieces) {
     const doc = encodePiece(piece);
     doc.meta.system = system;
@@ -99,19 +97,23 @@ export async function rebuildAndPush({ system, pieces, currentIndex = [], commit
     entry.updatedAt = updatedAt;
     const prev = currentById.get(entry.id);
     if (!force && prev && prev.contentHash === entry.contentHash) continue; // unchanged
-    changedEntries.push(entry);
-    changedDetails.push({ id: entry.id, detail });
+    changedPieces.push({ entry, detail });
     changed.push(entry.id);
   }
+  const index = mergeIndex(currentIndex, changedPieces.map(p => p.entry));
+  return { changed, changedPieces, index };
+}
 
-  const index = mergeIndex(currentIndex, changedEntries);
+// committer: async (files:[{path, getContent(current)}]) => any   (wraps GitHubUtils.commitMultipleFiles)
+export async function rebuildAndPush({ system, pieces, currentIndex = [], committer, force = false, updatedAt = null }) {
+  const { changed, changedPieces, index } = computeChanges({ system, pieces, currentIndex, force, updatedAt });
   if (changed.length === 0) return { changed, index, pushed: false };
 
   const files = [
     { path: `db/music/${system}/index.json`, getContent: () => JSON.stringify(index, null, 2) },
-    ...changedDetails.map(d => ({
-      path: `db/music/${system}/details/${d.id}.json`,
-      getContent: () => JSON.stringify(d.detail)
+    ...changedPieces.map(({ entry, detail }) => ({
+      path: `db/music/${system}/details/${entry.id}.json`,
+      getContent: () => JSON.stringify(detail)
     }))
   ];
   await committer(files);

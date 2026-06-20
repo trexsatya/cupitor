@@ -1,6 +1,6 @@
 // public/music-index.test.js
 import { encodeNoteText, primaryVoice } from './music-encoding.js';
-import { fnv1a, buildIndexEntry, splitTiers, getSystemFromUrl, getMusicResourceUrl, mergeIndex, rebuildAndPush } from './music-index.js';
+import { fnv1a, buildIndexEntry, splitTiers, getSystemFromUrl, getMusicResourceUrl, mergeIndex, rebuildAndPush, computeChanges } from './music-index.js';
 
 const txt = 'G4# D5# D5 C5#\nB4 C5# B4 A4# G4#';
 
@@ -104,5 +104,35 @@ describe('rebuild & push (payload assembly)', () => {
     const entry = res.index.find(e => e.id === 'triad');
     expect(entry.channels).toContain('chordSymbol');
     expect(entry.search.chords).toBe('C');
+  });
+});
+
+describe('computeChanges (pure)', () => {
+  test('returns changed ids, paired entry+detail, and merged index', () => {
+    const { changed, changedPieces, index } = computeChanges({
+      system: 'western',
+      pieces: [{ id: 'triad', format: 'note-text', source: 'C4 E4 G4', key: 'C' }],
+      currentIndex: [], updatedAt: '2026-06-20',
+    });
+    expect(changed).toEqual(['triad']);
+    expect(changedPieces).toHaveLength(1);
+    expect(changedPieces[0].entry.id).toBe('triad');
+    expect(changedPieces[0].entry.system).toBe('western');
+    expect(changedPieces[0].entry.updatedAt).toBe('2026-06-20');
+    expect(changedPieces[0].detail.format).toBe('note-text');
+    expect(index.find(e => e.id === 'triad')).toBeTruthy();
+  });
+
+  test('skips a piece whose contentHash is unchanged, unless force', () => {
+    const args = {
+      system: 'western',
+      pieces: [{ id: 'x', format: 'note-text', source: 'C4 E4 G4', key: 'C' }],
+      currentIndex: [],
+    };
+    const first = computeChanges(args);
+    const second = computeChanges({ ...args, currentIndex: first.index });
+    expect(second.changed).toEqual([]);
+    const forced = computeChanges({ ...args, currentIndex: first.index, force: true });
+    expect(forced.changed).toEqual(['x']);
   });
 });
