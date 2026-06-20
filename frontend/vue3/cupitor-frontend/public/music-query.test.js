@@ -1,6 +1,7 @@
 import { parseQuery, validateQuery } from './music-query.js';
 import { decomposeChord, normExtToken } from './music-query.js';
 import { matchChordQuery } from './music-query.js';
+import { parseMelodyTokens, matchMelodyPitchClasses } from './music-query.js';
 
 describe('validateQuery', () => {
   test('rejects unknown type', () => {
@@ -203,5 +204,38 @@ describe('matchChordQuery', () => {
     expect(m).not.toBeNull();
     expect(m.start).toBe(0);
     expect(m.end).toBe(2);
+  });
+});
+
+describe('parseMelodyTokens', () => {
+  test('maps note names to pitch classes and "." to null', () => {
+    expect(parseMelodyTokens(['C', '.', 'E', 'G'])).toEqual([0, null, 4, 7]);
+  });
+  test('handles sharps and flats equivalently', () => {
+    expect(parseMelodyTokens(['C#', 'Db'])).toEqual([1, 1]);
+  });
+});
+
+describe('matchMelodyPitchClasses', () => {
+  const piece = 'C D E F G';   // pcs 0 2 4 5 7
+  test('exact contiguous window', () => {
+    const m = matchMelodyPitchClasses(['D', 'E', 'F'], piece);
+    expect(m).toEqual({ start: 1, end: 3 });
+  });
+  test('wildcard skips a position', () => {
+    const m = matchMelodyPitchClasses(['C', '.', 'E'], piece);
+    expect(m).toEqual({ start: 0, end: 2 });
+  });
+  test('octave-agnostic across compact spelling', () => {
+    // "Cs" in the index == C#/Db query
+    const m = matchMelodyPitchClasses(['C#'], 'C Cs D');
+    expect(m).toEqual({ start: 1, end: 1 });
+  });
+  test('no match returns null', () => {
+    expect(matchMelodyPitchClasses(['G', 'G'], piece)).toBeNull();
+  });
+  test('returns the earliest match', () => {
+    const m = matchMelodyPitchClasses(['C'], 'C D C');
+    expect(m).toEqual({ start: 0, end: 0 });
   });
 });

@@ -184,3 +184,38 @@ export function matchChordQuery(query, pieceChordsStr) {
     symbols: indices.map(i => pieceSyms[i])
   };
 }
+
+
+// ---------- melody: pitch-class matching ----------
+
+// Query token spelling (sharps/flats) -> pitch class number.
+const QUERY_PC = {
+  C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, 'E#': 5, Fb: 4,
+  F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10,
+  B: 11, 'B#': 0, Cb: 11
+};
+// Index compact spelling ("Cs"=1 ...) -> pitch class number.
+const COMPACT_PC = { C: 0, Cs: 1, D: 2, Ds: 3, E: 4, F: 5, Fs: 6, G: 7, Gs: 8, A: 9, As: 10, B: 11 };
+
+export function parseMelodyTokens(notes) {
+  return notes.map(n => (n === '.' ? null : QUERY_PC[n]));
+}
+
+function pitchClassesToNumbers(pcStr) {
+  return (pcStr || '').split(/\s+/).filter(Boolean).map(t => COMPACT_PC[t]);
+}
+
+export function matchMelodyPitchClasses(notes, pitchClassesStr) {
+  const q = parseMelodyTokens(notes);
+  const seq = pitchClassesToNumbers(pitchClassesStr);
+  const len = q.length;
+  for (let start = 0; start + len <= seq.length; start++) {
+    let ok = true;
+    for (let i = 0; i < len; i++) {
+      if (q[i] === null) continue;       // wildcard
+      if (seq[start + i] !== q[i]) { ok = false; break; }
+    }
+    if (ok) return { start, end: start + len - 1 };
+  }
+  return null;
+}
