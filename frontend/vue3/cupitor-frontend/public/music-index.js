@@ -117,3 +117,9 @@ export async function rebuildAndPush({ system, pieces, currentIndex = [], commit
   await committer(files);
   return { changed, index, pushed: true };
 }
+
+export async function loadIndex(system) {
+  const res = await fetch(`${getMusicResourceUrl(system)}/index.json`);
+  if (!res.ok) return [];
+  return res.json();
+}

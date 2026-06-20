@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Music Sequence Search</title>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script type="module" src="music_search.js"></script>
+    <script src="/github-utils.js"></script>
     <style>
         body {
             font-family: sans-serif;
@@ -141,105 +141,87 @@
     </style>
 </head>
 <body>
-<h1>Music Sequence Search (Vanilla JS/jQuery)</h1>
+<h1>Music Library — Manager (<span id="systemLabel"></span>)</h1>
 <div class="controls">
-    <input id="query" placeholder="Enter notes e.g. E D C" style="width:250px;">
-    <label>Tolerance: <input id="tolerance" type="number" value="0" min="0" max="6" style="width:60px;"></label>
-    <label><input type="checkbox" id="allowRepetition" checked> Allow repetition</label>
-    <label><input type="checkbox" id="allowPassing" checked> Allow passing notes</label>
-    <button id="searchBtn">Search</button>
+  <button id="addXmlBtn">Add MusicXML…</button>
+  <input type="file" id="xmlFile" accept=".xml,.musicxml,application/xml,text/xml" style="display:none" multiple>
+  <button id="addTextBtn">Add note-text…</button>
+  <button id="rebuildBtn">Rebuild &amp; Push selected/new</button>
+  <span id="status"></span>
 </div>
-<div id="results"></div>
+<textarea id="textInput" placeholder="Paste note-text, first line = title" style="display:none;width:100%;height:6em"></textarea>
+<div id="pieceList"></div>
 
 <script type="module">
-    import {extractPitchesFromText, findIntervalMatches, highlightMatchesInText} from './music_search.js'
+  import { getSystemFromUrl, getMusicResourceUrl, loadIndex, rebuildAndPush } from './music-index.js';
 
-    $(async function () {
-        const index = await fetch('data/music_index.json').then(r => r.json());
-        const files = {};
-        for (const f of index) {
-            try {
-                files[f] = await fetch('data/' + f).then(r => r.text());
-            } catch (e) {
-                files[f] = '';
-            }
-        }
-        $('#searchBtn').click(() => searchNow(index, files));
+  const system = getSystemFromUrl().name;
+  document.getElementById('systemLabel').textContent = system;
+
+  // jQuery is already global in music.html (loaded via <script>); musicxml.js needs it.
+  let index = [];
+  const pending = [];  // newly added pieces not yet pushed: {id,title,format,source,key}
+
+  function idFromName(name) {
+    return name.replace(/\.(xml|musicxml|txt)$/i, '').trim().replace(/\s+/g, '_').replace(/[\/\\:*?"<>|]/g, '');
+  }
+  function setStatus(s) { document.getElementById('status').textContent = s; }
+
+  function render() {
+    const rows = [];
+    index.forEach(e => rows.push(
+      `<label style="display:block"><input type="checkbox" class="sel" data-id="${e.id}"> ${e.title || e.id} <small>(${e.noteCount} notes, ${e.channels.join('/')})</small></label>`));
+    pending.forEach(p => rows.push(
+      `<label style="display:block;color:#a06000"><input type="checkbox" class="sel" data-id="${p.id}" checked disabled> ${p.title} <small>(new — will be pushed)</small></label>`));
+    document.getElementById('pieceList').innerHTML = rows.join('') || '<em>No pieces yet.</em>';
+  }
+
+  document.getElementById('addXmlBtn').onclick = () => document.getElementById('xmlFile').click();
+  document.getElementById('xmlFile').onchange = async (ev) => {
+    for (const file of ev.target.files) {
+      const source = await file.text();
+      const id = idFromName(file.name);
+      pending.push({ id, title: id, format: 'musicxml', source });
+    }
+    render();
+  };
+  document.getElementById('addTextBtn').onclick = () => {
+    const ta = document.getElementById('textInput'); ta.style.display = 'block'; ta.focus();
+  };
+  document.getElementById('textInput').onchange = (ev) => {
+    const text = ev.target.value.trim(); if (!text) return;
+    const title = text.split('\n')[0].slice(0, 60);
+    pending.push({ id: idFromName(title), title, format: 'note-text', source: text, key: 'C' });
+    ev.target.value = ''; ev.target.style.display = 'none'; render();
+  };
+
+  document.getElementById('rebuildBtn').onclick = async () => {
+    const selectedIds = new Set(Array.from(document.querySelectorAll('.sel:checked')).map(c => c.dataset.id));
+    const reselected = index
+      .filter(e => selectedIds.has(e.id))
+      .map(e => ({ id: e.id, title: e.title, format: e.format, source: null, key: e.key }));
+    // For already-indexed pieces we need their source; fetch the detail file on demand.
+    for (const r of reselected) {
+      const detail = await fetch(`${getMusicResourceUrl(system)}/details/${r.id}.json`).then(x => x.json());
+      r.source = detail.source; r.format = detail.format;
+    }
+    const pieces = [...pending, ...reselected];
+    if (!pieces.length) { setStatus('Nothing selected.'); return; }
+    setStatus('Pushing…');
+    const committer = (files) => window.GitHubUtils.commitMultipleFiles({
+      owner: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages',
+      commitMessage: `music(${system}): rebuild ${pieces.map(p => p.id).join(', ')}`,
+      files
     });
+    try {
+      const res = await rebuildAndPush({ system, pieces, currentIndex: index, committer, force: selectedIds.size > 0,
+        updatedAt: new Date().toISOString().slice(0, 10) });
+      index = res.index; pending.length = 0; render();
+      setStatus(res.pushed ? `Pushed: ${res.changed.join(', ')}` : 'No changes.');
+    } catch (e) { setStatus('Push failed: ' + e.message); }
+  };
 
-    function createAccordion(containerId, items) {
-        const container = document.getElementById(containerId);
-        if (!container) {
-            console.error(`Container #${containerId} not found.`);
-            return;
-        }
-
-        container.innerHTML = "";
-        container.classList.add("accordion-container");
-
-        items.forEach((item, index) => {
-            const section = document.createElement("div");
-            section.className = "accordion-section";
-
-            const header = document.createElement("button");
-            header.className = "accordion-header";
-            header.textContent = item.title || `Section ${index + 1}`;
-
-            const content = document.createElement("div");
-            content.className = "accordion-content";
-            content.innerHTML = item.content || "";
-
-            // Toggle behavior — only one open at a time
-            header.addEventListener("click", () => {
-                const isOpen = content.classList.contains("open");
-
-                // Close all other sections
-                container.querySelectorAll(".accordion-content").forEach(c => {
-                    c.classList.remove("open");
-                    c.previousElementSibling.classList.remove("active");
-                });
-
-                // Open this one (if it was previously closed)
-                if (!isOpen) {
-                    content.classList.add("open");
-                    header.classList.add("active");
-                }
-            });
-
-            section.appendChild(header);
-            section.appendChild(content);
-            container.appendChild(section);
-        });
-    }
-
-    function searchNow(index, files) {
-        const query = $('#query').val().trim();
-        if (!query) return;
-
-        const results = []
-        Object.keys(files).forEach(x => {
-            const fileText = files[x]
-            const withHighlights = [`<a target="_blank" href="https://www.youtube.com/results?search_query=${x.replace('-', ' ').replace('.txt', '')}">YouTube</a>`]
-            let matchCount = 0
-            fileText.split(/\r?\n/).forEach(line => {
-                const pitches = extractPitchesFromText(line, { defaultOctave: 4 })
-                const melodyNotes = pitches[0];
-                if(typeof melodyNotes === "string") {
-                    withHighlights.push(line)
-                } else {
-                    const matches = findIntervalMatches(melodyNotes, extractPitchesFromText(query, { defaultOctave: 4 })[0])
-                    withHighlights.push(highlightMatchesInText(line, matches))
-                    matchCount += matches.length
-                }
-            })
-
-            if(matchCount > 0) {
-                results.push({title: `${x} (${matchCount})`, content: withHighlights.join("<br>")})
-            }
-        })
-
-        createAccordion('results', results);
-    }
+  (async () => { try { index = await loadIndex(system); } catch (_) { index = []; } render(); })();
 </script>
 </body>
 </html>
