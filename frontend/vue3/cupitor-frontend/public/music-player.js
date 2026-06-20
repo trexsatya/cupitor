@@ -63,7 +63,19 @@ export function instrumentVoiceKey(name) {
 export function createMusicPlayer({ Tone, getCursor } = {}) {
   const T = Tone || (typeof globalThis !== 'undefined' ? globalThis.Tone : undefined);
   if (!T) throw new Error('Tone.js is not available');
-  const synth = new T.PolySynth(T.Synth).toDestination();
+  // Distinct timbres per category using standard Tone voices (no samples). Guitar uses
+  // the monophonic PluckSynth — fine for the melodic primary voice we schedule.
+  function makeVoice(category) {
+    switch (category) {
+      case 'guitar':  return new T.PluckSynth().toDestination();
+      case 'strings': return new T.PolySynth(T.AMSynth).toDestination();
+      case 'organ':   return new T.PolySynth(T.FMSynth).toDestination();
+      case 'piano':
+      case 'synth':
+      default:        return new T.PolySynth(T.Synth).toDestination();
+    }
+  }
+  let synth = makeVoice('synth');
   let part = null;
   let schedule = [];
 
@@ -83,9 +95,13 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   }
 
   return {
-    synth,
     setSchedule(s) { schedule = s || []; buildPart(); },
     setLoop(on) { if (part) part.loop = !!on; },
+    setInstrument(category) {
+      const next = makeVoice(category);
+      if (synth && synth.dispose) synth.dispose();
+      synth = next;   // the Part callback closes over `synth`, so the new voice is used immediately
+    },
     async play() {
       await T.start();
       if (!part) buildPart();
