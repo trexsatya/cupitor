@@ -104,6 +104,7 @@ export function createMusicRenderer(container, opts = {}) {
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
   let noteNames = false;
   let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
+  let shownFrom = 1;             // 1-based first measure of the currently drawn window
 
   // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
   // No-op on a sheet without instruments (e.g. the test fake / before load).
@@ -222,41 +223,61 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
-  // Shade the captured measure range behind the notes (a translucent rect spanning the union
-  // of its noteheads). Removed + rebuilt on every render. No-op without a DOM svg / range.
+  // Absolute 1-based measure number for the a-th measure in the rendered measureList. Trust
+  // the source measure's MeasureNumber; otherwise infer from whether the whole piece or just
+  // a window is drawn (measureList holds either all measures or only the drawn ones).
+  function absoluteMeasureNumber(measures, a, listLength) {
+    const sm = measures && measures[0] && measures[0].parentSourceMeasure;
+    if (sm && Number.isFinite(sm.MeasureNumber)) return sm.MeasureNumber;
+    const full = listLength === (totalMeasures || listLength);
+    return full ? a + 1 : shownFrom + a;
+  }
+
+  // Shade the captured measure range behind the notes. One translucent rect per matching
+  // measure, sized from its VexFlow stave geometry (the same coordinates OSMD renders into,
+  // per getMeasurePosition in the original analysis code) — robust across line breaks and
+  // partial/segment renders. Removed + rebuilt on every render. No-op without a DOM svg / range.
   const MEASURE_HL_CLASS = 'measure-hl-layer';
   function applyMeasureHighlight() {
     if (!container || !container.querySelectorAll) return;
     container.querySelectorAll('.' + MEASURE_HL_CLASS).forEach((n) => n.remove());
     if (!measureHighlight) return;
     const svg = container.querySelector('svg');
-    if (!svg) return;
+    const measureList = osmd.graphic && osmd.graphic.measureList;
+    if (!svg || !measureList || !measureList.length) return;
     const [from, to] = measureHighlight;
-    const byMeasure = renderedNotesByMeasure();
-    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, found = false;
-    for (let m = from; m <= to; m++) {
-      (byMeasure[m] || []).forEach((nt) => {
-        if (!nt.el || !nt.el.getBBox) return;
-        const b = nt.el.getBBox();
-        found = true;
-        if (b.x < x1) x1 = b.x;
-        if (b.y < y1) y1 = b.y;
-        if (b.x + b.width > x2) x2 = b.x + b.width;
-        if (b.y + b.height > y2) y2 = b.y + b.height;
+    measureList.forEach((measures, a) => {
+      const abs = absoluteMeasureNumber(measures, a, measureList.length);
+      if (abs < from || abs > to) return;
+      // Union the staves of this measure (a grand staff spans several) into one box.
+      let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, ok = false;
+      (measures || []).forEach((measure) => {
+        const st = measure && measure.stave;
+        if (!st) return;
+        const left = (st.x != null ? st.x : st.start_x);
+        const width = (st.width != null ? st.width : ((st.end_x || 0) - (st.start_x || 0)));
+        const top = st.y;
+        const height = (st.height != null ? st.height : 48);
+        if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+        ok = true;
+        if (left < x1) x1 = left;
+        if (left + width > x2) x2 = left + width;
+        if (top < y1) y1 = top;
+        if (top + height > y2) y2 = top + height;
       });
-    }
-    if (!found) return;
-    const padX = 6, padY = 24;
-    const rect = document.createElementNS(SVG_NS, 'rect');
-    rect.setAttribute('class', MEASURE_HL_CLASS);
-    rect.setAttribute('x', x1 - padX);
-    rect.setAttribute('y', y1 - padY);
-    rect.setAttribute('width', (x2 - x1) + 2 * padX);
-    rect.setAttribute('height', (y2 - y1) + 2 * padY);
-    rect.setAttribute('fill', '#ffe9a8');
-    rect.setAttribute('opacity', '0.5');
-    rect.setAttribute('pointer-events', 'none');
-    svg.insertBefore(rect, svg.firstChild);   // first child → painted behind the notes
+      if (!ok) return;
+      const padY = 8;
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('class', MEASURE_HL_CLASS);
+      rect.setAttribute('x', x1);
+      rect.setAttribute('y', y1 - padY);
+      rect.setAttribute('width', x2 - x1);
+      rect.setAttribute('height', (y2 - y1) + 2 * padY);
+      rect.setAttribute('fill', '#ffe9a8');
+      rect.setAttribute('opacity', '0.5');
+      rect.setAttribute('pointer-events', 'none');
+      svg.insertBefore(rect, svg.firstChild);   // first child → painted behind the notes
+    });
   }
 
   // One render pass: apply model colors, render, then (re)build the note-name overlay, the
@@ -280,15 +301,18 @@ export function createMusicRenderer(container, opts = {}) {
       }
       await osmd.load(detail.source);
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
+      shownFrom = 1;
       redraw();
       return { ok: true, totalMeasures };
     },
     showFull() {
       osmd.setOptions({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: totalMeasures || Number.MAX_SAFE_INTEGER });
+      shownFrom = 1;
       redraw();
     },
     showSegment(measureRange) {
       osmd.setOptions({ drawFromMeasureNumber: measureRange[0], drawUpToMeasureNumber: measureRange[1] });
+      shownFrom = measureRange[0];
       redraw();
     },
     setZoom,
