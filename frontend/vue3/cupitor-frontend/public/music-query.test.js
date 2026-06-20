@@ -12,6 +12,11 @@ describe('validateQuery', () => {
     expect(validateQuery({ type: 'melody', notes: [] }).ok).toBe(false);
     expect(validateQuery({ type: 'melody', notes: ['C', '.', 'E'] }).ok).toBe(true);
   });
+  test('rejects null / non-object input', () => {
+    expect(validateQuery(null).ok).toBe(false);
+    expect(validateQuery(42).ok).toBe(false);
+    expect(validateQuery('chord').ok).toBe(false);
+  });
 });
 
 describe('parseQuery', () => {
@@ -37,5 +42,16 @@ describe('parseQuery', () => {
   });
   test('throws on an invalid query', () => {
     expect(() => parseQuery({ type: 'chord', chords: [] })).toThrow();
+  });
+  test('normalises max_results: keeps a positive integer, drops garbage', () => {
+    expect(parseQuery({ type: 'chord', chords: [{ chord: 'C' }], max_results: 5 }).max_results).toBe(5);
+    expect(parseQuery({ type: 'chord', chords: [{ chord: 'C' }], max_results: 2.7 }).max_results).toBe(2);
+    expect(parseQuery({ type: 'chord', chords: [{ chord: 'C' }], max_results: 'all' }).max_results).toBeUndefined();
+    expect(parseQuery({ type: 'chord', chords: [{ chord: 'C' }], max_results: -1 }).max_results).toBeUndefined();
+    expect(parseQuery({ type: 'chord', chords: [{ chord: 'C' }] }).max_results).toBeUndefined();
+  });
+  test('coerces a non-array extensions_allowed to []', () => {
+    const q = parseQuery({ type: 'chord', chords: [{ chord: 'G', extensions_allowed: '7' }] });
+    expect(q.chords[0].extensions_allowed).toEqual([]);
   });
 });
