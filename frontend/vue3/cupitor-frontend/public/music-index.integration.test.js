@@ -16,6 +16,7 @@ const have = (p) => { try { return fs.existsSync(p); } catch (_) { return false;
     const xml = fs.readFileSync(CHOPIN, 'utf8');
     const doc = inferChords(encodeMusicXml(xml, { id: 'Chopin_Nocturne_Op.9_No.2_for_Solo_Guitar', system: 'western' }));
     expect(doc.meta.key).toBe('E');
+    expect(doc.meta.tempo).toBe(54);   // Phase 0: <sound tempo="54">
     const entry = buildIndexEntry(doc, xml);
     expect(entry.noteCount).toBeGreaterThan(100);
     expect(entry.channels).toContain('duration');
