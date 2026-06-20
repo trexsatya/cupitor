@@ -1,5 +1,5 @@
 // public/music-index.js
-import { primaryVoice, packContour } from './music-encoding.js';
+import { primaryVoice, packContour, encodeNoteText, encodeMusicXml, inferChords } from './music-encoding.js';
 
 export function fnv1a(str) {
   let h = 0x811c9dc5;
@@ -68,4 +68,52 @@ export function getSystemFromUrl(href) {
 export function getMusicResourceUrl(system) {
   const name = system || getSystemFromUrl().name;
   return `https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/music/${name}`;
+}
+
+export function mergeIndex(existing, entries) {
+  const byId = new Map(existing.map(e => [e.id, e]));
+  entries.forEach(e => byId.set(e.id, e));
+  return Array.from(byId.values());
+}
+
+function encodePiece(piece) {
+  const meta = { id: piece.id, title: piece.title, system: piece.system, key: piece.key,
+                 sourceUrl: piece.sourceUrl, youtube: piece.youtube, instrument: piece.instrument };
+  const doc = piece.format === 'musicxml'
+    ? encodeMusicXml(piece.source, meta)
+    : encodeNoteText(piece.source, meta);
+  return inferChords(doc);   // fill chordSymbol (harmony tags already win — inferChords only fills nulls)
+}
+
+// committer: async (files:[{path, getContent(current)}]) => any   (wraps GitHubUtils.commitMultipleFiles)
+export async function rebuildAndPush({ system, pieces, currentIndex = [], committer, force = false, updatedAt = null }) {
+  const currentById = new Map(currentIndex.map(e => [e.id, e]));
+  const changedEntries = [];
+  const changedDetails = [];   // {id, detail}
+  const changed = [];
+
+  for (const piece of pieces) {
+    const doc = encodePiece(piece);
+    doc.meta.system = system;
+    const { entry, detail } = splitTiers(doc, piece.source);
+    entry.updatedAt = updatedAt;
+    const prev = currentById.get(entry.id);
+    if (!force && prev && prev.contentHash === entry.contentHash) continue; // unchanged
+    changedEntries.push(entry);
+    changedDetails.push({ id: entry.id, detail });
+    changed.push(entry.id);
+  }
+
+  const index = mergeIndex(currentIndex, changedEntries);
+  if (changed.length === 0) return { changed, index, pushed: false };
+
+  const files = [
+    { path: `db/music/${system}/index.json`, getContent: () => JSON.stringify(index, null, 2) },
+    ...changedDetails.map(d => ({
+      path: `db/music/${system}/details/${d.id}.json`,
+      getContent: () => JSON.stringify(d.detail)
+    }))
+  ];
+  await committer(files);
+  return { changed, index, pushed: true };
 }
