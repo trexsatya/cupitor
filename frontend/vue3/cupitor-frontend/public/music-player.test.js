@@ -205,17 +205,17 @@ describe('gmInstrumentForVoice', () => {
 });
 
 describe('soundfontSampleMap', () => {
-  test('builds {pitch: url}; sharps use "s" in the filename only', () => {
+  test('builds {pitch: url}; sharp keys map to FLAT filenames (FluidR3 spelling)', () => {
     const m = soundfontSampleMap('acoustic_grand_piano', { baseUrl: 'B/', format: 'mp3', notes: ['C4', 'F#4'] });
     expect(m).toEqual({
       'C4': 'B/acoustic_grand_piano-mp3/C4.mp3',
-      'F#4': 'B/acoustic_grand_piano-mp3/Fs4.mp3',   // key keeps '#', filename uses 's'
+      'F#4': 'B/acoustic_grand_piano-mp3/Gb4.mp3',   // key keeps '#'; file uses the flat the CDN has
     });
   });
-  test('defaults to the FluidR3_GM CDN and a sparse central note set', () => {
+  test('defaults to the FluidR3_GM CDN and a sparse central note set (flats)', () => {
     const m = soundfontSampleMap('church_organ');
     expect(m['C4']).toBe('https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/church_organ-mp3/C4.mp3');
-    expect(Object.keys(m)).toContain('F#4');
-    expect(m['F#4'].endsWith('church_organ-mp3/Fs4.mp3')).toBe(true);
+    expect(Object.keys(m)).toContain('Gb4');
+    expect(m['Gb4'].endsWith('church_organ-mp3/Gb4.mp3')).toBe(true);
   });
 });
