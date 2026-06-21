@@ -231,6 +231,7 @@ export function createMusicRenderer(container, opts = {}) {
       if (num < shownFrom || num > shownTo) return;
       (measures || []).forEach((measure) => {
         ((measure.staffEntries) || []).forEach((se) => {
+          const onsetBeats = staffEntryOnsetBeats(se);   // shared by all notes in this staff entry
           (se.graphicalVoiceEntries || []).forEach((gve) => {
             (gve.notes || []).forEach((gnote) => {
               const vf = gnote.vfnote;
@@ -248,7 +249,7 @@ export function createMusicRenderer(container, opts = {}) {
               // `measure`/`idx` are the note's stable musical key (absolute measure + position
               // within it), used to re-anchor the draggable chord window across re-renders.
               const arr = (byMeasure[num] = byMeasure[num] || []);
-              arr.push({ name, left: b.x, el, measure: num, idx: arr.length });
+              arr.push({ name, left: b.x, el, measure: num, idx: arr.length, onsetBeats });
             });
           });
         });
@@ -344,6 +345,19 @@ export function createMusicRenderer(container, opts = {}) {
   }
   // Just the vertical extent — used to group notes/labels into staff systems.
   function elBand(el) { const b = elBox(el); return b ? { top: b.top, bottom: b.bottom } : null; }
+
+  // Onset of a graphical staff entry in quarter-note beats from the piece start, read from OSMD's
+  // source timestamps (RealValue is in whole notes → ×4 for quarter beats). null when unavailable,
+  // in which case window playback falls back from note-accurate to measure-granular.
+  function staffEntryOnsetBeats(se) {
+    try { if (se && se.getAbsoluteTimestamp) { const t = se.getAbsoluteTimestamp(); if (t && typeof t.RealValue === 'number') return t.RealValue * 4; } } catch (_) {}
+    try {
+      const sse = se && (se.sourceStaffEntry || se.parentStaffEntry);
+      const t = sse && (sse.AbsoluteTimestamp || (sse.getAbsoluteTimestamp && sse.getAbsoluteTimestamp()));
+      if (t && typeof t.RealValue === 'number') return t.RealValue * 4;
+    } catch (_) {}
+    return null;
+  }
 
   // Per-system [{top,bottom}] in svg-user space (one per rendered staff line), so a label can be
   // placed relative to the note's OWN system instead of the global extent across all systems.
@@ -563,7 +577,7 @@ export function createMusicRenderer(container, opts = {}) {
         const mid = (box.top + box.bottom) / 2;
         const band = bands.length ? nearestStaffIdx(bands, mid) : 0;
         out.push({ name: n.name, el: n.el, measure: n.measure, idx: n.idx, order: out.length, band,
-          left: box.left, right: box.right, top: box.top, bottom: box.bottom });
+          onsetBeats: n.onsetBeats, left: box.left, right: box.right, top: box.top, bottom: box.bottom });
       });
     });
     return out;
@@ -609,6 +623,34 @@ export function createMusicRenderer(container, opts = {}) {
     return nearestByX(inBand, x);
   }
 
+  // The currently selected window notes (reading order), seeding a small window at the start the
+  // first time the window is shown. Shared by the overlay, the chord readout, and the play range.
+  function currentWindowSelection() {
+    const ordered = orderedRenderedNotes();
+    if (!ordered.length) return { ordered, selected: [] };
+    if (!chordWindow.start || !chordWindow.end) {
+      chordWindow.start = { measure: ordered[0].measure, idx: ordered[0].idx };
+      const e = ordered[Math.min(ordered.length - 1, 3)];
+      chordWindow.end = { measure: e.measure, idx: e.idx };
+    }
+    const anchorList = ordered.map((n) => ({ measure: n.measure, idx: n.idx }));
+    let a = clampAnchorIndex(anchorList, chordWindow.start);
+    let b = clampAnchorIndex(anchorList, chordWindow.end);
+    if (a > b) { const t = a; a = b; b = t; }
+    return { ordered, selected: notesInWindow(ordered, a, b) };
+  }
+
+  // Playable range of a selection: always a measure span; plus a quarter-beat span when every
+  // selected note carries an onset (note-accurate playback, possibly starting mid-measure).
+  function rangeFromSelected(selected) {
+    if (!selected || !selected.length) return null;
+    const measures = selected.map((n) => n.measure);
+    const range = { fromMeasure: Math.min(...measures), toMeasure: Math.max(...measures) };
+    const onsets = selected.map((n) => n.onsetBeats).filter((v) => typeof v === 'number');
+    if (onsets.length === selected.length) { range.fromBeat = Math.min(...onsets); range.toBeat = Math.max(...onsets); }
+    return range;
+  }
+
   function fireWindowChange(selected) {
     if (!onWindowChange) return;
     const forChords = selected.map((n) => ({ name: n.name, el: n.el, left: n.order }));
@@ -618,10 +660,8 @@ export function createMusicRenderer(container, opts = {}) {
     areas.forEach((area) => area.chords.forEach((ch) => {
       if (!seen.has(ch.name)) { seen.add(ch.name); chords.push({ name: ch.name, notes: ch.notes }); }
     }));
-    const measureRange = selected.length
-      ? [Math.min(...selected.map((n) => n.measure)), Math.max(...selected.map((n) => n.measure))]
-      : null;
-    try { onWindowChange({ chords, measureRange }); } catch (_) {}
+    const range = rangeFromSelected(selected);
+    try { onWindowChange({ chords, measureRange: range ? [range.fromMeasure, range.toMeasure] : null }); } catch (_) {}
   }
 
   // Remove + redraw the window overlay (per-system rectangles + two edge handles), recompute its
@@ -632,19 +672,8 @@ export function createMusicRenderer(container, opts = {}) {
     if (!chordWindow.active) return;
     const svg = container.querySelector('svg');
     if (!svg) return;
-    const ordered = orderedRenderedNotes();
-    if (!ordered.length) { fireWindowChange([]); return; }
-    // Seed a small window at the start the first time it's shown.
-    if (!chordWindow.start || !chordWindow.end) {
-      chordWindow.start = { measure: ordered[0].measure, idx: ordered[0].idx };
-      const e = ordered[Math.min(ordered.length - 1, 3)];
-      chordWindow.end = { measure: e.measure, idx: e.idx };
-    }
-    const anchorList = ordered.map((n) => ({ measure: n.measure, idx: n.idx }));
-    let a = clampAnchorIndex(anchorList, chordWindow.start);
-    let b = clampAnchorIndex(anchorList, chordWindow.end);
-    if (a > b) { const t = a; a = b; b = t; }
-    const selected = notesInWindow(ordered, a, b);
+    const { selected } = currentWindowSelection();
+    if (!selected.length) { fireWindowChange([]); return; }
     const bands = staffBoxes();
     const layer = mkSvg('g', { class: WINDOW_LAYER_CLASS });
 
@@ -775,6 +804,10 @@ export function createMusicRenderer(container, opts = {}) {
     setDimConnectors(on) { dimConnectors = !!on; redraw(); },
     // Toggle the draggable chord window. Off clears its anchors so it re-seeds next time.
     setChordWindow(on) { chordWindow.active = !!on; if (!chordWindow.active) { chordWindow.start = null; chordWindow.end = null; } redraw(); },
+    // Live play range of the window: { fromMeasure, toMeasure, fromBeat?, toBeat? }, or null when
+    // the window is off / empty. Beats are present only when onset times were available (then
+    // playback is note-accurate; otherwise it's measure-granular). Read fresh, not cached.
+    getWindowRange() { return chordWindow.active ? rangeFromSelected(currentWindowSelection().selected) : null; },
     // The manually-picked best-match chord names — read at vocab-save time.
     getSelectedChords() { return [...selectedChords]; },
     // Pre-select chords by name (e.g. restoring a saved vocab item) and re-draw the overlay.

@@ -84,6 +84,11 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
   const spb = 60 / bpm; // seconds per quarter-note beat
   const from = (opts.fromMeasure == null) ? -Infinity : opts.fromMeasure;
   const to = (opts.toMeasure == null) ? Infinity : opts.toMeasure;
+  // Optional note-accurate window: keep only onsets within [fromBeat, toBeat] (quarter-note beats
+  // from the piece start). Lets the chord window start/end mid-measure, narrower than the measure
+  // filter above. Both filters apply (AND); the beat range is a subset of its measure range.
+  const fromBeat = (opts.fromBeat == null) ? -Infinity : opts.fromBeat;
+  const toBeat = (opts.toBeat == null) ? Infinity : opts.toBeat;
 
   const events = []; // { midi, beats (onset), durBeats, measure }
   const parts = doc.getElementsByTagName('part');
@@ -146,8 +151,10 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
     }
   }
 
+  const EPS = 1e-6;
   const out = events
     .filter((e) => e.measure >= from && e.measure <= to)
+    .filter((e) => e.beats >= fromBeat - EPS && e.beats <= toBeat + EPS)
     .map((e) => ({ midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb }));
   out.sort((a, b) => a.time - b.time); // stable: chord/aligned notes keep emission order
   if (out.length) {

@@ -462,13 +462,13 @@
     const to = parseInt(document.getElementById('segTo').value, 10);
     return (Number.isFinite(from) && Number.isFinite(to)) ? { fromMeasure: from, toMeasure: to } : {};
   }
-  // What to play: when the chord window is on, play only the measures it spans; otherwise the
-  // segment from/to. (Measure-granular — plays whole measures the window covers.)
+  // What to play: when the chord window is on, play only the window — note-accurate (fromBeat/
+  // toBeat) when onsets are available, else the measures it spans. Otherwise the segment from/to.
+  // Read live from the renderer so it can't go stale against the window's current position.
   function activeRange() {
     const winOn = document.getElementById('chordWindowChk') && document.getElementById('chordWindowChk').checked;
-    if (winOn && windowState.measureRange) {
-      return { fromMeasure: windowState.measureRange[0], toMeasure: windowState.measureRange[1] };
-    }
+    const wr = winOn && renderer && renderer.getWindowRange && renderer.getWindowRange();
+    if (wr) return wr;
     return segmentRange();
   }
   function currentTempo() {
@@ -480,17 +480,20 @@
     // MusicXML pieces get a time-accurate, polyphonic schedule from the source; note-text
     // pieces (no real timing) fall back to the simple per-note sequential builder.
     const useXml = currentDetail.format === 'musicxml' && currentDetail.source;
+    const range = activeRange();
     const schedule = useXml
-      ? buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), ...activeRange() })
-      : buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...activeRange() });
+      ? buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), ...range })
+      : buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...range });
     if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
+    const span = (range.fromBeat != null) ? ` (window, beats ${range.fromBeat}–${range.toBeat})`
+      : (range.fromMeasure != null) ? ` (m. ${range.fromMeasure}–${range.toMeasure})` : '';
     const p = ensurePlayer();
     p.setInstrument(document.getElementById('instrSel').value);
     p.setSchedule(schedule);
     p.setLoop(document.getElementById('loopChk').checked);
     document.getElementById('transportMsg').textContent = 'Loading instrument…';
     p.play()
-      .then(() => { document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes`; })
+      .then(() => { document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes${span}`; })
       .catch(() => { document.getElementById('transportMsg').textContent = 'Playback error.'; });
   }
   let ytMonitor = null;

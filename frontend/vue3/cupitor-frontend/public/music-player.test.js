@@ -184,6 +184,25 @@ describe('buildScheduleFromMusicXml', () => {
     ]);
   });
 
+  test('beat range starts mid-measure: keeps onsets in [fromBeat,toBeat], re-zeroed', () => {
+    // measure 1: C@0, E@1, G@2, A@3 (quarter beats). Window from beat 1 to beat 2 → E, G only.
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}${pn('G', 4, 1)}${pn('A', 4, 1)}</measure>`);
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120, fromBeat: 1, toBeat: 2 })).toEqual([
+      { midi: 64, time: 0,   duration: 0.5 },
+      { midi: 67, time: 0.5, duration: 0.5 },
+    ]);
+  });
+
+  test('beat range crossing a barline keeps a sub-measure run across measures', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}</measure>` +
+                     `<measure number="2">${pn('G', 4, 1)}${pn('B', 4, 1)}</measure>`);
+    // beats: C@0,E@1,G@2,B@3 → window [1,2] = E (m1) + G (m2)
+    expect(buildScheduleFromMusicXml(xml, { tempo: 120, fromBeat: 1, toBeat: 2 })).toEqual([
+      { midi: 64, time: 0,   duration: 0.5 },
+      { midi: 67, time: 0.5, duration: 0.5 },
+    ]);
+  });
+
   test('empty / unparseable / note-less input → []', () => {
     expect(buildScheduleFromMusicXml('', { tempo: 120 })).toEqual([]);
     expect(buildScheduleFromMusicXml(null)).toEqual([]);
