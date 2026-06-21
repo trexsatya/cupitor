@@ -327,11 +327,20 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
     }
   }
 
-  function stop() {
+  // When called from a Transport-scheduled callback (the boundary stop), `atTime` is the
+  // callback's scheduling time; use it for the Transport/Part stop so Tone keeps sample-accurate
+  // timing (and doesn't warn about scheduling with a stale "now"). Bare calls (user actions) stop
+  // immediately.
+  function stop(atTime) {
     clearStopTimer();
     T.Transport.loop = false;   // clear the loop window so a later non-loop play isn't left looping
-    T.Transport.stop();
-    if (part) { try { part.stop(0); } catch (_) {} }
+    if (typeof atTime === 'number') {
+      T.Transport.stop(atTime);
+      if (part) { try { part.stop(atTime); } catch (_) {} }
+    } else {
+      T.Transport.stop();
+      if (part) { try { part.stop(0); } catch (_) {} }
+    }
     const c = getCursor && getCursor();
     if (c) { try { c.reset(); c.hide(); } catch (_) {} }
   }
@@ -346,7 +355,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       } else if (T.Transport.state === 'started') {
         // turned off mid-playback: still end at the segment boundary
         const end = scheduleEnd(schedule);
-        if (end > 0) { clearStopTimer(); stopId = T.Transport.scheduleOnce(() => stop(), end); }
+        if (end > 0) { clearStopTimer(); stopId = T.Transport.scheduleOnce((time) => stop(time), end); }
       }
     },
     setInstrument(category) {
@@ -366,7 +375,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       part.start(0);
       if (!loop) {
         const end = scheduleEnd(schedule);
-        if (end > 0) stopId = T.Transport.scheduleOnce(() => stop(), end);
+        if (end > 0) stopId = T.Transport.scheduleOnce((time) => stop(time), end);
       }
     },
     pause() { T.Transport.pause(); },
