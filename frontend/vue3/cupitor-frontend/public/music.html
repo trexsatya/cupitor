@@ -250,6 +250,13 @@
     <label><input type="checkbox" id="noteNameChk"> Note names</label>
     <label><input type="checkbox" id="chordChk"> Show chords</label>
     <label><input type="checkbox" id="dimConnChk" checked> Dim beams/stems</label>
+    <label><input type="checkbox" id="chordWindowChk"> Chord window</label>
+  </div>
+  <div id="windowPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#f4f8ff; border:1px solid #cfe0ff; border-radius:4px">
+    <span style="font-size:.85em;color:#555">Drag the blue window over the staff. Chords:</span>
+    <span id="windowChords"></span>
+    <span id="windowRange" style="font-size:.8em;color:#777"></span>
+    <button id="captureWindowBtn" style="margin-left:.5em">Capture window → vocab</button>
   </div>
   <div id="osmdPreview"></div>
   <div id="ytPlayer" style="display:none"></div>
@@ -364,8 +371,48 @@
   let renderer = null;
   let totalMeasures = 0;
   function ensureRenderer() {
-    if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'), { onChordSelect: syncVocabChords });
+    if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'),
+      { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange });
     return renderer;
+  }
+
+  // ── Chord window (draggable selection over the staff) ──────────────────────────────────────
+  let windowState = { chords: [], measureRange: null };   // latest payload from the renderer
+  const windowPicks = new Set();                          // chord names the user picked to capture
+  // Fired by the renderer whenever the window moves/re-anchors: refresh chips + highlight + range.
+  function onChordWindowChange(payload) {
+    windowState = payload || { chords: [], measureRange: null };
+    const names = new Set(windowState.chords.map((c) => c.name));
+    [...windowPicks].forEach((n) => { if (!names.has(n)) windowPicks.delete(n); });   // drop vanished picks
+    renderWindowChips();
+    applyWindowHighlight();
+    const r = windowState.measureRange;
+    document.getElementById('windowRange').textContent = r ? `(m. ${r[0]}–${r[1]})` : '';
+  }
+  function renderWindowChips() {
+    const host = document.getElementById('windowChords');
+    if (!host) return;
+    host.innerHTML = '';
+    if (!windowState.chords.length) { host.textContent = ' — '; return; }
+    windowState.chords.forEach((c) => {
+      const sel = windowPicks.has(c.name);
+      const chip = document.createElement('button');
+      chip.textContent = (sel ? '✓ ' : '') + c.name;
+      chip.style.cssText = `margin:0 .15em; padding:.05em .4em; font-size:.85em; border-radius:3px; cursor:pointer; border:1px solid ${sel ? '#c62828' : '#1565c0'}; background:${sel ? '#ffe3e3' : '#eef4ff'}; color:${sel ? '#c62828' : '#1565c0'}`;
+      chip.onclick = () => {
+        if (windowPicks.has(c.name)) windowPicks.delete(c.name); else windowPicks.add(c.name);
+        renderWindowChips();
+        applyWindowHighlight();
+      };
+      host.appendChild(chip);
+    });
+  }
+  function applyWindowHighlight() {
+    if (!renderer) return;
+    let notes = [];
+    windowState.chords.forEach((c) => { if (windowPicks.has(c.name)) notes = notes.concat(c.notes || []); });
+    renderer.clearHighlight();
+    if (notes.length) renderer.highlightChord(notes);
   }
   // Auto-update chord picks while a saved vocab item is on screen. Writes the LOCAL cache only
   // (survives reload) — it does NOT push to GitHub, which would spam commits on every toggle.
@@ -626,6 +673,19 @@
   document.getElementById('noteNameChk').onchange = (e) => { if (renderer) renderer.setNoteNames(e.target.checked); };
   document.getElementById('chordChk').onchange = (e) => { if (renderer) renderer.setShowChords(e.target.checked); };
   document.getElementById('dimConnChk').onchange = (e) => { if (renderer) renderer.setDimConnectors(e.target.checked); };
+  document.getElementById('chordWindowChk').onchange = (e) => {
+    document.getElementById('windowPanel').style.display = e.target.checked ? '' : 'none';
+    if (!e.target.checked) { windowPicks.clear(); if (renderer) renderer.clearHighlight(); }
+    if (renderer) renderer.setChordWindow(e.target.checked);
+  };
+  // Capture the current window: map its measure range + picked chords into the existing flow.
+  document.getElementById('captureWindowBtn').onclick = () => {
+    if (!windowState.measureRange) { setMediaMsg('No notes in the window', 'err'); return; }
+    document.getElementById('segFrom').value = windowState.measureRange[0];
+    document.getElementById('segTo').value = windowState.measureRange[1];
+    if (renderer) renderer.setSelectedChords([...windowPicks]);
+    document.getElementById('addVocabBtn').click();   // reuse Add/update-to-vocab (times, note, confirm)
+  };
   // Editing the note auto-updates a saved vocab item (local cache only; push via Add/update).
   document.getElementById('vocabNote').onchange = () => {
     if (!currentVocabEntry) return;   // fresh capture: saved when you click Add/update to vocab

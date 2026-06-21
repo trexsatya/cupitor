@@ -94,6 +94,33 @@ export function responsiveZoom(viewportWidth) {
   return clamp(viewportWidth / ZOOM_BASELINE_PX, 0.4, 1.0);
 }
 
+// Pure: inclusive slice of an ordered note list between two reading-order indices, with the
+// endpoints normalized (swapped if reversed) and clamped to the array bounds. [] for empty input.
+export function notesInWindow(ordered, startOrder, endOrder) {
+  if (!ordered || !ordered.length) return [];
+  let a = startOrder == null ? 0 : startOrder;
+  let b = endOrder == null ? ordered.length - 1 : endOrder;
+  if (a > b) { const t = a; a = b; b = t; }
+  a = clamp(a, 0, ordered.length - 1);
+  b = clamp(b, 0, ordered.length - 1);
+  return ordered.slice(a, b + 1);
+}
+
+// Pure: resolve a {measure, idx} anchor to a position in an ordered reading-order list of
+// {measure, idx}. Exact match wins; otherwise the nearest note by measure distance, then idx
+// distance — so a window survives re-renders that scroll/zoom the anchored measures out/in.
+// Returns 0 for an empty list or a null anchor.
+export function clampAnchorIndex(list, anchor) {
+  if (!list || !list.length || !anchor) return 0;
+  let best = 0, bestKey = Infinity;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].measure === anchor.measure && list[i].idx === anchor.idx) return i;
+    const key = Math.abs(list[i].measure - anchor.measure) * 100000 + Math.abs(list[i].idx - anchor.idx);
+    if (key < bestKey) { bestKey = key; best = i; }
+  }
+  return best;
+}
+
 // Thin OSMD wrapper. opts.osmdFactory(container) lets tests inject a spy; in the browser
 // it defaults to the global OpenSheetMusicDisplay. Visual output is browser-verified;
 // this wrapper's method/argument contract is unit-tested via an injected fake.
@@ -103,6 +130,7 @@ export function createMusicRenderer(container, opts = {}) {
   osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false });
   const onAfterRender = opts.onAfterRender;   // called after each render (lets the UI rebuild chord chips)
   const onChordSelect = opts.onChordSelect;   // called on a user chord-label click with the selected names
+  const onWindowChange = opts.onWindowChange; // called with { chords, measureRange } when the chord window moves
   let totalMeasures = 0;
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
   let noteNames = false;
@@ -112,6 +140,9 @@ export function createMusicRenderer(container, opts = {}) {
   let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
   let shownFrom = 1;             // 1-based first measure of the currently drawn window
   let shownTo = Number.MAX_SAFE_INTEGER;   // ...and the last (chords/highlight clip to this)
+  // Draggable selection window over the staff. start/end are stable {measure, idx} anchors so the
+  // window re-resolves to the right notes after re-renders (zoom/segment). Inactive by default.
+  const chordWindow = { active: false, start: null, end: null };
 
   // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
   // No-op on a sheet without instruments (e.g. the test fake / before load).
@@ -214,7 +245,10 @@ export function createMusicRenderer(container, opts = {}) {
               // (getBBox → 0). Those phantom notes otherwise anchor chord labels at x=0.
               if (!el || !name || el.isConnected === false) return;
               const b = el.getBBox ? el.getBBox() : { x: 0 };
-              (byMeasure[num] = byMeasure[num] || []).push({ name, left: b.x, el });
+              // `measure`/`idx` are the note's stable musical key (absolute measure + position
+              // within it), used to re-anchor the draggable chord window across re-renders.
+              const arr = (byMeasure[num] = byMeasure[num] || []);
+              arr.push({ name, left: b.x, el, measure: num, idx: arr.length });
             });
           });
         });
@@ -298,16 +332,18 @@ export function createMusicRenderer(container, opts = {}) {
     return top === Infinity ? null : { top, bottom };
   }
 
-  // Map an element's local bbox to its [top,bottom] in svg-user space (via getCTM, so OSMD's
-  // zoom/translate is respected). Returns null when the element can't be measured.
-  function elBand(el) {
+  // Map an element's local bbox to {left,right,top,bottom} in svg-user space (via getCTM, so
+  // OSMD's zoom/translate is respected). Returns null when the element can't be measured.
+  function elBox(el) {
     if (!el || !el.getBBox) return null;
     const b = el.getBBox();
     const m = el.getCTM && el.getCTM();
-    const top = m ? (m.b * b.x + m.d * b.y + m.f) : b.y;
-    const bottom = m ? (m.b * b.x + m.d * (b.y + b.height) + m.f) : (b.y + b.height);
-    return { top, bottom };
+    const map = (px, py) => (m ? { x: m.a * px + m.c * py + m.e, y: m.b * px + m.d * py + m.f } : { x: px, y: py });
+    const p1 = map(b.x, b.y), p2 = map(b.x + b.width, b.y + b.height);
+    return { left: Math.min(p1.x, p2.x), right: Math.max(p1.x, p2.x), top: Math.min(p1.y, p2.y), bottom: Math.max(p1.y, p2.y) };
   }
+  // Just the vertical extent — used to group notes/labels into staff systems.
+  function elBand(el) { const b = elBox(el); return b ? { top: b.top, bottom: b.bottom } : null; }
 
   // Per-system [{top,bottom}] in svg-user space (one per rendered staff line), so a label can be
   // placed relative to the note's OWN system instead of the global extent across all systems.
@@ -504,8 +540,181 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
+  // ── Draggable chord window ────────────────────────────────────────────────────────────────
+  const WINDOW_LAYER_CLASS = 'chord-window-layer';
+  const WINDOW_FILL = '#bcdcff';        // translucent selection band (distinct from #ffe9a8 capture)
+  const WINDOW_HANDLE = '#1565c0';      // grab-handle color
+
+  function mkSvg(tag, attrs) {
+    const el = document.createElementNS(SVG_NS, tag);
+    Object.keys(attrs).forEach((k) => el.setAttribute(k, attrs[k]));
+    return el;
+  }
+
+  // Rendered notes in reading/time order (measure → within-measure idx), each tagged with its
+  // svg-space box, system band index, and global order. The source of truth for the window.
+  function orderedRenderedNotes() {
+    const byMeasure = renderedNotesByMeasure();
+    const bands = staffBoxes();
+    const out = [];
+    Object.keys(byMeasure).map(Number).sort((p, q) => p - q).forEach((measure) => {
+      byMeasure[measure].forEach((n) => {
+        const box = elBox(n.el) || { left: n.left || 0, right: n.left || 0, top: 0, bottom: 0 };
+        const mid = (box.top + box.bottom) / 2;
+        const band = bands.length ? nearestStaffIdx(bands, mid) : 0;
+        out.push({ name: n.name, el: n.el, measure: n.measure, idx: n.idx, order: out.length, band,
+          left: box.left, right: box.right, top: box.top, bottom: box.bottom });
+      });
+    });
+    return out;
+  }
+
+  // svg-user-space point for a client (mouse) coordinate.
+  function svgPoint(svg, clientX, clientY) {
+    const m = svg.getScreenCTM && svg.getScreenCTM();
+    if (!m || !m.inverse) return { x: clientX, y: clientY };
+    const inv = m.inverse();
+    return { x: inv.a * clientX + inv.c * clientY + inv.e, y: inv.b * clientX + inv.d * clientY + inv.f };
+  }
+
+  // Nearest rendered note to an svg-space point: first pick the system band by y, then the note
+  // whose x-center is closest within that band (falls back to nearest across all bands).
+  function pointerToNote(ordered, x, y) {
+    if (!ordered.length) return null;
+    const bands = staffBoxes();
+    const bandIdx = bands.length ? nearestStaffIdx(bands, y) : 0;
+    const pick = (sameBand) => {
+      let best = null, bd = Infinity;
+      ordered.forEach((n) => {
+        if (sameBand && (n.band || 0) !== bandIdx) return;
+        const d = Math.abs((n.left + n.right) / 2 - x);
+        if (d < bd) { bd = d; best = n; }
+      });
+      return best;
+    };
+    return pick(true) || pick(false);
+  }
+
+  function fireWindowChange(selected) {
+    if (!onWindowChange) return;
+    const forChords = selected.map((n) => ({ name: n.name, el: n.el, left: n.order }));
+    const areas = guessChordAreas(forChords, undefined, { maxPerArea: 3 });
+    const seen = new Set();
+    const chords = [];
+    areas.forEach((area) => area.chords.forEach((ch) => {
+      if (!seen.has(ch.name)) { seen.add(ch.name); chords.push({ name: ch.name, notes: ch.notes }); }
+    }));
+    const measureRange = selected.length
+      ? [Math.min(...selected.map((n) => n.measure)), Math.max(...selected.map((n) => n.measure))]
+      : null;
+    try { onWindowChange({ chords, measureRange }); } catch (_) {}
+  }
+
+  // Remove + redraw the window overlay (per-system rectangles + two edge handles), recompute its
+  // chords, and notify the UI. Part of redraw(), so it re-anchors after every render.
+  function applyChordWindow() {
+    if (!container || !container.querySelectorAll) return;
+    container.querySelectorAll('.' + WINDOW_LAYER_CLASS).forEach((n) => n.remove());
+    if (!chordWindow.active) return;
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+    const ordered = orderedRenderedNotes();
+    if (!ordered.length) { fireWindowChange([]); return; }
+    // Seed a small window at the start the first time it's shown.
+    if (!chordWindow.start || !chordWindow.end) {
+      chordWindow.start = { measure: ordered[0].measure, idx: ordered[0].idx };
+      const e = ordered[Math.min(ordered.length - 1, 3)];
+      chordWindow.end = { measure: e.measure, idx: e.idx };
+    }
+    const anchorList = ordered.map((n) => ({ measure: n.measure, idx: n.idx }));
+    let a = clampAnchorIndex(anchorList, chordWindow.start);
+    let b = clampAnchorIndex(anchorList, chordWindow.end);
+    if (a > b) { const t = a; a = b; b = t; }
+    const selected = notesInWindow(ordered, a, b);
+    const bands = staffBoxes();
+    const layer = mkSvg('g', { class: WINDOW_LAYER_CLASS });
+
+    // One rectangle per system the selection spans (text-selection shape across wrapped lines).
+    const byBand = new Map();
+    selected.forEach((n) => { const arr = byBand.get(n.band) || []; arr.push(n); byBand.set(n.band, arr); });
+    byBand.forEach((notes, bandIdx) => {
+      const left = Math.min(...notes.map((n) => n.left));
+      const right = Math.max(...notes.map((n) => n.right));
+      const band = bands[bandIdx] || { top: Math.min(...notes.map((n) => n.top)), bottom: Math.max(...notes.map((n) => n.bottom)) };
+      const pad = 6;
+      const rect = mkSvg('rect', { x: left - 4, y: band.top - pad, width: (right - left) + 8,
+        height: (band.bottom - band.top) + 2 * pad, fill: WINDOW_FILL, opacity: '0.33', style: 'cursor:move' });
+      rect.addEventListener('pointerdown', startMiddleDrag);
+      layer.appendChild(rect);
+    });
+
+    // Edge handles at the true endpoints.
+    const s = selected[0], e = selected[selected.length - 1];
+    const sBand = bands[s.band] || { top: s.top, bottom: s.bottom };
+    const eBand = bands[e.band] || { top: e.top, bottom: e.bottom };
+    const lh = mkSvg('rect', { x: s.left - 8, y: sBand.top - 6, width: 6, height: (sBand.bottom - sBand.top) + 12,
+      fill: WINDOW_HANDLE, opacity: '0.85', rx: 2, style: 'cursor:ew-resize' });
+    lh.addEventListener('pointerdown', (ev) => startHandleDrag(ev, 'start'));
+    const rh = mkSvg('rect', { x: e.right + 2, y: eBand.top - 6, width: 6, height: (eBand.bottom - eBand.top) + 12,
+      fill: WINDOW_HANDLE, opacity: '0.85', rx: 2, style: 'cursor:ew-resize' });
+    rh.addEventListener('pointerdown', (ev) => startHandleDrag(ev, 'end'));
+    layer.appendChild(lh);
+    layer.appendChild(rh);
+
+    svg.appendChild(layer);
+    fireWindowChange(selected);
+  }
+
+  // Drag an endpoint handle: map the pointer to the nearest note and move that anchor live.
+  function startHandleDrag(ev, which) {
+    ev.preventDefault(); ev.stopPropagation();
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+    const move = (e) => {
+      const ordered = orderedRenderedNotes();
+      const p = svgPoint(svg, e.clientX, e.clientY);
+      const note = pointerToNote(ordered, p.x, p.y);
+      if (note) { chordWindow[which] = { measure: note.measure, idx: note.idx }; applyChordWindow(); }
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  // Drag the middle: slide the whole range through reading order by the pointer's note-delta,
+  // keeping the note count constant (can roll across a line break); clamped to the rendered notes.
+  function startMiddleDrag(ev) {
+    ev.preventDefault();
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+    const ordered = orderedRenderedNotes();
+    const anchorList = ordered.map((n) => ({ measure: n.measure, idx: n.idx }));
+    const a0 = clampAnchorIndex(anchorList, chordWindow.start);
+    const b0 = clampAnchorIndex(anchorList, chordWindow.end);
+    const grab = pointerToNote(ordered, svgPoint(svg, ev.clientX, ev.clientY).x, svgPoint(svg, ev.clientX, ev.clientY).y);
+    const grabOrder = grab ? grab.order : a0;
+    const move = (e) => {
+      const p = svgPoint(svg, e.clientX, e.clientY);
+      const cur = pointerToNote(ordered, p.x, p.y);
+      if (!cur) return;
+      let delta = cur.order - grabOrder;
+      let na = a0 + delta, nb = b0 + delta;
+      const n = ordered.length;
+      if (na < 0) { nb -= na; na = 0; }
+      if (nb > n - 1) { na -= (nb - (n - 1)); nb = n - 1; }
+      na = clamp(na, 0, n - 1); nb = clamp(nb, 0, n - 1);
+      chordWindow.start = anchorList[na];
+      chordWindow.end = anchorList[nb];
+      applyChordWindow();
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
   // One render pass: apply model colors, render, dim connectors, then (re)build the note-name
-  // overlay, the captured-measure shading, the chord-candidate overlay, and notify the UI.
+  // overlay, the captured-measure shading, the chord-candidate overlay, the chord window, and
+  // notify the UI.
   function redraw() {
     clearHighlight();
     applyVoiceColors();
@@ -514,6 +723,7 @@ export function createMusicRenderer(container, opts = {}) {
     applyNoteNames();
     applyMeasureHighlight();
     applyChordOverlay();
+    applyChordWindow();
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
@@ -549,6 +759,8 @@ export function createMusicRenderer(container, opts = {}) {
     setShowChords(on) { showChords = !!on; redraw(); },
     // Toggle dimming of beams/stems/slurs (reduces visual noise; noteheads stay black).
     setDimConnectors(on) { dimConnectors = !!on; redraw(); },
+    // Toggle the draggable chord window. Off clears its anchors so it re-seeds next time.
+    setChordWindow(on) { chordWindow.active = !!on; if (!chordWindow.active) { chordWindow.start = null; chordWindow.end = null; } redraw(); },
     // The manually-picked best-match chord names — read at vocab-save time.
     getSelectedChords() { return [...selectedChords]; },
     // Pre-select chords by name (e.g. restoring a saved vocab item) and re-draw the overlay.
