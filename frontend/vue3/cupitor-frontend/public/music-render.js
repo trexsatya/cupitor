@@ -223,12 +223,14 @@ export function createMusicRenderer(container, opts = {}) {
     const byMeasure = {};
     const measureList = osmd.graphic && osmd.graphic.measureList;
     if (!measureList || !measureList.forEach) return byMeasure;
-    // measureList is [measureIndex][staffIndex]. Key by each measure's absolute number and keep
-    // only the currently rendered window — OSMD's measureList can hold every measure even when
-    // just a segment is drawn, so chords must be restricted to [shownFrom, shownTo].
+    // measureList is [measureIndex][staffIndex]. Key by each measure's absolute number. We do NOT
+    // clip to [shownFrom, shownTo]: OSMD's measureList can hold undrawn measures, but their note
+    // elements are detached and dropped by the isConnected guard below — so the result is exactly
+    // the rendered notes. An explicit measure-number clip here used to wrongly drop the leftmost
+    // rendered measure when OSMD's numbering was offset from shownFrom (e.g. a pickup measure),
+    // misaligning the chord window from what's drawn.
     measureList.forEach((measures, a) => {
       const num = absoluteMeasureNumber(measures, a, measureList.length);
-      if (num < shownFrom || num > shownTo) return;
       (measures || []).forEach((measure) => {
         ((measure.staffEntries) || []).forEach((se) => {
           const onsetBeats = staffEntryOnsetBeats(se);   // shared by all notes in this staff entry
