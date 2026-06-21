@@ -579,20 +579,34 @@ export function createMusicRenderer(container, opts = {}) {
 
   // Nearest rendered note to an svg-space point: first pick the system band by y, then the note
   // whose x-center is closest within that band (falls back to nearest across all bands).
+  function nearestByX(list, x) {
+    let best = null, bd = Infinity;
+    list.forEach((n) => { const d = Math.abs((n.left + n.right) / 2 - x); if (d < bd) { bd = d; best = n; } });
+    return best;
+  }
+  // Map an svg-space point to a rendered note. Primary axis is the system (line) under y; within
+  // that line we take the nearest note by x. Crucially, dragging PAST a line's right edge wraps to
+  // the next line's first note (and past the left edge → previous line's last note), so the window
+  // can be extended/slid across a wrapped line break by the natural left↔right gesture, not only by
+  // dragging diagonally down into the next system.
   function pointerToNote(ordered, x, y) {
     if (!ordered.length) return null;
     const bands = staffBoxes();
-    const bandIdx = bands.length ? nearestStaffIdx(bands, y) : 0;
-    const pick = (sameBand) => {
-      let best = null, bd = Infinity;
-      ordered.forEach((n) => {
-        if (sameBand && (n.band || 0) !== bandIdx) return;
-        const d = Math.abs((n.left + n.right) / 2 - x);
-        if (d < bd) { bd = d; best = n; }
-      });
-      return best;
-    };
-    return pick(true) || pick(false);
+    if (!bands.length) return nearestByX(ordered, x);
+    const bandIdx = nearestStaffIdx(bands, y);
+    const inBand = ordered.filter((n) => (n.band || 0) === bandIdx);
+    if (!inBand.length) return nearestByX(ordered, x);
+    const maxX = Math.max(...inBand.map((n) => n.right));
+    const minX = Math.min(...inBand.map((n) => n.left));
+    if (x > maxX && bandIdx < bands.length - 1) {
+      const next = ordered.filter((n) => (n.band || 0) === bandIdx + 1);
+      if (next.length) return next.reduce((a, b) => (a.order < b.order ? a : b));   // first note of next line
+    }
+    if (x < minX && bandIdx > 0) {
+      const prev = ordered.filter((n) => (n.band || 0) === bandIdx - 1);
+      if (prev.length) return prev.reduce((a, b) => (a.order > b.order ? a : b));    // last note of prev line
+    }
+    return nearestByX(inBand, x);
   }
 
   function fireWindowChange(selected) {
