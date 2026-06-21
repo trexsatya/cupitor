@@ -263,6 +263,19 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   let schedule = [];
   let loop = false;
   let stopId = null;   // Tone.Transport.scheduleOnce id for the boundary stop
+  let cursorStartStep = 0;   // distinct onsets to skip so the cursor homes to the window's start
+
+  // Home the OSMD cursor to the start of what we're playing: the rendered view's first note,
+  // then forward cursorStartStep onsets (non-zero only when playing a chord window that begins
+  // partway through the view, whose schedule is re-zeroed to t=0).
+  function homeCursor(cursor) {
+    if (!cursor) return;
+    try {
+      cursor.reset();
+      for (let i = 0; i < cursorStartStep; i++) cursor.next();
+      cursor.show();
+    } catch (_) {}
+  }
 
   // Stop at an explicit transport time 0: calling part.stop() bare resolves to "now", which
   // after a Transport.stop() can be a tiny negative float that Tone rejects (RangeError).
@@ -279,7 +292,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   function buildPart() {
     disposePart();
     const cursor = getCursor && getCursor();
-    if (cursor) { try { cursor.reset(); cursor.show(); } catch (_) {} }
+    homeCursor(cursor);
     // Advance the OSMD cursor once per distinct onset (not per note) so chords and overlapping
     // voices don't over-step it. The earliest onset re-homes the cursor (reset) instead of
     // advancing — so it lands on the first note and, crucially, snaps back to the start on
@@ -294,7 +307,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
     part = new T.Part((time, ev) => {
       synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
       if (cursor && ev._step) T.Draw.schedule(() => {
-        try { if (ev._first) { cursor.reset(); cursor.show(); } else cursor.next(); } catch (_) {}
+        try { if (ev._first) homeCursor(cursor); else cursor.next(); } catch (_) {}
       }, time);
     }, events);
     part.loop = false;   // looping is driven by the Transport (reliable) — see play()/setLoop
@@ -324,7 +337,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   }
 
   return {
-    setSchedule(s) { schedule = s || []; buildPart(); },
+    setSchedule(s, opts = {}) { schedule = s || []; cursorStartStep = opts.cursorStartStep || 0; buildPart(); },
     setLoop(on) {
       loop = !!on;
       applyLoop();

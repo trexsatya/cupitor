@@ -489,7 +489,7 @@
       : (range.fromMeasure != null) ? ` (m. ${range.fromMeasure}–${range.toMeasure})` : '';
     const p = ensurePlayer();
     p.setInstrument(document.getElementById('instrSel').value);
-    p.setSchedule(schedule);
+    p.setSchedule(schedule, { cursorStartStep: range.cursorStep || 0 });
     p.setLoop(document.getElementById('loopChk').checked);
     document.getElementById('transportMsg').textContent = 'Loading instrument…';
     p.play()
