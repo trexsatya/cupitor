@@ -209,7 +209,10 @@ export function createMusicRenderer(container, opts = {}) {
               const heads = root.querySelectorAll('.vf-notehead');
               const el = heads[idx] || heads[0];
               const name = vexKeyToPitchClass(vf[0].keys && vf[0].keys[idx]);
-              if (!el || !name) return;
+              // Skip notes whose notehead isn't actually in the rendered SVG: OSMD's measureList
+              // can hold measures outside the drawn window, and their elements are detached
+              // (getBBox → 0). Those phantom notes otherwise anchor chord labels at x=0.
+              if (!el || !name || el.isConnected === false) return;
               const b = el.getBBox ? el.getBBox() : { x: 0 };
               (byMeasure[num] = byMeasure[num] || []).push({ name, left: b.x, el });
             });
@@ -295,20 +298,51 @@ export function createMusicRenderer(container, opts = {}) {
     return top === Infinity ? null : { top, bottom };
   }
 
-  // Per-stave [{top,bottom}] in svg-user space (one per rendered staff/line), so a label can be
-  // placed relative to the note's OWN staff instead of the global extent across all systems.
+  // Map an element's local bbox to its [top,bottom] in svg-user space (via getCTM, so OSMD's
+  // zoom/translate is respected). Returns null when the element can't be measured.
+  function elBand(el) {
+    if (!el || !el.getBBox) return null;
+    const b = el.getBBox();
+    const m = el.getCTM && el.getCTM();
+    const top = m ? (m.b * b.x + m.d * b.y + m.f) : b.y;
+    const bottom = m ? (m.b * b.x + m.d * (b.y + b.height) + m.f) : (b.y + b.height);
+    return { top, bottom };
+  }
+
+  // Per-system [{top,bottom}] in svg-user space (one per rendered staff line), so a label can be
+  // placed relative to the note's OWN system instead of the global extent across all systems.
+  // Prefers .vf-stave; this OSMD/VexFlow build emits no .vf-stave (staff lines are bare paths),
+  // so fall back to clustering rendered noteheads — a large vertical gap between consecutive
+  // (sorted) notehead centers marks the break between one wrapped system and the next.
+  const SYSTEM_GAP = 60;   // min vertical whitespace (svg units) separating two systems
   function staffBoxes() {
-    const out = [];
-    container.querySelectorAll('.vf-stave').forEach((el) => {
-      if (!el.getBBox) return;
-      const b = el.getBBox();
-      const m = el.getCTM && el.getCTM();
-      const top = m ? (m.b * b.x + m.d * b.y + m.f) : b.y;
-      const bottom = m ? (m.b * b.x + m.d * (b.y + b.height) + m.f) : (b.y + b.height);
-      out.push({ top, bottom });
+    const staveEls = container.querySelectorAll('.vf-stave');
+    if (staveEls.length) {
+      const out = [];
+      staveEls.forEach((el) => { const band = elBand(el); if (band) out.push(band); });
+      return out.sort((a, b) => a.top - b.top);
+    }
+    const mids = [];
+    container.querySelectorAll('.vf-notehead').forEach((el) => {
+      const band = elBand(el);
+      if (band) mids.push({ ...band, mid: (band.top + band.bottom) / 2 });
     });
-    out.sort((a, b) => a.top - b.top);
-    return out;
+    if (!mids.length) return [];
+    mids.sort((a, b) => a.mid - b.mid);
+    const out = [];
+    let cur = { top: mids[0].top, bottom: mids[0].bottom, last: mids[0].mid };
+    for (let i = 1; i < mids.length; i++) {
+      if (mids[i].mid - cur.last > SYSTEM_GAP) {
+        out.push({ top: cur.top, bottom: cur.bottom });
+        cur = { top: mids[i].top, bottom: mids[i].bottom, last: mids[i].mid };
+      } else {
+        cur.top = Math.min(cur.top, mids[i].top);
+        cur.bottom = Math.max(cur.bottom, mids[i].bottom);
+        cur.last = mids[i].mid;
+      }
+    }
+    out.push({ top: cur.top, bottom: cur.bottom });
+    return out.sort((a, b) => a.top - b.top);
   }
 
   // Index of the staff whose vertical band contains (or is nearest to) y.
@@ -328,58 +362,66 @@ export function createMusicRenderer(container, opts = {}) {
     if (!showChords) return;
     const svg = container.querySelector('svg');
     if (!svg) return;
+    // Group rendered notes by system (wrapped line) BEFORE detecting chords. guessChordAreas
+    // slides a window by x, but x RESETS on each wrapped line — a global x-sort would conflate
+    // notes from different lines that share an x-column into bogus chords. Within one system x
+    // is onset order, so we detect per system and place each system's labels against its own band.
+    const bands = staffBoxes();                 // [{top,bottom}] per system, sorted top→bottom
+    const fallback = systemBounds();            // global extent when no notehead bands are found
     const byMeasure = renderedNotesByMeasure();
-    const stream = [];
-    Object.keys(byMeasure).forEach((m) => { stream.push(...byMeasure[m]); });
-    const areas = guessChordAreas(stream, undefined, { maxPerArea: MAX_LABELS_PER_AREA });
-    if (!areas.length) return;
-    // Highlight the selected chords' notes regardless of which labels we end up drawing.
-    let selectedNotes = [];
-    areas.forEach((area) => area.chords.forEach((ch) => {
-      if (selectedChords.has(ch.name)) selectedNotes = selectedNotes.concat(ch.notes);
-    }));
+    const allNotes = [];
+    Object.keys(byMeasure).forEach((m) => allNotes.push(...byMeasure[m]));
+    const groups = Array.from({ length: Math.max(1, bands.length) }, () => []);
+    allNotes.forEach((n) => {
+      let idx = 0;
+      if (bands.length) { const b = elBand(n.el); if (b) idx = nearestStaffIdx(bands, (b.top + b.bottom) / 2); }
+      groups[idx].push(n);
+    });
+
     const layer = document.createElementNS(SVG_NS, 'g');
     layer.setAttribute('class', CHORD_LAYER_CLASS);
-    // Place each label on an even row above/below ITS OWN staff (multi-system safe), columns
-    // alternating sides per staff so adjacent labels don't collide, with a per-row min-gap.
-    const staves = staffBoxes();
-    const fallback = systemBounds();   // used when no .vf-stave is found
-    const cols = areas
-      .map((area) => { const a = chordAnchorXY(area); return { area, x: a.x, mid: (a.top + a.bottom) / 2 }; })
-      .sort((a, b) => a.x - b.x);
-    const lastX = new Map();           // `${staffIdx}:${side}` → last placed x
-    const countPerStaff = new Map();   // staffIdx → labels placed (drives per-staff alternation)
-    cols.forEach(({ area, x, mid }) => {
-      let idx = 0, sTop = mid, sBottom = mid;
-      if (staves.length) { idx = nearestStaffIdx(staves, mid); sTop = staves[idx].top; sBottom = staves[idx].bottom; }
-      else if (fallback) { sTop = fallback.top; sBottom = fallback.bottom; }
-      const cnt = countPerStaff.get(idx) || 0;
-      const side = cnt % 2;            // 0 = above, 1 = below — alternate within each staff
-      const key = idx + ':' + side;
-      const prev = lastX.has(key) ? lastX.get(key) : -Infinity;
-      if (x - prev < MIN_LABEL_GAP) return;   // too close on this row → skip
-      lastX.set(key, x);
-      countPerStaff.set(idx, cnt + 1);
-      const aboveY = sTop - 8, belowY = sBottom + 16;
-      area.chords.forEach((ch, k) => {
-        const isSel = selectedChords.has(ch.name);
-        const t = document.createElementNS(SVG_NS, 'text');
-        t.setAttribute('x', x);
-        t.setAttribute('y', side === 0 ? (aboveY - k * 11) : (belowY + k * 11));
-        t.setAttribute('font-size', isSel ? '11' : '9');
-        t.setAttribute('font-weight', '700');
-        t.setAttribute('fill', isSel ? '#c62828' : '#1565c0');
-        t.setAttribute('text-decoration', isSel ? 'underline' : 'none');
-        t.setAttribute('style', 'cursor:pointer');
-        t.textContent = (isSel ? '✓ ' : '') + ch.name;
-        t.addEventListener('click', () => {
-          if (selectedChords.has(ch.name)) selectedChords.delete(ch.name); else selectedChords.add(ch.name);
-          applyChordOverlay();
-          if (onChordSelect) { try { onChordSelect([...selectedChords]); } catch (_) {} }
+    let selectedNotes = [];
+
+    groups.forEach((notes, bandIdx) => {
+      if (notes.length < 2) return;
+      const areas = guessChordAreas(notes, undefined, { maxPerArea: MAX_LABELS_PER_AREA });
+      if (!areas.length) return;
+      // Highlight selected chords' notes regardless of whether their label survives de-crowding.
+      areas.forEach((area) => area.chords.forEach((ch) => {
+        if (selectedChords.has(ch.name)) selectedNotes = selectedNotes.concat(ch.notes);
+      }));
+      const band = bands[bandIdx] || fallback || { top: 0, bottom: 0 };
+      const aboveY = band.top - 8, belowY = band.bottom + 16;
+      const cols = areas.map((area) => ({ area, x: chordAnchorXY(area).x })).sort((a, b) => a.x - b.x);
+      const lastX = new Map();   // side (0=above,1=below) → last placed x, to de-crowd each row
+      let placed = 0;
+      cols.forEach(({ area, x }) => {
+        const side = placed % 2;            // alternate above/below within this system
+        const prev = lastX.has(side) ? lastX.get(side) : -Infinity;
+        if (x - prev < MIN_LABEL_GAP) return;   // too close on this row → skip
+        lastX.set(side, x);
+        placed += 1;
+        area.chords.forEach((ch, k) => {
+          const isSel = selectedChords.has(ch.name);
+          const t = document.createElementNS(SVG_NS, 'text');
+          t.setAttribute('x', x);
+          t.setAttribute('y', side === 0 ? (aboveY - k * 11) : (belowY + k * 11));
+          t.setAttribute('font-size', isSel ? '11' : '9');
+          t.setAttribute('font-weight', '700');
+          t.setAttribute('fill', isSel ? '#c62828' : '#1565c0');
+          t.setAttribute('text-decoration', isSel ? 'underline' : 'none');
+          t.setAttribute('style', 'cursor:pointer');
+          t.textContent = (isSel ? '✓ ' : '') + ch.name;
+          t.addEventListener('click', () => {
+            if (selectedChords.has(ch.name)) selectedChords.delete(ch.name); else selectedChords.add(ch.name);
+            applyChordOverlay();
+            if (onChordSelect) { try { onChordSelect([...selectedChords]); } catch (_) {} }
+          });
+          layer.appendChild(t);
         });
-        layer.appendChild(t);
       });
     });
+
     svg.appendChild(layer);
     if (selectedNotes.length) highlightChord(selectedNotes); else clearHighlight();
   }
@@ -445,8 +487,10 @@ export function createMusicRenderer(container, opts = {}) {
   // after each render (osmd.render() repaints them black); a no-op when off / without a DOM svg.
   function applyDimConnectors() {
     if (!dimConnectors || !container || !container.querySelectorAll) return;
-    // Beams/stems/slurs/ties + the numeric annotations (string numbers, fret-hand fingerings).
-    const groups = '.vf-beam, .vf-stem, .vf-slur, .vf-tie, .vf-stavetie, .vf-stringnumber, .vf-frethandfinger, .vf-fingering';
+    // Beams/stems/flags/slurs/ties + connecting lines + the numeric annotations (string
+    // numbers, fret-hand fingerings). This OSMD/VexFlow build draws flags as .vf-flag, slurs as
+    // .vf-curve, and gliss/connector lines as .vf-line — all initially black, so include them.
+    const groups = '.vf-beam, .vf-stem, .vf-flag, .vf-slur, .vf-curve, .vf-tie, .vf-stavetie, .vf-line, .vf-stringnumber, .vf-frethandfinger, .vf-fingering, .vf-text';
     container.querySelectorAll(groups).forEach((g) => {
       // Recolor the group itself (in case the class sits on the text/shape) and its drawables.
       [g, ...g.querySelectorAll('path, rect, polygon, line, text, tspan, circle')].forEach((el) => {
