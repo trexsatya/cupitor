@@ -462,6 +462,15 @@
     const to = parseInt(document.getElementById('segTo').value, 10);
     return (Number.isFinite(from) && Number.isFinite(to)) ? { fromMeasure: from, toMeasure: to } : {};
   }
+  // What to play: when the chord window is on, play only the measures it spans; otherwise the
+  // segment from/to. (Measure-granular — plays whole measures the window covers.)
+  function activeRange() {
+    const winOn = document.getElementById('chordWindowChk') && document.getElementById('chordWindowChk').checked;
+    if (winOn && windowState.measureRange) {
+      return { fromMeasure: windowState.measureRange[0], toMeasure: windowState.measureRange[1] };
+    }
+    return segmentRange();
+  }
   function currentTempo() {
     const t = parseInt(document.getElementById('tempoInput').value, 10);
     return Number.isFinite(t) && t > 0 ? t : 90;
@@ -472,8 +481,8 @@
     // pieces (no real timing) fall back to the simple per-note sequential builder.
     const useXml = currentDetail.format === 'musicxml' && currentDetail.source;
     const schedule = useXml
-      ? buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), ...segmentRange() })
-      : buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...segmentRange() });
+      ? buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), ...activeRange() })
+      : buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...activeRange() });
     if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
     const p = ensurePlayer();
     p.setInstrument(document.getElementById('instrSel').value);
