@@ -127,7 +127,11 @@ export function clampAnchorIndex(list, anchor) {
 export function createMusicRenderer(container, opts = {}) {
   const factory = opts.osmdFactory || ((c) => new opensheetmusicdisplay.OpenSheetMusicDisplay(c));
   const osmd = factory(container);
-  osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false });
+  // useXMLMeasureNumbers:false → OSMD labels measures by its own 1-based sequential count, the same
+  // convention music-encoding uses (measureNumber = index + 1). With a pickup/anacrusis the XML's
+  // printed numbers are offset by one, which made a vocab item's stored range (e.g. m7-8) render
+  // under labels m6-7. Sequential labels keep the displayed numbers in step with segFrom/segTo.
+  osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false, useXMLMeasureNumbers: false });
   const onAfterRender = opts.onAfterRender;   // called after each render (lets the UI rebuild chord chips)
   const onChordSelect = opts.onChordSelect;   // called on a user chord-label click with the selected names
   const onWindowChange = opts.onWindowChange; // called with { chords, measureRange } when the chord window moves
