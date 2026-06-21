@@ -6,6 +6,7 @@ import { createMusicRenderer } from './music-render.js';
 import { resolveMatchMeasures } from './music-render.js';
 import { voiceColor } from './music-render.js';
 import { noteName } from './music-render.js';
+import { notesInWindow, clampAnchorIndex } from './music-render.js';
 import { encodeMusicXml, inferChords } from './music-encoding.js';
 import { buildIndexEntry } from './music-index.js';
 import fs from 'fs';
@@ -314,5 +315,62 @@ describe('createMusicRenderer note names', () => {
     const r = createMusicRenderer({}, { osmdFactory: () => osmd, onAfterRender: () => { calls++; } });
     r.showSegment([1, 2]);
     expect(calls).toBeGreaterThan(0);
+  });
+});
+
+describe('notesInWindow', () => {
+  const five = [{ order: 0 }, { order: 1 }, { order: 2 }, { order: 3 }, { order: 4 }];
+  test('inclusive slice between start and end order', () => {
+    expect(notesInWindow(five, 1, 3).map(n => n.order)).toEqual([1, 2, 3]);
+  });
+  test('single-note window', () => {
+    expect(notesInWindow(five, 2, 2).map(n => n.order)).toEqual([2]);
+  });
+  test('swaps when start > end', () => {
+    expect(notesInWindow(five, 3, 1).map(n => n.order)).toEqual([1, 2, 3]);
+  });
+  test('clamps out-of-range bounds to the array', () => {
+    expect(notesInWindow(five, -5, 99).map(n => n.order)).toEqual([0, 1, 2, 3, 4]);
+  });
+  test('empty input → empty', () => {
+    expect(notesInWindow([], 0, 2)).toEqual([]);
+    expect(notesInWindow(null, 0, 2)).toEqual([]);
+  });
+});
+
+describe('clampAnchorIndex', () => {
+  // ordered reading-order list of {measure, idx}
+  const list = [
+    { measure: 1, idx: 0 }, { measure: 1, idx: 1 },
+    { measure: 2, idx: 0 }, { measure: 2, idx: 1 }, { measure: 2, idx: 2 },
+    { measure: 3, idx: 0 },
+  ];
+  test('exact match returns its position', () => {
+    expect(clampAnchorIndex(list, { measure: 2, idx: 1 })).toBe(3);
+    expect(clampAnchorIndex(list, { measure: 1, idx: 0 })).toBe(0);
+  });
+  test('missing idx within a present measure → nearest idx in that measure', () => {
+    expect(clampAnchorIndex(list, { measure: 2, idx: 9 })).toBe(4);   // measure 2's last note
+  });
+  test('measure scrolled out below → first note', () => {
+    expect(clampAnchorIndex(list, { measure: 0, idx: 0 })).toBe(0);
+  });
+  test('measure scrolled out above → last note', () => {
+    expect(clampAnchorIndex(list, { measure: 9, idx: 0 })).toBe(5);
+  });
+  test('empty list or null anchor → 0', () => {
+    expect(clampAnchorIndex([], { measure: 1, idx: 0 })).toBe(0);
+    expect(clampAnchorIndex(list, null)).toBe(0);
+  });
+});
+
+describe('createMusicRenderer chord window', () => {
+  test('setChordWindow re-renders and is safe without a rendered graphic', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    const before = osmd.calls.filter(c => c[0] === 'render').length;
+    expect(() => r.setChordWindow(true)).not.toThrow();
+    expect(osmd.calls.filter(c => c[0] === 'render').length).toBe(before + 1);
+    expect(() => r.setChordWindow(false)).not.toThrow();
   });
 });
