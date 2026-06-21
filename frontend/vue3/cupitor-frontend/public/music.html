@@ -147,6 +147,34 @@
         .extPill.active { background: #2563eb; color: #fff; border-color: #2563eb; }
         #managerSection { margin-bottom: 1rem; }
         #managerSection > summary { cursor: pointer; font-weight: 600; }
+
+        /* On phones the inline preview is too cramped; show it as a full-screen modal dialog.
+           #musicPreview is toggled via display:none/block, so when shown these rules make it a
+           fixed overlay. The existing Close button (#previewCloseBtn) dismisses it. */
+        @media (max-width: 700px) {
+          #musicPreview {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            margin: 0;
+            background: #fff;
+            overflow: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            padding: 1rem;
+            border-top: none;
+            box-shadow: 0 0 24px rgba(0, 0, 0, .4);
+          }
+          /* Keep the close/segment controls reachable at the top while scrolling the score. */
+          #musicPreview > div:first-child {
+            position: sticky;
+            top: 0;
+            background: #fff;
+            padding-bottom: .4rem;
+            z-index: 1;
+          }
+          body.preview-open { overflow: hidden; }   /* lock the page behind the dialog */
+        }
     </style>
 </head>
 <body>
@@ -232,7 +260,7 @@
         <option value="synth">Synth</option>
       </select>
     </label>
-    <span id="transportMsg"></span>
+    <span id="transportMsg" style="color: blueviolet;"></span>
   </div>
   <div id="mediaRow" style="margin:.25rem 0">
     <input id="ytUrl" type="text" placeholder="YouTube URL" style="width:18em">
@@ -253,7 +281,7 @@
     <label><input type="checkbox" id="chordWindowChk"> Chord window</label>
   </div>
   <div id="windowPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#f4f8ff; border:1px solid #cfe0ff; border-radius:4px">
-    <span style="font-size:.85em;color:#555">Drag the blue window over the staff. Chords:</span>
+    <span style="font-size:.85em;color:#555">Chords:</span>
     <span id="windowChords"></span>
     <span id="windowRange" style="font-size:.8em;color:#777"></span>
     <button id="captureWindowBtn" style="margin-left:.5em">Capture window → vocab</button>
@@ -646,6 +674,7 @@
     document.getElementById('previewTitle').textContent = title;
     document.getElementById('previewMsg').textContent = 'Loading…';
     document.getElementById('musicPreview').style.display = 'block';
+    document.body.classList.add('preview-open');   // lock page scroll behind the mobile dialog
     currentDetail = null; currentPreviewId = null; currentVocabEntry = null;   // cleared until a piece fully renders
     updateAddVocabLabel();
     let detail;
@@ -735,6 +764,7 @@
     clearYtMonitor(); if (yt) yt.pause();
     paused = false; updatePauseLabel();
     document.getElementById('musicPreview').style.display = 'none';
+    document.body.classList.remove('preview-open');
   };
 
   // ---- Search UI (Layout C) ----
