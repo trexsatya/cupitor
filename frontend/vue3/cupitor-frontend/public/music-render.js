@@ -806,10 +806,21 @@ export function createMusicRenderer(container, opts = {}) {
     setDimConnectors(on) { dimConnectors = !!on; redraw(); },
     // Toggle the draggable chord window. Off clears its anchors so it re-seeds next time.
     setChordWindow(on) { chordWindow.active = !!on; if (!chordWindow.active) { chordWindow.start = null; chordWindow.end = null; } redraw(); },
-    // Live play range of the window: { fromMeasure, toMeasure, fromBeat?, toBeat? }, or null when
-    // the window is off / empty. Beats are present only when onset times were available (then
-    // playback is note-accurate; otherwise it's measure-granular). Read fresh, not cached.
-    getWindowRange() { return chordWindow.active ? rangeFromSelected(currentWindowSelection().selected) : null; },
+    // Live play range of the window: { fromMeasure, toMeasure, fromBeat?, toBeat?, cursorStep },
+    // or null when the window is off / empty. Beats are present only when onset times were
+    // available (note-accurate; else measure-granular). cursorStep is the number of distinct
+    // onsets in the rendered view BEFORE the window's first note, so the player can home the OSMD
+    // cursor to the window start (the schedule is re-zeroed). Read fresh, not cached.
+    getWindowRange() {
+      if (!chordWindow.active) return null;
+      const { ordered, selected } = currentWindowSelection();
+      const range = rangeFromSelected(selected);
+      if (!range) return null;
+      const startOrder = selected[0].order;
+      const key = (n) => (typeof n.onsetBeats === 'number' ? n.onsetBeats : n.order);
+      range.cursorStep = new Set(ordered.filter((n) => n.order < startOrder).map(key)).size;
+      return range;
+    },
     // The manually-picked best-match chord names — read at vocab-save time.
     getSelectedChords() { return [...selectedChords]; },
     // Pre-select chords by name (e.g. restoring a saved vocab item) and re-draw the overlay.
