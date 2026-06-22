@@ -250,7 +250,9 @@
     <select id="srcSel"><option value="midi">MIDI</option><option value="youtube">YouTube</option></select>
     <button id="playBtn" class="btn" title="Play from the start"><span class="ic">▶</span><span class="txt">▶ Play</span></button>
     <button id="pauseBtn" class="btn" title="Pause / Resume"><span class="ic">⏸</span><span class="txt">⏸ Pause</span></button>
-    <label class="iconlabel" title="Loop the segment"><input type="checkbox" id="loopChk"><span class="ic">🔁</span><span class="txt"> Loop segment</span></label>
+    <button class="btn toggle" data-for="loopChk" title="Loop the segment" aria-pressed="false"><span class="ic">🔁</span><span class="txt">🔁 Loop segment</span></button>
+    <input type="checkbox" id="loopChk" hidden>   <!-- loop state; toggled by the button above -->
+
     <label>Tempo <input id="tempoInput" type="number" min="20" max="300" style="width:4em"></label>
     <label>Instrument
       <select id="instrSel">
@@ -278,11 +280,16 @@
     <span id="mediaMsg"></span>
   </div>
   <div id="viewOptions" style="margin:.25rem 0" class="previewControls">
-    <label><input type="checkbox" id="voiceColorChk" checked> Color voices</label>
-    <label><input type="checkbox" id="noteNameChk"> Note names</label>
-    <label><input type="checkbox" id="chordChk"> Show chords</label>
-    <label><input type="checkbox" id="dimConnChk" checked> Dim beams/stems</label>
-    <label><input type="checkbox" id="chordWindowChk"> Chord window</label>
+    <button class="btn toggle" data-for="voiceColorChk" title="Color the voices"><span class="ic">🎨</span><span class="txt">Color voices</span></button>
+    <button class="btn toggle" data-for="noteNameChk" title="Show note names"><span class="ic">🔤</span><span class="txt">Note names</span></button>
+    <button class="btn toggle" data-for="chordChk" title="Show chords"><span class="ic">🎵</span><span class="txt">Show chords</span></button>
+    <button class="btn toggle" data-for="dimConnChk" title="Dim beams / stems"><span class="ic">〰️</span><span class="txt">Dim beams/stems</span></button>
+    <button class="btn toggle" data-for="chordWindowChk" title="Draggable chord window"><span class="ic">🔲</span><span class="txt">Chord window</span></button>
+    <input type="checkbox" id="voiceColorChk" checked hidden>
+    <input type="checkbox" id="noteNameChk" hidden>
+    <input type="checkbox" id="chordChk" hidden>
+    <input type="checkbox" id="dimConnChk" checked hidden>
+    <input type="checkbox" id="chordWindowChk" hidden>
   </div>
   <div id="windowPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#f4f8ff; border:1px solid #cfe0ff; border-radius:4px">
     <span style="font-size:.85em;color:#555">Chords:</span>
@@ -603,6 +610,27 @@
     const w = document.getElementById('ytLinkWrap');
     w.style.display = (w.style.display === 'none' || !w.style.display) ? 'inline' : 'none';
   };
+  // View toggles (Loop, Color voices, Note names, Show chords, Dim, Chord window) are icon
+  // buttons backed by a hidden checkbox. Clicking flips the checkbox, fires its existing change
+  // handler, and lights the button. Programmatic checkbox changes call syncToggles() to refresh.
+  function syncToggle(btn) {
+    const chk = document.getElementById(btn.dataset.for);
+    const on = !!(chk && chk.checked);
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  function syncToggles() { document.querySelectorAll('.btn.toggle').forEach(syncToggle); }
+  document.querySelectorAll('.btn.toggle').forEach((btn) => {
+    btn.onclick = () => {
+      const chk = document.getElementById(btn.dataset.for);
+      chk.checked = !chk.checked;
+      chk.dispatchEvent(new Event('change'));   // run the checkbox's existing onchange logic
+      syncToggle(btn);
+    };
+  });
+  // Loop's effect lives on its checkbox so the generic toggle drives it (and applies live).
+  document.getElementById('loopChk').onchange = () => { if (player) player.setLoop(document.getElementById('loopChk').checked); };
+  syncToggles();
   // Two-button transport: Play always (re)starts from the segment start; Pause toggles to Resume.
   let paused = false;
   function updatePauseLabel() {
@@ -902,6 +930,7 @@
       renderer.setShowChords(true);
       renderer.setSelectedChords(savedChords);
     }
+    syncToggles();   // reflect the (programmatic) Show-chords state on its toggle button
     updateAddVocabLabel();
   }
   // Delete a vocab item after confirmation: drop it locally, re-render, then push the new vocab.json.
