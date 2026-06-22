@@ -22,7 +22,7 @@
 .btn:hover { background: #eef4ff; border-color: #2563eb; }
 .btn:active { background: #dbe7ff; }
 .btn.ico { padding: .25em .45em; }   /* tight icon-only buttons (◀ ▶ measure arrows) */
-.btn .ic { display: none; }          /* desktop: text label is enough */
+.btn .ic, .iconlabel .ic { display: none; }   /* desktop: text label is enough */
 
 /* Vocabulary rows: clickable label grows; delete (🗑) sits at the right, quiet until hovered. */
 .vocabRow { display: flex; align-items: center; gap: .5rem; }
@@ -42,8 +42,8 @@
 
 @media (max-width: 700px) {
   .btn { padding: .5em .6em; font-size: 1em; }   /* bigger tap targets */
-  .btn .txt { display: none; }                   /* mobile: show the icon only */
-  .btn .ic { display: inline; }
+  .btn .txt, .iconlabel .txt { display: none; }  /* mobile: show the icon only */
+  .btn .ic, .iconlabel .ic { display: inline; }
   .btn.ico { padding: .4em .55em; }
   .vocabDel { opacity: 1; }                       /* no hover on touch — always visible */
   .previewControls > * { margin-top: 8px; }
