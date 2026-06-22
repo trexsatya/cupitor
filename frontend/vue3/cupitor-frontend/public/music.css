@@ -21,6 +21,9 @@
 }
 .btn:hover { background: #eef4ff; border-color: #2563eb; }
 .btn:active { background: #dbe7ff; }
+/* Toggle buttons (Loop, Color voices, …) lit when their option is on. */
+.btn.toggle.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+.btn.toggle.active:hover { background: #1e54cf; }
 .btn.ico { padding: .25em .45em; }   /* tight icon-only buttons (◀ ▶ measure arrows) */
 .btn .ic, .iconlabel .ic { display: none; }   /* desktop: text label is enough */
 
