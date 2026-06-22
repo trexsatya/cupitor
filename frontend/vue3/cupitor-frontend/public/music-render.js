@@ -131,7 +131,23 @@ export function createMusicRenderer(container, opts = {}) {
   // reads. The app counts measures sequentially (pickup = 1), so with an anacrusis the printed
   // number is offset by the pickup count; measureOffset (computed on load) bridges the two and the
   // UI displays/accepts printed numbers while storage/drawFrom stay sequential. See getMeasureOffset.
-  osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false, useXMLMeasureNumbers: true });
+  // autoResize:false — OSMD's auto-resize attaches a debounced window.resize handler that calls
+  // osmd.render() directly. We zoom explicitly via applyResponsiveZoom, so the resize re-render is
+  // pure liability — turn it off. (This alone is not enough: OSMD ALSO defers a one-shot render ~1ms
+  // after construction that is NOT gated by autoResize — see the render wrap below.)
+  osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false, useXMLMeasureNumbers: true, autoResize: false });
+  // OSMD renders behind our back: a one-shot render it schedules ~1ms after construction (via
+  // handleResize's `setTimeout(e,1)`, ungated by autoResize) and any autoResize render. Both call
+  // osmd.render() directly — repainting connectors black and dropping our overlays, which races and
+  // often beats our dim pass on load. Wrap render so postRender() (dim + overlays) ALWAYS runs after
+  // it, whoever triggered it. The guard stops a postRender that ever re-enters render from looping.
+  const _osmdRender = osmd.render.bind(osmd);
+  let _inRender = false;
+  osmd.render = (...a) => {
+    const out = _osmdRender(...a);
+    if (!_inRender) { _inRender = true; try { postRender(); } finally { _inRender = false; } }
+    return out;
+  };
   const onAfterRender = opts.onAfterRender;   // called after each render (lets the UI rebuild chord chips)
   const onChordSelect = opts.onChordSelect;   // called on a user chord-label click with the selected names
   const onWindowChange = opts.onWindowChange; // called with { chords, measureRange } when the chord window moves
@@ -762,19 +778,26 @@ export function createMusicRenderer(container, opts = {}) {
     window.addEventListener('pointerup', up);
   }
 
-  // One render pass: apply model colors, render, dim connectors, then (re)build the note-name
+  // Everything that must run after a (re-)layout: dim connectors, then (re)build the note-name
   // overlay, the captured-measure shading, the chord-candidate overlay, the chord window, and
-  // notify the UI.
-  function redraw() {
-    clearHighlight();
-    applyVoiceColors();
-    osmd.render();
+  // notify the UI. Wired to run after EVERY osmd.render() via the render wrap installed in
+  // createMusicRenderer — so OSMD's own internal re-renders (notably the render it defers ~1ms
+  // after construction, and any autoResize render) can't leave the score un-dimmed or overlays
+  // stale. osmd.render() repaints connectors black on every pass, so this must re-dim each time.
+  function postRender() {
     applyDimConnectors();
     applyNoteNames();
     applyMeasureHighlight();
     applyChordOverlay();
     applyChordWindow();
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
+  }
+
+  // One render pass: push model colors, then render. The render wrap runs postRender() afterwards.
+  function redraw() {
+    clearHighlight();
+    applyVoiceColors();
+    osmd.render();
   }
 
   function setZoom(factor) { osmd.Zoom = factor; redraw(); }

@@ -147,7 +147,7 @@ describe('createMusicRenderer', () => {
   test('initialises OSMD with svg/compact options', () => {
     const osmd = fakeOsmd();
     createMusicRenderer({}, { osmdFactory: () => osmd });
-    expect(osmd.calls[0]).toEqual(['setOptions', { backend: 'svg', drawingParameters: 'compacttight', drawTitle: false, useXMLMeasureNumbers: true }]);
+    expect(osmd.calls[0]).toEqual(['setOptions', { backend: 'svg', drawingParameters: 'compacttight', drawTitle: false, useXMLMeasureNumbers: true, autoResize: false }]);
   });
 
   test('loadDetail loads musicxml source, renders, reports total measures', async () => {
