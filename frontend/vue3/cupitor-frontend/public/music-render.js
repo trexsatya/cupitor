@@ -196,14 +196,20 @@ export function createMusicRenderer(container, opts = {}) {
   // Internal: the current effective muted identities (shared by getMutedNotes + applySuppressionDim).
   function mutedList() { return effectiveMuted([...suppressedNotes.values()], tempRestored, hearAll); }
 
+  // OSMD Voice object → its global color index (the same index voiceColor() uses), rebuilt every
+  // render by applyVoiceColors so rendered notes can be tagged with a stable voice id.
+  const voiceIndexByRef = new Map();
+
   // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
   // No-op on a sheet without instruments (e.g. the test fake / before load).
   function applyVoiceColors() {
     const instruments = osmd.Sheet && osmd.Sheet.Instruments;
     if (!instruments || !instruments.forEach) return;
+    voiceIndexByRef.clear();
     let vi = 0;
     instruments.forEach((instr) => {
       (instr.Voices || []).forEach((voice) => {
+        voiceIndexByRef.set(voice, vi);
         const color = colorVoices ? voiceColor(vi) : DEFAULT_NOTE_COLOR;
         (voice.VoiceEntries || []).forEach((ve) => {
           (ve.Notes || []).forEach((note) => { note.NoteheadColor = color; });
@@ -300,10 +306,17 @@ export function createMusicRenderer(container, opts = {}) {
               // (getBBox → 0). Those phantom notes otherwise anchor chord labels at x=0.
               if (!el || !name || el.isConnected === false) return;
               const b = el.getBBox ? el.getBBox() : { x: 0 };
+              // MIDI pitch (Pitch.getHalfTone() + 12, as in applyNoteNames) and the note's voice
+              // color-index — used to identify suppressed notes and to suppress whole voices.
+              const sourceNote = gnote.sourceNote;
+              const pitch = sourceNote && sourceNote.Pitch;
+              const midi = (pitch && typeof pitch.getHalfTone === 'function') ? pitch.getHalfTone() + 12 : null;
+              const voiceRef = sourceNote && sourceNote.ParentVoiceEntry && sourceNote.ParentVoiceEntry.ParentVoice;
+              const voice = voiceIndexByRef.has(voiceRef) ? voiceIndexByRef.get(voiceRef) : 0;
               // `measure`/`idx` are the note's stable musical key (absolute measure + position
               // within it), used to re-anchor the draggable chord window across re-renders.
               const arr = (byMeasure[num] = byMeasure[num] || []);
-              arr.push({ name, left: b.x, el, measure: num, idx: arr.length, onsetBeats });
+              arr.push({ name, left: b.x, el, measure: num, idx: arr.length, onsetBeats, midi, voice });
             });
           });
         });
@@ -631,7 +644,8 @@ export function createMusicRenderer(container, opts = {}) {
         const mid = (box.top + box.bottom) / 2;
         const band = bands.length ? nearestStaffIdx(bands, mid) : 0;
         out.push({ name: n.name, el: n.el, measure: n.measure, idx: n.idx, order: out.length, band,
-          onsetBeats: n.onsetBeats, left: box.left, right: box.right, top: box.top, bottom: box.bottom });
+          onsetBeats: n.onsetBeats, midi: n.midi, voice: n.voice,
+          left: box.left, right: box.right, top: box.top, bottom: box.bottom });
       });
     });
     return out;
