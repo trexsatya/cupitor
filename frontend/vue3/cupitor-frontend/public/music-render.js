@@ -169,6 +169,8 @@ export function createMusicRenderer(container, opts = {}) {
     if (!_inRender) { _inRender = true; try { postRender(); } finally { _inRender = false; } }
     return out;
   };
+  // Notehead clicks drive suppression (edit-mode) / temporary restore (practice-mode).
+  if (container && container.addEventListener) container.addEventListener('click', onNoteheadClick);
   const onAfterRender = opts.onAfterRender;   // called after each render (lets the UI rebuild chord chips)
   const onChordSelect = opts.onChordSelect;   // called on a user chord-label click with the selected names
   const onWindowChange = opts.onWindowChange; // called with { chords, measureRange } when the chord window moves
@@ -621,6 +623,27 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
+  // Grey the noteheads that are currently muted (effective set). Runs in postRender, AFTER a fresh
+  // osmd.render() has repainted voice colors — so notes no longer muted are already their normal
+  // color and need no reset; we only paint the muted ones. No-op unless something is suppressed.
+  function applySuppressionDim() {
+    if (!container || !container.querySelectorAll || !suppressedNotes.size) return;
+    const mutedKeys = new Set(mutedList().map(suppressionKey));
+    if (!mutedKeys.size) return;   // hearAll on, or all temp-restored
+    orderedRenderedNotes().forEach((n) => {
+      if (n.midi == null || !n.el) return;
+      const key = suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats });
+      if (!mutedKeys.has(key)) return;
+      [n.el, ...n.el.querySelectorAll('path, ellipse, circle, rect')].forEach((h) => {
+        h.setAttribute('fill', DIM_CONNECTOR_COLOR); h.style.fill = DIM_CONNECTOR_COLOR;
+        const st = h.getAttribute('stroke');
+        if (st && st !== 'none') { h.setAttribute('stroke', DIM_CONNECTOR_COLOR); h.style.stroke = DIM_CONNECTOR_COLOR; }
+      });
+      // Practice affordance: a muted note is click-to-hear when not editing the set.
+      if (!suppressMode && n.el.style) { n.el.style.cursor = 'pointer'; }
+    });
+  }
+
   // ── Draggable chord window ────────────────────────────────────────────────────────────────
   const WINDOW_LAYER_CLASS = 'chord-window-layer';
   const WINDOW_FILL = '#bcdcff';        // translucent selection band (distinct from #ffe9a8 capture)
@@ -689,6 +712,27 @@ export function createMusicRenderer(container, opts = {}) {
       if (prev.length) return prev.reduce((a, b) => (a.order > b.order ? a : b));    // last note of prev line
     }
     return nearestByX(inBand, x);
+  }
+
+  // Click a notehead to toggle suppression. Edit-mode → add/remove from S. Practice-mode → toggle
+  // temporary restore (T) on a note that is in S. Ignores clicks that aren't on a notehead.
+  function onNoteheadClick(ev) {
+    const head = ev.target && ev.target.closest && ev.target.closest('.vf-notehead');
+    if (!head) return;
+    const n = orderedRenderedNotes().find((o) => o.el === head || (o.el && o.el.contains && o.el.contains(head)));
+    if (!n || n.midi == null) return;
+    const id = { measure: n.measure, midi: n.midi, beats: n.onsetBeats };
+    const key = suppressionKey(id);
+    if (suppressMode) {
+      if (suppressedNotes.has(key)) { suppressedNotes.delete(key); tempRestored.delete(key); }
+      else suppressedNotes.set(key, id);
+    } else {
+      if (!suppressedNotes.has(key)) return;                 // practice: only S notes are clickable
+      if (tempRestored.has(key)) tempRestored.delete(key);   // re-suppress
+      else tempRestored.add(key);                            // temporarily restore
+    }
+    redraw();
+    if (onSuppressionChange) { try { onSuppressionChange(); } catch (_) {} }
   }
 
   // The currently selected window notes (reading order), seeding a small window at the start the
@@ -835,6 +879,7 @@ export function createMusicRenderer(container, opts = {}) {
     applyMeasureHighlight();
     applyChordOverlay();
     applyChordWindow();
+    applySuppressionDim();
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
@@ -914,6 +959,31 @@ export function createMusicRenderer(container, opts = {}) {
     getMutedNotes() { return mutedList(); },                            // effective muted, for the player
     setHearAll(on) { hearAll = !!on; redraw(); if (onSuppressionChange) { try { onSuppressionChange(); } catch (_) {} } },
     setSuppressMode(on) { suppressMode = !!on; redraw(); },
+    // Bulk-suppress (on=true) or restore (on=false) every rendered note of a voice in the view.
+    suppressVoice(voiceId, on) {
+      notesOfVoice(orderedRenderedNotes(), voiceId).forEach((id) => {
+        const key = suppressionKey(id);
+        if (on) suppressedNotes.set(key, id);
+        else { suppressedNotes.delete(key); tempRestored.delete(key); }
+      });
+      redraw();
+      if (onSuppressionChange) { try { onSuppressionChange(); } catch (_) {} }
+    },
+    // Voices present in the view, for the chips: [{ id, color, allSuppressed }].
+    listVoices() {
+      const byVoice = new Map();
+      orderedRenderedNotes().forEach((n) => {
+        if (n.midi == null) return;
+        if (!byVoice.has(n.voice)) byVoice.set(n.voice, []);
+        byVoice.get(n.voice).push(n);
+      });
+      return [...byVoice.keys()].sort((a, b) => a - b).map((id) => {
+        const notes = byVoice.get(id);
+        const allSuppressed = notes.every((n) =>
+          suppressedNotes.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+        return { id, color: voiceColor(id), allSuppressed };
+      });
+    },
     // Live play range of the window: { fromMeasure, toMeasure, fromBeat?, toBeat?, cursorStep },
     // or null when the window is off / empty. Beats are present only when onset times were
     // available (note-accurate; else measure-granular). cursorStep is the number of distinct
