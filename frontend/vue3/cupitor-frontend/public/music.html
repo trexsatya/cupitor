@@ -291,6 +291,14 @@
     <input type="checkbox" id="dimConnChk" checked hidden>
     <input type="checkbox" id="chordWindowChk" hidden>
   </div>
+  <div id="suppressPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#fff8f0; border:1px solid #ffd9b0; border-radius:4px">
+    <button class="btn toggle" data-for="suppressModeChk" title="Click notes to silence them"><span class="ic">🔇</span><span class="txt">Suppress notes</span></button>
+    <button class="btn toggle" data-for="hearAllChk" title="Temporarily hear every suppressed note"><span class="ic">👂</span><span class="txt">Hear all</span></button>
+    <span id="voiceChips"></span>
+    <span id="suppressHint" style="font-size:.8em;color:#a0660a"></span>
+    <input type="checkbox" id="suppressModeChk" hidden>
+    <input type="checkbox" id="hearAllChk" hidden>
+  </div>
   <div id="windowPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#f4f8ff; border:1px solid #cfe0ff; border-radius:4px">
     <span style="font-size:.85em;color:#555">Chords:</span>
     <span id="windowChords"></span>
@@ -416,7 +424,7 @@
   const toSeqMeasure = (printed) => (Number.isFinite(printed) ? printed + currentOffset : printed);
   function ensureRenderer() {
     if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'),
-      { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange });
+      { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange, onSuppressionChange: onSuppressionChange });
     return renderer;
   }
 
@@ -528,8 +536,9 @@
     // pieces (no real timing) fall back to the simple per-note sequential builder.
     const useXml = currentDetail.format === 'musicxml' && currentDetail.source;
     const range = activeRange();
+    const muted = (renderer && renderer.getMutedNotes) ? renderer.getMutedNotes() : [];
     const schedule = useXml
-      ? buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), ...range })
+      ? buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), ...range, mutedNotes: muted })
       : buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...range });
     if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
     const span = (range.fromBeat != null) ? ' (window)'
@@ -631,6 +640,35 @@
   // Loop's effect lives on its checkbox so the generic toggle drives it (and applies live).
   document.getElementById('loopChk').onchange = () => { if (player) player.setLoop(document.getElementById('loopChk').checked); };
   syncToggles();
+
+  // ── Note suppression UI (vocab items only) ─────────────────────────────────────────────────
+  function renderVoiceChips() {
+    const box = document.getElementById('voiceChips');
+    box.innerHTML = '';
+    if (!renderer || !renderer.listVoices) return;
+    renderer.listVoices().forEach((v) => {
+      const chip = document.createElement('button');
+      chip.className = 'voiceChip' + (v.allSuppressed ? ' active' : '');
+      chip.textContent = `V${v.id + 1}`;
+      chip.style.borderColor = v.color;
+      chip.style.color = v.allSuppressed ? '#fff' : v.color;
+      chip.style.background = v.allSuppressed ? v.color : '#fff';
+      chip.title = v.allSuppressed ? 'Restore this voice' : 'Silence this whole voice';
+      chip.onclick = () => { renderer.suppressVoice(v.id, !v.allSuppressed); };
+      box.appendChild(chip);
+    });
+  }
+  function onSuppressionChange() {
+    renderVoiceChips();
+    const n = (renderer && renderer.getSuppressedNotes) ? renderer.getSuppressedNotes().length : 0;
+    document.getElementById('suppressHint').textContent = n ? `${n} note${n === 1 ? '' : 's'} suppressed` : '';
+  }
+  document.getElementById('suppressModeChk').onchange = (e) => {
+    if (renderer) renderer.setSuppressMode(e.target.checked);
+    document.getElementById('voiceChips').style.display = e.target.checked ? '' : 'none';
+    if (e.target.checked) renderVoiceChips();
+  };
+  document.getElementById('hearAllChk').onchange = (e) => { if (renderer) renderer.setHearAll(e.target.checked); };
   // Two-button transport: Play always (re)starts from the segment start; Pause toggles to Resume.
   let paused = false;
   function updatePauseLabel() {
@@ -705,6 +743,7 @@
       chords: (renderer && renderer.getSelectedChords && renderer.getSelectedChords()) || [],
       note: document.getElementById('vocabNote').value.trim(),
       snapshot: buildSnapshot(currentDetail, [from, to]),
+      suppressed: (renderer && renderer.getSuppressedNotes && renderer.getSuppressedNotes()) || [],
       category: document.getElementById('vocabCat').value.trim() || 'uncategorized',
       createdAt: (updating && currentVocabEntry.createdAt) || new Date().toISOString().slice(0, 10),
     });
@@ -754,6 +793,11 @@
     renderer.clearMeasureHighlight();   // a plain piece preview carries no captured-range shading
     renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
     renderer.showFull();
+    if (renderer) renderer.setSuppressedNotes([]);
+    document.getElementById('suppressPanel').style.display = 'none';
+    document.getElementById('suppressModeChk').checked = false;
+    document.getElementById('hearAllChk').checked = false;
+    syncToggles();
     document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
   }
   document.getElementById('pieceList').addEventListener('click', (ev) => {
@@ -816,6 +860,7 @@
     clearYtMonitor(); if (yt) yt.pause();
     paused = false; updatePauseLabel();
     document.getElementById('musicPreview').style.display = 'none';
+    document.getElementById('suppressPanel').style.display = 'none';
     document.body.classList.remove('preview-open');
   };
 
@@ -923,6 +968,13 @@
     if (entry.startSeconds != null) document.getElementById('guessSec').value = entry.startSeconds;
     if (entry.endSeconds != null) document.getElementById('guessEndSec').value = entry.endSeconds;
     if (renderer) { renderer.showSegment([from, to]); renderer.highlightMeasures([from, to]); }
+    if (renderer) renderer.setSuppressedNotes(entry.suppressed || []);
+    document.getElementById('suppressModeChk').checked = false;
+    document.getElementById('hearAllChk').checked = false;
+    document.getElementById('voiceChips').style.display = 'none';
+    document.getElementById('suppressPanel').style.display = '';
+    syncToggles();           // reflect suppress-mode/hear-all buttons as off
+    onSuppressionChange();   // refresh chips + hint
     // Restore the manually-picked chords: show the overlay and pre-select those labels.
     const savedChords = entry.chords || (entry.chord ? [entry.chord] : []);   // back-compat with old single-chord entries
     if (savedChords.length && renderer) {
