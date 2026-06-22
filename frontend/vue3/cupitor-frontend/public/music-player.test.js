@@ -208,6 +208,16 @@ describe('buildScheduleFromMusicXml', () => {
     expect(buildScheduleFromMusicXml(null)).toEqual([]);
     expect(buildScheduleFromMusicXml('<score-partwise></score-partwise>', { tempo: 120 })).toEqual([]);
   });
+
+  test('mutedNotes flags matching schedule items (by measure, midi, beats) and leaves others alone', () => {
+    // measure 1: C4@beat0, E4@beat1 (two quarters at tempo 120 → 0.5s each).
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 120, mutedNotes: [{ measure: 1, midi: 64, beats: 1 }] });
+    expect(s).toEqual([
+      { midi: 60, time: 0, duration: 0.5 },
+      { midi: 64, time: 0.5, duration: 0.5, muted: true },
+    ]);
+  });
 });
 
 describe('gmInstrumentForVoice', () => {

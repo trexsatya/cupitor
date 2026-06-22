@@ -164,10 +164,15 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
   }
 
   const EPS = 1e-6;
+  const muted = (opts.mutedNotes && opts.mutedNotes.length) ? opts.mutedNotes : null;
   const out = events
     .filter((e) => e.measure >= from && e.measure <= to)
     .filter((e) => e.beats >= fromBeat - EPS && e.beats <= toBeat + EPS)
-    .map((e) => ({ midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb }));
+    .map((e) => {
+      const item = { midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb };
+      if (muted && isSuppressed(e, muted)) item.muted = true;   // silenced note: keep its slot, skip the synth
+      return item;
+    });
   out.sort((a, b) => a.time - b.time); // stable: chord/aligned notes keep emission order
   if (out.length) {
     const t0 = out[0].time;
@@ -317,7 +322,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       return [e.time, { ...e, _step: step, _first: e.time === firstTime }];
     });
     part = new T.Part((time, ev) => {
-      synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
+      if (!ev.muted) synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
       if (cursor && ev._step) T.Draw.schedule(() => {
         try { if (ev._first) homeCursor(cursor); else cursor.next(); } catch (_) {}
       }, time);
