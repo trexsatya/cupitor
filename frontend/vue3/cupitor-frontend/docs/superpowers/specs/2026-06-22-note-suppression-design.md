@@ -8,9 +8,13 @@
 
 Let the user mark specific notes in a vocabulary item as **suppressed** so they can
 practice chords: a suppressed note is **dimmed** in the score and **silenced** during
-playback. A non-persisted **"Hear all"** toggle temporarily restores every suppressed
-note (un-dims + un-mutes) so the user can check themselves, then hide them again — without
-losing the saved suppression set.
+playback. Two non-persisted restore controls let the user check themselves without losing
+the saved suppression set:
+- a global **"Hear all"** toggle that temporarily restores *every* suppressed note, and
+- **per-note temporary restore**: clicking a single dimmed note un-dims + un-mutes just that
+  one (toggle), to preview a note they keep missing.
+
+Neither restore control changes the saved set.
 
 This applies only when a vocabulary item is open (not in plain piece preview).
 
@@ -21,13 +25,13 @@ In scope:
 - A "suppress this voice" shortcut (bulk add/remove all of a voice's notes in the segment).
 - Visual dimming of suppressed noteheads (+ their stems).
 - Muting suppressed notes during playback while keeping cursor/timing correct.
-- A temporary "Hear all" restore toggle (transient, not saved).
+- A global "Hear all" restore toggle (transient, not saved).
+- Per-note temporary restore by clicking a dimmed note (transient, not saved).
 - Persisting the suppression set on the vocab entry.
 
 Out of scope (YAGNI):
 - Suppression in plain piece preview (only vocab items).
 - Suppression by pitch-class or by arbitrary rules.
-- Per-note temporary restore (the restore toggle is global only).
 - Migrating existing vocab entries (absence of the field == empty set).
 
 ## Note Identity (the core decision)
@@ -74,43 +78,72 @@ suppressed: [ { measure: <int>, midi: <int>, beats: <number> }, ... ]
 - `buildVocabEntry`: add `suppressed = []` → entry field `suppressed`.
 - No other changes; save/load already serialize the whole entry.
 
+### Interaction Model — three sets
+
+There are three note sets, and what is *currently* silenced/dimmed is computed from them:
+
+- **`S` — suppressed (persisted).** The saved set. Edited only in edit-mode and by voice chips.
+- **`T` — temporarily restored (transient).** A subset of `S` the user is previewing per-note.
+  Cleared on reopen / segment change / mode reset. Never saved.
+- **`H` — Hear-all (transient boolean).** When true, restore everything.
+
+**Effective muted set** (drives both dimming and playback muting):
+`muted = H ? [] : (S − T)`.
+
+**Two click semantics on a notehead, selected by edit-mode:**
+- **Edit-mode ON** (🔇 lit): click toggles the note in/out of `S` (and on removal, also drops
+  it from `T`). This is "deciding what to suppress." Voice chips also edit `S` here.
+- **Edit-mode OFF** (practice, the default): click a *dimmed* (currently-muted) note to toggle
+  it in/out of `T` — temporary per-note restore. Clicking a non-muted note does nothing.
+  Dimmed noteheads get `cursor:pointer` + a "click to hear" title for discoverability.
+
+`H` on overrides `T` (everything audible); per-note restore only has visible effect when `H`
+is off.
+
 ### `public/music-render.js` (visual + selection)
 State (module-closure, like `dimConnectors`):
-- `suppressedNotes: Set<string>` — keys `${measure}:${midi}:${beats6}`.
-- `suppressionActive: boolean` — when false (Hear-all on), do not dim.
-- `suppressMode: boolean` — when true, notehead clicks toggle suppression.
+- `suppressedNotes: Set<string>` — `S`, keys `${measure}:${midi}:${beats6}`.
+- `tempRestored: Set<string>` — `T`, same key space, subset of `S`.
+- `hearAll: boolean` — `H`.
+- `suppressMode: boolean` — when true, notehead clicks edit `S`; when false, they toggle `T`.
 
-Note tagging: extend the rendered-note model so each note carries `midi` and `voice`
-(both already derivable from OSMD — `midi` is used for voice coloring; `voice` from the
-note's parent voice). Needed for matching and for voice expansion.
+Note tagging: extend the rendered-note model so each note carries `midi`, `voice`, and
+`onsetBeats` (midi + voice already derivable from OSMD — midi is used for voice coloring;
+onsetBeats is already computed for the chord window). Needed for matching and voice expansion.
 
 Passes / behavior:
 - `applySuppressionDim()` — runs inside `postRender()` (so it survives OSMD re-renders, like
-  `applyDimConnectors`). When `suppressionActive`, grey each notehead (+ its stem) whose
-  `(measure,midi,beats)` key ∈ `suppressedNotes`. Uses the existing dim grey.
-- Notehead click handler (active only when `suppressMode`): toggle that note's key in the
-  set, re-dim, and fire `onSuppressChange([...list])`.
-- `suppressVoice(voiceId, on)` — add/remove all rendered notes of that voice in the current
-  view; fire `onSuppressChange`.
+  `applyDimConnectors`). Greys each notehead (+ its stem) whose key is in the **effective muted
+  set** (`muted`). Uses the existing dim grey. Sets `cursor:pointer` + title on muted noteheads
+  when not in edit-mode (practice click-to-hear affordance).
+- Notehead click handler: map click → nearest note via the existing `pointerToNote`, get its
+  `{measure, midi, onsetBeats}` key, then — if `suppressMode`, toggle in `S`; else, only if the
+  note is currently muted, toggle in `T`. After any change, re-dim and fire `onSuppressionChange()`.
+- `suppressVoice(voiceId, on)` — add/remove all rendered notes of that voice from `S`; fire
+  `onSuppressionChange()`.
 
 Pure helpers (unit-tested), exported:
 - `suppressionKey({measure, midi, beats})` → string.
 - `notesOfVoice(notes, voiceId)` → identity list (used by `suppressVoice`).
+- `effectiveMuted(S, T, hearAll)` → identity list (the `muted` computation).
 
 API additions on the renderer object:
-- `setSuppressedNotes(list)` / `getSuppressedNotes()` (returns `[{measure,midi,beats}]`).
+- `setSuppressedNotes(list)` — set `S`; clears `T`, `hearAll`.
+- `getSuppressedNotes()` → `S` as `[{measure,midi,beats}]` (for persistence).
+- `getMutedNotes()` → effective `muted` as `[{measure,midi,beats}]` (for the player).
 - `setSuppressMode(on)`.
-- `setSuppressionActive(on)`.
+- `setHearAll(on)`.
 - `suppressVoice(voiceId, on)`.
-- `listVoices()` → `[{ id, color }]` present in the current view (to build the voice chips).
+- `listVoices()` → `[{ id, color, allSuppressed }]` present in the current view (for the chips).
 
-`onSuppressChange` is a new constructor callback (alongside `onChordSelect`,
-`onWindowChange`).
+`onSuppressionChange` is a new constructor callback (alongside `onChordSelect`,
+`onWindowChange`), fired after *any* change to `S`, `T`, or `H`, with no args — the page pulls
+`getSuppressedNotes()` (persist) and `getMutedNotes()` (player) as needed.
 
 ### `public/music-player.js` (muting)
-- `setSuppressed(list)` — store the suppression set.
-- `setSuppressionActive(on)` — when false, ignore suppression (Hear-all).
-- In `buildPart`: an event matching the set (when active) is **not** triggered on the synth
+- `setSuppressed(list)` — store the **effective muted list** (the page passes
+  `renderer.getMutedNotes()`; the player stays dumb — it just mutes whatever it's given).
+- In `buildPart`: an event matching the muted list is **not** triggered on the synth
   (`triggerAttackRelease` skipped) but **keeps its `_step`/`_first`** so the OSMD cursor and
   Transport timing are unaffected — a fully-muted beat still advances the cursor.
 
@@ -122,36 +155,40 @@ Shown only when `currentVocabEntry` is set:
 - **🔇 "Suppress" toggle** — enters/exits suppress edit-mode (`renderer.setSuppressMode`).
   While on, a row of **voice chips** appears (from `renderer.listVoices()`), colored to match
   voice colors. A chip toggles its voice: if **every** rendered note of that voice is already
-  suppressed, the chip restores them (`suppressVoice(id, false)`); otherwise it suppresses the
-  whole voice (`suppressVoice(id, true)`). The chip shows an active/lit state when its voice is
+  suppressed (`allSuppressed`), the chip restores them (`suppressVoice(id, false)`); otherwise
+  it suppresses the whole voice (`suppressVoice(id, true)`). The chip lights when its voice is
   fully suppressed, mirroring the existing toggle buttons.
-- **👂 "Hear all" toggle** — transient; flips `renderer.setSuppressionActive` and
-  `player.setSuppressionActive`. Not saved.
+- **👂 "Hear all" toggle** — transient; calls `renderer.setHearAll(on)`. Not saved.
+- Per-note temporary restore needs no new control — it's the practice-mode notehead click
+  (edit-mode off), handled inside the renderer.
 - Wiring:
-  - `onSuppressChange(list)` → `player.setSuppressed(list)` and update any count label.
+  - `onSuppressionChange()` → `player.setSuppressed(renderer.getMutedNotes())` and update the
+    suppressed-count label.
   - `openVocabEntry` → `renderer.setSuppressedNotes(entry.suppressed||[])`,
-    `player.setSuppressed(entry.suppressed||[])`, reset Hear-all to off, suppress-mode off.
+    `player.setSuppressed(renderer.getMutedNotes())`, edit-mode off (Hear-all + `T` already
+    cleared by `setSuppressedNotes`).
   - Add/update vocab → include `renderer.getSuppressedNotes()` as `suppressed` in the entry.
-  - On close / opening a plain preview → clear suppression state (mode off, set empty,
-    active true).
+  - On close / opening a plain preview → `renderer.setSuppressedNotes([])`, mode off.
 
 ## Data Flow
 
 ```
-click notehead (suppress mode)         voice chip click
-        │                                     │
-        ▼                                     ▼
-renderer toggles set ───────────► onSuppressChange(list)
-        │                                     │
-        ▼                                     ▼
-applySuppressionDim (postRender)      player.setSuppressed(list)
-        │                                     │
-   dims noteheads                       buildPart skips synth trigger
-                                        (keeps cursor step)
+notehead click ──► renderer: edit-mode? toggle S : (if muted) toggle T
+voice chip   ──► renderer.suppressVoice → edits S
+Hear-all     ──► renderer.setHearAll(H)
+        │
+        ▼
+  onSuppressionChange()  ──► page pulls:
+        │                      getSuppressedNotes() → entry.suppressed (on save)
+        │                      getMutedNotes()      → player.setSuppressed(...)
+        ▼
+applySuppressionDim (postRender)        buildPart skips synth trigger for muted
+   dims muted noteheads                 events (keeps cursor step)
 
-Add/update vocab → entry.suppressed = renderer.getSuppressedNotes() → vocab.json (push)
-openVocabEntry  → renderer.setSuppressedNotes + player.setSuppressed from entry.suppressed
-Hear-all toggle → renderer.setSuppressionActive(off) + player.setSuppressionActive(off)
+muted = H ? [] : (S − T)   ← single source of truth for dim AND mute
+
+Add/update vocab → entry.suppressed = getSuppressedNotes() → vocab.json (push)
+openVocabEntry  → setSuppressedNotes(entry.suppressed); player.setSuppressed(getMutedNotes())
 ```
 
 ## Error Handling / Edge Cases
@@ -161,9 +198,12 @@ Hear-all toggle → renderer.setSuppressionActive(off) + player.setSuppressionAc
 - **Unison across voices** (same midi + same onset in two voices): both match and are
   suppressed together. Acceptable — they are "that pitch at that time."
 - **Fully-muted beat**: cursor still advances (events keep `_step`).
-- **Hear-all on while editing**: dims are hidden but the set is unchanged; clicks still edit
-  the set (the underlying selection is independent of the active flag). Restoring Hear-all
-  off shows the current set.
+- **`T` ⊆ `S` invariant**: removing a note from `S` (edit-mode) also drops it from `T`, so a
+  stray temp-restore can never reference a note that is no longer suppressed.
+- **Hear-all on**: overrides `T` — `muted = []`, everything audible/visible. `S` and `T` are
+  untouched; turning Hear-all off restores `muted = S − T`.
+- **Per-note click on a non-muted note** (practice mode): no-op (nothing to restore).
+- **Edit-mode off + nothing suppressed**: notehead clicks are no-ops (no muted notes to toggle).
 - **Missing `midi`/`voice`** on a note (rests, unpitched): excluded from selection and
   matching.
 
@@ -173,15 +213,16 @@ Pure cores (unit, Jest):
 - `music-vocab.test.js`: `buildVocabEntry` includes `suppressed` (default `[]`; round-trips a
   provided list).
 - `music-render.test.js`: `suppressionKey` formatting; `notesOfVoice` returns the right
-  identities for a given voice.
+  identities for a given voice; `effectiveMuted(S, T, hearAll)` returns `S − T`, `[]` when
+  `hearAll`, and ignores `T` entries not in `S`.
 - `music-player.test.js`: `isSuppressed` matches on `(measure,midi,beats)` with `EPS` and
   rejects near-misses; a schedule built with a suppressed event marks it muted while
   retaining its cursor step.
 
 Browser-verified (cannot unit-test SVG/audio):
-- Clicking noteheads in suppress mode dims/restores them.
-- Voice chips bulk-suppress/restore a voice.
+- Edit-mode: clicking noteheads dims/restores them in the saved set; voice chips bulk-toggle.
+- Practice-mode: clicking a dimmed note temporarily restores just that one (un-dim + audible);
+  clicking again re-suppresses it; the saved set is unchanged on reopen.
 - Playback actually silences suppressed notes; cursor still tracks.
 - "Hear all" restores audio + visuals temporarily; toggling back re-applies.
-- Save/reopen round-trips the suppression set.
-```
+- Save/reopen round-trips the suppression set (and `T`/Hear-all reset to clean).
