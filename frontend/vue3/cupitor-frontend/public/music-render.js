@@ -172,6 +172,7 @@ export function createMusicRenderer(container, opts = {}) {
   const onAfterRender = opts.onAfterRender;   // called after each render (lets the UI rebuild chord chips)
   const onChordSelect = opts.onChordSelect;   // called on a user chord-label click with the selected names
   const onWindowChange = opts.onWindowChange; // called with { chords, measureRange } when the chord window moves
+  const onSuppressionChange = opts.onSuppressionChange;   // fired after a user change to S, T, or hearAll
   let totalMeasures = 0;
   let measureOffset = 0;     // sequential MeasureNumber − printed number (the pickup/anacrusis shift)
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
@@ -185,6 +186,15 @@ export function createMusicRenderer(container, opts = {}) {
   // Draggable selection window over the staff. start/end are stable {measure, idx} anchors so the
   // window re-resolves to the right notes after re-renders (zoom/segment). Inactive by default.
   const chordWindow = { active: false, start: null, end: null };
+
+  // Note suppression (vocab practice): S = persisted suppressed set, T = transient per-note
+  // restore, hearAll = transient global restore. Effective muted = hearAll ? [] : (S − T).
+  const suppressedNotes = new Map();   // suppressionKey → {measure, midi, beats}  (S)
+  const tempRestored = new Set();      // suppressionKey strings, subset of S       (T)
+  let hearAll = false;
+  let suppressMode = false;            // true → notehead clicks edit S; false → toggle T (practice)
+  // Internal: the current effective muted identities (shared by getMutedNotes + applySuppressionDim).
+  function mutedList() { return effectiveMuted([...suppressedNotes.values()], tempRestored, hearAll); }
 
   // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
   // No-op on a sheet without instruments (e.g. the test fake / before load).
@@ -876,6 +886,20 @@ export function createMusicRenderer(container, opts = {}) {
     getMeasureOffset() { return measureOffset; },
     // Toggle the draggable chord window. Off clears its anchors so it re-seeds next time.
     setChordWindow(on) { chordWindow.active = !!on; if (!chordWindow.active) { chordWindow.start = null; chordWindow.end = null; } redraw(); },
+    // ── Note suppression ─────────────────────────────────────────────────────────────────────
+    // Set/replace the persisted suppressed set (e.g. from a vocab entry); resets transient state.
+    // Does NOT fire onSuppressionChange — the caller restores player state explicitly.
+    setSuppressedNotes(list) {
+      suppressedNotes.clear(); tempRestored.clear(); hearAll = false;
+      (list || []).forEach((n) => {
+        if (n && n.midi != null) suppressedNotes.set(suppressionKey(n), { measure: n.measure, midi: n.midi, beats: n.beats });
+      });
+      redraw();
+    },
+    getSuppressedNotes() { return [...suppressedNotes.values()]; },     // S, for persistence
+    getMutedNotes() { return mutedList(); },                            // effective muted, for the player
+    setHearAll(on) { hearAll = !!on; redraw(); if (onSuppressionChange) { try { onSuppressionChange(); } catch (_) {} } },
+    setSuppressMode(on) { suppressMode = !!on; redraw(); },
     // Live play range of the window: { fromMeasure, toMeasure, fromBeat?, toBeat?, cursorStep },
     // or null when the window is off / empty. Beats are present only when onset times were
     // available (note-accurate; else measure-granular). cursorStep is the number of distinct
