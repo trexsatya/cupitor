@@ -204,9 +204,11 @@
         <div id="chips"></div>
         <button id="addChipBtn">+ Add chord</button>
         <div>
-          <label><input type="checkbox" id="strictExt"> strict extensions</label>
+          <button class="btn toggle" data-for="strictExt" title="Require exact chord extensions (no extra tones)"><span class="ic">🎯</span><span class="txt">strict extensions</span></button>
           <label>max gap <input id="maxGap" type="number" min="0" value="0" style="width:3em"></label>
-          <label><input type="checkbox" id="transposeInv"> transpose-invariant</label>
+          <button class="btn toggle" data-for="transposeInv" title="Match the progression in any key"><span class="ic">🔀</span><span class="txt">transpose-invariant</span></button>
+          <input type="checkbox" id="strictExt" hidden>
+          <input type="checkbox" id="transposeInv" hidden>
         </div>
       </div>
       <div id="melodyMode" style="display:none">
@@ -672,6 +674,7 @@
   document.getElementById('hearAllChk').onchange = (e) => { if (renderer) renderer.setHearAll(e.target.checked); };
   // Two-button transport: Play always (re)starts from the segment start; Pause toggles to Resume.
   let paused = false;
+  let ytPlaying = false;   // tracks YouTube playback (Tone.Transport.state is authoritative for MIDI)
   function updatePauseLabel() {
     document.getElementById('pauseBtn').innerHTML = paused
       ? '<span class="ic">▶</span><span class="txt">▶ Resume</span>'
@@ -679,7 +682,9 @@
   }
   document.getElementById('playBtn').onclick = () => {
     paused = false; updatePauseLabel();
-    (document.getElementById('srcSel').value === 'youtube' ? playYouTube() : playMidi());
+    const isYt = document.getElementById('srcSel').value === 'youtube';
+    ytPlaying = isYt;   // started fresh; only meaningful for the YouTube source
+    (isYt ? playYouTube() : playMidi());
   };
   document.getElementById('pauseBtn').onclick = () => {
     const isYt = document.getElementById('srcSel').value === 'youtube';
@@ -687,11 +692,29 @@
       if (isYt) { if (yt) yt.pause(); } else if (player) player.pause();
       paused = true;
     } else {
-      if (isYt) { if (yt) yt.play(); } else if (player) player.resume();
+      if (isYt) { if (yt) yt.play(); ytPlaying = true; } else if (player) player.resume();
       paused = false;
     }
     updatePauseLabel();
   };
+  // Spacebar: play / pause / resume the transport (active only while the preview is open, and not
+  // while typing in a field). Resume if paused; pause if playing; otherwise start from the top.
+  function transportToggle() {
+    if (paused) { document.getElementById('pauseBtn').click(); return; }   // resume
+    const isYt = document.getElementById('srcSel').value === 'youtube';
+    const playing = isYt
+      ? ytPlaying
+      : !!(window.Tone && window.Tone.Transport && window.Tone.Transport.state === 'started');
+    document.getElementById(playing ? 'pauseBtn' : 'playBtn').click();
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.code !== 'Space' && e.key !== ' ') return;
+    if (document.getElementById('musicPreview').style.display === 'none') return;   // preview closed
+    const t = e.target, tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+    e.preventDefault();   // stop the page from scrolling / re-triggering a focused button
+    transportToggle();
+  });
   document.getElementById('segFrom').oninput = () => {
     const f = parseInt(document.getElementById('segFrom').value, 10);   // auto-set end = start + 1
     if (Number.isFinite(f)) document.getElementById('segTo').value = f + 1;
@@ -859,7 +882,7 @@
   document.getElementById('previewCloseBtn').onclick = () => {
     if (player) player.stop();
     clearYtMonitor(); if (yt) yt.pause();
-    paused = false; updatePauseLabel();
+    paused = false; ytPlaying = false; updatePauseLabel();
     document.getElementById('musicPreview').style.display = 'none';
     document.getElementById('suppressPanel').style.display = 'none';
     if (renderer) { renderer.setSuppressedNotes([]); renderer.setSuppressMode(false); }
