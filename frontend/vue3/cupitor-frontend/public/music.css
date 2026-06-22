@@ -1,0 +1,50 @@
+.previewControls > *{
+   margin-top: 5px;
+   margin-right: 5px;
+}
+
+/* Buttons: one consistent, smooth look. Each button carries an icon (.ic) and a text label
+   (.txt); desktop shows the text, mobile collapses to the icon for a tighter, app-like UI. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .3em;
+  padding: .3em .6em;
+  border: 1px solid #cfcfcf;
+  border-radius: 6px;
+  background: #fff;
+  color: #222;
+  cursor: pointer;
+  font-size: .9em;
+  line-height: 1.4;
+  transition: background .15s ease, border-color .15s ease;
+}
+.btn:hover { background: #eef4ff; border-color: #2563eb; }
+.btn:active { background: #dbe7ff; }
+.btn.ico { padding: .25em .45em; }   /* tight icon-only buttons (◀ ▶ measure arrows) */
+.btn .ic { display: none; }          /* desktop: text label is enough */
+
+/* Vocabulary rows: clickable label grows; delete (🗑) sits at the right, quiet until hovered. */
+.vocabRow { display: flex; align-items: center; gap: .5rem; }
+.vocabLabel { flex: 1 1 auto; cursor: pointer; }
+.vocabDel {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 1em;
+  padding: .1em .35em;
+  border-radius: 4px;
+  opacity: .55;
+  transition: opacity .15s ease, background .15s ease;
+}
+.vocabDel:hover { opacity: 1; background: #fde8e8; }
+
+@media (max-width: 700px) {
+  .btn { padding: .5em .6em; font-size: 1em; }   /* bigger tap targets */
+  .btn .txt { display: none; }                   /* mobile: show the icon only */
+  .btn .ic { display: inline; }
+  .btn.ico { padding: .4em .55em; }
+  .vocabDel { opacity: 1; }                       /* no hover on touch — always visible */
+  .previewControls > * { margin-top: 8px; }
+}

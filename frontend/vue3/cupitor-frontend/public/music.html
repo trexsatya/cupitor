@@ -8,6 +8,7 @@
     <script src="/github-utils.js"></script>
     <script src="/vendor/opensheetmusicdisplay.min.js"></script>
     <script src="/vendor/tone.js"></script>
+    <link rel="stylesheet" href="/music.css">
     <script src="https://www.youtube.com/iframe_api"></script>
     <style>
         body {
@@ -229,26 +230,26 @@
     </details>
   </div>
 <div id="musicPreview" style="display:none;border-top:1px solid #ddd;padding-top:1rem">
-  <div style="margin-bottom:.5rem">
+  <div style="margin-bottom:.5rem" class="previewControls">
     <strong id="previewTitle"></strong>
-    <button id="previewFullBtn">Full</button>
-    <label>Measures:
-      <button id="startPrevBtn" title="extend the window to an earlier measure">◀</button>
-      <input id="segFrom" type="number" min="1" style="width:2em" placeholder="from">
-      <button id="startNextBtn" title="move the start later">▶</button>
+    <button id="previewFullBtn" class="btn" title="Show the full piece"><span class="ic">⤢</span><span class="txt">Full</span></button>
+    <label class="measLabel">Measures:
+      <button id="startPrevBtn" class="btn ico" title="extend the window to an earlier measure">◀</button>
+      <input id="segFrom" type="number" min="1" style="width:2.4em" placeholder="from">
+      <button id="startNextBtn" class="btn ico" title="move the start later">▶</button>
       –
-      <button id="endPrevBtn" title="move the end earlier">◀</button>
-      <input id="segTo" type="number" min="1" style="width:2em" placeholder="to">
-      <button id="endNextBtn" title="extend the window to a later measure">▶</button>
+      <button id="endPrevBtn" class="btn ico" title="move the end earlier">◀</button>
+      <input id="segTo" type="number" min="1" style="width:2.4em" placeholder="to">
+      <button id="endNextBtn" class="btn ico" title="extend the window to a later measure">▶</button>
     </label>
-    <button id="previewSegBtn">Show segment</button>
-    <button id="previewCloseBtn">Close</button>
+    <button id="previewSegBtn" class="btn" title="Show this measure range"><span class="ic">◧</span><span class="txt">Show segment</span></button>
+    <button id="previewCloseBtn" class="btn" title="Close"><span class="ic">✕</span><span class="txt">Close</span></button>
     <span id="previewMsg"></span>
   </div>
-  <div id="transport" style="margin:.5rem 0">
+  <div id="transport" style="margin:.5rem 0" class="previewControls">
     <select id="srcSel"><option value="midi">MIDI</option><option value="youtube">YouTube</option></select>
-    <button id="playBtn">▶ Play</button>
-    <button id="pauseBtn">⏸ Pause</button>
+    <button id="playBtn" class="btn" title="Play from the start"><span class="ic">▶</span><span class="txt">▶ Play</span></button>
+    <button id="pauseBtn" class="btn" title="Pause / Resume"><span class="ic">⏸</span><span class="txt">⏸ Pause</span></button>
     <label><input type="checkbox" id="loopChk"> Loop segment</label>
     <label>Tempo <input id="tempoInput" type="number" min="20" max="300" style="width:4em"></label>
     <label>Instrument
@@ -262,18 +263,21 @@
     </label>
     <span id="transportMsg" style="color: blueviolet;"></span>
   </div>
-  <div id="mediaRow" style="margin:.25rem 0">
-    <input id="ytUrl" type="text" placeholder="YouTube URL" style="width:18em">
-    <button id="ytSaveBtn">Link YouTube</button>
-    <button id="guessBtn">Guess segment times</button>
+  <div id="mediaRow" style="margin:.25rem 0" class="previewControls">
+    <button id="ytToggleBtn" class="btn" title="Show / hide the YouTube link field"><span class="ic">🔗</span><span class="txt">🔗 YouTube link</span></button>
+    <span id="ytLinkWrap" style="display:none">
+      <input id="ytUrl" type="text" placeholder="YouTube URL" style="width:16em">
+      <button id="ytSaveBtn" class="btn" title="Link this YouTube video to the piece"><span class="ic">💾</span><span class="txt">Link</span></button>
+    </span>
+    <button id="guessBtn" class="btn" title="Guess segment start/end times from the YouTube video"><span class="ic">⏱</span><span class="txt">Guess times</span></button>
     <input id="guessSec" type="number" step="0.1" style="width:5em" placeholder="start s">
     <input id="guessEndSec" type="number" step="0.1" style="width:5em" placeholder="end s">
     <input id="vocabCat" type="text" placeholder="category" style="width:8em">
     <input id="vocabNote" type="text" placeholder="note" style="width:14em">
-    <button id="addVocabBtn">Add to vocab</button>
+    <button id="addVocabBtn" class="btn"><span class="ic">➕</span><span class="txt">Add to vocab</span></button>
     <span id="mediaMsg"></span>
   </div>
-  <div id="viewOptions" style="margin:.25rem 0">
+  <div id="viewOptions" style="margin:.25rem 0" class="previewControls">
     <label><input type="checkbox" id="voiceColorChk" checked> Color voices</label>
     <label><input type="checkbox" id="noteNameChk"> Note names</label>
     <label><input type="checkbox" id="chordChk"> Show chords</label>
@@ -284,7 +288,7 @@
     <span style="font-size:.85em;color:#555">Chords:</span>
     <span id="windowChords"></span>
     <span id="windowRange" style="font-size:.8em;color:#777"></span>
-    <button id="captureWindowBtn" style="margin-left:.5em">Capture window → vocab</button>
+    <button id="captureWindowBtn" class="btn" style="margin-left:.5em" title="Capture this window to vocab"><span class="ic">➕</span><span class="txt">Capture window → vocab</span></button>
   </div>
   <div id="osmdPreview"></div>
   <div id="ytPlayer" style="display:none"></div>
@@ -465,7 +469,9 @@
   // The "Add to vocab" button doubles as "Add/update" while a saved vocab item is on screen.
   function updateAddVocabLabel() {
     const btn = document.getElementById('addVocabBtn');
-    if (btn) btn.textContent = currentVocabEntry ? 'Add/update to vocab' : 'Add to vocab';
+    if (btn) btn.innerHTML = currentVocabEntry
+      ? '<span class="ic">✎</span><span class="txt">Add/update to vocab</span>'
+      : '<span class="ic">➕</span><span class="txt">Add to vocab</span>';
   }
   const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // Transient status pill for media/vocab actions: styled by tone, fades out + clears itself.
@@ -592,9 +598,18 @@
     } catch (e) { document.getElementById('transportMsg').textContent = 'YouTube error: ' + e.message; }
   }
   document.getElementById('instrSel').onchange = () => { if (player) player.setInstrument(document.getElementById('instrSel').value); };
+  // The YouTube link field stays hidden until asked for — most of the time you're not editing it.
+  document.getElementById('ytToggleBtn').onclick = () => {
+    const w = document.getElementById('ytLinkWrap');
+    w.style.display = (w.style.display === 'none' || !w.style.display) ? 'inline' : 'none';
+  };
   // Two-button transport: Play always (re)starts from the segment start; Pause toggles to Resume.
   let paused = false;
-  function updatePauseLabel() { document.getElementById('pauseBtn').textContent = paused ? '▶ Resume' : '⏸ Pause'; }
+  function updatePauseLabel() {
+    document.getElementById('pauseBtn').innerHTML = paused
+      ? '<span class="ic">▶</span><span class="txt">▶ Resume</span>'
+      : '<span class="ic">⏸</span><span class="txt">⏸ Pause</span>';
+  }
   document.getElementById('playBtn').onclick = () => {
     paused = false; updatePauseLabel();
     (document.getElementById('srcSel').value === 'youtube' ? playYouTube() : playMidi());
@@ -889,6 +904,16 @@
     }
     updateAddVocabLabel();
   }
+  // Delete a vocab item after confirmation: drop it locally, re-render, then push the new vocab.json.
+  async function deleteVocabEntry(entry) {
+    if (!window.confirm(`Delete vocab item “${entry.id}”?\n\nThis removes it for good.`)) return;
+    vocab = vocab.filter(v => v.id !== entry.id);
+    if (currentVocabEntry && currentVocabEntry.id === entry.id) { currentVocabEntry = null; updateAddVocabLabel(); }
+    renderVocab();
+    setMediaMsg('Deleting…');
+    const res = await saveVocabAndPush({ system, vocab, store, committer: makeCommitter(`delete vocab ${entry.id}`) });
+    setMediaMsg(res.pushed ? `Deleted “${entry.id}”` : `Deleted locally; push failed: ${res.pushError}`, res.pushed ? 'ok' : 'err');
+  }
   function renderVocab() {
     const box = document.getElementById('vocabList');
     const groups = groupVocabByCategory(vocab);
@@ -901,12 +926,19 @@
       g.entries.forEach(e => {
         const title = (index.find(x => x.id === e.pieceId) || {}).title || e.pieceId;
         const mark = (e.startSeconds != null || e.youtube) ? ' ▶' : '';
-        const row = document.createElement('div');
-        row.className = 'resultRow';
         const noteHtml = e.note ? ` <small style="color:#666">— ${escapeHtml(e.note)}</small>` : '';
         const off = e.measureOffset || 0;   // show the item's PRINTED measure numbers
-        row.innerHTML = `${title} <small>m${e.measureStart - off}–${e.measureEnd - off}${mark}</small>${noteHtml}`;
-        row.onclick = () => openVocabEntry(e);
+        const row = document.createElement('div');
+        row.className = 'resultRow vocabRow';
+        const label = document.createElement('span');
+        label.className = 'vocabLabel';
+        label.innerHTML = `${title} <small>m${e.measureStart - off}–${e.measureEnd - off}${mark}</small>${noteHtml}`;
+        label.onclick = () => openVocabEntry(e);
+        const del = document.createElement('button');
+        del.className = 'vocabDel'; del.title = 'Delete this vocab item'; del.textContent = '🗑';
+        del.onclick = (ev) => { ev.stopPropagation(); deleteVocabEntry(e); };
+        row.appendChild(label);
+        row.appendChild(del);
         box.appendChild(row);
       });
     });
