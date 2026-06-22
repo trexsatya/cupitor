@@ -648,6 +648,7 @@
     if (!renderer || !renderer.listVoices) return;
     renderer.listVoices().forEach((v) => {
       const chip = document.createElement('button');
+      chip.type = 'button';
       chip.className = 'voiceChip' + (v.allSuppressed ? ' active' : '');
       chip.textContent = `V${v.id + 1}`;
       chip.style.borderColor = v.color;
@@ -665,7 +666,7 @@
   }
   document.getElementById('suppressModeChk').onchange = (e) => {
     if (renderer) renderer.setSuppressMode(e.target.checked);
-    document.getElementById('voiceChips').style.display = e.target.checked ? '' : 'none';
+    document.getElementById('voiceChips').style.display = e.target.checked ? 'inline' : 'none';
     if (e.target.checked) renderVoiceChips();
   };
   document.getElementById('hearAllChk').onchange = (e) => { if (renderer) renderer.setHearAll(e.target.checked); };
@@ -793,7 +794,7 @@
     renderer.clearMeasureHighlight();   // a plain piece preview carries no captured-range shading
     renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
     renderer.showFull();
-    if (renderer) renderer.setSuppressedNotes([]);
+    if (renderer) { renderer.setSuppressedNotes([]); renderer.setSuppressMode(false); }
     document.getElementById('suppressPanel').style.display = 'none';
     document.getElementById('suppressModeChk').checked = false;
     document.getElementById('hearAllChk').checked = false;
@@ -861,6 +862,10 @@
     paused = false; updatePauseLabel();
     document.getElementById('musicPreview').style.display = 'none';
     document.getElementById('suppressPanel').style.display = 'none';
+    if (renderer) { renderer.setSuppressedNotes([]); renderer.setSuppressMode(false); }
+    document.getElementById('suppressModeChk').checked = false;
+    document.getElementById('hearAllChk').checked = false;
+    syncToggles();
     document.body.classList.remove('preview-open');
   };
 
