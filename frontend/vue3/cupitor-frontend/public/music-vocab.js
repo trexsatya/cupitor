@@ -24,7 +24,8 @@ export function buildSnapshot(detail, measureRange) {
 // Pure: build a categorized vocab entry. id follows M1 (pieceId + measure range, spaces→_).
 export function buildVocabEntry({ pieceId, system, measureRange, measureOffset = 0, youtube = null,
                                   startSeconds = null, endSeconds = null, chords = [], note = '',
-                                  snapshot = null, category = 'uncategorized', createdAt = null }) {
+                                  snapshot = null, category = 'uncategorized', createdAt = null,
+                                  suppressed = [] }) {
   const [measureStart, measureEnd] = measureRange;
   const id = `${pieceId}_${measureStart}_${measureEnd}`.replace(/\s+/g, '_');
   return {
@@ -34,6 +35,7 @@ export function buildVocabEntry({ pieceId, system, measureRange, measureOffset =
     chords: chords || [],   // manually-picked best-match chord names (multi-select)
     note: note || '',       // free-text annotation for the segment
     snapshot: snapshot || { pitches: [], chords: [] },
+    suppressed: suppressed || [],   // notes silenced for chord practice: [{measure, midi, beats}]
     createdAt,
   };
 }
