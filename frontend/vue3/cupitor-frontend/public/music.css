@@ -52,3 +52,16 @@
   .vocabDel { opacity: 1; }                       /* no hover on touch — always visible */
   .previewControls > * { margin-top: 8px; }
 }
+
+/* Voice chips for note suppression: a small pill per voice, lit when the whole voice is muted. */
+.voiceChip {
+  display: inline-block;
+  margin: 0 .15em;
+  padding: .05em .5em;
+  font-size: .85em;
+  border-radius: 10px;
+  border: 1px solid #888;
+  background: #fff;
+  cursor: pointer;
+}
+#voiceChips { display: none; }   /* shown only while in suppress edit-mode */
