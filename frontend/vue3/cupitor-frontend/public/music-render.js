@@ -94,6 +94,27 @@ export function responsiveZoom(viewportWidth) {
   return clamp(viewportWidth / ZOOM_BASELINE_PX, 0.4, 1.0);
 }
 
+// Pure: stable string key for a note identity, for suppression-set membership/dedupe.
+export function suppressionKey({ measure, midi, beats }) {
+  return `${measure}:${midi}:${Number(beats).toFixed(6)}`;
+}
+
+// Pure: the note identities {measure, midi, beats} of a given voice in a rendered-note list
+// (excludes unpitched notes, which have midi == null).
+export function notesOfVoice(notes, voiceId) {
+  return (notes || [])
+    .filter((n) => n.voice === voiceId && n.midi != null)
+    .map((n) => ({ measure: n.measure, midi: n.midi, beats: n.onsetBeats }));
+}
+
+// Pure: notes currently silenced/dimmed = hearAll ? none : suppressed minus temp-restored.
+// `tempRestored` is a Set of suppressionKey strings; keys not present in `suppressed` are ignored.
+export function effectiveMuted(suppressed, tempRestored, hearAll) {
+  if (hearAll) return [];
+  const t = tempRestored || new Set();
+  return (suppressed || []).filter((n) => !t.has(suppressionKey(n)));
+}
+
 // Pure: inclusive slice of an ordered note list between two reading-order indices, with the
 // endpoints normalized (swapped if reversed) and clamped to the array bounds. [] for empty input.
 export function notesInWindow(ordered, startOrder, endOrder) {
