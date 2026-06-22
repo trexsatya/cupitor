@@ -399,3 +399,18 @@ describe('suppression pure helpers', () => {
     expect(effectiveMuted(S, T2, false)).toEqual(S);
   });
 });
+
+describe('createMusicRenderer suppression set API', () => {
+  test('round-trips the suppressed set and computes the effective muted set', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.setSuppressedNotes([{ measure: 1, midi: 60, beats: 0 }, { measure: 1, midi: 64, beats: 0 }]);
+    expect(r.getSuppressedNotes()).toEqual([{ measure: 1, midi: 60, beats: 0 }, { measure: 1, midi: 64, beats: 0 }]);
+    expect(r.getMutedNotes()).toEqual([{ measure: 1, midi: 60, beats: 0 }, { measure: 1, midi: 64, beats: 0 }]);
+    r.setHearAll(true);
+    expect(r.getMutedNotes()).toEqual([]);            // hear-all overrides
+    expect(r.getSuppressedNotes()).toHaveLength(2);   // saved set intact
+    r.setHearAll(false);
+    expect(r.getMutedNotes()).toHaveLength(2);
+  });
+});
