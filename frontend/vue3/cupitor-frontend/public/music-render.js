@@ -127,15 +127,16 @@ export function clampAnchorIndex(list, anchor) {
 export function createMusicRenderer(container, opts = {}) {
   const factory = opts.osmdFactory || ((c) => new opensheetmusicdisplay.OpenSheetMusicDisplay(c));
   const osmd = factory(container);
-  // useXMLMeasureNumbers:false → OSMD labels measures by its own 1-based sequential count, the same
-  // convention music-encoding uses (measureNumber = index + 1). With a pickup/anacrusis the XML's
-  // printed numbers are offset by one, which made a vocab item's stored range (e.g. m7-8) render
-  // under labels m6-7. Sequential labels keep the displayed numbers in step with segFrom/segTo.
-  osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false, useXMLMeasureNumbers: false });
+  // Show the score's PRINTED (XML) measure numbers — that's the canonical reference a musician
+  // reads. The app counts measures sequentially (pickup = 1), so with an anacrusis the printed
+  // number is offset by the pickup count; measureOffset (computed on load) bridges the two and the
+  // UI displays/accepts printed numbers while storage/drawFrom stay sequential. See getMeasureOffset.
+  osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false, useXMLMeasureNumbers: true });
   const onAfterRender = opts.onAfterRender;   // called after each render (lets the UI rebuild chord chips)
   const onChordSelect = opts.onChordSelect;   // called on a user chord-label click with the selected names
   const onWindowChange = opts.onWindowChange; // called with { chords, measureRange } when the chord window moves
   let totalMeasures = 0;
+  let measureOffset = 0;     // sequential MeasureNumber − printed number (the pickup/anacrusis shift)
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
   let noteNames = false;
   let showChords = false;        // draw stacked chord-candidate labels above each chord area
@@ -778,6 +779,24 @@ export function createMusicRenderer(container, opts = {}) {
 
   function setZoom(factor) { osmd.Zoom = factor; redraw(); }
 
+  // The pickup/anacrusis shift between the app's sequential numbering (music-encoding counts the
+  // pickup as measure 1) and the score's printed numbers. Primary: the count of leading implicit
+  // (pickup) measures — robust regardless of OSMD's internal MeasureNumber semantics. Fallback for
+  // a score with no pickup but shifted printed numbers: 1 − printed-number-of-the-first-measure.
+  function computeMeasureOffset() {
+    measureOffset = 0;
+    try {
+      const sms = osmd.Sheet && osmd.Sheet.SourceMeasures;
+      if (!sms || !sms.length) return;
+      let lead = 0;
+      for (const m of sms) { if (m.ImplicitMeasure) lead++; else break; }
+      if (lead > 0) { measureOffset = lead; return; }
+      const m0 = sms[0];
+      const printed = (typeof m0.getPrintedMeasureNumber === 'function') ? m0.getPrintedMeasureNumber() : m0.MeasureNumberPrinted;
+      if (Number.isFinite(printed)) measureOffset = 1 - printed;
+    } catch (_) { measureOffset = 0; }
+  }
+
   return {
     osmd,
     async loadDetail(detail) {
@@ -786,10 +805,11 @@ export function createMusicRenderer(container, opts = {}) {
       }
       await osmd.load(detail.source);
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
+      computeMeasureOffset();
       shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
       selectedChords.clear();   // a fresh piece carries no manual chord picks
       redraw();
-      return { ok: true, totalMeasures };
+      return { ok: true, totalMeasures, measureOffset };
     },
     showFull() {
       osmd.setOptions({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: totalMeasures || Number.MAX_SAFE_INTEGER });
@@ -808,6 +828,8 @@ export function createMusicRenderer(container, opts = {}) {
     setShowChords(on) { showChords = !!on; redraw(); },
     // Toggle dimming of beams/stems/slurs (reduces visual noise; noteheads stay black).
     setDimConnectors(on) { dimConnectors = !!on; redraw(); },
+    // Pickup/anacrusis shift (sequential − printed); the UI shows/accepts printed measure numbers.
+    getMeasureOffset() { return measureOffset; },
     // Toggle the draggable chord window. Off clears its anchors so it re-seeds next time.
     setChordWindow(on) { chordWindow.active = !!on; if (!chordWindow.active) { chordWindow.start = null; chordWindow.end = null; } redraw(); },
     // Live play range of the window: { fromMeasure, toMeasure, fromBeat?, toBeat?, cursorStep },
