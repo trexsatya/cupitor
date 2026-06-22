@@ -45,6 +45,7 @@ describe('buildVocabEntry', () => {
       chords: ['Cmaj', 'Am'],
       note: 'tricky run',
       snapshot: { pitches: [60, 62], chords: ['C'] },
+      suppressed: [],
       createdAt: '2026-06-20',
     });
   });
@@ -60,6 +61,19 @@ describe('buildVocabEntry', () => {
     expect(entry.snapshot).toEqual({ pitches: [], chords: [] });
     expect(entry.measureOffset).toBe(0);   // no pickup shift unless provided
     expect(entry.id).toBe('p_1_1');
+  });
+
+  test('stores a provided suppressed-notes list', () => {
+    const entry = buildVocabEntry({
+      pieceId: 'p', system: 'western', measureRange: [1, 1], createdAt: '2026-06-22',
+      suppressed: [{ measure: 1, midi: 60, beats: 0 }, { measure: 1, midi: 64, beats: 1 }],
+    });
+    expect(entry.suppressed).toEqual([{ measure: 1, midi: 60, beats: 0 }, { measure: 1, midi: 64, beats: 1 }]);
+  });
+
+  test('defaults suppressed to an empty array', () => {
+    const entry = buildVocabEntry({ pieceId: 'p', system: 'sargam', measureRange: [1, 1], createdAt: '2026-06-22' });
+    expect(entry.suppressed).toEqual([]);
   });
 });
 
