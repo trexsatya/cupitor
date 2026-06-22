@@ -7,6 +7,7 @@ import { resolveMatchMeasures } from './music-render.js';
 import { voiceColor } from './music-render.js';
 import { noteName } from './music-render.js';
 import { notesInWindow, clampAnchorIndex } from './music-render.js';
+import { suppressionKey, notesOfVoice, effectiveMuted } from './music-render.js';
 import { encodeMusicXml, inferChords } from './music-encoding.js';
 import { buildIndexEntry } from './music-index.js';
 import fs from 'fs';
@@ -372,5 +373,29 @@ describe('createMusicRenderer chord window', () => {
     expect(() => r.setChordWindow(true)).not.toThrow();
     expect(osmd.calls.filter(c => c[0] === 'render').length).toBe(before + 1);
     expect(() => r.setChordWindow(false)).not.toThrow();
+  });
+});
+
+describe('suppression pure helpers', () => {
+  test('suppressionKey formats measure:midi:beats with fixed precision', () => {
+    expect(suppressionKey({ measure: 2, midi: 60, beats: 4 })).toBe('2:60:4.000000');
+    expect(suppressionKey({ measure: 1, midi: 67, beats: 1.5 })).toBe('1:67:1.500000');
+  });
+  test('notesOfVoice keeps that voice and drops unpitched notes', () => {
+    const notes = [
+      { measure: 1, midi: 60, onsetBeats: 0, voice: 0 },
+      { measure: 1, midi: 64, onsetBeats: 0, voice: 1 },
+      { measure: 1, midi: null, onsetBeats: 1, voice: 0 },
+    ];
+    expect(notesOfVoice(notes, 0)).toEqual([{ measure: 1, midi: 60, beats: 0 }]);
+  });
+  test('effectiveMuted = suppressed − tempRestored, empty when hearAll', () => {
+    const S = [{ measure: 1, midi: 60, beats: 0 }, { measure: 1, midi: 64, beats: 0 }];
+    const T = new Set([suppressionKey({ measure: 1, midi: 64, beats: 0 })]);
+    expect(effectiveMuted(S, T, false)).toEqual([{ measure: 1, midi: 60, beats: 0 }]);
+    expect(effectiveMuted(S, T, true)).toEqual([]);
+    // a tempRestored key that isn't in S has no effect
+    const T2 = new Set([suppressionKey({ measure: 9, midi: 99, beats: 9 })]);
+    expect(effectiveMuted(S, T2, false)).toEqual(S);
   });
 });
