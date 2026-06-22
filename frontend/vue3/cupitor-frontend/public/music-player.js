@@ -67,6 +67,18 @@ function tieTypesOf(noteEl) {
   return types;
 }
 
+// Pure: is this note one of the suppressed ones? Match on (measure, midi) with a small epsilon
+// on the onset beat (floats). `set` is [{measure, midi, beats}] in piece-start quarter beats —
+// the same scale as a schedule/raw event's `beats`.
+export function isSuppressed(event, set) {
+  if (!event || !set || !set.length) return false;
+  const EPS = 1e-6;
+  for (const s of set) {
+    if (s.measure === event.measure && s.midi === event.midi && Math.abs(s.beats - event.beats) < EPS) return true;
+  }
+  return false;
+}
+
 // Pure: build a time-accurate, polyphonic schedule from a MusicXML string. Reads every
 // part/voice with ABSOLUTE onsets, honoring <divisions>, <duration> (authoritative — bakes
 // in dotted values), <chord/> (stacked at the same onset), <rest> (advances time, no note),

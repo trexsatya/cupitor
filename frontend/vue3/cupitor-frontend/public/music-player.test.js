@@ -1,5 +1,5 @@
 // public/music-player.test.js
-import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd, buildScheduleFromMusicXml, gmInstrumentForVoice, soundfontSampleMap } from './music-player.js';
+import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd, buildScheduleFromMusicXml, gmInstrumentForVoice, soundfontSampleMap, isSuppressed } from './music-player.js';
 
 // Primary voice = the one with the most notes. midi=pitch, duration=<type> string|null, measureIndex 1-based.
 function voice(pitch, duration, measureIndex) {
@@ -236,5 +236,25 @@ describe('soundfontSampleMap', () => {
     expect(m['C4']).toBe('https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/church_organ-mp3/C4.mp3');
     expect(Object.keys(m)).toContain('Gb4');
     expect(m['Gb4'].endsWith('church_organ-mp3/Gb4.mp3')).toBe(true);
+  });
+});
+
+describe('isSuppressed', () => {
+  const set = [{ measure: 2, midi: 60, beats: 4 }, { measure: 2, midi: 67, beats: 4 }];
+  test('matches on (measure, midi, beats)', () => {
+    expect(isSuppressed({ measure: 2, midi: 60, beats: 4 }, set)).toBe(true);
+    expect(isSuppressed({ measure: 2, midi: 67, beats: 4 }, set)).toBe(true);
+  });
+  test('tolerates float drift on beats within EPS', () => {
+    expect(isSuppressed({ measure: 2, midi: 60, beats: 4 + 1e-9 }, set)).toBe(true);
+  });
+  test('rejects a different pitch, measure, or distant onset', () => {
+    expect(isSuppressed({ measure: 2, midi: 62, beats: 4 }, set)).toBe(false);
+    expect(isSuppressed({ measure: 3, midi: 60, beats: 4 }, set)).toBe(false);
+    expect(isSuppressed({ measure: 2, midi: 60, beats: 4.5 }, set)).toBe(false);
+  });
+  test('empty or missing set → false', () => {
+    expect(isSuppressed({ measure: 2, midi: 60, beats: 4 }, [])).toBe(false);
+    expect(isSuppressed({ measure: 2, midi: 60, beats: 4 }, null)).toBe(false);
   });
 });
