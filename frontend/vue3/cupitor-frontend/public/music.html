@@ -234,11 +234,11 @@
     <button id="previewFullBtn">Full</button>
     <label>Measures:
       <button id="startPrevBtn" title="extend the window to an earlier measure">◀</button>
-      <input id="segFrom" type="number" min="1" style="width:4em" placeholder="from">
+      <input id="segFrom" type="number" min="1" style="width:2em" placeholder="from">
       <button id="startNextBtn" title="move the start later">▶</button>
       –
       <button id="endPrevBtn" title="move the end earlier">◀</button>
-      <input id="segTo" type="number" min="1" style="width:4em" placeholder="to">
+      <input id="segTo" type="number" min="1" style="width:2em" placeholder="to">
       <button id="endNextBtn" title="extend the window to a later measure">▶</button>
     </label>
     <button id="previewSegBtn">Show segment</button>
@@ -398,6 +398,11 @@
 
   let renderer = null;
   let totalMeasures = 0;
+  // Measure numbers are stored/rendered SEQUENTIALLY (pickup = 1) but shown/typed as the score's
+  // PRINTED numbers. currentOffset = sequential − printed for the loaded piece (the pickup shift).
+  let currentOffset = 0;
+  const toPrintedMeasure = (seq) => (Number.isFinite(seq) ? seq - currentOffset : seq);
+  const toSeqMeasure = (printed) => (Number.isFinite(printed) ? printed + currentOffset : printed);
   function ensureRenderer() {
     if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'),
       { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange });
@@ -414,8 +419,8 @@
     [...windowPicks].forEach((n) => { if (!names.has(n)) windowPicks.delete(n); });   // drop vanished picks
     renderWindowChips();
     applyWindowHighlight();
-    const r = windowState.measureRange;
-    document.getElementById('windowRange').textContent = r ? `(m. ${r[0]}–${r[1]})` : '';
+    const r = windowState.measureRange;   // sequential → show printed
+    document.getElementById('windowRange').textContent = r ? `(m. ${toPrintedMeasure(r[0])}–${toPrintedMeasure(r[1])})` : '';
   }
   function renderWindowChips() {
     const host = document.getElementById('windowChords');
@@ -486,9 +491,10 @@
     return player;
   }
   function segmentRange() {
+    // Fields hold PRINTED numbers; convert to the sequential numbers used internally / by OSMD.
     const from = parseInt(document.getElementById('segFrom').value, 10);
     const to = parseInt(document.getElementById('segTo').value, 10);
-    return (Number.isFinite(from) && Number.isFinite(to)) ? { fromMeasure: from, toMeasure: to } : {};
+    return (Number.isFinite(from) && Number.isFinite(to)) ? { fromMeasure: toSeqMeasure(from), toMeasure: toSeqMeasure(to) } : {};
   }
   // What to play: when the chord window is on, play only the window — note-accurate (fromBeat/
   // toBeat) when onsets are available, else the measures it spans. Otherwise the segment from/to.
@@ -513,8 +519,8 @@
       ? buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), ...range })
       : buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...range });
     if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
-    const span = (range.fromBeat != null) ? ` (window, beats ${range.fromBeat}–${range.toBeat})`
-      : (range.fromMeasure != null) ? ` (m. ${range.fromMeasure}–${range.toMeasure})` : '';
+    const span = (range.fromBeat != null) ? ' (window)'
+      : (range.fromMeasure != null) ? ` (m. ${toPrintedMeasure(range.fromMeasure)}–${toPrintedMeasure(range.toMeasure)})` : '';
     const p = ensurePlayer();
     p.setInstrument(document.getElementById('instrSel').value);
     p.setSchedule(schedule, { cursorStartStep: range.cursorStep || 0 });
@@ -649,6 +655,7 @@
     }
     const entry = buildVocabEntry({
       pieceId: currentPreviewId, system, measureRange: [from, to],
+      measureOffset: currentOffset,   // pickup shift, so the list can show printed numbers
       youtube: (currentDetail.meta && currentDetail.meta.youtube) || null,
       startSeconds: Number.isFinite(startRaw) ? startRaw : null,
       endSeconds: Number.isFinite(endRaw) ? endRaw : null,
@@ -692,6 +699,7 @@
     currentDetail = detail;
     currentPreviewId = id;
     totalMeasures = res.totalMeasures || 0;
+    currentOffset = res.measureOffset || 0;   // pickup shift for printed↔sequential conversions
     document.getElementById('instrSel').value = instrumentVoiceKey(detail.meta && detail.meta.instrument);
     if (player) player.setInstrument(document.getElementById('instrSel').value);
     document.getElementById('ytUrl').value = (detail.meta && detail.meta.youtube) || '';
@@ -722,8 +730,8 @@
   // Capture the current window: map its measure range + picked chords into the existing flow.
   document.getElementById('captureWindowBtn').onclick = () => {
     if (!windowState.measureRange) { setMediaMsg('No notes in the window', 'err'); return; }
-    document.getElementById('segFrom').value = windowState.measureRange[0];
-    document.getElementById('segTo').value = windowState.measureRange[1];
+    document.getElementById('segFrom').value = toPrintedMeasure(windowState.measureRange[0]);
+    document.getElementById('segTo').value = toPrintedMeasure(windowState.measureRange[1]);
     if (renderer) renderer.setSelectedChords([...windowPicks]);
     document.getElementById('addVocabBtn').click();   // reuse Add/update-to-vocab (times, note, confirm)
   };
@@ -737,22 +745,23 @@
     setMediaMsg('Note saved locally — Add/update to vocab to push', 'ok');
   };
   document.getElementById('previewSegBtn').onclick = () => {
-    const from = parseInt(document.getElementById('segFrom').value, 10);
-    const to = parseInt(document.getElementById('segTo').value, 10);
+    const from = toSeqMeasure(parseInt(document.getElementById('segFrom').value, 10));
+    const to = toSeqMeasure(parseInt(document.getElementById('segTo').value, 10));
     if (renderer && Number.isFinite(from) && Number.isFinite(to)) renderer.showSegment([from, to]);
   };
   // Prev/Next on each boundary: the start pair (◀▶ left) moves segFrom, the end pair (◀▶
   // right) moves segTo. ◀ on the start and ▶ on the end grow the window; the inner arrows shrink it.
   function adjustSegment(which, delta) {
     if (!renderer) return;
-    let from = parseInt(document.getElementById('segFrom').value, 10);
-    let to = parseInt(document.getElementById('segTo').value, 10);
+    // Work in sequential numbers (fields are printed), clamp to [1, totalMeasures], write printed.
+    let from = toSeqMeasure(parseInt(document.getElementById('segFrom').value, 10));
+    let to = toSeqMeasure(parseInt(document.getElementById('segTo').value, 10));
     if (!Number.isFinite(from)) from = 1;
     if (!Number.isFinite(to)) to = from;
     if (which === 'from') from = Math.min(to, Math.max(1, from + delta));
     else to = Math.max(from, Math.min(totalMeasures || (to + Math.max(delta, 0)), to + delta));
-    document.getElementById('segFrom').value = from;
-    document.getElementById('segTo').value = to;
+    document.getElementById('segFrom').value = toPrintedMeasure(from);
+    document.getElementById('segTo').value = toPrintedMeasure(to);
     renderer.showSegment([from, to]);
   }
   document.getElementById('startPrevBtn').onclick = () => adjustSegment('from', -1);
@@ -852,10 +861,10 @@
   async function openResult(result) {
     await openPreview(result.pieceId);
     if (!currentDetail) return;   // note-text or failed render: detail pane shows its own message
-    const mr = resolveMatchMeasures(currentDetail, result.match);
+    const mr = resolveMatchMeasures(currentDetail, result.match);   // sequential
     if (mr) {
-      document.getElementById('segFrom').value = mr[0];
-      document.getElementById('segTo').value = mr[1];
+      document.getElementById('segFrom').value = toPrintedMeasure(mr[0]);
+      document.getElementById('segTo').value = toPrintedMeasure(mr[1]);
       if (renderer) renderer.showSegment(mr);
     }
   }
@@ -863,9 +872,9 @@
     await openPreview(entry.pieceId);
     if (!currentDetail) return;
     currentVocabEntry = entry;
-    const from = entry.measureStart, to = entry.measureEnd;
-    document.getElementById('segFrom').value = from;
-    document.getElementById('segTo').value = to;
+    const from = entry.measureStart, to = entry.measureEnd;   // sequential (stored)
+    document.getElementById('segFrom').value = toPrintedMeasure(from);
+    document.getElementById('segTo').value = toPrintedMeasure(to);
     document.getElementById('vocabCat').value = (entry.category && entry.category !== 'uncategorized') ? entry.category : '';
     document.getElementById('vocabNote').value = entry.note || '';
     if (entry.startSeconds != null) document.getElementById('guessSec').value = entry.startSeconds;
@@ -895,7 +904,8 @@
         const row = document.createElement('div');
         row.className = 'resultRow';
         const noteHtml = e.note ? ` <small style="color:#666">— ${escapeHtml(e.note)}</small>` : '';
-        row.innerHTML = `${title} <small>m${e.measureStart}–${e.measureEnd}${mark}</small>${noteHtml}`;
+        const off = e.measureOffset || 0;   // show the item's PRINTED measure numbers
+        row.innerHTML = `${title} <small>m${e.measureStart - off}–${e.measureEnd - off}${mark}</small>${noteHtml}`;
         row.onclick = () => openVocabEntry(e);
         box.appendChild(row);
       });

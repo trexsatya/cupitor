@@ -147,14 +147,14 @@ describe('createMusicRenderer', () => {
   test('initialises OSMD with svg/compact options', () => {
     const osmd = fakeOsmd();
     createMusicRenderer({}, { osmdFactory: () => osmd });
-    expect(osmd.calls[0]).toEqual(['setOptions', { backend: 'svg', drawingParameters: 'compacttight', drawTitle: false, useXMLMeasureNumbers: false }]);
+    expect(osmd.calls[0]).toEqual(['setOptions', { backend: 'svg', drawingParameters: 'compacttight', drawTitle: false, useXMLMeasureNumbers: true }]);
   });
 
   test('loadDetail loads musicxml source, renders, reports total measures', async () => {
     const osmd = fakeOsmd();
     const r = createMusicRenderer({}, { osmdFactory: () => osmd });
     const res = await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
-    expect(res).toEqual({ ok: true, totalMeasures: 4 });
+    expect(res).toEqual({ ok: true, totalMeasures: 4, measureOffset: 0 });
     expect(osmd.calls.some(c => c[0] === 'load' && c[1] === '<xml/>')).toBe(true);
     expect(osmd.calls.some(c => c[0] === 'render')).toBe(true);
   });

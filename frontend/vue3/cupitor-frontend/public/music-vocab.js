@@ -22,13 +22,14 @@ export function buildSnapshot(detail, measureRange) {
 }
 
 // Pure: build a categorized vocab entry. id follows M1 (pieceId + measure range, spaces→_).
-export function buildVocabEntry({ pieceId, system, measureRange, youtube = null, startSeconds = null,
-                                  endSeconds = null, chords = [], note = '', snapshot = null,
-                                  category = 'uncategorized', createdAt = null }) {
+export function buildVocabEntry({ pieceId, system, measureRange, measureOffset = 0, youtube = null,
+                                  startSeconds = null, endSeconds = null, chords = [], note = '',
+                                  snapshot = null, category = 'uncategorized', createdAt = null }) {
   const [measureStart, measureEnd] = measureRange;
   const id = `${pieceId}_${measureStart}_${measureEnd}`.replace(/\s+/g, '_');
   return {
     id, category, pieceId, system, measureStart, measureEnd,
+    measureOffset,          // pickup/anacrusis shift: printed number = measureStart − measureOffset
     youtube, startSeconds, endSeconds,
     chords: chords || [],   // manually-picked best-match chord names (multi-select)
     note: note || '',       // free-text annotation for the segment
