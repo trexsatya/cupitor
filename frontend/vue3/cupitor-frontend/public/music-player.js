@@ -74,7 +74,12 @@ export function isSuppressed(event, set) {
   if (!event || !set || !set.length) return false;
   const EPS = 1e-6;
   for (const s of set) {
-    if (s.measure === event.measure && s.midi === event.midi && Math.abs(s.beats - event.beats) < EPS) return true;
+    // Match on (midi, beats) only — NOT measure. An absolute onset (piece-start quarter beats) lies
+    // in exactly one measure, so (midi, beats) uniquely identifies the note. We deliberately ignore
+    // `measure`: the renderer numbers measures sequentially (pickup = 1) while the player reads the
+    // XML `number` attribute (pickup often "0"), so requiring measure-equality would miss pickup-bar
+    // notes. `measure` is still carried in the stored identity for readability/debugging.
+    if (s.midi === event.midi && Math.abs(s.beats - event.beats) < EPS) return true;
   }
   return false;
 }

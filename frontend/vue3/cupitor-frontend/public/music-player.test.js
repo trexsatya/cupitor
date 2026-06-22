@@ -258,10 +258,14 @@ describe('isSuppressed', () => {
   test('tolerates float drift on beats within EPS', () => {
     expect(isSuppressed({ measure: 2, midi: 60, beats: 4 + 1e-9 }, set)).toBe(true);
   });
-  test('rejects a different pitch, measure, or distant onset', () => {
+  test('rejects a different pitch or distant onset', () => {
     expect(isSuppressed({ measure: 2, midi: 62, beats: 4 }, set)).toBe(false);
-    expect(isSuppressed({ measure: 3, midi: 60, beats: 4 }, set)).toBe(false);
     expect(isSuppressed({ measure: 2, midi: 60, beats: 4.5 }, set)).toBe(false);
+  });
+  test('matches by (midi, beats) even when the measure number disagrees (pickup safety)', () => {
+    // renderer may tag a note measure=1 while the player event has measure=0 (XML pickup "number");
+    // beats + midi still identify it, so suppression works across that numbering gap.
+    expect(isSuppressed({ measure: 0, midi: 60, beats: 4 }, set)).toBe(true);
   });
   test('empty or missing set → false', () => {
     expect(isSuppressed({ measure: 2, midi: 60, beats: 4 }, [])).toBe(false);
