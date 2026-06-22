@@ -892,7 +892,7 @@ export function createMusicRenderer(container, opts = {}) {
     setSuppressedNotes(list) {
       suppressedNotes.clear(); tempRestored.clear(); hearAll = false;
       (list || []).forEach((n) => {
-        if (n && n.midi != null) suppressedNotes.set(suppressionKey(n), { measure: n.measure, midi: n.midi, beats: n.beats });
+        if (n && n.midi != null && n.beats != null) suppressedNotes.set(suppressionKey(n), { measure: n.measure, midi: n.midi, beats: n.beats });
       });
       redraw();
     },

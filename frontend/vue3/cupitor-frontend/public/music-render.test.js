@@ -413,4 +413,15 @@ describe('createMusicRenderer suppression set API', () => {
     r.setHearAll(false);
     expect(r.getMutedNotes()).toHaveLength(2);
   });
+
+  test('ignores notes missing midi or beats (no NaN keys)', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.setSuppressedNotes([
+      { measure: 1, midi: 60, beats: 0 },   // valid
+      { measure: 1, midi: 62 },             // no beats → dropped
+      { measure: 1, beats: 1 },             // no midi  → dropped
+    ]);
+    expect(r.getSuppressedNotes()).toEqual([{ measure: 1, midi: 60, beats: 0 }]);
+  });
 });
