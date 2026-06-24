@@ -59,3 +59,18 @@ export async function linkYouTubeAndPush({ system, id, url, currentIndex = [], s
 
   return { index, pushed, pushError, localError };
 }
+
+// Local-first variant of the above: patch both tiers and persist to the store (synced:false)
+// WITHOUT pushing. The GitHub commit happens later via the manual pushPending batch. Same guards.
+export async function linkYouTubeLocal({ system, id, url, currentIndex = [], store }) {
+  const prevEntry = currentIndex.find(e => e.id === id);
+  if (!prevEntry) return { index: currentIndex, error: 'piece not found' };
+  const detail = await store.getDetail(system, id);
+  if (!detail) return { index: currentIndex, error: 'detail not found' };
+  const { entry, detail: patched } = applyYouTubeLink(prevEntry, detail, url);
+  const index = mergeIndex(currentIndex, [entry]);
+  let localError = null;
+  try { await store.putPieces(system, [{ entry, detail: patched }]); }
+  catch (e) { localError = e.message; }
+  return { index, localError };
+}

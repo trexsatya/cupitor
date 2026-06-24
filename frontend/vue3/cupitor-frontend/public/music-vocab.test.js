@@ -1,5 +1,5 @@
 // public/music-vocab.test.js
-import { buildSnapshot, buildVocabEntry, upsertVocab, groupVocabByCategory } from './music-vocab.js';
+import { buildSnapshot, buildVocabEntry, upsertVocab, uniqueVocabId, groupVocabByCategory } from './music-vocab.js';
 
 function detailWith(pitch, chordSymbol, measureIndex) {
   return { meta: { id: 'p' }, format: 'musicxml', source: '<x/>',
@@ -88,6 +88,15 @@ describe('upsertVocab', () => {
     const list2 = upsertVocab(list1, { id: 'x_1_2', category: 'updated' });
     expect(list2.find(e => e.id === 'x_1_2').category).toBe('updated');
     expect(list2).toHaveLength(2);
+  });
+});
+
+describe('uniqueVocabId', () => {
+  test('returns the base id when free; appends the smallest unused _N on collision', () => {
+    const vocab = [{ id: 'P_5_8' }, { id: 'P_5_8_2' }];
+    expect(uniqueVocabId(vocab, 'P_1_4')).toBe('P_1_4');   // free → unchanged
+    expect(uniqueVocabId(vocab, 'P_5_8')).toBe('P_5_8_3');  // _2 taken → next free is _3
+    expect(uniqueVocabId([], 'P_5_8')).toBe('P_5_8');
   });
 });
 

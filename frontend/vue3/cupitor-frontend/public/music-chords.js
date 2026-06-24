@@ -6,6 +6,40 @@
 // Pure + unit-tested; the DOM extraction that feeds it lives in the renderer glue.
 import { allChords } from './music-reference-data.js';
 
+// Pure: chord key → label for display. A plain major triad drops its "maj" (Gmaj → G);
+// everything else is shown verbatim, so "maj7" stays "maj7" (Gmaj7), and dim/min/aug/7
+// are untouched (Bdim, Em, G7). Only an exact trailing "maj" is stripped.
+export function chordDisplayName(name) {
+  if (!name) return name;
+  return name.replace(/maj$/, '');
+}
+
+// Pure: every note in `notes` (one onset-ordered stream, e.g. a single system) that takes
+// part in a COMPLETE occurrence of `chordName` — a tight run, starting on a chord tone and
+// spanning at most `tones + slack` consecutive notes, in which every one of the chord's tones
+// appears. The occurrence's chord-tone notes are collected (intruding non-chord notes skipped);
+// an isolated tone with no nearby partners is excluded. Returns the de-duplicated note objects
+// (same refs as input, in stream order), so the caller can highlight them. Used by the "Global"
+// chord match: click a chord name → light up every place it occurs across the visible sheet.
+export function chordOccurrenceNotes(notes, chordName, dict = allChords, { slack = 2 } = {}) {
+  const tones = dict[chordName] && dict[chordName].notes;
+  if (!tones || !tones.length || !notes || notes.length < tones.length) return [];
+  const toneSet = new Set(tones);
+  const sorted = notes.slice().sort((a, b) => a.left - b.left);
+  const span = tones.length + slack;   // a complete occurrence spans at most this many notes
+  const picked = new Set();
+  for (let i = 0; i < sorted.length; i++) {
+    if (!toneSet.has(sorted[i].name)) continue;   // a run can only start on a chord tone
+    const seen = new Set();
+    const idxs = [];
+    for (let j = i; j < sorted.length && j < i + span; j++) {
+      if (toneSet.has(sorted[j].name)) { seen.add(sorted[j].name); idxs.push(j); }
+    }
+    if (seen.size === toneSet.size) idxs.forEach((k) => picked.add(k));
+  }
+  return [...picked].sort((a, b) => a - b).map((k) => sorted[k]);
+}
+
 // Group notes by their onset `step`, returning the groups in ascending step order.
 function groupByStep(notes) {
   const m = new Map();
@@ -27,13 +61,118 @@ export function matchingChords(notes, chordsToScan = allChords) {
   return matches;
 }
 
-// Pick the single best match for a window: the chord that explains the most notes, breaking
-// ties toward the simpler (fewer-tone) chord. Without this every subset/superset that fits a
-// scale-rich window is emitted, flooding the result.
-function pickBestChord(matches) {
-  return matches.slice().sort((a, b) =>
-    (b.notes.length - a.notes.length) || (a.chordTones.length - b.chordTones.length)
-  )[0];
+// Pitch-class numbers (enharmonics fold together) so chord roots/tones compare across spellings.
+const PITCH_CLASS = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, 'E#': 5, Fb: 4, F: 5,
+  'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11, 'B#': 0, Cb: 11 };
+const pcOf = (name) => PITCH_CLASS[name];
+
+// Pure: vertical-stack evidence in a note stream. Notes that share an onset (`left`) sound together
+// — a real chord stack, much stronger harmonic evidence than notes that merely fall in a melodic
+// window. Returns the pitch-classes (numbers) appearing in ANY stack, plus the bass (lowest-midi)
+// pitch-class and note name of the PRIMARY stack (largest, ties → earliest). midi-less notes (the
+// pure-unit-test inputs) → bassPC null, so ranking degrades to the original coverage order.
+export function stackInfo(notes) {
+  const byOnset = new Map();
+  (notes || []).forEach((n) => { const k = n.left; if (!byOnset.has(k)) byOnset.set(k, []); byOnset.get(k).push(n); });
+  const stacks = [];
+  byOnset.forEach((ns, onset) => { if (ns.length >= 2) stacks.push({ onset: Number(onset), ns }); });
+  const stackPCs = new Set();
+  stacks.forEach((s) => s.ns.forEach((n) => { const p = pcOf(n.name); if (p != null) stackPCs.add(p); }));
+  let bassPC = null, bassName = null;
+  if (stacks.length) {
+    stacks.sort((a, b) => (b.ns.length - a.ns.length) || (a.onset - b.onset));
+    let low = null;
+    stacks[0].ns.forEach((n) => { if (n.midi != null && (low == null || n.midi < low.midi)) low = n; });
+    if (low) { bassPC = pcOf(low.name); bassName = low.name; }
+  }
+  return { hasStacks: stacks.length > 0, stackPCs, bassPC, bassName };
+}
+
+// Pure: rank candidate chords for a note stream, stack-aware. When the stream has vertical stacks,
+// prefer (1) the chord whose ROOT is the stack's bass, (2) chords fully realized WITHIN the stacks,
+// (3) the simpler (fewer-tone) chord, then (4) melodic coverage. With no stacks it falls back to the
+// original order (coverage, then simplicity), so detection is unchanged where nothing sounds together.
+export function rankMatches(matches, notes) {
+  const st = stackInfo(notes);
+  const rootIsBass = (m) => (st.bassPC != null && pcOf(m.chordTones[0]) === st.bassPC) ? 1 : 0;
+  const fullInStack = (m) => m.chordTones.every((t) => st.stackPCs.has(pcOf(t))) ? 1 : 0;
+  return matches.slice().sort((a, b) => {
+    if (st.hasStacks) {
+      const r = rootIsBass(b) - rootIsBass(a); if (r) return r;
+      const f = fullInStack(b) - fullInStack(a); if (f) return f;
+      const s = a.chordTones.length - b.chordTones.length; if (s) return s;   // prefer the simpler triad
+    }
+    return (b.notes.length - a.notes.length) || (a.chordTones.length - b.chordTones.length);
+  });
+}
+
+// Diatonic triad quality of a root in a MAJOR key: I/IV/V major, ii/iii/vi minor, vii° diminished.
+const MAJOR_DEGREE = { 0: 'maj', 2: 'min', 4: 'min', 5: 'maj', 7: 'maj', 9: 'min', 11: 'dim' };
+function diatonicQuality(rootPc, keyPc) {
+  if (rootPc == null || keyPc == null) return null;
+  return MAJOR_DEGREE[((rootPc - keyPc) % 12 + 12) % 12] || null;
+}
+
+// Pure: name the chord implied by a BARE power chord — a primary stack that is exactly {root, fifth}
+// (a perfect fifth, bass = root) with no third sounding. Its quality can't be matched (the third is
+// absent), so it's taken from a third elsewhere in the measure (minor wins over major) or, failing
+// that, from the key (diatonic triad on the root). Returns a match {name, notes, chordTones} from
+// `dict`, or null when the stack isn't a bare power chord or no quality can be resolved.
+function powerChordMatch(notes, dict, keyPc) {
+  const st = stackInfo(notes);
+  if (st.bassPC == null) return null;
+  const root = st.bassPC;
+  const others = [...st.stackPCs].filter((p) => p !== root);
+  if (others.length !== 1 || ((others[0] - root + 12) % 12) !== 7) return null;   // not exactly root + perfect fifth
+  const present = new Set((notes || []).map((n) => pcOf(n.name)));
+  const qual = present.has((root + 3) % 12) ? 'min' : present.has((root + 4) % 12) ? 'maj' : diatonicQuality(root, keyPc);
+  if (!qual) return null;
+  const name = st.bassName + (qual === 'min' ? 'min' : qual === 'dim' ? 'dim' : 'maj');
+  if (!dict[name]) return null;
+  const tones = dict[name].notes;
+  return { name, notes: (notes || []).filter((n) => tones.includes(n.name)), chordTones: tones };
+}
+
+// Pure: the best chords for a note set, stack-aware, with a key-resolved power-chord fallback when
+// the top match's root isn't the stack bass (a bare power chord names a chord the matcher can't).
+// Returns up to `limit` matches, best first.
+export function bestChords(notes, dict = allChords, { key = null, limit = 3 } = {}) {
+  const keyPc = key != null ? PITCH_CLASS[String(key).replace(/m(in)?$/i, '')] : null;
+  const ranked = rankMatches(matchingChords(notes, dict), notes);
+  const st = stackInfo(notes);
+  const top = ranked[0];
+  const topRootIsBass = top && st.bassPC != null && pcOf(top.chordTones[0]) === st.bassPC;
+  if (!topRootIsBass) {
+    const pc = powerChordMatch(notes, dict, keyPc);
+    if (pc && !ranked.some((m) => m.name === pc.name)) return [pc, ...ranked].slice(0, limit);
+  }
+  return ranked.slice(0, limit);
+}
+
+// Pure: like bestChords, but a chord may be COMPLETED by tones just across the barline. Mostly a
+// measure's harmony lives in its own notes (and is returned as-is), but sometimes the tone that
+// finishes the chord sits late in the previous measure or early in the next. So: only when the
+// measure's own top chord is NOT a full triad rooted on its stack bass do we retry with the
+// `neighborNotes` mixed in — and we accept the completed reading ONLY if it stays rooted on the same
+// bass. This is deliberately conservative: a wider, unconditional window flips solid measures (a
+// passing melody note turns Bm→Bsus4), whereas same-bass completion only ever fills a gap.
+export function bestChordsCompleting(ownNotes, neighborNotes, dict = allChords, { key = null, limit = 3 } = {}) {
+  const own = bestChords(ownNotes, dict, { key, limit });
+  const st = stackInfo(ownNotes);
+  const top = own[0];
+  const presentPc = new Set((ownNotes || []).map((n) => pcOf(n.name)));
+  const topFull = top && st.bassPC != null && pcOf(top.chordTones[0]) === st.bassPC
+    && top.chordTones.length >= 3 && top.chordTones.every((t) => presentPc.has(pcOf(t)));
+  if (topFull || st.bassPC == null || !neighborNotes || !neighborNotes.length) return own;
+  const completed = bestChords(ownNotes.concat(neighborNotes), dict, { key, limit });
+  return (completed[0] && pcOf(completed[0].chordTones[0]) === st.bassPC) ? completed : own;
+}
+
+// Pick the single best match for a window — now stack-aware (see rankMatches): a vertical chord
+// outranks a melodic coincidence. Without this every subset/superset that fits a scale-rich window
+// is emitted, flooding the result.
+function pickBestChord(matches, notes) {
+  return rankMatches(matches, notes)[0];
 }
 
 // Pure: chords found within one measure's notes. Each note is { name, left, ... }; `left`
@@ -50,7 +189,7 @@ export function guessChordsForMeasure(notes, chordsToScan = allChords) {
     scanned = scanned.concat(steps.slice(start, start + 2).flat());
     const matches = matchingChords(scanned, chordsToScan);
     if (matches.length) {
-      const best = pickBestChord(matches);
+      const best = pickBestChord(matches, scanned);
       out.push({ range: [start, start + 2], notes: best.notes, chords: [best] });
       scanned = [];
     }
@@ -65,20 +204,11 @@ export function guessChordsForMeasure(notes, chordsToScan = allChords) {
 // scale-like measure matches most of the diatonic family and floods the UI with chips.
 // Returns [{ measure, name, notes }]; `notes` are the contributing note objects (which carry
 // whatever ref the caller attached, e.g. a notehead element, for highlighting).
-export function guessChords(notesByMeasure, chordsToScan = allChords, { maxPerMeasure = 3 } = {}) {
+export function guessChords(notesByMeasure, chordsToScan = allChords, { maxPerMeasure = 3, key = null } = {}) {
   const result = [];
   Object.keys(notesByMeasure).forEach((mk) => {
     const measure = Number(mk);
-    const byName = new Map();
-    guessChordsForMeasure(notesByMeasure[mk], chordsToScan).forEach((g) => {
-      g.chords.forEach((c) => {
-        const prev = byName.get(c.name);
-        if (!prev || c.notes.length > prev.notes.length) byName.set(c.name, c);
-      });
-    });
-    [...byName.values()]
-      .sort((a, b) => (b.notes.length - a.notes.length) || (a.chordTones.length - b.chordTones.length))
-      .slice(0, maxPerMeasure)
+    bestChords(notesByMeasure[mk] || [], chordsToScan, { key, limit: maxPerMeasure })
       .forEach((c) => result.push({ measure, name: c.name, notes: c.notes }));
   });
   return result;
@@ -88,11 +218,12 @@ export function guessChords(notesByMeasure, chordsToScan = allChords, { maxPerMe
 // OVERLAPPING window that grows (from each onset, by x) until it spans `windowSize` DISTINCT
 // pitch classes (octaves/repeats ignored); each window that matches contributes its chords. Consecutive overlapping windows merge into one area — so
 // proximal candidates for the same place (n1,n2,n3→chord1 and n2,n3,n4→chord2) land together —
-// while a window that matches nothing (a melodic gap) ends the current area. Per area we keep
-// the best `maxPerArea` distinct chords by coverage. Returns
-// [{ x, top, chords: [{ name, notes, chordTones }] }] where x/top anchor the area (min left /
+// while a window that matches nothing (a melodic gap) ends the current area. Per area the chords are
+// chosen by bestChords (stack-aware + key-resolved power chord), so the label reflects the vertical
+// harmony rather than a melodic coincidence. `key` (e.g. 'C') enables the power-chord fallback.
+// Returns [{ x, top, chords: [{ name, notes, chordTones }] }] where x/top anchor the area (min left /
 // min notehead top of its notes) for placing stacked labels in the score.
-export function guessChordAreas(notes, chordsToScan = allChords, { windowSize = 4, maxPerArea = 3 } = {}) {
+export function guessChordAreas(notes, chordsToScan = allChords, { windowSize = 4, maxPerArea = 3, key = null } = {}) {
   if (!notes || notes.length < 2) return [];
   const sorted = notes.slice().sort((a, b) => (a.left - b.left));
   const areas = [];
@@ -121,14 +252,7 @@ export function guessChordAreas(notes, chordsToScan = allChords, { windowSize = 
     const areaNotes = sorted.slice(area.startIdx, area.endIdx + 1);
     const x = Math.min(...areaNotes.map((n) => n.left));
     const top = Math.min(...areaNotes.map(topOf));
-    const byName = new Map();
-    area.matches.forEach((m) => {
-      const prev = byName.get(m.name);
-      if (!prev || m.notes.length > prev.notes.length) byName.set(m.name, m);
-    });
-    const chords = [...byName.values()]
-      .sort((a, b) => (b.notes.length - a.notes.length) || (a.chordTones.length - b.chordTones.length))
-      .slice(0, maxPerArea)
+    const chords = bestChords(areaNotes, chordsToScan, { key, limit: maxPerArea })
       .map((m) => ({ name: m.name, notes: m.notes, chordTones: m.chordTones }));
     return { x, top, chords };
   }).filter((a) => a.chords.length);

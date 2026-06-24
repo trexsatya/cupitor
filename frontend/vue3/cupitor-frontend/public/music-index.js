@@ -48,7 +48,25 @@ export function buildIndexEntry(doc, source) {
     },
     detailPath: `details/${doc.meta.id}.json`,
     contentHash: fnv1a(source),
+    tags: [],         // user-assigned labels; preserved across rebuilds (see computeChanges)
     updatedAt: null   // stamped by the caller (Date is unavailable in some contexts)
+  };
+}
+
+// Pure: keep only the entries that carry at least one of the active tags. An empty/absent
+// active set means "no filter" → all entries. Used by the library list and the search input.
+export function filterByTags(entries, activeTags) {
+  const active = activeTags instanceof Set ? activeTags : new Set(activeTags || []);
+  if (!active.size) return entries || [];
+  return (entries || []).filter(e => (e.tags || []).some(t => active.has(t)));
+}
+
+// Pure: remove a piece from the library — drop its index entry AND every vocab entry that
+// belongs to it (cascade). Returns fresh arrays; inputs are untouched.
+export function removePieceFromLibrary(index, vocab, id) {
+  return {
+    index: (index || []).filter(e => e.id !== id),
+    vocab: (vocab || []).filter(v => v.pieceId !== id),
   };
 }
 
@@ -115,6 +133,7 @@ export function computeChanges({ system, pieces, currentIndex = [], force = fals
     const { entry, detail } = splitTiers(doc, piece.source);
     entry.updatedAt = updatedAt;
     const prev = currentById.get(entry.id);
+    if (prev && prev.tags && prev.tags.length) entry.tags = prev.tags;   // tags are user metadata — survive rebuilds
     if (!force && prev && prev.contentHash === entry.contentHash) continue; // unchanged
     changedPieces.push({ entry, detail });
     changed.push(entry.id);
@@ -178,6 +197,30 @@ export async function retryPush({ system, currentIndex = [], committer, store })
       getContent: () => JSON.stringify(detail)
     }))
   ];
+  const ids = unpushed.map(u => u.entry.id);
+  try {
+    await committer(files);
+    await store.markSynced(system, ids);
+    return { pushed: true, changed: ids };
+  } catch (e) {
+    return { pushed: false, pushError: e.message, changed: [] };
+  }
+}
+
+// The single manual-push entry point for the local-first model: commits everything pending in
+// ONE batch commit — the full current index, one detail file per unpushed piece THAT HAS a local
+// detail (tag-only / link-only edits carry no detail, so only index.json reflects them), and
+// vocab.json when pushVocab. Marks all pending pieces synced on success. Never rethrows.
+export async function pushPending({ system, currentIndex = [], vocab = [], pushVocab = false, committer, store }) {
+  const unpushed = await store.getUnpushed(system);
+  const files = [
+    { path: `db/music/${system}/index.json`, getContent: () => JSON.stringify(currentIndex, null, 2) },
+    ...unpushed.filter(u => u.detail != null).map(({ entry, detail }) => ({
+      path: `db/music/${system}/details/${entry.id}.json`,
+      getContent: () => JSON.stringify(detail)
+    }))
+  ];
+  if (pushVocab) files.push({ path: `db/music/${system}/vocab.json`, getContent: () => JSON.stringify(vocab || [], null, 2) });
   const ids = unpushed.map(u => u.entry.id);
   try {
     await committer(files);

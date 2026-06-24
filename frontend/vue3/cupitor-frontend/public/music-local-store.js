@@ -88,6 +88,16 @@ export function createMusicStore({ indexedDB } = {}) {
       return row ? row.detail : null;
     },
 
+    // Remove a piece entirely from the local cache (entry + detail). Deleting a missing
+    // key is a harmless no-op in IndexedDB.
+    async deletePiece(system, id) {
+      const db = await open();
+      const tx = db.transaction(['entries', 'details'], 'readwrite');
+      tx.objectStore('entries').delete(keyOf(system, id));
+      tx.objectStore('details').delete(keyOf(system, id));
+      await txDone(tx);
+    },
+
     async markSynced(system, ids) {
       const idSet = new Set(ids);
       const rows = await getAllBySystem('entries', system);  // readonly tx completes first
