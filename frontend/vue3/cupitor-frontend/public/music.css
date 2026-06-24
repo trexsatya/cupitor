@@ -65,3 +65,20 @@
   cursor: pointer;
 }
 #voiceChips { display: none; }   /* shown only while in suppress edit-mode */
+
+/* Library tag-filter chips: click to toggle; lit when the tag is in the active filter. */
+.tagChip {
+  display: inline-block;
+  margin: 0 .15em .15em 0;
+  padding: .05em .5em;
+  font-size: .8em;
+  border-radius: 10px;
+  border: 1px solid #aaa;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+}
+.tagChip.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+/* Per-row delete button in Manage Library: quiet until hovered. */
+.pieceDel { border: none; background: none; cursor: pointer; opacity: .55; padding: 0 .25em; }
+.pieceDel:hover { opacity: 1; }

@@ -91,3 +91,31 @@ describe('linkYouTubeAndPush', () => {
     expect(store.calls.synced).toEqual([]);
   });
 });
+
+import { linkYouTubeLocal } from './music-media.js';
+
+describe('linkYouTubeLocal (no push)', () => {
+  function fakeStore(detail) {
+    const calls = { put: [] };
+    return { calls, async getDetail() { return detail; }, async putPieces(system, items) { calls.put.push({ system, items }); } };
+  }
+  const detail = { meta: { id: 'p', youtube: null }, voices: [], format: 'musicxml', source: '<x/>' };
+  const currentIndex = [{ id: 'p', title: 'P', youtube: null }];
+  const url = 'https://youtu.be/dQw4w9WgXcQ';
+
+  test('patches both tiers + writes local, no committer/push', async () => {
+    const store = fakeStore(detail);
+    const res = await linkYouTubeLocal({ system: 'western', id: 'p', url, currentIndex, store });
+    expect(res.error).toBeUndefined();
+    expect(res.index.find(e => e.id === 'p').youtube).toBe(url);
+    expect(store.calls.put[0].items[0].detail.meta.youtube).toBe(url);
+    expect(store.calls.put[0].items[0].entry.youtube).toBe(url);
+  });
+
+  test('missing detail → error, no local write', async () => {
+    const store = fakeStore(null);
+    const res = await linkYouTubeLocal({ system: 'western', id: 'p', url, currentIndex, store });
+    expect(res.error).toBe('detail not found');
+    expect(store.calls.put.length).toBe(0);
+  });
+});

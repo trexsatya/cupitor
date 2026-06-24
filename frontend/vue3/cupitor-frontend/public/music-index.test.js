@@ -1,6 +1,6 @@
 // public/music-index.test.js
 import { encodeNoteText, primaryVoice } from './music-encoding.js';
-import { fnv1a, buildIndexEntry, splitTiers, getSystemFromUrl, getMusicResourceUrl, mergeIndex, rebuildAndPush, computeChanges, mergeLocalRemote, retryPush } from './music-index.js';
+import { fnv1a, buildIndexEntry, splitTiers, getSystemFromUrl, getMusicResourceUrl, mergeIndex, rebuildAndPush, computeChanges, mergeLocalRemote, retryPush, filterByTags, removePieceFromLibrary, pushPending } from './music-index.js';
 
 const txt = 'G4# D5# D5 C5#\nB4 C5# B4 A4# G4#';
 
@@ -28,6 +28,7 @@ describe('index assembly', () => {
     expect(entry.search.contour).toBe('7,-1,-1,-2,2,-2,-1,-2');
     expect(entry.detailPath).toBe('details/jethalal_bgm.json');
     expect(entry.contentHash).toBe(fnv1a(txt));
+    expect(entry.tags).toEqual([]);   // new pieces start untagged
   });
 
   test('splitTiers: detail carries voices + inline source', () => {
@@ -261,6 +262,92 @@ describe('retryPush', () => {
     expect(res.pushed).toBe(false);
     expect(res.pushError).toBe('rate limit');
     expect(res.changed).toEqual([]);
+    expect(store.calls.synced).toEqual([]);
+  });
+});
+
+describe('tags: preserved across a rebuild', () => {
+  test('computeChanges carries the prior entry tags onto a rebuilt (changed) entry', () => {
+    const doc = encodeNoteText(txt, { id: 'p', title: 'P', system: 'western', key: 'G#m' });
+    const first = computeChanges({ system: 'western', pieces: [{ id: 'p', title: 'P', format: 'note-text', source: txt, key: 'G#m' }] });
+    // user tagged the piece after the first build
+    const tagged = first.index.map(e => e.id === 'p' ? { ...e, tags: ['licks', 'study'] } : e);
+    // re-import with changed source → entry is rebuilt; tags must survive
+    const second = computeChanges({
+      system: 'western', currentIndex: tagged, force: true,
+      pieces: [{ id: 'p', title: 'P', format: 'note-text', source: txt + '\nA4', key: 'G#m' }],
+    });
+    expect(second.index.find(e => e.id === 'p').tags).toEqual(['licks', 'study']);
+  });
+});
+
+describe('filterByTags (pure)', () => {
+  const lib = [
+    { id: 'a', tags: ['jazz', 'study'] },
+    { id: 'b', tags: ['rock'] },
+    { id: 'c' },                       // untagged
+  ];
+  test('no active tags → all entries unchanged', () => {
+    expect(filterByTags(lib, new Set()).map(e => e.id)).toEqual(['a', 'b', 'c']);
+    expect(filterByTags(lib, []).map(e => e.id)).toEqual(['a', 'b', 'c']);
+  });
+  test('keeps entries having ANY active tag', () => {
+    expect(filterByTags(lib, new Set(['study'])).map(e => e.id)).toEqual(['a']);
+    expect(filterByTags(lib, new Set(['jazz', 'rock'])).map(e => e.id)).toEqual(['a', 'b']);
+  });
+  test('an untagged entry never matches a filter', () => {
+    expect(filterByTags(lib, new Set(['anything'])).map(e => e.id)).toEqual([]);
+  });
+});
+
+describe('removePieceFromLibrary (pure)', () => {
+  test('drops the piece from the index and all its vocab entries', () => {
+    const index = [{ id: 'p' }, { id: 'q' }];
+    const vocab = [{ id: 'p_1_2', pieceId: 'p' }, { id: 'q_1_1', pieceId: 'q' }, { id: 'p_3_4', pieceId: 'p' }];
+    const out = removePieceFromLibrary(index, vocab, 'p');
+    expect(out.index.map(e => e.id)).toEqual(['q']);
+    expect(out.vocab.map(v => v.id)).toEqual(['q_1_1']);
+  });
+});
+
+describe('pushPending', () => {
+  function storeWith(unpushed) {
+    const calls = { synced: [] };
+    return { calls, async getUnpushed() { return unpushed; }, async markSynced(system, ids) { calls.synced.push(ids); } };
+  }
+  test('one commit: index.json + non-null unpushed details + vocab.json (when pushVocab); skips null details', async () => {
+    let files = null;
+    const committer = async (f) => { files = f; };
+    const store = storeWith([
+      { entry: { id: 'withDetail' }, detail: { format: 'x', source: 's' } },
+      { entry: { id: 'tagOnly' }, detail: null },   // tag-only edit: no local detail → skip the detail file
+    ]);
+    const index = [{ id: 'withDetail' }, { id: 'tagOnly' }];
+    const vocab = [{ id: 'v1' }];
+    const res = await pushPending({ system: 'western', currentIndex: index, vocab, pushVocab: true, committer, store });
+    expect(res.pushed).toBe(true);
+    const paths = files.map(f => f.path);
+    expect(paths).toContain('db/music/western/index.json');
+    expect(paths).toContain('db/music/western/details/withDetail.json');
+    expect(paths).not.toContain('db/music/western/details/tagOnly.json');   // null detail skipped
+    expect(paths).toContain('db/music/western/vocab.json');
+    expect(JSON.parse(await files.find(f => f.path.endsWith('vocab.json')).getContent(null))).toEqual(vocab);
+    expect(store.calls.synced[0]).toEqual(['withDetail', 'tagOnly']);   // both marked synced
+  });
+  test('pushVocab false → no vocab.json', async () => {
+    let files = null;
+    const committer = async (f) => { files = f; };
+    const store = storeWith([]);
+    const res = await pushPending({ system: 'western', currentIndex: [{ id: 'a' }], vocab: [], pushVocab: false, committer, store });
+    expect(res.pushed).toBe(true);
+    expect(files.map(f => f.path)).toEqual(['db/music/western/index.json']);
+  });
+  test('committer throws → pushed:false + pushError, not marked synced', async () => {
+    const store = storeWith([{ entry: { id: 'a' }, detail: { x: 1 } }]);
+    const committer = async () => { throw new Error('offline'); };
+    const res = await pushPending({ system: 'western', currentIndex: [{ id: 'a' }], vocab: [], pushVocab: true, committer, store });
+    expect(res.pushed).toBe(false);
+    expect(res.pushError).toBe('offline');
     expect(store.calls.synced).toEqual([]);
   });
 });

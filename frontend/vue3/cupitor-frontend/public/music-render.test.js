@@ -8,6 +8,8 @@ import { voiceColor } from './music-render.js';
 import { noteName } from './music-render.js';
 import { notesInWindow, clampAnchorIndex } from './music-render.js';
 import { suppressionKey, notesOfVoice, effectiveMuted } from './music-render.js';
+import { pitchClassFromPitch } from './music-render.js';
+import { clusterBandsByGap } from './music-render.js';
 import { encodeMusicXml, inferChords } from './music-encoding.js';
 import { buildIndexEntry } from './music-index.js';
 import fs from 'fs';
@@ -423,5 +425,52 @@ describe('createMusicRenderer suppression set API', () => {
       { measure: 1, beats: 1 },             // no midi  → dropped
     ]);
     expect(r.getSuppressedNotes()).toEqual([{ measure: 1, midi: 60, beats: 0 }]);
+  });
+});
+
+describe('pitchClassFromPitch', () => {
+  // Mirror OSMD's Pitch: static getNoteEnumString / accidentalVexflow + the two getters.
+  const LETTER = { 0: 'C', 2: 'D', 4: 'E', 5: 'F', 7: 'G', 9: 'A', 11: 'B' };
+  const ACC = { sharp: '#', flat: 'b', natural: 'n', doublesharp: '##' };  // none → undefined
+  class FakePitch {
+    constructor(fundamental, accidental) { this.FundamentalNote = fundamental; this.Accidental = accidental; }
+    static getNoteEnumString(t) { return LETTER[t] || ''; }
+    static accidentalVexflow(t) { return ACC[t]; }
+  }
+
+  test('keeps the notated accidental (the F#-read-as-F fix)', () => {
+    expect(pitchClassFromPitch(new FakePitch(5, 'sharp'))).toBe('F#');   // was misread as F
+    expect(pitchClassFromPitch(new FakePitch(11, 'flat'))).toBe('Bb');
+    expect(pitchClassFromPitch(new FakePitch(7, 'doublesharp'))).toBe('G##');
+  });
+  test('NONE and NATURAL carry no accidental in the name', () => {
+    expect(pitchClassFromPitch(new FakePitch(5, 'none'))).toBe('F');      // accidentalVexflow → undefined
+    expect(pitchClassFromPitch(new FakePitch(5, 'natural'))).toBe('F');   // "n" → stripped
+  });
+  test('null pitch or a non-OSMD object → null (caller falls back to the VexFlow key)', () => {
+    expect(pitchClassFromPitch(null)).toBeNull();
+    expect(pitchClassFromPitch({ FundamentalNote: 5, Accidental: 'sharp' })).toBeNull();
+  });
+});
+
+describe('clusterBandsByGap (system clustering, zoom-scaled gap)', () => {
+  // Three wrapped systems at y≈100/200/300 (≈100 between mids), each a ~20-tall notehead band.
+  const mids = [
+    { top: 90, bottom: 110, mid: 100 },
+    { top: 95, bottom: 115, mid: 105 },
+    { top: 190, bottom: 210, mid: 200 },
+    { top: 290, bottom: 310, mid: 300 },
+  ];
+  test('separates systems when the gap threshold is below the inter-system gap', () => {
+    expect(clusterBandsByGap(mids, 60)).toHaveLength(3);
+  });
+  test('zoomed-down coords with a fixed gap merge into one band — the mobile bug — and a zoom-scaled gap recovers', () => {
+    const z = 0.4;
+    const scaled = mids.map((m) => ({ top: m.top * z, bottom: m.bottom * z, mid: m.mid * z }));
+    expect(clusterBandsByGap(scaled, 60)).toHaveLength(1);        // fixed 60 collapses all lines
+    expect(clusterBandsByGap(scaled, 60 * z)).toHaveLength(3);    // gap × zoom restores the 3 systems
+  });
+  test('empty input → []', () => {
+    expect(clusterBandsByGap([], 60)).toEqual([]);
   });
 });

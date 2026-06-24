@@ -155,17 +155,26 @@
         @media (max-width: 700px) {
           #musicPreview {
             position: fixed;
-            inset: 0;
+            /* Explicit longhand offsets + sizes, NOT the `inset` shorthand: older mobile Safari
+               ignores `inset`, leaving the fixed box to size to its content (taller/wider than the
+               screen) while the body is locked — so nothing scrolls and the score is clipped. */
+            top: 0; right: 0; bottom: 0; left: 0;
+            width: 100%;
+            height: 100vh;
+            height: 100dvh;          /* dynamic viewport: excludes the mobile browser's URL bar */
+            box-sizing: border-box;  /* keep the 1rem padding inside the viewport box (no overflow) */
             z-index: 1000;
             margin: 0;
             background: #fff;
             overflow: auto;
-            overscroll-behavior: contain;
             -webkit-overflow-scrolling: touch;
             padding: 1rem;
             border-top: none;
             box-shadow: 0 0 24px rgba(0, 0, 0, .4);
           }
+          /* The score can be wider than the screen; let it scroll horizontally on its own so the
+             page body never has to. */
+          #osmdPreview { overflow-x: auto; }
           /* Keep the close/segment controls reachable at the top while scrolling the score. */
           #musicPreview > div:first-child {
             position: sticky;
@@ -186,11 +195,12 @@
     <button id="addXmlBtn">Add MusicXML…</button>
     <input type="file" id="xmlFile" accept=".xml,.musicxml,application/xml,text/xml" style="display:none" multiple>
     <button id="addTextBtn">Add note-text…</button>
-    <button id="rebuildBtn">Rebuild &amp; Push selected/new</button>
+    <button id="rebuildBtn">Rebuild selected/new (local)</button>
     <button id="retryBtn" style="display:none"></button>
     <span id="status"></span>
   </div>
   <textarea id="textInput" placeholder="Paste note-text, first line = title" style="display:none;width:100%;height:6em"></textarea>
+  <div id="tagFilterBar" style="margin:.35rem 0"></div>
   <div id="pieceList"></div>
 </details>
 <div id="appLayout">
@@ -233,7 +243,7 @@
   </div>
 <div id="musicPreview" style="display:none;border-top:1px solid #ddd;padding-top:1rem">
   <div style="margin-bottom:.5rem" class="previewControls">
-    <strong id="previewTitle"></strong>
+    <div><strong id="previewTitle"></strong></div>
     <label class="measLabel">Measures:
       <button id="startPrevBtn" class="btn ico" title="extend the window to an earlier measure">◀</button>
       <input id="segFrom" type="number" min="1" style="width:2.4em" placeholder="from">
@@ -279,7 +289,6 @@
     <input id="vocabCat" type="text" placeholder="category" style="width:8em">
     <input id="vocabNote" type="text" placeholder="note" style="width:14em">
     <button id="addVocabBtn" class="btn"><span class="ic">➕</span><span class="txt">Add to vocab</span></button>
-    <span id="mediaMsg"></span>
   </div>
   <div id="viewOptions" style="margin:.25rem 0" class="previewControls">
     <button class="btn toggle" data-for="voiceColorChk" title="Color the voices"><span class="ic">🎨</span><span class="txt">Color voices</span></button>
@@ -287,11 +296,13 @@
     <button class="btn toggle" data-for="chordChk" title="Show chords"><span class="ic">🎵</span><span class="txt">Show chords</span></button>
     <button class="btn toggle" data-for="dimConnChk" title="Dim beams / stems"><span class="ic">〰️</span><span class="txt">Dim beams/stems</span></button>
     <button class="btn toggle" data-for="chordWindowChk" title="Draggable chord window"><span class="ic">🔲</span><span class="txt">Chord window</span></button>
+    <button class="btn toggle" data-for="globalMatchChk" title="When on, clicking a chord name highlights every occurrence of it across the visible sheet"><span class="ic">🌐</span><span class="txt">Global</span></button>
     <input type="checkbox" id="voiceColorChk" checked hidden>
     <input type="checkbox" id="noteNameChk" hidden>
     <input type="checkbox" id="chordChk" hidden>
     <input type="checkbox" id="dimConnChk" checked hidden>
     <input type="checkbox" id="chordWindowChk" hidden>
+    <input type="checkbox" id="globalMatchChk" hidden>
   </div>
   <div id="suppressPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#fff8f0; border:1px solid #ffd9b0; border-radius:4px">
     <button class="btn toggle" data-for="suppressModeChk" title="Click notes to silence them"><span class="ic">🔇</span><span class="txt">Suppress notes</span></button>
@@ -313,22 +324,26 @@
 </div>
 
 <script type="module">
-  import { getSystemFromUrl, getMusicResourceUrl, loadLibrary, rebuildAndPush, retryPush } from './music-index.js';
+  import { getSystemFromUrl, getMusicResourceUrl, loadLibrary, computeChanges, pushPending, filterByTags, removePieceFromLibrary } from './music-index.js';
   import { runQuery } from './music-query.js';
   import { createMusicRenderer, resolveMatchMeasures } from './music-render.js';
+  import { chordDisplayName } from './music-chords.js';
   import { buildChordQuery, buildMelodyQuery, matchSummary } from './music-search-ui.js';
   import { createMusicStore } from './music-local-store.js';
   import { buildSchedule, buildScheduleFromMusicXml, createMusicPlayer, createYouTubeController, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
-  import { guessSegmentStart, linkYouTubeAndPush } from './music-media.js';
-  import { buildSnapshot, buildVocabEntry, upsertVocab, loadVocab, saveVocabAndPush, groupVocabByCategory } from './music-vocab.js';
+  import { guessSegmentStart, linkYouTubeLocal } from './music-media.js';
+  import { buildSnapshot, buildVocabEntry, upsertVocab, uniqueVocabId, loadVocab, groupVocabByCategory } from './music-vocab.js';
 
   const system = getSystemFromUrl().name;
   document.getElementById('systemLabel').textContent = system;
 
   // jQuery is already global in music.html (loaded via <script>); musicxml.js needs it.
   let index = [];
-  let unpushedIds = new Set();
+  let unpushedIds = new Set();   // pieces with local index/detail edits (add/rebuild/tags/link) awaiting push
   let vocab = [];
+  let dirtyVocab = false;        // vocab.json changed locally, awaiting the manual push
+  let dirtyIndex = false;        // index.json changed with no unpushed piece (e.g. a delete) — needs push
+  const tagFilter = new Set();   // active tag filter; applies to the library list AND search
   const store = createMusicStore();
   const pending = [];  // newly added pieces not yet pushed: {id,title,format,source,key}
 
@@ -337,11 +352,15 @@
   }
   function setStatus(s) { document.getElementById('status').textContent = s; }
 
-  function updateRetryBtn() {
+  // The single manual-push affordance: every edit stacks up locally; this button (was "Retry push")
+  // commits them all in one batch. Count = unpushed pieces + a vocab change + an index-only change.
+  function updatePushBtn() {
     const btn = document.getElementById('retryBtn');
-    if (unpushedIds.size) { btn.style.display = ''; btn.textContent = `Retry push (${unpushedIds.size})`; }
+    const n = unpushedIds.size + (dirtyVocab ? 1 : 0) + (dirtyIndex ? 1 : 0);
+    if (n > 0) { btn.style.display = ''; btn.textContent = `Push changes (${n})`; }
     else { btn.style.display = 'none'; }
   }
+  function hasPending() { return unpushedIds.size > 0 || dirtyVocab || dirtyIndex; }
 
   function makeCommitter(label) {
     return (files) => window.GitHubUtils.commitMultipleFiles({
@@ -350,13 +369,39 @@
     });
   }
 
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+  // Parse a comma-separated tag string → trimmed, de-duped, non-empty list (order preserved).
+  function parseTags(str) {
+    const out = [];
+    String(str || '').split(',').forEach(t => { const v = t.trim(); if (v && !out.includes(v)) out.push(v); });
+    return out;
+  }
+  function allTags() {
+    const set = new Set();
+    index.forEach(e => (e.tags || []).forEach(t => set.add(t)));
+    return [...set].sort();
+  }
+  // Tag-filter chips above the library list; clicking a chip toggles it in the active filter.
+  function renderTagFilter() {
+    const bar = document.getElementById('tagFilterBar');
+    const tags = allTags();
+    if (!tags.length) { bar.innerHTML = ''; return; }
+    bar.innerHTML = '<span style="font-size:.8em;color:#555">Filter by tag:</span> '
+      + tags.map(t => `<button class="tagChip${tagFilter.has(t) ? ' active' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`).join(' ')
+      + (tagFilter.size ? ` <button class="tagChip" data-tag="" title="Clear filter">clear ✕</button>` : '');
+  }
   function render() {
     const rows = [];
-    index.forEach(e => rows.push(
-      `<label style="display:block"><input type="checkbox" class="sel" data-id="${e.id}"> ${e.title || e.id} <small>(${e.noteCount} notes, ${e.channels.join('/')})</small> <button class="previewBtn" data-id="${e.id}">Preview</button>${unpushedIds.has(e.id) ? ' <span style="color:#c00;font-weight:600">● not pushed</span>' : ''}</label>`));
+    filterByTags(index, tagFilter).forEach(e => rows.push(
+      `<label style="display:block"><input type="checkbox" class="sel" data-id="${e.id}"> ${esc(e.title || e.id)} <small>(${e.noteCount} notes, ${e.channels.join('/')})</small> `
+      + `<button class="previewBtn" data-id="${e.id}">Preview</button> `
+      + `<input class="pieceTags" data-id="${e.id}" value="${esc((e.tags || []).join(', '))}" placeholder="tags…" style="width:10em;font-size:.85em"> `
+      + `<button class="pieceDel" data-id="${e.id}" title="Delete piece + its vocab">🗑</button>`
+      + `${unpushedIds.has(e.id) ? ' <span style="color:#c00;font-weight:600">● not pushed</span>' : ''}</label>`));
     pending.forEach(p => rows.push(
-      `<label style="display:block;color:#a06000"><input type="checkbox" class="sel" data-id="${p.id}" checked disabled> ${p.title} <small>(new — will be pushed)</small></label>`));
-    document.getElementById('pieceList').innerHTML = rows.join('') || '<em>No pieces yet.</em>';
+      `<label style="display:block;color:#a06000"><input type="checkbox" class="sel" data-id="${p.id}" checked disabled> ${esc(p.title)} <small>(new — Push to publish)</small></label>`));
+    document.getElementById('pieceList').innerHTML = rows.join('') || '<em>No pieces match.</em>';
+    renderTagFilter();
   }
 
   document.getElementById('addXmlBtn').onclick = () => document.getElementById('xmlFile').click();
@@ -391,30 +436,32 @@
     }
     const pieces = [...pending, ...reselected];
     if (!pieces.length) { setStatus('Nothing selected.'); return; }
-    setStatus('Saving…');
-    const committer = makeCommitter(pieces.map(p => p.id).join(', '));
+    setStatus('Encoding…');
     try {
-      const res = await rebuildAndPush({ system, pieces, currentIndex: index, committer, store,
+      const { changed, changedPieces, index: nextIndex } = computeChanges({ system, pieces, currentIndex: index,
         force: selectedIds.size > 0, updatedAt: new Date().toISOString().slice(0, 10) });
-      index = res.index; pending.length = 0;
-      res.changed.forEach(id => { if (res.pushed) unpushedIds.delete(id); else unpushedIds.add(id); });
-      render(); updateRetryBtn();
-      let msg = res.pushed ? `Pushed: ${res.changed.join(', ')}`
-              : (res.changed.length ? `Saved locally; push failed: ${res.pushError}` : 'No changes.');
-      if (res.localError) msg += ` (local save error: ${res.localError})`;
-      setStatus(msg);
+      index = nextIndex; pending.length = 0;
+      let localError = null;
+      try { await store.putPieces(system, changedPieces); } catch (e) { localError = e.message; }
+      changed.forEach(id => unpushedIds.add(id));
+      render(); updatePushBtn();
+      setStatus(changed.length
+        ? `Encoded ${changed.length} piece(s) locally — click "Push changes" to publish.${localError ? ' (local save error: ' + localError + ')' : ''}`
+        : 'No changes.');
     } catch (e) { setStatus('Error: ' + e.message); }
   };
 
+  // Manual push: commit ALL stacked local edits (index + changed details + vocab) in one batch.
   document.getElementById('retryBtn').onclick = async () => {
-    setStatus('Retrying push…');
+    if (!hasPending()) { setStatus('Nothing to push.'); return; }
+    setStatus('Pushing…');
     try {
-      const res = await retryPush({ system, currentIndex: index, committer: makeCommitter('retry unpushed'), store });
-      res.changed.forEach(id => unpushedIds.delete(id));
-      render(); updateRetryBtn();
-      setStatus(res.pushed ? `Pushed: ${res.changed.join(', ')}`
-              : (res.pushError ? 'Retry failed: ' + res.pushError : 'Nothing to retry.'));
-    } catch (e) { setStatus('Retry failed: ' + e.message); }
+      const res = await pushPending({ system, currentIndex: index, vocab, pushVocab: dirtyVocab,
+        committer: makeCommitter('push changes'), store });
+      if (res.pushed) { unpushedIds.clear(); dirtyVocab = false; dirtyIndex = false; }
+      render(); updatePushBtn();
+      setStatus(res.pushed ? 'Pushed all changes to GitHub.' : 'Push failed: ' + (res.pushError || 'unknown'));
+    } catch (e) { setStatus('Push failed: ' + e.message); }
   };
 
   let renderer = null;
@@ -425,14 +472,17 @@
   const toPrintedMeasure = (seq) => (Number.isFinite(seq) ? seq - currentOffset : seq);
   const toSeqMeasure = (printed) => (Number.isFinite(printed) ? printed + currentOffset : printed);
   function ensureRenderer() {
-    if (!renderer) renderer = createMusicRenderer(document.getElementById('osmdPreview'),
-      { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange, onSuppressionChange: onSuppressionChange });
+    if (!renderer) {
+      renderer = createMusicRenderer(document.getElementById('osmdPreview'),
+        { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange, onSuppressionChange: onSuppressionChange });
+    }
     return renderer;
   }
 
   // ── Chord window (draggable selection over the staff) ──────────────────────────────────────
   let windowState = { chords: [], measureRange: null };   // latest payload from the renderer
   const windowPicks = new Set();                          // chord names the user picked to capture
+  let globalChordMatch = false;   // "Global" toggle: picked chords highlight every occurrence sheet-wide
   // Fired by the renderer whenever the window moves/re-anchors: refresh chips + highlight + range.
   function onChordWindowChange(payload) {
     windowState = payload || { chords: [], measureRange: null };
@@ -451,7 +501,7 @@
     windowState.chords.forEach((c) => {
       const sel = windowPicks.has(c.name);
       const chip = document.createElement('button');
-      chip.textContent = (sel ? '✓ ' : '') + c.name;
+      chip.textContent = (sel ? '✓ ' : '') + chordDisplayName(c.name);
       chip.style.cssText = `margin:0 .15em; padding:.05em .4em; font-size:.85em; border-radius:3px; cursor:pointer; border:1px solid ${sel ? '#c62828' : '#1565c0'}; background:${sel ? '#ffe3e3' : '#eef4ff'}; color:${sel ? '#c62828' : '#1565c0'}`;
       chip.onclick = () => {
         if (windowPicks.has(c.name)) windowPicks.delete(c.name); else windowPicks.add(c.name);
@@ -463,9 +513,17 @@
   }
   function applyWindowHighlight() {
     if (!renderer) return;
-    let notes = [];
-    windowState.chords.forEach((c) => { if (windowPicks.has(c.name)) notes = notes.concat(c.notes || []); });
+    // The window and the overlay share one highlight channel; when the window is off, leave it
+    // to the overlay (otherwise toggling Global would erase an overlay-selected highlight).
+    if (!document.getElementById('chordWindowChk').checked) return;
+    const picked = windowState.chords.filter((c) => windowPicks.has(c.name)).map((c) => c.name);
     renderer.clearHighlight();
+    if (!picked.length) return;
+    // Global: light up every occurrence of the picked chords across the sheet. Local: only the
+    // window's own notes that form them.
+    const notes = (globalChordMatch && renderer.occurrenceNotesForChords)
+      ? renderer.occurrenceNotesForChords(picked)
+      : windowState.chords.filter((c) => windowPicks.has(c.name)).reduce((acc, c) => acc.concat(c.notes || []), []);
     if (notes.length) renderer.highlightChord(notes);
   }
   // Auto-update chord picks while a saved vocab item is on screen. Writes the LOCAL cache only
@@ -491,23 +549,37 @@
       : '<span class="ic">➕</span><span class="txt">Add to vocab</span>';
   }
   const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  // Transient status pill for media/vocab actions: styled by tone, fades out + clears itself.
-  let mediaMsgTimer = null;
+  // Toast notifications for media/vocab actions: stacked, auto-dismissing popups that float over the
+  // page (replacing the old inline status pill). Tone sets the colour; errors linger longer; a toast
+  // also dismisses on click. setMediaMsg keeps its (text, tone) signature so all call sites are unchanged.
+  function toastHost() {
+    let c = document.getElementById('toastHost');
+    if (!c) {
+      c = document.createElement('div');
+      c.id = 'toastHost';
+      // longhand positioning (not `inset`) for older mobile Safari; container ignores pointer events
+      // so it never blocks the page, while each toast re-enables them to be click-dismissable.
+      c.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:11000;'
+        + 'display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:max-content;max-width:92vw';
+      document.body.appendChild(c);
+    }
+    return c;
+  }
   function setMediaMsg(text, tone) {
-    const el = document.getElementById('mediaMsg');
-    if (!el) return;
-    if (mediaMsgTimer) { clearTimeout(mediaMsgTimer); mediaMsgTimer = null; }
-    if (!text) { el.textContent = ''; el.style.cssText = ''; return; }
-    const palette = { info: ['#eef2ff', '#3730a3'], ok: ['#e7f6ec', '#1b7f3b'], err: ['#fdecec', '#b42318'] };
-    const [bg, fg] = palette[tone] || palette.info;
-    el.textContent = text;
-    el.style.cssText = `display:inline-block;margin-left:.5rem;padding:2px 10px;border-radius:999px;`
-      + `font-size:.85em;background:${bg};color:${fg};transition:opacity .4s;opacity:1`;
-    const ms = tone === 'err' ? 8000 : 4000;   // give errors longer to read
-    mediaMsgTimer = setTimeout(() => {
-      el.style.opacity = '0';
-      mediaMsgTimer = setTimeout(() => { el.textContent = ''; el.style.cssText = ''; }, 400);
-    }, ms);
+    if (!text) return;
+    const palette = { info: ['#eef2ff', '#3730a3', '#c7d2fe'], ok: ['#e7f6ec', '#1b7f3b', '#a7e3bd'], err: ['#fdecec', '#b42318', '#f3b4ad'] };
+    const [bg, fg, border] = palette[tone] || palette.info;
+    const t = document.createElement('div');
+    t.textContent = text;
+    t.style.cssText = `pointer-events:auto;cursor:pointer;background:${bg};color:${fg};border:1px solid ${border};`
+      + 'padding:8px 14px;border-radius:10px;font-size:.9rem;line-height:1.35;box-shadow:0 4px 16px rgba(0,0,0,.18);'
+      + 'max-width:92vw;text-align:center;opacity:0;transform:translateY(8px);transition:opacity .25s,transform .25s';
+    toastHost().appendChild(t);
+    requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform = 'translateY(0)'; });
+    let gone = false;
+    const dismiss = () => { if (gone) return; gone = true; t.style.opacity = '0'; t.style.transform = 'translateY(8px)'; setTimeout(() => t.remove(), 280); };
+    t.addEventListener('click', dismiss);
+    setTimeout(dismiss, tone === 'err' ? 8000 : 4000);   // errors linger longer
   }
   function ensurePlayer() {
     if (!player) player = createMusicPlayer({ getCursor: () => (renderer && renderer.osmd ? renderer.osmd.cursor : null) });
@@ -725,14 +797,13 @@
     const url = document.getElementById('ytUrl').value.trim();
     if (!currentPreviewId || !url) { setMediaMsg('Preview a piece and enter a URL.', 'info'); return; }
     setMediaMsg('Saving link…');
-    const res = await linkYouTubeAndPush({ system, id: currentPreviewId, url, currentIndex: index,
-      store, committer: makeCommitter(`link ${currentPreviewId}`) });
+    const res = await linkYouTubeLocal({ system, id: currentPreviewId, url, currentIndex: index, store });
     if (res.error) { setMediaMsg(res.error, 'err'); return; }
     index = res.index;
     if (currentDetail && currentDetail.meta) currentDetail.meta.youtube = url;
-    if (!res.pushed) unpushedIds.add(currentPreviewId); else unpushedIds.delete(currentPreviewId);
-    render(); updateRetryBtn();
-    setMediaMsg(res.pushed ? 'Linked + pushed.' : `Saved locally; push failed: ${res.pushError}`, res.pushed ? 'ok' : 'err');
+    unpushedIds.add(currentPreviewId);
+    render(); updatePushBtn();
+    setMediaMsg('Linked locally — click "Push changes" to publish.', 'ok');
   };
   document.getElementById('guessBtn').onclick = () => {
     if (!currentDetail) { setMediaMsg('Preview a piece first.', 'info'); return; }
@@ -747,16 +818,52 @@
     setMediaMsg(`Segment: ${start.toFixed(1)}–${end.toFixed(1)}s of ${dur.toFixed(0)}s`, 'ok');
   };
 
+  // Three-way prompt for "Add/update to vocab" while a saved item is on screen. Resolves to
+  // 'update' (overwrite the item), 'new' (save as a separate item), or 'cancel' (abort, change
+  // nothing). A small custom modal because window.confirm offers only two outcomes — and its
+  // Cancel reads as "abort", which is exactly the trap that made the old OK/Cancel flow surprising.
+  function chooseVocabAction(entryId) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:10000;padding:1em';
+      const box = document.createElement('div');
+      box.style.cssText = 'background:#fff;border-radius:10px;padding:1.2em;width:24em;max-width:100%;box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.3)';
+      const msg = document.createElement('div');
+      msg.style.cssText = 'margin-bottom:1em;line-height:1.45';
+      msg.append('This passage is already saved as ');
+      const b = document.createElement('b'); b.textContent = '“' + entryId + '”'; msg.append(b);   // textContent: no HTML injection from the id
+      msg.append('. What would you like to do?');
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:.5em;justify-content:flex-end;flex-wrap:wrap';
+      let done = false;
+      const onKey = (e) => { if (e.key === 'Escape') finish('cancel'); };
+      const finish = (val) => { if (done) return; done = true; document.removeEventListener('keydown', onKey); document.body.removeChild(overlay); resolve(val); };
+      const mk = (label, val, primary) => {
+        const btn = document.createElement('button');
+        btn.className = 'btn'; btn.textContent = label;
+        if (primary) btn.style.cssText = 'background:#1565c0;color:#fff;border-color:#1565c0';
+        btn.onclick = () => finish(val);
+        return btn;
+      };
+      row.append(mk('Cancel', 'cancel'), mk('Add as new', 'new'), mk('Update', 'update', true));
+      box.append(msg, row); overlay.append(box);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) finish('cancel'); });
+      document.addEventListener('keydown', onKey);
+      document.body.append(overlay);
+    });
+  }
   document.getElementById('addVocabBtn').onclick = async () => {
     if (!currentDetail || !currentPreviewId) { setMediaMsg('Preview a piece first.', 'info'); return; }
     const range = segmentRange();
     const from = range.fromMeasure || 1, to = range.toMeasure || from;
     const startRaw = parseFloat(document.getElementById('guessSec').value);
     const endRaw = parseFloat(document.getElementById('guessEndSec').value);
-    // While a saved vocab item is on screen, confirm whether to update it or add a new item.
+    // While a saved vocab item is on screen, ask whether to update it, add a separate item, or abort.
     let updating = false;
     if (currentVocabEntry) {
-      updating = window.confirm(`This is the saved vocab item “${currentVocabEntry.id}”.\n\nOK = update that item · Cancel = add as a new item`);
+      const action = await chooseVocabAction(currentVocabEntry.id);
+      if (action === 'cancel') return;            // abort entirely — change nothing
+      updating = action === 'update';
     }
     const entry = buildVocabEntry({
       pieceId: currentPreviewId, system, measureRange: [from, to],
@@ -771,16 +878,15 @@
       category: document.getElementById('vocabCat').value.trim() || 'uncategorized',
       createdAt: (updating && currentVocabEntry.createdAt) || new Date().toISOString().slice(0, 10),
     });
-    if (updating) entry.id = currentVocabEntry.id;   // keep the original identity even if the measures changed
+    if (updating) entry.id = currentVocabEntry.id;                          // update: keep the original identity even if the measures changed
+    else if (currentVocabEntry) entry.id = uniqueVocabId(vocab, entry.id);  // add-new from a saved item: suffix so it can't silently replace it
     vocab = upsertVocab(vocab, entry);
     currentVocabEntry = entry;                        // now showing the saved (possibly new) item
     updateAddVocabLabel();
     renderVocab();
-    setMediaMsg(updating ? 'Updating vocab…' : 'Saving vocab…');
-    const res = await saveVocabAndPush({ system, vocab, store, committer: makeCommitter(`vocab ${entry.id}`) });
-    setMediaMsg(res.pushed
-      ? `${updating ? 'Updated' : 'Added'} "${entry.id}" (${vocab.length} total)`
-      : `Saved locally; push failed: ${res.pushError}`, res.pushed ? 'ok' : 'err');
+    try { await store.putVocab(system, vocab); } catch (_) {}
+    dirtyVocab = true; updatePushBtn();
+    setMediaMsg(`${updating ? 'Updated' : 'Added'} "${entry.id}" (${vocab.length} total) — click "Push changes" to publish.`, 'ok');
   };
   async function openPreview(id) {
     const title = (index.find(e => e.id === id) || {}).title || id;
@@ -818,16 +924,57 @@
     renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
     renderer.showFull();
     if (renderer) { renderer.setSuppressedNotes([]); renderer.setSuppressMode(false); }
-    document.getElementById('suppressPanel').style.display = 'none';
+    // Note suppression is available in a plain preview too (not just saved vocab items): you can
+    // silence notes to practice chords/melodies live. It stays transient unless you capture to vocab.
+    document.getElementById('suppressPanel').style.display = '';
     document.getElementById('suppressModeChk').checked = false;
     document.getElementById('hearAllChk').checked = false;
+    document.getElementById('voiceChips').style.display = 'none';
     syncToggles();
+    onSuppressionChange();   // reset the chips/hint for the fresh piece
     document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
   }
   document.getElementById('pieceList').addEventListener('click', (ev) => {
-    const btn = ev.target.closest('.previewBtn');
-    if (btn) { ev.preventDefault(); openPreview(btn.dataset.id); }
+    const prev = ev.target.closest('.previewBtn');
+    if (prev) { ev.preventDefault(); openPreview(prev.dataset.id); return; }
+    const del = ev.target.closest('.pieceDel');
+    if (del) { ev.preventDefault(); deletePiece(del.dataset.id); }
   });
+  // Tag edits: commit on blur/Enter (change). Local-only — pushed later via "Push changes".
+  document.getElementById('pieceList').addEventListener('change', (ev) => {
+    const inp = ev.target.closest('.pieceTags');
+    if (inp) setPieceTags(inp.dataset.id, inp.value);
+  });
+  // Tag-filter chips toggle the active filter (empty data-tag = clear).
+  document.getElementById('tagFilterBar').addEventListener('click', (ev) => {
+    const chip = ev.target.closest('.tagChip');
+    if (!chip) return;
+    const t = chip.dataset.tag;
+    if (!t) tagFilter.clear(); else if (tagFilter.has(t)) tagFilter.delete(t); else tagFilter.add(t);
+    render();
+  });
+  // Save tags locally on the index entry (+ local store), mark the piece pending. No push.
+  async function setPieceTags(id, value) {
+    const entry = index.find(e => e.id === id); if (!entry) return;
+    entry.tags = parseTags(value);
+    const detail = await store.getDetail(system, id);   // may be null for a remote piece; pushPending skips null details
+    try { await store.putPieces(system, [{ entry, detail }]); } catch (_) {}
+    unpushedIds.add(id);
+    render(); updatePushBtn();
+    setStatus(`Tagged "${id}" — click "Push changes" to publish.`);
+  }
+  // Delete a piece AND its vocab entries; local-only, batched into the next manual push.
+  async function deletePiece(id) {
+    if (!window.confirm(`Delete piece "${id}" and all its vocabulary?\n\nThis removes it from the library.`)) return;
+    const out = removePieceFromLibrary(index, vocab, id);
+    index = out.index; vocab = out.vocab;
+    try { await store.deletePiece(system, id); await store.putVocab(system, vocab); } catch (_) {}
+    unpushedIds.delete(id);
+    dirtyIndex = true; dirtyVocab = true;
+    if (currentVocabEntry && currentVocabEntry.pieceId === id) { currentVocabEntry = null; updateAddVocabLabel(); }
+    render(); renderVocab(); updatePushBtn();
+    setStatus(`Deleted "${id}" locally — click "Push changes" to publish.`);
+  }
   document.getElementById('previewFullBtn').onclick = () => renderer && renderer.showFull();
   document.getElementById('voiceColorChk').onchange = (e) => { if (renderer) renderer.setVoiceColors(e.target.checked); };
   document.getElementById('noteNameChk').onchange = (e) => { if (renderer) renderer.setNoteNames(e.target.checked); };
@@ -838,6 +985,13 @@
     if (!e.target.checked) { windowPicks.clear(); if (renderer) renderer.clearHighlight(); }
     if (renderer) renderer.setChordWindow(e.target.checked);
   };
+  // "Global": re-scope chord-name clicks to the whole visible sheet. Tell the renderer (it
+  // re-applies the overlay's selection) and re-apply the window-chip highlight in the new scope.
+  document.getElementById('globalMatchChk').onchange = (e) => {
+    globalChordMatch = e.target.checked;
+    if (renderer && renderer.setGlobalChordMatch) renderer.setGlobalChordMatch(globalChordMatch);
+    applyWindowHighlight();
+  };
   // Capture the current window: map its measure range + picked chords into the existing flow.
   document.getElementById('captureWindowBtn').onclick = () => {
     if (!windowState.measureRange) { setMediaMsg('No notes in the window', 'err'); return; }
@@ -846,15 +1000,8 @@
     if (renderer) renderer.setSelectedChords([...windowPicks]);
     document.getElementById('addVocabBtn').click();   // reuse Add/update-to-vocab (times, note, confirm)
   };
-  // Editing the note auto-updates a saved vocab item (local cache only; push via Add/update).
-  document.getElementById('vocabNote').onchange = () => {
-    if (!currentVocabEntry) return;   // fresh capture: saved when you click Add/update to vocab
-    currentVocabEntry.note = document.getElementById('vocabNote').value.trim();
-    vocab = upsertVocab(vocab, currentVocabEntry);
-    renderVocab();
-    if (store && store.putVocab) { try { const p = store.putVocab(system, vocab); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
-    setMediaMsg('Note saved locally — Add/update to vocab to push', 'ok');
-  };
+  // A note edit is NOT auto-saved: it persists only when you click "Add/update to vocab" and choose
+  // Update (or Add as new). This keeps Cancel a true abort — nothing changes until you commit.
   document.getElementById('previewSegBtn').onclick = () => {
     const from = toSeqMeasure(parseInt(document.getElementById('segFrom').value, 10));
     const to = toSeqMeasure(parseInt(document.getElementById('segTo').value, 10));
@@ -1019,9 +1166,9 @@
     vocab = vocab.filter(v => v.id !== entry.id);
     if (currentVocabEntry && currentVocabEntry.id === entry.id) { currentVocabEntry = null; updateAddVocabLabel(); }
     renderVocab();
-    setMediaMsg('Deleting…');
-    const res = await saveVocabAndPush({ system, vocab, store, committer: makeCommitter(`delete vocab ${entry.id}`) });
-    setMediaMsg(res.pushed ? `Deleted “${entry.id}”` : `Deleted locally; push failed: ${res.pushError}`, res.pushed ? 'ok' : 'err');
+    try { await store.putVocab(system, vocab); } catch (_) {}
+    dirtyVocab = true; updatePushBtn();
+    setMediaMsg(`Deleted “${entry.id}” locally — click "Push changes" to publish.`, 'ok');
   }
   function renderVocab() {
     const box = document.getElementById('vocabList');
@@ -1063,9 +1210,10 @@
     let query;
     try { query = buildQuery(); } catch (e) { document.getElementById('searchMsg').textContent = e.message; return; }
     let results;
-    try { results = runQuery(query, index); }
+    try { results = runQuery(query, filterByTags(index, tagFilter)); }
     catch (e) { document.getElementById('searchMsg').textContent = 'Invalid query: ' + e.message; return; }
-    document.getElementById('searchMsg').textContent = `${results.length} match${results.length === 1 ? '' : 'es'}`;
+    const tagNote = tagFilter.size ? ` (tags: ${[...tagFilter].join(', ')})` : '';
+    document.getElementById('searchMsg').textContent = `${results.length} match${results.length === 1 ? '' : 'es'}${tagNote}`;
     renderResults(results);
   };
   addChip();            // start with one chord chip
@@ -1075,7 +1223,7 @@
     try { const lib = await loadLibrary(system, store); index = lib.index; unpushedIds = lib.unpushedIds; }
     catch (_) { index = []; unpushedIds = new Set(); }
     try { vocab = await loadVocab(system, store); } catch (_) { vocab = []; }
-    render(); updateRetryBtn(); renderVocab();
+    render(); updatePushBtn(); renderVocab();
   })();
 </script>
 </body>

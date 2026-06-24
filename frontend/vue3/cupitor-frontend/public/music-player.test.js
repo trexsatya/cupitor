@@ -118,9 +118,9 @@ describe('buildScheduleFromMusicXml', () => {
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}</measure>` +
                      `<measure number="2">${pn('G', 4, 2)}</measure>`);
     expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
-      { midi: 60, time: 0,   duration: 0.5 },
-      { midi: 64, time: 0.5, duration: 0.5 },
-      { midi: 67, time: 1,   duration: 1 },
+      { midi: 60, time: 0,   duration: 0.5, beat: 0 },
+      { midi: 64, time: 0.5, duration: 0.5, beat: 1 },
+      { midi: 67, time: 1,   duration: 1,   beat: 2 },
     ]);
   });
 
@@ -128,18 +128,20 @@ describe('buildScheduleFromMusicXml', () => {
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1, { chord: true })}` +
                      `${pn('G', 4, 1, { chord: true })}${pn('D', 4, 1)}</measure>`);
     expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
-      { midi: 60, time: 0,   duration: 0.5 },
-      { midi: 64, time: 0,   duration: 0.5 },
-      { midi: 67, time: 0,   duration: 0.5 },
-      { midi: 62, time: 0.5, duration: 0.5 },
+      { midi: 60, time: 0,   duration: 0.5, beat: 0 },
+      { midi: 64, time: 0,   duration: 0.5, beat: 0 },
+      { midi: 67, time: 0,   duration: 0.5, beat: 0 },
+      { midi: 62, time: 0.5, duration: 0.5, beat: 1 },
     ]);
   });
 
   test('rests advance time without sounding (the gap is preserved)', () => {
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${rest(1)}${pn('E', 4, 1)}</measure>`);
+    // `beat` keeps the rest's gap (E at beat 2, not beat 1) so the OSMD cursor can be advanced
+    // over the rest entry — `time` is re-zeroed/compacted but the absolute beat is not.
     expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
-      { midi: 60, time: 0, duration: 0.5 },
-      { midi: 64, time: 1, duration: 0.5 },
+      { midi: 60, time: 0, duration: 0.5, beat: 0 },
+      { midi: 64, time: 1, duration: 0.5, beat: 2 },
     ]);
   });
 
@@ -147,9 +149,9 @@ describe('buildScheduleFromMusicXml', () => {
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 5, 2, { voice: 1 })}${backup(2)}` +
                      `${pn('C', 4, 1, { voice: 2 })}${pn('E', 4, 1, { voice: 2 })}</measure>`);
     expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
-      { midi: 72, time: 0,   duration: 1 },
-      { midi: 60, time: 0,   duration: 0.5 },
-      { midi: 64, time: 0.5, duration: 0.5 },
+      { midi: 72, time: 0,   duration: 1,   beat: 0 },
+      { midi: 60, time: 0,   duration: 0.5, beat: 0 },
+      { midi: 64, time: 0.5, duration: 0.5, beat: 1 },
     ]);
   });
 
@@ -157,30 +159,32 @@ describe('buildScheduleFromMusicXml', () => {
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1, { tie: 'start' })}` +
                      `${pn('C', 4, 1, { tie: 'stop' })}</measure>`);
     expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
-      { midi: 60, time: 0, duration: 1 },
+      { midi: 60, time: 0, duration: 1, beat: 0 },
     ]);
   });
 
   test('divisions scale duration to beats', () => {
     const xml = wrap(`<measure number="1">${attrs(2)}${pn('C', 4, 2)}${pn('D', 4, 1)}</measure>`);
     expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
-      { midi: 60, time: 0,   duration: 0.5 },
-      { midi: 62, time: 0.5, duration: 0.25 },
+      { midi: 60, time: 0,   duration: 0.5,  beat: 0 },
+      { midi: 62, time: 0.5, duration: 0.25, beat: 1 },
     ]);
   });
 
   test('alter raises/lowers the pitch (F# = 66)', () => {
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('F', 4, 1, { alter: 1 })}</measure>`);
     expect(buildScheduleFromMusicXml(xml, { tempo: 120 })).toEqual([
-      { midi: 66, time: 0, duration: 0.5 },
+      { midi: 66, time: 0, duration: 0.5, beat: 0 },
     ]);
   });
 
   test('measure range filters then re-zeroes the segment to t=0', () => {
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}</measure>` +
                      `<measure number="2">${pn('G', 4, 2)}</measure>`);
+    // `time` re-zeroes to 0 for the segment, but `beat` stays ABSOLUTE (2) — so cursor sync still
+    // lands on the right note when only a measure range is played.
     expect(buildScheduleFromMusicXml(xml, { tempo: 120, fromMeasure: 2, toMeasure: 2 })).toEqual([
-      { midi: 67, time: 0, duration: 1 },
+      { midi: 67, time: 0, duration: 1, beat: 2 },
     ]);
   });
 
@@ -188,8 +192,8 @@ describe('buildScheduleFromMusicXml', () => {
     // measure 1: C@0, E@1, G@2, A@3 (quarter beats). Window from beat 1 to beat 2 → E, G only.
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}${pn('G', 4, 1)}${pn('A', 4, 1)}</measure>`);
     expect(buildScheduleFromMusicXml(xml, { tempo: 120, fromBeat: 1, toBeat: 2 })).toEqual([
-      { midi: 64, time: 0,   duration: 0.5 },
-      { midi: 67, time: 0.5, duration: 0.5 },
+      { midi: 64, time: 0,   duration: 0.5, beat: 1 },
+      { midi: 67, time: 0.5, duration: 0.5, beat: 2 },
     ]);
   });
 
@@ -198,8 +202,8 @@ describe('buildScheduleFromMusicXml', () => {
                      `<measure number="2">${pn('G', 4, 1)}${pn('B', 4, 1)}</measure>`);
     // beats: C@0,E@1,G@2,B@3 → window [1,2] = E (m1) + G (m2)
     expect(buildScheduleFromMusicXml(xml, { tempo: 120, fromBeat: 1, toBeat: 2 })).toEqual([
-      { midi: 64, time: 0,   duration: 0.5 },
-      { midi: 67, time: 0.5, duration: 0.5 },
+      { midi: 64, time: 0,   duration: 0.5, beat: 1 },
+      { midi: 67, time: 0.5, duration: 0.5, beat: 2 },
     ]);
   });
 
@@ -214,8 +218,8 @@ describe('buildScheduleFromMusicXml', () => {
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}</measure>`);
     const s = buildScheduleFromMusicXml(xml, { tempo: 120, mutedNotes: [{ measure: 1, midi: 64, beats: 1 }] });
     expect(s).toEqual([
-      { midi: 60, time: 0, duration: 0.5 },
-      { midi: 64, time: 0.5, duration: 0.5, muted: true },
+      { midi: 60, time: 0, duration: 0.5, beat: 0 },
+      { midi: 64, time: 0.5, duration: 0.5, beat: 1, muted: true },
     ]);
   });
 });

@@ -174,7 +174,11 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
     .filter((e) => e.measure >= from && e.measure <= to)
     .filter((e) => e.beats >= fromBeat - EPS && e.beats <= toBeat + EPS)
     .map((e) => {
-      const item = { midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb };
+      // `beat` = ABSOLUTE onset in quarter-beats from the piece start. Unlike `time` (re-zeroed
+      // below so the segment starts at 0s), `beat` is preserved so the OSMD cursor — whose iterator
+      // timestamps are also absolute — can be driven to each note's true position, stepping over
+      // rests instead of advancing one entry per scheduled note.
+      const item = { midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb, beat: e.beats };
       if (muted && isSuppressed(e, muted)) item.muted = true;   // silenced note: keep its slot, skip the synth
       return item;
     });
@@ -287,14 +291,43 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   let stopId = null;   // Tone.Transport.scheduleOnce id for the boundary stop
   let cursorStartStep = 0;   // distinct onsets to skip so the cursor homes to the window's start
 
-  // Home the OSMD cursor to the start of what we're playing: the rendered view's first note,
-  // then forward cursorStartStep onsets (non-zero only when playing a chord window that begins
-  // partway through the view, whose schedule is re-zeroed to t=0).
+  // The OSMD cursor's current onset in quarter-beats (absolute from piece start), or null when the
+  // iterator/timestamp isn't reachable. RealValue is in whole notes → ×4 for quarter beats.
+  function cursorBeat(cursor) {
+    try {
+      const t = cursor && cursor.iterator && cursor.iterator.currentTimeStamp;
+      return (t && typeof t.RealValue === 'number') ? t.RealValue * 4 : null;
+    } catch (_) { return null; }
+  }
+  function cursorEnded(cursor) {
+    try { return !!(cursor && cursor.iterator && cursor.iterator.EndReached); } catch (_) { return false; }
+  }
+  // Step the cursor FORWARD until it reaches `beat` (absolute quarter-beats), skipping rest and
+  // chord-internal entries. Forward-only and step-guarded, so it can't loop or move backward; a
+  // no-op when already at/past the target. This is what keeps the cursor synced through rests:
+  // the audio schedule has no rest events, so one note may sit several cursor entries ahead.
+  function advanceCursorToBeat(cursor, beat) {
+    if (cursor == null || beat == null) return;
+    let guard = 0;
+    while (guard++ < 5000) {
+      const cb = cursorBeat(cursor);
+      if (cb == null || cb >= beat - 1e-6 || cursorEnded(cursor)) break;
+      cursor.next();
+    }
+  }
+
+  // Home the OSMD cursor to the start of what we're playing: reset to the sheet start, then advance
+  // to the first scheduled note's absolute beat (skipping any leading rests). Falls back to the old
+  // cursorStartStep stepping when the schedule carries no beats (the note-text builder).
   function homeCursor(cursor) {
     if (!cursor) return;
     try {
       cursor.reset();
-      for (let i = 0; i < cursorStartStep; i++) cursor.next();
+      const firstBeat = schedule.length ? schedule[0].beat : null;
+      // Beat-driven homing when both the schedule carries beats AND the cursor exposes a readable
+      // timestamp; otherwise fall back to the old onset-count stepping (note-text / older OSMD).
+      if (firstBeat != null && cursorBeat(cursor) != null) advanceCursorToBeat(cursor, firstBeat);
+      else for (let i = 0; i < cursorStartStep; i++) cursor.next();
       cursor.show();
     } catch (_) {}
   }
@@ -329,7 +362,11 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
     part = new T.Part((time, ev) => {
       if (!ev.muted) synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
       if (cursor && ev._step) T.Draw.schedule(() => {
-        try { if (ev._first) homeCursor(cursor); else cursor.next(); } catch (_) {}
+        try {
+          if (ev._first) homeCursor(cursor);
+          else if (ev.beat != null && cursorBeat(cursor) != null) advanceCursorToBeat(cursor, ev.beat);   // skip rests between notes
+          else cursor.next();                                                                             // no beats / no timestamp: old stepping
+        } catch (_) {}
       }, time);
     }, events);
     part.loop = false;   // looping is driven by the Transport (reliable) — see play()/setLoop

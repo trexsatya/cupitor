@@ -47,6 +47,18 @@ export function upsertVocab(vocab, entry) {
   return out;
 }
 
+// Pure: a vocab id not already used in `vocab`. Returns `baseId` when free, else appends the
+// smallest `_N` (N≥2) that's unused. Lets "Add as a new item" create a genuine second entry for a
+// passage that already has one (ids are derived from pieceId+measureRange, so an unchanged range
+// would otherwise collide and silently replace).
+export function uniqueVocabId(vocab, baseId) {
+  const ids = new Set((vocab || []).map(e => e.id));
+  if (!ids.has(baseId)) return baseId;
+  let n = 2;
+  while (ids.has(`${baseId}_${n}`)) n++;
+  return `${baseId}_${n}`;
+}
+
 // Pure: group vocab entries by category (sorted), preserving each group's entry order.
 export function groupVocabByCategory(vocab) {
   const byCat = new Map();

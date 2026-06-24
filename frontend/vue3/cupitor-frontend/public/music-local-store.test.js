@@ -27,6 +27,23 @@ describe('createMusicStore', () => {
     expect(await store.getDetail('western', 'missing')).toBeNull();
   });
 
+  test('deletePiece removes the entry and its detail (other pieces untouched)', async () => {
+    const store = freshStore();
+    await store.putPieces('western', [{ entry: entryA, detail: detailA }, { entry: entryB, detail: detailB }]);
+    await store.deletePiece('western', 'a');
+    const rows = await store.getEntries('western');
+    expect(rows.map(r => r.entry.id)).toEqual(['b']);
+    expect(await store.getDetail('western', 'a')).toBeNull();
+    expect(await store.getDetail('western', 'b')).toEqual(detailB);
+  });
+
+  test('deletePiece on a missing id is a no-op (no throw)', async () => {
+    const store = freshStore();
+    await store.putPieces('western', [{ entry: entryA, detail: detailA }]);
+    await expect(store.deletePiece('western', 'nope')).resolves.toBeUndefined();
+    expect((await store.getEntries('western')).map(r => r.entry.id)).toEqual(['a']);
+  });
+
   test('systems are isolated (same id, different system)', async () => {
     const store = freshStore();
     await store.putPieces('western', [{ entry: entryA, detail: detailA }]);
