@@ -211,7 +211,7 @@ export async function retryPush({ system, currentIndex = [], committer, store })
 // ONE batch commit — the full current index, one detail file per unpushed piece THAT HAS a local
 // detail (tag-only / link-only edits carry no detail, so only index.json reflects them), and
 // vocab.json when pushVocab. Marks all pending pieces synced on success. Never rethrows.
-export async function pushPending({ system, currentIndex = [], vocab = [], pushVocab = false, committer, store }) {
+export async function pushPending({ system, currentIndex = [], vocab = [], pushVocab = false, tags = [], pushTags = false, committer, store }) {
   const unpushed = await store.getUnpushed(system);
   const files = [
     { path: `db/music/${system}/index.json`, getContent: () => JSON.stringify(currentIndex, null, 2) },
@@ -221,6 +221,7 @@ export async function pushPending({ system, currentIndex = [], vocab = [], pushV
     }))
   ];
   if (pushVocab) files.push({ path: `db/music/${system}/vocab.json`, getContent: () => JSON.stringify(vocab || [], null, 2) });
+  if (pushTags) files.push({ path: `db/music/${system}/tags.json`, getContent: () => JSON.stringify(tags || [], null, 2) });
   const ids = unpushed.map(u => u.entry.id);
   try {
     await committer(files);

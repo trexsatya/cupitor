@@ -3,6 +3,7 @@
 // a thin OSMD wrapper (injectable factory) for whole-piece / segment rendering.
 import { primaryVoice } from './music-encoding.js';
 import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
+import { indexAssignments, colorMap, toggleNote, noteStyle, noteId as tagNoteId } from './music-tags.js';
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -19,6 +20,46 @@ export function voiceColor(index) {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Atomically (re)build an overlay `<g class=className>` inside `svg`. `build(layer)` fills a fresh,
+// DETACHED group; only if it completes WITHOUT throwing do we remove the old layer(s) and append the
+// new one. So a transient geometry error mid-build (getBBox / getScreenCTM can throw or return null
+// during a viewport or font-swap transition on mobile) leaves the previous overlay intact instead of
+// blanking it. Returns true on a successful swap, false if build threw (old layer kept). No-throw.
+export function swapOverlayLayer(svg, className, build) {
+  const layer = document.createElementNS(SVG_NS, 'g');
+  layer.setAttribute('class', className);
+  try { build(layer); }
+  catch (_) { return false; }
+  svg.querySelectorAll('g.' + className).forEach((n) => n.remove());
+  svg.appendChild(layer);
+  return true;
+}
+
+// Build an SVG <foreignObject> wrapping an HTML <div> as a label at (x, y) in svg-user space. Rendering
+// the label as HTML — not an SVG <text> — sidesteps the Blink/Android bug where SVG-text glyph layout
+// collapses after a web font (OSMD's engraving font) finishes loading. The foreignObject sits in the
+// same coordinate system as the old <text>, so positioning/scroll are unchanged. `anchor` aligns the
+// box horizontally: 'start' (x = left edge) or 'middle' (x = centre). `vAlign` aligns it vertically:
+// 'baseline' (y = text baseline, matching <text>'s default) or 'middle' (y = vertical centre, for a
+// label centred in a dot). Returns the <foreignObject>; its sole child is the <div>.
+export function svgHtmlLabel(doc, { x, y, fontSize, anchor = 'start', vAlign = 'baseline', css = '', text }) {
+  const fo = doc.createElementNS(SVG_NS, 'foreignObject');
+  const w = 240, h = Math.ceil(fontSize * 1.7);
+  fo.setAttribute('x', anchor === 'middle' ? x - w / 2 : x);
+  fo.setAttribute('y', vAlign === 'middle' ? y - h / 2 : y - fontSize);   // baseline ≈ box top; middle ≈ box centre
+  fo.setAttribute('width', w);
+  fo.setAttribute('height', h);
+  fo.setAttribute('overflow', 'visible');
+  const div = doc.createElement('div');
+  div.textContent = text;
+  div.setAttribute('style',
+    `font-size:${fontSize}px;line-height:${h}px;white-space:nowrap;`
+    + (anchor === 'middle' ? 'text-align:center;' : '')
+    + css);
+  fo.appendChild(div);
+  return fo;
+}
 const PITCH_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 // Pure: MIDI number → English/scientific note name with sharps, e.g. 60 → 'C4'. '' for null/NaN.
 export function noteName(midi) {
@@ -181,6 +222,78 @@ export function clampAnchorIndex(list, anchor) {
   return best;
 }
 
+// Pure: step a window [a,b] over n reading-order notes by one note. Returns the new {a, b}.
+//   moveLeft/moveRight — slide the whole range (count fixed), clamped at the ends
+//   expand — grow by one at the end; if already at the last note, grow at the start instead
+//   shrink — shrink by one at the end, but never below a single note
+export function stepWindowAnchors(a, b, n, action) {
+  if (a > b) { const t = a; a = b; b = t; }
+  if (action === 'moveLeft') { if (a > 0) { a--; b--; } }
+  else if (action === 'moveRight') { if (b < n - 1) { a++; b++; } }
+  else if (action === 'expand') { if (b < n - 1) b++; else if (a > 0) a--; }
+  else if (action === 'shrink') { if (b > a) b--; }
+  a = clamp(a, 0, n - 1); b = clamp(b, 0, n - 1);
+  return { a, b };
+}
+
+// Pure: move a window [a,b] to the system (line) above (dir=-1) or below (dir=+1), keeping its note
+// count and its horizontal position-within-the-line. `bandOf` is the band/system index per ordered
+// note. Returns the new {a, b}; unchanged when there is no band in that direction.
+export function stepWindowToBand(bandOf, a, b, dir) {
+  const n = bandOf.length;
+  if (!n) return { a, b };
+  if (a > b) { const t = a; a = b; b = t; }
+  const width = b - a;
+  const curBand = bandOf[a];
+  const targetBand = curBand + dir;
+  const targetIdxs = [];
+  for (let i = 0; i < n; i++) if (bandOf[i] === targetBand) targetIdxs.push(i);
+  if (!targetIdxs.length) return { a, b };          // no line that way → stay put
+  let posInBand = 0;                                // how far into the current line the start sits
+  for (let i = 0; i < a; i++) if (bandOf[i] === curBand) posInBand++;
+  const na = targetIdxs[Math.min(posInBand, targetIdxs.length - 1)];
+  const nb = clamp(na + width, 0, n - 1);
+  return { a: na, b: nb };
+}
+
+// Distinct pitch-class names from a list of note objects that carry a `name` (e.g. "C#").
+export function pitchClassesOf(notes) {
+  const seen = new Set();
+  const out = [];
+  (notes || []).forEach((n) => {
+    const nm = n && n.name;
+    if (nm && !seen.has(nm)) { seen.add(nm); out.push(nm); }
+  });
+  return out;
+}
+
+// Scientific-pitch octave for a MIDI number (C4 = 60 → '4'); null when midi is absent.
+export function octaveFromMidi(midi) {
+  if (typeof midi !== 'number') return null;
+  return '' + (Math.floor(midi / 12) - 1);
+}
+
+// Distinct { name, octave } pitches from note objects carrying `name` + `midi`. Keeps the actual
+// register (so the fretboard can place each note at its real pitch), de-duped by name+octave.
+export function noteSetOf(notes) {
+  const seen = new Set();
+  const out = [];
+  (notes || []).forEach((n) => {
+    if (!n || !n.name) return;
+    const octave = octaveFromMidi(n.midi);
+    const key = n.name + '|' + (octave == null ? '' : octave);
+    if (!seen.has(key)) { seen.add(key); out.push({ name: n.name, octave }); }
+  });
+  return out;
+}
+
+// Given measureChordAreas output (ordered), take each measure's top (first) chord.
+export function topChordPerMeasure(areas) {
+  return (areas || [])
+    .filter((a) => a.chords && a.chords.length)
+    .map((a) => ({ measure: a.measure, chord: a.chords[0] }));
+}
+
 // Thin OSMD wrapper. opts.osmdFactory(container) lets tests inject a spy; in the browser
 // it defaults to the global OpenSheetMusicDisplay. Visual output is browser-verified;
 // this wrapper's method/argument contract is unit-tested via an injected fake.
@@ -208,6 +321,23 @@ export function createMusicRenderer(container, opts = {}) {
     if (!_inRender) { _inRender = true; try { postRender(); } finally { _inRender = false; } }
     return out;
   };
+  // Mobile late-settle guard: on phones the URL bar collapsing (≈1s after load), rotation, or the
+  // music font finishing can trigger a browser repaint that strands our SVG <text> overlays (note
+  // names, chord labels) even though no re-render ran — a known mobile WebKit quirk. Re-apply the
+  // overlays when those settle. Debounced and overlay-only (no osmd.render), so it can't reflow the
+  // score; postRender's sub-passes are no-ops until a sheet is loaded.
+  function reapplyOverlays() { try { postRender(); } catch (_) {} }
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    let _settleT = null;
+    const settle = () => { clearTimeout(_settleT); _settleT = setTimeout(reapplyOverlays, 160); };
+    const vv = window.visualViewport;
+    if (vv && vv.addEventListener) vv.addEventListener('resize', settle); else window.addEventListener('resize', settle);
+    window.addEventListener('orientationchange', settle);
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.ready && document.fonts.ready.then) {
+      document.fonts.ready.then(reapplyOverlays).catch(() => {});
+    }
+  }
+
   // Notehead clicks drive suppression (edit-mode) / temporary restore (practice-mode).
   if (container && container.addEventListener) container.addEventListener('click', onNoteheadClick);
   const onAfterRender = opts.onAfterRender;   // called after each render (lets the UI rebuild chord chips)
@@ -241,6 +371,22 @@ export function createMusicRenderer(container, opts = {}) {
   // Internal: the current effective muted identities (shared by getMutedNotes + applySuppressionDim).
   function mutedList() { return effectiveMuted([...suppressedNotes.values()], tempRestored, hearAll); }
 
+  // Pattern tags. The tag list is GLOBAL (tagRegistry: [{name,color}], supplied by the host), while
+  // the note assignments are per-piece (assignments: [{name, notes}], persisted as detail.patterns).
+  // tagMode → notehead clicks add/remove the note in the active tag (no muting). filter dims notes
+  // not in the selected tags. Color comes from the registry; first-tag wins for a multi-tag note.
+  let assignments = [];              // per-piece [{ name, notes:[{measure,midi,beats}] }]
+  let tagRegistry = [];              // global [{ name, color }]
+  let tagMode = false;
+  let activeTag = null;              // the tag that notehead clicks paint into
+  let tagFilter = false;             // when on, dim notes not in the selected tags
+  let filterTags = new Set();        // tag names the filter shows
+  const onPatternsChange = opts.onPatternsChange;   // fired after the user edits per-piece assignments
+  // A detached copy of the per-piece assignments, safe to persist / hand to the UI.
+  function getAssignments() {
+    return assignments.map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) }));
+  }
+
   // OSMD Voice object → its global color index (the same index voiceColor() uses), rebuilt every
   // render by applyVoiceColors so rendered notes can be tagged with a stable voice id.
   const voiceIndexByRef = new Map();
@@ -269,49 +415,43 @@ export function createMusicRenderer(container, opts = {}) {
   // OSMD's Pitch.getHalfTone() + 12 is the MIDI number (C4 → 48 + 12 = 60).
   function applyNoteNames() {
     if (!container || !container.querySelectorAll) return;
-    container.querySelectorAll('.note-name-layer').forEach((n) => n.remove());
-    if (!noteNames) return;
-    const measureList = osmd.graphic && osmd.graphic.measureList;
     const svg = container.querySelector('svg');
+    if (!noteNames) { container.querySelectorAll('.note-name-layer').forEach((n) => n.remove()); return; }
+    const measureList = osmd.graphic && osmd.graphic.measureList;
     if (!measureList || !measureList.forEach || !svg) return;
-    const layer = document.createElementNS(SVG_NS, 'g');
-    layer.setAttribute('class', 'note-name-layer');
-    measureList.forEach((measures) => {
-      (measures || []).forEach((measure) => {
-        ((measure && measure.staffEntries) || []).forEach((se) => {
-          (se.graphicalVoiceEntries || []).forEach((gve) => {
-            (gve.notes || []).forEach((gnote) => {
-              const pitch = gnote.sourceNote && gnote.sourceNote.Pitch;
-              if (!pitch || typeof pitch.getHalfTone !== 'function') return; // rest / no pitch
-              const label = noteName(pitch.getHalfTone() + 12);
-              if (!label) return;
-              const vf = gnote.vfnote;
-              const el = vf && vf[0] && vf[0].attrs && vf[0].attrs.el;
-              if (!el || !el.querySelectorAll) return;
-              const heads = el.querySelectorAll('.vf-notehead');
-              const head = heads[gnote.vfnoteIndex || 0] || heads[0];
-              if (!head || !head.getBBox) return;
-              const b = head.getBBox();
-              const t = document.createElementNS(SVG_NS, 'text');
-              t.setAttribute('x', b.x + b.width / 2);
-              t.setAttribute('y', b.y - 2);
-              t.setAttribute('text-anchor', 'middle');
-              t.setAttribute('font-size', '7');
-              t.setAttribute('fill', '#444');
-              // White halo painted UNDER the fill (paint-order: stroke) so a staff line can't strike
-              // through the glyph — the label stays readable wherever it lands on the staff.
-              t.setAttribute('stroke', '#fff');
-              t.setAttribute('stroke-width', '2.5');
-              t.setAttribute('stroke-linejoin', 'round');
-              t.setAttribute('paint-order', 'stroke');
-              t.textContent = label;
-              layer.appendChild(t);
+    // Build-then-swap: a getBBox that throws/returns garbage mid-transition won't blank the labels.
+    swapOverlayLayer(svg, 'note-name-layer', (layer) => {
+      measureList.forEach((measures) => {
+        (measures || []).forEach((measure) => {
+          ((measure && measure.staffEntries) || []).forEach((se) => {
+            (se.graphicalVoiceEntries || []).forEach((gve) => {
+              (gve.notes || []).forEach((gnote) => {
+                const pitch = gnote.sourceNote && gnote.sourceNote.Pitch;
+                if (!pitch || typeof pitch.getHalfTone !== 'function') return; // rest / no pitch
+                const label = noteName(pitch.getHalfTone() + 12);
+                if (!label) return;
+                const vf = gnote.vfnote;
+                const el = vf && vf[0] && vf[0].attrs && vf[0].attrs.el;
+                if (!el || !el.querySelectorAll) return;
+                const heads = el.querySelectorAll('.vf-notehead');
+                const head = heads[gnote.vfnoteIndex || 0] || heads[0];
+                if (!head || !head.getBBox) return;
+                let b; try { b = head.getBBox(); } catch (_) { return; }   // skip a note whose box isn't measurable yet
+                // HTML label (foreignObject), not SVG <text>: on Android/Blink SVG-text glyphs collapse
+                // after OSMD's music font loads. Centred above the notehead. The white halo (so a staff
+                // line can't strike through the glyph) is a CSS text-shadow instead of paint-order stroke.
+                const fo = svgHtmlLabel(document, {
+                  x: b.x + b.width / 2, y: b.y - 2, fontSize: 7, anchor: 'middle',
+                  css: 'color:#444;text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 2px #fff;',
+                  text: label,
+                });
+                layer.appendChild(fo);
+              });
             });
           });
         });
       });
     });
-    svg.appendChild(layer);
   }
 
   // A VexFlow key ("c#/4") → pitch-class name ("C#"), preserving the notated accidental so
@@ -431,40 +571,36 @@ export function createMusicRenderer(container, opts = {}) {
   const MIN_LABEL_GAP = 30;        // min horizontal spacing between label columns (de-crowd)
   const MAX_LABELS_PER_AREA = 2;   // cap the vertical stack so labels don't pile up
 
-  // svg-user-space anchor for an area's labels: its leftmost contributing notehead mapped
-  // through the element's CTM, so labels line up even when OSMD applies a zoom/translate
-  // transform (raw getBBox coords are in the notehead's local space, not the svg root's).
+  // overlay-svg-space anchor for an area's labels: its leftmost contributing notehead, projected
+  // through elBox (getBoundingClientRect → overlaySvg.getScreenCTM().inverse()). This is the SAME
+  // space the y-bands and the chord window use, so labels land on the notes even on a CSS-scaled
+  // (mobile) layout — where the old getBBox×getCTM path missed the svg's CSS scale and bunched the
+  // labels into the left half of the line.
   function chordAnchorXY(area) {
     let anchor = null;
     area.chords.forEach((ch) => (ch.notes || []).forEach((n) => {
       if (n && n.el && (anchor === null || (n.left || 0) < (anchor.left || 0))) anchor = n;
     }));
-    if (anchor && anchor.el && anchor.el.getBBox) {
-      const b = anchor.el.getBBox();
-      const m = anchor.el.getCTM && anchor.el.getCTM();
-      if (m) {
-        const map = (px, py) => ({ x: m.a * px + m.c * py + m.e, y: m.b * px + m.d * py + m.f });
-        return { x: map(b.x, b.y).x, top: map(b.x, b.y).y, bottom: map(b.x, b.y + b.height).y };
-      }
-      return { x: b.x, top: b.y, bottom: b.y + b.height };
+    if (anchor && anchor.el) {
+      const b = elBox(anchor.el);
+      if (b) return { x: b.left, top: b.top, bottom: b.bottom };
     }
     return { x: area.x, top: area.top, bottom: area.top };
   }
 
-  // Top/bottom of the rendered staff lines in svg-user space (falls back to the notehead
+  // Top/bottom of the rendered staff lines in overlay-svg space (falls back to the notehead
   // extent), so chord labels can sit on even rows above/below the staff rather than per-note.
+  // Uses elBox (getScreenCTM projection) to match the bands/anchors — the old getBBox×getCTM
+  // missed the svg's CSS scale on mobile.
   function systemBounds() {
     const staves = container.querySelectorAll('.vf-stave');
     const els = staves.length ? staves : container.querySelectorAll('.vf-notehead');
     let top = Infinity, bottom = -Infinity;
     els.forEach((el) => {
-      if (!el.getBBox) return;
-      const b = el.getBBox();
-      const m = el.getCTM && el.getCTM();
-      const ty = m ? (m.b * b.x + m.d * b.y + m.f) : b.y;
-      const by = m ? (m.b * b.x + m.d * (b.y + b.height) + m.f) : (b.y + b.height);
-      if (ty < top) top = ty;
-      if (by > bottom) bottom = by;
+      const b = elBox(el);
+      if (!b) return;
+      if (b.top < top) top = b.top;
+      if (b.bottom > bottom) bottom = b.bottom;
     });
     return top === Infinity ? null : { top, bottom };
   }
@@ -658,10 +794,16 @@ export function createMusicRenderer(container, opts = {}) {
 
   function applyChordOverlay() {
     if (!container || !container.querySelectorAll) return;
-    container.querySelectorAll('.' + CHORD_LAYER_CLASS).forEach((n) => n.remove());
-    if (!showChords) return;
-    const svg = container.querySelector('svg');
+    // Draw into the SAME viewport the anchors/bands resolve to (overlaySvg = the noteheads' nearest
+    // <svg>, which is the inner zoom-scaled one when OSMD nests). Appending to the outer svg while
+    // positioning in overlaySvg space is what pushed the labels into the left half on mobile.
+    const svg = overlaySvg();
+    if (!showChords) { container.querySelectorAll('.' + CHORD_LAYER_CLASS).forEach((n) => n.remove()); return; }
     if (!svg) return;
+    let selectedNotes = [];
+    // Build-then-swap: notesBySystem/elBox use getScreenCTM, which can throw/return null mid-transition
+    // on mobile. On failure the previous chord labels (and highlight) stay put instead of blanking.
+    const ok = swapOverlayLayer(svg, CHORD_LAYER_CLASS, (layer) => {
     // Group rendered notes by system before detecting chords (see notesBySystem). Within one
     // system x is onset order, so we detect per system and place labels against its own band.
     const fallback = systemBounds();            // global extent when no notehead bands are found
@@ -670,10 +812,6 @@ export function createMusicRenderer(container, opts = {}) {
     // height and gets clipped (invisible) — which is exactly why a below-the-last-line label vanished.
     const vb = svg.viewBox && svg.viewBox.baseVal;
     const drawBottom = (vb && vb.height) ? (vb.y + vb.height) : Infinity;
-
-    const layer = document.createElementNS(SVG_NS, 'g');
-    layer.setAttribute('class', CHORD_LAYER_CLASS);
-    let selectedNotes = [];
 
     groups.forEach((notes, bandIdx) => {
       if (notes.length < 2) return;
@@ -700,21 +838,21 @@ export function createMusicRenderer(container, opts = {}) {
         else { side = 0; lastAbove = x; }   // visible-but-tight over hidden
         area.chords.forEach((ch, k) => {
           const isSel = selectedChords.has(ch.name);
-          const t = document.createElementNS(SVG_NS, 'text');
-          t.setAttribute('x', x);
-          t.setAttribute('y', side === 0 ? (aboveY - k * 11) : (belowY + k * 11));
-          t.setAttribute('font-size', isSel ? '11' : '9');
-          t.setAttribute('font-weight', '700');
-          t.setAttribute('fill', isSel ? '#c62828' : '#1565c0');
-          t.setAttribute('text-decoration', isSel ? 'underline' : 'none');
-          t.setAttribute('style', 'cursor:pointer');
-          t.textContent = (isSel ? '✓ ' : '') + chordDisplayName(ch.name);
-          t.addEventListener('click', () => {
+          // HTML label (foreignObject) instead of SVG <text> — see svgHtmlLabel: SVG text glyphs
+          // collapse on Android/Blink after OSMD's font loads; HTML text doesn't.
+          const fo = svgHtmlLabel(document, {
+            x, y: side === 0 ? (aboveY - k * 11) : (belowY + k * 11),
+            fontSize: isSel ? 11 : 9, anchor: 'start',
+            css: `font-weight:700;cursor:pointer;color:${isSel ? '#c62828' : '#1565c0'};`
+              + (isSel ? 'text-decoration:underline;' : ''),
+            text: (isSel ? '✓ ' : '') + chordDisplayName(ch.name),
+          });
+          fo.firstChild.addEventListener('click', () => {
             if (selectedChords.has(ch.name)) selectedChords.delete(ch.name); else selectedChords.add(ch.name);
             applyChordOverlay();
             if (onChordSelect) { try { onChordSelect([...selectedChords]); } catch (_) {} }
           });
-          layer.appendChild(t);
+          layer.appendChild(fo);
         });
       });
     });
@@ -722,9 +860,9 @@ export function createMusicRenderer(container, opts = {}) {
     // Global mode: ignore the per-area notes and light up every complete occurrence of each
     // selected chord across the whole visible sheet.
     if (globalChordMatch && selectedChords.size) selectedNotes = occurrenceNotesForChords([...selectedChords]);
-
-    svg.appendChild(layer);
-    if (selectedNotes.length) highlightChord(selectedNotes); else clearHighlight();
+    });
+    // Only touch the highlight when the rebuild actually succeeded (otherwise keep the prior state).
+    if (ok) { if (selectedNotes.length) highlightChord(selectedNotes); else clearHighlight(); }
   }
 
   // Absolute 1-based measure number for the a-th measure in the rendered measureList. Trust
@@ -826,6 +964,28 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
+  // Color noteheads by their pattern tag (first tag wins) and, when the filter is on, dim notes that
+  // aren't in a selected tag. Runs in postRender AFTER applySuppressionDim so tag colors win over the
+  // suppression grey. No-op when there are no patterns.
+  function applyTagOverlay() {
+    if (!container || !container.querySelectorAll || !assignments.length) return;
+    const indexed = indexAssignments(assignments);
+    const cmap = colorMap(tagRegistry);
+    const colorOf = (name) => cmap[name];
+    orderedRenderedNotes().forEach((n) => {
+      if (n.midi == null || !n.el) return;
+      const key = tagNoteId({ measure: n.measure, midi: n.midi, beats: n.onsetBeats });
+      const { color, dim } = noteStyle(indexed, key, tagFilter, filterTags, colorOf);
+      const paint = color || (dim ? DIM_CONNECTOR_COLOR : null);
+      if (!paint) return;   // untagged note, filter off → leave it as OSMD drew it
+      [n.el, ...n.el.querySelectorAll('path, ellipse, circle, rect')].forEach((h) => {
+        h.setAttribute('fill', paint); h.style.fill = paint;
+        const st = h.getAttribute('stroke');
+        if (st && st !== 'none') { h.setAttribute('stroke', paint); h.style.stroke = paint; }
+      });
+    });
+  }
+
   // ── Draggable chord window ────────────────────────────────────────────────────────────────
   const WINDOW_LAYER_CLASS = 'chord-window-layer';
   const WINDOW_FILL = '#bcdcff';        // translucent selection band (distinct from #ffe9a8 capture)
@@ -917,6 +1077,13 @@ export function createMusicRenderer(container, opts = {}) {
     if (!n || n.midi == null) return;
     const id = { measure: n.measure, midi: n.midi, beats: n.onsetBeats };
     const key = suppressionKey(id);
+    if (tagMode) {   // paint the note into the active tag (no muting); takes precedence over suppress
+      if (!activeTag) return;
+      assignments = toggleNote(assignments, activeTag, id);
+      redraw();
+      if (onPatternsChange) { try { onPatternsChange(getAssignments()); } catch (_) {} }
+      return;
+    }
     if (suppressMode) {
       if (suppressedNotes.has(key)) { suppressedNotes.delete(key); tempRestored.delete(key); }
       else suppressedNotes.set(key, id);
@@ -1082,6 +1249,27 @@ export function createMusicRenderer(container, opts = {}) {
     svg.addEventListener('pointercancel', up);
   }
 
+  // Step the window without dragging (for touch / small screens). action:
+  //   'moveLeft'|'moveRight' — slide the whole range one note through reading order (count fixed)
+  //   'moveUp'|'moveDown'    — jump to the line (system) above/below at the same horizontal spot
+  //   'expand'|'shrink'       — grow/shrink the range by one note at the end (expand falls back to
+  //                             the start edge when already at the last note; shrink keeps ≥1 note)
+  function adjustWindow(action) {
+    if (!chordWindow.active) return;
+    const ordered = orderedRenderedNotes();
+    if (!ordered.length) return;
+    currentWindowSelection();   // seed start/end the first time
+    const anchorList = ordered.map((n) => ({ measure: n.measure, idx: n.idx }));
+    const a0 = clampAnchorIndex(anchorList, chordWindow.start);
+    const b0 = clampAnchorIndex(anchorList, chordWindow.end);
+    const { a, b } = (action === 'moveUp' || action === 'moveDown')
+      ? stepWindowToBand(ordered.map((nn) => nn.band || 0), a0, b0, action === 'moveUp' ? -1 : 1)
+      : stepWindowAnchors(a0, b0, ordered.length, action);
+    chordWindow.start = anchorList[a];
+    chordWindow.end = anchorList[b];
+    applyChordWindow();
+  }
+
   // Everything that must run after a (re-)layout: dim connectors, then (re)build the note-name
   // overlay, the captured-measure shading, the chord-candidate overlay, the chord window, and
   // notify the UI. Wired to run after EVERY osmd.render() via the render wrap installed in
@@ -1095,6 +1283,7 @@ export function createMusicRenderer(container, opts = {}) {
     applyChordOverlay();
     applyChordWindow();
     applySuppressionDim();
+    applyTagOverlay();
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
@@ -1125,8 +1314,45 @@ export function createMusicRenderer(container, opts = {}) {
     } catch (_) { measureOffset = 0; }
   }
 
+  // Read-only: the auto-guessed chords as an ordered step sequence. Concatenates per-system
+  // measure chords in reading order; each step's noteNames are the chord's pitch classes with
+  // suppressed notes excluded unless includeSuppressed. Reuses measureChordAreas + mutedList.
+  function getGuessedChordSequence({ includeSuppressed = false } = {}) {
+    const { groups } = notesBySystem();
+    const mutedKeys = includeSuppressed ? new Set()
+      : new Set(mutedList().map((n) => suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+    const steps = [];
+    groups.forEach((notes) => {
+      topChordPerMeasure(measureChordAreas(notes)).forEach(({ measure, chord }) => {
+        const live = (chord.notes || []).filter((n) =>
+          !mutedKeys.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+        steps.push({ measure, name: chord.name, notes: noteSetOf(live.length ? live : chord.notes) });
+      });
+    });
+    steps.sort((a, b) => a.measure - b.measure);
+    return steps;
+  }
+
+  // Read-only: the current chord-window selection as one note-set, or null when no window is active.
+  function getWindowNoteSet({ includeSuppressed = false } = {}) {
+    if (!chordWindow.active) return null;
+    const { selected } = currentWindowSelection();
+    if (!selected || !selected.length) return null;
+    const mutedKeys = includeSuppressed ? new Set()
+      : new Set(mutedList().map((n) => suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+    const live = selected.filter((n) =>
+      !mutedKeys.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+    const range = rangeFromSelected(selected);
+    return {
+      measureRange: range ? [range.fromMeasure, range.toMeasure] : null,
+      notes: noteSetOf(live.length ? live : selected),
+    };
+  }
+
   return {
     osmd,
+    getGuessedChordSequence,
+    getWindowNoteSet,
     async loadDetail(detail) {
       if (!detail || detail.format !== 'musicxml' || !detail.source) {
         return { ok: false, reason: 'not-musicxml' };
@@ -1137,6 +1363,8 @@ export function createMusicRenderer(container, opts = {}) {
       computeMeasureOffset();
       shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
       selectedChords.clear();   // a fresh piece carries no manual chord picks
+      assignments = (detail.patterns || []).map((p) => ({ name: p.name, notes: (p.notes || []).map((n) => ({ ...n })) }));
+      tagMode = false; activeTag = null; tagFilter = false; filterTags = new Set();   // tagRegistry is global — not reset here
       redraw();
       return { ok: true, totalMeasures, measureOffset };
     },
@@ -1161,6 +1389,50 @@ export function createMusicRenderer(container, opts = {}) {
     getMeasureOffset() { return measureOffset; },
     // Toggle the draggable chord window. Off clears its anchors so it re-seeds next time.
     setChordWindow(on) { chordWindow.active = !!on; if (!chordWindow.active) { chordWindow.start = null; chordWindow.end = null; } redraw(); },
+    // Move/resize the window by one note without dragging (touch-friendly). See adjustWindow.
+    adjustWindow(action) { adjustWindow(action); },
+
+    // ── Pattern tags ──────────────────────────────────────────────────────────────────────────
+    // The global tag list [{name,color}] — colors and the selectable names come from here. The host
+    // owns it (persisted device-wide) and pushes it in; it is NOT reset on piece load.
+    setTagRegistry(list) { tagRegistry = (list || []).map((t) => ({ name: t.name, color: t.color })); redraw(); },
+    getTagNames() { return tagRegistry.map((t) => t.name); },
+    getTagColors() { return colorMap(tagRegistry); },
+    // Per-piece note assignments [{name, notes}], persisted as detail.patterns. setPatterns does not
+    // fire onPatternsChange (used on load); editing notes via tag-mode clicks does.
+    setPatterns(list) { assignments = (list || []).map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) })); redraw(); },
+    getPatterns() { return getAssignments(); },
+    // Drop a tag's note assignments in THIS piece (called when the global tag is deleted). Fires
+    // onPatternsChange so the piece persists.
+    clearTagAssignments(name) {
+      assignments = assignments.filter((a) => a.name !== name);
+      if (activeTag === name) activeTag = null;
+      filterTags.delete(name);
+      redraw();
+      if (onPatternsChange) { try { onPatternsChange(getAssignments()); } catch (_) {} }
+    },
+    // Enter/leave tag-paint mode; clicking noteheads then edits the active tag.
+    setTagMode(on) { tagMode = !!on; redraw(); },
+    setActiveTag(name) { activeTag = name || null; },
+    // Filtering: master on/off plus the set of tag names to keep highlighted (others dim).
+    setTagFilter(on) { tagFilter = !!on; redraw(); },
+    setFilterTags(names) { filterTags = new Set(names || []); redraw(); },
+    // Note identities [{measure,midi,beats}] of the currently-checked filter tags, merged across
+    // tags, de-duplicated, and sorted by onset — the play-set for tag skip-playback. [] if none.
+    getFilterNotes() {
+      const seen = new Set();
+      const out = [];
+      assignments.forEach((a) => {
+        if (!filterTags.has(a.name)) return;
+        (a.notes || []).forEach((n) => {
+          const k = suppressionKey(n);
+          if (seen.has(k)) return;
+          seen.add(k);
+          out.push({ measure: n.measure, midi: n.midi, beats: n.beats });
+        });
+      });
+      return out.sort((x, y) => x.beats - y.beats);
+    },
     // Toggle "Global" chord matching: when on, a clicked chord name highlights every complete
     // occurrence of it across the visible sheet. Re-applies the overlay highlight in the new scope.
     setGlobalChordMatch(on) { globalChordMatch = !!on; applyChordOverlay(); },

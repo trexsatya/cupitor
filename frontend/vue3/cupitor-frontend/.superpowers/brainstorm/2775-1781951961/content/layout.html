@@ -1,0 +1,112 @@
+<h2>M2 app layout — how do Search, Results, Score, Player & Capture coexist?</h2>
+<p class="subtitle">The same five regions, three arrangements. Each shows desktop (left) + mobile (right). Click the one that feels right; we'll refine it.</p>
+
+<style>
+  .wf { border:1px solid #bbb; border-radius:6px; background:#fafafa; font-size:11px; color:#333; }
+  .wf .r { border:1px dashed #99a; background:#fff; margin:4px; padding:6px 8px; border-radius:4px; }
+  .wf .accent { background:#eef4ff; border-color:#5b8def; }
+  .wf .score { background:#f3fff3; border-color:#4caf50; }
+  .wf .play { background:#fff7e6; border-color:#e0a000; }
+  .frames { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+  .desktop { width:340px; }
+  .phone { width:120px; }
+  .phone .r { padding:4px 6px; font-size:10px; }
+  .cap { font-size:10px; color:#888; text-transform:uppercase; letter-spacing:.04em; margin:2px 0 0 4px; }
+  .row2 { display:flex; gap:6px; }
+  .row2 > div { flex:1; }
+</style>
+
+<div class="options">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Two-pane workbench (desktop) → tabbed (mobile)</h3>
+      <p>Left pane = Search panel + Results list. Right pane = Score + Player + Capture. On mobile, a top tab bar switches between <b>Search</b> / <b>Score</b> / <b>Play</b>, one at a time.</p>
+      <div class="frames">
+        <div>
+          <div class="cap">desktop</div>
+          <div class="wf desktop">
+            <div class="r accent">🔎 Search panel (chord / melody tabs, fuzzy controls)</div>
+            <div class="row2">
+              <div class="r" style="min-height:90px">Results list<br>• piece 1<br>• piece 2</div>
+              <div>
+                <div class="r score" style="min-height:50px">🎼 Score (whole piece / segment)</div>
+                <div class="r play">▶ YouTube + MIDI · capture</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="cap">mobile</div>
+          <div class="wf phone">
+            <div class="r" style="background:#eee">[ Search | Score | Play ]</div>
+            <div class="r accent" style="min-height:120px">active tab fills screen</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Search-on-top, results as a vertical feed of rendered cards</h3>
+      <p>Search controls across the top. Results below as a scrollable feed — each card renders its <b>matched segment</b> inline (mini-score) with a ▶ play button. Tap a card to expand the full piece + full player + capture. Naturally single-column → mobile is the same, just narrower.</p>
+      <div class="frames">
+        <div>
+          <div class="cap">desktop</div>
+          <div class="wf desktop">
+            <div class="r accent">🔎 Search bar + chord/melody panel + controls</div>
+            <div class="r score">▣ result — mini-score of matched segment · ▶</div>
+            <div class="r score">▣ result — mini-score of matched segment · ▶</div>
+            <div class="r" style="border-color:#888">▣ expanded → full score + player + capture</div>
+          </div>
+        </div>
+        <div>
+          <div class="cap">mobile</div>
+          <div class="wf phone">
+            <div class="r accent">🔎 search</div>
+            <div class="r score">▣ ▶</div>
+            <div class="r score">▣ ▶</div>
+            <div class="r score">▣ ▶</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Master → detail (search list, then a focused piece view)</h3>
+      <p>Screen 1 = search + a compact results list (text rows: title, match score). Tap a result → Screen 2, a focused detail view: full score, player, segment-capture, media-linking. Desktop shows both side-by-side; mobile shows one screen at a time with a back button.</p>
+      <div class="frames">
+        <div>
+          <div class="cap">desktop</div>
+          <div class="wf desktop">
+            <div class="row2">
+              <div>
+                <div class="r accent">🔎 search</div>
+                <div class="r" style="min-height:70px">results<br>• row<br>• row</div>
+              </div>
+              <div>
+                <div class="r score" style="min-height:60px">🎼 selected piece — full score</div>
+                <div class="r play">▶ player · capture · link media</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="cap">mobile</div>
+          <div class="wf phone">
+            <div class="r accent">🔎 + results list</div>
+            <div class="cap">tap → </div>
+            <div class="r score" style="min-height:70px">‹ back · score + player</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>

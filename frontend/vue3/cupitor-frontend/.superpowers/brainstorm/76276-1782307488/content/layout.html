@@ -1,0 +1,75 @@
+<style>
+  .fb-wrap{background:#fff;border:1px solid #d8dee8;border-radius:10px;padding:14px 16px;margin:10px 0}
+  .fb-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;margin-bottom:10px}
+  .fb-chip{border:1px solid #1565c0;color:#1565c0;border-radius:999px;padding:2px 10px;cursor:pointer;background:#eef4ff}
+  .fb-chip.alt{border-color:#bbb;color:#555;background:#fff}
+  .fb-btn{border:1px solid #1565c0;background:#1565c0;color:#fff;border-radius:6px;padding:3px 12px;cursor:pointer}
+  .paths{font-family:monospace;font-size:12.5px;line-height:1.55;margin:6px 0 12px}
+  .paths select{font:12.5px monospace;padding:5px 8px;border:1px solid #1565c0;border-radius:6px;background:#eef4ff;color:#0d3c7a;min-width:340px;cursor:pointer}
+  .paths .hint{color:#888;font-size:11.5px;margin-top:4px}
+  .step{display:flex;gap:10px;align-items:center;font-size:13px;margin:8px 0;flex-wrap:wrap}
+  .step b{font-size:15px;color:#1565c0}
+  .neck{display:grid;grid-template-columns:34px 26px repeat(7,1fr);gap:0;background:#f3ead7;border:1px solid #cbb994;border-radius:6px;overflow:hidden}
+  .neck .cell{height:30px;border-right:1px solid #cbb994;position:relative;display:flex;align-items:center;justify-content:center}
+  .neck .open{border-right:3px solid #6b5836}
+  .neck .lbl{background:#efe6d2;font:600 11px monospace;color:#6b5836;border-right:2px solid #6b5836}
+  .neck .strline::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:#b9a886}
+  .dot{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:700 10px monospace;color:#fff;position:relative;z-index:2}
+  .now{background:#1565c0}
+  .prev{background:#1565c0;opacity:.42}
+  .older{background:#1565c0;opacity:.18}
+  .frets{display:grid;grid-template-columns:34px 26px repeat(7,1fr);font:11px monospace;color:#999;text-align:center}
+  .frets span{padding-top:2px}
+  .legend{font-size:12px;color:#555;margin-top:8px}
+  .legend .dot{display:inline-flex;width:14px;height:14px;vertical-align:middle;margin:0 3px}
+</style>
+
+<h2>Fretboard panel — proposed layout</h2>
+<p class="subtitle">Horizontal neck (nut on the left), high-E string on top — standard tab orientation and matches the existing guitar code. Click anywhere if it works; tell me what to change.</p>
+
+<div class="fb-wrap">
+  <div class="fb-bar">
+    <span class="label">Source</span>
+    <span class="fb-chip">Guessed chords</span>
+    <span class="fb-chip alt">Chord window</span>
+    <span style="margin-left:8px"><input type="checkbox"> include suppressed</span>
+    <span class="fb-btn" style="margin-left:auto">🎸 Capture → fretboard</span>
+  </div>
+
+  <div class="label">Ways to play &nbsp;Bm · C · G · Am · Em · Bm · C · Am · Bm · Em · Em · Em</div>
+  <div class="paths">
+    <select>
+      <option>Path 1 — open / low position   ▁▁▂▁▂▁  (least movement)</option>
+      <option>Path 2 — barre, around frets 2–5   ▂▃▂▃▂▃</option>
+      <option>Path 3 — up the neck, frets 7–10   ▃▂▃▂▃▂</option>
+    </select>
+    <div class="hint">Pick a way to play the whole progression; the fretboard below animates through it.</div>
+  </div>
+
+  <div class="step">
+    <span class="fb-btn">◀ Prev</span>
+    <span>Step <b>3 / 12</b> — chord <b>G</b></span>
+    <span class="fb-btn">Next ▶</span>
+    <span style="margin-left:8px">▶ Play &nbsp;speed <input type="range" style="vertical-align:middle;width:80px"></span>
+    <span style="margin-left:8px">this chord's shape: <span class="fb-chip">◀ 1 / 4 ▶</span></span>
+  </div>
+
+  <div class="neck">
+    <!-- row = string. cols: label | open | fret1..7 -->
+    <div class="cell lbl">e</div><div class="cell open strline"><span class="dot now">3</span></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div>
+    <div class="cell lbl">B</div><div class="cell open strline"><span class="dot now">0</span></div><div class="cell strline"><span class="dot prev">1</span></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div>
+    <div class="cell lbl">G</div><div class="cell open strline"><span class="dot now">0</span></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"><span class="dot older">4</span></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div>
+    <div class="cell lbl">D</div><div class="cell open strline"><span class="dot now">0</span></div><div class="cell strline"></div><div class="cell strline"><span class="dot prev">2</span></div><div class="cell strline"><span class="dot older">4</span></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div>
+    <div class="cell lbl">A</div><div class="cell open strline"></div><div class="cell strline"><span class="dot older">2</span></div><div class="cell strline"><span class="dot prev">3</span></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div>
+    <div class="cell lbl">E</div><div class="cell open strline"><span class="dot now">3</span></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div><div class="cell strline"></div>
+  </div>
+  <div class="frets"><span></span><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span></div>
+
+  <div class="legend">
+    <span class="dot now"></span> G (now) &nbsp;·&nbsp;
+    <span class="dot prev"></span> C (previous) &nbsp;·&nbsp;
+    <span class="dot older"></span> Bm (older, fainter) &nbsp; — the cumulative trail
+  </div>
+</div>
+
+<p class="subtitle">Numbers in dots = fret. Open notes sit in the leftmost (open) column. The selected path drives the animation; the "shape" cycler swaps just the current chord's fingering within that path.</p>

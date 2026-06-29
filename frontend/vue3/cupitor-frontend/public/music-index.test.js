@@ -342,6 +342,17 @@ describe('pushPending', () => {
     expect(res.pushed).toBe(true);
     expect(files.map(f => f.path)).toEqual(['db/music/western/index.json']);
   });
+  test('pushTags true → tags.json with the registry; false → none', async () => {
+    let files = null;
+    const committer = async (f) => { files = f; };
+    const tags = [{ name: 'riff', color: '#e6194B' }];
+    let res = await pushPending({ system: 'western', currentIndex: [{ id: 'a' }], tags, pushTags: true, committer, store: storeWith([]) });
+    expect(res.pushed).toBe(true);
+    expect(files.map(f => f.path)).toContain('db/music/western/tags.json');
+    expect(JSON.parse(await files.find(f => f.path.endsWith('tags.json')).getContent(null))).toEqual(tags);
+    res = await pushPending({ system: 'western', currentIndex: [{ id: 'a' }], tags, pushTags: false, committer, store: storeWith([]) });
+    expect(files.map(f => f.path)).not.toContain('db/music/western/tags.json');
+  });
   test('committer throws → pushed:false + pushError, not marked synced', async () => {
     const store = storeWith([{ entry: { id: 'a' }, detail: { x: 1 } }]);
     const committer = async () => { throw new Error('offline'); };

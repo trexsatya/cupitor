@@ -2660,7 +2660,7 @@ body.rec-paused #recPlayingPauseBtn:hover { background: #388e3c; }
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
 }
 #recPlayingPrevBtn { left: calc(50% - 112px); }
-#recPlayingNextBtn { left: calc(50% + 56px); }
+#recPlayingNextBtn { left: calc(50% + 112px); }
 body.rec-playing #recPlayingPrevBtn,
 body.rec-playing #recPlayingNextBtn { display: inline-flex; }
 
@@ -2685,13 +2685,38 @@ body.rec-playing #recPlayingNextBtn { display: inline-flex; }
     cursor: pointer;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
 }
-#recPlayingMinimizeBtn { right: 56px; background: rgba(0,0,0,0.65); }
-#recPlayingCloseBtn    { right: 12px; background: #b71c1c; }
+#recPlayingMinimizeBtn { right: 56px;  background: rgba(0,0,0,0.65); }
+#recPlayingCloseBtn    { right: 12px;  background: #b71c1c; }
 body.rec-playing #recPlayingMinimizeBtn,
 body.rec-playing #recPlayingCloseBtn { display: inline-flex; }
 #recPlayingMinimizeBtn:hover { background: rgba(0,0,0,0.85); }
 #recPlayingCloseBtn:hover { background: #d32f2f; }
 #recPlayingCloseBtn svg { display: block; }
+
+/* Search-this-word — sits in the bottom transport row between the Queue
+   (center) button and the Next button. Tapping minimises the overlay and
+   drops the current word into the main search box. */
+#recPlayingSearchBtn {
+    position: fixed;
+    top: calc(76px + min(100vw, 900px) * 0.5625);
+    left: calc(50% + 56px);
+    z-index: 100003;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: #424242;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+    font-size: 18px;
+}
+body.rec-playing #recPlayingSearchBtn { display: inline-flex; }
+#recPlayingSearchBtn:hover { background: #616161; }
 
 /* Restore pill — shown only while play mode is minimized. Compact bar at
    the bottom of the viewport with the queue cursor and two buttons:
@@ -2748,6 +2773,7 @@ body.rec-playing-minimized #recPlayingNextBtn,
 body.rec-playing-minimized #recPlayingShuffleBtn,
 body.rec-playing-minimized #recPlayingLoopBtn,
 body.rec-playing-minimized #recPlayingMinimizeBtn,
+body.rec-playing-minimized #recPlayingSearchBtn,
 body.rec-playing-minimized #recPlayingCloseBtn { display: none !important; }
 #recPlayingPrevBtn:hover,
 #recPlayingNextBtn:hover { background: #616161; }
@@ -2810,7 +2836,22 @@ body.rec-playing #recPlayingLoopBtn { display: inline-flex; }
         top: calc(76px + min(100vw, 900px) * 0.5625 + 6px);
     }
     #recPlayingShuffleBtn { left: calc(50% - 152px); }
-    #recPlayingLoopBtn    { left: calc(50% + 120px); }
+    /* Shifted further out so it doesn't overlap the new Search/Next slot. */
+    #recPlayingLoopBtn    { left: calc(50% + 180px); }
+    /* Tighter transport pack: 40px buttons, 8px gaps. */
+    #recPlayingPrevBtn,
+    #recPlayingPauseBtn,
+    #recPlayingQueueBtn,
+    #recPlayingSearchBtn,
+    #recPlayingNextBtn {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+    }
+    #recPlayingPrevBtn   { left: calc(50% - 96px); }
+    #recPlayingPauseBtn  { left: calc(50% - 48px); }
+    #recPlayingSearchBtn { left: calc(50% + 48px); }
+    #recPlayingNextBtn   { left: calc(50% + 96px); }
 }
 
 /* Current word — big bold display pinned at the top of the viewport

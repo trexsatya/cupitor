@@ -7,7 +7,7 @@
 // push carrying this content succeeds. The `system` index isolates western/sargam.
 
 const DB_NAME = 'cupitor-music';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const keyOf = (system, id) => `${system}:${id}`;
 
@@ -48,6 +48,10 @@ export function createMusicStore({ indexedDB } = {}) {
         // v2: per-system vocabulary snapshot, keyed by system (one row per system).
         if (!db.objectStoreNames.contains('vocab')) {
           db.createObjectStore('vocab', { keyPath: 'system' });
+        }
+        // v3: per-system pattern-tag registry snapshot (the global tag list), keyed by system.
+        if (!db.objectStoreNames.contains('tags')) {
+          db.createObjectStore('tags', { keyPath: 'system' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -134,6 +138,20 @@ export function createMusicStore({ indexedDB } = {}) {
       const tx = db.transaction('vocab', 'readonly');
       const row = await reqDone(tx.objectStore('vocab').get(system));
       return row ? row.vocab : [];
+    },
+
+    async putTags(system, tags) {
+      const db = await open();
+      const tx = db.transaction('tags', 'readwrite');
+      tx.objectStore('tags').put({ system, tags: tags || [] });
+      await txDone(tx);
+    },
+
+    async getTags(system) {
+      const db = await open();
+      const tx = db.transaction('tags', 'readonly');
+      const row = await reqDone(tx.objectStore('tags').get(system));
+      return row ? row.tags : [];
     },
   };
 }

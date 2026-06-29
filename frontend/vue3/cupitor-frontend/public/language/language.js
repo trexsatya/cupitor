@@ -4503,6 +4503,38 @@ async function getMatchingWords(list, search, token) {
   return wordToItemsMap;
 }
 
+// Programmatic version of selectSearchedWord that takes the word directly
+// rather than reading it from a clicked DOM node. Used by Player/Practice's
+// "send to search" buttons.
+//
+// Drives BOTH paths:
+//   1. #searchText input + 'input' trigger — runs the real search pipeline
+//      (doSearch) so SRT findings appear in #result. This is the canonical
+//      path; rareWordSearch uses the same.
+//   2. #searchedWords option lookup — keeps the picker dropdown in sync so
+//      the user sees their word reflected there too.
+function sendWordToSearchBox(word) {
+  const w = (word || '').toString().trim()
+  if (!w) return false
+  // Drive the real search box first so the search actually runs. The
+  // input listens for `change` (searchTextChanged → doSearch); `input`
+  // only updates the clear-X button. Trigger both so the clear-X also
+  // appears.
+  const $st = $('#searchText')
+  if ($st.length) $st.val(w).trigger('input').trigger('change')
+  // Mirror into the vocabulary picker when there's a matching option (best
+  // effort — missing option just means the word isn't in vocab yet).
+  const $option = $('#searchedWords option').filter(function () {
+    return $(this).text().toLowerCase().includes(w.toLowerCase())
+  }).first()
+  if ($option.length) {
+    $('#searchedWords').val($option.val()).trigger('change')
+  }
+  window.preSelectedSearchedWord = w
+  return true
+}
+window.sendWordToSearchBox = sendWordToSearchBox
+
 function selectSearchedWord(event) {
   const textToMatch = $(event.target).parent().data('text').replaceAll("\n", "")
   // Find the option with text containing the textToMatch string
@@ -11336,6 +11368,15 @@ async function playRecording(opts) {
       .on('click', cycleRecPlayLoopMode)
     _refreshRecPlayModeBtns()
   }
+  // Send-to-search: drop the current item's word into #searchedWords, then
+  // minimise so the user can read the full search results behind the
+  // overlay. Same semantic as clicking the red mouse-pointer arrow inside
+  // a subtitle line, but always operates on the currently-playing item.
+  if (!$('#recPlayingSearchBtn').length) {
+    $(`<button id="recPlayingSearchBtn" type="button" title="Search this word (minimizes)" aria-label="Search this word">🔎</button>`)
+      .appendTo('body')
+      .on('click', _searchCurrentRecPlayWord)
+  }
   // Minimize button — collapses the play UI so the user can interact with
   // the main page while the session is paused. Restore re-pins everything.
   if (!$('#recPlayingMinimizeBtn').length) {
@@ -11637,6 +11678,7 @@ async function playRecording(opts) {
   $('#recPlayingShuffleBtn').remove()
   $('#recPlayingLoopBtn').remove()
   $('#recPlayingMinimizeBtn').remove()
+  $('#recPlayingSearchBtn').remove()
   $('#recPlayingCloseBtn').remove()
   $('#recPlayingQueueBtn').remove()
   $('#recPlayingRestorePill').remove()
@@ -11805,6 +11847,18 @@ window.openPlayingQueueDialog = openPlayingQueueDialog
 // _sleepRespectingPause + _waitYTUntilEnd respect _recPlayPaused, so they
 // won't advance until restore. The restore pill is the single visible
 // hook back into the session.
+// Player overlay: take the currently-playing item's word, drop it into the
+// main search box, and minimise the overlay so the search results are
+// visible. Falls back to it.searchText when item.word is absent (older
+// captures missing the field).
+function _searchCurrentRecPlayWord() {
+  const it = window._recPlayCurrentItem
+  if (!it) return
+  const w = it.word || it.searchText || it._w
+  if (!sendWordToSearchBox(w)) return
+  try { minimizePlayingRecording() } catch (_) {}
+}
+
 function minimizePlayingRecording() {
   if (!window._playingRecording) return
   window._recPlayMinimized = true
@@ -11869,6 +11923,7 @@ function stopPlayingRecording() {
   $('#recPlayingShuffleBtn').remove()
   $('#recPlayingLoopBtn').remove()
   $('#recPlayingMinimizeBtn').remove()
+  $('#recPlayingSearchBtn').remove()
   $('#recPlayingRestorePill').remove()
   $('#recPlayNavToast').remove()
   try { window.speechSynthesis && window.speechSynthesis.cancel() } catch (_) {}
@@ -11963,6 +12018,7 @@ function openPracticeMode(opts) {
         <button type="button" class="practice-info" aria-label="Show item details" title="Show item details" aria-expanded="false">ℹ</button>
         <button type="button" class="practice-shuffle" aria-label="Shuffle" title="Shuffle order" aria-pressed="false">🔀</button>
         <button type="button" class="practice-settings" aria-label="Practice settings" title="Reveal mode / direction / delete" aria-expanded="false">⋯</button>
+        <button type="button" class="practice-search" aria-label="Search this word" title="Search this word (minimizes)">🔎</button>
         <button type="button" class="practice-minimize" aria-label="Minimize" title="Minimize">⌄</button>
         <button type="button" class="practice-close" aria-label="Close practice" title="Close">✕</button>
       </div>
@@ -12023,6 +12079,7 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-close', closePracticeMode)
     $p.on('click', '.practice-restore-close', closePracticeMode)
     $p.on('click', '.practice-minimize', minimizePracticeMode)
+    $p.on('click', '.practice-search', _searchCurrentPracticeWord)
     $p.on('click', '.practice-restore-btn', restorePracticeMode)
     $p.on('click', '.practice-delete', _deleteCurrentPracticeCard)
     $p.on('click', '.practice-info', _togglePracticeInfoPanel)
@@ -12191,6 +12248,16 @@ function _updatePracticeSpeedBtn() {
 // #mainControlInputs / #vocabularyResult / #result / #mediaRelatedContainer.
 // Pause the clip too so audio doesn't keep playing while the user is doing
 // something else.
+// Practice overlay: take the current card's word, drop it into the main
+// search box, then minimise. Same behaviour as the Player's 🔎 button.
+function _searchCurrentPracticeWord() {
+  const it = (window._practiceCards || [])[window._practiceIdx]
+  if (!it) return
+  const w = it.word || it.searchText || it._w
+  if (!sendWordToSearchBox(w)) return
+  try { minimizePracticeMode() } catch (_) {}
+}
+
 function minimizePracticeMode() {
   if (!window._practiceActive) return
   window._practiceMinimized = true

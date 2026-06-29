@@ -1,5 +1,5 @@
 // public/music-player.test.js
-import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd, buildScheduleFromMusicXml, gmInstrumentForVoice, soundfontSampleMap, isSuppressed } from './music-player.js';
+import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd, buildScheduleFromMusicXml, gmInstrumentForVoice, soundfontSampleMap, isSuppressed, compressKeptEvents } from './music-player.js';
 
 // Primary voice = the one with the most notes. midi=pitch, duration=<type> string|null, measureIndex 1-based.
 function voice(pitch, duration, measureIndex) {
@@ -220,6 +220,122 @@ describe('buildScheduleFromMusicXml', () => {
     expect(s).toEqual([
       { midi: 60, time: 0, duration: 0.5, beat: 0 },
       { midi: 64, time: 0.5, duration: 0.5, beat: 1, muted: true },
+    ]);
+  });
+
+  test('keepNotes keeps only matched notes and compresses the gap across an untagged note', () => {
+    // C@0, D@1 (untagged), E@2. Keep C+E → play C then E, gap (over D) collapsed to a breath.
+    // `beat` stays the ORIGINAL absolute onset so the OSMD cursor jumps ahead; `time` is compressed.
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('D', 4, 1)}${pn('E', 4, 1)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, {
+      tempo: 120, keepNotes: [{ midi: 60, beats: 0 }, { midi: 64, beats: 2 }], breathBeats: 0.5,
+    });
+    // 120 BPM → 0.5s/beat. C: t0,beat0; E: out onset = C.end(1b) + breath(0.5b) = 1.5b → 0.75s, beat 2.
+    expect(s).toEqual([
+      { midi: 60, time: 0,    duration: 0.5, beat: 0 },
+      { midi: 64, time: 0.75, duration: 0.5, beat: 2 },
+    ]);
+  });
+
+  test('keepNotes preserves a rest-only gap (breath unused) regardless of default', () => {
+    // C@0 (quarter), rest, E@2 — both kept, nothing untagged between → keep the original gap.
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${rest(1)}${pn('E', 4, 1)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 120, keepNotes: [{ midi: 60, beats: 0 }, { midi: 64, beats: 2 }] });
+    expect(s).toEqual([
+      { midi: 60, time: 0, duration: 0.5, beat: 0 },
+      { midi: 64, time: 1, duration: 0.5, beat: 2 },
+    ]);
+  });
+
+  test('keepNotes defaults the breath to 1 beat when breathBeats is omitted', () => {
+    // C@0, D@1 (untagged), E@2. No breathBeats → default 1 beat: E out onset = C.end(1) + 1 = 2b → 1.0s.
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('D', 4, 1)}${pn('E', 4, 1)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 120, keepNotes: [{ midi: 60, beats: 0 }, { midi: 64, beats: 2 }] });
+    expect(s).toEqual([
+      { midi: 60, time: 0, duration: 0.5, beat: 0 },
+      { midi: 64, time: 1, duration: 0.5, beat: 2 },
+    ]);
+  });
+
+  test('keepNotes with a custom breathBeats overrides the default', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('D', 4, 1)}${pn('E', 4, 1)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, {
+      tempo: 120, keepNotes: [{ midi: 60, beats: 0 }, { midi: 64, beats: 2 }], breathBeats: 0.5,
+    });
+    // breath = 0.5 beat → E out onset = C.end(1) + 0.5 = 1.5 beats → 0.75s.
+    expect(s).toEqual([
+      { midi: 60, time: 0, duration: 0.5, beat: 0 },
+      { midi: 64, time: 0.75, duration: 0.5, beat: 2 },
+    ]);
+  });
+});
+
+describe('compressKeptEvents', () => {
+  // `kept`/`others` carry onset `beats` + `durBeats` (quarter-beats). The helper returns the kept
+  // events (originals preserved) with a rewritten output onset `t` (beats): rhythm preserved within
+  // a run, gaps that span an untagged note collapsed to a `breathBeats` breath.
+  test('first kept note starts the output timeline at 0', () => {
+    const kept = [{ midi: 60, beats: 4, durBeats: 1 }];
+    expect(compressKeptEvents(kept, [], 0.5)).toEqual([{ midi: 60, beats: 4, durBeats: 1, t: 0 }]);
+  });
+
+  test('breathBeats defaults to 1 when omitted', () => {
+    // C@0 (quarter), untagged D@1, E@2 → collapse spans D, default breath = 1 → E at C.end(1) + 1 = 2.
+    const kept = [{ midi: 60, beats: 0, durBeats: 1 }, { midi: 64, beats: 2, durBeats: 1 }];
+    const others = [{ midi: 62, beats: 1, durBeats: 1 }];
+    expect(compressKeptEvents(kept, others)).toEqual([
+      { midi: 60, beats: 0, durBeats: 1, t: 0 },
+      { midi: 64, beats: 2, durBeats: 1, t: 2 },
+    ]);
+  });
+
+  test('contiguous kept notes stay contiguous (no gap to remove)', () => {
+    const kept = [{ midi: 60, beats: 0, durBeats: 1 }, { midi: 62, beats: 1, durBeats: 1 }];
+    expect(compressKeptEvents(kept, [], 0.5)).toEqual([
+      { midi: 60, beats: 0, durBeats: 1, t: 0 },
+      { midi: 62, beats: 1, durBeats: 1, t: 1 },
+    ]);
+  });
+
+  test('a rest-only gap between kept notes is preserved (part of the run rhythm)', () => {
+    // C@0 (quarter) … gap … E@2 (quarter), nothing untagged in between → keep the 1-beat gap.
+    const kept = [{ midi: 60, beats: 0, durBeats: 1 }, { midi: 64, beats: 2, durBeats: 1 }];
+    expect(compressKeptEvents(kept, [], 0.5)).toEqual([
+      { midi: 60, beats: 0, durBeats: 1, t: 0 },
+      { midi: 64, beats: 2, durBeats: 1, t: 2 },
+    ]);
+  });
+
+  test('a gap spanning an untagged note collapses to the breath gap', () => {
+    // C@0 (quarter), untagged D@1, E@2 → the C→E gap spans D, collapse to E at C.end + breath.
+    const kept = [{ midi: 60, beats: 0, durBeats: 1 }, { midi: 64, beats: 2, durBeats: 1 }];
+    const others = [{ midi: 62, beats: 1, durBeats: 1 }];
+    expect(compressKeptEvents(kept, others, 0.5)).toEqual([
+      { midi: 60, beats: 0, durBeats: 1, t: 0 },
+      { midi: 64, beats: 2, durBeats: 1, t: 1.5 },
+    ]);
+  });
+
+  test('chord-stacked kept notes (same onset) share one output onset', () => {
+    const kept = [{ midi: 60, beats: 0, durBeats: 1 }, { midi: 64, beats: 0, durBeats: 1 }];
+    expect(compressKeptEvents(kept, [], 0.5)).toEqual([
+      { midi: 60, beats: 0, durBeats: 1, t: 0 },
+      { midi: 64, beats: 0, durBeats: 1, t: 0 },
+    ]);
+  });
+
+  test('two runs separated by untagged material: rhythm kept within, breath between', () => {
+    // run A: C@0,E@1 (contiguous quarters); untagged stuff fills beats 2–4; run B: G@4,B@5.
+    const kept = [
+      { midi: 60, beats: 0, durBeats: 1 }, { midi: 64, beats: 1, durBeats: 1 },
+      { midi: 67, beats: 4, durBeats: 1 }, { midi: 71, beats: 5, durBeats: 1 },
+    ];
+    const others = [{ midi: 65, beats: 2, durBeats: 1 }, { midi: 65, beats: 3, durBeats: 1 }];
+    expect(compressKeptEvents(kept, others, 0.5)).toEqual([
+      { midi: 60, beats: 0, durBeats: 1, t: 0 },
+      { midi: 64, beats: 1, durBeats: 1, t: 1 },
+      { midi: 67, beats: 4, durBeats: 1, t: 2.5 },   // E.end(2) + breath(0.5)
+      { midi: 71, beats: 5, durBeats: 1, t: 3.5 },   // contiguous after G
     ]);
   });
 });

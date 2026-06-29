@@ -84,6 +84,36 @@ export function isSuppressed(event, set) {
   return false;
 }
 
+// Pure: rewrite the output onset (`t`, in beats) of `kept` events for tag skip-playback —
+// preserving rhythm within a run but removing the empty stretches between runs. `kept` is the
+// notes to play (each {beats: absolute onset, durBeats, …}, sorted by onset); `others` is the
+// untagged notes' onsets. Walking kept A→B: a same-onset note (chord) shares A's slot; a
+// contiguous/rest-only gap is preserved; a gap that spans an untagged note onset collapses to a
+// `breathBeats` breath. Originals are preserved (incl. absolute `beats` for cursor sync); only `t`
+// is added. The first kept note anchors the timeline at t=0.
+export function compressKeptEvents(kept, others, breathBeats = 1) {
+  const EPS = 1e-6;
+  const out = [];
+  let shift = 0;   // beats removed so far; output onset = beats − shift
+  for (let i = 0; i < kept.length; i++) {
+    const e = kept[i];
+    if (i === 0) { shift = e.beats; out.push({ ...e, t: 0 }); continue; }
+    const prev = kept[i - 1];
+    if (Math.abs(e.beats - prev.beats) < EPS) { out.push({ ...e, t: e.beats - shift }); continue; }
+    const prevEnd = prev.beats + prev.durBeats;
+    const gap = e.beats - prevEnd;
+    if (gap > EPS) {
+      // An untagged onset in [prevEnd, e.beats) is "in between" material to skip. Use >= prevEnd so a
+      // note starting exactly where the previous kept note ends counts; < e.beats excludes a chord
+      // sibling simultaneous with the next kept note.
+      const spansUntagged = (others || []).some((o) => o.beats >= prevEnd - EPS && o.beats < e.beats - EPS);
+      if (spansUntagged) shift += gap - breathBeats;   // collapse the skipped span to a breath
+    }
+    out.push({ ...e, t: e.beats - shift });
+  }
+  return out;
+}
+
 // Pure: build a time-accurate, polyphonic schedule from a MusicXML string. Reads every
 // part/voice with ABSOLUTE onsets, honoring <divisions>, <duration> (authoritative — bakes
 // in dotted values), <chord/> (stacked at the same onset), <rest> (advances time, no note),
@@ -170,18 +200,27 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
 
   const EPS = 1e-6;
   const muted = (opts.mutedNotes && opts.mutedNotes.length) ? opts.mutedNotes : null;
-  const out = events
+  // Tag skip-playback: keep only these notes and compress the gaps between tagged runs.
+  const keep = (opts.keepNotes && opts.keepNotes.length) ? opts.keepNotes : null;
+  const breathBeats = (typeof opts.breathBeats === 'number' && opts.breathBeats >= 0) ? opts.breathBeats : 1;
+  const ranged = events
     .filter((e) => e.measure >= from && e.measure <= to)
-    .filter((e) => e.beats >= fromBeat - EPS && e.beats <= toBeat + EPS)
-    .map((e) => {
-      // `beat` = ABSOLUTE onset in quarter-beats from the piece start. Unlike `time` (re-zeroed
-      // below so the segment starts at 0s), `beat` is preserved so the OSMD cursor — whose iterator
-      // timestamps are also absolute — can be driven to each note's true position, stepping over
-      // rests instead of advancing one entry per scheduled note.
-      const item = { midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb, beat: e.beats };
-      if (muted && isSuppressed(e, muted)) item.muted = true;   // silenced note: keep its slot, skip the synth
-      return item;
-    });
+    .filter((e) => e.beats >= fromBeat - EPS && e.beats <= toBeat + EPS);
+  // `beat` = ABSOLUTE onset in quarter-beats from the piece start. Unlike `time` (re-zeroed below so
+  // the segment starts at 0s), `beat` is preserved so the OSMD cursor — whose iterator timestamps
+  // are also absolute — can be driven to each note's true position, stepping over rests (and, in
+  // skip-playback, jumping ahead over skipped material) instead of advancing one entry per note.
+  const out = keep
+    ? compressKeptEvents(
+        ranged.filter((e) => isSuppressed(e, keep)).sort((a, b) => a.beats - b.beats),
+        ranged.filter((e) => !isSuppressed(e, keep)),
+        breathBeats,
+      ).map((c) => ({ midi: c.midi, time: c.t * spb, duration: c.durBeats * spb, beat: c.beats }))
+    : ranged.map((e) => {
+        const item = { midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb, beat: e.beats };
+        if (muted && isSuppressed(e, muted)) item.muted = true;   // silenced note: keep its slot, skip the synth
+        return item;
+      });
   out.sort((a, b) => a.time - b.time); // stable: chord/aligned notes keep emission order
   if (out.length) {
     const t0 = out[0].time;

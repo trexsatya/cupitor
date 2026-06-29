@@ -185,6 +185,43 @@
           }
           body.preview-open { overflow: hidden; }   /* lock the page behind the dialog */
         }
+        #fretboardPanel.fb-wrap{background:#fff;border:1px solid #d8dee8;border-radius:10px;padding:10px 14px;margin-top:1rem}
+        #fretboardPanel summary{cursor:pointer;font-weight:600}
+        #fretboardPanel .fb-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;margin:8px 0}
+        #fretboardPanel .fb-chip{border:1px solid #1565c0;color:#1565c0;border-radius:999px;padding:2px 10px;cursor:pointer;background:#eef4ff}
+        #fretboardPanel .fb-chip.alt{border-color:#bbb;color:#555;background:#fff}
+        #fretboardPanel .fb-btn{border:1px solid #1565c0;background:#1565c0;color:#fff;border-radius:6px;padding:3px 12px;cursor:pointer}
+        #fretboardPanel .fb-paths{margin:8px 0;font-size:13px}
+        #fretboardPanel .fb-paths select{font:12.5px monospace;padding:4px 8px;border:1px solid #1565c0;border-radius:6px;min-width:320px}
+        #fretboardPanel .fb-step{display:flex;gap:8px;align-items:center;font-size:13px;margin:8px 0;flex-wrap:wrap}
+        #fretboardPanel .fb-msg{color:#c62828;font-size:12px}
+        #fbSvg{max-width:100%;overflow-x:auto;display:block}
+        /* Pattern tags */
+        #tagPanel .tag-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
+        #tagPanel .tag-lbl{color:#555}
+        #tagPanel select,#tagPanel #tagNew{padding:3px 6px;border:1px solid #c9b8ff;border-radius:5px;font-size:13px}
+        #tagPanel .tag-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+        #tagPanel .tag-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #ddd0ff;border-radius:999px;padding:3px 8px;font-size:12.5px;background:#fff}
+        #tagPanel .tag-pill .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+        #tagPanel .tag-pill .cnt{color:#888}
+        #tagPanel .tag-pill .del{border:none;background:none;color:#a33;cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+        #fretboardPanel:fullscreen{background:#fff;overflow:auto;padding:24px}
+        #fretboardPanel:fullscreen #fbSvg{width:100%;height:auto;max-width:none}
+        /* Touch-friendly chord-window move/resize buttons (alternative to dragging) */
+        #windowNudge.win-nudge{display:inline-flex;gap:6px;align-items:center;margin-right:.5em;vertical-align:middle}
+        #windowNudge .win-btn{min-width:40px;height:36px;border:1px solid #1565c0;background:#eef4ff;color:#1565c0;border-radius:6px;font-size:16px;line-height:1;cursor:pointer;font-weight:700}
+        #windowNudge .win-btn:active{background:#1565c0;color:#fff}
+        #windowNudge .win-sep{display:inline-block;width:1px;height:22px;background:#cfe0ff}
+        /* Fretboard panel — mobile layout: bigger touch targets, full-width select, stacked controls */
+        @media (max-width:640px){
+          #fretboardPanel.fb-wrap{padding:8px 10px}
+          #fretboardPanel .fb-btn,#fretboardPanel .fb-chip{min-height:40px;padding:8px 12px;font-size:14px}
+          #fretboardPanel .fb-bar .fb-btn{margin-left:0 !important}
+          #fretboardPanel .fb-paths select{width:100%;min-width:0;min-height:40px}
+          #fretboardPanel .fb-bar,#fretboardPanel .fb-step{gap:8px}
+          #fbSpeed{flex:1 1 120px}
+          #windowNudge .win-btn{min-width:48px;height:42px;font-size:18px}
+        }
     </style>
 </head>
 <body>
@@ -297,12 +334,14 @@
     <button class="btn toggle" data-for="dimConnChk" title="Dim beams / stems"><span class="ic">〰️</span><span class="txt">Dim beams/stems</span></button>
     <button class="btn toggle" data-for="chordWindowChk" title="Draggable chord window"><span class="ic">🔲</span><span class="txt">Chord window</span></button>
     <button class="btn toggle" data-for="globalMatchChk" title="When on, clicking a chord name highlights every occurrence of it across the visible sheet"><span class="ic">🌐</span><span class="txt">Global</span></button>
+    <button class="btn toggle" data-for="tagPanelChk" title="Tag patterns of notes and colour them"><span class="ic">🏷️</span><span class="txt">Pattern tags</span></button>
     <input type="checkbox" id="voiceColorChk" checked hidden>
     <input type="checkbox" id="noteNameChk" hidden>
     <input type="checkbox" id="chordChk" hidden>
     <input type="checkbox" id="dimConnChk" checked hidden>
     <input type="checkbox" id="chordWindowChk" hidden>
     <input type="checkbox" id="globalMatchChk" hidden>
+    <input type="checkbox" id="tagPanelChk" hidden>
   </div>
   <div id="suppressPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#fff8f0; border:1px solid #ffd9b0; border-radius:4px">
     <button class="btn toggle" data-for="suppressModeChk" title="Click notes to silence them"><span class="ic">🔇</span><span class="txt">Suppress notes</span></button>
@@ -313,12 +352,69 @@
     <input type="checkbox" id="hearAllChk" hidden>
   </div>
   <div id="windowPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#f4f8ff; border:1px solid #cfe0ff; border-radius:4px">
+    <div id="windowNudge" class="win-nudge" title="Move / resize the window (easier than dragging on touch)">
+      <button type="button" id="winMoveL" class="win-btn" title="Move window left" aria-label="Move window left">◀</button>
+      <button type="button" id="winMoveR" class="win-btn" title="Move window right" aria-label="Move window right">▶</button>
+      <button type="button" id="winMoveU" class="win-btn" title="Move window to line above" aria-label="Move window up">▲</button>
+      <button type="button" id="winMoveD" class="win-btn" title="Move window to line below" aria-label="Move window down">▼</button>
+      <span class="win-sep"></span>
+      <button type="button" id="winShrink" class="win-btn" title="Shrink window" aria-label="Shrink window">–</button>
+      <button type="button" id="winExpand" class="win-btn" title="Expand window" aria-label="Expand window">+</button>
+    </div>
     <span style="font-size:.85em;color:#555">Chords:</span>
     <span id="windowChords"></span>
     <span id="windowRange" style="font-size:.8em;color:#777"></span>
     <button id="captureWindowBtn" class="btn" style="margin-left:.5em" title="Capture this window to vocab"><span class="ic">➕</span><span class="txt">Capture window → vocab</span></button>
   </div>
+  <div id="tagPanel" style="display:none; margin:.25rem 0; padding:.4rem .5rem; background:#f6f3ff; border:1px solid #ddd0ff; border-radius:4px">
+    <div class="tag-row">
+      <button class="btn toggle" data-for="tagModeChk" title="Click notes to add/remove them from the active tag"><span class="ic">🖌️</span><span class="txt">Tag mode</span></button>
+      <label class="tag-lbl">Tag:
+        <input id="tagInput" list="tagOptions" placeholder="pick or type a tag…" maxlength="24" autocomplete="off"
+               title="Pick an existing tag or type a new one (Enter), then click notes to paint it" style="width:11em">
+        <datalist id="tagOptions"></datalist>
+      </label>
+      <button class="btn toggle" data-for="tagFilterChk" title="Show only the checked tags; dim the rest"><span class="ic">🔍</span><span class="txt">Filter</span></button>
+      <button id="playTagsBtn" class="btn" title="Play only the checked tags' notes, skipping the gaps between them"><span class="ic">▶</span><span class="txt">▶ Play tags</span></button>
+      <label class="tag-lbl" title="Silence inserted between tagged runs, in beats (scales with tempo)">breath
+        <input type="number" id="breathBeats" min="0" max="4" step="0.25" value="1" style="width:4em">
+      </label>
+      <input type="checkbox" id="tagModeChk" hidden>
+      <input type="checkbox" id="tagFilterChk" hidden>
+    </div>
+    <div id="tagList" class="tag-list"></div>
+  </div>
   <div id="osmdPreview"></div>
+  <details id="fretboardPanel" class="fb-wrap">
+    <summary>🎸 Fretboard</summary>
+    <div class="fb-bar">
+      <span class="label">Source</span>
+      <button type="button" id="fbSrcGuessed" class="fb-chip">Guessed chords</button>
+      <button type="button" id="fbSrcWindow" class="fb-chip alt">Chord window</button>
+      <label style="margin-left:8px"><input type="checkbox" id="fbSuppress"> include suppressed</label>
+      <label style="margin-left:8px"><input type="checkbox" id="fbOctave" checked> match octave</label>
+      <button type="button" id="fbCapture" class="fb-btn" style="margin-left:auto">Capture → fretboard</button>
+      <button type="button" id="fbFullscreen" class="fb-chip alt">⛶ Fullscreen</button>
+    </div>
+    <div class="fb-paths">
+      <label>Ways to play <select id="fbPaths"></select></label>
+    </div>
+    <div class="fb-step">
+      <button type="button" id="fbReset" class="fb-chip alt">Reset</button>
+      <button type="button" id="fbPrev" class="fb-btn">◀ Prev</button>
+      <span>Step <b id="fbStepLabel">—</b></span>
+      <button type="button" id="fbNext" class="fb-btn">Next ▶</button>
+      <button type="button" id="fbPlay" class="fb-btn" style="margin-left:8px">▶ Play</button>
+      <input type="range" id="fbSpeed" min="200" max="1400" value="700" style="vertical-align:middle;width:90px">
+      <span style="margin-left:8px">shape
+        <button type="button" id="fbShapePrev" class="fb-chip">◀</button>
+        <b id="fbShapeLabel">0 / 0</b>
+        <button type="button" id="fbShapeNext" class="fb-chip">▶</button>
+      </span>
+    </div>
+    <div id="fbMsg" class="fb-msg"></div>
+    <svg id="fbSvg"></svg>
+  </details>
   <div id="ytPlayer" style="display:none"></div>
 </div>
 </div>
@@ -327,12 +423,14 @@
   import { getSystemFromUrl, getMusicResourceUrl, loadLibrary, computeChanges, pushPending, filterByTags, removePieceFromLibrary } from './music-index.js';
   import { runQuery } from './music-query.js';
   import { createMusicRenderer, resolveMatchMeasures } from './music-render.js';
+  import { init as initFretboard } from './fretboard-panel.js';
   import { chordDisplayName } from './music-chords.js';
   import { buildChordQuery, buildMelodyQuery, matchSummary } from './music-search-ui.js';
   import { createMusicStore } from './music-local-store.js';
   import { buildSchedule, buildScheduleFromMusicXml, createMusicPlayer, createYouTubeController, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
   import { guessSegmentStart, linkYouTubeLocal } from './music-media.js';
   import { buildSnapshot, buildVocabEntry, upsertVocab, uniqueVocabId, loadVocab, groupVocabByCategory } from './music-vocab.js';
+  import { addTag as addTagReg, removeTag as removeTagReg, mergeRegistry } from './music-tags.js';
 
   const system = getSystemFromUrl().name;
   document.getElementById('systemLabel').textContent = system;
@@ -347,6 +445,25 @@
   const store = createMusicStore();
   const pending = [];  // newly added pieces not yet pushed: {id,title,format,source,key}
 
+  // Pattern-tag registry: the GLOBAL list of tags [{name,color}], shared across all pieces and
+  // synced via a pushed tags.json (like vocab.json). Per-piece note assignments live in each
+  // detail.patterns. Loaded at startup; edits persist locally and go out in the next manual push.
+  let tagRegistry = [];
+  let dirtyTags = false;   // tags.json changed locally, awaiting the manual push
+  async function loadTagRegistry() {
+    let remote = [];
+    try { const res = await fetch(`${getMusicResourceUrl(system)}/tags.json`); if (res.ok) remote = await res.json(); } catch (_) { remote = []; }
+    let local = [];
+    try { local = (await store.getTags(system)) || []; } catch (_) { local = []; }
+    return mergeRegistry(remote, local);   // remote ∪ local-only tags, colors preserved
+  }
+  function saveTagRegistry() {
+    store.putTags(system, tagRegistry).catch(() => {});
+    dirtyTags = true;
+    if (renderer) renderer.setTagRegistry(tagRegistry);
+    updatePushBtn();
+  }
+
   function idFromName(name) {
     return name.replace(/\.(xml|musicxml|txt)$/i, '').trim().replace(/\s+/g, '_').replace(/[\/\\:*?"<>|]/g, '');
   }
@@ -356,11 +473,11 @@
   // commits them all in one batch. Count = unpushed pieces + a vocab change + an index-only change.
   function updatePushBtn() {
     const btn = document.getElementById('retryBtn');
-    const n = unpushedIds.size + (dirtyVocab ? 1 : 0) + (dirtyIndex ? 1 : 0);
+    const n = unpushedIds.size + (dirtyVocab ? 1 : 0) + (dirtyIndex ? 1 : 0) + (dirtyTags ? 1 : 0);
     if (n > 0) { btn.style.display = ''; btn.textContent = `Push changes (${n})`; }
     else { btn.style.display = 'none'; }
   }
-  function hasPending() { return unpushedIds.size > 0 || dirtyVocab || dirtyIndex; }
+  function hasPending() { return unpushedIds.size > 0 || dirtyVocab || dirtyIndex || dirtyTags; }
 
   function makeCommitter(label) {
     return (files) => window.GitHubUtils.commitMultipleFiles({
@@ -457,8 +574,8 @@
     setStatus('Pushing…');
     try {
       const res = await pushPending({ system, currentIndex: index, vocab, pushVocab: dirtyVocab,
-        committer: makeCommitter('push changes'), store });
-      if (res.pushed) { unpushedIds.clear(); dirtyVocab = false; dirtyIndex = false; }
+        tags: tagRegistry, pushTags: dirtyTags, committer: makeCommitter('push changes'), store });
+      if (res.pushed) { unpushedIds.clear(); dirtyVocab = false; dirtyIndex = false; dirtyTags = false; }
       render(); updatePushBtn();
       setStatus(res.pushed ? 'Pushed all changes to GitHub.' : 'Push failed: ' + (res.pushError || 'unknown'));
     } catch (e) { setStatus('Push failed: ' + e.message); }
@@ -474,7 +591,29 @@
   function ensureRenderer() {
     if (!renderer) {
       renderer = createMusicRenderer(document.getElementById('osmdPreview'),
-        { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange, onSuppressionChange: onSuppressionChange });
+        { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange, onSuppressionChange: onSuppressionChange,
+          onPatternsChange: onPatternsChange });
+      initFretboard(renderer, {
+        panel: document.getElementById('fretboardPanel'),
+        srcGuessed: document.getElementById('fbSrcGuessed'),
+        srcWindow: document.getElementById('fbSrcWindow'),
+        suppressChk: document.getElementById('fbSuppress'),
+        octaveChk: document.getElementById('fbOctave'),
+        captureBtn: document.getElementById('fbCapture'),
+        resetBtn: document.getElementById('fbReset'),
+        fullscreenBtn: document.getElementById('fbFullscreen'),
+        pathSelect: document.getElementById('fbPaths'),
+        prevBtn: document.getElementById('fbPrev'),
+        nextBtn: document.getElementById('fbNext'),
+        playBtn: document.getElementById('fbPlay'),
+        speed: document.getElementById('fbSpeed'),
+        shapePrev: document.getElementById('fbShapePrev'),
+        shapeNext: document.getElementById('fbShapeNext'),
+        stepLabel: document.getElementById('fbStepLabel'),
+        shapeLabel: document.getElementById('fbShapeLabel'),
+        msg: document.getElementById('fbMsg'),
+        svg: document.getElementById('fbSvg'),
+      });
     }
     return renderer;
   }
@@ -624,6 +763,28 @@
     document.getElementById('transportMsg').textContent = 'Loading instrument…';
     p.play()
       .then(() => { document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes${span}`; })
+      .catch(() => { document.getElementById('transportMsg').textContent = 'Playback error.'; });
+  }
+  // Tag skip-playback: play only the checked tags' notes, removing the empty stretches between
+  // tagged runs (a beat-relative breath separates runs). Whole piece — ignores segment/window.
+  function playTags() {
+    if (!currentDetail) return;
+    if (!(currentDetail.format === 'musicxml' && currentDetail.source)) {
+      document.getElementById('transportMsg').textContent = 'Tag playback needs a MusicXML piece.'; return;
+    }
+    const keep = (renderer && renderer.getFilterNotes) ? renderer.getFilterNotes() : [];
+    if (!keep.length) { document.getElementById('transportMsg').textContent = 'Check a tag to play it.'; return; }
+    const breath = parseFloat(document.getElementById('breathBeats').value);
+    const breathBeats = (Number.isFinite(breath) && breath >= 0) ? breath : 1;
+    const schedule = buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), keepNotes: keep, breathBeats });
+    if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
+    const p = ensurePlayer();
+    p.setInstrument(document.getElementById('instrSel').value);
+    p.setSchedule(schedule, { cursorStartStep: 0 });
+    p.setLoop(document.getElementById('loopChk').checked);
+    document.getElementById('transportMsg').textContent = 'Loading instrument…';
+    p.play()
+      .then(() => { document.getElementById('transportMsg').textContent = `Playing ${schedule.length} tagged notes`; })
       .catch(() => { document.getElementById('transportMsg').textContent = 'Playback error.'; });
   }
   let ytMonitor = null;
@@ -905,7 +1066,9 @@
     } catch (e) { document.getElementById('previewMsg').textContent = 'Failed to load detail.'; return; }
     let res;
     try {
-      res = await ensureRenderer().loadDetail(detail);
+      var renderer = await ensureRenderer();
+      res = await renderer.loadDetail(detail);
+      renderer.setTagRegistry(tagRegistry);   // seed the global tag list (colors + selectable names)
     } catch (e) { document.getElementById('previewMsg').textContent = 'Render error: ' + e.message; return; }
     if (!res.ok) { document.getElementById('previewMsg').textContent = 'Cannot render (note-text piece).'; return; }
     currentDetail = detail;
@@ -930,8 +1093,21 @@
     document.getElementById('suppressModeChk').checked = false;
     document.getElementById('hearAllChk').checked = false;
     document.getElementById('voiceChips').style.display = 'none';
+    // Pattern tags: the renderer loaded detail.patterns on load; reset the tag controls and rebuild
+    // the tag UI for the fresh piece. Keep the panel's visibility following its toggle.
+    document.getElementById('tagModeChk').checked = false;
+    document.getElementById('tagFilterChk').checked = false;
+    tagFilterSel.clear();
+    activeTagName = '';
+    if (renderer) { renderer.setTagMode(false); renderer.setTagFilter(false); renderer.setFilterTags([]); }
+    // Fold any tags this piece already uses into the global list (so they're selectable everywhere).
+    // Only persist/mark-dirty when the merge actually added something (mergeRegistry only grows).
+    const mergedReg = mergeRegistry(tagRegistry, renderer ? renderer.getPatterns() : []);
+    if (mergedReg.length !== tagRegistry.length) { tagRegistry = mergedReg; saveTagRegistry(); }
+    else if (renderer) renderer.setTagRegistry(tagRegistry);
     syncToggles();
     onSuppressionChange();   // reset the chips/hint for the fresh piece
+    renderTagUI();
     document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
   }
   document.getElementById('pieceList').addEventListener('click', (ev) => {
@@ -985,6 +1161,90 @@
     if (!e.target.checked) { windowPicks.clear(); if (renderer) renderer.clearHighlight(); }
     if (renderer) renderer.setChordWindow(e.target.checked);
   };
+  // ── Pattern tags ───────────────────────────────────────────────────────────────────────────
+  let activeTagName = '';   // the tag clicked notes paint into; mirrored in the combobox input
+  const tagFilterSel = new Set();   // tag names checked in the filter list
+  // Rebuild the tag combobox options and the tag pills from the GLOBAL tag list, annotated with how
+  // many notes THIS piece assigns to each. Called on load and after every tag edit.
+  function renderTagUI() {
+    if (!renderer) return;
+    const names = renderer.getTagNames();      // global list
+    const colors = renderer.getTagColors();    // global colors
+    const countOf = {};                        // per-piece note counts
+    renderer.getPatterns().forEach((a) => { countOf[a.name] = (a.notes || []).length; });
+    // Combobox: a single field that both picks an existing tag and accepts a new one (Enter).
+    if (!names.includes(activeTagName)) activeTagName = names[0] || '';
+    renderer.setActiveTag(activeTagName || null);
+    const dl = document.getElementById('tagOptions');
+    dl.innerHTML = '';
+    names.forEach((nm) => { const o = document.createElement('option'); o.value = nm; dl.appendChild(o); });
+    const input = document.getElementById('tagInput');
+    if (document.activeElement !== input) input.value = activeTagName;   // don't fight mid-typing
+    const list = document.getElementById('tagList');
+    list.innerHTML = '';
+    names.forEach((nm) => {
+      const pill = document.createElement('span');
+      pill.className = 'tag-pill';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = tagFilterSel.has(nm); cb.title = 'Show this tag when filtering';
+      cb.onchange = () => { if (cb.checked) tagFilterSel.add(nm); else tagFilterSel.delete(nm); if (renderer) renderer.setFilterTags([...tagFilterSel]); };
+      const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = colors[nm] || '#999';
+      const label = document.createElement('span'); label.textContent = nm;
+      const cnt = document.createElement('span'); cnt.className = 'cnt'; cnt.textContent = `(${countOf[nm] || 0})`;
+      const del = document.createElement('button'); del.className = 'del'; del.textContent = '×'; del.title = 'Delete tag (global)';
+      del.onclick = () => {
+        tagRegistry = removeTagReg(tagRegistry, nm); saveTagRegistry();   // drop from the global list
+        tagFilterSel.delete(nm);
+        if (renderer) renderer.clearTagAssignments(nm);   // drop this piece's notes for it → onPatternsChange persists
+        renderTagUI();
+      };
+      pill.append(cb, sw, label, cnt, del);
+      list.appendChild(pill);
+    });
+    if (renderer) renderer.setFilterTags([...tagFilterSel]);
+  }
+  // Persist per-piece note assignments with the piece (local-first; pushed in the next manual batch).
+  async function onPatternsChange(patterns) {
+    renderTagUI();
+    if (!currentDetail || !currentPreviewId) return;
+    currentDetail.patterns = patterns;
+    const entry = index.find((e) => e.id === currentPreviewId);
+    if (entry) {
+      try { await store.putPieces(system, [{ entry, detail: currentDetail }]); } catch (_) {}
+      unpushedIds.add(currentPreviewId);
+      render(); updatePushBtn();
+    }
+  }
+  document.getElementById('tagPanelChk').onchange = (e) => {
+    document.getElementById('tagPanel').style.display = e.target.checked ? '' : 'none';
+    if (!e.target.checked && renderer) { renderer.setTagMode(false); document.getElementById('tagModeChk').checked = false; syncToggles(); }
+    if (e.target.checked) renderTagUI();
+  };
+  document.getElementById('tagModeChk').onchange = (e) => { if (renderer) renderer.setTagMode(e.target.checked); };
+  document.getElementById('tagFilterChk').onchange = (e) => { if (renderer) renderer.setTagFilter(e.target.checked); };
+  document.getElementById('playTagsBtn').onclick = playTags;
+  // One combobox does add + select: an existing name just becomes active; a new name is added to the
+  // GLOBAL tag list (next palette color), saved, and made active. Commits on Enter or on blur.
+  function commitTag() {
+    if (!renderer) return;
+    const input = document.getElementById('tagInput');
+    const name = input.value.trim();
+    if (!name) { input.value = activeTagName; return; }
+    if (!renderer.getTagNames().includes(name)) {   // new → add to the global registry
+      const r = addTagReg(tagRegistry, name); tagRegistry = r.registry; saveTagRegistry();
+    }
+    activeTagName = name; renderer.setActiveTag(name);
+    renderTagUI();
+  }
+  document.getElementById('tagInput').addEventListener('change', commitTag);
+  document.getElementById('tagInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitTag(); } });
+  // Touch-friendly window nudge buttons — move/resize without dragging (hard on mobile).
+  [['winMoveL', 'moveLeft'], ['winMoveR', 'moveRight'], ['winMoveU', 'moveUp'], ['winMoveD', 'moveDown'],
+   ['winShrink', 'shrink'], ['winExpand', 'expand']]
+    .forEach(([id, action]) => {
+      const b = document.getElementById(id);
+      if (b) b.onclick = () => { if (renderer && renderer.adjustWindow) renderer.adjustWindow(action); };
+    });
   // "Global": re-scope chord-name clicks to the whole visible sheet. Tell the renderer (it
   // re-applies the overlay's selection) and re-apply the window-chip highlight in the new scope.
   document.getElementById('globalMatchChk').onchange = (e) => {
@@ -1223,6 +1483,8 @@
     try { const lib = await loadLibrary(system, store); index = lib.index; unpushedIds = lib.unpushedIds; }
     catch (_) { index = []; unpushedIds = new Set(); }
     try { vocab = await loadVocab(system, store); } catch (_) { vocab = []; }
+    try { tagRegistry = await loadTagRegistry(); } catch (_) { tagRegistry = []; }
+    if (renderer) renderer.setTagRegistry(tagRegistry);   // (renderer is lazy; ensureRenderer also seeds it)
     render(); updatePushBtn(); renderVocab();
   })();
 </script>

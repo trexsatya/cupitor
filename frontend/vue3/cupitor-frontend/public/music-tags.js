@@ -1,0 +1,91 @@
+// public/music-tags.js
+// Pure model for "pattern tags". Two layers, kept separate so the tag list can be GLOBAL while the
+// note assignments stay per-piece:
+//   • registry    — the global, shared list of tags: [{ name, color }] (persisted device-wide)
+//   • assignments — which notes in THIS piece carry which tag: [{ name, notes:[{measure,midi,beats}] }]
+//                   (persisted with the piece, as detail.patterns)
+// Colors live only in the registry, so a tag looks the same in every piece. No DOM, no rendering.
+
+// Distinct, reasonably-separable hues. Tags cycle through these in creation order.
+export const TAG_PALETTE = [
+  '#e6194B', '#3cb44b', '#4363d8', '#f58231', '#911eb4',
+  '#1d9e8a', '#f032e6', '#9A6324', '#808000', '#000075',
+];
+
+export function tagColor(i) { return TAG_PALETTE[((i % TAG_PALETTE.length) + TAG_PALETTE.length) % TAG_PALETTE.length]; }
+
+// Stable key for a note identity (mirrors suppressionKey so the two features key notes identically).
+export function noteId({ measure, midi, beats }) { return `${measure}:${midi}:${Number(beats).toFixed(6)}`; }
+
+// ── Registry (global tag list) ────────────────────────────────────────────────────────────────
+
+// Add a tag (next palette color) unless the name already exists or is blank. Returns { registry, added }.
+export function addTag(registry, name) {
+  const list = registry || [];
+  const clean = (name || '').trim();
+  if (!clean || list.some((t) => t.name === clean)) return { registry: list, added: false };
+  return { registry: [...list, { name: clean, color: tagColor(list.length) }], added: true };
+}
+
+// Drop a tag by name. Returns a NEW registry.
+export function removeTag(registry, name) { return (registry || []).filter((t) => t.name !== name); }
+
+// name → color lookup.
+export function colorMap(registry) {
+  const m = {};
+  (registry || []).forEach((t) => { m[t.name] = t.color; });
+  return m;
+}
+
+// Ensure every tag name used in `patterns` exists in the registry (so a piece's tags always show in
+// the global list). Preserves existing registry colors; honours a legacy color carried on a pattern,
+// else assigns the next palette color. Returns a NEW registry.
+export function mergeRegistry(registry, patterns) {
+  const out = (registry || []).map((t) => ({ ...t }));
+  const has = new Set(out.map((t) => t.name));
+  (patterns || []).forEach((p) => {
+    if (!p || !p.name || has.has(p.name)) return;
+    out.push({ name: p.name, color: p.color || tagColor(out.length) });
+    has.add(p.name);
+  });
+  return out;
+}
+
+// ── Assignments (per-piece note → tag) ──────────────────────────────────────────────────────────
+
+export function indexAssignments(assignments) {
+  return (assignments || []).map((a) => ({ name: a.name, keys: new Set((a.notes || []).map(noteId)) }));
+}
+
+// The NAME of the first assignment (by order) whose set contains `key`, or null. First tag wins.
+export function firstTagForKey(indexed, key) {
+  for (const a of indexed) if (a.keys.has(key)) return a.name;
+  return null;
+}
+
+// Add/remove a note in the named tag's assignment, creating the assignment entry if absent.
+// Returns a NEW assignments array.
+export function toggleNote(assignments, name, id) {
+  const key = noteId(id);
+  const list = assignments || [];
+  const note = { measure: id.measure, midi: id.midi, beats: id.beats };
+  if (!list.some((a) => a.name === name)) return [...list, { name, notes: [note] }];
+  return list.map((a) => {
+    if (a.name !== name) return a;
+    const has = (a.notes || []).some((n) => noteId(n) === key);
+    const notes = has ? a.notes.filter((n) => noteId(n) !== key) : [...(a.notes || []), note];
+    return { ...a, notes };
+  });
+}
+
+// The per-note render decision. `colorOf(name)` resolves the registry color; `selectedNames` is the
+// Set of tags the filter shows.
+//   filter off → tagged notes get their color, nothing dims (base "color by tag" behavior)
+//   filter on  → a note in a SELECTED tag keeps its color; every other note is dimmed.
+export function noteStyle(indexed, key, filterOn, selectedNames, colorOf) {
+  const name = firstTagForKey(indexed, key);
+  const color = name && colorOf ? colorOf(name) : null;
+  if (!filterOn) return { color, dim: false };
+  if (name && selectedNames && selectedNames.has(name)) return { color, dim: false };
+  return { color: null, dim: true };
+}

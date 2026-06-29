@@ -428,6 +428,42 @@ describe('createMusicRenderer suppression set API', () => {
   });
 });
 
+describe('createMusicRenderer tag filter playback notes', () => {
+  test('getFilterNotes merges the checked tags, sorts by onset, de-dups', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.setPatterns([
+      { name: 'A', notes: [{ measure: 1, midi: 64, beats: 1 }, { measure: 1, midi: 60, beats: 0 }] },
+      { name: 'B', notes: [{ measure: 3, midi: 67, beats: 8 }] },
+      { name: 'C', notes: [{ measure: 2, midi: 62, beats: 4 }] },   // not in the filter
+    ]);
+    r.setFilterTags(['A', 'B']);
+    expect(r.getFilterNotes()).toEqual([
+      { measure: 1, midi: 60, beats: 0 },
+      { measure: 1, midi: 64, beats: 1 },
+      { measure: 3, midi: 67, beats: 8 },
+    ]);
+  });
+
+  test('getFilterNotes returns [] when no tags are checked', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.setPatterns([{ name: 'A', notes: [{ measure: 1, midi: 60, beats: 0 }] }]);
+    expect(r.getFilterNotes()).toEqual([]);
+  });
+
+  test('getFilterNotes de-dups a note shared by two checked tags', () => {
+    const osmd = fakeOsmd();
+    const r = createMusicRenderer({}, { osmdFactory: () => osmd });
+    r.setPatterns([
+      { name: 'A', notes: [{ measure: 1, midi: 60, beats: 0 }] },
+      { name: 'B', notes: [{ measure: 1, midi: 60, beats: 0 }] },
+    ]);
+    r.setFilterTags(['A', 'B']);
+    expect(r.getFilterNotes()).toEqual([{ measure: 1, midi: 60, beats: 0 }]);
+  });
+});
+
 describe('pitchClassFromPitch', () => {
   // Mirror OSMD's Pitch: static getNoteEnumString / accidentalVexflow + the two getters.
   const LETTER = { 0: 'C', 2: 'D', 4: 'E', 5: 'F', 7: 'G', 9: 'A', 11: 'B' };
@@ -472,5 +508,190 @@ describe('clusterBandsByGap (system clustering, zoom-scaled gap)', () => {
   });
   test('empty input → []', () => {
     expect(clusterBandsByGap([], 60)).toEqual([]);
+  });
+});
+
+import { pitchClassesOf, topChordPerMeasure } from './music-render.js';
+
+describe('pitchClassesOf', () => {
+  test('dedupes by name, preserves first-seen order', () => {
+    expect(pitchClassesOf([{ name: 'C' }, { name: 'E' }, { name: 'C' }, { name: 'G' }]))
+      .toEqual(['C', 'E', 'G']);
+  });
+  test('ignores entries without a name', () => {
+    expect(pitchClassesOf([{ name: 'C' }, {}, { name: null }, { name: 'G' }])).toEqual(['C', 'G']);
+  });
+  test('null/empty input → []', () => {
+    expect(pitchClassesOf(null)).toEqual([]);
+    expect(pitchClassesOf([])).toEqual([]);
+  });
+});
+
+describe('topChordPerMeasure', () => {
+  test('takes the first chord of each measure that has one', () => {
+    const areas = [
+      { measure: 1, chords: [{ name: 'C' }, { name: 'Am' }] },
+      { measure: 2, chords: [] },
+      { measure: 3, chords: [{ name: 'G' }] },
+    ];
+    expect(topChordPerMeasure(areas)).toEqual([
+      { measure: 1, chord: { name: 'C' } },
+      { measure: 3, chord: { name: 'G' } },
+    ]);
+  });
+  test('null input → []', () => {
+    expect(topChordPerMeasure(null)).toEqual([]);
+  });
+});
+
+import { octaveFromMidi, noteSetOf } from './music-render.js';
+
+describe('octaveFromMidi', () => {
+  test('C4 = 60 → "4", E2 = 40 → "2", E4 = 64 → "4"', () => {
+    expect(octaveFromMidi(60)).toBe('4');
+    expect(octaveFromMidi(40)).toBe('2');
+    expect(octaveFromMidi(64)).toBe('4');
+  });
+  test('B3 = 59 → "3" (octave boundary at C)', () => {
+    expect(octaveFromMidi(59)).toBe('3');
+  });
+  test('non-number → null', () => {
+    expect(octaveFromMidi(undefined)).toBeNull();
+  });
+});
+
+describe('noteSetOf', () => {
+  test('keeps name+octave, dedupes same pitch, preserves first-seen order', () => {
+    expect(noteSetOf([
+      { name: 'C', midi: 60 }, { name: 'E', midi: 64 },
+      { name: 'C', midi: 60 }, { name: 'C', midi: 72 },
+    ])).toEqual([
+      { name: 'C', octave: '4' }, { name: 'E', octave: '4' }, { name: 'C', octave: '5' },
+    ]);
+  });
+  test('ignores entries without a name; null/empty → []', () => {
+    expect(noteSetOf([{ name: 'C', midi: 60 }, {}, { name: null, midi: 1 }]))
+      .toEqual([{ name: 'C', octave: '4' }]);
+    expect(noteSetOf(null)).toEqual([]);
+  });
+});
+
+import { stepWindowAnchors } from './music-render.js';
+
+describe('stepWindowAnchors', () => {
+  const n = 10;
+  test('moveRight slides both, fixed width; clamps at the end', () => {
+    expect(stepWindowAnchors(2, 4, n, 'moveRight')).toEqual({ a: 3, b: 5 });
+    expect(stepWindowAnchors(7, 9, n, 'moveRight')).toEqual({ a: 7, b: 9 }); // b at last → no move
+  });
+  test('moveLeft slides both; clamps at the start', () => {
+    expect(stepWindowAnchors(2, 4, n, 'moveLeft')).toEqual({ a: 1, b: 3 });
+    expect(stepWindowAnchors(0, 3, n, 'moveLeft')).toEqual({ a: 0, b: 3 }); // a at 0 → no move
+  });
+  test('expand grows at the end, then falls back to the start edge', () => {
+    expect(stepWindowAnchors(2, 4, n, 'expand')).toEqual({ a: 2, b: 5 });
+    expect(stepWindowAnchors(3, 9, n, 'expand')).toEqual({ a: 2, b: 9 }); // b at last → grow start
+    expect(stepWindowAnchors(0, 9, n, 'expand')).toEqual({ a: 0, b: 9 }); // already full
+  });
+  test('shrink shrinks at the end but never below one note', () => {
+    expect(stepWindowAnchors(2, 4, n, 'shrink')).toEqual({ a: 2, b: 3 });
+    expect(stepWindowAnchors(5, 5, n, 'shrink')).toEqual({ a: 5, b: 5 }); // single note → stays
+  });
+  test('normalizes a reversed range before stepping', () => {
+    expect(stepWindowAnchors(6, 3, n, 'moveRight')).toEqual({ a: 4, b: 7 });
+  });
+});
+
+import { stepWindowToBand } from './music-render.js';
+
+describe('stepWindowToBand', () => {
+  // 9 notes across 3 lines: band 0 = idx0-2, band 1 = idx3-5, band 2 = idx6-8.
+  const bandOf = [0, 0, 0, 1, 1, 1, 2, 2, 2];
+  test('moveDown jumps to the next line at the same position-in-line, keeping width', () => {
+    expect(stepWindowToBand(bandOf, 0, 1, +1)).toEqual({ a: 3, b: 4 }); // line0 pos0 → line1 pos0
+    expect(stepWindowToBand(bandOf, 1, 2, +1)).toEqual({ a: 4, b: 5 }); // pos1 preserved
+  });
+  test('moveUp jumps to the previous line', () => {
+    expect(stepWindowToBand(bandOf, 4, 5, -1)).toEqual({ a: 1, b: 2 });
+  });
+  test('no line in that direction → unchanged', () => {
+    expect(stepWindowToBand(bandOf, 0, 1, -1)).toEqual({ a: 0, b: 1 }); // already top line
+    expect(stepWindowToBand(bandOf, 6, 7, +1)).toEqual({ a: 6, b: 7 }); // already bottom line
+  });
+  test('clamps position when the target line is shorter', () => {
+    const ragged = [0, 0, 0, 0, 1, 1]; // line0 has 4, line1 has 2
+    expect(stepWindowToBand(ragged, 3, 3, +1)).toEqual({ a: 5, b: 5 }); // pos3 → clamp to last (pos1)
+  });
+  test('empty input is safe', () => {
+    expect(stepWindowToBand([], 0, 0, +1)).toEqual({ a: 0, b: 0 });
+  });
+});
+
+import { swapOverlayLayer } from './music-render.js';
+import { svgHtmlLabel } from './music-render.js';
+
+describe('svgHtmlLabel', () => {
+  // Labels are HTML in a <foreignObject> (not SVG <text>) so glyphs don't collapse on Android/Blink
+  // after OSMD's font loads. These pin the structure + positioning the renderer relies on.
+  test('wraps the text in a foreignObject > div with the given text', () => {
+    const fo = svgHtmlLabel(document, { x: 10, y: 20, fontSize: 9, text: 'Emin+9' });
+    expect(fo.tagName.toLowerCase()).toBe('foreignobject');
+    const div = fo.firstChild;
+    expect(div.tagName.toLowerCase()).toBe('div');
+    expect(div.textContent).toBe('Emin+9');
+    expect(fo.querySelector('text')).toBeNull();   // must NOT be an SVG <text>
+  });
+
+  test("anchor 'start' puts the box left edge at x; baseline maps to box top", () => {
+    const fo = svgHtmlLabel(document, { x: 50, y: 30, fontSize: 9, anchor: 'start', text: 'C' });
+    expect(Number(fo.getAttribute('x'))).toBe(50);
+    expect(Number(fo.getAttribute('y'))).toBe(30 - 9);   // y is the baseline → box top = y - fontSize
+  });
+
+  test("anchor 'middle' centres the box on x", () => {
+    const fo = svgHtmlLabel(document, { x: 100, y: 30, fontSize: 7, anchor: 'middle', text: 'C4' });
+    const w = Number(fo.getAttribute('width'));
+    expect(Number(fo.getAttribute('x'))).toBe(100 - w / 2);
+    expect(fo.firstChild.getAttribute('style')).toContain('text-align:center');
+  });
+
+  test('applies font-size and caller css to the div', () => {
+    const fo = svgHtmlLabel(document, { x: 0, y: 0, fontSize: 11, css: 'color:#c62828;font-weight:700;', text: 'G' });
+    const style = fo.firstChild.getAttribute('style');
+    expect(style).toContain('font-size:11px');
+    expect(style).toContain('color:#c62828');
+    expect(style).toContain('font-weight:700');
+  });
+});
+
+describe('swapOverlayLayer', () => {
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const mkSvg = () => document.createElementNS(SVG_NS, 'svg');
+
+  test('builds a fresh layer and returns true on success', () => {
+    const svg = mkSvg();
+    const ok = swapOverlayLayer(svg, 'lyr', (layer) => {
+      const t = document.createElementNS(SVG_NS, 'text'); t.textContent = 'A'; layer.appendChild(t);
+    });
+    expect(ok).toBe(true);
+    expect(svg.querySelectorAll('g.lyr').length).toBe(1);
+    expect(svg.querySelector('g.lyr text').textContent).toBe('A');
+  });
+
+  test('a throwing build leaves the PREVIOUS layer intact and returns false', () => {
+    const svg = mkSvg();
+    swapOverlayLayer(svg, 'lyr', (layer) => { const t = document.createElementNS(SVG_NS, 'text'); t.textContent = 'first'; layer.appendChild(t); });
+    const ok = swapOverlayLayer(svg, 'lyr', () => { throw new Error('getBBox boom'); });
+    expect(ok).toBe(false);
+    expect(svg.querySelectorAll('g.lyr').length).toBe(1);                 // still exactly one
+    expect(svg.querySelector('g.lyr text').textContent).toBe('first');   // the OLD one — not blanked
+  });
+
+  test('a successful build replaces the old layer (no accumulation)', () => {
+    const svg = mkSvg();
+    swapOverlayLayer(svg, 'lyr', (l) => { const t = document.createElementNS(SVG_NS, 'text'); t.textContent = '1'; l.appendChild(t); });
+    swapOverlayLayer(svg, 'lyr', (l) => { const t = document.createElementNS(SVG_NS, 'text'); t.textContent = '2'; l.appendChild(t); });
+    expect(svg.querySelectorAll('g.lyr').length).toBe(1);
+    expect(svg.querySelector('g.lyr text').textContent).toBe('2');
   });
 });
