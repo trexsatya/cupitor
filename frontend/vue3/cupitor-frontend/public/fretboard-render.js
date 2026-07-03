@@ -46,7 +46,10 @@ function stringY(string) { return PAD_TOP + (string - 1) * STRING_GAP; }
 // x-center for a fret: fret 0 sits in the open column left of the nut; fret N centers in its cell.
 function fretX(fret) { return fret === 0 ? PAD_LEFT - 22 : PAD_LEFT + (fret - 0.5) * FRET_W; }
 
-export function renderFretboard(svgEl, { trail = [] } = {}) {
+const COMMON_COLOR = '#e8820c';   // note held in common with the previous step
+const ARROW_COLOR = '#5b2a86';    // movement direction when several notes share a string
+
+export function renderFretboard(svgEl, { trail = [], highlight = new Set(), arrows = [] } = {}) {
   while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
 
   const width = PAD_LEFT + NUM_FRETS * FRET_W + 12;
@@ -86,12 +89,34 @@ export function renderFretboard(svgEl, { trail = [] } = {}) {
     entry.voicing.forEach((p) => {
       const cx = fretX(p.fret);
       const cy = stringY(p.string);
-      svgEl.appendChild(el('circle', { cx, cy, r: DOT_R, fill: '#1565c0', opacity,
-        'data-age': entry.age, class: 'fb-dot' }));
+      // Current-step notes held in common with the previous step are drawn in a distinct color
+      // (with a ring) so the held/common note stands out while stepping.
+      const isCommon = entry.age === 0 && highlight.has(`${p.string}:${p.fret}`);
+      svgEl.appendChild(el('circle', { cx, cy, r: DOT_R, fill: isCommon ? COMMON_COLOR : '#1565c0', opacity,
+        ...(isCommon ? { stroke: '#7a3d00', 'stroke-width': 2 } : {}),
+        'data-age': entry.age, class: isCommon ? 'fb-dot fb-dot-common' : 'fb-dot' }));
       const num = htmlLabel({ x: cx, y: cy, fontSize: 9, anchor: 'middle', vAlign: 'middle',
         css: `color:#fff;font-weight:700;opacity:${opacity};`, text: '' + p.fret });
       num.setAttribute('class', 'fb-dot-label');
       svgEl.appendChild(num);
     });
+  });
+
+  // Movement arrows: a horizontal arrow just above a string that carries several notes, spanning
+  // its min→max fret. Head at the higher fret for 'up', lower for 'down', both ends for 'bi'.
+  arrows.forEach((a) => {
+    const y = stringY(a.string) - (DOT_R + 5);
+    const x1 = fretX(a.minFret);
+    const x2 = fretX(a.maxFret);
+    // The `fb-arrow-line` + direction class drive the CSS flow/pulse animation (defined in the page).
+    svgEl.appendChild(el('line', { x1, y1: y, x2, y2: y, stroke: ARROW_COLOR, 'stroke-width': 2,
+      class: `fb-arrow fb-arrow-line ${a.dir}` }));
+    const head = (x, pointLeft) => {
+      const d = 6;
+      const pts = pointLeft ? `${x},${y} ${x + d},${y - 4} ${x + d},${y + 4}` : `${x},${y} ${x - d},${y - 4} ${x - d},${y + 4}`;
+      svgEl.appendChild(el('polygon', { points: pts, fill: ARROW_COLOR, class: 'fb-arrow fb-arrowhead' }));
+    };
+    if (a.dir === 'up' || a.dir === 'bi') head(x2, false);   // toward higher fret (right)
+    if (a.dir === 'down' || a.dir === 'bi') head(x1, true);  // toward the nut (left)
   });
 }

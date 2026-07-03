@@ -544,7 +544,22 @@ describe('topChordPerMeasure', () => {
   });
 });
 
-import { octaveFromMidi, noteSetOf } from './music-render.js';
+import { octaveFromMidi, noteSetOf, midiFromVexKey, eventsOf } from './music-render.js';
+
+describe('midiFromVexKey', () => {
+  test('parses a VexFlow key (note/octave) into a MIDI number', () => {
+    expect(midiFromVexKey('c/4')).toBe(60);    // C4
+    expect(midiFromVexKey('b/3')).toBe(59);    // B3 — the register a borrowed B should keep
+    expect(midiFromVexKey('bb/3')).toBe(58);   // Bb3
+    expect(midiFromVexKey('f#/4')).toBe(66);   // F#4
+    expect(midiFromVexKey('cn/5')).toBe(72);   // natural marker stripped → C5
+  });
+  test('invalid / octaveless input → null', () => {
+    expect(midiFromVexKey('b')).toBeNull();
+    expect(midiFromVexKey('')).toBeNull();
+    expect(midiFromVexKey(null)).toBeNull();
+  });
+});
 
 describe('octaveFromMidi', () => {
   test('C4 = 60 → "4", E2 = 40 → "2", E4 = 64 → "4"', () => {
@@ -573,6 +588,22 @@ describe('noteSetOf', () => {
     expect(noteSetOf([{ name: 'C', midi: 60 }, {}, { name: null, midi: 1 }]))
       .toEqual([{ name: 'C', octave: '4' }]);
     expect(noteSetOf(null)).toEqual([]);
+  });
+});
+
+describe('eventsOf', () => {
+  test('keeps midi+onset+duration in onset order, drops non-numeric midi, defaults missing beat/dur', () => {
+    expect(eventsOf([
+      { midi: 64, onsetBeats: 2, durBeats: 1 },
+      { midi: 60, onsetBeats: 0, durBeats: 2 },
+      { midi: 67, onsetBeats: 0 },            // shares onset 0 → same beat (chord); dur defaults to 1
+      {}, { midi: null, onsetBeats: 1 },      // dropped (no numeric midi)
+    ])).toEqual([
+      { midi: 60, beat: 0, durBeats: 2 },
+      { midi: 67, beat: 0, durBeats: 1 },
+      { midi: 64, beat: 2, durBeats: 1 },
+    ]);
+    expect(eventsOf(null)).toEqual([]);
   });
 });
 

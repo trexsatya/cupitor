@@ -36,6 +36,13 @@ export const STANDARD_TUNING = {
 
 const STRINGS = [1, 2, 3, 4, 5, 6];
 
+// The note { name, octave } sounding at a string/fret in standard tuning, or null if out of range.
+export function noteAt(string, fret) {
+  const names = STANDARD_TUNING.notes[string];
+  if (!names || fret < 0 || fret >= names.length) return null;
+  return { name: names[fret], octave: STANDARD_TUNING.octaves[string][fret] };
+}
+
 // Every {string, fret, octave} where the pitch class `noteName` appears (frets 0..12).
 // If `octave` is given, restrict to that register. Enharmonic via equalNotes.
 export function findPositions(noteName, octave) {
@@ -68,15 +75,20 @@ function normNote(n) { return typeof n === 'string' ? { name: n, octave: undefin
 // `notes` is an array of { name, octave } (or plain pitch-class strings). Octave matching is strict:
 // an octave-tagged note out of guitar range contributes no positions and is dropped (we never
 // relocate it to the wrong register). De-duplicated.
-export function voicingsForNotes(notes) {
+export function voicingsForNotes(notes, { requirePlayable = true, requireDistinctStrings = true } = {}) {
   const perNote = (notes || [])
     .map(normNote)
     .map((n) => findPositions(n.name, n.octave))
     .filter((arr) => arr.length > 0);
   if (!perNote.length) return [];
   return cartesian(...perNote)
-    .filter((combo) => allPairs(combo, isPlayable))
+    // Playability (fretted span ≤ 3) — optional, so a "show the exact notes" mode can keep
+    // physically-unplayable spreads.
+    .filter((combo) => !requirePlayable || allPairs(combo, isPlayable))
+    // One note per string — optional, so match-octave mode can show every sheet note at its exact
+    // register even when two land on the same string.
     .filter((combo) => {
+      if (!requireDistinctStrings) return true;
       const strings = combo.map((p) => p.string);
       return new Set(strings).size === strings.length;
     })

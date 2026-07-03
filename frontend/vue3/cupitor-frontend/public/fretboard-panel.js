@@ -1,8 +1,26 @@
 // public/fretboard-panel.js
 // Controller for the fretboard visualizer panel. Pure helpers (buildTrail, cycleIndex) are exported
 // for unit testing; init() wires the DOM and is exercised manually in the browser.
-import { voicingsForNotes, findPaths, movementSparkline } from './fretboard-core.js';
+import { voicingsForNotes, findPaths, movementSparkline, noteAt } from './fretboard-core.js';
 import { renderFretboard } from './fretboard-render.js';
+import { equalNotes } from './music-reference-data.js';
+
+// "string:fret" keys of positions in `voicing` whose note also appears in `prevNotes` (the previous
+// step's notes, [{name, octave}]) — the common notes to highlight when stepping. Enharmonic-aware.
+// When `matchOctave` is true a note must match name AND octave to count as common; otherwise the
+// match is by pitch class.
+export function commonPositions(voicing, prevNotes, matchOctave) {
+  const keys = new Set();
+  if (!voicing || !prevNotes || !prevNotes.length) return keys;
+  voicing.forEach((p) => {
+    const nm = noteAt(p.string, p.fret);
+    if (!nm) return;
+    const hit = prevNotes.some((x) =>
+      equalNotes(x.name, nm.name) && (!matchOctave || String(x.octave) === String(nm.octave)));
+    if (hit) keys.add(`${p.string}:${p.fret}`);
+  });
+  return keys;
+}
 
 // Modulo stepper; tolerates count 0.
 export function cycleIndex(idx, count, dir) {
@@ -26,12 +44,49 @@ export function buildTrail(path, stepVoicings, stepIdx, overrides) {
   return trail;
 }
 
-// Wire the panel. `renderer` is a createMusicRenderer instance; `dom` holds the panel elements.
-export function init(renderer, dom) {
+// Per-string movement arrows for a step where several notes land on one string. `seq` is the step's
+// ordered note sequence (with repeats) [{name, octave}]; each is mapped to its position in `voicing`,
+// then per string the ordered frets are classified: 'up' (frets rise), 'down' (fall), or 'bi'
+// (reverses, e.g. n1→n2→n1). Strings with <2 sounded notes, or no fret change, yield no arrow.
+export function stringArrows(voicing, seq, matchOctave) {
+  if (!voicing || !seq || seq.length < 2) return [];
+  const posFor = (note) => voicing.find((p) => {
+    const nm = noteAt(p.string, p.fret);
+    return nm && equalNotes(note.name, nm.name) && (!matchOctave || String(note.octave) === String(nm.octave));
+  });
+  const perString = new Map();   // string → ordered frets
+  seq.forEach((note) => {
+    const p = posFor(note);
+    if (!p) return;
+    if (!perString.has(p.string)) perString.set(p.string, []);
+    perString.get(p.string).push(p.fret);
+  });
+  const arrows = [];
+  perString.forEach((frets, string) => {
+    if (frets.length < 2) return;
+    let up = false, down = false;
+    for (let i = 1; i < frets.length; i++) {
+      if (frets[i] > frets[i - 1]) up = true;
+      else if (frets[i] < frets[i - 1]) down = true;
+    }
+    if (!up && !down) return;   // repeated same fret → no movement
+    arrows.push({ string, minFret: Math.min(...frets), maxFret: Math.max(...frets), dir: (up && down) ? 'bi' : (up ? 'up' : 'down') });
+  });
+  return arrows;
+}
+
+// Wire the panel. `renderer` is a createMusicRenderer instance; `dom` holds the panel elements;
+// `hooks.playSequence(events)` sounds a step's notes as they read on the sheet (injected by the
+// page so the fretboard reuses the main player/instrument); `events` is [{midi, beat, durBeats}].
+export function init(renderer, dom, hooks = {}) {
   const state = {
-    source: 'guessed',          // 'guessed' | 'window'
+    source: 'guessed',          // 'guessed' | 'window' | 'matched' | 'phrases'
     includeSuppressed: false,
-    matchOctave: true,          // true → place notes at their written register; false → pitch-class
+    // true → place notes at their written register; false → pitch-class (idiomatic shapes).
+    // Initialised from the checkbox so the HTML default is the source of truth.
+    matchOctave: !!(dom && dom.octaveChk && dom.octaveChk.checked),
+    requirePlayable: !!(dom && dom.playableChk && dom.playableChk.checked),  // enforce fretted span ≤ 3
+    autoPlay: !!(dom && dom.autoPlayChk && dom.autoPlayChk.checked),         // sound each step on Prev/Next
     steps: [],                  // [{ measure?, name, noteNames }]
     stepVoicings: [],           // voicingsForNotes per step
     paths: [],                  // findPaths output
@@ -57,17 +112,29 @@ export function init(renderer, dom) {
     let steps = [];
     if (state.source === 'guessed') {
       steps = renderer.getGuessedChordSequence(opts) || [];
+    } else if (state.source === 'matched') {
+      steps = (renderer.getPatternMatchSequence && renderer.getPatternMatchSequence(opts)) || [];
+    } else if (state.source === 'phrases') {
+      steps = (renderer.getPhrasesSequence && renderer.getPhrasesSequence(opts)) || [];
     } else {
       const ws = renderer.getWindowNoteSet(opts);
-      if (ws && ws.notes.length) steps = [{ name: 'window', notes: ws.notes }];
+      if (ws && ws.notes.length) steps = [{ name: 'window', notes: ws.notes, seq: ws.seq, measures: ws.measureRange }];
     }
-    if (!steps.length) { setMsg('No chords to capture — guess chords or select a window first.'); return; }
+    if (!steps.length) {
+      if (renderer.clearStepHighlight) renderer.clearStepHighlight();
+      setMsg(state.source === 'matched' ? 'No motifs — run Find pattern (Motifs panel) first.'
+        : state.source === 'phrases' ? 'No phrases with notes on the sheet — create one in the Phrases panel first.'
+        : 'No chords to capture — guess chords or select a window first.');
+      return;
+    }
     setMsg('');
     state.steps = steps;
-    // Match-octave on → place notes at their exact written register (some chords may have no
-    // playable shape). Off → drop the octave so each note resolves to any register (idiomatic shapes).
+    // Match-octave on → place notes at their exact written register AND allow two notes on the same
+    // string (show every sheet note where it sounds). Off → drop the octave so each note resolves to
+    // any register, one per string (idiomatic playable shapes). `requirePlayable` gates the span filter.
+    const opts2 = { requirePlayable: state.requirePlayable, requireDistinctStrings: !state.matchOctave };
     state.stepVoicings = steps.map((s) =>
-      state.matchOctave ? voicingsForNotes(s.notes) : voicingsForNotes(s.notes.map((n) => ({ name: n.name }))));
+      state.matchOctave ? voicingsForNotes(s.notes, opts2) : voicingsForNotes(s.notes.map((n) => ({ name: n.name })), opts2));
     state.paths = findPaths(state.stepVoicings);
     state.selectedPathIdx = 0;
     state.stepIdx = 0;
@@ -102,7 +169,18 @@ export function init(renderer, dom) {
   function render() {
     const path = currentPath();
     const trail = buildTrail(path, state.stepVoicings, state.stepIdx, state.overrides);
-    renderFretboard(dom.svg, { trail });
+    // Highlight notes held in common with the previous step (current voicing is the age-0 entry).
+    // Respect match-octave: when on, "common" means same pitch AND octave; when off, pitch class.
+    const prev = state.steps[state.stepIdx - 1];
+    const prevNotes = prev ? (prev.notes || []) : [];
+    const curVoicing = (trail[trail.length - 1] || {}).voicing;
+    const highlight = commonPositions(curVoicing, prevNotes, state.matchOctave);
+    // Movement arrows for strings that carry several notes (only meaningful in match-octave mode,
+    // where two notes can share a string). Sheet order comes from the step's `seq`.
+    const arrows = stringArrows(curVoicing, (state.steps[state.stepIdx] || {}).seq, state.matchOctave);
+    renderFretboard(dom.svg, { trail, highlight, arrows });
+    // Shade the sheet segment (measure band behind the notes) for the current step, tracking stepping.
+    if (renderer.highlightStepMeasures) renderer.highlightStepMeasures((state.steps[state.stepIdx] || {}).measures || null);
     const step = state.steps[state.stepIdx];
     if (dom.stepLabel) dom.stepLabel.textContent =
       state.steps.length ? `${state.stepIdx + 1} / ${state.steps.length} — ${step ? step.name : ''}` : '—';
@@ -117,8 +195,11 @@ export function init(renderer, dom) {
   function step(dir) {
     if (!state.steps.length) return;
     const n = state.steps.length;
+    const prevIdx = state.stepIdx;
     state.stepIdx = Math.max(0, Math.min(n - 1, state.stepIdx + dir));
     render();
+    // Auto-play: sound the new step as it reads on the sheet (only when the index actually moved).
+    if (state.autoPlay && state.stepIdx !== prevIdx) playStep();
   }
 
   function play() {
@@ -131,6 +212,14 @@ export function init(renderer, dom) {
       state.stepIdx += 1;
       render();
     }, state.speedMs);
+  }
+
+  // Sound the current step as it reads on the sheet (the notes behind the highlighted segment), via
+  // the injected playSequence hook. Independent of the visual step transport.
+  function playStep() {
+    if (!hooks.playSequence) return;
+    const events = (state.steps[state.stepIdx] || {}).events || [];
+    if (events.length) hooks.playSequence(events);
   }
 
   function cycleShape(dir) {
@@ -156,16 +245,22 @@ export function init(renderer, dom) {
   function reflectSource() {
     if (dom.srcGuessed) dom.srcGuessed.classList.toggle('alt', state.source !== 'guessed');
     if (dom.srcWindow) dom.srcWindow.classList.toggle('alt', state.source !== 'window');
+    if (dom.srcMatched) dom.srcMatched.classList.toggle('alt', state.source !== 'matched');
+    if (dom.srcPhrases) dom.srcPhrases.classList.toggle('alt', state.source !== 'phrases');
   }
 
   // Wiring.
   if (dom.srcGuessed) dom.srcGuessed.addEventListener('click', () => { state.source = 'guessed'; reflectSource(); });
   if (dom.srcWindow) dom.srcWindow.addEventListener('click', () => { state.source = 'window'; reflectSource(); });
+  if (dom.srcMatched) dom.srcMatched.addEventListener('click', () => { state.source = 'matched'; reflectSource(); });
+  if (dom.srcPhrases) dom.srcPhrases.addEventListener('click', () => { state.source = 'phrases'; reflectSource(); });
   // A capture parameter changed — re-run the capture in place if the user has already captured once,
   // so toggling reflects immediately without re-clicking Capture.
   function maybeRecapture() { if (state.steps.length) capture(); }
   if (dom.suppressChk) dom.suppressChk.addEventListener('change', (e) => { state.includeSuppressed = e.target.checked; maybeRecapture(); });
   if (dom.octaveChk) dom.octaveChk.addEventListener('change', (e) => { state.matchOctave = e.target.checked; maybeRecapture(); });
+  if (dom.playableChk) dom.playableChk.addEventListener('change', (e) => { state.requirePlayable = e.target.checked; maybeRecapture(); });
+  if (dom.autoPlayChk) dom.autoPlayChk.addEventListener('change', (e) => { state.autoPlay = e.target.checked; });
   if (dom.captureBtn) dom.captureBtn.addEventListener('click', capture);
   if (dom.resetBtn) dom.resetBtn.addEventListener('click', reset);
   if (dom.fullscreenBtn) {
@@ -179,11 +274,15 @@ export function init(renderer, dom) {
   });
   if (dom.prevBtn) dom.prevBtn.addEventListener('click', () => { stopPlay(); step(-1); });
   if (dom.nextBtn) dom.nextBtn.addEventListener('click', () => { stopPlay(); step(+1); });
+  if (dom.playStepBtn) dom.playStepBtn.addEventListener('click', playStep);
   if (dom.playBtn) dom.playBtn.addEventListener('click', play);
   if (dom.speed) dom.speed.addEventListener('input', (e) => { state.speedMs = 1600 - parseInt(e.target.value, 10); });
   if (dom.shapePrev) dom.shapePrev.addEventListener('click', () => cycleShape(-1));
   if (dom.shapeNext) dom.shapeNext.addEventListener('click', () => cycleShape(+1));
-  if (dom.panel) dom.panel.addEventListener('toggle', () => { if (!dom.panel.open) stopPlay(); });
+  if (dom.panel) dom.panel.addEventListener('toggle', () => {
+    if (!dom.panel.open) { stopPlay(); if (renderer.clearStepHighlight) renderer.clearStepHighlight(); }
+    else if (state.steps.length) render();   // re-apply the step band when re-opened
+  });
 
   reflectSource();
 
@@ -198,5 +297,9 @@ export function init(renderer, dom) {
     window.addEventListener('orientationchange', settle);
   }
 
-  return { capture, reset, _state: state }; // _state exposed for debugging only
+  // Switch the capture source ('guessed'|'window'|'matched'|'phrases') from outside (e.g. the page
+  // auto-selects 'matched' when tag filtering engages). Reflects the button state; does not capture.
+  function setSource(name) { if (name && name !== state.source) { state.source = name; reflectSource(); } }
+
+  return { capture, reset, setSource, _state: state }; // _state exposed for debugging only
 }

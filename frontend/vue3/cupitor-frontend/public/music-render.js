@@ -3,7 +3,10 @@
 // a thin OSMD wrapper (injectable factory) for whole-piece / segment rendering.
 import { primaryVoice } from './music-encoding.js';
 import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
-import { indexAssignments, colorMap, toggleNote, noteStyle, noteId as tagNoteId } from './music-tags.js';
+import { indexAssignments, colorMap, toggleNote, firstTagForKey, noteId as tagNoteId } from './music-tags.js';
+import { extractTemplate, findMatches, degreeSequence, guessKey, keyLabel, MAJOR_SCALE, MINOR_SCALE } from './music-pattern.js';
+import { addPhrase as addPhraseReducer, removePhrase as removePhraseReducer,
+  togglePhraseNote as togglePhraseNoteReducer, resolvePhraseNoteIds, phraseByName } from './music-phrase.js';
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -273,6 +276,24 @@ export function octaveFromMidi(midi) {
   return '' + (Math.floor(midi / 12) - 1);
 }
 
+// A VexFlow key ("c#/5", "bb/3", "cn/4") → MIDI number, or null. Used to recover a note's register
+// when OSMD's source-note Pitch model is unavailable (then only the VexFlow key carries the octave),
+// so the fretboard can still place the note at its true octave instead of treating it as pitch-class.
+const VEX_SEMITONE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+export function midiFromVexKey(key) {
+  if (!key || typeof key !== 'string') return null;
+  const [pcRaw, octRaw] = key.split('/');
+  if (!pcRaw || octRaw == null) return null;
+  const norm = (pcRaw[0].toUpperCase() + pcRaw.slice(1)).replace(/n/g, '');   // "C#", "Bb"
+  let semi = VEX_SEMITONE[norm[0]];
+  if (semi == null) return null;
+  for (const ch of norm.slice(1)) { if (ch === '#') semi++; else if (ch === 'b') semi--; }
+  const oct = parseInt(octRaw, 10);
+  if (Number.isNaN(oct)) return null;
+  const midi = 12 * (oct + 1) + semi;
+  return (midi >= 0 && midi <= 127) ? midi : null;
+}
+
 // Distinct { name, octave } pitches from note objects carrying `name` + `midi`. Keeps the actual
 // register (so the fretboard can place each note at its real pitch), de-duped by name+octave.
 export function noteSetOf(notes) {
@@ -285,6 +306,27 @@ export function noteSetOf(notes) {
     if (!seen.has(key)) { seen.add(key); out.push({ name: n.name, octave }); }
   });
   return out;
+}
+
+// Playable events for a note set: [{midi, beat, durBeats}] in onset order (notes without a numeric
+// midi dropped). Carries each note's onset + duration so a step is sounded as it reads on the
+// sheet — notes sharing an onset stack into a chord, later onsets play in sequence — at the true
+// written register, regardless of the fretboard's match-octave mode.
+export function eventsOf(notes) {
+  return (notes || [])
+    .filter((n) => n && typeof n.midi === 'number')
+    .map((n) => ({ midi: n.midi, beat: (n.onsetBeats == null ? 0 : n.onsetBeats), durBeats: (n.durBeats == null ? 1 : n.durBeats) }))
+    .sort((a, b) => a.beat - b.beat);
+}
+
+// Ordered note sequence [{name, octave}] in SHEET (onset) order, with repeats preserved — for the
+// fretboard's per-string movement arrows (which need melodic direction, not a de-duped set).
+export function seqOf(notes) {
+  return (notes || [])
+    .filter((n) => n && n.name)
+    .slice()
+    .sort((a, b) => ((a.onsetBeats == null ? 0 : a.onsetBeats) - (b.onsetBeats == null ? 0 : b.onsetBeats)))
+    .map((n) => ({ name: n.name, octave: octaveFromMidi(n.midi) }));
 }
 
 // Given measureChordAreas output (ordered), take each measure's top (first) chord.
@@ -356,6 +398,7 @@ export function createMusicRenderer(container, opts = {}) {
                                  // occurrence of it across the visible sheet (not just locally)
   const selectedChords = new Set();   // manually-picked best-match chord names (multi-select; persisted per vocab item)
   let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
+  let stepHighlight = null;      // [from,to] of the current fretboard step's measures (blue band)
   let shownFrom = 1;             // 1-based first measure of the currently drawn window
   let shownTo = Number.MAX_SAFE_INTEGER;   // ...and the last (chords/highlight clip to this)
   // Draggable selection window over the staff. start/end are stable {measure, idx} anchors so the
@@ -382,10 +425,23 @@ export function createMusicRenderer(container, opts = {}) {
   let tagFilter = false;             // when on, dim notes not in the selected tags
   let filterTags = new Set();        // tag names the filter shows
   const onPatternsChange = opts.onPatternsChange;   // fired after the user edits per-piece assignments
+  // Phrases: per-piece [{ name, color, notes:[{measure,midi,beats}] }] — named sets of hand-picked
+  // notes (see music-phrase.js). Persisted as detail.phrases.
+  let phrases = [];
+  let phrasePaintMode = false;       // when on, notehead clicks add/remove the active phrase's notes
+  let activePhrase = null;           // the phrase that paint-mode clicks and fretboard capture use
+  let phraseFilter = false;          // when on (phrase panel open), dim notes not in a shown phrase
+  let shownPhrases = new Set();       // phrase names whose notes are revealed + tinted on the sheet
+  const onPhrasesChange = opts.onPhrasesChange;     // fired after the user edits phrases
   // A detached copy of the per-piece assignments, safe to persist / hand to the UI.
   function getAssignments() {
     return assignments.map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) }));
   }
+  // A detached copy of the phrases, safe to persist / hand to the UI.
+  function getPhrases() {
+    return phrases.map((p) => ({ name: p.name, color: p.color, notes: (p.notes || []).map((n) => ({ ...n })) }));
+  }
+  function firePhrasesChange() { if (onPhrasesChange) { try { onPhrasesChange(getPhrases()); } catch (_) {} } }
 
   // OSMD Voice object → its global color index (the same index voiceColor() uses), rebuilt every
   // render by applyVoiceColors so rendered notes can be tagged with a stable voice id.
@@ -518,14 +574,22 @@ export function createMusicRenderer(container, opts = {}) {
               if (!el || !name || el.isConnected === false) return;
               const b = el.getBBox ? el.getBBox() : { x: 0 };
               // MIDI pitch (Pitch.getHalfTone() + 12, as in applyNoteNames) and the note's voice
-              // color-index — used to identify suppressed notes and to suppress whole voices.
-              const midi = (pitch && typeof pitch.getHalfTone === 'function') ? pitch.getHalfTone() + 12 : null;
+              // color-index — used to identify suppressed notes and to suppress whole voices. When the
+              // Pitch model is missing, recover the register from the VexFlow key (which carries the
+              // octave) so the note isn't left octave-less — that made fretboard capture place such a
+              // note (e.g. a borrowed chord tone) at an arbitrary octave.
+              const midi = (pitch && typeof pitch.getHalfTone === 'function')
+                ? pitch.getHalfTone() + 12
+                : midiFromVexKey(vf[0].keys && vf[0].keys[idx]);
+              // Note duration in quarter-beats (Length is in whole notes → ×4), for pattern search.
+              const len = sourceNote && sourceNote.Length;
+              const durBeats = (len && typeof len.RealValue === 'number') ? len.RealValue * 4 : null;
               const voiceRef = sourceNote && sourceNote.ParentVoiceEntry && sourceNote.ParentVoiceEntry.ParentVoice;
               const voice = voiceIndexByRef.has(voiceRef) ? voiceIndexByRef.get(voiceRef) : 0;
               // `measure`/`idx` are the note's stable musical key (absolute measure + position
               // within it), used to re-anchor the draggable chord window across re-renders.
               const arr = (byMeasure[num] = byMeasure[num] || []);
-              arr.push({ name, left: b.x, el, measure: num, idx: arr.length, onsetBeats, midi, voice, system });
+              arr.push({ name, left: b.x, el, measure: num, idx: arr.length, onsetBeats, midi, durBeats, voice, system });
             });
           });
         });
@@ -546,10 +610,11 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
-  // Recolor (in yellow) the noteheads that formed a chord; replaces any prior highlight. Sets
-  // both the fill attribute and the inline style so it wins over OSMD's voice-color style.
-  function highlightChord(notes) {
-    clearHighlight();
+  // Recolor the given noteheads in `color` (default chord yellow); sets both the fill attribute and
+  // the inline style so it wins over OSMD's voice-color style. Does NOT clear prior highlights, so
+  // several groups (e.g. per-tag pattern matches) can be painted in different colors — callers that
+  // want a fresh start call clearHighlight() first.
+  function highlightNotes(notes, color = CHORD_HL_COLOR) {
     (notes || []).forEach((nt) => {
       const el = nt && nt.el;
       if (!el || !el.querySelectorAll) return;
@@ -558,11 +623,13 @@ export function createMusicRenderer(container, opts = {}) {
           p.setAttribute('data-chord-orig', p.getAttribute('fill') || '');
           p.setAttribute('data-chord-orig-style', p.style.fill || '');
         }
-        p.setAttribute('fill', CHORD_HL_COLOR);
-        p.style.fill = CHORD_HL_COLOR;
+        p.setAttribute('fill', color);
+        p.style.fill = color;
       });
     });
   }
+  // Highlight one chord's notes in yellow, replacing any prior highlight.
+  function highlightChord(notes) { clearHighlight(); highlightNotes(notes, CHORD_HL_COLOR); }
 
   // Overlay stacked chord-candidate labels above each detected chord area. Each area shows its
   // best few chords (closest to the staff = best); clicking a label highlights that chord's
@@ -875,19 +942,13 @@ export function createMusicRenderer(container, opts = {}) {
     return full ? a + 1 : shownFrom + a;
   }
 
-  // Shade the captured measure range behind the notes. One translucent rect per matching
-  // measure, sized from its VexFlow stave geometry (the same coordinates OSMD renders into,
-  // per getMeasurePosition in the original analysis code) — robust across line breaks and
-  // partial/segment renders. Removed + rebuilt on every render. No-op without a DOM svg / range.
-  const MEASURE_HL_CLASS = 'measure-hl-layer';
-  function applyMeasureHighlight() {
-    if (!container || !container.querySelectorAll) return;
-    container.querySelectorAll('.' + MEASURE_HL_CLASS).forEach((n) => n.remove());
-    if (!measureHighlight) return;
-    const svg = container.querySelector('svg');
-    const measureList = osmd.graphic && osmd.graphic.measureList;
-    if (!svg || !measureList || !measureList.length) return;
-    const [from, to] = measureHighlight;
+  // Shade a [from,to] measure range behind the notes. One translucent rect per matching measure,
+  // sized from its VexFlow stave geometry (the same coordinates OSMD renders into, per
+  // getMeasurePosition in the original analysis code) — robust across line breaks and
+  // partial/segment renders. No-op without a range.
+  function shadeMeasureRange(svg, measureList, range, { cls, fill, opacity }) {
+    if (!range) return;
+    const [from, to] = range;
     measureList.forEach((measures, a) => {
       const abs = absoluteMeasureNumber(measures, a, measureList.length);
       if (abs < from || abs > to) return;
@@ -910,16 +971,31 @@ export function createMusicRenderer(container, opts = {}) {
       if (!ok) return;
       const padY = 8;
       const rect = document.createElementNS(SVG_NS, 'rect');
-      rect.setAttribute('class', MEASURE_HL_CLASS);
+      rect.setAttribute('class', cls);
       rect.setAttribute('x', x1);
       rect.setAttribute('y', y1 - padY);
       rect.setAttribute('width', x2 - x1);
       rect.setAttribute('height', (y2 - y1) + 2 * padY);
-      rect.setAttribute('fill', '#ffe9a8');
-      rect.setAttribute('opacity', '0.5');
+      rect.setAttribute('fill', fill);
+      rect.setAttribute('opacity', opacity);
       rect.setAttribute('pointer-events', 'none');
       svg.insertBefore(rect, svg.firstChild);   // first child → painted behind the notes
     });
+  }
+
+  // Two independent shaded bands, rebuilt on every render: the captured vocab range (yellow) and
+  // the current fretboard step's measures (blue, echoing the fretboard dots). No-op without a DOM svg.
+  const MEASURE_HL_CLASS = 'measure-hl-layer';
+  const STEP_HL_CLASS = 'step-hl-layer';
+  function applyMeasureHighlight() {
+    if (!container || !container.querySelectorAll) return;
+    container.querySelectorAll('.' + MEASURE_HL_CLASS + ',.' + STEP_HL_CLASS).forEach((n) => n.remove());
+    if (!measureHighlight && !stepHighlight) return;
+    const svg = container.querySelector('svg');
+    const measureList = osmd.graphic && osmd.graphic.measureList;
+    if (!svg || !measureList || !measureList.length) return;
+    shadeMeasureRange(svg, measureList, measureHighlight, { cls: MEASURE_HL_CLASS, fill: '#ffe9a8', opacity: '0.5' });
+    shadeMeasureRange(svg, measureList, stepHighlight, { cls: STEP_HL_CLASS, fill: '#1565c0', opacity: '0.18' });
   }
 
   // Grey out the beams/stems/slurs (VexFlow vf-* groups) so the noteheads stand out. Re-applied
@@ -967,17 +1043,38 @@ export function createMusicRenderer(container, opts = {}) {
   // Color noteheads by their pattern tag (first tag wins) and, when the filter is on, dim notes that
   // aren't in a selected tag. Runs in postRender AFTER applySuppressionDim so tag colors win over the
   // suppression grey. No-op when there are no patterns.
+  // Tag + phrase coloring / dimming, in one pass. The tag panel (tagFilter) and phrase panel
+  // (phraseFilter) each act as a "dim mode": while open, notes NOT in a revealed tag/phrase are
+  // dimmed, and a note is revealed (kept lit + colored) when its tag is checked (filterTags) or its
+  // phrase is shown (shownPhrases). The tag/phrase currently being painted is always revealed so
+  // authoring stays visible. When neither panel is open, tagged notes keep their base color-by-tag
+  // and nothing dims. Phrase color wins over tag color on a shared note.
   function applyTagOverlay() {
-    if (!container || !container.querySelectorAll || !assignments.length) return;
+    if (!container || !container.querySelectorAll) return;
+    if (!tagFilter && !phraseFilter && !assignments.length) return;   // nothing to color / dim
     const indexed = indexAssignments(assignments);
     const cmap = colorMap(tagRegistry);
-    const colorOf = (name) => cmap[name];
+    const revealTags = new Set(filterTags);
+    if (tagMode && activeTag) revealTags.add(activeTag);
+    const revealPhrases = new Set(shownPhrases);
+    if (phrasePaintMode && activePhrase) revealPhrases.add(activePhrase);
+    // note-id → phrase color, for the phrases currently revealed.
+    const phraseKeyColor = new Map();
+    if (phraseFilter) phrases.forEach((p) => {
+      if (revealPhrases.has(p.name)) (p.notes || []).forEach((n) => phraseKeyColor.set(tagNoteId(n), p.color));
+    });
     orderedRenderedNotes().forEach((n) => {
       if (n.midi == null || !n.el) return;
       const key = tagNoteId({ measure: n.measure, midi: n.midi, beats: n.onsetBeats });
-      const { color, dim } = noteStyle(indexed, key, tagFilter, filterTags, colorOf);
-      const paint = color || (dim ? DIM_CONNECTOR_COLOR : null);
-      if (!paint) return;   // untagged note, filter off → leave it as OSMD drew it
+      let paint = null, lit = false;
+      if (phraseFilter && phraseKeyColor.has(key)) { paint = phraseKeyColor.get(key); lit = true; }
+      else {
+        const tname = firstTagForKey(indexed, key);
+        if (tagFilter) { if (tname && revealTags.has(tname)) { paint = cmap[tname]; lit = true; } }
+        else if (tname) { paint = cmap[tname]; }   // panels closed → base color-by-tag, no dim
+      }
+      if (!lit && (tagFilter || phraseFilter)) paint = DIM_CONNECTOR_COLOR;   // dim the un-revealed
+      if (!paint) return;
       [n.el, ...n.el.querySelectorAll('path, ellipse, circle, rect')].forEach((h) => {
         h.setAttribute('fill', paint); h.style.fill = paint;
         const st = h.getAttribute('stroke');
@@ -1010,11 +1107,126 @@ export function createMusicRenderer(container, opts = {}) {
         // Prefer OSMD's system index; only fall back to nearest-band-by-y when it's unavailable.
         const band = (n.system != null) ? n.system : (bands.length ? nearestStaffIdx(bands, mid) : 0);
         out.push({ name: n.name, el: n.el, measure: n.measure, idx: n.idx, order: out.length, band,
-          onsetBeats: n.onsetBeats, midi: n.midi, voice: n.voice,
+          onsetBeats: n.onsetBeats, midi: n.midi, durBeats: n.durBeats, voice: n.voice,
           left: box.left, right: box.right, top: box.top, bottom: box.bottom });
       });
     });
     return out;
+  }
+
+  const NOTE_EPS = 1e-6;
+  // Stream indices (ascending) of the given note identities in the rendered `ordered` stream,
+  // matched by (midi, onset). Unrendered notes drop out. Shared by tag + phrase pattern search.
+  function orderedIndicesFor(noteIds, ordered) {
+    return (noteIds || [])
+      .map((tn) => ordered.findIndex((n) => n.midi === tn.midi && Math.abs((n.onsetBeats == null ? NaN : n.onsetBeats) - tn.beats) < NOTE_EPS))
+      .filter((i) => i >= 0)
+      .sort((p, q) => p - q);
+  }
+
+  // Pitch sequence for interval matching: raw MIDIs, or diatonic degree indices under the chosen /
+  // guessed key. Returns { pitchSeq, keyLabel } (keyLabel null unless diatonic + interval matching).
+  function pitchSeqFor(midis, { intervalBasis, wantInt, key }) {
+    if (intervalBasis !== 'diatonic' || !wantInt) return { pitchSeq: midis, keyLabel: null };
+    let k = key;
+    if (!k) {
+      const counts = new Array(12).fill(0);
+      midis.forEach((m) => { if (m != null) counts[((m % 12) + 12) % 12]++; });
+      k = guessKey(counts);
+    }
+    const scale = k.mode === 'minor' ? MINOR_SCALE : MAJOR_SCALE;
+    return { pitchSeq: degreeSequence(midis, k.tonicPc, scale), keyLabel: keyLabel(k.tonicPc, k.mode) };
+  }
+
+  // Search the open sheet for other occurrences of each checked filter tag's note pattern, and
+  // highlight every match in that tag's color. The pattern preserves gap structure (the number of
+  // intervening notes between consecutive tagged notes), matched by intervals / durations / both.
+  // intervalBasis 'chromatic' (literal semitones) or 'diatonic' (scale-degree steps under `key`,
+  // or a best-guess key when `key` is null). Returns { results: [{name,color,count}], keyLabel }.
+  // Groups from the most recent pattern search: `lastPatternMatches` = OTHER occurrences (for
+  // Play-tags + fretboard); `lastPatternOriginals` = each tag's own occurrence (fretboard, so the
+  // capture shows every occurrence in piece order — originals + matches).
+  let lastPatternMatches = [];
+  let lastPatternOriginals = [];
+  function searchTagPatterns({ mode = 'intervals', durationStrict = true, intervalBasis = 'chromatic', key = null } = {}) {
+    clearHighlight();
+    lastPatternMatches = [];
+    lastPatternOriginals = [];
+    const ordered = orderedRenderedNotes();
+    const midis = ordered.map((n) => n.midi);
+    const durs = ordered.map((n) => n.durBeats);
+    const wantInt = mode === 'intervals' || mode === 'both';
+    const { pitchSeq, keyLabel: resolvedKeyLabel } = pitchSeqFor(midis, { intervalBasis, wantInt, key });
+    const cmap = colorMap(tagRegistry);
+    const results = [];
+    assignments.forEach((a) => {
+      if (!filterTags.has(a.name)) return;
+      const color = cmap[a.name] || CHORD_HL_COLOR;
+      // Locate this tag's notes in the rendered stream by (midi, onset); keep those visible, ordered.
+      const idx = orderedIndicesFor(a.notes, ordered);
+      if (idx.length < 2) { results.push({ name: a.name, color, count: 0 }); return; }
+      lastPatternOriginals.push({ name: a.name, notes: idx.map((i) => ordered[i]) });   // the tag's own occurrence
+      const template = extractTemplate(idx, pitchSeq, durs);
+      const matches = findMatches(pitchSeq, durs, template, { mode, durationStrict });
+      matches.forEach((m) => {
+        const notes = m.map((i) => ordered[i]);
+        highlightNotes(notes, color);
+        lastPatternMatches.push({ name: a.name, notes });   // one group per matched occurrence
+      });
+      results.push({ name: a.name, color, count: matches.length });
+    });
+    return { results, keyLabel: resolvedKeyLabel };
+  }
+
+  // ── Phrases ────────────────────────────────────────────────────────────────────────────────
+  // Resolve a phrase to onset-ordered note identities [{measure,midi,beats}] — the play-set for
+  // phrase playback. Empty when the phrase is unknown.
+  function getPhraseNoteIds(name) {
+    return resolvePhraseNoteIds(phraseByName(phrases, name));
+  }
+
+  // Every phrase as fretboard capture steps — ONE step per phrase (all its notes together), in
+  // creation order. Mirrors how "Motifs" captures each occurrence as a single step (not per note).
+  // Each step carries notes/seq/events/measures like the other capture sources. Honors
+  // includeSuppressed. Empty when no phrase has notes drawn on the sheet.
+  function getPhrasesSequence({ includeSuppressed = false } = {}) {
+    const ordered = orderedRenderedNotes();
+    const mutedKeys = includeSuppressed ? new Set()
+      : new Set(mutedList().map((n) => suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+    const steps = [];
+    phrases.forEach((p) => {
+      const all = orderedIndicesFor(resolvePhraseNoteIds(p), ordered).map((i) => ordered[i]);
+      const live = all.filter((n) => !mutedKeys.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+      const src = live.length ? live : all;
+      if (!src.length) return;
+      const ms = src.map((n) => n.measure).filter((m) => m != null);
+      const m0 = ms.length ? Math.min(...ms) : null;
+      steps.push({ name: `${p.name}${m0 != null ? ` · m${m0}` : ''}`, notes: noteSetOf(src), seq: seqOf(src),
+        events: eventsOf(src), measures: ms.length ? [m0, Math.max(...ms)] : null });
+    });
+    return steps;
+  }
+
+  // Find + highlight other occurrences of a phrase's note sequence on the open sheet (same engine as
+  // tag search). Highlights the phrase's OWN notes and every match in the phrase color. Returns
+  // { count, keyLabel }. mode/durationStrict/intervalBasis/key as in searchTagPatterns.
+  function searchPhrasePattern(name, { mode = 'intervals', durationStrict = true, intervalBasis = 'chromatic', key = null } = {}) {
+    clearHighlight();
+    const phrase = phraseByName(phrases, name);
+    if (!phrase) return { count: 0, keyLabel: null };
+    const ordered = orderedRenderedNotes();
+    const midis = ordered.map((n) => n.midi);
+    const durs = ordered.map((n) => n.durBeats);
+    const wantInt = mode === 'intervals' || mode === 'both';
+    const { pitchSeq, keyLabel: resolvedKeyLabel } = pitchSeqFor(midis, { intervalBasis, wantInt, key });
+    const idx = orderedIndicesFor(resolvePhraseNoteIds(phrase), ordered);
+    const color = phrase.color || CHORD_HL_COLOR;
+    highlightNotes(idx.map((i) => ordered[i]), color);   // the phrase's own occurrence
+    if (idx.length < 2) return { count: 0, keyLabel: resolvedKeyLabel };
+    const template = extractTemplate(idx, pitchSeq, durs);
+    const matches = findMatches(pitchSeq, durs, template, { mode, durationStrict });
+    matches.forEach((m) => highlightNotes(m.map((i) => ordered[i]), color));
+    return { count: matches.length, keyLabel: resolvedKeyLabel };
   }
 
   // The SVG viewport that note elements resolve to via getCTM. Some OSMD/VexFlow builds nest an
@@ -1077,6 +1289,13 @@ export function createMusicRenderer(container, opts = {}) {
     if (!n || n.midi == null) return;
     const id = { measure: n.measure, midi: n.midi, beats: n.onsetBeats };
     const key = suppressionKey(id);
+    if (phrasePaintMode) {   // paint the note into the active phrase; wins over tag/suppress
+      if (!activePhrase) return;
+      phrases = togglePhraseNoteReducer(phrases, activePhrase, id);
+      redraw();
+      firePhrasesChange();
+      return;
+    }
     if (tagMode) {   // paint the note into the active tag (no muting); takes precedence over suppress
       if (!activeTag) return;
       assignments = toggleNote(assignments, activeTag, id);
@@ -1326,7 +1545,8 @@ export function createMusicRenderer(container, opts = {}) {
       topChordPerMeasure(measureChordAreas(notes)).forEach(({ measure, chord }) => {
         const live = (chord.notes || []).filter((n) =>
           !mutedKeys.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
-        steps.push({ measure, name: chord.name, notes: noteSetOf(live.length ? live : chord.notes) });
+        const src = live.length ? live : chord.notes;
+        steps.push({ measure, name: chord.name, notes: noteSetOf(src), seq: seqOf(src), events: eventsOf(src), measures: [measure, measure] });
       });
     });
     steps.sort((a, b) => a.measure - b.measure);
@@ -1346,6 +1566,8 @@ export function createMusicRenderer(container, opts = {}) {
     return {
       measureRange: range ? [range.fromMeasure, range.toMeasure] : null,
       notes: noteSetOf(live.length ? live : selected),
+      seq: seqOf(live.length ? live : selected),
+      events: eventsOf(live.length ? live : selected),
     };
   }
 
@@ -1364,7 +1586,9 @@ export function createMusicRenderer(container, opts = {}) {
       shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
       selectedChords.clear();   // a fresh piece carries no manual chord picks
       assignments = (detail.patterns || []).map((p) => ({ name: p.name, notes: (p.notes || []).map((n) => ({ ...n })) }));
+      phrases = (detail.phrases || []).map((p) => ({ name: p.name, color: p.color, notes: (p.notes || []).map((n) => ({ ...n })) }));
       tagMode = false; activeTag = null; tagFilter = false; filterTags = new Set();   // tagRegistry is global — not reset here
+      phrasePaintMode = false; activePhrase = null; phraseFilter = false; shownPhrases = new Set();
       redraw();
       return { ok: true, totalMeasures, measureOffset };
     },
@@ -1400,7 +1624,7 @@ export function createMusicRenderer(container, opts = {}) {
     getTagColors() { return colorMap(tagRegistry); },
     // Per-piece note assignments [{name, notes}], persisted as detail.patterns. setPatterns does not
     // fire onPatternsChange (used on load); editing notes via tag-mode clicks does.
-    setPatterns(list) { assignments = (list || []).map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) })); redraw(); },
+    setPatterns(list) { assignments = (list || []).map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) })); lastPatternMatches = []; lastPatternOriginals = []; redraw(); },
     getPatterns() { return getAssignments(); },
     // Drop a tag's note assignments in THIS piece (called when the global tag is deleted). Fires
     // onPatternsChange so the piece persists.
@@ -1416,7 +1640,7 @@ export function createMusicRenderer(container, opts = {}) {
     setActiveTag(name) { activeTag = name || null; },
     // Filtering: master on/off plus the set of tag names to keep highlighted (others dim).
     setTagFilter(on) { tagFilter = !!on; redraw(); },
-    setFilterTags(names) { filterTags = new Set(names || []); redraw(); },
+    setFilterTags(names) { filterTags = new Set(names || []); lastPatternMatches = []; lastPatternOriginals = []; redraw(); },
     // Note identities [{measure,midi,beats}] of the currently-checked filter tags, merged across
     // tags, de-duplicated, and sorted by onset — the play-set for tag skip-playback. [] if none.
     getFilterNotes() {
@@ -1432,6 +1656,78 @@ export function createMusicRenderer(container, opts = {}) {
         });
       });
       return out.sort((x, y) => x.beats - y.beats);
+    },
+    // Find + highlight other occurrences of each checked tag's pattern on the open sheet. Returns
+    // [{name, color, count}]. mode ∈ 'intervals'|'duration'|'both'; durationStrict toggles exact vs
+    // proportional duration matching.
+    searchTagPatterns(opts) { return searchTagPatterns(opts); },
+
+    // ── Phrases (named composite of member tags + extra notes; see music-phrase.js) ──────────
+    // Per-piece phrase list, persisted as detail.phrases. setPhrases does NOT fire onPhrasesChange
+    // (used on load / restore); the editing methods below do.
+    setPhrases(list) {
+      phrases = (list || []).map((p) => ({ name: p.name, color: p.color, notes: (p.notes || []).map((n) => ({ ...n })) }));
+      redraw();
+    },
+    getPhrases() { return getPhrases(); },
+    getPhraseNames() { return phrases.map((p) => p.name); },
+    getPhraseColors() { const m = {}; phrases.forEach((p) => { m[p.name] = p.color; }); return m; },
+    // Create a phrase (next palette color); no-op on blank/duplicate. Returns whether it was added.
+    addPhrase(name) {
+      const { phrases: next, added } = addPhraseReducer(phrases, name);
+      if (added) { phrases = next; firePhrasesChange(); redraw(); }
+      return added;
+    },
+    removePhrase(name) {
+      phrases = removePhraseReducer(phrases, name);
+      if (activePhrase === name) activePhrase = null;
+      shownPhrases.delete(name);
+      firePhrasesChange(); redraw();
+    },
+    // Enter/leave phrase-paint mode; notehead clicks then add/remove the active phrase's notes.
+    setPhrasePaintMode(on) { phrasePaintMode = !!on; redraw(); },
+    setActivePhrase(name) { activePhrase = name || null; },
+    // Phrase "dim mode" (on while the phrase panel is open): dim notes not in a shown phrase.
+    setPhraseFilter(on) { phraseFilter = !!on; redraw(); },
+    // The set of phrase names whose notes are revealed + tinted on the sheet.
+    setShownPhrases(names) { shownPhrases = new Set(names || []); redraw(); },
+    getPhraseNoteIds(name) { return getPhraseNoteIds(name); },
+    getPhrasesSequence(opts) { return getPhrasesSequence(opts); },
+    searchPhrasePattern(name, opts) { return searchPhrasePattern(name, opts); },
+    // Best-guess key of the currently-rendered notes (Krumhansl-Schmuckler profiles), as
+    // { tonicPc, mode, label } — powers the diatonic key picker's default. null when nothing is drawn.
+    guessBestKey() {
+      const counts = new Array(12).fill(0);
+      orderedRenderedNotes().forEach((n) => { if (n.midi != null) counts[((n.midi % 12) + 12) % 12]++; });
+      if (!counts.some((c) => c > 0)) return null;
+      const k = guessKey(counts);
+      return { tonicPc: k.tonicPc, mode: k.mode, label: keyLabel(k.tonicPc, k.mode) };
+    },
+    // Note identities [{measure,midi,beats}] matched by the most recent searchTagPatterns (flattened
+    // across occurrences) — so Play-tags can include them. Reset when the tag selection / patterns change.
+    getPatternMatchNotes() {
+      const out = [];
+      lastPatternMatches.forEach((g) => g.notes.forEach((n) => out.push({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+      return out;
+    },
+    // Matched occurrences as fretboard capture steps: one step per occurrence, [{name, notes:[{name,octave}]}].
+    // Honors includeSuppressed like the other capture sources. Empty when no search has been run.
+    getPatternMatchSequence({ includeSuppressed = false } = {}) {
+      const mutedKeys = includeSuppressed ? new Set()
+        : new Set(mutedList().map((n) => suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+      const onsetOf = (g) => (g.notes[0] ? (g.notes[0].onsetBeats ?? g.notes[0].measure ?? 0) : 0);
+      const steps = [];
+      // Every occurrence of the pattern — the tags' own notes AND the matches — in piece order.
+      [...lastPatternOriginals, ...lastPatternMatches].sort((a, b) => onsetOf(a) - onsetOf(b)).forEach((g) => {
+        const live = g.notes.filter((n) => !mutedKeys.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
+        const src = live.length ? live : g.notes;
+        const notes = noteSetOf(src);
+        const ms = src.map((n) => n.measure).filter((m) => m != null);
+        const m0 = (g.notes[0] || {}).measure;
+        if (notes.length) steps.push({ name: `${g.name}${m0 != null ? ` · m${m0}` : ''}`, notes, seq: seqOf(src), events: eventsOf(src),
+          measures: ms.length ? [Math.min(...ms), Math.max(...ms)] : null });
+      });
+      return steps;
     },
     // Toggle "Global" chord matching: when on, a clicked chord name highlights every complete
     // occurrence of it across the visible sheet. Re-applies the overlay highlight in the new scope.
@@ -1506,6 +1802,10 @@ export function createMusicRenderer(container, opts = {}) {
     // (zoom / segment changes) until cleared. Used to mark a vocab item's original measures.
     highlightMeasures(range) { measureHighlight = (range && range.length === 2) ? [range[0], range[1]] : null; applyMeasureHighlight(); },
     clearMeasureHighlight() { measureHighlight = null; applyMeasureHighlight(); },
+    // Shade the current fretboard step's measures in a distinct blue band (echoing the fretboard
+    // dots), independent of the vocab-range highlight. Tracks stepping; persists across re-renders.
+    highlightStepMeasures(range) { stepHighlight = (range && range.length === 2) ? [range[0], range[1]] : null; applyMeasureHighlight(); },
+    clearStepHighlight() { stepHighlight = null; applyMeasureHighlight(); },
     applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };
 }

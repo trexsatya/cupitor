@@ -1,4 +1,16 @@
-import { findPositions, isPlayable, voicingsForNotes, voicingCenter, voicingSpan, findPaths, movementSparkline } from './fretboard-core.js';
+import { findPositions, isPlayable, voicingsForNotes, voicingCenter, voicingSpan, findPaths, movementSparkline, noteAt } from './fretboard-core.js';
+
+describe('noteAt', () => {
+  test('returns the sounding note+octave for a string/fret in standard tuning', () => {
+    expect(noteAt(6, 0)).toEqual({ name: 'E', octave: '2' });   // open low E
+    expect(noteAt(1, 1)).toEqual({ name: 'F', octave: '4' });   // high E string, fret 1
+    expect(noteAt(5, 3)).toEqual({ name: 'C', octave: '3' });   // A string, fret 3 = C
+  });
+  test('out-of-range → null', () => {
+    expect(noteAt(6, 99)).toBeNull();
+    expect(noteAt(9, 0)).toBeNull();
+  });
+});
 
 describe('findPositions', () => {
   test('open high-E (string 1) and low-E (string 6) both found for E', () => {
@@ -84,6 +96,23 @@ describe('voicingsForNotes', () => {
 
   test('plain pitch-class strings still work (octave-agnostic)', () => {
     expect(voicingsForNotes(['C', 'E', 'G']).length).toBeGreaterThan(0);
+  });
+
+  test('requirePlayable:false keeps an unplayable wide-span voicing that the default drops', () => {
+    // F2 (only s6f1) + D5 (only s1f10): the sole covering voicing spans 9 frets → unplayable.
+    const notes = [{ name: 'F', octave: '2' }, { name: 'D', octave: '5' }];
+    expect(voicingsForNotes(notes)).toEqual([]);                              // default drops it
+    const relaxed = voicingsForNotes(notes, { requirePlayable: false });
+    expect(relaxed.length).toBe(1);
+    expect(relaxed[0].map((p) => `${p.string}:${p.fret}`).sort()).toEqual(['1:10', '6:1']);
+  });
+
+  test('requireDistinctStrings:false allows two notes on the same string', () => {
+    // C4 and D4 can both sit on string 2 (f1, f3). Default forbids the same-string voicing.
+    const notes = [{ name: 'C', octave: '4' }, { name: 'D', octave: '4' }];
+    const dup = (v) => new Set(v.map((p) => p.string)).size < v.length;
+    expect(voicingsForNotes(notes).some(dup)).toBe(false);
+    expect(voicingsForNotes(notes, { requireDistinctStrings: false }).some(dup)).toBe(true);
   });
 
   test('octave matching is strict: more positions exist octave-agnostic than for a fixed octave', () => {

@@ -149,6 +149,11 @@
         #managerSection { margin-bottom: 1rem; }
         #managerSection > summary { cursor: pointer; font-weight: 600; }
 
+        /* Native fullscreen (#previewFullscreenBtn): give the pane a solid background and let it
+           scroll, since the fullscreen element otherwise renders on a black, non-scrolling backdrop. */
+        #musicPreview:fullscreen { background: #fff; overflow: auto; padding: 1rem; }
+        #musicPreview:-webkit-full-screen { background: #fff; overflow: auto; padding: 1rem; }
+
         /* On phones the inline preview is too cramped; show it as a full-screen modal dialog.
            #musicPreview is toggled via display:none/block, so when shown these rules make it a
            fixed overlay. The existing Close button (#previewCloseBtn) dismisses it. */
@@ -187,14 +192,36 @@
         }
         #fretboardPanel.fb-wrap{background:#fff;border:1px solid #d8dee8;border-radius:10px;padding:10px 14px;margin-top:1rem}
         #fretboardPanel summary{cursor:pointer;font-weight:600}
+        /* Nested "Controls" collapsible: subtler than the panel's own summary. */
+        #fretboardPanel .fb-controls{margin:6px 0}
+        #fretboardPanel .fb-controls>summary{font-weight:500;font-size:12.5px;color:#555;list-style:none}
+        #fretboardPanel .fb-controls>summary::-webkit-details-marker{display:none}
+        #fretboardPanel .fb-controls>summary::before{content:'▸ ';color:#888}
+        #fretboardPanel .fb-controls[open]>summary::before{content:'▾ '}
         #fretboardPanel .fb-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;margin:8px 0}
         #fretboardPanel .fb-chip{border:1px solid #1565c0;color:#1565c0;border-radius:999px;padding:2px 10px;cursor:pointer;background:#eef4ff}
         #fretboardPanel .fb-chip.alt{border-color:#bbb;color:#555;background:#fff}
-        #fretboardPanel .fb-btn{border:1px solid #1565c0;background:#1565c0;color:#fff;border-radius:6px;padding:3px 12px;cursor:pointer}
+        #fretboardPanel .fb-btn{border:1px solid #1565c0;border-radius:6px;padding:3px 12px;cursor:pointer}
         #fretboardPanel .fb-paths{margin:8px 0;font-size:13px}
         #fretboardPanel .fb-paths select{font:12.5px monospace;padding:4px 8px;border:1px solid #1565c0;border-radius:6px;min-width:320px}
         #fretboardPanel .fb-step{display:flex;gap:8px;align-items:center;font-size:13px;margin:8px 0;flex-wrap:wrap}
         #fretboardPanel .fb-msg{color:#c62828;font-size:12px}
+        /* Keep Prev / Step / Next together on one line even when the row wraps. */
+        #fretboardPanel .fb-nav{display:inline-flex;gap:8px;align-items:center;flex-wrap:nowrap}
+        #fretboardPanel .fb-step-lbl{white-space:nowrap}
+        /* Movement arrows: dashes march toward the arrowhead (up = right, down = left); the
+           bidirectional arrow pulses instead. Arrowheads pulse for visibility. */
+        #fretboardPanel .fb-arrow-line{stroke-dasharray:6 4}
+        #fretboardPanel .fb-arrow-line.up{animation:fbFlowFwd .7s linear infinite}
+        #fretboardPanel .fb-arrow-line.down{animation:fbFlowBack .7s linear infinite}
+        #fretboardPanel .fb-arrow-line.bi{stroke-dasharray:none;animation:fbArrowPulse 1.1s ease-in-out infinite}
+        #fretboardPanel .fb-arrowhead{animation:fbArrowPulse 1.1s ease-in-out infinite}
+        @keyframes fbFlowFwd{to{stroke-dashoffset:-10}}
+        @keyframes fbFlowBack{to{stroke-dashoffset:10}}
+        @keyframes fbArrowPulse{0%,100%{opacity:.35}50%{opacity:1}}
+        @media (prefers-reduced-motion: reduce){
+          #fretboardPanel .fb-arrow-line,#fretboardPanel .fb-arrowhead{animation:none}
+        }
         #fbSvg{max-width:100%;overflow-x:auto;display:block}
         /* Pattern tags */
         #tagPanel .tag-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
@@ -205,6 +232,20 @@
         #tagPanel .tag-pill .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
         #tagPanel .tag-pill .cnt{color:#888}
         #tagPanel .tag-pill .del{border:none;background:none;color:#a33;cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+        /* Check/uncheck-all sits just before the tag pills. */
+        #tagPanel .tag-list-head{display:flex;align-items:flex-start;gap:8px;margin-top:8px}
+        #tagPanel .tag-list-head .tag-list{margin-top:0}
+        #tagPanel .icon-btn{border:1px solid #bbb;background:#fff;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:15px;line-height:1.5;flex:none}
+        /* Phrases panel: one card per phrase (header row of actions + a wrap of member-tag checkboxes). */
+        #phrasePanel .tag-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
+        #phrasePanel .tag-lbl{color:#555}
+        #phrasePanel .tag-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+        #phrasePanel .phrase-row{border:1px solid #cfe0ff;border-radius:6px;padding:6px 8px;background:#fff}
+        #phrasePanel .phrase-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+        #phrasePanel .phrase-tags{display:flex;flex-wrap:wrap;margin-top:6px;padding-top:6px;border-top:1px dashed #e0e8f5}
+        #phrasePanel .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+        #phrasePanel .del{border:none;background:none;color:#a33;cursor:pointer;font-size:15px;line-height:1;padding:0 2px;margin-left:auto}
+        #phrasePanel .btn.active{background:#1565c0;color:#fff;border-color:#1565c0}
         #fretboardPanel:fullscreen{background:#fff;overflow:auto;padding:24px}
         #fretboardPanel:fullscreen #fbSvg{width:100%;height:auto;max-width:none}
         /* Touch-friendly chord-window move/resize buttons (alternative to dragging) */
@@ -215,10 +256,11 @@
         /* Fretboard panel — mobile layout: bigger touch targets, full-width select, stacked controls */
         @media (max-width:640px){
           #fretboardPanel.fb-wrap{padding:8px 10px}
-          #fretboardPanel .fb-btn,#fretboardPanel .fb-chip{min-height:40px;padding:8px 12px;font-size:14px}
+          /* Smaller, tidier tap targets (the old 40px min-height looked clunky). */
+          #fretboardPanel .fb-btn,#fretboardPanel .fb-chip{padding:4px 9px;font-size:12px}
           #fretboardPanel .fb-bar .fb-btn{margin-left:0 !important}
-          #fretboardPanel .fb-paths select{width:100%;min-width:0;min-height:40px}
-          #fretboardPanel .fb-bar,#fretboardPanel .fb-step{gap:8px}
+          #fretboardPanel .fb-paths select{width:100%;min-width:0}
+          #fretboardPanel .fb-bar,#fretboardPanel .fb-step{gap:6px}
           #fbSpeed{flex:1 1 120px}
           #windowNudge .win-btn{min-width:48px;height:42px;font-size:18px}
         }
@@ -292,6 +334,7 @@
     </label>
     <button id="previewFullBtn" class="btn" title="Show the full piece"><span class="ic">⤢</span><span class="txt">Full</span></button>
     <button id="previewSegBtn" class="btn" title="Show this measure range"><span class="ic">◧</span><span class="txt">Show segment</span></button>
+    <button id="previewFullscreenBtn" class="btn" title="Toggle fullscreen"><span class="ic">⛶</span><span class="txt">Fullscreen</span></button>
     <button id="previewCloseBtn" class="btn" title="Close"><span class="ic">✕</span><span class="txt">Close</span></button>
     <span id="previewMsg"></span>
   </div>
@@ -334,7 +377,8 @@
     <button class="btn toggle" data-for="dimConnChk" title="Dim beams / stems"><span class="ic">〰️</span><span class="txt">Dim beams/stems</span></button>
     <button class="btn toggle" data-for="chordWindowChk" title="Draggable chord window"><span class="ic">🔲</span><span class="txt">Chord window</span></button>
     <button class="btn toggle" data-for="globalMatchChk" title="When on, clicking a chord name highlights every occurrence of it across the visible sheet"><span class="ic">🌐</span><span class="txt">Global</span></button>
-    <button class="btn toggle" data-for="tagPanelChk" title="Tag patterns of notes and colour them"><span class="ic">🏷️</span><span class="txt">Pattern tags</span></button>
+    <button class="btn toggle" data-for="tagPanelChk" title="Tag recurring motifs of notes and colour them"><span class="ic">🏷️</span><span class="txt">Motifs</span></button>
+    <button class="btn toggle" data-for="phrasePanelChk" title="Build phrases from tags + extra notes"><span class="ic">🎼</span><span class="txt">Phrases</span></button>
     <input type="checkbox" id="voiceColorChk" checked hidden>
     <input type="checkbox" id="noteNameChk" hidden>
     <input type="checkbox" id="chordChk" hidden>
@@ -342,6 +386,7 @@
     <input type="checkbox" id="chordWindowChk" hidden>
     <input type="checkbox" id="globalMatchChk" hidden>
     <input type="checkbox" id="tagPanelChk" hidden>
+    <input type="checkbox" id="phrasePanelChk" hidden>
   </div>
   <div id="suppressPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#fff8f0; border:1px solid #ffd9b0; border-radius:4px">
     <button class="btn toggle" data-for="suppressModeChk" title="Click notes to silence them"><span class="ic">🔇</span><span class="txt">Suppress notes</span></button>
@@ -374,46 +419,92 @@
                title="Pick an existing tag or type a new one (Enter), then click notes to paint it" style="width:11em">
         <datalist id="tagOptions"></datalist>
       </label>
-      <button class="btn toggle" data-for="tagFilterChk" title="Show only the checked tags; dim the rest"><span class="ic">🔍</span><span class="txt">Filter</span></button>
       <button id="playTagsBtn" class="btn" title="Play only the checked tags' notes, skipping the gaps between them"><span class="ic">▶</span><span class="txt">▶ Play tags</span></button>
       <label class="tag-lbl" title="Silence inserted between tagged runs, in beats (scales with tempo)">breath
         <input type="number" id="breathBeats" min="0" max="4" step="0.25" value="1" style="width:4em">
       </label>
       <input type="checkbox" id="tagModeChk" hidden>
-      <input type="checkbox" id="tagFilterChk" hidden>
     </div>
-    <div id="tagList" class="tag-list"></div>
+    <div class="tag-row" style="margin-top:6px">
+      <button id="findPatternBtn" class="btn" title="Find other occurrences of the checked tags' note patterns on the open sheet"><span class="ic">🔎</span><span class="txt">Find pattern</span></button>
+      <label class="tag-lbl">Match
+        <select id="patMode" title="Match by pitch intervals, note durations, or both">
+          <option value="intervals">intervals</option>
+          <option value="duration">duration</option>
+          <option value="both">both</option>
+        </select>
+      </label>
+      <label class="tag-lbl" title="Durations: off = exact note types; on = proportional (augmentation/diminution matches)">
+        <input type="checkbox" id="patProportional"> proportional
+      </label>
+      <select id="patIntervalBasis" title="Match intervals literally (chromatic) or by scale degree (diatonic)">
+        <option value="diatonic">diatonic</option>
+        <option value="chromatic">chromatic</option>
+      </select>
+      <select id="patKey" title="Key for diatonic matching (defaults to the piece's best-guess key)"></select>
+      <span id="patternMsg" style="font-size:.8em;color:#555"></span>
+    </div>
+    <div class="tag-list-head">
+      <button id="tagCheckAllBtn" class="icon-btn" title="Check / uncheck all tags" aria-label="Check or uncheck all tags">☑</button>
+      <div id="tagList" class="tag-list"></div>
+    </div>
+  </div>
+  <div id="phrasePanel" style="display:none; margin:.25rem 0; padding:.4rem .5rem; background:#eef4ff; border:1px solid #cfe0ff; border-radius:4px">
+    <div class="tag-row">
+      <label class="tag-lbl">New phrase:
+        <input id="phraseInput" maxlength="32" placeholder="name…" autocomplete="off" style="width:11em">
+      </label>
+      <button id="addPhraseBtn" class="btn"><span class="ic">➕</span><span class="txt">Add</span></button>
+      <span id="phraseMsg" style="font-size:.8em;color:#555"></span>
+    </div>
+    <div id="phraseList" class="tag-list"></div>
   </div>
   <div id="osmdPreview"></div>
   <details id="fretboardPanel" class="fb-wrap">
     <summary>🎸 Fretboard</summary>
-    <div class="fb-bar">
-      <span class="label">Source</span>
-      <button type="button" id="fbSrcGuessed" class="fb-chip">Guessed chords</button>
-      <button type="button" id="fbSrcWindow" class="fb-chip alt">Chord window</button>
-      <label style="margin-left:8px"><input type="checkbox" id="fbSuppress"> include suppressed</label>
-      <label style="margin-left:8px"><input type="checkbox" id="fbOctave" checked> match octave</label>
-      <button type="button" id="fbCapture" class="fb-btn" style="margin-left:auto">Capture → fretboard</button>
-      <button type="button" id="fbFullscreen" class="fb-chip alt">⛶ Fullscreen</button>
-    </div>
-    <div class="fb-paths">
-      <label>Ways to play <select id="fbPaths"></select></label>
-    </div>
-    <div class="fb-step">
-      <button type="button" id="fbReset" class="fb-chip alt">Reset</button>
-      <button type="button" id="fbPrev" class="fb-btn">◀ Prev</button>
-      <span>Step <b id="fbStepLabel">—</b></span>
-      <button type="button" id="fbNext" class="fb-btn">Next ▶</button>
-      <button type="button" id="fbPlay" class="fb-btn" style="margin-left:8px">▶ Play</button>
-      <input type="range" id="fbSpeed" min="200" max="1400" value="700" style="vertical-align:middle;width:90px">
-      <span style="margin-left:8px">shape
-        <button type="button" id="fbShapePrev" class="fb-chip">◀</button>
-        <b id="fbShapeLabel">0 / 0</b>
-        <button type="button" id="fbShapeNext" class="fb-chip">▶</button>
-      </span>
-    </div>
+    <!-- All controls above the diagram collapse behind one toggle to declutter the panel. -->
+    <details class="fb-controls" open>
+      <summary>⚙️ Controls</summary>
+      <div class="fb-bar">
+        <button type="button" id="fbSrcGuessed" class="fb-chip">Guessed chords</button>
+        <button type="button" id="fbSrcWindow" class="fb-chip alt">Chord window</button>
+        <button type="button" id="fbSrcMatched" class="fb-chip alt" title="Notes from the motifs' matched occurrences (run Find pattern first)">Motifs</button>
+        <button type="button" id="fbSrcPhrases" class="fb-chip alt" title="Notes from all phrases (create phrases in the Phrases panel)">Phrases</button>
+        <button type="button" class="btn toggle" data-for="fbSuppress" title="Include suppressed notes in the capture"><span class="ic">🔇</span><span class="txt">Suppressed</span></button>
+        <button type="button" class="btn toggle" data-for="fbOctave" title="Place notes at their written octave (off = pitch-class shapes)"><span class="ic">🎯</span><span class="txt">Match octave</span></button>
+        <button type="button" class="btn toggle" data-for="fbPlayable" title="Only physically playable voicings (fretted span ≤ 3)"><span class="ic">🖐️</span><span class="txt">Playable</span></button>
+        <button type="button" id="fbCapture" class="fb-btn" style="margin-left:auto">Capture → fretboard</button>
+        <button type="button" id="fbFullscreen" class="fb-chip alt">⛶ Fullscreen</button>
+        <input type="checkbox" id="fbSuppress" hidden>
+        <input type="checkbox" id="fbOctave" checked hidden>
+        <input type="checkbox" id="fbPlayable" checked hidden>
+      </div>
+      <div class="fb-paths">
+        <label>Ways to play <select id="fbPaths"></select></label>
+      </div>
+      <!-- Transport / shape controls stay above the diagram; only Prev/Next sit below it. -->
+      <div class="fb-step">
+        <button type="button" id="fbReset" class="fb-chip alt">Reset</button>
+        <span class="fb-step-lbl">Step <b id="fbStepLabel">—</b></span>
+        <button type="button" id="fbPlay" class="fb-btn" style="margin-left:8px">▶ Play</button>
+        <input type="range" id="fbSpeed" min="200" max="1400" value="700" style="vertical-align:middle;width:90px">
+        <span style="margin-left:8px">shape
+          <button type="button" id="fbShapePrev" class="fb-chip">◀</button>
+          <b id="fbShapeLabel">0 / 0</b>
+          <button type="button" id="fbShapeNext" class="fb-chip">▶</button>
+        </span>
+      </div>
+    </details>
     <div id="fbMsg" class="fb-msg"></div>
     <svg id="fbSvg"></svg>
+    <!-- Prev/Next step navigation sits BELOW the fretboard, under the diagram it drives. -->
+    <div class="fb-step fb-nav">
+      <button type="button" id="fbPrev" class="fb-btn">◀ Prev</button>
+      <button type="button" id="fbPlayStep" class="fb-btn" title="Sound the current step's notes (the highlighted sheet segment)">🔊 Play step</button>
+      <button type="button" id="fbNext" class="fb-btn">Next ▶</button>
+      <button type="button" class="btn toggle" data-for="fbAutoPlayChk" title="Automatically sound each step as you move Prev/Next"><span class="ic">🎧</span><span class="txt">Auto-play</span></button>
+      <input type="checkbox" id="fbAutoPlayChk" hidden>
+    </div>
   </details>
   <div id="ytPlayer" style="display:none"></div>
 </div>
@@ -592,19 +683,24 @@
     if (!renderer) {
       renderer = createMusicRenderer(document.getElementById('osmdPreview'),
         { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange, onSuppressionChange: onSuppressionChange,
-          onPatternsChange: onPatternsChange });
-      initFretboard(renderer, {
+          onPatternsChange: onPatternsChange, onPhrasesChange: onPhrasesChange });
+      fbPanel = initFretboard(renderer, {
         panel: document.getElementById('fretboardPanel'),
         srcGuessed: document.getElementById('fbSrcGuessed'),
         srcWindow: document.getElementById('fbSrcWindow'),
+        srcMatched: document.getElementById('fbSrcMatched'),
+        srcPhrases: document.getElementById('fbSrcPhrases'),
         suppressChk: document.getElementById('fbSuppress'),
         octaveChk: document.getElementById('fbOctave'),
+        playableChk: document.getElementById('fbPlayable'),
         captureBtn: document.getElementById('fbCapture'),
         resetBtn: document.getElementById('fbReset'),
         fullscreenBtn: document.getElementById('fbFullscreen'),
         pathSelect: document.getElementById('fbPaths'),
         prevBtn: document.getElementById('fbPrev'),
         nextBtn: document.getElementById('fbNext'),
+        playStepBtn: document.getElementById('fbPlayStep'),
+        autoPlayChk: document.getElementById('fbAutoPlayChk'),
         playBtn: document.getElementById('fbPlay'),
         speed: document.getElementById('fbSpeed'),
         shapePrev: document.getElementById('fbShapePrev'),
@@ -613,6 +709,19 @@
         shapeLabel: document.getElementById('fbShapeLabel'),
         msg: document.getElementById('fbMsg'),
         svg: document.getElementById('fbSvg'),
+      }, {
+        // Sound the current step as it reads on the sheet (chords stack, melody plays in sequence),
+        // through the same player/instrument as the transport. `events` is [{midi, beat, durBeats}].
+        playSequence: (events) => {
+          if (!events || !events.length) return;
+          const p = ensurePlayer();
+          const instr = document.getElementById('instrSel').value;
+          if (instr !== fbStepInstr) { p.setInstrument(instr); fbStepInstr = instr; }
+          const spb = 60 / currentTempo();
+          const base = Math.min(...events.map((e) => e.beat));
+          const secs = events.map((e) => ({ midi: e.midi, time: (e.beat - base) * spb, duration: Math.max(0.15, (e.durBeats || 1) * spb) }));
+          return p.playSequence(secs);
+        },
       });
     }
     return renderer;
@@ -680,6 +789,8 @@
   }
 
   let player = null, yt = null, currentDetail = null, currentVocabEntry = null;
+  let fbStepInstr = null;   // last instrument pushed to the player for fretboard step-play (avoids re-creating the voice)
+  let fbPanel = null;       // fretboard panel controller (from initFretboard) — for cross-panel actions
   // The "Add to vocab" button doubles as "Add/update" while a saved vocab item is on screen.
   function updateAddVocabLabel() {
     const btn = document.getElementById('addVocabBtn');
@@ -772,7 +883,16 @@
     if (!(currentDetail.format === 'musicxml' && currentDetail.source)) {
       document.getElementById('transportMsg').textContent = 'Tag playback needs a MusicXML piece.'; return;
     }
-    const keep = (renderer && renderer.getFilterNotes) ? renderer.getFilterNotes() : [];
+    const tagged = (renderer && renderer.getFilterNotes) ? renderer.getFilterNotes() : [];
+    // Include the notes matched by the most recent Find-pattern search (if any), so the recurring
+    // pattern is sounded alongside the tagged notes. Union, de-duped by (midi, beats), onset-sorted.
+    const matched = (renderer && renderer.getPatternMatchNotes) ? renderer.getPatternMatchNotes() : [];
+    const seen = new Set();
+    const keep = [...tagged, ...matched].filter((n) => {
+      const k = `${n.midi}@${n.beats}`;
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    }).sort((a, b) => a.beats - b.beats);
     if (!keep.length) { document.getElementById('transportMsg').textContent = 'Check a tag to play it.'; return; }
     const breath = parseFloat(document.getElementById('breathBeats').value);
     const breathBeats = (Number.isFinite(breath) && breath >= 0) ? breath : 1;
@@ -783,8 +903,9 @@
     p.setSchedule(schedule, { cursorStartStep: 0 });
     p.setLoop(document.getElementById('loopChk').checked);
     document.getElementById('transportMsg').textContent = 'Loading instrument…';
+    const withMatches = matched.length ? ' (tags + matches)' : '';
     p.play()
-      .then(() => { document.getElementById('transportMsg').textContent = `Playing ${schedule.length} tagged notes`; })
+      .then(() => { document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes${withMatches}`; })
       .catch(() => { document.getElementById('transportMsg').textContent = 'Playback error.'; });
   }
   let ytMonitor = null;
@@ -1086,6 +1207,8 @@
     renderer.clearMeasureHighlight();   // a plain piece preview carries no captured-range shading
     renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
     renderer.showFull();
+    // Default the diatonic key picker to this piece's best-guess key (notes are now rendered).
+    if (renderer.guessBestKey) { const g = renderer.guessBestKey(); if (g) document.getElementById('patKey').value = `${g.tonicPc}:${g.mode}`; }
     if (renderer) { renderer.setSuppressedNotes([]); renderer.setSuppressMode(false); }
     // Note suppression is available in a plain preview too (not just saved vocab items): you can
     // silence notes to practice chords/melodies live. It stays transient unless you capture to vocab.
@@ -1096,10 +1219,11 @@
     // Pattern tags: the renderer loaded detail.patterns on load; reset the tag controls and rebuild
     // the tag UI for the fresh piece. Keep the panel's visibility following its toggle.
     document.getElementById('tagModeChk').checked = false;
-    document.getElementById('tagFilterChk').checked = false;
     tagFilterSel.clear();
     activeTagName = '';
-    if (renderer) { renderer.setTagMode(false); renderer.setTagFilter(false); renderer.setFilterTags([]); }
+    // Dimming follows whether the tag panel is currently open (no separate Filter toggle any more).
+    const tagPanelOpen = document.getElementById('tagPanelChk').checked;
+    if (renderer) { renderer.setTagMode(false); renderer.setTagFilter(tagPanelOpen); renderer.setFilterTags([]); }
     // Fold any tags this piece already uses into the global list (so they're selectable everywhere).
     // Only persist/mark-dirty when the merge actually added something (mergeRegistry only grows).
     const mergedReg = mergeRegistry(tagRegistry, renderer ? renderer.getPatterns() : []);
@@ -1108,6 +1232,14 @@
     syncToggles();
     onSuppressionChange();   // reset the chips/hint for the fresh piece
     renderTagUI();
+    // Phrases: the renderer loaded detail.phrases on load; reset the phrase controls for the fresh
+    // piece (panel visibility follows its own toggle).
+    activePhraseName = null; phrasePainting = false; shownPhraseNames.clear();
+    document.getElementById('phraseInput').value = '';
+    document.getElementById('phraseMsg').textContent = '';
+    const phrasePanelOpen = document.getElementById('phrasePanelChk').checked;
+    if (renderer) { renderer.setPhrasePaintMode(false); renderer.setShownPhrases([]); renderer.setPhraseFilter(phrasePanelOpen); }
+    if (phrasePanelOpen) renderPhraseUI();
     document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
   }
   document.getElementById('pieceList').addEventListener('click', (ev) => {
@@ -1164,6 +1296,9 @@
   // ── Pattern tags ───────────────────────────────────────────────────────────────────────────
   let activeTagName = '';   // the tag clicked notes paint into; mirrored in the combobox input
   const tagFilterSel = new Set();   // tag names checked in the filter list
+  let activePhraseName = null;   // phrase whose notes paint-mode clicks edit
+  const shownPhraseNames = new Set();   // phrases revealed + tinted on the sheet (checkboxes)
+  let phrasePainting = false;    // phrase-paint mode on/off
   // Rebuild the tag combobox options and the tag pills from the GLOBAL tag list, annotated with how
   // many notes THIS piece assigns to each. Called on load and after every tag edit.
   function renderTagUI() {
@@ -1187,7 +1322,12 @@
       pill.className = 'tag-pill';
       const cb = document.createElement('input');
       cb.type = 'checkbox'; cb.checked = tagFilterSel.has(nm); cb.title = 'Show this tag when filtering';
-      cb.onchange = () => { if (cb.checked) tagFilterSel.add(nm); else tagFilterSel.delete(nm); if (renderer) renderer.setFilterTags([...tagFilterSel]); };
+      cb.onchange = () => {
+        if (cb.checked) tagFilterSel.add(nm); else tagFilterSel.delete(nm);
+        if (renderer) renderer.setFilterTags([...tagFilterSel]);
+        // Filtering by tags → point the fretboard at the tags' matched patterns automatically.
+        if (cb.checked && fbPanel) fbPanel.setSource('matched');
+      };
       const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = colors[nm] || '#999';
       const label = document.createElement('span'); label.textContent = nm;
       const cnt = document.createElement('span'); cnt.className = 'cnt'; cnt.textContent = `(${countOf[nm] || 0})`;
@@ -1202,6 +1342,8 @@
       list.appendChild(pill);
     });
     if (renderer) renderer.setFilterTags([...tagFilterSel]);
+    // A tag change (added/removed) may affect the phrase panel's member-tag checkboxes.
+    if (document.getElementById('phrasePanel').style.display !== 'none') renderPhraseUI();
   }
   // Persist per-piece note assignments with the piece (local-first; pushed in the next manual batch).
   async function onPatternsChange(patterns) {
@@ -1217,12 +1359,188 @@
   }
   document.getElementById('tagPanelChk').onchange = (e) => {
     document.getElementById('tagPanel').style.display = e.target.checked ? '' : 'none';
+    // Opening the Pattern-tags panel dims all notes; checked tags reveal theirs.
+    if (renderer) renderer.setTagFilter(e.target.checked);
     if (!e.target.checked && renderer) { renderer.setTagMode(false); document.getElementById('tagModeChk').checked = false; syncToggles(); }
     if (e.target.checked) renderTagUI();
   };
   document.getElementById('tagModeChk').onchange = (e) => { if (renderer) renderer.setTagMode(e.target.checked); };
-  document.getElementById('tagFilterChk').onchange = (e) => { if (renderer) renderer.setTagFilter(e.target.checked); };
   document.getElementById('playTagsBtn').onclick = playTags;
+  // Check all tags at once (or uncheck all if every tag is already checked).
+  document.getElementById('tagCheckAllBtn').onclick = () => {
+    if (!renderer) return;
+    const names = renderer.getTagNames();
+    const allOn = names.length > 0 && names.every((n) => tagFilterSel.has(n));
+    tagFilterSel.clear();
+    if (!allOn) names.forEach((n) => tagFilterSel.add(n));
+    renderer.setFilterTags([...tagFilterSel]);
+    if (tagFilterSel.size && fbPanel) fbPanel.setSource('matched');   // mirror the per-tag check behavior
+    renderTagUI();
+  };
+  // Populate the diatonic-key picker: 24 keys (value "tonicPc:mode"). The selected key defaults to
+  // the piece's best guess (set on load in openPreview) instead of an "auto" sentinel.
+  (function fillPatKey() {
+    const sel = document.getElementById('patKey');
+    const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    ['major', 'minor'].forEach((mode) => names.forEach((nm, pc) => {
+      const o = document.createElement('option');
+      o.value = `${pc}:${mode}`; o.textContent = `${nm} ${mode}`;
+      sel.appendChild(o);
+    }));
+  })();
+  // Find + highlight other occurrences of the checked tags' patterns on the open sheet.
+  function searchPattern() {
+    const msgEl = document.getElementById('patternMsg');
+    if (!currentDetail) return;
+    if (!(currentDetail.format === 'musicxml' && currentDetail.source)) {
+      msgEl.textContent = 'Pattern search needs a MusicXML piece.'; return;
+    }
+    if (!renderer || !renderer.searchTagPatterns) return;
+    const mode = document.getElementById('patMode').value;
+    const durationStrict = !document.getElementById('patProportional').checked;
+    const intervalBasis = document.getElementById('patIntervalBasis').value;
+    const keyVal = document.getElementById('patKey').value;
+    let key = null;
+    if (keyVal) { const [pc, m] = keyVal.split(':'); key = { tonicPc: parseInt(pc, 10), mode: m }; }
+    const { results, keyLabel } = renderer.searchTagPatterns({ mode, durationStrict, intervalBasis, key });
+    if (!results.length) { msgEl.textContent = 'Check a tag to search.'; return; }
+    msgEl.innerHTML = '';
+    if (keyLabel) msgEl.appendChild(document.createTextNode(`key: ${keyLabel} — `));
+    results.forEach((r, i) => {
+      const span = document.createElement('span');
+      span.textContent = `${r.name}: ${r.count}`;
+      span.style.color = r.color; span.style.fontWeight = '600';
+      msgEl.appendChild(span);
+      if (i < results.length - 1) msgEl.appendChild(document.createTextNode('  ·  '));
+    });
+  }
+  document.getElementById('findPatternBtn').onclick = searchPattern;
+
+  // ── Phrases ──────────────────────────────────────────────────────────────────────────────────
+  // A phrase = named set of hand-picked notes with its own color. Rebuilt from the renderer's phrase
+  // list on every edit. Per row: a show checkbox (reveal + tint on the dimmed sheet), then paint /
+  // play / fretboard / find / delete.
+  function renderPhraseUI() {
+    if (!renderer) return;
+    const phrases = renderer.getPhrases();
+    const list = document.getElementById('phraseList');
+    list.innerHTML = '';
+    if (!phrases.length) {
+      list.innerHTML = '<span style="font-size:.85em;color:#888">No phrases yet — add one, then paint its notes on the sheet.</span>';
+      return;
+    }
+    const mkBtn = (txt, title, fn, active) => {
+      const b = document.createElement('button');
+      b.className = 'btn' + (active ? ' active' : ''); b.style.cssText = 'padding:1px 7px;font-size:12px';
+      b.title = title; b.textContent = txt; b.onclick = fn; return b;
+    };
+    phrases.forEach((p) => {
+      const row = document.createElement('div'); row.className = 'phrase-row';
+      const show = document.createElement('input'); show.type = 'checkbox'; show.checked = shownPhraseNames.has(p.name);
+      show.title = 'Show this phrase (reveal + tint its notes on the sheet)';
+      show.onchange = () => setPhraseShown(p.name, show.checked);
+      const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = p.color || '#999';
+      const nm = document.createElement('b'); nm.textContent = p.name; nm.style.marginRight = '6px';
+      const info = document.createElement('span');
+      info.style.cssText = 'font-size:.78em;color:#666;margin-right:8px';
+      info.textContent = `${p.notes.length} note${p.notes.length === 1 ? '' : 's'}`;
+      const paintBtn = mkBtn('🖌️', 'Paint notes — click noteheads on the sheet', () => togglePhrasePaint(p.name), activePhraseName === p.name && phrasePainting);
+      const playBtn = mkBtn('▶', 'Play this phrase', () => playPhrase(p.name));
+      const findBtn = mkBtn('🔍', 'Find other occurrences of this phrase on the sheet', () => findPhrase(p.name));
+      const delBtn = mkBtn('🗑', 'Delete this phrase', () => {
+        if (window.confirm(`Delete phrase "${p.name}"? Its ${p.notes.length} hand-picked note${p.notes.length === 1 ? '' : 's'} will be lost.`)) renderer.removePhrase(p.name);
+      });
+      delBtn.style.marginLeft = 'auto';   // push delete to the far right of the row
+      const head = document.createElement('div'); head.className = 'phrase-head';
+      head.append(show, sw, nm, info, paintBtn, playBtn, findBtn, delBtn);
+      row.append(head);
+      list.appendChild(row);
+    });
+  }
+  // Toggle phrase-paint mode for one phrase (exits tag mode to avoid competing notehead clicks).
+  function togglePhrasePaint(name) {
+    if (activePhraseName === name && phrasePainting) { phrasePainting = false; activePhraseName = null; }
+    else {
+      activePhraseName = name; phrasePainting = true;
+      document.getElementById('tagModeChk').checked = false; if (renderer) renderer.setTagMode(false); syncToggles();
+    }
+    if (renderer) { renderer.setActivePhrase(activePhraseName); renderer.setPhrasePaintMode(phrasePainting); }
+    renderPhraseUI();
+  }
+  // Reveal/hide a phrase's notes on the (dimmed) sheet.
+  function setPhraseShown(name, on) {
+    if (on) shownPhraseNames.add(name); else shownPhraseNames.delete(name);
+    if (renderer) renderer.setShownPhrases([...shownPhraseNames]);
+    renderPhraseUI();
+  }
+  // Play a phrase's resolved notes, skipping the gaps between them (same engine as Play tags).
+  function playPhrase(name) {
+    if (!currentDetail) return;
+    if (!(currentDetail.format === 'musicxml' && currentDetail.source)) {
+      document.getElementById('transportMsg').textContent = 'Phrase playback needs a MusicXML piece.'; return;
+    }
+    const keep = (renderer && renderer.getPhraseNoteIds) ? renderer.getPhraseNoteIds(name) : [];
+    if (!keep.length) { document.getElementById('transportMsg').textContent = 'This phrase has no notes.'; return; }
+    const breath = parseFloat(document.getElementById('breathBeats').value);
+    const breathBeats = (Number.isFinite(breath) && breath >= 0) ? breath : 1;
+    const schedule = buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), keepNotes: keep, breathBeats });
+    if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
+    const p = ensurePlayer();
+    p.setInstrument(document.getElementById('instrSel').value);
+    p.setSchedule(schedule, { cursorStartStep: 0 });
+    p.setLoop(document.getElementById('loopChk').checked);
+    document.getElementById('transportMsg').textContent = 'Loading instrument…';
+    p.play()
+      .then(() => { document.getElementById('transportMsg').textContent = `Playing phrase "${name}" (${schedule.length} notes)`; })
+      .catch(() => { document.getElementById('transportMsg').textContent = 'Playback error.'; });
+  }
+  // Find + highlight other occurrences of a phrase (reuses the tag panel's match settings).
+  function findPhrase(name) {
+    const msgEl = document.getElementById('phraseMsg');
+    if (!currentDetail || !(currentDetail.format === 'musicxml' && currentDetail.source)) {
+      msgEl.textContent = 'Pattern search needs a MusicXML piece.'; return;
+    }
+    if (!renderer || !renderer.searchPhrasePattern) return;
+    const mode = document.getElementById('patMode').value;
+    const durationStrict = !document.getElementById('patProportional').checked;
+    const intervalBasis = document.getElementById('patIntervalBasis').value;
+    const keyVal = document.getElementById('patKey').value;
+    let key = null;
+    if (keyVal) { const [pc, m] = keyVal.split(':'); key = { tonicPc: parseInt(pc, 10), mode: m }; }
+    const { count, keyLabel } = renderer.searchPhrasePattern(name, { mode, durationStrict, intervalBasis, key });
+    msgEl.textContent = `"${name}": ${count} other occurrence${count === 1 ? '' : 's'}${keyLabel ? ` · key ${keyLabel}` : ''}`;
+  }
+  // Persist per-piece phrases with the piece (local-first; pushed in the next manual batch).
+  async function onPhrasesChange(list) {
+    renderPhraseUI();
+    if (!currentDetail || !currentPreviewId) return;
+    currentDetail.phrases = list;
+    const entry = index.find((e) => e.id === currentPreviewId);
+    if (entry) {
+      try { await store.putPieces(system, [{ entry, detail: currentDetail }]); } catch (_) {}
+      unpushedIds.add(currentPreviewId);
+      render(); updatePushBtn();
+    }
+  }
+  document.getElementById('phrasePanelChk').onchange = (e) => {
+    document.getElementById('phrasePanel').style.display = e.target.checked ? '' : 'none';
+    // Opening the Phrases panel dims all notes; shown phrases reveal theirs.
+    if (renderer) renderer.setPhraseFilter(e.target.checked);
+    if (!e.target.checked) {   // leaving the panel exits phrase-paint mode
+      phrasePainting = false; activePhraseName = null;
+      if (renderer) renderer.setPhrasePaintMode(false);
+    } else { renderPhraseUI(); if (fbPanel) fbPanel.setSource('phrases'); }   // point the fretboard at phrases
+  };
+  document.getElementById('addPhraseBtn').onclick = () => {
+    const input = document.getElementById('phraseInput');
+    const name = input.value.trim();
+    if (!name || !renderer) return;
+    if (renderer.addPhrase(name)) { input.value = ''; document.getElementById('phraseMsg').textContent = ''; }
+    else document.getElementById('phraseMsg').textContent = 'A phrase with that name already exists.';
+  };
+  document.getElementById('phraseInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById('addPhraseBtn').click(); }
+  });
   // One combobox does add + select: an existing name just becomes active; a new name is added to the
   // GLOBAL tag list (next palette color), saved, and made active. Commits on Enter or on blur.
   function commitTag() {
@@ -1298,6 +1616,17 @@
     syncToggles();
     document.body.classList.remove('preview-open');
   };
+  // Toggle native fullscreen on the preview pane (webkit fallback for Safari).
+  document.getElementById('previewFullscreenBtn').onclick = () => {
+    const el = document.getElementById('musicPreview');
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+    else { (el.requestFullscreen || el.webkitRequestFullscreen).call(el); }
+  };
+  // Re-fit the score to the (new) viewport width whenever fullscreen enters/exits.
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach((ev) => document.addEventListener(ev, () => {
+    if (renderer && renderer.applyResponsiveZoom) renderer.applyResponsiveZoom(window.innerWidth);
+  }));
 
   // ---- Search UI (Layout C) ----
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];

@@ -1,4 +1,54 @@
-import { buildTrail, cycleIndex } from './fretboard-panel.js';
+import { buildTrail, cycleIndex, commonPositions, stringArrows } from './fretboard-panel.js';
+
+describe('stringArrows', () => {
+  // A string (5) fret3 = C3, fret7 = E3. Voicing stacks both on string 5.
+  const voicing = [{ string: 5, fret: 3 }, { string: 5, fret: 7 }];
+  test('ascending sequence on one string → an "up" arrow (toward higher frets)', () => {
+    const seq = [{ name: 'C', octave: '3' }, { name: 'E', octave: '3' }];
+    expect(stringArrows(voicing, seq, true)).toEqual([{ string: 5, minFret: 3, maxFret: 7, dir: 'up' }]);
+  });
+  test('descending sequence → a "down" arrow', () => {
+    const seq = [{ name: 'E', octave: '3' }, { name: 'C', octave: '3' }];
+    expect(stringArrows(voicing, seq, true)).toEqual([{ string: 5, minFret: 3, maxFret: 7, dir: 'down' }]);
+  });
+  test('out-and-back (n1,n2,n1) → a bidirectional arrow', () => {
+    const seq = [{ name: 'C', octave: '3' }, { name: 'E', octave: '3' }, { name: 'C', octave: '3' }];
+    expect(stringArrows(voicing, seq, true)).toEqual([{ string: 5, minFret: 3, maxFret: 7, dir: 'bi' }]);
+  });
+  test('no movement (single note, or repeated same fret) → no arrow', () => {
+    expect(stringArrows(voicing, [{ name: 'C', octave: '3' }], true)).toEqual([]);
+    expect(stringArrows(voicing, [{ name: 'C', octave: '3' }, { name: 'C', octave: '3' }], true)).toEqual([]);
+  });
+  test('notes on different strings produce no arrow', () => {
+    const v = [{ string: 5, fret: 3 }, { string: 4, fret: 2 }];   // C3 on s5, E3 on s4
+    const seq = [{ name: 'C', octave: '3' }, { name: 'E', octave: '3' }];
+    expect(stringArrows(v, seq, true)).toEqual([]);
+  });
+});
+
+describe('commonPositions', () => {
+  test('pitch-class match (matchOctave off): position whose note appears in the previous step', () => {
+    // Voicing: low-E open (E2), A/fret3 (C3), D/fret2 (E3). Previous step has C & G (any octave).
+    const voicing = [{ string: 6, fret: 0 }, { string: 5, fret: 3 }, { string: 4, fret: 2 }];
+    const keys = commonPositions(voicing, [{ name: 'C' }, { name: 'G' }], false);
+    expect([...keys]).toEqual(['5:3']);
+  });
+  test('enharmonic match counts (Db ≡ C#)', () => {
+    const voicing = [{ string: 5, fret: 4 }];   // A string fret 4 = C#3
+    expect([...commonPositions(voicing, [{ name: 'Db' }], false)]).toEqual(['5:4']);
+  });
+  test('matchOctave on: requires the same octave, not just pitch class', () => {
+    // A/fret3 = C3. Previous step has C4 → NOT common when matching octave; common when not.
+    const voicing = [{ string: 5, fret: 3 }];
+    expect(commonPositions(voicing, [{ name: 'C', octave: '4' }], true).size).toBe(0);
+    expect([...commonPositions(voicing, [{ name: 'C', octave: '3' }], true)]).toEqual(['5:3']);
+    expect([...commonPositions(voicing, [{ name: 'C', octave: '4' }], false)]).toEqual(['5:3']);
+  });
+  test('no previous notes / empty voicing → empty set', () => {
+    expect(commonPositions([{ string: 1, fret: 0 }], [], false).size).toBe(0);
+    expect(commonPositions(null, [{ name: 'C' }], false).size).toBe(0);
+  });
+});
 
 describe('cycleIndex', () => {
   test('wraps forward and backward', () => {

@@ -478,6 +478,19 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
     },
     pause() { T.Transport.pause(); },
     resume() { T.Transport.start(); },   // continue from the paused position (no reset to 0)
+    // Sound a short sequence immediately, independent of the Transport and OSMD cursor — used by the
+    // fretboard "play step" button. `events` is [{midi, time, duration}] in seconds relative to now;
+    // notes sharing a `time` stack into a chord, later ones play in sequence. No-op for an empty set.
+    async playSequence(events) {
+      const list = (events || []).filter((e) => e && typeof e.midi === 'number');
+      if (!list.length) return;
+      await T.start();
+      try { if (T.loaded) await T.loaded(); } catch (_) {}   // wait for sampled buffers (synth fallback still resolves)
+      const now = T.now();
+      list.forEach((e) => {
+        try { synth.triggerAttackRelease(T.Frequency(e.midi, 'midi').toNote(), e.duration || 0.4, now + (e.time || 0)); } catch (_) {}
+      });
+    },
     stop,
   };
 }
