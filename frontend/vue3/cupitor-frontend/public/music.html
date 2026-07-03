@@ -223,6 +223,13 @@
           #fretboardPanel .fb-arrow-line,#fretboardPanel .fb-arrowhead{animation:none}
         }
         #fbSvg{max-width:100%;overflow-x:auto;display:block}
+        /* Collapsible Motifs / Phrases panels (like the fretboard panel) + shared match bar. */
+        .np-panel{margin:.25rem 0;padding:.4rem .6rem;border-radius:4px}
+        .np-panel>summary{cursor:pointer;font-weight:600;font-size:13.5px}
+        #tagPanel{background:#f6f3ff;border:1px solid #ddd0ff}
+        #phrasePanel{background:#eef4ff;border:1px solid #cfe0ff}
+        .pattern-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;margin:.25rem 0;padding:.35rem .6rem;background:#fafafa;border:1px solid #e5e5e5;border-radius:4px}
+        .pattern-controls select{padding:3px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
         /* Pattern tags */
         #tagPanel .tag-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
         #tagPanel .tag-lbl{color:#555}
@@ -377,16 +384,12 @@
     <button class="btn toggle" data-for="dimConnChk" title="Dim beams / stems"><span class="ic">〰️</span><span class="txt">Dim beams/stems</span></button>
     <button class="btn toggle" data-for="chordWindowChk" title="Draggable chord window"><span class="ic">🔲</span><span class="txt">Chord window</span></button>
     <button class="btn toggle" data-for="globalMatchChk" title="When on, clicking a chord name highlights every occurrence of it across the visible sheet"><span class="ic">🌐</span><span class="txt">Global</span></button>
-    <button class="btn toggle" data-for="tagPanelChk" title="Tag recurring motifs of notes and colour them"><span class="ic">🏷️</span><span class="txt">Motifs</span></button>
-    <button class="btn toggle" data-for="phrasePanelChk" title="Build phrases from tags + extra notes"><span class="ic">🎼</span><span class="txt">Phrases</span></button>
     <input type="checkbox" id="voiceColorChk" checked hidden>
     <input type="checkbox" id="noteNameChk" hidden>
     <input type="checkbox" id="chordChk" hidden>
     <input type="checkbox" id="dimConnChk" checked hidden>
     <input type="checkbox" id="chordWindowChk" hidden>
     <input type="checkbox" id="globalMatchChk" hidden>
-    <input type="checkbox" id="tagPanelChk" hidden>
-    <input type="checkbox" id="phrasePanelChk" hidden>
   </div>
   <div id="suppressPanel" style="display:none; margin:.25rem 0; padding:.3rem .4rem; background:#fff8f0; border:1px solid #ffd9b0; border-radius:4px">
     <button class="btn toggle" data-for="suppressModeChk" title="Click notes to silence them"><span class="ic">🔇</span><span class="txt">Suppress notes</span></button>
@@ -411,9 +414,10 @@
     <span id="windowRange" style="font-size:.8em;color:#777"></span>
     <button id="captureWindowBtn" class="btn" style="margin-left:.5em" title="Capture this window to vocab"><span class="ic">➕</span><span class="txt">Capture window → vocab</span></button>
   </div>
-  <div id="tagPanel" style="display:none; margin:.25rem 0; padding:.4rem .5rem; background:#f6f3ff; border:1px solid #ddd0ff; border-radius:4px">
+  <details id="tagPanel" class="np-panel">
+    <summary>🏷️ Motifs</summary>
     <div class="tag-row">
-      <button class="btn toggle" data-for="tagModeChk" title="Click notes to add/remove them from the active tag"><span class="ic">🖌️</span><span class="txt">Tag mode</span></button>
+      <button class="btn toggle" data-for="tagModeChk" title="Click notes to add/remove them from the active tag"><span class="ic">🖌️</span><span class="txt">Edit mode</span></button>
       <label class="tag-lbl">Tag:
         <input id="tagInput" list="tagOptions" placeholder="pick or type a tag…" maxlength="24" autocomplete="off"
                title="Pick an existing tag or type a new one (Enter), then click notes to paint it" style="width:11em">
@@ -427,29 +431,15 @@
     </div>
     <div class="tag-row" style="margin-top:6px">
       <button id="findPatternBtn" class="btn" title="Find other occurrences of the checked tags' note patterns on the open sheet"><span class="ic">🔎</span><span class="txt">Find pattern</span></button>
-      <label class="tag-lbl">Match
-        <select id="patMode" title="Match by pitch intervals, note durations, or both">
-          <option value="intervals">intervals</option>
-          <option value="duration">duration</option>
-          <option value="both">both</option>
-        </select>
-      </label>
-      <label class="tag-lbl" title="Durations: off = exact note types; on = proportional (augmentation/diminution matches)">
-        <input type="checkbox" id="patProportional"> proportional
-      </label>
-      <select id="patIntervalBasis" title="Match intervals literally (chromatic) or by scale degree (diatonic)">
-        <option value="diatonic">diatonic</option>
-        <option value="chromatic">chromatic</option>
-      </select>
-      <select id="patKey" title="Key for diatonic matching (defaults to the piece's best-guess key)"></select>
       <span id="patternMsg" style="font-size:.8em;color:#555"></span>
     </div>
     <div class="tag-list-head">
       <button id="tagCheckAllBtn" class="icon-btn" title="Check / uncheck all tags" aria-label="Check or uncheck all tags">☑</button>
       <div id="tagList" class="tag-list"></div>
     </div>
-  </div>
-  <div id="phrasePanel" style="display:none; margin:.25rem 0; padding:.4rem .5rem; background:#eef4ff; border:1px solid #cfe0ff; border-radius:4px">
+  </details>
+  <details id="phrasePanel" class="np-panel">
+    <summary>🎼 Phrases</summary>
     <div class="tag-row">
       <label class="tag-lbl">New phrase:
         <input id="phraseInput" maxlength="32" placeholder="name…" autocomplete="off" style="width:11em">
@@ -458,6 +448,26 @@
       <span id="phraseMsg" style="font-size:.8em;color:#555"></span>
     </div>
     <div id="phraseList" class="tag-list"></div>
+  </details>
+    <!-- Shared pattern-match settings — used by BOTH the Motifs "Find pattern" and each Phrase's Find.
+       Shown whenever the Motifs or Phrases panel is expanded. -->
+  <div id="patternControls" class="pattern-controls" style="display:none">
+    <span class="tag-lbl">Pattern match:</span>
+    <label class="tag-lbl">by
+      <select id="patMode" title="Match by pitch intervals, note durations, or both">
+        <option value="intervals">intervals</option>
+        <option value="duration">duration</option>
+        <option value="both">both</option>
+      </select>
+    </label>
+    <label class="tag-lbl" title="Durations: off = exact note types; on = proportional (augmentation/diminution matches)">
+      <input type="checkbox" id="patProportional"> proportional
+    </label>
+    <select id="patIntervalBasis" title="Match intervals literally (chromatic) or by scale degree (diatonic)">
+      <option value="diatonic">diatonic</option>
+      <option value="chromatic">chromatic</option>
+    </select>
+    <select id="patKey" title="Key for diatonic matching (defaults to the piece's best-guess key)"></select>
   </div>
   <div id="osmdPreview"></div>
   <details id="fretboardPanel" class="fb-wrap">
@@ -1221,8 +1231,8 @@
     document.getElementById('tagModeChk').checked = false;
     tagFilterSel.clear();
     activeTagName = '';
-    // Dimming follows whether the tag panel is currently open (no separate Filter toggle any more).
-    const tagPanelOpen = document.getElementById('tagPanelChk').checked;
+    // Dimming follows whether the collapsible Motifs panel is currently expanded.
+    const tagPanelOpen = document.getElementById('tagPanel').open;
     if (renderer) { renderer.setTagMode(false); renderer.setTagFilter(tagPanelOpen); renderer.setFilterTags([]); }
     // Fold any tags this piece already uses into the global list (so they're selectable everywhere).
     // Only persist/mark-dirty when the merge actually added something (mergeRegistry only grows).
@@ -1237,9 +1247,10 @@
     activePhraseName = null; phrasePainting = false; shownPhraseNames.clear();
     document.getElementById('phraseInput').value = '';
     document.getElementById('phraseMsg').textContent = '';
-    const phrasePanelOpen = document.getElementById('phrasePanelChk').checked;
+    const phrasePanelOpen = document.getElementById('phrasePanel').open;
     if (renderer) { renderer.setPhrasePaintMode(false); renderer.setShownPhrases([]); renderer.setPhraseFilter(phrasePanelOpen); }
     if (phrasePanelOpen) renderPhraseUI();
+    updatePatternControls();
     document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
   }
   document.getElementById('pieceList').addEventListener('click', (ev) => {
@@ -1343,7 +1354,7 @@
     });
     if (renderer) renderer.setFilterTags([...tagFilterSel]);
     // A tag change (added/removed) may affect the phrase panel's member-tag checkboxes.
-    if (document.getElementById('phrasePanel').style.display !== 'none') renderPhraseUI();
+    if (document.getElementById('phrasePanel').open) renderPhraseUI();
   }
   // Persist per-piece note assignments with the piece (local-first; pushed in the next manual batch).
   async function onPatternsChange(patterns) {
@@ -1357,13 +1368,19 @@
       render(); updatePushBtn();
     }
   }
-  document.getElementById('tagPanelChk').onchange = (e) => {
-    document.getElementById('tagPanel').style.display = e.target.checked ? '' : 'none';
-    // Opening the Pattern-tags panel dims all notes; checked tags reveal theirs.
-    if (renderer) renderer.setTagFilter(e.target.checked);
-    if (!e.target.checked && renderer) { renderer.setTagMode(false); document.getElementById('tagModeChk').checked = false; syncToggles(); }
-    if (e.target.checked) renderTagUI();
-  };
+  // Show the shared match controls whenever either collapsible panel is expanded.
+  function updatePatternControls() {
+    const open = document.getElementById('tagPanel').open || document.getElementById('phrasePanel').open;
+    document.getElementById('patternControls').style.display = open ? '' : 'none';
+  }
+  // Expanding the Motifs panel dims all notes (checked tags reveal theirs); collapsing exits tag mode.
+  document.getElementById('tagPanel').addEventListener('toggle', (e) => {
+    const open = e.target.open;
+    if (renderer) renderer.setTagFilter(open);
+    if (!open && renderer) { renderer.setTagMode(false); document.getElementById('tagModeChk').checked = false; syncToggles(); }
+    if (open) renderTagUI();
+    updatePatternControls();
+  });
   document.getElementById('tagModeChk').onchange = (e) => { if (renderer) renderer.setTagMode(e.target.checked); };
   document.getElementById('playTagsBtn').onclick = playTags;
   // Check all tags at once (or uncheck all if every tag is already checked).
@@ -1417,16 +1434,18 @@
   document.getElementById('findPatternBtn').onclick = searchPattern;
 
   // ── Phrases ──────────────────────────────────────────────────────────────────────────────────
-  // A phrase = named set of hand-picked notes with its own color. Rebuilt from the renderer's phrase
-  // list on every edit. Per row: a show checkbox (reveal + tint on the dimmed sheet), then paint /
-  // play / fretboard / find / delete.
+  // A phrase = named group of member tags + extra hand-picked notes, with its own color. Rebuilt
+  // from the renderer's phrase list on every edit. Per row: a show checkbox (reveal + tint on the
+  // dimmed sheet), paint / play / find / delete, and a wrap of member-tag checkboxes.
   function renderPhraseUI() {
     if (!renderer) return;
     const phrases = renderer.getPhrases();
+    const tagNames = renderer.getTagNames();
+    const tagColors = renderer.getTagColors();
     const list = document.getElementById('phraseList');
     list.innerHTML = '';
     if (!phrases.length) {
-      list.innerHTML = '<span style="font-size:.85em;color:#888">No phrases yet — add one, then paint its notes on the sheet.</span>';
+      list.innerHTML = '<span style="font-size:.85em;color:#888">No phrases yet — add one, then tick its member tags and/or paint extra notes.</span>';
       return;
     }
     const mkBtn = (txt, title, fn, active) => {
@@ -1443,17 +1462,29 @@
       const nm = document.createElement('b'); nm.textContent = p.name; nm.style.marginRight = '6px';
       const info = document.createElement('span');
       info.style.cssText = 'font-size:.78em;color:#666;margin-right:8px';
-      info.textContent = `${p.notes.length} note${p.notes.length === 1 ? '' : 's'}`;
-      const paintBtn = mkBtn('🖌️', 'Paint notes — click noteheads on the sheet', () => togglePhrasePaint(p.name), activePhraseName === p.name && phrasePainting);
-      const playBtn = mkBtn('▶', 'Play this phrase', () => playPhrase(p.name));
+      info.textContent = `${p.tags.length} tag${p.tags.length === 1 ? '' : 's'} · ${p.notes.length} extra`;
+      const paintBtn = mkBtn('🖌️', 'Paint extra notes — click noteheads on the sheet', () => togglePhrasePaint(p.name), activePhraseName === p.name && phrasePainting);
+      const playBtn = mkBtn('▶', 'Play this phrase (its tags + extra notes, together)', () => playPhrase(p.name));
       const findBtn = mkBtn('🔍', 'Find other occurrences of this phrase on the sheet', () => findPhrase(p.name));
       const delBtn = mkBtn('🗑', 'Delete this phrase', () => {
-        if (window.confirm(`Delete phrase "${p.name}"? Its ${p.notes.length} hand-picked note${p.notes.length === 1 ? '' : 's'} will be lost.`)) renderer.removePhrase(p.name);
+        if (window.confirm(`Delete phrase "${p.name}"? (${p.tags.length} tag${p.tags.length === 1 ? '' : 's'} + ${p.notes.length} extra note${p.notes.length === 1 ? '' : 's'})`)) renderer.removePhrase(p.name);
       });
       delBtn.style.marginLeft = 'auto';   // push delete to the far right of the row
       const head = document.createElement('div'); head.className = 'phrase-head';
       head.append(show, sw, nm, info, paintBtn, playBtn, findBtn, delBtn);
-      row.append(head);
+      // Member-tag checkboxes (the phrase's logical group).
+      const tagsWrap = document.createElement('div'); tagsWrap.className = 'phrase-tags';
+      if (!tagNames.length) {
+        const s = document.createElement('span'); s.style.cssText = 'font-size:.8em;color:#999'; s.textContent = '(no tags to add yet)'; tagsWrap.append(s);
+      }
+      tagNames.forEach((tn) => {
+        const lbl = document.createElement('label'); lbl.style.cssText = 'font-size:.82em;display:inline-flex;align-items:center;gap:3px;margin-right:8px';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = p.tags.includes(tn);
+        cb.onchange = () => renderer.setPhraseTag(p.name, tn, cb.checked);
+        const dot = document.createElement('span'); dot.className = 'sw'; dot.style.background = tagColors[tn] || '#999';
+        lbl.append(cb, dot, document.createTextNode(tn)); tagsWrap.append(lbl);
+      });
+      row.append(head, tagsWrap);
       list.appendChild(row);
     });
   }
@@ -1522,15 +1553,16 @@
       render(); updatePushBtn();
     }
   }
-  document.getElementById('phrasePanelChk').onchange = (e) => {
-    document.getElementById('phrasePanel').style.display = e.target.checked ? '' : 'none';
-    // Opening the Phrases panel dims all notes; shown phrases reveal theirs.
-    if (renderer) renderer.setPhraseFilter(e.target.checked);
-    if (!e.target.checked) {   // leaving the panel exits phrase-paint mode
+  // Expanding the Phrases panel dims all notes (shown phrases reveal theirs); collapsing exits paint.
+  document.getElementById('phrasePanel').addEventListener('toggle', (e) => {
+    const open = e.target.open;
+    if (renderer) renderer.setPhraseFilter(open);
+    if (!open) {   // collapsing exits phrase-paint mode
       phrasePainting = false; activePhraseName = null;
       if (renderer) renderer.setPhrasePaintMode(false);
     } else { renderPhraseUI(); if (fbPanel) fbPanel.setSource('phrases'); }   // point the fretboard at phrases
-  };
+    updatePatternControls();
+  });
   document.getElementById('addPhraseBtn').onclick = () => {
     const input = document.getElementById('phraseInput');
     const name = input.value.trim();

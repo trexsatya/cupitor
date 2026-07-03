@@ -5,8 +5,8 @@ import { primaryVoice } from './music-encoding.js';
 import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
 import { indexAssignments, colorMap, toggleNote, firstTagForKey, noteId as tagNoteId } from './music-tags.js';
 import { extractTemplate, findMatches, degreeSequence, guessKey, keyLabel, MAJOR_SCALE, MINOR_SCALE } from './music-pattern.js';
-import { addPhrase as addPhraseReducer, removePhrase as removePhraseReducer,
-  togglePhraseNote as togglePhraseNoteReducer, resolvePhraseNoteIds, phraseByName } from './music-phrase.js';
+import { addPhrase as addPhraseReducer, removePhrase as removePhraseReducer, setPhraseTag as setPhraseTagReducer,
+  removeTagFromPhrases, togglePhraseNote as togglePhraseNoteReducer, resolvePhraseNoteIds, phraseByName } from './music-phrase.js';
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -425,11 +425,13 @@ export function createMusicRenderer(container, opts = {}) {
   let tagFilter = false;             // when on, dim notes not in the selected tags
   let filterTags = new Set();        // tag names the filter shows
   const onPatternsChange = opts.onPatternsChange;   // fired after the user edits per-piece assignments
-  // Phrases: per-piece [{ name, color, notes:[{measure,midi,beats}] }] — named sets of hand-picked
-  // notes (see music-phrase.js). Persisted as detail.phrases.
+  // Phrases: per-piece [{ name, color, tags:[tagName], notes:[{measure,midi,beats}] }] — a logical
+  // group of member tags plus extra hand-picked notes, resolved live to the union of their notes
+  // (see music-phrase.js), for highlighting/playing together, find, and fretboard capture.
+  // Persisted as detail.phrases.
   let phrases = [];
-  let phrasePaintMode = false;       // when on, notehead clicks add/remove the active phrase's notes
-  let activePhrase = null;           // the phrase that paint-mode clicks and fretboard capture use
+  let phrasePaintMode = false;       // when on, notehead clicks add/remove the active phrase's extra notes
+  let activePhrase = null;           // the phrase that paint-mode clicks edit
   let phraseFilter = false;          // when on (phrase panel open), dim notes not in a shown phrase
   let shownPhrases = new Set();       // phrase names whose notes are revealed + tinted on the sheet
   const onPhrasesChange = opts.onPhrasesChange;     // fired after the user edits phrases
@@ -439,7 +441,7 @@ export function createMusicRenderer(container, opts = {}) {
   }
   // A detached copy of the phrases, safe to persist / hand to the UI.
   function getPhrases() {
-    return phrases.map((p) => ({ name: p.name, color: p.color, notes: (p.notes || []).map((n) => ({ ...n })) }));
+    return phrases.map((p) => ({ name: p.name, color: p.color, tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
   }
   function firePhrasesChange() { if (onPhrasesChange) { try { onPhrasesChange(getPhrases()); } catch (_) {} } }
 
@@ -1045,10 +1047,10 @@ export function createMusicRenderer(container, opts = {}) {
   // suppression grey. No-op when there are no patterns.
   // Tag + phrase coloring / dimming, in one pass. The tag panel (tagFilter) and phrase panel
   // (phraseFilter) each act as a "dim mode": while open, notes NOT in a revealed tag/phrase are
-  // dimmed, and a note is revealed (kept lit + colored) when its tag is checked (filterTags) or its
-  // phrase is shown (shownPhrases). The tag/phrase currently being painted is always revealed so
-  // authoring stays visible. When neither panel is open, tagged notes keep their base color-by-tag
-  // and nothing dims. Phrase color wins over tag color on a shared note.
+  // dimmed, and a note is revealed (kept lit + colored) when its tag is checked (filterTags) or a
+  // phrase containing that tag is shown (shownPhrases). The tag currently being painted is always
+  // revealed so authoring stays visible. When neither panel is open, tagged notes keep their base
+  // color-by-tag and nothing dims. Phrase color wins over tag color on a shared note.
   function applyTagOverlay() {
     if (!container || !container.querySelectorAll) return;
     if (!tagFilter && !phraseFilter && !assignments.length) return;   // nothing to color / dim
@@ -1057,11 +1059,11 @@ export function createMusicRenderer(container, opts = {}) {
     const revealTags = new Set(filterTags);
     if (tagMode && activeTag) revealTags.add(activeTag);
     const revealPhrases = new Set(shownPhrases);
-    if (phrasePaintMode && activePhrase) revealPhrases.add(activePhrase);
-    // note-id → phrase color, for the phrases currently revealed.
+    if (phrasePaintMode && activePhrase) revealPhrases.add(activePhrase);   // keep the painted phrase visible
+    // note-id → phrase color, for the revealed phrases (their resolved union of tags' + extra notes).
     const phraseKeyColor = new Map();
     if (phraseFilter) phrases.forEach((p) => {
-      if (revealPhrases.has(p.name)) (p.notes || []).forEach((n) => phraseKeyColor.set(tagNoteId(n), p.color));
+      if (revealPhrases.has(p.name)) resolvePhraseNoteIds(p, assignments).forEach((n) => phraseKeyColor.set(tagNoteId(n), p.color));
     });
     orderedRenderedNotes().forEach((n) => {
       if (n.midi == null || !n.el) return;
@@ -1179,23 +1181,22 @@ export function createMusicRenderer(container, opts = {}) {
   }
 
   // ── Phrases ────────────────────────────────────────────────────────────────────────────────
-  // Resolve a phrase to onset-ordered note identities [{measure,midi,beats}] — the play-set for
-  // phrase playback. Empty when the phrase is unknown.
+  // Resolve a phrase to onset-ordered note identities [{measure,midi,beats}] (its member tags'
+  // notes + extra notes, unioned) — the play-set for playing the phrase together. Empty when unknown.
   function getPhraseNoteIds(name) {
-    return resolvePhraseNoteIds(phraseByName(phrases, name));
+    return resolvePhraseNoteIds(phraseByName(phrases, name), assignments);
   }
 
-  // Every phrase as fretboard capture steps — ONE step per phrase (all its notes together), in
-  // creation order. Mirrors how "Motifs" captures each occurrence as a single step (not per note).
-  // Each step carries notes/seq/events/measures like the other capture sources. Honors
-  // includeSuppressed. Empty when no phrase has notes drawn on the sheet.
+  // Every phrase as fretboard capture steps — ONE step per phrase (all its resolved notes together),
+  // in creation order. Mirrors how "Motifs" captures each occurrence as a single step. Each step
+  // carries notes/seq/events/measures. Honors includeSuppressed. Empty when no phrase has notes drawn.
   function getPhrasesSequence({ includeSuppressed = false } = {}) {
     const ordered = orderedRenderedNotes();
     const mutedKeys = includeSuppressed ? new Set()
       : new Set(mutedList().map((n) => suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
     const steps = [];
     phrases.forEach((p) => {
-      const all = orderedIndicesFor(resolvePhraseNoteIds(p), ordered).map((i) => ordered[i]);
+      const all = orderedIndicesFor(resolvePhraseNoteIds(p, assignments), ordered).map((i) => ordered[i]);
       const live = all.filter((n) => !mutedKeys.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
       const src = live.length ? live : all;
       if (!src.length) return;
@@ -1207,9 +1208,9 @@ export function createMusicRenderer(container, opts = {}) {
     return steps;
   }
 
-  // Find + highlight other occurrences of a phrase's note sequence on the open sheet (same engine as
-  // tag search). Highlights the phrase's OWN notes and every match in the phrase color. Returns
-  // { count, keyLabel }. mode/durationStrict/intervalBasis/key as in searchTagPatterns.
+  // Find + highlight other occurrences of a phrase's note sequence on the open sheet — SAME engine
+  // and rules as tag/motif search (intervals/duration/both, chromatic/diatonic). Highlights the
+  // phrase's own occurrence and every match in the phrase color. Returns { count, keyLabel }.
   function searchPhrasePattern(name, { mode = 'intervals', durationStrict = true, intervalBasis = 'chromatic', key = null } = {}) {
     clearHighlight();
     const phrase = phraseByName(phrases, name);
@@ -1219,7 +1220,7 @@ export function createMusicRenderer(container, opts = {}) {
     const durs = ordered.map((n) => n.durBeats);
     const wantInt = mode === 'intervals' || mode === 'both';
     const { pitchSeq, keyLabel: resolvedKeyLabel } = pitchSeqFor(midis, { intervalBasis, wantInt, key });
-    const idx = orderedIndicesFor(resolvePhraseNoteIds(phrase), ordered);
+    const idx = orderedIndicesFor(resolvePhraseNoteIds(phrase, assignments), ordered);
     const color = phrase.color || CHORD_HL_COLOR;
     highlightNotes(idx.map((i) => ordered[i]), color);   // the phrase's own occurrence
     if (idx.length < 2) return { count: 0, keyLabel: resolvedKeyLabel };
@@ -1289,7 +1290,7 @@ export function createMusicRenderer(container, opts = {}) {
     if (!n || n.midi == null) return;
     const id = { measure: n.measure, midi: n.midi, beats: n.onsetBeats };
     const key = suppressionKey(id);
-    if (phrasePaintMode) {   // paint the note into the active phrase; wins over tag/suppress
+    if (phrasePaintMode) {   // paint the note into the active phrase's extra notes; wins over tag/suppress
       if (!activePhrase) return;
       phrases = togglePhraseNoteReducer(phrases, activePhrase, id);
       redraw();
@@ -1586,7 +1587,7 @@ export function createMusicRenderer(container, opts = {}) {
       shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
       selectedChords.clear();   // a fresh piece carries no manual chord picks
       assignments = (detail.patterns || []).map((p) => ({ name: p.name, notes: (p.notes || []).map((n) => ({ ...n })) }));
-      phrases = (detail.phrases || []).map((p) => ({ name: p.name, color: p.color, notes: (p.notes || []).map((n) => ({ ...n })) }));
+      phrases = (detail.phrases || []).map((p) => ({ name: p.name, color: p.color, tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
       tagMode = false; activeTag = null; tagFilter = false; filterTags = new Set();   // tagRegistry is global — not reset here
       phrasePaintMode = false; activePhrase = null; phraseFilter = false; shownPhrases = new Set();
       redraw();
@@ -1632,8 +1633,12 @@ export function createMusicRenderer(container, opts = {}) {
       assignments = assignments.filter((a) => a.name !== name);
       if (activeTag === name) activeTag = null;
       filterTags.delete(name);
+      // A deleted tag also stops being a member of any phrase.
+      const before = JSON.stringify(phrases.map((p) => p.tags));
+      phrases = removeTagFromPhrases(phrases, name);
       redraw();
       if (onPatternsChange) { try { onPatternsChange(getAssignments()); } catch (_) {} }
+      if (before !== JSON.stringify(phrases.map((p) => p.tags))) firePhrasesChange();
     },
     // Enter/leave tag-paint mode; clicking noteheads then edits the active tag.
     setTagMode(on) { tagMode = !!on; redraw(); },
@@ -1662,11 +1667,11 @@ export function createMusicRenderer(container, opts = {}) {
     // proportional duration matching.
     searchTagPatterns(opts) { return searchTagPatterns(opts); },
 
-    // ── Phrases (named composite of member tags + extra notes; see music-phrase.js) ──────────
+    // ── Phrases (named logical group of tags; see music-phrase.js) ───────────────────────────
     // Per-piece phrase list, persisted as detail.phrases. setPhrases does NOT fire onPhrasesChange
     // (used on load / restore); the editing methods below do.
     setPhrases(list) {
-      phrases = (list || []).map((p) => ({ name: p.name, color: p.color, notes: (p.notes || []).map((n) => ({ ...n })) }));
+      phrases = (list || []).map((p) => ({ name: p.name, color: p.color, tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
       redraw();
     },
     getPhrases() { return getPhrases(); },
@@ -1684,12 +1689,14 @@ export function createMusicRenderer(container, opts = {}) {
       shownPhrases.delete(name);
       firePhrasesChange(); redraw();
     },
-    // Enter/leave phrase-paint mode; notehead clicks then add/remove the active phrase's notes.
+    // Add/remove a member tag on a phrase (its notes resolve live from the tags + extra notes).
+    setPhraseTag(name, tagName, on) { phrases = setPhraseTagReducer(phrases, name, tagName, !!on); firePhrasesChange(); redraw(); },
+    // Enter/leave phrase-paint mode; notehead clicks then add/remove the active phrase's extra notes.
     setPhrasePaintMode(on) { phrasePaintMode = !!on; redraw(); },
     setActivePhrase(name) { activePhrase = name || null; },
     // Phrase "dim mode" (on while the phrase panel is open): dim notes not in a shown phrase.
     setPhraseFilter(on) { phraseFilter = !!on; redraw(); },
-    // The set of phrase names whose notes are revealed + tinted on the sheet.
+    // The set of phrase names whose resolved notes are revealed + tinted on the sheet.
     setShownPhrases(names) { shownPhrases = new Set(names || []); redraw(); },
     getPhraseNoteIds(name) { return getPhraseNoteIds(name); },
     getPhrasesSequence(opts) { return getPhrasesSequence(opts); },
