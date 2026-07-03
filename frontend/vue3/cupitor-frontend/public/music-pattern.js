@@ -101,6 +101,64 @@ export function findMatches(midis, durs, template, { mode = 'intervals', duratio
   return out;
 }
 
+// 12-bin pitch-class histogram of a midi list (nulls skipped) — the input to guessKey.
+export function pcHistogram(midis) {
+  const counts = new Array(12).fill(0);
+  (midis || []).forEach((m) => { if (m != null) counts[((m % 12) + 12) % 12]++; });
+  return counts;
+}
+
+// The pitch sequence a match runs on: raw midis (chromatic) or diatonic degree indices under
+// `key` ({tonicPc,mode}), guessed from `midis` when `key` is null. Duration-only matching
+// (`wantInt` false) always uses raw midis. Returns { pitchSeq, key } (key null unless diatonic).
+export function pitchSequence(midis, { intervalBasis = 'chromatic', wantInt = true, key = null } = {}) {
+  if (intervalBasis !== 'diatonic' || !wantInt) return { pitchSeq: midis, key: null };
+  const k = key || guessKey(pcHistogram(midis));
+  const scale = k.mode === 'minor' ? MINOR_SCALE : MAJOR_SCALE;
+  return { pitchSeq: degreeSequence(midis, k.tonicPc, scale), key: k };
+}
+
+// Melodic pattern search. `findMatches` counts the intervening stream notes between tagged notes
+// as part of the template, so two things break a melodically-identical recurrence: (1) notes from
+// another voice/staff interleaved between melody notes, and (2) chord tones stacked on a melody
+// note's onset. We remove both by reducing the stream to a monophonic melodic line before matching:
+//   • scope to the voice(s) the tag lives in (drops other voices/staves), then
+//   • collapse each onset to its TOP note (highest midi) — the melody — so chords become one step.
+// Gap structure is still honored WITHIN that melodic line (skipped onsets stay part of the shape).
+// `stream` = reading-order notes with {midi, durBeats, voice, onset}; `tagIdx` = the tag's note
+// indices in `stream`. Tag notes map to the melodic step at their onset (the tag's own notes are
+// assumed to be the melody, i.e. the top note at each onset). Returns stream-index lists
+// { originalIdx, matches } (matches excludes the original) + the resolved `key`.
+export function findScopedMatches(stream, tagIdx, { mode = 'intervals', durationStrict = true, intervalBasis = 'chromatic', key = null } = {}) {
+  const idx = (tagIdx || []).slice().sort((a, b) => a - b);
+  if (idx.length < 2) return { originalIdx: idx, matches: [], key: null };
+  const voices = new Set(idx.map((i) => stream[i] && stream[i].voice));
+  // Top note per onset within the tag's voice(s). Each melody entry keeps the full-stream index of
+  // the note it represents, so matches map back to real noteheads.
+  const byOnset = new Map();
+  stream.forEach((n, i) => {
+    if (!n || n.midi == null || !voices.has(n.voice)) return;
+    const cur = byOnset.get(n.onset);
+    if (!cur || n.midi > cur.midi) byOnset.set(n.onset, { pos: i, midi: n.midi, durBeats: n.durBeats, onset: n.onset });
+  });
+  const melody = [...byOnset.values()].sort((a, b) => a.onset - b.onset);
+  const melodyMidis = melody.map((e) => e.midi);
+  const melodyDurs = melody.map((e) => e.durBeats);
+  const wantInt = mode === 'intervals' || mode === 'both';
+  const { pitchSeq, key: usedKey } = pitchSequence(melodyMidis, { intervalBasis, wantInt, key });
+  const tagOnsets = new Set(idx.map((i) => stream[i].onset));
+  const tagPos = [];
+  melody.forEach((e, mi) => { if (tagOnsets.has(e.onset)) tagPos.push(mi); });
+  if (tagPos.length < 2) return { originalIdx: tagPos.map((mi) => melody[mi].pos), matches: [], key: usedKey };
+  const template = extractTemplate(tagPos, pitchSeq, melodyDurs);
+  const matches = findMatches(pitchSeq, melodyDurs, template, { mode, durationStrict });
+  return {
+    originalIdx: tagPos.map((mi) => melody[mi].pos),
+    matches: matches.map((m) => m.map((mi) => melody[mi].pos)),
+    key: usedKey,
+  };
+}
+
 // Transposition-invariant: every consecutive Δsemitones at the offset positions equals the template.
 function intervalsMatch(midis, offsets, intervals, s) {
   for (let j = 0; j < intervals.length; j++) {

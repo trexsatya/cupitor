@@ -3,8 +3,8 @@
 // a thin OSMD wrapper (injectable factory) for whole-piece / segment rendering.
 import { primaryVoice } from './music-encoding.js';
 import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
-import { indexAssignments, colorMap, toggleNote, firstTagForKey, noteId as tagNoteId } from './music-tags.js';
-import { extractTemplate, findMatches, degreeSequence, guessKey, keyLabel, MAJOR_SCALE, MINOR_SCALE } from './music-pattern.js';
+import { indexAssignments, colorMap, toggleNote, firstTagForKey, revealedTagForKey, noteId as tagNoteId } from './music-tags.js';
+import { findScopedMatches, pcHistogram, guessKey, keyLabel } from './music-pattern.js';
 import { addPhrase as addPhraseReducer, removePhrase as removePhraseReducer, setPhraseTag as setPhraseTagReducer,
   removeTagFromPhrases, togglePhraseNote as togglePhraseNoteReducer, resolvePhraseNoteIds, phraseByName } from './music-phrase.js';
 
@@ -1070,10 +1070,14 @@ export function createMusicRenderer(container, opts = {}) {
       const key = tagNoteId({ measure: n.measure, midi: n.midi, beats: n.onsetBeats });
       let paint = null, lit = false;
       if (phraseFilter && phraseKeyColor.has(key)) { paint = phraseKeyColor.get(key); lit = true; }
-      else {
+      else if (tagFilter) {
+        // Light the note for ANY revealed tag it belongs to — not just its first tag — so a note
+        // shared with an earlier (hidden) tag still shows when a later tag is revealed.
+        const tname = revealedTagForKey(indexed, key, revealTags);
+        if (tname) { paint = cmap[tname]; lit = true; }
+      } else {
         const tname = firstTagForKey(indexed, key);
-        if (tagFilter) { if (tname && revealTags.has(tname)) { paint = cmap[tname]; lit = true; } }
-        else if (tname) { paint = cmap[tname]; }   // panels closed → base color-by-tag, no dim
+        if (tname) { paint = cmap[tname]; }   // panels closed → base color-by-tag, no dim
       }
       if (!lit && (tagFilter || phraseFilter)) paint = DIM_CONNECTOR_COLOR;   // dim the un-revealed
       if (!paint) return;
@@ -1126,25 +1130,19 @@ export function createMusicRenderer(container, opts = {}) {
       .sort((p, q) => p - q);
   }
 
-  // Pitch sequence for interval matching: raw MIDIs, or diatonic degree indices under the chosen /
-  // guessed key. Returns { pitchSeq, keyLabel } (keyLabel null unless diatonic + interval matching).
-  function pitchSeqFor(midis, { intervalBasis, wantInt, key }) {
-    if (intervalBasis !== 'diatonic' || !wantInt) return { pitchSeq: midis, keyLabel: null };
-    let k = key;
-    if (!k) {
-      const counts = new Array(12).fill(0);
-      midis.forEach((m) => { if (m != null) counts[((m % 12) + 12) % 12]++; });
-      k = guessKey(counts);
-    }
-    const scale = k.mode === 'minor' ? MINOR_SCALE : MAJOR_SCALE;
-    return { pitchSeq: degreeSequence(midis, k.tonicPc, scale), keyLabel: keyLabel(k.tonicPc, k.mode) };
+  // Resolve the diatonic key ONCE from the whole piece (or honor the picked `key`), so a search's
+  // key label and every tag/phrase within it use the same key. Null unless diatonic + interval mode.
+  function resolveSearchKey(ordered, { intervalBasis, wantInt, key }) {
+    if (intervalBasis !== 'diatonic' || !wantInt) return null;
+    return key || guessKey(pcHistogram(ordered.map((n) => n.midi)));
   }
 
   // Search the open sheet for other occurrences of each checked filter tag's note pattern, and
-  // highlight every match in that tag's color. The pattern preserves gap structure (the number of
-  // intervening notes between consecutive tagged notes), matched by intervals / durations / both.
-  // intervalBasis 'chromatic' (literal semitones) or 'diatonic' (scale-degree steps under `key`,
-  // or a best-guess key when `key` is null). Returns { results: [{name,color,count}], keyLabel }.
+  // highlight every match in that tag's color. Matched by intervals / durations / both. The pattern
+  // is scoped to the melodic voice(s) the tag lives in (see findScopedMatches), so accompaniment /
+  // bar-line crossings don't count toward the gap structure. intervalBasis 'chromatic' (literal
+  // semitones) or 'diatonic' (scale-degree steps under `key`, or a best-guess key when `key` is
+  // null). Returns { results: [{name,color,count}], keyLabel }.
   // Groups from the most recent pattern search: `lastPatternMatches` = OTHER occurrences (for
   // Play-tags + fretboard); `lastPatternOriginals` = each tag's own occurrence (fretboard, so the
   // capture shows every occurrence in piece order — originals + matches).
@@ -1155,10 +1153,10 @@ export function createMusicRenderer(container, opts = {}) {
     lastPatternMatches = [];
     lastPatternOriginals = [];
     const ordered = orderedRenderedNotes();
-    const midis = ordered.map((n) => n.midi);
-    const durs = ordered.map((n) => n.durBeats);
+    const stream = ordered.map((n) => ({ midi: n.midi, durBeats: n.durBeats, voice: n.voice, onset: n.onsetBeats }));
     const wantInt = mode === 'intervals' || mode === 'both';
-    const { pitchSeq, keyLabel: resolvedKeyLabel } = pitchSeqFor(midis, { intervalBasis, wantInt, key });
+    const resolvedKey = resolveSearchKey(ordered, { intervalBasis, wantInt, key });
+    const resolvedKeyLabel = resolvedKey ? keyLabel(resolvedKey.tonicPc, resolvedKey.mode) : null;
     const cmap = colorMap(tagRegistry);
     const results = [];
     assignments.forEach((a) => {
@@ -1167,9 +1165,8 @@ export function createMusicRenderer(container, opts = {}) {
       // Locate this tag's notes in the rendered stream by (midi, onset); keep those visible, ordered.
       const idx = orderedIndicesFor(a.notes, ordered);
       if (idx.length < 2) { results.push({ name: a.name, color, count: 0 }); return; }
-      lastPatternOriginals.push({ name: a.name, notes: idx.map((i) => ordered[i]) });   // the tag's own occurrence
-      const template = extractTemplate(idx, pitchSeq, durs);
-      const matches = findMatches(pitchSeq, durs, template, { mode, durationStrict });
+      const { originalIdx, matches } = findScopedMatches(stream, idx, { mode, durationStrict, intervalBasis, key: resolvedKey });
+      lastPatternOriginals.push({ name: a.name, notes: originalIdx.map((i) => ordered[i]) });   // the tag's own occurrence
       matches.forEach((m) => {
         const notes = m.map((i) => ordered[i]);
         highlightNotes(notes, color);
@@ -1216,16 +1213,15 @@ export function createMusicRenderer(container, opts = {}) {
     const phrase = phraseByName(phrases, name);
     if (!phrase) return { count: 0, keyLabel: null };
     const ordered = orderedRenderedNotes();
-    const midis = ordered.map((n) => n.midi);
-    const durs = ordered.map((n) => n.durBeats);
+    const stream = ordered.map((n) => ({ midi: n.midi, durBeats: n.durBeats, voice: n.voice, onset: n.onsetBeats }));
     const wantInt = mode === 'intervals' || mode === 'both';
-    const { pitchSeq, keyLabel: resolvedKeyLabel } = pitchSeqFor(midis, { intervalBasis, wantInt, key });
+    const resolvedKey = resolveSearchKey(ordered, { intervalBasis, wantInt, key });
+    const resolvedKeyLabel = resolvedKey ? keyLabel(resolvedKey.tonicPc, resolvedKey.mode) : null;
     const idx = orderedIndicesFor(resolvePhraseNoteIds(phrase, assignments), ordered);
     const color = phrase.color || CHORD_HL_COLOR;
     highlightNotes(idx.map((i) => ordered[i]), color);   // the phrase's own occurrence
     if (idx.length < 2) return { count: 0, keyLabel: resolvedKeyLabel };
-    const template = extractTemplate(idx, pitchSeq, durs);
-    const matches = findMatches(pitchSeq, durs, template, { mode, durationStrict });
+    const { matches } = findScopedMatches(stream, idx, { mode, durationStrict, intervalBasis, key: resolvedKey });
     matches.forEach((m) => highlightNotes(m.map((i) => ordered[i]), color));
     return { count: matches.length, keyLabel: resolvedKeyLabel };
   }

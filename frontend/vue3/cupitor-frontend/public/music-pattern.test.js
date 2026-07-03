@@ -1,5 +1,5 @@
 // public/music-pattern.test.js
-import { extractTemplate, findMatches, degreeIndex, degreeSequence, guessKey, keyLabel, MAJOR_SCALE, MINOR_SCALE } from './music-pattern.js';
+import { extractTemplate, findMatches, degreeIndex, degreeSequence, guessKey, keyLabel, MAJOR_SCALE, MINOR_SCALE, findScopedMatches } from './music-pattern.js';
 
 // MIDI helper: C4=60. E4=64,F#4=66,G4=67, C4=60,D4=62.
 describe('degreeIndex (diatonic scale-degree index)', () => {
@@ -143,6 +143,50 @@ describe('findMatches — both', () => {
     const durs  = [1,  9, 2,    9, 9, 9,   1,  9, 2,     1,  9, 1];
     const t = extractTemplate([0, 2], midis, durs);
     expect(findMatches(midis, durs, t, { mode: 'both', durationStrict: true })).toEqual([[6, 8]]);
+  });
+});
+
+describe('findScopedMatches — melodic (top-note-per-onset) matching', () => {
+  // Single-voice stream (as in a piano lead sheet) where chord tones share a melody note's onset.
+  // Melody: E4 D4 C4 D4  …then… B3 A3 G3 A3 (same contour, down a 4th). The 4th melody note and the
+  // recurrence's 4th note are the TOP of chords of DIFFERENT sizes, and chord tones are listed
+  // before the melody note — so the flat gap structure differs but the top-note melody is identical.
+  const N = (midi, onset, extra = {}) => ({ midi, durBeats: 1, voice: 0, onset, ...extra });
+  const stream = [
+    N(64, 0),                       // 0   E4  melody
+    N(62, 1),                       // 1   D4
+    N(60, 2),                       // 2   C4
+    N(55, 3), N(48, 3), N(62, 3),   // 3,4,5   chord @3: tones 55,48 then melody-top D4=62
+    N(72, 4),                       // 6   unrelated later melody note
+    N(59, 5),                       // 7   B3  melody
+    N(57, 6),                       // 8   A3
+    N(55, 7),                       // 9   G3
+    N(52, 8), N(57, 8),             // 10,11   chord @8: tone 52 then melody-top A3=57 (smaller chord)
+  ];
+  const tagIdx = [0, 1, 2, 5];      // E D C (top-of-chord) D — the melody notes
+
+  test('raw findMatches on the flat stream MISSES it (chord tones break the gap structure)', () => {
+    const midis = stream.map((n) => n.midi);
+    const durs = stream.map((n) => n.durBeats);
+    const t = extractTemplate(tagIdx, midis, durs);
+    expect(findMatches(midis, durs, t, { mode: 'intervals' })).toEqual([]);
+  });
+
+  test('melodic matching finds B-A-G-A on the chromatic basis (chords collapse to their top note)', () => {
+    const r = findScopedMatches(stream, tagIdx, { mode: 'intervals', intervalBasis: 'chromatic' });
+    expect(r.matches).toEqual([[7, 8, 9, 11]]);   // stream indices of B A G A (top note)
+    expect(r.originalIdx).toEqual([0, 1, 2, 5]);
+  });
+
+  test('melodic matching finds B-A-G-A on the diatonic basis (E minor)', () => {
+    const r = findScopedMatches(stream, tagIdx,
+      { mode: 'intervals', intervalBasis: 'diatonic', key: { tonicPc: 4, mode: 'minor' } });
+    expect(r.matches).toEqual([[7, 8, 9, 11]]);
+    expect(r.key).toEqual({ tonicPc: 4, mode: 'minor' });
+  });
+
+  test('fewer than 2 tagged notes → no matches', () => {
+    expect(findScopedMatches(stream, [2], { mode: 'intervals' })).toEqual({ originalIdx: [2], matches: [], key: null });
   });
 });
 

@@ -1,4 +1,4 @@
-import { tagColor, noteId, addTag, removeTag, colorMap, mergeRegistry, indexAssignments, firstTagForKey, toggleNote, noteStyle, TAG_PALETTE } from './music-tags.js';
+import { tagColor, noteId, addTag, removeTag, colorMap, mergeRegistry, indexAssignments, firstTagForKey, revealedTagForKey, toggleNote, noteStyle, TAG_PALETTE } from './music-tags.js';
 
 const id = (measure, midi, beats) => ({ measure, midi, beats });
 
@@ -84,5 +84,31 @@ describe('noteStyle', () => {
     expect(noteStyle(indexed, noteId(id(1, 60, 0)), true, sel, colorOf)).toEqual({ color: '#aa', dim: false });
     expect(noteStyle(indexed, noteId(id(2, 62, 0)), true, sel, colorOf)).toEqual({ color: null, dim: true });
     expect(noteStyle(indexed, noteId(id(9, 9, 9)), true, sel, colorOf)).toEqual({ color: null, dim: true });
+  });
+
+  test('overlapping tags: a note shared with an EARLIER tag still lights for the revealed one', () => {
+    // 'first' claims the note before 'second' does; revealing only 'second' must still light it
+    // (regression: firstTagForKey attributed it to 'first' → the note wrongly stayed dimmed).
+    const shared = indexAssignments([
+      { name: 'first', notes: [id(2, 64, 4.5), id(2, 67, 5)] },
+      { name: 'second', notes: [id(2, 64, 4.5)] },       // note also in 'first'
+    ]);
+    const c = (n) => ({ first: '#f1', second: '#f2' }[n]);
+    expect(noteStyle(shared, noteId(id(2, 64, 4.5)), true, new Set(['second']), c)).toEqual({ color: '#f2', dim: false });
+    // both revealed → earliest-in-order revealed tag colors it (deterministic)
+    expect(noteStyle(shared, noteId(id(2, 64, 4.5)), true, new Set(['first', 'second']), c)).toEqual({ color: '#f1', dim: false });
+  });
+});
+
+describe('revealedTagForKey', () => {
+  const indexed = indexAssignments([
+    { name: 'a', notes: [id(1, 60, 0)] },
+    { name: 'b', notes: [id(1, 60, 0), id(2, 62, 0)] },   // shares note with 'a'
+  ]);
+  test('honors the allowed set; null allowed → any tag (first wins)', () => {
+    expect(revealedTagForKey(indexed, noteId(id(1, 60, 0)), new Set(['b']))).toBe('b'); // skip hidden 'a'
+    expect(revealedTagForKey(indexed, noteId(id(1, 60, 0)), new Set(['a', 'b']))).toBe('a'); // earliest revealed
+    expect(revealedTagForKey(indexed, noteId(id(1, 60, 0)), new Set())).toBeNull();          // none revealed
+    expect(revealedTagForKey(indexed, noteId(id(1, 60, 0)), null)).toBe('a');                // any
   });
 });

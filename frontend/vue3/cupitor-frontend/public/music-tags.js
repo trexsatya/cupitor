@@ -57,11 +57,17 @@ export function indexAssignments(assignments) {
   return (assignments || []).map((a) => ({ name: a.name, keys: new Set((a.notes || []).map(noteId)) }));
 }
 
-// The NAME of the first assignment (by order) whose set contains `key`, or null. First tag wins.
-export function firstTagForKey(indexed, key) {
-  for (const a of indexed) if (a.keys.has(key)) return a.name;
+// The NAME of the first assignment (by order) that contains `key` and whose name is in `allowed`
+// (a Set), or null. `allowed` null → any tag qualifies. When a filter reveals only some tags, a
+// note shared by several tags must light for a REVEALED tag even if an earlier (hidden) tag also
+// claims it — so callers pass the revealed set here rather than relying on firstTagForKey.
+export function revealedTagForKey(indexed, key, allowed) {
+  for (const a of indexed) if ((!allowed || allowed.has(a.name)) && a.keys.has(key)) return a.name;
   return null;
 }
+
+// The NAME of the first assignment (by order) whose set contains `key`, or null. First tag wins.
+export function firstTagForKey(indexed, key) { return revealedTagForKey(indexed, key, null); }
 
 // Add/remove a note in the named tag's assignment, creating the assignment entry if absent.
 // Returns a NEW assignments array.
@@ -83,9 +89,13 @@ export function toggleNote(assignments, name, id) {
 //   filter off → tagged notes get their color, nothing dims (base "color by tag" behavior)
 //   filter on  → a note in a SELECTED tag keeps its color; every other note is dimmed.
 export function noteStyle(indexed, key, filterOn, selectedNames, colorOf) {
-  const name = firstTagForKey(indexed, key);
-  const color = name && colorOf ? colorOf(name) : null;
-  if (!filterOn) return { color, dim: false };
-  if (name && selectedNames && selectedNames.has(name)) return { color, dim: false };
+  if (!filterOn) {
+    const name = firstTagForKey(indexed, key);
+    return { color: name && colorOf ? colorOf(name) : null, dim: false };
+  }
+  // A note in ANY selected tag lights (colored by that revealed tag), even if a non-selected tag
+  // also claims it. Everything else dims.
+  const name = revealedTagForKey(indexed, key, selectedNames || new Set());
+  if (name) return { color: colorOf ? colorOf(name) : null, dim: false };
   return { color: null, dim: true };
 }

@@ -423,9 +423,9 @@
                title="Pick an existing tag or type a new one (Enter), then click notes to paint it" style="width:11em">
         <datalist id="tagOptions"></datalist>
       </label>
-      <button id="playTagsBtn" class="btn" title="Play only the checked tags' notes, skipping the gaps between them"><span class="ic">▶</span><span class="txt">▶ Play tags</span></button>
-      <label class="tag-lbl" title="Silence inserted between tagged runs, in beats (scales with tempo)">breath
-        <input type="number" id="breathBeats" min="0" max="4" step="0.25" value="1" style="width:4em">
+      <button id="playTagsBtn" class="btn" title="Play only the checked tags' notes, skipping the gaps between them"><span class="ic">▶</span><span class="txt">▶ Play</span></button>
+      <label class="tag-lbl" title="Silence inserted between tagged runs, in beats (scales with tempo)">Breath
+        <input type="number" id="breathBeats" min="0" max="4" step="0.25" value="1" style="width:2em">
       </label>
       <input type="checkbox" id="tagModeChk" hidden>
     </div>
@@ -1381,7 +1381,17 @@
     if (open) renderTagUI();
     updatePatternControls();
   });
-  document.getElementById('tagModeChk').onchange = (e) => { if (renderer) renderer.setTagMode(e.target.checked); };
+  document.getElementById('tagModeChk').onchange = (e) => {
+    if (!renderer) return;
+    // Tag Edit mode and phrase-paint mode are mutually exclusive (paint has click precedence, so a
+    // left-over active phrase would otherwise swallow tag clicks). Turning Edit mode on exits paint.
+    if (e.target.checked && phrasePainting) {
+      phrasePainting = false; activePhraseName = null;
+      renderer.setPhrasePaintMode(false); renderer.setActivePhrase(null);
+      renderPhraseUI();
+    }
+    renderer.setTagMode(e.target.checked);
+  };
   document.getElementById('playTagsBtn').onclick = playTags;
   // Check all tags at once (or uncheck all if every tag is already checked).
   document.getElementById('tagCheckAllBtn').onclick = () => {
