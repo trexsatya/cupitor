@@ -329,6 +329,8 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   let loop = false;
   let stopId = null;   // Tone.Transport.scheduleOnce id for the boundary stop
   let cursorStartStep = 0;   // distinct onsets to skip so the cursor homes to the window's start
+  let stopping = false;   // true from the moment a stop begins until the next play; suppresses the
+                          // stray note the Part re-fires when Transport.stop() resets position to 0
 
   // The OSMD cursor's current onset in quarter-beats (absolute from piece start), or null when the
   // iterator/timestamp isn't reachable. RealValue is in whole notes → ×4 for quarter beats.
@@ -399,7 +401,9 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       return [e.time, { ...e, _step: step, _first: e.time === firstTime }];
     });
     part = new T.Part((time, ev) => {
-      if (!ev.muted) synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
+      // `stopping` guards the note the Part re-fires at position 0 when the boundary stop resets the
+      // Transport — otherwise the first note sounds again just as playback ends.
+      if (!ev.muted && !stopping) synth.triggerAttackRelease(T.Frequency(ev.midi, 'midi').toNote(), ev.duration, time);
       if (cursor && ev._step) T.Draw.schedule(() => {
         try {
           if (ev._first) homeCursor(cursor);
@@ -432,7 +436,9 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
   function stop(atTime) {
     clearStopTimer();
     T.Transport.loop = false;   // clear the loop window so a later non-loop play isn't left looping
-    if (typeof atTime === 'number') {
+    stopping = true;            // silence the position-0 re-fire until the next play()
+    const natural = typeof atTime === 'number';   // boundary/loop-off completion vs. a user stop
+    if (natural) {
       T.Transport.stop(atTime);
       if (part) { try { part.stop(atTime); } catch (_) {} }
     } else {
@@ -440,7 +446,13 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       if (part) { try { part.stop(0); } catch (_) {} }
     }
     const c = getCursor && getCursor();
-    if (c) { try { c.reset(); c.hide(); } catch (_) {} }
+    if (c) {
+      try {
+        // Completion parks the (silent) cursor on the first note; a user stop clears it.
+        if (natural) homeCursor(c);
+        else { c.reset(); c.hide(); }
+      } catch (_) {}
+    }
   }
 
   return {
@@ -466,6 +478,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       // Wait for sampled-instrument buffers (resolves even if a load errored → synth fallback).
       try { if (T.loaded) await T.loaded(); } catch (_) {}
       if (!part) buildPart();
+      stopping = false;   // re-arm audio for this playthrough
       clearStopTimer();
       T.Transport.stop();   // reset position to 0 so part.start(0)'s events are in the future
       applyLoop();
@@ -477,7 +490,7 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
       }
     },
     pause() { T.Transport.pause(); },
-    resume() { T.Transport.start(); },   // continue from the paused position (no reset to 0)
+    resume() { stopping = false; T.Transport.start(); },   // continue from the paused position (no reset to 0)
     // Sound a short sequence immediately, independent of the Transport and OSMD cursor — used by the
     // fretboard "play step" button. `events` is [{midi, time, duration}] in seconds relative to now;
     // notes sharing a `time` stack into a chord, later ones play in sequence. No-op for an empty set.
