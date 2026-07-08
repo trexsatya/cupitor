@@ -226,8 +226,20 @@
         /* Collapsible Motifs / Phrases panels (like the fretboard panel) + shared match bar. */
         .np-panel{margin:.25rem 0;padding:.4rem .6rem;border-radius:4px}
         .np-panel>summary{cursor:pointer;font-weight:600;font-size:13.5px}
+        /* Header toggle: shows/hides THIS panel's tags/phrases on the sheet (dim the rest), independent
+           of expand/collapse (which only shows the panel's own controls + list). */
+        .np-vis{margin-left:8px;border:1px solid #bbb;background:#fff;border-radius:6px;padding:1px 7px;cursor:pointer;font-size:12.5px;font-weight:400;vertical-align:middle}
+        .np-vis[aria-pressed="true"]{background:#1565c0;border-color:#1565c0;color:#fff}
         #tagPanel{background:#f6f3ff;border:1px solid #ddd0ff}
         #phrasePanel{background:#eef4ff;border:1px solid #cfe0ff}
+        /* When expanded, a panel's body floats over the sheet (absolute) instead of pushing it down —
+           so toggling a panel never reflows the page (which could nudge a scrollbar and force OSMD to
+           re-render, dropping the pattern-match highlights). Anchored below both summaries via .np-wrap. */
+        .np-wrap{position:relative}
+        .np-panel[open]>.np-body{position:absolute;left:0;right:0;top:100%;z-index:60;margin-top:3px;
+          border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:.5rem .7rem;max-height:72vh;overflow:auto}
+        #tagPanel[open]>.np-body{background:#f6f3ff;border:1px solid #ddd0ff}
+        #phrasePanel[open]>.np-body{background:#eef4ff;border:1px solid #cfe0ff}
         .pattern-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;margin:.25rem 0;padding:.35rem .6rem;background:#fafafa;border:1px solid #e5e5e5;border-radius:4px}
         .pattern-controls select{padding:3px 6px;border:1px solid #ccc;border-radius:5px;font-size:13px}
         /* Pattern tags */
@@ -386,7 +398,7 @@
     <button class="btn toggle" data-for="globalMatchChk" title="When on, clicking a chord name highlights every occurrence of it across the visible sheet"><span class="ic">🌐</span><span class="txt">Global</span></button>
     <input type="checkbox" id="voiceColorChk" checked hidden>
     <input type="checkbox" id="noteNameChk" hidden>
-    <input type="checkbox" id="chordChk" hidden>
+    <input type="checkbox" id="chordChk" checked hidden>
     <input type="checkbox" id="dimConnChk" checked hidden>
     <input type="checkbox" id="chordWindowChk" hidden>
     <input type="checkbox" id="globalMatchChk" hidden>
@@ -414,8 +426,12 @@
     <span id="windowRange" style="font-size:.8em;color:#777"></span>
     <button id="captureWindowBtn" class="btn" style="margin-left:.5em" title="Capture this window to vocab"><span class="ic">➕</span><span class="txt">Capture window → vocab</span></button>
   </div>
+  <!-- Motifs + Phrases panels overlay the sheet when expanded (see .np-body CSS) so toggling them
+       never reflows the page — a reflow could nudge a scrollbar and force OSMD to re-render. -->
+  <div class="np-wrap">
   <details id="tagPanel" class="np-panel">
-    <summary>🏷️ Motifs</summary>
+    <summary>🏷️ Motifs<button type="button" id="tagVisBtn" class="np-vis" title="Show these motifs on the sheet (dim everything else)" aria-pressed="false">👁 on sheet</button></summary>
+    <div class="np-body">
     <div class="tag-row">
       <button class="btn toggle" data-for="tagModeChk" title="Click notes to add/remove them from the active tag"><span class="ic">🖌️</span><span class="txt">Edit mode</span></button>
       <label class="tag-lbl">Tag:
@@ -437,9 +453,11 @@
       <button id="tagCheckAllBtn" class="icon-btn" title="Check / uncheck all tags" aria-label="Check or uncheck all tags">☑</button>
       <div id="tagList" class="tag-list"></div>
     </div>
+    </div>
   </details>
   <details id="phrasePanel" class="np-panel">
-    <summary>🎼 Phrases</summary>
+    <summary>🎼 Phrases<button type="button" id="phraseVisBtn" class="np-vis" title="Show these phrases on the sheet (dim everything else)" aria-pressed="false">👁 on sheet</button></summary>
+    <div class="np-body">
     <div class="tag-row">
       <label class="tag-lbl">New phrase:
         <input id="phraseInput" maxlength="32" placeholder="name…" autocomplete="off" style="width:11em">
@@ -448,9 +466,10 @@
       <span id="phraseMsg" style="font-size:.8em;color:#555"></span>
     </div>
     <div id="phraseList" class="tag-list"></div>
+    </div>
   </details>
     <!-- Shared pattern-match settings — used by BOTH the Motifs "Find pattern" and each Phrase's Find.
-       Shown whenever the Motifs or Phrases panel is expanded. -->
+       Moved into whichever panel is open (updatePatternControls) so it rides the same overlay. -->
   <div id="patternControls" class="pattern-controls" style="display:none">
     <span class="tag-lbl">Pattern match:</span>
     <label class="tag-lbl">by
@@ -469,6 +488,7 @@
     </select>
     <select id="patKey" title="Key for diatonic matching (defaults to the piece's best-guess key)"></select>
   </div>
+  </div>
   <div id="osmdPreview"></div>
   <details id="fretboardPanel" class="fb-wrap">
     <summary>🎸 Fretboard</summary>
@@ -483,8 +503,7 @@
         <button type="button" class="btn toggle" data-for="fbSuppress" title="Include suppressed notes in the capture"><span class="ic">🔇</span><span class="txt">Suppressed</span></button>
         <button type="button" class="btn toggle" data-for="fbOctave" title="Place notes at their written octave (off = pitch-class shapes)"><span class="ic">🎯</span><span class="txt">Match octave</span></button>
         <button type="button" class="btn toggle" data-for="fbPlayable" title="Only physically playable voicings (fretted span ≤ 3)"><span class="ic">🖐️</span><span class="txt">Playable</span></button>
-        <button type="button" id="fbCapture" class="fb-btn" style="margin-left:auto">Capture → fretboard</button>
-        <button type="button" id="fbFullscreen" class="fb-chip alt">⛶ Fullscreen</button>
+        <button type="button" id="fbFullscreen" class="fb-chip alt" style="margin-left:auto">⛶ Fullscreen</button>
         <input type="checkbox" id="fbSuppress" hidden>
         <input type="checkbox" id="fbOctave" checked hidden>
         <input type="checkbox" id="fbPlayable" checked hidden>
@@ -513,7 +532,9 @@
       <button type="button" id="fbPlayStep" class="fb-btn" title="Sound the current step's notes (the highlighted sheet segment)">🔊 Play step</button>
       <button type="button" id="fbNext" class="fb-btn">Next ▶</button>
       <button type="button" class="btn toggle" data-for="fbAutoPlayChk" title="Automatically sound each step as you move Prev/Next"><span class="ic">🎧</span><span class="txt">Auto-play</span></button>
+      <button type="button" class="btn toggle" data-for="fbNoteName" title="Label the dots with note names (off = fret numbers)"><span class="ic">🔤</span><span class="txt">Note names</span></button>
       <input type="checkbox" id="fbAutoPlayChk" hidden>
+      <input type="checkbox" id="fbNoteName" hidden>
     </div>
   </details>
   <div id="ytPlayer" style="display:none"></div>
@@ -703,7 +724,7 @@
         suppressChk: document.getElementById('fbSuppress'),
         octaveChk: document.getElementById('fbOctave'),
         playableChk: document.getElementById('fbPlayable'),
-        captureBtn: document.getElementById('fbCapture'),
+        noteNameChk: document.getElementById('fbNoteName'),
         resetBtn: document.getElementById('fbReset'),
         fullscreenBtn: document.getElementById('fbFullscreen'),
         pathSelect: document.getElementById('fbPaths'),
@@ -1217,6 +1238,7 @@
     renderer.clearMeasureHighlight();   // a plain piece preview carries no captured-range shading
     renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
     renderer.showFull();
+    renderer.setShowChords(document.getElementById('chordChk').checked);   // Show chords is on by default
     // Default the diatonic key picker to this piece's best-guess key (notes are now rendered).
     if (renderer.guessBestKey) { const g = renderer.guessBestKey(); if (g) document.getElementById('patKey').value = `${g.tonicPc}:${g.mode}`; }
     if (renderer) { renderer.setSuppressedNotes([]); renderer.setSuppressMode(false); }
@@ -1231,9 +1253,8 @@
     document.getElementById('tagModeChk').checked = false;
     tagFilterSel.clear();
     activeTagName = '';
-    // Dimming follows whether the collapsible Motifs panel is currently expanded.
-    const tagPanelOpen = document.getElementById('tagPanel').open;
-    if (renderer) { renderer.setTagMode(false); renderer.setTagFilter(tagPanelOpen); renderer.setFilterTags([]); }
+    if (renderer) { renderer.setTagMode(false); renderer.setFilterTags([]); }
+    setTagVis(false);   // sheet tag visibility starts off (decoupled from expand); auto-load turns it on
     // Fold any tags this piece already uses into the global list (so they're selectable everywhere).
     // Only persist/mark-dirty when the merge actually added something (mergeRegistry only grows).
     const mergedReg = mergeRegistry(tagRegistry, renderer ? renderer.getPatterns() : []);
@@ -1242,13 +1263,26 @@
     syncToggles();
     onSuppressionChange();   // reset the chips/hint for the fresh piece
     renderTagUI();
+    // If this piece carries motifs, surface them automatically: turn on the sheet 👁 visibility, check
+    // every motif that has notes here, and run the pattern search so its occurrences highlight on load.
+    // The panel itself stays COLLAPSED (its overlay would cover the sheet); the user opens it to manage.
+    const pieceTags = renderer ? renderer.getPatterns().filter((a) => (a.notes || []).length).map((a) => a.name) : [];
+    if (pieceTags.length) {
+      pieceTags.forEach((n) => tagFilterSel.add(n));
+      renderer.setFilterTags([...tagFilterSel]);
+      setTagVis(true);                            // reveal motifs on the sheet (dim the rest)
+      renderTagUI();
+      searchPattern();                            // auto-run Find pattern (matches now populate lastPatternMatches)
+      if (fbPanel) fbPanel.setSource('matched');  // point the fretboard at the motifs' matches
+    }
     // Phrases: the renderer loaded detail.phrases on load; reset the phrase controls for the fresh
     // piece (panel visibility follows its own toggle).
     activePhraseName = null; phrasePainting = false; shownPhraseNames.clear();
     document.getElementById('phraseInput').value = '';
     document.getElementById('phraseMsg').textContent = '';
     const phrasePanelOpen = document.getElementById('phrasePanel').open;
-    if (renderer) { renderer.setPhrasePaintMode(false); renderer.setShownPhrases([]); renderer.setPhraseFilter(phrasePanelOpen); }
+    if (renderer) { renderer.setPhrasePaintMode(false); renderer.setShownPhrases([]); }
+    setPhraseVis(false);   // sheet phrase visibility starts off (decoupled from expand)
     if (phrasePanelOpen) renderPhraseUI();
     updatePatternControls();
     document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
@@ -1368,15 +1402,37 @@
       render(); updatePushBtn();
     }
   }
-  // Show the shared match controls whenever either collapsible panel is expanded.
+  // Move the shared match controls into whichever panel is open, so they ride that panel's floating
+  // overlay (rather than sitting in flow and reflowing the sheet). Hidden when neither is open.
   function updatePatternControls() {
-    const open = document.getElementById('tagPanel').open || document.getElementById('phrasePanel').open;
-    document.getElementById('patternControls').style.display = open ? '' : 'none';
+    const tag = document.getElementById('tagPanel'), phr = document.getElementById('phrasePanel');
+    const pc = document.getElementById('patternControls');
+    const openPanel = tag.open ? tag : (phr.open ? phr : null);
+    if (openPanel) { openPanel.querySelector('.np-body').appendChild(pc); pc.style.display = 'flex'; }
+    else pc.style.display = 'none';
   }
-  // Expanding the Motifs panel dims all notes (checked tags reveal theirs); collapsing exits tag mode.
+  // Sheet visibility is DECOUPLED from expand/collapse: the header 👁 toggle dims the sheet and reveals
+  // the checked motifs/phrases; expand/collapse only shows this panel's own controls + list.
+  let tagVisOn = false, phraseVisOn = false;
+  function setTagVis(on) {
+    tagVisOn = !!on;
+    if (renderer) renderer.setTagFilter(tagVisOn);
+    const b = document.getElementById('tagVisBtn'); if (b) b.setAttribute('aria-pressed', tagVisOn ? 'true' : 'false');
+  }
+  function setPhraseVis(on) {
+    phraseVisOn = !!on;
+    if (renderer) renderer.setPhraseFilter(phraseVisOn);
+    const b = document.getElementById('phraseVisBtn'); if (b) b.setAttribute('aria-pressed', phraseVisOn ? 'true' : 'false');
+  }
+  // The header 👁 buttons sit inside <summary>, so preventDefault/stopPropagation keeps a click from
+  // also toggling the <details>.
+  document.getElementById('tagVisBtn').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setTagVis(!tagVisOn); });
+  document.getElementById('phraseVisBtn').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); setPhraseVis(!phraseVisOn); });
+  // Expand/collapse the Motifs panel: only its controls + tag list; collapsing exits tag-paint mode.
+  // The two panels are mutually exclusive so their floating overlays never stack on each other.
   document.getElementById('tagPanel').addEventListener('toggle', (e) => {
     const open = e.target.open;
-    if (renderer) renderer.setTagFilter(open);
+    if (open) document.getElementById('phrasePanel').open = false;
     if (!open && renderer) { renderer.setTagMode(false); document.getElementById('tagModeChk').checked = false; syncToggles(); }
     if (open) renderTagUI();
     updatePatternControls();
@@ -1563,10 +1619,10 @@
       render(); updatePushBtn();
     }
   }
-  // Expanding the Phrases panel dims all notes (shown phrases reveal theirs); collapsing exits paint.
+  // Expand/collapse the Phrases panel: only its controls + phrase list; collapsing exits phrase-paint.
   document.getElementById('phrasePanel').addEventListener('toggle', (e) => {
     const open = e.target.open;
-    if (renderer) renderer.setPhraseFilter(open);
+    if (open) document.getElementById('tagPanel').open = false;
     if (!open) {   // collapsing exits phrase-paint mode
       phrasePainting = false; activePhraseName = null;
       if (renderer) renderer.setPhrasePaintMode(false);

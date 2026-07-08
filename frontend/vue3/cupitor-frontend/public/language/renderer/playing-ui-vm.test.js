@@ -5,6 +5,7 @@ import {
   findLineByTime,
   buildPlayingBannerVM,
   buildPlayingSubsVM,
+  contiguousPlayWindow,
 } from "./playing-ui-vm";
 
 describe("buildBoundedWordRe", () => {
@@ -183,5 +184,94 @@ describe("buildPlayingSubsVM", () => {
     const out = buildPlayingSubsVM({ parsed, lang: "en", item: { lineIndex: 0 }, before: 0, after: 0 });
     expect(out.rows[0].mainText).toBe("A");
     expect(out.rows[0].secText).toBe("a");
+  });
+
+  // Cues carrying start/end times — needed for the stale-lineIndex recovery.
+  function timed(rows) {
+    return {
+      sv: rows.map((r, i) => ({ index: r.index, text: r.text, start: { ordinal: i * 2 }, end: { ordinal: i * 2 + 2 } })),
+      en: [],
+    };
+  }
+  test("recovers via time+word when the recorded lineIndex is stale (SRT re-segmented)", () => {
+    const parsed = timed([
+      { index: 10, text: "aaa" },
+      { index: 11, text: "gå på pinka på natten" },
+      { index: 12, text: "ccc" },
+    ]);
+    // lineIndex 253 no longer exists; timeStart/timeEnd bracket cue #2, word matches it.
+    const out = buildPlayingSubsVM({ parsed, lang: "sv", item: { lineIndex: 253, word: "pinka", timeStart: 2, timeEnd: 4 }, before: 0, after: 0 });
+    expect(out.state).toBe("ok");
+    expect(out.matchIdx).toBe(1);
+  });
+  test("recovers by time alone when the word isn't in the text (hand-capture: word is the video title)", () => {
+    const parsed = timed([
+      { index: 10, text: "aaa" },
+      { index: 11, text: "bbb" },
+    ]);
+    const out = buildPlayingSubsVM({ parsed, lang: "sv", item: { lineIndex: 999, word: "Some Video Title", timeStart: 2, timeEnd: 4 }, before: 0, after: 0 });
+    expect(out.state).toBe("ok");
+    expect(out.matchIdx).toBe(1);
+  });
+  test("still 'no-match' when lineIndex is absent and there is no time/word anchor", () => {
+    const parsed = makeParsed(["a", "b"], ["A", "B"]);
+    const out = buildPlayingSubsVM({ parsed, lang: "sv", item: { lineIndex: 99 } });
+    expect(out.state).toBe("no-match");
+  });
+});
+
+describe("contiguousPlayWindow", () => {
+  const cue = (index, text, ts, te) => ({ index, text, start: { ordinal: ts }, end: { ordinal: te } });
+
+  test("contracts a stored window that spans a large gap (the overshoot bug)", () => {
+    const primary = [
+      cue(1, "a", 0, 2),
+      cue(2, "b", 2, 4),
+      cue(3, "fast here", 320, 323), // matched, right after a 316s gap
+      cue(4, "d", 323, 325),
+    ];
+    // Stored window was the old naive ±2 span [2, 325] that crossed the gap.
+    const win = contiguousPlayWindow(primary, { lineIndex: 3, word: "fast", timeStart: 2, timeEnd: 325 }, { gapThreshold: 1.5 });
+    expect(win.timeStart).toBe(320);
+    expect(win.timeEnd).toBe(325);
+    expect(win.matchIdx).toBe(2);
+  });
+
+  test("leaves a fully-contiguous stored window unchanged (idempotent)", () => {
+    const primary = [cue(1, "a", 0, 2), cue(2, "b matched", 2, 4), cue(3, "c", 4, 6)];
+    const win = contiguousPlayWindow(primary, { lineIndex: 2, word: "matched", timeStart: 0, timeEnd: 6 }, { gapThreshold: 1.5 });
+    expect(win.timeStart).toBe(0);
+    expect(win.timeEnd).toBe(6);
+  });
+
+  test("never lengthens beyond the stored window (shrink-only)", () => {
+    // 5 contiguous cues span [0,10]; stored window is only [2,6].
+    const primary = [0, 1, 2, 3, 4].map((i) => cue(i + 1, i === 2 ? "w" : "x", i * 2, i * 2 + 2));
+    const win = contiguousPlayWindow(primary, { lineIndex: 3, word: "w", timeStart: 2, timeEnd: 6 }, { gapThreshold: 1.5 });
+    expect(win.timeStart).toBe(2);
+    expect(win.timeEnd).toBe(6);
+  });
+
+  test("recovers the anchor by time+word when lineIndex is stale", () => {
+    const primary = [cue(10, "aaa", 0, 2), cue(11, "gå på pinka", 2, 4), cue(12, "ccc", 4, 6)];
+    const win = contiguousPlayWindow(primary, { lineIndex: 253, word: "pinka", timeStart: 2, timeEnd: 4 }, { gapThreshold: 1.5 });
+    expect(win.matchIdx).toBe(1);
+    expect(win.timeStart).toBe(2);
+    expect(win.timeEnd).toBe(4);
+  });
+
+  test("returns null for manual items (user-authored clips are never re-clamped)", () => {
+    const primary = [cue(1, "a", 0, 2)];
+    expect(contiguousPlayWindow(primary, { manual: true, lineIndex: 1 })).toBeNull();
+  });
+
+  test("returns null when the cue can't be located", () => {
+    const primary = [cue(1, "a", 0, 2), cue(2, "b", 2, 4)];
+    expect(contiguousPlayWindow(primary, { lineIndex: 999 })).toBeNull();
+  });
+
+  test("returns null for empty / missing primary", () => {
+    expect(contiguousPlayWindow([], { lineIndex: 1 })).toBeNull();
+    expect(contiguousPlayWindow(null, { lineIndex: 1 })).toBeNull();
   });
 });

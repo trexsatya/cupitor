@@ -10,6 +10,8 @@ import {
   mergeSrtWithNewEntries,
   mergeSrtWithResolution,
   detectSrtConflicts,
+  upsertSrtEntry,
+  applyQueuedEditsToText,
 } from "./srt-parser";
 
 const SAMPLE_SRT = `1
@@ -260,6 +262,62 @@ describe("detectSrtConflicts", () => {
   });
   test("returns [] when existing text is empty", () => {
     expect(detectSrtConflicts("", [{ start: 1, end: 2, text: "a" }])).toEqual([]);
+  });
+});
+
+describe("srtToJson", () => {
+  test("returns [] for null/undefined/empty (source-only videos have no .en.srt)", () => {
+    expect(srtToJson(null)).toEqual([]);
+    expect(srtToJson(undefined)).toEqual([]);
+    expect(srtToJson("")).toEqual([]);
+  });
+});
+
+describe("upsertSrtEntry", () => {
+  test("replaces the text of an existing index, keeping its timestamp verbatim", () => {
+    const out = upsertSrtEntry(SAMPLE_SRT, { index: 2, start: 999, end: 1000, text: "Ny text" });
+    expect(out).toContain("2\n00:00:04,000 --> 00:00:06,000\nNy text");
+    // first block untouched, no renumbering, no duplicate blocks
+    expect(out).toContain("1\n00:00:01,000 --> 00:00:03,500\nHej världen");
+    expect(out.match(/-->/g)).toHaveLength(2);
+  });
+
+  test("inserts a missing index in numeric order using the supplied timestamp", () => {
+    const src = "1\n00:00:01,000 --> 00:00:02,000\nA\n\n3\n00:00:05,000 --> 00:00:06,000\nC";
+    const out = upsertSrtEntry(src, { index: 2, start: 3, end: 4, text: "B" });
+    const order = out.trim().split(/\n\s*\n/).map((b) => b.split("\n")[0]);
+    expect(order).toEqual(["1", "2", "3"]);
+    expect(out).toContain("2\n00:00:03,000 --> 00:00:04,000\nB");
+  });
+
+  test("builds a fresh single-entry SRT from empty input", () => {
+    expect(upsertSrtEntry("", { index: 5, start: 10, end: 12, text: "Hej" }))
+      .toBe("5\n00:00:10,000 --> 00:00:12,000\nHej\n");
+  });
+
+  test("leaves text unchanged when the index is missing and no timestamp is given", () => {
+    expect(upsertSrtEntry(SAMPLE_SRT, { index: 9, text: "x" })).toBe(SAMPLE_SRT);
+  });
+});
+
+describe("applyQueuedEditsToText", () => {
+  test("updates existing lines in place", () => {
+    const out = applyQueuedEditsToText(SAMPLE_SRT, { "2": { newText: "Bytt" } });
+    expect(out).toContain("2\n00:00:04,000 --> 00:00:06,000\nBytt");
+    expect(out).toContain("Hej världen");
+  });
+
+  test("builds a fresh SRT when current is empty and edits carry timestamps", () => {
+    const out = applyQueuedEditsToText("", {
+      "1": { newText: "Hej", start: 1, end: 3 },
+      "2": { newText: "Då", start: 3, end: 5 },
+    });
+    expect(out).toContain("1\n00:00:01,000 --> 00:00:03,000\nHej");
+    expect(out).toContain("2\n00:00:03,000 --> 00:00:05,000\nDå");
+  });
+
+  test("returns null when current is empty and edits have no timestamps", () => {
+    expect(applyQueuedEditsToText("", { "1": { newText: "Hej" } })).toBeNull();
   });
 });
 

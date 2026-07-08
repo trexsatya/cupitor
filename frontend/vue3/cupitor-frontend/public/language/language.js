@@ -45,6 +45,24 @@ import {
   scoreSimilarity as _scoreSimilarity,
 } from './similarity.js';
 import { toSeconds, fromSeconds } from './time-format.js';
+// Shared pure logic, also consumed by the Node "Manage" CLI (tools/language).
+// These modules are the single source of truth; the functions below are thin
+// window-aware wrappers over them.
+import {
+  removeHintsInBrackets as _sharedRemoveHints,
+  buildExpansionMap as _buildExpansionMap,
+  expandWords as _sharedExpandWords,
+} from './vocab-expand.js';
+import {
+  sanitizeFilenameSegment as _sharedSanitizeFilename,
+  buildCapturedSubtitleBaseName as _sharedBuildBaseName,
+} from './subtitle-naming.js';
+import {
+  flattenVocabEntries as _flattenVocabEntries,
+  buildRareWordRegex as _buildRareWordRegex,
+  buildRareWordPrefilter as _buildRareWordPrefilter,
+  prefilterHit as _prefilterHit,
+} from './rare-words.js';
 import {
   srtError as _srtError,
   srtToJson,
@@ -57,7 +75,10 @@ import {
   mergeSrtWithNewEntries,
   mergeSrtWithResolution,
   detectSrtConflicts,
+  upsertSrtEntry,
+  applyQueuedEditsToText,
 } from './srt-parser.js';
+import { translateLines } from './translate-lines.js';
 import {
   splitSentences,
   chunkifySentence,
@@ -93,7 +114,18 @@ import {
   recordingItemCountIn as _recordingItemCountIn,
   recordingItemCountByName as _coreRecordingItemCountByName,
   mergeRecordingCollections as _coreMergeRecordingCollections,
+  mergeRecordingsLocalAuthoritative as _coreMergeRecordingsLocalAuthoritative,
+  bridgePlaylistsToRecordings as _coreBridgePlaylistsToRecordings,
 } from './recordings-merge.js';
+import {
+  nextRandomPlaylistName as _nextRandomPlaylistName,
+  collectManualItems as _collectManualItems,
+  wordsForCategories as _wordsForCategories,
+  matchingPositions as _matchingPositions,
+  buildAutoItemsForWord as _buildAutoItemsForWord,
+  sampleAndGroup as _sampleAndGroup,
+  fisherYates as _fisherYates,
+} from './random-playlist.js';
 import {
   buildPlayQueue as _coreBuildPlayQueue,
   shuffleQueue as _coreShuffleQueue,
@@ -161,6 +193,8 @@ import {
   phraseFoundInTexts as _phraseFoundInTexts,
   highlightWordHtml as _highlightWordHtml,
   findLineByTime as _findLineByTime,
+  resolveMatchIdxByTimeWord as _resolveMatchIdxByTimeWord,
+  contiguousPlayWindow as _contiguousPlayWindow,
   buildPlayingBannerVM,
   buildPlayingSubsVM,
 } from './renderer/playing-ui-vm.js';
@@ -275,40 +309,19 @@ window.addEventListener('cupitorDialog1Closed', () => {
   })
 });
 
+// Native app pushes the user's book/EPUB playlists here (each card = a manual
+// flashcard whose text is the front, plus book_key/chapter_idx for an
+// "Open in EPUB" deep-link). We request them on boot via PlaylistBridge and
+// rebuild the external playlists whenever a fresh payload arrives.
+window.addEventListener('cupitorPlaylists', (ev) => {
+  try { buildPlaylistsWithManualCards(ev.detail) }
+  catch (e) { console.warn('cupitorPlaylists handler failed', e) }
+});
+
 function getExpansionForWords() {
-  const list = ``
-
-  const wordsMap = {}
-  list.split("\n").filter(it => it.trim().length > 2).forEach(it => {
-    const splits = it.split("=")
-    wordsMap[splits[0]] = splits[1].split(",")
-  })
-
-  // Merge user-defined expansions from the vocabulary file. Any line in a
-  // category named "expansions" / "Expansions" / "_expansions" that follows
-  // the `key=val1,val2,...` shape contributes to (or overrides) the
-  // hardcoded map above. Other lines in that category (including comments
-  // or stray content) are ignored.
-  try {
-    const userLines = (window.vocabulary && (
-      window.vocabulary['expansions']
-      || window.vocabulary['Expansions']
-      || window.vocabulary['_expansions']
-    )) || []
-    userLines.forEach(line => {
-      if (typeof line !== 'string') return
-      const t = line.trim()
-      if (!t || t.indexOf('=') < 1) return
-      const eq = t.indexOf('=')
-      const key = t.substring(0, eq).trim()
-      const valStr = t.substring(eq + 1).trim()
-      if (!key || !valStr) return
-      const vals = valStr.split(',').map(v => v.trim()).filter(Boolean)
-      if (vals.length) wordsMap[key] = vals
-    })
-  } catch (e) { console.warn('[expansions] failed to merge user-defined expansions', e) }
-
-  return wordsMap
+  // Expansion map is derived from the vocabulary file's `expansions` category.
+  // The pure builder lives in ./vocab-expand.js (shared with the Node CLI).
+  return _buildExpansionMap(window.vocabulary)
 }
 
 function togglePlay(el) {
@@ -495,26 +508,17 @@ async function scanRareWords() {
   // search's file-level filter).
   const subs = Object.values(window.allSubtitles || {})
     .filter(s => s && (s.sv || s.en))
-    .map(s => ({
-      sv: s.sv ? _cleanSrtForMatch(s.sv) : '',
-      en: s.en ? _cleanSrtForMatch(s.en) : ''
-    }))
-
-  // Flatten vocabulary into unique lines (keep first category seen).
-  // Skip very short lines outright — single/double-char tokens are almost
-  // always function words ("se", "ha", "be", "i") that appear everywhere
-  // and bring no signal to the rare-words list.
-  const MIN_LINE_LEN = 3
-  const seen = new Map()
-  Object.entries(window.vocabulary || {}).forEach(([cat, lines]) => {
-    if (!Array.isArray(lines)) return
-    lines.forEach(line => {
-      const l = (line || '').trim()
-      if (l.length < MIN_LINE_LEN) return
-      if (!seen.has(l)) seen.set(l, cat)
+    .map(s => {
+      const sv = s.sv ? _cleanSrtForMatch(s.sv) : ''
+      const en = s.en ? _cleanSrtForMatch(s.en) : ''
+      // Lowercased copies feed the cheap substring pre-filter below (the regex
+      // is case-insensitive and still runs on the original text).
+      return { sv, en, svLo: sv.toLowerCase(), enLo: en.toLowerCase() }
     })
-  })
-  const entries = Array.from(seen.entries()) // [line, category]
+
+  // Flatten vocabulary into unique {line, category} entries. Shared logic in
+  // ./rare-words.js (drops <3-char function words, keeps first category seen).
+  const entries = _flattenVocabEntries(window.vocabulary)
 
   const found = []
   const total = entries.length
@@ -532,48 +536,24 @@ async function scanRareWords() {
   const SLICE_MS = 25
   const now = () => (window.performance && performance.now) ? performance.now() : Date.now()
   let lastYield = now()
-  // Per-alternative minimum length. The vocab uses `|` to list alternatives
-  // for a concept; some entries include very short forms ("lev" alongside
-  // "leva|lever|levde", " be " alongside "lyssna|höra") that, when fed into
-  // the alternation regex below, swallow the line by matching as substrings
-  // of unrelated words (lev → "level", "love", "alleviate", …). Drop those
-  // short alternatives from the regex so they don't drag the whole line out
-  // of the rare list.
-  const MIN_ALT_LEN = 3
   for (let i = 0; i < total; i++) {
     if (token !== window._rareWordsScanToken) { $('#rareWordsScanBtn').prop('disabled', false); return }
-    const [line, cat] = entries[i]
-    let re
+    const { line, category: cat } = entries[i]
+    // Build the boundary-anchored match regex from the expanded line. Shared
+    // logic in ./rare-words.js: drops short alternatives, relaxes spaces, and
+    // falls back to a non-/u regex when needed. null ⇒ nothing to test against.
+    let re, sigs = null
     try {
       const expanded = expandWords(line, getLangFromUrl().code)
-      // Drop alternatives shorter than MIN_ALT_LEN before composing the
-      // final regex. Preserve the existing _relaxSpaces step (run on the
-      // already-stripped string) so multi-word alternatives still match
-      // across whitespace.
-      const stripped = String(expanded || '')
-        .split(SEPARATOR_PIPE)
-        .filter(p => p.trim().length >= MIN_ALT_LEN)
-        .join(SEPARATOR_PIPE)
-      if (!stripped) { /* nothing left to test against; treat as absent */ continue }
-      const relaxed = _relaxSpaces(stripped)
-      // The original regex lacked word boundaries, so a normal-length form
-      // like "fanatisk" matched every subtitle containing "fanatiskt" /
-      // "fanatiska" — counted as covered when the exact form is absent.
-      // Anchor with Unicode boundary lookarounds so a hit requires real
-      // word edges. \b is ASCII-only (treats å/ä/ö as boundaries), so we
-      // use [\p{L}\p{N}] lookarounds with /u instead.
-      try {
-        re = new RegExp('(?<![\\p{L}\\p{N}])(?:' + relaxed + ')(?![\\p{L}\\p{N}])', 'iu')
-      } catch (eU) {
-        // Pattern can't be promoted to Unicode mode (vocab line contains a
-        // /u-unsafe construct). Fall back to the unanchored regex so we
-        // still produce a signal for the line rather than zero-matching it.
-        re = new RegExp(relaxed, 'i')
-      }
+      re = _buildRareWordRegex(expanded)
+      sigs = _buildRareWordPrefilter(expanded)
     } catch (e) { re = null }
     if (re) {
       let count = 0
       for (const sub of subs) {
+        // Cheap substring gate: skip the /u regex for subtitles that can't
+        // possibly contain any alternative (see ./rare-words.js).
+        if (sigs && !_prefilterHit(sub.svLo, sub.enLo, sigs)) continue
         if ((sub.sv && re.test(sub.sv)) || (sub.en && re.test(sub.en))) {
           count++
           if (count >= threshold) break // can't be "fewer than threshold" any more
@@ -1674,7 +1654,34 @@ window._appSettings = {
   // Max rows shown upfront in the prefix-search vocabulary panel. The rest
   // (strongest matches that overflow this cap) move into the "Different
   // prefixes" dialog at the top so they're still reachable in one click.
-  prefixResultsMax: 5
+  prefixResultsMax: 5,
+  // Clip-window bounds for playlist playback. SRTs are sparse snippets (a video's
+  // file stitches distant captures together), so a ±context window can span a
+  // multi-hour gap and play far past the word. Cues are treated as adjacent when
+  // the gap between them is <= clipGapThresholdSec; auto-built clips are also hard
+  // capped at clipMaxDurationSec. (Manual captures use the gap threshold but stay
+  // uncapped.) See contiguousClipWindow in random-playlist.js.
+  clipGapThresholdSec: 1.5,
+  clipMaxDurationSec: 25,
+  // Automatic-random capture: minimum words to have around the vocab word before
+  // adding context sentences. If the matched subtitle line already has this many
+  // words before AND after the word, no context lines are added; otherwise lines
+  // are added on the deficient side up to the "Sentences around word" cap.
+  minWordsAround: 10
+}
+
+// Adjacency gap / max-duration accessors, guarding against a bad localStorage value.
+function _clipGapThresholdSec() {
+  const n = parseFloat(window._appSettings && window._appSettings.clipGapThresholdSec)
+  return Number.isFinite(n) && n >= 0 ? n : 1.5
+}
+function _clipMaxDurationSec() {
+  const n = parseFloat(window._appSettings && window._appSettings.clipMaxDurationSec)
+  return Number.isFinite(n) && n > 0 ? n : 25
+}
+function _minWordsAround() {
+  const n = parseInt(window._appSettings && window._appSettings.minWordsAround, 10)
+  return Number.isFinite(n) && n >= 0 ? n : 10
 }
 
 function appSettingsLocalKey() {
@@ -1706,6 +1713,9 @@ function loadAppSettings() {
   $('#numberOfPrefixFindings').val(
     parseInt(window._appSettings.prefixResultsMax, 10) || 5
   )
+  $('#clipGapThresholdSec').val(_clipGapThresholdSec())
+  $('#clipMaxDurationSec').val(_clipMaxDurationSec())
+  $('#minWordsAround').val(_minWordsAround())
   return Promise.resolve()
 }
 
@@ -2582,6 +2592,30 @@ $('document').ready(e => {
   $('#contextLinesBefore').on('change input', _onContextChange)
   $('#contextLinesAfter').on('change input', _onContextChange)
 
+  // Clip-window bounds (see contiguousClipWindow). Gap threshold applies to both
+  // auto-built and captured clips; max duration caps auto-built clips only.
+  $('#clipGapThresholdSec').on('change input', e => {
+    const v = parseFloat($(e.target).val())
+    if (Number.isFinite(v) && v >= 0) {
+      window._appSettings.clipGapThresholdSec = Math.min(30, v)
+      saveAppSettings()
+    }
+  })
+  $('#clipMaxDurationSec').on('change input', e => {
+    const v = parseFloat($(e.target).val())
+    if (Number.isFinite(v) && v > 0) {
+      window._appSettings.clipMaxDurationSec = Math.max(5, Math.min(120, v))
+      saveAppSettings()
+    }
+  })
+  $('#minWordsAround').on('change input', e => {
+    const v = parseInt($(e.target).val(), 10)
+    if (Number.isFinite(v) && v >= 0) {
+      window._appSettings.minWordsAround = Math.min(100, v)
+      saveAppSettings()
+    }
+  })
+
   $('#recPlayGapSeconds').on('change input', e => {
     const v = parseInt($(e.target).val(), 10)
     if (Number.isFinite(v)) {
@@ -3369,10 +3403,10 @@ async function loadAllSubtitles() {
       const indexLinks = new Set(srts.map(s => s.link))
       for (const [link, entry] of cached) {
         if (!indexLinks.has(link)) { deadLinks.push(link); continue }
-        if (entry && entry.sv && entry.en && !window.allSubtitles[link]) {
+        if (entry && entry.sv && !window.allSubtitles[link]) {
           window.allSubtitles[link] = {
             sv: entry.sv,
-            en: entry.en,
+            en: entry.en || null,
             source: entry.source,
             fileName: entry.name,
             fetchedFrom: 'cache',
@@ -3795,7 +3829,16 @@ async function getSubtitlesForLink(link, source) {
   const svName = name + getTargetLangSrtSuffix()
   const enName = name + ".en.srt"
   const sv = await _fetchSrtFile(`${getResourceUrl()}/srts/${encodeURIComponent(svName)}`)
-  const en = await _fetchSrtFile(`${getResourceUrl()}/srts/${encodeURIComponent(enName)}`)
+  // The .en.srt is optional — source-only snippets (CLI `srt --no-translate`,
+  // or lines still awaiting the in-app 🌐 translate) have none. A genuine 404
+  // must NOT discard the source we just fetched; only a transient failure
+  // propagates so the boot retry pool tops it up later.
+  let en = null
+  try {
+    en = await _fetchSrtFile(`${getResourceUrl()}/srts/${encodeURIComponent(enName)}`)
+  } catch (e) {
+    if (!(e && e.kind === 'notfound')) throw e
+  }
 
   window.allSubtitles[link] = {sv, en, source, fileName: name}
   // Write the freshly-fetched pair to IndexedDB so the next boot can skip
@@ -4705,7 +4748,14 @@ function _srtPathFor(link, langCode) {
 // Block surgery instead of parse/rebuild so timestamp formatting (comma vs
 // dot, trailing newlines) survives the round-trip verbatim. Returns null
 // if the index isn't found so the caller can surface a clear error.
-function _replaceSrtLine(rawSrt, lineIndex, newText) {
+//
+// When `opts.start`/`opts.end` are supplied (the translation path), the line
+// is inserted — creating the block or the whole file if absent — via
+// upsertSrtEntry, so a source-only snippet can grow its .en.srt on demand.
+function _replaceSrtLine(rawSrt, lineIndex, newText, opts = null) {
+  if (opts && opts.start != null && opts.end != null) {
+    return upsertSrtEntry(rawSrt || '', { index: lineIndex, start: opts.start, end: opts.end, text: newText })
+  }
   if (!rawSrt) return null
   const target = String(lineIndex).trim()
   const blocks = rawSrt.split(/\r?\n\r?\n/)
@@ -4724,14 +4774,19 @@ function _replaceSrtLine(rawSrt, lineIndex, newText) {
 // so the UI updates without a re-search. Concurrent-safe: commitWithMerge
 // re-runs `merge` on a 409/422, so the line-edit is re-applied against the
 // latest remote text.
-async function _saveSubtitleEdit(link, langCode, lineIndex, newText) {
+async function _saveSubtitleEdit(link, langCode, lineIndex, newText, opts = null) {
   const filePath = _srtPathFor(link, langCode)
   if (!filePath) throw new Error('No SRT path for ' + link)
   const key = langCode === 'en' ? 'en' : 'sv'
   const stored = window.allSubtitles[link]
-  if (!stored || !stored[key]) throw new Error('SRT not loaded for ' + link)
+  if (!stored) throw new Error('SRT not loaded for ' + link)
+  // A translation insert (opts carries the source line's timestamp) may target
+  // a line — or a whole .en.srt — that doesn't exist yet; treat a missing body
+  // as empty so _replaceSrtLine/upsertSrtEntry can create it.
+  const canInsert = !!(opts && opts.start != null && opts.end != null)
+  if (!stored[key] && !canInsert) throw new Error('SRT not loaded for ' + link)
 
-  const updated = _replaceSrtLine(stored[key], lineIndex, newText)
+  const updated = _replaceSrtLine(stored[key] || '', lineIndex, newText, opts)
   if (!updated) throw new Error(`Line ${lineIndex} not found in ${filePath}`)
 
   // Optimistic local update — render immediately and let the network catch up.
@@ -4751,7 +4806,7 @@ async function _saveSubtitleEdit(link, langCode, lineIndex, newText) {
   // Queue this edit instead of pushing a per-line commit. A debounced
   // background flush (or the manual Sync-Edits button in Settings) groups
   // multiple edits across files into a single commit via commitMultipleFiles.
-  _queueSubtitleEdit(filePath, lineIndex, newText)
+  _queueSubtitleEdit(filePath, lineIndex, newText, opts)
   return true
 }
 
@@ -4782,10 +4837,18 @@ function _savePendingSrtEdits(edits) {
 function _pendingSrtEditCount(edits) {
   return _pendingSrtEditCountCore(edits || _loadPendingSrtEdits())
 }
-function _queueSubtitleEdit(filePath, lineIndex, newText) {
+function _queueSubtitleEdit(filePath, lineIndex, newText, opts = null) {
   const edits = _loadPendingSrtEdits()
   if (!edits[filePath]) edits[filePath] = {}
-  edits[filePath][String(lineIndex)] = { newText, ts: Date.now() }
+  const entry = { newText, ts: Date.now() }
+  // Carry the source line's timestamp for inserts (translation of a line the
+  // remote .en.srt doesn't have yet) so the flush can create it. `ts` above is
+  // the edit's wall-clock time (ms); `start`/`end` are SRT time strings.
+  if (opts && opts.start != null && opts.end != null) {
+    entry.start = opts.start
+    entry.end = opts.end
+  }
+  edits[filePath][String(lineIndex)] = entry
   _savePendingSrtEdits(edits)
   _updateSrtEditsUi()
   // Auto-flush was previously firing 10s after the last edit. Now that the
@@ -4823,17 +4886,14 @@ async function flushPendingSrtEdits() {
   const files = paths.map(filePath => ({
     path: filePath,
     getContent: (current) => {
-      // No remote file → skip (don't create a fresh SRT from edits alone).
-      if (!current) {
-        console.warn(`flushPendingSrtEdits: ${filePath} not on remote; skipping`)
-        return null
+      // Replaces existing lines; inserts lines that carry a timestamp (a
+      // translation of a line the remote doesn't have yet); when there's no
+      // remote file and no timestamped edits, returns null so we don't create
+      // a fresh SRT from plain ✎ edits alone.
+      const updated = applyQueuedEditsToText(current || '', edits[filePath])
+      if (updated == null) {
+        console.warn(`flushPendingSrtEdits: ${filePath} has no committable content; skipping`)
       }
-      let updated = current
-      Object.entries(edits[filePath]).forEach(([lineIndex, entry]) => {
-        const next = _replaceSrtLine(updated, lineIndex, entry.newText)
-        if (next) updated = next
-        else console.warn(`flushPendingSrtEdits: line ${lineIndex} not in ${filePath}; edit dropped`)
-      })
       return updated
     }
   }))
@@ -5028,8 +5088,9 @@ function renderLines(id, url) {
   // never terminates in playback. Detection: any consecutive-line gap
   // larger than `MAX_GAP_S` is a discontinuity; stop walking outward when
   // we encounter one. Display still shows the full window — only the
-  // play-button's time bounds get contracted.
-  const MAX_GAP_S = 60
+  // play-button's time bounds get contracted. Threshold is user-configurable
+  // (clipGapThresholdSec, default 1.5s); captures stay uncapped in duration.
+  const MAX_GAP_S = _clipGapThresholdSec()
   let _playFromIdx = fromLineIndex
   let _playToIdx   = toLineIndex
   if (Number.isFinite(matchLineIndex) && matchLineIndex >= fromLineIndex && matchLineIndex <= toLineIndex) {
@@ -5098,6 +5159,7 @@ function renderLines(id, url) {
      ${infoButton()}
   </span>
   <span class="capture-btn btn" title="Add this match to the current recording">●</span>
+  <span class="translate-lines-btn btn" data-id="${id}" data-url="${url}" title="Translate the visible lines to English">🌐</span>
   <span style="float: right;">
     <span class="remove-prev-btn btn" > - </span>
     <span class="add-next-btn btn"> + </span>
@@ -5288,8 +5350,12 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
     const isMultiWord = word.trim().split(/\s+/).length > 1
+    // Multi-word phrase: render as a popover-triggering `.link` span (NOT an
+    // <a>, which the document click handler opens directly) so clicking it
+    // shows the same "Search here / Search on wiki" popover as single words.
+    // The href carries the phrase-search Wiktionary URL for the wiki action.
     const wikiPart = isMultiWord
-        ? `<a class="link" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}" target="_blank">${word}</a>`
+        ? `<span> <span class="link" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}">${word}</span></span>`
         : getWikiLinks(word)
     wordBlock.append(`<div style=""> Wiki: ${wikiPart} 丨
         <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> 丨
@@ -6467,7 +6533,7 @@ async function fetchFromDownloadedFiles(lookingFor, token) {
   lookingFor = expandWords(lookingFor)
 
   const keys = Object.keys(window.allSubtitles)
-      .filter(it => window.allSubtitles[it].sv && window.allSubtitles[it].en)
+      .filter(it => window.allSubtitles[it].sv || window.allSubtitles[it].en)
   const out = []
   const re = new RegExp(_relaxSpaces(lookingFor), "i")
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -6502,40 +6568,7 @@ async function fetchFromDownloadedFiles(lookingFor, token) {
 }
 
 export function removeHintsInBrackets(txt) {
-  const original = txt;
-  txt = txt.replaceAll("(sl-pl)", "")
-      .replaceAll("(pl)", "")
-      .replaceAll(" (ngt) ", " .*")
-      .replaceAll(" (ngn) ", " .*")
-      .replaceAll(" (ngn)", " [^ ]*")
-      .replaceAll(" (ngt)", " [^ ]*")
-
-  const fn = () => {
-    if (txt.indexOf("(") < 0) return
-    if (txt.indexOf("(") >= 0 && txt.indexOf(")") < 0) {
-      alert("Invalid brackets in" + original)
-      txt = txt.replaceAll("(", "")
-      return
-    }
-    // Match the innermost balanced pair (no nested parens inside) and strip
-    // it by position. Greedy matching previously over-consumed for nested
-    // pairs like "(was i so (vajaså))", trimming "(vajaså))" — leaving an
-    // orphan "(" that triggered a false "Invalid brackets" alert.
-    const m = txt.match(/\([^()]*\)/)
-    if (m) {
-      txt = txt.slice(0, m.index) + txt.slice(m.index + m[0].length)
-    } else {
-      // No innermost pair exists despite both '(' and ')' being present —
-      // structurally broken (e.g. ")foo("). Bail to avoid an infinite loop.
-      txt = txt.replace(/[()]/g, "")
-    }
-  }
-
-  while (txt.indexOf("(") >= 0) {
-    fn()
-  }
-
-  return txt
+  return _sharedRemoveHints(txt)
 }
 
 /**
@@ -6546,65 +6579,14 @@ export function removeHintsInBrackets(txt) {
  * @param{string} txt
  */
 export function expandWords(txt, lang='sv') {
-  const terms = getSearchedTerms(txt)
-  const final = []
-  terms.forEach(term => {
-    if (lang === 'es' && ['lo', 'le', 'la'].some(it => term.trim().endsWith(it))) {
-      final.push(term.substring(0, term.length - 2))
-    }
-    final.push(term)
-  })
-  txt = final.join(SEPARATOR_PIPE)
-  const startTime = new Date().getTime()
-
-  const t = _expandWords(txt, lang)
-  if (!t || t.trim() === '') { //Fallback
-    return txt.replaceAll("<*", "")
-  }
-
-  return t
-}
-
-function _expandWords(txt, lang) {
-  if (txt.indexOf("<*") < 0) {
-    return removeHintsInBrackets(txt)
-  }
-
-  const expansions = getExpansionForWords()
-  const terms = txt.split(SEPARATOR_PIPE)
-  const fn = () => {
-    const w = terms.shift()
-    if (!w) return
-    // Trailing whitespace is optional so the synthetic space we used to add
-    // doesn't end up baked into the expanded term — that space made
-    // "<*gå rätt till" miss subtitles like "gå rätt till." (punctuation, no space).
-    const match = w.match(/<\*(?:\{([^)]+)})?([^\s>]*)(?:\s.*)?$/)
-    if (match && match.length === 3) {
-      const ref = match[1]
-      const wordToExpand = match[2]
-      let expandedWords = [];
-      if(lang === 'es') {
-        expandedWords = conjugateTableSpanish(wordToExpand, ref).flat()
-      } else {
-        expandedWords = expansions[wordToExpand] || [wordToExpand]
-      }
-      expandedWords.forEach(it => terms.push(w.replace(`<*${ref ? '{' + ref + '}' : ''}` + wordToExpand, it)))
-    } else if (w.indexOf("<*") < 0) {
-      terms.push(w)
-    }
-  }
-
-  const cnt = 0
-  while (cnt < 5 && terms.some(t => t.indexOf("<*") >= 0)) {
-    fn()
-  }
-
-  return _.uniq(terms)
-      .filter(it => it.trim().length > 1)
-      .map(it => {
-        if (it.length < 3) return ` ${it} `
-        return it
-      }).join(SEPARATOR_PIPE)
+  // Delegates to the shared implementation (./vocab-expand.js). The window app
+  // supplies the vocabulary-derived expansion map and the Spanish conjugator.
+  return _sharedExpandWords(
+    txt,
+    lang,
+    getExpansionForWords(),
+    lang === 'es' ? conjugateTableSpanish : null
+  )
 }
 
 // STEM_RULES and guessStems are now imported from ./stemming.js
@@ -6945,33 +6927,12 @@ function presentSrtMergeDialog(label, conflicts) {
 // SVT/YouTube metadata, whitespace, and control chars. Swedish å/ä/ö are
 // retained — they encode fine via encodeURIComponent.
 function sanitizeFilenameSegment(s, maxLen) {
-  if (!s) return ''
-  // Strip filesystem/URL-reserved chars and the fullwidth colon U+FF1A
-  // (which slips in from SVT/YouTube metadata and is ugly when URL-encoded).
-  // Preserve ordinary spaces and Swedish letters — the existing " || "
-  // naming convention has spaces inside each piece, and they encode fine.
-  let out = String(s)
-    .replace(/[\\/:*?"<>|：]/g, '_')
-    .replace(/[\r\n\t\f\v]+/g, ' ')
-    .replace(/ +/g, ' ')
-    .replace(/_+/g, '_')
-    .replace(/^[\s_]+|[\s_]+$/g, '')
-  if (maxLen && out.length > maxLen) out = out.slice(0, maxLen).replace(/[\s_]+$/, '')
-  return out
+  return _sharedSanitizeFilename(s, maxLen)
 }
 
 function buildCapturedSubtitleBaseName(detail) {
-  const id = detail.videoId
-  const title = detail.videoTitle || id
-  const channel = detail.channel || detail.channelTitle || detail.videoChannel || detail.uploader || title
-  // Keep the established `channel || title || id` convention — other code
-  // (fetchCategorisation, local-file media-name parsing) and downstream
-  // tooling expects this separator. Each piece is sanitized (no FS/URL
-  // reserved chars, no fullwidth colon, no internal pipe) and capped so the
-  // full filename stays well under FS / URL limits.
-  const safeChannel = sanitizeFilenameSegment(channel, 40)
-  const safeTitle = sanitizeFilenameSegment(title, 60)
-  return _nfc([safeChannel, safeTitle, id].filter(Boolean).join(' || '))
+  // `channel || title || id`, sanitized + NFC-normalized (./subtitle-naming.js).
+  return _sharedBuildBaseName(detail)
 }
 
 // Look up an entry in the deployed index.json by videoId. Uses
@@ -7886,6 +7847,46 @@ function bufferCapturedSubtitle(detail) {
   buf.push({ id: uuid(), capturedAt: Date.now(), detail })
   saveCapturedBuffer(buf)
   updateCapturedBtn()
+  // Make the capture searchable immediately, before it's pushed to GitHub, by
+  // merging it into the in-memory index (allSubtitles + srts). The push path
+  // still does the authoritative remote write + merge; this only mirrors it
+  // locally so the next search finds the captured line without a reload.
+  try { _seedCapturedIntoSearchIndex(detail) }
+  catch (e) { console.warn('seed captured subtitle into search index failed', e) }
+}
+
+// Merge a captured subtitle into window.allSubtitles + window.srts so search
+// (fetchFromDownloadedFiles) picks it up right away. Reuses the same pure
+// merge the push path uses (mergeSrtWithNewEntries / linesToSrtText) and the
+// shared naming/source helpers. No network — purely local cache seeding.
+function _seedCapturedIntoSearchIndex(detail) {
+  const videoId = detail && detail.videoId
+  if (!videoId) return
+  const existing = window.allSubtitles[videoId] || {}
+
+  let sv = existing.sv || null
+  if (detail.lines && detail.lines.length) {
+    sv = existing.sv ? mergeSrtWithNewEntries(existing.sv, detail.lines) : linesToSrtText(detail.lines)
+  }
+  if (!sv) return // nothing capturable without at least a source line
+
+  let en = existing.en || null
+  if (detail.translation && detail.translation.length) {
+    en = existing.en ? mergeSrtWithNewEntries(existing.en, detail.translation) : linesToSrtText(detail.translation)
+  }
+
+  const baseName = _nfc(buildCapturedSubtitleBaseName(detail))
+  const source = inferSubtitleSource(detail)
+  window.allSubtitles[videoId] = { ...existing, sv, en, source, fileName: baseName, fetchedFrom: 'captured' }
+  // Drop cached parses so subsequent reads reflect the merged text.
+  delete window.allSubtitles[videoId]._parsedSv
+  delete window.allSubtitles[videoId]._parsedEn
+
+  if (!Array.isArray(window.srts)) window.srts = []
+  const at = window.srts.findIndex(s => s && s.link === videoId)
+  const srtEntry = { link: videoId, name: baseName, source }
+  if (at >= 0) window.srts[at] = { ...window.srts[at], ...srtEntry }
+  else window.srts.push(srtEntry)
 }
 
 // escapeHtml lives in ./html-utils.js (re-exported from ./highlight.js).
@@ -8719,6 +8720,57 @@ window._markCapturedButtons = _markCapturedButtons
 
 const REC_DIRTY_KEY = 'cupitor:recordings:dirty'
 
+// External (native-bridge) playlists are owned by the Cupitor app and
+// re-supplied on every load, so they must NOT be written to localStorage or
+// pushed to GitHub. This returns a shallow copy of the collection with them
+// stripped out — used by both persistence and sync.
+function _persistableRecordings() {
+  const all = window._recordings || {}
+  const out = {}
+  Object.keys(all).forEach(n => { if (all[n] && !all[n].external) out[n] = all[n] })
+  return out
+}
+
+// Ingest a native PlaylistBridge payload (see the cupitorPlaylists listener) as
+// external, manual-card playlists. Native owns them and re-sends the full set
+// on every load, so previously-injected external playlists are dropped first
+// and the fresh ones spliced in — without touching GitHub-synced playlists,
+// persistence, or the sync-dirty flag.
+function buildPlaylistsWithManualCards(payload) {
+  const { recordings, activeName } = _coreBridgePlaylistsToRecordings(payload)
+  const coll = window._recordings || (window._recordings = {})
+  Object.keys(coll).forEach(n => { if (coll[n] && coll[n].external) delete coll[n] })
+  Object.assign(coll, recordings)
+  window._recording = window._recording || { state: 'idle' }
+  const cur = window._recording.currentName
+  const wantActive = (activeName && coll[activeName]) ? activeName
+    : (cur && coll[cur]) ? cur
+    : Object.keys(recordings)[0]
+  if (wantActive && coll[wantActive]) {
+    // Set the active pointer directly (not selectRecording) so we don't mark
+    // the GitHub-sync flag dirty for native-owned data.
+    window._recording.currentName = wantActive
+    window._recording.virtual = false
+    window._recording.items = coll[wantActive].items
+  }
+  try { _updateRecordingUI() } catch (_) {}
+  try { _markCapturedButtons() } catch (_) {}
+  try { if ($('#recordingReviewDialog').is(':visible')) openRecordingReviewDialog() } catch (_) {}
+}
+window.buildPlaylistsWithManualCards = buildPlaylistsWithManualCards
+
+// Ask the native side to open the EPUB reader at a card's book + chapter.
+function _openEpubForCard(bookKey, chapterIdx) {
+  if (!window.PlaylistBridge || typeof window.PlaylistBridge.postMessage !== 'function') {
+    alert('Opening the book needs the Cupitor app.')
+    return
+  }
+  try {
+    window.PlaylistBridge.postMessage(JSON.stringify({ op: 'openEpub', book_key: bookKey, chapter_idx: chapterIdx }))
+  } catch (e) { console.warn('openEpub post failed', e) }
+}
+window._openEpubForCard = _openEpubForCard
+
 function _saveRecording() {
   try {
     // Keep the active recording's items pointer in sync with the collection
@@ -8734,7 +8786,7 @@ function _saveRecording() {
       }
       window._recordings[name].updatedAt = Date.now()
     }
-    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(window._recordings))
+    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
     localStorage.setItem(REC_CURRENT_KEY, name)
     localStorage.setItem(REC_STATE_KEY, window._recording.state)
     // Best-effort cleanup of the legacy single-buffer key once we've fully
@@ -8766,6 +8818,9 @@ function recordingsFilePath() {
 function mergeRecordingCollections(localColl, remoteColl) {
   return _coreMergeRecordingCollections(localColl, remoteColl)
 }
+function mergeRecordingsLocalAuthoritative(localColl, remoteColl) {
+  return _coreMergeRecordingsLocalAuthoritative(localColl, remoteColl)
+}
 
 async function loadRecordingsFromGithub() {
   try {
@@ -8790,6 +8845,10 @@ async function _mergeRemoteRecordingsIntoLocal() {
   if (!remote) return
   const merged = mergeRecordingCollections(window._recordings || {}, remote)
   window._recordings = merged
+  // Remote was successfully pulled in this session — a Sync may now treat the
+  // local playlist SET as authoritative (so deletions propagate) without risk
+  // of wiping remote playlists we simply never loaded.
+  window._recordingsRemoteMerged = true
   // Keep the active recording's items pointer in sync with the merged entry.
   const cur = window._recording.currentName
   if (merged[cur]) window._recording.items = merged[cur].items
@@ -8813,12 +8872,25 @@ async function syncRecordingsToGithub() {
         let remote = {}
         try { remote = remoteText ? JSON.parse(remoteText) : {} } catch (_) {}
         if (!remote || typeof remote !== 'object') remote = {}
-        const merged = mergeRecordingCollections(window._recordings || {}, remote)
+        // Local-authoritative merge (deletions propagate) only when we've
+        // confirmed the remote was pulled into local this session; otherwise
+        // fall back to a safe union so a cold/failed boot can't wipe remote.
+        // External (native-bridge) playlists are never pushed; sync only the
+        // persistable set, then splice the externals back into memory so they
+        // stay available for the rest of the session.
+        const localPersistable = _persistableRecordings()
+        const merged = window._recordingsRemoteMerged
+          ? mergeRecordingsLocalAuthoritative(localPersistable, remote)
+          : mergeRecordingCollections(localPersistable, remote)
+        const externals = {}
+        Object.keys(window._recordings || {}).forEach(n => {
+          if (window._recordings[n] && window._recordings[n].external) externals[n] = window._recordings[n]
+        })
         // Adopt the merge result so subsequent local edits start from the
         // post-sync baseline, and a 409/422 retry sees fresh state.
-        window._recordings = merged
+        window._recordings = Object.assign({}, merged, externals)
         const cur = window._recording.currentName
-        if (merged[cur]) window._recording.items = merged[cur].items
+        if (window._recordings[cur]) window._recording.items = window._recordings[cur].items
         try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(merged)) } catch (_) {}
         return JSON.stringify(merged, null, 2) + '\n'
       }
@@ -8963,6 +9035,251 @@ function createRandomFromAllPlaylist({ count = 50 } = {}) {
   return true
 }
 window.createRandomFromAllPlaylist = createRandomFromAllPlaylist
+
+// Lazily-built, cached index over the downloaded subtitle corpus. Each entry
+// keeps the raw target-language SRT text and memoises its parsed lines on first
+// match. Shuffled once so per-word early-break picks random files. Cached on
+// window (keyed by corpus size) so repeated Random builds reuse the parse work.
+// With ~7000 subtitles this is the difference between re-scanning everything
+// per word and touching each file at most once.
+function _autoScanFiles() {
+  const all = window.allSubtitles || {}
+  const keys = Object.keys(all).filter(k => all[k] && (all[k].sv || all[k].en))
+  const cache = window._autoScanFilesCache
+  if (cache && cache.n === keys.length) return cache.files
+  const files = keys.map(k => ({
+    link: k,
+    source: all[k].source,
+    // Prefer the studied language (stored under `sv`); fall back to English.
+    raw: (all[k].sv && all[k].sv.length ? all[k].sv : all[k].en) || '',
+    lines: null // parsed on first match, then reused
+  }))
+  const shuffled = _fisherYates(files)
+  window._autoScanFilesCache = { n: keys.length, files: shuffled }
+  return shuffled
+}
+
+// Automatically generate captured-shaped items by scanning the downloaded
+// subtitle corpus for each vocabulary word in the selected categories.
+// Non-destructive: never fetches new SRTs and never touches the live search.
+// Returns {st,w,it} tuples. Stops early once `count` items are collected (words
+// are shuffled first, so the early cut is still a representative sample).
+// `onProgress(wordsDone, wordsTotal, itemsFound)` is optional.
+async function buildAutomaticItems({ vocabCategories = [], matchesPerWord = 1, contextLines = 2, count = Infinity, onProgress = null } = {}) {
+  // Mirror doSearch's deferral so we don't scan an empty corpus on a cold load.
+  if (!window.vocabulary || !window._subtitlesLoaded) {
+    try { await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]) } catch (_) {}
+  }
+  const files = _autoScanFiles()
+  // Shuffle words so an early-exit still yields a spread across the category.
+  const words = _fisherYates(_wordsForCategories(window.vocabulary, vocabCategories, VOCAB_HIDDEN_CATEGORIES))
+  const tuples = []
+  let lastYield = Date.now()
+  for (let wi = 0; wi < words.length; wi++) {
+    if (tuples.length >= count) break
+    const word = words[wi]
+    if (onProgress) { try { onProgress(wi + 1, words.length, tuples.length) } catch (_) {} }
+    // Expand the raw vocab line once ("(hint)|form1|form2" → "form1|form2"):
+    // the expansion drives both the match regex (same as the live search) AND
+    // the stored word, so items are labelled/grouped by the real word forms
+    // rather than the raw vocab entry with its brackets/hints.
+    let expanded
+    try { expanded = expandWords(word) } catch (_) { continue }
+    expanded = (expanded || '').trim()
+    if (!expanded) continue
+    // Word-bounded, relaxed-space, case-insensitive — the SAME matcher the live
+    // search uses (withWordBoundaries), so "fors" matches the whole word and not
+    // a substring of "töksfors".
+    let re
+    try { re = new RegExp(_relaxSpaces(withWordBoundaries(expanded)), 'i') } catch (_) { continue }
+    const matches = []
+    for (let fi = 0; fi < files.length && matches.length < matchesPerWord; fi++) {
+      const f = files[fi]
+      // Cheap raw-text gate: skip files that can't contain the word before the
+      // expensive parse. (re is non-global, so .test() is not stateful.)
+      if (!f.raw || !re.test(f.raw)) continue
+      if (!f.lines) {
+        f.lines = srtToJson(f.raw).map(e => ({
+          index: parseInt(e.index, 10),
+          ts: e.start && e.start.ordinal,
+          te: e.end && e.end.ordinal,
+          text: e.text || ''
+        }))
+      }
+      const positions = _matchingPositions(f.lines, re)
+      for (let pi = 0; pi < positions.length && matches.length < matchesPerWord; pi++) {
+        const pos = positions[pi]
+        // The actual surface word that matched this line (e.g. "gick" out of the
+        // "går|gick" expansion) — used as the item's single-word label.
+        const m = (f.lines[pos].text || '').match(re)
+        const surface = (m && m[0] && m[0].trim()) || expanded
+        matches.push({ link: f.link, source: f.source, lines: f.lines, pos, word: surface })
+      }
+    }
+    _buildAutoItemsForWord(expanded, matches, {
+      matchesPerWord, contextLines,
+      minWordsAround: _minWordsAround(),
+      gapThreshold: _clipGapThresholdSec(),
+      maxDuration: _clipMaxDurationSec(),
+    }).forEach(t => tuples.push(t))
+    // Yield to the UI on a ~50ms budget so the dialog stays responsive and the
+    // progress text repaints, without a forced event-loop hop per file/word.
+    if (Date.now() - lastYield > 50) {
+      await new Promise(r => setTimeout(r, 0))
+      lastYield = Date.now()
+    }
+  }
+  return tuples
+}
+window.buildAutomaticItems = buildAutomaticItems
+
+// The "Build Random Playlist" dialog: compose the random-practice playlist from
+// two independent sources (Automatic subtitle scan + existing captured items),
+// each scoped by a searchable select2 (empty = all), then write it to a new
+// auto-named playlist or replace the reserved "Random From All".
+function _openRandomBuilderDialog() {
+  const realNames = listRecordings().filter(n => !_isVirtual(n))
+  const vocab = window.vocabulary || {}
+  const cats = Object.keys(vocab).filter(c => !VOCAB_HIDDEN_CATEGORIES.has(c)).sort()
+
+  let $d = $('#randomBuilderDialog')
+  if ($d.length) { try { $d.dialog('destroy') } catch (_) {} $d.remove() }
+  $d = $('<div id="randomBuilderDialog"></div>').appendTo('body')
+
+  const catOpts = cats.map(c => `<option value="${_.escape(c)}">${_.escape(c)} (${(vocab[c] || []).length})</option>`).join('')
+  const plOpts = realNames.map(n => {
+    const cnt = _collectManualItems(window._recordings, [n]).length
+    return `<option value="${_.escape(n)}">${_.escape(n)} (${cnt})</option>`
+  }).join('')
+  const suggestedName = _nextRandomPlaylistName(listRecordings())
+
+  $d.html(`
+    <style>
+      #randomBuilderDialog .rb-block{margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #eee;}
+      #randomBuilderDialog .rb-src{display:block;font-size:14px;margin-bottom:6px;}
+      #randomBuilderDialog .rb-sub{margin-left:22px;}
+      #randomBuilderDialog .rb-row{display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap;}
+      #randomBuilderDialog .rb-row > label{font-size:12px;color:#555;min-width:150px;}
+      #randomBuilderDialog .rb-hint{font-size:11px;color:#999;flex-basis:100%;margin-left:150px;}
+      #randomBuilderDialog .rb-dest{display:block;font-size:13px;margin:4px 0;}
+      /* Cap the multi-select chip area so many selections scroll inside the
+         box instead of ballooning the dialog past the viewport. */
+      #randomBuilderDialog .select2-selection--multiple{max-height:110px;overflow-y:auto;}
+    </style>
+    <div class="rb-block">
+      <label class="rb-src"><input type="checkbox" id="rbAuto" checked> <b>Automatic</b> — find example sentences from vocabulary</label>
+      <div class="rb-sub" id="rbAutoSub">
+        <div class="rb-row"><label>Vocabulary categories</label>
+          <select id="rbVocabCats" multiple style="width:100%">${catOpts}</select>
+          <div class="rb-hint">Leave empty = all categories</div>
+        </div>
+        <div class="rb-row"><label>Matches per word</label><input type="number" id="rbMatchesPerWord" value="1" min="1" max="10" style="width:70px"></div>
+        <div class="rb-row"><label>Sentences around word</label><input type="number" id="rbContextLines" value="2" min="0" max="10" style="width:70px"></div>
+      </div>
+    </div>
+    <div class="rb-block">
+      <label class="rb-src"><input type="checkbox" id="rbManual" checked> <b>Manually recorded / captured</b></label>
+      <div class="rb-sub" id="rbManualSub">
+        <div class="rb-row"><label>Playlists</label>
+          <select id="rbPlaylists" multiple style="width:100%">${plOpts}</select>
+          <div class="rb-hint">Leave empty = all playlists</div>
+        </div>
+      </div>
+    </div>
+    <div class="rb-row"><label>Total items</label><input type="number" id="rbCount" value="50" min="1" max="500" style="width:80px"></div>
+    <div class="rb-block">
+      <div style="font-weight:bold;margin-bottom:4px;">Save as</div>
+      <label class="rb-dest"><input type="radio" name="rbDest" value="new" checked> New playlist <input type="text" id="rbNewName" value="${_.escape(suggestedName)}" style="width:150px"></label>
+      <label class="rb-dest"><input type="radio" name="rbDest" value="replace"> Replace "${_.escape(RANDOM_REC_NAME)}"</label>
+    </div>
+    <div class="rb-status" id="rbStatus" style="display:none;color:#666;font-size:12px;margin-top:6px;"></div>
+  `)
+
+  const enableSub = () => {
+    $d.find('#rbAutoSub').css('opacity', $d.find('#rbAuto').is(':checked') ? '' : 0.45)
+    $d.find('#rbManualSub').css('opacity', $d.find('#rbManual').is(':checked') ? '' : 0.45)
+  }
+  $d.on('change', '#rbAuto,#rbManual', enableSub)
+
+  const finish = async function () {
+    const useAuto = $d.find('#rbAuto').is(':checked')
+    const useManual = $d.find('#rbManual').is(':checked')
+    if (!useAuto && !useManual) { alert('Pick at least one source (Automatic and/or Manual).'); return }
+
+    const mode = $d.find('input[name="rbDest"]:checked').val()
+    let targetName = RANDOM_REC_NAME
+    if (mode === 'new') {
+      targetName = String($d.find('#rbNewName').val() || '').trim()
+      if (!targetName) { alert('Enter a name for the new playlist.'); return }
+      if (window._recordings[targetName] && !confirm(`"${targetName}" already exists. Overwrite it?`)) return
+    }
+
+    const count = Math.max(1, parseInt($d.find('#rbCount').val(), 10) || 50)
+    const matchesPerWord = Math.max(1, parseInt($d.find('#rbMatchesPerWord').val(), 10) || 1)
+    const contextLines = Math.max(0, parseInt($d.find('#rbContextLines').val(), 10) || 0)
+    const vocabCategories = $d.find('#rbVocabCats').val() || []
+    const playlists = $d.find('#rbPlaylists').val() || []
+
+    const pool = []
+    if (useManual) pool.push(..._collectManualItems(window._recordings, playlists))
+    if (useAuto) {
+      const $btns = $d.closest('.ui-dialog').find('.ui-dialog-buttonpane button')
+      $btns.prop('disabled', true)
+      $d.find('#rbStatus').show().text('Scanning subtitles…')
+      try {
+        const autoTuples = await buildAutomaticItems({
+          vocabCategories, matchesPerWord, contextLines, count,
+          onProgress: (done, total, found) => $d.find('#rbStatus').text(`Scanning subtitles… ${found}/${count} found (word ${done}/${total})`)
+        })
+        pool.push(...autoTuples)
+      } finally {
+        $btns.prop('disabled', false)
+        $d.find('#rbStatus').hide()
+      }
+    }
+
+    if (!pool.length) {
+      alert('No items to sample from. Enable more categories/playlists, or capture some matches first.')
+      return
+    }
+
+    const grouped = _sampleAndGroup(pool, { count })
+    const prev = window._recordings[targetName]
+    window._recordings[targetName] = {
+      items: grouped,
+      createdAt: (prev && prev.createdAt) || Date.now(),
+      updatedAt: Date.now(),
+      random: true
+    }
+    selectRecording(targetName)
+    try { $d.dialog('close') } catch (_) {}
+    openRecordingReviewDialog()
+  }
+
+  $d.dialog({
+    title: 'Build Random Playlist',
+    width: Math.min(460, $(window).width() - 40),
+    // Cap height to the viewport so the body scrolls instead of overflowing
+    // off-screen when the category / playlist selections grow.
+    maxHeight: Math.max(320, $(window).height() - 80),
+    modal: true,
+    autoOpen: true,
+    buttons: {
+      'Build': function () { finish() },
+      'Cancel': function () { try { $(this).dialog('close') } catch (_) {} }
+    }
+  })
+
+  // select2 must init after the dialog node is attached; dropdownParent keeps
+  // the search dropdown layered above the modal. Nothing is pre-selected —
+  // an empty selection means "all".
+  try {
+    $d.find('#rbVocabCats').select2({ placeholder: 'All categories — type to filter…', width: '100%', dropdownParent: $d })
+    $d.find('#rbPlaylists').select2({ placeholder: 'All playlists — type to filter…', width: '100%', dropdownParent: $d })
+  } catch (_) {}
+  enableSub()
+}
+window._openRandomBuilderDialog = _openRandomBuilderDialog
 
 // Add a manual entry to a real playlist. Manual entries live in the same
 // `items[st][w]` map as captured items so they mix freely; they're put
@@ -9555,6 +9872,109 @@ window._openVirtualPlaylistEditor = _openVirtualPlaylistEditor
 // Per-entry audio recordings.
 //
 // Audio is persisted on the device file system via the Cupitor app's
+// ── Translation bridge ─────────────────────────────────────────────────────
+// The Cupitor host (Flutter WebView) exposes a `TranslateRequest` JS channel
+// and replies on `window.__cupTranslated(id, result, err)` — the same
+// request/reply shape as AudioBridge, but with a POSITIONAL callback and a
+// NUMERIC id (the Dart side echoes the id unquoted into runJavaScript, so a
+// string id would build invalid JS). Native translation dodges the CORS wall
+// that blocks the JSON endpoints from GitHub Pages. No browser fallback.
+const _TRANSLATE_PENDING = Object.create(null)
+let _translateReqSeq = 1
+function _haveTranslateBridge() {
+  return !!(window.TranslateRequest && typeof window.TranslateRequest.postMessage === 'function')
+}
+
+window.__cupTranslated = function (id, result, err) {
+  const pending = _TRANSLATE_PENDING[id]
+  if (!pending) return
+  delete _TRANSLATE_PENDING[id]
+  if (err) pending.reject(new Error(typeof err === 'string' ? err : (err && err.message) || 'translate-failed'))
+  else pending.resolve(result)
+}
+
+function _requestTranslation(text, source, target) {
+  if (!_haveTranslateBridge()) return Promise.reject(new Error('no-bridge'))
+  return new Promise((resolve, reject) => {
+    const id = _translateReqSeq++
+    const timer = setTimeout(() => {
+      if (_TRANSLATE_PENDING[id]) { delete _TRANSLATE_PENDING[id]; reject(new Error('translate-timeout')) }
+    }, 20000)
+    _TRANSLATE_PENDING[id] = {
+      resolve: (v) => { clearTimeout(timer); resolve(v) },
+      reject: (e) => { clearTimeout(timer); reject(e) },
+    }
+    try {
+      window.TranslateRequest.postMessage(JSON.stringify({ id, text, source, target }))
+    } catch (e) {
+      clearTimeout(timer); delete _TRANSLATE_PENDING[id]; reject(e)
+    }
+  })
+}
+
+// Translate every source (main-language) line currently visible in window `id`
+// into English and write them into the paired .en.srt, then re-render so the
+// English shows. Overwrites all visible lines (re-translate). Creates the
+// .en.srt / individual en lines when the snippet is source-only.
+async function translateVisibleLines(id, url, $btn) {
+  if (!_haveTranslateBridge()) { alert('Translation needs the Cupitor app.'); return }
+  const link = url
+  const stored = window.allSubtitles[link]
+  if (!stored || !stored.sv) { alert('No source subtitles loaded to translate.'); return }
+  if (!stored._parsedSv) stored._parsedSv = srtToJson(stored.sv)
+
+  const $container = $('#' + id)
+  let from = parseInt($container.data('fromIndex'), 10)
+  let to = parseInt($container.data('toIndex'), 10)
+  if (!Number.isFinite(from) || from < 1) from = 1
+  if (!Number.isFinite(to) || to < from) to = from
+
+  const svByIndex = new Map((stored._parsedSv || []).map(s => [String(s.index), s]))
+  const sourceLang = getLangFromUrl().code
+  const jobs = []
+  for (let i = from; i <= to; i++) {
+    const sub = svByIndex.get(String(i))
+    if (!sub) continue
+    const text = String(sub.text || '').trim()
+    if (!text) continue
+    jobs.push({ index: String(i), text, start: sub.ts, end: sub.te })
+  }
+  if (!jobs.length) { alert('No lines to translate in this window.'); return }
+
+  const restore = $btn ? String($btn.text() || '🌐') : '🌐'
+  if ($btn) $btn.addClass('busy').text('⌛')
+  let failed = 0
+  try {
+    const safeTranslate = async (t) => {
+      try { return await _requestTranslation(t, sourceLang, 'en') }
+      catch (e) { console.warn('translate line failed', e); return null }
+    }
+    const translations = await translateLines(jobs.map(j => j.text), safeTranslate)
+    for (let k = 0; k < jobs.length; k++) {
+      const tr = translations[k]
+      if (tr == null || !String(tr).trim()) { failed++; continue }
+      try {
+        await _saveSubtitleEdit(link, 'en', jobs[k].index, String(tr).trim(), { start: jobs[k].start, end: jobs[k].end })
+      } catch (err) { console.warn('translate save failed', jobs[k].index, err); failed++ }
+    }
+    // A source-only snippet has no en_subs in searchResult; create it so the
+    // re-render pairs each sv line with its fresh English (matched by index).
+    const hit = (window.searchResult || []).find(it => it && it.url === link)
+    if (hit && !hit.en_subs && stored.en) {
+      hit.en_subs = { path: _srtPathFor(link, 'en'), data: srtToJson(stored.en, 'en') }
+    }
+    renderLines('' + id, '' + url)
+    if (typeof _syncOnWindowChange === 'function') _syncOnWindowChange()
+    if (failed) alert(`Translated ${jobs.length - failed}/${jobs.length} lines; ${failed} failed.`)
+  } catch (err) {
+    console.error('translateVisibleLines failed', err)
+    alert('Translation failed: ' + (err && err.message || err))
+  } finally {
+    if ($btn) $btn.removeClass('busy').text(restore)
+  }
+}
+window.translateVisibleLines = translateVisibleLines
+
 // AudioBridge JS channel. The entry stores just the resulting `file://...`
 // URL in its `mediaUrl` field (with `mediaKind: 'audio'`); the bytes
 // themselves never live inside the _recordings JSON. The recorder UI is
@@ -10114,7 +10534,12 @@ function openRecordingReviewDialog() {
                   ? ` <button type="button" class="rec-item-media rec-item-audio" data-audio-url="${_.escape(it.mediaUrl)}" title="Play recorded audio">🎙</button>`
                   : ` <a class="rec-item-media" href="${_.escape(it.mediaUrl)}" target="_blank" rel="noopener" title="Open media (${_.escape(it.mediaKind || 'link')})">${it.mediaKind === 'youtube' ? '▶︎' : '🔗'}</a>`)
               : ''
-            _itemTextHtml = `<span class="rec-item-text rec-item-manual${it.enabled === false ? ' rec-item-off' : ''}">📝 ${src}${tgt ? ` → ${tgt}` : ''}</span>${mediaBadge}` +
+            // "Open in EPUB" for cards with book/chapter metadata (chapter_idx
+            // may be 0, so test against null). Handled by a delegated click.
+            const epubBadge = (it.book_key && it.chapter_idx != null)
+              ? ` <button type="button" class="rec-item-media rec-item-epub" data-book-key="${_.escape(String(it.book_key))}" data-chapter-idx="${_.escape(String(it.chapter_idx))}" title="Open in ${_.escape(String(it.chapter_title || it.book_title || 'the book'))}">📖</button>`
+              : ''
+            _itemTextHtml = `<span class="rec-item-text rec-item-manual${it.enabled === false ? ' rec-item-off' : ''}">📝 ${src}${tgt ? ` → ${tgt}` : ''}</span>${mediaBadge}${epubBadge}` +
                             `<button type="button" class="rec-manual-edit" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Edit this card">✎</button>`
           } else {
             _itemTextHtml = `<span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${it.timeStart}s–${it.timeEnd}s</span>`
@@ -10215,21 +10640,21 @@ function openRecordingReviewDialog() {
     e.preventDefault(); e.stopPropagation()
     _openVirtualPlaylistEditor(null)
   })
-  // Practice Random: build a fresh "Random From All" playlist. Confirm
-  // overwrite if one already exists so the user doesn't accidentally lose
-  // a curated random session.
+  // Practice Random: open the builder dialog to compose a random playlist from
+  // the Automatic (vocabulary subtitle scan) and/or Manual (captured) sources.
   $dlg.off('click', '#recRecRandom').on('click', '#recRecRandom', function (e) {
     e.preventDefault(); e.stopPropagation()
-    const exists = !!(window._recordings && window._recordings[RANDOM_REC_NAME])
-    if (exists) {
-      const ok = confirm(`"${RANDOM_REC_NAME}" already exists. Replace it with a fresh random sample?`)
-      if (!ok) return
-    }
-    if (createRandomFromAllPlaylist()) openRecordingReviewDialog()
+    _openRandomBuilderDialog()
   })
   $dlg.off('click', '#recRecAddManual').on('click', '#recRecAddManual', function (e) {
     e.preventDefault(); e.stopPropagation()
     _openManualEntryEditor(window._recording.currentName, null)
+  })
+  $dlg.off('click', '.rec-item-epub').on('click', '.rec-item-epub', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const bookKey = String($(this).attr('data-book-key') || '')
+    const ci = parseInt($(this).attr('data-chapter-idx'), 10)
+    _openEpubForCard(bookKey, Number.isFinite(ci) ? ci : $(this).attr('data-chapter-idx'))
   })
   $dlg.off('click', '.rec-manual-edit').on('click', '.rec-manual-edit', function (e) {
     e.preventDefault(); e.stopPropagation()
@@ -10358,6 +10783,16 @@ function openRecordingReviewDialog() {
   } else {
     $dlg.dialog(opts)
   }
+  // Make the playlist switcher searchable. The dialog HTML is rebuilt each open,
+  // so destroy any stale select2 before re-initialising. dropdownParent keeps
+  // the search dropdown layered inside the dialog.
+  try {
+    const $sel = $dlg.find('#recRecSelect')
+    if ($sel.length) {
+      if ($sel.hasClass('select2-hidden-accessible')) { try { $sel.select2('destroy') } catch (_) {} }
+      $sel.select2({ width: 'resolve', dropdownParent: $dlg })
+    }
+  } catch (_) {}
   // After the dialog renders, fetch any missing subtitles in the background
   // and populate the per-row preview spans. Fire-and-forget — if it fails
   // the row just shows "(no preview available)".
@@ -11537,6 +11972,19 @@ async function playRecording(opts) {
     // unrecoverable case.
     let _playStart = it.timeStart
     let _playEnd   = it.timeEnd
+    // Retroactive clip clamp: recompute the window from the CURRENT snippet so a
+    // stored [timeStart, timeEnd] built before the sparse-snippet fix (or across a
+    // temporal gap) doesn't overshoot. Shrink-only — never lengthens the clip; and
+    // skips manual/unlocatable items (contiguousPlayWindow returns null). Subtitle
+    // load is cached (the overlay uses the same call), so this is usually instant.
+    try {
+      const parsed = await _loadSubtitlesForItem(it)
+      const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
+      let primary = parsed && (lang === 'sv' ? parsed.sv : parsed.en)
+      if (!primary || !primary.length) primary = parsed && (lang === 'sv' ? parsed.en : parsed.sv)
+      const win = _contiguousPlayWindow(primary, it, { gapThreshold: _clipGapThresholdSec() })
+      if (win) { _playStart = win.timeStart; _playEnd = win.timeEnd }
+    } catch (e) { console.warn('playRecording: play-window clamp failed', it && it.id, e) }
     const _rawDur = (parseFloat(_playEnd) || 0) - (parseFloat(_playStart) || 0)
     if (Number.isFinite(_rawDur) && _rawDur > MAX_REASONABLE_CLIP_S) {
       const repaired = await _repairMalformedClip(it)
@@ -11877,8 +12325,11 @@ function restorePlayingRecording() {
   window._recPlayMinimized = false
   $('body').addClass('rec-playing').removeClass('rec-playing-minimized')
   $('#recPlayingRestorePill').hide()
-  // Don't auto-resume — leave it paused so the user can scrub / read before
-  // continuing. They can hit Pause/Resume button (▶) to actually play.
+  // Auto-resume on restore: minimize paused playback, so restoring should pick it
+  // back up (video + the inter-item timer, which the wait loops gate on
+  // _recPlayPaused). Same code path as tapping the ▶/⏸ button, matching the
+  // practice-mode restore behaviour.
+  if (window._recPlayPaused) { try { togglePlayingRecordingPause() } catch (_) {} }
 }
 window.minimizePlayingRecording = minimizePlayingRecording
 window.restorePlayingRecording = restorePlayingRecording
@@ -12275,11 +12726,18 @@ function restorePracticeMode() {
   window._practiceMinimized = false
   $('#practiceMode').removeClass('minimized')
   $('body').addClass('practice-mode')
-  // Re-cue the current card's video so playback is ready when the user hits
-  // Play (the practice-mode class flip above re-pins the YT player; we want
-  // it parked at the right timestamp again).
   const it = (window._practiceCards || [])[window._practiceIdx]
-  if (it) { try { _cuePracticeVideo(it) } catch (_) {} }
+  if (!it) return
+  // Manual cards have no clip — just re-cue them (parked), as before.
+  if (_isManualItem(it)) { try { _cuePracticeVideo(it) } catch (_) {} return }
+  // Video card: auto-restart on restore by triggering the Play button — the
+  // exact same code path (and behaviour) as the user pressing ▶ themselves, so
+  // a restored Player resumes on its own instead of sitting paused.
+  // showMediaContainer re-reveals the player that minimize hid (the precondition
+  // Play normally relies on); the click drives playPracticeClip, which
+  // seeks/plays and re-arms the clip stop-watcher that minimize cancelled.
+  try { showMediaContainer() } catch (_) {}
+  try { $('#practiceMode .practice-play').first().click() } catch (_) {}
 }
 function _updatePracticeRestoreCount() {
   const cards = window._practiceCards || []
@@ -12704,6 +13162,19 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
     $p.find('.practice-nav .practice-play').after($btn)
   }
 
+  // "Open in EPUB" — for cards that carry book/chapter metadata (from the
+  // native PlaylistBridge). chapter_idx may be 0, so test against null.
+  $p.find('.practice-epub-link').remove()
+  if (it.book_key && it.chapter_idx != null) {
+    const label = it.chapter_title || it.book_title || 'the book'
+    const $epub = $(`<button type="button" class="practice-epub-link" title="Open in ${_.escape(label)}" aria-label="Open in EPUB">📖</button>`)
+    $epub.on('click', (ev) => {
+      ev.preventDefault(); ev.stopPropagation()
+      _openEpubForCard(it.book_key, it.chapter_idx)
+    })
+    $p.find('.practice-nav .practice-play').after($epub)
+  }
+
   $p.find('.practice-reveal').show()
   $p.find('.practice-flipper').toggleClass('flipped', !!window._practiceFlipped)
   $p.removeClass('reveal-flip reveal-both reveal-hide').addClass(`reveal-${mode}`)
@@ -12827,7 +13298,9 @@ async function _practiceCardLines(it, before, after) {
   const tgtById = new Map()
   tgt.forEach(s => { if (s && s.index != null) tgtById.set(String(s.index), s) })
   const want = String(it.lineIndex)
-  const matchPos = src.findIndex(x => x && x.index != null && String(x.index) === want)
+  let matchPos = src.findIndex(x => x && x.index != null && String(x.index) === want)
+  // Stale lineIndex (SRT re-segmented since capture) → recover by time + word.
+  if (matchPos < 0) matchPos = _resolveMatchIdxByTimeWord(src, it)
   if (matchPos < 0) return null
   const from = Math.max(0, matchPos - (before || 0))
   const to   = Math.min(src.length - 1, matchPos + (after || 0))
@@ -12868,6 +13341,16 @@ $(document).on('click', '.capture-btn', function (e) {
   e.preventDefault()
   e.stopPropagation()
   _captureMatchFromButton($(this))
+})
+
+// Translate the source lines currently visible in this window into English and
+// write them into the paired .en.srt (see translateVisibleLines).
+$(document).on('click', '.translate-lines-btn', function (e) {
+  e.preventDefault()
+  e.stopPropagation()
+  const $btn = $(this)
+  if ($btn.hasClass('busy')) return
+  translateVisibleLines($btn.attr('data-id'), $btn.attr('data-url'), $btn)
 })
 
 // ── Inline subtitle line edit ────────────────────────────────────────────
@@ -13008,6 +13491,13 @@ $(function () {
   // Merge whatever's on GitHub into local — bring in playlists captured
   // from another device. Fire-and-forget; failures are logged.
   _mergeRemoteRecordingsIntoLocal().catch(e => console.warn('merge remote recordings failed', e))
+  // Ask the native app for its book/EPUB playlists. It replies asynchronously
+  // via the 'cupitorPlaylists' event (handled above). No-op in a plain browser.
+  try {
+    if (window.PlaylistBridge && typeof window.PlaylistBridge.postMessage === 'function') {
+      window.PlaylistBridge.postMessage(JSON.stringify({ op: 'getPlaylists' }))
+    }
+  } catch (e) { console.warn('getPlaylists post failed', e) }
 })
 
 // Expose functions that are called from inline HTML onclick/onchange handlers.

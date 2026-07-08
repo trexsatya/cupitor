@@ -51,4 +51,40 @@ describe('renderFretboard', () => {
     renderFretboard(svg, { trail: [{ voicing: null, age: 0 }] });
     expect(svg.querySelectorAll('.fb-dot').length).toBe(0);
   });
+
+  test('draws the chord-name title when `label` is given, and none when empty', () => {
+    const trail = [{ voicing: [{ string: 1, fret: 0 }], age: 0 }];
+
+    const withLabel = makeSvg();
+    renderFretboard(withLabel, { trail, label: 'Am' });
+    const titles = [...withLabel.querySelectorAll('.fb-title div')].map((d) => d.textContent);
+    expect(titles).toEqual(['Am']);
+
+    const noLabel = makeSvg();
+    renderFretboard(noLabel, { trail });
+    expect(noLabel.querySelectorAll('.fb-title').length).toBe(0);
+  });
+
+  test('a title strip makes the svg taller (headroom) but keeps all six strings', () => {
+    const trail = [{ voicing: [{ string: 1, fret: 0 }], age: 0 }];
+    const a = makeSvg(); renderFretboard(a, { trail });
+    const b = makeSvg(); renderFretboard(b, { trail, label: 'G7' });
+    const h = (svg) => parseFloat(svg.getAttribute('height'));
+    expect(h(b)).toBeGreaterThan(h(a));
+    expect(b.querySelectorAll('.fb-string').length).toBe(6);
+  });
+
+  test('labelMode "fret" labels the dot with the fret number; "note" with the note name', () => {
+    // string 5, fret 3 = C (STANDARD_TUNING); string 1, fret 0 = open high E.
+    const trail = [{ voicing: [{ string: 5, fret: 3 }, { string: 1, fret: 0 }], age: 0 }];
+    const labels = (svg) => [...svg.querySelectorAll('.fb-dot-label div')].map((d) => d.textContent).sort();
+
+    const fret = makeSvg();
+    renderFretboard(fret, { trail, labelMode: 'fret' });
+    expect(labels(fret)).toEqual(['0', '3']);
+
+    const note = makeSvg();
+    renderFretboard(note, { trail, labelMode: 'note' });
+    expect(labels(note)).toEqual(['C', 'E']);
+  });
 });

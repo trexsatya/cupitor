@@ -9,9 +9,89 @@ import {
   recordingItemCountIn,
   recordingItemCountByName,
   mergeRecordingCollections,
+  mergeRecordingsLocalAuthoritative,
+  bridgePlaylistsToRecordings,
 } from "./recordings-merge";
 
+describe("bridgePlaylistsToRecordings", () => {
+  const now = () => 1700000000000;
+  const payload = {
+    version: 1,
+    active_id: "p2",
+    playlists: [
+      { id: "p1", name: "Chapter notes", created_at: 10, cards: [
+        { id: "c1", text: "vad betyder detta?", book_key: "bookA", book_title: "Book A", chapter_idx: 0, chapter_title: "Intro", position: 5, created_at: 11 },
+      ] },
+      { id: "p2", name: "Hard words", created_at: 20, cards: [
+        { id: "c2", text: "annat ord", book_key: "bookB", chapter_idx: 3, position: 9, created_at: 21 },
+      ] },
+    ],
+  };
+
+  test("maps card.text to the front (source), leaves target blank, tags external manual", () => {
+    const { recordings } = bridgePlaylistsToRecordings(payload, now);
+    const card = recordings["Chapter notes"].items.Manual.Card[0];
+    expect(card.source).toBe("vad betyder detta?");
+    expect(card.target).toBe("");
+    expect(card.manual).toBe(true);
+    expect(card.external).toBe(true);
+    expect(card.id).toBe("c1");
+  });
+
+  test("carries book/chapter metadata, preserving chapter_idx of 0", () => {
+    const { recordings } = bridgePlaylistsToRecordings(payload, now);
+    const card = recordings["Chapter notes"].items.Manual.Card[0];
+    expect(card.book_key).toBe("bookA");
+    expect(card.chapter_idx).toBe(0);
+    expect(card.chapter_title).toBe("Intro");
+  });
+
+  test("marks each playlist external with its ext id and resolves active_id → name", () => {
+    const { recordings, activeName } = bridgePlaylistsToRecordings(payload, now);
+    expect(recordings["Hard words"].external).toBe(true);
+    expect(recordings["Hard words"].extId).toBe("p2");
+    expect(activeName).toBe("Hard words");
+  });
+
+  test("empty / missing payload yields no recordings and no active", () => {
+    expect(bridgePlaylistsToRecordings(null, now)).toEqual({ recordings: {}, activeName: null });
+    expect(bridgePlaylistsToRecordings({ playlists: [] }, now)).toEqual({ recordings: {}, activeName: null });
+  });
+});
+
 const fixedNow = () => 1700000000000;
+
+describe("mergeRecordingsLocalAuthoritative", () => {
+  const item = (id, lineIndex) => ({ id, lineIndex, searchText: "s", word: "w" });
+  const pl = (items, updatedAt = 1) => ({ items, createdAt: 1, updatedAt });
+
+  test("drops playlists that exist only on remote (deletion propagates)", () => {
+    const local = { A: pl({ s: { w: [item("v1", 1)] } }) };
+    const remote = { A: pl({ s: { w: [item("v1", 1)] } }), B: pl({ s: { w: [item("v9", 9)] } }) };
+    const out = mergeRecordingsLocalAuthoritative(local, remote, fixedNow);
+    expect(Object.keys(out).sort()).toEqual(["A"]);
+  });
+
+  test("keeps playlists that exist only locally", () => {
+    const local = { A: pl({ s: { w: [item("v1", 1)] } }), C: pl({ s: { w: [item("v3", 3)] } }) };
+    const remote = { A: pl({ s: { w: [item("v1", 1)] } }) };
+    const out = mergeRecordingsLocalAuthoritative(local, remote, fixedNow);
+    expect(Object.keys(out).sort()).toEqual(["A", "C"]);
+  });
+
+  test("unions items for a playlist present on both sides (keeps other-device captures)", () => {
+    const local = { A: pl({ s: { w: [item("v1", 1)] } }, 2) };
+    const remote = { A: pl({ s: { w: [item("v2", 2)] } }, 1) };
+    const out = mergeRecordingsLocalAuthoritative(local, remote, fixedNow);
+    const ids = out.A.items.s.w.map((i) => i.id).sort();
+    expect(ids).toEqual(["v1", "v2"]);
+  });
+
+  test("empty local drops everything (all deleted)", () => {
+    const remote = { A: pl({ s: { w: [item("v1", 1)] } }) };
+    expect(mergeRecordingsLocalAuthoritative({}, remote, fixedNow)).toEqual({});
+  });
+});
 
 describe("isVirtual", () => {
   test("true when the entry has virtual: true", () => {

@@ -58,17 +58,25 @@ export function expandRegex(txt) {
   return txt
 }
 
+// Word characters for the boundary lookarounds: ASCII word chars PLUS the
+// Latin-1 letters (À-Ö, Ø-ö, ø-ÿ — excludes the × and ÷ signs). Crucially this
+// includes Swedish å/ä/ö and other accents, so a match can't straddle them:
+// "vits" must not match inside "vitså", nor "fors" inside "töksfors". We spell
+// the class out (rather than \p{L}) so it works WITHOUT the /u flag — callers
+// compile with just "i", and adding /u would reject their hand-written regex.
+const WORD_CHAR = 'A-Za-z0-9_À-ÖØ-öø-ÿ'
+
 // Wrap a search pattern in regex word boundaries so a multi-word phrase
-// like "ta efter" doesn't match inside "tänkta efter" / "leta efter".
-// Uses lookarounds (\w on either side) rather than \b because Swedish
-// letters like å/ä/ö are non-\w in JS — \b would put a boundary inside a
-// Swedish word and cause spurious mismatches there too. Patterns the
-// user explicitly padded with whitespace (their convention for
-// literal-space prefix/suffix matching) are left alone.
+// like "ta efter" doesn't match inside "tänkta efter" / "leta efter", and a
+// single word doesn't match inside a longer (possibly accented) word. Uses
+// letter-class lookarounds rather than \b because Swedish å/ä/ö are non-\w in
+// JS — \b would put a boundary inside a Swedish word. Patterns the user
+// explicitly padded with whitespace (their convention for literal-space
+// prefix/suffix matching) are left alone.
 export function withWordBoundaries(pattern) {
   if (!pattern) return pattern
   if (/^\s|\s$/.test(pattern)) return pattern
-  return `(?<!\\w)(?:${pattern})(?!\\w)`
+  return `(?<![${WORD_CHAR}])(?:${pattern})(?![${WORD_CHAR}])`
 }
 
 // Treat any run of literal spaces in a user-supplied pattern as `\s+`, so

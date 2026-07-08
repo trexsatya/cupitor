@@ -87,6 +87,7 @@ export function init(renderer, dom, hooks = {}) {
     matchOctave: !!(dom && dom.octaveChk && dom.octaveChk.checked),
     requirePlayable: !!(dom && dom.playableChk && dom.playableChk.checked),  // enforce fretted span ≤ 3
     autoPlay: !!(dom && dom.autoPlayChk && dom.autoPlayChk.checked),         // sound each step on Prev/Next
+    showNoteName: !!(dom && dom.noteNameChk && dom.noteNameChk.checked),     // dots show note names vs fret #
     steps: [],                  // [{ measure?, name, noteNames }]
     stepVoicings: [],           // voicingsForNotes per step
     paths: [],                  // findPaths output
@@ -178,7 +179,9 @@ export function init(renderer, dom, hooks = {}) {
     // Movement arrows for strings that carry several notes (only meaningful in match-octave mode,
     // where two notes can share a string). Sheet order comes from the step's `seq`.
     const arrows = stringArrows(curVoicing, (state.steps[state.stepIdx] || {}).seq, state.matchOctave);
-    renderFretboard(dom.svg, { trail, highlight, arrows });
+    const curStep = state.steps[state.stepIdx];
+    renderFretboard(dom.svg, { trail, highlight, arrows, labelMode: state.showNoteName ? 'note' : 'fret',
+      label: curStep && curStep.name && curStep.name !== 'window' ? curStep.name : '' });
     // Shade the sheet segment (measure band behind the notes) for the current step, tracking stepping.
     if (renderer.highlightStepMeasures) renderer.highlightStepMeasures((state.steps[state.stepIdx] || {}).measures || null);
     const step = state.steps[state.stepIdx];
@@ -249,19 +252,22 @@ export function init(renderer, dom, hooks = {}) {
     if (dom.srcPhrases) dom.srcPhrases.classList.toggle('alt', state.source !== 'phrases');
   }
 
-  // Wiring.
-  if (dom.srcGuessed) dom.srcGuessed.addEventListener('click', () => { state.source = 'guessed'; reflectSource(); });
-  if (dom.srcWindow) dom.srcWindow.addEventListener('click', () => { state.source = 'window'; reflectSource(); });
-  if (dom.srcMatched) dom.srcMatched.addEventListener('click', () => { state.source = 'matched'; reflectSource(); });
-  if (dom.srcPhrases) dom.srcPhrases.addEventListener('click', () => { state.source = 'phrases'; reflectSource(); });
+  // Wiring. Selecting a source captures immediately (there's no separate Capture button); clicking
+  // the already-selected chip re-captures, so it doubles as a manual refresh.
+  function selectSource(name) { state.source = name; reflectSource(); capture(); }
+  if (dom.srcGuessed) dom.srcGuessed.addEventListener('click', () => selectSource('guessed'));
+  if (dom.srcWindow) dom.srcWindow.addEventListener('click', () => selectSource('window'));
+  if (dom.srcMatched) dom.srcMatched.addEventListener('click', () => selectSource('matched'));
+  if (dom.srcPhrases) dom.srcPhrases.addEventListener('click', () => selectSource('phrases'));
   // A capture parameter changed — re-run the capture in place if the user has already captured once,
-  // so toggling reflects immediately without re-clicking Capture.
+  // so toggling reflects immediately.
   function maybeRecapture() { if (state.steps.length) capture(); }
   if (dom.suppressChk) dom.suppressChk.addEventListener('change', (e) => { state.includeSuppressed = e.target.checked; maybeRecapture(); });
   if (dom.octaveChk) dom.octaveChk.addEventListener('change', (e) => { state.matchOctave = e.target.checked; maybeRecapture(); });
   if (dom.playableChk) dom.playableChk.addEventListener('change', (e) => { state.requirePlayable = e.target.checked; maybeRecapture(); });
   if (dom.autoPlayChk) dom.autoPlayChk.addEventListener('change', (e) => { state.autoPlay = e.target.checked; });
-  if (dom.captureBtn) dom.captureBtn.addEventListener('click', capture);
+  // Note-name vs fret-number labels: just a re-draw, no re-capture.
+  if (dom.noteNameChk) dom.noteNameChk.addEventListener('change', (e) => { state.showNoteName = e.target.checked; if (state.steps.length) render(); });
   if (dom.resetBtn) dom.resetBtn.addEventListener('click', reset);
   if (dom.fullscreenBtn) {
     dom.fullscreenBtn.addEventListener('click', toggleFullscreen);
@@ -282,6 +288,7 @@ export function init(renderer, dom, hooks = {}) {
   if (dom.panel) dom.panel.addEventListener('toggle', () => {
     if (!dom.panel.open) { stopPlay(); if (renderer.clearStepHighlight) renderer.clearStepHighlight(); }
     else if (state.steps.length) render();   // re-apply the step band when re-opened
+    else capture();                          // first open (nothing captured yet) → capture current source
   });
 
   reflectSource();
@@ -298,8 +305,15 @@ export function init(renderer, dom, hooks = {}) {
   }
 
   // Switch the capture source ('guessed'|'window'|'matched'|'phrases') from outside (e.g. the page
-  // auto-selects 'matched' when tag filtering engages). Reflects the button state; does not capture.
-  function setSource(name) { if (name && name !== state.source) { state.source = name; reflectSource(); } }
+  // auto-selects 'matched' when tag filtering engages, 'phrases' when the Phrases panel opens).
+  // Reflects the chip state and, when the panel is open, captures immediately (matching the click
+  // behavior). When collapsed it only points the source — the first open then captures it.
+  function setSource(name) {
+    if (!name || name === state.source) return;
+    state.source = name;
+    reflectSource();
+    if (dom.panel && dom.panel.open) capture();
+  }
 
   return { capture, reset, setSource, _state: state }; // _state exposed for debugging only
 }

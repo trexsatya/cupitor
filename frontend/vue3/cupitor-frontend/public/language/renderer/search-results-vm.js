@@ -49,7 +49,21 @@ export function groupAndArrangeResults(items, ctx = {}) {
   const categories = ctx.categories || {}
   const mediaFileNames = ctx.mediaFileNames || []
 
-  let arr = applyBlockedChannelFallback(items, ctx)
+  // Drop exact-duplicate matches (same video + same subtitle line). A no-pipe
+  // multi-word search registers the identical line under both the
+  // "whole search text" key and the "per-phrase term" key (which coincide when
+  // there's no expansion), so the same (url, line index) arrives twice and
+  // would render as two identical cards. Distinct line indices are kept.
+  const seen = new Set()
+  const deduped = (items || []).filter(it => {
+    if (!it) return false
+    const key = (it.url || it.id || it.link || '') + '|' + (it.line ? it.line.index : '')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  let arr = applyBlockedChannelFallback(deduped, ctx)
   let grouped = _.groupBy(arr, it => {
     const c = categories[it.url] || ''
     return c.trim()

@@ -31,6 +31,7 @@ export function srtError(kind, message) {
 // legacy callers working without forcing them to rename to .text.
 export function srtToJson(text, lang) {
   const mirror = lang && lang !== 'text'
+  if (text == null) return []
   text = text.replaceAll('<c.huvudpratare>', '')
   const items = []
   let currentItem = { text: '' }
@@ -192,6 +193,67 @@ export function mergeSrtWithResolution(existingText, newItems, resolution) {
   })
   deduped.sort((a, b) => srtTimeToSeconds(a.start) - srtTimeToSeconds(b.start))
   return entriesToSrtText(deduped)
+}
+
+// Insert-or-replace a single SRT block keyed by its explicit index number.
+// Unlike entriesToSrtText/linesToSrtText this keeps each block's own index
+// (the .en.srt mirrors the .sv.srt numbering) and never renumbers:
+//   * index present               → replace only the text line(s), keeping the
+//                                    block's timestamp verbatim (same surgery
+//                                    the manual line editor does).
+//   * index missing + start/end    → insert a fresh block in numeric-index
+//                                    order, formatting time via srtTimeFromValue.
+//   * empty raw + start/end        → return a single fresh block.
+//   * index missing + no timestamp → return the input unchanged (can't place it).
+export function upsertSrtEntry(raw, { index, start, end, text }) {
+  const target = String(index).trim()
+  const body = String(text == null ? '' : text).replace(/\r?\n+$/, '')
+  const src = raw == null ? '' : String(raw)
+
+  // Replace an existing block, verbatim except for its text body.
+  if (src.trim()) {
+    const blocks = src.split(/\r?\n\r?\n/)
+    for (let i = 0; i < blocks.length; i++) {
+      const lines = blocks[i].split(/\r?\n/)
+      if (lines[0] && lines[0].trim() === target && lines[1] && /-->/.test(lines[1])) {
+        blocks[i] = [lines[0], lines[1], body].join('\n')
+        return blocks.join('\n\n')
+      }
+    }
+  }
+
+  // A new block needs a timestamp — otherwise leave the text as-is.
+  if (start == null || end == null) return src
+
+  const newBlock = `${target}\n${srtTimeFromValue(start)} --> ${srtTimeFromValue(end)}\n${body}`
+  if (!src.trim()) return newBlock + '\n'
+
+  // Insert in numeric-index order among the existing (non-empty) blocks.
+  const blocks = src.split(/\r?\n\r?\n/).map(b => b.replace(/\r?\n+$/, '')).filter(b => b.trim())
+  const idxNum = Number(target)
+  const numOf = (b) => {
+    const n = Number(String(b.split(/\r?\n/)[0]).trim())
+    return Number.isFinite(n) ? n : Infinity
+  }
+  let at = blocks.findIndex(b => numOf(b) > idxNum)
+  if (at < 0) at = blocks.length
+  blocks.splice(at, 0, newBlock)
+  return blocks.join('\n\n') + '\n'
+}
+
+// Fold a map of queued edits { lineIndex: {newText, start?, end?} } into SRT
+// text. Existing lines are replaced; lines that are missing but carry a
+// timestamp are inserted (so a source-only snippet can grow its .en.srt on
+// demand); timestamp-less edits for missing lines are dropped. Returns null
+// when the result is still empty — matching the old "don't create a file from
+// edits alone" behavior for plain ✎ edits with no remote file.
+export function applyQueuedEditsToText(current, edits) {
+  let text = current == null ? '' : String(current)
+  Object.keys(edits || {}).forEach(lineIndex => {
+    const e = edits[lineIndex] || {}
+    text = upsertSrtEntry(text, { index: lineIndex, start: e.start, end: e.end, text: e.newText })
+  })
+  return text.trim() ? text : null
 }
 
 // Find entries where existing and incoming disagree on the same start time.

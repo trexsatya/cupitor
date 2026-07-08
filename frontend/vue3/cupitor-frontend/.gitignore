@@ -9,6 +9,11 @@ node_modules
 .env.local
 .env.*.local
 
+# language "Manage" CLI: local config (holds a filmot session cookie) + outputs
+# (fetched pages, browser profile, rare-words/hits artifacts)
+/config.json
+/out/
+
 # Log files
 npm-debug.log*
 yarn-debug.log*

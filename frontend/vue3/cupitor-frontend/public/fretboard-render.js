@@ -1,6 +1,8 @@
 // public/fretboard-render.js
 // Draws a horizontal guitar neck into a passed <svg>. Nut on the left, high-E string on top.
 // Stateless and idempotent: clears the svg and redraws on every call. No globals.
+import { noteAt } from './fretboard-core.js';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const NUM_FRETS = 12;          // drawn fret columns (1..12); fret 0 = the open column left of the nut
@@ -49,37 +51,54 @@ function fretX(fret) { return fret === 0 ? PAD_LEFT - 22 : PAD_LEFT + (fret - 0.
 const COMMON_COLOR = '#e8820c';   // note held in common with the previous step
 const ARROW_COLOR = '#5b2a86';    // movement direction when several notes share a string
 
-export function renderFretboard(svgEl, { trail = [], highlight = new Set(), arrows = [] } = {}) {
+// `labelMode` picks the text drawn inside each dot: 'fret' (the fret number) or 'note' (the note
+// name sounding there). `label` is the current step's chord/step name, drawn as a title above the
+// neck (empty → no title strip).
+export function renderFretboard(svgEl, { trail = [], highlight = new Set(), arrows = [], labelMode = 'fret', label = '' } = {}) {
   while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
 
+  const TITLE_H = label ? 24 : 0;   // headroom reserved for the chord-name title
   const width = PAD_LEFT + NUM_FRETS * FRET_W + 12;
-  const height = PAD_TOP + (STRING_COUNT - 1) * STRING_GAP + PAD_TOP;
+  const height = TITLE_H + PAD_TOP + (STRING_COUNT - 1) * STRING_GAP + PAD_TOP;
   svgEl.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svgEl.setAttribute('width', width);
   svgEl.setAttribute('height', height);
 
+  // Chord/step name for the current step, centered above the neck.
+  if (label) {
+    const title = htmlLabel({ x: width / 2, y: 18, fontSize: 15, anchor: 'middle',
+      css: 'color:#1565c0;font-weight:700;', text: label });
+    title.setAttribute('class', 'fb-title');
+    svgEl.appendChild(title);
+  }
+
+  // The neck lives in a group shifted below the title strip so all the existing y-math (stringY,
+  // PAD_TOP, height) stays as-is; only the group is translated.
+  const g = el('g', TITLE_H ? { transform: `translate(0, ${TITLE_H})` } : {});
+  svgEl.appendChild(g);
+
   // Fretboard background.
-  svgEl.appendChild(el('rect', { x: PAD_LEFT, y: PAD_TOP - 6, width: NUM_FRETS * FRET_W,
+  g.appendChild(el('rect', { x: PAD_LEFT, y: PAD_TOP - 6, width: NUM_FRETS * FRET_W,
     height: (STRING_COUNT - 1) * STRING_GAP + 12, fill: '#f3ead7', stroke: '#cbb994' }));
 
   // Nut (thick) + fret lines.
   for (let f = 0; f <= NUM_FRETS; f++) {
     const x = PAD_LEFT + f * FRET_W;
-    svgEl.appendChild(el('line', { x1: x, y1: PAD_TOP - 6, x2: x, y2: PAD_TOP - 6 + (STRING_COUNT - 1) * STRING_GAP + 12,
+    g.appendChild(el('line', { x1: x, y1: PAD_TOP - 6, x2: x, y2: PAD_TOP - 6 + (STRING_COUNT - 1) * STRING_GAP + 12,
       stroke: f === 0 ? '#6b5836' : '#cbb994', 'stroke-width': f === 0 ? 4 : 1, class: 'fb-fret' }));
   }
 
   // Strings + labels.
   for (let s = 1; s <= STRING_COUNT; s++) {
     const y = stringY(s);
-    svgEl.appendChild(el('line', { x1: PAD_LEFT, y1: y, x2: PAD_LEFT + NUM_FRETS * FRET_W, y2: y,
+    g.appendChild(el('line', { x1: PAD_LEFT, y1: y, x2: PAD_LEFT + NUM_FRETS * FRET_W, y2: y,
       stroke: '#b9a886', 'stroke-width': 1, class: 'fb-string' }));
-    svgEl.appendChild(htmlLabel({ x: 4, y: y + 4, fontSize: 11, css: 'color:#6b5836;', text: STRING_LABELS[s - 1] }));
+    g.appendChild(htmlLabel({ x: 4, y: y + 4, fontSize: 11, css: 'color:#6b5836;', text: STRING_LABELS[s - 1] }));
   }
 
   // Fret-number axis.
   for (let f = 1; f <= NUM_FRETS; f++) {
-    svgEl.appendChild(htmlLabel({ x: fretX(f), y: height - 2, fontSize: 9, anchor: 'middle', css: 'color:#999;', text: '' + f }));
+    g.appendChild(htmlLabel({ x: fretX(f), y: (height - TITLE_H) - 2, fontSize: 9, anchor: 'middle', css: 'color:#999;', text: '' + f }));
   }
 
   // Dots, oldest first so the current step paints on top.
@@ -92,13 +111,14 @@ export function renderFretboard(svgEl, { trail = [], highlight = new Set(), arro
       // Current-step notes held in common with the previous step are drawn in a distinct color
       // (with a ring) so the held/common note stands out while stepping.
       const isCommon = entry.age === 0 && highlight.has(`${p.string}:${p.fret}`);
-      svgEl.appendChild(el('circle', { cx, cy, r: DOT_R, fill: isCommon ? COMMON_COLOR : '#1565c0', opacity,
+      g.appendChild(el('circle', { cx, cy, r: DOT_R, fill: isCommon ? COMMON_COLOR : '#1565c0', opacity,
         ...(isCommon ? { stroke: '#7a3d00', 'stroke-width': 2 } : {}),
         'data-age': entry.age, class: isCommon ? 'fb-dot fb-dot-common' : 'fb-dot' }));
+      const text = labelMode === 'note' ? ((noteAt(p.string, p.fret) || {}).name || '' + p.fret) : '' + p.fret;
       const num = htmlLabel({ x: cx, y: cy, fontSize: 9, anchor: 'middle', vAlign: 'middle',
-        css: `color:#fff;font-weight:700;opacity:${opacity};`, text: '' + p.fret });
+        css: `color:#fff;font-weight:700;opacity:${opacity};`, text });
       num.setAttribute('class', 'fb-dot-label');
-      svgEl.appendChild(num);
+      g.appendChild(num);
     });
   });
 
@@ -109,12 +129,12 @@ export function renderFretboard(svgEl, { trail = [], highlight = new Set(), arro
     const x1 = fretX(a.minFret);
     const x2 = fretX(a.maxFret);
     // The `fb-arrow-line` + direction class drive the CSS flow/pulse animation (defined in the page).
-    svgEl.appendChild(el('line', { x1, y1: y, x2, y2: y, stroke: ARROW_COLOR, 'stroke-width': 2,
+    g.appendChild(el('line', { x1, y1: y, x2, y2: y, stroke: ARROW_COLOR, 'stroke-width': 2,
       class: `fb-arrow fb-arrow-line ${a.dir}` }));
     const head = (x, pointLeft) => {
       const d = 6;
       const pts = pointLeft ? `${x},${y} ${x + d},${y - 4} ${x + d},${y + 4}` : `${x},${y} ${x - d},${y - 4} ${x - d},${y + 4}`;
-      svgEl.appendChild(el('polygon', { points: pts, fill: ARROW_COLOR, class: 'fb-arrow fb-arrowhead' }));
+      g.appendChild(el('polygon', { points: pts, fill: ARROW_COLOR, class: 'fb-arrow fb-arrowhead' }));
     };
     if (a.dir === 'up' || a.dir === 'bi') head(x2, false);   // toward higher fret (right)
     if (a.dir === 'down' || a.dir === 'bi') head(x1, true);  // toward the nut (left)

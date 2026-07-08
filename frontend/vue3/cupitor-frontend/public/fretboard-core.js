@@ -172,8 +172,9 @@ export function findPaths(stepVoicings, { beamWidth = 8, maxPaths = 5, anchorWei
     const region = centers.length ? Math.round(centers.reduce((a, b) => a + b, 0) / centers.length) : 0;
     if (seen.has(region)) continue;
     seen.add(region);
-    out.push({ voicings: beam.voicings, cost: beam.cost, moves: beam.moves, label: pathLabel(region) });
+    out.push({ voicings: beam.voicings, cost: beam.cost, moves: beam.moves, region, label: pathLabel(region) });
   }
-  out.sort((a, b) => a.cost - b.cost);
+  // Open/low positions first (ascending neck region), then least hand movement within a region.
+  out.sort((a, b) => (a.region - b.region) || (a.cost - b.cost));
   return out.slice(0, maxPaths);
 }

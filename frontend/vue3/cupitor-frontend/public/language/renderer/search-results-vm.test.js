@@ -108,4 +108,23 @@ describe('groupAndArrangeResults', () => {
   test('throws if no lodash supplied and window._ unavailable', () => {
     expect(() => groupAndArrangeResults([], {})).toThrow(/lodash/)
   })
+  test('dedupes identical (url, line index) matches — same phrase added twice', () => {
+    // A no-pipe multi-word search adds the same line under both the
+    // whole-search-text key and the per-phrase-term key (identical key), so a
+    // line arrives twice. Only one card should render.
+    const items = [
+      { url: 'v1', line: { index: '12' } },
+      { url: 'v1', line: { index: '12' } },
+    ]
+    expect(groupAndArrangeResults(items, { lodash: _ })).toEqual([
+      { url: 'v1', line: { index: '12' } },
+    ])
+  })
+  test('keeps distinct line indices of the same video', () => {
+    const items = [
+      { url: 'v1', line: { index: '12' } },
+      { url: 'v1', line: { index: '40' } },
+    ]
+    expect(groupAndArrangeResults(items, { lodash: _ })).toHaveLength(2)
+  })
 })

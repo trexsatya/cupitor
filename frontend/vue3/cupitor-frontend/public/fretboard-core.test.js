@@ -139,11 +139,11 @@ describe('findPaths', () => {
   const near1 = [{ string: 6, fret: 2 }, { string: 5, fret: 3 }];
   const far1 = [{ string: 6, fret: 9 }, { string: 5, fret: 10 }];
 
-  test('ranks paths by ascending total movement', () => {
+  test('lists open/low positions first (ascending neck region)', () => {
     const paths = findPaths([[low0], [near1, far1]]);
     expect(paths.length).toBeGreaterThanOrEqual(1);
-    expect(paths[0].cost).toBeLessThanOrEqual(paths[paths.length - 1].cost);
-    expect(paths[0].voicings[1]).toEqual(near1);
+    expect(paths[0].region).toBeLessThanOrEqual(paths[paths.length - 1].region);
+    expect(paths[0].voicings[1]).toEqual(near1);   // the open/low path stays on frets 1–3, not up at 9–10
   });
 
   test('caps the number of returned paths at maxPaths', () => {

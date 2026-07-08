@@ -176,3 +176,68 @@ export function mergeRecordingCollections(localColl, remoteColl, nowFn = Date.no
   })
   return out
 }
+
+// Like mergeRecordingCollections, but the LOCAL playlist set is authoritative:
+// only playlists present locally survive (so a playlist deleted locally is
+// dropped on the next sync), while playlists present on BOTH sides still union
+// their items — preserving captures made on another device inside surviving
+// playlists. Implemented by restricting the remote side to names that exist
+// locally, then delegating to the union merge above.
+export function mergeRecordingsLocalAuthoritative(localColl, remoteColl, nowFn = Date.now) {
+  const local = localColl || {}
+  const remote = remoteColl || {}
+  const remoteSubset = {}
+  Object.keys(local).forEach(name => {
+    if (remote[name]) remoteSubset[name] = remote[name]
+  })
+  return mergeRecordingCollections(local, remoteSubset, nowFn)
+}
+
+// Convert a native PlaylistBridge payload
+//   { version, active_id, playlists: [{ id, name, created_at,
+//       cards: [{ id, text, book_key, book_title, chapter_idx, chapter_title,
+//                 position, created_at }] }] }
+// into recordings entries of external manual cards. Each card's `text` becomes
+// the card front (source); the book/chapter metadata rides along so the UI can
+// offer an "Open in EPUB" button. Everything is tagged `external: true` so the
+// app keeps it out of localStorage persistence and GitHub sync — the native
+// side owns it and re-supplies it on every load. Returns
+//   { recordings: { name: { external, extId, items:{Manual:{Card:[…]}}, … } }, activeName }
+export function bridgePlaylistsToRecordings(payload, nowFn = Date.now) {
+  const out = {}
+  let activeName = null
+  const playlists = (payload && Array.isArray(payload.playlists)) ? payload.playlists : []
+  playlists.forEach(pl => {
+    if (!pl) return
+    const name = (String(pl.name || pl.id || 'Playlist').trim()) || 'Playlist'
+    const cards = Array.isArray(pl.cards) ? pl.cards : []
+    const arr = cards.filter(Boolean).map(c => {
+      const it = {
+        manual: true,
+        external: true,
+        id: (c.id != null) ? String(c.id) : `${pl.id}:${c.position != null ? c.position : ''}`,
+        source: (c.text != null) ? String(c.text) : '',
+        target: '',
+        enabled: true,
+        createdAt: c.created_at || nowFn(),
+      }
+      // Book/chapter metadata for the EPUB deep-link. Only attach when present
+      // (chapter_idx may legitimately be 0, so test against null explicitly).
+      if (c.book_key != null) it.book_key = c.book_key
+      if (c.book_title != null) it.book_title = c.book_title
+      if (c.chapter_idx != null) it.chapter_idx = c.chapter_idx
+      if (c.chapter_title != null) it.chapter_title = c.chapter_title
+      if (c.position != null) it.position = c.position
+      return it
+    })
+    out[name] = {
+      external: true,
+      extId: pl.id,
+      items: { Manual: { Card: arr } },
+      createdAt: pl.created_at || nowFn(),
+      updatedAt: nowFn(),
+    }
+    if (payload && payload.active_id != null && pl.id === payload.active_id) activeName = name
+  })
+  return { recordings: out, activeName }
+}

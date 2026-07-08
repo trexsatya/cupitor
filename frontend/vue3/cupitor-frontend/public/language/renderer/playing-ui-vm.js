@@ -6,6 +6,7 @@
 // player state.
 
 import { isManualItem } from '../recordings-merge.js'
+import { contiguousClipWindow } from '../random-playlist.js'
 
 // Build a Unicode-bounded regex from `pattern` (already a regex source —
 // caller is responsible for escaping). Falls back to unbounded for old
@@ -106,6 +107,79 @@ export function findLineByTime(lines, t) {
   return i
 }
 
+// Recover the matched cue when a recorded item's `lineIndex` no longer exists
+// in the subtitle file — e.g. the SRT was re-segmented (or re-fetched) after the
+// item was captured, so its stored index falls outside the current cue set.
+// `lineIndex` is fragile; the clip time window (timeStart/timeEnd) and the
+// captured word are stable, so we fall back to those. Order: an in-window cue
+// containing the word → the cue at the window's midpoint (time only) → the word
+// anywhere. Returns -1 when no anchor resolves (callers then treat as no-match).
+export function resolveMatchIdxByTimeWord(primary, item) {
+  if (!primary || !primary.length || !item) return -1
+  const ts = Number(item.timeStart)
+  const te = Number(item.timeEnd)
+  const hasWin = Number.isFinite(ts) && Number.isFinite(te) && te >= ts
+  const word = item.word ? String(item.word).toLowerCase().trim() : ''
+  const overlapsWin = l => hasWin && l && l.start && l.end &&
+    typeof l.start.ordinal === 'number' && typeof l.end.ordinal === 'number' &&
+    l.end.ordinal > ts && l.start.ordinal < te
+  const hasWord = l => !!word && String((l && l.text) || '').toLowerCase().includes(word)
+  if (word && hasWin) {
+    const i = primary.findIndex(l => overlapsWin(l) && hasWord(l))
+    if (i >= 0) return i
+  }
+  if (hasWin) {
+    const i = findLineByTime(primary, (ts + te) / 2)
+    if (i >= 0) return i
+  }
+  if (word) {
+    const i = primary.findIndex(hasWord)
+    if (i >= 0) return i
+  }
+  return -1
+}
+
+// Recompute a recorded item's clip window from the CURRENT parsed subtitles so a
+// stored [timeStart, timeEnd] built before the sparse-snippet fix (or captured
+// across a temporal gap) doesn't overshoot at play time. Locates the matched cue
+// (by lineIndex, else time+word recovery), then contracts to the contiguous run
+// around it. The walk is bounded to the STORED window, so this only ever SHRINKS
+// a clip (trims gap overshoot) — it never lengthens one. Manual items and
+// unlocatable cues return null so the caller keeps the stored window.
+export function contiguousPlayWindow(primary, item, opts = {}) {
+  if (!primary || !primary.length || !item || isManualItem(item)) return null
+  const want = String(item.lineIndex)
+  let pos = primary.findIndex(l => l && l.index != null && String(l.index) === want)
+  if (pos < 0) pos = resolveMatchIdxByTimeWord(primary, item)
+  if (pos < 0) return null
+  const cues = primary.map(l => ({
+    ts: l && l.start && l.start.ordinal,
+    te: l && l.end && l.end.ordinal,
+  }))
+  // Bound the walk to the stored window so play-time only trims overshoot.
+  let loBound = 0
+  let hiBound = cues.length - 1
+  const sStart = Number(item.timeStart)
+  const sEnd = Number(item.timeEnd)
+  if (Number.isFinite(sStart) && Number.isFinite(sEnd) && sEnd > sStart) {
+    for (let i = 0; i < cues.length; i++) {
+      if (Number.isFinite(cues[i].te) && cues[i].te > sStart) { loBound = i; break }
+    }
+    for (let i = cues.length - 1; i >= 0; i--) {
+      if (Number.isFinite(cues[i].ts) && cues[i].ts < sEnd) { hiBound = i; break }
+    }
+    if (pos < loBound) loBound = pos
+    if (pos > hiBound) hiBound = pos
+  }
+  const win = contiguousClipWindow(cues, pos, {
+    loBound, hiBound,
+    gapThreshold: opts.gapThreshold,
+    maxDuration: opts.maxDuration == null ? Infinity : opts.maxDuration,
+  })
+  if (!(win.timeEnd > win.timeStart)) return null
+  return { timeStart: win.timeStart, timeEnd: win.timeEnd, matchIdx: pos }
+}
+
 // Build the now-playing banner VM:
 //   { progressText, headText, metaText, isManual, gapLabel }
 // `gapSeconds` is the active inter-item gap; the renderer feeds it to
@@ -163,7 +237,9 @@ export function buildPlayingSubsVM({ parsed, lang, item, before, after }) {
   if (!primary || !primary.length) return { state: 'no-primary' }
 
   const want = String(item && item.lineIndex)
-  const matchIdx = primary.findIndex(l => l && l.index != null && String(l.index) === want)
+  let matchIdx = primary.findIndex(l => l && l.index != null && String(l.index) === want)
+  // Stale lineIndex (SRT re-segmented since capture) → recover by time + word.
+  if (matchIdx < 0) matchIdx = resolveMatchIdxByTimeWord(primary, item)
   if (matchIdx < 0) return { state: 'no-match' }
 
   const _before = Math.max(0, parseInt(before, 10) || 0)

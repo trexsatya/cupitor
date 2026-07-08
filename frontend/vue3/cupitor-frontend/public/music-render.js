@@ -1148,6 +1148,12 @@ export function createMusicRenderer(container, opts = {}) {
   // capture shows every occurrence in piece order — originals + matches).
   let lastPatternMatches = [];
   let lastPatternOriginals = [];
+  // The most recent pattern search, as a thunk that re-applies it. Match highlights are painted
+  // directly onto notehead paths, so an osmd.render (autoResize, zoom settle, font load) wipes them;
+  // postRender re-invokes this so occurrences survive re-renders. Cleared when the tag selection or
+  // assignments change (the search must be re-run explicitly then). `_inReapply` guards re-entry.
+  let lastSearch = null;
+  let _inReapply = false;
   function searchTagPatterns({ mode = 'intervals', durationStrict = true, intervalBasis = 'chromatic', key = null } = {}) {
     clearHighlight();
     lastPatternMatches = [];
@@ -1174,6 +1180,7 @@ export function createMusicRenderer(container, opts = {}) {
       });
       results.push({ name: a.name, color, count: matches.length });
     });
+    lastSearch = () => searchTagPatterns({ mode, durationStrict, intervalBasis, key });   // re-apply on re-render
     return { results, keyLabel: resolvedKeyLabel };
   }
 
@@ -1212,6 +1219,7 @@ export function createMusicRenderer(container, opts = {}) {
     clearHighlight();
     const phrase = phraseByName(phrases, name);
     if (!phrase) return { count: 0, keyLabel: null };
+    lastSearch = () => searchPhrasePattern(name, { mode, durationStrict, intervalBasis, key });   // re-apply on re-render
     const ordered = orderedRenderedNotes();
     const stream = ordered.map((n) => ({ midi: n.midi, durBeats: n.durBeats, voice: n.voice, onset: n.onsetBeats }));
     const wantInt = mode === 'intervals' || mode === 'both';
@@ -1500,6 +1508,9 @@ export function createMusicRenderer(container, opts = {}) {
     applyChordWindow();
     applySuppressionDim();
     applyTagOverlay();
+    // Re-paint the last pattern search's occurrences (over the fresh overlay) so a re-render doesn't
+    // strip them. Guarded so the search's own clearHighlight/highlightNotes can't recurse into here.
+    if (lastSearch && !_inReapply) { _inReapply = true; try { lastSearch(); } catch (_) {} finally { _inReapply = false; } }
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
@@ -1621,7 +1632,7 @@ export function createMusicRenderer(container, opts = {}) {
     getTagColors() { return colorMap(tagRegistry); },
     // Per-piece note assignments [{name, notes}], persisted as detail.patterns. setPatterns does not
     // fire onPatternsChange (used on load); editing notes via tag-mode clicks does.
-    setPatterns(list) { assignments = (list || []).map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) })); lastPatternMatches = []; lastPatternOriginals = []; redraw(); },
+    setPatterns(list) { assignments = (list || []).map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) })); lastPatternMatches = []; lastPatternOriginals = []; lastSearch = null; redraw(); },
     getPatterns() { return getAssignments(); },
     // Drop a tag's note assignments in THIS piece (called when the global tag is deleted). Fires
     // onPatternsChange so the piece persists.
@@ -1637,11 +1648,18 @@ export function createMusicRenderer(container, opts = {}) {
       if (before !== JSON.stringify(phrases.map((p) => p.tags))) firePhrasesChange();
     },
     // Enter/leave tag-paint mode; clicking noteheads then edits the active tag.
-    setTagMode(on) { tagMode = !!on; redraw(); },
+    setTagMode(on) { if (tagMode === !!on) return; tagMode = !!on; redraw(); },
     setActiveTag(name) { activeTag = name || null; },
     // Filtering: master on/off plus the set of tag names to keep highlighted (others dim).
     setTagFilter(on) { tagFilter = !!on; redraw(); },
-    setFilterTags(names) { filterTags = new Set(names || []); lastPatternMatches = []; lastPatternOriginals = []; redraw(); },
+    setFilterTags(names) {
+      const next = new Set(names || []);
+      // No-op when the selection is unchanged: renderTagUI re-pushes the same set on every rebuild
+      // (e.g. when the Motifs panel expands), and redrawing there would clear the pattern search and
+      // dim its occurrences. Only a real selection change resets the search.
+      if (next.size === filterTags.size && [...next].every((n) => filterTags.has(n))) return;
+      filterTags = next; lastPatternMatches = []; lastPatternOriginals = []; lastSearch = null; redraw();
+    },
     // Note identities [{measure,midi,beats}] of the currently-checked filter tags, merged across
     // tags, de-duplicated, and sorted by onset — the play-set for tag skip-playback. [] if none.
     getFilterNotes() {
@@ -1688,7 +1706,7 @@ export function createMusicRenderer(container, opts = {}) {
     // Add/remove a member tag on a phrase (its notes resolve live from the tags + extra notes).
     setPhraseTag(name, tagName, on) { phrases = setPhraseTagReducer(phrases, name, tagName, !!on); firePhrasesChange(); redraw(); },
     // Enter/leave phrase-paint mode; notehead clicks then add/remove the active phrase's extra notes.
-    setPhrasePaintMode(on) { phrasePaintMode = !!on; redraw(); },
+    setPhrasePaintMode(on) { if (phrasePaintMode === !!on) return; phrasePaintMode = !!on; redraw(); },
     setActivePhrase(name) { activePhrase = name || null; },
     // Phrase "dim mode" (on while the phrase panel is open): dim notes not in a shown phrase.
     setPhraseFilter(on) { phraseFilter = !!on; redraw(); },

@@ -63,9 +63,24 @@ describe("expandRegex", () => {
 });
 
 describe("withWordBoundaries", () => {
-  test("wraps a pattern in non-\\w lookarounds", () => {
+  const reOf = (p) => new RegExp(relaxSpaces(withWordBoundaries(p)), "i");
+  test("wraps a pattern in Unicode-letter-aware lookarounds", () => {
     expect(withWordBoundaries("design"))
-      .toBe("(?<!\\w)(?:design)(?!\\w)");
+      .toBe("(?<![A-Za-z0-9_À-ÖØ-öø-ÿ])(?:design)(?![A-Za-z0-9_À-ÖØ-öø-ÿ])");
+  });
+  test("matches a standalone word", () => {
+    expect(reOf("vits").test("en bra vits här")).toBe(true);
+  });
+  test("does not match across a trailing Swedish vowel (vits ≠ vitså)", () => {
+    expect(reOf("vits").test("det var vitså igår")).toBe(false);
+  });
+  test("does not match inside a larger word on either side (fors ≠ töksfors)", () => {
+    expect(reOf("fors").test("en töksfors finns")).toBe(false);
+    expect(reOf("fors").test("vid en fors nu")).toBe(true);
+  });
+  test("respects boundaries before an accented letter too (över ≠ överraska)", () => {
+    expect(reOf("över").test("en överraska sak")).toBe(false);
+    expect(reOf("över").test("hoppa över nu")).toBe(true);
   });
   test("leaves patterns padded with leading/trailing space alone", () => {
     expect(withWordBoundaries(" en ")).toBe(" en ");
