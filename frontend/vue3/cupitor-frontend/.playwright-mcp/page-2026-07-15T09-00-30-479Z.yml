@@ -1,0 +1,499 @@
+- generic [ref=f2e1]:
+  - heading "Music study — western" [level=2] [ref=f2e2]
+  - group [ref=f2e3]:
+    - generic "Manage library (add / rebuild / push pieces)" [ref=f2e4] [cursor=pointer]
+    - option "All keys" [selected]
+    - option "A major"
+    - option "A minor"
+    - option "B major"
+    - option "B minor"
+    - option "C major"
+    - option "C# major"
+    - option "C# minor"
+    - option "D major"
+    - option "D minor"
+    - option "E major"
+    - option "E minor"
+    - option "F major"
+    - option "F minor"
+    - option "G major"
+    - option "G minor"
+  - group [ref=f2e5]:
+    - generic "🗓️ Practice Log" [ref=f2e6] [cursor=pointer]
+    - option "— none —" [selected]
+    - option "A_Time_For_Us.mscz"
+    - option "Chopin_Nocturne_Op.9_No.2_for_Solo_Guitar"
+    - option "BULERIAS.mscz"
+    - option "Flamenco-_Solea-_Compas__Falseta.mscz"
+    - option "Entre_dos_agua_voz_solista.mscz"
+    - option "Tango_Flamenco.mscz"
+    - option "cuban-dance-anonymous.mxl.tmp"
+    - option "valsa-sem-nome.mxl.tmp"
+    - option "12_Variations_of_Twinkle_Twinkle_Little_Star.mscz"
+    - option "Tarrega_-_Ave_Maria_-_Tab.mscz"
+    - option "Autumn_Leaves.mscz"
+    - option "Albeniz_Isaac_Malaguena_Op._165.mscz"
+    - option "Besame_mucho.mscz"
+    - option "Capricho_Arabe_-_Francisco_Tarrega_-_Tab.mscz"
+    - option "Canarios_-_Gasper_Sanz.mscz"
+    - option "Cardoso_Jorge_Milonga.mscz"
+    - option "Cavatina.mscz"
+    - option "el_condor_pasa.mscz"
+    - option "Feste_Lariane__Luigi_Mozzani.mscz"
+    - option "Fr_Elise__Noten_und_Tabulatur_fr_Gitarre.mscz"
+    - option "Gnossienne_No.1.mscz"
+    - option "Gnossienne_No.2_-_Erik_Satie_-_Solo_guitar.mscz"
+    - option "Gnossienne_No.3_-_Erik_Satie_-_Solo_guitar.mscz"
+    - option "GranVals.mscz"
+    - option "Greensleeves__variations_for_solo_guitar.mscz"
+    - option "Je_te_veux.mscz"
+    - option "Lagrima_-_Francisco_Tarrega.mscz"
+    - option "Malaguena_from_the_spanish_suite_Andalucia_by_E._Lecuona.mscz"
+    - option "Manha_de_Carnival_Theme_and_Fantasy_for_Solo_Guitar.mscz"
+    - option "Mariage_Damourmengzhongdehunli.mscz"
+    - option "Mi_Favorita.mscz"
+    - option "Moon_River.mscz"
+    - option "Moonlight_Sonata(1).mscz"
+    - option "Recuerdos_de_la_Alhambra_Francisco_Tarrega.mscz"
+    - option "Prelude_in_C_Major-Bach_guitarTAB.mscz"
+    - option "Pavan_The_Earl_of_Salisbury.mscz"
+    - option "New_Cinema_Paradiso_-_Guitar.mscz"
+    - option "samba-em-preludio.mxl"
+    - option "samba-do-aviao-antonio-carlos-jobim-samba-do-aviao-by-antonio-carlos-jobim.mxl"
+    - option "Romance_de_Amor_for_Guitar_Tabei_version.mscz"
+    - option "Song_From_a_Secret_Garden.mscz"
+    - option "SOLEA.mscz"
+    - option "Serenade__Franz_Schubert.mscz"
+    - option "sons-de-carrilhoes.mxl"
+    - option "Tarrega_-_Recuerdos_De_La_Alhambra_-_Tab.mscz"
+    - option "Un_Da_de_Noviembre__Leo_Brouwer.mscz"
+    - option "Valse_Venezolanos_No.3_Natalia.mscz"
+    - option "Etude_No.4_Op.48__Mauro_Giuliani.mscz"
+    - option "Etude_No.14_Op.60_-__Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Villa-Lobos_H._-_Etude_1.mscz"
+    - option "Etude_No.2_from_12_Etudes__H._Villa-Lobos.mscz"
+    - option "Etude_No.1_Op.60_-_Matteo_Carcassi_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_2_A_Des_arpeges__Heitor_Villa-Lobos.mscz"
+    - option "Estudio_de_Concierto_No._1__Agustn_Barrios_Mangor.mscz"
+    - option "Baiao.mscz"
+    - option "Brouwer-Lobos_Etude_1.6.mscz"
+    - option "Asturias.mscz"
+    - option "antonio-carlos-jobim-wave-guitar-tab.mxl"
+    - option "antonio-carlos-jobim-the-girl-from-ipanema-guitar-tab.mxl"
+    - option "antonio-carlos-jobim-desafinado-guitar-tab.mxl"
+    - option "danza-ungherese-n-5.mxl"
+    - option "El_Noi_De_La_Mare_segovia_version.mscz"
+    - option "El_Choclo.mscz"
+    - option "El_choclo_terminado.mscz"
+    - option "El_Carnaval_de_Venecia.mscz"
+    - option "1-pharaon-gipsy-kings-notes-and-tablature-for-guitar-guitar-1-part.mxl.tmp"
+    - option "danza-espanola-no-5-andaluza-enrique-granados.mxl.tmp"
+    - option "el-choclo.mxl.tmp"
+    - option "en-los-trigales.mscz.tmp"
+    - option "entre-dos-agua-voz-solista.mxl.tmp"
+    - option "fandanguillo-para-guitarra-op36-joaquin-turina.mxl.tmp"
+    - option "fantanguillo-moreno-torroba.mxl.tmp"
+    - option "gabriel-blockert-homenaje-a-turina.mxl.tmp"
+    - option "guitar-solo-la-cumparsita.mxl.tmp"
+    - option "joaquin-turina-fandanguillo.mxl.tmp"
+    - option "joaquin-turina-guitar-sonata.mxl.tmp"
+    - option "joaquin-turina-sevillana.mxl.tmp"
+    - option "la-cumparsita-g-matos-rodriguez-1897-1948.mxl.tmp"
+    - option "orgia-joaquin-turina.mxl.tmp"
+    - option "romance-de-los-pinos-frederico-moreno-torroba.mxl.tmp"
+    - option "sacro-monte-op-55-no-5-joaquin-turina.mxl.tmp"
+    - option "siete-piezas-de-album-i-segoviana-federico-moreno-torroba.mxl.tmp"
+    - option "suite-castellana-fandanguillo-federico-moreno-torroba.mxl.tmp"
+    - option "torija-elegia-federico-moreno-torroba.mxl.tmp"
+    - option "Adelita_-_Francisco_Tarrega_-_Tab.mscz"
+    - option "Al_di_Meola__Paco_de_Lucia_Mediterranean_Sundance.mscz"
+    - option "AL_DI_MEOLA_solo_from_Mediterranean_Sundance.mscz"
+    - option "Amanecer.mscz"
+    - option "Andre_Lavor__-_Suite_Colombiana_n_2_-_Porro.mscz"
+    - option "Andre_Lavor_-_BWV_1004_-_Bach_Chacona_Chaconne.mscz"
+    - option "Bach_Cello_Suite_1_IN_G_MAJOR_BMV_1007_Prelude_drop_C_guitar.mscz"
+    - option "Bach_Cello_Suite_No._1_in_G_Major_For_Guitar.mscz"
+    - option "Bach_Cello_Suite_No.2_in_D_Minor_Courante_For_Classical_GuitarTAB_.mscz"
+    - option "Carlo_Domeniconi_-_Koyunbaba_suite_for_guitar.mscz"
+    - option "Chaconne_BWV_1004__Johann_Sebastian_Bach.mscz"
+    - option "Clair_de_Lune_Guitar.mscz"
+    - option "Clair_De_Lune.mscz"
+    - option "Concierto_de_Aranjuez.mscz"
+    - option "Flamenco_Breeze.mscz"
+    - option "Heitor_Villa_Lobos_Prelude_No_1.mscz"
+    - option "Introduction_and_Variations_on_a_Theme_by_Mozart_Op_9_Fernando_Sor.mscz"
+    - option "J_S_Bach_Fuge_BWV_1001_w_fingering.mscz"
+    - option "J._S._Bach_-_Bourree_in_E_minor_BWV_996.mscz"
+    - option "J._S._Bach_BWV_999_Prelude.mscz"
+    - option "J.S._Bach_-_Minuet_in_G_major_BWV_Anh_114_Classic_Guitar_.mscz"
+    - option "J.S._Bach_BWV_998_Prelude.mscz"
+    - option "Yukihiro_Yoko_-_Sakura.mscz"
+    - option "Variations_on_a_Spanish_March.mscz"
+    - option "Variations_on_The_Carnival_Of_Venice.mscz"
+    - option "Toccata_11.mscz"
+    - option "Suite_Espanola_Gaspar_Sanz.mscz"
+    - option "Spanish_Fandango.mscz"
+    - option "Allegro_Moderato_Op.60_Nr._14__Matteo_Carcassi.mscz"
+    - option "Etude_No.25_Op.60_-_Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.24_Op.60_-_Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.23_Op.60_-_Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.22_Op.60_-_Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.21_Op.60_-_Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.20_Op.60_-_Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.19_Op.60_-_Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.18_Op.60_-__Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.17_Op.60_-__Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.16_Op.60_-__Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.15_Op.60_-__Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.14_Op.60_-__Carcassi_Matteo_1792_-_1853_-_Tablature(1).mscz"
+    - option "Etude_No.13_Op.60_-__Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.11_Op.60_-_Matteo_Carcassi_1792_-_1853.mscz"
+    - option "Etude_No.9_Op.60_-_Matteo_Carcassi_1792_-_1853_.mscz"
+    - option "Etude_No.8_Op.60_-_Matteo_Carcassi_1792_-_1853.mscz"
+    - option "Etude_No.7_Op.60_-_Matteo_Carcassi_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.6_Op.60_-_Matteo_Carcassi_1792_-_1853.mscz"
+    - option "Etude_No.5_Op.60_-_Matteo_Carcassi_1792_-_1853.mscz"
+    - option "Etude_No.4_Op.60_-_Matteo_Carcassi_1792_-_1853_.mscz"
+    - option "Etude_No.3_Op.60_-_Matteo_Carcassi_1792_-_1853_.mscz"
+    - option "Etude_ndeg10_op.60_-_Matteo_Carcassi_1792_-_1852.mscz"
+    - option "Carcassi_Study_in_A_minor_Op._60_no._7(1).mscz"
+    - option "Carcassi_Etude_No.12_Op.60.mscz"
+    - option "BROUWER-Leo_ETUDES-SIMPLES.mscz"
+    - option "Sor_op._6 — No. 1 (Allegro moderato)"
+    - option "Sor_op._6 — No. 2 (Andante Allegro)"
+    - option "Sor_op._6 — No. 3 (Andante)"
+    - option "Sor_op._6 — No. 4 (Allegretto)"
+    - option "Sor_op._6 — No. 5 (Andante)"
+    - option "Sor_op._6 — No. 6 (Allegro)"
+    - option "Sor_op._6 — No. 7 (Allegro)"
+    - option "Sor_op._6 — No. 8 (Andantino)"
+    - option "Sor_op._6 — No. 9 (Andante agitato)"
+    - option "Sor_op._6 — No. 10 (Moderato)"
+    - option "Sor_op._6 — No. 11 (Allegro moderato)"
+    - option "Sor_op._6 — No. 12 (Andante)"
+    - option "Sor-Op35 — No. 17"
+    - option "Sor-Op35 — No. 22"
+    - option "Sor-Op35 — No. 24"
+    - option "Planned" [selected]
+    - option "In progress"
+    - option "Done"
+    - option "Planned" [selected]
+    - option "In progress"
+    - option "Done"
+  - generic [ref=f2e7]:
+    - generic [ref=f2e8]:
+      - generic [ref=f2e9]:
+        - generic [ref=f2e10]:
+          - generic [ref=f2e11]:
+            - radio "Chord" [checked] [ref=f2e12]
+            - text: Chord
+          - generic [ref=f2e13]:
+            - radio "Melody" [ref=f2e14]
+            - text: Melody
+        - generic [ref=f2e15]:
+          - generic [ref=f2e17]:
+            - combobox [ref=f2e18]:
+              - option "C" [selected]
+              - option "C#"
+              - option "D"
+              - option "D#"
+              - option "E"
+              - option "F"
+              - option "F#"
+              - option "G"
+              - option "G#"
+              - option "A"
+              - option "A#"
+              - option "B"
+            - combobox [ref=f2e19]:
+              - option "maj" [selected]
+              - option "min"
+              - option "dim"
+              - option "aug"
+            - button "add9" [ref=f2e20] [cursor=pointer]
+            - button "7" [ref=f2e21] [cursor=pointer]
+            - button "maj7" [ref=f2e22] [cursor=pointer]
+            - button "6" [ref=f2e23] [cursor=pointer]
+            - button "9" [ref=f2e24] [cursor=pointer]
+            - button "sus4" [ref=f2e25] [cursor=pointer]
+            - button "×" [ref=f2e26]
+          - button "+ Add chord" [ref=f2e27]
+          - generic [ref=f2e28]:
+            - button "strict extensions" [ref=f2e29] [cursor=pointer]
+            - generic [ref=f2e31]:
+              - text: max gap
+              - spinbutton "max gap" [ref=f2e32]: "0"
+            - button "transpose-invariant" [ref=f2e33] [cursor=pointer]
+        - generic [ref=f2e35]:
+          - generic [ref=f2e36]:
+            - text: max results
+            - spinbutton "max results" [ref=f2e37]: "20"
+          - button "Search" [ref=f2e38]
+      - group [ref=f2e39]:
+        - generic "Vocabulary" [ref=f2e40] [cursor=pointer]
+    - generic [ref=f2e41]:
+      - generic [ref=f2e42]:
+        - strong [ref=f2e44]: A_Time_For_Us.mscz
+        - generic [ref=f2e45]:
+          - text: "#:"
+          - 'button "#: |▶ – ◀| |▶" [ref=f2e46] [cursor=pointer]': ◀|
+          - spinbutton "from" [ref=f2e47]: "3"
+          - button "|▶" [ref=f2e48] [cursor=pointer]
+          - text: –
+          - button "◀|" [ref=f2e49] [cursor=pointer]
+          - spinbutton "to" [ref=f2e50]: "4"
+          - button "|▶" [ref=f2e51] [cursor=pointer]
+        - button "Full" [ref=f2e52] [cursor=pointer]
+        - button "Show segment" [ref=f2e54] [cursor=pointer]
+        - button "Fullscreen" [ref=f2e56] [cursor=pointer]
+        - button "Close" [ref=f2e58] [cursor=pointer]
+        - text: 35 measures
+      - generic [ref=f2e60]:
+        - combobox [ref=f2e61]:
+          - option "MIDI" [selected]
+          - option "YouTube"
+        - button "▶ Play" [ref=f2e62] [cursor=pointer]
+        - button "⏸ Pause" [ref=f2e64] [cursor=pointer]
+        - button "🔁 Loop segment" [ref=f2e66] [cursor=pointer]
+        - generic [ref=f2e68]:
+          - text: Tempo
+          - spinbutton "Tempo" [ref=f2e69]: "71"
+        - generic [ref=f2e70]:
+          - text: Instrument
+          - combobox "Instrument" [ref=f2e71]:
+            - option "Piano"
+            - option "Guitar" [selected]
+            - option "Strings"
+            - option "Organ"
+            - option "Synth"
+      - generic [ref=f2e72]:
+        - button "🔗 YouTube link" [ref=f2e73] [cursor=pointer]
+        - button "Guess times" [ref=f2e75] [cursor=pointer]
+        - spinbutton "start s" [ref=f2e77]
+        - spinbutton "end s" [ref=f2e78]
+        - textbox "category" [ref=f2e79]
+        - textbox "note" [ref=f2e80]
+        - button "Add to vocab" [ref=f2e81] [cursor=pointer]
+      - generic [ref=f2e83]:
+        - button "Color voices" [pressed] [ref=f2e84] [cursor=pointer]
+        - button "Note names" [ref=f2e86] [cursor=pointer]
+        - button "Show chords" [pressed] [ref=f2e88] [cursor=pointer]
+        - button "Dim beams/stems" [pressed] [ref=f2e90] [cursor=pointer]
+        - button "Chord window" [ref=f2e92] [cursor=pointer]
+        - button "Global" [ref=f2e94] [cursor=pointer]
+      - generic [ref=f2e96]:
+        - button "Suppress notes" [ref=f2e97] [cursor=pointer]
+        - button "Hear all" [ref=f2e99] [cursor=pointer]
+      - generic [ref=f2e101]:
+        - group [ref=f2e102]:
+          - generic [ref=f2e103] [cursor=pointer]:
+            - text: 🏷️ Motifs
+            - button "👁 on sheet" [ref=f2e104]
+        - group [ref=f2e105]:
+          - generic [ref=f2e106] [cursor=pointer]:
+            - text: 🎼 Phrases
+            - button "👁 on sheet" [ref=f2e107]
+      - img [ref=f2e110]:
+        - generic [ref=f2e193]: Bm
+        - generic [ref=f2e236]: C
+        - generic [ref=f2e279]: G
+        - generic [ref=f2e322]: Am
+        - generic [ref=f2e324]: Adagio
+        - generic [ref=f2e326]: "3"
+        - generic [ref=f2e328]: "5"
+        - generic [ref=f2e372]: Em
+        - generic [ref=f2e415]: Bm
+        - generic [ref=f2e446]: C
+        - generic [ref=f2e479]: Am
+        - generic [ref=f2e506]: Bm
+        - generic [ref=f2e539]: Em
+        - generic [ref=f2e566]: Em
+        - generic [ref=f2e568]: "7"
+        - generic [ref=f2e570]: "9"
+        - generic [ref=f2e572]: "11"
+        - generic [ref=f2e574]: "13"
+        - generic [ref=f2e600]: Em
+        - generic [ref=f2e637]: G
+        - generic [ref=f2e670]: D
+        - generic [ref=f2e709]: Am
+        - generic [ref=f2e740]: Em
+        - generic [ref=f2e769]: F
+        - generic [ref=f2e800]: C
+        - generic [ref=f2e802]: "14"
+        - generic [ref=f2e804]: "16"
+        - generic [ref=f2e806]: "18"
+        - generic [ref=f2e808]: "20"
+        - generic [ref=f2e838]: Bm
+        - generic [ref=f2e877]: Em
+        - generic [ref=f2e920]: Bm
+        - generic [ref=f2e963]: C
+        - generic [ref=f2e1006]: G
+        - generic [ref=f2e1049]: Am
+        - generic [ref=f2e1051]: "21"
+        - generic [ref=f2e1053]: "23"
+        - generic [ref=f2e1055]: "25"
+        - generic [ref=f2e1099]: Em
+        - generic [ref=f2e1142]: Bm
+        - generic [ref=f2e1173]: C
+        - generic [ref=f2e1206]: Am
+        - generic [ref=f2e1264]: Em
+        - generic [ref=f2e1291]: Em
+        - generic [ref=f2e1293]: "27"
+        - generic [ref=f2e1295]: "29"
+        - generic [ref=f2e1297]: "31"
+        - generic [ref=f2e1299]: "33"
+        - generic [ref=f2e1344]: "34"
+        - generic [ref=f2e1346]:
+          - generic [ref=f2e1347]: Emin+9
+          - generic [ref=f2e1349]: Emin
+          - generic [ref=f2e1351]: Bmin
+          - generic [ref=f2e1353]: C
+          - generic [ref=f2e1355]: Cmaj+9
+          - generic [ref=f2e1357]: G
+          - generic [ref=f2e1359]: Gsus4
+          - generic [ref=f2e1361]: Amin
+          - generic [ref=f2e1363]: Asus4
+          - generic [ref=f2e1365]: Emin
+          - generic [ref=f2e1367]: Emin+9
+          - generic [ref=f2e1369]: Bmin
+          - generic [ref=f2e1371]: C
+          - generic [ref=f2e1373]: Cmaj+9
+          - generic [ref=f2e1375]: Amin
+          - generic [ref=f2e1377]: Bmin
+          - generic [ref=f2e1379]: Emin
+          - generic [ref=f2e1381]: Emin+9
+          - generic [ref=f2e1383]: Emin
+          - generic [ref=f2e1385]: Emin+9
+          - generic [ref=f2e1387]: Emin
+          - generic [ref=f2e1389]: G
+          - generic [ref=f2e1391]: D
+          - generic [ref=f2e1393]: Bmin
+          - generic [ref=f2e1395]: Amin
+          - generic [ref=f2e1397]: Emin
+          - generic [ref=f2e1399]: F
+          - generic [ref=f2e1401]: C
+          - generic [ref=f2e1403]: Bmin
+          - generic [ref=f2e1405]: Emin
+          - generic [ref=f2e1407]: Emin+9
+          - generic [ref=f2e1409]: Bmin
+          - generic [ref=f2e1411]: C
+          - generic [ref=f2e1413]: Cmaj+9
+          - generic [ref=f2e1415]: G
+          - generic [ref=f2e1417]: Gsus4
+          - generic [ref=f2e1419]: Amin
+          - generic [ref=f2e1421]: Asus4
+          - generic [ref=f2e1423]: Emin
+          - generic [ref=f2e1425]: Emin+9
+          - generic [ref=f2e1427]: Bmin
+          - generic [ref=f2e1429]: C
+          - generic [ref=f2e1431]: Cmaj+9
+          - generic [ref=f2e1433]: Amin
+          - generic [ref=f2e1435]: Bmin
+          - generic [ref=f2e1437]: G
+          - generic [ref=f2e1439]: Emin
+          - generic [ref=f2e1441]: Emin+9
+          - generic [ref=f2e1443]: Emin
+          - generic [ref=f2e1445]: Emin+9
+          - generic [ref=f2e1447]: Emin
+          - generic [ref=f2e1449]: Emin+9
+          - generic [ref=f2e1451]: Emin
+      - group [ref=f2e1453]:
+        - generic "🎨 Variations" [ref=f2e1454] [cursor=pointer]
+        - generic [ref=f2e1457]:
+          - generic [ref=f2e1458]:
+            - generic [ref=f2e1459]:
+              - text: Voice
+              - combobox "Voice" [ref=f2e1460]:
+                - option "Melody (auto-split)" [selected]
+                - option "Bass (auto-split)"
+            - generic [ref=f2e1461]:
+              - text: Style
+              - combobox "Style" [ref=f2e1462]:
+                - option "Classical"
+                - option "Bluesy" [selected]
+                - option "Contrapuntal"
+            - generic [ref=f2e1488]:
+              - checkbox "Shuffle" [ref=f2e1489]
+              - text: Shuffle
+            - generic [ref=f2e1463]:
+              - checkbox "add extra notes (widen to key scale)" [ref=f2e1464]
+              - text: add extra notes (widen to key scale)
+            - button "Generate" [ref=f2e1465] [cursor=pointer]
+          - generic [ref=f2e1466]:
+            - generic [ref=f2e1467]:
+              - checkbox "Passing tone" [checked] [ref=f2e1468]
+              - text: Passing tone
+            - generic [ref=f2e1469]:
+              - checkbox "Neighbour tone" [checked] [ref=f2e1470]
+              - text: Neighbour tone
+            - generic [ref=f2e1471]:
+              - checkbox "Suspension" [checked] [ref=f2e1472]
+              - text: Suspension
+            - generic [ref=f2e1473]:
+              - checkbox "Retardation" [checked] [ref=f2e1474]
+              - text: Retardation
+            - generic [ref=f2e1475]:
+              - checkbox "Appoggiatura" [checked] [ref=f2e1476]
+              - text: Appoggiatura
+            - generic [ref=f2e1477]:
+              - checkbox "Escape tone" [checked] [ref=f2e1478]
+              - text: Escape tone
+            - generic [ref=f2e1479]:
+              - checkbox "Anticipation" [checked] [ref=f2e1480]
+              - text: Anticipation
+          - generic [ref=f2e1481]:
+            - combobox [ref=f2e1482]:
+              - option "passing C @ m3" [selected]
+              - option "passing D @ m4"
+              - option "upper neighbour C @ m3"
+              - option "upper neighbour E @ m3"
+              - option "escape C @ m3"
+              - option "escape B @ m4"
+              - option "blue grace → B @ m3"
+              - option "passing C @ m3 · passing D @ m4"
+              - option "passing C @ m3 · escape C @ m3"
+              - option "passing C @ m3 · escape B @ m4"
+              - option "passing C @ m3 · blue grace → B @ m3"
+              - option "passing D @ m4 · upper neighbour C @ m3"
+              - option "passing D @ m4 · upper neighbour E @ m3"
+              - option "passing D @ m4 · escape C @ m3"
+              - option "passing D @ m4 · blue grace → B @ m3"
+              - option "upper neighbour C @ m3 · upper neighbour E @ m3"
+              - option "upper neighbour C @ m3 · escape C @ m3"
+              - option "upper neighbour C @ m3 · escape B @ m4"
+              - option "upper neighbour C @ m3 · blue grace → B @ m3"
+              - option "upper neighbour E @ m3 · escape C @ m3"
+              - option "upper neighbour E @ m3 · escape B @ m4"
+              - option "upper neighbour E @ m3 · blue grace → B @ m3"
+              - option "escape C @ m3 · escape B @ m4"
+              - option "escape B @ m4 · blue grace → B @ m3"
+              - option "passing C @ m3 · passing D @ m4 · escape C @ m3"
+              - option "passing C @ m3 · passing D @ m4 · blue grace → B @ m3"
+              - option "passing C @ m3 · escape C @ m3 · escape B @ m4"
+              - option "passing C @ m3 · escape B @ m4 · blue grace → B @ m3"
+              - option "passing D @ m4 · upper neighbour C @ m3 · upper neighbour E @ m3"
+              - option "passing D @ m4 · upper neighbour C @ m3 · escape C @ m3"
+              - option "passing D @ m4 · upper neighbour C @ m3 · blue grace → B @ m3"
+              - option "passing D @ m4 · upper neighbour E @ m3 · escape C @ m3"
+              - option "passing D @ m4 · upper neighbour E @ m3 · blue grace → B @ m3"
+              - option "upper neighbour C @ m3 · upper neighbour E @ m3 · escape C @ m3"
+              - option "upper neighbour C @ m3 · upper neighbour E @ m3 · escape B @ m4"
+              - option "upper neighbour C @ m3 · upper neighbour E @ m3 · blue grace → B @ m3"
+              - option "upper neighbour C @ m3 · escape C @ m3 · escape B @ m4"
+              - option "upper neighbour C @ m3 · escape B @ m4 · blue grace → B @ m3"
+              - option "upper neighbour E @ m3 · escape C @ m3 · escape B @ m4"
+              - option "upper neighbour E @ m3 · escape B @ m4 · blue grace → B @ m3"
+              - option "passing D @ m4 · upper neighbour C @ m3 · upper neighbour E @ m3 · escape C @ m3"
+              - option "passing D @ m4 · upper neighbour C @ m3 · upper neighbour E @ m3 · blue grace → B @ m3"
+              - option "upper neighbour C @ m3 · upper neighbour E @ m3 · escape C @ m3 · escape B @ m4"
+              - option "upper neighbour C @ m3 · upper neighbour E @ m3 · escape B @ m4 · blue grace → B @ m3"
+            - button "⏹ Stop" [active] [ref=f2e1644] [cursor=pointer]
+            - button "🎸 Fretboard" [ref=f2e1484] [cursor=pointer]
+            - button "🔇 Silence" [ref=f2e1485] [cursor=pointer]
+            - button "👂 Hear all" [ref=f2e1486] [cursor=pointer]
+          - img [ref=f2e1492]:
+            - generic [ref=f2e1572]: Bm
+            - generic [ref=f2e1642]: C
+      - group [ref=f2e1455]:
+        - generic "🎸 Fretboard" [ref=f2e1456] [cursor=pointer]
+        - text: ▾

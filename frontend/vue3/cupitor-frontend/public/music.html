@@ -144,6 +144,8 @@
         #results .resultRow { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; margin: 4px 0; cursor: pointer; }
         #results .resultRow:hover { background: #f3f3f3; }
         .chordChip { display: inline-flex; gap: 4px; align-items: center; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; margin: 2px; }
+        .match-chip { margin: 0 .15em; padding: .05em .5em; font-size: .9em; border-radius: 3px; cursor: pointer; border: 1px solid #1565c0; background: #eef4ff; color: #1565c0; }
+        .match-chip.on { border-color: #b8860b; background: #ffcc00; color: #4a3500; font-weight: 600; }
         .extPill { border: 1px solid #bbb; border-radius: 10px; padding: 0 8px; cursor: pointer; background: #fff; }
         .extPill.active { background: #2563eb; color: #fff; border-color: #2563eb; }
         #managerSection { margin-bottom: 1rem; }
@@ -158,6 +160,16 @@
            #musicPreview is toggled via display:none/block, so when shown these rules make it a
            fixed overlay. The existing Close button (#previewCloseBtn) dismisses it. */
         @media (max-width: 700px) {
+          /* Floating play/pause button: only on mobile, only while a piece is open. */
+          body.preview-open #fabPlay {
+            display: flex; align-items: center; justify-content: center;
+            position: fixed; z-index: 1200;
+            right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
+            width: 56px; height: 56px; border-radius: 50%;
+            background: #1565c0; color: #fff; border: none;
+            font-size: 24px; line-height: 1; cursor: pointer;
+            box-shadow: 0 4px 14px rgba(0,0,0,.35);
+          }
           #musicPreview {
             position: fixed;
             /* Explicit longhand offsets + sizes, NOT the `inset` shorthand: older mobile Safari
@@ -166,7 +178,7 @@
             top: 0; right: 0; bottom: 0; left: 0;
             width: 100%;
             height: 100vh;
-            height: 100dvh;          /* dynamic viewport: excludes the mobile browser's URL bar */
+            height: 96%;          /* dynamic viewport: excludes the mobile browser's URL bar */
             box-sizing: border-box;  /* keep the 1rem padding inside the viewport box (no overflow) */
             z-index: 1000;
             margin: 0;
@@ -265,6 +277,26 @@
         #phrasePanel .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
         #phrasePanel .del{border:none;background:none;color:#a33;cursor:pointer;font-size:15px;line-height:1;padding:0 2px;margin-left:auto}
         #phrasePanel .btn.active{background:#1565c0;color:#fff;border-color:#1565c0}
+        /* Variations panel — decorate a voice over a ≤3-measure segment with non-chord-tone techniques.
+           Normal-flow (not the floating .np-body overlay) because it hosts its own render sheet. */
+        #variationsSection{background:#f2fbf4;border:1px solid #c6e9cf}
+        #variationsSection>summary{color:#1b7f3b}
+        #variationsSection .var-body{margin-top:.5rem;display:flex;flex-direction:column;gap:.5rem}
+        #variationsSection .var-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px}
+        #variationsSection .var-controls select{padding:3px 6px;border:1px solid #b5ddc0;border-radius:5px;font-size:13px}
+        #variationsSection .var-techs{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;color:#333}
+        #variationsSection .var-techs label{display:inline-flex;gap:4px;align-items:center}
+        #variationsSection #varGenerate{background:#1b7f3b;color:#fff;border-color:#1b7f3b}
+        #variationsSection #varGenerate:disabled{background:#cfe6d6;border-color:#cfe6d6;color:#6d8a76;cursor:not-allowed}
+        #variationsSection .var-warn{font-size:12px;color:#b42318}
+        #variationsSection .var-picker{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:.25rem 0}
+        #variationsSection #varSelect{flex:1;min-width:160px;padding:4px 6px;border:1px solid #b5ddc0;border-radius:5px;font-size:13px;background:#fff}
+        #variationsSection #varPlay,#variationsSection #varFret,#variationsSection #varSilence,#variationsSection #varHearAll,#variationsSection #varSaveVocab{border:1px solid #1b7f3b;background:#fff;color:#1b7f3b;border-radius:5px;cursor:pointer;padding:3px 10px;font-size:13px}
+        #variationsSection #varSelect:disabled,#variationsSection #varPlay:disabled,#variationsSection #varFret:disabled,#variationsSection #varSilence:disabled,#variationsSection #varHearAll:disabled,#variationsSection #varSaveVocab:disabled{opacity:.5;cursor:not-allowed}
+        #variationsSection #varSilence.active,#variationsSection #varHearAll.active{background:#1b7f3b;color:#fff}
+        #variationsSection .var-silence-hint{font-size:12px;color:#a0660a}
+        #variationsSection .var-empty{font-size:12.5px;color:#777}
+        #variationsSection #varSheet{margin-top:.25rem;overflow-x:auto}
         #fretboardPanel:fullscreen{background:#fff;overflow:auto;padding:24px}
         #fretboardPanel:fullscreen #fbSvg{width:100%;height:auto;max-width:none}
         /* Touch-friendly chord-window move/resize buttons (alternative to dragging) */
@@ -283,6 +315,58 @@
           #fbSpeed{flex:1 1 120px}
           #windowNudge .win-btn{min-width:48px;height:42px;font-size:18px}
         }
+        /* Practice log */
+        #practiceSection{margin:.5rem 0;border:1px solid #e3dcff;border-radius:8px;padding:.35rem .6rem;background:#faf8ff}
+        #practiceSection > summary{cursor:pointer;font-weight:600}
+        .pl-form{margin:.5rem 0;display:flex;flex-direction:column;gap:8px}
+        .pl-form .pl-row{display:flex;gap:12px;flex-wrap:wrap}
+        .pl-form label{display:flex;flex-direction:column;font-size:12px;color:#555;gap:2px}
+        .pl-form .pl-wide{width:100%}
+        .pl-form input[type=text],.pl-form textarea,.pl-form input[type=date],.pl-form select,
+        .pl-addfield input,.pl-addfield select{padding:4px 6px;border:1px solid #c9b8ff;border-radius:5px;font-size:13px}
+        .pl-form .pl-wide input,.pl-form textarea{width:100%}
+        .pl-fields{border:1px dashed #d8ccff;border-radius:6px;padding:6px 8px}
+        .pl-fields-head{font-size:11.5px;color:#777;margin-bottom:4px}
+        .pl-addfield{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
+        .pl-field-row{display:flex;gap:6px;align-items:center;margin:3px 0;font-size:13px}
+        .pl-field-row .pl-fname{font-weight:600;min-width:8em}
+        .pl-field-row .pl-fval{flex:1}
+        .pl-field-row .pl-fx{border:none;background:none;color:#a33;cursor:pointer;font-size:15px}
+        .pl-form-foot{display:flex;gap:8px;align-items:center}
+        .pl-form-foot #plSave{background:#1565c0;color:#fff;border-color:#1565c0}
+        #practiceList{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+        .pl-entry{border:1px solid #e6e0f7;border-radius:8px;padding:8px 10px;background:#fff}
+        .pl-entry-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+        .pl-entry-week{font-weight:700;font-size:13px}
+        .pl-entry-goal{flex:1;min-width:8em}
+        .pl-piece-link{color:#1565c0;cursor:pointer;text-decoration:underline;font-size:12.5px}
+        .pl-entry-notes{color:#444;font-size:12.5px;margin-top:4px;white-space:pre-wrap}
+        .pl-entry-fields{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+        .pl-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid #e0e0e0;border-radius:999px;padding:1px 8px;font-size:12px;background:#fafafa}
+        .pl-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+        .pl-status-badge{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:600;color:#fff}
+        .pl-entry .icon-btn{border:1px solid #bbb;background:#fff;border-radius:6px;padding:1px 7px;cursor:pointer;font-size:13px}
+        /* Mobile floating play/pause button */
+        #fabPlay{display:none}
+        /* Guessed-key badge in the piece list */
+        .key-badge{display:inline-block;background:#fff3cd;color:#7a5b00;border:1px solid #ffe08a;border-radius:999px;padding:1px 8px;font-size:11.5px;font-weight:600;white-space:nowrap;vertical-align:baseline}
+        /* Split-collection confirm dialog */
+        .split-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:1000}
+        .split-box{background:#fff;color:#222;border-radius:10px;max-width:560px;width:92%;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.3);padding:16px 18px}
+        .split-head{font-weight:700;font-size:16px;margin-bottom:2px}
+        .split-sub{color:#666;font-size:12.5px;margin-bottom:10px}
+        .split-prefix{margin-bottom:10px}
+        .split-prefix label{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#555}
+        .split-prefix input{flex:1;padding:6px 8px;border:1px solid #c9b8ff;border-radius:6px;font-size:13px}
+        .split-list{overflow:auto;border:1px solid #eee;border-radius:8px;padding:4px}
+        .split-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f2f2f2}
+        .split-row:last-child{border-bottom:none}
+        .split-title{flex:1;font-size:13.5px}
+        .split-meta{color:#999;font-size:11.5px;white-space:nowrap}
+        .split-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+        .split-foot button{padding:6px 14px;border-radius:6px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
+        .split-foot .split-add{background:#1565c0;color:#fff;border-color:#1565c0;font-weight:600}
+        .split-foot .split-add:disabled{opacity:.5;cursor:default}
     </style>
 </head>
 <body>
@@ -299,7 +383,39 @@
   </div>
   <textarea id="textInput" placeholder="Paste note-text, first line = title" style="display:none;width:100%;height:6em"></textarea>
   <div id="tagFilterBar" style="margin:.35rem 0"></div>
+  <div id="keyFilterBar" style="margin:.35rem 0"></div>
   <div id="pieceList"></div>
+</details>
+<details id="practiceSection">
+  <summary>🗓️ Practice Log</summary>
+  <div class="pl-form">
+    <div class="pl-row">
+      <label>Week <input type="date" id="plWeek"></label>
+      <label>Piece
+        <select id="plPiece"><option value="">— none —</option></select>
+      </label>
+      <label>Status <select id="plStatus"></select></label>
+    </div>
+    <label class="pl-wide">Goal <input type="text" id="plGoal" placeholder="This week's goal…"></label>
+    <label class="pl-wide">Notes <textarea id="plNotes" rows="2" placeholder="Notes…"></textarea></label>
+    <div class="pl-fields">
+      <div class="pl-fields-head">Custom fields</div>
+      <div id="plFieldRows"></div>
+      <div class="pl-addfield">
+        <input id="plFieldName" list="plFieldNames" placeholder="field name" autocomplete="off">
+        <datalist id="plFieldNames"></datalist>
+        <input id="plFieldValue" placeholder="value">
+        <select id="plFieldStatus"></select>
+        <button type="button" id="plAddField" class="btn">＋ Add field</button>
+      </div>
+    </div>
+    <div class="pl-form-foot">
+      <button type="button" id="plSave" class="btn">Save entry</button>
+      <button type="button" id="plClear" class="btn">Clear</button>
+      <span id="plFormMsg"></span>
+    </div>
+  </div>
+  <div id="practiceList"></div>
 </details>
 <div id="appLayout">
   <div id="searchView">
@@ -342,14 +458,14 @@
 <div id="musicPreview" style="display:none;border-top:1px solid #ddd;padding-top:1rem">
   <div style="margin-bottom:.5rem" class="previewControls">
     <div><strong id="previewTitle"></strong></div>
-    <label class="measLabel">Measures:
-      <button id="startPrevBtn" class="btn ico" title="extend the window to an earlier measure">◀</button>
+    <label class="measLabel">#:
+      <button id="startPrevBtn" class="btn ico" title="extend the window to an earlier measure">◀|</button>
       <input id="segFrom" type="number" min="1" style="width:2.4em" placeholder="from">
-      <button id="startNextBtn" class="btn ico" title="move the start later">▶</button>
+      <button id="startNextBtn" class="btn ico" title="move the start later">|▶</button>
       –
-      <button id="endPrevBtn" class="btn ico" title="move the end earlier">◀</button>
+      <button id="endPrevBtn" class="btn ico" title="move the end earlier">◀|</button>
       <input id="segTo" type="number" min="1" style="width:2.4em" placeholder="to">
-      <button id="endNextBtn" class="btn ico" title="extend the window to a later measure">▶</button>
+      <button id="endNextBtn" class="btn ico" title="extend the window to a later measure">|▶</button>
     </label>
     <button id="previewFullBtn" class="btn" title="Show the full piece"><span class="ic">⤢</span><span class="txt">Full</span></button>
     <button id="previewSegBtn" class="btn" title="Show this measure range"><span class="ic">◧</span><span class="txt">Show segment</span></button>
@@ -490,6 +606,40 @@
   </div>
   </div>
   <div id="osmdPreview"></div>
+  <details id="variationsSection" class="np-panel">
+    <summary>🎨 Variations</summary>
+    <div class="var-body">
+      <div class="var-controls">
+        <label>Voice <select id="varVoice"></select></label>
+        <label>Style
+          <select id="varStyle">
+            <option value="classical">Classical</option>
+            <option value="bluesy">Bluesy</option>
+            <option value="contrapuntal">Contrapuntal</option>
+          </select>
+        </label>
+        <label id="varShuffleWrap" style="display:none"><input type="checkbox" id="varShuffle"> Shuffle</label>
+        <label id="varRegisterWrap" style="display:none">Counter
+          <select id="varRegister"><option value="below">below</option><option value="above">above</option></select>
+        </label>
+        <label><input id="varAddNotes" type="checkbox"> add extra notes (widen to key scale)</label>
+        <button id="varGenerate" class="btn">Generate</button>
+        <span id="varWarn" class="var-warn"></span>
+      </div>
+      <div id="varTechs" class="var-techs"></div>
+      <div id="varPicker" class="var-picker">
+        <select id="varSelect" disabled></select>
+        <button id="varPlay" type="button" disabled>▶ Play</button>
+        <button id="varFret" type="button" disabled>🎸 Fretboard</button>
+        <button id="varSilence" type="button" title="Click notes on the variation to silence them from playback" disabled>🔇 Silence</button>
+        <button id="varHearAll" type="button" title="Temporarily hear every silenced note" disabled>👂 Hear all</button>
+        <button id="varSaveVocab" type="button" title="Save this variation as a vocabulary item (replays exactly as generated)" disabled>➕ Save to vocab</button>
+        <span id="varSilenceHint" class="var-silence-hint"></span>
+      </div>
+      <div id="varEmpty" class="var-empty">Generate variations to preview them here.</div>
+      <div id="varSheet"></div>
+    </div>
+  </details>
   <details id="fretboardPanel" class="fb-wrap">
     <summary>🎸 Fretboard</summary>
     <!-- All controls above the diagram collapse behind one toggle to declutter the panel. -->
@@ -540,19 +690,28 @@
   <div id="ytPlayer" style="display:none"></div>
 </div>
 </div>
+<button id="fabPlay" title="Play / pause" aria-label="Play or pause">▶</button>
 
 <script type="module">
   import { getSystemFromUrl, getMusicResourceUrl, loadLibrary, computeChanges, pushPending, filterByTags, removePieceFromLibrary } from './music-index.js';
+  import { splitMusicXmlPieces, defaultTitlePrefix, pieceTitle } from './music-split.js';
   import { runQuery } from './music-query.js';
-  import { createMusicRenderer, resolveMatchMeasures } from './music-render.js';
+  import { createMusicRenderer, resolveMatchMeasures, collapsedChordSpans } from './music-render.js';
   import { init as initFretboard } from './fretboard-panel.js';
   import { chordDisplayName } from './music-chords.js';
   import { buildChordQuery, buildMelodyQuery, matchSummary } from './music-search-ui.js';
   import { createMusicStore } from './music-local-store.js';
+  import { PRACTICE_STATUSES, statusMeta, weekStart, weekLabel, makeEntry, upsertEntry, removeEntry, sortEntries, mergeFieldName } from './music-practice.js';
   import { buildSchedule, buildScheduleFromMusicXml, createMusicPlayer, createYouTubeController, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
   import { guessSegmentStart, linkYouTubeLocal } from './music-media.js';
   import { buildSnapshot, buildVocabEntry, upsertVocab, uniqueVocabId, loadVocab, groupVocabByCategory } from './music-vocab.js';
   import { addTag as addTagReg, removeTag as removeTagReg, mergeRegistry } from './music-tags.js';
+  import { TECHNIQUES, generateVariations } from './music-embellish.js';
+  import { generateCounterLines } from './music-counterpoint.js';
+  import { extractSegmentXml, applyVariation, coloredNoteMarks, ADDED_NOTE_COLOR, writeVoice } from './music-embellish-xml.js';
+  import { buildChordByMeasure, buildVoiceNotes, orderedVoiceIds, addressableMidis, variationFretSteps, voicePickerEntries, counterLineToNotesByMeasure, buildBeatNotes, distinctVoiceIdsInOrder } from './music-embellish-ui.js';
+  import { splitSingleVoice } from './music-voice-split.js';
+  import { encodeMusicXml } from './music-encoding.js';
 
   const system = getSystemFromUrl().name;
   document.getElementById('systemLabel').textContent = system;
@@ -564,6 +723,11 @@
   let dirtyVocab = false;        // vocab.json changed locally, awaiting the manual push
   let dirtyIndex = false;        // index.json changed with no unpushed piece (e.g. a delete) — needs push
   const tagFilter = new Set();   // active tag filter; applies to the library list AND search
+  let keyFilter = '';            // active guessed-key filter ('' = all); applies to the library list
+  let practiceEntries = [];      // weekly practice log entries (local-only)
+  let practiceFields = [];       // global custom-field-name registry (grows as you name new fields)
+  let practiceDraft = [];        // custom fields being composed in the form: [{name,value,status}]
+  let practiceEditId = null;     // id of the entry currently loaded into the form (null = new)
   const store = createMusicStore();
   const pending = [];  // newly added pieces not yet pushed: {id,title,format,source,key}
 
@@ -629,26 +793,59 @@
       + tags.map(t => `<button class="tagChip${tagFilter.has(t) ? ' active' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`).join(' ')
       + (tagFilter.size ? ` <button class="tagChip" data-tag="" title="Clear filter">clear ✕</button>` : '');
   }
+  // Distinct guessed keys present in the library, sorted for a stable dropdown.
+  function distinctKeys() {
+    const set = new Set();
+    index.forEach(e => { if (e.guessedKey) set.add(e.guessedKey); });
+    return [...set].sort();
+  }
+  function renderKeyFilter() {
+    const bar = document.getElementById('keyFilterBar');
+    const keys = distinctKeys();
+    if (keyFilter && !keys.includes(keyFilter)) keyFilter = '';   // stale selection (its pieces are gone)
+    if (!keys.length) { bar.innerHTML = ''; return; }
+    const opts = ['<option value="">All keys</option>']
+      .concat(keys.map(k => `<option value="${esc(k)}"${keyFilter === k ? ' selected' : ''}>${esc(k)}</option>`));
+    bar.innerHTML = '<span style="font-size:.8em;color:#555">Filter by key:</span> '
+      + `<select id="keyFilterSel" style="font-size:.85em;padding:2px 6px">${opts.join('')}</select>`
+      + (keyFilter ? ` <span class="key-badge">${esc(keyFilter)}</span>` : '');
+  }
   function render() {
     const rows = [];
-    filterByTags(index, tagFilter).forEach(e => rows.push(
+    filterByTags(index, tagFilter)
+      .filter(e => !keyFilter || e.guessedKey === keyFilter)
+      .forEach(e => rows.push(
       `<label style="display:block"><input type="checkbox" class="sel" data-id="${e.id}"> ${esc(e.title || e.id)} <small>(${e.noteCount} notes, ${e.channels.join('/')})</small> `
+      + `${e.guessedKey ? `<span class="key-badge" title="Guessed key (tonal center)">${esc(e.guessedKey)}</span> ` : ''}`
       + `<button class="previewBtn" data-id="${e.id}">Preview</button> `
       + `<input class="pieceTags" data-id="${e.id}" value="${esc((e.tags || []).join(', '))}" placeholder="tags…" style="width:10em;font-size:.85em"> `
+      + `${e.pieceCount > 1 ? `<button class="pieceSplit" data-id="${e.id}" title="Split into ${e.pieceCount} separate pieces">✂️</button> ` : ''}`
       + `<button class="pieceDel" data-id="${e.id}" title="Delete piece + its vocab">🗑</button>`
       + `${unpushedIds.has(e.id) ? ' <span style="color:#c00;font-weight:600">● not pushed</span>' : ''}</label>`));
     pending.forEach(p => rows.push(
       `<label style="display:block;color:#a06000"><input type="checkbox" class="sel" data-id="${p.id}" checked disabled> ${esc(p.title)} <small>(new — Push to publish)</small></label>`));
     document.getElementById('pieceList').innerHTML = rows.join('') || '<em>No pieces match.</em>';
     renderTagFilter();
+    renderKeyFilter();
   }
 
   document.getElementById('addXmlBtn').onclick = () => document.getElementById('xmlFile').click();
   document.getElementById('xmlFile').onchange = async (ev) => {
-    for (const file of ev.target.files) {
+    const files = [...ev.target.files];
+    ev.target.value = '';   // let the same file be picked again later
+    for (const file of files) {
       const source = await file.text();
-      const id = idFromName(file.name);
-      pending.push({ id, title: id, format: 'musicxml', source });
+      const base = idFromName(file.name);
+      // A file may pack several pieces (e.g. a book of etudes). Detect boundaries; if it's a
+      // collection, let the user confirm which pieces to add. Otherwise add it as one piece.
+      const defPrefix = defaultTitlePrefix(file.name);
+      let split = null;
+      try { split = splitMusicXmlPieces(source, { fallbackTitle: base, prefix: defPrefix }); } catch (_) { split = null; }
+      if (split && split.pieces.length > 1) {
+        await openSplitDialog(split, defPrefix);   // pushes the chosen pieces into `pending`
+      } else {
+        pending.push({ id: base, title: base, format: 'musicxml', source });
+      }
     }
     render();
   };
@@ -886,6 +1083,7 @@
     return Number.isFinite(t) && t > 0 ? t : 90;
   }
   function playMidi() {
+    stopVarPlayback();   // never overlap the variation preview on the shared Tone.Transport
     if (!currentDetail) return;
     // MusicXML pieces get a time-accurate, polyphonic schedule from the source; note-text
     // pieces (no real timing) fall back to the simple per-note sequential builder.
@@ -910,6 +1108,7 @@
   // Tag skip-playback: play only the checked tags' notes, removing the empty stretches between
   // tagged runs (a beat-relative breath separates runs). Whole piece — ignores segment/window.
   function playTags() {
+    stopVarPlayback();   // never overlap the variation preview on the shared Tone.Transport
     if (!currentDetail) return;
     if (!(currentDetail.format === 'musicxml' && currentDetail.source)) {
       document.getElementById('transportMsg').textContent = 'Tag playback needs a MusicXML piece.'; return;
@@ -1060,17 +1259,52 @@
   // Two-button transport: Play always (re)starts from the segment start; Pause toggles to Resume.
   let paused = false;
   let ytPlaying = false;   // tracks YouTube playback (Tone.Transport.state is authoritative for MIDI)
+  // Is the transport currently sounding (not paused, not stopped)? Drives the mobile FAB icon.
+  function fabPlaying() {
+    if (paused) return false;
+    const isYt = document.getElementById('srcSel').value === 'youtube';
+    return isYt ? ytPlaying : !!(window.Tone && window.Tone.Transport && window.Tone.Transport.state === 'started');
+  }
+  function updateFab() {
+    const fab = document.getElementById('fabPlay');
+    if (fab) fab.textContent = fabPlaying() ? '⏸' : '▶';
+  }
+  // Glue the FAB to the bottom-right of the *visual* viewport so it stays visible through page/score
+  // scroll, pinch-zoom, and the mobile URL bar showing/hiding. `position:fixed` alone pins to the
+  // layout viewport, so a pinch-zoom would slide the button off-screen; visualViewport tracks what's
+  // actually on screen. Counter-scaling by 1/scale keeps it a constant on-screen size when zoomed.
+  function positionFab() {
+    const fab = document.getElementById('fabPlay');
+    const vv = window.visualViewport;
+    if (!fab || !vv) return;            // no visualViewport → the CSS right/bottom fallback applies
+    const size = 56, margin = 16, scale = vv.scale || 1;
+    fab.style.right = 'auto';
+    fab.style.bottom = 'auto';
+    fab.style.transformOrigin = 'bottom right';
+    fab.style.transform = `scale(${1 / scale})`;
+    fab.style.left = (vv.offsetLeft + vv.width - margin - size) + 'px';
+    fab.style.top = (vv.offsetTop + vv.height - margin - size) + 'px';
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', positionFab);
+    window.visualViewport.addEventListener('scroll', positionFab);
+  }
+  window.addEventListener('scroll', positionFab, true);   // capture: also catches the score's own scroll
   function updatePauseLabel() {
     document.getElementById('pauseBtn').innerHTML = paused
       ? '<span class="ic">▶</span><span class="txt">▶ Resume</span>'
       : '<span class="ic">⏸</span><span class="txt">⏸ Pause</span>';
+    updateFab();
   }
   document.getElementById('playBtn').onclick = () => {
     paused = false; updatePauseLabel();
     const isYt = document.getElementById('srcSel').value === 'youtube';
     ytPlaying = isYt;   // started fresh; only meaningful for the YouTube source
     (isYt ? playYouTube() : playMidi());
+    document.getElementById('fabPlay').textContent = '⏸';   // we just started — reflect it immediately
   };
+  // Mobile floating play/pause button drives the same transport toggle as the spacebar.
+  document.getElementById('fabPlay').addEventListener('click', transportToggle);
   document.getElementById('pauseBtn').onclick = () => {
     const isYt = document.getElementById('srcSel').value === 'youtube';
     if (!paused) {
@@ -1207,6 +1441,7 @@
     document.getElementById('previewMsg').textContent = 'Loading…';
     document.getElementById('musicPreview').style.display = 'block';
     document.body.classList.add('preview-open');   // lock page scroll behind the mobile dialog
+    updateFab(); positionFab();                     // the FAB is now shown (mobile) — place & label it
     currentDetail = null; currentPreviewId = null; currentVocabEntry = null;   // cleared until a piece fully renders
     updateAddVocabLabel();
     let detail;
@@ -1285,11 +1520,21 @@
     setPhraseVis(false);   // sheet phrase visibility starts off (decoupled from expand)
     if (phrasePanelOpen) renderPhraseUI();
     updatePatternControls();
+    // Variations panel: repopulate the voice picker, clear any prior results/sheet, re-check the guardrail.
+    populateVarVoices();
+    stopVarPlayback();
+    variations = []; varGenRange = null; varWorkingSource = null; varGenVoiceId = '1'; varGenVoiceIds = ['1']; varCounterVoiceId = '2'; currentVarXml = null;
+    populateVarSelect();   // clears the select + disables Play/Fretboard, shows the empty state
+    if (varRenderer && document.getElementById('varSheet')) document.getElementById('varSheet').innerHTML = '';
+    varRenderer = null;   // OSMD binds to the (now-cleared) container; recreate lazily on next select
+    refreshVariationsGuardrail();
     document.getElementById('previewMsg').textContent = `${res.totalMeasures} measures`;
   }
   document.getElementById('pieceList').addEventListener('click', (ev) => {
     const prev = ev.target.closest('.previewBtn');
     if (prev) { ev.preventDefault(); openPreview(prev.dataset.id); return; }
+    const spl = ev.target.closest('.pieceSplit');
+    if (spl) { ev.preventDefault(); splitPiece(spl.dataset.id); return; }
     const del = ev.target.closest('.pieceDel');
     if (del) { ev.preventDefault(); deletePiece(del.dataset.id); }
   });
@@ -1304,6 +1549,13 @@
     if (!chip) return;
     const t = chip.dataset.tag;
     if (!t) tagFilter.clear(); else if (tagFilter.has(t)) tagFilter.delete(t); else tagFilter.add(t);
+    render();
+  });
+  // Key-filter dropdown (delegated — the <select> is re-rendered on each render()).
+  document.getElementById('keyFilterBar').addEventListener('change', (ev) => {
+    const sel = ev.target.closest('#keyFilterSel');
+    if (!sel) return;
+    keyFilter = sel.value;
     render();
   });
   // Save tags locally on the index entry (+ local store), mark the piece pending. No push.
@@ -1327,6 +1579,103 @@
     if (currentVocabEntry && currentVocabEntry.pieceId === id) { currentVocabEntry = null; updateAddVocabLabel(); }
     render(); renderVocab(); updatePushBtn();
     setStatus(`Deleted "${id}" locally — click "Push changes" to publish.`);
+  }
+  // A piece id that doesn't collide with an existing library entry or a pending add.
+  function uniquePieceId(base) {
+    const taken = new Set([...index.map(e => e.id), ...pending.map(p => p.id)]);
+    if (!taken.has(base)) return base;
+    let i = 2; while (taken.has(`${base}_${i}`)) i++; return `${base}_${i}`;
+  }
+  // Manual split of an already-indexed piece: fetch its source (local store, else the remote detail
+  // file), split, and confirm — same dialog as auto-detect on import.
+  async function splitPiece(id) {
+    const entry = index.find(e => e.id === id);
+    const fallback = entry ? (entry.title || id) : id;
+    setStatus('Loading source to split…');
+    let detail = await store.getDetail(system, id).catch(() => null);
+    if (!detail || !detail.source) {
+      try { detail = await fetch(`${getMusicResourceUrl(system)}/details/${id}.json`).then(x => x.json()); } catch (_) {}
+    }
+    if (!detail || !detail.source) { setStatus('No source available to split this piece.'); return; }
+    if ((detail.format || 'musicxml') !== 'musicxml') { setStatus('Only MusicXML pieces can be split.'); return; }
+    const defPrefix = defaultTitlePrefix(fallback);
+    let split;
+    try { split = splitMusicXmlPieces(detail.source, { fallbackTitle: fallback, prefix: defPrefix }); }
+    catch (e) { setStatus('Split failed: ' + e.message); return; }
+    if (split.pieces.length <= 1) { setStatus(`"${fallback}" looks like a single piece — nothing to split.`); return; }
+    setStatus('');
+    openSplitDialog(split, defPrefix);
+  }
+  // Confirm dialog: list the detected pieces (checked by default) and add the chosen ones to
+  // `pending`. Resolves with the number added (0 on cancel). No re-render/re-encode happens here —
+  // the pieces enter the normal "Rebuild → Push" flow.
+  function openSplitDialog(split, initialPrefix) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'split-overlay';
+      const box = document.createElement('div');
+      box.className = 'split-box';
+      const head = document.createElement('div');
+      head.className = 'split-head';
+      head.textContent = `Split “${split.collectionTitle || 'this file'}” into ${split.pieces.length} pieces`;
+      const sub = document.createElement('div');
+      sub.className = 'split-sub';
+      sub.textContent = 'Edit the title prefix, uncheck any you don’t want. Each becomes its own library piece.';
+      // Editable title prefix — each piece is named "{prefix} — No. N (tempo)". Default derived from
+      // the file/piece name (the composer/opus segment).
+      const prefixRow = document.createElement('div');
+      prefixRow.className = 'split-prefix';
+      const prefixLbl = document.createElement('label'); prefixLbl.textContent = 'Title prefix';
+      const prefixInp = document.createElement('input'); prefixInp.type = 'text';
+      prefixInp.value = initialPrefix || split.collectionTitle || '';
+      prefixLbl.appendChild(prefixInp);
+      prefixRow.appendChild(prefixLbl);
+      const list = document.createElement('div');
+      list.className = 'split-list';
+      const checks = split.pieces.map((p) => {
+        const row = document.createElement('label');
+        row.className = 'split-row';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = true;
+        const t = document.createElement('span'); t.className = 'split-title';
+        const meta = document.createElement('small'); meta.className = 'split-meta';
+        meta.textContent = `m ${p.measureStart}–${p.measureEnd} (${p.measureCount})`;
+        row.append(cb, t, meta);
+        list.appendChild(row);
+        return { cb, titleEl: t, piece: p };
+      });
+      const titleFor = (p) => pieceTitle(prefixInp.value, p.index, p.tempo);
+      const retitle = () => checks.forEach(({ titleEl, piece }) => { titleEl.textContent = titleFor(piece); });
+      retitle();
+      prefixInp.addEventListener('input', retitle);
+      const foot = document.createElement('div');
+      foot.className = 'split-foot';
+      const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
+      const add = document.createElement('button'); add.className = 'split-add';
+      const count = () => checks.filter((c) => c.cb.checked).length;
+      const refresh = () => { const n = count(); add.textContent = `Add ${n} piece${n === 1 ? '' : 's'}`; add.disabled = !n; };
+      list.addEventListener('change', refresh); refresh();
+      foot.append(cancel, add);
+      box.append(head, sub, prefixRow, list, foot);
+
+      const close = (added) => { overlay.remove(); resolve(added); };
+      cancel.onclick = () => close(0);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(0); });
+      add.onclick = () => {
+        let n = 0;
+        checks.forEach(({ cb, piece }) => {
+          if (!cb.checked) return;
+          const title = titleFor(piece);
+          const id = uniquePieceId(idFromName(title));
+          pending.push({ id, title, format: 'musicxml', source: piece.source });
+          n += 1;
+        });
+        render();
+        if (n) setStatus(`Added ${n} piece(s) — click “Rebuild selected/new (local)”, then “Push changes”.`);
+        close(n);
+      };
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+    });
   }
   document.getElementById('previewFullBtn').onclick = () => renderer && renderer.showFull();
   document.getElementById('voiceColorChk').onchange = (e) => { if (renderer) renderer.setVoiceColors(e.target.checked); };
@@ -1572,6 +1921,7 @@
   }
   // Play a phrase's resolved notes, skipping the gaps between them (same engine as Play tags).
   function playPhrase(name) {
+    stopVarPlayback();   // never overlap the variation preview on the shared Tone.Transport
     if (!currentDetail) return;
     if (!(currentDetail.format === 'musicxml' && currentDetail.source)) {
       document.getElementById('transportMsg').textContent = 'Phrase playback needs a MusicXML piece.'; return;
@@ -1697,11 +2047,418 @@
     document.getElementById('segFrom').value = toPrintedMeasure(from);
     document.getElementById('segTo').value = toPrintedMeasure(to);
     renderer.showSegment([from, to]);
+    refreshVariationsGuardrail();
   }
   document.getElementById('startPrevBtn').onclick = () => adjustSegment('from', -1);
   document.getElementById('startNextBtn').onclick = () => adjustSegment('from', 1);
   document.getElementById('endPrevBtn').onclick = () => adjustSegment('to', -1);
   document.getElementById('endNextBtn').onclick = () => adjustSegment('to', 1);
+
+  // ── Variations panel (Tasks 14–15) ─────────────────────────────────────────────────────────
+  // Decorate one voice over a ≤3-measure segment with non-chord-tone techniques, list the
+  // generated variations, then render + play the selected one in a single shared OSMD panel.
+  let varRenderer = null;          // dedicated OSMD instance bound to #varSheet (created lazily)
+  let varPlayer = null;            // dedicated player for previewing a variation (cursor on #varSheet)
+  let variations = [];             // the variations from the most recent Generate
+  let varVoiceIds = [];            // XML <voice> ids in encoder order (index-aligned with currentDetail.voices)
+  let varEntries = [];             // voicePickerEntries() for the current source (real voices or Melody/Bass split)
+  let varWorkingSource = null;     // source used for the current generation (split copy or raw)
+  let varGenRange = null;          // sequential [from,to] captured at Generate (edits are indexed to it)
+  let varGenVoiceId = '1';         // the <voice> id the current edits target
+  let varGenVoiceIds = ['1'];      // voice ids the fretboard should show (contrapuntal → [melody, counter])
+  let varCounterVoiceId = '2';     // the fresh <voice> id the contrapuntal counter-line is written to
+  let currentVarXml = null;        // embellished MusicXML of the currently-rendered variation (play/fretboard source)
+  let varPlaying = false;          // is #varPlay currently sounding a variation
+  // Per-variation note silencing: each variation index remembers its own silenced notes, so switching
+  // shows a fresh slate but restores what you silenced there. Regenerating clears the whole map.
+  const varSilences = new Map();   // variation index → [{measure,midi,beats}] silenced on that variation
+  let varRenderedIndex = -1;       // the variation index currently on #varSheet (for the memory above)
+  let varSilenceMode = false;      // #varSilence toggle: clicking noteheads silences them
+  let varHearAll = false;          // #varHearAll toggle: transiently un-mute everything
+
+  // Fill the technique checkboxes (all checked) once.
+  (function initVarTechniques() {
+    const host = document.getElementById('varTechs');
+    if (!host) return;
+    TECHNIQUES.forEach((t) => {
+      const label = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.className = 'var-tech'; cb.value = t.key; cb.checked = true;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + t.name));
+      host.appendChild(label);
+    });
+  })();
+
+  // Populate the voice picker from the loaded piece (Voice 1..N, index-based). Called on preview load.
+  function populateVarVoices() {
+    const sel = document.getElementById('varVoice');
+    if (!sel) return;
+    sel.innerHTML = '';
+    // orderedVoiceIds matches the encoder's voicesMap key order, so varVoiceIds[i] ↔ voices[i].
+    varVoiceIds = (currentDetail && currentDetail.source) ? orderedVoiceIds(currentDetail.source) : ['1'];
+    // Entries drive the picker: multi-voice → one per real voice; single-voice → Melody/Bass (auto-split).
+    varEntries = (currentDetail && currentDetail.source)
+      ? voicePickerEntries(currentDetail.source, varVoiceIds)
+      : [];
+    varEntries.forEach((entry, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i); opt.textContent = entry.label;
+      sel.appendChild(opt);
+    });
+  }
+
+  // Sequential segment span from the printed fields.
+  function varSegRange() {
+    const from = toSeqMeasure(parseInt(document.getElementById('segFrom').value, 10));
+    const to = toSeqMeasure(parseInt(document.getElementById('segTo').value, 10));
+    return { from, to };
+  }
+
+  // Guardrail: only allow generating for a ≤3-measure segment.
+  function refreshVariationsGuardrail() {
+    const btn = document.getElementById('varGenerate');
+    const warn = document.getElementById('varWarn');
+    if (!btn || !warn) return;
+    const { from, to } = varSegRange();
+    const span = (Number.isFinite(from) && Number.isFinite(to)) ? (to - from + 1) : 0;
+    if (span > 3) {
+      btn.disabled = true;
+      warn.textContent = 'Narrow the segment to 3 measures or fewer.';
+    } else {
+      btn.disabled = false;
+      warn.textContent = '';
+    }
+  }
+  document.getElementById('segFrom').addEventListener('input', refreshVariationsGuardrail);
+  document.getElementById('segTo').addEventListener('input', refreshVariationsGuardrail);
+  document.getElementById('variationsSection').addEventListener('toggle', (e) => { if (e.target.open) refreshVariationsGuardrail(); });
+
+  // Style selector drives which extra controls are relevant: contrapuntal hides the technique
+  // checkboxes and reveals the Counter register; bluesy reveals Shuffle. (#varTechs is the checkbox
+  // container div, so hiding it hides every technique checkbox at once.)
+  document.getElementById('varStyle').addEventListener('change', (e) => {
+    const style = e.target.value;
+    const techs = document.getElementById('varTechs');
+    if (techs) techs.style.display = style === 'contrapuntal' ? 'none' : '';
+    document.getElementById('varShuffleWrap').style.display = style === 'bluesy' ? '' : 'none';
+    document.getElementById('varRegisterWrap').style.display = style === 'contrapuntal' ? '' : 'none';
+  });
+
+  function checkedTechniqueKeys() {
+    return Array.from(document.querySelectorAll('#varTechs .var-tech'))
+      .filter((cb) => cb.checked).map((cb) => cb.value);
+  }
+
+  // Build the engine's voiceNotes + chordByMeasure + variations for the current segment/voice.
+  document.getElementById('varGenerate').onclick = () => {
+    if (!currentDetail || !currentDetail.voices || !currentDetail.voices.length) return;
+    const { from, to } = varSegRange();
+    if (!Number.isFinite(from) || !Number.isFinite(to)) return;
+    // Self-contained guardrail: don't rely solely on the disabled button.
+    if (to - from + 1 > 3) { refreshVariationsGuardrail(); return; }
+
+    const chordByMeasure = buildChordByMeasure(collapsedChordSpans(currentDetail));
+    const pickIdx = parseInt(document.getElementById('varVoice').value, 10) || 0;
+    const entry = varEntries[pickIdx] || varEntries[0];
+    if (!entry) return;
+    // Split entries embellish a two-voice working copy (melody='1', bass='2') of a single-voice
+    // piece; real voices work off the raw source. varWorkingSource/varGenVoiceId are the segment +
+    // <voice> id every later step (render/play/fretboard) must reuse.
+    const workingSource = entry.split ? splitSingleVoice(currentDetail.source) : currentDetail.source;
+    varWorkingSource = workingSource;
+    varGenVoiceId = entry.voiceId;
+
+    const style = document.getElementById('varStyle').value;
+    if (style === 'contrapuntal') {
+      // Contrapuntal: generate independent counter-lines that move against the chosen voice's
+      // melody. Each "variation" carries a whole counter-line; renderSelectedVariation writes it as
+      // a fresh colored voice. No per-note edits, so skip the classical note-list + alignment guard.
+      // Work entirely in SEGMENT-RELATIVE 1..N numbering: extractSegmentXml renumbers kept measures
+      // to 1..N by position, and renderSelectedVariation writes into that same renumbered segment —
+      // so the counter-line's measure values must be 1..N, not the absolute from..to.
+      const N = to - from + 1;
+      const seg = extractSegmentXml(workingSource, [from, to]);   // measures renumbered 1..N (by position)
+      // Chord map in SEGMENT-RELATIVE numbering: relative m (1..N) → the sequential chord at (from+m-1).
+      const relChord = {};
+      for (let m = 1; m <= N; m++) relChord[m] = chordByMeasure[from + m - 1] || null;
+      const melody = buildBeatNotes(seg, entry.voiceId, 1, N);    // reads the seg's renumbered 1..N
+      const lines = generateCounterLines({
+        melody,
+        chordByMeasure: relChord,
+        key: currentDetail.meta && currentDetail.meta.key,
+        register: document.getElementById('varRegister').value,
+      });
+      // Counter voice id = the first integer id not already used in the working source.
+      const used = new Set(distinctVoiceIdsInOrder(workingSource).map(String));
+      let counterId = 2; while (used.has(String(counterId))) counterId++;
+      varCounterVoiceId = String(counterId);
+      variations = lines.map((line, i) => ({ label: line.label || `Counter-line ${i + 1}`, isContrapuntal: true, line }));
+      varGenVoiceIds = [entry.voiceId, varCounterVoiceId];
+    } else {
+      // Classical / bluesy: decorate the chosen voice in place with non-chord-tone techniques.
+      // Engine note-list for the chosen voice, sourced from the working copy. For a split entry the
+      // synthetic voice has no currentDetail.voices[…] entry, so re-encode the working source and pull
+      // its voice by ordered id; real voices come from the pre-encoded currentDetail.voices.
+      let voiceNotes;
+      if (entry.split) {
+        const encoded = encodeMusicXml(workingSource);
+        const wids = orderedVoiceIds(workingSource);
+        const widx = Math.max(0, wids.indexOf(String(entry.voiceId)));
+        voiceNotes = buildVoiceNotes(encoded.voices[widx] || encoded.voices[0], from, to, chordByMeasure);
+      } else {
+        voiceNotes = buildVoiceNotes(currentDetail.voices[pickIdx], from, to, chordByMeasure);
+      }
+
+      // Alignment safety: the XML builder addresses one note per onset (skips <rest>/<chord/>).
+      // If its addressable count differs from our collapsed engine list, edits would land on the
+      // wrong notes — warn (still proceed) so the mismatch surfaces during manual testing.
+      try {
+        const addr = addressableMidis(extractSegmentXml(workingSource, [from, to]), entry.voiceId);
+        if (addr.length !== voiceNotes.length) {
+          console.warn(`[variations] note-list misalignment: engine ${voiceNotes.length} vs XML builder `
+            + `${addr.length} for entry "${entry.label}" (id ${entry.voiceId}) over measures ${from}-${to}. `
+            + 'Edits may land on the wrong notes.');
+        }
+      } catch (err) { console.warn('[variations] alignment check failed:', err); }
+
+      // Default pool = pitch classes present across ALL voices in the segment.
+      const segmentNoteNames = currentDetail.voices.flatMap((v) =>
+        v.name.filter((_, i) => v.measureIndex[i] >= from && v.measureIndex[i] <= to));
+
+      variations = generateVariations({
+        voiceNotes,
+        chordByMeasure,
+        segmentNoteNames,
+        key: currentDetail.meta && currentDetail.meta.key,
+        style,
+        techniques: checkedTechniqueKeys(),
+        addNotes: document.getElementById('varAddNotes').checked,
+        shuffle: document.getElementById('varShuffle') ? document.getElementById('varShuffle').checked : false,
+        cap: 50,
+      });
+      varGenVoiceIds = [entry.voiceId];
+    }
+    varGenRange = [from, to];       // freeze the range/voice the edits were indexed against
+    populateVarSelect();            // fill the select, select the first, and render it
+  };
+
+  // Fill the selectbox from the generated variations, enable/disable the controls, and auto-render
+  // the first option. When there are none, clear + disable everything and show the empty state.
+  function populateVarSelect() {
+    const sel = document.getElementById('varSelect');
+    const empty = document.getElementById('varEmpty');
+    const playBtn = document.getElementById('varPlay');
+    const fretBtn = document.getElementById('varFret');
+    const silenceBtn = document.getElementById('varSilence');
+    const hearBtn = document.getElementById('varHearAll');
+    const saveBtn = document.getElementById('varSaveVocab');
+    if (!sel) return;
+    stopVarPlayback();
+    sel.innerHTML = '';
+    // A fresh generation invalidates the per-variation silence memory and resets the toggles.
+    varSilences.clear(); varRenderedIndex = -1;
+    varSilenceMode = false; varHearAll = false; reflectVarSilence(); updateVarSilenceHint();
+    if (!variations.length) {
+      sel.disabled = playBtn.disabled = fretBtn.disabled = silenceBtn.disabled = hearBtn.disabled = saveBtn.disabled = true;
+      empty.style.display = '';
+      const styleSel = document.getElementById('varStyle');
+      const isContrapuntal = styleSel && styleSel.value === 'contrapuntal';
+      empty.textContent = varGenRange
+        ? (isContrapuntal
+          ? 'No counter-lines for this segment (a measure may lack a detected chord).'
+          : 'No variations for these techniques on this segment.')
+        : 'Generate variations to preview them here.';
+      currentVarXml = null;
+      if (varRenderer && document.getElementById('varSheet')) document.getElementById('varSheet').innerHTML = '';
+      return;
+    }
+    variations.forEach((v, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i); opt.textContent = v.label;
+      sel.appendChild(opt);
+    });
+    sel.disabled = playBtn.disabled = fretBtn.disabled = silenceBtn.disabled = hearBtn.disabled = saveBtn.disabled = false;
+    empty.style.display = 'none';
+    sel.selectedIndex = 0;
+    renderSelectedVariation();
+  }
+
+  // Lazily create the shared render panel bound to #varSheet.
+  function ensureVarRenderer() {
+    if (!varRenderer) varRenderer = createMusicRenderer(document.getElementById('varSheet'), {
+      // A notehead click (in silence mode) or Hear-all change fires this; remember the silenced
+      // notes against the variation currently shown, and refresh the count hint.
+      onSuppressionChange: () => {
+        if (varRenderedIndex >= 0) varSilences.set(varRenderedIndex, varRenderer.getSuppressedNotes());
+        updateVarSilenceHint();
+      },
+    });
+    return varRenderer;
+  }
+
+  // Lazily create the dedicated variation player; its cursor follows on #varSheet's OSMD.
+  function ensureVarPlayer() {
+    if (!varPlayer) varPlayer = createMusicPlayer({
+      getCursor: () => (varRenderer && varRenderer.osmd ? varRenderer.osmd.cursor : null),
+      // Natural end (played to the segment boundary): reset the ▶/⏹ toggle. Inline (not
+      // stopVarPlayback) so we don't re-enter the player's stop() from inside its own stop.
+      onEnd: () => { varPlaying = false; const b = document.getElementById('varPlay'); if (b) b.textContent = '▶ Play'; },
+    });
+    return varPlayer;
+  }
+
+  // Stop any in-progress variation playback and reset the cursor + the #varPlay button label.
+  function stopVarPlayback() {
+    if (varPlayer && varPlaying) { try { varPlayer.stop(); } catch (_) {} }
+    varPlaying = false;
+    const btn = document.getElementById('varPlay');
+    if (btn) btn.textContent = '▶ Play';
+  }
+
+  // Render the currently-selected variation: extract the frozen segment, apply its edits to the
+  // generated voice, render into #varSheet, then color the ADDED notes (after render so the
+  // noteheads exist). Stores the embellished XML in currentVarXml for play/fretboard.
+  async function renderSelectedVariation() {
+    stopVarPlayback();
+    const sel = document.getElementById('varSelect');
+    const v = variations[sel.selectedIndex];
+    if (!v || !currentDetail || !varGenRange) return;
+    const seg = extractSegmentXml(varWorkingSource || currentDetail.source, varGenRange);
+    let varXml;
+    if (v.isContrapuntal) {
+      // Realize the counter-line as a fresh colored voice grafted onto the frozen segment; the
+      // ADDED_NOTE_COLOR lets coloredNoteMarks() find its notes for highlighting below.
+      const doc = new DOMParser().parseFromString(seg, 'application/xml');
+      writeVoice(doc, { voiceId: varCounterVoiceId, notesByMeasure: counterLineToNotesByMeasure(v.line, seg), color: ADDED_NOTE_COLOR });
+      varXml = new XMLSerializer().serializeToString(doc);
+    } else {
+      varXml = applyVariation(seg, varGenVoiceId, v.edits);
+    }
+    currentVarXml = varXml;
+    const r = ensureVarRenderer();
+    try {
+      await r.loadDetail({ source: varXml, meta: { key: currentDetail.meta && currentDetail.meta.key }, format: 'musicxml', voices: [] });
+      r.showFull();
+      const marks = coloredNoteMarks(varXml);
+      r.highlightExtraNotes(marks, ADDED_NOTE_COLOR);
+      // Restore this variation's own silenced notes + the persistent silence/hear-all toggle state.
+      // setSuppressedNotes replaces the set (and resets hearAll), so re-apply hearAll after.
+      varRenderedIndex = sel.selectedIndex;
+      r.setSuppressedNotes(varSilences.get(varRenderedIndex) || []);
+      r.setSuppressMode(varSilenceMode);
+      if (varHearAll) r.setHearAll(true);
+      updateVarSilenceHint();
+    } catch (err) { console.warn('[variations] render failed:', err); }
+  }
+  document.getElementById('varSelect').onchange = renderSelectedVariation;
+
+  // Reflect the silence / hear-all toggle button states.
+  function reflectVarSilence() {
+    const s = document.getElementById('varSilence');
+    const h = document.getElementById('varHearAll');
+    if (s) s.classList.toggle('active', varSilenceMode);
+    if (h) h.classList.toggle('active', varHearAll);
+  }
+  // Show how many notes are silenced on the current variation.
+  function updateVarSilenceHint() {
+    const hint = document.getElementById('varSilenceHint');
+    if (!hint) return;
+    const n = (varRenderer && varRenderer.getSuppressedNotes) ? varRenderer.getSuppressedNotes().length : 0;
+    hint.textContent = n ? `${n} silenced` : '';
+  }
+  // 🔇 Silence: when on, clicking a notehead on the variation sheet silences/un-silences it (dimmed,
+  // and skipped by ▶ Play). The mode persists as you switch variations; the silenced notes are
+  // remembered per variation (see varSilences).
+  document.getElementById('varSilence').onclick = () => {
+    varSilenceMode = !varSilenceMode;
+    if (varRenderer) varRenderer.setSuppressMode(varSilenceMode);
+    reflectVarSilence();
+  };
+  // 👂 Hear all: transiently un-mute every silenced note without clearing the set.
+  document.getElementById('varHearAll').onclick = () => {
+    varHearAll = !varHearAll;
+    if (varRenderer) varRenderer.setHearAll(varHearAll);
+    reflectVarSilence();
+  };
+  // ➕ Save to vocab: persist the CURRENT variation as a vocabulary item. Unlike a normal capture
+  // (which only references the source passage), this stores the variation's own embellished MusicXML
+  // so re-opening replays it exactly, plus its silenced notes and fretboard voice ids. Auto-filed
+  // under the "variations" category (or the typed category); the note records style + which variation.
+  document.getElementById('varSaveVocab').onclick = async () => {
+    if (!currentVarXml || !currentPreviewId || !varGenRange) { setMediaMsg('Generate a variation first.', 'info'); return; }
+    const [from, to] = varGenRange;                       // sequential segment span the variation covers
+    const styleSel = document.getElementById('varStyle');
+    const styleTxt = (styleSel && styleSel.options[styleSel.selectedIndex]) ? styleSel.options[styleSel.selectedIndex].textContent : '';
+    const vSel = document.getElementById('varSelect');
+    const varTxt = (vSel && vSel.options[vSel.selectedIndex]) ? vSel.options[vSel.selectedIndex].textContent : '';
+    const label = [styleTxt, varTxt].filter(Boolean).join(' — ') || 'Variation';
+    const cat = document.getElementById('vocabCat').value.trim();
+    const entry = buildVocabEntry({
+      pieceId: currentPreviewId, system, measureRange: [from, to],
+      measureOffset: currentOffset,
+      youtube: (currentDetail.meta && currentDetail.meta.youtube) || null,
+      note: label,
+      snapshot: buildSnapshot(currentDetail, [from, to]),  // original-passage pitches, for search/context
+      suppressed: (varRenderer && varRenderer.getSuppressedNotes) ? varRenderer.getSuppressedNotes() : [],
+      category: cat || 'variations',
+      createdAt: new Date().toISOString().slice(0, 10),
+      variationXml: currentVarXml,                         // the actual embellished notes → replays as-is
+      variationLabel: label,
+      variationVoiceIds: [...varGenVoiceIds],
+    });
+    entry.id = uniqueVocabId(vocab, entry.id);             // never clobber a normal item / another saved variation
+    vocab = upsertVocab(vocab, entry);
+    renderVocab();
+    try { await store.putVocab(system, vocab); } catch (_) {}
+    dirtyVocab = true; updatePushBtn();
+    setMediaMsg(`Saved variation "${label}" to vocab (${vocab.length} total) — click "Push changes" to publish.`, 'ok');
+  };
+
+  // ▶ Play / ⏹ Stop toggle: play the current variation's XML with the OSMD cursor following on
+  // #varSheet. Mirrors the main preview play path (setInstrument → setSchedule → play), on a
+  // dedicated player so the cursor tracks #varSheet, not #osmdPreview.
+  document.getElementById('varPlay').onclick = () => {
+    if (varPlaying) { stopVarPlayback(); return; }
+    if (!currentVarXml) return;
+    // Skip the notes silenced on this variation (keeps their slot, mutes the synth) — mirrors the
+    // main preview's muted-notes path.
+    const muted = (varRenderer && varRenderer.getMutedNotes) ? varRenderer.getMutedNotes() : [];
+    const schedule = buildScheduleFromMusicXml(currentVarXml, { tempo: currentTempo(), mutedNotes: muted });
+    if (!schedule.length) return;
+    if (player) player.stop();   // don't overlap the main preview on the shared Tone.Transport
+    const p = ensureVarPlayer();
+    p.setInstrument(document.getElementById('instrSel').value);
+    p.setSchedule(schedule, { cursorStartStep: 0 });
+    p.setLoop(false);
+    varPlaying = true;
+    document.getElementById('varPlay').textContent = '⏹ Stop';
+    p.play().catch((err) => { console.warn('[variations] playback error:', err); stopVarPlayback(); });
+  };
+
+  // Build fretboard steps from the current variation's embellished voice: ONE step per BEAT
+  // (quarter-note pulse), each holding that beat's notes. See variationFretSteps — grouping by beat
+  // bounds each step's voicings and avoids the ~10^16-combo cartesian blow-up that killed the page.
+  // ADDED notes are ringed via highlightMidis.
+  function buildVariationSteps() {
+    if (!currentVarXml) return [];
+    return variationFretSteps(currentVarXml, varGenVoiceIds.length > 1 ? varGenVoiceIds : varGenVoiceIds[0]);
+  }
+
+  // 🎸 Fretboard: capture the current variation onto the fretboard, ringing the ADDED notes, and
+  // open the fretboard panel. Initializes the renderer/fretboard lazily if not yet created.
+  document.getElementById('varFret').onclick = () => {
+    if (!currentVarXml) return;
+    if (!fbPanel) ensureRenderer();   // fretboard is created inside ensureRenderer()
+    if (!fbPanel) return;             // guard: still unavailable (no piece loaded)
+    const steps = buildVariationSteps();
+    if (!steps.length) return;
+    const highlightMidis = coloredNoteMarks(currentVarXml).map((m) => m.midi);
+    // Track the cursor on the VARIATION sheet (these steps came from #varSheet, not the main preview).
+    fbPanel.captureSteps(steps, { highlightMidis, cursorRenderer: varRenderer });
+    const panel = document.getElementById('fretboardPanel');
+    if (panel && !panel.open) panel.open = true;
+  };
   document.getElementById('previewCloseBtn').onclick = () => {
     if (player) player.stop();
     clearYtMonitor(); if (yt) yt.pause();
@@ -1815,10 +2572,73 @@
     if (mr) {
       document.getElementById('segFrom').value = toPrintedMeasure(mr[0]);
       document.getElementById('segTo').value = toPrintedMeasure(mr[1]);
-      if (renderer) renderer.showSegment(mr);
+      if (renderer) { renderer.showSegment(mr); renderer.highlightMeasures(mr); }
+      // Call out exactly what matched at these measures as clickable chips — the searched chords may
+      // be labelled differently by the live on-sheet overlay, so clicking a chip lights up exactly
+      // the notes that formed that chord at its own measure(s), letting the user verify the match.
+      const m = result.match;
+      if (m.kind === 'chord' && (m.symbols || []).length) renderMatchedChords(m, mr);
     }
   }
+  // Render "Matched: [chip] [chip] … · measures X–Y" into previewMsg. Each chip highlights the notes
+  // that form its chord at its measure span (from the match's exact chord indices); click again to clear.
+  function renderMatchedChords(match, mr) {
+    const host = document.getElementById('previewMsg');
+    host.textContent = '';
+    host.appendChild(document.createTextNode('Matched: '));
+    const spans = currentDetail ? collapsedChordSpans(currentDetail) : [];
+    const indices = match.indices || [];
+    (match.symbols || []).forEach((sym, i) => {
+      const span = spans[indices[i]];                    // this chip's own measure span
+      const range = span ? [span.measureStart, span.measureEnd] : mr;
+      const chip = document.createElement('button');
+      chip.className = 'match-chip';
+      chip.textContent = chordDisplayName(sym);
+      chip.title = `Show the notes that form ${chordDisplayName(sym)} (measure ${toPrintedMeasure(range[0])})`;
+      chip.onclick = () => {
+        const wasOn = chip.classList.contains('on');
+        host.querySelectorAll('.match-chip.on').forEach((c) => c.classList.remove('on'));
+        if (wasOn) { if (renderer) renderer.clearHighlight(); return; }
+        chip.classList.add('on');
+        if (renderer) renderer.highlightMatchedChord(sym, range);
+      };
+      host.appendChild(chip);
+    });
+    host.appendChild(document.createTextNode(`  ·  measures ${toPrintedMeasure(mr[0])}–${toPrintedMeasure(mr[1])}`));
+  }
+  // Re-open a saved VARIATION vocab item: open its piece for context, then render the stored
+  // embellished MusicXML on the Variations sheet and enable the controls so it plays / silences /
+  // captures exactly as saved. Self-contained — driven by entry.variationXml, not the source passage.
+  async function openVariationVocabEntry(entry) {
+    await openPreview(entry.pieceId);
+    const from = entry.measureStart, to = entry.measureEnd;   // sequential (stored)
+    document.getElementById('segFrom').value = toPrintedMeasure(from);
+    document.getElementById('segTo').value = toPrintedMeasure(to);
+    // Freeze variation state to this saved item (no generated set — the controls act on currentVarXml).
+    variations = [];
+    varGenRange = [from, to];
+    varGenVoiceIds = (entry.variationVoiceIds && entry.variationVoiceIds.length) ? [...entry.variationVoiceIds] : ['1'];
+    currentVarXml = entry.variationXml;
+    varSilenceMode = false; varHearAll = false; varRenderedIndex = -1;
+    const r = ensureVarRenderer();
+    try {
+      await r.loadDetail({ source: entry.variationXml, meta: { key: (currentDetail && currentDetail.meta && currentDetail.meta.key) || null }, format: 'musicxml', voices: [] });
+      r.showFull();
+      r.highlightExtraNotes(coloredNoteMarks(entry.variationXml), ADDED_NOTE_COLOR);
+      r.setSuppressedNotes(entry.suppressed || []);
+      r.setSuppressMode(false);
+    } catch (err) { console.warn('[variations] saved-variation render failed:', err); }
+    // The picker has no generated options; enable the controls that act on currentVarXml directly.
+    const sel = document.getElementById('varSelect'); if (sel) { sel.innerHTML = ''; sel.disabled = true; }
+    ['varPlay', 'varFret', 'varSilence', 'varHearAll', 'varSaveVocab'].forEach((id) => { const b = document.getElementById(id); if (b) b.disabled = false; });
+    document.getElementById('varEmpty').style.display = 'none';
+    reflectVarSilence(); updateVarSilenceHint();
+    const panel = document.getElementById('variationsSection');
+    if (panel) { panel.open = true; panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    setMediaMsg(`Opened saved variation “${entry.variationLabel || entry.note || entry.id}”.`, 'ok');
+  }
   async function openVocabEntry(entry) {
+    if (entry.variationXml) { await openVariationVocabEntry(entry); return; }   // saved variation → replay its own XML
     await openPreview(entry.pieceId);
     if (!currentDetail) return;
     currentVocabEntry = entry;
@@ -1869,13 +2689,14 @@
       g.entries.forEach(e => {
         const title = (index.find(x => x.id === e.pieceId) || {}).title || e.pieceId;
         const mark = (e.startSeconds != null || e.youtube) ? ' ▶' : '';
+        const varMark = e.variationXml ? '🎶 ' : '';   // a saved variation replays its own embellished notes
         const noteHtml = e.note ? ` <small style="color:#666">— ${escapeHtml(e.note)}</small>` : '';
         const off = e.measureOffset || 0;   // show the item's PRINTED measure numbers
         const row = document.createElement('div');
         row.className = 'resultRow vocabRow';
         const label = document.createElement('span');
         label.className = 'vocabLabel';
-        label.innerHTML = `${title} <small>m${e.measureStart - off}–${e.measureEnd - off}${mark}</small>${noteHtml}`;
+        label.innerHTML = `${varMark}${title} <small>m${e.measureStart - off}–${e.measureEnd - off}${mark}</small>${noteHtml}`;
         label.onclick = () => openVocabEntry(e);
         const del = document.createElement('button');
         del.className = 'vocabDel'; del.title = 'Delete this vocab item'; del.textContent = '🗑';
@@ -1906,13 +2727,150 @@
   addChip();            // start with one chord chip
   buildNoteButtons();   // populate the melody note-picker
 
+  // ===== Weekly practice log (local-only) =====
+  function savePractice() {
+    if (!store || !store.putPractice) return;
+    try { const p = store.putPractice(system, { entries: practiceEntries, fields: practiceFields }); if (p && p.catch) p.catch(() => {}); } catch (_) {}
+  }
+  function newEntryId() { return `pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`; }
+  // Parse an <input type=date> 'YYYY-MM-DD' as a LOCAL date (new Date('YYYY-MM-DD') is UTC and can
+  // shift the day across a timezone — which would land weekStart on the wrong week).
+  function parseDateInput(v) {
+    const [y, m, d] = String(v || '').split('-').map(Number);
+    return (y && m && d) ? new Date(y, m - 1, d) : new Date();
+  }
+  function fillStatusSelect(sel, value) {
+    sel.innerHTML = PRACTICE_STATUSES.map(s => `<option value="${s.value}"${s.value === value ? ' selected' : ''}>${esc(s.label)}</option>`).join('');
+  }
+  function statusBadge(value) {
+    const m = statusMeta(value);
+    return `<span class="pl-status-badge" style="background:${m.color}">${esc(m.label)}</span>`;
+  }
+  function fieldDatalist() {
+    document.getElementById('plFieldNames').innerHTML = practiceFields.map(f => `<option value="${esc(f)}"></option>`).join('');
+  }
+  // Populate the piece dropdown + field-name datalist + status selects from current state.
+  function refreshPracticeInputs() {
+    const pieceSel = document.getElementById('plPiece');
+    const cur = pieceSel.value;
+    pieceSel.innerHTML = '<option value="">— none —</option>'
+      + index.map(e => `<option value="${esc(e.id)}">${esc(e.title || e.id)}</option>`).join('');
+    pieceSel.value = cur;
+    fieldDatalist();
+    if (!document.getElementById('plStatus').options.length) fillStatusSelect(document.getElementById('plStatus'), 'planned');
+    if (!document.getElementById('plFieldStatus').options.length) fillStatusSelect(document.getElementById('plFieldStatus'), 'planned');
+  }
+  function renderPracticeDraft() {
+    document.getElementById('plFieldRows').innerHTML = practiceDraft.map((f, i) =>
+      `<div class="pl-field-row"><span class="pl-fname">${esc(f.name)}</span>`
+      + `<span class="pl-fval">${esc(f.value)}</span>${statusBadge(f.status)}`
+      + ` <button type="button" class="pl-fx" data-i="${i}" title="Remove field">✕</button></div>`).join('');
+  }
+  function renderPracticeList() {
+    const rows = sortEntries(practiceEntries).map(e => {
+      const piece = e.pieceId ? ` <span class="pl-piece-link" data-piece="${esc(e.pieceId)}">▶ ${esc(e.pieceTitle || e.pieceId)}</span>` : '';
+      const fields = (e.custom || []).map(f =>
+        `<span class="pl-chip"><span class="pl-dot" style="background:${statusMeta(f.status).color}"></span><strong>${esc(f.name)}:</strong> ${esc(f.value)}</span>`).join('');
+      return `<div class="pl-entry" data-id="${esc(e.id)}"><div class="pl-entry-head">`
+        + `<span class="pl-entry-week">${esc(weekLabel(e.week))}</span>${statusBadge(e.status)}`
+        + `<span class="pl-entry-goal">${esc(e.goal)}</span>${piece}`
+        + `<button type="button" class="icon-btn pl-edit" data-id="${esc(e.id)}" title="Edit">✎</button>`
+        + `<button type="button" class="icon-btn pl-del" data-id="${esc(e.id)}" title="Delete">🗑</button></div>`
+        + (e.notes ? `<div class="pl-entry-notes">${esc(e.notes)}</div>` : '')
+        + (fields ? `<div class="pl-entry-fields">${fields}</div>` : '')
+        + `</div>`;
+    });
+    document.getElementById('practiceList').innerHTML = rows.join('') || '<em style="color:#888;font-size:13px">No practice entries yet.</em>';
+  }
+  function renderPractice() { refreshPracticeInputs(); renderPracticeDraft(); renderPracticeList(); }
+  function resetPracticeForm() {
+    practiceEditId = null; practiceDraft = [];
+    document.getElementById('plWeek').value = weekStart(new Date());
+    document.getElementById('plGoal').value = '';
+    document.getElementById('plNotes').value = '';
+    document.getElementById('plPiece').value = '';
+    fillStatusSelect(document.getElementById('plStatus'), 'planned');
+    fillStatusSelect(document.getElementById('plFieldStatus'), 'planned');
+    document.getElementById('plSave').textContent = 'Save entry';
+    document.getElementById('plFormMsg').textContent = '';
+    renderPracticeDraft();
+  }
+  // Add a custom field: register a new name globally, append it to the form's draft.
+  document.getElementById('plAddField').addEventListener('click', () => {
+    const nameInp = document.getElementById('plFieldName');
+    const valInp = document.getElementById('plFieldValue');
+    const merged = mergeFieldName(practiceFields, nameInp.value);
+    if (!merged.name) { nameInp.focus(); return; }
+    practiceFields = merged.fields;
+    if (merged.added) { savePractice(); fieldDatalist(); }   // persist the new field name globally
+    practiceDraft.push({ name: merged.name, value: valInp.value.trim(), status: document.getElementById('plFieldStatus').value });
+    nameInp.value = ''; valInp.value = '';
+    renderPracticeDraft();
+  });
+  document.getElementById('plFieldRows').addEventListener('click', (ev) => {
+    const x = ev.target.closest('.pl-fx'); if (!x) return;
+    practiceDraft.splice(parseInt(x.dataset.i, 10), 1);
+    renderPracticeDraft();
+  });
+  document.getElementById('plSave').addEventListener('click', () => {
+    const week = weekStart(parseDateInput(document.getElementById('plWeek').value));
+    const goal = document.getElementById('plGoal').value.trim();
+    const notes = document.getElementById('plNotes').value.trim();
+    const pieceId = document.getElementById('plPiece').value || null;
+    const status = document.getElementById('plStatus').value;
+    if (!goal && !notes && !pieceId && !practiceDraft.length) {
+      document.getElementById('plFormMsg').textContent = 'Add a goal, note, piece, or field first.'; return;
+    }
+    const pieceTitle = pieceId ? ((index.find(e => e.id === pieceId) || {}).title || pieceId) : '';
+    const entry = makeEntry({ id: practiceEditId || newEntryId(), week, pieceId, pieceTitle, goal, status, notes,
+      custom: practiceDraft, updatedAt: new Date().toISOString() });
+    practiceEntries = upsertEntry(practiceEntries, entry);
+    savePractice(); resetPracticeForm(); renderPracticeList();
+    document.getElementById('plFormMsg').textContent = 'Saved.';
+  });
+  document.getElementById('plClear').addEventListener('click', resetPracticeForm);
+  document.getElementById('practiceList').addEventListener('click', (ev) => {
+    const link = ev.target.closest('.pl-piece-link');
+    if (link) { openPreview(link.dataset.piece); return; }
+    const edit = ev.target.closest('.pl-edit');
+    if (edit) {
+      const e = practiceEntries.find(x => x.id === edit.dataset.id); if (!e) return;
+      practiceEditId = e.id;
+      refreshPracticeInputs();
+      document.getElementById('plWeek').value = e.week;
+      document.getElementById('plGoal').value = e.goal;
+      document.getElementById('plNotes').value = e.notes;
+      document.getElementById('plPiece').value = e.pieceId || '';
+      fillStatusSelect(document.getElementById('plStatus'), e.status);
+      practiceDraft = (e.custom || []).map(f => ({ ...f }));
+      renderPracticeDraft();
+      document.getElementById('plSave').textContent = 'Update entry';
+      document.getElementById('plFormMsg').textContent = `Editing ${weekLabel(e.week)}…`;
+      document.getElementById('practiceSection').open = true;
+      document.getElementById('plGoal').focus();
+      return;
+    }
+    const del = ev.target.closest('.pl-del');
+    if (del) {
+      if (!window.confirm('Delete this practice entry?')) return;
+      practiceEntries = removeEntry(practiceEntries, del.dataset.id);
+      if (practiceEditId === del.dataset.id) resetPracticeForm();
+      savePractice(); renderPracticeList();
+    }
+  });
+  // Keep the piece dropdown current when the panel is opened.
+  document.getElementById('practiceSection').addEventListener('toggle', (e) => { if (e.target.open) refreshPracticeInputs(); });
+
   (async () => {
     try { const lib = await loadLibrary(system, store); index = lib.index; unpushedIds = lib.unpushedIds; }
     catch (_) { index = []; unpushedIds = new Set(); }
     try { vocab = await loadVocab(system, store); } catch (_) { vocab = []; }
     try { tagRegistry = await loadTagRegistry(); } catch (_) { tagRegistry = []; }
+    try { const pl = await store.getPractice(system); practiceEntries = pl.entries || []; practiceFields = pl.fields || []; }
+    catch (_) { practiceEntries = []; practiceFields = []; }
     if (renderer) renderer.setTagRegistry(tagRegistry);   // (renderer is lazy; ensureRenderer also seeds it)
     render(); updatePushBtn(); renderVocab();
+    renderPractice(); resetPracticeForm();
   })();
 </script>
 </body>

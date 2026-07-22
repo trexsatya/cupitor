@@ -335,6 +335,14 @@ describe('runQuery', () => {
     expect(res[0].score).toBeCloseTo(1.0);
   });
 
+  test('chord match exposes the exact matched indices (for per-chord highlighting)', () => {
+    // gapped: 'C Am G' — C at 0, G at 2 (Am at 1 skipped via max_gap). symbols/indices align.
+    const res = runQuery({ type: 'chord', chords: [{ chord: 'C' }, { chord: 'G' }], max_gap: 1 },
+      [entry('gapped', { chords: 'C Am G' })]);
+    expect(res[0].match.indices).toEqual([0, 2]);
+    expect(res[0].match.symbols).toEqual(['C', 'G']);
+  });
+
   test('melody pitch-class query (octave-agnostic)', () => {
     const res = runQuery({ type: 'melody', notes: ['C', 'E', 'G'] }, entries);
     expect(res.map(r => r.pieceId)).toEqual(['alpha']);

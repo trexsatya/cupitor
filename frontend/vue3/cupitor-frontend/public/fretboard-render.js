@@ -50,11 +50,13 @@ function fretX(fret) { return fret === 0 ? PAD_LEFT - 22 : PAD_LEFT + (fret - 0.
 
 const COMMON_COLOR = '#e8820c';   // note held in common with the previous step
 const ARROW_COLOR = '#5b2a86';    // movement direction when several notes share a string
+const EXTRA_COLOR = '#EAB308';    // ADDED/extra note (segment-embellishment variation) — ring outline (matches ADDED_NOTE_COLOR)
 
 // `labelMode` picks the text drawn inside each dot: 'fret' (the fret number) or 'note' (the note
 // name sounding there). `label` is the current step's chord/step name, drawn as a title above the
-// neck (empty → no title strip).
-export function renderFretboard(svgEl, { trail = [], highlight = new Set(), arrows = [], labelMode = 'fret', label = '' } = {}) {
+// neck (empty → no title strip). `extra` is a Set of "string:fret" keys for ADDED notes of a
+// variation: they get a distinct colored ring around the dot (regardless of age) so they stand out.
+export function renderFretboard(svgEl, { trail = [], highlight = new Set(), arrows = [], extra = new Set(), labelMode = 'fret', label = '' } = {}) {
   while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
 
   const TITLE_H = label ? 24 : 0;   // headroom reserved for the chord-name title
@@ -114,6 +116,12 @@ export function renderFretboard(svgEl, { trail = [], highlight = new Set(), arro
       g.appendChild(el('circle', { cx, cy, r: DOT_R, fill: isCommon ? COMMON_COLOR : '#1565c0', opacity,
         ...(isCommon ? { stroke: '#7a3d00', 'stroke-width': 2 } : {}),
         'data-age': entry.age, class: isCommon ? 'fb-dot fb-dot-common' : 'fb-dot' }));
+      // ADDED/extra note of a variation: a distinct red ring around the dot, at full opacity and
+      // regardless of age, so the embellishment's added notes stand out from the base shape.
+      if (extra.has(`${p.string}:${p.fret}`)) {
+        g.appendChild(el('circle', { cx, cy, r: DOT_R + 3, fill: 'none', stroke: EXTRA_COLOR,
+          'stroke-width': 2.5, class: 'fb-dot-extra' }));
+      }
       const text = labelMode === 'note' ? ((noteAt(p.string, p.fret) || {}).name || '' + p.fret) : '' + p.fret;
       const num = htmlLabel({ x: cx, y: cy, fontSize: 9, anchor: 'middle', vAlign: 'middle',
         css: `color:#fff;font-weight:700;opacity:${opacity};`, text });

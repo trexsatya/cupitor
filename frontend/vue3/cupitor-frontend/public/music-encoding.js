@@ -2,6 +2,7 @@
 import { getScale, allChords, normaliseChordName } from './music-reference-data.js';
 import { extractPitchesFromText } from './music_search.js';
 import { MusicXml } from './musicxml.js';
+import { bestChords } from './music-chords.js';
 
 const BASE_PC = {
   "C":0,"C#":1,"Db":1,"D":2,"D#":3,"Eb":3,"E":4,"E#":5,"Fb":4,
@@ -10,6 +11,31 @@ const BASE_PC = {
 };
 
 const SARGAM = ["Sa","Re","Ga","Ma","Pa","Dha","Ni"];
+
+// Per-note onset (in divisions) within one measure, from its ordered timed events. Follows MusicXML
+// timing: a plain note advances the cursor by its duration; a <chord/> note stacks on the previous
+// note (same onset, no advance); <backup>/<forward> move the cursor (so multiple voices in one
+// measure align on a shared timeline). Notes that share an onset are a vertical stack — the evidence
+// the chord detector uses to name the harmony. `events` are {type:'note'|'backup'|'forward',
+// duration, chord?}; returns one onset per 'note' event, in order.
+export function computeOnsets(events) {
+  const onsets = [];
+  let cursor = 0, lastOnset = 0, sawNote = false;
+  for (const e of (events || [])) {
+    if (e.type === 'backup') { cursor -= (e.duration || 0); continue; }
+    if (e.type === 'forward') { cursor += (e.duration || 0); continue; }
+    // note
+    if (e.chord && sawNote) {
+      onsets.push(lastOnset);            // stacked on the previous note; cursor unchanged
+    } else {
+      lastOnset = cursor;
+      onsets.push(cursor);
+      cursor += (e.duration || 0);
+      sawNote = true;
+    }
+  }
+  return onsets;
+}
 
 export function pitchClass(name) {
   return BASE_PC[name];
@@ -49,7 +75,7 @@ export function unpackContour(str) {
 }
 
 const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
-function midiToName(midi) { return NOTE_NAMES[((midi % 12) + 12) % 12]; }
+export function midiToName(midi) { return NOTE_NAMES[((midi % 12) + 12) % 12]; }
 
 // Normalize tokens like "G4#" or "G4b" -> "G#4" / "Gb4" so extractPitchesFromText can parse them.
 function normalizeNoteText(txt) {
@@ -58,17 +84,20 @@ function normalizeNoteText(txt) {
 
 export function encodeNoteText(txt, meta = {}) {
   const lines = extractPitchesFromText(normalizeNoteText(txt), { defaultOctave: 4 }); // MIDI[] per note line, or string for non-note lines
-  const pitch = [], measureIndex = [];
+  const pitch = [], measureIndex = [], name = [], onset = [];
   let measure = 0;
   for (const line of lines) {
     if (Array.isArray(line) && line.length) {
       measure += 1; // treat each note line as a "measure" for context
-      for (const m of line) { pitch.push(m); measureIndex.push(measure); }
+      // note-text is a monophonic sequence: distinct onsets (index in the line), no vertical stacks.
+      line.forEach((m, i) => { pitch.push(m); measureIndex.push(measure); name.push(midiToName(m)); onset.push(i); });
     }
   }
   const key = meta.key || 'C';
   const voice = {
     pitch,
+    name,
+    onset,
     interval: intervalsOf(pitch),
     sargam: pitch.map(m => toSargam(midiToName(m), key)),
     duration: pitch.map(() => null),
@@ -125,18 +154,38 @@ export function encodeMusicXml(xmlString, meta = {}) {
     if (hasPitch) lyricByNoteOrder.push($(this).find('lyric text').first().text() || null);
   });
 
+  // Per-note onset (divisions) within each measure — lets the chord detector see vertical stacks
+  // (notes sharing an onset) across voices. Walk each measure's timed children in document order;
+  // the onsets line up 1:1 with toArray's per-measure notes (both are the <note> children in order).
+  const onsetsByMeasure = $xml.find('measure').toArray().map((el) => {
+    const events = [];
+    $(el).children().each(function () {
+      const tag = (this.nodeName || '').toLowerCase();
+      if (tag === 'note') {
+        events.push({ type: 'note', chord: $(this).children('chord').length > 0,
+          duration: parseInt($(this).children('duration').text(), 10) || 0 });
+      } else if (tag === 'backup' || tag === 'forward') {
+        events.push({ type: tag, duration: parseInt($(this).children('duration').text(), 10) || 0 });
+      }
+    });
+    return computeOnsets(events);
+  });
+
   // Build per-voice streams over sounded notes (rests dropped).
   const voicesMap = {};
   let soundedOrder = 0;
   measures.forEach((notes, mIdx) => {
     const measureNumber = mIdx + 1;
-    notes.forEach(n => {
+    const onsets = onsetsByMeasure[mIdx] || [];
+    notes.forEach((n, ni) => {
       if (!n.name || n.name.trim() === '' || Number.isNaN(n.octave)) return; // rest
       const realMidi = nameToMidi(n.name, n.octave);
       if (realMidi === null) return;
       const vKey = n.voice || '1';
-      const v = (voicesMap[vKey] = voicesMap[vKey] || { pitch:[], duration:[], lyric:[], chordSymbol:[], measureIndex:[] });
+      const v = (voicesMap[vKey] = voicesMap[vKey] || { pitch:[], name:[], onset:[], duration:[], lyric:[], chordSymbol:[], measureIndex:[] });
       v.pitch.push(realMidi);
+      v.name.push(n.name);                          // spelled (C#, Bb) — chord matching is name-based
+      v.onset.push(onsets[ni] != null ? onsets[ni] : 0);
       v.duration.push(n.type || null);
       v.lyric.push(lyricByNoteOrder[soundedOrder] || null);
       v.chordSymbol.push(harmonyByMeasure[measureNumber] || null);
@@ -149,6 +198,8 @@ export function encodeMusicXml(xmlString, meta = {}) {
     const v = voicesMap[k];
     return {
       pitch: v.pitch,
+      name: v.name,
+      onset: v.onset,
       interval: intervalsOf(v.pitch),
       sargam: v.pitch.map(m => toSargam(midiToName(m), key)),
       duration: v.duration,
@@ -210,15 +261,58 @@ export function primaryVoice(doc) {
 
 // Fills only null chordSymbol slots with the inferred chord for that note's measure.
 export function inferChords(doc) {
-  const pcByMeasure = {};
-  doc.voices.forEach(v => v.pitch.forEach((m, i) => {
+  // Use the SAME chord engine the on-sheet overlay uses (music-chords.js: stack-aware via note
+  // onsets, key-aware), so a searched chord matches what the sheet shows. Its picked chord (an
+  // allChords key) is run through normaliseChordName so search.chords keeps the search naming the
+  // query matcher understands. Notes carry spelled `name` (for enharmonic-correct matching) + `onset`
+  // (as `left`, so notes sounding together form a stack → the bass roots the chord).
+  const key = (doc.meta && doc.meta.key) || null;
+  const notesByMeasure = {};
+  doc.voices.forEach(v => (v.pitch || []).forEach((midi, i) => {
     const meas = v.measureIndex[i];
-    (pcByMeasure[meas] = pcByMeasure[meas] || new Set()).add(((m % 12) + 12) % 12);
+    const nm = v.name ? v.name[i] : midiToName(midi);
+    (notesByMeasure[meas] = notesByMeasure[meas] || []).push({ name: nm, midi, left: v.onset ? v.onset[i] : i });
   }));
   const chordByMeasure = {};
-  Object.keys(pcByMeasure).forEach(meas => { chordByMeasure[meas] = matchChord(pcByMeasure[meas]); });
+  Object.keys(notesByMeasure).forEach(meas => {
+    const best = bestChords(notesByMeasure[meas], allChords, { key, limit: 1 })[0];
+    chordByMeasure[meas] = best ? normaliseChordName(best.name) : null;
+  });
   doc.voices.forEach(v => v.pitch.forEach((m, i) => {
     if (v.chordSymbol[i] == null) v.chordSymbol[i] = chordByMeasure[v.measureIndex[i]] || null;
   }));
   return doc;
+}
+
+// The piece's harmony as ONE measure-ordered list of {symbol, measureStart, measureEnd} spans,
+// deduped over consecutive identical symbols. This is the canonical chord sequence the chord
+// search indexes (search.chords) AND the segment resolver reconstructs — sharing this one
+// function keeps them provably identical.
+//
+// Why not simply concatenate each voice's chords: inferChords fills every voice with the same
+// per-measure progression, so concatenating N voices repeats the progression N times and places a
+// high-measure span (end of one voice) immediately before a low-measure span (start of the next).
+// That non-monotonic seam both (a) lets a search match leak across two unrelated voices and (b)
+// makes segment resolution's MIN-start/MAX-end covering range explode to the whole piece. Ordering
+// by measure and taking one representative chord per measure removes both failure modes.
+//
+// Representative chord per measure = the first non-null chordSymbol found scanning voices in order
+// (voice 0 = primary/melody wins), which prefers a real notated harmony over an inferred fill.
+export function canonicalChordSpans(voices) {
+  const byMeasure = new Map();   // measure -> symbol (first voice to supply one wins)
+  (voices || []).forEach(v => {
+    (v.chordSymbol || []).forEach((c, i) => {
+      if (!c) return;
+      const meas = v.measureIndex[i];
+      if (!byMeasure.has(meas)) byMeasure.set(meas, c);
+    });
+  });
+  const spans = [];
+  for (const meas of [...byMeasure.keys()].sort((a, b) => a - b)) {
+    const symbol = byMeasure.get(meas);
+    const last = spans[spans.length - 1];
+    if (last && last.symbol === symbol) last.measureEnd = meas;
+    else spans.push({ symbol, measureStart: meas, measureEnd: meas });
+  }
+  return spans;
 }

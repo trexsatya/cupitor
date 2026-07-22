@@ -20,6 +20,9 @@ const have = (p) => { try { return fs.existsSync(p); } catch (_) { return false;
     expect(doc.meta.tempo).toBe(54);   // Phase 0: <sound tempo="54">
     const entry = buildIndexEntry(doc, xml);
     expect(entry.noteCount).toBeGreaterThan(100);
+    expect(entry.pieceCount).toBe(1);                   // a single nocturne — no split offered
+    // 4 sharps → tonal center E major or its relative C# minor (both valid Krumhansl outcomes).
+    expect(entry.guessedKey).toMatch(/^(E major|C# minor)$/);
     expect(entry.channels).toContain('duration');
     expect(entry.channels).toContain('chordSymbol');   // inference produced chords
     expect(entry.search.chords.length).toBeGreaterThan(0);
@@ -57,5 +60,6 @@ const have = (p) => { try { return fs.existsSync(p); } catch (_) { return false;
     const doc = inferChords(encodeMusicXml(xml, { id: '24_Etudes_Op.35_-_Fernando_Sor', system: 'western' }));
     const entry = buildIndexEntry(doc, xml);
     expect(entry.noteCount).toBeGreaterThan(500);
+    expect(entry.pieceCount).toBeGreaterThan(1);        // a 24-étude collection → split is offered
   }, 30000); // generous timeout for the large parse
 });

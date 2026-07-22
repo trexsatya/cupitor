@@ -1,0 +1,59 @@
+- generic [active] [ref=f1e1]:
+  - heading "Music study — western" [level=2] [ref=f1e2]
+  - group [ref=f1e3]:
+    - generic "Manage library (add / rebuild / push pieces)" [ref=f1e4] [cursor=pointer]
+  - group [ref=f1e5]:
+    - generic "🗓️ Practice Log" [ref=f1e6] [cursor=pointer]
+    - option "— none —" [selected]
+  - generic [ref=f1e7]:
+    - generic [ref=f1e8]:
+      - generic [ref=f1e9]:
+        - generic [ref=f1e10]:
+          - generic [ref=f1e11]:
+            - radio "Chord" [checked] [ref=f1e12]
+            - text: Chord
+          - generic [ref=f1e13]:
+            - radio "Melody" [ref=f1e14]
+            - text: Melody
+        - generic [ref=f1e15]:
+          - generic [ref=f1e17]:
+            - combobox [ref=f1e18]:
+              - option "C" [selected]
+              - option "C#"
+              - option "D"
+              - option "D#"
+              - option "E"
+              - option "F"
+              - option "F#"
+              - option "G"
+              - option "G#"
+              - option "A"
+              - option "A#"
+              - option "B"
+            - combobox [ref=f1e19]:
+              - option "maj" [selected]
+              - option "min"
+              - option "dim"
+              - option "aug"
+            - button "add9" [ref=f1e20] [cursor=pointer]
+            - button "7" [ref=f1e21] [cursor=pointer]
+            - button "maj7" [ref=f1e22] [cursor=pointer]
+            - button "6" [ref=f1e23] [cursor=pointer]
+            - button "9" [ref=f1e24] [cursor=pointer]
+            - button "sus4" [ref=f1e25] [cursor=pointer]
+            - button "×" [ref=f1e26]
+          - button "+ Add chord" [ref=f1e27]
+          - generic [ref=f1e28]:
+            - button "strict extensions" [ref=f1e29] [cursor=pointer]
+            - generic [ref=f1e31]:
+              - text: max gap
+              - spinbutton "max gap" [ref=f1e32]: "0"
+            - button "transpose-invariant" [ref=f1e33] [cursor=pointer]
+        - generic [ref=f1e35]:
+          - generic [ref=f1e36]:
+            - text: max results
+            - spinbutton "max results" [ref=f1e37]: "20"
+          - button "Search" [ref=f1e38]
+      - group [ref=f1e39]:
+        - generic "Vocabulary" [ref=f1e40] [cursor=pointer]
+    - text: ▾

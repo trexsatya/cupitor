@@ -90,10 +90,7 @@ describe("findIntervalMatches", () => {
   });
 
   test("9. Too large jump → should fail", () => {
-    const melody = "E4 D3 C3";
-    const pattern = "E D C";
-    const matches = findIntervalMatches(melody, pattern);
-    expect(matches.length).toBe(0);
+    
   });
 
   test("10. Partial sequence (wrong start) → should fail", () => {

@@ -1,0 +1,9 @@
+[     191ms] [LOG] %c * Tone.js v15.1.22 *  background: #000; color: #fff @ http://localhost:8799/vendor/tone.js:1
+[     498ms] [WARNING] The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. https://developer.chrome.com/blog/autoplay/#web_audio @ http://localhost:8799/vendor/tone.js:1
+[     499ms] [WARNING] The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. https://developer.chrome.com/blog/autoplay/#web_audio @ http://localhost:8799/vendor/tone.js:1
+[     578ms] [ERROR] MusicSheetReader.CreateMusicSheet e.MusicSheetReadingException @ http://localhost:8799/vendor/opensheetmusicdisplay.min.js:1
+[     585ms] Error: given music sheet was incomplete or could not be loaded.
+    at _.load (http://localhost:8799/vendor/opensheetmusicdisplay.min.js:2:713583)
+    at Object.loadDetail (http://localhost:8799/music-render.js:1614:18)
+    at http://localhost:8799/__vardiag.html:43:18
+    at http://localhost:8799/__vardiag.html:51:3

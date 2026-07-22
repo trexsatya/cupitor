@@ -94,7 +94,7 @@ export function matchingPositions(lines, re) {
 // before the anchor and fill trailing context, always covering the anchor cue.
 // Returns { fromPos, toPos, timeStart, timeEnd }. Never throws.
 export function contiguousClipWindow(cues, anchorPos, opts = {}) {
-  const gapThreshold = opts.gapThreshold == null ? 1.5 : opts.gapThreshold;
+  const gapThreshold = opts.gapThreshold == null ? 2.5 : opts.gapThreshold;
   const maxDuration = opts.maxDuration == null ? 25 : opts.maxDuration;
   const arr = cues || [];
   const n = arr.length;

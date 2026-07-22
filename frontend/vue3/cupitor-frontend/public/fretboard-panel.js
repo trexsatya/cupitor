@@ -75,6 +75,35 @@ export function stringArrows(voicing, seq, matchOctave) {
   return arrows;
 }
 
+// MIDI number for a standard-tuning note {name, octave}. The tuning table spells notes with sharps
+// only, so a sharp semitone map is sufficient; C4 = 60 (octave "4"). null when unresolvable. Local
+// so the pure helper below has no DOM/module coupling.
+const SEMITONE = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 };
+function midiOfNote(name, octave) {
+  const s = SEMITONE[name];
+  if (s == null) return null;
+  const o = parseInt(octave, 10);
+  if (Number.isNaN(o)) return null;
+  return (o + 1) * 12 + s;
+}
+
+// PURE: "string:fret" keys of a voicing's positions whose sounding note's MIDI is in `highlightMidis`
+// (a Set of MIDI numbers — a variation's ADDED notes). A voicing position carries only { string, fret }
+// (see voicingsForNotes), so pitch identity is recovered via noteAt(string,fret) → {name,octave} and
+// converted to MIDI. Matching by MIDI is register-exact and enharmonic-proof (the sheet's added-note
+// marks carry MIDI too). Empty set for a missing voicing or empty highlight set.
+export function extraKeysForVoicing(voicing, highlightMidis) {
+  const keys = new Set();
+  if (!voicing || !highlightMidis || !highlightMidis.size) return keys;
+  voicing.forEach((p) => {
+    const nm = noteAt(p.string, p.fret);
+    if (!nm) return;
+    const midi = midiOfNote(nm.name, nm.octave);
+    if (midi != null && highlightMidis.has(midi)) keys.add(`${p.string}:${p.fret}`);
+  });
+  return keys;
+}
+
 // Wire the panel. `renderer` is a createMusicRenderer instance; `dom` holds the panel elements;
 // `hooks.playSequence(events)` sounds a step's notes as they read on the sheet (injected by the
 // page so the fretboard reuses the main player/instrument); `events` is [{midi, beat, durBeats}].
@@ -94,9 +123,11 @@ export function init(renderer, dom, hooks = {}) {
     selectedPathIdx: 0,
     stepIdx: 0,
     overrides: new Map(),       // stepIdx → voicingIdx
+    highlightMidis: new Set(),  // MIDI numbers of ADDED notes to ring (segment-embellishment variation)
     playing: false,
     timer: null,
     speedMs: 900,
+    stepRenderer: renderer,     // sheet whose cursor follows stepping — main renderer, or a variation's (set per capture)
   };
 
   function setMsg(text) { if (dom.msg) dom.msg.textContent = text || ''; }
@@ -123,12 +154,15 @@ export function init(renderer, dom, hooks = {}) {
     }
     if (!steps.length) {
       if (renderer.clearStepHighlight) renderer.clearStepHighlight();
+      if (renderer.hideCursor) renderer.hideCursor();   // nothing to track on the main sheet
       setMsg(state.source === 'matched' ? 'No motifs — run Find pattern (Motifs panel) first.'
         : state.source === 'phrases' ? 'No phrases with notes on the sheet — create one in the Phrases panel first.'
         : 'No chords to capture — guess chords or select a window first.');
       return;
     }
     setMsg('');
+    state.highlightMidis = new Set();   // a normal capture never rings extra notes
+    state.stepRenderer = renderer;      // main-sheet sources → the cursor follows the main preview
     state.steps = steps;
     // Match-octave on → place notes at their exact written register AND allow two notes on the same
     // string (show every sheet note where it sounds). Off → drop the octave so each note resolves to
@@ -140,6 +174,25 @@ export function init(renderer, dom, hooks = {}) {
     state.selectedPathIdx = 0;
     state.stepIdx = 0;
     state.overrides = new Map();
+    populatePaths();
+    render();
+  }
+
+  // Capture steps supplied DIRECTLY (bypassing the renderer's chord/window/pattern sources), for the
+  // segment-embellishment variation view: the caller passes a variation's steps and the MIDI numbers
+  // of its ADDED notes, which get ringed on the fretboard. Mirrors capture()'s voicing/path logic.
+  function captureSteps(steps, { highlightMidis, cursorRenderer } = {}) {
+    stopPlay();
+    state.stepRenderer = cursorRenderer || renderer;   // e.g. the variation sheet's renderer, so its cursor follows
+    state.steps = steps || [];
+    const opts2 = { requirePlayable: state.requirePlayable, requireDistinctStrings: !state.matchOctave };
+    state.stepVoicings = state.steps.map((s) =>
+      state.matchOctave ? voicingsForNotes(s.notes, opts2) : voicingsForNotes(s.notes.map((n) => ({ name: n.name })), opts2));
+    state.paths = findPaths(state.stepVoicings);
+    state.selectedPathIdx = 0;
+    state.stepIdx = 0;
+    state.overrides = new Map();
+    state.highlightMidis = new Set(highlightMidis || []);
     populatePaths();
     render();
   }
@@ -179,11 +232,21 @@ export function init(renderer, dom, hooks = {}) {
     // Movement arrows for strings that carry several notes (only meaningful in match-octave mode,
     // where two notes can share a string). Sheet order comes from the step's `seq`.
     const arrows = stringArrows(curVoicing, (state.steps[state.stepIdx] || {}).seq, state.matchOctave);
+    // Ring the current voicing's ADDED notes (only for a captureSteps() with highlightMidis; empty
+    // for normal captures, so the base fretboard behavior is unchanged).
+    const extra = (state.highlightMidis && state.highlightMidis.size)
+      ? extraKeysForVoicing(curVoicing, state.highlightMidis) : new Set();
     const curStep = state.steps[state.stepIdx];
-    renderFretboard(dom.svg, { trail, highlight, arrows, labelMode: state.showNoteName ? 'note' : 'fret',
+    renderFretboard(dom.svg, { trail, highlight, arrows, extra, labelMode: state.showNoteName ? 'note' : 'fret',
       label: curStep && curStep.name && curStep.name !== 'window' ? curStep.name : '' });
     // Shade the sheet segment (measure band behind the notes) for the current step, tracking stepping.
     if (renderer.highlightStepMeasures) renderer.highlightStepMeasures((state.steps[state.stepIdx] || {}).measures || null);
+    // Move the sheet cursor to the current step so the score follows the fretboard. `stepRenderer` is
+    // whichever sheet these steps came from (main preview, or a variation). The step's earliest event
+    // beat is its absolute onset; a step without events just leaves the cursor put.
+    if (state.stepRenderer && state.stepRenderer.showCursorAtBeat && curStep && curStep.events && curStep.events.length) {
+      state.stepRenderer.showCursorAtBeat(Math.min(...curStep.events.map((e) => e.beat)));
+    }
     const step = state.steps[state.stepIdx];
     if (dom.stepLabel) dom.stepLabel.textContent =
       state.steps.length ? `${state.stepIdx + 1} / ${state.steps.length} — ${step ? step.name : ''}` : '—';
@@ -286,8 +349,12 @@ export function init(renderer, dom, hooks = {}) {
   if (dom.shapePrev) dom.shapePrev.addEventListener('click', () => cycleShape(-1));
   if (dom.shapeNext) dom.shapeNext.addEventListener('click', () => cycleShape(+1));
   if (dom.panel) dom.panel.addEventListener('toggle', () => {
-    if (!dom.panel.open) { stopPlay(); if (renderer.clearStepHighlight) renderer.clearStepHighlight(); }
-    else if (state.steps.length) render();   // re-apply the step band when re-opened
+    if (!dom.panel.open) {
+      stopPlay();
+      if (renderer.clearStepHighlight) renderer.clearStepHighlight();
+      if (state.stepRenderer && state.stepRenderer.hideCursor) state.stepRenderer.hideCursor();   // stop tracking the sheet cursor
+    }
+    else if (state.steps.length) render();   // re-apply the step band + cursor when re-opened
     else capture();                          // first open (nothing captured yet) → capture current source
   });
 
@@ -315,5 +382,5 @@ export function init(renderer, dom, hooks = {}) {
     if (dom.panel && dom.panel.open) capture();
   }
 
-  return { capture, reset, setSource, _state: state }; // _state exposed for debugging only
+  return { capture, captureSteps, reset, setSource, _state: state }; // _state exposed for debugging only
 }

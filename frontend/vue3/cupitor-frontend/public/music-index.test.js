@@ -29,6 +29,7 @@ describe('index assembly', () => {
     expect(entry.detailPath).toBe('details/jethalal_bgm.json');
     expect(entry.contentHash).toBe(fnv1a(txt));
     expect(entry.tags).toEqual([]);   // new pieces start untagged
+    expect(entry.guessedKey).toMatch(/^[A-G][#b]? (major|minor)$/);   // Krumhansl guess, e.g. "G# minor"
   });
 
   test('splitTiers: detail carries voices + inline source', () => {

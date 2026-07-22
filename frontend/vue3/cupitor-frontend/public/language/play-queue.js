@@ -208,3 +208,28 @@ export function computeResumePoint(map, collection, recName, mode) {
   const remaining = live.length - pos
   return { queue: live, pos, message: resumePromptMessage(recName, m, remaining, live.length) }
 }
+
+// Reconcile the app's rec-play pause state with the YouTube player's ACTUAL
+// state during the clip poll (see _waitYTUntilEnd). Headset buttons / hardware
+// media keys pause or resume the YT iframe directly, bypassing the app's pause
+// button — so the app must mirror the player or its clip timer keeps running
+// (and auto-advances) while the video sits paused. Pure so the tricky guards
+// are unit-testable without a live player.
+//
+// Returns 'pause' | 'resume' | null (leave as-is):
+//   appPaused    — window._recPlayPaused (does the app think it's paused?)
+//   playerState  — YT.PlayerState: 1=PLAYING, 2=PAUSED (others ignored here)
+//   everPlayed   — has the clip actually started (playhead advanced)? Guards
+//                  against treating a slow initial load as a user pause.
+//   sinceCmdMs   — ms since the app itself last commanded the player (pause/play
+//                  button). Within `graceMs` we don't trust playerState: the
+//                  player may still be transitioning to the commanded state, and
+//                  acting on the stale reading would instantly undo the command.
+//   graceMs      — grace window (default 800ms).
+export function recPlayExternalPauseAction({ appPaused, playerState, everPlayed, sinceCmdMs, graceMs = 800 }) {
+  if (!everPlayed) return null
+  if (sinceCmdMs != null && sinceCmdMs < graceMs) return null
+  if (!appPaused && playerState === 2) return 'pause'   // player paused behind our back
+  if (appPaused && playerState === 1) return 'resume'   // player resumed behind our back
+  return null
+}

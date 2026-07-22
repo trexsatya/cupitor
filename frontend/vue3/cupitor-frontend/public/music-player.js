@@ -10,6 +10,7 @@ export const NOTE_TYPE_BEATS = {
   '16th': 0.25, '32nd': 0.125, '64th': 0.0625, '128th': 0.03125,
 };
 const DEFAULT_BEATS = 1; // quarter, used when duration is null/unknown (e.g. note-text)
+const GRACE_BEATS = 0.25; // a grace note carries no <duration>; sound it this briefly, just before its principal
 
 // Pure: turn the primary voice into [{ midi, time, duration }] (seconds), optionally
 // restricted to a measure range and re-zeroed so the segment starts at t=0.
@@ -174,7 +175,17 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
 
           const midi = pitchToMidi(el);
           if (midi == null) { if (!isChord) { cursor += durBeats; lastOnset = cursor; } continue; }
-          if (durBeats <= 0) continue; // grace note: no duration, occupies no time
+          if (durBeats <= 0) {
+            // A grace note (acciaccatura) carries no <duration>, so it doesn't occupy the timeline.
+            // Sound it as a short note ending at its principal's onset (`cursor`), clamped so its beat
+            // is never negative — a negative onset would desync the OSMD cursor (which is forward-only
+            // from beat 0). It does NOT advance `cursor`, so the principal keeps its true onset.
+            if (el.querySelector('grace')) {
+              const graceLen = cursor > 0 ? Math.min(GRACE_BEATS, cursor) : GRACE_BEATS;
+              events.push({ midi, beats: Math.max(0, cursor - graceLen), durBeats: graceLen, measure: mNum, grace: true });
+            }
+            continue; // grace steals time from the beat; it never consumes/advances the timeline
+          }
 
           const onset = isChord ? lastOnset : cursor;
           const tieTypes = tieTypesOf(el);
@@ -287,7 +298,7 @@ export function soundfontSampleMap(instrument, { baseUrl = SOUNDFONT_BASE, forma
 // Browser glue: drive Tone.js from a buildSchedule() result and follow with the OSMD cursor.
 // opts.Tone defaults to the global Tone (vendored UMD). opts.getCursor returns the OSMD
 // cursor (or null) lazily so the player isn't coupled to a specific renderer instance.
-export function createMusicPlayer({ Tone, getCursor } = {}) {
+export function createMusicPlayer({ Tone, getCursor, onEnd } = {}) {
   const T = Tone || (typeof globalThis !== 'undefined' ? globalThis.Tone : undefined);
   if (!T) throw new Error('Tone.js is not available');
   // Fallback timbres (no samples) — used offline or if the soundfont can't load. All are
@@ -453,6 +464,9 @@ export function createMusicPlayer({ Tone, getCursor } = {}) {
         else { c.reset(); c.hide(); }
       } catch (_) {}
     }
+    // Notify the caller ONLY on a natural completion (the scheduled boundary stop), so a play/stop
+    // toggle can reset its label. A user stop (bare call) already knows it stopped.
+    if (natural && onEnd) { try { onEnd(); } catch (_) {} }
   }
 
   return {

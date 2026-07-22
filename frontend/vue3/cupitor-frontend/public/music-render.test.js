@@ -1,5 +1,6 @@
 import { measureRangeFromNoteRange } from './music-render.js';
 import { collapsedChordSpans } from './music-render.js';
+import { chordToneNotesInMeasures } from './music-render.js';
 import { measureRangeFromChordMatch } from './music-render.js';
 import { responsiveZoom } from './music-render.js';
 import { createMusicRenderer } from './music-render.js';
@@ -83,6 +84,36 @@ const haveChopin = (() => { try { return fs.existsSync(CHOPIN); } catch (_) { re
   });
 });
 
+describe('chordToneNotesInMeasures', () => {
+  // byMeasure keyed by absolute measure number; each note carries a pitch-class `name`.
+  const byMeasure = {
+    21: [{ name: 'D', el: 'd1' }, { name: 'F', el: 'f1' }, { name: 'A', el: 'a1' }, { name: 'E', el: 'e1' }],
+    22: [{ name: 'A', el: 'a2' }, { name: 'C', el: 'c2' }, { name: 'E', el: 'e2' }],
+    23: [{ name: 'B', el: 'b3' }, { name: 'D', el: 'd3' }, { name: 'F', el: 'f3' }],
+  };
+  test('picks only the chord-tone notes within the given measure range', () => {
+    // Dm (= D,F,A) at measure 21 only: E is not a chord tone and is excluded.
+    const notes = chordToneNotesInMeasures(byMeasure, ['D', 'F', 'A'], [21, 21]);
+    expect(notes.map(n => n.el)).toEqual(['d1', 'f1', 'a1']);
+  });
+  test('spans several measures and skips notes outside the range', () => {
+    const notes = chordToneNotesInMeasures(byMeasure, ['B', 'D', 'F'], [22, 23]);
+    expect(notes.map(n => n.el)).toEqual(['b3', 'd3', 'f3']);   // Bdim tones live in measure 23
+  });
+  test('empty tones / bad range yield []', () => {
+    expect(chordToneNotesInMeasures(byMeasure, [], [21, 21])).toEqual([]);
+    expect(chordToneNotesInMeasures(byMeasure, ['D'], null)).toEqual([]);
+  });
+  test('offset shifts the sequential range to the rendered (printed) numbering', () => {
+    // Pickup piece: rendered notes are keyed by printed = sequential − 1. A chip whose chord sits at
+    // SEQUENTIAL measure 22 must look up printed measure 21 — without the offset it lands on 22 (wrong).
+    const notes = chordToneNotesInMeasures(byMeasure, ['D', 'F', 'A'], [22, 22], 1);
+    expect(notes.map(n => n.el)).toEqual(['d1', 'f1', 'a1']);   // printed 21 = the Dm measure
+    // no offset would grab measure 22 (A,C,E) — only A is a Dm tone
+    expect(chordToneNotesInMeasures(byMeasure, ['D', 'F', 'A'], [22, 22], 0).map(n => n.el)).toEqual(['a2']);
+  });
+});
+
 describe('measureRangeFromChordMatch', () => {
   const detail2 = {
     voices: [{
@@ -104,16 +135,33 @@ describe('measureRangeFromChordMatch', () => {
   test('returns null when no chords', () => {
     expect(measureRangeFromChordMatch({ voices: [{ chordSymbol: [], measureIndex: [] }] }, [0, 0])).toBeNull();
   });
-  test('multi-voice: returns a non-inverted covering range (regression)', () => {
-    // voice 2 measures are not globally monotonic vs voice 1; the old endpoint-only
-    // logic returned an inverted/shrunk [1,2]. Covering min/max must give [1,3].
+  test('multi-voice: chords collapse to one measure-ordered sequence (no per-voice copies)', () => {
+    // Both voices carry the same 4-measure progression (as inferChords produces). The
+    // collapsed list must be the single progression C/G/Am/F over measures 1..4 — NOT the
+    // progression repeated per voice. So index [0,3] resolves to the whole tune [1,4].
     const d = { voices: [
-      { chordSymbol: ['C', 'C', 'G', 'Am'], measureIndex: [1, 1, 2, 3], pitch: [1, 2, 3, 4], interval: [], sargam: [], duration: [], lyric: [] },
-      { chordSymbol: ['Am', 'F'],           measureIndex: [1, 2],       pitch: [9, 9],       interval: [], sargam: [], duration: [], lyric: [] }
+      { chordSymbol: ['C', 'C', 'G', 'Am', 'F'], measureIndex: [1, 1, 2, 3, 4], pitch: [1, 2, 3, 4, 5], interval: [], sargam: [], duration: [], lyric: [] },
+      { chordSymbol: ['C', 'G', 'Am', 'F'],       measureIndex: [1, 2, 3, 4],    pitch: [9, 9, 9, 9],    interval: [], sargam: [], duration: [], lyric: [] }
     ]};
-    const r = measureRangeFromChordMatch(d, [0, 3]);
-    expect(r[0]).toBeLessThanOrEqual(r[1]);   // never inverted
-    expect(r).toEqual([1, 3]);
+    expect(collapsedChordSpans(d).map(s => s.symbol)).toEqual(['C', 'G', 'Am', 'F']);
+    expect(measureRangeFromChordMatch(d, [0, 3])).toEqual([1, 4]);
+  });
+
+  test('multi-voice: a match near a voice seam stays tight, never spans the whole piece (regression)', () => {
+    // Reproduces the Besame Mucho bug: the OLD concatenation placed voice-0's last chord
+    // (measure 3) immediately before voice-1's first chord (measure 1), so a matched range
+    // straddling that seam resolved via MIN-start/MAX-end to the whole piece. The canonical
+    // measure-ordered sequence makes every 2-chord window map to at most 2 adjacent measures.
+    const d = { voices: [
+      { chordSymbol: ['C', 'G', 'Am'], measureIndex: [1, 2, 3], pitch: [1, 2, 3], interval: [], sargam: [], duration: [], lyric: [] },
+      { chordSymbol: ['C', 'G', 'Am'], measureIndex: [1, 2, 3], pitch: [9, 9, 9], interval: [], sargam: [], duration: [], lyric: [] }
+    ]};
+    const spans = collapsedChordSpans(d);
+    // any adjacent pair resolves to a span of <= 2 measures, never [1,3]
+    for (let i = 1; i < spans.length; i++) {
+      const [lo, hi] = measureRangeFromChordMatch(d, [i - 1, i]);
+      expect(hi - lo).toBeLessThanOrEqual(1);
+    }
   });
   test('missing range args return null (no throw)', () => {
     const d = { voices: [{ chordSymbol: ['C'], measureIndex: [1], pitch: [1], interval: [], sargam: [], duration: [], lyric: [] }] };
@@ -724,5 +772,66 @@ describe('swapOverlayLayer', () => {
     swapOverlayLayer(svg, 'lyr', (l) => { const t = document.createElementNS(SVG_NS, 'text'); t.textContent = '2'; l.appendChild(t); });
     expect(svg.querySelectorAll('g.lyr').length).toBe(1);
     expect(svg.querySelector('g.lyr text').textContent).toBe('2');
+  });
+});
+
+describe('highlightExtraNotes persistence', () => {
+  // OSMD's Pitch surface pitchClassFromPitch + the MIDI derivation rely on.
+  class FakePitch {
+    constructor(halfTone) { this.FundamentalNote = 0; this.Accidental = 0; this._h = halfTone; }
+    getHalfTone() { return this._h; }
+    static getNoteEnumString() { return 'C'; }
+    static accidentalVexflow() { return ''; }
+  }
+
+  // Fake OSMD whose render() REBUILDS the notehead SVG (fresh, default-colored <path>) — exactly
+  // what OSMD's deferred/font-load re-render does, wiping any paint we applied directly.
+  function fakeGraphicOsmd() {
+    const gnote = {
+      vfnote: [{ attrs: { el: null }, keys: ['c/4'] }],
+      vfnoteIndex: 0,
+      sourceNote: { Pitch: new FakePitch(48) },   // C4 → MIDI 60
+    };
+    const measure = { parentSourceMeasure: { MeasureNumber: 1 },
+      staffEntries: [{ graphicalVoiceEntries: [{ notes: [gnote] }] }] };
+    function rebuildNotehead() {
+      const root = document.createElement('div');
+      const head = document.createElement('span'); head.setAttribute('class', 'vf-notehead');
+      const path = document.createElement('path'); path.setAttribute('fill', '#000000');
+      head.appendChild(path); root.appendChild(head);
+      document.body.appendChild(root);              // connected → not skipped by the isConnected guard
+      gnote.vfnote[0].attrs.el = root;
+    }
+    return {
+      calls: [], Zoom: 1, Sheet: { SourceMeasures: [{}] },
+      graphic: { measureList: [[measure]] },
+      setOptions(o) { this.calls.push(['setOptions', o]); },
+      load() { this.calls.push(['load']); return Promise.resolve(); },
+      render() { this.calls.push(['render']); rebuildNotehead(); },
+      _gnote: gnote,
+    };
+  }
+  const fillOf = (osmd) => osmd._gnote.vfnote[0].attrs.el.querySelector('path').getAttribute('fill');
+
+  test('re-applies the added-note color after a re-render wipes the SVG', async () => {
+    const osmd = fakeGraphicOsmd();
+    const r = createMusicRenderer(document.createElement('div'), { osmdFactory: () => osmd });
+    await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
+    const n = r.highlightExtraNotes([{ measure: 1, midi: 60 }], '#C62828');
+    expect(n).toBe(1);
+    expect(fillOf(osmd)).toBe('#C62828');
+    // OSMD fires a deferred render (post-construction ~1ms / font load) that rebuilds the notehead.
+    osmd.render();
+    expect(fillOf(osmd)).toBe('#C62828');   // must be re-applied, not left default
+  });
+
+  test('loading a new piece drops stale added-note marks', async () => {
+    const osmd = fakeGraphicOsmd();
+    const r = createMusicRenderer(document.createElement('div'), { osmdFactory: () => osmd });
+    await r.loadDetail({ format: 'musicxml', source: '<a/>' });
+    r.highlightExtraNotes([{ measure: 1, midi: 60 }], '#C62828');
+    await r.loadDetail({ format: 'musicxml', source: '<b/>' });   // fresh piece — no marks
+    osmd.render();
+    expect(fillOf(osmd)).toBe('#000000');
   });
 });

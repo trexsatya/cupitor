@@ -215,27 +215,89 @@ export function filterByLanguage(searchResults, selectedLang) {
 // check against the raw vocab line so canned phrases like "göra susen"
 // still match a multi-word expression. Tolerant to garbage input — any
 // exception is swallowed and returns false.
-export function wordIsExactInVocabularyLine(vocabLine, search) {
+export function wordIsExactInVocabularyLine(vocabLine, search, strict=false) {
   try {
-    const vocabLineLower = (vocabLine || '').toLowerCase()
-    const vocabWords = getWords(vocabLine)
-      .filter(it => it.trim().length > 2)
-      .map(it => it.toLowerCase().trim())
+    // A vocab line is a set of `|`-separated PHRASES — each often multi-word
+    // like "göra susen" — optionally carrying bracket hints ("(do something)",
+    // or inline "stor(t)"). The phrases are the matching unit, NOT word-tokens:
+    // splitting into words (the old getWords approach) let a component word of a
+    // multi-word phrase falsely match ("susen" hitting "göra susen"), and a
+    // superword swallow a shorter one. Callers with the expansion map pass the
+    // line through expandWords first so inflected forms are covered too.
+    const stripHints = (str) => {
+      let r = String(str)
+      while (/\([^()]*\)/.test(r)) r = r.replace(/\([^()]*\)/, '')
+      return r
+    }
+    const phrases = String(vocabLine == null ? '' : vocabLine)
+      .split(SEPARATOR_PIPE)
+      .map(p => stripHints(p).trim().toLowerCase())
+      .filter(Boolean)
+    if (!phrases.length) return false
     const s = (search || '').toLowerCase().trim()
     if (!s) return false
-    if (vocabWords.includes(s)) return true
     const terms = s.split(SEPARATOR_PIPE).map(t => t.trim()).filter(Boolean)
     for (const t of terms) {
-      if (t.indexOf(' ') > 0) {
-        if (vocabLineLower.includes(t)) return true
-      } else if (vocabWords.includes(t)) {
-        return true
-      }
+      if (phrases.includes(t)) return true                          // exact phrase
+      // Non-strict recall: a MULTI-WORD search term may substring-match inside a
+      // phrase (e.g. "göra susen" inside the phrase "att göra susen igen"). A
+      // bare single word never substring-matches — that's the whole point.
+      if (!strict && t.indexOf(' ') > 0 && phrases.some(p => p.includes(t))) return true
     }
     return false
   } catch (_) {
     return false
   }
+}
+
+// Decide how a "search this word" action (the Player / Practice 🔎 button)
+// should reflect `word` in the vocabulary picker. `options` are the candidate
+// picker entries, each `{ text, category }` where `text` is a possibly
+// `|`-separated vocab line like "sven|svenner|…" and `category` is that line's
+// vocabulary category (or null/unknown). `category` (3rd arg) is the CONTEXT
+// category to prefer — e.g. the category of the playlist being played.
+//
+// Returns { index, showAll }:
+//   • index >= 0  → select that single option (narrows the search to that line)
+//   • showAll:true (index -1) → don't narrow; leave the broad phrase search
+//     showing every matching line.
+//
+// Rules:
+//   • No exact whole-word match → fall back to the first whole-word-contains
+//     option, then the first substring match (so a word still anchors on
+//     something); index -1 only if nothing matches at all.
+//   • Exactly one exact match → select it (so "sven" selects "sven|svenner|…"
+//     and NOT the superword "körsven|…" that merely contains it).
+//   • More than one exact match → disambiguate by the context category:
+//       – context category given AND exactly one exact match is in it → select
+//         that one.
+//       – otherwise (no context category, it matches none, or it matches
+//         several) → showAll — don't filter to an arbitrary first match.
+export function pickVocabOptionForWord(word, options, category = null) {
+  const w = (word == null ? '' : String(word)).trim()
+  if (!w) return { index: -1, showAll: false }
+  const opts = Array.isArray(options) ? options : []
+  const textOf = o => (o && typeof o.text === 'string') ? o.text : null
+
+  const exactIdxs = []
+  opts.forEach((o, i) => { const t = textOf(o); if (t != null && wordIsExactInVocabularyLine(t, w, true)) exactIdxs.push(i) })
+
+  if (exactIdxs.length === 0) {
+    const containsIdx = opts.findIndex(o => { const t = textOf(o); return t != null && wordIsExactInVocabularyLine(t, w, false) })
+    if (containsIdx >= 0) return { index: containsIdx, showAll: false }
+    const wl = w.toLowerCase()
+    const subIdx = opts.findIndex(o => { const t = textOf(o); return t != null && t.toLowerCase().includes(wl) })
+    return { index: subIdx, showAll: false }
+  }
+  if (exactIdxs.length === 1) return { index: exactIdxs[0], showAll: false }
+
+  // Multiple exact matches — try to narrow by the context category.
+  const cat = category == null ? '' : String(category)
+  if (cat) {
+    const inCat = exactIdxs.filter(i => opts[i] && opts[i].category === cat)
+    if (inCat.length === 1) return { index: inCat[0], showAll: false }
+  }
+  return { index: -1, showAll: true }
 }
 
 // Does ANY `|`-segment of any line in `allWords` contain `word` as an exact

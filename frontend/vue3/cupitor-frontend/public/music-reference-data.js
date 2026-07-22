@@ -253,6 +253,23 @@ export function deNormaliseChordName(name) {
   return name.replaceAll("M7", "maj7").replaceAll("o", "dim").replaceAll("m", "min").replaceAll( "+", "aug")
 }
 
+// Reverse of normaliseChordName, built by inverting the map over the actual allChords keys (robust,
+// unlike deNormaliseChordName's blind string replaces). search.chords stores normalised names, so this
+// lets a matched chip resolve back to its allChords entry to look up its tones.
+const KEY_BY_NORMALISED = {};
+Object.keys(allChords).forEach(k => {
+  const n = normaliseChordName(k);
+  if (!(n in KEY_BY_NORMALISED)) KEY_BY_NORMALISED[n] = k;
+});
+
+// Resolve a chord name (either the search-normalised form, e.g. "Am"/"Bo", or a raw allChords key,
+// e.g. "Amin"/"Bdim") to { key, root, notes }, or null if unknown.
+export function chordByAnyName(name) {
+  if (!name) return null;
+  const key = allChords[name] ? name : KEY_BY_NORMALISED[name];
+  return (key && allChords[key]) ? { key, ...allChords[key] } : null;
+}
+
 
 export const findChordsWithAChromaticNote = chordTones => {
   const {cc1, cc2} = chromaticScales();

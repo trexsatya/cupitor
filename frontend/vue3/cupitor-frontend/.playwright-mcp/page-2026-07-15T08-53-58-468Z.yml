@@ -1,0 +1,3 @@
+- generic [active] [ref=e1]:
+  - button "Play" [ref=e2]
+  - button "Silence m2 first note" [ref=e3]

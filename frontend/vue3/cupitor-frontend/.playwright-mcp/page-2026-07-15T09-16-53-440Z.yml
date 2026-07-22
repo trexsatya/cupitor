@@ -1,0 +1,234 @@
+- generic [active] [ref=f7e1]:
+  - heading "Music study — western" [level=2] [ref=f7e2]
+  - group [ref=f7e3]:
+    - generic "Manage library (add / rebuild / push pieces)" [ref=f7e4] [cursor=pointer]
+    - option "All keys" [selected]
+    - option "A major"
+    - option "A minor"
+    - option "B major"
+    - option "B minor"
+    - option "C major"
+    - option "C# major"
+    - option "C# minor"
+    - option "D major"
+    - option "D minor"
+    - option "E major"
+    - option "E minor"
+    - option "F major"
+    - option "F minor"
+    - option "G major"
+    - option "G minor"
+  - group [ref=f7e5]:
+    - generic "🗓️ Practice Log" [ref=f7e6] [cursor=pointer]
+    - option "— none —" [selected]
+    - option "A_Time_For_Us.mscz"
+    - option "Chopin_Nocturne_Op.9_No.2_for_Solo_Guitar"
+    - option "BULERIAS.mscz"
+    - option "Flamenco-_Solea-_Compas__Falseta.mscz"
+    - option "Entre_dos_agua_voz_solista.mscz"
+    - option "Tango_Flamenco.mscz"
+    - option "cuban-dance-anonymous.mxl.tmp"
+    - option "valsa-sem-nome.mxl.tmp"
+    - option "12_Variations_of_Twinkle_Twinkle_Little_Star.mscz"
+    - option "Tarrega_-_Ave_Maria_-_Tab.mscz"
+    - option "Autumn_Leaves.mscz"
+    - option "Albeniz_Isaac_Malaguena_Op._165.mscz"
+    - option "Besame_mucho.mscz"
+    - option "Capricho_Arabe_-_Francisco_Tarrega_-_Tab.mscz"
+    - option "Canarios_-_Gasper_Sanz.mscz"
+    - option "Cardoso_Jorge_Milonga.mscz"
+    - option "Cavatina.mscz"
+    - option "el_condor_pasa.mscz"
+    - option "Feste_Lariane__Luigi_Mozzani.mscz"
+    - option "Fr_Elise__Noten_und_Tabulatur_fr_Gitarre.mscz"
+    - option "Gnossienne_No.1.mscz"
+    - option "Gnossienne_No.2_-_Erik_Satie_-_Solo_guitar.mscz"
+    - option "Gnossienne_No.3_-_Erik_Satie_-_Solo_guitar.mscz"
+    - option "GranVals.mscz"
+    - option "Greensleeves__variations_for_solo_guitar.mscz"
+    - option "Je_te_veux.mscz"
+    - option "Lagrima_-_Francisco_Tarrega.mscz"
+    - option "Malaguena_from_the_spanish_suite_Andalucia_by_E._Lecuona.mscz"
+    - option "Manha_de_Carnival_Theme_and_Fantasy_for_Solo_Guitar.mscz"
+    - option "Mariage_Damourmengzhongdehunli.mscz"
+    - option "Mi_Favorita.mscz"
+    - option "Moon_River.mscz"
+    - option "Moonlight_Sonata(1).mscz"
+    - option "Recuerdos_de_la_Alhambra_Francisco_Tarrega.mscz"
+    - option "Prelude_in_C_Major-Bach_guitarTAB.mscz"
+    - option "Pavan_The_Earl_of_Salisbury.mscz"
+    - option "New_Cinema_Paradiso_-_Guitar.mscz"
+    - option "samba-em-preludio.mxl"
+    - option "samba-do-aviao-antonio-carlos-jobim-samba-do-aviao-by-antonio-carlos-jobim.mxl"
+    - option "Romance_de_Amor_for_Guitar_Tabei_version.mscz"
+    - option "Song_From_a_Secret_Garden.mscz"
+    - option "SOLEA.mscz"
+    - option "Serenade__Franz_Schubert.mscz"
+    - option "sons-de-carrilhoes.mxl"
+    - option "Tarrega_-_Recuerdos_De_La_Alhambra_-_Tab.mscz"
+    - option "Un_Da_de_Noviembre__Leo_Brouwer.mscz"
+    - option "Valse_Venezolanos_No.3_Natalia.mscz"
+    - option "Etude_No.4_Op.48__Mauro_Giuliani.mscz"
+    - option "Etude_No.14_Op.60_-__Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Villa-Lobos_H._-_Etude_1.mscz"
+    - option "Etude_No.2_from_12_Etudes__H._Villa-Lobos.mscz"
+    - option "Etude_No.1_Op.60_-_Matteo_Carcassi_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_2_A_Des_arpeges__Heitor_Villa-Lobos.mscz"
+    - option "Estudio_de_Concierto_No._1__Agustn_Barrios_Mangor.mscz"
+    - option "Baiao.mscz"
+    - option "Brouwer-Lobos_Etude_1.6.mscz"
+    - option "Asturias.mscz"
+    - option "antonio-carlos-jobim-wave-guitar-tab.mxl"
+    - option "antonio-carlos-jobim-the-girl-from-ipanema-guitar-tab.mxl"
+    - option "antonio-carlos-jobim-desafinado-guitar-tab.mxl"
+    - option "danza-ungherese-n-5.mxl"
+    - option "El_Noi_De_La_Mare_segovia_version.mscz"
+    - option "El_Choclo.mscz"
+    - option "El_choclo_terminado.mscz"
+    - option "El_Carnaval_de_Venecia.mscz"
+    - option "1-pharaon-gipsy-kings-notes-and-tablature-for-guitar-guitar-1-part.mxl.tmp"
+    - option "danza-espanola-no-5-andaluza-enrique-granados.mxl.tmp"
+    - option "el-choclo.mxl.tmp"
+    - option "en-los-trigales.mscz.tmp"
+    - option "entre-dos-agua-voz-solista.mxl.tmp"
+    - option "fandanguillo-para-guitarra-op36-joaquin-turina.mxl.tmp"
+    - option "fantanguillo-moreno-torroba.mxl.tmp"
+    - option "gabriel-blockert-homenaje-a-turina.mxl.tmp"
+    - option "guitar-solo-la-cumparsita.mxl.tmp"
+    - option "joaquin-turina-fandanguillo.mxl.tmp"
+    - option "joaquin-turina-guitar-sonata.mxl.tmp"
+    - option "joaquin-turina-sevillana.mxl.tmp"
+    - option "la-cumparsita-g-matos-rodriguez-1897-1948.mxl.tmp"
+    - option "orgia-joaquin-turina.mxl.tmp"
+    - option "romance-de-los-pinos-frederico-moreno-torroba.mxl.tmp"
+    - option "sacro-monte-op-55-no-5-joaquin-turina.mxl.tmp"
+    - option "siete-piezas-de-album-i-segoviana-federico-moreno-torroba.mxl.tmp"
+    - option "suite-castellana-fandanguillo-federico-moreno-torroba.mxl.tmp"
+    - option "torija-elegia-federico-moreno-torroba.mxl.tmp"
+    - option "Adelita_-_Francisco_Tarrega_-_Tab.mscz"
+    - option "Al_di_Meola__Paco_de_Lucia_Mediterranean_Sundance.mscz"
+    - option "AL_DI_MEOLA_solo_from_Mediterranean_Sundance.mscz"
+    - option "Amanecer.mscz"
+    - option "Andre_Lavor__-_Suite_Colombiana_n_2_-_Porro.mscz"
+    - option "Andre_Lavor_-_BWV_1004_-_Bach_Chacona_Chaconne.mscz"
+    - option "Bach_Cello_Suite_1_IN_G_MAJOR_BMV_1007_Prelude_drop_C_guitar.mscz"
+    - option "Bach_Cello_Suite_No._1_in_G_Major_For_Guitar.mscz"
+    - option "Bach_Cello_Suite_No.2_in_D_Minor_Courante_For_Classical_GuitarTAB_.mscz"
+    - option "Carlo_Domeniconi_-_Koyunbaba_suite_for_guitar.mscz"
+    - option "Chaconne_BWV_1004__Johann_Sebastian_Bach.mscz"
+    - option "Clair_de_Lune_Guitar.mscz"
+    - option "Clair_De_Lune.mscz"
+    - option "Concierto_de_Aranjuez.mscz"
+    - option "Flamenco_Breeze.mscz"
+    - option "Heitor_Villa_Lobos_Prelude_No_1.mscz"
+    - option "Introduction_and_Variations_on_a_Theme_by_Mozart_Op_9_Fernando_Sor.mscz"
+    - option "J_S_Bach_Fuge_BWV_1001_w_fingering.mscz"
+    - option "J._S._Bach_-_Bourree_in_E_minor_BWV_996.mscz"
+    - option "J._S._Bach_BWV_999_Prelude.mscz"
+    - option "J.S._Bach_-_Minuet_in_G_major_BWV_Anh_114_Classic_Guitar_.mscz"
+    - option "J.S._Bach_BWV_998_Prelude.mscz"
+    - option "Yukihiro_Yoko_-_Sakura.mscz"
+    - option "Variations_on_a_Spanish_March.mscz"
+    - option "Variations_on_The_Carnival_Of_Venice.mscz"
+    - option "Toccata_11.mscz"
+    - option "Suite_Espanola_Gaspar_Sanz.mscz"
+    - option "Spanish_Fandango.mscz"
+    - option "Allegro_Moderato_Op.60_Nr._14__Matteo_Carcassi.mscz"
+    - option "Etude_No.25_Op.60_-_Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.24_Op.60_-_Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.23_Op.60_-_Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.22_Op.60_-_Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.21_Op.60_-_Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.20_Op.60_-_Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.19_Op.60_-_Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.18_Op.60_-__Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.17_Op.60_-__Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.16_Op.60_-__Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.15_Op.60_-__Carcassi_Matteo_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.14_Op.60_-__Carcassi_Matteo_1792_-_1853_-_Tablature(1).mscz"
+    - option "Etude_No.13_Op.60_-__Carcassi_Matteo_1792_-_1853.mscz"
+    - option "Etude_No.11_Op.60_-_Matteo_Carcassi_1792_-_1853.mscz"
+    - option "Etude_No.9_Op.60_-_Matteo_Carcassi_1792_-_1853_.mscz"
+    - option "Etude_No.8_Op.60_-_Matteo_Carcassi_1792_-_1853.mscz"
+    - option "Etude_No.7_Op.60_-_Matteo_Carcassi_1792_-_1853_-_Tablature.mscz"
+    - option "Etude_No.6_Op.60_-_Matteo_Carcassi_1792_-_1853.mscz"
+    - option "Etude_No.5_Op.60_-_Matteo_Carcassi_1792_-_1853.mscz"
+    - option "Etude_No.4_Op.60_-_Matteo_Carcassi_1792_-_1853_.mscz"
+    - option "Etude_No.3_Op.60_-_Matteo_Carcassi_1792_-_1853_.mscz"
+    - option "Etude_ndeg10_op.60_-_Matteo_Carcassi_1792_-_1852.mscz"
+    - option "Carcassi_Study_in_A_minor_Op._60_no._7(1).mscz"
+    - option "Carcassi_Etude_No.12_Op.60.mscz"
+    - option "BROUWER-Leo_ETUDES-SIMPLES.mscz"
+    - option "Sor_op._6 — No. 1 (Allegro moderato)"
+    - option "Sor_op._6 — No. 2 (Andante Allegro)"
+    - option "Sor_op._6 — No. 3 (Andante)"
+    - option "Sor_op._6 — No. 4 (Allegretto)"
+    - option "Sor_op._6 — No. 5 (Andante)"
+    - option "Sor_op._6 — No. 6 (Allegro)"
+    - option "Sor_op._6 — No. 7 (Allegro)"
+    - option "Sor_op._6 — No. 8 (Andantino)"
+    - option "Sor_op._6 — No. 9 (Andante agitato)"
+    - option "Sor_op._6 — No. 10 (Moderato)"
+    - option "Sor_op._6 — No. 11 (Allegro moderato)"
+    - option "Sor_op._6 — No. 12 (Andante)"
+    - option "Sor-Op35 — No. 17"
+    - option "Sor-Op35 — No. 22"
+    - option "Sor-Op35 — No. 24"
+    - option "Planned" [selected]
+    - option "In progress"
+    - option "Done"
+    - option "Planned" [selected]
+    - option "In progress"
+    - option "Done"
+  - generic [ref=f7e7]:
+    - generic [ref=f7e8]:
+      - generic [ref=f7e9]:
+        - generic [ref=f7e10]:
+          - generic [ref=f7e11]:
+            - radio "Chord" [checked] [ref=f7e12]
+            - text: Chord
+          - generic [ref=f7e13]:
+            - radio "Melody" [ref=f7e14]
+            - text: Melody
+        - generic [ref=f7e15]:
+          - generic [ref=f7e17]:
+            - combobox [ref=f7e18]:
+              - option "C" [selected]
+              - option "C#"
+              - option "D"
+              - option "D#"
+              - option "E"
+              - option "F"
+              - option "F#"
+              - option "G"
+              - option "G#"
+              - option "A"
+              - option "A#"
+              - option "B"
+            - combobox [ref=f7e19]:
+              - option "maj" [selected]
+              - option "min"
+              - option "dim"
+              - option "aug"
+            - button "add9" [ref=f7e20] [cursor=pointer]
+            - button "7" [ref=f7e21] [cursor=pointer]
+            - button "maj7" [ref=f7e22] [cursor=pointer]
+            - button "6" [ref=f7e23] [cursor=pointer]
+            - button "9" [ref=f7e24] [cursor=pointer]
+            - button "sus4" [ref=f7e25] [cursor=pointer]
+            - button "×" [ref=f7e26]
+          - button "+ Add chord" [ref=f7e27]
+          - generic [ref=f7e28]:
+            - button "strict extensions" [ref=f7e29] [cursor=pointer]
+            - generic [ref=f7e31]:
+              - text: max gap
+              - spinbutton "max gap" [ref=f7e32]: "0"
+            - button "transpose-invariant" [ref=f7e33] [cursor=pointer]
+        - generic [ref=f7e35]:
+          - generic [ref=f7e36]:
+            - text: max results
+            - spinbutton "max results" [ref=f7e37]: "20"
+          - button "Search" [ref=f7e38]
+      - group [ref=f7e39]:
+        - generic "Vocabulary" [ref=f7e40] [cursor=pointer]
+    - text: ▾

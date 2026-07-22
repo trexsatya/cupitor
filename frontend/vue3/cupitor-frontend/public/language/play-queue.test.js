@@ -9,6 +9,7 @@ import {
   reconstituteQueue,
   resumePromptMessage,
   computeResumePoint,
+  recPlayExternalPauseAction,
 } from "./play-queue";
 
 const it = (id, lineIndex, extra = {}) => ({ id, lineIndex, ...extra });
@@ -304,5 +305,43 @@ describe("computeResumePoint", () => {
     const out = computeResumePoint(map, coll, "P", "play");
     expect(out.pos).toBe(0);
     expect(out.queue.length).toBe(1);
+  });
+});
+
+describe("recPlayExternalPauseAction", () => {
+  const A = (o) => recPlayExternalPauseAction({ everPlayed: true, sinceCmdMs: 2000, ...o });
+
+  test("player paused behind our back → 'pause'", () => {
+    expect(A({ appPaused: false, playerState: 2 })).toBe("pause");
+  });
+  test("player resumed behind our back → 'resume'", () => {
+    expect(A({ appPaused: true, playerState: 1 })).toBe("resume");
+  });
+  test("in sync (both playing / both paused) → null", () => {
+    expect(A({ appPaused: false, playerState: 1 })).toBeNull();
+    expect(A({ appPaused: true, playerState: 2 })).toBeNull();
+  });
+  test("clip not started yet (everPlayed false) → null, so a slow load isn't a pause", () => {
+    expect(recPlayExternalPauseAction({ appPaused: false, playerState: 2, everPlayed: false, sinceCmdMs: 2000 }))
+      .toBeNull();
+  });
+  test("within the command grace window → null (player still settling, don't undo our own command)", () => {
+    // App just pressed pause (appPaused=true) but the player hasn't reached
+    // state 2 yet — without the grace, state 1 would be read as 'resume' and
+    // instantly undo the pause.
+    expect(recPlayExternalPauseAction({ appPaused: true, playerState: 1, everPlayed: true, sinceCmdMs: 100 }))
+      .toBeNull();
+    expect(recPlayExternalPauseAction({ appPaused: false, playerState: 2, everPlayed: true, sinceCmdMs: 100 }))
+      .toBeNull();
+  });
+  test("just past the grace window → acts again", () => {
+    expect(recPlayExternalPauseAction({ appPaused: true, playerState: 1, everPlayed: true, sinceCmdMs: 801 }))
+      .toBe("resume");
+  });
+  test("other player states (buffering/cued/unstarted) → null", () => {
+    [-1, 0, 3, 5].forEach((s) => {
+      expect(A({ appPaused: false, playerState: s })).toBeNull();
+      expect(A({ appPaused: true, playerState: s })).toBeNull();
+    });
   });
 });

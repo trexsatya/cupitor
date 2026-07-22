@@ -14,6 +14,7 @@ import {
   filterByLanguage,
   wordIsExactInVocabularyLine,
   vocabHasExactWord,
+  pickVocabOptionForWord,
 } from "./search-text";
 
 // Faux bracket-hint stripper that matches the production semantics for the
@@ -246,13 +247,13 @@ describe("filterByLanguage", () => {
 });
 
 describe("wordIsExactInVocabularyLine", () => {
-  test("matches a single-word search as a token", () => {
+  test("matches a single-word phrase", () => {
     expect(wordIsExactInVocabularyLine("(spell)|trolla|förtrolla|", "trolla")).toBe(true);
   });
-  test("does NOT match as substring of a longer token", () => {
+  test("does NOT match as substring of a longer word", () => {
     expect(wordIsExactInVocabularyLine("(spell)|trollguld|", "troll")).toBe(false);
   });
-  test("multi-word phrase falls back to substring match", () => {
+  test("matches a whole multi-word phrase", () => {
     expect(wordIsExactInVocabularyLine("(do)|göra susen|", "göra susen")).toBe(true);
   });
   test("|-separated search tries each term", () => {
@@ -260,6 +261,29 @@ describe("wordIsExactInVocabularyLine", () => {
   });
   test("empty search → false", () => {
     expect(wordIsExactInVocabularyLine("anything", "")).toBe(false);
+  });
+
+  // ── Phrase semantics: the pipe segments are PHRASES, not word tokens. ──
+  test("a bare component word does NOT match a multi-word phrase", () => {
+    // "göra"/"susen" are words inside the phrase "göra susen" — only the whole
+    // phrase matches. (The lenient wordIsInVocabularyLine tier handles word-level
+    // recall when no exact phrase matches.)
+    expect(wordIsExactInVocabularyLine("(do)|göra susen", "göra")).toBe(false);
+    expect(wordIsExactInVocabularyLine("(do)|göra susen", "susen")).toBe(false);
+  });
+  test("a superword phrase does NOT match a shorter search (sven ≠ körsven)", () => {
+    expect(wordIsExactInVocabularyLine("(driver)|körsven|körsvenner|kusk|kuskar", "sven")).toBe(false);
+    expect(wordIsExactInVocabularyLine("(lad)|sven|svenner|svenne|svennar", "sven")).toBe(true);
+  });
+  test("strips inline bracket hints from a phrase (stor(t) → stor)", () => {
+    expect(wordIsExactInVocabularyLine("(big)|stor(t)|stora", "stor")).toBe(true);
+  });
+  test("non-strict: a multi-word search substring-matches inside a phrase", () => {
+    expect(wordIsExactInVocabularyLine("(idiom)|att göra susen igen", "göra susen")).toBe(true);
+  });
+  test("strict: only exact phrase equality — no multi-word substring", () => {
+    expect(wordIsExactInVocabularyLine("(idiom)|att göra susen igen", "göra susen", true)).toBe(false);
+    expect(wordIsExactInVocabularyLine("(do)|göra susen", "göra susen", true)).toBe(true);
   });
 });
 
@@ -288,6 +312,51 @@ describe("vocabHasExactWord", () => {
       .toBe(false); // "stor(t)" strips to "stor", so "stort" is no longer an exact match
     expect(vocabHasExactWord(["(animal)|katt|", "(big)|stor|"], "katt", stripBracketHints))
       .toBe(true);
+  });
+});
+
+describe("pickVocabOptionForWord", () => {
+  const O = (text, category = null) => ({ text, category });
+
+  test("single exact match: prefers the whole-word line over a superword", () => {
+    // The Player 🔎 bug: "sven" must select "sven|svenner…", NOT the superword
+    // "körsven|körsvenner…" that appears first and merely contains "sven".
+    const opts = [O("körsven|körsvenner|körsvennerna"), O("sven|svenner|svennerna")];
+    expect(pickVocabOptionForWord("sven", opts)).toEqual({ index: 1, showAll: false });
+  });
+  test("single exact match: returns the whole-word option regardless of position", () => {
+    const opts = [O("sven|svenner"), O("körsven|körsvenner")];
+    expect(pickVocabOptionForWord("sven", opts)).toEqual({ index: 0, showAll: false });
+  });
+  test("no exact match: falls back to a substring match", () => {
+    expect(pickVocabOptionForWord("sven", [O("körsven|körsvenner")]))
+      .toEqual({ index: 0, showAll: false });
+  });
+  test("nothing matches → index -1, not showAll", () => {
+    expect(pickVocabOptionForWord("sven", [O("katt|katten"), O("hund")]))
+      .toEqual({ index: -1, showAll: false });
+  });
+  test("empty / falsy word → index -1", () => {
+    expect(pickVocabOptionForWord("", [O("sven|svenner")])).toEqual({ index: -1, showAll: false });
+    expect(pickVocabOptionForWord(null, [O("sven|svenner")])).toEqual({ index: -1, showAll: false });
+  });
+
+  // ── multiple exact matches: category disambiguation ──
+  test("multiple exact matches + no context category → show all (don't filter)", () => {
+    const opts = [O("sven|svenner", "lad"), O("sven|svennar", "servant")];
+    expect(pickVocabOptionForWord("sven", opts)).toEqual({ index: -1, showAll: true });
+  });
+  test("multiple exact matches + context category hits exactly one → select that one", () => {
+    const opts = [O("sven|svenner", "lad"), O("sven|svennar", "servant")];
+    expect(pickVocabOptionForWord("sven", opts, "servant")).toEqual({ index: 1, showAll: false });
+  });
+  test("multiple exact matches + context category hits several → show all", () => {
+    const opts = [O("sven|svenner", "lad"), O("sven|svennar", "lad"), O("sven|svenne", "servant")];
+    expect(pickVocabOptionForWord("sven", opts, "lad")).toEqual({ index: -1, showAll: true });
+  });
+  test("multiple exact matches + context category hits none → show all", () => {
+    const opts = [O("sven|svenner", "lad"), O("sven|svennar", "servant")];
+    expect(pickVocabOptionForWord("sven", opts, "unrelated")).toEqual({ index: -1, showAll: true });
   });
 });
 

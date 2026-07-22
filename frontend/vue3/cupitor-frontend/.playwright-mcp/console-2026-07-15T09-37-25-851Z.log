@@ -1,0 +1,24 @@
+[     179ms] [LOG] %c * Tone.js v15.1.22 *  background: #000; color: #fff @ http://localhost:8802/vendor/tone.js:1
+[     208ms] [WARNING] The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. https://developer.chrome.com/blog/autoplay/#web_audio @ http://localhost:8802/vendor/tone.js:1
+[     208ms] [WARNING] The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. https://developer.chrome.com/blog/autoplay/#web_audio @ http://localhost:8802/vendor/tone.js:1
+[  817981ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  862224ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  880639ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  898566ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  909962ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  917267ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  920404ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  928580ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  938973ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  970034ms] TypeError: Cannot read properties of undefined (reading 'PositionAndShape')
+    at e.Cursor.update (http://localhost:8802/vendor/opensheetmusicdisplay.min.js:2:705751)
+    at _.enableOrDisableCursors (http://localhost:8802/vendor/opensheetmusicdisplay.min.js:2:726758)
+    at _.render (http://localhost:8802/vendor/opensheetmusicdisplay.min.js:2:714914)
+    at osmd.render (http://localhost:8802/music-render.js:369:17)
+    at redraw (http://localhost:8802/music-render.js:1545:10)
+    at Object.showSegment (http://localhost:8802/music-render.js:1636:7)
+    at adjustSegment (http://localhost:8802/music.html:2050:14)
+    at document.getElementById.onclick (http://localhost:8802/music.html:2055:57)
+[  979169ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[  993102ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352
+[ 1033175ms] [WARNING] [variations] render failed: s.RERR.s.RuntimeError @ http://localhost:8802/music.html:2352

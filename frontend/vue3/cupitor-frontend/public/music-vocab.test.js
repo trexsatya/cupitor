@@ -75,6 +75,23 @@ describe('buildVocabEntry', () => {
     const entry = buildVocabEntry({ pieceId: 'p', system: 'sargam', measureRange: [1, 1], createdAt: '2026-06-22' });
     expect(entry.suppressed).toEqual([]);
   });
+
+  test('a saved variation carries its embellished XML, label, and fretboard voice ids', () => {
+    const entry = buildVocabEntry({
+      pieceId: 'p', system: 'western', measureRange: [3, 4], createdAt: '2026-07-15',
+      variationXml: '<score-partwise/>', variationLabel: 'Bluesy — Var 2', variationVoiceIds: ['1', '2'],
+    });
+    expect(entry.variationXml).toBe('<score-partwise/>');
+    expect(entry.variationLabel).toBe('Bluesy — Var 2');
+    expect(entry.variationVoiceIds).toEqual(['1', '2']);
+  });
+
+  test('a normal entry has NO variation-* keys (unchanged, backward-compatible shape)', () => {
+    const entry = buildVocabEntry({ pieceId: 'p', system: 'western', measureRange: [1, 1], createdAt: '2026-07-15' });
+    expect('variationXml' in entry).toBe(false);
+    expect('variationLabel' in entry).toBe(false);
+    expect('variationVoiceIds' in entry).toBe(false);
+  });
 });
 
 import { saveVocabAndPush } from './music-vocab.js';

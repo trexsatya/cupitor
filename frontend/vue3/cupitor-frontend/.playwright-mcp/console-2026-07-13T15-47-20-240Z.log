@@ -1,0 +1,10 @@
+[      97ms] [ERROR] Blocked confirm('Confirm refresh') during beforeunload. @ http://satyendra.website/language.html?lang=swedish:0
+[   10682ms] [LOG] [cache] boot: 6019 hits, 4 to fetch, 0 evicted @ http://satyendra.website/language/log-buffer.js:0
+[   10873ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/Svenska%20med%20Kalle%20%7C%7C%20Infl%C3%B6de%20%C3%A4r%20viktigt%20-%20Att%20lyssna%20och%20l%C3%A4sa%20-%20Vara%20uppm%C3%A4rksam%20och%20notera%20-%20Tankar%20och%20tips%20-%20Svenska%20%7C%7C%20HKLLIUhiSjM.sv.srt:0
+[   11187ms] [LOG] Not found HKLLIUhiSjM @ http://satyendra.website/language/log-buffer.js:0
+[   11187ms] [WARNING] [srt] 3 subtitle(s) failed transiently — retrying in background @ http://satyendra.website/language/log-buffer.js:0
+[   41196ms] [WARNING] [srt] background retry gave up on 3 subtitle(s) after 4 rounds: wyhwuheitmw, 0MPkooFCjGs, lJhA0XmgBJ0 @ http://satyendra.website/language/log-buffer.js:0
+[   46679ms] [LOG] Loading from local @ http://satyendra.website/language/log-buffer.js:0
+[   47443ms] [LOG] [stem-fallback] primary hits: 8 searchText: går an @ http://satyendra.website/language/log-buffer.js:0
+[   47478ms] [LOG] [prefix] 27 matches across 1 group(s) — showing 5 upfront, 22 in dialog @ http://satyendra.website/language/log-buffer.js:0
+[   93128ms] [ERROR] Blocked confirm('Confirm refresh') during beforeunload. @ http://satyendra.website/language.html?lang=swedish:0

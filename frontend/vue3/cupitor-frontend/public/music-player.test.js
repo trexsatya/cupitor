@@ -178,6 +178,34 @@ describe('buildScheduleFromMusicXml', () => {
     ]);
   });
 
+  test('grace notes sound: a duration-less grace note is scheduled just before its principal (never at a negative beat)', () => {
+    // G4 (2 beats) → grace B4 (no <duration>) → C5 principal. A grace note has no duration, so before
+    // this fix it was dropped from the schedule and never played. It should now sound briefly, ending
+    // at the principal's onset, on a NON-NEGATIVE beat (a negative beat would desync the OSMD cursor).
+    const grace = '<note><grace slash="yes"/><pitch><step>B</step><octave>4</octave></pitch><type>eighth</type></note>';
+    const xml = wrap(`<measure number="1">${attrs(4)}${pn('G', 4, 8)}${grace}${pn('C', 5, 8)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 120 });
+    const midis = s.map((e) => e.midi);
+    expect(midis).toContain(71);                    // B4 grace now present (was dropped)
+    const g = s.find((e) => e.midi === 71);
+    const principal = s.find((e) => e.midi === 72); // C5
+    expect(g.beat).toBeGreaterThan(0);              // between G4 (beat 0) and C5
+    expect(g.beat).toBeLessThan(principal.beat);    // sounds BEFORE the principal
+    expect(g.duration).toBeGreaterThan(0);          // has audible length
+    expect(principal.beat).toBe(2);                 // principal keeps its true onset (grace stole no timeline)
+  });
+
+  test('a grace note at the very start still sounds (clamped to beat 0, never negative)', () => {
+    // Grace as the first event: there is no room before it, so it sounds from beat 0 (not a negative beat).
+    const grace = '<note><grace slash="yes"/><pitch><step>B</step><octave>3</octave></pitch><type>eighth</type></note>';
+    const xml = wrap(`<measure number="1">${attrs(4)}${grace}${pn('C', 4, 8)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 120 });
+    const g = s.find((e) => e.midi === 59);         // B3
+    expect(g).toBeDefined();
+    expect(g.beat).toBeGreaterThanOrEqual(0);       // never negative
+    expect(g.duration).toBeGreaterThan(0);
+  });
+
   test('measure range filters then re-zeroes the segment to t=0', () => {
     const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}${pn('E', 4, 1)}</measure>` +
                      `<measure number="2">${pn('G', 4, 2)}</measure>`);

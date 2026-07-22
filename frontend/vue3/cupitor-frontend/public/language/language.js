@@ -95,6 +95,7 @@ import {
   filterByLanguage as _coreFilterByLanguage,
   wordIsExactInVocabularyLine,
   vocabHasExactWord as _coreVocabHasExactWord,
+  pickVocabOptionForWord,
 } from './search-text.js';
 import {
   withTimeout as _withTimeout,
@@ -134,6 +135,7 @@ import {
   getNewestEntry,
   saveQueueOrderInto,
   computeResumePoint,
+  recPlayExternalPauseAction,
 } from './play-queue.js';
 import {
   parseVocabularyFile,
@@ -313,6 +315,7 @@ window.addEventListener('cupitorDialog1Closed', () => {
 // flashcard whose text is the front, plus book_key/chapter_idx for an
 // "Open in EPUB" deep-link). We request them on boot via PlaylistBridge and
 // rebuild the external playlists whenever a fresh payload arrives.
+//
 window.addEventListener('cupitorPlaylists', (ev) => {
   try { buildPlaylistsWithManualCards(ev.detail) }
   catch (e) { console.warn('cupitorPlaylists handler failed', e) }
@@ -1512,8 +1515,9 @@ function navigateSearchHistory(direction) {
       .then(() => {
         // Mirror searchTextChanged's auto-prefix branch — navigating history
         // bypasses that handler entirely, so without this the prefix pane is
-        // never refreshed when stepping Prev/Next.
-        if ($('#toggleAutoPrefixSearchCheckbox').is(':checked')) {
+        // never refreshed when stepping Prev/Next. Single-word only (see
+        // _shouldAutoPrefixSearch) so a phrase replay keeps its exact findings.
+        if ($('#toggleAutoPrefixSearchCheckbox').is(':checked') && _shouldAutoPrefixSearch(term)) {
           try { searchVocabularyByPrefix() } catch (e) { console.warn('Auto prefix search failed', e) }
         }
       })
@@ -1521,6 +1525,17 @@ function navigateSearchHistory(direction) {
 }
 
 const $searchText1 = $('#searchText');
+
+// Auto prefix-search is a SINGLE-WORD tool: it groups vocab lines whose words
+// share a prefix with the search term. For a multi-word phrase (e.g. "går an")
+// the overlap only catches the first word ("går"), and its results OVERWRITE
+// the exact phrase findings renderVocabularyFindings already produced (so the
+// vocab line that actually contains the phrase — e.g. "<*gå an" — disappears).
+// Only auto-run it for single-word searches; the manual "Search by prefix" menu
+// still works for any term.
+function _shouldAutoPrefixSearch(term) {
+  return typeof term === 'string' && term.trim().length > 0 && !/\s/.test(term.trim())
+}
 
 export async function searchTextChanged() {
   const el = $('#searchedWords')
@@ -1530,9 +1545,10 @@ export async function searchTextChanged() {
   // Optional auto-prefix-search: when the toggle in the settings panel is
   // on (default), run a vocabulary prefix search on the same term so the
   // user doesn't have to click the "…" → "Search by prefix" menu item.
+  // Skipped for multi-word phrases so it doesn't clobber the exact findings.
   // (Mirrored inside navigateSearchHistory so Prev/Next replays also refresh
   // the prefix pane.)
-  if ($('#toggleAutoPrefixSearchCheckbox').is(':checked')) {
+  if ($('#toggleAutoPrefixSearchCheckbox').is(':checked') && _shouldAutoPrefixSearch(w)) {
     try { searchVocabularyByPrefix() } catch (e) { console.warn('Auto prefix search failed', e) }
   }
 }
@@ -1661,7 +1677,7 @@ window._appSettings = {
   // the gap between them is <= clipGapThresholdSec; auto-built clips are also hard
   // capped at clipMaxDurationSec. (Manual captures use the gap threshold but stay
   // uncapped.) See contiguousClipWindow in random-playlist.js.
-  clipGapThresholdSec: 1.5,
+  clipGapThresholdSec: 2.5,
   clipMaxDurationSec: 25,
   // Automatic-random capture: minimum words to have around the vocab word before
   // adding context sentences. If the matched subtitle line already has this many
@@ -1673,7 +1689,7 @@ window._appSettings = {
 // Adjacency gap / max-duration accessors, guarding against a bad localStorage value.
 function _clipGapThresholdSec() {
   const n = parseFloat(window._appSettings && window._appSettings.clipGapThresholdSec)
-  return Number.isFinite(n) && n >= 0 ? n : 1.5
+  return Number.isFinite(n) && n >= 0 ? n : 2.5
 }
 function _clipMaxDurationSec() {
   const n = parseFloat(window._appSettings && window._appSettings.clipMaxDurationSec)
@@ -2440,7 +2456,7 @@ $('document').ready(e => {
       // for the captured-subtitles review: each row has a Delete / Push
       // action we don't want clobbered, plus the trigger button click
       // itself shouldn't immediately re-close the dialog it just opened.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog").dialog("close");
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog").dialog("close");
     }
   });
 
@@ -4546,17 +4562,85 @@ async function getMatchingWords(list, search, token) {
   return wordToItemsMap;
 }
 
+// Copy `text` to the clipboard, best-effort and silent. Tries the async
+// Clipboard API first (needs a secure context + user gesture — both hold when
+// the user taps a button on https), then falls back to a hidden-textarea
+// execCommand('copy') for older Android WebViews where navigator.clipboard is
+// unavailable or rejects. Never throws.
+function _copyTextToClipboard(text) {
+  const s = (text == null ? '' : String(text))
+  if (!s) return
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(s).catch(() => _copyViaTextarea(s))
+      return
+    }
+  } catch (_) {}
+  _copyViaTextarea(s)
+}
+function _copyViaTextarea(s) {
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = s
+    ta.setAttribute('readonly', '')
+    ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0;'
+    document.body.appendChild(ta)
+    ta.select()
+    try { document.execCommand('copy') } catch (_) {}
+    document.body.removeChild(ta)
+  } catch (_) {}
+}
+
+// Cached map of vocab-line text → its category, so the picker mirror can tell
+// which category each candidate option belongs to. Rebuilt whenever
+// window.vocabulary is reassigned (load / edit / commit all replace it
+// wholesale). Hidden categories (expansions) are excluded.
+function _vocabLineCategoryMap() {
+  const vocab = window.vocabulary || {}
+  const cache = window._vocabLineCatCache
+  if (cache && cache.src === vocab) return cache.map
+  const map = new Map()
+  Object.keys(vocab).forEach(cat => {
+    if (VOCAB_HIDDEN_CATEGORIES.has(cat)) return
+    const lines = vocab[cat]
+    if (!Array.isArray(lines)) return
+    lines.forEach(line => { if (typeof line === 'string' && !map.has(line)) map.set(line, cat) })
+  })
+  window._vocabLineCatCache = { src: vocab, map }
+  return map
+}
+
+// Best-effort "which vocabulary category is this Player/Practice item from?"
+// Used to disambiguate a searched word that exactly matches several vocab
+// lines. Reads the source playlist's stored vocabCategory (set when the
+// playlist was built From Category); falls back to the playlist NAME when it
+// happens to be a real category (covers category playlists built before the
+// tag existed). Returns null when no real category can be determined.
+function _detectItemCategory(it) {
+  const vocab = window.vocabulary || {}
+  const isCat = c => !!(c && Object.prototype.hasOwnProperty.call(vocab, c) && !VOCAB_HIDDEN_CATEGORIES.has(c))
+  const recName = (it && it._recName) || (window._recording && window._recording.currentName)
+  const rec = recName && window._recordings && window._recordings[recName]
+  if (rec && isCat(rec.vocabCategory)) return rec.vocabCategory
+  if (isCat(recName)) return recName
+  return null
+}
+
 // Programmatic version of selectSearchedWord that takes the word directly
 // rather than reading it from a clicked DOM node. Used by Player/Practice's
-// "send to search" buttons.
+// "send to search" buttons. `opts.category` (optional) is the context category
+// to prefer when the word exactly matches several vocab lines.
 //
 // Drives BOTH paths:
 //   1. #searchText input + 'input' trigger — runs the real search pipeline
 //      (doSearch) so SRT findings appear in #result. This is the canonical
 //      path; rareWordSearch uses the same.
-//   2. #searchedWords option lookup — keeps the picker dropdown in sync so
-//      the user sees their word reflected there too.
-function sendWordToSearchBox(word) {
+//   2. #searchedWords picker — mirrors the word so the dropdown stays in sync.
+//      When the word maps to a single (or category-disambiguated) vocab line we
+//      SELECT it, which narrows the search to that line. When it maps to several
+//      lines we can't pin down, we DON'T narrow — the broad #searchText search
+//      above already shows every matching line ("show all").
+function sendWordToSearchBox(word, opts = {}) {
   const w = (word || '').toString().trim()
   if (!w) return false
   // Drive the real search box first so the search actually runs. The
@@ -4565,13 +4649,28 @@ function sendWordToSearchBox(word) {
   // appears.
   const $st = $('#searchText')
   if ($st.length) $st.val(w).trigger('input').trigger('change')
-  // Mirror into the vocabulary picker when there's a matching option (best
-  // effort — missing option just means the word isn't in vocab yet).
-  const $option = $('#searchedWords option').filter(function () {
-    return $(this).text().toLowerCase().includes(w.toLowerCase())
-  }).first()
-  if ($option.length) {
-    $('#searchedWords').val($option.val()).trigger('change')
+  // Candidate picker options: real vocab lines only (skip the blank option and
+  // the category headings, whose values are '' or start with '__cat__:').
+  const $realOpts = $('#searchedWords option').filter(function () {
+    const v = $(this).val()
+    return v && !(typeof v === 'string' && v.startsWith('__cat__:'))
+  })
+  const catMap = _vocabLineCategoryMap()
+  const options = $realOpts.map(function () {
+    const text = $(this).text()
+    return { text, category: catMap.get(text) || null }
+  }).get()
+  // Only honour a context category that is a real (currently-loaded) category.
+  const context = (opts && opts.category && window.vocabulary && window.vocabulary[opts.category]) ? opts.category : null
+  const decision = pickVocabOptionForWord(w, options, context)
+  if (decision.showAll) {
+    // Several matches we won't narrow to one → leave the broad #searchText
+    // search (run above; shows every matching line). Clear any stale picker
+    // selection via the select2-namespaced event so the widget updates WITHOUT
+    // firing vocabularyLineSelected (which would re-narrow the search).
+    try { $('#searchedWords').val(null).trigger('change.select2') } catch (_) {}
+  } else if (decision.index >= 0) {
+    $('#searchedWords').val($realOpts.eq(decision.index).val()).trigger('change')
   }
   window.preSelectedSearchedWord = w
   return true
@@ -5089,7 +5188,7 @@ function renderLines(id, url) {
   // larger than `MAX_GAP_S` is a discontinuity; stop walking outward when
   // we encounter one. Display still shows the full window — only the
   // play-button's time bounds get contracted. Threshold is user-configurable
-  // (clipGapThresholdSec, default 1.5s); captures stay uncapped in duration.
+  // (clipGapThresholdSec, default 2.5s); captures stay uncapped in duration.
   const MAX_GAP_S = _clipGapThresholdSec()
   let _playFromIdx = fromLineIndex
   let _playToIdx   = toLineIndex
@@ -6361,7 +6460,12 @@ export function renderVocabularyFindings(search) {
 
   const visibleCategories = Object.keys(window.vocabulary)
       .filter(cat => !VOCAB_HIDDEN_CATEGORIES.has(cat))
-  let matcher = (ln) => wordIsExactInVocabularyLine(ln, search)
+  // Expand each line to its inflected forms before phrase-matching, so a search
+  // for a conjugated form still hits its base vocab line (mirrors the lenient
+  // wordIsInVocabularyLine fallback, which also expands). wordIsExactInVocabularyLine
+  // then compares the search against the line's `|`-separated PHRASES.
+  const _vlang = (typeof getLangFromUrl === 'function' ? getLangFromUrl().code : null) || 'sv'
+  let matcher = (ln) => wordIsExactInVocabularyLine(expandWords(ln, _vlang), search)
   let categories = visibleCategories.filter(cat => window.vocabulary[cat].find(matcher))
 
   if (categories.length === 0) {
@@ -8737,6 +8841,12 @@ function _persistableRecordings() {
 // and the fresh ones spliced in — without touching GitHub-synced playlists,
 // persistence, or the sync-dirty flag.
 function buildPlaylistsWithManualCards(payload) {
+  // Snapshot the currently-shown items so we can skip a needless re-render if
+  // the native push carries identical data. Native pushes can arrive
+  // repeatedly; re-rendering an open dialog on every push resets the user's
+  // scroll and is jarring even when nothing changed.
+  let _beforeItems = ''
+  try { _beforeItems = JSON.stringify((window._recording && window._recording.items) || {}) } catch (_) {}
   const { recordings, activeName } = _coreBridgePlaylistsToRecordings(payload)
   const coll = window._recordings || (window._recordings = {})
   Object.keys(coll).forEach(n => { if (coll[n] && coll[n].external) delete coll[n] })
@@ -8755,7 +8865,15 @@ function buildPlaylistsWithManualCards(payload) {
   }
   try { _updateRecordingUI() } catch (_) {}
   try { _markCapturedButtons() } catch (_) {}
-  try { if ($('#recordingReviewDialog').is(':visible')) openRecordingReviewDialog() } catch (_) {}
+  // Only refresh the open review dialog if the items actually changed — an
+  // identical re-push shouldn't disturb the user's scroll / interaction.
+  try {
+    if ($('#recordingReviewDialog').is(':visible')) {
+      let _afterItems = ''
+      try { _afterItems = JSON.stringify((window._recording && window._recording.items) || {}) } catch (_) {}
+      if (_afterItems !== _beforeItems) openRecordingReviewDialog()
+    }
+  } catch (_) {}
 }
 window.buildPlaylistsWithManualCards = buildPlaylistsWithManualCards
 
@@ -9065,20 +9183,31 @@ function _autoScanFiles() {
 // Returns {st,w,it} tuples. Stops early once `count` items are collected (words
 // are shuffled first, so the early cut is still a representative sample).
 // `onProgress(wordsDone, wordsTotal, itemsFound)` is optional.
-async function buildAutomaticItems({ vocabCategories = [], matchesPerWord = 1, contextLines = 2, count = Infinity, onProgress = null } = {}) {
+//
+// `words` (optional) overrides the search units. When omitted, each vocab LINE
+// in `vocabCategories` is one unit (its pipe-phrases collapse into a single
+// alternation → one example per line). Pass an explicit array to scan at a
+// different granularity — e.g. the category-playlist builder passes each phrase
+// separately so every synonym gets its own example. Each entry is still run
+// through expandWords, which is idempotent on already-expanded forms, so
+// entries may be raw vocab text OR pre-expanded phrases.
+async function buildAutomaticItems({ vocabCategories = [], words = null, matchesPerWord = 1, contextLines = 2, count = Infinity, onProgress = null } = {}) {
   // Mirror doSearch's deferral so we don't scan an empty corpus on a cold load.
   if (!window.vocabulary || !window._subtitlesLoaded) {
     try { await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]) } catch (_) {}
   }
   const files = _autoScanFiles()
-  // Shuffle words so an early-exit still yields a spread across the category.
-  const words = _fisherYates(_wordsForCategories(window.vocabulary, vocabCategories, VOCAB_HIDDEN_CATEGORIES))
+  // Shuffle so an early-exit still yields a spread across the category.
+  const sourceWords = (Array.isArray(words) && words.length)
+    ? words.slice()
+    : _wordsForCategories(window.vocabulary, vocabCategories, VOCAB_HIDDEN_CATEGORIES)
+  const scanWords = _fisherYates(sourceWords)
   const tuples = []
   let lastYield = Date.now()
-  for (let wi = 0; wi < words.length; wi++) {
+  for (let wi = 0; wi < scanWords.length; wi++) {
     if (tuples.length >= count) break
-    const word = words[wi]
-    if (onProgress) { try { onProgress(wi + 1, words.length, tuples.length) } catch (_) {} }
+    const word = scanWords[wi]
+    if (onProgress) { try { onProgress(wi + 1, scanWords.length, tuples.length) } catch (_) {} }
     // Expand the raw vocab line once ("(hint)|form1|form2" → "form1|form2"):
     // the expansion drives both the match regex (same as the live search) AND
     // the stored word, so items are labelled/grouped by the real word forms
@@ -9165,7 +9294,13 @@ function _openRandomBuilderDialog() {
       /* Cap the multi-select chip area so many selections scroll inside the
          box instead of ballooning the dialog past the viewport. */
       #randomBuilderDialog .select2-selection--multiple{max-height:110px;overflow-y:auto;}
+      /* Scroll the dialog BODY (button pane stays fixed) when it's taller than
+         the viewport. A bounded inner region scrolls reliably regardless of
+         jQuery UI's auto-height sizing; the wrapper is pinned position:fixed at
+         top:20px by the global dialogopen handler. */
+      #randomBuilderDialog #rbScroll{max-height:calc(100vh - 170px);overflow-y:auto;overflow-x:hidden;}
     </style>
+    <div id="rbScroll">
     <div class="rb-block">
       <label class="rb-src"><input type="checkbox" id="rbAuto" checked> <b>Automatic</b> — find example sentences from vocabulary</label>
       <div class="rb-sub" id="rbAutoSub">
@@ -9193,6 +9328,7 @@ function _openRandomBuilderDialog() {
       <label class="rb-dest"><input type="radio" name="rbDest" value="replace"> Replace "${_.escape(RANDOM_REC_NAME)}"</label>
     </div>
     <div class="rb-status" id="rbStatus" style="display:none;color:#666;font-size:12px;margin-top:6px;"></div>
+    </div>
   `)
 
   const enableSub = () => {
@@ -9259,11 +9395,15 @@ function _openRandomBuilderDialog() {
   $d.dialog({
     title: 'Build Random Playlist',
     width: Math.min(460, $(window).width() - 40),
-    // Cap height to the viewport so the body scrolls instead of overflowing
-    // off-screen when the category / playlist selections grow.
-    maxHeight: Math.max(320, $(window).height() - 80),
+    // Height stays auto; the inner #rbScroll region caps + scrolls the body (see
+    // its CSS). jQuery UI's own maxHeight/auto-height sizing didn't scroll
+    // reliably here because the global dialogopen handler re-pins the wrapper.
     modal: true,
     autoOpen: true,
+    // Dragging/resizing steals touchmove on mobile so #rbScroll can't be
+    // scrolled — disable both (same fix as the Recorded Searches / Practice Log dialogs).
+    draggable: false,
+    resizable: false,
     buttons: {
       'Build': function () { finish() },
       'Cancel': function () { try { $(this).dialog('close') } catch (_) {} }
@@ -9280,6 +9420,204 @@ function _openRandomBuilderDialog() {
   enableSub()
 }
 window._openRandomBuilderDialog = _openRandomBuilderDialog
+
+// Small transient toast for the "From Category" build result (coverage note),
+// so the summary survives the dialog closing + review opening without an extra
+// click. Styled inline to avoid touching the stylesheet.
+let _cpBuildToastTimer = null
+function _cpBuildToast(msg) {
+  let $t = $('#cpBuildToast')
+  if (!$t.length) {
+    $t = $('<div id="cpBuildToast" role="status" aria-live="polite"></div>').appendTo('body')
+    $t.css({
+      position: 'fixed', left: '50%', bottom: '24px', transform: 'translateX(-50%)',
+      background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '8px 14px',
+      borderRadius: '6px', fontSize: '13px', zIndex: 100000, maxWidth: '80vw',
+      textAlign: 'center', pointerEvents: 'none'
+    })
+  }
+  $t.stop(true, true).text(msg).css('opacity', 1).show()
+  if (_cpBuildToastTimer) clearTimeout(_cpBuildToastTimer)
+  _cpBuildToastTimer = setTimeout(() => { $t.fadeOut(400) }, 3200)
+}
+
+// The distinct searchable phrases of a category, so every synonym gets its own
+// subtitle example instead of a whole line collapsing into one alternation.
+// expandWords does the real work — strips (hints), expands <*refs into their
+// inflected forms, turns inline (ngt)/(ngn) into wildcards — and returns the
+// pipe-joined searchable forms; we just split that per line and dedupe.
+function _phrasesForCategory(cat) {
+  const lines = (window.vocabulary || {})[cat] || []
+  const seen = new Set()
+  const out = []
+  lines.forEach(line => {
+    if (typeof line !== 'string') return
+    let expanded
+    try { expanded = expandWords(line) } catch (_) { return }
+    ;(expanded || '').split('|').forEach(seg => {
+      const p = seg.trim()
+      if (!p || seen.has(p)) return
+      seen.add(p)
+      out.push(p)
+    })
+  })
+  return out
+}
+
+// The "Build from Category" dialog (opened from the Recorded Searches header).
+// Scans the subtitle corpus for EVERY word in ONE chosen vocabulary category and
+// writes the matches to a new, kept playlist. Same automatic engine as Build
+// Random's Automatic source (buildAutomaticItems), but scoped to a single
+// category and NOT sampled — every found clip is kept (deduped by video+line,
+// never truncated to a count).
+function _openCategoryPlaylistDialog() {
+  let $d = $('#categoryPlaylistDialog')
+  if ($d.length) { try { $d.dialog('destroy') } catch (_) {} $d.remove() }
+  $d = $('<div id="categoryPlaylistDialog"></div>').appendTo('body')
+
+  // The category select starts empty with a loading placeholder — vocabulary
+  // loads asynchronously on boot (fetchVocabulary → _vocabularyReadyPromise),
+  // so it may not be present yet when this dialog opens. We populate the
+  // options after the ready promise resolves (see populateCategories below)
+  // rather than hard-failing when window.vocabulary is momentarily empty.
+  $d.html(`
+    <style>
+      #categoryPlaylistDialog .cp-row{display:flex;align-items:center;gap:8px;margin:8px 0;flex-wrap:wrap;}
+      #categoryPlaylistDialog .cp-row > label{font-size:12px;color:#555;min-width:150px;}
+      #categoryPlaylistDialog .cp-hint{font-size:11px;color:#999;flex-basis:100%;margin-left:150px;}
+      #categoryPlaylistDialog .cp-status{color:#666;font-size:12px;margin-top:8px;min-height:1.2em;}
+    </style>
+    <div class="cp-row"><label>Vocabulary category</label>
+      <select id="cpCategory" style="width:100%"><option value="">Loading categories…</option></select>
+    </div>
+    <div class="cp-row"><label>Playlist name</label>
+      <input type="text" id="cpName" value="" style="flex:1;min-width:150px">
+    </div>
+    <div class="cp-row"><label>Matches per word</label><input type="number" id="cpMatchesPerWord" value="1" min="1" max="10" style="width:70px"></div>
+    <div class="cp-row"><label>Sentences around word</label><input type="number" id="cpContextLines" value="2" min="0" max="10" style="width:70px"></div>
+    <div class="cp-status" id="cpStatus"></div>
+  `)
+
+  // Keep the name mirroring the chosen category until the user edits it by hand.
+  let nameEdited = false
+  $d.on('input', '#cpName', () => { nameEdited = true })
+  $d.on('change', '#cpCategory', function () {
+    if (!nameEdited) $d.find('#cpName').val($(this).val() || '')
+  })
+
+  // Fill the category <select>, init select2, seed the default name, and toggle
+  // the Build button. Runs once vocabulary is available; awaits the boot-time
+  // ready promise if it isn't loaded yet. Idempotent-ish: only ever called once
+  // here, right after the dialog opens.
+  const populateCategories = async function () {
+    if (!window.vocabulary) {
+      try { await window._vocabularyReadyPromise } catch (_) {}
+    }
+    const vocab = window.vocabulary || {}
+    const cats = Object.keys(vocab).filter(c => !VOCAB_HIDDEN_CATEGORIES.has(c)).sort()
+    const $cat = $d.find('#cpCategory')
+    const $build = $d.closest('.ui-dialog').find('.ui-dialog-buttonpane button:contains("Build")')
+    if (!cats.length) {
+      $cat.html('<option value="">No categories found</option>')
+      try { $cat.select2({ width: '100%', dropdownParent: $d, minimumResultsForSearch: Infinity }) } catch (_) {}
+      $build.prop('disabled', true)
+      $d.find('#cpStatus').text('No vocabulary categories are loaded. Reopen once the word list has loaded.')
+      return
+    }
+    $cat.html(cats.map(c => `<option value="${_.escape(c)}">${_.escape(c)} (${(vocab[c] || []).length})</option>`).join(''))
+    // select2 must init after the options + dialog node are attached;
+    // dropdownParent keeps the search dropdown layered above the modal.
+    try { $cat.select2({ placeholder: 'Choose a category…', width: '100%', dropdownParent: $d }) } catch (_) {}
+    if (!nameEdited) $d.find('#cpName').val(cats[0])
+    $build.prop('disabled', false)
+  }
+
+  const finish = async function () {
+    const cat = String($d.find('#cpCategory').val() || '').trim()
+    if (!cat) { alert('Pick a category.'); return }
+    const name = String($d.find('#cpName').val() || '').trim()
+    if (!name) { alert('Enter a name for the new playlist.'); return }
+    if (window._recordings[name] && !confirm(`"${name}" already exists. Overwrite it?`)) return
+
+    const matchesPerWord = Math.max(1, parseInt($d.find('#cpMatchesPerWord').val(), 10) || 1)
+    const contextLines   = Math.max(0, parseInt($d.find('#cpContextLines').val(), 10) || 0)
+
+    // Search each PHRASE in the category separately (not each whole line), so
+    // every synonym gets its own example clip.
+    const phrases = _phrasesForCategory(cat)
+    if (!phrases.length) { alert(`"${cat}" has no searchable phrases.`); return }
+
+    const $btns = $d.closest('.ui-dialog').find('.ui-dialog-buttonpane button')
+    $btns.prop('disabled', true)
+    const $status = $d.find('#cpStatus').text('Scanning subtitles…')
+    let scannedWords = 0
+    let pool = []
+    try {
+      pool = await buildAutomaticItems({
+        words: phrases, matchesPerWord, contextLines, count: Infinity,
+        onProgress: (done, total, found) => {
+          scannedWords = total
+          $status.text(`Scanning subtitles… ${found} found (phrase ${done}/${total})`)
+        }
+      })
+    } catch (err) {
+      console.warn('From Category build failed', err)
+      $status.text('')
+      $btns.prop('disabled', false)
+      alert('Something went wrong while scanning subtitles.')
+      return
+    }
+    $btns.prop('disabled', false)
+
+    if (!pool.length) {
+      $status.text('')
+      alert(`No subtitle matches found for any word in "${cat}".`)
+      return
+    }
+
+    // Keep ALL matches — dedup by (video, line) but never sample/truncate.
+    const grouped = _sampleAndGroup(pool, { count: Infinity })
+    const wordGroups = Object.keys(grouped).length
+    let clips = 0
+    Object.keys(grouped).forEach(st => Object.keys(grouped[st]).forEach(w => { clips += grouped[st][w].length }))
+
+    const prev = window._recordings[name]
+    window._recordings[name] = {
+      items: grouped,
+      // Remember which vocabulary category this playlist was built from, so the
+      // Player/Practice 🔎 button can disambiguate a searched word toward this
+      // category (see _detectItemCategory). Stored once per playlist (the name),
+      // not per item.
+      vocabCategory: cat,
+      createdAt: (prev && prev.createdAt) || Date.now(),
+      updatedAt: Date.now()
+    }
+    selectRecording(name)
+    try { $d.dialog('close') } catch (_) {}
+    openRecordingReviewDialog()
+    _cpBuildToast(`Built “${name}” — ${clips} clip${clips === 1 ? '' : 's'} across ${wordGroups} word${wordGroups === 1 ? '' : 's'} (scanned ${scannedWords} phrase${scannedWords === 1 ? '' : 's'})`)
+  }
+
+  $d.dialog({
+    title: 'Build Playlist from Category',
+    width: Math.min(440, $(window).width() - 40),
+    modal: true,
+    autoOpen: true,
+    // Dragging/resizing steals touchmove on mobile — disable both (same as the
+    // Build Random / Recorded Searches dialogs).
+    draggable: false,
+    resizable: false,
+    buttons: {
+      'Build': function () { finish() },
+      'Cancel': function () { try { $(this).dialog('close') } catch (_) {} }
+    }
+  })
+
+  // Build stays disabled until the category options are in place.
+  $d.closest('.ui-dialog').find('.ui-dialog-buttonpane button:contains("Build")').prop('disabled', true)
+  populateCategories()
+}
+window._openCategoryPlaylistDialog = _openCategoryPlaylistDialog
 
 // Add a manual entry to a real playlist. Manual entries live in the same
 // `items[st][w]` map as captured items so they mix freely; they're put
@@ -10430,6 +10768,103 @@ window.saveManualAudioBlob = saveManualAudioBlob
 window.loadManualAudioData = loadManualAudioData
 window.deleteManualAudio   = deleteManualAudio
 
+// Make a dialog's content element scrollable on old Android System WebView,
+// which cannot scroll an overflow:auto element whose content exceeds its max
+// compositing-layer/texture height (~16384px). The Recorded Searches list can
+// be ~23000px tall, so native scroll (and even programmatic scrollTop) silently
+// reverts to 0 there — while it works everywhere else. Confirmed on-device: the
+// dialog had identical computed styles to the Playback Queue dialog (which
+// scrolls fine at ~11600px); only the content height differed, and neither
+// position:fixed nor position:absolute changed it.
+//
+// The fix drives the scroll ourselves WITHOUT the native scroll mechanism and
+// WITHOUT a composited transform (a transform would allocate the same
+// oversized layer): wrap the content and offset it with `position:relative;
+// top:-N`, which is a paint-path move — the browser only rasterises the visible
+// slice, so there's no height limit. overflow:hidden clips it; a touch handler
+// translates it from finger deltas with light momentum.
+//
+// Feature-detected: only engages when native scroll is actually broken (a
+// probe scrollTop that reverts within a frame), so mobile Chrome / desktop keep
+// native scrolling, momentum, and jQuery UI drag-reorder untouched.
+function _installWebViewScroll(el) {
+  if (!el) return
+  const rewrap = () => {
+    // (Re)wrap the freshly-rendered children — the dialog HTML is rebuilt each
+    // open — into a single relatively-positioned inner element we can offset.
+    const inner = document.createElement('div')
+    inner.className = 'wv-fakescroll-inner'
+    inner.style.position = 'relative'
+    inner.style.top = '0px'
+    while (el.firstChild) inner.appendChild(el.firstChild)
+    el.appendChild(inner)
+    el.style.overflow = 'hidden'
+    el.style.touchAction = 'none'
+    el._fsInner = inner
+    el._fsOff = 0
+    el._fsApply = (v) => {
+      const max = Math.max(0, inner.offsetHeight - el.clientHeight)
+      el._fsOff = Math.min(max, Math.max(0, v))
+      inner.style.top = (-el._fsOff) + 'px'
+    }
+    // The playlist-switcher select2 dropdown would be clipped by overflow:hidden,
+    // so re-home it on <body> when we're in fake-scroll mode.
+    try {
+      const $sel = $(el).find('#recRecSelect')
+      if ($sel.length && $sel.hasClass('select2-hidden-accessible')) {
+        $sel.select2('destroy')
+        $sel.select2({ width: 'resolve', dropdownParent: $(document.body) })
+      }
+    } catch (_) {}
+    bindOnce()
+  }
+  function bindOnce() {
+    if (el._fsBound) return
+    el._fsBound = true
+    let startY = 0, startOff = 0, dragging = false, lastY = 0, lastDy = 0, momentum = null
+    const stopMomentum = () => { if (momentum) { cancelAnimationFrame(momentum); momentum = null } }
+    el.addEventListener('touchstart', e => {
+      if (!e.touches || e.touches.length !== 1) { dragging = false; return }
+      stopMomentum()
+      startY = e.touches[0].clientY
+      startOff = el._fsOff || 0
+      lastY = startY; lastDy = 0; dragging = true
+    }, { passive: true })
+    el.addEventListener('touchmove', e => {
+      if (!dragging || !el._fsInner || !e.touches || !e.touches.length) return
+      const y = e.touches[0].clientY
+      lastDy = y - lastY; lastY = y
+      if (el._fsApply) el._fsApply(startOff + (startY - y))
+      if (e.cancelable) e.preventDefault()
+    }, { passive: false })
+    const end = () => {
+      if (!dragging) return
+      dragging = false
+      let v = -lastDy * 1.3
+      const step = () => {
+        if (Math.abs(v) < 0.5 || !el._fsInner) { momentum = null; return }
+        if (el._fsApply) el._fsApply((el._fsOff || 0) + v)
+        v *= 0.93
+        momentum = requestAnimationFrame(step)
+      }
+      if (Math.abs(v) >= 0.5) momentum = requestAnimationFrame(step)
+    }
+    el.addEventListener('touchend', end)
+    el.addEventListener('touchcancel', end)
+  }
+  // Already in fake-scroll mode (a prior open detected the bug) → just re-wrap.
+  if (el._fsBound) { rewrap(); return }
+  // Nothing to scroll → leave alone.
+  if (el.scrollHeight <= el.clientHeight + 4) return
+  // Probe native scroll: set a small scrollTop and see if it survives a frame.
+  el.scrollTop = 2
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const nativeWorks = el.scrollTop >= 1
+    el.scrollTop = 0
+    if (!nativeWorks) rewrap()
+  }))
+}
+
 function openRecordingReviewDialog() {
   let $dlg = $('#recordingReviewDialog')
   if (!$dlg.length) {
@@ -10444,6 +10879,14 @@ function openRecordingReviewDialog() {
   // playlist matches where the item came from.
   const _lp = _loadLastPlayed()
   const _lpHere = _lp && _lp.recName === currentName ? _lp : null
+  // Preserve the user's scroll position across a refresh. This function is a
+  // full re-render ($dlg.html below wipes the content and resets scrollTop to
+  // 0), and it's called not just on user actions but whenever the native app
+  // pushes a fresh playlist payload (cupitorPlaylists → buildPlaylistsWithManualCards).
+  // Without this, every native push while the user is scrolling snaps the list
+  // back to the top — the WebView-only "slowly scrolls back to top" bug.
+  const _wasOpen = $dlg.hasClass('ui-dialog-content') && $dlg.is(':visible')
+  const _prevScrollTop = _wasOpen && $dlg[0] ? ($dlg[0].scrollTop || 0) : 0
   let html = ''
   // ── Header: switch / create / new-virtual / rename / duplicate / delete ──
   html += `<div class="rec-rec-header" style="margin-bottom:10px;padding:6px 6px 8px;border-bottom:1px solid #ddd;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
@@ -10458,6 +10901,7 @@ function openRecordingReviewDialog() {
     <button type="button" id="recRecNew"       class="btn rec-rec-btn" title="Create a new playlist" aria-label="Create a new playlist"><span class="rec-rec-ico">＋</span><span class="rec-rec-lbl">New</span></button>
     <button type="button" id="recRecNewVirtual" class="btn rec-rec-btn" title="Create a virtual playlist (combine existing playlists)" aria-label="Create a virtual playlist"><span class="rec-rec-ico">🔗</span><span class="rec-rec-lbl">Virtual</span></button>
     <button type="button" id="recRecRandom"     class="btn rec-rec-btn" title="Build a random-sample playlist from all real playlists" aria-label="Practice Random"><span class="rec-rec-ico">🎲</span><span class="rec-rec-lbl">Practice Random</span></button>
+    <button type="button" id="recRecFromCategory" class="btn rec-rec-btn" title="Build a playlist of subtitle examples for every word in one vocabulary category" aria-label="Build playlist from category"><span class="rec-rec-ico">📚</span><span class="rec-rec-lbl">From Category</span></button>
     <button type="button" id="recRecAddManual"  class="btn rec-rec-btn" title="Add a manual flashcard entry (source/target + optional media link)" aria-label="Add manual entry"${isVirtualCurrent ? ' disabled' : ''}><span class="rec-rec-ico">📝</span><span class="rec-rec-lbl">Add card</span></button>
     <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
     <button type="button" id="recRecDuplicate" class="btn rec-rec-btn" title="Duplicate this playlist" aria-label="Duplicate this playlist"><span class="rec-rec-ico">⎘</span><span class="rec-rec-lbl">Duplicate</span></button>
@@ -10646,6 +11090,12 @@ function openRecordingReviewDialog() {
     e.preventDefault(); e.stopPropagation()
     _openRandomBuilderDialog()
   })
+  // From Category: build a kept playlist of subtitle examples for every word in
+  // one chosen vocabulary category (single-category, no random sampling).
+  $dlg.off('click', '#recRecFromCategory').on('click', '#recRecFromCategory', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    _openCategoryPlaylistDialog()
+  })
   $dlg.off('click', '#recRecAddManual').on('click', '#recRecAddManual', function (e) {
     e.preventDefault(); e.stopPropagation()
     _openManualEntryEditor(window._recording.currentName, null)
@@ -10711,7 +11161,17 @@ function openRecordingReviewDialog() {
   // Drag-to-reorder within each word group. Falls back gracefully if jQuery
   // UI isn't loaded — the checkbox + delete actions still work. Skipped for
   // virtual playlists, whose item list is read-only.
-  if ($.fn.sortable && !isVirtualCurrent) {
+  //
+  // Also skipped on coarse-pointer (touch) devices: this jQuery UI build binds
+  // ZERO touch events, so touch drag-reorder never worked on mobile anyway, and
+  // there's no point initialising a widget that can't function there. Desktop
+  // (fine pointer) keeps drag-reorder. (The mobile scroll-reset bug had a
+  // separate cause — the dialog being re-rendered by native playlist pushes,
+  // which now preserves scroll — not sortable.)
+  const _coarsePointer = ('ontouchstart' in window)
+    || (navigator.maxTouchPoints > 0)
+    || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+  if ($.fn.sortable && !isVirtualCurrent && !_coarsePointer) {
     $dlg.find('.rec-item-list').each(function () {
       const $list = $(this)
       try { $list.sortable('destroy') } catch (_) {}
@@ -10745,6 +11205,12 @@ function openRecordingReviewDialog() {
     height: Math.min(560, $(window).height() - 60),
     modal: false,
     autoOpen: true,
+    // No drag/resize: the global dialogopen handler pins the position anyway,
+    // so drag-to-move isn't useful here, and the resize handles add wrapper
+    // chrome we don't want. (These don't affect scrolling — the Practice Log
+    // dialog also uses draggable:false and scrolls fine on mobile.)
+    draggable: false,
+    resizable: false,
     buttons: {
       // Belt-and-suspenders close: jQuery UI's dialog('close') sometimes
       // races with focus / async render work and leaves the wrapper visible
@@ -10783,6 +11249,11 @@ function openRecordingReviewDialog() {
   } else {
     $dlg.dialog(opts)
   }
+  // Restore the pre-refresh scroll position (see _prevScrollTop above). Runs
+  // after .dialog('open') so the content height is already established.
+  if (_wasOpen && _prevScrollTop) {
+    try { $dlg[0].scrollTop = _prevScrollTop } catch (_) {}
+  }
   // Make the playlist switcher searchable. The dialog HTML is rebuilt each open,
   // so destroy any stale select2 before re-initialising. dropdownParent keeps
   // the search dropdown layered inside the dialog.
@@ -10797,6 +11268,7 @@ function openRecordingReviewDialog() {
   // and populate the per-row preview spans. Fire-and-forget — if it fails
   // the row just shows "(no preview available)".
   _lazyLoadRecItemPreviews($dlg).catch(e => console.warn('preview lazy-load failed', e))
+  try { _installWebViewScroll($dlg[0]) } catch (_) {}
 }
 
 // Wait until YouTube's currentTime crosses `timeEnd`, then pause it. Bails
@@ -10865,21 +11337,35 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
         return resolve()
       }
       const now = Date.now()
-      // While the user has paused, don't accrue stall/load/max time. Just
-      // bookkeep how long we've been paused so we can subtract it below.
+      // Read the player's actual state once per tick (reused below).
+      let playerState = 1
+      try { if (window.ytPlayer && window.ytPlayer.getPlayerState) playerState = window.ytPlayer.getPlayerState() } catch (_) {}
+      // Headset / hardware media keys pause & resume the YT iframe directly,
+      // bypassing our ⏸ button. Mirror that into the app's pause state so the
+      // clip timer freezes (and the button updates) instead of running on and
+      // auto-advancing to the next clip. controlYt=false — the player is
+      // already in that state, so don't re-command it.
+      const _extAction = recPlayExternalPauseAction({
+        appPaused: !!window._recPlayPaused,
+        playerState,
+        everPlayed,
+        sinceCmdMs: now - (window._recPlayPauseCmdAt || 0),
+      })
+      if (_extAction === 'pause') _applyRecPlayPause(true, false)
+      else if (_extAction === 'resume') _applyRecPlayPause(false, false)
+      // While paused (by the button OR an external media key), don't accrue
+      // stall/load/max time. Just bookkeep how long we've been paused so we can
+      // subtract it below.
       if (window._recPlayPaused) {
         pausedAccum += (now - lastTickAt)
         lastTickAt = now
         return setTimeout(tick, 300)
       }
-      // Same accounting for any non-playing state — YT often sits in
-      // BUFFERING (3), UNSTARTED (-1) or CUED (5) for many seconds on a
-      // slow connection while it fetches segments. Without this the
-      // stall detector would skip the clip the moment playback pauses
-      // to refill the buffer. PLAYING (1) is the only state in which
-      // the playhead is supposed to be advancing.
-      let playerState = 1
-      try { if (window.ytPlayer && window.ytPlayer.getPlayerState) playerState = window.ytPlayer.getPlayerState() } catch (_) {}
+      // YT often sits in BUFFERING (3), UNSTARTED (-1) or CUED (5) for many
+      // seconds on a slow connection while it fetches segments. Without this the
+      // stall detector would skip the clip the moment playback pauses to refill
+      // the buffer. PLAYING (1) is the only state in which the playhead is
+      // supposed to be advancing.
       const NON_PLAYING = (playerState === -1 || playerState === 3 || playerState === 5)
       if (NON_PLAYING) {
         bufferingAccum += (now - lastTickAt)
@@ -12198,31 +12684,41 @@ function navigateRecordingPlayback(direction) {
 // browser speech). Toggled by the floating pause button. The wait loops
 // (_waitYTUntilEnd, _sleepRespectingPause) check window._recPlayPaused and
 // extend their deadlines so paused time doesn't count against stall/cap.
-function togglePlayingRecordingPause() {
-  if (!window._playingRecording) return
-  if (window._recPlayPaused) {
-    window._recPlayPaused = false
-    $('body').removeClass('rec-paused')
-    $('#recPlayingPauseBtn .rec-icon-pause').show()
-    $('#recPlayingPauseBtn .rec-icon-play').hide()
-    try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
-    try {
-      const t = window._recTTS
-      if (t && t.kind === 'audio' && t.audio) t.audio.play().catch(() => {})
-      else if (t && t.kind === 'speech') window.speechSynthesis && window.speechSynthesis.resume()
-    } catch (_) {}
-  } else {
-    window._recPlayPaused = true
+// Apply a rec-play pause/resume: sync the flag, button UI, body class and TTS.
+// `controlYt` — whether to also command the YouTube player. TRUE when the app
+// initiates (the ⏸ button); FALSE when we're only MIRRORING a player that a
+// headset / media key already paused or resumed (calling play/pauseVideo then
+// would fight the external command and loop back through the state poll). When
+// we do command the player we stamp _recPlayPauseCmdAt so the poll's grace
+// window ignores the transient state while the player settles.
+function _applyRecPlayPause(paused, controlYt = true) {
+  window._recPlayPaused = !!paused
+  const t = window._recTTS
+  if (paused) {
     $('body').addClass('rec-paused')
     $('#recPlayingPauseBtn .rec-icon-pause').hide()
     $('#recPlayingPauseBtn .rec-icon-play').show()
-    try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+    if (controlYt) { try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {} }
     try {
-      const t = window._recTTS
       if (t && t.kind === 'audio' && t.audio) t.audio.pause()
       else if (t && t.kind === 'speech') window.speechSynthesis && window.speechSynthesis.pause()
     } catch (_) {}
+  } else {
+    $('body').removeClass('rec-paused')
+    $('#recPlayingPauseBtn .rec-icon-pause').show()
+    $('#recPlayingPauseBtn .rec-icon-play').hide()
+    if (controlYt) { try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {} }
+    try {
+      if (t && t.kind === 'audio' && t.audio) t.audio.play().catch(() => {})
+      else if (t && t.kind === 'speech') window.speechSynthesis && window.speechSynthesis.resume()
+    } catch (_) {}
   }
+  if (controlYt) window._recPlayPauseCmdAt = Date.now()
+}
+
+function togglePlayingRecordingPause() {
+  if (!window._playingRecording) return
+  _applyRecPlayPause(!window._recPlayPaused, true)
 }
 
 // Open a modeless dialog listing the queue in play order with the current
@@ -12303,7 +12799,8 @@ function _searchCurrentRecPlayWord() {
   const it = window._recPlayCurrentItem
   if (!it) return
   const w = it.word || it.searchText || it._w
-  if (!sendWordToSearchBox(w)) return
+  if (!sendWordToSearchBox(w, { category: _detectItemCategory(it) })) return
+  _copyTextToClipboard(w)   // auto-copy the searched word for pasting elsewhere
   try { minimizePlayingRecording() } catch (_) {}
 }
 
@@ -12705,7 +13202,8 @@ function _searchCurrentPracticeWord() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
   const w = it.word || it.searchText || it._w
-  if (!sendWordToSearchBox(w)) return
+  if (!sendWordToSearchBox(w, { category: _detectItemCategory(it) })) return
+  _copyTextToClipboard(w)   // auto-copy the searched word for pasting elsewhere
   try { minimizePracticeMode() } catch (_) {}
 }
 

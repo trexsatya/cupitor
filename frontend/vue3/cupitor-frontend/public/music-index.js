@@ -1,5 +1,7 @@
 // public/music-index.js
-import { primaryVoice, packContour, encodeNoteText, encodeMusicXml, inferChords } from './music-encoding.js';
+import { primaryVoice, packContour, encodeNoteText, encodeMusicXml, inferChords, canonicalChordSpans } from './music-encoding.js';
+import { countPieces } from './music-split.js';
+import { guessKey, keyLabel, pcHistogram } from './music-pattern.js';
 
 export function fnv1a(str) {
   let h = 0x811c9dc5;
@@ -24,8 +26,13 @@ const PC_NAMES = ["C","Cs","D","Ds","E","F","Fs","G","Gs","A","As","B"];
 export function buildIndexEntry(doc, source) {
   const v = primaryVoice(doc);
   const noteCount = doc.voices.reduce((n, vv) => n + vv.pitch.length, 0);
-  const chords = [];
-  doc.voices.forEach(vv => vv.chordSymbol.forEach(c => { if (c && chords[chords.length - 1] !== c) chords.push(c); }));
+  // Tonal-center guess (Krumhansl-Schmuckler over all sounded pitch classes) — unlike `key` (from the
+  // notated key signature, major only) this distinguishes major vs. relative minor. null when empty.
+  const allMidis = doc.voices.reduce((acc, vv) => { acc.push(...vv.pitch); return acc; }, []);
+  const guessedKey = allMidis.length ? (({ tonicPc, mode }) => keyLabel(tonicPc, mode))(guessKey(pcHistogram(allMidis))) : null;
+  // Chord search indexes ONE measure-ordered progression (not each voice concatenated — that
+  // repeated the progression per voice and produced cross-voice false matches; see canonicalChordSpans).
+  const chords = canonicalChordSpans(doc.voices).map(s => s.symbol);
   return {
     id: doc.meta.id,
     title: doc.meta.title,
@@ -34,11 +41,14 @@ export function buildIndexEntry(doc, source) {
     sourceUrl: doc.meta.sourceUrl,
     youtube: doc.meta.youtube,
     key: doc.meta.key,
+    guessedKey,
     time: doc.meta.time,
     tempo: doc.meta.tempo,
     instrument: doc.meta.instrument,
     voiceCount: doc.voices.length,
     noteCount,
+    // How many pieces the source packs (>1 → offer to split it). MusicXML only; note-text is 1.
+    pieceCount: doc.meta.format === 'musicxml' && source ? countPieces(source) : 1,
     channels: channelsOf(doc),
     search: {
       contour: packContour(v.interval),

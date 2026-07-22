@@ -278,7 +278,10 @@ function runChord(query, search) {
   if (!m) return null;
   const span = m.end - m.start + 1;
   const score = query.chords.length / span;
-  return { kind: 'chord', range: [m.start, m.end], symbols: m.symbols, score };
+  // `indices` are the exact collapsed-chord positions each matched symbol sits at (may be
+  // non-contiguous when max_gap > 0). The UI maps indices[i] → its measure span so a matched
+  // chord chip can highlight exactly its own notes.
+  return { kind: 'chord', range: [m.start, m.end], indices: m.indices, symbols: m.symbols, score };
 }
 
 export function runQuery(input, entries) {

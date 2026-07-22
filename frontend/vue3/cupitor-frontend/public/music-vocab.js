@@ -25,10 +25,11 @@ export function buildSnapshot(detail, measureRange) {
 export function buildVocabEntry({ pieceId, system, measureRange, measureOffset = 0, youtube = null,
                                   startSeconds = null, endSeconds = null, chords = [], note = '',
                                   snapshot = null, category = 'uncategorized', createdAt = null,
-                                  suppressed = [] }) {
+                                  suppressed = [], variationXml = null, variationLabel = '',
+                                  variationVoiceIds = null }) {
   const [measureStart, measureEnd] = measureRange;
   const id = `${pieceId}_${measureStart}_${measureEnd}`.replace(/\s+/g, '_');
-  return {
+  const entry = {
     id, category, pieceId, system, measureStart, measureEnd,
     measureOffset,          // pickup/anacrusis shift: printed number = measureStart − measureOffset
     youtube, startSeconds, endSeconds,
@@ -38,6 +39,15 @@ export function buildVocabEntry({ pieceId, system, measureRange, measureOffset =
     suppressed: suppressed || [],   // notes silenced for chord practice: [{measure, midi, beats}]
     createdAt,
   };
+  // A saved *variation* carries its own embellished MusicXML so re-opening replays the exact
+  // variation (grace/shuffle/counter-line), not the plain source passage. These keys are absent
+  // on normal entries, keeping their stored shape unchanged.
+  if (variationXml) {
+    entry.variationXml = variationXml;
+    entry.variationLabel = variationLabel || '';
+    if (variationVoiceIds) entry.variationVoiceIds = variationVoiceIds;
+  }
+  return entry;
 }
 
 // Pure: add or replace a vocab entry by id, returning a new array.

@@ -7,7 +7,7 @@
 // push carrying this content succeeds. The `system` index isolates western/sargam.
 
 const DB_NAME = 'cupitor-music';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 const keyOf = (system, id) => `${system}:${id}`;
 
@@ -52,6 +52,11 @@ export function createMusicStore({ indexedDB } = {}) {
         // v3: per-system pattern-tag registry snapshot (the global tag list), keyed by system.
         if (!db.objectStoreNames.contains('tags')) {
           db.createObjectStore('tags', { keyPath: 'system' });
+        }
+        // v4: per-system weekly practice log — one row per system holding { entries, fields }.
+        // Local-only: never pushed to the shared library. `fields` is the global custom-field-name list.
+        if (!db.objectStoreNames.contains('practice')) {
+          db.createObjectStore('practice', { keyPath: 'system' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -152,6 +157,21 @@ export function createMusicStore({ indexedDB } = {}) {
       const tx = db.transaction('tags', 'readonly');
       const row = await reqDone(tx.objectStore('tags').get(system));
       return row ? row.tags : [];
+    },
+
+    // Weekly practice log (local-only). Stored as one row per system: { entries, fields }.
+    async putPractice(system, { entries, fields } = {}) {
+      const db = await open();
+      const tx = db.transaction('practice', 'readwrite');
+      tx.objectStore('practice').put({ system, entries: entries || [], fields: fields || [] });
+      await txDone(tx);
+    },
+
+    async getPractice(system) {
+      const db = await open();
+      const tx = db.transaction('practice', 'readonly');
+      const row = await reqDone(tx.objectStore('practice').get(system));
+      return { entries: (row && row.entries) || [], fields: (row && row.fields) || [] };
     },
   };
 }

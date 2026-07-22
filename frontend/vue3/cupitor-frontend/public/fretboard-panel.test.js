@@ -1,4 +1,4 @@
-import { buildTrail, cycleIndex, commonPositions, stringArrows } from './fretboard-panel.js';
+import { buildTrail, cycleIndex, commonPositions, stringArrows, extraKeysForVoicing } from './fretboard-panel.js';
 
 describe('stringArrows', () => {
   // A string (5) fret3 = C3, fret7 = E3. Voicing stacks both on string 5.
@@ -47,6 +47,31 @@ describe('commonPositions', () => {
   test('no previous notes / empty voicing → empty set', () => {
     expect(commonPositions([{ string: 1, fret: 0 }], [], false).size).toBe(0);
     expect(commonPositions(null, [{ name: 'C' }], false).size).toBe(0);
+  });
+});
+
+describe('extraKeysForVoicing', () => {
+  // string 5 / fret 3 = C3 (MIDI 48); string 1 / fret 0 = open high E4 (MIDI 64); string 4 / fret 2 = E3 (MIDI 52).
+  const voicing = [{ string: 5, fret: 3 }, { string: 1, fret: 0 }, { string: 4, fret: 2 }];
+
+  test('rings positions whose sounding MIDI is in the highlight set', () => {
+    const keys = extraKeysForVoicing(voicing, new Set([48, 64]));
+    expect([...keys].sort()).toEqual(['1:0', '5:3']);
+  });
+
+  test('a MIDI not present in the voicing produces no key', () => {
+    expect([...extraKeysForVoicing(voicing, new Set([100]))]).toEqual([]);
+  });
+
+  test('MIDI is register-exact — C4 (60) does not match the C3 (48) position', () => {
+    expect([...extraKeysForVoicing(voicing, new Set([60]))]).toEqual([]);
+    expect([...extraKeysForVoicing(voicing, new Set([48]))]).toEqual(['5:3']);
+  });
+
+  test('empty highlight set or missing voicing → empty set', () => {
+    expect(extraKeysForVoicing(voicing, new Set()).size).toBe(0);
+    expect(extraKeysForVoicing(null, new Set([48])).size).toBe(0);
+    expect(extraKeysForVoicing(voicing, null).size).toBe(0);
   });
 });
 

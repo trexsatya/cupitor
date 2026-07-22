@@ -1,5 +1,5 @@
 // public/music-encoding.test.js
-import { nameToMidi, intervalsOf, toSargam, packContour, unpackContour, encodeNoteText, encodeMusicXml, inferChords } from './music-encoding.js';
+import { nameToMidi, intervalsOf, toSargam, packContour, unpackContour, encodeNoteText, encodeMusicXml, inferChords, computeOnsets, canonicalChordSpans } from './music-encoding.js';
 import jQuery from 'jquery';
 
 // musicxml.js relies on a global `$`; provide it for jsdom.
@@ -102,6 +102,116 @@ describe('encodeMusicXml', () => {
   });
 });
 
+describe('computeOnsets (per-measure note onsets, divisions)', () => {
+  const N = (duration, chord = false) => ({ type: 'note', duration, chord });
+  const B = (duration) => ({ type: 'backup', duration });
+  const F = (duration) => ({ type: 'forward', duration });
+
+  test('sequential notes advance the cursor by their duration', () => {
+    expect(computeOnsets([N(1), N(1), N(2)])).toEqual([0, 1, 2]);
+  });
+
+  test('<chord/> notes share the onset of the preceding note (a vertical stack)', () => {
+    // A whole-note triad then the next beat: three stacked notes at 0, next at 4.
+    expect(computeOnsets([N(4), N(4, true), N(4, true), N(4)])).toEqual([0, 0, 0, 4]);
+  });
+
+  test('<backup> rewinds the cursor so a second voice aligns to the same beats', () => {
+    // voice1 half+half, backup a whole, voice2 half+half → onsets [0,2, 0,2].
+    expect(computeOnsets([N(2), N(2), B(4), N(2), N(2)])).toEqual([0, 2, 0, 2]);
+  });
+
+  test('<forward> advances the cursor (a rest gap)', () => {
+    expect(computeOnsets([N(2), F(2), N(2)])).toEqual([0, 4]);
+  });
+
+  test('a leading chord note (malformed) onsets at the current cursor', () => {
+    expect(computeOnsets([N(2, true), N(2)])).toEqual([0, 2]);
+  });
+});
+
+describe('encodeMusicXml carries spelled name + onset per note', () => {
+  const STACK = `<?xml version="1.0"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>G</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+      <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+      <note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+    <measure number="2">
+      <note><pitch><step>D</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>
+      <note><pitch><step>F</step><octave>4</octave></pitch><duration>2</duration><type>half</type></note>
+    </measure>
+  </part>
+</score-partwise>`;
+
+  test('a <chord/> stack shares one onset; the next measure restarts at 0', () => {
+    const doc = encodeMusicXml(STACK, { id: 't', system: 'western' });
+    const v = doc.voices[0];
+    expect(v.pitch).toEqual([60, 64, 67, 62, 65]);
+    expect(v.name).toEqual(['C', 'E', 'G', 'D', 'F']);   // spelled names, not midi→sharp
+    expect(v.onset).toEqual([0, 0, 0, 0, 2]);            // triad stacked at 0; m2: D@0, F@2
+  });
+});
+
+describe('canonicalChordSpans (single measure-ordered sequence across all voices)', () => {
+  test('a multi-voice piece collapses to ONE monotonic progression, not one copy per voice', () => {
+    // Two voices carrying the SAME per-measure progression (as inferChords produces).
+    const voices = [
+      { chordSymbol: ['Am', 'C', 'Am'], measureIndex: [1, 2, 3] },
+      { chordSymbol: ['Am', 'C', 'Am'], measureIndex: [1, 2, 3] },
+    ];
+    expect(canonicalChordSpans(voices)).toEqual([
+      { symbol: 'Am', measureStart: 1, measureEnd: 1 },
+      { symbol: 'C', measureStart: 2, measureEnd: 2 },
+      { symbol: 'Am', measureStart: 3, measureEnd: 3 },
+    ]);
+  });
+
+  test('spans are strictly measure-ordered — no voice-boundary seam jumping back', () => {
+    // voice 0 covers measures 1..3, voice 1 repeats 1..3. A concatenation would place a
+    // measure-3 span immediately before a measure-1 span (the seam that blows up segment
+    // resolution). The canonical sequence must never regress in measureStart.
+    const voices = [
+      { chordSymbol: ['Am', 'C', 'G'], measureIndex: [1, 2, 3] },
+      { chordSymbol: ['Am', 'C', 'G'], measureIndex: [1, 2, 3] },
+    ];
+    const spans = canonicalChordSpans(voices);
+    for (let i = 1; i < spans.length; i++) {
+      expect(spans[i].measureStart).toBeGreaterThanOrEqual(spans[i - 1].measureStart);
+    }
+  });
+
+  test('aggregates across voices by measure: a chord only present in a later voice is kept', () => {
+    // voice 0 rests (null) in measure 2; voice 1 supplies that measure's chord.
+    const voices = [
+      { chordSymbol: ['Am', null], measureIndex: [1, 2] },
+      { chordSymbol: [null, 'G'], measureIndex: [1, 2] },
+    ];
+    expect(canonicalChordSpans(voices)).toEqual([
+      { symbol: 'Am', measureStart: 1, measureEnd: 1 },
+      { symbol: 'G', measureStart: 2, measureEnd: 2 },
+    ]);
+  });
+
+  test('an earlier voice wins the measure (real harmony tag over another voice)', () => {
+    const voices = [
+      { chordSymbol: ['Am'], measureIndex: [1] },
+      { chordSymbol: ['E7'], measureIndex: [1] },
+    ];
+    expect(canonicalChordSpans(voices).map(s => s.symbol)).toEqual(['Am']);
+  });
+
+  test('empty / missing input yields an empty list', () => {
+    expect(canonicalChordSpans([])).toEqual([]);
+    expect(canonicalChordSpans(undefined)).toEqual([]);
+  });
+});
+
 describe('inferChords (pure, per-measure)', () => {
   test('fills null chordSymbol with the best per-measure triad', () => {
     // For note-text, each line is one measure.
@@ -121,6 +231,28 @@ describe('inferChords (pure, per-measure)', () => {
     const out = inferChords(doc);
     expect(out.voices[0].chordSymbol[0]).toBe('Csus4'); // preserved
     expect(out.voices[0].chordSymbol[1]).toBe('C');     // null slots filled with the measure chord
+  });
+
+  test('names a stacked chord by its bass — sheet-consistent (C-rooted, not A-rooted, for C-E-G-A over a C bass)', () => {
+    // Same four pitch classes {C,E,G,A} spell C6 (bass C) or Am7 (bass A). The old coverage-scorer
+    // ties and picks Am7 alphabetically; the sheet's engine roots it on the C bass. Search must agree.
+    const xml = `<?xml version="1.0"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>G</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+      <note><chord/><pitch><step>E</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+      <note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+      <note><chord/><pitch><step>A</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+  </part>
+</score-partwise>`;
+    const out = inferChords(encodeMusicXml(xml, { id: 't', system: 'western' }));
+    expect(out.voices[0].chordSymbol[0]).toMatch(/^C/);      // rooted on the bass C (e.g. C6)
+    expect(out.voices[0].chordSymbol[0]).not.toBe('Am7');
   });
 });
 

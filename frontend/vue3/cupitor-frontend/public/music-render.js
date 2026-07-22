@@ -1,8 +1,9 @@
 // public/music-render.js
 // Rendering for the music study app: pure measure-mapping helpers (TDD) +
 // a thin OSMD wrapper (injectable factory) for whole-piece / segment rendering.
-import { primaryVoice } from './music-encoding.js';
+import { primaryVoice, canonicalChordSpans } from './music-encoding.js';
 import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
+import { chordByAnyName } from './music-reference-data.js';
 import { indexAssignments, colorMap, toggleNote, firstTagForKey, revealedTagForKey, noteId as tagNoteId } from './music-tags.js';
 import { findScopedMatches, pcHistogram, guessKey, keyLabel } from './music-pattern.js';
 import { addPhrase as addPhraseReducer, removePhrase as removePhraseReducer, setPhraseTag as setPhraseTagReducer,
@@ -100,27 +101,33 @@ export function measureRangeFromNoteRange(detail, noteRange) {
   return [v.measureIndex[lo], v.measureIndex[hi]];
 }
 
-// Reconstruct the index's collapsed chord list with measure spans. Replicates
-// buildIndexEntry's walk (all voices in order; push a non-empty chordSymbol only when
-// it differs from the previously pushed one) so Phase-1 chord-range indices line up.
-// Measure spans are best-effort: for multi-voice pieces buildIndexEntry concatenates
-// voices, so a span may carry the measures of its first occurrence — adequate for
-// locating the segment, and pinned to the index by a test.
+// Reconstruct the index's chord list with measure spans, so a chord-match's index range maps
+// back to measures. Uses the SAME canonicalChordSpans as buildIndexEntry, so the reconstructed
+// sequence lines up with search.chords index-for-index. Because the sequence is measure-ordered
+// (never a per-voice concatenation), the spans are monotonic and a match resolves to a tight
+// measure range instead of blowing up across a voice boundary.
 export function collapsedChordSpans(detail) {
-  const spans = [];
-  (detail.voices || []).forEach(v => {
-    (v.chordSymbol || []).forEach((c, i) => {
-      if (!c) return;
-      const meas = v.measureIndex[i];
-      const last = spans[spans.length - 1];
-      if (last && last.symbol === c) {
-        if (meas > last.measureEnd) last.measureEnd = meas;
-      } else {
-        spans.push({ symbol: c, measureStart: meas, measureEnd: meas });
-      }
-    });
-  });
-  return spans;
+  return canonicalChordSpans((detail && detail.voices) || []);
+}
+
+// Pure: from `notesByMeasure` (measure-number → rendered notes, each with a pitch-class `name`),
+// the notes within [range] whose name is one of `tones`. Used to highlight exactly the notes that
+// form a matched chord at its own measure(s) — the caller passes the chord's measure span so a
+// chip only lights up its own notes, not other measures that happen to share a tone.
+// `range` is in the detail's SEQUENTIAL numbering (music-encoding counts the pickup as measure 1);
+// `notesByMeasure` is keyed by the RENDERED/printed number = sequential − offset. So on a pickup
+// piece (offset > 0) we shift the range back, else a chip lands one measure late (the classic
+// "only one note lit" bug where the neighbour measure shares a single tone).
+export function chordToneNotesInMeasures(notesByMeasure, tones, range, offset = 0) {
+  if (!tones || !tones.length || !range || range.length !== 2 || !notesByMeasure) return [];
+  const lo = Math.min(range[0], range[1]) - offset;
+  const hi = Math.max(range[0], range[1]) - offset;
+  const toneSet = new Set(tones);
+  const out = [];
+  for (let m = lo; m <= hi; m++) {
+    (notesByMeasure[m] || []).forEach((n) => { if (toneSet.has(n.name)) out.push(n); });
+  }
+  return out;
 }
 
 // Convert a Phase-1 chord match range (indices into the collapsed chord list) to a
@@ -399,6 +406,9 @@ export function createMusicRenderer(container, opts = {}) {
   const selectedChords = new Set();   // manually-picked best-match chord names (multi-select; persisted per vocab item)
   let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
   let stepHighlight = null;      // [from,to] of the current fretboard step's measures (blue band)
+  let extraNoteMarks = null;     // { marks:[{measure,midi}], color } — added-note (variation) highlight,
+                                 // re-applied after EVERY render so OSMD's deferred/font-load re-render
+                                 // (which rebuilds the SVG) can't wipe it. Cleared on loadDetail.
   let shownFrom = 1;             // 1-based first measure of the currently drawn window
   let shownTo = Number.MAX_SAFE_INTEGER;   // ...and the last (chords/highlight clip to this)
   // Draggable selection window over the staff. start/end are stable {measure, idx} anchors so the
@@ -632,6 +642,19 @@ export function createMusicRenderer(container, opts = {}) {
   }
   // Highlight one chord's notes in yellow, replacing any prior highlight.
   function highlightChord(notes) { clearHighlight(); highlightNotes(notes, CHORD_HL_COLOR); }
+
+  // Re-ink the variation's ADDED notes (matched by measure+MIDI against the freshly rendered
+  // noteheads) in extraNoteMarks.color. Called from postRender after every render, so OSMD's
+  // deferred/font-load re-render — which rebuilds the SVG and drops direct notehead paint — can't
+  // leave the added notes uncolored. No-op (returns 0) when no marks are set.
+  function applyExtraNoteHighlight() {
+    if (!extraNoteMarks || !extraNoteMarks.marks || !extraNoteMarks.marks.length) return 0;
+    const byM = renderedNotesByMeasure();
+    const els = [];
+    extraNoteMarks.marks.forEach((m) => (byM[m.measure] || []).forEach((n) => { if (n.midi === m.midi) els.push(n); }));
+    highlightNotes(els, extraNoteMarks.color);
+    return els.length;
+  }
 
   // Overlay stacked chord-candidate labels above each detected chord area. Each area shows its
   // best few chords (closest to the staff = best); clicking a label highlights that chord's
@@ -1511,6 +1534,7 @@ export function createMusicRenderer(container, opts = {}) {
     // Re-paint the last pattern search's occurrences (over the fresh overlay) so a re-render doesn't
     // strip them. Guarded so the search's own clearHighlight/highlightNotes can't recurse into here.
     if (lastSearch && !_inReapply) { _inReapply = true; try { lastSearch(); } catch (_) {} finally { _inReapply = false; } }
+    applyExtraNoteHighlight();   // re-ink variation added-notes onto the fresh noteheads
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
@@ -1593,6 +1617,7 @@ export function createMusicRenderer(container, opts = {}) {
       computeMeasureOffset();
       shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
       selectedChords.clear();   // a fresh piece carries no manual chord picks
+      extraNoteMarks = null;    // ...and no carried-over variation added-note highlight
       assignments = (detail.patterns || []).map((p) => ({ name: p.name, notes: (p.notes || []).map((n) => ({ ...n })) }));
       phrases = (detail.phrases || []).map((p) => ({ name: p.name, color: p.color, tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
       tagMode = false; activeTag = null; tagFilter = false; filterTags = new Set();   // tagRegistry is global — not reset here
@@ -1819,6 +1844,28 @@ export function createMusicRenderer(container, opts = {}) {
     getGuessedChords() { return guessChords(renderedNotesByMeasure()); },
     highlightChord,
     clearHighlight,
+    // Recolor every rendered notehead whose (measure, midi) matches one of `marks`
+    // ([{ measure, midi }]) — used to make a segment-embellishment variation's ADDED notes stand out
+    // in the dedicated variation renderer. Does NOT clear prior highlights (composes with others).
+    // Match-by (measure,midi) is intentionally simple: decorations are typically unique pitches in the
+    // bar, so coloring all same-midi matches in the measure is acceptable. Returns the count colored.
+    // No-op (0) without a DOM / rendered graphic, like the other highlight methods.
+    highlightExtraNotes(marks, color = '#C62828') {
+      extraNoteMarks = (marks && marks.length) ? { marks, color } : null;
+      return applyExtraNoteHighlight();
+    },
+    // Recolor exactly the notes that form a matched chord `name` (search-normalised or raw) within
+    // its measure span [from,to], in chord yellow. Replaces any prior highlight. Returns the notes
+    // (so the caller can tell whether anything lit up). Powers the clickable matched-chord chips.
+    highlightMatchedChord(name, range) {
+      const chord = chordByAnyName(name);
+      if (!chord) { clearHighlight(); return []; }
+      // `range` arrives in the detail's sequential numbering; renderedNotesByMeasure is keyed by the
+      // printed number, so pass measureOffset to realign (matters on pickup pieces).
+      const notes = chordToneNotesInMeasures(renderedNotesByMeasure(), chord.notes, range, measureOffset);
+      highlightChord(notes);
+      return notes;
+    },
     // Shade a captured measure range [from,to] behind the notes; persists across re-renders
     // (zoom / segment changes) until cleared. Used to mark a vocab item's original measures.
     highlightMeasures(range) { measureHighlight = (range && range.length === 2) ? [range[0], range[1]] : null; applyMeasureHighlight(); },
@@ -1827,6 +1874,27 @@ export function createMusicRenderer(container, opts = {}) {
     // dots), independent of the vocab-range highlight. Tracks stepping; persists across re-renders.
     highlightStepMeasures(range) { stepHighlight = (range && range.length === 2) ? [range[0], range[1]] : null; applyMeasureHighlight(); },
     clearStepHighlight() { stepHighlight = null; applyMeasureHighlight(); },
+    // Position the OSMD cursor at an absolute onset beat (quarter-beats from the score start — the same
+    // scale as a schedule event's `beat`) and show it. Lets the sheet cursor follow fretboard stepping:
+    // reset, then step forward to the first entry at/after `beat`. No-op if the cursor isn't ready yet.
+    showCursorAtBeat(beat) {
+      try {
+        const c = osmd.cursor;
+        if (!c) return;
+        c.reset();
+        if (beat != null) {
+          let guard = 0;
+          while (guard++ < 5000) {
+            const t = c.iterator && c.iterator.currentTimeStamp;
+            const cb = (t && typeof t.RealValue === 'number') ? t.RealValue * 4 : null;
+            if (cb == null || cb >= beat - 1e-6 || (c.iterator && c.iterator.EndReached)) break;
+            c.next();
+          }
+        }
+        c.show();
+      } catch (_) {}
+    },
+    hideCursor() { try { const c = osmd.cursor; if (c) { c.reset(); c.hide(); } } catch (_) {} },
     applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };
 }
