@@ -77,6 +77,15 @@ describe('instrumentVoiceKey', () => {
     expect(instrumentVoiceKey('Violin')).toBe('strings');
     expect(instrumentVoiceKey('Cello')).toBe('strings');
     expect(instrumentVoiceKey('Pipe Organ')).toBe('organ');
+    expect(instrumentVoiceKey('Flute')).toBe('flute');
+    expect(instrumentVoiceKey('Piccolo')).toBe('flute');
+    expect(instrumentVoiceKey('Recorder')).toBe('flute');
+  });
+  test('steel-string guitars map to the steel voice; nylon/classical stay on the nylon voice', () => {
+    expect(instrumentVoiceKey('Steel Guitar')).toBe('guitar_steel');
+    expect(instrumentVoiceKey('Acoustic Guitar (steel)')).toBe('guitar_steel');
+    expect(instrumentVoiceKey('Nylon Guitar')).toBe('guitar');
+    expect(instrumentVoiceKey('Classical Guitar')).toBe('guitar');
   });
   test('unknown / empty / null → synth', () => {
     expect(instrumentVoiceKey('Trumpet')).toBe('synth');
@@ -371,8 +380,10 @@ describe('compressKeptEvents', () => {
 describe('gmInstrumentForVoice', () => {
   test('maps each category to a General MIDI instrument', () => {
     expect(gmInstrumentForVoice('guitar')).toBe('acoustic_guitar_nylon');
+    expect(gmInstrumentForVoice('guitar_steel')).toBe('acoustic_guitar_steel');
     expect(gmInstrumentForVoice('strings')).toBe('string_ensemble_1');
     expect(gmInstrumentForVoice('organ')).toBe('church_organ');
+    expect(gmInstrumentForVoice('flute')).toBe('flute');
     expect(gmInstrumentForVoice('piano')).toBe('acoustic_grand_piano');
   });
   test('synth / unknown → acoustic grand piano', () => {

@@ -1,6 +1,0 @@
-[    1047ms] [WARNING] Failed to execute 'postMessage' on 'DOMWindow': The target origin provided ('https://www.youtube.com') does not match the recipient window's origin ('http://satyendra.website'). @ https://www.youtube.com/s/player/dd53c628/www-widgetapi.vflset/www-widgetapi.js:162
-[    2025ms] [LOG] [cache] boot: 6019 hits, 4 to fetch, 0 evicted @ http://satyendra.website/language/log-buffer.js:0
-[    2036ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/Svenska%20med%20Kalle%20%7C%7C%20Infl%C3%B6de%20%C3%A4r%20viktigt%20-%20Att%20lyssna%20och%20l%C3%A4sa%20-%20Vara%20uppm%C3%A4rksam%20och%20notera%20-%20Tankar%20och%20tips%20-%20Svenska%20%7C%7C%20HKLLIUhiSjM.sv.srt:0
-[    2384ms] [LOG] Not found HKLLIUhiSjM @ http://satyendra.website/language/log-buffer.js:0
-[    2384ms] [WARNING] [srt] 3 subtitle(s) failed transiently — retrying in background @ http://satyendra.website/language/log-buffer.js:0
-[   32403ms] [WARNING] [srt] background retry gave up on 3 subtitle(s) after 4 rounds: wyhwuheitmw, 0MPkooFCjGs, lJhA0XmgBJ0 @ http://satyendra.website/language/log-buffer.js:0

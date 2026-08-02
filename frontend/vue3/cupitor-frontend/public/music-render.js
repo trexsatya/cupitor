@@ -366,6 +366,7 @@ export function createMusicRenderer(container, opts = {}) {
   const _osmdRender = osmd.render.bind(osmd);
   let _inRender = false;
   osmd.render = (...a) => {
+    clampCursorToDrawnRange();   // never let OSMD update a cursor that sits outside the drawn window (it throws)
     const out = _osmdRender(...a);
     if (!_inRender) { _inRender = true; try { postRender(); } finally { _inRender = false; } }
     return out;
@@ -393,6 +394,7 @@ export function createMusicRenderer(container, opts = {}) {
   const onChordSelect = opts.onChordSelect;   // called on a user chord-label click with the selected names
   const onWindowChange = opts.onWindowChange; // called with { chords, measureRange } when the chord window moves
   const onSuppressionChange = opts.onSuppressionChange;   // fired after a user change to S, T, or hearAll
+  const onSeek = opts.onSeek;   // fired when the click-to-play-from start note changes (set or cleared)
   let totalMeasures = 0;
   let measureOffset = 0;     // sequential MeasureNumber − printed number (the pickup/anacrusis shift)
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
@@ -411,6 +413,8 @@ export function createMusicRenderer(container, opts = {}) {
                                  // (which rebuilds the SVG) can't wipe it. Cleared on loadDetail.
   let shownFrom = 1;             // 1-based first measure of the currently drawn window
   let shownTo = Number.MAX_SAFE_INTEGER;   // ...and the last (chords/highlight clip to this)
+  let playStart = null;          // {measure, midi, beats} of a click-selected start note; playback begins
+                                 // here (until the view changes or another note is clicked). See getPlayStartRange.
   // Draggable selection window over the staff. start/end are stable {measure, idx} anchors so the
   // window re-resolves to the right notes after re-renders (zoom/segment). Inactive by default.
   const chordWindow = { active: false, start: null, end: null };
@@ -607,6 +611,20 @@ export function createMusicRenderer(container, opts = {}) {
         });
       });
     });
+    // systemIndexOf advances its cache for EVERY measure in measureList, including undrawn ones whose
+    // notes were dropped above — so on a clipped segment the kept notes carry OFFSET system indices
+    // (e.g. 6..12 when measures 1..24 occupy systems 0..5). notesBySystem/staffBoxes treat system as a
+    // dense 0-based band index, so those gaps dumped whole lines into band 0 (chord labels for lower
+    // lines piled onto the first line). Remap to a dense 0-based range over the systems actually kept.
+    const present = [...new Set(
+      Object.keys(byMeasure).flatMap((m) => byMeasure[m].map((n) => n.system)).filter((s) => s != null),
+    )].sort((a, b) => a - b);
+    if (present.length && (present[0] !== 0 || present[present.length - 1] !== present.length - 1)) {
+      const remap = new Map(present.map((s, i) => [s, i]));
+      Object.keys(byMeasure).forEach((m) => byMeasure[m].forEach((n) => {
+        if (n.system != null && remap.has(n.system)) n.system = remap.get(n.system);
+      }));
+    }
     return byMeasure;
   }
 
@@ -1335,7 +1353,12 @@ export function createMusicRenderer(container, opts = {}) {
       if (suppressedNotes.has(key)) { suppressedNotes.delete(key); tempRestored.delete(key); }
       else suppressedNotes.set(key, id);
     } else {
-      if (!suppressedNotes.has(key)) return;                 // practice: only S notes are clickable
+      if (!suppressedNotes.has(key)) {
+        // Default view: click a note to set the playback start there (moves the cursor; the next Play
+        // begins from this beat). The chord window, when active, owns the play range — leave it alone.
+        if (!chordWindow.active) setPlayStartFromNote(n);
+        return;
+      }
       if (tempRestored.has(key)) tempRestored.delete(key);   // re-suppress
       else tempRestored.add(key);                            // temporarily restore
     }
@@ -1539,6 +1562,76 @@ export function createMusicRenderer(container, opts = {}) {
   }
 
   // One render pass: push model colors, then render. The render wrap runs postRender() afterwards.
+  // Absolute onset beat (quarter-beats from score start) of measure `mnum`'s downbeat; 0 if unavailable.
+  function measureStartBeat(mnum) {
+    try {
+      const sms = osmd.Sheet && osmd.Sheet.SourceMeasures;
+      if (!sms || !sms.length) return 0;
+      const m = sms[Math.max(0, Math.min(sms.length - 1, mnum - 1))];
+      const t = m && m.AbsoluteTimestamp;
+      return (t && typeof t.RealValue === 'number') ? t.RealValue * 4 : 0;
+    } catch (_) { return 0; }
+  }
+  // Keep the play cursor inside the drawn window [shownFrom, shownTo]. OSMD's render → Cursor.update
+  // reads the graphical entry of the cursor's current note; when the window is clipped to a segment
+  // that excludes that note, the entry is undefined and OSMD throws. So if the cursor sits outside the
+  // drawn measures, snap it forward (by absolute beat) to the first entry of the window before render.
+  function clampCursorToDrawnRange() {
+    try {
+      const c = osmd.cursor;
+      if (!c || !c.iterator) return;
+      const total = totalMeasures || 0;
+      const startBeat = measureStartBeat(shownFrom);
+      const endBeat = (total && shownTo < total) ? measureStartBeat(shownTo + 1) : Infinity;
+      const t = c.iterator.currentTimeStamp;
+      const cur = (t && typeof t.RealValue === 'number') ? t.RealValue * 4 : null;
+      if (cur != null && cur >= startBeat - 1e-6 && cur < endBeat - 1e-6) return;   // already inside
+      c.reset();
+      let guard = 0;
+      while (guard++ < 5000) {
+        const tt = c.iterator.currentTimeStamp;
+        const cb = (tt && typeof tt.RealValue === 'number') ? tt.RealValue * 4 : null;
+        if (cb == null || cb >= startBeat - 1e-6 || c.iterator.EndReached) break;
+        c.next();
+      }
+    } catch (_) {}
+  }
+
+  // Move the OSMD cursor to the first entry at/after absolute onset `beat` (quarter-beats from the
+  // score start) and show it. Reset, then step forward. No-op if the cursor isn't ready. Shared by the
+  // public showCursorAtBeat (fretboard stepping) and click-to-play-from.
+  function positionCursorAtBeat(beat) {
+    try {
+      const c = osmd.cursor;
+      if (!c) return;
+      c.reset();
+      if (beat != null) {
+        let guard = 0;
+        while (guard++ < 5000) {
+          const t = c.iterator && c.iterator.currentTimeStamp;
+          const cb = (t && typeof t.RealValue === 'number') ? t.RealValue * 4 : null;
+          if (cb == null || cb >= beat - 1e-6 || (c.iterator && c.iterator.EndReached)) break;
+          c.next();
+        }
+      }
+      c.show();
+    } catch (_) {}
+  }
+
+  // Record `n` as the playback start (click-to-play-from) and move the cursor there for feedback.
+  function setPlayStartFromNote(n) {
+    playStart = { measure: n.measure, midi: n.midi, beats: n.onsetBeats };
+    positionCursorAtBeat(n.onsetBeats);
+    if (onSeek) { try { onSeek(); } catch (_) {} }
+  }
+
+  // Drop the click-selected start (view changes reset playback to the view's own start).
+  function clearPlayStart() {
+    if (!playStart) return;
+    playStart = null;
+    if (onSeek) { try { onSeek(); } catch (_) {} }
+  }
+
   function redraw() {
     clearHighlight();
     applyVoiceColors();
@@ -1622,19 +1715,24 @@ export function createMusicRenderer(container, opts = {}) {
       phrases = (detail.phrases || []).map((p) => ({ name: p.name, color: p.color, tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
       tagMode = false; activeTag = null; tagFilter = false; filterTags = new Set();   // tagRegistry is global — not reset here
       phrasePaintMode = false; activePhrase = null; phraseFilter = false; shownPhrases = new Set();
+      clearPlayStart();   // a fresh piece has no click-selected start
       redraw();
       return { ok: true, totalMeasures, measureOffset };
     },
     showFull() {
       osmd.setOptions({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: totalMeasures || Number.MAX_SAFE_INTEGER });
       shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
+      clearPlayStart();   // changing the view resets playback to the view's own start
       redraw();
     },
     showSegment(measureRange) {
       osmd.setOptions({ drawFromMeasureNumber: measureRange[0], drawUpToMeasureNumber: measureRange[1] });
       shownFrom = measureRange[0]; shownTo = measureRange[1];
+      clearPlayStart();   // changing the view resets playback to the view's own start
       redraw();
     },
+    // The currently drawn measure window (1-based). from===1 && to>=totalMeasures means the whole piece.
+    getShownRange() { return { from: shownFrom, to: shownTo, total: totalMeasures }; },
     setZoom,
     setVoiceColors(on) { colorVoices = !!on; redraw(); },
     setNoteNames(on) { noteNames = !!on; redraw(); },
@@ -1644,6 +1742,10 @@ export function createMusicRenderer(container, opts = {}) {
     setDimConnectors(on) { dimConnectors = !!on; redraw(); },
     // Pickup/anacrusis shift (sequential − printed); the UI shows/accepts printed measure numbers.
     getMeasureOffset() { return measureOffset; },
+    // Absolute quarter-beat where the first full measure begins — i.e. the anacrusis/pickup length, or a
+    // whole measure when there's no pickup. Its value mod the meter is the phase of every barline
+    // downbeat, letting the metronome accent align to real downbeats on pickup pieces. See downbeatAlignment.
+    anacrusisBeats() { return Math.round(measureStartBeat(2)); },
     // Toggle the draggable chord window. Off clears its anchors so it re-seeds next time.
     setChordWindow(on) { chordWindow.active = !!on; if (!chordWindow.active) { chordWindow.start = null; chordWindow.end = null; } redraw(); },
     // Move/resize the window by one note without dragging (touch-friendly). See adjustWindow.
@@ -1836,6 +1938,25 @@ export function createMusicRenderer(container, opts = {}) {
       range.cursorStep = new Set(ordered.filter((n) => n.order < startOrder).map(key)).size;
       return range;
     },
+    // Play range for a click-selected start note: from that note through the END of the drawn view,
+    // as { fromMeasure, toMeasure, fromBeat?, toBeat?, cursorStep } (same shape as getWindowRange).
+    // Null when no start is set OR the start note isn't in the current view (e.g. re-clipped) — then
+    // playback falls back to the segment/whole-piece range. Read fresh so re-renders can't stale it.
+    getPlayStartRange() {
+      if (!playStart) return null;
+      const ordered = orderedRenderedNotes();
+      if (!ordered.length) return null;
+      const idx = ordered.findIndex((n) => n.midi === playStart.midi && n.measure === playStart.measure
+        && Math.abs((typeof n.onsetBeats === 'number' ? n.onsetBeats : NaN) - playStart.beats) < NOTE_EPS);
+      if (idx < 0) return null;
+      const selected = ordered.slice(idx);   // clicked note → end of the drawn view
+      const range = rangeFromSelected(selected);
+      if (!range) return null;
+      const startOrder = ordered[idx].order;
+      const key = (n) => (typeof n.onsetBeats === 'number' ? n.onsetBeats : n.order);
+      range.cursorStep = new Set(ordered.filter((n) => n.order < startOrder).map(key)).size;
+      return range;
+    },
     // The manually-picked best-match chord names — read at vocab-save time.
     getSelectedChords() { return [...selectedChords]; },
     // Pre-select chords by name (e.g. restoring a saved vocab item) and re-draw the overlay.
@@ -1877,23 +1998,7 @@ export function createMusicRenderer(container, opts = {}) {
     // Position the OSMD cursor at an absolute onset beat (quarter-beats from the score start — the same
     // scale as a schedule event's `beat`) and show it. Lets the sheet cursor follow fretboard stepping:
     // reset, then step forward to the first entry at/after `beat`. No-op if the cursor isn't ready yet.
-    showCursorAtBeat(beat) {
-      try {
-        const c = osmd.cursor;
-        if (!c) return;
-        c.reset();
-        if (beat != null) {
-          let guard = 0;
-          while (guard++ < 5000) {
-            const t = c.iterator && c.iterator.currentTimeStamp;
-            const cb = (t && typeof t.RealValue === 'number') ? t.RealValue * 4 : null;
-            if (cb == null || cb >= beat - 1e-6 || (c.iterator && c.iterator.EndReached)) break;
-            c.next();
-          }
-        }
-        c.show();
-      } catch (_) {}
-    },
+    showCursorAtBeat(beat) { positionCursorAtBeat(beat); },
     hideCursor() { try { const c = osmd.cursor; if (c) { c.reset(); c.hide(); } } catch (_) {} },
     applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };

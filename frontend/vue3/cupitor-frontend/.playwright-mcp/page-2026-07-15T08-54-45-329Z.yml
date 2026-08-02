@@ -1,6 +1,0 @@
-- generic [ref=f1e1]:
-  - button "Play" [ref=f1e2]
-  - button "Silence m2 first note" [active] [ref=f1e3]
-  - generic [ref=f1e4]: "ready. schedule=[{\"midi\":60,\"time\":0,\"duration\":0.5,\"beat\":0},{\"midi\":62,\"time\":0.5,\"duration\":0.5,\"beat\":1},{\"midi\":64,\"time\":1,\"duration\":0.5,\"beat\":2},{\"midi\":65,\"time\":1.5,\"duration\":0.5,\"beat\":3},{\"midi\":67,\"time\":2,\"duration\":0.5,\"beat\":4},{\"midi\":69,\"time\":2.5,\"duration\":0.5,\"beat\":5},{\"midi\":71,\"time\":3,\"duration\":0.5,\"beat\":6},{\"midi\":72,\"time\":3.5,\"duration\":0.5,\"beat\":7},{\"midi\":74,\"time\":4,\"duration\":1,\"beat\":8},{\"midi\":76,\"time\":5,\"duration\":1,\"beat\":10}] getMutedNotes=[{\"measure\":2,\"midi\":67,\"beats\":4}] schedule w/ muted flags=[{\"midi\":60,\"time\":0,\"duration\":0.5,\"beat\":0},{\"midi\":62,\"time\":0.5,\"duration\":0.5,\"beat\":1},{\"midi\":64,\"time\":1,\"duration\":0.5,\"beat\":2},{\"midi\":65,\"time\":1.5,\"duration\":0.5,\"beat\":3},{\"midi\":67,\"time\":2,\"duration\":0.5,\"beat\":4,\"muted\":true},{\"midi\":69,\"time\":2.5,\"duration\":0.5,\"beat\":5},{\"midi\":71,\"time\":3,\"duration\":0.5,\"beat\":6},{\"midi\":72,\"time\":3.5,\"duration\":0.5,\"beat\":7},{\"midi\":74,\"time\":4,\"duration\":1,\"beat\":8},{\"midi\":76,\"time\":5,\"duration\":1,\"beat\":10}]"
-  - img [ref=f1e58]:
-    - generic [ref=f1e106]: "3"

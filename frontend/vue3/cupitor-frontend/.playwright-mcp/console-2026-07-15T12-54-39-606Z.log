@@ -1,3 +1,0 @@
-[     193ms] [LOG] %c * Tone.js v15.1.22 *  background: #000; color: #fff @ http://localhost:8821/vendor/tone.js:1
-[     504ms] [WARNING] The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. https://developer.chrome.com/blog/autoplay/#web_audio @ http://localhost:8821/vendor/tone.js:1
-[     505ms] [WARNING] The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page. https://developer.chrome.com/blog/autoplay/#web_audio @ http://localhost:8821/vendor/tone.js:1

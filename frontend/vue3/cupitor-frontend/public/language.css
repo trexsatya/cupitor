@@ -1506,6 +1506,23 @@ body.rec-paused .lines-cntnr .buttons .capture-btn { opacity: 0.4; pointer-event
     font-style: italic;
 }
 
+/* Placeholder phrase translation shown in the review row + Practice back. */
+#recordingReviewDialog .rec-item-gloss { color: #2e7d32; font-style: italic; }
+.practice-phrase-gloss {
+    font-weight: 600;
+    color: #1b5e20;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px dashed #c8e6c9;
+}
+.practice-phrase-gloss[data-auto="1"]::after {
+    content: ' (auto)';
+    font-weight: 400;
+    font-style: italic;
+    color: #999;
+    font-size: 11px;
+}
+
 /* Virtual-playlist member picker dialog */
 #virtualPlaylistEditor .vpe-name-label {
     display: block;
@@ -2215,6 +2232,109 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     cursor: pointer;
 }
 .manage-popover .manage-item:hover { background: #f6f8fa; }
+
+/* Notification bell inbox — icon button with an unread badge, opening a
+   newest-first dropdown of study reminders that fired. Mirrors the manage
+   popover; closes on outside click via JS. */
+.notif-bell-wrap { display: inline-block; }
+#notifBellBtn { position: relative; }
+.notif-bell-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border-radius: 8px;
+    background: #d1242f;
+    color: #fff;
+    font-size: 10px;
+    line-height: 16px;
+    font-weight: 700;
+    text-align: center;
+}
+/* Fixed + JS-positioned (reparented to <body>) so no overflow-clipping or
+   stacking ancestor in the toolbar can squash or hide it. */
+.notif-bell-panel {
+    position: fixed;
+    width: 340px;
+    max-width: 90vw;
+    max-height: 60vh;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+    /* Above page chrome / result panels (which can reach ~100020) — the bell
+       dropdown never coexists with a jQuery UI dialog, so this is safe. */
+    z-index: 100050;
+}
+.notif-bell-hd {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid #eaeef2;
+    position: sticky;
+    top: 0;
+    background: #fff;
+}
+.notif-bell-hd span { font-weight: 700; font-size: 13px; color: #24292f; }
+.notif-bell-readall {
+    background: transparent;
+    border: none;
+    color: #0969da;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+}
+.notif-bell-readall[disabled] { color: #8c959f; cursor: default; }
+.notif-bell-empty { padding: 16px 12px; color: #8c959f; font-size: 12px; text-align: center; }
+.notif-bell-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid #f2f4f6;
+    padding: 8px 12px;
+    cursor: pointer;
+}
+.notif-bell-row:hover { background: #f6f8fa; }
+.notif-bell-row[data-open="0"] { cursor: default; }
+.notif-bell-row.unread { background: #f0f6ff; }
+.notif-bell-row.unread:hover { background: #e4eeff; }
+.notif-bell-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: transparent;
+}
+.notif-bell-row.unread .notif-bell-dot { background: #0969da; }
+.notif-bell-main { flex: 1 1 auto; min-width: 0; }
+.notif-bell-title {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #24292f;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.notif-bell-body {
+    display: block;
+    font-size: 12px;
+    color: #57606a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.notif-bell-meta { display: block; font-size: 11px; color: #8c959f; margin-top: 2px; }
+.notif-bell-missed { color: #bc4c00; font-weight: 600; }
 
 /* Rare words category headers (when no category filter is active). */
 .rare-words-cat-hdr {
@@ -3316,3 +3436,119 @@ body.rec-playing #recPlayingSubs { display: block; }
     }
     #practiceLogDialog .practice-log-item-name { padding-top: 0; }
 }
+
+/* ── Library (EPUB) full-text search — the bar and results injected at the
+   top of #result. Driven by PlaylistBridge's globalSearch op; only present
+   inside the Cupitor app. ───────────────────────────────────────────── */
+.lib-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 4px 6px;
+    margin-bottom: 4px;
+    background: #f6f8fa;
+    border-bottom: 1px solid #dde3e8;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+.lib-auto-label {
+    font-size: 0.82em;
+    color: #555;
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+}
+.lib-search-status {
+    font-size: 0.82em;
+    color: #666;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lib-status-busy::after {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-left: 5px;
+    border: 2px solid #bbb;
+    border-top-color: #4dba87;
+    border-radius: 50%;
+    animation: lib-spin 0.8s linear infinite;
+    vertical-align: -1px;
+}
+@keyframes lib-spin { to { transform: rotate(360deg); } }
+.lib-results:not(:empty) {
+    padding: 2px 6px 6px 6px;
+    border-bottom: 1px solid #dde3e8;
+    margin-bottom: 6px;
+}
+.lib-head {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 2px 0;
+    margin-bottom: 4px;
+    font-size: 0.82em;
+    color: #555;
+    cursor: pointer;
+}
+.lib-head:hover { color: #222; }
+.lib-caret { display: inline-block; width: 10px; color: #888; }
+.lib-collapsed .lib-body { display: none; }
+.lib-capped { color: #b8860b; }
+.lib-streaming { color: #4dba87; }
+.lib-cancelled { color: #999; }
+.lib-empty { font-size: 0.85em; color: #777; padding: 2px 0; }
+.lib-book { margin-bottom: 6px; }
+.lib-book-title {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 1px 0;
+    font-weight: 600;
+    font-size: 0.9em;
+    color: #24405c;
+    cursor: pointer;
+}
+.lib-book-title:hover { text-decoration: underline; }
+.lib-book-count { font-weight: 400; color: #888; font-size: 0.85em; }
+.lib-book-collapsed .lib-book-body { display: none; }
+.lib-chapter { margin: 3px 0 3px 8px; }
+.lib-open {
+    background: transparent;
+    border: none;
+    border-left: 3px solid #4dba87;
+    padding: 0 0 0 6px;
+    font-size: 0.85em;
+    color: #1d6fa5;
+    cursor: pointer;
+    text-align: left;
+}
+.lib-open:hover { text-decoration: underline; }
+.lib-snip {
+    display: block;
+    width: calc(100% - 9px);
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 1px 2px;
+    font-size: 0.85em;
+    font-family: inherit;
+    color: #333;
+    margin: 2px 0 2px 9px;
+    line-height: 1.35;
+    cursor: pointer;
+}
+.lib-snip:hover { background: #f0f4f8; }
+.lib-snip mark { background: #ffe680; padding: 0 1px; }

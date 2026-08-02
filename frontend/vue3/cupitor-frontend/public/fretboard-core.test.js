@@ -1,4 +1,4 @@
-import { findPositions, isPlayable, voicingsForNotes, voicingCenter, voicingSpan, findPaths, movementSparkline, noteAt } from './fretboard-core.js';
+import { findPositions, isPlayable, voicingsForNotes, voicingCenter, voicingSpan, findPaths, findCombinations, movementSparkline, noteAt } from './fretboard-core.js';
 
 describe('noteAt', () => {
   test('returns the sounding note+octave for a string/fret in standard tuning', () => {
@@ -174,5 +174,68 @@ describe('movementSparkline', () => {
   test('maps deltas to block glyphs and tolerates an empty array', () => {
     expect(movementSparkline([])).toBe('');
     expect(movementSparkline([0, 5, 2]).length).toBe(3);
+  });
+});
+
+describe('findCombinations', () => {
+  // Two region-coherent paths over two chords: a LOW path (frets ~1-3) and an UP path (~8-10).
+  const a0 = [{ string: 6, fret: 1 }, { string: 5, fret: 2 }];   // center 1.5
+  const a1 = [{ string: 6, fret: 2 }, { string: 5, fret: 3 }];   // center 2.5
+  const b0 = [{ string: 6, fret: 8 }, { string: 5, fret: 9 }];   // center 8.5
+  const b1 = [{ string: 6, fret: 9 }, { string: 5, fret: 10 }];  // center 9.5
+  const low = { voicings: [a0, a1], region: 2, cost: 1, moves: [0, 1], label: 'open' };
+  const up = { voicings: [b0, b1], region: 9, cost: 1, moves: [0, 1], label: 'up' };
+  const sig = (v) => (v ? JSON.stringify(v) : 'null');
+  const rowSig = (voicings) => voicings.map(sig).join('|');
+
+  test('mixes region voicings across chords — cross-region combinations NOT present in the region paths', () => {
+    const combos = findCombinations([low, up]);
+    // pure-region rows (a0,a1) and (b0,b1) already exist as paths → excluded; only the two mixes remain.
+    expect(combos.length).toBe(2);
+    const pathRows = [rowSig([a0, a1]), rowSig([b0, b1])];
+    combos.forEach((c) => expect(pathRows).not.toContain(rowSig(c.voicings)));
+    const rows = combos.map((c) => rowSig(c.voicings));
+    expect(rows).toContain(rowSig([b0, a1]));   // up → low
+    expect(rows).toContain(rowSig([a0, b1]));   // low → up
+  });
+
+  test('ranks by ascending total hand movement (smoothest mix first)', () => {
+    const combos = findCombinations([low, up]);
+    // (b0→a1) moves |2.5-8.5|=6; (a0→b1) moves |9.5-1.5|=8 → the 6-move mix ranks first.
+    expect(combos[0].voicings).toEqual([b0, a1]);
+    expect(combos[0].cost).toBeLessThanOrEqual(combos[combos.length - 1].cost);
+  });
+
+  test('caps the number of combinations', () => {
+    const c0 = [{ string: 6, fret: 1 }]; const c1 = [{ string: 6, fret: 5 }]; const c2 = [{ string: 6, fret: 9 }];
+    const d0 = [{ string: 5, fret: 2 }]; const d1 = [{ string: 5, fret: 6 }]; const d2 = [{ string: 5, fret: 10 }];
+    const paths = [
+      { voicings: [c0, d0] }, { voicings: [c1, d1] }, { voicings: [c2, d2] },
+    ];
+    const combos = findCombinations(paths, { cap: 2 });
+    expect(combos.length).toBeLessThanOrEqual(2);
+  });
+
+  test('a single region path yields no combinations (nothing to mix)', () => {
+    expect(findCombinations([low])).toEqual([]);
+  });
+
+  test('empty / missing input → []', () => {
+    expect(findCombinations([])).toEqual([]);
+    expect(findCombinations()).toEqual([]);
+  });
+
+  test('preserves a null (unplayable) step across the mix and carries label + moves', () => {
+    const lowN = { voicings: [a0, null, a1] };
+    const upN = { voicings: [b0, null, b1] };
+    const combos = findCombinations([lowN, upN]);
+    expect(combos.length).toBeGreaterThan(0);
+    combos.forEach((c) => {
+      expect(c.voicings.length).toBe(3);
+      expect(c.voicings[1]).toBeNull();               // the empty middle step stays null
+      expect(typeof c.label).toBe('string');
+      expect(c.label.length).toBeGreaterThan(0);
+      expect(Array.isArray(c.moves)).toBe(true);
+    });
   });
 });

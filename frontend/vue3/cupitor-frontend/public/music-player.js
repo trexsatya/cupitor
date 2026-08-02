@@ -256,7 +256,9 @@ export function parseYouTubeId(url) {
 export function instrumentVoiceKey(name) {
   const s = String(name || '').toLowerCase();
   if (/piano|keyboard|harpsichord|clav/.test(s)) return 'piano';
-  if (/guitar|pluck|lute|harp|mandolin|banjo/.test(s)) return 'guitar';
+  if (/flute|piccolo|recorder/.test(s)) return 'flute';   // before guitar: "flute" contains "lute"
+  if (/steel/.test(s) && /guitar/.test(s)) return 'guitar_steel';   // steel-string acoustic
+  if (/guitar|pluck|lute|harp|mandolin|banjo/.test(s)) return 'guitar';   // nylon/classical default
   if (/violin|viola|cello|bass|string|fiddle/.test(s)) return 'strings';
   if (/organ|accordion|harmonium/.test(s)) return 'organ';
   return 'synth';
@@ -277,8 +279,10 @@ function soundfontNoteFile(note) {
 // Pure: map a playback-voice category to a General MIDI instrument (soundfont folder name).
 export function gmInstrumentForVoice(category) {
   switch (category) {
-    case 'guitar':  return 'acoustic_guitar_nylon';
-    case 'strings': return 'string_ensemble_1';
+    case 'guitar':       return 'acoustic_guitar_nylon';
+    case 'guitar_steel': return 'acoustic_guitar_steel';
+    case 'strings':      return 'string_ensemble_1';
+    case 'flute':        return 'flute';
     case 'organ':   return 'church_organ';
     case 'piano':
     case 'synth':
@@ -306,12 +310,19 @@ export function createMusicPlayer({ Tone, getCursor, onEnd } = {}) {
   // envelope; the monophonic PluckSynth can't play polyphony).
   function makeSynthVoice(category) {
     switch (category) {
-      case 'guitar': {
+      case 'guitar':
+      case 'guitar_steel': {
         const g = new T.PolySynth(T.Synth).toDestination();
         g.set({ envelope: { attack: 0.005, decay: 0.4, sustain: 0, release: 0.4 } });
         return g;
       }
       case 'strings': return new T.PolySynth(T.AMSynth).toDestination();
+      case 'flute': {
+        // Breathy, sustained sine — soft attack/release, holds while the note is on.
+        const f = new T.PolySynth(T.Synth).toDestination();
+        f.set({ oscillator: { type: 'sine' }, envelope: { attack: 0.08, decay: 0.1, sustain: 0.9, release: 0.3 } });
+        return f;
+      }
       case 'organ':   return new T.PolySynth(T.FMSynth).toDestination();
       case 'piano':
       case 'synth':

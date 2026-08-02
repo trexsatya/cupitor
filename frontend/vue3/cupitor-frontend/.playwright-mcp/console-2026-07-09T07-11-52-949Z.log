@@ -1,5 +1,0 @@
-[    2080ms] [LOG] [cache] boot: 3428 hits, 2 to fetch, 0 evicted @ https://satyendra.website/language/log-buffer.js:0
-[    2282ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/Svenska%20med%20Kalle%20%7C%7C%20Infl%C3%B6de%20%C3%A4r%20viktigt%20-%20Att%20lyssna%20och%20l%C3%A4sa%20-%20Vara%20uppm%C3%A4rksam%20och%20notera%20-%20Tankar%20och%20tips%20-%20Svenska%20%7C%7C%20HKLLIUhiSjM.sv.srt:0
-[    2465ms] [LOG] Not found HKLLIUhiSjM @ https://satyendra.website/language/log-buffer.js:0
-[    2465ms] [WARNING] [srt] 1 subtitle(s) failed transiently — retrying in background @ https://satyendra.website/language/log-buffer.js:0
-[    2774ms] [ERROR] Blocked confirm('Confirm refresh') during beforeunload. @ https://satyendra.website/language.html?nocache=20260709a:0

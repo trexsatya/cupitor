@@ -248,8 +248,17 @@
            so toggling a panel never reflows the page (which could nudge a scrollbar and force OSMD to
            re-render, dropping the pattern-match highlights). Anchored below both summaries via .np-wrap. */
         .np-wrap{position:relative}
-        .np-panel[open]>.np-body{position:absolute;left:0;right:0;top:100%;z-index:60;margin-top:3px;
+        /* The expanded body is a floating, DRAGGABLE card (bounded width, not full-width) so the user
+           can move it off the score to reach the noteheads for tag/phrase painting. Absolute (no reflow);
+           drag applies a translate offset (see makePanelDraggable), preserved while the panel is open. */
+        .np-panel[open]>.np-body{position:absolute;left:0;right:auto;width:min(360px,92vw);top:100%;z-index:60;margin-top:3px;
           border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:.5rem .7rem;max-height:72vh;overflow:auto}
+        /* Drag handle: a slim sticky bar at the top of the card. Double-click resets the position. */
+        .np-drag{display:flex;align-items:center;gap:6px;cursor:move;user-select:none;touch-action:none;
+          font-size:12px;color:#8a7fb0;font-weight:600;margin:-.5rem -.7rem .45rem;padding:5px .7rem;
+          border-bottom:1px solid rgba(0,0,0,.08);border-radius:6px 6px 0 0;position:sticky;top:-.5rem;background:inherit;z-index:1}
+        #phrasePanel .np-drag{color:#6f8bbf}
+        .np-drag .grip{letter-spacing:1px}
         #tagPanel[open]>.np-body{background:#f6f3ff;border:1px solid #ddd0ff}
         #phrasePanel[open]>.np-body{background:#eef4ff;border:1px solid #cfe0ff}
         .pattern-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;margin:.25rem 0;padding:.35rem .6rem;background:#fafafa;border:1px solid #e5e5e5;border-radius:4px}
@@ -479,18 +488,45 @@
     <button id="pauseBtn" class="btn" title="Pause / Resume"><span class="ic">⏸</span><span class="txt">⏸ Pause</span></button>
     <button class="btn toggle" data-for="loopChk" title="Loop the segment" aria-pressed="false"><span class="ic">🔁</span><span class="txt">🔁 Loop segment</span></button>
     <input type="checkbox" id="loopChk" hidden>   <!-- loop state; toggled by the button above -->
+    <button class="btn toggle" data-for="metroChk" title="Metronome: a steady click at the tempo now — accents the downbeat from the time signature. Independent of playback." aria-pressed="false"><span class="ic">🎵</span><span class="txt">🎵 Metronome</span></button>
+    <input type="checkbox" id="metroChk" hidden>   <!-- standalone metronome on/off -->
+    <button class="btn toggle" data-for="metroPlayChk" title="Click on play: metronome runs only while the piece/segment plays — starts on the first beat, stops at the end, and repeats with Loop." aria-pressed="false"><span class="ic">🎵</span><span class="txt">🎵 on play</span></button>
+    <input type="checkbox" id="metroPlayChk" hidden>   <!-- click-along-with-playback on/off -->
 
-    <label>Tempo <input id="tempoInput" type="number" min="20" max="300" style="width:4em"></label>
-    <label>Instrument
+    <label> <input id="tempoInput" type="number" min="20" max="300" style="width:4em"></label>
+    <label>
       <select id="instrSel">
         <option value="piano">Piano</option>
-        <option value="guitar">Guitar</option>
+        <option value="guitar">Guitar (nylon)</option>
+        <option value="guitar_steel">Guitar (steel)</option>
         <option value="strings">Strings</option>
+        <option value="flute">Flute</option>
         <option value="organ">Organ</option>
         <option value="synth">Synth</option>
       </select>
     </label>
+    <label title="Transpose the whole piece — updates the sheet, chords, fretboard, and playback">
+      <select id="transposeKey"></select>
+    </label>
+    <button id="combineBtn" type="button" style="display:none" title="Combine several instrument parts onto one staff">Combine…</button>
     <span id="transportMsg" style="color: blueviolet;"></span>
+  </div>
+  <!-- Combine-parts picker: merge selected parts into one concert-pitch staff (view + playback/chords/fretboard). -->
+  <div id="combinePanel" style="display:none; position:absolute; z-index:60; background:#fff; border:1px solid #bbb; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.18); padding:.6rem .7rem; min-width:220px; font-size:.9rem">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.35rem">
+      <strong>Combine parts</strong>
+      <button id="combineCloseBtn" type="button" style="border:none;background:none;font-size:1.1rem;cursor:pointer;line-height:1">×</button>
+    </div>
+    <div id="combineList" style="max-height:200px; overflow:auto; margin-bottom:.4rem"></div>
+    <label style="display:block; margin-bottom:.4rem" title="Octave-shift each part into a 6-string guitar's range (E2–E5), keeping each line's shape">
+      <input type="checkbox" id="combineFitGuitar"> Fit to guitar range
+    </label>
+    <div style="display:flex; gap:.35rem; flex-wrap:wrap">
+      <button id="combineApplyBtn" type="button">Combine</button>
+      <button id="combineResetBtn" type="button" style="display:none">Reset</button>
+      <button id="combineSaveBtn" type="button" style="display:none" title="Save the combined version to your library">Save…</button>
+    </div>
+    <div id="combineMsg" style="color:#666; margin-top:.35rem; font-size:.82rem"></div>
   </div>
   <div id="mediaRow" style="margin:.25rem 0" class="previewControls">
     <button id="ytToggleBtn" class="btn" title="Show / hide the YouTube link field"><span class="ic">🔗</span><span class="txt">🔗 YouTube link</span></button>
@@ -548,6 +584,7 @@
   <details id="tagPanel" class="np-panel">
     <summary>🏷️ Motifs<button type="button" id="tagVisBtn" class="np-vis" title="Show these motifs on the sheet (dim everything else)" aria-pressed="false">👁 on sheet</button></summary>
     <div class="np-body">
+    <div class="np-drag" title="Drag to move · double-click to reset"><span class="grip">⠿⠿</span> drag to move</div>
     <div class="tag-row">
       <button class="btn toggle" data-for="tagModeChk" title="Click notes to add/remove them from the active tag"><span class="ic">🖌️</span><span class="txt">Edit mode</span></button>
       <label class="tag-lbl">Tag:
@@ -574,6 +611,7 @@
   <details id="phrasePanel" class="np-panel">
     <summary>🎼 Phrases<button type="button" id="phraseVisBtn" class="np-vis" title="Show these phrases on the sheet (dim everything else)" aria-pressed="false">👁 on sheet</button></summary>
     <div class="np-body">
+    <div class="np-drag" title="Drag to move · double-click to reset"><span class="grip">⠿⠿</span> drag to move</div>
     <div class="tag-row">
       <label class="tag-lbl">New phrase:
         <input id="phraseInput" maxlength="32" placeholder="name…" autocomplete="off" style="width:11em">
@@ -660,6 +698,7 @@
       </div>
       <div class="fb-paths">
         <label>Ways to play <select id="fbPaths"></select></label>
+        <label title="Mix the region shapes across chords — each chord can take its shape from a different position">Combinations <select id="fbCombos"></select></label>
       </div>
       <!-- Transport / shape controls stay above the diagram; only Prev/Next sit below it. -->
       <div class="fb-step">
@@ -703,6 +742,7 @@
   import { createMusicStore } from './music-local-store.js';
   import { PRACTICE_STATUSES, statusMeta, weekStart, weekLabel, makeEntry, upsertEntry, removeEntry, sortEntries, mergeFieldName } from './music-practice.js';
   import { buildSchedule, buildScheduleFromMusicXml, createMusicPlayer, createYouTubeController, parseYouTubeId, instrumentVoiceKey } from './music-player.js';
+  import { createMetronome, downbeatAlignment } from './music-metronome.js';
   import { guessSegmentStart, linkYouTubeLocal } from './music-media.js';
   import { buildSnapshot, buildVocabEntry, upsertVocab, uniqueVocabId, loadVocab, groupVocabByCategory } from './music-vocab.js';
   import { addTag as addTagReg, removeTag as removeTagReg, mergeRegistry } from './music-tags.js';
@@ -712,6 +752,8 @@
   import { buildChordByMeasure, buildVoiceNotes, orderedVoiceIds, addressableMidis, variationFretSteps, voicePickerEntries, counterLineToNotesByMeasure, buildBeatNotes, distinctVoiceIdsInOrder } from './music-embellish-ui.js';
   import { splitSingleVoice } from './music-voice-split.js';
   import { encodeMusicXml } from './music-encoding.js';
+  import { transposeMusicXml, nearestSemitones } from './music-transpose.js';
+  import { listParts, mergeParts } from './music-merge.js';
 
   const system = getSystemFromUrl().name;
   document.getElementById('systemLabel').textContent = system;
@@ -911,7 +953,7 @@
     if (!renderer) {
       renderer = createMusicRenderer(document.getElementById('osmdPreview'),
         { onChordSelect: syncVocabChords, onWindowChange: onChordWindowChange, onSuppressionChange: onSuppressionChange,
-          onPatternsChange: onPatternsChange, onPhrasesChange: onPhrasesChange });
+          onPatternsChange: onPatternsChange, onPhrasesChange: onPhrasesChange, onSeek: onSeek });
       fbPanel = initFretboard(renderer, {
         panel: document.getElementById('fretboardPanel'),
         srcGuessed: document.getElementById('fbSrcGuessed'),
@@ -925,6 +967,7 @@
         resetBtn: document.getElementById('fbReset'),
         fullscreenBtn: document.getElementById('fbFullscreen'),
         pathSelect: document.getElementById('fbPaths'),
+        comboSelect: document.getElementById('fbCombos'),
         prevBtn: document.getElementById('fbPrev'),
         nextBtn: document.getElementById('fbNext'),
         playStepBtn: document.getElementById('fbPlayStep'),
@@ -1017,6 +1060,14 @@
   }
 
   let player = null, yt = null, currentDetail = null, currentVocabEntry = null;
+  // Transpose: keep the ORIGINAL (untransposed) source + its detected tonic/mode so every transpose is
+  // computed from it (not cumulatively). The dropdown mirrors #patKey — 24 keys (major + minor) — and
+  // defaults to the piece's best-guess key. TRANSPOSE_NAMES[pc] is the tonic name shown per pitch class.
+  let pieceOriginalSource = null, pieceOriginalPc = 0, pieceOriginalMode = 'major';
+  // Combine-parts state: the piece's source BEFORE any merge (so Reset restores it), and whether a merge
+  // is currently applied. Merging makes the combined source the new transpose baseline.
+  let mergeBaseSource = null, mergedActive = false;
+  const TRANSPOSE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   let fbStepInstr = null;   // last instrument pushed to the player for fretboard step-play (avoids re-creating the voice)
   let fbPanel = null;       // fretboard panel controller (from initFretboard) — for cross-panel actions
   // The "Add to vocab" button doubles as "Add/update" while a saved vocab item is on screen.
@@ -1060,7 +1111,10 @@
     setTimeout(dismiss, tone === 'err' ? 8000 : 4000);   // errors linger longer
   }
   function ensurePlayer() {
-    if (!player) player = createMusicPlayer({ getCursor: () => (renderer && renderer.osmd ? renderer.osmd.cursor : null) });
+    if (!player) player = createMusicPlayer({ getCursor: () => (renderer && renderer.osmd ? renderer.osmd.cursor : null),
+      // Natural completion (fires only when Loop is off): the piece ended, so stop the "on play" click
+      // and reset the transport label. With Loop on this never fires, so the click keeps running.
+      onEnd: () => { midiPlaying = false; paused = false; updatePauseLabel(); updateMetro(false); } });
     return player;
   }
   function segmentRange() {
@@ -1076,7 +1130,21 @@
     const winOn = document.getElementById('chordWindowChk') && document.getElementById('chordWindowChk').checked;
     const wr = winOn && renderer && renderer.getWindowRange && renderer.getWindowRange();
     if (wr) return wr;
+    // A click-selected start note (if any and still in view) overrides the segment's start.
+    const ps = renderer && renderer.getPlayStartRange && renderer.getPlayStartRange();
+    if (ps) return ps;
     return segmentRange();
+  }
+  // Fired by the renderer when the click-to-play-from start note changes. Show where the next Play will
+  // begin, and mark a seek as pending so Resume restarts from the moved cursor instead of continuing
+  // from the paused position. Cleared when a start actually consumes it (Play / cursor reset).
+  function onSeek() {
+    const ps = renderer && renderer.getPlayStartRange && renderer.getPlayStartRange();
+    seekPending = !!ps;
+    const el = document.getElementById('transportMsg');
+    if (!el) return;
+    if (ps) el.textContent = `▶ Play starts at m. ${toPrintedMeasure(ps.fromMeasure)}`;
+    else if (/^▶ Play starts at/.test(el.textContent)) el.textContent = '';
   }
   function currentTempo() {
     const t = parseInt(document.getElementById('tempoInput').value, 10);
@@ -1094,16 +1162,29 @@
       ? buildScheduleFromMusicXml(currentDetail.source, { tempo: currentTempo(), ...range, mutedNotes: muted })
       : buildSchedule(currentDetail.voices, { tempo: currentTempo(), ...range });
     if (!schedule.length) { document.getElementById('transportMsg').textContent = 'Nothing to play.'; return; }
-    const span = (range.fromBeat != null) ? ' (window)'
+    const winOn = document.getElementById('chordWindowChk') && document.getElementById('chordWindowChk').checked;
+    const span = (winOn && range.fromBeat != null) ? ' (window)'
+      : (range.fromBeat != null && range.fromMeasure != null) ? ` (from m. ${toPrintedMeasure(range.fromMeasure)})`   // click-selected start
       : (range.fromMeasure != null) ? ` (m. ${toPrintedMeasure(range.fromMeasure)}–${toPrintedMeasure(range.toMeasure)})` : '';
     const p = ensurePlayer();
     p.setInstrument(document.getElementById('instrSel').value);
     p.setSchedule(schedule, { cursorStartStep: range.cursorStep || 0 });
     p.setLoop(document.getElementById('loopChk').checked);
     document.getElementById('transportMsg').textContent = 'Loading instrument…';
+    // Align the metronome to the piece: tick on the beat grid (the first played note may be syncopated /
+    // off-beat, e.g. beat 4.5) with the strong beat on the barline downbeats. schedule[0].beat is the
+    // absolute onset in quarter-beats; the anacrusis (pickup) length shifts where the downbeats sit.
+    const N = beatsPerMeasureFromSource();
+    const startAbsBeat = schedule.length ? (schedule[0].beat || 0) : 0;
+    const anacrusis = (renderer && renderer.anacrusisBeats) ? renderer.anacrusisBeats() : N;
+    ({ phase: metroPhase, beatOffset: metroBeatOffset } = downbeatAlignment(startAbsBeat, anacrusis, N));
+    midiPlaying = true;   // for the "on play" metronome (aligned once audio actually starts, below)
     p.play()
-      .then(() => { document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes${span}`; })
-      .catch(() => { document.getElementById('transportMsg').textContent = 'Playback error.'; });
+      .then(() => {
+        document.getElementById('transportMsg').textContent = `Playing ${schedule.length} notes${span}`;
+        updateMetro(true);   // start/re-phase the click to playback's first beat
+      })
+      .catch(() => { document.getElementById('transportMsg').textContent = 'Playback error.'; midiPlaying = false; updateMetro(false); });
   }
   // Tag skip-playback: play only the checked tags' notes, removing the empty stretches between
   // tagged runs (a beat-relative breath separates runs). Whole piece — ignores segment/window.
@@ -1225,6 +1306,47 @@
   });
   // Loop's effect lives on its checkbox so the generic toggle drives it (and applies live).
   document.getElementById('loopChk').onchange = () => { if (player) player.setLoop(document.getElementById('loopChk').checked); };
+
+  // Metronome — a steady click at the current tempo, accenting the downbeat from the piece's time
+  // signature. TWO independent controls share one click engine (its own clock, so no double-clicks):
+  //   • 🎵 Metronome  (metroChk)     — standalone: clicks now, regardless of playback.
+  //   • 🎵 on play    (metroPlayChk) — clicks only WHILE the piece/segment plays: aligned to the first
+  //                                    beat on Play, stopped at the end, and continues across Loop.
+  // The engine runs when either applies: manual on, OR on-play on AND MIDI is currently playing.
+  let metro = null;
+  let midiPlaying = false;   // MIDI playback is active (drives the "on play" metronome)
+  let metroPhase = 0;        // beat phase of the current playback start within its measure (0 = downbeat)
+  let metroBeatOffset = 0;   // sub-beat delay (beats) so the first click lands on the beat grid
+  function ensureMetro() { if (!metro) metro = createMetronome({}); return metro; }
+  function beatsPerMeasureFromSource() {
+    try {
+      const src = currentDetail && currentDetail.source;
+      const m = src && src.match(/<beats>\s*(\d+)\s*<\/beats>/);   // first <time> numerator; default 4
+      return m ? (parseInt(m[1], 10) || 4) : 4;
+    } catch (_) { return 4; }
+  }
+  const metroManualOn = () => document.getElementById('metroChk').checked;
+  const metroPlayOn = () => document.getElementById('metroPlayChk').checked;
+  const metroShouldRun = () => metroManualOn() || (metroPlayOn() && midiPlaying);
+  function syncMetronomeSettings() { if (!metro) return; metro.setTempo(currentTempo()); metro.setBeatsPerMeasure(beatsPerMeasureFromSource()); }
+  // Bring the engine in line with the desired state. `realign` re-phases the click to now (used when
+  // playback starts/resumes) so the accented beat lands on the piece's downbeats; otherwise a running
+  // click is left where it is. A standalone start (not playing) uses phase 0 — its first click is a
+  // downbeat. `metroPhase` is the playback-start phase computed in playMidi.
+  function updateMetro(realign) {
+    const m = ensureMetro();
+    if (metroShouldRun()) {
+      syncMetronomeSettings();
+      const phase = midiPlaying ? metroPhase : 0;
+      const offset = midiPlaying ? metroBeatOffset : 0;
+      if (realign) m.restart(phase, offset);
+      else if (!m.isRunning()) m.start(phase, offset);
+    } else m.stop();
+  }
+  document.getElementById('metroChk').onchange = () => updateMetro(false);
+  document.getElementById('metroPlayChk').onchange = () => updateMetro(false);
+  // Keep a running metronome at the live tempo when the Tempo field changes.
+  document.getElementById('tempoInput').addEventListener('input', () => { if (metro && metroShouldRun()) metro.setTempo(currentTempo()); });
   syncToggles();
 
   // ── Note suppression UI (vocab items only) ─────────────────────────────────────────────────
@@ -1258,6 +1380,9 @@
   document.getElementById('hearAllChk').onchange = (e) => { if (renderer) renderer.setHearAll(e.target.checked); };
   // Two-button transport: Play always (re)starts from the segment start; Pause toggles to Resume.
   let paused = false;
+  // Set when the play cursor was moved by a click; makes Resume restart from the cursor (not the
+  // paused position). Cleared once a Play/Resume starts from it. See onSeek + the pause/resume handler.
+  let seekPending = false;
   let ytPlaying = false;   // tracks YouTube playback (Tone.Transport.state is authoritative for MIDI)
   // Is the transport currently sounding (not paused, not stopped)? Drives the mobile FAB icon.
   function fabPlaying() {
@@ -1297,7 +1422,7 @@
     updateFab();
   }
   document.getElementById('playBtn').onclick = () => {
-    paused = false; updatePauseLabel();
+    paused = false; seekPending = false; updatePauseLabel();   // a fresh Play consumes any pending seek
     const isYt = document.getElementById('srcSel').value === 'youtube';
     ytPlaying = isYt;   // started fresh; only meaningful for the YouTube source
     (isYt ? playYouTube() : playMidi());
@@ -1310,8 +1435,12 @@
     if (!paused) {
       if (isYt) { if (yt) yt.pause(); } else if (player) player.pause();
       paused = true;
+      if (!isYt) { midiPlaying = false; updateMetro(false); }   // pause the "on play" click with the piece
     } else {
-      if (isYt) { if (yt) yt.play(); ytPlaying = true; } else if (player) player.resume();
+      // Resume: if the cursor was moved (clicked) while paused, start fresh from it; else continue.
+      if (isYt) { if (yt) yt.play(); ytPlaying = true; }
+      else if (seekPending) { seekPending = false; playMidi(); }   // playMidi re-arms midiPlaying + the click
+      else if (player) { player.resume(); midiPlaying = true; updateMetro(true); }
       paused = false;
     }
     updatePauseLabel();
@@ -1435,6 +1564,157 @@
     dirtyVocab = true; updatePushBtn();
     setMediaMsg(`${updating ? 'Updated' : 'Added'} "${entry.id}" (${vocab.length} total) — click "Push changes" to publish.`, 'ok');
   };
+  // Fill the transpose dropdown with the 12 keys, marking the piece's own key "(original)" and
+  // selecting it. Called on each fresh preview.
+  // 24 keys (major then minor), value "pc:mode" like #patKey; the piece's original key is preselected
+  // and marked "(original)".
+  function populateTransposeSelect() {
+    const sel = document.getElementById('transposeKey');
+    if (!sel) return;
+    sel.innerHTML = '';
+    ['major', 'minor'].forEach((mode) => TRANSPOSE_NAMES.forEach((nm, pc) => {
+      const opt = document.createElement('option');
+      opt.value = `${pc}:${mode}`;
+      const isOrig = pc === pieceOriginalPc && mode === pieceOriginalMode;
+      opt.textContent = isOrig ? `${nm} ${mode} (original)` : `${nm} ${mode}`;
+      sel.appendChild(opt);
+    }));
+    sel.value = `${pieceOriginalPc}:${pieceOriginalMode}`;
+  }
+
+  // Transpose the whole piece to target pitch class `targetPc` / `mode`. Always computed from the ORIGINAL
+  // source (so it's absolute, not cumulative), then re-renders the sheet and re-captures the fretboard;
+  // currentDetail.source is updated so playback and variations use the transposed pitches too.
+  async function applyTranspose(targetPc, mode) {
+    if (!currentDetail || pieceOriginalSource == null) return;
+    const semis = nearestSemitones(pieceOriginalPc, targetPc);
+    const src = semis === 0 ? pieceOriginalSource : transposeMusicXml(pieceOriginalSource, semis, targetPc, mode);
+    const keyLabel = `${TRANSPOSE_NAMES[targetPc]} ${mode}`;
+    currentDetail = { ...currentDetail, source: src, meta: { ...(currentDetail.meta || {}), key: keyLabel } };
+    const renderer = await ensureRenderer();
+    if (player) player.stop();
+    // Preserve the current view: loadDetail resets to the whole piece, so if a segment was clipped
+    // (not the full piece) re-show that same measure window on the transposed score instead of showFull.
+    const prev = renderer.getShownRange ? renderer.getShownRange() : null;
+    const wasSegment = prev && (prev.from > 1 || (prev.total && prev.to < prev.total)) && prev.to >= prev.from;
+    await renderer.loadDetail(currentDetail);
+    renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
+    if (wasSegment) renderer.showSegment([prev.from, prev.to]); else renderer.showFull();
+    renderer.setShowChords(document.getElementById('chordChk').checked);
+    if (fbPanel) fbPanel.capture();   // re-read the transposed sheet's chords onto the fretboard
+  }
+  {
+    const tsel = document.getElementById('transposeKey');
+    if (tsel) tsel.addEventListener('change', (e) => {
+      const [pc, mode] = String(e.target.value).split(':');
+      applyTranspose(parseInt(pc, 10) || 0, mode || 'major');
+    });
+  }
+
+  // ── Combine parts ─────────────────────────────────────────────────────────────────────────────
+  // Swap the piece to `newSource`, make it the transpose baseline, and re-render the whole preview
+  // (sheet + chords + fretboard). Shared by Combine and Reset. Re-guesses the key so Transpose is right.
+  async function reloadPieceSource(newSource) {
+    if (!currentDetail) return;
+    currentDetail = { ...currentDetail, source: newSource };
+    pieceOriginalSource = newSource;
+    const renderer = await ensureRenderer();
+    // Preserve the current view: merge keeps the same measure count, so if a segment is clipped, re-show
+    // that same measure window on the combined score instead of resetting to the whole piece.
+    const prev = renderer.getShownRange ? renderer.getShownRange() : null;
+    const wasSegment = prev && (prev.from > 1 || (prev.total && prev.to < prev.total)) && prev.to >= prev.from;
+    if (player) player.stop();
+    midiPlaying = false; updateMetro(false);
+    const res = await renderer.loadDetail(currentDetail);
+    const g = renderer.guessBestKey ? renderer.guessBestKey() : null;
+    pieceOriginalPc = g ? g.tonicPc : 0;
+    pieceOriginalMode = g ? g.mode : 'major';
+    populateTransposeSelect();
+    totalMeasures = (res && res.totalMeasures) || 0;
+    currentOffset = (res && res.measureOffset) || 0;
+    renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
+    if (wasSegment) renderer.showSegment([prev.from, prev.to]); else renderer.showFull();
+    renderer.setShowChords(document.getElementById('chordChk').checked);
+    if (fbPanel) fbPanel.capture();
+  }
+
+  const combinePanel = document.getElementById('combinePanel');
+  const combineMsg = document.getElementById('combineMsg');
+  // The pitched (mergeable) parts of the pre-merge source. Drums/percussion are excluded.
+  function mergeablePartsOf(src) {
+    try { return listParts(src).filter((p) => !p.unpitched); } catch (_) { return []; }
+  }
+  // Show the Combine button only when the piece has ≥2 pitched parts to merge.
+  function updateCombineBtn() {
+    const btn = document.getElementById('combineBtn');
+    if (!btn) return;
+    const n = (mergeBaseSource && !mergedActive) ? mergeablePartsOf(mergeBaseSource).length
+            : (mergeBaseSource ? mergeablePartsOf(mergeBaseSource).length : 0);
+    btn.style.display = n >= 2 ? '' : 'none';
+    btn.textContent = mergedActive ? 'Combined ✓' : 'Combine…';
+  }
+  function openCombinePanel() {
+    if (!mergeBaseSource) return;
+    const list = document.getElementById('combineList');
+    const parts = mergeablePartsOf(mergeBaseSource);
+    list.innerHTML = parts.map((p) =>
+      `<label style="display:block; padding:.12rem 0"><input type="checkbox" class="combineSel" value="${p.id}" checked> ${p.name}</label>`).join('');
+    document.getElementById('combineResetBtn').style.display = mergedActive ? '' : 'none';
+    document.getElementById('combineSaveBtn').style.display = mergedActive ? '' : 'none';
+    combineMsg.textContent = mergedActive ? 'Combined view active.' : `${parts.length} pitched parts.`;
+    const btn = document.getElementById('combineBtn');
+    const r = btn.getBoundingClientRect();
+    combinePanel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 260))}px`;
+    combinePanel.style.top = `${r.bottom + window.scrollY + 4}px`;
+    combinePanel.style.display = 'block';
+  }
+  document.getElementById('combineBtn').onclick = () =>
+    (combinePanel.style.display === 'block' ? (combinePanel.style.display = 'none') : openCombinePanel());
+  document.getElementById('combineCloseBtn').onclick = () => { combinePanel.style.display = 'none'; };
+
+  document.getElementById('combineApplyBtn').onclick = async () => {
+    const ids = [...document.querySelectorAll('.combineSel:checked')].map((c) => c.value);
+    if (ids.length < 2) { combineMsg.textContent = 'Pick at least two parts.'; return; }
+    combineMsg.textContent = 'Combining…';
+    const fitGuitar = document.getElementById('combineFitGuitar').checked;
+    const opts = { name: 'Combined' };
+    if (fitGuitar) opts.fitRange = { lo: 40, hi: 76 };   // 6-string guitar sounding range E2–E5
+    const merged = mergeParts(mergeBaseSource, ids, opts);
+    if (merged === mergeBaseSource) { combineMsg.textContent = 'Nothing to combine.'; return; }
+    mergedActive = true;
+    await reloadPieceSource(merged);
+    updateCombineBtn();
+    combinePanel.style.display = 'none';
+    document.getElementById('transportMsg').textContent =
+      `Combined ${ids.length} parts onto one staff${fitGuitar ? ' (guitar range)' : ''}.`;
+  };
+  document.getElementById('combineResetBtn').onclick = async () => {
+    if (!mergeBaseSource) return;
+    mergedActive = false;
+    await reloadPieceSource(mergeBaseSource);
+    updateCombineBtn();
+    combinePanel.style.display = 'none';
+    document.getElementById('transportMsg').textContent = 'Restored the original parts.';
+  };
+  // Save the combined version to the library as a NEW piece (mirrors the Add-MusicXML commit path).
+  document.getElementById('combineSaveBtn').onclick = async () => {
+    if (!mergedActive || !currentDetail) return;
+    const baseTitle = (index.find((e) => e.id === currentPreviewId) || {}).title || currentPreviewId || 'piece';
+    const title = `${baseTitle} (combined)`;
+    if (!confirm(`Save "${title}" as a new piece in your library?`)) return;
+    combineMsg.textContent = 'Saving…';
+    try {
+      const piece = { id: idFromName(title), title, format: 'musicxml', source: currentDetail.source };
+      const { changed, changedPieces, index: nextIndex } = computeChanges({
+        system, pieces: [piece], currentIndex: index, force: true, updatedAt: new Date().toISOString().slice(0, 10) });
+      index = nextIndex;
+      await store.putPieces(system, changedPieces);
+      changed.forEach((id) => unpushedIds.add(id));
+      render(); updatePushBtn();
+      combineMsg.textContent = 'Saved locally — use “Push changes” to publish.';
+    } catch (e) { combineMsg.textContent = 'Save failed: ' + e.message; }
+  };
+
   async function openPreview(id) {
     const title = (index.find(e => e.id === id) || {}).title || id;
     document.getElementById('previewTitle').textContent = title;
@@ -1443,6 +1723,10 @@
     document.body.classList.add('preview-open');   // lock page scroll behind the mobile dialog
     updateFab(); positionFab();                     // the FAB is now shown (mobile) — place & label it
     currentDetail = null; currentPreviewId = null; currentVocabEntry = null;   // cleared until a piece fully renders
+    midiPlaying = false;
+    document.getElementById('metroChk').checked = false;
+    document.getElementById('metroPlayChk').checked = false;
+    syncToggles(); if (metro) metro.stop();   // both metronome toggles start off for each piece
     updateAddVocabLabel();
     let detail;
     try {
@@ -1460,6 +1744,16 @@
     if (!res.ok) { document.getElementById('previewMsg').textContent = 'Cannot render (note-text piece).'; return; }
     currentDetail = detail;
     currentPreviewId = id;
+    pieceOriginalSource = detail.source;                         // baseline for transposition (absolute, non-cumulative)
+    mergeBaseSource = detail.source; mergedActive = false;       // pre-merge baseline for Combine parts
+    document.getElementById('combinePanel').style.display = 'none';
+    updateCombineBtn();
+    // Original key = the piece's best-guess tonic/mode (notes are rendered now), so the Transpose picker
+    // opens on the real key and transposes are measured from it. `pieceGuess` is reused for #patKey below.
+    const pieceGuess = renderer.guessBestKey ? renderer.guessBestKey() : null;
+    pieceOriginalPc = pieceGuess ? pieceGuess.tonicPc : 0;
+    pieceOriginalMode = pieceGuess ? pieceGuess.mode : 'major';
+    populateTransposeSelect();
     totalMeasures = res.totalMeasures || 0;
     currentOffset = res.measureOffset || 0;   // pickup shift for printed↔sequential conversions
     document.getElementById('instrSel').value = instrumentVoiceKey(detail.meta && detail.meta.instrument);
@@ -1474,8 +1768,8 @@
     renderer.applyResponsiveZoom(document.getElementById('osmdPreview').clientWidth || window.innerWidth);
     renderer.showFull();
     renderer.setShowChords(document.getElementById('chordChk').checked);   // Show chords is on by default
-    // Default the diatonic key picker to this piece's best-guess key (notes are now rendered).
-    if (renderer.guessBestKey) { const g = renderer.guessBestKey(); if (g) document.getElementById('patKey').value = `${g.tonicPc}:${g.mode}`; }
+    // Default the diatonic key picker to this piece's best-guess key (computed above as pieceGuess).
+    if (pieceGuess) document.getElementById('patKey').value = `${pieceGuess.tonicPc}:${pieceGuess.mode}`;
     if (renderer) { renderer.setSuppressedNotes([]); renderer.setSuppressMode(false); }
     // Note suppression is available in a plain preview too (not just saved vocab items): you can
     // silence notes to practice chords/melodies live. It stays transient unless you capture to vocab.
@@ -1711,7 +2005,12 @@
     if (document.activeElement !== input) input.value = activeTagName;   // don't fight mid-typing
     const list = document.getElementById('tagList');
     list.innerHTML = '';
-    names.forEach((nm) => {
+    // The pill list is for checking/filtering tags that actually mark notes in THIS piece — a tag with
+    // 0 notes here can't be shown/filtered, so hide it (it's still pickable via the datalist above).
+    const listNames = names.filter((nm) => (countOf[nm] || 0) > 0);
+    // Check/uncheck-all is meaningless without any listed tag — hide it when the list is empty.
+    document.getElementById('tagCheckAllBtn').style.display = listNames.length ? '' : 'none';
+    listNames.forEach((nm) => {
       const pill = document.createElement('span');
       pill.className = 'tag-pill';
       const cb = document.createElement('input');
@@ -1760,6 +2059,43 @@
     if (openPanel) { openPanel.querySelector('.np-body').appendChild(pc); pc.style.display = 'flex'; }
     else pc.style.display = 'none';
   }
+  // Make a floating panel body draggable by its .np-drag handle: pointer drag sets a translate offset
+  // (kept on the element, so it persists while open); double-click the handle resets it. A ≥40px sliver
+  // is always kept on-screen so the handle can't be lost. Wired once — the body elements are static.
+  function makePanelDraggable(body) {
+    const handle = body && body.querySelector('.np-drag');
+    if (!handle || handle._wired) return;
+    handle._wired = true;
+    let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0, aL = 0, aT = 0, bw = 0, bh = 0;
+    const apply = () => {
+      const o = body._off;
+      body.style.transform = (o && (o.x || o.y)) ? `translate(${o.x}px, ${o.y}px)` : '';
+    };
+    handle.addEventListener('pointerdown', (e) => {
+      dragging = true; sx = e.clientX; sy = e.clientY;
+      const o = body._off || { x: 0, y: 0 }; ox = o.x; oy = o.y;
+      const r = body.getBoundingClientRect();
+      aL = r.left - ox; aT = r.top - oy; bw = r.width; bh = r.height;   // anchored (untransformed) origin
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      let nx = ox + (e.clientX - sx), ny = oy + (e.clientY - sy);
+      nx = Math.max(40 - bw - aL, Math.min(window.innerWidth - 40 - aL, nx));
+      ny = Math.max(-aT, Math.min(window.innerHeight - 40 - aT, ny));
+      body._off = { x: nx, y: ny };
+      apply();
+    });
+    const end = (e) => { if (dragging) { dragging = false; try { handle.releasePointerCapture(e.pointerId); } catch (_) {} } };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+    handle.addEventListener('dblclick', () => { body._off = { x: 0, y: 0 }; apply(); });
+  }
+  ['tagPanel', 'phrasePanel'].forEach((id) => {
+    const p = document.getElementById(id);
+    if (p) makePanelDraggable(p.querySelector('.np-body'));
+  });
   // Sheet visibility is DECOUPLED from expand/collapse: the header 👁 toggle dims the sheet and reveals
   // the checked motifs/phrases; expand/collapse only shows this panel's own controls + list.
   let tagVisOn = false, phraseVisOn = false;
@@ -1801,7 +2137,8 @@
   // Check all tags at once (or uncheck all if every tag is already checked).
   document.getElementById('tagCheckAllBtn').onclick = () => {
     if (!renderer) return;
-    const names = renderer.getTagNames();
+    const countOf = {}; renderer.getPatterns().forEach((a) => { countOf[a.name] = (a.notes || []).length; });
+    const names = renderer.getTagNames().filter((n) => (countOf[n] || 0) > 0);   // only the listed (note-bearing) tags
     const allOn = names.length > 0 && names.every((n) => tagFilterSel.has(n));
     tagFilterSel.clear();
     if (!allOn) names.forEach((n) => tagFilterSel.add(n));
@@ -2461,6 +2798,10 @@
   };
   document.getElementById('previewCloseBtn').onclick = () => {
     if (player) player.stop();
+    midiPlaying = false;
+    document.getElementById('metroChk').checked = false;
+    document.getElementById('metroPlayChk').checked = false;
+    syncToggles(); if (metro) metro.stop();   // reset both metronome toggles
     clearYtMonitor(); if (yt) yt.pause();
     paused = false; ytPlaying = false; updatePauseLabel();
     document.getElementById('musicPreview').style.display = 'none';

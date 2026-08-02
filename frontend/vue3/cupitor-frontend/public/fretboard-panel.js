@@ -1,7 +1,7 @@
 // public/fretboard-panel.js
 // Controller for the fretboard visualizer panel. Pure helpers (buildTrail, cycleIndex) are exported
 // for unit testing; init() wires the DOM and is exercised manually in the browser.
-import { voicingsForNotes, findPaths, movementSparkline, noteAt } from './fretboard-core.js';
+import { voicingsForNotes, findPaths, findCombinations, movementSparkline, noteAt } from './fretboard-core.js';
 import { renderFretboard } from './fretboard-render.js';
 import { equalNotes } from './music-reference-data.js';
 
@@ -119,8 +119,11 @@ export function init(renderer, dom, hooks = {}) {
     showNoteName: !!(dom && dom.noteNameChk && dom.noteNameChk.checked),     // dots show note names vs fret #
     steps: [],                  // [{ measure?, name, noteNames }]
     stepVoicings: [],           // voicingsForNotes per step
-    paths: [],                  // findPaths output
+    paths: [],                  // findPaths output (region-coherent "ways to play")
     selectedPathIdx: 0,
+    combos: [],                 // findCombinations output (cross-region mixes of the paths' voicings)
+    selectedComboIdx: 0,
+    activeSource: 'path',       // 'path' (Ways to play) | 'combo' (Combinations) — which select drives the diagram
     stepIdx: 0,
     overrides: new Map(),       // stepIdx → voicingIdx
     highlightMidis: new Set(),  // MIDI numbers of ADDED notes to ring (segment-embellishment variation)
@@ -172,9 +175,13 @@ export function init(renderer, dom, hooks = {}) {
       state.matchOctave ? voicingsForNotes(s.notes, opts2) : voicingsForNotes(s.notes.map((n) => ({ name: n.name })), opts2));
     state.paths = findPaths(state.stepVoicings);
     state.selectedPathIdx = 0;
+    state.combos = findCombinations(state.paths, { cap: 100 });
+    state.selectedComboIdx = 0;
+    state.activeSource = 'path';
     state.stepIdx = 0;
     state.overrides = new Map();
     populatePaths();
+    populateCombos();
     render();
   }
 
@@ -190,10 +197,14 @@ export function init(renderer, dom, hooks = {}) {
       state.matchOctave ? voicingsForNotes(s.notes, opts2) : voicingsForNotes(s.notes.map((n) => ({ name: n.name })), opts2));
     state.paths = findPaths(state.stepVoicings);
     state.selectedPathIdx = 0;
+    state.combos = findCombinations(state.paths, { cap: 100 });
+    state.selectedComboIdx = 0;
+    state.activeSource = 'path';
     state.stepIdx = 0;
     state.overrides = new Map();
     state.highlightMidis = new Set(highlightMidis || []);
     populatePaths();
+    populateCombos();
     render();
   }
 
@@ -218,7 +229,27 @@ export function init(renderer, dom, hooks = {}) {
     dom.pathSelect.value = '0';
   }
 
-  function currentPath() { return state.paths[state.selectedPathIdx] || { voicings: [] }; }
+  // Fill the "Combinations" select with the cross-region mixes (empty/disabled when there are none —
+  // e.g. a single region, or a one-chord capture, has nothing to mix).
+  function populateCombos() {
+    if (!dom.comboSelect) return;
+    dom.comboSelect.innerHTML = '';
+    state.combos.forEach((c, i) => {
+      const opt = document.createElement('option');
+      opt.value = '' + i;
+      opt.textContent = `Combo ${i + 1} — ${c.label}  ${movementSparkline(c.moves)}`;
+      dom.comboSelect.appendChild(opt);
+    });
+    dom.comboSelect.value = '0';
+    dom.comboSelect.disabled = !state.combos.length;
+  }
+
+  // The voicing assignment currently driving the diagram — the selected "Ways to play" path or the
+  // selected "Combinations" mix, per activeSource. Both carry a `voicings` array, so callers are uniform.
+  function currentPath() {
+    if (state.activeSource === 'combo') return state.combos[state.selectedComboIdx] || { voicings: [] };
+    return state.paths[state.selectedPathIdx] || { voicings: [] };
+  }
 
   function render() {
     const path = currentPath();
@@ -339,7 +370,10 @@ export function init(renderer, dom, hooks = {}) {
     });
   }
   if (dom.pathSelect) dom.pathSelect.addEventListener('change', (e) => {
-    state.selectedPathIdx = parseInt(e.target.value, 10) || 0; state.overrides = new Map(); render();
+    state.activeSource = 'path'; state.selectedPathIdx = parseInt(e.target.value, 10) || 0; state.overrides = new Map(); render();
+  });
+  if (dom.comboSelect) dom.comboSelect.addEventListener('change', (e) => {
+    state.activeSource = 'combo'; state.selectedComboIdx = parseInt(e.target.value, 10) || 0; state.overrides = new Map(); render();
   });
   if (dom.prevBtn) dom.prevBtn.addEventListener('click', () => { stopPlay(); step(-1); });
   if (dom.nextBtn) dom.nextBtn.addEventListener('click', () => { stopPlay(); step(+1); });

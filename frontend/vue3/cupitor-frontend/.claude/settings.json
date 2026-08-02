@@ -10,7 +10,22 @@
       "WebFetch(domain:trexsatya.github.io)",
       "WebFetch(domain:satyendra.website)",
       "Bash(~/.claude/skills/cupitor-deploy/deploy.sh \"language: vocab matchers handle pipe-expanded search + multi-word phrase terms\")",
-      "Bash(echo \"EXIT=$?\")"
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(pkill -f \"http.server 88\")",
+      "Bash(/Users/satyendra.kumar/.local/bin/lean-ctx -c 'git -C /Users/satyendra.kumar/Documents/PersonalProjects/cupitor/frontend/vue3/cupitor-frontend status --short public/music-render.js public/music.html')",
+      "Bash(/Users/satyendra.kumar/.local/bin/lean-ctx -c 'yarn jest public/music-render public/music-player 2>&1')",
+      "Bash(/Users/satyendra.kumar/.local/bin/lean-ctx -c 'yarn jest public/music-metronome public/music-player public/music-render 2>&1')",
+      "Bash(pkill -f \"http.server 49546\")",
+      "Bash(pkill -f \"http.server 4977\")",
+      "Bash(pkill -f \"http.server 4954\")",
+      "Bash(rm -f /tmp/claude/atfu*.json /tmp/claude/atfu_src.xml)",
+      "Bash(pkill -f \"http.server 50763\")",
+      "Bash(pkill -f \"http.server 53385\")",
+      "Bash(pkill -f \"http.server 49933\")",
+      "Bash(pkill -f \"http.server 49587\")",
+      "Bash(rm -f /tmp/claude/sowhat.json /tmp/claude/sowhat.xml)",
+      "Bash(pkill -f \"http.server 52867\")",
+      "Bash(pkill -f \"http.server 55325\")"
     ],
     "additionalDirectories": [
       "/tmp/claude",

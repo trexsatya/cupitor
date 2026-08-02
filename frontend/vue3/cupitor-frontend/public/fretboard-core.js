@@ -178,3 +178,57 @@ export function findPaths(stepVoicings, { beamWidth = 8, maxPaths = 5, anchorWei
   out.sort((a, b) => (a.region - b.region) || (a.cost - b.cost));
   return out.slice(0, maxPaths);
 }
+
+const sigOf = (v) => (v ? JSON.stringify(v) : 'null');
+
+// Cross-region COMBINATIONS: mix the voicings the region `paths` already assign to each chord, so a
+// chord can take its shape from one region while its neighbour takes another (e.g. C open → Am up the
+// neck). The per-chord option set is just the distinct voicings across `paths` at that step (small and
+// already-playable), so the cartesian stays bounded and every shape is a real one. Ranked by ascending
+// total hand movement (smoothest mixes first); a combination identical to one of the region paths is
+// dropped (it's already offered there). A beam of width `beamWidth` bounds work on long sequences.
+// Returns [{ voicings, cost, moves, label }] — same shape as findPaths so the caller renders it the same.
+export function findCombinations(paths, { cap = 100, beamWidth = 600 } = {}) {
+  if (!paths || !paths.length) return [];
+  const nSteps = paths[0].voicings.length;
+  // Distinct voicing options per step, drawn from the region paths (null preserved for empty steps).
+  const perStep = [];
+  for (let s = 0; s < nSteps; s++) {
+    const seen = new Map();
+    for (const p of paths) {
+      const v = p.voicings[s] || null;
+      const k = sigOf(v);
+      if (!seen.has(k)) seen.set(k, v);
+    }
+    perStep.push([...seen.values()]);
+  }
+  // Beam over steps, ranked by cumulative true hand movement (|Δcenter| between consecutive shapes).
+  let beams = [{ voicings: [], cost: 0, moves: [], lastCenter: null }];
+  for (const options of perStep) {
+    const opts = options.length ? options : [null];
+    const next = [];
+    for (const b of beams) {
+      for (const v of opts) {
+        const center = v ? voicingCenter(v) : b.lastCenter;
+        const move = (v && b.lastCenter != null) ? Math.abs(center - b.lastCenter) : 0;
+        next.push({ voicings: [...b.voicings, v], cost: b.cost + move, moves: [...b.moves, move], lastCenter: center });
+      }
+    }
+    next.sort((a, b) => a.cost - b.cost);
+    beams = next.slice(0, beamWidth);
+  }
+  const pathRows = new Set(paths.map((p) => p.voicings.map(sigOf).join('|')));
+  const seenRow = new Set();
+  const out = [];
+  for (const b of beams) {           // already ascending by cost
+    const row = b.voicings.map(sigOf).join('|');
+    if (seenRow.has(row) || pathRows.has(row)) continue;   // dedupe, and skip pure-region rows
+    seenRow.add(row);
+    const label = b.voicings
+      .map((v) => (v == null ? '–' : (voicingCenter(v) === 0 ? 'f0' : `f${Math.round(voicingCenter(v))}`)))
+      .join('·');
+    out.push({ voicings: b.voicings, cost: b.cost, moves: b.moves, label });
+    if (out.length >= cap) break;
+  }
+  return out;
+}

@@ -128,6 +128,18 @@ import {
   fisherYates as _fisherYates,
 } from './random-playlist.js';
 import {
+  makeNotifKey as _makeNotifKey,
+  buildNotifItems as _buildNotifItems,
+  webpageNotifLists as _webpageNotifLists,
+  locateNotifItem as _locateNotifItem,
+} from './notif-bridge.js';
+import {
+  buildLibraryQuery as _buildLibraryQuery,
+  normalizeLibraryPayload as _normalizeLibraryPayload,
+  mergeLibraryHits as _mergeLibraryHits,
+  renderLibraryResultsHtml as _renderLibraryResultsHtml,
+} from './library-search.js';
+import {
   buildPlayQueue as _coreBuildPlayQueue,
   shuffleQueue as _coreShuffleQueue,
   migrateLegacyLastPlayedMap,
@@ -1406,6 +1418,9 @@ async function doSearch(searchThis, el) {
     await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]);
   }
   await fetchSRTs(searchThis);
+  // Fire-and-forget: the host answers on its own event, so this never delays
+  // the subtitle results. No-op unless the auto toggle is on.
+  _maybeAutoLibrarySearch();
   // let count = wordsToItems[searchThis] && wordsToItems[searchThis].length
   // count = count || 0
   if (!el) return
@@ -1683,7 +1698,15 @@ window._appSettings = {
   // adding context sentences. If the matched subtitle line already has this many
   // words before AND after the word, no context lines are added; otherwise lines
   // are added on the deficient side up to the "Sentences around word" cap.
-  minWordsAround: 10
+  minWordsAround: 10,
+  // Run the Cupitor library (EPUB full-text) search on every subtitle search.
+  // Off by default: the host indexes each book the first time a search visits
+  // it, so early searches cost seconds of native work (later ones hit the
+  // index and are quick).
+  autoLibrarySearch: false,
+  // Whether the book-results block inside #result starts folded. Sticky so a
+  // user who keeps the books out of the way isn't re-shown them every search.
+  libraryResultsCollapsed: false
 }
 
 // Adjacency gap / max-duration accessors, guarding against a bad localStorage value.
@@ -1732,6 +1755,9 @@ function loadAppSettings() {
   $('#clipGapThresholdSec').val(_clipGapThresholdSec())
   $('#clipMaxDurationSec').val(_clipMaxDurationSec())
   $('#minWordsAround').val(_minWordsAround())
+  const autoLib = !!window._appSettings.autoLibrarySearch
+  $('#toggleAutoLibrarySearchCheckbox').prop('checked', autoLib)
+  $('#librarySearchAutoCb').prop('checked', autoLib)
   return Promise.resolve()
 }
 
@@ -2660,6 +2686,16 @@ $('document').ready(e => {
         try { searchVocabularyByPrefix() } catch (_) {}
       }
     }
+  })
+
+  // Auto library search — mirrored by the compact "auto" checkbox on the
+  // results bar (#librarySearchAutoCb); both write the same setting.
+  $('#toggleAutoLibrarySearchCheckbox').change(e => {
+    const on = $(e.target).is(':checked')
+    window._appSettings.autoLibrarySearch = on
+    saveAppSettings()
+    $('#librarySearchAutoCb').prop('checked', on)
+    if (on && window.searchText) librarySearch(window.searchText)
   })
 
   $('#toggleLangCb').change(e => {
@@ -6541,6 +6577,7 @@ async function render(searchResults, search, className, token) {
   // Keep a "Loading…" placeholder visible during the slow getMatchingWords /
   // populate phase so the result area never goes blank mid-search.
   $result.html('<div style="color:grey;padding:6px;">Loading…</div>')
+  _ensureLibrarySearchBar()
 
   if (className === "secondary") {
     $result.css({backgroundColor: '#e3cece'})
@@ -6555,6 +6592,7 @@ async function render(searchResults, search, className, token) {
 
   // Matches are ready — swap out the loader for the real content.
   $result.html('')
+  _ensureLibrarySearchBar()
   if (window.unprocessedSearchText) {
     $result.append(`<p class="search-text-info">${
         unprocessedSearchText.split(SEPARATOR_PIPE).map(it => getWikiLink(it)).join(" | ")
@@ -6566,6 +6604,9 @@ async function render(searchResults, search, className, token) {
 
   if (Object.keys(wordToItemsMap).length === 0) {
     $result.html(resultNotFound(window.searchText))
+    // No subtitle hits is exactly when the books are worth a look — put the
+    // bar back after the wipe.
+    _ensureLibrarySearchBar()
   }
 
   $result.append("<hr>")
@@ -6759,6 +6800,9 @@ async function fetchSRTs(searchText) {
     const myToken = window._subtitleSearchToken
 
     $('#result').html('<div style="color:grey;padding:6px;">Loading…</div>')
+    // Keep the book-search bar (and any results already in it) alive across
+    // the placeholder — it is a separate, slower search than this one.
+    _ensureLibrarySearchBar()
 
     console.log("Loading from local")
     window.searchResult = await fetchFromDownloadedFiles(window.searchText.trim(), myToken);
@@ -8878,16 +8922,299 @@ function buildPlaylistsWithManualCards(payload) {
 window.buildPlaylistsWithManualCards = buildPlaylistsWithManualCards
 
 // Ask the native side to open the EPUB reader at a card's book + chapter.
-function _openEpubForCard(bookKey, chapterIdx) {
+// `match` is optional (spec §5.4): pass the search query and the reader opens
+// with its find bar pre-filled and the first match scrolled into view.
+function _openEpubForCard(bookKey, chapterIdx, match) {
   if (!window.PlaylistBridge || typeof window.PlaylistBridge.postMessage !== 'function') {
     alert('Opening the book needs the Cupitor app.')
     return
   }
   try {
-    window.PlaylistBridge.postMessage(JSON.stringify({ op: 'openEpub', book_key: bookKey, chapter_idx: chapterIdx }))
+    const msg = { op: 'openEpub', book_key: bookKey, chapter_idx: chapterIdx }
+    if (match) msg.match = String(match)
+    window.PlaylistBridge.postMessage(JSON.stringify(msg))
   } catch (e) { console.warn('openEpub post failed', e) }
 }
 window._openEpubForCard = _openEpubForCard
+
+// ─── Library search (EPUB full-text, via PlaylistBridge `globalSearch`) ───
+// The host scans every book in the user's library and streams the hits back as
+// `cupitorGlobalSearchResults` events: one delta batch per book-scan boundary
+// (done:false), then a closing event (done:true). Nothing here awaits that — we
+// post, paint a "Searching…" line and return, so the SRT search and the rest of
+// the UI keep running while the host works, and each batch paints as it lands.
+//
+// Query grammar is phrases OR'd with `|` (no regex): the host runs them
+// through an FTS5 index, word-matching each token and prefix-matching the last
+// one, with case + diacritics folded. See docs/webapp-integration-spec.md §5
+// and buildLibraryQuery in ./library-search.js for the translation from
+// window.searchText.
+// Watchdog between events, not for the whole search: the stream re-arms it on
+// every batch, so only actual silence from the host trips it. Sized for the
+// first search on a fresh install, which builds the index as it goes.
+const LIBRARY_SEARCH_TIMEOUT_MS = 45000
+const LIBRARY_SEARCH_DEBOUNCE_MS = 400
+// Cap the repaint rate while batches stream in.
+const LIBRARY_RENDER_THROTTLE_MS = 250
+
+// Accumulating state of the in-flight search: { query, hits, capped, cancelled,
+// timer, lastPaintAt, paintTimer }. Null when nothing is running.
+window._librarySearchPending = null
+// Last completed/partial payload, so a re-created result bar can restore it.
+window._librarySearchLast = null
+
+function _haveLibrarySearchBridge() {
+  return !!(window.PlaylistBridge && typeof window.PlaylistBridge.postMessage === 'function')
+}
+
+function _librarySetStatus(text, busy) {
+  const $s = $('#librarySearchStatus')
+  if (!$s.length) return
+  $s.text(text || '').toggleClass('lib-status-busy', !!busy)
+  // Cancelling only makes sense while the host is still streaming.
+  $('#librarySearchCancelBtn').toggle(!!busy)
+}
+
+// Silence from the host is the only failure signal (spec §7.2) — re-armed on
+// every batch so a slow book doesn't look like a dead bridge.
+function _armLibraryWatchdog(state) {
+  clearTimeout(state.timer)
+  state.timer = setTimeout(() => {
+    if (window._librarySearchPending !== state) return
+    window._librarySearchPending = null
+    _librarySetStatus('No response from the app — the library search timed out.', false)
+    _paintLibraryState(state, { cancelled: true })
+  }, LIBRARY_SEARCH_TIMEOUT_MS)
+}
+
+// Post a globalSearch and return immediately. `searchText` is our internal
+// (possibly pipe-expanded, possibly regex-laced) term — translated here.
+function librarySearch(searchText) {
+  if (!_haveLibrarySearchBridge()) return false
+  const query = _buildLibraryQuery(searchText)
+  if (!query) {
+    _librarySetStatus('Nothing searchable in that term.', false)
+    return false
+  }
+  _ensureLibrarySearchBar()
+  const prev = window._librarySearchPending
+  if (prev) {
+    clearTimeout(prev.timer)
+    clearTimeout(prev.paintTimer)
+    // A new globalSearch supersedes the old one host-side anyway, but say so
+    // explicitly so the host stops scanning for the old query right now
+    // instead of when it notices. Its closing event (cancelled: true, old
+    // query) still arrives and is dropped by the query check below.
+    if (prev.query !== query) libraryCancelSearch()
+  }
+  const state = { query, hits: [], capped: false, cancelled: false, timer: null, paintTimer: null, lastPaintAt: 0 }
+  window._librarySearchPending = state
+  _armLibraryWatchdog(state)
+  _librarySetStatus(`Searching your books for “${query}”…`, true)
+  $('#libraryResults').html('')
+  try {
+    window.PlaylistBridge.postMessage(JSON.stringify({ op: 'globalSearch', query }))
+  } catch (e) {
+    console.warn('globalSearch post failed', e)
+    clearTimeout(state.timer)
+    window._librarySearchPending = null
+    _librarySetStatus('Could not reach the app.', false)
+    return false
+  }
+  return true
+}
+window.librarySearch = librarySearch
+
+// Stop the in-flight search. The host answers with a closing
+// `done: true, cancelled: true` event for the current query.
+function libraryCancelSearch() {
+  const state = window._librarySearchPending
+  if (!state || !_haveLibrarySearchBridge()) return
+  try {
+    window.PlaylistBridge.postMessage(JSON.stringify({ op: 'cancelSearch' }))
+    _librarySetStatus('Stopping…', true)
+  } catch (e) { console.warn('cancelSearch post failed', e) }
+}
+window.libraryCancelSearch = libraryCancelSearch
+
+function _libraryRenderOpts(extra) {
+  return Object.assign(
+    { collapsed: !!(window._appSettings && window._appSettings.libraryResultsCollapsed) },
+    extra || {}
+  )
+}
+
+function _renderLibraryPayload(payload, opts) {
+  window._librarySearchLast = payload
+  window._libraryLastOpts = opts || {}
+  _ensureLibrarySearchBar()
+  const $out = $('#libraryResults')
+  if (!$out.length) return
+  $out.html(_renderLibraryResultsHtml(payload, _libraryRenderOpts(opts)))
+}
+
+// Paint the accumulated hits of `state`. Throttled while streaming so a book
+// that yields many small batches doesn't rebuild the list every few ms; the
+// final (non-streaming) paint always goes through immediately.
+function _paintLibraryState(state, opts) {
+  const o = opts || {}
+  const payload = { query: state.query, hits: state.hits, hitsCapped: state.capped, done: !o.streaming }
+  clearTimeout(state.paintTimer)
+  const since = Date.now() - state.lastPaintAt
+  if (o.streaming && since < LIBRARY_RENDER_THROTTLE_MS) {
+    state.paintTimer = setTimeout(() => _paintLibraryState(state, opts), LIBRARY_RENDER_THROTTLE_MS - since)
+    return
+  }
+  state.lastPaintAt = Date.now()
+  _renderLibraryPayload(payload, { streaming: !!o.streaming, cancelled: !!o.cancelled })
+}
+
+function _onLibrarySearchResults(detail) {
+  const payload = _normalizeLibraryPayload(detail)
+  const state = window._librarySearchPending
+  if (!state) {
+    // Unsolicited push (or a straggler from a search we already closed) —
+    // render it as a complete result set rather than dropping it.
+    if (payload.hits.length) {
+      setTimeout(() => _renderLibraryPayload(
+        { query: payload.query, hits: payload.hits, hitsCapped: payload.hitsCapped },
+        { cancelled: payload.cancelled }
+      ), 0)
+    }
+    return
+  }
+  // Superseded / stale: the closing event of an older query still arrives.
+  if (payload.query && payload.query !== state.query) return
+
+  state.hits = _mergeLibraryHits(state.hits, payload.hits)
+  state.capped = state.capped || payload.hitsCapped
+  state.cancelled = state.cancelled || payload.cancelled
+
+  if (payload.done) {
+    clearTimeout(state.timer)
+    window._librarySearchPending = null
+    _librarySetStatus(state.cancelled ? 'Book search stopped.' : '', false)
+    _paintLibraryState(state, { streaming: false, cancelled: state.cancelled })
+    return
+  }
+  _armLibraryWatchdog(state)
+  const n = state.hits.length
+  _librarySetStatus(`Searching your books for “${state.query}” — ${n} chapter${n === 1 ? '' : 's'} so far…`, true)
+  // Paint off the host's dispatch so a big batch doesn't build DOM inside it.
+  setTimeout(() => {
+    if (window._librarySearchPending !== state) return
+    _paintLibraryState(state, { streaming: true })
+  }, 0)
+}
+
+window.addEventListener('cupitorGlobalSearchResults', ev => {
+  try { _onLibrarySearchResults(ev.detail) }
+  catch (e) { console.warn('cupitorGlobalSearchResults handler failed', e) }
+})
+
+// The results bar lives inside #result, which every render() rebuilds — so
+// re-insert it (and restore the last results) whenever it has been wiped.
+// Idempotent: safe to call from every point that touches #result.
+function _ensureLibrarySearchBar() {
+  if (!_haveLibrarySearchBridge()) return
+  const $result = $('#result')
+  if (!$result.length || $result.children('#librarySearchBar').length) return
+  $result.prepend(`<div id="librarySearchBar" class="lib-search-bar">
+      <button type="button" id="librarySearchBtn" class="lang-tool-btn" title="Full-text search the EPUBs in your Cupitor library for the current search phrase. Words match whole, and the last word also matches by prefix (hem → hemma).">📚 Search books</button>
+      <button type="button" id="librarySearchCancelBtn" class="lang-tool-btn" style="display:none;" title="Stop the running book search">✕ Stop</button>
+      <label class="lib-auto-label" title="Run the book search automatically on every search">
+        <input type="checkbox" id="librarySearchAutoCb"> auto
+      </label>
+      <span id="librarySearchStatus" class="lib-search-status"></span>
+    </div>
+    <div id="libraryResults" class="lib-results"></div>`)
+  $('#librarySearchAutoCb').prop('checked', !!(window._appSettings && window._appSettings.autoLibrarySearch))
+  const pending = window._librarySearchPending
+  if (pending) {
+    const n = pending.hits.length
+    _librarySetStatus(`Searching your books for “${pending.query}”${n ? ` — ${n} chapter${n === 1 ? '' : 's'} so far…` : '…'}`, true)
+    // Partial hits from the batches that already landed.
+    $('#libraryResults').html(_renderLibraryResultsHtml(
+      { query: pending.query, hits: pending.hits, hitsCapped: pending.capped },
+      _libraryRenderOpts({ streaming: true })
+    ))
+  } else if (window._librarySearchLast) {
+    $('#libraryResults').html(_renderLibraryResultsHtml(window._librarySearchLast, _libraryRenderOpts(window._libraryLastOpts)))
+  }
+}
+window._ensureLibrarySearchBar = _ensureLibrarySearchBar
+
+// Called after every subtitle search. Two jobs:
+//   1. A book search still streaming for the PREVIOUS phrase is now stale —
+//      stop it, whether or not auto mode will start a new one. Otherwise the
+//      host keeps parsing books for a phrase the user has moved on from, and
+//      its batches keep painting under the new search term.
+//   2. In auto mode, kick off the book search for the new phrase. Debounced —
+//      one typed search can trigger several passes (primary + stem fallback)
+//      and each new globalSearch throws away the scan the host had going.
+function _maybeAutoLibrarySearch() {
+  if (!_haveLibrarySearchBridge()) return
+  const term = window.searchText
+  const query = _buildLibraryQuery(term)
+  const state = window._librarySearchPending
+  if (state && state.query !== query) libraryCancelSearch()
+  if (!(window._appSettings && window._appSettings.autoLibrarySearch)) return
+  if (!term || !String(term).trim()) return
+  clearTimeout(window._libraryAutoTimer)
+  window._libraryAutoTimer = setTimeout(() => librarySearch(term), LIBRARY_SEARCH_DEBOUNCE_MS)
+}
+window._maybeAutoLibrarySearch = _maybeAutoLibrarySearch
+
+// Delegated so the handlers survive #result being rebuilt.
+$(document).on('click', '#librarySearchBtn', () => {
+  if (!window.searchText || !String(window.searchText).trim()) {
+    _librarySetStatus('Search for something first.', false)
+    return
+  }
+  librarySearch(window.searchText)
+})
+$(document).on('click', '#librarySearchCancelBtn', () => libraryCancelSearch())
+$(document).on('change', '#librarySearchAutoCb', e => {
+  const on = $(e.target).is(':checked')
+  window._appSettings.autoLibrarySearch = on
+  saveAppSettings()
+  $('#toggleAutoLibrarySearchCheckbox').prop('checked', on)
+  if (on && window.searchText) librarySearch(window.searchText)
+})
+// Fold the whole book-results block. Sticky across searches — a re-render
+// reads the setting back through _libraryRenderOpts.
+$(document).on('click', '.lib-head', e => {
+  const $wrap = $(e.currentTarget).closest('.lib-wrap')
+  const collapsed = !$wrap.hasClass('lib-collapsed')
+  $wrap.toggleClass('lib-collapsed', collapsed)
+  $(e.currentTarget).attr('aria-expanded', String(!collapsed))
+    .find('.lib-caret').text(collapsed ? '▸' : '▾')
+  window._appSettings.libraryResultsCollapsed = collapsed
+  saveAppSettings()
+})
+// Per-book fold — transient, not worth persisting per book key.
+$(document).on('click', '.lib-book-title', e => {
+  const $book = $(e.currentTarget).closest('.lib-book')
+  const collapsed = !$book.hasClass('lib-book-collapsed')
+  $book.toggleClass('lib-book-collapsed', collapsed)
+  $(e.currentTarget).attr('aria-expanded', String(!collapsed))
+    .find('.lib-caret').text(collapsed ? '▸' : '▾')
+})
+$(document).on('click', '.lib-open', e => {
+  const d = $(e.currentTarget).data()
+  if (!d || !d.bookKey) return
+  // `match` prefills the reader's find bar and scrolls the hit into view
+  // (spec §5.4). It must be the phrase THIS hit matched — the reader only
+  // honours one phrase, so handing it the whole `x|y` query would land on x
+  // no matter which one the user clicked. data-match carries the snippet's
+  // own matched text; the query is a last resort for older markup.
+  const state = window._librarySearchPending
+  const match = d.match
+    || (state && state.query)
+    || (window._librarySearchLast && window._librarySearchLast.query)
+    || ''
+  _openEpubForCard(String(d.bookKey), parseInt(d.chapterIdx, 10) || 0, match)
+})
 
 function _saveRecording() {
   try {
@@ -8915,6 +9242,9 @@ function _saveRecording() {
     window._recordingsDirty = true
     try { localStorage.setItem(REC_DIRTY_KEY, '1') } catch (_) {}
     _refreshRecordingSyncBtn()
+    // Keep notification lists in step with playlist edits (debounced, no-op
+    // unless a playlist has notifications enabled and the bridge is present).
+    try { _notifScheduleResync() } catch (_) {}
   } catch (e) { console.warn('saveRecording failed', e) }
 }
 
@@ -9191,17 +9521,19 @@ function _autoScanFiles() {
 // separately so every synonym gets its own example. Each entry is still run
 // through expandWords, which is idempotent on already-expanded forms, so
 // entries may be raw vocab text OR pre-expanded phrases.
-async function buildAutomaticItems({ vocabCategories = [], words = null, matchesPerWord = 1, contextLines = 2, count = Infinity, onProgress = null } = {}) {
+async function buildAutomaticItems({ vocabCategories = [], words = null, matchesPerWord = 1, contextLines = 2, count = Infinity, ordered = false, onProgress = null } = {}) {
   // Mirror doSearch's deferral so we don't scan an empty corpus on a cold load.
   if (!window.vocabulary || !window._subtitlesLoaded) {
     try { await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]) } catch (_) {}
   }
   const files = _autoScanFiles()
-  // Shuffle so an early-exit still yields a spread across the category.
+  // Shuffle so an early-exit still yields a spread across the category. When
+  // `ordered` is set (category playlist), keep the words in the order given so
+  // the resulting playlist matches vocabulary order.
   const sourceWords = (Array.isArray(words) && words.length)
     ? words.slice()
     : _wordsForCategories(window.vocabulary, vocabCategories, VOCAB_HIDDEN_CATEGORIES)
-  const scanWords = _fisherYates(sourceWords)
+  const scanWords = ordered ? sourceWords : _fisherYates(sourceWords)
   const tuples = []
   let lastYield = Date.now()
   for (let wi = 0; wi < scanWords.length; wi++) {
@@ -9441,6 +9773,64 @@ function _cpBuildToast(msg) {
   _cpBuildToastTimer = setTimeout(() => { $t.fadeOut(400) }, 3200)
 }
 
+// Translate the phrase (searchText) of every non-manual playlist item that has
+// no translation yet, and store it in the item's `target` (marked `targetAuto`)
+// so Practice can show it as the back. Manual cards are left untouched. Unique
+// phrases are translated once, in bulk (concurrency-capped), via the host's
+// TranslateRequest bridge.
+async function _translatePlaylistPhrases($btn) {
+  if (!_haveTranslateBridge()) { alert('Translation needs the Cupitor app.'); return }
+  const name = window._recording && window._recording.currentName
+  if (!name || _isVirtual(name)) { alert('Pick a normal (non-virtual) playlist to translate.'); return }
+  const items = (window._recording && window._recording.items) || {}
+  // phrase → item refs that share it (all get the same translation).
+  const groups = new Map()
+  Object.keys(items).forEach(st => {
+    Object.keys(items[st] || {}).forEach(w => {
+      (items[st][w] || []).forEach(it => {
+        if (!it || _isManualItem(it)) return
+        if (it.target && String(it.target).trim()) return // already has a translation
+        const phrase = String(it.searchText || st || '').trim()
+        if (!phrase) return
+        if (!groups.has(phrase)) groups.set(phrase, [])
+        groups.get(phrase).push(it)
+      })
+    })
+  })
+  const phrases = [...groups.keys()]
+  if (!phrases.length) { _cpBuildToast('Every word/phrase already has a translation.'); return }
+
+  const source = (getLangFromUrl().code) || 'sv'
+  const target = 'en'
+  const labelHtml = $btn ? $btn.html() : null
+  if ($btn) $btn.prop('disabled', true)
+  let done = 0
+  const setProg = () => { if ($btn) $btn.html(`<span class="rec-rec-lbl">Translating… ${done}/${phrases.length}</span>`) }
+  setProg()
+  const translateFn = async (text) => {
+    let r = ''
+    try { r = await _requestTranslation(text, source, target) } catch (e) { console.warn('[translate] failed for', text, e) }
+    done++; setProg()
+    return r
+  }
+  let results
+  try {
+    results = await translateLines(phrases, translateFn, { concurrency: 4 })
+  } finally {
+    if ($btn) { $btn.prop('disabled', false); if (labelHtml != null) $btn.html(labelHtml) }
+  }
+  let applied = 0
+  phrases.forEach((p, i) => {
+    const tr = (results[i] == null ? '' : String(results[i])).trim()
+    if (!tr) return
+    groups.get(p).forEach(it => { it.target = tr; it.targetAuto = true })
+    applied++
+  })
+  if (applied) { _saveRecording(); openRecordingReviewDialog() }
+  const failed = phrases.length - applied
+  _cpBuildToast(`Translated ${applied} phrase${applied === 1 ? '' : 's'}${failed ? ` · ${failed} failed` : ''}.`)
+}
+
 // The distinct searchable phrases of a category, so every synonym gets its own
 // subtitle example instead of a whole line collapsing into one alternation.
 // expandWords does the real work — strips (hints), expands <*refs into their
@@ -9554,7 +9944,7 @@ function _openCategoryPlaylistDialog() {
     let pool = []
     try {
       pool = await buildAutomaticItems({
-        words: phrases, matchesPerWord, contextLines, count: Infinity,
+        words: phrases, matchesPerWord, contextLines, count: Infinity, ordered: true,
         onProgress: (done, total, found) => {
           scannedWords = total
           $status.text(`Scanning subtitles… ${found} found (phrase ${done}/${total})`)
@@ -9575,8 +9965,10 @@ function _openCategoryPlaylistDialog() {
       return
     }
 
-    // Keep ALL matches — dedup by (video, line) but never sample/truncate.
-    const grouped = _sampleAndGroup(pool, { count: Infinity })
+    // Keep ALL matches — dedup by (video, line) but never sample/truncate, and
+    // preserve vocabulary order (identity shuffle) so the playlist plays in the
+    // order words appear in the category.
+    const grouped = _sampleAndGroup(pool, { count: Infinity, shuffle: a => a })
     const wordGroups = Object.keys(grouped).length
     let clips = 0
     Object.keys(grouped).forEach(st => Object.keys(grouped[st]).forEach(w => { clips += grouped[st][w].length }))
@@ -9745,13 +10137,44 @@ function renameRecording(oldName, newName) {
   return true
 }
 
+// Every recorded-audio (file://) URL referenced by a manual card in `items`.
+function _collectAudioUrls(items) {
+  const urls = new Set()
+  Object.values(items || {}).forEach(byW => {
+    Object.values(byW || {}).forEach(arr => {
+      ;(arr || []).forEach(it => { if (it && _isAudioMediaUrl(it.mediaUrl)) urls.add(it.mediaUrl) })
+    })
+  })
+  return urls
+}
+
+// Delete the native audio files in `urls` that no remaining (non-virtual)
+// playlist still references — duplicated cards share the same file, so an
+// orphan check keeps a copy in another playlist from breaking.
+function _pruneOrphanAudio(urls) {
+  if (!urls || !urls.size) return
+  const stillUsed = new Set()
+  Object.keys(window._recordings || {}).forEach(n => {
+    if (_isVirtual(n)) return
+    _collectAudioUrls(window._recordings[n].items).forEach(u => stillUsed.add(u))
+  })
+  urls.forEach(u => { if (!stillUsed.has(u)) deleteManualAudio(u) })
+}
+
 function deleteRecording(name) {
   if (!window._recordings[name]) return false
   const isV = _isVirtual(name)
   const count = isV ? _recordingItemCountByName(name) : _recordingItemCountIn(window._recordings[name].items)
   const kind = isV ? 'virtual playlist' : 'recording'
   if (!confirm(`Delete ${kind} "${name}"${count ? ` (${count} item${count === 1 ? '' : 's'})` : ''}? This cannot be undone.`)) return false
+  // Voice recordings of the deleted playlist's manual cards (virtual playlists
+  // only reference their members' items, so they own no audio to delete).
+  const audioUrls = isV ? null : _collectAudioUrls(window._recordings[name].items)
+  // Scheduled notifications this playlist owns — remove them from the app so
+  // they don't fire for a playlist that no longer exists.
+  const notifKey = window._recordings[name].notifKey
   delete window._recordings[name]
+  if (notifKey && _haveNotifBridge()) { notifRpc('deleteList', { external_key: notifKey }).catch(() => {}) }
   if (!Object.keys(window._recordings).length) {
     window._recordings[REC_DEFAULT_NAME] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }
   }
@@ -9765,6 +10188,9 @@ function deleteRecording(name) {
       ? _resolveVirtualItems(next)
       : window._recordings[next].items
   }
+  // Fire-and-forget: delete the manual-card voice files now that the playlist
+  // is gone, keeping any file still referenced by another playlist.
+  if (audioUrls) _pruneOrphanAudio(audioUrls)
   _saveRecording()
   _updateRecordingUI()
   _markCapturedButtons()
@@ -10523,6 +10949,11 @@ function _openManualEntryEditor(playlistName, existing) {
   // click stops the current playback (toggle), and so syncAudioUI can flip
   // the button label between ▶ Play / ■ Stop.
   let playbackAudio = null
+  // Stop an in-flight recording and finalize its file. Assigned inside the
+  // showAudio block (where the recorder state is in scope); a no-op otherwise.
+  // Called by the Stop button AND by finish() so clicking Save mid-recording
+  // saves the voice recording instead of discarding it.
+  let _finalizeRecording = async () => {}
 
   if (showAudio) {
     audioUrl = _isAudioMediaUrl(existing && existing.mediaUrl) ? existing.mediaUrl : null
@@ -10603,7 +11034,7 @@ function _openManualEntryEditor(playlistName, existing) {
       syncAudioUI()
       recTimerId = setInterval(syncAudioUI, 1000)
     })
-    $stop.on('click', async () => {
+    _finalizeRecording = async () => {
       if (!nativeRecording) return
       let result
       try { result = await _audioRpc('recordStop', {}) }
@@ -10636,7 +11067,8 @@ function _openManualEntryEditor(playlistName, existing) {
       audioUrl = result
       audioUrlIsNew = true
       syncAudioUI()
-    })
+    }
+    $stop.on('click', () => { _finalizeRecording() })
     $play.on('click', async () => {
       // Toggle: click while playing stops playback (so the user can quickly
       // re-record without waiting for the clip to finish).
@@ -10677,6 +11109,10 @@ function _openManualEntryEditor(playlistName, existing) {
   }
 
   const finish = async () => {
+    // If a recording is still in progress, stop and persist it first so the
+    // card is saved WITH the voice recording rather than a file that cleanup()
+    // is about to cancel. No-op when nothing is recording.
+    await _finalizeRecording()
     const source       = $d.find('#meeSource').val()
     const target       = $d.find('#meeTarget').val()
     const typedMediaUrl = $d.find('#meeMedia').val()
@@ -10767,6 +11203,627 @@ window._openManualEntryEditor = _openManualEntryEditor
 window.saveManualAudioBlob = saveManualAudioBlob
 window.loadManualAudioData = loadManualAudioData
 window.deleteManualAudio   = deleteManualAudio
+
+// ─── NotifBridge: scheduled study notifications for a playlist ────────────
+// Mirrors the AudioBridge plumbing. The JS→Flutter channel is a single
+// postMessage of a JSON string; Flutter→JS replies land as CustomEvents on
+// window (each payload also stashed on window.__<event> before dispatch, so a
+// late listener can read current state). See the frozen contract doc
+// 2026-07-27-notif-bridge-webapp-contract.md. Pure item/list helpers live in
+// ./notif-bridge.js; this file owns the RPC, warm-push state, and dialog.
+const _NOTIF_PENDING = new Map()
+let _notifSeq = 0
+function _haveNotifBridge() { return !!(window.NotifBridge && typeof window.NotifBridge.postMessage === 'function') }
+
+// One ack per message we send; stray warm-push acks (request_id we don't know)
+// are ignored per the contract.
+window.addEventListener('cupitorNotifAck', e => {
+  const a = e && e.detail
+  if (!a) return
+  const p = _NOTIF_PENDING.get(a.request_id)
+  if (!p) return
+  _NOTIF_PENDING.delete(a.request_id)
+  if (a.ok) p.resolve(a.data == null ? true : a.data)
+  else p.reject(new Error(a.error || 'notif_error'))
+})
+
+// Re-render the open dialog whenever the app pushes fresh state (our mutation
+// or the in-app manager's). The payloads are also on window.__* for late reads.
+window.addEventListener('cupitorNotifSchedules', () => { if ($('#notifDialog').is(':visible')) _notifPopulateSchedules() })
+window.addEventListener('cupitorNotifLists', () => { if ($('#notifDialog').is(':visible')) _notifRenderEnabled() })
+// User tapped a notification body — the app has opened this page at the item's
+// open_url; open the item in Practice View.
+window.addEventListener('cupitorNotificationOpened', e => {
+  const d = e && e.detail
+  if (!d) return
+  const pl = _playlistForNotifKey(d.external_key) || (d.payload && d.payload.pl)
+  const xid = d.item_external_id || (d.payload && d.payload.xid)
+  console.log('[notif] opened event → practice', { pl, xid, external_key: d.external_key })
+  _notifOpenWhenReady(pl, xid)
+})
+
+function notifRpc(op, payload = {}) {
+  if (!_haveNotifBridge()) return Promise.reject(new Error('no-bridge'))
+  return new Promise((resolve, reject) => {
+    const request_id = 'wa-' + (++_notifSeq) + '-' + Date.now().toString(36)
+    _NOTIF_PENDING.set(request_id, { resolve, reject })
+    try { window.NotifBridge.postMessage(JSON.stringify(Object.assign({ op, request_id }, payload))) }
+    catch (err) { _NOTIF_PENDING.delete(request_id); reject(err) }
+  })
+}
+
+function _notifSchedules() {
+  const s = window.__cupitorNotifSchedules
+  return (s && Array.isArray(s.schedules)) ? s.schedules : []
+}
+function _notifLists() { return window.__cupitorNotifLists || { lists: [] } }
+
+// The playlist whose rec.notifKey owns this notification list (or null).
+function _playlistForNotifKey(key) {
+  const coll = window._recordings || {}
+  return Object.keys(coll).find(n => coll[n] && coll[n].notifKey === key) || null
+}
+
+// Open Practice View directly on the item a notification points at. Resolves
+// the item via the pure locateNotifItem (same id-construction in both
+// directions), makes its playlist current, then launches Practice rotated so
+// that item is first.
+function _displayNotifItem(playlistName, xid) {
+  if (!playlistName || !xid) return
+  const rec = window._recordings && window._recordings[playlistName]
+  if (!rec) { console.warn('[notif] playlist not found for deep link:', playlistName, '· known:', Object.keys(window._recordings || {})); return }
+  const items = _isVirtual(playlistName) ? _resolveVirtualItems(playlistName) : rec.items
+  const loc = _locateNotifItem(items, xid)
+  try { if (typeof selectRecording === 'function') selectRecording(playlistName) } catch (_) {}
+  if (!loc) { console.warn('[notif] item not located, opening practice from start:', xid); try { openPracticeMode() } catch (_) {} return }
+  // A word group collapses many clips into one notif item — start at the first
+  // ENABLED clip (disabled items are absent from the practice queue). Manual
+  // cards are 1:1 so their own index is used.
+  let idx = loc.idx
+  if (idx == null) {
+    const arr = (items[loc.st] && items[loc.st][loc.w]) || []
+    idx = arr.findIndex(it => it && it.enabled !== false)
+    if (idx < 0) idx = 0
+  }
+  try {
+    console.log('[notif] opening practice', { playlistName, st: loc.st, w: loc.w, idx })
+    openPracticeMode({ startItem: { recName: playlistName, st: loc.st, w: loc.w, idx } })
+  } catch (e) { console.warn('[notif] openPracticeMode failed', e) }
+}
+
+// Open a deep-linked item in Practice once the app is ready. Both the event and
+// the cold-start URL land here. Recordings may arrive slightly after the page
+// (localStorage load or the native cupitorPlaylists push), and openPracticeMode
+// needs the page booted — so poll up to ~20s rather than firing too early.
+function _notifOpenWhenReady(pl, xid) {
+  if (!pl || !xid) { console.warn('[notif] deep link missing pl/xid', { pl, xid }); return }
+  const start = Date.now()
+  const tick = () => {
+    if (window._recordings && window._recordings[pl] && typeof openPracticeMode === 'function') {
+      _displayNotifItem(pl, xid)
+    } else if (Date.now() - start < 20000) {
+      setTimeout(tick, 250)
+    } else {
+      console.warn('[notif] gave up waiting for playlist:', pl, '· known:', Object.keys(window._recordings || {}))
+    }
+  }
+  tick()
+}
+
+// Cold-start path: the app opens this page fresh at the item's open_url
+// (?notifPl=&notifItem=). Wait for full load (so the boot doesn't tear down the
+// practice view we open) and strip the params so a re-render/refresh doesn't
+// re-trigger and the URL stays clean.
+;(function _notifColdStart() {
+  let pl, xid
+  try {
+    const u = new URL(window.location.href)
+    pl = u.searchParams.get('notifPl')
+    xid = u.searchParams.get('notifItem')
+  } catch (_) { return }
+  if (!pl || !xid) return
+  console.log('[notif] cold-start deep link', { pl, xid })
+  try {
+    const u2 = new URL(window.location.href)
+    u2.searchParams.delete('notifPl'); u2.searchParams.delete('notifItem')
+    window.history.replaceState(null, '', u2.toString())
+  } catch (_) {}
+  const go = () => setTimeout(() => _notifOpenWhenReady(pl, xid), 400)
+  if (document.readyState === 'complete') go()
+  else window.addEventListener('load', go)
+})()
+
+function _notifScheduleKind(key) {
+  const s = _notifSchedules().find(x => x.key === key)
+  return s ? s.kind : null
+}
+
+function _notifPopulateSchedules() {
+  const $sel = $('#notifSchedule')
+  if (!$sel.length) return
+  const schedules = _notifSchedules()
+  const cur = $sel.val()
+  $sel.empty()
+  schedules.forEach(s => {
+    $sel.append(`<option value="${_.escape(s.key)}">${_.escape(s.name)} (${_.escape(s.kind)})</option>`)
+  })
+  if (cur && schedules.some(s => s.key === cur)) $sel.val(cur)
+  // Intro cadence: recurring schedules only, plus a "(none)" option.
+  const $intro = $('#notifIntroSchedule')
+  if ($intro.length) {
+    const curI = $intro.val()
+    $intro.empty().append('<option value="">(none)</option>')
+    schedules.filter(s => s.kind === 'recurring').forEach(s =>
+      $intro.append(`<option value="${_.escape(s.key)}">${_.escape(s.name)}</option>`))
+    if (curI && schedules.some(s => s.key === curI)) $intro.val(curI)
+  }
+  _notifSyncIntroAvailability()
+}
+
+// The introduction cadence is valid only when the main schedule is a series
+// (the contract acks bad_intro otherwise) — grey out / clear it when it isn't.
+function _notifSyncIntroAvailability() {
+  const $intro = $('#notifIntroSchedule')
+  if (!$intro.length) return
+  const isSeries = _notifScheduleKind($('#notifSchedule').val()) === 'series'
+  $intro.prop('disabled', !isSeries)
+  if (!isSeries) $intro.val('')
+  $('#notifIntroRow').css('opacity', isSeries ? '1' : '0.55')
+}
+
+// Build items for a playlist (resolving a virtual playlist's members).
+function _notifItemsForPlaylist(name) {
+  const rec = (window._recordings || {})[name]
+  if (!rec) return []
+  const items = _isVirtual(name) ? _resolveVirtualItems(name) : rec.items
+  return _buildNotifItems(items)
+}
+
+// Built notification items decorated with a payload identifying the item. We
+// deliberately DON'T set open_url: per the contract, an open_url makes the tap
+// NAVIGATE/reload the page (what showed the search screen). With no open_url the
+// tap fires cupitorNotificationOpened into the already-loaded page, which we
+// handle in place by opening Practice — no navigation, no reload. The payload
+// (pl + xid) rides along in the event so we can resolve the item.
+function _notifBuildDecorated(name) {
+  return _notifItemsForPlaylist(name).map(it => ({
+    ...it,
+    payload: { pl: name, xid: it.external_id },
+  }))
+}
+
+// Debounced auto-resync: whenever playlists change (item enable/disable, add,
+// remove, capture…), push the fresh items of every notification-enabled
+// playlist so the schedule reflects the playlist. syncItems 'replace' keeps SRS
+// progress for kept items, inserts new ones, and cancels removed ones.
+let _notifResyncTimer = null
+function _notifScheduleResync() {
+  if (!_haveNotifBridge()) return
+  if (_notifResyncTimer) clearTimeout(_notifResyncTimer)
+  _notifResyncTimer = setTimeout(_notifResyncAll, 1500)
+}
+function _notifResyncAll() {
+  _notifResyncTimer = null
+  if (!_haveNotifBridge()) return
+  const onBridge = new Set(_webpageNotifLists(_notifLists()).map(l => l.external_key))
+  const coll = window._recordings || {}
+  Object.keys(coll).forEach(name => {
+    const key = coll[name] && coll[name].notifKey
+    if (!key || !onBridge.has(key)) return
+    const items = _notifBuildDecorated(name)
+    // Don't auto-wipe to empty — an all-disabled/emptied playlist keeps its last
+    // items until the user explicitly disables it in the dialog.
+    if (!items.length) return
+    notifRpc('syncItems', { external_key: key, items, mode: 'replace' }).catch(() => {})
+  })
+}
+
+async function _notifEnablePlaylist(name, scheduleKey, introKey) {
+  const rec = (window._recordings || {})[name]
+  if (!rec) return
+  const built = _notifItemsForPlaylist(name)
+  if (!built.length) { alert('This playlist has no items with text to notify about.'); return }
+  const items = _notifBuildDecorated(name)
+  const existingKey = rec.notifKey
+  const alreadyOnBridge = existingKey && _webpageNotifLists(_notifLists()).some(l => l.external_key === existingKey)
+  const key = existingKey || _makeNotifKey()
+  // Intro cadence only applies to a series main schedule (bad_intro otherwise).
+  const useIntro = introKey && _notifScheduleKind(scheduleKey) === 'series'
+  const $st = $('#notifEnableStatus').text('Enabling…').css('color', '#666')
+  try {
+    if (alreadyOnBridge) {
+      // Playlist is the source of truth — replace so removed items are cancelled.
+      await notifRpc('syncItems', { external_key: key, items, mode: 'replace' })
+      // setSchedule sets FULL scheduling — omitting intro_schedule_key clears it.
+      const sched = { external_key: key, schedule_key: scheduleKey }
+      if (useIntro) sched.intro_schedule_key = introKey
+      await notifRpc('setSchedule', sched)
+    } else {
+      const create = { external_key: key, name, schedule_key: scheduleKey, items }
+      if (useIntro) create.intro_schedule_key = introKey
+      await notifRpc('createList', create)
+    }
+    rec.notifKey = key
+    _saveRecording()
+    $st.text(`Enabled — ${built.length} item${built.length === 1 ? '' : 's'}`).css('color', '#070')
+    _notifRenderEnabled()
+  } catch (err) {
+    console.warn('[notif] enable failed', err)
+    $st.text('Failed: ' + (err && err.message || err)).css('color', '#a00')
+  }
+}
+
+// Render the "Enabled notifications" section from the warm-pushed lists.
+function _notifRenderEnabled() {
+  const $wrap = $('#notifEnabledList')
+  if (!$wrap.length) return
+  const lists = _webpageNotifLists(_notifLists())
+  if (!lists.length) { $wrap.html('<div style="color:#888;font-size:12px;">None yet.</div>'); return }
+  const schedules = _notifSchedules()
+  let html = ''
+  lists.forEach(l => {
+    const plName = _playlistForNotifKey(l.external_key) || l.name
+    const count = Array.isArray(l.items) ? l.items.length : 0
+    const paused = l.status === 'paused'
+    const mainIsSeries = _notifScheduleKind(l.schedule_key) === 'series'
+    const schedOpts = schedules.map(s =>
+      `<option value="${_.escape(s.key)}"${s.key === l.schedule_key ? ' selected' : ''}>${_.escape(s.name)}</option>`).join('')
+    const introOpts = ['<option value="">(no intro)</option>'].concat(
+      schedules.filter(s => s.kind === 'recurring').map(s =>
+        `<option value="${_.escape(s.key)}"${s.key === l.intro_schedule_key ? ' selected' : ''}>${_.escape(s.name)}</option>`)
+    ).join('')
+    html += `<div class="notif-row" data-key="${_.escape(l.external_key)}" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #f0f0f0;">
+      <span style="flex:1;min-width:120px;font-size:13px;"><b>${_.escape(plName)}</b> <span style="color:#888;">(${count})</span>${paused ? ' <span style="color:#a60;">paused</span>' : ''}</span>
+      <select class="notif-sched" title="Schedule" style="max-width:140px;">${schedOpts}</select>
+      <select class="notif-intro" title="Introduction cadence (series schedule only)" style="max-width:120px;"${mainIsSeries ? '' : ' disabled'}>${introOpts}</select>
+      <button type="button" class="btn notif-toggle">${paused ? '▶ Resume' : '⏸ Pause'}</button>
+      <button type="button" class="btn notif-disable" style="color:#a00;">Disable</button>
+    </div>`
+  })
+  $wrap.html(html)
+}
+
+// Push a row's full scheduling (main + optional intro). Omitting the intro key
+// clears any existing intro, per the contract's setSchedule semantics.
+function _notifApplyRowSchedule($row) {
+  const key = $row.data('key')
+  const scheduleKey = $row.find('.notif-sched').val()
+  const introKey = $row.find('.notif-intro').val()
+  const payload = { external_key: key, schedule_key: scheduleKey }
+  if (introKey && _notifScheduleKind(scheduleKey) === 'series') payload.intro_schedule_key = introKey
+  notifRpc('setSchedule', payload).catch(err => alert('Could not change schedule: ' + (err.message || err)))
+}
+
+// Debug/browser escape hatch: reveal the feature without the app bridge, for
+// testing the dialog + tap→display path. Set localStorage.notifDebug='1' or add
+// ?notifdebug=1 to the URL.
+function _notifDebug() {
+  try { return localStorage.getItem('notifDebug') === '1' || /[?&]notifdebug=1(?:&|$)/.test(window.location.search) }
+  catch (_) { return false }
+}
+
+async function _notifBootCapabilities() {
+  const $uns = $('#notifUnsupported'), $perm = $('#notifPermRow'), $body = $('#notifBody')
+  if (!_haveNotifBridge()) {
+    if (!_notifDebug()) { $uns.show(); $perm.hide(); $body.hide(); return }
+    // Browser preview: show the UI with a stub schedule menu; Enable will report
+    // no-bridge (real scheduling needs the Cupitor app).
+    $uns.hide(); $perm.hide(); $body.show()
+    $('#notifEnableStatus').text('Preview — enabling needs the Cupitor app').css('color', '#a60')
+    if (!_notifSchedules().length) {
+      window.__cupitorNotifSchedules = { version: 1, schedules: [
+        { key: 'ebbinghaus', name: 'Ebbinghaus-anchored', kind: 'series' },
+        { key: 'daily_0900', name: 'Daily 09:00', kind: 'recurring' },
+      ] }
+      _notifPopulateSchedules()
+    }
+    return
+  }
+  let caps = null
+  try { caps = await notifRpc('getCapabilities') } catch (_) {}
+  if (!caps || caps.supported === false) { $uns.show(); $perm.hide(); $body.hide(); return }
+  $uns.hide()
+  if (caps.permission !== 'granted') { $perm.show(); $body.hide() }
+  else { $perm.hide(); $body.show() }
+}
+
+function _openNotifDialog() {
+  let $d = $('#notifDialog')
+  if (!$d.length) $d = $('<div id="notifDialog"></div>').appendTo('body')
+  $d.html(`
+    <div id="notifUnsupported" style="display:none;color:#a00;font-size:13px;">Notifications aren't available on this device.</div>
+    <div id="notifPermRow" style="display:none;margin-bottom:10px;">
+      <span style="font-size:13px;color:#a60;">Notifications need permission first.</span>
+      <button type="button" id="notifPermBtn" class="btn" style="margin-left:6px;">Enable notifications</button>
+    </div>
+    <div id="notifBody" style="display:none;">
+      <div class="mee-row"><label class="mee-lbl">Playlist</label>
+        <select id="notifPlaylist" style="width:100%;"></select></div>
+      <div class="mee-row"><label class="mee-lbl">Schedule</label>
+        <select id="notifSchedule" style="width:100%;"></select></div>
+      <div class="mee-row" id="notifIntroRow"><label class="mee-lbl">Introduce</label>
+        <select id="notifIntroSchedule" style="width:100%;"></select></div>
+      <div style="font-size:11px;color:#888;margin:-4px 0 4px;">Optional: drip new items in on a recurring cadence (needs a series schedule above).</div>
+      <div style="margin-top:8px;">
+        <button type="button" id="notifEnableBtn" class="btn">Enable for this playlist</button>
+        <span id="notifEnableStatus" style="font-size:12px;margin-left:6px;"></span>
+      </div>
+      <div style="margin-top:14px;border-top:1px solid #eee;padding-top:8px;">
+        <div style="font-weight:bold;font-size:13px;margin-bottom:6px;">Enabled notifications</div>
+        <div id="notifEnabledList"><div style="color:#888;font-size:12px;">None yet.</div></div>
+      </div>
+    </div>
+  `)
+
+  // Playlist select2 — real (non-virtual) playlists.
+  const $pl = $d.find('#notifPlaylist')
+  listRecordings().filter(n => !_isVirtual(n)).forEach(n => {
+    $pl.append(`<option value="${_.escape(n)}">${_.escape(n)} (${_recordingItemCountByName(n)})</option>`)
+  })
+  const curName = window._recording && window._recording.currentName
+  if (curName && !_isVirtual(curName)) $pl.val(curName)
+
+  _notifPopulateSchedules()
+  _notifRenderEnabled()
+
+  // Ask for fresh state (warm-push may predate the dialog); handlers re-render.
+  notifRpc('getSchedules').catch(() => {})
+  notifRpc('getLists').catch(() => {})
+
+  $d.off('click', '#notifPermBtn').on('click', '#notifPermBtn', async () => {
+    try { await notifRpc('requestPermission') } catch (_) {}
+    _notifBootCapabilities()
+  })
+  $d.off('change', '#notifSchedule').on('change', '#notifSchedule', _notifSyncIntroAvailability)
+  $d.off('click', '#notifEnableBtn').on('click', '#notifEnableBtn', () => {
+    const name = $pl.val()
+    const sched = $d.find('#notifSchedule').val()
+    const intro = $d.find('#notifIntroSchedule').val()
+    if (!name) { alert('Choose a playlist.'); return }
+    if (!sched) { alert('Choose a schedule.'); return }
+    _notifEnablePlaylist(name, sched, intro || null)
+  })
+  // Changing either the schedule or the intro cadence pushes the row's full
+  // scheduling. Switching the main to a recurring schedule clears the intro
+  // (bad_intro otherwise).
+  $d.off('change', '.notif-sched').on('change', '.notif-sched', function () {
+    const $row = $(this).closest('.notif-row')
+    const isSeries = _notifScheduleKind($(this).val()) === 'series'
+    const $intro = $row.find('.notif-intro')
+    $intro.prop('disabled', !isSeries)
+    if (!isSeries) $intro.val('')
+    _notifApplyRowSchedule($row)
+  })
+  $d.off('change', '.notif-intro').on('change', '.notif-intro', function () {
+    _notifApplyRowSchedule($(this).closest('.notif-row'))
+  })
+  $d.off('click', '.notif-toggle').on('click', '.notif-toggle', function () {
+    const $row = $(this).closest('.notif-row')
+    const key = $row.data('key')
+    const list = _webpageNotifLists(_notifLists()).find(l => l.external_key === key)
+    const next = (list && list.status === 'paused') ? 'active' : 'paused'
+    notifRpc('setStatus', { external_key: key, status: next }).catch(err => alert('Could not update: ' + (err.message || err)))
+  })
+  $d.off('click', '.notif-disable').on('click', '.notif-disable', function () {
+    const key = $(this).closest('.notif-row').data('key')
+    if (!confirm('Turn off notifications for this playlist?')) return
+    notifRpc('deleteList', { external_key: key }).then(() => {
+      const pl = _playlistForNotifKey(key)
+      if (pl && window._recordings[pl]) { delete window._recordings[pl].notifKey; _saveRecording() }
+    }).catch(err => alert('Could not disable: ' + (err.message || err)))
+  })
+
+  $d.dialog({
+    title: '🔔 Study notifications',
+    width: Math.min(460, $(window).width() - 40),
+    modal: true,
+    autoOpen: true,
+    close: () => { try { $pl.select2('destroy') } catch (_) {} }
+  })
+  try { $pl.select2({ width: '100%', dropdownParent: $d, minimumResultsForSearch: 8 }) } catch (_) {}
+  _notifBootCapabilities()
+}
+window._openNotifDialog = _openNotifDialog
+
+// Browser test helper (no NotifBridge needed): simulate a notification tap for
+// a playlist item by dispatching the real cupitorNotificationOpened event, so
+// the actual listener → _displayNotifItem path runs. Usage in the console:
+//   _notifSimulateOpen()            → current playlist, first item
+//   _notifSimulateOpen('My list', 2)→ named playlist, 3rd notif item
+window._notifSimulateOpen = function (playlistName, index = 0) {
+  const name = playlistName || (window._recording && window._recording.currentName)
+  const items = _notifItemsForPlaylist(name)
+  if (!items || !items.length) { console.warn('[notif] no notifiable items in', name); return }
+  const it = items[Math.max(0, Math.min(index | 0, items.length - 1))]
+  console.log('[notif] simulate tap →', name, '·', it.external_id, '·', JSON.stringify(it))
+  window.dispatchEvent(new CustomEvent('cupitorNotificationOpened', {
+    detail: {
+      external_key: (window._recordings[name] || {}).notifKey || null,
+      item_external_id: it.external_id,
+      payload: { pl: name, xid: it.external_id },
+    },
+  }))
+}
+
+// ── Notification bell inbox ──────────────────────────────────────────────
+// A YouTube-style inbox of study reminders that have fired, driven by the
+// contract's notification feed (getNotifications / cupitorNotifFeed). The feed
+// is a flat, newest-first stream of fire events; the app warm-pushes it on load
+// and re-pushes after every sweep, so the badge stays live without polling.
+// Unread = responded_at == null; tapping a row opens the item in Practice and
+// acks it (ackItem), and there's a Mark-all-read.
+function _notifFeed() {
+  const f = window.__cupitorNotifFeed
+  return (f && Array.isArray(f.notifications)) ? f.notifications : []
+}
+function _notifUnreadCount() {
+  return _notifFeed().reduce((n, e) => n + ((e && e.responded_at == null) ? 1 : 0), 0)
+}
+// Compact relative time for a fired_at epoch-ms — "now", "5m", "3h", "2d", or a
+// date for anything older than a week.
+function _notifRelTime(ms) {
+  if (!ms) return ''
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
+  if (s < 45) return 'now'
+  if (s < 3600) return Math.round(s / 60) + 'm'
+  if (s < 86400) return Math.round(s / 3600) + 'h'
+  if (s < 604800) return Math.round(s / 86400) + 'd'
+  try { return new Date(ms).toLocaleDateString() } catch (_) { return '' }
+}
+// Badge + button visibility. Bell shows whenever the feature is available.
+function _notifUpdateBell() {
+  const on = _haveNotifBridge() || _notifDebug()
+  $('#notifBellWrap').toggle(!!on)
+  if (!on) return
+  const n = _notifUnreadCount()
+  $('#notifBellBadge').text(n > 99 ? '99+' : String(n)).toggle(n > 0)
+}
+function _notifRenderFeed() {
+  const $panel = $('#notifBellPanel')
+  if (!$panel.length) return
+  const feed = _notifFeed().slice().sort((a, b) => (b.fired_at || 0) - (a.fired_at || 0))
+  const unread = _notifUnreadCount()
+  let html = `<div class="notif-bell-hd"><span>Notifications</span>`
+    + `<button type="button" class="notif-bell-readall"${unread ? '' : ' disabled'}>Mark all read</button></div>`
+  if (!feed.length) {
+    html += `<div class="notif-bell-empty">No reminders yet.</div>`
+  } else {
+    html += feed.map(e => {
+      const isUnread = e.responded_at == null
+      // Only webpage-owned lists (with an external_key) can be opened/acked;
+      // app-authored entries are display-only.
+      const openable = !!(e.external_key && e.item_external_id)
+      const missed = e.source === 'auto'
+      const meta = [_.escape(e.list_name || ''), _notifRelTime(e.fired_at), missed ? '<span class="notif-bell-missed">missed</span>' : '']
+        .filter(Boolean).join(' · ')
+      return `<button type="button" class="notif-bell-row${isUnread ? ' unread' : ''}"`
+        + ` data-open="${openable ? 1 : 0}" data-key="${_.escape(e.external_key || '')}"`
+        + ` data-xid="${_.escape(e.item_external_id || '')}">`
+        + `<span class="notif-bell-dot"></span><span class="notif-bell-main">`
+        + `<span class="notif-bell-title">${_.escape(e.title || '(untitled)')}</span>`
+        + (e.body ? `<span class="notif-bell-body">${_.escape(e.body)}</span>` : '')
+        + `<span class="notif-bell-meta">${meta}</span></span></button>`
+    }).join('')
+  }
+  $panel.html(html)
+}
+function _notifCloseBell() { $('#notifBellPanel').hide() }
+// Anchor the fixed panel under the bell, right-aligned to it, clamped to the
+// viewport. Called on open and on resize while open.
+function _positionBellPanel() {
+  const btn = document.getElementById('notifBellBtn')
+  const $panel = $('#notifBellPanel')
+  if (!btn || !$panel.length || !$panel.is(':visible')) return
+  const r = btn.getBoundingClientRect()
+  const vw = window.innerWidth
+  const pw = Math.min(340, Math.floor(vw * 0.9))
+  let left = r.right - pw
+  if (left + pw > vw - 8) left = vw - 8 - pw
+  if (left < 8) left = 8
+  // Cap height to the space below the bell so a long feed scrolls inside the
+  // panel instead of running off-screen (header stays sticky).
+  const maxH = Math.max(160, window.innerHeight - r.bottom - 12)
+  $panel.css({ left: left + 'px', top: (r.bottom + 4) + 'px', maxHeight: maxH + 'px' })
+}
+function _toggleNotifBell() {
+  const $panel = $('#notifBellPanel')
+  if ($panel.is(':visible')) { $panel.hide(); return }
+  // Reparent to <body> once so no clipping/stacking toolbar ancestor squashes it.
+  if ($panel.parent()[0] !== document.body) $panel.appendTo(document.body)
+  _notifRenderFeed()
+  $panel.show()
+  _positionBellPanel()
+  // Pull the freshest feed on open (warm-push may predate this); the listener
+  // re-renders when it lands.
+  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 50 }).catch(() => {})
+}
+// Optimistically stamp responded_at so the badge/row update instantly, then let
+// the next feed push reconcile.
+function _notifMarkReadLocal(pred) {
+  const feed = _notifFeed()
+  let changed = false
+  feed.forEach(e => { if (e && e.responded_at == null && pred(e)) { e.responded_at = Date.now(); changed = true } })
+  if (changed) { _notifUpdateBell(); if ($('#notifBellPanel').is(':visible')) _notifRenderFeed() }
+}
+function _notifAckItem(key, xid) {
+  if (!key || !xid) return
+  // Optimistic local mark-read first, so the UI updates instantly — and so it
+  // still works in a browser (no bridge) for testing. The RPC only goes out
+  // when the bridge is present.
+  _notifMarkReadLocal(e => e.external_key === key && e.item_external_id === xid)
+  if (!_haveNotifBridge()) return
+  notifRpc('ackItem', { external_key: key, item_external_id: xid })
+    .then(() => notifRpc('getNotifications', { limit: 50 }))
+    .catch(() => {})
+}
+
+// The app assigns window.__cupitorNotifFeed before dispatch, so late listeners
+// read current state; refresh the badge and any open panel on every push.
+window.addEventListener('cupitorNotifFeed', () => {
+  _notifUpdateBell()
+  if ($('#notifBellPanel').is(':visible')) _notifRenderFeed()
+})
+
+$(function () {
+  $(document).on('click', '#notifBellBtn', function (e) { e.stopPropagation(); _toggleNotifBell() })
+  // Outside-click closes the panel. The panel is reparented to <body>, so treat
+  // both the bell wrap and the panel itself as "inside".
+  $(document).on('click', function (e) {
+    if (!$(e.target).closest('#notifBellWrap, #notifBellPanel').length) _notifCloseBell()
+  })
+  $(window).on('resize', _positionBellPanel)
+  $(document).on('click', '.notif-bell-readall', function (e) {
+    e.stopPropagation()
+    // Ack every unread webpage-owned item; app-authored ones can't be acked.
+    const targets = _notifFeed().filter(x => x && x.responded_at == null && x.external_key && x.item_external_id)
+    const seen = new Set()
+    targets.forEach(x => {
+      const k = x.external_key + ' ' + x.item_external_id
+      if (seen.has(k)) return
+      seen.add(k)
+      _notifAckItem(x.external_key, x.item_external_id)
+    })
+  })
+  $(document).on('click', '.notif-bell-row', function (e) {
+    e.stopPropagation()
+    const $row = $(this)
+    if ($row.attr('data-open') !== '1') return
+    const key = $row.attr('data-key'), xid = $row.attr('data-xid')
+    _notifAckItem(key, xid)
+    _notifCloseBell()
+    const pl = _playlistForNotifKey(key)
+    if (pl) _notifOpenWhenReady(pl, xid)
+    else console.warn('[notif] inbox row: no playlist for key', key)
+  })
+})
+
+// Browser test helper (no NotifBridge): seed a sample feed and refresh the bell.
+//   _notifSimulateFeed()  → three sample fires, one unread + one "missed"
+window._notifSimulateFeed = function (list) {
+  const now = Date.now()
+  window.__cupitorNotifFeed = { version: 1, notifications: list || [
+    { external_key: 'reclist-demo', list_name: 'Demo playlist', item_external_id: 'w:hej|hej',
+      title: 'hej', body: 'hello', step: 1, item_status: 'active', fired_at: now - 60000,
+      responded_at: null, grade: null, source: null },
+    { external_key: 'reclist-demo', list_name: 'Demo playlist', item_external_id: 'w:tack|tack',
+      title: 'tack', body: 'thanks', step: 0, item_status: 'active', fired_at: now - 3 * 3600 * 1000,
+      responded_at: null, grade: null, source: 'auto' },
+    { external_key: 'reclist-demo', list_name: 'Demo playlist', item_external_id: 'card:m1',
+      title: 'god morgon', body: 'good morning', step: 2, item_status: 'active', fired_at: now - 2 * 86400 * 1000,
+      responded_at: now - 86400 * 1000, grade: 3, source: 'webpage' },
+  ] }
+  _notifUpdateBell()
+  if ($('#notifBellPanel').is(':visible')) _notifRenderFeed()
+}
+
+// Surface the Settings button inside the Cupitor app (where NotifBridge is
+// injected), or in a browser when the notifDebug flag is set for testing.
+$(function () {
+  if (_haveNotifBridge() || _notifDebug()) $('#notifSettingsBtn').show()
+  _notifUpdateBell()
+  // Prime the inbox: request the feed (the app also warm-pushes it on load).
+  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 50 }).catch(() => {})
+})
 
 // Make a dialog's content element scrollable on old Android System WebView,
 // which cannot scroll an overflow:auto element whose content exceeds its max
@@ -10871,8 +11928,13 @@ function openRecordingReviewDialog() {
     $dlg = $('<div id="recordingReviewDialog"></div>').appendTo('body')
   }
   const items = window._recording.items || {}
-  const searchTexts = Object.keys(items).sort()
   const currentName = window._recording.currentName || REC_DEFAULT_NAME
+  // Category playlists are built in vocabulary order — preserve that insertion
+  // order instead of sorting alphabetically. Every other playlist keeps the
+  // alphabetical sort.
+  const _curRec = (window._recordings || {})[currentName]
+  const _preserveOrder = !!(_curRec && _curRec.vocabCategory)
+  const searchTexts = _preserveOrder ? Object.keys(items) : Object.keys(items).sort()
   const isVirtualCurrent = _isVirtual(currentName)
   const allNames = listRecordings()
   // Last-played item (for highlighting). Only highlight when the displayed
@@ -10903,6 +11965,7 @@ function openRecordingReviewDialog() {
     <button type="button" id="recRecRandom"     class="btn rec-rec-btn" title="Build a random-sample playlist from all real playlists" aria-label="Practice Random"><span class="rec-rec-ico">🎲</span><span class="rec-rec-lbl">Practice Random</span></button>
     <button type="button" id="recRecFromCategory" class="btn rec-rec-btn" title="Build a playlist of subtitle examples for every word in one vocabulary category" aria-label="Build playlist from category"><span class="rec-rec-ico">📚</span><span class="rec-rec-lbl">From Category</span></button>
     <button type="button" id="recRecAddManual"  class="btn rec-rec-btn" title="Add a manual flashcard entry (source/target + optional media link)" aria-label="Add manual entry"${isVirtualCurrent ? ' disabled' : ''}><span class="rec-rec-ico">📝</span><span class="rec-rec-lbl">Add card</span></button>
+    <button type="button" id="recRecTranslate" class="btn rec-rec-btn" title="Translate each word/phrase (only where a translation is missing) and store it as a placeholder translation" aria-label="Translate phrases"${isVirtualCurrent ? ' disabled' : ''}><span class="rec-rec-ico">🌐</span><span class="rec-rec-lbl">Translate</span></button>
     <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
     <button type="button" id="recRecDuplicate" class="btn rec-rec-btn" title="Duplicate this playlist" aria-label="Duplicate this playlist"><span class="rec-rec-ico">⎘</span><span class="rec-rec-lbl">Duplicate</span></button>
     <button type="button" id="recRecDelete"    class="btn rec-rec-btn rec-rec-danger" title="Delete this playlist" aria-label="Delete this playlist"><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
@@ -10927,7 +11990,7 @@ function openRecordingReviewDialog() {
     searchTexts.forEach(st => {
       html += `<div class="rec-grp" style="margin-bottom:10px;padding:6px;border:1px solid #eee;border-radius:4px;">
         <div style="font-weight:bold;font-size:14px;">🔎 ${_.escape(st)}</div>`
-      Object.keys(items[st]).sort().forEach(w => {
+      ;(_preserveOrder ? Object.keys(items[st]) : Object.keys(items[st]).sort()).forEach(w => {
         const wEsc = _.escape(w)
         const stEsc = _.escape(st)
         html += `<div style="margin-left:10px;margin-top:4px;">
@@ -10986,7 +12049,10 @@ function openRecordingReviewDialog() {
             _itemTextHtml = `<span class="rec-item-text rec-item-manual${it.enabled === false ? ' rec-item-off' : ''}">📝 ${src}${tgt ? ` → ${tgt}` : ''}</span>${mediaBadge}${epubBadge}` +
                             `<button type="button" class="rec-manual-edit" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Edit this card">✎</button>`
           } else {
-            _itemTextHtml = `<span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${it.timeStart}s–${it.timeEnd}s</span>`
+            const glossHtml = (it.target && String(it.target).trim())
+              ? ` <span class="rec-item-gloss"${it.targetAuto ? ' title="Auto placeholder translation"' : ''}>→ ${_.escape(String(it.target).trim())}</span>`
+              : ''
+            _itemTextHtml = `<span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${it.timeStart}s–${it.timeEnd}s${glossHtml}</span>`
           }
           html += `<div class="rec-item${isVirtualCurrent ? ' rec-item-readonly' : ''}${_isLast ? ' rec-item-lastplayed' : ''}" data-idx="${idx}">
             <div class="rec-item-row1">
@@ -11099,6 +12165,10 @@ function openRecordingReviewDialog() {
   $dlg.off('click', '#recRecAddManual').on('click', '#recRecAddManual', function (e) {
     e.preventDefault(); e.stopPropagation()
     _openManualEntryEditor(window._recording.currentName, null)
+  })
+  $dlg.off('click', '#recRecTranslate').on('click', '#recRecTranslate', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    _translatePlaylistPhrases($(this))
   })
   $dlg.off('click', '.rec-item-epub').on('click', '.rec-item-epub', function (e) {
     e.preventDefault(); e.stopPropagation()
@@ -11808,6 +12878,23 @@ async function _renderPlayingSubtitles(item) {
 // _buildBoundedWordRe / _phraseFoundInTexts / _highlightWordHtml live in
 // ./renderer/playing-ui-vm.js (imported at the top).
 
+// Manual cards have no subtitles — show the card's own text in the same
+// prominent overlay (#recPlayingSubs) the subtitle rows use, so the text is
+// visible during playback even when the banner details are collapsed (mobile).
+// Source is the main line; target rides along as the secondary line.
+function _renderPlayingManualText(item) {
+  let $sub = $('#recPlayingSubs')
+  if (!$sub.length) $sub = $('<div id="recPlayingSubs"></div>').appendTo('body')
+  const src = (item && item.source ? String(item.source) : '').trim()
+  const tgt = (item && item.target ? String(item.target) : '').trim()
+  if (!src && !tgt) { $sub.html(''); return }
+  let html = '<div class="rec-ps-row rec-ps-active">'
+  if (src) html += `<div class="rec-ps-main">${_.escape(src)}</div>`
+  if (tgt) html += `<div class="rec-ps-sec">${_.escape(tgt)}</div>`
+  html += '</div>'
+  $sub.html(html)
+}
+
 // Scroll the active row to the vertical center of the #recPlayingSubs
 // panel. Adjusts only the panel's scrollTop (not the page) so mobile
 // scroll behaviour stays predictable. Used after initial render and on
@@ -12165,6 +13252,48 @@ window.handleYoutubePlayerError = handleYoutubePlayerError
 //   loop     : 'off' | 'one' | 'playlist' | 'all'  — override settings.recPlayLoop
 //   queue    : pre-built item array      — play these instead of the current
 //                                          playlist (e.g. starred lines)
+// Play a manual card's recorded audio during playlist playback and resolve
+// when it finishes (or the user stops / navigates away). Mirrors the pause,
+// stop, and prev/next/goto awareness of _waitYTUntilEnd / _sleepRespectingPause
+// so an audio card behaves like a video clip in the queue. Pause/resume is
+// driven off window._recPlayPaused transitions (not the element's own state)
+// so a headset-triggered pause of the element isn't fought by a poll.
+async function _playManualAudioAndWait(url) {
+  let dataUrl = null
+  try { dataUrl = await loadManualAudioData(url) } catch (_) {}
+  if (!dataUrl || !window._playingRecording) return
+  // Share the single preview slot so a badge preview and playlist audio never
+  // overlap, and so stopPlayingRecording / navigation can silence it.
+  _stopManualAudioPreview()
+  const a = new Audio(dataUrl)
+  window._recPlayManualAudio = a
+  if (!window._recPlayPaused) { try { await a.play() } catch (e) { console.warn('[manualAudio] playlist play failed', e) } }
+  await new Promise(resolve => {
+    let done = false
+    let appliedPaused = !!window._recPlayPaused
+    const finish = () => {
+      if (done) return
+      done = true
+      clearInterval(id)
+      try { a.pause() } catch (_) {}
+      resolve()
+    }
+    const id = setInterval(() => {
+      if (!window._playingRecording) return finish()
+      if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) return finish()
+      const nowPaused = !!window._recPlayPaused
+      if (nowPaused !== appliedPaused) {
+        appliedPaused = nowPaused
+        if (nowPaused) { try { a.pause() } catch (_) {} }
+        else { a.play().catch(() => {}) }
+      }
+    }, 150)
+    a.addEventListener('ended', finish)
+    a.addEventListener('error', finish)
+  })
+  if (window._recPlayManualAudio === a) window._recPlayManualAudio = null
+}
+
 async function playRecording(opts) {
   opts = opts || {}
   const settings = window._appSettings || {}
@@ -12359,6 +13488,9 @@ async function playRecording(opts) {
   const _curLooping  = () => { const l = _curLoop(); return l === 'one' || l === 'playlist' || l === 'all' }
   let prevWord = null
   let i = startIdx
+  // Guard against an all-text-only queue: count consecutive text-only cards we
+  // skip and bail once we've circled the whole queue with nothing to play.
+  let textOnlySkips = 0
   while (window._playingRecording) {
     // Boundary handling: with no loop we exit at queue end; otherwise wrap.
     if (i >= queue.length) {
@@ -12371,11 +13503,26 @@ async function playRecording(opts) {
     window._recPlayIndex = i
     window._recPlayQueueLen = queue.length
     const it = queue[i]
-    if (it.source && it.source.toLowerCase() !== 'youtube') {
+    // Manual cards carry the card's front text in `source`, not a media source,
+    // so exclude them here — they're handled by the _isManualItem branch below.
+    if (!_isManualItem(it) && it.source && it.source.toLowerCase() !== 'youtube') {
       console.warn('playRecording: skipping non-YouTube item', it)
       i++
       continue
     }
+    // Text-only manual cards (no media to play) are skipped during playback —
+    // they belong to Practice, not the play queue. Move in the direction the
+    // user last navigated (backward after a prev tap) so skipping feels natural,
+    // and stop if the whole queue turns out to be text-only.
+    if (_isManualItem(it) && !it.mediaUrl) {
+      if (++textOnlySkips >= queue.length) { stopPlayingRecording(); break }
+      const backward = !!window._recPlaySlowdown
+      i = backward
+        ? (i > 0 ? i - 1 : (_curLooping() ? queue.length - 1 : 0))
+        : (i + 1 < queue.length ? i + 1 : (_curLooping() ? 0 : queue.length))
+      continue
+    }
+    textOnlySkips = 0
 
     _renderPlayingBanner(it, i, queue.length)
     // Remember the item currently playing so the review dialog can highlight
@@ -12394,12 +13541,25 @@ async function playRecording(opts) {
     // in a new tab mid-playlist would break flow); the user can click
     // the link badge in the Review dialog instead.
     if (_isManualItem(it)) {
+      // Show the card's text in the subtitle overlay (the banner head is
+      // collapsed on mobile) so it's visible for the whole item.
+      _renderPlayingManualText(it)
       if (it.mediaKind === 'youtube' && it.mediaVideoId) {
         try {
           window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
           await changeMediaIfNeededTo(window.mediaSelected)
         } catch (e) { console.warn('playRecording: manual YT cue failed', it, e) }
+      } else if ((it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)) && it.mediaUrl) {
+        // Recorded-audio card: play the clip and wait for it to finish — the
+        // same role the video clip plays for YouTube items — then fall through
+        // to the inter-item gap hold below.
+        await _playManualAudioAndWait(it.mediaUrl)
+        if (!window._playingRecording) break
       }
+      // A playable manual card was reached — clear the backward-nav flag (the
+      // YT path does this after its clip; the manual path must too) so the
+      // text-only skip above resumes forward once we advance past here.
+      window._recPlaySlowdown = false
       // Hold for the inter-item gap so the user reads the text, honoring
       // pause / stop. The gap-countdown progress bar shows time-until-next.
       // Then handle prev/next/goto/loop the same way video items do,
@@ -12880,6 +14040,8 @@ function stopPlayingRecording() {
     if (t && t.kind === 'audio' && t.audio) { t.audio.pause(); t.audio.src = '' }
   } catch (_) {}
   window._recTTS = null
+  try { if (window._recPlayManualAudio) { window._recPlayManualAudio.pause(); window._recPlayManualAudio.src = '' } } catch (_) {}
+  window._recPlayManualAudio = null
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
   $('#toggleMediaContainer').click() 
   $('#mediaRelatedContainer').hide()
@@ -13228,14 +14390,6 @@ function restorePracticeMode() {
   if (!it) return
   // Manual cards have no clip — just re-cue them (parked), as before.
   if (_isManualItem(it)) { try { _cuePracticeVideo(it) } catch (_) {} return }
-  // Video card: auto-restart on restore by triggering the Play button — the
-  // exact same code path (and behaviour) as the user pressing ▶ themselves, so
-  // a restored Player resumes on its own instead of sitting paused.
-  // showMediaContainer re-reveals the player that minimize hid (the precondition
-  // Play normally relies on); the click drives playPracticeClip, which
-  // seeks/plays and re-arms the clip stop-watcher that minimize cancelled.
-  try { showMediaContainer() } catch (_) {}
-  try { $('#practiceMode .practice-play').first().click() } catch (_) {}
 }
 function _updatePracticeRestoreCount() {
   const cards = window._practiceCards || []
@@ -13560,6 +14714,10 @@ async function _renderPracticeCard() {
     _renderPracticeManualCard($p, it, idx, cards.length, frontIsSource, mode, srcCode)
     return
   }
+  // Show the card only after subtitles + vocabulary are loaded, so the subtitle
+  // lines and the word-translation fallback below are complete rather than empty.
+  try { await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise].map(p => Promise.resolve(p).catch(() => {}))) } catch (_) {}
+  if (window._practiceIdx !== idx) return  // user moved on while we waited
   // Video card path follows — first restore any controls the manual path hides.
   $p.find('.practice-ctx-ctrl').show()
   $p.find('.practice-play, .practice-speed').show()
@@ -13603,6 +14761,20 @@ async function _renderPracticeCard() {
   // 'flip' also fills .practice-back as a fallback AND fills the back-face.
   _practiceRenderLines($p.find('.practice-back'),  rows, frontIsSource ? 'target' : 'source', it.word)
   _practiceRenderLines($p.find('.practice-back-target'), rows, frontIsSource ? 'target' : 'source', it.word)
+  // When the clip has NO English subtitle (E unavailable), the target face is
+  // empty — fall back to the word's own translation: the 🌐 Translate-button
+  // value stored on the item as `it.target` (targetAuto). When English IS
+  // present it already IS the translation, so we add nothing.
+  const _hasEnglish = rows.some(r => r && r.target && r.target.trim())
+  if (!_hasEnglish && it.target && String(it.target).trim()) {
+    const trans = String(it.target).trim()
+    const auto = it.targetAuto ? ' data-auto="1"' : ''
+    const g = `<div class="practice-phrase-gloss"${auto}>${_.escape(trans)}</div>`
+    // Put it on the target-language (answer) face: the back when the front is
+    // the source, otherwise the front.
+    if (frontIsSource) { $p.find('.practice-back').prepend(g); $p.find('.practice-back-target').prepend(g) }
+    else { $p.find('.practice-front').prepend(g) }
+  }
   if (mode === 'both') $p.find('.practice-back').show()
 }
 
@@ -13996,6 +15168,21 @@ $(function () {
       window.PlaylistBridge.postMessage(JSON.stringify({ op: 'getPlaylists' }))
     }
   } catch (e) { console.warn('getPlaylists post failed', e) }
+  // Book-search bar lives inside #result; put it there once at boot so it's
+  // available before the first search too.
+  _ensureLibrarySearchBar()
+  // A globalSearch batch that landed before this page finished loading is
+  // mirrored on the window — render it rather than losing it. It's only the
+  // last batch of that stream (earlier deltas are gone), so treat it as a
+  // finished, possibly-partial result set.
+  try {
+    if (window.__cupitorGlobalSearchResults) {
+      const p = _normalizeLibraryPayload(window.__cupitorGlobalSearchResults)
+      if (p.hits.length) {
+        _renderLibraryPayload({ query: p.query, hits: p.hits, hitsCapped: p.hitsCapped }, { cancelled: p.cancelled })
+      }
+    }
+  } catch (e) { console.warn('replaying cupitorGlobalSearchResults failed', e) }
 })
 
 // Expose functions that are called from inline HTML onclick/onchange handlers.

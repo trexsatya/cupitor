@@ -284,7 +284,21 @@
                             </label>
                         </div>
                     </label>
+                    <label class="lang-panel-label" title="Also full-text search the books in your Cupitor library on every search (needs the Cupitor app). The first searches are slow while the app builds its index.">
+                        Auto book search
+                        <div class="checkbox-wrapper-22" style="display: inline; margin-left: 4px;">
+                            <label class="switch" for="toggleAutoLibrarySearchCheckbox">
+                                <input type="checkbox" id="toggleAutoLibrarySearchCheckbox" aria-label="auto library search">
+                                <div class="slider round"></div>
+                            </label>
+                        </div>
+                    </label>
                     <button type="button" id="practiceLogSettingsBtn" class="lang-tool-btn" onclick="openPracticeLogDialog()" title="Plan your week of language practice (Reading, Writing, Listening, …) and track what got done.">📋 Practice Log</button>
+                    <span class="notif-bell-wrap" id="notifBellWrap" style="position:relative;display:none;">
+                        <button type="button" id="notifBellBtn" class="lang-tool-btn" title="Notification inbox — study reminders that have fired">🔔<span id="notifBellBadge" class="notif-bell-badge" style="display:none;">0</span></button>
+                        <div id="notifBellPanel" class="notif-bell-panel" style="display:none;"></div>
+                    </span>
+                    <button type="button" id="notifSettingsBtn" class="lang-tool-btn" style="display:none;" onclick="_openNotifDialog()" title="Schedule study-reminder notifications for a Recorded Search playlist.">🔔 Notifications</button>
                     <span class="manage-wrap" style="position:relative;display:inline-block;">
                         <button type="button" id="manageBtn" class="lang-tool-btn" title="Channels / Rare words / Duplicate SRTs">Manage…</button>
                         <div id="manageMenu" class="manage-popover" style="display:none;">
