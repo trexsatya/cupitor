@@ -3,10 +3,13 @@ import { collapsedChordSpans } from './music-render.js';
 import { chordToneNotesInMeasures } from './music-render.js';
 import { measureRangeFromChordMatch } from './music-render.js';
 import { responsiveZoom } from './music-render.js';
-import { createMusicRenderer } from './music-render.js';
+import { createMusicRenderer, patchPedalGhostNoteCrash } from './music-render.js';
+import { resolveTagIndices, followScrollTop, unlitIdentities, groupsInsideBars, stripBracketOnlyTuplets, formatMeasureRanges,
+  setSystemBreaks, parseBarRange } from './music-render.js';
 import { resolveMatchMeasures } from './music-render.js';
 import { voiceColor } from './music-render.js';
 import { noteName } from './music-render.js';
+import { drawnNotesOf, paintNoteElement } from './music-render.js';
 import { notesInWindow, clampAnchorIndex } from './music-render.js';
 import { suppressionKey, notesOfVoice, effectiveMuted } from './music-render.js';
 import { pitchClassFromPitch } from './music-render.js';
@@ -194,6 +197,102 @@ function fakeOsmd() {
   };
 }
 
+// The bundled VexFlow calls note.getNoteHeadBeginX() on every note a pedal is anchored to. A pedal over
+// a rest is anchored to a ghost note, which has no noteheads and so no such method — and the throw comes
+// out of drawPage, truncating the whole score, not just the pedal. These fakes are the shapes seen on a
+// real score (Clair de Lune): a ghost note carrying getAbsoluteX/x_shift but no notehead accessors.
+function ghostNote(absX = 100, xShift = 3) {
+  return { x_shift: xShift, getAbsoluteX: () => absX, getStave: () => ({ getNoteStartX: () => 10 }) };
+}
+function fakePedalDrawer(notes, { throwAnyway = false } = {}) {
+  const drawn = [];
+  const ns = {
+    VexFlowMusicSheetDrawer: {
+      prototype: {
+        drawPedals(staffLine) {
+          staffLine.Pedals.forEach((p) => {
+            const marking = p.getPedalMarking();
+            // Exactly what VexFlow's drawBracketed does: call it unguarded.
+            marking.notes.forEach((n) => { if (n) drawn.push(n.getNoteHeadBeginX()); });
+            if (throwAnyway) throw new Error('some other pedal failure');
+          });
+        },
+      },
+    },
+  };
+  const staffLine = { Pedals: [{ getPedalMarking: () => ({ notes, render_options: {} }) }] };
+  return { ns, staffLine, drawn };
+}
+
+describe('patchPedalGhostNoteCrash', () => {
+  test('without the patch, a pedal on a rest throws — this is the bug being fixed', () => {
+    const { ns, staffLine } = fakePedalDrawer([ghostNote()]);
+    expect(() => ns.VexFlowMusicSheetDrawer.prototype.drawPedals(staffLine)).toThrow(/getNoteHeadBeginX/);
+  });
+
+  test('patched, the pedal draws at where the notehead would be (absoluteX + x_shift)', () => {
+    const { ns, staffLine, drawn } = fakePedalDrawer([ghostNote(100, 3)]);
+    expect(patchPedalGhostNoteCrash(ns)).toBe(true);
+    expect(() => ns.VexFlowMusicSheetDrawer.prototype.drawPedals(staffLine)).not.toThrow();
+    expect(drawn).toEqual([103]);
+  });
+
+  test('a note that already has the method is left alone', () => {
+    const real = { getAbsoluteX: () => 100, x_shift: 3, getNoteHeadBeginX: () => 999 };
+    const { ns, staffLine, drawn } = fakePedalDrawer([real]);
+    patchPedalGhostNoteCrash(ns);
+    ns.VexFlowMusicSheetDrawer.prototype.drawPedals(staffLine);
+    expect(drawn).toEqual([999]);
+  });
+
+  test('a pedal that still fails costs its pedals, not the rest of the score', () => {
+    const { ns, staffLine } = fakePedalDrawer([ghostNote()], { throwAnyway: true });
+    patchPedalGhostNoteCrash(ns);
+    expect(() => ns.VexFlowMusicSheetDrawer.prototype.drawPedals(staffLine)).not.toThrow();
+  });
+
+  test('the shim is gone after drawing — OSMD\'s own guard depends on the method being absent', () => {
+    // applyBordersFromVexflow skips a note via `if (!note.getNoteHeadBeginX) return`, because a ghost
+    // note's getBoundingBox() is null and the next line reads .x off it. A shim left attached defeats
+    // that guard and moves the crash into the next render's LAYOUT, killing the score outright.
+    const note = ghostNote();
+    const { ns, staffLine } = fakePedalDrawer([note]);
+    patchPedalGhostNoteCrash(ns);
+    ns.VexFlowMusicSheetDrawer.prototype.drawPedals(staffLine);
+    expect(typeof note.getNoteHeadBeginX).toBe('undefined');
+    expect(typeof note.getNoteHeadEndX).toBe('undefined');
+  });
+
+  test('the shim is removed even when drawing throws', () => {
+    const note = ghostNote();
+    const { ns, staffLine } = fakePedalDrawer([note], { throwAnyway: true });
+    patchPedalGhostNoteCrash(ns);
+    ns.VexFlowMusicSheetDrawer.prototype.drawPedals(staffLine);
+    expect(typeof note.getNoteHeadBeginX).toBe('undefined');
+  });
+
+  test('a note that had the method keeps it — only shims are removed', () => {
+    const real = { getAbsoluteX: () => 100, x_shift: 3, getNoteHeadBeginX: () => 999 };
+    const { ns, staffLine } = fakePedalDrawer([real]);
+    patchPedalGhostNoteCrash(ns);
+    ns.VexFlowMusicSheetDrawer.prototype.drawPedals(staffLine);
+    expect(real.getNoteHeadBeginX()).toBe(999);
+  });
+
+  test('patching twice does not stack wrappers', () => {
+    const { ns } = fakePedalDrawer([ghostNote()]);
+    expect(patchPedalGhostNoteCrash(ns)).toBe(true);
+    const once = ns.VexFlowMusicSheetDrawer.prototype.drawPedals;
+    expect(patchPedalGhostNoteCrash(ns)).toBe(false);
+    expect(ns.VexFlowMusicSheetDrawer.prototype.drawPedals).toBe(once);
+  });
+
+  test('a namespace without the drawer is a no-op, not a crash', () => {
+    expect(patchPedalGhostNoteCrash(null)).toBe(false);
+    expect(patchPedalGhostNoteCrash({})).toBe(false);
+  });
+});
+
 describe('createMusicRenderer', () => {
   test('initialises OSMD with svg/compact options', () => {
     const osmd = fakeOsmd();
@@ -340,6 +439,64 @@ describe('noteName', () => {
     expect(noteName(null)).toBe('');
     expect(noteName(undefined)).toBe('');
     expect(noteName(NaN)).toBe('');
+  });
+});
+
+// The compare view is a second OSMD drawing the same piece, and it reaches its notes through these
+// two. Both are what let a pane carry the sheet's colours and names.
+describe('drawnNotesOf', () => {
+  // One graphical measure in OSMD's shape: measureList[i][staff] → staffEntries → voice entries → notes.
+  const gmeasure = (number, notes, attached = true) => {
+    const el = document.createElement('div');
+    if (attached) document.body.appendChild(el);
+    return {
+      parentSourceMeasure: { MeasureNumber: number },
+      staffEntries: [{
+        getAbsoluteTimestamp: () => ({ RealValue: 1 }),   // ×4 → beat 4
+        graphicalVoiceEntries: [{
+          notes: notes.map((halfTone, i) => ({
+            sourceNote: { Pitch: { getHalfTone: () => halfTone } },
+            vfnote: [{ attrs: { el } }],
+            vfnoteIndex: i,
+          })),
+        }],
+      }],
+    };
+  };
+
+  test('reports each drawn note as (measure, midi, beats) with its notehead index', () => {
+    const osmd = { graphic: { measureList: [[gmeasure(4, [48, 52])]] } };
+    expect(drawnNotesOf(osmd).map((n) => ({ measure: n.measure, midi: n.midi, beats: n.beats, headIndex: n.headIndex })))
+      .toEqual([
+        { measure: 4, midi: 60, beats: 4, headIndex: 0 },   // getHalfTone + 12 is the MIDI number
+        { measure: 4, midi: 64, beats: 4, headIndex: 1 },
+      ]);
+  });
+
+  test('skips the measures that were not drawn', () => {
+    // measureList holds every measure of the piece whatever window is drawn; only the drawn ones are
+    // in the document. Counting the rest reported a 4-bar pane as the whole score.
+    const osmd = { graphic: { measureList: [[gmeasure(4, [48])], [gmeasure(9, [50], false)]] } };
+    expect(drawnNotesOf(osmd).map((n) => n.measure)).toEqual([4]);
+  });
+
+  test('survives the holes OSMD leaves in measureList, and a model that is not there yet', () => {
+    expect(drawnNotesOf({ graphic: { measureList: [[undefined]] } })).toEqual([]);
+    expect(drawnNotesOf({})).toEqual([]);
+    expect(drawnNotesOf(null)).toEqual([]);
+  });
+});
+
+describe('paintNoteElement', () => {
+  test('inks the group and its shapes, and leaves an unstroked shape unstroked', () => {
+    const g = document.createElement('div');
+    g.innerHTML = '<path stroke="none"></path><ellipse stroke="#000"></ellipse>';
+    paintNoteElement(g, '#ff0000');
+    const [path, ellipse] = [g.querySelector('path'), g.querySelector('ellipse')];
+    expect(g.getAttribute('fill')).toBe('#ff0000');
+    expect(path.getAttribute('fill')).toBe('#ff0000');
+    expect(path.getAttribute('stroke')).toBe('none');       // a shape drawn without a stroke keeps none
+    expect(ellipse.getAttribute('stroke')).toBe('#ff0000'); // one drawn with a stroke follows the fill
   });
 });
 
@@ -775,6 +932,39 @@ describe('swapOverlayLayer', () => {
   });
 });
 
+describe('stripBracketOnlyTuplets', () => {
+  const note = (dur, extra = '') => `<note><pitch><step>C</step><octave>4</octave></pitch><duration>${dur}</duration><type>16th</type>${extra}</note>`;
+  const wrap = (notes) => `<score-partwise><part id="P1"><measure number="1">${notes}</measure></part></score-partwise>`;
+  const bracket = '<notations><tuplet type="start" number="1"/></notations>';
+  const ratio = '<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>';
+
+  test('drops a bracket on a note with no ratio — the shape that freezes OSMD', () => {
+    const out = stripBracketOnlyTuplets(wrap(note(6, bracket)));
+    expect(out).not.toContain('<tuplet');
+    expect(out).toContain('<duration>6</duration>');   // the note itself is untouched
+  });
+
+  test('keeps a bracket on a real tuplet note', () => {
+    expect(stripBracketOnlyTuplets(wrap(note(4, ratio + bracket)))).toContain('<tuplet');
+  });
+
+  test('returns the input unchanged when there is no tuplet markup at all', () => {
+    const src = wrap(note(6));
+    expect(stripBracketOnlyTuplets(src)).toBe(src);
+  });
+
+  test('a file whose brackets all have ratios comes back byte-identical', () => {
+    const src = wrap(note(4, ratio + bracket));
+    expect(stripBracketOnlyTuplets(src)).toBe(src);
+  });
+
+  test('unparseable or empty input is passed through, never thrown on', () => {
+    expect(stripBracketOnlyTuplets('')).toBe('');
+    expect(stripBracketOnlyTuplets(null)).toBe('');
+    expect(stripBracketOnlyTuplets('<tuplet not xml')).toBe('<tuplet not xml');
+  });
+});
+
 describe('highlightExtraNotes persistence', () => {
   // OSMD's Pitch surface pitchClassFromPitch + the MIDI derivation rely on.
   class FakePitch {
@@ -833,5 +1023,354 @@ describe('highlightExtraNotes persistence', () => {
     await r.loadDetail({ format: 'musicxml', source: '<b/>' });   // fresh piece — no marks
     osmd.render();
     expect(fillOf(osmd)).toBe('#000000');
+  });
+
+  // While the Suppress-notes toggle is on, the point of the sheet is to show WHICH notes are silenced.
+  // Every other painter — tag colours, the variation's added-note ink — runs after the suppression
+  // grey and used to bury it, so a suppressed note could look perfectly normal while playing silently.
+  const DIM = '#d6d6d6';
+  const suppressed = async (osmd, r) => {
+    r.setSuppressedNotes([{ measure: 1, midi: 60, beats: 0 }]);
+    osmd.render();
+  };
+
+  // A rest reaches this code as a StaveNote with a real .vf-notehead and a PLACEHOLDER VexFlow key —
+  // b/4 for most rests, d/5 for a whole rest. It has no Pitch, so the vexKey fallback used to read that
+  // placeholder and enter the rest into the note stream as a B4/D5 that nothing can sound.
+  test('a rest is not a note: its placeholder key does not become a pitch', async () => {
+    const osmd = fakeGraphicOsmd();
+    // Same graphical shape as the real note beside it; only isRest tells them apart.
+    const rest = { vfnote: [{ attrs: { el: null }, keys: ['b/4'] }], vfnoteIndex: 0,
+      sourceNote: { Pitch: null, isRest: () => true } };
+    const root = document.createElement('div');
+    const head = document.createElement('span'); head.setAttribute('class', 'vf-notehead');
+    head.appendChild(document.createElement('path'));
+    root.appendChild(head); document.body.appendChild(root);
+    rest.vfnote[0].attrs.el = root;
+    osmd.graphic.measureList[0][0].staffEntries[0].graphicalVoiceEntries[0].notes.push(rest);
+    const r = createMusicRenderer(document.createElement('div'), { osmdFactory: () => osmd });
+    await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
+    expect(r.highlightExtraNotes([{ measure: 1, midi: 60 }], '#C62828')).toBe(1);   // the real C4 is there
+    expect(r.highlightExtraNotes([{ measure: 1, midi: 71 }], '#C62828')).toBe(0);   // the rest's b/4 is not
+  });
+
+  test('suppress mode ON: the grey survives a tag colour', async () => {
+    const osmd = fakeGraphicOsmd();
+    const r = createMusicRenderer(document.createElement('div'), { osmdFactory: () => osmd });
+    await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
+    r.setTagRegistry([{ name: 't', color: '#1565c0' }]);
+    r.setPatterns([{ name: 't', notes: [{ measure: 1, midi: 60, beats: 0 }] }]);
+    r.setSuppressMode(true);
+    await suppressed(osmd, r);
+    expect(fillOf(osmd)).toBe(DIM);
+  });
+
+  test('suppress mode ON: the grey survives the variation added-note ink too', async () => {
+    const osmd = fakeGraphicOsmd();
+    const r = createMusicRenderer(document.createElement('div'), { osmdFactory: () => osmd });
+    await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
+    r.highlightExtraNotes([{ measure: 1, midi: 60 }], '#C62828');
+    r.setSuppressMode(true);
+    await suppressed(osmd, r);
+    expect(fillOf(osmd)).toBe(DIM);
+  });
+
+  test('suppress mode OFF: colours win again, so a motif stays readable', async () => {
+    const osmd = fakeGraphicOsmd();
+    const r = createMusicRenderer(document.createElement('div'), { osmdFactory: () => osmd });
+    await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
+    r.highlightExtraNotes([{ measure: 1, midi: 60 }], '#C62828');
+    r.setSuppressMode(false);
+    await suppressed(osmd, r);
+    expect(fillOf(osmd)).toBe('#C62828');
+  });
+
+  test('suppress mode ON but nothing suppressed: ordinary colours', async () => {
+    const osmd = fakeGraphicOsmd();
+    const r = createMusicRenderer(document.createElement('div'), { osmdFactory: () => osmd });
+    await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
+    r.highlightExtraNotes([{ measure: 1, midi: 60 }], '#C62828');
+    r.setSuppressMode(true);
+    osmd.render();
+    expect(fillOf(osmd)).toBe('#C62828');
+  });
+
+  test('Hear all lifts the grey even in suppress mode — that is what it is for', async () => {
+    const osmd = fakeGraphicOsmd();
+    const r = createMusicRenderer(document.createElement('div'), { osmdFactory: () => osmd });
+    await r.loadDetail({ format: 'musicxml', source: '<xml/>' });
+    r.highlightExtraNotes([{ measure: 1, midi: 60 }], '#C62828');
+    r.setSuppressMode(true);
+    // Order matters: setSuppressedNotes REPLACES the whole suppression state and clears hearAll, so
+    // the note has to be suppressed before Hear-all is switched on.
+    r.setSuppressedNotes([{ measure: 1, midi: 60, beats: 0 }]);
+    osmd.render();
+    expect(fillOf(osmd)).toBe(DIM);          // suppressed and shown as such
+    r.setHearAll(true);
+    osmd.render();
+    expect(fillOf(osmd)).toBe('#C62828');    // …until Hear all lifts it
+  });
+});
+
+// A tag is stored as (midi, beats) with no voice. In a combined / two-hand score a UNISON — the same
+// pitch at the same moment in both hands — gives such an id two candidate noteheads, and taking the
+// wrong one drags the other hand into the search scope. Beethoven's "Marmotte" m2 (E minor) is the
+// case that surfaced it: the left hand plays E2 B2 E3 while the right hand holds E3.
+describe('resolveTagIndices — voice-coherent tag resolution', () => {
+  const O = (midi, onsetBeats, voice) => ({ midi, onsetBeats, voice });
+  const ordered = [
+    O(52, 3, 'rh'),     // 0  E3 right hand
+    O(40, 3, 'lh'),     // 1  E2 left hand    ← tagged
+    O(47, 3.5, 'lh'),   // 2  B2 left hand    ← tagged
+    O(52, 4, 'rh'),     // 3  E3 right hand   (drawn first — the old code took this one)
+    O(52, 4, 'lh'),     // 4  E3 left hand    ← tagged
+  ];
+  const tag = [{ midi: 40, beats: 3 }, { midi: 47, beats: 3.5 }, { midi: 52, beats: 4 }];
+
+  test('a unison resolves to the voice the rest of the tag lives in', () => {
+    expect(resolveTagIndices(tag, ordered)).toEqual([1, 2, 4]);
+  });
+
+  test('ids that match nothing are dropped; the result stays in reading order', () => {
+    const withGhost = [{ midi: 99, beats: 0 }, ...tag];
+    expect(resolveTagIndices(withGhost, ordered)).toEqual([1, 2, 4]);
+  });
+
+  test('every note ambiguous → first candidate, the long-standing fallback', () => {
+    const both = [O(52, 4, 'rh'), O(52, 4, 'lh')];
+    expect(resolveTagIndices([{ midi: 52, beats: 4 }], both)).toEqual([0]);
+  });
+
+  test('a tag that genuinely spans both hands keeps each note in its own voice', () => {
+    const spanning = [{ midi: 52, beats: 3 }, { midi: 47, beats: 3.5 }];   // rh E3 + lh B2
+    expect(resolveTagIndices(spanning, ordered)).toEqual([0, 2]);
+  });
+
+  test('empty / missing input is not an error', () => {
+    expect(resolveTagIndices(null, ordered)).toEqual([]);
+    expect(resolveTagIndices([], ordered)).toEqual([]);
+  });
+});
+
+// Auto-scroll decision for the Follow toggle. Scrolling on every note twitches, so the cursor is left
+// alone inside a comfort band and only re-parked once it leaves.
+describe('followScrollTop', () => {
+  const view = { scrollTop: 0, viewHeight: 600, contentHeight: 3000 };
+
+  test('a cursor comfortably in view is left alone', () => {
+    expect(followScrollTop({ ...view, cursorTop: 250, cursorBottom: 300 })).toBeNull();
+  });
+
+  test('a cursor below the fold is parked a third of the way down', () => {
+    expect(followScrollTop({ ...view, cursorTop: 900, cursorBottom: 950 })).toBe(700);
+  });
+
+  test('a cursor scrolled off the top brings the view back up', () => {
+    expect(followScrollTop({ ...view, scrollTop: 1000, cursorTop: 900, cursorBottom: 950 })).toBe(700);
+  });
+
+  test('inside the margin band still counts as out of view', () => {
+    // margin = min(600*0.2, 120) = 120, so the band is [120, 480] at scrollTop 0.
+    expect(followScrollTop({ ...view, cursorTop: 470, cursorBottom: 520 })).not.toBeNull();
+    expect(followScrollTop({ ...view, cursorTop: 130, cursorBottom: 170 })).toBeNull();
+  });
+
+  test('never scrolls past the end of the content, or above the top', () => {
+    expect(followScrollTop({ ...view, scrollTop: 0, cursorTop: 2990, cursorBottom: 3000 })).toBe(2400);
+    expect(followScrollTop({ ...view, scrollTop: 500, cursorTop: 0, cursorBottom: 10 })).toBe(0);
+  });
+
+  test('a sub-pixel move is not worth a scroll', () => {
+    expect(followScrollTop({ ...view, scrollTop: 700.4, cursorTop: 900, cursorBottom: 1250 })).toBeNull();
+  });
+
+  test('missing or degenerate input is not an error', () => {
+    expect(followScrollTop()).toBeNull();
+    expect(followScrollTop({ ...view, viewHeight: 0, cursorTop: 10, cursorBottom: 20 })).toBeNull();
+    expect(followScrollTop({ ...view, cursorTop: null, cursorBottom: null })).toBeNull();
+  });
+
+  test('content shorter than the view is pinned to the top, so there is nothing to do', () => {
+    expect(followScrollTop({ cursorTop: 500, cursorBottom: 540, scrollTop: 0, viewHeight: 600, contentHeight: 400 }))
+      .toBeNull();
+    // …and a container somehow scrolled past its own content is brought back to the top.
+    expect(followScrollTop({ cursorTop: 1000, cursorBottom: 1040, scrollTop: 300, viewHeight: 600, contentHeight: 400 }))
+      .toBe(0);
+  });
+});
+
+// A cross-voice unison draws TWO noteheads for one sound. If either is lit, the note is lit — and
+// reporting the grey twin as dimmed silences a highlighted note during playback, because the player
+// matches identities on (midi, beats) and cannot tell the two noteheads apart.
+describe('unlitIdentities', () => {
+  const N = (midi, beats, dim, measure = 1) => ({ measure, midi, beats, dim });
+
+  test('a grey notehead whose unison twin is lit is NOT reported as dimmed', () => {
+    expect(unlitIdentities([N(52, 4, true), N(52, 4, false)])).toEqual([]);
+  });
+
+  test('a genuinely dimmed note is still reported', () => {
+    expect(unlitIdentities([N(52, 4, true), N(47, 4, false)]))
+      .toEqual([{ measure: 1, midi: 52, beats: 4 }]);
+  });
+
+  test('both twins dimmed reports the note once, not twice', () => {
+    expect(unlitIdentities([N(52, 4, true), N(52, 4, true)]))
+      .toEqual([{ measure: 1, midi: 52, beats: 4 }]);
+  });
+
+  test('order follows the reading order of the notes', () => {
+    expect(unlitIdentities([N(60, 0, true), N(55, 1, true), N(50, 2, true)]))
+      .toEqual([{ measure: 1, midi: 60, beats: 0 }, { measure: 1, midi: 55, beats: 1 }, { measure: 1, midi: 50, beats: 2 }]);
+  });
+
+  test('nothing dimmed, or no input, yields an empty list', () => {
+    expect(unlitIdentities([N(52, 4, false)])).toEqual([]);
+    expect(unlitIdentities([])).toEqual([]);
+    expect(unlitIdentities()).toEqual([]);
+  });
+});
+
+// A motif is a RUN of notes. Narrowing playback to a phrase's bars must therefore weigh whole
+// occurrences: keeping the notes of a straddling match that happen to fall inside plays a fragment of
+// the tune. This was real — a five-note motif scoped to one phrase came out as four notes.
+describe('groupsInsideBars', () => {
+  const g = (name, from, to) => ({ name, from, to, notes: [{ measure: from }, { measure: to }] });
+
+  test('keeps an occurrence that lies wholly inside', () => {
+    expect(groupsInsideBars([g('a', 10, 12)], [[9, 16]]).map((x) => x.name)).toEqual(['a']);
+  });
+
+  test('drops one that straddles the end — that is the fragment bug', () => {
+    expect(groupsInsideBars([g('a', 15, 18)], [[9, 16]])).toEqual([]);
+  });
+
+  test('drops one that straddles the start', () => {
+    expect(groupsInsideBars([g('a', 7, 10)], [[9, 16]])).toEqual([]);
+  });
+
+  test('drops one wholly outside', () => {
+    expect(groupsInsideBars([g('a', 30, 32)], [[9, 16]])).toEqual([]);
+  });
+
+  test('an occurrence touching either edge exactly is inside', () => {
+    expect(groupsInsideBars([g('a', 9, 16)], [[9, 16]]).map((x) => x.name)).toEqual(['a']);
+  });
+
+  test('several ranges: inside ANY one of them counts', () => {
+    const groups = [g('a', 10, 12), g('b', 26, 28), g('c', 20, 22)];
+    expect(groupsInsideBars(groups, [[9, 16], [25, 32]]).map((x) => x.name)).toEqual(['a', 'b']);
+  });
+
+  test('no bars means no narrowing', () => {
+    const groups = [g('a', 10, 12), g('b', 99, 99)];
+    expect(groupsInsideBars(groups, null)).toBe(groups);
+    expect(groupsInsideBars(groups, [])).toBe(groups);
+  });
+
+  test('a group with no measures is not guessed at', () => {
+    expect(groupsInsideBars([{ name: 'a', from: null, to: null, notes: [] }], [[1, 8]])).toEqual([]);
+  });
+});
+
+describe('formatMeasureRanges', () => {
+  test('collapses consecutive runs and keeps isolated bars', () => {
+    expect(formatMeasureRanges([2, 3, 4, 7, 9, 10])).toBe('2–4, 7, 9–10');
+  });
+
+  test('de-dupes and sorts — callers hand it one entry per note', () => {
+    expect(formatMeasureRanges([7, 2, 3, 2, 3, 7])).toBe('2–3, 7');
+  });
+
+  test('caps the list and says it was capped', () => {
+    expect(formatMeasureRanges([1, 3, 5, 7, 9], 3)).toBe('1, 3, 5, …');
+  });
+
+  test('nothing to say for an empty or junk list', () => {
+    expect(formatMeasureRanges([])).toBe('');
+    expect(formatMeasureRanges(null)).toBe('');
+    expect(formatMeasureRanges([null, undefined, NaN])).toBe('');
+  });
+
+  test('a single bar is just that bar', () => {
+    expect(formatMeasureRanges([11, 11])).toBe('11');
+  });
+});
+
+// One phrase per line rests on this: OSMD only breaks where <print new-system="yes"> says, and only once
+// its rule is on — at which point the score's OWN breaks would come alive too, so they have to go.
+describe('setSystemBreaks', () => {
+  const score = (measures) => `<?xml version="1.0"?><score-partwise><part id="P1">${measures}</part></score-partwise>`;
+  const bar = (n, inner = '') => `<measure number="${n}">${inner}<note><pitch><step>C</step><octave>4</octave></pitch></note></measure>`;
+  const systemsIn = (xml) => [...xml.matchAll(/<measure number="(\d+)">\s*<print[^>]*new-system="yes"/g)].map((m) => m[1]);
+
+  test('marks exactly the bars asked for', () => {
+    const out = setSystemBreaks(score(bar(1) + bar(2) + bar(3) + bar(4)), [2, 4]);
+    expect(systemsIn(out)).toEqual(['2', '4']);
+  });
+
+  test("the score's own breaks are removed, so only ours decide the layout", () => {
+    // Without this the rule would activate breaks nobody asked for — a real library file carries four.
+    const src = score(bar(1, '<print new-system="yes"/>') + bar(2) + bar(3, '<print new-page="yes"/>'));
+    const out = setSystemBreaks(src, [2]);
+    expect(systemsIn(out)).toEqual(['2']);
+    expect(out).not.toContain('new-page');
+  });
+
+  test('an empty list strips every break and adds none', () => {
+    const src = score(bar(1, '<print new-system="yes"/>') + bar(2));
+    expect(setSystemBreaks(src, []).includes('new-system')).toBe(false);
+    expect(setSystemBreaks(src, null).includes('new-system')).toBe(false);
+  });
+
+  test('an existing <print> is reused, keeping whatever else it says', () => {
+    const src = score(bar(1) + bar(2, '<print><staff-layout><staff-distance>70</staff-distance></staff-layout></print>'));
+    const out = setSystemBreaks(src, [2]);
+    expect(systemsIn(out)).toEqual(['2']);
+    expect(out).toContain('staff-distance');
+    expect(out.match(/<print/g).length).toBe(1);   // reused, not a second one
+  });
+
+  test('bars that are not in the score are simply not there to mark', () => {
+    const out = setSystemBreaks(score(bar(1) + bar(2)), [2, 99]);
+    expect(systemsIn(out)).toEqual(['2']);
+  });
+
+  test('printed numbers, not positions — a pickup piece starting at 0 is matched as written', () => {
+    const out = setSystemBreaks(score(bar(0) + bar(1) + bar(2)), [1]);
+    expect(systemsIn(out)).toEqual(['1']);
+  });
+
+  test('unparseable or empty input comes back untouched', () => {
+    expect(setSystemBreaks('<score', [1])).toBe('<score');
+    expect(setSystemBreaks('', [1])).toBe('');
+    expect(setSystemBreaks(null, [1])).toBe('');
+  });
+});
+
+// Typed by hand into a comparison box, so it takes whatever spelling of a bar range comes naturally.
+describe('parseBarRange', () => {
+  test('the spellings a person actually types', () => {
+    expect(parseBarRange('4-8')).toEqual([4, 8]);
+    expect(parseBarRange('m4–8')).toEqual([4, 8]);      // en dash, and the m people say out loud
+    expect(parseBarRange(' 4 , 8 ')).toEqual([4, 8]);
+    expect(parseBarRange('4 8')).toEqual([4, 8]);
+  });
+
+  test('one number is that bar alone', () => {
+    expect(parseBarRange('7')).toEqual([7, 7]);
+  });
+
+  test('backwards is read as written, not refused', () => {
+    expect(parseBarRange('12-9')).toEqual([9, 12]);
+  });
+
+  test('a phrase name is null, so the caller tries it as a name instead of drawing a bar', () => {
+    expect(parseBarRange('A')).toBeNull();
+    expect(parseBarRange('B2')).toBeNull();      // NOT bar 2 — this drew the wrong music before
+    expect(parseBarRange('B2\u2032')).toBeNull();
+    expect(parseBarRange('Chorus')).toBeNull();
+    expect(parseBarRange('')).toBeNull();
+    expect(parseBarRange(null)).toBeNull();
   });
 });

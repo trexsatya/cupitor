@@ -2,12 +2,19 @@
 // Rendering for the music study app: pure measure-mapping helpers (TDD) +
 // a thin OSMD wrapper (injectable factory) for whole-piece / segment rendering.
 import { primaryVoice, canonicalChordSpans } from './music-encoding.js';
-import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
+import { guessChords, guessChordAreas, bestChords, bestChordsCompleting, verticalChords, chordDisplayName, chordOccurrenceNotes } from './music-chords.js';
 import { chordByAnyName } from './music-reference-data.js';
-import { indexAssignments, colorMap, toggleNote, firstTagForKey, revealedTagForKey, noteId as tagNoteId } from './music-tags.js';
+import { indexAssignments, colorMap, toggleNote, firstTagForKey, revealedTagForKey, renameInAssignments, noteId as tagNoteId } from './music-tags.js';
 import { findScopedMatches, pcHistogram, guessKey, keyLabel } from './music-pattern.js';
+import { findRhythmPatterns, soloMutedIndices } from './music-rhythm.js';
+import { detectKey, parseKeyName, fifthsOfKey } from './music-key.js';
 import { addPhrase as addPhraseReducer, removePhrase as removePhraseReducer, setPhraseTag as setPhraseTagReducer,
-  removeTagFromPhrases, togglePhraseNote as togglePhraseNoteReducer, resolvePhraseNoteIds, phraseByName } from './music-phrase.js';
+  removeTagFromPhrases, renameTagInPhrases, togglePhraseNote as togglePhraseNoteReducer, phraseByName,
+  phraseRange, setPhraseRange as setPhraseRangeReducer } from './music-phrase.js';
+import { detectPhrases as detectPhrasesModel, phraseBands as phraseBandsModel } from './music-phrase-detect.js';
+import { addGroup as addGroupReducer, removeGroup as removeGroupReducer, setGroupRanges as setGroupRangesReducer,
+  addGroupRanges as addGroupRangesReducer, setGroupPattern as setGroupPatternReducer, groupByName,
+  normalizeRanges as normRanges, groupPatterns, resolveGroupPattern, groupOpts, groupShades } from './music-rhythm-group.js';
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -15,6 +22,9 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const VOICE_COLORS = ['#1f77b4', '#d62728', '#2ca02c', '#9467bd', '#ff7f0e', '#17becf'];
 const DEFAULT_NOTE_COLOR = '#000000';
 const CHORD_HL_COLOR = '#ffcc00';   // notes of a clicked chord chip, highlighted in yellow
+// Occurrences of the picked rhythm pattern. Two shades of ONE hue: same hue reads as "one pattern",
+// while alternating shades keep back-to-back occurrences from merging into a single block of color.
+const RHYTHM_HL_COLORS = ['#0ca678', '#63e6be'];
 const DIM_CONNECTOR_COLOR = '#d6d6d6';   // faint grey for beams/stems/slurs so noteheads stand out
 // Pure: a stable color for a 0-based voice index, cycling past the palette length.
 export function voiceColor(index) {
@@ -146,6 +156,112 @@ export function measureRangeFromChordMatch(detail, chordRange) {
     if (spans[i].measureEnd > end) end = spans[i].measureEnd;
   }
   return [start, end];
+}
+
+// Which drawn notes are genuinely dimmed, given each notehead's identity and whether it is grey.
+//
+// A cross-voice unison draws TWO noteheads for one sound. If either is lit, the note is lit — and
+// reporting its grey twin would silence a highlighted note in playback, because the player matches
+// identities on (midi, beats) and cannot tell the two noteheads apart. `promoteUnisonHighlights`
+// lifts the grey twin at paint time; this makes the guarantee hold in the data whether or not that
+// paint pass has run. De-duped, so a note greyed in both staves is reported once.
+// Which whole occurrences lie inside `bars` ([[from,to],…], printed measures). A motif is a run of
+// notes, so it counts only when ALL of it is inside — an occurrence that starts before the last bar of
+// a phrase and finishes after it is not an occurrence "in" that phrase, and playing the part that fits
+// would sound like a fragment of the tune rather than the tune.
+export function groupsInsideBars(groups, bars) {
+  if (!bars || !bars.length) return groups || [];
+  return (groups || []).filter((g) => g && g.from != null && g.to != null
+    && bars.some(([from, to]) => g.from >= from && g.to <= to));
+}
+
+// Measure numbers as a compact human range: [2,3,4,7,9,10] → "2–4, 7, 9–10". De-duped and sorted, so
+// callers can hand over one entry per note. `max` caps how many groups are listed and appends "…":
+// a motif can occur three dozen times, and a tooltip that long is one nobody reads.
+export function formatMeasureRanges(nums, max = 12) {
+  const xs = [...new Set((nums || []).filter((n) => Number.isFinite(n)))].sort((a, b) => a - b);
+  if (!xs.length) return '';
+  const groups = [];
+  let start = xs[0], prev = xs[0];
+  for (let i = 1; i <= xs.length; i++) {
+    const n = xs[i];
+    if (n === prev + 1) { prev = n; continue; }   // still the same run (undefined past the end ends it)
+    groups.push(start === prev ? `${start}` : `${start}–${prev}`);
+    start = n; prev = n;
+  }
+  return groups.length > max ? `${groups.slice(0, max).join(', ')}, …` : groups.join(', ');
+}
+
+export function unlitIdentities(entries) {
+  const lit = new Set();
+  const key = (e) => `${e.midi}@${Number(e.beats).toFixed(6)}`;
+  (entries || []).forEach((e) => { if (!e.dim) lit.add(key(e)); });
+  const seen = new Set();
+  const out = [];
+  (entries || []).forEach((e) => {
+    if (!e.dim) return;
+    const k = key(e);
+    if (lit.has(k) || seen.has(k)) return;
+    seen.add(k);
+    out.push({ measure: e.measure, midi: e.midi, beats: e.beats });
+  });
+  return out;
+}
+
+// Where to scroll so the play cursor stays on screen — the decision, without any DOM.
+//
+// Scrolling on every note would twitch, so the cursor is left alone while it sits inside a comfortable
+// band and only re-parked once it leaves. It is then placed a third of the way down, which puts the
+// music about to be played in the larger half of the view instead of at the bottom edge.
+// All values are in the scroll container's own coordinates. Returns the new scrollTop, or null for
+// "leave it alone" — including when the move would be less than a pixel.
+export function followScrollTop({ cursorTop, cursorBottom, scrollTop, viewHeight, contentHeight } = {}) {
+  if (!(viewHeight > 0) || cursorTop == null || cursorBottom == null) return null;
+  const margin = Math.min(viewHeight * 0.2, 120);
+  if (cursorTop >= scrollTop + margin && cursorBottom <= scrollTop + viewHeight - margin) return null;
+  const max = contentHeight > viewHeight ? contentHeight - viewHeight : 0;
+  const next = Math.max(0, Math.min(max, cursorTop - viewHeight / 3));
+  return Math.abs(next - scrollTop) < 1 ? null : next;
+}
+
+// Locate a tag's stored notes in the rendered stream, keeping the tag inside ONE voice.
+//
+// A tag note is stored as (midi, beats) with no voice, so in a combined / two-hand score a unison —
+// the same pitch at the same moment in both hands — gives one id two candidate noteheads. Taking
+// whichever is drawn first used to be enough, but it isn't: the resolved notes decide which voices
+// the melodic search is scoped to, and one note landing in the wrong hand pulls that whole hand in.
+// The reduction then collapses each onset to its top note, so the tagged note itself gets replaced
+// by whatever sits above it and the search hunts a pattern that was never tagged.
+//
+// Resolve by agreement instead: notes with a single candidate name the tag's voice, and ambiguous
+// ones follow that vote. A tag genuinely spanning two hands is unaffected — its notes are each
+// unambiguous, so they keep their own voice. No unambiguous note at all falls back to the old
+// first-candidate rule, which is as good a guess as any.
+const TAG_ONSET_EPS = 1e-6;
+export function resolveTagIndices(noteIds, ordered) {
+  const all = ordered || [];
+  const candidates = (noteIds || []).map((tn) => {
+    const hits = [];
+    all.forEach((n, i) => {
+      if (n && n.midi === tn.midi && Math.abs((n.onsetBeats == null ? NaN : n.onsetBeats) - tn.beats) < TAG_ONSET_EPS) hits.push(i);
+    });
+    return hits;
+  }).filter((hits) => hits.length);
+  const votes = new Map();
+  candidates.forEach((hits) => {
+    if (hits.length !== 1) return;
+    const v = all[hits[0]].voice;
+    votes.set(v, (votes.get(v) || 0) + 1);
+  });
+  let winner = null, best = 0;
+  votes.forEach((n, v) => { if (n > best) { best = n; winner = v; } });
+  return candidates
+    .map((hits) => {
+      if (winner == null) return hits[0];
+      const inVoice = hits.find((i) => all[i].voice === winner);
+      return inVoice == null ? hits[0] : inVoice;
+    })
+    .sort((p, q) => p - q);
 }
 
 // Map a query result's match to a 1-based measure range, dispatching on match.kind.
@@ -343,10 +459,441 @@ export function topChordPerMeasure(areas) {
     .map((a) => ({ measure: a.measure, chord: a.chords[0] }));
 }
 
+// Repair a crash in the bundled VexFlow that aborts a draw pass mid-page.
+//
+// A pedal mark anchored to a rest gets a ghost note — a spacer with no noteheads — and VexFlow's
+// PedalMarking.drawBracketed calls note.getNoteHeadBeginX() on it unconditionally. Ghost notes don't
+// define it (only StaveNote does), so the call throws out of drawPedals, which drawStaffLine calls
+// BEFORE drawExpressions — so the throw takes the pedal, that line's expression marks, and the
+// remaining systems of that pass with it. Measured on Clair de Lune: an uncaught console error on every
+// load, no pedal marks, and ~180 stray path elements left behind by the abandoned pass, still layered
+// under the re-render that follows it. (Noteheads survive — they are drawn in a different pass — so the
+// score looks complete, which is what makes this easy to miss.)
+//
+// OSMD's own code guards this exact call ("if (!t.getNoteHeadBeginX) return"); VexFlow's does not, and
+// VexFlow isn't reachable from outside the bundle to patch directly.
+//
+// So the missing methods are supplied on the offending note itself, using VexFlow's own definitions
+// (getNoteHeadBeginX = getAbsoluteX() + x_shift). For something with no notehead that is exactly the
+// right anchor — where the notehead would have been — so the pedal still draws in the right place
+// instead of being dropped. Zero glyph width likewise: no notehead, nothing to span.
+//
+// The shim is REMOVED again as soon as the pedals are drawn, and that is not tidiness — it is required.
+// OSMD's own guard is load-bearing: applyBordersFromVexflow reads `if (!note.getNoteHeadBeginX) return`
+// to skip exactly these notes, because a ghost note's getBoundingBox() is null and the line after the
+// guard dereferences it. Leaving the method attached defeats that guard and moves the crash from drawing
+// into the NEXT render's layout, where it kills the score outright rather than truncating it. Layout and
+// draw are separate phases of a render, so a shim scoped to the draw call is invisible to layout.
+//
+// The try/finally also backstops: should a pedal fail for some other reason, it costs the pedals of one
+// staff line rather than the remainder of the score.
+export function patchPedalGhostNoteCrash(ns = (typeof opensheetmusicdisplay !== 'undefined' ? opensheetmusicdisplay : null)) {
+  const proto = ns && ns.VexFlowMusicSheetDrawer && ns.VexFlowMusicSheetDrawer.prototype;
+  if (!proto || !proto.drawPedals || proto.drawPedals._ghostNotePatched) return false;
+  const original = proto.drawPedals;
+  const patched = function drawPedals(staffLine, ...rest) {
+    const shimmed = [];
+    try {
+      ((staffLine && staffLine.Pedals) || []).forEach((pedal) => {
+        const marking = pedal && pedal.getPedalMarking && pedal.getPedalMarking();
+        ((marking && marking.notes) || []).forEach((note) => {
+          if (!note || typeof note.getAbsoluteX !== 'function') return;
+          if (typeof note.getNoteHeadBeginX === 'function') return;
+          note.getNoteHeadBeginX = () => note.getAbsoluteX() + (note.x_shift || 0);
+          note.getNoteHeadEndX = () => note.getNoteHeadBeginX()
+            + (typeof note.getGlyphWidth === 'function' ? note.getGlyphWidth() : 0);
+          shimmed.push(note);
+        });
+      });
+    } catch (_) { /* best-effort; the finally still restores and the catch still protects the page */ }
+    try {
+      return original.call(this, staffLine, ...rest);
+    } catch (_) {
+      return undefined;   // lose this staff line's pedals, never the rest of the score
+    } finally {
+      shimmed.forEach((note) => { delete note.getNoteHeadBeginX; delete note.getNoteHeadEndX; });
+    }
+  };
+  patched._ghostNotePatched = true;
+  proto.drawPedals = patched;
+  return true;
+}
+
+// Drop `<tuplet>` brackets from notes that carry no `<time-modification>`, and hand OSMD the result.
+//
+// A `<tuplet>` is only the BRACKET; the ratio lives in `<time-modification>`. A note with the bracket
+// and no ratio is malformed — it says "part of a tuplet" while its duration says otherwise — and it
+// FREEZES OSMD 1.8+ inside load(), synchronously, so the tab is gone with no error to catch. Two
+// MuseScore exports in this library do it (a 3-sixteenth group bracketed but never scaled); both open
+// instantly once the stray bracket is gone.
+//
+// Nothing audible or positional changes: no pitch, duration, voice or measure is touched, only a
+// notation bracket that describes a tuplet the notes aren't in. Applied to what OSMD reads, so the
+// stored source — the thing playback and the schedule parse — stays exactly as the exporter wrote it.
+// Skips the parse entirely when the file has no tuplet markup at all.
+export function stripBracketOnlyTuplets(xml) {
+  const src = String(xml == null ? '' : xml);
+  if (src.indexOf('<tuplet') < 0) return src;
+  let doc;
+  try { doc = new DOMParser().parseFromString(src, 'application/xml'); } catch (_) { return src; }
+  if (!doc || doc.getElementsByTagName('parsererror').length) return src;
+  let dropped = 0;
+  doc.querySelectorAll('note').forEach((n) => {
+    if (n.querySelector('time-modification')) return;
+    n.querySelectorAll('tuplet').forEach((t) => { t.remove(); dropped++; });
+  });
+  if (!dropped) return src;
+  try { return new XMLSerializer().serializeToString(doc); } catch (_) { return src; }
+}
+
+// Force each of `bars` (PRINTED measure numbers) to begin a new staff line, and take away every break
+// the score itself carries so those are the only ones. Returns the XML to hand OSMD.
+//
+// This is what makes one phrase per line possible: a phrase and each of its returns start their own
+// system, so bar 3 of the first statement sits above bar 3 of the return and the two can be read against
+// each other. OSMD only obeys these once rules.NewSystemAtXMLNewSystemAttribute is on, which is off by
+// default — so an untouched score's own breaks are ignored today, and turning the rule on without this
+// stripping pass would suddenly activate all of them (measured: 4 in one library file, which put lines
+// in places nobody asked for).
+//
+// A forced break is a FLOOR, not a ceiling: it guarantees a line starts there, and OSMD still breaks
+// wherever a stretch would overflow the page. Making the phrase itself fit is FixedMeasureWidth's job.
+//
+// An empty / falsy `bars` strips the score's breaks and adds none. That is NOT how the aligned view is
+// switched off — restoring the engraved layout means re-loading the stored source untouched, because a
+// stripped copy measurably lays out differently even with the rule off (see setPhraseAlign).
+export function setSystemBreaks(xml, bars) {
+  const src = String(xml == null ? '' : xml);
+  if (!src) return src;
+  let doc;
+  try { doc = new DOMParser().parseFromString(src, 'application/xml'); } catch (_) { return src; }
+  if (!doc || doc.getElementsByTagName('parsererror').length) return src;
+  const want = new Set((bars || []).map((b) => String(b)));
+  let changed = 0;
+  doc.querySelectorAll('print').forEach((p) => {
+    if (p.hasAttribute('new-system')) { p.removeAttribute('new-system'); changed++; }
+    if (p.hasAttribute('new-page')) { p.removeAttribute('new-page'); changed++; }
+  });
+  doc.querySelectorAll('measure').forEach((m) => {
+    if (!want.has(m.getAttribute('number'))) return;
+    let p = m.querySelector('print');
+    // `<print>` must be the measure's first element to be a layout instruction for it, and a measure
+    // that has none gets one. Reusing an existing one keeps whatever else it says (staff distances,
+    // measure numbering) instead of quietly dropping it.
+    if (!p) {
+      p = doc.createElement('print');
+      m.insertBefore(p, m.firstChild);
+    }
+    p.setAttribute('new-system', 'yes');
+    changed++;
+  });
+  if (!changed) return src;
+  try { return new XMLSerializer().serializeToString(doc); } catch (_) { return src; }
+}
+
+// "4-8", "m4–8", "4 8", "4,8" → [4, 8]; a single number is that bar alone. Null when it says nothing
+// usable. Typed by hand into a comparison box, so every separator anyone would reasonably reach for is
+// accepted rather than one blessed spelling.
+export function parseBarRange(text) {
+  const raw = String(text == null ? '' : text).trim();
+  if (!raw) return null;
+  // A phrase is named with letters — A, B2, B′, "Chorus" — and a bar range is not. So anything carrying a
+  // letter beyond the "m" people write in front of a bar number is NOT a range, and the caller should try
+  // it as a name instead. Without this test "B2" parsed as bar 2, which silently drew the wrong music.
+  if (/[a-zA-Z]/.test(raw.replace(/[mM]/g, ''))) return null;
+  const s = raw.replace(/[mM]/g, ' ').trim();
+  if (!s) return null;
+  const nums = s.split(/[^0-9]+/).filter((p) => p !== '').map((p) => parseInt(p, 10)).filter(Number.isFinite);
+  if (!nums.length) return null;
+  const a = nums[0], b = nums.length > 1 ? nums[1] : nums[0];
+  return [Math.min(a, b), Math.max(a, b)];
+}
+
+// ── Paint helpers shared by every OSMD instance ────────────────────────────────────────────────────
+// The sheet and the compare panes are SEPARATE OSMD instances drawing the same piece. Anything the
+// sheet paints onto its notes has to be paintable onto theirs the same way, or the comparison reads
+// differently from the score it was cut out of — so these live at module level rather than inside the
+// renderer's closure.
+
+// Onset of a graphical staff entry in quarter-note beats from the piece start, read from OSMD's
+// source timestamps (RealValue is in whole notes → ×4 for quarter beats). null when unavailable,
+// in which case window playback falls back from note-accurate to measure-granular.
+export function staffEntryOnsetBeats(se) {
+  try { if (se && se.getAbsoluteTimestamp) { const t = se.getAbsoluteTimestamp(); if (t && typeof t.RealValue === 'number') return t.RealValue * 4; } } catch (_) {}
+  try {
+    const sse = se && (se.sourceStaffEntry || se.parentStaffEntry);
+    const t = sse && (sse.AbsoluteTimestamp || (sse.getAbsoluteTimestamp && sse.getAbsoluteTimestamp()));
+    if (t && typeof t.RealValue === 'number') return t.RealValue * 4;
+  } catch (_) {}
+  return null;
+}
+
+// Every DRAWN note of an OSMD instance as { measure, midi, beats, el, headIndex } — `el` is the
+// VexFlow group carrying the noteheads and `headIndex` picks this note's head out of a chord's group.
+// (measure, midi, beats) is the same identity motifs and phrases are stored under, so a note found
+// here can be looked up against them.
+//
+// osmd.graphic.measureList holds EVERY measure of the piece whatever window is drawn; the measures
+// outside it have detached elements, which the isConnected test drops. What is in the document is
+// what was drawn.
+export function drawnNotesOf(osmd) {
+  const out = [];
+  const measureList = osmd && osmd.graphic && osmd.graphic.measureList;
+  if (!measureList || !measureList.forEach) return out;
+  measureList.forEach((measures) => {
+    (measures || []).forEach((measure) => {
+      if (!measure) return;   // OSMD hands back holes — an empty staff slot carries no notes
+      const sm = measure.parentSourceMeasure;
+      const num = sm && Number.isFinite(sm.MeasureNumber) ? sm.MeasureNumber : null;
+      ((measure.staffEntries) || []).forEach((se) => {
+        const beats = staffEntryOnsetBeats(se);
+        (se.graphicalVoiceEntries || []).forEach((gve) => {
+          (gve.notes || []).forEach((gnote) => {
+            const pitch = gnote.sourceNote && gnote.sourceNote.Pitch;
+            const midi = (pitch && typeof pitch.getHalfTone === 'function') ? pitch.getHalfTone() + 12 : null;
+            const vf = gnote.vfnote;
+            const el = vf && vf[0] && vf[0].attrs && vf[0].attrs.el;
+            if (!el || !el.isConnected) return;
+            // The model's own colour — what this note wears with nothing painted over it. Kept so a
+            // note can be put BACK to it when a highlight is taken away.
+            const base = (gnote.sourceNote && gnote.sourceNote.NoteheadColor) || null;
+            out.push({ measure: num, midi, beats, el, base, headIndex: gnote.vfnoteIndex || 0 });
+          });
+        });
+      });
+    });
+  });
+  return out;
+}
+
+// Push per-voice NoteheadColor onto the OSMD model, so the colour survives re-renders. `indexSink`,
+// when given, is filled with voice object → its global voice index (the same index voiceColor uses),
+// letting a rendered note be traced back to a stable voice id. No-op on a sheet without instruments
+// (the test fake, or before load).
+export function paintVoiceColors(osmd, on, indexSink) {
+  const instruments = osmd && osmd.Sheet && osmd.Sheet.Instruments;
+  if (!instruments || !instruments.forEach) return;
+  if (indexSink) indexSink.clear();
+  let vi = 0;
+  instruments.forEach((instr) => {
+    (instr.Voices || []).forEach((voice) => {
+      if (indexSink) indexSink.set(voice, vi);
+      const color = on ? voiceColor(vi) : DEFAULT_NOTE_COLOR;
+      (voice.VoiceEntries || []).forEach((ve) => {
+        (ve.Notes || []).forEach((note) => { note.NoteheadColor = color; });
+      });
+      vi++;
+    });
+  });
+}
+
+// Overlay English/scientific note names on an instance's rendered SVG. Removed + rebuilt on every
+// render. No-op when there's no DOM container / rendered graphic (test fakes, jsdom).
+export function paintNoteNames(osmd, container, on = true) {
+  if (!container || !container.querySelectorAll) return;
+  if (!on) { container.querySelectorAll('.note-name-layer').forEach((n) => n.remove()); return; }
+  const svg = container.querySelector('svg');
+  if (!svg) return;
+  const notes = drawnNotesOf(osmd);
+  // Build-then-swap: a getBBox that throws/returns garbage mid-transition won't blank the labels.
+  swapOverlayLayer(svg, 'note-name-layer', (layer) => {
+    notes.forEach((n) => {
+      const label = noteName(n.midi);
+      if (!label) return;   // rest / no pitch
+      const heads = n.el.querySelectorAll ? n.el.querySelectorAll('.vf-notehead') : [];
+      const head = heads[n.headIndex] || heads[0];
+      if (!head || !head.getBBox) return;
+      let b; try { b = head.getBBox(); } catch (_) { return; }   // skip a note whose box isn't measurable yet
+      // HTML label (foreignObject), not SVG <text>: on Android/Blink SVG-text glyphs collapse
+      // after OSMD's music font loads. Centred above the notehead. The white halo (so a staff
+      // line can't strike through the glyph) is a CSS text-shadow instead of paint-order stroke.
+      layer.appendChild(svgHtmlLabel(document, {
+        x: b.x + b.width / 2, y: b.y - 2, fontSize: 7, anchor: 'middle',
+        css: 'color:#444;text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 2px #fff;',
+        text: label,
+      }));
+    });
+  });
+}
+
+// Paint `color` over a rendered note's whole group (notehead, and any shape drawn with it), matching
+// how the sheet's own overlay inks a note so a compare pane and the sheet look identical.
+export function paintNoteElement(el, color) {
+  if (!el || !el.querySelectorAll) return;
+  [el, ...el.querySelectorAll('path, ellipse, circle, rect')].forEach((h) => {
+    h.setAttribute('fill', color); h.style.fill = color;
+    const st = h.getAttribute('stroke');
+    if (st && st !== 'none') { h.setAttribute('stroke', color); h.style.stroke = color; }
+  });
+}
+
+// Draw several stretches of ONE piece stacked in `host`, each on its own staff line, with the same bar
+// width in all of them — so bar 1 of m4–8 sits directly above bar 1 of m9–12 and the two can be read
+// against each other. Returns { zoom, panes:[{ range, label, bars, xs, lines }] }.
+//
+// One OSMD per pane rather than one score cut and pasted together: OSMD draws a CONTIGUOUS window
+// (drawFromMeasureNumber…drawUpToMeasureNumber), so two disjoint stretches cannot be one render without
+// rewriting the file, and each pane being its own score is what gives both of them an identical leading
+// clef/key/time — the thing that would otherwise offset one pane from the other.
+//
+// Alignment rests on a quiet OSMD default: StretchLastSystemLine is false, so the LAST system of a score
+// keeps its measures' own widths instead of being spread to fill the page. Every pane here is a single
+// system, hence every pane is a last system — which is why ranges of DIFFERENT lengths still share their
+// leading columns. Ranges are printed bar numbers; `offset` converts them to the sequential ones OSMD
+// wants (the pickup shift), exactly as showSegment does.
+// The panes carry the sheet's own colours and note names (opts.voiceColors / opts.colorOf /
+// opts.noteNames): this view exists to be read closely, and a stretch that loses the motif colouring
+// it has on the sheet is harder to read here than it was there.
+export async function renderAlignedSegments(host, xml, ranges, opts = {}) {
+  const { zoom = 1, offset = 0, minZoom = 0.3, factory,
+    voiceColors = false, colorOf = null, noteNames = false, onPlay = null } = opts;
+  const make = factory || ((c) => new opensheetmusicdisplay.OpenSheetMusicDisplay(c));
+  const wanted = (ranges || []).filter((r) => Array.isArray(r) && r.length === 2);
+  host.innerHTML = '';
+  if (!wanted.length) return { zoom, panes: [] };
+  const built = wanted.map((range) => {
+    const pane = document.createElement('div');
+    pane.className = 'cmp-pane';
+    const tag = document.createElement('div');
+    tag.className = 'cmp-tag';
+    const label = `m${range[0]}–${range[1]}`;
+    tag.textContent = label;
+    // ▶ on the pane itself: the stretch you are looking at is the one you want to hear, and reaching
+    // for the transport means first telling it which bars — which is what this pane already says.
+    if (onPlay) {
+      const play = document.createElement('button');
+      play.type = 'button';
+      play.className = 'cmp-play';
+      play.textContent = '▶';
+      play.title = `Play bars ${range[0]}–${range[1]}`;
+      play.onclick = () => onPlay([range[0], range[1]]);
+      tag.append(' ', play);
+    }
+    const sheet = document.createElement('div');
+    sheet.className = 'cmp-sheet';
+    pane.append(tag, sheet);
+    host.append(pane);
+    return { range, label, sheet, osmd: make(sheet) };
+  });
+  // PADDING. FixedMeasureWidth makes every bar of a pane the same width, but the pane still has to fit
+  // the page — so eight bars compress to ~145px each while two sit at ~225px, and the columns of a short
+  // stretch and a long one stop meaning anything (measured: m2–3 vs m20–27 shared 1 column of 2, while
+  // the evenly matched m4–8 vs m9–12 shared all 4).
+  //
+  // So every pane DRAWS the same number of bars — the shorter ones padded with the bars that follow them
+  // — and the surplus is then clipped away. Both panes are laid out under identical pressure, so a bar is
+  // the same width in each; what you see is only the stretch you asked for. Padding with real following
+  // bars rather than blank ones because an empty measure has to be invented (key, time, clef, rests) and
+  // an invented bar is a bar that can be wrong; these are clipped before they are ever seen.
+  const span = (r) => r[1] - r[0] + 1;
+  const padTo = Math.max(...wanted.map(span));
+  for (const b of built) {
+    b.osmd.setOptions({ backend: 'svg', drawingParameters: 'compacttight', drawTitle: false,
+      useXMLMeasureNumbers: true, autoResize: false });
+    if (b.osmd.rules) b.osmd.rules.FixedMeasureWidth = true;
+    await b.osmd.load(xml);
+    paintVoiceColors(b.osmd, voiceColors);   // on the MODEL, so the shrink loop's re-renders keep it
+    const total = (b.osmd.Sheet && b.osmd.Sheet.SourceMeasures && b.osmd.Sheet.SourceMeasures.length) || 0;
+    b.real = span(b.range);
+    // Clamped at the end of the piece: a stretch in the last bars cannot be padded to full width, and
+    // then its columns are its own. Reported per pane as `padded`, so the caller can say so.
+    const to = Math.min(b.range[0] + padTo - 1, total ? total - offset : b.range[1]);
+    b.drawn = to - b.range[0] + 1;
+    b.padded = b.drawn - b.real;
+    b.osmd.setOptions({ drawFromMeasureNumber: b.range[0] + offset, drawUpToMeasureNumber: to + offset });
+  }
+  // Shrink until every pane is ONE line: a stretch split over two lines has nothing to compare against
+  // the other pane's second line, and the columns stop meaning anything.
+  let z = zoom;
+  const draw = () => built.forEach((b) => { b.osmd.Zoom = z; b.osmd.render(); });
+  // Measured off the DRAWN SVG, not the graphic model. The model holds every measure of the piece and
+  // only a window of it is drawn, so counting rows there reported all 35 bars of the score for a 4-bar
+  // pane, decided it had wrapped, and drove the shrink loop to its floor — a 4-bar comparison rendered
+  // at 38%. What is on screen is the only thing that answers "did this fit on one line".
+  const linesOf = (b) => b.sheet.querySelectorAll('.staffline').length || 1;
+  const columnsOf = (b) => {
+    const base = b.sheet.getBoundingClientRect().left;
+    const xs = [...b.sheet.querySelectorAll('.vf-measure')]
+      .map((m) => Math.round(m.getBoundingClientRect().left - base));
+    return [...new Set(xs)].sort((p, q) => p - q);
+  };
+  draw();
+  for (let i = 0; i < 6 && built.some((b) => linesOf(b) > 1) && z > minZoom; i++) {
+    z = Math.max(minZoom, z * 0.85);
+    draw();
+  }
+  // Colours and names go on AFTER the last render — a re-render inside the shrink loop repaints the
+  // noteheads and rebuilds the SVG, so anything inked before it would be thrown away. Neither pass
+  // moves anything: the colour is a fill on notes already placed, the names are an overlay layer.
+  // Every note is inked on every pass, not just the ones a colour is found for: a motif being UNchecked
+  // has to take its colour off again, and a note left as it was painted last time would keep a highlight
+  // that the sheet no longer shows. `base` is the note's own (voice) colour, so that is where it goes back to.
+  const ink = (fn) => built.forEach((b) => {
+    drawnNotesOf(b.osmd).forEach((n) => {
+      if (n.midi == null) return;
+      const paint = (fn && fn({ measure: n.measure, midi: n.midi, beats: n.beats })) || n.base || DEFAULT_NOTE_COLOR;
+      paintNoteElement(n.el, paint);
+    });
+  });
+  if (colorOf) ink(colorOf);
+  if (noteNames) built.forEach((b) => paintNoteNames(b.osmd, b.sheet, true));
+  // Clip each pane after its own last real bar, so the padding that made the widths match is not shown.
+  // The frames stay equal width, so a shorter stretch reads as shorter rather than as cut off.
+  const panes = built.map((b) => {
+    const all = columnsOf(b);
+    const xs = all.slice(0, b.real);
+    const cut = all[b.real];                     // where the first padding bar starts
+    b.sheet.style.width = cut != null ? `${cut}px` : '';
+    b.sheet.style.minWidth = '';
+    // A playhead per pane, so a comparison can be FOLLOWED while it sounds. A plain line rather than the
+    // pane's own OSMD cursor: OSMD throws when asked to update a cursor sitting outside the drawn
+    // window, and every pane draws a window. The marks are the drawn notes' (beat, x) — the same
+    // absolute beats the transport counts in, so any pane can be asked where a given beat is.
+    const base = b.sheet.getBoundingClientRect().left;
+    const byBeat = new Map();
+    drawnNotesOf(b.osmd).forEach((n) => {
+      if (n.beats == null) return;
+      const x = Math.round(n.el.getBoundingClientRect().left - base);
+      if (cut != null && x >= cut) return;   // a padding bar: clipped away, so not this pane's music
+      byBeat.set(n.beats, Math.min(byBeat.has(n.beats) ? byBeat.get(n.beats) : Infinity, x));
+    });
+    b.marks = [...byBeat.entries()].map(([beat, x]) => ({ beat, x })).sort((p, q) => p.beat - q.beat);
+    b.head = document.createElement('div');
+    b.head.className = 'cmp-head';
+    b.head.style.display = 'none';
+    b.sheet.appendChild(b.head);
+    return { range: b.range, label: b.label, lines: linesOf(b), count: xs.length,
+      padded: b.padded, xs };
+  });
+  // Move every pane's playhead to `beat` (absolute quarter-beats, as the transport counts them). A pane
+  // whose stretch doesn't contain that beat hides its own — so while one is sounding the other is
+  // plainly not, which is the whole point of hearing them one after the other.
+  const showCursorAtBeat = (beat) => {
+    built.forEach((b) => {
+      const m = b.marks;
+      if (beat == null || !m.length || beat < m[0].beat - 1e-6 || beat > m[m.length - 1].beat + 1e-6) {
+        b.head.style.display = 'none';
+        return;
+      }
+      let at = 0;
+      for (let i = 0; i < m.length && m[i].beat <= beat + 1e-6; i++) at = i;
+      b.head.style.left = `${m[at].x - 2}px`;
+      b.head.style.display = '';
+    });
+  };
+  const hideCursor = () => built.forEach((b) => { b.head.style.display = 'none'; });
+  // Re-ink the panes that are already drawn. What the Motifs panel does to the sheet — check a motif,
+  // Find its pattern, dim the rest — has to show up here too, and re-drawing the panes for a colour
+  // change would throw away the alignment that was measured to build them.
+  const recolor = (fn) => ink(fn);
+  return { zoom: z, panes, showCursorAtBeat, hideCursor, recolor };
+}
+
 // Thin OSMD wrapper. opts.osmdFactory(container) lets tests inject a spy; in the browser
 // it defaults to the global OpenSheetMusicDisplay. Visual output is browser-verified;
 // this wrapper's method/argument contract is unit-tested via an injected fake.
 export function createMusicRenderer(container, opts = {}) {
+  patchPedalGhostNoteCrash();   // before the first render — see patchPedalGhostNoteCrash
   const factory = opts.osmdFactory || ((c) => new opensheetmusicdisplay.OpenSheetMusicDisplay(c));
   const osmd = factory(container);
   // Show the score's PRINTED (XML) measure numbers — that's the canonical reference a musician
@@ -363,12 +910,45 @@ export function createMusicRenderer(container, opts = {}) {
   // osmd.render() directly — repainting connectors black and dropping our overlays, which races and
   // often beats our dim pass on load. Wrap render so postRender() (dim + overlays) ALWAYS runs after
   // it, whoever triggered it. The guard stops a postRender that ever re-enters render from looping.
+  // Where the reader put the score, kept across renders. Drawing a different window changes the sheet's
+  // HEIGHT, so the box it scrolls in clamps to the shorter content and the place you were reading is
+  // gone — on a phone, where the preview is a fixed scrolling panel and a script redraws on nearly
+  // every step, that reads as being thrown back to the top over and over. So remember where the reader
+  // left it and put it back after each render; when the height comes back, so does the position.
+  //
+  // A clamp fires a scroll event of its own, and taking that for a choice would overwrite the very
+  // position being rescued — hence settleUntil: scrolls landing just after a render are the browser's,
+  // not the reader's.
+  let scrollBox = null;        // the element that actually scrolls the score (the mobile preview panel)
+  let wantScrollTop = null;
+  let settleUntil = 0;
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('scroll', (e) => {
+      if (Date.now() < settleUntil) return;
+      const t = e.target;
+      const el = (t === document || t === document.documentElement) ? document.scrollingElement : t;
+      if (!el || !el.contains || !container || !el.contains(container)) return;   // not a box the score sits in
+      scrollBox = el;
+      wantScrollTop = el.scrollTop;
+    }, true);
+  }
+  function restoreScroll() {
+    if (!scrollBox || wantScrollTop == null) return;
+    // Clamped by the browser when the sheet is currently shorter than where we were; wantScrollTop is
+    // kept as asked, so the next render that restores the height also restores the place.
+    try { if (Math.abs(scrollBox.scrollTop - wantScrollTop) >= 1) scrollBox.scrollTop = wantScrollTop; } catch (_) {}
+  }
   const _osmdRender = osmd.render.bind(osmd);
   let _inRender = false;
   osmd.render = (...a) => {
     clampCursorToDrawnRange();   // never let OSMD update a cursor that sits outside the drawn window (it throws)
+    settleUntil = Date.now() + 400;
     const out = _osmdRender(...a);
     if (!_inRender) { _inRender = true; try { postRender(); } finally { _inRender = false; } }
+    restoreScroll();
+    // Again once layout has settled: the SVG's final height can land after this call returns, and a
+    // restore against the old height is a restore to the wrong place.
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreScroll);
     return out;
   };
   // Mobile late-settle guard: on phones the URL bar collapsing (≈1s after load), rotation, or the
@@ -397,6 +977,8 @@ export function createMusicRenderer(container, opts = {}) {
   const onSeek = opts.onSeek;   // fired when the click-to-play-from start note changes (set or cleared)
   let totalMeasures = 0;
   let measureOffset = 0;     // sequential MeasureNumber − printed number (the pickup/anacrusis shift)
+  let sourceXml = '';        // the piece's MusicXML as stored, so the layout can be rebuilt from it
+  let alignBars = null;      // printed bars forced to start a line, or null for the score as engraved
   let colorVoices = true;    // voices are colored by default; the UI checkbox starts checked
   let noteNames = false;
   let showChords = false;        // draw stacked chord-candidate labels above each chord area
@@ -408,6 +990,10 @@ export function createMusicRenderer(container, opts = {}) {
   const selectedChords = new Set();   // manually-picked best-match chord names (multi-select; persisted per vocab item)
   let measureHighlight = null;   // [from,to] of a captured vocab range to shade behind the notes
   let stepHighlight = null;      // [from,to] of the current fretboard step's measures (blue band)
+  let phraseBandList = [];       // [{from,to,fill,opacity}] — the bars of a detected phrase's every
+                                 // occurrence, shaded in the family's colour. Many ranges at once
+                                 // (unlike the two single-range bands above), each with its own tint so
+                                 // a modified return reads lighter than the phrase's first statement.
   let extraNoteMarks = null;     // { marks:[{measure,midi}], color } — added-note (variation) highlight,
                                  // re-applied after EVERY render so OSMD's deferred/font-load re-render
                                  // (which rebuilds the SVG) can't wipe it. Cleared on loadDetail.
@@ -437,6 +1023,15 @@ export function createMusicRenderer(container, opts = {}) {
   let tagMode = false;
   let activeTag = null;              // the tag that notehead clicks paint into
   let tagFilter = false;             // when on, dim notes not in the selected tags
+  let dimAll = false;                // authoring aid: dim the whole sheet, keeping only the active/checked
+                                     // tags (and any Find-pattern matches) lit — like tagFilter but forced
+                                     // on even with nothing checked, so notes stand out while tagging.
+  let plainView = false;             // "Original view": suppress ALL motif/phrase overlays (even the base
+                                     // tag tint) so the sheet reads as the untouched piece. Data (tags /
+                                     // phrases) is untouched; cleared the moment any highlight is activated.
+  // On while a rhythm is highlighted (a picked pattern or a selected group): the sheet greys out and
+  // only the rhythm's own colours show, so voice / motif / phrase colours can't be mistaken for it.
+  let rhythmFocus = false;
   let filterTags = new Set();        // tag names the filter shows
   const onPatternsChange = opts.onPatternsChange;   // fired after the user edits per-piece assignments
   // Phrases: per-piece [{ name, color, tags:[tagName], notes:[{measure,midi,beats}] }] — a logical
@@ -449,82 +1044,44 @@ export function createMusicRenderer(container, opts = {}) {
   let phraseFilter = false;          // when on (phrase panel open), dim notes not in a shown phrase
   let shownPhrases = new Set();       // phrase names whose notes are revealed + tinted on the sheet
   const onPhrasesChange = opts.onPhrasesChange;     // fired after the user edits phrases
+  // Rhythm groups: per-piece [{ name, color, ranges:[[fromMeasure,toMeasure],…] }] — BARS the user
+  // judged to share a rhythmic character (see music-rhythm-group.js), highlightable and playable on
+  // their own. Persisted as detail.rhythmGroups.
+  let rhythmGroups = [];
+  const onRhythmGroupsChange = opts.onRhythmGroupsChange;   // fired after the user edits groups
   // A detached copy of the per-piece assignments, safe to persist / hand to the UI.
   function getAssignments() {
     return assignments.map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) }));
   }
   // A detached copy of the phrases, safe to persist / hand to the UI.
   function getPhrases() {
-    return phrases.map((p) => ({ name: p.name, color: p.color, tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
+    // `from`/`to` are reported filled in even for a phrase saved under the old model, so every reader
+    // sees one shape — the stored record is left as it is until the range is actually edited.
+    return phrases.map((p) => {
+      const r = phraseRange(p);
+      return { name: p.name, color: p.color, from: r ? r[0] : null, to: r ? r[1] : null,
+        tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) };
+    });
   }
   function firePhrasesChange() { if (onPhrasesChange) { try { onPhrasesChange(getPhrases()); } catch (_) {} } }
+  // A detached copy of the rhythm groups, safe to persist / hand to the UI.
+  // A detached copy of one group, safe to persist / hand to the UI. `pattern` carries the settings it
+  // was bound under (unit / proportional) — see music-rhythm-group.js.
+  function copyGroup(g) {
+    const out = { name: g.name, color: g.color, ranges: normRanges(g.ranges), pattern: g.pattern || null };
+    if (out.pattern) { out.unit = g.unit || 'bar'; out.proportional = !!g.proportional; }
+    return out;
+  }
+  function getRhythmGroups() { return rhythmGroups.map(copyGroup); }
+  function fireRhythmGroupsChange() { if (onRhythmGroupsChange) { try { onRhythmGroupsChange(getRhythmGroups()); } catch (_) {} } }
 
   // OSMD Voice object → its global color index (the same index voiceColor() uses), rebuilt every
   // render by applyVoiceColors so rendered notes can be tagged with a stable voice id.
   const voiceIndexByRef = new Map();
 
-  // Push per-voice NoteheadColor onto the OSMD model so it survives re-renders.
-  // No-op on a sheet without instruments (e.g. the test fake / before load).
-  function applyVoiceColors() {
-    const instruments = osmd.Sheet && osmd.Sheet.Instruments;
-    if (!instruments || !instruments.forEach) return;
-    voiceIndexByRef.clear();
-    let vi = 0;
-    instruments.forEach((instr) => {
-      (instr.Voices || []).forEach((voice) => {
-        voiceIndexByRef.set(voice, vi);
-        const color = colorVoices ? voiceColor(vi) : DEFAULT_NOTE_COLOR;
-        (voice.VoiceEntries || []).forEach((ve) => {
-          (ve.Notes || []).forEach((note) => { note.NoteheadColor = color; });
-        });
-        vi++;
-      });
-    });
-  }
+  function applyVoiceColors() { paintVoiceColors(osmd, colorVoices, voiceIndexByRef); }
 
-  // Overlay English/scientific note names on the rendered SVG. Removed + rebuilt on every
-  // render. No-op when there's no DOM container / rendered graphic (test fakes, jsdom).
-  // OSMD's Pitch.getHalfTone() + 12 is the MIDI number (C4 → 48 + 12 = 60).
-  function applyNoteNames() {
-    if (!container || !container.querySelectorAll) return;
-    const svg = container.querySelector('svg');
-    if (!noteNames) { container.querySelectorAll('.note-name-layer').forEach((n) => n.remove()); return; }
-    const measureList = osmd.graphic && osmd.graphic.measureList;
-    if (!measureList || !measureList.forEach || !svg) return;
-    // Build-then-swap: a getBBox that throws/returns garbage mid-transition won't blank the labels.
-    swapOverlayLayer(svg, 'note-name-layer', (layer) => {
-      measureList.forEach((measures) => {
-        (measures || []).forEach((measure) => {
-          ((measure && measure.staffEntries) || []).forEach((se) => {
-            (se.graphicalVoiceEntries || []).forEach((gve) => {
-              (gve.notes || []).forEach((gnote) => {
-                const pitch = gnote.sourceNote && gnote.sourceNote.Pitch;
-                if (!pitch || typeof pitch.getHalfTone !== 'function') return; // rest / no pitch
-                const label = noteName(pitch.getHalfTone() + 12);
-                if (!label) return;
-                const vf = gnote.vfnote;
-                const el = vf && vf[0] && vf[0].attrs && vf[0].attrs.el;
-                if (!el || !el.querySelectorAll) return;
-                const heads = el.querySelectorAll('.vf-notehead');
-                const head = heads[gnote.vfnoteIndex || 0] || heads[0];
-                if (!head || !head.getBBox) return;
-                let b; try { b = head.getBBox(); } catch (_) { return; }   // skip a note whose box isn't measurable yet
-                // HTML label (foreignObject), not SVG <text>: on Android/Blink SVG-text glyphs collapse
-                // after OSMD's music font loads. Centred above the notehead. The white halo (so a staff
-                // line can't strike through the glyph) is a CSS text-shadow instead of paint-order stroke.
-                const fo = svgHtmlLabel(document, {
-                  x: b.x + b.width / 2, y: b.y - 2, fontSize: 7, anchor: 'middle',
-                  css: 'color:#444;text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 2px #fff;',
-                  text: label,
-                });
-                layer.appendChild(fo);
-              });
-            });
-          });
-        });
-      });
-    });
-  }
+  function applyNoteNames() { paintNoteNames(osmd, container, noteNames); }
 
   // A VexFlow key ("c#/4") → pitch-class name ("C#"), preserving the notated accidental so
   // it matches the key-spelled chord tones in allChords.
@@ -567,6 +1124,11 @@ export function createMusicRenderer(container, opts = {}) {
     measureList.forEach((measures, a) => {
       const num = absoluteMeasureNumber(measures, a, measureList.length);
       (measures || []).forEach((measure) => {
+        // An EMPTY staff slot. OSMD hands back a measureList with holes in it — a trailing row whose
+        // staves are all undefined, and (on some scores) a staff that carries nothing in one measure.
+        // Reading through one threw before a note was collected, so the whole piece failed to open
+        // with "Cannot read properties of undefined". A hole holds no notes, so skipping loses nothing.
+        if (!measure) return;
         const system = systemIndexOf(measure, systemCache);   // wrapped-line index (null if unknown)
         ((measure.staffEntries) || []).forEach((se) => {
           const onsetBeats = staffEntryOnsetBeats(se);   // shared by all notes in this staff entry
@@ -582,6 +1144,14 @@ export function createMusicRenderer(container, opts = {}) {
               // authoritative notated spelling) and fall back to the VexFlow key only when the
               // model is unavailable — the key can drop an accidental drawn as a separate glyph.
               const sourceNote = gnote.sourceNote;
+              // A rest is a StaveNote as well: VexFlow gives it a real .vf-notehead element and a
+              // PLACEHOLDER key — b/4, d/5, or wherever it was nudged to clear another voice. It has no
+              // Pitch, so the vexKey fallback below read that placeholder and invented a pitch for it.
+              // Every consumer of this stream then saw phantom notes: 21 of them in the Marmotte, mostly
+              // B4/D5. They padded the motif search's gap structure, could out-rank a real melody note in
+              // the top-note-per-onset rule, skewed the key histogram, and — since no sound exists at
+              // those identities — silently swallowed a 🔇 click on any rest.
+              if (sourceNote && (typeof sourceNote.isRest === 'function' ? sourceNote.isRest() : sourceNote.isRestFlag)) return;
               const pitch = sourceNote && sourceNote.Pitch;
               const name = pitchClassFromPitch(pitch) || vexKeyToPitchClass(vf[0].keys && vf[0].keys[idx]);
               // Skip notes whose notehead isn't actually in the rendered SVG: OSMD's measureList
@@ -602,10 +1172,15 @@ export function createMusicRenderer(container, opts = {}) {
               const durBeats = (len && typeof len.RealValue === 'number') ? len.RealValue * 4 : null;
               const voiceRef = sourceNote && sourceNote.ParentVoiceEntry && sourceNote.ParentVoiceEntry.ParentVoice;
               const voice = voiceIndexByRef.has(voiceRef) ? voiceIndexByRef.get(voiceRef) : 0;
+              // A grace note's notehead sits ON its principal's onset — that is its identity, and the
+              // schedule matches it there too. Flagged so the pattern search can give it a slot of its
+              // own just BEFORE the beat; sharing the onset, it always lost to the principal and no
+              // motif could contain or match an ornament.
+              const grace = !!(sourceNote && (sourceNote.IsGraceNote || sourceNote.isGraceNote));
               // `measure`/`idx` are the note's stable musical key (absolute measure + position
               // within it), used to re-anchor the draggable chord window across re-renders.
               const arr = (byMeasure[num] = byMeasure[num] || []);
-              arr.push({ name, left: b.x, el, measure: num, idx: arr.length, onsetBeats, midi, durBeats, voice, system });
+              arr.push({ name, left: b.x, el, measure: num, idx: arr.length, onsetBeats, midi, durBeats, voice, system, grace });
             });
           });
         });
@@ -665,11 +1240,31 @@ export function createMusicRenderer(container, opts = {}) {
   // noteheads) in extraNoteMarks.color. Called from postRender after every render, so OSMD's
   // deferred/font-load re-render — which rebuilds the SVG and drops direct notehead paint — can't
   // leave the added notes uncolored. No-op (returns 0) when no marks are set.
+  // Marks carry (measure, midi, onsetBeats-from-the-barline). Measure+midi alone is not an identity:
+  // a bar that already holds a written C5 would have it inked as "added" alongside the variation's new
+  // C5. So when a bar has several noteheads of the mark's pitch, take the one whose position in the bar
+  // is nearest the mark's, and let each notehead be claimed once. A single candidate is used as-is,
+  // which is also the path taken by marks recorded before onsetBeats existed.
   function applyExtraNoteHighlight() {
     if (!extraNoteMarks || !extraNoteMarks.marks || !extraNoteMarks.marks.length) return 0;
     const byM = renderedNotesByMeasure();
     const els = [];
-    extraNoteMarks.marks.forEach((m) => (byM[m.measure] || []).forEach((n) => { if (n.midi === m.midi) els.push(n); }));
+    const claimed = new Set();
+    extraNoteMarks.marks.forEach((m) => {
+      const cands = (byM[m.measure] || []).filter((n) => n.midi === m.midi);
+      if (!cands.length) return;
+      if (cands.length === 1 || m.onsetBeats == null) { els.push(cands[0]); return; }
+      const barStart = measureStartBeat(m.measure);
+      let best = null, bestGap = Infinity;
+      cands.forEach((n) => {
+        if (claimed.has(n)) return;
+        const gap = Math.abs((n.onsetBeats - barStart) - m.onsetBeats);
+        if (gap < bestGap) { bestGap = gap; best = n; }
+      });
+      if (!best) return;
+      claimed.add(best);
+      els.push(best);
+    });
     highlightNotes(els, extraNoteMarks.color);
     return els.length;
   }
@@ -744,19 +1339,6 @@ export function createMusicRenderer(container, opts = {}) {
   }
   // Just the vertical extent — used to group notes/labels into staff systems.
   function elBand(el) { const b = elBox(el); return b ? { top: b.top, bottom: b.bottom } : null; }
-
-  // Onset of a graphical staff entry in quarter-note beats from the piece start, read from OSMD's
-  // source timestamps (RealValue is in whole notes → ×4 for quarter beats). null when unavailable,
-  // in which case window playback falls back from note-accurate to measure-granular.
-  function staffEntryOnsetBeats(se) {
-    try { if (se && se.getAbsoluteTimestamp) { const t = se.getAbsoluteTimestamp(); if (t && typeof t.RealValue === 'number') return t.RealValue * 4; } } catch (_) {}
-    try {
-      const sse = se && (se.sourceStaffEntry || se.parentStaffEntry);
-      const t = sse && (sse.AbsoluteTimestamp || (sse.getAbsoluteTimestamp && sse.getAbsoluteTimestamp()));
-      if (t && typeof t.RealValue === 'number') return t.RealValue * 4;
-    } catch (_) {}
-    return null;
-  }
 
   // Per-system [{top,bottom}] in svg-user space, indexed so bands[i] is the band of the notes whose
   // `system === i` — a label/window can sit on the note's OWN line. PRIMARY source is OSMD's system
@@ -868,25 +1450,40 @@ export function createMusicRenderer(container, opts = {}) {
     return out;
   }
 
-  // Chord labels are anchored PER MEASURE (not per sliding-window "area"): each measure's notes are
-  // scored as a unit so the vertical downbeat stack drives the label and it can't drift across the
-  // barline (the window scan blurred boundaries). But a chord whose completing tone sits just over a
-  // barline is allowed: bestChordsCompleting may pull in the measure's NON-STACK neighbours within
-  // ±LOOK_BEATS to finish a same-bass chord (conservative — see that function). Shape matches the old
-  // areas — [{ x, top, chords }] — so the placement/de-crowding code below is unchanged.
+  // Chord labels are resolved PER MEASURE (not per sliding-window "area"), so a label can't drift
+  // across the barline the way the window scan let it. Within a measure there are two cases:
+  //   • Chords are PRINTED (notes stacked on a beat) → one label per such beat, anchored at that beat,
+  //     naming exactly what sounds there. A bar that goes C then G shows both.
+  //   • Nothing is stacked (a single melodic line) → one guessed label for the measure, and a chord
+  //     whose completing tone sits just over a barline is allowed: bestChordsCompleting may pull in
+  //     NON-STACK neighbours within ±LOOK_BEATS to finish a same-bass chord (conservative — see it).
+  // Shape matches the old areas — [{ x, top, chords }] — so the placement/de-crowding code is unchanged.
   const LOOK_BEATS = 1.5;   // how far across a barline a completing tone may sit
   function measureChordAreas(notes) {
-    // A note is "stacked" if another note in this system shares its onset column — those carry the
-    // measure's own harmony and are never borrowed across the barline (only melodic singletons are).
-    const xCount = new Map();
-    notes.forEach((n) => xCount.set(n.left, (xCount.get(n.left) || 0) + 1));
-    const singletons = notes.filter((n) => (xCount.get(n.left) || 0) < 2 && n.onsetBeats != null);
+    // A note is "stacked" if another note in this system shares its BEAT — those carry the measure's
+    // own harmony and are never borrowed across the barline (only melodic singletons are). Keyed by
+    // beat, not x: VexFlow offsets a notehead in a cluster/cross-staff chord, so x split real stacks.
+    const beatCount = new Map();
+    notes.forEach((n) => { const k = n.onsetBeats != null ? n.onsetBeats : n.left; beatCount.set(k, (beatCount.get(k) || 0) + 1); });
+    const singletons = notes.filter((n) => (beatCount.get(n.onsetBeats != null ? n.onsetBeats : n.left) || 0) < 2 && n.onsetBeats != null);
     const byMeasure = new Map();
     notes.forEach((n) => { const arr = byMeasure.get(n.measure) || []; arr.push(n); byMeasure.set(n.measure, arr); });
     const out = [];
     [...byMeasure.keys()].sort((a, b) => a - b).forEach((m) => {
       const mn = byMeasure.get(m);
       if (mn.length < 2) return;
+      // Printed chords first: every beat whose stack spells a chord gets its OWN label, anchored at
+      // that beat (a bar reading C then G shows both, where each sounds — chord-chart convention).
+      const stacked = verticalChords(mn);
+      if (stacked.length) {
+        stacked.forEach((c) => out.push({
+          x: c.x != null ? c.x : Math.min(...mn.map((n) => n.left)), top: 0, measure: m,
+          chords: [{ name: c.name, notes: c.notes, chordTones: c.chordTones }],
+        }));
+        return;
+      }
+      // Nothing sounds together in this bar → guess from the melody, allowing a completing tone just
+      // across the barline (see bestChordsCompleting).
       const own = new Set(mn);
       const onsets = mn.map((n) => n.onsetBeats).filter((v) => v != null);
       let neighbors = [];
@@ -985,40 +1582,52 @@ export function createMusicRenderer(container, opts = {}) {
     return full ? a + 1 : shownFrom + a;
   }
 
-  // Shade a [from,to] measure range behind the notes. One translucent rect per matching measure,
-  // sized from its VexFlow stave geometry (the same coordinates OSMD renders into, per
-  // getMeasurePosition in the original analysis code) — robust across line breaks and
-  // partial/segment renders. No-op without a range.
-  function shadeMeasureRange(svg, measureList, range, { cls, fill, opacity }) {
-    if (!range) return;
-    const [from, to] = range;
+  // Box of one measure in the coordinates OSMD renders into, unioning its staves (a grand staff spans
+  // several) — read off the VexFlow stave geometry, per getMeasurePosition in the original analysis
+  // code, so it is robust across line breaks and partial/segment renders. Null when unmeasurable.
+  const SHADE_PAD_Y = 8;
+  function measureUnionBox(measures) {
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, ok = false;
+    (measures || []).forEach((measure) => {
+      const st = measure && measure.stave;
+      if (!st) return;
+      const left = (st.x != null ? st.x : st.start_x);
+      const width = (st.width != null ? st.width : ((st.end_x || 0) - (st.start_x || 0)));
+      const top = st.y;
+      const height = (st.height != null ? st.height : 48);
+      if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+      ok = true;
+      if (left < x1) x1 = left;
+      if (left + width > x2) x2 = left + width;
+      if (top < y1) y1 = top;
+      if (top + height > y2) y2 = top + height;
+    });
+    return ok ? { x1, y1, x2, y2 } : null;
+  }
+
+  // Boxes of the measures in [from,to], measure-number order. Shared by both shading styles below.
+  function measureBoxesInRange(measureList, from, to) {
+    const out = [];
     measureList.forEach((measures, a) => {
       const abs = absoluteMeasureNumber(measures, a, measureList.length);
       if (abs < from || abs > to) return;
-      // Union the staves of this measure (a grand staff spans several) into one box.
-      let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, ok = false;
-      (measures || []).forEach((measure) => {
-        const st = measure && measure.stave;
-        if (!st) return;
-        const left = (st.x != null ? st.x : st.start_x);
-        const width = (st.width != null ? st.width : ((st.end_x || 0) - (st.start_x || 0)));
-        const top = st.y;
-        const height = (st.height != null ? st.height : 48);
-        if (!Number.isFinite(left) || !Number.isFinite(top)) return;
-        ok = true;
-        if (left < x1) x1 = left;
-        if (left + width > x2) x2 = left + width;
-        if (top < y1) y1 = top;
-        if (top + height > y2) y2 = top + height;
-      });
-      if (!ok) return;
-      const padY = 8;
+      const b = measureUnionBox(measures);
+      if (b) out.push({ abs, ...b });
+    });
+    return out.sort((p, q) => p.abs - q.abs);
+  }
+
+  // Shade a [from,to] measure range behind the notes — one translucent rect per matching measure.
+  // No-op without a range.
+  function shadeMeasureRange(svg, measureList, range, { cls, fill, opacity }) {
+    if (!range) return;
+    measureBoxesInRange(measureList, range[0], range[1]).forEach((b) => {
       const rect = document.createElementNS(SVG_NS, 'rect');
       rect.setAttribute('class', cls);
-      rect.setAttribute('x', x1);
-      rect.setAttribute('y', y1 - padY);
-      rect.setAttribute('width', x2 - x1);
-      rect.setAttribute('height', (y2 - y1) + 2 * padY);
+      rect.setAttribute('x', b.x1);
+      rect.setAttribute('y', b.y1 - SHADE_PAD_Y);
+      rect.setAttribute('width', b.x2 - b.x1);
+      rect.setAttribute('height', (b.y2 - b.y1) + 2 * SHADE_PAD_Y);
       rect.setAttribute('fill', fill);
       rect.setAttribute('opacity', opacity);
       rect.setAttribute('pointer-events', 'none');
@@ -1026,17 +1635,94 @@ export function createMusicRenderer(container, opts = {}) {
     });
   }
 
+  // Shade ONE occurrence of a detected phrase as a BLOCK rather than as loose per-bar rects: its bars
+  // are merged into a single rect per system, trimmed at each end.
+  //
+  // The trim is the whole point. A phrase whose next return starts on the very next bar produced an
+  // unbroken wash of one colour across both, so there was no way to see where one ended — which is
+  // exactly what a phrase map has to show. Trimming each block leaves a visible seam at a boundary
+  // while bar lines INSIDE an occurrence stay unbroken, so a block reads as one phrase.
+  //
+  // A phrase that breaks across a line becomes several blocks with no seam to read, so the first block
+  // also gets a small badge (B2′) naming which return it is. That is drawn ON TOP of the notes — it is
+  // a label, and a label behind a notehead is no label.
+  const PHRASE_BLOCK_TRIM = 5;   // svg units off each end of a block → the seam at a phrase boundary
+  function shadePhraseOccurrence(svg, measureList, band, cls) {
+    const boxes = measureBoxesInRange(measureList, band.from, band.to);
+    if (!boxes.length) return;
+    // Merge into runs of consecutive bars sharing a system (same stave top). A line break starts a run.
+    const runs = [];
+    boxes.forEach((b) => {
+      const last = runs[runs.length - 1];
+      if (last && Math.abs(last.y1 - b.y1) < 1 && b.abs === last.lastAbs + 1) {
+        last.x2 = Math.max(last.x2, b.x2);
+        last.y2 = Math.max(last.y2, b.y2);
+        last.lastAbs = b.abs;
+      } else {
+        runs.push({ x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2, lastAbs: b.abs });
+      }
+    });
+    runs.forEach((r, i) => {
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('class', cls);
+      rect.setAttribute('x', r.x1 + PHRASE_BLOCK_TRIM);
+      rect.setAttribute('y', r.y1 - SHADE_PAD_Y);
+      // Never let the trim collapse a short block (a one-bar occurrence) to nothing.
+      rect.setAttribute('width', Math.max(2, (r.x2 - r.x1) - 2 * PHRASE_BLOCK_TRIM));
+      rect.setAttribute('height', (r.y2 - r.y1) + 2 * SHADE_PAD_Y);
+      rect.setAttribute('fill', band.fill);
+      rect.setAttribute('opacity', String(band.opacity));
+      rect.setAttribute('pointer-events', 'none');
+      svg.insertBefore(rect, svg.firstChild);
+      if (i !== 0 || !band.badge) return;
+      const t = document.createElementNS(SVG_NS, 'text');
+      t.setAttribute('class', cls);
+      t.setAttribute('x', r.x1 + PHRASE_BLOCK_TRIM + 2);
+      t.setAttribute('y', r.y1 - SHADE_PAD_Y + 9);
+      t.setAttribute('font-size', '10');
+      t.setAttribute('font-weight', 'bold');
+      t.setAttribute('fill', band.fill);
+      t.setAttribute('pointer-events', 'none');
+      t.textContent = band.badge;
+      svg.appendChild(t);   // last child → drawn over the notes, so the label stays readable
+    });
+    // Inside a modified return, outline the bars that actually differ from the phrase's first statement.
+    // The lighter fill only says "something in here changed"; this says where. A dashed outline rather
+    // than a stronger fill, because fill intensity already means literal-vs-varied and reusing it would
+    // make a changed bar of a variation look like the reference.
+    (band.changed || []).forEach((m) => {
+      const box = measureBoxesInRange(measureList, m, m)[0];
+      if (!box) return;
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('class', cls);
+      rect.setAttribute('x', box.x1 + PHRASE_BLOCK_TRIM);
+      rect.setAttribute('y', box.y1 - SHADE_PAD_Y);
+      rect.setAttribute('width', Math.max(2, (box.x2 - box.x1) - 2 * PHRASE_BLOCK_TRIM));
+      rect.setAttribute('height', (box.y2 - box.y1) + 2 * SHADE_PAD_Y);
+      rect.setAttribute('fill', 'none');
+      rect.setAttribute('stroke', band.fill);
+      rect.setAttribute('stroke-width', '1.5');
+      rect.setAttribute('stroke-dasharray', '5 3');
+      rect.setAttribute('opacity', '0.85');
+      rect.setAttribute('pointer-events', 'none');
+      svg.insertBefore(rect, svg.firstChild);   // behind the notes — a frame, not a veil
+    });
+  }
+
   // Two independent shaded bands, rebuilt on every render: the captured vocab range (yellow) and
   // the current fretboard step's measures (blue, echoing the fretboard dots). No-op without a DOM svg.
   const MEASURE_HL_CLASS = 'measure-hl-layer';
   const STEP_HL_CLASS = 'step-hl-layer';
+  const PHRASE_BAND_CLASS = 'phrase-band-layer';
   function applyMeasureHighlight() {
     if (!container || !container.querySelectorAll) return;
-    container.querySelectorAll('.' + MEASURE_HL_CLASS + ',.' + STEP_HL_CLASS).forEach((n) => n.remove());
-    if (!measureHighlight && !stepHighlight) return;
+    container.querySelectorAll('.' + MEASURE_HL_CLASS + ',.' + STEP_HL_CLASS + ',.' + PHRASE_BAND_CLASS).forEach((n) => n.remove());
+    if (!measureHighlight && !stepHighlight && !phraseBandList.length) return;
     const svg = container.querySelector('svg');
     const measureList = osmd.graphic && osmd.graphic.measureList;
     if (!svg || !measureList || !measureList.length) return;
+    // Phrase blocks first, so the vocab/step bands stay readable on top of them.
+    phraseBandList.forEach((b) => shadePhraseOccurrence(svg, measureList, b, PHRASE_BAND_CLASS));
     shadeMeasureRange(svg, measureList, measureHighlight, { cls: MEASURE_HL_CLASS, fill: '#ffe9a8', opacity: '0.5' });
     shadeMeasureRange(svg, measureList, stepHighlight, { cls: STEP_HL_CLASS, fill: '#1565c0', opacity: '0.18' });
   }
@@ -1084,17 +1770,24 @@ export function createMusicRenderer(container, opts = {}) {
   }
 
   // Color noteheads by their pattern tag (first tag wins) and, when the filter is on, dim notes that
-  // aren't in a selected tag. Runs in postRender AFTER applySuppressionDim so tag colors win over the
-  // suppression grey. No-op when there are no patterns.
+  // aren't in a selected tag. Runs in postRender after applySuppressionDim so tag colors win over the
+  // suppression grey — EXCEPT while the Suppress-notes toggle is on, when that pass moves to the end
+  // and wins instead (see postRender). No-op when there are no patterns.
   // Tag + phrase coloring / dimming, in one pass. The tag panel (tagFilter) and phrase panel
   // (phraseFilter) each act as a "dim mode": while open, notes NOT in a revealed tag/phrase are
   // dimmed, and a note is revealed (kept lit + colored) when its tag is checked (filterTags) or a
   // phrase containing that tag is shown (shownPhrases). The tag currently being painted is always
   // revealed so authoring stays visible. When neither panel is open, tagged notes keep their base
   // color-by-tag and nothing dims. Phrase color wins over tag color on a shared note.
-  function applyTagOverlay() {
-    if (!container || !container.querySelectorAll) return;
-    if (!tagFilter && !phraseFilter && !assignments.length) return;   // nothing to color / dim
+  //
+  // The decision itself is separated from the painting: (note identity) → the colour to ink it, or
+  // null to leave it as rendered. null instead of a function means the overlay is off entirely. Kept
+  // apart from applyTagOverlay so the compare view — a different OSMD instance drawing the same piece
+  // — can ask the same question about its own notes and come out the same colour.
+  function overlayPainter() {
+    if (plainView) return null;     // "Original view" — no tag/phrase colour or dim at all
+    if (rhythmFocus) return null;   // a rhythm highlight owns the sheet on its own — see applyRhythmFocusDim
+    if (!tagFilter && !phraseFilter && !dimAll && !assignments.length) return null;   // nothing to color / dim
     const indexed = indexAssignments(assignments);
     const cmap = colorMap(tagRegistry);
     const revealTags = new Set(filterTags);
@@ -1104,28 +1797,82 @@ export function createMusicRenderer(container, opts = {}) {
     // note-id → phrase color, for the revealed phrases (their resolved union of tags' + extra notes).
     const phraseKeyColor = new Map();
     if (phraseFilter) phrases.forEach((p) => {
-      if (revealPhrases.has(p.name)) resolvePhraseNoteIds(p, assignments).forEach((n) => phraseKeyColor.set(tagNoteId(n), p.color));
+      if (revealPhrases.has(p.name)) phraseNoteIds(p).forEach((n) => phraseKeyColor.set(tagNoteId(n), p.color));
     });
-    orderedRenderedNotes().forEach((n) => {
-      if (n.midi == null || !n.el) return;
-      const key = tagNoteId({ measure: n.measure, midi: n.midi, beats: n.onsetBeats });
+    return (key) => {
       let paint = null, lit = false;
       if (phraseFilter && phraseKeyColor.has(key)) { paint = phraseKeyColor.get(key); lit = true; }
-      else if (tagFilter) {
+      else if (tagFilter || dimAll) {
         // Light the note for ANY revealed tag it belongs to — not just its first tag — so a note
-        // shared with an earlier (hidden) tag still shows when a later tag is revealed.
+        // shared with an earlier (hidden) tag still shows when a later tag is revealed. Under dimAll the
+        // Find-pattern matches are re-lit afterwards by lastSearch (postRender), so they survive the dim.
         const tname = revealedTagForKey(indexed, key, revealTags);
         if (tname) { paint = cmap[tname]; lit = true; }
       } else {
         const tname = firstTagForKey(indexed, key);
         if (tname) { paint = cmap[tname]; }   // panels closed → base color-by-tag, no dim
       }
-      if (!lit && (tagFilter || phraseFilter)) paint = DIM_CONNECTOR_COLOR;   // dim the un-revealed
-      if (!paint) return;
+      if (!lit && (tagFilter || phraseFilter || dimAll)) paint = DIM_CONNECTOR_COLOR;   // dim the un-revealed
+      return paint;
+    };
+  }
+
+  function applyTagOverlay() {
+    if (!container || !container.querySelectorAll) return;
+    const paintOf = overlayPainter();
+    if (!paintOf) return;
+    orderedRenderedNotes().forEach((n) => {
+      if (n.midi == null || !n.el) return;
+      const paint = paintOf(tagNoteId({ measure: n.measure, midi: n.midi, beats: n.onsetBeats }));
+      if (paint) paintNoteElement(n.el, paint);
+    });
+  }
+
+  // Grey → hex + rgb() forms, for reading back a fill that the browser may have normalised.
+  const DIM_HEX = DIM_CONNECTOR_COLOR.toLowerCase();
+  const DIM_RGB = (() => { const m = DIM_HEX.match(/^#(\w\w)(\w\w)(\w\w)$/); return m ? `rgb(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)})` : ''; })();
+  const isDimFill = (v) => { v = (v || '').toLowerCase(); return v === DIM_HEX || v === DIM_RGB; };
+
+  // Unison fix: in a merged/two-voice piece the SAME pitch can sound at the SAME onset in two voices, so
+  // OSMD draws two noteheads at one spot. A motif/phrase search lights one of them (its notehead carries
+  // data-chord-orig); its unison partner was greyed by applyTagOverlay and, drawn on top, hides the lit
+  // one. Promote every grey notehead that shares an identity (measure,midi,beats) with a lit one to that
+  // lit colour — so both read as matched, and getDimmedNotes (grey-based) no longer mutes them in playback.
+  // Runs in postRender AFTER the search re-light. No-op when nothing is highlighted.
+  function promoteUnisonHighlights() {
+    if (!container || !container.querySelectorAll) return;
+    const ordered = orderedRenderedNotes();
+    const litColor = new Map();   // identity → the highlight colour it was lit with
+    ordered.forEach((n) => {
+      if (n.midi == null || !n.el) return;
+      const head = n.el.querySelector('path[data-chord-orig]');
+      if (!head) return;
+      const color = head.getAttribute('fill');
+      if (color && !isDimFill(color)) litColor.set(tagNoteId({ measure: n.measure, midi: n.midi, beats: n.onsetBeats }), color);
+    });
+    if (!litColor.size) return;
+    ordered.forEach((n) => {
+      if (n.midi == null || !n.el) return;
+      const color = litColor.get(tagNoteId({ measure: n.measure, midi: n.midi, beats: n.onsetBeats }));
+      if (!color) return;
       [n.el, ...n.el.querySelectorAll('path, ellipse, circle, rect')].forEach((h) => {
-        h.setAttribute('fill', paint); h.style.fill = paint;
+        if (isDimFill(h.getAttribute('fill')) || isDimFill(h.style && h.style.fill)) { h.setAttribute('fill', color); h.style.fill = color; }
+      });
+    });
+  }
+
+  // While a rhythm (a picked pattern or a selected group) is highlighted, that highlight owns the
+  // sheet: every notehead goes grey first, so voice colours and motif/phrase colours can't compete
+  // with it, and only what the rhythm lights up carries colour. Runs before the highlight is
+  // re-applied in postRender; a no-op when no rhythm is highlighted.
+  function applyRhythmFocusDim() {
+    if (!rhythmFocus || !container || !container.querySelectorAll) return;
+    orderedRenderedNotes().forEach((n) => {
+      if (!n.el) return;
+      [n.el, ...n.el.querySelectorAll('path, ellipse, circle, rect')].forEach((h) => {
+        h.setAttribute('fill', DIM_CONNECTOR_COLOR); h.style.fill = DIM_CONNECTOR_COLOR;
         const st = h.getAttribute('stroke');
-        if (st && st !== 'none') { h.setAttribute('stroke', paint); h.style.stroke = paint; }
+        if (st && st !== 'none') { h.setAttribute('stroke', DIM_CONNECTOR_COLOR); h.style.stroke = DIM_CONNECTOR_COLOR; }
       });
     });
   }
@@ -1153,8 +1900,10 @@ export function createMusicRenderer(container, opts = {}) {
         const mid = (box.top + box.bottom) / 2;
         // Prefer OSMD's system index; only fall back to nearest-band-by-y when it's unavailable.
         const band = (n.system != null) ? n.system : (bands.length ? nearestStaffIdx(bands, mid) : 0);
+        // `grace` has to be carried, not re-derived: this re-pack is what every consumer reads, and
+        // dropping the flag here silently disabled the whole grace handling in the pattern search.
         out.push({ name: n.name, el: n.el, measure: n.measure, idx: n.idx, order: out.length, band,
-          onsetBeats: n.onsetBeats, midi: n.midi, durBeats: n.durBeats, voice: n.voice,
+          onsetBeats: n.onsetBeats, midi: n.midi, durBeats: n.durBeats, voice: n.voice, grace: !!n.grace,
           left: box.left, right: box.right, top: box.top, bottom: box.bottom });
       });
     });
@@ -1165,17 +1914,30 @@ export function createMusicRenderer(container, opts = {}) {
   // Stream indices (ascending) of the given note identities in the rendered `ordered` stream,
   // matched by (midi, onset). Unrendered notes drop out. Shared by tag + phrase pattern search.
   function orderedIndicesFor(noteIds, ordered) {
-    return (noteIds || [])
-      .map((tn) => ordered.findIndex((n) => n.midi === tn.midi && Math.abs((n.onsetBeats == null ? NaN : n.onsetBeats) - tn.beats) < NOTE_EPS))
-      .filter((i) => i >= 0)
-      .sort((p, q) => p - q);
+    return resolveTagIndices(noteIds, ordered);
   }
 
   // Resolve the diatonic key ONCE from the whole piece (or honor the picked `key`), so a search's
   // key label and every tag/phrase within it use the same key. Null unless diatonic + interval mode.
+  // Uses the full detection (signature + cadences) rather than the profile alone: diatonic matching
+  // maps notes onto the major or the natural-minor collection, so a wrong mode shifts every degree.
   function resolveSearchKey(ordered, { intervalBasis, wantInt, key }) {
     if (intervalBasis !== 'diatonic' || !wantInt) return null;
-    return key || guessKey(pcHistogram(ordered.map((n) => n.midi)));
+    if (key) return key;
+    const d = detectedKey(ordered);
+    return d ? { tonicPc: d.tonicPc, mode: d.mode } : guessKey(pcHistogram(ordered.map((n) => n.midi)));
+  }
+
+  // The rendered notes' key, judged against the signature the sheet is actually drawn in (taken from
+  // the loaded piece's key string, so a transposed/combined score is judged in ITS key). Null when
+  // nothing is drawn. Shared by the diatonic search and the Transpose/patKey "original key".
+  function detectedKey(ordered) {
+    const notes = (ordered || []).filter((n) => n.midi != null);
+    if (!notes.length) return null;
+    const parsed = currentKey ? parseKeyName(currentKey) : null;
+    const fifths = parsed ? fifthsOfKey(parsed.tonicPc, parsed.mode) : null;
+    return detectKey(notes.map((n) => ({ midi: n.midi, measure: n.measure, onsetBeats: n.onsetBeats, durBeats: n.durBeats })),
+      { fifths, hasSignature: fifths != null });
   }
 
   // Search the open sheet for other occurrences of each checked filter tag's note pattern, and
@@ -1195,17 +1957,44 @@ export function createMusicRenderer(container, opts = {}) {
   // assignments change (the search must be re-run explicitly then). `_inReapply` guards re-entry.
   let lastSearch = null;
   let _inReapply = false;
+  function setRhythmFocus(on) {
+    const next = !!on;
+    if (rhythmFocus === next) return;
+    rhythmFocus = next;
+    if (!_inReapply) redraw();   // repaint the sheet under (or back out from) the focus
+  }
+  // The note line the pattern search runs on. Grace notes are nudged just before their principal so
+  // each holds its own moment: they are drawn (and identified) AT the principal's onset, so on a line
+  // of one-note-per-onset they were always beaten by it and stayed invisible to motifs. The nudge is
+  // search-only — every stored identity still uses the notehead's real onset.
+  const GRACE_NUDGE = 0.001;
+  function searchStream(ordered) {
+    const graceCount = new Map();
+    ordered.forEach((n) => { if (n.grace) graceCount.set(n.onsetBeats, (graceCount.get(n.onsetBeats) || 0) + 1); });
+    const placed = new Map();
+    return ordered.map((n) => {
+      let onset = n.onsetBeats;
+      if (n.grace && onset != null) {
+        const k = (placed.get(n.onsetBeats) || 0);
+        placed.set(n.onsetBeats, k + 1);
+        onset -= GRACE_NUDGE * (graceCount.get(n.onsetBeats) - k);   // first grace sits earliest
+      }
+      return { midi: n.midi, durBeats: n.durBeats, voice: n.voice, onset };
+    });
+  }
+
   function searchTagPatterns({ mode = 'intervals', durationStrict = true, intervalBasis = 'chromatic', key = null } = {}) {
     clearHighlight();
     lastPatternMatches = [];
     lastPatternOriginals = [];
     const ordered = orderedRenderedNotes();
-    const stream = ordered.map((n) => ({ midi: n.midi, durBeats: n.durBeats, voice: n.voice, onset: n.onsetBeats }));
+    const stream = searchStream(ordered);
     const wantInt = mode === 'intervals' || mode === 'both';
     const resolvedKey = resolveSearchKey(ordered, { intervalBasis, wantInt, key });
     const resolvedKeyLabel = resolvedKey ? keyLabel(resolvedKey.tonicPc, resolvedKey.mode) : null;
     const cmap = colorMap(tagRegistry);
     const results = [];
+    const painted = [];   // every matched occurrence, painted after the loop in size order
     assignments.forEach((a) => {
       if (!filterTags.has(a.name)) return;
       const color = cmap[a.name] || CHORD_HL_COLOR;
@@ -1213,23 +2002,235 @@ export function createMusicRenderer(container, opts = {}) {
       const idx = orderedIndicesFor(a.notes, ordered);
       if (idx.length < 2) { results.push({ name: a.name, color, count: 0 }); return; }
       const { originalIdx, matches } = findScopedMatches(stream, idx, { mode, durationStrict, intervalBasis, key: resolvedKey });
-      lastPatternOriginals.push({ name: a.name, notes: originalIdx.map((i) => ordered[i]) });   // the tag's own occurrence
+      // The tag's OWN occurrence is painted here too, not left to the tag overlay: this pass opens with
+      // clearHighlight(), which resets every notehead to its base fill — so the overlay's colour on the
+      // notes you tagged by hand was wiped and never put back. They played but did not light up.
+      const own = originalIdx.map((i) => ordered[i]);
+      lastPatternOriginals.push({ name: a.name, notes: own });
+      if (own.length) painted.push({ notes: own, color });
       matches.forEach((m) => {
         const notes = m.map((i) => ordered[i]);
-        highlightNotes(notes, color);
+        painted.push({ notes, color });
         lastPatternMatches.push({ name: a.name, notes });   // one group per matched occurrence
       });
       results.push({ name: a.name, color, count: matches.length });
     });
+    // Paint the longest occurrences LAST, so where a longer motif covers a shorter one the longer
+    // one's colour survives. Painting in motif order made the winner depend on which was tagged first.
+    painted.sort((x, y) => x.notes.length - y.notes.length)
+      .forEach((p) => highlightNotes(p.notes, p.color));
     lastSearch = () => searchTagPatterns({ mode, durationStrict, intervalBasis, key });   // re-apply on re-render
+    // A motif search takes the sheet back from a rhythm highlight. AFTER lastSearch is reassigned:
+    // dropping the focus re-renders, and postRender repaints from whatever lastSearch now names.
+    setRhythmFocus(false);
     return { results, keyLabel: resolvedKeyLabel };
   }
 
   // ── Phrases ────────────────────────────────────────────────────────────────────────────────
+  // ---- Rhythm patterns -------------------------------------------------------------------------
+  // Pitch-blind counterpart of the motif search: read the rhythms the DRAWN notes use (so a segment
+  // view yields that segment's rhythms), list them for a picker, then paint every occurrence of the
+  // picked one. Nothing has to be tagged first.
+  // Meter of one measure, in quarter-beats: its downbeat, the length of ONE BEAT, and the bar length.
+  // Compound meters (6/8, 9/8, 12/8) beat in dotted quarters — that is what makes three eighths a
+  // single beat-cell in 6/8 instead of an arbitrary run of three. Falls back to 4/4. Memoized per scan.
+  function meterOfMeasure(mnum, cache) {
+    if (cache.has(mnum)) return cache.get(mnum);
+    let numerator = 4, denominator = 4;
+    try {
+      const sms = osmd.Sheet && osmd.Sheet.SourceMeasures;
+      const m = sms && sms[Math.max(0, Math.min(sms.length - 1, mnum - 1))];
+      const ts = m && m.ActiveTimeSignature;
+      if (ts && ts.Numerator > 0 && ts.Denominator > 0) { numerator = ts.Numerator; denominator = ts.Denominator; }
+    } catch (_) { /* no sheet / no signature → 4/4 */ }
+    const unit = 4 / denominator;   // the notated beat unit (quarter-beats)
+    const compound = numerator % 3 === 0 && numerator > 3 && (denominator === 8 || denominator === 16);
+    const meter = { barBeat: measureStartBeat(mnum), beatBeats: compound ? unit * 3 : unit, barBeats: numerator * unit };
+    cache.set(mnum, meter);
+    return meter;
+  }
+  function rhythmStream(ordered) {
+    const cache = new Map();
+    return ordered.map((n) => {
+      const m = meterOfMeasure(n.measure, cache);
+      return { midi: n.midi, durBeats: n.durBeats, voice: n.voice, onset: n.onsetBeats, measure: n.measure,
+        barBeat: m.barBeat, beatBeats: m.beatBeats, barBeats: m.barBeats };
+    });
+  }
+  // The rhythm patterns of the open sheet, most frequent first — without the per-occurrence note
+  // lists, which only highlightRhythmPattern needs. See music-rhythm.js for `unit`/`proportional`.
+  function getRhythmPatterns(opts = {}) {
+    return findRhythmPatterns(rhythmStream(orderedRenderedNotes()), opts)
+      .map(({ id, unit, key, label, len, count, measures }) => ({ id, unit, key, label, len, count, measures }));
+  }
+  // Highlight every occurrence of one rhythm pattern (by `id` from getRhythmPatterns), replacing any
+  // prior highlight. A blank id just clears. Re-scans rather than caching occurrences, because a
+  // re-render rebuilds the note elements. Returns { count, label, measures }.
+  function highlightRhythmPattern(id, opts = {}) {
+    clearHighlight();
+    if (!id) { lastSearch = null; setRhythmFocus(false); return { count: 0, label: null, measures: [] }; }
+    lastSearch = () => highlightRhythmPattern(id, opts);   // survive re-renders
+    const ordered = orderedRenderedNotes();
+    const pat = findRhythmPatterns(rhythmStream(ordered), opts).find((p) => p.id === id);
+    if (!pat) return { count: 0, label: null, measures: [] };
+    pat.occurrences.forEach((o, i) => highlightNotes(o.noteIdx.map((k) => ordered[k]), RHYTHM_HL_COLORS[i % RHYTHM_HL_COLORS.length]));
+    const res = { count: pat.count, label: pat.label, measures: pat.measures };
+    setRhythmFocus(true);   // grey the rest of the sheet, then re-paint these (postRender → lastSearch)
+    return res;
+  }
+
+  // Note identities [{measure,midi,beats}] to hand the player as `mutedNotes` so that only one rhythm
+  // pattern sounds — every drawn note that is not part of it (see soloMutedIndices for the rule).
+  // Empty for an unknown id.
+  function getRhythmMutedNotes(id, opts = {}) {
+    if (!id) return [];
+    const ordered = orderedRenderedNotes();
+    const stream = rhythmStream(ordered);
+    const pat = findRhythmPatterns(stream, opts).find((p) => p.id === id);
+    if (!pat) return [];
+    return soloMutedIndices(stream, pat)
+      .map((i) => ({ measure: ordered[i].measure, midi: ordered[i].midi, beats: ordered[i].onsetBeats }));
+  }
+
+  // Note ids of EVERY drawn note in the measures a set of occurrences lands in — the play-set for
+  // "just the bars this rhythm lives in", which keeps those bars' timing exact while the stretches
+  // between them are removed. Onset-ordered, de-duped by (midi, onset).
+  function noteIdsInOccurrenceMeasures(ordered, occurrences) {
+    const bars = new Set();
+    (occurrences || []).forEach((o) => (o.noteIdx || []).forEach((k) => { if (ordered[k]) bars.add(ordered[k].measure); }));
+    if (!bars.size) return [];
+    const seen = new Set();
+    return ordered
+      .filter((n) => bars.has(n.measure))
+      .filter((n) => {
+        const key = `${n.midi}@${n.onsetBeats}`;
+        if (seen.has(key)) return false;
+        seen.add(key); return true;
+      })
+      .map((n) => ({ measure: n.measure, midi: n.midi, beats: n.onsetBeats }))
+      .sort((a, b) => a.beats - b.beats);
+  }
+
+  // Note ids of every drawn note inside one bar range — the play-set for "these bars, exactly as
+  // written". `from`/`to` are PRINTED measure numbers, the numbering the rendered stream itself carries,
+  // so a detected phrase's occurrence can be played straight from its own range with no renumbering
+  // (same reasoning as autoDetectPhrases). De-duped by (midi, onset) so a note doubled across staves is
+  // one event, and onset-ordered because that is what the player's keepNotes path expects.
+  function noteIdsInBarRange(from, to) {
+    const seen = new Set();
+    return orderedRenderedNotes()
+      .filter((n) => n.midi != null && n.measure >= from && n.measure <= to)
+      .filter((n) => {
+        const key = `${n.midi}@${n.onsetBeats}`;
+        if (seen.has(key)) return false;
+        seen.add(key); return true;
+      })
+      .map((n) => ({ measure: n.measure, midi: n.midi, beats: n.onsetBeats }))
+      .sort((a, b) => a.beats - b.beats);
+  }
+
+  // …for a picked pattern: the bars its occurrences land in.
+  function getRhythmMeasureNoteIds(id, opts = {}) {
+    if (!id) return [];
+    const ordered = orderedRenderedNotes();
+    const pat = findRhythmPatterns(rhythmStream(ordered), opts).find((p) => p.id === id);
+    return pat ? noteIdsInOccurrenceMeasures(ordered, pat.occurrences) : [];
+  }
+
+  // ---- Rhythm groups ---------------------------------------------------------------------------
+  // A group is a rhythm FIGURE limited to its own bars, so it behaves exactly like a picked pattern —
+  // same scan, same highlight, same solo — only fed the notes of those bars (see music-rhythm-group.js
+  // groupPatterns). Everything here works off the DRAWN notes, so a segment view narrows it.
+  function groupFigure(name, opts = {}) {
+    const g = groupByName(rhythmGroups, name);
+    if (!g) return null;
+    const ordered = orderedRenderedNotes();
+    const stream = rhythmStream(ordered);
+    const pat = resolveGroupPattern(stream, g, opts);
+    return pat ? { g, ordered, stream, pat } : { g, ordered, stream, pat: null };
+  }
+
+  // Paint every occurrence of the group's figure, alternating two shades of the group's colour (what
+  // the whole-sheet rhythm highlight does with its greens). A blank name clears. Returns
+  // { count, label, measures } — count/measures describe the FIGURE, not the bars.
+  function highlightRhythmGroup(name, opts = {}) {
+    clearHighlight();
+    if (!name) { lastSearch = null; setRhythmFocus(false); return { count: 0, label: null, measures: [] }; }
+    lastSearch = () => highlightRhythmGroup(name, opts);
+    const f = groupFigure(name, opts);
+    if (!f || !f.pat) return { count: 0, label: null, measures: [] };
+    const shades = groupShades(f.g.color || CHORD_HL_COLOR);
+    f.pat.occurrences.forEach((o, i) => highlightNotes(o.noteIdx.map((k) => f.ordered[k]), shades[i % shades.length]));
+    const res = { count: f.pat.count, label: f.pat.label, measures: f.pat.measures };
+    setRhythmFocus(true);   // the figure owns the sheet: everything else greys out
+    return res;
+  }
+
+  // Note identities [{measure,midi,beats}] to hand the player as `mutedNotes` so that only this group
+  // sounds: every drawn note that is not part of its figure — including every note outside its bars,
+  // since those are never in an occurrence. Empty when the figure isn't on the drawn sheet.
+  function getRhythmGroupMutedNotes(name, opts = {}) {
+    const f = groupFigure(name, opts);
+    if (!f || !f.pat) return [];
+    return soloMutedIndices(f.stream, f.pat)
+      .map((i) => ({ measure: f.ordered[i].measure, midi: f.ordered[i].midi, beats: f.ordered[i].onsetBeats }));
+  }
+
+  // The figure's own notes, onset-ordered — the play-set for hearing the group alone (skip-playback).
+  function getRhythmGroupNoteIds(name, opts = {}) {
+    const f = groupFigure(name, opts);
+    if (!f || !f.pat) return [];
+    const seen = new Set();
+    const out = [];
+    f.pat.occurrences.forEach((o) => o.noteIdx.forEach((k) => {
+      const n = f.ordered[k];
+      const key = `${n.midi}@${n.onsetBeats}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ measure: n.measure, midi: n.midi, beats: n.onsetBeats });
+    }));
+    return out.sort((a, b) => a.beats - b.beats);
+  }
+
+  // …and for a group: the bars its figure actually lands in (a subset of the group's own bars).
+  function getRhythmGroupMeasureNoteIds(name, opts = {}) {
+    const f = groupFigure(name, opts);
+    return (f && f.pat) ? noteIdsInOccurrenceMeasures(f.ordered, f.pat.occurrences) : [];
+  }
+
+  // The figures the group's bars run, most used first — the picker for "which rhythm is this group?".
+  function rhythmGroupPatterns(name, opts = {}) {
+    const g = groupByName(rhythmGroups, name);
+    if (!g) return [];
+    return groupPatterns(rhythmStream(orderedRenderedNotes()), g.ranges, groupOpts(g, opts))
+      .map(({ id, label, count, measures }) => ({ id, label, count, measures }));
+  }
+
+  // The figures of an arbitrary bar list — used to name a group after its rhythm as it is captured.
+  function rhythmRangesPatterns(ranges, opts = {}) {
+    return groupPatterns(rhythmStream(orderedRenderedNotes()), ranges || [], opts)
+      .map(({ id, label, count, measures }) => ({ id, label, count, measures }));
+  }
+
+  // Automatic phrase detection over the drawn sheet — cut the piece into `bars`-long spans and group
+  // the ones that recur (music-phrase-detect.js). Reads the same note stream the rhythm scanner does,
+  // whose `measure` is the PRINTED number, which is also what shadeMeasureRange matches on — so a
+  // detected phrase's bars can be shaded straight from the result with no renumbering.
+  // Re-scanned on demand rather than cached: a re-render rebuilds the notes this reads.
+  function autoDetectPhrases(opts = {}) {
+    return detectPhrasesModel(rhythmStream(orderedRenderedNotes()), opts);
+  }
+
   // Resolve a phrase to onset-ordered note identities [{measure,midi,beats}] (its member tags'
   // notes + extra notes, unioned) — the play-set for playing the phrase together. Empty when unknown.
+  // A phrase is a stretch of bars, so its notes are simply the notes drawn in those bars. A phrase
+  // saved under the old model has no range of its own and still resolves the way it was built.
+  function phraseNoteIds(p) {
+    const r = phraseRange(p);
+    return r ? noteIdsInBarRange(r[0], r[1]) : [];
+  }
   function getPhraseNoteIds(name) {
-    return resolvePhraseNoteIds(phraseByName(phrases, name), assignments);
+    return phraseNoteIds(phraseByName(phrases, name));
   }
 
   // Every phrase as fretboard capture steps — ONE step per phrase (all its resolved notes together),
@@ -1241,7 +2242,7 @@ export function createMusicRenderer(container, opts = {}) {
       : new Set(mutedList().map((n) => suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
     const steps = [];
     phrases.forEach((p) => {
-      const all = orderedIndicesFor(resolvePhraseNoteIds(p, assignments), ordered).map((i) => ordered[i]);
+      const all = orderedIndicesFor(phraseNoteIds(p), ordered).map((i) => ordered[i]);
       const live = all.filter((n) => !mutedKeys.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
       const src = live.length ? live : all;
       if (!src.length) return;
@@ -1266,12 +2267,13 @@ export function createMusicRenderer(container, opts = {}) {
     const wantInt = mode === 'intervals' || mode === 'both';
     const resolvedKey = resolveSearchKey(ordered, { intervalBasis, wantInt, key });
     const resolvedKeyLabel = resolvedKey ? keyLabel(resolvedKey.tonicPc, resolvedKey.mode) : null;
-    const idx = orderedIndicesFor(resolvePhraseNoteIds(phrase, assignments), ordered);
+    const idx = orderedIndicesFor(phraseNoteIds(phrase), ordered);
     const color = phrase.color || CHORD_HL_COLOR;
     highlightNotes(idx.map((i) => ordered[i]), color);   // the phrase's own occurrence
     if (idx.length < 2) return { count: 0, keyLabel: resolvedKeyLabel };
     const { matches } = findScopedMatches(stream, idx, { mode, durationStrict, intervalBasis, key: resolvedKey });
     matches.forEach((m) => highlightNotes(m.map((i) => ordered[i]), color));
+    setRhythmFocus(false);   // last: the re-render it triggers repaints this search on a fresh sheet
     return { count: matches.length, keyLabel: resolvedKeyLabel };
   }
 
@@ -1552,12 +2554,20 @@ export function createMusicRenderer(container, opts = {}) {
     applyMeasureHighlight();
     applyChordOverlay();
     applyChordWindow();
-    applySuppressionDim();
+    // Where the suppression grey sits in the paint order is decided by the Suppress-notes toggle.
+    // OFF: early, so tag / phrase / rhythm colour wins and a motif stays readable on a sheet that
+    // happens to carry muted notes. ON: last (below), because then the whole point of the sheet is
+    // WHICH notes are silenced — and every painter after this one would otherwise bury the grey,
+    // leaving a suppressed note looking perfectly normal while it plays silently.
+    if (!suppressMode) applySuppressionDim();
     applyTagOverlay();
+    applyRhythmFocusDim();   // a highlighted rhythm greys everything, then paints only its own notes
     // Re-paint the last pattern search's occurrences (over the fresh overlay) so a re-render doesn't
     // strip them. Guarded so the search's own clearHighlight/highlightNotes can't recurse into here.
     if (lastSearch && !_inReapply) { _inReapply = true; try { lastSearch(); } catch (_) {} finally { _inReapply = false; } }
+    promoteUnisonHighlights();   // lift a lit note's greyed unison partner so it isn't hidden / mis-muted
     applyExtraNoteHighlight();   // re-ink variation added-notes onto the fresh noteheads
+    if (suppressMode) applySuppressionDim();   // owns the sheet while you are choosing what to silence
     if (onAfterRender) { try { onAfterRender(); } catch (_) {} }
   }
 
@@ -1620,7 +2630,10 @@ export function createMusicRenderer(container, opts = {}) {
 
   // Record `n` as the playback start (click-to-play-from) and move the cursor there for feedback.
   function setPlayStartFromNote(n) {
-    playStart = { measure: n.measure, midi: n.midi, beats: n.onsetBeats };
+    // Keep the voice: (measure, midi, beats) alone is ambiguous at a cross-voice unison, and
+    // getPlayStartRange derives the cursor's step count from the resolved note's reading ORDER —
+    // so re-resolving to the other hand's copy parks the cursor one notehead from where you clicked.
+    playStart = { measure: n.measure, midi: n.midi, beats: n.onsetBeats, voice: n.voice };
     positionCursorAtBeat(n.onsetBeats);
     if (onSeek) { try { onSeek(); } catch (_) {} }
   }
@@ -1696,6 +2709,54 @@ export function createMusicRenderer(container, opts = {}) {
     };
   }
 
+  // The two engraving rules the aligned layout needs, both off in OSMD by default.
+  //
+  //   NewSystemAtXMLNewSystemAttribute — obey the <print new-system> marks setSystemBreaks wrote.
+  //   FixedMeasureWidth               — give every bar the same width, which is what actually puts bar k
+  //                                     of one line above bar k of the next. Breaking alone does NOT
+  //                                     align anything: each system is stretched to the full page width,
+  //                                     so a 3-bar line and a 5-bar line share no column positions.
+  //
+  // No FixedMeasureWidthFixedValue: OSMD then derives the width from the widest bar, so however many fit
+  // is however many fit. Pinning a value would let us force a bar count per line, but the value and the
+  // count are coupled (measured: 20 fit four bars, 23 fit only three) and guessing wrong puts a break in
+  // before the one we asked for — worse than a phrase that wraps with its columns still true.
+  function applyAlignRules() {
+    if (!osmd || !osmd.rules) return;   // the injected fake in the unit tests has no rules object
+    const on = !!(alignBars && alignBars.length);
+    osmd.rules.NewSystemAtXMLNewSystemAttribute = on;
+    osmd.rules.FixedMeasureWidth = on;
+  }
+  // The phrases that did not fit on the line they started: the line ran out before the next phrase's
+  // first bar. Reads the DRAWN systems, so it reports what happened rather than what was intended.
+  function wrappedPhrases(systems, bars) {
+    return (bars || []).filter((b, i) => {
+      const next = (bars || [])[i + 1];
+      if (next == null) return false;   // the last phrase runs to the end; nothing to fall short of
+      const sys = systems.find((s) => s.bars[0] === b);
+      return !!sys && sys.bars[sys.bars.length - 1] < next - 1;
+    });
+  }
+  // Which systems the last render actually produced: [{ bars:[printed…], xs:[…] }], top row first.
+  // Reports what was DRAWN rather than what was asked for, which is what lets the caller say honestly
+  // whether each phrase fitted on its own line. Reuses the same measure-number and box readers the
+  // shading uses, so a system here means the same thing a shaded band does.
+  function renderedSystems() {
+    const list = (osmd && osmd.graphic && osmd.graphic.measureList) || [];
+    const rows = new Map();
+    list.forEach((measures, a) => {
+      const box = measureUnionBox(measures);
+      if (!box) return;
+      const key = Math.round(box.y1);   // one row per stave top; a line break starts a new one
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key).push({ bar: absoluteMeasureNumber(measures, a, list.length), x: Math.round(box.x1) });
+    });
+    return [...rows.entries()].sort((p, q) => p[0] - q[0]).map(([, ms]) => {
+      ms.sort((p, q) => p.x - q.x);
+      return { bars: ms.map((m) => m.bar), xs: ms.map((m) => m.x) };
+    });
+  }
+
   return {
     osmd,
     getGuessedChordSequence,
@@ -1704,7 +2765,11 @@ export function createMusicRenderer(container, opts = {}) {
       if (!detail || detail.format !== 'musicxml' || !detail.source) {
         return { ok: false, reason: 'not-musicxml' };
       }
-      await osmd.load(detail.source);
+      sourceXml = detail.source;   // kept so the layout can be rebuilt without the caller re-supplying it
+      alignBars = null;            // a fresh piece is drawn as engraved
+      wantScrollTop = null;        // a new piece opens at its beginning, not at the last one's place
+      applyAlignRules();
+      await osmd.load(stripBracketOnlyTuplets(detail.source));
       currentKey = (detail.meta && detail.meta.key) || null;   // powers the chord detector's power-chord fallback
       totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
       computeMeasureOffset();
@@ -1713,12 +2778,70 @@ export function createMusicRenderer(container, opts = {}) {
       extraNoteMarks = null;    // ...and no carried-over variation added-note highlight
       assignments = (detail.patterns || []).map((p) => ({ name: p.name, notes: (p.notes || []).map((n) => ({ ...n })) }));
       phrases = (detail.phrases || []).map((p) => ({ name: p.name, color: p.color, tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
-      tagMode = false; activeTag = null; tagFilter = false; filterTags = new Set();   // tagRegistry is global — not reset here
+      rhythmGroups = (detail.rhythmGroups || []).map(copyGroup);
+      tagMode = false; activeTag = null; tagFilter = false; dimAll = false; plainView = false; filterTags = new Set();   // tagRegistry is global — not reset here
       phrasePaintMode = false; activePhrase = null; phraseFilter = false; shownPhrases = new Set();
       clearPlayStart();   // a fresh piece has no click-selected start
       redraw();
       return { ok: true, totalMeasures, measureOffset };
     },
+    // Lay the sheet out so each of `bars` (printed numbers) starts a staff line and every bar is the same
+    // width — one phrase per line, columns true, so a phrase can be read against its own return. A falsy
+    // or empty `bars` restores the score as engraved.
+    //
+    // This RE-LOADS the XML, because the break marks are read when the file is parsed, not when it is
+    // drawn. The reload deliberately does not go through loadDetail: that resets motifs, phrases, rhythm
+    // groups and every view flag, which would throw away the phrase list this layout is built from.
+    // Nothing else about the piece changes — same notes, same stored source; only what OSMD was handed.
+    //
+    // Returns what was actually drawn: { on, systems, aligned, wrapped } — `aligned` is how many systems
+    // share the leading column positions, `wrapped` the phrases that needed more than one line.
+    async setPhraseAlign(bars) {
+      if (!sourceXml) return { on: false, systems: [], aligned: 0, wrapped: [] };
+      const want = [...new Set((bars || []).map((b) => parseInt(b, 10)).filter(Number.isFinite))]
+        .sort((p, q) => p - q);
+      alignBars = want.length ? want : null;
+      applyAlignRules();
+      // Off loads the stored source UNTOUCHED. Handing it a stripped copy instead looked equivalent — the
+      // rule is off, so the score's own breaks are ignored either way — but measurably is not: the same
+      // piece came back as 7 systems where it had always drawn 6, and stayed there. Whatever OSMD does
+      // with those marks beyond the documented rule, the only layout guaranteed to be the one the app has
+      // always drawn is the one from the bytes it has always loaded.
+      const wasFull = shownFrom <= 1 && shownTo >= totalMeasures;
+      await osmd.load(stripBracketOnlyTuplets(alignBars ? setSystemBreaks(sourceXml, alignBars) : sourceXml));
+      totalMeasures = (osmd.Sheet && osmd.Sheet.SourceMeasures && osmd.Sheet.SourceMeasures.length) || 0;
+      computeMeasureOffset();
+      // A load starts a fresh sheet, so everything the VIEW had to say about the old one has to be said
+      // again. Both of these were missed at first, and the piece came back laid out differently after a
+      // round trip through the toggle — same bytes, 7 systems where it had always drawn 6 — because the
+      // responsive zoom had silently gone back to 1 and the drawn window with it.
+      osmd.Zoom = currentZoom;
+      if (wasFull) { shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER; }
+      osmd.setOptions({ drawFromMeasureNumber: shownFrom, drawUpToMeasureNumber: shownTo });
+      redraw();
+      // A phrase that wrapped cannot be read against another bar for bar, which is the only reason to
+      // align in the first place — so shrink until it fits rather than leaving the reader to do it. Zoom
+      // is the lever because it is the one the sheet already has; the alternative, pinning a fixed bar
+      // width, has to be solved against the bar count and lands a break BEFORE the one we asked for when
+      // the guess is wrong. Bounded and render-only (the breaks are already in the loaded XML), and it
+      // stops at a floor — some phrases are simply too long for the window, and a sheet shrunk to nothing
+      // helps no one.
+      const ZOOM_FLOOR = 0.35;
+      let systems = renderedSystems();
+      let wrapped = wrappedPhrases(systems, alignBars);
+      if (alignBars) {
+        for (let i = 0; i < 5 && wrapped.length && osmd.Zoom > ZOOM_FLOOR; i++) {
+          osmd.Zoom = Math.max(ZOOM_FLOOR, osmd.Zoom * 0.85);
+          redraw();
+          systems = renderedSystems();
+          wrapped = wrappedPhrases(systems, alignBars);
+        }
+      }
+      const starts = systems.map((s) => s.xs.join(','));
+      const common = starts.filter((s) => s === starts[1]).length;   // [0] holds the clef, so compare to [1]
+      return { on: !!alignBars, systems, aligned: alignBars ? common : 0, wrapped, zoom: osmd.Zoom };
+    },
+    getPhraseAlign() { return alignBars ? [...alignBars] : null; },
     showFull() {
       osmd.setOptions({ drawFromMeasureNumber: 1, drawUpToMeasureNumber: totalMeasures || Number.MAX_SAFE_INTEGER });
       shownFrom = 1; shownTo = totalMeasures || Number.MAX_SAFE_INTEGER;
@@ -1736,6 +2859,33 @@ export function createMusicRenderer(container, opts = {}) {
     setZoom,
     setVoiceColors(on) { colorVoices = !!on; redraw(); },
     setNoteNames(on) { noteNames = !!on; redraw(); },
+    getVoiceColors() { return colorVoices; },
+    // A snapshot of the colours the sheet is wearing: (note identity) → colour, or null for "nothing
+    // says otherwise". For the compare view, which draws the same piece in its own OSMD and has to reach
+    // the same colours. Re-ask after any change — it reads the state as it stands now.
+    //
+    // Read off the RENDERED noteheads first, and only fall back to the overlay's decision for notes the
+    // sheet isn't currently drawing. The paint order on a sheet is a stack — voice colour, suppression
+    // grey, tag/phrase colour, rhythm focus, the last pattern search — and re-deriving it would mean
+    // keeping a second copy of that stack in step with the first. What is on the notehead already IS
+    // the answer; the overlay is only needed where there is no notehead to read.
+    noteColorFn() {
+      const painted = new Map();
+      if (container && container.querySelectorAll) {
+        orderedRenderedNotes().forEach((n) => {
+          if (n.midi == null || !n.el || !n.el.querySelector) return;
+          const head = n.el.querySelector('.vf-notehead path') || n.el.querySelector('path');
+          const c = head && ((head.style && head.style.fill) || head.getAttribute('fill'));
+          if (c) painted.set(tagNoteId({ measure: n.measure, midi: n.midi, beats: n.onsetBeats }), c);
+        });
+      }
+      const overlay = overlayPainter();
+      return (n) => {
+        const key = tagNoteId(n);
+        if (painted.has(key)) return painted.get(key);
+        return overlay ? overlay(key) : null;
+      };
+    },
     // Toggle the in-score chord-candidate overlay (stacked labels above each chord area).
     setShowChords(on) { showChords = !!on; redraw(); },
     // Toggle dimming of beams/stems/slurs (reduces visual noise; noteheads stay black).
@@ -1759,7 +2909,7 @@ export function createMusicRenderer(container, opts = {}) {
     getTagColors() { return colorMap(tagRegistry); },
     // Per-piece note assignments [{name, notes}], persisted as detail.patterns. setPatterns does not
     // fire onPatternsChange (used on load); editing notes via tag-mode clicks does.
-    setPatterns(list) { assignments = (list || []).map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) })); lastPatternMatches = []; lastPatternOriginals = []; lastSearch = null; redraw(); },
+    setPatterns(list) { assignments = (list || []).map((a) => ({ name: a.name, notes: (a.notes || []).map((n) => ({ ...n })) })); lastPatternMatches = []; lastPatternOriginals = []; lastSearch = null; rhythmFocus = false; redraw(); },
     getPatterns() { return getAssignments(); },
     // Drop a tag's note assignments in THIS piece (called when the global tag is deleted). Fires
     // onPatternsChange so the piece persists.
@@ -1774,6 +2924,28 @@ export function createMusicRenderer(container, opts = {}) {
       if (onPatternsChange) { try { onPatternsChange(getAssignments()); } catch (_) {} }
       if (before !== JSON.stringify(phrases.map((p) => p.tags))) firePhrasesChange();
     },
+    // Move THIS piece's notes for `from` onto `to`, following the name through the phrase membership
+    // and through whatever this piece had selected — the motif you were looking at must still be the
+    // one shown and checked afterwards, or a rename would silently blank the sheet. Refused (false)
+    // when `to` already carries notes here: that is a merge, not a rename. Fires onPatternsChange.
+    renameTagAssignments(from, to) {
+      const clean = (to || '').trim();
+      if (!clean || clean === from || !assignments.some((a) => a.name === from)) return false;
+      const next = renameInAssignments(assignments, from, clean);
+      if (next === assignments) return false;   // `to` was taken — renameInAssignments refused
+      assignments = next;
+      if (activeTag === from) activeTag = clean;
+      if (filterTags.delete(from)) filterTags.add(clean);
+      const before = JSON.stringify(phrases.map((p) => p.tags));
+      phrases = renameTagInPhrases(phrases, from, clean);
+      // The cached search still holds groups labelled with the old name — drop it rather than repaint
+      // a stale label; the caller re-runs Find pattern if it wants the occurrences back.
+      lastPatternMatches = []; lastPatternOriginals = []; lastSearch = null;
+      redraw();
+      if (onPatternsChange) { try { onPatternsChange(getAssignments()); } catch (_) {} }
+      if (before !== JSON.stringify(phrases.map((p) => p.tags))) firePhrasesChange();
+      return true;
+    },
     // Enter/leave tag-paint mode; clicking noteheads then edits the active tag.
     setTagMode(on) { if (tagMode === !!on) return; tagMode = !!on; redraw(); },
     setActiveTag(name) { activeTag = name || null; },
@@ -1785,7 +2957,7 @@ export function createMusicRenderer(container, opts = {}) {
       // (e.g. when the Motifs panel expands), and redrawing there would clear the pattern search and
       // dim its occurrences. Only a real selection change resets the search.
       if (next.size === filterTags.size && [...next].every((n) => filterTags.has(n))) return;
-      filterTags = next; lastPatternMatches = []; lastPatternOriginals = []; lastSearch = null; redraw();
+      filterTags = next; lastPatternMatches = []; lastPatternOriginals = []; lastSearch = null; rhythmFocus = false; redraw();
     },
     // Note identities [{measure,midi,beats}] of the currently-checked filter tags, merged across
     // tags, de-duplicated, and sorted by onset — the play-set for tag skip-playback. [] if none.
@@ -1812,17 +2984,23 @@ export function createMusicRenderer(container, opts = {}) {
     // Per-piece phrase list, persisted as detail.phrases. setPhrases does NOT fire onPhrasesChange
     // (used on load / restore); the editing methods below do.
     setPhrases(list) {
-      phrases = (list || []).map((p) => ({ name: p.name, color: p.color, tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
+      phrases = (list || []).map((p) => ({ name: p.name, color: p.color, from: p.from ?? null, to: p.to ?? null,
+        tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
       redraw();
     },
     getPhrases() { return getPhrases(); },
     getPhraseNames() { return phrases.map((p) => p.name); },
     getPhraseColors() { const m = {}; phrases.forEach((p) => { m[p.name] = p.color; }); return m; },
     // Create a phrase (next palette color); no-op on blank/duplicate. Returns whether it was added.
-    addPhrase(name) {
-      const { phrases: next, added } = addPhraseReducer(phrases, name);
+    addPhrase(name, from = null, to = null) {
+      const { phrases: next, added } = addPhraseReducer(phrases, name, null, from, to);
       if (added) { phrases = next; firePhrasesChange(); redraw(); }
       return added;
+    },
+    // Move a phrase's bars.
+    setPhraseRange(name, from, to) {
+      phrases = setPhraseRangeReducer(phrases, name, from, to);
+      firePhrasesChange(); redraw();
     },
     removePhrase(name) {
       phrases = removePhraseReducer(phrases, name);
@@ -1842,21 +3020,71 @@ export function createMusicRenderer(container, opts = {}) {
     getPhraseNoteIds(name) { return getPhraseNoteIds(name); },
     getPhrasesSequence(opts) { return getPhrasesSequence(opts); },
     searchPhrasePattern(name, opts) { return searchPhrasePattern(name, opts); },
-    // Best-guess key of the currently-rendered notes (Krumhansl-Schmuckler profiles), as
-    // { tonicPc, mode, label } — powers the diatonic key picker's default. null when nothing is drawn.
-    guessBestKey() {
-      const counts = new Array(12).fill(0);
-      orderedRenderedNotes().forEach((n) => { if (n.midi != null) counts[((n.midi % 12) + 12) % 12]++; });
-      if (!counts.some((c) => c > 0)) return null;
-      const k = guessKey(counts);
-      return { tonicPc: k.tonicPc, mode: k.mode, label: keyLabel(k.tonicPc, k.mode) };
+    // Rhythm patterns of the drawn notes (list) + highlight every occurrence of one (by its id).
+    getRhythmPatterns(opts) { return getRhythmPatterns(opts); },
+    highlightRhythmPattern(id, opts) { return highlightRhythmPattern(id, opts); },
+    getRhythmMutedNotes(id, opts) { return getRhythmMutedNotes(id, opts); },
+    // Every note of the bars a picked rhythm occurs in — for playing those bars and nothing else.
+    getRhythmMeasureNoteIds(id, opts) { return getRhythmMeasureNoteIds(id, opts); },
+    // ── Rhythm groups (a rhythm figure limited to chosen bars; see music-rhythm-group.js) ───────
+    // Per-piece group list, persisted as detail.rhythmGroups. setRhythmGroups does NOT fire
+    // onRhythmGroupsChange (it IS the load path); every edit below does.
+    setRhythmGroups(list) { rhythmGroups = (list || []).map(copyGroup); },
+    getRhythmGroups() { return getRhythmGroups(); },
+    getRhythmGroupColors() { const m = {}; rhythmGroups.forEach((g) => { m[g.name] = g.color; }); return m; },
+    // Create a group over `ranges` (next palette color), optionally fixed to one figure (`pattern`);
+    // no-op on blank/duplicate name.
+    addRhythmGroup(name, ranges, pattern, opts) {
+      const { groups, added } = addGroupReducer(rhythmGroups, name, ranges, null, pattern, opts);
+      if (added) { rhythmGroups = groups; fireRhythmGroupsChange(); }
+      return added;
     },
+    removeRhythmGroup(name) { rhythmGroups = removeGroupReducer(rhythmGroups, name); fireRhythmGroupsChange(); },
+    // Replace / extend a group's bars, or change which of their figures it stands for.
+    setRhythmGroupRanges(name, ranges) { rhythmGroups = setGroupRangesReducer(rhythmGroups, name, ranges); fireRhythmGroupsChange(); },
+    addRhythmGroupRanges(name, ranges) { rhythmGroups = addGroupRangesReducer(rhythmGroups, name, ranges); fireRhythmGroupsChange(); },
+    setRhythmGroupPattern(name, id, opts) { rhythmGroups = setGroupPatternReducer(rhythmGroups, name, id, opts); fireRhythmGroupsChange(); },
+    // What a group is bound to right now: its figure's label + the settings it was read under, so the
+    // UI can say what the association IS (and flag one made under other settings than the panel's).
+    rhythmGroupBinding(name, opts) {
+      const g = groupByName(rhythmGroups, name);
+      if (!g) return null;
+      const bound = groupOpts(g, opts);
+      const pat = resolveGroupPattern(rhythmStream(orderedRenderedNotes()), g, opts);
+      return { pattern: g.pattern || null, label: pat ? pat.label : null, count: pat ? pat.count : 0, ...bound };
+    },
+    highlightRhythmGroup(name, opts) { return highlightRhythmGroup(name, opts); },
+    // A selected group's solo set (mutedNotes) and its own notes (keepNotes) — the two playback paths.
+    getRhythmGroupMutedNotes(name, opts) { return getRhythmGroupMutedNotes(name, opts); },
+    getRhythmGroupNoteIds(name, opts) { return getRhythmGroupNoteIds(name, opts); },
+    getRhythmGroupMeasureNoteIds(name, opts) { return getRhythmGroupMeasureNoteIds(name, opts); },
+    // The figures found in a group's bars (its picker), and in any bar list (to name a fresh capture).
+    rhythmGroupPatterns(name, opts) { return rhythmGroupPatterns(name, opts); },
+    rhythmRangesPatterns(ranges, opts) { return rhythmRangesPatterns(ranges, opts); },
+    // Best-guess key of the currently-rendered notes — the notated signature narrowed to one of its
+    // two keys by the cadences, with the pitch profile as a check (see music-key.js/detectKey). Powers
+    // the diatonic key picker's default and the Transpose "original key". Returns the full detail
+    // ({ tonicPc, mode, label, key, confidence, signatureFits, reasons, … }); null when nothing is drawn.
+    // The signature comes from the loaded piece's own key string, so a transposed/combined sheet is
+    // judged against the signature it is actually drawn in.
+    guessBestKey() { return detectedKey(orderedRenderedNotes()); },
     // Note identities [{measure,midi,beats}] matched by the most recent searchTagPatterns (flattened
     // across occurrences) — so Play-tags can include them. Reset when the tag selection / patterns change.
     getPatternMatchNotes() {
       const out = [];
       lastPatternMatches.forEach((g) => g.notes.forEach((n) => out.push({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
       return out;
+    },
+    // The same occurrences kept WHOLE: one entry per occurrence (the tags' own and the matches), with
+    // the bars it spans. getPatternMatchNotes flattens these into loose notes, which is fine when you
+    // want them all — but anything that narrows by bars has to weigh a run of notes as one thing, or a
+    // match lying across the boundary is played half-in, half-out.
+    getPatternMatchGroups() {
+      return [...lastPatternOriginals, ...lastPatternMatches].map((g) => {
+        const notes = (g.notes || []).map((n) => ({ measure: n.measure, midi: n.midi, beats: n.onsetBeats }));
+        const ms = notes.map((n) => n.measure).filter((m) => m != null);
+        return { name: g.name, notes, from: ms.length ? Math.min(...ms) : null, to: ms.length ? Math.max(...ms) : null };
+      });
     },
     // Matched occurrences as fretboard capture steps: one step per occurrence, [{name, notes:[{name,octave}]}].
     // Honors includeSuppressed like the other capture sources. Empty when no search has been run.
@@ -1896,6 +3124,34 @@ export function createMusicRenderer(container, opts = {}) {
     },
     getSuppressedNotes() { return [...suppressedNotes.values()]; },     // S, for persistence
     getMutedNotes() { return mutedList(); },                            // effective muted, for the player
+    setDimAll(on) { dimAll = !!on; redraw(); },
+    dimAllOn() { return dimAll; },
+    anyDimActive() { return !!(tagFilter || phraseFilter || rhythmFocus || dimAll); },
+    setPlainView(on) { plainView = !!on; redraw(); },
+    plainViewOn() { return plainView; },
+    // Drop the active motif/phrase search's coloured occurrences (keeps the tags/phrases themselves).
+    clearSearchHighlight() { lastSearch = null; lastPatternMatches = []; lastPatternOriginals = []; clearHighlight(); redraw(); },
+    // Identities [{measure,midi,beats}] of notes currently drawn DIMMED (grey) by whatever highlight owns
+    // the sheet — motif / phrase / rhythm / dim-all. Read straight from the rendered noteheads so it always
+    // matches what the eye sees. The player feeds these in as mutedNotes so a dimmed sheet plays only its
+    // lit notes. Empty when nothing is dimmed (returns [] so callers can spread it unconditionally).
+    getDimmedNotes() {
+      const out = [];
+      if (!(tagFilter || phraseFilter || rhythmFocus || dimAll)) return out;
+      if (!container || !container.querySelectorAll) return out;
+      // The dim passes set the notehead's `fill` ATTRIBUTE to the hex grey (they also set style.fill, but
+      // the browser reports that back as rgb()) — isDimFill matches either form. promoteUnisonHighlights has
+      // already lifted any lit note's greyed unison partner, so a still-grey notehead is genuinely dimmed.
+      orderedRenderedNotes().forEach((n) => {
+        if (n.midi == null || !n.el) return;
+        const head = n.el.querySelector('path, ellipse, circle');
+        if (!head) return;
+        const dim = isDimFill(head.getAttribute('fill')) || isDimFill(head.style && head.style.fill);
+        out.push({ measure: n.measure, midi: n.midi, beats: n.onsetBeats, dim });
+      });
+      // A grey notehead whose unison twin is LIT is not a dimmed note — see unlitIdentities.
+      return unlitIdentities(out);
+    },
     setHearAll(on) { hearAll = !!on; redraw(); if (onSuppressionChange) { try { onSuppressionChange(); } catch (_) {} } },
     setSuppressMode(on) { suppressMode = !!on; redraw(); },
     // Bulk-suppress (on=true) or restore (on=false) every rendered note of a voice in the view.
@@ -1908,7 +3164,9 @@ export function createMusicRenderer(container, opts = {}) {
       redraw();
       if (onSuppressionChange) { try { onSuppressionChange(); } catch (_) {} }
     },
-    // Voices present in the view, for the chips: [{ id, color, allSuppressed }].
+    // Voices present in the view: [{ id, color, allSuppressed, count, lo, hi }] — `id` is the color
+    // index (voiceColor's), `lo`/`hi` the voice's lowest/highest MIDI pitch. Powers the suppress chips
+    // and the colour legend, which names each colour by its voice and pitch range.
     listVoices() {
       const byVoice = new Map();
       orderedRenderedNotes().forEach((n) => {
@@ -1920,9 +3178,18 @@ export function createMusicRenderer(container, opts = {}) {
         const notes = byVoice.get(id);
         const allSuppressed = notes.every((n) =>
           suppressedNotes.has(suppressionKey({ measure: n.measure, midi: n.midi, beats: n.onsetBeats })));
-        return { id, color: voiceColor(id), allSuppressed };
+        const midis = notes.map((n) => n.midi);
+        return { id, color: voiceColor(id), allSuppressed, count: notes.length,
+          lo: Math.min(...midis), hi: Math.max(...midis) };
       });
     },
+    // Is voice colouring in effect? The legend must not name colours the sheet isn't using.
+    voiceColorsOn() { return colorVoices; },
+    // Is a rhythm highlight owning the sheet (everything else greyed)? The legend reads this.
+    rhythmFocusOn() { return rhythmFocus; },
+    // The colours highlights are painted in, so the UI's legend names the same hues the sheet shows
+    // instead of keeping its own copy of them.
+    highlightColors() { return { chord: CHORD_HL_COLOR, rhythm: [...RHYTHM_HL_COLORS], dim: DIM_CONNECTOR_COLOR }; },
     // Live play range of the window: { fromMeasure, toMeasure, fromBeat?, toBeat?, cursorStep },
     // or null when the window is off / empty. Beats are present only when onset times were
     // available (note-accurate; else measure-granular). cursorStep is the number of distinct
@@ -1946,8 +3213,15 @@ export function createMusicRenderer(container, opts = {}) {
       if (!playStart) return null;
       const ordered = orderedRenderedNotes();
       if (!ordered.length) return null;
-      const idx = ordered.findIndex((n) => n.midi === playStart.midi && n.measure === playStart.measure
-        && Math.abs((typeof n.onsetBeats === 'number' ? n.onsetBeats : NaN) - playStart.beats) < NOTE_EPS);
+      const hits = [];
+      ordered.forEach((n, i) => {
+        if (n.midi === playStart.midi && n.measure === playStart.measure
+          && Math.abs((typeof n.onsetBeats === 'number' ? n.onsetBeats : NaN) - playStart.beats) < NOTE_EPS) hits.push(i);
+      });
+      // A unison gives two candidates; take the one in the voice that was clicked. Starts recorded
+      // before the voice was kept (or whose voice is gone from the view) fall back to the first.
+      const inVoice = playStart.voice == null ? -1 : hits.findIndex((i) => ordered[i].voice === playStart.voice);
+      const idx = inVoice >= 0 ? hits[inVoice] : (hits.length ? hits[0] : -1);
       if (idx < 0) return null;
       const selected = ordered.slice(idx);   // clicked note → end of the drawn view
       const range = rangeFromSelected(selected);
@@ -1991,6 +3265,31 @@ export function createMusicRenderer(container, opts = {}) {
     // (zoom / segment changes) until cleared. Used to mark a vocab item's original measures.
     highlightMeasures(range) { measureHighlight = (range && range.length === 2) ? [range[0], range[1]] : null; applyMeasureHighlight(); },
     clearMeasureHighlight() { measureHighlight = null; applyMeasureHighlight(); },
+    // Detected phrases of the drawn sheet, in order of first appearance:
+    // { bars, offset, phrases:[{name,color,count,occurrences,ranges,label}] }. Pure read — nothing on
+    // the sheet changes until one of them is handed to shadePhrase.
+    detectPhrases(opts = {}) { return autoDetectPhrases(opts); },
+    // Shade every bar of one detected phrase in its family colour (its first statement stronger, its
+    // modified returns lighter). Replaces any previous phrase shading; a falsy phrase just clears.
+    // Independent of the motif / phrase / rhythm note colouring — this is a background band, so it
+    // survives (and reads under) whatever owns the noteheads.
+    shadePhrase(phrase) { phraseBandList = phraseBandsModel(phrase); applyMeasureHighlight(); },
+    clearPhraseShade() { phraseBandList = []; applyMeasureHighlight(); },
+    // Shade one arbitrary bar range as a single block — a stretch of bars named outright rather than found
+    // by the detector, which is what a script's inBars(9-16) is. Shares the phrase-band channel on
+    // purpose: "the bars this step is about" is one idea, so naming a new stretch REPLACES the last one
+    // instead of layering another wash over it. A falsy or unparseable range clears.
+    shadeBars(range, { fill = '#1565c0', opacity = 0.16, badge = '' } = {}) {
+      const a = range ? Number(range[0]) : NaN;
+      const b = range ? Number(range.length > 1 ? range[1] : range[0]) : NaN;
+      phraseBandList = (Number.isFinite(a) && Number.isFinite(b))
+        ? [{ from: Math.min(a, b), to: Math.max(a, b), fill, opacity, badge, changed: [] }]
+        : [];
+      applyMeasureHighlight();
+    },
+    // Note ids [{measure,midi,beats}] of every drawn note in a printed-measure range — the play-set for
+    // one occurrence of a detected phrase. Empty when those bars aren't on the drawn sheet.
+    barRangeNoteIds(from, to) { return noteIdsInBarRange(from, to); },
     // Shade the current fretboard step's measures in a distinct blue band (echoing the fretboard
     // dots), independent of the vocab-range highlight. Tracks stepping; persists across re-renders.
     highlightStepMeasures(range) { stepHighlight = (range && range.length === 2) ? [range[0], range[1]] : null; applyMeasureHighlight(); },
@@ -2000,6 +3299,47 @@ export function createMusicRenderer(container, opts = {}) {
     // reset, then step forward to the first entry at/after `beat`. No-op if the cursor isn't ready yet.
     showCursorAtBeat(beat) { positionCursorAtBeat(beat); },
     hideCursor() { try { const c = osmd.cursor; if (c) { c.reset(); c.hide(); } } catch (_) {} },
+    // Bring the play cursor into view, scrolling whichever box actually scrolls: the preview pane on
+    // mobile (it is the fixed, overflow:auto dialog) or the page itself on desktop. Returns true only
+    // when it moved something, so callers can tell "followed" from "already visible". Silent on any
+    // failure — this runs inside the playback draw callback and must never break it.
+    scrollCursorIntoView() {
+      let el = null;
+      try {
+        const c = osmd.cursor;
+        el = c && (c.cursorElement || (c.cursorElements && c.cursorElements[0]));
+      } catch (_) { return false; }
+      if (!el || !el.getBoundingClientRect) return false;
+      const r = el.getBoundingClientRect();
+      if (!r || (!r.height && !r.width)) return false;   // hidden cursor has no box
+      let box = el.parentElement;
+      while (box) {
+        const cs = (typeof getComputedStyle === 'function') ? getComputedStyle(box) : null;
+        if (cs && /(auto|scroll)/.test(cs.overflowY) && box.scrollHeight > box.clientHeight + 1) break;
+        box = box.parentElement;
+      }
+      if (box) {
+        const b = box.getBoundingClientRect();
+        const next = followScrollTop({
+          cursorTop: (r.top - b.top) + box.scrollTop,
+          cursorBottom: (r.bottom - b.top) + box.scrollTop,
+          scrollTop: box.scrollTop, viewHeight: box.clientHeight, contentHeight: box.scrollHeight,
+        });
+        if (next == null) return false;
+        try { box.scrollTo({ top: next, behavior: 'smooth' }); } catch (_) { box.scrollTop = next; }
+        return true;
+      }
+      if (typeof window === 'undefined') return false;
+      const y = window.scrollY || 0;
+      const doc = document.documentElement;
+      const next = followScrollTop({
+        cursorTop: r.top + y, cursorBottom: r.bottom + y, scrollTop: y,
+        viewHeight: window.innerHeight, contentHeight: doc ? doc.scrollHeight : 0,
+      });
+      if (next == null) return false;
+      try { window.scrollTo({ top: next, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, next); }
+      return true;
+    },
     applyResponsiveZoom(viewportWidth) { setZoom(responsiveZoom(viewportWidth)); }
   };
 }
