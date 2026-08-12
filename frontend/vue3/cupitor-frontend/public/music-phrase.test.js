@@ -1,13 +1,14 @@
 import {
   addPhrase, removePhrase, setPhraseTag, removeTagFromPhrases,
-  togglePhraseNote, resolvePhraseNoteIds, phraseColor, PHRASE_PALETTE,
+  togglePhraseNote, phraseNotes, addedNotes, droppedNotes, phraseColor, PHRASE_PALETTE,
+  phraseRange, setPhraseRange, renameTagInPhrases,
 } from './music-phrase.js';
 
 describe('addPhrase', () => {
   test('adds with next palette color; rejects blank and duplicate names', () => {
     let { phrases, added } = addPhrase([], 'Verse');
     expect(added).toBe(true);
-    expect(phrases).toEqual([{ name: 'Verse', color: PHRASE_PALETTE[0], tags: [], notes: [] }]);
+    expect(phrases).toEqual([{ name: 'Verse', color: PHRASE_PALETTE[0], from: null, to: null, tags: [], add: [], drop: [] }]);
 
     ({ phrases, added } = addPhrase(phrases, '  '));   // blank
     expect(added).toBe(false);
@@ -44,37 +45,160 @@ describe('setPhraseTag / removeTagFromPhrases', () => {
   });
 });
 
+// A click says "this note is wrong"; where the note sits says which way. This is the whole editing
+// gesture, so it is pinned here rather than left to the browser.
 describe('togglePhraseNote', () => {
-  const n = { measure: 2, midi: 64, beats: 4 };
-  test('adds then removes the same extra note by identity', () => {
-    let phrases = [{ name: 'P', color: '#000', tags: [], notes: [] }];
-    phrases = togglePhraseNote(phrases, 'P', n);
-    expect(phrases[0].notes).toEqual([n]);
-    phrases = togglePhraseNote(phrases, 'P', { measure: 2, midi: 64, beats: 4 });   // same identity
-    expect(phrases[0].notes).toEqual([]);
+  const bars = () => [{ name: 'P', color: '#000', from: 4, to: 8, tags: [], add: [], drop: [] }];
+
+  test('a note INSIDE the bars is taken out, and clicking it again puts it back', () => {
+    const n = { measure: 5, midi: 64, beats: 4 };
+    let phrases = togglePhraseNote(bars(), 'P', n);
+    expect(phrases[0].drop).toEqual([n]);
+    expect(phrases[0].add).toEqual([]);
+    phrases = togglePhraseNote(phrases, 'P', { measure: 5, midi: 64, beats: 4 });   // same identity
+    expect(phrases[0].drop).toEqual([]);
+  });
+
+  test('a note OUTSIDE the bars is brought in, and clicking it again removes it', () => {
+    const pickup = { measure: 3, midi: 60, beats: 0 };   // the bar before
+    let phrases = togglePhraseNote(bars(), 'P', pickup);
+    expect(phrases[0].add).toEqual([pickup]);
+    expect(phrases[0].drop).toEqual([]);
+    phrases = togglePhraseNote(phrases, 'P', { measure: 3, midi: 60, beats: 0 });
+    expect(phrases[0].add).toEqual([]);
+  });
+
+  test('a note is never both added and dropped', () => {
+    // Moving the bars can leave an added note sitting inside them; the next click has to resolve that
+    // into one list, not leave the phrase saying two contradictory things about the same note.
+    const n = { measure: 5, midi: 64, beats: 4 };
+    const stale = [{ name: 'P', from: 4, to: 8, add: [n], drop: [{ ...n }] }];
+    const next = togglePhraseNote(stale, 'P', n)[0];
+    expect(next.add).toEqual([]);
+    expect(next.drop).toEqual([]);
+  });
+
+  test('a phrase saved with its notes under `notes` is read and rewritten as `add`', () => {
+    const old = [{ name: 'P', notes: [{ measure: 5, midi: 60, beats: 0 }] }];
+    const next = togglePhraseNote(old, 'P', { measure: 9, midi: 67, beats: 12 })[0];
+    expect(next.notes).toBeUndefined();
+    expect(next.add.map((n) => n.midi)).toEqual([60, 67]);
+  });
+
+  test('the wrong phrase is left alone', () => {
+    const list = bars();
+    expect(togglePhraseNote(list, 'other', { measure: 5, midi: 64, beats: 4 })[0]).toBe(list[0]);
   });
 });
 
-describe('resolvePhraseNoteIds', () => {
-  const assignments = [
-    { name: 'T1', notes: [{ measure: 1, midi: 60, beats: 0 }, { measure: 2, midi: 64, beats: 4 }] },
-    { name: 'T2', notes: [{ measure: 3, midi: 67, beats: 8 }] },
+describe('phraseNotes', () => {
+  const inBars = [
+    { measure: 4, midi: 60, beats: 0 },
+    { measure: 4, midi: 64, beats: 1 },
+    { measure: 5, midi: 67, beats: 4 },
   ];
-  test('unions member tags + extra notes, de-dupes, sorts by onset', () => {
+
+  test('the bars, less what is dropped, plus what is added — in onset order', () => {
     const phrase = {
-      name: 'P', tags: ['T2', 'T1'],
-      notes: [{ measure: 2, midi: 62, beats: 2 }, { measure: 2, midi: 64, beats: 4 }],  // last dupes a T1 note
+      name: 'P', from: 4, to: 5,
+      drop: [{ measure: 4, midi: 64, beats: 1 }],
+      add: [{ measure: 3, midi: 55, beats: -2 }, { measure: 6, midi: 72, beats: 8 }],
     };
-    expect(resolvePhraseNoteIds(phrase, assignments)).toEqual([
-      { measure: 1, midi: 60, beats: 0 },
-      { measure: 2, midi: 62, beats: 2 },
-      { measure: 2, midi: 64, beats: 4 },
-      { measure: 3, midi: 67, beats: 8 },
+    expect(phraseNotes(phrase, inBars)).toEqual([
+      { measure: 3, midi: 55, beats: -2 },   // a pickup from the bar before
+      { measure: 4, midi: 60, beats: 0 },
+      { measure: 5, midi: 67, beats: 4 },
+      { measure: 6, midi: 72, beats: 8 },    // a resolution in the bar after
     ]);
   });
-  test('unknown member tags and missing midi contribute nothing; null phrase → []', () => {
-    const phrase = { name: 'P', tags: ['nope'], notes: [{ measure: 1, midi: null, beats: 0 }] };
-    expect(resolvePhraseNoteIds(phrase, assignments)).toEqual([]);
-    expect(resolvePhraseNoteIds(null, assignments)).toEqual([]);
+
+  test('with no exceptions it is simply the bars', () => {
+    expect(phraseNotes({ name: 'P', from: 4, to: 5 }, inBars)).toEqual(inBars);
+  });
+
+  test('an added note already in the bars is not counted twice, and a dropped one stays out', () => {
+    const phrase = { from: 4, to: 5, add: [{ measure: 4, midi: 60, beats: 0 }], drop: [{ measure: 4, midi: 60, beats: 0 }] };
+    expect(phraseNotes(phrase, inBars).map((n) => n.midi)).toEqual([64, 67]);   // drop wins over add
+    expect(phraseNotes({ from: 4, to: 5, add: [{ measure: 4, midi: 60, beats: 0 }] }, inBars)).toHaveLength(3);
+  });
+
+  test('notes without a pitch are not notes; a null phrase has nothing', () => {
+    expect(phraseNotes({ add: [{ measure: 1, midi: null, beats: 0 }] }, [])).toEqual([]);
+    expect(phraseNotes(null, inBars)).toEqual([]);
+  });
+});
+
+describe('addedNotes / droppedNotes', () => {
+  test('`notes` is read as `add`, and a missing list is empty rather than absent', () => {
+    expect(addedNotes({ notes: [{ midi: 60 }] })).toEqual([{ midi: 60 }]);
+    expect(addedNotes({ add: [{ midi: 62 }], notes: [{ midi: 60 }] })).toEqual([{ midi: 62 }]);   // add wins
+    expect(addedNotes({})).toEqual([]);
+    expect(droppedNotes({})).toEqual([]);
+    expect(droppedNotes(null)).toEqual([]);
+  });
+});
+
+// The bars are the phrase's shape. The old shape (member tags + painted notes) still has to resolve to
+// one, or every phrase anyone saved would go dead.
+describe('phrase ranges', () => {
+  test('a phrase is added over the bars it was given', () => {
+    const { phrases } = addPhrase([], 'Verse', null, 9, 16);
+    expect(phrases[0]).toMatchObject({ name: 'Verse', from: 9, to: 16 });
+    expect(phraseRange(phrases[0])).toEqual([9, 16]);
+  });
+
+  test('bars given backwards are put in order', () => {
+    const { phrases } = addPhrase([], 'Verse', null, 16, 9);
+    expect(phraseRange(phrases[0])).toEqual([9, 16]);
+  });
+
+  test('no bars means no range — NOT bar zero', () => {
+    // Number(null) and Number('') are both 0, so the careless version made this "m0–m0".
+    expect(addPhrase([], 'a').phrases[0]).toMatchObject({ from: null, to: null });
+    expect(addPhrase([], 'b', null, '', '').phrases[0]).toMatchObject({ from: null, to: null });
+    expect(phraseRange({ name: 'a', from: null, to: null })).toBeNull();
+  });
+
+  test('a phrase saved under the old model reports the span of its notes', () => {
+    const legacy = { name: 'old', color: '#000', tags: ['m'], notes: [{ measure: 5, midi: 60, beats: 0 }, { measure: 8, midi: 62, beats: 1 }] };
+    expect(phraseRange(legacy)).toEqual([5, 8]);
+  });
+
+  test('an explicit range wins over the notes it was built from', () => {
+    const both = { name: 'x', from: 20, to: 24, notes: [{ measure: 5 }, { measure: 8 }] };
+    expect(phraseRange(both)).toEqual([20, 24]);
+  });
+
+  test('setPhraseRange moves one phrase and leaves the others alone', () => {
+    const list = [{ name: 'a', from: 1, to: 4 }, { name: 'b', from: 5, to: 8 }];
+    const next = setPhraseRange(list, 'b', 9, 16);
+    expect(next.map((p) => [p.from, p.to])).toEqual([[1, 4], [9, 16]]);
+  });
+
+  test('clearing a range empties it rather than guessing', () => {
+    const next = setPhraseRange([{ name: 'a', from: 1, to: 4 }], 'a', '', '');
+    expect(next[0]).toMatchObject({ from: null, to: null });
+  });
+
+  test('phraseRange of nothing is null', () => {
+    expect(phraseRange(null)).toBeNull();
+    expect(phraseRange({ name: 'a' })).toBeNull();
+  });
+});
+
+describe('renameTagInPhrases', () => {
+  test('a renamed tag stays a member of the phrases that listed it', () => {
+    const phrases = [{ name: 'A', tags: ['x', 'y'] }, { name: 'B', tags: ['y'] }];
+    expect(renameTagInPhrases(phrases, 'x', 'X!')).toEqual([{ name: 'A', tags: ['X!', 'y'] }, { name: 'B', tags: ['y'] }]);
+  });
+
+  test('a phrase that listed BOTH names ends up listing the new one once', () => {
+    expect(renameTagInPhrases([{ name: 'A', tags: ['x', 'X!'] }], 'x', 'X!')).toEqual([{ name: 'A', tags: ['X!'] }]);
+  });
+
+  test('a blank or unchanged name leaves everything alone', () => {
+    const phrases = [{ name: 'A', tags: ['x'] }];
+    expect(renameTagInPhrases(phrases, 'x', '  ')).toBe(phrases);
+    expect(renameTagInPhrases(phrases, 'x', 'x')).toBe(phrases);
   });
 });

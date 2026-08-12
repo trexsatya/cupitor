@@ -10,7 +10,7 @@ import { findRhythmPatterns, soloMutedIndices } from './music-rhythm.js';
 import { detectKey, parseKeyName, fifthsOfKey } from './music-key.js';
 import { addPhrase as addPhraseReducer, removePhrase as removePhraseReducer, setPhraseTag as setPhraseTagReducer,
   removeTagFromPhrases, renameTagInPhrases, togglePhraseNote as togglePhraseNoteReducer, phraseByName,
-  phraseRange, setPhraseRange as setPhraseRangeReducer } from './music-phrase.js';
+  phraseRange, phraseNotes, addedNotes, droppedNotes, setPhraseRange as setPhraseRangeReducer } from './music-phrase.js';
 import { detectPhrases as detectPhrasesModel, phraseBands as phraseBandsModel } from './music-phrase-detect.js';
 import { addGroup as addGroupReducer, removeGroup as removeGroupReducer, setGroupRanges as setGroupRangesReducer,
   addGroupRanges as addGroupRangesReducer, setGroupPattern as setGroupPatternReducer, groupByName,
@@ -1034,12 +1034,12 @@ export function createMusicRenderer(container, opts = {}) {
   let rhythmFocus = false;
   let filterTags = new Set();        // tag names the filter shows
   const onPatternsChange = opts.onPatternsChange;   // fired after the user edits per-piece assignments
-  // Phrases: per-piece [{ name, color, tags:[tagName], notes:[{measure,midi,beats}] }] — a logical
-  // group of member tags plus extra hand-picked notes, resolved live to the union of their notes
-  // (see music-phrase.js), for highlighting/playing together, find, and fretboard capture.
-  // Persisted as detail.phrases.
+  // Phrases: per-piece [{ name, color, from, to, drop:[…], add:[…] }] — a named stretch of bars plus
+  // the exceptions to it: notes inside those bars that are not part of the phrase, and notes outside
+  // them that are (see music-phrase.js). Used for highlighting/playing together, find, and fretboard
+  // capture. Persisted as detail.phrases.
   let phrases = [];
-  let phrasePaintMode = false;       // when on, notehead clicks add/remove the active phrase's extra notes
+  let phrasePaintMode = false;       // when on, notehead clicks correct the active phrase's contents
   let activePhrase = null;           // the phrase that paint-mode clicks edit
   let phraseFilter = false;          // when on (phrase panel open), dim notes not in a shown phrase
   let shownPhrases = new Set();       // phrase names whose notes are revealed + tinted on the sheet
@@ -1060,7 +1060,8 @@ export function createMusicRenderer(container, opts = {}) {
     return phrases.map((p) => {
       const r = phraseRange(p);
       return { name: p.name, color: p.color, from: r ? r[0] : null, to: r ? r[1] : null,
-        tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) };
+        tags: [...(p.tags || [])],
+        add: addedNotes(p).map((n) => ({ ...n })), drop: droppedNotes(p).map((n) => ({ ...n })) };
     });
   }
   function firePhrasesChange() { if (onPhrasesChange) { try { onPhrasesChange(getPhrases()); } catch (_) {} } }
@@ -2223,11 +2224,12 @@ export function createMusicRenderer(container, opts = {}) {
 
   // Resolve a phrase to onset-ordered note identities [{measure,midi,beats}] (its member tags'
   // notes + extra notes, unioned) — the play-set for playing the phrase together. Empty when unknown.
-  // A phrase is a stretch of bars, so its notes are simply the notes drawn in those bars. A phrase
-  // saved under the old model has no range of its own and still resolves the way it was built.
+  // A phrase is a stretch of bars corrected by hand: the notes drawn in those bars, less the ones it
+  // says are not part of it, plus the ones it brings in from outside (see phraseNotes). Only the
+  // renderer knows what is drawn, so it supplies the bars' notes and the model does the arithmetic.
   function phraseNoteIds(p) {
     const r = phraseRange(p);
-    return r ? noteIdsInBarRange(r[0], r[1]) : [];
+    return phraseNotes(p, r ? noteIdsInBarRange(r[0], r[1]) : []);
   }
   function getPhraseNoteIds(name) {
     return phraseNoteIds(phraseByName(phrases, name));
@@ -2337,7 +2339,7 @@ export function createMusicRenderer(container, opts = {}) {
     if (!n || n.midi == null) return;
     const id = { measure: n.measure, midi: n.midi, beats: n.onsetBeats };
     const key = suppressionKey(id);
-    if (phrasePaintMode) {   // paint the note into the active phrase's extra notes; wins over tag/suppress
+    if (phrasePaintMode) {   // correct the active phrase's contents; wins over tag/suppress
       if (!activePhrase) return;
       phrases = togglePhraseNoteReducer(phrases, activePhrase, id);
       redraw();
@@ -2777,7 +2779,12 @@ export function createMusicRenderer(container, opts = {}) {
       selectedChords.clear();   // a fresh piece carries no manual chord picks
       extraNoteMarks = null;    // ...and no carried-over variation added-note highlight
       assignments = (detail.patterns || []).map((p) => ({ name: p.name, notes: (p.notes || []).map((n) => ({ ...n })) }));
-      phrases = (detail.phrases || []).map((p) => ({ name: p.name, color: p.color, tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
+      // from/to come back too. They did not, and since a phrase IS its bars, every phrase saved under
+      // the current model came back covering nothing and resolving to no notes at all — only the older
+      // ones survived a reload, on the strength of the notes they carried.
+      phrases = (detail.phrases || []).map((p) => ({ name: p.name, color: p.color,
+        from: p.from == null ? null : p.from, to: p.to == null ? null : p.to, tags: [...(p.tags || [])],
+        add: addedNotes(p).map((n) => ({ ...n })), drop: droppedNotes(p).map((n) => ({ ...n })) }));
       rhythmGroups = (detail.rhythmGroups || []).map(copyGroup);
       tagMode = false; activeTag = null; tagFilter = false; dimAll = false; plainView = false; filterTags = new Set();   // tagRegistry is global — not reset here
       phrasePaintMode = false; activePhrase = null; phraseFilter = false; shownPhrases = new Set();
@@ -2985,7 +2992,8 @@ export function createMusicRenderer(container, opts = {}) {
     // (used on load / restore); the editing methods below do.
     setPhrases(list) {
       phrases = (list || []).map((p) => ({ name: p.name, color: p.color, from: p.from ?? null, to: p.to ?? null,
-        tags: [...(p.tags || [])], notes: (p.notes || []).map((n) => ({ ...n })) }));
+        tags: [...(p.tags || [])],
+        add: addedNotes(p).map((n) => ({ ...n })), drop: droppedNotes(p).map((n) => ({ ...n })) }));
       redraw();
     },
     getPhrases() { return getPhrases(); },
@@ -3010,9 +3018,11 @@ export function createMusicRenderer(container, opts = {}) {
     },
     // Add/remove a member tag on a phrase (its notes resolve live from the tags + extra notes).
     setPhraseTag(name, tagName, on) { phrases = setPhraseTagReducer(phrases, name, tagName, !!on); firePhrasesChange(); redraw(); },
-    // Enter/leave phrase-paint mode; notehead clicks then add/remove the active phrase's extra notes.
+    // Enter/leave phrase-edit mode; notehead clicks then correct the active phrase — see togglePhraseNote.
     setPhrasePaintMode(on) { if (phrasePaintMode === !!on) return; phrasePaintMode = !!on; redraw(); },
     setActivePhrase(name) { activePhrase = name || null; },
+    // Which phrase clicks are editing, or null. The panel reads it back so its 🖌 shows what is on.
+    getPhraseEdit() { return phrasePaintMode ? activePhrase : null; },
     // Phrase "dim mode" (on while the phrase panel is open): dim notes not in a shown phrase.
     setPhraseFilter(on) { phraseFilter = !!on; redraw(); },
     // The set of phrase names whose resolved notes are revealed + tinted on the sheet.

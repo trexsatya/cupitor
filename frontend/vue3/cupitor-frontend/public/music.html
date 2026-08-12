@@ -3521,6 +3521,24 @@ Can you hear it?       &gt; ask()"></textarea>
       const bars = document.createElement('span');
       bars.style.cssText = 'font-size:.78em;color:#666;margin-right:8px;display:inline-flex;align-items:center;gap:2px';
       bars.append(document.createTextNode('m'), from, dash, to);
+      // What the bars alone do not say: the notes taken out of them and the ones brought in from
+      // outside. Shown only when there are any, so an ordinary phrase stays a name and a range.
+      const nDrop = (p.drop || []).length, nAdd = (p.add || []).length;
+      if (nDrop || nAdd) {
+        const fix = document.createElement('span');
+        fix.style.cssText = 'font-size:.72em;color:#0d6efd;margin-right:6px;font-family:ui-monospace,Menlo,monospace';
+        fix.textContent = `${nDrop ? `−${nDrop}` : ''}${nDrop && nAdd ? ' ' : ''}${nAdd ? `+${nAdd}` : ''}`;
+        fix.title = `${nDrop ? `${nDrop} note${nDrop === 1 ? '' : 's'} in these bars left out` : ''}`
+          + `${nDrop && nAdd ? '; ' : ''}${nAdd ? `${nAdd} note${nAdd === 1 ? '' : 's'} brought in from outside` : ''}`;
+        bars.append(fix);
+      }
+      // Edit contents: click notes on the sheet to take them out of the phrase or bring them in. One
+      // phrase at a time — clicks have to belong to something.
+      const editing = renderer.getPhraseEdit && renderer.getPhraseEdit() === p.name;
+      const editBtn = mkBtn('🖌', editing
+        ? 'Stop editing — the phrase keeps what you clicked'
+        : 'Edit what is in this phrase: click a note inside its bars to leave it out, or one outside to bring it in',
+        () => setPhraseEdit(editing ? null : p.name), editing);
       const playBtn = mkBtn('▶', phrasePlaysLit()
         ? 'Play these bars — with a motif / phrase view on, only the notes it has lit (see “▶ plays” above)'
         : 'Play these bars — every note in them, however the sheet is dimmed (see “▶ plays” above)',
@@ -3531,10 +3549,27 @@ Can you hear it?       &gt; ask()"></textarea>
       });
       delBtn.style.marginLeft = 'auto';
       const head = document.createElement('div'); head.className = 'phrase-head';
-      head.append(show, sw, nm, bars, playBtn, findBtn, delBtn);
+      head.append(show, sw, nm, bars, editBtn, playBtn, findBtn, delBtn);
       row.append(head);
       list.appendChild(row);
     });
+  }
+  // Start/stop editing what is in a phrase. The phrase is shown while you edit it — you are choosing
+  // notes by clicking them, and you cannot choose what you cannot see: the sheet dims everything else,
+  // so a note leaving the phrase goes grey and one joining it takes the phrase's colour under the click.
+  function setPhraseEdit(name) {
+    if (!renderer) return;
+    const msg = document.getElementById('phraseMsg');
+    renderer.setActivePhrase(name);
+    renderer.setPhrasePaintMode(!!name);
+    if (name) {
+      setPhraseVis(true);           // dims the rest of the sheet (and takes it from Motifs/Rhythms)
+      setPhraseShown(name, true);   // reveals THIS phrase, and re-renders the panel
+      msg.textContent = `Editing "${name}" — click a note in its bars to leave it out, or one outside to bring it in.`;
+    } else {
+      renderPhraseUI();
+      msg.textContent = '';
+    }
   }
   // Reveal/hide a phrase's bars on the (dimmed) sheet.
   function setPhraseShown(name, on) {
