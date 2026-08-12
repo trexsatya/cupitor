@@ -10,7 +10,8 @@ import { findRhythmPatterns, soloMutedIndices } from './music-rhythm.js';
 import { detectKey, parseKeyName, fifthsOfKey } from './music-key.js';
 import { addPhrase as addPhraseReducer, removePhrase as removePhraseReducer, setPhraseTag as setPhraseTagReducer,
   removeTagFromPhrases, renameTagInPhrases, togglePhraseNote as togglePhraseNoteReducer, phraseByName,
-  phraseRange, phraseNotes, addedNotes, droppedNotes, setPhraseRange as setPhraseRangeReducer } from './music-phrase.js';
+  phraseRange, phraseNotes, addedNotes, droppedNotes, renamePhrase as renamePhraseReducer,
+  setPhraseRange as setPhraseRangeReducer } from './music-phrase.js';
 import { detectPhrases as detectPhrasesModel, phraseBands as phraseBandsModel } from './music-phrase-detect.js';
 import { addGroup as addGroupReducer, removeGroup as removeGroupReducer, setGroupRanges as setGroupRangesReducer,
   addGroupRanges as addGroupRangesReducer, setGroupPattern as setGroupPatternReducer, groupByName,
@@ -3015,6 +3016,21 @@ export function createMusicRenderer(container, opts = {}) {
       if (activePhrase === name) activePhrase = null;
       shownPhrases.delete(name);
       firePhrasesChange(); redraw();
+    },
+    // Rename a phrase, keeping its bars, colour and corrections. The name is the handle everywhere —
+    // what the panel shows, what a script's inPhrase() names, what the compare boxes take — so anything
+    // holding it has to follow. Here that is the paint target and the shown set; the caller's own set
+    // and the piece's script are its to move. False when refused (see the reducer), so the caller can
+    // say why instead of appearing to do nothing.
+    renamePhrase(from, to) {
+      const next = renamePhraseReducer(phrases, from, to);
+      if (next === phrases) return false;
+      phrases = next;
+      const clean = (to || '').trim();
+      if (activePhrase === from) activePhrase = clean;
+      if (shownPhrases.delete(from)) shownPhrases.add(clean);
+      firePhrasesChange(); redraw();
+      return true;
     },
     // Add/remove a member tag on a phrase (its notes resolve live from the tags + extra notes).
     setPhraseTag(name, tagName, on) { phrases = setPhraseTagReducer(phrases, name, tagName, !!on); firePhrasesChange(); redraw(); },

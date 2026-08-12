@@ -1,7 +1,7 @@
 import {
   addPhrase, removePhrase, setPhraseTag, removeTagFromPhrases,
   togglePhraseNote, phraseNotes, addedNotes, droppedNotes, phraseColor, PHRASE_PALETTE,
-  phraseRange, setPhraseRange, renameTagInPhrases,
+  phraseRange, setPhraseRange, renameTagInPhrases, renamePhrase, phraseByName,
 } from './music-phrase.js';
 
 describe('addPhrase', () => {
@@ -183,6 +183,66 @@ describe('phrase ranges', () => {
   test('phraseRange of nothing is null', () => {
     expect(phraseRange(null)).toBeNull();
     expect(phraseRange({ name: 'a' })).toBeNull();
+  });
+});
+
+describe('renamePhrase', () => {
+  const list = () => [
+    { name: 'A', color: '#0d6efd', from: 4, to: 8, drop: [{ measure: 5, midi: 60, beats: 4 }], add: [] },
+    { name: 'B', color: '#d63384', from: 9, to: 16 },
+  ];
+
+  test('the phrase keeps everything but its name', () => {
+    const next = renamePhrase(list(), 'A', 'Chorus');
+    expect(next[0]).toEqual({ name: 'Chorus', color: '#0d6efd', from: 4, to: 8,
+      drop: [{ measure: 5, midi: 60, beats: 4 }], add: [] });
+    expect(next[1]).toEqual({ name: 'B', color: '#d63384', from: 9, to: 16 });
+  });
+
+  test('refused — and detectably so — for a name already in use', () => {
+    // The same array back is the refusal: two phrases under one name would be indistinguishable
+    // wherever the name is the handle, and one of them would silently win.
+    const before = list();
+    expect(renamePhrase(before, 'A', 'B')).toBe(before);
+    expect(renamePhrase(before, 'A', '  B  ')).toBe(before);   // trimmed before the check
+  });
+
+  test('nothing to do is nothing done', () => {
+    const before = list();
+    expect(renamePhrase(before, 'A', '   ')).toBe(before);     // blank
+    expect(renamePhrase(before, 'A', 'A')).toBe(before);       // unchanged
+    expect(renamePhrase(before, 'nope', 'C')).toBe(before);    // no such phrase
+    expect(renamePhrase(null, 'A', 'C')).toEqual([]);
+  });
+});
+
+// A name is matched exactly, never case-folded. It has to be: the detected families are A, B, C…, so
+// folding case would make a hand-named "b" collide with family B, and a piece can reasonably hold both
+// "intro" and "Intro". Pinned here because a "helpful" case-insensitive compare is an easy thing to add.
+describe('phrase names are case-sensitive', () => {
+  test('"a" and "A" are two different phrases', () => {
+    let { phrases, added } = addPhrase([], 'A', null, 1, 4);
+    ({ phrases, added } = addPhrase(phrases, 'a', null, 5, 8));
+    expect(added).toBe(true);
+    expect(phrases.map((p) => p.name)).toEqual(['A', 'a']);
+    expect(phraseByName(phrases, 'a')).toMatchObject({ from: 5, to: 8 });
+    expect(phraseByName(phrases, 'A')).toMatchObject({ from: 1, to: 4 });
+  });
+
+  test('renaming to a differently-cased name is allowed, and hits only its own phrase', () => {
+    const list = [{ name: 'A', from: 1, to: 4 }, { name: 'B', from: 5, to: 8 }];
+    expect(renamePhrase(list, 'B', 'a').map((p) => p.name)).toEqual(['A', 'a']);
+    expect(renamePhrase(list, 'a', 'C')).toBe(list);   // no phrase called "a" — "A" is not it
+  });
+
+  test('setPhraseRange, removePhrase and togglePhraseNote all match exactly', () => {
+    const list = [{ name: 'A', from: 1, to: 4, add: [], drop: [] }, { name: 'a', from: 5, to: 8, add: [], drop: [] }];
+    expect(setPhraseRange(list, 'a', 9, 12).map((p) => [p.name, p.from, p.to])).toEqual([['A', 1, 4], ['a', 9, 12]]);
+    expect(removePhrase(list, 'a').map((p) => p.name)).toEqual(['A']);
+    const n = { measure: 6, midi: 60, beats: 0 };
+    const next = togglePhraseNote(list, 'a', n);
+    expect(next[0].drop).toEqual([]);        // "A" untouched
+    expect(next[1].drop).toEqual([n]);       // inside "a"'s bars
   });
 });
 

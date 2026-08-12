@@ -339,7 +339,13 @@
         #rhythmPanel[open]>.np-body{background:#f0faf6;border:1px solid #c3e8da}
         /* Every floating card needs its own opaque background: the body has none of its own, and the
            sticky drag bar inherits it, so a panel without this rule shows the score straight through. */
-        #scriptPanel[open]>.np-body{background:#fdf8ef;border:1px solid #ecdcc2}
+        #scriptPanel[open]>.np-body{background:#fdf8ef;border:1px solid #ecdcc2;
+          /* Wider than the other cards: this one holds whole script LINES (words, then `>`, then the
+             commands) and the builder's eight-column table, where 360px meant reading everything
+             through a horizontal scrollbar. No media query needed — the 92vw cap is what a phone
+             lands on either way, so this only grows the card where there is room. A size set by the
+             resize grip is inline, so it still wins. */
+          width:min(960px,92vw)}
         #scriptPanel .np-drag{color:#a5854f}
         #rhythmPanel .np-drag{color:#4f9c85}
         #rhythmPanel .tag-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
@@ -453,11 +459,19 @@
         .script-text{width:100%;box-sizing:border-box;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
           font-size:12.5px;line-height:1.5;padding:6px 8px;border:1px solid #cfd8e3;border-radius:6px;
           resize:vertical;white-space:pre;overflow-wrap:normal;overflow-x:auto;flex:1 1 auto;min-width:0}
-        /* Gutter: one ▶ that rides the caret's line. `white-space:pre` above is what makes this
-           honest — no wrapping, so a line of text is always exactly one row to measure against. */
+        /* Gutter: the line numbers, and one ▶ that rides the caret's line. `white-space:pre` above is
+           what makes both honest — no wrapping, so a line of text is always exactly one row to measure
+           against. Width is set from the digit count in paintLineNos, so a script passing 9 or 99 lines
+           does not push the text sideways by surprise. */
         .script-edit{display:flex;align-items:stretch}
-        .script-gutter{position:relative;flex:0 0 20px;width:20px;overflow:hidden}
-        .script-line-run{position:absolute;left:1px;width:18px;padding:0;border:0;background:transparent;
+        .script-gutter{position:relative;flex:0 0 auto;width:20px;overflow:hidden}
+        /* pointer-events:none — the numbers are a readout, and must never eat a click meant for the
+           text (or for the ▶ sitting over them). */
+        .script-nums{position:absolute;left:0;top:0;text-align:right;pointer-events:none;user-select:none;
+          font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#9aa7b8}
+        .script-nums div{padding-right:4px}
+        .script-nums div.on{color:#2563eb;font-weight:700}   /* the caret's line, like the ▶ */
+        .script-line-run{position:absolute;right:1px;width:18px;padding:0;border:0;background:transparent;
           color:#2563eb;cursor:pointer;font-size:10px;text-align:center;border-radius:4px}
         .script-line-run:hover{background:#e8efff}
         /* Run and Stop are opposites: exactly one of them is ever the thing to press. */
@@ -490,7 +504,7 @@
         .cmp-opt{display:inline-flex;align-items:center;gap:3px;color:#3c4c66;white-space:nowrap}
         /* The hosted Motifs panel sits in the flow here, not as the floating card it is on the page:
            there is nothing to move it off, and a card hovering over the panes would cover the very
-           bars being compared. !important because fitPanelHeight writes an inline max-height sized
+           bars being compared. !important because fitPanelBox writes an inline max-height sized
            for the floating card. */
         .cmp-motifs{margin-bottom:8px}
         .cmp-motifs .np-panel[open]>.np-body{position:static;width:auto;max-height:none!important;
@@ -546,6 +560,8 @@
         .script-builder .sb-num{width:3.6em}
         .script-builder .sb-pick{max-width:9em}
         .script-builder .sb-bad{color:#b42318}
+        /* A scope on a line that plays its own phrase: still usable, so it can be cleared. */
+        .script-builder .sb-clash{border-color:#b42318;color:#b42318}
         .script-builder .sb-x{border:none;background:none;color:#a33;cursor:pointer;font-size:13px;
           line-height:1;padding:0 2px}
         .script-builder .sb-foot{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:5px}
@@ -874,7 +890,11 @@
       <!-- A phrase is a named stretch of bars. Which NOTES are in play is the Motifs panel's job, so
            there is nothing to pick here beyond where the phrase starts and ends. -->
       <label class="tag-lbl">New phrase:
-        <input id="phraseInput" maxlength="32" placeholder="name…" autocomplete="off" style="width:8em">
+        <!-- autocapitalize/autocorrect off: a phrase name is case-sensitive ("a" and "A" are two
+             phrases), and a phone keyboard capitalizing the first letter would quietly make a name
+             you did not type — then inPhrase(a) stops finding it. -->
+        <input id="phraseInput" maxlength="32" placeholder="name…" autocomplete="off"
+               autocapitalize="off" autocorrect="off" spellcheck="false" style="width:8em">
       </label>
       <label class="tag-lbl" title="The bars this phrase covers. Empty takes whatever range the segment boxes above are showing.">bars
         <input id="phraseFrom" type="number" min="1" style="width:3em" placeholder="from">–<input id="phraseTo" type="number" min="1" style="width:3em" placeholder="to">
@@ -1023,6 +1043,7 @@
     <div id="scriptBuilder" class="script-builder" style="display:none"></div>
     <div class="script-edit">
     <div id="scriptGutter" class="script-gutter">
+      <div id="scriptLineNos" class="script-nums" aria-hidden="true"></div>
       <button id="scriptLineRun" class="script-line-run" type="button" hidden>▶</button>
     </div>
     <textarea id="scriptText" class="script-text" rows="9" spellcheck="false"
@@ -1186,7 +1207,7 @@ Can you hear it?       &gt; ask()"></textarea>
     parseBarRange, renderAlignedSegments } from './music-render.js';
   import { init as initFretboard } from './fretboard-panel.js';
   import { chordDisplayName } from './music-chords.js';
-  import { parseScript, describeStep, tempoForPass, COMMANDS, renameTagInScript,
+  import { parseScript, describeStep, tempoForPass, COMMANDS, renameTagInScript, renamePhraseInScript,
     parseCalls, proseCut, formatLine, ARG_UI } from './music-script.js';
   import { safeHtml } from './music-richtext.js';
   import { keyExplanation } from './music-key.js';
@@ -2653,6 +2674,7 @@ Can you hear it?       &gt; ask()"></textarea>
     // Phrases: the renderer loaded detail.phrases on load; reset the phrase controls for the fresh
     // piece (panel visibility follows its own toggle).
     shownPhraseNames.clear();
+    renamingPhrase = null;   // a half-typed name belongs to the piece it was being typed on
     document.getElementById('phraseInput').value = '';
     document.getElementById('phraseMsg').textContent = '';
     const phrasePanelOpen = document.getElementById('phrasePanel').open;
@@ -2954,6 +2976,7 @@ Can you hear it?       &gt; ask()"></textarea>
   let renamingTag = null;
   let renamingDraft = '';
   const shownPhraseNames = new Set();   // phrases revealed + tinted on the sheet (checkboxes)
+  let renamingPhrase = null;            // which phrase row is showing its rename input, for the same reason
   // Rebuild the tag combobox options and the tag pills from the GLOBAL tag list, annotated with how
   // many notes THIS piece assigns to each. Called on load and after every tag edit.
   function renderTagUI() {
@@ -3239,18 +3262,28 @@ Can you hear it?       &gt; ask()"></textarea>
   // explicit width/height (inline, so it outlives closing and reopening the card, like the drag
   // offset); double-click drops back to the CSS size. Pointer-driven rather than CSS `resize` so it
   // works on touch. The grip is appended here — it must be the card's last child.
-  // Cap a card's height to the room actually below it, so it never runs past the window bottom (which
-  // would put its resize grip off-screen). The CSS 72vh cap can't do this — it knows the viewport, not
-  // where the card starts. Skipped once the user has sized the card by hand.
-  function fitPanelHeight(body) {
+  // Fit a card to the room actually around it, so it never runs past the window edge (which would put
+  // its resize grip off-screen, or hand the PAGE a horizontal scrollbar). The CSS caps cannot do this:
+  // they know the viewport, not where the card starts — and these cards are anchored to the controls
+  // column, which on a wide window begins hundreds of pixels in, so a vw cap bounds nothing.
+  //
+  // Height is capped. Width is SHIFTED instead: a wide card that will not fit to the right is moved
+  // left over the sheet — which is what these cards do anyway (they float over it, and they are
+  // draggable) — so the script panel keeps its full width rather than being squeezed on a 1280 screen.
+  // Both skipped once the user has sized the card by hand.
+  function fitPanelBox(body) {
     if (!body || body._userSized || !body.offsetParent) return;
-    const top = body.getBoundingClientRect().top;
-    body.style.maxHeight = `${Math.max(160, Math.round(window.innerHeight - top - 12))}px`;
+    body.style.marginLeft = '';   // measure the anchored position, not the last shift
+    const r = body.getBoundingClientRect();
+    body.style.maxHeight = `${Math.max(160, Math.round(window.innerHeight - r.top - 12))}px`;
+    // Shift left by whatever hangs off the right, but never past the window's own left edge.
+    const over = Math.round(r.right - (window.innerWidth - 12));
+    if (over > 0) body.style.marginLeft = `${-Math.min(over, Math.max(0, Math.round(r.left) - 8))}px`;
   }
   function fitOpenPanels() {
     PANEL_IDS.forEach((id) => {
       const p = document.getElementById(id);
-      if (p && p.open) fitPanelHeight(p.querySelector('.np-body'));
+      if (p && p.open) fitPanelBox(p.querySelector('.np-body'));
     });
   }
   window.addEventListener('resize', fitOpenPanels);
@@ -3277,7 +3310,7 @@ Can you hear it?       &gt; ask()"></textarea>
       body.style.width = `${Math.round(w)}px`;
       body.style.height = `${Math.round(h)}px`;
       body.style.maxHeight = 'none';   // the CSS 72vh cap would otherwise win over a taller drag
-      body._userSized = true;          // ...and stop fitPanelHeight from overriding the chosen size
+      body._userSized = true;          // ...and stop fitPanelBox from overriding the chosen size
     });
     const end = (e) => { if (sizing) { sizing = false; try { grip.releasePointerCapture(e.pointerId); } catch (_) {} } };
     grip.addEventListener('pointerup', end);
@@ -3286,7 +3319,7 @@ Can you hear it?       &gt; ask()"></textarea>
       e.stopPropagation();
       body.style.width = ''; body.style.height = ''; body.style.maxHeight = '';
       body._userSized = false;
-      fitPanelHeight(body);
+      fitPanelBox(body);
     });
   }
   // The Motifs / Phrases / Rhythm buttons ARE these panels' headers: one click opens a panel's floating
@@ -3329,7 +3362,13 @@ Can you hear it?       &gt; ask()"></textarea>
     makePanelDraggable(panel.querySelector('.np-body'));
     makePanelResizable(panel.querySelector('.np-body'));
     addPanelCloseButton(panel);
-    panel.addEventListener('toggle', () => { syncPanelTabs(); if (panel.open) fitPanelHeight(panel.querySelector('.np-body')); });
+    panel.addEventListener('toggle', () => {
+      syncPanelTabs();
+      if (!panel.open) return;
+      fitPanelBox(panel.querySelector('.np-body'));
+      // The script gutter cannot be measured while the panel is collapsed — settle it now that it is up.
+      if (id === 'scriptPanel') placeLineRun();
+    });
     const btn = document.getElementById(`${id}Btn`);
     if (btn) btn.onclick = () => { panel.open = !panel.open; };
   });
@@ -3506,7 +3545,12 @@ Can you hear it?       &gt; ask()"></textarea>
       show.title = 'Show this phrase (reveal + tint its bars on the sheet)';
       show.onchange = () => setPhraseShown(p.name, show.checked);
       const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = p.color || '#999';
-      const nm = document.createElement('b'); nm.textContent = p.name; nm.style.marginRight = '6px';
+      // The name is editable in place, like the range: both are things you get wrong on the first pass
+      // and want to correct while looking at the bars. Click the name (or ✎) to type over it.
+      const nm = document.createElement('b');
+      nm.textContent = p.name; nm.style.cssText = 'margin-right:6px;cursor:text';
+      nm.title = 'Click to rename';
+      nm.onclick = () => { renamingPhrase = p.name; renderPhraseUI(); };
       // The range is the phrase — so it is editable in place rather than shown as a caption.
       const mk = (val) => {
         const i = document.createElement('input');
@@ -3548,11 +3592,73 @@ Can you hear it?       &gt; ask()"></textarea>
         if (window.confirm(`Delete phrase "${p.name}"${p.from != null ? ` (m${p.from}–${p.to})` : ''}?`)) renderer.removePhrase(p.name);
       });
       delBtn.style.marginLeft = 'auto';
+      const renBtn = mkBtn('✎', 'Rename this phrase', () => { renamingPhrase = p.name; renderPhraseUI(); });
       const head = document.createElement('div'); head.className = 'phrase-head';
-      head.append(show, sw, nm, bars, editBtn, playBtn, findBtn, delBtn);
+      if (renamingPhrase === p.name) head.append(show, sw, phraseRenameEditor(p.name), bars);
+      else head.append(show, sw, nm, bars, renBtn, editBtn, playBtn, findBtn, delBtn);
       row.append(head);
       list.appendChild(row);
     });
+  }
+  // The row's inline rename form: just the name. Unlike a motif, a phrase belongs to ONE piece, so there
+  // is no "everywhere" scope to choose — nothing outside this piece can be pointing at it.
+  function phraseRenameEditor(from) {
+    const input = document.createElement('input');
+    input.value = from;
+    input.style.cssText = 'font-size:12.5px;padding:1px 4px;border:1px solid #9ec1ff;border-radius:4px;width:9em;margin-right:6px';
+    input.title = `New name for "${from}"`;
+    // See #phraseInput: names are case-sensitive, so nothing may re-case what was typed.
+    input.setAttribute('autocapitalize', 'off');
+    input.setAttribute('autocorrect', 'off');
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); applyPhraseRename(from, input.value); }
+      else if (e.key === 'Escape') { e.preventDefault(); renamingPhrase = null; renderPhraseUI(); }
+    };
+    const ok = mkRowBtn('✓', 'Apply the new name', () => applyPhraseRename(from, input.value));
+    const cancel = mkRowBtn('×', 'Cancel the rename', () => { renamingPhrase = null; renderPhraseUI(); });
+    // Focus without fighting typing: renderPhraseUI can rebuild this row for unrelated reasons.
+    setTimeout(() => { if (document.activeElement !== input) { input.focus(); input.select(); } }, 0);
+    const wrap = document.createElement('span');
+    wrap.style.cssText = 'display:inline-flex;align-items:center;gap:2px';
+    wrap.append(input, ok, cancel);
+    return wrap;
+  }
+  function mkRowBtn(txt, title, fn) {
+    const b = document.createElement('button');
+    b.className = 'btn'; b.style.cssText = 'padding:1px 7px;font-size:12px';
+    b.title = title; b.textContent = txt; b.onclick = fn;
+    return b;
+  }
+  // Move a phrase to a new name, and everything holding the old one with it: this panel's shown set, and
+  // the piece's script — a script still saying inPhrase(A) after A was renamed just stops finding it.
+  function applyPhraseRename(from, raw) {
+    const to = (raw || '').trim();
+    const msg = document.getElementById('phraseMsg');
+    if (!to || to === from) { renamingPhrase = null; renderPhraseUI(); return; }
+    if (!renderer || !renderer.renamePhrase(from, to)) {
+      // The only way this refuses is a name already in use — say so and stay in the form, so the name
+      // being typed is not lost to a silent no-op.
+      msg.textContent = `There is already a phrase called "${to}".`;
+      return;
+    }
+    if (shownPhraseNames.delete(from)) shownPhraseNames.add(to);
+    const lines = renamePhraseInOpenScript(from, to);
+    renamingPhrase = null;
+    renderPhraseUI();
+    msg.textContent = `"${from}" is now "${to}"${lines ? ` · ${lines} script line${lines === 1 ? '' : 's'} followed` : ''}.`;
+  }
+  // Follow the rename into the open piece's script (textarea + saved detail). Returns lines changed.
+  function renamePhraseInOpenScript(from, to) {
+    const ta = document.getElementById('scriptText');
+    if (!ta) return 0;
+    const { text, lines } = renamePhraseInScript(ta.value, from, to);
+    if (!lines) return 0;
+    ta.value = text;
+    parseScriptNow();
+    saveScript();
+    return lines;
   }
   // Start/stop editing what is in a phrase. The phrase is shown while you edit it — you are choosing
   // notes by clicking them, and you cannot choose what you cannot see: the sheet dims everything else,
@@ -3628,6 +3734,18 @@ Can you hear it?       &gt; ask()"></textarea>
   // dimmed sheet that plays everything looks like the dim has stopped working.
   const phrasePlayNote = () => ((!phrasePlaysLit() && dimActiveOnSheet()) ? ' · all notes of its bars' : '');
 
+  // Shade a named phrase's bars behind the notes, so playing it shows WHERE it is as well as sounding
+  // it. Carries the phrase's own colour and its name as the badge — the name is the thing that was
+  // asked for, and m4–8 is already written in the panel row next to it. Shares the one band channel
+  // with the detected-phrase shading, so the last thing asked for is the thing showing.
+  function shadeNamedPhrase(name) {
+    if (!renderer || !renderer.shadeBars) return;
+    const p = (renderer.getPhrases() || []).find((q) => q.name === name);
+    if (!p || p.from == null || p.to == null) return;   // a phrase covering nothing has nothing to shade
+    if (renderer.clearMeasureHighlight) renderer.clearMeasureHighlight();
+    if (renderer.clearStepHighlight) renderer.clearStepHighlight();
+    renderer.shadeBars([p.from, p.to], { fill: p.color || '#1565c0', badge: name });
+  }
   function playPhrase(name) {
     stopVarPlayback();   // never overlap the variation preview on the shared Tone.Transport
     if (!currentDetail) return;
@@ -3642,6 +3760,7 @@ Can you hear it?       &gt; ask()"></textarea>
     const heard = soundingCount(schedule);
     if (!heard) { setTransportMsg(nothingSounds(`phrase "${name}"`, phrasePlaysLit()), 'err'); return; }
     const silenced = schedule.length - heard;
+    shadeNamedPhrase(name);   // after the guards: a play that refused should not leave a band behind
     setLastPlay({ tag: 'P', label: `phrase "${name}"`, run: () => playPhrase(name) });
     const p = ensurePlayer();
     p.setInstrument(document.getElementById('instrSel').value);
@@ -4428,6 +4547,13 @@ Can you hear it?       &gt; ask()"></textarea>
   // A phrase argument is either a detected family (A, B, B2, B′…) or one you named by hand.
   function scriptPlayPhrase(name) {
     ensureDetectedPhrases();
+    // The phrase is the new subject, so it takes the sheet from whatever was dissecting it. Not
+    // cosmetic: with "▶ plays" on its default (only what the view has lit), a dim left behind by an
+    // earlier motif step SILENCES most of the phrase — on a script that works through motifs before
+    // playing the phrase whole, playPhrase(B) sounded 90 of its 152 notes and said so in passing.
+    // A phrase asked for by name is asked for whole. Same reasoning as playPhraseWith selecting its
+    // motifs without dimming; the panel's own ▶ is untouched, because there the dim IS the choice.
+    activateFocus('phrase');
     const res = resolvePhrase(name);
     if (res && res.detected) {
       // Set the pick directly rather than dispatching `change` on the picker: that handler switches
@@ -4660,10 +4786,49 @@ Can you hear it?       &gt; ask()"></textarea>
     const ta = document.getElementById('scriptText');
     return scriptSteps.findIndex((s) => s.line === caretLineNo(ta));
   }
+  // The gutter's line numbers. A script is written by line — the parse errors say "line 3", the table's
+  // rows are numbered, and a step IS a line — so the editor should say which line you are on rather than
+  // leaving you to count. Rebuilt only when the line COUNT changes; the offset follows every scroll.
+  //
+  // Rows are placed by line-height, not by measuring the text: the same reading placeLineRun uses, and
+  // trustworthy for the same reason (`white-space:pre`, so one line is one row).
+  function paintLineNos() {
+    const ta = document.getElementById('scriptText');
+    const box = document.getElementById('scriptLineNos');
+    if (!ta || !box) return;
+    const cs = getComputedStyle(ta);
+    const lh = parseFloat(cs.lineHeight) || 18;
+    const n = ta.value.split('\n').length;
+    if (box.childElementCount !== n) {
+      box.textContent = '';
+      for (let k = 1; k <= n; k++) {
+        const d = document.createElement('div');
+        d.textContent = String(k);
+        box.append(d);
+      }
+    }
+    // Sized from the widest number it will hold, so passing line 9 or 99 doesn't nudge the text. A
+    // measurement taken while the panel is collapsed reads 0 and is not kept, so the width is settled
+    // the first time the gutter is actually on screen.
+    const digits = String(n).length;
+    if (box.dataset.digits !== String(digits) || !box.offsetWidth) {
+      box.style.width = `${digits}ch`;
+      const w = box.offsetWidth;
+      if (w) {
+        box.dataset.digits = String(digits);
+        document.getElementById('scriptGutter').style.width = `${w + 22}px`;
+      }
+    }
+    box.style.lineHeight = `${lh}px`;
+    box.style.top = `${(parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0) - ta.scrollTop}px`;
+    const cur = caretLineNo(ta);
+    [...box.children].forEach((d, i) => d.classList.toggle('on', i + 1 === cur));
+  }
   function placeLineRun() {
     const ta = document.getElementById('scriptText');
     const btn = document.getElementById('scriptLineRun');
     if (!ta || !btn) return;
+    paintLineNos();   // before any early return — the numbers are there whether or not the line runs
     const i = stepAtCaret();
     if (i < 0) { btn.hidden = true; return; }
     const cs = getComputedStyle(ta);
@@ -4841,6 +5006,23 @@ Can you hear it?       &gt; ask()"></textarea>
     ['gap', 'Seconds of quiet after this step, instead of the panel’s gap'],
     ['', ''],
   ];
+  // An edit rebuilds the whole table, and with it the box that was scrolled and the control that was
+  // being used — so changing anything halfway down a long script threw the table back to the top and
+  // dropped focus to nowhere. Both are remembered across the swap. The control is identified by line +
+  // class + position rather than held as an element, because every element here is about to be replaced.
+  function builderFocusKey() {
+    const el = document.activeElement;
+    const tr = (el && el.closest) ? el.closest('.sb-table tr[data-line]') : null;
+    const cls = (el && el.className && typeof el.className === 'string') ? el.className.split(/\s+/)[0] : '';
+    if (!tr || !cls) return null;
+    return { line: tr.dataset.line, cls, i: [...tr.querySelectorAll(`.${cls}`)].indexOf(el) };
+  }
+  function builderRestoreFocus(key) {
+    if (!key || key.i < 0) return;
+    const tr = document.querySelector(`.sb-table tr[data-line="${key.line}"]`);
+    const el = tr && tr.querySelectorAll(`.${key.cls}`)[key.i];
+    if (el && el.focus) el.focus();
+  }
   function renderScriptBuilder() {
     const box = document.getElementById('scriptBuilder');
     if (!box) return;
@@ -4848,6 +5030,9 @@ Can you hear it?       &gt; ask()"></textarea>
     if (!builderOpen) return;
     // Each row's ▶ needs its step's index, so the step list has to match the text this render is reading.
     parseScriptNow();
+    const old = box.querySelector('.sb-wrap');
+    const keep = old ? { top: old.scrollTop, left: old.scrollLeft } : null;
+    const focusKey = builderFocusKey();
     box.innerHTML = '';
     const wrap = document.createElement('div'); wrap.className = 'sb-wrap';
     const table = document.createElement('table'); table.className = 'sb-table';
@@ -4862,6 +5047,10 @@ Can you hear it?       &gt; ask()"></textarea>
     // grid — a nested table would let each section's columns drift out of line with the others'.
     builderGroups().forEach((g) => table.append(builderTbody(g)));
     wrap.append(table); box.append(wrap);
+    // Put the reader back where they were. Clamped by the browser if the table got shorter, which is
+    // right — there is nowhere else to be. Done before the footer's own focus calls, so those still win.
+    if (keep) { wrap.scrollTop = keep.top; wrap.scrollLeft = keep.left; }
+    builderRestoreFocus(focusKey);
 
     const foot = document.createElement('div'); foot.className = 'sb-foot';
     // Appending rather than inserting at the caret: the table is the whole script at once, so there is no
@@ -5008,18 +5197,27 @@ Can you hear it?       &gt; ask()"></textarea>
 
     // does — one block per verb, plus one empty block to add the next.
     const acts = cell(); acts.className = 'sb-acts';
-    [...row.actions, null].forEach((call) => acts.append(builderActBlock(tr, call)));
+    [...row.actions, null].forEach((call) => acts.append(builderActBlock(tr, call, !!row.scope)));
 
-    // in / which — the step's scope.
+    // in / which — the step's scope. Not offered on a line that plays a phrase: playPhrase names the
+    // phrase it plays, so a scope here could only name a second, different place (see parseScript).
+    // A line that ALREADY has both keeps its select live, with only "—" open to it — disabling the
+    // control outright would show the mistake and take away the one thing that fixes it.
+    const namesItsOwn = row.actions.some((c) => c.name === 'playPhrase');
+    const clash = namesItsOwn && !!row.scope;
     const scopeSel = document.createElement('select');
-    scopeSel.className = 'sb-scope'; scopeSel.title = BUILDER_COLS[3][1];
+    scopeSel.className = 'sb-scope' + (clash ? ' sb-clash' : '');
+    scopeSel.title = clash
+      ? `This step plays a phrase of its own, so ${row.scope.name}(…) names a second place — set this to “—”`
+      : (namesItsOwn ? 'playPhrase names its own phrase — this step needs no scope' : BUILDER_COLS[3][1]);
     scopeSel.append(new Option('—', ''));
     ['inBars', 'inPhrase'].forEach((n) => {
       const o = new Option(n === 'inBars' ? 'bars' : 'phrase', n);
-      o.title = COMMANDS[n].doc; o.disabled = !builderCanAdd(n);
+      o.title = COMMANDS[n].doc; o.disabled = !builderCanAdd(n) || namesItsOwn;
       scopeSel.append(o);
     });
     scopeSel.value = row.scope ? row.scope.name : '';
+    scopeSel.disabled = namesItsOwn && !clash;
     scopeSel.onchange = () => builderApply(tr, { what: 'scope', name: scopeSel.value });
     cell().append(scopeSel);
     const which = cell();
@@ -5050,16 +5248,20 @@ Can you hear it?       &gt; ask()"></textarea>
     return tr;
   }
   // One verb of a step: which one, and its arguments. `call` null is the empty block that adds the next.
-  function builderActBlock(tr, call) {
+  function builderActBlock(tr, call, hasScope = false) {
     const act = document.createElement('div'); act.className = 'sb-act';
     const fn = document.createElement('select');
     fn.className = 'sb-fn'; fn.title = call ? COMMANDS[call.name].doc : 'Add a verb to this step';
     fn.append(new Option(call ? '—' : '＋ do…', ''));
     Object.entries(COMMANDS).forEach(([n, c]) => {
       if (BUILDER_MODIFIERS.includes(n)) return;          // these have columns of their own
+      // The other half of the scope rule: a step that already keeps to one place cannot also play a
+      // phrase of its own. Offered as disabled rather than hidden, so the reason can be read.
+      const clashes = n === 'playPhrase' && hasScope && (!call || call.name !== 'playPhrase');
       const can = builderCanAdd(n);
-      const o = new Option(can ? n : `${n} — nothing to name yet`, n);
-      o.disabled = !can; o.title = c.doc;
+      const o = new Option(clashes ? `${n} — this step already keeps to one place` : (can ? n : `${n} — nothing to name yet`), n);
+      o.disabled = !can || clashes;
+      o.title = clashes ? 'playPhrase names its own phrase — clear the “in” column first' : c.doc;
       fn.append(o);
     });
     fn.value = call ? call.name : '';

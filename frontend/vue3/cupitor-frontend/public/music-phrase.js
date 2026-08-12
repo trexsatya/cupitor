@@ -110,6 +110,18 @@ export function setPhraseRange(phrases, name, from, to) {
 // Drop a phrase by name. Returns a NEW phrases array.
 export function removePhrase(phrases, name) { return (phrases || []).filter((p) => p.name !== name); }
 
+// Rename a phrase, keeping its bars, colour and corrections. Returns the SAME array when it cannot be
+// done — blank, unchanged, no such phrase, or the new name already belongs to another one. Refusing a
+// taken name rather than merging: two phrases under one name would be indistinguishable everywhere the
+// name is the handle (the panel, inPhrase, the compare boxes), and one of them would silently win.
+export function renamePhrase(phrases, from, to) {
+  const list = phrases || [];
+  const clean = (to || '').trim();
+  if (!clean || clean === from || !list.some((p) => p.name === from)) return list;
+  if (list.some((p) => p.name === clean)) return list;
+  return list.map((p) => (p.name === from ? { ...p, name: clean } : p));
+}
+
 // Add (on=true) or remove (on=false) a member tag on the named phrase. No duplicates. NEW array.
 export function setPhraseTag(phrases, name, tagName, on) {
   return (phrases || []).map((p) => {
