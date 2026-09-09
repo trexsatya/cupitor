@@ -1,0 +1,21 @@
+{
+  "lang": "sv",
+  "targetLang": "en",
+  "dataDir": "/Users/satyendra.kumar/Documents/PersonalProjects/trexsatya.github.io/db/language/swedish",
+  "srtsDir": "/Users/satyendra.kumar/Documents/PersonalProjects/trexsatya.github.io/db/language/swedish/srts",
+  "outDir": "./out",
+  "rareThreshold": 2,
+  "maxItemsPerWord": 5,
+  "linesBefore": 3,
+  "linesAfter": 3,
+  "excludeChannels": [],
+  "preferManualCaptions": true,
+  "filmotCookie": "remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d=eyJpdiI6Ikh4VnhoaFFxdzhUZFlwc05jSmxYWnc9PSIsInZhbHVlIjoicjc4Y0kzTG15NkFGWm13VVJYeTl2TmM4d1dQdHJuaHFQZmd2YW15cUlkUFcrOUxKVkwzbXgwbFhWSTRFQ05Id0VJVS9WRm82c0s2aDhNcFh4Q3pUdjRpajUzTndZOU90ekQ3LzBNeHZCY3dLR2dlMWV1Nno0cWE4OGMwSXRRY3JDbjlwK0Y5STdaZXdCQTA3MnlNQ1FBPT0iLCJtYWMiOiIzMDM3NjIwNmQ5NGVmY2E0OWY2NzYxYjNhYjdlMzQ1ZWJhZTc0OGMyNjc0ZjRiYzczNWRiOTBiNmJkMjEzMzRiIiwidGFnIjoiIn0%3D; vsession=hNYnUtGrxyuYW5atohVjYR76wZqGNDk%2BQHV1BX%2FGtxytd4no6cbBU%3D95SZDWQVVWTBs6oROg1cXUFBpoNzYjMt963FUEAZtA6059ff33d695a32c04589a10466c4282; XSRF-TOKEN=eyJpdiI6Ii80WTlKc0NPQ1YrZ2ZXVldSYlFTUnc9PSIsInZhbHVlIjoiQ1pVVEh0cHg2dVF2ZzFxbXFRSkh6R0Mya2t2endnWHZ5QVdvaWY3RVNvMVE4QzN1U2NyTlVPWGhQV0pqTzdGajBQVjYwMjN1T1JIUHJXY2VjQTNUWEIvNnRBM284SjNBZVlTc0VGMkh3SlZ4MW1EaFR0MjhxbGZlemYxVEYwc24iLCJtYWMiOiI3M2QyMTkwYzJhYzg3YThlNGZlM2NjNjhhZWMwZWM2YzkxNmU3NTIxZTFkYTRlZWQzNDFiMDg0NjFjNmIxYjcwIiwidGFnIjoiIn0%3D; m_session=eyJpdiI6Im16VjhHYzRSRjBYSENXcFpIOENobkE9PSIsInZhbHVlIjoieVh0c29tMUlVQnVJRkFEZ3FvVXF0WllBQ0ppY2REajlpYW9UY3pjcnIzY3AvUFQvcEVFNU5PNElKbHZOYVk0d3ZzMzIzZGZrbHhnZnhvQnJkb2NpdS81NVhnUzVwSGNvalpaM1lxQjJKbGZVN0lOTm9vMnhpQUU0T0lRY2RHYnUiLCJtYWMiOiJkYWVmMjliZTg4MDQ0Mzk5OGM0ZWRlMjBmMTcxY2E2ZGE4NmEwYTIyMzczNDgxY2VkOTAyYTRkZTdhMjkyM2Q0IiwidGFnIjoiIn0%3D",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+  "filmotDelayMs": 1500,
+  "translateDelayMs": 800,
+  "chunkFilmot": 10,
+  "chunkSrt": 20,
+  "srtConflict": "keep",
+  "defaultDurSec": 3
+}
