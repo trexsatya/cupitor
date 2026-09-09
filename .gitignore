@@ -21,6 +21,7 @@ gradle-app.setting
 
 out/
 
+.DS_Store
 .idea
 **/docker/dist/*
 .claude
