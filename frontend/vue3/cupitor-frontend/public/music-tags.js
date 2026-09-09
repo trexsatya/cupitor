@@ -30,6 +30,30 @@ export function addTag(registry, name) {
 // Drop a tag by name. Returns a NEW registry.
 export function removeTag(registry, name) { return (registry || []).filter((t) => t.name !== name); }
 
+// Rename a tag in the registry, KEEPING its colour — a rename is the same motif under a new name, and
+// having it change colour everywhere would read as a different motif. Refuses a blank name, an unknown
+// `from`, and a `to` that is already taken: merging two tags is a different operation (whose notes win?),
+// and silently doing it here would lose one tag's assignments in every piece. { registry, renamed }.
+export function renameTag(registry, from, to) {
+  const list = registry || [];
+  const clean = (to || '').trim();
+  if (!clean || clean === from) return { registry: list, renamed: false };
+  if (!list.some((t) => t.name === from)) return { registry: list, renamed: false };
+  if (list.some((t) => t.name === clean)) return { registry: list, renamed: false };
+  return { registry: list.map((t) => (t.name === from ? { ...t, name: clean } : t)), renamed: true };
+}
+
+// Move one piece's note assignments onto a new tag name. Colours live in the registry, so this only
+// carries the notes across. Refuses when `to` already holds notes here — same merge problem as above.
+// Returns a NEW assignments array (the input unchanged when the rename is refused).
+export function renameInAssignments(assignments, from, to) {
+  const list = assignments || [];
+  const clean = (to || '').trim();
+  if (!clean || clean === from) return list;
+  if (list.some((a) => a.name === clean)) return list;
+  return list.map((a) => (a.name === from ? { ...a, name: clean } : a));
+}
+
 // name → color lookup.
 export function colorMap(registry) {
   const m = {};
@@ -62,8 +86,21 @@ export function indexAssignments(assignments) {
 // note shared by several tags must light for a REVEALED tag even if an earlier (hidden) tag also
 // claims it — so callers pass the revealed set here rather than relying on firstTagForKey.
 export function revealedTagForKey(indexed, key, allowed) {
-  for (const a of indexed) if ((!allowed || allowed.has(a.name)) && a.keys.has(key)) return a.name;
-  return null;
+  const hits = [];
+  for (const a of indexed) if ((!allowed || allowed.has(a.name)) && a.keys.has(key)) hits.push(a);
+  if (!hits.length) return null;
+  if (hits.length === 1) return hits[0].name;
+  // A motif that contains another one WHOLE owns the notes they share. Painting the shorter one there
+  // hides the longer figure the note is really part of — you would see "1,2,3" and never learn the
+  // note belongs to "1,2,3,2,1". Order still decides when neither motif contains the other.
+  const bigger = hits.find((a) => hits.every((b) => b === a || isSuperset(a.keys, b.keys)));
+  return (bigger || hits[0]).name;
+}
+
+function isSuperset(a, b) {
+  if (a.size < b.size) return false;
+  for (const k of b) if (!a.has(k)) return false;
+  return true;
 }
 
 // The NAME of the first assignment (by order) whose set contains `key`, or null. First tag wins.

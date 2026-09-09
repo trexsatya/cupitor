@@ -27,6 +27,25 @@ describe('createMusicStore', () => {
     expect(await store.getDetail('western', 'missing')).toBeNull();
   });
 
+  // Editing only a piece's index ENTRY — tags, a practice note — carries no detail. Writing the null
+  // through used to overwrite a good cached detail with nothing, and since the piece then counted as
+  // unpushed, the next open read that null and refused to open the piece at all.
+  test('an entry-only edit does not wipe the cached detail', async () => {
+    const store = freshStore();
+    await store.putPieces('western', [{ entry: entryA, detail: detailA }]);
+    await store.putPieces('western', [{ entry: { ...entryA, note: 'slow the coda' }, detail: null }]);
+    expect(await store.getDetail('western', 'a')).toEqual(detailA);
+    const rows = await store.getEntries('western');
+    expect(rows[0].entry.note).toBe('slow the coda');
+  });
+
+  test('an entry-only edit on a piece with no cached detail stores no detail (not a null one)', async () => {
+    const store = freshStore();
+    await store.putPieces('western', [{ entry: entryB, detail: undefined }]);
+    expect(await store.getDetail('western', 'b')).toBeNull();
+    expect((await store.getEntries('western'))[0].entry).toEqual(entryB);
+  });
+
   test('deletePiece removes the entry and its detail (other pieces untouched)', async () => {
     const store = freshStore();
     await store.putPieces('western', [{ entry: entryA, detail: detailA }, { entry: entryB, detail: detailB }]);

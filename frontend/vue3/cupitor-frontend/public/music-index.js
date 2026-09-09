@@ -1,7 +1,8 @@
 // public/music-index.js
 import { primaryVoice, packContour, encodeNoteText, encodeMusicXml, inferChords, canonicalChordSpans } from './music-encoding.js';
 import { countPieces } from './music-split.js';
-import { guessKey, keyLabel, pcHistogram } from './music-pattern.js';
+import { detectKey } from './music-key.js';
+import { durationTypeToNumber } from './music-reference-data.js';
 
 export function fnv1a(str) {
   let h = 0x811c9dc5;
@@ -23,13 +24,26 @@ function channelsOf(doc) {
 
 const PC_NAMES = ["C","Cs","D","Ds","E","F","Fs","G","Gs","A","As","B"];
 
+// Every sounded note as detectKey input: {midi, measure, onset, durBeats}. Duration comes from the
+// note TYPE ('quarter' → 0.25 of a whole), which is all the weighting needs — relative lengths; an
+// unwritten type counts as a quarter (note-text pieces carry no durations at all).
+function keyNotesOf(doc) {
+  const out = [];
+  (doc.voices || []).forEach((v) => (v.pitch || []).forEach((midi, i) => out.push({
+    midi, measure: v.measureIndex ? v.measureIndex[i] : 0, onset: v.onset ? v.onset[i] : i,
+    durBeats: (v.duration && durationTypeToNumber(v.duration[i])) || 0.25,
+  })));
+  return out;
+}
+
 export function buildIndexEntry(doc, source) {
   const v = primaryVoice(doc);
   const noteCount = doc.voices.reduce((n, vv) => n + vv.pitch.length, 0);
-  // Tonal-center guess (Krumhansl-Schmuckler over all sounded pitch classes) — unlike `key` (from the
-  // notated key signature, major only) this distinguishes major vs. relative minor. null when empty.
-  const allMidis = doc.voices.reduce((acc, vv) => { acc.push(...vv.pitch); return acc; }, []);
-  const guessedKey = allMidis.length ? (({ tonicPc, mode }) => keyLabel(tonicPc, mode))(guessKey(pcHistogram(allMidis))) : null;
+  // Tonal center: the notated signature narrowed to ONE of its two keys by the cadences (detectKey).
+  // encodeMusicXml already did this work and left it in meta.keyDetail — reuse it so the library badge
+  // and the open piece can never disagree; re-derive only for docs that carry no detail (note-text).
+  const keyDetail = doc.meta.keyDetail || detectKey(keyNotesOf(doc), { fifths: null, hasSignature: false });
+  const guessedKey = noteCount ? keyDetail.label : null;
   // Chord search indexes ONE measure-ordered progression (not each voice concatenated — that
   // repeated the progression per voice and produced cross-voice false matches; see canonicalChordSpans).
   const chords = canonicalChordSpans(doc.voices).map(s => s.symbol);
@@ -42,6 +56,10 @@ export function buildIndexEntry(doc, source) {
     youtube: doc.meta.youtube,
     key: doc.meta.key,
     guessedKey,
+    // How much the key badge can be trusted, and why — a piece with no (or a contradicted) key
+    // signature reads 'low'/'medium' so the list can mark it instead of asserting a key it guessed.
+    keyConfidence: noteCount ? keyDetail.confidence : null,
+    keyAmbiguous: noteCount ? !!keyDetail.ambiguous : null,
     time: doc.meta.time,
     tempo: doc.meta.tempo,
     instrument: doc.meta.instrument,
@@ -59,6 +77,7 @@ export function buildIndexEntry(doc, source) {
     detailPath: `details/${doc.meta.id}.json`,
     contentHash: fnv1a(source),
     tags: [],         // user-assigned labels; preserved across rebuilds (see computeChanges)
+    note: '',         // free-text practice note; user metadata, preserved across rebuilds too
     updatedAt: null   // stamped by the caller (Date is unavailable in some contexts)
   };
 }
@@ -144,6 +163,7 @@ export function computeChanges({ system, pieces, currentIndex = [], force = fals
     entry.updatedAt = updatedAt;
     const prev = currentById.get(entry.id);
     if (prev && prev.tags && prev.tags.length) entry.tags = prev.tags;   // tags are user metadata — survive rebuilds
+    if (prev && prev.note) entry.note = prev.note;                       // …and so is the practice note
     if (!force && prev && prev.contentHash === entry.contentHash) continue; // unchanged
     changedPieces.push({ entry, detail });
     changed.push(entry.id);

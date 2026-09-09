@@ -401,8 +401,11 @@ function makeRest(doc) {
 export function coloredNoteMarks(xml, color = ADDED_NOTE_COLOR) {
   const doc = typeof xml === 'string' ? new DOMParser().parseFromString(xml, 'application/xml') : xml;
   const marks = [];
+  let divisions = 1;   // carried forward: MusicXML states it once and later measures inherit it
   doc.querySelectorAll('measure').forEach((m) => {
     const measure = parseInt(m.getAttribute('number'), 10);
+    const dEl = m.querySelector('attributes > divisions');
+    if (dEl) divisions = parseInt(dEl.textContent, 10) || divisions;
     const notes = Array.from(m.querySelectorAll('note'));
     notes.forEach((note) => {
       if (note.getAttribute('color') !== color) return;
@@ -429,7 +432,10 @@ export function coloredNoteMarks(xml, color = ADDED_NOTE_COLOR) {
         const d = n.querySelector('duration');
         if (d) onsetDivs += parseInt(d.textContent, 10) || 0;
       }
-      marks.push({ measure, midi, onsetDivs });
+      // onsetBeats = the same onset in quarter-notes from the barline. `onsetDivs` alone is unusable
+      // outside this document (divisions vary per piece), and the renderer needs a musical position
+      // to tell two same-pitch notes in one bar apart.
+      marks.push({ measure, midi, onsetDivs, onsetBeats: onsetDivs / (divisions || 1) });
     });
   });
   return marks;

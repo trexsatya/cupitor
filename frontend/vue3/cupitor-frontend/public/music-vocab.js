@@ -69,6 +69,56 @@ export function uniqueVocabId(vocab, baseId) {
   return `${baseId}_${n}`;
 }
 
+// ── Reverting local edits ────────────────────────────────────────────────────────────────────
+// The library is shared through GitHub, so "local" means edited here but not pushed yet. These let
+// the UI show which vocab items differ from the published vocab.json, and put one back.
+// Deep-compares by JSON: entries are plain data (no functions, no cycles) built by buildVocabEntry.
+const sameEntry = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+export function vocabById(list) { return new Map((list || []).map((e) => [e.id, e])); }
+
+// 'new' — the server has never seen this item; 'changed' — it exists there but differs;
+// 'same' — identical to the published copy.
+export function vocabItemStatus(entry, remote) {
+  if (!entry) return 'same';
+  const r = (remote instanceof Map ? remote : vocabById(remote)).get(entry.id);
+  if (!r) return 'new';
+  return sameEntry(entry, r) ? 'same' : 'changed';
+}
+
+// Put the server's copy of one item back — or drop the item when the server has never seen it (there
+// is nothing to revert TO). Returns { vocab, action } with action 'restored' | 'removed' | 'none';
+// order is preserved for a restore so the list doesn't jump under the user.
+export function revertVocabEntry(local, remote, id) {
+  const list = local || [];
+  const idx = list.findIndex((e) => e.id === id);
+  if (idx < 0) return { vocab: list, action: 'none' };
+  const r = vocabById(remote).get(id);
+  if (!r) return { vocab: list.filter((e) => e.id !== id), action: 'removed' };
+  const next = list.slice();
+  next[idx] = r;
+  return { vocab: next, action: 'restored' };
+}
+
+// Is the local vocab now identical to the published one? Order-insensitive (the file is a bag of
+// items keyed by id) — used to clear the "unpushed" flag once the last local edit is reverted.
+export function vocabMatchesRemote(local, remote) {
+  const a = vocabById(local);
+  const b = vocabById(remote);
+  if (a.size !== b.size) return false;
+  for (const [id, entry] of a) { if (!b.has(id) || !sameEntry(entry, b.get(id))) return false; }
+  return true;
+}
+
+// Integration: the PUBLISHED vocabulary for a system, with no local overlay — the baseline a revert
+// restores from. [] when the file is missing or unreachable (offline: nothing to revert to).
+export async function loadRemoteVocab(system) {
+  try {
+    const res = await fetch(`${getMusicResourceUrl(system)}/vocab.json`);
+    return res.ok ? await res.json() : [];
+  } catch (_) { return []; }
+}
+
 // Pure: group vocab entries by category (sorted), preserving each group's entry order.
 export function groupVocabByCategory(vocab) {
   const byCat = new Map();
@@ -85,9 +135,7 @@ export function groupVocabByCategory(vocab) {
 // hasn't propagated). Local wins on id collisions; remote-only entries are kept. Tolerates
 // an unreachable remote and a missing/erroring store. `store` is optional (back-compat).
 export async function loadVocab(system, store) {
-  let remote = [];
-  try { const res = await fetch(`${getMusicResourceUrl(system)}/vocab.json`); if (res.ok) remote = await res.json(); }
-  catch (_) { remote = []; }
+  const remote = await loadRemoteVocab(system);
   if (!store || !store.getVocab) return remote;
   let local = [];
   try { local = (await store.getVocab(system)) || []; } catch (_) { local = []; }

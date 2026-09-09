@@ -1,8 +1,9 @@
 // public/music-encoding.js
-import { getScale, allChords, normaliseChordName } from './music-reference-data.js';
+import { getScale, allChords, normaliseChordName, durationTypeToNumber } from './music-reference-data.js';
 import { extractPitchesFromText } from './music_search.js';
 import { MusicXml } from './musicxml.js';
 import { bestChords } from './music-chords.js';
+import { detectKey, MAJOR_BY_FIFTHS } from './music-key.js';
 
 const BASE_PC = {
   "C":0,"C#":1,"Db":1,"D":2,"D#":3,"Eb":3,"E":4,"E#":5,"Fb":4,
@@ -116,17 +117,14 @@ export function encodeNoteText(txt, meta = {}) {
   };
 }
 
-// Map key-signature fifths (sharps +, flats -) to a major key name.
-const FIFTHS_TO_KEY = { '-7':'B','-6':'Gb','-5':'Db','-4':'Ab','-3':'Eb','-2':'Bb','-1':'F',
-  '0':'C','1':'G','2':'D','3':'A','4':'E','5':'B','6':'F#','7':'C#' };
-
 export function encodeMusicXml(xmlString, meta = {}) {
   const mx = new MusicXml().loadXml(xmlString);
   const measures = mx.toArray();                  // [[{name,octave,type,dot,voice,tie}, ...], ...]
 
   const $xml = mx.xml;
-  const fifths = $xml.find('fifths').first().text();
-  const key = FIFTHS_TO_KEY[String(parseInt(fifths || '0', 10))] || 'C';
+  const fifthsText = $xml.find('fifths').first().text();
+  const hasSignature = fifthsText != null && String(fifthsText).trim() !== '';
+  const fifths = hasSignature ? (parseInt(fifthsText, 10) || 0) : null;
   const beats = $xml.find('time > beats').first().text();
   const beatType = $xml.find('time > beat-type').first().text();
   const time = (beats && beatType) ? `${beats}/${beatType}` : null;
@@ -194,6 +192,23 @@ export function encodeMusicXml(xmlString, meta = {}) {
     });
   });
 
+  // Key: the signature narrows it to two (relative major / minor), the cadences pick one — and a
+  // missing or bare-0 signature can be overruled by the pitch content (see music-key.js). Done here,
+  // after the notes are built, because the decision needs them. `keyDetail` carries the WHY (and the
+  // caveats) so the UI can show what the reading rests on instead of a bare letter.
+  const keyNotes = [];
+  Object.keys(voicesMap).forEach((k) => {
+    const v = voicesMap[k];
+    v.pitch.forEach((midi, i) => keyNotes.push({
+      midi, measure: v.measureIndex[i], onset: v.onset[i],
+      // Whole-note fractions ('quarter' → 0.25); an unwritten type counts as a quarter, so a note with
+      // no duration weighs the same as an ordinary one rather than four times as much.
+      durBeats: durationTypeToNumber(v.duration[i]) || 0.25,
+    }));
+  });
+  const keyDetail = detectKey(keyNotes, { fifths, hasSignature });
+  const key = keyDetail.key || MAJOR_BY_FIFTHS[String(fifths || 0)] || 'C';
+
   const voices = Object.keys(voicesMap).map(k => {
     const v = voicesMap[k];
     return {
@@ -214,7 +229,7 @@ export function encodeMusicXml(xmlString, meta = {}) {
       id: meta.id || null, title: meta.title || meta.id || null,
       system: meta.system || 'western', format: 'musicxml',
       sourceUrl: meta.sourceUrl || null, youtube: meta.youtube || null,
-      key, time, tempo, instrument
+      key, keyDetail, time, tempo, instrument
     },
     voices: voices.length ? voices : [{ pitch:[],interval:[],sargam:[],duration:[],chordSymbol:[],lyric:[],measureIndex:[] }]
   };

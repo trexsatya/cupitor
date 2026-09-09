@@ -387,6 +387,17 @@ describe('coloredNoteMarks', () => {
     expect(marks[0].midi).toBe(72); // C5 anticipation
     expect(marks[0].onsetDivs).toBe(4); // sits after the A that kept the first 4 divisions
   });
+
+  // onsetDivs is meaningless outside its own document (divisions differ per piece). The renderer
+  // needs a musical position to tell two same-pitch notes in one bar apart, so marks also carry the
+  // onset in quarter-notes from the barline.
+  test('marks carry the onset in beats, not just divisions', () => {
+    const seg = extractSegmentXml(XML, [1, 1]);
+    const out = applyVariation(seg, 'P1', [{ op: 'split', index: 0, insertMidi: 71, insertName: 'B' }]);
+    const marks = coloredNoteMarks(out);
+    expect(marks[0].onsetDivs).toBe(4);
+    expect(marks[0].onsetBeats).toBe(2);   // divisions=2 → 4 divisions is 2 quarter-notes in
+  });
 });
 
 // ---------------------------------------------------------------------------

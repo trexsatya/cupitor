@@ -1,4 +1,4 @@
-import { listParts, mergeParts } from './music-merge.js';
+import { listParts, mergeParts, explodeStaves, shiftOctaves } from './music-merge.js';
 import { STEP_PC } from './music-transpose.js';
 
 // ── MusicXML fixture helpers ──────────────────────────────────────────────────────────────────
@@ -113,8 +113,21 @@ describe('mergeParts', () => {
     // P1 (C2=36, C3=48) is too low → shifted up one octave to 48, 60 (octave interval preserved);
     // P2 (C4=60) already sits in range → unchanged.
     expect(midis).toEqual([48, 60, 60]);
-    // Guitar reads treble clef.
-    expect(doc.querySelector('clef sign').textContent).toBe('G');
+    // Guitar reads a treble clef sounding an octave down (treble-8), so the E2–E5 range sits ON the
+    // staff instead of dangling below a plain treble clef (whose bottom line is E4).
+    const clef = doc.querySelector('clef');
+    expect(clef.querySelector('sign').textContent).toBe('G');
+    expect(num(clef.querySelector('line'))).toBe(2);
+    expect(num(clef.querySelector('clef-octave-change'))).toBe(-1);
+  });
+
+  test('a non-fit merge uses a plain clef with no octave change', () => {
+    const xml = score(
+      [scorePart('P1', 'A'), scorePart('P2', 'B')],
+      [part('P1', {}, note('C', 4, 4)), part('P2', {}, note('E', 4, 4))],
+    );
+    const doc = parse(mergeParts(xml, ['P1', 'P2']));
+    expect(doc.querySelectorAll('clef-octave-change').length).toBe(0);
   });
 
   test('fitRange composes with a part transpose (concert pitch first, then octave-fit)', () => {
@@ -134,5 +147,87 @@ describe('mergeParts', () => {
     const xml = score([scorePart('P1', 'A')], [part('P1', {}, note('C', 4, 4))]);
     expect(mergeParts(xml, ['P1'])).toBe(xml);
     expect(mergeParts(xml, [])).toBe(xml);
+  });
+});
+
+describe('shiftOctaves', () => {
+  test('moves every note up by whole octaves, preserving pitch classes and intervals', () => {
+    const xml = score([scorePart('P1', 'A')], [part('P1', {}, note('C', 3, 2) + note('E', 4, 2))]);
+    const doc = parse(shiftOctaves(xml, 1));
+    const midis = [...doc.querySelectorAll('note pitch')].map(midiOf).sort((a, b) => a - b);
+    expect(midis).toEqual([60, 76]);                            // C3→C4, E4→E5 (+12 each)
+    expect([...doc.querySelectorAll('note pitch step')].map((s) => s.textContent)).toEqual(['C', 'E']);
+  });
+
+  test('moves every note down for a negative shift', () => {
+    const xml = score([scorePart('P1', 'A')], [part('P1', {}, note('C', 4, 4))]);
+    const doc = parse(shiftOctaves(xml, -1));
+    expect([...doc.querySelectorAll('note pitch')].map(midiOf)).toEqual([48]);   // C4→C3
+  });
+
+  test('a zero shift returns the input unchanged', () => {
+    const xml = score([scorePart('P1', 'A')], [part('P1', {}, note('C', 4, 4))]);
+    expect(shiftOctaves(xml, 0)).toBe(xml);
+  });
+});
+
+describe('explodeStaves', () => {
+  // A one-measure grand-staff piano part: RH (staff 1, treble) then a full-measure <backup>, then LH
+  // (staff 2, bass) — the standard MusicXML layout for a single multi-staff part.
+  const grandStaffAttrs =
+    `<attributes><divisions>1</divisions><key><fifths>0</fifths></key>` +
+    `<time><beats>4</beats><beat-type>4</beat-type></time><staves>2</staves>` +
+    `<clef number="1"><sign>G</sign><line>2</line></clef>` +
+    `<clef number="2"><sign>F</sign><line>4</line></clef></attributes>`;
+  const pianoScore = (body) => score(
+    [scorePart('P1', 'Piano')],
+    [`<part id="P1"><measure number="1">${grandStaffAttrs}${body}</measure></part>`],
+  );
+  // RH: C5 then D5 (two quarters); backup a full measure; LH: C3 whole note.
+  const twoHandBody =
+    note('C', 5, 1, { voice: 1, staff: 1 }) + note('D', 5, 1, { voice: 1, staff: 1 }) +
+    `<backup><duration>2</duration></backup>` +
+    note('C', 3, 2, { voice: 2, staff: 2 });
+
+  test('splits a single multi-staff part into one single-staff part per staff', () => {
+    const parts = listParts(explodeStaves(pianoScore(twoHandBody)));
+    expect(parts.length).toBe(2);
+    expect(parts.every((p) => !p.unpitched)).toBe(true);
+    expect(parts.map((p) => p.name)).toEqual(['Piano — Right hand', 'Piano — Left hand']);
+  });
+
+  test('each exploded part is single-staff (no <staves>, no <staff> tags) with that staff’s clef', () => {
+    const doc = parse(explodeStaves(pianoScore(twoHandBody)));
+    expect(doc.querySelectorAll('staves').length).toBe(0);      // collapsed to one staff each
+    expect(doc.querySelectorAll('note staff').length).toBe(0);  // staff tags dropped
+    const clefs = [...doc.querySelectorAll('part')].map((p) => p.querySelector('clef sign').textContent);
+    expect(clefs).toEqual(['G', 'F']);                          // RH keeps treble, LH keeps bass
+  });
+
+  test('each staff keeps its own notes at the right onset (backup/cross-staff structure resolved)', () => {
+    const doc = parse(explodeStaves(pianoScore(twoHandBody)));
+    const parts = [...doc.querySelectorAll('part')];
+    const rhSteps = [...parts[0].querySelectorAll('note pitch step')].map((s) => s.textContent);
+    const lhSteps = [...parts[1].querySelectorAll('note pitch step')].map((s) => s.textContent);
+    expect(rhSteps).toEqual(['C', 'D']);                        // RH line
+    expect(lhSteps).toEqual(['C']);                             // LH bass note
+    // LH note starts at the measure beginning (leading RH run + backup resolved away → no stray forward).
+    expect(parts[1].querySelectorAll('forward').length).toBe(0);
+  });
+
+  test('a plain single-staff part is returned unchanged', () => {
+    const xml = score([scorePart('P1', 'Flute')], [part('P1', {}, note('C', 5, 4, { voice: 1 }))]);
+    expect(explodeStaves(xml)).toBe(xml);
+  });
+
+  test('exploded staves feed straight into mergeParts (guitar-fit) → one combined staff', () => {
+    const exploded = explodeStaves(pianoScore(twoHandBody));
+    const ids = listParts(exploded).map((p) => p.id);
+    const doc = parse(mergeParts(exploded, ids, { fitRange: { lo: 40, hi: 76 } }));
+    expect(doc.querySelectorAll('part').length).toBe(1);        // both hands on one staff
+    const steps = [...doc.querySelectorAll('note pitch step')].map((s) => s.textContent).sort();
+    expect(steps).toEqual(['C', 'C', 'D']);                     // RH C,D + LH C all present
+    const midis = [...doc.querySelectorAll('note pitch')].map(midiOf);
+    expect(midis.every((m) => m >= 40 && m <= 76)).toBe(true);  // folded into guitar range
   });
 });

@@ -25,7 +25,18 @@
       "Bash(pkill -f \"http.server 49587\")",
       "Bash(rm -f /tmp/claude/sowhat.json /tmp/claude/sowhat.xml)",
       "Bash(pkill -f \"http.server 52867\")",
-      "Bash(pkill -f \"http.server 55325\")"
+      "Bash(pkill -f \"http.server 55325\")",
+      "Bash(pkill -f \"http.server 8899\")",
+      "Bash(/Users/satyendra.kumar/.local/bin/lean-ctx -c 'git check-ignore -q .playwright-mcp')",
+      "Bash(pkill -f \"http.server 59020\")",
+      "Bash(pkill -f \"http.server 53478\")",
+      "Bash(pkill -f \"http.server 61323\")",
+      "Bash(pkill -f \"http.server 51813\")",
+      "Bash(rm -f public/_rhythm-harness.html public/_score.xml rhythm-bar-highlight.png rhythm-panel-app.png rhythm-cells-segment.png rhythm-cells-segment2.png)",
+      "Bash(/Users/satyendra.kumar/.local/bin/lean-ctx -c 'git status --short')",
+      "Bash(rm -f public/_rhythm-harness.html public/_score.xml public/_score68.xml)",
+      "Bash(npx jest *)",
+      "Bash(node _ip.mjs)"
     ],
     "additionalDirectories": [
       "/tmp/claude",

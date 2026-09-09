@@ -48,20 +48,28 @@ function pearson(a, b) {
   return (da > 0 && db > 0) ? num / Math.sqrt(da * db) : -Infinity;
 }
 
-// Best-fit key for a 12-bin pitch-class histogram → { tonicPc, mode }. Correlates the histogram
-// with the major/minor Krumhansl profiles rotated to each of the 12 tonics; highest wins.
-export function guessKey(pcCounts) {
+// All 24 keys scored against a 12-bin pitch-class histogram, best first:
+// [{ tonicPc, mode, score }]. Correlates the histogram with the major/minor Krumhansl profiles
+// rotated to each of the 12 tonics. Exposed (not just the winner) because key detection needs the
+// runner-up scores too — to tell "clearly this key" from "these two fit equally well".
+export function keyScores(pcCounts) {
   const counts = (pcCounts && pcCounts.length === 12) ? pcCounts : new Array(12).fill(0);
-  let best = { tonicPc: 0, mode: 'major' };
-  let bestScore = -Infinity;
+  const out = [];
   for (let t = 0; t < 12; t++) {
     for (const [mode, profile] of [['major', MAJOR_PROFILE], ['minor', MINOR_PROFILE]]) {
       const rotated = counts.map((_, pc) => profile[(((pc - t) % 12) + 12) % 12]);
-      const score = pearson(counts, rotated);
-      if (score > bestScore) { bestScore = score; best = { tonicPc: t, mode }; }
+      out.push({ tonicPc: t, mode, score: pearson(counts, rotated) });
     }
   }
-  return best;
+  return out.sort((a, b) => b.score - a.score);
+}
+
+// Best-fit key for a 12-bin pitch-class histogram → { tonicPc, mode }. Profile fit only: it sees no
+// key signature and no cadences, so it can confuse a key with its relative/neighbour. detectKey in
+// music-key.js is the fuller answer; this stays for callers that only have raw pitches.
+export function guessKey(pcCounts) {
+  const best = keyScores(pcCounts)[0];
+  return best && best.score > -Infinity ? { tonicPc: best.tonicPc, mode: best.mode } : { tonicPc: 0, mode: 'major' };
 }
 
 // Build a slide-able template from one tag's ascending stream indices. `midis`/`durs` are the full
@@ -133,22 +141,55 @@ export function findScopedMatches(stream, tagIdx, { mode = 'intervals', duration
   const idx = (tagIdx || []).slice().sort((a, b) => a - b);
   if (idx.length < 2) return { originalIdx: idx, matches: [], key: null };
   const voices = new Set(idx.map((i) => stream[i] && stream[i].voice));
+  const entry = (i) => ({ pos: i, midi: stream[i].midi, durBeats: stream[i].durBeats, onset: stream[i].onset });
   // Top note per onset within the tag's voice(s). Each melody entry keeps the full-stream index of
   // the note it represents, so matches map back to real noteheads.
   const byOnset = new Map();
   stream.forEach((n, i) => {
     if (!n || n.midi == null || !voices.has(n.voice)) return;
     const cur = byOnset.get(n.onset);
-    if (!cur || n.midi > cur.midi) byOnset.set(n.onset, { pos: i, midi: n.midi, durBeats: n.durBeats, onset: n.onset });
+    if (!cur || n.midi > cur.midi) byOnset.set(n.onset, entry(i));
   });
-  const melody = [...byOnset.values()].sort((a, b) => a.onset - b.onset);
+  // The tagged notes ARE the template — the top-note rule must not stand in for one of them. Tagging
+  // a lower note under a held higher one (an inner voice, a left-hand figure) would otherwise search
+  // for the higher note's shape instead of the tagged one.
+  //
+  // EVERY tagged note, including several at one onset. Keyed by onset alone, two notes of the motif
+  // that sound together overwrote each other: a four-note tag became a two-note template, which then
+  // matched 17 places in a piece that holds the motif nowhere else. A motif spelled across voices —
+  // in a piece that moves in parallel thirds, that is most of them — is still the motif you tagged.
+  const taggedAt = new Map();
+  idx.forEach((i) => {
+    const n = stream[i];
+    if (!n || n.midi == null) return;
+    if (!taggedAt.has(n.onset)) taggedAt.set(n.onset, []);
+    taggedAt.get(n.onset).push(entry(i));
+  });
+  // A motif with two notes at one moment can only be FOUND again if the line it is searched against
+  // keeps both notes everywhere, not just where it was tagged. The top-note-per-onset rule hid the
+  // second occurrence of exactly such a motif in m12 of the Marmotte: its G sits under an A at the
+  // same instant, so the line held the A alone and the shape could never line up. When the tag is an
+  // ordinary one-note-at-a-time figure this does not apply, and the melody stays a single line.
+  const simultaneous = taggedAt.size < idx.length;
+  const entries = [];
+  if (simultaneous) {
+    stream.forEach((n, i) => { if (n && n.midi != null && voices.has(n.voice)) entries.push(entry(i)); });
+  } else {
+    byOnset.forEach((e, onset) => { if (!taggedAt.has(onset)) entries.push(e); });   // tagged onsets are the tag's own
+    taggedAt.forEach((list) => list.forEach((e) => entries.push(e)));
+  }
+  // Simultaneous tagged notes keep the order the score lays them out in (`pos`) — the only order that
+  // is a fact about the music rather than a guess at what was meant.
+  const melody = entries.sort((a, b) => (a.onset - b.onset) || (a.pos - b.pos));
   const melodyMidis = melody.map((e) => e.midi);
   const melodyDurs = melody.map((e) => e.durBeats);
   const wantInt = mode === 'intervals' || mode === 'both';
   const { pitchSeq, key: usedKey } = pitchSequence(melodyMidis, { intervalBasis, wantInt, key });
-  const tagOnsets = new Set(idx.map((i) => stream[i].onset));
+  // By stream index, not by onset: an onset can now hold more than one melody entry, and only the
+  // tagged ones belong to the template.
+  const taggedPos = new Set(idx);
   const tagPos = [];
-  melody.forEach((e, mi) => { if (tagOnsets.has(e.onset)) tagPos.push(mi); });
+  melody.forEach((e, mi) => { if (taggedPos.has(e.pos)) tagPos.push(mi); });
   if (tagPos.length < 2) return { originalIdx: tagPos.map((mi) => melody[mi].pos), matches: [], key: usedKey };
   const template = extractTemplate(tagPos, pitchSeq, melodyDurs);
   const matches = findMatches(pitchSeq, melodyDurs, template, { mode, durationStrict });

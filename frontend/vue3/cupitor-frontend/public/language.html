@@ -260,6 +260,16 @@
                         Min words
                         <input type="number" id="minWordsAround" value="10" min="0" max="100" step="1" style="width: 46px; margin-left: 4px;">
                     </label>
+                    <label class="lang-panel-label" title="Seconds to wait between playlist items during Play All. The same value can be stepped from the ± control in the playback overlay.">
+                        Item gap
+                        <input type="number" id="recPlayGapSeconds" value="30" min="0" max="600" step="1" style="width: 46px; margin-left: 4px;">
+                    </label>
+                    <label class="lang-panel-label" title="Seconds to wait between a manual card's Source and Target recordings — the pause you get to recall the answer. Leave blank to use the item gap.">
+                        S→T gap
+                        <input type="number" id="recPlaySrcTgtGapSeconds" value="" min="0" max="600" step="1" placeholder="item" style="width: 46px; margin-left: 4px;">
+                    </label>
+                    <button type="button" id="openMusicPanel" class="btn lang-panel-btn"
+                            title="Background music that plays under a playlist: saved tracks, when it sounds, and how loud.">♫ Music…</button>
                     <label class="lang-panel-label">
                         Lang
                         <input class="tgl tgl-flip" id="toggleLangCb" type="checkbox" data-toggle="toggle"

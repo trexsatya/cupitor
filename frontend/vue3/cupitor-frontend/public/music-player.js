@@ -3,6 +3,7 @@
 // browser wrappers over Tone.js (MIDI) and the YouTube IFrame API. Only the pure
 // functions are unit-tested; the audio/video wrappers are browser-verified.
 import { primaryVoice } from './music-encoding.js';
+import { parseRepeatStructure, expandRepeats } from './music-repeats.js';
 
 // Note <type> → beats, where a quarter note = 1 beat (matches quarter-note BPM tempo).
 export const NOTE_TYPE_BEATS = {
@@ -75,14 +76,42 @@ export function isSuppressed(event, set) {
   if (!event || !set || !set.length) return false;
   const EPS = 1e-6;
   for (const s of set) {
-    // Match on (midi, beats) only — NOT measure. An absolute onset (piece-start quarter beats) lies
-    // in exactly one measure, so (midi, beats) uniquely identifies the note. We deliberately ignore
-    // `measure`: the renderer numbers measures sequentially (pickup = 1) while the player reads the
-    // XML `number` attribute (pickup often "0"), so requiring measure-equality would miss pickup-bar
-    // notes. `measure` is still carried in the stored identity for readability/debugging.
-    if (s.midi === event.midi && Math.abs(s.beats - event.beats) < EPS) return true;
+    // Match on (midi, beats) — NOT measure. `measure` is deliberately ignored: the renderer numbers
+    // measures sequentially (pickup = 1) while the player reads the XML `number` attribute (pickup
+    // often "0"), so requiring measure-equality would miss pickup-bar notes. It is still carried in
+    // the stored identity for readability/debugging.
+    //
+    // (midi, beats) does NOT uniquely identify a NOTEHEAD: a combined / two-hand score can draw the
+    // same pitch at the same instant in both staves — a cross-voice unison — and this matches both.
+    // That is right for playback (one sound) but means callers must not hand in a set where the two
+    // noteheads disagree: `getDimmedNotes` therefore never reports a grey note whose twin is lit,
+    // and the kept events are collapsed by `dedupeUnisons` so one identity yields one event.
+    if (s.midi !== event.midi) continue;
+    if (Math.abs(s.beats - event.beats) < EPS) return true;
+    // A grace note SOUNDS just before its principal (`beats`), but on the sheet it sits ON the
+    // principal's onset — which is the identity the renderer stores for its notehead. Match that too
+    // (`idBeats`), or no stored identity would ever name a grace note and 🔇 / rhythm-solo muting
+    // would silently skip every ornament.
+    if (event.idBeats != null && Math.abs(s.beats - event.idBeats) < EPS) return true;
   }
   return false;
+}
+
+// Collapse cross-voice unisons: two noteheads at the same pitch and onset are ONE sound. Note
+// identities are matched on (midi, beats), so a single kept identity picks up both noteheads and the
+// schedule would count — and report — the note twice. The longer of the two is kept, so a pitch held
+// in one hand while the other restates it still sounds for its written length. A real chord (same
+// onset, different pitches) and a repeated pitch (same pitch, different onsets) are untouched.
+export function dedupeUnisons(events) {
+  const out = [];
+  const at = new Map();
+  (events || []).forEach((e) => {
+    const key = `${e.midi}@${Number(e.beats).toFixed(6)}`;
+    const i = at.get(key);
+    if (i == null) { at.set(key, out.length); out.push(e); return; }
+    if ((e.durBeats || 0) > (out[i].durBeats || 0)) out[i] = e;
+  });
+  return out;
 }
 
 // Pure: rewrite the output onset (`t`, in beats) of `kept` events for tag skip-playback —
@@ -115,6 +144,26 @@ export function compressKeptEvents(kept, others, breathBeats = 1) {
   return out;
 }
 
+// Pure: play several schedules one after another, `gapSeconds` of silence between them (each part is
+// already re-zeroed to start at 0). Every note at a later part's first onset is flagged `rehome` so
+// the forward-only OSMD cursor jumps back to it instead of running off the end. Empty parts are skipped.
+export function concatSchedules(parts, gapSeconds = 0) {
+  const out = [];
+  let offset = 0;
+  (parts || []).forEach((part, pi) => {
+    if (!part || !part.length) return;
+    const startsAt = Math.min(...part.map((e) => e.time));
+    const endsAt = Math.max(...part.map((e) => e.time + e.duration));
+    part.forEach((e) => out.push({
+      ...e,
+      time: Number((e.time + offset).toFixed(6)),
+      rehome: (pi > 0 && Math.abs(e.time - startsAt) < 1e-6) ? true : e.rehome,
+    }));
+    offset += endsAt + gapSeconds;
+  });
+  return out.sort((a, b) => a.time - b.time);
+}
+
 // Pure: build a time-accurate, polyphonic schedule from a MusicXML string. Reads every
 // part/voice with ABSOLUTE onsets, honoring <divisions>, <duration> (authoritative — bakes
 // in dotted values), <chord/> (stacked at the same onset), <rest> (advances time, no note),
@@ -138,8 +187,11 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
   const fromBeat = (opts.fromBeat == null) ? -Infinity : opts.fromBeat;
   const toBeat = (opts.toBeat == null) ? Infinity : opts.toBeat;
 
-  const events = []; // { midi, beats (onset), durBeats, measure }
+  const events = []; // { midi, beats (onset), durBeats, measure, mi }
   const parts = doc.getElementsByTagName('part');
+  const measureStartBeats = [];   // measure index → absolute start beat (from part 0), for repeat re-sequencing
+  const measureHasNote = [];      // measure index → any <note> (across parts)? Note-less measures are collapsed
+  let part0EndBeat = 0;           // absolute end beat of part 0 (length of the last measure)
   for (let pi = 0; pi < parts.length; pi++) {
     let divisions = 1;        // current <divisions> for this part (quarter = `divisions` ticks)
     let cursor = 0;           // running onset in beats from the part start
@@ -148,6 +200,10 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
     const measures = parts[pi].getElementsByTagName('measure');
     for (let mi = 0; mi < measures.length; mi++) {
       const measure = measures[mi];
+      if (pi === 0) measureStartBeats[mi] = cursor;   // measure boundary (cursor is at the barline here)
+      // A measure with any <note> (in any part) keeps its duration in OSMD; a note-less measure (only
+      // <forward>/<backup>, e.g. a rest bar MuseScore exports that way) OSMD collapses to zero duration.
+      if (!measureHasNote[mi] && measure.getElementsByTagName('note').length) measureHasNote[mi] = true;
       const parsedNum = parseInt(measure.getAttribute('number'), 10);
       const mNum = Number.isNaN(parsedNum) ? (mi + 1) : parsedNum;
       const kids = measure.children;
@@ -182,7 +238,10 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
             // from beat 0). It does NOT advance `cursor`, so the principal keeps its true onset.
             if (el.querySelector('grace')) {
               const graceLen = cursor > 0 ? Math.min(GRACE_BEATS, cursor) : GRACE_BEATS;
-              events.push({ midi, beats: Math.max(0, cursor - graceLen), durBeats: graceLen, measure: mNum, grace: true });
+              // `idBeats` = the principal's onset, where the grace's NOTEHEAD sits on the sheet. That is
+              // the identity the renderer stores for it (suppression, rhythm patterns), so isSuppressed
+              // needs it to recognise a grace note the user silenced or did not select.
+              events.push({ midi, beats: Math.max(0, cursor - graceLen), idBeats: cursor, durBeats: graceLen, measure: mNum, mi, grace: true });
             }
             continue; // grace steals time from the beat; it never consumes/advances the timeline
           }
@@ -200,12 +259,67 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
             continue;                                    // no new note for a tie continuation
           }
 
-          const ev = { midi, beats: onset, durBeats, measure: mNum };
+          const ev = { midi, beats: onset, durBeats, measure: mNum, mi };
           events.push(ev);
           if (hasStart) openTies.set(key, ev);
           if (!isChord) { cursor += durBeats; lastOnset = onset; }
         }
       }
+    }
+    if (pi === 0) part0EndBeat = cursor;   // length of part 0 → end beat of the last measure
+  }
+
+  // The OSMD cursor is driven by each note's `beat`, which must match OSMD's own timeline. OSMD collapses
+  // note-less measures (see measureHasNote) to zero duration, so the cursor `beat` subtracts the total
+  // length of all such measures BEFORE a note — otherwise, after a note-less bar, advancing to the raw
+  // beat overshoots and the cursor skips the measures that follow. Audio `time` is unaffected (it keeps
+  // the silence); only the visual cursor beat shifts.
+  const mCount = measureStartBeats.length;
+  const measureLenAt = (k) => ((k + 1 < mCount ? measureStartBeats[k + 1] : part0EndBeat) - (measureStartBeats[k] || 0));
+  const emptyBefore = [];
+  { let acc = 0; for (let k = 0; k < mCount; k++) { emptyBefore[k] = acc; if (!measureHasNote[k]) acc += Math.max(0, measureLenAt(k)); } }
+  const visualBeatOf = (e) => e.beats - (emptyBefore[e.mi] || 0);
+
+  // Repeat expansion — only for FULL-PIECE playback (no segment / beat-window / tag filter). Reorder the
+  // measures into the written play order (repeats, voltas, D.C./D.S./Coda/Fine) and re-time: `time`
+  // accumulates monotonically while each note's cursor `beat` keeps its VISUAL position. A measure that
+  // jumps backward vs the previous one flags its first note `rehome` so the player can reposition the
+  // forward-only OSMD cursor. A clipped range keeps the existing linear path untouched.
+  const fullPiece = from === -Infinity && to === Infinity && fromBeat === -Infinity && toBeat === Infinity;
+  const wantExpand = opts.expandRepeats !== false && fullPiece && !(opts.keepNotes && opts.keepNotes.length);
+  if (wantExpand && events.length) {
+    let order = [];
+    try { order = expandRepeats(parseRepeatStructure(doc)); } catch (_) { order = []; }
+    const identity = order.length === mCount && order.every((v, k) => v === k);
+    if (order.length && !identity) {
+      const mutedSet = (opts.mutedNotes && opts.mutedNotes.length) ? opts.mutedNotes : null;
+      const byMi = new Map();
+      for (const e of events) { const a = byMi.get(e.mi) || []; a.push(e); byMi.set(e.mi, a); }
+      const measureLen = (k) => ((k + 1 < mCount ? measureStartBeats[k + 1] : part0EndBeat) - measureStartBeats[k]);
+      const seq = [];
+      let playCursor = 0, prevStart = -Infinity;
+      for (const mi of order) {
+        const start = measureStartBeats[mi] || 0;
+        const grp = byMi.get(mi) || [];
+        const jumpedBack = start < prevStart - 1e-6;
+        const rehomeBeat = grp.length ? Math.min(...grp.map((e) => e.beats)) : null;   // earliest onset of the instance
+        for (const e of grp) {
+          const item = { midi: e.midi, time: (playCursor + (e.beats - start)) * spb, duration: e.durBeats * spb, beat: visualBeatOf(e) };
+          if (mutedSet && isSuppressed(e, mutedSet)) item.muted = true;
+          // Flag every note at the instance's first onset so whichever the player steps on repositions
+          // the cursor back to the top of the jump (later onsets in the measure advance forward normally).
+          if (jumpedBack && e.beats === rehomeBeat) item.rehome = true;
+          seq.push(item);
+        }
+        playCursor += measureLen(mi) || 0;
+        prevStart = start;
+      }
+      seq.sort((a, b) => a.time - b.time);   // stable: chord/aligned notes keep emission order
+      if (seq.length) {
+        const t0 = seq[0].time;
+        for (const e of seq) { e.time = Number((e.time - t0).toFixed(6)); e.duration = Number(e.duration.toFixed(6)); }
+      }
+      return seq;
     }
   }
 
@@ -223,12 +337,18 @@ export function buildScheduleFromMusicXml(xmlString, opts = {}) {
   // skip-playback, jumping ahead over skipped material) instead of advancing one entry per note.
   const out = keep
     ? compressKeptEvents(
-        ranged.filter((e) => isSuppressed(e, keep)).sort((a, b) => a.beats - b.beats),
+        dedupeUnisons(ranged.filter((e) => isSuppressed(e, keep)).sort((a, b) => a.beats - b.beats)),
         ranged.filter((e) => !isSuppressed(e, keep)),
         breathBeats,
-      ).map((c) => ({ midi: c.midi, time: c.t * spb, duration: c.durBeats * spb, beat: c.beats }))
+      ).map((c) => {
+        const item = { midi: c.midi, time: c.t * spb, duration: c.durBeats * spb, beat: c.beats - (emptyBefore[c.mi] || 0) };
+        // `mutedNotes` applies here too: keeping a whole stretch (so its timing is exact) while
+        // silencing part of it is how a rhythm is soloed inside the bars it lives in.
+        if (muted && isSuppressed(c, muted)) item.muted = true;
+        return item;
+      })
     : ranged.map((e) => {
-        const item = { midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb, beat: e.beats };
+        const item = { midi: e.midi, time: e.beats * spb, duration: e.durBeats * spb, beat: visualBeatOf(e) };
         if (muted && isSuppressed(e, muted)) item.muted = true;   // silenced note: keep its slot, skip the synth
         return item;
       });
@@ -302,7 +422,7 @@ export function soundfontSampleMap(instrument, { baseUrl = SOUNDFONT_BASE, forma
 // Browser glue: drive Tone.js from a buildSchedule() result and follow with the OSMD cursor.
 // opts.Tone defaults to the global Tone (vendored UMD). opts.getCursor returns the OSMD
 // cursor (or null) lazily so the player isn't coupled to a specific renderer instance.
-export function createMusicPlayer({ Tone, getCursor, onEnd } = {}) {
+export function createMusicPlayer({ Tone, getCursor, onEnd, onCursorMove } = {}) {
   const T = Tone || (typeof globalThis !== 'undefined' ? globalThis.Tone : undefined);
   if (!T) throw new Error('Tone.js is not available');
   // Fallback timbres (no samples) — used offline or if the soundfont can't load. All are
@@ -379,6 +499,18 @@ export function createMusicPlayer({ Tone, getCursor, onEnd } = {}) {
     }
   }
 
+  // Reposition the cursor to an EARLIER beat (a repeat / D.C. / D.S. jump). The iterator only moves
+  // forward, so reset to the sheet start and advance up to `beat`. Used when a scheduled event's visual
+  // beat jumps backward vs the previous one (flagged `rehome` by the repeat-expanding schedule builder).
+  function rehomeCursorTo(cursor, beat) {
+    if (!cursor || beat == null) return;
+    try {
+      cursor.reset();
+      if (cursorBeat(cursor) != null) advanceCursorToBeat(cursor, beat);
+      cursor.show();
+    } catch (_) {}
+  }
+
   // Home the OSMD cursor to the start of what we're playing: reset to the sheet start, then advance
   // to the first scheduled note's absolute beat (skipping any leading rests). Falls back to the old
   // cursorStartStep stepping when the schedule carries no beats (the note-text builder).
@@ -429,9 +561,13 @@ export function createMusicPlayer({ Tone, getCursor, onEnd } = {}) {
       if (cursor && ev._step) T.Draw.schedule(() => {
         try {
           if (ev._first) homeCursor(cursor);
+          else if (ev.rehome && ev.beat != null && cursorBeat(cursor) != null) rehomeCursorTo(cursor, ev.beat);   // repeat/D.S./D.C. jump back
           else if (ev.beat != null && cursorBeat(cursor) != null) advanceCursorToBeat(cursor, ev.beat);   // skip rests between notes
           else cursor.next();                                                                             // no beats / no timestamp: old stepping
         } catch (_) {}
+        // After the cursor has actually moved — lets the page follow it (see the Follow toggle).
+        // Never let a scroll failure break playback, and never call it before the move.
+        if (onCursorMove) { try { onCursorMove(); } catch (_) {} }
       }, time);
     }, events);
     part.loop = false;   // looping is driven by the Transport (reliable) — see play()/setLoop

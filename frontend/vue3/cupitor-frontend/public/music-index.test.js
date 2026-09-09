@@ -110,6 +110,34 @@ describe('rebuild & push (payload assembly)', () => {
 });
 
 describe('computeChanges (pure)', () => {
+  // Tags and the practice note are the user's own metadata: a rebuild re-derives everything else from
+  // the source, so anything typed by hand has to be carried over or it is silently lost on re-import.
+  test('a rebuild keeps the practice note and the tags', () => {
+    const first = computeChanges({
+      system: 'western',
+      pieces: [{ id: 'triad', format: 'note-text', source: 'C4 E4 G4', key: 'C' }],
+      currentIndex: [], updatedAt: '2026-06-20',
+    });
+    const edited = first.index.map((e) => ({ ...e, tags: ['warmup'], note: 'slow the last bar' }));
+    const again = computeChanges({
+      system: 'western',
+      pieces: [{ id: 'triad', format: 'note-text', source: 'C4 E4 G4 B4', key: 'C' }],   // source changed
+      currentIndex: edited, updatedAt: '2026-06-21',
+    });
+    const entry = again.index.find((e) => e.id === 'triad');
+    expect(entry.note).toBe('slow the last bar');
+    expect(entry.tags).toEqual(['warmup']);
+  });
+
+  test('a fresh piece starts with an empty note', () => {
+    const { index } = computeChanges({
+      system: 'western',
+      pieces: [{ id: 'triad2', format: 'note-text', source: 'C4 E4 G4', key: 'C' }],
+      currentIndex: [], updatedAt: '2026-06-20',
+    });
+    expect(index.find((e) => e.id === 'triad2').note).toBe('');
+  });
+
   test('returns changed ids, paired entry+detail, and merged index', () => {
     const { changed, changedPieces, index } = computeChanges({
       system: 'western',

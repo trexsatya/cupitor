@@ -1,5 +1,5 @@
 // public/music-player.test.js
-import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd, buildScheduleFromMusicXml, gmInstrumentForVoice, soundfontSampleMap, isSuppressed, compressKeptEvents } from './music-player.js';
+import { buildSchedule, NOTE_TYPE_BEATS, parseYouTubeId, instrumentVoiceKey, scheduleEnd, buildScheduleFromMusicXml, gmInstrumentForVoice, soundfontSampleMap, isSuppressed, compressKeptEvents, dedupeUnisons } from './music-player.js';
 
 // Primary voice = the one with the most notes. midi=pitch, duration=<type> string|null, measureIndex 1-based.
 function voice(pitch, duration, measureIndex) {
@@ -204,6 +204,19 @@ describe('buildScheduleFromMusicXml', () => {
     expect(principal.beat).toBe(2);                 // principal keeps its true onset (grace stole no timeline)
   });
 
+  test('a grace note can be muted by its NOTEHEAD identity (the principal onset the renderer stores)', () => {
+    // The grace sounds before the beat, but on the sheet its notehead sits ON the principal's onset —
+    // so that is the (midi, beats) identity suppression / rhythm-solo hand to the player. Matching only
+    // the sounding beat let every ornament through the mute, audible as flicks in "silent" bars.
+    const grace = '<note><grace slash="yes"/><pitch><step>B</step><octave>4</octave></pitch><type>eighth</type></note>';
+    const xml = wrap(`<measure number="1">${attrs(4)}${pn('G', 4, 8)}${grace}${pn('C', 5, 8)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 120, mutedNotes: [{ measure: 1, midi: 71, beats: 2 }] });
+    const g = s.find((e) => e.midi === 71);
+    expect(g.beat).toBeLessThan(2);                 // still sounds early…
+    expect(g.muted).toBe(true);                     // …but the mute now finds it
+    expect(s.find((e) => e.midi === 72).muted).toBeUndefined();   // its principal is untouched
+  });
+
   test('a grace note at the very start still sounds (clamped to beat 0, never negative)', () => {
     // Grace as the first event: there is no room before it, so it sounds from beat 0 (not a negative beat).
     const grace = '<note><grace slash="yes"/><pitch><step>B</step><octave>3</octave></pitch><type>eighth</type></note>';
@@ -304,6 +317,53 @@ describe('buildScheduleFromMusicXml', () => {
       { midi: 60, time: 0, duration: 0.5, beat: 0 },
       { midi: 64, time: 0.75, duration: 0.5, beat: 2 },
     ]);
+  });
+
+  // ── Repeat expansion (full-piece playback follows the written form) ──────────────────────────
+  const fwd = '<barline location="left"><repeat direction="forward"/></barline>';
+  const bwd = '<barline location="right"><repeat direction="backward"/></barline>';
+
+  test('repeat barlines replay the span; play-time advances, cursor beat stays the visual position', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${fwd}${pn('C', 4, 4)}</measure>` +
+                     `<measure number="2">${pn('D', 4, 4)}${bwd}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 60 });   // 60 BPM → 1s/beat, each 4/4 measure = 4s
+    expect(s.map((e) => e.midi)).toEqual([60, 62, 60, 62]);    // C D played twice
+    expect(s.map((e) => e.time)).toEqual([0, 4, 8, 12]);       // play-time is monotonic
+    // The replayed C4 sounds again at t=8 but its cursor `beat` is the ORIGINAL visual position (0),
+    // and it's flagged to reposition the (forward-only) cursor back to the top of the repeat.
+    expect(s[2]).toMatchObject({ midi: 60, time: 8, beat: 0, rehome: true });
+    expect(s[0].rehome).toBeUndefined();                        // no reposition on the first pass
+  });
+
+  test('1st/2nd endings play the right form: [common, end1, common, end2]', () => {
+    const xml = wrap(
+      `<measure number="1">${attrs(1)}${fwd}${pn('C', 4, 4)}</measure>` +
+      `<measure number="2"><barline location="left"><ending number="1" type="start"/></barline>` +
+        `${pn('D', 4, 4)}<barline location="right"><ending number="1" type="stop"/><repeat direction="backward"/></barline></measure>` +
+      `<measure number="3"><barline location="left"><ending number="2" type="start"/></barline>${pn('E', 4, 4)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 60 });
+    expect(s.map((e) => e.midi)).toEqual([60, 62, 60, 64]);    // C, D(1st), C, E(2nd)
+  });
+
+  test('a note-less <forward>/<backup> measure is collapsed for the cursor beat (matches OSMD), audio keeps the silence', () => {
+    // m1 note, m2 = a full-measure rest expressed as forward/backup with NO <note> (OSMD gives it zero
+    // duration), m3 note. Audio: m3 still sounds a measure later (time keeps the gap). Cursor: m3's beat
+    // is 1 (right after m1), NOT 2 — so advancing the OSMD cursor doesn't overshoot past m3.
+    const emptyBar = `<measure number="2"><forward><duration>1</duration></forward><backup><duration>1</duration></backup><forward><duration>1</duration></forward></measure>`;
+    const xml = wrap(`<measure number="1">${attrs(1)}${pn('C', 4, 1)}</measure>` + emptyBar +
+                     `<measure number="3">${pn('E', 4, 1)}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 60 });   // 60 BPM → 1s/beat
+    expect(s.map((e) => e.midi)).toEqual([60, 64]);
+    expect(s[1].time).toBe(2);   // audio: E sounds 2 beats in (the empty bar's silence is preserved)
+    expect(s[1].beat).toBe(1);   // cursor: E's visual beat is 1 (the collapsed bar removed from the timeline)
+    expect(s[0].beat).toBe(0);
+  });
+
+  test('a clipped segment does NOT expand repeats (plays the range linearly, once)', () => {
+    const xml = wrap(`<measure number="1">${attrs(1)}${fwd}${pn('C', 4, 4)}</measure>` +
+                     `<measure number="2">${pn('D', 4, 4)}${bwd}</measure>`);
+    const s = buildScheduleFromMusicXml(xml, { tempo: 60, fromMeasure: 1, toMeasure: 2 });
+    expect(s.map((e) => e.midi)).toEqual([60, 62]);            // once through, no replay
   });
 });
 
@@ -429,5 +489,37 @@ describe('isSuppressed', () => {
   test('empty or missing set → false', () => {
     expect(isSuppressed({ measure: 2, midi: 60, beats: 4 }, [])).toBe(false);
     expect(isSuppressed({ measure: 2, midi: 60, beats: 4 }, null)).toBe(false);
+  });
+});
+
+// Two staves can carry the SAME pitch at the SAME onset — a cross-voice unison. That is one sound,
+// but note identities are matched on (midi, beats), so a single kept identity picks up both
+// noteheads and the schedule counted the note twice.
+describe('dedupeUnisons', () => {
+  const E = (midi, beats, durBeats = 1, extra = {}) => ({ midi, beats, durBeats, ...extra });
+
+  test('two noteheads at the same pitch and onset become one event', () => {
+    expect(dedupeUnisons([E(52, 4), E(52, 4)])).toEqual([E(52, 4)]);
+  });
+
+  test('the longer of the two is kept — the note sounds as long as it is written', () => {
+    expect(dedupeUnisons([E(52, 4, 0.5), E(52, 4, 2)])).toEqual([E(52, 4, 2)]);
+    expect(dedupeUnisons([E(52, 4, 2), E(52, 4, 0.5)])).toEqual([E(52, 4, 2)]);
+  });
+
+  test('a real chord is untouched — same onset, different pitches', () => {
+    const chord = [E(40, 3), E(47, 3), E(52, 3)];
+    expect(dedupeUnisons(chord)).toEqual(chord);
+  });
+
+  test('the same pitch at a different onset is a different note', () => {
+    const rep = [E(52, 3), E(52, 4)];
+    expect(dedupeUnisons(rep)).toEqual(rep);
+  });
+
+  test('order is preserved and empty input is not an error', () => {
+    expect(dedupeUnisons([])).toEqual([]);
+    expect(dedupeUnisons()).toEqual([]);
+    expect(dedupeUnisons([E(60, 0), E(55, 0), E(60, 0)])).toEqual([E(60, 0), E(55, 0)]);
   });
 });

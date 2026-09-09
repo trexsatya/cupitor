@@ -119,6 +119,28 @@ import {
   bridgePlaylistsToRecordings as _coreBridgePlaylistsToRecordings,
 } from './recordings-merge.js';
 import {
+  CAPTION_NO_TRANSLATION,
+  captionLinesFrom as _captionLinesFrom,
+  captionKey as _captionKey,
+  captionWords as _captionWords,
+  captionFaces as _captionFaces,
+} from './caption-capture.js';
+import {
+  MUSIC_MODES as REC_MUSIC_MODES,
+  MUSIC_VOL_WITH_AUDIO,
+  MUSIC_VOL_IN_GAPS,
+  musicVideoIdFromUrl as _musicVideoIdFromUrl,
+  musicMode as _musicModeOf,
+  musicTracks as _musicTracksOf,
+  musicSelectedId as _musicSelectedIdOf,
+  musicSelectedTrack as _musicSelectedTrackOf,
+  musicVolumeFor as _musicVolumeForPhase,
+  musicVolumeFieldsFor as _musicVolumeFieldsFor,
+  musicShouldPlay as _musicShouldPlay,
+  addMusicTrack as _addMusicTrack,
+  removeMusicTrack as _removeMusicTrack,
+} from './music-bed.js';
+import {
   nextRandomPlaylistName as _nextRandomPlaylistName,
   collectManualItems as _collectManualItems,
   wordsForCategories as _wordsForCategories,
@@ -1668,6 +1690,34 @@ window._appSettings = {
   blockedChannels: [],
   // Seconds the recording-playback waits between items.
   recPlayGapSeconds: 30,
+  // Which face of a new card a caption capture's text lands on — 'source'
+  // (caption is the prompt) or 'target' (caption is the answer). Remembered
+  // between captures because collecting from one video means repeated sends.
+  captionTextField: 'source',
+  // Seconds to wait between a manual card's Source and Target recordings —
+  // the "try to recall it" pause. null means unset, in which case the
+  // inter-item gap above is used, so one control covers both until the user
+  // wants a different (usually shorter) pause inside a card.
+  recPlaySrcTgtGapSeconds: null,
+  // Saved background-music tracks: [{ id, url, name }]. Empty means the
+  // feature is off and no extra player is ever built.
+  recMusicTracks: [],
+  // Video id of the chosen track. An id that is no longer in the list falls
+  // back to the first one — see musicSelectedId.
+  recMusicSelected: '',
+  // When the music is allowed to sound:
+  //   'item'    — only while a recording (or the spoken word) is sounding
+  //   'gap'     — only during the pauses (the recall pause and the hold on
+  //               the card's text), so it fills the silence without sitting
+  //               on top of the pronunciation
+  //   'nonstop' — throughout, standing aside only for video clips
+  recMusicMode: 'gap',
+  // Two levels, because 'nonstop' is in both situations. Under speech the
+  // music is there to be felt rather than heard; in a silent gap it can carry.
+  // Taken from music-bed.js so the stored default and the fallback that module
+  // applies to a missing value can't drift apart.
+  recMusicVolume: MUSIC_VOL_WITH_AUDIO,  // while a recording is playing
+  recMusicGapVolume: MUSIC_VOL_IN_GAPS,  // during the pauses
   // Playlist-style playback modes for recordings.
   // recPlayShuffle: items are reordered with Fisher-Yates before playback.
   // recPlayLoop:    'off'      — play through once then stop (default)
@@ -1706,7 +1756,10 @@ window._appSettings = {
   autoLibrarySearch: false,
   // Whether the book-results block inside #result starts folded. Sticky so a
   // user who keeps the books out of the way isn't re-shown them every search.
-  libraryResultsCollapsed: false
+  libraryResultsCollapsed: false,
+  // Ask the host for substring-anywhere matching instead of word / prefix
+  // (spec §5.6). Off by default, matching the host's own default.
+  libraryPartialMatch: false
 }
 
 // Adjacency gap / max-duration accessors, guarding against a bad localStorage value.
@@ -1721,6 +1774,118 @@ function _clipMaxDurationSec() {
 function _minWordsAround() {
   const n = parseInt(window._appSettings && window._appSettings.minWordsAround, 10)
   return Number.isFinite(n) && n >= 0 ? n : 10
+}
+
+// Pause between a manual card's Source and Target recordings, in seconds.
+// Returns null when the user hasn't set one — callers then fall back to the
+// inter-item gap. Blank/garbage in localStorage reads as unset, and 0 is a
+// real value (play them truly back to back).
+function _srcTgtGapSeconds() {
+  const raw = window._appSettings && window._appSettings.recPlaySrcTgtGapSeconds
+  if (raw == null || raw === '') return null
+  const n = parseInt(raw, 10)
+  return Number.isFinite(n) ? Math.max(0, Math.min(600, n)) : null
+}
+
+// The wait between playlist items, in seconds. Read live so the ± stepper in
+// the playback overlay takes effect mid-playback.
+function _interItemGapSeconds() {
+  const raw = window._appSettings && window._appSettings.recPlayGapSeconds
+  const sec = parseInt(raw != null ? raw : $('#recPlayGapSeconds').val(), 10)
+  // Same [0, 600] rails the setters enforce, so a hand-edited or legacy
+  // localStorage value can't produce an uncappable wait — nor, by
+  // inheritance, an uncappable source→target pause.
+  return Math.max(0, Math.min(600, Number.isFinite(sec) ? sec : 30))
+}
+
+// What the source→target pause actually resolves to right now: the override
+// when one is set, otherwise the inter-item gap.
+function _effectiveSrcTgtGapSeconds() {
+  const s = _srcTgtGapSeconds()
+  return s == null ? _interItemGapSeconds() : s
+}
+
+// Write the inter-item gap and refresh both places it is shown. Anything
+// unparseable is rejected outright rather than falling back to 0 — a typo in
+// the "type a value" prompt must not silently mute the wait between items,
+// nor collapse a source→target pause that inherits from it.
+function _setItemGap(v) {
+  const n = parseInt(v, 10)
+  if (!Number.isFinite(n)) return
+  window._appSettings.recPlayGapSeconds = Math.max(0, Math.min(600, n))
+  saveAppSettings()
+  _syncItemGapUI()
+  _syncSrcTgtGapUI()
+}
+
+function _syncItemGapUI() {
+  const v = _interItemGapSeconds()
+  _setSettingsInput('#recPlayGapSeconds', v)
+  const $val = $('#recPlayingBanner .rec-pb-gap-val')
+  if ($val.length) $val.text(v + 's')
+}
+
+// Push a value into a settings input. These syncs fire on every keystroke of
+// the very inputs they write to, so skip the write while the box is focused
+// AND already says the same thing — writing then would only jump the caret.
+// When the value was clamped or rejected the box is showing something that is
+// no longer true (900 typed, 600 stored), so correct it even mid-edit rather
+// than leave the two disagreeing until a reload.
+function _setSettingsInput(sel, value) {
+  try {
+    const el = $(sel)[0]
+    if (!el) return
+    if (el === document.activeElement && String(el.value).trim() === String(value)) return
+    $(el).val(value)
+  } catch (_) {}
+}
+
+// Write the source→target pause (null clears the override) and refresh both
+// places it is shown.
+function _setSrcTgtGap(v) {
+  if (v == null || String(v).trim() === '') {
+    window._appSettings.recPlaySrcTgtGapSeconds = null
+  } else {
+    const n = parseInt(v, 10)
+    if (!Number.isFinite(n)) return
+    window._appSettings.recPlaySrcTgtGapSeconds = Math.max(0, Math.min(600, n))
+  }
+  saveAppSettings()
+  _syncSrcTgtGapUI()
+}
+
+// ─── Background music settings ───────────────────────────────────────────
+// Reading helpers, kept beside the gap accessors because the music is driven
+// by the same phases those gaps define.
+
+// Thin bindings onto the live settings object; the rules themselves live in
+// music-bed.js, where they can be tested without a player or a DOM.
+function _musicVideoId()   { return _musicSelectedIdOf(window._appSettings) }
+function _musicTracks()    { return _musicTracksOf(window._appSettings) }
+function _musicTrack()     { return _musicSelectedTrackOf(window._appSettings) }
+function _musicMode()      { return _musicModeOf(window._appSettings) }
+// The level for whatever the playlist is doing right now — the quiet one only
+// while something else is sounding.
+function _musicVolume() {
+  return _musicVolumeForPhase(window._appSettings, window._recPlayPhase || 'idle')
+}
+
+// Keep the Settings input and the overlay stepper showing the same thing. An
+// inherited value is marked with a trailing "·" so it reads differently from
+// one the user pinned.
+function _syncSrcTgtGapUI() {
+  const set = _srcTgtGapSeconds()
+  _setSettingsInput('#recPlaySrcTgtGapSeconds', set == null ? '' : set)
+  const $val = $('#recPlayingBanner .rec-pb-sgap-val')
+  if (!$val.length) return
+  const eff = _effectiveSrcTgtGapSeconds()
+  $val.text(`ᔆᵀ ${eff}s${set == null ? '·' : ''}`)
+  $val.closest('.rec-pb-sgap').attr(
+    'title',
+    set == null
+      ? `Pause between Source and Target: ${eff}s, inherited from the gap between items. Click ± or tap to pin your own.`
+      : `Pause between Source and Target: ${eff}s. Tap the value and clear it to go back to the gap between items.`
+  )
 }
 
 function appSettingsLocalKey() {
@@ -1745,9 +1910,15 @@ function loadAppSettings() {
   }
   $('#contextLinesBefore').val(window._appSettings.contextLinesBefore)
   $('#contextLinesAfter').val(window._appSettings.contextLinesAfter)
-  $('#recPlayGapSeconds').val(
-    parseInt(window._appSettings.recPlayGapSeconds, 10) || 30
-  )
+  // 0 is a legitimate gap (items run straight into each other), so it must
+  // survive the round trip instead of being read as "missing" and shown as 30.
+  $('#recPlayGapSeconds').val(_interItemGapSeconds())
+  // Blank input = "no override", so an unset source→target gap must render
+  // empty rather than as a 0 the user never chose.
+  const _stGap = _srcTgtGapSeconds()
+  $('#recPlaySrcTgtGapSeconds').val(_stGap == null ? '' : _stGap)
+  // Music settings live in their own panel (#musicPanelDialog), which reads
+  // them when it opens — nothing to seed here.
   $('#practiceRevealMode').val(window._appSettings.practiceRevealMode || 'flip')
   $('#numberOfPrefixFindings').val(
     parseInt(window._appSettings.prefixResultsMax, 10) || 5
@@ -2658,13 +2829,25 @@ $('document').ready(e => {
     }
   })
 
-  $('#recPlayGapSeconds').on('change input', e => {
-    const v = parseInt($(e.target).val(), 10)
-    if (Number.isFinite(v)) {
-      window._appSettings.recPlayGapSeconds = Math.max(0, Math.min(600, v))
-      saveAppSettings()
-    }
+  $('#recPlayGapSeconds').on('change input', e => { _setItemGap($(e.target).val()) })
+
+  // Leaving either box empty or half-typed ("-") is rejected by the setters,
+  // which would otherwise strand the field showing something the setting
+  // doesn't hold. On blur, snap the display back to what is actually stored —
+  // for the item gap that is always a number, and for the override a blank
+  // legitimately means "use the item gap".
+  $('#recPlayGapSeconds').on('blur', () => _syncItemGapUI())
+  $('#recPlaySrcTgtGapSeconds').on('blur', () => _syncSrcTgtGapUI())
+
+  // Clearing the field is a meaningful edit here — it drops the override and
+  // hands the source→target pause back to the inter-item gap — so unlike the
+  // other numeric inputs an empty value is saved rather than ignored.
+  $('#recPlaySrcTgtGapSeconds').on('change input', e => {
+    const raw = String($(e.target).val() || '').trim()
+    _setSrcTgtGap(raw === '' ? null : raw)
   })
+
+  $('#openMusicPanel').on('click', e => { e.preventDefault(); _openMusicPanel() })
 
   $('#practiceRevealMode').on('change', e => {
     const v = String($(e.target).val() || 'hide')
@@ -3770,6 +3953,21 @@ async function _cacheWriteMany(entries) {
 
 async function _cacheWriteOne(entry) {
   return _cacheWriteMany([entry])
+}
+
+// Mirror the current in-memory subtitle pair for `link` into the persistent
+// IndexedDB cache. Called right after a capture / inline edit / translation is
+// pushed to GitHub, so a reload (or another view) sees the new content
+// immediately — no waiting for GitHub's CDN to catch up, and no re-fetch.
+// Single-user assumption: window.allSubtitles[link] already holds what we just
+// pushed (optimistic edits, or the same merge used to build the commit). A
+// concurrent remote change from another device is reconciled on an explicit
+// "Refresh subtitles".
+function _cacheWriteSubtitleFromMemory(link) {
+  const s = link && window.allSubtitles && window.allSubtitles[link]
+  if (!s || (s.sv == null && s.en == null)) return Promise.resolve()
+  return _cacheWriteOne({ link, name: s.fileName, sv: s.sv, en: s.en, source: s.source })
+    .catch(e => console.warn('[cache] post-push write failed for', link, e))
 }
 
 async function _cacheDeleteMany(links) {
@@ -5018,6 +5216,12 @@ async function flushPendingSrtEdits() {
     const link = _filePathToLink(filePath)
     if (link) editedLinks.add(link)
   }
+  // Capture the exact text committed per file (the merge of the freshly-fetched
+  // remote + our queued edits) so we can write it straight into the IndexedDB
+  // cache afterwards — correct even if memory drifted (e.g. a reload between the
+  // edit and this flush). getContent may run several times on a 422 retry; the
+  // last call reflects what actually landed.
+  const committedByPath = new Map()
   const files = paths.map(filePath => ({
     path: filePath,
     getContent: (current) => {
@@ -5028,6 +5232,8 @@ async function flushPendingSrtEdits() {
       const updated = applyQueuedEditsToText(current || '', edits[filePath])
       if (updated == null) {
         console.warn(`flushPendingSrtEdits: ${filePath} has no committable content; skipping`)
+      } else {
+        committedByPath.set(filePath, updated)
       }
       return updated
     }
@@ -5044,12 +5250,19 @@ async function flushPendingSrtEdits() {
   // (every queued edit already matched remote — buffer is stale, drop it).
   if (!result || result.committed !== false || result.reason === 'no-changes') {
     _savePendingSrtEdits({})
-    // The commit just rewrote one or more server-side SRTs; any cached
-    // pair for those links is now stale. Drop them so a subsequent
-    // getSubtitlesForLink (or the next boot's cache pass) refetches.
-    if (editedLinks.size) {
-      _cacheDeleteMany([...editedLinks]).catch(e => console.warn('[cache] post-edit evict failed', e))
-    }
+    // The commit just rewrote one or more server-side SRTs. Rather than evict
+    // and force a re-fetch (which races GitHub's CDN lag), fold the exact
+    // committed text back into memory + IndexedDB so a reload sees it at once.
+    committedByPath.forEach((text, filePath) => {
+      const link = _filePathToLink(filePath)
+      if (!link) return
+      const key = /\.en\.srt$/i.test(filePath) ? 'en' : 'sv'
+      window.allSubtitles[link] = { ...(window.allSubtitles[link] || {}), [key]: text }
+      // Drop stale parsed caches for the language we just rewrote.
+      if (key === 'sv') delete window.allSubtitles[link]._parsedSv
+      else delete window.allSubtitles[link]._parsedEn
+    })
+    editedLinks.forEach(link => { _cacheWriteSubtitleFromMemory(link) })
   }
   _updateSrtEditsUi()
   return result
@@ -6791,6 +7004,13 @@ async function fetchSRTs(searchText) {
     //To fix the mistakes in vocabulary list with double spaces
     window.searchText = window.searchText.split(" ").map(it => it.trim()).join(" ")
 
+    // Snapshot the clean expanded term for Book Search NOW — before the
+    // auto-prefix pass (searchVocabularyByPrefix) prepends compound-word parts
+    // to window.searchText for highlighting. Those bare parts (e.g. splitting
+    // "tagit i med hårdhandskarna" into "tagit"/"hårdhandskarna") would
+    // otherwise leak into the library query and match unrelated books.
+    window._librarySearchText = window.searchText
+
     window.allSubtitles = window.allSubtitles || {}
 
     // Cancellation: each fetchSRTs invocation gets a fresh token; older runs
@@ -6822,6 +7042,7 @@ async function fetchSRTs(searchText) {
       console.log("[stem-fallback] stems:", stems)
       if (stems.length) {
         window.searchText = [window.searchText, ...stems].join(SEPARATOR_PIPE)
+        window._librarySearchText = window.searchText   // keep Book Search's clean snapshot in step with the stem fallback
         window.searchResult = await fetchFromDownloadedFiles(window.searchText, myToken);
         if (myToken !== window._subtitleSearchToken) return
         console.log("[stem-fallback] secondary results:", window.searchResult.length)
@@ -8523,6 +8744,9 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
     if (Array.isArray(window.srts) && !window.srts.find(it => it.link === u.videoId)) {
       window.srts.push({ link: u.videoId, name: u.baseName, source: u.source })
     }
+    // Persist the just-pushed content so a reload doesn't re-fetch (or show a
+    // stale cache) for this video.
+    _cacheWriteSubtitleFromMemory(u.videoId)
   }
 
   return { pushedIds: allIds }
@@ -8635,6 +8859,9 @@ async function handleCapturedSubtitle(detail) {
       window.srts.push({ link: videoId, name: baseName, source })
     }
   }
+  // Persist the pushed content to IndexedDB so a reload sees it without a
+  // re-fetch from GitHub (whose CDN can lag right after a push).
+  _cacheWriteSubtitleFromMemory(videoId)
 }
 
 function isLocalhost() {
@@ -9013,7 +9240,17 @@ function librarySearch(searchText) {
   _librarySetStatus(`Searching your books for “${query}”…`, true)
   $('#libraryResults').html('')
   try {
-    window.PlaylistBridge.postMessage(JSON.stringify({ op: 'globalSearch', query }))
+    // Substring-anywhere matching. The host keeps the same setting device-side
+    // (spec §5.6, `searchIndexPartialMatch`), so send the flag EITHER WAY —
+    // omitting it when off would leave the host free to fall back to its own
+    // pref and run a partial search while our checkbox says otherwise. Sent
+    // explicitly, the bar's checkbox is the truth for searches we start.
+    const msg = {
+      op: 'globalSearch',
+      query,
+      partial: !!(window._appSettings && window._appSettings.libraryPartialMatch),
+    }
+    window.PlaylistBridge.postMessage(JSON.stringify(msg))
   } catch (e) {
     console.warn('globalSearch post failed', e)
     clearTimeout(state.timer)
@@ -9125,10 +9362,14 @@ function _ensureLibrarySearchBar() {
       <label class="lib-auto-label" title="Run the book search automatically on every search">
         <input type="checkbox" id="librarySearchAutoCb"> auto
       </label>
+      <label class="lib-auto-label" title="Match anywhere inside a word (envis → oenvist), not just at the start. Slower — the app scans every indexed chapter instead of using the index.">
+        <input type="checkbox" id="librarySearchPartialCb"> partial
+      </label>
       <span id="librarySearchStatus" class="lib-search-status"></span>
     </div>
     <div id="libraryResults" class="lib-results"></div>`)
   $('#librarySearchAutoCb').prop('checked', !!(window._appSettings && window._appSettings.autoLibrarySearch))
+  $('#librarySearchPartialCb').prop('checked', !!(window._appSettings && window._appSettings.libraryPartialMatch))
   const pending = window._librarySearchPending
   if (pending) {
     const n = pending.hits.length
@@ -9152,9 +9393,15 @@ window._ensureLibrarySearchBar = _ensureLibrarySearchBar
 //   2. In auto mode, kick off the book search for the new phrase. Debounced —
 //      one typed search can trigger several passes (primary + stem fallback)
 //      and each new globalSearch throws away the scan the host had going.
+// The term Book Search should query — the clean expanded search (snapshot in
+// fetchSRTs) rather than the live window.searchText, which the auto-prefix pass
+// pollutes with compound-word parts meant only for highlighting.
+function _librarySearchTerm() {
+  return window._librarySearchText || window.searchText
+}
 function _maybeAutoLibrarySearch() {
   if (!_haveLibrarySearchBridge()) return
-  const term = window.searchText
+  const term = _librarySearchTerm()
   const query = _buildLibraryQuery(term)
   const state = window._librarySearchPending
   if (state && state.query !== query) libraryCancelSearch()
@@ -9171,9 +9418,15 @@ $(document).on('click', '#librarySearchBtn', () => {
     _librarySetStatus('Search for something first.', false)
     return
   }
-  librarySearch(window.searchText)
+  librarySearch(_librarySearchTerm())
 })
 $(document).on('click', '#librarySearchCancelBtn', () => libraryCancelSearch())
+$(document).on('change', '#librarySearchPartialCb', e => {
+  window._appSettings.libraryPartialMatch = $(e.target).is(':checked')
+  saveAppSettings()
+  // Re-run so the user sees the difference straight away.
+  if (window.searchText) librarySearch(_librarySearchTerm())
+})
 $(document).on('change', '#librarySearchAutoCb', e => {
   const on = $(e.target).is(':checked')
   window._appSettings.autoLibrarySearch = on
@@ -9192,11 +9445,11 @@ $(document).on('click', '.lib-head', e => {
   window._appSettings.libraryResultsCollapsed = collapsed
   saveAppSettings()
 })
-// Per-book fold — transient, not worth persisting per book key.
-$(document).on('click', '.lib-book-title', e => {
-  const $book = $(e.currentTarget).closest('.lib-book')
-  const collapsed = !$book.hasClass('lib-book-collapsed')
-  $book.toggleClass('lib-book-collapsed', collapsed)
+// Per-word fold — transient, not worth persisting per matched word.
+$(document).on('click', '.lib-group-title', e => {
+  const $group = $(e.currentTarget).closest('.lib-group')
+  const collapsed = !$group.hasClass('lib-group-collapsed')
+  $group.toggleClass('lib-group-collapsed', collapsed)
   $(e.currentTarget).attr('aria-expanded', String(!collapsed))
     .find('.lib-caret').text(collapsed ? '▸' : '▾')
 })
@@ -10026,6 +10279,13 @@ function addManualEntry(playlistName, opts) {
     alert(`"${playlistName}" is a virtual playlist (or doesn't exist). Switch to a real playlist to add manual entries.`)
     return null
   }
+  // Book playlists pushed by the native app are stripped before persisting
+  // and rebuilt wholesale on the next push, so a card written here would
+  // report success and then vanish.
+  if (rec.external) {
+    alert(`"${playlistName}" comes from the Cupitor app and can't hold manual cards. Pick one of your own playlists.`)
+    return null
+  }
   const source = String(opts.source == null ? '' : opts.source).trim()
   const target = String(opts.target == null ? '' : opts.target).trim()
   if (!source && !target) { alert('At least one of Source / Target must be filled in.'); return null }
@@ -10042,6 +10302,9 @@ function addManualEntry(playlistName, opts) {
     it.mediaKind = media.kind                // 'youtube' | 'link' | 'audio'
     if (media.kind === 'youtube') it.mediaVideoId = media.id
   }
+  // Per-face pronunciation recordings (independent of the link above).
+  if (_isAudioMediaUrl(opts.sourceAudioUrl)) it.sourceAudioUrl = opts.sourceAudioUrl
+  if (_isAudioMediaUrl(opts.targetAudioUrl)) it.targetAudioUrl = opts.targetAudioUrl
   if (!rec.items)                          rec.items = {}
   if (!rec.items[MANUAL_ST])               rec.items[MANUAL_ST] = {}
   if (!Array.isArray(rec.items[MANUAL_ST][MANUAL_W])) rec.items[MANUAL_ST][MANUAL_W] = []
@@ -10063,19 +10326,370 @@ function updateManualEntry(playlistName, manualId, patch) {
       const arr = rec.items[st][w] || []
       const it = arr.find(x => x && x.manual && x.id === manualId)
       if (!it) continue
-      if (Object.prototype.hasOwnProperty.call(patch, 'source')) it.source = String(patch.source || '').trim()
-      if (Object.prototype.hasOwnProperty.call(patch, 'target')) it.target = String(patch.target || '').trim()
+      // Caption provenance pairs `captionStarts` with the rows of ONE face by
+      // position. Editing that face breaks the pairing, and stale starts would
+      // make the caption de-dupe skip lines the card no longer holds — so drop
+      // them and let a future capture re-add rather than silently lose.
+      const capField = _captionFieldOf(it)
+      ;['source', 'target'].forEach(k => {
+        if (!Object.prototype.hasOwnProperty.call(patch, k)) return
+        const next = String(patch[k] || '').trim()
+        if (k === capField && next !== it[k]) delete it.captionStarts
+        it[k] = next
+      })
       if (Object.prototype.hasOwnProperty.call(patch, 'mediaUrl')) {
         const m = _parseMediaUrl(patch.mediaUrl)
         if (m) { it.mediaUrl = m.url; it.mediaKind = m.kind; if (m.kind === 'youtube') it.mediaVideoId = m.id; else delete it.mediaVideoId }
         else   { delete it.mediaUrl; delete it.mediaKind; delete it.mediaVideoId }
       }
+      // Per-face recordings — an explicit null/'' clears the face's recording.
+      ;['sourceAudioUrl', 'targetAudioUrl'].forEach(k => {
+        if (!Object.prototype.hasOwnProperty.call(patch, k)) return
+        if (_isAudioMediaUrl(patch[k])) it[k] = patch[k]
+        else delete it[k]
+      })
       rec.updatedAt = Date.now()
       _saveRecording()
       return true
     }
   }
   return false
+}
+
+// ─── Caption capture (cupitorCaptionCapture) ─────────────────────────────
+// One event, two kinds of text, told apart by `source`. See
+// docs/caption-capture-integration-spec.md in the Cupitor repo for the wire
+// contract.
+//
+//   'caption' — the host's main WebView harvests a video's subtitles into a
+//               sidebar; the user ticks lines and taps send. Timed.
+//   'page'    — the user picks sentences off a web page (or a same-origin
+//               reader iframe) into a basket. No media time: every `start`
+//               is 0, and nothing carries a translation.
+//
+// The host guarantees a non-empty array of lines ordered by start, numeric
+// times, non-blank text, and no `translation` key at all when a line has none.
+// It guarantees nothing about duplicates, size, or `lang` accuracy — those are
+// handled below.
+//
+// Shape chosen here: ONE card for the whole block. The lines become the card's
+// Source (one per row) and their translations the Target, so a passage stays
+// together instead of exploding into thousands of flashcards on a select-all.
+
+// Playlists a capture can actually be filed in. Virtual ones hold no items of
+// their own, and `external` ones are the native app's book playlists — those
+// are stripped by _persistableRecordings and rebuilt wholesale on every
+// PlaylistBridge push, so a card added there would report success and then
+// vanish. Sorted, matching every other playlist list in the app.
+function _captionDestinations() {
+  return listRecordings().filter(n => {
+    const r = window._recordings && window._recordings[n]
+    return r && !_isVirtual(n) && !r.external
+  })
+}
+
+// Which cues from `url` are already sitting in this playlist, rebuilt from the
+// cards themselves rather than a side index so a deleted card takes its keys
+// with it.
+//
+// A card's rows are paired with `captionStarts` BY POSITION, which only holds
+// while the rows are exactly as captured. The manual-card editor can rewrite
+// the text freely, so updateManualEntry drops `captionStarts` when the caption
+// field is edited, and the length check here rejects anything that slipped
+// through. Distrusting a card costs a duplicate the user can delete; trusting
+// a stale one produces keys matching no real cue, silently dropping good lines.
+function _captionKeysInPlaylist(playlistName, url) {
+  const keys = new Set()
+  const rec = window._recordings && window._recordings[playlistName]
+  const bucket = rec && rec.items && rec.items[MANUAL_ST] && rec.items[MANUAL_ST][MANUAL_W]
+  if (!Array.isArray(bucket)) return keys
+  bucket.forEach(it => {
+    if (!it || it.captionUrl !== url || !Array.isArray(it.captionStarts)) return
+    const rows = String(it[_captionFieldOf(it)] || '').split('\n')
+    if (rows.length !== it.captionStarts.length) return
+    it.captionStarts.forEach((st, i) => keys.add(_captionKey(url, st, rows[i])))
+  })
+  return keys
+}
+
+// Which face of the card holds the caption text. Cards captured before the
+// choice existed always put it in Source, so a missing value means 'source'.
+function _captionFieldOf(it) {
+  return (it && it.captionField === 'target') ? 'target' : 'source'
+}
+
+// Add the block to `playlistName`, skipping cues already captured from the
+// same page. Returns a short human summary, or null when nothing was added.
+// Returns a summary string on success, '' when every line was already there,
+// or false when the write was refused (the caller then keeps the dialog open).
+// `field` is which face the caption text lands on — 'source' (the caption is
+// the prompt, its translation the answer) or 'target' (the caption is the
+// answer, and you supply the prompt, or its translation becomes one).
+function _addCaptionBlock(playlistName, cap, lines, field) {
+  const w = _captionWords(cap)
+  const n = c => `${c} ${c === 1 ? w.unit : w.units}`
+  const url = String(cap.url || '')
+  const seen = _captionKeysInPlaylist(playlistName, url)
+  const fresh = url ? lines.filter(l => !seen.has(_captionKey(url, l.start, l.text))) : lines
+  const skipped = lines.length - fresh.length
+  if (!fresh.length) {
+    _cpBuildToast(`Already captured — all ${n(lines.length)} are in "${playlistName}".`)
+    return ''   // nothing to do, but not a failure — let the dialog close
+  }
+  // The page/video URL rides along as the card's media link, which parseMediaUrl
+  // classifies. A page or a non-YouTube video becomes kind 'link': inert during
+  // playback, and just the card's 🔗 back to where the text came from. A YouTube
+  // URL becomes kind 'youtube', and playRecording cues it into the embedded
+  // player when the card comes round — at t=0, not at the captured offset, even
+  // though captionStarts holds it.
+  const faces = _captionFaces(fresh, field)
+  const it = addManualEntry(playlistName, {
+    mediaUrl: url, source: faces.source, target: faces.target,
+  })
+  if (!it) return false  // refused, and addManualEntry already said why
+  // Provenance, for the next send's de-dupe. Starts only — the texts are the
+  // card's own rows, so nothing is stored twice. Without a url there is nothing
+  // to match against later, so don't leave unusable starts behind either.
+  if (url) {
+    it.captionUrl = url
+    it.captionStarts = fresh.map(l => l.start)
+    // Which face to read those rows back out of.
+    it.captionField = faces.textField
+  }
+  if (cap.title) it.captionTitle = String(cap.title)
+  _saveRecording()
+  return skipped
+    ? `Added ${n(fresh.length)} to "${playlistName}" · ${skipped} already there`
+    : `Added ${n(fresh.length)} to "${playlistName}"`
+}
+
+// Rows rendered in the dialog's preview. Enough to recognise the passage; the
+// preview box scrolls (see .cap-cap-preview) rather than growing past the
+// playlist picker.
+const CAPTION_PREVIEW_ROWS = 12
+
+// Captures waiting for the dialog. The host brings the webapp to the front on
+// every send, so two sends in quick succession are easy to produce; without a
+// queue the second would overwrite the first in the shared dialog and the first
+// block would be lost with no message.
+const _captionQueue = []
+let _captionDialogOpen = false
+// Wording of the block currently ON SCREEN. A page capture can land while a
+// caption dialog is open, and the "more waiting" title belongs to the dialog
+// the user is looking at, not to the one that just arrived.
+let _captionDialogWords = null
+// Blocks that arrived before the real playlists were loaded, and the flag that
+// says they have been. Nothing may be filed until the flag is up — see
+// _handleCaptionCapture for what filing into the bootstrap collection costs.
+let _recordingsLoaded = false
+const _captionPreLoad = []
+
+// Ask where the block should go. Always asked, even when a real playlist is
+// active: a send yanks the webapp on top of the playing video, so the dialog
+// doubles as the confirmation that the send actually landed.
+function _openCaptionCaptureDialog(cap, lines) {
+  const active = (window._recording && window._recording.currentName) || ''
+  const names = _captionDestinations()
+  const w = _captionWords(cap)
+  _captionDialogWords = w
+  const n = c => `${c} ${c === 1 ? w.unit : w.units}`
+  const isPage = cap && cap.source === 'page'
+  const withTr = lines.filter(l => l.translation).length
+  const field = (window._appSettings && window._appSettings.captionTextField) === 'target'
+    ? 'target' : 'source'
+  let $d = $('#captionCaptureDialog')
+  if (!$d.length) $d = $('<div id="captionCaptureDialog"></div>').appendTo('body')
+
+  // Only mark a selection when the active playlist is actually a valid
+  // destination; otherwise let the browser take the first option rather than
+  // pretending some arbitrary playlist was "the active one".
+  const opts = names.map(n =>
+    `<option value="${_.escape(n)}"${n === active ? ' selected' : ''}>${_.escape(n)}</option>`
+  ).join('')
+  const preview = lines.slice(0, CAPTION_PREVIEW_ROWS)
+    .map(l => `<div class="cap-cap-line">${_.escape(l.text)}</div>`).join('')
+  const more = lines.length > CAPTION_PREVIEW_ROWS
+    ? `<div class="cap-cap-more">+ ${lines.length - CAPTION_PREVIEW_ROWS} more</div>` : ''
+  $d.html(`
+    <div class="cap-cap-meta">
+      <div class="cap-cap-title">${_.escape(cap.title || w.untitled)}</div>
+      <div class="cap-cap-count">${n(lines.length)}${withTr ? ` · ${withTr} translated` : ' · no translations'}</div>
+    </div>
+    <div class="cap-cap-preview">${preview}${more}</div>
+    <div class="cap-cap-row">
+      <span class="cap-cap-lbl">${w.fieldLbl}</span>
+      <label class="cap-cap-radio"><input type="radio" name="capCapField" value="source"${field === 'source' ? ' checked' : ''}> Source</label>
+      <label class="cap-cap-radio"><input type="radio" name="capCapField" value="target"${field === 'target' ? ' checked' : ''}> Target</label>
+    </div>
+    <div class="cap-cap-hint" id="capCapHint"></div>
+    <div class="cap-cap-row">
+      <label class="cap-cap-lbl" for="capCapPlaylist">Add to</label>
+      <select id="capCapPlaylist">${opts}</select>
+      <button type="button" id="capCapNew" class="btn" title="Create a new playlist for these lines">＋ New</button>
+    </div>
+    ${names.length ? '' : `<div class="cap-cap-hint">Nothing here can hold cards yet — ＋ New makes a playlist for them.</div>`}
+  `)
+  // Spell out what lands on the other face, since that flips with the choice
+  // and decides which way round the card is practised.
+  const _renderHint = () => {
+    const f = String($('input[name="capCapField"]:checked').val() || 'source')
+    const other = f === 'target' ? 'Source' : 'Target'
+    const missing = lines.length - withTr
+    $('#capCapHint').text(withTr
+      ? `${other} gets the translations (${missing ? `${n(missing)} without one shown as “${CAPTION_NO_TRANSLATION}”` : `all ${w.units} translated`}).`
+      // Page text never arrives translated — the collector sends only what was
+      // picked — so saying "not translated yet" would promise a fill-in that
+      // is never coming.
+      : isPage
+        ? `${other} is left empty — picked ${w.units} carry no translation.`
+        : `${other} is left empty — nothing has been translated yet.`)
+  }
+  $d.dialog({
+    title: _captionQueue.length
+      ? `${w.dialog} (${_captionQueue.length} more waiting)`
+      : w.dialog,
+    modal: true,
+    width: Math.min(520, $(window).width() - 20),
+    close: function () {
+      _captionDialogOpen = false
+      // Let this close finish before the shared element is re-opened.
+      setTimeout(_openNextCaptionCapture, 0)
+    },
+    buttons: {
+      Add: function () {
+        const $sel = $('#capCapPlaylist')
+        const name = String($sel.val() || '')
+        // Empty only when the picker has no options at all — say so rather
+        // than letting the button look broken.
+        if (!name) {
+          alert('Use ＋ New to make a playlist for these — there is none that can hold them.')
+          return
+        }
+        // Deferred creation — the playlist is only made once the user
+        // commits, so cancelling leaves nothing behind. A failed create
+        // keeps the dialog open rather than dropping the block.
+        if ($sel.find('option:selected').is('[data-new]') && !createRecording(name)) return
+        const chosen = String($('input[name="capCapField"]:checked').val() || 'source')
+        // Remember the choice — someone collecting from one video sends
+        // repeatedly and wants the same orientation each time.
+        window._appSettings.captionTextField = chosen
+        saveAppSettings()
+        const res = _addCaptionBlock(name, cap, lines, chosen)
+        // false = the write was refused and already explained. Stay open so
+        // the user can pick elsewhere instead of losing the capture.
+        if (res === false) return
+        $(this).dialog('close')
+        if (res) _cpBuildToast(res)
+      },
+      Cancel: function () { $(this).dialog('close') }
+    }
+  })
+  _renderHint()
+  $d.find('input[name="capCapField"]').off('change').on('change', _renderHint)
+  $d.find('#capCapNew').off('click').on('click', () => {
+    const raw = prompt('New playlist name:', cap.title ? String(cap.title).slice(0, 60) : '')
+    if (raw == null) return
+    const name = String(raw).trim()
+    if (!name) { alert('Give the playlist a name.'); return }
+    if (window._recordings && window._recordings[name]) {
+      // The picker lists only playlists that can hold cards, so "pick it from
+      // the list" is wrong advice for a name taken by a combined or app-owned
+      // one — it isn't in the list, and createRecording would refuse it too.
+      alert(names.indexOf(name) >= 0
+        ? `A playlist named "${name}" already exists — pick it from the list instead.`
+        : `"${name}" is taken by a playlist that can't hold captured cards. Choose another name.`)
+      return
+    }
+    const $sel = $('#capCapPlaylist')
+    // data-new marks it; the value is the plain name (verified free above).
+    // A magic value would have to survive innerHTML, and the HTML parser
+    // rewrites some codepoints — leaving .val() unable to match its own
+    // option, which silently breaks the button.
+    $sel.find('option[data-new]').remove()
+    $sel.append(
+      $('<option></option>').val(name).text(`${name} (new)`).attr('data-new', '1')
+    ).val(name)
+  })
+}
+
+function _openNextCaptionCapture() {
+  if (_captionDialogOpen) return
+  const next = _captionQueue.shift()
+  if (!next) return
+  _captionDialogOpen = true
+  // If opening throws, the flag has to come back down: nothing else lowers it
+  // but the dialog's own close callback, so a single failure would otherwise
+  // swallow every capture for the rest of the session, in silence.
+  try {
+    _openCaptionCaptureDialog(next.cap, next.lines)
+  } catch (e) {
+    _captionDialogOpen = false
+    console.warn('[caption] could not open capture dialog', e)
+    throw e
+  }
+}
+
+function _handleCaptionCapture(cap) {
+  const lines = _captionLinesFrom(cap)
+  // Malformed, or an event that isn't ours — stay silent, exactly as the host
+  // does with a malformed payload.
+  if (!lines.length) return
+  // Before _loadRecording() runs, `_recordings` is the bootstrap literal: one
+  // fictional 'Default' that came from nowhere. Filing a card into it would
+  // make _saveRecording persist THAT collection over the user's real playlists
+  // in localStorage — every playlist gone, silently. Hold the block instead;
+  // _captionCaptureReady drains it once the real collection is in place.
+  if (!_recordingsLoaded) { _captionPreLoad.push(cap); return }
+  _captionQueue.push({ cap, lines })
+  // The title renders once at open time, so a capture arriving while the
+  // dialog is up must update it in place — otherwise the 'more waiting' hint
+  // is missing in exactly the case it exists for. The wording belongs to the
+  // dialog on screen, not to the block that just landed.
+  if (_captionDialogOpen) {
+    try {
+      $('#captionCaptureDialog').dialog('option', 'title',
+        `${(_captionDialogWords || _captionWords(cap)).dialog} (${_captionQueue.length} more waiting)`)
+    } catch (_) {}
+  }
+  _openNextCaptionCapture()
+}
+window._handleCaptionCapture = _handleCaptionCapture
+
+// Registered at module scope, not on a page/route, because a capture can land
+// whatever the webapp is currently showing — and it fires before dialog1 is
+// visible when the host had to open dialog1 first.
+window.addEventListener('cupitorCaptionCapture', ev => _handleCaptionCapture(ev && ev.detail))
+
+// Called from the app's ready handler AFTER _loadRecording(), never at module
+// scope: until the real collection replaces the bootstrap, a destination list
+// is one fictional playlist and saving into it would overwrite everything the
+// user has.
+//
+// Two things can be waiting by then:
+//
+//  - a block the host dispatched into this document before we were ready, held
+//    by _handleCaptionCapture;
+//  - `window.__cupitorCaptionCapture`, the global mirror. The host does not set
+//    it today, so a capture dispatched while this page is mid-navigation is
+//    still lost — reading it costs nothing now and closes that hole the moment
+//    the host starts setting it.
+function _captionCaptureReady() {
+  _recordingsLoaded = true
+  try {
+    const pending = window.__cupitorCaptionCapture
+    if (pending) {
+      window.__cupitorCaptionCapture = null   // cleared so a reload can't re-add
+      _captionPreLoad.push(pending)
+    }
+  } catch (e) {
+    console.warn('[caption] pending capture failed', e)
+  }
+  // splice(0) so a handler that somehow re-enters can't replay the same block.
+  _captionPreLoad.splice(0).forEach(cap => {
+    try { _handleCaptionCapture(cap) } catch (e) {
+      console.warn('[caption] held capture failed', e)
+    }
+  })
 }
 
 // Create a virtual playlist that combines the given real-playlist members.
@@ -10142,7 +10756,12 @@ function _collectAudioUrls(items) {
   const urls = new Set()
   Object.values(items || {}).forEach(byW => {
     Object.values(byW || {}).forEach(arr => {
-      ;(arr || []).forEach(it => { if (it && _isAudioMediaUrl(it.mediaUrl)) urls.add(it.mediaUrl) })
+      ;(arr || []).forEach(it => {
+        if (!it) return
+        _cardAudioUrls(it).forEach(u => urls.add(u))
+        // Legacy cards kept their single recording in mediaUrl.
+        if (_isAudioMediaUrl(it.mediaUrl)) urls.add(it.mediaUrl)
+      })
     })
   })
   return urls
@@ -10266,10 +10885,13 @@ function clearRecording()  {
     return
   }
   if (!confirm(`Discard all items in "${window._recording.currentName}"?`)) return
+  // Capture the recordings before the items go, so the files can be freed.
+  const _clearedAudio = _collectAudioUrls(window._recording.items)
   // Clear in place — items is a live reference to the active recording's
   // bucket inside window._recordings, so replacing with {} would orphan it.
   Object.keys(window._recording.items).forEach(k => delete window._recording.items[k])
   _saveRecording()
+  _pruneOrphanAudio(_clearedAudio)
   _updateRecordingUI()
   _markCapturedButtons()
 }
@@ -10329,10 +10951,20 @@ function _captureMatchFromButton($capBtn) {
 function removeRecordedItem(searchText, word, idx) {
   const items = window._recording.items
   if (!items[searchText] || !items[searchText][word]) return
+  // Capture the card's recordings BEFORE it goes, then prune the files once
+  // the item is gone and no other playlist still references them (duplicated
+  // cards share the same file).
+  const gone = items[searchText][word][idx]
+  const audio = new Set()
+  if (gone) {
+    _cardAudioUrls(gone).forEach(u => audio.add(u))
+    if (_isAudioMediaUrl(gone.mediaUrl)) audio.add(gone.mediaUrl)
+  }
   items[searchText][word].splice(idx, 1)
   if (items[searchText][word].length === 0) delete items[searchText][word]
   if (Object.keys(items[searchText]).length === 0) delete items[searchText]
   _saveRecording()
+  _pruneOrphanAudio(audio)
   _updateRecordingUI()
   _markCapturedButtons()
 }
@@ -10431,6 +11063,36 @@ function _reorderWordItems(searchText, word, newOrderIdxs) {
   _saveRecording()
 }
 
+// Move the item at (st, w, idx) to `newIdx` within its own group, shifting the
+// rest along. This is the only reorder that works on a touch device: jQuery UI
+// sortable binds no touch events, so the drag handle is inert on a phone.
+//
+// Scope is the group, not the whole playlist, because an item's (searchText,
+// word) is its identity — the term it was captured under — so moving it across
+// groups would mean relabelling it. For manual cards that distinction is
+// invisible: they all live in the single Manual/Card group, so group order IS
+// playlist order. buildPlayQueue walks groups in insertion order and then array
+// order, so this array position is what actually determines play order.
+// Returns true when something moved.
+// True while a drag is in flight (and briefly after), so the click that ends a
+// drag doesn't also open the type-a-position prompt on the same handle.
+let _recDragJustSorted = false
+
+function moveRecordedItem(st, w, idx, newIdx) {
+  if (window._recording && window._recording.virtual) return false
+  const items = window._recording && window._recording.items
+  const arr = items && items[st] && items[st][w]
+  if (!Array.isArray(arr)) return false
+  if (!Number.isInteger(idx) || idx < 0 || idx >= arr.length) return false
+  const to = Math.max(0, Math.min(arr.length - 1, newIdx))
+  if (!Number.isInteger(to) || to === idx) return false
+  const [moved] = arr.splice(idx, 1)
+  arr.splice(to, 0, moved)
+  _saveRecording()
+  return true
+}
+window.moveRecordedItem = moveRecordedItem
+
 // Insert a duplicate of the item at (st, w, idx) immediately AFTER the
 // original. Useful for repetition without leaving the review dialog.
 // Returns true on success.
@@ -10450,9 +11112,33 @@ window.duplicateRecordedItem = duplicateRecordedItem
 // Truncate a single-line preview string. Collapses internal whitespace so
 // multi-line SRT entries render as one line in the review dialog.
 function _truncatePreview(s, n) {
-  s = String(s || '').replace(/\s+/g, ' ').trim()
+  s = String(s || '')
+  // Collapsing whitespace across a whole caption block — a select-all can be
+  // thousands of lines — is wasted work when only `n` characters survive, and
+  // the review dialog re-renders in full after every toggle, move and delete.
+  // Collapse a generous head instead. Whitespace only ever shrinks a string,
+  // so a head long enough to still exceed `n` after collapsing shares its
+  // first `n` characters with the fully-collapsed value; when it doesn't
+  // (a pathological run of spaces) fall through and do the whole thing.
+  if (s.length > n * 8) {
+    const head = s.slice(0, n * 8).replace(/\s+/g, ' ').trim()
+    if (head.length > n) return head.slice(0, n - 1) + '…'
+  }
+  s = s.replace(/\s+/g, ' ').trim()
   return s.length > n ? s.slice(0, n - 1) + '…' : s
 }
+
+// How much of a card's own text a review row shows, and how much of it the
+// hover title carries.
+//
+// A caption or page capture puts a whole block on ONE card — a select-all can
+// be thousands of lines — and the row wraps rather than clipping, so a single
+// untruncated card can be taller than the screen many times over. The list is
+// already fighting the WebView's ~16384px compositing-layer ceiling, past
+// which it simply stops painting, so this is about the dialog working at all
+// and not only about tidiness.
+const REC_ITEM_TEXT_MAX = 80
+const REC_ITEM_TITLE_MAX = 400
 
 // Resolve the source-language line text for an item. Returns '' if the
 // subtitles aren't in memory yet — the caller can either show a
@@ -10485,12 +11171,121 @@ async function _lazyLoadRecItemPreviews($dlg) {
     const text = _getRawSubtitleLineText(id, lang, line)
     $p.removeAttr('data-pending')
     if (text) {
-      $p.text(_truncatePreview(text, 80))
+      // Same limit as the render-time fill below (REC_ITEM_TEXT_MAX) — both
+      // write this one element, so a mismatch would make a row's preview
+      // change length the moment its subtitles arrive.
+      $p.text(_truncatePreview(text, REC_ITEM_TEXT_MAX))
     } else {
       $p.text('(no preview available)').addClass('rec-item-preview-missing')
     }
   })
 }
+
+// ── Replace an auto-captured item with a different SRT example ────────────
+// Scan the subtitle corpus for other occurrences of the same word and return
+// candidate clip items ({id, source, timeStart, timeEnd, lineIndex}), excluding
+// the current clip and any other clip already in this word's bucket. Reuses the
+// automatic-capture builder so the window/gap/max-clip rules match a fresh
+// build; the tuples carry no line text, so previews are resolved separately.
+async function _findAltCaptures(searchWord, arr, curIdx) {
+  const tuples = await buildAutomaticItems({ words: [searchWord], matchesPerWord: 30 })
+  const cur = arr[curIdx] || {}
+  const curKey = `${cur.id}|${cur.lineIndex}`
+  const used = new Set()
+  ;(arr || []).forEach((x, i) => { if (i !== curIdx && x) used.add(`${x.id}|${x.lineIndex}`) })
+  const seen = new Set()
+  const out = []
+  ;(tuples || []).forEach(t => {
+    const it = t && t.it
+    if (!it) return
+    const key = `${it.id}|${it.lineIndex}`
+    if (key === curKey || used.has(key) || seen.has(key)) return
+    seen.add(key)
+    out.push(it)
+  })
+  return out
+}
+
+// Picker dialog: choose a different auto-captured example for a playlist item.
+// The chosen candidate's clip fields overwrite the item in place; its word
+// label, enabled flag and translation are preserved (same word, new example).
+async function _openReplaceItemDialog(st, w, idx, opts = {}) {
+  opts = opts || {}
+  // Target playlist: the caller's (Practice passes the item's own _recName) or
+  // the currently-open one (the review dialog). _saveRecording persists the
+  // whole collection, so mutating any playlist's item sticks.
+  const recName = opts.recName || (window._recording && window._recording.currentName)
+  const recObj = (window._recordings && window._recordings[recName]) || null
+  if (!recObj) return
+  if (_isVirtual(recName) || recObj.virtual) { alert('This is a virtual playlist (read-only).'); return }
+  const arr = recObj.items && recObj.items[st] && recObj.items[st][w]
+  const it = arr && arr[idx]
+  if (!it || _isManualItem(it)) return
+  const searchWord = String(it.searchText || it.word || w || '').trim()
+  if (!searchWord) return
+  const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv'
+
+  let $d = $('#replaceItemDialog')
+  if (!$d.length) $d = $('<div id="replaceItemDialog"></div>').appendTo('body')
+  $d.html(`<div class="repl-loading" style="padding:8px;color:#57606a;font-size:13px;">Finding other examples of “${_.escape(searchWord)}”…</div>`)
+  $d.dialog({
+    title: '🎲 Replace with another example',
+    width: Math.min(520, $(window).width() - 40),
+    modal: true,
+    autoOpen: true,
+    buttons: {}
+  })
+
+  let cands = []
+  try { cands = await _findAltCaptures(searchWord, arr, idx) } catch (e) { console.warn('[replace] scan failed', e) }
+  if (!$d.dialog('isOpen')) return
+
+  if (!cands.length) {
+    $d.html(`<div style="padding:8px;color:#57606a;font-size:13px;">No other examples of “${_.escape(searchWord)}” were found in the loaded subtitles.</div>`)
+    $d.dialog('option', 'buttons', { 'Close': function () { $(this).dialog('close') } })
+    return
+  }
+
+  // Resolve preview text per candidate (subtitles are already loaded — the scan
+  // read them — but ensure the SRT is present just in case, deduped by videoId).
+  try { await Promise.all([...new Set(cands.map(c => c.id))].map(id => getSubtitlesForLink(id).catch(() => {}))) } catch (_) {}
+
+  const rows = cands.map((c, i) => {
+    let text = ''
+    try { text = _getRawSubtitleLineText(c.id, lang, c.lineIndex) || '' } catch (_) {}
+    const preview = text ? _truncatePreview(text, 90) : '(no preview)'
+    return `<label class="repl-cand">
+      <input type="radio" name="replCand" value="${i}"${i === 0 ? ' checked' : ''}>
+      <span class="repl-cand-body">
+        <span class="repl-cand-text">${_.escape(preview)}</span>
+        <span class="repl-cand-meta">${_.escape(c.id)} · ${c.timeStart}s–${c.timeEnd}s</span>
+      </span>
+    </label>`
+  }).join('')
+  $d.html(`<div class="repl-hd">Pick a new example for “${_.escape(searchWord)}” (${cands.length} found):</div><div class="repl-cand-list">${rows}</div>`)
+  $d.dialog('option', 'buttons', {
+    'Cancel': function () { $(this).dialog('close') },
+    'Replace': function () {
+      const sel = $d.find('input[name="replCand"]:checked').val()
+      const c = cands[parseInt(sel, 10)]
+      if (!c) { alert('Choose an example first.'); return }
+      // Swap the clip fields; keep word/searchText/enabled/target (same word).
+      it.id = c.id
+      it.source = c.source
+      it.timeStart = c.timeStart
+      it.timeEnd = c.timeEnd
+      it.lineIndex = c.lineIndex
+      _saveRecording()
+      $(this).dialog('close')
+      // Caller decides how to refresh (Practice re-renders the card; the review
+      // dialog rebuilds its list). Default to the review dialog.
+      if (typeof opts.onReplaced === 'function') { try { opts.onReplaced(c, it) } catch (_) {} }
+      else openRecordingReviewDialog()
+      try { _cpBuildToast('Replaced with a new example.') } catch (_) {}
+    }
+  })
+}
+window._openReplaceItemDialog = _openReplaceItemDialog
 
 // Copy a single recorded item from one playlist (recording) to another.
 // The source entry is left intact — useful for sharing a clip across
@@ -10752,6 +11547,112 @@ window.translateVisibleLines = translateVisibleLines
 // The file:// URL is opaque to JS — never feed it directly to new Audio(),
 // always round-trip through loadManualAudioData().
 
+// ─── SpeechBridge: native speech-to-text (dictation) ─────────────────────
+// NOT YET IMPLEMENTED on the Flutter side — the dialog1 WebView currently
+// exposes GitHubProxy / TtsBridge / MediaState / AudioBridge / TranslateRequest
+// / LinkLongPress / PlaylistBridge / NotifBridge only. Every entry point below
+// is guarded by _haveSpeechBridge(), so the 🎤 buttons simply don't render
+// until the channel exists; nothing else changes.
+//
+// Contract to implement (mirrors AudioBridge's rid pattern):
+//   JS → Dart : SpeechBridge.postMessage(JSON.stringify({op, rid, ...}))
+//     op 'start'  {rid, locale?}  → settles with the FINAL transcript (string)
+//     op 'stop'   {rid}           → 'ok'; finalizes the in-flight listen so the
+//                                   pending 'start' settles with what it heard
+//     op 'cancel' {rid}           → 'ok'; discards the in-flight listen
+//   Dart → JS : window.__cupSpeech({rid, result?, error?, partial?})
+//     A `partial` envelope streams interim text and does NOT settle the promise.
+//   Dart must release the mic from any active recorder first (STT and
+//   MediaRecorder contend for it on Android — see _releaseMicFromSpeechToText).
+const _SPEECH_PENDING = Object.create(null)
+let _speechReqSeq = 1
+function _nextSpeechRid() { return 's' + (_speechReqSeq++) + '_' + Date.now().toString(36) }
+function _haveSpeechBridge() { return !!(window.SpeechBridge && typeof window.SpeechBridge.postMessage === 'function') }
+
+window.__cupSpeech = function (envelope) {
+  if (!envelope || !envelope.rid) return
+  const pending = _SPEECH_PENDING[envelope.rid]
+  if (!pending) return
+  // Interim result — report progress, keep the promise open.
+  if (envelope.partial != null && envelope.result == null && !envelope.error) {
+    try { pending.onPartial && pending.onPartial(String(envelope.partial)) } catch (_) {}
+    return
+  }
+  delete _SPEECH_PENDING[envelope.rid]
+  if (envelope.error) pending.reject(new Error(envelope.error))
+  else                pending.resolve(envelope.result == null ? '' : String(envelope.result))
+}
+
+function _speechRpc(op, payload, onPartial) {
+  if (!_haveSpeechBridge()) return Promise.reject(new Error('no-bridge'))
+  return new Promise((resolve, reject) => {
+    const rid = _nextSpeechRid()
+    _SPEECH_PENDING[rid] = { resolve, reject, onPartial }
+    try {
+      window.SpeechBridge.postMessage(JSON.stringify(Object.assign({ op, rid }, payload || {})))
+    } catch (e) {
+      delete _SPEECH_PENDING[rid]
+      reject(e)
+    }
+  })
+}
+
+// stop / cancel are fire-and-forget: they act on the single in-flight listen
+// and settle the pending 'start' instead of answering separately, so
+// registering a pending entry for them would leak one.
+function _speechPost(op) {
+  if (!_haveSpeechBridge()) return
+  try { window.SpeechBridge.postMessage(JSON.stringify({ op, rid: _nextSpeechRid() })) } catch (_) {}
+}
+// At most ONE dictation at a time — the device has a single mic, and the
+// contract's stop/cancel address "the in-flight listen" with no way to pick
+// between two. Guards the Source and Target buttons against each other.
+let _speechListening = false
+function _cancelDictation() { if (_speechListening) { _speechListening = false; _speechPost('cancel') } }
+
+// Wire a 🎤 button to a text field: click starts dictation, click again stops
+// it. Interim text previews in the field; the final transcript is appended to
+// whatever was already typed. Returns without doing anything when the bridge
+// is absent (the button isn't rendered in that case anyway).
+// `busy` (optional) reports when something else already holds the mic (e.g. a
+// voice recording in progress in the same dialog).
+function _wireDictation($btn, $field, locale, busy) {
+  if (!$btn.length || !$field.length) return
+  let listening = false
+  let baseText = ''
+  $btn.on('click', async () => {
+    if (listening) { _speechPost('stop'); return }
+    // Another face is already dictating, or a recorder holds the mic.
+    if (_speechListening) return
+    if (typeof busy === 'function' && busy()) {
+      alert('Stop the voice recording first — it is using the microphone.')
+      return
+    }
+    listening = true
+    _speechListening = true
+    baseText = String($field.val() || '')
+    $btn.addClass('mee-mic-live').attr('title', 'Stop dictation')
+    const join = (extra) => (baseText && extra ? baseText.replace(/\s*$/, '') + ' ' : baseText) + extra
+    let text = ''
+    try {
+      text = await _speechRpc('start', locale ? { locale } : {}, (partial) => {
+        $field.val(join(partial))
+      })
+    } catch (e) {
+      console.warn('[speech] dictation failed', e)
+      const msg = (e && e.message) || String(e)
+      $field.val(baseText)
+      if (!/no-bridge|cancel/i.test(msg)) alert('Dictation failed.\n' + msg)
+    } finally {
+      listening = false
+      _speechListening = false
+      $btn.removeClass('mee-mic-live').attr('title', 'Dictate')
+    }
+    const finalText = String(text || '').trim()
+    $field.val(finalText ? join(finalText) : baseText).trigger('input')
+  })
+}
+
 const _AUDIO_PENDING = Object.create(null)
 let _audioReqSeq = 1
 function _nextAudioRid() { return 'a' + (_audioReqSeq++) + '_' + Date.now().toString(36) }
@@ -10822,6 +11723,18 @@ async function ensureMicPermissionViaBridge() {
 
 // True when a mediaUrl is one of our recorded audio files.
 function _isAudioMediaUrl(u) { return typeof u === 'string' && u.startsWith('file://') }
+
+// ── Manual-card recordings ───────────────────────────────────────────────
+// A card can carry an independent pronunciation recording for each face:
+// `sourceAudioUrl` and `targetAudioUrl`. `mediaUrl` is purely the link field
+// (YouTube / web) again, so a card can have BOTH a link and recordings.
+// Legacy cards that stored a recording in `mediaUrl` still play through the
+// legacy branch in the player; nothing here rewrites them.
+function _cardSourceAudio(it) { return (it && _isAudioMediaUrl(it.sourceAudioUrl)) ? it.sourceAudioUrl : null }
+function _cardTargetAudio(it) { return (it && _isAudioMediaUrl(it.targetAudioUrl)) ? it.targetAudioUrl : null }
+// Both recordings in play order (source first, then target), skipping empties.
+function _cardAudioUrls(it) { return [_cardSourceAudio(it), _cardTargetAudio(it)].filter(Boolean) }
+function _cardHasAudio(it) { return _cardAudioUrls(it).length > 0 }
 
 // ─── Native recording (via AudioBridge / Android MediaRecorder) ──────────
 // The editor's $rec/$stop handlers call `_audioRpc('recordStart' | 'recordStop')`
@@ -10898,25 +11811,32 @@ function _openManualEntryEditor(playlistName, existing) {
   // is too big for it and users would silently lose recordings on quota
   // errors. Just hide the section instead.
   const showAudio = _haveAudioBridge()
+  // Dictation is only offered when the host exposes SpeechBridge (see the
+  // SpeechBridge section — not implemented on the Flutter side yet).
+  const showStt = _haveSpeechBridge()
+  const micBtn = (id) => showStt
+    ? ` <button type="button" id="${id}" class="mee-mic" title="Dictate">🎤</button>`
+    : ''
+  // One independent recorder per face, so Source and Target can each carry
+  // their own pronunciation.
+  const audioBar = (prefix) => showAudio ? `
+      <div class="mee-audio-bar" id="${prefix}Bar">
+        <button type="button" id="${prefix}Rec"  class="btn" title="Start recording">● Record</button>
+        <button type="button" id="${prefix}Stop" class="btn" title="Stop recording" disabled>■ Stop</button>
+        <button type="button" id="${prefix}Play" class="btn" title="Play recording" disabled>▶ Play</button>
+        <button type="button" id="${prefix}Del"  class="btn" title="Delete recording" disabled style="color:#a00;">🗑</button>
+        <span id="${prefix}Status" class="mee-audio-status">(no audio)</span>
+      </div>` : ''
   $d.html(`
-    <div class="mee-row"><label class="mee-lbl">Source</label>
-      <textarea id="meeSource" class="mee-input" rows="2" placeholder="Question, source text, prompt…"></textarea></div>
-    <div class="mee-row"><label class="mee-lbl">Target</label>
-      <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation…"></textarea></div>
+    <div class="mee-row"><label class="mee-lbl">Source${micBtn('meeSttSource')}</label>
+      <textarea id="meeSource" class="mee-input" rows="2" placeholder="Question, source text, prompt…"></textarea>
+      ${audioBar('meeSrcAudio')}</div>
+    <div class="mee-row"><label class="mee-lbl">Target${micBtn('meeSttTarget')}</label>
+      <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation…"></textarea>
+      ${audioBar('meeTgtAudio')}</div>
     <div class="mee-row"><label class="mee-lbl">Media URL <span class="mee-lbl-hint">(optional — YouTube link or any web link)</span></label>
       <input id="meeMedia" class="mee-input" type="url" placeholder="https://…"></div>
-    <div class="mee-hint" style="font-size:12px;color:#666;">YouTube URLs are recognised automatically and will play in the embedded player during Practice / Play. Other URLs open in a new tab.</div>
-    ${showAudio ? `
-    <div class="mee-row" style="margin-top:10px;border-top:1px solid #eee;padding-top:8px;">
-      <label class="mee-lbl">Audio <span class="mee-lbl-hint">(optional — recorded pronunciation, saved on device)</span></label>
-      <div id="meeAudioBar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        <button type="button" id="meeAudioRec"    class="btn" title="Start recording">● Record</button>
-        <button type="button" id="meeAudioStop"   class="btn" title="Stop recording" disabled>■ Stop</button>
-        <button type="button" id="meeAudioPlay"   class="btn" title="Play recording" disabled>▶ Play</button>
-        <button type="button" id="meeAudioDel"    class="btn" title="Delete recording" disabled style="color:#a00;">🗑</button>
-        <span id="meeAudioStatus" style="font-size:12px;color:#666;margin-left:4px;">(no audio)</span>
-      </div>
-    </div>` : ''}
+    <div class="mee-hint" style="font-size:12px;color:#666;">YouTube URLs are recognised automatically and will play in the embedded player during Practice / Play. Other URLs open in a new tab.${showAudio ? ' Recordings are saved on the device; in Play All the Source recording plays, then the Target one.' : ''}</div>
   `)
   $d.find('#meeSource').val(existing ? existing.source || '' : '')
   $d.find('#meeTarget').val(existing ? existing.target || '' : '')
@@ -10928,41 +11848,45 @@ function _openManualEntryEditor(playlistName, existing) {
     $d.find('#meeMedia').val(_isAudioMediaUrl(mu) ? '' : mu)
   }
 
-  // ── Audio recorder state (scoped to this dialog instance) ──
+  // ── Audio recorders (one per face, scoped to this dialog instance) ──
   // Only wired up when `showAudio` is true (i.e. we're inside the Cupitor
   // app's WebView, where AudioBridge can persist to the device file system).
   // In a plain browser the audio UI isn't rendered and these stay unused.
-  let audioUrl = null
-  // True when `audioUrl` points to a just-recorded native file that hasn't
-  // been committed to the entry yet — used by cleanup()/del to know whether
-  // to delete it on cancel. Existing-entry audio left in place has this
-  // false: the file belongs to the saved entry, not to this dialog.
-  let audioUrlIsNew = false
-  // Recording state for the native MediaRecorder path (via AudioBridge).
-  // We don't keep a MediaRecorder/getUserMedia stream around any more — the
-  // Android side owns those. We just track whether a recording is in flight
-  // and tick the visible duration off the wall clock.
-  let nativeRecording = false
-  let recStartMs = 0
-  let recTimerId = null
-  // Active <Audio> element during preview playback. Tracked so a second Play
-  // click stops the current playback (toggle), and so syncAudioUI can flip
-  // the button label between ▶ Play / ■ Stop.
-  let playbackAudio = null
-  // Stop an in-flight recording and finalize its file. Assigned inside the
-  // showAudio block (where the recorder state is in scope); a no-op otherwise.
-  // Called by the Stop button AND by finish() so clicking Save mid-recording
-  // saves the voice recording instead of discarding it.
-  let _finalizeRecording = async () => {}
+  //
+  // Each recorder owns its own state; they share the native MediaRecorder,
+  // so starting one while the other is recording is prevented by the shared
+  // `anyRecording` guard below (Android only has one mic).
+  const recorders = []
+  const anyRecording = () => recorders.some(r => r.isRecording())
+  // Repaint every recorder — the mic is shared, so one starting/stopping
+  // changes what the other face's buttons may do.
+  const syncAll = () => recorders.forEach(r => { try { r.sync() } catch (_) {} })
 
-  if (showAudio) {
-    audioUrl = _isAudioMediaUrl(existing && existing.mediaUrl) ? existing.mediaUrl : null
+  function makeRecorder(prefix, initialUrl) {
+    // The committed file for this face (null when the face has no recording).
+    let audioUrl = _isAudioMediaUrl(initialUrl) ? initialUrl : null
+    // True when `audioUrl` points to a just-recorded native file that hasn't
+    // been committed to the entry yet — used by cleanup()/del to know whether
+    // to delete it on cancel. Existing-entry audio left in place has this
+    // false: the file belongs to the saved entry, not to this dialog.
+    let audioUrlIsNew = false
+    // Recording state for the native MediaRecorder path (via AudioBridge).
+    // We don't keep a MediaRecorder/getUserMedia stream around any more — the
+    // Android side owns those. We just track whether a recording is in flight
+    // and tick the visible duration off the wall clock.
+    let nativeRecording = false
+    let recStartMs = 0
+    let recTimerId = null
+    // Active <Audio> element during preview playback. Tracked so a second Play
+    // click stops the current playback (toggle), and so syncAudioUI can flip
+    // the button label between ▶ Play / ■ Stop.
+    let playbackAudio = null
 
-    const $rec  = $d.find('#meeAudioRec')
-    const $stop = $d.find('#meeAudioStop')
-    const $play = $d.find('#meeAudioPlay')
-    const $del  = $d.find('#meeAudioDel')
-    const $stat = $d.find('#meeAudioStatus')
+    const $rec  = $d.find('#' + prefix + 'Rec')
+    const $stop = $d.find('#' + prefix + 'Stop')
+    const $play = $d.find('#' + prefix + 'Play')
+    const $del  = $d.find('#' + prefix + 'Del')
+    const $stat = $d.find('#' + prefix + 'Status')
     function _hasAudio() { return !!audioUrl }
     function _isPlaying() { return !!(playbackAudio && !playbackAudio.paused && !playbackAudio.ended) }
     function _stopPlayback() {
@@ -10975,7 +11899,8 @@ function _openManualEntryEditor(playlistName, existing) {
     function syncAudioUI(extra) {
       const recording = nativeRecording
       const playing = _isPlaying()
-      $rec.prop('disabled',  recording || playing)
+      // Disabled while EITHER face is recording — one mic, one recorder.
+      $rec.prop('disabled',  anyRecording() || playing)
       $stop.prop('disabled', !recording)
       $play.prop('disabled', recording || !_hasAudio())
       $play.text(playing ? '■ Stop' : '▶ Play')
@@ -11002,7 +11927,9 @@ function _openManualEntryEditor(playlistName, existing) {
       // and write directly to <docs>/manual_audio/<id>.m4a. Bypasses the
       // WebView's getUserMedia entirely — that path races with
       // speech_to_text on Android and surfaces NotReadableError.
-      if (nativeRecording) return
+      // Only one recorder may hold the mic — the other face's recorder must
+      // be stopped first.
+      if (anyRecording()) return
       // If there's an unsaved just-recorded file from an earlier attempt
       // this dialog, throw it away — we're about to overwrite it.
       if (audioUrl && audioUrlIsNew) {
@@ -11033,8 +11960,12 @@ function _openManualEntryEditor(playlistName, existing) {
       recStartMs = Date.now()
       syncAudioUI()
       recTimerId = setInterval(syncAudioUI, 1000)
+      syncAll()   // grey out the other face's Record button
     })
-    _finalizeRecording = async () => {
+    // Stop an in-flight recording and finalize its file. Called by the Stop
+    // button AND by finish(), so clicking Save mid-recording saves the voice
+    // recording instead of discarding it.
+    async function finalize() {
       if (!nativeRecording) return
       let result
       try { result = await _audioRpc('recordStop', {}) }
@@ -11067,8 +11998,9 @@ function _openManualEntryEditor(playlistName, existing) {
       audioUrl = result
       audioUrlIsNew = true
       syncAudioUI()
+      syncAll()   // mic released — re-enable the other face's Record
     }
-    $stop.on('click', () => { _finalizeRecording() })
+    $stop.on('click', () => { finalize() })
     $play.on('click', async () => {
       // Toggle: click while playing stops playback (so the user can quickly
       // re-record without waiting for the clip to finish).
@@ -11106,77 +12038,129 @@ function _openManualEntryEditor(playlistName, existing) {
       audioUrlIsNew = false
       syncAudioUI()
     })
+
+    return {
+      url: () => audioUrl,
+      isRecording: () => nativeRecording,
+      // Lets the sibling recorder repaint when this one grabs/releases the mic.
+      sync: () => syncAudioUI(),
+      finalize,
+      // The entry now owns this file — stop cleanup() from deleting it.
+      markCommitted() { audioUrlIsNew = false },
+      // NOTE: there is deliberately no "drop on failed save" here. Dropping
+      // while the dialog is still open destroys a recording the user is about
+      // to re-save. cleanup() below is the single place uncommitted files are
+      // released, and it runs on every way out of the dialog.
+      cleanup() {
+        if (recTimerId) { clearInterval(recTimerId); recTimerId = null }
+        // If the user closes the dialog mid-recording, tell Dart to throw
+        // away the partial recording (stop the MediaRecorder, delete file).
+        if (nativeRecording) {
+          nativeRecording = false
+          nativeRecordCancel()  // fire-and-forget
+          // The file may have been written; mark for deletion below.
+          audioUrlIsNew = true
+        }
+        // Delete any newly-recorded native file that was never committed via
+        // Save — uncommitted recordings shouldn't survive dialog dismissal.
+        if (audioUrl && audioUrlIsNew) {
+          deleteManualAudio(audioUrl)   // fire-and-forget
+          audioUrl = null; audioUrlIsNew = false
+        }
+        // Also stop any in-progress preview playback — otherwise the <Audio>
+        // element keeps playing after the dialog closes.
+        try { _stopPlayback() } catch (_) {}
+      },
+    }
+  }
+
+  let recSource = null, recTarget = null
+  if (showAudio) {
+    // Legacy cards kept their single recording in `mediaUrl` — load it as the
+    // Source recording so editing such a card keeps (rather than orphans) it.
+    // The Media URL box already blanks file:// values, so saving moves it into
+    // sourceAudioUrl and leaves mediaUrl for real links.
+    const legacyAudio = (existing && _isAudioMediaUrl(existing.mediaUrl)) ? existing.mediaUrl : null
+    recSource = makeRecorder('meeSrcAudio', (existing && _cardSourceAudio(existing)) || legacyAudio)
+    recTarget = makeRecorder('meeTgtAudio', existing && _cardTargetAudio(existing))
+    recorders.push(recSource, recTarget)
+  }
+  if (showStt) {
+    const srcLocale = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || null
+    _wireDictation($d.find('#meeSttSource'), $d.find('#meeSource'), srcLocale, anyRecording)
+    _wireDictation($d.find('#meeSttTarget'), $d.find('#meeTarget'), 'en', anyRecording)
   }
 
   const finish = async () => {
     // If a recording is still in progress, stop and persist it first so the
     // card is saved WITH the voice recording rather than a file that cleanup()
     // is about to cancel. No-op when nothing is recording.
-    await _finalizeRecording()
+    for (const r of recorders) await r.finalize()
     const source       = $d.find('#meeSource').val()
     const target       = $d.find('#meeTarget').val()
     const typedMediaUrl = $d.find('#meeMedia').val()
 
-    // Audio-and-media write order, when the audio UI is on:
-    //  1. The recording (if any) is already on disk via the native
-    //     MediaRecorder path — `audioUrl` is the file:// URL.
-    //  2. If we have an audio URL it becomes the entry's mediaUrl,
-    //     overriding whatever the user typed in the Media URL box.
-    //     Recording is the more recent, explicit declaration of media.
-    //  3. Otherwise the entry takes the typed Media URL.
-    let finalMediaUrl = audioUrl ? audioUrl : typedMediaUrl
-    // Original audio file we may need to delete (replaced or removed).
-    const originalAudioUrl = _isAudioMediaUrl(existing && existing.mediaUrl) ? existing.mediaUrl : null
+    // Recordings live in their own per-face fields now, so `mediaUrl` is
+    // purely the typed link — a card can carry a YouTube/web link AND a
+    // pronunciation for each face.
+    const srcAudio = recSource ? recSource.url() : null
+    const tgtAudio = recTarget ? recTarget.url() : null
+    // Original files we may need to delete (replaced or removed). A legacy
+    // card's recording lived in mediaUrl and loads into the Source slot, so it
+    // counts as the Source original — deleting it there must free the file.
+    const originalSrc = existing
+      ? (_cardSourceAudio(existing) || (_isAudioMediaUrl(existing.mediaUrl) ? existing.mediaUrl : null))
+      : null
+    const originalTgt = existing ? _cardTargetAudio(existing) : null
 
+    const patch = { source, target }
+    // Only touch the link field when the box actually represents its current
+    // value. A legacy audio mediaUrl is blanked in the input (see above), so
+    // writing it back without the audio UI would silently drop the recording.
+    const legacyMediaAudio = !!(existing && _isAudioMediaUrl(existing.mediaUrl))
+    if (showAudio || !legacyMediaAudio) patch.mediaUrl = typedMediaUrl
+    // Likewise, never clear the per-face recordings when the recorders were
+    // never rendered (no AudioBridge — e.g. editing the card in a browser):
+    // the fields are absent from the patch, so updateManualEntry leaves them.
+    if (showAudio) {
+      patch.sourceAudioUrl = srcAudio
+      patch.targetAudioUrl = tgtAudio
+    }
     let saved
     if (isEdit) {
-      saved = updateManualEntry(playlistName, existing.id, { source, target, mediaUrl: finalMediaUrl })
+      saved = updateManualEntry(playlistName, existing.id, patch)
     } else {
-      const it = addManualEntry(playlistName, { source, target, mediaUrl: finalMediaUrl })
-      saved = !!it
+      saved = !!addManualEntry(playlistName, patch)
     }
 
-    if (showAudio) {
-      if (saved) {
-        // Audio is now committed to the entry — disarm the cancel-cleanup.
-        audioUrlIsNew = false
-        // Clean up the replaced/removed original audio file.
-        if (originalAudioUrl && originalAudioUrl !== finalMediaUrl) {
-          await deleteManualAudio(originalAudioUrl)
-        }
-      } else if (audioUrl && audioUrlIsNew) {
-        // Entry save failed — don't leak the just-written audio file.
-        await deleteManualAudio(audioUrl)
-        audioUrl = null; audioUrlIsNew = false
-      }
+    if (showAudio && saved) {
+      // Audio is now committed to the entry — disarm the cancel-cleanup.
+      recorders.forEach(r => r.markCommitted())
+      // Clean up replaced/removed originals — orphan-checked, because a
+      // duplicate of this card in another playlist may point at the same
+      // file. Runs after the save so the entry's new URLs are visible.
+      const replaced = new Set()
+      if (originalSrc && originalSrc !== srcAudio) replaced.add(originalSrc)
+      if (originalTgt && originalTgt !== tgtAudio) replaced.add(originalTgt)
+      _pruneOrphanAudio(replaced)
     }
+    // A failed save deliberately does NOT touch the recordings. Every failure
+    // here is recoverable and leaves the dialog open — an empty Source/Target
+    // is the common one — so the user is still holding the card they just
+    // recorded. Deleting the files here would strand them: the audio bar still
+    // showed the recording, so filling in the text and saving again wrote a
+    // card with no audio. Nothing leaks either way, because the only way out
+    // of this dialog is close → cleanup(), which drops uncommitted files.
     return saved
   }
 
   function cleanup() {
-    if (recTimerId) { clearInterval(recTimerId); recTimerId = null }
-    // If the user closes the dialog mid-recording, tell Dart to throw
-    // away the partial recording (stop the MediaRecorder, delete file).
-    if (nativeRecording) {
-      nativeRecording = false
-      nativeRecordCancel()  // fire-and-forget
-      // The file may have been written; mark for deletion below.
-      audioUrlIsNew = true
-    }
-    // Delete any newly-recorded native file that was never committed via
-    // Save — uncommitted recordings shouldn't survive dialog dismissal.
-    if (audioUrl && audioUrlIsNew) {
-      deleteManualAudio(audioUrl)   // fire-and-forget
-      audioUrl = null; audioUrlIsNew = false
-    }
-    // Also stop any in-progress preview playback — otherwise the <Audio>
-    // element keeps playing after the dialog closes.
-    try {
-      if (playbackAudio) {
-        try { playbackAudio.pause() } catch (_) {}
-        playbackAudio = null
-      }
-    } catch (_) {}
+    // Each recorder tears down its own timer / in-flight recording / preview
+    // and drops any file that was never committed via Save.
+    recorders.forEach(r => { try { r.cleanup() } catch (_) {} })
+    // Closing mid-dictation must release the native mic, otherwise it stays
+    // open until it times out and writes into a detached textarea.
+    try { _cancelDictation() } catch (_) {}
   }
 
   $d.dialog({
@@ -11778,7 +12762,7 @@ $(function () {
     const targets = _notifFeed().filter(x => x && x.responded_at == null && x.external_key && x.item_external_id)
     const seen = new Set()
     targets.forEach(x => {
-      const k = x.external_key + ' ' + x.item_external_id
+      const k = x.external_key + '\u0000' + x.item_external_id
       if (seen.has(k)) return
       seen.add(k)
       _notifAckItem(x.external_key, x.item_external_id)
@@ -12012,17 +12996,21 @@ function openRecordingReviewDialog() {
           // mark pending and let _lazyLoadRecItemPreviews fill it in after
           // the dialog renders.
           const _initialPreview = _previewTextForRecItem(it)
-          const _previewText = _initialPreview ? _truncatePreview(_initialPreview, 80) : '…'
+          const _previewText = _initialPreview ? _truncatePreview(_initialPreview, REC_ITEM_TEXT_MAX) : '…'
           const _pendingAttr = _initialPreview ? '' : ' data-pending="1"'
           // On a virtual playlist the list is read-only: only ▶ Play-from is
           // offered; drag / toggle / duplicate / copy / delete are omitted.
           const editControls = isVirtualCurrent ? '' : `
-              <span class="rec-drag" title="Drag to reorder">⋮⋮</span>
+              <button type="button" class="rec-drag" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}"
+                      title="Move this item — drag it, or tap to type a position">⋮⋮</button>
               <label class="rec-toggle" title="Include in Play All">
                 <input type="checkbox" class="rec-enable" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" ${checked}>
                 <span class="rec-toggle-track"><span class="rec-toggle-knob"></span></span>
               </label>`
           const dupBtn = isVirtualCurrent ? '' : `<button type="button" class="rec-dup" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Duplicate this item">⎘</button>`
+          // Replace an auto-captured clip with a different SRT example of the
+          // same word (picker). Manual cards have no SRT source, so no 🎲.
+          const replBtn = (isVirtualCurrent || _isManualItem(it)) ? '' : `<button type="button" class="rec-replace" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Replace with a different auto-captured example">🎲</button>`
           const delBtn = isVirtualCurrent ? '' : `<button type="button" class="rec-del" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Remove this item">✕</button>`
           const _isLast = _lpHere && _lpHere.st === st && _lpHere.w === w && _lpHere.idx === idx
           // Manual entries: render the source/target text on the main row
@@ -12030,15 +13018,43 @@ function openRecordingReviewDialog() {
           // YT id · timestamps that captured items show.
           let _itemTextHtml
           if (_isManualItem(it)) {
-            const src = _.escape(it.source || '')
-            const tgt = _.escape(it.target || '')
+            // Truncate BEFORE escaping. The other way round, a cut can land
+            // inside an entity — `&amp;` becomes `&am` — and the row emits
+            // broken markup.
+            const _srcShown = _truncatePreview(it.source, REC_ITEM_TEXT_MAX)
+            const _tgtShown = _truncatePreview(it.target, REC_ITEM_TEXT_MAX)
+            const src = _.escape(_srcShown)
+            const tgt = _.escape(_tgtShown)
+            // Carry more of the card on hover — but only when the row is
+            // actually hiding something. A tooltip repeating what is already
+            // on screen is noise, and title="" on a card with no text at all
+            // suppresses whatever tooltip an ancestor would have shown.
+            // Capped too: a native tooltip holding a whole caption block is
+            // its own kind of unusable.
+            const _srcFull = _truncatePreview(it.source, REC_ITEM_TITLE_MAX)
+            const _tgtFull = _truncatePreview(it.target, REC_ITEM_TITLE_MAX)
+            const _cardShown = `${_srcShown}${_tgtShown ? ` → ${_tgtShown}` : ''}`
+            const _cardFull  = `${_srcFull}${_tgtFull ? ` → ${_tgtFull}` : ''}`
+            const _titleAttr = (_cardFull && _cardFull !== _cardShown)
+              ? ` title="${_.escape(_cardFull)}"`
+              : ''
             const _isAudio = it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)
+            // Per-face recordings each get their own play badge. Play in place
+            // via AudioBridge — file:// can't be opened as a normal link.
+            // data-audio-url is read by a delegated click handler installed
+            // once on the review dialog.
+            // `title` is escaped like everything else: every caller passes a
+            // literal today, but the next one to pass card-derived text
+            // shouldn't have to notice that this was the one that didn't.
+            const audioBadge = (url, label, title) => url
+              ? ` <button type="button" class="rec-item-media rec-item-audio" data-audio-url="${_.escape(url)}" title="${_.escape(title)}">${label}</button>`
+              : ''
+            const faceBadges = audioBadge(_cardSourceAudio(it), '🎙ᔆ', 'Play the Source recording')
+                             + audioBadge(_cardTargetAudio(it), '🎙ᵀ', 'Play the Target recording')
             const mediaBadge = it.mediaUrl
               ? (_isAudio
-                  // Play in place via AudioBridge — file:// can't be opened
-                  // as a normal link. data-audio-url is read by a delegated
-                  // click handler installed once on the review dialog.
-                  ? ` <button type="button" class="rec-item-media rec-item-audio" data-audio-url="${_.escape(it.mediaUrl)}" title="Play recorded audio">🎙</button>`
+                  // Legacy card: its single recording still lives in mediaUrl.
+                  ? audioBadge(it.mediaUrl, '🎙', 'Play recorded audio')
                   : ` <a class="rec-item-media" href="${_.escape(it.mediaUrl)}" target="_blank" rel="noopener" title="Open media (${_.escape(it.mediaKind || 'link')})">${it.mediaKind === 'youtube' ? '▶︎' : '🔗'}</a>`)
               : ''
             // "Open in EPUB" for cards with book/chapter metadata (chapter_idx
@@ -12046,11 +13062,20 @@ function openRecordingReviewDialog() {
             const epubBadge = (it.book_key && it.chapter_idx != null)
               ? ` <button type="button" class="rec-item-media rec-item-epub" data-book-key="${_.escape(String(it.book_key))}" data-chapter-idx="${_.escape(String(it.chapter_idx))}" title="Open in ${_.escape(String(it.chapter_title || it.book_title || 'the book'))}">📖</button>`
               : ''
-            _itemTextHtml = `<span class="rec-item-text rec-item-manual${it.enabled === false ? ' rec-item-off' : ''}">📝 ${src}${tgt ? ` → ${tgt}` : ''}</span>${mediaBadge}${epubBadge}` +
-                            `<button type="button" class="rec-manual-edit" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Edit this card">✎</button>`
+            _itemTextHtml = `<span class="rec-item-text rec-item-manual${it.enabled === false ? ' rec-item-off' : ''}"${_titleAttr}>📝 ${src}${tgt ? ` → ${tgt}` : ''}</span>${faceBadges}${mediaBadge}${epubBadge}` +
+                            (isVirtualCurrent ? '' : `<button type="button" class="rec-manual-edit" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Edit this card">✎</button>`)
           } else {
-            const glossHtml = (it.target && String(it.target).trim())
-              ? ` <span class="rec-item-gloss"${it.targetAuto ? ' title="Auto placeholder translation"' : ''}>→ ${_.escape(String(it.target).trim())}</span>`
+            // A captured item's gloss is usually a short phrase, but nothing
+            // enforces that — a translated long line lands here in full and
+            // stretches the row exactly as an untruncated card does.
+            const _glossFull = String(it.target || '').replace(/\s+/g, ' ').trim()
+            const _glossShown = _truncatePreview(_glossFull, REC_ITEM_TEXT_MAX)
+            const _glossTitle = [
+              it.targetAuto ? 'Auto placeholder translation' : '',
+              _glossShown === _glossFull ? '' : _truncatePreview(_glossFull, REC_ITEM_TITLE_MAX),
+            ].filter(Boolean).join(' — ')
+            const glossHtml = _glossFull
+              ? ` <span class="rec-item-gloss"${_glossTitle ? ` title="${_.escape(_glossTitle)}"` : ''}>→ ${_.escape(_glossShown)}</span>`
               : ''
             _itemTextHtml = `<span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${it.timeStart}s–${it.timeEnd}s${glossHtml}</span>`
           }
@@ -12059,6 +13084,7 @@ function openRecordingReviewDialog() {
               ${editControls}
               <button type="button" class="rec-play-from" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Play from this item">▶</button>
               ${dupBtn}
+              ${replBtn}
               ${_itemTextHtml}
               ${copyOptions}
               ${delBtn}
@@ -12084,6 +13110,30 @@ function openRecordingReviewDialog() {
     const idx = parseInt($(this).data('idx'), 10)
     removeRecordedItem(st, w, idx)
     openRecordingReviewDialog()  // refresh
+  })
+
+  // Move an item by typing its new position. This is the ONLY reorder that
+  // works on a phone — the drag handle is inert there (see the sortable init
+  // below) — and on desktop it sits alongside dragging for long lists where
+  // dragging across a scroll is painful.
+  $dlg.off('click', '.rec-drag').on('click', '.rec-drag', function (e) {
+    e.preventDefault()
+    e.stopPropagation()
+    // A completed drag also fires a click on the handle; that click must not
+    // then ask for a position on top of the move the user just made.
+    if (_recDragJustSorted) return
+    const st  = String($(this).data('st'))
+    const w   = String($(this).data('w'))
+    const idx = parseInt($(this).data('idx'), 10)
+    const arr = ((window._recording.items || {})[st] || {})[w]
+    const len = Array.isArray(arr) ? arr.length : 0
+    if (len < 2) { _cpBuildToast('Nothing to reorder — this group has one item.'); return }
+    const raw = prompt(`Move to position (1–${len}):`, String(idx + 1))
+    if (raw == null) return
+    const pos = parseInt(String(raw).trim(), 10)
+    if (!Number.isFinite(pos)) return
+    if (pos < 1 || pos > len) { alert(`Enter a position between 1 and ${len}.`); return }
+    if (moveRecordedItem(st, w, idx, pos - 1)) openRecordingReviewDialog()   // refresh
   })
 
   $dlg.off('change', '.rec-enable').on('change', '.rec-enable', function (e) {
@@ -12116,6 +13166,15 @@ function openRecordingReviewDialog() {
     const w   = String($(this).data('w'))
     const idx = parseInt($(this).data('idx'), 10)
     if (duplicateRecordedItem(st, w, idx)) openRecordingReviewDialog()
+  })
+
+  // Replace an auto-captured item with a different SRT example (picker dialog).
+  $dlg.off('click', '.rec-replace').on('click', '.rec-replace', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    const st  = String($(this).data('st'))
+    const w   = String($(this).data('w'))
+    const idx = parseInt($(this).data('idx'), 10)
+    _openReplaceItemDialog(st, w, idx)
   })
 
   // Copy a single item to another playlist via the inline select.
@@ -12252,6 +13311,12 @@ function openRecordingReviewDialog() {
         tolerance: 'pointer',
         forcePlaceholderSize: true,
         placeholder: 'rec-item-placeholder',
+        // The handle is also a button that prompts for a position. Suppress
+        // that prompt around a real drag: mouseup at the end of a drag still
+        // fires a click on the handle, which would otherwise ask the user to
+        // place an item they just placed.
+        start: function () { _recDragJustSorted = true },
+        stop: function () { setTimeout(() => { _recDragJustSorted = false }, 250) },
         update: function () {
           const st = String($list.data('st'))
           const w  = String($list.data('w'))
@@ -12637,6 +13702,12 @@ function _renderPlayingBanner(it, idx, total) {
           <span class="rec-pb-gap-val" tabindex="0" role="button" title="Tap to set gap">30s</span>
           <button type="button" class="rec-pb-gap-inc" aria-label="Increase gap">+</button>
         </span>
+        <span class="rec-pb-gap rec-pb-sgap" style="display:none;" title="Pause between this card's Source and Target recordings — click ± or tap the value to type">
+          <button type="button" class="rec-pb-sgap-dec" aria-label="Decrease source-to-target pause">−</button>
+          <span class="rec-pb-sgap-val" tabindex="0" role="button" title="Tap to set the source→target pause">ᔆᵀ –</span>
+          <button type="button" class="rec-pb-sgap-inc" aria-label="Increase source-to-target pause">+</button>
+        </span>
+        <button type="button" class="rec-pb-music-btn" title="Background music" aria-label="Background music">♫</button>
         <button type="button" class="rec-pb-info-btn" title="Show details" aria-label="Show details" aria-expanded="false">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
@@ -12647,40 +13718,61 @@ function _renderPlayingBanner(it, idx, total) {
       <div class="rec-pb-details">
         <div class="rec-pb-head"></div>
         <div class="rec-pb-meta"></div>
+        <div class="rec-pb-details-gap">
+          <span class="rec-pb-gap" title="Inter-item gap (seconds) — click ± or tap the value to type">
+            <button type="button" class="rec-pb-gap-dec" aria-label="Decrease gap">−</button>
+            <span class="rec-pb-gap-val" tabindex="0" role="button" title="Tap to set gap">30s</span>
+            <button type="button" class="rec-pb-gap-inc" aria-label="Increase gap">+</button>
+          </span>
+        </div>
       </div>
     </div>`).appendTo('body')
+    // Reachable while a playlist is running, which is when someone actually
+    // wants to change the music — the same panel Settings opens.
+    $b.on('click', '.rec-pb-music-btn', function (e) {
+      e.preventDefault(); e.stopPropagation()
+      _openMusicPanel()
+    })
     $b.on('click', '.rec-pb-info-btn', function () {
       const open = !$b.hasClass('rec-pb-expanded')
       $b.toggleClass('rec-pb-expanded', open)
       $(this).attr('aria-expanded', open ? 'true' : 'false')
     })
+    // _setItemGap writes the value, persists it, and refreshes both the
+    // Settings input and the two readouts in this banner.
     const GAP_STEP = 5
-    const GAP_MIN  = 0
-    const GAP_MAX  = 600
-    const _setGap = (v) => {
-      const next = Math.max(GAP_MIN, Math.min(GAP_MAX, parseInt(v, 10) || 0))
-      window._appSettings.recPlayGapSeconds = next
-      // Keep the Settings input in sync if it's mounted.
-      try { $('#recPlayGapSeconds').val(next) } catch (_) {}
-      saveAppSettings()
-      $b.find('.rec-pb-gap-val').text(next + 's')
-    }
-    $b.on('click', '.rec-pb-gap-dec', (e) => {
+    $b.on('click', '.rec-pb-gap-dec, .rec-pb-gap-inc', (e) => {
       e.preventDefault(); e.stopPropagation()
-      const cur = parseInt(window._appSettings.recPlayGapSeconds, 10) || 0
-      _setGap(cur - GAP_STEP)
-    })
-    $b.on('click', '.rec-pb-gap-inc', (e) => {
-      e.preventDefault(); e.stopPropagation()
-      const cur = parseInt(window._appSettings.recPlayGapSeconds, 10) || 0
-      _setGap(cur + GAP_STEP)
+      const dir = $(e.currentTarget).hasClass('rec-pb-gap-inc') ? 1 : -1
+      _setItemGap(_interItemGapSeconds() + dir * GAP_STEP)
     })
     $b.on('click', '.rec-pb-gap-val', (e) => {
       e.preventDefault(); e.stopPropagation()
-      const cur = parseInt(window._appSettings.recPlayGapSeconds, 10) || 0
-      const raw = prompt('Gap between items (seconds, 0–600):', String(cur))
+      const raw = prompt('Gap between items (seconds, 0–600):', String(_interItemGapSeconds()))
       if (raw == null) return
-      _setGap(raw)
+      _setItemGap(raw)
+    })
+
+    // Source→Target pause. Stepping from "unset" starts at whatever is
+    // effective right now (the inter-item gap), so the first ± tap turns the
+    // inherited value into an explicit override rather than jumping to 0.
+    // Recall pauses are short, so step finely below 10s and coarsely above.
+    $b.on('click', '.rec-pb-sgap-dec, .rec-pb-sgap-inc', (e) => {
+      e.preventDefault(); e.stopPropagation()
+      const cur = _effectiveSrcTgtGapSeconds()
+      const step = cur <= 10 ? 1 : 5
+      const dir = $(e.currentTarget).hasClass('rec-pb-sgap-inc') ? 1 : -1
+      _setSrcTgtGap(cur + dir * step)
+    })
+    $b.on('click', '.rec-pb-sgap-val', (e) => {
+      e.preventDefault(); e.stopPropagation()
+      const cur = _srcTgtGapSeconds()
+      const raw = prompt(
+        'Pause between Source and Target (seconds, 0–600).\nLeave blank to use the gap between items.',
+        cur == null ? '' : String(cur)
+      )
+      if (raw == null) return
+      _setSrcTgtGap(String(raw).trim() === '' ? null : raw)
     })
   }
   // Per-item updates delegated to the pure VM + DOM updater. The static
@@ -12689,15 +13781,54 @@ function _renderPlayingBanner(it, idx, total) {
   if (!$w.length) $w = $('<div id="recPlayingWord"></div>').appendTo('body')
   const gap = window._appSettings && window._appSettings.recPlayGapSeconds
   updatePlayingBanner(buildPlayingBannerVM(it, idx, total, gap), $b[0], $w[0])
+  // The source→target pause only bites on a card that carries both
+  // recordings, so its stepper only shows there — the compact mobile row has
+  // no room for a knob that does nothing to the item being played.
+  const dual = !!(_cardSourceAudio(it) && _cardTargetAudio(it))
+  $b.find('.rec-pb-sgap').toggle(dual)
+  // Narrow viewports only have room for one pill, so the class lets CSS swap
+  // the item-gap pill out for this one while a dual card is playing. The
+  // item gap keeps a second copy of its stepper inside the ℹ details block,
+  // which CSS reveals in exactly that case — otherwise a deck where every
+  // card has both recordings would leave no way to change it on a phone
+  // without pausing to open Settings.
+  $b.toggleClass('rec-pb-has-sgap', dual)
+  // updatePlayingBanner writes only the first .rec-pb-gap-val it finds, so
+  // the details copy gets its text from here.
+  _syncItemGapUI()
+  if (dual) _syncSrcTgtGapUI()
 }
 
 // Drain the progress bar from full → empty over `ms`, visually signalling
 // the remaining inter-item gap time. The bar gets a `.gap` class so it
 // shows in a warm color (vs the green clip-progress fill) and the count
 // element switches to a "next-up" hint while the gap is running.
+// `hint` optionally replaces the "next in Ns · i/n" readout — the pause
+// inside a card is waiting for that card's Target, not for the next item.
 let _gapCountdownTimerId = null
-function _startGapCountdown(ms) {
+function _startGapCountdown(ms, hint) {
   _stopGapCountdown()
+  // A gap is silent, so the YouTube player has just reported "not playing" and
+  // the host's shim has pushed that to the system media session — which stops
+  // the headset being routed here for the whole gap. Re-assert that the session
+  // is running, unless the user actually paused it.
+  if (window._playingRecording && !window._recPlayPaused) _postMediaState(true)
+  // Every pause in playback comes through here — the recall pause inside a
+  // card and the hold between items alike — so this is the one place 'gap'
+  // mode needs to know about.
+  //
+  // Not while a prev/next is already queued, though: the gap is opened before
+  // the nav request is read, and both this countdown and the sleep it belongs
+  // to bail on their first tick. Flipping the phase for that one tick makes
+  // the music start and stop again ~200ms later, so holding down next stutters
+  // it. Leaving the phase alone lets the next item set the real one.
+  if (!window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)) {
+    // Tracked separately from the phase because a hand-started replay moves
+    // the phase to 'clip' while the gap itself is still counting down — this
+    // is what tells the replay's 'ended' which phase to hand back to.
+    window._recPlayGapActive = true
+    _setRecPlayPhase('gap')
+  }
   const $banner = $('#recPlayingBanner')
   if (!$banner.length) return
   const $bar   = $banner.find('.rec-pb-bar').addClass('gap')
@@ -12721,12 +13852,18 @@ function _startGapCountdown(ms) {
     const pct = Math.max(0, Math.min(100, (remaining / ms) * 100))
     $bar.css('width', pct + '%')
     const secsLeft = Math.max(0, Math.ceil(remaining / 1000))
-    if ($count.length) $count.text(`next in ${secsLeft}s · ${nextIdx + 1}/${queue.length}`)
+    if ($count.length) {
+      $count.text(hint ? hint(secsLeft) : `next in ${secsLeft}s · ${nextIdx + 1}/${queue.length}`)
+    }
     if (remaining <= 0) _stopGapCountdown()
   }, 200)
 }
 function _stopGapCountdown() {
   if (_gapCountdownTimerId) { clearInterval(_gapCountdownTimerId); _gapCountdownTimerId = null }
+  // Cleared before the early return below: a missing banner must not leave
+  // this stuck on, or a later replay would hand the phase back to a gap that
+  // finished long ago.
+  window._recPlayGapActive = false
   const $banner = $('#recPlayingBanner')
   if (!$banner.length) return
   $banner.find('.rec-pb-bar').removeClass('gap')
@@ -12734,6 +13871,12 @@ function _stopGapCountdown() {
   if ($count.length) {
     const pre = $count.data('preGapText')
     if (pre != null) $count.text(pre)
+    // Drop the cache once it's been spent. Leaving it behind makes the NEXT
+    // countdown restore this item's counter over a later item's — harmless
+    // when the only countdown ran at an item boundary, but the source→target
+    // pause runs mid-item, so a stale restore would sit on screen for the
+    // whole Target recording.
+    $count.removeData('preGapText')
   }
 }
 
@@ -13258,15 +14401,609 @@ window.handleYoutubePlayerError = handleYoutubePlayerError
 // so an audio card behaves like a video clip in the queue. Pause/resume is
 // driven off window._recPlayPaused transitions (not the element's own state)
 // so a headset-triggered pause of the element isn't fought by a poll.
-async function _playManualAudioAndWait(url) {
+// The visible player for a manual card's recordings. A manual card has no
+// video, so the YouTube slot is hidden (body.rec-playing-manual) and this takes
+// its place — with real <audio controls>, so the recording can be scrubbed,
+// paused and replayed by hand rather than only by the playlist's own timing.
+// Reused across items and faces; created on first use.
+// Tell the host whether this playlist session is running.
+//
+// The host's media-key shim reports playback state from `window.ytPlaying`
+// alone. A manual card's <audio> never sets that, so the system MediaSession
+// sits in STATE_PAUSED for the whole card — and Android routes headset buttons
+// to the session it believes is playing, so in that state the buttons never
+// reach this page at all: `cupitorMediaKey` simply never fires.
+//
+// Reported from the session's own pause state rather than from whether a clip
+// happens to be sounding. The gaps — the recall pause between Source and
+// Target, the hold on a card's text, the wait between items — are silent but
+// still "playing" as far as the user and the headset are concerned, and are
+// exactly when someone reaches for the buttons.
+function _postMediaState(playing) {
+  try {
+    const b = window.MediaState
+    if (!b || typeof b.postMessage !== 'function') return
+    // `source` means two different things: the front text of a manual card,
+    // but the provider name ('YouTube') on a captured clip — so reading it
+    // blind would title every video item "YouTube" on the lockscreen.
+    const it = window._recPlayCurrentItem
+    const raw = !it ? ''
+      : _isManualItem(it) ? (it.source || it.target || '')
+      : (it.word || it.searchText || '')
+    const title = String(raw).split('\n')[0].trim() || document.title || 'Cupitor'
+    b.postMessage(JSON.stringify({ playing: !!playing, title: title.slice(0, 120) }))
+  } catch (_) {}
+}
+
+// ─── Background music ────────────────────────────────────────────────────
+//
+// A SECOND YouTube player, quite separate from window.ytPlayer, whose only job
+// is to make sound under a card. Separate because sharing the main player
+// would break in three ways, each of them silently:
+//
+//  - the gap guard in playRecording re-pauses window.ytPlayer every 200ms
+//    while a gap is open, which is exactly when 'gap' mode wants music;
+//  - a manual card can carry its own YouTube link that is cued as a reference,
+//    and the two uses would fight over one player;
+//  - #mediaContainer is display:none on a manual card, and audio from a
+//    display:none iframe is not dependable in an Android WebView.
+//
+// So this one gets its own container, parked off-screen but RENDERED — never
+// display:none or visibility:hidden, both of which put media playback at the
+// browser's discretion.
+//
+// `window._recPlayPhase` says what the playlist is doing right now — 'clip'
+// (a recording is sounding), 'gap' (a pause), 'video' (a captured clip, which
+// has its own audio), or 'idle'. The mode setting maps that to sound or
+// silence; nothing else decides.
+let _musicPlayer = null
+let _musicReady = false
+let _musicLoadedId = ''
+
+function _musicHostNode() {
+  let host = document.getElementById('recMusicHost')
+  if (!host) {
+    host = document.createElement('div')
+    host.id = 'recMusicHost'
+    host.style.cssText = 'position:fixed;left:-10000px;top:0;width:200px;height:120px;' +
+                         'opacity:0;pointer-events:none;z-index:-1;'
+    document.body.appendChild(host)
+    host.appendChild(document.createElement('div'))
+  }
+  return host.firstChild
+}
+
+function _applyMusicVolume() {
+  if (!_musicPlayer || !_musicReady) return
+  try { _musicPlayer.setVolume(_musicVolume()) } catch (_) {}
+}
+
+// Why the current track won't play, as a YouTube error code — 0 when it's
+// fine. Kept apart from `_musicReady`, which says only whether the player
+// OBJECT is alive. Conflating the two is a trap: a music upload that refuses
+// embedding (101/150) is the common case, not the rare one, and a single flag
+// would then disable the feature for the rest of the page's life, including
+// for the working URL the user pastes next.
+let _musicError = 0
+
+// The codes worth explaining. Anything else gets the generic line.
+function _musicErrorText(code) {
+  if (code === 101 || code === 150) return "that video's owner doesn't allow it to be played inside other apps"
+  if (code === 100) return 'that video is private or has been removed'
+  if (code === 2)   return "that link doesn't point at a playable video"
+  return 'YouTube refused to play that video'
+}
+
+// Which track the failure belongs to, so the panel can point at the offending
+// row rather than warning about the library as a whole.
+let _musicErrorId = ''
+
+function _noteMusicError(code) {
+  _musicError = code || 1
+  _musicErrorId = _musicLoadedId
+  // Say it out loud once. Silence here is what makes this feature look simply
+  // broken: the URL is a valid YouTube link, so nothing else flags it.
+  _cpBuildToast(`No background music — ${_musicErrorText(code)}.`)
+  if ($('#musicPanelDialog').is(':visible')) _renderMusicPanel()
+}
+
+// Built on first actual need, so a user who never sets a music URL never pays
+// for an extra iframe.
+function _ensureMusicPlayer() {
+  const id = _musicVideoId()
+  if (!id) return null
+  if (!window.YT || typeof window.YT.Player !== 'function') return null
+  if (_musicPlayer) {
+    // Not gated on _musicReady: a player whose last video errored must still
+    // accept the next one, or one bad link poisons every later good one.
+    if (_musicLoadedId !== id) {
+      // cue, not load: loadVideoById starts playing immediately, and whether
+      // we should be sounding is _syncBackgroundMusic's decision, not this
+      // function's.
+      try {
+        _musicPlayer.cueVideoById(id)
+        _musicLoadedId = id
+        _musicError = 0          // a new video gets a clean slate
+        _musicErrorId = ''
+        _applyMusicVolume()
+      } catch (_) {}
+    }
+    return _musicPlayer
+  }
+  try {
+    _musicPlayer = new window.YT.Player(_musicHostNode(), {
+      videoId: id,
+      width: 200, height: 120,
+      playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, playsinline: 1 },
+      events: {
+        onReady: () => { _musicReady = true; _applyMusicVolume(); _syncBackgroundMusic() },
+        onStateChange: (e) => {
+          // Loop by hand on ENDED. The `loop` playerVar only works against a
+          // real playlist, so for a single video it does nothing.
+          //
+          // Rewind and then ask the usual question rather than calling
+          // playVideo() outright: YT state changes arrive as async messages
+          // from the iframe, so an ENDED can land after a stop or a phase
+          // flip, and restarting blind would strand the music playing with no
+          // session to turn it off.
+          if (e && e.data === 0) {
+            try { _musicPlayer.seekTo(0, true) } catch (_) {}
+            _syncBackgroundMusic()
+            return
+          }
+          // CUED (5) or PLAYING (1): the player now knows the real title, so
+          // an unnamed track can stop showing as a bare video id.
+          if (e && (e.data === 5 || e.data === 1)) _maybeNameTrackFromPlayer()
+        },
+        onError: (e) => _noteMusicError(e && e.data),
+      },
+    })
+    _musicLoadedId = id
+    _musicError = 0
+    _musicErrorId = ''
+  } catch (_) {
+    _musicPlayer = null
+    return null
+  }
+  return _musicPlayer
+}
+
+// ─── Music panel ─────────────────────────────────────────────────────────
+// The library and its controls, reachable from Settings and from the playlist
+// dialog. Both entry points open this same dialog rather than duplicating the
+// controls in two places.
+
+// Ask YouTube what a video is called, so the user doesn't have to name every
+// track by hand. The oembed endpoint needs no key and sends CORS headers.
+// Any failure — offline, blocked, rate-limited — falls back to the caller's
+// own default rather than blocking the add.
+async function _fetchYouTubeTitle(url) {
+  try {
+    const api = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`
+    const res = await _withTimeout(fetch(api), 6000, 'oembed')
+    if (!res || !res.ok) return ''
+    const j = await res.json()
+    return String((j && j.title) || '').trim()
+  } catch (_) { return '' }
+}
+
+// A track the user never named shows as its bare video id. Once the player
+// has actually loaded it we can do better, for free.
+function _maybeNameTrackFromPlayer() {
+  try {
+    if (!_musicPlayer || typeof _musicPlayer.getVideoData !== 'function') return
+    const id = _musicLoadedId
+    if (!id) return
+    const list = _musicTracks()
+    const t = list.find(x => x.id === id)
+    if (!t || t.name !== id) return          // already has a real name
+    const data = _musicPlayer.getVideoData() || {}
+    // A state change from the OUTGOING video can arrive after we've already
+    // cued the next one, and _musicLoadedId moved synchronously — so trust the
+    // player's own id over ours before writing a name.
+    if (String(data.video_id || '') !== id) return
+    const title = String(data.title || '').trim()
+    if (!title) return
+    window._appSettings.recMusicTracks = list.map(x =>
+      x.id === id ? { ...x, name: title } : x)
+    saveAppSettings()
+    if ($('#musicPanelDialog').is(':visible')) _renderMusicPanel()
+  } catch (_) {}
+}
+
+function _musicVolRow(key, label, value) {
+  return `<div class="mp-row mp-vol" data-vol="${key}">
+    <label class="mp-lbl" for="mpVol_${key}">${label}</label>
+    <input type="range" id="mpVol_${key}" class="mp-slider" min="0" max="100" step="5" value="${value}">
+    <span class="mp-vol-val">${value}%</span>
+  </div>`
+}
+
+// Redraw the parts that change: the track list, and which volume sliders
+// apply to the chosen mode.
+function _renderMusicPanel() {
+  const $d = $('#musicPanelDialog')
+  if (!$d.length) return
+  const tracks = _musicTracks()
+  const sel = _musicVideoId()
+  const mode = _musicMode()
+  const s = window._appSettings || {}
+
+  const opts = tracks.length
+    ? tracks.map(t =>
+        `<option value="${_.escape(t.id)}"${t.id === sel ? ' selected' : ''}>${_.escape(t.name)}</option>`
+      ).join('')
+    : '<option value="">(no tracks yet)</option>'
+  $d.find('#mpTrack').html(opts).prop('disabled', !tracks.length)
+  $d.find('#mpDelete').prop('disabled', !tracks.length)
+
+  // Point at the offending row. A link YouTube refuses is still a valid
+  // YouTube link, so nothing else about the panel would look wrong.
+  const bad = _musicError && _musicErrorId && _musicErrorId === sel
+  $d.find('#mpTrackWarn')
+    .toggle(!!bad)
+    .text(bad ? `Can't play this one — ${_musicErrorText(_musicError)}.` : '')
+
+  $d.find('input[name="mpMode"]').each(function () {
+    $(this).prop('checked', $(this).val() === mode)
+  })
+
+  // Rebuilt only when the SET of sliders changes. A re-render can be triggered
+  // by a title arriving or a playback error while the user is mid-drag, and
+  // replacing the input under their finger would drop the gesture.
+  const fields = _musicVolumeFieldsFor(mode)
+  const $vol = $d.find('#mpVolumes')
+  const sig = fields.join(',')
+  if ($vol.attr('data-fields') !== sig) {
+    const rows = []
+    if (fields.indexOf('withAudio') >= 0) {
+      rows.push(_musicVolRow('withAudio', 'Volume with audio',
+        _musicVolumeForPhase(s, 'clip')))
+    }
+    if (fields.indexOf('inGaps') >= 0) {
+      rows.push(_musicVolRow('inGaps', 'Volume in gaps',
+        _musicVolumeForPhase(s, 'gap')))
+    }
+    $vol.attr('data-fields', sig).html(rows.join(''))
+  }
+}
+
+function _openMusicPanel() {
+  let $d = $('#musicPanelDialog')
+  if (!$d.length) $d = $('<div id="musicPanelDialog"></div>').appendTo('body')
+  $d.html(`
+    <div class="mp-row">
+      <label class="mp-lbl" for="mpTrack">Track</label>
+      <select id="mpTrack" class="mp-grow"></select>
+      <button type="button" id="mpDelete" class="btn" title="Remove this track from the list">🗑</button>
+    </div>
+    <div class="mp-warn" id="mpTrackWarn" style="display:none;"></div>
+    <div class="mp-row mp-add">
+      <input type="text" id="mpUrl" class="mp-grow" placeholder="YouTube URL">
+      <input type="text" id="mpName" placeholder="Name (optional)">
+      <button type="button" id="mpAdd" class="btn">＋ Add</button>
+    </div>
+    <div class="mp-hint">Leave the name blank and it will be looked up.</div>
+    <div class="mp-row mp-modes">
+      <span class="mp-lbl">Play</span>
+      <label class="mp-radio"><input type="radio" name="mpMode" value="item"> With recording</label>
+      <label class="mp-radio"><input type="radio" name="mpMode" value="gap"> In the gaps</label>
+      <label class="mp-radio"><input type="radio" name="mpMode" value="nonstop"> Non-stop</label>
+    </div>
+    <div id="mpVolumes"></div>
+  `)
+  _renderMusicPanel()
+
+  $d.off('.mp')
+  $d.on('change.mp', '#mpTrack', function () {
+    window._appSettings.recMusicSelected = String($(this).val() || '')
+    saveAppSettings()
+    _resetBackgroundMusic()
+    // Redraw: the "can't play this one" line belongs to the track that failed,
+    // so switching away from it has to take the warning with it.
+    _renderMusicPanel()
+  })
+  $d.on('click.mp', '#mpDelete', function () {
+    const t = _musicTrack()
+    if (!t) return
+    if (!confirm(`Remove "${t.name}" from the music list?`)) return
+    window._appSettings.recMusicTracks = _removeMusicTrack(_musicTracks(), t.id)
+    // The selection is recomputed from the list, so a deleted track simply
+    // hands over to the next one rather than leaving a dangling id.
+    window._appSettings.recMusicSelected = ''
+    saveAppSettings()
+    _renderMusicPanel()
+    _resetBackgroundMusic()
+  })
+  $d.on('click.mp', '#mpAdd', async function () {
+    const url = String($d.find('#mpUrl').val() || '').trim()
+    if (!url) return
+    let name = String($d.find('#mpName').val() || '').trim()
+    if (!_musicVideoIdFromUrl(url)) {
+      alert("That doesn't look like a YouTube link. Background music plays through YouTube, so it needs one.")
+      return
+    }
+    const $btn = $(this)
+    // Only look a title up for a track we don't already have. A blank name on
+    // a track that's already saved means "no opinion", and passing a fetched
+    // title through would quietly overwrite the name the user chose for it —
+    // while the panel's own hint tells them to leave the box empty.
+    const known = _musicTracks().some(t => t.id === _musicVideoIdFromUrl(url))
+    if (!name && !known) {
+      // Never let a slow network hold the add hostage — _fetchYouTubeTitle
+      // resolves to '' on any failure and the id is used instead.
+      $btn.prop('disabled', true).text('…')
+      name = await _fetchYouTubeTitle(url)
+      $btn.prop('disabled', false).text('＋ Add')
+    }
+    const res = _addMusicTrack(_musicTracks(), url, name)
+    if (res.reason === 'full') { alert('The music list is full — remove a track first.'); return }
+    window._appSettings.recMusicTracks = res.tracks
+    if (res.id) window._appSettings.recMusicSelected = res.id
+    saveAppSettings()
+    $d.find('#mpUrl').val('')
+    $d.find('#mpName').val('')
+    _renderMusicPanel()
+    _resetBackgroundMusic()
+    if (!res.added && res.reason === 'duplicate') {
+      _cpBuildToast(name ? 'Already in the list — renamed and selected it.'
+                         : 'Already in the list — selected it.')
+    }
+  })
+  $d.on('change.mp', 'input[name="mpMode"]', function () {
+    const v = String($(this).val() || 'gap')
+    if (REC_MUSIC_MODES.indexOf(v) < 0) return
+    window._appSettings.recMusicMode = v
+    saveAppSettings()
+    // Which sliders apply depends on the mode, so the panel redraws.
+    _renderMusicPanel()
+    _syncBackgroundMusic()
+  })
+  // 'input' alone: a range fires it throughout the drag AND on release, so
+  // also listening for 'change' just doubles every save — and each save
+  // serialises the whole settings object into localStorage.
+  $d.on('input.mp', '.mp-slider', function () {
+    const which = String($(this).closest('.mp-vol').attr('data-vol') || '')
+    const n = Math.max(0, Math.min(100, parseInt($(this).val(), 10) || 0))
+    if (which === 'withAudio') window._appSettings.recMusicVolume = n
+    else if (which === 'inGaps') window._appSettings.recMusicGapVolume = n
+    else return
+    $(this).siblings('.mp-vol-val').text(`${n}%`)
+    saveAppSettings()
+    // Heard immediately, but only if this slider governs the CURRENT phase —
+    // _applyMusicVolume reads the phase, so dragging the gap slider during a
+    // recording correctly changes nothing yet.
+    _applyMusicVolume()
+  })
+
+  $d.dialog({
+    title: '♫ Background music',
+    modal: true,
+    width: Math.min(460, $(window).width() - 20),
+    // The play overlay sits at 100002-100004 and the modal backdrop has no
+    // z-index of its own, so without this body class the dim would fall behind
+    // the banner while the dialog floated above it.
+    open: function () { $('body').addClass('music-panel-open') },
+    close: function () { $('body').removeClass('music-panel-open') },
+  })
+}
+window.openMusicPanel = _openMusicPanel
+
+// Should the music be sounding right now? One place decides, and every phase
+// change and pause routes through here.
+function _syncBackgroundMusic() {
+  const want = _musicShouldPlay({
+    mode: _musicMode(),
+    phase: window._recPlayPhase || 'idle',
+    hasTrack: !!_musicVideoId(),
+    errored: !!_musicError,
+    playing: !!window._playingRecording,
+    paused: !!window._recPlayPaused,
+  })
+  const p = want ? _ensureMusicPlayer() : _musicPlayer
+  // Tints the ♫ button while the bed is actually sounding. Keyed on the player
+  // really being there and ready, not just on wanting it — a glowing button
+  // over silence would be worse than no indicator.
+  $('body').toggleClass('music-on', !!(want && p && _musicReady))
+  if (!p) return
+  // Starting needs a working player; STOPPING must always go through, even on
+  // one we consider broken — an errored player can still be making noise, and
+  // refusing to pause it would leave the user nothing that shuts it up.
+  try {
+    if (!want) { p.pauseVideo(); return }
+    if (!_musicReady) return
+    _applyMusicVolume()
+    p.playVideo()
+  } catch (_) {}
+}
+
+function _setRecPlayPhase(phase) {
+  if (window._recPlayPhase === phase) return
+  window._recPlayPhase = phase
+  _syncBackgroundMusic()
+}
+
+// End of session. Position is deliberately kept — stopping and restarting a
+// playlist shouldn't drag you back through the same intro every time.
+function _stopBackgroundMusic() {
+  window._recPlayPhase = 'idle'
+  $('body').removeClass('music-on')
+  // Deliberately not gated on _musicReady — see _syncBackgroundMusic. Stop has
+  // to work on a player we think is broken, because that is precisely the one
+  // that might still be sounding.
+  if (!_musicPlayer) return
+  try { _musicPlayer.pauseVideo() } catch (_) {}
+}
+
+// The URL changed in Settings. Swapping the track mid-session beats making the
+// user stop and start the playlist to hear it.
+function _resetBackgroundMusic() {
+  // No early return on a missing player: setting a URL for the FIRST time
+  // mid-session is exactly when there isn't one yet, and _syncBackgroundMusic
+  // builds it when the current phase calls for music.
+  if (!_musicVideoId()) {
+    if (_musicPlayer) { try { _musicPlayer.pauseVideo() } catch (_) {} }
+    return
+  }
+  _ensureMusicPlayer()
+  _syncBackgroundMusic()
+}
+
+// Pausing the element ourselves — or swapping its `src` while it plays — makes
+// it fire 'pause', which the listener below would otherwise read as the user
+// pausing the whole session. Media events are queued rather than dispatched
+// synchronously, so a flag cleared on the next line would already be down.
+//
+// Armed only when the element is actually playing (a paused element fires
+// nothing, and arming then would swallow the user's NEXT real pause), consumed
+// by the first 'pause' that arrives, and expiring on its own if none does. All
+// three matter: a blanket time window swallows a genuine hand-pause that lands
+// inside it, which wedges the clip — the poll only reacts to CHANGES in the
+// session's pause state, so a pause it never learned about is never undone.
+let _recPaIgnorePauseUntil = 0
+const REC_PA_IGNORE_MS = 500
+function _recPaExpectPause(a) {
+  if (a && !a.paused) _recPaIgnorePauseUntil = Date.now() + REC_PA_IGNORE_MS
+}
+
+function _recPlayAudioEl() {
+  let $wrap = $('#recPlayingAudio')
+  if (!$wrap.length) {
+    $wrap = $(`<div id="recPlayingAudio">
+      <div class="rec-pa-face"></div>
+      <audio class="rec-pa-el" controls preload="auto"></audio>
+      <div class="rec-pa-faces"></div>
+    </div>`).appendTo('body')
+    const el = $wrap.find('.rec-pa-el')[0]
+    // Hand-driven play/pause on the controls has to become the session's
+    // pause state, or the playlist's poll would fight the user and the
+    // overlay's Pause button would show the wrong thing.
+    // controlYt:false — the element has already done the thing; we only need
+    // the session state and the overlay button to agree with it.
+    el.addEventListener('play',  () => {
+      // Whatever started it — the playlist, a face button, or the element's
+      // own Play — a recording is now sounding, and the music bed has to hear
+      // about it. Without this a replay started by hand during a gap gets the
+      // gap's louder music straight over the top of the pronunciation.
+      _setRecPlayPhase('clip')
+      if (window._playingRecording && window._recPlayPaused) _applyRecPlayPause(false, false)
+    })
+    el.addEventListener('pause', () => {
+      // 'pause' also fires when a clip ends, and whenever we pause or re-src
+      // the element ourselves — none of those is the user pausing.
+      if (Date.now() < _recPaIgnorePauseUntil) { _recPaIgnorePauseUntil = 0; return }
+      if (window._playingRecording && !window._recPlayPaused && !el.ended) _applyRecPlayPause(true, false)
+    })
+    // A hand-started replay ends inside a gap that is still running, so hand
+    // the phase back rather than leaving it on 'clip' for the rest of it.
+    el.addEventListener('ended', () => {
+      if (window._recPlayGapActive) _setRecPlayPhase('gap')
+    })
+  }
+  return $wrap.find('.rec-pa-el')[0]
+}
+
+// Point the shared element at a clip without the src assignment being mistaken
+// for a user pause.
+function _setManualAudioSrc(a, dataUrl) {
+  _recPaExpectPause(a)
+  a.src = dataUrl
+}
+
+// Show/hide the audio player, and with it the YouTube slot it replaces.
+//
+// While the player is up, `_recPlayManualAudio` points at the element for the
+// WHOLE item, not just while a clip is sounding. Pause, seek and the headset
+// all route through that pointer, and the recall gap between Source and Target
+// — plus the hold on the card's text afterwards — is exactly when the user
+// reaches for them. Leaving it null there sent those commands to the YouTube
+// player instead, which on a card carrying a reference link meant a resume
+// started a video nobody asked for.
+function _showManualAudioPlayer(show, faceLabel) {
+  $('body').toggleClass('rec-playing-manual', !!show)
+  if (!show) {
+    // Hiding an <audio> does not silence it. A face button pressed during the
+    // card's text hold is still sounding when the next item takes the slot,
+    // and nulling the pointer below would leave nothing able to stop it.
+    const prev = window._recPlayManualAudio
+    if (prev) { _recPaExpectPause(prev); try { prev.pause() } catch (_) {} }
+    $('#recPlayingAudio').hide()
+    window._recPlayManualAudio = null
+    return
+  }
+  const el = _recPlayAudioEl()
+  window._recPlayManualAudio = el
+  const $w = $('#recPlayingAudio').show()
+  $w.find('.rec-pa-face').text(faceLabel || '')
+  _renderManualFaceButtons($w, window._recPlayCurrentItem)
+  return el
+}
+
+// Buttons to replay one face on demand. The playlist plays Source, then
+// Target, then holds on the card's text; during that hold these are the only
+// way to hear a face again without restarting the whole card.
+function _renderManualFaceButtons($wrap, it) {
+  const $row = $wrap.find('.rec-pa-faces').empty()
+  const faces = [
+    { url: _cardSourceAudio(it), label: 'Source', icon: 'ᔆ' },
+    { url: _cardTargetAudio(it), label: 'Target', icon: 'ᵀ' },
+  ].filter(f => f.url)
+  if (!faces.length) { $row.hide(); return }
+  $row.show()
+  faces.forEach(f => {
+    $('<button type="button" class="rec-pa-face-btn"></button>')
+      .attr('title', `Play the ${f.label} recording`)
+      .text(`${f.icon} ${f.label}`)
+      .on('click', ev => { ev.preventDefault(); _playManualFace(f.url, f.label) })
+      .appendTo($row)
+  })
+}
+
+// Play one face on demand, through the same element the playlist uses so that
+// pause, seek and the headset keep addressing whatever is actually sounding.
+//
+// The playlist's own wait is listening for 'ended' on this element, so a replay
+// started here ends that clip's wait when it finishes and the card moves on to
+// its gap. Pressing the face that is already sounding therefore just restarts
+// it, which is the point. Pressing the OTHER face mid-clip stands in for the
+// one that was playing, so the card's own turn for it still comes round after
+// the recall gap and it sounds a second time — a fair reading of "play this
+// now", and the alternative (rewriting the card's remaining sequence from a
+// button press) would be a good deal more surprising.
+async function _playManualFace(url, label) {
+  let dataUrl = null
+  try { dataUrl = await loadManualAudioData(url) } catch (_) {}
+  // Loading goes through the host bridge, so the session can end while we
+  // wait. Without this check _recPlayAudioEl would rebuild the panel that
+  // stopPlayingRecording had just removed and play into a finished session,
+  // where nothing is left that could pause it.
+  if (!dataUrl || !window._playingRecording) return
+  // Share the single preview slot, so a badge preview and a face replay can't
+  // sound over each other.
+  _stopManualAudioPreview()
+  const a = _recPlayAudioEl()
+  $('#recPlayingAudio').find('.rec-pa-face').text(label)
+  _setManualAudioSrc(a, dataUrl)
+  window._recPlayManualAudio = a
+  // Pressing a face button is the user asking for sound. If the session was
+  // paused, lift the pause rather than start a clip the session thinks is
+  // stopped — controlYt:false because we do the playing ourselves, right here.
+  if (window._playingRecording && window._recPlayPaused) _applyRecPlayPause(false, false)
+  try { await a.play() } catch (e) { console.warn('[manualAudio] face replay failed', e) }
+}
+
+async function _playManualAudioAndWait(url, faceLabel) {
   let dataUrl = null
   try { dataUrl = await loadManualAudioData(url) } catch (_) {}
   if (!dataUrl || !window._playingRecording) return
   // Share the single preview slot so a badge preview and playlist audio never
   // overlap, and so stopPlayingRecording / navigation can silence it.
   _stopManualAudioPreview()
-  const a = new Audio(dataUrl)
-  window._recPlayManualAudio = a
+  const a = _showManualAudioPlayer(true, faceLabel)
+  _setManualAudioSrc(a, dataUrl)
+  // A recording is about to sound: 'item' mode plays under it, 'gap' mode
+  // stands aside for it.
+  _setRecPlayPhase('clip')
   if (!window._recPlayPaused) { try { await a.play() } catch (e) { console.warn('[manualAudio] playlist play failed', e) } }
   await new Promise(resolve => {
     let done = false
@@ -13275,6 +15012,16 @@ async function _playManualAudioAndWait(url) {
       if (done) return
       done = true
       clearInterval(id)
+      // The element is shared across every clip now, so these have to come
+      // off — otherwise clip N carries N-1 stale finishers that resolve the
+      // wrong promise the moment it ends.
+      a.removeEventListener('ended', finish)
+      a.removeEventListener('error', finish)
+      // A prev/next while the clip is still sounding lands here with the
+      // element PLAYING. Without this the pause below comes back through the
+      // listener as "the user paused", and the item we navigate to starts
+      // paused — the headset's own next key would stop the playlist dead.
+      _recPaExpectPause(a)
       try { a.pause() } catch (_) {}
       resolve()
     }
@@ -13284,14 +15031,17 @@ async function _playManualAudioAndWait(url) {
       const nowPaused = !!window._recPlayPaused
       if (nowPaused !== appliedPaused) {
         appliedPaused = nowPaused
-        if (nowPaused) { try { a.pause() } catch (_) {} }
+        // Mirroring a pause the session already decided on — don't let it
+        // bounce back through the listener as a fresh user pause.
+        if (nowPaused) { _recPaExpectPause(a); try { a.pause() } catch (_) {} }
         else { a.play().catch(() => {}) }
       }
     }, 150)
     a.addEventListener('ended', finish)
     a.addEventListener('error', finish)
   })
-  if (window._recPlayManualAudio === a) window._recPlayManualAudio = null
+  // _recPlayManualAudio deliberately stays pointed at the element — see
+  // _showManualAudioPlayer. It is cleared when the player is hidden.
 }
 
 async function playRecording(opts) {
@@ -13329,11 +15079,11 @@ async function playRecording(opts) {
 
   // Read the gap LIVE on each sleep so the inline gap-control in the
   // playback overlay can change the wait between items mid-playback.
-  const currentGapMs = () => {
-    const raw = (window._appSettings && window._appSettings.recPlayGapSeconds)
-    const sec = parseInt(raw != null ? raw : $('#recPlayGapSeconds').val(), 10)
-    return Math.max(0, Number.isFinite(sec) ? sec : 30) * 1000
-  }
+  const currentGapMs = () => _interItemGapSeconds() * 1000
+  // Pause inside a manual card, between its Source and Target recordings.
+  // Also read live, and falls back to the inter-item gap when the user has
+  // not pinned an override.
+  const currentSrcTgtGapMs = () => _effectiveSrcTgtGapSeconds() * 1000
 
   // Enter play mode: close lingering dialogs, hide page chrome, surface the
   // floating Stop button. Stop button is created lazily so it doesn't
@@ -13471,6 +15221,14 @@ async function playRecording(opts) {
   $('body').addClass('rec-playing').removeClass('rec-paused rec-playing-minimized')
 
   window._playingRecording = true
+  // Claim the system media session up front, so the headset is routed here from
+  // the first item — including a manual card, which never touches ytPlaying.
+  _postMediaState(true)
+  // No phase yet; the first item sets one. Assigned rather than routed through
+  // _setRecPlayPhase, which skips the sync when the phase is unchanged — the
+  // previous session left this at 'idle', and 'nonstop' has to start again.
+  window._recPlayPhase = 'idle'
+  _syncBackgroundMusic()
   window._recNavRequest = null
   window._recNavGotoIndex = null
   window._recPlaySlowdown = false
@@ -13505,6 +15263,14 @@ async function playRecording(opts) {
     const it = queue[i]
     // Manual cards carry the card's front text in `source`, not a media source,
     // so exclude them here — they're handled by the _isManualItem branch below.
+    // Hand the YouTube slot back unless THIS item is going to sound through
+    // the audio player. Keyed on the item actually having audio, not merely on
+    // it being manual: a manual card carrying only a YouTube link still wants
+    // the video, and would otherwise inherit the hidden slot from whichever
+    // recorded card came before it.
+    if (!(_isManualItem(it) && (_cardHasAudio(it) || _isAudioMediaUrl(it.mediaUrl)))) {
+      _showManualAudioPlayer(false)
+    }
     if (!_isManualItem(it) && it.source && it.source.toLowerCase() !== 'youtube') {
       console.warn('playRecording: skipping non-YouTube item', it)
       i++
@@ -13514,7 +15280,7 @@ async function playRecording(opts) {
     // they belong to Practice, not the play queue. Move in the direction the
     // user last navigated (backward after a prev tap) so skipping feels natural,
     // and stop if the whole queue turns out to be text-only.
-    if (_isManualItem(it) && !it.mediaUrl) {
+    if (_isManualItem(it) && !_cardHasAudio(it) && !it.mediaUrl) {
       if (++textOnlySkips >= queue.length) { stopPlayingRecording(); break }
       const backward = !!window._recPlaySlowdown
       i = backward
@@ -13533,6 +15299,9 @@ async function playRecording(opts) {
     // Also expose the live item object so the YT onError handler knows which
     // video failed (and can label the delete prompt).
     window._recPlayCurrentItem = it
+    // Refresh the session with this item's title, and re-assert that we are
+    // playing — the previous item's end will have pushed "not playing".
+    _postMediaState(!window._recPlayPaused)
     // Manual entries: no clip to play. If the media is a YouTube link we
     // still cue it into the embedded player at t=0 (so the user can hit
     // play manually if they want) but never auto-play — the playlist's
@@ -13549,11 +15318,41 @@ async function playRecording(opts) {
           window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
           await changeMediaIfNeededTo(window.mediaSelected)
         } catch (e) { console.warn('playRecording: manual YT cue failed', it, e) }
-      } else if ((it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)) && it.mediaUrl) {
-        // Recorded-audio card: play the clip and wait for it to finish — the
-        // same role the video clip plays for YouTube items — then fall through
-        // to the inter-item gap hold below.
-        await _playManualAudioAndWait(it.mediaUrl)
+      }
+      // Recorded-audio card: play the Source recording, then the Target one,
+      // back to back — together they play the role the video clip plays for
+      // YouTube items — then fall through to the inter-item gap hold below.
+      // A YouTube link is only a reference now (cued above, never auto-played),
+      // so a card can carry both a link and its own pronunciations.
+      {
+        const clips = _cardAudioUrls(it)
+        // Legacy cards kept their single recording in mediaUrl.
+        if (!clips.length && (it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)) && it.mediaUrl) {
+          clips.push(it.mediaUrl)
+        }
+        const navPending = () => window._recNavRequest || Number.isInteger(window._recNavGotoIndex)
+        for (let ci = 0; ci < clips.length; ci++) {
+          // Recall pause before the Target clip. Uses the source→target
+          // override when the user has pinned one, otherwise the same gap
+          // that separates items. Pause / stop / prev / next all cut it
+          // short, exactly as they cut the inter-item gap short.
+          if (ci > 0) {
+            const stMs = currentSrcTgtGapMs()
+            if (stMs > 0) {
+              _startGapCountdown(stMs, s => `target in ${s}s`)
+              await _sleepRespectingPause(stMs)
+              _stopGapCountdown()
+            }
+            if (!window._playingRecording || navPending()) break
+          }
+          // Label the player so it's obvious which face is sounding, since
+          // both faces of one card play back to back with no visual break.
+          await _playManualAudioAndWait(clips[ci], clips.length > 1
+            ? (ci === 0 ? 'Source' : 'Target')
+            : '')
+          // Stop / prev / next during a clip must not start the next one.
+          if (!window._playingRecording || navPending()) break
+        }
         if (!window._playingRecording) break
       }
       // A playable manual card was reached — clear the backward-nav flag (the
@@ -13597,6 +15396,11 @@ async function playRecording(opts) {
       // Speak the word once before its first item plays. Re-runs whenever
       // the queue moves on to a new word — including when the user
       // navigates prev/next and the new item belongs to a different word.
+      //
+      // Counts as a clip: it is speech the user is meant to catch, so 'gap'
+      // mode steps aside for it exactly as it does for a recording, instead
+      // of treating the announcement as silence to fill.
+      _setRecPlayPhase('clip')
       await _speakWord(it.word)
       if (!window._playingRecording) break
       prevWord = it.word
@@ -13664,6 +15468,9 @@ async function playRecording(opts) {
     // Lift the gap-guard before playing — without this the guard would
     // immediately re-pause the player we just asked to start.
     window._recPlayGapGuard = false
+    // A captured clip carries its own audio, so the music steps aside for the
+    // whole of it and comes back on the gap that follows.
+    _setRecPlayPhase('video')
     const _src = (it.source || '').toLowerCase() === 'youtube' ? 'YouTube' : (it.source || 'YouTube')
     try {
       await playMediaSlice(it.id, _playStart, _playEnd, _src)
@@ -13756,13 +15563,28 @@ async function playRecording(opts) {
   } catch (_) {}
   window._recPlayQueue = null
   window._playingRecording = false
+  // A playlist that runs to its natural end has to let go of the same things
+  // an explicit Stop does. Leaving the media session claiming to play keeps
+  // Android routing the headset here, where every handler now no-ops on
+  // !_playingRecording — so the buttons go dead AND no other app can have
+  // them. And an <audio> element is not silenced by being removed from the
+  // DOM, so a face replay started during the last item would play on with
+  // nothing left holding a reference to stop it.
+  _postMediaState(false)
+  _stopBackgroundMusic()
+  try {
+    const _ma = window._recPlayManualAudio
+    if (_ma) { _ma.pause(); _ma.src = '' }
+  } catch (_) {}
+  window._recPlayManualAudio = null
   window._recPlaySlowdown = false
   window._recNavRequest = null
   window._recPlayCurrentItem = null
   window._recPlayMinimized = false
   window._recPlayGapGuard = false
   if (window._recPlayGapGuardId) { clearInterval(window._recPlayGapGuardId); window._recPlayGapGuardId = null }
-  $('body').removeClass('rec-playing rec-paused rec-playing-minimized')
+  $('body').removeClass('rec-playing rec-paused rec-playing-minimized rec-playing-manual')
+  $('#recPlayingAudio').remove()
   $('#recPlayingBanner').remove()
   $('#recPlayingSubs').remove()
   $('#recPlayingWord').remove()
@@ -13854,11 +15676,25 @@ function navigateRecordingPlayback(direction) {
 function _applyRecPlayPause(paused, controlYt = true) {
   window._recPlayPaused = !!paused
   const t = window._recTTS
+  // A manual card's YouTube link is only ever cued as a reference — never let
+  // pause/resume command that player. Read once: both branches need it.
+  const _manualItem = _isManualItem(window._recPlayCurrentItem)
   if (paused) {
     $('body').addClass('rec-paused')
     $('#recPlayingPauseBtn .rec-icon-pause').hide()
     $('#recPlayingPauseBtn .rec-icon-play').show()
-    if (controlYt) { try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {} }
+    // Drive whatever is actually sounding. On a manual card that's the <audio>
+    // element — and the YouTube player must be left alone there: a manual card
+    // may carry a link that was only ever CUED as a reference, so playVideo()
+    // on resume would start a video nobody asked for. Keyed on the item being
+    // manual rather than on the audio pointer being set, because that pointer
+    // is null on a manual card with no recordings, and null again in the
+    // window before the first clip's bytes have loaded.
+    if (controlYt) {
+      const _ma = window._recPlayManualAudio
+      if (_ma) { try { _ma.pause() } catch (_) {} }
+      else if (!_manualItem) { try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {} }
+    }
     try {
       if (t && t.kind === 'audio' && t.audio) t.audio.pause()
       else if (t && t.kind === 'speech') window.speechSynthesis && window.speechSynthesis.pause()
@@ -13867,18 +15703,77 @@ function _applyRecPlayPause(paused, controlYt = true) {
     $('body').removeClass('rec-paused')
     $('#recPlayingPauseBtn .rec-icon-pause').show()
     $('#recPlayingPauseBtn .rec-icon-play').hide()
-    if (controlYt) { try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {} }
+    if (controlYt) {
+      const _ma = window._recPlayManualAudio
+      // An ended clip means the card is in a gap — the pause being lifted was a
+      // pause of silence, so resuming must not replay what already sounded.
+      if (_ma) { if (!_ma.ended) { try { _ma.play().catch(() => {}) } catch (_) {} } }
+      else if (!_manualItem) { try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {} }
+    }
     try {
       if (t && t.kind === 'audio' && t.audio) t.audio.play().catch(() => {})
       else if (t && t.kind === 'speech') window.speechSynthesis && window.speechSynthesis.resume()
     } catch (_) {}
   }
   if (controlYt) window._recPlayPauseCmdAt = Date.now()
+  // Keep the system media session in step, whatever moved the pause state —
+  // the ⏸ button, the audio controls, or an external key. Without this the
+  // session goes quiet on manual cards and stops receiving the headset.
+  _postMediaState(window._playingRecording && !paused)
+  // The music answers to the session's pause state like everything else, so a
+  // headset pause silences the card AND the music behind it.
+  _syncBackgroundMusic()
 }
 
 function togglePlayingRecordingPause() {
   if (!window._playingRecording) return
   _applyRecPlayPause(!window._recPlayPaused, true)
+}
+
+// Seek the thing that is actually sounding, by `delta` seconds. A manual card
+// plays through the <audio> element; everything else through the YouTube
+// player. Returns true when a seek happened, so callers can fall back.
+//
+// For a video the seek is clamped to the clip's own window — a recorded item
+// is a slice of a long video, so rewinding past timeStart would drop the user
+// into unrelated footage rather than replaying what they just heard.
+// Returns true when it seeked, REC_SEEK_UNDERFLOW when the rewind would land
+// before the start of the current clip, and false when there is nothing
+// seekable. Underflow is not clamped: someone rewinding past the beginning
+// wants what came BEFORE this item, not its first second over again.
+const REC_SEEK_STEP_SEC = 15
+const REC_SEEK_UNDERFLOW = 'underflow'
+function _recPlaySeekRelative(delta) {
+  if (!window._playingRecording) return false
+  const a = window._recPlayManualAudio
+  if (a) {
+    const target = (a.currentTime || 0) + delta
+    // A recorded face is usually a second or two, so on a manual card this is
+    // the normal outcome, not an edge case: 15s of rewind has nowhere to go
+    // and "back" can only mean the item before. The seek below does real work
+    // only on a recording longer than the step.
+    if (target < 0) return REC_SEEK_UNDERFLOW
+    const dur = Number.isFinite(a.duration) ? a.duration : Infinity
+    try { a.currentTime = Math.min(dur, target) } catch (_) { return false }
+    // The clip may already have finished — rewinding into a long recording
+    // during the hold that follows it is a request to hear it again, not just
+    // to move a playhead nobody is listening to.
+    if (!window._recPlayPaused) { try { a.play().catch(() => {}) } catch (_) {} }
+    return true
+  }
+  const it = window._recPlayCurrentItem
+  try {
+    if (!window.ytPlayer || typeof window.ytPlayer.getCurrentTime !== 'function') return false
+    const cur = window.ytPlayer.getCurrentTime() || 0
+    // A recorded item is a slice of a longer video, so its own start is the
+    // floor — rewinding past it would drop the user into unrelated footage.
+    const lo  = (it && Number.isFinite(+it.timeStart)) ? +it.timeStart : 0
+    const hi  = (it && Number.isFinite(+it.timeEnd))   ? +it.timeEnd   : Infinity
+    const target = cur + delta
+    if (target < lo) return REC_SEEK_UNDERFLOW
+    window.ytPlayer.seekTo(Math.min(hi, target), true)
+    return true
+  } catch (_) { return false }
 }
 
 // Open a modeless dialog listing the queue in play order with the current
@@ -14016,12 +15911,15 @@ function _sleepRespectingPause(ms) {
 
 function stopPlayingRecording() {
   window._playingRecording = false
+  _postMediaState(false)
+  _stopBackgroundMusic()
   window._recPlayPaused = false
   window._recPlayMinimized = false
   window._recPlayGapGuard = false
   if (window._recPlayGapGuardId) { clearInterval(window._recPlayGapGuardId); window._recPlayGapGuardId = null }
   try { _stopGapCountdown() } catch (_) {}
-  $('body').removeClass('rec-playing rec-paused rec-playing-minimized')
+  $('body').removeClass('rec-playing rec-paused rec-playing-minimized rec-playing-manual')
+  $('#recPlayingAudio').remove()
   $('#recPlayingBanner').remove()
   $('#recPlayingSubs').remove()
   $('#recPlayingWord').remove()
@@ -14151,6 +16049,7 @@ function openPracticeMode(opts) {
         </div>
         <div class="practice-settings-row">
           <span class="practice-settings-lbl">Item</span>
+          <button type="button" class="practice-replace" aria-label="Replace this card with a different example" title="Replace with a different auto-captured example">🎲 Replace example</button>
           <button type="button" class="practice-delete" aria-label="Delete this item from the playlist" title="Delete this card from the playlist">🗑 Delete this card</button>
         </div>
       </div>
@@ -14192,6 +16091,7 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-search', _searchCurrentPracticeWord)
     $p.on('click', '.practice-restore-btn', restorePracticeMode)
     $p.on('click', '.practice-delete', _deleteCurrentPracticeCard)
+    $p.on('click', '.practice-replace', _replaceCurrentPracticeCard)
     $p.on('click', '.practice-info', _togglePracticeInfoPanel)
     $p.on('click', '.practice-shuffle', _togglePracticeShuffle)
     $p.on('click', '.practice-settings', _togglePracticeSettingsPanel)
@@ -14427,6 +16327,39 @@ window._onPracticeViewportChange = _onPracticeViewportChange
 // AudioBridge so it doesn't leak in the host app's storage. Playlist-side
 // SRT/index files are NOT touched — those are managed via the Manage
 // dialogs, not by card removal.
+// Replace the current (auto-captured) practice card with a different SRT
+// example of the same word — same picker as the review dialog. Applies to the
+// item's own playlist (it._recName) and refreshes the visible card in place.
+function _replaceCurrentPracticeCard() {
+  const it = (window._practiceCards || [])[window._practiceIdx]
+  if (!it) return
+  if (_isManualItem(it)) { alert('Manual cards have no subtitle source to swap.'); return }
+  const recName = it._recName || (window._recording && window._recording.currentName)
+  if (!recName || it._st == null || it._w == null) {
+    alert('Cannot locate this card in its playlist.'); return
+  }
+  // Resolve the CURRENT index by identity — `_idx` is a snapshot from when the
+  // queue was built and drifts as soon as another card is deleted, which would
+  // otherwise rewrite a different card in the same bucket (same fix as
+  // _removeQueueItem).
+  const _rec = window._recordings && window._recordings[recName]
+  const _arr = _rec && _rec.items && _rec.items[it._st] && _rec.items[it._st][it._w]
+  if (!Array.isArray(_arr)) { alert('Cannot locate this card in its playlist.'); return }
+  let _idx = _arr.findIndex(x => x && x.id === it.id && x.lineIndex === it.lineIndex)
+  if (_idx < 0 && typeof it._idx === 'number' && it._idx < _arr.length) _idx = it._idx
+  if (_idx < 0) { alert('Cannot locate this card in its playlist.'); return }
+  _openReplaceItemDialog(it._st, it._w, _idx, {
+    recName,
+    onReplaced: (c) => {
+      // Mirror the new clip fields onto the queue copy so the card re-renders
+      // to the new example without rebuilding the whole practice queue.
+      it.id = c.id; it.source = c.source
+      it.timeStart = c.timeStart; it.timeEnd = c.timeEnd; it.lineIndex = c.lineIndex
+      _renderPracticeCard()
+    }
+  })
+}
+
 function _deleteCurrentPracticeCard() {
   const cards = window._practiceCards
   const idx = window._practiceIdx
@@ -14442,12 +16375,16 @@ function _deleteCurrentPracticeCard() {
   // mutates the playlist, after which we couldn't tell whether the deleted
   // card had its own audio. Only act on file:// urls; YouTube / generic
   // links don't have a local-storage counterpart to clean up.
-  const audioUrl = (isManual && it.mediaUrl && _isAudioMediaUrl(it.mediaUrl)) ? it.mediaUrl : null
+  // Both per-face recordings (plus a legacy single one in mediaUrl).
+  const audioUrls = new Set()
+  if (isManual) {
+    _cardAudioUrls(it).forEach(u => audioUrls.add(u))
+    if (_isAudioMediaUrl(it.mediaUrl)) audioUrls.add(it.mediaUrl)
+  }
   const ok = _removeQueueItem(it)
   if (!ok) { alert('Could not delete — the item is no longer in the playlist (maybe already removed).'); return }
-  if (audioUrl) {
-    deleteManualAudio(audioUrl).catch(e => console.warn('deleteManualAudio failed for', audioUrl, e))
-  }
+  // Orphan-checked so a copy of this card in another playlist keeps its file.
+  _pruneOrphanAudio(audioUrls)
   // Drop from the in-memory queue too, then re-render. If we deleted the
   // last card, fall back one position so we don't render an empty slot.
   cards.splice(idx, 1)
@@ -14719,6 +16656,7 @@ async function _renderPracticeCard() {
   try { await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise].map(p => Promise.resolve(p).catch(() => {}))) } catch (_) {}
   if (window._practiceIdx !== idx) return  // user moved on while we waited
   // Video card path follows — first restore any controls the manual path hides.
+  $p.find('.practice-replace').show()
   $p.find('.practice-ctx-ctrl').show()
   $p.find('.practice-play, .practice-speed').show()
   $p.find('.practice-media-link').remove()
@@ -14786,6 +16724,8 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   // (video) card renders by the restore-block at the top of _renderPracticeCard.
   $p.find('.practice-ctx-ctrl').hide()
   $p.find('.practice-play, .practice-speed').hide()
+  // Manual cards have no SRT source to swap → no replace option.
+  $p.find('.practice-replace').hide()
 
   const frontText = frontIsSource ? (it.source || '') : (it.target || '')
   const backText  = frontIsSource ? (it.target || '') : (it.source || '')
@@ -14806,6 +16746,22 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   // else opens in a new tab. Appended to the practice-nav row so it sits
   // alongside prev/next where the hidden play-clip button used to be.
   $p.find('.practice-media-link').remove()
+  // Per-face pronunciation buttons — Source and Target can each carry one.
+  // Listed Target-first: each is inserted directly after .practice-play, so
+  // this leaves the rendered order Source, then Target.
+  ;[
+    { url: _cardTargetAudio(it), icon: '🎙ᵀ', title: 'Play the Target recording' },
+    { url: _cardSourceAudio(it), icon: '🎙ᔆ', title: 'Play the Source recording' },
+  ].forEach(face => {
+    if (!face.url) return
+    const $b = $(`<button type="button" class="practice-media-link" title="${face.title}" aria-label="${face.title}">${face.icon}</button>`)
+    $b.on('click', (ev) => {
+      ev.preventDefault(); ev.stopPropagation()
+      _startManualAudioPreview(face.url, $b)
+    })
+    $p.find('.practice-nav .practice-play').after($b)
+  })
+
   if (it.mediaUrl) {
     const isYT    = it.mediaKind === 'youtube' && it.mediaVideoId
     const isAudio = it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)
@@ -15134,13 +17090,45 @@ $(document).on('keydown', function (e) {
 // detail.key ∈ {'previous', 'next', 'play_pause'}. Wiring them through
 // the same navigation/pause path keeps the inline-script contract from
 // language.html honoured.
+// Android's MediaSession collapses headset clicks before we ever see them:
+// 1 click → play_pause, 2 → next, 3 → previous. There is no 4-click keycode,
+// so a genuine quadruple-tap can't be distinguished here — the counting would
+// have to happen natively, on raw KEYCODE_HEADSETHOOK events, and even then
+// only for headsets that send raw clicks rather than AVRCP commands.
+//
+// So 'previous' (the triple-tap) rewinds. It jumps to the previous item in two
+// cases instead: when the rewind would land before the start of what is
+// playing — near the beginning, "back" can only sensibly mean the item before
+// — and when a SECOND triple-tap lands within the window below, which is how
+// you leave an item from the middle of it. That first tap's rewind is already
+// applied by then, which costs nothing, since we're leaving the item anyway.
+const REC_PREV_DOUBLE_MS = 900
+let _recPrevKeyAt = 0
+// Whether the previous tap actually rewound. The double-tap means "cancel that
+// rewind and leave the item", so it only applies when there WAS a rewind — on
+// a short manual recording every tap jumps already, and pairing two of those
+// into a compound gesture would silently skip two cards.
+let _recPrevWasSeek = false
 window.addEventListener('cupitorMediaKey', function (ev) {
   if (!ev || !ev.detail) return
   switch (ev.detail.key) {
-    case 'previous':
+    case 'previous': {
       if (typeof ev.preventDefault === 'function') ev.preventDefault()
+      const now = Date.now()
+      const again = _recPrevWasSeek && (now - _recPrevKeyAt) < REC_PREV_DOUBLE_MS
+      _recPrevKeyAt = again ? 0 : now      // consume, so 3 taps isn't 2 jumps
+      if (again) { _recPrevWasSeek = false; navigateRecordingPlayback('prev'); break }
+      const seeked = _recPlaySeekRelative(-REC_SEEK_STEP_SEC) === true
+      _recPrevWasSeek = seeked
+      if (seeked) {
+        _cpBuildToast(`⏪ ${REC_SEEK_STEP_SEC}s`)
+        break
+      }
+      // Either the rewind would run off the front of this item, or there is
+      // nothing seekable at all (between items, say) — both mean "back".
       navigateRecordingPlayback('prev')
       break
+    }
     case 'next':
       if (typeof ev.preventDefault === 'function') ev.preventDefault()
       navigateRecordingPlayback('next')
@@ -15154,6 +17142,9 @@ window.addEventListener('cupitorMediaKey', function (ev) {
 
 $(function () {
   _loadRecording()
+  // Must follow _loadRecording — a capture that arrived before this page
+  // finished loading needs the real playlist collection to choose from.
+  _captionCaptureReady()
   // Restore dirty marker so a page refresh after a local edit still shows
   // the Sync* indicator until the user actually pushes.
   try { window._recordingsDirty = localStorage.getItem(REC_DIRTY_KEY) === '1' } catch (_) {}

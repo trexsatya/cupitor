@@ -1,6 +1,52 @@
 // public/music-chords.test.js
 import { matchingChords, guessChordsForMeasure, guessChords, guessChordAreas, chordDisplayName, chordOccurrenceNotes,
-  stackInfo, rankMatches, bestChords, bestChordsCompleting } from './music-chords.js';
+  stackInfo, rankMatches, bestChords, bestChordsCompleting, verticalStacks, stackChord, verticalChords } from './music-chords.js';
+
+// Notes printed vertically (sharing a beat) are the harmony the score states outright — those chords
+// must always be reported, never lost to a melodic guess or a display cap.
+describe('vertical (same-beat) chords', () => {
+  const DICT = { Cmaj: { notes: ['C', 'E', 'G'] }, Gmaj: { notes: ['G', 'B', 'D'] },
+    Cmaj7: { notes: ['C', 'E', 'G', 'B'] }, Em: { notes: ['E', 'G', 'B'] } };
+  const col = (names, left, baseMidi = 60) => names.map((name, i) => ({ name, left, midi: baseMidi + i * 4 }));
+
+  test('every beat that spells a chord is listed, in playing order', () => {
+    const notes = [...col(['C', 'E', 'G'], 0), ...col(['G', 'B', 'D'], 10, 55)];
+    expect(verticalChords(notes, DICT).map((c) => c.name)).toEqual(['Cmaj', 'Gmaj']);
+  });
+  test('the chord that explains the WHOLE column wins (C-E-G-B is Cmaj7, not Cmaj + a stray B)', () => {
+    expect(stackChord(col(['C', 'E', 'G', 'B'], 0), DICT).name).toBe('Cmaj7');
+  });
+  test('a repeated chord collapses to one entry; a real change keeps both', () => {
+    const repeated = [...col(['C', 'E', 'G'], 0), ...col(['C', 'E', 'G'], 10)];
+    expect(verticalChords(repeated, DICT).map((c) => c.name)).toEqual(['Cmaj']);
+    const changing = [...col(['C', 'E', 'G'], 0), ...col(['G', 'B', 'D'], 10, 55), ...col(['C', 'E', 'G'], 20)];
+    expect(verticalChords(changing, DICT).map((c) => c.name)).toEqual(['Cmaj', 'Gmaj', 'Cmaj']);
+  });
+  test('same beat, different x still counts as one chord (VexFlow offsets cluster noteheads)', () => {
+    // onsetBeats says these three sound together even though their drawn x differs.
+    const notes = [{ name: 'C', left: 0, midi: 60, onsetBeats: 4 }, { name: 'E', left: 7, midi: 64, onsetBeats: 4 },
+      { name: 'G', left: 3, midi: 67, onsetBeats: 4 }];
+    expect(verticalStacks(notes).length).toBe(1);
+    expect(verticalChords(notes, DICT).map((c) => c.name)).toEqual(['Cmaj']);
+  });
+  test('fewer than three pitch classes spells nothing (an octave or a bare fifth is not a chord)', () => {
+    expect(stackChord(col(['C', 'C'], 0), DICT)).toBe(null);
+    expect(verticalChords([...col(['C', 'G'], 0)], DICT)).toEqual([]);
+  });
+  test('printed chords survive the display limit; melodic guesses are what gets capped', () => {
+    const notes = [...col(['C', 'E', 'G'], 0), ...col(['G', 'B', 'D'], 10, 55)];
+    expect(bestChords(notes, DICT, { limit: 1 }).map((c) => c.name)).toEqual(['Cmaj', 'Gmaj']);
+    expect(bestChords(notes, DICT, { limit: 1, verticals: false }).length).toBe(1);
+  });
+});
+
+describe('power chord quality follows the key MODE, not just its tonic', () => {
+  test('Eb + Bb with no third is Eb major in C minor, and unnameable in C major', () => {
+    const notes = [{ name: 'Eb', left: 0, midi: 63 }, { name: 'Bb', left: 0, midi: 70 }];
+    expect(bestChords(notes, undefined, { key: 'Cm' })[0].name).toBe('Ebmaj');
+    expect(bestChords(notes, undefined, { key: 'C' })).toEqual([]);   // bIII is not diatonic in C major
+  });
+});
 
 describe('stackInfo (vertical-stack evidence)', () => {
   // notes sharing `left` sound together (a real chord stack); bass = lowest midi of the primary stack.

@@ -149,8 +149,11 @@ export const DURATION_TO_SYLLABLE = {
   'dotted-whole': 'bu-u-u-u-u-m'
 }
 
+// 'quarter' → 0.25 (whole-note units). An unknown/absent type is null, not a crash: durations are
+// optional in our encodings (note-text carries none), and callers weight by them.
 export function durationTypeToNumber(type) {
-  return number(Object.keys(DURATION_TO_NAME).find(it => DURATION_TO_NAME[it] === type))
+  const k = Object.keys(DURATION_TO_NAME).find(it => DURATION_TO_NAME[it] === type)
+  return k === undefined ? null : number(k)
 }
 
 export function durationType(numericForm) {

@@ -2,7 +2,7 @@ import {
   buildLibraryQuery,
   normalizeLibraryPayload,
   mergeLibraryHits,
-  groupHitsByBook,
+  groupSnippetsByMatch,
   renderLibraryResultsHtml,
 } from './library-search.js'
 
@@ -96,15 +96,34 @@ describe('renderLibraryResultsHtml', () => {
     snippets: [{ phrase: match, offset: 0, before: 'a ', match, after: ' b' }],
   })
 
-  test('groups chapters under their book and carries the openEpub data', () => {
+  test('one collapsible group per matched word, chapters listed inside', () => {
     const html = renderLibraryResultsHtml({
       query: 'hem',
-      hits: [hit('k1', 'Bok A', 0, 'hem'), hit('k1', 'Bok A', 3, 'hem'), hit('k2', 'Bok B', 1, 'hem')],
+      hits: [hit('k1', 'Bok A', 0, 'hem'), hit('k1', 'Bok A', 3, 'hemma'), hit('k2', 'Bok B', 1, 'hem')],
     })
-    expect(html.match(/lib-book-title/g)).toHaveLength(2)
+    // "hem" (2 chapters, 2 books) and "hemma" (1) — not one group per book
+    expect(html.match(/class="lib-group-title"/g)).toHaveLength(2)
     expect(html).toContain('data-book-key="k1" data-chapter-idx="3"')
-    expect(html).toContain('<mark>hem</mark>')
-    expect(html).toContain('across 2 books')
+    expect(html).toContain('3 snippets · 2 words · 3 chapters · 2 books')
+    // the chapter line names its book now that books aren't the grouping level
+    expect(html).toContain('Bok B')
+  })
+
+  test('the same word from several books lands in one group', () => {
+    const html = renderLibraryResultsHtml({
+      query: 'hem',
+      hits: [hit('k1', 'Bok A', 0, 'hem'), hit('k2', 'Bok B', 1, 'hem')],
+    })
+    expect(html.match(/class="lib-group-title"/g)).toHaveLength(1)
+    expect(html).toContain('2 in 2 books')
+  })
+
+  test('groups fold independently', () => {
+    const html = renderLibraryResultsHtml({
+      query: 'hem', hits: [hit('k', 'B', 0, 'hem'), hit('k', 'B', 1, 'hemma')],
+    })
+    expect(html.match(/class="lib-group-title" aria-expanded="true"/g)).toHaveLength(2)
+    expect(html.match(/lib-group-body/g)).toHaveLength(2)
   })
 
   test('each hit carries the phrase IT matched, not the whole query', () => {
@@ -164,14 +183,8 @@ describe('renderLibraryResultsHtml', () => {
     expect(shut).toContain('lib-collapsed')
     expect(shut).toContain('aria-expanded="false"')
     // header text survives collapsing — the user still sees the hit count
-    expect(shut).toContain('1 snippet in 1 chapter')
+    expect(shut).toContain('1 snippet · 1 word · 1 chapter')
     expect(shut).toContain('<mark>hem</mark>')
-  })
-
-  test('each book is independently collapsible', () => {
-    const html = renderLibraryResultsHtml({ query: 'q', hits: [hit('k1', 'A', 0, 'q'), hit('k2', 'B', 0, 'q')] })
-    expect(html.match(/class="lib-book-title" aria-expanded="true"/g)).toHaveLength(2)
-    expect(html.match(/lib-book-body/g)).toHaveLength(2)
   })
 
   test('reports the 200-hit cap and the empty case', () => {
@@ -190,13 +203,27 @@ describe('renderLibraryResultsHtml', () => {
   })
 })
 
-describe('groupHitsByBook', () => {
-  test('falls back to the title when book_key is missing', () => {
-    const groups = groupHitsByBook([
-      { bookKey: '', bookTitle: 'X', chapterIdx: 0, snippets: [] },
-      { bookKey: '', bookTitle: 'X', chapterIdx: 1, snippets: [] },
+describe('groupSnippetsByMatch', () => {
+  const snip = m => ({ phrase: 'hem', offset: 0, before: '', match: m, after: '' })
+
+  test('folds casing together and keeps the host order (exact word first)', () => {
+    const groups = groupSnippetsByMatch([
+      { bookKey: 'k', bookTitle: 'B', chapterIdx: 0, chapterTitle: 'C',
+        snippets: [snip('hem'), snip('Hem'), snip('hemma')] },
+    ])
+    expect(groups.map(g => g.key)).toEqual(['hem', 'hemma'])
+    expect(groups[0].snippetCount).toBe(2)
+    // one chapter entry per (book, chapter) inside a group, not one per snippet
+    expect(groups[0].chapters).toHaveLength(1)
+  })
+
+  test('counts distinct books, falling back to the title when book_key is missing', () => {
+    const groups = groupSnippetsByMatch([
+      { bookKey: '', bookTitle: 'X', chapterIdx: 0, chapterTitle: 'C', snippets: [snip('hem')] },
+      { bookKey: '', bookTitle: 'X', chapterIdx: 1, chapterTitle: 'C', snippets: [snip('hem')] },
     ])
     expect(groups).toHaveLength(1)
+    expect(groups[0].books.size).toBe(1)
     expect(groups[0].chapters).toHaveLength(2)
   })
 })

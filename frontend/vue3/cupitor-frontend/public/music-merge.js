@@ -150,10 +150,12 @@ export function mergeParts(xml, partIds, opts = {}) {
   const beats = timeEl ? intOf(timeEl.querySelector('beats'), 4) : 4;
   const beatType = timeEl ? intOf(timeEl.querySelector('beat-type'), 4) : 4;
 
-  // Clef: guitar convention (treble) when fitting to a range; otherwise from the merged range median.
-  let clefSign, clefLine;
+  // Clef: guitar convention when fitting to a range — a treble clef sounding an octave down (treble-8),
+  // so the guitar's E2–E5 sounding range sits ON the staff instead of hanging below a plain treble clef
+  // (bottom line E4). Otherwise pick treble/bass from the merged range median, no octave shift.
+  let clefSign, clefLine, clefOctave = 0;
   if (fit) {
-    [clefSign, clefLine] = ['G', 2];
+    [clefSign, clefLine, clefOctave] = ['G', 2, -1];
   } else {
     const midis = perPartMidis.flat().sort((a, b) => a - b);
     const median = midis.length ? midis[Math.floor(midis.length / 2)] : 71;
@@ -183,7 +185,9 @@ export function mergeParts(xml, partIds, opts = {}) {
     const cl = doc.createElement('clef');
     const sg = doc.createElement('sign'); sg.textContent = clefSign;
     const ln = doc.createElement('line'); ln.textContent = String(clefLine);
-    cl.appendChild(sg); cl.appendChild(ln); a.appendChild(cl);
+    cl.appendChild(sg); cl.appendChild(ln);
+    if (clefOctave) { const oc = doc.createElement('clef-octave-change'); oc.textContent = String(clefOctave); cl.appendChild(oc); }
+    a.appendChild(cl);
     return a;
   }
 
@@ -256,5 +260,149 @@ export function mergeParts(xml, partIds, opts = {}) {
     }
   }
 
+  return new XMLSerializer().serializeToString(doc);
+}
+
+// ── explodeStaves ──────────────────────────────────────────────────────────────────────────────
+// A solo-piano piece is ONE <part> spread across two staves (right hand / left hand), so the Combine
+// picker — which merges separate <part>s — has nothing to grab. explodeStaves rewrites every multi-staff
+// part into one single-staff <part> per staff, so the piece then looks like a multi-part score and can be
+// combined (and guitar-fitted) with the existing mergeParts. A piece with no multi-staff part is returned
+// unchanged. Pure DOM in / string out, like the rest of this module.
+
+// The staff numbers a part actually uses: the declared <staves> count, unioned with any <staff> on a note.
+function staffNumbersOf(partEl) {
+  const set = new Set();
+  partEl.querySelectorAll('note > staff').forEach((s) => { const n = parseInt(s.textContent, 10); if (n > 0) set.add(n); });
+  const stavesEl = partEl.querySelector('attributes > staves') || partEl.querySelector('staves');
+  const declared = stavesEl ? (parseInt(stavesEl.textContent, 10) || 0) : 0;
+  for (let k = 1; k <= declared; k++) set.add(k);
+  return [...set].sort((a, b) => a - b);
+}
+
+const staffLabels = (base, count) => (count === 2
+  ? [`${base} — Right hand`, `${base} — Left hand`]
+  : Array.from({ length: count }, (_, i) => `${base} — staff ${i + 1}`));
+
+const durElem = (doc, tag, d) => {
+  const e = doc.createElement(tag); const dd = doc.createElement('duration'); dd.textContent = String(d); e.appendChild(dd); return e;
+};
+
+// One staff's <attributes>: single-staff (drop <staves>), keeping only this staff's clef and stripping any
+// per-staff `number` attribute from key/time/clef.
+function staffAttributes(doc, attrEl, k) {
+  const na = doc.createElement('attributes');
+  [...attrEl.children].forEach((c) => {
+    if (c.tagName === 'staves') return;
+    if (c.tagName === 'clef') {
+      const num = c.getAttribute('number');
+      if (num != null && parseInt(num, 10) !== k) return;      // keep only this staff's clef
+    }
+    const cc = c.cloneNode(true);
+    if (cc.getAttribute && cc.getAttribute('number') != null) cc.removeAttribute('number');
+    na.appendChild(cc);
+  });
+  return na;
+}
+
+// Rebuild one staff's version of a measure: its attributes (filtered), the score-wide extras (only for the
+// first staff, so repeats/directions survive without duplicating), then this staff's notes placed at their
+// simulated onsets — resolving the cross-staff <backup>/<forward> into plain gaps.
+const STAFF_EXTRAS = new Set(['direction', 'harmony', 'barline', 'print', 'sound', 'grouping']);
+function rebuildStaffMeasure(doc, meas, k, isFirstStaff, out, defaultStaff) {
+  const attrEl = childrenTagged(meas, 'attributes')[0];
+  if (attrEl) out.appendChild(staffAttributes(doc, attrEl, k));
+  if (isFirstStaff) [...meas.children].forEach((c) => { if (STAFF_EXTRAS.has(c.tagName)) out.appendChild(c.cloneNode(true)); });
+
+  // Simulate the measure timeline to give every note an onset, then collect the ones on staff k.
+  let pos = 0, lastStart = 0;
+  const items = [];
+  const staffOf = (n) => { const s = n.querySelector('staff'); return s ? (parseInt(s.textContent, 10) || defaultStaff) : defaultStaff; };
+  [...meas.children].forEach((c) => {
+    if (c.tagName === 'note') {
+      const isChord = !!c.querySelector('chord');
+      const isGrace = !!c.querySelector('grace');
+      const dur = isGrace ? 0 : intOf(c.querySelector('duration'));
+      const onset = isChord ? lastStart : pos;
+      if (staffOf(c) === k) items.push({ onset, isChord, dur, node: c });
+      if (!isChord && !isGrace) { lastStart = onset; pos += dur; }
+    } else if (c.tagName === 'backup') { pos -= intOf(c.querySelector('duration')); }
+    else if (c.tagName === 'forward') { pos += intOf(c.querySelector('duration')); }
+  });
+
+  let cur = 0;
+  items.forEach(({ onset, isChord, dur, node }) => {
+    const clone = node.cloneNode(true);
+    const st = clone.querySelector('staff'); if (st) st.remove();               // single staff now
+    if (!isChord) {
+      const gap = onset - cur;
+      if (gap > 0) out.appendChild(durElem(doc, 'forward', gap));
+      else if (gap < 0) out.appendChild(durElem(doc, 'backup', -gap));
+      cur = onset + dur;
+    }
+    out.appendChild(clone);                                                     // chord notes ride the principal's onset
+  });
+}
+
+export function explodeStaves(xml) {
+  if (!xml || typeof xml !== 'string') return xml;
+  const doc = parseXml(xml);
+  if (!doc) return xml;
+
+  const partList = doc.querySelector('part-list');
+  const scorePartById = {};
+  if (partList) partList.querySelectorAll('score-part').forEach((sp) => { scorePartById[sp.getAttribute('id')] = sp; });
+
+  let changed = false;
+  [...doc.querySelectorAll('part')].forEach((partEl) => {
+    const id = partEl.getAttribute('id');
+    const staffNums = staffNumbersOf(partEl);
+    if (staffNums.length < 2) return;                                           // already single-staff
+    changed = true;
+    const defaultStaff = staffNums[0];
+    const measures = childrenTagged(partEl, 'measure');
+
+    const newParts = staffNums.map((k) => {
+      const np = doc.createElement('part'); np.setAttribute('id', `${id}_s${k}`); return np;
+    });
+    measures.forEach((meas) => {
+      staffNums.forEach((k, ki) => {
+        const pm = doc.createElement('measure');
+        const numAttr = meas.getAttribute('number'); if (numAttr != null) pm.setAttribute('number', numAttr);
+        rebuildStaffMeasure(doc, meas, k, ki === 0, pm, defaultStaff);
+        newParts[ki].appendChild(pm);
+      });
+    });
+    newParts.forEach((np) => partEl.parentNode.insertBefore(np, partEl));
+    partEl.remove();
+
+    const sp = scorePartById[id];
+    if (sp && partList) {
+      const nmEl = sp.querySelector('part-name');
+      const base = (nmEl && nmEl.textContent.trim()) || id;
+      const labels = staffLabels(base, staffNums.length);
+      staffNums.forEach((k, ki) => {
+        const nsp = doc.createElement('score-part'); nsp.setAttribute('id', `${id}_s${k}`);
+        const nm = doc.createElement('part-name'); nm.textContent = labels[ki]; nsp.appendChild(nm);
+        partList.insertBefore(nsp, sp);
+      });
+      sp.remove();
+    }
+  });
+
+  return changed ? new XMLSerializer().serializeToString(doc) : xml;
+}
+
+// ── shiftOctaves ───────────────────────────────────────────────────────────────────────────────
+// Move EVERY note by `octaves` whole octaves (may be negative). Used by the combined view's octave nudge:
+// a two-hand piano piece folded onto one guitar staff sits low (its bass is the guitar's low register,
+// notated on ledger lines below the treble staff), and transposing down drops it further. Where the whole
+// arrangement should sit is a readability-vs-playability judgement, so the user places it by whole octaves.
+// Octave-only, so pitch classes / spelling / key signature are untouched.
+export function shiftOctaves(xml, octaves) {
+  if (!xml || typeof xml !== 'string' || !octaves) return xml;
+  const doc = parseXml(xml);
+  if (!doc) return xml;
+  doc.querySelectorAll('note > pitch > octave').forEach((o) => { o.textContent = String((parseInt(o.textContent, 10) || 0) + octaves); });
   return new XMLSerializer().serializeToString(doc);
 }

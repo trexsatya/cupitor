@@ -186,3 +186,57 @@ describe('groupVocabByCategory', () => {
     expect(groupVocabByCategory(null)).toEqual([]);
   });
 });
+
+import { vocabItemStatus, revertVocabEntry, vocabMatchesRemote, loadRemoteVocab } from './music-vocab.js';
+
+// Reverting local edits: the library is shared through GitHub, so a local item may be new, changed,
+// or identical to the published vocab.json — and reverting means taking the published copy back.
+describe('reverting a vocab item', () => {
+  const remote = [{ id: 'a', note: 'server' }, { id: 'b', note: 'same' }];
+  const local = [{ id: 'a', note: 'mine' }, { id: 'b', note: 'same' }, { id: 'c', note: 'brand new' }];
+
+  test('each item knows whether it is new, changed, or already published', () => {
+    expect(vocabItemStatus(local[0], remote)).toBe('changed');
+    expect(vocabItemStatus(local[1], remote)).toBe('same');
+    expect(vocabItemStatus(local[2], remote)).toBe('new');
+    expect(vocabItemStatus(local[0], new Map(remote.map((e) => [e.id, e])))).toBe('changed');   // Map accepted
+  });
+
+  test('reverting a CHANGED item puts the server copy back, in place', () => {
+    const { vocab, action } = revertVocabEntry(local, remote, 'a');
+    expect(action).toBe('restored');
+    expect(vocab.map((e) => e.id)).toEqual(['a', 'b', 'c']);   // order held
+    expect(vocab[0]).toEqual({ id: 'a', note: 'server' });
+    expect(local[0].note).toBe('mine');                        // input untouched
+  });
+
+  test('reverting a NEW item removes it — there is nothing on the server to go back to', () => {
+    const { vocab, action } = revertVocabEntry(local, remote, 'c');
+    expect(action).toBe('removed');
+    expect(vocab.map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  test('an unknown id changes nothing', () => {
+    expect(revertVocabEntry(local, remote, 'zzz')).toEqual({ vocab: local, action: 'none' });
+  });
+
+  test('vocabMatchesRemote tells the UI when the last local edit is gone', () => {
+    expect(vocabMatchesRemote(local, remote)).toBe(false);
+    const step1 = revertVocabEntry(local, remote, 'a').vocab;
+    expect(vocabMatchesRemote(step1, remote)).toBe(false);          // 'c' is still local-only
+    const step2 = revertVocabEntry(step1, remote, 'c').vocab;
+    expect(vocabMatchesRemote(step2, remote)).toBe(true);           // back to the published set
+    expect(vocabMatchesRemote([], [])).toBe(true);
+  });
+});
+
+describe('loadRemoteVocab', () => {
+  test('returns the published list, and [] when it cannot be reached', async () => {
+    global.fetch = async () => ({ ok: true, json: async () => [{ id: 'r' }] });
+    expect(await loadRemoteVocab('western')).toEqual([{ id: 'r' }]);
+    global.fetch = async () => ({ ok: false });
+    expect(await loadRemoteVocab('western')).toEqual([]);
+    global.fetch = async () => { throw new Error('offline'); };
+    expect(await loadRemoteVocab('western')).toEqual([]);
+  });
+});

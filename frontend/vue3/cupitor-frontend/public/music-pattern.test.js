@@ -198,3 +198,105 @@ describe('findMatches — guards', () => {
     expect(findMatches(midis, durs, t, { mode: 'intervals' })).toEqual([]);
   });
 });
+
+// The melodic reduction collapses each onset to its top note so chords become one step. That must
+// never overrule the notes the user actually tagged: tagging a lower note under a held higher one
+// used to search for the HIGHER note's shape instead — a pattern nobody asked for.
+describe('findScopedMatches — the tagged notes are the template', () => {
+  const N = (midi, onset) => ({ midi, durBeats: 1, voice: 0, onset });
+  const stream = [
+    N(64, 0),   // 0  a higher note sharing the tagged onset
+    N(40, 0),   // 1  ← tagged (the lower one)
+    N(47, 1),   // 2  ← tagged
+    N(52, 2),   // 3  ← tagged      tagged shape = +7, +5
+    N(45, 3),   // 4  a recurrence of the TAGGED shape, transposed up a fourth
+    N(52, 4),   // 5
+    N(57, 5),   // 6
+  ];
+  const tagIdx = [1, 2, 3];
+
+  test('a tagged note is not replaced by the top note at its own onset', () => {
+    const r = findScopedMatches(stream, tagIdx, { mode: 'intervals' });
+    expect(r.originalIdx).toEqual([1, 2, 3]);
+  });
+
+  test('so the search finds the shape that was tagged', () => {
+    const r = findScopedMatches(stream, tagIdx, { mode: 'intervals' });
+    expect(r.matches).toEqual([[4, 5, 6]]);
+  });
+});
+
+// Two notes of a motif can sound together — in a piece that moves in parallel thirds, most motifs
+// spelled off the page do. The melody line the search runs on holds one note per onset, and keying it
+// by onset alone let the second tagged note overwrite the first: a four-note tag silently became a
+// two-note template, which then "matched" 17 places in a piece that holds the motif nowhere else.
+describe('findScopedMatches with simultaneous tagged notes', () => {
+  // A(57) G(55) together, then F#(54) E(52) together — 4,3,2,1 as it sits in m12 of the Marmotte.
+  const stacked = [
+    { midi: 57, durBeats: 0.5, voice: 0, onset: 0 },
+    { midi: 55, durBeats: 0.5, voice: 0, onset: 0 },
+    { midi: 54, durBeats: 0.5, voice: 0, onset: 0.5 },
+    { midi: 52, durBeats: 0.5, voice: 0, onset: 0.5 },
+    // a two-note descent of -3 elsewhere: what the collapsed template used to match
+    { midi: 69, durBeats: 0.5, voice: 0, onset: 4 },
+    { midi: 66, durBeats: 0.5, voice: 0, onset: 4.5 },
+  ];
+
+  test('every tagged note survives into the template', () => {
+    const r = findScopedMatches(stacked, [0, 1, 2, 3], { mode: 'intervals' });
+    expect(r.originalIdx).toEqual([0, 1, 2, 3]);
+  });
+
+  test('...so it does not match a shorter shape somewhere else', () => {
+    const r = findScopedMatches(stacked, [0, 1, 2, 3], { mode: 'intervals' });
+    expect(r.matches).toEqual([]);
+  });
+
+  // The half of this that the first fix missed: a motif whose notes sound together can only be found
+  // again if the searched line keeps BOTH notes everywhere. In m12 of the Marmotte the figure repeats
+  // three beats later, and its G sits under an A at the same instant — so a top-note-only line held
+  // the A alone and the shape could never line up. The user could see the repeat; the search could not.
+  test('a stacked motif is found where it repeats, stacked the same way', () => {
+    const twice = [
+      { midi: 57, durBeats: 0.5, voice: 0, onset: 0 },
+      { midi: 55, durBeats: 0.5, voice: 0, onset: 0 },
+      { midi: 54, durBeats: 0.5, voice: 0, onset: 0.5 },
+      { midi: 52, durBeats: 0.5, voice: 0, onset: 1 },
+      { midi: 55, durBeats: 0.5, voice: 0, onset: 1 },
+      { midi: 57, durBeats: 0.5, voice: 0, onset: 1.5 },   // the same figure again
+      { midi: 55, durBeats: 0.5, voice: 0, onset: 1.5 },
+      { midi: 54, durBeats: 0.5, voice: 0, onset: 2 },
+      { midi: 52, durBeats: 0.5, voice: 0, onset: 2.5 },
+    ];
+    const r = findScopedMatches(twice, [0, 1, 2, 3], { mode: 'intervals' });
+    expect(r.matches).toHaveLength(1);
+    expect(r.matches[0].map((i) => twice[i].midi)).toEqual([57, 55, 54, 52]);
+  });
+
+  test('the motif is still found where it really recurs', () => {
+    const withEcho = [...stacked,
+      { midi: 64, durBeats: 0.5, voice: 0, onset: 8 },     // the same shape, a fifth up, one note per onset
+      { midi: 62, durBeats: 0.5, voice: 0, onset: 8.5 },
+      { midi: 61, durBeats: 0.5, voice: 0, onset: 9 },
+      { midi: 59, durBeats: 0.5, voice: 0, onset: 9.5 }];
+    const r = findScopedMatches(withEcho, [0, 1, 2, 3], { mode: 'intervals' });
+    expect(r.matches).toEqual([[6, 7, 8, 9]]);
+  });
+
+  test('simultaneous tagged notes read in the order the score lays them out', () => {
+    const r = findScopedMatches(stacked, [0, 1, 2, 3], { mode: 'intervals' });
+    const midis = r.originalIdx.map((i) => stacked[i].midi);
+    expect(midis).toEqual([57, 55, 54, 52]);
+  });
+
+  test('a non-tagged note at a tagged onset does not join the template', () => {
+    const withNeighbour = [
+      { midi: 57, durBeats: 0.5, voice: 0, onset: 0 },
+      { midi: 60, durBeats: 0.5, voice: 0, onset: 0 },    // higher, untagged — the old top-note rule
+      { midi: 55, durBeats: 0.5, voice: 0, onset: 0.5 },
+      { midi: 54, durBeats: 0.5, voice: 0, onset: 1 },
+    ];
+    const r = findScopedMatches(withNeighbour, [0, 2, 3], { mode: 'intervals' });
+    expect(r.originalIdx).toEqual([0, 2, 3]);
+  });
+});

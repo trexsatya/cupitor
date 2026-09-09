@@ -80,7 +80,10 @@ export function createMusicStore({ indexedDB } = {}) {
       for (const { entry, detail } of items) {
         const _key = keyOf(system, entry.id);
         entries.put({ _key, system, id: entry.id, entry, synced: false });
-        details.put({ _key, system, id: entry.id, detail });
+        // Only write a detail we actually have. Editing just the ENTRY of a piece whose detail was
+        // never cached locally (tags, a practice note) used to store `detail: null`, and since the
+        // piece was now "unpushed" the next open read that null and refused to open the piece at all.
+        if (detail != null) details.put({ _key, system, id: entry.id, detail });
       }
       await txDone(tx);
     },
@@ -95,6 +98,14 @@ export function createMusicStore({ indexedDB } = {}) {
       const tx = db.transaction('details', 'readonly');
       const row = await reqDone(tx.objectStore('details').get(keyOf(system, id)));
       return row ? row.detail : null;
+    },
+
+    // Every cached detail for a system, as [{ id, detail }]. For edits that have to sweep the whole
+    // library (renaming a motif everywhere): a piece that carries motifs was written here when they
+    // were made, so the cache is where "everywhere" can be applied without refetching 188 details.
+    async getAllDetails(system) {
+      const rows = await getAllBySystem('details', system);
+      return rows.map(r => ({ id: r.id, detail: r.detail })).filter(r => r.detail);
     },
 
     // Remove a piece entirely from the local cache (entry + detail). Deleting a missing

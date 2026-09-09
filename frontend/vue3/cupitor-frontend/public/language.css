@@ -607,6 +607,79 @@
     font-size: 0.88em;
 }
 
+/* Background-music panel — reached from Settings and from the playlist
+   dialog, so the controls live in one place instead of two. */
+#musicPanelDialog .mp-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+#musicPanelDialog .mp-lbl {
+    flex: 0 0 auto;
+    min-width: 88px;
+    font-size: 12px;
+    color: #555;
+}
+#musicPanelDialog .mp-grow {
+    flex: 1 1 auto;
+    min-width: 0;          /* let the select shrink instead of pushing 🗑 out */
+}
+#musicPanelDialog .mp-add input {
+    min-width: 0;
+}
+#musicPanelDialog .mp-warn {
+    font-size: 12px;
+    color: #a3352f;
+    margin: -4px 0 8px;
+}
+#musicPanelDialog .mp-hint {
+    font-size: 11px;
+    color: #888;
+    margin: -4px 0 10px;
+}
+#musicPanelDialog .mp-modes {
+    flex-wrap: wrap;
+}
+#musicPanelDialog .mp-radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+}
+#musicPanelDialog .mp-slider {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+#musicPanelDialog .mp-vol-val {
+    flex: 0 0 auto;
+    min-width: 38px;
+    text-align: right;
+    font-size: 12px;
+    color: #555;
+}
+/* Phone: the label + slider + readout don't fit one line beside a 88px
+   label, and the add row has two text inputs competing for the same space. */
+@media (max-width: 640px) {
+    #musicPanelDialog .mp-add {
+        flex-wrap: wrap;
+    }
+    #musicPanelDialog .mp-add input {
+        flex: 1 1 100%;
+    }
+    #musicPanelDialog .mp-lbl {
+        min-width: 72px;
+    }
+}
+
+/* Opens a dialog rather than holding a value, so it sits with the labels but
+   reads as an action. */
+.lang-panel-btn {
+    font-size: 0.88em;
+    padding: 2px 8px;
+    white-space: nowrap;
+}
+
 .lang-panel-label {
     display: inline-flex;
     align-items: center;
@@ -1577,13 +1650,33 @@ body.rec-paused .lines-cntnr .buttons .capture-btn { opacity: 0.4; pointer-event
     border-radius: 3px;
     margin: 2px 0;
 }
+/* Reorder handle. It is a <button>, not a span, because tapping it is the only
+   way to reorder on a phone — jQuery UI sortable binds no touch events, so the
+   drag half is desktop-only. Button defaults are stripped so it still reads as
+   a handle rather than a control. */
 #recordingReviewDialog .rec-item .rec-drag {
     color: #bbb;
     user-select: none;
     cursor: grab;
     font-size: 12px;
+    background: none;
+    border: none;
+    padding: 0 2px;
+    margin: 0;
+    line-height: 1;
+    font-family: inherit;
 }
 #recordingReviewDialog .rec-item .rec-drag:hover { color: #555; }
+/* Touch: no dragging available, so make it an obvious tap target of its own. */
+@media (pointer: coarse) {
+    #recordingReviewDialog .rec-item .rec-drag {
+        cursor: pointer;
+        color: #888;
+        font-size: 15px;
+        padding: 6px 8px;
+        margin: -6px 0;
+    }
+}
 #recordingReviewDialog .rec-item.ui-sortable-helper {
     background: #fffde7;
     box-shadow: 0 2px 6px rgba(0,0,0,0.15);
@@ -1883,6 +1976,69 @@ body.practice-mode #mediaRelatedContainer {
    The natural layout collapses (its parent .fl-left has float:left and
    most of its other children are display:none in play mode), which made
    the iframe render at zero height. Fixed positioning sidesteps that. */
+/* A manual card has no video. Hide the YouTube slot entirely and let
+   #recPlayingAudio take that space, rather than leaving a black 16:9 box
+   above a card that is only ever going to make sound. Overrides the
+   display:block !important below, so it has to be at least as specific. */
+body.rec-playing.rec-playing-manual #mediaContainer {
+    display: none !important;
+}
+/* Audio player for a manual card's recordings — same fixed slot the video
+   would have used. Real <audio controls> so the recording can be scrubbed and
+   replayed by hand, not just driven by the playlist's timing. */
+#recPlayingAudio {
+    position: fixed;
+    top: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(100vw, 900px);
+    box-sizing: border-box;
+    padding: 10px 12px;
+    background: #111;
+    color: #eee;
+    z-index: 100001;
+    display: none;
+}
+/* Requires .rec-playing, which minimizing removes — otherwise this fixed,
+   900px-wide black panel stays parked over the page the user just minimized
+   the player to get back to (the 🔍 "search this word" button minimizes too). */
+body.rec-playing.rec-playing-manual #recPlayingAudio { display: block; }
+#recPlayingAudio .rec-pa-face {
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.7;
+    min-height: 14px;
+    margin-bottom: 6px;
+}
+#recPlayingAudio .rec-pa-el {
+    width: 100%;
+    display: block;
+}
+/* Replay one face on demand. The card plays Source then Target and then holds
+   on its text; during that hold these are the only way to hear a face again. */
+#recPlayingAudio .rec-pa-faces {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+#recPlayingAudio .rec-pa-face-btn {
+    flex: 1 1 0;
+    /* Comfortably tappable with a thumb — this is used mid-listen, one-handed,
+       and often without looking. */
+    min-height: 40px;
+    padding: 8px 10px;
+    font-size: 14px;
+    color: #eee;
+    background: #262626;
+    border: 1px solid #444;
+    border-radius: 6px;
+    cursor: pointer;
+}
+#recPlayingAudio .rec-pa-face-btn:active {
+    background: #383838;
+}
+
 body.rec-playing #mediaContainer,
 body.practice-mode #mediaContainer {
     display: block !important;
@@ -2336,6 +2492,23 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 .notif-bell-meta { display: block; font-size: 11px; color: #8c959f; margin-top: 2px; }
 .notif-bell-missed { color: #bc4c00; font-weight: 600; }
 
+/* Replace-item picker — a radio list of alternative auto-captured examples. */
+.repl-hd { font-size: 13px; color: #24292f; margin-bottom: 8px; }
+.repl-cand-list { max-height: 46vh; overflow-y: auto; }
+.repl-cand {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 6px;
+    border-bottom: 1px solid #f2f4f6;
+    cursor: pointer;
+}
+.repl-cand:hover { background: #f6f8fa; }
+.repl-cand input { margin-top: 3px; flex: 0 0 auto; }
+.repl-cand-body { display: flex; flex-direction: column; min-width: 0; }
+.repl-cand-text { font-size: 13px; color: #24292f; }
+.repl-cand-meta { font-size: 11px; color: #8c959f; margin-top: 2px; }
+
 /* Rare words category headers (when no category filter is active). */
 .rare-words-cat-hdr {
     font-size: 11px;
@@ -2607,6 +2780,11 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
    100002–100004 (banner, transport, corner buttons). Bump the queue dialog
    above all of them so it doesn't render behind the banner. */
 .ui-dialog:has(> #playingQueueDialog) { z-index: 100010 !important; }
+/* Same reason: the music panel opens from the player overlay too. Its modal
+   backdrop needs lifting as well — jQuery UI gives .ui-widget-overlay no
+   z-index of its own, so it would otherwise dim the page BEHIND the banner. */
+.ui-dialog:has(> #musicPanelDialog) { z-index: 100010 !important; }
+body.music-panel-open .ui-widget-overlay { z-index: 100009 !important; }
 
 /* Restore pill for the minimized rare-words dialog. Floats above the page
    in the bottom-right so it doesn't sit on top of the play-mode pill
@@ -3109,6 +3287,30 @@ body.rec-playing #recPlayingWord { display: block; }
 }
 #recPlayingBanner .rec-pb-info-btn:hover { background: rgba(255,255,255,0.22); }
 #recPlayingBanner .rec-pb-info-btn svg { display: block; }
+/* Same shape as ℹ, but deliberately NOT covered by the desktop rule that
+   hides ℹ: that one is a details toggle the wide layout makes redundant,
+   while this opens the music panel and is wanted at every width. */
+#recPlayingBanner .rec-pb-music-btn {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    background: rgba(255,255,255,0.12);
+    color: #f5f5f5;
+    border-radius: 50%;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    line-height: 1;
+}
+#recPlayingBanner .rec-pb-music-btn:hover { background: rgba(255,255,255,0.22); }
+/* Playing right now — so it's findable at a glance while a track is running. */
+body.music-on #recPlayingBanner .rec-pb-music-btn {
+    background: rgba(120, 190, 255, 0.32);
+}
 #recPlayingBanner .rec-pb-details { margin-top: 8px; }
 
 /* Inline gap stepper in the playback banner — pill-shaped, sits next to
@@ -3135,7 +3337,8 @@ body.rec-playing #recPlayingWord { display: block; }
     border-radius: 50%;
 }
 #recPlayingBanner .rec-pb-gap > button:hover { background: rgba(255,255,255,0.18); }
-#recPlayingBanner .rec-pb-gap-val {
+#recPlayingBanner .rec-pb-gap-val,
+#recPlayingBanner .rec-pb-sgap-val {
     min-width: 36px;
     text-align: center;
     font-family: monospace;
@@ -3144,6 +3347,70 @@ body.rec-playing #recPlayingWord { display: block; }
     padding: 2px 4px;
     user-select: none;
 }
+
+/* Source→Target pause stepper. Only shown while a card with both recordings
+   is playing, so it sits beside the item-gap pill and needs a little more
+   width for its "ᔆᵀ 30s" readout. Tinted so the two pills don't read as one
+   control. */
+#recPlayingBanner .rec-pb-sgap {
+    background: rgba(120, 190, 255, 0.18);
+}
+#recPlayingBanner .rec-pb-sgap-val { min-width: 52px; }
+
+/* Captured-captions dialog — where a block of caption lines sent from the
+   host's video sidebar lands. The preview is capped in height so a select-all
+   on a whole transcript can't push the playlist picker off screen. */
+#captionCaptureDialog .cap-cap-meta { margin-bottom: 8px; }
+#captionCaptureDialog .cap-cap-title {
+    font-weight: 600;
+    word-break: break-word;
+}
+#captionCaptureDialog .cap-cap-count { font-size: 12px; color: #666; margin-top: 2px; }
+#captionCaptureDialog .cap-cap-preview {
+    max-height: 30vh;
+    overflow-y: auto;
+    background: #f7f7f7;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-bottom: 10px;
+}
+#captionCaptureDialog .cap-cap-line {
+    font-size: 13px;
+    line-height: 1.45;
+    padding: 1px 0;
+    word-break: break-word;
+}
+#captionCaptureDialog .cap-cap-more { font-size: 12px; color: #888; padding-top: 4px; }
+#captionCaptureDialog .cap-cap-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+#captionCaptureDialog .cap-cap-row label { font-size: 13px; }
+#captionCaptureDialog .cap-cap-lbl { font-size: 13px; }
+#captionCaptureDialog .cap-cap-row + .cap-cap-row { margin-top: 8px; }
+#captionCaptureDialog .cap-cap-radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+#captionCaptureDialog .cap-cap-radio input { margin: 0; }
+#captionCaptureDialog .cap-cap-hint {
+    font-size: 12px;
+    color: #666;
+    margin: 4px 0 8px;
+}
+#captionCaptureDialog #capCapPlaylist { flex: 1 1 160px; min-width: 0; }
+
+/* Second copy of the item-gap stepper, inside the ℹ details block. It exists
+   only as the phone fallback for when the source→target pill has taken the
+   single slot in the top row, so it stays hidden by default and is switched
+   on by exactly the one rule that hides the top-row copy — that pairing is
+   what guarantees one and only one of the two is ever visible. */
+#recPlayingBanner .rec-pb-details-gap { margin-top: 8px; display: none; }
 
 /* Desktop layout — banner is wide enough to always show details, so the
    ℹ button is redundant. Count is also redundant (it's in the head). */
@@ -3171,6 +3438,17 @@ body.rec-playing #recPlayingWord { display: block; }
     }
     #recPlayingBanner .rec-pb-details { display: none; }
     #recPlayingBanner.rec-pb-expanded .rec-pb-details { display: block; }
+    /* Two stepper pills plus the ℹ button are wider than the banner gets on a
+       phone: the row would spill under the Minimize/Close buttons and squeeze
+       the progress area until its centred countdown text is clipped. While a
+       dual-recording card is playing, the source→target pause is the one that
+       is about to happen, so it takes the single slot in the top row and the
+       item gap moves into the ℹ details block. The two declarations belong
+       together — one hides the top-row copy, the other reveals the fallback.
+       The first selector must stay scoped to .rec-pb-top, or it matches the
+       fallback pill too and leaves no item-gap control at all. */
+    #recPlayingBanner.rec-pb-has-sgap .rec-pb-top .rec-pb-gap:not(.rec-pb-sgap) { display: none; }
+    #recPlayingBanner.rec-pb-has-sgap .rec-pb-details-gap { display: block; }
     #recPlayingWord {
         top: 40px;
         font-size: 20px;
@@ -3211,7 +3489,14 @@ body.rec-playing #recPlayingSubs { display: block; }
     background: rgba(255, 255, 255, 0.08);
     border-left-color: #4caf50;
 }
-#recPlayingSubs .rec-ps-main {}
+/* A manual card's text is stored with real newlines — a caption capture puts
+   one cue per line — so the overlay has to honour them instead of collapsing
+   the whole card onto one run-on line. */
+#recPlayingSubs .rec-ps-main,
+#recPlayingSubs .rec-ps-sec {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
 #recPlayingSubs .rec-ps-sec {
     font-size: 0.85em;
     font-style: italic;
@@ -3508,8 +3793,8 @@ body.rec-playing #recPlayingSubs { display: block; }
 .lib-streaming { color: #4dba87; }
 .lib-cancelled { color: #999; }
 .lib-empty { font-size: 0.85em; color: #777; padding: 2px 0; }
-.lib-book { margin-bottom: 6px; }
-.lib-book-title {
+.lib-group { margin-bottom: 6px; }
+.lib-group-title {
     display: block;
     width: 100%;
     text-align: left;
@@ -3521,9 +3806,11 @@ body.rec-playing #recPlayingSubs { display: block; }
     color: #24405c;
     cursor: pointer;
 }
-.lib-book-title:hover { text-decoration: underline; }
-.lib-book-count { font-weight: 400; color: #888; font-size: 0.85em; }
-.lib-book-collapsed .lib-book-body { display: none; }
+.lib-group-title:hover { text-decoration: underline; }
+.lib-group-title mark { background: #ffe680; padding: 0 2px; border-radius: 2px; }
+.lib-group-count { font-weight: 400; color: #888; font-size: 0.85em; }
+.lib-group-collapsed .lib-group-body { display: none; }
+.lib-chapter-book { color: #555; }
 .lib-chapter { margin: 3px 0 3px 8px; }
 .lib-open {
     background: transparent;
@@ -3552,3 +3839,33 @@ body.rec-playing #recPlayingSubs { display: block; }
 }
 .lib-snip:hover { background: #f0f4f8; }
 .lib-snip mark { background: #ffe680; padding: 0 1px; }
+
+/* Manual-card editor: per-face dictation button + recorder bar. Source and
+   Target each own an independent recording (played back to back in Play All). */
+#manualEntryEditor .mee-mic {
+    background: transparent;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    padding: 2px 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+#manualEntryEditor .mee-mic:hover { background: #f6f8fa; }
+/* Listening — pulses so it's obvious the mic is open. */
+#manualEntryEditor .mee-mic-live {
+    background: #ffe9e9;
+    border-color: #d1242f;
+    animation: mee-mic-pulse 1s ease-in-out infinite;
+}
+@keyframes mee-mic-pulse { 50% { opacity: 0.45; } }
+#manualEntryEditor .mee-audio-bar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+#manualEntryEditor .mee-audio-status { font-size: 12px; color: #666; margin-left: 4px; }

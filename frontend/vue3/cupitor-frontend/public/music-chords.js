@@ -5,6 +5,7 @@
 // are present — tracking exactly which notes formed it (so the UI can highlight them).
 // Pure + unit-tested; the DOM extraction that feeds it lives in the renderer glue.
 import { allChords } from './music-reference-data.js';
+import { parseKeyName } from './music-key.js';
 
 // Pure: chord key → label for display. A plain major triad drops its "maj" (Gmaj → G);
 // everything else is shown verbatim, so "maj7" stays "maj7" (Gmaj7), and dim/min/aug/7
@@ -66,6 +67,12 @@ const PITCH_CLASS = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, 'E#': 5,
   'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11, 'B#': 0, Cb: 11 };
 const pcOf = (name) => PITCH_CLASS[name];
 
+// The key that says "these notes sound together". `onsetBeats` (the musical beat, from the score
+// model) when the caller has it, else `left` (the x-position). Beat beats x: VexFlow nudges a
+// notehead sideways for seconds/clusters and for cross-staff stems, so two notes ON THE SAME BEAT can
+// have different x — grouping those by x split a printed chord into single notes and lost it.
+const onsetKeyOf = (n) => (n && n.onsetBeats != null ? n.onsetBeats : (n ? n.left : undefined));
+
 // Pure: vertical-stack evidence in a note stream. Notes that share an onset (`left`) sound together
 // — a real chord stack, much stronger harmonic evidence than notes that merely fall in a melodic
 // window. Returns the pitch-classes (numbers) appearing in ANY stack, plus the bass (lowest-midi)
@@ -73,7 +80,7 @@ const pcOf = (name) => PITCH_CLASS[name];
 // pure-unit-test inputs) → bassPC null, so ranking degrades to the original coverage order.
 export function stackInfo(notes) {
   const byOnset = new Map();
-  (notes || []).forEach((n) => { const k = n.left; if (!byOnset.has(k)) byOnset.set(k, []); byOnset.get(k).push(n); });
+  (notes || []).forEach((n) => { const k = onsetKeyOf(n); if (!byOnset.has(k)) byOnset.set(k, []); byOnset.get(k).push(n); });
   const stacks = [];
   byOnset.forEach((ns, onset) => { if (ns.length >= 2) stacks.push({ onset: Number(onset), ns }); });
   const stackPCs = new Set();
@@ -86,6 +93,59 @@ export function stackInfo(notes) {
     if (low) { bassPC = pcOf(low.name); bassName = low.name; }
   }
   return { hasStacks: stacks.length > 0, stackPCs, bassPC, bassName };
+}
+
+// Pure: the note stream's vertical stacks — the onset columns (notes sharing a beat, see onsetKeyOf)
+// that hold at least `minNotes` notes — in time order: [{ onset, x, notes }]. These are the chords
+// that are literally printed on the staff, one note above the other. `x` is the leftmost notehead of
+// the column, so a caller can anchor a label right where the chord sounds.
+export function verticalStacks(notes, { minNotes = 2 } = {}) {
+  const byOnset = new Map();
+  (notes || []).forEach((n) => { const k = onsetKeyOf(n); if (!byOnset.has(k)) byOnset.set(k, []); byOnset.get(k).push(n); });
+  return [...byOnset.keys()].sort((a, b) => a - b)
+    .map((onset) => {
+      const ns = byOnset.get(onset);
+      const xs = ns.map((n) => n.left).filter((x) => typeof x === 'number');
+      return { onset: Number(onset), x: xs.length ? Math.min(...xs) : Number(onset), notes: ns };
+    })
+    .filter((s) => s.notes.length >= minNotes);
+}
+
+// Pure: the chord a SINGLE onset column spells, or null when it spells none (fewer than 3 distinct
+// pitch classes, or no dictionary chord whose every tone is present). Among the chords that fit, the
+// best one (a) leaves the fewest of the column's own notes unexplained — so C-E-G-B is Cmaj7, not
+// Cmaj-with-a-stray-B — then (b) is rooted on the column's bass, then (c) is the simpler chord.
+export function stackChord(colNotes, dict = allChords) {
+  const pcs = new Set((colNotes || []).map((n) => pcOf(n.name)).filter((p) => p != null));
+  if (pcs.size < 3) return null;
+  const bass = (colNotes || []).reduce((low, n) => (n.midi != null && (low == null || n.midi < low.midi) ? n : low), null);
+  const bassPC = bass ? pcOf(bass.name) : null;
+  const scored = matchingChords(colNotes, dict).map((m) => {
+    const tonePcs = new Set(m.chordTones.map(pcOf));
+    let extra = 0; pcs.forEach((p) => { if (!tonePcs.has(p)) extra++; });
+    return { m, extra, rootIsBass: (bassPC != null && pcOf(m.chordTones[0]) === bassPC) ? 1 : 0 };
+  });
+  if (!scored.length) return null;
+  scored.sort((a, b) => (a.extra - b.extra) || (b.rootIsBass - a.rootIsBass)
+    || (a.m.chordTones.length - b.m.chordTones.length) || a.m.name.localeCompare(b.m.name));
+  return scored[0].m;
+}
+
+// Pure: every chord that is fully SOUNDING in a vertical stack, in left-to-right order:
+// [{ name, notes, chordTones, onset }]. This is the guarantee the UI needs — if three or more notes
+// share a beat (are printed vertically) and they spell a chord, that chord is reported, whatever the
+// surrounding melody does. Consecutive columns spelling the same chord collapse to the first (a bar
+// of four repeated C chords is one "C", not four), but a real change (C … G … C) keeps every step.
+export function verticalChords(notes, dict = allChords, { collapseRepeats = true } = {}) {
+  const out = [];
+  verticalStacks(notes, { minNotes: 3 }).forEach((s) => {
+    const m = stackChord(s.notes, dict);
+    if (!m) return;
+    const last = out[out.length - 1];
+    if (collapseRepeats && last && last.name === m.name) { last.notes = last.notes.concat(m.notes); return; }
+    out.push({ name: m.name, notes: m.notes.slice(), chordTones: m.chordTones, onset: s.onset, x: s.x });
+  });
+  return out;
 }
 
 // Pure: rank candidate chords for a note stream, stack-aware. When the stream has vertical stacks,
@@ -108,9 +168,13 @@ export function rankMatches(matches, notes) {
 
 // Diatonic triad quality of a root in a MAJOR key: I/IV/V major, ii/iii/vi minor, vii° diminished.
 const MAJOR_DEGREE = { 0: 'maj', 2: 'min', 4: 'min', 5: 'maj', 7: 'maj', 9: 'min', 11: 'dim' };
-function diatonicQuality(rootPc, keyPc) {
+// …and in a (natural) MINOR key: i/iv/v minor, III/VI/VII major, ii° diminished. Without this a
+// power chord in a minor key was named from the major table — an A5 in D minor came out "Amaj".
+const MINOR_DEGREE = { 0: 'min', 2: 'dim', 3: 'maj', 5: 'min', 7: 'min', 8: 'maj', 10: 'maj' };
+function diatonicQuality(rootPc, keyPc, mode = 'major') {
   if (rootPc == null || keyPc == null) return null;
-  return MAJOR_DEGREE[((rootPc - keyPc) % 12 + 12) % 12] || null;
+  const table = mode === 'minor' ? MINOR_DEGREE : MAJOR_DEGREE;
+  return table[((rootPc - keyPc) % 12 + 12) % 12] || null;
 }
 
 // Pure: name the chord implied by a BARE power chord — a primary stack that is exactly {root, fifth}
@@ -118,14 +182,14 @@ function diatonicQuality(rootPc, keyPc) {
 // absent), so it's taken from a third elsewhere in the measure (minor wins over major) or, failing
 // that, from the key (diatonic triad on the root). Returns a match {name, notes, chordTones} from
 // `dict`, or null when the stack isn't a bare power chord or no quality can be resolved.
-function powerChordMatch(notes, dict, keyPc) {
+function powerChordMatch(notes, dict, keyPc, keyMode = 'major') {
   const st = stackInfo(notes);
   if (st.bassPC == null) return null;
   const root = st.bassPC;
   const others = [...st.stackPCs].filter((p) => p !== root);
   if (others.length !== 1 || ((others[0] - root + 12) % 12) !== 7) return null;   // not exactly root + perfect fifth
   const present = new Set((notes || []).map((n) => pcOf(n.name)));
-  const qual = present.has((root + 3) % 12) ? 'min' : present.has((root + 4) % 12) ? 'maj' : diatonicQuality(root, keyPc);
+  const qual = present.has((root + 3) % 12) ? 'min' : present.has((root + 4) % 12) ? 'maj' : diatonicQuality(root, keyPc, keyMode);
   if (!qual) return null;
   const name = st.bassName + (qual === 'min' ? 'min' : qual === 'dim' ? 'dim' : 'maj');
   if (!dict[name]) return null;
@@ -133,20 +197,38 @@ function powerChordMatch(notes, dict, keyPc) {
   return { name, notes: (notes || []).filter((n) => tones.includes(n.name)), chordTones: tones };
 }
 
+// Key string ('C', 'Am', 'D minor', null) → { keyPc, keyMode } for the power-chord fallback.
+function keyPcMode(key) {
+  const parsed = key == null ? null : parseKeyName(key);
+  return { keyPc: parsed ? parsed.tonicPc : null, keyMode: parsed ? parsed.mode : 'major' };
+}
+
 // Pure: the best chords for a note set, stack-aware, with a key-resolved power-chord fallback when
 // the top match's root isn't the stack bass (a bare power chord names a chord the matcher can't).
-// Returns up to `limit` matches, best first.
-export function bestChords(notes, dict = allChords, { key = null, limit = 3 } = {}) {
-  const keyPc = key != null ? PITCH_CLASS[String(key).replace(/m(in)?$/i, '')] : null;
+//
+// Chords printed VERTICALLY come first and are never dropped: every onset column that spells a chord
+// (see verticalChords) is listed, in left-to-right order, before the melodic/window guesses — so a
+// bar whose beats read C then G reports both, instead of one label for whichever stack happened to be
+// biggest. `limit` caps only the melodic extras; it can't truncate what is actually on the staff.
+// Pass `verticals: false` for pure window matching (the old behaviour).
+export function bestChords(notes, dict = allChords, { key = null, limit = 3, verticals = true } = {}) {
+  const { keyPc, keyMode } = keyPcMode(key);
   const ranked = rankMatches(matchingChords(notes, dict), notes);
   const st = stackInfo(notes);
   const top = ranked[0];
   const topRootIsBass = top && st.bassPC != null && pcOf(top.chordTones[0]) === st.bassPC;
+  let out = ranked;
   if (!topRootIsBass) {
-    const pc = powerChordMatch(notes, dict, keyPc);
-    if (pc && !ranked.some((m) => m.name === pc.name)) return [pc, ...ranked].slice(0, limit);
+    const pc = powerChordMatch(notes, dict, keyPc, keyMode);
+    if (pc && !ranked.some((m) => m.name === pc.name)) out = [pc, ...ranked];
   }
-  return ranked.slice(0, limit);
+  out = out.slice(0, limit);
+  if (!verticals) return out;
+  const stacked = verticalChords(notes, dict);
+  if (!stacked.length) return out;
+  const names = new Set(stacked.map((m) => m.name));
+  return stacked.concat(out.filter((m) => !names.has(m.name)))
+    .slice(0, Math.max(limit, stacked.length));    // the printed chords always survive the cap
 }
 
 // Pure: like bestChords, but a chord may be COMPLETED by tones just across the barline. Mostly a
@@ -158,6 +240,9 @@ export function bestChords(notes, dict = allChords, { key = null, limit = 3 } = 
 // passing melody note turns Bm→Bsus4), whereas same-bass completion only ever fills a gap.
 export function bestChordsCompleting(ownNotes, neighborNotes, dict = allChords, { key = null, limit = 3 } = {}) {
   const own = bestChords(ownNotes, dict, { key, limit });
+  // A measure that prints its chords vertically needs no help from across the barline — its harmony
+  // is already sounding (and borrowing a neighbour tone could only blur it).
+  if (verticalChords(ownNotes, dict).length) return own;
   const st = stackInfo(ownNotes);
   const top = own[0];
   const presentPc = new Set((ownNotes || []).map((n) => pcOf(n.name)));
