@@ -184,7 +184,10 @@ export function contiguousPlayWindow(primary, item, opts = {}) {
 //   { progressText, headText, metaText, isManual, gapLabel }
 // `gapSeconds` is the active inter-item gap; the renderer feeds it to
 // the gap stepper's read-out.
-export function buildPlayingBannerVM(it, idx, total, gapSeconds) {
+// `reversed` — the session is practising cards the other way round, so the
+// Target face is the prompt and the Source face the answer. Only the two
+// manual faces swap; a captured clip has no second side to turn over.
+export function buildPlayingBannerVM(it, idx, total, gapSeconds, reversed = false) {
   const safeIdx = Number.isFinite(idx) ? idx : 0
   const safeTotal = Number.isFinite(total) ? total : 0
   const _gap = parseInt(gapSeconds, 10)
@@ -199,11 +202,13 @@ export function buildPlayingBannerVM(it, idx, total, gapSeconds) {
     const linkLbl = it.mediaUrl
       ? ` · ${it.mediaKind === 'youtube' ? '▶ YouTube' : '🔗 link'}`
       : ''
+    const head = reversed ? it.target : it.source
+    const meta = reversed ? it.source : it.target
     return {
       isManual: true,
       progressText: `${safeIdx + 1}/${safeTotal}`,
-      headText: `📝 ${it.source || '(empty)'}`,
-      metaText: `${it.target || '(empty)'}${linkLbl}`,
+      headText: `📝 ${head || '(empty)'}`,
+      metaText: `${meta || '(empty)'}${linkLbl}`,
       word: it.word || '',
       gapLabel: `${gap}s`,
     }

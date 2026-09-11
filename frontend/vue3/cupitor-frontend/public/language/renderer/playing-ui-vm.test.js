@@ -119,6 +119,25 @@ describe("buildPlayingBannerVM", () => {
     expect(out.metaText).toBe("vid · yt · 10s – 15s");
     expect(out.word).toBe("world");
   });
+  // Practising the deck backwards turns the card over: the Target face becomes
+  // the prompt. Only the two faces swap — the link badge stays where it is.
+  test("reversed manual item shows target as the prompt", () => {
+    const out = buildPlayingBannerVM({
+      manual: true, source: "src", target: "tgt", mediaUrl: "yt", mediaKind: "youtube"
+    }, 0, 1, 30, true);
+    expect(out.headText).toBe("📝 tgt");
+    expect(out.metaText).toBe("src · ▶ YouTube");
+  });
+  test("reversed empty face still reads (empty), on whichever side it lands", () => {
+    const out = buildPlayingBannerVM({ manual: true, source: "a", target: "" }, 0, 1, 30, true);
+    expect(out.headText).toBe("📝 (empty)");
+    expect(out.metaText).toBe("a");
+  });
+  // A captured clip has no second side to turn over.
+  test("reversed leaves a captured clip alone", () => {
+    const it = { searchText: "hej", word: "world", id: "vid", source: "yt", timeStart: 10, timeEnd: 15 };
+    expect(buildPlayingBannerVM(it, 0, 1, 30, true)).toEqual(buildPlayingBannerVM(it, 0, 1, 30, false));
+  });
   test("gap label falls back to 30 for non-numeric", () => {
     const out = buildPlayingBannerVM({ word: "x" }, 0, 1, "garbage");
     expect(out.gapLabel).toBe("30s");

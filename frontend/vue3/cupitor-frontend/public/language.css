@@ -638,6 +638,13 @@
     color: #888;
     margin: -4px 0 10px;
 }
+/* Reads as a state, not just a control — the panel may be reopened long
+   after the music was silenced, and the button is where the answer lives. */
+#musicPanelDialog .mp-hush.mp-hush-on {
+    background: #fdf0d8;
+    border-color: #e0b877;
+    color: #6b4a12;
+}
 #musicPanelDialog .mp-modes {
     flex-wrap: wrap;
 }
@@ -1487,6 +1494,20 @@ body.rec-paused .lines-cntnr .buttons .capture-btn { opacity: 0.4; pointer-event
 
 /* Review-dialog sortable placeholder + row hover. The placeholder reserves
    the dragged row's space so the list doesn't jump while reordering. */
+/* A finding reached through a guessed word rather than through the search
+   itself — neither of its two lines can carry a highlight, so this is the
+   only thing saying why it is in the list. */
+.srt-via-guess {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: 3px;
+    background: #eef3fa;
+    color: #3a5a80;
+    font-size: 11px;
+    font-style: italic;
+}
+
 #recordingReviewDialog .rec-item {
     font-size: 12px;
     display: flex;
@@ -1501,6 +1522,17 @@ body.rec-paused .lines-cntnr .buttons .capture-btn { opacity: 0.4; pointer-event
     display: flex;
     align-items: center;
     gap: 6px;
+}
+/* Position in the playlist. Tabular figures, and enough reserved width that
+   the controls beside them still line up across two- and three-digit rows. */
+#recordingReviewDialog .rec-item-no {
+    flex: 0 0 auto;
+    min-width: 2em;
+    text-align: right;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: #9aa0a6;
+    user-select: none;
 }
 #recordingReviewDialog .rec-item-preview {
     font-size: 11px;
@@ -1717,6 +1749,13 @@ body.rec-paused .lines-cntnr .buttons .capture-btn { opacity: 0.4; pointer-event
        on tap. */
     #recordingReviewDialog .rec-item-row1:has(.rec-item-manual) .rec-copy-to {
         max-width: 88px;
+    }
+    /* Every pixel on this row is spoken for — a captured row already runs
+       wider than the dialog. The number gives up its column before the
+       controls give up their place on the line. */
+    #recordingReviewDialog .rec-item-no {
+        min-width: 0;
+        font-size: 10px;
     }
 }
 #recordingReviewDialog .rec-item-media {
@@ -3310,6 +3349,31 @@ body.rec-playing #recPlayingWord { display: block; }
 /* Playing right now — so it's findable at a glance while a track is running. */
 body.music-on #recPlayingBanner .rec-pb-music-btn {
     background: rgba(120, 190, 255, 0.32);
+}
+/* Same shape and the same exemption as ♫: the desktop rule that hides ℹ
+   must not take this with it — which side of a card comes first is worth
+   seeing at every width. */
+#recPlayingBanner .rec-pb-swap-btn {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    background: rgba(255,255,255,0.12);
+    color: #f5f5f5;
+    border-radius: 50%;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    line-height: 1;
+}
+#recPlayingBanner .rec-pb-swap-btn:hover { background: rgba(255,255,255,0.22); }
+/* Turned over right now, so the deck's direction is readable at a glance
+   rather than something you work out from the card in front of you. */
+#recPlayingBanner .rec-pb-swap-btn.rec-pb-swap-on {
+    background: rgba(255, 196, 120, 0.34);
 }
 #recPlayingBanner .rec-pb-details { margin-top: 8px; }
 

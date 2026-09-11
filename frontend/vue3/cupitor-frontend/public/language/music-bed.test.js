@@ -107,6 +107,16 @@ describe("musicShouldPlay", () => {
     }
   });
 
+  // Hushing is orthogonal: it silences the bed in every mode and every phase,
+  // including the ones that would otherwise always be playing.
+  it("stays silent while hushed, whatever else is true", () => {
+    for (const mode of ["item", "gap", "nonstop"]) {
+      for (const phase of ["clip", "gap", "idle"]) {
+        expect(musicShouldPlay({ ...base, mode, phase, hushed: true })).toBe(false);
+      }
+    }
+  });
+
   it("stays silent when there is nothing to play or nothing running", () => {
     const s = { ...base, mode: "nonstop", phase: "gap" };
     expect(musicShouldPlay({ ...s, hasTrack: false })).toBe(false);

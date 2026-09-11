@@ -99,6 +99,10 @@ export function musicVolumeFieldsFor(mode) {
 export function musicShouldPlay(state) {
   const s = state || {};
   if (!s.hasTrack || s.errored) return false;
+  // Hushed by hand from the panel. Deliberately above everything else: it is
+  // the one answer that does not depend on the mode, the phase, or whether a
+  // playlist is running — someone who asked for quiet wants quiet.
+  if (s.hushed) return false;
   if (!s.playing || s.paused) return false;
   // A captured clip brings its own audio; the bed stands aside for it.
   if (s.phase === 'video') return false;

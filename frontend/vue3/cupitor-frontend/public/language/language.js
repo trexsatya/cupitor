@@ -58,6 +58,16 @@ import {
   buildCapturedSubtitleBaseName as _sharedBuildBaseName,
 } from './subtitle-naming.js';
 import {
+  EVERYTHING_ELSE as _EVERYTHING_ELSE,
+  guessCorrespondingWords as _guessCorrespondingWords,
+  groupResultsByWord as _groupResultsByWord,
+  MAX_GROUPS as _MAX_GROUPS,
+  capGroups as _capGroups,
+  lineContainsWord as _lineContainsWord,
+  tokenizeLine as _tokenizeLine,
+  wordMatches as _wordMatches,
+} from './corresponding-words.js';
+import {
   flattenVocabEntries as _flattenVocabEntries,
   buildRareWordRegex as _buildRareWordRegex,
   buildRareWordPrefilter as _buildRareWordPrefilter,
@@ -1690,6 +1700,17 @@ window._appSettings = {
   blockedChannels: [],
   // Seconds the recording-playback waits between items.
   recPlayGapSeconds: 30,
+  // Background music hushed by hand from its panel. Kept with the settings
+  // rather than in a variable that dies with the page: someone who silenced
+  // the music did so for a reason, and having it start again on its own after
+  // a reload is the more surprising of the two behaviours. The panel button
+  // and the ♫ tint both say which way it is.
+  recMusicPaused: false,
+  // Play and show every manual card the other way round — Target first, then
+  // Source. A whole-session switch rather than a per-card one: practising a
+  // deck backwards is a mode you are in for a while, and it leaves the cards
+  // themselves untouched, so nothing has to be edited back afterwards.
+  recPlayReverse: false,
   // Which face of a new card a caption capture's text lands on — 'source'
   // (caption is the prompt) or 'target' (caption is the answer). Remembered
   // between captures because collecting from one video means repeated sends.
@@ -1860,6 +1881,7 @@ function _setSrcTgtGap(v) {
 
 // Thin bindings onto the live settings object; the rules themselves live in
 // music-bed.js, where they can be tested without a player or a DOM.
+function _musicHushed()    { return !!(window._appSettings && window._appSettings.recMusicPaused) }
 function _musicVideoId()   { return _musicSelectedIdOf(window._appSettings) }
 function _musicTracks()    { return _musicTracksOf(window._appSettings) }
 function _musicTrack()     { return _musicSelectedTrackOf(window._appSettings) }
@@ -1873,18 +1895,48 @@ function _musicVolume() {
 // Keep the Settings input and the overlay stepper showing the same thing. An
 // inherited value is marked with a trailing "·" so it reads differently from
 // one the user pinned.
+// Put every face-aware corner of the player in step with the switch: the
+// button's own state, the card's two lines, the hand-play buttons under the
+// player and the pause pill between the faces.
+function _syncRecPlayReverseBtn() {
+  const on = _recPlayReversed()
+  $('#recPlayingBanner .rec-pb-swap-btn')
+    .toggleClass('rec-pb-swap-on', on)
+    .attr('title', on
+      ? 'Practising Target first — tap to go back to Source first'
+      : 'Practise the other way round — Target first')
+    .attr('aria-pressed', on ? 'true' : 'false')
+}
+
+function _syncRecPlayReverseUI() {
+  _syncRecPlayReverseBtn()
+  const args = window._recPlayBannerArgs
+  if (args && args.it) _renderPlayingBanner(args.it, args.idx, args.total)
+  if (window._recPlayCurrentItem && _isManualItem(window._recPlayCurrentItem)) {
+    _renderPlayingManualText(window._recPlayCurrentItem)
+  }
+  const $pa = $('#recPlayingAudio')
+  if ($pa.length && window._recPlayCurrentItem) _renderManualFaceButtons($pa, window._recPlayCurrentItem)
+  _syncSrcTgtGapUI()
+}
+
 function _syncSrcTgtGapUI() {
   const set = _srcTgtGapSeconds()
   _setSettingsInput('#recPlaySrcTgtGapSeconds', set == null ? '' : set)
   const $val = $('#recPlayingBanner .rec-pb-sgap-val')
   if (!$val.length) return
   const eff = _effectiveSrcTgtGapSeconds()
-  $val.text(`ᔆᵀ ${eff}s${set == null ? '·' : ''}`)
+  // Name the faces in the order the pause actually sits between them, so a
+  // reversed session doesn't label its Target→Source pause "ᔆᵀ".
+  const [first, second] = _cardFacesInOrder(window._recPlayCurrentItem)
+  $val.text(`${first.icon}${second.icon} ${eff}s${set == null ? '·' : ''}`)
+  const _pair = `${first.label} and ${second.label}`
+  $val.attr('title', `Tap to set the ${first.label.toLowerCase()}→${second.label.toLowerCase()} pause`)
   $val.closest('.rec-pb-sgap').attr(
     'title',
     set == null
-      ? `Pause between Source and Target: ${eff}s, inherited from the gap between items. Click ± or tap to pin your own.`
-      : `Pause between Source and Target: ${eff}s. Tap the value and clear it to go back to the gap between items.`
+      ? `Pause between ${_pair}: ${eff}s, inherited from the gap between items. Click ± or tap to pin your own.`
+      : `Pause between ${_pair}: ${eff}s. Tap the value and clear it to go back to the gap between items.`
   )
 }
 
@@ -4359,6 +4411,41 @@ function getLangFromUrl() {
   return {fullName: value, code: alpha2Code(value)};
 }
 
+// Publish the page's language pair where the host app can read it without
+// running any of our code — it only has to parse the document it already
+// loaded. The names follow this page's own convention, which is the opposite
+// of the everyday reading: TARGET is the language being studied (the one
+// `?lang=` selects, and the one getTargetLangSrtSuffix names its SRTs after),
+// SOURCE is the English side those subtitles are paired with.
+//
+// Written from script rather than sitting in the HTML, because the studied
+// language is decided by the URL — a fixed tag would be wrong the moment
+// someone opened ?lang=spanish. This runs while the module loads, which is
+// before the host finishes the page, so the host never reads a stale value.
+// The full name goes out too: the two-letter code is only known for the
+// languages alpha2Code lists, and is left empty rather than guessed.
+function _publishLanguageMeta() {
+  try {
+    const lang = getLangFromUrl()
+    const tags = {
+      'cupitor-target-lang': lang.code || '',
+      'cupitor-target-lang-name': lang.fullName || '',
+      'cupitor-source-lang': 'en',
+    }
+    Object.keys(tags).forEach(name => {
+      let el = document.head && document.head.querySelector(`meta[name="${name}"]`)
+      if (!el) {
+        if (!document.head) return
+        el = document.createElement('meta')
+        el.setAttribute('name', name)
+        document.head.appendChild(el)
+      }
+      el.setAttribute('content', tags[name])
+    })
+  } catch (e) { console.warn('publishing language meta failed', e) }
+}
+_publishLanguageMeta()
+
 function getResourceUrl() {
   const value = getLangFromUrl();
   return `https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/${value.fullName}`
@@ -5664,8 +5751,13 @@ function groupAndArrangeResults(items) {
 async function populateSRTFindings(wordToItemsMap, $result, token) {
   // Expose for debugging: inspect via `window._lastWordToItemsMap` in console.
   window._lastWordToItemsMap = wordToItemsMap
-  let words = getWordsOrdered(Object.keys(wordToItemsMap))
-  if (window.searchText.includes(SEPARATOR_PIPE)) {
+  // When the keys are guessed corresponding words rather than searched terms,
+  // they arrive already ranked by how good the guess is, and none of them is
+  // one of the searched terms — so neither the usual ordering nor the
+  // pipe-expansion filter below has anything to say about them.
+  const grouped = !!window._srtGroupedByCorresponding
+  let words = grouped ? Object.keys(wordToItemsMap) : getWordsOrdered(Object.keys(wordToItemsMap))
+  if (!grouped && window.searchText.includes(SEPARATOR_PIPE)) {
     const filtered = words.filter(it => it.trim() !== window.searchText.trim())
     // If the filter strips the only key (no per-line matches AND the
     // expansion contained regex-syntax terms that getMatchingWords skipped
@@ -5689,8 +5781,13 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
       const w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
       if (w) items = wordToItemsMap[w]
     }
+    const isSweepUp = grouped && word === _EVERYTHING_ELSE
     let title = word
-    if (word.trim().length !== word.length) {
+    if (isSweepUp) {
+      // The lines the guesses could not account for. Named for what it is
+      // rather than left under a marker nobody typed.
+      title = 'everything else'
+    } else if (word.trim().length !== word.length) {
       title = `"${word}"`
     }
 
@@ -5705,9 +5802,13 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
     const wikiPart = isMultiWord
         ? `<span> <span class="link" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}">${word}</span></span>`
         : getWikiLinks(word)
-    wordBlock.append(`<div style=""> Wiki: ${wikiPart} 丨
+    // The sweep-up heading is not a word, so there is nothing to look it up
+    // in — a Wiktionary link for "_everything_else" would be a dead end.
+    if (!isSweepUp) {
+      wordBlock.append(`<div style=""> Wiki: ${wikiPart} 丨
         <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> 丨
         <a href="https://filmot.com/search/%22${word}%22/1?lang=${getLangFromUrl().code}" target="_blank">YouTube (Filmot)</a> </div> <br>`)
+    }
 
     $result.append(wordBlock)
 
@@ -5736,9 +5837,18 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
       const item = items[i];
 
       try {
+        // The capture path reads this heading back as the playlist word, so it
+        // has to be the word this line actually matched — not the block it was
+        // filed under. They are the same thing for an ordinary search; under a
+        // guessed grouping the heading is a guess, and one of them is the
+        // sweep-up marker, which nobody typed and nothing should be saved as.
         const $fileBlock = $(`<div class="srt-file" title="${item['name']}">
-                              <h4 data-file="${item.url}" style="display: none;"> ${word} </h4>
+                              <h4 data-file="${item.url}" style="display: none;"> ${item.word || word} </h4>
                           </div>`)
+        if (item._viaGuess) {
+          $fileBlock.append(
+            `<span class="srt-via-guess" title="Found through the ${_.escape(item._viaGuess)} in this line, not through the English search">via ${_.escape(item._viaGuess)}</span>`)
+        }
 
         wordBlock.append($fileBlock)
 
@@ -6766,6 +6876,224 @@ export function renderVocabularyFindings(search) {
   _attachAccordionDelegate(vocab)
 }
 
+// ─── Grouping an English search by the word it corresponds to ────────────
+//
+// Searching in English finds English subtitle lines, and each one is paired
+// with a line in the language being studied. Those paired lines are what the
+// search is really for, and they are usually several different words wearing
+// one English coat — "precisely" is mostly "just", sometimes "precis". Shown
+// as one flat list they read as one word with inexplicable variety.
+//
+// So before the findings are drawn, guess which studied-language words are
+// standing in for the English one and make each of them a heading. What the
+// guess is built from lives in corresponding-words.js; this side collects the
+// evidence — the paired lines, the user's own vocabulary, and the host app's
+// translator — and hands the result to the ordinary renderer as if the groups
+// had been the searched words all along.
+
+// The studied-language line paired with a result, by subtitle index. This is
+// the same pairing getMainSubAndSecondarySub renders from, read straight
+// rather than through the display path.
+// Indexed rather than scanned: the lookup runs once per result, and both the
+// file and the line were linear searches — together they turn a few hundred
+// results over a few hundred files into a few hundred thousand comparisons.
+//
+// Built fresh for each regrouping and thrown away with it. Holding it between
+// searches would be worse than useless: a subtitle edit rewrites `.data` on
+// the very same result objects, so an identity check would not notice, and the
+// grouping would score words that are no longer on screen.
+function _buildStudiedLineIndex() {
+  const byUrl = new Map()
+  ;(window.searchResult || []).forEach(entry => {
+    const data = entry && entry.sv_subs && entry.sv_subs.data
+    if (!entry || !Array.isArray(data)) return
+    byUrl.set(entry.url, new Map(data.map(l => [l && l.index, (l && l.text) || ''])))
+  })
+  return byUrl
+}
+
+function _studiedLineTextOf(index, item) {
+  if (!item || !item.line) return ''
+  const lines = index.get(item.url)
+  return (lines && lines.get(item.line.index)) || ''
+}
+
+// Headwords from the user's own vocabulary whose English side mentions the
+// searched word. The vocabulary is the one place in the app that already
+// knows what these words mean, so a hit here is worth more than any amount of
+// counting — it is a translation someone wrote down on purpose.
+function _vocabWordsForEnglish(englishWord) {
+  const en = String(englishWord || '').toLowerCase().trim()
+  if (en.length < 3 || !window.vocabulary) return []
+  const out = []
+  try {
+    _flattenVocabEntries(window.vocabulary).forEach(({ line }) => {
+      const parts = String(line).split(SEPARATOR_PIPE).map(p => p.trim()).filter(Boolean)
+      if (parts.length < 2) return
+      // parts[0] is the studied-language headword; the rest carry the gloss.
+      if (!parts.slice(1).some(p => _lineContainsWord(p, en))) return
+      // One word, no bracketed hints: "göra susen" and "stoft(-et)" are real
+      // vocabulary entries, and neither can ever match a subtitle token, so
+      // letting them through only costs a heading that renders empty.
+      // A guess becomes a heading, and a heading is interpolated into markup
+      // and into two URLs. A vocabulary entry is free text the user typed, so
+      // only plain single words are let through — anything else could not
+      // match a subtitle token anyway.
+      const head = removeHintsInBrackets(_vocabLineFirstWord(line)).trim()
+      if (head && /^[\p{L}\p{M}'’-]+$/u.test(head)) out.push(head)
+    })
+  } catch (e) { console.warn('vocab guesses failed', e) }
+  return [...new Set(out.filter(Boolean))]
+}
+
+// What the host app's translator makes of the word. A dictionary answer where
+// the subtitles only offer evidence — but it needs the app, it costs a round
+// trip, and a search must not sit waiting on it, so it is given a short leash
+// and simply contributes nothing when it doesn't arrive in time.
+const CORRESPONDING_TRANSLATE_MS = 2500
+// Remembered for the session. The same word gets looked up again every time
+// the results are redrawn — a settings change re-renders them — and without
+// this the wait is paid again each time, and a slow answer that made the
+// deadline once but not twice would rename the headings under the user.
+const _TRANSLATE_GUESS_CACHE = new Map()
+async function _translationGuesses(englishWord) {
+  const en = String(englishWord || '').trim()
+  if (en.length < 3 || !_haveTranslateBridge()) return []
+  const studied = getLangFromUrl().code
+  if (!studied) return []
+  const cacheKey = `${studied}\u0000${en.toLowerCase()}`
+  if (_TRANSLATE_GUESS_CACHE.has(cacheKey)) return _TRANSLATE_GUESS_CACHE.get(cacheKey)
+  try {
+    const text = await _withTimeout(
+      _requestTranslation(en, 'en', studied), CORRESPONDING_TRANSLATE_MS, 'translate-guess')
+    // A one-word query usually comes back as one word, but not always — take
+    // every word of the answer and let the scoring sort them out.
+    const words = String(text || '').toLowerCase().split(/[^\p{L}\p{M}'’-]+/u).filter(w => w.length >= 3)
+    _TRANSLATE_GUESS_CACHE.set(cacheKey, words)
+    return words
+  } catch (_) {
+    // Remember the failure too. A bridge that is there but not answering
+    // costs the full wait, and without this every redraw of the same results
+    // pays it again with the page showing "Loading…" throughout.
+    _TRANSLATE_GUESS_CACHE.set(cacheKey, [])
+    return []
+  }
+}
+
+// Lines in the subtitles this search already pulled down that use a guessed
+// word but whose English side never says the searched word — the uses a
+// straight English search cannot reach. Each one is turned into the same
+// shape as a primary result, anchored on its ENGLISH line, so everything
+// downstream (the renderer, the click handlers, the capture path) treats it
+// no differently from a hit the search found itself.
+function _extraMatchesForGuesses(candidates, existing) {
+  // Only the words that can still become headings are worth sweeping for —
+  // this walks every subtitle of every file the search pulled down, and the
+  // guesses below the cap would have their findings folded into the sweep-up
+  // anyway. See _regroupByCorrespondingWord for where the cap is applied.
+  const wanted = (candidates || []).slice(0, _MAX_GROUPS)
+  if (!wanted.length) return []
+  const have = new Set((existing || []).map(it => `${it.url}|${it.line && it.line.index}`))
+  const out = []
+  ;(window.searchResult || []).forEach(entry => {
+    const sv = entry && entry.sv_subs && entry.sv_subs.data
+    const en = entry && entry.en_subs && entry.en_subs.data
+    if (!Array.isArray(sv) || !Array.isArray(en)) return
+    const enByIndex = new Map(en.map(l => [l && l.index, l]))
+    sv.forEach(svLine => {
+      if (!svLine || !svLine.text) return
+      const key = `${entry.url}|${svLine.index}`
+      if (have.has(key)) return
+      // Most lines contain none of the guesses, and splitting a line into
+      // words is far dearer than looking for a substring in it — so rule the
+      // line out on the cheap test first, and only tokenise the few that
+      // survive. Tokenising is what settles it: a substring can sit inside a
+      // longer, unrelated word.
+      const lower = svLine.text.toLowerCase()
+      if (!wanted.some(c => lower.includes(c.word))) return
+      const tokens = _tokenizeLine(svLine.text)
+      const hit = wanted.find(c => tokens.some(t => _wordMatches(t, c.word)))
+      if (!hit) return
+      const enLine = enByIndex.get(svLine.index)
+      if (!enLine) return
+      have.add(key)
+      const extra = new MatchResult(hit.word, enLine, entry.url, entry.source)
+      // Neither line of this pair carries a highlight — the English side does
+      // not contain what was searched for, which is the whole reason it was
+      // worth finding. Mark it so the reader can see why it is here.
+      extra._viaGuess = hit.word
+      out.push(extra)
+    })
+  })
+  return out
+}
+
+// Returns a replacement for wordToItemsMap, or null to leave the search alone.
+async function _regroupByCorrespondingWord(wordToItemsMap, search) {
+  try {
+    if (getSelectedLang() !== 'en') return null
+    // The map holds one key per matched form plus a key for the whole search
+    // text, so the same line arrives under two of them. Left in, it would be
+    // counted twice as evidence and stretch the line total it is weighed
+    // against — the render path drops the duplicate later, but the guessing
+    // happens first.
+    const seen = new Set()
+    const items = Object.values(wordToItemsMap || {}).flat().filter(it => {
+      if (!it || !it.line) return false
+      const key = `${it.url}|${it.line.index}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    if (items.length < 2) return null
+
+    const index = _buildStudiedLineIndex()
+    const lineOf = it => _studiedLineTextOf(index, it)
+    const lines = items.map(lineOf).filter(Boolean)
+    if (!lines.length) return null
+
+    // unprocessedSearchText is the raw text behind the search, which for a
+    // search started from a vocabulary line is the whole entry —
+    // "precis|precisely". Its first part is the studied-language headword, not
+    // the English one, and asking the host to translate that FROM English
+    // gives a wrong answer and caches it. Only trust it when it is a plain
+    // term; otherwise use what was actually searched.
+    const _rawSearch = String(window.unprocessedSearchText || '')
+    const searchWord = String(
+      (_rawSearch && _rawSearch.indexOf(SEPARATOR_PIPE) < 0) ? _rawSearch : (search || '')
+    ).split(SEPARATOR_PIPE)[0].trim()
+    // Ask for more candidates than there are headings. A word offered by the
+    // translator or the vocabulary is admitted before we know whether any
+    // line uses it, so capping here would spend the headings on guesses that
+    // turn out to be empty — the cap belongs after the empties are dropped.
+    const candidates = _guessCorrespondingWords({
+      lines,
+      searchWord,
+      vocabWords: _vocabWordsForEnglish(searchWord),
+      translatedWords: await _translationGuesses(searchWord),
+      stopWords: VOCAB_OVERLAP_STOP_WORDS,
+      max: _MAX_GROUPS * 3,
+    })
+    if (!candidates.length) return null
+
+    const all = items.concat(_extraMatchesForGuesses(candidates, items))
+    let groups = _groupResultsByWord(all, candidates, lineOf)
+    // More candidates were asked for than there are headings, so trim — the
+    // findings under a dropped heading move to the sweep-up, never away.
+    groups = _capGroups(groups, _MAX_GROUPS)
+    // One group is not a grouping — it only buries the results under a
+    // heading that says nothing.
+    if (groups.length < 2) return null
+
+    const out = {}
+    groups.forEach(g => { out[g.word] = g.items })
+    return out
+  } catch (e) {
+    console.warn('grouping by corresponding word failed', e)
+    return null
+  }
+}
+
 async function render(searchResults, search, className, token) {
   // The vocab list is rendered once on the primary pass. The secondary pass
   // (fired by fetchSRTs' stem fallback) gets a multi-pipe `search` like
@@ -6800,8 +7128,15 @@ async function render(searchResults, search, className, token) {
 
   const searchResultsFiltered = filterByLanguage(searchResults);
 
-  const wordToItemsMap = await getMatchingWords(searchResultsFiltered, search, token);
+  let wordToItemsMap = await getMatchingWords(searchResultsFiltered, search, token);
   if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
+
+  // An English search reads better split by the studied-language word behind
+  // each hit. Falls through untouched whenever there is nothing to split on.
+  const _regrouped = await _regroupByCorrespondingWord(wordToItemsMap, search)
+  if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
+  window._srtGroupedByCorresponding = !!_regrouped
+  if (_regrouped) wordToItemsMap = _regrouped
 
   // Matches are ready — swap out the loader for the real content.
   $result.html('')
@@ -11734,6 +12069,37 @@ function _cardSourceAudio(it) { return (it && _isAudioMediaUrl(it.sourceAudioUrl
 function _cardTargetAudio(it) { return (it && _isAudioMediaUrl(it.targetAudioUrl)) ? it.targetAudioUrl : null }
 // Both recordings in play order (source first, then target), skipping empties.
 function _cardAudioUrls(it) { return [_cardSourceAudio(it), _cardTargetAudio(it)].filter(Boolean) }
+
+function _recPlayReversed() { return !!(window._appSettings && window._appSettings.recPlayReverse) }
+
+// Which way round the card ON SCREEN is, which is not the same question as
+// which way the switch is set. Playback decides a card's running order once,
+// when the card starts, so flipping the switch halfway through a card must not
+// leave the banner describing an order the audio is not following. Null means
+// no card is running and the switch answers for itself.
+let _recPlayCardReversed = null
+function _cardFacesReversed() {
+  return _recPlayCardReversed === null ? _recPlayReversed() : _recPlayCardReversed
+}
+
+// A card's two faces in the order the session plays them. Everything that
+// sounds, labels or displays a face reads this, so the switch cannot leave one
+// of them disagreeing with the rest — the label under the player saying
+// "Source" while the Target recording is what you can hear.
+//
+// `_cardAudioUrls` above deliberately keeps its fixed order: its callers
+// collect URLs into sets for cleanup and cache warming, where the order means
+// nothing and a reversed list would only be confusing to read.
+function _cardFacesInOrder(it) {
+  const faces = [
+    { key: 'source', label: 'Source', icon: 'ᔆ', text: (it && it.source) || '', url: _cardSourceAudio(it) },
+    { key: 'target', label: 'Target', icon: 'ᵀ', text: (it && it.target) || '', url: _cardTargetAudio(it) },
+  ]
+  return _cardFacesReversed() ? [faces[1], faces[0]] : faces
+}
+
+// Just the faces that carry a recording, still in play order.
+function _cardClipsInOrder(it) { return _cardFacesInOrder(it).filter(f => f.url) }
 function _cardHasAudio(it) { return _cardAudioUrls(it).length > 0 }
 
 // ─── Native recording (via AudioBridge / Android MediaRecorder) ──────────
@@ -11836,7 +12202,7 @@ function _openManualEntryEditor(playlistName, existing) {
       ${audioBar('meeTgtAudio')}</div>
     <div class="mee-row"><label class="mee-lbl">Media URL <span class="mee-lbl-hint">(optional — YouTube link or any web link)</span></label>
       <input id="meeMedia" class="mee-input" type="url" placeholder="https://…"></div>
-    <div class="mee-hint" style="font-size:12px;color:#666;">YouTube URLs are recognised automatically and will play in the embedded player during Practice / Play. Other URLs open in a new tab.${showAudio ? ' Recordings are saved on the device; in Play All the Source recording plays, then the Target one.' : ''}</div>
+    <div class="mee-hint" style="font-size:12px;color:#666;">YouTube URLs are recognised automatically and will play in the embedded player during Practice / Play. Other URLs open in a new tab.${showAudio ? ' Recordings are saved on the device; in Play All both play in turn — Source first, unless the player is set to practise the deck backwards.' : ''}</div>
   `)
   $d.find('#meeSource').val(existing ? existing.source || '' : '')
   $d.find('#meeTarget').val(existing ? existing.target || '' : '')
@@ -12906,6 +13272,21 @@ function _installWebViewScroll(el) {
   }))
 }
 
+// Number every row in the dialog, top to bottom, so an item can be named by
+// position and the length of a playlist is visible at a glance.
+//
+// The numbers follow what is on screen, not the play queue. Most playlists are
+// listed alphabetically while playback follows insertion order, and disabled
+// items keep their row but never play — so a column that tried to show play
+// position would jump around and skip, which is worse than not numbering at
+// all. Filled in after the render rather than built into the markup, so a
+// drag-reorder can renumber without rebuilding the whole dialog.
+function _renumberRecItems($dlg) {
+  $dlg.find('.rec-item').each(function (i) {
+    $(this).children('.rec-item-row1').children('.rec-item-no').text(i + 1)
+  })
+}
+
 function openRecordingReviewDialog() {
   let $dlg = $('#recordingReviewDialog')
   if (!$dlg.length) {
@@ -13081,6 +13462,7 @@ function openRecordingReviewDialog() {
           }
           html += `<div class="rec-item${isVirtualCurrent ? ' rec-item-readonly' : ''}${_isLast ? ' rec-item-lastplayed' : ''}" data-idx="${idx}">
             <div class="rec-item-row1">
+              <span class="rec-item-no"></span>
               ${editControls}
               <button type="button" class="rec-play-from" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Play from this item">▶</button>
               ${dupBtn}
@@ -13098,6 +13480,7 @@ function openRecordingReviewDialog() {
     })
   }
   $dlg.html(html)
+  _renumberRecItems($dlg)
 
   $dlg.off('click', '.rec-del').on('click', '.rec-del', function (e) {
     // Stop the click from bubbling to the document-level outside-click
@@ -13128,7 +13511,9 @@ function openRecordingReviewDialog() {
     const arr = ((window._recording.items || {})[st] || {})[w]
     const len = Array.isArray(arr) ? arr.length : 0
     if (len < 2) { _cpBuildToast('Nothing to reorder — this group has one item.'); return }
-    const raw = prompt(`Move to position (1–${len}):`, String(idx + 1))
+    // Says "in this group" because the number on the row counts the whole
+    // playlist, while this move is confined to the group the item sits in.
+    const raw = prompt(`Move to position in this group (1–${len}):`, String(idx + 1))
     if (raw == null) return
     const pos = parseInt(String(raw).trim(), 10)
     if (!Number.isFinite(pos)) return
@@ -13320,15 +13705,23 @@ function openRecordingReviewDialog() {
         update: function () {
           const st = String($list.data('st'))
           const w  = String($list.data('w'))
+          // Read the attribute, not .data(): jQuery caches a data value on
+          // first read and writing the attribute below does not invalidate
+          // that cache, so a second drag in the same render would map from
+          // the positions of the first one and save a scrambled order.
           const order = $list.find('> .rec-item').map(function () {
-            return parseInt($(this).data('idx'), 10)
+            return parseInt($(this).attr('data-idx'), 10)
           }).get()
           _reorderWordItems(st, w, order)
           // Refresh data-idx attrs so subsequent removes/edits hit the right
-          // entries without a full re-render.
+          // entries without a full re-render — and drop the cached copies with
+          // them, since the delete, duplicate, toggle and copy handlers all
+          // read through .data() and would otherwise act on the old position.
           $list.find('> .rec-item').each(function (i) {
-            $(this).attr('data-idx', i).find('[data-idx]').attr('data-idx', i)
+            $(this).attr('data-idx', i).removeData('idx')
+              .find('[data-idx]').attr('data-idx', i).removeData('idx')
           })
+          _renumberRecItems($dlg)
         }
       })
     })
@@ -13686,6 +14079,9 @@ function _speakWordBrowser(text) {
 // vocab state can shift), we don't try to locate the match in the live
 // #result DOM — we draw a self-contained banner from the recorded fields.
 function _renderPlayingBanner(it, idx, total) {
+  // Kept so the reverse switch can redraw the card that is on screen now
+  // rather than leaving it the old way round until the next item starts.
+  window._recPlayBannerArgs = { it, idx, total }
   let $b = $('#recPlayingBanner')
   if (!$b.length) {
     // Top row is the compact mobile view: count, progress, gap stepper, info
@@ -13707,6 +14103,7 @@ function _renderPlayingBanner(it, idx, total) {
           <span class="rec-pb-sgap-val" tabindex="0" role="button" title="Tap to set the source→target pause">ᔆᵀ –</span>
           <button type="button" class="rec-pb-sgap-inc" aria-label="Increase source-to-target pause">+</button>
         </span>
+        <button type="button" class="rec-pb-swap-btn" title="Practise the other way round — Target first" aria-label="Swap Source and Target">⇄</button>
         <button type="button" class="rec-pb-music-btn" title="Background music" aria-label="Background music">♫</button>
         <button type="button" class="rec-pb-info-btn" title="Show details" aria-label="Show details" aria-expanded="false">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -13729,6 +14126,20 @@ function _renderPlayingBanner(it, idx, total) {
     </div>`).appendTo('body')
     // Reachable while a playlist is running, which is when someone actually
     // wants to change the music — the same panel Settings opens.
+    // Turn the whole deck over. A session-wide switch, so it stays put from
+    // one card to the next and survives a reload — practising backwards is a
+    // mode, not a one-card detour. The cards are not touched.
+    $b.on('click', '.rec-pb-swap-btn', function (e) {
+      e.preventDefault(); e.stopPropagation()
+      window._appSettings.recPlayReverse = !_recPlayReversed()
+      saveAppSettings()
+      _syncRecPlayReverseUI()
+      // A card already under way keeps the order it started with, so say so
+      // rather than letting the switch look like it did nothing.
+      const waiting = _recPlayCardReversed !== null && _recPlayCardReversed !== _recPlayReversed()
+      const which = _recPlayReversed() ? '⇄ Target first' : '⇄ Source first'
+      _cpBuildToast(waiting ? `${which} — from the next card` : which)
+    })
     $b.on('click', '.rec-pb-music-btn', function (e) {
       e.preventDefault(); e.stopPropagation()
       _openMusicPanel()
@@ -13767,8 +14178,9 @@ function _renderPlayingBanner(it, idx, total) {
     $b.on('click', '.rec-pb-sgap-val', (e) => {
       e.preventDefault(); e.stopPropagation()
       const cur = _srcTgtGapSeconds()
+      const [pFirst, pSecond] = _cardFacesInOrder(window._recPlayCurrentItem)
       const raw = prompt(
-        'Pause between Source and Target (seconds, 0–600).\nLeave blank to use the gap between items.',
+        `Pause between ${pFirst.label} and ${pSecond.label} (seconds, 0–600).\nLeave blank to use the gap between items.`,
         cur == null ? '' : String(cur)
       )
       if (raw == null) return
@@ -13780,7 +14192,7 @@ function _renderPlayingBanner(it, idx, total) {
   let $w = $('#recPlayingWord')
   if (!$w.length) $w = $('<div id="recPlayingWord"></div>').appendTo('body')
   const gap = window._appSettings && window._appSettings.recPlayGapSeconds
-  updatePlayingBanner(buildPlayingBannerVM(it, idx, total, gap), $b[0], $w[0])
+  updatePlayingBanner(buildPlayingBannerVM(it, idx, total, gap, _cardFacesReversed()), $b[0], $w[0])
   // The source→target pause only bites on a card that carries both
   // recordings, so its stepper only shows there — the compact mobile row has
   // no room for a knob that does nothing to the item being played.
@@ -13793,6 +14205,7 @@ function _renderPlayingBanner(it, idx, total) {
   // card has both recordings would leave no way to change it on a phone
   // without pausing to open Settings.
   $b.toggleClass('rec-pb-has-sgap', dual)
+  _syncRecPlayReverseBtn()
   // updatePlayingBanner writes only the first .rec-pb-gap-val it finds, so
   // the details copy gets its text from here.
   _syncItemGapUI()
@@ -14028,8 +14441,13 @@ async function _renderPlayingSubtitles(item) {
 function _renderPlayingManualText(item) {
   let $sub = $('#recPlayingSubs')
   if (!$sub.length) $sub = $('<div id="recPlayingSubs"></div>').appendTo('body')
-  const src = (item && item.source ? String(item.source) : '').trim()
-  const tgt = (item && item.target ? String(item.target) : '').trim()
+  // This is the card as a phone sees it — the banner's two lines live inside
+  // the details block, which narrow layouts keep collapsed. So it has to turn
+  // over with everything else, or a reversed session would show the answer
+  // above the prompt for the whole card.
+  const [first, second] = _cardFacesInOrder(item)
+  const src = String(first.text || '').trim()
+  const tgt = String(second.text || '').trim()
   if (!src && !tgt) { $sub.html(''); return }
   let html = '<div class="rec-ps-row rec-ps-active">'
   if (src) html += `<div class="rec-ps-main">${_.escape(src)}</div>`
@@ -14421,6 +14839,12 @@ window.handleYoutubePlayerError = handleYoutubePlayerError
 // exactly when someone reaches for the buttons.
 function _postMediaState(playing) {
   try {
+    // The host's shim works the same state out for itself, from
+    // `window.ytPlaying`, and posts that on its own schedule. Nothing sets
+    // that flag on a manual card, so those posts kept saying "paused" over
+    // the top of ours. Keep it in step — the page is what knows whether the
+    // page is playing.
+    window.ytPlaying = !!playing
     const b = window.MediaState
     if (!b || typeof b.postMessage !== 'function') return
     // `source` means two different things: the front text of a manual card,
@@ -14428,7 +14852,7 @@ function _postMediaState(playing) {
     // blind would title every video item "YouTube" on the lockscreen.
     const it = window._recPlayCurrentItem
     const raw = !it ? ''
-      : _isManualItem(it) ? (it.source || it.target || '')
+      : _isManualItem(it) ? (_cardFacesInOrder(it).map(f => f.text).find(Boolean) || '')
       : (it.word || it.searchText || '')
     const title = String(raw).split('\n')[0].trim() || document.title || 'Cupitor'
     b.postMessage(JSON.stringify({ playing: !!playing, title: title.slice(0, 120) }))
@@ -14637,6 +15061,16 @@ function _renderMusicPanel() {
   $d.find('#mpTrack').html(opts).prop('disabled', !tracks.length)
   $d.find('#mpDelete').prop('disabled', !tracks.length)
 
+  const hushed = _musicHushed()
+  $d.find('#mpHush')
+    .text(hushed ? '▶ Resume music' : '⏸ Pause music')
+    .toggleClass('mp-hush-on', hushed)
+    .attr('aria-pressed', hushed ? 'true' : 'false')
+    .prop('disabled', !tracks.length)
+  $d.find('#mpHushHint').text(hushed
+    ? 'Silenced until you resume it. The playlist is unaffected.'
+    : 'Stops the music without stopping the playlist.')
+
   // Point at the offending row. A link YouTube refuses is still a valid
   // YouTube link, so nothing else about the panel would look wrong.
   const bad = _musicError && _musicErrorId && _musicErrorId === sel
@@ -14678,6 +15112,10 @@ function _openMusicPanel() {
       <button type="button" id="mpDelete" class="btn" title="Remove this track from the list">🗑</button>
     </div>
     <div class="mp-warn" id="mpTrackWarn" style="display:none;"></div>
+    <div class="mp-row">
+      <button type="button" id="mpHush" class="btn mp-hush"></button>
+    </div>
+    <div class="mp-hint" id="mpHushHint"></div>
     <div class="mp-row mp-add">
       <input type="text" id="mpUrl" class="mp-grow" placeholder="YouTube URL">
       <input type="text" id="mpName" placeholder="Name (optional)">
@@ -14701,6 +15139,14 @@ function _openMusicPanel() {
     _resetBackgroundMusic()
     // Redraw: the "can't play this one" line belongs to the track that failed,
     // so switching away from it has to take the warning with it.
+    _renderMusicPanel()
+  })
+  // Silence the bed without touching the mode, the track or the playlist —
+  // the playlist plays on, this only stops the music underneath it.
+  $d.on('click.mp', '#mpHush', function () {
+    window._appSettings.recMusicPaused = !_musicHushed()
+    saveAppSettings()
+    _syncBackgroundMusic()
     _renderMusicPanel()
   })
   $d.on('click.mp', '#mpDelete', function () {
@@ -14796,6 +15242,7 @@ function _syncBackgroundMusic() {
     mode: _musicMode(),
     phase: window._recPlayPhase || 'idle',
     hasTrack: !!_musicVideoId(),
+    hushed: _musicHushed(),
     errored: !!_musicError,
     playing: !!window._playingRecording,
     paused: !!window._recPlayPaused,
@@ -14944,10 +15391,7 @@ function _showManualAudioPlayer(show, faceLabel) {
 // way to hear a face again without restarting the whole card.
 function _renderManualFaceButtons($wrap, it) {
   const $row = $wrap.find('.rec-pa-faces').empty()
-  const faces = [
-    { url: _cardSourceAudio(it), label: 'Source', icon: 'ᔆ' },
-    { url: _cardTargetAudio(it), label: 'Target', icon: 'ᵀ' },
-  ].filter(f => f.url)
+  const faces = _cardClipsInOrder(it)
   if (!faces.length) { $row.hide(); return }
   $row.show()
   faces.forEach(f => {
@@ -15236,6 +15680,7 @@ async function playRecording(opts) {
   // handleYoutubePlayerError). Reset so a fresh session can re-prompt.
   window._recPlayErrorPromptedFor = null
   window._recPlayCurrentItem = null
+  _recPlayCardReversed = null
   // Expose the queue so the player-overlay Shuffle button can re-randomise
   // the unplayed tail without restarting playback.
   window._recPlayQueue = queue
@@ -15290,15 +15735,22 @@ async function playRecording(opts) {
     }
     textOnlySkips = 0
 
+    // Both of these have to be in place BEFORE the banner draws: it renders
+    // the pause pill from the current item and the pinned direction, and
+    // setting them afterwards left the pill describing the previous card.
+    //
+    // Expose the live item object so the YT onError handler knows which video
+    // failed (and can label the delete prompt), and pin the direction for this
+    // card — see _cardFacesReversed.
+    window._recPlayCurrentItem = it
+    _recPlayCardReversed = _recPlayReversed()
+
     _renderPlayingBanner(it, i, queue.length)
     // Remember the item currently playing so the review dialog can highlight
     // it after the player is closed (and so a follow-up Play All / Practice
     // on this playlist can offer to resume from this exact item, in the
     // same queue order). The `i` advances queuePos so Resume picks up here.
     _setLastPlayed(it, 'play', i)
-    // Also expose the live item object so the YT onError handler knows which
-    // video failed (and can label the delete prompt).
-    window._recPlayCurrentItem = it
     // Refresh the session with this item's title, and re-assert that we are
     // playing — the previous item's end will have pushed "not playing".
     _postMediaState(!window._recPlayPaused)
@@ -15325,10 +15777,10 @@ async function playRecording(opts) {
       // A YouTube link is only a reference now (cued above, never auto-played),
       // so a card can carry both a link and its own pronunciations.
       {
-        const clips = _cardAudioUrls(it)
+        const clips = _cardClipsInOrder(it)
         // Legacy cards kept their single recording in mediaUrl.
         if (!clips.length && (it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)) && it.mediaUrl) {
-          clips.push(it.mediaUrl)
+          clips.push({ key: 'source', label: 'Source', icon: 'ᔆ', text: (it && it.source) || '', url: it.mediaUrl })
         }
         const navPending = () => window._recNavRequest || Number.isInteger(window._recNavGotoIndex)
         for (let ci = 0; ci < clips.length; ci++) {
@@ -15339,7 +15791,8 @@ async function playRecording(opts) {
           if (ci > 0) {
             const stMs = currentSrcTgtGapMs()
             if (stMs > 0) {
-              _startGapCountdown(stMs, s => `target in ${s}s`)
+              const _nextLbl = (clips[ci].label || '').toLowerCase() || 'next'
+              _startGapCountdown(stMs, s => `${_nextLbl} in ${s}s`)
               await _sleepRespectingPause(stMs)
               _stopGapCountdown()
             }
@@ -15347,9 +15800,7 @@ async function playRecording(opts) {
           }
           // Label the player so it's obvious which face is sounding, since
           // both faces of one card play back to back with no visual break.
-          await _playManualAudioAndWait(clips[ci], clips.length > 1
-            ? (ci === 0 ? 'Source' : 'Target')
-            : '')
+          await _playManualAudioAndWait(clips[ci].url, clips.length > 1 ? clips[ci].label : '')
           // Stop / prev / next during a clip must not start the next one.
           if (!window._playingRecording || navPending()) break
         }
@@ -15580,6 +16031,7 @@ async function playRecording(opts) {
   window._recPlaySlowdown = false
   window._recNavRequest = null
   window._recPlayCurrentItem = null
+  _recPlayCardReversed = null
   window._recPlayMinimized = false
   window._recPlayGapGuard = false
   if (window._recPlayGapGuardId) { clearInterval(window._recPlayGapGuardId); window._recPlayGapGuardId = null }
@@ -15737,12 +16189,14 @@ function togglePlayingRecordingPause() {
 // For a video the seek is clamped to the clip's own window — a recorded item
 // is a slice of a long video, so rewinding past timeStart would drop the user
 // into unrelated footage rather than replaying what they just heard.
-// Returns true when it seeked, REC_SEEK_UNDERFLOW when the rewind would land
-// before the start of the current clip, and false when there is nothing
-// seekable. Underflow is not clamped: someone rewinding past the beginning
-// wants what came BEFORE this item, not its first second over again.
+// Returns true when it seeked, REC_SEEK_UNDERFLOW / REC_SEEK_OVERFLOW when the
+// move would land outside the current clip, and false when there is nothing
+// seekable. Neither end is clamped: someone seeking past the beginning wants
+// what came BEFORE this item, and past the end, what comes after — not its
+// first or last second over again.
 const REC_SEEK_STEP_SEC = 15
 const REC_SEEK_UNDERFLOW = 'underflow'
+const REC_SEEK_OVERFLOW = 'overflow'
 function _recPlaySeekRelative(delta) {
   if (!window._playingRecording) return false
   const a = window._recPlayManualAudio
@@ -15753,8 +16207,18 @@ function _recPlaySeekRelative(delta) {
     // and "back" can only mean the item before. The seek below does real work
     // only on a recording longer than the step.
     if (target < 0) return REC_SEEK_UNDERFLOW
-    const dur = Number.isFinite(a.duration) ? a.duration : Infinity
-    try { a.currentTime = Math.min(dur, target) } catch (_) { return false }
+    // Same reasoning at the other end, and it is the normal outcome there too.
+    // Parking the element on its own duration would not skip anything: play()
+    // from the end rewinds to the start, so it would replay the face instead.
+    //
+    // duration is NaN until the clip's metadata arrives, which is a real
+    // window rather than a corner — the element is re-pointed at a new file
+    // immediately before every face. With no known end there is no way to tell
+    // a seek from a skip, so wait rather than guess.
+    const dur = a.duration
+    if (!Number.isFinite(dur)) return false
+    if (target > dur) return REC_SEEK_OVERFLOW
+    try { a.currentTime = target } catch (_) { return false }
     // The clip may already have finished — rewinding into a long recording
     // during the hold that follows it is a request to hear it again, not just
     // to move a playhead nobody is listening to.
@@ -15762,6 +16226,12 @@ function _recPlaySeekRelative(delta) {
     return true
   }
   const it = window._recPlayCurrentItem
+  // The same rule pause and resume follow: a manual card's YouTube link is a
+  // reference, cued and never played, so it is not what a seek key means. Read
+  // from the item, not from the audio pointer — that pointer is null on a
+  // manual card with no recordings, and null again in the window before the
+  // first clip's bytes have loaded. Seeking a cued player starts it.
+  if (!it || _isManualItem(it)) return false
   try {
     if (!window.ytPlayer || typeof window.ytPlayer.getCurrentTime !== 'function') return false
     const cur = window.ytPlayer.getCurrentTime() || 0
@@ -15771,7 +16241,8 @@ function _recPlaySeekRelative(delta) {
     const hi  = (it && Number.isFinite(+it.timeEnd))   ? +it.timeEnd   : Infinity
     const target = cur + delta
     if (target < lo) return REC_SEEK_UNDERFLOW
-    window.ytPlayer.seekTo(Math.min(hi, target), true)
+    if (target > hi) return REC_SEEK_OVERFLOW
+    window.ytPlayer.seekTo(target, true)
     return true
   } catch (_) { return false }
 }
@@ -17087,9 +17558,16 @@ $(document).on('keydown', function (e) {
 
 // External media keys (Bluetooth headset, OS media controls, the host
 // webview's hardware keys) dispatch a `cupitorMediaKey` CustomEvent with
-// detail.key ∈ {'previous', 'next', 'play_pause'}. Wiring them through
-// the same navigation/pause path keeps the inline-script contract from
-// language.html honoured.
+// detail.key ∈ {'play', 'pause', 'play_pause', 'stop', 'next', 'previous',
+// 'fast_forward', 'rewind'}. Wiring them through the same navigation/pause
+// path keeps the inline-script contract from language.html honoured.
+//
+// While a playlist is running they all belong to the session, not just the
+// toggle: a wired button sends one TOGGLE, but a Bluetooth headset speaks
+// AVRCP and sends discrete PLAY and PAUSE. Handling only the toggle left pause
+// and resume dead on exactly the headsets people use, while the host quietly
+// ran its own default on the YouTube player. Outside a playlist they are not
+// ours, and the host's defaults are what drive a plain video.
 // Android's MediaSession collapses headset clicks before we ever see them:
 // 1 click → play_pause, 2 → next, 3 → previous. There is no 4-click keycode,
 // so a genuine quadruple-tap can't be distinguished here — the counting would
@@ -17109,11 +17587,36 @@ let _recPrevKeyAt = 0
 // a short manual recording every tap jumps already, and pairing two of those
 // into a compound gesture would silently skip two cards.
 let _recPrevWasSeek = false
+
+// Claim a key for the playlist, so the host's own handler doesn't act on it too.
+//
+// The host dispatches a plain CustomEvent, and a CustomEvent is not cancelable
+// unless it is made that way — so preventDefault() here does nothing, and the
+// host's default handler runs on every press however the page answers it. That
+// handler toggles `window.ytPlayer` (on a manual card, starting the reference
+// video that was only ever cued) and then reports playback state from
+// `window.ytPlaying`, which a manual card never sets — so a tenth of a second
+// after we told the system we were playing, the session flipped back to paused
+// and the headset stopped reaching this page at all.
+//
+// stopImmediatePropagation does what preventDefault cannot. The host installs
+// its listener once the page has finished loading, which is after this module
+// ran, so ours is registered first and can stop the event before it gets there.
+//
+// Only while a playlist is running: outside one these keys are not ours, and
+// the host's defaults are exactly what should drive a plain video.
+function _recTakeMediaKey(ev) {
+  if (!window._playingRecording) return false
+  if (typeof ev.preventDefault === 'function') ev.preventDefault()
+  if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation()
+  return true
+}
+
 window.addEventListener('cupitorMediaKey', function (ev) {
   if (!ev || !ev.detail) return
   switch (ev.detail.key) {
     case 'previous': {
-      if (typeof ev.preventDefault === 'function') ev.preventDefault()
+      if (!_recTakeMediaKey(ev)) break
       const now = Date.now()
       const again = _recPrevWasSeek && (now - _recPrevKeyAt) < REC_PREV_DOUBLE_MS
       _recPrevKeyAt = again ? 0 : now      // consume, so 3 taps isn't 2 jumps
@@ -17130,12 +17633,56 @@ window.addEventListener('cupitorMediaKey', function (ev) {
       break
     }
     case 'next':
-      if (typeof ev.preventDefault === 'function') ev.preventDefault()
+      if (!_recTakeMediaKey(ev)) break
       navigateRecordingPlayback('next')
       break
     case 'play_pause':
-      if (typeof ev.preventDefault === 'function') ev.preventDefault()
+      if (!_recTakeMediaKey(ev)) break
       togglePlayingRecordingPause()
+      break
+    // Discrete play/pause, rather than a toggle. Each is a no-op when the
+    // session is already in the state asked for — a headset that repeats PLAY
+    // must not pause what it just resumed. It still answers, though: a PLAY
+    // that arrives while we are already playing usually means the system's
+    // idea of us has drifted, and a session it thinks is idle is one it stops
+    // sending buttons to. The toggle itself posts state on its own.
+    case 'play':
+      if (!_recTakeMediaKey(ev)) break
+      if (window._recPlayPaused) togglePlayingRecordingPause()
+      else _postMediaState(true)
+      break
+    case 'pause':
+      if (!_recTakeMediaKey(ev)) break
+      if (!window._recPlayPaused) togglePlayingRecordingPause()
+      else _postMediaState(false)
+      break
+    // Deliberately a pause, not a teardown. Android sends STOP for things the
+    // user did not mean as "end this" — a call arriving, another app taking
+    // over, the notification being swiped away — and losing the whole session
+    // to one of those is not recoverable by pressing play again.
+    case 'stop':
+      if (!_recTakeMediaKey(ev)) break
+      if (!window._recPlayPaused) togglePlayingRecordingPause()
+      else _postMediaState(false)
+      break
+    // Seek through the session rather than the player. A captured item is a
+    // slice of a longer video, so the host's own seek — which knows nothing
+    // about where the slice starts or ends — drops the user into unrelated
+    // footage, and on a manual card it moves a player that isn't sounding.
+    //
+    // These keys only seek. Where there is no room to move — a recorded face
+    // is a second or two, so that is the ordinary case on a manual card — they
+    // do nothing, rather than falling through to the next or previous item:
+    // that would resume a session the user had paused, and would throw away
+    // the other face of the card they are on. Leaving an item is what the
+    // dedicated next and previous keys are for.
+    case 'fast_forward':
+      if (!_recTakeMediaKey(ev)) break
+      if (_recPlaySeekRelative(REC_SEEK_STEP_SEC) === true) _cpBuildToast(`⏩ ${REC_SEEK_STEP_SEC}s`)
+      break
+    case 'rewind':
+      if (!_recTakeMediaKey(ev)) break
+      if (_recPlaySeekRelative(-REC_SEEK_STEP_SEC) === true) _cpBuildToast(`⏪ ${REC_SEEK_STEP_SEC}s`)
       break
   }
 })

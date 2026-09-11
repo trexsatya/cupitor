@@ -1,7 +1,6 @@
 <html>
 
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
 
     <script src="/vendor/jquery.js"></script>
     <script></script>
@@ -77,12 +76,19 @@
             }
         }
 
+        // window.ytPlaying is what the host reads to decide whether this page
+        // is playing, and it drives whether the system media session — and so
+        // the headset — keeps talking to us.
+        //
+        // While a playlist is running the page owns that answer instead: a gap
+        // between clips pauses this player, and a manual card never touches it
+        // at all, but the session is playing throughout. Letting the player
+        // answer there reported "paused" mid-session and the buttons stopped
+        // arriving. Outside a playlist the player is the only thing playing,
+        // so it stays the source of truth.
         function onPlayerStateChange(event) {
-            if (event.data === YT.PlayerState.PLAYING) {
-                window.ytPlaying = true
-            } else {
-                window.ytPlaying = false;
-            }
+            if (window._playingRecording) return
+            window.ytPlaying = event.data === YT.PlayerState.PLAYING
         }
 
         // Fired when a video can't be played (removed, private, embedding
