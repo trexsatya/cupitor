@@ -63,6 +63,9 @@ import {
   groupResultsByWord as _groupResultsByWord,
   MAX_GROUPS as _MAX_GROUPS,
   capGroups as _capGroups,
+  sinkUnevidencedGroups as _sinkUnevidencedGroups,
+  confirmByBackTranslation as _confirmByBackTranslation,
+  translationConfidence as _translationConfidence,
   lineContainsWord as _lineContainsWord,
   tokenizeLine as _tokenizeLine,
   wordMatches as _wordMatches,
@@ -1898,9 +1901,22 @@ function _musicVolume() {
 // Put every face-aware corner of the player in step with the switch: the
 // button's own state, the card's two lines, the hand-play buttons under the
 // player and the pause pill between the faces.
+// Whether turning the deck over means anything here. Only a manual card has
+// two faces; a playlist of captured clips has nothing to swap, so the button
+// would be a control that does nothing.
+//
+// Asked of the whole queue rather than the item on screen, because the switch
+// governs the session: on a deck holding both kinds, hiding it while a clip
+// plays would make it come and go as the playlist moved.
+function _queueHasManualCard() {
+  const q = window._recPlayQueue
+  return Array.isArray(q) && q.some(it => _isManualItem(it))
+}
+
 function _syncRecPlayReverseBtn() {
   const on = _recPlayReversed()
   $('#recPlayingBanner .rec-pb-swap-btn')
+    .toggle(_queueHasManualCard())
     .toggleClass('rec-pb-swap-on', on)
     .attr('title', on
       ? 'Practising Target first — tap to go back to Source first'
@@ -4719,6 +4735,16 @@ async function getMatchingWords(list, search, token) {
   const ITEM_CHUNK = 25
 
   const transformedRe = new RegExp(_relaxSpaces(transformedSearchText), "i")
+  // English does not compound or inflect the way the studied language does, so
+  // a loose match there lands on a different word almost every time: "thin"
+  // answered with think, thing and nothing, each dragging its own unrelated
+  // subtitles in behind it. Whole words only is what an English search means.
+  //
+  // The studied language keeps the loose match, and needs it — "hus" genuinely
+  // belongs with huset and husrannsakan. The explicit leading/trailing-space
+  // conventions below stay in both languages: those are a deliberate gesture
+  // for "words ending in…", not an accident of substring matching.
+  const exactWordsOnly = getSelectedLang() === 'en'
   // Per-word matching test: alternatives like " ber ", " be ", " bad " (the
   // user's convention for forcing word-boundary semantics) can never match a
   // bare segmented word like "ber" because the literal spaces have to be in
@@ -4776,7 +4802,9 @@ async function getMatchingWords(list, search, token) {
         const words = getWords(line.text, search).map(it => it.trim().toLowerCase())
         const endsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
         const startsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
-        words.filter(word => word.match(perWordRe) || word.match(transformedRe) || endsWith(word) || startsWith(word))
+        words.filter(word => word.match(perWordRe)
+                || (!exactWordsOnly && word.match(transformedRe))
+                || endsWith(word) || startsWith(word))
             .forEach(word => {
               wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
             })
@@ -5791,7 +5819,11 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
       title = `"${word}"`
     }
 
-    const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}"><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${title} <span class="match-count"></span></h5></div>`)
+    // Nothing under this heading was found by the search itself — every line
+    // came in through the guess. Dimmed, so the eye goes to the headings that
+    // answer what was actually asked.
+    const viaGuessOnly = grouped && !isSweepUp && items.length > 0 && items.every(it => it && it._viaGuess)
+    const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}${viaGuessOnly ? ' srt-guess-only' : ''}"${viaGuessOnly ? ' title="No English line here contains the search word — these are lines whose ' + _.escape(getLangFromUrl().fullName || 'studied-language') + ' side uses this guess"' : ''}><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${title} <span class="match-count"></span></h5></div>`)
     items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
     const isMultiWord = word.trim().split(/\s+/).length > 1
@@ -6902,14 +6934,29 @@ export function renderVocabularyFindings(search) {
 // searches would be worse than useless: a subtitle edit rewrites `.data` on
 // the very same result objects, so an identity check would not notice, and the
 // grouping would score words that are no longer on screen.
+// Also counts, in the same pass, how many of those lines use each word. That
+// count is the yardstick the guessing measures against: a word is worth a
+// heading when it is common in the matched lines and uncommon in these same
+// subtitles generally. Counting the matched lines alone cannot tell a
+// translation from a preposition — see MIN_LIFT.
 function _buildStudiedLineIndex() {
   const byUrl = new Map()
+  const background = new Map()
+  let backgroundLines = 0
   ;(window.searchResult || []).forEach(entry => {
     const data = entry && entry.sv_subs && entry.sv_subs.data
     if (!entry || !Array.isArray(data)) return
-    byUrl.set(entry.url, new Map(data.map(l => [l && l.index, (l && l.text) || ''])))
+    const lines = new Map()
+    data.forEach(l => {
+      const text = (l && l.text) || ''
+      lines.set(l && l.index, text)
+      if (!text) return
+      backgroundLines++
+      new Set(_tokenizeLine(text)).forEach(w => background.set(w, (background.get(w) || 0) + 1))
+    })
+    byUrl.set(entry.url, lines)
   })
-  return byUrl
+  return { byUrl, background, backgroundLines }
 }
 
 function _studiedLineTextOf(index, item) {
@@ -6919,9 +6966,10 @@ function _studiedLineTextOf(index, item) {
 }
 
 // Headwords from the user's own vocabulary whose English side mentions the
-// searched word. The vocabulary is the one place in the app that already
-// knows what these words mean, so a hit here is worth more than any amount of
-// counting — it is a translation someone wrote down on purpose.
+// searched word. The vocabulary is the one place in the app that already knows
+// what these words mean — a translation someone wrote down on purpose — so a
+// hit here stands on its own, without the word having to appear in a single
+// matched line.
 function _vocabWordsForEnglish(englishWord) {
   const en = String(englishWord || '').toLowerCase().trim()
   if (en.length < 3 || !window.vocabulary) return []
@@ -6932,15 +6980,11 @@ function _vocabWordsForEnglish(englishWord) {
       if (parts.length < 2) return
       // parts[0] is the studied-language headword; the rest carry the gloss.
       if (!parts.slice(1).some(p => _lineContainsWord(p, en))) return
-      // One word, no bracketed hints: "göra susen" and "stoft(-et)" are real
-      // vocabulary entries, and neither can ever match a subtitle token, so
-      // letting them through only costs a heading that renders empty.
-      // A guess becomes a heading, and a heading is interpolated into markup
-      // and into two URLs. A vocabulary entry is free text the user typed, so
-      // only plain single words are let through — anything else could not
-      // match a subtitle token anyway.
+      // A vocabulary entry is free text the user typed, and "göra susen" and
+      // "stoft(-et)" are both real ones — so it is held to the same plain-word
+      // rule as everything else that can become a heading.
       const head = removeHintsInBrackets(_vocabLineFirstWord(line)).trim()
-      if (head && /^[\p{L}\p{M}'’-]+$/u.test(head)) out.push(head)
+      if (head && _PLAIN_WORD_RE.test(head)) out.push(head)
     })
   } catch (e) { console.warn('vocab guesses failed', e) }
   return [...new Set(out.filter(Boolean))]
@@ -6951,33 +6995,133 @@ function _vocabWordsForEnglish(englishWord) {
 // trip, and a search must not sit waiting on it, so it is given a short leash
 // and simply contributes nothing when it doesn't arrive in time.
 const CORRESPONDING_TRANSLATE_MS = 2500
-// Remembered for the session. The same word gets looked up again every time
-// the results are redrawn — a settings change re-renders them — and without
-// this the wait is paid again each time, and a slow answer that made the
-// deadline once but not twice would rename the headings under the user.
-const _TRANSLATE_GUESS_CACHE = new Map()
+// The confirming pass is a bonus on top of an answer we already have, so it
+// gets a shorter leash than the pass that produces one.
+const CORRESPONDING_CONFIRM_MS = 1500
+
+// Every lookup asks for the dictionary as well as the translation, and one
+// memo holds every direction. The same word is looked up again each time the
+// results are redrawn — a settings change re-renders them — and without this
+// the wait is paid again each time; worse, an answer that made the deadline
+// once but not twice would rename the headings under the user. Failures are
+// remembered too: a bridge that is present but not answering costs the full
+// wait, with the page showing "Loading…" throughout.
+const _TRANSLATE_DETAIL_CACHE = new Map()
+async function _translateDetailed(text, from, to, ms) {
+  const key = `${from}\u0000${to}\u0000${String(text).toLowerCase()}`
+  if (_TRANSLATE_DETAIL_CACHE.has(key)) return _TRANSLATE_DETAIL_CACHE.get(key)
+  const req = _requestTranslation(text, from, to, { detail: true })
+  // The request outlives our deadline. The first lookup of a session is the
+  // one that pays for the host waking its translator up, so it is the likeliest
+  // to miss — and the answer then arrives a moment later, correct and unwanted.
+  // Let it land: without this the one call most likely to be late is the one
+  // whose failure is remembered for the rest of the page's life.
+  req.then(v => { if (v) _TRANSLATE_DETAIL_CACHE.set(key, v) }, () => {})
+  let out = null
+  try { out = await _withTimeout(req, ms, 'translate') || null } catch (_) { out = null }
+  // Not over an answer that beat us to it.
+  if (!_TRANSLATE_DETAIL_CACHE.has(key)) _TRANSLATE_DETAIL_CACHE.set(key, out)
+  return out
+}
+
+// A heading has to be a plain single word. It is interpolated into markup and
+// into two URLs, and it has to be able to match a subtitle token at all — so
+// "göra susen" from the vocabulary and "rödaktigt färgämne" from the
+// dictionary are both let go, having no chance of matching anything anyway.
+const _PLAIN_WORD_RE = /^[\p{L}\p{M}'’-]+$/u
+
+// Flatten a dictionary answer into candidate words, best first.
+//
+// Senses are grouped by part of speech, and inside each the terms run in the
+// host's own order of likelihood. That order is the ranking: the `score` beside
+// a term is absent more often than present — of the six senses of "sjö" only
+// two carry one.
+//
+// Each term also carries `reverse`, its own back-translation list, and nothing
+// here reads it. It looks like free confirmation and is not: on a well-stocked
+// entry every sense reaches back to the word asked about. All six senses of
+// "sjö" name sjö in their reverse lists, down to "loch" — so rewarding it would
+// lift a whole dictionary entry at once against everything else, which is a
+// change of subject, not a ranking. Checking a translation means asking about
+// the studied-language word on its own; that is what the confirming pass does.
+function _rankedTermsFromDetail(detail) {
+  const out = []
+  const seen = new Set()
+  const add = (term, score) => {
+    const w = String(term || '').toLowerCase().trim()
+    if (w.length < 3 || seen.has(w) || !_PLAIN_WORD_RE.test(w)) return
+    seen.add(w)
+    const entry = { word: w, rank: out.length }
+    if (Number.isFinite(score)) entry.score = score
+    out.push(entry)
+  }
+  const senses = (detail && Array.isArray(detail.senses)) ? detail.senses : []
+  senses.forEach(sense => {
+    const terms = (sense && Array.isArray(sense.terms)) ? sense.terms : []
+    terms.forEach(t => add(t && t.term, t && t.score))
+  })
+  // The plain translation and the whole-string alternates come in behind the
+  // senses, being the whole answer rather than one sense of it.
+  add(detail && detail.text)
+  ;(detail && Array.isArray(detail.alternates) ? detail.alternates : []).forEach(a => add(a))
+  return out
+}
+
+// Every studied-language word the host offers for the searched English one.
+//
+// The dictionary is the better answer where it exists — one word rarely has
+// one translation, and "run" reaching us as "springa" alone loses köra, driva
+// and löpa before the counting even starts. It is not always there: the host
+// falls back to an offline translator that has no dictionary behind it, and
+// answers with a bare string. That string is still worth having, so it stays
+// as the fallback it always was.
 async function _translationGuesses(englishWord) {
   const en = String(englishWord || '').trim()
   if (en.length < 3 || !_haveTranslateBridge()) return []
   const studied = getLangFromUrl().code
   if (!studied) return []
-  const cacheKey = `${studied}\u0000${en.toLowerCase()}`
-  if (_TRANSLATE_GUESS_CACHE.has(cacheKey)) return _TRANSLATE_GUESS_CACHE.get(cacheKey)
-  try {
-    const text = await _withTimeout(
-      _requestTranslation(en, 'en', studied), CORRESPONDING_TRANSLATE_MS, 'translate-guess')
-    // A one-word query usually comes back as one word, but not always — take
-    // every word of the answer and let the scoring sort them out.
-    const words = String(text || '').toLowerCase().split(/[^\p{L}\p{M}'’-]+/u).filter(w => w.length >= 3)
-    _TRANSLATE_GUESS_CACHE.set(cacheKey, words)
-    return words
-  } catch (_) {
-    // Remember the failure too. A bridge that is there but not answering
-    // costs the full wait, and without this every redraw of the same results
-    // pays it again with the page showing "Loading…" throughout.
-    _TRANSLATE_GUESS_CACHE.set(cacheKey, [])
-    return []
-  }
+  const got = await _translateDetailed(en, 'en', studied, CORRESPONDING_TRANSLATE_MS)
+  const ranked = _rankedTermsFromDetail(got && { ...(got.detail || {}), text: got.text })
+  if (ranked.length) return ranked
+  // No dictionary — a one-word query usually comes back as one word, but not
+  // always, so take every word of the answer and let the scoring sort them out.
+  const text = String((got && got.text) || '')
+  return text.toLowerCase().split(/[^\p{L}\p{M}'’-]+/u).filter(w => w.length >= 3)
+}
+
+// Translate each guess back and see whether it comes out as what was searched
+// for. This is the one signal that checks rather than infers: everything else
+// reasons from how words are distributed, while this asks what the word means.
+//
+// Asked with the dictionary, because the answer that matters is often not the
+// first one: "kör" translates back to "drives", and only its sense list also
+// says "run". Where there is no dictionary the single answer is still checked,
+// exactly as before.
+//
+// Only the candidates whose meaning is still open are asked about. A word the
+// translator itself offered is already known to be a translation, and asking
+// again would push the words that genuinely need checking — the ones read off
+// the subtitles, which is to say the guesses — out of the batch.
+//
+// All at once rather than one after another — six words in sequence would add
+// six deadlines to a search, and they do not depend on each other.
+async function _backTranslations(candidates) {
+  if (!_haveTranslateBridge()) return new Map()
+  const studied = getLangFromUrl().code
+  if (!studied) return new Map()
+  const top = (candidates || [])
+    .filter(c => !(c.reasons || []).includes('translated'))
+    .slice(0, _MAX_GROUPS)
+  if (!top.length) return new Map()
+  const pairs = await Promise.all(top.map(async c => {
+    const got = await _translateDetailed(c.word, studied, 'en', CORRESPONDING_CONFIRM_MS)
+    if (!got) return [c.word, '']
+    const senses = (got.detail && Array.isArray(got.detail.senses)) ? got.detail.senses : []
+    const terms = senses.flatMap(s => (s && Array.isArray(s.terms) ? s.terms : []).map(t => t && t.term))
+    const alternates = (got.detail && Array.isArray(got.detail.alternates)) ? got.detail.alternates : []
+    return [c.word, [got.text, ...terms, ...alternates].filter(Boolean)]
+  }))
+  return new Map(pairs.filter(([, v]) => v && v.length))
 }
 
 // Lines in the subtitles this search already pulled down that use a guessed
@@ -6987,11 +7131,20 @@ async function _translationGuesses(englishWord) {
 // downstream (the renderer, the click handlers, the capture path) treats it
 // no differently from a hit the search found itself.
 function _extraMatchesForGuesses(candidates, existing) {
-  // Only the words that can still become headings are worth sweeping for —
-  // this walks every subtitle of every file the search pulled down, and the
-  // guesses below the cap would have their findings folded into the sweep-up
-  // anyway. See _regroupByCorrespondingWord for where the cap is applied.
-  const wanted = (candidates || []).slice(0, _MAX_GROUPS)
+  // The guesses, and all of them — a word the translator or the vocabulary
+  // offered, whether or not these results happen to use it.
+  //
+  // Not the words read off the subtitles themselves. Their evidence is already
+  // here, in the lines the search found, and sweeping for them only pulls in
+  // lines that have nothing to do with the search: an English search for
+  // "quickly" turned "ganska" — a word that merely keeps company with the
+  // answer — into a heading of 51 lines, 50 of which were dragged in this way.
+  //
+  // And all of them rather than the leaders, because which guesses become
+  // headings is settled after this runs, by dropping the ones nothing landed
+  // in. Sweeping only the top few would decide that before asking it.
+  const wanted = (candidates || []).filter(c =>
+    (c.reasons || []).some(r => r === 'translated' || r === 'vocabulary'))
   if (!wanted.length) return []
   const have = new Set((existing || []).map(it => `${it.url}|${it.line && it.line.index}`))
   const out = []
@@ -7028,6 +7181,159 @@ function _extraMatchesForGuesses(candidates, existing) {
   return out
 }
 
+// Which English word this search is really about.
+//
+// Everything downstream is built on the answer: it is handed to the host to
+// translate FROM English, looked for in the English side of the vocabulary, and
+// compared against back-translations. Given a studied-language word instead,
+// every one of those asks a question with no sensible answer — and the wrong
+// translation is then remembered for the session.
+//
+// The awkward case is a search begun from a vocabulary line, where both the raw
+// text ("precis|precisely") and the expanded form the search actually ran on
+// are studied-language-first. Neither string says which side is which, and a
+// stem expansion ("förvärvad|förvärva|förvärv") has no English side at all.
+//
+// So rather than guess from the shape, ask the results. Every one of them was
+// found by matching an English subtitle line, so the English part is the part
+// those lines use — and if none of them does, there is no English word here to
+// reason about and the whole grouping is better skipped.
+function _englishSearchWord(search, items) {
+  const raw = String(window.unprocessedSearchText || '') || String(search || '')
+  const parts = raw.split(SEPARATOR_PIPE)
+    .map(p => removeHintsInBrackets(p).trim().toLowerCase())
+    .filter(Boolean)
+  if (!parts.length) return ''
+  // Nothing to choose between: whatever was typed is the English side, phrase
+  // or not.
+  if (parts.length === 1) return parts[0]
+  const used = new Map()
+  ;(items || []).forEach(it => {
+    const tokens = new Set(_tokenizeLine((it && it.line && it.line.text) || ''))
+    if (!tokens.size) return
+    parts.forEach(p => {
+      const words = _tokenizeLine(p)
+      if (words.length && words.every(w => tokens.has(w))) used.set(p, (used.get(p) || 0) + 1)
+    })
+  })
+  let best = ''
+  used.forEach((n, part) => { if (!best || n > used.get(best)) best = part })
+  return best
+}
+
+// ─── The host's dictionary, shown ────────────────────────────────────────
+
+// Every term the dictionary offers, phrases included — unlike the grouping's
+// view of the same answer, which can only use single words because its terms
+// become headings. Here a phrase is worth showing and worth searching for.
+function _dictionaryTerms(detail) {
+  const out = []
+  const seen = new Set()
+  const add = (term, score, pos) => {
+    const w = String(term == null ? '' : term).trim()
+    const key = w.toLowerCase()
+    if (!w || seen.has(key)) return
+    seen.add(key)
+    const entry = { word: w, rank: out.length, pos: pos || '' }
+    if (Number.isFinite(score)) entry.score = score
+    out.push(entry)
+  }
+  const senses = (detail && Array.isArray(detail.senses)) ? detail.senses : []
+  senses.forEach(sense => {
+    const terms = (sense && Array.isArray(sense.terms)) ? sense.terms : []
+    terms.forEach(t => add(t && t.term, t && t.score, sense && sense.pos))
+  })
+  // The plain translation and the whole-string alternates are the answer rather
+  // than one sense of it, so they come in behind the senses.
+  add(detail && detail.text, null, '')
+  ;(detail && Array.isArray(detail.alternates) ? detail.alternates : []).forEach(a => add(a, null, ''))
+  return out
+}
+
+// Search one of them, against the studied language's subtitles.
+//
+// Whatever the toggle says. The toggle is there to choose which language you
+// are searching IN, and someone who has just read that "thin" is "tunn" wants
+// to see tunn in Swedish subtitles — going back to flip a switch first is a
+// step that only exists because of how the page is built. The override lasts
+// exactly one search and searchTextChanged clears it.
+function _searchStudiedTerm(term) {
+  const w = String(term || '').trim()
+  if (!w) return
+  window.forceLangForNextSearch = 'sv'
+  $('#searchText').val(w).trigger('input').trigger('change')
+}
+
+function _translationPanelEl() {
+  let $p = $('#translationPanel')
+  if (!$p.length) {
+    $p = $('<details id="translationPanel"><summary class="xl-summary"></summary><div class="xl-body"></div></details>')
+    $p.insertBefore('#result')
+    // Remembered, because this is either the first thing you want to see on
+    // every search or something you never want in the way, and which of the two
+    // it is does not change from one search to the next.
+    $p.on('toggle', function () {
+      try {
+        window._appSettings.translationPanelOpen = !!this.open
+        saveAppSettings()
+      } catch (_) {}
+    })
+    $p.on('click', '.xl-term', function (e) {
+      e.preventDefault(); e.stopPropagation()
+      _searchStudiedTerm($(this).attr('data-term'))
+    })
+  }
+  return $p
+}
+
+// What the host's dictionary makes of the English word just searched.
+//
+// One word rarely has one translation, and a search that shows only the first
+// hides the rest: "thin" is tunn, but it is also smal, mager and gles, and
+// which one a subtitle used is the whole question. Each is a search of its own,
+// one tap away.
+async function _renderTranslationPanel(token) {
+  const $p = $('#translationPanel')
+  // What the user typed, not what the search became. By the time it reaches
+  // render it has been through expandWords and may have picked up stems, so it
+  // arrives as "thin|thins" — a string no dictionary has an entry for.
+  const raw = String($('#searchText').val() || '')
+  // A vocabulary line is not a word to look up either, and which side of its
+  // pipe the English half sits on is not knowable from the string.
+  const usable = getSelectedLang() === 'en'
+    && raw.trim().length >= 3
+    && raw.indexOf(SEPARATOR_PIPE) < 0
+    && _haveTranslateBridge()
+  if (!usable) { if ($p.length) $p.hide(); return }
+  const studied = getLangFromUrl()
+  if (!studied || !studied.code) { if ($p.length) $p.hide(); return }
+  const word = raw.trim()
+  const got = await _translateDetailed(word, 'en', studied.code, CORRESPONDING_TRANSLATE_MS)
+  // The search moved on while the host was answering — the same token every
+  // other stage of the render checks itself against.
+  if (token !== undefined && token !== window._subtitleSearchToken) return
+  const terms = _dictionaryTerms(got && { ...(got.detail || {}), text: got.text })
+  const $panel = _translationPanelEl()
+  if (!terms.length) { $panel.hide(); return }
+  const langName = studied.fullName || studied.code.toUpperCase()
+  $panel.find('.xl-summary').html(
+    `<span class="xl-dir">EN → ${_.escape(langName)}</span>` +
+    `<span class="xl-word">${_.escape(word)}</span>` +
+    `<span class="xl-n">${terms.length}</span>`)
+  const chips = terms.map(t => {
+    const conf = _translationConfidence(t)
+    const why = t.pos ? `${t.pos}` : ''
+    const sure = Number.isFinite(t.score) ? `${Math.round(t.score * 100)}%` : 'no score given'
+    return `<button type="button" class="xl-term xl-conf-${conf}" data-term="${_.escape(t.word)}"` +
+      ` title="${_.escape(`Search ${t.word} in ${langName} subtitles${why ? ` · ${why}` : ''} · ${sure}`)}">` +
+      `${_.escape(t.word)}</button>`
+  }).join('')
+  $panel.find('.xl-body').html(`<div class="xl-terms">${chips}</div>`)
+  const open = !(window._appSettings && window._appSettings.translationPanelOpen === false)
+  $panel[0].open = open
+  $panel.show()
+}
+
 // Returns a replacement for wordToItemsMap, or null to leave the search alone.
 async function _regroupByCorrespondingWord(wordToItemsMap, search) {
   try {
@@ -7047,21 +7353,13 @@ async function _regroupByCorrespondingWord(wordToItemsMap, search) {
     })
     if (items.length < 2) return null
 
-    const index = _buildStudiedLineIndex()
-    const lineOf = it => _studiedLineTextOf(index, it)
+    const { byUrl, background, backgroundLines } = _buildStudiedLineIndex()
+    const lineOf = it => _studiedLineTextOf(byUrl, it)
     const lines = items.map(lineOf).filter(Boolean)
     if (!lines.length) return null
 
-    // unprocessedSearchText is the raw text behind the search, which for a
-    // search started from a vocabulary line is the whole entry —
-    // "precis|precisely". Its first part is the studied-language headword, not
-    // the English one, and asking the host to translate that FROM English
-    // gives a wrong answer and caches it. Only trust it when it is a plain
-    // term; otherwise use what was actually searched.
-    const _rawSearch = String(window.unprocessedSearchText || '')
-    const searchWord = String(
-      (_rawSearch && _rawSearch.indexOf(SEPARATOR_PIPE) < 0) ? _rawSearch : (search || '')
-    ).split(SEPARATOR_PIPE)[0].trim()
+    const searchWord = _englishSearchWord(search, items)
+    if (!searchWord) return null
     // Ask for more candidates than there are headings. A word offered by the
     // translator or the vocabulary is admitted before we know whether any
     // line uses it, so capping here would spend the headings on guesses that
@@ -7072,12 +7370,20 @@ async function _regroupByCorrespondingWord(wordToItemsMap, search) {
       vocabWords: _vocabWordsForEnglish(searchWord),
       translatedWords: await _translationGuesses(searchWord),
       stopWords: VOCAB_OVERLAP_STOP_WORDS,
+      background,
+      backgroundLines,
       max: _MAX_GROUPS * 3,
     })
     if (!candidates.length) return null
 
-    const all = items.concat(_extraMatchesForGuesses(candidates, items))
-    let groups = _groupResultsByWord(all, candidates, lineOf)
+    // Ask the translator to check the answer before it becomes a heading.
+    const checked = _confirmByBackTranslation(
+      candidates, searchWord, await _backTranslations(candidates))
+
+    const all = items.concat(_extraMatchesForGuesses(checked, items))
+    let groups = _groupResultsByWord(all, checked, lineOf)
+    // A swept line carries _viaGuess; a line the search itself found does not.
+    groups = _sinkUnevidencedGroups(groups, it => !(it && it._viaGuess))
     // More candidates were asked for than there are headings, so trim — the
     // findings under a dropped heading move to the sweep-up, never away.
     groups = _capGroups(groups, _MAX_GROUPS)
@@ -7086,7 +7392,15 @@ async function _regroupByCorrespondingWord(wordToItemsMap, search) {
     if (groups.length < 2) return null
 
     const out = {}
-    groups.forEach(g => { out[g.word] = g.items })
+    groups.forEach(g => {
+      // A swept line says which word brought it in, and grouping may since have
+      // filed it under a stronger word the same line happens to use. Say where
+      // it ended up, so the label and the heading cannot contradict each other.
+      if (g.word !== _EVERYTHING_ELSE) {
+        g.items.forEach(it => { if (it && it._viaGuess) it._viaGuess = g.word })
+      }
+      out[g.word] = g.items
+    })
     return out
   } catch (e) {
     console.warn('grouping by corresponding word failed', e)
@@ -7111,6 +7425,9 @@ async function render(searchResults, search, className, token) {
     } else {
       renderVocabularyFindings(search)
     }
+    // Fire-and-forget: the dictionary comes over the host bridge and the
+    // results must not wait on it.
+    _renderTranslationPanel(token).catch(e => console.warn('translation panel failed', e))
   }
   if (!searchResults) return {}
 
@@ -11779,16 +12096,45 @@ function _haveTranslateBridge() {
   return !!(window.TranslateRequest && typeof window.TranslateRequest.postMessage === 'function')
 }
 
-window.__cupTranslated = function (id, result, err) {
+// A fourth positional argument, `detail`, carries per-sense dictionary data —
+// but only for a caller that asked for it via `_requestTranslation(..., {
+// detail: true })`. One word rarely has one translation, and the host was
+// already discarding the senses Google returns alongside every lookup.
+function _asDetailObject(detail) {
+  if (!detail) return null
+  if (typeof detail === 'object') return detail
+  if (typeof detail !== 'string') return null
+  try {
+    const parsed = JSON.parse(detail)
+    return (parsed && typeof parsed === 'object') ? parsed : null
+  } catch (_) { return null }
+}
+
+window.__cupTranslated = function (id, result, err, detail) {
   const pending = _TRANSLATE_PENDING[id]
   if (!pending) return
   delete _TRANSLATE_PENDING[id]
   if (err) pending.reject(new Error(typeof err === 'string' ? err : (err && err.message) || 'translate-failed'))
+  // Callers that did not opt in keep resolving with the bare string they
+  // always have; the object form would turn into "[object Object]" in the
+  // several places that do String(await ...).
+  // The host may hand the payload over as an object or as the JSON text of
+  // one. Read as text it would simply look like a word with no senses in it,
+  // and the page would quietly fall back to the plain translation for the rest
+  // of the session.
+  else if (pending.wantsDetail) pending.resolve({ text: result, detail: _asDetailObject(detail) })
   else pending.resolve(result)
 }
 
-function _requestTranslation(text, source, target) {
+// opts.detail — ask the host for dictionary senses as well as the translation.
+// Resolves with { text, detail } instead of a plain string when set. `detail`
+// is { provider, senses: [{ pos, terms: [{ term, reverse, score }] }],
+// alternates }, and `provider` is 'mlkit' when the answer came from the
+// offline fallback, which has no dictionary — so an empty `senses` there means
+// "unavailable", not "this word has a single sense".
+function _requestTranslation(text, source, target, opts) {
   if (!_haveTranslateBridge()) return Promise.reject(new Error('no-bridge'))
+  const wantsDetail = !!(opts && opts.detail)
   return new Promise((resolve, reject) => {
     const id = _translateReqSeq++
     const timer = setTimeout(() => {
@@ -11797,9 +12143,14 @@ function _requestTranslation(text, source, target) {
     _TRANSLATE_PENDING[id] = {
       resolve: (v) => { clearTimeout(timer); resolve(v) },
       reject: (e) => { clearTimeout(timer); reject(e) },
+      wantsDetail,
     }
     try {
-      window.TranslateRequest.postMessage(JSON.stringify({ id, text, source, target }))
+      // The key is omitted entirely when not wanted, so the payload an
+      // existing call site sends is byte-identical to before.
+      window.TranslateRequest.postMessage(JSON.stringify(
+        wantsDetail ? { id, text, source, target, detail: true }
+                    : { id, text, source, target }))
     } catch (e) {
       clearTimeout(timer); delete _TRANSLATE_PENDING[id]; reject(e)
     }
@@ -12102,6 +12453,20 @@ function _cardFacesInOrder(it) {
 function _cardClipsInOrder(it) { return _cardFacesInOrder(it).filter(f => f.url) }
 function _cardHasAudio(it) { return _cardAudioUrls(it).length > 0 }
 
+// Whether a manual card has anything the player can actually sound.
+//
+// Carrying a link is not the same as having something to play. A card whose
+// only media is an ordinary web address has nothing the player can do with it —
+// it opens in a browser tab, which is not what a running deck is for — so the
+// deck used to stop on it in silence, waiting out the gap on a card that could
+// never make a sound. A video it can play; a recording it can play; a link it
+// cannot.
+function _cardHasPlayableMedia(it) {
+  if (_cardHasAudio(it)) return true
+  const media = _parseMediaUrl(it && it.mediaUrl)
+  return !!media && (media.kind === 'youtube' || media.kind === 'audio')
+}
+
 // ─── Native recording (via AudioBridge / Android MediaRecorder) ──────────
 // The editor's $rec/$stop handlers call `_audioRpc('recordStart' | 'recordStop')`
 // directly so they can inspect the PlatformException code (in particular
@@ -12147,8 +12512,10 @@ async function _startManualAudioPreview(url, $btn) {
   // Same button clicked again → stop.
   const cur = window._manualAudioPreview
   if (cur && cur.$btn && $btn && cur.$btn.is($btn)) { _stopManualAudioPreview(); return }
-  // Different button: stop the old clip first so we don't double-play.
+  // Different button: stop the old clip first so we don't double-play — and
+  // the deck and Practice too, since a preview is a request to hear THIS.
   _stopManualAudioPreview()
+  _silenceOtherAudio('preview')
   const dataUrl = await loadManualAudioData(url)
   if (!dataUrl) { console.warn('[manualAudio] could not load', url); return }
   const a = new Audio(dataUrl)
@@ -13197,6 +13564,10 @@ $(function () {
 function _installWebViewScroll(el) {
   if (!el) return
   const rewrap = () => {
+    // Where the user was. The dialog re-renders on every native playlist push,
+    // and the offset lives on the container, which survives that — so it can be
+    // put back rather than snapping the list to the top under someone's thumb.
+    const keep = el._fsOff || 0
     // (Re)wrap the freshly-rendered children — the dialog HTML is rebuilt each
     // open — into a single relatively-positioned inner element we can offset.
     const inner = document.createElement('div')
@@ -13205,8 +13576,14 @@ function _installWebViewScroll(el) {
     inner.style.top = '0px'
     while (el.firstChild) inner.appendChild(el.firstChild)
     el.appendChild(inner)
-    el.style.overflow = 'hidden'
-    el.style.touchAction = 'none'
+    // Only the vertical axis has a height problem. Sideways the content is
+    // nowhere near the layer ceiling, so that axis keeps native scrolling —
+    // clipping both was what left a wide row with no way to reach its end.
+    el.style.overflowX = 'auto'
+    el.style.overflowY = 'hidden'
+    // pan-x, not none: the browser still owns sideways dragging, and we take
+    // over only once a gesture turns out to be a vertical one.
+    el.style.touchAction = 'pan-x'
     el._fsInner = inner
     el._fsOff = 0
     el._fsApply = (v) => {
@@ -13214,6 +13591,7 @@ function _installWebViewScroll(el) {
       el._fsOff = Math.min(max, Math.max(0, v))
       inner.style.top = (-el._fsOff) + 'px'
     }
+    el._fsApply(keep)
     // The playlist-switcher select2 dropdown would be clipped by overflow:hidden,
     // so re-home it on <body> when we're in fake-scroll mode.
     try {
@@ -13228,18 +13606,34 @@ function _installWebViewScroll(el) {
   function bindOnce() {
     if (el._fsBound) return
     el._fsBound = true
-    let startY = 0, startOff = 0, dragging = false, lastY = 0, lastDy = 0, momentum = null
+    let startY = 0, startX = 0, startOff = 0, dragging = false
+    let lastY = 0, lastDy = 0, momentum = null
+    // Which way this gesture turned out to go. Undecided until it has moved far
+    // enough to tell: claiming it on the first pixel makes a sideways drag
+    // jump the list, and never claiming it leaves the list unable to move.
+    let axis = null
+    const AXIS_SLOP = 6
     const stopMomentum = () => { if (momentum) { cancelAnimationFrame(momentum); momentum = null } }
     el.addEventListener('touchstart', e => {
       if (!e.touches || e.touches.length !== 1) { dragging = false; return }
       stopMomentum()
       startY = e.touches[0].clientY
+      startX = e.touches[0].clientX
       startOff = el._fsOff || 0
-      lastY = startY; lastDy = 0; dragging = true
+      lastY = startY; lastDy = 0; dragging = true; axis = null
     }, { passive: true })
     el.addEventListener('touchmove', e => {
       if (!dragging || !el._fsInner || !e.touches || !e.touches.length) return
       const y = e.touches[0].clientY
+      const x = e.touches[0].clientX
+      if (axis === null) {
+        const dy = Math.abs(y - startY), dx = Math.abs(x - startX)
+        if (Math.max(dy, dx) < AXIS_SLOP) { lastY = y; return }
+        axis = dy > dx ? 'y' : 'x'
+      }
+      // Sideways is the browser's to handle, and preventing it here is exactly
+      // what stopped it working.
+      if (axis === 'x') return
       lastDy = y - lastY; lastY = y
       if (el._fsApply) el._fsApply(startOff + (startY - y))
       if (e.cancelable) e.preventDefault()
@@ -13247,6 +13641,8 @@ function _installWebViewScroll(el) {
     const end = () => {
       if (!dragging) return
       dragging = false
+      if (axis === 'x') { axis = null; return }
+      axis = null
       let v = -lastDy * 1.3
       const step = () => {
         if (Math.abs(v) < 0.5 || !el._fsInner) { momentum = null; return }
@@ -13261,15 +13657,39 @@ function _installWebViewScroll(el) {
   }
   // Already in fake-scroll mode (a prior open detected the bug) → just re-wrap.
   if (el._fsBound) { rewrap(); return }
+  // Asked and answered. The probe moves the list to find out whether it can be
+  // moved, so running it on every re-render meant every native playlist push
+  // dragged the user back to the top — on the browsers where scrolling worked
+  // perfectly well.
+  if (el._fsNativeOk) return
   // Nothing to scroll → leave alone.
   if (el.scrollHeight <= el.clientHeight + 4) return
   // Probe native scroll: set a small scrollTop and see if it survives a frame.
+  const before = el.scrollTop
   el.scrollTop = 2
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const nativeWorks = el.scrollTop >= 1
-    el.scrollTop = 0
-    if (!nativeWorks) rewrap()
+    // Back where it was, not to the top: the caller may already have restored
+    // the user's position before this frame came round.
+    el.scrollTop = before
+    if (nativeWorks) el._fsNativeOk = true
+    else rewrap()
   }))
+}
+
+// Where a dialog is scrolled to, and how to put it back — asked of whichever
+// mechanism is actually moving it. On a WebView driven by the fake scroller
+// above, scrollTop is always 0 and always will be; reading it there is what
+// made every attempt to preserve the position a no-op.
+function _recDlgScrollPos(el) {
+  if (!el) return 0
+  return el._fsInner ? (el._fsOff || 0) : (el.scrollTop || 0)
+}
+
+function _recDlgScrollTo(el, v) {
+  if (!el) return
+  if (typeof el._fsApply === 'function') el._fsApply(v)
+  else el.scrollTop = v
 }
 
 // Number every row in the dialog, top to bottom, so an item can be named by
@@ -13313,7 +13733,7 @@ function openRecordingReviewDialog() {
   // Without this, every native push while the user is scrolling snaps the list
   // back to the top — the WebView-only "slowly scrolls back to top" bug.
   const _wasOpen = $dlg.hasClass('ui-dialog-content') && $dlg.is(':visible')
-  const _prevScrollTop = _wasOpen && $dlg[0] ? ($dlg[0].scrollTop || 0) : 0
+  const _prevScrollTop = _wasOpen && $dlg[0] ? _recDlgScrollPos($dlg[0]) : 0
   let html = ''
   // ── Header: switch / create / new-virtual / rename / duplicate / delete ──
   html += `<div class="rec-rec-header" style="margin-bottom:10px;padding:6px 6px 8px;border-bottom:1px solid #ddd;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
@@ -13777,11 +14197,6 @@ function openRecordingReviewDialog() {
   } else {
     $dlg.dialog(opts)
   }
-  // Restore the pre-refresh scroll position (see _prevScrollTop above). Runs
-  // after .dialog('open') so the content height is already established.
-  if (_wasOpen && _prevScrollTop) {
-    try { $dlg[0].scrollTop = _prevScrollTop } catch (_) {}
-  }
   // Make the playlist switcher searchable. The dialog HTML is rebuilt each open,
   // so destroy any stale select2 before re-initialising. dropdownParent keeps
   // the search dropdown layered inside the dialog.
@@ -13796,7 +14211,15 @@ function openRecordingReviewDialog() {
   // and populate the per-row preview spans. Fire-and-forget — if it fails
   // the row just shows "(no preview available)".
   _lazyLoadRecItemPreviews($dlg).catch(e => console.warn('preview lazy-load failed', e))
+  // Install first: on a WebView this re-wraps the freshly-rendered rows, and
+  // the position can only be set once there is something to set it on.
   try { _installWebViewScroll($dlg[0]) } catch (_) {}
+  // Put the user back where they were. This runs on every native playlist push
+  // and every return from an editor, not just on a deliberate re-open — a list
+  // that jumps to the top each time is unusable at any length.
+  if (_wasOpen && _prevScrollTop) {
+    try { _recDlgScrollTo($dlg[0], _prevScrollTop) } catch (_) {}
+  }
 }
 
 // Wait until YouTube's currentTime crosses `timeEnd`, then pause it. Bails
@@ -14084,25 +14507,17 @@ function _renderPlayingBanner(it, idx, total) {
   window._recPlayBannerArgs = { it, idx, total }
   let $b = $('#recPlayingBanner')
   if (!$b.length) {
-    // Top row is the compact mobile view: count, progress, gap stepper, info
-    // toggle. Head + meta live below and are hidden on narrow viewports
-    // until the user taps the ℹ button. Desktop CSS keeps everything visible.
+    // Top row is what is always on screen: progress, the two mode buttons and
+    // the ℹ toggle. Head, meta and both time steppers live in the details
+    // block below — a gap is something you set now and then, not something
+    // worth the width it costs on a phone every second the deck is running.
+    // Desktop CSS keeps the details block open, so nothing is buried there.
     $b = $(`<div id="recPlayingBanner">
       <div class="rec-pb-top">
         <div class="rec-pb-progress">
           <span class="rec-pb-bar"></span>
           <span class="rec-pb-count"></span>
         </div>
-        <span class="rec-pb-gap" title="Inter-item gap (seconds) — click ± or tap the value to type">
-          <button type="button" class="rec-pb-gap-dec" aria-label="Decrease gap">−</button>
-          <span class="rec-pb-gap-val" tabindex="0" role="button" title="Tap to set gap">30s</span>
-          <button type="button" class="rec-pb-gap-inc" aria-label="Increase gap">+</button>
-        </span>
-        <span class="rec-pb-gap rec-pb-sgap" style="display:none;" title="Pause between this card's Source and Target recordings — click ± or tap the value to type">
-          <button type="button" class="rec-pb-sgap-dec" aria-label="Decrease source-to-target pause">−</button>
-          <span class="rec-pb-sgap-val" tabindex="0" role="button" title="Tap to set the source→target pause">ᔆᵀ –</span>
-          <button type="button" class="rec-pb-sgap-inc" aria-label="Increase source-to-target pause">+</button>
-        </span>
         <button type="button" class="rec-pb-swap-btn" title="Practise the other way round — Target first" aria-label="Swap Source and Target">⇄</button>
         <button type="button" class="rec-pb-music-btn" title="Background music" aria-label="Background music">♫</button>
         <button type="button" class="rec-pb-info-btn" title="Show details" aria-label="Show details" aria-expanded="false">
@@ -14115,11 +14530,16 @@ function _renderPlayingBanner(it, idx, total) {
       <div class="rec-pb-details">
         <div class="rec-pb-head"></div>
         <div class="rec-pb-meta"></div>
-        <div class="rec-pb-details-gap">
+        <div class="rec-pb-times">
           <span class="rec-pb-gap" title="Inter-item gap (seconds) — click ± or tap the value to type">
             <button type="button" class="rec-pb-gap-dec" aria-label="Decrease gap">−</button>
             <span class="rec-pb-gap-val" tabindex="0" role="button" title="Tap to set gap">30s</span>
             <button type="button" class="rec-pb-gap-inc" aria-label="Increase gap">+</button>
+          </span>
+          <span class="rec-pb-gap rec-pb-sgap" style="display:none;" title="Pause between this card's Source and Target recordings — click ± or tap the value to type">
+            <button type="button" class="rec-pb-sgap-dec" aria-label="Decrease source-to-target pause">−</button>
+            <span class="rec-pb-sgap-val" tabindex="0" role="button" title="Tap to set the source→target pause">ᔆᵀ –</span>
+            <button type="button" class="rec-pb-sgap-inc" aria-label="Increase source-to-target pause">+</button>
           </span>
         </div>
       </div>
@@ -14194,20 +14614,11 @@ function _renderPlayingBanner(it, idx, total) {
   const gap = window._appSettings && window._appSettings.recPlayGapSeconds
   updatePlayingBanner(buildPlayingBannerVM(it, idx, total, gap, _cardFacesReversed()), $b[0], $w[0])
   // The source→target pause only bites on a card that carries both
-  // recordings, so its stepper only shows there — the compact mobile row has
-  // no room for a knob that does nothing to the item being played.
+  // recordings, so its stepper only shows there — a knob that does nothing to
+  // the card in front of you is worse than no knob.
   const dual = !!(_cardSourceAudio(it) && _cardTargetAudio(it))
   $b.find('.rec-pb-sgap').toggle(dual)
-  // Narrow viewports only have room for one pill, so the class lets CSS swap
-  // the item-gap pill out for this one while a dual card is playing. The
-  // item gap keeps a second copy of its stepper inside the ℹ details block,
-  // which CSS reveals in exactly that case — otherwise a deck where every
-  // card has both recordings would leave no way to change it on a phone
-  // without pausing to open Settings.
-  $b.toggleClass('rec-pb-has-sgap', dual)
   _syncRecPlayReverseBtn()
-  // updatePlayingBanner writes only the first .rec-pb-gap-val it finds, so
-  // the details copy gets its text from here.
   _syncItemGapUI()
   if (dual) _syncSrcTgtGapUI()
 }
@@ -15333,6 +15744,7 @@ function _recPlayAudioEl() {
       // about it. Without this a replay started by hand during a gap gets the
       // gap's louder music straight over the top of the pronunciation.
       _setRecPlayPhase('clip')
+      _stopPracticeAudio()
       if (window._playingRecording && window._recPlayPaused) _applyRecPlayPause(false, false)
     })
     el.addEventListener('pause', () => {
@@ -15422,10 +15834,9 @@ async function _playManualFace(url, label) {
   // stopPlayingRecording had just removed and play into a finished session,
   // where nothing is left that could pause it.
   if (!dataUrl || !window._playingRecording) return
-  // Share the single preview slot, so a badge preview and a face replay can't
-  // sound over each other.
-  _stopManualAudioPreview()
+  // Only one recording sounds at a time, whichever mode started it.
   const a = _recPlayAudioEl()
+  _silenceOtherAudio('deck')
   $('#recPlayingAudio').find('.rec-pa-face').text(label)
   _setManualAudioSrc(a, dataUrl)
   window._recPlayManualAudio = a
@@ -15436,13 +15847,150 @@ async function _playManualFace(url, label) {
   try { await a.play() } catch (e) { console.warn('[manualAudio] face replay failed', e) }
 }
 
+// How tall whatever is sitting in the media slot turned out to be. Cleared to
+// nothing when the video has the slot back, so the card returns to the 16:9
+// offset its own rule describes.
+function _setPracticeMediaHeight(px) {
+  try {
+    if (px > 0) document.body.style.setProperty('--practice-media-h', px + 'px')
+    else document.body.style.removeProperty('--practice-media-h')
+  } catch (_) {}
+}
+
+// The card's recordings in the order Practice is showing its faces — which is
+// Practice's own direction toggle, not the player's reverse switch. The two are
+// separate settings and a card can be practised one way while the deck is set
+// to play the other.
+function _practiceClipsInOrder(it) {
+  const source = { key: 'source', label: 'Source', icon: 'ᔆ', url: _cardSourceAudio(it) }
+  const target = { key: 'target', label: 'Target', icon: 'ᵀ', url: _cardTargetAudio(it) }
+  const faces = window._practiceFrontIsSource === false ? [target, source] : [source, target]
+  return faces.filter(f => f.url)
+}
+
+// Practice's own audio panel, and its own <audio> element.
+//
+// Deliberately not the player's. A playlist session does not end when Practice
+// opens — minimising the player only pauses it, and the deck sits parked
+// waiting for its current clip to finish — so the two modes are live at the
+// same time, and one element between them means each is holding something the
+// other is entitled to change. Practice cueing a card would silence the deck's
+// clip in a way the deck never hears about, leaving it waiting for an 'ended'
+// that can no longer come; closing Practice would hide the panel the deck is
+// still using. They look alike and behave alike; they are not the same thing.
+//
+// What they must share is the silence: only one recording sounds at a time.
+// That is arranged where playback starts, not by pooling the elements.
+function _practiceAudioEl() {
+  let $wrap = $('#practiceAudio')
+  if (!$wrap.length) {
+    $wrap = $(`<div id="practiceAudio">
+      <div class="rec-pa-face"></div>
+      <audio class="rec-pa-el" controls preload="auto"></audio>
+      <div class="rec-pa-faces"></div>
+    </div>`).appendTo('body')
+    // Pressing Play on the controls is as much a request for sound as pressing
+    // a face button, so it silences the other sources too.
+    const el = $wrap.find('.rec-pa-el')[0]
+    el.addEventListener('play', () => _silenceOtherAudio('practice'))
+  }
+  return $wrap.find('.rec-pa-el')[0]
+}
+
+// Whatever else is sounding, stop it. Three things can make a recording play —
+// the deck, a badge preview and Practice — and any two of them at once is just
+// noise. `starting` says which of them is about to sound: 'deck', 'practice' or
+// 'preview'. Silencing the deck is a different act from silencing the other
+// two, which is why it needs saying.
+function _silenceOtherAudio(starting) {
+  if (starting !== 'preview') { try { _stopManualAudioPreview() } catch (_) {} }
+  if (starting !== 'practice') _stopPracticeAudio()
+  if (starting !== 'deck') {
+    // Pausing the deck's <audio> behind its back is not enough — it is worse
+    // than nothing. The deck waits out each clip by listening for 'ended', and
+    // a clip that was paused never ends, so it would sit on that card for good
+    // with the session still nominally running. Pause the SESSION instead: its
+    // own machinery stops the element, the transport and the media session
+    // agree about it, and Resume picks up where it left off.
+    //
+    // This is also what silences a video card, whose sound is the YouTube
+    // player rather than any element of ours.
+    if (window._playingRecording && !window._recPlayPaused) { _applyRecPlayPause(true, true); return }
+    const player = window._recPlayManualAudio
+    if (player) { _recPaExpectPause(player); try { player.pause() } catch (_) {} }
+  }
+}
+
+function _stopPracticeAudio() {
+  const el = $('#practiceAudio .rec-pa-el')[0]
+  if (el) { try { el.pause() } catch (_) {} }
+}
+
+// Play one of the card's faces through Practice's element.
+async function _playPracticeFace(face) {
+  if (!face || !face.url) return
+  const token = window._practiceClipToken
+  let dataUrl = null
+  try { dataUrl = await loadManualAudioData(face.url) } catch (_) {}
+  if (!dataUrl || !window._practiceActive || token !== window._practiceClipToken) return
+  const el = _practiceAudioEl()
+  $('#practiceAudio').find('.rec-pa-face').text(face.label)
+  el.src = dataUrl
+  try { await el.play() } catch (e) { console.warn('[practiceAudio] play failed', e) }
+}
+
+// Show the panel for a manual card, and with it hide the video slot it takes.
+//
+// The front face is cued but not played. Practice is for recalling, and a card
+// that sounds the moment it appears has answered its own question — but with
+// nothing loaded the controls sit there dead, so the cue is what makes Play
+// mean something.
+async function _showPracticeAudioPanel(it) {
+  const clips = _isManualItem(it) ? _practiceClipsInOrder(it) : []
+  $('body').toggleClass('practice-manual', clips.length > 0)
+  _stopPracticeAudio()
+  if (!clips.length) {
+    $('#practiceAudio').hide()
+    _setPracticeMediaHeight(0)
+    return
+  }
+  const el = _practiceAudioEl()
+  const $w = $('#practiceAudio').show()
+  const front = clips[0]
+  $w.find('.rec-pa-face').text(front.label)
+  const $row = $w.find('.rec-pa-faces').empty().toggle(clips.length > 1)
+  clips.forEach(f => {
+    $('<button type="button" class="rec-pa-face-btn"></button>')
+      .attr('title', `Play the ${f.label} recording`)
+      .text(`${f.icon} ${f.label}`)
+      .on('click', ev => { ev.preventDefault(); _playPracticeFace(f) })
+      .appendTo($row)
+  })
+  // The card is laid out to clear a 16:9 video. This panel is a good deal
+  // shorter, and left at the video's height the card would start a third of
+  // the way down an empty screen. Measured rather than guessed: the panel
+  // grows with the number of faces the card carries.
+  _setPracticeMediaHeight($w[0] ? $w[0].offsetHeight : 0)
+  // Cards change faster than the bridge answers, so the card that asked has to
+  // still be the card on screen when the bytes arrive.
+  const token = window._practiceClipToken
+  let dataUrl = null
+  try { dataUrl = await loadManualAudioData(front.url) } catch (_) {}
+  if (!window._practiceActive || token !== window._practiceClipToken) return
+  // A cue that could not be loaded must clear the element, not leave it. The
+  // panel is now labelled with THIS card's face, and the previous card's
+  // recording is still in there — Play would sound the wrong card.
+  if (!dataUrl) { try { el.removeAttribute('src'); el.load() } catch (_) {}; return }
+  el.src = dataUrl
+}
+
 async function _playManualAudioAndWait(url, faceLabel) {
   let dataUrl = null
   try { dataUrl = await loadManualAudioData(url) } catch (_) {}
   if (!dataUrl || !window._playingRecording) return
-  // Share the single preview slot so a badge preview and playlist audio never
-  // overlap, and so stopPlayingRecording / navigation can silence it.
-  _stopManualAudioPreview()
+  // Only one recording sounds at a time, whichever mode started it — and
+  // stopPlayingRecording / navigation can silence this one.
+  _silenceOtherAudio('deck')
   const a = _showManualAudioPlayer(true, faceLabel)
   _setManualAudioSrc(a, dataUrl)
   // A recording is about to sound: 'item' mode plays under it, 'gap' mode
@@ -15691,9 +16239,29 @@ async function playRecording(opts) {
   const _curLooping  = () => { const l = _curLoop(); return l === 'one' || l === 'playlist' || l === 'all' }
   let prevWord = null
   let i = startIdx
-  // Guard against an all-text-only queue: count consecutive text-only cards we
-  // skip and bail once we've circled the whole queue with nothing to play.
+  // Guard against a queue with nothing playable in it: count the cards we skip
+  // and bail once we have circled the whole queue with nothing to play.
   let textOnlySkips = 0
+  // Where to look next after skipping a card, in the direction the user last
+  // navigated — a "previous" tap has to keep going backwards past the cards it
+  // cannot play, or Prev lands back on the card it started from and looks
+  // broken.
+  const _stepOverSkipped = () => {
+    const backward = !!window._recPlaySlowdown
+    if (backward && i <= 0 && !_curLooping()) {
+      // Nothing behind this card and nowhere to wrap to. Clamping to 0 would
+      // skip the same card over and over until the counter ran out and stopped
+      // a session whose later items were all playable — so turn round and sweep
+      // forwards instead, and let the counter start that sweep afresh: it is
+      // there to catch a queue with nothing in it, not to punish a change of
+      // direction.
+      window._recPlaySlowdown = false
+      textOnlySkips = 0
+      return 1
+    }
+    if (backward) return i > 0 ? i - 1 : queue.length - 1
+    return i + 1 < queue.length ? i + 1 : (_curLooping() ? 0 : queue.length)
+  }
   while (window._playingRecording) {
     // Boundary handling: with no loop we exit at queue end; otherwise wrap.
     if (i >= queue.length) {
@@ -15718,19 +16286,17 @@ async function playRecording(opts) {
     }
     if (!_isManualItem(it) && it.source && it.source.toLowerCase() !== 'youtube') {
       console.warn('playRecording: skipping non-YouTube item', it)
-      i++
+      if (++textOnlySkips >= queue.length) { stopPlayingRecording(); break }
+      i = _stepOverSkipped()
       continue
     }
-    // Text-only manual cards (no media to play) are skipped during playback —
-    // they belong to Practice, not the play queue. Move in the direction the
-    // user last navigated (backward after a prev tap) so skipping feels natural,
-    // and stop if the whole queue turns out to be text-only.
-    if (_isManualItem(it) && !_cardHasAudio(it) && !it.mediaUrl) {
+    // Manual cards with nothing to sound are skipped during playback — they
+    // belong to Practice, not the play queue. Move in the direction the user
+    // last navigated (backward after a prev tap) so skipping feels natural, and
+    // stop if the whole queue turns out to have nothing to play.
+    if (_isManualItem(it) && !_cardHasPlayableMedia(it)) {
       if (++textOnlySkips >= queue.length) { stopPlayingRecording(); break }
-      const backward = !!window._recPlaySlowdown
-      i = backward
-        ? (i > 0 ? i - 1 : (_curLooping() ? queue.length - 1 : 0))
-        : (i + 1 < queue.length ? i + 1 : (_curLooping() ? 0 : queue.length))
+      i = _stepOverSkipped()
       continue
     }
     textOnlySkips = 0
@@ -16155,6 +16721,11 @@ function _applyRecPlayPause(paused, controlYt = true) {
     $('body').removeClass('rec-paused')
     $('#recPlayingPauseBtn .rec-icon-pause').show()
     $('#recPlayingPauseBtn .rec-icon-play').hide()
+    // Lifting the pause is the deck starting to sound again, and it is reachable
+    // from the restore pill while Practice is open and playing — so it silences
+    // the others exactly as starting a fresh clip does. A video card resumes
+    // through the YouTube player, which no element listener would catch.
+    if (controlYt) _silenceOtherAudio('deck')
     if (controlYt) {
       const _ma = window._recPlayManualAudio
       // An ended clip means the card is in a gap — the pause being lifted was a
@@ -16268,8 +16839,8 @@ function openPlayingQueueDialog() {
     html += `<div class="pqd-row${isCur ? ' pqd-current' : ''}" data-idx="${i}">
       <span class="pqd-num">${i + 1}</span>
       <div class="pqd-body">
-        <div class="pqd-text">${_.escape(label)}</div>
-        ${sub ? `<div class="pqd-sub">${_.escape(sub)}</div>` : ''}
+        <div class="pqd-text" title="${_.escape(label)}">${_.escape(label)}</div>
+        ${sub ? `<div class="pqd-sub" title="${_.escape(sub)}">${_.escape(sub)}</div>` : ''}
       </div>
       <button type="button" class="pqd-play" data-idx="${i}" title="Play from here" aria-label="Play from here">▶</button>
     </div>`
@@ -16425,6 +16996,12 @@ function stopPlayingRecording() {
 // the current playlist. Falls back to the current playlist when omitted.
 function openPracticeMode(opts) {
   opts = opts || {}
+  // A running deck is not stopped by opening Practice — the session stays alive
+  // so it can be resumed — but it must not still be sounding underneath, and
+  // Practice covers every control that could pause it. Pausing through the
+  // session (not the element) keeps the transport, the media session and Resume
+  // all in agreement.
+  try { _silenceOtherAudio('practice') } catch (_) {}
   let queue
   let startIdx = 0
   if (opts.resumeQueue && Array.isArray(opts.resumeQueue.queue) && opts.resumeQueue.queue.length) {
@@ -16669,6 +17246,10 @@ function closePracticeMode() {
   window._practiceClipToken = (window._practiceClipToken || 0) + 1
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
   try { _stopManualAudioPreview() } catch (_) {}
+  // Hiding an <audio> does not silence it, and the panel is shared with the
+  // player — leave it visible and a closed practice session keeps sounding
+  // over the page underneath.
+  try { _showPracticeAudioPanel(null) } catch (_) {}
   if (window.visualViewport && window._practiceViewportWired) {
     window.visualViewport.removeEventListener('resize', _onPracticeViewportChange)
     window.visualViewport.removeEventListener('scroll', _onPracticeViewportChange)
@@ -16741,6 +17322,10 @@ function _searchCurrentPracticeWord() {
 }
 
 function minimizePracticeMode() {
+  // Hiding an <audio> does not silence it, and minimising hides the panel by
+  // dropping the body class — the same trap closing the view has to avoid.
+  try { _stopPracticeAudio() } catch (_) {}
+  try { _stopManualAudioPreview() } catch (_) {}
   if (!window._practiceActive) return
   window._practiceMinimized = true
   $('#practiceMode').addClass('minimized')
@@ -16754,6 +17339,11 @@ function minimizePracticeMode() {
   $('#toggleMediaContainer').click()  
 }
 function restorePracticeMode() {
+  // Nothing to restore once Practice has been closed — #practiceMode is gone by
+  // then, and re-adding the body class would hide the search UI behind a view
+  // that no longer exists, with no visible way back. Exported, so it can be
+  // called from outside the button that normally guarantees this.
+  if (!window._practiceActive) return
   window._practiceMinimized = false
   $('#practiceMode').removeClass('minimized')
   $('body').addClass('practice-mode')
@@ -17126,7 +17716,9 @@ async function _renderPracticeCard() {
   // lines and the word-translation fallback below are complete rather than empty.
   try { await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise].map(p => Promise.resolve(p).catch(() => {}))) } catch (_) {}
   if (window._practiceIdx !== idx) return  // user moved on while we waited
-  // Video card path follows — first restore any controls the manual path hides.
+  // Video card path follows — first restore any controls the manual path hides,
+  // and hand the slot back to the video.
+  _showPracticeAudioPanel(null)
   $p.find('.practice-replace').show()
   $p.find('.practice-ctx-ctrl').show()
   $p.find('.practice-play, .practice-speed').show()
@@ -17217,21 +17809,10 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   // else opens in a new tab. Appended to the practice-nav row so it sits
   // alongside prev/next where the hidden play-clip button used to be.
   $p.find('.practice-media-link').remove()
-  // Per-face pronunciation buttons — Source and Target can each carry one.
-  // Listed Target-first: each is inserted directly after .practice-play, so
-  // this leaves the rendered order Source, then Target.
-  ;[
-    { url: _cardTargetAudio(it), icon: '🎙ᵀ', title: 'Play the Target recording' },
-    { url: _cardSourceAudio(it), icon: '🎙ᔆ', title: 'Play the Source recording' },
-  ].forEach(face => {
-    if (!face.url) return
-    const $b = $(`<button type="button" class="practice-media-link" title="${face.title}" aria-label="${face.title}">${face.icon}</button>`)
-    $b.on('click', (ev) => {
-      ev.preventDefault(); ev.stopPropagation()
-      _startManualAudioPreview(face.url, $b)
-    })
-    $p.find('.practice-nav .practice-play').after($b)
-  })
+  // The card's own recordings are played from the audio panel below, which
+  // takes the video's slot — full controls, and one element doing the sounding
+  // rather than a nav button with its own private Audio racing it.
+  _showPracticeAudioPanel(it)
 
   if (it.mediaUrl) {
     const isYT    = it.mediaKind === 'youtube' && it.mediaVideoId
@@ -17530,6 +18111,13 @@ $(document).on('keydown', '.edit-line-input', function (e) {
 // type in dialogs that happen to be open.
 $(document).on('keydown', function (e) {
   if (!window._playingRecording) return
+  // Not while Practice is up. A session does not end when Practice opens — it
+  // is only paused — and both views bind the document, so without this the
+  // arrow keys turn a Practice card AND move the deck's queue behind it, and
+  // Space resumes a deck whose every control Practice is covering. Escape
+  // would close both at once. Practice has the keyboard for as long as it is
+  // the thing on screen.
+  if (window._practiceActive) return
   if (e.key === 'Escape') {
     e.preventDefault()
     stopPlayingRecording()
@@ -17607,6 +18195,10 @@ let _recPrevWasSeek = false
 // the host's defaults are exactly what should drive a plain video.
 function _recTakeMediaKey(ev) {
   if (!window._playingRecording) return false
+  // Practice is on top and the deck is paused underneath with no visible
+  // control — a headset play would start it sounding with nothing on screen
+  // able to stop it again.
+  if (window._practiceActive) return false
   if (typeof ev.preventDefault === 'function') ev.preventDefault()
   if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation()
   return true

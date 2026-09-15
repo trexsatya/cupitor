@@ -25,7 +25,7 @@
 //     as the match in matched segments like "förråta" / "förrått".
 //     `opts.stripBracketHints` same contract as above.
 
-import { SEPARATOR_PIPE } from './vocab-search.js'
+import { SEPARATOR_PIPE, stripExpansionMarkers, stripExpansionMarkersWithMap } from './vocab-search.js'
 
 // HTML escape matching lodash `_.escape` (&<>"' → entities).
 export function escapeHtml(str) {
@@ -68,11 +68,16 @@ export function highlightSearchInVocabLine(rawText, searchText, opts = {}) {
 
   const segments = String(rawText).split(SEPARATOR_PIPE)
   const html = segments.map(seg => {
+    // Work against a marker-free view of the segment ("för<*se" → "förse"),
+    // keeping `markMap` so the final offsets land back on the raw text. The
+    // matchers join across `<*` too, so without this every line they newly
+    // surface would render with nothing marked.
+    const { text: segNoMark, map: markMap } = stripExpansionMarkersWithMap(seg)
     let stripped
-    try { stripped = stripBracketHints(seg.toLowerCase()).trim() }
-    catch (_) { stripped = seg.toLowerCase().trim() }
+    try { stripped = stripExpansionMarkers(stripBracketHints(seg.toLowerCase())).trim() }
+    catch (_) { stripped = segNoMark.toLowerCase().trim() }
     if (stripped.length < 2) return escapeHtml(seg)
-    const segLower = seg.toLowerCase()
+    const segLower = segNoMark.toLowerCase()
 
     // Candidate tokens: the whole stripped segment, plus each whitespace-
     // separated word inside it (so multi-word lines like "Rik som ett troll"
@@ -131,9 +136,14 @@ export function highlightSearchInVocabLine(rawText, searchText, opts = {}) {
 
     const markStart = bestKind === 'prefix' ? bestTokenIdx : bestTokenIdx + bestToken.length - bestLen
     const markEnd = markStart + bestLen
-    return escapeHtml(seg.slice(0, markStart)) +
-           '<mark class="vocab-hl">' + escapeHtml(seg.slice(markStart, markEnd)) + '</mark>' +
-           escapeHtml(seg.slice(markEnd))
+    // Back to raw-text offsets. A span that straddles a marker swallows it,
+    // which is right: the marker is part of how that word is written.
+    const rawStart = markMap[markStart]
+    const rawEnd = markMap[markEnd - 1] + 1
+    if (rawStart === undefined || !(rawEnd > rawStart)) return escapeHtml(seg)
+    return escapeHtml(seg.slice(0, rawStart)) +
+           '<mark class="vocab-hl">' + escapeHtml(seg.slice(rawStart, rawEnd)) + '</mark>' +
+           escapeHtml(seg.slice(rawEnd))
   })
   return html.join(' | ')
 }
@@ -148,17 +158,23 @@ export function highlightStemInPrefixMatch(rawText, candidate, stem, opts = {}) 
   if (stemOffsetInCand < 0) return escapeHtml(rawText).replaceAll(SEPARATOR_PIPE, ' | ')
   const segments = String(rawText).split(SEPARATOR_PIPE)
   const html = segments.map(seg => {
+    // Same marker-free view + position map as highlightSearchInVocabLine —
+    // the Different-prefixes dialog matches "förtränga" against "för<*tränga".
+    const { text: segNoMark, map: markMap } = stripExpansionMarkersWithMap(seg)
     let stripped
-    try { stripped = stripBracketHints(seg.toLowerCase()).trim() }
-    catch (_) { stripped = seg.toLowerCase().trim() }
+    try { stripped = stripExpansionMarkers(stripBracketHints(seg.toLowerCase())).trim() }
+    catch (_) { stripped = segNoMark.toLowerCase().trim() }
     if (!stripped.startsWith(candLower)) return escapeHtml(seg)
-    const segLower = seg.toLowerCase()
+    const segLower = segNoMark.toLowerCase()
     const candIdx = segLower.indexOf(candLower)
     if (candIdx < 0) return escapeHtml(seg)
     const stemIdx = candIdx + stemOffsetInCand
-    return escapeHtml(seg.slice(0, stemIdx)) +
-           '<mark class="vocab-hl">' + escapeHtml(seg.slice(stemIdx, stemIdx + stemLen)) + '</mark>' +
-           escapeHtml(seg.slice(stemIdx + stemLen))
+    const rawStart = markMap[stemIdx]
+    const rawEnd = markMap[stemIdx + stemLen - 1] + 1
+    if (rawStart === undefined || !(rawEnd > rawStart)) return escapeHtml(seg)
+    return escapeHtml(seg.slice(0, rawStart)) +
+           '<mark class="vocab-hl">' + escapeHtml(seg.slice(rawStart, rawEnd)) + '</mark>' +
+           escapeHtml(seg.slice(rawEnd))
   })
   return html.join(' | ')
 }

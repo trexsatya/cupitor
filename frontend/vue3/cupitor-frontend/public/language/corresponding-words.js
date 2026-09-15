@@ -21,6 +21,44 @@ export const EVERYTHING_ELSE = '_everything_else';
 // instead and does not need to repeat.
 export const MIN_DOC_COUNT = 2;
 
+// …but repetition on its own is worthless, because the words that repeat most
+// are the ones that repeat everywhere. Counting alone, an English search for
+// "thin" proposed "ska" and "den" as its Swedish counterparts — they were in
+// more of the matched lines than "tunna" was, as they are in more of ANY
+// lines. What marks a translation is not that it is frequent here but that it
+// is frequent HERE AND NOWHERE ELSE.
+//
+// So each word is measured against how often it appears in the same subtitles
+// generally. Lift is that ratio: a grammar word scores about 1 whatever you
+// search for, while the word the search is really about scores in the tens or
+// hundreds.
+//
+// Two things to know about where it bites. The everyday-word ceiling below is
+// what actually throws out the grammar words — by the time a word has passed
+// that and the share floor, lift only decides the narrow band between them, so
+// these three are one test and not three. And because the background is drawn
+// from the very files the matches came from, lift cannot exceed the number of
+// background lines divided by the number of matched ones: a search whose hits
+// fill more than an eighth of the files it pulled down leaves no word able to
+// clear this bar, and the subtitles contribute nothing. That is the right
+// answer for the searches it happens to — "the", matching 13,938 lines, has no
+// counterpart to find — but it is a ceiling on the evidence, not a judgement.
+export const MIN_LIFT = 8;
+
+// And a word has to account for a fair share of the matches, not just clear
+// the lift bar. Lift alone promotes rare accidents: two subtitles out of 193
+// that happen to mention "hönshuset" score enormous lift and mean nothing,
+// while "huset" — in 76 of them — is the answer.
+export const MIN_HIT_SHARE = 0.15;
+
+// A word this ordinary is grammar, whatever the numbers say about it here.
+// Measured rather than listed, because a list is one language's opinion and
+// this runs over whichever language is being studied. In 13,000 lines of
+// Swedish subtitles the split is unmistakable: inte 8.7%, har 9.3%, men 7.7%,
+// ska 4.5%, kan 4.3%, bara 2.7% — against tror 1.4%, blir 1.6%, vatten 0.2%,
+// tunna 0.01%. Nothing real lives between them.
+export const MAX_BACKGROUND_SHARE = 0.025;
+
 // One and two-letter tokens are almost all grammar, and the stop-word list
 // cannot name every inflected clitic.
 export const MIN_TOKEN_LEN = 3;
@@ -41,16 +79,37 @@ const SCORE_TRANSLATION = 12;
 const SCORE_VOCABULARY = 10;
 const SCORE_COGNATE = 6;
 
-// Repetition is scored as a SHARE of the lines, not a count. A word in two of
-// three lines is the answer; the same two out of two hundred is noise, and a
-// raw count cannot tell those apart — it would also let a long result set
-// outvote the translator simply by being long.
+// A dictionary entry is a ranked list, not a set. Asked about "lake" the host
+// offers sjö first, then insjö, göl, träsk — all true, steadily rarer. So each
+// step down the list is worth a little less, the first sense keeping the full
+// weight a lone translation has always had, and the tail never falling below
+// what a mere resemblance is worth. Position is what the ranking rests on
+// rather than the score that sometimes accompanies a term, because that score
+// is absent more often than it is present.
+const SCORE_TRANSLATION_RANK_STEP = 2;
+const SCORE_TRANSLATION_MIN = SCORE_COGNATE;
+
+// What a confirmed guess is worth: exactly what the translator's own answer is
+// worth, because it is the same claim reached from the other end — there the
+// translator named this word, here it is handed this word and names the search.
+// Worth no more than that, or a word only the subtitles point at would outrank
+// one both the subtitles and the dictionary agree on, which cannot be right.
+const SCORE_CONFIRMED = SCORE_TRANSLATION;
+
+// What surviving the corpus tests is worth. A word that clears the lift bar,
+// the share bar and the everyday-word ceiling has been checked three times
+// against the subtitles in hand, which is why it is worth more than a
+// dictionary sense that appears in none of them. The dictionary offers every
+// sense a word has ever had; these lines show which one is actually in front
+// of the reader.
+const SCORE_DISTINCTIVE = 14;
+
+// And among the words that survive, the one used in most of the matched lines
+// leads. Scored as a share so it stays comparable however many results there
+// are.
 const SCORE_REPEATED_MAX = 10;
 
-// Below this many lines there is no such thing as a share. With two lines
-// every word they happen to have in common scores full marks, and the
-// headings come out as whatever those two sentences share — which on a pair
-// of subtitles is usually a pronoun and a verb.
+// Below this many lines there is no such thing as a share.
 export const MIN_LINES_FOR_FREQUENCY = 3;
 
 // Letters, not bytes: the studied languages carry åäöéüñ and the apostrophe
@@ -113,13 +172,45 @@ export function lineContainsWord(line, candidate) {
   return tokenizeLine(line).some(tok => wordMatches(tok, candidate));
 }
 
+// Whether two words in the SAME language are the same word, one of them
+// possibly inflected: thin/thinner, house/houses.
+//
+// A different question from the cognate rule above, and it must not borrow it.
+// Across languages a shared opening is worth something because the endings are
+// exactly what differ. Between two English words a shared opening of four
+// letters is commonplace and means nothing: start/starve, police/policy,
+// plan/plant, read/ready. One word has to BE the other with an ending on it,
+// which is the only way a back-translation legitimately differs from the word
+// that was searched for.
+const SAME_WORD_SUFFIX_SLACK = 3;
+export function sameWord(a, b) {
+  const x = String(a || '').toLowerCase();
+  const y = String(b || '').toLowerCase();
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const short = x.length <= y.length ? x : y;
+  const long = x.length <= y.length ? y : x;
+  if (short.length < MIN_TOKEN_LEN) return false;
+  return long.startsWith(short) && long.length - short.length <= SAME_WORD_SUFFIX_SLACK;
+}
+
 // Rank the words that might be the counterpart of `searchWord`.
 //
 //   lines           — the studied-language line paired with each result
 //   searchWord      — what was typed, in English
 //   vocabWords      — studied-language headwords whose English gloss matches
-//   translatedWords — what the host's translator made of `searchWord`
+//   translatedWords — what the host's translator made of `searchWord`: plain
+//                     words, or `{ word, rank }` when the host's dictionary
+//                     answered with ranked senses
 //   stopWords       — a Set of words that never anchor a group
+//   background      — Map of word → how many lines of the SAME subtitles
+//                     contain it, matched or not; the yardstick for lift
+//   backgroundLines — how many lines that Map was built from
+//
+// Without a background nothing is read from repetition at all. There is no
+// safe way to tell a translation from a preposition by counting alone, and
+// guessing produces headings that are actively misleading — worse than the
+// plain list the caller falls back to.
 //
 // A candidate reaching us from the vocabulary or the translator is kept even
 // when it appears in none of the lines: that is precisely the word worth
@@ -130,6 +221,8 @@ export function guessCorrespondingWords({
   vocabWords = [],
   translatedWords = [],
   stopWords = new Set(),
+  background = null,
+  backgroundLines = 0,
   max = MAX_GROUPS,
 } = {}) {
   const freq = documentFrequencies(lines);
@@ -146,25 +239,59 @@ export function guessCorrespondingWords({
     cand.set(w, at);
   };
 
-  // Repetition across the lines.
+  // Words that stand out from these subtitles' ordinary vocabulary.
   const lineCount = (lines || []).length;
-  if (lineCount >= MIN_LINES_FOR_FREQUENCY) {
+  const bgTotal = Number(backgroundLines) || 0;
+  const haveBackground = background instanceof Map && bgTotal > 0;
+  if (lineCount >= MIN_LINES_FOR_FREQUENCY && haveBackground) {
+    // Has to account for a real share of the matches, and at least two of
+    // them however small the search.
+    const floor = Math.max(MIN_DOC_COUNT, Math.ceil(MIN_HIT_SHARE * lineCount));
     freq.forEach((count, word) => {
-      if (count >= MIN_DOC_COUNT) note(word, SCORE_REPEATED_MAX * count / lineCount, 'repeated');
+      if (count < floor) return;
+      const bgCount = background.get(word) || 0;
+      // The background is drawn from the same subtitles as the matches, so a
+      // word found here is found there. Treat an absent one as unremarkable
+      // rather than as infinitely distinctive.
+      if (bgCount <= 0) return;
+      // Everyday words are out before the arithmetic starts. On a small
+      // search the background is small too, and lift measured over a few
+      // hundred lines is noisy enough to let one through.
+      if (bgCount / bgTotal > MAX_BACKGROUND_SHARE) return;
+      const lift = (count / lineCount) / (bgCount / bgTotal);
+      if (lift < MIN_LIFT) return;
+      note(word, SCORE_DISTINCTIVE + SCORE_REPEATED_MAX * count / lineCount, 'distinctive');
     });
   }
 
   // The dictionary the user has been building all along.
   (vocabWords || []).forEach(w => note(w, SCORE_VOCABULARY, 'vocabulary'));
 
-  // What the host app makes of the word.
-  (translatedWords || []).forEach(w => note(w, SCORE_TRANSLATION, 'translated'));
+  // What the host app makes of the word. Either a bare word — all a plain
+  // translation gives — or one of the ranked senses the host's dictionary
+  // answered with.
+  (translatedWords || []).forEach((entry, i) => {
+    const word = typeof entry === 'string' ? entry : (entry && entry.word);
+    const rank = (entry && Number.isFinite(entry.rank)) ? entry.rank : i;
+    note(word, Math.max(SCORE_TRANSLATION_MIN, SCORE_TRANSLATION - rank * SCORE_TRANSLATION_RANK_STEP), 'translated');
+  });
 
-  // Words that simply look like the English one.
+  // Looking like the English word promotes a candidate; it does not make one.
+  //
+  // As an admission route it earned its keep only in false positives: an
+  // English search for "house" found the untranslated word "house" in three of
+  // 193 lines and put it above "huset", and "angry" turned up "angrep" —
+  // Swedish for "attacked" — sharing four letters and nothing else. A word
+  // used in too few of the matches to qualify on its own evidence is not made
+  // trustworthy by resembling the search term. Where the resemblance IS
+  // meaningful the word is already here on its distribution, and this lifts it
+  // over its rivals.
   const search = String(searchWord || '').toLowerCase().trim();
   if (search) {
-    freq.forEach((_count, word) => {
-      if (isCognate(word, search)) note(word, SCORE_COGNATE, 'cognate');
+    cand.forEach((entry, word) => {
+      if (!isCognate(word, search)) return;
+      entry.score += SCORE_COGNATE;
+      if (!entry.reasons.includes('cognate')) entry.reasons.push('cognate');
     });
   }
 
@@ -204,6 +331,57 @@ export function groupResultsByWord(items, candidates, lineOf) {
   return groups;
 }
 
+// How sure the host's dictionary is about one of its terms.
+//
+// Its `score` is the honest answer where there is one, but there usually is
+// not: of the six senses it gives for "sjö" only two carry a score, and the
+// four without are the rarer ones. So a term with no score is placed by where
+// the dictionary put it — which is the same information, less precisely.
+//
+// The thresholds come from what real answers look like: the primary sense of a
+// common word scores around 0.5 and its runner-up around 0.03, so anything past
+// a tenth is the word you were looking for and anything under a fiftieth is a
+// sense you will meet once a year.
+export const CONFIDENCE_HIGH = 0.1;
+export const CONFIDENCE_LOW = 0.02;
+
+export function translationConfidence(term) {
+  const score = term && term.score;
+  if (Number.isFinite(score)) {
+    if (score >= CONFIDENCE_HIGH) return 'high';
+    if (score >= CONFIDENCE_LOW) return 'medium';
+    return 'low';
+  }
+  const rank = term && term.rank;
+  if (!Number.isFinite(rank)) return 'low';
+  if (rank === 0) return 'high';
+  return rank <= 2 ? 'medium' : 'low';
+}
+
+// Sink the groups that nothing the search itself found landed in.
+//
+//   foundBySearch — whether a result came from the search rather than from a
+//                   sweep made on the strength of a guess
+//
+// A guess can collect a whole group in which not one line was found by the
+// search: an English search for "thin" offers fin, smal and mager, and each
+// gathers lines whose studied-language side uses it while their English side
+// never says "thin". Worth keeping — they are the uses a straight English
+// search cannot reach — but not worth ranking above the words the search did
+// land on, which is where a good dictionary rank would otherwise carry them.
+//
+// Stable, so the ranking still decides the order within each half, and the
+// sweep-up stays last wherever it was.
+export function sinkUnevidencedGroups(groups, foundBySearch) {
+  const all = groups || [];
+  if (typeof foundBySearch !== 'function') return all;
+  const named = all.filter(g => g && g.word !== EVERYTHING_ELSE);
+  const unevidenced = g => g.items && g.items.length > 0 && !g.items.some(foundBySearch);
+  return named.filter(g => !unevidenced(g))
+    .concat(named.filter(unevidenced))
+    .concat(all.filter(g => g && g.word === EVERYTHING_ELSE));
+}
+
 // Keep at most `max` headings — without losing a single finding.
 //
 // Capping the headings and capping the results are different things, and
@@ -219,4 +397,37 @@ export function capGroups(groups, max = MAX_GROUPS) {
   const out = named.slice(0, keep);
   if (leftOver.length) out.push({ word: EVERYTHING_ELSE, reasons: [], items: leftOver });
   return out;
+}
+
+// Promote the candidates whose back-translation says they mean what was
+// searched for.
+//
+//   backTranslations — Map of candidate word → what it translates back to,
+//                      either the one answer a plain translation gives or
+//                      every English sense the host's dictionary listed
+//
+// Only ever promotes. A translator asked for one word gives one answer, and a
+// real sense often is not that answer — "kör" back-translates to "drives",
+// which is a true sense of "run" and not a reason to throw the group away. So
+// a confirmation lifts a candidate and a non-confirmation leaves it exactly
+// where the evidence already put it.
+export function confirmByBackTranslation(candidates, searchWord, backTranslations) {
+  const search = String(searchWord || '').toLowerCase().trim();
+  if (!search || !(backTranslations instanceof Map)) return candidates || [];
+  return (candidates || []).map(c => {
+    const back = backTranslations.get(c.word);
+    if (!back) return c;
+    // A dictionary answer is a list of senses, and the sense that matters is
+    // rarely the first: asked what "kör" means a translator says "drives",
+    // while its list says drive, run, operate. Checking the whole list is what
+    // lets a real sense confirm.
+    const hit = (Array.isArray(back) ? back : [back])
+      .flatMap(b => tokenizeLine(String(b)))
+      .some(w => sameWord(w, search));
+    if (!hit) return c;
+    return { ...c, score: c.score + SCORE_CONFIRMED, reasons: [...(c.reasons || []), 'confirmed'] };
+  }).sort((a, b) =>
+    b.score - a.score ||
+    b.docCount - a.docCount ||
+    a.word.localeCompare(b.word));
 }

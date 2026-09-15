@@ -54,6 +54,44 @@ export function stripBracketHints(txt) {
   return s
 }
 
+// Drop the vocabulary file's expansion marker so a segment reads as the word
+// it stands for: "till<*räkna" → "tillräkna", "<*göra susen" → "göra susen".
+// The overlap matchers below compare against RAW vocab lines (expandWords is
+// too costly to run per line per keystroke), so without this the ~370 lines
+// written with a `<*` marker sit outside the matching pool entirely: they are
+// unreachable by their joined form AND by the near-containment rule that
+// every unmarked line already enjoys. Stripping puts them on equal footing.
+//
+// Caveat: this assumes the `<*ref` names a lemma that its own expansion list
+// contains — true for all but a handful of keys. Where a key is a bare
+// placeholder (`plats=upp,ner,fram,…`, as in "längst <*plats"), the joined
+// form is a phrase the expansion never produces.
+const EXPANSION_MARKER_RE = /<\*(?:\{[^}]*\})?/g
+
+export function stripExpansionMarkers(txt) {
+  if (typeof txt !== 'string') return ''
+  return txt.replace(EXPANSION_MARKER_RE, '')
+}
+
+// Same strip, but also returns where each surviving character came from:
+// `map[i]` is the index in `txt` of `text[i]`. Callers that report a match as
+// an offset range (the highlighters) need this — a match found on "förse"
+// has to be marked on "för<*se", and plain indexOf can't bridge that.
+export function stripExpansionMarkersWithMap(txt) {
+  const s = typeof txt === 'string' ? txt : ''
+  let out = ''
+  const map = []
+  let i = 0
+  EXPANSION_MARKER_RE.lastIndex = 0
+  let m
+  while ((m = EXPANSION_MARKER_RE.exec(s)) !== null) {
+    for (let k = i; k < m.index; k++) { out += s[k]; map.push(k) }
+    i = m.index + m[0].length
+  }
+  for (let k = i; k < s.length; k++) { out += s[k]; map.push(k) }
+  return { text: out, map }
+}
+
 function _splitSearchParts(searchText) {
   const stRaw = (searchText || '').toLowerCase().trim()
   if (!stRaw) return []
@@ -65,6 +103,7 @@ function _splitVocabParts(vocabLine) {
   return vocabLine.split(SEPARATOR_PIPE)
     .map(p => p.toLowerCase().trim())
     .map(p => { try { return stripBracketHints(p).trim() } catch (_) { return p } })
+    .map(p => stripExpansionMarkers(p).trim())
     .filter(p => p.length >= 2)
 }
 
@@ -146,6 +185,7 @@ export function vocabSuffixOverlapLen(vocabLine, searchText) {
   const vocabParts = vocabLine.split(SEPARATOR_PIPE)
     .map(p => p.toLowerCase().trim())
     .map(p => { try { return stripBracketHints(p).trim() } catch (_) { return p } })
+    .map(p => stripExpansionMarkers(p).trim())
     .filter(p => p.length >= 2)
   let max = 0
   for (const p of vocabParts) {
@@ -171,7 +211,12 @@ export function buildKnownWordSet(vocabulary, hiddenCategories) {
       if (typeof line !== 'string') continue
       for (const seg of line.split(SEPARATOR_PIPE)) {
         let stripped
-        try { stripped = stripBracketHints(seg.toLowerCase()).trim() }
+        // Markers go first so the lexicon holds the same word the overlap
+        // matchers see: "för<*tränga" must yield "förtränga", not "för" +
+        // "tränga". Otherwise vocabCompoundParts treats a word the matchers
+        // know as an unknown compound and injects its fragments as extra
+        // search terms, burying the real hit under prefix noise.
+        try { stripped = stripExpansionMarkers(stripBracketHints(seg.toLowerCase())).trim() }
         catch (_) { stripped = seg.toLowerCase().trim() }
         if (!stripped) continue
         for (const w of stripped.split(/[\s,/<>*]+/)) {

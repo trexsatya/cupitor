@@ -1,5 +1,7 @@
 import {
   stripBracketHints,
+  stripExpansionMarkers,
+  stripExpansionMarkersWithMap,
   vocabPrefixOverlapLen,
   vocabSuffixOverlapLen,
   vocabPrefixOverlapDetail,
@@ -241,5 +243,64 @@ describe("integration: groups by matched substring", () => {
     expect(groups.has("troll")).toBe(true);
     expect(groups.has("guld")).toBe(true);
     expect(groups.has("tro")).toBe(true);
+  });
+});
+
+// `<*ref` is the vocabulary file's expansion marker: "till<*räkna" stands for
+// "tillräkna" (and its inflections). The overlap matchers run on the RAW line,
+// so the marker has to be transparent or the concatenated word is unreachable.
+describe("expansion markers are transparent to overlap matching", () => {
+  const line = "(attribute)|till<*skriva|till<*räkna|";
+
+  test("stripExpansionMarkers removes the marker wherever it sits", () => {
+    expect(stripExpansionMarkers("till<*räkna")).toBe("tillräkna");   // letter-attached
+    expect(stripExpansionMarkers("<*göra susen")).toBe("göra susen"); // leading
+    expect(stripExpansionMarkers("<*ta <*sin kos")).toBe("ta sin kos"); // several in one segment
+    expect(stripExpansionMarkers("<*{an}komma")).toBe("komma");       // {ref} form
+  });
+
+  test("stripExpansionMarkers leaves lone regex wildcards alone", () => {
+    // Vocab lines carry real regex fragments — "<*lägga .* i minnet". Only the
+    // two-character marker goes; a bare '*' or '<' is content.
+    expect(stripExpansionMarkers("<*lägga .* i minnet")).toBe("lägga .* i minnet");
+    expect(stripExpansionMarkers("a * b < c")).toBe("a * b < c");
+  });
+
+  test("stripExpansionMarkersWithMap points every char back at the original", () => {
+    const { text, map } = stripExpansionMarkersWithMap("för<*se");
+    expect(text).toBe("förse");
+    expect(map).toEqual([0, 1, 2, 5, 6]);
+    // The map is what lets a match on "förse" be marked on "för<*se".
+    expect([...text].every((ch, i) => "för<*se"[map[i]] === ch)).toBe(true);
+  });
+
+  test("prefix overlap finds the concatenated form", () => {
+    expect(vocabPrefixOverlapLen(line, "tillräkna")).toBe(9);
+    expect(vocabPrefixOverlapLen(line, "tillskriva")).toBe(10);
+    expect(vocabPrefixOverlapDetail(line, "tillräkna").matched).toBe("tillräkna");
+  });
+
+  test("a segment that is only a marker still matches its base word", () => {
+    expect(vocabPrefixOverlapLen("(do)|<*göra", "göra")).toBe(4);
+  });
+
+  test("suffix overlap sees through the marker too", () => {
+    expect(vocabSuffixOverlapLen("(overlook)|över<*se", "överse")).toBe(6);
+  });
+
+  test("markers do not let a match bleed across a segment boundary", () => {
+    // "till<*skriva|till<*räkna" must stay two words, never "tillskrivatill…".
+    expect(vocabPrefixOverlapLen(line, "skrivatill")).toBe(0);
+    expect(vocabPrefixOverlapDetail(line, "tillskriva").matched).toBe("tillskriva");
+  });
+
+  test("the lexicon agrees with the matchers about what a marked word is", () => {
+    // buildKnownWordSet used to split AT the marker, so "förtränga" was two
+    // fragments and vocabCompoundParts treated it as an unknown compound —
+    // injecting "fört" as an extra search term and burying the real hit.
+    const known = buildKnownWordSet({ V: ["(repression)|för<*tränga|"] }, new Set());
+    expect(known.has("förtränga")).toBe(true);
+    expect(known.has("fört")).toBe(false);
+    expect(vocabCompoundParts("förtränga", known, buildPrefixSet(known))).toEqual([]);
   });
 });

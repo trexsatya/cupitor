@@ -5,7 +5,7 @@
 // dependency (vocabSuffixOverlapLen for the weak-overlap fallback) is
 // passed in, and the caller supplies the line list.
 
-import { SEPARATOR_PIPE } from './vocab-search.js'
+import { SEPARATOR_PIPE, stripExpansionMarkers } from './vocab-search.js'
 
 // Derivational prefixes per language. Sorted longest-first by _stripPrefix
 // so stripping picks `under-` before `un-`, `genom-` before `ge-`, etc.
@@ -52,7 +52,11 @@ export function findDifferentPrefixMatches(searchText, lang, lines, lineCategory
     lines.forEach((vocabLine, idx) => {
       if (seen.has(idx)) return
       if (typeof vocabLine !== 'string') return
-      const parts = vocabLine.split(SEPARATOR_PIPE).map(s => s.toLowerCase().trim())
+      // Expansion markers are transparent here too: "till<*skriva" is the
+      // line's way of writing "tillskriva", which is exactly the shape a
+      // prefix candidate has.
+      const parts = vocabLine.split(SEPARATOR_PIPE)
+        .map(s => stripExpansionMarkers(s).toLowerCase().trim())
         .filter(s => s.length >= candidate.length)
       if (parts.some(part => part.startsWith(candidate))) {
         seen.add(idx)

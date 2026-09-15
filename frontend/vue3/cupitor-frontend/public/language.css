@@ -1508,6 +1508,19 @@ body.rec-paused .lines-cntnr .buttons .capture-btn { opacity: 0.4; pointer-event
     font-style: italic;
 }
 
+/* A whole group reached that way: every line under this heading came in on the
+   guess, and not one of their English lines says what was searched for. Dimmed
+   rather than hidden — these are the uses a straight English search cannot
+   reach, and sometimes they are the interesting half. */
+h5.l-accordion.srt-guess-only {
+    opacity: 0.55;
+    font-style: italic;
+}
+
+h5.l-accordion.srt-guess-only:hover {
+    opacity: 1;
+}
+
 #recordingReviewDialog .rec-item {
     font-size: 12px;
     display: flex;
@@ -2003,10 +2016,12 @@ body.practice-mode {
 body.rec-playing #mainControlInputs,
 body.rec-playing #vocabularyResult,
 body.rec-playing #result,
+body.rec-playing #translationPanel,
 body.rec-playing #mediaRelatedContainer,
 body.practice-mode #mainControlInputs,
 body.practice-mode #vocabularyResult,
 body.practice-mode #result,
+body.practice-mode #translationPanel,
 body.practice-mode #mediaRelatedContainer {
     display: none !important;
 }
@@ -2019,7 +2034,8 @@ body.practice-mode #mediaRelatedContainer {
    #recPlayingAudio take that space, rather than leaving a black 16:9 box
    above a card that is only ever going to make sound. Overrides the
    display:block !important below, so it has to be at least as specific. */
-body.rec-playing.rec-playing-manual #mediaContainer {
+body.rec-playing.rec-playing-manual:not(.practice-mode) #mediaContainer,
+body.practice-mode.practice-manual #mediaContainer {
     display: none !important;
 }
 /* Audio player for a manual card's recordings — same fixed slot the video
@@ -2041,7 +2057,55 @@ body.rec-playing.rec-playing-manual #mediaContainer {
 /* Requires .rec-playing, which minimizing removes — otherwise this fixed,
    900px-wide black panel stays parked over the page the user just minimized
    the player to get back to (the 🔍 "search this word" button minimizes too). */
-body.rec-playing.rec-playing-manual #recPlayingAudio { display: block; }
+body.rec-playing.rec-playing-manual:not(.practice-mode) #recPlayingAudio { display: block; }
+/* A playlist session does not end when Practice opens — minimising only pauses
+   it — so the player's panel has to stand aside rather than share the slot. */
+body.practice-mode #recPlayingAudio { display: none !important; }
+
+/* Practice's own panel, in the slot the video would have had: a manual card's
+   recordings are what there is to practise with, and a 16:9 black box above a
+   card that will never show video is worse than nothing. Its own element, not
+   the player's — see _practiceAudioEl. */
+#practiceAudio {
+    position: fixed;
+    top: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(100vw, 900px);
+    box-sizing: border-box;
+    padding: 10px 12px;
+    background: #111;
+    color: #eee;
+    z-index: 100003;
+    display: none;
+}
+body.practice-mode.practice-manual #practiceAudio { display: block; }
+#practiceAudio .rec-pa-face {
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.7;
+    min-height: 14px;
+    margin-bottom: 6px;
+}
+#practiceAudio .rec-pa-el { width: 100%; display: block; }
+#practiceAudio .rec-pa-faces {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+#practiceAudio .rec-pa-face-btn {
+    flex: 1 1 0;
+    min-height: 40px;
+    padding: 8px 10px;
+    font-size: 14px;
+    color: #eee;
+    background: #262626;
+    border: 1px solid #444;
+    border-radius: 6px;
+    cursor: pointer;
+}
+#practiceAudio .rec-pa-face-btn:active { background: #383838; }
 #recPlayingAudio .rec-pa-face {
     font-size: 12px;
     letter-spacing: 0.04em;
@@ -2252,6 +2316,11 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 #practiceMode .practice-settings-panel .practice-delete:hover { background: #d32f2f; }
 /* The card content sits below the fixed video (video bottom ≈ 64px +
    56.25% of min(100vw,900px)). */
+/* A manual card's slot holds the audio panel, not a 16:9 video, so the card
+   starts right below whatever height that turned out to be. */
+body.practice-manual #practiceMode .practice-card {
+    top: calc(64px + var(--practice-media-h, 150px) + 12px);
+}
 #practiceMode .practice-card {
     position: absolute;
     top: calc(64px + min(100vw, 900px) * 0.5625 + 12px);
@@ -2792,15 +2861,26 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     color: #555;
 }
 #playingQueueDialog .pqd-body { flex: 1; min-width: 0; }
+/* A queue is read by scanning, so every row gets the same height whatever the
+   card holds: one sentence-long card must not push the next twenty off the
+   screen. The full text is in the row's tooltip, and on the card itself. */
+#playingQueueDialog .pqd-text,
+#playingQueueDialog .pqd-sub {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
 #playingQueueDialog .pqd-text {
     font-size: 14px;
-    overflow-wrap: anywhere;
     color: #222;
+    -webkit-line-clamp: 2;
 }
 #playingQueueDialog .pqd-sub {
     font-size: 11px;
     color: #777;
     margin-top: 2px;
+    -webkit-line-clamp: 1;
 }
 #playingQueueDialog .pqd-play {
     flex: 0 0 auto;
@@ -3074,7 +3154,12 @@ body.rec-playing #recPlayingSearchBtn { display: inline-flex; }
     font-size: 14px;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
 }
-body.rec-playing-minimized #recPlayingRestorePill { display: inline-flex; }
+/* Not while Practice is open. The paused deck is still alive underneath, and
+   this pill sits above Practice at z-index 100005 — tapping it resumes the deck
+   into a screen Practice owns, where the deck's own scrub bar and face buttons
+   are hidden, leaving sound with only the transport to stop it. Closing
+   Practice brings the pill straight back. */
+body.rec-playing-minimized:not(.practice-mode) #recPlayingRestorePill { display: inline-flex; }
 #recPlayingRestorePill .rec-pill-count {
     font-family: monospace;
     font-weight: 700;
@@ -3098,8 +3183,14 @@ body.rec-playing-minimized #recPlayingRestorePill { display: inline-flex; }
 
 /* While minimized, the play overlay hides itself but the body class is
    still flipped on (rec-playing-minimized). Make sure the various
-   "show during play" rules don't keep stale UI visible. */
-body.rec-playing-minimized #mediaContainer,
+   "show during play" rules don't keep stale UI visible.
+
+   Except the video slot, and only while Practice has it. Minimising the deck is
+   the normal way into Practice from a running session, and nothing clears this
+   class on the way — so without the exception a practice VIDEO card hides its
+   own player, leaving a 16:9 gap where it should be and sound coming out of an
+   iframe nobody can see. */
+body.rec-playing-minimized:not(.practice-mode) #mediaContainer,
 body.rec-playing-minimized #recPlayingBanner,
 body.rec-playing-minimized #recPlayingWord,
 body.rec-playing-minimized #recPlayingSubs,
@@ -3267,8 +3358,29 @@ body.rec-playing #recPlayingWord { display: block; }
     margin: 0 auto;
     box-shadow: 0 4px 12px rgba(0,0,0,0.35);
 }
-#recPlayingBanner .rec-pb-head { font-weight: bold; margin-bottom: 4px; }
-#recPlayingBanner .rec-pb-meta { font-family: monospace; font-size: 11px; opacity: 0.8; }
+/* A card's two faces can hold a whole sentence, and the banner floats over the
+   video — left to run, a long one pushes the details block down the screen and
+   covers what is playing. Clamped to a couple of lines each; the full text is
+   on the card itself. `anywhere` so a long unbroken URL breaks instead of
+   widening the banner. */
+#recPlayingBanner .rec-pb-head,
+#recPlayingBanner .rec-pb-meta {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+#recPlayingBanner .rec-pb-head {
+    font-weight: bold;
+    margin-bottom: 4px;
+    -webkit-line-clamp: 2;
+}
+#recPlayingBanner .rec-pb-meta {
+    font-family: monospace;
+    font-size: 11px;
+    opacity: 0.8;
+    -webkit-line-clamp: 2;
+}
 #recPlayingBanner .rec-pb-top {
     display: flex;
     align-items: center;
@@ -3469,12 +3581,15 @@ body.music-on #recPlayingBanner .rec-pb-music-btn {
 }
 #captionCaptureDialog #capCapPlaylist { flex: 1 1 160px; min-width: 0; }
 
-/* Second copy of the item-gap stepper, inside the ℹ details block. It exists
-   only as the phone fallback for when the source→target pill has taken the
-   single slot in the top row, so it stays hidden by default and is switched
-   on by exactly the one rule that hides the top-row copy — that pairing is
-   what guarantees one and only one of the two is ever visible. */
-#recPlayingBanner .rec-pb-details-gap { margin-top: 8px; display: none; }
+/* Both time steppers, inside the ℹ details block. They are set now and then,
+   not watched, so they cost the top row nothing while the deck runs — and the
+   row no longer has to choose which of the two pills it has room for. */
+#recPlayingBanner .rec-pb-times {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
 
 /* Desktop layout — banner is wide enough to always show details, so the
    ℹ button is redundant. Count is also redundant (it's in the head). */
@@ -3502,17 +3617,6 @@ body.music-on #recPlayingBanner .rec-pb-music-btn {
     }
     #recPlayingBanner .rec-pb-details { display: none; }
     #recPlayingBanner.rec-pb-expanded .rec-pb-details { display: block; }
-    /* Two stepper pills plus the ℹ button are wider than the banner gets on a
-       phone: the row would spill under the Minimize/Close buttons and squeeze
-       the progress area until its centred countdown text is clipped. While a
-       dual-recording card is playing, the source→target pause is the one that
-       is about to happen, so it takes the single slot in the top row and the
-       item gap moves into the ℹ details block. The two declarations belong
-       together — one hides the top-row copy, the other reveals the fallback.
-       The first selector must stay scoped to .rec-pb-top, or it matches the
-       fallback pill too and leaves no item-gap control at all. */
-    #recPlayingBanner.rec-pb-has-sgap .rec-pb-top .rec-pb-gap:not(.rec-pb-sgap) { display: none; }
-    #recPlayingBanner.rec-pb-has-sgap .rec-pb-details-gap { display: block; }
     #recPlayingWord {
         top: 40px;
         font-size: 20px;
@@ -3933,3 +4037,85 @@ body.rec-playing #recPlayingSubs { display: block; }
     margin-top: 4px;
 }
 #manualEntryEditor .mee-audio-status { font-size: 12px; color: #666; margin-left: 4px; }
+
+/* ── The host's dictionary for an English search ─────────────────────────
+   Sits above the findings: what the word means, before what it looks like in
+   use. Every term is a search in the studied language, so the whole panel is
+   a row of buttons rather than text. */
+#translationPanel {
+    margin: 0 0 8px;
+    border: 1px solid #cfd8e3;
+    border-radius: 6px;
+    background: #f7f9fc;
+    font-size: 13px;
+}
+#translationPanel .xl-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+}
+/* The default disclosure triangle sits awkwardly against the flex row; the
+   summary already reads as expandable from its own marker below. */
+#translationPanel .xl-summary::-webkit-details-marker { display: none; }
+#translationPanel .xl-summary::before {
+    content: "▸";
+    font-size: 11px;
+    color: #5a7ba6;
+}
+#translationPanel[open] .xl-summary::before { content: "▾"; }
+#translationPanel .xl-dir {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: #5a7ba6;
+    text-transform: uppercase;
+}
+#translationPanel .xl-word { font-weight: 700; color: #22303f; }
+#translationPanel .xl-n {
+    margin-left: auto;
+    font-size: 11px;
+    color: #6b7c90;
+}
+#translationPanel .xl-body { padding: 0 10px 10px; }
+#translationPanel .xl-terms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+#translationPanel .xl-term {
+    padding: 4px 10px;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    font-size: 13px;
+    cursor: pointer;
+    /* Tappable with a thumb — this is a phone control as much as a desktop one. */
+    min-height: 32px;
+}
+/* Colour is the dictionary's own confidence, strongest first. Not a traffic
+   light: a pale chip is still a real translation, just a rarer sense — so the
+   weakest is readable rather than greyed towards invisible. */
+#translationPanel .xl-conf-high {
+    background: #1d6f42;
+    border-color: #1d6f42;
+    color: #fff;
+    font-weight: 600;
+}
+#translationPanel .xl-conf-medium {
+    background: #dff0e4;
+    border-color: #8fc0a1;
+    color: #1d4f31;
+}
+#translationPanel .xl-conf-low {
+    background: #fff;
+    border-color: #c8d2de;
+    color: #4a5a6b;
+}
+#translationPanel .xl-term:active { transform: translateY(1px); }
+
+@media (max-width: 600px) {
+    #translationPanel .xl-body { padding: 0 8px 8px; }
+    #translationPanel .xl-term { font-size: 14px; }
+}

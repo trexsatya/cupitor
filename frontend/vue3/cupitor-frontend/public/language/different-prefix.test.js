@@ -107,3 +107,23 @@ describe("findDifferentPrefixMatches", () => {
     }
   });
 });
+
+// The dialog compares candidates against RAW vocab lines, so the `<*`
+// expansion marker has to be transparent there too: "för<*tränga" is how the
+// file writes "förtränga", which is exactly the shape a candidate has.
+describe("expansion markers in different-prefix matching", () => {
+  const lines = ["(repression)|för<*tränga|borttränga", "(plain)|förvara"];
+  const cats = ["V", "V"];
+
+  test("finds a different-prefix match written with a marker", () => {
+    const { results } = findDifferentPrefixMatches("undertränga", "sv", lines, cats, null);
+    const hit = results.find(r => r.lineIdx === 0);
+    expect(hit).toBeDefined();
+    expect(hit.candidate).toBe("förtränga");
+  });
+
+  test("still matches plain lines the same way", () => {
+    const { results } = findDifferentPrefixMatches("bevara", "sv", lines, cats, null);
+    expect(results.some(r => r.lineIdx === 1 && r.candidate === "förvara")).toBe(true);
+  });
+});

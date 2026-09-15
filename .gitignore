@@ -1,6 +1,7 @@
 .gradle
 /build/
 
+.DS_Store
 *.swp
 
 #Ignore in current as well as sub folders

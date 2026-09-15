@@ -191,3 +191,28 @@ describe("highlightSearchInVocabLine — escapes embedded HTML", () => {
     expect(out).toContain("&lt;y&gt;");
   });
 });
+
+// Lines written with the `<*` expansion marker ("för<*tränga" = "förtränga")
+// are matched on their joined form, so the highlighter has to mark the right
+// slice of the raw text — the marker sits inside the word it must mark.
+describe("expansion markers in highlighted vocab lines", () => {
+  test("marks a word whose marker is in the middle", () => {
+    const html = highlightSearchInVocabLine("(repression)|för<*tränga|borttränga", "förtränga");
+    expect(html).toContain('<mark class="vocab-hl">för&lt;*tränga</mark>');
+  });
+
+  test("marks a word whose marker leads the segment", () => {
+    const html = highlightSearchInVocabLine("(do)|<*göra susen", "göra susen");
+    expect(html).toContain('<mark class="vocab-hl">göra susen</mark>');
+  });
+
+  test("highlightStemInPrefixMatch marks the stem, not the marker", () => {
+    const html = highlightStemInPrefixMatch("(repression)|för<*tränga", "förtränga", "tränga");
+    expect(html).toContain('<mark class="vocab-hl">tränga</mark>');
+  });
+
+  test("lines without markers are unaffected", () => {
+    expect(highlightSearchInVocabLine("(big)|stor(t)|stora", "stor"))
+      .toBe('(big) | <mark class="vocab-hl">stor</mark>(t) | <mark class="vocab-hl">stor</mark>a');
+  });
+});
