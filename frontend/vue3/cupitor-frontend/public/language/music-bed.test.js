@@ -9,6 +9,14 @@ import {
   musicShouldPlay,
   addMusicTrack,
   removeMusicTrack,
+  MUSIC_SERVE_BASE,
+  musicTrackKind,
+  musicLocalFileName,
+  musicLocalIdFromUrl,
+  musicEngineFor,
+  musicServedUrl,
+  addLocalMusicTrack,
+  pruneMissingLocalTracks,
 } from "./music-bed";
 
 const YT = "https://www.youtube.com/watch?v=aBcDeFgHiJk";
@@ -131,7 +139,7 @@ describe("addMusicTrack / removeMusicTrack", () => {
     expect(addMusicTrack([], "https://vimeo.com/1").reason).toBe("not-youtube");
     const first = addMusicTrack([], YT, "Lo-fi");
     expect(first.added).toBe(true);
-    expect(first.tracks[0]).toEqual({ id: "aBcDeFgHiJk", url: YT, name: "Lo-fi" });
+    expect(first.tracks[0]).toEqual({ kind: "youtube", id: "aBcDeFgHiJk", url: YT, name: "Lo-fi" });
     // Same video via the short form is the same track.
     const again = addMusicTrack(first.tracks, SHORT, "");
     expect(again.added).toBe(false);
@@ -157,5 +165,174 @@ describe("addMusicTrack / removeMusicTrack", () => {
     const { tracks } = addMusicTrack([], YT, "Lo-fi");
     expect(removeMusicTrack(tracks, "aBcDeFgHiJk")).toEqual([]);
     expect(removeMusicTrack(tracks, "nope")).toHaveLength(1);
+  });
+});
+
+// ── Local tracks ─────────────────────────────────────────────────────────
+
+const LOCAL = "file:///data/user/0/org.satya.cupitor/files/music/kalinka.mp3";
+const LOCAL2 = "file:///data/user/0/org.satya.cupitor/files/music/waltz.ogg";
+
+describe("musicTrackKind", () => {
+  // A library saved before local tracks existed has no `kind` at all, and
+  // every one of those rows is a YouTube track.
+  it("defaults to youtube and only reads 'local' as local", () => {
+    expect(musicTrackKind({ id: "a", url: YT })).toBe("youtube");
+    expect(musicTrackKind({ kind: "youtube", id: "a" })).toBe("youtube");
+    expect(musicTrackKind({ kind: "local", id: "local:x.mp3" })).toBe("local");
+    expect(musicTrackKind({ kind: "nonsense", id: "a" })).toBe("youtube");
+    expect(musicTrackKind(null)).toBe("youtube");
+  });
+});
+
+describe("musicLocalFileName", () => {
+  it("takes the basename of a file url and rejects anything else", () => {
+    expect(musicLocalFileName(LOCAL)).toBe("kalinka.mp3");
+    expect(musicLocalFileName("file:///a/b/c/My Song (live).m4a")).toBe("My Song (live).m4a");
+    expect(musicLocalFileName("https://example.com/x.mp3")).toBe("");
+    expect(musicLocalFileName("file:///dir/")).toBe("");
+    expect(musicLocalFileName(null)).toBe("");
+  });
+});
+
+describe("musicLocalIdFromUrl", () => {
+  // The id IS the filename, so a url that is already saved collapses onto the
+  // existing row through the dedupe normalizeMusicTracks already does.
+  it("derives the id from the filename", () => {
+    expect(musicLocalIdFromUrl(LOCAL)).toBe("local:kalinka.mp3");
+    expect(musicLocalIdFromUrl("https://example.com/x.mp3")).toBe("");
+  });
+});
+
+describe("musicEngineFor", () => {
+  it("names the engine each track needs", () => {
+    expect(musicEngineFor({ id: "aBcDeFgHiJk", url: YT })).toBe("youtube");
+    expect(musicEngineFor({ kind: "local", id: "local:kalinka.mp3", url: LOCAL })).toBe("local");
+    // A local row whose url has been emptied can't be played by anything.
+    expect(musicEngineFor({ kind: "local", id: "local:x", url: "" })).toBe("none");
+    expect(musicEngineFor({ id: "", url: YT })).toBe("none");
+    expect(musicEngineFor(null)).toBe("none");
+  });
+});
+
+describe("musicServedUrl", () => {
+  // A page loaded over https cannot reference a file:// subresource, so the
+  // player asks the app for it over the intercepted origin instead.
+  it("builds the served url from the filename, and is empty for youtube", () => {
+    expect(musicServedUrl({ kind: "local", id: "local:kalinka.mp3", url: LOCAL }))
+      .toBe(`${MUSIC_SERVE_BASE}kalinka.mp3`);
+    expect(musicServedUrl({ kind: "local", id: "x", url: "file:///a/My Song.m4a" }))
+      .toBe(`${MUSIC_SERVE_BASE}My%20Song.m4a`);
+    expect(musicServedUrl({ id: "aBcDeFgHiJk", url: YT })).toBe("");
+    expect(musicServedUrl(null)).toBe("");
+  });
+});
+
+describe("addLocalMusicTrack", () => {
+  it("adds a file url, naming it from the file when no name is given", () => {
+    const res = addLocalMusicTrack([], LOCAL, "");
+    expect(res.added).toBe(true);
+    expect(res.id).toBe("local:kalinka.mp3");
+    expect(res.tracks[0]).toEqual({
+      kind: "local", id: "local:kalinka.mp3", url: LOCAL, name: "kalinka.mp3",
+    });
+  });
+
+  it("refuses anything that is not a file url", () => {
+    expect(addLocalMusicTrack([], YT, "x").reason).toBe("not-local");
+    expect(addLocalMusicTrack([], "", "x").reason).toBe("not-local");
+  });
+
+  // Same rename-on-duplicate behaviour the YouTube add box has, and the list
+  // passed in is never mutated.
+  it("collapses a duplicate url and renames when given a name", () => {
+    const { tracks } = addLocalMusicTrack([], LOCAL, "Kalinka");
+    const again = addLocalMusicTrack(tracks, LOCAL, "Kalinka (slow)");
+    expect(again.added).toBe(false);
+    expect(again.reason).toBe("duplicate");
+    expect(again.tracks).toHaveLength(1);
+    expect(again.tracks[0].name).toBe("Kalinka (slow)");
+    expect(tracks[0].name).toBe("Kalinka");
+  });
+
+  it("refuses to grow past the cap", () => {
+    const full = Array.from({ length: MUSIC_TRACKS_MAX }, (_, i) => ({ id: `v${i}` }));
+    expect(addLocalMusicTrack(full, LOCAL, "x").reason).toBe("full");
+  });
+});
+
+describe("normalizeMusicTracks with kinds", () => {
+  it("carries kind through and defaults a missing one to youtube", () => {
+    const out = normalizeMusicTracks([
+      { id: "a", url: YT, name: "One" },
+      { kind: "local", id: "local:kalinka.mp3", url: LOCAL, name: "Kalinka" },
+    ]);
+    expect(out[0].kind).toBe("youtube");
+    expect(out[1].kind).toBe("local");
+  });
+
+  // Selection falls back to the first row, so a local row with no file url
+  // would be chosen and then play nothing, with nothing to say why.
+  it("drops a local row that has no usable file url", () => {
+    const out = normalizeMusicTracks([
+      { kind: "local", id: "local:x", url: "", name: "Ghost" },
+      { kind: "local", id: "local:y", url: "https://not-a-file", name: "Ghost 2" },
+      { kind: "local", id: "local:kalinka.mp3", url: LOCAL, name: "Kalinka" },
+      { id: "a", url: "" },                       // a youtube row needs no url
+    ]);
+    expect(out.map(t => t.id)).toEqual(["local:kalinka.mp3", "a"]);
+  });
+});
+
+describe("pruneMissingLocalTracks", () => {
+  const mixed = [
+    { id: "a", url: YT, name: "One" },
+    { kind: "local", id: "local:kalinka.mp3", url: LOCAL, name: "Kalinka" },
+    { kind: "local", id: "local:waltz.ogg", url: LOCAL2, name: "Waltz" },
+  ];
+
+  it("drops local tracks whose file is gone and keeps the ones still there", () => {
+    const res = pruneMissingLocalTracks(mixed, [LOCAL]);
+    expect(res.tracks.map(t => t.id)).toEqual(["a", "local:kalinka.mp3"]);
+    expect(res.removed.map(t => t.name)).toEqual(["Waltz"]);
+  });
+
+  // A YouTube track is never swept: it isn't on disk to begin with, and
+  // whether YouTube will serve it can change back.
+  it("never removes a youtube track, even with nothing on disk", () => {
+    const res = pruneMissingLocalTracks(mixed, []);
+    expect(res.tracks.map(t => t.id)).toEqual(["a"]);
+    expect(res.removed).toHaveLength(2);
+  });
+
+  it("removes nothing when every file is present", () => {
+    const res = pruneMissingLocalTracks(mixed, [LOCAL, LOCAL2]);
+    expect(res.removed).toEqual([]);
+    expect(res.tracks).toHaveLength(3);
+  });
+
+  // A failed listing is not an empty disk. This is the rule that stops one bad
+  // bridge call from wiping the library.
+  it("removes nothing when there is no listing at all", () => {
+    for (const none of [null, undefined, "oops", {}]) {
+      const res = pruneMissingLocalTracks(mixed, none);
+      expect(res.removed).toEqual([]);
+      expect(res.tracks).toHaveLength(3);
+    }
+  });
+});
+
+describe("musicShouldPlay is independent of the source", () => {
+  // The decision reads mode, phase, hush and error state — never what the
+  // track is. Re-running the table against a local track proves it.
+  const base = { hasTrack: true, playing: true, mode: "gap", phase: "gap" };
+  it("gives a local track the same answers as a youtube one", () => {
+    expect(musicShouldPlay({ ...base, mode: "nonstop", phase: "clip" })).toBe(true);
+    expect(musicShouldPlay({ ...base, mode: "item", phase: "clip" })).toBe(true);
+    expect(musicShouldPlay({ ...base, mode: "item", phase: "gap" })).toBe(false);
+    expect(musicShouldPlay({ ...base, mode: "gap", phase: "gap" })).toBe(true);
+    expect(musicShouldPlay({ ...base, phase: "video" })).toBe(false);
+    expect(musicShouldPlay({ ...base, hushed: true })).toBe(false);
+    expect(musicShouldPlay({ ...base, errored: true })).toBe(false);
   });
 });

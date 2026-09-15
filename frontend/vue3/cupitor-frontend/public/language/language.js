@@ -152,6 +152,11 @@ import {
   musicShouldPlay as _musicShouldPlay,
   addMusicTrack as _addMusicTrack,
   removeMusicTrack as _removeMusicTrack,
+  musicTrackKind as _musicTrackKind,
+  musicEngineFor as _musicEngineFor,
+  musicServedUrl as _musicServedUrl,
+  addLocalMusicTrack as _addLocalMusicTrack,
+  pruneMissingLocalTracks as _pruneMissingLocalTracks,
 } from './music-bed.js';
 import {
   nextRandomPlaylistName as _nextRandomPlaylistName,
@@ -15291,10 +15296,25 @@ function _postMediaState(playing) {
 // (a recording is sounding), 'gap' (a pause), 'video' (a captured clip, which
 // has its own audio), or 'idle'. The mode setting maps that to sound or
 // silence; nothing else decides.
-let _musicPlayer = null
-let _musicReady = false
-let _musicLoadedId = ''
+//
+// Two kinds of track, one engine at a time. A YouTube track rides the second
+// YT player described above; a file the user picked from the device plays
+// through a plain <audio> element in the same off-screen host. Both sit
+// behind the same small surface so that nothing below this block — the
+// mode/phase decision, the panel, stop and reset — knows or cares which one
+// is sounding:
+//
+//   kind        'youtube' | 'local'
+//   ready       true once play() will be honoured
+//   loadedId    the track id the engine currently holds
+//   cue(track)  swap to another track of the SAME kind without starting it
+//   play() / pause() / setVolume(0..100)
+//   stop()      release the source entirely — the engine is done
+let _musicEngine = null
 
+// The off-screen container both engines mount into. Parked off-screen but
+// RENDERED — never display:none or visibility:hidden, both of which put media
+// playback at the browser's discretion.
 function _musicHostNode() {
   let host = document.getElementById('recMusicHost')
   if (!host) {
@@ -15303,26 +15323,27 @@ function _musicHostNode() {
     host.style.cssText = 'position:fixed;left:-10000px;top:0;width:200px;height:120px;' +
                          'opacity:0;pointer-events:none;z-index:-1;'
     document.body.appendChild(host)
-    host.appendChild(document.createElement('div'))
   }
-  return host.firstChild
+  return host
 }
 
 function _applyMusicVolume() {
-  if (!_musicPlayer || !_musicReady) return
-  try { _musicPlayer.setVolume(_musicVolume()) } catch (_) {}
+  if (!_musicEngine || !_musicEngine.ready) return
+  try { _musicEngine.setVolume(_musicVolume()) } catch (_) {}
 }
 
-// Why the current track won't play, as a YouTube error code — 0 when it's
-// fine. Kept apart from `_musicReady`, which says only whether the player
-// OBJECT is alive. Conflating the two is a trap: a music upload that refuses
-// embedding (101/150) is the common case, not the rare one, and a single flag
-// would then disable the feature for the rest of the page's life, including
-// for the working URL the user pastes next.
+// Why the current track won't play — a YouTube error code, or one of our own
+// strings for a local file — and 0 when it's fine. Kept apart from the
+// engine's `ready`, which says only whether the player OBJECT is alive.
+// Conflating the two is a trap: a music upload that refuses embedding
+// (101/150) is the common case, not the rare one, and a single flag would
+// then disable the feature for the rest of the page's life, including for
+// the working URL the user pastes next.
 let _musicError = 0
 
 // The codes worth explaining. Anything else gets the generic line.
 function _musicErrorText(code) {
+  if (code === 'local-decode') return "this device can't play that file"
   if (code === 101 || code === 150) return "that video's owner doesn't allow it to be played inside other apps"
   if (code === 100) return 'that video is private or has been removed'
   if (code === 2)   return "that link doesn't point at a playable video"
@@ -15333,45 +15354,49 @@ function _musicErrorText(code) {
 // row rather than warning about the library as a whole.
 let _musicErrorId = ''
 
-function _noteMusicError(code) {
+// `eng` is the engine that failed, passed in rather than read from
+// _musicEngine: player errors arrive as async messages, so by the time one
+// lands the engine it belongs to may already have been replaced.
+function _noteMusicError(code, eng) {
+  // A switch of kind stops the old engine; an error it was already about to
+  // report must not silence the new one.
+  if (eng && eng !== _musicEngine) return
   _musicError = code || 1
-  _musicErrorId = _musicLoadedId
+  _musicErrorId = eng ? eng.loadedId : (_musicEngine ? _musicEngine.loadedId : '')
   // Say it out loud once. Silence here is what makes this feature look simply
-  // broken: the URL is a valid YouTube link, so nothing else flags it.
+  // broken: the URL is a valid link, so nothing else flags it.
   _cpBuildToast(`No background music — ${_musicErrorText(code)}.`)
   if ($('#musicPanelDialog').is(':visible')) _renderMusicPanel()
 }
 
-// Built on first actual need, so a user who never sets a music URL never pays
-// for an extra iframe.
-function _ensureMusicPlayer() {
-  const id = _musicVideoId()
-  if (!id) return null
+// ── YouTube engine ──
+function _makeYtMusicEngine(track) {
   if (!window.YT || typeof window.YT.Player !== 'function') return null
-  if (_musicPlayer) {
-    // Not gated on _musicReady: a player whose last video errored must still
-    // accept the next one, or one bad link poisons every later good one.
-    if (_musicLoadedId !== id) {
-      // cue, not load: loadVideoById starts playing immediately, and whether
-      // we should be sounding is _syncBackgroundMusic's decision, not this
-      // function's.
-      try {
-        _musicPlayer.cueVideoById(id)
-        _musicLoadedId = id
-        _musicError = 0          // a new video gets a clean slate
-        _musicErrorId = ''
-        _applyMusicVolume()
-      } catch (_) {}
-    }
-    return _musicPlayer
+  const mount = document.createElement('div')
+  _musicHostNode().appendChild(mount)
+  const eng = { kind: 'youtube', ready: false, loadedId: track.id, player: null }
+  // cue, not load: loadVideoById starts playing immediately, and whether we
+  // should be sounding is _syncBackgroundMusic's decision, not this one's.
+  // Not gated on `ready`: a player whose last video errored must still
+  // accept the next one, or one bad link poisons every later good one.
+  eng.cue = (t) => { try { eng.player.cueVideoById(t.id); eng.loadedId = t.id } catch (_) {} }
+  eng.play = () => { try { eng.player.playVideo() } catch (_) {} }
+  eng.pause = () => { try { eng.player.pauseVideo() } catch (_) {} }
+  eng.setVolume = (v) => { try { eng.player.setVolume(v) } catch (_) {} }
+  eng.stop = () => {
+    eng.pause()
+    // destroy() takes the iframe with it; the mount div is ours to remove.
+    try { eng.player.destroy() } catch (_) {}
+    try { mount.remove() } catch (_) {}
+    eng.ready = false
   }
   try {
-    _musicPlayer = new window.YT.Player(_musicHostNode(), {
-      videoId: id,
+    eng.player = new window.YT.Player(mount, {
+      videoId: track.id,
       width: 200, height: 120,
       playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, modestbranding: 1, playsinline: 1 },
       events: {
-        onReady: () => { _musicReady = true; _applyMusicVolume(); _syncBackgroundMusic() },
+        onReady: () => { eng.ready = true; _applyMusicVolume(); _syncBackgroundMusic() },
         onStateChange: (e) => {
           // Loop by hand on ENDED. The `loop` playerVar only works against a
           // real playlist, so for a single video it does nothing.
@@ -15382,7 +15407,7 @@ function _ensureMusicPlayer() {
           // flip, and restarting blind would strand the music playing with no
           // session to turn it off.
           if (e && e.data === 0) {
-            try { _musicPlayer.seekTo(0, true) } catch (_) {}
+            try { eng.player.seekTo(0, true) } catch (_) {}
             _syncBackgroundMusic()
             return
           }
@@ -15390,17 +15415,188 @@ function _ensureMusicPlayer() {
           // an unnamed track can stop showing as a bare video id.
           if (e && (e.data === 5 || e.data === 1)) _maybeNameTrackFromPlayer()
         },
-        onError: (e) => _noteMusicError(e && e.data),
+        onError: (e) => _noteMusicError(e && e.data, eng),
       },
     })
-    _musicLoadedId = id
-    _musicError = 0
-    _musicErrorId = ''
   } catch (_) {
-    _musicPlayer = null
+    try { mount.remove() } catch (_) {}
     return null
   }
-  return _musicPlayer
+  return eng
+}
+
+// ── Local-file engine ──
+// `loop` on the element replaces the hand-rolled rewind the YouTube engine
+// needs. The src is the URL the app serves the file at, never file:// — a
+// page loaded over https cannot reference a file:// subresource.
+function _makeLocalMusicEngine(track) {
+  const a = document.createElement('audio')
+  a.loop = true
+  a.preload = 'auto'
+  a.setAttribute('playsinline', '')
+  _musicHostNode().appendChild(a)
+  const eng = { kind: 'local', ready: false, loadedId: track.id, el: a }
+  eng.cue = (t) => {
+    eng.loadedId = t.id
+    a.src = _musicServedUrl(t)
+    try { a.load() } catch (_) {}
+  }
+  // play() returns a promise that rejects when the browser refuses; the
+  // rejection is not an error we can act on, and an unhandled one is noise.
+  eng.play = () => { try { const p = a.play(); if (p && p.catch) p.catch(() => {}) } catch (_) {} }
+  eng.pause = () => { try { a.pause() } catch (_) {} }
+  eng.setVolume = (v) => { a.volume = Math.max(0, Math.min(100, Number(v) || 0)) / 100 }
+  eng.stop = () => {
+    eng.pause()
+    // Dropping the src and reloading is what actually releases the stream;
+    // removing the element alone leaves the fetch running.
+    try { a.removeAttribute('src'); a.load() } catch (_) {}
+    try { a.remove() } catch (_) {}
+    eng.ready = false
+  }
+  // `ready` flips once and stays up, like the YouTube engine's onReady: a
+  // play() issued before a later cue has buffered is still honoured once data
+  // arrives, so there is nothing to wait for on subsequent tracks.
+  a.addEventListener('canplay', () => {
+    if (eng.ready) return
+    eng.ready = true
+    _applyMusicVolume()
+    _syncBackgroundMusic()
+  })
+  a.addEventListener('error', () => _onLocalMusicError(eng))
+  a.src = _musicServedUrl(track)
+  return eng
+}
+
+// An <audio> error does not say whether the file is missing or merely one the
+// WebView cannot decode — both arrive as the same code. So ask: run the sweep,
+// and if it took this track the file was gone and the user has been told. If
+// not, the file is there and unplayable, and the row is marked.
+async function _onLocalMusicError(eng) {
+  if (eng !== _musicEngine) return
+  const id = eng.loadedId
+  const probe = await _probeLocalMusic()
+  // The user may have moved on while we were asking. An answer about the
+  // OLD track must not be pinned on whatever is loaded now.
+  if (eng !== _musicEngine || eng.loadedId !== id) return
+  if (probe.state === 'ready') {
+    const removed = _applyMusicSweep(probe.onDisk)
+    if (removed.some(t => t.id === id)) return
+  }
+  // The file is there. A first failure can also be the page asking before
+  // the app had wired itself up to answer, so reload once before blaming the
+  // file; a second failure on the same track is the file's.
+  const track = _musicTrack()
+  if (eng.retriedId !== id && track && track.id === id) {
+    eng.retriedId = id
+    eng.cue(track)
+    _syncBackgroundMusic()
+    return
+  }
+  _noteMusicError('local-decode', eng)
+}
+
+// Built on first actual need, so a user who never adds a track never pays
+// for an extra iframe or element.
+function _ensureMusicEngine() {
+  const track = _musicTrack()
+  const kind = _musicEngineFor(track)
+  if (kind === 'none') return null
+  if (_musicEngine && _musicEngine.kind !== kind) {
+    // Only one source sounds at a time, and a YouTube iframe kept alive for
+    // a track nobody chose is memory the phone would rather have back.
+    _musicEngine.stop()
+    _musicEngine = null
+  }
+  if (_musicEngine) {
+    if (_musicEngine.loadedId !== track.id) {
+      _musicEngine.cue(track)
+      _musicError = 0          // a new track gets a clean slate
+      _musicErrorId = ''
+      _applyMusicVolume()
+    }
+    return _musicEngine
+  }
+  _musicEngine = kind === 'youtube' ? _makeYtMusicEngine(track) : _makeLocalMusicEngine(track)
+  if (_musicEngine) {
+    _musicError = 0
+    _musicErrorId = ''
+  }
+  return _musicEngine
+}
+
+// ─── Local music files: what the device has ───────────────────────────────
+// The library remembers a file:// URL; the app owns the file. These keep the
+// two honest with each other.
+
+// What the device can do for local music, from one `musicList` call:
+//   'ready'        — the bridge answered; `onDisk` is what it holds
+//   'unsupported'  — the app is there but cannot serve files (Android < 8)
+//   'error'        — the app is there and should be able to, but the listing
+//                    failed; nothing may be swept on this answer
+//   'none'         — no bridge at all: a plain browser
+async function _probeLocalMusic() {
+  if (!_haveAudioBridge()) return { state: 'none', onDisk: null }
+  try {
+    const raw = await _audioRpc('musicList', {})
+    const list = JSON.parse(raw || '[]')
+    if (!Array.isArray(list)) return { state: 'error', onDisk: null }
+    return { state: 'ready', onDisk: list }
+  } catch (e) {
+    const msg = String((e && e.message) || '')
+    if (msg === 'unsupported') return { state: 'unsupported', onDisk: null }
+    if (msg === 'no-bridge') return { state: 'none', onDisk: null }
+    return { state: 'error', onDisk: null }
+  }
+}
+
+// Drop every local track whose file is no longer on the device, tell the
+// user, and let the bed hand over. Returns the tracks removed. Only ever
+// called with a real listing — a failed listing must never look like an
+// empty disk, or one bad bridge call would wipe the library.
+function _applyMusicSweep(onDisk) {
+  const urls = (onDisk || []).map(x => x && x.url)
+  const res = _pruneMissingLocalTracks(_musicTracks(), urls)
+  if (!res.removed.length) return []
+  window._appSettings.recMusicTracks = res.tracks
+  saveAppSettings()
+  const n = res.removed.length
+  _cpBuildToast(n === 1
+    ? `Removed "${res.removed[0].name}" from the music list — the file is no longer on the device.`
+    : `Removed ${n} tracks from the music list — their files are no longer on the device.`)
+  if ($('#musicPanelDialog').is(':visible')) _renderMusicPanel()
+  // The selection is recomputed from the list, so a swept track simply
+  // hands over to the next one.
+  _resetBackgroundMusic()
+  return res.removed
+}
+
+function _fmtMusicBytes(n) {
+  const b = Number(n) || 0
+  if (b >= 1024 * 1024 * 1024) return `${(b / (1024 * 1024 * 1024)).toFixed(1)} GB`
+  if (b >= 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`
+  if (b >= 1024) return `${Math.round(b / 1024)} KB`
+  return `${b} B`
+}
+
+// Bring the panel's device controls in line with what the device can do,
+// and sweep. Called when the panel opens and after every pick.
+async function _refreshLocalMusic() {
+  const probe = await _probeLocalMusic()
+  const $d = $('#musicPanelDialog')
+  if (!$d.length) return
+  // The pick button stays available on 'error': the app is there, and a
+  // listing that failed once says nothing about whether a pick would.
+  $d.find('#mpPickRow').toggle(probe.state === 'ready' || probe.state === 'error')
+  $d.find('#mpDeviceHint').toggle(probe.state === 'unsupported')
+  if (probe.state === 'error') {
+    $d.find('#mpDiskUse').text("Couldn't read the local music files just now.")
+    return
+  }
+  if (probe.state !== 'ready') { $d.find('#mpDiskUse').text(''); return }
+  const total = probe.onDisk.reduce((s, x) => s + (Number(x && x.size) || 0), 0)
+  $d.find('#mpDiskUse').text(total ? `Local tracks use ${_fmtMusicBytes(total)} of storage.` : '')
+  _applyMusicSweep(probe.onDisk)
 }
 
 // ─── Music panel ─────────────────────────────────────────────────────────
@@ -15426,15 +15622,17 @@ async function _fetchYouTubeTitle(url) {
 // has actually loaded it we can do better, for free.
 function _maybeNameTrackFromPlayer() {
   try {
-    if (!_musicPlayer || typeof _musicPlayer.getVideoData !== 'function') return
-    const id = _musicLoadedId
+    const eng = _musicEngine
+    if (!eng || eng.kind !== 'youtube' || !eng.player) return
+    if (typeof eng.player.getVideoData !== 'function') return
+    const id = eng.loadedId
     if (!id) return
     const list = _musicTracks()
     const t = list.find(x => x.id === id)
     if (!t || t.name !== id) return          // already has a real name
-    const data = _musicPlayer.getVideoData() || {}
+    const data = eng.player.getVideoData() || {}
     // A state change from the OUTGOING video can arrive after we've already
-    // cued the next one, and _musicLoadedId moved synchronously — so trust the
+    // cued the next one, and eng.loadedId moved synchronously — so trust the
     // player's own id over ours before writing a name.
     if (String(data.video_id || '') !== id) return
     const title = String(data.title || '').trim()
@@ -15464,10 +15662,13 @@ function _renderMusicPanel() {
   const mode = _musicMode()
   const s = window._appSettings || {}
 
+  // Each row carries its kind — ♪ for a file on the device, ▶ for YouTube —
+  // so the two are told apart at a glance in a plain <select>.
   const opts = tracks.length
-    ? tracks.map(t =>
-        `<option value="${_.escape(t.id)}"${t.id === sel ? ' selected' : ''}>${_.escape(t.name)}</option>`
-      ).join('')
+    ? tracks.map(t => {
+        const icon = _musicTrackKind(t) === 'local' ? '♪' : '▶'
+        return `<option value="${_.escape(t.id)}"${t.id === sel ? ' selected' : ''}>${icon} ${_.escape(t.name)}</option>`
+      }).join('')
     : '<option value="">(no tracks yet)</option>'
   $d.find('#mpTrack').html(opts).prop('disabled', !tracks.length)
   $d.find('#mpDelete').prop('disabled', !tracks.length)
@@ -15533,6 +15734,11 @@ function _openMusicPanel() {
       <button type="button" id="mpAdd" class="btn">＋ Add</button>
     </div>
     <div class="mp-hint">Leave the name blank and it will be looked up.</div>
+    <div class="mp-row mp-add" id="mpPickRow" style="display:none;">
+      <button type="button" id="mpPick" class="btn mp-grow">🎵 Add from device</button>
+    </div>
+    <div class="mp-hint" id="mpDeviceHint" style="display:none;">Local music needs the Cupitor app on Android 8 or newer.</div>
+    <div class="mp-hint" id="mpDiskUse"></div>
     <div class="mp-row mp-modes">
       <span class="mp-lbl">Play</span>
       <label class="mp-radio"><input type="radio" name="mpMode" value="item"> With recording</label>
@@ -15542,6 +15748,9 @@ function _openMusicPanel() {
     <div id="mpVolumes"></div>
   `)
   _renderMusicPanel()
+  // Shows the device button only where the app can serve files, and sweeps
+  // away tracks whose files are gone. Async, so the panel is usable at once.
+  _refreshLocalMusic()
 
   $d.off('.mp')
   $d.on('change.mp', '#mpTrack', function () {
@@ -15571,13 +15780,68 @@ function _openMusicPanel() {
     saveAppSettings()
     _renderMusicPanel()
     _resetBackgroundMusic()
+    // The copy is private to the app; leaving it would be invisible disk.
+    if (_musicTrackKind(t) === 'local' && _haveAudioBridge()) {
+      _audioRpc('musicDelete', { url: t.url })
+        .then(() => _refreshLocalMusic())
+        .catch(() => {})
+    }
+  })
+  // Pick files from the device. The app copies each into its own storage and
+  // answers with the file:// URLs; the library only ever sees those.
+  $d.on('click.mp', '#mpPick', async function () {
+    const $btn = $(this)
+    $btn.prop('disabled', true)
+    let picked = []
+    let failed = 0
+    try {
+      const reply = JSON.parse(await _audioRpc('musicPick', {}) || '{}') || {}
+      picked = Array.isArray(reply.picked) ? reply.picked : []
+      failed = Number(reply.failed) || 0
+    } catch (_) { picked = []; failed = 0 }
+    $btn.prop('disabled', false)
+    // A copy that failed must not look like a cancel.
+    if (failed) {
+      _cpBuildToast(failed === 1 ? "One file couldn't be copied into the app."
+                                 : `${failed} files couldn't be copied into the app.`)
+    }
+    if (!picked.length) return
+    let list = _musicTracks()
+    let lastId = ''
+    let added = 0
+    const orphans = []
+    for (const p of picked) {
+      if (!p || !p.url) continue
+      const res = _addLocalMusicTrack(list, p.url, p.name)
+      list = res.tracks
+      if (res.reason === 'full') {
+        // The file is already copied but has no row; delete it rather than
+        // leave storage the panel counts and the user cannot see.
+        orphans.push(p.url)
+        continue
+      }
+      if (res.id) lastId = res.id
+      if (res.added) added++
+    }
+    window._appSettings.recMusicTracks = list
+    // The last file picked becomes the selection.
+    if (lastId) window._appSettings.recMusicSelected = lastId
+    saveAppSettings()
+    _renderMusicPanel()
+    _resetBackgroundMusic()
+    for (const u of orphans) _audioRpc('musicDelete', { url: u }).catch(() => {})
+    _refreshLocalMusic()
+    if (orphans.length) alert('The music list is full — remove a track first.')
+    else if (!added) _cpBuildToast(picked.length === 1 ? 'Already in the list — selected it.' : 'Already in the list.')
   })
   $d.on('click.mp', '#mpAdd', async function () {
     const url = String($d.find('#mpUrl').val() || '').trim()
     if (!url) return
     let name = String($d.find('#mpName').val() || '').trim()
     if (!_musicVideoIdFromUrl(url)) {
-      alert("That doesn't look like a YouTube link. Background music plays through YouTube, so it needs one.")
+      alert($d.find('#mpPickRow').is(':visible')
+        ? "That doesn't look like a YouTube link. Paste a YouTube URL here, or use “Add from device” for a file on this phone."
+        : "That doesn't look like a YouTube link. Background music plays through YouTube, so it needs one.")
       return
     }
     const $btn = $(this)
@@ -15658,20 +15922,20 @@ function _syncBackgroundMusic() {
     playing: !!window._playingRecording,
     paused: !!window._recPlayPaused,
   })
-  const p = want ? _ensureMusicPlayer() : _musicPlayer
+  const p = want ? _ensureMusicEngine() : _musicEngine
   // Tints the ♫ button while the bed is actually sounding. Keyed on the player
   // really being there and ready, not just on wanting it — a glowing button
   // over silence would be worse than no indicator.
-  $('body').toggleClass('music-on', !!(want && p && _musicReady))
+  $('body').toggleClass('music-on', !!(want && p && p.ready))
   if (!p) return
   // Starting needs a working player; STOPPING must always go through, even on
   // one we consider broken — an errored player can still be making noise, and
   // refusing to pause it would leave the user nothing that shuts it up.
   try {
-    if (!want) { p.pauseVideo(); return }
-    if (!_musicReady) return
+    if (!want) { p.pause(); return }
+    if (!p.ready) return
     _applyMusicVolume()
-    p.playVideo()
+    p.play()
   } catch (_) {}
 }
 
@@ -15686,24 +15950,24 @@ function _setRecPlayPhase(phase) {
 function _stopBackgroundMusic() {
   window._recPlayPhase = 'idle'
   $('body').removeClass('music-on')
-  // Deliberately not gated on _musicReady — see _syncBackgroundMusic. Stop has
-  // to work on a player we think is broken, because that is precisely the one
+  // Deliberately not gated on `ready` — see _syncBackgroundMusic. Stop has to
+  // work on a player we think is broken, because that is precisely the one
   // that might still be sounding.
-  if (!_musicPlayer) return
-  try { _musicPlayer.pauseVideo() } catch (_) {}
+  if (!_musicEngine) return
+  try { _musicEngine.pause() } catch (_) {}
 }
 
-// The URL changed in Settings. Swapping the track mid-session beats making the
-// user stop and start the playlist to hear it.
+// The track changed in the panel. Swapping the track mid-session beats making
+// the user stop and start the playlist to hear it.
 function _resetBackgroundMusic() {
-  // No early return on a missing player: setting a URL for the FIRST time
+  // No early return on a missing engine: adding a track for the FIRST time
   // mid-session is exactly when there isn't one yet, and _syncBackgroundMusic
   // builds it when the current phase calls for music.
   if (!_musicVideoId()) {
-    if (_musicPlayer) { try { _musicPlayer.pauseVideo() } catch (_) {} }
+    if (_musicEngine) { try { _musicEngine.pause() } catch (_) {} }
     return
   }
-  _ensureMusicPlayer()
+  _ensureMusicEngine()
   _syncBackgroundMusic()
 }
 
