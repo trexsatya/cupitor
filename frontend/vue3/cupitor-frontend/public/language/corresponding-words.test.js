@@ -12,6 +12,7 @@ import {
   sameWord,
   sinkUnevidencedGroups,
   translationConfidence,
+  translationConfidences,
 } from "./corresponding-words";
 
 // 'han' is a stop word in the real list; the rest of these are not.
@@ -320,6 +321,42 @@ describe("translationConfidence", () => {
     expect(translationConfidence({ term: "mere", rank: 2 })).toBe("medium");
     expect(translationConfidence({ term: "loch", rank: 5 })).toBe("low");
     expect(translationConfidence(null)).toBe("low");
+  });
+});
+
+describe("translationConfidences", () => {
+  it("grades the real sjö answer", () => {
+    const terms = [
+      { word: "lake", score: 0.4798 },
+      { word: "sea", score: 0.0316 },
+      { word: "wave" }, { word: "mere" }, { word: "lough" }, { word: "loch" },
+    ];
+    expect(translationConfidences(terms))
+      .toEqual(["high", "medium", "low", "low", "low", "low"]);
+  });
+
+  it("does not let an unscored term outrank a scored one", () => {
+    // Alone, the second of these reads as 'medium' off its position while the
+    // first reads as 'low' off its score — the rarer sense looking surer.
+    const terms = [{ word: "a", score: 0.015 }, { word: "b" }];
+    expect(translationConfidences(terms)).toEqual(["low", "low"]);
+  });
+
+  it("uses position when the answer carries no scores at all", () => {
+    const terms = [{ word: "tunn" }, { word: "smal" }, { word: "mager" }, { word: "gles" }];
+    expect(translationConfidences(terms)).toEqual(["high", "medium", "medium", "low"]);
+  });
+
+  it("counts positions in the list it is given, not the one it came from", () => {
+    // The panel drops the term that merely echoes the word asked about, so the
+    // survivor is now the dictionary's best offer and is graded as such.
+    const terms = [{ word: "smal" }, { word: "mager" }];
+    expect(translationConfidences(terms)).toEqual(["high", "medium"]);
+  });
+
+  it("has nothing to say about nothing", () => {
+    expect(translationConfidences([])).toEqual([]);
+    expect(translationConfidences(null)).toEqual([]);
   });
 });
 

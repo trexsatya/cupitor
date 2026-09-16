@@ -358,6 +358,27 @@ export function translationConfidence(term) {
   return rank <= 2 ? 'medium' : 'low';
 }
 
+// Grade a whole answer, which is the only way the two measures can be read
+// side by side.
+//
+// Scores and places are different scales, and colouring one term by each puts
+// them in the same row as if they meant the same thing: a first sense scoring
+// 0.015 would be the palest chip on screen while the unscored sense beside it —
+// rarer, by the dictionary's own ordering — looks surer than it. So an answer
+// carrying any score is read by score throughout, and one carrying none is read
+// by where the dictionary put each term.
+//
+// Places are counted in the list as given, so terms dropped before display
+// (the answer that merely echoes the word asked about) don't leave a gap that
+// pushes everything after them down a grade.
+export function translationConfidences(terms) {
+  const list = terms || [];
+  const scored = list.some(t => t && Number.isFinite(t.score));
+  return list.map((t, i) => scored
+    ? translationConfidence({ score: (t && Number.isFinite(t.score)) ? t.score : 0 })
+    : translationConfidence({ rank: i }));
+}
+
 // Sink the groups that nothing the search itself found landed in.
 //
 //   foundBySearch — whether a result came from the search rather than from a

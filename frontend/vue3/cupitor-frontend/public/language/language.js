@@ -10,6 +10,7 @@ import {
   buildKnownWordSet,
   buildPrefixSet,
   vocabCompoundParts as _coreVocabCompoundParts,
+  stripExpansionMarkers as _stripExpansionMarkers,
 } from './vocab-search.js';
 import { STEM_RULES, guessStems } from './stemming.js';
 import {
@@ -65,7 +66,7 @@ import {
   capGroups as _capGroups,
   sinkUnevidencedGroups as _sinkUnevidencedGroups,
   confirmByBackTranslation as _confirmByBackTranslation,
-  translationConfidence as _translationConfidence,
+  translationConfidences as _translationConfidences,
   lineContainsWord as _lineContainsWord,
   tokenizeLine as _tokenizeLine,
   wordMatches as _wordMatches,
@@ -680,6 +681,11 @@ function _renderRareWordsPage() {
 // the full dialog back in one click.
 function rareWordSearch(line) {
   window.forceMainLangForNextSearch = true
+  // A rare word is a studied-language word, so the switch says so — otherwise
+  // it claims these results are English, and every later reading of it (the
+  // context-window buttons, the playback helpers) takes the wrong side of the
+  // subtitle pair.
+  _setLangToggle(false)
   window.unprocessedSearchText = line
   window.searchText = expandWords(line, getLangFromUrl().code)
   $('#searchText').val(line).trigger('input')
@@ -1551,11 +1557,10 @@ function navigateSearchHistory(direction) {
   // Replay in the language the search was originally in, regardless of the
   // current UI toggle. Cleared in fetchSRTs's finally block.
   window.forceLangForNextSearch = lang === 'en' ? 'en' : 'sv'
-  // Sync the toggle visually so the user can see which language the replayed
-  // search is in (prop() without trigger doesn't fire the change handler, so
-  // no double-search). After forceLang is cleared, the next typed search
-  // will follow this toggle position, which matches user intent.
-  $('#toggleLangCb').prop('checked', lang === 'en')
+  // Sync the toggle so the user can see which language the replayed search is
+  // in. After forceLang is cleared, the next typed search will follow this
+  // toggle position, which matches user intent.
+  _setLangToggle(lang === 'en')
   // Trigger 'input' (not 'change') so the X-clear button visibility updates
   // without re-firing the typed-search flow on top of our explicit doSearch
   // call below.
@@ -2367,7 +2372,24 @@ async function vocabularyLineSelected() {
     return;
   }
   // $('#searchText').val($('#searchedWords').val()).trigger('change')
-  const vocabOptionVal = JSON.parse(rawVal);
+  // Not every option here is a vocabulary line: doSearch adds a bare term to
+  // this list for every search made through the history, and they look the
+  // same in the dropdown. Such a term has no studied-language side to pin and
+  // nothing to expand, so it runs like anything typed into the box.
+  let vocabOptionVal = null
+  try { vocabOptionVal = JSON.parse(rawVal) } catch (_) {}
+  if (!vocabOptionVal || typeof vocabOptionVal.e !== 'string') {
+    window.unprocessedSearchText = null
+    $('#searchText').val(rawVal).trigger('input')
+    await doSearch(String(rawVal), null)
+    return
+  }
+  // A vocabulary line is always searched in the studied language. Pinned here
+  // rather than where the dropdown is wired up, because the branches above
+  // never search — and nothing but a search clears this again, so pinning for
+  // them would hijack whatever the user did next.
+  window.forceMainLangForNextSearch = true
+  _setLangToggle(false)
   window.unprocessedSearchText = vocabOptionVal.o
   window.searchText = vocabOptionVal.e //expandWords(window.unprocessedSearchText, getLangFromUrl().code)
   // render() now branches on window.unprocessedSearchText — when set, it
@@ -2775,7 +2797,6 @@ $('document').ready(e => {
   })
 
   $('#searchedWords').change(e => {
-    window.forceMainLangForNextSearch = true;
     vocabularyLineSelected()
   })
 
@@ -3115,7 +3136,14 @@ function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLa
       // word from an EN subtitle is searched against EN SRTs even when the
       // toggle is on SV (and vice-versa). Cleared in searchTextChanged's
       // finally block.
-      if (wordLang === 'sv' || wordLang === 'en') window.forceLangForNextSearch = wordLang
+      if (wordLang === 'sv' || wordLang === 'en') {
+        window.forceLangForNextSearch = wordLang
+        // And move the switch with it, as replaying from the history does: the
+        // pin lasts one search, so a switch left pointing the other way both
+        // describes these results wrongly and sends the next typed search back
+        // to the language the user has just left.
+        _setLangToggle(wordLang === 'en')
+      }
       $('#searchText').val(word).trigger('change')
     }
   })
@@ -5987,6 +6015,22 @@ function enablePasteForHashChange() {
   })
 }
 
+// Move the language switch — both halves of it. The checkbox is what the page
+// reads; the switch the user reads is drawn by bootstrap-toggle from its own
+// state, and it does not watch the property. Setting the property alone leaves
+// the page searching one language while the switch says the other.
+//
+// Silently: the switch's own handler starts a fresh search, and every caller
+// here is about to start one itself.
+function _setLangToggle(isEn) {
+  const $cb = $('#toggleLangCb')
+  $cb.prop('checked', !!isEn)
+  try {
+    const widget = $cb.data('bs.toggle')
+    if (widget) { if (isEn) widget.on(true); else widget.off(true) }
+  } catch (e) { console.warn('lang toggle sync failed', e) }
+}
+
 function getSelectedLang() {
   // forceLangForNextSearch overrides the UI toggle for one search — used by
   // "Search here" on a clicked subtitle word (search in whichever language
@@ -7008,24 +7052,56 @@ const CORRESPONDING_CONFIRM_MS = 1500
 // memo holds every direction. The same word is looked up again each time the
 // results are redrawn — a settings change re-renders them — and without this
 // the wait is paid again each time; worse, an answer that made the deadline
-// once but not twice would rename the headings under the user. Failures are
+// once but not twice would rename the headings under the user. Silence is
 // remembered too: a bridge that is present but not answering costs the full
 // wait, with the page showing "Loading…" throughout.
 const _TRANSLATE_DETAIL_CACHE = new Map()
+// A page stays open for a whole study session, every search adds an entry, and
+// each entry holds a whole dictionary answer down to every term's
+// back-translations. Far more than a session needs, but not without end.
+const _TRANSLATE_DETAIL_CACHE_MAX = 500
+function _rememberTranslation(key, value) {
+  if (!_TRANSLATE_DETAIL_CACHE.has(key) && _TRANSLATE_DETAIL_CACHE.size >= _TRANSLATE_DETAIL_CACHE_MAX) {
+    // A Map hands back its keys in the order they went in, so this is the oldest.
+    _TRANSLATE_DETAIL_CACHE.delete(_TRANSLATE_DETAIL_CACHE.keys().next().value)
+  }
+  _TRANSLATE_DETAIL_CACHE.set(key, value)
+}
+// Two things ask about the same word in the same breath — the panel shows the
+// dictionary while the grouping reads the same answer for its headings — and
+// neither is in the cache yet when the other starts. One question, one answer,
+// each caller keeping its own deadline for it.
+const _TRANSLATE_DETAIL_INFLIGHT = new Map()
 async function _translateDetailed(text, from, to, ms) {
   const key = `${from}\u0000${to}\u0000${String(text).toLowerCase()}`
   if (_TRANSLATE_DETAIL_CACHE.has(key)) return _TRANSLATE_DETAIL_CACHE.get(key)
-  const req = _requestTranslation(text, from, to, { detail: true })
-  // The request outlives our deadline. The first lookup of a session is the
-  // one that pays for the host waking its translator up, so it is the likeliest
-  // to miss — and the answer then arrives a moment later, correct and unwanted.
-  // Let it land: without this the one call most likely to be late is the one
-  // whose failure is remembered for the rest of the page's life.
-  req.then(v => { if (v) _TRANSLATE_DETAIL_CACHE.set(key, v) }, () => {})
+  let req = _TRANSLATE_DETAIL_INFLIGHT.get(key)
+  if (!req) {
+    req = _requestTranslation(text, from, to, { detail: true })
+    _TRANSLATE_DETAIL_INFLIGHT.set(key, req)
+    // The request outlives our deadline. The first lookup of a session is the
+    // one that pays for the host waking its translator up, so it is the
+    // likeliest to miss — and the answer then arrives a moment later, correct
+    // and unwanted. Let it land: without this the one call most likely to be
+    // late is the one whose silence is remembered for the rest of the page's
+    // life.
+    req.then(v => { if (v) _rememberTranslation(key, v) }, () => {
+      // A refusal is not silence, whenever it turns up. If it arrives after a
+      // caller gave up waiting and wrote the wait off, take that back — the
+      // word deserves another ask rather than a blank panel for the rest of
+      // the page's life.
+      if (_TRANSLATE_DETAIL_CACHE.get(key) === null) _TRANSLATE_DETAIL_CACHE.delete(key)
+    }).then(() => { _TRANSLATE_DETAIL_INFLIGHT.delete(key) })
+  }
+  let refused = false
+  req.then(null, () => { refused = true })
   let out = null
   try { out = await _withTimeout(req, ms, 'translate') || null } catch (_) { out = null }
-  // Not over an answer that beat us to it.
-  if (!_TRANSLATE_DETAIL_CACHE.has(key)) _TRANSLATE_DETAIL_CACHE.set(key, out)
+  // What is worth not paying twice is the wait. A host that said no said it at
+  // once, so remembering that would hide the word for the rest of the page's
+  // life over a single hiccup — only silence is remembered, and not over an
+  // answer that beat us to it.
+  if (!refused && !_TRANSLATE_DETAIL_CACHE.has(key)) _rememberTranslation(key, out)
   return out
 }
 
@@ -7034,6 +7110,17 @@ async function _translateDetailed(text, from, to, ms) {
 // "göra susen" from the vocabulary and "rödaktigt färgämne" from the
 // dictionary are both let go, having no chance of matching anything anyway.
 const _PLAIN_WORD_RE = /^[\p{L}\p{M}'’-]+$/u
+
+// What can sensibly be asked of a dictionary. A whole sentence comes back as a
+// whole sentence — a translation, but not a word: nothing downstream can use
+// it as a heading or search it against a subtitle line, and asking costs a
+// round trip and a place in the memo. Three words is already generous.
+const _LOOKUP_MAX_WORDS = 3
+function _isLookupText(text) {
+  const parts = String(text == null ? '' : text).trim().split(/\s+/).filter(Boolean)
+  return parts.length > 0 && parts.length <= _LOOKUP_MAX_WORDS &&
+    parts.every(p => _PLAIN_WORD_RE.test(p))
+}
 
 // Flatten a dictionary answer into candidate words, best first.
 //
@@ -7082,7 +7169,7 @@ function _rankedTermsFromDetail(detail) {
 // as the fallback it always was.
 async function _translationGuesses(englishWord) {
   const en = String(englishWord || '').trim()
-  if (en.length < 3 || !_haveTranslateBridge()) return []
+  if (en.length < 3 || !_isLookupText(en) || !_haveTranslateBridge()) return []
   const studied = getLangFromUrl().code
   if (!studied) return []
   const got = await _translateDetailed(en, 'en', studied, CORRESPONDING_TRANSLATE_MS)
@@ -7206,7 +7293,7 @@ function _extraMatchesForGuesses(candidates, existing) {
 function _englishSearchWord(search, items) {
   const raw = String(window.unprocessedSearchText || '') || String(search || '')
   const parts = raw.split(SEPARATOR_PIPE)
-    .map(p => removeHintsInBrackets(p).trim().toLowerCase())
+    .map(p => removeHintsInBrackets(_stripExpansionMarkers(p)).trim().toLowerCase())
     .filter(Boolean)
   if (!parts.length) return ''
   // Nothing to choose between: whatever was typed is the English side, phrase
@@ -7255,18 +7342,92 @@ function _dictionaryTerms(detail) {
   return out
 }
 
-// Search one of them, against the studied language's subtitles.
+// Search one of the terms, in the language it is written in.
 //
-// Whatever the toggle says. The toggle is there to choose which language you
-// are searching IN, and someone who has just read that "thin" is "tunn" wants
-// to see tunn in Swedish subtitles — going back to flip a switch first is a
-// step that only exists because of how the page is built. The override lasts
-// exactly one search and searchTextChanged clears it.
-function _searchStudiedTerm(term) {
+// Whatever the toggle says. The toggle chooses which language you are searching
+// IN, and someone who has just read that "thin" is "tunn" wants to see tunn in
+// Swedish subtitles — going back to flip a switch first is a step that only
+// exists because of how the page is built. The override lasts exactly one
+// search and searchTextChanged clears it.
+function _searchTermInLang(term, lang) {
   const w = String(term || '').trim()
   if (!w) return
-  window.forceLangForNextSearch = 'sv'
+  window.forceLangForNextSearch = (lang === 'en') ? 'en' : 'sv'
+  // Move the switch to match, exactly as replaying a search from the history
+  // does: the override lasts one search, and leaving it pointing the other way
+  // makes the page describe itself wrongly from then on — and sends the next
+  // typed search back to the language the user has just left.
+  _setLangToggle(lang === 'en')
   $('#searchText').val(w).trigger('input').trigger('change')
+}
+
+// Which way round the lookup goes. The toggle says which language the search is
+// running in; the panel translates out of that one and into the other, and a
+// term it offers is searched in the language it is written in.
+//
+// 'sv' is this page's name for the studied language whatever it actually is —
+// the same marker forceLangForNextSearch understands.
+function _translationPanelDirection() {
+  const studied = getLangFromUrl()
+  if (!studied || !studied.code) return null
+  const name = studied.fullName || studied.code.toUpperCase()
+  // Read by people, in a tooltip with no styling of its own.
+  const studiedName = name.charAt(0).toUpperCase() + name.slice(1)
+  // The language the results on screen were actually found in, which is not
+  // always what the toggle says. A search can be pinned to one language for one
+  // search — "Search here" on a subtitle word, a term from this panel, a replay
+  // from the history — and by the time a settings change redraws those same
+  // results the pin is gone and the toggle can say the opposite.
+  const lang = (window._resultsSearchLang === 'en' || window._resultsSearchLang === 'sv')
+    ? window._resultsSearchLang
+    : getSelectedLang()
+  return lang === 'en'
+    ? { from: 'en', to: studied.code, fromName: 'EN', toName: studiedName, searchIn: 'sv' }
+    : { from: studied.code, to: 'en', fromName: studiedName, toName: 'EN', searchIn: 'en' }
+}
+
+// The word whose results are on screen.
+//
+// Not simply the search box: a search started from the vocabulary dropdown or
+// the history never writes to it, so the box holds whatever was typed before —
+// a different word from the one being looked at. unprocessedSearchText is what
+// those paths set, and typed searches clear it.
+function _translationPanelWord() {
+  const raw = (window.unprocessedSearchText == null)
+    ? String($('#searchText').val() || '')
+    : String(window.unprocessedSearchText)
+  // A vocabulary line is a pair, not a word to look up, and which half is the
+  // one being searched is not knowable from the string.
+  if (raw.indexOf(SEPARATOR_PIPE) >= 0) return ''
+  // Unbalanced brackets put a warning in front of the user on their way out of
+  // removeHintsInBrackets, which is no business of a panel nobody asked for.
+  if (raw.split('(').length !== raw.split(')').length) return ''
+  // A vocabulary line also carries expansion markers and bracketed hints, which
+  // mean something to the search and nothing to a translator. The marker is not
+  // always leading — "över<*se" is the commoner shape — so the same strip the
+  // vocabulary matching uses does the work here.
+  const word = removeHintsInBrackets(_stripExpansionMarkers(raw)).trim().replace(/\s+/g, ' ')
+  // fetchSRTs refuses to search anything shorter than three characters, so a
+  // shorter word can only produce a panel above a different search's results.
+  if (word.length < 3) return ''
+  // Whatever is left of a hint once the brackets go ("se [^ ]*") is not a word
+  // to look up either, and the same rule that decides that says so.
+  return _isLookupText(word) ? word : ''
+}
+
+// The panel belongs to the word on screen and to the direction it was looked up
+// in. When either moves on it is wrong — and it goes on being clickable for as
+// long as the host takes to answer, sitting at the top of the page where a
+// thumb lands — so it comes down at once, and only goes back up with an answer
+// for the new word. An unchanged word leaves it alone, so redrawing the same
+// results doesn't make it blink.
+function _hideStaleTranslationPanel() {
+  const $p = $('#translationPanel')
+  if (!$p.length) return
+  const dir = _haveTranslateBridge() ? _translationPanelDirection() : null
+  const word = dir ? _translationPanelWord() : ''
+  if (word && $p.attr('data-word') === word && $p.attr('data-dir') === `${dir.from}>${dir.to}`) return
+  $p.removeAttr('data-word').removeAttr('data-dir').hide()
 }
 
 function _translationPanelEl() {
@@ -7285,57 +7446,68 @@ function _translationPanelEl() {
     })
     $p.on('click', '.xl-term', function (e) {
       e.preventDefault(); e.stopPropagation()
-      _searchStudiedTerm($(this).attr('data-term'))
+      // Read off the chip itself rather than remembered on the panel: the
+      // direction changes with the toggle, and a stale one would search the
+      // right word against the wrong language's subtitles.
+      _searchTermInLang(this.getAttribute('data-term'), this.getAttribute('data-lang'))
     })
   }
   return $p
 }
 
-// What the host's dictionary makes of the English word just searched.
+// What the host's dictionary makes of the word just searched, whichever
+// language it was searched in.
 //
-// One word rarely has one translation, and a search that shows only the first
-// hides the rest: "thin" is tunn, but it is also smal, mager and gles, and
-// which one a subtitle used is the whole question. Each is a search of its own,
-// one tap away.
+// One word rarely has one translation, and showing only the first hides the
+// rest: "thin" is tunn, but it is also smal, mager and gles, and which one a
+// subtitle used is the whole question. It reads the same way back — "sjö" is
+// lake, sea, mere and loch. Each term is a search of its own, one tap away, run
+// against the subtitles of the language that term is written in.
 async function _renderTranslationPanel(token) {
-  const $p = $('#translationPanel')
-  // What the user typed, not what the search became. By the time it reaches
-  // render it has been through expandWords and may have picked up stems, so it
-  // arrives as "thin|thins" — a string no dictionary has an entry for.
-  const raw = String($('#searchText').val() || '')
-  // A vocabulary line is not a word to look up either, and which side of its
-  // pipe the English half sits on is not knowable from the string.
-  const usable = getSelectedLang() === 'en'
-    && raw.trim().length >= 3
-    && raw.indexOf(SEPARATOR_PIPE) < 0
-    && _haveTranslateBridge()
-  if (!usable) { if ($p.length) $p.hide(); return }
-  const studied = getLangFromUrl()
-  if (!studied || !studied.code) { if ($p.length) $p.hide(); return }
-  const word = raw.trim()
-  const got = await _translateDetailed(word, 'en', studied.code, CORRESPONDING_TRANSLATE_MS)
+  const dir = _haveTranslateBridge() ? _translationPanelDirection() : null
+  const word = dir ? _translationPanelWord() : ''
+  _hideStaleTranslationPanel()
+  if (!word) return
+  const got = await _translateDetailed(word, dir.from, dir.to, CORRESPONDING_TRANSLATE_MS)
   // The search moved on while the host was answering — the same token every
   // other stage of the render checks itself against.
   if (token !== undefined && token !== window._subtitleSearchToken) return
+  // Not every render carries one, though: a settings change and a channel block
+  // redraw the same results without a search behind them, and there the token
+  // check cannot see anything move. So ask the page what it is showing now.
+  const now = _translationPanelDirection()
+  if (!now || now.from !== dir.from || now.to !== dir.to) return
+  if (_translationPanelWord() !== word) return
+  // A word is not a translation of itself. With no dictionary behind it the
+  // host echoes back whatever it could not translate, and an offline answer for
+  // "sjö" is "sjö" — a chip that searches the search that is already on screen.
   const terms = _dictionaryTerms(got && { ...(got.detail || {}), text: got.text })
+    .filter(t => t.word.toLowerCase() !== word.toLowerCase())
+  if (!terms.length) { $('#translationPanel').hide(); return }
   const $panel = _translationPanelEl()
-  if (!terms.length) { $panel.hide(); return }
-  const langName = studied.fullName || studied.code.toUpperCase()
   $panel.find('.xl-summary').html(
-    `<span class="xl-dir">EN → ${_.escape(langName)}</span>` +
+    `<span class="xl-dir">${_.escape(dir.fromName)} → ${_.escape(dir.toName)}</span>` +
     `<span class="xl-word">${_.escape(word)}</span>` +
     `<span class="xl-n">${terms.length}</span>`)
-  const chips = terms.map(t => {
-    const conf = _translationConfidence(t)
-    const why = t.pos ? `${t.pos}` : ''
+  const confidences = _translationConfidences(terms)
+  const chips = terms.map((t, i) => {
+    // The search itself refuses anything shorter than three characters, so a
+    // chip for "ö" could only ever be a button that does nothing. It is still
+    // the answer to the question asked, so it is shown — just not as a promise.
+    const searchable = t.word.length >= 3
+    const why = t.pos ? ` · ${t.pos}` : ''
     const sure = Number.isFinite(t.score) ? `${Math.round(t.score * 100)}%` : 'no score given'
-    return `<button type="button" class="xl-term xl-conf-${conf}" data-term="${_.escape(t.word)}"` +
-      ` title="${_.escape(`Search ${t.word} in ${langName} subtitles${why ? ` · ${why}` : ''} · ${sure}`)}">` +
-      `${_.escape(t.word)}</button>`
+    const title = searchable
+      ? `Search ${t.word} in ${dir.toName} subtitles${why} · ${sure}`
+      : `${t.word}${why} · ${sure} · too short to search`
+    return `<button type="button" class="xl-term xl-conf-${confidences[i]}"${searchable ? '' : ' disabled'}` +
+      ` data-term="${_.escape(t.word)}" data-lang="${_.escape(dir.searchIn)}"` +
+      ` title="${_.escape(title)}">${_.escape(t.word)}</button>`
   }).join('')
   $panel.find('.xl-body').html(`<div class="xl-terms">${chips}</div>`)
   const open = !(window._appSettings && window._appSettings.translationPanelOpen === false)
   $panel[0].open = open
+  $panel.attr('data-word', word).attr('data-dir', `${dir.from}>${dir.to}`)
   $panel.show()
 }
 
@@ -7636,7 +7808,15 @@ window.renderVocabularyFindings = renderVocabularyFindings;
 window.findUnknownExpansionRefs = findUnknownExpansionRefs;
 window.searchVocabularyBySimilarity = searchVocabularyBySimilarity;
 
+// How many searches are between their first line and their last. A run that is
+// refused before it starts never joins the count, and must not tidy up after
+// the ones that did.
+let _searchRunsInFlight = 0
+
 async function fetchSRTs(searchText) {
+  // Null until this run has a token of its own — a search refused for being too
+  // short never gets one.
+  let myToken = null
   try {
     if ((typeof searchText) !== 'string') {
       searchText = null
@@ -7653,6 +7833,10 @@ async function fetchSRTs(searchText) {
     // current UI toggle). getSelectedLang() already honors any
     // forceLangForNextSearch override from "Search here".
     recordSessionSearch(_historyTerm, getSelectedLang())
+    // The same answer, kept for the re-renders that come after this search
+    // finishes: a settings change redraws these results, but by then the
+    // one-search override is gone and the toggle may say the opposite.
+    window._resultsSearchLang = getSelectedLang()
 
     window.searchText = txt;
     window.searchText = expandWords(window.searchText)
@@ -7674,9 +7858,13 @@ async function fetchSRTs(searchText) {
     // bail out as soon as they observe a newer token, so the UI stays responsive
     // when the user types quickly.
     window._subtitleSearchToken = (window._subtitleSearchToken || 0) + 1
-    const myToken = window._subtitleSearchToken
+    myToken = window._subtitleSearchToken
+    _searchRunsInFlight++
 
     $('#result').html('<div style="color:grey;padding:6px;">Loading…</div>')
+    // The dictionary panel describes the results being replaced, so it goes
+    // with them rather than staying up, clickable, until the host answers.
+    _hideStaleTranslationPanel()
     // Keep the book-search bar (and any results already in it) alive across
     // the placeholder — it is a separate, slower search than this one.
     _ensureLibrarySearchBar()
@@ -7712,8 +7900,19 @@ async function fetchSRTs(searchText) {
       }
     }
   } finally {
-    window.forceMainLangForNextSearch = false
-    window.forceLangForNextSearch = null
+    if (myToken !== null) _searchRunsInFlight--
+    // The override belongs to whichever search is current. An older run
+    // finishing late — it may have been waiting on the translator for seconds —
+    // must not take away the language a newer one was started with. Nor may a
+    // run that never started: clearing the search box is refused for being too
+    // short, and it would otherwise unpin a search already under way and leave
+    // it finding the other language's lines.
+    const mine = myToken !== null && myToken === window._subtitleSearchToken
+    const nothingRunning = myToken === null && _searchRunsInFlight === 0
+    if (mine || nothingRunning) {
+      window.forceMainLangForNextSearch = false
+      window.forceLangForNextSearch = null
+    }
   }
 }
 

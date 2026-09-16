@@ -4114,6 +4114,15 @@ body.rec-playing #recPlayingSubs { display: block; }
     color: #4a5a6b;
 }
 #translationPanel .xl-term:active { transform: translateY(1px); }
+/* A term too short for the search to accept (a one-letter word like "ö"). Worth
+   reading, so it keeps its colour — but it is not a button, and nothing about
+   it should invite a tap. */
+#translationPanel .xl-term:disabled {
+    cursor: default;
+    opacity: 0.75;
+    border-style: dashed;
+}
+#translationPanel .xl-term:disabled:active { transform: none; }
 
 @media (max-width: 600px) {
     #translationPanel .xl-body { padding: 0 8px 8px; }
