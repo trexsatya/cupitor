@@ -168,7 +168,14 @@ export function mergeRecordingCollections(localColl, remoteColl, nowFn = Date.no
         mergedItems[st][w] = dest
       })
     })
+    // Everything the playlist carries besides its items — the background music
+    // it plays under, the reminder it is wired to — comes along, with the newer
+    // side's answer winning where both have one. Rebuilt as a bare literal, a
+    // playlist lost every one of those the first time the two sides were merged,
+    // which for a setting made on this device is the next page load.
     out[name] = {
+      ...second,
+      ...first,
       items: mergedItems,
       createdAt: Math.min(a.createdAt || nowFn(), b.createdAt || nowFn()),
       updatedAt: Math.max(a.updatedAt || 0, b.updatedAt || 0),

@@ -17,6 +17,8 @@ import {
   musicServedUrl,
   addLocalMusicTrack,
   pruneMissingLocalTracks,
+  resolveMusicTrack,
+  MUSIC_NONE,
 } from "./music-bed";
 
 const YT = "https://www.youtube.com/watch?v=aBcDeFgHiJk";
@@ -334,5 +336,52 @@ describe("musicShouldPlay is independent of the source", () => {
     expect(musicShouldPlay({ ...base, phase: "video" })).toBe(false);
     expect(musicShouldPlay({ ...base, hushed: true })).toBe(false);
     expect(musicShouldPlay({ ...base, errored: true })).toBe(false);
+  });
+});
+
+describe("resolveMusicTrack", () => {
+  const settings = {
+    recMusicTracks: [
+      { id: "aaaaaaaaaaa", url: YT, name: "Rain" },
+      { id: "bbbbbbbbbbb", url: "https://www.youtube.com/watch?v=bbbbbbbbbbb", name: "Waves" },
+    ],
+    recMusicSelected: "aaaaaaaaaaa",
+  };
+
+  it("plays the panel's track when neither the card nor the playlist says anything", () => {
+    expect(resolveMusicTrack(settings, {}).name).toBe("Rain");
+    expect(resolveMusicTrack(settings, null).name).toBe("Rain");
+  });
+
+  it("lets the playlist speak over the panel, and the card over both", () => {
+    expect(resolveMusicTrack(settings, { playlistTrackId: "bbbbbbbbbbb" }).name).toBe("Waves");
+    expect(resolveMusicTrack(settings, {
+      playlistTrackId: "bbbbbbbbbbb", cardTrackId: "aaaaaaaaaaa",
+    }).name).toBe("Rain");
+  });
+
+  it("treats silence as an answer, not as an empty one", () => {
+    expect(resolveMusicTrack(settings, { cardTrackId: MUSIC_NONE })).toBeNull();
+    // The card is silent even where its playlist named a track.
+    expect(resolveMusicTrack(settings, {
+      playlistTrackId: "bbbbbbbbbbb", cardTrackId: MUSIC_NONE,
+    })).toBeNull();
+    // A silent playlist still lets one of its cards name its own.
+    expect(resolveMusicTrack(settings, {
+      playlistTrackId: MUSIC_NONE, cardTrackId: "bbbbbbbbbbb",
+    }).name).toBe("Waves");
+  });
+
+  it("falls through a track that is no longer in the library", () => {
+    // Deleted from the panel, or its file swept away — going silent over an id
+    // nothing can explain would leave the user nothing to look at.
+    expect(resolveMusicTrack(settings, { cardTrackId: "ccccccccccc" }).name).toBe("Rain");
+    expect(resolveMusicTrack(settings, {
+      cardTrackId: "ccccccccccc", playlistTrackId: "bbbbbbbbbbb",
+    }).name).toBe("Waves");
+  });
+
+  it("has nothing to play when the library is empty", () => {
+    expect(resolveMusicTrack({}, { cardTrackId: "aaaaaaaaaaa" })).toBeNull();
   });
 });

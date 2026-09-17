@@ -24,13 +24,19 @@ export const CAPTION_NO_TRANSLATION = '—';
 // text silently, the one failure mode with no way back.
 export function captionLinesFrom(cap) {
   if (!cap || !Array.isArray(cap.lines)) return [];
+  // The two sources mean different things by a newline. A subtitle cue is
+  // broken to fit the screen, so its break is presentation and collapsing it
+  // restores the one utterance the cue is. A page sentence is broken where
+  // the document breaks it — a verse, a line of dialogue — and that break is
+  // the text, so it is kept and the line simply occupies more than one row.
+  const keepBreaks = cap.source === 'page';
   return cap.lines.map(l => {
     if (!l) return null;
-    // A two-line on-screen cue — or a sentence that wrapped across a page's
-    // markup — arrives with an embedded newline. Collapse it: one row of the
-    // card must be exactly one line, because the de-dupe pairs the card's rows
-    // with `captionStarts` by position.
-    const text = String(l.text == null ? '' : l.text).replace(/\s*\n\s*/g, ' ').trim();
+    const raw = String(l.text == null ? '' : l.text).replace(/\r\n?/g, '\n');
+    const text = keepBreaks
+      ? raw.split('\n').map(r => r.replace(/[ \t]+/g, ' ').trim())
+          .filter(Boolean).join('\n')
+      : raw.replace(/\s*\n\s*/g, ' ').trim();
     if (!text) return null;
     const start = Number(l.start);
     const tr = l.translation == null
@@ -74,15 +80,89 @@ export function captionWords(cap) {
 // When nothing is translated at all the other face is left empty rather than
 // filled with a column of placeholders, which would be noise rather than
 // information.
+// A line that kept its own breaks fills more than one row, and the opposite
+// face has to grow with it or every row below would pair with the wrong line.
+// The extra rows carry the same placeholder a missing translation does: the
+// row belongs to the line above it and holds nothing of its own.
 export function captionFaces(lines, field, noTranslation = CAPTION_NO_TRANSLATION) {
   const textField = field === 'target' ? 'target' : 'source';
   const otherField = textField === 'target' ? 'source' : 'target';
+  const counts = captionRowCounts(lines);
   return {
     textField,
     otherField,
     [textField]: lines.map(l => l.text).join('\n'),
     [otherField]: lines.some(l => l.translation)
-      ? lines.map(l => l.translation || noTranslation).join('\n')
+      ? lines.map((l, i) => {
+          // A translation is one utterance for the whole line, so it occupies
+          // the line's first row whatever it arrived looking like. Letting a
+          // newline through here would add a row the text face has no twin
+          // for, which is the very shift the placeholder exists to prevent.
+          const one = String(l.translation || '').replace(/\s*\n\s*/g, ' ').trim();
+          const rows = [one || noTranslation];
+          while (rows.length < counts[i]) rows.push(noTranslation);
+          return rows.join('\n');
+        }).join('\n')
       : '',
+  };
+}
+
+// How many rows of the card each line occupies. Stored with the card as
+// `captionRows` so the de-dupe can put the rows back together into the lines
+// they came from.
+export function captionRowCounts(lines) {
+  return (lines || []).map(l => String((l && l.text) || '').split('\n').length);
+}
+
+// The inverse: regroup a face's rows into one string per captured line.
+// Returns null when the rows and the counts disagree — a card whose text has
+// been edited since — which the caller reads as "don't trust this card's
+// provenance" rather than as an error.
+export function captionRowGroups(rows, counts) {
+  if (!Array.isArray(rows) || !Array.isArray(counts)) return null;
+  const out = [];
+  let at = 0;
+  for (const c of counts) {
+    // Only a real number counts. This is the one place that distrusts what a
+    // card stored about itself, so a "2" that came back from JSON as a string
+    // — or a true, or a [1] — is a card to walk away from, not to coerce.
+    if (typeof c !== 'number' || !Number.isInteger(c) || c < 1 ||
+        at + c > rows.length) return null;
+    out.push(rows.slice(at, at + c).join('\n'));
+    at += c;
+  }
+  return at === rows.length ? out : null;
+}
+
+// Which face of a card holds the text in the language being studied.
+//
+// A captured card records that in `captionField`; anything else (a card typed
+// by hand, or one captured before the choice existed) keeps the page's default
+// reading, where Source is the studied language and Target the English side.
+export function captionFieldOf(item) {
+  return (item && item.captionField === 'target') ? 'target' : 'source';
+}
+
+// Which way a "fill this face from the other one" translation runs.
+//
+// `face` is the face being filled; the text comes from the opposite one. The
+// languages follow whichever face holds the studied language, so a card
+// captured with the caption text in Target translates the other way round from
+// one captured the usual way — otherwise the button would hand English to the
+// host as if it were Swedish and write the answer over the captured original.
+//
+// Returns null when the direction can't be named: `studiedCode` is null for a
+// `?lang=` the page has no code for, and naming the language wrongly is worse
+// than not offering the button.
+export function cardTranslateDirection(item, face, studiedCode) {
+  if (face !== 'source' && face !== 'target') return null;
+  if (!studiedCode) return null;
+  const studied = captionFieldOf(item);
+  const from = face === 'source' ? 'target' : 'source';
+  return {
+    from,
+    to: face,
+    fromLang: from === studied ? studiedCode : 'en',
+    toLang: face === studied ? studiedCode : 'en',
   };
 }

@@ -138,6 +138,10 @@ import {
   captionKey as _captionKey,
   captionWords as _captionWords,
   captionFaces as _captionFaces,
+  captionRowCounts as _captionRowCounts,
+  captionRowGroups as _captionRowGroups,
+  captionFieldOf as _captionFieldOf,
+  cardTranslateDirection as _cardTranslateDirection,
 } from './caption-capture.js';
 import {
   MUSIC_MODES as REC_MUSIC_MODES,
@@ -148,6 +152,8 @@ import {
   musicTracks as _musicTracksOf,
   musicSelectedId as _musicSelectedIdOf,
   musicSelectedTrack as _musicSelectedTrackOf,
+  resolveMusicTrack as _resolveMusicTrack,
+  MUSIC_NONE as _MUSIC_NONE,
   musicVolumeFor as _musicVolumeForPhase,
   musicVolumeFieldsFor as _musicVolumeFieldsFor,
   musicShouldPlay as _musicShouldPlay,
@@ -1532,6 +1538,7 @@ function recordSessionSearch(term, lang) {
   }
   window.sessionHistoryIndex = list.length - 1
   saveNavHistoryToStorage(list)
+  _refreshSearchHistoryPanel()
 }
 
 function navigateSearchHistory(direction) {
@@ -1546,9 +1553,21 @@ function navigateSearchHistory(direction) {
   } else {
     newIdx = cur + direction
   }
-  if (newIdx < 0 || newIdx > list.length - 1) return
   if (newIdx === cur) return
+  replaySearchHistoryAt(newIdx)
+}
+
+// Run the search stored at one position in the history, and stand on it.
+//
+// The stepping buttons reach this one position at a time; the list behind a
+// long press hands it any position at all, which is the whole point of the
+// list — a search five back is five taps away otherwise.
+function replaySearchHistoryAt(newIdx) {
+  const list = window.sessionSearchHistory
+  if (!list || !list.length) return
+  if (!Number.isFinite(newIdx) || newIdx < 0 || newIdx > list.length - 1) return
   window.sessionHistoryIndex = newIdx
+  _refreshSearchHistoryPanel()
   const entry = list[newIdx]
   const term = _historyEntryTerm(entry)
   const lang = _historyEntryLang(entry)
@@ -1582,6 +1601,141 @@ function navigateSearchHistory(direction) {
         }
       })
       .finally(() => { window._navigatingHistory = false })
+}
+
+// ─── The history behind the stepping buttons ─────────────────────────────
+//
+// Stepping is fine for the search before this one. It is not fine for the one
+// before the five you have run since — that is five taps, each of them a real
+// search that loads subtitles and redraws the page. A long press on either
+// button opens the whole list instead, and any entry in it is one tap away.
+//
+// Both buttons open the same list. The history is a single line whichever end
+// of it you happen to be walking from, so a long press on Next reaches
+// something older just as a long press on Prev reaches something newer; where
+// you are standing is marked, which is the only thing the two directions
+// disagree about.
+function _searchHistoryPanelEl() {
+  let $p = $('#searchHistoryPanel')
+  if (!$p.length) {
+    $p = $('<div id="searchHistoryPanel" class="srch-hist-panel" style="display:none;"></div>')
+    $p.appendTo('body')
+    $p.on('click', '.srch-hist-row', function (e) {
+      e.preventDefault(); e.stopPropagation()
+      const idx = parseInt(this.getAttribute('data-idx'), 10)
+      _closeSearchHistoryPanel()
+      replaySearchHistoryAt(idx)
+    })
+  }
+  // Reparent once so no clipping or stacking toolbar ancestor squashes it.
+  if ($p.parent()[0] !== document.body) $p.appendTo(document.body)
+  return $p
+}
+
+function _renderSearchHistoryPanel() {
+  const $p = $('#searchHistoryPanel')
+  if (!$p.length) return
+  const list = window.sessionSearchHistory || []
+  const cur = (typeof window.sessionHistoryIndex === 'number') ? window.sessionHistoryIndex : -1
+  let html = '<div class="srch-hist-hd">Recent searches</div>'
+  if (!list.length) {
+    html += '<div class="srch-hist-empty">Nothing searched yet.</div>'
+  } else {
+    // Newest first, the way a browser's back button reads. The stored order is
+    // the opposite, so the index each row carries is its place in the list and
+    // not its place on screen.
+    const rows = []
+    for (let i = list.length - 1; i >= 0; i--) {
+      const term = _historyEntryTerm(list[i])
+      if (typeof term !== 'string' || !term) continue
+      const lang = _historyEntryLang(list[i]) === 'en' ? 'EN' : ''
+      rows.push(`<button type="button" class="srch-hist-row${i === cur ? ' is-current' : ''}" data-idx="${i}">`
+        + `<span class="srch-hist-term">${_.escape(term)}</span>`
+        + (lang ? `<span class="srch-hist-lang">${lang}</span>` : '')
+        + (i === cur ? '<span class="srch-hist-here">here</span>' : '')
+        + '</button>')
+    }
+    html += rows.join('')
+  }
+  $p.html(html)
+}
+
+// Anchored under whichever button was held, clamped to the viewport.
+function _positionSearchHistoryPanel(btn) {
+  const $p = $('#searchHistoryPanel')
+  if (!btn || !$p.length || !$p.is(':visible')) return
+  const r = btn.getBoundingClientRect()
+  const vw = window.innerWidth
+  const pw = Math.min(280, Math.floor(vw * 0.9))
+  let left = Math.round(r.left + r.width / 2 - pw / 2)
+  if (left + pw > vw - 8) left = vw - 8 - pw
+  if (left < 8) left = 8
+  const maxH = Math.max(160, window.innerHeight - r.bottom - 12)
+  $p.css({ left: left + 'px', top: (r.bottom + 4) + 'px', width: pw + 'px', maxHeight: maxH + 'px' })
+}
+
+function _closeSearchHistoryPanel() { $('#searchHistoryPanel').hide() }
+
+// The list is a picture of the history, and the history moves under it: a step
+// with the buttons moves where "here" is, and a search recorded while the list
+// is open shifts every entry along by one — which would leave a row replaying
+// its neighbour. Cheap enough to simply redraw.
+function _refreshSearchHistoryPanel() {
+  if ($('#searchHistoryPanel').is(':visible')) _renderSearchHistoryPanel()
+}
+
+function _openSearchHistoryPanel(btn) {
+  const $p = _searchHistoryPanelEl()
+  _renderSearchHistoryPanel()
+  $p.show()
+  _positionSearchHistoryPanel(btn)
+  window._searchHistoryAnchor = btn
+  // Put where you are standing in view — with a long history the current entry
+  // is otherwise somewhere below the fold, and it is the one landmark the list
+  // has.
+  const here = $p.find('.srch-hist-row.is-current')[0]
+  if (here && typeof here.scrollIntoView === 'function') {
+    try { here.scrollIntoView({ block: 'nearest' }) } catch (_) {}
+  }
+}
+
+function _toggleSearchHistoryPanel(btn) {
+  if ($('#searchHistoryPanel').is(':visible')) { _closeSearchHistoryPanel(); return }
+  _openSearchHistoryPanel(btn)
+}
+
+// A long press fires while the finger is still down, and the click that
+// follows it on release would step the history under the list that just
+// opened. Remembering when it fired is enough to tell the two apart.
+function _searchHistoryWasLongPress() {
+  return (Date.now() - (window._searchHistoryLongPressAt || 0)) < 700
+}
+
+function _wireSearchHistoryLongPress() {
+  ;['prevSearchBtn', 'nextSearchBtn'].forEach(id => {
+    const el = document.getElementById(id)
+    if (!el) return
+    // The library's own default is a second and a half, which reads as the page
+    // having ignored you.
+    el.setAttribute('data-long-press-delay', '450')
+    el.addEventListener('long-press', e => {
+      // Deliberately NOT preventDefault: the library reads that as "swallow the
+      // next click" and installs a one-shot eater on the document, which goes
+      // on waiting if the press ends in a drag and no click ever comes — and
+      // then eats a tap the user meant for something else. The timestamp below
+      // is what tells the two apart.
+      window._searchHistoryLongPressAt = Date.now()
+      _toggleSearchHistoryPanel(el)
+    })
+  })
+  $(document).on('click.srchHist', e => {
+    if ($(e.target).closest('#searchHistoryPanel, #prevSearchBtn, #nextSearchBtn').length) return
+    _closeSearchHistoryPanel()
+  })
+  $(document).on('keydown.srchHist', e => {
+    if (e.key === 'Escape' && $('#searchHistoryPanel').is(':visible')) _closeSearchHistoryPanel()
+  })
+  $(window).on('resize.srchHist', () => _positionSearchHistoryPanel(window._searchHistoryAnchor))
 }
 
 const $searchText1 = $('#searchText');
@@ -1899,6 +2053,41 @@ function _musicVideoId()   { return _musicSelectedIdOf(window._appSettings) }
 function _musicTracks()    { return _musicTracksOf(window._appSettings) }
 function _musicTrack()     { return _musicSelectedTrackOf(window._appSettings) }
 function _musicMode()      { return _musicModeOf(window._appSettings) }
+
+// The playlist record the item being played belongs to. An item carries the
+// name of the playlist it came from when the queue was built from several.
+function _recordOfPlaylist(name) {
+  const n = name || (window._recording && window._recording.currentName)
+  return (n && window._recordings && window._recordings[n]) || null
+}
+
+// What a card or its playlist asks for, and what plays when neither asks.
+//
+// _musicTrack above is the panel's chosen track — the default, and what the
+// panel's own Track row is showing. This is the one that actually sounds, and
+// on a card or a playlist that names its own they are different.
+function _musicTrackNow() {
+  const it = window._recPlayCurrentItem
+  const rec = _recordOfPlaylist(it && it._recName)
+  return _resolveMusicTrack(window._appSettings, {
+    cardTrackId: it && it.musicTrackId,
+    playlistTrackId: rec && rec.musicTrackId,
+  })
+}
+// The choices a card or a playlist has: say nothing and take whatever the level
+// above it plays, name one of the saved tracks, or ask for silence outright.
+// Same list in both places, because they are the same question asked of two
+// different things.
+function _musicChoiceOptions(selected, inheritLabel) {
+  const sel = String(selected || '')
+  const opt = (v, label) =>
+    `<option value="${_.escape(v)}"${v === sel ? ' selected' : ''}>${_.escape(label)}</option>`
+  return [opt('', inheritLabel)]
+    .concat(_musicTracks().map(t => opt(t.id, `${_musicTrackKind(t) === 'local' ? '♪' : '▶'} ${t.name}`)))
+    .concat([opt(_MUSIC_NONE, '(silence)')])
+    .join('')
+}
+
 // The level for whatever the playlist is doing right now — the quiet one only
 // while something else is sounding.
 function _musicVolume() {
@@ -2800,8 +2989,9 @@ $('document').ready(e => {
     vocabularyLineSelected()
   })
 
-  $('#prevSearchBtn').click(() => navigateSearchHistory(-1))
-  $('#nextSearchBtn').click(() => navigateSearchHistory(1))
+  $('#prevSearchBtn').click(() => { if (_searchHistoryWasLongPress()) return; navigateSearchHistory(-1) })
+  $('#nextSearchBtn').click(() => { if (_searchHistoryWasLongPress()) return; navigateSearchHistory(1) })
+  _wireSearchHistoryLongPress()
 
   $('#searchVocabularyByPrefixBtn').click(e => {
     e.stopPropagation()
@@ -11158,6 +11348,9 @@ function addManualEntry(playlistName, opts) {
     it.mediaKind = media.kind                // 'youtube' | 'link' | 'audio'
     if (media.kind === 'youtube') it.mediaVideoId = media.id
   }
+  // Which background music sounds under this card. '' means the card says
+  // nothing and takes whatever its playlist plays.
+  if (opts.musicTrackId) it.musicTrackId = String(opts.musicTrackId)
   // Per-face pronunciation recordings (independent of the link above).
   if (_isAudioMediaUrl(opts.sourceAudioUrl)) it.sourceAudioUrl = opts.sourceAudioUrl
   if (_isAudioMediaUrl(opts.targetAudioUrl)) it.targetAudioUrl = opts.targetAudioUrl
@@ -11190,13 +11383,21 @@ function updateManualEntry(playlistName, manualId, patch) {
       ;['source', 'target'].forEach(k => {
         if (!Object.prototype.hasOwnProperty.call(patch, k)) return
         const next = String(patch[k] || '').trim()
-        if (k === capField && next !== it[k]) delete it.captionStarts
+        if (k === capField && next !== it[k]) {
+          delete it.captionStarts
+          delete it.captionRows
+        }
         it[k] = next
       })
       if (Object.prototype.hasOwnProperty.call(patch, 'mediaUrl')) {
         const m = _parseMediaUrl(patch.mediaUrl)
         if (m) { it.mediaUrl = m.url; it.mediaKind = m.kind; if (m.kind === 'youtube') it.mediaVideoId = m.id; else delete it.mediaVideoId }
         else   { delete it.mediaUrl; delete it.mediaKind; delete it.mediaVideoId }
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'musicTrackId')) {
+        const m = String(patch.musicTrackId || '')
+        if (m) it.musicTrackId = m
+        else delete it.musicTrackId
       }
       // Per-face recordings — an explicit null/'' clears the face's recording.
       ;['sourceAudioUrl', 'targetAudioUrl'].forEach(k => {
@@ -11249,11 +11450,15 @@ function _captionDestinations() {
 // with it.
 //
 // A card's rows are paired with `captionStarts` BY POSITION, which only holds
-// while the rows are exactly as captured. The manual-card editor can rewrite
-// the text freely, so updateManualEntry drops `captionStarts` when the caption
-// field is edited, and the length check here rejects anything that slipped
-// through. Distrusting a card costs a duplicate the user can delete; trusting
-// a stale one produces keys matching no real cue, silently dropping good lines.
+// while the rows are exactly as captured. A captured line may occupy several
+// rows — a page sentence keeps the breaks the document gave it — so
+// `captionRows` says how many each line took and the rows are regrouped before
+// they are matched. A card saved before that existed has one row per line.
+// The manual-card editor can rewrite the text freely, so updateManualEntry
+// drops both when the caption field is edited, and the regrouping here rejects
+// anything that slipped through. Distrusting a card costs a duplicate the user
+// can delete; trusting a stale one produces keys matching no real cue,
+// silently dropping good lines.
 function _captionKeysInPlaylist(playlistName, url) {
   const keys = new Set()
   const rec = window._recordings && window._recordings[playlistName]
@@ -11262,16 +11467,14 @@ function _captionKeysInPlaylist(playlistName, url) {
   bucket.forEach(it => {
     if (!it || it.captionUrl !== url || !Array.isArray(it.captionStarts)) return
     const rows = String(it[_captionFieldOf(it)] || '').split('\n')
-    if (rows.length !== it.captionStarts.length) return
-    it.captionStarts.forEach((st, i) => keys.add(_captionKey(url, st, rows[i])))
+    const counts = Array.isArray(it.captionRows)
+      ? it.captionRows
+      : it.captionStarts.map(() => 1)
+    const texts = _captionRowGroups(rows, counts)
+    if (!texts || texts.length !== it.captionStarts.length) return
+    it.captionStarts.forEach((st, i) => keys.add(_captionKey(url, st, texts[i])))
   })
   return keys
-}
-
-// Which face of the card holds the caption text. Cards captured before the
-// choice existed always put it in Source, so a missing value means 'source'.
-function _captionFieldOf(it) {
-  return (it && it.captionField === 'target') ? 'target' : 'source'
 }
 
 // Add the block to `playlistName`, skipping cues already captured from the
@@ -11309,6 +11512,9 @@ function _addCaptionBlock(playlistName, cap, lines, field) {
   if (url) {
     it.captionUrl = url
     it.captionStarts = fresh.map(l => l.start)
+    // How many rows each of those lines took, since a line that kept its own
+    // breaks is more than one row of the card.
+    it.captionRows = _captionRowCounts(fresh)
     // Which face to read those rows back out of.
     it.captionField = faces.textField
   }
@@ -12504,8 +12710,9 @@ function _cancelDictation() { if (_speechListening) { _speechListening = false; 
 // it. Interim text previews in the field; the final transcript is appended to
 // whatever was already typed. Returns without doing anything when the bridge
 // is absent (the button isn't rendered in that case anyway).
-// `busy` (optional) reports when something else already holds the mic (e.g. a
-// voice recording in progress in the same dialog).
+// `busy` (optional) reports when something else is already working on this
+// field — a voice recording holding the mic, or a translation about to write
+// into the box. Return a string to say which; `true` keeps the mic wording.
 function _wireDictation($btn, $field, locale, busy) {
   if (!$btn.length || !$field.length) return
   let listening = false
@@ -12514,8 +12721,10 @@ function _wireDictation($btn, $field, locale, busy) {
     if (listening) { _speechPost('stop'); return }
     // Another face is already dictating, or a recorder holds the mic.
     if (_speechListening) return
-    if (typeof busy === 'function' && busy()) {
-      alert('Stop the voice recording first — it is using the microphone.')
+    const blocked = (typeof busy === 'function') ? busy() : false
+    if (blocked) {
+      alert(typeof blocked === 'string' ? blocked
+        : 'Stop the voice recording first — it is using the microphone.')
       return
     }
     listening = true
@@ -12667,8 +12876,18 @@ function _cardHasAudio(it) { return _cardAudioUrls(it).length > 0 }
 // cannot.
 function _cardHasPlayableMedia(it) {
   if (_cardHasAudio(it)) return true
+  if (_cardHasVideoLink(it)) return true
   const media = _parseMediaUrl(it && it.mediaUrl)
-  return !!media && (media.kind === 'youtube' || media.kind === 'audio')
+  return !!media && media.kind === 'audio'
+}
+
+// Whether the card has a video for the embedded player to show. The stored
+// fields are what a saved card carries; the URL is parsed as well, because a
+// card written before those fields existed has only the link.
+function _cardHasVideoLink(it) {
+  if (it && it.mediaKind === 'youtube' && it.mediaVideoId) return true
+  const media = _parseMediaUrl(it && it.mediaUrl)
+  return !!media && media.kind === 'youtube'
 }
 
 // ─── Native recording (via AudioBridge / Android MediaRecorder) ──────────
@@ -12751,9 +12970,34 @@ function _openManualEntryEditor(playlistName, existing) {
   // Dictation is only offered when the host exposes SpeechBridge (see the
   // SpeechBridge section — not implemented on the Flutter side yet).
   const showStt = _haveSpeechBridge()
+  // Filling one face from the other needs the host's translator AND a name for
+  // the language being studied — `?lang=` can select one the page has no code
+  // for, and there is no honest direction to offer then.
+  const studiedLang = getLangFromUrl()
+  const studiedCode = studiedLang && studiedLang.code
+  const showTranslate = _haveTranslateBridge() && !!studiedCode
+  const _studiedName = (() => {
+    const n = String((studiedLang && studiedLang.fullName) || studiedCode || '')
+    return n.charAt(0).toUpperCase() + n.slice(1)
+  })()
+  const langName = (code) => (code === 'en' ? 'English' : _studiedName)
+  // Nothing to choose from is not a choice: the picker appears once there is at
+  // least one saved track, and the music panel is where tracks are added.
+  const showMusic = _musicTracks().length > 0
   const micBtn = (id) => showStt
-    ? ` <button type="button" id="${id}" class="mee-mic" title="Dictate">🎤</button>`
+    ? `<button type="button" id="${id}" class="mee-mic" title="Dictate">🎤</button>`
     : ''
+  // Both faces' buttons are built up front so each can name its own direction
+  // in its tooltip — which way round it runs depends on the card.
+  const trBtn = (id, face) => {
+    if (!showTranslate) return ''
+    const dir = _cardTranslateDirection(existing, face, studiedCode)
+    if (!dir) return ''
+    const otherLbl = dir.from === 'source' ? 'Source' : 'Target'
+    const title = `Fill this box by translating ${otherLbl} (${langName(dir.fromLang)} → ${langName(dir.toLang)})`
+    return `<button type="button" id="${id}" class="mee-tr" title="${_.escape(title)}">🌐</button>`
+  }
+  const trNote = (id) => showTranslate ? `<span id="${id}" class="mee-tr-note" role="status" aria-live="polite"></span>` : ''
   // One independent recorder per face, so Source and Target can each carry
   // their own pronunciation.
   const audioBar = (prefix) => showAudio ? `
@@ -12765,14 +13009,19 @@ function _openManualEntryEditor(playlistName, existing) {
         <span id="${prefix}Status" class="mee-audio-status">(no audio)</span>
       </div>` : ''
   $d.html(`
-    <div class="mee-row"><label class="mee-lbl">Source${micBtn('meeSttSource')}</label>
+    <div class="mee-row">
+      <div class="mee-lbl-row"><label class="mee-lbl" for="meeSource">Source</label>${micBtn('meeSttSource')}${trBtn('meeTrSource', 'source')}${trNote('meeTrSourceNote')}</div>
       <textarea id="meeSource" class="mee-input" rows="2" placeholder="Question, source text, prompt…"></textarea>
       ${audioBar('meeSrcAudio')}</div>
-    <div class="mee-row"><label class="mee-lbl">Target${micBtn('meeSttTarget')}</label>
+    <div class="mee-row">
+      <div class="mee-lbl-row"><label class="mee-lbl" for="meeTarget">Target</label>${micBtn('meeSttTarget')}${trBtn('meeTrTarget', 'target')}${trNote('meeTrTargetNote')}</div>
       <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation…"></textarea>
       ${audioBar('meeTgtAudio')}</div>
     <div class="mee-row"><label class="mee-lbl">Media URL <span class="mee-lbl-hint">(optional — YouTube link or any web link)</span></label>
       <input id="meeMedia" class="mee-input" type="url" placeholder="https://…"></div>
+    ${showMusic ? `
+    <div class="mee-row"><label class="mee-lbl" for="meeMusic">Background music <span class="mee-lbl-hint">(optional — while this card plays)</span></label>
+      <select id="meeMusic" class="mee-input">${_musicChoiceOptions(existing && existing.musicTrackId, '(whatever the playlist plays)')}</select></div>` : ''}
     <div class="mee-hint" style="font-size:12px;color:#666;">YouTube URLs are recognised automatically and will play in the embedded player during Practice / Play. Other URLs open in a new tab.${showAudio ? ' Recordings are saved on the device; in Play All both play in turn — Source first, unless the player is set to practise the deck backwards.' : ''}</div>
   `)
   $d.find('#meeSource').val(existing ? existing.source || '' : '')
@@ -13022,13 +13271,155 @@ function _openManualEntryEditor(playlistName, existing) {
     recTarget = makeRecorder('meeTgtAudio', existing && _cardTargetAudio(existing))
     recorders.push(recSource, recTarget)
   }
+  // ── Fill one face from the other's translation ──
+  // True once the dialog has closed. The dialog reuses one #manualEntryEditor
+  // node for every card, so an answer still in flight when the user closes it
+  // would otherwise land in the NEXT card's boxes, under the same ids.
+  let dialogClosed = false
+  // One translation at a time: both buttons read and write the same two boxes,
+  // so a second one started mid-flight would translate text about to be
+  // replaced. Declared above the dictation wiring because the mic buttons have
+  // to see it too.
+  let translating = false
+  // The note of whichever button is working, so anything that has to interrupt
+  // a translation can say so where the user is already looking.
+  let activeNote = null
+  const translators = []
+
   if (showStt) {
     const srcLocale = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || null
-    _wireDictation($d.find('#meeSttSource'), $d.find('#meeSource'), srcLocale, anyRecording)
-    _wireDictation($d.find('#meeSttTarget'), $d.find('#meeTarget'), 'en', anyRecording)
+    // Which face is dictated in which language follows the card, exactly as the
+    // translate buttons do — a card captured with the caption text in Target
+    // holds the studied language there, and dictating English into it would be
+    // nonsense.
+    const studiedFace = _captionFieldOf(existing)
+    // Dictation snapshots the box when it starts and writes that snapshot back
+    // when it ends, so it must not start over a translation about to land.
+    const micBusy = () => anyRecording()
+      || (translating && 'Wait for the translation to finish first.')
+    _wireDictation($d.find('#meeSttSource'), $d.find('#meeSource'),
+      studiedFace === 'source' ? srcLocale : 'en', micBusy)
+    _wireDictation($d.find('#meeSttTarget'), $d.find('#meeTarget'),
+      studiedFace === 'target' ? srcLocale : 'en', micBusy)
   }
+  function makeTranslator(face) {
+    const dir = _cardTranslateDirection(existing, face, studiedCode)
+    const $btn = $d.find(face === 'source' ? '#meeTrSource' : '#meeTrTarget')
+    if (!dir || !$btn.length) return
+    const $note = $d.find(face === 'source' ? '#meeTrSourceNote' : '#meeTrTargetNote')
+    const $dest = $d.find(face === 'source' ? '#meeSource' : '#meeTarget')
+    const $from = $d.find(dir.from === 'source' ? '#meeSource' : '#meeTarget')
+    const destLbl = face === 'source' ? 'Source' : 'Target'
+    const fromLbl = dir.from === 'source' ? 'Source' : 'Target'
+    // In-dialog, not a toast: #cpBuildToast shares .ui-dialog's z-index and the
+    // dialog is later in the document, so a toast raised from here paints
+    // behind the modal the user is looking at.
+    const note = (msg, color) => { $note.text(msg || '').css('color', color || '#666') }
+    // Set while this button writes the box, so the clear-on-edit handler below
+    // can tell the user's typing from our own fill.
+    let applying = false
+    $btn.on('click', async () => {
+      if (translating) return
+      // Dictation snapshots the box's text when it starts and writes that
+      // snapshot back when it ends, so anything written underneath it is lost
+      // — and a partial transcript is not the text the user meant to translate.
+      if (_speechListening) { note('Stop dictation first.', '#a00'); return }
+      const text = String($from.val() || '').trim()
+      if (!text) { note(`Nothing in ${fromLbl} to translate.`, '#a00'); return }
+      // Replacing the face the captions were captured into also costs the card
+      // the per-line timings that pair its rows with the video, and with them
+      // its place in the re-capture de-dupe. Same as typing over it, but the
+      // button is one tap and the cost is not obvious from the card.
+      const destHoldsCaptions = !!(existing && existing.captionStarts
+        && _captionFieldOf(existing) === face)
+      const destBefore = String($dest.val() || '')
+      let confirmed = false
+      if (destBefore.trim()) {
+        if (!confirm(`Replace the ${destLbl} text with the translation of ${fromLbl}?`
+          + (destHoldsCaptions
+            ? `\n\nThis is the face the subtitles were captured into — replacing it also drops this card's line timings.`
+            : ''))) return
+        confirmed = true
+      }
+      translating = true
+      activeNote = note
+      let out = null
+      let failed = 0
+      try {
+        translators.forEach(t => t.setBusy(true))
+        $btn.addClass('mee-tr-busy')
+        note('translating…', '#06a')
+        // The rows of the captured face are paired by position with
+        // captionStarts, and translating the block as one string is not
+        // guaranteed to come back with the same number of rows; translating
+        // row by row is. Blank rows pass through translateLines untouched.
+        //
+        // A captured line may span several rows, though, and those rows are
+        // one sentence: translate them together and give the answer back the
+        // rows it has to occupy, so the faces still line up.
+        const rows = text.split('\n')
+        const fromHoldsCaptions = !!(existing && _captionFieldOf(existing) !== face)
+        const counts = fromHoldsCaptions && Array.isArray(existing.captionRows)
+          ? existing.captionRows
+          : null
+        const grouped = counts ? _captionRowGroups(rows, counts) : null
+        const lines = grouped || rows
+        const safe = async (t) => {
+          try { return await _requestTranslation(t, dir.fromLang, dir.toLang) }
+          catch (e) { console.warn('[cardTranslate] line failed', e); failed++; return null }
+        }
+        const got = await translateLines(lines, safe)
+        out = grouped
+          ? got.map((v, i) => {
+              const one = v == null ? '' : String(v).replace(/\s*\n\s*/g, ' ')
+              const filled = [one]
+              while (filled.length < counts[i]) filled.push(CAPTION_NO_TRANSLATION)
+              return filled.join('\n')
+            }).join('\n')
+          : got.map(v => (v == null ? '' : String(v))).join('\n')
+      } catch (e) {
+        console.warn('[cardTranslate] failed', e)
+      } finally {
+        translating = false
+        activeNote = null
+        $btn.removeClass('mee-tr-busy')
+        translators.forEach(t => t.setBusy(false))
+      }
+      if (dialogClosed) return
+      if (out == null || !out.trim()) { note('Translation failed.', '#a00'); return }
+      // The box was empty when the button was pressed, so nothing was confirmed
+      // — but the host can take twenty seconds per line, and the user is free to
+      // answer it themselves while waiting. Ask before throwing that away.
+      const destNow = String($dest.val() || '')
+      if (!confirmed && destNow !== destBefore && destNow.trim()
+        && !confirm(`${destLbl} was filled in while the translation was running. Replace it?`)) {
+        note('left as you typed it', '#a60'); return
+      }
+      applying = true
+      try { $dest.val(out).trigger('input') } finally { applying = false }
+      // With no dictionary behind it the host echoes back whatever it could not
+      // translate, and the offline path has no dictionary — so this is common,
+      // not rare. The text is still written (an empty box helps nobody), but
+      // saying so stops a card being saved with two identical faces unnoticed.
+      if (out.trim() === text) note('same text — no translation found', '#a60')
+      else note(failed ? `filled in · ${failed} line${failed === 1 ? '' : 's'} failed` : 'filled in',
+                failed ? '#a60' : '#070')
+    })
+    // The note describes the box as the translation left it; once the user
+    // edits it themselves it is describing something that is no longer there.
+    $dest.add($from).on('input', () => { if (!applying) note('') })
+    translators.push({ setBusy: (b) => $btn.prop('disabled', b) })
+  }
+  if (showTranslate) { makeTranslator('source'); makeTranslator('target') }
 
   const finish = async () => {
+    // A translation in flight is about to rewrite one of the boxes this reads.
+    // Saving now would store the text it is replacing and silently discard the
+    // answer, because closing the dialog drops it.
+    if (translating) {
+      if (activeNote) activeNote('Still translating — try again in a moment.', '#a00')
+      return false
+    }
     // If a recording is still in progress, stop and persist it first so the
     // card is saved WITH the voice recording rather than a file that cleanup()
     // is about to cancel. No-op when nothing is recording.
@@ -13051,6 +13442,9 @@ function _openManualEntryEditor(playlistName, existing) {
     const originalTgt = existing ? _cardTargetAudio(existing) : null
 
     const patch = { source, target }
+    // Absent from the patch when the picker was never rendered, so a card saved
+    // on a page with no tracks keeps whatever it already had.
+    if (showMusic) patch.musicTrackId = String($d.find('#meeMusic').val() || '')
     // Only touch the link field when the box actually represents its current
     // value. A legacy audio mediaUrl is blanked in the input (see above), so
     // writing it back without the audio UI would silently drop the recording.
@@ -13092,6 +13486,9 @@ function _openManualEntryEditor(playlistName, existing) {
   }
 
   function cleanup() {
+    // Stops a translation still in flight from writing into the boxes, which by
+    // then belong to whichever card is opened next.
+    dialogClosed = true
     // Each recorder tears down its own timer / in-flight recording / preview
     // and drops any file that was never committed via Save.
     recorders.forEach(r => { try { r.cleanup() } catch (_) {} })
@@ -13100,9 +13497,22 @@ function _openManualEntryEditor(playlistName, existing) {
     try { _cancelDictation() } catch (_) {}
   }
 
+  // Cap the height so the body scrolls inside the dialog. The dialog is pinned
+  // at a fixed top with no bottom bound, so without this a card whose textareas
+  // have been dragged taller simply runs off the bottom of the screen, taking
+  // the Save button with it. visualViewport is the honest height on a phone,
+  // excluding the address bar; it is read once, before the dialog opens, so the
+  // cap follows a rotation between opens but not the keyboard coming up.
+  const _vh = (window.visualViewport && window.visualViewport.height)
+           || window.innerHeight
+           || $(window).height()
   $d.dialog({
     title: isEdit ? 'Edit card' : 'Add manual card',
     width: Math.min(480, $(window).width() - 40),
+    maxHeight: Math.max(240, _vh - 80),
+    // jQuery UI's drag handler claims the touch gesture, and on a WebView that
+    // is the same gesture the user scrolls the content with.
+    draggable: false,
     modal: true,
     autoOpen: true,
     close: cleanup,
@@ -15662,6 +16072,30 @@ function _makeLocalMusicEngine(track) {
     _applyMusicVolume()
     _syncBackgroundMusic()
   })
+  // `loop` asks the browser to rewind the stream itself, and the app serves
+  // these files over its own scheme — a response that answers no range request
+  // is one the player will not seek, so the track ends and stays ended. Rewind
+  // by hand when that happens, the way the YouTube engine always has to. Silent
+  // when `loop` works, because then `ended` never fires.
+  //
+  // A rewind that did not take brings the track straight back here, and asking
+  // the same way again would spin as fast as the browser can dispatch. So the
+  // second attempt in a second loads the file afresh, and a third says what the
+  // first two were really telling us: whatever this is, it is not a track that
+  // plays. Ending twice in one second is not something a piece of music does,
+  // so ordinary looping never reaches either.
+  let lastEndedAt = 0
+  let quickEnds = 0
+  a.addEventListener('ended', () => {
+    if (eng !== _musicEngine) return
+    const now = Date.now()
+    quickEnds = (now - lastEndedAt < 1000) ? quickEnds + 1 : 0
+    lastEndedAt = now
+    if (quickEnds >= 2) return
+    if (quickEnds === 1) { try { a.load() } catch (_) {} }
+    else { try { a.currentTime = 0 } catch (_) {} }
+    _syncBackgroundMusic()
+  })
   a.addEventListener('error', () => _onLocalMusicError(eng))
   a.src = _musicServedUrl(track)
   return eng
@@ -15685,8 +16119,12 @@ async function _onLocalMusicError(eng) {
   // The file is there. A first failure can also be the page asking before
   // the app had wired itself up to answer, so reload once before blaming the
   // file; a second failure on the same track is the file's.
-  const track = _musicTrack()
-  if (eng.retriedId !== id && track && track.id === id) {
+  const track = _musicTrackNow()
+  // Moved on while we were asking — the card being played now wants a different
+  // track, or none. Whatever went wrong belongs to a track nobody is waiting
+  // for, and a toast about it would name something no longer on screen.
+  if (!track || track.id !== id) return
+  if (eng.retriedId !== id) {
     eng.retriedId = id
     eng.cue(track)
     _syncBackgroundMusic()
@@ -15698,7 +16136,7 @@ async function _onLocalMusicError(eng) {
 // Built on first actual need, so a user who never adds a track never pays
 // for an extra iframe or element.
 function _ensureMusicEngine() {
-  const track = _musicTrack()
+  const track = _musicTrackNow()
   const kind = _musicEngineFor(track)
   if (kind === 'none') return null
   if (_musicEngine && _musicEngine.kind !== kind) {
@@ -15872,6 +16310,21 @@ function _renderMusicPanel() {
   $d.find('#mpTrack').html(opts).prop('disabled', !tracks.length)
   $d.find('#mpDelete').prop('disabled', !tracks.length)
 
+  // The current playlist can keep a track of its own, and a card inside it can
+  // keep one of its own again. Hidden where there is nothing to choose from, and
+  // on the playlists that cannot hold the setting: a virtual one owns no items,
+  // and one pushed by the app is rebuilt wholesale on its next push.
+  const listName = (window._recording && window._recording.currentName) || ''
+  const listRec = _recordOfPlaylist(listName)
+  const listCanHold = !!(listRec && !listRec.virtual && !listRec.external)
+  const showListRow = !!tracks.length && listCanHold
+  $d.find('#mpListRow').toggle(showListRow)
+  $d.find('#mpListHint').toggle(showListRow)
+  if (showListRow) {
+    $d.find('#mpListTrack').html(_musicChoiceOptions(listRec.musicTrackId, '(use the track above)'))
+    $d.find('#mpListHint').text(`Plays under everything in "${listName}", unless a card names its own.`)
+  }
+
   const hushed = _musicHushed()
   $d.find('#mpHush')
     .text(hushed ? '▶ Resume music' : '⏸ Pause music')
@@ -15923,6 +16376,11 @@ function _openMusicPanel() {
       <button type="button" id="mpDelete" class="btn" title="Remove this track from the list">🗑</button>
     </div>
     <div class="mp-warn" id="mpTrackWarn" style="display:none;"></div>
+    <div class="mp-row" id="mpListRow" style="display:none;">
+      <label class="mp-lbl" for="mpListTrack">This playlist</label>
+      <select id="mpListTrack" class="mp-grow"></select>
+    </div>
+    <div class="mp-hint" id="mpListHint" style="display:none;"></div>
     <div class="mp-row">
       <button type="button" id="mpHush" class="btn mp-hush"></button>
     </div>
@@ -15959,6 +16417,16 @@ function _openMusicPanel() {
     // Redraw: the "can't play this one" line belongs to the track that failed,
     // so switching away from it has to take the warning with it.
     _renderMusicPanel()
+  })
+  $d.on('change.mp', '#mpListTrack', function () {
+    const rec = _recordOfPlaylist()
+    if (!rec || rec.virtual || rec.external) return
+    const v = String($(this).val() || '')
+    if (v) rec.musicTrackId = v
+    else delete rec.musicTrackId
+    _saveRecording()
+    // Takes effect under the card already playing, not at the next one.
+    _syncBackgroundMusic()
   })
   // Silence the bed without touching the mode, the track or the playlist —
   // the playlist plays on, this only stops the music underneath it.
@@ -16112,10 +16580,22 @@ window.openMusicPanel = _openMusicPanel
 // Should the music be sounding right now? One place decides, and every phase
 // change and pause routes through here.
 function _syncBackgroundMusic() {
+  const track = _musicTrackNow()
+  // A failure belongs to the track that failed. It is remembered so a broken
+  // link is not retried every few seconds — but the card being played can name
+  // a different track, and the engine is only rebuilt on the path this decision
+  // gates, so a remembered failure would silence every card after it and leave
+  // nothing to clear it.
+  if (_musicError && (!track || track.id !== _musicErrorId)) {
+    _musicError = 0
+    _musicErrorId = ''
+  }
   const want = _musicShouldPlay({
     mode: _musicMode(),
     phase: window._recPlayPhase || 'idle',
-    hasTrack: !!_musicVideoId(),
+    // Whether anything is going to sound under THIS card — a card or a
+    // playlist can ask for silence where the panel has a track chosen.
+    hasTrack: !!track,
     hushed: _musicHushed(),
     errored: !!_musicError,
     playing: !!window._playingRecording,
@@ -16411,6 +16891,11 @@ async function _playPracticeFace(face) {
 async function _showPracticeAudioPanel(it) {
   const clips = _isManualItem(it) ? _practiceClipsInOrder(it) : []
   $('body').toggleClass('practice-manual', clips.length > 0)
+  // The video slot belongs to a card that has a video in it. A manual card
+  // without a YouTube link has none — with or without recordings of its own —
+  // and leaving the slot up parks the last video card's player above a card it
+  // has nothing to do with, pushing the text down past an empty black box.
+  $('body').toggleClass('practice-no-video', _isManualItem(it) && !_cardHasVideoLink(it))
   _stopPracticeAudio()
   if (!clips.length) {
     $('#practiceAudio').hide()
@@ -16773,6 +17258,10 @@ async function playRecording(opts) {
     // card — see _cardFacesReversed.
     window._recPlayCurrentItem = it
     _recPlayCardReversed = _recPlayReversed()
+    // A card can name its own background music, so the answer to "what should
+    // be sounding" changes with the card and not only with the phase — and two
+    // cards in a row can both be 'clip', which is no phase change at all.
+    _syncBackgroundMusic()
 
     _renderPlayingBanner(it, i, queue.length)
     // Remember the item currently playing so the review dialog can highlight

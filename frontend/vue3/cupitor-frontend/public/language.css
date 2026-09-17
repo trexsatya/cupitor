@@ -1800,6 +1800,11 @@ h5.l-accordion.srt-guess-only:hover {
 /* Manual-entry editor dialog */
 #manualEntryEditor .mee-row { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
 #manualEntryEditor .mee-lbl { font-size: 12px; color: #555; font-weight: 600; }
+/* The face's buttons are siblings of the label, not children of it: a <label>
+   with no `for` takes the first labelable descendant as its control, so a
+   button inside one fires when the user taps the word. */
+#manualEntryEditor .mee-lbl-row { display: flex; align-items: center; flex-wrap: wrap; }
+#manualEntryEditor .mee-tr-note { font-size: 11px; color: #666; margin-left: 8px; }
 #manualEntryEditor .mee-lbl-hint { font-weight: 400; color: #888; }
 #manualEntryEditor .mee-input {
     width: 100%;
@@ -2034,8 +2039,14 @@ body.practice-mode #mediaRelatedContainer {
    #recPlayingAudio take that space, rather than leaving a black 16:9 box
    above a card that is only ever going to make sound. Overrides the
    display:block !important below, so it has to be at least as specific. */
+/* Two ways a practice card has no use for the slot: it holds this card's own
+   recordings instead, or the card has no video at all. Both hide the video —
+   the audio panel is drawn over the same fixed strip, so a card carrying a link
+   AND a recording would otherwise paint one on top of the other, with the
+   uncovered band below still taking taps meant for the card. */
 body.rec-playing.rec-playing-manual:not(.practice-mode) #mediaContainer,
-body.practice-mode.practice-manual #mediaContainer {
+body.practice-mode.practice-manual #mediaContainer,
+body.practice-mode.practice-no-video #mediaContainer {
     display: none !important;
 }
 /* Audio player for a manual card's recordings — same fixed slot the video
@@ -2316,6 +2327,13 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 #practiceMode .practice-settings-panel .practice-delete:hover { background: #d32f2f; }
 /* The card content sits below the fixed video (video bottom ≈ 64px +
    56.25% of min(100vw,900px)). */
+/* Nothing in the slot at all — a manual card with no video and no recordings.
+   The card starts where the slot would have, with nothing above it. Listed
+   before the rule below so a card that does have an audio panel keeps its own
+   height (equal specificity, so the later rule wins). */
+body.practice-no-video #practiceMode .practice-card {
+    top: calc(64px + var(--practice-media-h, 0px) + 12px);
+}
 /* A manual card's slot holds the audio panel, not a 16:9 video, so the card
    starts right below whatever height that turned out to be. */
 body.practice-manual #practiceMode .practice-card {
@@ -3556,6 +3574,9 @@ body.music-on #recPlayingBanner .rec-pb-music-btn {
     line-height: 1.45;
     padding: 1px 0;
     word-break: break-word;
+    /* A picked sentence keeps the line breaks the page gave it, and the
+       preview is where you decide whether to send it — so show them. */
+    white-space: pre-wrap;
 }
 #captionCaptureDialog .cap-cap-more { font-size: 12px; color: #888; padding-top: 4px; }
 #captionCaptureDialog .cap-cap-row {
@@ -4029,6 +4050,33 @@ body.rec-playing #recPlayingSubs { display: block; }
     animation: mee-mic-pulse 1s ease-in-out infinite;
 }
 @keyframes mee-mic-pulse { 50% { opacity: 0.45; } }
+/* Fill this face from the other one's translation. Shares the mic button's
+   shape so the two sit together on a label without looking like two systems. */
+#manualEntryEditor .mee-tr {
+    background: transparent;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    padding: 2px 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+#manualEntryEditor .mee-tr:hover { background: #f6f8fa; }
+#manualEntryEditor .mee-tr:disabled { opacity: 0.5; cursor: default; }
+/* Waiting on the host's answer. The button is disabled while it works, so this
+   has to out-rank both .mee-tr:hover and .mee-tr:disabled — and restate
+   opacity, or the pulse animates down from the disabled 0.5 and barely reads. */
+#manualEntryEditor .mee-tr.mee-tr-busy,
+#manualEntryEditor .mee-tr.mee-tr-busy:hover,
+#manualEntryEditor .mee-tr.mee-tr-busy:disabled {
+    background: #eaf3ff;
+    border-color: #0969da;
+    opacity: 1;
+    cursor: default;
+    animation: mee-mic-pulse 1s ease-in-out infinite;
+}
 #manualEntryEditor .mee-audio-bar {
     display: flex;
     gap: 6px;
@@ -4128,3 +4176,60 @@ body.rec-playing #recPlayingSubs { display: block; }
     #translationPanel .xl-body { padding: 0 8px 8px; }
     #translationPanel .xl-term { font-size: 14px; }
 }
+
+/* ─── Search-history list (long press on Prev / Next) ─────────────────── */
+/* Fixed and body-parented, like the notification panel, so no toolbar
+   ancestor clips it. */
+.srch-hist-panel {
+    position: fixed;
+    max-width: 90vw;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+    z-index: 100050;
+}
+.srch-hist-hd {
+    padding: 6px 10px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #6b7c90;
+    border-bottom: 1px solid #eef1f5;
+    position: sticky;
+    top: 0;
+    background: #fff;
+}
+.srch-hist-empty { padding: 10px; font-size: 13px; color: #6b7c90; }
+.srch-hist-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid #f2f4f7;
+    text-align: left;
+    font-size: 14px;
+    color: #22303f;
+    cursor: pointer;
+    /* Tappable with a thumb. */
+    min-height: 40px;
+}
+.srch-hist-row:last-child { border-bottom: 0; }
+.srch-hist-row:hover { background: #f6f8fb; }
+.srch-hist-row.is-current { background: #eef4ff; font-weight: 600; }
+.srch-hist-term { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srch-hist-lang, .srch-hist-here {
+    flex: 0 0 auto;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #5a7ba6;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    padding: 1px 6px;
+}
+.srch-hist-here { color: #1d6f42; border-color: #8fc0a1; }

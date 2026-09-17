@@ -132,6 +132,36 @@ export function musicSelectedTrack(settings) {
   return musicTracks(settings).find(t => t.id === id) || null;
 }
 
+// A card or a playlist saying "no music here", as opposed to saying nothing and
+// taking whatever the level above it plays.
+export const MUSIC_NONE = 'none';
+
+// Which track sounds under the card being played.
+//
+// A card can name its own, a playlist can name one for everything in it, and
+// the panel's chosen track is what plays when neither does — so the nearest
+// answer wins and the rest are what it falls back to. Either level can also ask
+// for silence outright, which is an answer rather than a gap to fill.
+//
+// A named track that is no longer in the library is treated as nothing said:
+// the file was deleted or the row removed, and going silent over a stale id
+// would leave the user with no way to see why.
+export function resolveMusicTrack(settings, ctx) {
+  const list = musicTracks(settings);
+  const c = ctx || {};
+  const pick = (id) => {
+    const want = String(id || '').trim();
+    if (!want) return undefined;                       // says nothing
+    if (want === MUSIC_NONE) return null;              // says silence
+    return list.find(t => t.id === want) || undefined; // gone: says nothing
+  };
+  const fromCard = pick(c.cardTrackId);
+  if (fromCard !== undefined) return fromCard;
+  const fromPlaylist = pick(c.playlistTrackId);
+  if (fromPlaylist !== undefined) return fromPlaylist;
+  return musicSelectedTrack(settings);
+}
+
 // Which volume applies right now. 'clip' is the only phase where something
 // else is sounding, so it is the only one that gets the quiet level.
 export function musicVolumeFor(settings, phase) {

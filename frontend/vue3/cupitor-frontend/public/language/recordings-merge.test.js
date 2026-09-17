@@ -280,6 +280,31 @@ describe("mergeRecordingCollections", () => {
     expect(out.p.createdAt).toBe(1);
   });
 
+  test("keeps what a playlist carries besides its items", () => {
+    // A setting made on this device — the music it plays under, the reminder it
+    // is wired to — has to survive the next merge, which for a local change is
+    // the next page load.
+    const a = { p: { items: { s: { w: [it("X", 1)] } }, createdAt: 1, updatedAt: 200, musicTrackId: "rain", notifKey: "k1" } };
+    const b = { p: { items: { s: { w: [it("Y", 2)] } }, createdAt: 1, updatedAt: 100, musicTrackId: "waves", vocabCategory: "verbs" } };
+    const out = mergeRecordingCollections(a, b, fixedNow);
+    // The newer side answers where both do; the older side is kept where only
+    // it has an answer.
+    expect(out.p.musicTrackId).toBe("rain");
+    expect(out.p.notifKey).toBe("k1");
+    expect(out.p.vocabCategory).toBe("verbs");
+    // And the items are still the merged ones, not either side's.
+    expect(out.p.items.s.w.map(i => i.id)).toEqual(["X", "Y"]);
+  });
+
+  test("a field cleared on the newer side stays cleared", () => {
+    const a = { p: { items: {}, createdAt: 1, updatedAt: 200 } };
+    const b = { p: { items: {}, createdAt: 1, updatedAt: 100, musicTrackId: "waves" } };
+    // Nothing distinguishes "never set" from "deleted" in a plain object, so the
+    // older side's value comes through. Pinned because it is the known edge of
+    // the rule above, not because it is the nicer answer.
+    expect(mergeRecordingCollections(a, b, fixedNow).p.musicTrackId).toBe("waves");
+  });
+
   test("newer side wins for ordering ties when same (id, lineIndex) seen first", () => {
     const a = { p: { items: { s: { w: [it("X", 1, { from: "a" })] } }, createdAt: 1, updatedAt: 200 } };
     const b = { p: { items: { s: { w: [it("X", 1, { from: "b" })] } }, createdAt: 1, updatedAt: 100 } };
