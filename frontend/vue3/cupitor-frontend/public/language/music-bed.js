@@ -199,6 +199,43 @@ export function musicShouldPlay(state) {
   return s.phase === 'gap';
 }
 
+// How close to the end counts as being at it. Position updates land a few times
+// a second, so the last one before the end is short of it by some fraction.
+export const MUSIC_END_EPSILON = 0.25;
+
+// Does the element have to be re-loaded before it can play again?
+//
+// A fresh load is the one rewind that never depends on seeking. Local tracks
+// are served from an origin that answers no range request, so the element
+// reports itself unseekable; putting currentTime back to 0 works only while
+// the whole track happens to still be buffered, which is true of a short one
+// and false of the long track a bed is usually made of. When that rewind
+// quietly does nothing, asking the element to play again changes nothing
+// either — sitting at the end IS the state it is already in.
+//
+// Reading `ended` is only meaningful because the bed does NOT set `loop`: an
+// element with a loop attribute never reports having ended, whether or not it
+// managed to rewind.
+export function musicNeedsReload(el) {
+  if (!el) return false;
+  if (el.ended) return true;
+  // Still running — whatever it is doing, it is not stuck, and reloading it
+  // would put an audible cut in the middle of a track that was fine.
+  if (!el.paused) return false;
+  const dur = Number(el.duration);
+  const at = Number(el.currentTime);
+  // A stream still being measured reports NaN or Infinity, and an endless one
+  // never arrives anywhere. Nothing to be at the end of yet.
+  if (!isFinite(dur) || dur <= 0 || !isFinite(at)) return false;
+  // Never played is not the end, however short the track — otherwise a freshly
+  // loaded element reads as finished and is reloaded before it can start.
+  if (at <= 0) return false;
+  // Paused at the end. The bed keeps its position across the pauses between
+  // cards on purpose, so anywhere earlier is a place to resume from, not to
+  // rewind from.
+  return at >= dur - MUSIC_END_EPSILON;
+}
+
 // Add a URL to the library. Returns the new list plus what happened, so the
 // caller can report "already saved" differently from "that isn't a YouTube
 // link" without re-deriving either.

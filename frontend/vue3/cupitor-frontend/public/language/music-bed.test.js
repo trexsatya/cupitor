@@ -7,6 +7,8 @@ import {
   musicVolumeFor,
   musicVolumeFieldsFor,
   musicShouldPlay,
+  musicNeedsReload,
+  MUSIC_END_EPSILON,
   addMusicTrack,
   removeMusicTrack,
   MUSIC_SERVE_BASE,
@@ -383,5 +385,68 @@ describe("resolveMusicTrack", () => {
 
   it("has nothing to play when the library is empty", () => {
     expect(resolveMusicTrack({}, { cardTrackId: "aaaaaaaaaaa" })).toBeNull();
+  });
+});
+
+describe("musicNeedsReload", () => {
+  // The bed keeps its position across the pauses between cards on purpose, so
+  // this has to stay false everywhere except a track sitting at its end.
+  // `ended` is only readable because the engine does not set `loop` — a
+  // looping element never reports having ended.
+  const el = (o) => Object.assign({ ended: false, paused: true, currentTime: 0, duration: 180 }, o);
+
+  it("reloads an element that has ended", () => {
+    expect(musicNeedsReload(el({ ended: true, currentTime: 180 }))).toBe(true);
+  });
+
+  it("reloads one paused at the end without having said it ended", () => {
+    expect(musicNeedsReload(el({ currentTime: 180 }))).toBe(true);
+  });
+
+  it("counts the last position before the end as the end", () => {
+    expect(musicNeedsReload(el({ currentTime: 180 - MUSIC_END_EPSILON / 2 }))).toBe(true);
+    expect(musicNeedsReload(el({ currentTime: 180 - MUSIC_END_EPSILON * 4 }))).toBe(false);
+  });
+
+  it("leaves a paused track alone in the middle", () => {
+    // Resuming from here is the whole point of keeping the position.
+    expect(musicNeedsReload(el({ currentTime: 90 }))).toBe(false);
+  });
+
+  it("never touches a track that is still playing", () => {
+    // Playback runs through the last fraction of a second on the way to the
+    // end; reloading there would cut a track that was perfectly fine.
+    expect(musicNeedsReload(el({ paused: false, currentTime: 179.99 }))).toBe(false);
+    expect(musicNeedsReload(el({ paused: false, currentTime: 90 }))).toBe(false);
+  });
+
+  it("does not call a freshly loaded element finished", () => {
+    // Nothing has played yet. Short tracks are the trap: with a duration
+    // under the epsilon, position 0 is within reach of the end.
+    expect(musicNeedsReload(el({ currentTime: 0 }))).toBe(false);
+    expect(musicNeedsReload(el({ currentTime: 0, duration: 0.2 }))).toBe(false);
+  });
+
+  it("waits rather than reloading while the duration is still unknown", () => {
+    // A stream being measured reports NaN; an endless one, Infinity.
+    expect(musicNeedsReload(el({ duration: NaN, currentTime: 5 }))).toBe(false);
+    expect(musicNeedsReload(el({ duration: Infinity, currentTime: 5 }))).toBe(false);
+    expect(musicNeedsReload(el({ duration: 0, currentTime: 0 }))).toBe(false);
+    expect(musicNeedsReload(el({ currentTime: NaN }))).toBe(false);
+  });
+
+  it("still reloads an ended element whose duration never arrived", () => {
+    expect(musicNeedsReload(el({ ended: true, duration: NaN }))).toBe(true);
+    expect(musicNeedsReload(el({ ended: true, paused: false }))).toBe(true);
+  });
+
+  it("treats a position past the duration as the end", () => {
+    // A revised-down duration can leave the position beyond it.
+    expect(musicNeedsReload(el({ currentTime: 200 }))).toBe(true);
+  });
+
+  it("has no opinion without an element", () => {
+    expect(musicNeedsReload(null)).toBe(false);
+    expect(musicNeedsReload(undefined)).toBe(false);
   });
 });

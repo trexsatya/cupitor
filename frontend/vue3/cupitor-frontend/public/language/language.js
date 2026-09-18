@@ -167,6 +167,7 @@ import {
   musicServedUrl as _musicServedUrl,
   addLocalMusicTrack as _addLocalMusicTrack,
   pruneMissingLocalTracks as _pruneMissingLocalTracks,
+  musicNeedsReload as _musicNeedsReload,
 } from './music-bed.js';
 import {
   nextRandomPlaylistName as _nextRandomPlaylistName,
@@ -16486,13 +16487,26 @@ function _makeYtMusicEngine(track) {
   return eng
 }
 
+// A track ending twice inside this many ms is not music looping, and playing
+// for longer than it is proof the track is fine.
+const MUSIC_LOOP_MIN_MS = 1000
+// Retries in quick succession before leaving it alone until something changes.
+const MUSIC_LOOP_GIVE_UP = 3
+
 // ── Local-file engine ──
-// `loop` on the element replaces the hand-rolled rewind the YouTube engine
-// needs. The src is the URL the app serves the file at, never file:// — a
-// page loaded over https cannot reference a file:// subresource.
+// The loop is driven by hand, the way the YouTube engine's always has been.
+// `loop` on the element is deliberately NOT set: an element carrying a loop
+// attribute never reports having ended — no `ended` event, and `ended` reads
+// false forever — so it takes every means of noticing a rewind that did not
+// happen with it. It asks the element to seek back to the start, and these
+// files are served from an origin that answers no range request, so on a track
+// too long to stay buffered that seek can quietly do nothing and leave the bed
+// silent with nothing to report.
+//
+// The src is the URL the app serves the file at, never file:// — a page loaded
+// over https cannot reference a file:// subresource.
 function _makeLocalMusicEngine(track) {
   const a = document.createElement('audio')
-  a.loop = true
   a.preload = 'auto'
   a.setAttribute('playsinline', '')
   _musicHostNode().appendChild(a)
@@ -16504,7 +16518,17 @@ function _makeLocalMusicEngine(track) {
   }
   // play() returns a promise that rejects when the browser refuses; the
   // rejection is not an error we can act on, and an unhandled one is noise.
-  eng.play = () => { try { const p = a.play(); if (p && p.catch) p.catch(() => {}) } catch (_) {} }
+  //
+  // Asking an element that is already at the end to play is asking it to
+  // rewind, and on an unseekable response it may not be able to — leaving the
+  // bed silent with nothing to report, because refusing to rewind is not an
+  // error and the end was reached long ago. So reload first: the one rewind
+  // that always works. A second way back in beside the `ended` handler, for a
+  // track that stops without ever announcing it.
+  eng.play = () => {
+    try { if (_musicNeedsReload(a)) a.load() } catch (_) {}
+    try { const p = a.play(); if (p && p.catch) p.catch(() => {}) } catch (_) {}
+  }
   eng.pause = () => { try { a.pause() } catch (_) {} }
   eng.setVolume = (v) => { a.volume = Math.max(0, Math.min(100, Number(v) || 0)) / 100 }
   eng.stop = () => {
@@ -16525,29 +16549,36 @@ function _makeLocalMusicEngine(track) {
     _syncBackgroundMusic()
   })
   // `loop` asks the browser to rewind the stream itself, and the app serves
-  // these files over its own scheme — a response that answers no range request
-  // is one the player will not seek, so the track ends and stays ended. Rewind
-  // by hand when that happens, the way the YouTube engine always has to. Silent
-  // when `loop` works, because then `ended` never fires.
+  // The track reached its end: start it again. load() rather than
+  // currentTime = 0, because a fresh load is the only rewind that does not
+  // depend on seeking, and these files are served from an origin that answers
+  // no range request.
   //
-  // A rewind that did not take brings the track straight back here, and asking
-  // the same way again would spin as fast as the browser can dispatch. So the
-  // second attempt in a second loads the file afresh, and a third says what the
-  // first two were really telling us: whatever this is, it is not a track that
-  // plays. Ending twice in one second is not something a piece of music does,
-  // so ordinary looping never reaches either.
+  // A file that ends the moment it starts would spin as fast as the browser
+  // can dispatch, so ends arriving on top of each other stop being answered.
+  // Measured between one end and the next, which is how long the track played
+  // for — a piece of music does not finish twice inside a second. An end that
+  // arrives after a decent stretch clears the count, so a session's worth of
+  // ordinary looping never approaches it, and one bad transition cannot leave
+  // the bed silent for good.
   let lastEndedAt = 0
   let quickEnds = 0
   a.addEventListener('ended', () => {
     if (eng !== _musicEngine) return
     const now = Date.now()
-    quickEnds = (now - lastEndedAt < 1000) ? quickEnds + 1 : 0
+    quickEnds = (now - lastEndedAt < MUSIC_LOOP_MIN_MS) ? quickEnds + 1 : 0
     lastEndedAt = now
-    if (quickEnds >= 2) return
-    if (quickEnds === 1) { try { a.load() } catch (_) {} }
-    else { try { a.currentTime = 0 } catch (_) {} }
+    if (quickEnds >= MUSIC_LOOP_GIVE_UP) return
+    try { a.load() } catch (_) {}
     _syncBackgroundMusic()
   })
+  // A track that is sounding has nothing left to retry. Without this the one
+  // retry _onLocalMusicError allows is spent once for the life of the engine
+  // rather than once per stumble, so a later transient failure goes straight
+  // to giving up and silences the bed for the rest of the session. Looping by
+  // hand re-fetches the file on every lap, which is that much more opportunity
+  // for a stumble.
+  a.addEventListener('playing', () => { eng.retriedId = '' })
   a.addEventListener('error', () => _onLocalMusicError(eng))
   a.src = _musicServedUrl(track)
   return eng
