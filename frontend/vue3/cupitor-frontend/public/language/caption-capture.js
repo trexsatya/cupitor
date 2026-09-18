@@ -46,6 +46,124 @@ export function captionLinesFrom(cap) {
   }).filter(Boolean);
 }
 
+// The address a captured card links back to.
+//
+// `cap.url` is the page: the block's identity, and what the de-dupe matches
+// on, so it carries no start offset and means the same thing for every send
+// from one video. `cap.timeParam` is what this player calls a start offset,
+// or '' for one that cannot be deep-linked.
+//
+// `lines` is what actually lands on the card, which is not always everything
+// the user picked — lines already captured from this video are dropped first.
+// The link follows the lowest time among the lines it is put on: pointing at
+// a passage that ended up on some other card is worse than not pointing at a
+// passage at all.
+//
+// Comes back as the plain page whenever there is no moment to name: no
+// parameter, a page block (every time is 0), unreadable times, or a passage
+// that starts at the very beginning, which the plain address already is.
+export function captionMediaLink(cap, lines) {
+  const url = String((cap && cap.url) || '').trim();
+  // Anything that is not an ordinary web page carries no link at all. The
+  // channel this arrives on is reachable from any script on any page the user
+  // visits, and this address ends up in an href and in window.open — a
+  // `javascript:` or `data:` one has no business being either.
+  if (!isWebPage(url)) return '';
+  const name = String((cap && cap.timeParam) || '').trim();
+  // The name is sent even where a moment is not worth pointing at — a live
+  // channel names it so the address can be cleaned for identity, and says no
+  // to the link separately. Only an explicit no counts, so a block that says
+  // nothing keeps its link.
+  if (!name || (cap && cap.timeLink === false)) return url;
+  const at = Math.floor(earliestStart(lines));
+  // An offset no player would read is not worth writing. The upper bound is
+  // what keeps a nonsense cue time out of exponent notation, which is what
+  // a number this large stringifies to.
+  if (!Number.isFinite(at) || at <= 0 || at >= 1e9) return url;
+  return withParam(url, name, at);
+}
+
+// The page a captured block belongs to, with no start offset on it.
+//
+// This is identity: which video the lines came from, not where the viewer was
+// in it. The page sends its address already in this shape, but a card filed
+// earlier holds whatever the address bar said at the time, so the stored one
+// is put through here before the two are compared.
+export function captionPageKey(url, timeParam) {
+  const clean = String(url || '').trim();
+  const name = String(timeParam || '').trim();
+  if (!clean || !name || !isWebPage(clean)) return clean;
+  return withoutParam(clean, name);
+}
+
+// The earliest moment among these lines. A line whose time cannot be read is
+// passed over rather than allowed to poison the answer — one unreadable cue
+// should cost its own precision, not the whole card's link.
+function earliestStart(lines) {
+  let best = Infinity;
+  for (const l of lines || []) {
+    const t = Number(l && l.start);
+    if (Number.isFinite(t) && t < best) best = t;
+  }
+  return best;
+}
+
+// Only an ordinary web page is rewritten. A relative address resolved against
+// whatever page the webapp is on would become a link to somewhere else
+// entirely, and a blob: or about: address is not somewhere to be sent back to.
+function isWebPage(url) {
+  try {
+    const p = new URL(url).protocol;
+    return p === 'http:' || p === 'https:';
+  } catch (_) {
+    return false;
+  }
+}
+
+// Query surgery by hand, on purpose. Reading the query into URLSearchParams
+// and writing it back re-encodes every OTHER parameter — a bare `?flag` comes
+// back as `?flag=`, and characters it escapes differently change shape — so
+// the link would differ from the page in ways nobody asked for. Splitting the
+// string touches only the parameter named.
+//
+// These rules have a twin in `db/js/src/20-caption-sidebar.js`, which removes
+// the same parameter on its way out of the page. The two have to agree about
+// what counts as the same key, or a link ends up carrying two offsets — both
+// sides' tests run the same table of addresses for that reason.
+function splitUrl(url) {
+  const h = url.indexOf('#');
+  const head = h >= 0 ? url.slice(0, h) : url;
+  const q = head.indexOf('?');
+  return {
+    base: q >= 0 ? head.slice(0, q) : head,
+    // A page writes the name either way round, so both spellings match.
+    parts: (q >= 0 ? head.slice(q + 1).split('&') : []).filter(Boolean),
+    hash: h >= 0 ? url.slice(h) : '',
+  };
+}
+
+function isParam(part, name) {
+  const key = part.split('=')[0];
+  return key === name || key === encodeURIComponent(name);
+}
+
+function joinUrl(u) {
+  return u.base + (u.parts.length ? `?${u.parts.join('&')}` : '') + u.hash;
+}
+
+function withoutParam(url, name) {
+  const u = splitUrl(url);
+  u.parts = u.parts.filter(p => !isParam(p, name));
+  return joinUrl(u);
+}
+
+function withParam(url, name, value) {
+  const u = splitUrl(url);
+  u.parts = u.parts.filter(p => !isParam(p, name));
+  u.parts.push(`${encodeURIComponent(name)}=${value}`);
+  return joinUrl(u);
+}
+
 // Identity of one captured line. Start is part of the key because subtitle
 // tracks repeat short lines ("Ja.") constantly — keying on text alone would
 // silently swallow every repeat after the first. Page blocks have no times, so

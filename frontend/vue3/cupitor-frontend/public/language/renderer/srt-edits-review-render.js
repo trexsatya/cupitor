@@ -7,6 +7,10 @@
 //   - renderSrtEditsReviewList(vm, mountEl)
 //   - collectSrtEditsByCheckbox(mountEl, checked)
 // They share the row shape ('.srt-review-row[data-file][data-line]').
+//
+// Each file group also carries its own checkbox in the header, so a whole
+// file's edits can be taken or left in one click. setSrtEditsGroupChecked and
+// syncSrtEditsGroupBoxes keep that header box and its rows agreeing.
 
 // Replace `mountEl`'s contents with the file-grouped review rows.
 export function renderSrtEditsReviewList(vm, mountEl) {
@@ -28,7 +32,20 @@ export function renderSrtEditsReviewList(vm, mountEl) {
     const head = document.createElement('div')
     head.className = 'srt-review-file-head'
     head.title = group.filePath
-    head.textContent = group.headLabel
+    // The whole header is the label, so tapping the file name takes or leaves
+    // every edit in that file — the row-by-row boxes stay available below.
+    const headLabel = document.createElement('label')
+    headLabel.className = 'srt-review-file-keep-wrap'
+    const headBox = document.createElement('input')
+    headBox.type = 'checkbox'
+    headBox.className = 'srt-review-file-keep'
+    headBox.checked = true
+    const headName = document.createElement('span')
+    headName.className = 'srt-review-file-name'
+    headName.textContent = group.headLabel
+    headLabel.appendChild(headBox)
+    headLabel.appendChild(headName)
+    head.appendChild(headLabel)
     groupDiv.appendChild(head)
 
     group.lines.forEach(line => {
@@ -67,6 +84,29 @@ export function renderSrtEditsReviewList(vm, mountEl) {
     })
 
     mountEl.appendChild(groupDiv)
+  })
+
+  syncSrtEditsGroupBoxes(mountEl)
+}
+
+// Tick or untick every edit in one file group.
+export function setSrtEditsGroupChecked(groupEl, checked) {
+  if (!groupEl) return
+  groupEl.querySelectorAll('.srt-review-keep').forEach(cb => { cb.checked = !!checked })
+}
+
+// Bring every header box back in line with its rows: ticked when the whole
+// file is taken, clear when none of it is, indeterminate in between. A group
+// with no rows left reads as unticked rather than as "all of nothing".
+export function syncSrtEditsGroupBoxes(mountEl) {
+  if (!mountEl) return
+  mountEl.querySelectorAll('.srt-review-file').forEach(groupEl => {
+    const head = groupEl.querySelector('.srt-review-file-keep')
+    if (!head) return
+    const rows = groupEl.querySelectorAll('.srt-review-keep')
+    const checked = Array.prototype.filter.call(rows, cb => cb.checked).length
+    head.checked = rows.length > 0 && checked === rows.length
+    head.indeterminate = checked > 0 && checked < rows.length
   })
 }
 

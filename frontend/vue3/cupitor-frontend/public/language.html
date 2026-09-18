@@ -225,7 +225,12 @@
                         </div>
                     </div>
                     <div id="btns-2" class="lang-search-select-row" style="margin-bottom: 0;">
-                        <select id="searchedWords" style="width: 100%;"></select>
+                        <div class="lang-select-with-toggle">
+                            <select id="searchedWords" style="width: 100%;"></select>
+                            <input class="tgl tgl-flip lang-inline-toggle" id="toggleLangCb" type="checkbox"
+                                   data-toggle="toggle" data-size="mini" data-on="EN" data-off="SV"
+                                   title="Which language the search runs in"/>
+                        </div>
                         <div id="vocabLoadingBar" style="width:100%;height:3px;background:#eee;margin-top:2px;overflow:hidden;">
                             <div id="vocabLoadingBarFill" style="width:0;height:100%;background:#4dba87;transition:width .2s ease;"></div>
                         </div>
@@ -277,12 +282,6 @@
                     </label>
                     <button type="button" id="openMusicPanel" class="btn lang-panel-btn"
                             title="Background music that plays under a playlist: saved tracks, when it sounds, and how loud.">♫ Music…</button>
-                    <label class="lang-panel-label">
-                        Lang
-                        <input class="tgl tgl-flip" id="toggleLangCb" type="checkbox" data-toggle="toggle"
-                               data-size="small" data-on="EN" data-off="SV" style="margin-left: 4px;"/>
-                    </label>
-                    
                     <label class="lang-panel-label" title="Clear search text on click">
                         Clear on click
                         <div class="checkbox-wrapper-22" style="display: inline; margin-left: 4px;">

@@ -145,6 +145,69 @@
 .lang-search-select-row .select2-container {
     width: 100% !important;
 }
+/* The vocabulary select and the SV/EN switch share one line: the switch says
+   which language the box below is searched in, so it belongs next to it rather
+   than buried in Settings. The select takes the rest of the row. */
+.lang-search-select-row .lang-select-with-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+}
+.lang-search-select-row .lang-select-with-toggle > select,
+.lang-search-select-row .lang-select-with-toggle .select2-container {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto !important;   /* beats the row-wide 100% above */
+}
+/* bootstrap-toggle replaces the checkbox with a .toggle widget; size and paint
+   that, not the input.
+
+   It is a Bootstrap 3 widget and this page loads Bootstrap 4, so the classes it
+   asks for — .btn-default above all — no longer exist and the switch arrives
+   with no appearance at all, just the words SV/EN in the flow. Its own CSS
+   still does the sliding, so only the looks are supplied here. */
+.lang-search-select-row .lang-select-with-toggle .toggle {
+    flex: 0 0 auto;
+    width: 44px !important;
+    height: 22px !important;
+    min-width: 44px;
+    border: 1px solid #c8d1da;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #eef1f4;
+    cursor: pointer;
+}
+.lang-search-select-row .lang-select-with-toggle .toggle .btn {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0 3px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 20px;
+    min-height: 0;
+}
+/* The language actually in use reads as the "on" side whichever it is. */
+.lang-search-select-row .lang-select-with-toggle .toggle .toggle-on {
+    background: #2f6feb;
+    color: #fff;
+    text-align: left;
+}
+.lang-search-select-row .lang-select-with-toggle .toggle .toggle-off {
+    background: #7c8794;
+    color: #fff;
+    text-align: right;
+}
+.lang-search-select-row .lang-select-with-toggle .toggle .toggle-handle {
+    background: #fff;
+    border: 1px solid #c8d1da;
+    border-radius: 999px;
+    width: 14px;
+    padding: 0;
+}
 
 .lang-tool-btn {
     padding: 5px 10px;
@@ -233,6 +296,21 @@
     padding-bottom: 6px;
     border-bottom: 1px dashed #d0d7de;
     margin-bottom: 6px;
+}
+/* The header doubles as the file's own select/deselect control. */
+.srt-review-file-keep-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+.srt-review-file-keep {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+}
+.srt-review-file-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2923,19 +3001,35 @@ body.practice-manual #practiceMode .practice-card {
 .ui-dialog:has(> #musicPanelDialog) { z-index: 100010 !important; }
 body.music-panel-open .ui-widget-overlay { z-index: 100009 !important; }
 
-/* Restore pill for the minimized rare-words dialog. Floats above the page
-   in the bottom-right so it doesn't sit on top of the play-mode pill
-   (which is bottom-center) when both are visible. Clicking re-opens the
-   dialog with all state preserved (page, category filter, results). */
-#rareWordsRestorePill {
+/* Where minimized dialogs park; they stack upwards so several at once never
+   land on each other. Raised a pill's height off the bottom edge to clear the
+   band the other floating pills own — Practice's restore pill (bottom-right)
+   and the playback pill (bottom-center, which reaches into this corner on a
+   phone). Above every dialog z-index in this file, because a pill is the only
+   way back to what it holds: behind the playback-queue or music-panel dialog
+   it would strand a parked card until that dialog was closed. */
+#minimizedDialogs {
     position: fixed;
-    bottom: 16px;
+    bottom: 64px;
     right: 16px;
-    z-index: 100005;
-    display: none;
+    z-index: 100030;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: flex-end;
+    gap: 8px;
+    /* Only the pills catch clicks — the gaps between them belong to the page
+       underneath. */
+    pointer-events: none;
+}
+#minimizedDialogs > * { pointer-events: auto; }
+
+/* One parked dialog. Clicking it brings the dialog back as it was. */
+.dlg-pill {
+    display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 8px 6px 14px;
+    max-width: min(78vw, 320px);
+    padding: 6px 14px;
     background: rgba(33, 33, 33, 0.94);
     color: #f5f5f5;
     border-radius: 24px;
@@ -2943,8 +3037,42 @@ body.music-panel-open .ui-widget-overlay { z-index: 100009 !important; }
     cursor: pointer;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
 }
-#rareWordsRestorePill .rare-pill-icon { font-size: 16px; }
-#rareWordsRestorePill .rare-pill-label { font-weight: 600; }
+.dlg-pill:hover { background: rgba(33, 33, 33, 1); }
+.dlg-pill .dlg-pill-icon { font-size: 16px; }
+.dlg-pill .dlg-pill-label {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Minimize control in a dialog titlebar. jQuery UI pins its close button to
+   the right edge of the bar, so this one is placed just inside it. */
+.ui-dialog-titlebar .dlg-minimize {
+    position: absolute;
+    right: 2.4em;
+    top: 50%;
+    width: 24px;
+    height: 24px;
+    margin-top: -12px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+}
+.ui-dialog-titlebar .dlg-minimize:hover { background: rgba(0, 0, 0, 0.12); }
+
+/* The rare-words pill is the one that can also be dismissed: the dialog
+   behind it is closed rather than parked, so its results can be let go of
+   from here. Hidden until a rare-word click minimizes the dialog. */
+#rareWordsRestorePill {
+    display: none;
+    padding-right: 8px;
+}
 #rareWordsRestorePill .rare-pill-close {
     width: 26px;
     height: 26px;
@@ -2957,7 +3085,6 @@ body.music-panel-open .ui-widget-overlay { z-index: 100009 !important; }
     cursor: pointer;
 }
 #rareWordsRestorePill .rare-pill-close:hover { background: #d32f2f; }
-#rareWordsRestorePill:hover { background: rgba(33, 33, 33, 1); }
 
 /* Settings → "Unavailable (N)…" review dialog. Lists every video that
    errored out during a play session, with per-row "Open / Remove / Forget"
@@ -4079,12 +4206,56 @@ body.rec-playing #recPlayingSubs { display: block; }
 }
 #manualEntryEditor .mee-audio-bar {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     align-items: center;
     flex-wrap: wrap;
     margin-top: 4px;
 }
-#manualEntryEditor .mee-audio-status { font-size: 12px; color: #666; margin-left: 4px; }
+#manualEntryEditor .mee-audio-status { font-size: 11px; color: #666; margin-left: 4px; }
+/* The recorder bar is four controls per face, eight on a card — at full button
+   size they were most of the dialog. Small type and tight padding shrink the
+   strip; min-height keeps the box itself tappable, because Delete is in here
+   and it does not ask twice. */
+#manualEntryEditor .mee-audio-bar .btn {
+    font-size: 11px;
+    line-height: 1.1;
+    padding: 3px 7px;
+    min-height: 26px;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    background: #fff;
+}
+/* The global .btn:hover paints cyan; the rule above out-ranks it and would
+   otherwise leave these the only controls in the dialog with no hover at all. */
+#manualEntryEditor .mee-audio-bar .btn:hover:not(:disabled) { background: #f6f8fa; }
+#manualEntryEditor .mee-audio-bar .btn:disabled { opacity: 0.45; }
+
+/* Swap: the two faces trade text and recording. Sits between the boxes because
+   that is the thing it acts on — a hinge, not a toolbar button. */
+#manualEntryEditor .mee-swap-row {
+    display: flex;
+    justify-content: center;
+    margin: -4px 0 6px;
+}
+#manualEntryEditor .mee-swap {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    line-height: 1;
+    padding: 3px 9px;
+    color: #57606a;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 999px;
+    cursor: pointer;
+}
+#manualEntryEditor .mee-swap:hover { background: #f6f8fa; color: #24292f; }
+#manualEntryEditor .mee-swap-lbl { font-weight: 600; letter-spacing: 0.02em; }
+
+/* Which way round this card translates — asked once, above the editor. */
+#meeDirAsk .mee-dir-q { font-size: 13px; color: #24292f; margin-bottom: 6px; }
+#meeDirAsk .mee-dir-hint { font-size: 11px; color: #777; }
 
 /* ── The host's dictionary for an English search ─────────────────────────
    Sits above the findings: what the word means, before what it looks like in

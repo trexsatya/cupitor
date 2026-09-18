@@ -93,6 +93,7 @@ import {
   applyQueuedEditsToText,
 } from './srt-parser.js';
 import { translateLines } from './translate-lines.js';
+import { numberRows as _numberRows, plainRows as _plainRows, parseNumbered as _parseNumbered } from './translate-block.js';
 import {
   splitSentences,
   chunkifySentence,
@@ -136,6 +137,8 @@ import {
   CAPTION_NO_TRANSLATION,
   captionLinesFrom as _captionLinesFrom,
   captionKey as _captionKey,
+  captionMediaLink as _captionMediaLink,
+  captionPageKey as _captionPageKey,
   captionWords as _captionWords,
   captionFaces as _captionFaces,
   captionRowCounts as _captionRowCounts,
@@ -235,6 +238,8 @@ import {
 import {
   renderSrtEditsReviewList,
   collectSrtEditsByCheckbox,
+  setSrtEditsGroupChecked,
+  syncSrtEditsGroupBoxes,
 } from './renderer/srt-edits-review-render.js';
 import {
   buildPracticeLogPlanVM,
@@ -519,6 +524,137 @@ function importSearches() {
   $("#import-dialog").dialog()
 }
 
+// --- Minimized dialogs ----------------------------------------------------
+// Minimizing takes a dialog off the screen without closing it. Closing is
+// destructive for the dialogs that offer it — the card editor rebuilds its
+// body and tears down its recorders, the vocabulary dialog clears the words
+// being typed — so the widget is left open and only its window is hidden. A
+// pill in the bottom-right corner brings it back exactly as it was.
+
+// Dialog element id -> { $wrap, $pill } for every dialog currently minimized.
+const _minimizedDialogs = new Map()
+
+// The column the pills live in. Several dialogs can be parked at once, so they
+// stack instead of landing on the same corner.
+function _minimizedDialogsBar() {
+  let $bar = $('#minimizedDialogs')
+  if (!$bar.length) $bar = $('<div id="minimizedDialogs"></div>').appendTo('body')
+  return $bar
+}
+
+// A restore pill. `onPick` runs on tap, Enter and Space.
+function _makeDialogPill(icon, label, title, onPick) {
+  const $pill = $('<div class="dlg-pill" role="button" tabindex="0"></div>')
+    .attr('title', title)
+    .append($('<span class="dlg-pill-icon" aria-hidden="true"></span>').text(icon))
+    .append($('<span class="dlg-pill-label"></span>').text(label))
+  const go = (e) => {
+    e.preventDefault()
+    // The document-level outside-click handler closes every visible dialog
+    // that isn't whitelisted. Without this, the same click that restores a
+    // dialog would travel on and close whatever else is open.
+    e.stopPropagation()
+    onPick()
+  }
+  $pill.on('click', go)
+  $pill.on('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') go(e) })
+  return $pill
+}
+
+function _isDialogMinimized(id) { return _minimizedDialogs.has(id) }
+
+function _minimizeDialog(id, icon, label) {
+  const $d = $('#' + id)
+  const $wrap = $d.closest('.ui-dialog')
+  if (!$wrap.length || _minimizedDialogs.has(id)) return
+  let inst = null
+  try { inst = $d.dialog('instance') } catch (_) {}
+  // jQuery UI leaves the wrapper in the DOM after a close, so "there is a
+  // wrapper" is not "there is a dialog to park". Parking a closed one would
+  // put a pill on screen that shows a window the widget believes is shut.
+  if (!inst || !inst.isOpen()) return
+  // A modal dialog holds a document-wide focusin trap that drags focus back
+  // into it, and jQuery UI has no supported way to turn modality off while a
+  // dialog is open — so the overlay goes through the widget's own teardown,
+  // which also keeps the shared overlay count right when another modal is up.
+  // If that fails, don't park at all: a hidden dialog still holding the trap
+  // leaves the page unusable with nothing on screen to explain why.
+  if (inst.options.modal) {
+    try { inst._destroyOverlay() } catch (_) { return }
+  }
+  // Closing is what normally takes a dialog out of the focus-tracking list. A
+  // parked one never closes, and an invisible instance at the head of that list
+  // is exactly where the next modal's focus trap would send focus.
+  try { inst._untrackInstance() } catch (_) {}
+  $wrap.hide()
+  const $pill = _makeDialogPill(icon, label, 'Restore ' + label, () => _restoreMinimizedDialog(id))
+  _minimizedDialogsBar().append($pill)
+  _minimizedDialogs.set(id, { $wrap, $pill })
+  // The dialog can still be closed from elsewhere while it is parked. Drop the
+  // pill then, rather than leave one pointing at a window that is gone.
+  $d.off('dialogclose.minimize').on('dialogclose.minimize', () => _dropMinimizedDialog(id))
+}
+
+// Forget a minimized dialog without putting it back on screen.
+function _dropMinimizedDialog(id) {
+  const st = _minimizedDialogs.get(id)
+  if (!st) return
+  _minimizedDialogs.delete(id)
+  st.$pill.remove()
+}
+
+// Put a minimized dialog back. Returns false when there was nothing parked
+// under that id, so callers can use it as "resume if there is one".
+function _restoreMinimizedDialog(id) {
+  const st = _minimizedDialogs.get(id)
+  if (!st) return false
+  _dropMinimizedDialog(id)
+  const $d = $('#' + id)
+  let inst = null
+  try { inst = $d.dialog('instance') } catch (_) {}
+  st.$wrap.show()
+  // Only an instance that is still open owns an overlay. Re-creating one for a
+  // widget that has been closed or destroyed since would inflate the shared
+  // count for good and strand the focus trap with no dialog behind it.
+  const live = !!(inst && inst.isOpen && inst.isOpen())
+  if (live && inst.options.modal) {
+    try { inst._createOverlay() } catch (_) {}
+  }
+  // Back on screen, so back at the head of the focus-tracking list.
+  if (live) { try { inst._makeFocusTarget() } catch (_) {} }
+  try { $d.dialog('moveToTop') } catch (_) {}
+  return true
+}
+window._restoreMinimizedDialog = _restoreMinimizedDialog
+
+// Put a minimize control in a dialog's titlebar, just left of its close
+// button. Call it after the widget exists — the titlebar is jQuery UI's, not
+// part of the dialog's own markup.
+// `busy` is optional: called on each click, it returns a reason string when
+// the dialog must not be parked right now (and the reason is shown instead).
+function _addDialogMinimizeButton(id, icon, label, busy) {
+  const $bar = $('#' + id).closest('.ui-dialog').find('.ui-dialog-titlebar')
+  if (!$bar.length) return
+  // jQuery UI keeps one titlebar across opens, so a button left from a previous
+  // open would still carry that open's label ("Add manual card" on a dialog now
+  // editing a card). Replace it rather than keep the stale one.
+  $bar.find('.dlg-minimize').remove()
+  const $btn = $('<button type="button" class="dlg-minimize" aria-label="Minimize"' +
+    ' title="Minimize — nothing is lost; a pill in the corner brings it back">−</button>')
+  // The titlebar is jQuery UI's drag handle, and only its own close button is
+  // excluded from it. Without this, a press that drifts a few pixels — normal
+  // on a touchscreen — drags the dialog instead of minimizing it.
+  $btn.on('mousedown touchstart', (e) => { e.stopPropagation() })
+  $btn.on('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const why = busy && busy()
+    if (why) { alert(why); return }
+    _minimizeDialog(id, icon, label)
+  })
+  $btn.insertBefore($bar.find('.ui-dialog-titlebar-close'))
+}
+
 // --- Rare / unused vocabulary finder -------------------------------------
 // Scans every vocabulary line against all loaded subtitles and lists the
 // ones that appear in fewer than the chosen number of subtitles (a threshold
@@ -707,11 +843,11 @@ function _minimizeRareWordsDialog() {
   try { $('#rareWordsDialog').dialog('close') } catch (_) {}
   let $pill = $('#rareWordsRestorePill')
   if (!$pill.length) {
-    $pill = $(`<div id="rareWordsRestorePill" role="button" tabindex="0" title="Restore rare words dialog">
-      <span class="rare-pill-icon" aria-hidden="true">🔎</span>
-      <span class="rare-pill-label">Rare words</span>
+    $pill = $(`<div id="rareWordsRestorePill" class="dlg-pill" role="button" tabindex="0" title="Restore rare words dialog">
+      <span class="dlg-pill-icon" aria-hidden="true">🔎</span>
+      <span class="dlg-pill-label">Rare words</span>
       <button type="button" class="rare-pill-close" aria-label="Close">✕</button>
-    </div>`).appendTo('body')
+    </div>`).appendTo(_minimizedDialogsBar())
     $pill.on('click', function (e) {
       if ($(e.target).closest('.rare-pill-close').length) return
       // Stop propagation — the document-level outside-click handler at
@@ -722,6 +858,10 @@ function _minimizeRareWordsDialog() {
       _restoreRareWordsDialog()
     })
     $pill.on('keydown', function (e) {
+      // The dismiss button lives inside the pill, so its own Enter/Space
+      // bubbles up here first — without this guard, dismissing the pill from
+      // the keyboard would reopen the dialog it was meant to put away.
+      if ($(e.target).closest('.rare-pill-close').length) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         e.stopPropagation()
@@ -855,6 +995,12 @@ function openAddToVocabDialog() {
   const w = window.innerWidth * 0.9
   const h = window.innerHeight * 0.8
 
+  // The dialog was minimized, not closed, so the words half-typed in it are
+  // still there. Pick it up where it was left instead of starting over — only
+  // the reference word is refreshed below, to follow whatever was searched in
+  // the meantime.
+  const resuming = _isDialogMinimized('addToVocabularyDialog')
+
   // Discard any in-progress text so the new dialog starts blank — saves only
   // happen on the Save button via addToVocab(); closing the dialog (via the
   // X, Escape, or click-outside) must NOT carry over typed words.
@@ -862,7 +1008,7 @@ function openAddToVocabDialog() {
     $('#vocabularySegmentTextarea').val('')
     $('#vocabNewCategory').val('')
   };
-  discardSegment();
+  if (!resuming) discardSegment();
   // Restore the pending-hint when reopening — staged-but-uncommitted
   // edits survive a dialog close (we no longer auto-commit on close).
   _refreshVocabPendingHint()
@@ -893,10 +1039,13 @@ function openAddToVocabDialog() {
   // If Insert position is sticky on "inline" (e.g. from a prior session),
   // pre-fill the textarea with the chosen reference word so the user can
   // edit in place — matches the behaviour of switching to inline manually.
-  try {
-    const posSel = document.getElementById('vocabInsertPosition')
-    if (posSel && posSel.value === 'inline') onVocabInsertPositionChange(posSel)
-  } catch (_) {}
+  // Skipped when resuming: it would overwrite the text being typed.
+  if (!resuming) {
+    try {
+      const posSel = document.getElementById('vocabInsertPosition')
+      if (posSel && posSel.value === 'inline') onVocabInsertPositionChange(posSel)
+    } catch (_) {}
+  }
 
   // Closing the dialog does NOT commit to GitHub — only the explicit save
   // buttons do. Staged edits remain in window.vocabulary; reopening the
@@ -910,17 +1059,20 @@ function openAddToVocabDialog() {
   // Without this, the document-level "close on outside click" handler fires
   // on the same click and immediately closes the dialog.
   setTimeout(() => {
+    if (_restoreMinimizedDialog('addToVocabularyDialog')) return
     const $dialog = $("#addToVocabularyDialog")
     if ($dialog.hasClass('ui-dialog-content')) {
-      $dialog.dialog('option', { width: w, height: h, close: onDialogClose }).dialog('open')
+      $dialog.dialog('option', { width: w, height: h, title: 'Add to vocab', close: onDialogClose }).dialog('open')
     } else {
       $dialog.dialog({
         width: w,
         height: h,
+        title: 'Add to vocab',
         modal: false,
         close: onDialogClose
       })
     }
+    _addDialogMinimizeButton('addToVocabularyDialog', '➕', 'Add to vocab')
     _wireVocabKeyboardScroll()
   }, 0)
 }
@@ -2937,7 +3089,7 @@ $('document').ready(e => {
       // for the captured-subtitles review: each row has a Delete / Push
       // action we don't want clobbered, plus the trigger button click
       // itself shouldn't immediately re-close the dialog it just opened.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog").dialog("close");
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog").dialog("close");
     }
   });
 
@@ -5629,8 +5781,21 @@ $(function () {
     openSrtEditsReviewDialog()
   })
   // In-dialog actions: select all / none, discard checked, push checked.
-  $(document).on('click', '#srtEditsSelectAll',  function () { $('#srtEditsReviewList .srt-review-keep').prop('checked', true) })
-  $(document).on('click', '#srtEditsSelectNone', function () { $('#srtEditsReviewList .srt-review-keep').prop('checked', false) })
+  $(document).on('click', '#srtEditsSelectAll',  function () {
+    $('#srtEditsReviewList .srt-review-keep').prop('checked', true)
+    _syncSrtEditsGroupBoxes()
+  })
+  $(document).on('click', '#srtEditsSelectNone', function () {
+    $('#srtEditsReviewList .srt-review-keep').prop('checked', false)
+    _syncSrtEditsGroupBoxes()
+  })
+  // A file's header box takes or leaves that whole file in one go; ticking
+  // rows by hand reports back up so the header shows all / none / part-way.
+  $(document).on('change', '#srtEditsReviewList .srt-review-file-keep', function () {
+    setSrtEditsGroupChecked($(this).closest('.srt-review-file')[0], this.checked)
+    _syncSrtEditsGroupBoxes()
+  })
+  $(document).on('change', '#srtEditsReviewList .srt-review-keep', _syncSrtEditsGroupBoxes)
   $(document).on('click', '#srtEditsDiscardSelected', _onSrtEditsDiscardSelected)
   $(document).on('click', '#srtEditsPushSelected',    _onSrtEditsPushSelected)
   try { _updateSrtEditsUi() } catch (_) {}
@@ -5646,6 +5811,10 @@ function _renderSrtEditsReviewList() {
 
 function _collectSrtEditsByCheckbox(checked) {
   return collectSrtEditsByCheckbox($('#srtEditsReviewList')[0], checked)
+}
+
+function _syncSrtEditsGroupBoxes() {
+  syncSrtEditsGroupBoxes($('#srtEditsReviewList')[0])
 }
 
 function openSrtEditsReviewDialog() {
@@ -5672,14 +5841,27 @@ window.openSrtEditsReviewDialog = openSrtEditsReviewDialog
 async function _onSrtEditsPushSelected() {
   const keep = _collectSrtEditsByCheckbox(true)
   if (!keep.length) { alert('Select at least one edit to push.'); return }
-  // Persist the user's in-dialog text tweaks back into the buffer first —
-  // discard everything that's unchecked, then flush.
-  const next = {}
+  const buf = _loadPendingSrtEdits()
+  // The flush pushes whatever is in the buffer, so the buffer is narrowed to
+  // the picked edits — carrying the user's in-dialog text tweaks. Everything
+  // else on an entry is kept: `start`/`end` are what let an insert create a
+  // line the remote file doesn't have, and rebuilding the entry from scratch
+  // would drop them, leaving the flush nothing committable to write.
+  const push = {}
   keep.forEach(({ filePath, lineIndex, newText }) => {
-    if (!next[filePath]) next[filePath] = {}
-    next[filePath][String(lineIndex)] = { newText, ts: Date.now() }
+    const li = String(lineIndex)
+    const prev = (buf[filePath] || {})[li] || {}
+    if (!push[filePath]) push[filePath] = {}
+    push[filePath][li] = { ...prev, newText, ts: Date.now() }
+    if (buf[filePath]) delete buf[filePath][li]
   })
-  _savePendingSrtEdits(next)
+  // What was left unticked. That means "not this one now", never "throw it
+  // away" — and the flush empties the buffer, so these are put back after it.
+  const hold = {}
+  Object.keys(buf).forEach(fp => {
+    if (Object.keys(buf[fp] || {}).length) hold[fp] = buf[fp]
+  })
+  _savePendingSrtEdits(push)
   _updateSrtEditsUi()
   const $btn = $('#srtEditsPushSelected').prop('disabled', true).text('Pushing…')
   try {
@@ -5691,6 +5873,15 @@ async function _onSrtEditsPushSelected() {
   } catch (e) {
     alert('Push failed: ' + (e && e.message || e))
   } finally {
+    // Put the unticked edits back, whether the push landed or not. A failed
+    // push leaves its own edits in the buffer; those win, since they carry the
+    // text the user just tweaked.
+    const after = _loadPendingSrtEdits()
+    Object.keys(hold).forEach(fp => {
+      if (!after[fp]) after[fp] = {}
+      Object.keys(hold[fp]).forEach(li => { if (!after[fp][li]) after[fp][li] = hold[fp][li] })
+    })
+    _savePendingSrtEdits(after)
     $btn.prop('disabled', false).text('Push selected')
     _updateSrtEditsUi()
   }
@@ -6916,9 +7107,17 @@ function searchVocabularyByPrefix() {
   // The expanded form is the one used for overlap matching and highlights;
   // the closure keeps the raw form so the Different-prefixes dialog still
   // strips a meaningful prefix off the original word.
+  //
+  // Only for the studied language. Splitting is morphology, not string search:
+  // it looks for vocabulary words INSIDE the term, which is how Swedish builds
+  // compounds. An English term is not built from them, so every hit is a
+  // coincidence of spelling — "colander" contains "land", and a search for a
+  // kitchen sieve comes back with landa, land and mark.
   const decomp = new Set()
-  for (const part of rawSearchText.split(SEPARATOR_PIPE).map(s => s.trim()).filter(Boolean)) {
-    for (const w of vocabCompoundParts(part)) decomp.add(w)
+  if (getSelectedLang() !== 'en') {
+    for (const part of rawSearchText.split(SEPARATOR_PIPE).map(s => s.trim()).filter(Boolean)) {
+      for (const w of vocabCompoundParts(part)) decomp.add(w)
+    }
   }
   // Compound parts go FIRST so that on equal-LCP ties (e.g. a vocab segment
   // "kväll" matches both "kväll" and "kvällstysta" with LCP=5) the compound
@@ -7275,7 +7474,16 @@ async function _translateDetailed(text, from, to, ms) {
     // and unwanted. Let it land: without this the one call most likely to be
     // late is the one whose silence is remembered for the rest of the page's
     // life.
-    req.then(v => { if (v) _rememberTranslation(key, v) }, () => {
+    req.then(v => {
+      if (!v) return
+      _rememberTranslation(key, v)
+      // The wait is over but the render that wanted this is long finished, and
+      // it finished by hiding the panel. Nothing else will ever ask again this
+      // page-life, because the answer is now cached — so the word that was
+      // slowest to look up is the one that silently never gets a panel. Paint
+      // it now, if the search it belongs to is still the one on screen.
+      _repaintTranslationPanelIfCurrent(from, to, text)
+    }, () => {
       // A refusal is not silence, whenever it turns up. If it arrives after a
       // caller gave up waiting and wrote the wait off, take that back — the
       // word deserves another ask rather than a blank panel for the rest of
@@ -7653,6 +7861,27 @@ function _translationPanelEl() {
 // subtitle used is the whole question. It reads the same way back — "sjö" is
 // lake, sea, mere and loch. Each term is a search of its own, one tap away, run
 // against the subtitles of the language that term is written in.
+// Re-run the panel for an answer that arrived after its render gave up.
+//
+// Only when the page is still showing that exact lookup — same word, same
+// direction. A late answer for a search the user has moved on from is not news
+// any more, and painting it would put one word's panel over another's results.
+function _repaintTranslationPanelIfCurrent(from, to, text) {
+  try {
+    if (!_haveTranslateBridge()) return
+    const dir = _translationPanelDirection()
+    if (!dir || dir.from !== from || dir.to !== to) return
+    const word = _translationPanelWord()
+    if (!word || word.toLowerCase() !== String(text).toLowerCase()) return
+    // Already painted for this word — the render beat the deadline after all.
+    const $p = $('#translationPanel')
+    if ($p.length && $p.is(':visible') && $p.attr('data-word') === word
+      && $p.attr('data-dir') === `${dir.from}>${dir.to}`) return
+    _renderTranslationPanel(window._subtitleSearchToken)
+      .catch(e => console.warn('late translation panel failed', e))
+  } catch (e) { console.warn('late translation panel check failed', e) }
+}
+
 async function _renderTranslationPanel(token) {
   const dir = _haveTranslateBridge() ? _translationPanelDirection() : null
   const word = dir ? _translationPanelWord() : ''
@@ -11394,6 +11623,12 @@ function updateManualEntry(playlistName, manualId, patch) {
         if (m) { it.mediaUrl = m.url; it.mediaKind = m.kind; if (m.kind === 'youtube') it.mediaVideoId = m.id; else delete it.mediaVideoId }
         else   { delete it.mediaUrl; delete it.mediaKind; delete it.mediaVideoId }
       }
+      // Which face the caption rows live in. Only a swap sends this, and it is
+      // applied after the loop above so that loop's drop-detection still reads
+      // the face the rows were in when the edit started.
+      if (Object.prototype.hasOwnProperty.call(patch, 'captionField')) {
+        it.captionField = patch.captionField === 'target' ? 'target' : 'source'
+      }
       if (Object.prototype.hasOwnProperty.call(patch, 'musicTrackId')) {
         const m = String(patch.musicTrackId || '')
         if (m) it.musicTrackId = m
@@ -11459,13 +11694,19 @@ function _captionDestinations() {
 // anything that slipped through. Distrusting a card costs a duplicate the user
 // can delete; trusting a stale one produces keys matching no real cue,
 // silently dropping good lines.
-function _captionKeysInPlaylist(playlistName, url) {
+function _captionKeysInPlaylist(playlistName, url, timeParam) {
   const keys = new Set()
   const rec = window._recordings && window._recordings[playlistName]
   const bucket = rec && rec.items && rec.items[MANUAL_ST] && rec.items[MANUAL_ST][MANUAL_W]
   if (!Array.isArray(bucket)) return keys
   bucket.forEach(it => {
-    if (!it || it.captionUrl !== url || !Array.isArray(it.captionStarts)) return
+    // The stored address is put through the same normalisation as the
+    // incoming one. A card holds whatever the address bar said when it was
+    // filed, and a player writes its own playback position there — so
+    // comparing the two raw would make every card from a video watched past
+    // the start invisible, and file its lines again as duplicates.
+    if (!it || _captionPageKey(it.captionUrl, timeParam) !== url ||
+        !Array.isArray(it.captionStarts)) return
     const rows = String(it[_captionFieldOf(it)] || '').split('\n')
     const counts = Array.isArray(it.captionRows)
       ? it.captionRows
@@ -11487,23 +11728,36 @@ function _captionKeysInPlaylist(playlistName, url) {
 function _addCaptionBlock(playlistName, cap, lines, field) {
   const w = _captionWords(cap)
   const n = c => `${c} ${c === 1 ? w.unit : w.units}`
-  const url = String(cap.url || '')
-  const seen = _captionKeysInPlaylist(playlistName, url)
+  const timeParam = String(cap.timeParam || '')
+  // Belt and braces: the page sends its address with no offset on it, and an
+  // older one that does not is normalised here rather than becoming a second
+  // identity for the same video.
+  const url = _captionPageKey(cap.url, timeParam)
+  const seen = _captionKeysInPlaylist(playlistName, url, timeParam)
   const fresh = url ? lines.filter(l => !seen.has(_captionKey(url, l.start, l.text))) : lines
   const skipped = lines.length - fresh.length
   if (!fresh.length) {
     _cpBuildToast(`Already captured — all ${n(lines.length)} are in "${playlistName}".`)
     return ''   // nothing to do, but not a failure — let the dialog close
   }
-  // The page/video URL rides along as the card's media link, which parseMediaUrl
-  // classifies. A page or a non-YouTube video becomes kind 'link': inert during
-  // playback, and just the card's 🔗 back to where the text came from. A YouTube
-  // URL becomes kind 'youtube', and playRecording cues it into the embedded
-  // player when the card comes round — at t=0, not at the captured offset, even
-  // though captionStarts holds it.
+  // The link back to where the text came from rides along as the card's media
+  // link, which parseMediaUrl classifies. A page or a non-YouTube video becomes
+  // kind 'link': inert during playback, and just the card's 🔗. A YouTube URL
+  // becomes kind 'youtube', and playRecording cues it into the embedded player
+  // when the card comes round — at t=0, not at the captured offset, even though
+  // captionStarts holds it.
+  //
+  // It is the timed address where the player has one, so the 🔗 opens the video
+  // at the passage rather than at the top — built from `fresh`, the lines this
+  // card actually holds, so it never points at one that was dropped as already
+  // captured and sits on a different card. The card's provenance below stays
+  // keyed on the plain page address: the link moves with each selection, and a
+  // de-dupe keyed on something that moves would recognise nothing.
   const faces = _captionFaces(fresh, field)
   const it = addManualEntry(playlistName, {
-    mediaUrl: url, source: faces.source, target: faces.target,
+    mediaUrl: _captionMediaLink({ url, timeParam, timeLink: cap.timeLink }, fresh),
+    source: faces.source,
+    target: faces.target,
   })
   if (!it) return false  // refused, and addManualEntry already said why
   // Provenance, for the next send's de-dupe. Starts only — the texts are the
@@ -12957,7 +13211,68 @@ async function _startManualAudioPreview(url, $btn) {
 }
 window._stopManualAudioPreview = _stopManualAudioPreview
 
+// Longest card the translate button will try to send as a single request.
+// Past this the hosts that cap a request start refusing, and a refusal costs
+// the full 20s timeout before the row-by-row pass can even begin — so a long
+// card skips the attempt and goes straight to rows.
+const CARD_TRANSLATE_BATCH_MAX = 4500
+
+// Ask which way round a card's translation runs. Resolves with 'studiedToEn'
+// or 'enToStudied', or null when the user backs out.
+//
+// The card cannot answer this itself: "Source" and "Target" are face names, not
+// languages, and what is actually typed in them is the user's business. A guess
+// that is wrong hands one language to the translator labelled as the other and
+// writes the answer over the good text, so it is asked rather than assumed —
+// once per card, then remembered while the editor stays open.
+function _askTranslateDirection(studiedName, suggested) {
+  return new Promise((resolve) => {
+    let $a = $('#meeDirAsk')
+    if (!$a.length) $a = $('<div id="meeDirAsk"></div>').appendTo('body')
+    // Not escaped: jQuery UI builds each button with .text(), which escapes.
+    const sv2en = `${studiedName} → English`
+    const en2sv = `English → ${studiedName}`
+    $a.html(`<div class="mee-dir-q">Which way round should this card be translated?</div>`
+      + `<div class="mee-dir-hint">Whichever you pick is used for both boxes until you close this card.</div>`)
+    let answered = null
+    const done = () => { try { $a.dialog('close') } catch (_) {} }
+    // The likelier one first, marked, so the common case is the first thing
+    // under the thumb — but both are one tap, because the guess is a guess.
+    const buttons = {}
+    const label = (k) => (k === 'studiedToEn' ? sv2en : en2sv)
+      + (k === suggested ? '  ·  likely' : '')
+    const order = suggested === 'enToStudied'
+      ? ['enToStudied', 'studiedToEn']
+      : ['studiedToEn', 'enToStudied']
+    order.forEach(k => { buttons[label(k)] = function () { answered = k; done() } })
+    buttons['Cancel'] = function () { answered = null; done() }
+    $a.dialog({
+      title: 'Translation direction',
+      width: Math.min(360, $(window).width() - 40),
+      draggable: false,
+      modal: true,
+      autoOpen: true,
+      close: () => resolve(answered),
+      buttons,
+    })
+  })
+}
+
 function _openManualEntryEditor(playlistName, existing) {
+  // A minimized editor still holds an unsaved card, and the body is rebuilt
+  // below — opening on top of it would throw that card away without asking.
+  // It may also be a different card, or a card in a different playlist, than
+  // the one just clicked, so the choice belongs to the user rather than to a
+  // rule here.
+  if (_isDialogMinimized('manualEntryEditor')) {
+    const back = confirm('A card you were editing is still open, minimized.\n\n' +
+      'OK — go back to it.\nCancel — drop it and open the one you just picked.')
+    _restoreMinimizedDialog('manualEntryEditor')
+    if (back) return
+    // close() runs the parked editor's cleanup: recorders torn down, any
+    // recording it never committed deleted, the mic released.
+    try { $('#manualEntryEditor').dialog('close') } catch (_) {}
+  }
   let $d = $('#manualEntryEditor')
   if (!$d.length) $d = $('<div id="manualEntryEditor"></div>').appendTo('body')
   const isEdit = !!existing
@@ -12989,14 +13304,9 @@ function _openManualEntryEditor(playlistName, existing) {
     : ''
   // Both faces' buttons are built up front so each can name its own direction
   // in its tooltip — which way round it runs depends on the card.
-  const trBtn = (id, face) => {
-    if (!showTranslate) return ''
-    const dir = _cardTranslateDirection(existing, face, studiedCode)
-    if (!dir) return ''
-    const otherLbl = dir.from === 'source' ? 'Source' : 'Target'
-    const title = `Fill this box by translating ${otherLbl} (${langName(dir.fromLang)} → ${langName(dir.toLang)})`
-    return `<button type="button" id="${id}" class="mee-tr" title="${_.escape(title)}">🌐</button>`
-  }
+  const trBtn = (id) => showTranslate
+    ? `<button type="button" id="${id}" class="mee-tr">🌐</button>`
+    : ''
   const trNote = (id) => showTranslate ? `<span id="${id}" class="mee-tr-note" role="status" aria-live="polite"></span>` : ''
   // One independent recorder per face, so Source and Target can each carry
   // their own pronunciation.
@@ -13013,6 +13323,9 @@ function _openManualEntryEditor(playlistName, existing) {
       <div class="mee-lbl-row"><label class="mee-lbl" for="meeSource">Source</label>${micBtn('meeSttSource')}${trBtn('meeTrSource', 'source')}${trNote('meeTrSourceNote')}</div>
       <textarea id="meeSource" class="mee-input" rows="2" placeholder="Question, source text, prompt…"></textarea>
       ${audioBar('meeSrcAudio')}</div>
+    <div class="mee-swap-row">
+      <button type="button" id="meeSwap" class="mee-swap" title="Swap Source and Target — text and recordings change places">⇅<span class="mee-swap-lbl">Swap</span></button>
+    </div>
     <div class="mee-row">
       <div class="mee-lbl-row"><label class="mee-lbl" for="meeTarget">Target</label>${micBtn('meeSttTarget')}${trBtn('meeTrTarget', 'target')}${trNote('meeTrTargetNote')}</div>
       <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation…"></textarea>
@@ -13061,6 +13374,8 @@ function _openManualEntryEditor(playlistName, existing) {
     // Android side owns those. We just track whether a recording is in flight
     // and tick the visible duration off the wall clock.
     let nativeRecording = false
+    // True from the click until the bridge says the recording has begun.
+    let pendingStart = false
     let recStartMs = 0
     let recTimerId = null
     // Active <Audio> element during preview playback. Tracked so a second Play
@@ -13126,8 +13441,17 @@ function _openManualEntryEditor(playlistName, existing) {
       }
       const id = 'rec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
       let result
+      // Claimed synchronously: the bridge round trip below is an await, and
+      // until it returns `nativeRecording` is still false. Anything that asks
+      // "is this recording?" in that window — the sibling face's Record button,
+      // the Swap button — would otherwise get `false` and act on a recorder
+      // that is about to overwrite its own state.
+      pendingStart = true
+      syncAll()
       try { result = await _audioRpc('recordStart', { id }) }
       catch (e) {
+        pendingStart = false
+        syncAll()
         console.warn('[manualAudio] recordStart failed', e)
         const msg = (e && e.message) || String(e)
         // Dart surfaces 'permission-denied' separately so we can show the
@@ -13140,6 +13464,7 @@ function _openManualEntryEditor(playlistName, existing) {
         return
       }
       // Dart returns the file:// URL the recording is being written to.
+      pendingStart = false
       audioUrl = result
       audioUrlIsNew = true
       nativeRecording = true
@@ -13227,7 +13552,21 @@ function _openManualEntryEditor(playlistName, existing) {
 
     return {
       url: () => audioUrl,
-      isRecording: () => nativeRecording,
+      // Includes the not-yet-acknowledged start, so callers can't slip between
+      // the click and the bridge's answer.
+      isRecording: () => nativeRecording || pendingStart,
+      // Reading and writing the whole state, so the two faces can trade
+      // recordings when the card is swapped. `audioUrlIsNew` has to travel with
+      // the url — it is what decides whether cleanup() deletes the file, and
+      // leaving it behind would either strand a new recording or delete one the
+      // saved entry still owns.
+      state: () => ({ url: audioUrl, isNew: audioUrlIsNew }),
+      setState(st) {
+        _stopPlayback()
+        audioUrl = st ? st.url : null
+        audioUrlIsNew = !!(st && st.isNew)
+        syncAudioUI()
+      },
       // Lets the sibling recorder repaint when this one grabs/releases the mic.
       sync: () => syncAudioUI(),
       finalize,
@@ -13284,6 +13623,17 @@ function _openManualEntryEditor(playlistName, existing) {
   // The note of whichever button is working, so anything that has to interrupt
   // a translation can say so where the user is already looking.
   let activeNote = null
+  // Which face holds the studied language right now. Seeded from what the card
+  // recorded, then corrected by whatever the user tells us — a direction they
+  // pick, or a swap that physically moves the text.
+  let studiedFace = _captionFieldOf(existing)
+  // True once the two faces have traded places in this editor, so the saved
+  // card's own record of which face held the captions can be put right.
+  let facesSwapped = false
+  // The user's answer, once given. Stored as a layout, never as a direction:
+  // "Swedish → English" means opposite things depending on which button was
+  // pressed, and the answer has to serve both.
+  let cardLayout = null
   const translators = []
 
   if (showStt) {
@@ -13302,15 +13652,43 @@ function _openManualEntryEditor(playlistName, existing) {
     _wireDictation($d.find('#meeSttTarget'), $d.find('#meeTarget'),
       studiedFace === 'target' ? srcLocale : 'en', micBusy)
   }
+  const layoutOf = (f) => (f === 'source' ? 'studiedInSource' : 'studiedInTarget')
+  // The picker speaks directions, because that is how the button the user just
+  // pressed reads. Turning that answer into a layout needs the face it was
+  // asked from: picking "studied → English" while filling `face` says the text
+  // came from the OTHER face, so that is where the studied language lives.
+  const layoutFromPick = (face, picked) => {
+    const fromFace = face === 'source' ? 'target' : 'source'
+    return layoutOf(picked === 'studiedToEn' ? fromFace : face)
+  }
+  // Only ever marks the likelier button in the picker; never acted on alone.
+  const suggestedPick = (face) =>
+    (studiedFace === (face === 'source' ? 'target' : 'source')) ? 'studiedToEn' : 'enToStudied'
   function makeTranslator(face) {
-    const dir = _cardTranslateDirection(existing, face, studiedCode)
     const $btn = $d.find(face === 'source' ? '#meeTrSource' : '#meeTrTarget')
-    if (!dir || !$btn.length) return
+    if (!showTranslate || !$btn.length) return
     const $note = $d.find(face === 'source' ? '#meeTrSourceNote' : '#meeTrTargetNote')
     const $dest = $d.find(face === 'source' ? '#meeSource' : '#meeTarget')
-    const $from = $d.find(dir.from === 'source' ? '#meeSource' : '#meeTarget')
+    // The box the text comes from is always the other face; only the languages
+    // depend on the answer.
+    const $from = $d.find(face === 'source' ? '#meeTarget' : '#meeSource')
     const destLbl = face === 'source' ? 'Source' : 'Target'
-    const fromLbl = dir.from === 'source' ? 'Source' : 'Target'
+    const fromLbl = face === 'source' ? 'Target' : 'Source'
+    // A layout reads the same for both buttons; each one just picks out the two
+    // faces it cares about.
+    const langsFor = (layout) => {
+      const studiedIn = layout === 'studiedInSource' ? 'source' : 'target'
+      const langOf = (f) => (f === studiedIn ? studiedCode : 'en')
+      return { fromLang: langOf(face === 'source' ? 'target' : 'source'), toLang: langOf(face) }
+    }
+    // The tooltip has to follow the answer and the swap, or it ends up naming
+    // the opposite of what the button will actually send.
+    const refreshTitle = () => {
+      const d = langsFor(cardLayout || layoutOf(studiedFace))
+      $btn.attr('title', `Fill this box by translating ${fromLbl} `
+        + `(${langName(d.fromLang)} → ${langName(d.toLang)})`
+        + (cardLayout ? '' : ' — you will be asked to confirm'))
+    }
     // In-dialog, not a toast: #cpBuildToast shares .ui-dialog's z-index and the
     // dialog is later in the document, so a toast raised from here paints
     // behind the modal the user is looking at.
@@ -13326,6 +13704,20 @@ function _openManualEntryEditor(playlistName, existing) {
       if (_speechListening) { note('Stop dictation first.', '#a00'); return }
       const text = String($from.val() || '').trim()
       if (!text) { note(`Nothing in ${fromLbl} to translate.`, '#a00'); return }
+      // Asked once per card, then remembered. Nothing has been touched yet, so
+      // backing out of the picker leaves the card exactly as it was.
+      if (!cardLayout) {
+        const picked = await _askTranslateDirection(_studiedName, suggestedPick(face))
+        // The dialog may have closed under the picker, in which case these
+        // boxes belong to the next card already — check before writing.
+        if (dialogClosed) return
+        if (!picked) { note(''); return }
+        cardLayout = layoutFromPick(face, picked)
+        studiedFace = cardLayout === 'studiedInSource' ? 'source' : 'target'
+        translators.forEach(t => t.refreshTitle())
+      }
+      const dir = langsFor(cardLayout)
+      const dirLbl = `${langName(dir.fromLang)} → ${langName(dir.toLang)}`
       // Replacing the face the captions were captured into also costs the card
       // the per-line timings that pair its rows with the video, and with them
       // its place in the re-capture de-dupe. Same as typing over it, but the
@@ -13348,35 +13740,49 @@ function _openManualEntryEditor(playlistName, existing) {
       try {
         translators.forEach(t => t.setBusy(true))
         $btn.addClass('mee-tr-busy')
-        note('translating…', '#06a')
-        // The rows of the captured face are paired by position with
-        // captionStarts, and translating the block as one string is not
-        // guaranteed to come back with the same number of rows; translating
-        // row by row is. Blank rows pass through translateLines untouched.
+        note(`translating… ${dirLbl}`, '#06a')
+        // Row by row, always — the answer then has exactly the rows the text it
+        // came from had, and the two faces stay lined up. Blank rows pass
+        // through translateLines untouched.
         //
-        // A captured line may span several rows, though, and those rows are
-        // one sentence: translate them together and give the answer back the
-        // rows it has to occupy, so the faces still line up.
-        const rows = text.split('\n')
-        const fromHoldsCaptions = !!(existing && _captionFieldOf(existing) !== face)
-        const counts = fromHoldsCaptions && Array.isArray(existing.captionRows)
-          ? existing.captionRows
-          : null
-        const grouped = counts ? _captionRowGroups(rows, counts) : null
-        const lines = grouped || rows
+        // Deliberately NOT grouped by `captionRows`. A multi-row line looks
+        // like one sentence broken to fit a screen, but it never is: a
+        // subtitle cue's break IS presentation, and captionLinesFrom already
+        // collapses it, so every count a subtitle capture stores is 1. Only a
+        // page capture keeps its breaks, and it keeps them precisely because
+        // there the break is the text — a dialogue turn, a verse, a line. So
+        // grouping can only ever fire on the rows that must not be joined; it
+        // put a whole transcript through as one request and padded the rest of
+        // the card with placeholders.
+        const lines = text.split('\n')
         const safe = async (t) => {
           try { return await _requestTranslation(t, dir.fromLang, dir.toLang) }
           catch (e) { console.warn('[cardTranslate] line failed', e); failed++; return null }
         }
-        const got = await translateLines(lines, safe)
-        out = grouped
-          ? got.map((v, i) => {
-              const one = v == null ? '' : String(v).replace(/\s*\n\s*/g, ' ')
-              const filled = [one]
-              while (filled.length < counts[i]) filled.push(CAPTION_NO_TRANSLATION)
-              return filled.join('\n')
-            }).join('\n')
-          : got.map(v => (v == null ? '' : String(v))).join('\n')
+        let got = null
+        // The whole card in one request, because the rows are a conversation:
+        // "MARILYN: I think," on its own is a fragment, and a translator given
+        // it alone answers a fragment. One request also costs one request,
+        // which matters when a transcript is sixty rows.
+        //
+        // What comes back has to land row for row, though — the faces are read
+        // side by side, and a captured card pairs its rows with video timings
+        // by position. Two ways it can, tried in order:
+        if (lines.length > 1 && text.length <= CARD_TRANSLATE_BATCH_MAX) {
+          //   1. ask plainly, and take it only if the rows came back intact.
+          got = _plainRows(await safe(text), lines.length)
+          //   2. ask again with the rows numbered. The numbers survive what the
+          //      line breaks do not: the offline ML Kit path answers as a
+          //      single line, and Google re-segments sentences freely.
+          if (!got) got = _parseNumbered(await safe(_numberRows(lines)), lines.length)
+          // Neither attempt is a row that failed — the rows have not been asked
+          // yet. Clear it so the count the user sees is about them.
+          if (!got) failed = 0
+        }
+        //   3. row by row. Always recoverable, always without context, so it is
+        //      the last resort rather than the plan.
+        if (!got) got = await translateLines(lines, safe)
+        out = got.map(v => (v == null ? '' : String(v))).join('\n')
       } catch (e) {
         console.warn('[cardTranslate] failed', e)
       } finally {
@@ -13401,16 +13807,49 @@ function _openManualEntryEditor(playlistName, existing) {
       // translate, and the offline path has no dictionary — so this is common,
       // not rare. The text is still written (an empty box helps nobody), but
       // saying so stops a card being saved with two identical faces unnoticed.
-      if (out.trim() === text) note('same text — no translation found', '#a60')
-      else note(failed ? `filled in · ${failed} line${failed === 1 ? '' : 's'} failed` : 'filled in',
+      if (out.trim() === text) note(`${dirLbl} · same text, no translation found`, '#a60')
+      else note(failed ? `${dirLbl} · ${failed} line${failed === 1 ? '' : 's'} failed` : `${dirLbl} · filled in`,
                 failed ? '#a60' : '#070')
     })
     // The note describes the box as the translation left it; once the user
     // edits it themselves it is describing something that is no longer there.
     $dest.add($from).on('input', () => { if (!applying) note('') })
-    translators.push({ setBusy: (b) => $btn.prop('disabled', b) })
+    translators.push({ setBusy: (b) => $btn.prop('disabled', b), clearNote: () => note(''), refreshTitle })
+    refreshTitle()
   }
   if (showTranslate) { makeTranslator('source'); makeTranslator('target') }
+
+  // ── Swap the two faces ──
+  // Text and recording change places together. A face's recording is that
+  // face's text spoken aloud, so moving one without the other would leave the
+  // card saying one thing and sounding another.
+  $d.find('#meeSwap').on('click', () => {
+    if (translating) { if (activeNote) activeNote('Wait for the translation to finish.', '#a00'); return }
+    if (_speechListening) { alert('Stop dictation first.'); return }
+    if (anyRecording()) { alert('Stop the recording first.'); return }
+    // Replacing the caption-bearing face's text is what costs the card its
+    // per-line timings, and a swap replaces both faces.
+    if (existing && existing.captionStarts
+      && !confirm("Swap Source and Target?\n\nThis card's text was captured from subtitles — swapping the faces drops its line timings.")) return
+    const $src = $d.find('#meeSource'), $tgt = $d.find('#meeTarget')
+    const sv = $src.val(), tv = $tgt.val()
+    $src.val(tv); $tgt.val(sv)
+    if (recSource && recTarget) {
+      const a = recSource.state(), b = recTarget.state()
+      recSource.setState(b); recTarget.setState(a)
+    }
+    // The remembered direction described the old arrangement; the languages
+    // have just changed faces, so asking again is the only honest thing.
+    // The languages just changed faces. The remembered answer described the old
+    // arrangement, and the guess that seeds the next one is derived from
+    // `studiedFace` — so flip that too, or the re-ask suggests exactly the
+    // option that is now wrong.
+    studiedFace = studiedFace === 'source' ? 'target' : 'source'
+    facesSwapped = !facesSwapped
+    cardLayout = null
+    translators.forEach(t => { t.clearNote(); t.refreshTitle() })
+    $src.trigger('input'); $tgt.trigger('input')
+  })
 
   const finish = async () => {
     // A translation in flight is about to rewrite one of the boxes this reads.
@@ -13456,6 +13895,12 @@ function _openManualEntryEditor(playlistName, existing) {
     if (showAudio) {
       patch.sourceAudioUrl = srcAudio
       patch.targetAudioUrl = tgtAudio
+    }
+    // Only when the text actually moved. A direction the user picked says which
+    // language they meant, which is not the same claim as where the captured
+    // rows now live.
+    if (facesSwapped && existing && existing.captionField) {
+      patch.captionField = existing.captionField === 'target' ? 'source' : 'target'
     }
     let saved
     if (isEdit) {
@@ -13527,6 +13972,13 @@ function _openManualEntryEditor(playlistName, existing) {
       'Cancel': function () { try { $(this).dialog('close') } catch (_) {} }
     }
   })
+  // Parking is refused while the mic or the translator is working: a hidden
+  // dialog holding an open microphone has nothing on screen to say so, and a
+  // translation lands in textareas the user can no longer see.
+  _addDialogMinimizeButton('manualEntryEditor', '📝', isEdit ? 'Edit card' : 'Add manual card',
+    () => (anyRecording() && 'Stop the recording first — minimizing would leave the microphone open with nothing on screen to show it.')
+       || (_speechListening && 'Finish dictating first.')
+       || (translating && 'Wait for the translation to finish first.'))
 }
 window._openManualEntryEditor = _openManualEntryEditor
 // Exposed so the recording-review row and other UI can play/refresh audio

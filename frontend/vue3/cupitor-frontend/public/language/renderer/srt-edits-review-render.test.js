@@ -4,6 +4,8 @@
 import {
   renderSrtEditsReviewList,
   collectSrtEditsByCheckbox,
+  setSrtEditsGroupChecked,
+  syncSrtEditsGroupBoxes,
 } from "./srt-edits-review-render";
 
 function makeMount() { return document.createElement("div"); }
@@ -122,5 +124,76 @@ describe("collectSrtEditsByCheckbox", () => {
     const mount = makeMount();
     renderSrtEditsReviewList({ state: "empty", groups: [] }, mount);
     expect(collectSrtEditsByCheckbox(mount, true)).toEqual([]);
+  });
+});
+
+describe("per-file select / deselect", () => {
+  function twoFileVM() {
+    return {
+      state: "normal",
+      groups: [
+        sampleVM().groups[0],
+        {
+          filePath: "db/language/Swedish/srts/bar.en.srt",
+          shortName: "bar.en.srt",
+          count: 1,
+          headLabel: "bar.en.srt — 1 edit",
+          lines: [{ lineIndex: "7", newText: "only", ageLabel: "now" }],
+        },
+      ],
+    };
+  }
+
+  test("a freshly rendered file is fully selected, not part-way", () => {
+    const mount = makeMount();
+    renderSrtEditsReviewList(sampleVM(), mount);
+    const head = mount.querySelector(".srt-review-file-keep");
+    expect(head.checked).toBe(true);
+    expect(head.indeterminate).toBe(false);
+  });
+
+  test("the header box takes or leaves only its own file", () => {
+    const mount = makeMount();
+    renderSrtEditsReviewList(twoFileVM(), mount);
+    const groups = mount.querySelectorAll(".srt-review-file");
+    setSrtEditsGroupChecked(groups[0], false);
+    syncSrtEditsGroupBoxes(mount);
+    expect(collectSrtEditsByCheckbox(mount, true).map(e => e.lineIndex)).toEqual(["7"]);
+    expect(groups[0].querySelector(".srt-review-file-keep").checked).toBe(false);
+    expect(groups[1].querySelector(".srt-review-file-keep").checked).toBe(true);
+  });
+
+  test("unticking one row of a file leaves its header part-way", () => {
+    const mount = makeMount();
+    renderSrtEditsReviewList(sampleVM(), mount);
+    mount.querySelectorAll(".srt-review-keep")[0].checked = false;
+    syncSrtEditsGroupBoxes(mount);
+    const head = mount.querySelector(".srt-review-file-keep");
+    expect(head.checked).toBe(false);
+    expect(head.indeterminate).toBe(true);
+  });
+
+  test("ticking the last row back fills the header in again", () => {
+    const mount = makeMount();
+    renderSrtEditsReviewList(sampleVM(), mount);
+    const rows = mount.querySelectorAll(".srt-review-keep");
+    rows[0].checked = false;
+    syncSrtEditsGroupBoxes(mount);
+    rows[0].checked = true;
+    syncSrtEditsGroupBoxes(mount);
+    const head = mount.querySelector(".srt-review-file-keep");
+    expect(head.checked).toBe(true);
+    expect(head.indeterminate).toBe(false);
+  });
+
+  test("a header box is not counted as one of its file's edits", () => {
+    const mount = makeMount();
+    renderSrtEditsReviewList(twoFileVM(), mount);
+    expect(collectSrtEditsByCheckbox(mount, true).length).toBe(3);
+  });
+
+  test("no-ops on falsy elements", () => {
+    expect(() => setSrtEditsGroupChecked(null, true)).not.toThrow();
+    expect(() => syncSrtEditsGroupBoxes(null)).not.toThrow();
   });
 });
