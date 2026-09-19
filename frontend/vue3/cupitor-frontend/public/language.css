@@ -1537,9 +1537,9 @@ input:checked + .slider:before {
     border: 1px solid #b71c1c;
     border-radius: 50%;
     margin-left: 8px;
-    width: 28px;
-    height: 28px;
-    line-height: 26px;
+    width: 24px;
+    height: 24px;
+    line-height: 24px;
     text-align: center;
     font-size: 16px;
     vertical-align: middle;
@@ -1568,7 +1568,7 @@ body.rec-paused .lines-cntnr .buttons .capture-btn { opacity: 0.4; pointer-event
     content: '✓';
     font-size: 14px;
 }
-.lines-cntnr .buttons .capture-btn.is-captured { font-size: 0; line-height: 26px; }
+.lines-cntnr .buttons .capture-btn.is-captured { font-size: 0; line-height: 24px; }
 
 /* Review-dialog sortable placeholder + row hover. The placeholder reserves
    the dragged row's space so the list doesn't jump while reordering. */

@@ -1622,6 +1622,7 @@ async function doSearch(searchThis, el) {
     console.log('[search] data not loaded yet, deferring until vocabulary + subtitles ready…');
     await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]);
   }
+  resetSearchResultIndex()
   await fetchSRTs(searchThis);
   // Fire-and-forget: the host answers on its own event, so this never delays
   // the subtitle results. No-op unless the auto toggle is on.
@@ -6191,7 +6192,12 @@ function groupAndArrangeResults(items) {
   })
 }
 
+function getSearchResultPageSize() {
+  return window.SEARCH_RESULT_PAGE_SIZE || 50
+}
+
 async function populateSRTFindings(wordToItemsMap, $result, token) {
+  const startTime = new Date()
   // Expose for debugging: inspect via `window._lastWordToItemsMap` in console.
   window._lastWordToItemsMap = wordToItemsMap
   // When the keys are guessed corresponding words rather than searched terms,
@@ -6211,139 +6217,148 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
   window._lastRenderedWords = words
 
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
-  const WORD_CHUNK = 5
+  const WORD_CHUNK = 1
 
-  for (let wStart = 0; wStart < words.length; wStart += WORD_CHUNK) {
-    if (token !== undefined && token !== window._subtitleSearchToken) return
+  for (let wStart = window._lastRenderedWordIndex, i=0; wStart < words.length; wStart += WORD_CHUNK, i++) {
+    if(i > getSearchResultPageSize()) {
+      $('#search-pagination').show()
+      console.log(`Populate SRT findings completed in ${(new Date() - startTime)/1000} s`)
+      break
+    }
+    window._lastRenderedWordIndex = wStart
+    if (token !== undefined && token !== window._subtitleSearchToken) {
+      console.log('Token mismatch, aborting populateSRTFindings');
+      return
+    }
     const wEnd = Math.min(wStart + WORD_CHUNK, words.length)
     const slice = words.slice(wStart, wEnd)
     slice.forEach(word => {
-    try {
-    let items = wordToItemsMap[word] || []
-    if (!items.length) {
-      const w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
-      if (w) items = wordToItemsMap[w]
-    }
-    const isSweepUp = grouped && word === _EVERYTHING_ELSE
-    let title = word
-    if (isSweepUp) {
-      // The lines the guesses could not account for. Named for what it is
-      // rather than left under a marker nobody typed.
-      title = 'everything else'
-    } else if (word.trim().length !== word.length) {
-      title = `"${word}"`
-    }
-
-    // Nothing under this heading was found by the search itself — every line
-    // came in through the guess. Dimmed, so the eye goes to the headings that
-    // answer what was actually asked.
-    const viaGuessOnly = grouped && !isSweepUp && items.length > 0 && items.every(it => it && it._viaGuess)
-    const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}${viaGuessOnly ? ' srt-guess-only' : ''}"${viaGuessOnly ? ' title="No English line here contains the search word — these are lines whose ' + _.escape(getLangFromUrl().fullName || 'studied-language') + ' side uses this guess"' : ''}><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${title} <span class="match-count"></span></h5></div>`)
-    items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
-
-    const isMultiWord = word.trim().split(/\s+/).length > 1
-    // Multi-word phrase: render as a popover-triggering `.link` span (NOT an
-    // <a>, which the document click handler opens directly) so clicking it
-    // shows the same "Search here / Search on wiki" popover as single words.
-    // The href carries the phrase-search Wiktionary URL for the wiki action.
-    const wikiPart = isMultiWord
-        ? `<span> <span class="link" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}">${word}</span></span>`
-        : getWikiLinks(word)
-    // The sweep-up heading is not a word, so there is nothing to look it up
-    // in — a Wiktionary link for "_everything_else" would be a dead end.
-    if (!isSweepUp) {
-      wordBlock.append(`<div style=""> Wiki: ${wikiPart} 丨
-        <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> 丨
-        <a href="https://filmot.com/search/%22${word}%22/1?lang=${getLangFromUrl().code}" target="_blank">YouTube (Filmot)</a> </div> <br>`)
-    }
-
-    $result.append(wordBlock)
-
-    items = groupAndArrangeResults(items)
-    // Total available matches after source-filter / dedup grouping. Shown
-    // in the accordion header so the user knows how many hits a word has,
-    // even when only `numberOfItemsToShow()` are rendered below.
-    const totalMatches = items.length
-
-    // (Previously: when toggle=EN, dedup items whose parallel-index SV text
-    // shared any non-common word with an already-rendered item's SV side.
-    // That was designed for "viewing EN translations of SV searches", but the
-    // search pipeline always runs *in* the selected language — for a direct
-    // EN search every hit's parallel SV line shares a form of the searched
-    // word, so item #2..N all looked like duplicates and got dropped. The
-    // header count showed the true total, the body showed only one row.
-    // Removing the dedup; the per-result list is short enough that genuine
-    // duplicates aren't a real UX problem.)
-    const rendered = [];
-
-    for (let i = 0; i < items.length; i++) {
-      if (rendered.length >= numberOfItemsToShow()) {
-        break;
-      }
-
-      const item = items[i];
-
       try {
-        // The capture path reads this heading back as the playlist word, so it
-        // has to be the word this line actually matched — not the block it was
-        // filed under. They are the same thing for an ordinary search; under a
-        // guessed grouping the heading is a guess, and one of them is the
-        // sweep-up marker, which nobody typed and nothing should be saved as.
-        const $fileBlock = $(`<div class="srt-file" title="${item['name']}">
-                              <h4 data-file="${item.url}" style="display: none;"> ${item.word || word} </h4>
-                          </div>`)
-        if (item._viaGuess) {
-          $fileBlock.append(
-            `<span class="srt-via-guess" title="Found through the ${_.escape(item._viaGuess)} in this line, not through the English search">via ${_.escape(item._viaGuess)}</span>`)
+        let items = wordToItemsMap[word] || []
+        if (!items.length) {
+          const w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
+          if (w) items = wordToItemsMap[w]
+        }
+        const isSweepUp = grouped && word === _EVERYTHING_ELSE
+        let title = word
+        if (isSweepUp) {
+          // The lines the guesses could not account for. Named for what it is
+          // rather than left under a marker nobody typed.
+          title = 'everything else'
+        } else if (word.trim().length !== word.length) {
+          title = `"${word}"`
         }
 
-        wordBlock.append($fileBlock)
+        // Nothing under this heading was found by the search itself — every line
+        // came in through the guess. Dimmed, so the eye goes to the headings that
+        // answer what was actually asked.
+        const viaGuessOnly = grouped && !isSweepUp && items.length > 0 && items.every(it => it && it._viaGuess)
+        const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}${viaGuessOnly ? ' srt-guess-only' : ''}"${viaGuessOnly ? ' title="No English line here contains the search word — these are lines whose ' + _.escape(getLangFromUrl().fullName || 'studied-language') + ' side uses this guess"' : ''}><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${title} <span class="match-count"></span></h5></div>`)
+        items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
-        const id = uuid()
-        const $lines = $(`<div id="${id}" style="padding-top: 4px; padding-bottom: 8px;"></div>`)
-        // Expand the visible window by the user-configured context. renderLines
-        // clamps fromIndex to >= 1 and (with the new clamp below) toIndex to
-        // the file's last index, so passing out-of-range values is safe.
-        // Coerce everything to Number: the SRT parser stores `line.index` as a
-        // string, so `index + _after` would concatenate ("103" + 2 → "1032"),
-        // ballooning toIndex so the renderLines file-end clamp shows every line
-        // from the match to EOF — i.e. "more than configured lines after match".
-        // Subtraction (used for fromIndex) always coerces numerically, which is
-        // why _before never tripped this. Also defensively coerce the settings.
-        const _before = parseInt((window._appSettings && window._appSettings.contextLinesBefore), 10) || 0
-        const _after = parseInt((window._appSettings && window._appSettings.contextLinesAfter), 10) || 0
-        const matchIdx = parseInt(item.line.index, 10) || 0
-        // Stash the matched line's SRT index so renderLines can expose it
-        // to the capture button (the +/- buttons mutate from/toIndex, but
-        // the underlying matched line never changes).
-        $lines.data({fromIndex: matchIdx - _before, toIndex: matchIdx + _after, matchLineIndex: matchIdx})
-        $fileBlock.append($lines)
+        const isMultiWord = word.trim().split(/\s+/).length > 1
+        // Multi-word phrase: render as a popover-triggering `.link` span (NOT an
+        // <a>, which the document click handler opens directly) so clicking it
+        // shows the same "Search here / Search on wiki" popover as single words.
+        // The href carries the phrase-search Wiktionary URL for the wiki action.
+        const wikiPart = isMultiWord
+            ? `<span> <span class="link" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}">${word}</span></span>`
+            : getWikiLinks(word)
+        // The sweep-up heading is not a word, so there is nothing to look it up
+        // in — a Wiktionary link for "_everything_else" would be a dead end.
+        if (!isSweepUp) {
+          wordBlock.append(`<div style=""> Wiki: ${wikiPart} 丨
+            <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> 丨
+            <a href="https://filmot.com/search/%22${word}%22/1?lang=${getLangFromUrl().code}" target="_blank">YouTube (Filmot)</a> </div> <br>`)
+        }
 
-        renderLines(id, item.url)
-        rendered.push(item)
-      } catch (perItemErr) {
-        // One bad item shouldn't kill the whole word block. Log and move on.
-        console.error('populateSRTFindings: failed to render item for', word, item, perItemErr)
+        $result.append(wordBlock)
+
+        items = groupAndArrangeResults(items)
+        // Total available matches after source-filter / dedup grouping. Shown
+        // in the accordion header so the user knows how many hits a word has,
+        // even when only `numberOfItemsToShow()` are rendered below.
+        const totalMatches = items.length
+
+        // (Previously: when toggle=EN, dedup items whose parallel-index SV text
+        // shared any non-common word with an already-rendered item's SV side.
+        // That was designed for "viewing EN translations of SV searches", but the
+        // search pipeline always runs *in* the selected language — for a direct
+        // EN search every hit's parallel SV line shares a form of the searched
+        // word, so item #2..N all looked like duplicates and got dropped. The
+        // header count showed the true total, the body showed only one row.
+        // Removing the dedup; the per-result list is short enough that genuine
+        // duplicates aren't a real UX problem.)
+        const rendered = [];
+
+        for (let i = 0; i < items.length; i++) {
+          if (rendered.length >= numberOfItemsToShow()) {
+            break;
+          }
+
+          const item = items[i];
+
+          try {
+            // The capture path reads this heading back as the playlist word, so it
+            // has to be the word this line actually matched — not the block it was
+            // filed under. They are the same thing for an ordinary search; under a
+            // guessed grouping the heading is a guess, and one of them is the
+            // sweep-up marker, which nobody typed and nothing should be saved as.
+            const $fileBlock = $(`<div class="srt-file" title="${item['name']}">
+                                  <h4 data-file="${item.url}" style="display: none;"> ${item.word || word} </h4>
+                              </div>`)
+            if (item._viaGuess) {
+              $fileBlock.append(
+                `<span class="srt-via-guess" title="Found through the ${_.escape(item._viaGuess)} in this line, not through the English search">via ${_.escape(item._viaGuess)}</span>`)
+            }
+
+            wordBlock.append($fileBlock)
+
+            const id = uuid()
+            const $lines = $(`<div id="${id}" style="padding-top: 4px; padding-bottom: 8px;"></div>`)
+            // Expand the visible window by the user-configured context. renderLines
+            // clamps fromIndex to >= 1 and (with the new clamp below) toIndex to
+            // the file's last index, so passing out-of-range values is safe.
+            // Coerce everything to Number: the SRT parser stores `line.index` as a
+            // string, so `index + _after` would concatenate ("103" + 2 → "1032"),
+            // ballooning toIndex so the renderLines file-end clamp shows every line
+            // from the match to EOF — i.e. "more than configured lines after match".
+            // Subtraction (used for fromIndex) always coerces numerically, which is
+            // why _before never tripped this. Also defensively coerce the settings.
+            const _before = parseInt((window._appSettings && window._appSettings.contextLinesBefore), 10) || 0
+            const _after = parseInt((window._appSettings && window._appSettings.contextLinesAfter), 10) || 0
+            const matchIdx = parseInt(item.line.index, 10) || 0
+            // Stash the matched line's SRT index so renderLines can expose it
+            // to the capture button (the +/- buttons mutate from/toIndex, but
+            // the underlying matched line never changes).
+            $lines.data({fromIndex: matchIdx - _before, toIndex: matchIdx + _after, matchLineIndex: matchIdx})
+            $fileBlock.append($lines)
+
+            renderLines(id, item.url)
+            rendered.push(item)
+          } catch (perItemErr) {
+            // One bad item shouldn't kill the whole word block. Log and move on.
+            console.error('populateSRTFindings: failed to render item for', word, item, perItemErr)
+          }
+        }//end for
+
+        // Header bookkeeping: show a match count, and grey the header out if
+        // the post-filter pipeline produced nothing (sources disabled, all
+        // duplicates, etc.) so the user can tell apart "no hits" from
+        // "hits, just collapsed".
+        if (totalMatches > 0) {
+          wordBlock.find('.match-count').text(`(${totalMatches})`)
+        }
+        if (rendered.length === 0) {
+          wordBlock.find('.l-accordion').addClass('no-result')
+        }
+      } catch (perWordErr) {
+        // Per-word failures (missing categories, bad item shape, …) used to
+        // break the entire results render. Log and continue so the user
+        // still sees results for the other words.
+        console.error('populateSRTFindings: failed for word', word, perWordErr)
       }
-    }//end for
-
-    // Header bookkeeping: show a match count, and grey the header out if
-    // the post-filter pipeline produced nothing (sources disabled, all
-    // duplicates, etc.) so the user can tell apart "no hits" from
-    // "hits, just collapsed".
-    if (totalMatches > 0) {
-      wordBlock.find('.match-count').text(`(${totalMatches})`)
-    }
-    if (rendered.length === 0) {
-      wordBlock.find('.l-accordion').addClass('no-result')
-    }
-    } catch (perWordErr) {
-      // Per-word failures (missing categories, bad item shape, …) used to
-      // break the entire results render. Log and continue so the user
-      // still sees results for the other words.
-      console.error('populateSRTFindings: failed for word', word, perWordErr)
-    }
-  })
+    }) //end slice.forEach
     await yieldToUI()
     // Measure the sticky accordion height once we've rendered enough chunks
     // for one to be on the page, and feed it back as a CSS variable so
@@ -8006,6 +8021,7 @@ async function _regroupByCorrespondingWord(wordToItemsMap, search) {
 }
 
 async function render(searchResults, search, className, token) {
+  const startTime = new Date()
   // The vocab list is rendered once on the primary pass. The secondary pass
   // (fired by fetchSRTs' stem fallback) gets a multi-pipe `search` like
   // "förvärvad|förvärva|förvärv" which never satisfies word-equality and
@@ -8043,6 +8059,7 @@ async function render(searchResults, search, className, token) {
   const searchResultsFiltered = filterByLanguage(searchResults);
 
   let wordToItemsMap = await getMatchingWords(searchResultsFiltered, search, token);
+  window.wordToItemsMap = wordToItemsMap
   if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
 
   // An English search reads better split by the studied-language word behind
@@ -8109,6 +8126,7 @@ async function render(searchResults, search, className, token) {
 
   showResultContainer();
 
+  console.log(`Search render completed in ${(new Date() - startTime)/1000} s`)
   // return Object.assign({}, wordToItemsMap, wordToItemsMapNonSrt);
   return wordToItemsMap;
 } // end render
@@ -8126,6 +8144,10 @@ class SearchResult {
     this.sv_match = sv_match;
     this.en_match = en_match;
   }
+}
+
+function resetSearchResultIndex() {
+  window._lastRenderedWordIndex = 0
 }
 
 // Strip SRT framing (block indices, timestamp lines) and collapse all
@@ -8232,6 +8254,18 @@ window.searchVocabularyBySimilarity = searchVocabularyBySimilarity;
 // refused before it starts never joins the count, and must not tidy up after
 // the ones that did.
 let _searchRunsInFlight = 0
+
+async function loadNextPageOfSearchResults(reset = false) {
+  if(reset) {
+    resetSearchResultIndex()
+  }
+  const $result = $('#result')
+  $result.html('<div style="color:grey;padding:6px;">Loading…</div>')
+  await populateSRTFindings(window.wordToItemsMap, $result, window._subtitleSearchToken);
+  renderAccordions($result[0])
+}
+
+window.loadNextPageOfSearchResults = loadNextPageOfSearchResults;
 
 async function fetchSRTs(searchText) {
   // Null until this run has a token of its own — a search refused for being too
@@ -18330,7 +18364,7 @@ window.openPlayingQueueDialog = openPlayingQueueDialog
 function _searchCurrentRecPlayWord() {
   const it = window._recPlayCurrentItem
   if (!it) return
-  const w = it.word || it.searchText || it._w
+  const w = getSelectionText() || it.word || it.searchText || it._w
   if (!sendWordToSearchBox(w, { category: _detectItemCategory(it) })) return
   _copyTextToClipboard(w)   // auto-copy the searched word for pasting elsewhere
   try { minimizePlayingRecording() } catch (_) {}
@@ -18546,17 +18580,18 @@ function openPracticeMode(opts) {
               <button type="button" class="practice-ctx-reset" title="Reset to the matched line only" aria-label="Reset context">↺</button>
             </div>
             <div class="practice-front"></div>
-            <button type="button" class="practice-reveal" title="Reveal (R)" aria-label="Reveal">👁</button>
+            
             <div class="practice-back" style="display:none;"></div>
           </div>
           <div class="practice-face practice-back-face">
             <div class="practice-back-target"></div>
-            <button type="button" class="practice-unflip" title="Show source again" aria-label="Show source again">↶</button>
+            
           </div>
         </div>
       </div>
       <div class="practice-nav">
         <button type="button" class="practice-prev" aria-label="Previous (←)" title="Previous (←)">‹</button>
+        <button type="button" class="practice-unflip" title="Show source again" aria-label="Show source again">↶</button>
         <button type="button" class="practice-play" aria-label="Play clip" title="Play clip">▶</button>
         <button type="button" class="practice-speed" aria-label="Playback speed" title="Cycle playback speed">1×</button>
         <button type="button" class="practice-next" aria-label="Next (→)" title="Next (→)">›</button>
@@ -18591,6 +18626,8 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-next', () => practiceNav(1))
     $p.on('click', '.practice-reveal', revealPracticeCard)
     $p.on('click', '.practice-unflip', revealPracticeCard)   // toggles flip back
+    $p.on('dblclick', '.practice-front-face', revealPracticeCard)
+    $p.on('dblclick', '.practice-back-face', revealPracticeCard)
     $p.on('click', '.practice-dir', togglePracticeDir)
     $p.on('click', '.practice-play', playPracticeClip)
     $p.on('click', '.practice-speed', cyclePracticePlaybackRate)
@@ -18735,6 +18772,16 @@ function _updatePracticeSpeedBtn() {
   $('#practiceMode .practice-speed').text(`${r}×`)
 }
 
+function getSelectionText() {
+    let text = "";
+    if (window.getSelection) {
+        text = window.getSelection().toString();
+    } else if (document.selection && document.selection.type != "Control") {
+        text = document.selection.createRange().text;
+    }
+    return text;
+}
+
 // Collapse the practice UI to a tiny pill so the user can interact with the
 // page underneath without losing position. The restore pill is shown in its
 // place; everything else (topbar, card, nav, pinned YT player, hidden main
@@ -18750,7 +18797,7 @@ function _updatePracticeSpeedBtn() {
 function _searchCurrentPracticeWord() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
-  const w = it.word || it.searchText || it._w
+  const w = getSelectionText() || it.word || it.searchText || it._w
   if (!sendWordToSearchBox(w, { category: _detectItemCategory(it) })) return
   _copyTextToClipboard(w)   // auto-copy the searched word for pasting elsewhere
   try { minimizePracticeMode() } catch (_) {}
