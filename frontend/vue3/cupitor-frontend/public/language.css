@@ -2352,6 +2352,61 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 #practiceMode .practice-info-meta { color: #ccc; font-family: monospace; word-break: break-all; }
 #practiceMode.minimized .practice-info-panel,
 #practiceMode.minimized .practice-settings-panel { display: none !important; }
+/* Shadowing bar — Rec / Keep / discard for takes spoken over a clip. Sits
+   above the prev/next row at the foot of the card, inside #practiceMode so it
+   travels with the practice overlay's stacking. */
+#practiceMode .practice-rec-bar {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: 60px;
+    z-index: 100004;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(33, 33, 33, 0.94);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    pointer-events: auto;
+}
+#practiceMode.minimized .practice-rec-bar { display: none !important; }
+#practiceMode .prec-btn {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f5f5f5;
+    font-size: 13px;
+    cursor: pointer;
+}
+#practiceMode .prec-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+#practiceMode .prec-btn:disabled { opacity: 0.4; cursor: default; }
+/* Recording is the one state worth spotting from across the room. */
+#practiceMode .prec-btn.prec-toggle.on {
+    background: #b71c1c;
+    border-color: #d32f2f;
+    color: #fff;
+    font-weight: 600;
+}
+#practiceMode .prec-status {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: #bbb;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* While a panel is open the whole overlay is lifted over #practiceAudio
+   (100003). The panels sit inside #practiceMode, which is a stacking context,
+   so their own z-index cannot outrank a sibling of their container — the
+   manual-card audio player would cover the settings panel and the Delete
+   button in it. Dropped again on close so the audio controls come back. */
+#practiceMode.panel-open:not(.minimized) { z-index: 100005; }
 
 /* Settings-panel rows. Each row is a label + control; rows stack so they
    read top-to-bottom on the narrow phone width. */
@@ -3000,6 +3055,10 @@ body.practice-manual #practiceMode .practice-card {
    z-index of its own, so it would otherwise dim the page BEHIND the banner. */
 .ui-dialog:has(> #musicPanelDialog) { z-index: 100010 !important; }
 body.music-panel-open .ui-widget-overlay { z-index: 100009 !important; }
+/* The card editor is lifted to 100020 over practice and the player; its modal
+   backdrop has to come up with it, or those two keep showing through around
+   the dialog instead of being dimmed behind it. Just under the dialog. */
+body.manual-editor-open .ui-widget-overlay { z-index: 100019 !important; }
 
 /* Where minimized dialogs park; they stack upwards so several at once never
    land on each other. Raised a pill's height off the bottom edge to clear the

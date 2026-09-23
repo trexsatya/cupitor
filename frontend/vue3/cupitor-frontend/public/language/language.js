@@ -170,6 +170,14 @@ import {
   musicNeedsReload as _musicNeedsReload,
 } from './music-bed.js';
 import {
+  addTake as _addTake,
+  removeTake as _removeTake,
+  rewindPointFor as _rewindPointFor,
+  takeAt as _takeAt,
+  takesDuration as _takesDuration,
+  takeOffsetLabel as _takeOffsetLabel,
+} from './practice-rec.js';
+import {
   nextRandomPlaylistName as _nextRandomPlaylistName,
   collectManualItems as _collectManualItems,
   wordsForCategories as _wordsForCategories,
@@ -2036,6 +2044,11 @@ window._appSettings = {
   // (caption is the prompt) or 'target' (caption is the answer). Remembered
   // between captures because collecting from one video means repeated sends.
   captionTextField: 'source',
+  // The playlist the last capture was actually filed into. Offered first next
+  // time, because the playlist you are collecting into is rarely the one you
+  // happen to be practising. Only ever set from a destination that accepted a
+  // block, so a refused one is never remembered. '' means nothing yet.
+  captionPlaylist: '',
   // Seconds to wait between a manual card's Source and Target recordings —
   // the "try to recall it" pause. null means unset, in which case the
   // inter-item gap above is used, so one control covers both until the user
@@ -8388,20 +8401,51 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 
 async function loadYoutubeVideo(videoId) {
   await waitUntil(() => window.ytPlayerReady && window.ytPlayer.getIframe())
-  const iframe = window.ytPlayer.getIframe()
   showMediaContainer()
   // Play / practice modes drive everything through their own floating overlay,
   // so the side player panel (speed controls, starred lines, etc.) just gets in
   // the way — keep it hidden while either mode is active.
   if (!window._playingRecording && !window._practiceActive) showMediaRelatedContainer()
   return new Promise((resolve, reject) => {
-    try {
-      const currentVideoId = iframe.src.split("embed/")[1].split("?")[0]
-      iframe.src = `${iframe.src}`.replaceAll(currentVideoId, videoId)
-      iframe.onload = () => {
-        setSpeed();
-        resolve()
+    // Finish the way a reload used to.
+    //
+    // Reassigning iframe.src navigated the embed, so the API re-handshook and
+    // the inline onPlayerReady in language.html ran on EVERY video change, not
+    // just at boot — and it did two things: playVideo(), and the seek below
+    // when an interval was pending. playClickedMedia depends on that seek; it
+    // sets youtubePlayInterval and never seeks itself. Loading through the API
+    // does not reload the embed, so onPlayerReady never fires again and both
+    // effects have to happen here. loadVideoById plays on its own, which
+    // covers the first; callers that only want the video loaded still call
+    // _suppressYoutubeAutoplay(), unchanged.
+    const settle = () => {
+      try { setSpeed() } catch (_) {}
+      if (window.youtubePlayInterval) {
+        try { seekToYoutubeTime(window.youtubePlayInterval.start) } catch (_) {}
       }
+      resolve()
+    }
+    try {
+      // Reuse the one player instead of navigating the iframe. Every
+      // navigation tore down a player document and built another, and each
+      // player holds a hardware video decoder — a small, fixed, per-device
+      // allowance that has nothing to do with how much memory is free.
+      window.ytPlayer.loadVideoById(videoId)
+      // There is no `load` event to wait on any more, so poll the player for
+      // the new id. Bounded deliberately: waitUntil never gives up, and a
+      // video that turns out to be unplayable must not leave every caller
+      // awaiting a promise that can no longer settle.
+      const deadline = Date.now() + 10000
+      const tick = () => {
+        let loaded = false
+        try {
+          const d = window.ytPlayer.getVideoData && window.ytPlayer.getVideoData()
+          loaded = !!(d && d.video_id === videoId)
+        } catch (_) {}
+        if (loaded || Date.now() > deadline) { settle(); return }
+        setTimeout(tick, 100)
+      }
+      tick()
     } catch (e) {
       console.log(e)
       reject(e)
@@ -10306,6 +10350,27 @@ const REC_KEY            = 'cupitor:recording'           // legacy
 const REC_STATE_KEY      = 'cupitor:recording:state'
 const REC_COLLECTION_KEY = 'cupitor:recordings'
 const REC_CURRENT_KEY    = 'cupitor:recording:current'
+// The active playlist's stable id, when it has one. Only the app's own
+// playlists do; they arrive carrying `extId` and keep it across a rename,
+// whereas the name above is just what they were called last time. Absent for
+// playlists this page owns, where the name IS the identity and a rename here
+// rewrites it in place.
+const REC_CURRENT_EXT_KEY = 'cupitor:recording:currentExtId'
+
+// Which playlist a remembered reference points at in `coll` now.
+//
+// The stable id is tried first, so a playlist renamed on either side is still
+// found; the name is the fallback for the ones that have no id.
+function _resolveRememberedPlaylist(coll, name, extId) {
+  if (!coll) return null
+  if (extId != null && extId !== '') {
+    const want = String(extId)
+    const byId = Object.keys(coll).find(
+      n => coll[n] && coll[n].extId != null && String(coll[n].extId) === want)
+    if (byId) return byId
+  }
+  return (name && coll[name]) ? name : null
+}
 const REC_DEFAULT_NAME   = 'Default'
 
 window._recordings = { [REC_DEFAULT_NAME]: { items: {}, createdAt: Date.now(), updatedAt: Date.now() } }
@@ -10358,6 +10423,14 @@ function _loadRecording() {
 
     const currentName = localStorage.getItem(REC_CURRENT_KEY)
     const activeName = (currentName && coll[currentName]) ? currentName : Object.keys(coll)[0]
+    // Held whether or not it resolved just now. Anything the native app owns
+    // is stripped before this collection is saved (see _persistableRecordings)
+    // and only reappears when the app pushes it, which is after this runs — so
+    // a name that looks unknown here may be perfectly good a second later.
+    // Keeping it is what lets the push put the user back where they were
+    // instead of on whichever playlist happens to sort first.
+    window._rememberedActiveName = currentName || null
+    window._rememberedActiveExtId = localStorage.getItem(REC_CURRENT_EXT_KEY)
 
     window._recordings = coll
     const activeVirtual = !!(coll[activeName] && coll[activeName].virtual)
@@ -10434,9 +10507,39 @@ function buildPlaylistsWithManualCards(payload) {
   Object.assign(coll, recordings)
   window._recording = window._recording || { state: 'idle' }
   const cur = window._recording.currentName
-  const wantActive = (activeName && coll[activeName]) ? activeName
-    : (cur && coll[cur]) ? cur
-    : Object.keys(recordings)[0]
+  // The app sends its active playlist on EVERY push, including the one that
+  // fires on each page load — so the value is not a request to switch, it is
+  // the app restating itself. Applying it unconditionally is what drags the
+  // user off the playlist they chose here, every single time the page loads.
+  // Comparing against the previous push tells a real switch apart from a
+  // restatement.
+  const prevPushed = window._lastPushedActiveName
+  const firstPush = prevPushed === undefined
+  window._lastPushedActiveName = activeName || null
+
+  // What this page was last on, read at load — possibly a playlist that only
+  // exists now that this push has brought it in, and possibly under a new name
+  // if it was renamed in the app since.
+  const remembered = _resolveRememberedPlaylist(
+    coll, window._rememberedActiveName, window._rememberedActiveExtId)
+
+  let wantActive
+  if (firstPush) {
+    // The user's own last choice here outranks the app's opening restatement.
+    wantActive = (remembered && coll[remembered]) ? remembered
+      : (activeName && coll[activeName]) ? activeName
+      : (cur && coll[cur]) ? cur
+      : Object.keys(recordings)[0]
+  } else if (activeName && activeName !== prevPushed && coll[activeName]) {
+    // The app actually switched playlists since the last push. That is a user
+    // action on the other side of the bridge, so follow it.
+    wantActive = activeName
+  } else {
+    // A restatement. Stay where we are.
+    wantActive = (cur && coll[cur]) ? cur
+      : (activeName && coll[activeName]) ? activeName
+      : Object.keys(recordings)[0]
+  }
   if (wantActive && coll[wantActive]) {
     // Set the active pointer directly (not selectRecording) so we don't mark
     // the GitHub-sync flag dirty for native-owned data.
@@ -10796,6 +10899,10 @@ function _saveRecording() {
     }
     localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
     localStorage.setItem(REC_CURRENT_KEY, name)
+    // Stored beside the name so a rename on either side cannot strand it.
+    const _activeExt = window._recordings[name] && window._recordings[name].extId
+    if (_activeExt != null) localStorage.setItem(REC_CURRENT_EXT_KEY, String(_activeExt))
+    else localStorage.removeItem(REC_CURRENT_EXT_KEY)
     localStorage.setItem(REC_STATE_KEY, window._recording.state)
     // Best-effort cleanup of the legacy single-buffer key once we've fully
     // moved to the collection model.
@@ -10957,6 +11064,10 @@ function _recordingItemCountByName(name) {
 function selectRecording(name) {
   if (!window._recordings[name]) return false
   window._recording.currentName = name
+  // Every deliberate choice of playlist comes through here, so this is where
+  // "what this page was last on" stays true. Without it a push landing after
+  // a selection would still be comparing against the name read at load.
+  window._rememberedActiveName = name
   window._recording.virtual = _isVirtual(name)
   // For a virtual playlist, items is a freshly-resolved union (read-only —
   // capture/edit is blocked while a virtual playlist is active). For a real
@@ -11772,8 +11883,10 @@ function _addCaptionBlock(playlistName, cap, lines, field) {
   const fresh = url ? lines.filter(l => !seen.has(_captionKey(url, l.start, l.text))) : lines
   const skipped = lines.length - fresh.length
   if (!fresh.length) {
-    _cpBuildToast(`Already captured — all ${n(lines.length)} are in "${playlistName}".`)
-    return ''   // nothing to do, but not a failure — let the dialog close
+    // Returned rather than announced here: the caller decides where this is
+    // said, and inside Cupitor it has to be said outside this page. Nothing
+    // was written, but that is not a failure — let the dialog close.
+    return `Already captured — all ${n(lines.length)} are in "${playlistName}".`
   }
   // The link back to where the text came from rides along as the card's media
   // link, which parseMediaUrl classifies. A page or a non-YouTube video becomes
@@ -11835,6 +11948,35 @@ let _captionDialogWords = null
 let _recordingsLoaded = false
 const _captionPreLoad = []
 
+// Tell the host a capture has been filed, so it can put its dialog away and
+// give the user back the page or book they sent it from. Sending is the whole
+// reason the webapp is on screen at that moment, so once the block has landed
+// there is nothing left here to look at.
+//
+// `message` is what the user should be told — the host says it, because a
+// toast drawn in this page would be torn down with the dialog that holds it.
+//
+// Returns true when the host has been told, so the caller knows not to say it
+// here as well. Outside Cupitor there is no host and no dialog to close, so it
+// returns false and the caller speaks for itself.
+function _notifyCaptureFiled(playlistName, message) {
+  if (!window.PlaylistBridge ||
+      typeof window.PlaylistBridge.postMessage !== 'function') return false
+  try {
+    window.PlaylistBridge.postMessage(JSON.stringify({
+      op: 'captureFiled',
+      playlist: String(playlistName || ''),
+      message: String(message || ''),
+    }))
+    return true
+  } catch (e) {
+    // Losing this costs a dialog the user can close by hand; it must never
+    // cost the capture that has already been written.
+    console.warn('captureFiled: bridge post failed', e)
+    return false
+  }
+}
+
 // Ask where the block should go. Always asked, even when a real playlist is
 // active: a send yanks the webapp on top of the playing video, so the dialog
 // doubles as the confirmation that the send actually landed.
@@ -11851,11 +11993,17 @@ function _openCaptionCaptureDialog(cap, lines) {
   let $d = $('#captionCaptureDialog')
   if (!$d.length) $d = $('<div id="captionCaptureDialog"></div>').appendTo('body')
 
-  // Only mark a selection when the active playlist is actually a valid
-  // destination; otherwise let the browser take the first option rather than
-  // pretending some arbitrary playlist was "the active one".
+  // Where the last capture went, falling back to the active playlist. Both
+  // are checked against `names`, so a remembered playlist that has since been
+  // deleted, renamed, or turned into a combined one simply stops being
+  // offered rather than preselecting something that cannot hold the block.
+  // With neither valid, nothing is marked and the browser takes the first
+  // option, rather than pretending some arbitrary playlist was the one.
+  const remembered =
+    String((window._appSettings && window._appSettings.captionPlaylist) || '')
+  const preselect = names.indexOf(remembered) >= 0 ? remembered : active
   const opts = names.map(n =>
-    `<option value="${_.escape(n)}"${n === active ? ' selected' : ''}>${_.escape(n)}</option>`
+    `<option value="${_.escape(n)}"${n === preselect ? ' selected' : ''}>${_.escape(n)}</option>`
   ).join('')
   const preview = lines.slice(0, CAPTION_PREVIEW_ROWS)
     .map(l => `<div class="cap-cap-line">${_.escape(l.text)}</div>`).join('')
@@ -11929,8 +12077,19 @@ function _openCaptionCaptureDialog(cap, lines) {
         // false = the write was refused and already explained. Stay open so
         // the user can pick elsewhere instead of losing the capture.
         if (res === false) return
+        // Remembered only now: a destination that refused the block is not
+        // one to offer first next time.
+        window._appSettings.captionPlaylist = name
+        saveAppSettings()
         $(this).dialog('close')
-        if (res) _cpBuildToast(res)
+        // Hand the screen back to whatever the user was doing when they sent
+        // this — but not while more blocks are queued, because the close
+        // callback is about to open the next picker and closing now would
+        // hide it. The host reports the result in that case, since anything
+        // said in this page goes down with the dialog it is drawn in.
+        if (_captionQueue.length || !_notifyCaptureFiled(name, res)) {
+          if (res) _cpBuildToast(res)
+        }
       },
       Cancel: function () { $(this).dialog('close') }
     }
@@ -12097,6 +12256,11 @@ function renameRecording(oldName, newName) {
   delete window._recordings[oldName]
   if (window._recording.currentName === oldName) {
     window._recording.currentName = newName
+  }
+  // Otherwise the next push compares against a name that no longer exists and
+  // quietly falls through to some other playlist.
+  if (window._rememberedActiveName === oldName) {
+    window._rememberedActiveName = newName
   }
   _saveRecording()
   return true
@@ -13966,6 +14130,8 @@ function _openManualEntryEditor(playlistName, existing) {
   }
 
   function cleanup() {
+    // The backdrop goes back to its ordinary height with the dialog.
+    $('body').removeClass('manual-editor-open')
     // Stops a translation still in flight from writing into the boxes, which by
     // then belong to whichever card is opened next.
     dialogClosed = true
@@ -13996,6 +14162,17 @@ function _openManualEntryEditor(playlistName, existing) {
     modal: true,
     autoOpen: true,
     close: cleanup,
+    open: function () {
+      // Practice and the player cover the screen from z-index 100001 up, and
+      // both are deliberately see-through so the video shows past them. A
+      // dialog left where jQuery UI puts it paints behind that and reads as a
+      // card torn in half. Lift the window, and the modal backdrop with it, so
+      // the thing being edited is the thing in front. Mirrors the practice
+      // line editor; see .above-practice-mode.
+      const $w = $(this).closest('.ui-dialog')
+      $w.appendTo('body').addClass('above-practice-mode')
+      $('body').addClass('manual-editor-open')
+    },
     buttons: {
       // The Save button is async — `finish()` may need to round-trip through
       // the AudioBridge to write the recording before the entry is saved.
@@ -14141,12 +14318,32 @@ function _notifOpenWhenReady(pl, xid) {
   } catch (_) { return }
   if (!pl || !xid) return
   console.log('[notif] cold-start deep link', { pl, xid })
+  // Raised before the params are stripped below, because that strip happens
+  // synchronously during module evaluation — by the time anything running on
+  // `load` looks at the URL it is already clean. The view restore reads this
+  // to know it should stand down for the deep link.
+  window._cupNotifDeepLink = true
   try {
     const u2 = new URL(window.location.href)
     u2.searchParams.delete('notifPl'); u2.searchParams.delete('notifItem')
     window.history.replaceState(null, '', u2.toString())
   } catch (_) {}
   const go = () => setTimeout(() => _notifOpenWhenReady(pl, xid), 400)
+  if (document.readyState === 'complete') go()
+  else window.addEventListener('load', go)
+})()
+
+// Reopen whatever was on screen when the app last went away. Same wait as the
+// deep link above, for the same reason.
+//
+// The work is deferred rather than done here: _restoreOpenView reads module
+// constants declared further down this file, which do not exist yet while this
+// line is being evaluated. Hoisting makes the call legal; the delay makes it
+// correct.
+;(function _restoreOpenViewOnLoad() {
+  const go = () => setTimeout(() => {
+    try { _restoreOpenView() } catch (e) { console.warn('[restore] failed', e) }
+  }, 400)
   if (document.readyState === 'complete') go()
   else window.addEventListener('load', go)
 })()
@@ -16089,6 +16286,177 @@ function _saveQueueOrder(queue, mode) {
     _saveLastPlayedMap(next)
   }
 }
+// ── Which view was on screen when the page last stopped running ──────────
+//
+// Written while Player or Practice is open and wiped the moment either is put
+// away — by the user, or by a deck reaching its end. So the only thing that
+// ever survives into the next load is the case nothing else can cover: the app
+// was killed with a view still open. Reopening it then is what makes a
+// relaunched app feel like it never closed, while a view the user deliberately
+// left stays closed.
+const OPEN_VIEW_KEY = 'cupitor:openView'
+
+// Mirror the flag to the native host.
+//
+// localStorage alone is not enough for it: these views live inside the host's
+// study dialog, and that dialog is not reopened on launch — so this page is
+// not running, and nothing here can restore anything. The host has to know a
+// view was open in order to bring the dialog back at all. Silent, and
+// harmless, in a plain browser.
+function _postViewStateToHost(view) {
+  if (!window.PlaylistBridge ||
+      typeof window.PlaylistBridge.postMessage !== 'function') return
+  try {
+    window.PlaylistBridge.postMessage(JSON.stringify({
+      op: 'viewState',
+      view: view || '',
+    }))
+  } catch (e) {
+    console.warn('viewState: bridge post failed', e)
+  }
+}
+
+// The active playlist's stable id, or null for one this page owns.
+function _activeExtId() {
+  const n = window._recording && window._recording.currentName
+  const rec = n && window._recordings && window._recordings[n]
+  return (rec && rec.extId != null) ? String(rec.extId) : null
+}
+
+function _setOpenView(view) {
+  _postViewStateToHost(view)
+  try {
+    localStorage.setItem(OPEN_VIEW_KEY, JSON.stringify({
+      view,
+      // Pinned so a restore never reopens a deck from a playlist the user is
+      // no longer in. The id rides along where there is one, so a playlist
+      // renamed before the next launch is still recognised.
+      playlist: (window._recording && window._recording.currentName) || '',
+      extId: _activeExtId(),
+      at: Date.now(),
+    }))
+  } catch (_) {}
+}
+
+// Called from every teardown, and it is whichever view is left standing that
+// decides the outcome — not the one that just went away.
+//
+// The two overlap: Practice opens over a deck that keeps playing underneath.
+// Closing Practice there must not erase the fact that the deck is still open,
+// or killing the app a moment later would restore nothing. Every caller drops
+// its own flag before calling in, so the checks below see the state as it is
+// once this teardown is done.
+function _clearOpenView() {
+  if (window._practiceActive) { _setOpenView('practice'); return }
+  if (window._playingRecording) { _setOpenView('player'); return }
+  _postViewStateToHost('')
+  try { localStorage.removeItem(OPEN_VIEW_KEY) } catch (_) {}
+}
+
+// Read once and wipe, whatever happens next.
+//
+// A restore that cannot complete — a playlist deleted since, a queue that no
+// longer builds, an outright throw — must not leave the flag behind to be
+// retried on every launch from here on. Reopening the view arms it again, so
+// nothing is lost by clearing first.
+function _takeOpenView() {
+  let raw = null
+  try {
+    raw = localStorage.getItem(OPEN_VIEW_KEY)
+    localStorage.removeItem(OPEN_VIEW_KEY)
+  } catch (_) { return null }
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw)
+    if (!v || (v.view !== 'player' && v.view !== 'practice')) return null
+    return v
+  } catch (_) { return null }
+}
+
+// Put back the view the app died with, position and all.
+//
+// Reached only through a flag that survived a whole run of the page, so a view
+// the user closed — or a deck that finished — never comes back. Waits for the
+// playlists the same way the notification deep link does: they arrive from
+// localStorage or the native cupitorPlaylists push, either of which can land
+// after the page, and opening before the boot has settled gets the view torn
+// straight back down.
+function _restoreOpenView() {
+  const saved = _takeOpenView()
+  if (!saved) return
+  // Without any reference to the playlist there is no way to tell whether the
+  // deck still belongs anywhere, and reopening the wrong one is worse than not
+  // reopening. A view cannot normally be open without one, so this is a guard
+  // rather than a case.
+  if (!saved.playlist && !saved.extId) return
+  // A notification deep link opens a view of its own; two opens racing for the
+  // same DOM is not worth the trouble, and the deep link is the more specific
+  // intent — the user tapped something. The URL cannot be consulted here: the
+  // cold-start handler strips its params during module evaluation, long before
+  // this runs, so it leaves a flag behind instead.
+  if (window._cupNotifDeepLink) return
+
+  const start = Date.now()
+  const tick = () => {
+    // Something opened a view while we were waiting; leave it alone.
+    if (window._practiceActive || window._playingRecording) return
+    const cur = (window._recording && window._recording.currentName) || ''
+    // Resolve every tick rather than once: the collection this is matched
+    // against starts as a one-entry bootstrap placeholder and is replaced when
+    // the real set lands, from localStorage or the native push. Matching by id
+    // first means a playlist renamed since is still the same playlist.
+    const name = _resolveRememberedPlaylist(
+      window._recordings, saved.playlist, saved.extId)
+    if (!name) {
+      if (Date.now() - start < 20000) setTimeout(tick, 250)
+      else console.warn('[restore] playlist never arrived; not reopening', saved)
+      return
+    }
+    // Only the playlist's existence is waited on. Whether it is the *active*
+    // one is this function's job to settle, not something to sit and hope for:
+    // the app's own playlists are pushed after load and land with the active
+    // pointer wherever the fallback left it.
+    if (cur !== name) {
+      try {
+        if (!selectRecording(name)) {
+          console.warn('[restore] could not select playlist', name)
+          return
+        }
+      } catch (e) {
+        console.warn('[restore] selecting the playlist failed', e)
+        return
+      }
+    }
+    let resumeQueue = null
+    try {
+      // The resolved name, not `cur` — that was read before the select above
+      // and would ask for a resume point in whatever playlist we just left.
+      const point = computeResumePoint(
+        _loadLastPlayedMap(), window._recordings, name,
+        saved.view === 'player' ? 'play' : 'practice')
+      // No resume point just means starting at the top — still better than
+      // not coming back at all.
+      if (point) resumeQueue = { queue: point.queue, pos: point.pos }
+    } catch (e) {
+      console.warn('[restore] could not rebuild the queue', e)
+    }
+    try {
+      if (saved.view === 'player') {
+        // Silent on arrival — see the startPaused note in playRecording.
+        playRecording(Object.assign({ startPaused: true },
+          resumeQueue ? { resumeQueue } : null))
+      } else {
+        // Practice shows a card and waits for you, so there is nothing to
+        // hold back — reopening it makes no sound of its own.
+        openPracticeMode(resumeQueue ? { resumeQueue } : undefined)
+      }
+    } catch (e) {
+      console.warn('[restore] reopening failed', e)
+    }
+  }
+  tick()
+}
+
 function _maybeResumeStartItem(mode) {
   const cur = window._recording && window._recording.currentName
   const point = computeResumePoint(_loadLastPlayedMap(), window._recordings, cur, mode)
@@ -17652,7 +18020,12 @@ async function playRecording(opts) {
       .on('click', '.rec-pill-close', stopPlayingRecording)
   }
   _refreshRecPlayModeBtns()
-  window._recPlayPaused = false
+  // Normally false — starting the deck means starting to hear it. A restore
+  // passes startPaused: the app coming back is not the user asking for audio,
+  // and a WebView will often refuse to play without a tap anyway, which would
+  // leave the deck looking stuck on its first item. The pill's play button
+  // starts it.
+  window._recPlayPaused = !!opts.startPaused
   window._recPlayMinimized = false
   // Gap-guard: a single shared interval running for the whole session
   // that re-pauses the YT player whenever it slips back to PLAYING during
@@ -17678,6 +18051,11 @@ async function playRecording(opts) {
   $('body').addClass('rec-playing').removeClass('rec-paused rec-playing-minimized')
 
   window._playingRecording = true
+  _setOpenView('player')
+  // Paint the pill as paused when we started that way, or it shows a pause
+  // button over a deck that is not running. controlYt stays false: there is
+  // nothing playing yet to be told to stop.
+  if (opts.startPaused) _applyRecPlayPause(true, false)
   // Claim the system media session up front, so the headset is routed here from
   // the first item — including a manual card, which never touches ytPlaying.
   _postMediaState(true)
@@ -17789,6 +18167,19 @@ async function playRecording(opts) {
     // Refresh the session with this item's title, and re-assert that we are
     // playing — the previous item's end will have pushed "not playing".
     _postMediaState(!window._recPlayPaused)
+    // A paused deck must not BEGIN an item. Each clip path handles being
+    // paused part-way through, but none of them checks before starting: the
+    // word is spoken through a fresh <audio> and the video is told to play
+    // before anything consults the flag. Worse, a video started while paused
+    // never registers as having played — _waitYTUntilEnd returns early on
+    // every tick, so `everPlayed` stays false and none of its bails can fire,
+    // leaving the clip running past its end with the queue stuck behind it.
+    // Holding here keeps the banner up and the deck silent until the play
+    // button is pressed, which is the state a restored session opens in.
+    while (window._playingRecording && window._recPlayPaused) {
+      await new Promise(r => setTimeout(r, 200))
+    }
+    if (!window._playingRecording) break
     // Manual entries: no clip to play. If the media is a YouTube link we
     // still cue it into the embedded player at t=0 (so the user can hit
     // play manually if they want) but never auto-play — the playlist's
@@ -18049,6 +18440,9 @@ async function playRecording(opts) {
   } catch (_) {}
   window._recPlayQueue = null
   window._playingRecording = false
+  // A deck that played to its end is finished, not interrupted — so it is not
+  // something to put back on screen next launch.
+  _clearOpenView()
   // A playlist that runs to its natural end has to let go of the same things
   // an explicit Stop does. Leaving the media session claiming to play keeps
   // Android routing the headset here, where every handler now no-ops on
@@ -18422,6 +18816,8 @@ function _sleepRespectingPause(ms) {
 
 function stopPlayingRecording() {
   window._playingRecording = false
+  // Stopping IS putting the view away, so there is nothing to restore.
+  _clearOpenView()
   _postMediaState(false)
   _stopBackgroundMusic()
   window._recPlayPaused = false
@@ -18524,6 +18920,7 @@ function openPracticeMode(opts) {
   window._practiceFlipped = false
   window._practiceMinimized = false
   window._practiceActive = true
+  _setOpenView('practice')
   // `body.practice-mode #mediaRelatedContainer { display:none !important }`
   // already hides the side player panel while practice is open — no need to
   // set inline display:none here, which would otherwise outlive the body
@@ -18570,6 +18967,7 @@ function openPracticeMode(opts) {
           <button type="button" class="practice-delete" aria-label="Delete this item from the playlist" title="Delete this card from the playlist">🗑 Delete this card</button>
         </div>
       </div>
+      <div class="practice-rec-bar" style="display:none;"></div>
       <div class="practice-card">
         <div class="practice-flipper">
           <div class="practice-face practice-front-face">
@@ -18603,6 +19001,9 @@ function openPracticeMode(opts) {
       </div>
     </div>`).appendTo('body')
 
+    $p.on('click', '.prec-toggle', _pracRecToggle)
+    $p.on('click', '.prec-keep', _pracRecKeep)
+    $p.on('click', '.prec-drop', _pracRecDiscard)
     $p.on('click', '.practice-close', closePracticeMode)
     $p.on('click', '.practice-restore-close', closePracticeMode)
     $p.on('click', '.practice-minimize', minimizePracticeMode)
@@ -18714,10 +19115,16 @@ window.openPracticeMode = openPracticeMode
 
 function closePracticeMode() {
   window._practiceActive = false
+  // Every way out of Practice lands here — the ✕, Escape, and the deck
+  // emptying — and all of them mean the view was put away, so none of them
+  // should bring it back next launch.
+  _clearOpenView()
   window._practiceMinimized = false
   window._practiceClipToken = (window._practiceClipToken || 0) + 1
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
   try { _stopManualAudioPreview() } catch (_) {}
+  // A shadowing session belongs to the card on screen; there is no card now.
+  try { _pracRecEnd(true) } catch (_) {}
   // Hiding an <audio> does not silence it, and the panel is shared with the
   // player — leave it visible and a closed practice session keeps sounding
   // over the page underneath.
@@ -18979,6 +19386,19 @@ function _togglePracticeShuffle() {
   _refreshPracticeShuffleBtn()
 }
 
+// Both slide-down panels live inside #practiceMode, which is a stacking
+// context of its own — so the z-index they carry only ranks them against
+// their siblings, and the manual-card audio player, which is a sibling of
+// #practiceMode rather than of theirs, paints over them however high they
+// ask to be. Lift the whole overlay while a panel is open, and put it back
+// afterwards so the audio controls are reachable again.
+function _syncPracticePanelOpen() {
+  const $p = $('#practiceMode')
+  if (!$p.length) return
+  const open = $p.find('.practice-info-panel, .practice-settings-panel').is(':visible')
+  $p.toggleClass('panel-open', open)
+}
+
 function _togglePracticeInfoPanel() {
   const $p = $('#practiceMode')
   const $panel = $p.find('.practice-info-panel')
@@ -18993,6 +19413,7 @@ function _togglePracticeInfoPanel() {
     $p.find('.practice-settings').attr('aria-expanded', 'false').removeClass('active')
     _updatePracticeInfo()
   }
+  _syncPracticePanelOpen()
 }
 function _togglePracticeSettingsPanel() {
   const $p = $('#practiceMode')
@@ -19008,6 +19429,7 @@ function _togglePracticeSettingsPanel() {
     const mode = (window._appSettings && window._appSettings.practiceRevealMode) || 'flip'
     $panel.find('.practice-reveal-select').val(mode)
   }
+  _syncPracticePanelOpen()
 }
 
 // Populate the practice info panel with the current card's metadata —
@@ -19128,6 +19550,299 @@ async function playPracticeClip() {
   } catch (e) { console.warn('practice: play failed', e) }
 }
 
+// ─── Shadowing takes in Practice ──────────────────────────────────────────
+// Speak over a clip and hear yourself in place. Rec pins the moment, pauses
+// the video and opens the mic. Pause closes it, rewinds to the take before
+// this one, runs up to the mark, plays back what was said there, and lets the
+// video carry on from the same point.
+//
+// Takes are scratch — the card holds none of them until Keep. Ordering and
+// the rewind rule live in ./practice-rec.js.
+
+// The session on the card currently on screen, or null. One card at a time.
+let _pracRec = null
+
+// Which card a session belongs to. By identity rather than queue position:
+// the index drifts as soon as another card is deleted.
+function _pracRecKey(it) {
+  return it ? [it._recName, it._st, it._w, it.id, it.lineIndex].join('|') : ''
+}
+
+// A card can carry takes when there is a clip to speak over and a host that
+// can hold the bytes. A manual card already has its own two recordings.
+function _pracRecEligible(it) {
+  return !!(it && !it.manual && typeof it.timeStart === 'number' && _haveAudioBridge())
+}
+
+// Takes the card already holds. They open the session read-only: the files
+// belong to the card, so leaving without keeping must not delete them.
+function _pracRecSavedTakes(it) {
+  const list = (it && Array.isArray(it.practiceTakes)) ? it.practiceTakes : []
+  return list
+    .filter(t => t && _isAudioMediaUrl(t.url) && isFinite(Number(t.t1)))
+    .map(t => ({ t1: Number(t.t1), url: t.url, ms: Number(t.ms) || 0 }))
+}
+
+function _pracRecBegin(it) {
+  const saved = _pracRecSavedTakes(it)
+  _pracRec = {
+    key: _pracRecKey(it),
+    clipStart: Number(it.timeStart) || 0,
+    takes: saved.slice(),
+    // Files the card points at. Everything else is ours to delete.
+    kept: new Set(saved.map(t => t.url)),
+    // Kept files that a re-recording displaced. The card still points at them
+    // until Keep rewrites the list, so they cannot go before that.
+    orphans: [],
+    phase: 'idle',
+    t1: null,
+    url: null,
+    startedMs: 0,
+    token: 0,
+    timer: null,
+    audio: null,
+  }
+  return _pracRec
+}
+
+// End the session. `discard` drops every file the card does not point at.
+function _pracRecEnd(discard) {
+  const st = _pracRec
+  _pracRec = null
+  if (!st) return
+  st.token++
+  if (st.timer) { clearInterval(st.timer); st.timer = null }
+  if (st.audio) { try { st.audio.pause() } catch (_) {} st.audio = null }
+  // A recording left open holds the microphone and writes into a file nobody
+  // is going to ask for.
+  // Not awaited — the session is already gone. The catch is on the promise
+  // because the rejection arrives long after this frame has returned.
+  if (st.phase === 'recording') {
+    try { Promise.resolve(_audioRpc('recordCancel', {})).catch(() => {}) } catch (_) {}
+  }
+  if (discard) st.takes.forEach(t => { if (!st.kept.has(t.url)) deleteManualAudio(t.url) })
+}
+
+// Stop the clip's own end-watcher: while the loop is driving the playhead,
+// that watcher would pause the video somewhere of its own choosing.
+function _pracRecTakeOverPlayhead() {
+  window._practiceClipToken = (window._practiceClipToken || 0) + 1
+  if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
+}
+
+function _pracRecNow() {
+  try { return (window.ytPlayer && window.ytPlayer.getCurrentTime && window.ytPlayer.getCurrentTime()) || 0 }
+  catch (_) { return 0 }
+}
+function _pracRecPauseVideo() {
+  try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+}
+function _pracRecPlayVideo() {
+  try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
+}
+
+function _renderPracticeRecBar(note) {
+  const $bar = $('#practiceMode .practice-rec-bar')
+  if (!$bar.length) return
+  const st = _pracRec
+  if (!st) { $bar.hide().empty(); return }
+  const n = st.takes.length
+  const unkept = st.takes.filter(t => !st.kept.has(t.url)).length
+  const rec = st.phase === 'recording'
+  // Mid-loop the video is being driven for the user; a second Rec on top of
+  // that would pin a moment they did not choose.
+  const busy = st.phase === 'replaying' || st.phase === 'playback'
+  const status = note ? note
+    : rec ? 'recording — Pause to hear it back'
+    : st.phase === 'replaying' ? 'replaying…'
+    : st.phase === 'playback' ? 'your take'
+    : n ? n + (n === 1 ? ' take · ' : ' takes · ') + Math.round(_takesDuration(st.takes)) + 's'
+    : 'Rec to speak over this clip'
+  $bar.empty().append(
+    $('<button type="button" class="prec-btn prec-toggle"></button>')
+      .text(rec ? '⏸ Pause' : '● Rec')
+      .toggleClass('on', rec)
+      .prop('disabled', busy)
+      .attr('title', rec ? 'Stop and hear it back in place' : 'Record over the clip from here'),
+    $('<button type="button" class="prec-btn prec-keep"></button>')
+      .text(unkept ? '✔ Keep ' + unkept : '✔ Keep')
+      .prop('disabled', !unkept || rec || busy)
+      .attr('title', 'Save these takes on the card'),
+    $('<button type="button" class="prec-btn prec-drop">🗑</button>')
+      .prop('disabled', !unkept || rec || busy)
+      .attr('title', 'Throw away the takes that were never kept'),
+    $('<span class="prec-status"></span>').text(status)
+  ).show()
+}
+
+function _pracRecToggle() {
+  const st = _pracRec
+  if (!st) return
+  if (st.phase === 'recording') { _pracRecStop(); return }
+  if (st.phase !== 'idle') return
+  _pracRecStart()
+}
+
+async function _pracRecStart() {
+  const st = _pracRec
+  if (!st || st.phase !== 'idle') return
+  const t1 = _pracRecNow() || st.clipStart
+  _pracRecTakeOverPlayhead()
+  _pracRecPauseVideo()
+  let perm = 'unknown'
+  try { perm = await ensureMicPermissionViaBridge() } catch (_) {}
+  if (_pracRec !== st) return
+  if (perm === 'denied') {
+    alert('Microphone permission was denied. Enable it in Settings → Apps → Cupitor → Permissions.')
+    return
+  }
+  // Claimed before the round trip: until the bridge answers, anything asking
+  // whether this is recording would otherwise be told no.
+  st.phase = 'recording'
+  st.t1 = t1
+  st.startedMs = Date.now()
+  _renderPracticeRecBar()
+  const id = 'prec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  let url
+  try { url = await _audioRpc('recordStart', { id }) }
+  catch (e) {
+    if (_pracRec === st) {
+      st.phase = 'idle'; st.t1 = null
+      _renderPracticeRecBar('could not start recording')
+    }
+    console.warn('[practiceRec] recordStart failed', e)
+    return
+  }
+  // The card changed while the bridge was answering — the file belongs to
+  // nobody now.
+  if (_pracRec !== st) {
+    try { await _audioRpc('recordStop', {}) } catch (_) {}
+    if (url) deleteManualAudio(url)
+    return
+  }
+  st.url = url
+}
+
+async function _pracRecStop() {
+  const st = _pracRec
+  if (!st || st.phase !== 'recording') return
+  const t1 = st.t1
+  const ms = Date.now() - st.startedMs
+  let url = null
+  try { url = await _audioRpc('recordStop', {}) }
+  catch (e) { console.warn('[practiceRec] recordStop failed', e) }
+  if (_pracRec !== st) { if (url) deleteManualAudio(url); return }
+  st.phase = 'idle'
+  st.t1 = null
+  st.url = null
+  // Dart answers null when there was not enough audio to keep.
+  if (!url) { _renderPracticeRecBar('nothing recorded — hold it longer'); return }
+  const res = _addTake(st.takes, { t1, url, ms })
+  st.takes = res.takes
+  if (res.replaced) {
+    // A take the card already points at cannot be deleted until Keep has
+    // rewritten the list; one that was only ever scratch can go now.
+    if (st.kept.has(res.replaced.url)) { st.orphans.push(res.replaced.url); st.kept.delete(res.replaced.url) }
+    else deleteManualAudio(res.replaced.url)
+  }
+  _renderPracticeRecBar()
+  _pracRecReplay(t1)
+}
+
+// Rewind to the take before this one, run up to the mark, play what was said
+// there, then let the video carry on.
+function _pracRecReplay(t1) {
+  const st = _pracRec
+  if (!st) return
+  const tk = _takeAt(st.takes, t1)
+  if (!tk) return
+  const from = _rewindPointFor(st.takes, t1, st.clipStart)
+  const token = ++st.token
+  st.phase = 'replaying'
+  _renderPracticeRecBar()
+  _pracRecTakeOverPlayhead()
+  ;(async () => {
+    try { await seekToYoutubeTime(from) } catch (_) {}
+    if (_pracRec !== st || token !== st.token) return
+    _pracRecPlayVideo()
+    if (st.timer) { clearInterval(st.timer); st.timer = null }
+    st.timer = setInterval(() => {
+      if (_pracRec !== st || token !== st.token) { clearInterval(st.timer); st.timer = null; return }
+      if (_pracRecNow() < Number(tk.t1)) return
+      clearInterval(st.timer); st.timer = null
+      _pracRecPauseVideo()
+      _pracRecPlayTake(st, tk, token)
+    }, 120)
+  })()
+}
+
+async function _pracRecPlayTake(st, tk, token) {
+  st.phase = 'playback'
+  _renderPracticeRecBar()
+  // The file lives outside the page's origin; the bridge hands back the bytes.
+  let dataUrl = null
+  try { dataUrl = await loadManualAudioData(tk.url) } catch (_) {}
+  if (_pracRec !== st || token !== st.token) return
+  // Whatever happens to the playback, the video carries on from the mark —
+  // a take that will not sound must not strand the loop.
+  let done = false
+  const carryOn = () => {
+    if (done) return
+    done = true
+    if (_pracRec !== st || token !== st.token) return
+    st.audio = null
+    st.phase = 'idle'
+    _renderPracticeRecBar()
+    _pracRecPlayVideo()
+  }
+  if (!dataUrl) { carryOn(); return }
+  const a = new Audio(dataUrl)
+  st.audio = a
+  a.addEventListener('ended', carryOn)
+  a.addEventListener('error', carryOn)
+  try { const pr = a.play(); if (pr && pr.catch) pr.catch(() => carryOn()) }
+  catch (_) { carryOn() }
+}
+
+// Write the takes onto the card. Located by identity, the same way the
+// replace and delete actions do it.
+function _pracRecKeep() {
+  const st = _pracRec
+  if (!st) return
+  const it = (window._practiceCards || [])[window._practiceIdx]
+  if (!it) return
+  const rec = window._recordings && window._recordings[it._recName]
+  const arr = rec && rec.items && rec.items[it._st] && rec.items[it._st][it._w]
+  if (!Array.isArray(arr)) { alert('Cannot locate this card in its playlist.'); return }
+  let i = arr.findIndex(x => x && x.id === it.id && x.lineIndex === it.lineIndex)
+  if (i < 0 && typeof it._idx === 'number' && it._idx < arr.length) i = it._idx
+  if (i < 0) { alert('Cannot locate this card in its playlist.'); return }
+  const takes = st.takes.map(t => ({ t1: t.t1, url: t.url, ms: t.ms }))
+  if (takes.length) arr[i].practiceTakes = takes
+  else delete arr[i].practiceTakes
+  // Mirror onto the queue copy so leaving and returning shows the same thing.
+  it.practiceTakes = arr[i].practiceTakes
+  rec.updatedAt = Date.now()
+  _saveRecording()
+  st.kept = new Set(takes.map(t => t.url))
+  // Now that the card no longer points at them, the displaced files can go.
+  st.orphans.splice(0).forEach(u => deleteManualAudio(u))
+  _renderPracticeRecBar('kept on this card')
+}
+
+// Throw away what was never kept, leaving the card as it was.
+function _pracRecDiscard() {
+  const st = _pracRec
+  if (!st) return
+  const loose = st.takes.filter(t => !st.kept.has(t.url))
+  if (!loose.length) return
+  if (!confirm('Throw away ' + loose.length + ' take' + (loose.length === 1 ? '' : 's') +
+               ' that ' + (loose.length === 1 ? 'was' : 'were') + " never kept?")) return
+  st.takes = st.takes.filter(t => st.kept.has(t.url))
+  loose.forEach(t => deleteManualAudio(t.url))
+  _renderPracticeRecBar('discarded')
+}
+
 // Render the front/back as a column of subtitle lines (matched ± context).
 // Each line carries data so the inline editor can target the right SRT line.
 // `highlightWord` is the captured word for this card; the source side runs
@@ -19184,6 +19899,14 @@ async function _renderPracticeCard() {
   try { _setLastPlayed(it, 'practice', idx) } catch (_) {}
   // Keep the info panel in sync as the user navigates cards, if it's open.
   if ($p.find('.practice-info-panel').is(':visible')) _updatePracticeInfo()
+  // A shadowing session belongs to one card. Landing on a different one ends
+  // the old session and drops whatever it was never told to keep; landing
+  // back on the same card (a flip, a re-render) leaves it running.
+  if (!_pracRec || _pracRec.key !== _pracRecKey(it)) {
+    try { _pracRecEnd(true) } catch (_) {}
+    if (_pracRecEligible(it)) _pracRecBegin(it)
+  }
+  _renderPracticeRecBar()
   const srcCode = ((typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv').toUpperCase()
   const frontIsSource = window._practiceFrontIsSource
   const mode = (window._appSettings && window._appSettings.practiceRevealMode) || 'flip'
