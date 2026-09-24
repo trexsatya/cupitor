@@ -673,6 +673,14 @@ function moveActiveObject(prop, amount) {
   activeObject.setCoords();
   updateTreeItem(activeObject)
   pc.renderAll()
+  if (activeObject.uid) {
+    recordScript(`animate(${JSON.stringify(activeObject.uid)}, ${JSON.stringify({ [prop]: activeObject[prop] })}, {"duration":100})`)
+  } else if (activeObject.type === 'activeselection') {
+    // Same form a multi-object drag records (see pc mouse:up in play.html).
+    const moves = activeObject._objects.filter(o => o.uid)
+      .map(o => `animate('${o.uid}', ${JSON.stringify(getActualProperties(o, true))}, {"duration":100})`)
+    if (moves.length) recordScript(`Promise.all([${moves.join(",")}])`)
+  }
 }
 
 /**
@@ -784,9 +792,67 @@ function duplicate(obj) {
   }
 
   return obj.clone().then(cloned => {
-    pc.add(cloned);
-    return cloned;
+    const added = _addClones(cloned, 0);
+    return added.length === 1 ? added[0] : added;
   });
+}
+
+// clone() copies uid, customData and treeConnection (see the toObject
+// override), so a copy would share the source's identity. Give it its own
+// before adding; pc.add then assigns a fresh uid.
+function _detachClone(o) {
+  delete o.uid;
+  _detachIdentity(o);
+  // Objects inside a group are cloned with their uids too; give them fresh
+  // ones now so they are recorded and replay (e.g. after Ungroup) to the same ids.
+  (o._objects || []).forEach(function renew(child) {
+    if (child.uid) child.uid = semanticUid(child.type || '');
+    _detachIdentity(child);
+    if (child.customData && child.uid) child.customData.uid = child.uid;
+    (child._objects || []).forEach(renew);
+  });
+}
+
+function _detachIdentity(o) {
+  if (o.customData) {
+    o.customData = JSON.parse(JSON.stringify(o.customData));
+    delete o.customData.uid;
+  }
+  delete o.treeConnection;
+}
+
+// Adds a clone (or each object of a cloned multi-selection) to pc, shifted
+// by `offset`, and records one line that recreates exactly these objects.
+function _addClones(cloned, offset) {
+  const objs = cloned.type === 'activeselection' ? cloned.removeAll() : [cloned];
+  objs.forEach(o => {
+    _detachClone(o);
+    o.set({ left: o.left + offset, top: o.top + offset, evented: true });
+    pc.add(o);
+    o.setCoords();
+  });
+  pc.requestRenderAll();
+  recordScript(`Promise.resolve(addClones(${JSON.stringify(objs.map(o => o.toObject()))}))`);
+  return objs;
+}
+
+function _trackUid(obj) {
+  customData(obj).uid = obj.uid;
+  window.objectIds.add({uid: obj.uid, type: 'fabric.js ' + (customData(obj).type || '')});
+  updateObjectIdsUi();
+}
+
+// Recorded-script form of Duplicate / Paste: recreates the copies, uids included.
+async function addClones(jsonList) {
+  const objs = await fabric.util.enlivenObjects(jsonList);
+  objs.forEach((o, i) => {
+    o.uid = jsonList[i].uid;
+    pc.add(o);
+    o.setCoords();
+    _trackUid(o);
+  });
+  pc.requestRenderAll();
+  return objs;
 }
 
 function copy(canvas, obj) {
@@ -810,38 +876,9 @@ function paste(canvas) {
   // clone again, so you can do multiple copies.
   _clipboard.clone().then(function (clonedObj) {
     canvas.discardActiveObject();
-
-    const options = {
-      left: clonedObj.left + 10,
-      top: clonedObj.top + 10,
-      evented: true,
-    };
-
-    clonedObj.set(options);
-
-    if (clonedObj.type === 'activeSelection') {
-      // active selection needs a reference to the canvas.
-      clonedObj.canvas = canvas;
-      clonedObj.forEachObject(function (obj) {
-        const id = globalStore('clone', obj)
-        console.log(`Cloned _.${id}`)
-        canvas.add(obj);
-        const tr = obj.calcTransformMatrix()
-        options.left = obj.left + 10 + tr[4]
-        options.top = obj.top + 10 + tr[5]
-        obj.set(options)
-        obj.setCoords();
-      });
-
-    } else {
-      const id = globalStore('clone', clonedObj)
-      console.log(`Cloned _.${id}`)
-      canvas.add(clonedObj);
-    }
+    _addClones(clonedObj, 10).forEach(obj => globalStore('clone', obj));
     _clipboard.top += 10;
     _clipboard.left += 10;
-
-    canvas.renderAll();
   });
 }
 
@@ -1343,6 +1380,7 @@ function degroup(pc) {
   const grp = pc.getActiveObject();
   if (!grp || (grp.type !== 'group' && grp.type !== 'activeselection')) return;
   const items = grp.getObjects() || [];
+  if (grp.type === 'group' && grp.uid) recordScript(`ungroupObjects(${JSON.stringify(grp.uid)})`);
 
   // Snapshot absolute world-space transforms for every item BEFORE any mutation,
   // while the group is still on canvas and item.group references are intact.
@@ -1391,21 +1429,46 @@ function degroup(pc) {
   pc.requestRenderAll();
 }
 
-function group(pc) {
-  const sel = pc.getActiveObject();
-  if (!sel || sel.type !== 'activeselection') return;
-
-  // Create a new Group from the selected objects
-  const objectsToGroup = [...sel._objects];
+// Replaces the given objects (uids or objects) with one Group on pc.
+// Used by group() and by recorded scripts, so replay recreates the same uid.
+function groupObjects(items, uid) {
+  const objectsToGroup = items.map(findIfRequired).filter(isFabricObject);
+  if (objectsToGroup.length < 2) return null;
   const group = new fabric.Group(objectsToGroup);
+  if (uid) group.uid = uid;
 
   // Remove the individual objects and add the group
   objectsToGroup.forEach(obj => pc.remove(obj));
   pc.add(group);
+  if (uid) _trackUid(group);
+  return group;
+}
+
+function group(pc) {
+  const sel = pc.getActiveObject();
+  if (!sel || sel.type !== 'activeselection') return;
+
+  const objectsToGroup = [...sel._objects];
+  const uids = objectsToGroup.map(o => o.uid);
+  const group = groupObjects(objectsToGroup);
+  if (!group) return;
 
   // Discard current selection and set the group as active
   pc.discardActiveObject();
   pc.setActiveObject(group);
+  pc.requestRenderAll();
+  if (uids.every(Boolean)) recordScript(`groupObjects(${JSON.stringify(uids)}, ${JSON.stringify(group.uid)})`);
+}
+
+// Recorded-script form of Ungroup.
+function ungroupObjects(uid) {
+  const grp = findIfRequired(uid);
+  if (!isFabricObject(grp) || grp.type !== 'group') return;
+  pc.setActiveObject(grp);
+  degroup(pc);
+  // degroup leaves the pieces selected; while selected their left/top are
+  // relative to the selection, which later recorded lines don't expect.
+  pc.discardActiveObject();
   pc.requestRenderAll();
 }
 
@@ -1484,7 +1547,25 @@ function buildScriptExecutables() {
 function playScript() {
   const fns = buildScriptExecutables().map(eval)
   if (!fns.length) return
-  schedule(fns, 1)
+  const total = fns.length
+  // A failing line is reported and skipped, so playback (and play mode)
+  // always reaches the end.
+  const report = (i, err) => {
+    console.error(`Script line ${i + 1} failed:`, err)
+    window.showPlayLine && showPlayLine(i + 1, total, err && err.message || String(err))
+  }
+  const steps = fns.map((fn, i) => () => {
+    window.showPlayLine && showPlayLine(i + 1, total)
+    try {
+      const result = fn()
+      return result instanceof Promise ? result.catch(err => report(i, err)) : result
+    } catch (err) {
+      report(i, err)
+    }
+  })
+  window._stopPlayback = false
+  window.enterPlayMode && enterPlayMode()
+  schedule(steps, 1, null, () => window.exitPlayMode && exitPlayMode(), () => window._stopPlayback)
 }
 
 function exportScript() {

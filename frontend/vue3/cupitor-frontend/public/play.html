@@ -38,6 +38,10 @@
     <script type="module">
         import * as DS from '/data-structures.js';
         Object.assign(window, DS);
+        import * as Layers from '/play-layers.js';
+        Object.assign(window, Layers);
+        import * as Flow from '/play-flow.js';
+        Object.assign(window, Flow);
     </script>
     <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
     <script type="text/javascript" src="/fabric.play.js"></script>
@@ -306,7 +310,7 @@
 </head>
 
 <body>
-<span style="position:fixed;top:2rem;right: 1rem">
+<span id="layer-info-bar" style="position:fixed;top:2rem;right: 1rem">
         Lyr: <span id="layerInfo" style="color: blue">PC</span>;
         Uid: <span id="selectedObjId" style="color: blue"></span>;
     </span>
@@ -1383,7 +1387,7 @@
 
 <!-- Script Viewer / Editor Dialog -->
 <div id="scriptViewerDialog" style="display:none;position:fixed;inset:0;z-index:9999998;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;">
-    <div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.35);width:96vw;height:94vh;display:flex;flex-direction:column;font-family:system-ui,sans-serif;">
+    <div style="background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.35);width:96vw;height:94vh;position:relative;display:flex;flex-direction:column;font-family:system-ui,sans-serif;">
         <div style="background:#f5f5f5;border-bottom:1px solid #ddd;padding:12px 16px;border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:space-between;">
             <span style="font-weight:600;font-size:14px;color:#333;">&#128196; Recorded Script</span>
             <div style="display:flex;gap:8px;">
@@ -1392,6 +1396,7 @@
                 <button onclick="$('#importDialog').show()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Import</button>
                 <button onclick="clearScriptDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Clear</button>
                 <button onclick="copyScriptDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Copy All</button>
+                <button onclick="toggleScriptHelp()" title="Functions you can use in a script" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">? Functions</button>
                 <button onclick="saveScriptEdits()" style="padding:4px 10px;border:1px solid #1976D2;border-radius:4px;background:#1976D2;color:#fff;font-size:12px;cursor:pointer;">Save Edits</button>
                 <button onclick="closeScriptDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;font-size:16px;line-height:1;">&times;</button>
             </div>
@@ -1400,6 +1405,18 @@
             Each line is one recorded operation. Edit freely — click <em>Save Edits</em> to apply changes back to the recording.
         </div>
         <div id="scriptViewerEditor" style="flex:1;min-height:350px;width:100%;"></div>
+        <div id="scriptHelpPopup" style="display:none;position:absolute;top:70px;right:24px;width:min(460px, calc(100% - 48px));max-height:70vh;z-index:10;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.25);flex-direction:column;font-size:12px;">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #eee;">
+                <strong style="color:#333;">Script functions</strong>
+                <input id="scriptHelpFilter" type="text" placeholder="Filter" oninput="renderScriptHelp(this.value)"
+                       style="flex:1;font-size:12px;padding:3px 6px;border:1px solid #ddd;border-radius:4px;">
+                <button onclick="toggleScriptHelp(false)" title="Close" style="border:none;background:none;font-size:16px;cursor:pointer;line-height:1;">&times;</button>
+            </div>
+            <div style="padding:6px 10px;color:#888;border-bottom:1px solid #f3f3f3;">
+                Wherever <code>uid</code> is asked for, you can pass the object itself. Click a function to insert it at the cursor.
+            </div>
+            <div id="scriptHelpList" style="overflow-y:auto;padding:4px 0 8px 0;"></div>
+        </div>
         <div style="padding:10px 16px;background:#f9f9f9;border-top:1px solid #eee;border-radius:0 0 10px 10px;font-size:11px;color:#aaa;">
             <span id="scriptLineCount">0 lines</span>
         </div>
@@ -1796,7 +1813,28 @@
     <button class="wb-tool" title="Toggle Grid (G)" onclick="gridManager.toggle()">
         <i class="fas fa-th"></i>
     </button>
+    <div class="wb-separator"></div>
+    <button class="wb-tool" title="Script editor (Ctrl/&#8984;+Shift+S)" onclick="openScriptDialog()">
+        <i class="fas fa-code"></i>
+    </button>
+    <button class="wb-tool" title="Keyboard shortcuts (?)" onclick="toggleShortcutsHelp()">
+        <i class="fas fa-keyboard"></i>
+    </button>
 </div>
+
+<!-- Keyboard shortcuts help -->
+<div id="shortcuts-help" onclick="if (event.target === this) toggleShortcutsHelp(false)">
+    <div class="shortcuts-box">
+        <div class="shortcuts-head">
+            <strong>Keyboard shortcuts</strong>
+            <button onclick="toggleShortcutsHelp(false)" title="Close (Esc)">&times;</button>
+        </div>
+        <div id="shortcuts-list"></div>
+    </div>
+</div>
+
+<!-- Line being played (shown only during script playback) -->
+<div id="play-line-badge"></div>
 
 <!-- Zoom Controls -->
 <div id="zoom-controls">
@@ -1815,6 +1853,11 @@
 <!-- Property Panel -->
 <div id="property-panel">
     <div class="prop-header">Properties</div>
+    <div id="prop-stack-section" style="display:none;">
+        <div class="prop-row"><label style="margin-bottom:0;">Objects here (top first)</label></div>
+        <div id="prop-stack-list"></div>
+        <div class="prop-section-divider"></div>
+    </div>
     <div id="prop-shape-section">
         <div class="prop-row">
             <label>Fill</label>
@@ -1828,6 +1871,11 @@
             <label>Stroke W</label>
             <input type="number" id="prop-stroke-width" value="1" min="0" max="50" step="0.5" style="width:60px;"
                    onchange="applyProperty('strokeWidth', parseFloat(this.value))">
+        </div>
+        <div class="prop-row" id="prop-radius-row" style="display:none;">
+            <label>Corner radius</label>
+            <input type="number" id="prop-radius" value="0" min="0" max="500" step="1" style="width:60px;"
+                   onchange="applyCornerRadius(parseFloat(this.value) || 0)">
         </div>
         <div class="prop-row">
             <label>Stroke Type</label>
@@ -1851,6 +1899,7 @@
             <button class="prop-toggle" onclick="sendToBackSelected()" title="Send to Back">
                 <i class="fas fa-angles-down"></i>
             </button>
+            <span id="prop-layer-pos" style="font-size:11px;color:#555;white-space:nowrap;"></span>
         </div>
         <div class="prop-row">
             <label>Animate</label>
@@ -1859,6 +1908,7 @@
                 <option value="spotlight">Spotlight (auto)</option>
                 <option value="spotlight:circle">Spotlight (circle)</option>
                 <option value="spotlight:rect">Spotlight (rect)</option>
+                <option value="flow">Flow (source &rarr; target)</option>
             </select>
             <button id="prop-anim-toggle" class="prop-toggle" onclick="toggleSelectedAnim()" title="Start/Stop animation">&#9654; Start</button>
         </div>
@@ -1945,6 +1995,11 @@
 
 <!-- Context Menu -->
 <div id="wb-context-menu">
+    <div id="ctx-layer-section" style="display:none;">
+        <div class="ctx-heading">Select layer</div>
+        <div id="ctx-layer-list"></div>
+        <div class="ctx-separator"></div>
+    </div>
     <div class="ctx-item" onclick="copy(pc); closeContextMenu()"><i class="fas fa-copy"></i> Copy <span class="shortcut">Ctrl+C</span></div>
     <div class="ctx-item" onclick="paste(pc); closeContextMenu()"><i class="fas fa-paste"></i> Paste <span class="shortcut">Ctrl+V</span></div>
     <div class="ctx-item" onclick="duplicateSelected(); closeContextMenu()"><i class="fas fa-clone"></i> Duplicate</div>
@@ -2083,10 +2138,63 @@
     // Property panel show/hide
     pc.on('selection:created', showPropertyPanel);
     pc.on('selection:updated', showPropertyPanel);
+    ['object:modified', 'object:added', 'object:removed'].forEach(ev => pc.on(ev, () => {
+        if (document.getElementById('property-panel').classList.contains('visible')) _renderStackList();
+    }));
     pc.on('selection:cleared', function() {
         document.getElementById('property-panel').classList.remove('visible');
         document.getElementById('tree-node-panel').classList.remove('visible');
     });
+
+    // Lists every object under the current selection so ones covered by
+    // others can still be picked. Hidden when the selection overlaps nothing.
+    function _renderStackList() {
+        const section = document.getElementById('prop-stack-section');
+        const list = document.getElementById('prop-stack-list');
+        const active = pc.getActiveObject();
+        list.innerHTML = '';
+        if (!active || typeof overlappingStack !== 'function') { section.style.display = 'none'; return; }
+        document.getElementById('prop-layer-pos').textContent = layerPosition(pc.getObjects(), pc.getActiveObjects());
+        const selected = new Set(pc.getActiveObjects());
+        const stack = overlappingStack(pc.getObjects(), [...selected].map(o => o.getBoundingRect()),
+            o => o.getBoundingRect(), o => selected.has(o));
+        if (stack.length < 2) { section.style.display = 'none'; return; }
+        section.style.display = '';
+        stack.forEach(o => {
+            const row = document.createElement('div');
+            row.className = 'tree-child-row prop-stack-row' + (selected.has(o) ? ' selected' : '');
+            row.title = 'Select this object';
+            const swatch = document.createElement('span');
+            swatch.className = 'prop-stack-swatch';
+            const colour = _layerSwatchColour(o);
+            if (colour) swatch.style.background = colour;
+            const lbl = document.createElement('span');
+            lbl.className = 'tree-child-label';
+            lbl.textContent = layerLabel(o);
+            row.appendChild(swatch);
+            row.appendChild(lbl);
+            row.onclick = () => {
+                pc.discardActiveObject();
+                pc.setActiveObject(o);
+                pc.requestRenderAll();
+            };
+            list.appendChild(row);
+        });
+    }
+
+    // "Flow" only applies to connectors with a direction (see canFlow).
+    function _syncFlowOption() {
+        const select = document.getElementById('prop-anim-type');
+        const option = select.querySelector('option[value="flow"]');
+        const applicable = typeof canFlow === 'function' && pc.getActiveObjects().some(canFlow);
+        option.hidden = option.disabled = !applicable;
+        if (!applicable && select.value === 'flow') select.value = 'highlight';
+    }
+
+    function _layerSwatchColour(o) {
+        return (_isStickyNote(o) && o.customData.color) ||
+            (typeof o.fill === 'string' && o.fill) || (typeof o.stroke === 'string' && o.stroke) || '';
+    }
 
     function isTextObject(obj) {
         if (!obj) return false;
@@ -2099,6 +2207,8 @@
         if (!obj) return;
         const panel = document.getElementById('property-panel');
         panel.classList.add('visible');
+        _renderStackList();
+        _syncFlowOption();
 
         const shapeSection = document.getElementById('prop-shape-section');
         const textSection = document.getElementById('prop-text-section');
@@ -2112,6 +2222,10 @@
         const stickyInnerRect = isSticky && typeof obj.getObjects === 'function'
             ? obj.getObjects().find(o => o.type === 'rect')
             : null;
+
+        const isRect = obj instanceof fabric.Rect;
+        document.getElementById('prop-radius-row').style.display = isRect ? '' : 'none';
+        if (isRect) document.getElementById('prop-radius').value = obj.rx || 0;
 
         // Shape properties: show for non-text objects (and for stickies —
         // they expose paper colour + opacity but no stroke).
@@ -2226,6 +2340,15 @@
         newState[prop] = value;
         undoManager.push(Commands.modifyObject(pc, obj, prevState, newState));
         if (obj.uid) recordScript(`setProp('${obj.uid}', '${prop}', ${JSON.stringify(value)})`);
+    }
+
+    function applyCornerRadius(radius) {
+        const obj = pc.getActiveObject();
+        if (!(obj instanceof fabric.Rect)) return;
+        const prevState = { rx: obj.rx || 0, ry: obj.ry || 0 };
+        setCornerRadius(obj, radius);
+        undoManager.push(Commands.modifyObject(pc, obj, prevState, { rx: radius, ry: radius }));
+        if (obj.uid) recordScript(`setCornerRadius(${JSON.stringify(obj.uid)}, ${JSON.stringify(radius)})`);
     }
 
     function applyTextFill(value) {
@@ -2385,12 +2508,20 @@
     // Close overlay on Escape key; open the script editor with Ctrl/Cmd+Shift+S.
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
+            if (document.getElementById('shortcuts-help').classList.contains('visible')) toggleShortcutsHelp(false);
+            if (document.body.classList.contains("play-mode")) stopScriptPlayback();
             if (document.getElementById('media-overlay').style.display === 'flex') {
                 closeMediaOverlay();
             }
             if (document.getElementById('scriptViewerDialog').style.display === 'flex') {
                 closeScriptDialog();
             }
+        }
+        if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+            const t = e.target;
+            const typing = t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable);
+            const editingText = window.pc && pc.getActiveObject() && pc.getActiveObject().isEditing;
+            if (!typing && !editingText) { e.preventDefault(); toggleShortcutsHelp(); }
         }
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'S' || e.key === 's')) {
             // Don't swallow the shortcut while the user is editing an IText
@@ -2409,7 +2540,10 @@
     // dialog because it's handled here before propagation is stopped.
     ['keydown', 'keyup', 'keypress'].forEach(type => {
         document.getElementById('scriptViewerDialog').addEventListener(type, e => {
-            if (type === 'keydown' && e.key === 'Escape') closeScriptDialog();
+            if (type === 'keydown' && e.key === 'Escape') {
+                if (document.getElementById('scriptHelpPopup').style.display === 'flex') toggleScriptHelp(false);
+                else closeScriptDialog();
+            }
             e.stopPropagation();
         });
     });
@@ -2439,6 +2573,209 @@
 
     function closeScriptDialog() {
         document.getElementById('scriptViewerDialog').style.display = 'none';
+    }
+
+    // ---- Play mode: clutter-free canvas while a script plays ----
+    function enterPlayMode() {
+        document.body.classList.add('play-mode');
+        [window.pc, window.oc].forEach(c => { if (c) { c.skipControlsDrawing = true; c.requestRenderAll(); } });
+    }
+
+    function exitPlayMode() {
+        document.body.classList.remove('play-mode');
+        document.getElementById('play-line-badge').textContent = '';
+        [window.pc, window.oc].forEach(c => { if (c) { c.skipControlsDrawing = false; c.requestRenderAll(); } });
+    }
+
+    // Esc during playback: the line in progress finishes, the rest are skipped.
+    function stopScriptPlayback() {
+        window._stopPlayback = true;
+        window.isRecordingPlayback = false;
+        exitPlayMode();
+    }
+
+    function showPlayLine(n, total, error) {
+        const badge = document.getElementById('play-line-badge');
+        badge.textContent = error ? `Line ${n} of ${total} failed: ${error}` : `Line ${n} of ${total}`;
+        badge.classList.toggle('failed', !!error);
+    }
+
+    // ---- Keyboard shortcuts help ----
+    const KEYBOARD_SHORTCUTS = [
+        ['Tools', [
+            ['V', 'Select tool'],
+            ['H', 'Hand / pan (when nothing is selected)'],
+            ['P', 'Pen'],
+            ['S', 'Rectangle (when nothing is selected)'],
+            ['N', 'Sticky note'],
+            ['T', 'Small text; with an object selected, make a tree from it'],
+            ['G', 'Show / hide grid'],
+            ['R', 'Show / hide rulers'],
+            ['D', 'Switch which layer is in front for drawing'],
+        ]],
+        ['Edit', [
+            ['Ctrl/\u2318 + Z', 'Undo'],
+            ['Ctrl/\u2318 + Shift + Z,  Ctrl/\u2318 + Y', 'Redo'],
+            ['Ctrl/\u2318 + A', 'Select all'],
+            ['Ctrl/\u2318 + G', 'Group selected objects'],
+            ['Ctrl + C', 'Copy (also opens the notes editor for the selected object)'],
+            ['Ctrl + V', 'Paste'],
+            ['Delete,  Backspace', 'Delete selected'],
+            ['E', 'Edit selected object'],
+            ['H', 'Hide selected object'],
+            ['Arrow keys', 'Move selected object by 10px'],
+            ['+  /  \u2212', 'Grow / shrink selected object (tree node: show / hide children)'],
+            ['L', 'Clear drawings (asks first)'],
+        ]],
+        ['View', [
+            ['+  /  \u2212', 'Zoom in / out (when nothing is selected)'],
+            ['Ctrl/\u2318 + 0', 'Reset zoom'],
+            ['Ctrl + ,', 'Bring main canvas to front'],
+            ['Ctrl + .', 'Bring drawing canvas to front'],
+            ['Ctrl + T', 'Bring text layer to front'],
+            ['Ctrl + I', 'Open inspector'],
+        ]],
+        ['Scripts', [
+            ['Ctrl/\u2318 + Shift + S', 'Open the script editor'],
+            ['Esc', 'Stop animations and return to Select; during playback, stop the script'],
+            ['?', 'This list'],
+        ]],
+    ];
+
+    function toggleShortcutsHelp(show) {
+        const el = document.getElementById('shortcuts-help');
+        const open = show != null ? show : !el.classList.contains('visible');
+        if (open && !el.dataset.rendered) {
+            const list = document.getElementById('shortcuts-list');
+            KEYBOARD_SHORTCUTS.forEach(([group, items]) => {
+                const h = document.createElement('div');
+                h.className = 'shortcuts-group';
+                h.textContent = group;
+                list.appendChild(h);
+                items.forEach(([keys, what]) => {
+                    const row = document.createElement('div');
+                    row.className = 'shortcuts-row';
+                    const k = document.createElement('span');
+                    k.className = 'shortcuts-keys';
+                    keys.split(/,\s+/).forEach(combo => {
+                        const kbd = document.createElement('kbd');
+                        kbd.textContent = combo;
+                        k.appendChild(kbd);
+                    });
+                    const d = document.createElement('span');
+                    d.textContent = what;
+                    row.appendChild(k);
+                    row.appendChild(d);
+                    list.appendChild(row);
+                });
+            });
+            el.dataset.rendered = '1';
+        }
+        el.classList.toggle('visible', open);
+    }
+
+    // Functions a recorded script can call, grouped for the "? Functions" popup.
+    const SCRIPT_HELP = [
+        ['Create', [
+            ['addRect(left, top, width, height, opts)', 'Rectangle'],
+            ['addDiamond(left, top, width, height, opts)', 'Diamond'],
+            ['addEllipse(left, top, rx, ry, opts)', 'Ellipse'],
+            ['addLine([x1, y1, x2, y2], opts)', 'Straight line'],
+            ['arrow(x1, y1, x2, y2, opts)', 'Arrow (returns it; add with pc.add)'],
+            ['textbox(opts)', 'Text box (returns it; add with pc.add)'],
+            ['textInRect(text, x, y, optsText, optsRect, uid)', 'Text inside a rectangle (returns it; add with pc.add)'],
+            ['textInQuad(text, x, y, width, height, optsText, optsShape)', 'Text inside a reshapeable box; returns {quad, text}'],
+            ['addStickyNote(x, y, opts)', 'Sticky note'],
+            ['addShapeLabel(shapeUid, position, text, opts)', 'Label attached to a shape'],
+            ['addImage(url, left, top, opts)', 'Image from a URL'],
+            ['addMath(tex, left, top, opts)', 'Rendered maths (TeX)'],
+            ['createFreehandPath(pathString, opts)', 'Freehand path (returns it; add with pc.add or oc.add)'],
+            ['showArray(items, x, y, canvas, opts)', 'Row of boxed values'],
+            ['showMatrix(rows, x, y, canvas, opts)', 'Grid of boxed values'],
+            ['renderSubtree(values, opts, node)', 'Tree of nodes'],
+            ['writeTextList(lines, x, y, opts)', 'Write lines of text (also writeTextListOrdered)'],
+            ['typeTextList(lines, x, y, opts)', 'Type lines of text (also typeTextListOrdered)'],
+        ]],
+        ['Change', [
+            ['setProp(uid, prop, value)', 'Set one property, e.g. fill'],
+            ['setCornerRadius(uid, radius)', 'Round the corners of a rectangle'],
+            ['setText(uid, text)', 'Replace the text of an object'],
+            ['setStickyProp(uid, prop, value)', 'Sticky note colour or text property'],
+            ['setQuadLabel(uid, text)', 'Text of a textInQuad box'],
+            ['setCustomData(uid, data)', 'Merge into customData'],
+            ['reshapeLine(uid, points, cx, cy)', 'Move the end points of a line'],
+            ['reshapeLineXY(uid, x1, y1, x2, y2)', 'Move the end points of a line'],
+            ['reshapeQuad(uid, points, props)', 'Move the corners of a box'],
+            ['bringToFront(uid)', 'Put on top of everything'],
+            ['sendToBack(uid)', 'Put behind everything'],
+            ['hideObject(uid)', 'Hide (and its tree lines)'],
+            ['showObject(uid)', 'Show again'],
+            ['removeByUid(uid)', 'Delete'],
+            ['addClones([json])', 'Recreate duplicated / pasted objects (recorded for you)'],
+        ]],
+        ['Animate', [
+            ['animate(uid, props, {duration})', 'Tween properties; waits until done (default 1000 ms)'],
+            ['animatePath(uid, samples, {duration})', 'Replay a recorded curved drag'],
+            ['anim(uid, type, opts)', "Start 'highlight', 'spotlight', 'spotlight:circle', 'spotlight:rect' or 'flow'"],
+            ["anim(uid, 'flow', {duration, color})", 'Dot travels along an arrow from its source to where it points'],
+            ['stopAnim(uid)', 'Stop it; with no argument stops everything'],
+            ['zoomSelectedObject(uid, isPlus, amount)', 'Grow or shrink an object'],
+            ['expandTreeItems(uid)', 'Show the children of a tree node'],
+            ['collapseTreeItems(uid)', 'Hide the children of a tree node'],
+        ]],
+        ['Canvas & timing', [
+            ['sleep(seconds)', 'Pause; returns a promise'],
+            ['clear(layer)', "Clear 'pc', 'oc' or 'txt'; no argument clears all"],
+            ['findIfRequired(uid)', 'Look up an object by uid'],
+            ['pc  /  oc', 'Main and overlay canvases (Fabric.js)'],
+            ["_['id']", 'Objects stored by earlier script lines'],
+        ]],
+    ];
+
+    function renderScriptHelp(filter) {
+        const q = (filter || '').trim().toLowerCase();
+        const list = document.getElementById('scriptHelpList');
+        list.innerHTML = '';
+        SCRIPT_HELP.forEach(([group, items]) => {
+            const shown = items.filter(([sig, desc]) => !q || (sig + ' ' + desc).toLowerCase().includes(q));
+            if (!shown.length) return;
+            const h = document.createElement('div');
+            h.textContent = group;
+            h.style.cssText = 'padding:6px 10px 2px;font-weight:600;color:#666;';
+            list.appendChild(h);
+            shown.forEach(([sig, desc]) => {
+                const row = document.createElement('div');
+                row.className = 'script-help-row';
+                row.title = 'Insert at cursor';
+                row.style.cssText = 'padding:3px 10px;cursor:pointer;display:flex;flex-direction:column;';
+                row.onmouseenter = () => { row.style.background = '#f0f5ff'; };
+                row.onmouseleave = () => { row.style.background = ''; };
+                const code = document.createElement('code');
+                code.textContent = sig;
+                code.style.cssText = 'color:#1565c0;overflow-wrap:anywhere;';
+                const d = document.createElement('span');
+                d.textContent = desc;
+                d.style.cssText = 'color:#777;font-size:11px;';
+                row.appendChild(code);
+                row.appendChild(d);
+                row.onclick = () => {
+                    const ed = ensureScriptEditor();
+                    ed.insert(sig);
+                    ed.focus();
+                };
+                list.appendChild(row);
+            });
+        });
+    }
+
+    function toggleScriptHelp(show) {
+        const popup = document.getElementById('scriptHelpPopup');
+        const open = show != null ? show : popup.style.display !== 'flex';
+        popup.style.display = open ? 'flex' : 'none';
+        if (open) {
+            renderScriptHelp(document.getElementById('scriptHelpFilter').value);
+            document.getElementById('scriptHelpFilter').focus();
+        }
     }
 
     function saveScriptEdits() {
@@ -2909,17 +3246,50 @@
     document.addEventListener('mouseup', function() { isDraggingTree = false; });
 
     // Context menu
-    pc.on('mouse:down', function(e) {
-        if (e.e && e.e.button === 2) {
-            e.e.preventDefault();
-            const menu = document.getElementById('wb-context-menu');
-            menu.style.left = e.e.clientX + 'px';
-            menu.style.top = e.e.clientY + 'px';
-            menu.classList.add('visible');
-        } else {
-            closeContextMenu();
-        }
+    // Fabric does not report right-clicks (fireRightClick is off), so the
+    // menu opens from the browser's own contextmenu event.
+    pc.upperCanvasEl.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        _renderContextLayerList(pc.getScenePoint(e));
+        const menu = document.getElementById('wb-context-menu');
+        menu.classList.add('visible');
+        const x = Math.max(0, Math.min(e.clientX, window.innerWidth - menu.offsetWidth));
+        const y = Math.max(0, Math.min(e.clientY, window.innerHeight - menu.offsetHeight));
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
     });
+    pc.on('mouse:down', closeContextMenu);
+
+    // "Select layer" lists everything under the pointer, so covered objects
+    // can be picked. Shown only when more than one object is there.
+    function _renderContextLayerList(point) {
+        const section = document.getElementById('ctx-layer-section');
+        const list = document.getElementById('ctx-layer-list');
+        list.innerHTML = '';
+        const hits = typeof stackAt === 'function' ? stackAt(pc.getObjects(), o => o.containsPoint(point)) : [];
+        if (hits.length < 2) { section.style.display = 'none'; return; }
+        section.style.display = '';
+        const selected = new Set(pc.getActiveObjects());
+        hits.forEach(o => {
+            const item = document.createElement('div');
+            item.className = 'ctx-item' + (selected.has(o) ? ' ctx-item-current' : '');
+            const swatch = document.createElement('span');
+            swatch.className = 'prop-stack-swatch';
+            const colour = _layerSwatchColour(o);
+            if (colour) swatch.style.background = colour;
+            const lbl = document.createElement('span');
+            lbl.textContent = layerLabel(o);
+            item.appendChild(swatch);
+            item.appendChild(lbl);
+            item.onclick = () => {
+                pc.discardActiveObject();
+                pc.setActiveObject(o);
+                pc.requestRenderAll();
+                closeContextMenu();
+            };
+            list.appendChild(item);
+        });
+    }
     document.addEventListener('click', function(e) {
         if (!e.target.closest('#wb-context-menu')) closeContextMenu();
     });
@@ -2950,6 +3320,7 @@
         if (obj) {
             pc.bringObjectToFront(obj);
             pc.requestRenderAll();
+            _renderStackList();
             if (obj.uid) recordScript(`bringToFront(${JSON.stringify(obj.uid)})`);
         }
     }
@@ -3032,6 +3403,7 @@
         if (obj) {
             pc.sendObjectToBack(obj);
             pc.requestRenderAll();
+            _renderStackList();
             if (obj.uid) recordScript(`sendToBack(${JSON.stringify(obj.uid)})`);
         }
     }

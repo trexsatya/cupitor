@@ -84,6 +84,14 @@ function syncUidCounters() {
 }
 
 // Helper for script playback: set a property on an object by uid
+// Rounded corners for a rectangle (fabric caps the radius at half the shorter side).
+function setCornerRadius(uidOrObj, radius) {
+  const obj = findIfRequired(uidOrObj);
+  if (!(obj instanceof fabric.Rect)) return;
+  obj.set({ rx: radius, ry: radius });
+  if (obj.canvas) obj.canvas.requestRenderAll();
+}
+
 function setProp(uid, prop, value) {
   const obj = findById(uid);
   if (obj && typeof obj.set === 'function') {
@@ -2229,11 +2237,115 @@ function _animResolveList(input) {
   return list;
 }
 
+// ---- Flow: a dot travelling along a connector, source → arrowhead ----
+// Drawn straight onto the canvas after each render (no fabric object is
+// added), and repeats until stopAnim().
+const _flows = new Map(); // line → { startedAt, duration, color, radius }
+const _flowCanvases = new WeakSet();
+let _flowFrame = null;
+
+function _flowKind(obj) {
+  if (!obj || !(obj instanceof fabric.Line)) return null;
+  if (typeof BiLineArrow === 'function' && obj instanceof BiLineArrow) return 'bi';
+  if (fabric.LineArrow && obj instanceof fabric.LineArrow) return 'arrow';
+  return obj.customData && obj.customData.source != null ? 'line' : null;
+}
+
+// [start, end] in scene coordinates, or null if `obj` has no single direction.
+function flowPath(obj) {
+  const kind = _flowKind(obj);
+  if (!kind || typeof flowEnds !== 'function') return null;
+  const p = obj.calcLinePoints();
+  const m = obj.calcTransformMatrix();
+  const p1 = fabric.util.transformPoint(new fabric.Point(p.x1, p.y1), m);
+  const p2 = fabric.util.transformPoint(new fabric.Point(p.x2, p.y2), m);
+  let src = null;
+  if (kind === 'line') {
+    const s = findIfRequired(obj.customData.source);
+    src = s && typeof s.getCenterPoint === 'function' ? s.getCenterPoint() : null;
+  }
+  return flowEnds(kind, p1, p2, src);
+}
+
+function canFlow(obj) {
+  return !!flowPath(obj);
+}
+
+function _drawFlows(canvas, ctx) {
+  if (!_flows.size) return;
+  const v = canvas.viewportTransform;
+  const now = Date.now();
+  ctx.save();
+  ctx.transform(v[0], v[1], v[2], v[3], v[4], v[5]);
+  _flows.forEach((f, line) => {
+    if (line.canvas !== canvas || line.visible === false) return;
+    const ends = flowPath(line);
+    if (!ends) return;
+    const t = ((now - f.startedAt) % f.duration) / f.duration;
+    // A head dot with a short fading trail behind it.
+    for (let i = 3; i >= 0; i--) {
+      const ti = t - i * 0.035;
+      if (ti < 0) continue;
+      const pt = pointAlong(ends[0], ends[1], ti);
+      ctx.globalAlpha = i === 0 ? 1 : 0.45 - i * 0.12;
+      ctx.fillStyle = f.color;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, f.radius * (1 - i * 0.18), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+  ctx.restore();
+}
+
+function _flowTick() {
+  _flowFrame = null;
+  const canvases = new Set();
+  _flows.forEach((f, line) => {
+    if (!line.canvas) { _stopFlow(line); return; } // removed from the canvas
+    canvases.add(line.canvas);
+  });
+  canvases.forEach(c => c.requestRenderAll());
+  if (_flows.size) _flowFrame = requestAnimationFrame(_flowTick);
+}
+
+function _stopFlow(line) {
+  if (!_flows.delete(line)) return;
+  if (line.externalData) {
+    delete line.externalData.flow;
+    line.externalData.animating = false;
+  }
+  if (line.canvas) line.canvas.requestRenderAll();
+}
+
+function flowAlong(list, opts) {
+  opts = opts || {};
+  const lines = list.filter(canFlow);
+  lines.forEach(line => {
+    const canvas = line.canvas || window.pc;
+    if (!_flowCanvases.has(canvas)) {
+      _flowCanvases.add(canvas);
+      canvas.on('after:render', e => { if (e.ctx === canvas.contextContainer) _drawFlows(canvas, e.ctx); });
+    }
+    _flows.set(line, {
+      startedAt: Date.now(),
+      duration: opts.duration || 1400,
+      color: opts.color || '#ff5722',
+      radius: opts.radius || Math.max(5, (line.strokeWidth || 1) * 3)
+    });
+    line.externalData = line.externalData || {};
+    line.externalData.flow = true;
+    line.externalData.animating = true;
+  });
+  if (lines.length && !_flowFrame) _flowFrame = requestAnimationFrame(_flowTick);
+  return lines;
+}
+
 function anim(uidOrObjOrList, type, opts) {
   const list = _animResolveList(uidOrObjOrList);
   if (!list.length) return null;
   type = (type || 'highlight') + '';
   if (type === 'spotlight') return spotlight(list, opts);
+  if (type === 'flow') return flowAlong(list, opts);
   // Highlight: animate each object independently. Animating an
   // activeSelection's scale doesn't always render reliably across all
   // children in fabric v6, so we operate per-child.
@@ -2245,6 +2357,8 @@ function stopAnim(uidOrObjOrList) {
   if (uidOrObjOrList == null) {
     // Stop everything.
     stopSpotlight();
+    // Flows can run on any canvas (e.g. oc), not just pc.
+    [..._flows.keys()].forEach(_stopFlow);
     if (window.pc) {
       window.pc.getObjects().forEach(o => {
         if (o.externalData && o.externalData.animating) stopAnimation(o, window.pc);
@@ -2268,6 +2382,7 @@ function stopAnimation(object, canvas){
 
     if(object.externalData) {
         const me = object.externalData
+        if (me.flow) _stopFlow(object);
         me.stopAnimation = true;
         if(!me.animating) return null;
 
