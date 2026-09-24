@@ -170,7 +170,11 @@ import {
   musicNeedsReload as _musicNeedsReload,
 } from './music-bed.js';
 import { gestureAxis as _gestureAxis, nativeScrollVerdictStale as _nativeScrollVerdictStale } from './scroll-gesture.js';
-import { clipRange as _clipRange } from './practice-clip.js';
+import {
+  clipRange as _clipRange,
+  contiguousLineWindow as _contiguousLineWindow,
+  formatGap as _formatGap,
+} from './practice-clip.js';
 import {
   addTake as _addTake,
   removeTake as _removeTake,
@@ -6120,10 +6124,28 @@ function renderLines(id, url) {
 
 
   const mainLangCode = getLangFromUrl().code  // sv / es / …
+  // These files stitch captures from distant moments together, so two lines
+  // shown one under the other can be minutes apart in the video. The play
+  // bounds above already stop at the break; this marks where it is, so the
+  // lines past it are not read as following on from the ones before.
+  let _prevEnd = null
   range(fromLineIndex, toLineIndex - fromLineIndex + 1).forEach(idx => {
     const sub = getSub(idx)
     const {mainSub, secondarySub} = getMainSubAndSecondarySub(subtitleFile, ({...sub}));
     const subIdx = (sub && sub.index != null) ? String(sub.index) : ''
+    const _thisStart = (sub && sub.start && typeof sub.start.ordinal === 'number') ? sub.start.ordinal : null
+    const _gap = (_prevEnd != null && _thisStart != null && (_thisStart - _prevEnd) > MAX_GAP_S)
+      ? (_thisStart - _prevEnd) : 0
+    _prevEnd = (sub && sub.end && typeof sub.end.ordinal === 'number') ? sub.end.ordinal : _prevEnd
+    if (_gap) {
+      // Says only what the timestamps show: a stretch of video with nothing
+      // on it, and how long. Whether that is a seam between two captures or a
+      // silence inside one, the clip stops either way.
+      const _mark = `<div class="line line-gap" title="${_formatGap(_gap)} of video with no subtitle — playback stops here">.....</div>`
+      subForLines += _mark
+      mainSubPanel.append(_mark)
+      if (secondarySub && secondarySub.text) secondarySubPanel.append(_mark)
+    }
     const lineMain = `<div class="line main-line" data-url="${url}" data-line-index="${subIdx}" data-lang-code="${mainLangCode}"><span class="line-text">${mainSub.text}</span><span class="edit-line-btn" title="Edit translation">✎</span></div>`;
     subForLines += lineMain
     mainSubPanel.append(lineMain)
@@ -20439,8 +20461,11 @@ async function _practiceCardLines(it, before, after) {
   // Stale lineIndex (SRT re-segmented since capture) → recover by time + word.
   if (matchPos < 0) matchPos = _resolveMatchIdxByTimeWord(src, it)
   if (matchPos < 0) return null
-  const from = Math.max(0, matchPos - (before || 0))
-  const to   = Math.min(src.length - 1, matchPos + (after || 0))
+  // Only the lines the clip can actually reach. These files stitch captures
+  // from distant moments together, so the line next to this one in the file
+  // can be minutes away in the video — putting it on the card would show text
+  // the playback never gets to.
+  const { from, to } = _contiguousLineWindow(src, matchPos, before || 0, after || 0)
   const rows = []
   for (let i = from; i <= to; i++) {
     const line = src[i]

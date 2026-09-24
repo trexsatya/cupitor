@@ -4536,3 +4536,15 @@ body.rec-playing #recPlayingSubs { display: block; }
     padding: 1px 6px;
 }
 .srch-hist-here { color: #1d6f42; border-color: #8fc0a1; }
+
+/* A break in the video between two lines that sit next to each other in the
+   subtitle file: these files stitch captures from distant moments together,
+   and playback stops at the break rather than running across it. */
+.line.line-gap {
+    color: #9aa4ae;
+    letter-spacing: 3px;
+    text-align: center;
+    padding: 2px 0;
+    user-select: none;
+    cursor: default;
+}
