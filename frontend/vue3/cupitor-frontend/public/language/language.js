@@ -19082,6 +19082,7 @@ function openPracticeMode(opts) {
     $p.on('click', '.prec-toggle', _pracRecToggle)
     $p.on('click', '.prec-keep', _pracRecKeep)
     $p.on('click', '.prec-drop', _pracRecDiscard)
+    $p.on('click', '.prec-take', _pracRecGoToTake)
     $p.on('click', '.practice-close', closePracticeMode)
     $p.on('click', '.practice-restore-close', closePracticeMode)
     $p.on('click', '.practice-minimize', minimizePracticeMode)
@@ -19770,7 +19771,40 @@ function _renderPracticeRecBar(note) {
         .prop('disabled', !unkept || rec || busy)
         .attr('title', 'Throw away the takes that were never kept')
     )
-  ).show()
+  )
+  // One small button per take, numbered the way they sit in the clip, to hear
+  // any of them back without having to play up to its mark. Their own row so
+  // they get the whole width rather than squeezing the column beside the Rec
+  // button, and a row that is only there when there is something on it.
+  if (n) {
+    const $takes = $('<span class="prec-takes"></span>')
+    st.takes.forEach((tk, i) => {
+      $takes.append(
+        $('<button type="button" class="prec-btn prec-take"></button>')
+          .text(String(i + 1))
+          .attr('data-t1', String(tk.t1))
+          .toggleClass('unkept', !st.kept.has(tk.url))
+          .prop('disabled', rec || busy)
+          .attr('title', 'Back to take ' + (i + 1) + ' (' +
+            _takeOffsetLabel(tk, st.clipStart) + ') and play it')
+      )
+    })
+    $bar.append($takes)
+  }
+  $bar.show()
+}
+
+// Go to a take and hear it. The same loop a finished recording runs: back to
+// the mark before this one, play the stretch it was spoken over, then the take
+// itself — so a take can be reviewed without playing up to it from wherever
+// the video happens to be.
+function _pracRecGoToTake(e) {
+  const st = _pracRec
+  if (!st || st.phase !== 'idle') return
+  const t1 = Number($(e.currentTarget).attr('data-t1'))
+  if (!isFinite(t1)) return
+  _pracRecTakeOverPlayhead()
+  _pracRecReplay(t1)
 }
 
 function _pracRecToggle() {

@@ -2416,6 +2416,33 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     color: #fff;
     font-weight: 600;
 }
+/* The takes get a row of their own across the whole bar, rather than crowding
+   the column beside the record button. Only rendered when there are any, so
+   the bar is one row until the first take exists. */
+#practiceMode .prec-takes {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+#practiceMode .prec-btn.prec-take {
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+}
+/* A take the card does not hold yet — Keep is what makes it stay. */
+#practiceMode .prec-btn.prec-take.unkept {
+    border-color: rgba(255, 82, 82, 0.5);
+    color: #ffb3b3;
+}
 /* Keep and discard share the right-hand column, ending at the bar's edge. */
 #practiceMode .prec-side {
     display: flex;
