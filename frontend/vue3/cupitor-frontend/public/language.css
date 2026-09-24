@@ -2425,6 +2425,10 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
+    /* The bar is anchored to the bottom, so rows of takes grow upwards over
+       the card. Two rows, then scroll. */
+    max-height: 68px;
+    overflow-y: auto;
 }
 #practiceMode .prec-btn.prec-take {
     width: 28px;

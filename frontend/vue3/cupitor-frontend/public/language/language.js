@@ -19622,8 +19622,19 @@ async function playPracticeClip() {
     // Playing the clip again is a fresh listen, so every take sounds at its
     // mark — including any the pass after a recording was holding back. The
     // watcher also lets go on a big enough jump, but starting from near the
-    // clip start is not one.
-    if (_pracRec) _pracRec.awaiting = null
+    // clip start is not one. Anything the previous pass still had running
+    // belongs to it and not to this listen: a take still sounding would play
+    // over the clip, and its own ending would set the video going again.
+    if (_pracRec) {
+      const prs = _pracRec
+      prs.awaiting = null
+      prs.token++
+      if (prs.audio) { try { prs.audio.pause() } catch (_) {} prs.audio = null }
+      if (prs.phase === 'playback') prs.phase = 'idle'
+      // No crossing until the watcher has two readings from where we are now.
+      prs.watchPos = null
+      _renderPracticeRecBar()
+    }
     // Apply the user's chosen playback rate just before play — must happen
     // AFTER the video has been loaded/seeked, else YT silently snaps it
     // back to 1× when the new video kicks in.
@@ -19819,8 +19830,12 @@ async function _pracRecStart() {
   const st = _pracRec
   if (!st || st.phase !== 'idle') return
   const t1 = _pracRecNow() || st.clipStart
-  // Speaking again ends whatever pass was running.
+  // Speaking again ends whatever pass was running — including one whose rewind
+  // has not landed yet. Without the token that seek would finish in its own
+  // time and start the video moving again, and the take would be spoken over a
+  // clip that is running rather than the moment Rec pinned.
   st.awaiting = null
+  st.token++
   _pracRecTakeOverPlayhead()
   _pracRecPauseVideo()
   let perm = 'unknown'
