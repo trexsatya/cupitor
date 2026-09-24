@@ -1432,6 +1432,12 @@ input:checked + .slider:before {
     box-shadow: 0 2px 4px rgba(0,0,0,0.08);
     display: none;
 }
+/* Practice covers the screen from 100002 up, so at the banner's own level it
+   loads subtitles behind the view with nothing on screen to say so. Above the
+   practice chrome, below any dialog. */
+body.practice-mode #srtLoadingBanner {
+    z-index: 100006;
+}
 #srtLoadingBanner #srtLoadingText {
     display: block;
     margin-bottom: 2px;
@@ -3122,6 +3128,10 @@ body.music-panel-open .ui-widget-overlay { z-index: 100009 !important; }
    backdrop has to come up with it, or those two keep showing through around
    the dialog instead of being dimmed behind it. Just under the dialog. */
 body.manual-editor-open .ui-widget-overlay { z-index: 100019 !important; }
+/* A modal's backdrop belongs with the dialog it dims. Left where it is, the
+   dialog floats in front while the overlay it is meant to dim shows through
+   beside it, untouched. */
+body.dialog-above-practice .ui-widget-overlay { z-index: 100019 !important; }
 
 /* Where minimized dialogs park; they stack upwards so several at once never
    land on each other. Raised a pill's height off the bottom edge to clear the

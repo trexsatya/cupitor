@@ -170,6 +170,7 @@ import {
   musicNeedsReload as _musicNeedsReload,
 } from './music-bed.js';
 import { gestureAxis as _gestureAxis, nativeScrollVerdictStale as _nativeScrollVerdictStale } from './scroll-gesture.js';
+import { clipRange as _clipRange } from './practice-clip.js';
 import {
   addTake as _addTake,
   removeTake as _removeTake,
@@ -537,6 +538,52 @@ function importSearches() {
 }
 
 // --- Minimized dialogs ----------------------------------------------------
+// Practice and the player cover the whole screen from z-index 100001 up, and
+// both are deliberately see-through so the video keeps showing past them.
+// Every jQuery UI dialog is pinned at 100000, so while either is up a dialog
+// paints BEHIND the overlay: parts of it show through, the view reads as
+// fragmented, and a tap in the middle of it lands on whatever is in front.
+//
+// So while an overlay is up, dialogs go in front of it — all of them, rather
+// than each one having to remember to ask.
+const DIALOG_ABOVE_OVERLAY_Z = 100020
+
+function _screenOverlayOpen() {
+  const $p = $('#practiceMode')
+  return !!($p.length && $p.is(':visible') && !$p.hasClass('minimized'))
+}
+
+function _liftDialogAboveOverlay($wrap) {
+  if (!$wrap || !$wrap.length) return
+  // Last in <body> as well as highest: inside a nested stacking context a
+  // z-index cannot outrank that context's own siblings, however large it is.
+  // Being last also settles the order between two lifted dialogs.
+  $wrap.appendTo('body').addClass('above-practice-mode')
+  const el = $wrap[0]
+  // Inline and important too, in case the stylesheet has not arrived yet.
+  if (el) el.style.setProperty('z-index', String(DIALOG_ABOVE_OVERLAY_Z), 'important')
+  $('body').addClass('dialog-above-practice')
+}
+
+// For dialogs that were already open when the overlay went up.
+function _liftOpenDialogsAboveOverlay() {
+  if (!_screenOverlayOpen()) return
+  $('.ui-dialog:visible').each(function () { _liftDialogAboveOverlay($(this)) })
+}
+
+$(function () {
+  $(document).on('dialogopen', function (e) {
+    if (!_screenOverlayOpen()) return
+    _liftDialogAboveOverlay($(e.target).closest('.ui-dialog'))
+  })
+  $(document).on('dialogclose', function () {
+    // The backdrop is only lifted while a lifted dialog is still up.
+    if (!$('.ui-dialog.above-practice-mode:visible').length) {
+      $('body').removeClass('dialog-above-practice')
+    }
+  })
+})
+
 // Minimizing takes a dialog off the screen without closing it. Closing is
 // destructive for the dialogs that offer it — the card editor rebuilds its
 // body and tears down its recorders, the vocabulary dialog clears the words
@@ -3107,7 +3154,11 @@ $('document').ready(e => {
       // for the captured-subtitles review: each row has a Delete / Push
       // action we don't want clobbered, plus the trigger button click
       // itself shouldn't immediately re-close the dialog it just opened.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog").dialog("close");
+      // #replaceItemDialog is opened by a button that is itself outside any
+      // dialog when Practice is the caller, so the very click that opens it
+      // arrives here and would close it again — it stages a picked radio
+      // option too, which a stray click should not throw away.
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog,#replaceItemDialog").dialog("close");
     }
   });
 
@@ -15073,12 +15124,11 @@ function openRecordingReviewDialog() {
   }
   const items = window._recording.items || {}
   const currentName = window._recording.currentName || REC_DEFAULT_NAME
-  // Category playlists are built in vocabulary order — preserve that insertion
-  // order instead of sorting alphabetically. Every other playlist keeps the
-  // alphabetical sort.
-  const _curRec = (window._recordings || {})[currentName]
-  const _preserveOrder = !!(_curRec && _curRec.vocabCategory)
-  const searchTexts = _preserveOrder ? Object.keys(items) : Object.keys(items).sort()
+  // The order the playlist is in, which is the order Play and Practice take it
+  // in with shuffle off — buildPlayQueue walks these same keys. Sorting here
+  // instead listed a playlist alphabetically while it played in another order,
+  // so the list said nothing about what was coming next.
+  const searchTexts = Object.keys(items)
   const isVirtualCurrent = _isVirtual(currentName)
   const allNames = listRecordings()
   // Last-played item (for highlighting). Only highlight when the displayed
@@ -15140,7 +15190,7 @@ function openRecordingReviewDialog() {
     searchTexts.forEach(st => {
       html += `<div class="rec-grp" style="margin-bottom:10px;padding:6px;border:1px solid #eee;border-radius:4px;">
         <div style="font-weight:bold;font-size:14px;">🔎 ${_.escape(st)}</div>`
-      ;(_preserveOrder ? Object.keys(items[st]) : Object.keys(items[st]).sort()).forEach(w => {
+      Object.keys(items[st]).forEach(w => {
         const wEsc = _.escape(w)
         const stEsc = _.escape(st)
         html += `<div style="margin-left:10px;margin-top:4px;">
@@ -18999,6 +19049,8 @@ function openPracticeMode(opts) {
   window._practiceMinimized = false
   window._practiceActive = true
   _setOpenView('practice')
+  // Any dialog left open before this covered the screen would be behind it.
+  _liftOpenDialogsAboveOverlay()
   // `body.practice-mode #mediaRelatedContainer { display:none !important }`
   // already hides the side player panel while practice is open — no need to
   // set inline display:none here, which would otherwise outlive the body
@@ -19315,6 +19367,8 @@ function restorePracticeMode() {
   window._practiceMinimized = false
   $('#practiceMode').removeClass('minimized')
   $('body').addClass('practice-mode')
+  // The overlay is back over anything that was opened while it was parked.
+  _liftOpenDialogsAboveOverlay()
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
   // Manual cards have no clip — just re-cue them (parked), as before.
@@ -19563,21 +19617,32 @@ function revealPracticeCard() {
 // the shown one (i+1), so the clip plays one line past what's displayed. Falls
 // back to the shown line's own end, then to the item's timeEnd. Times are in
 // seconds (SRT ordinals).
-async function _practiceClipStopTime(it) {
-  let stop = (typeof it.timeEnd === 'number') ? it.timeEnd : (it.timeStart + 4)
+// The stretch of video a card plays: the lines it is showing.
+//
+// The ↑+ / ↓+ buttons widen the card by whole subtitle lines, and playback
+// follows them — otherwise the extra lines can be read but never heard. The
+// window is the same one _practiceCardLines draws, resolved the same way, so
+// what plays is what is on the card.
+//
+// One line of run-off past the end, as it has always had: subtitle end times
+// clip speech short, and the next line's end is a natural place to stop.
+async function _practiceClipRange(it, before, after) {
+  const fallback = {
+    start: (typeof it.timeStart === 'number') ? it.timeStart : 0,
+    stop: (typeof it.timeEnd === 'number') ? it.timeEnd : null,
+  }
+  if (fallback.stop == null) fallback.stop = fallback.start + 4
   try {
     const parsed = await _loadSubtitlesForItem(it)
     const src = (parsed && parsed.sv) || []
     const want = String(it.lineIndex)
-    const pos = src.findIndex(x => x && x.index != null && String(x.index) === want)
-    if (pos >= 0) {
-      const next = src[pos + 1]
-      const endOf = l => (l && l.end && typeof l.end.ordinal === 'number') ? l.end.ordinal : null
-      const e = endOf(next) != null ? endOf(next) : endOf(src[pos])
-      if (e != null) stop = e
-    }
-  } catch (err) { console.warn('practice: stop-time resolve failed', err) }
-  return stop
+    let pos = src.findIndex(x => x && x.index != null && String(x.index) === want)
+    // Stale lineIndex (SRT re-segmented since capture) → recover by time and
+    // word, the same fallback the card itself uses.
+    if (pos < 0) pos = _resolveMatchIdxByTimeWord(src, it)
+    return _clipRange(src, pos, before, after, fallback)
+  } catch (err) { console.warn('practice: clip range resolve failed', err) }
+  return _clipRange([], -1, before, after, fallback)
 }
 
 // Poll the YouTube playhead and pause once it passes `stop`. Practice mode runs
@@ -19608,7 +19673,8 @@ async function playPracticeClip() {
   // can't pause a later clip.
   const token = (window._practiceClipToken = (window._practiceClipToken || 0) + 1)
   try {
-    const stop = await _practiceClipStopTime(it)
+    const { start, stop } = await _practiceClipRange(
+      it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0)
     if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
     // The cue normally already loaded the right video; reload only if needed.
     let needLoad = true
@@ -19617,7 +19683,7 @@ async function playPracticeClip() {
       window.mediaSelected = { link: it.id, source: 'link' }
       await changeMediaIfNeededTo(window.mediaSelected)
     }
-    await seekToYoutubeTime(it.timeStart)
+    await seekToYoutubeTime(start)
     if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
     // Playing the clip again is a fresh listen, so every take sounds at its
     // mark — including any the pass after a recording was holding back. The
