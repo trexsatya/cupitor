@@ -16,6 +16,27 @@
 
 export const GESTURE_SLOP = 6;
 
+// Whether an earlier "native scroll works here" answer can still be trusted.
+//
+// What breaks on the old WebView is a content-height limit, so the answer
+// depends on how tall the list was when it was asked. A list measured before
+// its row previews arrive is shorter than the list the user ends up with, and
+// an answer kept for the life of the element goes quietly wrong the moment the
+// content crosses the limit — the list stops scrolling and nothing asks again.
+//
+// Below FS_RECHECK_ABOVE no browser has trouble, so an answer given there
+// cannot go stale and re-asking would only cost a visible frame.
+export const FS_RECHECK_ABOVE = 8192;
+export const FS_RECHECK_STEP = 512;
+
+export function nativeScrollVerdictStale(height, okAt) {
+  const h = Number(height);
+  if (!isFinite(h) || h <= FS_RECHECK_ABOVE) return false;
+  const was = Number(okAt);
+  if (!isFinite(was)) return true;
+  return Math.abs(h - was) > FS_RECHECK_STEP;
+}
+
 export function gestureAxis(dx, dy, canScrollX, slop) {
   const s = Number(slop) > 0 ? Number(slop) : GESTURE_SLOP;
   const ax = Math.abs(Number(dx) || 0);

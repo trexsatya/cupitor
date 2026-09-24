@@ -169,7 +169,7 @@ import {
   pruneMissingLocalTracks as _pruneMissingLocalTracks,
   musicNeedsReload as _musicNeedsReload,
 } from './music-bed.js';
-import { gestureAxis as _gestureAxis } from './scroll-gesture.js';
+import { gestureAxis as _gestureAxis, nativeScrollVerdictStale as _nativeScrollVerdictStale } from './scroll-gesture.js';
 import {
   addTake as _addTake,
   removeTake as _removeTake,
@@ -14862,19 +14862,34 @@ $(function () {
 // native scrolling, momentum, and jQuery UI drag-reorder untouched.
 function _installWebViewScroll(el) {
   if (!el) return
+  // Nothing here can be measured while the dialog is shut, and the re-check
+  // that follows the previews can easily land after someone has closed it. A
+  // hidden element measures zero, which would clamp the remembered position to
+  // the top and lose the user's place for the next open.
+  if (!el.clientHeight) return
   const rewrap = () => {
     // Where the user was. The dialog re-renders on every native playlist push,
     // and the offset lives on the container, which survives that — so it can be
     // put back rather than snapping the list to the top under someone's thumb.
-    const keep = el._fsOff || 0
+    // Arriving here from native scroll the offset is still 0, so take the
+    // position from whichever mechanism was carrying it.
+    const keep = el._fsOff || el.scrollTop || el._fsWantTop || 0
     // (Re)wrap the freshly-rendered children — the dialog HTML is rebuilt each
     // open — into a single relatively-positioned inner element we can offset.
-    const inner = document.createElement('div')
-    inner.className = 'wv-fakescroll-inner'
-    inner.style.position = 'relative'
+    // Wrapping is also asked for without a re-render, when the list changes
+    // size under us; wrapping a wrapper would leave two `top` offsets in the
+    // chain and move the content by their sum, so an existing one is reused.
+    const existing = el.firstElementChild
+    const reuse = el.childNodes.length === 1 && existing &&
+      existing.classList && existing.classList.contains('wv-fakescroll-inner')
+    const inner = reuse ? existing : document.createElement('div')
+    if (!reuse) {
+      inner.className = 'wv-fakescroll-inner'
+      inner.style.position = 'relative'
+      while (el.firstChild) inner.appendChild(el.firstChild)
+      el.appendChild(inner)
+    }
     inner.style.top = '0px'
-    while (el.firstChild) inner.appendChild(el.firstChild)
-    el.appendChild(inner)
     // Only the vertical axis has a height problem. Sideways the content is
     // nowhere near the layer ceiling, so that axis keeps native scrolling —
     // clipping both was what left a wide row with no way to reach its end.
@@ -14973,22 +14988,46 @@ function _installWebViewScroll(el) {
   }
   // Already in fake-scroll mode (a prior open detected the bug) → just re-wrap.
   if (el._fsBound) { rewrap(); return }
-  // Asked and answered. The probe moves the list to find out whether it can be
-  // moved, so running it on every re-render meant every native playlist push
-  // dragged the user back to the top — on the browsers where scrolling worked
-  // perfectly well.
-  if (el._fsNativeOk) return
+  // Asked and answered — but an answer is only good for the height it was
+  // given at. What fails here is a content-height limit: the same element
+  // scrolls perfectly at 12000px and stops at 23000px. The row previews are
+  // fetched after the first render and each one turns an empty span into a
+  // line of text, which is easily enough to carry a long list over that line
+  // — so a list that was measured before they landed gets a "native scroll is
+  // fine" that stops being true a moment later, and the answer used to be
+  // kept for the life of the element.
+  //
+  // So the verdict is remembered against the height it was taken at, and asked
+  // again once the list is a different size. Only where the limit is anywhere
+  // near, though: the probe moves the list to find out whether it can be
+  // moved, and running it on every re-render dragged people back to the top on
+  // the browsers where scrolling worked perfectly well.
+  if (el._fsNativeOk && !_nativeScrollVerdictStale(el.scrollHeight, el._fsOkAt)) return
   // Nothing to scroll → leave alone.
   if (el.scrollHeight <= el.clientHeight + 4) return
+  // One question at a time. The re-check after the previews land is a
+  // microtask, so when there is nothing left to fetch it runs before this
+  // probe's frames do — and a second probe started in the meantime would watch
+  // the first one put the list back and read that as proof that the list
+  // cannot be moved. The list was moving perfectly well; it would be handed to
+  // a touch-only scroller anyway, leaving a desktop with a dead mouse wheel.
+  if (el._fsProbing) return
+  el._fsProbing = true
   // Probe native scroll: set a small scrollTop and see if it survives a frame.
   const before = el.scrollTop
+  const probedAt = el.scrollHeight
+  // Only a restore that happens while this probe is in flight should be
+  // honoured below; anything left over from a previous open is not where the
+  // user is now.
+  el._fsWantTop = null
   el.scrollTop = 2
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const nativeWorks = el.scrollTop >= 1
-    // Back where it was, not to the top: the caller may already have restored
-    // the user's position before this frame came round.
-    el.scrollTop = before
-    if (nativeWorks) el._fsNativeOk = true
+    el._fsProbing = false
+    // Back where it was, not to the top — and if the caller restored the
+    // user's position before this frame came round, back to that instead.
+    el.scrollTop = el._fsWantTop != null ? el._fsWantTop : before
+    if (nativeWorks) { el._fsNativeOk = true; el._fsOkAt = probedAt }
     else rewrap()
   }))
 }
@@ -15005,7 +15044,9 @@ function _recDlgScrollPos(el) {
 function _recDlgScrollTo(el, v) {
   if (!el) return
   if (typeof el._fsApply === 'function') el._fsApply(v)
-  else el.scrollTop = v
+  // Remembered as well as set: a native-scroll probe may be in flight, and it
+  // puts back the position it read before this ran.
+  else { el._fsWantTop = v; el.scrollTop = v }
 }
 
 // Number every row in the dialog, top to bottom, so an item can be named by
@@ -15049,7 +15090,13 @@ function openRecordingReviewDialog() {
   // Without this, every native push while the user is scrolling snaps the list
   // back to the top — the WebView-only "slowly scrolls back to top" bug.
   const _wasOpen = $dlg.hasClass('ui-dialog-content') && $dlg.is(':visible')
-  const _prevScrollTop = _wasOpen && $dlg[0] ? _recDlgScrollPos($dlg[0]) : 0
+  // A position belongs to the list it was taken from. Picking a different
+  // playlist re-renders through here too, and carrying the old offset over
+  // opens the new list part-way down, or at its end if it is the shorter of
+  // the two — so only a refresh of the same list gets its place kept.
+  const _sameList = !!($dlg[0] && $dlg[0]._recShowing === currentName)
+  const _prevScrollTop = _wasOpen && _sameList ? _recDlgScrollPos($dlg[0]) : 0
+  if ($dlg[0]) $dlg[0]._recShowing = currentName
   let html = ''
   // ── Header: switch / create / new-virtual / rename / duplicate / delete ──
   html += `<div class="rec-rec-header" style="margin-bottom:10px;padding:6px 6px 8px;border-bottom:1px solid #ddd;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
@@ -15526,7 +15573,13 @@ function openRecordingReviewDialog() {
   // After the dialog renders, fetch any missing subtitles in the background
   // and populate the per-row preview spans. Fire-and-forget — if it fails
   // the row just shows "(no preview available)".
-  _lazyLoadRecItemPreviews($dlg).catch(e => console.warn('preview lazy-load failed', e))
+  // Each preview turns an empty span into a line of text, so the list is
+  // taller once they land than it was when the scroller sized it up — and on a
+  // WebView that difference decides whether native scroll works at all. Hand
+  // back once they are in so the list is judged at the size it ended up.
+  _lazyLoadRecItemPreviews($dlg)
+    .then(() => { try { _installWebViewScroll($dlg[0]) } catch (_) {} })
+    .catch(e => console.warn('preview lazy-load failed', e))
   // Install first: on a WebView this re-wraps the freshly-rendered rows, and
   // the position can only be set once there is something to set it on.
   try { _installWebViewScroll($dlg[0]) } catch (_) {}
@@ -15535,6 +15588,11 @@ function openRecordingReviewDialog() {
   // that jumps to the top each time is unusable at any length.
   if (_wasOpen && _prevScrollTop) {
     try { _recDlgScrollTo($dlg[0], _prevScrollTop) } catch (_) {}
+  } else if (_wasOpen && !_sameList) {
+    // A different playlist starts at its beginning. The fake scroller keeps
+    // its offset on the element and puts it back when it re-wraps, so leaving
+    // it alone would open the new list wherever the old one had been left.
+    try { _recDlgScrollTo($dlg[0], 0) } catch (_) {}
   }
 }
 
@@ -20581,6 +20639,7 @@ window.resumeRecording          = resumeRecording
 window.stopRecording            = stopRecording
 window.clearRecording           = clearRecording
 window.openRecordingReviewDialog= openRecordingReviewDialog
+window._installWebViewScroll    = _installWebViewScroll
 window.playRecording            = playRecording
 window.stopPlayingRecording     = stopPlayingRecording
 window.togglePlayingRecordingPause = togglePlayingRecordingPause

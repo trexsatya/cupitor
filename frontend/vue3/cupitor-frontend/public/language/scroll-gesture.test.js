@@ -1,4 +1,41 @@
-import { gestureAxis, GESTURE_SLOP } from "./scroll-gesture";
+import {
+  gestureAxis,
+  GESTURE_SLOP,
+  nativeScrollVerdictStale,
+  FS_RECHECK_ABOVE,
+} from "./scroll-gesture";
+
+describe("nativeScrollVerdictStale", () => {
+  test("keeps the answer while the list is the size it was measured at", () => {
+    expect(nativeScrollVerdictStale(20000, 20000)).toBe(false);
+    expect(nativeScrollVerdictStale(20000, 19800)).toBe(false);
+  });
+
+  test("asks again once row previews have grown the list", () => {
+    // The whole bug: measured at 11200 before the previews arrived, used at
+    // 19600 afterwards — past the height where the WebView gives up.
+    expect(nativeScrollVerdictStale(19600, 11200)).toBe(true);
+  });
+
+  test("asks again when the list shrinks by as much", () => {
+    expect(nativeScrollVerdictStale(11200, 19600)).toBe(true);
+  });
+
+  test("leaves short lists alone however much they change", () => {
+    // No browser struggles here, and re-probing costs a visible frame.
+    expect(nativeScrollVerdictStale(FS_RECHECK_ABOVE, 100)).toBe(false);
+    expect(nativeScrollVerdictStale(3000, 20000)).toBe(false);
+  });
+
+  test("a tall list with no answer on record is worth asking about", () => {
+    expect(nativeScrollVerdictStale(20000, undefined)).toBe(true);
+  });
+
+  test("treats an unusable height as nothing to act on", () => {
+    expect(nativeScrollVerdictStale(NaN, 100)).toBe(false);
+    expect(nativeScrollVerdictStale(undefined, 100)).toBe(false);
+  });
+});
 
 describe("gestureAxis", () => {
   test("waits until the finger has moved far enough to tell", () => {
