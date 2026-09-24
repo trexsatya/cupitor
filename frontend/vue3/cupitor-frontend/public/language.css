@@ -155,7 +155,13 @@
     width: 100%;
     min-width: 0;
 }
-.lang-search-select-row .lang-select-with-toggle > select,
+/* The original <select> is skipped once select2 has taken it over. select2
+   parks it off-screen at 1px and relies on that staying 1px; this rule is more
+   specific and would size it to its widest option instead — hundreds of pixels
+   of page that nothing is drawn on, which the phone will happily scroll to.
+   Before select2 runs, and if it never does, the plain select is still the
+   control and still gets sized. */
+.lang-search-select-row .lang-select-with-toggle > select:not(.select2-hidden-accessible),
 .lang-search-select-row .lang-select-with-toggle .select2-container {
     flex: 1 1 auto;
     min-width: 0;

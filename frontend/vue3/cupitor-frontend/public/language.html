@@ -55,7 +55,13 @@
                 subWidth = $(window).width() - (ytVideoWidth + 40)
             } else {
                 ytVideoWidth = ww - 15;
-                subWidth = ww - 10;
+                // Measured from its own column, not from the window. The panel
+                // sits inside a column that is already as wide as the page
+                // allows, and adds a left margin on top of that, so a width
+                // taken from the window comes out wider than the space there
+                // is — a strip of blank page on the right that the phone will
+                // still scroll sideways to.
+                subWidth = 'auto';
                 ytHeight = wh / 2;
                 // $('#mediaControls').css({width: '100%', bottom: '-15em', right: 0})
                 $('#youtubePlayer-info').hide()
