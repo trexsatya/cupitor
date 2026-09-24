@@ -169,6 +169,7 @@ import {
   pruneMissingLocalTracks as _pruneMissingLocalTracks,
   musicNeedsReload as _musicNeedsReload,
 } from './music-bed.js';
+import { gestureAxis as _gestureAxis } from './scroll-gesture.js';
 import {
   addTake as _addTake,
   removeTake as _removeTake,
@@ -14884,11 +14885,17 @@ function _installWebViewScroll(el) {
     el.style.touchAction = 'pan-x'
     el._fsInner = inner
     el._fsOff = 0
+    // Moving the inner element changes layout — that is the whole point of
+    // offsetting it rather than transforming it — so reading its height right
+    // after writing `top` forces the layout to be redone. Once per gesture is
+    // enough: the list cannot grow under a finger that is already down.
+    el._fsMax = null
     el._fsApply = (v) => {
-      const max = Math.max(0, inner.offsetHeight - el.clientHeight)
-      el._fsOff = Math.min(max, Math.max(0, v))
+      if (el._fsMax == null) el._fsMax = Math.max(0, inner.offsetHeight - el.clientHeight)
+      el._fsOff = Math.min(el._fsMax, Math.max(0, v))
       inner.style.top = (-el._fsOff) + 'px'
     }
+    el._fsMax = null
     el._fsApply(keep)
     // The playlist-switcher select2 dropdown would be clipped by overflow:hidden,
     // so re-home it on <body> when we're in fake-scroll mode.
@@ -14912,22 +14919,29 @@ function _installWebViewScroll(el) {
     let axis = null
     const AXIS_SLOP = 6
     const stopMomentum = () => { if (momentum) { cancelAnimationFrame(momentum); momentum = null } }
+    const arm = (t) => {
+      startY = t.clientY
+      startX = t.clientX
+      startOff = el._fsOff || 0
+      lastY = startY; lastDy = 0; dragging = true; axis = null
+      // The list may have been rebuilt since the last gesture.
+      el._fsMax = null
+    }
     el.addEventListener('touchstart', e => {
       if (!e.touches || e.touches.length !== 1) { dragging = false; return }
       stopMomentum()
-      startY = e.touches[0].clientY
-      startX = e.touches[0].clientX
-      startOff = el._fsOff || 0
-      lastY = startY; lastDy = 0; dragging = true; axis = null
+      arm(e.touches[0])
     }, { passive: true })
     el.addEventListener('touchmove', e => {
       if (!dragging || !el._fsInner || !e.touches || !e.touches.length) return
       const y = e.touches[0].clientY
       const x = e.touches[0].clientX
       if (axis === null) {
-        const dy = Math.abs(y - startY), dx = Math.abs(x - startX)
-        if (Math.max(dy, dx) < AXIS_SLOP) { lastY = y; return }
-        axis = dy > dx ? 'y' : 'x'
+        // Sideways is only worth giving away when there is somewhere sideways
+        // to go; otherwise a thumb's diagonal start kills the whole gesture.
+        const canX = el.scrollWidth > el.clientWidth + 1
+        axis = _gestureAxis(x - startX, y - startY, canX, AXIS_SLOP)
+        if (axis === null) { lastY = y; return }
       }
       // Sideways is the browser's to handle, and preventing it here is exactly
       // what stopped it working.
@@ -14936,7 +14950,11 @@ function _installWebViewScroll(el) {
       if (el._fsApply) el._fsApply(startOff + (startY - y))
       if (e.cancelable) e.preventDefault()
     }, { passive: false })
-    const end = () => {
+    const end = (e) => {
+      // A second finger disarms the gesture. When it lifts and one is still
+      // down, take that one up — otherwise the list stays dead under a finger
+      // that never left the screen, until every finger has gone.
+      if (e && e.touches && e.touches.length === 1) { stopMomentum(); arm(e.touches[0]); return }
       if (!dragging) return
       dragging = false
       if (axis === 'x') { axis = null; return }
