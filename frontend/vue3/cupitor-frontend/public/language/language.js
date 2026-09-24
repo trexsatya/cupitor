@@ -19743,25 +19743,33 @@ function _renderPracticeRecBar(note) {
   // Mid-loop the video is being driven for the user; a second Rec on top of
   // that would pin a moment they did not choose.
   const busy = st.phase === 'playback'
+  // Short enough for the column beside the button. What the longer wording
+  // used to explain, the button now says by being round, red and in the
+  // middle — and its tooltip still spells it out.
   const status = note ? note
-    : rec ? 'recording — Pause to hear it back'
+    : rec ? 'recording…'
     : st.phase === 'playback' ? 'your take'
     : n ? n + (n === 1 ? ' take · ' : ' takes · ') + Math.round(_takesDuration(st.takes)) + 's'
-    : 'Rec to speak over this clip'
+    : 'Speak over this clip'
+  // Status, then the round Rec button, then Keep and discard — one per grid
+  // column, so the button the thumb goes for is in the middle of the bar.
   $bar.empty().append(
+    $('<span class="prec-status"></span>').text(status),
     $('<button type="button" class="prec-btn prec-toggle"></button>')
-      .text(rec ? '⏸ Pause' : '● Rec')
+      .text(rec ? '⏸' : '●')
       .toggleClass('on', rec)
       .prop('disabled', busy)
+      .attr('aria-label', rec ? 'Pause' : 'Rec')
       .attr('title', rec ? 'Stop and hear it back in place' : 'Record over the clip from here'),
-    $('<button type="button" class="prec-btn prec-keep"></button>')
-      .text(unkept ? '✔ Keep ' + unkept : '✔ Keep')
-      .prop('disabled', !unkept || rec || busy)
-      .attr('title', 'Save these takes on the card'),
-    $('<button type="button" class="prec-btn prec-drop">🗑</button>')
-      .prop('disabled', !unkept || rec || busy)
-      .attr('title', 'Throw away the takes that were never kept'),
-    $('<span class="prec-status"></span>').text(status)
+    $('<span class="prec-side"></span>').append(
+      $('<button type="button" class="prec-btn prec-keep"></button>')
+        .text(unkept ? '✔ Keep ' + unkept : '✔ Keep')
+        .prop('disabled', !unkept || rec || busy)
+        .attr('title', 'Save these takes on the card'),
+      $('<button type="button" class="prec-btn prec-drop">🗑</button>')
+        .prop('disabled', !unkept || rec || busy)
+        .attr('title', 'Throw away the takes that were never kept')
+    )
   ).show()
 }
 
