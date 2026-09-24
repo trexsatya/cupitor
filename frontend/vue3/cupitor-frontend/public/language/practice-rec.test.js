@@ -5,6 +5,7 @@ import {
   removeTake,
   rewindPointFor,
   takeDueBetween,
+  takeDueForPass,
   TAKE_MAX_STEP,
   takesDuration,
   takeOffsetLabel,
@@ -181,5 +182,53 @@ describe("takeDueBetween", () => {
     expect(takeDueBetween(takes, NaN, 35)).toBeNull();
     expect(takeDueBetween(takes, 34, NaN)).toBeNull();
     expect(takeDueBetween(null, 34, 36)).toBeNull();
+  });
+});
+
+describe("takeDueForPass", () => {
+  // Speak over the clip at 10s, speak again at 20s. Finishing the second one
+  // rewinds to the first one's mark and plays forward, so the pass opens
+  // sitting on that mark.
+  const takes = [{ t1: 10, url: "r1" }, { t1: 20, url: "r2" }];
+
+  test("the pass plays the take it was made for, not the one before it", () => {
+    // The playhead reading wobbles either side of a seek, so the first mark
+    // reads as crossed. Without the pass this is what the user hears.
+    expect(takeDueBetween(takes, 9.95, 10.1).url).toBe("r1");
+    expect(takeDueForPass(takes, 9.95, 10.1, 20)).toBeNull();
+    expect(takeDueForPass(takes, 19.9, 20.1, 20).url).toBe("r2");
+  });
+
+  test("a mark recorded between two others still skips its neighbour", () => {
+    const three = [{ t1: 10, url: "r1" }, { t1: 12, url: "r3" }, { t1: 20, url: "r2" }];
+    expect(takeDueForPass(three, 9.9, 10.1, 12)).toBeNull();
+    expect(takeDueForPass(three, 11.9, 12.1, 12).url).toBe("r3");
+  });
+
+  test("with no pass running every mark sounds, which is what a rewind does", () => {
+    expect(takeDueForPass(takes, 9.9, 10.1, null).url).toBe("r1");
+    expect(takeDueForPass(takes, 9.9, 10.1, undefined).url).toBe("r1");
+    expect(takeDueForPass(takes, 19.9, 20.1, NaN).url).toBe("r2");
+  });
+
+  test("a mark at the very start of the clip can be waited for", () => {
+    // Nothing is skipped just because the awaited mark is zero.
+    const atZero = [{ t1: 0, url: "r0" }];
+    expect(takeDueForPass(atZero, -0.05, 0.1, 0).url).toBe("r0");
+  });
+
+  test("throwing the awaited take away stops it holding the others back", () => {
+    // Discard removes the take mid-pass; the guard would otherwise match
+    // nothing and silence every mark until the user seeks.
+    // While it is still there, the earlier mark stays quiet.
+    expect(takeDueForPass(takes, 9.9, 10.1, 20)).toBeNull();
+    // Once it is gone the guard has nothing to match, and must not go on
+    // silencing every remaining mark.
+    expect(takeDueForPass([{ t1: 10, url: "r1" }], 9.9, 10.1, 20).url).toBe("r1");
+  });
+
+  test("it never plays what takeDueBetween would not", () => {
+    expect(takeDueForPass(takes, 20.1, 20.2, 20)).toBeNull();
+    expect(takeDueForPass(takes, 5, 30, 20)).toBeNull();
   });
 });

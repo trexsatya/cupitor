@@ -111,6 +111,35 @@ export function takeDueBetween(takes, prev, now) {
   return best;
 }
 
+// The take to play in the pass that follows a recording, where `awaiting` is
+// the mark that pass was aimed at.
+//
+// That pass rewinds to the mark before the new take and plays forward, so it
+// begins sitting on that earlier mark. A seek only settles to within a second
+// or so, so the playhead can land short of the mark and then cross it — and
+// the user hears a take they recorded minutes ago before the stretch they
+// just spoke over. The pass is there to play back the take just made, so that
+// is the only one it plays.
+//
+// Every other mark is still live: pass no `awaiting` — which is what an
+// ordinary rewind or a second press of play does — and this is just
+// takeDueBetween.
+export function takeDueForPass(takes, prev, now, awaiting) {
+  const due = takeDueBetween(takes, prev, now);
+  if (!due) return null;
+  // No pass running. Checked before the number, because a clip can start at
+  // zero and Number(null) is zero too — reading "nothing to wait for" as
+  // "waiting for the mark at zero" would silence a take at the very start.
+  if (awaiting == null) return due;
+  const want = Number(awaiting);
+  if (!isFinite(want)) return due;
+  // The mark the pass was waiting for is gone — discarded, or recorded over
+  // from somewhere else. There is nothing left to hold the others back for.
+  const target = takeAt(takes, want);
+  if (!target) return due;
+  return due === target ? due : null;
+}
+
 // Total seconds recorded across the takes, for the "3 takes · 12s" line.
 export function takesDuration(takes) {
   return (takes || []).reduce((n, tk) => {

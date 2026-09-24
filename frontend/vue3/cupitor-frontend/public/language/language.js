@@ -174,7 +174,9 @@ import {
   addTake as _addTake,
   removeTake as _removeTake,
   rewindPointFor as _rewindPointFor,
-  takeDueBetween as _takeDueBetween,
+  takeDueForPass as _takeDueForPass,
+  TAKE_MAX_STEP as _TAKE_MAX_STEP,
+  TAKE_SAME_SPOT as _TAKE_SAME_SPOT,
   takesDuration as _takesDuration,
   takeOffsetLabel as _takeOffsetLabel,
 } from './practice-rec.js';
@@ -19616,6 +19618,11 @@ async function playPracticeClip() {
     }
     await seekToYoutubeTime(it.timeStart)
     if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
+    // Playing the clip again is a fresh listen, so every take sounds at its
+    // mark — including any the pass after a recording was holding back. The
+    // watcher also lets go on a big enough jump, but starting from near the
+    // clip start is not one.
+    if (_pracRec) _pracRec.awaiting = null
     // Apply the user's chosen playback rate just before play — must happen
     // AFTER the video has been loaded/seeked, else YT silently snaps it
     // back to 1× when the new video kicks in.
@@ -19676,6 +19683,9 @@ function _pracRecBegin(it) {
     // Where the playhead was on the previous poll. Null until the first one:
     // there is no crossing without two readings.
     watchPos: null,
+    // The mark the pass after a recording is aimed at, while such a pass is
+    // running. Null the rest of the time, when every mark sounds.
+    awaiting: null,
     startedMs: 0,
     token: 0,
     timer: null,
@@ -19767,6 +19777,8 @@ async function _pracRecStart() {
   const st = _pracRec
   if (!st || st.phase !== 'idle') return
   const t1 = _pracRecNow() || st.clipStart
+  // Speaking again ends whatever pass was running.
+  st.awaiting = null
   _pracRecTakeOverPlayhead()
   _pracRecPauseVideo()
   let perm = 'unknown'
@@ -19852,28 +19864,41 @@ function _pracRecWatch() {
     // it. Neither is playback crossing a mark.
     if (st.phase === 'recording' || st.phase === 'playback') return
     if (prev == null) return
-    const due = _takeDueBetween(st.takes, prev, ct)
-    if (!due) return
-    _pracRecPauseVideo()
-    _pracRecPlayTake(st, due, ++st.token)
+    // Going somewhere ends the pass that followed a recording, and every mark
+    // is live again — which is what makes a rewind play the takes back.
+    if (Math.abs(ct - prev) > _TAKE_MAX_STEP) st.awaiting = null
+    const due = _takeDueForPass(st.takes, prev, ct, st.awaiting)
+    if (due) {
+      st.awaiting = null
+      _pracRecPauseVideo()
+      _pracRecPlayTake(st, due, ++st.token)
+      return
+    }
+    // The mark this pass was aimed at is behind the playhead without having
+    // been crossed — the rewind landed past it, which it can when two takes
+    // are closer together than the seek settles. Waiting for it now would
+    // keep every later take quiet for the rest of the clip.
+    if (st.awaiting != null && ct > Number(st.awaiting) + _TAKE_SAME_SPOT) st.awaiting = null
   }, 120)
 }
 
-// Rewind to the take before the one just recorded and play from there. The
-// watcher above does the rest — it is the same crossing that plays a take on
-// any other pass, so there is nothing special about this one.
+// Rewind to the take before the one just recorded and play from there, so the
+// user hears the stretch they spoke over and then themselves speaking over it.
+// The watcher above plays the take when the playhead reaches its mark.
 function _pracRecReplay(t1) {
   const st = _pracRec
   if (!st) return
   const from = _rewindPointFor(st.takes, t1, st.clipStart)
   const token = ++st.token
+  st.awaiting = null
   _pracRecTakeOverPlayhead()
   ;(async () => {
     try { await seekToYoutubeTime(from) } catch (_) {}
     if (_pracRec !== st || token !== st.token) return
-    // The seek is not playback, so the marks it moved back past are armed
-    // rather than fired.
     st.watchPos = _pracRecNow()
+    // This pass belongs to the take just recorded. It begins sitting on the
+    // mark of the one before it, which the watcher would otherwise sound.
+    st.awaiting = t1
     _pracRecPlayVideo()
     _pracRecWatch()
   })()
