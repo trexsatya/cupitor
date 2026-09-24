@@ -81,6 +81,36 @@ export function rewindPointFor(takes, t1, clipStart) {
   return best;
 }
 
+// The most a playhead moves between two reads and still counts as playback.
+// The poll runs several times a second, so an ordinary step is a fraction of
+// this even at speed; anything larger is the playhead being put somewhere.
+export const TAKE_MAX_STEP = 2;
+
+// The take to play when the playhead moves from `prev` to `now`, or null.
+//
+// Crossing the mark is what fires a take, which is what makes them play every
+// time rather than only in the pass that recorded them: rewinding, or playing
+// the clip again, puts the marks back ahead of the playhead and they fire
+// afresh. A jump in either direction is a seek rather than playback — landing
+// past a take is the user going somewhere, not listening through it.
+//
+// The earliest mark in the window wins, so two takes close together keep
+// their order instead of the later one swallowing the earlier.
+export function takeDueBetween(takes, prev, now) {
+  const from = Number(prev);
+  const to = Number(now);
+  if (!isFinite(from) || !isFinite(to)) return null;
+  const step = to - from;
+  if (step <= 0 || step > TAKE_MAX_STEP) return null;
+  let best = null;
+  for (const tk of takes || []) {
+    const s = at(tk);
+    if (s == null || s <= from || s > to) continue;
+    if (!best || s < at(best)) best = tk;
+  }
+  return best;
+}
+
 // Total seconds recorded across the takes, for the "3 takes · 12s" line.
 export function takesDuration(takes) {
   return (takes || []).reduce((n, tk) => {

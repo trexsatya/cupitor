@@ -173,7 +173,7 @@ import {
   addTake as _addTake,
   removeTake as _removeTake,
   rewindPointFor as _rewindPointFor,
-  takeAt as _takeAt,
+  takeDueBetween as _takeDueBetween,
   takesDuration as _takesDuration,
   takeOffsetLabel as _takeOffsetLabel,
 } from './practice-rec.js';
@@ -19597,11 +19597,16 @@ function _pracRecBegin(it) {
     phase: 'idle',
     t1: null,
     url: null,
+    // Where the playhead was on the previous poll. Null until the first one:
+    // there is no crossing without two readings.
+    watchPos: null,
     startedMs: 0,
     token: 0,
     timer: null,
     audio: null,
   }
+  // Armed for the whole card, not just after a recording.
+  _pracRecWatch()
   return _pracRec
 }
 
@@ -19651,10 +19656,9 @@ function _renderPracticeRecBar(note) {
   const rec = st.phase === 'recording'
   // Mid-loop the video is being driven for the user; a second Rec on top of
   // that would pin a moment they did not choose.
-  const busy = st.phase === 'replaying' || st.phase === 'playback'
+  const busy = st.phase === 'playback'
   const status = note ? note
     : rec ? 'recording — Pause to hear it back'
-    : st.phase === 'replaying' ? 'replaying…'
     : st.phase === 'playback' ? 'your take'
     : n ? n + (n === 1 ? ' take · ' : ' takes · ') + Math.round(_takesDuration(st.takes)) + 's'
     : 'Rec to speak over this clip'
@@ -19749,30 +19753,53 @@ async function _pracRecStop() {
   _pracRecReplay(t1)
 }
 
-// Rewind to the take before this one, run up to the mark, play what was said
-// there, then let the video carry on.
+// Watch the playhead for the whole time the card is on screen, and play a
+// take whenever playback crosses its mark. Not just in the pass that recorded
+// it: rewinding, or pressing play again, puts the marks back ahead of the
+// playhead and they sound again — which is the only way a take is any use for
+// listening back to.
+//
+// One poll for the card, started when the session opens. It costs nothing
+// while the video is still, because a playhead that has not moved has not
+// crossed anything.
+function _pracRecWatch() {
+  const st = _pracRec
+  if (!st || st.timer) return
+  st.timer = setInterval(() => {
+    if (_pracRec !== st) { clearInterval(st.timer); st.timer = null; return }
+    const ct = _pracRecNow()
+    const prev = st.watchPos
+    // Tracked even while the video is held, so resuming compares against
+    // where it actually is rather than against where it was long ago.
+    st.watchPos = ct
+    // Recording holds the video still, and a take playing has already paused
+    // it. Neither is playback crossing a mark.
+    if (st.phase === 'recording' || st.phase === 'playback') return
+    if (prev == null) return
+    const due = _takeDueBetween(st.takes, prev, ct)
+    if (!due) return
+    _pracRecPauseVideo()
+    _pracRecPlayTake(st, due, ++st.token)
+  }, 120)
+}
+
+// Rewind to the take before the one just recorded and play from there. The
+// watcher above does the rest — it is the same crossing that plays a take on
+// any other pass, so there is nothing special about this one.
 function _pracRecReplay(t1) {
   const st = _pracRec
   if (!st) return
-  const tk = _takeAt(st.takes, t1)
-  if (!tk) return
   const from = _rewindPointFor(st.takes, t1, st.clipStart)
   const token = ++st.token
-  st.phase = 'replaying'
-  _renderPracticeRecBar()
   _pracRecTakeOverPlayhead()
   ;(async () => {
     try { await seekToYoutubeTime(from) } catch (_) {}
     if (_pracRec !== st || token !== st.token) return
+    // The seek is not playback, so the marks it moved back past are armed
+    // rather than fired.
+    st.watchPos = _pracRecNow()
     _pracRecPlayVideo()
-    if (st.timer) { clearInterval(st.timer); st.timer = null }
-    st.timer = setInterval(() => {
-      if (_pracRec !== st || token !== st.token) { clearInterval(st.timer); st.timer = null; return }
-      if (_pracRecNow() < Number(tk.t1)) return
-      clearInterval(st.timer); st.timer = null
-      _pracRecPauseVideo()
-      _pracRecPlayTake(st, tk, token)
-    }, 120)
+    _pracRecWatch()
   })()
 }
 
@@ -19792,6 +19819,9 @@ async function _pracRecPlayTake(st, tk, token) {
     if (_pracRec !== st || token !== st.token) return
     st.audio = null
     st.phase = 'idle'
+    // The mark is behind the playhead now; without this the next poll would
+    // compare against a reading from before the take and play it again.
+    st.watchPos = _pracRecNow()
     _renderPracticeRecBar()
     _pracRecPlayVideo()
   }

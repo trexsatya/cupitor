@@ -4,6 +4,8 @@ import {
   addTake,
   removeTake,
   rewindPointFor,
+  takeDueBetween,
+  TAKE_MAX_STEP,
   takesDuration,
   takeOffsetLabel,
 } from "./practice-rec";
@@ -128,5 +130,56 @@ describe("labels", () => {
   test("says nothing it cannot work out", () => {
     expect(takeOffsetLabel(null, 30)).toBe("");
     expect(takeOffsetLabel(tk(34), NaN)).toBe("");
+  });
+});
+
+describe("takeDueBetween", () => {
+  const takes = [tk(35), tk(50)];
+
+  test("fires when playback crosses a mark", () => {
+    expect(takeDueBetween(takes, 34.9, 35.1).t1).toBe(35);
+  });
+
+  test("does not fire again once the mark is behind the playhead", () => {
+    // Otherwise a take would repeat on every poll for the rest of the clip.
+    expect(takeDueBetween(takes, 35.1, 35.2)).toBeNull();
+    expect(takeDueBetween(takes, 36, 40)).toBeNull();
+  });
+
+  test("fires again after a rewind — this is what makes them replay", () => {
+    // The reported bug: rewinding, or pressing play again, used to play
+    // nothing back. Putting the mark ahead of the playhead re-arms it.
+    expect(takeDueBetween(takes, 30, 30.2)).toBeNull();
+    expect(takeDueBetween(takes, 34.9, 35.1).t1).toBe(35);
+  });
+
+  test("a mark exactly at the new position counts as crossed", () => {
+    expect(takeDueBetween(takes, 34.9, 35).t1).toBe(35);
+  });
+
+  test("takes the earliest mark in the window, not the last", () => {
+    const close = [tk(35), tk(35.5)];
+    expect(takeDueBetween(close, 34.9, 36).t1).toBe(35);
+  });
+
+  test("a seek does not fire the takes it lands past", () => {
+    // Jumping somewhere is going there, not listening through it.
+    expect(takeDueBetween(takes, 10, 40)).toBeNull();
+    expect(takeDueBetween(takes, 10, 10 + TAKE_MAX_STEP + 0.1)).toBeNull();
+  });
+
+  test("a step within the tolerance still counts as playback", () => {
+    expect(takeDueBetween([tk(11)], 10, 10 + TAKE_MAX_STEP).t1).toBe(11);
+  });
+
+  test("standing still or going backwards fires nothing", () => {
+    expect(takeDueBetween(takes, 35, 35)).toBeNull();
+    expect(takeDueBetween(takes, 40, 30)).toBeNull();
+  });
+
+  test("says nothing it cannot work out", () => {
+    expect(takeDueBetween(takes, NaN, 35)).toBeNull();
+    expect(takeDueBetween(takes, 34, NaN)).toBeNull();
+    expect(takeDueBetween(null, 34, 36)).toBeNull();
   });
 });
