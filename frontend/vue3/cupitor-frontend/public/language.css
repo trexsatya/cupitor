@@ -2373,12 +2373,7 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     right: 8px;
     bottom: 60px;
     z-index: 100004;
-    /* Three columns so the record button sits dead centre however wide the
-       status text or the buttons beside it happen to be. */
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    gap: 8px;
+    display: block;
     padding: 6px 10px;
     border-radius: 8px;
     background: rgba(33, 33, 33, 0.94);
@@ -2402,7 +2397,26 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
 /* The one control the thumb goes for without looking: a round button in the
    middle of the bar, big enough to hit while watching the video rather than
    the screen. */
+/* The row the record button is centred in. Status on the left, Keep and
+   discard on the right, and the button pinned to the middle regardless of
+   either — the two sides are capped so they cannot reach under it. */
+#practiceMode .prec-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 64px;
+}
+#practiceMode .prec-row > .prec-status,
+#practiceMode .prec-row > .prec-side {
+    max-width: calc(50% - 40px);
+}
 #practiceMode .prec-btn.prec-toggle {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
     width: 64px;
     height: 64px;
     min-height: 64px;
@@ -2426,7 +2440,6 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
    the column beside the record button. Only rendered when there are any, so
    the bar is one row until the first take exists. */
 #practiceMode .prec-takes {
-    grid-column: 1 / -1;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -4547,4 +4560,11 @@ body.rec-playing #recPlayingSubs { display: block; }
     padding: 2px 0;
     user-select: none;
     cursor: default;
+}
+
+/* Held, on the way to being deleted. */
+#practiceMode .prec-btn.prec-take.prec-take-holding {
+    transform: scale(0.88);
+    border-color: #ff5252;
+    transition: transform 0.4s ease-out;
 }

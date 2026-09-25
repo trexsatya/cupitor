@@ -177,7 +177,9 @@ import {
 } from './practice-clip.js';
 import {
   addTake as _addTake,
+  takeAt as _takeAt,
   removeTake as _removeTake,
+  TAKE_SAME_SPOT as TAKE_SAME_SPOT_S,
   rewindPointFor as _rewindPointFor,
   takeDueForPass as _takeDueForPass,
   TAKE_MAX_STEP as _TAKE_MAX_STEP,
@@ -19157,6 +19159,9 @@ function openPracticeMode(opts) {
     $p.on('click', '.prec-keep', _pracRecKeep)
     $p.on('click', '.prec-drop', _pracRecDiscard)
     $p.on('click', '.prec-take', _pracRecGoToTake)
+    $p.on('touchstart mousedown', '.prec-take', _pracRecHoldStart)
+    $p.on('touchmove', '.prec-take', _pracRecHoldMove)
+    $p.on('touchend touchcancel mouseup mouseleave', '.prec-take', _pracRecHoldEnd)
     $p.on('click', '.practice-close', closePracticeMode)
     $p.on('click', '.practice-restore-close', closePracticeMode)
     $p.on('click', '.practice-minimize', minimizePracticeMode)
@@ -19851,24 +19856,28 @@ function _renderPracticeRecBar(note) {
     : st.phase === 'playback' ? 'your take'
     : n ? n + (n === 1 ? ' take · ' : ' takes · ') + Math.round(_takesDuration(st.takes)) + 's'
     : 'Speak over this clip'
-  // Status, then the round Rec button, then Keep and discard — one per grid
-  // column, so the button the thumb goes for is in the middle of the bar.
+  // The Rec button is taken out of the row's flow and pinned to its middle, so
+  // nothing beside it can push it off centre — a column that refuses to shrink
+  // to its share leaves the button wherever the leftovers put it, and which
+  // engine does that is not worth finding out one device at a time.
   $bar.empty().append(
-    $('<span class="prec-status"></span>').text(status),
-    $('<button type="button" class="prec-btn prec-toggle"></button>')
-      .text(rec ? '⏸' : '●')
-      .toggleClass('on', rec)
-      .prop('disabled', busy)
-      .attr('aria-label', rec ? 'Pause' : 'Rec')
-      .attr('title', rec ? 'Stop and hear it back in place' : 'Record over the clip from here'),
-    $('<span class="prec-side"></span>').append(
-      $('<button type="button" class="prec-btn prec-keep"></button>')
-        .text(unkept ? '✔ Keep ' + unkept : '✔ Keep')
-        .prop('disabled', !unkept || rec || busy)
-        .attr('title', 'Save these takes on the card'),
-      $('<button type="button" class="prec-btn prec-drop">🗑</button>')
-        .prop('disabled', !unkept || rec || busy)
-        .attr('title', 'Throw away the takes that were never kept')
+    $('<div class="prec-row"></div>').append(
+      $('<span class="prec-status"></span>').text(status),
+      $('<span class="prec-side"></span>').append(
+        $('<button type="button" class="prec-btn prec-keep"></button>')
+          .text(unkept ? '✔ Keep ' + unkept : '✔ Keep')
+          .prop('disabled', !unkept || rec || busy)
+          .attr('title', 'Save these takes on the card'),
+        $('<button type="button" class="prec-btn prec-drop">🗑</button>')
+          .prop('disabled', !unkept || rec || busy)
+          .attr('title', 'Throw away the takes that were never kept')
+      ),
+      $('<button type="button" class="prec-btn prec-toggle"></button>')
+        .text(rec ? '⏸' : '●')
+        .toggleClass('on', rec)
+        .prop('disabled', busy)
+        .attr('aria-label', rec ? 'Pause' : 'Rec')
+        .attr('title', rec ? 'Stop and hear it back in place' : 'Record over the clip from here')
     )
   )
   // One small button per take, numbered the way they sit in the clip, to hear
@@ -19893,11 +19902,87 @@ function _renderPracticeRecBar(note) {
   $bar.show()
 }
 
+// Press and hold a take to delete it. Tapping plays it, which is the common
+// thing to want, so deleting is the deliberate gesture rather than a second
+// target crowding a button the width of a fingertip.
+const PREC_HOLD_MS = 500
+const PREC_HOLD_SLOP = 10
+let _precHold = null
+
+function _precHoldClear() {
+  if (_precHold && _precHold.timer) clearTimeout(_precHold.timer)
+  $('#practiceMode .prec-take').removeClass('prec-take-holding')
+  _precHold = null
+}
+
+function _precPoint(e) {
+  const oe = e.originalEvent || e
+  const t = oe.touches && oe.touches[0]
+  return t ? { x: t.clientX, y: t.clientY } : { x: oe.clientX, y: oe.clientY }
+}
+
+function _pracRecHoldStart(e) {
+  const st = _pracRec
+  if (!st || st.phase !== 'idle') return
+  const el = e.currentTarget
+  const t1 = Number($(el).attr('data-t1'))
+  if (!isFinite(t1)) return
+  _precHoldClear()
+  const at = _precPoint(e)
+  const started = { el, t1, x: at.x, y: at.y, fired: false, timer: null }
+  started.timer = setTimeout(() => {
+    if (_precHold !== started) return
+    started.fired = true
+    $(el).removeClass('prec-take-holding')
+    _pracRecDeleteTake(t1)
+  }, PREC_HOLD_MS)
+  _precHold = started
+  $(el).addClass('prec-take-holding')
+}
+
+// A finger that travels was scrolling, not holding.
+function _pracRecHoldMove(e) {
+  if (!_precHold) return
+  const at = _precPoint(e)
+  if (Math.abs(at.x - _precHold.x) > PREC_HOLD_SLOP ||
+      Math.abs(at.y - _precHold.y) > PREC_HOLD_SLOP) _precHoldClear()
+}
+
+function _pracRecHoldEnd() {
+  // A hold that fired has already done its work; the click that follows it
+  // must not then play the take that is no longer there.
+  if (_precHold && _precHold.fired) { _precHold = null; _precHoldSwallowClick = true; return }
+  _precHoldClear()
+}
+let _precHoldSwallowClick = false
+
+function _pracRecDeleteTake(t1) {
+  const st = _pracRec
+  if (!st) return
+  const tk = _takeAt(st.takes, t1)
+  if (!tk) return
+  const n = st.takes.indexOf(tk) + 1
+  if (!confirm('Delete take ' + n + ' (' + _takeOffsetLabel(tk, st.clipStart) + ')?')) return
+  if (_pracRec !== st) return
+  const res = _removeTake(st.takes, t1)
+  st.takes = res.takes
+  if (res.removed) {
+    // A take the card already points at cannot be deleted until Keep has
+    // rewritten the list; one that was only ever scratch can go now.
+    if (st.kept.has(res.removed.url)) { st.orphans.push(res.removed.url); st.kept.delete(res.removed.url) }
+    else deleteManualAudio(res.removed.url)
+  }
+  // Nothing is waiting for a mark that no longer exists.
+  if (st.awaiting != null && Math.abs(Number(st.awaiting) - t1) <= TAKE_SAME_SPOT_S) st.awaiting = null
+  _renderPracticeRecBar('take ' + n + ' deleted')
+}
+
 // Go to a take and hear it. The same loop a finished recording runs: back to
 // the mark before this one, play the stretch it was spoken over, then the take
 // itself — so a take can be reviewed without playing up to it from wherever
 // the video happens to be.
 function _pracRecGoToTake(e) {
+  if (_precHoldSwallowClick) { _precHoldSwallowClick = false; return }
   const st = _pracRec
   if (!st || st.phase !== 'idle') return
   const t1 = Number($(e.currentTarget).attr('data-t1'))
