@@ -11,11 +11,6 @@
   pointer-events: auto;
 }
 
-/* Ensure no canvas interferes with toolbar */
-.canvas-container canvas {
-  max-height: calc(100vh - 120px); /* Leave space for toolbar */
-}
-
 /* Force any overlapping elements to stay below toolbar */
 .canvas-container,
 .upper-canvas,
