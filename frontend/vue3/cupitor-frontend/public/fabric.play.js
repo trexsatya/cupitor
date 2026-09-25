@@ -1198,7 +1198,7 @@ function makeSubtree(node, values, opts) {
   opts.idMappings = renderSubtree(values, opts, node)
   //TODO: Find the closest obj which was recorded so we know its uid,
   // and find the relation to that i.e (level, index, data); And use that in the record script
-  recordScript(`renderSubtree(${JSON.stringify(values)}, ${JSON.stringify(opts)}, '${node.uid}')`)
+  const renderLine = `renderSubtree(${JSON.stringify(values)}, ${JSON.stringify(opts)}, '${node.uid}')`
 
   // Hide all immediate children and their connector lines, then show the Tree Node panel
   const outgoingLines = node.treeConnection?.outgoing?.lines || [];
@@ -1214,8 +1214,11 @@ function makeSubtree(node, values, opts) {
         if (child.uid) hiddenChildUids.push(child.uid);
       }
     });
-  // hideObject(child) also hides the child's connector line, so replay matches.
-  if (hiddenChildUids.length) recordScript(`${JSON.stringify(hiddenChildUids)}.forEach(u => hideObject(u))`)
+  // One line, so playback never shows the children between creating and hiding
+  // them. hideObject(child) also hides the child's connector line.
+  recordScript(hiddenChildUids.length
+    ? `${renderLine}; ${JSON.stringify(hiddenChildUids)}.forEach(u => hideObject(u))`
+    : renderLine)
 
   // Open the Tree Node panel focused on this node
   if (typeof showTreeNodePanel === 'function') {
