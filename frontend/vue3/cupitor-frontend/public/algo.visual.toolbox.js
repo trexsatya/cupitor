@@ -1588,7 +1588,10 @@ function animate(obj, props, opts){
 
     const canvas = pc;
   // eslint-disable-next-line @typescript-eslint/no-empty-function
-    const objSpecificUpdate = obj?.onAnimationChange || (() => {});
+    // Tree nodes keep their connector lines attached while moving. Children get
+    // onAnimationChange when created; roots (and nodes loaded from JSON) don't.
+    const objSpecificUpdate = obj?.onAnimationChange
+        || (obj?.treeConnection && typeof updateTreeItem === 'function' ? () => updateTreeItem(obj) : () => {});
     const options = Object.assign({}, {
         duration: 1000,
         onChange: () => { canvas.renderAll.bind(canvas); objSpecificUpdate(); canvas.renderAll(); },
@@ -1597,12 +1600,28 @@ function animate(obj, props, opts){
 
     const fn = options.onComplete;
 
+    // fabric runs one animation per property and completes each separately, so
+    // resolve once all have finished (or shortly after the duration, in case a
+    // non-numeric property never reports back). Otherwise the next script line
+    // starts while this object is still moving.
     return new Promise(function(myResolve) {
+        const total = Object.keys(props || {}).length;
+        let done = 0, settled = false, last;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            objSpecificUpdate();
+            canvas.requestRenderAll();
+            fn(last);
+            myResolve();
+        };
         options.onComplete = (e) => {
-            fn(e);
-            myResolve()
-        }
+            last = e;
+            if (++done >= total) finish();
+        };
         obj.animate(props, options);
+        if (!total) finish();
+        setTimeout(finish, (options.duration || 0) + 250);
     });
 }
 

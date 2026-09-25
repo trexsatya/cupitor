@@ -958,6 +958,9 @@ function makeLine(coords, opts) {
   return line;
 }
 
+// Distinct colours that keep white text readable.
+const TREE_CHILD_COLORS = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#00897b', '#6d4c41', '#3949ab'];
+
 function renderSubtree(values, opts, node) {
   node = findIfRequired(node)
   if(!node) return;
@@ -1046,9 +1049,16 @@ function renderSubtree(values, opts, node) {
       const { name, shape } = childSpec;
 
       // Create target node with specified shape
+      // With options.colorful each child gets its own palette colour, by position
+      // (so a replay picks the same colours).
+      const colour = options.colorful ? TREE_CHILD_COLORS[valuesIndex % TREE_CHILD_COLORS.length] : null
       const targetNode = shape === 'none' ?
-          textInRect(name, x2, y2, {fill: 'black'}, {fill: 'white'})
-          : boundedText(shape)(name, x2, y2, {}, {})
+          (colour
+            ? textInRect(name, x2, y2, {fill: '#ffffff'}, {fill: colour})
+            : textInRect(name, x2, y2, {fill: 'black'}, {fill: 'white'}))
+          : colour
+            ? boundedText(shape)(name, x2, y2, { fill: '#ffffff' }, { fill: colour })
+            : boundedText(shape)(name, x2, y2, {}, {})
 
       if(idMappings[valuesIndex]) {
         targetNode.uid = idMappings[valuesIndex]
@@ -1195,6 +1205,7 @@ function collapseTreeItems(obj) {
 function makeSubtree(node, values, opts) {
   opts = opts || {}
   opts.overlapOnRoot = true
+  opts.colorful = true
   opts.idMappings = renderSubtree(values, opts, node)
   //TODO: Find the closest obj which was recorded so we know its uid,
   // and find the relation to that i.e (level, index, data); And use that in the record script
@@ -1234,18 +1245,38 @@ const getActualProperties = (object, round) => {
     roundFn = x => Math.round(x * 100) / 100
   }
   const mat = object.calcTransformMatrix(false);
-  // Assuming objects origin x/y is 'left'/'top'; TODO for others
+  // Canvas-level left/top, angle and scale. On the canvas they are the object's
+  // own; inside a group or selection the group's transform is combined in, and
+  // left/top is the point that puts the centre where it is now given the
+  // object's origin, outline, scale and rotation. Flips stay the object's own.
+  const d = { left: object.left, top: object.top, angle: object.angle, scaleX: object.scaleX, scaleY: object.scaleY, skewX: object.skewX, skewY: object.skewY };
+  if (object.group) {
+    const g = fabric.util.qrDecompose(object.group.calcTransformMatrix());
+    const own = { angle: object.angle, scaleX: object.scaleX, scaleY: object.scaleY };
+    d.angle = g.angle + object.angle;
+    d.scaleX = g.scaleX * object.scaleX;
+    d.scaleY = g.scaleY * object.scaleY;
+    Object.assign(object, { angle: d.angle, scaleX: d.scaleX, scaleY: d.scaleY });
+    try {
+      const origin = object.translateToOriginPoint(new fabric.Point(mat[4], mat[5]), object.originX, object.originY);
+      d.left = origin.x;
+      d.top = origin.y;
+    } finally {
+      Object.assign(object, own);
+    }
+  }
+  const origin = { x: d.left, y: d.top };
   const props =  {
-    x: roundFn(mat[4] - object.width/2),
-    y: roundFn(mat[5] - object.height/2),
+    x: roundFn(origin.x),
+    y: roundFn(origin.y),
     w: roundFn(object.width),
     h: roundFn(object.height),
     fill: object.fill,
-    angle: roundFn(object.angle),
-    skewX: roundFn(object.skewX),
-    skewY: roundFn(object.skewY),
-    scaleX: roundFn(object.scaleX),
-    scaleY: roundFn(object.scaleY),
+    angle: roundFn(d.angle),
+    skewX: roundFn(d.skewX),
+    skewY: roundFn(d.skewY),
+    scaleX: roundFn(d.scaleX),
+    scaleY: roundFn(d.scaleY),
     opacity: object.opacity,
     center: object.getCenterPoint(),
   }
