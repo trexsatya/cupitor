@@ -1025,10 +1025,36 @@
         if (!e.e.clientX) e.e.clientX = 10;
         if (!e.e.clientY) e.e.clientY = 10;
 
+        // Where the click is on the canvas itself (accounts for zoom and pan).
+        const scene = e.scenePoint || { x: e.e.clientX, y: e.e.clientY };
+
+        if (window._shapeTextKind) {
+            const kind = window._shapeTextKind;
+            toolManager.activate('select');
+            const text = prompt('Enter text');
+            if (!text) return;
+            const x = Math.round(scene.x), y = Math.round(scene.y);
+            const make = boundedText(kind);
+            // Named explicitly: recorded lines must survive minification.
+            const fnName = { rect: 'textInRect', circ: 'textInCircle', elli: 'textInEllipse', diamond: 'textInDiamond',
+                hexagon: 'textInHexagon', star: 'textInStar', cloud: 'textInCloud' }[kind];
+            const shape = kind === 'rect' ? make(text, x, y, {}, {}, semanticUid('textrect')) : make(text, x, y, {}, {});
+            if (!shape) return;
+            pc.add(shape);
+            pc.setActiveObject(shape);
+            pc.requestRenderAll();
+            const id = shape.uid;
+            const call = kind === 'rect'
+                ? `textInRect(${JSON.stringify(text)}, ${x}, ${y}, {}, {}, '${id}')`
+                : `${fnName}(${JSON.stringify(text)}, ${x}, ${y}, {}, {})`;
+            recordScript(`_['${id}'] = ${call}; _['${id}'].uid = '${id}'; pc.add(_['${id}']);`);
+            return;
+        }
+
         if (window.insertText) {
             let opts_ = {
-                top: e.e.clientY,
-                left: e.e.clientX
+                top: scene.y,
+                left: scene.x
             };
             opts_.uid = semanticUid('textbox')
             const tb = textbox(opts_)
@@ -1041,8 +1067,8 @@
         }
         if (window.insertSmallText) {
             let opts = {
-                top: e.e.clientY,
-                left: e.e.clientX,
+                top: scene.y,
+                left: scene.x,
                 width: 25
             };
             opts.uid = semanticUid('textbox')
@@ -1057,8 +1083,8 @@
         if (window.signalMatexInsertion) {
             window.signalMatexInsertion = false;
             window.matexInsertionPoint = {
-                top: e.e.clientY,
-                left: e.e.clientX
+                top: Math.round(scene.y),
+                left: Math.round(scene.x)
             }
             document.getElementById('mathjaxDialog').style.display = 'block';
         }
@@ -1073,8 +1099,8 @@
             if (!text) return;
             let optsText = {}
             let optsRect = {}
-            let x = e.e.clientX;
-            let y = e.e.clientY;
+            let x = Math.round(scene.x);
+            let y = Math.round(scene.y);
             let id = semanticUid('textrect');
             const tb = textInRect(text, x, y, optsText, optsRect, id)
             tb.hasControls = false;
@@ -1088,7 +1114,7 @@
             var text = prompt('Enter text')
             if (!text) return;
 
-            const ar = showArray(text.split(','), e.e.clientX, e.e.clientY, pc, {});
+            const ar = showArray(text.split(','), Math.round(scene.x), Math.round(scene.y), pc, {});
             pc.getObjects().forEach(o => o.hasControls = false);
         }
 
@@ -1097,8 +1123,8 @@
                 const a = window.arrowButtonClicked.first;
                 let x1 = a.x;
                 let y1 = a.y;
-                let x2 = e.e.clientX;
-                let y2 = e.e.clientY;
+                let x2 = Math.round(scene.x);
+                let y2 = Math.round(scene.y);
                 let opts_ = {
                     stroke: ($('#drawing-color').val() || 'black')
                 };
@@ -1110,8 +1136,8 @@
                 recordScript(`_['${id}'] = arrow(${x1}, ${y1}, ${x2}, ${y2}, ${JSON.stringify(opts_)}); pc.add(_['${id}']);`)
             } else {
                 window.arrowButtonClicked.first = {
-                    x: e.e.clientX,
-                    y: e.e.clientY
+                    x: Math.round(scene.x),
+                    y: Math.round(scene.y)
                 }
             }
         }
@@ -1790,9 +1816,19 @@
     <button class="wb-tool" data-tool="sticky" title="Sticky Note (N)" onclick="toolManager.activate('sticky')">
         <i class="fas fa-sticky-note"></i>
     </button>
-    <button class="wb-tool" data-tool="text" title="Text (T)" onclick="toolManager.activate('text')">
+    <div class="wb-tool" data-tool="text" title="Text" onclick="toggleTextMenu()">
         <i class="fas fa-font"></i>
-    </button>
+        <div class="wb-shape-menu" id="text-menu">
+            <button onclick="event.stopPropagation(); toolManager.activate('text'); closeTextMenu()"><i class="fas fa-font"></i>&nbsp; Text</button>
+            <button onclick="event.stopPropagation(); startShapeText('rect')">&#9645;&nbsp; Text in rectangle</button>
+            <button onclick="event.stopPropagation(); startShapeText('circ')">&#9679;&nbsp; Text in circle</button>
+            <button onclick="event.stopPropagation(); startShapeText('elli')">&#11053;&nbsp; Text in ellipse</button>
+            <button onclick="event.stopPropagation(); startShapeText('diamond')">&#9670;&nbsp; Text in diamond</button>
+            <button onclick="event.stopPropagation(); startShapeText('hexagon')">&#11042;&nbsp; Text in hexagon</button>
+            <button onclick="event.stopPropagation(); startShapeText('star')">&#9733;&nbsp; Text in star</button>
+            <button onclick="event.stopPropagation(); startShapeText('cloud')">&#9729;&nbsp; Text in cloud</button>
+        </div>
+    </div>
     <button class="wb-tool" data-tool="connector" title="Connector (C)" onclick="toolManager.activate('connector')">
         <i class="fas fa-project-diagram"></i>
     </button>
@@ -2685,6 +2721,7 @@
             ['textbox(opts)', 'Text box (returns it; add with pc.add)'],
             ['textInRect(text, x, y, optsText, optsRect, uid)', 'Text inside a rectangle (returns it; add with pc.add)'],
             ['textInQuad(text, x, y, width, height, optsText, optsShape)', 'Text inside a reshapeable box; returns {quad, text}'],
+            ['textInCircle(text, x, y, optsText, optsShape)', 'Text inside a circle (returns it; add with pc.add). Also textInEllipse, textInDiamond, textInHexagon, textInStar, textInCloud'],
             ['addStickyNote(x, y, opts)', 'Sticky note'],
             ['addShapeLabel(shapeUid, position, text, opts)', 'Label attached to a shape'],
             ['addImage(url, left, top, opts)', 'Image from a URL'],
@@ -3415,8 +3452,24 @@
     function closeShapeMenu() {
         document.getElementById('shape-menu').classList.remove('open');
     }
+    function toggleTextMenu() {
+        document.getElementById('text-menu').classList.toggle('open');
+    }
+    function closeTextMenu() {
+        document.getElementById('text-menu').classList.remove('open');
+    }
+    // Next click on the canvas asks for the text and places it inside `kind`
+    // (a boundedText() key: rect, circ, elli, diamond, hexagon, star, cloud).
+    function startShapeText(kind) {
+        closeTextMenu();
+        toolManager.activate('shapeText');
+        window._shapeTextKind = kind;
+        // activate() highlights only a button whose data-tool matches the tool name.
+        document.querySelector('.wb-tool[data-tool="text"]').classList.add('active');
+    }
     document.addEventListener('click', function(e) {
         if (!e.target.closest('[data-tool="shape"]')) closeShapeMenu();
+        if (!e.target.closest('[data-tool="text"]')) closeTextMenu();
     });
 </script>
 </body>

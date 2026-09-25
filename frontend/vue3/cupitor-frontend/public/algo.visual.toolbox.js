@@ -408,7 +408,11 @@ function textInDiamond(textStr, x, y, optsText, optsShape) {
     points: points,
     fill: 'orange',
     originX: 'center',
-    originY: 'center'
+    originY: 'center',
+    // Without an explicit position fabric places a polygon by its top-left
+    // corner, leaving the text (centred at 0,0) outside the shape.
+    left: 0,
+    top: 0
   }, optsShape);
 
   const diamond = new fabric.Polygon(points, options);
@@ -449,7 +453,11 @@ function textInHexagon(textStr, x, y, optsText, optsShape) {
     points: points,
     fill: 'purple',
     originX: 'center',
-    originY: 'center'
+    originY: 'center',
+    // Without an explicit position fabric places a polygon by its top-left
+    // corner, leaving the text (centred at 0,0) outside the shape.
+    left: 0,
+    top: 0
   }, optsShape);
 
   const hexagon = new fabric.Polygon(points, options);
@@ -1019,7 +1027,11 @@ function textInStar(textStr, x, y, optsText, optsShape) {
     points: points,
     fill: 'gold',
     originX: 'center',
-    originY: 'center'
+    originY: 'center',
+    // Without an explicit position fabric places a polygon by its top-left
+    // corner, leaving the text (centred at 0,0) outside the shape.
+    left: 0,
+    top: 0
   }, optsShape);
 
   const star = new fabric.Polygon(points, options);

@@ -547,6 +547,19 @@ function registerTools(toolManager, primaryCanvas, overlayCanvas) {
     }
   });
 
+  // Text inside a shape: the kind comes from the Text menu (window._shapeTextKind).
+  toolManager.register('shapeText', {
+    activate() {
+      primaryCanvas.defaultCursor = 'crosshair';
+      primaryCanvas.selection = false;
+    },
+    deactivate() {
+      primaryCanvas.defaultCursor = 'default';
+      primaryCanvas.selection = true;
+      window._shapeTextKind = null;
+    }
+  });
+
   toolManager.register('sticky', {
     activate() {
       primaryCanvas.defaultCursor = 'crosshair';

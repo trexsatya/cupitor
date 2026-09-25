@@ -114,6 +114,12 @@ canvas {
   display: flex;
 }
 
+/* Beats `#whiteboard-toolbar * { position: relative }`, which would put the
+   menu inside the toolbar row instead of above the button. */
+#whiteboard-toolbar .wb-shape-menu {
+  position: absolute;
+}
+
 .wb-shape-menu button {
   border: none;
   background: transparent;
