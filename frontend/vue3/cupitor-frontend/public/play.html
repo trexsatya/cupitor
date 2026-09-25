@@ -518,6 +518,10 @@
     });
     superimposeOverlayCanvas()
     moveToFront('pc')
+    // Put the text layer's origin on the canvas's (the body margin offsets the
+    // canvases), so a script's x/y is the same spot for typed text as for shapes.
+    const _pcBox = pc.wrapperEl.getBoundingClientRect();
+    txt.css({ left: _pcBox.left + window.scrollX, top: _pcBox.top + window.scrollY });
 
     function customData(obj) {
         if (!obj.customData) obj.customData = {};

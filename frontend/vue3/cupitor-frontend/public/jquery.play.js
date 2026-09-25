@@ -113,13 +113,19 @@ function _renderTextList(animator, lines, x, y, opts, ordered) {
     return x;
   })();
 
+  // type()/write() apply their options as CSS, and jQuery reads a bare
+  // lineHeight number as a multiplier (50 → 50 × font size), which pushes the
+  // text far below its line. lineHeight here only spaces the lines apart.
+  const cssOpts = Object.assign({}, opts);
+  delete cssOpts.lineHeight;
+
   const runOne = (text, idx) => {
     const top = y + idx * opts.lineHeight;
     if (animator === 'write') {
       // write() positions a Vara <div> inside #textillateContainer using
       // opts.x / opts.y; we leave SVG left-aligned inside that box and rely
       // on the box's own left to honour alignment.
-      const lineOpts = Object.assign({}, opts, {
+      const lineOpts = Object.assign({}, cssOpts, {
         x: lineLeft, y: top, width: opts.width,
         color: opts.color
       });
@@ -136,6 +142,7 @@ function _renderTextList(animator, lines, x, y, opts, ordered) {
         left: lineLeft,
         width: opts.width,
         textAlign: opts.align,
+        lineHeight: 'normal',
         color: opts.color,
         fontSize: (typeof opts.fontSize === 'number' ? opts.fontSize + 'px' : opts.fontSize)
       });
@@ -144,7 +151,7 @@ function _renderTextList(animator, lines, x, y, opts, ordered) {
       if (typeof updateObjectIdsUi === 'function') updateObjectIdsUi();
     }
     $('#textillateContainer').append(el);
-    return type(text, '#' + uid, opts);
+    return type(text, '#' + uid, cssOpts);
   };
 
   if (opts.sequential) {
