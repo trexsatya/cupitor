@@ -1202,14 +1202,20 @@ function makeSubtree(node, values, opts) {
 
   // Hide all immediate children and their connector lines, then show the Tree Node panel
   const outgoingLines = node.treeConnection?.outgoing?.lines || [];
+  const hiddenChildUids = [];
   outgoingLines
     .map(findIfRequired)
     .filter(Boolean)
     .forEach(line => {
       hideObject(line);
       const child = findIfRequired(line.customData?.target);
-      if (child) hideObject(child);
+      if (child) {
+        hideObject(child);
+        if (child.uid) hiddenChildUids.push(child.uid);
+      }
     });
+  // hideObject(child) also hides the child's connector line, so replay matches.
+  if (hiddenChildUids.length) recordScript(`${JSON.stringify(hiddenChildUids)}.forEach(u => hideObject(u))`)
 
   // Open the Tree Node panel focused on this node
   if (typeof showTreeNodePanel === 'function') {

@@ -2018,7 +2018,8 @@
     <div class="prop-row">
         <label>Visibility</label>
         <input type="range" id="tree-visibility-input" min="0" max="1" step="0.05" value="1"
-               oninput="applyVisibilityToSelectedChildren(parseFloat(this.value))">
+               oninput="applyVisibilityToSelectedChildren(parseFloat(this.value))"
+               onchange="recordVisibilityOfSelectedChildren(parseFloat(this.value))">
     </div>
 </div>
 
@@ -2259,9 +2260,11 @@
             ? obj.getObjects().find(o => o.type === 'rect')
             : null;
 
-        const isRect = obj instanceof fabric.Rect;
+        const parts = !isSticky && typeof compositeParts === 'function' ? compositeParts(obj) : null;
+        const shapeSrc = parts ? parts.shapes[0] : obj;
+        const isRect = shapeSrc instanceof fabric.Rect;
         document.getElementById('prop-radius-row').style.display = isRect ? '' : 'none';
-        if (isRect) document.getElementById('prop-radius').value = obj.rx || 0;
+        if (isRect) document.getElementById('prop-radius').value = shapeSrc.rx || 0;
 
         // Shape properties: show for non-text objects (and for stickies —
         // they expose paper colour + opacity but no stroke).
@@ -2276,10 +2279,10 @@
                 document.getElementById('prop-fill').value = colorToHex(paperFill) || '#FFE082';
                 document.getElementById('prop-opacity').value = obj.opacity != null ? obj.opacity : 1;
             } else {
-                document.getElementById('prop-fill').value = colorToHex(obj.fill) || '#333333';
-                document.getElementById('prop-stroke').value = colorToHex(obj.stroke) || '#000000';
-                document.getElementById('prop-stroke-width').value = obj.strokeWidth != null ? obj.strokeWidth : 1;
-                document.getElementById('prop-stroke-type').value = detectStrokeType(obj.strokeDashArray);
+                document.getElementById('prop-fill').value = colorToHex(shapeSrc.fill) || '#333333';
+                document.getElementById('prop-stroke').value = colorToHex(shapeSrc.stroke) || '#000000';
+                document.getElementById('prop-stroke-width').value = shapeSrc.strokeWidth != null ? shapeSrc.strokeWidth : 1;
+                document.getElementById('prop-stroke-type').value = detectStrokeType(shapeSrc.strokeDashArray);
                 document.getElementById('prop-opacity').value = obj.opacity != null ? obj.opacity : 1;
             }
         }
@@ -2303,7 +2306,7 @@
 
         // Text section: show for text-like objects AND for sticky notes
         // (so users can tune the inner textbox's font/colour/alignment).
-        const textSrc = isSticky ? stickyInnerText : (isText ? obj : null);
+        const textSrc = isSticky ? stickyInnerText : parts ? parts.text : (isText ? obj : null);
         if (textSrc) {
             textSection.style.display = '';
             document.getElementById('prop-text-color').value = colorToHex(textSrc.fill) || '#222222';
@@ -2358,9 +2361,34 @@
         return prop === 'fill-text' ? 'textFill' : prop;
     }
 
+    // Text-in-shape groups: text settings go to the text, the rest to the shape.
+    const _PART_TEXT_PROPS = ['fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'underline'];
+
+    function _applyPart(obj, part, prop, value) {
+        const parts = compositeParts(obj);
+        const targets = part === 'text' ? [parts.text] : parts.shapes;
+        const key = prop === 'cornerRadius' ? 'rx' : prop;
+        const prev = targets.map(t => ({ t: t, v: t[key] }));
+        setPartProp(obj, part, prop, value);
+        undoManager.push({
+            redo() { setPartProp(obj, part, prop, value); },
+            undo() {
+                if (part === 'text') { setPartProp(obj, part, prop, prev[0].v); return; }
+                prev.forEach(p => p.t.set(prop === 'cornerRadius' ? { rx: p.v, ry: p.v } : { [prop]: p.v }));
+                obj.dirty = true;
+                pc.requestRenderAll();
+            }
+        });
+        if (obj.uid) recordScript(`setPartProp(${JSON.stringify(obj.uid)}, ${JSON.stringify(part)}, ${JSON.stringify(prop)}, ${JSON.stringify(value)})`);
+    }
+
     function applyProperty(prop, value) {
         const obj = pc.getActiveObject();
         if (!obj) return;
+        if (prop !== 'opacity' && compositeParts(obj)) {
+            _applyPart(obj, _PART_TEXT_PROPS.includes(prop) ? 'text' : 'shape', prop, value);
+            return;
+        }
         if (_isStickyNote(obj)) {
             const sp = _stickyPropMap(prop);
             setStickyProp(obj, sp, value);
@@ -2380,6 +2408,7 @@
 
     function applyCornerRadius(radius) {
         const obj = pc.getActiveObject();
+        if (compositeParts(obj)) { _applyPart(obj, 'shape', 'cornerRadius', radius); return; }
         if (!(obj instanceof fabric.Rect)) return;
         const prevState = { rx: obj.rx || 0, ry: obj.ry || 0 };
         setCornerRadius(obj, radius);
@@ -2396,6 +2425,7 @@
             if (obj.uid) recordScript(`setStickyProp(${JSON.stringify(obj.uid)}, "textFill", ${JSON.stringify(value)})`);
             return;
         }
+        if (compositeParts(obj)) { _applyPart(obj, 'text', 'fill', value); return; }
         // For plain text objects, "fill" IS the text colour.
         applyProperty('fill', value);
     }
@@ -2408,9 +2438,12 @@
         const innerText = sticky && typeof obj.getObjects === 'function'
             ? obj.getObjects().find(o => o.type === 'textbox' || o.type === 'i-text' || o.type === 'text')
             : null;
-        const current = sticky ? (innerText && innerText[prop]) : obj[prop];
+        const parts = compositeParts(obj);
+        const current = sticky ? (innerText && innerText[prop]) : parts ? parts.text[prop] : obj[prop];
         const newValue = current === onVal ? offVal : onVal;
-        if (sticky) {
+        if (parts) {
+            _applyPart(obj, 'text', prop, newValue);
+        } else if (sticky) {
             setStickyProp(obj, prop, newValue);
             pc.requestRenderAll();
             if (obj.uid) recordScript(`setStickyProp(${JSON.stringify(obj.uid)}, ${JSON.stringify(prop)}, ${JSON.stringify(newValue)})`);
@@ -2454,6 +2487,7 @@
         if (!obj) return;
         const prev = obj.strokeDashArray ? [...obj.strokeDashArray] : null;
         const value = STROKE_DASH_PRESETS[type] ? [...STROKE_DASH_PRESETS[type]] : null;
+        if (compositeParts(obj)) { _applyPart(obj, 'shape', 'strokeDashArray', value); return; }
         obj.set('strokeDashArray', value);
         pc.requestRenderAll();
         undoManager.push(Commands.modifyObject(pc, obj,
@@ -2736,6 +2770,7 @@
         ['Change', [
             ['setProp(uid, prop, value)', 'Set one property, e.g. fill'],
             ['setCornerRadius(uid, radius)', 'Round the corners of a rectangle'],
+            ["setPartProp(uid, 'text' | 'shape', prop, value)", 'Change the text or the shape of a text-in-shape object'],
             ['setText(uid, text)', 'Replace the text of an object'],
             ['setStickyProp(uid, prop, value)', 'Sticky note colour or text property'],
             ['setQuadLabel(uid, text)', 'Text of a textInQuad box'],
@@ -3204,6 +3239,10 @@
         if (!targets.length) return;
         // If any visible, hide all; otherwise show all
         const anyVisible = targets.some(c => c.visible !== false);
+        const uids = JSON.stringify(targets.map(c => c.uid).filter(Boolean));
+        recordScript(anyVisible
+            ? `${uids}.forEach(u => hideObject(u))`
+            : `${uids}.forEach(u => { showObject(u); bringToFront(u); })`);
         targets.forEach(c => {
             if (anyVisible) {
                 hideObject(c);
@@ -3230,6 +3269,13 @@
             else c.set('visible', true);
         });
         pc.requestRenderAll();
+    }
+
+    // The slider fires input continuously; record only the value it settles on.
+    function recordVisibilityOfSelectedChildren(value) {
+        const uids = getSelectedChildren().map(c => c.uid).filter(Boolean);
+        if (!uids.length) return;
+        recordScript(`${JSON.stringify(uids)}.forEach(u => { setProp(u, 'opacity', ${value}); setProp(u, 'visible', ${value > 0}); })`);
     }
 
     // Make property panel draggable

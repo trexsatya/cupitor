@@ -84,6 +84,62 @@ function syncUidCounters() {
 }
 
 // Helper for script playback: set a property on an object by uid
+const _TEXT_TYPES = ['text', 'textbox', 'i-text'];
+
+// A group made of one text plus shape parts (text in a rectangle, circle,
+// cloud, ...). Sticky notes have their own helper (setStickyProp).
+function compositeParts(obj) {
+  if (!obj || obj.type !== 'group' || typeof obj.getObjects !== 'function') return null;
+  if (obj.customData && obj.customData.type === 'stickyNote') return null;
+  const kids = obj.getObjects();
+  const texts = kids.filter(k => _TEXT_TYPES.includes(k.type));
+  const shapes = kids.filter(k => !_TEXT_TYPES.includes(k.type) && k.type !== 'group');
+  return texts.length === 1 && shapes.length ? { text: texts[0], shapes: shapes } : null;
+}
+
+// Sets `prop` on the text part (part = 'text') or on every shape part
+// (part = 'shape') of a composite group. 'cornerRadius' sets rx/ry on rectangles.
+function setPartProp(uidOrObj, part, prop, value) {
+  const obj = findIfRequired(uidOrObj);
+  const parts = compositeParts(obj);
+  if (!parts) return;
+  const targets = part === 'text' ? [parts.text] : parts.shapes;
+  if (part === 'text') _capturePartBase(obj, parts);
+  targets.forEach(t => {
+    if (prop === 'cornerRadius') {
+      if (t instanceof fabric.Rect) t.set({ rx: value, ry: value });
+    } else {
+      t.set(prop, value);
+    }
+  });
+  if (part === 'text') _fitShapeToText(obj, parts);
+  obj.dirty = true;
+  if (obj.canvas) obj.canvas.requestRenderAll();
+}
+
+// The text and shape sizes as first built, so the shape can keep the same
+// proportion to its text when the text is resized.
+function _capturePartBase(obj, parts) {
+  obj.customData = obj.customData || {};
+  if (obj.customData.partBase) return;
+  obj.customData.partBase = {
+    tw: parts.text.width, th: parts.text.height,
+    shapes: parts.shapes.map(s => ({ scaleX: s.scaleX, scaleY: s.scaleY, left: s.left, top: s.top }))
+  };
+}
+
+function _fitShapeToText(obj, parts) {
+  const base = obj.customData.partBase;
+  const k = Math.max(parts.text.width / base.tw, parts.text.height / base.th);
+  parts.shapes.forEach((s, i) => {
+    const b = base.shapes[i];
+    if (!b) return;
+    s.set({ scaleX: b.scaleX * k, scaleY: b.scaleY * k, left: b.left * k, top: b.top * k, strokeUniform: true });
+  });
+  obj.triggerLayout();
+  obj.setCoords();
+}
+
 // Rounded corners for a rectangle (fabric caps the radius at half the shorter side).
 function setCornerRadius(uidOrObj, radius) {
   const obj = findIfRequired(uidOrObj);
