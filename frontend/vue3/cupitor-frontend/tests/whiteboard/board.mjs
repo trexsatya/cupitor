@@ -11,7 +11,8 @@ import { serveStatic } from '../../tools/play-mcp/page-driver.js';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const PUBLIC_DIR = path.resolve(here, '../../public');
+// WB_PUBLIC_DIR=dist runs the scenarios against a production build.
+export const PUBLIC_DIR = path.resolve(process.env.WB_PUBLIC_DIR || path.resolve(here, '../../public'));
 export const fixture = name => path.join(here, 'fixtures', name);
 
 let shared = null;

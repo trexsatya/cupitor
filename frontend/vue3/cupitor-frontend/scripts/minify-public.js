@@ -73,10 +73,13 @@ async function processFile(file) {
     output: { comments: /^!|@preserve|@license|@cc_on/i },
   }
 
-  // Try module mode first (handles ESM `export`/`import`); fall back to
-  // script mode if a vendor file rejects module-only constructs.
-  let result = await callMinify(code, { ...baseOpts, module: true })
-  if (result.error) {
+  // ES modules (files with import/export) are minified as modules. Plain
+  // scripts are minified as scripts: their top-level functions are globals
+  // other scripts, inline handlers and recorded play scripts call by name,
+  // so they must keep their names and not be dropped as unused.
+  const isModule = /^\s*(import|export)\b/m.test(code)
+  let result = await callMinify(code, { ...baseOpts, module: isModule })
+  if (result.error && isModule) {
     result = await callMinify(code, { ...baseOpts, module: false })
   }
   if (result.error) {
