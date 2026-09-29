@@ -664,6 +664,7 @@ function makeConnection(e) {
   if (window.firstOfConnection) {
     const from = firstOfConnection, to = pc.getActiveObject()
     window.firstOfConnection = null
+    if (!isFabricObject(from) || !isFabricObject(to)) return
     const line = connectObjects(from, to)
     if (line && from.uid && to.uid) {
       recordScript(`connectObjects(${JSON.stringify(from.uid)}, ${JSON.stringify(to.uid)}, ${JSON.stringify(line.uid)})`)
@@ -679,7 +680,10 @@ function makeConnection(e) {
 // opts.duration ms (default 800) and a promise of the line is returned.
 function connectObjects(fromUidOrObj, toUidOrObj, lineUid, opts) {
   const a = findIfRequired(fromUidOrObj), b = findIfRequired(toUidOrObj)
-  if (!isFabricObject(a) || !isFabricObject(b) || a === b) return null
+  // Thrown so a script's player reports the line instead of skipping it quietly.
+  if (!isFabricObject(a)) throw new Error(`connectObjects: no object ${JSON.stringify(fromUidOrObj)}`)
+  if (!isFabricObject(b)) throw new Error(`connectObjects: no object ${JSON.stringify(toUidOrObj)}`)
+  if (a === b) return null
   const line = connect(pc, a, b, { uid: lineUid })
   Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid })
   _listConnector(line)

@@ -313,7 +313,7 @@ function textInRect(textStr, x, y, optsText, optsRect, uid){
         originY: 'center',
         fill: 'white'
     }, optsText);
-    if(optsText.textColor) op.fill = optsText.textColor;
+    if(optsText && optsText.textColor) op.fill = optsText.textColor;
 
     // Pad every line, not just the first and last, so multi-line text stays centred.
     const text = new fabric.Text(String(textStr).split('\n').map(l => " " + l + " ").join('\n'), {
@@ -337,7 +337,7 @@ function textInRect(textStr, x, y, optsText, optsRect, uid){
         rx: 10, ry: 10
     },optsRect);
 
-    if(optsRect.rectColor) options.fill = optsRect.rectColor;
+    if(optsRect && optsRect.rectColor) options.fill = optsRect.rectColor;
 
     const rect = new fabric.Rect(options);
 
@@ -375,7 +375,7 @@ function textInCircle(textStr, x,y, optsText, optsCirc){
         originY: 'center',
         fill: 'white'
     }, optsText);
-    if(optsText.textColor) op.fill = optsText.textColor;
+    if(optsText && optsText.textColor) op.fill = optsText.textColor;
 
     const text = new fabric.Text( textStr, op);
 
@@ -386,7 +386,7 @@ function textInCircle(textStr, x,y, optsText, optsCirc){
         originY: 'center'
     },optsCirc);
 
-    if(optsCirc.circleColor) options.fill = optsCirc.circleColor;
+    if(optsCirc && optsCirc.circleColor) options.fill = optsCirc.circleColor;
 
     const circle = new fabric.Circle(options);
 
@@ -413,7 +413,7 @@ function textInEllipse(textStr, x, y, optsText, optsCirc){
     originY: 'center',
     fill: 'white'
   }, optsText);
-  if(optsText.textColor) op.fill = optsText.textColor;
+  if(optsText && optsText.textColor) op.fill = optsText.textColor;
 
   const text = new fabric.Text( textStr, op);
 
@@ -425,7 +425,7 @@ function textInEllipse(textStr, x, y, optsText, optsCirc){
     originY: 'center'
   },optsCirc);
 
-  if(optsCirc.circleColor) options.fill = optsCirc.circleColor;
+  if(optsCirc && optsCirc.circleColor) options.fill = optsCirc.circleColor;
 
   const circle = new fabric.Ellipse(options);
 
@@ -2242,10 +2242,11 @@ function spotlight(uidOrObjOrList, opts) {
   const cornerRadius = opts.cornerRadius != null ? opts.cornerRadius : 12;
   targets.forEach(t => {
     if (!t || typeof t.getBoundingRect !== 'function') return;
-    // absolute=false → coords are already viewport-transformed (canvas
-    // pixel space, which the SVG viewBox is locked to).
-    const br = t.getBoundingRect(false, true);
-    if (!br || !br.width || !br.height) return;
+    // getBoundingRect is in canvas coordinates; the SVG's viewBox is the
+    // canvas element in screen pixels, so apply the zoom and pan.
+    const box = t.getBoundingRect(), v = (t.canvas || window.pc).viewportTransform;
+    const br = { left: box.left * v[0] + v[4], top: box.top * v[3] + v[5], width: box.width * v[0], height: box.height * v[3] };
+    if (!br.width || !br.height) return;
     const w = br.width, h = br.height;
     const cx = br.left + w / 2;
     const cy = br.top  + h / 2;

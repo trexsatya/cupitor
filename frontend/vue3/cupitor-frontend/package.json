@@ -7,6 +7,7 @@
     "build": "vue-cli-service build && node scripts/minify-public.js && node scripts/cache-bust.js",
     "test:unit": "vue-cli-service test:unit",
     "test:e2e": "vue-cli-service test:e2e",
+    "test:whiteboard": "node --test tests/whiteboard/",
     "lint": "vue-cli-service lint"
   },
   "dependencies": {

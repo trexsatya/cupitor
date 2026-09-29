@@ -1,0 +1,224 @@
+// public/script-functions.js
+// Functions a play.html script can call, grouped for the Scripts panel's
+// "? Functions" popup and for the animation MCP server (tools/play-mcp).
+// Each entry is [signature, description, options], where options (optional)
+// lists [name, meaning] pairs for the arguments and option objects it takes.
+// "Other Fabric properties" means any other key is passed on to the Fabric.js
+// object (e.g. opacity, angle, strokeDashArray, shadow).
+const SCRIPT_FUNCTIONS = [
+    ['Create', [
+        ['addRect(left, top, width, height, opts)', 'Rectangle', [
+            ['uid', 'id for later lines (default: next R<n>)'],
+            ['fill', "fill colour (default 'transparent')"],
+            ['stroke', "outline colour (default '#333')"],
+            ['strokeWidth', 'outline width (default 2)'],
+            ['rx, ry', 'corner radius'],
+            ['…', 'other Fabric properties; left/top/width/height always come from the arguments'],
+        ]],
+        ['addDiamond(left, top, width, height, opts)', 'Diamond (a rectangle turned 45°)', [
+            ['uid', 'id for later lines'],
+            ['fill / stroke / strokeWidth', "as addRect (defaults 'transparent', '#333', 2)"],
+            ['angle', 'turn in degrees (default 45)'],
+            ['…', 'other Fabric properties'],
+        ]],
+        ['addEllipse(left, top, rx, ry, opts)', 'Ellipse (rx, ry: radii)', [
+            ['uid', 'id for later lines'],
+            ['fill / stroke / strokeWidth', "as addRect (defaults 'transparent', '#333', 2)"],
+            ['…', 'other Fabric properties'],
+        ]],
+        ['addLine([x1, y1, x2, y2], opts)', 'Straight line (bendable by its middle handle)', [
+            ['uid', 'id for later lines'],
+            ['stroke / strokeWidth', 'line colour and width'],
+            ['…', 'other Fabric properties'],
+        ]],
+        ['arrow(x1, y1, x2, y2, opts)', 'Arrow pointing at x2, y2 (returns it; add with pc.add)', [
+            ['uid', 'id (default: next arrow id)'],
+            ['stroke', "colour (default '#555')"],
+            ['strokeWidth', 'width (default 1.5)'],
+            ['arrowSize', 'head size (default 8)'],
+        ]],
+        ['textbox(opts)', 'Text box, as wide as its text (returns it; add with pc.add)', [
+            ['uid', 'id for later lines'],
+            ['text', "the text (default '')"],
+            ['left, top', 'position (default 400, 100)'],
+            ['color', "text colour (default 'blue')"],
+            ['width', 'starting width while empty (default 300)'],
+            ['angle', 'turn in degrees (default 0)'],
+        ]],
+        ['textInRect(text, x, y, optsText, optsRect, uid)', 'Text inside a rounded rectangle, centred on x, y (returns it; add with pc.add)', [
+            ['optsText.fill (or textColor)', "text colour (default 'white'); the text is 20 px"],
+            ['optsRect.fill (or rectColor)', "rectangle colour (default 'red')"],
+            ['optsRect.padx, pady', 'room around the text (default 20, 20)'],
+            ['optsRect.rx, ry', 'corner radius (default 10)'],
+            ['optsRect …', 'other Fabric properties of the rectangle'],
+            ['uid', 'id for later lines'],
+        ]],
+        ['textInCircle(text, x, y, optsText, optsShape)', 'Text inside a circle, centred on x, y (returns it; add with pc.add)', [
+            ['optsText', "fontSize (default 20), fill (or textColor; default 'white'), other Fabric text properties"],
+            ['optsShape.fill (or circleColor)', "circle colour (default 'red')"],
+            ['optsShape.radius', 'radius (default: the text width)'],
+            ['optsShape …', 'other Fabric properties of the circle'],
+        ]],
+        ['textInEllipse(text, x, y, optsText, optsShape)', 'Text inside an ellipse (returns it; add with pc.add)', [
+            ['optsText', "fontSize (default 20), fill (or textColor; default 'white'), other Fabric text properties"],
+            ['optsShape.fill (or circleColor)', "ellipse colour (default 'red')"],
+            ['optsShape.rx, ry', 'radii (default: the text width and height)'],
+            ['optsShape …', 'other Fabric properties of the ellipse'],
+        ]],
+        ['textInDiamond / textInHexagon / textInStar(text, x, y, optsText, optsShape)', 'Text inside a diamond, hexagon or star (returns it; add with pc.add)', [
+            ['optsText', "fontSize (default 20), fill (default 'white'), other Fabric text properties"],
+            ['optsShape.fill', "shape colour (defaults 'orange', 'purple', 'gold')"],
+            ['optsShape.points', 'corner points, to reshape it'],
+            ['optsShape …', 'other Fabric properties of the shape'],
+        ]],
+        ['textInCloud(text, x, y, optsText, optsShape)', 'Text inside a cloud (returns it; add with pc.add)', [
+            ['optsText', "fontSize (default 20), fill (default 'black'), other Fabric text properties"],
+            ['optsShape.fill', "cloud colour (default 'lightblue')"],
+        ]],
+        ['textInQuad(text, x, y, width, height, optsText, optsShape)', 'Text inside a box whose corners can be dragged; returns {quad, text} (add both)', [
+            ['width, height', 'size (default 160, 100)'],
+            ['optsShape.points', 'corner points instead of a rectangle'],
+            ['optsShape.fill / stroke / strokeWidth', "defaults 'rgba(100,150,220,0.35)', '#1976D2', 2"],
+            ['optsShape …', 'other Fabric properties of the box'],
+            ['optsText', "fontSize (default 18), fill (default '#111'), other Fabric text properties"],
+        ]],
+        ['addHtmlBox(x, y, w, h, html, opts)', 'HTML box: rich text, lists, links, images; double-click to edit', [
+            ['uid', 'id for later lines (default: next HB<n>)'],
+            ['padding', 'room inside the box (default 8)'],
+            ['fill', "background (default 'transparent')"],
+            ['stroke / strokeWidth', "border (default '#999', 1)"],
+            ['rx, ry', 'corner radius (default 4)'],
+            ['…', 'other Fabric properties'],
+        ]],
+        ['addStickyNote(x, y, opts)', 'Sticky note', [
+            ['uid', 'id for later lines'],
+            ['text', "note text (default '')"],
+            ['fill', "paper colour (default '#FFEB3B')"],
+            ['width, height', 'size (default 200, 200)'],
+            ['fontSize', 'text size (default 16)'],
+        ]],
+        ['addShapeLabel(shapeUid, position, text, opts)', 'Label attached to a shape', [
+            ['position', "'inside-center', 'inside-n' … 'inside-se', 'outside-n' … 'outside-se' (n, s, e, w, nw, ne, sw, se)"],
+            ['uid', 'id for later lines'],
+            ['fontSize', 'text size (default 13)'],
+            ['fill', "text colour (default '#222')"],
+            ['fontWeight / fontStyle', "default 'normal'"],
+            ['fontFamily', "default 'Arial, sans-serif'"],
+        ]],
+        ['addImage(url, left, top, opts)', 'Image from a URL (left, top default 100)', [
+            ['uid', 'id for later lines'],
+        ]],
+        ['addMath(tex, left, top, opts)', 'Rendered maths (TeX)', [
+            ['uid', 'id for later lines'],
+        ]],
+        ['createFreehandPath(pathString, opts)', 'Freehand path from SVG path data (returns it; add with pc.add or oc.add); draws itself in during playback', [
+            ['left, top', 'position (default 0, 0)'],
+            ['stroke', "colour (default '#000000')"],
+            ['strokeWidth', 'width (default 1)'],
+            ['fill', "fill (default '')"],
+            ['strokeLineCap / strokeLineJoin', "default 'butt', 'miter'"],
+            ['strokeDashArray', 'dashes, e.g. [8, 5] (default none)'],
+            ['opacity, scaleX, scaleY, angle', 'defaults 1, 1, 1, 0'],
+            ['uid', 'id for later lines'],
+        ]],
+        ['showArray(items, x, y, canvas, opts)', 'Row of circled values', [
+            ['gapx', 'space between items, times their size (default 1.5)'],
+            ['gapy', 'vertical spacing (default 1.5)'],
+        ]],
+        ['showMatrix(rows, x, y, canvas, opts)', 'Grid of circled values', [
+            ['gapx, gapy', 'spacing between items and rows (default 1.5, 1.5)'],
+            ['radius', 'circle size (default: fits the widest value)'],
+        ]],
+        ['renderSubtree(values, opts, node)', 'Tree children under node; returns {index: uid}', [
+            ['values', "'Alpha, Beta' — children; 'Beta:circ' gives one child its own shape"],
+            ['values prefix', "'shape;children' sets every child's shape: rect (default), circ, elli, diamond, hexagon, star, cloud, or none (a plain black-on-white rectangle); add 'arrow:out' (plain line, default), 'arrow:in' (arrows point at the parent) or 'arrow:bi', e.g. 'arrow:in,circ;A, B'"],
+            ['opts.idMappings', '{index: uid} ids for the children'],
+            ['opts.colorful', 'a different colour per child'],
+            ['opts.overlapOnRoot', 'start the children on top of the parent (to move them out later)'],
+            ['opts.width, height', 'spread and drop of the children (default 150, 60)'],
+        ]],
+        ['writeTextList(lines, x, y, opts)', 'Hand-write lines of text (writeTextListOrdered numbers them)', [
+            ['fontSize', 'text size (default 36)'],
+            ['color', "colour (default 'black')"],
+            ['lineHeight', 'px between lines (default 50)'],
+            ['width', 'width of each line (default 600)'],
+            ['align', "'left' (default), 'center' or 'right' of x"],
+            ['strokeWidth', 'pen width (default 2)'],
+            ['sequential', 'one line after another (default false: all together)'],
+        ]],
+        ['typeTextList(lines, x, y, opts)', 'Type lines of text (typeTextListOrdered numbers them)', [
+            ['fontSize / color / lineHeight / width / align', 'as writeTextList'],
+            ['sequential', 'one line after another (default true)'],
+            ['…', 'other CSS properties of the text'],
+        ]],
+    ]],
+    ['Change', [
+        ['setProp(uid, prop, value)', 'Set one Fabric property, e.g. fill, opacity, strokeWidth'],
+        ['setCornerRadius(uid, radius)', 'Round the corners of a rectangle'],
+        ["setPartProp(uid, 'text' | 'shape', prop, value)", "Change the text or the shape of a text-in-shape object; prop 'cornerRadius' rounds rectangles"],
+        ['setText(uid, text)', 'Replace the text of an object'],
+        ['setStickyProp(uid, prop, value)', 'Sticky note property', [
+            ['prop', "'fill' (paper), 'textFill', 'opacity', 'width', 'height', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'underline', 'textAlign'"],
+        ]],
+        ['setHtml(uid, html)', "Replace an HTML box's content"],
+        ['setQuadLabel(uid, text)', 'Text of a textInQuad box'],
+        ['setCustomData(uid, data)', 'Merge into customData (e.g. {padding: 12} for an HTML box)'],
+        ['reshapeLine(uid, points, cx, cy)', 'Move the end points (and bend) of a line'],
+        ['reshapeLineXY(uid, x1, y1, x2, y2)', 'Move the end points of a line'],
+        ['reshapeQuad(uid, points, props)', 'Move the corners of a box'],
+        ['bringToFront(uid)', 'Put on top of everything'],
+        ['sendToBack(uid)', 'Put behind everything'],
+        ['hideObject(uid)', 'Hide (and its tree lines)'],
+        ['showObject(uid)', 'Show again'],
+        ['removeByUid(uid)', 'Delete (its connectors go with it)'],
+        ['groupObjects([uids], groupUid)', 'Group objects'],
+        ['ungroupObjects(groupUid)', 'Ungroup'],
+        ['connectObjects(fromUid, toUid, lineUid, opts)', 'Arrow that stays attached to both objects when they move', [
+            ['lineUid', 'id for the arrow'],
+            ['opts.animate', 'grow the arrow from the source to the target; the next line waits'],
+            ['opts.duration', 'how long it grows, ms (default 800)'],
+        ]],
+        ['addClones([json])', 'Recreate duplicated / pasted objects (recorded for you)'],
+    ]],
+    ['Animate', [
+        ['animate(uid, props, opts)', 'Tween properties, e.g. {left: 300, top: 200, angle: 45, scaleX: 2, opacity: 0.5}; the next line waits', [
+            ['duration', 'ms (default 1000; 0 jumps straight there)'],
+            ['easing', 'a fabric.util.ease function, e.g. fabric.util.ease.easeOutBounce'],
+            ['onComplete', 'called when every property is done'],
+        ]],
+        ['animatePath(uid, samples, opts)', 'Replay a recorded curved drag ([{left, top, t}, …])', [
+            ['duration', 'total ms (default: the pace it was recorded at)'],
+            ['onComplete', 'called at the end'],
+        ]],
+        ["reveal(uid, from, opts)", 'Wipe an object into view (shows it if hidden); the next line waits', [
+            ['from', "'left' (uncover left to right; default), 'right', 'top' or 'bottom' — the object's own sides"],
+            ['opts.duration', 'ms (default 800)'],
+        ]],
+        ["anim(uid, 'highlight', opts)", 'Pulse bigger and back until stopped', [
+            ['factor', 'how much bigger (default 1.18)'],
+            ['duration', 'ms per half pulse (default 600)'],
+        ]],
+        ["anim(uid, 'spotlight', opts)", 'Darken everything else until stopped', [
+            ['shape', "'auto' (default), 'circle' or 'rect'"],
+            ['padding', 'px around the object (default 30)'],
+            ['cornerRadius', 'rect corner radius (default 12)'],
+            ['color', "shade colour (default '#000')"],
+        ]],
+        ["anim(uid, 'flow', opts)", 'Dot travels along an arrow from its source to where it points, until stopped', [
+            ['duration', 'ms per trip (default 1400)'],
+            ['color', "dot colour (default '#ff5722')"],
+            ['radius', 'dot size (default: 3 × the line width, at least 5)'],
+        ]],
+        ['stopAnim(uid)', 'Stop highlight, spotlight, flow or reveal; with no argument stops everything'],
+        ['zoomSelectedObject(uid, isPlus, amount)', 'Grow (isPlus true, default) or shrink an object by amount (default 1.5)'],
+        ['expandTreeItems(uid)', 'Show the children of a tree node'],
+        ['collapseTreeItems(uid)', 'Hide the children of a tree node'],
+    ]],
+    ['Canvas & timing', [
+        ['sleep(seconds)', 'Pause; returns a promise (start the line with Promise.resolve(sleep(1)) to make the next line wait)'],
+        ['clear(layer)', "Clear 'pc', 'oc' or 'txt'; no argument clears all"],
+        ['findIfRequired(uid)', 'Look up an object by uid (also inside groups)'],
+        ['pc  /  oc', 'Main and overlay canvases (Fabric.js)'],
+        ["_['id']", 'Objects stored by earlier script lines'],
+    ]],
+];

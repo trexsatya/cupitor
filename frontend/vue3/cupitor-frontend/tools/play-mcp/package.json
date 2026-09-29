@@ -1,0 +1,16 @@
+{
+  "name": "play-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server for writing play.html animations in a live browser page",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "zod": "^4.6.5"
+  }
+}

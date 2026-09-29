@@ -48,6 +48,7 @@
     <script type="text/javascript" src="/jquery.play.js"></script>
     <script type="text/javascript" src="/play.js"></script>
     <script type="text/javascript" src="/vendor/html-to-image.js"></script>
+    <script type="text/javascript" src="/script-functions.js" charset="utf-8"></script>
     <script type="text/javascript" src="/html-box.js"></script>
     <script type="text/javascript" src="/whiteboard.js"></script>
     <script type="text/javascript" src="/whiteboard.undo.js"></script>
@@ -2918,83 +2919,20 @@
         el.classList.toggle('visible', open);
     }
 
-    // Functions a recorded script can call, grouped for the "? Functions" popup.
-    const SCRIPT_HELP = [
-        ['Create', [
-            ['addRect(left, top, width, height, opts)', 'Rectangle'],
-            ['addDiamond(left, top, width, height, opts)', 'Diamond'],
-            ['addEllipse(left, top, rx, ry, opts)', 'Ellipse'],
-            ['addLine([x1, y1, x2, y2], opts)', 'Straight line'],
-            ['arrow(x1, y1, x2, y2, opts)', 'Arrow (returns it; add with pc.add)'],
-            ['textbox(opts)', 'Text box (returns it; add with pc.add)'],
-            ['textInRect(text, x, y, optsText, optsRect, uid)', 'Text inside a rectangle (returns it; add with pc.add)'],
-            ['textInQuad(text, x, y, width, height, optsText, optsShape)', 'Text inside a reshapeable box; returns {quad, text}'],
-            ['textInCircle(text, x, y, optsText, optsShape)', 'Text inside a circle (returns it; add with pc.add). Also textInEllipse, textInDiamond, textInHexagon, textInStar, textInCloud'],
-            ['addStickyNote(x, y, opts)', 'Sticky note'],
-            ['addShapeLabel(shapeUid, position, text, opts)', 'Label attached to a shape'],
-            ['addImage(url, left, top, opts)', 'Image from a URL'],
-            ['addMath(tex, left, top, opts)', 'Rendered maths (TeX)'],
-            ['createFreehandPath(pathString, opts)', 'Freehand path (returns it; add with pc.add or oc.add)'],
-            ['showArray(items, x, y, canvas, opts)', 'Row of boxed values'],
-            ['showMatrix(rows, x, y, canvas, opts)', 'Grid of boxed values'],
-            ['renderSubtree(values, opts, node)', 'Tree of nodes'],
-            ['writeTextList(lines, x, y, opts)', 'Write lines of text (also writeTextListOrdered)'],
-            ['typeTextList(lines, x, y, opts)', 'Type lines of text (also typeTextListOrdered)'],
-        ]],
-        ['Change', [
-            ['setProp(uid, prop, value)', 'Set one property, e.g. fill'],
-            ['setCornerRadius(uid, radius)', 'Round the corners of a rectangle'],
-            ["setPartProp(uid, 'text' | 'shape', prop, value)", 'Change the text or the shape of a text-in-shape object'],
-            ['setText(uid, text)', 'Replace the text of an object'],
-            ['setStickyProp(uid, prop, value)', 'Sticky note colour or text property'],
-            ['setQuadLabel(uid, text)', 'Text of a textInQuad box'],
-            ['setCustomData(uid, data)', 'Merge into customData'],
-            ['reshapeLine(uid, points, cx, cy)', 'Move the end points of a line'],
-            ['reshapeLineXY(uid, x1, y1, x2, y2)', 'Move the end points of a line'],
-            ['reshapeQuad(uid, points, props)', 'Move the corners of a box'],
-            ['bringToFront(uid)', 'Put on top of everything'],
-            ['sendToBack(uid)', 'Put behind everything'],
-            ['hideObject(uid)', 'Hide (and its tree lines)'],
-            ['showObject(uid)', 'Show again'],
-            ['removeByUid(uid)', 'Delete'],
-            ['connectObjects(fromUid, toUid, lineUid)', 'Arrow that stays attached to both objects when they move'],
-            ["connectObjects(fromUid, toUid, lineUid, {animate: true, duration: 800})", 'Same, but the arrow grows from the source to the target'],
-            ['addClones([json])', 'Recreate duplicated / pasted objects (recorded for you)'],
-        ]],
-        ['Animate', [
-            ['animate(uid, props, {duration})', 'Tween properties; waits until done (default 1000 ms)'],
-            ['animatePath(uid, samples, {duration})', 'Replay a recorded curved drag'],
-            ['anim(uid, type, opts)', "Start 'highlight', 'spotlight', 'spotlight:circle', 'spotlight:rect' or 'flow'"],
-            ["anim(uid, 'flow', {duration, color})", 'Dot travels along an arrow from its source to where it points'],
-            ['addHtmlBox(x, y, w, h, html, {uid, fill, stroke})', 'HTML box: rich text, lists, links; double-click to edit'],
-            ['setHtml(uid, html)', "Replace an HTML box's content"],
-            ["reveal(uid, 'left' | 'right' | 'top' | 'bottom', {duration})", 'Wipe an object into view from that side (shows it if hidden); the next line waits'],
-            ['stopAnim(uid)', 'Stop it; with no argument stops everything'],
-            ['zoomSelectedObject(uid, isPlus, amount)', 'Grow or shrink an object'],
-            ['expandTreeItems(uid)', 'Show the children of a tree node'],
-            ['collapseTreeItems(uid)', 'Hide the children of a tree node'],
-        ]],
-        ['Canvas & timing', [
-            ['sleep(seconds)', 'Pause; returns a promise'],
-            ['clear(layer)', "Clear 'pc', 'oc' or 'txt'; no argument clears all"],
-            ['findIfRequired(uid)', 'Look up an object by uid'],
-            ['pc  /  oc', 'Main and overlay canvases (Fabric.js)'],
-            ["_['id']", 'Objects stored by earlier script lines'],
-        ]],
-    ];
 
     function renderScriptHelp(filter) {
         const q = (filter || '').trim().toLowerCase();
         const list = document.getElementById('scriptHelpList');
         list.innerHTML = '';
-        SCRIPT_HELP.forEach(([group, items]) => {
-            const shown = items.filter(([sig, desc]) => !q || (sig + ' ' + desc).toLowerCase().includes(q));
+        SCRIPT_FUNCTIONS.forEach(([group, items]) => {
+            const shown = items.filter(([sig, desc, opts]) => !q ||
+                [sig, desc, ...(opts || []).flat()].join(' ').toLowerCase().includes(q));
             if (!shown.length) return;
             const h = document.createElement('div');
             h.textContent = group;
             h.style.cssText = 'padding:6px 10px 2px;font-weight:600;color:#666;';
             list.appendChild(h);
-            shown.forEach(([sig, desc]) => {
+            shown.forEach(([sig, desc, opts]) => {
                 const row = document.createElement('div');
                 row.className = 'script-help-row';
                 row.title = 'Insert at cursor';
@@ -3009,6 +2947,21 @@
                 d.style.cssText = 'color:#777;font-size:11px;';
                 row.appendChild(code);
                 row.appendChild(d);
+                // The options the function takes, one per line.
+                if (opts && opts.length) {
+                    const o = document.createElement('div');
+                    o.style.cssText = 'margin:2px 0 0 10px;font-size:11px;color:#555;display:grid;grid-template-columns:auto 1fr;gap:1px 8px;';
+                    opts.forEach(([key, meaning]) => {
+                        const k = document.createElement('code');
+                        k.textContent = key;
+                        k.style.cssText = 'color:#6a1b9a;white-space:nowrap;';
+                        const m = document.createElement('span');
+                        m.textContent = meaning;
+                        o.appendChild(k);
+                        o.appendChild(m);
+                    });
+                    row.appendChild(o);
+                }
                 row.onclick = () => {
                     const ed = ensureScriptEditor();
                     ed.insert(sig);
