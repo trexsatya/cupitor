@@ -197,95 +197,112 @@ function _showStickyTextEditor(canvas, group) {
 }
 
 // --- Alignment Guides ---
+// Snaps a dragged object to line up (left, centre or right; top, middle or
+// bottom) with other visible objects, and shows dashed guides where it does.
+// Guides are painted on the top layer, not added as canvas objects.
 class AlignmentGuideManager {
-  constructor(canvas) {
+  constructor(canvas, opts) {
     this.canvas = canvas;
     this.enabled = true;
-    this.threshold = 5;
-    this.guideLines = [];
+    this.threshold = 5; // screen pixels
+    this.guides = [];   // [{ orientation: 'horizontal' | 'vertical', position }]
+    this._painted = false;
+    this.onSnap = (opts && opts.onSnap) || null;
   }
 
   clearGuides() {
-    this.guideLines.forEach(l => this.canvas.remove(l));
-    this.guideLines = [];
+    if (!this.guides.length) return;
+    this.guides = [];
+    this.canvas.requestRenderAll();
   }
 
-  showGuide(orientation, position) {
-    const w = 6000;
-    let line;
-    if (orientation === 'horizontal') {
-      line = new fabric.Line([-w, position, w, position], {
-        stroke: '#F44336', strokeWidth: 0.5, strokeDashArray: [5, 5],
-        selectable: false, evented: false, excludeFromExport: true
-      });
-    } else {
-      line = new fabric.Line([position, -w, position, w], {
-        stroke: '#F44336', strokeWidth: 0.5, strokeDashArray: [5, 5],
-        selectable: false, evented: false, excludeFromExport: true
-      });
-    }
-    this.guideLines.push(line);
-    this.canvas.add(line);
+  // Objects a drag can line up with: visible, pickable, not lines, and not
+  // the dragged object or one of the objects it carries.
+  _candidates(target) {
+    const carried = new Set(target._objects || []);
+    return this.canvas.getObjects().filter(o =>
+      o !== target && !carried.has(o) && o.visible !== false &&
+      o.selectable !== false && o.evented !== false &&
+      !o.excludeFromExport && !(o instanceof fabric.Line)
+    );
   }
 
   checkAlignment(target) {
-    if (!this.enabled) return;
-    this.clearGuides();
-    const allObjects = this.canvas.getObjects().filter(o =>
-      o !== target && !o.excludeFromExport && o.selectable !== false
-    );
-    const targetCenter = target.getCenterPoint();
-    const targetBound = target.getBoundingRect();
-
-    allObjects.forEach(obj => {
-      const objCenter = obj.getCenterPoint();
-      const objBound = obj.getBoundingRect();
-
-      // Horizontal center alignment
-      if (Math.abs(targetCenter.y - objCenter.y) < this.threshold) {
-        target.set({ top: objCenter.y - (targetBound.height / 2) });
-        this.showGuide('horizontal', objCenter.y);
-      }
-      // Vertical center alignment
-      if (Math.abs(targetCenter.x - objCenter.x) < this.threshold) {
-        target.set({ left: objCenter.x - (targetBound.width / 2) });
-        this.showGuide('vertical', objCenter.x);
-      }
-      // Top edge alignment
-      if (Math.abs(targetBound.top - objBound.top) < this.threshold) {
-        target.set({ top: objBound.top });
-        this.showGuide('horizontal', objBound.top);
-      }
-      // Bottom edge alignment
-      if (Math.abs(targetBound.top + targetBound.height - (objBound.top + objBound.height)) < this.threshold) {
-        target.set({ top: objBound.top + objBound.height - targetBound.height });
-        this.showGuide('horizontal', objBound.top + objBound.height);
-      }
-      // Left edge alignment
-      if (Math.abs(targetBound.left - objBound.left) < this.threshold) {
-        target.set({ left: objBound.left });
-        this.showGuide('vertical', objBound.left);
-      }
-      // Right edge alignment
-      if (Math.abs(targetBound.left + targetBound.width - (objBound.left + objBound.width)) < this.threshold) {
-        target.set({ left: objBound.left + objBound.width - targetBound.width });
-        this.showGuide('vertical', objBound.left + objBound.width);
-      }
+    this.guides = [];
+    if (!this.enabled || !target) return;
+    const limit = this.threshold / (this.canvas.getZoom() || 1);
+    const edges = r => ({
+      x: [r.left, r.left + r.width / 2, r.left + r.width],
+      y: [r.top, r.top + r.height / 2, r.top + r.height]
     });
+    target.setCoords();
+    const t = edges(target.getBoundingRect());
+    // The closest match on each axis wins; like edges only (left to left, ...).
+    const best = { x: null, y: null };
+    this._candidates(target).forEach(obj => {
+      const o = edges(obj.getBoundingRect());
+      ['x', 'y'].forEach(axis => {
+        for (let i = 0; i < 3; i++) {
+          const d = o[axis][i] - t[axis][i];
+          if (Math.abs(d) < limit && (!best[axis] || Math.abs(d) < Math.abs(best[axis].d))) {
+            best[axis] = { d, position: o[axis][i] };
+          }
+        }
+      });
+    });
+    if (!best.x && !best.y) return;
+    // Shift by the gap, so it works whatever the object's origin is.
+    if (best.x) {
+      target.set('left', target.left + best.x.d);
+      this.guides.push({ orientation: 'vertical', position: best.x.position });
+    }
+    if (best.y) {
+      target.set('top', target.top + best.y.d);
+      this.guides.push({ orientation: 'horizontal', position: best.y.position });
+    }
+    target.setCoords();
+    if (this.onSnap) this.onSnap(target);
+  }
+
+  _clearTop() {
+    if (!this._painted) return;
+    // A freehand brush draws on the same top layer; never wipe its stroke.
+    if (this.canvas.isDrawingMode) { this._painted = false; return; }
+    this.canvas.clearContext(this.canvas.contextTop);
+    this._painted = false;
+  }
+
+  _paint() {
+    if (!this.guides.length) return;
+    const ctx = this.canvas.contextTop;
+    const v = this.canvas.viewportTransform;
+    const far = 100000;
+    ctx.save();
+    ctx.transform(v[0], v[1], v[2], v[3], v[4], v[5]);
+    ctx.strokeStyle = '#F44336';
+    ctx.lineWidth = 1 / (v[0] || 1);
+    ctx.setLineDash([5 / (v[0] || 1), 5 / (v[0] || 1)]);
+    ctx.beginPath();
+    this.guides.forEach(g => {
+      if (g.orientation === 'horizontal') { ctx.moveTo(-far, g.position); ctx.lineTo(far, g.position); }
+      else { ctx.moveTo(g.position, -far); ctx.lineTo(g.position, far); }
+    });
+    ctx.stroke();
+    ctx.restore();
+    this._painted = true;
   }
 }
 
-function initAlignmentGuides(canvas) {
-  const guideManager = new AlignmentGuideManager(canvas);
+function initAlignmentGuides(canvas, opts) {
+  const guideManager = new AlignmentGuideManager(canvas, opts);
   canvas.on('object:moving', function(e) {
     guideManager.checkAlignment(e.target);
   });
-  canvas.on('object:modified', function() {
-    guideManager.clearGuides();
-  });
-  canvas.on('before:transform', function() {
-    guideManager.clearGuides();
-  });
+  canvas.on('before:render', () => guideManager._clearTop());
+  canvas.on('after:render', () => guideManager._paint());
+  canvas.on('mouse:up', () => guideManager.clearGuides());
+  canvas.on('object:modified', () => guideManager.clearGuides());
+  canvas.on('before:transform', () => guideManager.clearGuides());
   return guideManager;
 }
 
@@ -568,6 +585,17 @@ function registerTools(toolManager, primaryCanvas, overlayCanvas) {
     deactivate() {
       primaryCanvas.defaultCursor = 'default';
       window._insertStickyNote = false;
+    }
+  });
+
+  toolManager.register('htmlBox', {
+    activate() {
+      primaryCanvas.defaultCursor = 'crosshair';
+      window._insertHtmlBox = true;
+    },
+    deactivate() {
+      primaryCanvas.defaultCursor = 'default';
+      window._insertHtmlBox = false;
     }
   });
 

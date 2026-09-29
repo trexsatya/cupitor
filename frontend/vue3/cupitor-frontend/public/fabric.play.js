@@ -270,6 +270,27 @@ fabric.CurvableLine = CurvableLine;
 fabric.classRegistry.setClass(CurvableLine);
 fabric.classRegistry.setClass(CurvableLine, 'CurvableLine');
 
+// Text boxes marked customData.autoFit (the Text tools' boxes) are as wide as
+// their longest line, so no empty space is left at the right. An empty box
+// keeps its width so it can still be clicked. Dragging a side handle sets the
+// width by hand, and from then on the text wraps at that width.
+const _textboxInitDimensions = fabric.Textbox.prototype.initDimensions;
+fabric.Textbox.prototype.initDimensions = function () {
+  const cd = this.customData;
+  if (this.initialized && cd && cd.autoFit) {
+    const t = this.canvas && this.canvas._currentTransform;
+    if (t && t.target === this && t.action === 'resizing') cd.autoFit = false;
+  }
+  if (!this.initialized || !cd || !cd.autoFit || !this.text) return _textboxInitDimensions.call(this);
+  // Lay out without wrapping, then shrink to the widest line and lay out again.
+  this.width = 1e6;
+  _textboxInitDimensions.call(this);
+  let widest = 0;
+  for (let i = 0; i < this._textLines.length; i++) widest = Math.max(widest, this.getLineWidth(i));
+  this.width = Math.ceil(widest) + 1;
+  _textboxInitDimensions.call(this);
+};
+
 fabric.Canvas.prototype.add = (function (originalFn) {
   return function (...args) {
     const obj = args[0];
@@ -641,9 +662,110 @@ function selectFirstOfConnection(e) {
 
 function makeConnection(e) {
   if (window.firstOfConnection) {
-    connect(pc, firstOfConnection, pc.getActiveObject())
+    const from = firstOfConnection, to = pc.getActiveObject()
     window.firstOfConnection = null
+    const line = connectObjects(from, to)
+    if (line && from.uid && to.uid) {
+      recordScript(`connectObjects(${JSON.stringify(from.uid)}, ${JSON.stringify(to.uid)}, ${JSON.stringify(line.uid)})`)
+    }
   }
+}
+
+// A Connector-tool line that stays attached to both objects: the line knows
+// its ends (customData.source/target) and each object lists its connector
+// lines (customData.connectorsOut/In), so the links save, replay and survive
+// moves (updateConnectors runs from updateTreeItem).
+// With opts.animate the line grows from the source to the target over
+// opts.duration ms (default 800) and a promise of the line is returned.
+function connectObjects(fromUidOrObj, toUidOrObj, lineUid, opts) {
+  const a = findIfRequired(fromUidOrObj), b = findIfRequired(toUidOrObj)
+  if (!isFabricObject(a) || !isFabricObject(b) || a === b) return null
+  const line = connect(pc, a, b, { uid: lineUid })
+  Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid })
+  _listConnector(line)
+  if (!(opts && opts.animate)) return line
+  const end = { x2: line.x2, y2: line.y2 }
+  line.set({ x2: line.x1, y2: line.y1 })
+  return animate(line, end, { duration: (opts && opts.duration) || 800 }).then(() => line)
+}
+
+function _listConnector(line) {
+  const cd = line.customData
+  const a = findIfRequired(cd.source), b = findIfRequired(cd.target)
+  if (!isFabricObject(a) || !isFabricObject(b)) return
+  const add = (obj, key) => { const list = customData(obj)[key] = customData(obj)[key] || []; if (!list.includes(line.uid)) list.push(line.uid) }
+  add(a, 'connectorsOut')
+  add(b, 'connectorsIn')
+}
+
+// Called for every object removed from / added to pc, whatever removed it
+// (Delete, eraser, scripts, undo): a removed connector is unlisted from its
+// objects, a removed object takes its connector lines with it, and a connector
+// put back (undo) is listed again. Objects moving into a group aren't removed.
+function onConnectorRemoved(obj) {
+  if (!obj || (obj.group && obj.group.type === 'group')) return
+  const cd = obj.customData || {}
+  if (cd.type === 'connector') {
+    [cd.source, cd.target].map(findIfRequired).filter(isFabricObject).forEach(end => {
+      const e = end.customData || {}
+      if (e.connectorsOut) e.connectorsOut = e.connectorsOut.filter(u => u !== obj.uid)
+      if (e.connectorsIn) e.connectorsIn = e.connectorsIn.filter(u => u !== obj.uid)
+    })
+    return
+  }
+  // The lines go with the object as one undo step: they are kept on the object
+  // and put back when it is (onConnectorAdded).
+  const lines = _connectorLines(obj)
+  if (!lines.length) return
+  obj._removedConnectors = lines
+  _withoutUndo(() => lines.forEach(line => { if (line.canvas) line.canvas.remove(line) }))
+}
+
+function onConnectorAdded(obj) {
+  if (!obj || !obj.customData) return
+  if (obj.customData.type === 'connector' && obj.uid) _listConnector(obj)
+  const lines = obj._removedConnectors
+  if (lines) {
+    delete obj._removedConnectors
+    _withoutUndo(() => lines.forEach(line => { if (!line.canvas) pc.add(line) }))
+  }
+}
+
+function _withoutUndo(fn) {
+  const um = window.undoManager
+  const was = um && um.isPerformingAction
+  if (um) um.isPerformingAction = true
+  try { fn() } finally { if (um) um.isPerformingAction = was }
+}
+
+// Turns obj's connector lines into plain lines that no longer follow anything.
+function _unlinkConnectors(obj) {
+  _connectorLines(obj).forEach(line => {
+    onConnectorRemoved(line)
+    const cd = line.customData
+    delete cd.type; delete cd.source; delete cd.target
+  })
+  const cd = obj.customData
+  if (cd) { delete cd.connectorsOut; delete cd.connectorsIn }
+}
+
+function _connectorLines(obj) {
+  const cd = obj && obj.customData
+  if (!cd || !(cd.connectorsOut || cd.connectorsIn)) return []
+  return [...(cd.connectorsOut || []), ...(cd.connectorsIn || [])]
+    .map(findIfRequired).filter(isFabricObject)
+}
+
+function updateConnectors(obj) {
+  const lines = _connectorLines(obj)
+  lines.forEach(line => {
+    const a = findIfRequired(line.customData.source), b = findIfRequired(line.customData.target)
+    if (!isFabricObject(a) || !isFabricObject(b)) return
+    const [x1, y1, x2, y2] = connectorEnds(a, b)
+    line.set({ x1, y1, x2, y2 })
+    line.setCoords()
+  })
+  if (lines.length) pc.requestRenderAll()
 }
 
 function zoomSelectedObject(obj, isPlus = true, amount = 1.5) {
@@ -698,7 +820,6 @@ function deleteFabricObject(obj) {
   obj.treeConnection?.outgoing?.lines?.map(findIfRequired)?.forEach((line) => {
     pc.remove(line)
   })
-
   pc.remove(obj)
   pc.renderAll()
 }
@@ -817,6 +938,8 @@ function _detachIdentity(o) {
   if (o.customData) {
     o.customData = JSON.parse(JSON.stringify(o.customData));
     delete o.customData.uid;
+    delete o.customData.connectorsOut;
+    delete o.customData.connectorsIn;
   }
   delete o.treeConnection;
 }
@@ -825,11 +948,25 @@ function _detachIdentity(o) {
 // by `offset`, and records one line that recreates exactly these objects.
 function _addClones(cloned, offset) {
   const objs = cloned.type === 'activeselection' ? cloned.removeAll() : [cloned];
+  const sourceUids = objs.map(o => o.uid);
   objs.forEach(o => {
     _detachClone(o);
     o.set({ left: o.left + offset, top: o.top + offset, evented: true });
     pc.add(o);
     o.setCoords();
+  });
+  // A copied connector links the copies of its ends when both were copied
+  // with it; otherwise it becomes a plain line.
+  const newUid = new Map(sourceUids.map((u, i) => [u, objs[i].uid]));
+  objs.forEach(o => {
+    const cd = o.customData;
+    if (!cd || cd.type !== 'connector') return;
+    if (newUid.has(cd.source) && newUid.has(cd.target)) {
+      cd.source = newUid.get(cd.source); cd.target = newUid.get(cd.target);
+      _listConnector(o);
+    } else {
+      delete cd.type; delete cd.source; delete cd.target;
+    }
   });
   pc.requestRenderAll();
   recordScript(`Promise.resolve(addClones(${JSON.stringify(objs.map(o => o.toObject()))}))`);
@@ -1072,6 +1209,7 @@ function renderSubtree(values, opts, node) {
       customData(line).target = targetNode.uid ? targetNode.uid : targetNode
       customData(line).direction = arrowDir
 
+      placeTreeLine(line)
       pc.add(line)
       pc.sendObjectToBack(line)
       node.treeConnection.outgoing = node.treeConnection.outgoing || defaultOutgoing()
@@ -1083,7 +1221,6 @@ function renderSubtree(values, opts, node) {
           point: 'centre'
         }
       }
-      targetNode.onAnimationChange = () => updateTreeItem(targetNode)
 
       if(options.overlapOnRoot) {
         pc.bringObjectToFront(targetNode)
@@ -1206,13 +1343,16 @@ function makeSubtree(node, values, opts) {
   opts = opts || {}
   opts.overlapOnRoot = true
   opts.colorful = true
+  const existingLines = new Set((node.treeConnection?.outgoing?.lines || []).map(l => (typeof l === 'object' ? l.uid : l)))
   opts.idMappings = renderSubtree(values, opts, node)
   //TODO: Find the closest obj which was recorded so we know its uid,
   // and find the relation to that i.e (level, index, data); And use that in the record script
   const renderLine = `renderSubtree(${JSON.stringify(values)}, ${JSON.stringify(opts)}, '${node.uid}')`
 
-  // Hide all immediate children and their connector lines, then show the Tree Node panel
-  const outgoingLines = node.treeConnection?.outgoing?.lines || [];
+  // Hide the children just added and their connector lines (children that were
+  // already there keep their visibility), then show the Tree Node panel
+  const outgoingLines = (node.treeConnection?.outgoing?.lines || [])
+    .filter(l => !existingLines.has(typeof l === 'object' ? l.uid : l));
   const hiddenChildUids = [];
   outgoingLines
     .map(findIfRequired)
@@ -1292,8 +1432,25 @@ const getActualProperties = (object, round) => {
   return props;
 };
 
+// Puts a tree line between the facing edges of its source and target nodes
+// ('in' arrows run from the target back to the source). False when either
+// node can't be found.
+function placeTreeLine(line) {
+  if (!isFabricObject(line) || !line.customData) return false
+  const a = findIfRequired(line.customData.source), b = findIfRequired(line.customData.target)
+  if (!isFabricObject(a) || !isFabricObject(b)) return false
+  const [x1, y1, x2, y2] = edgeMidEnds(a, b)
+  line.set(line.customData.direction === 'in' ? { x1: x2, y1: y2, x2: x1, y2: y1 } : { x1, y1, x2, y2 })
+  line.setCoords()
+  return true
+}
+
 function updateTreeItem(obj) {
   obj = findIfRequired(obj)
+  // Objects inside a group (or selection) move with it, however deeply nested,
+  // so their tree and connector lines follow too.
+  if (obj && obj._objects) obj._objects.forEach(child => updateTreeItem(child))
+  if (isFabricObject(obj)) updateConnectors(obj)
   if(!obj || !obj.treeConnection) return;
 
   let p;
@@ -1312,17 +1469,19 @@ function updateTreeItem(obj) {
         x: c.x + obj.width / 2
       }
     }
-    const p = getActualProperties(obj)
-    p.x = p.x + obj.width / 2
-    p.y = p.y + obj.height / 2
-    return p
+    // Tree lines join node centres (whatever the node's origin, scale or group).
+    return obj.getCenterPoint()
   };
 
+  // Lines that know both their nodes join the facing edges (see placeTreeLine);
+  // the rest follow the node's centre as before.
+  const placed = l => placeTreeLine(l)
   const inward = obj.treeConnection.incoming || {};
   const outward = obj.treeConnection.outgoing || {};
   if (inward.lines && inward.point) {
     p = getPointCoords(obj, null);
     inward.lines.map(findIfRequired).filter(it => it).forEach(l => {
+      if (placed(l)) return;
       l.set('x2', p.x);
       l.set('y2', p.y);
       obj.setCoords();
@@ -1333,6 +1492,7 @@ function updateTreeItem(obj) {
   if (outward.lines && outward.point) {
     p = getPointCoords(obj, null);
     outward.lines.map(findIfRequired).filter(it => it).forEach(l => {
+      if (placed(l)) return;
       l.set('x1', p.x);
       l.set('y1', p.y);
       obj.setCoords();
@@ -1431,6 +1591,8 @@ function degroup(pc) {
     )
   );
 
+  // The group is going away, so lines connected to it stop following it.
+  if (grp.type === 'group') _unlinkConnectors(grp);
   pc.remove(grp);
 
   items.forEach((item, i) => {
@@ -1574,18 +1736,26 @@ function exportCanvas() {
   window.URL.revokeObjectURL(url);
 }
 
-function buildScriptExecutables() {
-  return (window.recordedScriptLines || []).map(line => {
+function buildScriptExecutables(lines) {
+  return (lines || window.recordedScriptLines || []).map(line => {
     line = line.trim()
-    const executable = (line.startsWith('animate') || line.startsWith('Promise'))
+    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal'))
       ? `return ${line};`
       : line
     return `() => { ${executable} }`
   })
 }
 
-function playScript() {
-  const fns = buildScriptExecutables().map(eval)
+// Turns one built line into its function. A line that isn't valid script
+// becomes one that fails when played, so it is reported and skipped like any
+// other failing line instead of stopping the whole script.
+function compileScriptLine(src) {
+  try { return eval(src) } catch (err) { return () => { throw err } }
+}
+
+// Plays the recorded script, or just `lines` when given (e.g. an import).
+function playScript(lines) {
+  const fns = buildScriptExecutables(lines).map(compileScriptLine)
   if (!fns.length) return
   const total = fns.length
   // A failing line is reported and skipped, so playback (and play mode)

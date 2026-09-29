@@ -789,3 +789,10 @@ body.play-mode #play-line-badge:not(:empty) {
   padding: 1px 5px;
   white-space: nowrap;
 }
+
+/* HTML boxes (html-box.js): the live element sits over its canvas rectangle
+   and lets clicks through, except while it is being edited. */
+.html-box { position: absolute; left: 0; top: 0; transform-origin: 0 0; box-sizing: border-box; pointer-events: none; }
+.html-box.editing { pointer-events: auto; outline: 2px solid #1976D2; outline-offset: 1px; cursor: text; }
+/* Text styling of the content lives in html-box.js (_HTML_BOX_CSS), shared with the canvas picture. */
+body.play-mode .html-box { pointer-events: none !important; outline: none !important; }

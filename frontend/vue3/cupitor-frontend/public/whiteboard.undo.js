@@ -97,11 +97,13 @@ function initUndoRedo(canvas, undoManager, overlayCanvas) {
 function initCanvasUndoRedo(canvas, undoManager) {
   // Track object state before modification
   let objectBeforeState = null;
+  let autoFitBefore;
 
   canvas.on('before:transform', function(e) {
     if (undoManager.isPerformingAction) return;
     const target = e.transform?.target;
     if (target) {
+      autoFitBefore = target.customData && target.customData.autoFit;
       objectBeforeState = {
         left: target.left,
         top: target.top,
@@ -130,7 +132,17 @@ function initCanvasUndoRedo(canvas, undoManager) {
 
     // Use appropriate command based on canvas type
     const commandType = canvas.isDrawingMode ? Commands.modifyObject : Commands.modifyObject;
-    undoManager.push(commandType(canvas, target, objectBeforeState, newState));
+    const command = commandType(canvas, target, objectBeforeState, newState);
+    // Resizing a text box by its side handles stops it fitting its text
+    // (customData.autoFit); undo/redo put that back along with the width.
+    const autoFitAfter = target.customData && target.customData.autoFit;
+    if (autoFitBefore !== autoFitAfter) {
+      const setFit = v => { target.customData = target.customData || {}; target.customData.autoFit = v; };
+      const { undo, redo } = command;
+      command.undo = () => { setFit(autoFitBefore); undo(); };
+      command.redo = () => { setFit(autoFitAfter); redo(); };
+    }
+    undoManager.push(command);
     objectBeforeState = null;
   });
 

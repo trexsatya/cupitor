@@ -15,6 +15,7 @@ function recordScript(str) {
 // Semantic UID generator — e.g. T1, T2 for textboxes; R1, R2 for rects etc.
 const _SEMANTIC_PREFIXES = {
   textbox: 'T', text: 'T', 'i-text': 'T',
+  htmlbox: 'HB',
   textrect: 'R', rect: 'R',
   textcircle: 'C', circle: 'C',
   textellipse: 'E', ellipse: 'E',
@@ -158,13 +159,24 @@ function setProp(uid, prop, value) {
 
 function findById(id, canvas) {
   if (!canvas) canvas = pc
-  const fabricObj = canvas._objects.find(it => it.uid + '' === id + '' || it.customData?.uid + '' === id + '');
+  const match = it => it.uid + '' === id + '' || it.customData?.uid + '' === id + '';
+  // Top-level objects first, then objects inside groups (edited via the Properties panel).
+  const fabricObj = canvas._objects.find(match) || _findInGroups(canvas._objects, match);
   if(!fabricObj) {
     let obj = $(`*[data-uid='${id}']`)
     if(!obj.length) obj = $(`#${id}`)
     return obj
   }
   return fabricObj;
+}
+
+function _findInGroups(objects, match) {
+  for (const o of objects) {
+    if (o.type !== 'group' || !o._objects) continue;
+    const found = o._objects.find(match) || _findInGroups(o._objects, match);
+    if (found) return found;
+  }
+  return null;
 }
 
 function isFabricObject(obj) {
@@ -286,6 +298,8 @@ function textbox(opts){
         centerTransform: true
     });
     textSample.uid = opts.uid || semanticUid('textbox');
+    textSample.customData = Object.assign(textSample.customData || {}, { autoFit: true });
+    textSample.initDimensions();
     return textSample
 }
 
@@ -301,10 +315,12 @@ function textInRect(textStr, x, y, optsText, optsRect, uid){
     }, optsText);
     if(optsText.textColor) op.fill = optsText.textColor;
 
-    const text = new fabric.Text(" " + textStr + " ", {
+    // Pad every line, not just the first and last, so multi-line text stays centred.
+    const text = new fabric.Text(String(textStr).split('\n').map(l => " " + l + " ").join('\n'), {
       fontSize: 20,
       originX: 'center',
       originY: 'center',
+      textAlign: 'center',
       fill: op.fill
     });
 
@@ -771,7 +787,8 @@ function addStickyNote(x, y, opts) {
 // so the rendered line lands exactly where the user dragged it.
 function reshapeLineXY(uidOrObj, x1, y1, x2, y2) {
   const ln = findIfRequired(uidOrObj);
-  if (!ln) return;
+  // findIfRequired returns a (possibly empty) jQuery wrapper for unknown uids.
+  if (!isFabricObject(ln)) return;
   ln.x1 = x1; ln.y1 = y1;
   ln.x2 = x2; ln.y2 = y2;
   if (typeof ln._setWidthHeight === 'function') ln._setWidthHeight();
@@ -952,6 +969,9 @@ function setCustomData(uidOrObj, data) {
   if (!obj || !data) return;
   if (!obj.customData) obj.customData = {};
   Object.assign(obj.customData, data);
+  // Some objects draw from customData (e.g. an HTML box's padding).
+  if (obj.set) obj.set('dirty', true);
+  if (window.pc) window.pc.requestRenderAll();
 }
 
 // Miro-style: 2 endpoint handles + 1 midpoint "bend" handle. Path coords
@@ -1588,15 +1608,20 @@ function animate(obj, props, opts){
 
     const canvas = pc;
   // eslint-disable-next-line @typescript-eslint/no-empty-function
-    // Tree nodes keep their connector lines attached while moving. Children get
-    // onAnimationChange when created; roots (and nodes loaded from JSON) don't.
-    const objSpecificUpdate = obj?.onAnimationChange
-        || (obj?.treeConnection && typeof updateTreeItem === 'function' ? () => updateTreeItem(obj) : () => {});
+    // Each frame: the object's own hook (e.g. a quad's label) and its tree and
+    // connector lines, including those of objects inside it.
+    const objSpecificUpdate = () => {
+        if (obj && obj.onAnimationChange) obj.onAnimationChange();
+        if (typeof updateTreeItem === 'function') updateTreeItem(obj);
+    };
     const options = Object.assign({}, {
         duration: 1000,
         onChange: () => { canvas.renderAll.bind(canvas); objSpecificUpdate(); canvas.renderAll(); },
         onComplete: function() {}
     }, opts);
+
+    // Fabric divides by the duration, so 0 would leave the object at NaN.
+    if (!(options.duration > 0)) options.duration = 1;
 
     const fn = options.onComplete;
 
@@ -1940,35 +1965,13 @@ function bounds(obj){
  */
 function connect(canvas, it, other, opts){
 
-    var line = null;
-
     var opts = opts || { dx:0, dy: 0 }
-    const options = combined({
-        stroke: '#555',
-        strokeWidth: 1.5
-    }, opts);
 
     if(typeof other == 'function'){
         other = other(this)
     }
 
-    let x1,y1,x2,y2;
-    const midx1 = it.left+it.width/2, midy1 = it.top+it.height/2, midx2 = other.left+other.width/2, midy2 = other.top + other.height/2
-    if(other.left > it.left + it.width){
-        x1 = it.left+it.width; x2 = other.left;
-    } else if(other.left + other.width < it.left) {
-        x1 = it.left; x2 = other.left+other.width;
-    } else {
-        x1 = midx1; x2 = midx2;
-    }
-
-    if(other.top > it.top + it.height){
-        y1 = it.top + it.height; y2 = other.top;
-    } else if(other.top + other.height < it.top) {
-        y1 = it.top; y2 = other.top + other.height;
-    } else {
-        y1 = midy1; y2 = midy2;
-    }
+    const [x1, y1, x2, y2] = connectorEnds(it, other);
 
     var line = new fabric.LineArrow([x1, y1, x2, y2], {
         strokeWidth: 1.5,
@@ -1976,12 +1979,52 @@ function connect(canvas, it, other, opts){
         stroke: '#555',
         padding: 4
     });
+    if (opts.uid) line.uid = opts.uid;
 
     attachLineEndpointControls(line);
     canvas.add(line)
 
     return line
 
+}
+
+// End points for a connector from `it` to `other`: facing edges when the boxes
+// are apart on an axis, centres when they overlap on it. Uses the on-canvas
+// boxes, so scale and rotation are accounted for.
+// Ends for a line joining two objects at the middles of the edges that face
+// each other: bottom/top when the other object is mostly above or below,
+// right/left when it is mostly beside. Overlapping objects join at their centres.
+function edgeMidEnds(it, other) {
+    const a = _freshBox(it), b = _freshBox(other);
+    const ca = it.getCenterPoint(), cb = other.getCenterPoint();
+    const dx = cb.x - ca.x, dy = cb.y - ca.y;
+    const apartX = Math.abs(dx) > (a.width + b.width) / 2;
+    const apartY = Math.abs(dy) > (a.height + b.height) / 2;
+    if (!apartX && !apartY) return [ca.x, ca.y, cb.x, cb.y];
+    const vertical = apartY && (!apartX || Math.abs(dy) / (a.height + b.height) >= Math.abs(dx) / (a.width + b.width));
+    if (vertical) {
+        return dy > 0 ? [ca.x, a.top + a.height, cb.x, b.top] : [ca.x, a.top, cb.x, b.top + b.height];
+    }
+    return dx > 0 ? [a.left + a.width, ca.y, b.left, cb.y] : [a.left, ca.y, b.left + b.width, cb.y];
+}
+
+// getBoundingRect reads cached corners, which lag behind an object being animated.
+function _freshBox(obj) {
+    obj.setCoords();
+    return obj.getBoundingRect();
+}
+
+function connectorEnds(it, other) {
+    const a = _freshBox(it), b = _freshBox(other);
+    const ca = it.getCenterPoint(), cb = other.getCenterPoint();
+    let x1, x2, y1, y2;
+    if (b.left > a.left + a.width) { x1 = a.left + a.width; x2 = b.left; }
+    else if (b.left + b.width < a.left) { x1 = a.left; x2 = b.left + b.width; }
+    else { x1 = ca.x; x2 = cb.x; }
+    if (b.top > a.top + a.height) { y1 = a.top + a.height; y2 = b.top; }
+    else if (b.top + b.height < a.top) { y1 = a.top; y2 = b.top + b.height; }
+    else { y1 = ca.y; y2 = cb.y; }
+    return [x1, y1, x2, y2];
 }
 
 // This function does the actual work
@@ -2440,10 +2483,74 @@ function anim(uidOrObjOrList, type, opts) {
   return list;
 }
 
+// Wipes objects into view from one of their own sides: 'left' (uncovering
+// left to right), 'right', 'top' or 'bottom'; rotated objects wipe along
+// their own edges. Hidden objects are shown first; lines that become visible
+// with them appear once the object is fully revealed. The object is clipped
+// to a growing rectangle in its own coordinates and the clip is removed at the
+// end. Resolves when every object is fully revealed (or the reveal is stopped).
+function reveal(uidOrObjOrList, from, opts) {
+  const list = _animResolveList(uidOrObjOrList);
+  const side = ['left', 'right', 'top', 'bottom'].includes(from) ? from : 'left';
+  const duration = (opts && opts.duration) || 800;
+  return Promise.all(list.map(obj => new Promise(resolve => {
+    finishReveal(obj); // a reveal already running on it ends first
+    const canvas = obj.canvas || window.pc;
+    const lines = _linesOf(obj).filter(l => l.visible === false);
+    if (obj.visible === false && typeof showObject === 'function') showObject(obj);
+    lines.forEach(l => { l.visible = false; });
+    // Local box, centred on the object, with room for its outline.
+    const pad = (obj.strokeWidth || 0) / 2 + 1;
+    const box = { left: -obj.width / 2 - pad, top: -obj.height / 2 - pad, width: obj.width + 2 * pad, height: obj.height + 2 * pad };
+    const clip = new fabric.Rect({ ...box, originX: 'left', originY: 'top' });
+    const state = { previous: obj.clipPath, lines, resolve, aborted: false };
+    const wipe = t => {
+      if (side === 'left') clip.set({ width: box.width * t });
+      else if (side === 'right') clip.set({ left: box.left + box.width * (1 - t), width: box.width * t });
+      else if (side === 'top') clip.set({ height: box.height * t });
+      else clip.set({ top: box.top + box.height * (1 - t), height: box.height * t });
+      obj.set('dirty', true); // also marks any group it sits in
+      canvas.requestRenderAll();
+    };
+    obj._reveal = state;
+    obj.clipPath = clip;
+    wipe(0);
+    fabric.util.animate({
+      startValue: 0, endValue: 1, duration,
+      onChange: wipe,
+      abort: () => state.aborted,
+      onComplete: () => finishReveal(obj)
+    });
+  })));
+}
+
+// Ends a running reveal at once: the object is shown whole, its lines appear.
+function finishReveal(obj) {
+  const state = obj && obj._reveal;
+  if (!state) return;
+  delete obj._reveal;
+  state.aborted = true;
+  obj.clipPath = state.previous;
+  obj.set('dirty', true);
+  state.lines.forEach(l => { l.visible = true; });
+  (obj.canvas || window.pc).requestRenderAll();
+  state.resolve(obj);
+}
+
+// Tree and connector lines attached to obj.
+function _linesOf(obj) {
+  const tc = obj.treeConnection || {};
+  const uids = [...((tc.incoming && tc.incoming.lines) || []), ...((tc.outgoing && tc.outgoing.lines) || [])];
+  const tree = uids.map(findIfRequired).filter(isFabricObject);
+  const conn = typeof _connectorLines === 'function' ? _connectorLines(obj) : [];
+  return [...new Set([...tree, ...conn])];
+}
+
 function stopAnim(uidOrObjOrList) {
   if (uidOrObjOrList == null) {
     // Stop everything.
     stopSpotlight();
+    if (window.pc) window.pc.getObjects().forEach(function finish(o) { finishReveal(o); (o._objects || []).forEach(finish); });
     // Flows can run on any canvas (e.g. oc), not just pc.
     [..._flows.keys()].forEach(_stopFlow);
     if (window.pc) {
@@ -2458,6 +2565,7 @@ function stopAnim(uidOrObjOrList) {
   // One stopSpotlight call drops the shared overlay for every spotlit
   // object in the list.
   stopSpotlight(list);
+  list.forEach(finishReveal);
   list.forEach(obj => {
     if (obj.externalData && obj.externalData.animating) {
       stopAnimation(obj, obj.canvas || window.pc);

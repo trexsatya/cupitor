@@ -46,15 +46,20 @@ function handleImageInputDialogButtons(src) {
 
 function handleImportDialogButtons(src) {
   if (src === "OK") {
-    //Handle file selection
+    // One script plays at a time; an import would start a second player.
+    if (window.isRecordingPlayback) {
+      $('#importMessage').text('A script is playing. Import once it has finished.')
+      return
+    }
+    $('#importMessage').text('')
     const file = document.querySelector('#importInputFile').files[0];
     const reader = new FileReader();
     reader.addEventListener("load", function () {
-      //importIntoCanvas(reader.result)
-      let lines = eval(reader.result + '')
-      if (Array.isArray(lines)) lines = remapImportedUidsToAvoidConflicts(lines)
-      const script = lines.map(eval)
-      schedule(script, 1)
+      // Imported lines join the recorded script and play like it does.
+      const lines = remapImportedUidsToAvoidConflicts(parseImportedScript(reader.result + ''))
+      if (!lines.length) return
+      window.recordedScriptLines = (window.recordedScriptLines || []).concat(lines)
+      playScript(lines)
     }, false);
     if (file) {
       reader.readAsText(file);
@@ -65,18 +70,50 @@ function handleImportDialogButtons(src) {
   }
 }
 
+// Script lines from an imported file: either an Export (a JSON list of
+// "() => { line }" functions, see buildScriptExecutables) or plain text with
+// one line per row, as the script editor shows it.
+function parseImportedScript(text) {
+  let list = null
+  try { list = JSON.parse(text) } catch (e) { /* plain text */ }
+  if (!Array.isArray(list)) {
+    return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+  }
+  return list.filter(l => typeof l === 'string').map(l => {
+    const body = l.trim().match(/^\(\)\s*=>\s*\{\s*([\s\S]*?)\s*\}$/)
+    if (!body) return l.trim()
+    const ret = body[1].match(/^return\s+([\s\S]*?);?$/)
+    return ret ? ret[1] : body[1]
+  }).filter(Boolean)
+}
+
 // Imported scripts hard-code semantic UIDs (T1, R2, IMG3, …). If the canvas
 // already has an object with that UID, the imported commands would mutate the
 // existing object instead of creating a fresh one. Remap conflicting UIDs to
 // fresh ones (same prefix) before evaluating.
+// Quoted strings holding HTML (an HTML box's content) are left alone, so
+// text in them that looks like a uid isn't rewritten.
+function _outsideHtmlStrings(line, fn) {
+  const kept = []
+  const masked = line.replace(/"(?:[^"\\]|\\.)*"/g, s => {
+    if (!s.includes('<')) return s
+    kept.push(s)
+    return '\u0000' + (kept.length - 1) + '\u0000'
+  })
+  return fn(masked).replace(/\u0000(\d+)\u0000/g, (m, i) => kept[+i])
+}
+
 function remapImportedUidsToAvoidConflicts(lines) {
   const idPattern = /(['"])([A-Z]+\d+)\1/g
   const found = new Set()
   lines.forEach(function (line) {
     if (typeof line !== 'string') return
-    idPattern.lastIndex = 0
-    let m
-    while ((m = idPattern.exec(line)) !== null) found.add(m[2])
+    _outsideHtmlStrings(line, function (text) {
+      idPattern.lastIndex = 0
+      let m
+      while ((m = idPattern.exec(text)) !== null) found.add(m[2])
+      return text
+    })
   })
   if (found.size === 0) return lines
 
@@ -112,9 +149,9 @@ function remapImportedUidsToAvoidConflicts(lines) {
 
   return lines.map(function (line) {
     if (typeof line !== 'string') return line
-    return line.replace(idPattern, function (full, q, uid) {
+    return _outsideHtmlStrings(line, text => text.replace(idPattern, function (full, q, uid) {
       return remap[uid] ? (q + remap[uid] + q) : full
-    })
+    }))
   })
 }
 
@@ -191,6 +228,8 @@ $(document).ready(function () {
 
 window.canPasteImageFromClipboard = true;
 document.onpaste = function (event) {
+  // Pasting into an HTML box being edited is ordinary text/HTML paste.
+  if (event.target && event.target.isContentEditable) return;
   // use event.originalEvent.clipboard for newer chrome versions
   const items = (event.clipboardData || event.originalEvent.clipboardData).items;
   console.log(JSON.stringify(items)); // will give you the mime types
@@ -279,6 +318,13 @@ function setObjVisibility(obj, visibility) {
   obj?.treeConnection?.outgoing?.lines?.map(findIfRequired)?.forEach((line) => {
     line.visible = visibility;
   });
+  // A connector shows only while both of its objects do.
+  if (obj && typeof _connectorLines === 'function') {
+    _connectorLines(obj).forEach(line => {
+      const ends = [line.customData.source, line.customData.target].map(findIfRequired);
+      line.visible = ends.every(e => isFabricObject(e) && e.visible !== false);
+    });
+  }
   pc?.renderAll();
 }
 
