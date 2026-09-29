@@ -488,15 +488,8 @@ function initShapeDrawingTool(canvas, toolManager) {
           }
         }
         if (window.undoManager) {
-          if (labelText) {
-            const shapeRef = currentShape;
-            window.undoManager.push({
-              redo() { canvas.add(shapeRef); canvas.add(labelText); canvas.requestRenderAll(); },
-              undo() { canvas.remove(shapeRef); canvas.remove(labelText); canvas.requestRenderAll(); }
-            });
-          } else {
-            window.undoManager.push(Commands.addObject(canvas, currentShape));
-          }
+          // A quad's label goes and comes back with it (onConnectorAdded).
+          window.undoManager.push(Commands.addObject(canvas, currentShape));
         }
         const drawnShape = currentShape;
         currentShape = null;

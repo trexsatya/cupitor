@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { openBoard, stopBrowser, replayElsewhere, assertSameScene } from './board.mjs';
 
 after(stopBrowser);
+const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 async function drawRect(b, x1, y1, x2, y2) {
   await b.shapeTool(0);
@@ -37,8 +38,19 @@ test('rearranging: snap into line, resize and rotate a multi-selection, replay',
     const grown = [await box(b, a), await box(b, c)];
     grown.forEach((r, i) => assert.ok(r[2] > before[i][2] && r[3] > before[i][3], `both grew: ${before[i]} → ${r}`));
     await b.dragHandle('mtr', 60, 0);
+    assert.ok(await b.eval(() => Math.abs(pc.getActiveObject().angle) > 3), 'turned');
+
+    // Undo both with the selection still active: each shape goes back.
+    await b.key(`${mod}+z`);
     await b.deselect();
-    assert.ok(await b.eval(u => Math.abs(findIfRequired(u).angle) > 3, a), 'turned');
+    assert.deepEqual(await b.eval(u => Math.round(findIfRequired(u).angle), a), 0, 'undo takes the turn back');
+    assert.deepEqual([await box(b, a), await box(b, c)], grown, 'still grown');
+    await b.key(`${mod}+z`);
+    const undone = [await box(b, a), await box(b, c)];
+    undone.forEach((r, i) => r.forEach((v, k) => assert.ok(Math.abs(v - before[i][k]) <= 1, `back to ${before[i]}: ${r}`)));
+    // Redo the resize again.
+    await b.key(`${mod}+Shift+z`);
+    assert.deepEqual([await box(b, a), await box(b, c)], grown, 'redo grows them again');
 
     const lines = await b.script();
     const live = await b.snapshot();

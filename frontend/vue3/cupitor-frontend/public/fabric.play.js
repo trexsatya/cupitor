@@ -704,10 +704,12 @@ function _listConnector(line) {
 
 // Called for every object removed from / added to pc, whatever removed it
 // (Delete, eraser, scripts, undo): a removed connector is unlisted from its
-// objects, a removed object takes its connector lines with it, and a connector
-// put back (undo) is listed again. Objects moving into a group aren't removed.
+// objects, a removed object takes its connector and tree lines with it, and a
+// connector put back (undo) is listed again. Objects moving into a group
+// aren't removed.
 function onConnectorRemoved(obj) {
   if (!obj || (obj.group && obj.group.type === 'group')) return
+  rememberRemoved(obj, pc)
   const cd = obj.customData || {}
   if (cd.type === 'connector') {
     [cd.source, cd.target].map(findIfRequired).filter(isFabricObject).forEach(end => {
@@ -719,13 +721,19 @@ function onConnectorRemoved(obj) {
   }
   // The lines go with the object as one undo step: they are kept on the object
   // and put back when it is (onConnectorAdded).
-  const lines = _connectorLines(obj)
+  const lines = [..._connectorLines(obj), ..._treeLines(obj)].filter(l => l.canvas)
   if (!lines.length) return
   obj._removedConnectors = lines
   _withoutUndo(() => lines.forEach(line => { if (line.canvas) line.canvas.remove(line) }))
 }
 
 function onConnectorAdded(obj) {
+  // A quad's label that went with it comes back with it.
+  const label = obj && obj._labelText
+  if (label && label._removedWithQuad && !label.canvas && obj.canvas) {
+    delete label._removedWithQuad
+    obj.canvas.add(label)
+  }
   if (!obj || !obj.customData) return
   if (obj.customData.type === 'connector' && obj.uid) _listConnector(obj)
   const lines = obj._removedConnectors
@@ -751,6 +759,32 @@ function _unlinkConnectors(obj) {
   })
   const cd = obj.customData
   if (cd) { delete cd.connectorsOut; delete cd.connectorsIn }
+}
+
+function _treeLines(obj) {
+  const tc = obj && obj.treeConnection
+  if (!tc) return []
+  return [...(tc.incoming && tc.incoming.lines || []), ...(tc.outgoing && tc.outgoing.lines || [])]
+    .map(findIfRequired).filter(isFabricObject)
+}
+
+// Objects taken off pc or oc, by uid, so a later undo (live or in a recorded
+// script) can put the very same object back with restoreObject.
+const _removedObjects = new Map()
+
+function rememberRemoved(obj, canvas) {
+  if (obj && obj.uid && !(obj.group && obj.group.type === 'group')) _removedObjects.set(obj.uid, { obj, canvas })
+}
+
+// Script form of undoing a removal: puts the removed object back where it
+// was (pc or oc), with the lines that went with it.
+function restoreObject(uid) {
+  const entry = _removedObjects.get(uid)
+  if (!entry || entry.obj.canvas) return
+  _removedObjects.delete(uid)
+  entry.canvas.add(entry.obj)
+  entry.obj.setCoords()
+  entry.canvas.requestRenderAll()
 }
 
 function _connectorLines(obj) {
@@ -818,12 +852,7 @@ function deleteFabricObject(obj) {
   if (!obj) {
     return
   }
-  obj.treeConnection?.incoming?.lines?.map(findIfRequired)?.forEach((line) => {
-    pc.remove(line)
-  })
-  obj.treeConnection?.outgoing?.lines?.map(findIfRequired)?.forEach((line) => {
-    pc.remove(line)
-  })
+  // Its tree and connector lines go with it (onConnectorRemoved).
   pc.remove(obj)
   pc.renderAll()
 }
@@ -869,20 +898,15 @@ function deleteTreeConnection(parentNode, lineUid, childUid) {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function deleteSelectedObjects() {
-  const activeObjects = pc.getActiveObjects();
-  if (activeObjects.length > 1) {
-    activeObjects.forEach(x => {
-      deleteFabricObject(x)
-      recordScript(`deleteFabricObject('${x.uid}')`)
-    })
-    pc.discardActiveObject();
-  } else {
-    const activeObject = pc.getActiveObject();
-    if (activeObject) {
-      deleteFabricObject(activeObject);
-      recordScript(`deleteFabricObject('${activeObject.uid}')`)
-    }
-  }
+  const objs = pc.getActiveObjects().length > 1 ? pc.getActiveObjects().slice() : [pc.getActiveObject()].filter(Boolean)
+  if (!objs.length) return
+  if (objs.length > 1) pc.discardActiveObject()
+  // One undo step for the whole selection.
+  if (window.undoManager) undoManager.push(Commands.group(objs.map(o => Commands.removeObject(pc, o))))
+  objs.forEach(x => {
+    deleteFabricObject(x)
+    if (x.uid) recordScript(`deleteFabricObject('${x.uid}')`)
+  })
 }
 
 function applyBlackTheme() {

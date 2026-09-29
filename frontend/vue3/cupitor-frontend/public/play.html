@@ -856,16 +856,12 @@
     }
 
     pc.on('object:added', e => onConnectorAdded(e.target));
-    pc.on('object:removed', e => {
-        //console.log(e.target);
-        const obj = e.target;
-        onConnectorRemoved(obj);
-        if (obj.treeConnection && obj.treeConnection.outgoing) {
-            obj.treeConnection.outgoing.lines.forEach(l => {
-                pc.remove(l);
-            })
-        }
-    })
+    pc.on('object:removed', e => onConnectorRemoved(e.target));
+    oc.on('object:removed', e => rememberRemoved(e.target, oc));
+    // A cleared canvas starts afresh: nothing of it left to restore.
+    [pc, oc].forEach(c => c.on('canvas:cleared', () => {
+        _removedObjects.forEach((entry, uid) => { if (entry.canvas === c) _removedObjects.delete(uid); });
+    }));
 
     window.isFabricObjectMoving = false
     window.currentPathSamples = null
@@ -1189,7 +1185,26 @@
         'w': 'whiten'
     };
 
+    function _isTypingIn(el) {
+        return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    }
+
+    // Notes kept for an object (window.nodeContents), edited in a side panel.
+    function openNodeContent() {
+        const selected = pc.getActiveObject();
+        if (!selected) return;
+        window.nodeContents = window.nodeContents || {};
+        CKEDITOR.instances['node-content-editor'].setData(window.nodeContents[selected.uid] || '');
+        $('#node-content-holder').show();
+        const $editContentCheckbox = $('#editContentCheckbox')[0];
+        $editContentCheckbox.checked = false;
+        updateNodeContentAsPerCheckbox($editContentCheckbox);
+    }
+
     $(document).keydown(e => {
+        // Keys typed into a text field (Properties panel, dialogs) are text,
+        // not canvas shortcuts; Escape still stops animations and tools.
+        if (_isTypingIn(e.target) && e.key !== 'Escape') return;
         const selectedObj = pc.getActiveObject()
         const selectedObjId = selectedObj?.uid;
 
@@ -1319,18 +1334,6 @@
                 height: 400,
             })
         }
-        if(e.key === 'c' && e.ctrlKey) {
-            const  selected = pc.getActiveObject()
-            if(selected) {
-                window.nodeContents = window.nodeContents || {};
-                const content = window.nodeContents[selected.uid] || ''
-                CKEDITOR.instances['node-content-editor'].setData(content)
-                $('#node-content-holder').show()
-                let $editContentCheckbox = $('#editContentCheckbox')[0];
-                $editContentCheckbox.checked = false
-                updateNodeContentAsPerCheckbox($editContentCheckbox)
-            }
-        }
         if (e.keyCode === 32) {
             // toggleRecording()
         }
@@ -1350,11 +1353,11 @@
                     }
                 }
                 break
-            case 67:
-                if (e.ctrlKey) copy(pc)
+            case 67: // Ctrl/Cmd+C, Ctrl/Cmd+V: copy and paste objects
+                if (e.ctrlKey || e.metaKey) copy(pc)
                 break;
             case 86:
-                if (e.ctrlKey) paste(pc)
+                if (e.ctrlKey || e.metaKey) paste(pc)
                 break;
             case 39: //right
                 if (selectedObj) moveActiveObject('left', 10)
@@ -2114,12 +2117,13 @@
         <div id="ctx-layer-list"></div>
         <div class="ctx-separator"></div>
     </div>
-    <div class="ctx-item" onclick="copy(pc); closeContextMenu()"><i class="fas fa-copy"></i> Copy <span class="shortcut">Ctrl+C</span></div>
-    <div class="ctx-item" onclick="paste(pc); closeContextMenu()"><i class="fas fa-paste"></i> Paste <span class="shortcut">Ctrl+V</span></div>
+    <div class="ctx-item" onclick="copy(pc); closeContextMenu()"><i class="fas fa-copy"></i> Copy <span class="shortcut">Ctrl/&#8984;+C</span></div>
+    <div class="ctx-item" onclick="paste(pc); closeContextMenu()"><i class="fas fa-paste"></i> Paste <span class="shortcut">Ctrl/&#8984;+V</span></div>
     <div class="ctx-item" onclick="duplicateSelected(); closeContextMenu()"><i class="fas fa-clone"></i> Duplicate</div>
     <div class="ctx-separator"></div>
     <div class="ctx-item" onclick="deleteSelectedAndClose()"><i class="fas fa-trash"></i> Delete <span class="shortcut">Del</span></div>
     <div class="ctx-item" onclick="openLabelPicker(); closeContextMenu()"><i class="fas fa-tag"></i> Add Label</div>
+    <div class="ctx-item" onclick="openNodeContent(); closeContextMenu()"><i class="fas fa-sticky-note"></i> Notes</div>
     <div class="ctx-separator"></div>
     <div class="ctx-item" onclick="bringToFrontSelected(); closeContextMenu()"><i class="fas fa-layer-group"></i> Bring to Front</div>
     <div class="ctx-item" onclick="sendToBackSelected(); closeContextMenu()"><i class="fas fa-layer-group"></i> Send to Back</div>
@@ -2520,7 +2524,11 @@
                 prev.forEach(p => p.t.set(prop === 'cornerRadius' ? { rx: p.v, ry: p.v } : { [prop]: p.v }));
                 obj.dirty = true;
                 pc.requestRenderAll();
-            }
+            },
+            script: obj.uid ? {
+                undo: `setPartProp(${JSON.stringify(obj.uid)}, ${JSON.stringify(part)}, ${JSON.stringify(prop)}, ${JSON.stringify(prev[0].v)})`,
+                redo: `setPartProp(${JSON.stringify(obj.uid)}, ${JSON.stringify(part)}, ${JSON.stringify(prop)}, ${JSON.stringify(value)})`
+            } : null
         });
         if (obj.uid) recordScript(`setPartProp(${JSON.stringify(obj.uid)}, ${JSON.stringify(part)}, ${JSON.stringify(prop)}, ${JSON.stringify(value)})`);
     }
@@ -2576,7 +2584,11 @@
         pc.requestRenderAll();
         undoManager.push({
             undo() { obj.customData.padding = prev; pc.requestRenderAll(); },
-            redo() { obj.customData.padding = value; pc.requestRenderAll(); }
+            redo() { obj.customData.padding = value; pc.requestRenderAll(); },
+            script: obj.uid ? {
+                undo: `setCustomData(${JSON.stringify(obj.uid)}, {padding: ${JSON.stringify(prev)}})`,
+                redo: `setCustomData(${JSON.stringify(obj.uid)}, {padding: ${JSON.stringify(value)}})`
+            } : null
         });
         if (obj.uid) recordScript(`setCustomData(${JSON.stringify(obj.uid)}, {padding: ${JSON.stringify(value)}})`);
     }
@@ -2863,8 +2875,8 @@
             ['Ctrl/\u2318 + Shift + Z,  Ctrl/\u2318 + Y', 'Redo'],
             ['Ctrl/\u2318 + A', 'Select all'],
             ['Ctrl/\u2318 + G', 'Group selected objects'],
-            ['Ctrl + C', 'Copy (also opens the notes editor for the selected object)'],
-            ['Ctrl + V', 'Paste'],
+            ['Ctrl/\u2318 + C', 'Copy selected objects (right-click \u2192 Notes opens an object\u2019s notes)'],
+            ['Ctrl/\u2318 + V', 'Paste'],
             ['Delete,  Backspace', 'Delete selected'],
             ['E', 'Edit selected object'],
             ['H', 'Hide selected object'],
@@ -3548,12 +3560,7 @@
     }
 
     function deleteSelectedAndClose() {
-        const obj = pc.getActiveObject();
-        if (obj) {
-            undoManager.push(Commands.removeObject(pc, obj));
-            if (obj.uid) recordScript(`removeByUid(${JSON.stringify(obj.uid)})`);
-            deleteFabricObject(obj);
-        }
+        deleteSelectedObjects();
         closeContextMenu();
     }
 

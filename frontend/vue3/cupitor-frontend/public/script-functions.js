@@ -154,6 +154,7 @@ const SCRIPT_FUNCTIONS = [
     ]],
     ['Change', [
         ['setProp(uid, prop, value)', 'Set one Fabric property, e.g. fill, opacity, strokeWidth'],
+        ['setObjectProps(uid, props)', 'Set several Fabric properties at once, e.g. {left: 100, top: 50, angle: 15}; its lines follow'],
         ['setCornerRadius(uid, radius)', 'Round the corners of a rectangle'],
         ["setPartProp(uid, 'text' | 'shape', prop, value)", "Change the text or the shape of a text-in-shape object; prop 'cornerRadius' rounds rectangles"],
         ['setText(uid, text)', 'Replace the text of an object'],
@@ -170,7 +171,8 @@ const SCRIPT_FUNCTIONS = [
         ['sendToBack(uid)', 'Put behind everything'],
         ['hideObject(uid)', 'Hide (and its tree lines)'],
         ['showObject(uid)', 'Show again'],
-        ['removeByUid(uid)', 'Delete (its connectors go with it)'],
+        ['removeByUid(uid)', 'Delete (its connector and tree lines go with it)'],
+        ['restoreObject(uid)', 'Put back an object deleted earlier in the script, with its lines (what undoing a delete records)'],
         ['groupObjects([uids], groupUid)', 'Group objects'],
         ['ungroupObjects(groupUid)', 'Ungroup'],
         ['connectObjects(fromUid, toUid, lineUid, opts)', 'Arrow that stays attached to both objects when they move', [

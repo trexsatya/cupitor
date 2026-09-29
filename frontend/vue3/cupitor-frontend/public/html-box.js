@@ -316,7 +316,8 @@ function exitHtmlBoxEdit(commit) {
     el._html = html;
     if (box.uid) recordScript(`setHtml(${JSON.stringify(box.uid)}, ${JSON.stringify(html)})`);
     if (window.undoManager) {
-      undoManager.push({ undo() { setHtml(box, before); }, redo() { setHtml(box, html); } });
+      const line = h => (box.uid ? `setHtml(${JSON.stringify(box.uid)}, ${JSON.stringify(h)})` : null);
+      undoManager.push({ undo() { setHtml(box, before); }, redo() { setHtml(box, html); }, script: { undo: line(before), redo: line(html) } });
     }
   } else {
     el._content.innerHTML = before;

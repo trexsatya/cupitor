@@ -643,7 +643,9 @@ function attachQuadBehavior(polygon, labelText) {
   // is guarded by `.canvas` because fabric nulls it on removal, so the
   // reciprocal remove becomes a no-op and we avoid a loop.
   polygon.on('removed', () => {
-    if (labelText.canvas) labelText.canvas.remove(labelText);
+    if (!labelText.canvas) return;
+    labelText._removedWithQuad = true; // comes back with the quad (onConnectorAdded)
+    labelText.canvas.remove(labelText);
   });
   labelText.on('removed', () => {
     if (polygon.canvas) polygon.canvas.remove(polygon);
@@ -950,10 +952,13 @@ function sendToBack(uidOrObj) {
 }
 
 function removeByUid(uidOrObj) {
-  const obj = findIfRequired(uidOrObj);
-  if (!obj || !obj.canvas) return;
-  obj.canvas.remove(obj);
-  obj.canvas.requestRenderAll();
+  let obj = findIfRequired(uidOrObj);
+  // Freehand drawings live on the overlay canvas.
+  if (!isFabricObject(obj) && window.oc) obj = oc.getObjects().find(o => o.uid + '' === uidOrObj + '');
+  const canvas = obj && obj.canvas;
+  if (!canvas) return;
+  canvas.remove(obj);
+  canvas.requestRenderAll();
 }
 
 function setObjectProps(uidOrObj, props) {
@@ -961,6 +966,8 @@ function setObjectProps(uidOrObj, props) {
   if (!obj) return;
   obj.set(props);
   obj.setCoords();
+  // Its tree and connector lines follow it.
+  if (typeof updateTreeItem === 'function' && obj.canvas) updateTreeItem(obj);
   if (obj.canvas) obj.canvas.requestRenderAll();
 }
 
@@ -1188,9 +1195,10 @@ function addRectangle(opts){
 
 function groupFabricObjects (objs, opts){
     if(!objs) return
-    objs.forEach(o => { pc.remove(o) });
-
+    // Grouped first, so the objects count as moving into the group (their
+    // lines stay) rather than being removed.
     const G = new fabric.Group(objs, {left: opts.left || 100, top: opts.top || 100 })
+    objs.forEach(o => { pc.remove(o) });
     pc.add(G);
     G.setCoords()
     pc.renderAll();
