@@ -117,7 +117,8 @@ export class PlayPage {
       null, { timeout: timeoutMs, polling: 100 });
     const lineErrors = await page.evaluate(() => window.__mcpLineErrors.slice());
     return {
-      played: lines ? lines.length : await page.evaluate(() => window.recordedScriptLines.length),
+      // Lines that ran: comments and blank lines don't count.
+      played: await page.evaluate(l => scriptCommentLines(l || window.recordedScriptLines).filter(c => !c).length, lines),
       ms: Date.now() - started,
       lineErrors,
       pageErrors: this.pageErrors.slice(errorsBefore)
@@ -204,11 +205,14 @@ export class PlayPage {
 export function parseScriptFile(text) {
   let list = null;
   try { list = JSON.parse(text); } catch (e) { /* plain text */ }
-  if (!Array.isArray(list)) return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  return list.filter(l => typeof l === 'string').map(l => {
-    const body = l.trim().match(/^\(\)\s*=>\s*\{\s*([\s\S]*?)\s*\}$/);
+  // Lines as written: indentation and blank lines kept (comments and blank
+  // lines are skipped when playing), blank lines at the end dropped.
+  const trimEnd = ls => { while (ls.length && !ls[ls.length - 1].trim()) ls.pop(); return ls; };
+  if (!Array.isArray(list)) return trimEnd(text.split(/\r?\n/).map(l => l.replace(/\s+$/, '')));
+  return trimEnd(list.filter(l => typeof l === 'string').map(l => {
+    const body = l.trim().match(/^\(\)\s*=>\s*\{ ?([\s\S]*?)\s*\}$/);
     if (!body) return l.trim();
     const ret = body[1].match(/^return\s+([\s\S]*?);?$/);
     return ret ? ret[1] : body[1];
-  }).filter(Boolean);
+  }));
 }

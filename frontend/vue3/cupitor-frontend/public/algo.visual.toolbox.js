@@ -2546,6 +2546,146 @@ function finishReveal(obj) {
   state.resolve(obj);
 }
 
+// Draws objects' outlines as if traced by a pen, then fades their fill (and
+// any text or picture inside) in. Shapes inside a group are traced
+// together; a filled shape without an outline is traced in its fill colour;
+// text and pictures just fade in. Hidden objects are
+// shown first; their tree and connector lines appear at the end.
+// opts: duration (ms, default 1200) — the time for the outline; the fill
+// takes a further quarter of it.
+function drawOutline(uidOrObjOrList, opts) {
+  const list = _animResolveList(uidOrObjOrList);
+  const duration = Math.max(1, (opts && opts.duration) || 1200);
+  const fadeTime = Math.max(1, duration / 4);
+  return Promise.all(list.map(obj => new Promise(resolve => {
+    // One already running on it, inside it or around it ends first.
+    (function finishIn(o) { finishDrawOutline(o); (o._objects || []).forEach(finishIn); })(obj);
+    for (let g = obj.group; g; g = g.group) finishDrawOutline(g);
+    finishReveal(obj);
+    const canvas = obj.canvas || window.pc;
+    const lines = _linesOf(obj).filter(l => l.visible === false);
+    if (obj.visible === false && typeof showObject === 'function') showObject(obj);
+    lines.forEach(l => { l.visible = false; });
+
+    // Pieces with an outline are traced; everything else fades in.
+    const traced = [], faded = [];
+    (function sort(o) {
+      if (o._objects && o.type !== 'activeselection') return o._objects.forEach(sort);
+      const outline = (o.stroke && o.strokeWidth > 0) || _fillAlpha(o.fill) > 0;
+      if (outline && _outlineLength(o) > 0) traced.push(o); // shapes and lines only
+      else faded.push(o);
+    })(obj);
+    if (!traced.length) { faded.length = 0; faded.push(obj); }
+    // A plain colour fades in; a gradient or pattern comes back when the outline is done.
+    const fills = traced.map(o => ({ o, fill: o.fill, alpha: _fillAlpha(o.fill) }));
+    const state = {
+      traced: traced.map(o => ({ o, dash: o.strokeDashArray, offset: o.strokeDashOffset, length: _dashLength(o),
+        stroke: o.stroke, strokeWidth: o.strokeWidth, borrowed: !(o.stroke && o.strokeWidth > 0) })),
+      fills, faded: faded.map(o => ({ o, opacity: o.opacity == null ? 1 : o.opacity })),
+      lines, resolve, aborted: false
+    };
+    obj._drawOutline = state;
+    const redraw = () => { [...traced, ...faded].forEach(o => o.set('dirty', true)); canvas.requestRenderAll(); };
+    state.traced.forEach(t => {
+      // No outline of its own: trace one in its fill colour for the drawing.
+      if (t.borrowed) t.o.set({ stroke: new fabric.Color(t.o.fill).setAlpha(1).toRgba(), strokeWidth: 2 });
+      t.o._innerAlpha = 0; // what a shape draws besides its outline (an HTML box's content, an arrowhead)
+      t.o.set({ strokeDashArray: [t.length, t.length], strokeDashOffset: t.length });
+    });
+    const fillAt = (f, t) => f.o.set('fill', new fabric.Color(f.fill).setAlpha(f.alpha * t).toRgba());
+    fills.forEach(f => { if (f.alpha) fillAt(f, 0); else if (f.fill && typeof f.fill !== 'string') f.o.set('fill', ''); });
+    state.faded.forEach(f => f.o.set('opacity', 0));
+    redraw();
+
+    const fadeIn = () => fabric.util.animate({
+      startValue: 0, endValue: 1, duration: fadeTime,
+      onChange: t => {
+        fills.forEach(f => { if (f.alpha) fillAt(f, t); });
+        state.faded.forEach(f => f.o.set('opacity', f.opacity * t));
+        traced.forEach(o => { o._innerAlpha = t; });
+        // A borrowed outline gives way to the fill.
+        state.traced.forEach(b => { if (b.borrowed) b.o.set('stroke', new fabric.Color(b.o.fill).setAlpha(1 - t).toRgba()); });
+        redraw();
+      },
+      abort: () => state.aborted,
+      onComplete: () => finishDrawOutline(obj)
+    });
+    fabric.util.animate({
+      startValue: 1, endValue: 0, duration,
+      onChange: v => { state.traced.forEach(t => t.o.set('strokeDashOffset', t.length * v)); redraw(); },
+      abort: () => state.aborted,
+      onComplete: () => {
+        if (state.aborted) return;
+        state.traced.forEach(t => t.o.set({ strokeDashArray: t.dash, strokeDashOffset: t.offset }));
+        fills.forEach(f => { if (!f.alpha) f.o.set('fill', f.fill); });
+        redraw();
+        fadeIn();
+      }
+    });
+  })));
+}
+
+// Ends a running drawOutline at once: everything shown as it was.
+function finishDrawOutline(obj) {
+  const state = obj && obj._drawOutline;
+  if (!state) return;
+  delete obj._drawOutline;
+  state.aborted = true;
+  state.traced.forEach(t => {
+    t.o.set({ strokeDashArray: t.dash, strokeDashOffset: t.offset, stroke: t.stroke, strokeWidth: t.strokeWidth });
+    delete t.o._innerAlpha;
+  });
+  state.fills.forEach(f => f.o.set('fill', f.fill));
+  state.faded.forEach(f => f.o.set('opacity', f.opacity));
+  [...state.traced.map(t => t.o), ...state.faded.map(f => f.o)].forEach(o => o.set('dirty', true));
+  state.lines.forEach(l => { l.visible = true; });
+  state.resolve(obj);
+  const canvas = obj.canvas || window.pc;
+  if (canvas) canvas.requestRenderAll();
+}
+
+// Alpha of a plain fill colour (to fade in to); 0 for none, transparent, or a gradient/pattern.
+function _fillAlpha(fill) {
+  if (typeof fill !== 'string' || !fill || fill === 'transparent') return 0;
+  return new fabric.Color(fill).getAlpha();
+}
+
+// The outline's length in the units its dash is drawn in: the object's own
+// units, or scaled ones when the stroke keeps its width (strokeUniform).
+function _dashLength(o) {
+  const len = _outlineLength(o);
+  if (!o.strokeUniform) return len;
+  const s = o.getObjectScaling();
+  return len * (Math.abs(s.x) + Math.abs(s.y)) / 2;
+}
+
+// Length of an object's outline in its own units.
+function _outlineLength(o) {
+  const w = o.width || 0, h = o.height || 0;
+  if (o instanceof fabric.Line) return Math.hypot(o.x2 - o.x1, o.y2 - o.y1);
+  if (o instanceof fabric.Circle) return 2 * Math.PI * o.radius;
+  if (o instanceof fabric.Ellipse) {
+    const a = o.rx, b = o.ry; // Ramanujan's approximation
+    return Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
+  }
+  if (o instanceof fabric.Polyline) { // also Polygon
+    const p = o.points || [];
+    let len = 0;
+    for (let i = 1; i < p.length; i++) len += Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y);
+    if (o instanceof fabric.Polygon && p.length > 2) len += Math.hypot(p[0].x - p[p.length - 1].x, p[0].y - p[p.length - 1].y);
+    return len;
+  }
+  if (o instanceof fabric.Path) {
+    return fabric.util.getPathSegmentsInfo(o.path).reduce((sum, seg) => sum + (seg.length || 0), 0);
+  }
+  if (o instanceof fabric.Triangle) return w + 2 * Math.hypot(w / 2, h);
+  if (o instanceof fabric.Rect) {
+    const r = Math.min(((o.rx || 0) + (o.ry || o.rx || 0)) / 2, w / 2, h / 2);
+    return 2 * (w + h) - r * (8 - 2 * Math.PI);
+  }
+  return 0; // text, images and the like have no outline to trace
+}
+
 // Tree and connector lines attached to obj.
 function _linesOf(obj) {
   const tc = obj.treeConnection || {};
@@ -2559,7 +2699,7 @@ function stopAnim(uidOrObjOrList) {
   if (uidOrObjOrList == null) {
     // Stop everything.
     stopSpotlight();
-    if (window.pc) window.pc.getObjects().forEach(function finish(o) { finishReveal(o); (o._objects || []).forEach(finish); });
+    if (window.pc) window.pc.getObjects().forEach(function finish(o) { finishReveal(o); finishDrawOutline(o); (o._objects || []).forEach(finish); });
     // Flows can run on any canvas (e.g. oc), not just pc.
     [..._flows.keys()].forEach(_stopFlow);
     if (window.pc) {
@@ -2575,6 +2715,7 @@ function stopAnim(uidOrObjOrList) {
   // object in the list.
   stopSpotlight(list);
   list.forEach(finishReveal);
+  list.forEach(finishDrawOutline);
   list.forEach(obj => {
     if (obj.externalData && obj.externalData.animating) {
       stopAnimation(obj, obj.canvas || window.pc);

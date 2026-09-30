@@ -196,6 +196,10 @@ const SCRIPT_FUNCTIONS = [
             ['from', "'left' (uncover left to right; default), 'right', 'top' or 'bottom' — the object's own sides"],
             ['opts.duration', 'ms (default 800)'],
         ]],
+        ['drawOutline(uid, opts)', 'Trace the outline as if drawn with a pen, then fade the fill and any text in (shows it if hidden); several uids draw together; the next line waits', [
+            ['uid', 'a uid or a list of uids; shapes inside a group are traced together, objects without an outline fade in'],
+            ['opts.duration', 'ms for the outline (default 1200); the fill takes a quarter of that again'],
+        ]],
         ["anim(uid, 'highlight', opts)", 'Pulse bigger and back until stopped', [
             ['factor', 'how much bigger (default 1.18)'],
             ['duration', 'ms per half pulse (default 600)'],
@@ -211,7 +215,7 @@ const SCRIPT_FUNCTIONS = [
             ['color', "dot colour (default '#ff5722')"],
             ['radius', 'dot size (default: 3 × the line width, at least 5)'],
         ]],
-        ['stopAnim(uid)', 'Stop highlight, spotlight, flow or reveal; with no argument stops everything'],
+        ['stopAnim(uid)', 'Stop highlight, spotlight, flow, reveal or drawOutline; with no argument stops everything'],
         ['zoomSelectedObject(uid, isPlus, amount)', 'Grow (isPlus true, default) or shrink an object by amount (default 1.5)'],
         ['expandTreeItems(uid)', 'Show the children of a tree node'],
         ['collapseTreeItems(uid)', 'Hide the children of a tree node'],

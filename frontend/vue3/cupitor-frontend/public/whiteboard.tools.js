@@ -317,7 +317,6 @@ function initShapeDrawingTool(canvas, toolManager) {
   canvas.on('mouse:down', function(e) {
     const tool = toolManager.getActive();
     if (!SHAPE_TOOLS.includes(tool)) return;
-    if (e.target) return; // clicked on an existing object
 
     isDrawingShape = true;
     const pointer = canvas.getPointer(e.e);
@@ -619,10 +618,13 @@ function registerTools(toolManager, primaryCanvas, overlayCanvas) {
         primaryCanvas.isDrawingMode = false;
         primaryCanvas.selection = false;
         primaryCanvas.defaultCursor = 'crosshair';
+        // Drawing starts wherever the drag does, over other objects too.
+        primaryCanvas.skipTargetFind = true;
       },
       deactivate() {
         primaryCanvas.selection = true;
         primaryCanvas.defaultCursor = 'default';
+        primaryCanvas.skipTargetFind = false;
       }
     });
   });

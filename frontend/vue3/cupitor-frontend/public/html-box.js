@@ -24,6 +24,7 @@ class HtmlBox extends fabric.Rect {
     if (!picture || _isEditingHtmlBox(this) || this._htmlPictureContent !== _htmlPictureContent(this)) return;
     const w = this.width, h = this.height, r = Math.min(this.rx || 0, w / 2, h / 2);
     ctx.save();
+    if (this._innerAlpha != null) ctx.globalAlpha *= this._innerAlpha; // drawOutline fades it in
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(-w / 2, -h / 2, w, h, r); else ctx.rect(-w / 2, -h / 2, w, h);
     ctx.clip();
@@ -293,6 +294,8 @@ function editHtmlBox(uidOrObj) {
   if (!isFabricObject(box) || !isHtmlBox(box)) return;
   if (window._htmlBoxEditing) exitHtmlBoxEdit(true);
   const el = _htmlBoxElement(box);
+  // A box edited as soon as it is placed hasn't had its content put in yet.
+  if (el._html !== box.customData.html) { el._content.innerHTML = box.customData.html; el._html = box.customData.html; }
   window._htmlBoxEditing = { box, el, before: box.customData.html };
   el.classList.add('editing');
   el._content.contentEditable = 'true';
@@ -300,6 +303,141 @@ function editHtmlBox(uidOrObj) {
   pc.requestRenderAll();
   setTimeout(() => el._content.focus(), 0);
   if (typeof _syncHtmlEditButton === 'function') _syncHtmlEditButton();
+}
+
+// Keeps new HTML on a box: set, recorded and undoable.
+function _commitHtml(box, before, html) {
+  setHtml(box, html);
+  if (box.uid) recordScript(`setHtml(${JSON.stringify(box.uid)}, ${JSON.stringify(html)})`);
+  if (window.undoManager) {
+    const line = h => (box.uid ? `setHtml(${JSON.stringify(box.uid)}, ${JSON.stringify(h)})` : null);
+    undoManager.push({ undo() { setHtml(box, before); }, redo() { setHtml(box, html); }, script: { undo: line(before), redo: line(html) } });
+  }
+}
+
+// Edits a box in CKEditor (vendor/ckeditor): a formatting toolbar, and
+// Source for the HTML and CSS. The editing area has the box's size and
+// default look; the box on the canvas follows the edits. Apply keeps them
+// (recorded, undoable), Cancel puts the old content back.
+let _htmlBoxEditor = null; // { dialog, editor, box, before }
+
+function editHtmlBoxInEditor(uidOrObj) {
+  const box = findIfRequired(uidOrObj);
+  if (!isFabricObject(box) || !isHtmlBox(box) || !window.CKEDITOR) return;
+  if (window._htmlBoxEditing) exitHtmlBoxEdit(true);
+  const ed = _htmlBoxEditor || (_htmlBoxEditor = _createHtmlBoxEditor());
+  if (ed.box) ed.close(false); // another box still open: put it back first
+  ed.box = box;
+  ed.before = box.customData.html;
+  ed.loading = true;
+  ed.dialog.style.display = 'flex';
+  const fill = () => ed.editor.setData(ed.before, { callback: () => {
+    // What the editor makes of the content before any edit (it tidies HTML),
+    // so Apply without edits changes nothing.
+    ed.loaded = ed.editor.getData();
+    ed.loading = false;
+    _styleHtmlBoxEditor(ed);
+    ed.editor.resetUndo();
+    ed.editor.focus();
+  } });
+  const load = () => (ed.editor.mode === 'wysiwyg' ? fill() : ed.editor.setMode('wysiwyg', fill));
+  if (ed.editor.status === 'ready') load();
+  else ed.editor.on('instanceReady', evt => { evt.removeListener(); load(); });
+}
+
+function _createHtmlBoxEditor() {
+  const dialog = document.createElement('div');
+  dialog.id = 'htmlBoxEditorDialog';
+  dialog.style.cssText = 'display:none;position:fixed;inset:0;z-index:9999997;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;';
+  dialog.innerHTML = '<div style="background:#fff;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.3);padding:10px;width:min(860px, calc(100% - 32px));max-height:calc(100% - 32px);display:flex;flex-direction:column;gap:8px;font-size:13px;">' +
+    '<div style="color:#555;">HTML box &mdash; <b>Source</b> edits the HTML and CSS. Inline <code>style="&hellip;"</code> keeps CSS to this box; a <code>&lt;style&gt;</code> block applies to the whole page.</div>' +
+    '<textarea id="htmlBoxEditorArea"></textarea>' +
+    '<div style="display:flex;justify-content:flex-end;gap:6px;"><button type="button" data-a="cancel">Cancel</button><button type="button" data-a="ok">Apply</button></div></div>';
+  document.body.appendChild(dialog);
+  const editor = CKEDITOR.replace('htmlBoxEditorArea', {
+    allowedContent: true,
+    // Its dropdowns and dialogs (fonts, colours, links) open above this dialog.
+    baseFloatZIndex: 10000000,
+    // <style> blocks stay as written (CKEditor would otherwise drop them).
+    protectedSource: [/<style[\s\S]*?<\/style>/gi],
+    height: 300,
+    resize_enabled: false,
+    removePlugins: 'elementspath',
+    extraPlugins: '', // the shared config's list is an array, which CKEditor can't read here
+    toolbar: [
+      ['Source'], ['Undo', 'Redo'],
+      ['Bold', 'Italic', 'Underline', 'Strike', 'Subscript', 'Superscript', 'RemoveFormat'],
+      ['NumberedList', 'BulletedList', 'Outdent', 'Indent', 'Blockquote'],
+      ['JustifyLeft', 'JustifyCenter', 'JustifyRight', 'JustifyBlock'],
+      ['Link', 'Unlink', 'Image', 'Table', 'HorizontalRule', 'SpecialChar'],
+      '/',
+      ['Styles', 'Format', 'Font', 'FontSize'], ['TextColor', 'BGColor'], ['Maximize']
+    ]
+  });
+  // CKEditor 4.6 on Chrome fails to blur in Source mode (it reads the
+  // wysiwyg window, which Source mode doesn't have). There, blur at once and
+  // finish what it leaves undone when that read fails.
+  const fm = editor.focusManager, blur = fm.blur;
+  fm.blur = function (now) {
+    if (editor.mode !== 'source') return blur.call(this, now);
+    try { blur.call(this, true); } catch (e) {
+      if (editor.container) editor.container.removeClass('cke_focus');
+      editor.fire('blur');
+    }
+  };
+  // Loading until the box's content is in, so start-up changes don't reach the box.
+  const ed = { dialog, editor, box: null, before: null, loading: true };
+  const preview = () => { if (ed.box && !ed.loading) setHtml(ed.box, editor.getData()); };
+  editor.on('change', preview);
+  editor.on('mode', () => {
+    // Source mode is a plain textarea: follow its typing too.
+    if (editor.mode === 'source') editor.editable().on('input', preview);
+    _styleHtmlBoxEditor(ed);
+  });
+  const close = keep => {
+    const { box, before } = ed;
+    ed.box = null;
+    if (!box) return;
+    const html = editor.getData();
+    // Keys go back to the board (undo, shortcuts), not the hidden editor.
+    if (dialog.contains(document.activeElement)) document.activeElement.blur();
+    dialog.style.display = 'none';
+    if (keep && html !== before && html !== ed.loaded) _commitHtml(box, before, html);
+    else setHtml(box, before);
+    if (box.canvas) box.canvas.requestRenderAll();
+  };
+  dialog.querySelector('[data-a="ok"]').onclick = () => close(true);
+  dialog.querySelector('[data-a="cancel"]').onclick = () => close(false);
+  // Typing here (Source mode is a textarea on the page) isn't a canvas
+  // shortcut; Escape cancels, as in the other popups.
+  ['keydown', 'keyup', 'keypress'].forEach(type => dialog.addEventListener(type, e => {
+    e.stopPropagation();
+    if (type === 'keydown' && e.key === 'Escape') close(false);
+  }));
+  editor.on('key', evt => { if (evt.data.keyCode === 27) close(false); }); // Escape in the editing area
+  // CKEditor's own dialogs (link, table, ...) sit outside this one: keep their keys off the canvas too.
+  editor.on('dialogShow', evt => {
+    const el = evt.data.getElement().$;
+    if (el._keysKept) return;
+    el._keysKept = true;
+    ['keydown', 'keyup', 'keypress'].forEach(type => el.addEventListener(type, e => e.stopPropagation()));
+  });
+  ed.close = close;
+  return ed;
+}
+
+// The editing area looks like the box: its size, padding and default font.
+function _styleHtmlBoxEditor(ed) {
+  const doc = ed.editor.document, box = ed.box;
+  if (!doc || !box || ed.editor.mode !== 'wysiwyg') return;
+  const id = 'html-box-editor-look';
+  const old = doc.$.getElementById(id);
+  if (old) old.remove();
+  const style = doc.$.createElement('style');
+  style.id = id;
+  style.textContent = _HTML_BOX_CSS.replace(/\.html-box-content(?=[{ ,])/g, 'body') +
+    `body{margin:12px auto;width:${box.width}px;height:auto;min-height:${box.height}px;padding:${box.customData.padding || 0}px;overflow:visible;outline:1px dashed #bbb;background:#fff;}`;
+  doc.$.head.appendChild(style);
 }
 
 // Leaves edit mode; with commit the new HTML is kept, recorded and undoable.
@@ -312,13 +450,8 @@ function exitHtmlBoxEdit(commit) {
   el._content.contentEditable = 'false';
   el.classList.remove('editing');
   if (commit && html !== before) {
-    setHtml(box, html);
+    _commitHtml(box, before, html);
     el._html = html;
-    if (box.uid) recordScript(`setHtml(${JSON.stringify(box.uid)}, ${JSON.stringify(html)})`);
-    if (window.undoManager) {
-      const line = h => (box.uid ? `setHtml(${JSON.stringify(box.uid)}, ${JSON.stringify(h)})` : null);
-      undoManager.push({ undo() { setHtml(box, before); }, redo() { setHtml(box, html); }, script: { undo: line(before), redo: line(html) } });
-    }
   } else {
     el._content.innerHTML = before;
     el._html = before;

@@ -201,10 +201,12 @@ export function detached(gaps, tolerance = 2) {
 }
 
 // Replays `lines` in a fresh page and returns its snapshot; `then(board)`
-// can go on using the replayed board before it closes.
-export async function replayElsewhere(lines, then) {
+// can go on using the replayed board before it closes, `beforePlay(board)`
+// can set it up first.
+export async function replayElsewhere(lines, then, beforePlay) {
   const b = await openBoard();
   try {
+    if (beforePlay) await beforePlay(b);
     await b.play(lines);
     const result = { snapshot: await b.snapshot(), gaps: await b.lineGaps(), errors: b.errors };
     if (then) await then(b);

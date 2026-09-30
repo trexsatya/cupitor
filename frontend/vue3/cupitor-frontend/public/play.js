@@ -76,15 +76,18 @@ function handleImportDialogButtons(src) {
 function parseImportedScript(text) {
   let list = null
   try { list = JSON.parse(text) } catch (e) { /* plain text */ }
+  // Lines as written: indentation and blank lines (comments are skipped when
+  // playing) kept, blank lines at the end dropped.
+  const trimEnd = ls => { while (ls.length && !ls[ls.length - 1].trim()) ls.pop(); return ls }
   if (!Array.isArray(list)) {
-    return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    return trimEnd(text.split(/\r?\n/).map(l => l.replace(/\s+$/, '')))
   }
-  return list.filter(l => typeof l === 'string').map(l => {
-    const body = l.trim().match(/^\(\)\s*=>\s*\{\s*([\s\S]*?)\s*\}$/)
+  return trimEnd(list.filter(l => typeof l === 'string').map(l => {
+    const body = l.trim().match(/^\(\)\s*=>\s*\{ ?([\s\S]*?)\s*\}$/)
     if (!body) return l.trim()
     const ret = body[1].match(/^return\s+([\s\S]*?);?$/)
     return ret ? ret[1] : body[1]
-  }).filter(Boolean)
+  }))
 }
 
 // Imported scripts hard-code semantic UIDs (T1, R2, IMG3, …). If the canvas

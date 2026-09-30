@@ -262,8 +262,9 @@
             --node-content-fg: white;
         }
 
+        /* CKEditor dropdowns (fonts, colours) above the editors' panels and dialogs. */
         .cke_panel {
-            z-index: 500000 !important;
+            z-index: 10000001 !important;
         }
 
         /* Background grid canvas styling */
@@ -542,6 +543,7 @@
     const colorFg = getComputedStyle(element).getPropertyValue('--node-content-fg');
 
     CKEDITOR.on('instanceReady', function(e) {
+        if (e.editor.name !== 'node-content-editor') return; // the HTML box editor has its own look
         // First time
         e.editor.document.getBody().setStyle('background-color', colorBg).setStyle('color', colorFg);
         // in case the user switches to source and back
@@ -842,6 +844,12 @@
     })
     pc.on('selection:created', handleSelection);
     pc.on('selection:updated', handleSelection);
+    // A selected object is being edited: an outline drawing on it ends first,
+    // so its real fill and outline are what the panel changes.
+    ['selection:created', 'selection:updated'].forEach(ev => pc.on(ev, e => (e.selected || []).forEach(o => {
+        for (let g = o; g; g = g.group) finishDrawOutline(g);
+        (function finishIn(x) { finishDrawOutline(x); (x._objects || []).forEach(finishIn); })(o);
+    })));
     function handleSelection(e) {
         const obj = e.selected ? e.selected[0] : e.target;
         if (!obj) return;
@@ -1478,6 +1486,7 @@
             </div>
             <div style="padding:6px 10px;color:#888;border-bottom:1px solid #f3f3f3;">
                 Wherever <code>uid</code> is asked for, you can pass the object itself. Click a function to insert it at the cursor.
+                Lines starting with <code>//</code> are comments (a <code>/* &hellip; */</code> can span lines): they stay in the script and are skipped when it plays.
             </div>
             <div id="scriptHelpList" style="overflow-y:auto;padding:4px 0 8px 0;"></div>
         </div>
@@ -1996,6 +2005,7 @@
                 <option value="reveal:right">Reveal (right &rarr; left)</option>
                 <option value="reveal:top">Reveal (top &rarr; bottom)</option>
                 <option value="reveal:bottom">Reveal (bottom &rarr; top)</option>
+                <option value="drawOutline">Draw outline</option>
             </select>
             <button id="prop-anim-toggle" class="prop-toggle" onclick="toggleSelectedAnim()" title="Start/Stop animation">&#9654; Start</button>
         </div>
@@ -2026,6 +2036,7 @@
         <div class="prop-section-divider"></div>
         <div class="prop-row">
             <button id="prop-html-edit" class="prop-toggle" style="width:auto;padding:0 8px;" onclick="toggleHtmlBoxEdit()">Edit HTML</button>
+            <button id="prop-html-source" class="prop-toggle" style="width:auto;padding:0 8px;margin-left:4px;" title="Edit in a full editor: fonts, colours, styles, and Source for the HTML and CSS" onclick="editHtmlBoxInEditor(_propTarget())">Editor&hellip;</button>
             <label style="margin-left:8px;">Padding</label>
             <input type="number" id="prop-html-padding" min="0" max="80" step="1" style="width:56px;" onchange="applyHtmlPadding(parseInt(this.value))">
         </div>
@@ -2996,7 +3007,9 @@
 
     function saveScriptEdits() {
         const ed = ensureScriptEditor();
-        const lines = ed.getValue().split('\n').filter(l => l.trim() !== '');
+        // Blank lines stay (they're skipped when playing), so line numbers match the editor.
+        const lines = ed.getValue().split('\n');
+        while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
         window.recordedScriptLines = lines;
         document.getElementById('scriptLineCount').textContent = lines.length + ' line' + (lines.length !== 1 ? 's' : '');
     }
@@ -3161,18 +3174,21 @@
     window._stepwiseState = null;
 
     function playScriptStepwise() {
-        const lines = (window.recordedScriptLines || []).map(s => (s + '').trim()).filter(Boolean);
-        if (!lines.length) return;
-        const fns = (typeof buildScriptExecutables === 'function')
-            ? buildScriptExecutables().map(compileScriptLine)
-            : lines.map(l => {
-                const exec = (l.startsWith('animate') || l.startsWith('Promise') || l.startsWith('connectObjects') || l.startsWith('reveal')) ? 'return ' + l + ';' : l;
-                return eval('(() => { ' + exec + ' })');
-              });
-        window._stepwiseState = { lines: lines, fns: fns, index: 0, busy: false };
+        const lines = (window.recordedScriptLines || []).map(s => (s + '').trim());
+        const code = scriptCode(lines);
+        const comments = code.map(c => !c);
+        if (!comments.includes(false)) return;
+        const fns = buildScriptExecutables(code).map(compileScriptLine);
+        window._stepwiseState = { lines: lines, fns: fns, comments: comments, index: 0, busy: false };
+        _stepwiseSkipComments(window._stepwiseState);
         window.isRecordingPlayback = true;
         $('#stepwisePlayDialog').css('display', 'flex');
         renderStepwiseLines();
+    }
+
+    // Comments (and blank lines) are passed over, not stepped through.
+    function _stepwiseSkipComments(s) {
+        while (s.index < s.lines.length && s.comments[s.index]) s.index += 1;
     }
 
     function closeStepwiseDialog() {
@@ -3196,12 +3212,13 @@
         document.getElementById('stepwiseIndex').textContent = Math.min(s.index, total);
         document.getElementById('stepwiseTotal').textContent = total;
         el.innerHTML = s.lines.map(function (line, i) {
+            const comment = s.comments[i];
             const isCurrent = i === s.index;
-            const isDone = i < s.index;
+            const isDone = i < s.index && !comment;
             const bg = isCurrent ? '#fff59d' : (isDone ? '#e8f5e9' : 'transparent');
-            const color = isDone ? '#888' : '#222';
+            const color = comment ? '#6a8759' : (isDone ? '#888' : '#222');
             const prefix = isCurrent ? '&#9654; ' : (isDone ? '&#10003; ' : '&nbsp;&nbsp;');
-            return '<div style="padding:2px 4px;background:' + bg + ';color:' + color +
+            return '<div style="padding:2px 4px;background:' + bg + ';color:' + color + (comment ? ';font-style:italic' : '') +
                 ';white-space:pre-wrap;word-break:break-all;">' + prefix +
                 (i + 1).toString().padStart(3, ' ') + ': ' + _stepwiseEscapeHtml(line) + '</div>';
         }).join('');
@@ -3232,6 +3249,7 @@
         }
         const advance = function () {
             s.index += 1;
+            _stepwiseSkipComments(s);
             s.busy = false;
             renderStepwiseLines();
         };
@@ -3245,7 +3263,7 @@
     function stepwiseRunToEnd() {
         const s = window._stepwiseState;
         if (!s) return;
-        const remaining = s.fns.slice(s.index);
+        const remaining = s.fns.filter((fn, i) => i >= s.index && !s.comments[i]);
         closeStepwiseDialog();
         if (remaining.length) schedule(remaining, 1);
     }
@@ -3620,7 +3638,13 @@
         const type = colon === -1 ? raw : raw.slice(0, colon);
         const shape = colon === -1 ? null : raw.slice(colon + 1);
         const opts = shape ? { shape: shape } : null;
-        // A reveal plays once to the end, so it is recorded as it starts.
+        // A reveal or outline drawing plays once to the end, so it is recorded as it starts.
+        if (type === 'drawOutline') {
+            pc.discardActiveObject();
+            drawOutline(uids);
+            recordScript(`drawOutline(${JSON.stringify(uids)}, {"duration":1200})`);
+            return;
+        }
         if (type === 'reveal') {
             pc.discardActiveObject();
             reveal(uids, shape);

@@ -190,6 +190,7 @@ class LineArrow extends fabric.Line {
     const sz = this.arrowSize || 8;
 
     ctx.save();
+    if (this._innerAlpha != null) ctx.globalAlpha *= this._innerAlpha; // drawOutline fades it in
     ctx.translate((this.x2 - this.x1) / 2, (this.y2 - this.y1) / 2);
     ctx.rotate(angle);
     ctx.beginPath();
@@ -1765,13 +1766,52 @@ function exportCanvas() {
 }
 
 function buildScriptExecutables(lines) {
-  return (lines || window.recordedScriptLines || []).map(line => {
-    line = line.trim()
-    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal'))
+  return (lines || window.recordedScriptLines || []).map(raw => {
+    const line = raw.trim()
+    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal') || line.startsWith('drawOutline'))
       ? `return ${line};`
-      : line
-    return `() => { ${executable} }`
+      : raw.replace(/\s+$/, '') // indentation kept (e.g. inside a /* … */)
+    // The brace on its own line: a comment at the end of the line can't swallow it.
+    return `() => { ${executable}\n}`
   })
+}
+
+// The code on each script line, without its comments: // to the end of the
+// line, and /* … */ (which may span lines) — but not inside quotes. A line
+// with no code left (a comment or blank line) stays in the script and is
+// skipped when it plays. A /* that is never closed only comments out the
+// rest of its own line, so later lines still play.
+function scriptCode(lines) {
+  const scan = unclosed => { // lines whose /* never closes
+    let inBlock = false, opener = -1
+    const code = lines.map((raw, i) => {
+      const s = raw + ''
+      let out = '', quote = null
+      for (let k = 0; k < s.length; k++) {
+        const c = s[k], next = s[k + 1]
+        if (inBlock) { if (c === '*' && next === '/') { inBlock = false; k++ } continue }
+        if (quote) {
+          out += c
+          if (c === '\\') out += s[++k] || ''
+          else if (c === quote) quote = null
+          continue
+        }
+        if (c === '"' || c === "'" || c === '`') { quote = c; out += c; continue }
+        if (c === '/' && next === '/') break
+        if (c === '/' && next === '*') { inBlock = true; opener = i; k++; continue }
+        out += c
+      }
+      if (inBlock && unclosed.has(i)) inBlock = false
+      return out.trim()
+    })
+    return inBlock ? scan(unclosed.add(opener)) : code
+  }
+  return scan(new Set())
+}
+
+// Which script lines are comments (or blank): nothing on them to run.
+function scriptCommentLines(lines) {
+  return scriptCode(lines).map(code => !code)
 }
 
 // Turns one built line into its function. A line that isn't valid script
@@ -1783,16 +1823,21 @@ function compileScriptLine(src) {
 
 // Plays the recorded script, or just `lines` when given (e.g. an import).
 function playScript(lines) {
-  const fns = buildScriptExecutables(lines).map(compileScriptLine)
-  if (!fns.length) return
-  const total = fns.length
+  const src = lines || window.recordedScriptLines || []
+  const code = scriptCode(src)
+  const comments = code.map(c => !c)
+  // What runs is each line's code, its comments left out.
+  const fns = buildScriptExecutables(code).map(compileScriptLine)
+  if (!comments.includes(false)) return
+  // Line numbers are the script's own (comments included), as the editor shows them.
+  const total = src.length
   // A failing line is reported and skipped, so playback (and play mode)
   // always reaches the end.
   const report = (i, err) => {
     console.error(`Script line ${i + 1} failed:`, err)
     window.showPlayLine && showPlayLine(i + 1, total, err && err.message || String(err))
   }
-  const steps = fns.map((fn, i) => () => {
+  const steps = fns.map((fn, i) => comments[i] ? null : () => {
     window.showPlayLine && showPlayLine(i + 1, total)
     try {
       const result = fn()
@@ -1800,7 +1845,7 @@ function playScript(lines) {
     } catch (err) {
       report(i, err)
     }
-  })
+  }).filter(Boolean)
   window._stopPlayback = false
   window.enterPlayMode && enterPlayMode()
   schedule(steps, 1, null, () => window.exitPlayMode && exitPlayMode(), () => window._stopPlayback)

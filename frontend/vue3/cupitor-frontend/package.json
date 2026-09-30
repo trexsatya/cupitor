@@ -8,6 +8,7 @@
     "test:unit": "vue-cli-service test:unit",
     "test:e2e": "vue-cli-service test:e2e",
     "test:whiteboard": "node --test tests/whiteboard/",
+    "demo:whiteboard": "node tools/whiteboard-demo/record.mjs",
     "lint": "vue-cli-service lint"
   },
   "dependencies": {
