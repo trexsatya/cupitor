@@ -77,6 +77,21 @@ function _setState(canvas, obj, state) {
   canvas.requestRenderAll();
 }
 
+// Where an object is on the canvas, also when it is in a multi-selection
+// (whose objects have left/top relative to it).
+function _placeOnCanvas(o) {
+  const d = fabric.util.qrDecompose(o.calcTransformMatrix());
+  // The decomposed matrix already holds any flip (as angle and scale).
+  const p = { scaleX: d.scaleX, scaleY: d.scaleY, angle: d.angle, skewX: d.skewX, skewY: d.skewY, flipX: false, flipY: false };
+  // left/top for the object's own origin, worked out with its canvas
+  // scale and angle.
+  const own = { scaleX: o.scaleX, scaleY: o.scaleY, angle: o.angle, skewX: o.skewX, skewY: o.skewY, flipX: o.flipX, flipY: o.flipY };
+  Object.assign(o, p);
+  const at = o.translateToOriginPoint(new fabric.Point(d.translateX, d.translateY), o.originX, o.originY);
+  Object.assign(o, own);
+  return Object.assign(p, { left: at.x, top: at.y });
+}
+
 const Commands = {
   addObject(canvas, obj) {
     return {
@@ -148,19 +163,7 @@ function initCanvasUndoRedo(canvas, undoManager) {
   let objectBeforeState = null;
   let autoFitBefore;
 
-  // Where each object of a multi-selection is on the canvas.
-  const placeOf = o => {
-    const d = fabric.util.qrDecompose(o.calcTransformMatrix());
-    // The decomposed matrix already holds any flip (as angle and scale).
-    const p = { scaleX: d.scaleX, scaleY: d.scaleY, angle: d.angle, skewX: d.skewX, skewY: d.skewY, flipX: false, flipY: false };
-    // left/top for the object's own origin, worked out with its canvas
-    // scale and angle (inside the selection they are relative to it).
-    const own = { scaleX: o.scaleX, scaleY: o.scaleY, angle: o.angle, skewX: o.skewX, skewY: o.skewY, flipX: o.flipX, flipY: o.flipY };
-    Object.assign(o, p);
-    const at = o.translateToOriginPoint(new fabric.Point(d.translateX, d.translateY), o.originX, o.originY);
-    Object.assign(o, own);
-    return Object.assign(p, { left: at.x, top: at.y });
-  };
+  const placeOf = _placeOnCanvas;
   let selectionBefore = null;
 
   canvas.on('before:transform', function(e) {

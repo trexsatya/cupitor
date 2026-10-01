@@ -962,8 +962,10 @@ function removeByUid(uidOrObj) {
 }
 
 function setObjectProps(uidOrObj, props) {
-  const obj = findIfRequired(uidOrObj);
-  if (!obj) return;
+  let obj = findIfRequired(uidOrObj);
+  // Freehand drawings live on the overlay canvas.
+  if (!isFabricObject(obj) && window.oc) obj = oc.getObjects().find(o => o.uid + '' === uidOrObj + '' || (o.customData && o.customData.uid + '' === uidOrObj + ''));
+  if (!isFabricObject(obj)) return;
   obj.set(props);
   obj.setCoords();
   // Its tree and connector lines follow it.

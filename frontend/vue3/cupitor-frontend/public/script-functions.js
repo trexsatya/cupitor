@@ -173,6 +173,11 @@ const SCRIPT_FUNCTIONS = [
         ['showObject(uid)', 'Show again'],
         ['removeByUid(uid)', 'Delete (its connector and tree lines go with it)'],
         ['restoreObject(uid)', 'Put back an object deleted earlier in the script, with its lines (what undoing a delete records)'],
+        ['tagState(name, uids)', 'Remember how these objects look now (place, size, angle, colours, visibility, text, HTML; the items of a group too) under a name; tagging a name again replaces it'],
+        ['revertState(name, opts)', 'Put the objects of a tag back the way they were (and bring back any deleted since); the next line waits', [
+            ['opts.duration', 'ms to move back (default 600; 0 at once)'],
+        ]],
+        ['untagState(name)', 'Forget a tag'],
         ['groupObjects([uids], groupUid)', 'Group objects'],
         ['ungroupObjects(groupUid)', 'Ungroup'],
         ['connectObjects(fromUid, toUid, lineUid, opts)', 'Arrow that stays attached to both objects when they move', [

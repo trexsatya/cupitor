@@ -788,6 +788,176 @@ function restoreObject(uid) {
   entry.canvas.requestRenderAll()
 }
 
+// ---- Tagged states --------------------------------------------------------
+// A tag remembers, by uid, how some objects looked at one moment, so they
+// can be put back that way later with revertState. Objects inside a group
+// are remembered with it.
+const _stateTags = new Map()
+
+const _TAG_NUMBERS = ['left', 'top', 'scaleX', 'scaleY', 'angle', 'skewX', 'skewY', 'opacity', 'width', 'height', 'strokeWidth']
+const _TAG_OTHERS = ['flipX', 'flipY', 'visible', 'fill', 'stroke', 'text']
+
+function _objectState(o) {
+  const s = {}
+  _TAG_NUMBERS.concat(_TAG_OTHERS).forEach(k => {
+    const v = o[k]
+    if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string' || v === null) s[k] = v
+  })
+  // Objects of a multi-selection have left/top relative to it.
+  if (o.group && o.group.type === 'activeselection') Object.assign(s, _placeOnCanvas(o))
+  if (isHtmlBox(o)) s.html = o.customData.html
+  if (o.type === 'group') s.items = o.getObjects().map(_objectState)
+  return s
+}
+
+// The tagged object with this uid; with restore, one removed since is put
+// back on its canvas (but not a group that was taken apart: its items are
+// on the canvas by themselves now).
+function _taggedObject(uid, restore) {
+  const same = u => u + '' === uid + ''
+  const onCanvas = c => c && c.getObjects().find(o => same(o.uid) || (o.customData && same(o.customData.uid)))
+  const obj = onCanvas(window.pc) || onCanvas(window.oc)
+  if (obj) return { obj, restored: false }
+  if (!restore) return null
+  const key = [..._removedObjects.keys()].find(same)
+  const entry = key !== undefined && _removedObjects.get(key)
+  if (!entry || (entry.obj.type === 'group' && entry.obj.getObjects().some(i => entry.canvas.getObjects().includes(i)))) return null
+  restoreObject(key)
+  return entry.obj.canvas ? { obj: entry.obj, restored: true } : null
+}
+
+// Script form: tagState(name, uids) remembers how those objects look now
+// (tagging again under the same name replaces it). False when none of them
+// is on the board.
+function tagState(name, uids) {
+  const list = (Array.isArray(uids) ? uids : [uids]).filter(u => u != null && u !== '')
+  const states = {}
+  list.forEach(uid => {
+    const found = _taggedObject(uid, false)
+    if (found) states[uid] = _objectState(found.obj)
+  })
+  if (!Object.keys(states).length) return false
+  _stateTags.set(String(name), states)
+  return true
+}
+
+function untagState(name) {
+  _stateTags.delete(String(name))
+}
+
+// Tag names, with the uids each one covers.
+function stateTags() {
+  return [..._stateTags].map(([name, states]) => ({ name, uids: Object.keys(states) }))
+}
+
+// Sets a remembered state; numbers are left out when they are to be animated.
+function _applyState(o, state, skipNumbers) {
+  const props = {}
+  Object.keys(state).forEach(k => {
+    if (k === 'html' || k === 'items' || k === 'visible' || (skipNumbers && _TAG_NUMBERS.includes(k))) return
+    if (o[k] !== state[k]) props[k] = state[k]
+  })
+  if (Object.keys(props).length) o.set(props)
+  if ('visible' in state && o.visible !== state.visible) _setTaggedVisible(o, state.visible)
+  if (state.html !== undefined && o.customData && o.customData.html !== state.html) setHtml(o, state.html)
+  if (state.items) {
+    const items = o.getObjects()
+    if (items.length === state.items.length) items.forEach((item, i) => _applyState(item, state.items[i], false))
+    o.set('dirty', true)
+  }
+  o.setCoords()
+}
+
+// Puts the objects of a tag back as they were, animated over opts.duration
+// ms (default 600; 0 sets them at once). Returns a promise, and the undo
+// step for it.
+function _revertState(name, opts) {
+  const states = _stateTags.get(String(name))
+  if (!states) return { done: Promise.resolve(), command: null }
+  const duration = opts && opts.duration != null ? opts.duration : 600
+  const commands = []
+  const moves = []
+  const objects = []
+  // Undoing stops the animation first, so it doesn't carry on after.
+  const run = { stopped: false }
+  Object.keys(states).forEach(uid => {
+    // Not found: deleted for good, or put in a group since (it moves with the group).
+    const found = _taggedObject(uid, true)
+    if (!found) return
+    const { obj, restored } = found
+    objects.push(obj)
+    const canvas = obj.canvas
+    // A multi-selection holds its objects relative to it.
+    if (obj.group && obj.group.type === 'activeselection') canvas.discardActiveObject()
+    const state = states[uid]
+    if (restored) commands.push(Commands.addObject(canvas, obj))
+    const before = _objectState(obj)
+    commands.push(..._stateCommands(canvas, obj, before, state))
+    const numbers = {}
+    _TAG_NUMBERS.forEach(k => { if (k in state && obj[k] !== state[k]) numbers[k] = state[k] })
+    const animated = duration > 0 && Object.keys(numbers).length
+    // Something being hidden fades out first, so it hides at the end.
+    const hideLater = animated && state.visible === false && obj.visible
+    _applyState(obj, hideLater ? Object.assign({}, state, { visible: true }) : state, animated)
+    if (animated) {
+      // animate() draws the main canvas; a drawing on the overlay redraws its own.
+      const own = canvas !== window.pc ? { onChange: () => canvas.requestRenderAll() } : {}
+      moves.push(animate(obj, numbers, Object.assign({ duration }, own)).then(() => { if (hideLater && !run.stopped) _setTaggedVisible(obj, false) }))
+    } else {
+      if (typeof updateTreeItem === 'function') updateTreeItem(obj)
+    }
+    canvas.requestRenderAll()
+  })
+  const done = Promise.all(moves).then(() => {
+    objects.forEach(o => { if (o.canvas) { o.setCoords(); if (typeof updateTreeItem === 'function') updateTreeItem(o) } })
+    ;[window.pc, window.oc].forEach(c => c && c.requestRenderAll())
+  })
+  if (!commands.length) return { done, command: null }
+  // Last in the list, so undone first.
+  commands.push({
+    undo() { run.stopped = true; objects.forEach(o => fabric.runningAnimations.cancelByTarget(o)) },
+    redo() {}
+  })
+  return { done, command: Commands.group(commands) }
+}
+
+// The undo steps between two states of an object (its items included).
+function _stateCommands(canvas, obj, from, to) {
+  // Only what both states hold (a gradient fill, say, is in neither).
+  const keys = Object.keys(to).filter(k => k !== 'html' && k !== 'items' && k !== 'visible' && k in from)
+  const pick = s => Object.fromEntries(keys.map(k => [k, s[k]]))
+  const commands = [Commands.modifyObject(canvas, obj, pick(from), pick(to))]
+  if ('visible' in to && 'visible' in from && from.visible !== to.visible) {
+    const uid = obj.uid || (obj.customData && obj.customData.uid)
+    const line = v => (uid ? `${v ? 'showObject' : 'hideObject'}(${JSON.stringify(uid)})` : null)
+    commands.push({ undo() { _setTaggedVisible(obj, from.visible) }, redo() { _setTaggedVisible(obj, to.visible) }, script: { undo: line(from.visible), redo: line(to.visible) } })
+  }
+  if (to.html !== undefined && from.html !== to.html) {
+    const line = h => (obj.uid ? `setHtml(${JSON.stringify(obj.uid)}, ${JSON.stringify(h)})` : null)
+    commands.push({ undo() { setHtml(obj, from.html) }, redo() { setHtml(obj, to.html) }, script: { undo: line(from.html), redo: line(to.html) } })
+  }
+  if (to.items && from.items && to.items.length === from.items.length) {
+    // Before its items in the list, so redrawn after they are undone.
+    commands.push({ undo() { obj.set('dirty', true); canvas.requestRenderAll() }, redo() {} })
+    obj.getObjects().forEach((item, i) => commands.push(..._stateCommands(canvas, item, from.items[i], to.items[i])))
+    commands.push({ undo() {}, redo() { obj.set('dirty', true); canvas.requestRenderAll() } })
+  }
+  return commands
+}
+
+// Hides or shows an object with the lines that go with it.
+function _setTaggedVisible(o, visible) {
+  if (typeof setObjVisibility === 'function') setObjVisibility(o, visible)
+  else o.visible = visible
+  o.set('dirty', true)
+  if (o.canvas) o.canvas.requestRenderAll()
+}
+
+// Script form: revertState(name, opts); the next line waits for it.
+function revertState(name, opts) {
+  return _revertState(name, opts).done
+}
+
 function _connectorLines(obj) {
   const cd = obj && obj.customData
   if (!cd || !(cd.connectorsOut || cd.connectorsIn)) return []
@@ -1768,7 +1938,7 @@ function exportCanvas() {
 function buildScriptExecutables(lines) {
   return (lines || window.recordedScriptLines || []).map(raw => {
     const line = raw.trim()
-    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal') || line.startsWith('drawOutline'))
+    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal') || line.startsWith('drawOutline') || line.startsWith('revertState'))
       ? `return ${line};`
       : raw.replace(/\s+$/, '') // indentation kept (e.g. inside a /* … */)
     // The brace on its own line: a comment at the end of the line can't swallow it.

@@ -314,9 +314,14 @@
 </head>
 
 <body>
-<span id="layer-info-bar" style="position:fixed;top:2rem;right: 1rem">
-        Lyr: <span id="layerInfo" style="color: blue">PC</span>;
-        Uid: <span id="selectedObjId" style="color: blue"></span>;
+<div id="script-restored-bar" style="display:none;">
+    <span id="script-restored-text"></span>
+    <button class="prop-toggle wide restored-action" onclick="hideRestoredScriptBar(); openClearBeforePlayDialog();">&#9654; Play it</button>
+    <button class="prop-toggle wide restored-action" onclick="startFreshScript()">Start fresh</button>
+    <button class="explorer-eye" title="Keep it, close this" onclick="hideRestoredScriptBar()">&times;</button>
+</div>
+<span id="layer-info-bar" title="Layer in front, and the uid of the selected object">
+        Lyr: <b id="layerInfo">PC</b> &nbsp; Uid: <b id="selectedObjId">&ndash;</b>
     </span>
 
 <svg id="horizRuler" xmlns="http://www.w3.org/2000/svg" style="height: 40px; position: fixed; top: 0;"></svg>
@@ -688,10 +693,120 @@
     </div>
 </div>
 <script>
-    window.recordedScriptLines = window.recordedScriptLines || []
+    // ---- The recorded script, with when each line was added ----
+    // Kept in localStorage, so a reload doesn't lose it. Whatever sets
+    // recordedScriptLines (recording, Save Edits, Import, Clear) goes through
+    // here; lines that were already there keep their time.
+    const SCRIPT_STORE_KEY = 'play.script';
+    // changed: this page changed the script since it was last saved (a page
+    // that didn't must not overwrite what another tab saved).
+    const _script = { lines: [], times: [], known: [], changed: false };
+
+    // Times for new lines from old ones: unchanged (or only moved) lines keep theirs.
+    function _alignScriptTimes(oldLines, oldTimes, newLines, fill) {
+        const times = newLines.map(() => fill);
+        const n = Math.min(oldLines.length, newLines.length);
+        let head = 0;
+        while (head < n && oldLines[head] === newLines[head]) { times[head] = oldTimes[head]; head++; }
+        let tail = 0;
+        while (tail < n - head && oldLines[oldLines.length - 1 - tail] === newLines[newLines.length - 1 - tail]) {
+            times[newLines.length - 1 - tail] = oldTimes[oldLines.length - 1 - tail];
+            tail++;
+        }
+        const pool = new Map();
+        for (let i = head; i < oldLines.length - tail; i++) {
+            if (!pool.has(oldLines[i])) pool.set(oldLines[i], []);
+            pool.get(oldLines[i]).push(oldTimes[i]);
+        }
+        for (let i = head; i < newLines.length - tail; i++) {
+            const q = pool.get(newLines[i]);
+            if (q && q.length) times[i] = q.shift();
+        }
+        return times;
+    }
+
+    // The times, matched to the lines as they are now.
+    function scriptLineTimes() {
+        const lines = _script.lines;
+        const same = lines.length === _script.known.length && lines.every((l, i) => l === _script.known[i]);
+        if (!same) {
+            _script.times = _alignScriptTimes(_script.known, _script.times, lines, Date.now());
+            _script.known = lines.slice();
+            _scriptChanged();
+        }
+        return _script.times;
+    }
+
+    function _scriptChanged() {
+        _script.changed = true;
+        // The offer to play the restored script no longer fits.
+        const bar = document.getElementById('script-restored-bar');
+        if (bar && !bar.classList.contains('warning')) bar.style.display = 'none';
+        _saveScriptSoon();
+    }
+
+    let _scriptSaveTimer = null;
+    function _saveScriptSoon() {
+        clearTimeout(_scriptSaveTimer);
+        _scriptSaveTimer = setTimeout(saveScriptToStorage, 400);
+    }
+    function saveScriptToStorage() {
+        clearTimeout(_scriptSaveTimer);
+        const times = scriptLineTimes();
+        if (!_script.changed) return;
+        try {
+            if (_script.lines.length) localStorage.setItem(SCRIPT_STORE_KEY, JSON.stringify({ lines: _script.lines, times }));
+            else localStorage.removeItem(SCRIPT_STORE_KEY);
+            _script.changed = false;
+        } catch (e) {
+            _warnScriptNotSaved(e);
+        }
+    }
+    // Said once: what is kept from an earlier save would come back instead.
+    let _scriptSaveWarned = false;
+    function _warnScriptNotSaved(e) {
+        console.warn('The script could not be saved in this browser:', e && e.message);
+        const bar = document.getElementById('script-restored-bar');
+        if (_scriptSaveWarned || !bar) return;
+        _scriptSaveWarned = true;
+        bar.classList.add('warning');
+        document.getElementById('script-restored-text').textContent = 'This browser could not keep the script (its storage may be full). Export it to keep it.';
+        bar.querySelectorAll('.restored-action').forEach(b => { b.style.display = 'none'; });
+        bar.style.display = 'flex';
+    }
+    window.addEventListener('pagehide', saveScriptToStorage);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveScriptToStorage(); });
+
+    Object.defineProperty(window, 'recordedScriptLines', {
+        configurable: true,
+        get() { return _script.lines; },
+        set(lines) {
+            scriptLineTimes(); // settle the old lines' times first
+            _script.lines = Array.isArray(lines) ? lines : [];
+            scriptLineTimes();
+        }
+    });
+
+    // A script from an earlier visit comes back (the board stays empty until it is played).
+    (function restoreScript() {
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(SCRIPT_STORE_KEY) || 'null'); } catch (e) { saved = null; }
+        if (!saved || !Array.isArray(saved.lines) || !saved.lines.length) return;
+        const lines = saved.lines.map(l => String(l));
+        const times = lines.map((l, i) => {
+            const t = Array.isArray(saved.times) && saved.times.length === lines.length ? saved.times[i] : null;
+            return Number.isFinite(t) ? t : null;
+        });
+        Object.assign(_script, { lines, times, known: lines.slice() });
+        window._restoredScript = true;
+    })();
+
     const pushRecordedScriptLine = x => {
-        if (!Array.isArray(window.recordedScriptLines)) window.recordedScriptLines = [];
-        window.recordedScriptLines.push(x);
+        scriptLineTimes();
+        _script.lines.push(x);
+        _script.times.push(Date.now());
+        _script.known.push(x);
+        _scriptChanged();
     }
     window.recordScriptFn = pushRecordedScriptLine
     function toggleRecordScript(on) {
@@ -844,6 +959,13 @@
     })
     pc.on('selection:created', handleSelection);
     pc.on('selection:updated', handleSelection);
+    pc.on('selection:cleared', () => _showSelectedUid());
+    // The uid of the selection in the bar at the bottom; a count for several.
+    function _showSelectedUid() {
+        const sel = pc.getActiveObjects();
+        const uid = o => o.uid || (o.customData && o.customData.uid) || '?';
+        $('#selectedObjId').text(!sel.length ? '\u2013' : sel.length > 1 ? `${sel.length} selected` : uid(sel[0]));
+    }
     // A selected object is being edited: an outline drawing on it ends first,
     // so its real fill and outline are what the panel changes.
     ['selection:created', 'selection:updated'].forEach(ev => pc.on(ev, e => (e.selected || []).forEach(o => {
@@ -853,7 +975,7 @@
     function handleSelection(e) {
         const obj = e.selected ? e.selected[0] : e.target;
         if (!obj) return;
-        $('#selectedObjId').html(obj.uid)
+        _showSelectedUid();
         if (window.connectionMode) {
             if (!window.firstOfConnection) firstOfConnection = obj
             else {
@@ -869,6 +991,7 @@
     // A cleared canvas starts afresh: nothing of it left to restore.
     [pc, oc].forEach(c => c.on('canvas:cleared', () => {
         _removedObjects.forEach((entry, uid) => { if (entry.canvas === c) _removedObjects.delete(uid); });
+        if (c === pc) _stateTags.clear();
     }));
 
     window.isFabricObjectMoving = false
@@ -1057,7 +1180,7 @@
         if (window._insertHtmlBox) {
             toolManager.activate('select');
             const x = Math.round(scene.x), y = Math.round(scene.y);
-            const box = addHtmlBox(x, y, 320, 160, '<p>Double-click to edit</p>', {});
+            const box = addHtmlBox(x, y, 320, 160, '', {});
             recordScript(`addHtmlBox(${x}, ${y}, 320, 160, ${JSON.stringify(box.customData.html)}, ${JSON.stringify({ uid: box.uid })})`);
             undoManager.push(Commands.addObject(pc, box));
             pc.setActiveObject(box);
@@ -1904,6 +2027,9 @@
     <button class="wb-tool" title="Script editor (Ctrl/&#8984;+Shift+S)" onclick="openScriptDialog()">
         <i class="fas fa-code"></i>
     </button>
+    <button class="wb-tool" id="object-explorer-btn" title="Objects: find, select, hide and show" onclick="toggleObjectExplorer()">
+        <i class="fas fa-list"></i>
+    </button>
     <button class="wb-tool" title="Keyboard shortcuts (?)" onclick="toggleShortcutsHelp()">
         <i class="fas fa-keyboard"></i>
     </button>
@@ -1935,6 +2061,17 @@
 <!-- Minimap -->
 <div id="minimap-container">
     <canvas id="minimap" width="180" height="120"></canvas>
+</div>
+
+<!-- Object explorer -->
+<div id="object-explorer">
+    <div class="prop-header">Objects <button class="explorer-eye" title="Close" onclick="toggleObjectExplorer(false)">&times;</button></div>
+    <div id="object-explorer-tools">
+        <input type="text" id="object-explorer-filter" placeholder="Find (uid or text)" oninput="renderObjectExplorer(true)">
+        <label title="List only hidden objects"><input type="checkbox" id="object-explorer-hidden" onchange="renderObjectExplorer(true)"> Hidden</label>
+        <button id="object-explorer-show-all" class="prop-toggle wide" onclick="showAllHiddenObjects()" title="Show every hidden object">Show all</button>
+    </div>
+    <div id="object-explorer-list"></div>
 </div>
 
 <!-- Property Panel -->
@@ -2089,6 +2226,21 @@
                 <option value="Verdana, sans-serif">Verdana</option>
                 <option value="system-ui, sans-serif">System</option>
             </select>
+        </div>
+    </div>
+    <!-- Tagged states -->
+    <div id="prop-tag-section">
+        <div class="prop-section-divider"></div>
+        <div class="prop-row" title="Remember how the selected objects look now (place, size, angle, colours, visibility, text), under a name, to put them back that way later.">
+            <label>Tag state</label>
+            <input type="text" id="prop-tag-name" placeholder="name" style="flex:1;min-width:0;" onkeydown="if (event.key === 'Enter') tagSelectedState()">
+            <button id="prop-tag-add" class="prop-toggle wide" onclick="tagSelectedState()">+ Tag</button>
+        </div>
+        <div class="prop-row" title="Put the objects of a tag back the way they were when tagged.">
+            <label>Revert to</label>
+            <select id="prop-tag-list" style="flex:1;min-width:0;"></select>
+            <button id="prop-tag-revert" class="prop-toggle wide" onclick="revertToSelectedTag()">Revert</button>
+            <button id="prop-tag-remove" class="prop-toggle" onclick="removeSelectedTag()" title="Forget this tag">&times;</button>
         </div>
     </div>
 </div>
@@ -2351,6 +2503,7 @@
         _renderStackList();
         _syncFlowOption();
         _renderGroupList();
+        _renderTagList();
         _fillPropertyFields(obj);
     }
 
@@ -2825,8 +2978,32 @@
         ed.setFontSize(13);
         ed.session.setUseWrapMode(true);
         ed.setOption('showPrintMargin', false);
+        // The gutter shows when each line was added, next to its number.
+        let rowTimes = [], timeWidth = 0;
+        const refreshTimes = () => {
+            rowTimes = _alignScriptTimes(window.recordedScriptLines, scriptLineTimes(), ed.session.getValue().split('\n'), null);
+            timeWidth = rowTimes.reduce((w, t) => (t ? Math.max(w, _formatLineTime(t).length + 1) : w), 0);
+        };
+        ed.session.on('change', refreshTimes);
+        ed._refreshLineTimes = () => { refreshTimes(); ed.renderer.updateFull(); };
+        ed.session.gutterRenderer = {
+            getWidth: (session, lastLineNumber, config) => (String(lastLineNumber).length + 1 + timeWidth) * config.characterWidth,
+            getText: (session, row) => {
+                const t = rowTimes[row];
+                const num = String(row + 1);
+                return t && session.getLine(row).trim() ? `${_formatLineTime(t)} ${num}` : num;
+            }
+        };
         window._scriptEditor = ed;
         return ed;
+    }
+
+    // "14:03:27" today, "30 Sep 14:03" before.
+    function _formatLineTime(ms) {
+        const d = new Date(ms), now = new Date();
+        const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        if (d.toDateString() === now.toDateString()) return time;
+        return d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + time.slice(0, 5);
     }
 
     function openScriptDialog() {
@@ -2834,9 +3011,23 @@
         document.getElementById('scriptViewerDialog').style.display = 'flex';
         const ed = ensureScriptEditor();
         ed.setValue(lines.join('\n'), -1);
+        ed._refreshLineTimes();
         ed.resize(true);
         document.getElementById('scriptLineCount').textContent = lines.length + ' line' + (lines.length !== 1 ? 's' : '');
         ed.focus();
+    }
+
+    // After a reload: the script from last time is back; play it to redraw the board.
+    function hideRestoredScriptBar() { document.getElementById('script-restored-bar').style.display = 'none'; }
+    function startFreshScript() {
+        window.recordedScriptLines = [];
+        saveScriptToStorage();
+        hideRestoredScriptBar();
+    }
+    if (window._restoredScript) {
+        const n = window.recordedScriptLines.length;
+        document.getElementById('script-restored-text').textContent = `Your script from last time is back (${n} line${n !== 1 ? 's' : ''}).`;
+        document.getElementById('script-restored-bar').style.display = 'flex';
     }
 
     function closeScriptDialog() {
@@ -3011,6 +3202,7 @@
         const lines = ed.getValue().split('\n');
         while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
         window.recordedScriptLines = lines;
+        ed._refreshLineTimes();
         document.getElementById('scriptLineCount').textContent = lines.length + ' line' + (lines.length !== 1 ? 's' : '');
     }
 
@@ -3655,6 +3847,167 @@
         anim(uids, type, opts || undefined);
         window._activeAnim = { uids: uids, type: type, opts: opts, startedAt: Date.now() };
         _setAnimBtnRunning(true);
+    }
+
+    // ---- Object explorer: every object, to find, select, hide and show ----
+    function toggleObjectExplorer(open) {
+        const panel = document.getElementById('object-explorer');
+        const show = open === undefined ? !panel.classList.contains('visible') : open;
+        panel.classList.toggle('visible', show);
+        document.getElementById('object-explorer-btn').classList.toggle('active', show);
+        if (show) renderObjectExplorer(true);
+    }
+
+    // Objects top first, items of groups under their group; freehand
+    // drawings (the overlay) after.
+    function _explorerEntries() {
+        const out = [];
+        const walk = (objects, depth, canvas) => objects.slice().reverse().forEach(o => {
+            if (!o.uid && !(o.customData && o.customData.uid)) return;
+            out.push({ o, depth, canvas });
+            if (o.type === 'group' && !_isStickyNote(o)) walk(o.getObjects(), depth + 1, canvas);
+        });
+        walk(pc.getObjects(), 0, pc);
+        if (window.oc) walk(oc.getObjects(), 0, oc);
+        return out;
+    }
+
+    // An object counts as hidden when it, or a group it is in, is hidden.
+    const _explorerHidden = o => { for (let x = o; x; x = x.group) if (x.visible === false) return true; return false; };
+    const _explorerUid = o => o.uid || o.customData.uid;
+
+    let _explorerKey = '';
+    function renderObjectExplorer(force) {
+        const panel = document.getElementById('object-explorer');
+        if (!panel.classList.contains('visible')) return;
+        const entries = _explorerEntries();
+        const selected = new Set(pc.getActiveObjects());
+        // Redrawn only when something it shows changed.
+        const key = entries.map(e => _explorerUid(e.o) + (e.o.visible === false ? '-' : '+') + (selected.has(e.o) ? '*' : '') + layerLabel(e.o)).join('|');
+        if (!force && key === _explorerKey) return;
+        _explorerKey = key;
+        const find = document.getElementById('object-explorer-filter').value.trim().toLowerCase();
+        const hiddenOnly = document.getElementById('object-explorer-hidden').checked;
+        const list = document.getElementById('object-explorer-list');
+        list.innerHTML = '';
+        let hiddenCount = 0;
+        entries.forEach(({ o, depth, canvas }) => {
+            const uid = String(_explorerUid(o));
+            const label = layerLabel(o);
+            const hidden = o.visible === false;
+            if (hidden) hiddenCount++;
+            if (hiddenOnly && !hidden) return;
+            if (find && !(uid.toLowerCase().includes(find) || label.toLowerCase().includes(find))) return;
+            const row = document.createElement('div');
+            // Greyed too when a group it is in is hidden (showing the group shows it).
+            row.className = 'explorer-row' + (hidden ? ' hidden-object' : _explorerHidden(o) ? ' in-hidden-group' : '') + (selected.has(o) ? ' selected' : '');
+            row.dataset.uid = uid;
+            row.style.paddingLeft = (4 + depth * 14) + 'px';
+            const eye = document.createElement('button');
+            eye.className = 'explorer-eye';
+            eye.title = hidden ? 'Show' : 'Hide';
+            eye.innerHTML = `<i class="fas fa-eye${hidden ? '-slash' : ''}"></i>`;
+            eye.onclick = ev => { ev.stopPropagation(); setObjectVisibleRecorded(o, hidden); };
+            const lbl = document.createElement('span');
+            lbl.className = 'explorer-label';
+            lbl.textContent = label;
+            lbl.title = label;
+            const id = document.createElement('span');
+            id.className = 'explorer-uid';
+            id.textContent = uid;
+            row.append(eye, lbl, id);
+            // Selects it (a hidden one, or one inside a hidden group, can't be).
+            row.onclick = () => {
+                if (canvas !== pc || o.group || _explorerHidden(o)) return;
+                pc.discardActiveObject();
+                pc.setActiveObject(o);
+                pc.requestRenderAll();
+            };
+            list.appendChild(row);
+        });
+        if (!list.children.length) list.innerHTML = `<div class="explorer-uid" style="padding:6px">${entries.length ? 'Nothing matches' : 'No objects yet'}</div>`;
+        document.getElementById('object-explorer-show-all').disabled = !hiddenCount;
+    }
+    [pc, oc].forEach(c => c.on('after:render', () => renderObjectExplorer(false)));
+
+    // Hides or shows an object (with its lines), recorded and undoable.
+    function _setVisible(o, visible) {
+        setObjVisibility(o, visible);
+        o.set('dirty', true); // an item in a group: the group draws it again
+        if (o.canvas) o.canvas.requestRenderAll();
+        if (window.oc) oc.requestRenderAll();
+    }
+    function _visibilityCommand(o, visible) {
+        const line = v => `${v ? 'showObject' : 'hideObject'}(${JSON.stringify(_explorerUid(o))})`;
+        return { redo() { _setVisible(o, visible); }, undo() { _setVisible(o, !visible); }, script: { redo: line(visible), undo: line(!visible) } };
+    }
+    function setObjectVisibleRecorded(o, visible) {
+        const command = _visibilityCommand(o, visible);
+        command.redo();
+        recordScript(command.script.redo);
+        if (window.undoManager) undoManager.push(command);
+    }
+    function showAllHiddenObjects() {
+        const hidden = _explorerEntries().map(e => e.o).filter(o => o.visible === false);
+        if (!hidden.length) return;
+        const commands = hidden.map(o => _visibilityCommand(o, true));
+        commands.forEach(c => { c.redo(); recordScript(c.script.redo); });
+        if (window.undoManager) undoManager.push(Commands.group(commands));
+    }
+
+    // ---- Tagged states: remember how objects look, revert to it later ----
+    function _selectedUids() {
+        const obj = pc.getActiveObject();
+        if (!obj) return [];
+        return (obj.type === 'activeselection' ? obj.getObjects() : [obj]).map(o => o.uid || (o.customData && o.customData.uid)).filter(Boolean);
+    }
+
+    // All tags; those covering the selection first.
+    function _renderTagList(pick) {
+        const list = document.getElementById('prop-tag-list');
+        const mine = new Set(_selectedUids());
+        const tags = stateTags();
+        const covers = t => t.uids.some(u => mine.has(u));
+        const ordered = tags.filter(covers).concat(tags.filter(t => !covers(t)));
+        list.innerHTML = '';
+        ordered.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.name;
+            opt.textContent = t.name + (t.uids.length > 1 ? ` (${t.uids.length} objects)` : '');
+            list.appendChild(opt);
+        });
+        if (pick != null) list.value = pick;
+        document.getElementById('prop-tag-revert').disabled = !tags.length;
+        document.getElementById('prop-tag-remove').disabled = !tags.length;
+    }
+
+    function tagSelectedState() {
+        const uids = _selectedUids();
+        if (!uids.length) return;
+        const input = document.getElementById('prop-tag-name');
+        let name = input.value.trim();
+        if (!name) { let n = _stateTags.size + 1; while (_stateTags.has('Tag ' + n)) n++; name = 'Tag ' + n; }
+        if (!tagState(name, uids)) return;
+        recordScript(`tagState(${JSON.stringify(name)}, ${JSON.stringify(uids)})`);
+        input.value = '';
+        _renderTagList(name);
+    }
+
+    function revertToSelectedTag() {
+        const name = document.getElementById('prop-tag-list').value;
+        if (!name) return;
+        const { done, command } = _revertState(name, { duration: 600 });
+        recordScript(`revertState(${JSON.stringify(name)}, {"duration":600})`);
+        if (command && window.undoManager) undoManager.push(command);
+        done.then(() => { const t = _propTarget(); if (t) _fillPropertyFields(t); });
+    }
+
+    function removeSelectedTag() {
+        const name = document.getElementById('prop-tag-list').value;
+        if (!name) return;
+        untagState(name);
+        recordScript(`untagState(${JSON.stringify(name)})`);
+        _renderTagList();
     }
 
     function stopActiveAnim() {

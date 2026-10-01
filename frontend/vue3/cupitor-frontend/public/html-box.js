@@ -186,7 +186,9 @@ function _htmlBoxLayer() {
     layer.style.cssText = 'position:absolute;width:0;height:0;overflow:visible;z-index:2001;pointer-events:none;';
     document.body.appendChild(layer);
     const style = document.createElement('style');
-    style.textContent = _HTML_BOX_CSS;
+    // A hint in an empty box being typed in; only on screen, never in its content or picture.
+    style.textContent = _HTML_BOX_CSS +
+      '.html-box.editing .html-box-content:empty::before{content:"Type here\u2026";color:#aaa;}';
     document.head.appendChild(style);
   }
   const r = pc.wrapperEl.getBoundingClientRect();

@@ -31,6 +31,9 @@ test('rich notes: type and format an HTML box, cover it, zoom, replay', async ()
     await b.click(200, 200);
     const [box] = await b.newUids(before);
     await b.page.waitForSelector('.html-box.editing');
+    // It starts empty, with a hint that is only on screen.
+    assert.deepEqual(await b.eval(u => [findIfRequired(u).customData.html,
+      getComputedStyle(document.querySelector('.html-box.editing .html-box-content'), '::before').content], box), ['', '"Type here…"']);
 
     // Type two lines (letters like t, s, h are canvas shortcuts elsewhere),
     // then make them bold and a bulleted list from the Properties panel.
@@ -53,7 +56,7 @@ test('rich notes: type and format an HTML box, cover it, zoom, replay', async ()
     // Undo takes the text back to the placeholder; redo brings it again.
     await b.deselect();
     await b.key(`${mod}+z`);
-    assert.equal(await b.eval(u => findIfRequired(u).customData.html, box), '<p>Double-click to edit</p>');
+    assert.equal(await b.eval(u => findIfRequired(u).customData.html, box), '', 'undo empties it again');
     await b.key(`${mod}+Shift+z`);
     assert.equal(await b.eval(u => findIfRequired(u).customData.html, box), html);
 
@@ -102,7 +105,8 @@ test('rich notes: edit a box in the editor, CSS in Source; cancel, apply, undo, 
     await b.select(box);
     const html = () => b.eval(u => findIfRequired(u).customData.html, box);
     const original = await html();
-    assert.equal(original, '<p>Double-click to edit</p>', 'placing a box and pressing Escape keeps its text');
+    assert.equal(original, '', 'a new box starts empty and stays so when left unedited');
+    assert.equal((await b.script()).filter(l => /^setHtml/.test(l)).length, 0, 'nothing recorded for it');
 
     // Opens with the box's content, the editing area the box's width.
     const open = async () => {
@@ -110,7 +114,7 @@ test('rich notes: edit a box in the editor, CSS in Source; cancel, apply, undo, 
       await b.page.waitForFunction(() => { const e = CKEDITOR.instances.htmlBoxEditorArea; return e && e.status === 'ready' && !_htmlBoxEditor.loading && e.document.$.getElementById('html-box-editor-look'); }, null, { timeout: 30000 });
     };
     await open();
-    assert.match(await b.eval(() => CKEDITOR.instances.htmlBoxEditorArea.getData()), /Double-click to edit/);
+    assert.equal(await b.eval(() => CKEDITOR.instances.htmlBoxEditorArea.getData().trim()), '');
     assert.equal(await b.eval(u => Math.round(CKEDITOR.instances.htmlBoxEditorArea.document.getBody().$.getBoundingClientRect().width), box), 320);
 
     // Apply with no edits records nothing.
@@ -142,8 +146,11 @@ test('rich notes: edit a box in the editor, CSS in Source; cancel, apply, undo, 
     assert.equal(await b.eval(u => isFabricObject(findIfRequired(u)), box), true, 'Delete in a CKEditor dialog leaves the box');
     await b.page.click('.cke_dialog .cke_dialog_ui_button_cancel');
 
-    // The toolbar formats what's selected, and the box follows.
-    await b.eval(() => { const e = CKEDITOR.instances.htmlBoxEditorArea; e.focus(); e.execCommand('selectAll'); });
+    // Type a word, then the toolbar formats what's selected, and the box follows.
+    await b.eval(() => CKEDITOR.instances.htmlBoxEditorArea.focus());
+    await b.page.keyboard.type('Calm');
+    await b.page.waitForFunction(u => /Calm/.test(findIfRequired(u).customData.html), box, { timeout: 5000 });
+    await b.eval(() => CKEDITOR.instances.htmlBoxEditorArea.execCommand('selectAll'));
     await b.page.click('#htmlBoxEditorDialog .cke_button__bold');
     await b.page.waitForFunction(u => /<strong>/.test(findIfRequired(u).customData.html), box, { timeout: 5000 });
 

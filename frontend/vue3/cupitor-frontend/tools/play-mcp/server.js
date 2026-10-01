@@ -57,7 +57,7 @@ export function formatFunctions(groups, filter) {
 
 const INSTRUCTIONS = `Writes animations for play.html, a Fabric.js whiteboard with a script player.
 A script is a list of JavaScript lines run in order in the page. Each line runs after the previous one:
-lines starting with animate, Promise, connectObjects, reveal or drawOutline are waited for; other lines are followed by a ~1 s pause.
+lines starting with animate, Promise, connectObjects, reveal, drawOutline or revertState are waited for; other lines are followed by a ~1 s pause.
 Lines starting with // are comments (a /* ... */ can span lines): kept in the script, skipped when it plays; use them to label scenes.
 Objects have uids (e.g. "R1", "T2"); pass {uid: "..."} when creating objects so later lines can refer to them.
 Coordinates are canvas pixels (top-left 0,0; the visible canvas is about 1400x800 at zoom 1).

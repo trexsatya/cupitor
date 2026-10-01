@@ -328,17 +328,28 @@ function setObjVisibility(obj, visibility) {
       line.visible = ends.every(e => isFabricObject(e) && e.visible !== false);
     });
   }
+  // Nothing hidden stays selected (the object, or a line that went with it).
+  if (!visibility && pc && pc.getActiveObjects().some(o => o.visible === false)) pc.discardActiveObject();
   pc?.renderAll();
 }
 
+// Freehand drawings live on the overlay canvas.
+function _visibilityTarget(obj) {
+  const found = findIfRequired(obj)
+  if (typeof obj !== 'object' && !isFabricObject(found) && window.oc) {
+    return oc.getObjects().find(o => o.uid + '' === obj + '' || (o.customData && o.customData.uid + '' === obj + '')) || null
+  }
+  return found
+}
+
 function hideObject(obj) {
-  obj = findIfRequired(obj)
+  obj = _visibilityTarget(obj)
   if(obj === undefined || obj === null) return;
   setObjVisibility(obj, false);
 }
 
 function showObject(obj) {
-  obj = findIfRequired(obj)
+  obj = _visibilityTarget(obj)
   if(obj === undefined || obj === null) return;
   setObjVisibility(obj, true);
 }

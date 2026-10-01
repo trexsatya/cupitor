@@ -673,6 +673,7 @@ canvas {
 
 /* --- Play mode: only the canvas while a script plays --- */
 body.play-mode #layer-info-bar,
+body.play-mode #script-restored-bar,
 body.play-mode #horizRuler,
 body.play-mode #vertRuler,
 body.play-mode .top-bar,
@@ -683,6 +684,8 @@ body.play-mode #whiteboard-toolbar,
 body.play-mode #zoom-controls,
 body.play-mode #minimap-container,
 body.play-mode #property-panel,
+body.play-mode #layer-info-bar,
+body.play-mode #object-explorer,
 body.play-mode #tree-node-panel,
 body.play-mode #wb-context-menu,
 body.play-mode #label-picker {
@@ -796,3 +799,139 @@ body.play-mode #play-line-badge:not(:empty) {
 .html-box.editing { pointer-events: auto; outline: 2px solid #1976D2; outline-offset: 1px; cursor: text; }
 /* Text styling of the content lives in html-box.js (_HTML_BOX_CSS), shared with the canvas picture. */
 body.play-mode .html-box { pointer-events: none !important; outline: none !important; }
+
+.prop-toggle.wide {
+  width: auto;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+/* Layer and uid of the selection, bottom left. */
+#layer-info-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50px;
+  z-index: 1000001;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  padding: 6px 10px;
+  font: 12px system-ui, sans-serif;
+  color: #555;
+}
+
+#layer-info-bar b {
+  color: #1565c0;
+  font-weight: 600;
+}
+
+/* Every object on the board, to find, select, hide and show them. */
+#object-explorer {
+  position: fixed;
+  top: 60px;
+  left: 50px;
+  width: 260px;
+  max-height: calc(100vh - 160px);
+  z-index: 999998;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  display: none;
+  flex-direction: column;
+  font: 13px system-ui, sans-serif;
+}
+
+#object-explorer.visible {
+  display: flex;
+}
+
+#object-explorer .prop-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#object-explorer-tools {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid #eee;
+}
+
+#object-explorer-filter {
+  flex: 1;
+  min-width: 0;
+}
+
+#object-explorer-list {
+  overflow-y: auto;
+  padding: 4px 6px 8px;
+}
+
+.explorer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.explorer-row:hover {
+  background: #f0f4ff;
+}
+
+.explorer-row.selected {
+  background: #e3f2fd;
+}
+
+.explorer-row.in-hidden-group .explorer-label,
+.explorer-row.hidden-object .explorer-label {
+  color: #aaa;
+  font-style: italic;
+}
+
+.explorer-row .explorer-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorer-row .explorer-uid {
+  color: #999;
+  font-size: 11px;
+}
+
+.explorer-eye {
+  border: none;
+  background: none;
+  color: #777;
+  cursor: pointer;
+  width: 22px;
+  padding: 0;
+}
+
+.explorer-row.hidden-object .explorer-eye {
+  color: #c62828;
+}
+
+/* After a reload, offers to play the script that came back. */
+#script-restored-bar {
+  position: fixed;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000001;
+  align-items: center;
+  gap: 8px;
+  background: #fffde7;
+  border: 1px solid #f0e2a0;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  padding: 6px 10px;
+  font: 13px system-ui, sans-serif;
+  color: #555;
+}
