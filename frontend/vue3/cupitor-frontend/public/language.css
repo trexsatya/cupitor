@@ -4568,3 +4568,28 @@ body.rec-playing #recPlayingSubs { display: block; }
     border-color: #ff5252;
     transition: transform 0.4s ease-out;
 }
+
+/* Manual cards listed with the search results (see _ensureManualSearchBar). */
+.manual-results-count,
+.manual-results-empty {
+    font-size: 0.82em;
+    color: #666;
+    margin: 2px 0 4px 0;
+}
+.manual-hit {
+    border-left: 3px solid #7986cb;
+    padding: 4px 6px;
+    margin: 4px 0;
+    background: #f7f8fc;
+}
+.manual-hit-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8em;
+    color: #555;
+}
+.manual-hit-playlist { flex: 1 1 auto; }
+.manual-hit-link { text-decoration: none; }
+.manual-hit-face { margin-top: 2px; }
+.manual-hit-target { color: #555; font-style: italic; }

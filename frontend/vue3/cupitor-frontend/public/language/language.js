@@ -147,6 +147,10 @@ import {
   cardTranslateDirection as _cardTranslateDirection,
 } from './caption-capture.js';
 import {
+  findManualCards as _findManualCards,
+  renderManualResultsHtml as _renderManualResultsHtml,
+} from './manual-search.js';
+import {
   MUSIC_MODES as REC_MUSIC_MODES,
   MUSIC_VOL_WITH_AUDIO,
   MUSIC_VOL_IN_GAPS,
@@ -2165,6 +2169,8 @@ window._appSettings = {
   // it, so early searches cost seconds of native work (later ones hit the
   // index and are quick).
   autoLibrarySearch: false,
+  // List matching manual cards (from every playlist) with the search results.
+  includeManualInSearch: false,
   // Whether the book-results block inside #result starts folded. Sticky so a
   // user who keeps the books out of the way isn't re-shown them every search.
   libraryResultsCollapsed: false,
@@ -8352,6 +8358,8 @@ async function loadNextPageOfSearchResults(reset = false) {
   }
   const $result = $('#result')
   $result.html('<div style="color:grey;padding:6px;">Loading…</div>')
+  // The wipe takes the book and manual-card bars with it.
+  _ensureLibrarySearchBar()
   await populateSRTFindings(window.wordToItemsMap, $result, window._subtitleSearchToken);
   renderAccordions($result[0])
 }
@@ -10840,10 +10848,63 @@ window.addEventListener('cupitorGlobalSearchResults', ev => {
   catch (e) { console.warn('cupitorGlobalSearchResults handler failed', e) }
 })
 
+// Manual cards in the search results. A bar of its own under the book search,
+// with an "include" toggle remembered in the settings. When on, every search
+// lists the manual cards — from every playlist — whose Source or Target
+// matches the same term the subtitle search ran. Cheap enough to redo on
+// every redraw, so nothing is cached: an edited card shows its new text the
+// next time the results are drawn.
+function _ensureManualSearchBar() {
+  const $result = $('#result')
+  if (!$result.length) return
+  if (!$result.children('#manualSearchBar').length) {
+    $result.prepend(`<div id="manualSearchBar" class="lib-search-bar">
+        <label class="lib-auto-label" title="Also list the manual cards in your playlists that match this search">
+          <input type="checkbox" id="manualSearchIncludeCb"> 🗂 Include manual cards
+        </label>
+      </div>
+      <div id="manualResults" class="lib-results"></div>`)
+  }
+  const on = !!(window._appSettings && window._appSettings.includeManualInSearch)
+  $('#manualSearchIncludeCb').prop('checked', on)
+  _renderManualSearchResults()
+}
+
+function _renderManualSearchResults() {
+  const $out = $('#manualResults')
+  if (!$out.length) return
+  const on = !!(window._appSettings && window._appSettings.includeManualInSearch)
+  const term = _librarySearchTerm()
+  if (!on || !term || !String(term).trim()) { $out.html(''); return }
+  const hits = _findManualCards(window._recordings, term)
+  $out.html(_renderManualResultsHtml(hits, term))
+}
+
+$(document).on('change', '#manualSearchIncludeCb', e => {
+  if (!window._appSettings) window._appSettings = {}
+  window._appSettings.includeManualInSearch = $(e.target).is(':checked')
+  saveAppSettings()
+  _renderManualSearchResults()
+})
+$(document).on('click', '#manualResults .manual-hit-edit', e => {
+  const $hit = $(e.target).closest('.manual-hit')
+  const name = $hit.attr('data-playlist')
+  const id = $hit.attr('data-id')
+  const rec = window._recordings && window._recordings[name]
+  const bucket = rec && rec.items && rec.items[MANUAL_ST] && rec.items[MANUAL_ST][MANUAL_W]
+  const it = Array.isArray(bucket) && bucket.find(x => x && String(x.id) === id)
+  if (!it) { _renderManualSearchResults(); return }  // gone since it was listed
+  _openManualEntryEditor(name, it)
+})
+// The editor may have changed or deleted the card the results show.
+$(document).on('dialogclose', '#manualEntryEditor', () => _renderManualSearchResults())
+
 // The results bar lives inside #result, which every render() rebuilds — so
 // re-insert it (and restore the last results) whenever it has been wiped.
 // Idempotent: safe to call from every point that touches #result.
 function _ensureLibrarySearchBar() {
+  // First, so the book bar (prepended below) sits above it.
+  _ensureManualSearchBar()
   if (!_haveLibrarySearchBridge()) return
   const $result = $('#result')
   if (!$result.length || $result.children('#librarySearchBar').length) return
