@@ -17,7 +17,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
+import crypto from 'node:crypto';
 import { PlayPage, parseScriptFile } from './page-driver.js';
+import { ACTIONS, parseScene, planActions, inspect, validate, withoutLastAction } from './scene.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,7 +57,43 @@ export function formatFunctions(groups, filter) {
   return out.join('\n') || 'No function matches.';
 }
 
+// A picture's src: URLs and paths under public/ are used as they are; a local
+// file elsewhere is copied into public/play-assets/ so the script (and the
+// page's Import) can load it by a path under public/.
+export function resolvePictureSrc(src, publicDir) {
+  if (/^(https?:|data:)/i.test(src)) return src;
+  const inPublic = path.resolve(publicDir, src.replace(/^\/+/, ''));
+  if (!path.isAbsolute(src) && fs.existsSync(inPublic)) return path.relative(publicDir, inPublic).split(path.sep).join('/');
+  const file = path.resolve(src);
+  if (!fs.existsSync(file)) throw new Error(`picture not found: ${src}`);
+  const rel = path.relative(publicDir, file);
+  if (!rel.startsWith('..') && !path.isAbsolute(rel)) return rel.split(path.sep).join('/');
+  const data = fs.readFileSync(file);
+  const hash = crypto.createHash('sha1').update(data).digest('hex').slice(0, 8);
+  const name = `${path.basename(file, path.extname(file))}-${hash}${path.extname(file)}`;
+  const dir = path.join(publicDir, 'play-assets');
+  fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(path.join(dir, name))) fs.writeFileSync(path.join(dir, name), data);
+  return `play-assets/${name}`;
+}
+
+function resolvePictures(actions, publicDir) {
+  const fix = o => { if (o && typeof o === 'object' && typeof o.src === 'string') o.src = resolvePictureSrc(o.src, publicDir); };
+  actions.forEach(a => { fix(a); fix(a && a.with); ((a && a.items) || []).forEach(fix); });
+  return actions;
+}
+
 const INSTRUCTIONS = `Writes animations for play.html, a Fabric.js whiteboard with a script player.
+
+Guided visual reasoning (preferred): design at the level of meaning, not pixels.
+For each passage: name the narrator's move, set a viewer_task (notice/compare/predict/infer/remember/question/integrate),
+reuse concepts already on screen, use the smallest visual model, reveal progressively, and treat pauses as real states.
+apply_semantic_action takes actions like {op: "introduce", id: "culture", text: "CULTURE", place: {near: "person", side: "left"}};
+the server places things, writes the script lines, and keeps each action as a "// @sem {...}" comment in the script,
+so the scene model always comes from the script itself. inspect_scene shows the model; validate_scene checks overlaps,
+off-canvas objects, small text and missing objects; undo_last_action takes the last action back.
+
+Low-level scripting:
 A script is a list of JavaScript lines run in order in the page. Each line runs after the previous one:
 lines starting with animate, Promise, connectObjects, reveal, drawOutline or revertState are waited for; other lines are followed by a ~1 s pause.
 Lines starting with // are comments (a /* ... */ can span lines): kept in the script, skipped when it plays; use them to label scenes.
@@ -64,6 +102,11 @@ Coordinates are canvas pixels (top-left 0,0; the visible canvas is about 1400x80
 Workflow: list_functions to see what is available and its options; run_script_lines to add and play lines;
 list_objects / screenshot to check the result; replay_script to watch the whole thing from the start;
 save_script_file to keep it (the page's Import button loads such files).`;
+
+// Reading the script, planning against it and playing the result happen as
+// one step, so two clients can't plan from the same script and both append.
+let sceneQueue = Promise.resolve();
+const exclusive = fn => { const run = sceneQueue.then(fn); sceneQueue = run.catch(() => {}); return run; };
 
 export function createServer(page, publicDir) {
   const server = new McpServer({ name: 'play-animations', version: '0.1.0' }, { instructions: INSTRUCTIONS });
@@ -139,6 +182,40 @@ export function createServer(page, publicDir) {
     fs.writeFileSync(path.resolve(file), body);
     return text(`Saved ${lines.length} line(s) to ${path.resolve(file)}.`);
   });
+
+  server.registerTool('apply_semantic_action', {
+    description: 'Apply semantic actions in order (one beat, usually): the server lays them out, adds them to the script (each after a "// @sem" comment that records it) and plays them. If any action is invalid, none is applied. Actions:\n'
+      + Object.entries(ACTIONS).map(([op, d]) => `- ${op}: ${d}`).join('\n')
+      + '\npace (optional on most): instant | short | deliberate, or ms.',
+    inputSchema: { actions: z.array(z.object({ op: z.enum(Object.keys(ACTIONS)) }).passthrough()).min(1) }
+  }, async ({ actions }) => exclusive(async () => {
+    const model = parseScene(await page.script());
+    const { lines, records } = await planActions(model, resolvePictures(actions, publicDir), specs => page.measure(specs));
+    const result = report(await page.play(lines, { record: true }));
+    const placed = records.flatMap(r => (r.at ? [`${r.id} at ${r.at.join(',')}`] : []).concat((r.items || []).map(i => `${i.id} at ${i.at.join(',')}`)));
+    return text([result, placed.length ? `Placed: ${placed.join('; ')}` : ''].filter(Boolean).join('\n'));
+  }));
+
+  server.registerTool('inspect_scene', {
+    description: 'The scene model rebuilt from the script: scenes, beats, viewer tasks, concepts (role, text and its revisions, emphasis, boundary, groups, enclosures) and relationships, with each one\'s live box on the canvas.'
+  }, async () => text(inspect(parseScene(await page.script()), await page.objects())));
+
+  server.registerTool('validate_scene', {
+    description: 'Checks the scene: overlapping concepts, things off the canvas, text too small to read, concepts or relationships missing from the canvas, enclosures that miss members or catch others, a scene with no viewer_task.'
+  }, async () => {
+    const issues = validate(parseScene(await page.script()), await page.objects());
+    return text(issues.length ? issues.map(i => `${i.level}: ${i.message}`).join('\n') : 'No issues found.');
+  });
+
+  server.registerTool('undo_last_action', {
+    description: 'Remove the last semantic action (its "// @sem" comment and every line after it) from the script and replay the script.'
+  }, async () => exclusive(async () => {
+    const cut = withoutLastAction(await page.script());
+    if (!cut) return text('No semantic action in the script.');
+    await page.setScript(cut.lines);
+    const result = report(await page.play(null, { clearFirst: true }));
+    return text(`Removed ${cut.removed.length} line(s), starting with: ${cut.removed[0]}\n${result}`);
+  }));
 
   server.registerTool('reset_page', {
     description: 'Reload play.html: empty canvas and empty recorded script.'

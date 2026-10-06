@@ -1,0 +1,76 @@
+// @sem {"op":"scene","name":"opening_question"}
+// @sem {"op":"beat","name":"question","viewer_task":{"type":"notice","target":"the question comes before any explanation"}}
+// @sem {"op":"introduce","id":"father","kind":"figure","text":"father","fontSize":16,"boundary":"none","at":[260,670],"size":[44,129]}
+drawOutline(addFigure(260, 670, {"uid":"father","label":"father","fontSize":16}), {duration: 1500})
+// @sem {"op":"introduce","id":"child","kind":"figure","text":"child","fontSize":16,"boundary":"none","at":[364,670],"size":[43,129]}
+drawOutline(addFigure(364, 670, {"uid":"child","label":"child","fontSize":16}), {duration: 1500})
+// @sem {"op":"introduce","id":"food","kind":"picture","text":"food","fontSize":16,"boundary":"none","src":"img/placeholder.png","width":110,"at":[501,670],"size":[110,100]}
+Promise.resolve(addPicture("img/placeholder.png", 501, 670, {"uid":"food","label":"food","width":110,"fontSize":16})).then(g => drawOutline(g, {duration: 1500}))
+// @sem {"op":"introduce","id":"life_question","kind":"text","text":"WHAT'S THE POINT OF THIS LIFE?","fontSize":30,"boundary":"none","at":[700,130],"size":[519,58]}
+drawOutline(addLabel("WHAT'S THE POINT OF THIS LIFE?", 700, 130, {"uid":"life_question","fontSize":30,"boundary":"none"}), {duration: 700})
+// @sem {"op":"pause","kind":"thinking","seconds":0.5}
+Promise.resolve(sleep(0.5))
+// @sem {"op":"beat","name":"practical containment","viewer_task":{"type":"notice","target":"practical instructions contain life without answering the question"}}
+// @sem {"op":"introduce_group","id":"practical","items":[{"id":"eat","kind":"text","text":"EAT","fontSize":22,"boundary":"none","at":[583,400],"size":[65,49]},{"id":"study","kind":"text","text":"STUDY","fontSize":22,"boundary":"none","at":[697,400],"size":[99,49]},{"id":"live","kind":"text","text":"LIVE","fontSize":22,"boundary":"none","at":[814,400],"size":[72,49]}],"relations":[]}
+Promise.all([drawOutline(addLabel("EAT", 583, 400, {"uid":"eat","fontSize":22,"boundary":"none"}), {duration: 700}), drawOutline(addLabel("STUDY", 697, 400, {"uid":"study","fontSize":22,"boundary":"none"}), {duration: 700}), drawOutline(addLabel("LIVE", 814, 400, {"uid":"live","fontSize":22,"boundary":"none"}), {duration: 700})])
+// @sem {"op":"enclose","id":"practical_box","group":"practical","members":["eat","study","live"],"style":"solid","at":[700,400],"size":[340,89]}
+drawOutline(addRect(700, 400, 340, 89, {"uid":"practical_box","originX":"center","originY":"center","rx":18,"ry":18,"stroke":"#666","strokeWidth":2}), {duration: 1500})
+// @sem {"op":"pause","kind":"short","seconds":0.3}
+Promise.resolve(sleep(0.3))
+// @sem {"op":"beat","name":"internalization","viewer_task":{"type":"notice","target":"the unresolved question persists"}}
+// @sem {"op":"deemphasize","ids":["practical"],"opacity":{"eat":0.2,"study":0.2,"live":0.2,"practical_box":0.2}}
+Promise.all([animate("eat", {opacity: 0.2}, {duration: 700}), animate("study", {opacity: 0.2}, {duration: 700}), animate("live", {opacity: 0.2}, {duration: 700}), animate("practical_box", {opacity: 0.2}, {duration: 700})])
+// @sem {"op":"move_into","id":"life_question","into":"child","at":[364,585],"scale":0.5}
+animate("life_question", {left: 364, top: 585, scaleX: 0.5, scaleY: 0.5}, {duration: 1500})
+// @sem {"op":"beat","name":"competing arguments","viewer_task":{"type":"compare","target":"reasoning builds competing structures"}}
+// @sem {"op":"remove","ids":["eat","study","live","practical_box"]}
+Promise.all([animate("eat", {opacity: 0}, {duration: 700}), animate("study", {opacity: 0}, {duration: 700}), animate("live", {opacity: 0}, {duration: 700}), animate("practical_box", {opacity: 0}, {duration: 700})]).then(() => ["eat","study","live","practical_box"].forEach(removeByUid))
+// @sem {"op":"replace","id":"life_question","with":{"id":"god","kind":"text","text":"GOD?","fontSize":30,"boundary":"none","role":null,"at":[364,585],"size":[109,58]}}
+animate("life_question", {opacity: 0}, {duration: 700}).then(() => removeByUid("life_question"))
+drawOutline(addLabel("GOD?", 364, 585, {"uid":"god","fontSize":30,"boundary":"none"}), {duration: 700})
+// @sem {"op":"widen_context","ids":["god"],"scale":0.99,"moves":{"god":{"at":[700,130],"scale":0.99}}}
+Promise.all([animate("god", {left: 700, top: 130, scaleX: 0.99, scaleY: 0.99}, {duration: 1500})])
+// @sem {"op":"branch","from":"god","items":[{"id":"yes","kind":"text","text":"YES","fontSize":22,"boundary":"none","at":[648,243],"size":[68,49]},{"id":"no","kind":"text","text":"NO","fontSize":22,"boundary":"none","at":[758,243],"size":[57,49]}],"relations":[{"id":"god__yes","from":"god","to":"yes","kind":null},{"id":"god__no","from":"god","to":"no","kind":null}]}
+drawOutline(addLabel("YES", 648, 243, {"uid":"yes","fontSize":22,"boundary":"none"}), {duration: 700})
+connectObjects("god", "yes", "god__yes", {animate: true, duration: 700})
+drawOutline(addLabel("NO", 758, 243, {"uid":"no","fontSize":22,"boundary":"none"}), {duration: 700})
+connectObjects("god", "no", "god__no", {animate: true, duration: 700})
+// @sem {"op":"branch","from":"yes","items":[{"id":"design","kind":"text","text":"design","fontSize":16,"boundary":"none","at":[576,349],"size":[71,42]},{"id":"first_cause","kind":"text","text":"first cause","fontSize":16,"boundary":"none","at":[708,349],"size":[97,42]}],"relations":[{"id":"yes__design","from":"yes","to":"design","kind":null},{"id":"yes__first_cause","from":"yes","to":"first_cause","kind":null}]}
+drawOutline(addLabel("design", 576, 349, {"uid":"design","fontSize":16,"boundary":"none"}), {duration: 700})
+connectObjects("yes", "design", "yes__design", {animate: true, duration: 700})
+drawOutline(addLabel("first cause", 708, 349, {"uid":"first_cause","fontSize":16,"boundary":"none"}), {duration: 700})
+connectObjects("yes", "first_cause", "yes__first_cause", {animate: true, duration: 700})
+// @sem {"op":"branch","from":"no","items":[{"id":"suffering","kind":"text","text":"suffering","fontSize":16,"boundary":"none","at":[946,349],"size":[85,42]},{"id":"no_evidence","kind":"text","text":"no evidence","fontSize":16,"boundary":"none","at":[1092,349],"size":[110,42]}],"relations":[{"id":"no__suffering","from":"no","to":"suffering","kind":null},{"id":"no__no_evidence","from":"no","to":"no_evidence","kind":null}]}
+drawOutline(addLabel("suffering", 946, 349, {"uid":"suffering","fontSize":16,"boundary":"none"}), {duration: 700})
+connectObjects("no", "suffering", "no__suffering", {animate: true, duration: 700})
+drawOutline(addLabel("no evidence", 1092, 349, {"uid":"no_evidence","fontSize":16,"boundary":"none"}), {duration: 700})
+connectObjects("no", "no_evidence", "no__no_evidence", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"design__suffering","from":"design","to":"suffering","kind":"counter"}
+connectObjects("design", "suffering", "design__suffering", {animate: true, duration: 700})
+// @sem {"op":"beat","name":"widening frame","viewer_task":{"type":"notice","target":"earlier certainty becomes local and small"}}
+// @sem {"op":"widen_context","ids":["god","yes","no","design","first_cause","suffering","no_evidence"],"scale":0.4,"moves":{"god":{"at":[1083,88],"scale":0.396},"yes":{"at":[1062,133],"scale":0.4},"no":{"at":[1106,133],"scale":0.4},"design":{"at":[1033,175],"scale":0.4},"first_cause":{"at":[1086,175],"scale":0.4},"suffering":{"at":[1181,175],"scale":0.4},"no_evidence":{"at":[1239,175],"scale":0.4}}}
+Promise.all([animate("god", {left: 1083, top: 88, scaleX: 0.396, scaleY: 0.396}, {duration: 1500}), animate("yes", {left: 1062, top: 133, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("no", {left: 1106, top: 133, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("design", {left: 1033, top: 175, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("first_cause", {left: 1086, top: 175, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("suffering", {left: 1181, top: 175, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("no_evidence", {left: 1239, top: 175, scaleX: 0.4, scaleY: 0.4}, {duration: 1500})])
+// @sem {"op":"pause","kind":"thinking","seconds":0.5}
+Promise.resolve(sleep(0.5))
+// @sem {"op":"beat","name":"revision of knowledge","viewer_task":{"type":"notice","target":"the same claim weakening step by step"}}
+// @sem {"op":"introduce","id":"knowledge","kind":"box","text":"I KNOW","fontSize":30,"boundary":"solid","at":[700,400],"size":[136,60]}
+drawOutline(addLabel("I KNOW", 700, 400, {"uid":"knowledge","fontSize":30,"boundary":"solid"}), {duration: 700})
+// @sem {"op":"revise","id":"knowledge","text":"I THINK I KNOW","size":[251,60]}
+animate("knowledge", {opacity: 0.15}, {duration: 180}).then(() => setLabelText("knowledge", "I THINK I KNOW")).then(() => animate("knowledge", {opacity: 1}, {duration: 420}))
+// @sem {"op":"revise","id":"knowledge","text":"I THINK I MIGHT KNOW","size":[356,60]}
+animate("knowledge", {opacity: 0.15}, {duration: 180}).then(() => setLabelText("knowledge", "I THINK I MIGHT KNOW")).then(() => animate("knowledge", {opacity: 1}, {duration: 420}))
+// @sem {"op":"revise","id":"knowledge","text":"I DON'T KNOW","size":[235,60]}
+animate("knowledge", {opacity: 0.15}, {duration: 180}).then(() => setLabelText("knowledge", "I DON'T KNOW")).then(() => animate("knowledge", {opacity: 1}, {duration: 420}))
+// @sem {"op":"beat","name":"paradox","viewer_task":{"type":"question","target":"the only certainty is uncertainty"}}
+// @sem {"op":"introduce","id":"know_nothing","kind":"box","text":"I KNOW NOTHING","fontSize":22,"boundary":"solid","at":[700,516],"size":[214,51]}
+drawOutline(addLabel("I KNOW NOTHING", 700, 516, {"uid":"know_nothing","fontSize":22,"boundary":"solid"}), {duration: 700})
+// @sem {"op":"connect","id":"knowledge__know_nothing","from":"knowledge","to":"know_nothing","kind":null}
+connectObjects("knowledge", "know_nothing", "knowledge__know_nothing", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"know_nothing__knowledge","from":"know_nothing","to":"knowledge","kind":null}
+connectObjects("know_nothing", "knowledge", "know_nothing__knowledge", {animate: true, duration: 700})
+// @sem {"op":"introduce","id":"certainty","kind":"box","text":"CERTAINTY","fontSize":22,"boundary":"solid","at":[1000,670],"size":[149,51]}
+drawOutline(addLabel("CERTAINTY", 1000, 670, {"uid":"certainty","fontSize":22,"boundary":"solid"}), {duration: 700})
+// @sem {"op":"question","id":"certainty","text":"CERTAINTY?","size":[161,51]}
+animate("certainty", {opacity: 0.15}, {duration: 450}).then(() => (setLabelText("certainty", "CERTAINTY?"), setLabelBoundary("certainty", "dashed"))).then(() => animate("certainty", {opacity: 1}, {duration: 1050}))
+// @sem {"op":"pause","kind":"thinking","seconds":0.5}
+Promise.resolve(sleep(0.5))

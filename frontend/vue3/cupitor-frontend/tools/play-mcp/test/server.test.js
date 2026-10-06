@@ -23,8 +23,9 @@ after(async () => { await client.close(); });
 
 test('lists its tools', async () => {
   const names = (await client.listTools()).tools.map(t => t.name).sort();
-  assert.deepEqual(names, ['get_script', 'list_functions', 'list_objects', 'load_script_file', 'replace_script',
-    'replay_script', 'reset_page', 'run_script_lines', 'save_script_file', 'screenshot']);
+  assert.deepEqual(names, ['apply_semantic_action', 'get_script', 'inspect_scene', 'list_functions', 'list_objects',
+    'load_script_file', 'replace_script', 'replay_script', 'reset_page', 'run_script_lines', 'save_script_file',
+    'screenshot', 'undo_last_action', 'validate_scene']);
 });
 
 test('function reference includes options', async () => {
@@ -63,6 +64,44 @@ test('saves, edits, loads and replays the script', async () => {
   assert.match(textOf(await client.callTool({ name: 'load_script_file', arguments: { path: exported } })), /Played 2 line\(s\)/);
   assert.match(textOf(await client.callTool({ name: 'get_script', arguments: {} })), /^1: addRect/);
   fs.rmSync(file); fs.rmSync(exported);
+});
+
+test('semantic actions: placed, drawn, recorded with their intent, undone', async () => {
+  await client.callTool({ name: 'reset_page', arguments: {} });
+  const run = textOf(await client.callTool({ name: 'apply_semantic_action', arguments: { actions: [
+    { op: 'scene', name: 'why' },
+    { op: 'viewer_task', type: 'infer', target: 'many causes' },
+    { op: 'introduce', id: 'person', kind: 'figure', text: 'PERSON' },
+    { op: 'introduce', id: 'food', kind: 'picture', src: 'img/placeholder.png', width: 80, place: { near: 'person', side: 'right' } },
+    { op: 'introduce', id: 'culture', text: 'CULTURE', place: { near: 'person', side: 'left' } },
+    { op: 'connect', from: 'culture', to: 'person' }
+  ] } }));
+  assert.match(run, /No errors/);
+  const script = textOf(await client.callTool({ name: 'get_script', arguments: {} }));
+  assert.match(script, /^1: \/\/ @sem \{"op":"scene","name":"why"\}/);
+  const objs = JSON.parse(textOf(await client.callTool({ name: 'list_objects', arguments: {} })));
+  const arrow = objs.find(o => o.uid === 'culture__person');
+  assert.ok(arrow.box.width > 10, 'the grown arrow has a size (and so is drawn)');
+  const scene = JSON.parse(textOf(await client.callTool({ name: 'inspect_scene', arguments: {} })));
+  assert.deepEqual(scene.objects.map(o => o.id), ['person', 'food', 'culture']);
+  assert.ok(scene.objects.every(o => o.live && o.live.visible));
+  assert.match(textOf(await client.callTool({ name: 'validate_scene', arguments: {} })), /No issues found/);
+  const bad = await client.callTool({ name: 'apply_semantic_action', arguments: { actions: [
+    { op: 'introduce', id: 'habit', text: 'HABIT' }, { op: 'connect', from: 'habit', to: 'nobody' }] } });
+  assert.ok(bad.isError);
+  assert.equal(textOf(await client.callTool({ name: 'get_script', arguments: {} })), script, 'a failing list changes nothing');
+  assert.match(textOf(await client.callTool({ name: 'undo_last_action', arguments: {} })), /No errors/);
+  const after = JSON.parse(textOf(await client.callTool({ name: 'inspect_scene', arguments: {} })));
+  assert.deepEqual(after.relations, []);
+});
+
+test('the opening-question example replays and rebuilds its scene', async () => {
+  const file = path.resolve(path.dirname(server), 'examples/opening_question.txt');
+  assert.match(textOf(await client.callTool({ name: 'load_script_file', arguments: { path: file } })), /No errors/);
+  const scene = JSON.parse(textOf(await client.callTool({ name: 'inspect_scene', arguments: {} })));
+  assert.equal(scene.beats.length, 7);
+  assert.ok(scene.objects.every(o => o.live && o.live !== 'missing from canvas'));
+  assert.deepEqual(scene.objects.find(o => o.id === 'knowledge').revisions, ['I KNOW', 'I THINK I KNOW', 'I THINK I MIGHT KNOW', "I DON'T KNOW"]);
 });
 
 test('also works over HTTP', async () => {

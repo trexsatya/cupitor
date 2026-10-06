@@ -90,6 +90,25 @@ const SCRIPT_FUNCTIONS = [
             ['rx, ry', 'corner radius (default 4)'],
             ['…', 'other Fabric properties'],
         ]],
+        ['addLabel(text, x, y, opts)', 'A word or phrase centred on x, y, in a box that always fits it (returns it)', [
+            ['uid', 'id for later lines (default: next label id)'],
+            ['fontSize', 'text size (default 22)'],
+            ['color', "text and box colour (default '#222')"],
+            ['boundary', "'none' (default), 'solid' or 'dashed' box"],
+            ['padding', 'room between text and box (default 12)'],
+        ]],
+        ['addFigure(x, y, opts)', 'A minimal person centred on x, y, with an optional label under it (returns it)', [
+            ['uid', 'id for later lines'],
+            ['label', 'text under the figure'],
+            ['color', "default '#222'"],
+            ['fontSize', 'label size (default 18)'],
+        ]],
+        ['addPicture(src, x, y, opts)', 'A picture (URL or path under the page folder) centred on x, y, with an optional label; returns a promise of it', [
+            ['uid', 'id for later lines'],
+            ['label', 'text under the picture'],
+            ['width', 'px (default 160); the height keeps the proportions'],
+            ['color / fontSize', "label colour and size (default '#222', 18)"],
+        ]],
         ['addStickyNote(x, y, opts)', 'Sticky note', [
             ['uid', 'id for later lines'],
             ['text', "note text (default '')"],
@@ -161,6 +180,8 @@ const SCRIPT_FUNCTIONS = [
         ['setStickyProp(uid, prop, value)', 'Sticky note property', [
             ['prop', "'fill' (paper), 'textFill', 'opacity', 'width', 'height', 'fontSize', 'fontFamily', 'fontWeight', 'fontStyle', 'underline', 'textAlign'"],
         ]],
+        ['setLabelText(uid, text)', 'New text for an addLabel label: the box refits and the centre stays put'],
+        ['setLabelBoundary(uid, boundary)', "Box of an addLabel label: 'none', 'solid' or 'dashed'"],
         ['setHtml(uid, html)', "Replace an HTML box's content"],
         ['setQuadLabel(uid, text)', 'Text of a textInQuad box'],
         ['setCustomData(uid, data)', 'Merge into customData (e.g. {padding: 12} for an HTML box)'],

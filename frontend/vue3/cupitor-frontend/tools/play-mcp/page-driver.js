@@ -48,7 +48,7 @@ export class PlayPage {
     this._queue = Promise.resolve();
     // One page is shared by every client and request, so its operations run
     // one at a time, in the order they were asked for.
-    for (const name of ['reset', 'play', 'script', 'setScript', 'objects', 'screenshot', 'evaluate']) {
+    for (const name of ['reset', 'play', 'script', 'setScript', 'objects', 'screenshot', 'evaluate', 'measure']) {
       const fn = this[name].bind(this);
       this[name] = (...args) => {
         const run = this._queue.then(() => fn(...args));
@@ -173,6 +173,18 @@ export class PlayPage {
       walk(pc.getObjects(), undefined);
       return out;
     }, uid || null);
+  }
+
+  // Sizes [width, height] of objects as the page would build them (labels,
+  // figures, pictures), without adding them: [{kind, text, fontSize, boundary, src, width}].
+  async measure(specs) {
+    const page = await this.open();
+    return page.evaluate(async list => Promise.all(list.map(async s => {
+      const o = s.kind === 'figure' ? makeFigure(0, 0, { uid: '__measure', label: s.text, fontSize: s.fontSize })
+        : s.kind === 'picture' ? await makePicture(s.src, 0, 0, { uid: '__measure', label: s.text, width: s.width, fontSize: s.fontSize })
+        : makeLabel(s.text, 0, 0, { uid: '__measure', fontSize: s.fontSize, boundary: s.boundary });
+      return [Math.round(o.width), Math.round(o.height)];
+    })), specs);
   }
 
   // PNG of the canvas, or of one object with some margin around it.

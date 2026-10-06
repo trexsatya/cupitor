@@ -60,10 +60,58 @@ claude mcp add play-animations -- node /path/to/tools/play-mcp/server.js
 **Clients that connect by URL:** start `node server.js --http 3337` and point them at
 `http://127.0.0.1:3337/mcp`.
 
+## Guided visual reasoning: semantic actions
+
+Scenes can be built from meaning rather than coordinates. A client sends actions such as
+
+```json
+[{ "op": "beat", "name": "many causes", "viewer_task": { "type": "infer", "target": "behaviour has many causes" } },
+ { "op": "introduce", "id": "culture", "text": "CULTURE", "role": "cause", "place": { "near": "person", "side": "left" } },
+ { "op": "connect", "from": "culture", "to": "person" },
+ { "op": "pause", "kind": "prediction" }]
+```
+
+and the server lays them out, writes ordinary script lines, and plays them. Each action is kept in the script as
+a comment just before the lines it wrote:
+
+```
+// @sem {"op":"introduce","id":"culture","kind":"text","text":"CULTURE","fontSize":22,"boundary":"none","role":"cause","at":[214,400],"size":[121,50]}
+drawOutline(addLabel("CULTURE", 214, 400, {"uid":"culture","fontSize":22,"boundary":"none"}), {duration: 700})
+```
+
+The scene model (concepts, roles, revisions, groups, enclosures, relationships, beats, viewer tasks) is rebuilt
+from these comments whenever it is needed (`scene.js`, `parseScene`), so a saved script carries its own
+intent: loading it brings the scene back, and deleting an action's lines removes it from the scene. Each
+comment holds the positions and sizes the action settled on, so rebuilding never needs the page.
+
+| Action | What it does |
+| --- | --- |
+| `scene`, `beat`, `viewer_task` | Name the scene and its beats; record what the viewer should do mentally (notice, compare, predict, infer, remember, question, integrate) |
+| `introduce`, `introduce_group`, `branch` | Add concepts as text, a box, a minimal person (`figure`) or a `picture`; placed near another concept, in a region, or in a row or column |
+| `connect`, `disconnect` | Relationships: arrows that follow both ends |
+| `enclose`, `weaken_boundary` | A boundary round concepts; dash or drop it |
+| `revise`, `question`, `replace` | Change a concept's text in place (its revisions are kept), make it uncertain, or swap it for another |
+| `deemphasize`, `focus` | Fade concepts back, or bring some forward and dim the rest |
+| `move_into`, `widen_context` | Move a concept into another; shrink a set into a much larger frame |
+| `pause`, `remove` | Hold still (`short`, `prediction`, `thinking`); fade out and delete |
+
+`examples/opening_question.txt` is a whole scene built this way: a child's question about the point of life,
+practical answers enclosing it, competing arguments that shrink into a wider frame, and "I KNOW" revised step
+by step down to "I DON'T KNOW". Load it with `load_script_file` (or the page's **Import**) and use `inspect_scene`
+to see its beats and viewer tasks.
+
+A picture's `src` can be a URL, a path under `public/`, or a local file; a local file elsewhere is copied into
+`public/play-assets/` so the script loads it by a path the page serves. Durations are classes (`instant`,
+`short`, `deliberate`) or ms. Layout keeps concepts on the canvas, clear of each other and of the page's minimap.
+
 ## Tools
 
 | Tool | What it does |
 | --- | --- |
+| `apply_semantic_action` | Apply semantic actions in order: laid out, written to the script with their `// @sem` comments, and played. If any action is invalid, none is applied. |
+| `inspect_scene` | The scene model rebuilt from the script, with each concept's live box on the canvas. |
+| `validate_scene` | Overlaps, things off the canvas or under the minimap, text too small to read, arrows running through other concepts, concepts missing from the canvas, enclosures that miss members or catch others, a scene without a viewer task. |
+| `undo_last_action` | Remove the last semantic action and its lines, and replay. |
 | `list_functions` | Functions a script can call, with their options (from `public/script-functions.js`, the same list the page's **? Functions** popup shows). Optional word filter. |
 | `run_script_lines` | Add lines to the recorded script and play them; each line waits as the player does. Reports failures per line. `record: false` just tries them. |
 | `list_objects` | Objects on the canvas, including inside groups: uid, type, bounding box, angle, visibility, colours, text, tree children, connectors. |
@@ -84,5 +132,6 @@ coordinates) as its MCP `instructions`.
 npm test
 ```
 
-Starts the server headless, connects a real MCP client over stdio and over HTTP, and exercises
-every tool.
+`test/scene.test.js` checks the scene layer on its own (layout, rebuilding from the script, validation).
+`test/server.test.js` starts the server headless, connects a real MCP client over stdio and over HTTP, and
+exercises every tool.

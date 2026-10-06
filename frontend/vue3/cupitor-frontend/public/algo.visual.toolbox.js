@@ -365,6 +365,116 @@ function textInRect(textStr, x, y, optsText, optsRect, uid){
     return group;
 }
 
+// A word or phrase as one object, centred on x, y: a text with a box around it
+// (the box can be hidden or dashed). The box always fits the text, so the text
+// can be revised in place (setLabelText) without the object changing identity.
+// opts: uid, fontSize (22), color ('#222'), boundary ('none' (default) | 'solid' | 'dashed'), padding (12).
+function makeLabel(text, x, y, opts) {
+  const o = Object.assign({ fontSize: 22, color: '#222', boundary: 'none', padding: 12 }, opts);
+  const t = new fabric.Text(String(text), {
+    fontSize: o.fontSize, fill: o.color, fontFamily: 'Helvetica, Arial, sans-serif', textAlign: 'center',
+    originX: 'center', originY: 'center', left: 0, top: 0
+  });
+  const r = new fabric.Rect({
+    width: t.width + 2 * o.padding, height: t.height + 2 * o.padding, originX: 'center', originY: 'center',
+    left: 0, top: 0, rx: 10, ry: 10, fill: 'transparent', stroke: o.color
+  });
+  _setLabelBoundary(r, o.boundary);
+  const g = new fabric.Group([r, t], { originX: 'center', originY: 'center', left: x || 0, top: y || 0 });
+  g.uid = o.uid || semanticUid('label');
+  g.customData = { type: 'label', text: String(text), padding: o.padding, boundary: o.boundary };
+  return g;
+}
+
+function addLabel(text, x, y, opts) {
+  const g = makeLabel(text, x, y, opts);
+  pc.add(g);
+  return g;
+}
+
+function _setLabelBoundary(rect, boundary) {
+  rect.set({ strokeWidth: boundary === 'none' ? 0 : 2, strokeDashArray: boundary === 'dashed' ? [10, 7] : null });
+}
+
+// New text for a label: the box is refitted around it and the centre stays put.
+function setLabelText(uidOrObj, text) {
+  const g = findIfRequired(uidOrObj);
+  if (!isFabricObject(g) || !g.customData || g.customData.type !== 'label') throw new Error(`setLabelText: ${uidOrObj} is not a label`);
+  const [r, t] = g.getObjects();
+  const centre = g.getCenterPoint();
+  t.set('text', String(text));
+  r.set({ width: t.width + 2 * g.customData.padding, height: t.height + 2 * g.customData.padding });
+  g.triggerLayout();
+  g.setPositionByOrigin(centre, 'center', 'center');
+  g.setCoords();
+  g.dirty = true;
+  g.customData.text = String(text);
+  if (typeof updateTreeItem === 'function') updateTreeItem(g);
+  if (g.canvas) g.canvas.requestRenderAll();
+}
+
+// 'none', 'solid' or 'dashed' outline around a label.
+function setLabelBoundary(uidOrObj, boundary) {
+  const g = findIfRequired(uidOrObj);
+  if (!isFabricObject(g) || !g.customData || g.customData.type !== 'label') throw new Error(`setLabelBoundary: ${uidOrObj} is not a label`);
+  _setLabelBoundary(g.getObjects()[0], boundary);
+  g.customData.boundary = boundary;
+  g.dirty = true;
+  if (g.canvas) g.canvas.requestRenderAll();
+}
+
+// A minimal person (head, body, arms, legs), centred on x, y, with an optional label under it.
+// opts: uid, label, color ('#222'), fontSize (18).
+function makeFigure(x, y, opts) {
+  const o = Object.assign({ color: '#222', fontSize: 18 }, opts);
+  const body = new fabric.Path('M 25 0 A 12 12 0 1 1 24.9 0 Z M 25 24 L 25 64 M 5 40 L 45 40 M 25 64 L 8 100 M 25 64 L 42 100', {
+    fill: '', stroke: o.color, strokeWidth: 3, strokeLineCap: 'round', strokeLineJoin: 'round', left: 0, top: 0
+  });
+  const parts = [body];
+  if (o.label) {
+    parts.push(new fabric.Text(String(o.label), {
+      fontSize: o.fontSize, fill: o.color, fontFamily: 'Helvetica, Arial, sans-serif',
+      originX: 'center', originY: 'top', left: body.left + body.width / 2, top: body.top + body.height + 10
+    }));
+  }
+  const g = new fabric.Group(parts, { originX: 'center', originY: 'center', left: x || 0, top: y || 0 });
+  g.uid = o.uid || semanticUid('figure');
+  g.customData = { type: 'figure', text: o.label ? String(o.label) : undefined };
+  return g;
+}
+
+function addFigure(x, y, opts) {
+  const g = makeFigure(x, y, opts);
+  pc.add(g);
+  return g;
+}
+
+// A picture (URL, or a path under the page's folder) scaled to a width,
+// centred on x, y, with an optional label under it. Resolves to the object.
+// opts: uid, label, width (160), color ('#222'), fontSize (18).
+function makePicture(src, x, y, opts) {
+  const o = Object.assign({ width: 160, color: '#222', fontSize: 18 }, opts);
+  return fabric.Image.fromURL(src, { crossOrigin: 'anonymous' }).then(img => {
+    if (!img.width) throw new Error(`makePicture: could not load ${src}`);
+    img.set({ left: 0, top: 0, scaleX: o.width / img.width, scaleY: o.width / img.width });
+    const parts = [img];
+    if (o.label) {
+      parts.push(new fabric.Text(String(o.label), {
+        fontSize: o.fontSize, fill: o.color, fontFamily: 'Helvetica, Arial, sans-serif',
+        originX: 'center', originY: 'top', left: o.width / 2, top: img.height * img.scaleY + 10
+      }));
+    }
+    const g = new fabric.Group(parts, { originX: 'center', originY: 'center', left: x || 0, top: y || 0 });
+    g.uid = o.uid || semanticUid('picture');
+    g.customData = { type: 'picture', src: src, text: o.label ? String(o.label) : undefined };
+    return g;
+  });
+}
+
+function addPicture(src, x, y, opts) {
+  return makePicture(src, x, y, opts).then(g => { pc.add(g); return g; });
+}
+
 function textInCircle(textStr, x,y, optsText, optsCirc){
     if(!arguments.length) console.log('textInCircle(text, x,y, optsText, optsCirc)')
     if(!textStr) return null;
@@ -795,6 +905,7 @@ function reshapeLineXY(uidOrObj, x1, y1, x2, y2) {
   ln.x2 = x2; ln.y2 = y2;
   if (typeof ln._setWidthHeight === 'function') ln._setWidthHeight();
   ln.setCoords();
+  ln.dirty = true; // its cached picture is the old size
   if (ln.canvas) ln.canvas.requestRenderAll();
 }
 

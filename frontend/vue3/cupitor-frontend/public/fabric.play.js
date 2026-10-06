@@ -689,9 +689,15 @@ function connectObjects(fromUidOrObj, toUidOrObj, lineUid, opts) {
   Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid })
   _listConnector(line)
   if (!(opts && opts.animate)) return line
-  const end = { x2: line.x2, y2: line.y2 }
-  line.set({ x2: line.x1, y2: line.y1 })
-  return animate(line, end, { duration: (opts && opts.duration) || 800 }).then(() => line)
+  // Grown by reshaping each frame: a line's box (and so whether it is drawn
+  // at all) only follows its end points when it is reshaped.
+  const { x1, y1, x2, y2 } = line
+  reshapeLineXY(line, x1, y1, x1, y1)
+  return new Promise(resolve => fabric.util.animate({
+    startValue: 0, endValue: 1, duration: (opts && opts.duration) || 800,
+    onChange: t => reshapeLineXY(line, x1, y1, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t),
+    onComplete: () => { reshapeLineXY(line, x1, y1, x2, y2); resolve(line) }
+  }))
 }
 
 function _listConnector(line) {
