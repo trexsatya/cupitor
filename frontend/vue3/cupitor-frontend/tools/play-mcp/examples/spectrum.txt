@@ -1,6 +1,6 @@
 // @sem {"op":"scene","name":"spectrum","reset":true}
 animateViewport({zoom: 1, pan: [0, 0]}, {duration: 0})
-// @sem {"op":"beat","name":"two kinds","viewer_task":{"type":"notice","target":"two clean categories"}}
+// @sem {"op":"beat","name":"two kinds","move":"two clean categories","viewer_task":{"type":"notice","target":"two clean categories"}}
 // @sem {"op":"narrate","id":"n1","text":"Two words, two boxes.","sync":"with","words":4,"hold":2100,"wait":300}
 Promise.resolve(caption("Two words, two boxes.", {id: "n1", wait: 300}))
 // @sem {"op":"introduce","id":"day","kind":"box","text":"DAY","fontSize":30,"boundary":"solid","at":[260,400],"size":[85,60]}
@@ -9,7 +9,7 @@ drawOutline(addLabel("DAY", 260, 400, {"uid":"day","fontSize":30,"boundary":"sol
 drawOutline(addLabel("NIGHT", 1140, 400, {"uid":"night","fontSize":30,"boundary":"solid"}), {duration: 700})
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"in between","viewer_task":{"type":"question","target":"which box do these belong in?"}}
+// @sem {"op":"beat","name":"in between","move":"cases that fit neither category appear between them","viewer_task":{"type":"question","target":"which box do these belong in?"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n2","text":"Then the hours between them.","sync":"with","words":5,"hold":2500,"wait":300}
 Promise.resolve(caption("Then the hours between them.", {id: "n2", wait: 300}))
@@ -23,7 +23,7 @@ drawOutline(addLabel("TWILIGHT?", 920, 400, {"uid":"twilight","fontSize":22,"bou
 Promise.resolve(caption("Which box does each belong in?", {id: "n3", wait: 2900}))
 // @sem {"op":"pause","kind":"prediction","seconds":2}
 Promise.resolve(sleep(2))
-// @sem {"op":"beat","name":"the line fails","viewer_task":{"type":"notice","target":"the boundary cannot be drawn"}}
+// @sem {"op":"beat","name":"the line fails","move":"the boundaries weaken","viewer_task":{"type":"notice","target":"the boundary cannot be drawn"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n4","text":"The edges stop holding.","sync":"with","words":4,"hold":2100,"wait":300}
 Promise.resolve(caption("The edges stop holding.", {id: "n4", wait: 300}))
@@ -33,7 +33,7 @@ animate("day", {opacity: 0.3}, {duration: 750}).then(() => setLabelBoundary("day
 animate("night", {opacity: 0.3}, {duration: 750}).then(() => setLabelBoundary("night", "dashed")).then(() => animate("night", {opacity: 1}, {duration: 750}))
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"a continuum","viewer_task":{"type":"integrate","target":"one continuum, not two kinds"}}
+// @sem {"op":"beat","name":"a continuum","move":"the categories dissolve into one band","viewer_task":{"type":"integrate","target":"one continuum, not two kinds"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n5","text":"Perhaps there were never two things here.","sync":"with","words":7,"hold":3200,"wait":300}
 Promise.resolve(caption("Perhaps there were never two things here.", {id: "n5", wait: 300}))

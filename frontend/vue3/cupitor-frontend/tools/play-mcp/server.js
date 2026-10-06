@@ -20,6 +20,7 @@ import { z } from 'zod';
 import crypto from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { PlayPage, parseScriptFile } from './page-driver.js';
+import { reviewStops, buildReviewHtml } from './review.js';
 import { ACTIONS, parseScene, planActions, inspect, validate, withoutLastAction, describeTimeline, captionsFile } from './scene.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -119,16 +120,17 @@ export function createServer(page, publicDir) {
   const tool = (name, config, handler) => server.registerTool(name, config, (...args) => currentRequest.run(args[args.length - 1], () => handler(...args)));
   // Playing a narrated scene takes minutes. While it plays, a client that asked
   // for progress hears every few seconds, so it can keep waiting.
-  const play = async (lines, opts) => {
+  const withProgress = async work => {
     const extra = currentRequest.getStore();
     const token = extra && extra._meta && extra._meta.progressToken;
-    if (token === undefined) return page.play(lines, opts);
+    if (token === undefined) return work();
     const started = Date.now();
     const beat = setInterval(() => {
       extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: Math.round((Date.now() - started) / 1000), message: 'playing' } }).catch(() => {});
     }, HEARTBEAT_MS);
-    try { return await page.play(lines, opts); } finally { clearInterval(beat); }
+    try { return await work(); } finally { clearInterval(beat); }
   };
+  const play = (lines, opts) => withProgress(() => page.play(lines, opts));
   const text = t => ({ content: [{ type: 'text', text: typeof t === 'string' ? t : JSON.stringify(t, null, 2) }] });
   const report = r => {
     const lines = [`Played ${r.played} line(s) in ${r.ms} ms.`];
@@ -239,6 +241,33 @@ export function createServer(page, publicDir) {
     fs.writeFileSync(path.resolve(file), body);
     return text(`Wrote ${(body.match(/-->/g) || []).length} caption(s) to ${path.resolve(file)}.`);
   });
+
+  tool('review_scene', {
+    description: "Write a review page (one self-contained HTML file) for the script: per beat, the narrator's move, the viewer task, the narration with times, the visual moves in plain words, a checklist, the issues found at the end of the beat, and screenshots before the first reveal (when the beat holds one back) and at the end. The script is replayed fast for the screenshots, leaving the canvas at its end.",
+    inputSchema: { path: z.string().describe('the HTML file to write'), script: z.string().optional().describe('a script file to review (loaded as the recorded script first); default: the recorded script') }
+  }, async ({ path: file, script }) => exclusive(async () => {
+    let lines;
+    if (script) { lines = parseScriptFile(fs.readFileSync(path.resolve(script), 'utf8')); await page.setScript(lines); }
+    else lines = await page.script();
+    const stops = reviewStops(lines);
+    if (!stops.length) return text('The script has no beats to review (add {op: "beat", name} actions).');
+    const at = []; // what each walk stop is: [key, line index, beat number or null]
+    stops.forEach((s, i) => {
+      if (s.beforeIndex != null) at.push([`${i}:before`, s.beforeIndex, null]);
+      at.push([`${i}:end`, s.endIndex, i]);
+    });
+    const frames = {}, issues = {};
+    const walked = await withProgress(() => page.walk(lines, at.map(a => a[1]), async (k, look) => {
+      if (k >= at.length) return;
+      const [key, index, beat] = at[k];
+      frames[key] = (await look.screenshot()).toString('base64');
+      if (beat != null) issues[beat] = validate(parseScene(lines.slice(0, index)), await look.objects(), lines.slice(0, index));
+    }));
+    const title = script ? path.basename(script) : 'Recorded script';
+    fs.writeFileSync(path.resolve(file), buildReviewHtml({ title: `Review: ${title}`, lines, stops, frames, issues }));
+    const failed = walked.lineErrors.length ? `\n${walked.lineErrors.length} line(s) failed while replaying.` : '';
+    return text(`Wrote a review of ${stops.length} beat(s) with ${Object.keys(frames).length} screenshot(s) to ${path.resolve(file)}.${failed}`);
+  }));
 
   tool('undo_last_action', {
     description: 'Remove the last semantic action (its "// @sem" comment and every line after it) from the script and replay the script.'

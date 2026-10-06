@@ -46,9 +46,11 @@ export class PlayPage {
     this.headless = headless;
     this.page = null;
     this._queue = Promise.resolve();
+    // walk() looks at the page between steps of its own queued turn.
+    this._unqueued = { screenshot: this.screenshot.bind(this), objects: this.objects.bind(this) };
     // One page is shared by every client and request, so its operations run
     // one at a time, in the order they were asked for.
-    for (const name of ['reset', 'play', 'script', 'setScript', 'objects', 'screenshot', 'evaluate', 'measure']) {
+    for (const name of ['reset', 'play', 'script', 'setScript', 'objects', 'screenshot', 'evaluate', 'measure', 'walk']) {
       const fn = this[name].bind(this);
       this[name] = (...args) => {
         const run = this._queue.then(() => fn(...args));
@@ -111,6 +113,7 @@ export class PlayPage {
     await page.evaluate(({ lines, record, clearFirst }) => {
       window.__mcpLineErrors = [];
       if (clearFirst && typeof clear === 'function') clear();
+      if (clearFirst && window.viewportManager) viewportManager.resetView(); // a replay starts from the starting view
       if (lines && record) window.recordedScriptLines = (window.recordedScriptLines || []).concat(lines);
       playScript(lines || undefined);
     }, { lines, record, clearFirst });
@@ -124,6 +127,67 @@ export class PlayPage {
       lineErrors,
       pageErrors: this.pageErrors.slice(errorsBefore)
     };
+  }
+
+  // Plays `lines` once from a cleared canvas without recording them, stopping
+  // before each line index in `stops` (and at the end, as stop stops.length)
+  // to await onStop(k, {screenshot, objects}). With `fast`, waits and
+  // animations take next to no time: only the states between them matter.
+  async walk(lines, stops, onStop, { fast = true, timeoutMs = 10 * 60000 } = {}) {
+    const page = await this.open();
+    const marks = stops.map((index, k) => ({ index, k })).concat([{ index: lines.length, k: stops.length }]);
+    const run = lines.slice();
+    // Inserted from the end so earlier indexes stay right; same index keeps order.
+    [...marks].sort((a, b) => b.index - a.index || b.k - a.k).forEach(m => run.splice(m.index, 0, `Promise.resolve(__mcpHold(${m.k}))`));
+    // The script's own line number for each played line (0 for an inserted hold).
+    const own = []; let n = 0;
+    run.forEach(l => own.push(/^Promise\.resolve\(__mcpHold\(\d+\)\)$/.test(l) ? 0 : ++n));
+    const deadline = Date.now() + timeoutMs;
+    let finished = false;
+    try {
+    await page.evaluate(({ run, fast }) => {
+      window.__mcpLineErrors = [];
+      window.__mcpHeld = null;
+      window.__mcpHold = k => new Promise(release => { window.__mcpHeld = { k, release }; });
+      window.__mcpRestore = [];
+      if (fast) {
+        const swap = (name, fn) => { const orig = window[name]; if (typeof orig !== 'function') return; window.__mcpRestore.push([name, orig]); window[name] = fn(orig); };
+        swap('sleep', () => () => Promise.resolve());
+        // [function, index of its options argument]
+        [['animate', 2], ['drawOutline', 1], ['connectObjects', 3], ['animateViewport', 1], ['revertState', 1], ['reveal', 2]].forEach(([name, at]) =>
+          swap(name, orig => function (...args) { args[at] = Object.assign({}, args[at], { duration: 1 }); return orig.apply(this, args); }));
+      }
+      if (typeof clear === 'function') clear();
+      if (window.viewportManager) viewportManager.resetView(); // from the starting view, as a replay is
+      playScript(run);
+    }, { run, fast });
+      for (;;) {
+        await page.waitForFunction(() => window.__mcpHeld || (!document.body.classList.contains('play-mode') && !window.isRecordingPlayback),
+          null, { timeout: Math.max(1, deadline - Date.now()), polling: 50 });
+        const held = await page.evaluate(() => window.__mcpHeld && window.__mcpHeld.k);
+        if (held == null) break;
+        await page.waitForTimeout(250); // a caption fading in, an HTML box's picture
+        await onStop(held, this._unqueued);
+        await page.evaluate(() => { const h = window.__mcpHeld; window.__mcpHeld = null; h.release(); });
+      }
+      finished = true;
+    } finally {
+      // Whatever happened, the page gets its own functions back, and a walk
+      // cut short stops playing instead of waiting on a hold for ever.
+      await page.evaluate(stop => {
+        (window.__mcpRestore || []).forEach(([name, orig]) => { window[name] = orig; });
+        window.__mcpRestore = [];
+        if (stop) {
+          window._stopPlayback = true;
+          const h = window.__mcpHeld; window.__mcpHeld = null;
+          if (h) h.release();
+          if (window.exitPlayMode) exitPlayMode();
+          window.isRecordingPlayback = false;
+        }
+      }, !finished).catch(() => {});
+    }
+    const errors = await page.evaluate(() => window.__mcpLineErrors.slice());
+    return { lineErrors: errors.map(e => ({ ...e, line: own[e.line - 1] || e.line })) };
   }
 
   async script() {

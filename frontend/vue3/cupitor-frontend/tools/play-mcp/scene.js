@@ -29,7 +29,7 @@ export const RESERVED = [{ name: 'minimap', x: 1180, y: 640, w: 220, h: 160 }];
 
 export const ACTIONS = {
   scene: 'Start a scene: {name}. Objects from earlier scenes stay and can be reused.',
-  beat: 'Start a beat (one conceptual move): {name, viewer_task?: {type, target}}.',
+  beat: "Start a beat (one conceptual move): {name, move? (what the narrator does here, e.g. 'the question appears before any answer'), viewer_task?: {type, target}}.",
   viewer_task: `What the viewer should do mentally: {type: ${VIEWER_TASKS.join('|')}, target, constraint?}. Attaches to the current beat (or scene).`,
   introduce: "Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, place?, pace?}. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]}, {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.",
   introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, place?, pace?}.',
@@ -137,7 +137,7 @@ export function applyRecord(model, rec) {
     case 'beat':
       model.caption = null;
       model.beat = rec.name;
-      model.beats.push({ name: rec.name, scene: model.scene });
+      model.beats.push({ name: rec.name, scene: model.scene, ...(rec.move ? { move: rec.move } : {}) });
       if (rec.viewer_task) model.viewerTasks.push({ ...rec.viewer_task, scene: model.scene, beat: rec.name });
       break;
     case 'viewer_task':
@@ -270,7 +270,7 @@ export function applyRecord(model, rec) {
   model.log.push(describe(rec, model));
 }
 
-function describe(rec, model) {
+export function describe(rec, model) {
   const where = [model.scene, model.beat].filter(Boolean).join(' / ');
   const what = rec.id ? `${rec.op} ${rec.id}` : rec.op === 'connect' ? `connect ${rec.from} -> ${rec.to}`
     : rec.ids ? `${rec.op} ${rec.ids.join(', ')}` : rec.name ? `${rec.op} ${rec.name}` : rec.op;
@@ -500,7 +500,8 @@ export async function planAction(model, a, measure) {
     case 'beat':
       if (!a.name) throw new Error('beat: name is required');
       if (a.viewer_task) checkTask(a.viewer_task);
-      return { record: { op, name: a.name, viewer_task: a.viewer_task }, lines: clearCaption(model) };
+      if (a.move != null && (typeof a.move !== 'string' || !a.move.trim())) throw new Error('beat: move is a sentence saying what the narrator does');
+      return { record: { op, name: a.name, move: a.move, viewer_task: a.viewer_task }, lines: clearCaption(model) };
     case 'viewer_task':
       checkTask(a);
       return { record: { op, type: a.type, target: a.target, constraint: a.constraint }, lines: [] };
@@ -1061,7 +1062,7 @@ export function timeline(lines) {
   const beats = [];
   let beat = null, item = null, t = 0, scene = null;
   const items = [];
-  const startBeat = name => { beat = { scene, beat: name, start: t, items: [] }; beats.push(beat); };
+  const startBeat = (name, isBeat) => { beat = { scene, beat: name, isBeat: !!isBeat, start: t, items: [] }; beats.push(beat); };
   const code = scriptCode(lines || []);
   (lines || []).forEach((raw, i) => {
     const line = String(raw).trim();
@@ -1069,7 +1070,7 @@ export function timeline(lines) {
       let rec;
       try { rec = JSON.parse(line.slice(TAG.trim().length)); } catch (e) { return; }
       if (rec.op === 'scene') { scene = rec.name; startBeat(null); }
-      else if (rec.op === 'beat') startBeat(rec.name);
+      else if (rec.op === 'beat') { startBeat(rec.name, true); if (rec.move) beat.move = rec.move; }
       else if (!beat) startBeat(null);
       item = { op: rec.op, rec, start: t, duration: 0 };
       if (rec.op !== 'scene' && rec.op !== 'beat') { beat.items.push(item); items.push(item); }
@@ -1119,6 +1120,7 @@ export function describeTimeline(lines) {
   const out = [];
   tl.beats.forEach(b => {
     out.push(`t=${sec(b.start)} ${b.scene ? `[${b.scene}] ` : ''}${b.beat ? `beat "${b.beat}"` : '(before any beat)'} (${sec(b.end - b.start)})`);
+    if (b.move) out.push(`  move: ${b.move}`);
     b.items.forEach(it => {
       const r = it.rec;
       if (it.op === 'narrate') out.push(`  ${sec(it.start)}  ${r.id} (${r.sync}, ${sec(r.hold)}): "${r.text}"`);
@@ -1136,21 +1138,22 @@ export function narrationIssues(lines) {
   const issues = [];
   const tl = timeline(lines);
   if (!tl.narrations.length) return issues;
+  const beatOf = it => (tl.beats.find(b => b.items.includes(it)) || {}).start;
   tl.narrations.forEach(n => {
     const r = n.rec, need = readingTime(r.words);
-    if (r.sync === 'before' && r.hold < need * 0.8) issues.push({ level: 'warning', id: r.id, message: `narration ${r.id} is held ${(r.hold / 1000).toFixed(1)}s; reading it takes about ${(need / 1000).toFixed(1)}s` });
-    if (r.sync === 'with' && n.shown < need * 0.8) issues.push({ level: 'warning', id: r.id, message: `narration ${r.id} shows for ${(n.shown / 1000).toFixed(1)}s while the scene moves on; reading it takes about ${(need / 1000).toFixed(1)}s` });
+    if (r.sync === 'before' && r.hold < need * 0.8) issues.push({ level: 'warning', id: r.id, at: beatOf(n), message: `narration ${r.id} is held ${(r.hold / 1000).toFixed(1)}s; reading it takes about ${(need / 1000).toFixed(1)}s` });
+    if (r.sync === 'with' && n.shown < need * 0.8) issues.push({ level: 'warning', id: r.id, at: beatOf(n), message: `narration ${r.id} shows for ${(n.shown / 1000).toFixed(1)}s while the scene moves on; reading it takes about ${(need / 1000).toFixed(1)}s` });
   });
   const VISUAL = op => !['narrate', 'pause', 'viewer_task', 'checkpoint'].includes(op);
   tl.beats.forEach(b => {
     b.items.forEach((it, i) => {
       const next = b.items[i + 1];
       if (it.op === 'narrate' && /\?["'\u201d\u2019)\]]*\s*$/.test(it.rec.text) && next && VISUAL(next.op)) {
-        issues.push({ level: 'info', id: it.rec.id, message: `narration ${it.rec.id} asks a question and the next move follows at once: a prediction pause would leave time to think` });
+        issues.push({ level: 'info', id: it.rec.id, at: b.start, message: `narration ${it.rec.id} asks a question and the next move follows at once: a prediction pause would leave time to think` });
       }
     });
-    if (b.beat && b.items.some(it => VISUAL(it.op)) && !b.items.some(it => it.op === 'narrate')) {
-      issues.push({ level: 'info', message: `beat "${b.beat}" moves without narration` });
+    if (b.isBeat && b.items.some(it => VISUAL(it.op)) && !b.items.some(it => it.op === 'narrate')) {
+      issues.push({ level: 'info', at: b.start, message: `beat "${b.beat}" moves without narration` });
     }
   });
   return issues;

@@ -1,6 +1,6 @@
 // @sem {"op":"scene","name":"opening_question","reset":true}
 animateViewport({zoom: 1, pan: [0, 0]}, {duration: 0})
-// @sem {"op":"beat","name":"question","viewer_task":{"type":"notice","target":"the question comes before any explanation"}}
+// @sem {"op":"beat","name":"question","move":"an ordinary scene, then the question arrives before any explanation","viewer_task":{"type":"notice","target":"the question comes before any explanation"}}
 // @sem {"op":"narrate","id":"n1","text":"A father, a child, and something to eat. An ordinary evening.","sync":"with","words":11,"hold":4700,"wait":300}
 Promise.resolve(caption("A father, a child, and something to eat. An ordinary evening.", {id: "n1", wait: 300}))
 // @sem {"op":"introduce","id":"father","kind":"figure","text":"father","fontSize":16,"boundary":"none","at":[260,670],"size":[44,129]}
@@ -17,7 +17,7 @@ Promise.resolve(sleep(2))
 drawOutline(addLabel("WHAT'S THE POINT OF THIS LIFE?", 700, 130, {"uid":"life_question","fontSize":30,"boundary":"none"}), {duration: 700})
 // @sem {"op":"pause","kind":"thinking","seconds":4}
 Promise.resolve(sleep(4))
-// @sem {"op":"beat","name":"practical containment","viewer_task":{"type":"notice","target":"practical instructions contain life without answering the question"}}
+// @sem {"op":"beat","name":"practical containment","move":"the practical answer is offered, and it fences life in without touching the question","viewer_task":{"type":"notice","target":"practical instructions contain life without answering the question"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n3","text":"The grown-up answer is practical.","sync":"before","words":5,"hold":2500,"wait":2500}
 Promise.resolve(caption("The grown-up answer is practical.", {id: "n3", wait: 2500}))
@@ -31,7 +31,7 @@ Promise.resolve(sleep(2))
 drawOutline(addRect(700, 400, 340, 89, {"uid":"practical_box","originX":"center","originY":"center","rx":18,"ry":18,"stroke":"#666","strokeWidth":2}), {duration: 1500})
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"internalization","viewer_task":{"type":"notice","target":"the unresolved question persists"}}
+// @sem {"op":"beat","name":"internalization","move":"the practical answer recedes; the question stays with the child","viewer_task":{"type":"notice","target":"the unresolved question persists"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n5","text":"The instructions fade. The question does not.","sync":"with","words":7,"hold":3200,"wait":300}
 Promise.resolve(caption("The instructions fade. The question does not.", {id: "n5", wait: 300}))
@@ -41,7 +41,7 @@ Promise.all([animate("eat", {opacity: 0.2}, {duration: 700}), animate("study", {
 animate("life_question", {left: 364, top: 585, scaleX: 0.5, scaleY: 0.5}, {duration: 1500})
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"competing arguments","viewer_task":{"type":"compare","target":"reasoning builds competing structures"}}
+// @sem {"op":"beat","name":"competing arguments","move":"the question sharpens into GOD? and two sides build cases that answer each other","viewer_task":{"type":"compare","target":"reasoning builds competing structures"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n6","text":"Later, the question takes a sharper form.","sync":"with","words":7,"hold":3200,"wait":300}
 Promise.resolve(caption("Later, the question takes a sharper form.", {id: "n6", wait: 300}))
@@ -75,7 +75,7 @@ Promise.resolve(caption("And each case answers the other.", {id: "n8", wait: 290
 connectObjects("design", "suffering", "design__suffering", {bend: 50, animate: true, duration: 700})
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"widening frame","viewer_task":{"type":"notice","target":"earlier certainty becomes local and small"}}
+// @sem {"op":"beat","name":"widening frame","move":"the whole argument shrinks into a corner of a much larger space","viewer_task":{"type":"notice","target":"earlier certainty becomes local and small"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n9","text":"Step back far enough, and the whole argument is one small corner.","sync":"with","words":12,"hold":5100,"wait":300}
 Promise.resolve(caption("Step back far enough, and the whole argument is one small corner.", {id: "n9", wait: 300}))
@@ -83,7 +83,7 @@ Promise.resolve(caption("Step back far enough, and the whole argument is one sma
 Promise.all([setCustomData("design__suffering", {bend: 20}), animate("god", {left: 1083, top: 88, scaleX: 0.396, scaleY: 0.396}, {duration: 1500}), animate("yes", {left: 1062, top: 133, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("no", {left: 1106, top: 133, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("design", {left: 1033, top: 175, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("first_cause", {left: 1086, top: 175, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("suffering", {left: 1181, top: 175, scaleX: 0.4, scaleY: 0.4}, {duration: 1500}), animate("no_evidence", {left: 1239, top: 175, scaleX: 0.4, scaleY: 0.4}, {duration: 1500})])
 // @sem {"op":"pause","kind":"thinking","seconds":4}
 Promise.resolve(sleep(4))
-// @sem {"op":"beat","name":"revision of knowledge","viewer_task":{"type":"notice","target":"the same claim weakening step by step"}}
+// @sem {"op":"beat","name":"revision of knowledge","move":"one claim is revised, step by step, into its opposite","viewer_task":{"type":"notice","target":"the same claim weakening step by step"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n10","text":"What did I know?","sync":"before","words":4,"hold":2100,"wait":2100}
 Promise.resolve(caption("What did I know?", {id: "n10", wait: 2100}))
@@ -101,7 +101,7 @@ animate("knowledge", {opacity: 0.15}, {duration: 450}).then(() => setLabelText("
 animate("knowledge", {opacity: 0.15}, {duration: 450}).then(() => setLabelText("knowledge", "I DON'T KNOW")).then(() => animate("knowledge", {opacity: 1}, {duration: 1050}))
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"paradox","viewer_task":{"type":"question","target":"the only certainty is uncertainty"}}
+// @sem {"op":"beat","name":"paradox","move":"the doubt turns on itself, and certainty itself is questioned","viewer_task":{"type":"question","target":"the only certainty is uncertainty"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n11","text":"Even that claims something.","sync":"with","words":4,"hold":2100,"wait":300}
 Promise.resolve(caption("Even that claims something.", {id: "n11", wait: 300}))

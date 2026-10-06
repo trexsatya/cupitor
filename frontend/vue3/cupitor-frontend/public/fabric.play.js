@@ -503,7 +503,7 @@ function caption(text, opts) {
     el = document.createElement('div')
     el.id = 'play-caption'
     Object.assign(el.style, {
-      position: 'fixed', left: '50%', bottom: '90px', transform: 'translateX(-50%)', maxWidth: '68%',
+      position: 'fixed', left: '50%', bottom: '44px', transform: 'translateX(-50%)', maxWidth: '68%',
       zIndex: 999999, background: 'rgba(20,20,30,.82)', color: '#fff', font: '600 20px/1.35 system-ui, sans-serif',
       padding: '10px 18px', borderRadius: '10px', textAlign: 'center', pointerEvents: 'none',
       transition: 'opacity .2s', opacity: '0'

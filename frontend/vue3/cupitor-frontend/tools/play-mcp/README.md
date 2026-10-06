@@ -86,7 +86,7 @@ comment holds the positions and sizes the action settled on, so rebuilding never
 
 | Action | What it does |
 | --- | --- |
-| `scene`, `beat`, `viewer_task` | Name the scene and its beats; record what the viewer should do mentally (notice, compare, predict, infer, remember, question, integrate) |
+| `scene`, `beat`, `viewer_task` | Name the scene and its beats (a beat can say the narrator's `move`); record what the viewer should do mentally (notice, compare, predict, infer, remember, question, integrate) |
 | `introduce`, `introduce_group`, `branch` | Add concepts as text, a box, a minimal person (`figure`) or a `picture`; placed near another concept, in a region, or in a row or column |
 | `connect`, `disconnect` | Relationships: arrows that follow both ends. They curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop |
 | `enclose`, `weaken_boundary` | A boundary round concepts; dash or drop it |
@@ -132,6 +132,17 @@ estimated times. `export_captions` writes the narration as a WebVTT (or SRT) cap
 script. `validate_scene` also flags lines shown too briefly to read, a question followed at once by the next
 move (no time to think), and beats that move without narration.
 
+### Review mode
+
+`review_scene` writes one self-contained HTML page for a script (the recorded one, or a file). For each beat it
+shows the narrator's move (`{op: "beat", name, move}`), the viewer task, the narration with its times, the visual
+moves in plain words, a checklist (task and move stated, narration before the first move, questions given time,
+concepts reused, revisions that keep or replace identity, readability and layout warnings, length), the issues
+found at the end of the beat, and two screenshots: the end of the beat and, when the beat makes the viewer wait
+(a `before` narration or a pause) and then moves, the moment just before the move it held back. For the
+screenshots the script is replayed once with waits and animations cut to almost nothing, so a scene that plays
+for minutes is reviewed in seconds; the canvas is left at the script's end.
+
 ## Tools
 
 | Tool | What it does |
@@ -141,6 +152,7 @@ move (no time to think), and beats that move without narration.
 | `validate_scene` | Overlaps, things off the canvas or under the minimap, text too small to read, arrows running through other concepts, concepts missing from the canvas, enclosures that miss members or catch others, a scene without a viewer task. |
 | `scene_timeline` | The script as it plays: beats with start times, viewer tasks, narration and moves. |
 | `export_captions` | Write the narration as a caption track (`vtt`, default, or `srt`) timed to the script. |
+| `review_scene` | Write a review page: per beat, move, viewer task, narration, moves, checklist, issues and screenshots. |
 | `undo_last_action` | Remove the last semantic action and its lines, and replay. |
 | `list_functions` | Functions a script can call, with their options (from `public/script-functions.js`, the same list the page's **? Functions** popup shows). Optional word filter. |
 | `run_script_lines` | Add lines to the recorded script and play them; each line waits as the player does. Reports failures per line. `record: false` just tries them. |
@@ -162,6 +174,7 @@ coordinates) as its MCP `instructions`.
 npm test
 ```
 
-`test/scene.test.js` checks the scene layer on its own (layout, rebuilding from the script, validation).
+`test/scene.test.js` checks the scene layer on its own (layout, rebuilding from the script, validation, narration
+timing); `test/review.test.js` the review page.
 `test/server.test.js` starts the server headless, connects a real MCP client over stdio and over HTTP, and
 exercises every tool.

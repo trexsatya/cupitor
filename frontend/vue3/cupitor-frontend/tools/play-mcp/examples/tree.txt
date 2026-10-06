@@ -1,13 +1,13 @@
 // @sem {"op":"scene","name":"tree","reset":true}
 animateViewport({zoom: 1, pan: [0, 0]}, {duration: 0})
-// @sem {"op":"beat","name":"a tree","viewer_task":{"type":"notice","target":"the tree is the obvious centre"}}
+// @sem {"op":"beat","name":"a tree","move":"a single, obvious centre","viewer_task":{"type":"notice","target":"the tree is the obvious centre"}}
 // @sem {"op":"narrate","id":"n1","text":"Start with a tree.","sync":"with","words":4,"hold":2100,"wait":300}
 Promise.resolve(caption("Start with a tree.", {id: "n1", wait: 300}))
 // @sem {"op":"introduce","id":"tree","kind":"box","text":"TREE","fontSize":38,"boundary":"solid","at":[700,400],"size":[127,69]}
 drawOutline(addLabel("TREE", 700, 400, {"uid":"tree","fontSize":38,"boundary":"solid"}), {duration: 700})
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"what it needs","viewer_task":{"type":"predict","target":"the tree depends on what is around it"}}
+// @sem {"op":"beat","name":"what it needs","move":"the tree's conditions arrive one by one","viewer_task":{"type":"predict","target":"the tree depends on what is around it"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n2","text":"What does it need to be a tree at all?","sync":"before","words":10,"hold":4400,"wait":4400}
 Promise.resolve(caption("What does it need to be a tree at all?", {id: "n2", wait: 4400}))
@@ -35,7 +35,7 @@ Promise.resolve(caption("And some of it needs the tree back.", {id: "n3", wait: 
 connectObjects("tree", "insects", "tree__insects", {bend: 13, animate: true, duration: 700})
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"the web","viewer_task":{"type":"integrate","target":"the conditions depend on each other, not only on the tree"}}
+// @sem {"op":"beat","name":"the web","move":"the conditions turn out to depend on each other","viewer_task":{"type":"integrate","target":"the conditions depend on each other, not only on the tree"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n4","text":"But these do not only point at the tree.","sync":"with","words":9,"hold":4000,"wait":300}
 Promise.resolve(caption("But these do not only point at the tree.", {id: "n4", wait: 300}))
@@ -49,7 +49,7 @@ connectObjects("insects", "soil", "insects__soil", {animate: true, duration: 700
 tagState("tree_centre", ["tree","soil","sun","water","insects","soil__tree","sun__tree","water__tree","insects__tree","tree__insects","sun__water","water__soil","insects__soil"])
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"no centre","viewer_task":{"type":"infer","target":"the centre was a framing choice"}}
+// @sem {"op":"beat","name":"no centre","move":"the web keeps growing until the tree is one node among many","viewer_task":{"type":"infer","target":"the centre was a framing choice"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n5","text":"Follow any thread and it keeps going.","sync":"with","words":7,"hold":3200,"wait":300}
 Promise.resolve(caption("Follow any thread and it keeps going.", {id: "n5", wait: 300}))
@@ -77,7 +77,7 @@ Promise.all([animate("tree", {opacity: 0.4}, {duration: 700})])
 animateViewport({zoom: 0.75, pan: [168, 100]}, {duration: 1500})
 // @sem {"op":"pause","kind":"thinking","seconds":4}
 Promise.resolve(sleep(4))
-// @sem {"op":"beat","name":"back to the tree","viewer_task":{"type":"compare","target":"the tree-centred picture again, now seen as one way of framing the web"}}
+// @sem {"op":"beat","name":"back to the tree","move":"the first picture returns, now seen as one framing","viewer_task":{"type":"compare","target":"the tree-centred picture again, now seen as one way of framing the web"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n7","text":"The first picture again. Same tree, same lines.","sync":"with","words":8,"hold":3600,"wait":300}
 Promise.resolve(caption("The first picture again. Same tree, same lines.", {id: "n7", wait: 300}))

@@ -24,7 +24,7 @@ after(async () => { await client.close(); });
 test('lists its tools', async () => {
   const names = (await client.listTools()).tools.map(t => t.name).sort();
   assert.deepEqual(names, ['apply_semantic_action', 'export_captions', 'get_script', 'inspect_scene', 'list_functions',
-    'list_objects', 'load_script_file', 'replace_script', 'replay_script', 'reset_page', 'run_script_lines',
+    'list_objects', 'load_script_file', 'replace_script', 'replay_script', 'reset_page', 'review_scene', 'run_script_lines',
     'save_script_file', 'scene_timeline', 'screenshot', 'undo_last_action', 'validate_scene']);
 });
 
@@ -136,6 +136,21 @@ test('narration: a caption on the page, a timeline to read, a caption track to e
   assert.match(textOf(await client.callTool({ name: 'export_captions', arguments: { path: file } })), /Wrote 1 caption/);
   assert.match(fs.readFileSync(file, 'utf8'), /^WEBVTT\n\nq1\n00:00:00\.\d{3} --> /);
   fs.rmSync(file);
+});
+
+test('review_scene: a page per script, a section and frames per beat, made by a fast replay', async () => {
+  const script = path.resolve(path.dirname(server), 'examples/river.txt');
+  const out = path.join(os.tmpdir(), `play-mcp-review-${process.pid}.html`);
+  const started = Date.now();
+  const r = textOf(await client.callTool({ name: 'review_scene', arguments: { path: out, script } }, undefined,
+    { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} }));
+  assert.match(r, /Wrote a review of 4 beat\(s\)/);
+  assert.ok(Date.now() - started < 40000, 'much faster than playing the scene');
+  const html = fs.readFileSync(out, 'utf8');
+  const beats = (fs.readFileSync(script, 'utf8').match(/"op":"beat"/g) || []).length;
+  assert.equal(html.match(/<section class="beat"/g).length, beats);
+  assert.ok(html.match(/data:image\/png;base64,/g).length >= beats);
+  fs.rmSync(out);
 });
 
 test('every example replays without errors and validates clean', async () => {

@@ -1,6 +1,6 @@
 // @sem {"op":"scene","name":"river","reset":true}
 animateViewport({zoom: 1, pan: [0, 0]}, {duration: 0})
-// @sem {"op":"beat","name":"the river","viewer_task":{"type":"notice","target":"the name holds while every part changes"}}
+// @sem {"op":"beat","name":"the river","move":"a named thing and its parts","viewer_task":{"type":"notice","target":"the name holds while every part changes"}}
 // @sem {"op":"narrate","id":"n1","text":"A river, and the water in it.","sync":"with","words":7,"hold":3200,"wait":300}
 Promise.resolve(caption("A river, and the water in it.", {id: "n1", wait: 300}))
 // @sem {"op":"introduce","id":"river","kind":"text","text":"RIVER","fontSize":38,"boundary":"none","at":[700,130],"size":[140,67]}
@@ -11,7 +11,7 @@ Promise.all([drawOutline(addLabel("drop 1", 494, 400, {"uid":"d1","fontSize":16,
 drawOutline(addRect(700, 400, 523, 84, {"uid":"bed","originX":"center","originY":"center","rx":18,"ry":18,"stroke":"#666","strokeWidth":2,"strokeDashArray":[10,7]}), {duration: 1500})
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"flowing","viewer_task":{"type":"notice","target":"parts leave and arrive"}}
+// @sem {"op":"beat","name":"flowing","move":"the parts are replaced while the name holds","viewer_task":{"type":"notice","target":"parts leave and arrive"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n2","text":"The water moves on. New water comes.","sync":"with","words":7,"hold":3200,"wait":300}
 Promise.resolve(caption("The water moves on. New water comes.", {id: "n2", wait: 300}))
@@ -29,7 +29,7 @@ Promise.all([animate("d7", {left: 700, top: 400}, {duration: 1500}), animate("d6
 Promise.all([drawOutline(addLabel("drop 8", 494, 400, {"uid":"d8","fontSize":16,"boundary":"solid"}), {duration: 1500}), drawOutline(addLabel("drop 9", 597, 400, {"uid":"d9","fontSize":16,"boundary":"solid"}), {duration: 1500})])
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
-// @sem {"op":"beat","name":"same river?","viewer_task":{"type":"question","target":"is it still the same river?"}}
+// @sem {"op":"beat","name":"same river?","move":"the last original part leaves, and the name itself is questioned","viewer_task":{"type":"question","target":"is it still the same river?"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n3","text":"When the last of the first water has gone, is it the same river?","sync":"before","words":14,"hold":5900,"wait":5900}
 Promise.resolve(caption("When the last of the first water has gone, is it the same river?", {id: "n3", wait: 5900}))
@@ -43,7 +43,7 @@ Promise.all([drawOutline(addLabel("drop 10", 494, 400, {"uid":"d10","fontSize":1
 animate("river", {opacity: 0.15}, {duration: 450}).then(() => (setLabelText("river", "RIVER?"), setLabelBoundary("river", "dashed"))).then(() => animate("river", {opacity: 1}, {duration: 1050}))
 // @sem {"op":"pause","kind":"thinking","seconds":4}
 Promise.resolve(sleep(4))
-// @sem {"op":"beat","name":"me too","viewer_task":{"type":"integrate","target":"a self is held the same way"}}
+// @sem {"op":"beat","name":"me too","move":"the same pattern is turned on the self","viewer_task":{"type":"integrate","target":"a self is held the same way"}}
 Promise.resolve(caption(null))
 // @sem {"op":"narrate","id":"n4","text":"Now put yourself in its place.","sync":"with","words":6,"hold":2900,"wait":300}
 Promise.resolve(caption("Now put yourself in its place.", {id: "n4", wait: 300}))
