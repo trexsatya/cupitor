@@ -488,6 +488,35 @@ function sleep(x) {
   })
 }
 
+// Narration as a caption: text in a strip at the bottom of the screen (not
+// part of the canvas, so the camera doesn't move it). Resolves after
+// opts.wait ms, so a line can hold the script while it is read (or let the
+// next lines run under it with a short wait). caption(null) takes it away.
+// opts: id (the narration line it shows), wait (ms, default 0).
+function caption(text, opts) {
+  let el = document.getElementById('play-caption')
+  if (text == null) {
+    if (el) el.style.opacity = '0'
+    return Promise.resolve()
+  }
+  if (!el) {
+    el = document.createElement('div')
+    el.id = 'play-caption'
+    Object.assign(el.style, {
+      position: 'fixed', left: '50%', bottom: '90px', transform: 'translateX(-50%)', maxWidth: '68%',
+      zIndex: 999999, background: 'rgba(20,20,30,.82)', color: '#fff', font: '600 20px/1.35 system-ui, sans-serif',
+      padding: '10px 18px', borderRadius: '10px', textAlign: 'center', pointerEvents: 'none',
+      transition: 'opacity .2s', opacity: '0'
+    })
+    document.body.appendChild(el)
+  }
+  el.textContent = String(text)
+  el.dataset.id = (opts && opts.id) || ''
+  void el.offsetWidth // a new caption starts from its faded-out style, so it fades in
+  el.style.opacity = '1'
+  return sleep(((opts && opts.wait) || 0) / 1000)
+}
+
 function record() {
   $("#btnStart").click()
 }
@@ -646,6 +675,7 @@ function clear(layer) {
     oc.clear()
   }
   if (clearTxt) {
+    caption(null)
     $('#textillateContainer').css({backgroundColor: 'white'})
     $('#cinemaText').css({color: 'black'})
     $('#cinemaText').html('')

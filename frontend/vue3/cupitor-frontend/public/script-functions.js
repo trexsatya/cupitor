@@ -252,6 +252,10 @@ const SCRIPT_FUNCTIONS = [
         ['animateViewport({zoom, pan: [x, y]}, opts)', 'Move the camera: the view eases to that zoom and pan; the next line waits', [
             ['opts.duration', 'ms (default 800; 0 jumps)'],
         ]],
+        ['caption(text, opts)', 'Show a line of narration as a caption at the bottom of the screen until the next one; caption(null) hides it. Start the line with Promise.resolve(…) to make the next line wait opts.wait ms', [
+            ['opts.id', 'the narration line it shows'],
+            ['opts.wait', 'ms before the next line runs (default 0)'],
+        ]],
         ['clear(layer)', "Clear 'pc', 'oc' or 'txt'; no argument clears all"],
         ['findIfRequired(uid)', 'Look up an object by uid (also inside groups)'],
         ['pc  /  oc', 'Main and overlay canvases (Fabric.js)'],

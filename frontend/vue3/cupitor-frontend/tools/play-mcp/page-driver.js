@@ -103,7 +103,8 @@ export class PlayPage {
   // Plays `lines` (or the whole recorded script with `lines` null) and waits
   // until playback ends. With `record`, new lines are added to the recorded
   // script first. Returns the failures, numbered within what was played.
-  async play(lines, { record = true, clearFirst = false, timeoutMs = 120000 } = {}) {
+  // Narrated scenes run for minutes, so the wait is long.
+  async play(lines, { record = true, clearFirst = false, timeoutMs = 20 * 60000 } = {}) {
     const page = await this.open();
     const errorsBefore = this.pageErrors.length;
     const started = Date.now();

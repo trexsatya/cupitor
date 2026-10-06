@@ -23,9 +23,9 @@ after(async () => { await client.close(); });
 
 test('lists its tools', async () => {
   const names = (await client.listTools()).tools.map(t => t.name).sort();
-  assert.deepEqual(names, ['apply_semantic_action', 'get_script', 'inspect_scene', 'list_functions', 'list_objects',
-    'load_script_file', 'replace_script', 'replay_script', 'reset_page', 'run_script_lines', 'save_script_file',
-    'screenshot', 'undo_last_action', 'validate_scene']);
+  assert.deepEqual(names, ['apply_semantic_action', 'export_captions', 'get_script', 'inspect_scene', 'list_functions',
+    'list_objects', 'load_script_file', 'replace_script', 'replay_script', 'reset_page', 'run_script_lines',
+    'save_script_file', 'scene_timeline', 'screenshot', 'undo_last_action', 'validate_scene']);
 });
 
 test('function reference includes options', async () => {
@@ -120,11 +120,34 @@ test('camera, curved arrows that follow, and bringing back a removed concept, on
   assert.ok(b && b.visible && b.opacity === 1 && list.some(o => o.uid === 'a__b'), 'b is back with its arrows');
 });
 
+test('narration: a caption on the page, a timeline to read, a caption track to export', async () => {
+  await client.callTool({ name: 'reset_page', arguments: {} });
+  assert.match(textOf(await client.callTool({ name: 'apply_semantic_action', arguments: { actions: [
+    { op: 'scene', name: 'n' }, { op: 'beat', name: 'ask' },
+    { op: 'narrate', id: 'q1', text: 'Which box does it belong in?', seconds: 0.5 },
+    { op: 'introduce', id: 'a', text: 'A' }
+  ] } })), /No errors/);
+  // A line that fails unless the caption shows the narration, tagged with its id.
+  const check = 'Promise.resolve().then(() => { const c = document.getElementById("play-caption"); '
+    + 'if (c.textContent !== "Which box does it belong in?" || c.dataset.id !== "q1" || c.style.opacity !== "1") throw new Error("caption: " + c.textContent + " " + c.dataset.id + " " + c.style.opacity); })';
+  assert.match(textOf(await client.callTool({ name: 'run_script_lines', arguments: { record: false, lines: [check] } })), /No errors/);
+  assert.match(textOf(await client.callTool({ name: 'scene_timeline', arguments: {} })), /q1 \(before, 0\.5s\): "Which box does it belong in\?"/);
+  const file = path.join(os.tmpdir(), `play-mcp-${process.pid}.vtt`);
+  assert.match(textOf(await client.callTool({ name: 'export_captions', arguments: { path: file } })), /Wrote 1 caption/);
+  assert.match(fs.readFileSync(file, 'utf8'), /^WEBVTT\n\nq1\n00:00:00\.\d{3} --> /);
+  fs.rmSync(file);
+});
+
 test('every example replays without errors and validates clean', async () => {
   const dir = path.resolve(path.dirname(server), 'examples');
   for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.txt'))) {
     await client.callTool({ name: 'reset_page', arguments: {} });
-    assert.match(textOf(await client.callTool({ name: 'load_script_file', arguments: { path: path.join(dir, file) } })), /No errors/, file);
+    // Narrated scenes play for minutes: the server's progress heartbeat keeps a 30 s timeout from running out.
+    let beats = 0;
+    const loaded = await client.callTool({ name: 'load_script_file', arguments: { path: path.join(dir, file) } }, undefined,
+      { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => { beats++; } });
+    assert.match(textOf(loaded), /No errors/, file);
+    if (file === 'opening_question.txt') assert.ok(beats > 5, `progress was reported (${beats})`);
     const issues = textOf(await client.callTool({ name: 'validate_scene', arguments: {} }));
     // Small text is allowed: widening makes it small on purpose.
     assert.ok(!issues.split('\n').some(l => /^(error|warning):/.test(l) && !/hard to read/.test(l)), `${file}: ${issues}`);
@@ -133,7 +156,8 @@ test('every example replays without errors and validates clean', async () => {
 
 test('the opening-question example replays and rebuilds its scene', async () => {
   const file = path.resolve(path.dirname(server), 'examples/opening_question.txt');
-  assert.match(textOf(await client.callTool({ name: 'load_script_file', arguments: { path: file } })), /No errors/);
+  assert.match(textOf(await client.callTool({ name: 'load_script_file', arguments: { path: file } }, undefined,
+    { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} })), /No errors/);
   const scene = JSON.parse(textOf(await client.callTool({ name: 'inspect_scene', arguments: {} })));
   assert.equal(scene.beats.length, 7);
   assert.ok(scene.objects.every(o => o.live && o.live !== 'missing from canvas'));

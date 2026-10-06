@@ -18,8 +18,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import crypto from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { PlayPage, parseScriptFile } from './page-driver.js';
-import { ACTIONS, parseScene, planActions, inspect, validate, withoutLastAction } from './scene.js';
+import { ACTIONS, parseScene, planActions, inspect, validate, withoutLastAction, describeTimeline, captionsFile } from './scene.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -90,7 +91,8 @@ For each passage: name the narrator's move, set a viewer_task (notice/compare/pr
 reuse concepts already on screen, use the smallest visual model, reveal progressively, and treat pauses as real states.
 apply_semantic_action takes actions like {op: "introduce", id: "culture", text: "CULTURE", place: {near: "person", side: "left"}};
 the server places things, writes the script lines, and keeps each action as a "// @sem {...}" comment in the script,
-so the scene model always comes from the script itself. inspect_scene shows the model; validate_scene checks overlaps,
+so the scene model always comes from the script itself. Narration is {op: "narrate", text}: a caption timed to reading pace;
+scene_timeline shows narration and moves with their times; export_captions writes a caption track. inspect_scene shows the model; validate_scene checks overlaps,
 off-canvas objects, small text and missing objects; undo_last_action takes the last action back.
 
 Low-level scripting:
@@ -108,8 +110,25 @@ save_script_file to keep it (the page's Import button loads such files).`;
 let sceneQueue = Promise.resolve();
 const exclusive = fn => { const run = sceneQueue.then(fn); sceneQueue = run.catch(() => {}); return run; };
 
+// The request a tool call is serving, so playback can report progress on it.
+const currentRequest = new AsyncLocalStorage();
+const HEARTBEAT_MS = 5000;
+
 export function createServer(page, publicDir) {
   const server = new McpServer({ name: 'play-animations', version: '0.1.0' }, { instructions: INSTRUCTIONS });
+  const tool = (name, config, handler) => server.registerTool(name, config, (...args) => currentRequest.run(args[args.length - 1], () => handler(...args)));
+  // Playing a narrated scene takes minutes. While it plays, a client that asked
+  // for progress hears every few seconds, so it can keep waiting.
+  const play = async (lines, opts) => {
+    const extra = currentRequest.getStore();
+    const token = extra && extra._meta && extra._meta.progressToken;
+    if (token === undefined) return page.play(lines, opts);
+    const started = Date.now();
+    const beat = setInterval(() => {
+      extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: Math.round((Date.now() - started) / 1000), message: 'playing' } }).catch(() => {});
+    }, HEARTBEAT_MS);
+    try { return await page.play(lines, opts); } finally { clearInterval(beat); }
+  };
   const text = t => ({ content: [{ type: 'text', text: typeof t === 'string' ? t : JSON.stringify(t, null, 2) }] });
   const report = r => {
     const lines = [`Played ${r.played} line(s) in ${r.ms} ms.`];
@@ -119,25 +138,25 @@ export function createServer(page, publicDir) {
     return lines.join('\n');
   };
 
-  server.registerTool('list_functions', {
+  tool('list_functions', {
     description: 'Functions a play.html script can call, with their options. Optionally filter by a word (e.g. "tree", "text", "reveal").',
     inputSchema: { filter: z.string().optional() }
   }, async ({ filter }) => text(formatFunctions(loadFunctions(publicDir), filter)));
 
-  server.registerTool('run_script_lines', {
+  tool('run_script_lines', {
     description: 'Add script lines to the recorded script and play them in the page (each line waits as the player does). Returns failures per line.',
     inputSchema: {
       lines: z.array(z.string()).min(1).describe('JavaScript lines, one statement each, e.g. addRect(100,100,120,60,{"uid":"R1","fill":"#90caf9"})'),
       record: z.boolean().optional().describe('Add them to the recorded script (default true). False just tries them.')
     }
-  }, async ({ lines, record }) => text(report(await page.play(lines, { record: record !== false }))));
+  }, async ({ lines, record }) => text(report(await play(lines, { record: record !== false }))));
 
-  server.registerTool('list_objects', {
+  tool('list_objects', {
     description: 'Objects on the canvas (including inside groups): uid, type, bounding box, angle, visibility, colours, text, tree children and connectors.',
     inputSchema: { uid: z.string().optional().describe('Only this object') }
   }, async ({ uid }) => text(await page.objects(uid)));
 
-  server.registerTool('screenshot', {
+  tool('screenshot', {
     description: 'PNG of the canvas, or of one object with a margin around it.',
     inputSchema: { uid: z.string().optional(), margin: z.number().optional() }
   }, async ({ uid, margin }) => {
@@ -145,33 +164,33 @@ export function createServer(page, publicDir) {
     return { content: [{ type: 'image', data: png.toString('base64'), mimeType: 'image/png' }] };
   });
 
-  server.registerTool('get_script', {
+  tool('get_script', {
     description: 'The recorded script: every line so far, in order (1-based line numbers).'
   }, async () => {
     const lines = await page.script();
     return text(lines.map((l, i) => `${i + 1}: ${l}`).join('\n') || '(empty)');
   });
 
-  server.registerTool('replace_script', {
+  tool('replace_script', {
     description: 'Replace the whole recorded script (e.g. to edit or delete lines). Use replay_script to see the result.',
     inputSchema: { lines: z.array(z.string()) }
   }, async ({ lines }) => { await page.setScript(lines); return text(`Script has ${lines.length} line(s).`); });
 
-  server.registerTool('replay_script', {
+  tool('replay_script', {
     description: 'Clear the canvas and play the whole recorded script from the start. Returns failures per line.',
     inputSchema: { clear: z.boolean().optional().describe('Clear the canvas first (default true)') }
-  }, async ({ clear }) => text(report(await page.play(null, { clearFirst: clear !== false }))));
+  }, async ({ clear }) => text(report(await play(null, { clearFirst: clear !== false }))));
 
-  server.registerTool('load_script_file', {
+  tool('load_script_file', {
     description: 'Load a script file (plain lines, or a play.html Export) as the recorded script and replay it.',
     inputSchema: { path: z.string() }
   }, async ({ path: file }) => {
     const lines = parseScriptFile(fs.readFileSync(path.resolve(file), 'utf8'));
     await page.setScript(lines);
-    return text(report(await page.play(null, { clearFirst: true })));
+    return text(report(await play(null, { clearFirst: true })));
   });
 
-  server.registerTool('save_script_file', {
+  tool('save_script_file', {
     description: "Save the recorded script to a file: 'lines' (one line per row, as the script editor shows) or 'export' (what the page's Export button writes). Both load with the page's Import button.",
     inputSchema: { path: z.string(), format: z.enum(['lines', 'export']).optional() }
   }, async ({ path: file, format }) => {
@@ -183,7 +202,7 @@ export function createServer(page, publicDir) {
     return text(`Saved ${lines.length} line(s) to ${path.resolve(file)}.`);
   });
 
-  server.registerTool('apply_semantic_action', {
+  tool('apply_semantic_action', {
     description: 'Apply semantic actions in order (one beat, usually): the server lays them out, adds them to the script (each after a "// @sem" comment that records it) and plays them. If any action is invalid, none is applied. Actions:\n'
       + Object.entries(ACTIONS).map(([op, d]) => `- ${op}: ${d}`).join('\n')
       + '\npace (optional on most): instant | short | deliberate, or ms.',
@@ -191,33 +210,47 @@ export function createServer(page, publicDir) {
   }, async ({ actions }) => exclusive(async () => {
     const model = parseScene(await page.script());
     const { lines, records } = await planActions(model, resolvePictures(actions, publicDir), specs => page.measure(specs));
-    const result = report(await page.play(lines, { record: true }));
+    const result = report(await play(lines, { record: true }));
     const placed = records.flatMap(r => (r.at ? [`${r.id} at ${r.at.join(',')}`] : []).concat((r.items || r.arriving || []).map(i => `${i.id} at ${i.at.join(',')}`)));
     return text([result, placed.length ? `Placed: ${placed.join('; ')}` : ''].filter(Boolean).join('\n'));
   }));
 
-  server.registerTool('inspect_scene', {
+  tool('inspect_scene', {
     description: 'The scene model rebuilt from the script: scenes, beats, viewer tasks, concepts (role, text and its revisions, emphasis, boundary, groups, enclosures) and relationships, with each one\'s live box on the canvas.'
   }, async () => text(inspect(parseScene(await page.script()), await page.objects())));
 
-  server.registerTool('validate_scene', {
+  tool('validate_scene', {
     description: 'Checks the scene: overlapping concepts, things off the canvas, text too small to read, concepts or relationships missing from the canvas, enclosures that miss members or catch others, a scene with no viewer_task.'
   }, async () => {
-    const issues = validate(parseScene(await page.script()), await page.objects());
+    const lines = await page.script();
+    const issues = validate(parseScene(lines), await page.objects(), lines);
     return text(issues.length ? issues.map(i => `${i.level}: ${i.message}`).join('\n') : 'No issues found.');
   });
 
-  server.registerTool('undo_last_action', {
+  tool('scene_timeline', {
+    description: 'The script as it will play: each beat with its start time and length, its viewer task, the narration lines (with how long each is held) and the visual moves in order, with estimated times.'
+  }, async () => text(describeTimeline(await page.script())));
+
+  tool('export_captions', {
+    description: "Write the narration as a caption track timed to the script: 'vtt' (WebVTT, default; cue ids are the narration ids) or 'srt'.",
+    inputSchema: { path: z.string(), format: z.enum(['vtt', 'srt']).optional() }
+  }, async ({ path: file, format }) => {
+    const body = captionsFile(await page.script(), format || 'vtt');
+    fs.writeFileSync(path.resolve(file), body);
+    return text(`Wrote ${(body.match(/-->/g) || []).length} caption(s) to ${path.resolve(file)}.`);
+  });
+
+  tool('undo_last_action', {
     description: 'Remove the last semantic action (its "// @sem" comment and every line after it) from the script and replay the script.'
   }, async () => exclusive(async () => {
     const cut = withoutLastAction(await page.script());
     if (!cut) return text('No semantic action in the script.');
     await page.setScript(cut.lines);
-    const result = report(await page.play(null, { clearFirst: true }));
+    const result = report(await play(null, { clearFirst: true }));
     return text(`Removed ${cut.removed.length} line(s), starting with: ${cut.removed[0]}\n${result}`);
   }));
 
-  server.registerTool('reset_page', {
+  tool('reset_page', {
     description: 'Reload play.html: empty canvas and empty recorded script.'
   }, async () => { await page.reset(); return text('Page reloaded.'); });
 

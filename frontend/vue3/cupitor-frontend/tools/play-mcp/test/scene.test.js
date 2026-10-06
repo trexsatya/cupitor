@@ -1,7 +1,7 @@
 // The scene layer without a browser: sizes come from a fake measurer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyScene, parseScene, planActions, boxOf, validate, withoutLastAction, view, TAG } from '../scene.js';
+import { emptyScene, parseScene, planActions, boxOf, validate, withoutLastAction, view, TAG, lineTime, timeline, captionsFile, narrationIssues } from '../scene.js';
 
 const measure = async specs => specs.map(s => (s.kind === 'figure' ? [50, 130] : [String(s.text).length * 12 + 24, 50]));
 const plan = async (actions, model = emptyScene()) => ({ model, ...(await planActions(model, actions, measure)) });
@@ -286,4 +286,78 @@ test('review fixes: revived concepts go back to their place, group and arrows; d
   ]);
   const bed = boxOf(e.model.objects.bed);
   e.model.groups.g.members.map(id => boxOf(e.model.objects[id])).forEach(b => assert.ok(b.x > bed.x && b.x + b.w < bed.x + bed.w));
+});
+
+// ---- Milestone 3: narration
+
+test('narration: held for reading pace, ids for later audio, caption cleared by the next beat only when one shows', async () => {
+  const { model, lines, records } = await plan([
+    { op: 'beat', name: 'one' },
+    { op: 'narrate', text: 'Then the child asks something no dinner can answer.' },
+    { op: 'narrate', text: 'Look.', sync: 'with' },
+    { op: 'narrate', text: 'Slowly now.', seconds: 3 },
+    { op: 'beat', name: 'two' },
+    { op: 'beat', name: 'three' }
+  ]);
+  assert.deepEqual(records.filter(r => r.op === 'narrate').map(r => [r.id, r.words, r.hold, r.wait]),
+    [['n1', 9, 4000, 4000], ['n2', 1, 1500, 300], ['n3', 2, 3000, 3000]]);
+  assert.match(lines.find(l => l.includes('caption("Look."')), /^Promise\.resolve\(caption\("Look\.", \{id: "n2", wait: 300\}\)\)$/);
+  assert.equal(lines.filter(l => l === 'Promise.resolve(caption(null))').length, 1, 'only the beat after a caption clears it');
+  assert.deepEqual(parseScene(lines).narration, model.narration);
+  await assert.rejects(plan([{ op: 'narrate', id: 'n1', text: 'again' }], model), /"n1" is already used/);
+});
+
+test('timeline and caption track: times from the lines, cues from the narration', async () => {
+  assert.equal(lineTime('drawOutline(addLabel("duration: 9999", 1, 2, {}), {duration: 700})'), 975, 'text in quotes is not timing');
+  assert.equal(lineTime('animate("a", {opacity: 0}, {duration: 500}).then(() => removeByUid("a"))'), 600);
+  assert.equal(lineTime('pc.add(x)'), 1000);
+  const { lines } = await plan([
+    { op: 'scene', name: 's' },
+    { op: 'beat', name: 'b1' },
+    { op: 'narrate', text: 'One two three four five six seven eight nine.' },
+    { op: 'introduce', id: 'a', text: 'A' },
+    { op: 'narrate', text: 'And then.', sync: 'with' },
+    { op: 'pause', seconds: 2 }
+  ]);
+  const tl = timeline(lines);
+  const [n1, n2] = tl.narrations;
+  assert.equal(n1.start, 100, 'after the camera reset line');
+  assert.equal(n2.start, n1.start + 4100 + 975);
+  assert.equal(n2.shown, 400 + 2100);
+  assert.equal(captionsFile(lines), `WEBVTT\n\nn1\n00:00:00.100 --> 00:00:05.175\nOne two three four five six seven eight nine.\n\nn2\n00:00:05.175 --> 00:00:07.675\nAnd then.\n`);
+  assert.match(captionsFile(lines, 'srt'), /^1\n00:00:00,100 --> 00:00:05,175\n/);
+});
+
+test('narration checks: too quick to read, a question answered at once, a beat without words; none without narration', async () => {
+  const { lines } = await plan([
+    { op: 'beat', name: 'b1' },
+    { op: 'narrate', text: 'What is the point of this life?' },
+    { op: 'introduce', id: 'q', text: 'WHY?' },
+    { op: 'narrate', text: 'A long line of words that nobody could read in the time it is given here.', sync: 'with' },
+    { op: 'beat', name: 'b2' },
+    { op: 'introduce', id: 'r', text: 'R' }
+  ]);
+  const msgs = narrationIssues(lines).map(i => i.message).join('\n');
+  assert.match(msgs, /n2 shows for 0\.4s/);
+  assert.match(msgs, /n1 asks a question and the next move follows at once/);
+  assert.match(msgs, /beat "b2" moves without narration/);
+  assert.deepEqual(narrationIssues((await plan([{ op: 'beat', name: 'b' }, { op: 'introduce', id: 'a', text: 'A' }])).lines), []);
+});
+
+test('narration review fixes: comments add no time, cues end when their caption goes, quoted questions count', async () => {
+  const { lines } = await plan([
+    { op: 'beat', name: 'b1' },
+    { op: 'narrate', text: 'One two three four five six seven eight.', sync: 'with' },
+    { op: 'pause', seconds: 1 },
+    { op: 'beat', name: 'b2' },
+    { op: 'narrate', text: 'Why "now?"' },
+    { op: 'introduce', id: 'a', text: 'A' }
+  ]);
+  const commented = [...lines.slice(0, 3), 'Promise.resolve(sleep(1)) // sleep(9) duration: 9000', '/* a note', 'pc.add(x)', '*/', ...lines.slice(3)];
+  const [a, b] = [timeline(lines), timeline(commented)];
+  assert.equal(b.total, a.total + 1100, 'only the added sleep(1) line counts');
+  const cues = captionsFile(lines).split('\n\n').slice(1);
+  const time = c => c.split('\n')[1].split(' --> ').map(x => +x.slice(6).replace('.', ''));
+  assert.ok(time(cues[0])[1] <= time(cues[1])[0], 'cues do not overlap');
+  assert.match(narrationIssues(lines).map(i => i.message).join('\n'), /n2 asks a question/);
 });

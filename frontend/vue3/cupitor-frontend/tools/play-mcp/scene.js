@@ -14,6 +14,11 @@ export const PACE = { instant: 200, short: 700, deliberate: 1500 };
 // Pauses, in seconds.
 export const PAUSE = { short: 1, prediction: 2, thinking: 4 };
 export const TEXT_SIZE = { small: 16, normal: 22, large: 30, title: 38 };
+// Reading pace for narration captions: words per minute, the time to notice
+// a new caption, and the shortest and longest a line is held (ms).
+export const READ = { wpm: 160, lead: 600, min: 1500, max: 8000 };
+// How long a caption shown alongside what follows (sync 'with') holds the script.
+const WITH_LEAD = 300;
 export const VIEWER_TASKS = ['notice', 'compare', 'predict', 'infer', 'remember', 'question', 'integrate'];
 const OPACITY = { faint: 0.2, dim: 0.4 };
 const GAP = 60;       // room between an anchor and what is placed next to it
@@ -45,12 +50,13 @@ export const ACTIONS = {
   checkpoint: 'Remember how every concept, relationship and the camera are now: {name}.',
   return_to: 'Go back: {name} puts the concepts of a checkpoint back as they were (positions, text, emphasis, ones removed since) and the camera; {ids} brings back removed concepts where they were.',
   turnover: "Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text}] or [\"TEXT\"], direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.",
+  narrate: "A line of narration, shown as a caption: {text, id? (default n1, n2, ...; later audio for the line takes this id), sync?: before (default: the script waits while it is read, so what follows is revealed after it) | with (what follows plays while it shows), seconds? (hold it this long instead of the reading-pace estimate)}. A caption stays until the next narrate, beat or scene.",
   pause: `Hold still: {kind?: ${Object.keys(PAUSE).join('|')}, seconds?}.`,
   remove: 'Fade concepts out and delete them: {ids, pace?}.'
 };
 
 export function emptyScene() {
-  return { camera: { zoom: 1, pan: [0, 0] }, retired: {}, retiredRelations: {}, checkpoints: {}, scene: null, scenes: [], beat: null, beats: [], viewerTasks: [], objects: {}, relations: {}, groups: {}, log: [] };
+  return { narration: [], caption: null, camera: { zoom: 1, pan: [0, 0] }, retired: {}, retiredRelations: {}, checkpoints: {}, scene: null, scenes: [], beat: null, beats: [], viewerTasks: [], objects: {}, relations: {}, groups: {}, log: [] };
 }
 
 // ---- reading a script -------------------------------------------------------
@@ -123,11 +129,13 @@ export function applyRecord(model, rec) {
   };
   switch (rec.op) {
     case 'scene':
+      model.caption = null;
       if (rec.reset) model.camera = { zoom: 1, pan: [0, 0] };
       model.scene = rec.name; model.beat = null;
       model.scenes.push({ name: rec.name });
       break;
     case 'beat':
+      model.caption = null;
       model.beat = rec.name;
       model.beats.push({ name: rec.name, scene: model.scene });
       if (rec.viewer_task) model.viewerTasks.push({ ...rec.viewer_task, scene: model.scene, beat: rec.name });
@@ -247,6 +255,10 @@ export function applyRecord(model, rec) {
       }
       break;
     }
+    case 'narrate':
+      model.narration.push({ id: rec.id, text: rec.text, sync: rec.sync, words: rec.words, hold: rec.hold, wait: rec.wait, scene: model.scene, beat: model.beat });
+      model.caption = rec.id;
+      break;
     case 'pause':
       break;
     case 'remove':
@@ -444,6 +456,14 @@ function createLine(o, ms) {
   return `drawOutline(addLabel(${J(o.text)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, fontSize: o.fontSize, boundary: o.boundary })}), {duration: ${ms}})`;
 }
 
+export const wordCount = text => String(text).trim().split(/\s+/).filter(Boolean).length;
+// How long a line of `words` words takes to read, in ms.
+export const readingTime = words =>
+  Math.min(READ.max, Math.max(READ.min, Math.round((READ.lead + words * 60000 / READ.wpm) / 100) * 100));
+
+// A beat or scene starts without the last beat's caption.
+const clearCaption = model => (model.caption ? ['Promise.resolve(caption(null))'] : []);
+
 const cameraLine = (c, ms) => `animateViewport({zoom: ${c.zoom}, pan: [${c.pan[0]}, ${c.pan[1]}]}, {duration: ${ms}})`;
 
 // Centre and size of a box round boxes `bs`, `pad` px (on screen) outside them.
@@ -475,12 +495,12 @@ export async function planAction(model, a, measure) {
     case 'scene':
       if (!a.name) throw new Error('scene: name is required');
       // The first scene starts from the starting view, so a replay does too.
-      if (!model.scenes.length) return { record: { op, name: a.name, reset: true }, lines: [cameraLine({ zoom: 1, pan: [0, 0] }, 0)] };
-      return { record: { op, name: a.name }, lines: [] };
+      if (!model.scenes.length) return { record: { op, name: a.name, reset: true }, lines: [cameraLine({ zoom: 1, pan: [0, 0] }, 0), ...clearCaption(model)] };
+      return { record: { op, name: a.name }, lines: clearCaption(model) };
     case 'beat':
       if (!a.name) throw new Error('beat: name is required');
       if (a.viewer_task) checkTask(a.viewer_task);
-      return { record: { op, name: a.name, viewer_task: a.viewer_task }, lines: [] };
+      return { record: { op, name: a.name, viewer_task: a.viewer_task }, lines: clearCaption(model) };
     case 'viewer_task':
       checkTask(a);
       return { record: { op, type: a.type, target: a.target, constraint: a.constraint }, lines: [] };
@@ -832,6 +852,22 @@ export async function planAction(model, a, measure) {
       return { record: { op, ids: a.ids, reset: a.reset || undefined, camera }, lines: [cameraLine(camera, pace(a, 'deliberate'))] };
     }
 
+    case 'narrate': {
+      if (typeof a.text !== 'string' || !a.text.trim()) throw new Error('narrate: text is required');
+      const id = a.id || `n${model.narration.length + 1}`;
+      if (typeof id !== 'string' || !ID.test(id)) throw new Error(`narrate: id "${id}" must start with a letter and use letters, digits, _ or -`);
+      if (model.narration.some(n => n.id === id)) throw new Error(`narrate: id "${id}" is already used`);
+      const sync = a.sync || 'before';
+      if (!['before', 'with'].includes(sync)) throw new Error('narrate: sync must be before or with');
+      const words = wordCount(a.text);
+      const hold = a.seconds != null ? Math.round(num(a.seconds, 'narrate: seconds', 0.3, 60) * 1000) : readingTime(words);
+      const wait = sync === 'before' ? hold : Math.min(WITH_LEAD, hold);
+      return {
+        record: { op, id, text: a.text, sync, words, hold, wait },
+        lines: [`Promise.resolve(caption(${J(a.text)}, {id: ${J(id)}, wait: ${wait}}))`]
+      };
+    }
+
     case 'pause': {
       const kind = a.kind || 'short';
       const seconds = a.seconds != null ? num(a.seconds, 'pause: seconds', 0, 600) : PAUSE[kind];
@@ -900,6 +936,7 @@ export function inspect(model, live) {
   return {
     camera: model.camera, scene: model.scene, beat: model.beat, scenes: model.scenes.map(s => s.name), beats: model.beats,
     viewerTasks: model.viewerTasks, groups: Object.values(model.groups), objects, relations,
+    narration: model.narration.map(n => ({ id: n.id, text: n.text, sync: n.sync, hold: n.hold, beat: n.beat || undefined })),
     checkpoints: Object.keys(model.checkpoints), removed: Object.keys(model.retired),
     ...(extra.length ? { notInModel: extra } : {}),
     actions: model.log, ...(model.problems && model.problems.length ? { problems: model.problems } : {})
@@ -960,9 +997,168 @@ export function segmentHitsBox([x1, y1, x2, y2], b) {
   return true;
 }
 
-// Problems a reviewer would catch at a glance. `live` is list_objects output.
-export function validate(model, live) {
+// ---- timing -------------------------------------------------------------------
+
+// Lines the player waits for; any other code line is followed by a 1 s pause,
+// and a waited-for line by a 0.1 s gap.
+const AWAITED = /^(animate|Promise|connectObjects|reveal|drawOutline|revertState|timelineStep)/;
+
+// The code on each script line without its comments, as the player reads it
+// (public/fabric.play.js scriptCode): // to the end of the line and /* … */
+// across lines, not inside quotes; a /* never closed only comments out the
+// rest of its own line.
+export function scriptCode(lines) {
+  const scan = unclosed => {
+    let inBlock = false, opener = -1;
+    const code = lines.map((raw, i) => {
+      const s = String(raw);
+      let out = '', quote = null;
+      for (let k = 0; k < s.length; k++) {
+        const c = s[k], next = s[k + 1];
+        if (inBlock) { if (c === '*' && next === '/') { inBlock = false; k++; } continue; }
+        if (quote) {
+          out += c;
+          if (c === '\\') out += s[++k] || '';
+          else if (c === quote) quote = null;
+          continue;
+        }
+        if (c === '"' || c === "'" || c === '`') { quote = c; out += c; continue; }
+        if (c === '/' && next === '/') break;
+        if (c === '/' && next === '*') { inBlock = true; opener = i; k++; continue; }
+        out += c;
+      }
+      if (inBlock && unclosed.has(i)) inBlock = false;
+      return out.trim();
+    });
+    return inBlock ? scan(unclosed.add(opener)) : code;
+  };
+  return scan(new Set());
+}
+
+// About how long a line of script code (comments already taken out) takes to
+// play, in ms: the steps of a .then chain one after another, the parts of a
+// step at once.
+export function lineTime(line) {
+  const code = String(line).trim();
+  if (!code || code.startsWith('//')) return 0;
+  if (!AWAITED.test(code)) return 1000;
+  const bare = code.replace(/"(?:[^"\\]|\\.)*"/g, '""'); // text in quotes can't be read as timing
+  let ms = 0;
+  bare.split('.then(').forEach(step => {
+    let m = 0;
+    for (const [, n] of step.matchAll(/duration: (\d+)/g)) m = Math.max(m, +n * (step.includes('drawOutline') ? 1.25 : 1));
+    for (const [, n] of step.matchAll(/sleep\(([\d.]+)\)/g)) m = Math.max(m, +n * 1000);
+    for (const [, n] of step.matchAll(/wait: (\d+)/g)) m = Math.max(m, +n);
+    if (!m && /connectObjects\(/.test(step)) m = 800;
+    ms += m;
+  });
+  return Math.round(ms) + 100;
+}
+
+// When each action plays (ms from the start), grouped by beat, with narration
+// and how long each caption stays up.
+export function timeline(lines) {
+  const beats = [];
+  let beat = null, item = null, t = 0, scene = null;
+  const items = [];
+  const startBeat = name => { beat = { scene, beat: name, start: t, items: [] }; beats.push(beat); };
+  const code = scriptCode(lines || []);
+  (lines || []).forEach((raw, i) => {
+    const line = String(raw).trim();
+    if (line.startsWith(TAG.trim())) {
+      let rec;
+      try { rec = JSON.parse(line.slice(TAG.trim().length)); } catch (e) { return; }
+      if (rec.op === 'scene') { scene = rec.name; startBeat(null); }
+      else if (rec.op === 'beat') startBeat(rec.name);
+      else if (!beat) startBeat(null);
+      item = { op: rec.op, rec, start: t, duration: 0 };
+      if (rec.op !== 'scene' && rec.op !== 'beat') { beat.items.push(item); items.push(item); }
+      return;
+    }
+    const ms = lineTime(code[i]);
+    if (item) item.duration += ms;
+    t += ms;
+  });
+  beats.forEach((b, i) => { b.end = i + 1 < beats.length ? beats[i + 1].start : t; });
+  // A caption shows until the next caption, the next beat or scene, or the end.
+  const narrations = items.filter(it => it.op === 'narrate');
+  narrations.forEach(n => {
+    const nextCaption = narrations.find(m => m.start > n.start);
+    const nextBeat = beats.find(b => b.start > n.start && b.beat !== undefined);
+    n.shown = Math.min(nextCaption ? nextCaption.start : t, nextBeat ? nextBeat.start : t) - n.start;
+    n.lastOnScreen = !nextCaption && !nextBeat; // nothing takes it away before the end
+  });
+  return { total: t, beats: beats.filter(b => b.items.length || b.beat), narrations };
+}
+
+const clock = (ms, sep) => {
+  const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60, f = ms % 1000;
+  const p = (n, k = 2) => String(n).padStart(k, '0');
+  return `${p(h)}:${p(m)}:${p(s)}${sep}${p(f, 3)}`;
+};
+
+// A caption track (WebVTT, or SubRip with 'srt') of the script's narration:
+// each cue from when its caption appears until it goes (at least its hold).
+export function captionsFile(lines, format = 'vtt') {
+  if (!['vtt', 'srt'].includes(format)) throw new Error('format must be vtt or srt');
+  const cues = timeline(lines).narrations.map((n, i) => {
+    // A caption goes when the next one or a new beat takes it away; the last
+    // one, left on screen at the end, is held for its reading time.
+    const end = n.start + (n.lastOnScreen ? Math.max(n.shown, n.rec.hold) : n.shown);
+    return format === 'vtt'
+      ? `${n.rec.id}\n${clock(n.start, '.')} --> ${clock(end, '.')}\n${n.rec.text}\n`
+      : `${i + 1}\n${clock(n.start, ',')} --> ${clock(end, ',')}\n${n.rec.text}\n`;
+  });
+  return (format === 'vtt' ? 'WEBVTT\n\n' : '') + cues.join('\n');
+}
+
+// The script as narration and visual moves, beat by beat, for reading.
+export function describeTimeline(lines) {
+  const tl = timeline(lines);
+  const sec = ms => `${(ms / 1000).toFixed(1)}s`;
+  const out = [];
+  tl.beats.forEach(b => {
+    out.push(`t=${sec(b.start)} ${b.scene ? `[${b.scene}] ` : ''}${b.beat ? `beat "${b.beat}"` : '(before any beat)'} (${sec(b.end - b.start)})`);
+    b.items.forEach(it => {
+      const r = it.rec;
+      if (it.op === 'narrate') out.push(`  ${sec(it.start)}  ${r.id} (${r.sync}, ${sec(r.hold)}): "${r.text}"`);
+      else if (it.op === 'viewer_task') out.push(`  viewer task: ${r.type}: ${r.target}`);
+      else out.push(`  ${sec(it.start)}  ${describe(r, { scene: null, beat: null })}${it.duration ? ` (${sec(it.duration)})` : ''}`);
+    });
+  });
+  out.push(`total ${sec(tl.total)}`);
+  return out.join('\n');
+}
+
+// Narration problems: lines held too briefly to read, a question answered
+// before there is time to think, beats that move without words.
+export function narrationIssues(lines) {
   const issues = [];
+  const tl = timeline(lines);
+  if (!tl.narrations.length) return issues;
+  tl.narrations.forEach(n => {
+    const r = n.rec, need = readingTime(r.words);
+    if (r.sync === 'before' && r.hold < need * 0.8) issues.push({ level: 'warning', id: r.id, message: `narration ${r.id} is held ${(r.hold / 1000).toFixed(1)}s; reading it takes about ${(need / 1000).toFixed(1)}s` });
+    if (r.sync === 'with' && n.shown < need * 0.8) issues.push({ level: 'warning', id: r.id, message: `narration ${r.id} shows for ${(n.shown / 1000).toFixed(1)}s while the scene moves on; reading it takes about ${(need / 1000).toFixed(1)}s` });
+  });
+  const VISUAL = op => !['narrate', 'pause', 'viewer_task', 'checkpoint'].includes(op);
+  tl.beats.forEach(b => {
+    b.items.forEach((it, i) => {
+      const next = b.items[i + 1];
+      if (it.op === 'narrate' && /\?["'\u201d\u2019)\]]*\s*$/.test(it.rec.text) && next && VISUAL(next.op)) {
+        issues.push({ level: 'info', id: it.rec.id, message: `narration ${it.rec.id} asks a question and the next move follows at once: a prediction pause would leave time to think` });
+      }
+    });
+    if (b.beat && b.items.some(it => VISUAL(it.op)) && !b.items.some(it => it.op === 'narrate')) {
+      issues.push({ level: 'info', message: `beat "${b.beat}" moves without narration` });
+    }
+  });
+  return issues;
+}
+
+// Problems a reviewer would catch at a glance. `live` is list_objects output.
+export function validate(model, live, lines) {
+  const issues = lines ? narrationIssues(lines) : [];
   const liveBy = new Map((live || []).filter(o => o.uid && !o.parent).map(o => [o.uid, o]));
   (model.problems || []).forEach(p => issues.push({ level: 'error', message: p }));
   const objs = Object.values(model.objects);

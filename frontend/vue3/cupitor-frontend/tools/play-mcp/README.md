@@ -97,6 +97,7 @@ comment holds the positions and sizes the action settled on, so rebuilding never
 | `dissolve_boundary` | Categories become a continuum: their boxes lose their outlines while a colour band appears under them (place in-between cases first with `place: {between: [a, b]}`) |
 | `checkpoint`, `return_to` | Remember the scene; go back to it (places, text, emphasis, removed concepts, camera), or bring back removed concepts by id |
 | `turnover` | Members of a group leave while new ones arrive, the group (and its enclosure) holding |
+| `narrate` | A line of narration shown as a caption (see below) |
 | `pause`, `remove` | Hold still (`short`, `prediction`, `thinking`); fade out and delete |
 
 `examples/` holds whole scenes built this way. `opening_question.txt`: a child's question about the point of life,
@@ -104,13 +105,32 @@ practical answers enclosing it, competing arguments that shrink into a wider fra
 by step down to "I DON'T KNOW". Load it with `load_script_file` (or the page's **Import**) and use `inspect_scene`
 to see its beats and viewer tasks. `tree.txt` grows a web of conditions round a tree until the tree is one
 node among many; `spectrum.txt` puts in-between cases between DAY and NIGHT until the boundary dissolves
-into a band; `river.txt` keeps RIVER while every drop is replaced, then does the same for ME.
+into a band; `river.txt` keeps RIVER while every drop is replaced, then does the same for ME. All four are narrated.
 
 A picture's `src` can be a URL, a path under `public/`, or a local file; a local file elsewhere is copied into
 `public/play-assets/` so the script loads it by a path the page serves. Durations are classes (`instant`,
 `short`, `deliberate`) or ms. Layout keeps concepts in view, clear of each other and of the page's minimap; under a
 zoomed-out camera, new text is made larger in the scene so it reads at the size asked for. The first `scene`
 of a script resets the camera, so replays start from the same view.
+
+### Narration
+
+`{"op": "narrate", "text": "Then the child asks something no dinner can answer."}` shows the line as a caption at
+the bottom of the screen. It is held for its reading time (160 words a minute, plus a moment to notice it;
+1.5–8 s), or `seconds` if given. With `sync: "before"` (the default) the script waits while it is read, so what
+follows is revealed after it; with `sync: "with"` what follows plays while the caption shows. A caption stays
+until the next line, beat or scene. Each line has an id (`n1`, `n2`, … unless given), the key a recorded voice
+for that line can use later.
+
+Tools that play the script (`apply_semantic_action`, `run_script_lines`, `replay_script`, `load_script_file`,
+`undo_last_action`) return when playback ends, which for a narrated scene can take minutes. While they play,
+the server sends a progress notification every 5 s to clients that ask for progress, so those clients keep
+waiting; a client that doesn't reset its timeout on progress may need a longer tool timeout.
+
+`scene_timeline` lists each beat with its start time, its viewer task, its narration and its moves, with
+estimated times. `export_captions` writes the narration as a WebVTT (or SRT) caption track timed to the
+script. `validate_scene` also flags lines shown too briefly to read, a question followed at once by the next
+move (no time to think), and beats that move without narration.
 
 ## Tools
 
@@ -119,6 +139,8 @@ of a script resets the camera, so replays start from the same view.
 | `apply_semantic_action` | Apply semantic actions in order: laid out, written to the script with their `// @sem` comments, and played. If any action is invalid, none is applied. |
 | `inspect_scene` | The scene model rebuilt from the script, with each concept's live box on the canvas. |
 | `validate_scene` | Overlaps, things off the canvas or under the minimap, text too small to read, arrows running through other concepts, concepts missing from the canvas, enclosures that miss members or catch others, a scene without a viewer task. |
+| `scene_timeline` | The script as it plays: beats with start times, viewer tasks, narration and moves. |
+| `export_captions` | Write the narration as a caption track (`vtt`, default, or `srt`) timed to the script. |
 | `undo_last_action` | Remove the last semantic action and its lines, and replay. |
 | `list_functions` | Functions a script can call, with their options (from `public/script-functions.js`, the same list the page's **? Functions** popup shows). Optional word filter. |
 | `run_script_lines` | Add lines to the recorded script and play them; each line waits as the player does. Reports failures per line. `record: false` just tries them. |
