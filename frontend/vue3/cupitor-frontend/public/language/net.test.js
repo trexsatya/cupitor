@@ -219,7 +219,7 @@ describe("commitWithMerge", () => {
 
   test("file-not-found is silent — merge sees null remote", async () => {
     const utils = {
-      getFile: jest.fn(async () => { throw new Error("404"); }),
+      getFile: jest.fn(async () => { throw new Error("GitHub API error 404: Not Found"); }),
       putFile: jest.fn(async () => ({ content: "new", sha: "s" }))
     };
     const merge = jest.fn(async (remote) => `${remote}|done`);
@@ -228,6 +228,16 @@ describe("commitWithMerge", () => {
     }, { githubUtils: utils, log: () => {} });
     expect(merge).toHaveBeenCalledWith(null);
     expect(out).toBe("null|done");
+  });
+
+  test("a read that fails for another reason writes nothing", async () => {
+    const utils = {
+      getFile: jest.fn(async () => { throw new Error("GitHubProxy timeout (30000ms) for GET x"); }),
+      putFile: jest.fn()
+    };
+    await expect(commitWithMerge({ filePath: "f", commitMessage: "m", merge: async () => "x" },
+      { githubUtils: utils, log: () => {} })).rejects.toThrow(/timeout/);
+    expect(utils.putFile).not.toHaveBeenCalled();
   });
 
   test("exhausts retries and throws lastErr", async () => {
@@ -252,5 +262,18 @@ describe("commitWithMerge", () => {
     } finally {
       global.window = originalWindow;
     }
+  });
+});
+
+describe("parseRemoteList", () => {
+  const { parseRemoteList } = require("./net.js");
+  test("no file yet is an empty list; a list comes back as it is", () => {
+    expect(parseRemoteList(null)).toEqual([]);
+    expect(parseRemoteList("  ")).toEqual([]);
+    expect(parseRemoteList('[{"link":"a"}]')).toEqual([{ link: "a" }]);
+  });
+  test("text that is not a list throws instead of starting from nothing", () => {
+    expect(() => parseRemoteList("[{", "index.json")).toThrow(/index.json .*not valid JSON/);
+    expect(() => parseRemoteList("{}", "index.json")).toThrow(/not a list/);
   });
 });

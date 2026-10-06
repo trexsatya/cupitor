@@ -127,8 +127,10 @@ export async function commitWithMerge({
       const file = await githubUtils.getFile(owner, repo, filePath, '', branch)
       remoteContent = file.content
       sha = file.sha
-    } catch (_) {
-      // File doesn't exist on remote yet — we'll create it.
+    } catch (e) {
+      // File doesn't exist on remote yet — we'll create it. Any other failed
+      // read aborts: merging into "nothing" would overwrite the file.
+      if (!/GitHub API error 404\b/.test(String(e && e.message))) throw e
     }
     const merged = await merge(remoteContent)
     if (merged === null || merged === undefined) {
@@ -149,4 +151,15 @@ export async function commitWithMerge({
     }
   }
   throw lastErr || new Error(`commitWithMerge: exhausted retries on ${filePath}`)
+}
+
+// The server's copy of a JSON list, ready to be added to or filtered. No text
+// means the file does not exist yet: an empty list. Text that is not a list
+// throws — starting from an empty list would overwrite everything in it.
+export function parseRemoteList(text, label = 'file') {
+  if (text == null || !String(text).trim()) return []
+  let v
+  try { v = JSON.parse(text) } catch (e) { throw new Error(`${label} on GitHub is not valid JSON — nothing was changed`) }
+  if (!Array.isArray(v)) throw new Error(`${label} on GitHub is not a list — nothing was changed`)
+  return v
 }

@@ -136,7 +136,30 @@
     const query = branch ? `?ref=${encodeURIComponent(branch)}` : "";
     const path = `/repos/${owner}/${repo}/contents/${filePath}${query}`;
     const response = await _githubRequest("GET", path, null, token);
-    return { content: _b64decode(response.content), sha: response.sha };
+    let b64 = response.content || "";
+    // Over 1 MB the contents API leaves `content` empty (encoding "none").
+    // Taken as written, a non-empty file reads as empty and the next write
+    // replaces it with whatever was added to "nothing". The blob API serves
+    // the same bytes up to 100 MB.
+    if (!b64 && response.size > 0) {
+      // Its errors are reworded so a 404 here can't pass for "no such file".
+      let blob;
+      try {
+        blob = await _githubRequest("GET", `/repos/${owner}/${repo}/git/blobs/${response.sha}`, null, token);
+      } catch (e) {
+        throw new Error(`getFile: ${filePath} blob read failed (${String(e && e.message).replace(/^GitHub API error /, 'status ')})`);
+      }
+      b64 = blob.content || "";
+      if (!b64) throw new Error(`getFile: ${filePath} is ${response.size} bytes but came back empty`);
+    }
+    return { content: _b64decode(b64), sha: response.sha };
+  }
+
+  // A read that failed because the file is not there — as opposed to one that
+  // failed for any other reason (network, rate limit, proxy timeout), after
+  // which the file must not be treated as empty.
+  function isNotFound(err) {
+    return /GitHub API error 404\b/.test(String(err && err.message));
   }
 
   /**
@@ -171,8 +194,9 @@
     try {
       const existing = await getFile(owner, repo, filePath, token, branch);
       sha = existing.sha;
-    } catch (_) {
+    } catch (e) {
       // File does not exist yet — omit sha to create it
+      if (!isNotFound(e)) throw e;
     }
 
     return putFile(owner, repo, filePath, content, commitMessage, sha, token, branch);
@@ -201,8 +225,9 @@
     try {
       const existing = await getFile(owner, repo, filePath, "", branch);
       sha = existing.sha;
-    } catch (_) {
-      return null; // already gone
+    } catch (e) {
+      if (isNotFound(e)) return null; // already gone
+      throw e;
     }
     return deleteFile(owner, repo, filePath, commitMessage, sha, "", branch);
   }
@@ -287,16 +312,19 @@
             try {
               await getFile(owner, repo, f.path, token, branch);
               return { f, action: 'delete' };
-            } catch (_) {
-              return { f, action: 'skip' };  // already gone
+            } catch (e) {
+              if (isNotFound(e)) return { f, action: 'skip' };  // already gone
+              throw e;
             }
           }
           let currentText = null;
           try {
             const existing = await getFile(owner, repo, f.path, token, branch);
             currentText = existing.content;
-          } catch (_) {
-            // File doesn't exist yet — getContent will receive null.
+          } catch (e) {
+            // File doesn't exist yet — getContent will receive null. Any other
+            // failure aborts: building on "nothing" would overwrite the file.
+            if (!isNotFound(e)) throw e;
           }
           const newText = await f.getContent(currentText);
           if (newText === null || newText === undefined) {

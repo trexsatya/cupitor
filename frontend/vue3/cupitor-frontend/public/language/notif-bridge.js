@@ -8,6 +8,7 @@
 // `external_id`; internal row ids never cross the bridge.
 
 import { isManualItem } from "./recordings-merge.js";
+import { cardPlainText } from "./card-html.js";
 
 // A stable, name-independent key for a playlist's notification list. Stored on
 // the recording object (rec.notifKey) so it survives a playlist rename — the
@@ -60,10 +61,11 @@ export function buildNotifItems(items) {
       arr.forEach((it) => {
         if (!it || it.enabled === false) return; // disabled items don't notify
         if (isManualItem(it)) {
-          const src = clean(it.source);
+          // A notification is plain text: a card written as HTML gives its words.
+          const src = clean(cardPlainText(it.source));
           // Titled by source; fall back to target so a target-only card still
           // produces a valid (non-empty) item.
-          push(`card:${it.id || `${st}|${w}`}`, src || clean(it.target), src ? it.target : "");
+          push(`card:${it.id || `${st}|${w}`}`, src || clean(cardPlainText(it.target)), src ? cardPlainText(it.target) : "");
         } else {
           hasNonManual = true;
         }

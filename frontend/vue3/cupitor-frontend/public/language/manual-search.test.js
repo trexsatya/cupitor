@@ -1,4 +1,4 @@
-import { findManualCards, highlightMatchesHtml, renderManualResultsHtml } from './manual-search.js'
+import { findManualCards, highlightMatchesHtml, matchSnippetHtml, renderManualResultsHtml } from './manual-search.js'
 
 const card = (id, source, target, extra = {}) => ({ manual: true, id, source, target, ...extra })
 const playlist = (cards, extra = {}) => ({ items: { Manual: { Card: cards } }, ...extra })
@@ -56,21 +56,48 @@ describe('highlightMatchesHtml', () => {
   })
 })
 
-describe('renderManualResultsHtml', () => {
-  test('carries what the edit button needs, and the link when there is one', () => {
-    const html = renderManualResultsHtml(
-      [{ playlist: 'Sv "1"', item: card('x', 'hem', 'home', { mediaUrl: 'https://y.t/v?t=5' }) }],
-      'hem',
-    )
-    expect(html).toContain('data-playlist="Sv &quot;1&quot;"')
-    expect(html).toContain('data-id="x"')
-    expect(html).toContain('href="https://y.t/v?t=5"')
+describe('matchSnippetHtml', () => {
+  const long = 'Det var en gång en liten flicka som bodde i ett hus vid havet och hon tyckte mycket om att simma varje morgon'
+
+  test('cuts to the match at word boundaries, with … where it was cut', () => {
+    expect(matchSnippetHtml(long, 'hus', 15))
+      .toBe("…bodde i ett <span class='highlight'>hus</span> vid havet och…")
   })
 
-  test('a non-web link is not made clickable', () => {
-    const html = renderManualResultsHtml(
-      [{ playlist: 'P', item: card('x', 'hem', '', { mediaUrl: 'javascript:alert(1)' }) }], 'hem')
-    expect(html).not.toContain('href=')
+  test('no … at an end that was not cut', () => {
+    expect(matchSnippetHtml('Ett hus', 'hus')).toBe("Ett <span class='highlight'>hus</span>")
+  })
+
+  test('line breaks become one line', () => {
+    expect(matchSnippetHtml('Hon åt\nfrukost', 'frukost'))
+      .toBe("Hon åt <span class='highlight'>frukost</span>")
+  })
+
+  test('no match is null', () => {
+    expect(matchSnippetHtml('Ett hus', 'bil')).toBeNull()
+    expect(matchSnippetHtml('', 'hus')).toBeNull()
+  })
+})
+
+describe('renderManualResultsHtml', () => {
+  test('one clickable line per card, from whichever face matched', () => {
+    const html = renderManualResultsHtml([
+      { playlist: 'Sv "1"', item: card('x', 'Ett hus', 'A house') },
+      { playlist: 'P', item: card('y', 'Något', 'house rules') },
+    ], 'hus|house')
+    expect(html).toContain('data-playlist="Sv &quot;1&quot;"')
+    expect(html).toContain('data-id="x"')
+    expect(html).toContain("<span class='highlight'>hus</span>")
+    // Source matched for x, so its Target is not shown; y matched on Target.
+    expect(html).not.toContain('A house')
+    expect(html).toContain("<span class='highlight'>house</span> rules")
+    expect(html).toContain('2 manual cards')
+  })
+
+  test('folded renders the header only', () => {
+    const html = renderManualResultsHtml([{ playlist: 'P', item: card('x', 'hus', '') }], 'hus', { collapsed: true })
+    expect(html).toContain('lib-collapsed')
+    expect(html).toContain('aria-expanded="false"')
   })
 
   test('nothing found says so', () => {

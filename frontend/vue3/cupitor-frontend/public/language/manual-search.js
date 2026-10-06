@@ -8,6 +8,7 @@
 
 import { escapeHtml } from './html-utils.js'
 import { relaxSpaces } from './search-text.js'
+import { cardPlainText } from './card-html.js'
 
 // Where addManualEntry files cards: items['Manual']['Card'].
 const MANUAL_ST = 'Manual'
@@ -38,7 +39,8 @@ export function findManualCards(recordings, search, { limit = 200 } = {}) {
     if (!Array.isArray(bucket)) continue
     for (const item of bucket) {
       if (!item) continue
-      if (re.test(String(item.source || '')) || re.test(String(item.target || ''))) {
+      // The words, so a search for "span" does not find every card in colour.
+      if (re.test(cardPlainText(item.source)) || re.test(cardPlainText(item.target))) {
         out.push({ playlist: name, item })
         if (out.length >= limit) return out
       }
@@ -68,33 +70,47 @@ export function highlightMatchesHtml(text, search) {
   return parts.join('').replace(/\r?\n/g, '<br>')
 }
 
-function isWebLink(url) {
-  try {
-    const p = new URL(url).protocol
-    return p === 'http:' || p === 'https:'
-  } catch (_) {
-    return false
+// One line of `text` around the first match, as HTML: whitespace (line breaks
+// included) flattened to single spaces, cut to about `radius` characters
+// either side of the match at word boundaries, with … where it was cut, and
+// every match inside the cut highlighted. Null when nothing matches.
+export function matchSnippetHtml(text, search, radius = 40) {
+  const flat = String(text == null ? '' : text).replace(/\s+/g, ' ').trim()
+  const re = searchRegex(search, 'i')
+  const m = re && flat ? re.exec(flat) : null
+  if (!m) return null
+  const mEnd = m.index + m[0].length
+  let start = Math.max(0, m.index - radius)
+  let end = Math.min(flat.length, mEnd + radius)
+  if (start > 0) {
+    const sp = flat.indexOf(' ', start)
+    if (sp >= 0 && sp < m.index) start = sp + 1
   }
+  if (end < flat.length) {
+    const sp = flat.lastIndexOf(' ', end)
+    if (sp > mEnd) end = sp
+  }
+  return (start > 0 ? '…' : '') +
+    highlightMatchesHtml(flat.slice(start, end), search) +
+    (end < flat.length ? '…' : '')
 }
 
-export function renderManualResultsHtml(hits, search) {
+// The manual-card block for the results area: a header that folds it, and
+// one line per card — the matching face cut down to the match. `collapsed`
+// renders it folded; the header stays so the count is still visible.
+export function renderManualResultsHtml(hits, search, { collapsed = false } = {}) {
   if (!hits || !hits.length) {
     return '<div class="manual-results-empty">No manual cards match.</div>'
   }
   const rows = hits.map(({ playlist, item }) => {
-    const link = item.mediaUrl && isWebLink(item.mediaUrl)
-      ? `<a class="manual-hit-link" href="${escapeHtml(item.mediaUrl)}" target="_blank" rel="noopener" title="Open the card's link">🔗</a>`
-      : ''
-    return `<div class="manual-hit" data-playlist="${escapeHtml(playlist)}" data-id="${escapeHtml(item.id)}">
-      <div class="manual-hit-head">
-        <span class="manual-hit-playlist">${escapeHtml(playlist)}</span>
-        ${link}
-        <button type="button" class="manual-hit-edit lang-tool-btn" title="Edit this card">✎</button>
-      </div>
-      ${item.source ? `<div class="manual-hit-face">${highlightMatchesHtml(item.source, search)}</div>` : ''}
-      ${item.target ? `<div class="manual-hit-face manual-hit-target">${highlightMatchesHtml(item.target, search)}</div>` : ''}
-    </div>`
+    const snippet = matchSnippetHtml(cardPlainText(item.source), search) ||
+      matchSnippetHtml(cardPlainText(item.target), search) || ''
+    return `<button type="button" class="manual-hit" data-playlist="${escapeHtml(playlist)}" data-id="${escapeHtml(item.id)}" title="Practice this card">` +
+      `<span class="manual-hit-playlist">${escapeHtml(playlist)}</span> ${snippet}</button>`
   })
   const n = hits.length
-  return `<div class="manual-results-count">${n} manual card${n === 1 ? '' : 's'}</div>${rows.join('')}`
+  return `<div class="lib-wrap manual-wrap${collapsed ? ' lib-collapsed' : ''}">
+  <button type="button" class="manual-head" aria-expanded="${!collapsed}" title="Show / hide the manual cards"><span class="lib-caret">${collapsed ? '▸' : '▾'}</span> 🗂 ${n} manual card${n === 1 ? '' : 's'}</button>
+  <div class="lib-body">${rows.join('')}</div>
+</div>`
 }

@@ -7,6 +7,8 @@ import {
   resolveVirtualItems,
   itemsForRecording,
   recordingItemCountIn,
+  rowPositionIn,
+  youtubeStartSeconds,
   recordingItemCountByName,
   mergeRecordingCollections,
   mergeRecordingsLocalAuthoritative,
@@ -344,3 +346,35 @@ describe("mergeRecordingCollections", () => {
     expect(mergeRecordingCollections(null, a, fixedNow).p).toBe(a.p);
   });
 });
+
+describe('rowPositionIn', () => {
+  const items = {
+    huset: { hus: [{ id: 'a' }, { id: 'b' }], huset: [{ id: 'c' }] },
+    Manual: { Card: [{ id: 'm1' }, { id: 'm2', enabled: false }, { id: 'm3' }] },
+  }
+  test('counts rows as the review dialog lists them, disabled ones included', () => {
+    expect(rowPositionIn(items, 'huset', 'hus', 1)).toEqual({ pos: 2, total: 6 })
+    expect(rowPositionIn(items, 'Manual', 'Card', 2)).toEqual({ pos: 6, total: 6 })
+  })
+  test('an item that is not there has no position', () => {
+    expect(rowPositionIn(items, 'Manual', 'Card', 3)).toBeNull()
+    expect(rowPositionIn(items, 'nope', 'x', 0)).toBeNull()
+    expect(rowPositionIn(null, 'Manual', 'Card', 0)).toBeNull()
+  })
+})
+
+describe('youtubeStartSeconds', () => {
+  test('reads the start a link names', () => {
+    expect(youtubeStartSeconds('https://www.youtube.com/watch?v=abcdefghijk&t=95')).toBe(95)
+    expect(youtubeStartSeconds('https://youtu.be/abcdefghijk?t=95s')).toBe(95)
+    expect(youtubeStartSeconds('https://www.youtube.com/watch?t=1m35s&v=abcdefghijk')).toBe(95)
+    expect(youtubeStartSeconds('https://www.youtube.com/watch?v=abcdefghijk#t=1h2m3s')).toBe(3723)
+    expect(youtubeStartSeconds('https://www.youtube.com/embed/abcdefghijk?start=42')).toBe(42)
+  })
+  test('no start, or one it cannot read, is 0', () => {
+    expect(youtubeStartSeconds('https://www.youtube.com/watch?v=abcdefghijk')).toBe(0)
+    expect(youtubeStartSeconds('https://www.youtube.com/watch?v=abcdefghijk&t=')).toBe(0)
+    expect(youtubeStartSeconds('https://www.youtube.com/watch?v=abcdefghijk&tt=9')).toBe(0)
+    expect(youtubeStartSeconds(null)).toBe(0)
+  })
+})

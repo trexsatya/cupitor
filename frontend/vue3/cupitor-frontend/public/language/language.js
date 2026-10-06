@@ -118,6 +118,7 @@ import {
   runInBatches as _runInBatches,
   fetchWithRetry,
   commitWithMerge as _coreCommitWithMerge,
+  parseRemoteList,
 } from './net.js';
 import {
   isVirtual as _coreIsVirtual,
@@ -128,11 +129,19 @@ import {
   resolveVirtualItems as _coreResolveVirtualItems,
   itemsForRecording as _coreItemsForRecording,
   recordingItemCountIn as _recordingItemCountIn,
+  rowPositionIn as _rowPositionIn,
+  youtubeStartSeconds as _youtubeStartSeconds,
   recordingItemCountByName as _coreRecordingItemCountByName,
   mergeRecordingCollections as _coreMergeRecordingCollections,
   mergeRecordingsLocalAuthoritative as _coreMergeRecordingsLocalAuthoritative,
   bridgePlaylistsToRecordings as _coreBridgePlaylistsToRecordings,
 } from './recordings-merge.js';
+import {
+  threeWayRecordings as _threeWayRecordings,
+  mergePlaylist3 as _mergePlaylist3,
+  summarizePlaylistChange as _summarizePlaylistChange,
+  sameJson as _sameJson,
+} from './recordings-3way.js';
 import {
   CAPTION_NO_TRANSLATION,
   captionLinesFrom as _captionLinesFrom,
@@ -146,6 +155,7 @@ import {
   captionFieldOf as _captionFieldOf,
   cardTranslateDirection as _cardTranslateDirection,
 } from './caption-capture.js';
+import { cardHtml as _cardHtml, cardPlainText as _cardPlainText } from './card-html.js';
 import {
   findManualCards as _findManualCards,
   renderManualResultsHtml as _renderManualResultsHtml,
@@ -392,8 +402,10 @@ window.addEventListener('capturedSubtitle', (e) => {
 });
 
 window.addEventListener('cupitorDialog1Closed', () => {
-  // Close all dialogs
+  // Close all dialogs — except one marked to wait for the user's return: the
+  // playlist a capture was just filed in (see _keepFiledPlaylistOpen).
   $('.ui-dialog-content').each(function () {
+    if (this.getAttribute('data-keep-on-host-close') === '1') return
     try { $(this).dialog('close') } catch (_) {}
   })
 });
@@ -2171,6 +2183,8 @@ window._appSettings = {
   autoLibrarySearch: false,
   // List matching manual cards (from every playlist) with the search results.
   includeManualInSearch: false,
+  // Whether that block starts folded. Sticky, like libraryResultsCollapsed.
+  manualResultsCollapsed: false,
   // Whether the book-results block inside #result starts folded. Sticky so a
   // user who keeps the books out of the way isn't re-shown them every search.
   libraryResultsCollapsed: false,
@@ -2710,7 +2724,8 @@ async function _commitPracticeLogToGithub() {
       commitMessage: 'practice-log: update weekly plan/notes',
       merge: (remoteText) => {
         let remote = null
-        try { remote = remoteText ? JSON.parse(remoteText) : null } catch (_) { remote = null }
+        // Unreadable text on the server is not "no log yet": writing over it would lose it.
+        if (remoteText && remoteText.trim()) remote = JSON.parse(remoteText)
         const local = JSON.parse(baseline)
         const merged = _prunePracticeLogWeeks(_mergePracticeLog(remote, local))
         // Refresh in-memory state so the dialog reflects the merged result.
@@ -3159,7 +3174,9 @@ $('document').ready(e => {
   });
 
   $(document).on("click", function(e) {
-    if ($(".ui-dialog:visible").length && !$(e.target).closest(".ui-dialog,.show-info-btn,#reviewCapturedBtn").length) {
+    // CKEditor draws its link balloon and menus on <body>, outside the dialog
+    // it belongs to — a click in them is not a click outside.
+    if ($(".ui-dialog:visible").length && !$(e.target).closest(".ui-dialog,.show-info-btn,#reviewCapturedBtn,.ck-body-wrapper,.ck").length) {
       // The add-vocabulary dialog stages user input (typed words, picked
       // category) that's easy to lose to a stray outside click — keep it
       // open and require an explicit X / Escape / Save to dismiss. Same
@@ -3170,7 +3187,7 @@ $('document').ready(e => {
       // dialog when Practice is the caller, so the very click that opens it
       // arrives here and would close it again — it stages a picked radio
       // option too, which a stray click should not throw away.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog,#replaceItemDialog").dialog("close");
+      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#richCardEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog,#replaceItemDialog").dialog("close");
     }
   });
 
@@ -8586,9 +8603,7 @@ async function saveStarredLines() {
       filePath,
       commitMessage: `srt: update starred lines for ${window.mediaBeingPlayed.link}`,
       merge: (remoteText) => {
-        let arr = []
-        try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
-        if (!Array.isArray(arr)) arr = []
+        const arr = parseRemoteList(remoteText, filePath)
         const idx = arr.findIndex(it => it.link === window.mediaBeingPlayed.link)
         if (idx >= 0) arr[idx] = record
         else arr.push(record)
@@ -8750,19 +8765,18 @@ function buildCapturedSubtitleBaseName(detail) {
 async function fetchSrtIndexEntry(videoId) {
   const lang = getLangFromUrl()
   const filePath = `db/language/${lang.fullName}/srts/index.json`
+  let text = null
   try {
     const file = await window.GitHubUtils.getFile(
       'trexsatya', 'trexsatya.github.io', filePath, '', 'gh-pages'
     )
-    const arr = JSON.parse(file.content)
-    if (Array.isArray(arr)) {
-      const hit = arr.find(it => it.link === videoId)
-      return hit ? { ...hit, name: _nfc(hit.name) } : null
-    }
+    text = file.content
   } catch (e) {
-    console.warn('fetchSrtIndexEntry failed', e)
+    // A failed read is not "this video is new".
+    if (!/GitHub API error 404\b/.test(String(e && e.message))) throw e
   }
-  return null
+  const hit = parseRemoteList(text, 'index.json').find(it => it.link === videoId)
+  return hit ? { ...hit, name: _nfc(hit.name) } : null
 }
 
 function inferSubtitleSource(detail) {
@@ -8837,9 +8851,7 @@ async function deleteSelectedMedia() {
       filePath: `${srtsDir}/index.json`,
       commitMessage: `srts: remove index entry for ${link}`,
       merge: (remoteText) => {
-        let arr = []
-        try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
-        if (!Array.isArray(arr)) arr = []
+        const arr = parseRemoteList(remoteText, 'index.json')
         const filtered = arr.filter(it => it.link !== link)
         return JSON.stringify(filtered, null, 2)
       }
@@ -8995,9 +9007,7 @@ async function _deleteDuplicateSrtEntry(link, baseName) {
     filePath: `${srtsDir}/index.json`,
     commitMessage: `srts: remove duplicate index entry for ${link} / ${baseName}`,
     merge: (remoteText) => {
-      let arr = []
-      try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
-      if (!Array.isArray(arr)) arr = []
+      const arr = parseRemoteList(remoteText, 'index.json')
       const idx = arr.findIndex(it => it && it.link === link && _nfc(it.name) === baseName)
       if (idx >= 0) arr.splice(idx, 1)
       return JSON.stringify(arr, null, 2)
@@ -9334,9 +9344,7 @@ async function _deleteVideoByLink(link) {
     filePath: `${srtsDir}/index.json`,
     commitMessage: `srts: remove index entry for ${link} (unavailable)`,
     merge: (remoteText) => {
-      let arr = []
-      try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
-      if (!Array.isArray(arr)) arr = []
+      const arr = parseRemoteList(remoteText, 'index.json')
       const filtered = arr.filter(it => it.link !== link)
       return JSON.stringify(filtered, null, 2)
     }
@@ -9365,9 +9373,7 @@ async function upsertSrtIndexEntry(videoId, baseName, source) {
     filePath,
     commitMessage: `srts: upsert index entry for ${videoId}`,
     merge: (remoteText) => {
-      let arr = []
-      try { arr = remoteText ? JSON.parse(remoteText) : [] } catch (_) {}
-      if (!Array.isArray(arr)) arr = []
+      const arr = parseRemoteList(remoteText, 'index.json')
       const idx = arr.findIndex(it => it.link === videoId)
       if (idx >= 0) arr[idx] = { ...arr[idx], ...record }
       else arr.push(record)
@@ -9526,9 +9532,7 @@ async function deleteChannel(channel) {
   files.push({
     path: `${srtsDir}/index.json`,
     getContent: (current) => {
-      let arr = []
-      try { arr = current ? JSON.parse(current) : [] } catch (_) {}
-      if (!Array.isArray(arr)) arr = []
+      const arr = parseRemoteList(current, 'index.json')
       const linksToDrop = new Set(videos.map(v => v.link))
       const filtered = arr.filter(it => !linksToDrop.has(it.link))
       return JSON.stringify(filtered, null, 2) + '\n'
@@ -9981,16 +9985,19 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
   // the full index, which caused the timeouts the user hit on Push All.
   // ──────────────────────────────────────────────────────────────────────
   _report('fetching-index')
-  let indexArr = []
+  // The index names each video's files. Without it every capture of a known
+  // video would be filed under a new name, so only a missing index counts as
+  // empty; any other failed read stops the push.
+  let indexText = null
   try {
     const file = await window.GitHubUtils.getFile(
       'trexsatya', 'trexsatya.github.io', indexPath, '', 'gh-pages'
     )
-    indexArr = JSON.parse(file.content)
-    if (!Array.isArray(indexArr)) indexArr = []
+    indexText = file.content
   } catch (e) {
-    console.warn('pushCapturedSubtitlesBatched: index.json fetch failed', e)
+    if (!/GitHub API error 404\b/.test(String(e && e.message))) throw e
   }
+  const indexArr = parseRemoteList(indexText, 'index.json')
   const indexByLink = new Map(indexArr.map(it => [it.link, it]))
 
   // Per (videoId, langCode): collect aggregate entries, pick a baseName +
@@ -10105,9 +10112,7 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
     fileSpecs.push({
       path: indexPath,
       getContent: (current) => {
-        let arr = []
-        try { arr = current ? JSON.parse(current) : [] } catch (_) {}
-        if (!Array.isArray(arr)) arr = []
+        const arr = parseRemoteList(current, 'index.json')
         indexAdditions.forEach(ne => {
           if (!arr.find(it => it.link === ne.link)) arr.push(ne)
         })
@@ -10877,7 +10882,9 @@ function _renderManualSearchResults() {
   const term = _librarySearchTerm()
   if (!on || !term || !String(term).trim()) { $out.html(''); return }
   const hits = _findManualCards(window._recordings, term)
-  $out.html(_renderManualResultsHtml(hits, term))
+  $out.html(_renderManualResultsHtml(hits, term, {
+    collapsed: !!(window._appSettings && window._appSettings.manualResultsCollapsed),
+  }))
 }
 
 $(document).on('change', '#manualSearchIncludeCb', e => {
@@ -10886,18 +10893,31 @@ $(document).on('change', '#manualSearchIncludeCb', e => {
   saveAppSettings()
   _renderManualSearchResults()
 })
-$(document).on('click', '#manualResults .manual-hit-edit', e => {
-  const $hit = $(e.target).closest('.manual-hit')
+// A card opens on its own in Practice — just that card, not its playlist.
+$(document).on('click', '#manualResults .manual-hit', e => {
+  const $hit = $(e.currentTarget)
   const name = $hit.attr('data-playlist')
   const id = $hit.attr('data-id')
   const rec = window._recordings && window._recordings[name]
   const bucket = rec && rec.items && rec.items[MANUAL_ST] && rec.items[MANUAL_ST][MANUAL_W]
-  const it = Array.isArray(bucket) && bucket.find(x => x && String(x.id) === id)
-  if (!it) { _renderManualSearchResults(); return }  // gone since it was listed
-  _openManualEntryEditor(name, it)
+  const idx = Array.isArray(bucket) ? bucket.findIndex(x => x && String(x.id) === id) : -1
+  if (idx < 0) { _renderManualSearchResults(); return }  // gone since it was listed
+  openPracticeMode({
+    queue: [{ ...bucket[idx], _recName: name, _st: MANUAL_ST, _w: MANUAL_W, _idx: idx }],
+    single: true,
+  })
 })
-// The editor may have changed or deleted the card the results show.
-$(document).on('dialogclose', '#manualEntryEditor', () => _renderManualSearchResults())
+// Fold the block. Sticky across searches, like the book results.
+$(document).on('click', '#manualResults .manual-head', e => {
+  const $wrap = $(e.currentTarget).closest('.manual-wrap')
+  const collapsed = !$wrap.hasClass('lib-collapsed')
+  $wrap.toggleClass('lib-collapsed', collapsed)
+  $(e.currentTarget).attr('aria-expanded', String(!collapsed))
+    .find('.lib-caret').text(collapsed ? '▸' : '▾')
+  if (!window._appSettings) window._appSettings = {}
+  window._appSettings.manualResultsCollapsed = collapsed
+  saveAppSettings()
+})
 
 // The results bar lives inside #result, which every render() rebuilds — so
 // re-insert it (and restore the last results) whenever it has been wiped.
@@ -11094,38 +11114,273 @@ async function loadRecordingsFromGithub() {
   }
 }
 
+// ── Three-way sync ────────────────────────────────────────────────────────
+// The server's copy as of the last time this device and the server agreed (a
+// pull at load, or a Sync). Comparing each side to it tells "deleted here"
+// apart from "added there", and finds the playlists changed on BOTH sides —
+// those are put to the person rather than merged behind their back.
+// Per file, since each language syncs its own recordings.json.
+function _recordingsBaseKey() { return 'cupitor:recordings:base:' + recordingsFilePath() }
+function _loadRecordingsBase() {
+  try {
+    const raw = localStorage.getItem(_recordingsBaseKey())
+    const v = raw ? JSON.parse(raw) : null
+    return v && typeof v === 'object' ? v : null
+  } catch (_) { return null }
+}
+function _saveRecordingsBase(coll) {
+  try { localStorage.setItem(_recordingsBaseKey(), JSON.stringify(coll || {})) } catch (_) {}
+}
+
+// The server's copy, fresh. Through the GitHub API, which always answers with
+// the latest commit; raw.githubusercontent.com caches for minutes, and a stale
+// copy looks exactly like "the server undid your changes" to a three-way
+// merge. `fresh` says which one answered.
+async function _fetchRemoteRecordings() {
+  const path = recordingsFilePath()
+  const parse = text => {
+    const v = text && String(text).trim() ? JSON.parse(text) : {}
+    return v && typeof v === 'object' ? v : null
+  }
+  try {
+    if (typeof window.GitHubProxy !== 'undefined' && window.GitHubUtils) {
+      // Inside the app: its proxy holds the token.
+      const f = await window.GitHubUtils.getFile('trexsatya', 'trexsatya.github.io', path, '', 'gh-pages')
+      // An empty body is not "the server has nothing" — the contents API
+      // sends one for a file over 1 MB — so it does not count as a fresh read.
+      const text = f && f.content
+      const data = text && String(text).trim() ? parse(text) : null
+      if (data) return { data, fresh: true }
+    } else {
+      // A plain browser: the repository is public, so the API answers without
+      // a token — and asking GitHubUtils would prompt for one on every load.
+      const r = await fetch(`https://api.github.com/repos/trexsatya/trexsatya.github.io/contents/${path}?ref=gh-pages`,
+        { headers: { Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' })
+      if (r.status === 404) return { data: {}, fresh: true }
+      if (r.ok) {
+        const data = parse(await r.text())
+        if (data) return { data, fresh: true }
+      }
+    }
+  } catch (e) {
+    console.warn('[recordings] fresh read failed, using the cached copy', e)
+  }
+  return { data: await loadRecordingsFromGithub(), fresh: false }
+}
+
+function _describePlaylistSide(base, side) {
+  const c = _summarizePlaylistChange(base, side)
+  if (c.state === 'deleted') return 'deleted'
+  if (c.state === 'new') return `new · ${c.total} item${c.total === 1 ? '' : 's'}`
+  const parts = []
+  if (c.added) parts.push(`+${c.added} added`)
+  if (c.removed) parts.push(`−${c.removed} removed`)
+  if (c.edited) parts.push(`✎${c.edited} edited`)
+  if (!parts.length) parts.push('settings changed')
+  return `${parts.join(', ')} · ${c.total} item${c.total === 1 ? '' : 's'}`
+}
+
+// Ask which version of each conflicting playlist to keep. Resolves to
+// { [name]: 'mine' | 'server' | 'merge' }, or null when the dialog is closed
+// without choosing — the caller decides what "not now" means.
+function _askRecordingConflicts(conflicts, when) {
+  return new Promise(resolve => {
+    let $d = $('#recConflictDialog')
+    if ($d.length) { try { $d.dialog('destroy') } catch (_) {} $d.remove() }
+    $d = $('<div id="recConflictDialog" class="rec-conflict"></div>').appendTo('body')
+    const rows = conflicts.map((c, i) => {
+      const canMerge = !!(c.local && c.remote)
+      const pick = canMerge ? 'merge' : 'mine'
+      const opt = (val, label, disabled) =>
+        `<label class="rec-conflict-opt${disabled ? ' disabled' : ''}"><input type="radio" name="rc${i}" value="${val}"${val === pick ? ' checked' : ''}${disabled ? ' disabled' : ''}> ${label}</label>`
+      return `<div class="rec-conflict-row" data-i="${i}">
+        <div class="rec-conflict-name">${_.escape(c.name)}</div>
+        <div class="rec-conflict-side">This device: ${_.escape(_describePlaylistSide(c.base, c.local))}</div>
+        <div class="rec-conflict-side">GitHub: ${_.escape(_describePlaylistSide(c.base, c.remote))}</div>
+        <div class="rec-conflict-opts">
+          ${opt('mine', 'Keep this device')}
+          ${opt('server', 'Keep GitHub')}
+          ${opt('merge', 'Merge both', !canMerge)}
+        </div>
+      </div>`
+    }).join('')
+    $d.html(`<p class="rec-conflict-intro">${conflicts.length === 1 ? 'This playlist was' : 'These playlists were'} changed both here and on GitHub since the last sync.
+      <b>Merge both</b> keeps what was added on either side and what was deleted on either side; a card edited on both keeps the newer edit.</p>${rows}`)
+    let settled = false
+    const done = v => { if (settled) return; settled = true; resolve(v) }
+    const _vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight || 600
+    $d.dialog({
+      title: 'Playlists changed in two places',
+      width: Math.min(560, $(window).width() - 24),
+      maxHeight: Math.max(240, _vh - 60),
+      modal: true,
+      draggable: false,
+      resizable: false,
+      position: { my: 'center top', at: 'center top+30', of: window },
+      buttons: [
+        { text: when === 'sync' ? 'Apply and sync' : 'Apply', click() {
+          const out = {}
+          conflicts.forEach((c, i) => { out[c.name] = $d.find(`input[name="rc${i}"]:checked`).val() || 'mine' })
+          done(out)
+          $d.dialog('close')
+        } },
+        { text: when === 'sync' ? 'Cancel sync' : 'Decide later', click() { $d.dialog('close') } },
+      ],
+      close() { done(null); try { $d.dialog('destroy') } catch (_) {} $d.remove() },
+    })
+  })
+}
+
+// Fold the choices into `merged`. Returns the cards that were edited on both
+// sides of a merge, so the person can be told where to look.
+function _applyRecordingChoices(merged, conflicts, choices) {
+  const collided = []
+  conflicts.forEach(c => {
+    const choice = choices[c.name]
+    let out
+    if (choice === 'server') out = c.remote
+    else if (choice === 'merge' && c.local && c.remote) {
+      const m = _mergePlaylist3(c.base, c.local, c.remote)
+      out = m.playlist
+      m.collisions.forEach(k => collided.push(`${c.name}: ${k}`))
+    } else out = c.local
+    if (out) merged[c.name] = out
+    else delete merged[c.name]
+  })
+  return collided
+}
+
+function _reportRecordingCollisions(collided) {
+  if (!collided.length) return
+  alert(`Merged. ${collided.length} item${collided.length === 1 ? ' was' : 's were'} changed on both sides — the newer version was kept:\n\n` +
+    collided.slice(0, 15).join('\n') + (collided.length > 15 ? `\n…and ${collided.length - 15} more` : ''))
+}
+
+function _adoptRecordings(persistable) {
+  const externals = {}
+  Object.keys(window._recordings || {}).forEach(n => {
+    if (window._recordings[n] && window._recordings[n].external) externals[n] = window._recordings[n]
+  })
+  window._recordings = Object.assign({}, persistable, externals)
+  if (!Object.keys(window._recordings).length) {
+    window._recordings[REC_DEFAULT_NAME] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }
+  }
+  // The open playlist may have been deleted on the other side — move to the
+  // first one left, as deleting it here does, so a capture never lands in a
+  // playlist that no longer exists.
+  let cur = window._recording.currentName
+  if (!window._recordings[cur]) cur = window._recording.currentName = listRecordings()[0]
+  window._recording.virtual = _isVirtual(cur)
+  window._recording.items = window._recording.virtual
+    ? _resolveVirtualItems(cur)
+    : window._recordings[cur].items
+}
+
 // Merge whatever's currently on github into the local in-memory collection.
 // Called once during boot so the user's other-device captures show up. Does
 // NOT clear the dirty flag — local captures since last sync stay dirty.
 async function _mergeRemoteRecordingsIntoLocal() {
-  const remote = await loadRecordingsFromGithub()
+  const { data: remote, fresh } = await _fetchRemoteRecordings()
   if (!remote) return
-  const merged = mergeRecordingCollections(window._recordings || {}, remote)
-  window._recordings = merged
+  const base = _loadRecordingsBase()
+  if (!fresh || !base) {
+    // No last-synced copy yet (first run), or only the cached copy answered:
+    // the plain union, which can bring a deleted item back but can never
+    // drop anything. A fresh copy becomes the starting point for next time.
+    window._recordings = mergeRecordingCollections(window._recordings || {}, remote)
+    if (fresh) _saveRecordingsBase(remote)
+  } else {
+    const local = _persistableRecordings()
+    const { merged, conflicts } = _threeWayRecordings(base, local, remote)
+    // The server's copy is what this device now agrees it has seen…
+    const nextBase = Object.assign({}, remote)
+    let collided = []
+    if (conflicts.length) {
+      const choices = await _askRecordingConflicts(conflicts, 'load')
+      if (choices) {
+        collided = _applyRecordingChoices(merged, conflicts, choices)
+      } else {
+        // "Decide later": keep this device's version for now, and keep the
+        // old last-synced copy for these playlists, so they still count as
+        // changed on both sides and are asked about again at Sync rather
+        // than quietly pushed over the server's changes.
+        conflicts.forEach(c => {
+          if (c.local) merged[c.name] = c.local
+          if (c.base) nextBase[c.name] = c.base
+          else delete nextBase[c.name]
+        })
+      }
+    }
+    _adoptRecordings(merged)
+    _saveRecordingsBase(nextBase)
+    if (!_sameJson(merged, remote)) {
+      window._recordingsDirty = true
+      try { localStorage.setItem(REC_DIRTY_KEY, '1') } catch (_) {}
+    }
+    _reportRecordingCollisions(collided)
+  }
   // Remote was successfully pulled in this session — a Sync may now treat the
   // local playlist SET as authoritative (so deletions propagate) without risk
   // of wiping remote playlists we simply never loaded.
   window._recordingsRemoteMerged = true
   // Keep the active recording's items pointer in sync with the merged entry.
   const cur = window._recording.currentName
-  if (merged[cur]) window._recording.items = merged[cur].items
+  if (window._recordings[cur]) window._recording.items = window._recordings[cur].items
   // Persist without bumping dirty.
   try {
-    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(window._recordings))
+    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
   } catch (_) {}
+  _refreshRecordingSyncBtn()
   _updateRecordingUI()
   _markCapturedButtons()
 }
 
+const SYNC_CANCELLED = 'sync cancelled'
 async function syncRecordingsToGithub() {
   const filePath = recordingsFilePath()
+  let pushed = null
+  let syncCollisions = []
+  // Taken once: a 409 retry runs the merge again, and it must start from what
+  // this device had, not from the previous attempt's result. Choices are kept
+  // per playlist for the same reason — a retry must not ask twice.
+  const localSnapshot = JSON.parse(JSON.stringify(_persistableRecordings()))
+  const chosen = {}
   const $btn = $('#recRecSync')
   $btn.prop('disabled', true).addClass('syncing')
   try {
     await commitWithMerge({
       filePath,
       commitMessage: 'recordings: sync via language tool',
-      merge: (remoteText) => {
+      merge: async (remoteText) => {
+        const base = _loadRecordingsBase()
+        if (base) {
+          // Three-way against the last-synced copy: one-sided changes go
+          // through, deletions included. So an answer that cannot be read must
+          // never pass for "the server has nothing" — that would delete every
+          // playlist. commitWithMerge hands over null for a failed read as
+          // well as a missing file; with a last-synced copy on record, the
+          // file existed, so null is a failed read.
+          let remote = null
+          try { remote = remoteText && remoteText.trim() ? JSON.parse(remoteText) : null } catch (_) {}
+          if (!remote || typeof remote !== 'object') {
+            if (Object.keys(base).length) {
+              throw new Error("couldn't read GitHub's copy of the playlists — nothing was changed. Try again.")
+            }
+            remote = {}
+          }
+          const { merged, conflicts } = _threeWayRecordings(base, localSnapshot, remote)
+          const open = conflicts.filter(c => !chosen[c.name])
+          if (open.length) {
+            const choices = await _askRecordingConflicts(open, 'sync')
+            if (!choices) throw new Error(SYNC_CANCELLED)
+            Object.assign(chosen, choices)
+          }
+          syncCollisions = _applyRecordingChoices(merged, conflicts, chosen)
+          // Adopted only once the push has gone through (below), so a failed
+          // sync leaves this device exactly as it was.
+          pushed = merged
+          return JSON.stringify(merged, null, 2) + '\n'
+        }
         let remote = {}
         try { remote = remoteText ? JSON.parse(remoteText) : {} } catch (_) {}
         if (!remote || typeof remote !== 'object') remote = {}
@@ -11149,12 +11404,22 @@ async function syncRecordingsToGithub() {
         const cur = window._recording.currentName
         if (window._recordings[cur]) window._recording.items = window._recordings[cur].items
         try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(merged)) } catch (_) {}
+        pushed = merged
         return JSON.stringify(merged, null, 2) + '\n'
       }
     })
+    // What was just pushed is what the server has now.
+    if (pushed) {
+      _adoptRecordings(pushed)
+      try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings())) } catch (_) {}
+      _saveRecordingsBase(pushed)
+    }
+    _reportRecordingCollisions(syncCollisions)
     window._recordingsDirty = false
     try { localStorage.removeItem(REC_DIRTY_KEY) } catch (_) {}
   } catch (e) {
+    // Choosing not to decide is not a failure worth an alert.
+    if (e && e.message === SYNC_CANCELLED) return
     console.error('syncRecordingsToGithub failed', e)
     alert('Sync failed: ' + (e && e.message || e))
     throw e
@@ -12098,6 +12363,23 @@ const _captionPreLoad = []
 // Returns true when the host has been told, so the caller knows not to say it
 // here as well. Outside Cupitor there is no host and no dialog to close, so it
 // returns false and the caller speaks for itself.
+// Open the playlist a capture (subtitle lines or a video note) was just filed
+// in, marked so that closing the study dialog leaves it open. The mark goes
+// the moment the user closes it, so every other open of the dialog behaves
+// as before.
+function _keepFiledPlaylistOpen(name) {
+  try {
+    if (window._recording.currentName !== name) selectRecording(name)
+    openRecordingReviewDialog()
+    $('#recordingReviewDialog').attr('data-keep-on-host-close', '1')
+  } catch (e) {
+    console.warn('[caption] could not show the playlist', e)
+  }
+}
+$(document).on('dialogclose', '#recordingReviewDialog', function () {
+  this.removeAttribute('data-keep-on-host-close')
+})
+
 function _notifyCaptureFiled(playlistName, message) {
   if (!window.PlaylistBridge ||
       typeof window.PlaylistBridge.postMessage !== 'function') return false
@@ -12221,6 +12503,11 @@ function _openCaptionCaptureDialog(cap, lines) {
         window._appSettings.captionPlaylist = name
         saveAppSettings()
         $(this).dialog('close')
+        // Show where it went, and keep it there: the host is about to close
+        // the study dialog to hand the video back, and the playlist should
+        // still be open when the user comes back to it. Not while more blocks
+        // are queued — the next picker is about to open.
+        if (res && !_captionQueue.length) _keepFiledPlaylistOpen(name)
         // Hand the screen back to whatever the user was doing when they sent
         // this — but not while more blocks are queued, because the close
         // callback is about to open the next picker and closing now would
@@ -12234,6 +12521,13 @@ function _openCaptionCaptureDialog(cap, lines) {
     }
   })
   _renderHint()
+  // In front of anything already open — the playlist a previous capture was
+  // filed in is kept open on purpose (_keepFiledPlaylistOpen). Every dialog
+  // is pinned at one z-index (language.css), so the later one in the page
+  // paints on top, and this dialog is created once and reused: without the
+  // move it opens behind that playlist. Modal, so its backdrop goes too.
+  const $wrap = $d.closest('.ui-dialog')
+  $('body').append($wrap.prevAll('.ui-widget-overlay').first(), $wrap)
   $d.find('input[name="capCapField"]').off('change').on('change', _renderHint)
   $d.find('#capCapNew').off('click').on('click', () => {
     const raw = prompt('New playlist name:', cap.title ? String(cap.title).slice(0, 60) : '')
@@ -13476,6 +13770,38 @@ function _cardHasPlayableMedia(it) {
 // Whether the card has a video for the embedded player to show. The stored
 // fields are what a saved card carries; the URL is parsed as well, because a
 // card written before those fields existed has only the link.
+// Load a manual card's YouTube link into the embedded player at the moment
+// the link names (`t=95`, as a captured caption or video note writes it) —
+// not at the start of the video. A video already loaded is just moved there.
+async function _cueManualCardVideo(it) {
+  const media = _parseMediaUrl(it && it.mediaUrl)
+  const id = (it && it.mediaVideoId) || (media && media.kind === 'youtube' ? media.id : null)
+  if (!id) return
+  // Only the latest cue may move the player: a cue still loading when another
+  // card asks for its own video must not seek that one to its time.
+  const tok = window._manualCueToken = (window._manualCueToken || 0) + 1
+  window.mediaSelected = { link: id, source: 'link' }
+  await changeMediaIfNeededTo(window.mediaSelected)
+  if (tok !== window._manualCueToken) return
+  // Always made, so a video already loaded also goes back to the start a link
+  // without a time means. A seek issued while a fresh video is still starting
+  // up is dropped by the player, so it is repeated until it holds — but only
+  // while this is still the latest cue and the player still holds this video,
+  // never onto another card's.
+  const target = _youtubeStartSeconds(it.mediaUrl)
+  const mine = () => {
+    if (tok !== window._manualCueToken) return false
+    try { const d = window.ytPlayer.getVideoData(); return !d || !d.video_id || d.video_id === id } catch (_) { return true }
+  }
+  for (let i = 0; i < 20 && mine(); i++) {
+    let ct = null
+    try { ct = window.ytPlayer.getCurrentTime() } catch (_) {}
+    if (ct != null && Math.abs(ct - target) <= 1.5) return
+    if (i % 5 === 0) { try { window.ytPlayer.seekTo(target, true) } catch (_) {} }
+    await new Promise(r => setTimeout(r, 150))
+  }
+}
+
 function _cardHasVideoLink(it) {
   if (it && it.mediaKind === 'youtube' && it.mediaVideoId) return true
   const media = _parseMediaUrl(it && it.mediaUrl)
@@ -13596,6 +13922,116 @@ function _askTranslateDirection(studiedName, suggested) {
   })
 }
 
+// ── Rich-text editing of a card face (CKEditor 5) ────────────────────────
+// Loaded on first use only — it is a large script and most cards never need
+// it. 41.4.2 is the last classic build that runs without a licence key.
+const CKEDITOR_SRC = 'https://cdn.jsdelivr.net/npm/@ckeditor/ckeditor5-build-classic@41.4.2/build/ckeditor.js'
+let _ckLoading = null
+function _loadCkEditor() {
+  if (window.ClassicEditor) return Promise.resolve(window.ClassicEditor)
+  if (_ckLoading) return _ckLoading
+  _ckLoading = new Promise((resolve, reject) => {
+    const sc = document.createElement('script')
+    sc.src = CKEDITOR_SRC
+    sc.onload = () => window.ClassicEditor ? resolve(window.ClassicEditor) : reject(new Error('CKEditor did not load'))
+    sc.onerror = () => reject(new Error('Could not download the editor — are you online?'))
+    document.head.appendChild(sc)
+  }).catch(e => { _ckLoading = null; throw e })
+  return _ckLoading
+}
+
+// What a face holds, as the editor's starting HTML. A plain face becomes one
+// paragraph per line, so its line breaks survive the round trip.
+function _faceToEditorHtml(text) {
+  const t = String(text || '')
+  if (_cardHtml(t).isHtml) return t
+  return t.split('\n').map(l => `<p>${_.escape(l)}</p>`).join('')
+}
+
+// Edit a face of the card being edited in CKEditor; Apply writes the HTML
+// back into its box (the box's own preview then shows it), Cancel leaves the
+// box as it was. Nothing is saved until the card editor's own Save.
+// jQuery UI's modal dialogs take focus back from anything outside a dialog,
+// and CKEditor draws its link balloon and menus on <body> — so typing a link
+// URL would be impossible. Let those through.
+if ($.ui && $.ui.dialog && !$.ui.dialog.prototype._cupCkAllowed) {
+  $.widget('ui.dialog', $.ui.dialog, {
+    _cupCkAllowed: true,
+    _allowInteraction(event) {
+      if ($(event.target).closest('.ck, .ck-body-wrapper').length) return true
+      return this._super(event)
+    },
+  })
+}
+
+let _richEditorSeq = 0
+async function _openRichCardEditor($box, label) {
+  // A second open while the first is still downloading or starting wins; the
+  // first notices it is stale and stands down instead of leaking an editor.
+  const seq = ++_richEditorSeq
+  let ClassicEditor
+  try { ClassicEditor = await _loadCkEditor() } catch (e) { alert(e.message); return }
+  if (seq !== _richEditorSeq) return
+  let $d = $('#richCardEditor')
+  // Closed properly, so its editor is destroyed by its own close handler.
+  if ($d.length) { try { $d.dialog('close') } catch (_) {} $('#richCardEditor').remove() }
+  $d = $('<div id="richCardEditor"><div class="rce-host"></div></div>').appendTo('body')
+  let editor = null
+  let initial = null
+  const done = () => {
+    if (editor) { editor.destroy().catch(() => {}); editor = null }
+    try { $d.dialog('destroy') } catch (_) {}
+    $d.remove()
+  }
+  $d.dialog({
+    title: `${label} — formatting`,
+    width: Math.min(640, $(window).width() - 16),
+    modal: true,
+    // Escape belongs to the editor (closing a menu or a link balloon), not to
+    // this dialog — closing here would throw the edit away.
+    closeOnEscape: false,
+    draggable: false,
+    resizable: false,
+    position: { my: 'center top', at: 'center top+20', of: window },
+    buttons: {
+      Apply() {
+        // Untouched, the box keeps what it had — a plain face is not turned
+        // into paragraphs just by being looked at.
+        if (editor && editor.getData() !== initial) $box.val(editor.getData()).trigger('input')
+        $d.dialog('close')
+      },
+      Cancel() { $d.dialog('close') },
+    },
+    close: done,
+  })
+  // Over the card editor, which is lifted to 100020 to clear Practice and the
+  // player — at the usual dialog height this opened behind it. Its backdrop
+  // comes up with it, just under.
+  try {
+    $d.closest('.ui-dialog')[0].style.setProperty('z-index', '100030', 'important')
+    const ov = $d.dialog('instance').overlay
+    if (ov && ov[0]) ov[0].style.setProperty('z-index', '100029', 'important')
+  } catch (_) {}
+  try {
+    editor = await ClassicEditor.create($d.find('.rce-host')[0], {
+      // No image upload — it needs a server — so it is left off the toolbar.
+      toolbar: ['heading', '|', 'bold', 'italic', 'link', 'bulletedList', 'numberedList',
+        'blockQuote', 'insertTable', '|', 'undo', 'redo'],
+    })
+    // Closed (or replaced) while the editor was starting: nothing will
+    // destroy this one later, so do it now.
+    if (seq !== _richEditorSeq || !document.body.contains($d[0])) { editor.destroy().catch(() => {}); editor = null; return }
+    editor.setData(_faceToEditorHtml($box.val()))
+    initial = editor.getData()
+    editor.editing.view.focus()
+  } catch (e) {
+    console.warn('[rich editor] could not start', e)
+    alert('The rich editor could not start: ' + (e && e.message || e))
+    $d.dialog('close')
+  }
+}
+window._openRichCardEditor = _openRichCardEditor
+
 function _openManualEntryEditor(playlistName, existing) {
   // A minimized editor still holds an unsaved card, and the body is rebuilt
   // below — opening on top of it would throw that card away without asking.
@@ -13646,6 +14082,8 @@ function _openManualEntryEditor(playlistName, existing) {
     ? `<button type="button" id="${id}" class="mee-tr">🌐</button>`
     : ''
   const trNote = (id) => showTranslate ? `<span id="${id}" class="mee-tr-note" role="status" aria-live="polite"></span>` : ''
+  // Opens the face in a rich-text editor (CKEditor) that writes HTML back.
+  const richBtn = (id) => `<button type="button" id="${id}" class="mee-rich" title="Edit with formatting (bold, lists, links…)">🖋</button>`
   // One independent recorder per face, so Source and Target can each carry
   // their own pronunciation.
   const audioBar = (prefix) => showAudio ? `
@@ -13658,15 +14096,17 @@ function _openManualEntryEditor(playlistName, existing) {
       </div>` : ''
   $d.html(`
     <div class="mee-row">
-      <div class="mee-lbl-row"><label class="mee-lbl" for="meeSource">Source</label>${micBtn('meeSttSource')}${trBtn('meeTrSource', 'source')}${trNote('meeTrSourceNote')}</div>
-      <textarea id="meeSource" class="mee-input" rows="2" placeholder="Question, source text, prompt…"></textarea>
+      <div class="mee-lbl-row"><label class="mee-lbl" for="meeSource">Source</label>${micBtn('meeSttSource')}${trBtn('meeTrSource', 'source')}${richBtn('meeRichSource')}${trNote('meeTrSourceNote')}</div>
+      <textarea id="meeSource" class="mee-input" rows="2" placeholder="Question, source text, prompt… (HTML allowed)"></textarea>
+      <div id="meeSourcePreview" class="mee-html-preview card-html" style="display:none;"></div>
       ${audioBar('meeSrcAudio')}</div>
     <div class="mee-swap-row">
       <button type="button" id="meeSwap" class="mee-swap" title="Swap Source and Target — text and recordings change places">⇅<span class="mee-swap-lbl">Swap</span></button>
     </div>
     <div class="mee-row">
-      <div class="mee-lbl-row"><label class="mee-lbl" for="meeTarget">Target</label>${micBtn('meeSttTarget')}${trBtn('meeTrTarget', 'target')}${trNote('meeTrTargetNote')}</div>
-      <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation…"></textarea>
+      <div class="mee-lbl-row"><label class="mee-lbl" for="meeTarget">Target</label>${micBtn('meeSttTarget')}${trBtn('meeTrTarget', 'target')}${richBtn('meeRichTarget')}${trNote('meeTrTargetNote')}</div>
+      <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation… (HTML allowed)"></textarea>
+      <div id="meeTargetPreview" class="mee-html-preview card-html" style="display:none;"></div>
       ${audioBar('meeTgtAudio')}</div>
     <div class="mee-row"><label class="mee-lbl">Media URL <span class="mee-lbl-hint">(optional — YouTube link or any web link)</span></label>
       <input id="meeMedia" class="mee-input" type="url" placeholder="https://…"></div>
@@ -13677,6 +14117,29 @@ function _openManualEntryEditor(playlistName, existing) {
   `)
   $d.find('#meeSource').val(existing ? existing.source || '' : '')
   $d.find('#meeTarget').val(existing ? existing.target || '' : '')
+  $d.find('#meeRichSource').on('click', () => _openRichCardEditor($d.find('#meeSource'), 'Source'))
+  $d.find('#meeRichTarget').on('click', () => _openRichCardEditor($d.find('#meeTarget'), 'Target'))
+  // A face written as HTML shows how it will look, under its box. Polled
+  // rather than wired to 'input': translation, dictation and Swap all write
+  // the boxes without firing it.
+  {
+    const last = {}
+    const paint = () => {
+      ;['Source', 'Target'].forEach(f => {
+        const v = String($d.find('#mee' + f).val() || '')
+        if (last[f] === v) return
+        last[f] = v
+        const { html, isHtml } = _cardHtml(v)
+        $d.find('#mee' + f + 'Preview').html(isHtml ? html : '').toggle(isHtml)
+      })
+    }
+    paint()
+    clearInterval(window._meePreviewTimer)
+    window._meePreviewTimer = setInterval(() => {
+      if (!document.body.contains($d[0])) { clearInterval(window._meePreviewTimer); return }
+      if ($d.is(':visible')) paint()
+    }, 400)
+  }
   // Don't surface a file:// URL in the Media URL text input — the audio
   // recorder section below represents it instead. Showing the raw file://
   // path would let the user accidentally edit it into nonsense.
@@ -14040,7 +14503,8 @@ function _openManualEntryEditor(playlistName, existing) {
       // snapshot back when it ends, so anything written underneath it is lost
       // — and a partial transcript is not the text the user meant to translate.
       if (_speechListening) { note('Stop dictation first.', '#a00'); return }
-      const text = String($from.val() || '').trim()
+      // The words, not the markup — a translator handed tags mangles them.
+      const text = _cardPlainText(String($from.val() || '')).trim()
       if (!text) { note(`Nothing in ${fromLbl} to translate.`, '#a00'); return }
       // Asked once per card, then remembered. Nothing has been touched yet, so
       // backing out of the picker leaves the card exactly as it was.
@@ -15322,8 +15786,8 @@ function openRecordingReviewDialog() {
             // Truncate BEFORE escaping. The other way round, a cut can land
             // inside an entity — `&amp;` becomes `&am` — and the row emits
             // broken markup.
-            const _srcShown = _truncatePreview(it.source, REC_ITEM_TEXT_MAX)
-            const _tgtShown = _truncatePreview(it.target, REC_ITEM_TEXT_MAX)
+            const _srcShown = _truncatePreview(_cardPlainText(it.source), REC_ITEM_TEXT_MAX)
+            const _tgtShown = _truncatePreview(_cardPlainText(it.target), REC_ITEM_TEXT_MAX)
             const src = _.escape(_srcShown)
             const tgt = _.escape(_tgtShown)
             // Carry more of the card on hover — but only when the row is
@@ -15332,8 +15796,8 @@ function openRecordingReviewDialog() {
             // suppresses whatever tooltip an ancestor would have shown.
             // Capped too: a native tooltip holding a whole caption block is
             // its own kind of unusable.
-            const _srcFull = _truncatePreview(it.source, REC_ITEM_TITLE_MAX)
-            const _tgtFull = _truncatePreview(it.target, REC_ITEM_TITLE_MAX)
+            const _srcFull = _truncatePreview(_cardPlainText(it.source), REC_ITEM_TITLE_MAX)
+            const _tgtFull = _truncatePreview(_cardPlainText(it.target), REC_ITEM_TITLE_MAX)
             const _cardShown = `${_srcShown}${_tgtShown ? ` → ${_tgtShown}` : ''}`
             const _cardFull  = `${_srcFull}${_tgtFull ? ` → ${_tgtFull}` : ''}`
             const _titleAttr = (_cardFull && _cardFull !== _cardShown)
@@ -16372,8 +16836,12 @@ function _renderPlayingManualText(item) {
   const tgt = String(second.text || '').trim()
   if (!src && !tgt) { $sub.html(''); return }
   let html = '<div class="rec-ps-row rec-ps-active">'
-  if (src) html += `<div class="rec-ps-main">${_.escape(src)}</div>`
-  if (tgt) html += `<div class="rec-ps-sec">${_.escape(tgt)}</div>`
+  const face = (cls, t) => {
+    const { html: h, isHtml } = _cardHtml(t)
+    return `<div class="${cls}${isHtml ? ' card-html' : ''}">${h}</div>`
+  }
+  if (src) html += face('rec-ps-main', src)
+  if (tgt) html += face('rec-ps-sec', tgt)
   html += '</div>'
   $sub.html(html)
 }
@@ -16537,6 +17005,15 @@ function _activeExtId() {
 }
 
 function _setOpenView(view) {
+  // A lone card from the search results is not worth reopening after a
+  // restart, and reopening Practice there would line up the whole playlist —
+  // so record what is underneath it instead: a deck still playing, or nothing.
+  if (view === 'practice' && window._practiceSingle) {
+    if (window._playingRecording) { _setOpenView('player'); return }
+    _postViewStateToHost('')
+    try { localStorage.removeItem(OPEN_VIEW_KEY) } catch (_) {}
+    return
+  }
   _postViewStateToHost(view)
   try {
     localStorage.setItem(OPEN_VIEW_KEY, JSON.stringify({
@@ -16945,7 +17422,7 @@ function _postMediaState(playing) {
     // blind would title every video item "YouTube" on the lockscreen.
     const it = window._recPlayCurrentItem
     const raw = !it ? ''
-      : _isManualItem(it) ? (_cardFacesInOrder(it).map(f => f.text).find(Boolean) || '')
+      : _isManualItem(it) ? (_cardFacesInOrder(it).map(f => _cardPlainText(f.text)).find(Boolean) || '')
       : (it.word || it.searchText || '')
     const title = String(raw).split('\n')[0].trim() || document.title || 'Cupitor'
     b.postMessage(JSON.stringify({ playing: !!playing, title: title.slice(0, 120) }))
@@ -17994,6 +18471,9 @@ async function _showPracticeAudioPanel(it) {
   // and leaving the slot up parks the last video card's player above a card it
   // has nothing to do with, pushing the text down past an empty black box.
   $('body').toggleClass('practice-no-video', _isManualItem(it) && !_cardHasVideoLink(it))
+  // A video AND recordings: the video keeps its slot and the recordings panel
+  // goes under it, so either can be played.
+  $('body').toggleClass('practice-manual-video', clips.length > 0 && _cardHasVideoLink(it))
   _stopPracticeAudio()
   if (!clips.length) {
     $('#practiceAudio').hide()
@@ -18404,10 +18884,9 @@ async function playRecording(opts) {
       // Show the card's text in the subtitle overlay (the banner head is
       // collapsed on mobile) so it's visible for the whole item.
       _renderPlayingManualText(it)
-      if (it.mediaKind === 'youtube' && it.mediaVideoId) {
+      if (_cardHasVideoLink(it)) {
         try {
-          window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
-          await changeMediaIfNeededTo(window.mediaSelected)
+          await _cueManualCardVideo(it)
         } catch (e) { console.warn('playRecording: manual YT cue failed', it, e) }
       }
       // Recorded-audio card: play the Source recording, then the Target one,
@@ -18907,10 +19386,10 @@ function openPlayingQueueDialog() {
   queue.forEach((it, i) => {
     const isCur = i === curIdx
     const label = it.manual
-      ? `📝 ${(it.source || '').trim() || '(empty)'}`
+      ? `📝 ${_cardPlainText(it.source).trim() || '(empty)'}`
       : `${it.id} · ${it.timeStart}s–${it.timeEnd}s`
     const sub = it.manual
-      ? ((it.target || '').trim() || '')
+      ? (_cardPlainText(it.target).trim() || '')
       : (it._st && it._w ? `"${it._st}" → ${it._w}` : '')
     html += `<div class="pqd-row${isCur ? ' pqd-current' : ''}" data-idx="${i}">
       <span class="pqd-num">${i + 1}</span>
@@ -19097,7 +19576,7 @@ function openPracticeMode(opts) {
     // Match Player's order semantics: respect the recPlayShuffle setting.
     // Default off → natural playlist order, same as Player when shuffle is
     // off. The in-practice shuffle button (top bar) flips this same setting.
-    if (window._appSettings && window._appSettings.recPlayShuffle) {
+    if (window._appSettings && window._appSettings.recPlayShuffle && !opts.single) {
       _shuffleQueue(queue)
     }
     // Optional startItem rotation — rotates the queue so the requested card
@@ -19117,7 +19596,7 @@ function openPracticeMode(opts) {
     }
     // Snapshot for a future Resume — saved after shuffle/rotate so the
     // saved order matches what's about to be practiced.
-    _saveQueueOrder(queue, 'practice')
+    if (!opts.single) _saveQueueOrder(queue, 'practice')
   }
   window._practiceCards = queue
   window._practiceIdx = startIdx
@@ -19132,6 +19611,11 @@ function openPracticeMode(opts) {
   window._practicePlaybackRate = 1
   window._practiceFlipped = false
   window._practiceMinimized = false
+  // One card on its own (from the search results): not a session. It is not
+  // shuffled, and it leaves the playlist's saved resume order and position —
+  // and the reopen-after-restart marker — alone. Set here, past every early
+  // return, so a refused open cannot change the flag of the one on screen.
+  window._practiceSingle = !!opts.single
   window._practiceActive = true
   _setOpenView('practice')
   // Any dialog left open before this covered the screen would be behind it.
@@ -19178,6 +19662,7 @@ function openPracticeMode(opts) {
         </div>
         <div class="practice-settings-row">
           <span class="practice-settings-lbl">Item</span>
+          <button type="button" class="practice-edit" aria-label="Edit this card" title="Edit this card's text, recordings and link">✎ Edit</button>
           <button type="button" class="practice-replace" aria-label="Replace this card with a different example" title="Replace with a different auto-captured example">🎲 Replace example</button>
           <button type="button" class="practice-delete" aria-label="Delete this item from the playlist" title="Delete this card from the playlist">🗑 Delete this card</button>
         </div>
@@ -19230,6 +19715,7 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-restore-btn', restorePracticeMode)
     $p.on('click', '.practice-delete', _deleteCurrentPracticeCard)
     $p.on('click', '.practice-replace', _replaceCurrentPracticeCard)
+    $p.on('click', '.practice-edit', _editCurrentPracticeCard)
     $p.on('click', '.practice-info', _togglePracticeInfoPanel)
     $p.on('click', '.practice-shuffle', _togglePracticeShuffle)
     $p.on('click', '.practice-settings', _togglePracticeSettingsPanel)
@@ -19334,6 +19820,11 @@ window.openPracticeMode = openPracticeMode
 
 function closePracticeMode() {
   window._practiceActive = false
+  // The card may have been deleted or changed while it was open.
+  if (window._practiceSingle) {
+    window._practiceSingle = false
+    try { _renderManualSearchResults() } catch (_) {}
+  }
   // Every way out of Practice lands here — the ✕, Escape, and the deck
   // emptying — and all of them mean the view was put away, so none of them
   // should bring it back next launch.
@@ -19460,7 +19951,10 @@ function restorePracticeMode() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
   // Manual cards have no clip — just re-cue them (parked), as before.
-  if (_isManualItem(it)) { try { _cuePracticeVideo(it) } catch (_) {} return }
+  if (_isManualItem(it)) {
+    if (_cardHasVideoLink(it)) { try { _cueManualCardVideo(it) } catch (_) {} }
+    return
+  }
 }
 function _updatePracticeRestoreCount() {
   const cards = window._practiceCards || []
@@ -19531,6 +20025,41 @@ function _replaceCurrentPracticeCard() {
   })
 }
 
+// The stored card behind a practice card. The queue holds copies, and a
+// virtual playlist's cards live in its member playlists, so it is found by id
+// — `_idx` drifts as soon as another card is deleted.
+function _storedManualCard(it) {
+  if (!it || !it.id) return null
+  const names = _isVirtual(it._recName) ? _virtualMembers(it._recName) : [it._recName]
+  for (const name of names) {
+    const rec = window._recordings && window._recordings[name]
+    const arr = rec && rec.items && rec.items[it._st] && rec.items[it._st][it._w]
+    const item = Array.isArray(arr) && arr.find(x => x && x.id === it.id)
+    if (item) return { name, item }
+  }
+  return null
+}
+
+function _editCurrentPracticeCard() {
+  const it = (window._practiceCards || [])[window._practiceIdx]
+  if (!it || !_isManualItem(it)) return
+  const found = _storedManualCard(it)
+  if (!found) { alert('Cannot locate this card in its playlist.'); return }
+  _openManualEntryEditor(found.name, found.item)
+  // When the editor goes, bring the edit onto the card on screen. Saving can
+  // replace the stored object, so look it up again rather than reuse it.
+  // Namespaced and replaced each time, so repeated Edits never stack up
+  // handlers for cards no longer on screen.
+  $('#manualEntryEditor').off('dialogclose.practiceEdit').one('dialogclose.practiceEdit', () => {
+    const again = _storedManualCard(it)
+    if (!again) return
+    const keep = { _recName: it._recName, _st: it._st, _w: it._w, _idx: it._idx }
+    Object.keys(it).forEach(k => { if (!(k in keep)) delete it[k] })
+    Object.assign(it, again.item, keep)
+    try { _renderPracticeCard() } catch (_) {}
+  })
+}
+
 function _deleteCurrentPracticeCard() {
   const cards = window._practiceCards
   const idx = window._practiceIdx
@@ -19539,7 +20068,7 @@ function _deleteCurrentPracticeCard() {
   if (!it || !it._recName) return
   const isManual = !!it.manual
   const label = isManual
-    ? `"${(it.source || '').slice(0, 40)}${(it.source || '').length > 40 ? '…' : ''}"`
+    ? `"${_cardPlainText(it.source).slice(0, 40)}${_cardPlainText(it.source).length > 40 ? '…' : ''}"`
     : `${it.id} @ ${it.timeStart}s–${it.timeEnd}s`
   if (!confirm(`Delete this card (${label}) from "${it._recName}"?\n\nThis cannot be undone from the UI.`)) return
   // Capture the local-audio URL BEFORE removing the item — _removeQueueItem
@@ -19574,6 +20103,8 @@ function _deleteCurrentPracticeCard() {
 function _refreshPracticeShuffleBtn() {
   const $btn = $('#practiceMode').find('.practice-shuffle')
   if (!$btn.length) return
+  // Nothing to shuffle when one card was opened on its own.
+  $btn.toggle(!window._practiceSingle)
   const on = !!(window._appSettings && window._appSettings.recPlayShuffle)
   $btn.toggleClass('active', on).attr('aria-pressed', on ? 'true' : 'false')
     .attr('title', on ? 'Shuffle: on (tap to restore order)' : 'Shuffle: off (tap to randomise)')
@@ -19588,7 +20119,9 @@ function _togglePracticeShuffle() {
   const next = !window._appSettings.recPlayShuffle
   window._appSettings.recPlayShuffle = next
   try { saveAppSettings() } catch (_) {}
-  if (window._practiceActive && Array.isArray(window._practiceCards) && window._practiceCards.length) {
+  // A lone card has no deck to reorder; rebuilding would line up a playlist.
+  if (window._practiceActive && !window._practiceSingle &&
+      Array.isArray(window._practiceCards) && window._practiceCards.length) {
     const cur = window._practiceCards[window._practiceIdx] || null
     // Rebuild from the playlist in natural order, then shuffle if enabled.
     // This restores order when shuffle is being turned OFF.
@@ -19665,12 +20198,26 @@ function _updatePracticeInfo() {
   if (!it) return
   const $head = $p.find('.practice-info-head')
   const $meta = $p.find('.practice-info-meta')
+  // Which row of its playlist this is, numbered as the Recorded Searches
+  // dialog numbers them, so the card can be found there.
+  const name = it._recName || ''
+  const items = !name ? null : _isVirtual(name) ? _resolveVirtualItems(name)
+    : (window._recordings[name] && window._recordings[name].items)
+  // Found by identity: `_idx` is a snapshot from when the queue was built and
+  // drifts as soon as another card is deleted.
+  const bucket = items && items[it._st] && items[it._st][it._w]
+  let rowIdx = Array.isArray(bucket) ? bucket.findIndex(x => x && x.id === it.id && x.lineIndex === it.lineIndex) : -1
+  if (rowIdx < 0) rowIdx = it._idx
+  const at = _rowPositionIn(items, it._st, it._w, rowIdx)
+  const where = `${name || '?'}${at ? ` · #${at.pos} of ${at.total}` : ''}`
+  // A preview, not the card: the card itself is on screen right below.
+  const INFO_MAX = 45
   if (it.manual) {
     const linkLbl = it.mediaUrl ? ` · ${it.mediaKind === 'youtube' ? '▶ YouTube' : '🔗 link'}` : ''
-    $head.text(`📝 Manual — ${it._recName || '?'}`)
-    $meta.text(`${it.source || '(empty)'}  →  ${it.target || '(empty)'}${linkLbl}`)
+    $head.text(`📝 ${where}`)
+    $meta.text(`${_truncatePreview(_cardPlainText(it.source), INFO_MAX) || '(empty)'}  →  ${_truncatePreview(_cardPlainText(it.target), INFO_MAX) || '(empty)'}${linkLbl}`)
   } else {
-    $head.text(`${it._recName || '?'} — "${it._st || ''}" → ${it._w || ''}`)
+    $head.text(`${where} — "${_truncatePreview(it._st || '', 40)}" → ${_truncatePreview(it._w || '', 30)}`)
     $meta.text(`${it.id} · ${it.source || '?'} · ${it.timeStart}s – ${it.timeEnd}s`)
   }
 }
@@ -20318,7 +20865,9 @@ async function _renderPracticeCard() {
   // Persist resume-target on every card change. Mode='practice' so the
   // next Play All / Practice click on this playlist offers to resume here.
   // `idx` advances queuePos so the saved queue tracks where we are.
-  try { _setLastPlayed(it, 'practice', idx) } catch (_) {}
+  if (!window._practiceSingle) {
+    try { _setLastPlayed(it, 'practice', idx) } catch (_) {}
+  }
   // Keep the info panel in sync as the user navigates cards, if it's open.
   if ($p.find('.practice-info-panel').is(':visible')) _updatePracticeInfo()
   // A shadowing session belongs to one card. Landing on a different one ends
@@ -20347,6 +20896,8 @@ async function _renderPracticeCard() {
   // and hand the slot back to the video.
   _showPracticeAudioPanel(null)
   $p.find('.practice-replace').show()
+  // Only manual cards have an editor.
+  $p.find('.practice-edit').hide()
   $p.find('.practice-ctx-ctrl').show()
   $p.find('.practice-play, .practice-speed').show()
   $p.find('.practice-media-link').remove()
@@ -20409,6 +20960,15 @@ async function _renderPracticeCard() {
 // Render a manual flashcard into the existing practice DOM. Same flip/hide
 // /both reveal modes as a video card — the difference is the content is
 // the user-typed source/target text and there's no clip / SRT lookup.
+// One face of a manual card for Practice: its HTML, cleaned, when it was
+// written as HTML (card-html.js); otherwise the text as written.
+function _cardTextEl(text) {
+  const $el = $('<div class="practice-manual-text"></div>')
+  if (!String(text || '').trim()) return $el.text('(empty)')
+  const { html, isHtml } = _cardHtml(text)
+  return $el.toggleClass('card-html', isHtml).html(html)
+}
+
 function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcCode) {
   // Hide controls that only apply to video clips. Removed when the next
   // (video) card renders by the restore-block at the top of _renderPracticeCard.
@@ -20416,6 +20976,7 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   $p.find('.practice-play, .practice-speed').hide()
   // Manual cards have no SRT source to swap → no replace option.
   $p.find('.practice-replace').hide()
+  $p.find('.practice-edit').show()
 
   const frontText = frontIsSource ? (it.source || '') : (it.target || '')
   const backText  = frontIsSource ? (it.target || '') : (it.source || '')
@@ -20426,11 +20987,11 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   $p.find('.practice-word').text('📝 manual').css('visibility', 'visible')
 
   const $front = $p.find('.practice-front').empty()
-  $front.append($('<div class="practice-manual-text"></div>').text(frontText || '(empty)'))
+  $front.append(_cardTextEl(frontText))
   const $back  = $p.find('.practice-back').hide().empty()
-  $back.append($('<div class="practice-manual-text"></div>').text(backText || '(empty)'))
+  $back.append(_cardTextEl(backText))
   const $backFace = $p.find('.practice-back-target').empty()
-  $backFace.append($('<div class="practice-manual-text"></div>').text(backText || '(empty)'))
+  $backFace.append(_cardTextEl(backText))
 
   // Optional media link — YouTube cues in the embedded player, anything
   // else opens in a new tab. Appended to the practice-nav row so it sits
@@ -20442,8 +21003,8 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   _showPracticeAudioPanel(it)
 
   if (it.mediaUrl) {
-    const isYT    = it.mediaKind === 'youtube' && it.mediaVideoId
-    const isAudio = it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)
+    const isYT    = _cardHasVideoLink(it)
+    const isAudio = !isYT && (it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl))
     const icon    = isYT ? '▶' : (isAudio ? '🎙' : '🔗')
     const title   = isYT    ? 'Play the linked YouTube video'
                   : isAudio ? 'Play the recorded audio'
@@ -20451,11 +21012,10 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
     const $btn = $(`<button type="button" class="practice-media-link" title="${title}" aria-label="Open linked media">${icon}</button>`)
     $btn.on('click', async (ev) => {
       ev.preventDefault(); ev.stopPropagation()
+
       if (isYT) {
-        // Cue into the embedded player at t=0. Don't auto-play (Practice
-        // mode is for studying — the user clicks again to play).
-        window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
-        try { changeMediaIfNeededTo(window.mediaSelected) } catch (_) {}
+        // Cue into the embedded player, at the moment the link names.
+        _cueManualCardVideo(it)
       } else if (isAudio) {
         // Bridge-loaded preview with toggle: click while playing stops it;
         // navigating away or closing Practice also stops it.
@@ -20633,6 +21193,9 @@ $(document).on('keydown', function (e) {
   if (!window._practiceActive) return
   const tag = (e.target && e.target.tagName || '').toLowerCase()
   if (tag === 'input' || tag === 'textarea') return
+  // Keys typed into a dialog over Practice (the card editor, its rich-text
+  // editor — a contenteditable, not a textarea) are that dialog's, not ours.
+  if (e.target && (e.target.isContentEditable || $(e.target).closest('.ui-dialog, .ck').length)) return
   if (e.key === 'Escape')          { e.preventDefault(); closePracticeMode() }
   else if (e.key === 'ArrowLeft')  { e.preventDefault(); practiceNav(-1) }
   else if (e.key === 'ArrowRight') { e.preventDefault(); practiceNav(1) }

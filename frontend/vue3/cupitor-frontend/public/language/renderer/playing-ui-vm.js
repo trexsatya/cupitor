@@ -6,6 +6,7 @@
 // player state.
 
 import { isManualItem } from '../recordings-merge.js'
+import { cardPlainText } from '../card-html.js'
 import { contiguousClipWindow } from '../random-playlist.js'
 
 // Build a Unicode-bounded regex from `pattern` (already a regex source —
@@ -202,8 +203,9 @@ export function buildPlayingBannerVM(it, idx, total, gapSeconds, reversed = fals
     const linkLbl = it.mediaUrl
       ? ` · ${it.mediaKind === 'youtube' ? '▶ YouTube' : '🔗 link'}`
       : ''
-    const head = reversed ? it.target : it.source
-    const meta = reversed ? it.source : it.target
+    // One-line text: the words of a card written as HTML, without the tags.
+    const head = cardPlainText(reversed ? it.target : it.source)
+    const meta = cardPlainText(reversed ? it.source : it.target)
     return {
       isManual: true,
       progressText: `${safeIdx + 1}/${safeTotal}`,

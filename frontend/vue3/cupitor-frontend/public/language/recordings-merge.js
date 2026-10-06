@@ -45,6 +45,21 @@ export function parseMediaUrl(raw) {
   return { kind: 'link', url }
 }
 
+// Where a YouTube link asks the video to start, in whole seconds; 0 when it
+// names no start. Reads `t` (95, 95s, 1m35s, 1h2m3s) and `start` (seconds), in
+// the query or after the #. Anything unreadable is 0 — the start of the video
+// is always a fair place to land.
+export function youtubeStartSeconds(raw) {
+  const url = String(raw == null ? '' : raw)
+  const m = url.match(/[?&#](?:t|start)=([0-9hms]+)/i)
+  if (!m) return 0
+  const v = m[1].toLowerCase()
+  if (/^\d+s?$/.test(v)) return parseInt(v, 10)
+  const hms = v.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/)
+  if (!hms || !(hms[1] || hms[2] || hms[3])) return 0
+  return (parseInt(hms[1] || 0, 10) * 3600) + (parseInt(hms[2] || 0, 10) * 60) + parseInt(hms[3] || 0, 10)
+}
+
 // Members of a virtual playlist, filtered to existing non-virtual entries
 // (so a deleted / renamed member silently drops out — and nested virtual
 // playlists are forbidden by collapsing them away).
@@ -89,6 +104,23 @@ export function itemsForRecording(coll, name) {
 }
 
 // Total recordable items across all (searchText, word) buckets.
+// Where an item sits in a playlist as the Recorded Searches dialog numbers it:
+// every row, top to bottom — search text, then word, then the word's list, in
+// stored order, disabled rows included. { pos (1-based), total }, or null when
+// the item is not there.
+export function rowPositionIn(items, st, w, idx) {
+  let n = 0
+  let pos = null
+  for (const s of Object.keys(items || {})) {
+    for (const ww of Object.keys(items[s] || {})) {
+      const arr = items[s][ww] || []
+      if (s === st && ww === w && idx >= 0 && idx < arr.length) pos = n + idx + 1
+      n += arr.length
+    }
+  }
+  return pos == null ? null : { pos, total: n }
+}
+
 export function recordingItemCountIn(items) {
   return Object.values(items || {}).reduce(
     (sum, words) => sum + Object.values(words).reduce((s2, arr) => s2 + arr.length, 0),
