@@ -205,6 +205,7 @@ const SCRIPT_FUNCTIONS = [
             ['lineUid', 'id for the arrow'],
             ['opts.animate', 'grow the arrow from the source to the target; the next line waits'],
             ['opts.duration', 'how long it grows, ms (default 800)'],
+            ['opts.bend', "curve it: px its middle stands off the straight line (to the left of its direction when positive), or 'loop' for an arrow from an object back to itself"],
         ]],
         ['addClones([json])', 'Recreate duplicated / pasted objects (recorded for you)'],
     ]],
@@ -248,6 +249,9 @@ const SCRIPT_FUNCTIONS = [
     ]],
     ['Canvas & timing', [
         ['sleep(seconds)', 'Pause; returns a promise (start the line with Promise.resolve(sleep(1)) to make the next line wait)'],
+        ['animateViewport({zoom, pan: [x, y]}, opts)', 'Move the camera: the view eases to that zoom and pan; the next line waits', [
+            ['opts.duration', 'ms (default 800; 0 jumps)'],
+        ]],
         ['clear(layer)', "Clear 'pc', 'oc' or 'txt'; no argument clears all"],
         ['findIfRequired(uid)', 'Look up an object by uid (also inside groups)'],
         ['pc  /  oc', 'Main and overlay canvases (Fabric.js)'],

@@ -26,10 +26,10 @@ export const ACTIONS = {
   scene: 'Start a scene: {name}. Objects from earlier scenes stay and can be reused.',
   beat: 'Start a beat (one conceptual move): {name, viewer_task?: {type, target}}.',
   viewer_task: `What the viewer should do mentally: {type: ${VIEWER_TASKS.join('|')}, target, constraint?}. Attaches to the current beat (or scene).`,
-  introduce: "Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, place?, pace?}. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below} or {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.",
+  introduce: "Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, place?, pace?}. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]}, {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.",
   introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, place?, pace?}.',
   branch: 'Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, pace?}.',
-  connect: 'Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, pace?}.',
+  connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop.",
   disconnect: 'Remove a relationship: {id} or {from, to}.',
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.',
   revise: 'Change the text of the same concept (identity kept): {id, text, pace?}.',
@@ -39,13 +39,18 @@ export const ACTIONS = {
   deemphasize: 'Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.',
   focus: 'Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.',
   move_into: 'Move a concept into another (e.g. a question into a person), smaller: {id, into, scale?, pace?}.',
-  widen_context: 'Shrink concepts into a much larger frame, making them local: {ids?: [ids] (default all), scale?: 0.45, region?, pace?}.',
+  widen_context: "Pull the camera back so concepts sit small inside a much larger frame: {ids?: [ids] (default all), scale?: 0.45, region? (where they end up on screen), mode?: camera (default) | objects (shrink the concepts themselves, leaving the rest as it is), pace?}.",
+  narrow_context: 'Bring the camera in on concepts: {ids, fill?: 0.7 (share of the screen they fill)} or {reset: true} (back to the starting view), pace?.',
+  dissolve_boundary: "Turn categories into a continuum: the boxes of concepts (in order, e.g. two categories with in-between cases already placed between them) lose their boundaries while a colour band appears under them: {ids, id (the band), colors?: [from, to], pace?}.",
+  checkpoint: 'Remember how every concept, relationship and the camera are now: {name}.',
+  return_to: 'Go back: {name} puts the concepts of a checkpoint back as they were (positions, text, emphasis, ones removed since) and the camera; {ids} brings back removed concepts where they were.',
+  turnover: "Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text}] or [\"TEXT\"], direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.",
   pause: `Hold still: {kind?: ${Object.keys(PAUSE).join('|')}, seconds?}.`,
   remove: 'Fade concepts out and delete them: {ids, pace?}.'
 };
 
 export function emptyScene() {
-  return { scene: null, scenes: [], beat: null, beats: [], viewerTasks: [], objects: {}, relations: {}, groups: {}, log: [] };
+  return { camera: { zoom: 1, pan: [0, 0] }, retired: {}, retiredRelations: {}, checkpoints: {}, scene: null, scenes: [], beat: null, beats: [], viewerTasks: [], objects: {}, relations: {}, groups: {}, log: [] };
 }
 
 // ---- reading a script -------------------------------------------------------
@@ -80,16 +85,28 @@ function addObject(model, rec, o) {
     fontSize: o.fontSize, src: o.src, width: o.width, scale: 1, opacity: 1, boundary: o.boundary || 'none',
     history: o.text != null ? [o.text] : [], scene: model.scene, beat: model.beat
   };
+  delete model.retired[o.id]; // its id now names something else
 }
 
 function addRelation(model, r) {
-  model.relations[r.id] = { id: r.id, from: r.from, to: r.to, kind: r.kind || null, opacity: 1, scene: model.scene, beat: model.beat };
+  delete model.retiredRelations[r.id]; // its id now names something else
+  model.relations[r.id] = { id: r.id, from: r.from, to: r.to, kind: r.kind || null, bend: r.bend || 0, opacity: 1, scene: model.scene, beat: model.beat };
 }
 
+const clone = v => JSON.parse(JSON.stringify(v));
+
+// A removed concept is kept (with the relationships that went with it) so
+// return_to can bring it back.
 function dropObject(model, id) {
+  const gone = Object.values(model.relations).filter(r => r.from === id || r.to === id);
+  model.retired[id] = {
+    object: clone(model.objects[id]),
+    groups: Object.values(model.groups).filter(g => g.members.includes(id)).map(g => g.id),
+    enclosures: Object.values(model.objects).filter(o => o.members && o.members.includes(id)).map(o => o.id)
+  };
   delete model.objects[id];
-  // Its connectors go with it on the canvas.
-  Object.values(model.relations).forEach(r => { if (r.from === id || r.to === id) delete model.relations[r.id]; });
+  // Its connectors go with it on the canvas; they wait until both ends are back.
+  gone.forEach(r => { model.retiredRelations[r.id] = clone(r); delete model.relations[r.id]; });
   Object.values(model.objects).forEach(o => { if (o.members) o.members = o.members.filter(m => m !== id); });
   Object.values(model.groups).forEach(g => {
     g.members = g.members.filter(m => m !== id);
@@ -106,6 +123,7 @@ export function applyRecord(model, rec) {
   };
   switch (rec.op) {
     case 'scene':
+      if (rec.reset) model.camera = { zoom: 1, pan: [0, 0] };
       model.scene = rec.name; model.beat = null;
       model.scenes.push({ name: rec.name });
       break;
@@ -137,6 +155,7 @@ export function applyRecord(model, rec) {
         id: rec.id, kind: 'enclosure', members: rec.members, at: rec.at, size: rec.size, scale: 1, opacity: 1,
         boundary: rec.style || 'solid', history: [], scene: model.scene, beat: model.beat
       };
+      delete model.retired[rec.id];
       if (rec.group && model.groups[rec.group]) model.groups[rec.group].enclosure = rec.id;
       break;
     case 'revise':
@@ -167,8 +186,67 @@ export function applyRecord(model, rec) {
       break;
     }
     case 'widen_context':
+    case 'narrow_context':
+      if (rec.camera) { model.camera = rec.camera; break; }
+      Object.entries(rec.bends || {}).forEach(([id, b]) => { model.relations[id].bend = b; });
       Object.entries(rec.moves).forEach(([id, m]) => { const o = obj(id); o.at = m.at; o.scale = m.scale; });
       break;
+    case 'dissolve_boundary':
+      rec.ids.forEach(id => { obj(id).boundary = 'none'; });
+      model.objects[rec.id] = {
+        id: rec.id, kind: 'spectrum', members: rec.ids, colors: rec.colors, at: rec.at, size: rec.size, scale: 1, opacity: 1,
+        boundary: 'none', history: [], scene: model.scene, beat: model.beat
+      };
+      delete model.retired[rec.id];
+      break;
+    case 'checkpoint':
+      model.checkpoints[rec.name] = rec.state;
+      break;
+    case 'return_to':
+      if (rec.name) {
+        const st = model.checkpoints[rec.name];
+        if (!st) throw new Error(`return_to: no checkpoint "${rec.name}"`);
+        // What came after the checkpoint goes (and can be brought back by id).
+        rec.removed.forEach(id => dropObject(model, id));
+        rec.unlinked.forEach(id => { model.retiredRelations[id] = clone(model.relations[id]); delete model.relations[id]; });
+        Object.values(st.objects).forEach(o => { model.objects[o.id] = clone(o); delete model.retired[o.id]; });
+        Object.values(st.relations).forEach(r => { model.relations[r.id] = clone(r); delete model.retiredRelations[r.id]; });
+        Object.values(st.groups).forEach(g => { model.groups[g.id] = clone(g); });
+        model.camera = clone(st.camera);
+      } else {
+        rec.ids.forEach(id => {
+          const r = model.retired[id];
+          if (!r) throw new Error(`return_to: "${id}" was not removed`);
+          model.objects[id] = clone(r.object);
+          delete model.retired[id];
+          // Back into its groups and enclosures.
+          (r.groups || []).forEach(gid => {
+            const g = model.groups[gid] = model.groups[gid] || { id: gid, members: [], enclosure: null };
+            if (!g.members.includes(id)) g.members.push(id);
+          });
+          (r.enclosures || []).forEach(eid => {
+            const e = model.objects[eid];
+            if (e && !e.members.includes(id)) e.members.push(id);
+          });
+        });
+        rec.relations.forEach(r => { model.relations[r.id] = clone(r); delete model.retiredRelations[r.id]; });
+      }
+      break;
+    case 'turnover': {
+      const before = model.groups[rec.group];
+      if (!before) throw new Error(`turnover: no group "${rec.group}"`);
+      rec.leaving.forEach(id => dropObject(model, id));
+      Object.entries(rec.moves).forEach(([id, at]) => { obj(id).at = at; });
+      rec.arriving.forEach(it => addObject(model, rec, it));
+      // dropObject deletes a group left empty for a moment; it is the same group.
+      const group = model.groups[rec.group] = { ...before, id: rec.group, members: rec.members };
+      const enc = group.enclosure && model.objects[group.enclosure];
+      if (enc) {
+        enc.members = [...enc.members, ...rec.arriving.map(it => it.id)];
+        if (rec.enclosure) { enc.at = rec.enclosure.at; enc.size = rec.enclosure.size; }
+      }
+      break;
+    }
     case 'pause':
       break;
     case 'remove':
@@ -197,11 +275,27 @@ export function boxOf(o) {
 const overlaps = (a, b, room = 0) =>
   a.x < b.x + b.w + room && b.x < a.x + a.w + room && a.y < b.y + b.h + room && b.y < a.y + a.h + room;
 
-const onCanvas = b => b.x >= CANVAS.margin && b.y >= CANVAS.margin &&
-  b.x + b.w <= CANVAS.width - CANVAS.margin && b.y + b.h <= CANVAS.height - CANVAS.margin;
+// The camera: the viewport transform's zoom and pan. Positions in the model
+// are scene coordinates; regions, the minimap and font sizes are on screen.
+const zoomOf = model => (model.camera ? model.camera.zoom : 1);
+export function toScene(model, [sx, sy]) {
+  const c = model.camera || { zoom: 1, pan: [0, 0] };
+  return [(sx - c.pan[0]) / c.zoom, (sy - c.pan[1]) / c.zoom];
+}
+const screenRect = (model, r) => {
+  const [x, y] = toScene(model, [r.x, r.y]), z = zoomOf(model);
+  return { ...r, x, y, w: r.w / z, h: r.h / z };
+};
+// The part of the scene the camera shows.
+export const view = model => screenRect(model, { x: 0, y: 0, w: CANVAS.width, h: CANVAS.height });
+
+const onCanvas = (model, b) => {
+  const v = view(model), m = CANVAS.margin / zoomOf(model);
+  return b.x >= v.x + m && b.y >= v.y + m && b.x + b.w <= v.x + v.w - m && b.y + b.h <= v.y + v.h - m;
+};
 
 function occupied(model) {
-  return Object.values(model.objects).filter(o => o.opacity > 0).map(boxOf).concat(RESERVED);
+  return Object.values(model.objects).filter(o => o.opacity > 0).map(boxOf).concat(RESERVED.map(r => screenRect(model, r)));
 }
 
 export const REGIONS = {
@@ -215,6 +309,7 @@ const SIDES = { right: [1, 0], left: [-1, 0], below: [0, 1], above: [0, -1] };
 export function placeBox(model, size, place = {}, taken = occupied(model)) {
   const [w, h] = size;
   const cands = [];
+  const k = 1 / zoomOf(model), gap = GAP * k, clearance = CLEARANCE * k;
   if (place.x != null || place.y != null) return [num(place.x, 'place.x', -5000, 5000), num(place.y, 'place.y', -5000, 5000)];
   if (place.near) {
     const anchor = model.objects[place.near];
@@ -226,33 +321,41 @@ export function placeBox(model, size, place = {}, taken = occupied(model)) {
       sides.forEach(side => {
         const [dx, dy] = SIDES[side];
         const along = dx ? (a.w + w) / 2 : (a.h + h) / 2;
-        const across = dx ? h + CLEARANCE : w + CLEARANCE;
+        const across = dx ? h + clearance : w + clearance;
         for (const j of [0, 1, -1, 2, -2, 3, -3]) {
-          const d = along + GAP + step * (dx ? w : h) * 0.75;
+          const d = along + gap + step * (dx ? w : h) * 0.75;
           cands.push([ac[0] + dx * d + (dx ? 0 : j * across), ac[1] + dy * d + (dy ? 0 : j * across)]);
         }
       });
     }
   } else {
-    const region = place.region || 'center';
-    const c = REGIONS[region];
-    if (!c) throw new Error(`place: region must be one of ${Object.keys(REGIONS).join(', ')}`);
+    let c;
+    if (place.between) {
+      if (!Array.isArray(place.between) || place.between.length !== 2) throw new Error('place: between takes two ids');
+      const [p, q] = place.between.map(id => { const o = model.objects[id]; if (!o) throw new Error(`place: no concept "${id}"`); return o.at; });
+      c = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+    } else {
+      const region = place.region || 'center';
+      if (!REGIONS[region]) throw new Error(`place: region must be one of ${Object.keys(REGIONS).join(', ')}`);
+      c = toScene(model, REGIONS[region]);
+    }
     cands.push(c);
-    for (let r = 80; r <= 640; r += 80) {
+    for (let r = 80 * k; r <= 640 * k; r += 80 * k) {
       for (let k = 0; k < 12; k++) cands.push([c[0] + r * Math.cos(k * Math.PI / 6), c[1] + r * 0.6 * Math.sin(k * Math.PI / 6)]);
     }
   }
   const boxAt = ([x, y]) => ({ x: x - w / 2, y: y - h / 2, w, h });
-  const free = cands.find(c => onCanvas(boxAt(c)) && !taken.some(t => overlaps(boxAt(c), t, CLEARANCE)));
+  const free = cands.find(c => onCanvas(model, boxAt(c)) && !taken.some(t => overlaps(boxAt(c), t, clearance)));
   if (free) return free.map(Math.round);
   // Nothing free: the on-canvas spot touching the fewest others.
-  const score = c => taken.filter(t => overlaps(boxAt(c), t, CLEARANCE)).length + (onCanvas(boxAt(c)) ? 0 : 100);
+  const score = c => taken.filter(t => overlaps(boxAt(c), t, clearance)).length + (onCanvas(model, boxAt(c)) ? 0 : 100);
   return cands.reduce((best, c) => (score(c) < score(best) ? c : best)).map(Math.round);
 }
 
 // Centres for items laid out in a row or column, the whole set placed as one box.
 function layoutRun(model, sizes, layout, place, gap) {
   const row = layout !== 'column';
+  gap /= zoomOf(model);
   const total = sizes.reduce((s, [w, h]) => s + (row ? w : h), 0) + gap * (sizes.length - 1);
   const thick = Math.max(...sizes.map(([w, h]) => (row ? h : w)));
   const [cx, cy] = placeBox(model, row ? [total, thick] : [thick, total], place);
@@ -296,6 +399,9 @@ function need(model, id, op) {
   return model.objects[id];
 }
 
+// Everything a checkpoint needs to put the scene back.
+const snapshot = model => clone({ objects: model.objects, relations: model.relations, groups: model.groups, camera: model.camera });
+
 // Concepts named directly or through a group (its members and its enclosure).
 function expand(model, ids, op) {
   if (!Array.isArray(ids) || !ids.length) throw new Error(`${op}: ids must be a non-empty list`);
@@ -308,19 +414,22 @@ function expand(model, ids, op) {
   return [...new Set(out)];
 }
 
-function objectSpec(a, text) {
+// What a concept is made of. Sizes are on screen: under a zoomed-out camera
+// the font (or picture) is made bigger in the scene to look the same size.
+function objectSpec(model, a, text) {
   const kind = a.kind || 'text';
   if (!KINDS.includes(kind)) throw new Error(`kind must be ${KINDS.join(', ')}`);
   const pictured = kind === 'figure' || kind === 'picture';
   const size = a.size || (pictured ? 'small' : 'normal');
-  const fontSize = typeof size === 'number' ? size : TEXT_SIZE[size];
-  if (!fontSize) throw new Error(`size must be ${Object.keys(TEXT_SIZE).join(', ')} or a font size`);
+  const screenFont = typeof size === 'number' ? size : TEXT_SIZE[size];
+  if (!screenFont) throw new Error(`size must be ${Object.keys(TEXT_SIZE).join(', ')} or a font size`);
   if (!pictured && (text == null || text === '')) throw new Error('text is required');
+  const fontSize = Math.round(screenFont / zoomOf(model) * 10) / 10;
   const spec = { kind, text: text == null || text === '' ? undefined : String(text), fontSize, boundary: kind === 'box' ? 'solid' : 'none' };
   if (kind === 'picture') {
     if (!a.src) throw new Error('a picture needs src');
     spec.src = a.src;
-    spec.width = a.width == null ? 160 : num(a.width, 'width', 8, 1400);
+    spec.width = Math.round((a.width == null ? 160 : num(a.width, 'width', 8, 1400)) / zoomOf(model));
   }
   return spec;
 }
@@ -333,6 +442,23 @@ function createLine(o, ms) {
     return `drawOutline(addFigure(${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, fontSize: o.fontSize })}), {duration: ${ms}})`;
   }
   return `drawOutline(addLabel(${J(o.text)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, fontSize: o.fontSize, boundary: o.boundary })}), {duration: ${ms}})`;
+}
+
+const cameraLine = (c, ms) => `animateViewport({zoom: ${c.zoom}, pan: [${c.pan[0]}, ${c.pan[1]}]}, {duration: ${ms}})`;
+
+// Centre and size of a box round boxes `bs`, `pad` px (on screen) outside them.
+function boxAround(model, bs, pad) {
+  const m = pad / zoomOf(model);
+  const x0 = Math.min(...bs.map(b => b.x)) - m, y0 = Math.min(...bs.map(b => b.y)) - m;
+  const x1 = Math.max(...bs.map(b => b.x + b.w)) + m, y1 = Math.max(...bs.map(b => b.y + b.h)) + m;
+  return { at: [Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2)], size: [Math.round(x1 - x0), Math.round(y1 - y0)] };
+}
+
+// Centre of the box round these concepts.
+function centreOf(model, ids) {
+  const bs = ids.map(id => boxOf(model.objects[id]));
+  return [(Math.min(...bs.map(b => b.x)) + Math.max(...bs.map(b => b.x + b.w))) / 2,
+    (Math.min(...bs.map(b => b.y)) + Math.max(...bs.map(b => b.y + b.h))) / 2];
 }
 
 const fadeAll = (pairs, ms) => `Promise.all([${pairs.map(([id, v]) => `animate(${J(id)}, {opacity: ${v}}, {duration: ${ms}})`).join(', ')}])`;
@@ -348,6 +474,8 @@ export async function planAction(model, a, measure) {
   switch (op) {
     case 'scene':
       if (!a.name) throw new Error('scene: name is required');
+      // The first scene starts from the starting view, so a replay does too.
+      if (!model.scenes.length) return { record: { op, name: a.name, reset: true }, lines: [cameraLine({ zoom: 1, pan: [0, 0] }, 0)] };
       return { record: { op, name: a.name }, lines: [] };
     case 'beat':
       if (!a.name) throw new Error('beat: name is required');
@@ -360,7 +488,7 @@ export async function planAction(model, a, measure) {
     case 'introduce': {
       const id = idFor(a.id, a.text);
       checkNewId(model, id);
-      const spec = objectSpec(a, a.text);
+      const spec = objectSpec(model, a, a.text);
       const [size] = await measure([spec]);
       const at = placeBox(model, size, a.place);
       const rec = { op, id, ...spec, role: a.role, at, size };
@@ -378,7 +506,7 @@ export async function planAction(model, a, measure) {
         const id = idFor(item.id, item.text);
         checkNewId(model, id, taken);
         taken.add(id);
-        return { id, ...objectSpec({ ...a, ...item }, item.text), ...(item.role ? { role: item.role } : {}) };
+        return { id, ...objectSpec(model, { ...a, ...item }, item.text), ...(item.role ? { role: item.role } : {}) };
       });
       const sizes = await measure(items);
       const side = a.side || 'below';
@@ -405,11 +533,12 @@ export async function planAction(model, a, measure) {
 
     case 'connect': {
       need(model, a.from, op); need(model, a.to, op);
-      if (a.from === a.to) throw new Error('connect: from and to are the same concept');
       const id = a.id || `${a.from}__${a.to}`;
       checkNewId(model, id);
-      const rec = { op, id, from: a.from, to: a.to, kind: a.kind || null };
-      return { record: rec, lines: [`connectObjects(${J(a.from)}, ${J(a.to)}, ${J(id)}, {animate: true, duration: ${pace(a)}})`] };
+      const bend = a.from === a.to ? 'loop' : chooseBend(model, a.from, a.to, a.bend == null ? 'auto' : a.bend);
+      const rec = { op, id, from: a.from, to: a.to, kind: a.kind || null, ...(bend ? { bend } : {}) };
+      const opts = bend ? `{bend: ${J(bend)}, animate: true, duration: ${pace(a)}}` : `{animate: true, duration: ${pace(a)}}`;
+      return { record: rec, lines: [`connectObjects(${J(a.from)}, ${J(a.to)}, ${J(id)}, ${opts})`] };
     }
 
     case 'disconnect': {
@@ -425,11 +554,7 @@ export async function planAction(model, a, measure) {
       members.forEach(m => need(model, m, op));
       const style = a.style || 'solid';
       if (!['solid', 'dashed'].includes(style)) throw new Error('enclose: style must be solid or dashed');
-      const bs = members.map(m => boxOf(model.objects[m]));
-      const pad = 20;
-      const x0 = Math.min(...bs.map(b => b.x)) - pad, y0 = Math.min(...bs.map(b => b.y)) - pad;
-      const x1 = Math.max(...bs.map(b => b.x + b.w)) + pad, y1 = Math.max(...bs.map(b => b.y + b.h)) + pad;
-      const at = [Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2)], size = [Math.round(x1 - x0), Math.round(y1 - y0)];
+      const { at, size } = boxAround(model, members.map(m => boxOf(model.objects[m])), 20);
       const opts = { uid: a.id, originX: 'center', originY: 'center', rx: 18, ry: 18, stroke: '#666', strokeWidth: 2 };
       if (style === 'dashed') opts.strokeDashArray = [10, 7];
       return {
@@ -475,7 +600,7 @@ export async function planAction(model, a, measure) {
       const w = a.with || {};
       const id = idFor(w.id, w.text);
       checkNewId(model, id);
-      const spec = objectSpec({ kind: old.kind === 'enclosure' ? 'text' : old.kind, size: old.fontSize, ...w }, w.text);
+      const spec = objectSpec(model, { kind: old.kind === 'enclosure' ? 'text' : old.kind, size: old.fontSize * zoomOf(model), ...w }, w.text);
       const [size] = await measure([spec]);
       const neu = { id, ...spec, role: w.role || old.role, at: old.at, size };
       const ms = pace(a);
@@ -522,24 +647,189 @@ export async function planAction(model, a, measure) {
       const ids = a.ids ? expand(model, a.ids, op) : Object.keys(model.objects);
       // An enclosure goes with its members.
       Object.values(model.objects).forEach(o => {
-        if (o.kind === 'enclosure' && !ids.includes(o.id) && o.members.every(m => ids.includes(m))) ids.push(o.id);
+        if (o.members && !ids.includes(o.id) && o.members.every(m => ids.includes(m))) ids.push(o.id);
       });
       if (!ids.length) throw new Error('widen_context: nothing to widen');
       const k = a.scale == null ? 0.45 : num(a.scale, 'widen_context: scale', 0.01, 1);
-      const bs = ids.map(id => boxOf(model.objects[id]));
-      const cx = (Math.min(...bs.map(b => b.x)) + Math.max(...bs.map(b => b.x + b.w))) / 2;
-      const cy = (Math.min(...bs.map(b => b.y)) + Math.max(...bs.map(b => b.y + b.h))) / 2;
-      const [tx, ty] = REGIONS[a.region || 'center'] || (() => { throw new Error('widen_context: unknown region'); })();
+      const [cx, cy] = centreOf(model, ids);
+      if (!REGIONS[a.region || 'center']) throw new Error(`widen_context: region must be one of ${Object.keys(REGIONS).join(', ')}`);
+      const mode = a.mode || 'camera';
+      if (mode === 'camera') {
+        const zoom = +(zoomOf(model) * k).toFixed(4);
+        if (zoom < 0.05) throw new Error('widen_context: the camera cannot pull back that far');
+        const [sx, sy] = REGIONS[a.region || 'center'];
+        const camera = { zoom, pan: [Math.round(sx - cx * zoom), Math.round(sy - cy * zoom)] };
+        return { record: { op, mode, ids: a.ids, scale: k, camera }, lines: [cameraLine(camera, pace(a, 'deliberate'))] };
+      }
+      if (mode !== 'objects') throw new Error('widen_context: mode must be camera or objects');
+      const [tx, ty] = toScene(model, REGIONS[a.region || 'center']);
       const moves = {};
       ids.forEach(id => {
         const o = model.objects[id];
         moves[id] = { at: [Math.round(tx + (o.at[0] - cx) * k), Math.round(ty + (o.at[1] - cy) * k)], scale: +((o.scale || 1) * k).toFixed(3) };
       });
       const ms = pace(a, 'deliberate');
+      // Curved arrows between shrinking concepts curve less, in proportion.
+      const bends = {};
+      Object.values(model.relations).forEach(r => {
+        if (typeof r.bend === 'number' && r.bend && moves[r.from] && moves[r.to]) bends[r.id] = Math.round(r.bend * k) || Math.sign(r.bend);
+      });
+      const rebend = Object.entries(bends).map(([id, b]) => `setCustomData(${J(id)}, {bend: ${b}}), `).join('');
       return {
-        record: { op, ids: a.ids, scale: k, moves },
-        lines: [`Promise.all([${Object.entries(moves).map(([id, m]) => `animate(${J(id)}, {left: ${m.at[0]}, top: ${m.at[1]}, scaleX: ${m.scale}, scaleY: ${m.scale}}, {duration: ${ms}})`).join(', ')}])`]
+        record: { op, ids: a.ids, scale: k, moves, ...(Object.keys(bends).length ? { bends } : {}) },
+        lines: [`Promise.all([${rebend}${Object.entries(moves).map(([id, m]) => `animate(${J(id)}, {left: ${m.at[0]}, top: ${m.at[1]}, scaleX: ${m.scale}, scaleY: ${m.scale}}, {duration: ${ms}})`).join(', ')}])`]
       };
+    }
+
+    case 'dissolve_boundary': {
+      if (!Array.isArray(a.ids) || a.ids.length < 2) throw new Error('dissolve_boundary: ids needs two or more concepts');
+      a.ids.forEach(id => {
+        const o = need(model, id, op);
+        if (o.kind !== 'text' && o.kind !== 'box') throw new Error(`dissolve_boundary: "${id}" is a ${o.kind}; only text and box concepts`);
+      });
+      checkNewId(model, a.id);
+      const colors = a.colors || ['#90caf9', '#ffcc80'];
+      if (!Array.isArray(colors) || colors.length < 2 || !colors.every(c => typeof c === 'string' && /^[#\w(),.\s%]+$/.test(c))) throw new Error('dissolve_boundary: colors takes two or more CSS colours');
+      const { at, size } = boxAround(model, a.ids.map(id => boxOf(model.objects[id])), 24);
+      const ms = pace(a, 'deliberate');
+      const stops = colors.map((c, i) => `{offset: ${+(i / (colors.length - 1)).toFixed(3)}, color: ${J(c)}}`).join(', ');
+      const ids = J(a.ids);
+      return {
+        record: { op, id: a.id, ids: a.ids, colors, at, size },
+        lines: [
+          // The boundaries weaken first, so the binary fails before the continuum shows.
+          `Promise.all(${ids}.map(id => animate(id, {opacity: 0.55}, {duration: ${Math.round(ms / 3)}}))).then(() => ${ids}.forEach(id => setLabelBoundary(id, "dashed")))`,
+          `Promise.resolve(addRect(${at[0]}, ${at[1]}, ${size[0]}, ${size[1]}, {uid: ${J(a.id)}, originX: "center", originY: "center", rx: 18, ry: 18, strokeWidth: 0, opacity: 0, fill: new fabric.Gradient({type: "linear", gradientUnits: "percentage", coords: {x1: 0, y1: 0, x2: 1, y2: 0}, colorStops: [${stops}]})})).then(r => (sendToBack(r), animate(r, {opacity: 1}, {duration: ${ms}})))`,
+          `Promise.all([${a.ids.map(id => `(setLabelBoundary(${J(id)}, "none"), animate(${J(id)}, {opacity: ${model.objects[id].opacity}}, {duration: ${Math.round(ms / 3)}}))`).join(', ')}])`
+        ]
+      };
+    }
+
+    case 'checkpoint': {
+      if (!a.name || typeof a.name !== 'string') throw new Error('checkpoint: name is required');
+      const uids = [...Object.keys(model.objects), ...Object.keys(model.relations)];
+      return { record: { op, name: a.name, state: snapshot(model) }, lines: [`tagState(${J(a.name)}, ${J(uids)})`] };
+    }
+
+    case 'return_to': {
+      const ms = pace(a, 'deliberate');
+      if (a.name) {
+        const st = model.checkpoints[a.name];
+        if (!st) throw new Error(`return_to: no checkpoint "${a.name}"`);
+        const lines = [];
+        // What came after the checkpoint fades out (its arrows go with it).
+        const removed = Object.keys(model.objects).filter(id => !st.objects[id]);
+        const unlinked = Object.values(model.relations)
+          .filter(r => !st.relations[r.id] && !removed.includes(r.from) && !removed.includes(r.to)).map(r => r.id);
+        if (removed.length || unlinked.length) {
+          const gone = [...removed, ...unlinked];
+          lines.push(`${fadeAll(gone.map(id => [id, 0]), Math.round(ms / 2))}.then(() => ${J(gone)}.forEach(removeByUid))`);
+        }
+        // revertState puts back places and looks but not how arrows curve, so
+        // that is set first (it redraws them at the end).
+        const known = id => model.relations[id] || model.retiredRelations[id] || {};
+        const rebend = Object.values(st.relations).filter(r => r.bend && known(r.id).bend !== r.bend)
+          .map(r => `setCustomData(${J(r.id)}, {bend: ${J(r.bend)}})`);
+        lines.push(rebend.length ? `Promise.resolve().then(() => { ${rebend.join('; ')}; }).then(() => revertState(${J(a.name)}, {duration: ${ms}}))`
+          : `revertState(${J(a.name)}, {duration: ${ms}})`);
+        // Label text and boundaries are not part of a tag either.
+        const fixes = Object.values(st.objects).filter(o => o.kind === 'text' || o.kind === 'box').flatMap(o => {
+          const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
+          return [...(now.text !== o.text ? [`setLabelText(${J(o.id)}, ${J(o.text)})`] : []),
+            ...(now.boundary !== o.boundary ? [`setLabelBoundary(${J(o.id)}, ${J(o.boundary)})`] : [])];
+        });
+        if (fixes.length) lines.push(`Promise.resolve().then(() => { ${fixes.join('; ')}; })`);
+        const c = model.camera;
+        if (c.zoom !== st.camera.zoom || c.pan[0] !== st.camera.pan[0] || c.pan[1] !== st.camera.pan[1]) lines.push(cameraLine(st.camera, ms));
+        return { record: { op, name: a.name, removed, unlinked }, lines };
+      }
+      if (!Array.isArray(a.ids) || !a.ids.length) throw new Error('return_to: give a checkpoint name or ids of removed concepts');
+      a.ids.forEach(id => {
+        if (!model.retired[id]) throw new Error(`return_to: "${id}" was not removed`);
+        if (model.objects[id] || model.relations[id]) throw new Error(`return_to: "${id}" is in use again`);
+      });
+      // Relationships come back once both their ends are back.
+      const back = new Set([...Object.keys(model.objects), ...a.ids]);
+      const pending = Object.values(model.retiredRelations);
+      const relations = pending.filter(r => back.has(r.from) && back.has(r.to) && !model.relations[r.id]);
+      // restoreObject puts back the arrows that went with a concept, whether
+      // or not the other end is there: they are taken off and drawn afresh.
+      const touching = pending.filter(r => a.ids.includes(r.from) || a.ids.includes(r.to) || relations.includes(r)).map(r => r.id);
+      const restore = [...a.ids.map(id => `restoreObject(${J(id)})`), ...touching.map(id => `removeByUid(${J(id)})`)];
+      const fades = a.ids.map(id => {
+        const o = model.retired[id].object, sc = o.scale == null ? 1 : o.scale;
+        return `animate(${J(id)}, {left: ${o.at[0]}, top: ${o.at[1]}, scaleX: ${sc}, scaleY: ${sc}, opacity: ${o.opacity}}, {duration: ${ms}})`;
+      });
+      const lines = [`Promise.resolve().then(() => { ${restore.join('; ')}; }).then(() => Promise.all([${fades.join(', ')}]))`];
+      if (relations.length) {
+        lines.push(`Promise.all([${relations.map(r => `connectObjects(${J(r.from)}, ${J(r.to)}, ${J(r.id)}, {${r.bend ? `bend: ${J(r.bend)}, ` : ''}animate: true, duration: ${pace(a)}})`).join(', ')}])`);
+      }
+      return { record: { op, ids: a.ids, relations }, lines };
+    }
+
+    case 'turnover': {
+      const g = model.groups[a.group];
+      if (!g) throw new Error(`turnover: no group "${a.group}"`);
+      const leaving = a.leaving || [];
+      if (!Array.isArray(leaving)) throw new Error('turnover: leaving must be a list');
+      leaving.forEach(id => { if (!g.members.includes(id)) throw new Error(`turnover: "${id}" is not in group "${a.group}"`); });
+      const incoming = a.arriving || [];
+      if (!Array.isArray(incoming) || (!leaving.length && !incoming.length)) throw new Error('turnover: give leaving and/or arriving members');
+      const dir = a.direction || 'right';
+      const step = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] }[dir];
+      if (!step) throw new Error('turnover: direction must be right, left, down or up');
+      const taken = new Set();
+      const sample = model.objects[g.members[0]] || {};
+      const arriving = incoming.map(it => {
+        const item = typeof it === 'string' ? { text: it } : it;
+        const id = idFor(item.id, item.text);
+        checkNewId(model, id, taken); taken.add(id);
+        const kind = sample.kind === 'box' ? 'box' : 'text';
+        return { id, ...objectSpec(model, { kind, size: sample.fontSize ? sample.fontSize * zoomOf(model) : undefined, ...item }, item.text) };
+      });
+      const sizes = arriving.length ? await measure(arriving) : [];
+      const staying = g.members.filter(m => !leaving.includes(m));
+      if (!staying.length && !arriving.length) throw new Error('turnover: that would leave the group empty');
+      // Arrivals come in at the end opposite to where leavers go.
+      const order = step[0] + step[1] > 0 ? [...arriving.map(x => x.id), ...staying] : [...staying, ...arriving.map(x => x.id)];
+      const sizeOf = id => (model.objects[id] ? model.objects[id].size.map(v => v * (model.objects[id].scale || 1)) : sizes[arriving.findIndex(x => x.id === id)]);
+      const [cx, cy] = centreOf(model, g.members);
+      const centres = layoutRun(model, order.map(sizeOf), step[0] !== 0 ? 'row' : 'column', { x: cx, y: cy }, 32);
+      const at = Object.fromEntries(order.map((id, i) => [id, centres[i]]));
+      const moves = Object.fromEntries(staying.map(id => [id, at[id]]));
+      const placed = arriving.map((x, i) => ({ ...x, at: at[x.id], size: sizes[i] }));
+      const ms = pace(a, 'deliberate'), d = 80 / zoomOf(model);
+      const lines = [];
+      if (leaving.length) {
+        lines.push(`Promise.all([${leaving.map(id => { const o = model.objects[id]; return `animate(${J(id)}, {left: ${Math.round(o.at[0] + step[0] * d)}, top: ${Math.round(o.at[1] + step[1] * d)}, opacity: 0}, {duration: ${ms}})`; }).join(', ')}]).then(() => ${J(leaving)}.forEach(removeByUid))`);
+      }
+      const shifts = staying.map(id => `animate(${J(id)}, {left: ${moves[id][0]}, top: ${moves[id][1]}}, {duration: ${ms}})`);
+      // The group's enclosure is refitted round its new members.
+      let enclosure;
+      if (g.enclosure && model.objects[g.enclosure]) {
+        const boxes = order.map(id => { const [w, h] = sizeOf(id); return { x: at[id][0] - w / 2, y: at[id][1] - h / 2, w, h }; });
+        enclosure = { id: g.enclosure, ...boxAround(model, boxes, 20) };
+        shifts.push(`animate(${J(g.enclosure)}, {left: ${enclosure.at[0]}, top: ${enclosure.at[1]}, width: ${enclosure.size[0]}, height: ${enclosure.size[1]}}, {duration: ${ms}})`);
+      }
+      if (shifts.length) lines.push(`Promise.all([${shifts.join(', ')}])`);
+      if (placed.length) lines.push(`Promise.all([${placed.map(q => createLine(q, ms)).join(', ')}])`);
+      return { record: { op, group: a.group, leaving, moves, arriving: placed, members: order, ...(enclosure ? { enclosure } : {}) }, lines };
+    }
+
+    case 'narrow_context': {
+      let camera;
+      if (a.reset) camera = { zoom: 1, pan: [0, 0] };
+      else {
+        const ids = expand(model, a.ids, op);
+        const fill = a.fill == null ? 0.7 : num(a.fill, 'narrow_context: fill', 0.1, 1);
+        const bs = ids.map(id => boxOf(model.objects[id]));
+        const w = Math.max(...bs.map(b => b.x + b.w)) - Math.min(...bs.map(b => b.x));
+        const h = Math.max(...bs.map(b => b.y + b.h)) - Math.min(...bs.map(b => b.y));
+        const zoom = +Math.min(2, Math.max(0.05, Math.min(CANVAS.width * fill / w, CANVAS.height * fill / h))).toFixed(4);
+        const [cx, cy] = centreOf(model, ids);
+        camera = { zoom, pan: [Math.round(CANVAS.width / 2 - cx * zoom), Math.round(CANVAS.height / 2 - cy * zoom)] };
+      }
+      return { record: { op, ids: a.ids, reset: a.reset || undefined, camera }, lines: [cameraLine(camera, pace(a, 'deliberate'))] };
     }
 
     case 'pause': {
@@ -608,11 +898,52 @@ export function inspect(model, live) {
   const relations = Object.values(model.relations).map(r => ({ id: r.id, from: r.from, to: r.to, kind: r.kind || undefined, ...(r.opacity !== 1 ? { emphasis: 'dim' } : {}) }));
   const extra = live ? [...liveBy.keys()].filter(uid => !model.objects[uid] && !model.relations[uid]) : [];
   return {
-    scene: model.scene, beat: model.beat, scenes: model.scenes.map(s => s.name), beats: model.beats,
+    camera: model.camera, scene: model.scene, beat: model.beat, scenes: model.scenes.map(s => s.name), beats: model.beats,
     viewerTasks: model.viewerTasks, groups: Object.values(model.groups), objects, relations,
+    checkpoints: Object.keys(model.checkpoints), removed: Object.keys(model.retired),
     ...(extra.length ? { notInModel: extra } : {}),
     actions: model.log, ...(model.problems && model.problems.length ? { problems: model.problems } : {})
   };
+}
+
+// Straight ends of a connector between two model boxes: facing edges where
+// the boxes are apart, centres where they overlap (as the page's connectorEnds).
+function connectorEnds(a, b) {
+  let x1, x2, y1, y2;
+  if (b.x > a.x + a.w) { x1 = a.x + a.w; x2 = b.x; } else if (b.x + b.w < a.x) { x1 = a.x; x2 = b.x + b.w; } else { x1 = a.x + a.w / 2; x2 = b.x + b.w / 2; }
+  if (b.y > a.y + a.h) { y1 = a.y + a.h; y2 = b.y; } else if (b.y + b.h < a.y) { y1 = a.y; y2 = b.y + b.h; } else { y1 = a.y + a.h / 2; y2 = b.y + b.h / 2; }
+  return [x1, y1, x2, y2];
+}
+
+// The pieces of a connector to test for crossings: the straight line, or two
+// chords through the middle of a curve. `mid` is the curve's middle point.
+export function connectorChords([x1, y1, x2, y2], mid) {
+  return mid ? [[x1, y1, mid[0], mid[1]], [mid[0], mid[1], x2, y2]] : [[x1, y1, x2, y2]];
+}
+
+const bendMiddle = ([x1, y1, x2, y2], bend) => {
+  const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+  return [(x1 + x2) / 2 + (y2 - y1) / len * bend, (y1 + y2) / 2 - (x2 - x1) / len * bend];
+};
+
+// 'auto': straight if that is clear of other concepts and not on top of a
+// straight reverse arrow; else the smallest bend, either way, that is clear.
+function chooseBend(model, from, to, bend) {
+  if (bend !== 'auto') return num(bend, 'connect: bend', -600, 600);
+  const ends = connectorEnds(boxOf(model.objects[from]), boxOf(model.objects[to]));
+  const others = Object.values(model.objects)
+    .filter(o => o.id !== from && o.id !== to && o.kind !== 'enclosure' && o.kind !== 'spectrum' && o.opacity > 0)
+    .map(o => { const b = boxOf(o); return { x: b.x + 4, y: b.y + 4, w: b.w - 8, h: b.h - 8 }; });
+  const reverse = Object.values(model.relations).some(r => r.from === to && r.to === from && !r.bend);
+  // Bends grow with the arrow: a short arrow only needs a slight curve.
+  const len = Math.hypot(ends[2] - ends[0], ends[3] - ends[1]);
+  const k = Math.min(1 / zoomOf(model), Math.max(0.25, len / 260));
+  for (const c of [0, 50, -50, 100, -100, 160, -160]) {
+    if (c === 0 && reverse) continue;
+    const chords = connectorChords(ends, c ? bendMiddle(ends, c * k) : null);
+    if (!others.some(b => chords.some(ch => segmentHitsBox(ch, b)))) return c && Math.round(c * k);
+  }
+  return reverse ? Math.round(50 * k) : 0;
 }
 
 // Whether the segment [x1, y1, x2, y2] crosses the box (Liang-Barsky clipping).
@@ -644,16 +975,18 @@ export function validate(model, live) {
     if (!model.objects[r.from] || !model.objects[r.to]) issues.push({ level: 'error', id: r.id, message: `relationship "${r.id}" points at a concept that no longer exists` });
     else if (!liveBy.get(r.id)) issues.push({ level: 'error', id: r.id, message: `relationship "${r.id}" is not on the canvas` });
   });
+  const v = view(model);
   shown.forEach(o => {
     const b = liveBy.get(o.id).box;
-    if (b.left < 0 || b.top < 0 || b.left + b.width > CANVAS.width || b.top + b.height > CANVAS.height) {
-      issues.push({ level: 'warning', id: o.id, message: `"${o.id}" is partly off the visible canvas` });
+    if (b.left < v.x || b.top < v.y || b.left + b.width > v.x + v.w || b.top + b.height > v.y + v.h) {
+      issues.push({ level: 'warning', id: o.id, message: `"${o.id}" is partly out of view` });
     }
     RESERVED.forEach(r => {
-      if (overlaps({ x: b.left, y: b.top, w: b.width, h: b.height }, r)) issues.push({ level: 'warning', id: o.id, message: `"${o.id}" is under the page's ${r.name}` });
+      if (overlaps({ x: b.left, y: b.top, w: b.width, h: b.height }, screenRect(model, r))) issues.push({ level: 'warning', id: o.id, message: `"${o.id}" is under the page's ${r.name}` });
     });
-    if (o.kind !== 'enclosure' && o.fontSize && o.fontSize * o.scale < 13) {
-      issues.push({ level: o.opacity < 1 ? 'info' : 'warning', id: o.id, message: `"${o.id}" text is about ${Math.round(o.fontSize * o.scale)} px: hard to read (fine if it was made small on purpose, e.g. by widen_context)` });
+    const px = o.fontSize * o.scale * zoomOf(model);
+    if (o.fontSize && px < 13) {
+      issues.push({ level: o.opacity < 1 ? 'info' : 'warning', id: o.id, message: `"${o.id}" text shows at about ${Math.round(px)} px: hard to read (fine if it was made small on purpose, e.g. by widen_context)` });
     }
   });
   const liveBox = o => { const b = liveBy.get(o.id).box; return { x: b.left, y: b.top, w: b.width, h: b.height }; };
@@ -663,8 +996,9 @@ export function validate(model, live) {
       const p = shown[i], q = shown[j];
       if (p.inside === q.id || q.inside === p.id) continue;
       const bp = liveBox(p), bq = liveBox(q);
-      const enc = p.kind === 'enclosure' ? p : q.kind === 'enclosure' ? q : null;
-      if (enc && p.kind !== q.kind) {
+      const isBox = o => o.kind === 'enclosure' || o.kind === 'spectrum';
+      const enc = isBox(p) ? p : isBox(q) ? q : null;
+      if (enc && isBox(p) !== isBox(q)) {
         const other = enc === p ? q : p, be = liveBox(enc), bo = liveBox(other);
         if (enc.members.includes(other.id)) {
           if (!contains(be, bo)) issues.push({ level: 'warning', id: enc.id, message: `"${other.id}" belongs in enclosure "${enc.id}" but sticks out of it` });
@@ -673,17 +1007,18 @@ export function validate(model, live) {
         }
         continue;
       }
-      if (p.kind === 'enclosure' && q.kind === 'enclosure' && (contains(bp, bq) || contains(bq, bp))) continue;
+      if (isBox(p) && isBox(q) && (contains(bp, bq) || contains(bq, bp))) continue;
       if (overlaps(bp, bq, -2)) issues.push({ level: 'warning', id: p.id, message: `"${p.id}" and "${q.id}" overlap` });
     }
   }
   Object.values(model.relations).forEach(r => {
     const l = liveBy.get(r.id);
     if (!l || !l.ends || !l.visible || !(l.opacity > 0)) return;
-    shown.filter(o => o.kind !== 'enclosure' && o.id !== r.from && o.id !== r.to && o.inside !== r.from && o.inside !== r.to)
+    shown.filter(o => !o.members && o.id !== r.from && o.id !== r.to && o.inside !== r.from && o.inside !== r.to)
       .forEach(o => {
         const b = liveBox(o);
-        if (segmentHitsBox(l.ends, { x: b.x + 4, y: b.y + 4, w: b.w - 8, h: b.h - 8 })) {
+        const inner = { x: b.x + 4, y: b.y + 4, w: b.w - 8, h: b.h - 8 };
+        if (connectorChords(l.ends, l.bend).some(ch => segmentHitsBox(ch, inner))) {
           issues.push({ level: 'warning', id: r.id, message: `relationship "${r.id}" runs through "${o.id}"` });
         }
       });

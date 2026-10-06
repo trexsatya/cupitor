@@ -160,7 +160,8 @@ export class PlayPage {
         };
         const text = textOf(o);
         if (text) item.text = text.length > 120 ? text.slice(0, 120) + '…' : text;
-        if (o instanceof fabric.Line) item.ends = [o.x1, o.y1, o.x2, o.y2].map(r);
+        if (o instanceof fabric.Line || (typeof o.rebuild === 'function' && o.x1 != null)) item.ends = [o.x1, o.y1, o.x2, o.y2].map(r);
+        if (typeof o.rebuild === 'function' && o.cx != null) item.bend = [o.cx, o.cy].map(r);
         if (cd.source || cd.target) Object.assign(item, { source: cd.source, target: cd.target });
         const kids = (tc.outgoing && tc.outgoing.lines || []).map(l => (typeof l === 'object' ? l : findIfRequired(l)))
           .filter(isFabricObject).map(l => l.customData && l.customData.target);

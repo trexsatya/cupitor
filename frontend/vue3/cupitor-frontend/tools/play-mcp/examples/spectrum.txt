@@ -1,0 +1,32 @@
+// @sem {"op":"scene","name":"spectrum","reset":true}
+animateViewport({zoom: 1, pan: [0, 0]}, {duration: 0})
+// @sem {"op":"beat","name":"two kinds","viewer_task":{"type":"notice","target":"two clean categories"}}
+// @sem {"op":"introduce","id":"day","kind":"box","text":"DAY","fontSize":30,"boundary":"solid","at":[260,400],"size":[85,60]}
+drawOutline(addLabel("DAY", 260, 400, {"uid":"day","fontSize":30,"boundary":"solid"}), {duration: 700})
+// @sem {"op":"introduce","id":"night","kind":"box","text":"NIGHT","fontSize":30,"boundary":"solid","at":[1140,400],"size":[119,60]}
+drawOutline(addLabel("NIGHT", 1140, 400, {"uid":"night","fontSize":30,"boundary":"solid"}), {duration: 700})
+// @sem {"op":"pause","kind":"short","seconds":1}
+Promise.resolve(sleep(1))
+// @sem {"op":"beat","name":"in between","viewer_task":{"type":"question","target":"which box do these belong in?"}}
+// @sem {"op":"introduce","id":"dusk","kind":"text","text":"DUSK?","fontSize":22,"boundary":"none","at":[700,400],"size":[97,49]}
+drawOutline(addLabel("DUSK?", 700, 400, {"uid":"dusk","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"introduce","id":"evening","kind":"text","text":"EVENING?","fontSize":22,"boundary":"none","at":[480,400],"size":[135,49]}
+drawOutline(addLabel("EVENING?", 480, 400, {"uid":"evening","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"introduce","id":"twilight","kind":"text","text":"TWILIGHT?","fontSize":22,"boundary":"none","at":[920,400],"size":[141,49]}
+drawOutline(addLabel("TWILIGHT?", 920, 400, {"uid":"twilight","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"pause","kind":"prediction","seconds":2}
+Promise.resolve(sleep(2))
+// @sem {"op":"beat","name":"the line fails","viewer_task":{"type":"notice","target":"the boundary cannot be drawn"}}
+// @sem {"op":"weaken_boundary","id":"day","style":"dashed"}
+animate("day", {opacity: 0.3}, {duration: 750}).then(() => setLabelBoundary("day", "dashed")).then(() => animate("day", {opacity: 1}, {duration: 750}))
+// @sem {"op":"weaken_boundary","id":"night","style":"dashed"}
+animate("night", {opacity: 0.3}, {duration: 750}).then(() => setLabelBoundary("night", "dashed")).then(() => animate("night", {opacity: 1}, {duration: 750}))
+// @sem {"op":"pause","kind":"short","seconds":1}
+Promise.resolve(sleep(1))
+// @sem {"op":"beat","name":"a continuum","viewer_task":{"type":"integrate","target":"one continuum, not two kinds"}}
+// @sem {"op":"dissolve_boundary","id":"daylight","ids":["day","evening","dusk","twilight","night"],"colors":["#fff3c4","#9fa8da"],"at":[709,400],"size":[1030,108]}
+Promise.all(["day","evening","dusk","twilight","night"].map(id => animate(id, {opacity: 0.55}, {duration: 500}))).then(() => ["day","evening","dusk","twilight","night"].forEach(id => setLabelBoundary(id, "dashed")))
+Promise.resolve(addRect(709, 400, 1030, 108, {uid: "daylight", originX: "center", originY: "center", rx: 18, ry: 18, strokeWidth: 0, opacity: 0, fill: new fabric.Gradient({type: "linear", gradientUnits: "percentage", coords: {x1: 0, y1: 0, x2: 1, y2: 0}, colorStops: [{offset: 0, color: "#fff3c4"}, {offset: 1, color: "#9fa8da"}]})})).then(r => (sendToBack(r), animate(r, {opacity: 1}, {duration: 1500})))
+Promise.all([(setLabelBoundary("day", "none"), animate("day", {opacity: 1}, {duration: 500})), (setLabelBoundary("evening", "none"), animate("evening", {opacity: 1}, {duration: 500})), (setLabelBoundary("dusk", "none"), animate("dusk", {opacity: 1}, {duration: 500})), (setLabelBoundary("twilight", "none"), animate("twilight", {opacity: 1}, {duration: 500})), (setLabelBoundary("night", "none"), animate("night", {opacity: 1}, {duration: 500}))])
+// @sem {"op":"pause","kind":"thinking","seconds":4}
+Promise.resolve(sleep(4))

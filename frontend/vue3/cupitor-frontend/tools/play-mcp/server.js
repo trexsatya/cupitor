@@ -192,7 +192,7 @@ export function createServer(page, publicDir) {
     const model = parseScene(await page.script());
     const { lines, records } = await planActions(model, resolvePictures(actions, publicDir), specs => page.measure(specs));
     const result = report(await page.play(lines, { record: true }));
-    const placed = records.flatMap(r => (r.at ? [`${r.id} at ${r.at.join(',')}`] : []).concat((r.items || []).map(i => `${i.id} at ${i.at.join(',')}`)));
+    const placed = records.flatMap(r => (r.at ? [`${r.id} at ${r.at.join(',')}`] : []).concat((r.items || r.arriving || []).map(i => `${i.id} at ${i.at.join(',')}`)));
     return text([result, placed.length ? `Placed: ${placed.join('; ')}` : ''].filter(Boolean).join('\n'));
   }));
 

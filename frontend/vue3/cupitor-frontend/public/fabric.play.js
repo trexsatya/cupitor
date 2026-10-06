@@ -271,6 +271,52 @@ fabric.CurvableLine = CurvableLine;
 fabric.classRegistry.setClass(CurvableLine);
 fabric.classRegistry.setClass(CurvableLine, 'CurvableLine');
 
+// A curved connector: a CurvableLine with an arrowhead at (x2, y2) pointing
+// along the curve.
+class ArrowPath extends CurvableLine {
+  static type = 'ArrowPath';
+
+  constructor(pts, options) {
+    const opts = Object.assign({ arrowSize: 8 }, options || {});
+    super(pts, opts);
+    this.arrowSize = opts.arrowSize;
+  }
+
+  _render(ctx) {
+    super._render(ctx);
+    if (!this.visible) return;
+    // The curve leaves its control point heading for (x2, y2).
+    const cpx = 2 * this.cx - (this.x1 + this.x2) / 2, cpy = 2 * this.cy - (this.y1 + this.y2) / 2;
+    const angle = Math.atan2(this.y2 - cpy, this.x2 - cpx);
+    const sz = this.arrowSize || 8;
+    ctx.save();
+    if (this._innerAlpha != null) ctx.globalAlpha *= this._innerAlpha; // drawOutline fades it in
+    ctx.translate(this.x2 - this.pathOffset.x, this.y2 - this.pathOffset.y);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-sz, -sz * 0.5);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-sz, sz * 0.5);
+    ctx.strokeStyle = this.stroke;
+    ctx.lineWidth = this.strokeWidth;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  toObject(propertiesToInclude) {
+    return Object.assign(super.toObject(propertiesToInclude), { arrowSize: this.arrowSize });
+  }
+
+  static fromObject(object) {
+    return Promise.resolve(new ArrowPath([object.x1, object.y1, object.x2, object.y2], object));
+  }
+}
+fabric.ArrowPath = ArrowPath;
+fabric.classRegistry.setClass(ArrowPath);
+fabric.classRegistry.setClass(ArrowPath, 'ArrowPath');
+
 // Text boxes marked customData.autoFit (the Text tools' boxes) are as wide as
 // their longest line, so no empty space is left at the right. An empty box
 // keeps its width so it can still be clicked. Dragging a side handle sets the
@@ -679,12 +725,25 @@ function makeConnection(e) {
 // moves (updateConnectors runs from updateTreeItem).
 // With opts.animate the line grows from the source to the target over
 // opts.duration ms (default 800) and a promise of the line is returned.
+// opts.bend curves it: px its middle stands off the straight line (to the
+// left of the way it points when positive), or 'loop' for an arrow from an
+// object back to itself.
 function connectObjects(fromUidOrObj, toUidOrObj, lineUid, opts) {
   const a = findIfRequired(fromUidOrObj), b = findIfRequired(toUidOrObj)
   // Thrown so a script's player reports the line instead of skipping it quietly.
   if (!isFabricObject(a)) throw new Error(`connectObjects: no object ${JSON.stringify(fromUidOrObj)}`)
   if (!isFabricObject(b)) throw new Error(`connectObjects: no object ${JSON.stringify(toUidOrObj)}`)
-  if (a === b) return null
+  const bend = opts && opts.bend
+  if (a === b && bend !== 'loop') return null
+  if (bend) {
+    const [x1, y1, x2, y2, cx, cy] = _bentEnds(a, b, bend)
+    const line = new fabric.ArrowPath([x1, y1, x2, y2], { cx, cy, stroke: '#555', strokeWidth: 1.5 })
+    if (lineUid) line.uid = lineUid
+    pc.add(line)
+    Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid, bend })
+    _listConnector(line)
+    return opts.animate ? drawOutline(line, { duration: opts.duration || 800 }).then(() => line) : line
+  }
   const line = connect(pc, a, b, { uid: lineUid })
   Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid })
   _listConnector(line)
@@ -698,6 +757,18 @@ function connectObjects(fromUidOrObj, toUidOrObj, lineUid, opts) {
     onChange: t => reshapeLineXY(line, x1, y1, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t),
     onComplete: () => { reshapeLineXY(line, x1, y1, x2, y2); resolve(line) }
   }))
+}
+
+// Ends and middle [x1, y1, x2, y2, cx, cy] of a curved connector from a to b.
+function _bentEnds(a, b, bend) {
+  if (bend === 'loop') {
+    // Out of the top edge and back into the right edge, round the corner.
+    const r = _freshBox(a), d = Math.max(56, Math.min(r.width, r.height) * 1.2)
+    return [r.left + r.width * 0.7, r.top, r.left + r.width, r.top + r.height * 0.3, r.left + r.width + d * 0.35, r.top - d * 0.35]
+  }
+  const [x1, y1, x2, y2] = connectorEnds(a, b)
+  const len = Math.hypot(x2 - x1, y2 - y1) || 1
+  return [x1, y1, x2, y2, (x1 + x2) / 2 + (y2 - y1) / len * bend, (y1 + y2) / 2 - (x2 - x1) / len * bend]
 }
 
 function _listConnector(line) {
@@ -976,6 +1047,11 @@ function updateConnectors(obj) {
   lines.forEach(line => {
     const a = findIfRequired(line.customData.source), b = findIfRequired(line.customData.target)
     if (!isFabricObject(a) || !isFabricObject(b)) return
+    if (line.customData.bend && typeof line.rebuild === 'function') {
+      [line.x1, line.y1, line.x2, line.y2, line.cx, line.cy] = _bentEnds(a, b, line.customData.bend)
+      line.rebuild()
+      return
+    }
     const [x1, y1, x2, y2] = connectorEnds(a, b)
     line.set({ x1, y1, x2, y2 })
     line.setCoords()

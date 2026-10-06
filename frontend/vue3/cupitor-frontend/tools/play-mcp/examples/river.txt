@@ -1,0 +1,52 @@
+// @sem {"op":"scene","name":"river","reset":true}
+animateViewport({zoom: 1, pan: [0, 0]}, {duration: 0})
+// @sem {"op":"beat","name":"the river","viewer_task":{"type":"notice","target":"the name holds while every part changes"}}
+// @sem {"op":"introduce","id":"river","kind":"text","text":"RIVER","fontSize":38,"boundary":"none","at":[700,130],"size":[140,67]}
+drawOutline(addLabel("RIVER", 700, 130, {"uid":"river","fontSize":38,"boundary":"none"}), {duration: 700})
+// @sem {"op":"introduce_group","id":"water","kind":"box","items":[{"id":"d1","kind":"box","text":"drop 1","fontSize":16,"boundary":"solid","at":[494,400],"size":[71,44]},{"id":"d2","kind":"box","text":"drop 2","fontSize":16,"boundary":"solid","at":[597,400],"size":[71,44]},{"id":"d3","kind":"box","text":"drop 3","fontSize":16,"boundary":"solid","at":[700,400],"size":[71,44]},{"id":"d4","kind":"box","text":"drop 4","fontSize":16,"boundary":"solid","at":[803,400],"size":[71,44]},{"id":"d5","kind":"box","text":"drop 5","fontSize":16,"boundary":"solid","at":[906,400],"size":[71,44]}],"relations":[]}
+Promise.all([drawOutline(addLabel("drop 1", 494, 400, {"uid":"d1","fontSize":16,"boundary":"solid"}), {duration: 700}), drawOutline(addLabel("drop 2", 597, 400, {"uid":"d2","fontSize":16,"boundary":"solid"}), {duration: 700}), drawOutline(addLabel("drop 3", 700, 400, {"uid":"d3","fontSize":16,"boundary":"solid"}), {duration: 700}), drawOutline(addLabel("drop 4", 803, 400, {"uid":"d4","fontSize":16,"boundary":"solid"}), {duration: 700}), drawOutline(addLabel("drop 5", 906, 400, {"uid":"d5","fontSize":16,"boundary":"solid"}), {duration: 700})])
+// @sem {"op":"enclose","id":"bed","group":"water","members":["d1","d2","d3","d4","d5"],"style":"dashed","at":[700,400],"size":[523,84]}
+drawOutline(addRect(700, 400, 523, 84, {"uid":"bed","originX":"center","originY":"center","rx":18,"ry":18,"stroke":"#666","strokeWidth":2,"strokeDashArray":[10,7]}), {duration: 1500})
+// @sem {"op":"pause","kind":"short","seconds":1}
+Promise.resolve(sleep(1))
+// @sem {"op":"beat","name":"flowing","viewer_task":{"type":"notice","target":"parts leave and arrive"}}
+// @sem {"op":"turnover","group":"water","leaving":["d5"],"moves":{"d1":[597,400],"d2":[700,400],"d3":[803,400],"d4":[906,400]},"arriving":[{"id":"d6","kind":"box","text":"drop 6","fontSize":16,"boundary":"solid","at":[494,400],"size":[71,44]}],"members":["d6","d1","d2","d3","d4"],"enclosure":{"id":"bed","at":[700,400],"size":[523,84]}}
+Promise.all([animate("d5", {left: 986, top: 400, opacity: 0}, {duration: 1500})]).then(() => ["d5"].forEach(removeByUid))
+Promise.all([animate("d1", {left: 597, top: 400}, {duration: 1500}), animate("d2", {left: 700, top: 400}, {duration: 1500}), animate("d3", {left: 803, top: 400}, {duration: 1500}), animate("d4", {left: 906, top: 400}, {duration: 1500}), animate("bed", {left: 700, top: 400, width: 523, height: 84}, {duration: 1500})])
+Promise.all([drawOutline(addLabel("drop 6", 494, 400, {"uid":"d6","fontSize":16,"boundary":"solid"}), {duration: 1500})])
+// @sem {"op":"turnover","group":"water","leaving":["d4"],"moves":{"d6":[597,400],"d1":[700,400],"d2":[803,400],"d3":[906,400]},"arriving":[{"id":"d7","kind":"box","text":"drop 7","fontSize":16,"boundary":"solid","at":[494,400],"size":[71,44]}],"members":["d7","d6","d1","d2","d3"],"enclosure":{"id":"bed","at":[700,400],"size":[523,84]}}
+Promise.all([animate("d4", {left: 986, top: 400, opacity: 0}, {duration: 1500})]).then(() => ["d4"].forEach(removeByUid))
+Promise.all([animate("d6", {left: 597, top: 400}, {duration: 1500}), animate("d1", {left: 700, top: 400}, {duration: 1500}), animate("d2", {left: 803, top: 400}, {duration: 1500}), animate("d3", {left: 906, top: 400}, {duration: 1500}), animate("bed", {left: 700, top: 400, width: 523, height: 84}, {duration: 1500})])
+Promise.all([drawOutline(addLabel("drop 7", 494, 400, {"uid":"d7","fontSize":16,"boundary":"solid"}), {duration: 1500})])
+// @sem {"op":"turnover","group":"water","leaving":["d3","d2"],"moves":{"d7":[700,400],"d6":[803,400],"d1":[906,400]},"arriving":[{"id":"d8","kind":"box","text":"drop 8","fontSize":16,"boundary":"solid","at":[494,400],"size":[71,44]},{"id":"d9","kind":"box","text":"drop 9","fontSize":16,"boundary":"solid","at":[597,400],"size":[71,44]}],"members":["d8","d9","d7","d6","d1"],"enclosure":{"id":"bed","at":[700,400],"size":[523,84]}}
+Promise.all([animate("d3", {left: 986, top: 400, opacity: 0}, {duration: 1500}), animate("d2", {left: 883, top: 400, opacity: 0}, {duration: 1500})]).then(() => ["d3","d2"].forEach(removeByUid))
+Promise.all([animate("d7", {left: 700, top: 400}, {duration: 1500}), animate("d6", {left: 803, top: 400}, {duration: 1500}), animate("d1", {left: 906, top: 400}, {duration: 1500}), animate("bed", {left: 700, top: 400, width: 523, height: 84}, {duration: 1500})])
+Promise.all([drawOutline(addLabel("drop 8", 494, 400, {"uid":"d8","fontSize":16,"boundary":"solid"}), {duration: 1500}), drawOutline(addLabel("drop 9", 597, 400, {"uid":"d9","fontSize":16,"boundary":"solid"}), {duration: 1500})])
+// @sem {"op":"pause","kind":"prediction","seconds":2}
+Promise.resolve(sleep(2))
+// @sem {"op":"beat","name":"same river?","viewer_task":{"type":"question","target":"is it still the same river?"}}
+// @sem {"op":"turnover","group":"water","leaving":["d1"],"moves":{"d8":[602,400],"d9":[705,400],"d7":[808,400],"d6":[911,400]},"arriving":[{"id":"d10","kind":"box","text":"drop 10","fontSize":16,"boundary":"solid","at":[494,400],"size":[80,44]}],"members":["d10","d8","d9","d7","d6"],"enclosure":{"id":"bed","at":[700,400],"size":[533,84]}}
+Promise.all([animate("d1", {left: 986, top: 400, opacity: 0}, {duration: 1500})]).then(() => ["d1"].forEach(removeByUid))
+Promise.all([animate("d8", {left: 602, top: 400}, {duration: 1500}), animate("d9", {left: 705, top: 400}, {duration: 1500}), animate("d7", {left: 808, top: 400}, {duration: 1500}), animate("d6", {left: 911, top: 400}, {duration: 1500}), animate("bed", {left: 700, top: 400, width: 533, height: 84}, {duration: 1500})])
+Promise.all([drawOutline(addLabel("drop 10", 494, 400, {"uid":"d10","fontSize":16,"boundary":"solid"}), {duration: 1500})])
+// @sem {"op":"question","id":"river","text":"RIVER?","size":[161,67]}
+animate("river", {opacity: 0.15}, {duration: 450}).then(() => (setLabelText("river", "RIVER?"), setLabelBoundary("river", "dashed"))).then(() => animate("river", {opacity: 1}, {duration: 1050}))
+// @sem {"op":"pause","kind":"thinking","seconds":4}
+Promise.resolve(sleep(4))
+// @sem {"op":"beat","name":"me too","viewer_task":{"type":"integrate","target":"a self is held the same way"}}
+// @sem {"op":"deemphasize","ids":["water","river"],"opacity":{"d10":0.2,"d8":0.2,"d9":0.2,"d7":0.2,"d6":0.2,"bed":0.2,"river":0.2}}
+Promise.all([animate("d10", {opacity: 0.2}, {duration: 700}), animate("d8", {opacity: 0.2}, {duration: 700}), animate("d9", {opacity: 0.2}, {duration: 700}), animate("d7", {opacity: 0.2}, {duration: 700}), animate("d6", {opacity: 0.2}, {duration: 700}), animate("bed", {opacity: 0.2}, {duration: 700}), animate("river", {opacity: 0.2}, {duration: 700})])
+// @sem {"op":"introduce","id":"me","kind":"figure","text":"ME","fontSize":16,"boundary":"none","at":[260,670],"size":[43,129]}
+drawOutline(addFigure(260, 670, {"uid":"me","label":"ME","fontSize":16}), {duration: 1500})
+// @sem {"op":"introduce_group","id":"parts","items":[{"id":"cells","kind":"text","text":"cells","fontSize":16,"boundary":"none","at":[370,670],"size":[56,42]},{"id":"memories","kind":"text","text":"memories","fontSize":16,"boundary":"none","at":[477,670],"size":[94,42]},{"id":"beliefs","kind":"text","text":"beliefs","fontSize":16,"boundary":"none","at":[591,670],"size":[70,42]}],"relations":[]}
+Promise.all([drawOutline(addLabel("cells", 370, 670, {"uid":"cells","fontSize":16,"boundary":"none"}), {duration: 700}), drawOutline(addLabel("memories", 477, 670, {"uid":"memories","fontSize":16,"boundary":"none"}), {duration: 700}), drawOutline(addLabel("beliefs", 591, 670, {"uid":"beliefs","fontSize":16,"boundary":"none"}), {duration: 700})])
+// @sem {"op":"turnover","group":"parts","leaving":["cells"],"moves":{"memories":[494,670],"beliefs":[608,670]},"arriving":[{"id":"new_cells","kind":"text","text":"new cells","fontSize":16,"boundary":"none","at":[370,670],"size":[90,42]}],"members":["new_cells","memories","beliefs"]}
+Promise.all([animate("cells", {left: 450, top: 670, opacity: 0}, {duration: 1500})]).then(() => ["cells"].forEach(removeByUid))
+Promise.all([animate("memories", {left: 494, top: 670}, {duration: 1500}), animate("beliefs", {left: 608, top: 670}, {duration: 1500})])
+Promise.all([drawOutline(addLabel("new cells", 370, 670, {"uid":"new_cells","fontSize":16,"boundary":"none"}), {duration: 1500})])
+// @sem {"op":"turnover","group":"parts","leaving":["beliefs"],"moves":{"new_cells":[489,670],"memories":[613,670]},"arriving":[{"id":"new_beliefs","kind":"text","text":"new beliefs","fontSize":16,"boundary":"none","at":[360,670],"size":[104,42]}],"members":["new_beliefs","new_cells","memories"]}
+Promise.all([animate("beliefs", {left: 688, top: 670, opacity: 0}, {duration: 1500})]).then(() => ["beliefs"].forEach(removeByUid))
+Promise.all([animate("new_cells", {left: 489, top: 670}, {duration: 1500}), animate("memories", {left: 613, top: 670}, {duration: 1500})])
+Promise.all([drawOutline(addLabel("new beliefs", 360, 670, {"uid":"new_beliefs","fontSize":16,"boundary":"none"}), {duration: 1500})])
+// @sem {"op":"pause","kind":"thinking","seconds":4}
+Promise.resolve(sleep(4))

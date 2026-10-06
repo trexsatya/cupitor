@@ -1,0 +1,65 @@
+// @sem {"op":"scene","name":"tree","reset":true}
+animateViewport({zoom: 1, pan: [0, 0]}, {duration: 0})
+// @sem {"op":"beat","name":"a tree","viewer_task":{"type":"notice","target":"the tree is the obvious centre"}}
+// @sem {"op":"introduce","id":"tree","kind":"box","text":"TREE","fontSize":38,"boundary":"solid","at":[700,400],"size":[127,69]}
+drawOutline(addLabel("TREE", 700, 400, {"uid":"tree","fontSize":38,"boundary":"solid"}), {duration: 700})
+// @sem {"op":"pause","kind":"short","seconds":1}
+Promise.resolve(sleep(1))
+// @sem {"op":"beat","name":"what it needs","viewer_task":{"type":"predict","target":"the tree depends on what is around it"}}
+// @sem {"op":"introduce","id":"soil","kind":"text","text":"SOIL","fontSize":22,"boundary":"none","at":[700,519],"size":[74,49]}
+drawOutline(addLabel("SOIL", 700, 519, {"uid":"soil","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"introduce","id":"sun","kind":"text","text":"SUN","fontSize":22,"boundary":"none","at":[700,281],"size":[70,49]}
+drawOutline(addLabel("SUN", 700, 281, {"uid":"sun","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"introduce","id":"water","kind":"text","text":"WATER","fontSize":22,"boundary":"none","at":[526,400],"size":[101,49]}
+drawOutline(addLabel("WATER", 526, 400, {"uid":"water","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"introduce","id":"insects","kind":"text","text":"INSECTS","fontSize":22,"boundary":"none","at":[883,400],"size":[119,49]}
+drawOutline(addLabel("INSECTS", 883, 400, {"uid":"insects","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"connect","id":"soil__tree","from":"soil","to":"tree","kind":null}
+connectObjects("soil", "tree", "soil__tree", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"sun__tree","from":"sun","to":"tree","kind":null}
+connectObjects("sun", "tree", "sun__tree", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"water__tree","from":"water","to":"tree","kind":null}
+connectObjects("water", "tree", "water__tree", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"insects__tree","from":"insects","to":"tree","kind":null}
+connectObjects("insects", "tree", "insects__tree", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"tree__insects","from":"tree","to":"insects","kind":null,"bend":13}
+connectObjects("tree", "insects", "tree__insects", {bend: 13, animate: true, duration: 700})
+// @sem {"op":"pause","kind":"prediction","seconds":2}
+Promise.resolve(sleep(2))
+// @sem {"op":"beat","name":"the web","viewer_task":{"type":"integrate","target":"the conditions depend on each other, not only on the tree"}}
+// @sem {"op":"connect","id":"sun__water","from":"sun","to":"water","kind":null}
+connectObjects("sun", "water", "sun__water", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"water__soil","from":"water","to":"soil","kind":null}
+connectObjects("water", "soil", "water__soil", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"insects__soil","from":"insects","to":"soil","kind":null}
+connectObjects("insects", "soil", "insects__soil", {animate: true, duration: 700})
+// @sem {"op":"checkpoint","name":"tree_centre","state":{"objects":{"tree":{"id":"tree","kind":"box","text":"TREE","role":null,"at":[700,400],"size":[127,69],"fontSize":38,"scale":1,"opacity":1,"boundary":"solid","history":["TREE"],"scene":"tree","beat":"a tree"},"soil":{"id":"soil","kind":"text","text":"SOIL","role":null,"at":[700,519],"size":[74,49],"fontSize":22,"scale":1,"opacity":1,"boundary":"none","history":["SOIL"],"scene":"tree","beat":"what it needs"},"sun":{"id":"sun","kind":"text","text":"SUN","role":null,"at":[700,281],"size":[70,49],"fontSize":22,"scale":1,"opacity":1,"boundary":"none","history":["SUN"],"scene":"tree","beat":"what it needs"},"water":{"id":"water","kind":"text","text":"WATER","role":null,"at":[526,400],"size":[101,49],"fontSize":22,"scale":1,"opacity":1,"boundary":"none","history":["WATER"],"scene":"tree","beat":"what it needs"},"insects":{"id":"insects","kind":"text","text":"INSECTS","role":null,"at":[883,400],"size":[119,49],"fontSize":22,"scale":1,"opacity":1,"boundary":"none","history":["INSECTS"],"scene":"tree","beat":"what it needs"}},"relations":{"soil__tree":{"id":"soil__tree","from":"soil","to":"tree","kind":null,"bend":0,"opacity":1,"scene":"tree","beat":"what it needs"},"sun__tree":{"id":"sun__tree","from":"sun","to":"tree","kind":null,"bend":0,"opacity":1,"scene":"tree","beat":"what it needs"},"water__tree":{"id":"water__tree","from":"water","to":"tree","kind":null,"bend":0,"opacity":1,"scene":"tree","beat":"what it needs"},"insects__tree":{"id":"insects__tree","from":"insects","to":"tree","kind":null,"bend":0,"opacity":1,"scene":"tree","beat":"what it needs"},"tree__insects":{"id":"tree__insects","from":"tree","to":"insects","kind":null,"bend":13,"opacity":1,"scene":"tree","beat":"what it needs"},"sun__water":{"id":"sun__water","from":"sun","to":"water","kind":null,"bend":0,"opacity":1,"scene":"tree","beat":"the web"},"water__soil":{"id":"water__soil","from":"water","to":"soil","kind":null,"bend":0,"opacity":1,"scene":"tree","beat":"the web"},"insects__soil":{"id":"insects__soil","from":"insects","to":"soil","kind":null,"bend":0,"opacity":1,"scene":"tree","beat":"the web"}},"groups":{},"camera":{"zoom":1,"pan":[0,0]}}}
+tagState("tree_centre", ["tree","soil","sun","water","insects","soil__tree","sun__tree","water__tree","insects__tree","tree__insects","sun__water","water__soil","insects__soil"])
+// @sem {"op":"beat","name":"no centre","viewer_task":{"type":"infer","target":"the centre was a framing choice"}}
+// @sem {"op":"introduce","id":"fungi","kind":"text","text":"FUNGI","fontSize":22,"boundary":"none","at":[557,519],"size":[92,49]}
+drawOutline(addLabel("FUNGI", 557, 519, {"uid":"fungi","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"introduce","id":"birds","kind":"text","text":"BIRDS","fontSize":22,"boundary":"none","at":[883,291],"size":[91,49]}
+drawOutline(addLabel("BIRDS", 883, 291, {"uid":"birds","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"introduce","id":"rain","kind":"text","text":"RAIN","fontSize":22,"boundary":"none","at":[526,291],"size":[77,49]}
+drawOutline(addLabel("RAIN", 526, 291, {"uid":"rain","fontSize":22,"boundary":"none"}), {duration: 700})
+// @sem {"op":"connect","id":"fungi__soil","from":"fungi","to":"soil","kind":null}
+connectObjects("fungi", "soil", "fungi__soil", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"birds__insects","from":"birds","to":"insects","kind":null}
+connectObjects("birds", "insects", "birds__insects", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"rain__water","from":"rain","to":"water","kind":null}
+connectObjects("rain", "water", "rain__water", {animate: true, duration: 700})
+// @sem {"op":"connect","id":"sun__rain","from":"sun","to":"rain","kind":null}
+connectObjects("sun", "rain", "sun__rain", {animate: true, duration: 700})
+// @sem {"op":"deemphasize","ids":["tree"],"opacity":{"tree":0.4}}
+Promise.all([animate("tree", {opacity: 0.4}, {duration: 700})])
+// @sem {"op":"widen_context","mode":"camera","scale":0.75,"camera":{"zoom":0.75,"pan":[168,100]}}
+animateViewport({zoom: 0.75, pan: [168, 100]}, {duration: 1500})
+// @sem {"op":"pause","kind":"thinking","seconds":4}
+Promise.resolve(sleep(4))
+// @sem {"op":"beat","name":"back to the tree","viewer_task":{"type":"compare","target":"the tree-centred picture again, now seen as one way of framing the web"}}
+// @sem {"op":"return_to","name":"tree_centre","removed":["fungi","birds","rain"],"unlinked":[]}
+Promise.all([animate("fungi", {opacity: 0}, {duration: 750}), animate("birds", {opacity: 0}, {duration: 750}), animate("rain", {opacity: 0}, {duration: 750})]).then(() => ["fungi","birds","rain"].forEach(removeByUid))
+revertState("tree_centre", {duration: 1500})
+animateViewport({zoom: 1, pan: [0, 0]}, {duration: 1500})
+// @sem {"op":"pause","kind":"thinking","seconds":4}
+Promise.resolve(sleep(4))

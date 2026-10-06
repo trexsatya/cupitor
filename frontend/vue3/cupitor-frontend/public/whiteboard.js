@@ -198,6 +198,29 @@ class ViewportManager {
 }
 
 // --- Pan/Zoom Event Setup ---
+// Script form of a camera move: the view eases to {zoom, pan: [x, y]} (the
+// viewport transform's scale and translation) over opts.duration ms (default
+// 800; 0 jumps). Resolves when it gets there.
+function animateViewport(target, opts) {
+  const vm = window.viewportManager;
+  const from = { zoom: vm.zoom, x: vm.panX, y: vm.panY };
+  const to = { zoom: target.zoom, x: target.pan[0], y: target.pan[1] };
+  const duration = opts && opts.duration != null ? opts.duration : 800;
+  const set = t => {
+    vm.zoom = from.zoom + (to.zoom - from.zoom) * t;
+    vm.panX = from.x + (to.x - from.x) * t;
+    vm.panY = from.y + (to.y - from.y) * t;
+    vm.applyTransform();
+  };
+  return new Promise(resolve => {
+    if (!(duration > 0)) { set(1); resolve(); return; }
+    fabric.util.animate({
+      startValue: 0, endValue: 1, duration, easing: fabric.util.ease.easeInOutQuad,
+      onChange: set, onComplete: () => { set(1); resolve(); }
+    });
+  });
+}
+
 function initWhiteboardPanZoom(viewportManager, primaryCanvas) {
   let spaceDown = false;
 

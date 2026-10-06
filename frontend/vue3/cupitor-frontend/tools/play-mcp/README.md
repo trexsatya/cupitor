@@ -88,21 +88,29 @@ comment holds the positions and sizes the action settled on, so rebuilding never
 | --- | --- |
 | `scene`, `beat`, `viewer_task` | Name the scene and its beats; record what the viewer should do mentally (notice, compare, predict, infer, remember, question, integrate) |
 | `introduce`, `introduce_group`, `branch` | Add concepts as text, a box, a minimal person (`figure`) or a `picture`; placed near another concept, in a region, or in a row or column |
-| `connect`, `disconnect` | Relationships: arrows that follow both ends |
+| `connect`, `disconnect` | Relationships: arrows that follow both ends. They curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop |
 | `enclose`, `weaken_boundary` | A boundary round concepts; dash or drop it |
 | `revise`, `question`, `replace` | Change a concept's text in place (its revisions are kept), make it uncertain, or swap it for another |
 | `deemphasize`, `focus` | Fade concepts back, or bring some forward and dim the rest |
-| `move_into`, `widen_context` | Move a concept into another; shrink a set into a much larger frame |
+| `move_into` | Move a concept into another |
+| `widen_context`, `narrow_context` | Pull the camera back so concepts sit small in a much larger frame (or, with `mode: "objects"`, shrink just those concepts); bring it in on some concepts or back to the starting view |
+| `dissolve_boundary` | Categories become a continuum: their boxes lose their outlines while a colour band appears under them (place in-between cases first with `place: {between: [a, b]}`) |
+| `checkpoint`, `return_to` | Remember the scene; go back to it (places, text, emphasis, removed concepts, camera), or bring back removed concepts by id |
+| `turnover` | Members of a group leave while new ones arrive, the group (and its enclosure) holding |
 | `pause`, `remove` | Hold still (`short`, `prediction`, `thinking`); fade out and delete |
 
-`examples/opening_question.txt` is a whole scene built this way: a child's question about the point of life,
+`examples/` holds whole scenes built this way. `opening_question.txt`: a child's question about the point of life,
 practical answers enclosing it, competing arguments that shrink into a wider frame, and "I KNOW" revised step
 by step down to "I DON'T KNOW". Load it with `load_script_file` (or the page's **Import**) and use `inspect_scene`
-to see its beats and viewer tasks.
+to see its beats and viewer tasks. `tree.txt` grows a web of conditions round a tree until the tree is one
+node among many; `spectrum.txt` puts in-between cases between DAY and NIGHT until the boundary dissolves
+into a band; `river.txt` keeps RIVER while every drop is replaced, then does the same for ME.
 
 A picture's `src` can be a URL, a path under `public/`, or a local file; a local file elsewhere is copied into
 `public/play-assets/` so the script loads it by a path the page serves. Durations are classes (`instant`,
-`short`, `deliberate`) or ms. Layout keeps concepts on the canvas, clear of each other and of the page's minimap.
+`short`, `deliberate`) or ms. Layout keeps concepts in view, clear of each other and of the page's minimap; under a
+zoomed-out camera, new text is made larger in the scene so it reads at the size asked for. The first `scene`
+of a script resets the camera, so replays start from the same view.
 
 ## Tools
 

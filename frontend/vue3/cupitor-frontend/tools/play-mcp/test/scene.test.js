@@ -1,7 +1,7 @@
 // The scene layer without a browser: sizes come from a fake measurer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyScene, parseScene, planActions, boxOf, validate, withoutLastAction, TAG } from '../scene.js';
+import { emptyScene, parseScene, planActions, boxOf, validate, withoutLastAction, view, TAG } from '../scene.js';
 
 const measure = async specs => specs.map(s => (s.kind === 'figure' ? [50, 130] : [String(s.text).length * 12 + 24, 50]));
 const plan = async (actions, model = emptyScene()) => ({ model, ...(await planActions(model, actions, measure)) });
@@ -62,7 +62,7 @@ test('widening takes an enclosure along with its members', async () => {
   const { model, lines } = await plan([
     { op: 'introduce_group', id: 'practical', items: ['EAT', 'STUDY', 'LIVE'] },
     { op: 'enclose', id: 'practical_box', group: 'practical' },
-    { op: 'widen_context', ids: ['eat', 'study', 'live'], scale: 0.5 }
+    { op: 'widen_context', ids: ['eat', 'study', 'live'], scale: 0.5, mode: 'objects' }
   ]);
   assert.equal(model.objects.practical_box.scale, 0.5);
   assert.match(lines.at(-1), /animate\("practical_box"/);
@@ -122,7 +122,7 @@ test('removing tidies groups and enclosures', async () => {
     { op: 'introduce_group', id: 'g', items: ['A', 'B'] },
     { op: 'enclose', id: 'e', group: 'g' },
     { op: 'remove', ids: ['b'] },
-    { op: 'widen_context', ids: ['a'], scale: 0.5 },
+    { op: 'widen_context', ids: ['a'], scale: 0.5, mode: 'objects' },
     { op: 'remove', ids: ['e'] },
     { op: 'deemphasize', ids: ['g'] },
     { op: 'remove', ids: ['g'] }
@@ -136,7 +136,7 @@ test('enclosures move with their remaining members', async () => {
     { op: 'introduce_group', id: 'g', items: ['A', 'B'] },
     { op: 'enclose', id: 'e', group: 'g' },
     { op: 'remove', ids: ['b'] },
-    { op: 'widen_context', ids: ['a'], scale: 0.5 }
+    { op: 'widen_context', ids: ['a'], scale: 0.5, mode: 'objects' }
   ]);
   assert.match(lines.at(-1), /animate\("e"/);
 });
@@ -154,4 +154,136 @@ test('dashing a removed enclosure outline brings it back', async () => {
   const { lines } = await plan([{ op: 'introduce', id: 'a', text: 'A' }, { op: 'enclose', id: 'e', members: ['a'] },
     { op: 'weaken_boundary', id: 'e', style: 'none' }, { op: 'weaken_boundary', id: 'e', style: 'dashed' }]);
   assert.match(lines.at(-1), /setProp\("e", "strokeWidth", 2\)/);
+});
+
+// ---- Milestone 2
+
+test('camera: widening pulls the view back; new concepts land in view at the same on-screen size; reset comes back', async () => {
+  const { model, lines } = await plan([
+    { op: 'scene', name: 's' },
+    { op: 'introduce', id: 'a', text: 'A' },
+    { op: 'widen_context', scale: 0.5 },
+    { op: 'introduce', id: 'b', text: 'B', place: { region: 'top-left' } }
+  ]);
+  assert.match(lines[1], /^animateViewport\(\{zoom: 1, pan: \[0, 0\]\}, \{duration: 0\}\)$/, 'a script starts from the starting view');
+  assert.equal(model.camera.zoom, 0.5);
+  assert.equal(model.objects.b.fontSize, 44);
+  const v = view(model), b = boxOf(model.objects.b);
+  assert.ok(b.x >= v.x && b.y >= v.y && b.x + b.w <= v.x + v.w && b.y + b.h <= v.y + v.h);
+  assert.deepEqual(parseScene(lines).camera, model.camera);
+  await plan([{ op: 'narrow_context', reset: true }], model);
+  assert.deepEqual(model.camera, { zoom: 1, pan: [0, 0] });
+});
+
+test('connect bends round a concept in the way, off a straight reverse arrow, and loops on itself', async () => {
+  const { model, lines } = await plan([
+    { op: 'introduce', id: 'a', text: 'A', place: { x: 200, y: 300 } },
+    { op: 'introduce', id: 'b', text: 'B', place: { x: 450, y: 300 } },
+    { op: 'introduce', id: 'c', text: 'C', place: { x: 700, y: 300 } },
+    { op: 'connect', from: 'a', to: 'b' },
+    { op: 'connect', from: 'a', to: 'c' },
+    { op: 'connect', from: 'b', to: 'a' },
+    { op: 'connect', from: 'c', to: 'c' }
+  ]);
+  assert.equal(model.relations.a__b.bend, 0);
+  assert.notEqual(model.relations.a__c.bend, 0);
+  assert.notEqual(model.relations.b__a.bend, 0);
+  assert.equal(model.relations.c__c.bend, 'loop');
+  assert.match(lines.at(-1), /connectObjects\("c", "c", "c__c", \{bend: "loop"/);
+});
+
+test('between, then dissolving the boundaries into one band', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'day', text: 'DAY', kind: 'box', place: { region: 'left' } },
+    { op: 'introduce', id: 'night', text: 'NIGHT', kind: 'box', place: { region: 'right' } },
+    { op: 'introduce', id: 'dusk', text: 'DUSK?', place: { between: ['day', 'night'] } },
+    { op: 'dissolve_boundary', id: 'band', ids: ['day', 'dusk', 'night'] }
+  ]);
+  assert.ok(model.objects.day.at[0] < model.objects.dusk.at[0] && model.objects.dusk.at[0] < model.objects.night.at[0]);
+  assert.deepEqual(['day', 'night'].map(id => model.objects[id].boundary), ['none', 'none']);
+  const band = boxOf(model.objects.band);
+  ['day', 'dusk', 'night'].map(id => boxOf(model.objects[id])).forEach(b => assert.ok(b.x > band.x && b.x + b.w < band.x + band.w));
+});
+
+test('return_to a checkpoint puts text, places and camera back; return_to ids revives a removed concept with its arrows', async () => {
+  const { model, lines } = await plan([
+    { op: 'introduce', id: 'k', text: 'I KNOW', kind: 'box' },
+    { op: 'introduce', id: 'x', text: 'X', place: { near: 'k' } },
+    { op: 'connect', from: 'k', to: 'x' },
+    { op: 'checkpoint', name: 'start' },
+    { op: 'revise', id: 'k', text: "I DON'T KNOW" },
+    { op: 'widen_context', scale: 0.5 },
+    { op: 'remove', ids: ['x'] },
+    { op: 'return_to', name: 'start' }
+  ]);
+  assert.equal(model.objects.k.text, 'I KNOW');
+  assert.ok(model.objects.x && model.relations.k__x);
+  assert.deepEqual(model.camera, { zoom: 1, pan: [0, 0] });
+  assert.ok(lines.some(l => l.includes('setLabelText("k", "I KNOW")')));
+  assert.deepEqual(parseScene(lines).objects, model.objects);
+
+  const again = await plan([{ op: 'introduce', id: 'k', text: 'K' }, { op: 'introduce', id: 'x', text: 'X', place: { near: 'k' } },
+    { op: 'connect', from: 'k', to: 'x' }, { op: 'remove', ids: ['x'] }, { op: 'return_to', ids: ['x'] }]);
+  assert.ok(again.model.objects.x && again.model.relations.k__x);
+  assert.ok(again.lines.some(l => /restoreObject\("x"\)/.test(l)));
+  await assert.rejects(plan([{ op: 'return_to', ids: ['k'] }], again.model), /"k" was not removed/);
+});
+
+test('turnover: members change, the group and its enclosure hold', async () => {
+  const { model } = await plan([
+    { op: 'introduce_group', id: 'w', items: ['D1', 'D2', 'D3'] },
+    { op: 'enclose', id: 'bed', group: 'w' },
+    { op: 'turnover', group: 'w', leaving: ['d3'], arriving: ['D4'] },
+    { op: 'turnover', group: 'w', leaving: ['d1', 'd2', 'd4'], arriving: ['D5'] }
+  ]);
+  assert.deepEqual(model.groups.w.members, ['d5']);
+  assert.equal(model.groups.w.enclosure, 'bed');
+  assert.ok(model.objects.bed.members.includes('d5'));
+  assert.ok(model.retired.d3 && model.retired.d4);
+  await assert.rejects(plan([{ op: 'turnover', group: 'w', leaving: ['bed'] }], model), /not in group/);
+});
+
+test('review fixes: revived concepts go back to their place, group and arrows; dims and enclosures hold', async () => {
+  // A turnover leaver comes back where it was, into its group.
+  const t = await plan([
+    { op: 'introduce_group', id: 'g', items: ['A', 'B', 'C'] },
+    { op: 'turnover', group: 'g', leaving: ['a'], arriving: ['D'] },
+    { op: 'return_to', ids: ['a'] }
+  ]);
+  const at = t.model.objects.a.at;
+  assert.match(t.lines.at(-1), new RegExp(`animate\\("a", \\{left: ${at[0]}, top: ${at[1]}`));
+  assert.ok(t.model.groups.g.members.includes('a'));
+
+  // An arrow whose ends were removed one after the other comes back with the second.
+  const r = await plan([
+    { op: 'introduce', id: 'a', text: 'A' }, { op: 'introduce', id: 'b', text: 'B', place: { near: 'a' } },
+    { op: 'connect', from: 'a', to: 'b' }, { op: 'remove', ids: ['a'] }, { op: 'remove', ids: ['b'] },
+    { op: 'return_to', ids: ['a'] }, { op: 'return_to', ids: ['b'] }
+  ]);
+  assert.ok(r.model.relations.a__b);
+  assert.deepEqual(parseScene(r.lines).relations, r.model.relations);
+
+  // Dissolving keeps a dimmed concept dim.
+  const d = await plan([
+    { op: 'introduce', id: 'a', text: 'A', kind: 'box', place: { region: 'left' } },
+    { op: 'introduce', id: 'b', text: 'B', kind: 'box', place: { region: 'right' } },
+    { op: 'deemphasize', ids: ['a'] }, { op: 'dissolve_boundary', id: 'band', ids: ['a', 'b'] }
+  ]);
+  assert.match(d.lines.at(-1), /animate\("a", \{opacity: 0.4\}/);
+
+  // Going back to a checkpoint takes away what came after it.
+  const c = await plan([
+    { op: 'introduce', id: 'a', text: 'A' }, { op: 'checkpoint', name: 'c1' },
+    { op: 'replace', id: 'a', with: { id: 'a2', text: 'A2' } }, { op: 'return_to', name: 'c1' }
+  ]);
+  assert.deepEqual(Object.keys(c.model.objects), ['a']);
+  assert.ok(c.model.retired.a2);
+
+  // A turnover that grows the group refits its enclosure round it.
+  const e = await plan([
+    { op: 'introduce_group', id: 'g', items: ['A', 'B'] }, { op: 'enclose', id: 'bed', group: 'g' },
+    { op: 'turnover', group: 'g', leaving: [], arriving: ['C', 'D'] }
+  ]);
+  const bed = boxOf(e.model.objects.bed);
+  e.model.groups.g.members.map(id => boxOf(e.model.objects[id])).forEach(b => assert.ok(b.x > bed.x && b.x + b.w < bed.x + bed.w));
 });

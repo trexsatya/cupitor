@@ -78,7 +78,7 @@ test('semantic actions: placed, drawn, recorded with their intent, undone', asyn
   ] } }));
   assert.match(run, /No errors/);
   const script = textOf(await client.callTool({ name: 'get_script', arguments: {} }));
-  assert.match(script, /^1: \/\/ @sem \{"op":"scene","name":"why"\}/);
+  assert.match(script, /^1: \/\/ @sem \{"op":"scene","name":"why"/);
   const objs = JSON.parse(textOf(await client.callTool({ name: 'list_objects', arguments: {} })));
   const arrow = objs.find(o => o.uid === 'culture__person');
   assert.ok(arrow.box.width > 10, 'the grown arrow has a size (and so is drawn)');
@@ -93,6 +93,42 @@ test('semantic actions: placed, drawn, recorded with their intent, undone', asyn
   assert.match(textOf(await client.callTool({ name: 'undo_last_action', arguments: {} })), /No errors/);
   const after = JSON.parse(textOf(await client.callTool({ name: 'inspect_scene', arguments: {} })));
   assert.deepEqual(after.relations, []);
+});
+
+test('camera, curved arrows that follow, and bringing back a removed concept, on the page', async () => {
+  await client.callTool({ name: 'reset_page', arguments: {} });
+  const act = actions => client.callTool({ name: 'apply_semantic_action', arguments: { actions } });
+  assert.match(textOf(await act([
+    { op: 'scene', name: 'm2' },
+    { op: 'introduce', id: 'a', text: 'A', place: { x: 300, y: 300 } },
+    { op: 'introduce', id: 'b', text: 'B', place: { x: 700, y: 300 } },
+    { op: 'connect', from: 'a', to: 'b' }, { op: 'connect', from: 'b', to: 'a' }, { op: 'connect', from: 'a', to: 'a' },
+    { op: 'widen_context', scale: 0.5 }
+  ])), /No errors/);
+  const objs = () => client.callTool({ name: 'list_objects', arguments: {} }).then(r => JSON.parse(textOf(r)));
+  let list = await objs();
+  const ba = list.find(o => o.uid === 'b__a');
+  assert.equal(ba.type, 'arrowpath');
+  assert.ok(list.find(o => o.uid === 'a__a').box.width > 10, 'the loop is drawn');
+  assert.equal((await client.callTool({ name: 'inspect_scene', arguments: {} }).then(r => JSON.parse(textOf(r)))).camera.zoom, 0.5);
+  await client.callTool({ name: 'run_script_lines', arguments: { lines: ['animate("b", {top: 500}, {duration: 50})'], record: false } });
+  list = await objs();
+  assert.ok(list.find(o => o.uid === 'b__a').ends[1] > ba.ends[1] + 100, 'the curved arrow followed b');
+  assert.match(textOf(await act([{ op: 'remove', ids: ['b'] }, { op: 'return_to', ids: ['b'] }])), /No errors/);
+  list = await objs();
+  const b = list.find(o => o.uid === 'b');
+  assert.ok(b && b.visible && b.opacity === 1 && list.some(o => o.uid === 'a__b'), 'b is back with its arrows');
+});
+
+test('every example replays without errors and validates clean', async () => {
+  const dir = path.resolve(path.dirname(server), 'examples');
+  for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.txt'))) {
+    await client.callTool({ name: 'reset_page', arguments: {} });
+    assert.match(textOf(await client.callTool({ name: 'load_script_file', arguments: { path: path.join(dir, file) } })), /No errors/, file);
+    const issues = textOf(await client.callTool({ name: 'validate_scene', arguments: {} }));
+    // Small text is allowed: widening makes it small on purpose.
+    assert.ok(!issues.split('\n').some(l => /^(error|warning):/.test(l) && !/hard to read/.test(l)), `${file}: ${issues}`);
+  }
 });
 
 test('the opening-question example replays and rebuilds its scene', async () => {
