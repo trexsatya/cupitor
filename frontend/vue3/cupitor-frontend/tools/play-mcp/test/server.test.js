@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { parseScriptFile } from '../page-driver.js';
 
 const server = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../server.js');
 const textOf = r => r.content.map(c => c.text || '').join('\n');
@@ -24,8 +25,8 @@ after(async () => { await client.close(); });
 test('lists its tools', async () => {
   const names = (await client.listTools()).tools.map(t => t.name).sort();
   assert.deepEqual(names, ['apply_semantic_action', 'export_captions', 'get_script', 'inspect_scene', 'list_functions',
-    'list_objects', 'load_script_file', 'replace_script', 'replay_script', 'reset_page', 'review_scene', 'run_script_lines',
-    'save_script_file', 'scene_timeline', 'screenshot', 'undo_last_action', 'validate_scene']);
+    'list_objects', 'load_script_file', 'plan_spec', 'replace_script', 'replay_script', 'reset_page', 'review_scene', 'run_script_lines',
+    'save_script_file', 'scene_timeline', 'screenshot', 'undo_last_action', 'validate_scene', 'build_from_plan'].sort());
 });
 
 test('function reference includes options', async () => {
@@ -151,6 +152,25 @@ test('review_scene: a page per script, a section and frames per beat, made by a 
   assert.equal(html.match(/<section class="beat"/g).length, beats);
   assert.ok(html.match(/data:image\/png;base64,/g).length >= beats);
   fs.rmSync(out);
+});
+
+test('build_from_plan: a plan builds the same scene the actions do; a wrong id is named by place and builds nothing', async () => {
+  const dir = path.resolve(path.dirname(server), 'examples');
+  const opts = [undefined, { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} }];
+  assert.match(textOf(await client.callTool({ name: 'build_from_plan', arguments: { path: path.join(dir, 'spectrum.plan.json'), dry_run: true } })),
+    /^The plan can be built: 1 scene\(s\), 4 beat\(s\), 17 action\(s\), about \d+ s\.$/);
+  const built = textOf(await client.callTool({ name: 'build_from_plan', arguments: { path: path.join(dir, 'spectrum.plan.json') } }, ...opts));
+  assert.match(built, /No errors[\s\S]*validate_scene: no issues/);
+  const script = textOf(await client.callTool({ name: 'get_script', arguments: {} })).split('\n').map(l => l.replace(/^\d+: /, ''));
+  assert.deepEqual(script, parseScriptFile(fs.readFileSync(path.join(dir, 'spectrum.txt'), 'utf8')));
+  const bad = path.join(os.tmpdir(), `play-mcp-plan-${process.pid}.json`);
+  const plan = JSON.parse(fs.readFileSync(path.join(dir, 'spectrum.plan.json'), 'utf8'));
+  plan.scenes[0].beats[2].actions[1].id = 'dayy';
+  fs.writeFileSync(bad, '```json\n' + JSON.stringify(plan) + '\n```\n');  // as an assistant often answers
+  assert.equal(textOf(await client.callTool({ name: 'build_from_plan', arguments: { path: bad } })),
+    'The plan cannot be built:\n- scene 1 "spectrum", beat 3 "the line fails", action 2 (weaken_boundary): weaken_boundary: no concept "dayy"\n(Later beats were not checked: they may rely on this one.)');
+  assert.deepEqual(textOf(await client.callTool({ name: 'get_script', arguments: {} })).split('\n').map(l => l.replace(/^\d+: /, '')), script, 'nothing was built');
+  fs.rmSync(bad);
 });
 
 test('every example replays without errors and validates clean', async () => {

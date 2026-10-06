@@ -143,6 +143,19 @@ found at the end of the beat, and two screenshots: the end of the beat and, when
 screenshots the script is replayed once with waits and animations cut to almost nothing, so a scene that plays
 for minutes is reviewed in seconds; the canvas is left at the script's end.
 
+### Plans
+
+A plan is a whole scene document as JSON: `{title, scenes: [{name, beats: [{name, move, viewer_task, actions}]}]}`,
+where `actions` are the semantic actions above. [PLAN-SPEC.md](PLAN-SPEC.md) is the instructions for another
+assistant (for example ChatGPT) that turns a text into a plan: give it the spec and the text, and save the JSON
+it answers with. `examples/spectrum.plan.json` is a small plan.
+
+`build_from_plan {path, dry_run: true}` checks a plan without changing the canvas or the script: its shape, then
+every action laid out in order (pictures are loaded to measure them, and local ones copied to `public/play-assets/`),
+reporting the first problem by scene, beat and action. Without `dry_run` it clears the page (unless
+`fresh: false`), builds the script, plays it and reports what `validate_scene` finds. `plan_spec` returns the
+same text as PLAN-SPEC.md, generated from the action list, so the two cannot drift apart.
+
 ## Tools
 
 | Tool | What it does |
@@ -153,6 +166,8 @@ for minutes is reviewed in seconds; the canvas is left at the script's end.
 | `scene_timeline` | The script as it plays: beats with start times, viewer tasks, narration and moves. |
 | `export_captions` | Write the narration as a caption track (`vtt`, default, or `srt`) timed to the script. |
 | `review_scene` | Write a review page: per beat, move, viewer task, narration, moves, checklist, issues and screenshots. |
+| `plan_spec` | The instructions for writing a plan from a text (PLAN-SPEC.md). |
+| `build_from_plan` | Check (`dry_run`) or build a plan file into the script and play it. |
 | `undo_last_action` | Remove the last semantic action and its lines, and replay. |
 | `list_functions` | Functions a script can call, with their options (from `public/script-functions.js`, the same list the page's **? Functions** popup shows). Optional word filter. |
 | `run_script_lines` | Add lines to the recorded script and play them; each line waits as the player does. Reports failures per line. `record: false` just tries them. |

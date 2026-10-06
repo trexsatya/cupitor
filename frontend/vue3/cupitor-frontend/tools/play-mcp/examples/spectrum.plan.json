@@ -1,0 +1,55 @@
+{
+  "title": "Day and night",
+  "scenes": [
+    {
+      "name": "spectrum",
+      "beats": [
+        {
+          "name": "two kinds",
+          "move": "two clean categories",
+          "viewer_task": { "type": "notice", "target": "two clean categories" },
+          "actions": [
+            { "op": "narrate", "text": "Two words, two boxes.", "sync": "with" },
+            { "op": "introduce", "id": "day", "text": "DAY", "kind": "box", "size": "large", "place": { "region": "left" } },
+            { "op": "introduce", "id": "night", "text": "NIGHT", "kind": "box", "size": "large", "place": { "region": "right" } },
+            { "op": "pause", "kind": "short" }
+          ]
+        },
+        {
+          "name": "in between",
+          "move": "cases that fit neither category appear between them",
+          "viewer_task": { "type": "question", "target": "which box do these belong in?" },
+          "actions": [
+            { "op": "narrate", "text": "Then the hours between them.", "sync": "with" },
+            { "op": "introduce", "id": "dusk", "text": "DUSK?", "place": { "between": ["day", "night"] } },
+            { "op": "introduce", "id": "evening", "text": "EVENING?", "place": { "between": ["day", "dusk"] } },
+            { "op": "introduce", "id": "twilight", "text": "TWILIGHT?", "place": { "between": ["dusk", "night"] } },
+            { "op": "narrate", "text": "Which box does each belong in?" },
+            { "op": "pause", "kind": "prediction" }
+          ]
+        },
+        {
+          "name": "the line fails",
+          "move": "the boundaries weaken",
+          "viewer_task": { "type": "notice", "target": "the boundary cannot be drawn" },
+          "actions": [
+            { "op": "narrate", "text": "The edges stop holding.", "sync": "with" },
+            { "op": "weaken_boundary", "id": "day" },
+            { "op": "weaken_boundary", "id": "night" },
+            { "op": "pause", "kind": "short" }
+          ]
+        },
+        {
+          "name": "a continuum",
+          "move": "the categories dissolve into one band",
+          "viewer_task": { "type": "integrate", "target": "one continuum, not two kinds" },
+          "actions": [
+            { "op": "narrate", "text": "Perhaps there were never two things here.", "sync": "with" },
+            { "op": "dissolve_boundary", "id": "daylight", "ids": ["day", "evening", "dusk", "twilight", "night"], "colors": ["#fff3c4", "#9fa8da"] },
+            { "op": "pause", "kind": "thinking" }
+          ]
+        }
+      ]
+    }
+  ]
+}

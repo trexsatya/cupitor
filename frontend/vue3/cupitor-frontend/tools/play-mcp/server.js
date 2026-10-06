@@ -21,7 +21,8 @@ import crypto from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { PlayPage, parseScriptFile } from './page-driver.js';
 import { reviewStops, buildReviewHtml } from './review.js';
-import { ACTIONS, parseScene, planActions, inspect, validate, withoutLastAction, describeTimeline, captionsFile } from './scene.js';
+import { ACTIONS, parseScene, planActions, inspect, validate, withoutLastAction, describeTimeline, captionsFile, narrationIssues, timeline } from './scene.js';
+import { planBeats, planSpec } from './plan.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -81,7 +82,7 @@ export function resolvePictureSrc(src, publicDir) {
 
 function resolvePictures(actions, publicDir) {
   const fix = o => { if (o && typeof o === 'object' && typeof o.src === 'string') o.src = resolvePictureSrc(o.src, publicDir); };
-  actions.forEach(a => { fix(a); fix(a && a.with); ((a && a.items) || []).forEach(fix); });
+  actions.forEach(a => { fix(a); fix(a && a.with); [...((a && a.items) || []), ...((a && a.arriving) || [])].forEach(fix); });
   return actions;
 }
 
@@ -267,6 +268,47 @@ export function createServer(page, publicDir) {
     fs.writeFileSync(path.resolve(file), buildReviewHtml({ title: `Review: ${title}`, lines, stops, frames, issues }));
     const failed = walked.lineErrors.length ? `\n${walked.lineErrors.length} line(s) failed while replaying.` : '';
     return text(`Wrote a review of ${stops.length} beat(s) with ${Object.keys(frames).length} screenshot(s) to ${path.resolve(file)}.${failed}`);
+  }));
+
+  tool('plan_spec', {
+    description: 'Instructions (with a worked example) for writing a plan: a JSON scene document another assistant can produce from a text, for build_from_plan.'
+  }, async () => text(planSpec(JSON.parse(fs.readFileSync(path.join(here, 'examples/spectrum.plan.json'), 'utf8')))));
+
+  tool('build_from_plan', {
+    description: 'Build a scene from a plan file (the format plan_spec describes). Every beat is planned before anything plays, so a mistake anywhere builds nothing and is reported by scene, beat and action. dry_run only checks it (and estimates its length and narration timing).',
+    inputSchema: {
+      path: z.string().describe('the plan (JSON)'),
+      dry_run: z.boolean().optional().describe('check the plan without building it'),
+      fresh: z.boolean().optional().describe('start from an empty page (default true); false adds the plan to the current script')
+    }
+  }, async ({ path: file, dry_run, fresh }) => exclusive(async () => {
+    let plan;
+    // Assistants often wrap their answer in a ```json fence.
+    try { plan = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8').trim().replace(/^```(?:json)?\s*\n([\s\S]*)\n```$/, '$1')); } catch (e) { return text(`Could not read the plan: ${e.message}`); }
+    const { errors, warnings, beats } = planBeats(plan);
+    if (errors.length) return text(['The plan cannot be built:', ...errors.map(e => `- ${e}`)].join('\n'));
+    const start = fresh === false ? await page.script() : [];
+    const model = parseScene(start);
+    const lines = [];
+    for (const b of beats) {
+      try {
+        lines.push(...(await planActions(model, resolvePictures([...b.head, ...b.actions], publicDir), specs => page.measure(specs))).lines);
+      } catch (e) {
+        // planActions counts the beat's own scene/beat entries first.
+        const m = /^Action (\d+) \(([^)]*)\): ([\s\S]*)$/.exec(e.message);
+        const n = m ? +m[1] - b.head.length : 0;
+        const what = !m ? e.message : n > 0 ? `action ${n} (${m[2]}): ${m[3]}` : `the beat itself: ${m[3]}`;
+        return text(`The plan cannot be built:\n- ${b.where}, ${what}\n(Later beats were not checked: they may rely on this one.)`);
+      }
+    }
+    const notes = [...warnings, ...narrationIssues([...start, ...lines]).map(i => `${i.level}: ${i.message}`)];
+    const size = `${plan.scenes.length} scene(s), ${beats.length} beat(s), ${beats.reduce((n, b) => n + b.actions.length, 0)} action(s), about ${Math.round(timeline([...start, ...lines]).total / 1000)} s`;
+    if (dry_run) return text([`The plan can be built: ${size}.`, ...(notes.length ? ['Notes:', ...notes.map(n => `- ${n}`)] : [])].join('\n'));
+    if (fresh !== false) await page.reset();
+    const result = report(await play(lines, { record: true }));
+    const after = await page.script();
+    const issues = validate(parseScene(after), await page.objects(), after).map(i => `${i.level}: ${i.message}`);
+    return text([`Built the plan: ${size}.`, result, ...(warnings.length ? ['Notes:', ...warnings.map(n => `- ${n}`)] : []), ...(issues.length ? ['validate_scene:', ...issues.map(n => `- ${n}`)] : ['validate_scene: no issues.'])].join('\n'));
   }));
 
   tool('undo_last_action', {
