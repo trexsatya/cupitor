@@ -31,13 +31,13 @@ export const ACTIONS = {
   scene: 'Start a scene: {name}. Objects from earlier scenes stay and can be reused.',
   beat: "Start a beat (one conceptual move): {name, move? (what the narrator does here, e.g. 'the question appears before any answer'), viewer_task?: {type, target}}.",
   viewer_task: `What the viewer should do mentally: {type: ${VIEWER_TASKS.join('|')}, target, constraint?}. Attaches to the current beat (or scene).`,
-  introduce: "Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, place?, pace?}. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]}, {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.",
+  introduce: "Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, place?, pace?}. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.",
   introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, place?, pace?}.',
   branch: 'Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, pace?}.',
-  connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop.",
+  connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none.",
   disconnect: 'Remove a relationship: {id} or {from, to}.',
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.',
-  revise: 'Change the text of the same concept (identity kept): {id, text, pace?}.',
+  revise: 'Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.',
   question: 'Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.',
   weaken_boundary: "Dash (or remove) a concept's or enclosure's boundary: {id, style?: dashed|none, pace?}.",
   replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?}, pace?}.',
@@ -108,7 +108,8 @@ function dropObject(model, id) {
   model.retired[id] = {
     object: clone(model.objects[id]),
     groups: Object.values(model.groups).filter(g => g.members.includes(id)).map(g => g.id),
-    enclosures: Object.values(model.objects).filter(o => o.members && o.members.includes(id)).map(o => o.id)
+    enclosures: Object.values(model.objects).filter(o => o.members && o.members.includes(id)).map(o => o.id),
+    encloses: Object.values(model.groups).filter(g => g.enclosure === id).map(g => g.id)
   };
   delete model.objects[id];
   // Its connectors go with it on the canvas; they wait until both ends are back.
@@ -232,6 +233,10 @@ export function applyRecord(model, rec) {
             const g = model.groups[gid] = model.groups[gid] || { id: gid, members: [], enclosure: null };
             if (!g.members.includes(id)) g.members.push(id);
           });
+          (r.encloses || []).forEach(gid => {
+            const g = model.groups[gid] = model.groups[gid] || { id: gid, members: [], enclosure: null };
+            g.enclosure = id;
+          });
           (r.enclosures || []).forEach(eid => {
             const e = model.objects[eid];
             if (e && !e.members.includes(id)) e.members.push(id);
@@ -318,15 +323,25 @@ const SIDES = { right: [1, 0], left: [-1, 0], below: [0, 1], above: [0, -1] };
 
 // Where a box of `size` (centred) can go: the first free spot by `place`,
 // else the least crowded of those tried.
+// The box a place is given relative to: a concept's, or a group's (its enclosure, or round its members).
+function anchorBox(model, id) {
+  const g = model.groups[id], end = g ? groupEnd(model, id) : id;
+  if (model.objects[end]) return boxOf(model.objects[end]);
+  if (g && g.members.length) {
+    const bs = g.members.map(m => boxOf(model.objects[m]));
+    const x0 = Math.min(...bs.map(b => b.x)), y0 = Math.min(...bs.map(b => b.y));
+    return { x: x0, y: y0, w: Math.max(...bs.map(b => b.x + b.w)) - x0, h: Math.max(...bs.map(b => b.y + b.h)) - y0 };
+  }
+  throw new Error(`place: no concept "${id}"`);
+}
+
 export function placeBox(model, size, place = {}, taken = occupied(model)) {
   const [w, h] = size;
   const cands = [];
   const k = 1 / zoomOf(model), gap = GAP * k, clearance = CLEARANCE * k;
   if (place.x != null || place.y != null) return [num(place.x, 'place.x', -5000, 5000), num(place.y, 'place.y', -5000, 5000)];
   if (place.near) {
-    const anchor = model.objects[place.near];
-    if (!anchor) throw new Error(`place: no concept "${place.near}"`);
-    const a = boxOf(anchor), ac = [a.x + a.w / 2, a.y + a.h / 2];
+    const a = anchorBox(model, place.near), ac = [a.x + a.w / 2, a.y + a.h / 2];
     const sides = !place.side || place.side === 'around' ? ['right', 'left', 'below', 'above'] : [place.side];
     if (!sides.every(s => SIDES[s])) throw new Error(`place: side must be around, left, right, above or below`);
     for (let step = 0; step < 5; step++) {
@@ -344,7 +359,7 @@ export function placeBox(model, size, place = {}, taken = occupied(model)) {
     let c;
     if (place.between) {
       if (!Array.isArray(place.between) || place.between.length !== 2) throw new Error('place: between takes two ids');
-      const [p, q] = place.between.map(id => { const o = model.objects[id]; if (!o) throw new Error(`place: no concept "${id}"`); return o.at; });
+      const [p, q] = place.between.map(id => { const b = anchorBox(model, id); return [b.x + b.w / 2, b.y + b.h / 2]; });
       c = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
     } else {
       const region = place.region || 'center';
@@ -413,6 +428,15 @@ function need(model, id, op) {
 
 // Everything a checkpoint needs to put the scene back.
 const snapshot = model => clone({ objects: model.objects, relations: model.relations, groups: model.groups, camera: model.camera });
+
+// A group as one end of an arrow: its enclosure.
+const groupEnd = (model, id) => { const g = model.groups[id]; return g && g.enclosure && model.objects[g.enclosure] ? g.enclosure : id; };
+
+// The enclosures an action needs drawn first: a connect to a group without one.
+const missingEnclosures = (model, a) => a && a.op === 'connect'
+  ? [...new Set([a.from, a.to])].filter(id => model.groups[id] && groupEnd(model, id) === id)
+    .map(group => ({ op: 'enclose', id: `${group}_boundary`, group, style: 'dashed', auto: true, ...(a.pace ? { pace: a.pace } : {}) }))
+  : [];
 
 // Concepts named directly or through a group (its members and its enclosure).
 function expand(model, ids, op) {
@@ -553,8 +577,9 @@ export async function planAction(model, a, measure) {
     }
 
     case 'connect': {
-      need(model, a.from, op); need(model, a.to, op);
       const id = a.id || `${a.from}__${a.to}`;
+      a = { ...a, from: groupEnd(model, a.from), to: groupEnd(model, a.to) };
+      need(model, a.from, op); need(model, a.to, op);
       checkNewId(model, id);
       const bend = a.from === a.to ? 'loop' : chooseBend(model, a.from, a.to, a.bend == null ? 'auto' : a.bend);
       const rec = { op, id, from: a.from, to: a.to, kind: a.kind || null, ...(bend ? { bend } : {}) };
@@ -563,7 +588,12 @@ export async function planAction(model, a, measure) {
     }
 
     case 'disconnect': {
-      const id = a.id || (a.from && a.to && `${a.from}__${a.to}`);
+      let id = a.id || (a.from && a.to && `${a.from}__${a.to}`);
+      // Or by its ends, a group standing for its enclosure.
+      if (!model.relations[id] && !a.id && a.from && a.to) {
+        const r = Object.values(model.relations).find(r => r.from === groupEnd(model, a.from) && r.to === groupEnd(model, a.to));
+        if (r) id = r.id;
+      }
       if (!model.relations[id]) throw new Error(`disconnect: no relationship "${id}"`);
       return { record: { op, id }, lines: [`animate(${J(id)}, {opacity: 0}, {duration: ${pace(a)}}).then(() => removeByUid(${J(id)}))`] };
     }
@@ -579,7 +609,7 @@ export async function planAction(model, a, measure) {
       const opts = { uid: a.id, originX: 'center', originY: 'center', rx: 18, ry: 18, stroke: '#666', strokeWidth: 2 };
       if (style === 'dashed') opts.strokeDashArray = [10, 7];
       return {
-        record: { op, id: a.id, group: a.group, members, style, at, size },
+        record: { op, id: a.id, group: a.group, members, style, at, size, ...(a.auto ? { auto: true } : {}) },
         lines: [`drawOutline(addRect(${at[0]}, ${at[1]}, ${size[0]}, ${size[1]}, ${J(opts)}), {duration: ${pace(a, 'deliberate')}})`]
       };
     }
@@ -587,10 +617,12 @@ export async function planAction(model, a, measure) {
     case 'revise':
     case 'question': {
       const o = need(model, a.id, op);
-      if (o.kind !== 'text' && o.kind !== 'box') throw new Error(`${op}: "${a.id}" is a ${o.kind}; only text and box concepts have text to change`);
+      const pictured = o.kind === 'figure' || o.kind === 'picture';
+      if (!(o.kind === 'text' || o.kind === 'box' || (pictured && op === 'revise'))) throw new Error(`${op}: "${a.id}" is a ${o.kind}; ${op === 'question' ? 'only text and box concepts can be questioned' : 'it has no text to change'}`);
+      if (pictured && !o.text) throw new Error(`revise: "${a.id}" is a ${o.kind} without a label; give it text when introducing it`);
       const text = a.text != null ? String(a.text) : op === 'question' ? (o.text.endsWith('?') ? o.text : o.text + '?') : null;
-      if (text == null) throw new Error('revise: text is required');
-      const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: o.boundary }]);
+      if (text == null || text === '') throw new Error('revise: text is required');
+      const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: o.boundary, ...(o.kind === 'picture' ? { src: o.src, width: o.width } : {}) }]);
       const ms = pace(a, 'deliberate');
       const change = op === 'question'
         ? `(setLabelText(${J(a.id)}, ${J(text)}), setLabelBoundary(${J(a.id)}, "dashed"))`
@@ -895,22 +927,27 @@ function checkTask(t) {
 export async function planActions(model, actions, measure) {
   const lines = [], records = [];
   for (let i = 0; i < actions.length; i++) {
-    let planned;
-    try { planned = await planAction(model, actions[i], measure); }
-    catch (e) { throw new Error(`Action ${i + 1} (${actions[i] && actions[i].op}): ${e.message}`); }
-    applyRecord(model, planned.record);
-    records.push(planned.record);
-    lines.push(TAG + JSON.stringify(planned.record), ...planned.lines);
+    try {
+      for (const a of [...missingEnclosures(model, actions[i]), actions[i]]) {
+        const planned = await planAction(model, a, measure);
+        applyRecord(model, planned.record);
+        records.push(planned.record);
+        lines.push(TAG + JSON.stringify(planned.record), ...planned.lines);
+      }
+    } catch (e) { throw new Error(`Action ${i + 1} (${actions[i] && actions[i].op}): ${e.message}`); }
   }
   return { lines, records };
 }
 
-// The last action's annotation and the lines after it, removed.
+// The last action's annotation and the lines after it, removed; with it the
+// enclosure drawn for it (a connect to a group without one).
 export function withoutLastAction(lines) {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (String(lines[i]).trim().startsWith(TAG.trim())) return { lines: lines.slice(0, i), removed: lines.slice(i) };
-  }
-  return null;
+  const tags = lines.map((l, i) => (String(l).trim().startsWith(TAG.trim()) ? i : -1)).filter(i => i >= 0);
+  if (!tags.length) return null;
+  let i = tags.at(-1);
+  const auto = tags.length > 1 && (() => { try { return JSON.parse(String(lines[tags.at(-2)]).trim().slice(TAG.trim().length)).auto; } catch { return false; } })();
+  if (auto) i = tags.at(-2);
+  return { lines: lines.slice(0, i), removed: lines.slice(i) };
 }
 
 // ---- inspecting and validating -----------------------------------------------

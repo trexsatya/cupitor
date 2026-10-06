@@ -55,13 +55,13 @@ them out, or never use that pattern yourself.
 ## Actions
 
 - `viewer_task`: What the viewer should do mentally: {type: notice|compare|predict|infer|remember|question|integrate, target, constraint?}. Attaches to the current beat (or scene).
-- `introduce`: Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, place?, pace?}. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]}, {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.
+- `introduce`: Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, place?, pace?}. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.
 - `introduce_group`: Add several concepts as a row or column: {id, items: [{id, text}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, place?, pace?}.
 - `branch`: Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, pace?}.
-- `connect`: Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop.
+- `connect`: Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none.
 - `disconnect`: Remove a relationship: {id} or {from, to}.
 - `enclose`: Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.
-- `revise`: Change the text of the same concept (identity kept): {id, text, pace?}.
+- `revise`: Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.
 - `question`: Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.
 - `weaken_boundary`: Dash (or remove) a concept's or enclosure's boundary: {id, style?: dashed|none, pace?}.
 - `replace`: Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?}, pace?}.
@@ -79,7 +79,7 @@ them out, or never use that pattern yourself.
 - `remove`: Fade concepts out and delete them: {ids, pace?}.
 
 Places: `{"near": id, "side": "left" | "right" | "above" | "below" | "around"}`, `{"between": [id, id]}`
-or `{"region": "center" | "top" | "bottom" | "left" | "right" | "top-left" | "top-right" | "bottom-left" | "bottom-right"}`.
+(ids of concepts or groups) or `{"region": "center" | "top" | "bottom" | "left" | "right" | "top-left" | "top-right" | "bottom-left" | "bottom-right"}`.
 Sizes: "small", "normal", "large", "title". Paces: "instant", "short", "deliberate".
 Pauses: "short", "prediction", "thinking".
 In a plan, a picture's `src` is an http(s) URL (the other forms above are paths on the server's machine);

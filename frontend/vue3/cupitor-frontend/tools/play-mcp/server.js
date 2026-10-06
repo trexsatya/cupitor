@@ -312,7 +312,7 @@ export function createServer(page, publicDir) {
   }));
 
   tool('undo_last_action', {
-    description: 'Remove the last semantic action (its "// @sem" comment and every line after it) from the script and replay the script.'
+    description: 'Remove the last semantic action (its "// @sem" comment and every line after it, and the enclosure drawn for it when it was an arrow to a group) from the script and replay the script.'
   }, async () => exclusive(async () => {
     const cut = withoutLastAction(await page.script());
     if (!cut) return text('No semantic action in the script.');

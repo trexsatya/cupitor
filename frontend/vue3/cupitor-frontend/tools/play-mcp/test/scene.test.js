@@ -229,6 +229,45 @@ test('return_to a checkpoint puts text, places and camera back; return_to ids re
   await assert.rejects(plan([{ op: 'return_to', ids: ['k'] }], again.model), /"k" was not removed/);
 });
 
+test('a group can be an arrow end (through its enclosure, a dashed one drawn if it has none) and a place anchor', async () => {
+  const { model, lines } = await plan([
+    { op: 'introduce', id: 'vote', text: 'VOTE', place: { region: 'left' } },
+    { op: 'introduce_group', id: 'pros', items: ['POLITICIANS', 'EXPERTS'], layout: 'column', place: { region: 'right' } },
+    { op: 'introduce', id: 'mid', text: 'MID', place: { between: ['vote', 'pros'] } },
+    { op: 'introduce', id: 'over', text: 'OVER', place: { near: 'pros', side: 'above' } },
+    { op: 'connect', from: 'pros', to: 'vote' },
+    { op: 'connect', from: 'vote', to: 'pros', id: 'back' }
+  ]);
+  assert.equal(model.groups.pros.enclosure, 'pros_boundary');
+  assert.equal(model.objects.pros_boundary.boundary, 'dashed');
+  assert.deepEqual([model.relations.pros__vote.from, model.relations.back.to], ['pros_boundary', 'pros_boundary']);
+  assert.equal(lines.filter(l => l.includes('"op":"enclose"')).length, 1, 'drawn once');
+  assert.deepEqual(parseScene(lines).relations, model.relations);
+  const [mid, over, box] = ['mid', 'over', 'pros_boundary'].map(id => boxOf(model.objects[id]));
+  assert.ok(mid.x + mid.w < box.x && over.y + over.h < box.y, 'between and above the group');
+  await plan([{ op: 'disconnect', from: 'pros', to: 'vote' }], model);
+  await plan([{ op: 'disconnect', from: 'vote', to: 'pros_boundary' }], model);
+  // Undo takes the enclosure drawn for the arrow with it.
+  const cut = withoutLastAction(lines.slice(0, lines.findIndex(l => l.includes('"id":"back"'))));
+  assert.equal(cut.removed.filter(l => l.startsWith(TAG)).length, 2);
+  assert.equal(parseScene(cut.lines).groups.pros.enclosure, null);
+  // A removed enclosure brought back is the group's again.
+  await plan([{ op: 'remove', ids: ['pros_boundary'] }, { op: 'return_to', ids: ['pros_boundary'] }, { op: 'connect', from: 'pros', to: 'mid' }], model);
+  assert.equal(model.relations.pros__mid.from, 'pros_boundary');
+});
+
+test('revise changes the label under a figure; one without a label, or a question, is refused', async () => {
+  const { model, lines } = await plan([
+    { op: 'introduce', id: 'p', kind: 'figure', text: 'VOTER' },
+    { op: 'introduce', id: 'q', kind: 'figure' },
+    { op: 'revise', id: 'p', text: 'CITIZEN' }
+  ]);
+  assert.deepEqual(model.objects.p.history, ['VOTER', 'CITIZEN']);
+  assert.match(lines.at(-1), /setLabelText\("p", "CITIZEN"\)/);
+  await assert.rejects(plan([{ op: 'revise', id: 'q', text: 'X' }], model), /without a label/);
+  await assert.rejects(plan([{ op: 'question', id: 'p' }], model), /only text and box/);
+});
+
 test('turnover: members change, the group and its enclosure hold', async () => {
   const { model } = await plan([
     { op: 'introduce_group', id: 'w', items: ['D1', 'D2', 'D3'] },

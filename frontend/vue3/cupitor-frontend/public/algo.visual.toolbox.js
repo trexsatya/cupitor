@@ -396,14 +396,16 @@ function _setLabelBoundary(rect, boundary) {
   rect.set({ strokeWidth: boundary === 'none' ? 0 : 2, strokeDashArray: boundary === 'dashed' ? [10, 7] : null });
 }
 
-// New text for a label: the box is refitted around it and the centre stays put.
+// New text for a label (the box is refitted around it), or for the label under
+// a figure or picture; the centre stays put.
 function setLabelText(uidOrObj, text) {
   const g = findIfRequired(uidOrObj);
-  if (!isFabricObject(g) || !g.customData || g.customData.type !== 'label') throw new Error(`setLabelText: ${uidOrObj} is not a label`);
-  const [r, t] = g.getObjects();
+  const type = isFabricObject(g) && g.customData && g.customData.type;
+  const [r, t] = type ? g.getObjects() : [];
+  if (type !== 'label' && !((type === 'figure' || type === 'picture') && t instanceof fabric.Text)) throw new Error(`setLabelText: ${uidOrObj} is not a label, or a figure or picture with a label`);
   const centre = g.getCenterPoint();
   t.set('text', String(text));
-  r.set({ width: t.width + 2 * g.customData.padding, height: t.height + 2 * g.customData.padding });
+  if (type === 'label') r.set({ width: t.width + 2 * g.customData.padding, height: t.height + 2 * g.customData.padding });
   g.triggerLayout();
   g.setPositionByOrigin(centre, 'center', 'center');
   g.setCoords();

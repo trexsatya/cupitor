@@ -87,10 +87,10 @@ comment holds the positions and sizes the action settled on, so rebuilding never
 | Action | What it does |
 | --- | --- |
 | `scene`, `beat`, `viewer_task` | Name the scene and its beats (a beat can say the narrator's `move`); record what the viewer should do mentally (notice, compare, predict, infer, remember, question, integrate) |
-| `introduce`, `introduce_group`, `branch` | Add concepts as text, a box, a minimal person (`figure`) or a `picture`; placed near another concept, in a region, or in a row or column |
-| `connect`, `disconnect` | Relationships: arrows that follow both ends. They curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop |
+| `introduce`, `introduce_group`, `branch` | Add concepts as text, a box, a minimal person (`figure`) or a `picture`; placed near another concept or group, between two, in a region, or in a row or column |
+| `connect`, `disconnect` | Relationships: arrows that follow both ends. They curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop. A group as an end means its enclosure (a dashed one is drawn first if it has none) |
 | `enclose`, `weaken_boundary` | A boundary round concepts; dash or drop it |
-| `revise`, `question`, `replace` | Change a concept's text in place (its revisions are kept), make it uncertain, or swap it for another |
+| `revise`, `question`, `replace` | Change a concept's text, or a figure's or picture's label, in place (its revisions are kept), make it uncertain, or swap it for another |
 | `deemphasize`, `focus` | Fade concepts back, or bring some forward and dim the rest |
 | `move_into` | Move a concept into another |
 | `widen_context`, `narrow_context` | Pull the camera back so concepts sit small in a much larger frame (or, with `mode: "objects"`, shrink just those concepts); bring it in on some concepts or back to the starting view |

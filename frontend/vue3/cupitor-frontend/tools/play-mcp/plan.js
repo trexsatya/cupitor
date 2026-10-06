@@ -101,7 +101,7 @@ them out, or never use that pattern yourself.
 ${actions}
 
 Places: \`{"near": id, "side": "left" | "right" | "above" | "below" | "around"}\`, \`{"between": [id, id]}\`
-or \`{"region": ${Object.keys(REGIONS).map(r => `"${r}"`).join(' | ')}}\`.
+(ids of concepts or groups) or \`{"region": ${Object.keys(REGIONS).map(r => `"${r}"`).join(' | ')}}\`.
 Sizes: ${Object.keys(TEXT_SIZE).map(s => `"${s}"`).join(', ')}. Paces: ${Object.keys(PACE).map(p => `"${p}"`).join(', ')}.
 Pauses: ${Object.keys(PAUSE).map(p => `"${p}"`).join(', ')}.
 In a plan, a picture's \`src\` is an http(s) URL (the other forms above are paths on the server's machine);
