@@ -89,14 +89,14 @@ comment holds the positions and sizes the action settled on, so rebuilding never
 | `scene`, `beat`, `viewer_task` | Name the scene and its beats (a beat can say the narrator's `move`); record what the viewer should do mentally (notice, compare, predict, infer, remember, question, integrate) |
 | `introduce`, `introduce_group`, `branch` | Add concepts as text, a box, a minimal person (`figure`) or a `picture`; placed near another concept or group, between two, in a region, or in a row or column. A `role` from the palette (citizen, knowledge, power, feedback, risk, values, technical, neutral) colours a concept, and `color` sets one directly; `background` fills the box behind a text or box concept; the colour stays through revisions, emphasis changes and going back, and a group's items, a replacement and turnover arrivals take colour and background on unless given their own |
 | `type`, `write` | A text concept typed in a character at a time, or written by hand stroke after stroke (still handwritten after a revise or question), for a proposition being formulated in front of the viewer; otherwise as `introduce` |
-| `connect`, `disconnect` | Relationships: arrows that follow both ends. They curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop. When a concept is pushed aside, its arrows take the curve that suits where it now is (a curve given by hand stays). A group as an end means its enclosure (a dashed one is drawn first if it has none). Arrows leave and arrive at the middles of facing edges, never a corner unless `from_side` / `to_side` names one |
+| `connect`, `disconnect` | Relationships: arrows that follow both ends. They (and `branch` arrows) curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop. When a concept is pushed aside, its arrows take the curve that suits where it now is (a curve given by hand stays). A group as an end means its enclosure (a dashed one is drawn first if it has none). Arrows leave and arrive at the middles of facing edges, never a corner unless `from_side` / `to_side` names one |
 | `enclose`, `weaken_boundary` | A boundary round concepts; dash or drop it |
 | `revise`, `question`, `replace` | Change a concept's text, or a figure's or picture's label, in place (its revisions are kept), make it uncertain, or swap it for another; a longer text pushes the concepts beside it aside |
 | `deemphasize`, `focus` | Fade concepts back, or bring some forward and dim the rest |
 | `move_into` | Move a concept into another |
 | `widen_context`, `narrow_context` | Pull the camera back so concepts sit small in a much larger frame (or, with `mode: "objects"`, shrink just those concepts); bring it in on some concepts or back to the starting view. When a new, longer or replaced concept has no room in view, the camera pulls back by itself first, as its own step |
 | `dissolve_boundary` | Categories become a continuum: their boxes lose their outlines while a colour band appears under them (place in-between cases first with `place: {between: [a, b]}`) |
-| `checkpoint`, `return_to` | Remember the scene; go back to it (places, text, emphasis, removed concepts, camera), or bring back removed concepts by id |
+| `checkpoint`, `return_to` | Remember the scene; go back to it (places, text, emphasis, removed concepts, camera), or bring back removed concepts by id (a dimmed one still on screen comes back to full strength) |
 | `turnover` | Members of a group leave while new ones arrive, the group (and its enclosure) holding |
 | `narrate` | A line of narration shown as a caption (see below) |
 | `pause`, `remove` | Hold still (`short`, `prediction`, `thinking`); fade out and delete |
@@ -110,7 +110,7 @@ into a band; `river.txt` keeps RIVER while every drop is replaced, then does the
 
 A picture's `src` can be a URL, a path under `public/`, or a local file; a local file elsewhere is copied into
 `public/play-assets/` so the script loads it by a path the page serves. Durations are classes (`instant`,
-`short`, `deliberate`) or ms. Layout keeps concepts in view, clear of each other and of the page's minimap; under a
+`short`, `deliberate`) or ms. Layout keeps concepts in view, clear of each other, of the page's minimap and of the narration caption strip; under a
 zoomed-out camera, new text is made larger in the scene so it reads at the size asked for. The first `scene`
 of a script resets the camera, so replays start from the same view.
 
@@ -163,7 +163,7 @@ same text as PLAN-SPEC.md, generated from the action list, so the two cannot dri
 | --- | --- |
 | `apply_semantic_action` | Apply semantic actions in order: laid out, written to the script with their `// @sem` comments, and played. If any action is invalid, none is applied. |
 | `inspect_scene` | The scene model rebuilt from the script, with each concept's live box on the canvas. |
-| `validate_scene` | Overlaps, things off the canvas or under the minimap, text too small to read, arrows running through other concepts, concepts missing from the canvas, enclosures that miss members or catch others, a scene without a viewer task. |
+| `validate_scene` | Overlaps, things off the canvas or under the minimap (or the caption, when there is narration), text too small to read, arrows running through other concepts, concepts missing from the canvas, enclosures that miss members or catch others, a scene without a viewer task. |
 | `scene_timeline` | The script as it plays: beats with start times, viewer tasks, narration and moves. |
 | `export_captions` | Write the narration as a caption track (`vtt`, default, or `srt`) timed to the script. |
 | `review_scene` | Write a review page: per beat, move, viewer task, narration, moves, checklist, issues and screenshots. |

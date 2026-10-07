@@ -302,7 +302,29 @@ test('return_to a checkpoint puts text, places and camera back; return_to ids re
     { op: 'connect', from: 'k', to: 'x' }, { op: 'remove', ids: ['x'] }, { op: 'return_to', ids: ['x'] }]);
   assert.ok(again.model.objects.x && again.model.relations.k__x);
   assert.ok(again.lines.some(l => /restoreObject\("x"\)/.test(l)));
-  await assert.rejects(plan([{ op: 'return_to', ids: ['k'] }], again.model), /"k" was not removed/);
+  // Still on screen, only dimmed: brought back to full strength; an unknown id is refused.
+  const dimmed = await plan([{ op: 'deemphasize', ids: ['k'], level: 'faint' }, { op: 'return_to', ids: ['k'] }], again.model);
+  assert.equal(dimmed.model.objects.k.opacity, 1);
+  assert.match(dimmed.lines.at(-1), /^Promise\.all\(\[animate\("k", \{opacity: 1\}/);
+  assert.equal(parseScene([...again.lines, ...dimmed.lines]).objects.k.opacity, 1);
+  const both = await plan([{ op: 'deemphasize', ids: ['k', 'x'] }, { op: 'return_to', ids: ['k', 'x'] }], again.model);
+  assert.equal(both.model.relations.k__x.opacity, 1, 'their arrow comes back with them');
+  assert.equal(parseScene([...again.lines, ...both.lines]).relations.k__x.opacity, 1);
+  await assert.rejects(plan([{ op: 'return_to', ids: ['nobody'] }], again.model), /no concept "nobody" to bring back/);
+});
+
+test('branch arrows curve round concepts in their way; nothing is placed under the narration caption', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'root', text: 'ROOT', place: { x: 700, y: 150 } },
+    { op: 'introduce', id: 'wall', text: 'WALL WALL WALL', place: { x: 700, y: 300 } },
+    { op: 'branch', from: 'root', items: ['ONE', 'TWO', 'THREE'], side: 'below' }
+  ]);
+  // The children land below the wall; the middle arrow would run through it.
+  const bends = ['one', 'two', 'three'].map(id => model.relations[`root__${id}`].bend || 0);
+  assert.ok(bends.some(b => b !== 0), `some arrow curves: ${bends}`);
+  const caption = { x: 342, y: 697, w: 700, h: 103 };
+  const low = await plan([{ op: 'narrate', text: 'Words.' }, { op: 'introduce', id: 'low', text: 'A LONG QUESTION AT THE BOTTOM?', size: 'large', place: { region: 'bottom' } }]);
+  assert.ok(!hit(boxOf(low.model.objects.low), caption), 'clear of the caption');
 });
 
 test('a group can be an arrow end (through its enclosure, a dashed one drawn if it has none) and a place anchor', async () => {

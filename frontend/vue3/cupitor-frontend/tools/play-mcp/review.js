@@ -58,7 +58,7 @@ export function plainMove(rec) {
     case 'narrow_context': return rec.reset ? 'camera back to the starting view' : `camera in on ${(rec.ids || []).join(', ')} (zoom ${rec.camera.zoom})`;
     case 'dissolve_boundary': return `dissolve ${rec.ids.join(', ')} into the band ${rec.id}`;
     case 'checkpoint': return `checkpoint ${q(rec.name)}`;
-    case 'return_to': return rec.name ? `return to checkpoint ${q(rec.name)}` : `bring back ${rec.ids.join(', ')}`;
+    case 'return_to': return rec.name ? `return to checkpoint ${q(rec.name)}` : [rec.ids.length ? `bring back ${rec.ids.join(', ')}` : '', rec.shown ? `bring ${rec.shown.join(', ')} back to full strength` : ''].filter(Boolean).join('; ');
     case 'turnover': return `turnover in ${rec.group}: ${rec.leaving.join(', ') || 'none'} leave, ${rec.arriving.map(a => a.id).join(', ') || 'none'} arrive`;
     case 'pause': return `pause ${rec.seconds}s${rec.kind && rec.kind !== 'short' ? ` (${rec.kind})` : ''}`;
     case 'remove': return `remove ${rec.ids.join(', ')}`;

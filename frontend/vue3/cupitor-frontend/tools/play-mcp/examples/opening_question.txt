@@ -3,12 +3,12 @@ animateViewport({zoom: 1, pan: [0, 0]}, {duration: 0})
 // @sem {"op":"beat","name":"question","move":"an ordinary scene, then the question arrives before any explanation","viewer_task":{"type":"notice","target":"the question comes before any explanation"}}
 // @sem {"op":"narrate","id":"n1","text":"A father, a child, and something to eat. An ordinary evening.","sync":"with","words":11,"hold":4700,"wait":300}
 Promise.resolve(caption("A father, a child, and something to eat. An ordinary evening.", {id: "n1", wait: 300}))
-// @sem {"op":"introduce","id":"father","kind":"figure","text":"father","fontSize":16,"boundary":"none","at":[260,670],"size":[44,129]}
-drawOutline(addFigure(260, 670, {"uid":"father","label":"father","fontSize":16}), {duration: 1500})
-// @sem {"op":"introduce","id":"child","kind":"figure","text":"child","fontSize":16,"boundary":"none","at":[364,670],"size":[43,129]}
-drawOutline(addFigure(364, 670, {"uid":"child","label":"child","fontSize":16}), {duration: 1500})
-// @sem {"op":"introduce","id":"food","kind":"picture","text":"food","fontSize":16,"boundary":"none","src":"img/placeholder.png","width":110,"at":[501,670],"size":[110,100]}
-Promise.resolve(addPicture("img/placeholder.png", 501, 670, {"uid":"food","label":"food","width":110,"fontSize":16})).then(g => drawOutline(g, {duration: 1500}))
+// @sem {"op":"introduce","id":"father","kind":"figure","text":"father","fontSize":16,"boundary":"none","at":[260,600],"size":[44,129]}
+drawOutline(addFigure(260, 600, {"uid":"father","label":"father","fontSize":16}), {duration: 1500})
+// @sem {"op":"introduce","id":"child","kind":"figure","text":"child","fontSize":16,"boundary":"none","at":[364,600],"size":[43,129]}
+drawOutline(addFigure(364, 600, {"uid":"child","label":"child","fontSize":16}), {duration: 1500})
+// @sem {"op":"introduce","id":"food","kind":"picture","text":"food","fontSize":16,"boundary":"none","src":"img/placeholder.png","width":110,"at":[501,600],"size":[110,100]}
+Promise.resolve(addPicture("img/placeholder.png", 501, 600, {"uid":"food","label":"food","width":110,"fontSize":16})).then(g => drawOutline(g, {duration: 1500}))
 // @sem {"op":"narrate","id":"n2","text":"Then the child asks something no dinner can answer.","sync":"before","words":9,"hold":4000,"wait":4000}
 Promise.resolve(caption("Then the child asks something no dinner can answer.", {id: "n2", wait: 4000}))
 // @sem {"op":"pause","kind":"prediction","seconds":2}
@@ -37,8 +37,8 @@ Promise.resolve(caption(null))
 Promise.resolve(caption("The instructions fade. The question does not.", {id: "n5", wait: 300}))
 // @sem {"op":"deemphasize","ids":["practical"],"opacity":{"eat":0.2,"study":0.2,"live":0.2,"practical_box":0.2}}
 Promise.all([animate("eat", {opacity: 0.2}, {duration: 700}), animate("study", {opacity: 0.2}, {duration: 700}), animate("live", {opacity: 0.2}, {duration: 700}), animate("practical_box", {opacity: 0.2}, {duration: 700})])
-// @sem {"op":"move_into","id":"life_question","into":"child","at":[364,585],"scale":0.5}
-animate("life_question", {left: 364, top: 585, scaleX: 0.5, scaleY: 0.5}, {duration: 1500})
+// @sem {"op":"move_into","id":"life_question","into":"child","at":[364,515],"scale":0.5}
+animate("life_question", {left: 364, top: 515, scaleX: 0.5, scaleY: 0.5}, {duration: 1500})
 // @sem {"op":"pause","kind":"short","seconds":1}
 Promise.resolve(sleep(1))
 // @sem {"op":"beat","name":"competing arguments","move":"the question sharpens into GOD? and two sides build cases that answer each other","viewer_task":{"type":"compare","target":"reasoning builds competing structures"}}
@@ -47,9 +47,9 @@ Promise.resolve(caption(null))
 Promise.resolve(caption("Later, the question takes a sharper form.", {id: "n6", wait: 300}))
 // @sem {"op":"remove","ids":["eat","study","live","practical_box"]}
 Promise.all([animate("eat", {opacity: 0}, {duration: 700}), animate("study", {opacity: 0}, {duration: 700}), animate("live", {opacity: 0}, {duration: 700}), animate("practical_box", {opacity: 0}, {duration: 700})]).then(() => ["eat","study","live","practical_box"].forEach(removeByUid))
-// @sem {"op":"replace","id":"life_question","with":{"id":"god","kind":"text","text":"GOD?","fontSize":30,"boundary":"none","role":null,"at":[364,585],"size":[109,58]}}
+// @sem {"op":"replace","id":"life_question","with":{"id":"god","kind":"text","text":"GOD?","fontSize":30,"boundary":"none","role":null,"at":[364,515],"size":[109,58]}}
 animate("life_question", {opacity: 0}, {duration: 700}).then(() => removeByUid("life_question"))
-drawOutline(addLabel("GOD?", 364, 585, {"uid":"god","fontSize":30,"boundary":"none"}), {duration: 700})
+drawOutline(addLabel("GOD?", 364, 515, {"uid":"god","fontSize":30,"boundary":"none"}), {duration: 700})
 // @sem {"op":"widen_context","ids":["god"],"scale":0.99,"moves":{"god":{"at":[700,130],"scale":0.99}}}
 Promise.all([animate("god", {left: 700, top: 130, scaleX: 0.99, scaleY: 0.99}, {duration: 1500})])
 // @sem {"op":"narrate","id":"n7","text":"Each side builds its case.","sync":"with","words":5,"hold":2500,"wait":300}
@@ -115,8 +115,8 @@ connectObjects("know_nothing", "knowledge", "know_nothing__knowledge", {bend: 13
 Promise.resolve(caption("So what is left that is certain?", {id: "n12", wait: 3200}))
 // @sem {"op":"pause","kind":"prediction","seconds":2}
 Promise.resolve(sleep(2))
-// @sem {"op":"introduce","id":"certainty","kind":"box","text":"CERTAINTY","fontSize":22,"boundary":"solid","at":[1000,670],"size":[149,51]}
-drawOutline(addLabel("CERTAINTY", 1000, 670, {"uid":"certainty","fontSize":22,"boundary":"solid"}), {duration: 700})
+// @sem {"op":"introduce","id":"certainty","kind":"box","text":"CERTAINTY","fontSize":22,"boundary":"solid","at":[1000,640],"size":[149,51]}
+drawOutline(addLabel("CERTAINTY", 1000, 640, {"uid":"certainty","fontSize":22,"boundary":"solid"}), {duration: 700})
 // @sem {"op":"question","id":"certainty","text":"CERTAINTY?","size":[161,51]}
 animate("certainty", {opacity: 0.15}, {duration: 450}).then(() => (setLabelText("certainty", "CERTAINTY?"), setLabelBoundary("certainty", "dashed"))).then(() => animate("certainty", {opacity: 1}, {duration: 1050}))
 // @sem {"op":"pause","kind":"thinking","seconds":4}

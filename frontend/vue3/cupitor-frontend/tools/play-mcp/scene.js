@@ -25,7 +25,10 @@ const GAP = 60;       // room between an anchor and what is placed next to it
 const CLEARANCE = 24; // the least room kept between objects
 const KINDS = ['text', 'box', 'figure', 'picture'];
 // Page controls drawn over the canvas (play.html at 1400x850, zoom 1): nothing is placed under them.
-export const RESERVED = [{ name: 'minimap', x: 1180, y: 640, w: 220, h: 160 }];
+// The narration caption is a strip at the bottom middle (up to three lines).
+export const RESERVED = [{ name: 'minimap', x: 1180, y: 640, w: 220, h: 160 }, { name: 'caption', x: 342, y: 697, w: 700, h: 103 }];
+// The page areas kept clear in a scene: the caption only once there is narration.
+const reservedIn = model => RESERVED.filter(r => r.name !== 'caption' || model.narration.length);
 
 // Colours by role: color is meaning, not decoration, so a role keeps its
 // colour through the whole film. A concept's own color goes before its role's.
@@ -58,7 +61,7 @@ export const ACTIONS = {
   narrow_context: 'Bring the camera in on concepts: {ids, fill?: 0.7 (share of the screen they fill)} or {reset: true} (back to the starting view), pace?.',
   dissolve_boundary: "Turn categories into a continuum: the boxes of concepts (in order, e.g. two categories with in-between cases already placed between them) lose their boundaries while a colour band appears under them: {ids, id (the band), colors?: [from, to], pace?}.",
   checkpoint: 'Remember how every concept, relationship and the camera are now: {name}.',
-  return_to: 'Go back: {name} puts the concepts of a checkpoint back as they were (positions, text, emphasis, ones removed since) and the camera; {ids} brings back removed concepts where they were.',
+  return_to: 'Go back: {name} puts the concepts of a checkpoint back as they were (positions, text, emphasis, ones removed since) and the camera; {ids} brings back removed concepts where they were (one still on screen, e.g. dimmed, comes back to full strength).',
   turnover: "Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text, role?, color?, background?}] or [\"TEXT\"] (without their own, arrivals take the role, colour and background the group was made with, else a staying member's), direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.",
   narrate: "A line of narration, shown as a caption: {text, id? (default n1, n2, ...; later audio for the line takes this id), sync?: before (default: the script waits while it is read, so what follows is revealed after it) | with (what follows plays while it shows), seconds? (hold it this long instead of the reading-pace estimate)}. A caption stays until the next narrate, beat or scene.",
   pause: `Hold still: {kind?: ${Object.keys(PAUSE).join('|')}, seconds?}.`,
@@ -241,6 +244,8 @@ export function applyRecord(model, rec) {
         Object.values(st.groups).forEach(g => { model.groups[g.id] = clone(g); });
         model.camera = clone(st.camera);
       } else {
+        (rec.shown || []).forEach(id => { obj(id).opacity = 1; });
+        (rec.relit || []).forEach(id => { if (model.relations[id]) model.relations[id].opacity = 1; });
         rec.ids.forEach(id => {
           const r = model.retired[id];
           if (!r) throw new Error(`return_to: "${id}" was not removed`);
@@ -300,7 +305,7 @@ export function applyRecord(model, rec) {
 export function describe(rec, model) {
   const where = [model.scene, model.beat].filter(Boolean).join(' / ');
   const what = rec.id ? `${rec.op} ${rec.id}` : rec.op === 'connect' ? `connect ${rec.from} -> ${rec.to}`
-    : rec.ids ? `${rec.op} ${rec.ids.join(', ')}` : rec.name ? `${rec.op} ${rec.name}` : rec.op;
+    : rec.ids ? `${rec.op} ${[...rec.ids, ...(rec.shown || [])].join(', ')}` : rec.name ? `${rec.op} ${rec.name}` : rec.op;
   return where ? `[${where}] ${what}` : what;
 }
 
@@ -334,12 +339,12 @@ const onCanvas = (model, b) => {
 };
 
 function occupied(model) {
-  return Object.values(model.objects).filter(o => o.opacity > 0).map(boxOf).concat(RESERVED.map(r => screenRect(model, r)));
+  return Object.values(model.objects).filter(o => o.opacity > 0).map(boxOf).concat(reservedIn(model).map(r => screenRect(model, r)));
 }
 
 export const REGIONS = {
-  center: [700, 400], top: [700, 130], bottom: [700, 670], left: [260, 400], right: [1140, 400],
-  'top-left': [260, 130], 'top-right': [1140, 130], 'bottom-left': [260, 670], 'bottom-right': [1000, 670]
+  center: [700, 400], top: [700, 130], bottom: [700, 630], left: [260, 400], right: [1140, 400],
+  'top-left': [260, 130], 'top-right': [1140, 130], 'bottom-left': [260, 630], 'bottom-right': [1000, 630]
 };
 const SIDES = { right: [1, 0], left: [-1, 0], below: [0, 1], above: [0, -1] };
 
@@ -722,12 +727,16 @@ export async function planAction(model, a, measure) {
       if (op === 'introduce_group') {
         lines.push(`Promise.all([${placed.map(p => createLine(p, ms)).join(', ')}])`);
       } else {
+        // Each arrow curves round concepts in its way, the new children among them.
+        const trial = clone(model);
+        placed.forEach(p => { trial.objects[p.id] = { scale: 1, opacity: 1, ...clone(p) }; });
         placed.forEach(p => {
           const rid = `${from.id}__${p.id}`;
           checkNewId(model, rid, taken);
           taken.add(rid);
-          relations.push({ id: rid, from: from.id, to: p.id, kind: a.relation || null });
-          lines.push(createLine(p, ms), `connectObjects(${J(from.id)}, ${J(p.id)}, ${J(rid)}, {animate: true, duration: ${ms}})`);
+          const bend = chooseBend(trial, from.id, p.id, 'auto');
+          relations.push({ id: rid, from: from.id, to: p.id, kind: a.relation || null, ...(bend ? { bend } : {}) });
+          lines.push(createLine(p, ms), `connectObjects(${J(from.id)}, ${J(p.id)}, ${J(rid)}, {${bend ? `bend: ${bend}, ` : ''}animate: true, duration: ${ms}})`);
         });
       }
       // A group's own role, colour and background, which its later arrivals take.
@@ -973,10 +982,18 @@ export async function planAction(model, a, measure) {
         return { record: { op, name: a.name, removed, unlinked }, lines };
       }
       if (!Array.isArray(a.ids) || !a.ids.length) throw new Error('return_to: give a checkpoint name or ids of removed concepts');
+      // A concept still on screen (dimmed, say) is brought back to full strength instead.
+      const shown = a.ids.filter(id => model.objects[id] && !model.retired[id]);
+      a = { ...a, ids: a.ids.filter(id => !shown.includes(id)) };
       a.ids.forEach(id => {
-        if (!model.retired[id]) throw new Error(`return_to: "${id}" was not removed`);
+        if (!model.retired[id]) throw new Error(`return_to: no concept "${id}" to bring back`);
         if (model.objects[id] || model.relations[id]) throw new Error(`return_to: "${id}" is in use again`);
       });
+      // With them, their arrows to concepts at full strength.
+      const full = id => shown.includes(id) || a.ids.includes(id) || (model.objects[id] && model.objects[id].opacity === 1);
+      const relit = shown.length ? Object.values(model.relations).filter(r => r.opacity !== 1 && full(r.from) && full(r.to)).map(r => r.id) : [];
+      const strengthen = [...shown.filter(id => model.objects[id].opacity !== 1), ...relit]
+        .map(id => `animate(${J(id)}, {opacity: 1}, {duration: ${ms}})`);
       // Relationships come back once both their ends are back.
       const back = new Set([...Object.keys(model.objects), ...a.ids]);
       const pending = Object.values(model.retiredRelations);
@@ -989,11 +1006,14 @@ export async function planAction(model, a, measure) {
         const o = model.retired[id].object, sc = o.scale == null ? 1 : o.scale;
         return `animate(${J(id)}, {left: ${o.at[0]}, top: ${o.at[1]}, scaleX: ${sc}, scaleY: ${sc}, opacity: ${o.opacity}}, {duration: ${ms}})`;
       });
-      const lines = [`Promise.resolve().then(() => { ${restore.join('; ')}; }).then(() => Promise.all([${fades.join(', ')}]))`];
+      const lines = [
+        ...(a.ids.length ? [`Promise.resolve().then(() => { ${restore.join('; ')}; }).then(() => Promise.all([${fades.join(', ')}]))`] : []),
+        ...(strengthen.length ? [`Promise.all([${strengthen.join(', ')}])`] : [])
+      ];
       if (relations.length) {
         lines.push(`Promise.all([${relations.map(r => `connectObjects(${J(r.from)}, ${J(r.to)}, ${J(r.id)}, {${r.bend ? `bend: ${J(r.bend)}, ` : ''}${r.sides ? `sides: ${J(r.sides)}, ` : ''}animate: true, duration: ${pace(a)}})`).join(', ')}])`);
       }
-      return { record: { op, ids: a.ids, relations }, lines };
+      return { record: { op, ids: a.ids, relations, ...(shown.length ? { shown } : {}), ...(relit.length ? { relit } : {}) }, lines };
     }
 
     case 'turnover': {
@@ -1161,7 +1181,7 @@ async function roomInView(model, a, measure) {
     const changed = Object.keys(trial.objects).filter(id => moved(id) && !trial.objects[id].members);
     const added = changed.map(id => boxOf(trial.objects[id]));
     const others = Object.values(trial.objects).filter(o => o.opacity > 0 && !changed.includes(o.id) && !(o.members && o.members.some(m => changed.includes(m))))
-      .map(boxOf).concat(RESERVED.map(r => screenRect(trial, r)));
+      .map(boxOf).concat(reservedIn(trial).map(r => screenRect(trial, r)));
     return added.every(b => onCanvas(trial, b) && !others.some(t => overlaps(b, t)));
   };
   const c = model.camera, z = zoomOf(model);
@@ -1483,7 +1503,7 @@ export function validate(model, live, lines) {
     if (b.left < v.x || b.top < v.y || b.left + b.width > v.x + v.w || b.top + b.height > v.y + v.h) {
       issues.push({ level: 'warning', id: o.id, message: `"${o.id}" is partly out of view` });
     }
-    RESERVED.forEach(r => {
+    reservedIn(model).forEach(r => {
       if (overlaps({ x: b.left, y: b.top, w: b.width, h: b.height }, screenRect(model, r))) issues.push({ level: 'warning', id: o.id, message: `"${o.id}" is under the page's ${r.name}` });
     });
     const px = o.fontSize * o.scale * zoomOf(model);
