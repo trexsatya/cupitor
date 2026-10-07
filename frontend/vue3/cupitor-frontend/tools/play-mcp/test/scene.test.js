@@ -342,6 +342,20 @@ test('a new concept keeps off an arrow already drawn when a spot nearby is free;
   assert.deepEqual(m2.objects.d.at, [700, 400]);
 });
 
+test('an arrow that cannot clear everything takes the curve crossing the fewest concepts, not the straight line', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'a', text: 'A', place: { x: 100, y: 400 } },
+    { op: 'introduce', id: 'b', text: 'B', place: { x: 1300, y: 400 } },
+    // A wall every curve crosses, and three concepts on the straight line.
+    { op: 'introduce', id: 'wall', text: 'W', place: { x: 700, y: 400 } },
+    { op: 'introduce', id: 'p', text: 'P', place: { x: 400, y: 400 } },
+    { op: 'introduce', id: 'q', text: 'Q', place: { x: 1000, y: 400 } }
+  ]);
+  model.objects.wall.size = [60, 1600]; // as tall as the view: no curve gets round it
+  const { model: m } = await plan([{ op: 'connect', from: 'a', to: 'b' }], model);
+  assert.notEqual(m.relations.a__b.bend || 0, 0, 'curved: crossing only the wall beats crossing all three');
+});
+
 test('a group can be an arrow end (through its enclosure, a dashed one drawn if it has none) and a place anchor', async () => {
   const { model, lines } = await plan([
     { op: 'introduce', id: 'vote', text: 'VOTE', place: { region: 'left' } },

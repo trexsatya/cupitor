@@ -1305,7 +1305,8 @@ const bendMiddle = ([x1, y1, x2, y2], bend) => {
 };
 
 // 'auto': straight if that is clear of other concepts and not on top of a
-// straight reverse arrow; else the smallest bend, either way, that is clear.
+// straight reverse arrow; else the smallest bend, either way, that is clear;
+// else the one crossing the fewest.
 function chooseBend(model, from, to, bend, sides) {
   if (bend !== 'auto') return num(bend, 'connect: bend', -600, 600);
   const ends = connectorEnds(boxOf(model.objects[from]), boxOf(model.objects[to]), sides);
@@ -1316,12 +1317,16 @@ function chooseBend(model, from, to, bend, sides) {
   // Bends grow with the arrow: a short arrow only needs a slight curve.
   const len = Math.hypot(ends[2] - ends[0], ends[3] - ends[1]);
   const k = Math.min(1 / zoomOf(model), Math.max(0.25, len / 260));
-  for (const c of [0, 50, -50, 100, -100, 160, -160]) {
+  // With none clear, the curve crossing the fewest concepts (the smaller on a tie).
+  let best = null;
+  for (const c of [0, 50, -50, 100, -100, 160, -160, 240, -240]) {
     if (c === 0 && reverse) continue;
     const chords = connectorChords(ends, c ? bendMiddle(ends, c * k) : null);
-    if (!others.some(b => chords.some(ch => segmentHitsBox(ch, b)))) return c && Math.round(c * k);
+    const hits = others.filter(b => chords.some(ch => segmentHitsBox(ch, b))).length;
+    if (!hits) return c && Math.round(c * k);
+    if (!best || hits < best.hits) best = { c, hits };
   }
-  return reverse ? Math.round(50 * k) : 0;
+  return best.c && Math.round(best.c * k);
 }
 
 // Whether the segment [x1, y1, x2, y2] crosses the box (Liang-Barsky clipping).

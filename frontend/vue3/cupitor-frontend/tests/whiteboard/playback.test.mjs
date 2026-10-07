@@ -132,3 +132,32 @@ test('typed and handwritten labels: in a character or stroke at a time, then who
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('handwriting: a middle dot is a dot, missing punctuation is written with what the font has, unknown characters leave a gap', async () => {
+  const b = await openBoard();
+  try {
+    const look = await b.eval(async () => {
+      await handFont();
+      const strokes = t => makeHandText(t, { fontSize: 40 }).getObjects().filter(p => p._handD);
+      const width = t => makeHandText(t, { fontSize: 40 }).width;
+      return {
+        middot: strokes('·').map(p => p._handD), question: strokes('?').length,
+        dash: strokes('–').length === strokes('-').length, ellipsis: strokes('…').length === strokes('...').length,
+        unknown: strokes('日').length, dots: width('...') > width('.') * 3,
+        // Letters keep their own width; an accent typed apart joins its letter; zero-width characters add nothing.
+        letters: width('ll') < width('..') * 0.8, // only punctuation gets a cell
+        decomposed: width('e\u0301') === width('\u00e9'), zeroWidth: width('a\u200Bb') === width('ab')
+      };
+    });
+    assert.equal(look.middot.length, 1);
+    assert.match(look.middot[0], / a /, 'a little circle, not the ? glyph');
+    assert.equal(look.dash, true);
+    assert.equal(look.ellipsis, true);
+    assert.equal(look.unknown, 0, 'no ? for a character the font lacks');
+    assert.equal(look.dots, true, 'dots each get room of their own');
+    assert.equal(look.letters, true, 'narrow letters are not padded');
+    assert.equal(look.decomposed, true);
+    assert.equal(look.zeroWidth, true);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

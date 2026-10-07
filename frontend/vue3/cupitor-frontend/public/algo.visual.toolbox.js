@@ -427,23 +427,43 @@ function _handStrokes(text) {
   const font = _handFont;
   if (!font) throw new Error('makeHandText: load the handwriting font first (handFont())');
   const glyph = ch => font.c[ch.charCodeAt(0)];
-  const capH = _handBox(glyph('H').paths).h;
+  const H = _handBox(glyph('H').paths), capH = H.h;
+  const gap = font.p.space * 0.18, cell = font.p.space * 0.45; // punctuation (. , :) gets a cell of its own
   const strokes = [];
   let x = 0;
-  for (const ch of String(text)) {
-    if (ch === ' ') { x += font.p.space; continue; }
+  // Composed first, so an accent typed as its own character joins its letter.
+  const chars = [...String(text).normalize('NFC')].flatMap(ch => [...(_HAND_SUBSTITUTES[ch] || ch)]);
+  for (const ch of chars) {
+    if (/[\u200B-\u200D\u2060\uFE0E\uFE0F]|\p{M}/u.test(ch)) continue; // nothing to write
+    if (/\s/.test(ch)) { x += font.p.space; continue; }
+    if (_HAND_MIDDOTS.includes(ch)) {
+      // A dot half way up the capitals, in a cell of its own.
+      strokes.push({ d: _handDot(x + cell / 2, H.y + capH / 2, capH * 0.05), dx: 0 });
+      x += cell + gap;
+      continue;
+    }
     const [base, ...marks] = ch.normalize('NFD');
-    const g = glyph(base) || glyph('?');
+    const g = glyph(base);
+    // Not in the font: a gap rather than a sign that means something else.
+    if (!g) { x += font.p.space; continue; }
     const paths = g.paths.map(e => `M ${e.mx},${-e.my} ` + e.d.replace(/^\s*m\s*0\s*,\s*0\s*/i, ''));
     const box = _handBox(g.paths);
-    const dx = x - box.x;
+    const w = /[\p{L}\p{N}]/u.test(base) ? box.w : Math.max(box.w, cell);
+    const dx = x + (w - box.w) / 2 - box.x;
     const placed = paths.map(d => ({ d, dx }));
     marks.forEach(m => { const mark = _HAND_MARKS[m]; if (mark) mark(box.x, box.w, box.y, capH).forEach(d => placed.push({ d, dx })); });
     strokes.push(...placed);
-    x += box.w + font.p.space * 0.18;
+    x += w + gap;
   }
   return { strokes, width: x, capH };
 }
+
+// Characters the font lacks, written with ones it has.
+const _HAND_SUBSTITUTES = {
+  '\u2013': '-', '\u2014': '-', '\u2212': '-', '\u2018': "'", '\u2019': "'", '\u201C': '"', '\u201D': '"', '\u201E': '"',
+  '\u00AB': '"', '\u00BB': '"', '\u2026': '...', '\u2192': '->', '\u2190': '<-', '\u00D7': 'x'
+};
+const _HAND_MIDDOTS = ['\u00B7', '\u2022', '\u2219', '\u22C5'];
 
 // The box (font units) round a glyph's strokes, from their path data.
 function _handBox(paths) {
