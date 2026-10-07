@@ -327,6 +327,21 @@ test('branch arrows curve round concepts in their way; nothing is placed under t
   assert.ok(!hit(boxOf(low.model.objects.low), caption), 'clear of the caption');
 });
 
+test('a new concept keeps off an arrow already drawn when a spot nearby is free; with none, it takes the usual one', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'a', text: 'A', place: { x: 300, y: 400 } },
+    { op: 'introduce', id: 'b', text: 'B', place: { x: 1100, y: 400 } },
+    { op: 'connect', from: 'a', to: 'b' },
+    { op: 'introduce', id: 'c', text: 'MIDDLE', place: { region: 'center' } }
+  ]);
+  const c = boxOf(model.objects.c);
+  assert.ok(c.y > 400 + 2 || c.y + c.h < 400 - 2, `clear of the arrow along y 400: ${JSON.stringify(c)}`);
+  assert.ok(Math.hypot(c.x + c.w / 2 - 700, c.y + c.h / 2 - 400) <= 160 + 80, 'still near where it was asked for');
+  // An exact place is kept, arrow or not.
+  const { model: m2 } = await plan([{ op: 'introduce', id: 'd', text: 'D', place: { x: 700, y: 400 } }], model);
+  assert.deepEqual(m2.objects.d.at, [700, 400]);
+});
+
 test('a group can be an arrow end (through its enclosure, a dashed one drawn if it has none) and a place anchor', async () => {
   const { model, lines } = await plan([
     { op: 'introduce', id: 'vote', text: 'VOTE', place: { region: 'left' } },

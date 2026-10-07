@@ -442,8 +442,17 @@ function anchorBox(model, id) {
   throw new Error(`place: no concept "${id}"`);
 }
 
+// The arrows on screen, as the straight pieces placement keeps off.
+function arrowChords(model) {
+  return Object.values(model.relations).filter(r => r.opacity > 0 && r.bend !== 'loop' && model.objects[r.from] && model.objects[r.to]).flatMap(r => {
+    const ends = connectorEnds(boxOf(model.objects[r.from]), boxOf(model.objects[r.to]), r.sides);
+    return connectorChords(ends, r.bend ? bendMiddle(ends, r.bend) : null);
+  });
+}
+
 // Where a box of `size` (centred) can go: the first free spot by `place`, else
-// the free spot in view nearest it, else the least crowded of those tried.
+// the free spot in view nearest it, else the least crowded of those tried. A
+// free spot a little further on that keeps off the arrows goes before one on an arrow.
 export function placeBox(model, size, place = {}, taken = occupied(model)) {
   const [w, h] = size;
   const cands = [];
@@ -483,7 +492,15 @@ export function placeBox(model, size, place = {}, taken = occupied(model)) {
   const boxAt = ([x, y]) => ({ x: x - w / 2, y: y - h / 2, w, h });
   const isFree = c => onCanvas(model, boxAt(c)) && !taken.some(t => overlaps(boxAt(c), t, clearance));
   const free = cands.find(isFree);
-  if (free) return free.map(Math.round);
+  if (free) {
+    const chords = arrowChords(model), detour = 160 * k;
+    const m = 6 * k; // an arrow grazing the edge counts too
+    const onArrow = c => { const b = boxAt(c); return chords.some(ch => segmentHitsBox(ch, { x: b.x - m, y: b.y - m, w: b.w + 2 * m, h: b.h + 2 * m })); };
+    if (!onArrow(free)) return free.map(Math.round);
+    const far = Math.hypot(free[0] - cands[0][0], free[1] - cands[0][1]) + detour;
+    const clear = cands.find(c => Math.hypot(c[0] - cands[0][0], c[1] - cands[0][1]) <= far && isFree(c) && !onArrow(c));
+    return (clear || free).map(Math.round);
+  }
   // None of those: the free spot in view nearest the first choice.
   const v = view(model), step = 20 * k, [ix, iy] = cands[0], grid = [];
   for (let x = v.x + w / 2; x <= v.x + v.w - w / 2; x += step) {

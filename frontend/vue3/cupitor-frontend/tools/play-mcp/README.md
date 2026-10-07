@@ -110,7 +110,7 @@ into a band; `river.txt` keeps RIVER while every drop is replaced, then does the
 
 A picture's `src` can be a URL, a path under `public/`, or a local file; a local file elsewhere is copied into
 `public/play-assets/` so the script loads it by a path the page serves. Durations are classes (`instant`,
-`short`, `deliberate`) or ms. Layout keeps concepts in view, clear of each other, of the page's minimap and of the narration caption strip; under a
+`short`, `deliberate`) or ms. Layout keeps concepts in view, clear of each other, of the page's minimap and of the narration caption strip, and off arrows already drawn when a spot a little further on allows; under a
 zoomed-out camera, new text is made larger in the scene so it reads at the size asked for. The first `scene`
 of a script resets the camera, so replays start from the same view.
 
