@@ -320,6 +320,10 @@
     <button class="prop-toggle wide restored-action" onclick="startFreshScript()">Start fresh</button>
     <button class="explorer-eye" title="Keep it, close this" onclick="hideRestoredScriptBar()">&times;</button>
 </div>
+<div id="play-notice" style="display:none;">
+    <span id="play-notice-text"></span>
+    <button class="explorer-eye" title="Close" onclick="hidePlayNotice()">&times;</button>
+</div>
 <span id="layer-info-bar" title="Layer in front, and the uid of the selected object">
         Lyr: <b id="layerInfo">PC</b> &nbsp; Uid: <b id="selectedObjId">&ndash;</b>
     </span>
@@ -1587,6 +1591,7 @@
             <span style="font-weight:600;font-size:14px;color:#333;">&#128196; Recorded Script</span>
             <div style="display:flex;gap:8px;">
                 <button onclick="playScriptFromDialog()" style="padding:4px 10px;border:1px solid #2e7d32;border-radius:4px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer;">&#9654; Play</button>
+                <button id="runSelectedLinesBtn" onclick="runSelectedScriptLines()" title="Run the selected lines (or the line with the cursor) on the board as it is (Ctrl/&#8984;+Enter)" style="padding:4px 10px;border:1px solid #2e7d32;border-radius:4px;background:#fff;color:#2e7d32;font-size:12px;cursor:pointer;">&#9654; Run selected</button>
                 <button onclick="exportScript()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Export</button>
                 <button onclick="$('#importDialog').show()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Import</button>
                 <button onclick="clearScriptDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Clear</button>
@@ -1597,7 +1602,7 @@
             </div>
         </div>
         <div style="padding:12px 16px;font-size:11px;color:#888;border-bottom:1px solid #eee;">
-            Each line is one recorded operation. Edit freely — click <em>Save Edits</em> to apply changes back to the recording.
+            Each line is one recorded operation. Edit freely — click <em>Save Edits</em> to apply changes back to the recording. <em>Run selected</em> (Ctrl/&#8984;+Enter) runs just the selected lines on the board as it is.
         </div>
         <div id="scriptViewerEditor" style="flex:1;min-height:350px;width:100%;"></div>
         <div id="scriptHelpPopup" style="display:none;position:absolute;top:70px;right:24px;width:min(460px, calc(100% - 48px));max-height:70vh;z-index:10;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.25);flex-direction:column;font-size:12px;">
@@ -2978,6 +2983,11 @@
         ed.setFontSize(13);
         ed.session.setUseWrapMode(true);
         ed.setOption('showPrintMargin', false);
+        ed.commands.addCommand({
+            name: 'runSelectedLines',
+            bindKey: { win: 'Ctrl-Enter', mac: 'Command-Enter' },
+            exec: () => runSelectedScriptLines()
+        });
         // The gutter shows when each line was added, next to its number.
         let rowTimes = [], timeWidth = 0;
         const refreshTimes = () => {
@@ -3010,7 +3020,12 @@
         const lines = window.recordedScriptLines || [];
         document.getElementById('scriptViewerDialog').style.display = 'flex';
         const ed = ensureScriptEditor();
-        ed.setValue(lines.join('\n'), -1);
+        // The same script as last time keeps its cursor and selection (blank
+        // lines at the end aren't kept in the script).
+        if (ed.getValue().replace(/(\n[ \t]*)+$/, '') !== lines.join('\n')) {
+            ed.setValue(lines.join('\n'), -1);
+            ed.session.clearAnnotations(); // they were for other lines
+        }
         ed._refreshLineTimes();
         ed.resize(true);
         document.getElementById('scriptLineCount').textContent = lines.length + ' line' + (lines.length !== 1 ? 's' : '');
@@ -3096,6 +3111,7 @@
         ]],
         ['Scripts', [
             ['Ctrl/\u2318 + Shift + S', 'Open the script editor'],
+            ['Ctrl/\u2318 + Enter', 'In the script editor: run the selected lines (or the cursor\u2019s line)'],
             ['Esc', 'Stop animations and return to Select; during playback, stop the script'],
             ['?', 'This list'],
         ]],
@@ -3217,6 +3233,51 @@
         const text = window._scriptEditor ? window._scriptEditor.getValue() : '';
         navigator.clipboard.writeText(text);
     }
+
+    // The rows the editor's selections cover (a selection ending at the start
+    // of a line leaves that line out); just the cursor's row when nothing is selected.
+    function _selectedScriptRows(ed) {
+        const ranges = ed.selection.getAllRanges ? ed.selection.getAllRanges() : [ed.getSelectionRange()];
+        const rows = new Set();
+        ranges.forEach(r => {
+            const last = r.end.row > r.start.row && r.end.column === 0 ? r.end.row - 1 : r.end.row;
+            for (let row = r.start.row; row <= last; row++) rows.add(row);
+        });
+        return [...rows].sort((a, b) => a - b);
+    }
+
+    // Runs only the selected lines, on the board as it is (nothing cleared,
+    // nothing recorded again). Edits are kept first, as Play does.
+    function runSelectedScriptLines() {
+        const ed = ensureScriptEditor();
+        if (window.isRecordingPlayback) {
+            document.getElementById('scriptLineCount').textContent = 'A script is playing: run the lines once it has finished';
+            return;
+        }
+        const rows = _selectedScriptRows(ed);
+        saveScriptEdits();
+        const lines = window.recordedScriptLines;
+        const code = scriptCode(lines);
+        if (!rows.some(r => code[r])) return; // only comments or blank lines
+        ed.session.clearAnnotations();
+        hidePlayNotice();
+        closeScriptDialog();
+        // Lines that failed stay marked in the editor, and are named on the board.
+        playScript(lines, { only: rows, onDone: failures => {
+            if (!failures.length) return;
+            ed.session.setAnnotations(failures.map(f => ({ row: f.line - 1, column: 0, text: f.message, type: 'error' })));
+            const first = failures[0];
+            showPlayNotice(failures.length === 1
+                ? `Line ${first.line} failed: ${first.message}`
+                : `${failures.length} lines failed (first, line ${first.line}: ${first.message}). They are marked in the script editor.`);
+        } });
+    }
+
+    function showPlayNotice(text) {
+        document.getElementById('play-notice-text').textContent = text;
+        document.getElementById('play-notice').style.display = 'flex';
+    }
+    function hidePlayNotice() { document.getElementById('play-notice').style.display = 'none'; }
 
     function playScriptFromDialog() {
         // Flush any unsaved edits in the ACE editor so the user plays what they see.

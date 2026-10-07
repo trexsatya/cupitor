@@ -344,7 +344,6 @@ const CLIPS = {
     await b.press('#scriptViewerDialog button:text-is("Import")');
     await b.page.setInputFiles('#importInputFile', fixture('nested-groups.txt'));
     await b.press('#importDialog button:has-text("OK")');
-    await b.page.click('#scriptViewerDialog button[onclick="closeScriptDialog()"]');
     b.fast(true); // 133 lines at a second each: shown at 4x
     await b.page.waitForFunction(() => !window.isRecordingPlayback, null, { timeout: 400000, polling: 500 }); await wait(800);
     b.fast(false);

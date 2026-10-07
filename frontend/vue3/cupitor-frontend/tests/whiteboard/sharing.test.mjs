@@ -20,7 +20,6 @@ async function importFile(b, file, { wait = true } = {}) {
     await b.page.waitForFunction(() => document.body.classList.contains('play-mode') || window.isRecordingPlayback, null, { timeout: 10000 }).catch(() => {});
     await b.page.waitForFunction(() => !document.body.classList.contains('play-mode') && !window.isRecordingPlayback, null, { timeout: 300000, polling: 250 });
     await b.page.waitForTimeout(300);
-    await b.page.click('#scriptViewerDialog button[onclick="closeScriptDialog()"]');
   }
 }
 
@@ -100,7 +99,10 @@ test('sharing: a broken line is reported and skipped; importing again while it p
     });
     await importFile(b, file, { wait: false });
     await b.page.waitForFunction(() => window.isRecordingPlayback, null, { timeout: 10000 });
-    // A second import while this one plays is refused with a message.
+    // The script dialog went away as it started playing; a second import
+    // from it (reopened) while this one plays is refused with a message.
+    assert.equal(await b.page.isVisible('#scriptViewerDialog'), false);
+    await b.key(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+Shift+s`);
     await b.page.click('#scriptViewerDialog button:text-is("Import")');
     await b.page.setInputFiles('#importInputFile', file);
     await b.page.click('#importDialog button:has-text("OK")');

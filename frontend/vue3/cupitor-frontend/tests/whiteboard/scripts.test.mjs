@@ -119,14 +119,77 @@ test('scripts: comments survive Export and Import', async () => {
 
   const other = await openBoard();
   try {
+    // A line typed in the editor but not saved yet, then Import.
     await other.page.click('.wb-tool[title^="Script editor"]');
+    await other.eval(() => window._scriptEditor.setValue('// my notes', -1));
     await other.page.click('#scriptViewerDialog button:text-is("Import")');
     await other.page.setInputFiles('#importInputFile', file);
     await other.page.click('#importDialog button:has-text("OK")');
+    // It plays at once, so the script dialog is out of the way.
+    await other.page.waitForFunction(() => getComputedStyle(document.getElementById('scriptViewerDialog')).display === 'none', null, { timeout: 5000 });
     await other.page.waitForFunction(() => window.isRecordingPlayback, null, { timeout: 10000 }).catch(() => {});
     await other.page.waitForFunction(() => !window.isRecordingPlayback, null, { timeout: 60000 });
-    assert.deepEqual(await other.script(), SCRIPT.filter(l => l.trim()), 'same lines, comments included');
+    assert.deepEqual(await other.script(), ['// my notes', ...SCRIPT.filter(l => l.trim())], 'the edit is kept, then the same lines, comments included');
     assert.deepEqual(await other.eval(() => ['R1', 'R2', 'R3'].map(u => isFabricObject(findIfRequired(u)))), [true, true, true]);
     assert.deepEqual(other.errors, []);
   } finally { await other.close(); }
+});
+
+test('scripts: run just the selected lines, or the cursor\'s line, on the board as it is', async () => {
+  const b = await openBoard();
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  const lines = [
+    'addRect(100,100,60,40,{"uid":"R1"})',
+    'addRect(300,100,60,40,{"uid":"R2"})',
+    '/* addRect(500,100,60,40,{"uid":"R9"})',
+    '   still a comment */',
+    'setObjectProps("R1", {"left": 400})',
+    'removeByUid("R2")'
+  ];
+  const on = () => b.eval(() => ['R1', 'R2', 'R9'].map(u => { const o = findIfRequired(u); return isFabricObject(o) ? Math.round(o.left) : null; }));
+  const select = (r1, c1, r2, c2) => b.eval(([a, b2, c, d]) => {
+    const { Range } = ace.require('ace/range');
+    _scriptEditor.selection.setRange(new Range(a, b2, c, d));
+  }, [r1, c1, r2, c2]);
+  const done = () => b.page.waitForFunction(() => !window.isRecordingPlayback && !document.body.classList.contains('play-mode'), null, { timeout: 30000 });
+  try {
+    await b.page.click('.wb-tool[title^="Script editor"]');
+    await b.eval(text => window._scriptEditor.setValue(text, -1), lines.join('\n'));
+    await watchBadge(b);
+
+    // Rows 1-2 selected (the selection ends at the start of row 3): only they run.
+    await select(0, 0, 2, 0);
+    await b.page.click('#runSelectedLinesBtn');
+    await done();
+    assert.deepEqual(await on(), [100, 300, null]);
+    assert.deepEqual(await badges(b), ['Line 1 of 6', 'Line 2 of 6'], 'numbered as in the editor');
+    assert.equal(await b.page.isVisible('#scriptViewerDialog'), false, 'out of the way while they run');
+
+    // Reopened, the selection is where it was; a comment line alone runs nothing.
+    await b.page.click('.wb-tool[title^="Script editor"]');
+    assert.deepEqual(await b.eval(() => { const r = _scriptEditor.getSelectionRange(); return [r.start.row, r.end.row]; }), [0, 2]);
+    await select(3, 2, 3, 2);
+    await b.page.click('#runSelectedLinesBtn');
+    assert.equal(await b.page.isVisible('#scriptViewerDialog'), true, 'nothing to run: it stays open');
+
+    // The cursor's line, with the shortcut: R1 moves, R2 stays.
+    await select(4, 3, 4, 3);
+    await b.eval(() => _scriptEditor.focus());
+    await b.page.keyboard.press(`${mod}+Enter`);
+    await done();
+    assert.deepEqual(await on(), [400, 300, null]);
+    assert.deepEqual(await b.script(), lines, 'running lines adds nothing to the script');
+    assert.deepEqual(b.errors, []);
+
+    // A line that fails (it needs an object no selected line made) stays reported.
+    await b.page.click('.wb-tool[title^="Script editor"]');
+    await b.eval(() => { _scriptEditor.navigateFileEnd(); _scriptEditor.insert('\nconnectObjects("R1", "R7", "L1")'); });
+    await select(6, 0, 6, 0);
+    await b.page.click('#runSelectedLinesBtn');
+    await done();
+    assert.match(await b.page.textContent('#play-notice'), /Line 7 failed: connectObjects: no object "R7"/);
+    await b.page.click('.wb-tool[title^="Script editor"]');
+    assert.deepEqual(await b.eval(() => _scriptEditor.session.getAnnotations().map(a => [a.row, a.type])), [[6, 'error']], 'marked in the editor');
+    b.errors.length = 0; // the failure is also logged, as for any script line
+  } finally { await b.close(); }
 });

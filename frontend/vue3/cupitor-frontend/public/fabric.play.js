@@ -2050,7 +2050,7 @@ function exportCanvas() {
 function buildScriptExecutables(lines) {
   return (lines || window.recordedScriptLines || []).map(raw => {
     const line = raw.trim()
-    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal') || line.startsWith('drawOutline') || line.startsWith('revertState'))
+    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal') || line.startsWith('drawOutline') || line.startsWith('revertState') || line.startsWith('timelineStep'))
       ? `return ${line};`
       : raw.replace(/\s+$/, '') // indentation kept (e.g. inside a /* … */)
     // The brace on its own line: a comment at the end of the line can't swallow it.
@@ -2104,10 +2104,15 @@ function compileScriptLine(src) {
 }
 
 // Plays the recorded script, or just `lines` when given (e.g. an import).
-function playScript(lines) {
+// opts.only: the line indexes to run (the rest are passed over, numbered as
+// before); comments are worked out over the whole script either way.
+// opts.onDone(failures) is called at the end with [{ line, message }]
+// (line counted from 1).
+function playScript(lines, opts) {
   const src = lines || window.recordedScriptLines || []
   const code = scriptCode(src)
-  const comments = code.map(c => !c)
+  const only = opts && opts.only ? new Set(opts.only) : null
+  const comments = code.map((c, i) => !c || (only !== null && !only.has(i)))
   // What runs is each line's code, its comments left out.
   const fns = buildScriptExecutables(code).map(compileScriptLine)
   if (!comments.includes(false)) return
@@ -2115,7 +2120,9 @@ function playScript(lines) {
   const total = src.length
   // A failing line is reported and skipped, so playback (and play mode)
   // always reaches the end.
+  const failures = []
   const report = (i, err) => {
+    failures.push({ line: i + 1, message: err && err.message || String(err) })
     console.error(`Script line ${i + 1} failed:`, err)
     window.showPlayLine && showPlayLine(i + 1, total, err && err.message || String(err))
   }
@@ -2130,7 +2137,10 @@ function playScript(lines) {
   }).filter(Boolean)
   window._stopPlayback = false
   window.enterPlayMode && enterPlayMode()
-  schedule(steps, 1, null, () => window.exitPlayMode && exitPlayMode(), () => window._stopPlayback)
+  schedule(steps, 1, null, () => {
+    window.exitPlayMode && exitPlayMode()
+    if (opts && opts.onDone) opts.onDone(failures)
+  }, () => window._stopPlayback)
 }
 
 function exportScript() {

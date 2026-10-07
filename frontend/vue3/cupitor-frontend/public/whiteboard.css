@@ -674,6 +674,7 @@ canvas {
 /* --- Play mode: only the canvas while a script plays --- */
 body.play-mode #layer-info-bar,
 body.play-mode #script-restored-bar,
+body.play-mode #play-notice,
 body.play-mode #horizRuler,
 body.play-mode #vertRuler,
 body.play-mode .top-bar,
@@ -934,4 +935,23 @@ body.play-mode .html-box { pointer-events: none !important; outline: none !impor
   padding: 6px 10px;
   font: 13px system-ui, sans-serif;
   color: #555;
+}
+
+/* A run of selected lines that had failures says so here. */
+#play-notice {
+  position: fixed;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(720px, calc(100vw - 32px));
+  z-index: 1000001;
+  align-items: center;
+  gap: 8px;
+  background: #ffebee;
+  border: 1px solid #ef9a9a;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  padding: 6px 10px;
+  font: 13px system-ui, sans-serif;
+  color: #b71c1c;
 }

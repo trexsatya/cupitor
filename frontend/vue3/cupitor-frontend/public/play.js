@@ -58,6 +58,11 @@ function handleImportDialogButtons(src) {
       // Imported lines join the recorded script and play like it does.
       const lines = remapImportedUidsToAvoidConflicts(parseImportedScript(reader.result + ''))
       if (!lines.length) return
+      // It plays straight away: the script dialog goes, keeping what was edited in it (as Play does).
+      if (typeof closeScriptDialog === 'function' && $('#scriptViewerDialog').css('display') !== 'none') {
+        if (window._scriptEditor) saveScriptEdits()
+        closeScriptDialog()
+      }
       window.recordedScriptLines = (window.recordedScriptLines || []).concat(lines)
       playScript(lines)
     }, false);

@@ -873,6 +873,95 @@ function addEllipse(left, top, rx, ry, opts) {
   return ell;
 }
 
+// A bulleted timeline: a spine with a bullet and a label per item, drawn
+// down (direction 'vertical', labels to the right) or across ('horizontal',
+// labels under the bullets). The spine is `uid`, the bullets `uid_B1`…, the
+// labels `uid_T1`…; timelineStep highlights the items one by one. Drawing
+// again with the same uid replaces the timeline.
+const _TIMELINE_COLORS = {
+  spine: '#b0bec5',
+  pending: '#90a4ae', active: '#ff7043', done: '#26a69a',
+  pendingText: '#90a4ae', activeText: '#1565c0', doneText: '#37474f'
+};
+
+function bulletTimeline(uid, items, x, y, opts) {
+  if (!Array.isArray(items) || !items.length) return null;
+  const given = Object.fromEntries(Object.entries(opts || {}).filter(([, v]) => v !== undefined && v !== null));
+  opts = Object.assign({ direction: 'vertical', gap: 110, radius: 12, fontSize: 20, labelWidth: 300 }, given);
+  opts.gap = Math.max(20, Number(opts.gap) || 110);
+  const colors = Object.assign({}, _TIMELINE_COLORS, opts.colors);
+  const across = opts.direction === 'horizontal';
+  const n = items.length;
+  _removeTimeline(uid);
+  const at = i => (across ? { x: x + i * opts.gap, y } : { x, y: y + i * opts.gap });
+  const end = at(n - 1);
+  // One item has no spine to draw (it still holds the timeline's settings).
+  const spine = addLine([x, y, end.x, end.y], { uid, stroke: colors.spine, strokeWidth: 4, visible: n > 1 });
+  spine.customData = Object.assign(spine.customData || {}, {
+    type: 'timeline', direction: across ? 'horizontal' : 'vertical', count: n, colors, step: 0
+  });
+  items.forEach((text, i) => {
+    const p = at(i);
+    const bullet = addEllipse(p.x, p.y, opts.radius, opts.radius, {
+      uid: `${uid}_B${i + 1}`, fill: colors.pending, stroke: '#fff', strokeWidth: 3, originX: 'center', originY: 'center'
+    });
+    // Across: centred under the bullet, as wide as the gap; down: to its right.
+    const label = new fabric.Textbox(String(text), across
+      ? { left: p.x, top: p.y + opts.radius + 14, width: opts.gap - 12, originX: 'center', textAlign: 'center' }
+      : { left: p.x + opts.radius + 28, top: p.y - opts.fontSize * 0.6, width: opts.labelWidth });
+    label.set({ fontSize: opts.fontSize, fontFamily: 'helvetica', fill: colors.pendingText });
+    label.uid = `${uid}_T${i + 1}`;
+    // Where it sits from its bullet, so it follows when the timeline is moved.
+    label.customData = Object.assign(label.customData || {}, { timelineOffset: { left: label.left - bullet.left, top: label.top - bullet.top } });
+    pc.add(label);
+  });
+  pc.requestRenderAll();
+  return spine;
+}
+
+function _removeTimeline(uid) {
+  const spine = findIfRequired(uid);
+  if (!isFabricObject(spine) || !spine.customData || spine.customData.type !== 'timeline') return;
+  for (let i = 1; i <= spine.customData.count; i++) [`${uid}_B${i}`, `${uid}_T${i}`].forEach(removeByUid);
+  removeByUid(uid);
+}
+
+// Highlights item n of a timeline (1 is the first): the ones before it are
+// done, the ones after it pending; 0 puts every item back to pending. The
+// next line waits for it.
+function timelineStep(uid, n, opts) {
+  const spine = findIfRequired(uid);
+  const cd = isFabricObject(spine) && spine.customData;
+  if (!cd || cd.type !== 'timeline') return Promise.resolve();
+  opts = Object.assign({ duration: 450, grow: 1.9, nudge: 16 }, opts);
+  n = Math.round(Number(n)) || 0;
+  const colors = cd.colors || _TIMELINE_COLORS;
+  const across = cd.direction === 'horizontal';
+  const moves = [];
+  for (let i = 1; i <= cd.count; i++) {
+    const bullet = findIfRequired(`${uid}_B${i}`), label = findIfRequired(`${uid}_T${i}`);
+    if (!isFabricObject(bullet) || !isFabricObject(label)) continue;
+    // A step started before the last one finished takes over from it.
+    [bullet, label].forEach(o => fabric.runningAnimations.cancelByTarget(o));
+    const state = i < n ? 'done' : i === n ? 'active' : 'pending';
+    const off = label.customData && label.customData.timelineOffset;
+    const home = off ? { left: bullet.left + off.left, top: bullet.top + off.top } : { left: label.left, top: label.top };
+    setObjectProps(bullet, { fill: colors[state] });
+    setObjectProps(label, { fill: colors[state + 'Text'], fontWeight: state === 'active' ? 'bold' : 'normal' });
+    const active = state === 'active';
+    const scale = active ? opts.grow : 1;
+    // The active label steps away from the spine: right when down, lower when across.
+    const place = across ? { top: home.top + (active ? opts.nudge : 0) } : { left: home.left + (active ? opts.nudge : 0) };
+    const duration = active ? opts.duration : Math.round(opts.duration * 0.78);
+    if (bullet.scaleX !== scale || bullet.scaleY !== scale) {
+      moves.push(animate(bullet, { scaleX: scale, scaleY: scale }, Object.assign({ duration }, active ? { easing: fabric.util.ease.easeOutBack } : {})));
+    }
+    if (Object.keys(place).some(k => label[k] !== place[k])) moves.push(animate(label, place, { duration }));
+  }
+  cd.step = n;
+  return Promise.all(moves);
+}
+
 function addDiamond(left, top, width, height, opts) {
   opts = opts || {};
   const rect = new fabric.Rect(Object.assign({
