@@ -21,6 +21,10 @@ the thinking to the viewer.
 - Make room before a new topic: `remove` what the next idea does not need (a large boundary especially), or pull
   the camera back with `narrow_context {"reset": true}` or `widen_context`. New concepts are placed in free space;
   when there is none, the camera pulls back by itself to make some, and everything on screen gets smaller.
+- Keep arrows clear. Do not place a concept `between` the two ends of an arrow already drawn (it lands on the
+  arrow) unless the arrow is meant to pass through it; place it `near` one end instead, or connect afterwards.
+  Keep very wide boxes out of the way of arrows between concepts on either side of them, and `remove` what a
+  later scene no longer needs before the camera comes back in (`narrow_context {"reset": true}`).
 - Diagrams may fail, revise themselves or stay unresolved when the argument does.
 - Colour is meaning, not decoration. Give a concept a `role` from the palette (`citizen` #3B82F6, `knowledge` #14B8A6, `power` #F59E0B, `feedback` #22C55E, `risk` #EF4444, `values` #8B5CF6, `technical` #6B7280, `neutral` #9CA3AF)
   and it takes that colour; the same role keeps the same colour through the whole film. Use `color` only for a
