@@ -90,10 +90,10 @@ comment holds the positions and sizes the action settled on, so rebuilding never
 | `introduce`, `introduce_group`, `branch` | Add concepts as text, a box, a minimal person (`figure`) or a `picture`; placed near another concept or group, between two, in a region, or in a row or column |
 | `connect`, `disconnect` | Relationships: arrows that follow both ends. They curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop. A group as an end means its enclosure (a dashed one is drawn first if it has none) |
 | `enclose`, `weaken_boundary` | A boundary round concepts; dash or drop it |
-| `revise`, `question`, `replace` | Change a concept's text, or a figure's or picture's label, in place (its revisions are kept), make it uncertain, or swap it for another |
+| `revise`, `question`, `replace` | Change a concept's text, or a figure's or picture's label, in place (its revisions are kept), make it uncertain, or swap it for another; a longer text pushes the concepts beside it aside |
 | `deemphasize`, `focus` | Fade concepts back, or bring some forward and dim the rest |
 | `move_into` | Move a concept into another |
-| `widen_context`, `narrow_context` | Pull the camera back so concepts sit small in a much larger frame (or, with `mode: "objects"`, shrink just those concepts); bring it in on some concepts or back to the starting view |
+| `widen_context`, `narrow_context` | Pull the camera back so concepts sit small in a much larger frame (or, with `mode: "objects"`, shrink just those concepts); bring it in on some concepts or back to the starting view. When a new, longer or replaced concept has no room in view, the camera pulls back by itself first, as its own step |
 | `dissolve_boundary` | Categories become a continuum: their boxes lose their outlines while a colour band appears under them (place in-between cases first with `place: {between: [a, b]}`) |
 | `checkpoint`, `return_to` | Remember the scene; go back to it (places, text, emphasis, removed concepts, camera), or bring back removed concepts by id |
 | `turnover` | Members of a group leave while new ones arrive, the group (and its enclosure) holding |

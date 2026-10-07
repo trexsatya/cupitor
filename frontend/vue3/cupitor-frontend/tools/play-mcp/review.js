@@ -53,7 +53,7 @@ export function plainMove(rec) {
     case 'deemphasize': return `fade back ${Object.keys(rec.opacity).join(', ')}`;
     case 'focus': return `focus on ${(rec.ids || []).join(', ')}`;
     case 'move_into': return `move ${rec.id} into ${rec.into}`;
-    case 'widen_context': return rec.camera ? `camera pulls back (zoom ${rec.camera.zoom})` : `shrink ${Object.keys(rec.moves).join(', ')} to ${rec.scale}`;
+    case 'widen_context': return rec.camera ? `camera pulls back (zoom ${rec.camera.zoom})${rec.auto ? ' to make room' : ''}` : `shrink ${Object.keys(rec.moves).join(', ')} to ${rec.scale}`;
     case 'narrow_context': return rec.reset ? 'camera back to the starting view' : `camera in on ${(rec.ids || []).join(', ')} (zoom ${rec.camera.zoom})`;
     case 'dissolve_boundary': return `dissolve ${rec.ids.join(', ')} into the band ${rec.id}`;
     case 'checkpoint': return `checkpoint ${q(rec.name)}`;

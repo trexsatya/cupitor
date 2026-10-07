@@ -18,6 +18,9 @@ the thinking to the viewer.
   something else.
 - Choose the smallest model: a few words, arrows and boundaries. Keep around a dozen concepts on screen at most;
   fade or remove what is finished, or widen the frame (`widen_context`) to show a change of scale.
+- Make room before a new topic: `remove` what the next idea does not need (a large boundary especially), or pull
+  the camera back with `narrow_context {"reset": true}` or `widen_context`. New concepts are placed in free space;
+  when there is none, the camera pulls back by itself to make some, and everything on screen gets smaller.
 - Diagrams may fail, revise themselves or stay unresolved when the argument does.
 
 ## How to work, for each passage

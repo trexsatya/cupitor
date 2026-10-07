@@ -54,7 +54,10 @@ test('revise and question keep the concept, replace swaps it and its relationshi
   assert.deepEqual(model.objects.k.history, ['I KNOW', 'I THINK I KNOW', 'I THINK I KNOW?']);
   assert.equal(model.objects.k.boundary, 'dashed');
   assert.equal(model.objects.n, undefined);
-  assert.deepEqual(model.objects.god.at, (await plan([{ op: 'introduce', id: 'k', text: 'I KNOW', kind: 'box' }, { op: 'introduce', id: 'n', text: 'NOTHING', place: { near: 'k' } }])).model.objects.n.at);
+  // The replacement takes the place NOTHING was pushed to as I KNOW grew.
+  const start = (await plan([{ op: 'introduce', id: 'k', text: 'I KNOW', kind: 'box' }, { op: 'introduce', id: 'n', text: 'NOTHING', place: { near: 'k' } }])).model.objects.n.at;
+  assert.ok(model.objects.god.at[0] > start[0] && model.objects.god.at[1] === start[1]);
+  assert.ok(!hit(boxOf(model.objects.god), boxOf(model.objects.k)));
   assert.deepEqual(model.relations, {});
 });
 
@@ -247,6 +250,15 @@ test('a group can be an arrow end (through its enclosure, a dashed one drawn if 
   assert.ok(mid.x + mid.w < box.x && over.y + over.h < box.y, 'between and above the group');
   await plan([{ op: 'disconnect', from: 'pros', to: 'vote' }], model);
   await plan([{ op: 'disconnect', from: 'vote', to: 'pros_boundary' }], model);
+  // An arrow between two groups without enclosures draws both; undo takes all three.
+  const two = await plan([
+    { op: 'introduce_group', id: 'g1', items: ['ONE'], place: { region: 'top-left' } },
+    { op: 'introduce_group', id: 'g2', items: ['TWO'], place: { region: 'bottom-right' } },
+    { op: 'connect', from: 'g1', to: 'g2' }
+  ]);
+  const undone = withoutLastAction(two.lines);
+  assert.equal(undone.removed.filter(l => l.startsWith(TAG)).length, 3);
+  assert.deepEqual(Object.keys(parseScene(undone.lines).objects).sort(), ['one', 'two']);
   // Undo takes the enclosure drawn for the arrow with it.
   const cut = withoutLastAction(lines.slice(0, lines.findIndex(l => l.includes('"id":"back"'))));
   assert.equal(cut.removed.filter(l => l.startsWith(TAG)).length, 2);
@@ -266,6 +278,119 @@ test('revise changes the label under a figure; one without a label, or a questio
   assert.match(lines.at(-1), /setLabelText\("p", "CITIZEN"\)/);
   await assert.rejects(plan([{ op: 'revise', id: 'q', text: 'X' }], model), /without a label/);
   await assert.rejects(plan([{ op: 'question', id: 'p' }], model), /only text and box/);
+});
+
+test('a longer text pushes the neighbours it would cover aside and refits the enclosure round them', async () => {
+  const { model, lines } = await plan([
+    { op: 'introduce_group', id: 'plans', items: ['PLAN A', 'PLAN B', 'PLAN C'], place: { region: 'center' } },
+    { op: 'enclose', id: 'frame', group: 'plans' },
+    { op: 'introduce', id: 'far', text: 'FAR', place: { region: 'top-left' } }
+  ]);
+  const [a0, c0, f0] = ['plan_a', 'plan_c', 'far'].map(id => [...model.objects[id].at]);
+  const { records } = await planActions(model, [{ op: 'revise', id: 'plan_b', text: 'PLAN B, THE FINAL CHOICE?' }], measure);
+  const b = boxOf(model.objects.plan_b);
+  assert.ok(model.objects.plan_a.at[0] < a0[0] && model.objects.plan_c.at[0] > c0[0], 'pushed outward');
+  assert.ok(!['plan_a', 'plan_c'].some(id => hit(boxOf(model.objects[id]), b)), 'no longer covered');
+  assert.deepEqual(model.objects.far.at, f0, 'others stay');
+  const frame = boxOf(model.objects.frame), outer = boxOf(model.objects.plan_c);
+  assert.ok(frame.x + frame.w > outer.x + outer.w, 'enclosure refitted');
+  assert.deepEqual(parseScene([...lines, TAG + JSON.stringify(records[0])]).objects, model.objects);
+  // As in a real plan: questioned (C pushed to just the gap), then, with the camera moved, a much longer text.
+  const sizes = { 'PLAN A': [100, 50], 'PLAN B': [100, 50], 'PLAN C': [100, 50], 'PLAN B?': [112, 50], 'PLAN B — FINAL CHOICE?': [287, 50] };
+  const m2 = emptyScene();
+  m2.camera = { zoom: 1.445, pan: [0, 0] };
+  const sized = async specs => specs.map(sp => sizes[sp.text]);
+  await planActions(m2, [
+    { op: 'introduce', id: 'a', kind: 'box', text: 'PLAN A', place: { x: 583, y: 190 } },
+    { op: 'introduce', id: 'b', kind: 'box', text: 'PLAN B', place: { x: 706, y: 190 } },
+    { op: 'introduce', id: 'c', kind: 'box', text: 'PLAN C', place: { x: 829, y: 190 } },
+    { op: 'question', id: 'b' }
+  ], sized);
+  // The camera comes in a little: the least room kept between concepts (on screen) is now more than they have.
+  m2.camera = { zoom: 1, pan: [0, 0] };
+  await planActions(m2, [{ op: 'revise', id: 'b', text: 'PLAN B — FINAL CHOICE?' }], sized);
+  const row = ['a', 'b', 'c'].map(id => boxOf(m2.objects[id]));
+  assert.ok(!hit(row[0], row[1]) && !hit(row[1], row[2]), 'no neighbours covered');
+  // A push passes along the row: A grows into B, which moves into C, which moves too.
+  sizes['PLAN A, AND MUCH MORE THAN THAT'] = [420, 50];
+  await planActions(m2, [{ op: 'revise', id: 'a', text: 'PLAN A, AND MUCH MORE THAN THAT' }], sized);
+  const row2 = ['a', 'b', 'c'].map(id => boxOf(m2.objects[id]));
+  assert.ok(!hit(row2[0], row2[1]) && !hit(row2[1], row2[2]) && !hit(row2[0], row2[2]), 'the push passed along');
+  // Only what sits beside it moves; a shorter text moves nothing; a longer replacement makes room too.
+  sizes['UNDER'] = [100, 50]; sizes['X'] = [60, 50]; sizes['PLAN C, REPLACED BY SOMETHING LONG'] = [400, 50];
+  await planActions(m2, [{ op: 'introduce', id: 'u', kind: 'box', text: 'UNDER', place: { x: m2.objects.b.at[0], y: 280 } }], sized);
+  const [u0, cAt] = [[...m2.objects.u.at], [...m2.objects.c.at]];
+  await planActions(m2, [{ op: 'revise', id: 'b', text: 'X' }], sized);
+  assert.deepEqual([m2.objects.u.at, m2.objects.c.at], [u0, cAt]);
+  await planActions(m2, [{ op: 'revise', id: 'b', text: 'PLAN B — FINAL CHOICE?' }, { op: 'replace', id: 'c', with: { id: 'c2', text: 'PLAN C, REPLACED BY SOMETHING LONG' } }], sized);
+  assert.deepEqual(m2.objects.u.at, u0, 'the one below stays');
+  assert.ok(!hit(boxOf(m2.objects.b), boxOf(m2.objects.c2)), 'the replacement made room');
+});
+
+test('with the camera in close and a boundary filling most of the view, a branch still lands in view', async () => {
+  const sizes = { CITIZEN: [218, 145], POWER: [68, 43], KNOWLEDGE: [98, 43], TIME: [50, 43] };
+  const sized = async specs => specs.map(s => sizes[s.text] || [80, 38]);
+  const model = emptyScene();
+  await planActions(model, [
+    { op: 'introduce', id: 'person', kind: 'figure', text: 'CITIZEN', place: { x: 700, y: 400 } },
+    { op: 'introduce', id: 'power', kind: 'box', text: 'POWER', place: { x: 873, y: 400 } },
+    { op: 'introduce', id: 'know', kind: 'box', text: 'KNOWLEDGE', place: { x: 700, y: 276 } },
+    { op: 'introduce', id: 'time', kind: 'box', text: 'TIME', place: { x: 536, y: 400 } },
+    { op: 'enclose', id: 'cap', members: ['person', 'power', 'know', 'time'] }
+  ], sized);
+  model.camera = { zoom: 2, pan: [-700, -400] };
+  await planActions(model, [{ op: 'branch', from: 'know', side: 'right', items: ['ECONOMY', 'STATISTICS', 'LAW', 'SCIENCE'] }], sized);
+  const v = view(model);
+  ['economy', 'statistics', 'law', 'science'].forEach(id => {
+    const b = boxOf(model.objects[id]);
+    assert.ok(b.x >= v.x && b.y >= v.y && b.x + b.w <= v.x + v.w && b.y + b.h <= v.y + v.h, `${id} in view`);
+  });
+});
+
+test('with no room left in view, the camera first pulls back just enough; undo takes that with it', async () => {
+  const sizes = { CITIZEN: [218, 145], POWER: [68, 43], KNOWLEDGE: [98, 43], TIME: [50, 43] };
+  const sized = async specs => specs.map(s => sizes[s.text] || [String(s.text).length * 8 * s.fontSize / 11 + 24, 38 * s.fontSize / 11]);
+  const model = emptyScene();
+  const { lines } = await planActions(model, [
+    { op: 'introduce', id: 'person', kind: 'figure', text: 'CITIZEN', place: { x: 700, y: 400 } },
+    { op: 'introduce', id: 'power', kind: 'box', text: 'POWER', place: { x: 873, y: 400 } },
+    { op: 'introduce', id: 'know', kind: 'box', text: 'KNOWLEDGE', place: { x: 700, y: 276 } },
+    { op: 'introduce', id: 'time', kind: 'box', text: 'TIME', place: { x: 536, y: 400 } },
+    { op: 'enclose', id: 'cap', members: ['person', 'power', 'know', 'time'] },
+    { op: 'narrow_context', ids: ['cap'], fill: 1 }
+  ], sized);
+  const zoom = model.camera.zoom;
+  const items = ['LABOUR MARKET', 'HOUSING', 'RIGHTS', 'INTEGRATION', 'PUBLIC FINANCES', 'SCHOOLS'];
+  const more = await planActions(model, [{ op: 'branch', from: 'know', side: 'below', items }], sized);
+  assert.deepEqual(more.records.map(r => r.op), ['widen_context', 'branch']);
+  assert.ok(more.records[0].auto && model.camera.zoom < zoom && model.camera.zoom >= zoom * 0.85 ** 6);
+  const v = view(model), others = ['person', 'power', 'know', 'time', 'cap'].map(id => boxOf(model.objects[id]));
+  more.records[1].items.forEach(it => {
+    const b = boxOf(model.objects[it.id]);
+    assert.ok(b.x >= v.x && b.y >= v.y && b.x + b.w <= v.x + v.w && b.y + b.h <= v.y + v.h, `${it.id} in view`);
+    assert.ok(!others.some(o => hit(b, o)), `${it.id} covers nothing`);
+  });
+  const all = [...lines, ...more.lines];
+  assert.equal(parseScene(all).camera.zoom, model.camera.zoom);
+  assert.deepEqual(parseScene(withoutLastAction(all).lines).camera, parseScene(lines).camera);
+  // A plan cannot ask for the shortcut.
+  const own = await planActions(model, [{ op: 'widen_context', auto: true, camera: { zoom: '1); evil(' } }], sized);
+  assert.ok(!own.lines.join('\n').includes('evil') && !own.records[0].auto);
+});
+
+test('a longer text that would push its neighbours out of view pulls the camera back first', async () => {
+  const sizes = { 'A': [100, 50], 'B': [100, 50], 'C': [236, 50], 'B, A MUCH LONGER TEXT NOW': [420, 50] };
+  const sized = async specs => specs.map(sp => sizes[sp.text]);
+  const model = emptyScene();
+  await planActions(model, [
+    { op: 'introduce', id: 'a', kind: 'box', text: 'A', place: { x: 900, y: 300 } },
+    { op: 'introduce', id: 'b', kind: 'box', text: 'B', place: { x: 1030, y: 300 } },
+    { op: 'introduce', id: 'c', kind: 'box', text: 'C', place: { x: 1230, y: 300 } }
+  ], sized);
+  const { records } = await planActions(model, [{ op: 'revise', id: 'b', text: 'B, A MUCH LONGER TEXT NOW' }], sized);
+  assert.deepEqual(records.map(r => r.op), ['widen_context', 'revise']);
+  const v = view(model);
+  ['a', 'b', 'c'].forEach(id => { const x = boxOf(model.objects[id]); assert.ok(x.x >= v.x && x.x + x.w <= v.x + v.w, `${id} in view`); });
 });
 
 test('turnover: members change, the group and its enclosure hold', async () => {

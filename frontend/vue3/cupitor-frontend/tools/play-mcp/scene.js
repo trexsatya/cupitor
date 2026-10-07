@@ -171,6 +171,8 @@ export function applyRecord(model, rec) {
     case 'question': {
       const o = obj(rec.id);
       o.text = rec.text; o.size = rec.size; o.history.push(rec.text);
+      Object.entries(rec.moves || {}).forEach(([id, at]) => { obj(id).at = at; });
+      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
       if (rec.op === 'question') { o.boundary = 'dashed'; o.questioned = true; }
       break;
     }
@@ -180,6 +182,8 @@ export function applyRecord(model, rec) {
     case 'replace':
       obj(rec.id);
       dropObject(model, rec.id);
+      Object.entries(rec.moves || {}).forEach(([id, at]) => { obj(id).at = at; });
+      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
       addObject(model, rec, rec.with);
       break;
     case 'deemphasize':
@@ -321,8 +325,37 @@ export const REGIONS = {
 };
 const SIDES = { right: [1, 0], left: [-1, 0], below: [0, 1], above: [0, -1] };
 
-// Where a box of `size` (centred) can go: the first free spot by `place`,
-// else the least crowded of those tried.
+// Room for a concept growing to `size` in place (a longer text): neighbours it
+// would newly cover move sideways out of the way, and enclosures round it or
+// them are refitted.
+function makeRoom(model, o, size, { leaving = false } = {}) {
+  const before = boxOf(o), after = boxOf({ ...o, size }), gap = CLEARANCE / zoomOf(model);
+  const moves = {}, enclosures = {};
+  if (after.w <= before.w) return { moves, enclosures };
+  const beside = (p, q) => p.y < q.y + q.h && q.y < p.y + p.h;
+  const movable = Object.values(model.objects).filter(p =>
+    p.id !== o.id && !p.members && p.kind !== 'spectrum' && p.inside !== o.id && o.inside !== p.id && p.opacity > 0 && !overlaps(before, boxOf(p)));
+  // Each push passes on to what the pushed concept then runs into, further the same way.
+  const push = (from, centre, dir) => movable.forEach(p => {
+    if (moves[p.id] || (p.at[0] - centre) * dir < 0 || !beside(from, boxOf(p)) || !overlaps(from, boxOf(p), gap)) return;
+    const b = boxOf(p), dx = dir > 0 ? from.x + from.w + gap - b.x : from.x - gap - (b.x + b.w);
+    if (dx * dir <= 0) return;
+    moves[p.id] = [Math.round(p.at[0] + dx), p.at[1]];
+    push(boxOf({ ...p, at: moves[p.id] }), moves[p.id][0], dir);
+  });
+  push(after, o.at[0], 1);
+  push(after, o.at[0], -1);
+  const boxFor = id => (id === o.id ? after : moves[id] ? boxOf({ ...model.objects[id], at: moves[id] }) : boxOf(model.objects[id]));
+  Object.values(model.objects).forEach(e => {
+    if (e.kind !== 'enclosure' || !e.members.some(m => m === o.id || moves[m])) return;
+    const members = e.members.filter(m => model.objects[m] && !(leaving && m === o.id));
+    if (!members.length) return;
+    const fit = boxAround(model, members.map(boxFor), 20);
+    if (fit.at.join() !== e.at.join() || fit.size.join() !== e.size.join()) enclosures[e.id] = fit;
+  });
+  return { moves, enclosures };
+}
+
 // The box a place is given relative to: a concept's, or a group's (its enclosure, or round its members).
 function anchorBox(model, id) {
   const g = model.groups[id], end = g ? groupEnd(model, id) : id;
@@ -335,6 +368,8 @@ function anchorBox(model, id) {
   throw new Error(`place: no concept "${id}"`);
 }
 
+// Where a box of `size` (centred) can go: the first free spot by `place`, else
+// the free spot in view nearest it, else the least crowded of those tried.
 export function placeBox(model, size, place = {}, taken = occupied(model)) {
   const [w, h] = size;
   const cands = [];
@@ -372,8 +407,17 @@ export function placeBox(model, size, place = {}, taken = occupied(model)) {
     }
   }
   const boxAt = ([x, y]) => ({ x: x - w / 2, y: y - h / 2, w, h });
-  const free = cands.find(c => onCanvas(model, boxAt(c)) && !taken.some(t => overlaps(boxAt(c), t, clearance)));
+  const isFree = c => onCanvas(model, boxAt(c)) && !taken.some(t => overlaps(boxAt(c), t, clearance));
+  const free = cands.find(isFree);
   if (free) return free.map(Math.round);
+  // None of those: the free spot in view nearest the first choice.
+  const v = view(model), step = 20 * k, [ix, iy] = cands[0], grid = [];
+  for (let x = v.x + w / 2; x <= v.x + v.w - w / 2; x += step) {
+    for (let y = v.y + h / 2; y <= v.y + v.h - h / 2; y += step) grid.push([x, y]);
+  }
+  const near = grid.filter(isFree).sort((p, q) => Math.hypot(p[0] - ix, p[1] - iy) - Math.hypot(q[0] - ix, q[1] - iy))[0];
+  if (near) return near.map(Math.round);
+  cands.push(...grid);
   // Nothing free: the on-canvas spot touching the fewest others.
   const score = c => taken.filter(t => overlaps(boxAt(c), t, clearance)).length + (onCanvas(model, boxAt(c)) ? 0 : 100);
   return cands.reduce((best, c) => (score(c) < score(best) ? c : best)).map(Math.round);
@@ -429,13 +473,16 @@ function need(model, id, op) {
 // Everything a checkpoint needs to put the scene back.
 const snapshot = model => clone({ objects: model.objects, relations: model.relations, groups: model.groups, camera: model.camera });
 
+// Marks actions the planner adds itself (a plan cannot set it).
+const AUTO = Symbol('auto');
+
 // A group as one end of an arrow: its enclosure.
 const groupEnd = (model, id) => { const g = model.groups[id]; return g && g.enclosure && model.objects[g.enclosure] ? g.enclosure : id; };
 
 // The enclosures an action needs drawn first: a connect to a group without one.
 const missingEnclosures = (model, a) => a && a.op === 'connect'
   ? [...new Set([a.from, a.to])].filter(id => model.groups[id] && groupEnd(model, id) === id)
-    .map(group => ({ op: 'enclose', id: `${group}_boundary`, group, style: 'dashed', auto: true, ...(a.pace ? { pace: a.pace } : {}) }))
+    .map(group => ({ op: 'enclose', id: `${group}_boundary`, group, style: 'dashed', [AUTO]: true, ...(a.pace ? { pace: a.pace } : {}) }))
   : [];
 
 // Concepts named directly or through a group (its members and its enclosure).
@@ -609,7 +656,7 @@ export async function planAction(model, a, measure) {
       const opts = { uid: a.id, originX: 'center', originY: 'center', rx: 18, ry: 18, stroke: '#666', strokeWidth: 2 };
       if (style === 'dashed') opts.strokeDashArray = [10, 7];
       return {
-        record: { op, id: a.id, group: a.group, members, style, at, size, ...(a.auto ? { auto: true } : {}) },
+        record: { op, id: a.id, group: a.group, members, style, at, size, ...(a[AUTO] ? { auto: true } : {}) },
         lines: [`drawOutline(addRect(${at[0]}, ${at[1]}, ${size[0]}, ${size[1]}, ${J(opts)}), {duration: ${pace(a, 'deliberate')}})`]
       };
     }
@@ -622,14 +669,19 @@ export async function planAction(model, a, measure) {
       if (pictured && !o.text) throw new Error(`revise: "${a.id}" is a ${o.kind} without a label; give it text when introducing it`);
       const text = a.text != null ? String(a.text) : op === 'question' ? (o.text.endsWith('?') ? o.text : o.text + '?') : null;
       if (text == null || text === '') throw new Error('revise: text is required');
-      const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: o.boundary, ...(o.kind === 'picture' ? { src: o.src, width: o.width } : {}) }]);
+      const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: op === 'question' ? 'dashed' : o.boundary, ...(o.kind === 'picture' ? { src: o.src, width: o.width } : {}) }]);
       const ms = pace(a, 'deliberate');
       const change = op === 'question'
         ? `(setLabelText(${J(a.id)}, ${J(text)}), setLabelBoundary(${J(a.id)}, "dashed"))`
         : `setLabelText(${J(a.id)}, ${J(text)})`;
+      const { moves, enclosures } = makeRoom(model, o, size);
+      const shifts = [
+        ...Object.entries(moves).map(([id, at]) => `animate(${J(id)}, {left: ${at[0]}, top: ${at[1]}}, {duration: ${Math.round(ms * 0.3)}})`),
+        ...Object.entries(enclosures).map(([id, e]) => `animate(${J(id)}, {left: ${e.at[0]}, top: ${e.at[1]}, width: ${e.size[0]}, height: ${e.size[1]}}, {duration: ${Math.round(ms * 0.3)}})`)
+      ];
       return {
-        record: { op, id: a.id, text, size },
-        lines: [`animate(${J(a.id)}, {opacity: 0.15}, {duration: ${Math.round(ms * 0.3)}}).then(() => ${change}).then(() => animate(${J(a.id)}, {opacity: ${o.opacity}}, {duration: ${Math.round(ms * 0.7)}}))`]
+        record: { op, id: a.id, text, size, ...(shifts.length ? { moves, enclosures } : {}) },
+        lines: [`${shifts.length ? `Promise.all([${shifts.join(', ')}]).then(() => ` : ''}animate(${J(a.id)}, {opacity: 0.15}, {duration: ${Math.round(ms * 0.3)}})${shifts.length ? ')' : ''}.then(() => ${change}).then(() => animate(${J(a.id)}, {opacity: ${o.opacity}}, {duration: ${Math.round(ms * 0.7)}}))`]
       };
     }
 
@@ -657,9 +709,14 @@ export async function planAction(model, a, measure) {
       const [size] = await measure([spec]);
       const neu = { id, ...spec, role: w.role || old.role, at: old.at, size };
       const ms = pace(a);
+      const { moves, enclosures } = makeRoom(model, { ...old, scale: 1 }, size, { leaving: true });
+      const shifts = [
+        ...Object.entries(moves).map(([mid, at]) => `animate(${J(mid)}, {left: ${at[0]}, top: ${at[1]}}, {duration: ${ms}})`),
+        ...Object.entries(enclosures).map(([eid, e]) => `animate(${J(eid)}, {left: ${e.at[0]}, top: ${e.at[1]}, width: ${e.size[0]}, height: ${e.size[1]}}, {duration: ${ms}})`)
+      ];
       return {
-        record: { op, id: a.id, with: neu },
-        lines: [`animate(${J(a.id)}, {opacity: 0}, {duration: ${ms}}).then(() => removeByUid(${J(a.id)}))`, createLine(neu, ms)]
+        record: { op, id: a.id, with: neu, ...(shifts.length ? { moves, enclosures } : {}) },
+        lines: [`animate(${J(a.id)}, {opacity: 0}, {duration: ${ms}}).then(() => removeByUid(${J(a.id)}))`, ...(shifts.length ? [`Promise.all([${shifts.join(', ')}])`] : []), createLine(neu, ms)]
       };
     }
 
@@ -697,6 +754,8 @@ export async function planAction(model, a, measure) {
     }
 
     case 'widen_context': {
+      // Made by roomInView, not by hand: the camera to pull back to.
+      if (a[AUTO]) return { record: { op, camera: a.camera, auto: true }, lines: [cameraLine(a.camera, pace(a, 'deliberate'))] };
       const ids = a.ids ? expand(model, a.ids, op) : Object.keys(model.objects);
       // An enclosure goes with its members.
       Object.values(model.objects).forEach(o => {
@@ -928,7 +987,7 @@ export async function planActions(model, actions, measure) {
   const lines = [], records = [];
   for (let i = 0; i < actions.length; i++) {
     try {
-      for (const a of [...missingEnclosures(model, actions[i]), actions[i]]) {
+      for (const a of [...missingEnclosures(model, actions[i]), ...(await roomInView(model, actions[i], measure)), actions[i]]) {
         const planned = await planAction(model, a, measure);
         applyRecord(model, planned.record);
         records.push(planned.record);
@@ -939,14 +998,47 @@ export async function planActions(model, actions, measure) {
   return { lines, records };
 }
 
-// The last action's annotation and the lines after it, removed; with it the
-// enclosure drawn for it (a connect to a group without one).
+// When the concepts an action adds, grows or pushes aside would not fit in view
+// without covering others, the camera first pulls back (keeping the centre of
+// the view) just far enough for them to fit: a widen_context of its own, marked auto.
+const ADDS = ['introduce', 'introduce_group', 'branch', 'revise', 'question', 'replace'];
+const ROOM_STEP = 0.85, ROOM_STEPS = 6;
+async function roomInView(model, a, measure) {
+  if (!a || !ADDS.includes(a.op) || (a.op !== 'branch' && a.place && (a.place.x != null || a.place.y != null))) return [];
+  const fits = async camera => {
+    const trial = clone(model);
+    trial.camera = camera;
+    const { record } = await planAction(trial, a, measure);
+    applyRecord(trial, record);
+    const moved = id => { const [p, q] = [model.objects[id], trial.objects[id]]; return !p || p.at.join() !== q.at.join() || p.size.join() !== q.size.join(); };
+    const changed = Object.keys(trial.objects).filter(id => moved(id) && !trial.objects[id].members);
+    const added = changed.map(id => boxOf(trial.objects[id]));
+    const others = Object.values(trial.objects).filter(o => o.opacity > 0 && !changed.includes(o.id) && !(o.members && o.members.some(m => changed.includes(m))))
+      .map(boxOf).concat(RESERVED.map(r => screenRect(trial, r)));
+    return added.every(b => onCanvas(trial, b) && !others.some(t => overlaps(b, t)));
+  };
+  const c = model.camera, z = zoomOf(model);
+  if (await fits(c)) return [];
+  const centre = [(CANVAS.width / 2 - c.pan[0]) / z, (CANVAS.height / 2 - c.pan[1]) / z];
+  for (let k = 1; k <= ROOM_STEPS; k++) {
+    const zoom = +(z * ROOM_STEP ** k).toFixed(4);
+    if (zoom < 0.05) break;
+    const camera = { zoom, pan: [Math.round(CANVAS.width / 2 - centre[0] * zoom), Math.round(CANVAS.height / 2 - centre[1] * zoom)] };
+    if (await fits(camera)) return [{ op: 'widen_context', camera, [AUTO]: true }];
+  }
+  return [];
+}
+
+// The last action's annotation and the lines after it, removed; with it what
+// was done first to make way for it (marked auto: an enclosure drawn for an
+// arrow to a group, the camera pulling back to make room).
 export function withoutLastAction(lines) {
   const tags = lines.map((l, i) => (String(l).trim().startsWith(TAG.trim()) ? i : -1)).filter(i => i >= 0);
   if (!tags.length) return null;
-  let i = tags.at(-1);
-  const auto = tags.length > 1 && (() => { try { return JSON.parse(String(lines[tags.at(-2)]).trim().slice(TAG.trim().length)).auto; } catch { return false; } })();
-  if (auto) i = tags.at(-2);
+  const auto = t => { try { return JSON.parse(String(lines[t]).trim().slice(TAG.trim().length)).auto; } catch { return false; } };
+  let k = tags.length - 1;
+  while (k > 0 && auto(tags[k - 1])) k--;
+  const i = tags[k];
   return { lines: lines.slice(0, i), removed: lines.slice(i) };
 }
 
