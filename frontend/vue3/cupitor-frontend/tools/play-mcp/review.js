@@ -41,6 +41,7 @@ export function plainMove(rec) {
     : p.between ? `, between ${p.between.join(' and ')}` : p.region ? `, ${p.region}` : '';
   switch (rec.op) {
     case 'introduce': return `introduce ${rec.text ? q(rec.text) : 'a ' + rec.kind} as ${rec.id}${rec.kind !== 'text' ? ` (${rec.kind})` : ''}`;
+    case 'type': case 'write': return `${rec.op} ${q(rec.text)} as ${rec.id}${rec.kind !== 'text' ? ` (${rec.kind})` : ''}`;
     case 'introduce_group': return `introduce group ${rec.id}: ${rec.items.map(i => q(i.text)).join(', ')}`;
     case 'branch': return `branch from ${rec.from}: ${rec.items.map(i => q(i.text)).join(', ')}`;
     case 'connect': return `connect ${rec.from} → ${rec.to}${rec.bend === 'loop' ? ' (loop)' : rec.bend ? ' (curved)' : ''}${rec.kind ? ` [${rec.kind}]` : ''}`;
@@ -70,7 +71,7 @@ function refs(rec) {
   return [rec.from, rec.to, rec.into, rec.group, ...(rec.ids || []), ...(rec.members || []),
     ...(['revise', 'question', 'weaken_boundary', 'replace', 'move_into'].includes(rec.op) ? [rec.id] : [])].filter(Boolean);
 }
-const created = rec => [...(rec.op === 'introduce' ? [rec.id] : []), ...((rec.items || rec.arriving || []).map(i => i.id)),
+const created = rec => [...(['introduce', 'type', 'write'].includes(rec.op) ? [rec.id] : []), ...((rec.items || rec.arriving || []).map(i => i.id)),
   ...(rec.op === 'replace' ? [rec.with.id] : []), ...(['enclose', 'dissolve_boundary'].includes(rec.op) ? [rec.id] : [])];
 
 const isReadability = i => /hard to read/.test(i.message);

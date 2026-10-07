@@ -109,8 +109,18 @@ const SCRIPT_FUNCTIONS = [
             ['uid', 'id for later lines (default: next label id)'],
             ['fontSize', 'text size (default 22)'],
             ['color', "text and box colour (default '#222')"],
+            ['background', 'fill of the box behind the text (default none)'],
             ['boundary', "'none' (default), 'solid' or 'dashed' box"],
             ['padding', 'room between text and box (default 12)'],
+            ['hand', 'true: the text in handwriting, as pen strokes (load it first with handFont())'],
+        ]],
+        ['typeIn(uid, opts)', 'Type a label\'s text in, a character at a time; the next line waits', [
+            ['opts.duration', 'ms for the whole text (default 70 a character)'],
+            ['opts.caret', 'a | ahead of the text while it is typed (default true)'],
+        ]],
+        ['handFont()', 'Load the handwriting font (a promise); addLabel(…, {hand: true}) needs it'],
+        ['writeIn(uid, opts)', 'Write a handwritten label in, stroke after stroke; the next line waits', [
+            ['opts.duration', 'ms for the whole text (default 160 a character)'],
         ]],
         ['addFigure(x, y, opts)', 'A minimal person centred on x, y, with an optional label under it (returns it)', [
             ['uid', 'id for later lines'],

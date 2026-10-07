@@ -87,3 +87,48 @@ test('stepwise opens as a bar without code lines; → steps on; the lines can be
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('typed and handwritten labels: in a character or stroke at a time, then whole; a handwritten one renamed stays in its place, its box fitting', async () => {
+  const b = await openBoard();
+  try {
+    await b.eval(() => {
+      window.recordedScriptLines = [
+        'Promise.resolve(typeIn(addLabel("WHO?", 300, 200, {uid: "t", boundary: "solid"}), {duration: 2000}))',
+        'Promise.resolve(handFont()).then(() => writeIn(addLabel("VEM SÄTTER RAMEN?", 600, 400, {uid: "w", boundary: "solid", hand: true}), {duration: 2000}))'
+      ];
+      playScript();
+    });
+    // Part way: some of the text, with the caret; then part of the strokes.
+    await b.page.waitForTimeout(900);
+    const typing = await b.eval(() => findIfRequired('t').getObjects()[1].text);
+    assert.ok(/^W?H?O?\|$/.test(typing) && typing.length < 5, `part typed: ${typing}`);
+    await b.page.waitForFunction(() => isFabricObject(findIfRequired('w')));
+    await b.page.waitForTimeout(800);
+    const hidden = await b.eval(() => findIfRequired('w').getObjects()[1].getObjects().filter(p => p.strokeDashOffset > 0).length);
+    assert.ok(hidden > 0, 'some strokes still to write');
+    await b.page.waitForFunction(() => !window.isRecordingPlayback);
+    assert.equal(await b.eval(() => findIfRequired('t').getObjects()[1].text), 'WHO?');
+    assert.equal(await b.eval(() => findIfRequired('w').getObjects()[1].getObjects().filter(p => p.strokeDashOffset > 0).length), 0, 'all written');
+
+    // Renamed (also when shrunk): the same centre, the box round the new strokes.
+    const look = () => b.eval(() => {
+      const g = findIfRequired('w'), [r, h] = g.getObjects();
+      g.setCoords(); h.setCoords();
+      const c = g.getCenterPoint(), hc = h.getCenterPoint();
+      return { centre: [Math.round(c.x), Math.round(c.y)], strokes: [Math.round(hc.x), Math.round(hc.y)], box: Math.round(r.width), text: Math.round(h.width) };
+    });
+    const before = await look();
+    await b.eval(() => { tagState('written', ['w']); setLabelText('w', 'VEM SÄTTER RAMEN NU?'); });
+    const after = await look();
+    assert.deepEqual(after.centre, before.centre);
+    assert.deepEqual(after.strokes, after.centre, 'the strokes stay in the label');
+    assert.ok(after.text > before.text && after.box === after.text + 24, `the box fits the longer text: ${JSON.stringify(after)}`);
+    // Going back to the tag brings back the old strokes in their box.
+    await b.eval(() => revertState('written', { duration: 0 }));
+    assert.deepEqual(await look(), before, 'back to the tagged text, strokes and box');
+    await b.eval(() => { setObjectProps('w', { scaleX: 0.5, scaleY: 0.5 }); setLabelText('w', 'VEM?'); });
+    const small = await look();
+    assert.deepEqual(small.strokes, small.centre, 'shrunk, the strokes still stay in the label');
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

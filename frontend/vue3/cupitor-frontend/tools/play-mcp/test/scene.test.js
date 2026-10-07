@@ -211,6 +211,27 @@ test('arrows leave from the middle of an edge, not a corner, unless a side is na
   await assert.rejects(plan([...WHY_ACTION.slice(2, 4), { op: 'connect', from: 'person', to: 'action', to_side: 'middle' }]), /to_side is one of top, bottom/);
 });
 
+test('type and write: a concept formulated in front of the viewer, timed by its characters; written ones stay in handwriting', async () => {
+  const seen = [];
+  const measuring = async specs => { seen.push(...specs); return measure(specs); };
+  const { model, lines } = await planActions(emptyScene(), [
+    { op: 'type', id: 'q', text: 'WHO SETS THE FRAME?', role: 'power', place: { region: 'top' } },
+    { op: 'write', id: 'h', text: 'VEM SÄTTER RAMEN?', kind: 'box', pace: 'deliberate' },
+    { op: 'type', id: 'p', text: 'ABC', caret: false, characters_per_second: 3, place: { region: 'bottom' } },
+    { op: 'revise', id: 'h', text: 'VEM?' }
+  ], measuring).then(r => ({ ...r, model: parseScene(r.lines) }));
+  const code = lines.filter(l => !l.startsWith('//'));
+  assert.match(code[0], /^Promise\.resolve\(typeIn\(addLabel\("WHO SETS THE FRAME\?", .*"color":"#F59E0B".*\), \{duration: 633\}\)\)$/); // 19 characters at 30 a second
+  assert.match(code[1], /^Promise\.resolve\(handFont\(\)\)\.then\(\(\) => writeIn\(addLabel\("VEM SÄTTER RAMEN\?", .*"boundary":"solid".*"hand":true\}\), \{duration: 2833\}\)\)$/); // 17 at 6
+  assert.match(code[2], /\{duration: 1000, caret: false\}/);
+  assert.equal(model.objects.h.hand, true);
+  assert.equal(model.objects.q.hand, undefined);
+  const revised = seen.filter(s => s.text === 'VEM?');
+  assert.ok(revised.length && revised.every(s => s.hand), 'a revision is measured in handwriting');
+  assert.ok(lineTime(code[1]) >= 2833, 'the timeline counts the writing');
+  await assert.rejects(plan([{ op: 'write', text: 'X', kind: 'figure' }]), /write: kind must be text or box/);
+});
+
 test('colour by role: own colour first, groups pass theirs on, kept through changes and back in the script; replace and turnover keep it unless given one', async () => {
   const { model, lines } = await plan([
     { op: 'introduce', id: 'people', text: 'PEOPLE', role: 'citizen' },
@@ -231,6 +252,20 @@ test('colour by role: own colour first, groups pass theirs on, kept through chan
   assert.match(lines.find(l => l.startsWith("drawOutline(addLabel(\"PEOPLE\"")), /addLabel\("PEOPLE", .*"color":"#3B82F6"/);
   assert.equal(parseScene(lines).objects.people.color, '#3B82F6');
   await assert.rejects(plan([{ op: 'introduce', text: 'X', color: 'red; alert(1)' }]), /must be a CSS colour/);
+  const tinted = await plan([
+    { op: 'introduce_group', id: 'g', background: '#FEE2E2', role: 'risk', items: ['ONE', { id: 'two', text: 'TWO', background: '#DBEAFE' }] },
+    { op: 'replace', id: 'one', with: { id: 'uno', text: 'UNO' } },
+    { op: 'turnover', group: 'g', leaving: ['two'], arriving: ['THREE'] }
+  ]);
+  assert.deepEqual(['uno', 'three'].map(id => tinted.model.objects[id].background), ['#FEE2E2', '#FEE2E2'], 'arrivals look like a member that stays');
+  assert.match(tinted.lines.find(l => l.startsWith('drawOutline(addLabel("UNO"')), /"background":"#FEE2E2"/);
+  assert.equal(parseScene(tinted.lines).objects.uno.background, '#FEE2E2');
+  await assert.rejects(plan([{ op: 'introduce', id: 'p', kind: 'figure', background: '#eee' }]), /background is for text and box/);
+  const onlyTint = await plan([
+    { op: 'introduce_group', id: 'h', background: '#eee', items: [{ id: 'k', text: 'K', role: 'power' }] },
+    { op: 'turnover', group: 'h', leaving: [], arriving: ['L'] }
+  ]);
+  assert.deepEqual([onlyTint.model.objects.l.color, onlyTint.model.objects.l.background], ['#F59E0B', '#eee'], 'a group with only a background: colour from a staying member');
 });
 
 test('between, then dissolving the boundaries into one band', async () => {

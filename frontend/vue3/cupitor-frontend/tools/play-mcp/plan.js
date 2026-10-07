@@ -68,7 +68,12 @@ the thinking to the viewer.
 - Diagrams may fail, revise themselves or stay unresolved when the argument does.
 - Colour is meaning, not decoration. Give a concept a \`role\` from the palette (${Object.entries(ROLE_COLORS).map(([r, c]) => `\`${r}\` ${c}`).join(', ')})
   and it takes that colour; the same role keeps the same colour through the whole film. Use \`color\` only for a
-  meaning the palette lacks, and leave concepts without either in the normal ink.
+  meaning the palette lacks, and leave concepts without either in the normal ink. \`background\` fills the box behind a
+  text or box concept; keep it light (a pale tint of the concept's colour, such as #DBEAFE behind #3B82F6) so the
+  text stays readable.
+- \`type\` and \`write\` make a text concept appear as it is being formulated: typed in, or written by hand. Use them
+  only when the act of formulating matters (a question being posed, a promise made, a hypothesis put forward);
+  most concepts still appear with \`introduce\`.
 
 ## How to work, for each passage
 

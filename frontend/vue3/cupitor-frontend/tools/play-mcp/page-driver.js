@@ -154,7 +154,7 @@ export class PlayPage {
         const swap = (name, fn) => { const orig = window[name]; if (typeof orig !== 'function') return; window.__mcpRestore.push([name, orig]); window[name] = fn(orig); };
         swap('sleep', () => () => Promise.resolve());
         // [function, index of its options argument]
-        [['animate', 2], ['drawOutline', 1], ['connectObjects', 3], ['animateViewport', 1], ['revertState', 1], ['reveal', 2]].forEach(([name, at]) =>
+        [['animate', 2], ['drawOutline', 1], ['connectObjects', 3], ['animateViewport', 1], ['revertState', 1], ['reveal', 2], ['typeIn', 1], ['writeIn', 1]].forEach(([name, at]) =>
           swap(name, orig => function (...args) { args[at] = Object.assign({}, args[at], { duration: 1 }); return orig.apply(this, args); }));
       }
       if (typeof clear === 'function') clear();
@@ -248,7 +248,7 @@ export class PlayPage {
     return page.evaluate(async list => Promise.all(list.map(async s => {
       const o = s.kind === 'figure' ? makeFigure(0, 0, { uid: '__measure', label: s.text, fontSize: s.fontSize })
         : s.kind === 'picture' ? await makePicture(s.src, 0, 0, { uid: '__measure', label: s.text, width: s.width, fontSize: s.fontSize })
-        : makeLabel(s.text, 0, 0, { uid: '__measure', fontSize: s.fontSize, boundary: s.boundary });
+        : (s.hand && await handFont(), makeLabel(s.text, 0, 0, { uid: '__measure', fontSize: s.fontSize, boundary: s.boundary, hand: s.hand }));
       return [Math.round(o.width), Math.round(o.height)];
     })), specs);
   }

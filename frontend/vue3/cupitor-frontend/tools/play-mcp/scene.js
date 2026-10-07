@@ -39,16 +39,18 @@ export const ACTIONS = {
   scene: 'Start a scene: {name}. Objects from earlier scenes stay and can be reused.',
   beat: "Start a beat (one conceptual move): {name, move? (what the narrator does here, e.g. 'the question appears before any answer'), viewer_task?: {type, target}}.",
   viewer_task: `What the viewer should do mentally: {type: ${VIEWER_TASKS.join('|')}, target, constraint?}. Attaches to the current beat (or scene).`,
-  introduce: `Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, color?, place?, pace?}. role names what the concept is (any word); ${ROLES} also colour it (${Object.entries(ROLE_COLORS).map(([r, c]) => `${r} ${c}`).join(', ')}), so a role keeps its colour throughout. color (a CSS colour such as #3B82F6) goes before the role's. The colour stays through revise, question, focus, deemphasize, move_into and return_to. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.`,
-  introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text, role?, color?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, place?, pace?}. An item without its own role or color takes the group\'s.',
-  branch: 'Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, role?, color?, pace?}. Items as in introduce_group.',
+  introduce: `Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, color?, place?, pace?}. role names what the concept is (any word); ${ROLES} also colour it (${Object.entries(ROLE_COLORS).map(([r, c]) => `${r} ${c}`).join(', ')}), so a role keeps its colour throughout. color (a CSS colour such as #3B82F6) goes before the role's. background (a CSS colour; text and box only) fills the box behind the text, e.g. a light tint of its colour such as #DBEAFE. The colour stays through revise, question, focus, deemphasize, move_into and return_to. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.`,
+  type: "Type a new text concept in, a character at a time, when a proposition, question, promise or hypothesis is being formulated in front of the viewer: as introduce (text or box only), plus caret?: true|false (default true) and characters_per_second? (default from pace: short 30, deliberate 12). It is then an ordinary concept.",
+  write: "Write a new text concept in by hand, stroke after stroke, as a lecturer would: as introduce (text or box only), plus characters_per_second? (default from pace: short 14, deliberate 6). It stays in handwriting through revise and question; a replace or turnover arrival is ordinary text.",
+  introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text, role?, color?, background?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, background?, place?, pace?}. An item without its own role, color or background takes the group\'s.',
+  branch: 'Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, role?, color?, background?, pace?}. Items as in introduce_group.',
   connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.",
   disconnect: 'Remove a relationship: {id} or {from, to}.',
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.',
   revise: 'Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.',
   question: 'Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.',
   weaken_boundary: "Dash (or remove) a concept's or enclosure's boundary: {id, style?: dashed|none, pace?}.",
-  replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?}, pace?}. Without a role or color of its own, the new concept keeps the old one\'s.',
+  replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one\'s.',
   deemphasize: 'Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.',
   focus: 'Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.',
   move_into: 'Move a concept into another (e.g. a question into a person), smaller: {id, into, scale?, pace?}.',
@@ -57,7 +59,7 @@ export const ACTIONS = {
   dissolve_boundary: "Turn categories into a continuum: the boxes of concepts (in order, e.g. two categories with in-between cases already placed between them) lose their boundaries while a colour band appears under them: {ids, id (the band), colors?: [from, to], pace?}.",
   checkpoint: 'Remember how every concept, relationship and the camera are now: {name}.',
   return_to: 'Go back: {name} puts the concepts of a checkpoint back as they were (positions, text, emphasis, ones removed since) and the camera; {ids} brings back removed concepts where they were.',
-  turnover: "Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text, role?, color?}] or [\"TEXT\"] (without their own, arrivals take the members' role and colour), direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.",
+  turnover: "Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text, role?, color?, background?}] or [\"TEXT\"] (without their own, arrivals take the role, colour and background the group was made with, else a staying member's), direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.",
   narrate: "A line of narration, shown as a caption: {text, id? (default n1, n2, ...; later audio for the line takes this id), sync?: before (default: the script waits while it is read, so what follows is revealed after it) | with (what follows plays while it shows), seconds? (hold it this long instead of the reading-pace estimate)}. A caption stays until the next narrate, beat or scene.",
   pause: `Hold still: {kind?: ${Object.keys(PAUSE).join('|')}, seconds?}.`,
   remove: 'Fade concepts out and delete them: {ids, pace?}.'
@@ -96,7 +98,7 @@ export function parseScene(lines) {
 function addObject(model, rec, o) {
   model.objects[o.id] = {
     id: o.id, kind: o.kind || 'text', text: o.text, role: o.role || null, at: o.at, size: o.size,
-    fontSize: o.fontSize, src: o.src, width: o.width, ...(o.color ? { color: o.color } : {}), scale: 1, opacity: 1, boundary: o.boundary || 'none',
+    fontSize: o.fontSize, src: o.src, width: o.width, ...(o.color ? { color: o.color } : {}), ...(o.background ? { background: o.background } : {}), ...(o.hand ? { hand: true } : {}), scale: 1, opacity: 1, boundary: o.boundary || 'none',
     history: o.text != null ? [o.text] : [], scene: model.scene, beat: model.beat
   };
   delete model.retired[o.id]; // its id now names something else
@@ -153,12 +155,14 @@ export function applyRecord(model, rec) {
       model.viewerTasks.push({ type: rec.type, target: rec.target, constraint: rec.constraint, scene: model.scene, beat: model.beat });
       break;
     case 'introduce':
+    case 'type':
+    case 'write':
       addObject(model, rec, rec);
       break;
     case 'introduce_group':
     case 'branch':
       rec.items.forEach(it => addObject(model, rec, { role: rec.role, ...it }));
-      if (rec.op === 'introduce_group') model.groups[rec.id] = { id: rec.id, members: rec.items.map(it => it.id), enclosure: null };
+      if (rec.op === 'introduce_group') model.groups[rec.id] = { id: rec.id, members: rec.items.map(it => it.id), enclosure: null, ...(rec.look ? { look: rec.look } : {}) };
       (rec.relations || []).forEach(r => addRelation(model, r));
       break;
     case 'connect':
@@ -564,14 +568,13 @@ function expand(model, ids, op) {
 
 const COLOR = /^(#[0-9a-f]{3,8}|(rgb|rgba|hsl|hsla)\([0-9.,%\s]+\)|[a-z]+)$/i;
 
+const cssColor = (v, name) => {
+  if (typeof v !== 'string' || !COLOR.test(v.trim())) throw new Error(`${name} "${v}" must be a CSS colour such as "#3B82F6"`);
+  return v.trim();
+};
+
 // The colour of a concept made from `a` (own color, else its role's), or undefined.
-function colorOf(a) {
-  if (a.color != null) {
-    if (typeof a.color !== 'string' || !COLOR.test(a.color.trim())) throw new Error(`color "${a.color}" must be a CSS colour such as "#3B82F6"`);
-    return a.color.trim();
-  }
-  return ROLE_COLORS[a.role];
-}
+const colorOf = a => (a.color != null ? cssColor(a.color, 'color') : ROLE_COLORS[a.role]);
 
 // What a concept is made of. Sizes are on screen: under a zoomed-out camera
 // the font (or picture) is made bigger in the scene to look the same size.
@@ -587,6 +590,10 @@ function objectSpec(model, a, text) {
   const spec = { kind, text: text == null || text === '' ? undefined : String(text), fontSize, boundary: kind === 'box' ? 'solid' : 'none' };
   const color = colorOf(a);
   if (color) spec.color = color;
+  if (a.background != null) {
+    if (pictured) throw new Error(`background is for text and box concepts, not a ${kind}`);
+    spec.background = cssColor(a.background, 'background');
+  }
   if (kind === 'picture') {
     if (!a.src) throw new Error('a picture needs src');
     spec.src = a.src;
@@ -602,8 +609,11 @@ function createLine(o, ms) {
   if (o.kind === 'figure') {
     return `drawOutline(addFigure(${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}) })}), {duration: ${ms}})`;
   }
-  return `drawOutline(addLabel(${J(o.text)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, fontSize: o.fontSize, boundary: o.boundary, ...(o.color ? { color: o.color } : {}) })}), {duration: ${ms}})`;
+  return `drawOutline(${labelCall(o)}, {duration: ${ms}})`;
 }
+
+// The addLabel call making a text or box concept.
+const labelCall = o => `addLabel(${J(o.text)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, fontSize: o.fontSize, boundary: o.boundary, ...(o.color ? { color: o.color } : {}), ...(o.background ? { background: o.background } : {}), ...(o.hand ? { hand: true } : {}) })})`;
 
 export const wordCount = text => String(text).trim().split(/\s+/).filter(Boolean).length;
 // How long a line of `words` words takes to read, in ms.
@@ -655,6 +665,28 @@ export async function planAction(model, a, measure) {
       checkTask(a);
       return { record: { op, type: a.type, target: a.target, constraint: a.constraint }, lines: [] };
 
+    case 'type':
+    case 'write': {
+      const id = idFor(a.id, a.text);
+      checkNewId(model, id);
+      if (a.kind != null && a.kind !== 'text' && a.kind !== 'box') throw new Error(`${op}: kind must be text or box`);
+      const spec = { ...objectSpec(model, a, a.text), ...(op === 'write' ? { hand: true } : {}) };
+      const [size] = await measure([spec]);
+      const at = placeBox(model, size, a.place);
+      const rec = { op, id, ...spec, role: a.role, at, size };
+      // Characters a second: given, or from the pace (writing is slower than typing).
+      const chars = [...spec.text].length;
+      const cps = a.characters_per_second != null ? num(a.characters_per_second, `${op}: characters_per_second`, 1, 200)
+        : typeof a.pace === 'number' ? null : { instant: 0, short: op === 'type' ? 30 : 14, deliberate: op === 'type' ? 12 : 6 }[a.pace || 'short'];
+      if (cps === undefined) throw new Error(`pace must be ${Object.keys(PACE).join(', ')} or ms`);
+      const ms = cps === null ? pace(a) : cps ? Math.round(chars / cps * 1000) : PACE.instant;
+      if (a.caret != null && typeof a.caret !== 'boolean') throw new Error('type: caret is true or false');
+      const line = op === 'type'
+        ? `Promise.resolve(typeIn(${labelCall(rec)}, {duration: ${ms}${a.caret === false ? ', caret: false' : ''}}))`
+        : `Promise.resolve(handFont()).then(() => writeIn(${labelCall(rec)}, {duration: ${ms}}))`;
+      return { record: rec, lines: [line] };
+    }
+
     case 'introduce': {
       const id = idFor(a.id, a.text);
       checkNewId(model, id);
@@ -698,7 +730,9 @@ export async function planAction(model, a, measure) {
           lines.push(createLine(p, ms), `connectObjects(${J(from.id)}, ${J(p.id)}, ${J(rid)}, {animate: true, duration: ${ms}})`);
         });
       }
-      return { record: { op, id: a.id, from: a.from, kind: a.kind, role: a.role, items: placed, relations }, lines };
+      // A group's own role, colour and background, which its later arrivals take.
+      const look = Object.fromEntries(['role', 'color', 'background'].filter(k => a[k] != null).map(k => [k, a[k]]));
+      return { record: { op, id: a.id, from: a.from, kind: a.kind, role: a.role, ...(op === 'introduce_group' && Object.keys(look).length ? { look } : {}), items: placed, relations }, lines };
     }
 
     case 'connect': {
@@ -748,7 +782,7 @@ export async function planAction(model, a, measure) {
       if (pictured && !o.text) throw new Error(`revise: "${a.id}" is a ${o.kind} without a label; give it text when introducing it`);
       const text = a.text != null ? String(a.text) : op === 'question' ? (o.text.endsWith('?') ? o.text : o.text + '?') : null;
       if (text == null || text === '') throw new Error('revise: text is required');
-      const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: op === 'question' ? 'dashed' : o.boundary, ...(o.kind === 'picture' ? { src: o.src, width: o.width } : {}) }]);
+      const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: op === 'question' ? 'dashed' : o.boundary, ...(o.hand ? { hand: true } : {}), ...(o.kind === 'picture' ? { src: o.src, width: o.width } : {}) }]);
       const ms = pace(a, 'deliberate');
       const change = op === 'question'
         ? `(setLabelText(${J(a.id)}, ${J(text)}), setLabelBoundary(${J(a.id)}, "dashed"))`
@@ -782,7 +816,7 @@ export async function planAction(model, a, measure) {
       const w = a.with || {};
       const id = idFor(w.id, w.text);
       checkNewId(model, id);
-      const keep = w.role == null && w.color == null ? { role: old.role, color: old.color } : {};
+      const keep = { ...(w.role == null && w.color == null ? { role: old.role, color: old.color } : {}), ...(w.background == null && old.background && !['figure', 'picture'].includes(w.kind) ? { background: old.background } : {}) };
       const spec = objectSpec(model, { kind: old.kind === 'enclosure' ? 'text' : old.kind, size: old.fontSize * zoomOf(model), ...keep, ...w }, w.text);
       const [size] = await measure([spec]);
       const neu = { id, ...spec, role: w.role || old.role, at: old.at, size };
@@ -974,13 +1008,20 @@ export async function planAction(model, a, measure) {
       const step = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] }[dir];
       if (!step) throw new Error('turnover: direction must be right, left, down or up');
       const taken = new Set();
-      const sample = model.objects[g.members[0]] || {};
+      // Arrivals take the group's own role, colour and background, else those of a
+      // member that stays (any member when all leave).
+      const sample = model.objects[g.members.find(m => !leaving.includes(m)) || g.members[0]] || {};
+      const own = g.look || {};
+      const look = {
+        ...(own.role != null || own.color != null ? { role: own.role, color: own.color } : { role: sample.role, color: sample.color }),
+        background: own.background != null ? own.background : sample.background
+      };
       const arriving = incoming.map(it => {
         const item = typeof it === 'string' ? { text: it } : it;
         const id = idFor(item.id, item.text);
         checkNewId(model, id, taken); taken.add(id);
         const kind = sample.kind === 'box' ? 'box' : 'text';
-        const keep = item.role == null && item.color == null ? { role: sample.role, color: sample.color } : {};
+        const keep = { ...(item.role == null && item.color == null ? { role: look.role, color: look.color } : {}), ...(item.background == null && look.background ? { background: look.background } : {}) };
         return { id, ...objectSpec(model, { kind, size: sample.fontSize ? sample.fontSize * zoomOf(model) : undefined, ...keep, ...item }, item.text), ...(item.role || keep.role ? { role: item.role || keep.role } : {}) };
       });
       const sizes = arriving.length ? await measure(arriving) : [];
@@ -1107,7 +1148,7 @@ export async function planActions(model, actions, measure) {
 // When the concepts an action adds, grows or pushes aside would not fit in view
 // without covering others, the camera first pulls back (keeping the centre of
 // the view) just far enough for them to fit: a widen_context of its own, marked auto.
-const ADDS = ['introduce', 'introduce_group', 'branch', 'revise', 'question', 'replace', 'turnover'];
+const ADDS = ['introduce', 'type', 'write', 'introduce_group', 'branch', 'revise', 'question', 'replace', 'turnover'];
 const ROOM_STEP = 0.85, ROOM_STEPS = 6;
 async function roomInView(model, a, measure) {
   if (!a || !ADDS.includes(a.op) || (a.op !== 'branch' && a.place && (a.place.x != null || a.place.y != null))) return [];
@@ -1154,7 +1195,7 @@ export function withoutLastAction(lines) {
 export function inspect(model, live) {
   const liveBy = new Map((live || []).filter(o => o.uid && !o.parent).map(o => [o.uid, o]));
   const objects = Object.values(model.objects).map(o => {
-    const out = { id: o.id, kind: o.kind, text: o.text, role: o.role || undefined, color: o.color, scene: o.scene || undefined, beat: o.beat || undefined };
+    const out = { id: o.id, kind: o.kind, text: o.text, role: o.role || undefined, color: o.color, background: o.background, scene: o.scene || undefined, beat: o.beat || undefined };
     if (o.history.length > 1) out.revisions = o.history;
     if (o.members) out.members = o.members;
     if (o.inside) out.inside = o.inside;

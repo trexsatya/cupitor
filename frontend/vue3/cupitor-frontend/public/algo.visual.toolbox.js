@@ -368,21 +368,112 @@ function textInRect(textStr, x, y, optsText, optsRect, uid){
 // A word or phrase as one object, centred on x, y: a text with a box around it
 // (the box can be hidden or dashed). The box always fits the text, so the text
 // can be revised in place (setLabelText) without the object changing identity.
-// opts: uid, fontSize (22), color ('#222'), boundary ('none' (default) | 'solid' | 'dashed'), padding (12).
+// opts: uid, fontSize (22), color ('#222'), background (the box's fill; none by default),
+// boundary ('none' (default) | 'solid' | 'dashed'), padding (12), hand (true: the text in
+// handwriting, as pen strokes; needs handFont() loaded first).
 function makeLabel(text, x, y, opts) {
   const o = Object.assign({ fontSize: 22, color: '#222', boundary: 'none', padding: 12 }, opts);
-  const t = new fabric.Text(String(text), {
+  const t = o.hand ? makeHandText(text, { fontSize: o.fontSize, color: o.color }) : new fabric.Text(String(text), {
     fontSize: o.fontSize, fill: o.color, fontFamily: 'Helvetica, Arial, sans-serif', textAlign: 'center',
     originX: 'center', originY: 'center', left: 0, top: 0
   });
   const r = new fabric.Rect({
     width: t.width + 2 * o.padding, height: t.height + 2 * o.padding, originX: 'center', originY: 'center',
-    left: 0, top: 0, rx: 10, ry: 10, fill: 'transparent', stroke: o.color
+    left: 0, top: 0, rx: 10, ry: 10, fill: o.background || 'transparent', stroke: o.color
   });
   _setLabelBoundary(r, o.boundary);
   const g = new fabric.Group([r, t], { originX: 'center', originY: 'center', left: x || 0, top: y || 0 });
   g.uid = o.uid || semanticUid('label');
   g.customData = { type: 'label', text: String(text), padding: o.padding, boundary: o.boundary };
+  if (o.hand) g.customData.hand = { fontSize: o.fontSize, color: o.color };
+  return g;
+}
+
+// ---- Handwriting ----
+// Pen strokes for each character come from a Vara.js font (Shadows Into Light):
+// per glyph, strokes as SVG paths in font units, offset by (mx, -my) from the
+// glyph's origin. Letters with accents (Å, Ä, Ö, É, …) are the base letter with
+// the marks drawn above it.
+
+const HAND_FONT_URL = '/vendor/varajs/fonts/Shadows-Into-Light/shadows-into-light.json';
+let _handFont = null, _handFontLoading = null;
+
+// Loads the handwriting font once; resolves when makeHandText can be used.
+function handFont() {
+  if (_handFont) return Promise.resolve(_handFont);
+  if (!_handFontLoading) {
+    _handFontLoading = fetch(HAND_FONT_URL).then(r => {
+      if (!r.ok) throw new Error(`handFont: ${HAND_FONT_URL} answered ${r.status}`);
+      return r.json();
+    }).then(font => (_handFont = font), err => { _handFontLoading = null; throw err; });
+  }
+  return _handFontLoading;
+}
+
+// Marks drawn above a base letter, as paths in a box (x0, top) w wide, in font units.
+const _HAND_MARKS = {
+  '\u0308': (x0, w, top, u) => [_handDot(x0 + w * 0.32, top - u * 0.22, u * 0.05), _handDot(x0 + w * 0.68, top - u * 0.22, u * 0.05)], // ¨
+  '\u030A': (x0, w, top, u) => [_handCircle(x0 + w / 2, top - u * 0.24, u * 0.11)], // ˚
+  '\u0301': (x0, w, top, u) => [`M ${x0 + w * 0.42},${top - u * 0.1} L ${x0 + w * 0.62},${top - u * 0.32}`], // ´
+  '\u0300': (x0, w, top, u) => [`M ${x0 + w * 0.58},${top - u * 0.1} L ${x0 + w * 0.38},${top - u * 0.32}`], // `
+  '\u0302': (x0, w, top, u) => [`M ${x0 + w * 0.3},${top - u * 0.1} L ${x0 + w / 2},${top - u * 0.3} L ${x0 + w * 0.7},${top - u * 0.1}`], // ^
+  '\u0303': (x0, w, top, u) => [`M ${x0 + w * 0.25},${top - u * 0.16} C ${x0 + w * 0.4},${top - u * 0.32} ${x0 + w * 0.6},${top - u * 0.02} ${x0 + w * 0.75},${top - u * 0.2}`] // ~
+};
+const _handCircle = (cx, cy, r) => `M ${cx - r},${cy} a ${r},${r} 0 1,0 ${2 * r},0 a ${r},${r} 0 1,0 ${-2 * r},0`;
+const _handDot = (cx, cy, r) => _handCircle(cx, cy, r);
+
+// Stroke paths (font units) for a line of text, left to right from x = 0, and its width.
+function _handStrokes(text) {
+  const font = _handFont;
+  if (!font) throw new Error('makeHandText: load the handwriting font first (handFont())');
+  const glyph = ch => font.c[ch.charCodeAt(0)];
+  const capH = _handBox(glyph('H').paths).h;
+  const strokes = [];
+  let x = 0;
+  for (const ch of String(text)) {
+    if (ch === ' ') { x += font.p.space; continue; }
+    const [base, ...marks] = ch.normalize('NFD');
+    const g = glyph(base) || glyph('?');
+    const paths = g.paths.map(e => `M ${e.mx},${-e.my} ` + e.d.replace(/^\s*m\s*0\s*,\s*0\s*/i, ''));
+    const box = _handBox(g.paths);
+    const dx = x - box.x;
+    const placed = paths.map(d => ({ d, dx }));
+    marks.forEach(m => { const mark = _HAND_MARKS[m]; if (mark) mark(box.x, box.w, box.y, capH).forEach(d => placed.push({ d, dx })); });
+    strokes.push(...placed);
+    x += box.w + font.p.space * 0.18;
+  }
+  return { strokes, width: x, capH };
+}
+
+// The box (font units) round a glyph's strokes, from their path data.
+function _handBox(paths) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  paths.forEach(e => {
+    const p = new fabric.Path(`M ${e.mx},${-e.my} ` + e.d.replace(/^\s*m\s*0\s*,\s*0\s*/i, ''));
+    x0 = Math.min(x0, p.left); y0 = Math.min(y0, p.top); x1 = Math.max(x1, p.left + p.width); y1 = Math.max(y1, p.top + p.height);
+  });
+  return isFinite(x0) ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : { x: 0, y: 0, w: 0, h: 0 };
+}
+
+// Text in handwriting: a group of stroke paths, centred on 0, 0, its capitals
+// about opts.fontSize * 0.7 tall. opts: fontSize (22), color ('#222').
+function makeHandText(text, opts) {
+  const o = Object.assign({ fontSize: 22, color: '#222' }, opts);
+  const { strokes, capH } = _handStrokes(text);
+  const k = o.fontSize * 0.7 / capH;
+  const paths = strokes.map(({ d, dx }) => {
+    const p = new fabric.Path(d, {
+      fill: '', stroke: o.color, strokeWidth: Math.max(1.5, o.fontSize / 11) / k, // in font units: it scales with the text
+      strokeLineCap: 'round', strokeLineJoin: 'round', objectCaching: false
+    });
+    p.set({ left: (p.left + dx) * k, top: p.top * k, scaleX: k, scaleY: k });
+    p._handD = d;
+    return p;
+  });
+  // An empty text still takes up a line, so a label round it keeps its shape.
+  if (!paths.length) paths.push(new fabric.Rect({ width: 1, height: o.fontSize, fill: '', strokeWidth: 0, opacity: 0 }));
+  const g = new fabric.Group(paths, { originX: 'center', originY: 'center', left: 0, top: 0, objectCaching: false });
+  g._hand = true;
   return g;
 }
 
@@ -401,10 +492,21 @@ function _setLabelBoundary(rect, boundary) {
 function setLabelText(uidOrObj, text) {
   const g = findIfRequired(uidOrObj);
   const type = isFabricObject(g) && g.customData && g.customData.type;
-  const [r, t] = type ? g.getObjects() : [];
+  const [r] = type ? g.getObjects() : [];
+  let t = type ? g.getObjects()[1] : undefined;
   if (type !== 'label' && !((type === 'figure' || type === 'picture') && t instanceof fabric.Text)) throw new Error(`setLabelText: ${uidOrObj} is not a label, or a figure or picture with a label`);
   const centre = g.getCenterPoint();
-  t.set('text', String(text));
+  if (type === 'label' && g.customData.hand) {
+    // Handwriting is strokes, not a text: new strokes take the old ones' place.
+    const nt = makeHandText(String(text), g.customData.hand);
+    // A child joins a group from the canvas: placed where the old text is
+    // (the group's scale and angle included), it lands in the old text's place.
+    fabric.util.applyTransformToObject(nt, t.calcTransformMatrix());
+    nt.set({ opacity: t.opacity });
+    g.remove(t);
+    g.add(nt);
+    t = nt;
+  } else t.set('text', String(text));
   if (type === 'label') r.set({ width: t.width + 2 * g.customData.padding, height: t.height + 2 * g.customData.padding });
   g.triggerLayout();
   g.setPositionByOrigin(centre, 'center', 'center');
@@ -2750,6 +2852,73 @@ function finishReveal(obj) {
   state.lines.forEach(l => { l.visible = true; });
   (obj.canvas || window.pc).requestRenderAll();
   state.resolve(obj);
+}
+
+// A label's text typed in, a character at a time, from the left (the box and
+// its background are there from the start). opts: duration (ms; default 70 a
+// character), caret (true: a | ahead of the text while it is typed).
+// Resolves to the label.
+function typeIn(uidOrObj, opts) {
+  const g = findIfRequired(uidOrObj);
+  if (!isFabricObject(g) || !g.customData || g.customData.type !== 'label' || g.customData.hand) throw new Error(`typeIn: ${uidOrObj} is not a label in type`);
+  const t = g.getObjects()[1];
+  // Typed again while still typing: the label's own text and place, not the part shown.
+  const home = t._typeHome || { text: g.customData.text, originX: t.originX, left: t.left };
+  if (!t._typeHome) t._typeHome = Object.assign({}, home, { width: t.width });
+  const chars = [...home.text], n = chars.length;
+  const duration = (opts && opts.duration) || Math.max(200, n * 70);
+  const caret = !(opts && opts.caret === false);
+  const start = home.left - t._typeHome.width / 2;
+  const canvas = g.canvas || window.pc;
+  const show = k => {
+    t.set({ text: chars.slice(0, k).join('') + (caret && k < n ? '|' : ''), originX: 'left', left: start });
+    g.dirty = true;
+    if (canvas) canvas.requestRenderAll();
+  };
+  show(0);
+  return new Promise(resolve => fabric.util.animate({
+    startValue: 0, endValue: n, duration: playDuration(duration), easing: (e, b, c, d) => b + c * e / d,
+    onChange: v => show(Math.floor(v)),
+    onComplete: () => { delete t._typeHome; t.set(home); g.dirty = true; if (canvas) canvas.requestRenderAll(); resolve(g); }
+  }));
+}
+
+// Length of SVG path data, in its own units.
+function _pathLength(d) {
+  try {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    el.setAttribute('d', d);
+    return el.getTotalLength() || 1;
+  } catch (e) { return 100; }
+}
+
+// A handwritten label written in, stroke after stroke, as a pen would (the box
+// and its background are there from the start). opts: duration (ms; default
+// 160 a character). Resolves to the label.
+function writeIn(uidOrObj, opts) {
+  const g = findIfRequired(uidOrObj);
+  if (!isFabricObject(g) || !g.customData || !g.customData.hand) throw new Error(`writeIn: ${uidOrObj} is not a handwritten label`);
+  const strokes = g.getObjects()[1].getObjects().filter(p => p._handD).map(p => ({ p, len: _pathLength(p._handD) }));
+  let total = 0;
+  strokes.forEach(s => { s.from = total; total += s.len; s.p.set({ strokeDashArray: [s.len, s.len], strokeDashOffset: s.len }); });
+  const duration = (opts && opts.duration) || Math.max(300, [...g.customData.text].length * 160);
+  const canvas = g.canvas || window.pc;
+  const draw = v => {
+    strokes.forEach(s => s.p.set('strokeDashOffset', s.len - Math.max(0, Math.min(s.len, v - s.from))));
+    g.dirty = true;
+    if (canvas) canvas.requestRenderAll();
+  };
+  draw(0);
+  return new Promise(resolve => fabric.util.animate({
+    startValue: 0, endValue: total, duration: playDuration(duration), easing: (e, b, c, d) => b + c * e / d,
+    onChange: draw,
+    onComplete: () => {
+      strokes.forEach(s => s.p.set({ strokeDashArray: null, strokeDashOffset: 0 }));
+      g.dirty = true;
+      if (canvas) canvas.requestRenderAll();
+      resolve(g);
+    }
+  }));
 }
 
 // Draws objects' outlines as if traced by a pen, then fades their fill (and

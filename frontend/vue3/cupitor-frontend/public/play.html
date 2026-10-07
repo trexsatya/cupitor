@@ -3566,6 +3566,10 @@
         setPlaySpeed(saved || 1);
     })();
 
+    // The handwriting font is loaded up front, so lines that change a
+    // handwritten label work when played on their own too.
+    if (typeof handFont === 'function') handFont().catch(err => console.warn(err.message));
+
     // ---- Tree Node Panel ----
     function getNodeLabel(node) {
         if (!node) return '';

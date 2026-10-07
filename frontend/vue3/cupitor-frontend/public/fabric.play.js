@@ -929,6 +929,8 @@ function _objectState(o) {
   if (o.group && o.group.type === 'activeselection') Object.assign(s, _placeOnCanvas(o))
   if (isHtmlBox(o)) s.html = o.customData.html
   if (o.type === 'group') s.items = o.getObjects().map(_objectState)
+  // A handwritten label's strokes are made from its text, so the text is kept to make them again.
+  if (o.customData && o.customData.hand) s.handText = o.customData.text
   return s
 }
 
@@ -982,6 +984,8 @@ function _applyState(o, state, skipNumbers) {
   if (Object.keys(props).length) o.set(props)
   if ('visible' in state && o.visible !== state.visible) _setTaggedVisible(o, state.visible)
   if (state.html !== undefined && o.customData && o.customData.html !== state.html) setHtml(o, state.html)
+  // Strokes for the remembered text first, so the items below line up with them.
+  if (state.handText != null && o.customData && o.customData.hand && o.customData.text !== state.handText) setLabelText(o, state.handText)
   if (state.items) {
     const items = o.getObjects()
     if (items.length === state.items.length) items.forEach((item, i) => _applyState(item, state.items[i], false))
