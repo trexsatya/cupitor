@@ -1981,7 +1981,7 @@ function animate(obj, props, opts){
         };
         obj.animate(props, options);
         if (!total) finish();
-        setTimeout(finish, (options.duration || 0) + 250);
+        (typeof playTimeout === 'function' ? playTimeout : setTimeout)(finish, (options.duration || 0) + 250);
     });
 }
 
@@ -2741,7 +2741,7 @@ function canFlow(obj) {
 function _drawFlows(canvas, ctx) {
   if (!_flows.size) return;
   const v = canvas.viewportTransform;
-  const now = Date.now();
+  const now = typeof playNow === 'function' ? playNow() : Date.now();
   ctx.save();
   ctx.transform(v[0], v[1], v[2], v[3], v[4], v[5]);
   _flows.forEach((f, line) => {
@@ -2794,7 +2794,7 @@ function flowAlong(list, opts) {
       canvas.on('after:render', e => { if (e.ctx === canvas.contextContainer) _drawFlows(canvas, e.ctx); });
     }
     _flows.set(line, {
-      startedAt: Date.now(),
+      startedAt: typeof playNow === 'function' ? playNow() : Date.now(),
       duration: opts.duration || 1400,
       color: opts.color || '#ff5722',
       radius: opts.radius || Math.max(5, (line.strokeWidth || 1) * 3)

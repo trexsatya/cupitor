@@ -356,6 +356,22 @@ test('an arrow that cannot clear everything takes the curve crossing the fewest 
   assert.notEqual(m.relations.a__b.bend || 0, 0, 'curved: crossing only the wall beats crossing all three');
 });
 
+test('an arrow along the bottom never curves out of view; branch arrows take from_side / to_side', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'a', text: 'VAD BLEV DET?', place: { x: 1000, y: 760 } },
+    { op: 'introduce', id: 'b', text: 'NÄSTA VAL', place: { x: 250, y: 760 } },
+    { op: 'introduce', id: 'w', text: 'IN THE WAY', place: { x: 620, y: 760 } },
+    { op: 'connect', from: 'a', to: 'b' }
+  ]);
+  const r = model.relations.a__b, A = boxOf(model.objects.a), B = boxOf(model.objects.b);
+  const ends = connectorEnds(A, B), len = Math.hypot(ends[2] - ends[0], ends[3] - ends[1]);
+  const midY = (ends[1] + ends[3]) / 2 - (ends[2] - ends[0]) / len * (r.bend || 0);
+  assert.ok(midY <= 800 - 20, `the curve's middle stays on screen: y ${Math.round(midY)} (bend ${r.bend})`);
+  const { model: m2, lines } = await plan([{ op: 'branch', from: 'a', items: ['X'], side: 'above', from_side: 'top-left', to_side: 'bottom' }], model);
+  assert.deepEqual(m2.relations.a__x.sides, { from: 'top-left', to: 'bottom' });
+  assert.match(lines.join('\n'), /connectObjects\("a", "x", "a__x", \{(bend: -?\d+, )?sides: \{"from":"top-left","to":"bottom"\}/);
+});
+
 test('a group can be an arrow end (through its enclosure, a dashed one drawn if it has none) and a place anchor', async () => {
   const { model, lines } = await plan([
     { op: 'introduce', id: 'vote', text: 'VOTE', place: { region: 'left' } },

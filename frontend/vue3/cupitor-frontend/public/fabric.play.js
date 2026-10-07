@@ -52,11 +52,12 @@ function animatePathDrawing(path) {
   // Animation duration based on path length (min 200ms, max 2000ms)
   const duration = Math.min(Math.max(pathLength / 2, 200), 2000);
 
-  // Animate the path drawing
-  const startTime = Date.now();
+  // Animate the path drawing (on the frame clock, which stands still while paused)
+  let startTime = null;
 
-  function animateFrame() {
-    const elapsed = Date.now() - startTime;
+  function animateFrame(t) {
+    if (startTime === null) startTime = t;
+    const elapsed = t - startTime;
     const progress = Math.min(elapsed / duration, 1);
 
     // Ease-out animation for smoother effect
@@ -484,8 +485,71 @@ function update(canvas) {
  */
 function sleep(x) {
   return new Promise((suc, fail) => {
-    setTimeout(() => suc(), x * 1000 / playRate())
+    playTimeout(() => suc(), x * 1000 / playRate())
   })
+}
+
+// ---- Pausing playback ----
+// pausePlayback() freezes everything timed: animations (they all run on
+// requestAnimationFrame, which hands them a clock that stops while paused),
+// and waits made with playTimeout (sleeps, captions, the gap between script
+// lines). resumePlayback() carries on from the same moment.
+window._playPaused = false
+let _pausedAt = 0, _pausedTotal = 0, _heldFrames = []
+const _resumedFrames = new Map() // held id -> the real one it was given on resume
+const _playTimers = new Set()
+;(function (raf, cancel) {
+  // Held frames get ids of their own (negative), so callers can still cancel them.
+  let heldId = 0
+  window.requestAnimationFrame = function (cb) {
+    if (window._playPaused) { const id = --heldId; _heldFrames.push({ id, cb }); return id }
+    return raf(t => cb(t - _pausedTotal))
+  }
+  window.cancelAnimationFrame = function (id) {
+    if (id < 0) {
+      _heldFrames = _heldFrames.filter(f => f.id !== id)
+      if (_resumedFrames.has(id)) { cancel(_resumedFrames.get(id)); _resumedFrames.delete(id) }
+    } else cancel(id)
+  }
+})(window.requestAnimationFrame.bind(window), window.cancelAnimationFrame.bind(window))
+
+// setTimeout that stands still while playback is paused.
+function playTimeout(fn, ms) {
+  const timer = { remaining: Math.max(0, ms || 0), start: 0, id: null }
+  const arm = () => { timer.start = performance.now(); timer.id = setTimeout(() => { _playTimers.delete(timer); fn() }, timer.remaining) }
+  timer.arm = arm
+  _playTimers.add(timer)
+  if (!window._playPaused) arm()
+  return timer
+}
+
+function pausePlayback() {
+  if (window._playPaused) return
+  window._playPaused = true
+  _pausedAt = performance.now()
+  _playTimers.forEach(t => { clearTimeout(t.id); t.remaining = Math.max(0, t.remaining - (_pausedAt - t.start)) })
+  document.body.classList.add('play-paused')
+}
+
+function resumePlayback() {
+  if (!window._playPaused) return
+  window._playPaused = false
+  _pausedTotal += performance.now() - _pausedAt
+  const held = _heldFrames
+  _heldFrames = []
+  _resumedFrames.clear()
+  held.forEach(f => _resumedFrames.set(f.id, window.requestAnimationFrame(f.cb)))
+  _playTimers.forEach(t => t.arm())
+  document.body.classList.remove('play-paused')
+}
+
+// The time playback has run, in ms: performance.now() without the paused stretches.
+function playNow() {
+  return (window._playPaused ? _pausedAt : performance.now()) - _pausedTotal
+}
+
+function togglePlayback() {
+  if (window._playPaused) resumePlayback(); else pausePlayback()
 }
 
 // Playback speed: while a script plays (or is stepped through), its waits and
@@ -650,7 +714,7 @@ function typeQuote(text, _options) {
 
 function delayExecution(fn, delayInMillis) {
   return new Promise((myResolve, myReject) => {
-    setTimeout(() => {
+    playTimeout(() => {
       fn();
       myResolve()
     }, delayInMillis)

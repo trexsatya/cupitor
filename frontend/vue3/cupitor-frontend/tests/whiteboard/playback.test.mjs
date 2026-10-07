@@ -161,3 +161,38 @@ test('handwriting: a middle dot is a dot, missing punctuation is written with wh
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('pause and resume: nothing moves or moves on while paused, then it carries on from the same moment; Space and the button toggle it; Esc while paused stops', async () => {
+  const b = await openBoard();
+  try {
+    await b.eval(() => {
+      window.recordedScriptLines = [
+        'addRect(100, 100, 80, 40, {uid: "A"})',
+        'animate("A", {left: 900}, {duration: 2000})',
+        'Promise.resolve(sleep(1))',
+        'addRect(100, 300, 80, 40, {uid: "B"})'
+      ];
+      playScript();
+    });
+    await b.page.waitForFunction(() => isFabricObject(findIfRequired('A')) && findIfRequired('A').left > 200);
+    await b.page.keyboard.press(' ');
+    assert.equal(await b.page.isVisible('#play-pause-btn .when-paused'), true, 'the button offers Resume');
+    const at = await b.eval(() => findIfRequired('A').left);
+    await b.page.waitForTimeout(2500); // longer than the whole animation
+    assert.equal(await b.eval(() => findIfRequired('A').left), at, 'still while paused');
+    assert.equal(await b.eval(() => isFabricObject(findIfRequired('B'))), false, 'no line runs while paused');
+    await b.page.click('#play-pause-btn');
+    await b.page.waitForFunction(() => isFabricObject(findIfRequired('B')), null, { timeout: 8000 });
+    assert.equal(await b.eval(() => findIfRequired('A').left), 900, 'the animation finished where it should');
+    await b.page.waitForFunction(() => !document.body.classList.contains('play-mode'));
+
+    // Paused, then Esc: playback stops and the board is not left frozen.
+    await b.eval(() => { window.recordedScriptLines = ['Promise.resolve(sleep(1))', 'addRect(100, 500, 80, 40, {uid: "C"})']; playScript(); });
+    await b.page.keyboard.press(' ');
+    await b.page.keyboard.press('Escape');
+    assert.equal(await b.eval(() => window._playPaused), false);
+    await b.page.waitForTimeout(1500);
+    assert.equal(await b.eval(() => isFabricObject(findIfRequired('C'))), false, 'the rest was skipped');
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

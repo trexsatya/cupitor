@@ -215,7 +215,7 @@ function animateViewport(target, opts) {
   return new Promise(resolve => {
     if (!(duration > 0)) { set(1); resolve(); return; }
     fabric.util.animate({
-      startValue: 0, endValue: 1, duration, easing: fabric.util.ease.easeInOutQuad,
+      startValue: 0, endValue: 1, duration: typeof playDuration === 'function' ? playDuration(duration) : duration, easing: fabric.util.ease.easeInOutQuad,
       onChange: set, onComplete: () => { set(1); resolve(); }
     });
   });

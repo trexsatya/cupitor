@@ -46,7 +46,7 @@ export const ACTIONS = {
   type: "Type a new text concept in, a character at a time, when a proposition, question, promise or hypothesis is being formulated in front of the viewer: as introduce (text or box only), plus caret?: true|false (default true) and characters_per_second? (default from pace: short 30, deliberate 12). It is then an ordinary concept.",
   write: "Write a new text concept in by hand, stroke after stroke, as a lecturer would: as introduce (text or box only), plus characters_per_second? (default from pace: short 14, deliberate 6). It stays in handwriting through revise and question; a replace or turnover arrival is ordinary text.",
   introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text, role?, color?, background?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, background?, place?, pace?}. An item without its own role, color or background takes the group\'s.',
-  branch: 'Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, role?, color?, background?, pace?}. Items as in introduce_group.',
+  branch: 'Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, role?, color?, background?, from_side?, to_side?, pace?}. Items as in introduce_group; from_side / to_side as in connect, for every arrow.',
   connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.",
   disconnect: 'Remove a relationship: {id} or {from, to}.',
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.',
@@ -745,15 +745,16 @@ export async function planAction(model, a, measure) {
         lines.push(`Promise.all([${placed.map(p => createLine(p, ms)).join(', ')}])`);
       } else {
         // Each arrow curves round concepts in its way, the new children among them.
+        const sides = sidesOf(a);
         const trial = clone(model);
         placed.forEach(p => { trial.objects[p.id] = { scale: 1, opacity: 1, ...clone(p) }; });
         placed.forEach(p => {
           const rid = `${from.id}__${p.id}`;
           checkNewId(model, rid, taken);
           taken.add(rid);
-          const bend = chooseBend(trial, from.id, p.id, 'auto');
-          relations.push({ id: rid, from: from.id, to: p.id, kind: a.relation || null, ...(bend ? { bend } : {}) });
-          lines.push(createLine(p, ms), `connectObjects(${J(from.id)}, ${J(p.id)}, ${J(rid)}, {${bend ? `bend: ${bend}, ` : ''}animate: true, duration: ${ms}})`);
+          const bend = chooseBend(trial, from.id, p.id, 'auto', sides);
+          relations.push({ id: rid, from: from.id, to: p.id, kind: a.relation || null, ...(bend ? { bend } : {}), ...(sides ? { sides } : {}) });
+          lines.push(createLine(p, ms), `connectObjects(${J(from.id)}, ${J(p.id)}, ${J(rid)}, {${bend ? `bend: ${bend}, ` : ''}${sides ? `sides: ${J(sides)}, ` : ''}animate: true, duration: ${ms}})`);
         });
       }
       // A group's own role, colour and background, which its later arrivals take.
@@ -1317,16 +1318,21 @@ function chooseBend(model, from, to, bend, sides) {
   // Bends grow with the arrow: a short arrow only needs a slight curve.
   const len = Math.hypot(ends[2] - ends[0], ends[3] - ends[1]);
   const k = Math.min(1 / zoomOf(model), Math.max(0.25, len / 260));
+  // A curve passes through its middle, its furthest point: one taking that out of view is not an option.
+  const v = view(model), m = 20 / zoomOf(model);
+  const inView = ([x, y]) => x >= v.x + m && x <= v.x + v.w - m && y >= v.y + m && y <= v.y + v.h - m;
   // With none clear, the curve crossing the fewest concepts (the smaller on a tie).
   let best = null;
   for (const c of [0, 50, -50, 100, -100, 160, -160, 240, -240]) {
     if (c === 0 && reverse) continue;
-    const chords = connectorChords(ends, c ? bendMiddle(ends, c * k) : null);
+    const mid = c ? bendMiddle(ends, c * k) : null;
+    if (mid && !inView(mid)) continue;
+    const chords = connectorChords(ends, mid);
     const hits = others.filter(b => chords.some(ch => segmentHitsBox(ch, b))).length;
     if (!hits) return c && Math.round(c * k);
     if (!best || hits < best.hits) best = { c, hits };
   }
-  return best.c && Math.round(best.c * k);
+  return best ? best.c && Math.round(best.c * k) : 0;
 }
 
 // Whether the segment [x1, y1, x2, y2] crosses the box (Liang-Barsky clipping).

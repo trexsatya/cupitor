@@ -558,7 +558,9 @@ export function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowC
   window.isRecordingPlayback = true;
 
   let fn = null;
-  fn = (x, idx) => setTimeout(() => {
+  // Waits stand still while playback is paused (playTimeout, in fabric.play.js).
+  const wait = (f, ms) => (typeof window.playTimeout === 'function' ? window.playTimeout(f, ms) : setTimeout(f, ms));
+  fn = (x, idx) => wait(() => {
     // console.log("Processing item at index", idx, " at ", new Date());
     const first = data.splice(0, 1);
 

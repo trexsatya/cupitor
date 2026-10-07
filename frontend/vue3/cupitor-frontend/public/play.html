@@ -2066,6 +2066,9 @@
 <!-- Line being played (shown only during script playback) -->
 <div id="play-line-badge"></div>
 
+<!-- Pause / resume while a script plays (Space does the same) -->
+<button id="play-pause-btn" onclick="togglePlayback()" title="Pause / resume (Space)"><span class="when-playing">&#10074;&#10074; Pause</span><span class="when-paused">&#9654; Resume</span></button>
+
 <!-- Zoom Controls -->
 <div id="zoom-controls">
     <button onclick="viewportManager.zoomToPoint({x: innerWidth/2, y: innerHeight/2}, viewportManager.zoom * 1.2)" title="Zoom In">+</button>
@@ -2955,6 +2958,11 @@
                 closeScriptDialog();
             }
         }
+        // Space while a script plays: pause / resume.
+        if (e.key === ' ' && !e.repeat && document.body.classList.contains('play-mode') && !_isTypingIn(e.target)) {
+            e.preventDefault();
+            togglePlayback();
+        }
         if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
             const t = e.target;
             const typing = t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable);
@@ -3075,6 +3083,7 @@
 
     // Esc during playback: the line in progress finishes, the rest are skipped.
     function stopScriptPlayback() {
+        resumePlayback(); // a paused line finishes too
         window._stopPlayback = true;
         window.isRecordingPlayback = false;
         exitPlayMode();
@@ -3125,6 +3134,7 @@
             ['Ctrl/\u2318 + Shift + S', 'Open the script editor'],
             ['Ctrl/\u2318 + Enter', 'In the script editor: run the selected lines (or the cursor\u2019s line)'],
             ['Esc', 'Stop animations and return to Select; during playback, stop the script'],
+            ['Space', 'During playback: pause / resume'],
             ['→', 'Playing stepwise: the next step (with nothing selected)'],
             ['?', 'This list'],
         ]],

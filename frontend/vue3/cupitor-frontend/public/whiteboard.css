@@ -712,6 +712,36 @@ body.play-mode #play-line-badge:not(:empty) {
   display: block;
 }
 
+#play-pause-btn {
+  display: none;
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 999999;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font: 12px system-ui, sans-serif;
+  cursor: pointer;
+  opacity: 0.35;
+}
+#play-pause-btn:hover,
+body.play-paused #play-pause-btn {
+  opacity: 1;
+}
+body.play-mode #play-pause-btn {
+  display: block;
+}
+#play-pause-btn .when-paused,
+body.play-paused #play-pause-btn .when-playing {
+  display: none;
+}
+body.play-paused #play-pause-btn .when-paused {
+  display: inline;
+}
+
 #play-line-badge.failed {
   background: rgba(183, 28, 28, 0.85);
 }
