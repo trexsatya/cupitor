@@ -1562,6 +1562,7 @@
         <label style="display:block;margin:6px 0;font-size:13px;"><input type="checkbox" id="clearBeforePlay-txt" checked> Text layer</label>
         <hr style="border:none;border-top:1px solid #eee;margin:10px 0;">
         <label style="display:block;margin:6px 0;font-size:13px;"><input type="checkbox" id="recordPlayback"> &#128264; Record screen while playing (.webm)</label>
+        <label style="display:block;margin:6px 0;font-size:13px;">Speed <select class="play-speed" onchange="setPlaySpeed(this.value)" title="Playback speed" style="font-size:12px;padding:3px 4px;border:1px solid #ddd;border-radius:4px;background:#fff;"><option value="1">1&times;</option><option value="1.5">1.5&times;</option><option value="2">2&times;</option><option value="4">4&times;</option><option value="8">8&times;</option></select></label>
         <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;">
             <button onclick="closeClearBeforePlayDialog()" style="padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#fff;font-size:12px;cursor:pointer;">Cancel</button>
             <button onclick="confirmClearAndPlayStepwise()" style="padding:4px 10px;border:1px solid #1976D2;border-radius:4px;background:#fff;color:#1976D2;font-size:12px;cursor:pointer;">&#9197; Play Stepwise</button>
@@ -1571,14 +1572,25 @@
 </div>
 
 <!-- Stepwise Playback Panel -->
-<div id="stepwisePlayDialog" style="display:none;position:fixed;right:20px;bottom:20px;z-index:9999998;background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.35);width:520px;max-height:60vh;flex-direction:column;font-family:system-ui,sans-serif;border:1px solid #ddd;">
-    <div style="background:#f5f5f5;border-bottom:1px solid #ddd;padding:10px 14px;border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:space-between;">
+<!-- Starts compact (no code lines): Next, Run to End and the speed; "Lines" shows the script. -->
+<style>
+    #stepwisePlayDialog { width: 520px; }
+    #stepwisePlayDialog.compact { width: auto; }
+    #stepwisePlayDialog.compact #stepwiseLines { display: none; }
+    #stepwisePlayDialog.compact #stepwiseHeader { border-radius: 10px 10px 0 0; }
+</style>
+<div id="stepwisePlayDialog" class="compact" style="display:none;position:fixed;right:20px;bottom:20px;z-index:9999998;background:#fff;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.35);max-height:60vh;flex-direction:column;font-family:system-ui,sans-serif;border:1px solid #ddd;">
+    <div id="stepwiseHeader" style="background:#f5f5f5;border-bottom:1px solid #ddd;padding:10px 14px;border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:space-between;gap:10px;">
         <span style="font-weight:600;font-size:13px;color:#333;">&#9197; Stepwise &mdash; <span id="stepwiseIndex">0</span> / <span id="stepwiseTotal">0</span></span>
-        <button onclick="closeStepwiseDialog()" style="border:none;background:transparent;font-size:18px;cursor:pointer;line-height:1;" title="Close">&times;</button>
+        <span style="display:flex;align-items:center;gap:4px;">
+            <button id="stepwiseLinesBtn" onclick="toggleStepwiseLines()" style="border:1px solid #ddd;background:#fff;border-radius:4px;font-size:11px;padding:2px 8px;cursor:pointer;" title="Show or hide the script lines">Show lines</button>
+            <button onclick="closeStepwiseDialog()" style="border:none;background:transparent;font-size:18px;cursor:pointer;line-height:1;" title="Close">&times;</button>
+        </span>
     </div>
     <div id="stepwiseLines" style="overflow:auto;padding:8px 12px;font-family:ui-monospace,Menlo,monospace;font-size:11px;flex:1;background:#fafafa;border-bottom:1px solid #eee;max-height:40vh;"></div>
     <div style="padding:10px 14px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
         <span id="stepwiseStatus" style="font-size:11px;color:#888;margin-right:auto;"></span>
+        <select class="play-speed" onchange="setPlaySpeed(this.value)" title="Playback speed" style="font-size:12px;padding:3px 4px;border:1px solid #ddd;border-radius:4px;background:#fff;"><option value="1">1&times;</option><option value="1.5">1.5&times;</option><option value="2">2&times;</option><option value="4">4&times;</option><option value="8">8&times;</option></select>
         <button onclick="stepwiseRunToEnd()" style="padding:5px 12px;border:1px solid #1976D2;border-radius:4px;background:#fff;color:#1976D2;font-size:12px;cursor:pointer;">&#9654; Run to End</button>
         <button id="stepwiseNextBtn" onclick="stepwiseNext()" style="padding:5px 12px;border:1px solid #2e7d32;border-radius:4px;background:#2e7d32;color:#fff;font-size:12px;cursor:pointer;">&#9193; Next</button>
     </div>
@@ -3113,6 +3125,7 @@
             ['Ctrl/\u2318 + Shift + S', 'Open the script editor'],
             ['Ctrl/\u2318 + Enter', 'In the script editor: run the selected lines (or the cursor\u2019s line)'],
             ['Esc', 'Stop animations and return to Select; during playback, stop the script'],
+            ['→', 'Playing stepwise: the next step (with nothing selected)'],
             ['?', 'This list'],
         ]],
     ];
@@ -3518,8 +3531,40 @@
         if (!s) return;
         const remaining = s.fns.filter((fn, i) => i >= s.index && !s.comments[i]);
         closeStepwiseDialog();
-        if (remaining.length) schedule(remaining, 1);
+        if (remaining.length) schedule(remaining, () => 1 / playRate());
     }
+
+    function toggleStepwiseLines() {
+        const dialog = document.getElementById('stepwisePlayDialog');
+        const compact = dialog.classList.toggle('compact');
+        document.getElementById('stepwiseLinesBtn').textContent = compact ? 'Show lines' : 'Hide lines';
+        renderStepwiseLines();
+    }
+
+    // → steps on while the stepwise panel is open (not while typing, or with
+    // something selected, when the arrow keys move it).
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'ArrowRight' || !window._stepwiseState || e.metaKey || e.ctrlKey || e.altKey) return;
+        const t = e.target;
+        if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+        if (window.pc && pc.getActiveObject()) return;
+        e.preventDefault();
+        stepwiseNext();
+    });
+
+    // ---- Playback speed ----
+    // window.playSpeed (see playRate in fabric.play.js), remembered in this browser.
+    function setPlaySpeed(v) {
+        const speed = Number(v) > 0 ? Number(v) : 1;
+        window.playSpeed = speed;
+        try { localStorage.setItem('playSpeed', String(speed)); } catch (e) { /* storage off */ }
+        document.querySelectorAll('select.play-speed').forEach(sel => { sel.value = String(speed); });
+    }
+    (function () {
+        let saved = null;
+        try { saved = localStorage.getItem('playSpeed'); } catch (e) { /* storage off */ }
+        setPlaySpeed(saved || 1);
+    })();
 
     // ---- Tree Node Panel ----
     function getNodeLabel(node) {

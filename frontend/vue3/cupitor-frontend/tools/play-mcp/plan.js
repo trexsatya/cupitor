@@ -3,7 +3,7 @@
 //   { title, scenes: [{ name, beats: [{ name, move, viewer_task, actions: [...] }] }] }
 // where actions are the semantic actions apply_semantic_action takes.
 
-import { ACTIONS, VIEWER_TASKS, PACE, PAUSE, TEXT_SIZE, REGIONS } from './scene.js';
+import { ACTIONS, VIEWER_TASKS, PACE, PAUSE, TEXT_SIZE, REGIONS, ROLE_COLORS } from './scene.js';
 
 const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
 
@@ -66,6 +66,9 @@ the thinking to the viewer.
   the camera back with \`narrow_context {"reset": true}\` or \`widen_context\`. New concepts are placed in free space;
   when there is none, the camera pulls back by itself to make some, and everything on screen gets smaller.
 - Diagrams may fail, revise themselves or stay unresolved when the argument does.
+- Colour is meaning, not decoration. Give a concept a \`role\` from the palette (${Object.entries(ROLE_COLORS).map(([r, c]) => `\`${r}\` ${c}`).join(', ')})
+  and it takes that colour; the same role keeps the same colour through the whole film. Use \`color\` only for a
+  meaning the palette lacks, and leave concepts without either in the normal ink.
 
 ## How to work, for each passage
 

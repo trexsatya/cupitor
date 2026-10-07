@@ -581,7 +581,7 @@ export function schedule(data, timeInSeconds, taskRunner, onComplete, finishNowC
         })
       } else if (result !== false) {
         // If the item is just a number, we assume that you want to sleep for that amount of seconds
-        let delay = timeInSeconds * 1000
+        let delay = (typeof timeInSeconds == 'function' ? timeInSeconds() : timeInSeconds) * 1000
         if (typeof (result) == 'number') delay = result * 1000
         fn && fn(delay, idx + 1)
       } else {

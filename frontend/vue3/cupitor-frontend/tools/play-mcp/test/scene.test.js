@@ -1,7 +1,7 @@
 // The scene layer without a browser: sizes come from a fake measurer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyScene, parseScene, planActions, boxOf, validate, withoutLastAction, view, TAG, lineTime, timeline, captionsFile, narrationIssues } from '../scene.js';
+import { emptyScene, parseScene, planActions, boxOf, validate, withoutLastAction, view, TAG, lineTime, timeline, captionsFile, narrationIssues, connectorEnds } from '../scene.js';
 
 const measure = async specs => specs.map(s => (s.kind === 'figure' ? [50, 130] : [String(s.text).length * 12 + 24, 50]));
 const plan = async (actions, model = emptyScene()) => ({ model, ...(await planActions(model, actions, measure)) });
@@ -193,6 +193,44 @@ test('connect bends round a concept in the way, off a straight reverse arrow, an
   assert.notEqual(model.relations.b__a.bend, 0);
   assert.equal(model.relations.c__c.bend, 'loop');
   assert.match(lines.at(-1), /connectObjects\("c", "c", "c__c", \{bend: "loop"/);
+});
+
+test('arrows leave from the middle of an edge, not a corner, unless a side is named', async () => {
+  const a = { x: 0, y: 0, w: 100, h: 50 };
+  assert.deepEqual(connectorEnds(a, { x: 300, y: 200, w: 100, h: 50 }), [50, 50, 350, 200]); // mostly below: bottom to top
+  assert.deepEqual(connectorEnds(a, { x: 300, y: 60, w: 100, h: 50 }), [100, 25, 300, 85]); // mostly beside: right to left
+  assert.deepEqual(connectorEnds(a, { x: 300, y: 200, w: 100, h: 50 }, { from: 'bottom-right', to: 'left' }), [100, 50, 300, 225]);
+  const { model, lines } = await plan([
+    { op: 'introduce', id: 'a', text: 'A', place: { x: 100, y: 100 } },
+    { op: 'introduce', id: 'b', text: 'B', place: { x: 500, y: 400 } },
+    { op: 'connect', from: 'a', to: 'b', from_side: 'top-right' }
+  ]);
+  assert.deepEqual(model.relations.a__b.sides, { from: 'top-right' });
+  assert.match(lines.at(-1), /connectObjects\("a", "b", "a__b", \{sides: \{"from":"top-right"\}, animate: true/);
+  assert.deepEqual(parseScene(lines).relations.a__b.sides, { from: 'top-right' });
+  await assert.rejects(plan([...WHY_ACTION.slice(2, 4), { op: 'connect', from: 'person', to: 'action', to_side: 'middle' }]), /to_side is one of top, bottom/);
+});
+
+test('colour by role: own colour first, groups pass theirs on, kept through changes and back in the script; replace and turnover keep it unless given one', async () => {
+  const { model, lines } = await plan([
+    { op: 'introduce', id: 'people', text: 'PEOPLE', role: 'citizen' },
+    { op: 'introduce', id: 'odd', text: 'ODD', role: 'citizen', color: 'rebeccapurple', place: { near: 'people', side: 'right' } },
+    { op: 'introduce', id: 'plain', text: 'PLAIN', role: 'cause', place: { near: 'people', side: 'left' } },
+    { op: 'introduce_group', id: 'risks', role: 'risk', place: { region: 'bottom' }, items: ['CRISIS', { id: 'facts', text: 'FACTS', role: 'knowledge' }, { id: 'mine', text: 'MINE', color: '#123456' }] },
+    { op: 'revise', id: 'people', text: 'CITIZENS' },
+    { op: 'question', id: 'people' },
+    { op: 'deemphasize', ids: ['people'] },
+    { op: 'replace', id: 'odd', with: { id: 'odder', text: 'ODDER' } },
+    { op: 'turnover', group: 'risks', leaving: ['crisis'], arriving: ['FRAUD'] }
+  ]);
+  const color = id => model.objects[id].color;
+  assert.equal(color('people'), '#3B82F6');
+  assert.equal(color('odder'), 'rebeccapurple', 'replace keeps the old colour');
+  assert.equal(color('plain'), undefined, 'a role outside the palette leaves the normal ink');
+  assert.deepEqual([color('facts'), color('mine'), color('fraud')], ['#14B8A6', '#123456', '#EF4444']);
+  assert.match(lines.find(l => l.startsWith("drawOutline(addLabel(\"PEOPLE\"")), /addLabel\("PEOPLE", .*"color":"#3B82F6"/);
+  assert.equal(parseScene(lines).objects.people.color, '#3B82F6');
+  await assert.rejects(plan([{ op: 'introduce', text: 'X', color: 'red; alert(1)' }]), /must be a CSS colour/);
 });
 
 test('between, then dissolving the boundaries into one band', async () => {

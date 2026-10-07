@@ -484,8 +484,20 @@ function update(canvas) {
  */
 function sleep(x) {
   return new Promise((suc, fail) => {
-    setTimeout(() => suc(), x * 1000)
+    setTimeout(() => suc(), x * 1000 / playRate())
   })
+}
+
+// Playback speed: while a script plays (or is stepped through), its waits and
+// animations take 1 / window.playSpeed of their time. 1 is normal speed.
+function playRate() {
+  return window.isRecordingPlayback && window.playSpeed > 0 ? window.playSpeed : 1
+}
+
+// An animation's ms at the playback speed (fabric.util can't be wrapped: it is
+// frozen, so each animation asks for its time here).
+function playDuration(ms) {
+  return ms > 0 ? Math.max(1, ms / playRate()) : ms
 }
 
 // Narration as a caption: text in a strip at the bottom of the screen (not
@@ -757,25 +769,28 @@ function makeConnection(e) {
 // opts.duration ms (default 800) and a promise of the line is returned.
 // opts.bend curves it: px its middle stands off the straight line (to the
 // left of the way it points when positive), or 'loop' for an arrow from an
-// object back to itself.
+// object back to itself. Ends sit at the middles of facing edges; opts.sides
+// {from, to} names an end's point instead ('top', 'top-left', 'center', …,
+// see connectorEnds).
 function connectObjects(fromUidOrObj, toUidOrObj, lineUid, opts) {
   const a = findIfRequired(fromUidOrObj), b = findIfRequired(toUidOrObj)
   // Thrown so a script's player reports the line instead of skipping it quietly.
   if (!isFabricObject(a)) throw new Error(`connectObjects: no object ${JSON.stringify(fromUidOrObj)}`)
   if (!isFabricObject(b)) throw new Error(`connectObjects: no object ${JSON.stringify(toUidOrObj)}`)
   const bend = opts && opts.bend
+  const sides = opts && opts.sides && (opts.sides.from || opts.sides.to) ? opts.sides : null
   if (a === b && bend !== 'loop') return null
   if (bend) {
-    const [x1, y1, x2, y2, cx, cy] = _bentEnds(a, b, bend)
+    const [x1, y1, x2, y2, cx, cy] = _bentEnds(a, b, bend, sides)
     const line = new fabric.ArrowPath([x1, y1, x2, y2], { cx, cy, stroke: '#555', strokeWidth: 1.5 })
     if (lineUid) line.uid = lineUid
     pc.add(line)
-    Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid, bend })
+    Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid, bend }, sides ? { sides } : {})
     _listConnector(line)
     return opts.animate ? drawOutline(line, { duration: opts.duration || 800 }).then(() => line) : line
   }
-  const line = connect(pc, a, b, { uid: lineUid })
-  Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid })
+  const line = connect(pc, a, b, { uid: lineUid, sides })
+  Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid }, sides ? { sides } : {})
   _listConnector(line)
   if (!(opts && opts.animate)) return line
   // Grown by reshaping each frame: a line's box (and so whether it is drawn
@@ -783,20 +798,20 @@ function connectObjects(fromUidOrObj, toUidOrObj, lineUid, opts) {
   const { x1, y1, x2, y2 } = line
   reshapeLineXY(line, x1, y1, x1, y1)
   return new Promise(resolve => fabric.util.animate({
-    startValue: 0, endValue: 1, duration: (opts && opts.duration) || 800,
+    startValue: 0, endValue: 1, duration: playDuration((opts && opts.duration) || 800),
     onChange: t => reshapeLineXY(line, x1, y1, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t),
     onComplete: () => { reshapeLineXY(line, x1, y1, x2, y2); resolve(line) }
   }))
 }
 
 // Ends and middle [x1, y1, x2, y2, cx, cy] of a curved connector from a to b.
-function _bentEnds(a, b, bend) {
+function _bentEnds(a, b, bend, sides) {
   if (bend === 'loop') {
     // Out of the top edge and back into the right edge, round the corner.
     const r = _freshBox(a), d = Math.max(56, Math.min(r.width, r.height) * 1.2)
     return [r.left + r.width * 0.7, r.top, r.left + r.width, r.top + r.height * 0.3, r.left + r.width + d * 0.35, r.top - d * 0.35]
   }
-  const [x1, y1, x2, y2] = connectorEnds(a, b)
+  const [x1, y1, x2, y2] = connectorEnds(a, b, sides)
   const len = Math.hypot(x2 - x1, y2 - y1) || 1
   return [x1, y1, x2, y2, (x1 + x2) / 2 + (y2 - y1) / len * bend, (y1 + y2) / 2 - (x2 - x1) / len * bend]
 }
@@ -1078,11 +1093,11 @@ function updateConnectors(obj) {
     const a = findIfRequired(line.customData.source), b = findIfRequired(line.customData.target)
     if (!isFabricObject(a) || !isFabricObject(b)) return
     if (line.customData.bend && typeof line.rebuild === 'function') {
-      [line.x1, line.y1, line.x2, line.y2, line.cx, line.cy] = _bentEnds(a, b, line.customData.bend)
+      [line.x1, line.y1, line.x2, line.y2, line.cx, line.cy] = _bentEnds(a, b, line.customData.bend, line.customData.sides)
       line.rebuild()
       return
     }
-    const [x1, y1, x2, y2] = connectorEnds(a, b)
+    const [x1, y1, x2, y2] = connectorEnds(a, b, line.customData.sides)
     line.set({ x1, y1, x2, y2 })
     line.setCoords()
   })
@@ -2137,7 +2152,7 @@ function playScript(lines, opts) {
   }).filter(Boolean)
   window._stopPlayback = false
   window.enterPlayMode && enterPlayMode()
-  schedule(steps, 1, null, () => {
+  schedule(steps, () => 1 / playRate(), null, () => {
     window.exitPlayMode && exitPlayMode()
     if (opts && opts.onDone) opts.onDone(failures)
   }, () => window._stopPlayback)

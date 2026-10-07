@@ -1834,6 +1834,7 @@ function animate(obj, props, opts){
 
     // Fabric divides by the duration, so 0 would leave the object at NaN.
     if (!(options.duration > 0)) options.duration = 1;
+    options.duration = playDuration(options.duration);
 
     const fn = options.onComplete;
 
@@ -2183,7 +2184,7 @@ function connect(canvas, it, other, opts){
         other = other(this)
     }
 
-    const [x1, y1, x2, y2] = connectorEnds(it, other);
+    const [x1, y1, x2, y2] = connectorEnds(it, other, opts.sides);
 
     var line = new fabric.LineArrow([x1, y1, x2, y2], {
         strokeWidth: 1.5,
@@ -2200,9 +2201,6 @@ function connect(canvas, it, other, opts){
 
 }
 
-// End points for a connector from `it` to `other`: facing edges when the boxes
-// are apart on an axis, centres when they overlap on it. Uses the on-canvas
-// boxes, so scale and rotation are accounted for.
 // Ends for a line joining two objects at the middles of the edges that face
 // each other: bottom/top when the other object is mostly above or below,
 // right/left when it is mostly beside. Overlapping objects join at their centres.
@@ -2226,17 +2224,21 @@ function _freshBox(obj) {
     return obj.getBoundingRect();
 }
 
-function connectorEnds(it, other) {
-    const a = _freshBox(it), b = _freshBox(other);
-    const ca = it.getCenterPoint(), cb = other.getCenterPoint();
-    let x1, x2, y1, y2;
-    if (b.left > a.left + a.width) { x1 = a.left + a.width; x2 = b.left; }
-    else if (b.left + b.width < a.left) { x1 = a.left; x2 = b.left + b.width; }
-    else { x1 = ca.x; x2 = cb.x; }
-    if (b.top > a.top + a.height) { y1 = a.top + a.height; y2 = b.top; }
-    else if (b.top + b.height < a.top) { y1 = a.top; y2 = b.top + b.height; }
-    else { y1 = ca.y; y2 = cb.y; }
-    return [x1, y1, x2, y2];
+// Ends for a connector from `it` to `other`: the middles of the edges that face
+// each other (edgeMidEnds), never a corner unless asked for. sides.from /
+// sides.to name an end's point instead: 'top', 'bottom', 'left', 'right',
+// 'top-left', 'top-right', 'bottom-left', 'bottom-right' or 'center'.
+function connectorEnds(it, other, sides) {
+    const ends = edgeMidEnds(it, other);
+    const at = (obj, side) => {
+        const r = _freshBox(obj);
+        const x = side.includes('left') ? r.left : side.includes('right') ? r.left + r.width : r.left + r.width / 2;
+        const y = side.includes('top') ? r.top : side.includes('bottom') ? r.top + r.height : r.top + r.height / 2;
+        return [x, y];
+    };
+    if (sides && sides.from) [ends[0], ends[1]] = at(it, sides.from);
+    if (sides && sides.to) [ends[2], ends[3]] = at(other, sides.to);
+    return ends;
 }
 
 // This function does the actual work
@@ -2729,7 +2731,7 @@ function reveal(uidOrObjOrList, from, opts) {
     obj.clipPath = clip;
     wipe(0);
     fabric.util.animate({
-      startValue: 0, endValue: 1, duration,
+      startValue: 0, endValue: 1, duration: playDuration(duration),
       onChange: wipe,
       abort: () => state.aborted,
       onComplete: () => finishReveal(obj)
@@ -2802,7 +2804,7 @@ function drawOutline(uidOrObjOrList, opts) {
     redraw();
 
     const fadeIn = () => fabric.util.animate({
-      startValue: 0, endValue: 1, duration: fadeTime,
+      startValue: 0, endValue: 1, duration: playDuration(fadeTime),
       onChange: t => {
         fills.forEach(f => { if (f.alpha) fillAt(f, t); });
         state.faded.forEach(f => f.o.set('opacity', f.opacity * t));
@@ -2815,7 +2817,7 @@ function drawOutline(uidOrObjOrList, opts) {
       onComplete: () => finishDrawOutline(obj)
     });
     fabric.util.animate({
-      startValue: 1, endValue: 0, duration,
+      startValue: 1, endValue: 0, duration: playDuration(duration),
       onChange: v => { state.traced.forEach(t => t.o.set('strokeDashOffset', t.length * v)); redraw(); },
       abort: () => state.aborted,
       onComplete: () => {

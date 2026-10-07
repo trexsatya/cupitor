@@ -221,6 +221,7 @@ const SCRIPT_FUNCTIONS = [
             ['opts.animate', 'grow the arrow from the source to the target; the next line waits'],
             ['opts.duration', 'how long it grows, ms (default 800)'],
             ['opts.bend', "curve it: px its middle stands off the straight line (to the left of its direction when positive), or 'loop' for an arrow from an object back to itself"],
+            ['opts.sides', "{from, to}: where the arrow leaves and arrives instead of the middles of the facing edges: 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right' or 'center'"],
         ]],
         ['addClones([json])', 'Recreate duplicated / pasted objects (recorded for you)'],
     ]],

@@ -27,20 +27,28 @@ const KINDS = ['text', 'box', 'figure', 'picture'];
 // Page controls drawn over the canvas (play.html at 1400x850, zoom 1): nothing is placed under them.
 export const RESERVED = [{ name: 'minimap', x: 1180, y: 640, w: 220, h: 160 }];
 
+// Colours by role: color is meaning, not decoration, so a role keeps its
+// colour through the whole film. A concept's own color goes before its role's.
+export const ROLE_COLORS = {
+  citizen: '#3B82F6', knowledge: '#14B8A6', power: '#F59E0B', feedback: '#22C55E',
+  risk: '#EF4444', values: '#8B5CF6', technical: '#6B7280', neutral: '#9CA3AF'
+};
+const ROLES = Object.keys(ROLE_COLORS).join('|');
+
 export const ACTIONS = {
   scene: 'Start a scene: {name}. Objects from earlier scenes stay and can be reused.',
   beat: "Start a beat (one conceptual move): {name, move? (what the narrator does here, e.g. 'the question appears before any answer'), viewer_task?: {type, target}}.",
   viewer_task: `What the viewer should do mentally: {type: ${VIEWER_TASKS.join('|')}, target, constraint?}. Attaches to the current beat (or scene).`,
-  introduce: "Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, place?, pace?}. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.",
-  introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, place?, pace?}.',
-  branch: 'Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, pace?}.',
-  connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none.",
+  introduce: `Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, color?, place?, pace?}. role names what the concept is (any word); ${ROLES} also colour it (${Object.entries(ROLE_COLORS).map(([r, c]) => `${r} ${c}`).join(', ')}), so a role keeps its colour throughout. color (a CSS colour such as #3B82F6) goes before the role's. The colour stays through revise, question, focus, deemphasize, move_into and return_to. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.`,
+  introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text, role?, color?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, place?, pace?}. An item without its own role or color takes the group\'s.',
+  branch: 'Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, role?, color?, pace?}. Items as in introduce_group.',
+  connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.",
   disconnect: 'Remove a relationship: {id} or {from, to}.',
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.',
   revise: 'Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.',
   question: 'Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.',
   weaken_boundary: "Dash (or remove) a concept's or enclosure's boundary: {id, style?: dashed|none, pace?}.",
-  replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?}, pace?}.',
+  replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?}, pace?}. Without a role or color of its own, the new concept keeps the old one\'s.',
   deemphasize: 'Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.',
   focus: 'Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.',
   move_into: 'Move a concept into another (e.g. a question into a person), smaller: {id, into, scale?, pace?}.',
@@ -49,7 +57,7 @@ export const ACTIONS = {
   dissolve_boundary: "Turn categories into a continuum: the boxes of concepts (in order, e.g. two categories with in-between cases already placed between them) lose their boundaries while a colour band appears under them: {ids, id (the band), colors?: [from, to], pace?}.",
   checkpoint: 'Remember how every concept, relationship and the camera are now: {name}.',
   return_to: 'Go back: {name} puts the concepts of a checkpoint back as they were (positions, text, emphasis, ones removed since) and the camera; {ids} brings back removed concepts where they were.',
-  turnover: "Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text}] or [\"TEXT\"], direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.",
+  turnover: "Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text, role?, color?}] or [\"TEXT\"] (without their own, arrivals take the members' role and colour), direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.",
   narrate: "A line of narration, shown as a caption: {text, id? (default n1, n2, ...; later audio for the line takes this id), sync?: before (default: the script waits while it is read, so what follows is revealed after it) | with (what follows plays while it shows), seconds? (hold it this long instead of the reading-pace estimate)}. A caption stays until the next narrate, beat or scene.",
   pause: `Hold still: {kind?: ${Object.keys(PAUSE).join('|')}, seconds?}.`,
   remove: 'Fade concepts out and delete them: {ids, pace?}.'
@@ -88,7 +96,7 @@ export function parseScene(lines) {
 function addObject(model, rec, o) {
   model.objects[o.id] = {
     id: o.id, kind: o.kind || 'text', text: o.text, role: o.role || null, at: o.at, size: o.size,
-    fontSize: o.fontSize, src: o.src, width: o.width, scale: 1, opacity: 1, boundary: o.boundary || 'none',
+    fontSize: o.fontSize, src: o.src, width: o.width, ...(o.color ? { color: o.color } : {}), scale: 1, opacity: 1, boundary: o.boundary || 'none',
     history: o.text != null ? [o.text] : [], scene: model.scene, beat: model.beat
   };
   delete model.retired[o.id]; // its id now names something else
@@ -96,7 +104,7 @@ function addObject(model, rec, o) {
 
 function addRelation(model, r) {
   delete model.retiredRelations[r.id]; // its id now names something else
-  model.relations[r.id] = { id: r.id, from: r.from, to: r.to, kind: r.kind || null, bend: r.bend || 0, ...(r.fixedBend ? { fixedBend: true } : {}), opacity: 1, scene: model.scene, beat: model.beat };
+  model.relations[r.id] = { id: r.id, from: r.from, to: r.to, kind: r.kind || null, bend: r.bend || 0, ...(r.fixedBend ? { fixedBend: true } : {}), ...(r.sides ? { sides: r.sides } : {}), opacity: 1, scene: model.scene, beat: model.beat };
 }
 
 const clone = v => JSON.parse(JSON.stringify(v));
@@ -392,7 +400,7 @@ function rebends(model, moves, sizes = {}, { gone = [], added = [] } = {}) {
   const out = {};
   Object.values(model.relations).forEach(r => {
     if (!(ids.includes(r.from) || ids.includes(r.to)) || r.bend === 'loop' || r.fixedBend || !trial.objects[r.from] || !trial.objects[r.to]) return;
-    const b = chooseBend(trial, r.from, r.to, 'auto') || 0;
+    const b = chooseBend(trial, r.from, r.to, 'auto', r.sides) || 0;
     if (b !== (r.bend || 0)) out[r.id] = b;
   });
   return out;
@@ -409,7 +417,8 @@ const shiftLines = (moves, enclosures, ms) => [
 const redrawLines = (model, bends) => Object.entries(bends).map(([id, b]) => {
   const r = model.relations[id];
   const fade = r.opacity != null && r.opacity !== 1 ? `; setObjectProps(${J(id)}, {opacity: ${r.opacity}})` : '';
-  return `removeByUid(${J(id)}); connectObjects(${J(r.from)}, ${J(r.to)}, ${J(id)}${b ? `, {bend: ${b}}` : ''})${fade}`;
+  const opts = [b ? `bend: ${b}` : '', r.sides ? `sides: ${J(r.sides)}` : ''].filter(Boolean).join(', ');
+  return `removeByUid(${J(id)}); connectObjects(${J(r.from)}, ${J(r.to)}, ${J(id)}${opts ? `, {${opts}}` : ''})${fade}`;
 });
 
 // The box a place is given relative to: a concept's, or a group's (its enclosure, or round its members).
@@ -553,6 +562,17 @@ function expand(model, ids, op) {
   return [...new Set(out)];
 }
 
+const COLOR = /^(#[0-9a-f]{3,8}|(rgb|rgba|hsl|hsla)\([0-9.,%\s]+\)|[a-z]+)$/i;
+
+// The colour of a concept made from `a` (own color, else its role's), or undefined.
+function colorOf(a) {
+  if (a.color != null) {
+    if (typeof a.color !== 'string' || !COLOR.test(a.color.trim())) throw new Error(`color "${a.color}" must be a CSS colour such as "#3B82F6"`);
+    return a.color.trim();
+  }
+  return ROLE_COLORS[a.role];
+}
+
 // What a concept is made of. Sizes are on screen: under a zoomed-out camera
 // the font (or picture) is made bigger in the scene to look the same size.
 function objectSpec(model, a, text) {
@@ -565,6 +585,8 @@ function objectSpec(model, a, text) {
   if (!pictured && (text == null || text === '')) throw new Error('text is required');
   const fontSize = Math.round(screenFont / zoomOf(model) * 10) / 10;
   const spec = { kind, text: text == null || text === '' ? undefined : String(text), fontSize, boundary: kind === 'box' ? 'solid' : 'none' };
+  const color = colorOf(a);
+  if (color) spec.color = color;
   if (kind === 'picture') {
     if (!a.src) throw new Error('a picture needs src');
     spec.src = a.src;
@@ -575,12 +597,12 @@ function objectSpec(model, a, text) {
 
 function createLine(o, ms) {
   if (o.kind === 'picture') {
-    return `Promise.resolve(addPicture(${J(o.src)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, width: o.width, fontSize: o.fontSize })})).then(g => drawOutline(g, {duration: ${ms}}))`;
+    return `Promise.resolve(addPicture(${J(o.src)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, width: o.width, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}) })})).then(g => drawOutline(g, {duration: ${ms}}))`;
   }
   if (o.kind === 'figure') {
-    return `drawOutline(addFigure(${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, fontSize: o.fontSize })}), {duration: ${ms}})`;
+    return `drawOutline(addFigure(${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}) })}), {duration: ${ms}})`;
   }
-  return `drawOutline(addLabel(${J(o.text)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, fontSize: o.fontSize, boundary: o.boundary })}), {duration: ${ms}})`;
+  return `drawOutline(addLabel(${J(o.text)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, fontSize: o.fontSize, boundary: o.boundary, ...(o.color ? { color: o.color } : {}) })}), {duration: ${ms}})`;
 }
 
 export const wordCount = text => String(text).trim().split(/\s+/).filter(Boolean).length;
@@ -684,9 +706,10 @@ export async function planAction(model, a, measure) {
       a = { ...a, from: groupEnd(model, a.from), to: groupEnd(model, a.to) };
       need(model, a.from, op); need(model, a.to, op);
       checkNewId(model, id);
-      const bend = a.from === a.to ? 'loop' : chooseBend(model, a.from, a.to, a.bend == null ? 'auto' : a.bend);
-      const rec = { op, id, from: a.from, to: a.to, kind: a.kind || null, ...(bend ? { bend } : {}), ...(a.bend != null && a.bend !== 'auto' ? { fixedBend: true } : {}) };
-      const opts = bend ? `{bend: ${J(bend)}, animate: true, duration: ${pace(a)}}` : `{animate: true, duration: ${pace(a)}}`;
+      const sides = sidesOf(a);
+      const bend = a.from === a.to ? 'loop' : chooseBend(model, a.from, a.to, a.bend == null ? 'auto' : a.bend, sides);
+      const rec = { op, id, from: a.from, to: a.to, kind: a.kind || null, ...(bend ? { bend } : {}), ...(a.bend != null && a.bend !== 'auto' ? { fixedBend: true } : {}), ...(sides ? { sides } : {}) };
+      const opts = `{${bend ? `bend: ${J(bend)}, ` : ''}${sides ? `sides: ${J(sides)}, ` : ''}animate: true, duration: ${pace(a)}}`;
       return { record: rec, lines: [`connectObjects(${J(a.from)}, ${J(a.to)}, ${J(id)}, ${opts})`] };
     }
 
@@ -759,7 +782,8 @@ export async function planAction(model, a, measure) {
       const w = a.with || {};
       const id = idFor(w.id, w.text);
       checkNewId(model, id);
-      const spec = objectSpec(model, { kind: old.kind === 'enclosure' ? 'text' : old.kind, size: old.fontSize * zoomOf(model), ...w }, w.text);
+      const keep = w.role == null && w.color == null ? { role: old.role, color: old.color } : {};
+      const spec = objectSpec(model, { kind: old.kind === 'enclosure' ? 'text' : old.kind, size: old.fontSize * zoomOf(model), ...keep, ...w }, w.text);
       const [size] = await measure([spec]);
       const neu = { id, ...spec, role: w.role || old.role, at: old.at, size };
       const ms = pace(a);
@@ -933,7 +957,7 @@ export async function planAction(model, a, measure) {
       });
       const lines = [`Promise.resolve().then(() => { ${restore.join('; ')}; }).then(() => Promise.all([${fades.join(', ')}]))`];
       if (relations.length) {
-        lines.push(`Promise.all([${relations.map(r => `connectObjects(${J(r.from)}, ${J(r.to)}, ${J(r.id)}, {${r.bend ? `bend: ${J(r.bend)}, ` : ''}animate: true, duration: ${pace(a)}})`).join(', ')}])`);
+        lines.push(`Promise.all([${relations.map(r => `connectObjects(${J(r.from)}, ${J(r.to)}, ${J(r.id)}, {${r.bend ? `bend: ${J(r.bend)}, ` : ''}${r.sides ? `sides: ${J(r.sides)}, ` : ''}animate: true, duration: ${pace(a)}})`).join(', ')}])`);
       }
       return { record: { op, ids: a.ids, relations }, lines };
     }
@@ -956,7 +980,8 @@ export async function planAction(model, a, measure) {
         const id = idFor(item.id, item.text);
         checkNewId(model, id, taken); taken.add(id);
         const kind = sample.kind === 'box' ? 'box' : 'text';
-        return { id, ...objectSpec(model, { kind, size: sample.fontSize ? sample.fontSize * zoomOf(model) : undefined, ...item }, item.text) };
+        const keep = item.role == null && item.color == null ? { role: sample.role, color: sample.color } : {};
+        return { id, ...objectSpec(model, { kind, size: sample.fontSize ? sample.fontSize * zoomOf(model) : undefined, ...keep, ...item }, item.text), ...(item.role || keep.role ? { role: item.role || keep.role } : {}) };
       });
       const sizes = arriving.length ? await measure(arriving) : [];
       const staying = g.members.filter(m => !leaving.includes(m));
@@ -1129,7 +1154,7 @@ export function withoutLastAction(lines) {
 export function inspect(model, live) {
   const liveBy = new Map((live || []).filter(o => o.uid && !o.parent).map(o => [o.uid, o]));
   const objects = Object.values(model.objects).map(o => {
-    const out = { id: o.id, kind: o.kind, text: o.text, role: o.role || undefined, scene: o.scene || undefined, beat: o.beat || undefined };
+    const out = { id: o.id, kind: o.kind, text: o.text, role: o.role || undefined, color: o.color, scene: o.scene || undefined, beat: o.beat || undefined };
     if (o.history.length > 1) out.revisions = o.history;
     if (o.members) out.members = o.members;
     if (o.inside) out.inside = o.inside;
@@ -1154,13 +1179,40 @@ export function inspect(model, live) {
   };
 }
 
-// Straight ends of a connector between two model boxes: facing edges where
-// the boxes are apart, centres where they overlap (as the page's connectorEnds).
-function connectorEnds(a, b) {
-  let x1, x2, y1, y2;
-  if (b.x > a.x + a.w) { x1 = a.x + a.w; x2 = b.x; } else if (b.x + b.w < a.x) { x1 = a.x; x2 = b.x + b.w; } else { x1 = a.x + a.w / 2; x2 = b.x + b.w / 2; }
-  if (b.y > a.y + a.h) { y1 = a.y + a.h; y2 = b.y; } else if (b.y + b.h < a.y) { y1 = a.y; y2 = b.y + b.h; } else { y1 = a.y + a.h / 2; y2 = b.y + b.h / 2; }
-  return [x1, y1, x2, y2];
+// Points on a box an arrow may be told to leave from or arrive at.
+export const ARROW_SIDES = ['top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right', 'center'];
+
+// A connect's {from, to} sides, or null when neither is given.
+function sidesOf(a) {
+  const sides = {};
+  [['from_side', 'from'], ['to_side', 'to']].forEach(([key, end]) => {
+    if (a[key] == null) return;
+    if (!ARROW_SIDES.includes(a[key])) throw new Error(`connect: ${key} is one of ${ARROW_SIDES.join(', ')}`);
+    sides[end] = a[key];
+  });
+  return Object.keys(sides).length ? sides : null;
+}
+
+// Straight ends of a connector between two model boxes, as the page's
+// connectorEnds: the middles of the edges that face each other (top/bottom
+// when the other box is mostly above or below, left/right when mostly beside),
+// centres where they overlap; sides.from / sides.to name a point instead.
+export function connectorEnds(a, b, sides) {
+  const ca = [a.x + a.w / 2, a.y + a.h / 2], cb = [b.x + b.w / 2, b.y + b.h / 2];
+  const dx = cb[0] - ca[0], dy = cb[1] - ca[1];
+  const apartX = Math.abs(dx) > (a.w + b.w) / 2, apartY = Math.abs(dy) > (a.h + b.h) / 2;
+  let ends;
+  if (!apartX && !apartY) ends = [...ca, ...cb];
+  else if (apartY && (!apartX || Math.abs(dy) / (a.h + b.h) >= Math.abs(dx) / (a.w + b.w))) {
+    ends = dy > 0 ? [ca[0], a.y + a.h, cb[0], b.y] : [ca[0], a.y, cb[0], b.y + b.h];
+  } else ends = dx > 0 ? [a.x + a.w, ca[1], b.x, cb[1]] : [a.x, ca[1], b.x + b.w, cb[1]];
+  const at = (r, side) => [
+    side.includes('left') ? r.x : side.includes('right') ? r.x + r.w : r.x + r.w / 2,
+    side.includes('top') ? r.y : side.includes('bottom') ? r.y + r.h : r.y + r.h / 2
+  ];
+  if (sides && sides.from) [ends[0], ends[1]] = at(a, sides.from);
+  if (sides && sides.to) [ends[2], ends[3]] = at(b, sides.to);
+  return ends;
 }
 
 // The pieces of a connector to test for crossings: the straight line, or two
@@ -1176,9 +1228,9 @@ const bendMiddle = ([x1, y1, x2, y2], bend) => {
 
 // 'auto': straight if that is clear of other concepts and not on top of a
 // straight reverse arrow; else the smallest bend, either way, that is clear.
-function chooseBend(model, from, to, bend) {
+function chooseBend(model, from, to, bend, sides) {
   if (bend !== 'auto') return num(bend, 'connect: bend', -600, 600);
-  const ends = connectorEnds(boxOf(model.objects[from]), boxOf(model.objects[to]));
+  const ends = connectorEnds(boxOf(model.objects[from]), boxOf(model.objects[to]), sides);
   const others = Object.values(model.objects)
     .filter(o => o.id !== from && o.id !== to && o.kind !== 'enclosure' && o.kind !== 'spectrum' && o.opacity > 0)
     .map(o => { const b = boxOf(o); return { x: b.x + 4, y: b.y + 4, w: b.w - 8, h: b.h - 8 }; });

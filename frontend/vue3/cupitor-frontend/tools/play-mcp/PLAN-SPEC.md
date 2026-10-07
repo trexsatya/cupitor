@@ -22,6 +22,9 @@ the thinking to the viewer.
   the camera back with `narrow_context {"reset": true}` or `widen_context`. New concepts are placed in free space;
   when there is none, the camera pulls back by itself to make some, and everything on screen gets smaller.
 - Diagrams may fail, revise themselves or stay unresolved when the argument does.
+- Colour is meaning, not decoration. Give a concept a `role` from the palette (`citizen` #3B82F6, `knowledge` #14B8A6, `power` #F59E0B, `feedback` #22C55E, `risk` #EF4444, `values` #8B5CF6, `technical` #6B7280, `neutral` #9CA3AF)
+  and it takes that colour; the same role keeps the same colour through the whole film. Use `color` only for a
+  meaning the palette lacks, and leave concepts without either in the normal ink.
 
 ## How to work, for each passage
 
@@ -58,16 +61,16 @@ them out, or never use that pattern yourself.
 ## Actions
 
 - `viewer_task`: What the viewer should do mentally: {type: notice|compare|predict|infer|remember|question|integrate, target, constraint?}. Attaches to the current beat (or scene).
-- `introduce`: Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, place?, pace?}. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.
-- `introduce_group`: Add several concepts as a row or column: {id, items: [{id, text}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, place?, pace?}.
-- `branch`: Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, pace?}.
-- `connect`: Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none.
+- `introduce`: Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, color?, place?, pace?}. role names what the concept is (any word); citizen|knowledge|power|feedback|risk|values|technical|neutral also colour it (citizen #3B82F6, knowledge #14B8A6, power #F59E0B, feedback #22C55E, risk #EF4444, values #8B5CF6, technical #6B7280, neutral #9CA3AF), so a role keeps its colour throughout. color (a CSS colour such as #3B82F6) goes before the role's. The colour stays through revise, question, focus, deemphasize, move_into and return_to. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.
+- `introduce_group`: Add several concepts as a row or column: {id, items: [{id, text, role?, color?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, place?, pace?}. An item without its own role or color takes the group's.
+- `branch`: Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, role?, color?, pace?}. Items as in introduce_group.
+- `connect`: Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.
 - `disconnect`: Remove a relationship: {id} or {from, to}.
 - `enclose`: Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.
 - `revise`: Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.
 - `question`: Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.
 - `weaken_boundary`: Dash (or remove) a concept's or enclosure's boundary: {id, style?: dashed|none, pace?}.
-- `replace`: Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?}, pace?}.
+- `replace`: Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?}, pace?}. Without a role or color of its own, the new concept keeps the old one's.
 - `deemphasize`: Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.
 - `focus`: Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.
 - `move_into`: Move a concept into another (e.g. a question into a person), smaller: {id, into, scale?, pace?}.
@@ -76,7 +79,7 @@ them out, or never use that pattern yourself.
 - `dissolve_boundary`: Turn categories into a continuum: the boxes of concepts (in order, e.g. two categories with in-between cases already placed between them) lose their boundaries while a colour band appears under them: {ids, id (the band), colors?: [from, to], pace?}.
 - `checkpoint`: Remember how every concept, relationship and the camera are now: {name}.
 - `return_to`: Go back: {name} puts the concepts of a checkpoint back as they were (positions, text, emphasis, ones removed since) and the camera; {ids} brings back removed concepts where they were.
-- `turnover`: Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text}] or ["TEXT"], direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.
+- `turnover`: Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text, role?, color?}] or ["TEXT"] (without their own, arrivals take the members' role and colour), direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.
 - `narrate`: A line of narration, shown as a caption: {text, id? (default n1, n2, ...; later audio for the line takes this id), sync?: before (default: the script waits while it is read, so what follows is revealed after it) | with (what follows plays while it shows), seconds? (hold it this long instead of the reading-pace estimate)}. A caption stays until the next narrate, beat or scene.
 - `pause`: Hold still: {kind?: short|prediction|thinking, seconds?}.
 - `remove`: Fade concepts out and delete them: {ids, pace?}.
