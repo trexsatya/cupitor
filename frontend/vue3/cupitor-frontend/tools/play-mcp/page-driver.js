@@ -40,6 +40,21 @@ export function serveStatic(root) {
   }));
 }
 
+// Waits until done() holds in the page. Time spent with playback paused (on
+// the page, by a person) does not count against timeoutMs: a paused film
+// waits as long as it stays paused.
+async function untilDone(page, done, timeoutMs, polling) {
+  let left = timeoutMs;
+  for (;;) {
+    const started = Date.now();
+    const why = await page.waitForFunction(fn => (new Function(`return (${fn})()`))() ? 'done' : window._playPaused ? 'paused' : false,
+      String(done), { timeout: Math.max(1, left), polling });
+    if ((await why.jsonValue()) === 'done') return;
+    left -= Date.now() - started;
+    await page.waitForFunction(() => !window._playPaused, null, { timeout: 0, polling: 250 });
+  }
+}
+
 export class PlayPage {
   constructor({ publicDir, headless = false }) {
     this.publicDir = path.resolve(publicDir);
@@ -117,8 +132,7 @@ export class PlayPage {
       if (lines && record) window.recordedScriptLines = (window.recordedScriptLines || []).concat(lines);
       playScript(lines || undefined);
     }, { lines, record, clearFirst });
-    await page.waitForFunction(() => !document.body.classList.contains('play-mode') && !window.isRecordingPlayback,
-      null, { timeout: timeoutMs, polling: 100 });
+    await untilDone(page, () => !document.body.classList.contains('play-mode') && !window.isRecordingPlayback, timeoutMs, 100);
     const lineErrors = await page.evaluate(() => window.__mcpLineErrors.slice());
     return {
       // Lines that ran: comments and blank lines don't count.
@@ -162,8 +176,8 @@ export class PlayPage {
       playScript(run);
     }, { run, fast });
       for (;;) {
-        await page.waitForFunction(() => window.__mcpHeld || (!document.body.classList.contains('play-mode') && !window.isRecordingPlayback),
-          null, { timeout: Math.max(1, deadline - Date.now()), polling: 50 });
+        await untilDone(page, () => window.__mcpHeld || (!document.body.classList.contains('play-mode') && !window.isRecordingPlayback),
+          Math.max(1, deadline - Date.now()), 50);
         const held = await page.evaluate(() => window.__mcpHeld && window.__mcpHeld.k);
         if (held == null) break;
         await page.waitForTimeout(250); // a caption fading in, an HTML box's picture
