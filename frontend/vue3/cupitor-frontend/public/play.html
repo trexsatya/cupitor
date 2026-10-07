@@ -3562,6 +3562,16 @@
         stepwiseNext();
     });
 
+    // The pause button shows while the mouse moves (and for 2 s after), like a video player's controls.
+    (function () {
+        let still = null;
+        document.addEventListener('mousemove', function () {
+            document.body.classList.add('pointer-moving');
+            clearTimeout(still);
+            still = setTimeout(() => document.body.classList.remove('pointer-moving'), 2000);
+        });
+    })();
+
     // ---- Playback speed ----
     // window.playSpeed (see playRate in fabric.play.js), remembered in this browser.
     function setPlaySpeed(v) {

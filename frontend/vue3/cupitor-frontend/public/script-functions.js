@@ -233,6 +233,11 @@ const SCRIPT_FUNCTIONS = [
             ['opts.bend', "curve it: px its middle stands off the straight line (to the left of its direction when positive), or 'loop' for an arrow from an object back to itself"],
             ['opts.sides', "{from, to}: where the arrow leaves and arrives instead of the middles of the facing edges: 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right' or 'center'"],
         ]],
+        ['emanate(fromUid, obj, lineUid, opts)', 'A new object grows out of fromUid along a new connector: small where the arrow leaves, full size where it was put; the next line waits (wrap in Promise.resolve)', [
+            ['obj', 'the new object, or a promise of it (e.g. addLabel(...) or addPicture(...))'],
+            ['opts.bend, opts.sides', 'as connectObjects'],
+            ['opts.duration', 'ms (default 800)'],
+        ]],
         ['addClones([json])', 'Recreate duplicated / pasted objects (recorded for you)'],
     ]],
     ['Animate', [

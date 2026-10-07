@@ -725,7 +725,12 @@ body.play-mode #play-line-badge:not(:empty) {
   color: #fff;
   font: 12px system-ui, sans-serif;
   cursor: pointer;
-  opacity: 0.35;
+  /* Out of the picture (and recordings) until the mouse moves; always there while paused. */
+  opacity: 0;
+  transition: opacity .3s;
+}
+body.pointer-moving #play-pause-btn {
+  opacity: 0.6;
 }
 #play-pause-btn:hover,
 body.play-paused #play-pause-btn {

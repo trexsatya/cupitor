@@ -196,3 +196,31 @@ test('pause and resume: nothing moves or moves on while paused, then it carries 
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('a child grows out of its source along its arrow: small at the source edge first, full size at its place, the arrow following', async () => {
+  const b = await openBoard();
+  try {
+    await b.eval(() => {
+      addRect(200, 200, 120, 60, {uid: 'S'});
+      window.recordedScriptLines = ['Promise.resolve(emanate("S", addLabel("CHILD", 600, 500, {uid: "K", boundary: "solid"}), "S__K", {bend: 60, duration: 2000}))'];
+      playScript();
+    });
+    await b.page.waitForFunction(() => isFabricObject(findIfRequired('S__K')));
+    const look = () => b.eval(() => {
+      const k = findIfRequired('K'), l = findIfRequired('S__K'), c = k.getCenterPoint();
+      return { scale: k.scaleX, x: c.x, y: c.y, start: [l.x1, l.y1].map(Math.round), tip: [l.x2, l.y2], bend: l.customData.bend };
+    });
+    const early = await look();
+    assert.ok(early.scale < 0.5 && early.x < 400, `small, near the source: ${JSON.stringify(early)}`);
+    await b.page.waitForTimeout(800);
+    const mid = await look();
+    assert.ok(mid.scale > early.scale && mid.x > early.x && mid.y > early.y, `growing on its way: ${JSON.stringify(mid)}`);
+    await b.page.waitForFunction(() => !window.isRecordingPlayback);
+    const done = await look();
+    assert.deepEqual([done.scale, Math.round(done.x), Math.round(done.y), done.bend], [1, 600, 500, 60]);
+    assert.deepEqual(early.start, done.start, 'the arrow leaves from the same point all the way, not across the source');
+    const ends = await b.eval(() => { const k = findIfRequired('K'); k.setCoords(); const r = k.getBoundingRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top)]; });
+    assert.deepEqual(done.tip.map(Math.round), ends, 'the arrow ends at the middle of its top edge');
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

@@ -363,6 +363,9 @@ fabric.Canvas.prototype.add = (function (originalFn) {
         attachLineEndpointControls(obj);
         obj._hasEndpointControls = true;
       }
+      // Its corner positions were worked out for the default handles when it
+      // was added: work them out again for these (fabric looks each one up).
+      if (obj._hasEndpointControls) obj.setCoords();
     }
     return this
   };
@@ -866,6 +869,58 @@ function connectObjects(fromUidOrObj, toUidOrObj, lineUid, opts) {
     onChange: t => reshapeLineXY(line, x1, y1, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t),
     onComplete: () => { reshapeLineXY(line, x1, y1, x2, y2); resolve(line) }
   }))
+}
+
+// A new object grows out of `from` along a new connector lineUid: it starts
+// small where the arrow leaves `from` and travels to where it was put, growing
+// to its full size, with the arrow stretching behind it (a curved one bending
+// more as it goes). obj may be a promise of the object. opts: bend, sides (as
+// connectObjects), duration ms (default 800). Returns a promise of the object.
+function emanate(fromUidOrObj, obj, lineUid, opts) {
+  opts = opts || {}
+  const go = o => {
+    o = findIfRequired(o)
+    const a = findIfRequired(fromUidOrObj)
+    if (!isFabricObject(a)) throw new Error(`emanate: no object ${JSON.stringify(fromUidOrObj)}`)
+    if (!isFabricObject(o)) throw new Error('emanate: no object to grow')
+    if (o.visible === false && typeof showObject === 'function') showObject(o)
+    const end = o.getCenterPoint(), sx0 = o.scaleX, sy0 = o.scaleY, opacity = o.opacity == null ? 1 : o.opacity
+    const [x0, y0, x1, y1] = connectorEnds(a, o, opts.sides)
+    // On its way the arrow keeps the points it has at the end: while the child
+    // still overlaps `from`, facing edges would join their centres instead.
+    const named = (obj, x, y) => {
+      const r = _freshBox(obj), near = (p, q) => Math.abs(p - q) < 0.5
+      const v = near(y, r.top) ? 'top' : near(y, r.top + r.height) ? 'bottom' : ''
+      const h = near(x, r.left) ? 'left' : near(x, r.left + r.width) ? 'right' : ''
+      return v && h ? `${v}-${h}` : v || h || 'center'
+    }
+    const flying = { from: named(a, x0, y0), to: named(o, x1, y1) }
+    const bend = opts.bend || 0
+    let line = null
+    const at = t => {
+      if (line) {
+        if (t < 1) line.customData.sides = flying
+        else if (opts.sides) line.customData.sides = opts.sides
+        else delete line.customData.sides
+      }
+      const k = 0.1 + 0.9 * t
+      o.set({ scaleX: sx0 * k, scaleY: sy0 * k, opacity: opacity * Math.min(1, t * 3 + 0.2) })
+      o.setPositionByOrigin(new fabric.Point(x0 + (end.x - x0) * t, y0 + (end.y - y0) * t), 'center', 'center')
+      o.setCoords()
+      if (line && bend) line.customData.bend = bend * Math.max(t, 0.01)
+      if (line) updateConnectors(o)
+      pc.requestRenderAll()
+    }
+    at(0)
+    line = connectObjects(a, o, lineUid, { sides: opts.sides, ...(bend ? { bend: bend * 0.01 } : {}) })
+    at(0)
+    return new Promise(resolve => fabric.util.animate({
+      startValue: 0, endValue: 1, duration: playDuration(opts.duration || 800),
+      onChange: at,
+      onComplete: () => { at(1); resolve(o) }
+    }))
+  }
+  return obj && typeof obj.then === 'function' ? obj.then(go) : go(obj)
 }
 
 // Ends and middle [x1, y1, x2, y2, cx, cy] of a curved connector from a to b.

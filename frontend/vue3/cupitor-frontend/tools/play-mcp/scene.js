@@ -46,7 +46,7 @@ export const ACTIONS = {
   type: "Type a new text concept in, a character at a time, when a proposition, question, promise or hypothesis is being formulated in front of the viewer: as introduce (text or box only), plus caret?: true|false (default true) and characters_per_second? (default from pace: short 30, deliberate 12). It is then an ordinary concept.",
   write: "Write a new text concept in by hand, stroke after stroke, as a lecturer would: as introduce (text or box only), plus characters_per_second? (default from pace: short 14, deliberate 6). It stays in handwriting through revise and question; a replace or turnover arrival is ordinary text.",
   introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text, role?, color?, background?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, background?, place?, pace?}. An item without its own role, color or background takes the group\'s.',
-  branch: 'Add children of a concept and connect them: {from, items, side?: below|above|left|right, kind?, size?, role?, color?, background?, from_side?, to_side?, pace?}. Items as in introduce_group; from_side / to_side as in connect, for every arrow.',
+  branch: 'Add children of a concept, each growing out of it along its arrow (small at first, full size where it lands): {from, items, side?: below|above|left|right, kind?, size?, role?, color?, background?, from_side?, to_side?, emanate?: false (draw each child in place, then its arrow), pace?}. Items as in introduce_group; from_side / to_side as in connect, for every arrow.',
   connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.",
   disconnect: 'Remove a relationship: {id} or {from, to}.',
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.',
@@ -625,13 +625,15 @@ function objectSpec(model, a, text) {
 }
 
 function createLine(o, ms) {
-  if (o.kind === 'picture') {
-    return `Promise.resolve(addPicture(${J(o.src)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, width: o.width, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}) })})).then(g => drawOutline(g, {duration: ${ms}}))`;
-  }
-  if (o.kind === 'figure') {
-    return `drawOutline(addFigure(${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}) })}), {duration: ${ms}})`;
-  }
-  return `drawOutline(${labelCall(o)}, {duration: ${ms}})`;
+  if (o.kind === 'picture') return `Promise.resolve(${makeCall(o)}).then(g => drawOutline(g, {duration: ${ms}}))`;
+  return `drawOutline(${makeCall(o)}, {duration: ${ms}})`;
+}
+
+// The call making concept o (a picture's gives a promise of it).
+function makeCall(o) {
+  if (o.kind === 'picture') return `addPicture(${J(o.src)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, width: o.width, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}) })})`;
+  if (o.kind === 'figure') return `addFigure(${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}) })})`;
+  return labelCall(o);
 }
 
 // The addLabel call making a text or box concept.
@@ -754,7 +756,10 @@ export async function planAction(model, a, measure) {
           taken.add(rid);
           const bend = chooseBend(trial, from.id, p.id, 'auto', sides);
           relations.push({ id: rid, from: from.id, to: p.id, kind: a.relation || null, ...(bend ? { bend } : {}), ...(sides ? { sides } : {}) });
-          lines.push(createLine(p, ms), `connectObjects(${J(from.id)}, ${J(p.id)}, ${J(rid)}, {${bend ? `bend: ${bend}, ` : ''}${sides ? `sides: ${J(sides)}, ` : ''}animate: true, duration: ${ms}})`);
+          const how = `${bend ? `bend: ${bend}, ` : ''}${sides ? `sides: ${J(sides)}, ` : ''}`;
+          // Each child grows out of its source along its arrow, unless asked to be drawn and then connected.
+          if (a.emanate === false) lines.push(createLine(p, ms), `connectObjects(${J(from.id)}, ${J(p.id)}, ${J(rid)}, {${how}animate: true, duration: ${ms}})`);
+          else lines.push(`Promise.resolve(emanate(${J(from.id)}, ${makeCall(p)}, ${J(rid)}, {${how}duration: ${ms}}))`);
         });
       }
       // A group's own role, colour and background, which its later arrivals take.

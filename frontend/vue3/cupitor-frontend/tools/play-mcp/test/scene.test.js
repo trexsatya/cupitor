@@ -369,7 +369,11 @@ test('an arrow along the bottom never curves out of view; branch arrows take fro
   assert.ok(midY <= 800 - 20, `the curve's middle stays on screen: y ${Math.round(midY)} (bend ${r.bend})`);
   const { model: m2, lines } = await plan([{ op: 'branch', from: 'a', items: ['X'], side: 'above', from_side: 'top-left', to_side: 'bottom' }], model);
   assert.deepEqual(m2.relations.a__x.sides, { from: 'top-left', to: 'bottom' });
-  assert.match(lines.join('\n'), /connectObjects\("a", "x", "a__x", \{(bend: -?\d+, )?sides: \{"from":"top-left","to":"bottom"\}/);
+  // The child grows out of its source along the arrow; asked, it is drawn and then connected.
+  assert.match(lines.join('\n'), /^Promise\.resolve\(emanate\("a", addLabel\("X", .*\), "a__x", \{(bend: -?\d+, )?sides: \{"from":"top-left","to":"bottom"\}, duration: \d+\}\)\)$/m);
+  const apart = await plan([{ op: 'branch', from: 'a', items: ['Y'], emanate: false }], model);
+  assert.ok(apart.lines.some(l => l.startsWith('drawOutline(addLabel("Y"')));
+  assert.ok(apart.lines.some(l => l.startsWith('connectObjects("a", "y", "a__y", {')));
 });
 
 test('a group can be an arrow end (through its enclosure, a dashed one drawn if it has none) and a place anchor', async () => {
