@@ -393,6 +393,54 @@ test('a longer text that would push its neighbours out of view pulls the camera 
   ['a', 'b', 'c'].forEach(id => { const x = boxOf(model.objects[id]); assert.ok(x.x >= v.x && x.x + x.w <= v.x + v.w, `${id} in view`); });
 });
 
+test('a pushed concept\'s arrows get the curve that suits where it now is; a curve given by hand stays', async () => {
+  const sizes = { A: [80, 50], B: [80, 50], C: [80, 50], D: [80, 50], 'A, NOW A MUCH LONGER TEXT': [400, 50] };
+  const sized = async specs => specs.map(sp => sizes[sp.text]);
+  const model = emptyScene();
+  // B→D first has to curve round C; once B is pushed right, past C, a straight arrow is clear.
+  const { lines } = await planActions(model, [
+    { op: 'introduce', id: 'a', kind: 'box', text: 'A', place: { x: 400, y: 300 } },
+    { op: 'introduce', id: 'b', kind: 'box', text: 'B', place: { x: 520, y: 300 } },
+    { op: 'introduce', id: 'c', kind: 'box', text: 'C', place: { x: 640, y: 380 } },
+    { op: 'introduce', id: 'd', kind: 'box', text: 'D', place: { x: 1000, y: 520 } },
+    { op: 'connect', from: 'b', to: 'd' },
+    { op: 'connect', from: 'b', to: 'c', bend: 40 },
+    { op: 'checkpoint', name: 'curved' }
+  ], sized);
+  const curved = model.relations.b__d.bend;
+  assert.notEqual(curved, 0);
+  const more = await planActions(model, [{ op: 'revise', id: 'a', text: 'A, NOW A MUCH LONGER TEXT' }], sized);
+  assert.ok(model.objects.b.at[0] > 600);
+  assert.equal(model.relations.b__d.bend, 0);
+  assert.equal(model.relations.b__c.bend, 40);
+  assert.match(more.lines.join('\n'), /removeByUid\("b__d"\); connectObjects\("b", "d", "b__d"\)/);
+  // Going back to the checkpoint draws it curved again, once B is back.
+  const back = await planActions(model, [{ op: 'return_to', name: 'curved' }], sized);
+  assert.equal(model.relations.b__d.bend, curved);
+  assert.match(back.lines.join('\n'), new RegExp(`revertState\\("curved".*removeByUid\\("b__d"\\); connectObjects\\("b", "d", "b__d", \\{bend: ${curved}\\}\\)`));
+  more.lines.push(...back.lines);
+  assert.deepEqual(parseScene([...lines, ...more.lines]).relations, model.relations);
+});
+
+test('turnover: a group that grows pushes what is beside it along its row', async () => {
+  const { model, lines } = await plan([
+    { op: 'introduce_group', id: 'w', items: ['D1', 'D2'], place: { region: 'center' } },
+    { op: 'introduce', id: 'side', text: 'SIDE', place: { near: 'd2', side: 'right' } },
+    { op: 'turnover', group: 'w', leaving: ['d1'], arriving: ['D3', 'D4', 'D5'] }
+  ]);
+  const side = boxOf(model.objects.side);
+  ['d2', 'd3', 'd4', 'd5'].forEach(id => assert.ok(!hit(boxOf(model.objects[id]), side), `${id} clear of SIDE`));
+  // A boundary drawn round the group and SIDE by hand is refitted round where they now are.
+  const more = await planActions(model, [
+    { op: 'enclose', id: 'all', members: ['d2', 'd3', 'd4', 'd5', 'side'] },
+    { op: 'turnover', group: 'w', leaving: ['d2'], arriving: ['D6', 'D7'] }
+  ], measure);
+  const fence = boxOf(model.objects.all);
+  ['d3', 'd4', 'd5', 'd6', 'd7', 'side'].forEach(id => { const b = boxOf(model.objects[id]); assert.ok(b.x >= fence.x && b.x + b.w <= fence.x + fence.w, `${id} inside`); });
+  lines.push(...more.lines);
+  assert.deepEqual(parseScene(lines).objects, model.objects);
+});
+
 test('turnover: members change, the group and its enclosure hold', async () => {
   const { model } = await plan([
     { op: 'introduce_group', id: 'w', items: ['D1', 'D2', 'D3'] },

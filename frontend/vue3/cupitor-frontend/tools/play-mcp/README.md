@@ -88,7 +88,7 @@ comment holds the positions and sizes the action settled on, so rebuilding never
 | --- | --- |
 | `scene`, `beat`, `viewer_task` | Name the scene and its beats (a beat can say the narrator's `move`); record what the viewer should do mentally (notice, compare, predict, infer, remember, question, integrate) |
 | `introduce`, `introduce_group`, `branch` | Add concepts as text, a box, a minimal person (`figure`) or a `picture`; placed near another concept or group, between two, in a region, or in a row or column |
-| `connect`, `disconnect` | Relationships: arrows that follow both ends. They curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop. A group as an end means its enclosure (a dashed one is drawn first if it has none) |
+| `connect`, `disconnect` | Relationships: arrows that follow both ends. They curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop. When a concept is pushed aside, its arrows take the curve that suits where it now is (a curve given by hand stays). A group as an end means its enclosure (a dashed one is drawn first if it has none) |
 | `enclose`, `weaken_boundary` | A boundary round concepts; dash or drop it |
 | `revise`, `question`, `replace` | Change a concept's text, or a figure's or picture's label, in place (its revisions are kept), make it uncertain, or swap it for another; a longer text pushes the concepts beside it aside |
 | `deemphasize`, `focus` | Fade concepts back, or bring some forward and dim the rest |

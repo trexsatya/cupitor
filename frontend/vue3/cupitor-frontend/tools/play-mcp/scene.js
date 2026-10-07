@@ -96,7 +96,7 @@ function addObject(model, rec, o) {
 
 function addRelation(model, r) {
   delete model.retiredRelations[r.id]; // its id now names something else
-  model.relations[r.id] = { id: r.id, from: r.from, to: r.to, kind: r.kind || null, bend: r.bend || 0, opacity: 1, scene: model.scene, beat: model.beat };
+  model.relations[r.id] = { id: r.id, from: r.from, to: r.to, kind: r.kind || null, bend: r.bend || 0, ...(r.fixedBend ? { fixedBend: true } : {}), opacity: 1, scene: model.scene, beat: model.beat };
 }
 
 const clone = v => JSON.parse(JSON.stringify(v));
@@ -173,6 +173,7 @@ export function applyRecord(model, rec) {
       o.text = rec.text; o.size = rec.size; o.history.push(rec.text);
       Object.entries(rec.moves || {}).forEach(([id, at]) => { obj(id).at = at; });
       Object.entries(rec.enclosures || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
+      Object.entries(rec.bends || {}).forEach(([id, b]) => { model.relations[id].bend = b; });
       if (rec.op === 'question') { o.boundary = 'dashed'; o.questioned = true; }
       break;
     }
@@ -184,6 +185,7 @@ export function applyRecord(model, rec) {
       dropObject(model, rec.id);
       Object.entries(rec.moves || {}).forEach(([id, at]) => { obj(id).at = at; });
       Object.entries(rec.enclosures || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
+      Object.entries(rec.bends || {}).forEach(([id, b]) => { model.relations[id].bend = b; });
       addObject(model, rec, rec.with);
       break;
     case 'deemphasize':
@@ -255,6 +257,10 @@ export function applyRecord(model, rec) {
       rec.leaving.forEach(id => dropObject(model, id));
       Object.entries(rec.moves).forEach(([id, at]) => { obj(id).at = at; });
       rec.arriving.forEach(it => addObject(model, rec, it));
+      Object.entries(rec.pushed || {}).forEach(([id, at]) => { obj(id).at = at; });
+      (rec.joins || []).forEach(id => { obj(id).members.push(...rec.arriving.map(it => it.id)); });
+      Object.entries(rec.refits || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
+      Object.entries(rec.bends || {}).forEach(([id, b]) => { if (model.relations[id]) model.relations[id].bend = b; });
       // dropObject deletes a group left empty for a moment; it is the same group.
       const group = model.groups[rec.group] = { ...before, id: rec.group, members: rec.members };
       const enc = group.enclosure && model.objects[group.enclosure];
@@ -329,32 +335,82 @@ const SIDES = { right: [1, 0], left: [-1, 0], below: [0, 1], above: [0, -1] };
 // would newly cover move sideways out of the way, and enclosures round it or
 // them are refitted.
 function makeRoom(model, o, size, { leaving = false } = {}) {
-  const before = boxOf(o), after = boxOf({ ...o, size }), gap = CLEARANCE / zoomOf(model);
-  const moves = {}, enclosures = {};
-  if (after.w <= before.w) return { moves, enclosures };
-  const beside = (p, q) => p.y < q.y + q.h && q.y < p.y + p.h;
-  const movable = Object.values(model.objects).filter(p =>
-    p.id !== o.id && !p.members && p.kind !== 'spectrum' && p.inside !== o.id && o.inside !== p.id && p.opacity > 0 && !overlaps(before, boxOf(p)));
-  // Each push passes on to what the pushed concept then runs into, further the same way.
-  const push = (from, centre, dir) => movable.forEach(p => {
-    if (moves[p.id] || (p.at[0] - centre) * dir < 0 || !beside(from, boxOf(p)) || !overlaps(from, boxOf(p), gap)) return;
-    const b = boxOf(p), dx = dir > 0 ? from.x + from.w + gap - b.x : from.x - gap - (b.x + b.w);
-    if (dx * dir <= 0) return;
-    moves[p.id] = [Math.round(p.at[0] + dx), p.at[1]];
-    push(boxOf({ ...p, at: moves[p.id] }), moves[p.id][0], dir);
-  });
-  push(after, o.at[0], 1);
-  push(after, o.at[0], -1);
+  const before = boxOf(o), after = boxOf({ ...o, size });
+  if (after.w <= before.w) return { moves: {}, enclosures: {}, bends: rebends(model, {}, { [o.id]: size }) };
+  const moves = pushAside(model, before, after, o.at, p => p.id === o.id || p.inside === o.id || o.inside === p.id, 'x');
   const boxFor = id => (id === o.id ? after : moves[id] ? boxOf({ ...model.objects[id], at: moves[id] }) : boxOf(model.objects[id]));
+  const enclosures = refits(model, [o.id, ...Object.keys(moves)], boxFor, leaving ? [o.id] : []);
+  return { moves, enclosures, bends: rebends(model, { ...moves, ...atsOf(enclosures) }, { [o.id]: size, ...sizesOf(enclosures) }) };
+}
+
+// Concepts beside a region that grew from `before` to `after` (along `axis`)
+// moved out of its way, the push passing on to what each then runs into.
+function pushAside(model, before, after, centre, skip, axis) {
+  const gap = CLEARANCE / zoomOf(model), x = axis === 'x', k = x ? 0 : 1;
+  const [pos, len] = x ? ['x', 'w'] : ['y', 'h'], [cross, crossLen] = x ? ['y', 'h'] : ['x', 'w'];
+  const beside = (p, q) => p[cross] < q[cross] + q[crossLen] && q[cross] < p[cross] + p[crossLen];
+  const moves = {};
+  const movable = Object.values(model.objects).filter(p =>
+    !skip(p) && !p.members && p.kind !== 'spectrum' && p.opacity > 0 && !overlaps(before, boxOf(p)));
+  const push = (from, c, dir) => movable.forEach(p => {
+    if (moves[p.id] || (p.at[k] - c) * dir < 0 || !beside(from, boxOf(p)) || !overlaps(from, boxOf(p), gap)) return;
+    const b = boxOf(p), d = dir > 0 ? from[pos] + from[len] + gap - b[pos] : from[pos] - gap - (b[pos] + b[len]);
+    if (d * dir <= 0) return;
+    moves[p.id] = x ? [Math.round(p.at[0] + d), p.at[1]] : [p.at[0], Math.round(p.at[1] + d)];
+    push(boxOf({ ...p, at: moves[p.id] }), moves[p.id][k], dir);
+  });
+  push(after, centre[k], 1);
+  push(after, centre[k], -1);
+  return moves;
+}
+
+const atsOf = fits => Object.fromEntries(Object.entries(fits).map(([id, e]) => [id, e.at]));
+const sizesOf = fits => Object.fromEntries(Object.entries(fits).map(([id, e]) => [id, e.size]));
+
+// Enclosures round any of `ids`, refitted round where their members now are.
+function refits(model, ids, boxFor, gone = [], extra = {}) {
+  const out = {};
   Object.values(model.objects).forEach(e => {
-    if (e.kind !== 'enclosure' || !e.members.some(m => m === o.id || moves[m])) return;
-    const members = e.members.filter(m => model.objects[m] && !(leaving && m === o.id));
+    if (e.kind !== 'enclosure' || !e.members.some(m => ids.includes(m))) return;
+    const members = [...e.members.filter(m => model.objects[m] && !gone.includes(m)), ...(extra[e.id] || [])];
     if (!members.length) return;
     const fit = boxAround(model, members.map(boxFor), 20);
-    if (fit.at.join() !== e.at.join() || fit.size.join() !== e.size.join()) enclosures[e.id] = fit;
+    if (fit.at.join() !== e.at.join() || fit.size.join() !== e.size.join()) out[e.id] = fit;
   });
-  return { moves, enclosures };
+  return out;
 }
+
+// The arrows of concepts that moved (or changed size) whose best curve is now
+// different: {relation id: new bend}. Loops and bends given by hand stay.
+function rebends(model, moves, sizes = {}, { gone = [], added = [] } = {}) {
+  const ids = [...Object.keys(moves), ...Object.keys(sizes)];
+  const trial = clone(model);
+  gone.forEach(id => { delete trial.objects[id]; });
+  added.forEach(o => { trial.objects[o.id] = { scale: 1, opacity: 1, ...clone(o) }; });
+  Object.entries(moves).forEach(([id, at]) => { trial.objects[id].at = at; });
+  Object.entries(sizes).forEach(([id, size]) => { trial.objects[id].size = size; });
+  const out = {};
+  Object.values(model.relations).forEach(r => {
+    if (!(ids.includes(r.from) || ids.includes(r.to)) || r.bend === 'loop' || r.fixedBend || !trial.objects[r.from] || !trial.objects[r.to]) return;
+    const b = chooseBend(trial, r.from, r.to, 'auto') || 0;
+    if (b !== (r.bend || 0)) out[r.id] = b;
+  });
+  return out;
+}
+
+// Script lines moving pushed concepts and refitting enclosures.
+const shiftLines = (moves, enclosures, ms) => [
+  ...Object.entries(moves).map(([id, at]) => `animate(${J(id)}, {left: ${at[0]}, top: ${at[1]}}, {duration: ${ms}})`),
+  ...Object.entries(enclosures).map(([id, e]) => `animate(${J(id)}, {left: ${e.at[0]}, top: ${e.at[1]}, width: ${e.size[0]}, height: ${e.size[1]}}, {duration: ${ms}})`)
+];
+
+// Script lines redrawing arrows with new curves (a straight arrow and a curved
+// one are different kinds of line, so each is drawn again).
+const redrawLines = (model, bends) => Object.entries(bends).map(([id, b]) => {
+  const r = model.relations[id];
+  const fade = r.opacity != null && r.opacity !== 1 ? `; setObjectProps(${J(id)}, {opacity: ${r.opacity}})` : '';
+  return `removeByUid(${J(id)}); connectObjects(${J(r.from)}, ${J(r.to)}, ${J(id)}${b ? `, {bend: ${b}}` : ''})${fade}`;
+});
 
 // The box a place is given relative to: a concept's, or a group's (its enclosure, or round its members).
 function anchorBox(model, id) {
@@ -629,7 +685,7 @@ export async function planAction(model, a, measure) {
       need(model, a.from, op); need(model, a.to, op);
       checkNewId(model, id);
       const bend = a.from === a.to ? 'loop' : chooseBend(model, a.from, a.to, a.bend == null ? 'auto' : a.bend);
-      const rec = { op, id, from: a.from, to: a.to, kind: a.kind || null, ...(bend ? { bend } : {}) };
+      const rec = { op, id, from: a.from, to: a.to, kind: a.kind || null, ...(bend ? { bend } : {}), ...(a.bend != null && a.bend !== 'auto' ? { fixedBend: true } : {}) };
       const opts = bend ? `{bend: ${J(bend)}, animate: true, duration: ${pace(a)}}` : `{animate: true, duration: ${pace(a)}}`;
       return { record: rec, lines: [`connectObjects(${J(a.from)}, ${J(a.to)}, ${J(id)}, ${opts})`] };
     }
@@ -674,14 +730,12 @@ export async function planAction(model, a, measure) {
       const change = op === 'question'
         ? `(setLabelText(${J(a.id)}, ${J(text)}), setLabelBoundary(${J(a.id)}, "dashed"))`
         : `setLabelText(${J(a.id)}, ${J(text)})`;
-      const { moves, enclosures } = makeRoom(model, o, size);
-      const shifts = [
-        ...Object.entries(moves).map(([id, at]) => `animate(${J(id)}, {left: ${at[0]}, top: ${at[1]}}, {duration: ${Math.round(ms * 0.3)}})`),
-        ...Object.entries(enclosures).map(([id, e]) => `animate(${J(id)}, {left: ${e.at[0]}, top: ${e.at[1]}, width: ${e.size[0]}, height: ${e.size[1]}}, {duration: ${Math.round(ms * 0.3)}})`)
-      ];
+      const { moves, enclosures, bends } = makeRoom(model, o, size);
+      const shifts = shiftLines(moves, enclosures, Math.round(ms * 0.3)), redraws = redrawLines(model, bends);
+      const room = shifts.length || redraws.length ? { moves, enclosures, bends } : {};
       return {
-        record: { op, id: a.id, text, size, ...(shifts.length ? { moves, enclosures } : {}) },
-        lines: [`${shifts.length ? `Promise.all([${shifts.join(', ')}]).then(() => ` : ''}animate(${J(a.id)}, {opacity: 0.15}, {duration: ${Math.round(ms * 0.3)}})${shifts.length ? ')' : ''}.then(() => ${change}).then(() => animate(${J(a.id)}, {opacity: ${o.opacity}}, {duration: ${Math.round(ms * 0.7)}}))`]
+        record: { op, id: a.id, text, size, ...room },
+        lines: [`${shifts.length ? `Promise.all([${shifts.join(', ')}]).then(() => ` : ''}animate(${J(a.id)}, {opacity: 0.15}, {duration: ${Math.round(ms * 0.3)}})${shifts.length ? ')' : ''}.then(() => ${change}).then(() => animate(${J(a.id)}, {opacity: ${o.opacity}}, {duration: ${Math.round(ms * 0.7)}}))${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`]
       };
     }
 
@@ -709,14 +763,15 @@ export async function planAction(model, a, measure) {
       const [size] = await measure([spec]);
       const neu = { id, ...spec, role: w.role || old.role, at: old.at, size };
       const ms = pace(a);
-      const { moves, enclosures } = makeRoom(model, { ...old, scale: 1 }, size, { leaving: true });
-      const shifts = [
-        ...Object.entries(moves).map(([mid, at]) => `animate(${J(mid)}, {left: ${at[0]}, top: ${at[1]}}, {duration: ${ms}})`),
-        ...Object.entries(enclosures).map(([eid, e]) => `animate(${J(eid)}, {left: ${e.at[0]}, top: ${e.at[1]}, width: ${e.size[0]}, height: ${e.size[1]}}, {duration: ${ms}})`)
-      ];
+      const { moves, enclosures, bends } = makeRoom(model, { ...old, scale: 1 }, size, { leaving: true });
+      // The old concept's arrows go with it.
+      Object.keys(bends).forEach(rid => { const r = model.relations[rid]; if (r.from === old.id || r.to === old.id) delete bends[rid]; });
+      const shifts = shiftLines(moves, enclosures, ms), redraws = redrawLines(model, bends);
+      const room = shifts.length || redraws.length ? { moves, enclosures, bends } : {};
       return {
-        record: { op, id: a.id, with: neu, ...(shifts.length ? { moves, enclosures } : {}) },
-        lines: [`animate(${J(a.id)}, {opacity: 0}, {duration: ${ms}}).then(() => removeByUid(${J(a.id)}))`, ...(shifts.length ? [`Promise.all([${shifts.join(', ')}])`] : []), createLine(neu, ms)]
+        record: { op, id: a.id, with: neu, ...room },
+        lines: [`animate(${J(a.id)}, {opacity: 0}, {duration: ${ms}}).then(() => removeByUid(${J(a.id)}))`,
+          ...(shifts.length ? [`Promise.all([${shifts.join(', ')}])${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`] : []), createLine(neu, ms)]
       };
     }
 
@@ -840,10 +895,14 @@ export async function planAction(model, a, measure) {
         // revertState puts back places and looks but not how arrows curve, so
         // that is set first (it redraws them at the end).
         const known = id => model.relations[id] || model.retiredRelations[id] || {};
-        const rebend = Object.values(st.relations).filter(r => r.bend && known(r.id).bend !== r.bend)
+        // An arrow that has turned straight or curved since is another kind of
+        // line on the page: it is drawn again once the places are back.
+        const turned = Object.values(st.relations).filter(r => model.relations[r.id] && r.bend !== 'loop' && !r.bend !== !model.relations[r.id].bend);
+        const rebend = Object.values(st.relations).filter(r => r.bend && known(r.id).bend !== r.bend && !turned.includes(r))
           .map(r => `setCustomData(${J(r.id)}, {bend: ${J(r.bend)}})`);
-        lines.push(rebend.length ? `Promise.resolve().then(() => { ${rebend.join('; ')}; }).then(() => revertState(${J(a.name)}, {duration: ${ms}}))`
-          : `revertState(${J(a.name)}, {duration: ${ms}})`);
+        const redraws = redrawLines({ relations: st.relations }, Object.fromEntries(turned.map(r => [r.id, r.bend || 0])));
+        const revert = `revertState(${J(a.name)}, {duration: ${ms}})${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`;
+        lines.push(rebend.length ? `Promise.resolve().then(() => { ${rebend.join('; ')}; }).then(() => ${revert})` : revert);
         // Label text and boundaries are not part of a tag either.
         const fixes = Object.values(st.objects).filter(o => o.kind === 'text' || o.kind === 'box').flatMap(o => {
           const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
@@ -923,9 +982,31 @@ export async function planAction(model, a, measure) {
         enclosure = { id: g.enclosure, ...boxAround(model, boxes, 20) };
         shifts.push(`animate(${J(g.enclosure)}, {left: ${enclosure.at[0]}, top: ${enclosure.at[1]}, width: ${enclosure.size[0]}, height: ${enclosure.size[1]}}, {duration: ${ms}})`);
       }
-      if (shifts.length) lines.push(`Promise.all([${shifts.join(', ')}])`);
+      // A group that grows pushes what is beside it out of the way, along its row or column.
+      const box = ids => { const bs = ids.map(id => { const [w, h] = sizeOf(id); return { x: at[id][0] - w / 2, y: at[id][1] - h / 2, w, h }; }); return boxAround(model, bs, 0); };
+      const toBox = ({ at: [x, y], size: [w, h] }) => ({ x: x - w / 2, y: y - h / 2, w, h });
+      const was = boxAround(model, g.members.map(id => boxOf(model.objects[id])), 0);
+      const all = new Set([...g.members, ...order, g.enclosure]);
+      const pushed = pushAside(model, toBox(was), toBox(box(order)), [cx, cy],
+        p => all.has(p.id) || all.has(p.inside), step[0] !== 0 ? 'x' : 'y');
+      const boxFor = id => (at[id] ? toBox(box([id])) : pushed[id] ? boxOf({ ...model.objects[id], at: pushed[id] }) : boxOf(model.objects[id]));
+      // Arrivals also join an enclosure drawn round every member that stays.
+      const joins = staying.length ? Object.values(model.objects)
+        .filter(e => e.kind === 'enclosure' && e.id !== g.enclosure && staying.every(m => e.members.includes(m))).map(e => e.id) : [];
+      const refitted = refits(model, [...order, ...Object.keys(pushed)], boxFor, leaving,
+        Object.fromEntries(joins.map(id => [id, arriving.map(x => x.id)])));
+      delete refitted[g.enclosure];
+      shifts.push(...shiftLines(pushed, refitted, ms));
+      const encFit = enclosure ? { [enclosure.id]: enclosure } : {};
+      const bends = rebends(model, { ...moves, ...pushed, ...atsOf(refitted), ...atsOf(encFit) }, { ...sizesOf(refitted), ...sizesOf(encFit) },
+        { gone: leaving, added: placed });
+      Object.keys(bends).forEach(rid => { const r = model.relations[rid]; if (leaving.includes(r.from) || leaving.includes(r.to)) delete bends[rid]; });
+      const redraws = redrawLines(model, bends);
+      if (shifts.length) lines.push(`Promise.all([${shifts.join(', ')}])${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`);
+      else if (redraws.length) lines.push(`Promise.resolve().then(() => { ${redraws.join('; ')}; })`);
       if (placed.length) lines.push(`Promise.all([${placed.map(q => createLine(q, ms)).join(', ')}])`);
-      return { record: { op, group: a.group, leaving, moves, arriving: placed, members: order, ...(enclosure ? { enclosure } : {}) }, lines };
+      const room = { ...(joins.length ? { joins } : {}), ...(Object.keys(pushed).length ? { pushed } : {}), ...(Object.keys(refitted).length ? { refits: refitted } : {}), ...(Object.keys(bends).length ? { bends } : {}) };
+      return { record: { op, group: a.group, leaving, moves, arriving: placed, members: order, ...(enclosure ? { enclosure } : {}), ...room }, lines };
     }
 
     case 'narrow_context': {
@@ -1001,7 +1082,7 @@ export async function planActions(model, actions, measure) {
 // When the concepts an action adds, grows or pushes aside would not fit in view
 // without covering others, the camera first pulls back (keeping the centre of
 // the view) just far enough for them to fit: a widen_context of its own, marked auto.
-const ADDS = ['introduce', 'introduce_group', 'branch', 'revise', 'question', 'replace'];
+const ADDS = ['introduce', 'introduce_group', 'branch', 'revise', 'question', 'replace', 'turnover'];
 const ROOM_STEP = 0.85, ROOM_STEPS = 6;
 async function roomInView(model, a, measure) {
   if (!a || !ADDS.includes(a.op) || (a.op !== 'branch' && a.place && (a.place.x != null || a.place.y != null))) return [];
