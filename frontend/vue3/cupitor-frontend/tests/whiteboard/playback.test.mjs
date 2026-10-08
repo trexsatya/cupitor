@@ -302,3 +302,18 @@ test('a handwritten label keeps its own hand: renamed or reverted after the hand
   } finally { await b.close(); }
 });
 
+test('a box animated to a new size is drawn at it (a frame refitted round a renamed concept)', async () => {
+  const b = await openBoard();
+  try {
+    await b.play(['drawOutline(addRect(700, 400, 111, 169, {"uid":"f","originX":"center","originY":"center","rx":18,"ry":18,"stroke":"#666","strokeWidth":2}), {duration: 300})',
+      'animate("f", {left: 700, top: 400, width: 194, height: 169}, {duration: 450})']);
+    // Where the frame's sides are drawn along its middle line: at ±97 now, not the old ±55.
+    const edges = await b.eval(() => {
+      const c = pc.lowerCanvasEl, ctx = c.getContext('2d'), k = c.width / pc.width, v = pc.viewportTransform;
+      const xs = []; for (let x = 560; x <= 840; x += 2) if (ctx.getImageData(Math.round((x * v[0] + v[4]) * k), Math.round((400 * v[3] + v[5]) * k), 1, 1).data[3] > 0) xs.push(x);
+      return [Math.min(...xs), Math.max(...xs)];
+    });
+    assert.ok(edges[0] < 610 && edges[1] > 790, `drawn from ${edges[0]} to ${edges[1]}`);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

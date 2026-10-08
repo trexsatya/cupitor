@@ -92,6 +92,7 @@ them out, or never use that pattern yourself.
 - `replace`: Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one's.
 - `deemphasize`: Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.
 - `focus`: Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.
+- `move`: Move a concept already on screen to a new place, as introduce places one: {id, place, pace?}. Its arrows follow and a frame round it is refitted; use it to make room or line concepts up so their arrows run straight.
 - `move_into`: Move a concept into another (e.g. a question into a person), smaller: {id, into, scale?, pace?}.
 - `widen_context`: Pull the camera back so concepts sit small inside a much larger frame: {ids?: [ids] (default all), scale?: 0.45, region? (where they end up on screen), mode?: camera (default) | objects (shrink the concepts themselves, leaving the rest as it is), pace?}.
 - `narrow_context`: Bring the camera in on concepts: {ids, fill?: 0.7 (share of the screen they fill)} or {reset: true} (back to the starting view), pace?.
@@ -103,7 +104,7 @@ them out, or never use that pattern yourself.
 - `steps`: A list of steps on a spine, a bullet and a label each, for the stages of a process or an argument the viewer is taken through: {id, items: ["TEXT", …], direction?: vertical|horizontal (default vertical), size?, place?, pace?}. It is one concept: place near it, connect to it, focus, deemphasize, remove and return_to work on it as on any other. Then step shows progress through it.
 - `step`: Make item n of a step list the current one: {id, n, pace?}. n: 1 is the first; the items before it are shown done, the ones after it pending; 0 puts them all back to pending.
 - `pause`: Hold still: {kind?: short|prediction|thinking, seconds?}.
-- `remove`: Fade concepts out and delete them: {ids, pace?}. Ones removed earlier are skipped.
+- `remove`: Fade concepts out and delete them: {ids, pace?}. Ones removed earlier are skipped; arrows that met a frame round one concept go back to that concept.
 
 Places: `{"near": id, "side": "left" | "right" | "above" | "below" | "around"}`, `{"between": [id, id]}`
 (ids of concepts or groups) or `{"region": "center" | "top" | "bottom" | "left" | "right" | "top-left" | "top-right" | "bottom-left" | "bottom-right"}`.

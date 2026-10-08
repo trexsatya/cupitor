@@ -2029,6 +2029,10 @@ function animate(obj, props, opts){
     // Each frame: the object's own hook (e.g. a quad's label) and its tree and
     // connector lines, including those of objects inside it.
     const objSpecificUpdate = () => {
+        // fabric's animation sets the values without marking the cached
+        // drawing stale, so a box growing (width, height) would be drawn at
+        // its old size.
+        if (obj) obj.dirty = true;
         if (obj && obj.onAnimationChange) obj.onAnimationChange();
         if (typeof updateTreeItem === 'function') updateTreeItem(obj);
     };
@@ -2444,6 +2448,13 @@ function connectorEnds(it, other, sides) {
     };
     if (sides && sides.from) [ends[0], ends[1]] = at(it, sides.from);
     if (sides && sides.to) [ends[2], ends[3]] = at(other, sides.to);
+    // One end named, the other unnamed: it faces the named one when the other
+    // object lies that way (out of the left side into the right one).
+    const facing = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
+    const lies = (side, from, to) => (side === 'left' ? to.x < from.x : side === 'right' ? to.x > from.x : side === 'top' ? to.y < from.y : to.y > from.y);
+    const centre = o => o.getCenterPoint();
+    if (sides && facing[sides.from] && !sides.to && lies(sides.from, centre(it), centre(other))) [ends[2], ends[3]] = at(other, facing[sides.from]);
+    if (sides && facing[sides.to] && !sides.from && lies(sides.to, centre(other), centre(it))) [ends[0], ends[1]] = at(it, facing[sides.to]);
     return ends;
 }
 

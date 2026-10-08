@@ -64,6 +64,7 @@ export function plainMove(rec) {
     case 'turnover': return `turnover in ${rec.group}: ${rec.leaving.join(', ') || 'none'} leave, ${rec.arriving.map(a => a.id).join(', ') || 'none'} arrive`;
     case 'pause': return `pause ${rec.seconds}s${rec.kind && rec.kind !== 'short' ? ` (${rec.kind})` : ''}`;
     case 'remove': return `remove ${rec.ids.join(', ')}`;
+    case 'move': return `move ${rec.id} to ${rec.moves[rec.id].join(', ')}`;
     default: return describe(rec, { scene: null, beat: null }) + place(rec.place);
   }
 }
@@ -71,7 +72,7 @@ export function plainMove(rec) {
 // Ids an action refers to that already existed (concepts it reuses).
 function refs(rec) {
   return [rec.from, rec.to, rec.into, rec.group, ...(rec.ids || []), ...(rec.members || []),
-    ...(['revise', 'question', 'weaken_boundary', 'replace', 'move_into', 'step'].includes(rec.op) ? [rec.id] : [])].filter(Boolean);
+    ...(['revise', 'question', 'weaken_boundary', 'replace', 'move_into', 'move', 'step'].includes(rec.op) ? [rec.id] : [])].filter(Boolean);
 }
 const created = rec => [...(['introduce', 'type', 'write', 'steps'].includes(rec.op) ? [rec.id] : []), ...(rec.op === 'steps' ? [] : (rec.items || rec.arriving || []).map(i => i.id)),
   ...(rec.op === 'replace' ? [rec.with.id] : []), ...(['enclose', 'dissolve_boundary'].includes(rec.op) ? [rec.id] : [])];

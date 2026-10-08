@@ -1,7 +1,7 @@
 // The scene layer without a browser: sizes come from a fake measurer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyScene, parseScene, planActions, boxOf, validate, withoutLastAction, view, TAG, lineTime, timeline, captionsFile, narrationIssues, connectorEnds } from '../scene.js';
+import { emptyScene, parseScene, planActions, boxOf, validate, withoutLastAction, view, TAG, lineTime, timeline, captionsFile, narrationIssues, connectorEnds, connectorChords, segmentHitsBox } from '../scene.js';
 
 const measure = async specs => specs.map(s => (s.kind === 'steps' ? [300, s.items.length * 60, -130, -(s.items.length - 1) * 30] : s.kind === 'figure' ? [50, 130] : [String(s.text).length * 12 + 24, 50]));
 const plan = async (actions, model = emptyScene()) => ({ model, ...(await planActions(model, actions, measure)) });
@@ -200,6 +200,12 @@ test('arrows leave from the middle of an edge, not a corner, unless a side is na
   assert.deepEqual(connectorEnds(a, { x: 300, y: 200, w: 100, h: 50 }), [50, 50, 350, 200]); // mostly below: bottom to top
   assert.deepEqual(connectorEnds(a, { x: 300, y: 60, w: 100, h: 50 }), [100, 25, 300, 85]); // mostly beside: right to left
   assert.deepEqual(connectorEnds(a, { x: 300, y: 200, w: 100, h: 50 }, { from: 'bottom-right', to: 'left' }), [100, 50, 300, 225]);
+  // One side named: the other end faces it when the other box lies that way, else keeps its own choice.
+  const far = { x: -200, y: -300, w: 100, h: 50 }; // mostly above, a little left: on its own the arrow would end on its bottom
+  assert.deepEqual(connectorEnds(a, far), [50, 0, -150, -250]);
+  assert.deepEqual(connectorEnds(a, far, { from: 'left' }), [0, 25, -100, -275]);
+  assert.deepEqual(connectorEnds(far, a, { to: 'left' }), [-100, -275, 0, 25]);
+  assert.deepEqual(connectorEnds(a, { x: 300, y: 200, w: 100, h: 50 }, { from: 'left' }), [0, 25, 350, 200]); // target not to the left
   const { model, lines } = await plan([
     { op: 'introduce', id: 'a', text: 'A', place: { x: 100, y: 100 } },
     { op: 'introduce', id: 'b', text: 'B', place: { x: 500, y: 400 } },
@@ -797,5 +803,56 @@ test('a concept brought back whose old place is out of view now comes back at th
   // One still in view comes back where it was.
   const { model: m2 } = await plan([{ op: 'remove', ids: ['mid'] }, { op: 'return_to', ids: ['mid'] }], model);
   assert.deepEqual(m2.objects.mid.at, model.objects.mid.at);
+});
+
+test('an arrow does not curve round through its own end to reach the facing edge', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'gov', text: 'REGERING', kind: 'box', place: { x: 1140, y: 303 } },
+    { op: 'introduce', id: 'party', text: 'PARTI', kind: 'box', place: { x: 1140, y: 400 } },
+    { op: 'introduce', id: 'promise', text: 'VI SKA FÖRBÄTTRA X', kind: 'box', place: { x: 700, y: 400 } },
+    { op: 'introduce', id: 'res', text: 'VAD BLEV DET?', kind: 'box', place: { x: 360, y: 630 } },
+    { op: 'connect', from: 'gov', to: 'res', from_side: 'left' }
+  ]);
+  const r = model.relations.gov__res, A = boxOf(model.objects.gov), B = boxOf(model.objects.res);
+  const ends = connectorEnds(A, B, r.sides), len = Math.hypot(ends[2] - ends[0], ends[3] - ends[1]);
+  const mid = r.bend ? [(ends[0] + ends[2]) / 2 + (ends[3] - ends[1]) / len * r.bend, (ends[1] + ends[3]) / 2 - (ends[2] - ends[0]) / len * r.bend] : null;
+  const inner = b => ({ x: b.x + 8, y: b.y + 8, w: b.w - 16, h: b.h - 16 });
+  assert.ok(!connectorChords(ends, mid).some(ch => segmentHitsBox(ch, inner(B)) || segmentHitsBox(ch, inner(A))), `bend ${r.bend} keeps out of both ends`);
+});
+
+test('move: a concept goes to a new place with its frame and arrows; a concept framed alone sends its arrows from the frame', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'kid', kind: 'figure', text: 'BARN', place: { region: 'left' } },
+    { op: 'introduce', id: 'rep', kind: 'figure', text: 'REPRESENTANT', place: { region: 'center' } },
+    { op: 'enclose', id: 'frame', members: ['rep'] },
+    { op: 'connect', from: 'kid', to: 'rep' }
+  ]);
+  assert.equal(model.relations.kid__rep.to, 'frame', 'the arrow meets the frame round it');
+  const { model: m, lines } = await plan([{ op: 'move', id: 'rep', place: { region: 'right' } }], model);
+  const at = m.objects.rep.at;
+  assert.ok(at[0] > 1000, `moved right: ${at}`);
+  assert.deepEqual(m.objects.frame.at, at, 'the frame came with it');
+  assert.match(lines.find(l => l.startsWith('Promise.all([animate("rep"')), /animate\("frame", \{left: \d+, top: \d+, width/);
+  const { model: b } = await plan([{ op: 'branch', from: 'rep', items: ['RULE'] }], m);
+  assert.equal(b.relations.rep__rule.from, 'frame', 'a branch leaves from the frame too');
+  await assert.rejects(plan([{ op: 'move', id: 'frame', place: { region: 'top' } }], m), /is a frame; move what it is round/);
+  await assert.rejects(plan([{ op: 'move', id: 'kid' }], m), /place is required/);
+  // Joined to its own frame, an arrow stays on the concept rather than looping on the frame.
+  const { model: own } = await plan([{ op: 'connect', from: 'rep', to: 'frame' }], m);
+  assert.deepEqual([own.relations.rep__frame.from, own.relations.rep__frame.to], ['rep', 'frame']);
+  // The frame removed, its arrows go back to the concept it was round, on the page too.
+  const { model: gone, lines: rl } = await plan([{ op: 'remove', ids: ['frame'] }], m);
+  assert.deepEqual([gone.relations.kid__rep.from, gone.relations.kid__rep.to], ['kid', 'rep']);
+  assert.match(rl.at(-1), /removeByUid\)\)\.then\(\(\) => \{ \["kid__rep",.*\]\.forEach\(removeByUid\); return Promise\.all\(\[connectObjects\("kid", "rep", "kid__rep"/);
+});
+
+test('move refuses a concept inside another, and one holding others', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'box', text: 'BOX', size: 'large', place: { region: 'center' } },
+    { op: 'introduce', id: 'dot', text: 'DOT', size: 'small', place: { region: 'left' } },
+    { op: 'move_into', id: 'dot', into: 'box' }
+  ]);
+  await assert.rejects(plan([{ op: 'move', id: 'box', place: { region: 'right' } }], model), /"box" holds "dot"/);
+  await assert.rejects(plan([{ op: 'move', id: 'dot', place: { region: 'right' } }], model), /"dot" is inside "box"/);
 });
 

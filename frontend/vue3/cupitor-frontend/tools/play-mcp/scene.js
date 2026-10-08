@@ -56,6 +56,7 @@ export const ACTIONS = {
   replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one\'s.',
   deemphasize: 'Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.',
   focus: 'Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.',
+  move: "Move a concept already on screen to a new place, as introduce places one: {id, place, pace?}. Its arrows follow and a frame round it is refitted; use it to make room or line concepts up so their arrows run straight.",
   move_into: 'Move a concept into another (e.g. a question into a person), smaller: {id, into, scale?, pace?}.',
   widen_context: "Pull the camera back so concepts sit small inside a much larger frame: {ids?: [ids] (default all), scale?: 0.45, region? (where they end up on screen), mode?: camera (default) | objects (shrink the concepts themselves, leaving the rest as it is), pace?}.",
   narrow_context: 'Bring the camera in on concepts: {ids, fill?: 0.7 (share of the screen they fill)} or {reset: true} (back to the starting view), pace?.',
@@ -67,7 +68,7 @@ export const ACTIONS = {
   steps: 'A list of steps on a spine, a bullet and a label each, for the stages of a process or an argument the viewer is taken through: {id, items: ["TEXT", …], direction?: vertical|horizontal (default vertical), size?, place?, pace?}. It is one concept: place near it, connect to it, focus, deemphasize, remove and return_to work on it as on any other. Then step shows progress through it.',
   step: 'Make item n of a step list the current one: {id, n, pace?}. n: 1 is the first; the items before it are shown done, the ones after it pending; 0 puts them all back to pending.',
   pause: `Hold still: {kind?: ${Object.keys(PAUSE).join('|')}, seconds?}.`,
-  remove: 'Fade concepts out and delete them: {ids, pace?}. Ones removed earlier are skipped.'
+  remove: 'Fade concepts out and delete them: {ids, pace?}. Ones removed earlier are skipped; arrows that met a frame round one concept go back to that concept.'
 };
 
 export function emptyScene() {
@@ -219,6 +220,11 @@ export function applyRecord(model, rec) {
         else if (model.relations[id]) model.relations[id].opacity = v;
       });
       break;
+    case 'move':
+      Object.entries(rec.moves).forEach(([id, at]) => { obj(id).at = at; });
+      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
+      Object.entries(rec.bends || {}).forEach(([id, b]) => { model.relations[id].bend = b; });
+      break;
     case 'move_into': {
       const o = obj(rec.id);
       o.at = rec.at; o.scale = rec.scale; o.inside = rec.into;
@@ -305,6 +311,11 @@ export function applyRecord(model, rec) {
       break;
     case 'remove':
       rec.ids.forEach(id => dropObject(model, id));
+      (rec.reattach || []).forEach(r => {
+        const was = model.retiredRelations[r.id];
+        delete model.retiredRelations[r.id];
+        addRelation(model, { kind: was && was.kind, ...r });
+      });
       break;
     default:
       throw new Error(`unknown action "${rec.op}"`);
@@ -366,7 +377,16 @@ function makeRoom(model, o, size, { leaving = false } = {}) {
   if (after.w <= before.w) return { moves: {}, enclosures: {}, bends: rebends(model, {}, { [o.id]: size }) };
   const moves = pushAside(model, before, after, o.at, p => p.id === o.id || p.inside === o.id || o.inside === p.id, 'x');
   const boxFor = id => (id === o.id ? after : moves[id] ? boxOf({ ...model.objects[id], at: moves[id] }) : boxOf(model.objects[id]));
-  const enclosures = refits(model, [o.id, ...Object.keys(moves)], boxFor, leaving ? [o.id] : []);
+  let enclosures = refits(model, [o.id, ...Object.keys(moves)], boxFor, leaving ? [o.id] : []);
+  // A frame that grew round it makes room for itself too.
+  if (!leaving) {
+    Object.entries(enclosures).forEach(([id, fit]) => {
+      const e = model.objects[id], now = clone(model);
+      Object.entries(moves).forEach(([m, at]) => { now.objects[m].at = at; });
+      Object.assign(moves, pushAside(now, boxOf(e), boxOf({ ...e, ...fit }), fit.at, p => p.id === id || p.id === o.id || e.members.includes(p.id), 'x'));
+    });
+    enclosures = refits(model, [o.id, ...Object.keys(moves)], boxFor, []);
+  }
   return { moves, enclosures, bends: rebends(model, { ...moves, ...atsOf(enclosures) }, { [o.id]: size, ...sizesOf(enclosures) }) };
 }
 
@@ -581,6 +601,11 @@ const AUTO = Symbol('auto');
 
 // A group as one end of an arrow: its enclosure.
 const groupEnd = (model, id) => { const g = model.groups[id]; return g && g.enclosure && model.objects[g.enclosure] ? g.enclosure : id; };
+// A concept framed by itself (an enclosure round it alone): its arrows meet the frame.
+const frameEnd = (model, id) => {
+  const frames = Object.values(model.objects).filter(o => o.kind === 'enclosure' && o.opacity > 0 && o.members.length === 1 && o.members[0] === id);
+  return frames.length ? frames[frames.length - 1].id : id;
+};
 
 // The enclosures an action needs drawn first: a connect to a group without one.
 const missingEnclosures = (model, a) => a && a.op === 'connect'
@@ -789,19 +814,21 @@ export async function planAction(model, a, measure) {
         // one asked for when room was short) and arrives at their facing side
         // (unless named), so they fan out from one point, and curves round
         // concepts in its way, the new children among them.
-        const named = { ...BRANCH_SIDES[landedSide(boxOf(from), placed.map(boxOf), layout)], ...sidesOf(a) }, sides = Object.keys(named).length ? named : null;
+        // From its frame, when it is framed by itself.
+        const src = model.objects[frameEnd(model, from.id)];
+        const named = { ...BRANCH_SIDES[landedSide(boxOf(src), placed.map(boxOf), layout)], ...sidesOf(a) }, sides = Object.keys(named).length ? named : null;
         const trial = clone(model);
         placed.forEach(p => { trial.objects[p.id] = { scale: 1, opacity: 1, ...clone(p) }; });
         placed.forEach(p => {
           const rid = `${from.id}__${p.id}`;
           checkNewId(model, rid, taken);
           taken.add(rid);
-          const bend = chooseBend(trial, from.id, p.id, 'auto', sides);
-          relations.push({ id: rid, from: from.id, to: p.id, kind: a.relation || null, ...(bend ? { bend } : {}), ...(sides ? { sides } : {}) });
+          const bend = chooseBend(trial, src.id, p.id, 'auto', sides);
+          relations.push({ id: rid, from: src.id, to: p.id, kind: a.relation || null, ...(bend ? { bend } : {}), ...(sides ? { sides } : {}) });
           const how = `${bend ? `bend: ${bend}, ` : ''}${sides ? `sides: ${J(sides)}, ` : ''}`;
           // Each child grows out of its source along its arrow, unless asked to be drawn and then connected.
-          if (a.emanate === false) lines.push(createLine(p, ms), `connectObjects(${J(from.id)}, ${J(p.id)}, ${J(rid)}, {${how}animate: true, duration: ${ms}})`);
-          else lines.push(`Promise.resolve(emanate(${J(from.id)}, ${makeCall(p)}, ${J(rid)}, {${how}duration: ${ms}}))`);
+          if (a.emanate === false) lines.push(createLine(p, ms), `connectObjects(${J(src.id)}, ${J(p.id)}, ${J(rid)}, {${how}animate: true, duration: ${ms}})`);
+          else lines.push(`Promise.resolve(emanate(${J(src.id)}, ${makeCall(p)}, ${J(rid)}, {${how}duration: ${ms}}))`);
         });
       }
       // A group's own role, colour and background, which its later arrivals take.
@@ -811,7 +838,11 @@ export async function planAction(model, a, measure) {
 
     case 'connect': {
       const id = a.id || `${a.from}__${a.to}`;
-      a = { ...a, from: groupEnd(model, a.from), to: groupEnd(model, a.to) };
+      {
+        const from = groupEnd(model, a.from), to = groupEnd(model, a.to), ff = frameEnd(model, from), ft = frameEnd(model, to);
+        // Not when that would join a concept to its own frame.
+        a = ff === ft ? { ...a, from, to } : { ...a, from: ff, to: ft };
+      }
       need(model, a.from, op); need(model, a.to, op);
       checkNewId(model, id);
       const sides = sidesOf(a);
@@ -926,6 +957,28 @@ export async function planAction(model, a, measure) {
         }
       }
       return { record: { op, ids: a.ids, opacity }, lines: [fadeAll(Object.entries(opacity), pace(a))] };
+    }
+
+    case 'move': {
+      const o = need(model, a.id, op);
+      if (o.kind === 'enclosure' || o.kind === 'spectrum') throw new Error(`move: "${a.id}" is a ${o.kind === 'enclosure' ? 'frame' : 'colour band'}; move what it is round instead`);
+      if (!a.place) throw new Error('move: place is required');
+      if (a.place.near === a.id || (a.place.between || []).includes(a.id)) throw new Error('move: place it relative to something else');
+      if (o.inside) throw new Error(`move: "${a.id}" is inside "${o.inside}"; move "${o.inside}" instead`);
+      const holds = Object.values(model.objects).filter(p => p.inside === o.id).map(p => p.id);
+      if (holds.length) throw new Error(`move: "${a.id}" holds ${holds.map(h => `"${h}"`).join(', ')}; it cannot be moved without them`);
+      // Free space as if it (and frames round it alone) were not there.
+      const self = id => id === o.id || (model.objects[id].kind === 'enclosure' && model.objects[id].members.every(m => m === o.id));
+      const taken = Object.values(model.objects).filter(p => p.opacity > 0 && !self(p.id)).map(boxOf).concat(reservedIn(model).map(r => screenRect(model, r)));
+      const b = boxOf(o), at = placeBox(model, [b.w, b.h], a.place, taken);
+      const moves = { [o.id]: at };
+      const enclosures = refits(model, [o.id], id => (id === o.id ? boxOf({ ...o, at }) : boxOf(model.objects[id])));
+      const bends = rebends(model, { ...moves, ...atsOf(enclosures) }, sizesOf(enclosures));
+      const ms = pace(a, 'deliberate'), redraws = redrawLines(model, bends);
+      return {
+        record: { op, id: o.id, moves, enclosures, bends },
+        lines: [`Promise.all([${shiftLines(moves, enclosures, ms).join(', ')}])${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`]
+      };
     }
 
     case 'move_into': {
@@ -1218,7 +1271,22 @@ export async function planAction(model, a, measure) {
       const ids = left.length ? expand(model, left, op) : [];
       const ms = pace(a);
       if (!ids.length) return { record: { op, ids }, lines: [] };
-      return { record: { op, ids }, lines: [`${fadeAll(ids.map(id => [id, 0]), ms)}.then(() => ${J(ids)}.forEach(removeByUid))`] };
+      // A frame round one concept that stays: its arrows go back to that concept.
+      const lone = Object.fromEntries(ids.map(id => model.objects[id]).filter(o => o && o.kind === 'enclosure' && o.members.length === 1 && !ids.includes(o.members[0])).map(o => [o.id, o.members[0]]));
+      const reattach = Object.values(model.relations).filter(r => (lone[r.from] || lone[r.to]) && !(ids.includes(r.from) && !lone[r.from]) && !(ids.includes(r.to) && !lone[r.to]))
+        .map(r => ({ id: r.id, from: lone[r.from] || r.from, to: lone[r.to] || r.to, sides: r.sides, fixedBend: r.fixedBend }))
+        .filter(r => r.from !== r.to)
+        .map(r => {
+          const trial = clone(model);
+          ids.forEach(id => dropObject(trial, id));
+          const { fixedBend, ...rest } = r, bend = fixedBend ? model.relations[r.id].bend : chooseBend(trial, r.from, r.to, 'auto', r.sides);
+          return { ...rest, ...(bend ? { bend } : {}), ...(fixedBend ? { fixedBend } : {}) };
+        });
+      const redraw = reattach.map(r => `connectObjects(${J(r.from)}, ${J(r.to)}, ${J(r.id)}, {${r.bend ? `bend: ${J(r.bend)}, ` : ''}${r.sides ? `sides: ${J(r.sides)}, ` : ''}animate: true, duration: ${ms}})`);
+      return {
+        record: { op, ids, ...(reattach.length ? { reattach } : {}) },
+        lines: [`${fadeAll(ids.map(id => [id, 0]), ms)}.then(() => ${J(ids)}.forEach(removeByUid))${redraw.length ? `.then(() => { ${J(reattach.map(r => r.id))}.forEach(removeByUid); return Promise.all([${redraw.join(', ')}]); })` : ''}`]
+      };
     }
   }
   throw new Error(`unhandled op ${op}`);
@@ -1370,13 +1438,23 @@ export function connectorEnds(a, b, sides) {
   ];
   if (sides && sides.from) [ends[0], ends[1]] = at(a, sides.from);
   if (sides && sides.to) [ends[2], ends[3]] = at(b, sides.to);
+  // One end named, the other unnamed: it faces the named one when the other
+  // box lies that way (as the page does).
+  const facing = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
+  const lies = (side, p, q) => (side === 'left' ? q[0] < p[0] : side === 'right' ? q[0] > p[0] : side === 'top' ? q[1] < p[1] : q[1] > p[1]);
+  if (sides && facing[sides.from] && !sides.to && lies(sides.from, ca, cb)) [ends[2], ends[3]] = at(b, facing[sides.from]);
+  if (sides && facing[sides.to] && !sides.from && lies(sides.to, cb, ca)) [ends[0], ends[1]] = at(a, facing[sides.to]);
   return ends;
 }
 
 // The pieces of a connector to test for crossings: the straight line, or two
 // chords through the middle of a curve. `mid` is the curve's middle point.
 export function connectorChords([x1, y1, x2, y2], mid) {
-  return mid ? [[x1, y1, mid[0], mid[1]], [mid[0], mid[1], x2, y2]] : [[x1, y1, x2, y2]];
+  if (!mid) return [[x1, y1, x2, y2]];
+  // The curve itself (a quadratic through mid at its half way point), in short chords.
+  const cx = 2 * mid[0] - (x1 + x2) / 2, cy = 2 * mid[1] - (y1 + y2) / 2, n = 12;
+  const at = t => [(1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t * t * x2, (1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t * t * y2];
+  return Array.from({ length: n }, (_, i) => [...at(i / n), ...at((i + 1) / n)]);
 }
 
 const bendMiddle = ([x1, y1, x2, y2], bend) => {
@@ -1393,6 +1471,9 @@ function chooseBend(model, from, to, bend, sides) {
   const others = Object.values(model.objects)
     .filter(o => o.id !== from && o.id !== to && o.kind !== 'enclosure' && o.kind !== 'spectrum' && o.opacity > 0)
     .map(o => { const b = boxOf(o); return { x: b.x + 4, y: b.y + 4, w: b.w - 8, h: b.h - 8 }; });
+  // Its own ends too: an arrow coming round to an edge from the far side crosses its own box
+  // (inset more, so the edge it starts or ends on does not count).
+  const own = [from, to].map(id => { const b = boxOf(model.objects[id]); return { x: b.x + 8, y: b.y + 8, w: b.w - 16, h: b.h - 16 }; });
   const reverse = Object.values(model.relations).some(r => r.from === to && r.to === from && !r.bend);
   // Bends grow with the arrow: a short arrow only needs a slight curve.
   const len = Math.hypot(ends[2] - ends[0], ends[3] - ends[1]);
@@ -1407,7 +1488,7 @@ function chooseBend(model, from, to, bend, sides) {
     const mid = c ? bendMiddle(ends, c * k) : null;
     if (mid && !inView(mid)) continue;
     const chords = connectorChords(ends, mid);
-    const hits = others.filter(b => chords.some(ch => segmentHitsBox(ch, b))).length;
+    const hits = [...others, ...own].filter(b => chords.some(ch => segmentHitsBox(ch, b))).length;
     if (!hits) return c && Math.round(c * k);
     if (!best || hits < best.hits) best = { c, hits };
   }
