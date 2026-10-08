@@ -375,6 +375,11 @@ test('an arrow along the bottom never curves out of view; branch arrows take fro
   const fan = await plan([{ op: 'branch', from: 'a', items: ['P', 'Q', 'R', 'S'], side: 'above' }, { op: 'branch', from: 'b', items: ['T'], side: 'right', to_side: 'top' }], model);
   assert.deepEqual(['p', 'q', 'r', 's'].map(id => fan.model.relations[`a__${id}`].sides), Array(4).fill({ from: 'top', to: 'bottom' }));
   assert.deepEqual(fan.model.relations.b__t.sides, { from: 'right', to: 'top' });
+  // With no room on the side asked for, the arrows leave the side the children landed on.
+  for (const [y, side, sides] of [[700, 'below', { from: 'top', to: 'bottom' }], [60, 'above', { from: 'bottom', to: 'top' }]]) {
+    const { model: m } = await plan([{ op: 'introduce', id: 'root', text: 'ROOT', place: { x: 700, y } }, { op: 'branch', from: 'root', items: ['ONE', 'TWO', 'THREE'], side }]);
+    assert.deepEqual(m.relations.root__one.sides, sides, `asked ${side} at y ${y}`);
+  }
   const apart = await plan([{ op: 'branch', from: 'a', items: ['Y'], emanate: false }], model);
   assert.ok(apart.lines.some(l => l.startsWith('drawOutline(addLabel("Y"')));
   assert.ok(apart.lines.some(l => l.startsWith('connectObjects("a", "y", "a__y", {')));

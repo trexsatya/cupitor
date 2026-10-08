@@ -46,7 +46,7 @@ export const ACTIONS = {
   type: "Type a new text concept in, a character at a time, when a proposition, question, promise or hypothesis is being formulated in front of the viewer: as introduce (text or box only), plus caret?: true|false (default true) and characters_per_second? (default from pace: short 30, deliberate 12). It is then an ordinary concept.",
   write: "Write a new text concept in by hand, stroke after stroke, as a lecturer would: as introduce (text or box only), plus characters_per_second? (default from pace: short 14, deliberate 6). It stays in handwriting through revise and question; a replace or turnover arrival is ordinary text.",
   introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text, role?, color?, background?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, background?, place?, pace?}. An item without its own role, color or background takes the group\'s.',
-  branch: 'Add children of a concept, each growing out of it along its arrow (small at first, full size where it lands): {from, items, side?: below|above|left|right, kind?, size?, role?, color?, background?, from_side?, to_side?, emanate?: false (draw each child in place, then its arrow), pace?}. Items as in introduce_group. The arrows leave the side the children grow towards (bottom for below) and arrive at the side facing it; from_side / to_side, as in connect, name others for every arrow.',
+  branch: 'Add children of a concept, each growing out of it along its arrow (small at first, full size where it lands): {from, items, side?: below|above|left|right, kind?, size?, role?, color?, background?, from_side?, to_side?, emanate?: false (draw each child in place, then its arrow), pace?}. Items as in introduce_group. The arrows leave the side the children landed on (bottom when below) and arrive at the side facing it; from_side / to_side, as in connect, name others for every arrow.',
   connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.",
   disconnect: 'Remove a relationship: {id} or {from, to}.',
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.',
@@ -746,10 +746,11 @@ export async function planAction(model, a, measure) {
       if (op === 'introduce_group') {
         lines.push(`Promise.all([${placed.map(p => createLine(p, ms)).join(', ')}])`);
       } else {
-        // Each arrow leaves the side the children grow towards and arrives at
-        // their facing side (unless named), so they fan out from one point,
-        // and curves round concepts in its way, the new children among them.
-        const named = { ...BRANCH_SIDES[side], ...sidesOf(a) }, sides = Object.keys(named).length ? named : null;
+        // Each arrow leaves the side the children landed on (not always the
+        // one asked for when room was short) and arrives at their facing side
+        // (unless named), so they fan out from one point, and curves round
+        // concepts in its way, the new children among them.
+        const named = { ...BRANCH_SIDES[landedSide(boxOf(from), placed.map(boxOf), layout)], ...sidesOf(a) }, sides = Object.keys(named).length ? named : null;
         const trial = clone(model);
         placed.forEach(p => { trial.objects[p.id] = { scale: 1, opacity: 1, ...clone(p) }; });
         placed.forEach(p => {
@@ -1270,6 +1271,20 @@ export const ARROW_SIDES = ['top', 'bottom', 'left', 'right', 'top-left', 'top-r
 
 // A connect's {from, to} sides, or null when neither is given.
 const BRANCH_SIDES = { below: { from: 'bottom', to: 'top' }, above: { from: 'top', to: 'bottom' }, left: { from: 'left', to: 'right' }, right: { from: 'right', to: 'left' } };
+
+// Which side of box f the boxes bs lie on as a whole. A row clear of it above
+// or below takes that side, a column clear of it left or right that one;
+// otherwise the side with the widest gap, none when they overlap it both ways.
+function landedSide(f, bs, layout) {
+  const top = Math.min(...bs.map(b => b.y)), bottom = Math.max(...bs.map(b => b.y + b.h));
+  const left = Math.min(...bs.map(b => b.x)), right = Math.max(...bs.map(b => b.x + b.w));
+  const gaps = { below: top - (f.y + f.h), above: f.y - bottom, right: left - (f.x + f.w), left: f.x - right };
+  const along = layout === 'column' ? ['right', 'left'] : ['below', 'above'];
+  const preferred = along.filter(k => gaps[k] >= 0).sort((p, q) => gaps[q] - gaps[p])[0];
+  if (bs.length > 1 && preferred) return preferred;
+  const [side, gap] = Object.entries(gaps).reduce((best, g) => (g[1] > best[1] ? g : best));
+  return gap >= 0 ? side : null;
+}
 
 function sidesOf(a) {
   const sides = {};
