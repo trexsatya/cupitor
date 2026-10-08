@@ -92,6 +92,7 @@ test('typed and handwritten labels: in a character or stroke at a time, then who
   const b = await openBoard();
   try {
     await b.eval(() => {
+      setHandFont('satisfy'); // a hand written stroke by stroke
       window.recordedScriptLines = [
         'Promise.resolve(typeIn(addLabel("WHO?", 300, 200, {uid: "t", boundary: "solid"}), {duration: 2000}))',
         'Promise.resolve(handFont()).then(() => writeIn(addLabel("VEM SÄTTER RAMEN?", 600, 400, {uid: "w", boundary: "solid", hand: true}), {duration: 2000}))'
@@ -137,6 +138,7 @@ test('handwriting: a middle dot is a dot, missing punctuation is written with wh
   const b = await openBoard();
   try {
     const look = await b.eval(async () => {
+      setHandFont('satisfy');
       await handFont();
       const strokes = t => makeHandText(t, { fontSize: 40 }).getObjects().filter(p => p._handD);
       const width = t => makeHandText(t, { fontSize: 40 }).width;
@@ -252,3 +254,51 @@ test('a figure with a boundary: a frame round person and label, refitted when th
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('handwriting in a font hand (Merienda, the default): the real font, uncovered left to right; renamed in place', async () => {
+  const b = await openBoard();
+  try {
+    await b.eval(() => {
+      window.recordedScriptLines = ['Promise.resolve(handFont()).then(() => writeIn(addLabel("VÄLJ IGEN SENARE", 600, 300, {uid: "w", boundary: "solid", hand: true}), {duration: 2000}))'];
+      playScript();
+    });
+    await b.page.waitForFunction(() => isFabricObject(findIfRequired('w')));
+    await b.page.waitForTimeout(900);
+    const part = await b.eval(() => { const t = findIfRequired('w').getObjects()[1]; return { family: t.fontFamily, clip: t.clipPath && t.clipPath.width / t.width }; });
+    assert.equal(part.family, 'Merienda');
+    assert.ok(part.clip > 0.1 && part.clip < 0.9, `part written: ${part.clip}`);
+    await b.page.waitForFunction(() => !window.isRecordingPlayback);
+    assert.equal(await b.eval(() => findIfRequired('w').getObjects()[1].clipPath), undefined, 'all of it shows');
+    // Merienda itself is loaded, not a fallback font.
+    assert.equal(await b.eval(() => document.fonts.check('22px Merienda')), true);
+    const before = await b.eval(() => { const g = findIfRequired('w'); return [Math.round(g.getCenterPoint().x), Math.round(g.getCenterPoint().y), Math.round(g.getObjects()[0].width)]; });
+    await b.eval(() => setLabelText('w', 'NÄSTA VAL'));
+    const after = await b.eval(() => { const g = findIfRequired('w'); return [Math.round(g.getCenterPoint().x), Math.round(g.getCenterPoint().y), Math.round(g.getObjects()[0].width), g.getObjects()[1].fontFamily]; });
+    assert.deepEqual(after.slice(0, 2), before.slice(0, 2), 'same place');
+    assert.ok(after[2] < before[2] && after[3] === 'Merienda', `box fits the shorter text in the same hand: ${after}`);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('a handwritten label keeps its own hand: renamed or reverted after the hand changed, it stays in the hand it was made in', async () => {
+  const b = await openBoard();
+  try {
+    const hand = () => b.eval(() => { const t = findIfRequired('s').getObjects()[1]; return t._objects ? 'strokes' : t.fontFamily; });
+    await b.eval(async () => { await setHandFont('satisfy'); addLabel('FÖRST', 400, 300, { uid: 's', hand: true }); tagState('first', ['s']); });
+    assert.equal(await hand(), 'strokes');
+    // Another hand chosen: the earlier label is renamed and reverted in its own, each a line by itself.
+    await b.play(['setHandFont("merienda")', 'setLabelText("s", "SEDAN")']);
+    assert.equal(await hand(), 'strokes');
+    await b.play(['revertState("first", {duration: 1})']);
+    assert.equal(await hand(), 'strokes');
+    assert.equal(await b.eval(() => findIfRequired('s').customData.text), 'FÖRST');
+    // New ones are made in the chosen hand; two writeIns at once end with all of it showing.
+    await b.play(['addLabel("NY", 400, 500, {uid: "m", hand: true})']);
+    assert.equal(await b.eval(() => findIfRequired('m').getObjects()[1].fontFamily), 'Merienda');
+    await b.eval(() => Promise.all([writeIn('m', { duration: 600 }), writeIn('m', { duration: 300 })]));
+    assert.equal(await b.eval(() => findIfRequired('m').getObjects()[1].clipPath), undefined);
+    assert.match(await b.eval(() => { try { setHandFont('toString'); return ''; } catch (e) { return e.message; } }), /one of merienda/);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+

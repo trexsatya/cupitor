@@ -370,10 +370,11 @@ function textInRect(textStr, x, y, optsText, optsRect, uid){
 // can be revised in place (setLabelText) without the object changing identity.
 // opts: uid, fontSize (22), color ('#222'), background (the box's fill; none by default),
 // boundary ('none' (default) | 'solid' | 'dashed'), padding (12), hand (true: the text in
-// handwriting, as pen strokes; needs handFont() loaded first).
+// handwriting, see setHandFont; needs handFont() loaded first).
 function makeLabel(text, x, y, opts) {
   const o = Object.assign({ fontSize: 22, color: '#222', boundary: 'none', padding: 12 }, opts);
-  const t = o.hand ? makeHandText(text, { fontSize: o.fontSize, color: o.color }) : new fabric.Text(String(text), {
+  const hand = o.hand && { fontSize: o.fontSize, color: o.color, font: _handName };
+  const t = hand ? makeHandText(text, hand) : new fabric.Text(String(text), {
     fontSize: o.fontSize, fill: o.color, fontFamily: 'Helvetica, Arial, sans-serif', textAlign: 'center',
     originX: 'center', originY: 'center', left: 0, top: 0
   });
@@ -385,30 +386,49 @@ function makeLabel(text, x, y, opts) {
   const g = new fabric.Group([r, t], { originX: 'center', originY: 'center', left: x || 0, top: y || 0 });
   g.uid = o.uid || semanticUid('label');
   g.customData = { type: 'label', text: String(text), padding: o.padding, boundary: o.boundary };
-  if (o.hand) g.customData.hand = { fontSize: o.fontSize, color: o.color };
+  if (hand) g.customData.hand = hand; // rebuilt in the same hand when renamed
   return g;
 }
 
 // ---- Handwriting ----
-// Pen strokes for each character come from a Vara.js font (Satisfy, a light cursive):
-// per glyph, strokes as SVG paths in font units, offset by (mx, -my) from the
-// glyph's origin. Letters with accents (Å, Ä, Ö, É, …) are the base letter with
-// the marks drawn above it.
+// Two kinds of hand. A 'font' hand is a real font (Merienda by default): the
+// text is set in it, and writeIn uncovers it left to right as a pen would
+// write. A 'strokes' hand comes from a Vara.js font: per glyph, strokes as SVG
+// paths in font units, offset by (mx, -my) from the glyph's origin, and writeIn
+// draws them stroke by stroke; letters with accents (Å, Ä, Ö, É, …) are the
+// base letter with the marks drawn above it.
+// strokes: gap is the room after each letter, in spaces; the pen is the font size / weight wide.
+const HAND_FONTS = {
+  merienda: { kind: 'font', family: 'Merienda', url: '/vendor/fonts/Merienda/Merienda-wght.ttf', weight: 400 },
+  satisfy: { kind: 'strokes', url: '/vendor/varajs/fonts/Satisfy/SatisfySL.json', gap: 0.06, weight: 18 },
+  'shadows-into-light': { kind: 'strokes', url: '/vendor/varajs/fonts/Shadows-Into-Light/shadows-into-light.json', gap: 0.18, weight: 11 }
+};
+let _handName = 'merienda'; // the hand new handwriting is made in
+const _handLoaded = {}, _handLoading = {};
 
-// gap: room after each letter, in spaces; weight: the pen is the font size / weight wide.
-const HAND_FONT = { url: '/vendor/varajs/fonts/Satisfy/SatisfySL.json', gap: 0.06, weight: 18 };
-let _handFont = null, _handFontLoading = null;
+// Chooses the hand for handwriting made from now on (a name in HAND_FONTS)
+// and loads it; a label keeps the hand it was made in.
+function setHandFont(name) {
+  if (!Object.hasOwn(HAND_FONTS, name)) throw new Error(`setHandFont: one of ${Object.keys(HAND_FONTS).join(', ')}`);
+  _handName = name;
+  return handFont(name);
+}
 
-// Loads the handwriting font once; resolves when makeHandText can be used.
-function handFont() {
-  if (_handFont) return Promise.resolve(_handFont);
-  if (!_handFontLoading) {
-    _handFontLoading = fetch(HAND_FONT.url).then(r => {
-      if (!r.ok) throw new Error(`handFont: ${HAND_FONT.url} answered ${r.status}`);
-      return r.json();
-    }).then(font => (_handFont = Object.assign(font, { gap: HAND_FONT.gap })), err => { _handFontLoading = null; throw err; });
+// Loads a hand (by default the current one) once; resolves when makeHandText
+// can use it.
+function handFont(name = _handName) {
+  if (_handLoaded[name]) return Promise.resolve(_handLoaded[name]);
+  if (!_handLoading[name]) {
+    const hand = HAND_FONTS[name];
+    const loading = hand.kind === 'font'
+      ? new FontFace(hand.family, `url(${hand.url})`, { weight: '300 900' }).load().then(face => { document.fonts.add(face); return { kind: 'font' }; })
+      : fetch(hand.url).then(r => {
+        if (!r.ok) throw new Error(`handFont: ${hand.url} answered ${r.status}`);
+        return r.json();
+      }).then(font => Object.assign(font, { gap: hand.gap }));
+    _handLoading[name] = loading.then(font => (_handLoaded[name] = font), err => { delete _handLoading[name]; throw err; });
   }
-  return _handFontLoading;
+  return _handLoading[name];
 }
 
 // Marks drawn above a base letter, as paths in a box (x0, top) w wide, in font units.
@@ -424,8 +444,7 @@ const _handCircle = (cx, cy, r) => `M ${cx - r},${cy} a ${r},${r} 0 1,0 ${2 * r}
 const _handDot = (cx, cy, r) => _handCircle(cx, cy, r);
 
 // Stroke paths (font units) for a line of text, left to right from x = 0, and its width.
-function _handStrokes(text) {
-  const font = _handFont;
+function _handStrokes(text, font = _handLoaded[_handName]) {
   if (!font) throw new Error('makeHandText: load the handwriting font first (handFont())');
   const glyph = ch => font.c[ch.charCodeAt(0)];
   const H = _handBox(glyph('H').paths), capH = H.h;
@@ -476,15 +495,27 @@ function _handBox(paths) {
   return isFinite(x0) ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : { x: 0, y: 0, w: 0, h: 0 };
 }
 
-// Text in handwriting: a group of stroke paths, centred on 0, 0, its capitals
-// about opts.fontSize * 0.7 tall. opts: fontSize (22), color ('#222').
+// Text in handwriting, centred on 0, 0. opts: fontSize (22), color ('#222'),
+// font (the hand, a name in HAND_FONTS; default the current one, see
+// setHandFont). A font hand gives a text in that font, a strokes hand a group
+// of stroke paths with capitals about fontSize * 0.7 tall.
 function makeHandText(text, opts) {
   const o = Object.assign({ fontSize: 22, color: '#222' }, opts);
-  const { strokes, capH } = _handStrokes(text);
+  const name = o.font && Object.hasOwn(HAND_FONTS, o.font) ? o.font : _handName, hand = HAND_FONTS[name];
+  if (!_handLoaded[name]) throw new Error(`makeHandText: load the handwriting font first (handFont(${JSON.stringify(name)}))`);
+  if (hand.kind === 'font') {
+    const t = new fabric.Text(String(text), {
+      fontSize: o.fontSize, fill: o.color, fontFamily: hand.family, fontWeight: hand.weight,
+      originX: 'center', originY: 'center', left: 0, top: 0, objectCaching: false
+    });
+    t._hand = true;
+    return t;
+  }
+  const { strokes, capH } = _handStrokes(text, _handLoaded[name]);
   const k = o.fontSize * 0.7 / capH;
   const paths = strokes.map(({ d, dx }) => {
     const p = new fabric.Path(d, {
-      fill: '', stroke: o.color, strokeWidth: Math.max(1.2, o.fontSize / HAND_FONT.weight) / k, // in font units: it scales with the text
+      fill: '', stroke: o.color, strokeWidth: Math.max(1.2, o.fontSize / hand.weight) / k, // in font units: it scales with the text
       strokeLineCap: 'round', strokeLineJoin: 'round', objectCaching: false
     });
     p.set({ left: (p.left + dx) * k, top: p.top * k, scaleX: k, scaleY: k });
@@ -518,7 +549,7 @@ function setLabelText(uidOrObj, text) {
   if (type !== 'label' && !((type === 'figure' || type === 'picture') && t instanceof fabric.Text)) throw new Error(`setLabelText: ${uidOrObj} is not a label, or a figure or picture with a label`);
   const centre = g.getCenterPoint();
   if (type === 'label' && g.customData.hand) {
-    // Handwriting is strokes, not a text: new strokes take the old ones' place.
+    // Handwriting is made afresh in the label's own hand and takes the old one's place.
     const nt = makeHandText(String(text), g.customData.hand);
     // A child joins a group from the canvas: placed where the old text is
     // (the group's scale and angle included), it lands in the old text's place.
@@ -2965,12 +2996,15 @@ function _pathLength(d) {
   } catch (e) { return 100; }
 }
 
-// A handwritten label written in, stroke after stroke, as a pen would (the box
-// and its background are there from the start). opts: duration (ms; default
+// A handwritten label written in as a pen would (the box and its background
+// are there from the start): a font hand is uncovered left to right, a
+// strokes hand drawn stroke after stroke. opts: duration (ms; default
 // 160 a character). Resolves to the label.
 function writeIn(uidOrObj, opts) {
   const g = findIfRequired(uidOrObj);
   if (!isFabricObject(g) || !g.customData || !g.customData.hand) throw new Error(`writeIn: ${uidOrObj} is not a handwritten label`);
+  const t = g.getObjects()[1];
+  if (!t._objects) return _uncover(g, t, (opts && opts.duration) || Math.max(300, [...g.customData.text].length * 160));
   const strokes = g.getObjects()[1].getObjects().filter(p => p._handD).map(p => ({ p, len: _pathLength(p._handD) }));
   let total = 0;
   strokes.forEach(s => { s.from = total; total += s.len; s.p.set({ strokeDashArray: [s.len, s.len], strokeDashOffset: s.len }); });
@@ -2992,6 +3026,40 @@ function writeIn(uidOrObj, opts) {
       resolve(g);
     }
   }));
+}
+
+// A text in a font hand uncovered from left to right over duration ms, as the
+// pen writes it: a clip over it widens at an even pace.
+function _uncover(g, t, duration) {
+  if (t._uncovering) t._uncovering(); // one still running stops here
+  const canvas = g.canvas || window.pc;
+  const w = t.width, h = t.height * 1.6; // room for tails and accents above and below the line
+  const clip = new fabric.Rect({ left: -w / 2, top: -h / 2, width: 0, height: h, originX: 'left', originY: 'top' });
+  t.clipPath = clip;
+  const draw = v => {
+    clip.set('width', v);
+    t.dirty = true; g.dirty = true;
+    if (canvas) canvas.requestRenderAll();
+  };
+  draw(0);
+  return new Promise(resolve => {
+    let stop;
+    const done = () => {
+      if (t._uncovering !== stop) return;
+      delete t._uncovering;
+      t.clipPath = undefined;
+      t.dirty = true; g.dirty = true;
+      if (canvas) canvas.requestRenderAll();
+      resolve(g);
+    };
+    const abort = fabric.util.animate({
+      startValue: 0, endValue: w, duration: playDuration(duration), easing: (e, b, c, d) => b + c * e / d,
+      onChange: v => { if (t._uncovering === stop) draw(v); },
+      onComplete: done
+    });
+    // Stopped by a later writeIn: it ends here, the later one takes over.
+    stop = t._uncovering = () => { if (abort && typeof abort.abort === 'function') abort.abort(); delete t._uncovering; resolve(g); };
+  });
 }
 
 // Draws objects' outlines as if traced by a pen, then fades their fill (and

@@ -781,3 +781,21 @@ test('a group among the members of an enclosure stands for its members', async (
   assert.deepEqual(model.objects.frame.members.sort(), ['one', 'two', 'x']);
 });
 
+test('a concept brought back whose old place is out of view now comes back at the nearest free spot in view', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'far', text: 'FAR LEFT', place: { region: 'left' } },
+    { op: 'introduce', id: 'mid', text: 'MIDDLE', place: { region: 'right' } },
+    { op: 'remove', ids: ['far'] },
+    { op: 'narrow_context', ids: ['mid'], fill: 0.5 }
+  ]);
+  const old = model.retired.far.object.at;
+  const { model: m, lines } = await plan([{ op: 'return_to', ids: ['far'] }], model);
+  const v = view(m), b = boxOf(m.objects.far);
+  assert.notDeepEqual(m.objects.far.at, old);
+  assert.ok(b.x >= v.x && b.y >= v.y && b.x + b.w <= v.x + v.w && b.y + b.h <= v.y + v.h, `in view: ${JSON.stringify(b)} in ${JSON.stringify(v)}`);
+  assert.ok(lines.some(l => l.includes(`animate("far", {left: ${m.objects.far.at[0]}, top: ${m.objects.far.at[1]}`)));
+  // One still in view comes back where it was.
+  const { model: m2 } = await plan([{ op: 'remove', ids: ['mid'] }, { op: 'return_to', ids: ['mid'] }], model);
+  assert.deepEqual(m2.objects.mid.at, model.objects.mid.at);
+});
+

@@ -44,7 +44,7 @@ export const ACTIONS = {
   viewer_task: `What the viewer should do mentally: {type: ${VIEWER_TASKS.join('|')}, target, constraint?}. Attaches to the current beat (or scene).`,
   introduce: `Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, color?, place?, pace?}. role names what the concept is (any word); ${ROLES} also colour it (${Object.entries(ROLE_COLORS).map(([r, c]) => `${r} ${c}`).join(', ')}), so a role keeps its colour throughout. color (a CSS colour such as #3B82F6) goes before the role's. background (a CSS colour; text and box only) fills the box behind the text, e.g. a light tint of its colour such as #DBEAFE. The colour stays through revise, question, focus, deemphasize, move_into and return_to. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. A figure takes boundary?: solid|dashed, a rounded frame round the person and label (weaken_boundary changes it). place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.`,
   type: "Type a new text concept in, a character at a time, when a proposition, question, promise or hypothesis is being formulated in front of the viewer: as introduce (text or box only), plus caret?: true|false (default true) and characters_per_second? (default from pace: short 30, deliberate 12). It is then an ordinary concept.",
-  write: "Write a new text concept in by hand, stroke after stroke, as a lecturer would: as introduce (text or box only), plus characters_per_second? (default from pace: short 14, deliberate 6). It stays in handwriting through revise and question; a replace or turnover arrival is ordinary text.",
+  write: "Write a new text concept in by hand, as a lecturer would (a handwriting font, uncovered as it is written): as introduce (text or box only), plus characters_per_second? (default from pace: short 14, deliberate 6). It stays in handwriting through revise and question; a replace or turnover arrival is ordinary text.",
   introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text, role?, color?, background?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, background?, place?, pace?}. An item without its own role, color or background takes the group\'s.',
   branch: 'Add children of a concept, each growing out of it along its arrow (small at first, full size where it lands): {from, items, side?: below|above|left|right, kind?, size?, role?, color?, background?, from_side?, to_side?, emanate?: false (draw each child in place, then its arrow), pace?}. Items as in introduce_group. The arrows leave the side the children landed on (bottom when below) and arrive at the side facing it; from_side / to_side, as in connect, name others for every arrow.',
   connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.",
@@ -259,6 +259,7 @@ export function applyRecord(model, rec) {
           const r = model.retired[id];
           if (!r) throw new Error(`return_to: "${id}" was not removed`);
           model.objects[id] = clone(r.object);
+          if (rec.placed && rec.placed[id]) model.objects[id].at = rec.placed[id];
           delete model.retired[id];
           // Back into its groups and enclosures.
           (r.groups || []).forEach(gid => {
@@ -488,6 +489,8 @@ export function placeBox(model, size, place = {}, taken = occupied(model)) {
       if (!Array.isArray(place.between) || place.between.length !== 2) throw new Error('place: between takes two ids');
       const [p, q] = place.between.map(id => { const b = anchorBox(model, id); return [b.x + b.w / 2, b.y + b.h / 2]; });
       c = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+    } else if (place.from) {
+      c = place.from; // nearest free spot to a point (a concept's old place)
     } else {
       const region = place.region || 'center';
       if (!REGIONS[region]) throw new Error(`place: region must be one of ${Object.keys(REGIONS).join(', ')}`);
@@ -1071,9 +1074,14 @@ export async function planAction(model, a, measure) {
       // or not the other end is there: they are taken off and drawn afresh.
       const touching = pending.filter(r => a.ids.includes(r.from) || a.ids.includes(r.to) || relations.includes(r)).map(r => r.id);
       const restore = [...a.ids.map(id => `restoreObject(${J(id)})`), ...touching.map(id => `removeByUid(${J(id)})`)];
+      // One whose old place is out of view now (the camera has moved since)
+      // comes back at the nearest free spot in view.
+      const placed = {};
       const fades = a.ids.map(id => {
-        const o = model.retired[id].object, sc = o.scale == null ? 1 : o.scale;
-        return `animate(${J(id)}, {left: ${o.at[0]}, top: ${o.at[1]}, scaleX: ${sc}, scaleY: ${sc}, opacity: ${o.opacity}}, {duration: ${ms}})`;
+        const o = model.retired[id].object, sc = o.scale == null ? 1 : o.scale, b = boxOf(o);
+        if (!onCanvas(model, b)) placed[id] = placeBox(model, [b.w, b.h], { from: o.at });
+        const at = placed[id] || o.at;
+        return `animate(${J(id)}, {left: ${at[0]}, top: ${at[1]}, scaleX: ${sc}, scaleY: ${sc}, opacity: ${o.opacity}}, {duration: ${ms}})`;
       });
       const lines = [
         ...(a.ids.length ? [`Promise.resolve().then(() => { ${restore.join('; ')}; }).then(() => Promise.all([${fades.join(', ')}]))`] : []),
@@ -1082,7 +1090,7 @@ export async function planAction(model, a, measure) {
       if (relations.length) {
         lines.push(`Promise.all([${relations.map(r => `connectObjects(${J(r.from)}, ${J(r.to)}, ${J(r.id)}, {${r.bend ? `bend: ${J(r.bend)}, ` : ''}${r.sides ? `sides: ${J(r.sides)}, ` : ''}animate: true, duration: ${pace(a)}})`).join(', ')}])`);
       }
-      return { record: { op, ids: a.ids, relations, ...(shown.length ? { shown } : {}), ...(relit.length ? { relit } : {}) }, lines };
+      return { record: { op, ids: a.ids, relations, ...(shown.length ? { shown } : {}), ...(relit.length ? { relit } : {}), ...(Object.keys(placed).length ? { placed } : {}) }, lines };
     }
 
     case 'turnover': {
