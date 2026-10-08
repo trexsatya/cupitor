@@ -20,7 +20,7 @@ import { z } from 'zod';
 import crypto from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { PlayPage, parseScriptFile } from './page-driver.js';
-import { reviewStops, buildReviewHtml } from './review.js';
+import { reviewStops, buildReviewHtml, beatSummaries } from './review.js';
 import { ACTIONS, parseScene, planActions, inspect, validate, withoutLastAction, describeTimeline, captionsFile, narrationIssues, timeline } from './scene.js';
 import { planBeats, planSpec } from './plan.js';
 
@@ -94,7 +94,7 @@ reuse concepts already on screen, use the smallest visual model, reveal progress
 apply_semantic_action takes actions like {op: "introduce", id: "culture", text: "CULTURE", place: {near: "person", side: "left"}};
 the server places things, writes the script lines, and keeps each action as a "// @sem {...}" comment in the script,
 so the scene model always comes from the script itself. Narration is {op: "narrate", text}: a caption timed to reading pace;
-scene_timeline shows narration and moves with their times; export_captions writes a caption track. inspect_scene shows the model; validate_scene checks overlaps,
+check_plan replays a plan fast and says beat by beat what is on screen and where; scene_timeline shows narration and moves with their times; export_captions writes a caption track. inspect_scene shows the model; validate_scene checks overlaps,
 off-canvas objects, small text and missing objects; undo_last_action takes the last action back.
 
 Low-level scripting:
@@ -274,19 +274,14 @@ export function createServer(page, publicDir) {
     description: 'Instructions (with a worked example) for writing a plan: a JSON scene document another assistant can produce from a text, for build_from_plan.'
   }, async () => text(planSpec(JSON.parse(fs.readFileSync(path.join(here, 'examples/spectrum.plan.json'), 'utf8')))));
 
-  tool('build_from_plan', {
-    description: 'Build a scene from a plan file (the format plan_spec describes). Every beat is planned before anything plays, so a mistake anywhere builds nothing and is reported by scene, beat and action. dry_run only checks it (and estimates its length and narration timing).',
-    inputSchema: {
-      path: z.string().describe('the plan (JSON)'),
-      dry_run: z.boolean().optional().describe('check the plan without building it'),
-      fresh: z.boolean().optional().describe('start from an empty page (default true); false adds the plan to the current script')
-    }
-  }, async ({ path: file, dry_run, fresh }) => exclusive(async () => {
+  // A plan file planned beat by beat (nothing plays): its lines, or the error
+  // that stops it, named by scene, beat and action.
+  const planFile = async (file, fresh) => {
     let plan;
     // Assistants often wrap their answer in a ```json fence.
-    try { plan = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8').trim().replace(/^```(?:json)?\s*\n([\s\S]*)\n```$/, '$1')); } catch (e) { return text(`Could not read the plan: ${e.message}`); }
+    try { plan = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8').trim().replace(/^```(?:json)?\s*\n([\s\S]*)\n```$/, '$1')); } catch (e) { return { error: `Could not read the plan: ${e.message}` }; }
     const { errors, warnings, beats } = planBeats(plan);
-    if (errors.length) return text(['The plan cannot be built:', ...errors.map(e => `- ${e}`)].join('\n'));
+    if (errors.length) return { error: ['The plan cannot be built:', ...errors.map(e => `- ${e}`)].join('\n') };
     const start = fresh === false ? await page.script() : [];
     const model = parseScene(start);
     const lines = [];
@@ -298,17 +293,79 @@ export function createServer(page, publicDir) {
         const m = /^Action (\d+) \(([^)]*)\): ([\s\S]*)$/.exec(e.message);
         const n = m ? +m[1] - b.head.length : 0;
         const what = !m ? e.message : n > 0 ? `action ${n} (${m[2]}): ${m[3]}` : `the beat itself: ${m[3]}`;
-        return text(`The plan cannot be built:\n- ${b.where}, ${what}\n(Later beats were not checked: they may rely on this one.)`);
+        return { error: `The plan cannot be built:\n- ${b.where}, ${what}\n(Later beats were not checked: they may rely on this one.)` };
       }
     }
+    return { plan, beats, warnings, start, lines };
+  };
+
+  // A planned plan replayed fast from an empty page, stopping at the end of
+  // each beat: the beat-by-beat text, how many warnings are new in a beat, and
+  // how many lines failed. The plan is left as the recorded script.
+  const checkPlanned = async (file, { plan, beats, warnings, lines }) => {
+    await page.reset();
+    await page.setScript(lines);
+    const stops = reviewStops(lines);
+    const issues = {};
+    const walked = await withProgress(() => page.walk(lines, stops.map(s => s.endIndex), async (k, look) => {
+      if (k < stops.length) issues[k] = validate(parseScene(lines.slice(0, stops[k].endIndex)), await look.objects(), lines.slice(0, stops[k].endIndex));
+    }));
+    // Each beat's issues are how the canvas stood at its end (narration ones say which beat they start in).
+    const tbs = timeline(lines).beats.filter(b => b.isBeat);
+    const count = stops.reduce((n, _, i) => n + (issues[i] || []).filter(x => x.level === 'warning' && (x.at == null || x.at === (tbs[i] || {}).start)
+      && !(issues[i - 1] || []).some(y => y.message === x.message)).length, 0);
+    const head = [
+      `Plan ${path.basename(file)}: ${plan.scenes.length} scene(s), ${beats.length} beat(s), about ${Math.round(timeline(lines).total / 1000)} s.`,
+      ...(walked.lineErrors.length ? [`${walked.lineErrors.length} line(s) failed while replaying: ${walked.lineErrors.slice(0, 3).map(e => e.message || e).join('; ')}`] : []),
+      ...warnings.map(w => `note: ${w}`),
+      'Places are ninths of the screen (top-left … bottom-right, middle). Warnings are listed in the beat where they first appear.',
+      ''
+    ];
+    return { body: head.join('\n') + beatSummaries({ lines, stops, issues }), count, failed: walked.lineErrors.length };
+  };
+
+  tool('check_plan', {
+    description: 'Check a plan file fast: plan it as build_from_plan does, replay it with every animation instant (seconds, not the film\'s length) and say, beat by beat, what is on screen and where (a ninth of the screen), the frames and arrows, what came and went, and the warnings new in that beat. The text is meant to be pasted back to whoever writes the plan. The plan is left as the recorded script (review_scene can follow).',
+    inputSchema: {
+      path: z.string().describe('the plan (JSON)'),
+      out: z.string().optional().describe('also write the text to this file')
+    }
+  }, async ({ path: file, out }) => exclusive(async () => {
+    const planned = await planFile(file, true);
+    if (planned.error) return text(planned.error);
+    const { body, count, failed } = await checkPlanned(file, planned);
+    if (out) fs.writeFileSync(path.resolve(out), body + '\n');
+    return text(`${body}\n\n${count ? `${count} warning(s) in all` : 'No warnings'}${failed ? `, ${failed} line(s) failed` : ''}${out ? `; written to ${path.resolve(out)}` : ''}.`);
+  }));
+
+  tool('build_from_plan', {
+    description: 'Build a scene from a plan file (the format plan_spec describes). Every beat is planned before anything plays, so a mistake anywhere builds nothing and is reported by scene, beat and action. Then the plan is checked fast first (as check_plan, about a minute): if that finds warnings, nothing is built and the beat-by-beat check is returned instead, unless build_anyway. dry_run only plans it (and estimates its length and narration timing).',
+    inputSchema: {
+      path: z.string().describe('the plan (JSON)'),
+      dry_run: z.boolean().optional().describe('plan it without building it (no fast check either)'),
+      fresh: z.boolean().optional().describe('start from an empty page (default true); false adds the plan to the current script (no fast check)'),
+      build_anyway: z.boolean().optional().describe('build even when the fast check finds warnings (it still runs and its warnings are reported)')
+    }
+  }, async ({ path: file, dry_run, fresh, build_anyway }) => exclusive(async () => {
+    const planned = await planFile(file, fresh);
+    if (planned.error) return text(planned.error);
+    const { plan, beats, warnings, start, lines } = planned;
     const notes = [...warnings, ...narrationIssues([...start, ...lines]).map(i => `${i.level}: ${i.message}`)];
     const size = `${plan.scenes.length} scene(s), ${beats.length} beat(s), ${beats.reduce((n, b) => n + b.actions.length, 0)} action(s), about ${Math.round(timeline([...start, ...lines]).total / 1000)} s`;
     if (dry_run) return text([`The plan can be built: ${size}.`, ...(notes.length ? ['Notes:', ...notes.map(n => `- ${n}`)] : [])].join('\n'));
+    // The fast check first: a minute now saves a full-length build that would show the same warnings.
+    let checked = null;
+    if (fresh !== false) {
+      checked = await checkPlanned(file, planned);
+      if ((checked.count || checked.failed) && !build_anyway) {
+        return text([`Not built: the fast check found ${checked.count} warning(s)${checked.failed ? ` and ${checked.failed} failed line(s)` : ''}. Fix the plan, or build with build_anyway to watch it as it is.`, '', checked.body].join('\n'));
+      }
+    }
     if (fresh !== false) await page.reset();
     const result = report(await play(lines, { record: true }));
     const after = await page.script();
     const issues = validate(parseScene(after), await page.objects(), after).map(i => `${i.level}: ${i.message}`);
-    return text([`Built the plan: ${size}.`, result, ...(warnings.length ? ['Notes:', ...warnings.map(n => `- ${n}`)] : []), ...(issues.length ? ['validate_scene:', ...issues.map(n => `- ${n}`)] : ['validate_scene: no issues.'])].join('\n'));
+    return text([`Built the plan: ${size}.`, ...(checked ? [`Fast check first: ${checked.count ? `${checked.count} warning(s), built anyway` : 'no warnings'}.`] : []), result, ...(warnings.length ? ['Notes:', ...warnings.map(n => `- ${n}`)] : []), ...(issues.length ? ['validate_scene:', ...issues.map(n => `- ${n}`)] : ['validate_scene: no issues.'])].join('\n'));
   }));
 
   tool('undo_last_action', {

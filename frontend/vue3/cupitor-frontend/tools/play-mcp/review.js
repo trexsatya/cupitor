@@ -4,7 +4,7 @@
 // first reveal, if the beat holds one back, and at the end). Pure: the frames
 // and per-stop issues come from the caller.
 
-import { annotations, timeline, describe } from './scene.js';
+import { annotations, timeline, describe, parseScene, CANVAS } from './scene.js';
 
 const VISUAL = op => !['narrate', 'pause', 'viewer_task', 'checkpoint', 'scene', 'beat'].includes(op);
 
@@ -178,5 +178,51 @@ figcaption, .dim, .t { color: var(--dim); font-size: 13px; } .t { font-variant-n
 ${sections.join('\n')}
 </main></body></html>
 `;
+}
+
+// Where on the screen a concept is: a ninth of it (top-left … bottom-right,
+// middle), or out of view.
+function screenPlace(model, o) {
+  const z = model.camera ? model.camera.zoom : 1, pan = model.camera ? model.camera.pan : [0, 0];
+  const x = o.at[0] * z + pan[0], y = o.at[1] * z + pan[1];
+  if (x < 0 || y < 0 || x > CANVAS.width || y > CANVAS.height) return 'out of view';
+  const col = ['left', 'centre', 'right'][Math.min(2, Math.floor(x / (CANVAS.width / 3)))];
+  const row = ['top', 'middle', 'bottom'][Math.min(2, Math.floor(y / (CANVAS.height / 3)))];
+  return row === 'middle' ? (col === 'centre' ? 'middle' : col) : col === 'centre' ? row : `${row}-${col}`;
+}
+
+// What the screen holds at the end of each beat, as text another assistant
+// can read and act on: what is on screen and where, what came and went in the
+// beat, the arrows, and the warnings new in it (issues: per stop index, as
+// for the review page).
+export function beatSummaries({ lines, stops, issues = {} }) {
+  const tbs = timeline(lines).beats.filter(b => b.isBeat);
+  let prev = { objects: {} };
+  return stops.map((stop, i) => {
+    const model = parseScene(lines.slice(0, stop.endIndex));
+    const tb = tbs[i] || { start: 0, end: 0 };
+    const shown = Object.values(model.objects).filter(o => o.opacity > 0 && o.kind !== 'enclosure' && o.kind !== 'spectrum');
+    const came = shown.filter(o => !prev.objects[o.id]).map(o => o.id);
+    const went = Object.keys(prev.objects).filter(id => !model.objects[id]);
+    const name = o => `${o.id}${o.text != null ? ` ${q(o.text)}` : ''}${['figure', 'picture', 'steps'].includes(o.kind) ? ` (${o.kind})` : ''}`;
+    const where = shown.map(o => `${name(o)} ${screenPlace(model, o)}${o.opacity < 1 ? ', faded' : ''}`);
+    const frames = Object.values(model.objects).filter(o => o.kind === 'enclosure' && o.opacity > 0).map(o => `${o.id} round ${o.members.join(', ')}`);
+    const arrows = Object.values(model.relations).filter(r => r.opacity !== 0).map(r => `${r.from} → ${r.to}`);
+    const mine = (issues[i] || []).filter(x => x.at == null || x.at === tb.start);
+    const before = new Set((issues[i - 1] || []).map(x => x.message));
+    const fresh = mine.filter(x => !before.has(x.message) && x.level !== 'info'), still = mine.filter(x => before.has(x.message) && x.level !== 'info');
+    const zoom = model.camera && model.camera.zoom !== 1 ? `; camera zoom ${model.camera.zoom}` : '';
+    prev = model;
+    return [
+      `Beat ${i + 1} "${stop.beat}" (${sec(tb.start)}–${sec(tb.end)}${zoom})`,
+      `  on screen: ${where.join('; ') || 'nothing'}`,
+      ...(frames.length ? [`  frames: ${frames.join('; ')}`] : []),
+      ...(arrows.length ? [`  arrows: ${arrows.join(', ')}`] : []),
+      ...(came.length ? [`  new: ${came.join(', ')}`] : []),
+      ...(went.length ? [`  removed: ${went.join(', ')}`] : []),
+      ...(fresh.length ? fresh.map(x => `  ${x.level}: ${x.message}`) : []),
+      ...(still.length ? [`  still: ${still.length} warning(s) from before`] : [])
+    ].join('\n');
+  }).join('\n');
 }
 

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyScene, planActions } from '../scene.js';
-import { reviewStops, buildReviewHtml } from '../review.js';
+import { reviewStops, buildReviewHtml, beatSummaries } from '../review.js';
 
 const measure = async specs => specs.map(s => [String(s.text || 'x').length * 12 + 24, 50]);
 
@@ -49,3 +49,33 @@ test('review: beats pair with their sections by position, issues by beat, whatev
   assert.match(two, /Words here/);
   assert.ok(one.includes('moves without narration') && !two.includes('moves without narration'));
 });
+
+test('beat summaries: what is on screen and where, what came and went, arrows and frames, and only the warnings new in a beat', async () => {
+  const { lines } = await planActions(emptyScene(), [
+    { op: 'scene', name: 's' },
+    { op: 'beat', name: 'one' },
+    { op: 'introduce', id: 'a', text: 'A', place: { region: 'top-left' } },
+    { op: 'introduce', id: 'b', text: 'B', place: { region: 'bottom-right' } },
+    { op: 'connect', from: 'a', to: 'b' },
+    { op: 'beat', name: 'two' },
+    { op: 'deemphasize', ids: ['a'] },
+    { op: 'enclose', id: 'f', members: ['b'] },
+    { op: 'remove', ids: ['a'] }
+  ], measure);
+  const stops = reviewStops(lines);
+  const w = { level: 'warning', message: 'something overlaps' };
+  const text = beatSummaries({ lines, stops, issues: { 0: [w], 1: [w, { level: 'warning', message: 'new one' }] } });
+  const [one, two] = text.split(/\n(?=Beat )/);
+  assert.match(one, /^Beat 1 "one"/);
+  assert.match(one, /on screen: a “A” top-left; b “B” bottom-right/);
+  assert.match(one, /arrows: a → b/);
+  assert.match(one, /new: a, b/);
+  assert.match(one, /warning: something overlaps/);
+  assert.match(two, /on screen: b “B” bottom-right\n/);
+  assert.match(two, /frames: f round b/);
+  assert.match(two, /removed: a/);
+  assert.doesNotMatch(two, /something overlaps/);
+  assert.match(two, /warning: new one/);
+  assert.match(two, /still: 1 warning\(s\) from before/);
+});
+

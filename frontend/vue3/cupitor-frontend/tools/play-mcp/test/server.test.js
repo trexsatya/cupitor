@@ -26,7 +26,7 @@ test('lists its tools', async () => {
   const names = (await client.listTools()).tools.map(t => t.name).sort();
   assert.deepEqual(names, ['apply_semantic_action', 'export_captions', 'get_script', 'inspect_scene', 'list_functions',
     'list_objects', 'load_script_file', 'plan_spec', 'replace_script', 'replay_script', 'reset_page', 'review_scene', 'run_script_lines',
-    'save_script_file', 'scene_timeline', 'screenshot', 'undo_last_action', 'validate_scene', 'build_from_plan'].sort());
+    'save_script_file', 'scene_timeline', 'screenshot', 'undo_last_action', 'validate_scene', 'build_from_plan', 'check_plan'].sort());
 });
 
 test('function reference includes options', async () => {
@@ -154,13 +154,39 @@ test('review_scene: a page per script, a section and frames per beat, made by a 
   fs.rmSync(out);
 });
 
+test('check_plan: a plan replayed fast, told beat by beat, left as the script to review', async () => {
+  const dir = path.resolve(path.dirname(server), 'examples');
+  const out = path.join(os.tmpdir(), `play-mcp-check-${process.pid}.txt`);
+  const t = textOf(await client.callTool({ name: 'check_plan', arguments: { path: path.join(dir, 'spectrum.plan.json'), out } }, undefined, { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} }));
+  assert.equal((t.match(/^Beat \d+ "/gm) || []).length, 4);
+  assert.match(t, /on screen: .+ (top|middle|bottom|left|right|centre)/);
+  assert.match(t, /No warnings; written to /);
+  assert.equal(fs.readFileSync(out, 'utf8').trim(), t.slice(0, t.lastIndexOf('\n\n')).trim());
+  fs.rmSync(out);
+  const script = textOf(await client.callTool({ name: 'get_script', arguments: {} }));
+  assert.match(script, /"op":"beat"/);
+});
+
+test('build_from_plan checks fast first: a plan with warnings is not built unless build_anyway', async () => {
+  const opts = [undefined, { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} }];
+  const file = path.join(os.tmpdir(), `play-mcp-overlap-${process.pid}.json`);
+  fs.writeFileSync(file, JSON.stringify({ title: 't', scenes: [{ name: 's', beats: [{ name: 'b', actions: [
+    { op: 'introduce', id: 'a', text: 'ONE', place: { x: 700, y: 400 } }, { op: 'introduce', id: 'c', text: 'TWO', place: { x: 705, y: 400 } }] }] }] }));
+  const refused = textOf(await client.callTool({ name: 'build_from_plan', arguments: { path: file } }, ...opts));
+  assert.match(refused, /^Not built: the fast check found [1-9]\d* warning\(s\)\./);
+  assert.match(refused, /Beat 1 "b"[\s\S]*warning: .*overlap/);
+  const built = textOf(await client.callTool({ name: 'build_from_plan', arguments: { path: file, build_anyway: true } }, ...opts));
+  assert.match(built, /^Built the plan: [\s\S]*Fast check first: [1-9]\d* warning\(s\), built anyway\./);
+  fs.rmSync(file);
+});
+
 test('build_from_plan: a plan builds the same scene the actions do; a wrong id is named by place and builds nothing', async () => {
   const dir = path.resolve(path.dirname(server), 'examples');
   const opts = [undefined, { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} }];
   assert.match(textOf(await client.callTool({ name: 'build_from_plan', arguments: { path: path.join(dir, 'spectrum.plan.json'), dry_run: true } })),
     /^The plan can be built: 1 scene\(s\), 4 beat\(s\), 17 action\(s\), about \d+ s\.$/);
   const built = textOf(await client.callTool({ name: 'build_from_plan', arguments: { path: path.join(dir, 'spectrum.plan.json') } }, ...opts));
-  assert.match(built, /No errors[\s\S]*validate_scene: no issues/);
+  assert.match(built, /Fast check first: no warnings\.[\s\S]*No errors[\s\S]*validate_scene: no issues/);
   const script = textOf(await client.callTool({ name: 'get_script', arguments: {} })).split('\n').map(l => l.replace(/^\d+: /, ''));
   assert.deepEqual(script, parseScriptFile(fs.readFileSync(path.join(dir, 'spectrum.txt'), 'utf8')));
   const bad = path.join(os.tmpdir(), `play-mcp-plan-${process.pid}.json`);

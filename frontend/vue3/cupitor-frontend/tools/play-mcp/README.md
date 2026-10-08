@@ -158,6 +158,13 @@ reporting the first problem by scene, beat and action. Without `dry_run` it clea
 `fresh: false`), builds the script, plays it and reports what `validate_scene` finds. `plan_spec` returns the
 same text as PLAN-SPEC.md, generated from the action list, so the two cannot drift apart.
 
+`check_plan {path, out?}` checks a plan fast: it plans it as `build_from_plan` does, replays it with every
+animation instant (a 14-minute film in about a minute and a half) and returns, beat by beat, what is on screen and
+in which ninth of the screen, faded or not, the frames and arrows, what came and went, and the warnings new in that
+beat. The text is written to be pasted back to whoever writes the plan, so they can see what the screen holds
+without the film; `out` also saves it to a file. The plan is left as the recorded script, so `review_scene` can
+follow without building again.
+
 ## Tools
 
 | Tool | What it does |
@@ -170,6 +177,7 @@ same text as PLAN-SPEC.md, generated from the action list, so the two cannot dri
 | `review_scene` | Write a review page: per beat, move, viewer task, narration, moves, checklist, issues and screenshots. |
 | `plan_spec` | The instructions for writing a plan from a text (PLAN-SPEC.md). |
 | `build_from_plan` | Check (`dry_run`) or build a plan file into the script and play it. |
+| `check_plan` | Replay a plan fast and say, beat by beat, what is on screen and where, and its warnings. |
 | `undo_last_action` | Remove the last semantic action and its lines, and replay. |
 | `list_functions` | Functions a script can call, with their options (from `public/script-functions.js`, the same list the page's **? Functions** popup shows). Optional word filter. |
 | `run_script_lines` | Add lines to the recorded script and play them; each line waits as the player does. Reports failures per line. `record: false` just tries them. |
