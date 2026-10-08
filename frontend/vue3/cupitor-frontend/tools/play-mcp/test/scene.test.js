@@ -317,9 +317,9 @@ test('branch arrows curve round concepts in their way; nothing is placed under t
   const { model } = await plan([
     { op: 'introduce', id: 'root', text: 'ROOT', place: { x: 700, y: 150 } },
     { op: 'introduce', id: 'wall', text: 'WALL WALL WALL', place: { x: 700, y: 300 } },
-    { op: 'branch', from: 'root', items: ['ONE', 'TWO', 'THREE'], side: 'below' }
+    // Out of ROOT's right side into each child's left one: straight, the arrows to the far children would cross the near ones.
+    { op: 'branch', from: 'root', items: ['ONE', 'TWO', 'THREE'], side: 'below', from_side: 'right', to_side: 'left' }
   ]);
-  // The children land below the wall; the middle arrow would run through it.
   const bends = ['one', 'two', 'three'].map(id => model.relations[`root__${id}`].bend || 0);
   assert.ok(bends.some(b => b !== 0), `some arrow curves: ${bends}`);
   const caption = { x: 342, y: 697, w: 700, h: 103 };
@@ -371,6 +371,10 @@ test('an arrow along the bottom never curves out of view; branch arrows take fro
   assert.deepEqual(m2.relations.a__x.sides, { from: 'top-left', to: 'bottom' });
   // The child grows out of its source along the arrow; asked, it is drawn and then connected.
   assert.match(lines.join('\n'), /^Promise\.resolve\(emanate\("a", addLabel\("X", .*\), "a__x", \{(bend: -?\d+, )?sides: \{"from":"top-left","to":"bottom"\}, duration: \d+\}\)\)$/m);
+  // Unnamed, they leave the side the children grow towards and arrive at the facing one.
+  const fan = await plan([{ op: 'branch', from: 'a', items: ['P', 'Q', 'R', 'S'], side: 'above' }, { op: 'branch', from: 'b', items: ['T'], side: 'right', to_side: 'top' }], model);
+  assert.deepEqual(['p', 'q', 'r', 's'].map(id => fan.model.relations[`a__${id}`].sides), Array(4).fill({ from: 'top', to: 'bottom' }));
+  assert.deepEqual(fan.model.relations.b__t.sides, { from: 'right', to: 'top' });
   const apart = await plan([{ op: 'branch', from: 'a', items: ['Y'], emanate: false }], model);
   assert.ok(apart.lines.some(l => l.startsWith('drawOutline(addLabel("Y"')));
   assert.ok(apart.lines.some(l => l.startsWith('connectObjects("a", "y", "a__y", {')));
