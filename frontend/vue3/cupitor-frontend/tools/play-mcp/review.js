@@ -46,6 +46,8 @@ export function plainMove(rec) {
     case 'branch': return `branch from ${rec.from}: ${rec.items.map(i => q(i.text)).join(', ')}`;
     case 'connect': return `connect ${rec.from} → ${rec.to}${rec.bend === 'loop' ? ' (loop)' : rec.bend ? ' (curved)' : ''}${rec.kind ? ` [${rec.kind}]` : ''}`;
     case 'disconnect': return `disconnect ${rec.id}`;
+    case 'steps': return `steps ${rec.items.map(q).join(' → ')} as ${rec.id}${rec.direction === 'horizontal' ? ' (across)' : ''}`;
+    case 'step': return `step ${rec.id} to ${rec.n || 'none'}`;
     case 'enclose': return `enclose ${rec.members.join(', ')} in ${rec.id}${rec.style === 'dashed' ? ' (dashed)' : ''}`;
     case 'revise': return `revise ${rec.id} → ${q(rec.text)}`;
     case 'question': return `question ${rec.id} → ${q(rec.text)}`;
@@ -69,9 +71,9 @@ export function plainMove(rec) {
 // Ids an action refers to that already existed (concepts it reuses).
 function refs(rec) {
   return [rec.from, rec.to, rec.into, rec.group, ...(rec.ids || []), ...(rec.members || []),
-    ...(['revise', 'question', 'weaken_boundary', 'replace', 'move_into'].includes(rec.op) ? [rec.id] : [])].filter(Boolean);
+    ...(['revise', 'question', 'weaken_boundary', 'replace', 'move_into', 'step'].includes(rec.op) ? [rec.id] : [])].filter(Boolean);
 }
-const created = rec => [...(['introduce', 'type', 'write'].includes(rec.op) ? [rec.id] : []), ...((rec.items || rec.arriving || []).map(i => i.id)),
+const created = rec => [...(['introduce', 'type', 'write', 'steps'].includes(rec.op) ? [rec.id] : []), ...(rec.op === 'steps' ? [] : (rec.items || rec.arriving || []).map(i => i.id)),
   ...(rec.op === 'replace' ? [rec.with.id] : []), ...(['enclose', 'dissolve_boundary'].includes(rec.op) ? [rec.id] : [])];
 
 const isReadability = i => /hard to read/.test(i.message);

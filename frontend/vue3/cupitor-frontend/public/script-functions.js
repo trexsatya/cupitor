@@ -26,7 +26,7 @@ const SCRIPT_FUNCTIONS = [
             ['fill / stroke / strokeWidth', "as addRect (defaults 'transparent', '#333', 2)"],
             ['…', 'other Fabric properties'],
         ]],
-        ['bulletTimeline(uid, items, x, y, opts)', 'A list on a spine: a bullet and a label per item (bullets uid_B1…, labels uid_T1…)', [
+        ['stepList(uid, items, x, y, opts)', 'Steps on a spine: a bullet and a label per item (bullets uid_B1…, labels uid_T1…); markStep shows progress through them', [
             ['items', "the labels, e.g. ['Plan', 'Build', 'Ship']"],
             ['x, y', 'where the first bullet goes'],
             ['direction', "'vertical' (down, labels to the right; default) or 'horizontal' (across, labels under)"],
@@ -35,8 +35,9 @@ const SCRIPT_FUNCTIONS = [
             ['fontSize', 'label size (default 20)'],
             ['labelWidth', 'label width when vertical (default 300; across, the gap)'],
             ['colors', '{spine, pending, active, done, pendingText, activeText, doneText}'],
+            ['group', 'true: one object (uid) that moves, fades and is removed as a whole, its labels as wide as the longest needs'],
         ]],
-        ['timelineStep(uid, n, opts)', 'Highlight item n of a bulletTimeline (1 is the first): earlier items done, later ones pending; 0 resets; the next line waits', [
+        ['markStep(uid, n, opts)', 'Make item n of a stepList the current one (1 is the first): earlier items done, later ones pending; 0 resets; the next line waits', [
             ['duration', 'ms (default 450)'],
             ['grow', 'how much bigger the active bullet gets (default 1.9)'],
             ['nudge', 'px the active label steps away from the spine (default 16)'],

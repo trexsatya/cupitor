@@ -1,5 +1,5 @@
-// A teacher walks a class through the steps of a plan on a bulleted
-// timeline, drawn down the board and then across it.
+// A teacher walks a class through the steps of a plan on a step list,
+// drawn down the board and then across it.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openBoard, stopBrowser, replayElsewhere, assertSameScene } from './board.mjs';
@@ -13,12 +13,12 @@ const look = b => b.eval(() => [1, 2, 3].map(i => {
 }));
 
 for (const direction of ['vertical', 'horizontal']) {
-  test(`timeline (${direction}): drawn along the spine, stepped through, replayed`, async () => {
+  test(`step list (${direction}): drawn along the spine, stepped through, replayed`, async () => {
     const b = await openBoard();
     try {
       const lines = [
-        `bulletTimeline("TL", ${ITEMS}, 200, 150, {"direction": "${direction}", "gap": 160})`,
-        'timelineStep("TL", 2)'
+        `stepList("TL", ${ITEMS}, 200, 150, {"direction": "${direction}", "gap": 160})`,
+        'markStep("TL", 2)'
       ];
       await b.eval(l => { window.recordedScriptLines = l; }, lines);
       await b.play();
@@ -39,15 +39,15 @@ for (const direction of ['vertical', 'horizontal']) {
       else assert.ok(one[4] > 200 + 12, 'labels right of the bullets');
 
       // Step on to 3, then back to none.
-      await b.eval(() => timelineStep('TL', 3));
+      await b.eval(() => markStep('TL', 3));
       assert.deepEqual((await look(b)).map(r => r[0]), ['#26a69a', '#26a69a', '#ff7043']);
-      await b.eval(() => timelineStep('TL', 0));
+      await b.eval(() => markStep('TL', 0));
       const reset = await look(b);
       assert.deepEqual(reset.map(r => [r[0], r[1], r[3]]), [1, 2, 3].map(() => ['#90a4ae', 1, 'normal']));
       assert.equal(across ? reset[1][5] : reset[1][4], across ? one[5] : one[4], 'labels back home');
 
       const live = await b.snapshot();
-      const replay = await replayElsewhere(lines.concat(['timelineStep("TL", 3)', 'timelineStep("TL", 0)']));
+      const replay = await replayElsewhere(lines.concat(['markStep("TL", 3)', 'markStep("TL", 0)']));
       assert.deepEqual(replay.errors, []);
       assertSameScene(replay.snapshot, live, 2);
       assert.deepEqual(b.errors, []);
@@ -55,7 +55,7 @@ for (const direction of ['vertical', 'horizontal']) {
   });
 }
 
-test('timeline: labels follow a moved timeline; drawing again with the same uid replaces it', async () => {
+test('step list, by its old names bulletTimeline / timelineStep: labels follow a moved list; drawing again with the same uid replaces it', async () => {
   const b = await openBoard();
   try {
     await b.play([`bulletTimeline("TL", ${ITEMS}, 200, 150, {})`]);
@@ -73,3 +73,21 @@ test('timeline: labels follow a moved timeline; drawing again with the same uid 
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('a grouped step list is one object: steps are marked inside it, it moves and goes as one', async () => {
+  const b = await openBoard();
+  try {
+    await b.play([`stepList("TL", ${ITEMS}, 200, 150, {group: true})`, 'markStep("TL", 2)']);
+    assert.deepEqual(await b.eval(() => pc.getObjects().map(o => o.uid)), ['TL'], 'one object on the board');
+    const [one, two] = await look(b);
+    assert.deepEqual([one[0], two[0], two[1], two[3]], ['#26a69a', '#ff7043', 1.9, 'bold']);
+    await b.play(['animate("TL", {left: 700}, {duration: 1})', 'markStep("TL", 3)']);
+    assert.deepEqual((await look(b)).map(r => r[0]), ['#26a69a', '#26a69a', '#ff7043'], 'marked where it now is');
+    await b.play(['stepList("TL", ["One"], 100, 100, {group: true})']);
+    assert.deepEqual(await b.eval(() => pc.getObjects().map(o => o.uid)), ['TL'], 'drawn again: the old one went');
+    await b.play(['removeByUid("TL")']);
+    assert.deepEqual(await b.eval(() => pc.getObjects().length), 0);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+

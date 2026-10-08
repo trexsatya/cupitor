@@ -1018,69 +1018,95 @@ function addEllipse(left, top, rx, ry, opts) {
   return ell;
 }
 
-// A bulleted timeline: a spine with a bullet and a label per item, drawn
-// down (direction 'vertical', labels to the right) or across ('horizontal',
-// labels under the bullets). The spine is `uid`, the bullets `uid_B1`…, the
-// labels `uid_T1`…; timelineStep highlights the items one by one. Drawing
-// again with the same uid replaces the timeline.
-const _TIMELINE_COLORS = {
+// A list of steps: a spine with a bullet and a label per item, drawn down
+// (direction 'vertical', labels to the right) or across ('horizontal', labels
+// under the bullets). The spine is `uid`, the bullets `uid_B1`…, the labels
+// `uid_T1`…; markStep shows progress through them. Drawing again with the
+// same uid replaces the list. (bulletTimeline and timelineStep are the old
+// names, kept for saved scripts; 'timeline' and timelineOffset are the old
+// names of its data, still read.)
+const _STEP_COLORS = {
   spine: '#b0bec5',
   pending: '#90a4ae', active: '#ff7043', done: '#26a69a',
   pendingText: '#90a4ae', activeText: '#1565c0', doneText: '#37474f'
 };
 
-function bulletTimeline(uid, items, x, y, opts) {
+function stepList(uid, items, x, y, opts) {
   if (!Array.isArray(items) || !items.length) return null;
+  _removeStepList(uid);
+  const list = makeStepList(uid, items, x, y, opts);
+  if (list.type === 'group') pc.add(list);
+  else list.parts.forEach(o => pc.add(o));
+  pc.requestRenderAll();
+  return list.type === 'group' ? list : list.parts[0];
+}
+
+// The parts of a step list, not yet on the canvas: { type: 'parts', parts:
+// [spine, bullets and labels] }, or with opts.group one group (uid `uid`, its
+// spine `uid_spine`) that moves, fades and is removed as one object, its
+// labels as wide as the longest one needs (up to labelWidth).
+function makeStepList(uid, items, x, y, opts) {
   const given = Object.fromEntries(Object.entries(opts || {}).filter(([, v]) => v !== undefined && v !== null));
   opts = Object.assign({ direction: 'vertical', gap: 110, radius: 12, fontSize: 20, labelWidth: 300 }, given);
   opts.gap = Math.max(20, Number(opts.gap) || 110);
-  const colors = Object.assign({}, _TIMELINE_COLORS, opts.colors);
+  const colors = Object.assign({}, _STEP_COLORS, opts.colors);
   const across = opts.direction === 'horizontal';
   const n = items.length;
-  _removeTimeline(uid);
   const at = i => (across ? { x: x + i * opts.gap, y } : { x, y: y + i * opts.gap });
   const end = at(n - 1);
-  // One item has no spine to draw (it still holds the timeline's settings).
-  const spine = addLine([x, y, end.x, end.y], { uid, stroke: colors.spine, strokeWidth: 4, visible: n > 1 });
-  spine.customData = Object.assign(spine.customData || {}, {
-    type: 'timeline', direction: across ? 'horizontal' : 'vertical', count: n, colors, step: 0
-  });
+  const settings = { type: 'stepList', direction: across ? 'horizontal' : 'vertical', count: n, colors, step: 0 };
+  const labelWidth = opts.group && !across
+    ? Math.min(opts.labelWidth, Math.ceil(Math.max(...items.map(t => new fabric.Text(String(t), { fontSize: opts.fontSize, fontFamily: 'helvetica', fontWeight: 'bold' }).width))) + 4)
+    : opts.labelWidth;
+  // One item has no spine to draw (it still holds the list's settings).
+  const spine = new fabric.CurvableLine([x, y, end.x, end.y], { stroke: colors.spine, strokeWidth: 4, visible: n > 1 });
+  spine.uid = opts.group ? `${uid}_spine` : uid;
+  if (!opts.group) spine.customData = Object.assign(spine.customData || {}, settings);
+  const parts = [spine];
   items.forEach((text, i) => {
     const p = at(i);
-    const bullet = addEllipse(p.x, p.y, opts.radius, opts.radius, {
-      uid: `${uid}_B${i + 1}`, fill: colors.pending, stroke: '#fff', strokeWidth: 3, originX: 'center', originY: 'center'
+    const bullet = new fabric.Ellipse({
+      left: p.x, top: p.y, rx: opts.radius, ry: opts.radius, fill: colors.pending, stroke: '#fff', strokeWidth: 3, originX: 'center', originY: 'center'
     });
+    bullet.uid = `${uid}_B${i + 1}`;
     // Across: centred under the bullet, as wide as the gap; down: to its right.
     const label = new fabric.Textbox(String(text), across
       ? { left: p.x, top: p.y + opts.radius + 14, width: opts.gap - 12, originX: 'center', textAlign: 'center' }
-      : { left: p.x + opts.radius + 28, top: p.y - opts.fontSize * 0.6, width: opts.labelWidth });
+      : { left: p.x + opts.radius + 28, top: p.y - opts.fontSize * 0.6, width: labelWidth });
     label.set({ fontSize: opts.fontSize, fontFamily: 'helvetica', fill: colors.pendingText });
     label.uid = `${uid}_T${i + 1}`;
-    // Where it sits from its bullet, so it follows when the timeline is moved.
-    label.customData = Object.assign(label.customData || {}, { timelineOffset: { left: label.left - bullet.left, top: label.top - bullet.top } });
-    pc.add(label);
+    // Where it sits from its bullet, so it follows when the list is moved.
+    label.customData = Object.assign(label.customData || {}, { stepOffset: { left: label.left - bullet.left, top: label.top - bullet.top } });
+    parts.push(bullet, label);
   });
-  pc.requestRenderAll();
-  return spine;
+  if (!opts.group) return { type: 'parts', parts };
+  // Drawn afresh each frame: a growing bullet may stand out of the group's box.
+  const g = new fabric.Group(parts, { originX: 'center', originY: 'center', objectCaching: false });
+  g.uid = uid;
+  g.customData = settings;
+  return g;
 }
 
-function _removeTimeline(uid) {
+const _isStepList = o => isFabricObject(o) && o.customData && (o.customData.type === 'stepList' || o.customData.type === 'timeline');
+
+function _removeStepList(uid) {
   const spine = findIfRequired(uid);
-  if (!isFabricObject(spine) || !spine.customData || spine.customData.type !== 'timeline') return;
+  if (!_isStepList(spine)) return;
+  if (spine.type === 'group') return removeByUid(uid);
   for (let i = 1; i <= spine.customData.count; i++) [`${uid}_B${i}`, `${uid}_T${i}`].forEach(removeByUid);
   removeByUid(uid);
 }
 
-// Highlights item n of a timeline (1 is the first): the ones before it are
-// done, the ones after it pending; 0 puts every item back to pending. The
-// next line waits for it.
-function timelineStep(uid, n, opts) {
+// Marks item n of a step list as the current one (1 is the first): the ones
+// before it are done, the ones after it pending; 0 puts every item back to
+// pending. The next line waits for it.
+function markStep(uid, n, opts) {
   const spine = findIfRequired(uid);
-  const cd = isFabricObject(spine) && spine.customData;
-  if (!cd || cd.type !== 'timeline') return Promise.resolve();
+  if (!_isStepList(spine)) return Promise.resolve();
+  const cd = spine.customData;
   opts = Object.assign({ duration: 450, grow: 1.9, nudge: 16 }, opts);
   n = Math.round(Number(n)) || 0;
-  const colors = cd.colors || _TIMELINE_COLORS;
+  const colors = cd.colors || _STEP_COLORS;
   const across = cd.direction === 'horizontal';
   const moves = [];
   for (let i = 1; i <= cd.count; i++) {
@@ -1089,7 +1115,7 @@ function timelineStep(uid, n, opts) {
     // A step started before the last one finished takes over from it.
     [bullet, label].forEach(o => fabric.runningAnimations.cancelByTarget(o));
     const state = i < n ? 'done' : i === n ? 'active' : 'pending';
-    const off = label.customData && label.customData.timelineOffset;
+    const off = label.customData && (label.customData.stepOffset || label.customData.timelineOffset);
     const home = off ? { left: bullet.left + off.left, top: bullet.top + off.top } : { left: label.left, top: label.top };
     setObjectProps(bullet, { fill: colors[state] });
     setObjectProps(label, { fill: colors[state + 'Text'], fontWeight: state === 'active' ? 'bold' : 'normal' });
@@ -1104,8 +1130,12 @@ function timelineStep(uid, n, opts) {
     if (Object.keys(place).some(k => label[k] !== place[k])) moves.push(animate(label, place, { duration }));
   }
   cd.step = n;
+  if (spine.type === 'group') { spine.dirty = true; pc.requestRenderAll(); }
   return Promise.all(moves);
 }
+
+function bulletTimeline(uid, items, x, y, opts) { return stepList(uid, items, x, y, opts); }
+function timelineStep(uid, n, opts) { return markStep(uid, n, opts); }
 
 function addDiamond(left, top, width, height, opts) {
   opts = opts || {};

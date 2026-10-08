@@ -168,7 +168,7 @@ export class PlayPage {
         const swap = (name, fn) => { const orig = window[name]; if (typeof orig !== 'function') return; window.__mcpRestore.push([name, orig]); window[name] = fn(orig); };
         swap('sleep', () => () => Promise.resolve());
         // [function, index of its options argument]
-        [['animate', 2], ['drawOutline', 1], ['connectObjects', 3], ['animateViewport', 1], ['revertState', 1], ['reveal', 2], ['typeIn', 1], ['writeIn', 1], ['emanate', 3]].forEach(([name, at]) =>
+        [['animate', 2], ['drawOutline', 1], ['connectObjects', 3], ['animateViewport', 1], ['revertState', 1], ['reveal', 2], ['typeIn', 1], ['writeIn', 1], ['emanate', 3], ['markStep', 2]].forEach(([name, at]) =>
           swap(name, orig => function (...args) { args[at] = Object.assign({}, args[at], { duration: 1 }); return orig.apply(this, args); }));
       }
       if (typeof clear === 'function') clear();
@@ -256,10 +256,17 @@ export class PlayPage {
   }
 
   // Sizes [width, height] of objects as the page would build them (labels,
-  // figures, pictures), without adding them: [{kind, text, fontSize, boundary, src, width}].
+  // figures, pictures, step lists), without adding them: [{kind, text, fontSize, boundary, src, width, items, direction, gap}].
+  // A step list's has two more numbers: where its first bullet sits from its centre.
   async measure(specs) {
     const page = await this.open();
     return page.evaluate(async list => Promise.all(list.map(async s => {
+      if (s.kind === 'steps') {
+        // Also where its first bullet sits from its centre.
+        const g = makeStepList('__measure', s.items, 0, 0, { group: true, direction: s.direction, fontSize: s.fontSize, gap: s.gap });
+        const c = g.getCenterPoint();
+        return [Math.round(g.width), Math.round(g.height), Math.round(-c.x), Math.round(-c.y)];
+      }
       const o = s.kind === 'figure' ? makeFigure(0, 0, { uid: '__measure', label: s.text, fontSize: s.fontSize, boundary: s.boundary })
         : s.kind === 'picture' ? await makePicture(s.src, 0, 0, { uid: '__measure', label: s.text, width: s.width, fontSize: s.fontSize })
         : (s.hand && await handFont(), makeLabel(s.text, 0, 0, { uid: '__measure', fontSize: s.fontSize, boundary: s.boundary, hand: s.hand }));

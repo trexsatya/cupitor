@@ -2188,7 +2188,7 @@ function exportCanvas() {
 function buildScriptExecutables(lines) {
   return (lines || window.recordedScriptLines || []).map(raw => {
     const line = raw.trim()
-    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal') || line.startsWith('drawOutline') || line.startsWith('revertState') || line.startsWith('timelineStep'))
+    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal') || line.startsWith('drawOutline') || line.startsWith('revertState') || line.startsWith('timelineStep') || line.startsWith('markStep'))
       ? `return ${line};`
       : raw.replace(/\s+$/, '') // indentation kept (e.g. inside a /* … */)
     // The brace on its own line: a comment at the end of the line can't swallow it.

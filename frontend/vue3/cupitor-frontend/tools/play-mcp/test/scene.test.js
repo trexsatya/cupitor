@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyScene, parseScene, planActions, boxOf, validate, withoutLastAction, view, TAG, lineTime, timeline, captionsFile, narrationIssues, connectorEnds } from '../scene.js';
 
-const measure = async specs => specs.map(s => (s.kind === 'figure' ? [50, 130] : [String(s.text).length * 12 + 24, 50]));
+const measure = async specs => specs.map(s => (s.kind === 'steps' ? [300, s.items.length * 60, -130, -(s.items.length - 1) * 30] : s.kind === 'figure' ? [50, 130] : [String(s.text).length * 12 + 24, 50]));
 const plan = async (actions, model = emptyScene()) => ({ model, ...(await planActions(model, actions, measure)) });
 const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
@@ -741,4 +741,28 @@ test('a figure can have a frame round it, which weaken_boundary dashes; others a
   assert.match(r.join('\n'), /addFigure\(\d+, \d+, \{"uid":"teen".*"boundary":"dashed"/);
   const { lines: back } = await plan([{ op: 'checkpoint', name: 'c' }, { op: 'revise', id: 'bare', text: 'VUXEN B' }, { op: 'return_to', name: 'c' }], model);
   assert.match(back.join('\n'), /setLabelText\("bare", "VUXEN"\)/);
+});
+
+test('a step list is one concept, placed like any other; step marks progress through it; return_to goes back', async () => {
+  const { model, lines } = await plan([
+    { op: 'steps', id: 'plan', items: ['MÅL', 'ALTERNATIV', 'BESLUT'], place: { region: 'left' } },
+    { op: 'introduce', id: 'next', text: 'NEXT', place: { near: 'plan', side: 'right' } },
+    { op: 'checkpoint', name: 'start' },
+    { op: 'step', id: 'plan', n: 2 }
+  ]);
+  const o = model.objects.plan, b = boxOf(o);
+  assert.equal(o.kind, 'steps');
+  assert.equal(o.step, 2);
+  // The first bullet goes where the measured offset puts it from the centre.
+  assert.match(lines.find(l => l.startsWith('drawOutline(stepList(')), new RegExp(`^drawOutline\\(stepList\\("plan", \\["MÅL","ALTERNATIV","BESLUT"\\], ${o.at[0] - 130}, ${o.at[1] - 60}, \\{group: true, direction: "vertical"`));
+  assert.ok(lines.includes('markStep("plan", 2, {duration: 800})') || lines.some(l => /^markStep\("plan", 2, \{duration: \d+\}\)$/.test(l)));
+  assert.ok(!hit(boxOf(model.objects.next), b), 'the next concept keeps clear of it');
+  const back = await plan([{ op: 'return_to', name: 'start' }], model);
+  assert.equal(back.model.objects.plan.step, 0);
+  assert.ok(back.lines.some(l => l.includes('markStep("plan", 0, {duration: 1})')), 'its progress marked again');
+  await assert.rejects(plan([{ op: 'step', id: 'next', n: 1 }], model), /not a step list/);
+  await assert.rejects(plan([{ op: 'step', id: 'plan', n: 4 }], model), /step: n/);
+  await assert.rejects(plan([{ op: 'steps', id: 'empty', items: [] }]), /non-empty list/);
+  await assert.rejects(plan([{ op: 'replace', id: 'plan', with: { text: 'X' } }], model), /is a step list; give with.kind/);
+  assert.deepEqual(o.size, [332, 212], 'measured size and room for the current step');
 });

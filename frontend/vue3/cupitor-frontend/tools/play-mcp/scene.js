@@ -64,6 +64,8 @@ export const ACTIONS = {
   return_to: 'Go back: {name} puts the concepts of a checkpoint back as they were (positions, text, emphasis, ones removed since) and the camera; {ids} brings back removed concepts where they were (one still on screen, e.g. dimmed, comes back to full strength).',
   turnover: "Some members of a group leave while new ones arrive, the group's identity holding: {group, leaving: [ids], arriving: [{id, text, role?, color?, background?}] or [\"TEXT\"] (without their own, arrivals take the role, colour and background the group was made with, else a staying member's), direction?: right|left|down|up (where leavers go; arrivals come in at the other end), pace?}.",
   narrate: "A line of narration, shown as a caption: {text, id? (default n1, n2, ...; later audio for the line takes this id), sync?: before (default: the script waits while it is read, so what follows is revealed after it) | with (what follows plays while it shows), seconds? (hold it this long instead of the reading-pace estimate)}. A caption stays until the next narrate, beat or scene.",
+  steps: 'A list of steps on a spine, a bullet and a label each, for the stages of a process or an argument the viewer is taken through: {id, items: ["TEXT", …], direction?: vertical|horizontal (default vertical), size?, place?, pace?}. It is one concept: place near it, connect to it, focus, deemphasize, remove and return_to work on it as on any other. Then step shows progress through it.',
+  step: 'Make item n of a step list the current one: {id, n, pace?}. n: 1 is the first; the items before it are shown done, the ones after it pending; 0 puts them all back to pending.',
   pause: `Hold still: {kind?: ${Object.keys(PAUSE).join('|')}, seconds?}.`,
   remove: 'Fade concepts out and delete them: {ids, pace?}.'
 };
@@ -161,6 +163,13 @@ export function applyRecord(model, rec) {
     case 'type':
     case 'write':
       addObject(model, rec, rec);
+      break;
+    case 'steps':
+      addObject(model, rec, rec);
+      Object.assign(model.objects[rec.id], { items: rec.items, direction: rec.direction, gap: rec.gap, offset: rec.offset, step: 0 });
+      break;
+    case 'step':
+      obj(rec.id).step = rec.n;
       break;
     case 'introduce_group':
     case 'branch':
@@ -712,6 +721,32 @@ export async function planAction(model, a, measure) {
       return { record: rec, lines: [line] };
     }
 
+    case 'steps': {
+      if (!a.id) throw new Error('steps: id is required');
+      checkNewId(model, a.id);
+      if (!Array.isArray(a.items) || !a.items.length || !a.items.every(t => typeof t === 'string' && t.trim())) throw new Error('steps: items must be a non-empty list of texts');
+      const direction = a.direction || 'vertical';
+      if (!['vertical', 'horizontal'].includes(direction)) throw new Error('steps: direction must be vertical or horizontal');
+      const screenFont = typeof a.size === 'number' ? a.size : TEXT_SIZE[a.size || 'normal'];
+      if (!screenFont) throw new Error(`size must be ${Object.keys(TEXT_SIZE).join(', ')} or a font size`);
+      const fontSize = Math.round(screenFont / zoomOf(model) * 10) / 10;
+      const gap = Math.round(fontSize * (direction === 'vertical' ? 2.6 : 7));
+      const [[w0, h0, dx, dy]] = await measure([{ kind: 'steps', items: a.items, direction, fontSize, gap }]);
+      // Room all round for the current step, whose bullet grows and label steps out (16px).
+      const w = w0 + 32, h = h0 + 32;
+      const at = placeBox(model, [w, h], a.place);
+      const rec = { op, id: a.id, kind: 'steps', text: a.items.join(' · '), items: a.items, direction, fontSize, gap, offset: [dx, dy], role: a.role, at, size: [w, h] };
+      return { record: rec, lines: [`drawOutline(stepList(${J(a.id)}, ${J(a.items)}, ${at[0] + dx}, ${at[1] + dy}, {group: true, direction: ${J(direction)}, fontSize: ${fontSize}, gap: ${gap}}), {duration: ${pace(a, 'deliberate')}})`] };
+    }
+
+    case 'step': {
+      const o = need(model, a.id, op);
+      if (o.kind !== 'steps') throw new Error(`step: "${a.id}" is a ${o.kind}, not a step list`);
+      const n = num(a.n, 'step: n', 0, o.items.length);
+      if (!Number.isInteger(n)) throw new Error('step: n must be a whole number');
+      return { record: { op, id: a.id, n }, lines: [`markStep(${J(a.id)}, ${n}, {duration: ${pace(a)}})`] };
+    }
+
     case 'introduce': {
       const id = idFor(a.id, a.text);
       checkNewId(model, id);
@@ -850,6 +885,7 @@ export async function planAction(model, a, measure) {
     case 'replace': {
       const old = need(model, a.id, op);
       const w = a.with || {};
+      if (old.kind === 'steps' && !w.kind) throw new Error(`replace: "${a.id}" is a step list; give with.kind for what takes its place`);
       const id = idFor(w.id, w.text);
       checkNewId(model, id);
       const keep = { ...(w.role == null && w.color == null ? { role: old.role, color: old.color } : {}), ...(w.background == null && old.background && !['figure', 'picture'].includes(w.kind) ? { background: old.background } : {}), ...(w.boundary == null && old.framed && (w.kind || old.kind) === 'figure' ? { boundary: old.boundary } : {}) };
@@ -1002,6 +1038,11 @@ export async function planAction(model, a, measure) {
           const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
           return [...(now.text !== o.text && o.text != null ? [`setLabelText(${J(o.id)}, ${J(o.text)})`] : []),
             ...(now.boundary !== o.boundary ? [`setLabelBoundary(${J(o.id)}, ${J(o.boundary)})`] : [])];
+        });
+        // Nor is a step list's progress (bold labels): it is marked again.
+        Object.values(st.objects).filter(o => o.kind === 'steps').forEach(o => {
+          const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
+          if (now.step !== o.step) fixes.push(`markStep(${J(o.id)}, ${o.step}, {duration: 1})`);
         });
         if (fixes.length) lines.push(`Promise.resolve().then(() => { ${fixes.join('; ')}; })`);
         const c = model.camera;
@@ -1195,7 +1236,7 @@ export async function planActions(model, actions, measure) {
 // When the concepts an action adds, grows or pushes aside would not fit in view
 // without covering others, the camera first pulls back (keeping the centre of
 // the view) just far enough for them to fit: a widen_context of its own, marked auto.
-const ADDS = ['introduce', 'type', 'write', 'introduce_group', 'branch', 'revise', 'question', 'replace', 'turnover'];
+const ADDS = ['introduce', 'type', 'write', 'steps', 'introduce_group', 'branch', 'revise', 'question', 'replace', 'turnover'];
 const ROOM_STEP = 0.85, ROOM_STEPS = 6;
 async function roomInView(model, a, measure) {
   if (!a || !ADDS.includes(a.op) || (a.op !== 'branch' && a.place && (a.place.x != null || a.place.y != null))) return [];
@@ -1378,7 +1419,7 @@ export function segmentHitsBox([x1, y1, x2, y2], b) {
 
 // Lines the player waits for; any other code line is followed by a 1 s pause,
 // and a waited-for line by a 0.1 s gap.
-const AWAITED = /^(animate|Promise|connectObjects|reveal|drawOutline|revertState|timelineStep)/;
+const AWAITED = /^(animate|Promise|connectObjects|reveal|drawOutline|revertState|timelineStep|markStep)/;
 
 // The code on each script line without its comments, as the player reads it
 // (public/fabric.play.js scriptCode): // to the end of the line and /* … */
