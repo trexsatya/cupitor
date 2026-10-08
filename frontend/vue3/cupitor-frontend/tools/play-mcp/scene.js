@@ -49,7 +49,7 @@ export const ACTIONS = {
   branch: 'Add children of a concept, each growing out of it along its arrow (small at first, full size where it lands): {from, items, side?: below|above|left|right, kind?, size?, role?, color?, background?, from_side?, to_side?, emanate?: false (draw each child in place, then its arrow), pace?}. Items as in introduce_group. The arrows leave the side the children landed on (bottom when below) and arrive at the side facing it; from_side / to_side, as in connect, name others for every arrow.',
   connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.",
   disconnect: 'Remove a relationship: {id} or {from, to}.',
-  enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.',
+  enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}. A group among the members stands for all of its members.',
   revise: 'Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.',
   question: 'Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.',
   weaken_boundary: "Dash (or remove) a concept's or enclosure's boundary (a figure's frame too): {id, style?: dashed|none, pace?}.",
@@ -67,7 +67,7 @@ export const ACTIONS = {
   steps: 'A list of steps on a spine, a bullet and a label each, for the stages of a process or an argument the viewer is taken through: {id, items: ["TEXT", …], direction?: vertical|horizontal (default vertical), size?, place?, pace?}. It is one concept: place near it, connect to it, focus, deemphasize, remove and return_to work on it as on any other. Then step shows progress through it.',
   step: 'Make item n of a step list the current one: {id, n, pace?}. n: 1 is the first; the items before it are shown done, the ones after it pending; 0 puts them all back to pending.',
   pause: `Hold still: {kind?: ${Object.keys(PAUSE).join('|')}, seconds?}.`,
-  remove: 'Fade concepts out and delete them: {ids, pace?}.'
+  remove: 'Fade concepts out and delete them: {ids, pace?}. Ones removed earlier are skipped.'
 };
 
 export function emptyScene() {
@@ -831,7 +831,8 @@ export async function planAction(model, a, measure) {
 
     case 'enclose': {
       checkNewId(model, a.id);
-      const members = a.group ? (model.groups[a.group] || {}).members : a.members;
+      // A group among the members stands for its members (and its enclosure).
+      const members = a.group ? (model.groups[a.group] || {}).members : Array.isArray(a.members) && a.members.length ? expand(model, a.members, op) : null;
       if (!Array.isArray(members) || !members.length) throw new Error(`enclose: give members or an existing group`);
       members.forEach(m => need(model, m, op));
       const style = a.style || 'solid';
@@ -1203,8 +1204,12 @@ export async function planAction(model, a, measure) {
     }
 
     case 'remove': {
-      const ids = expand(model, a.ids, op);
+      if (!Array.isArray(a.ids) || !a.ids.length) throw new Error('remove: ids must be a non-empty list');
+      // Ones removed already are gone: nothing to do for them.
+      const left = a.ids.filter(id => !(model.retired[id] && !model.objects[id] && !model.groups[id]));
+      const ids = left.length ? expand(model, left, op) : [];
       const ms = pace(a);
+      if (!ids.length) return { record: { op, ids }, lines: [] };
       return { record: { op, ids }, lines: [`${fadeAll(ids.map(id => [id, 0]), ms)}.then(() => ${J(ids)}.forEach(removeByUid))`] };
     }
   }

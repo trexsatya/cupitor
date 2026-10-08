@@ -766,3 +766,18 @@ test('a step list is one concept, placed like any other; step marks progress thr
   await assert.rejects(plan([{ op: 'replace', id: 'plan', with: { text: 'X' } }], model), /is a step list; give with.kind/);
   assert.deepEqual(o.size, [332, 212], 'measured size and room for the current step');
 });
+
+test('removing a concept removed earlier does nothing; an unknown one is still refused', async () => {
+  const { model } = await plan([{ op: 'introduce', id: 'a', text: 'A' }, { op: 'introduce', id: 'b', text: 'B' }, { op: 'remove', ids: ['a'] }]);
+  const { lines } = await plan([{ op: 'remove', ids: ['a', 'b'] }], model);
+  assert.ok(lines.some(l => l.includes('["b"].forEach(removeByUid)')), 'only b goes');
+  const again = await plan([{ op: 'remove', ids: ['a'] }], model);
+  assert.ok(!again.lines.some(l => l.includes('removeByUid')));
+  await assert.rejects(plan([{ op: 'remove', ids: ['nope'] }], model), /no concept "nope"/);
+});
+
+test('a group among the members of an enclosure stands for its members', async () => {
+  const { model } = await plan([{ op: 'introduce_group', id: 'g', items: ['ONE', 'TWO'] }, { op: 'introduce', id: 'x', text: 'X' }, { op: 'enclose', id: 'frame', members: ['g', 'x'] }]);
+  assert.deepEqual(model.objects.frame.members.sort(), ['one', 'two', 'x']);
+});
+
