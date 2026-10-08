@@ -69,6 +69,9 @@ the thinking to the viewer.
   arrow) unless the arrow is meant to pass through it; place it \`near\` one end instead, or connect afterwards.
   Keep very wide boxes out of the way of arrows between concepts on either side of them, and \`remove\` what a
   later scene no longer needs before the camera comes back in (\`narrow_context {"reset": true}\`).
+- Clear the path before a \`branch\` or a long \`connect\`: \`remove\` finished concepts that sit
+  between the two ends or where the children will go. A faded (\`deemphasize\`) concept still counts as in the
+  way. Prefer connecting concepts that are near each other; for a far one, place it \`near\` its partner.
 - Diagrams may fail, revise themselves or stay unresolved when the argument does.
 - Colour is meaning, not decoration. Give a concept a \`role\` from the palette (${Object.entries(ROLE_COLORS).map(([r, c]) => `\`${r}\` ${c}`).join(', ')})
   and it takes that colour; the same role keeps the same colour through the whole film. Use \`color\` only for a
@@ -78,6 +81,9 @@ the thinking to the viewer.
 - \`type\` and \`write\` make a text concept appear as it is being formulated: typed in, or written by hand. Use them
   only when the act of formulating matters (a question being posed, a promise made, a hypothesis put forward);
   most concepts still appear with \`introduce\`.
+- Frames and highlights: a figure takes \`boundary: solid|dashed\` when it is introduced (a text gets one by being
+  \`kind: box\`). To highlight a concept already on screen, \`enclose\` it alone (\`{"op": "enclose", "id": "…",
+  "members": ["…"]}\`) and \`remove\` the enclosure when the moment is over.
 
 ## How to work, for each passage
 
@@ -86,7 +92,9 @@ the thinking to the viewer.
    \`{"type": one of ${VIEWER_TASKS.map(t => `"${t}"`).join(', ')}, "target": what the viewer should arrive at}\`.
 3. Write the narration as short lines (\`narrate\`, at most about 20 words each), in the text's own voice.
    \`"sync": "before"\` (the default) holds the scene while the line is read; \`"sync": "with"\` lets the next
-   actions play while it shows.
+   actions play while it shows. A \`with\` line is shown only as long as those actions take (until the next line,
+   beat or scene): when it is longer than they are, make it \`before\`, shorten it, or add a \`pause\` after the
+   actions. \`seconds\` changes how long a \`before\` line holds, not how long a \`with\` line shows.
 4. Add the visual actions that support the move, in order.
 
 ## Format

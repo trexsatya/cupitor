@@ -25,6 +25,9 @@ the thinking to the viewer.
   arrow) unless the arrow is meant to pass through it; place it `near` one end instead, or connect afterwards.
   Keep very wide boxes out of the way of arrows between concepts on either side of them, and `remove` what a
   later scene no longer needs before the camera comes back in (`narrow_context {"reset": true}`).
+- Clear the path before a `branch` or a long `connect`: `remove` finished concepts that sit
+  between the two ends or where the children will go. A faded (`deemphasize`) concept still counts as in the
+  way. Prefer connecting concepts that are near each other; for a far one, place it `near` its partner.
 - Diagrams may fail, revise themselves or stay unresolved when the argument does.
 - Colour is meaning, not decoration. Give a concept a `role` from the palette (`citizen` #3B82F6, `knowledge` #14B8A6, `power` #F59E0B, `feedback` #22C55E, `risk` #EF4444, `values` #8B5CF6, `technical` #6B7280, `neutral` #9CA3AF)
   and it takes that colour; the same role keeps the same colour through the whole film. Use `color` only for a
@@ -34,6 +37,9 @@ the thinking to the viewer.
 - `type` and `write` make a text concept appear as it is being formulated: typed in, or written by hand. Use them
   only when the act of formulating matters (a question being posed, a promise made, a hypothesis put forward);
   most concepts still appear with `introduce`.
+- Frames and highlights: a figure takes `boundary: solid|dashed` when it is introduced (a text gets one by being
+  `kind: box`). To highlight a concept already on screen, `enclose` it alone (`{"op": "enclose", "id": "…",
+  "members": ["…"]}`) and `remove` the enclosure when the moment is over.
 
 ## How to work, for each passage
 
@@ -42,7 +48,9 @@ the thinking to the viewer.
    `{"type": one of "notice", "compare", "predict", "infer", "remember", "question", "integrate", "target": what the viewer should arrive at}`.
 3. Write the narration as short lines (`narrate`, at most about 20 words each), in the text's own voice.
    `"sync": "before"` (the default) holds the scene while the line is read; `"sync": "with"` lets the next
-   actions play while it shows.
+   actions play while it shows. A `with` line is shown only as long as those actions take (until the next line,
+   beat or scene): when it is longer than they are, make it `before`, shorten it, or add a `pause` after the
+   actions. `seconds` changes how long a `before` line holds, not how long a `with` line shows.
 4. Add the visual actions that support the move, in order.
 
 ## Format
@@ -70,7 +78,7 @@ them out, or never use that pattern yourself.
 ## Actions
 
 - `viewer_task`: What the viewer should do mentally: {type: notice|compare|predict|infer|remember|question|integrate, target, constraint?}. Attaches to the current beat (or scene).
-- `introduce`: Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, color?, place?, pace?}. role names what the concept is (any word); citizen|knowledge|power|feedback|risk|values|technical|neutral also colour it (citizen #3B82F6, knowledge #14B8A6, power #F59E0B, feedback #22C55E, risk #EF4444, values #8B5CF6, technical #6B7280, neutral #9CA3AF), so a role keeps its colour throughout. color (a CSS colour such as #3B82F6) goes before the role's. background (a CSS colour; text and box only) fills the box behind the text, e.g. a light tint of its colour such as #DBEAFE. The colour stays through revise, question, focus, deemphasize, move_into and return_to. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.
+- `introduce`: Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, color?, place?, pace?}. role names what the concept is (any word); citizen|knowledge|power|feedback|risk|values|technical|neutral also colour it (citizen #3B82F6, knowledge #14B8A6, power #F59E0B, feedback #22C55E, risk #EF4444, values #8B5CF6, technical #6B7280, neutral #9CA3AF), so a role keeps its colour throughout. color (a CSS colour such as #3B82F6) goes before the role's. background (a CSS colour; text and box only) fills the box behind the text, e.g. a light tint of its colour such as #DBEAFE. The colour stays through revise, question, focus, deemphasize, move_into and return_to. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. A figure takes boundary?: solid|dashed, a rounded frame round the person and label (weaken_boundary changes it). place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.
 - `type`: Type a new text concept in, a character at a time, when a proposition, question, promise or hypothesis is being formulated in front of the viewer: as introduce (text or box only), plus caret?: true|false (default true) and characters_per_second? (default from pace: short 30, deliberate 12). It is then an ordinary concept.
 - `write`: Write a new text concept in by hand, stroke after stroke, as a lecturer would: as introduce (text or box only), plus characters_per_second? (default from pace: short 14, deliberate 6). It stays in handwriting through revise and question; a replace or turnover arrival is ordinary text.
 - `introduce_group`: Add several concepts as a row or column: {id, items: [{id, text, role?, color?, background?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, background?, place?, pace?}. An item without its own role, color or background takes the group's.
@@ -80,7 +88,7 @@ them out, or never use that pattern yourself.
 - `enclose`: Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.
 - `revise`: Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.
 - `question`: Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.
-- `weaken_boundary`: Dash (or remove) a concept's or enclosure's boundary: {id, style?: dashed|none, pace?}.
+- `weaken_boundary`: Dash (or remove) a concept's or enclosure's boundary (a figure's frame too): {id, style?: dashed|none, pace?}.
 - `replace`: Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one's.
 - `deemphasize`: Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.
 - `focus`: Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.

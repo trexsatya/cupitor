@@ -145,7 +145,7 @@ test('handwriting: a middle dot is a dot, missing punctuation is written with wh
         dash: strokes('–').length === strokes('-').length, ellipsis: strokes('…').length === strokes('...').length,
         unknown: strokes('日').length, dots: width('...') > width('.') * 3,
         // Letters keep their own width; an accent typed apart joins its letter; zero-width characters add nothing.
-        letters: width('ll') < width('..') * 0.8, // only punctuation gets a cell
+        letters: (adv => Math.abs(adv('ll') - 2 * adv('l')) < 0.01 && adv('l') < adv('.'))(t => _handStrokes(t).width), // letter advances // only punctuation gets a cell
         decomposed: width('e\u0301') === width('\u00e9'), zeroWidth: width('a\u200Bb') === width('ab')
       };
     });
@@ -221,6 +221,34 @@ test('a child grows out of its source along its arrow: small at the source edge 
     assert.deepEqual(early.start, done.start, 'the arrow leaves from the same point all the way, not across the source');
     const ends = await b.eval(() => { const k = findIfRequired('K'); k.setCoords(); const r = k.getBoundingRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top)]; });
     assert.deepEqual(done.tip.map(Math.round), ends, 'the arrow ends at the middle of its top edge');
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('a figure with a boundary: a frame round person and label, refitted when the label changes, dashed or hidden on request', async () => {
+  const b = await openBoard();
+  try {
+    const look = () => b.eval(() => {
+      const g = findIfRequired('F'); g.setCoords();
+      const [body, label, frame] = g.getObjects(), box = o => { o.setCoords(); const r = o.getBoundingRect(); return [r.left, r.top, r.left + r.width, r.top + r.height].map(Math.round); };
+      return { body: box(body), label: box(label), frame: box(frame), type: frame.type, dash: frame.strokeDashArray, width: frame.strokeWidth };
+    });
+    const inside = (f, x) => f[0] < x[0] && f[1] < x[1] && f[2] > x[2] && f[3] > x[3];
+    await b.play(['addFigure(400, 300, {uid: "F", label: "BARN", boundary: "solid"})']);
+    let l = await look();
+    assert.equal(l.type, 'rect');
+    assert.ok(inside(l.frame, l.body) && inside(l.frame, l.label), JSON.stringify(l));
+    await b.play(['setLabelText("F", "ETT MYCKET LÄNGRE NAMN")']);
+    l = await look();
+    assert.ok(inside(l.frame, l.label) && l.frame[2] - l.frame[0] < l.label[2] - l.label[0] + 40, `refitted: ${JSON.stringify(l)}`);
+    await b.play(['setLabelBoundary("F", "dashed")']);
+    assert.deepEqual((await look()).dash, [10, 7]);
+    await b.play(['setLabelBoundary("F", "none")']);
+    assert.equal((await look()).width, 0);
+    // A figure drawn without one has none to change.
+    await b.play(['addFigure(800, 300, {uid: "G", label: "VUXEN"})']);
+    assert.equal(await b.eval(() => findIfRequired('G').getObjects().length), 2);
+    assert.match(await b.eval(() => { try { setLabelBoundary('G', 'solid'); return ''; } catch (e) { return e.message; } }), /drawn with a boundary/);
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });

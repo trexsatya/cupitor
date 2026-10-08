@@ -390,22 +390,23 @@ function makeLabel(text, x, y, opts) {
 }
 
 // ---- Handwriting ----
-// Pen strokes for each character come from a Vara.js font (Shadows Into Light):
+// Pen strokes for each character come from a Vara.js font (Satisfy, a light cursive):
 // per glyph, strokes as SVG paths in font units, offset by (mx, -my) from the
 // glyph's origin. Letters with accents (Å, Ä, Ö, É, …) are the base letter with
 // the marks drawn above it.
 
-const HAND_FONT_URL = '/vendor/varajs/fonts/Shadows-Into-Light/shadows-into-light.json';
+// gap: room after each letter, in spaces; weight: the pen is the font size / weight wide.
+const HAND_FONT = { url: '/vendor/varajs/fonts/Satisfy/SatisfySL.json', gap: 0.06, weight: 18 };
 let _handFont = null, _handFontLoading = null;
 
 // Loads the handwriting font once; resolves when makeHandText can be used.
 function handFont() {
   if (_handFont) return Promise.resolve(_handFont);
   if (!_handFontLoading) {
-    _handFontLoading = fetch(HAND_FONT_URL).then(r => {
-      if (!r.ok) throw new Error(`handFont: ${HAND_FONT_URL} answered ${r.status}`);
+    _handFontLoading = fetch(HAND_FONT.url).then(r => {
+      if (!r.ok) throw new Error(`handFont: ${HAND_FONT.url} answered ${r.status}`);
       return r.json();
-    }).then(font => (_handFont = font), err => { _handFontLoading = null; throw err; });
+    }).then(font => (_handFont = Object.assign(font, { gap: HAND_FONT.gap })), err => { _handFontLoading = null; throw err; });
   }
   return _handFontLoading;
 }
@@ -428,7 +429,7 @@ function _handStrokes(text) {
   if (!font) throw new Error('makeHandText: load the handwriting font first (handFont())');
   const glyph = ch => font.c[ch.charCodeAt(0)];
   const H = _handBox(glyph('H').paths), capH = H.h;
-  const gap = font.p.space * 0.18, cell = font.p.space * 0.45; // punctuation (. , :) gets a cell of its own
+  const gap = font.p.space * (font.gap == null ? 0.18 : font.gap), cell = font.p.space * 0.45; // punctuation (. , :) gets a cell of its own
   const strokes = [];
   let x = 0;
   // Composed first, so an accent typed as its own character joins its letter.
@@ -483,7 +484,7 @@ function makeHandText(text, opts) {
   const k = o.fontSize * 0.7 / capH;
   const paths = strokes.map(({ d, dx }) => {
     const p = new fabric.Path(d, {
-      fill: '', stroke: o.color, strokeWidth: Math.max(1.5, o.fontSize / 11) / k, // in font units: it scales with the text
+      fill: '', stroke: o.color, strokeWidth: Math.max(1.2, o.fontSize / HAND_FONT.weight) / k, // in font units: it scales with the text
       strokeLineCap: 'round', strokeLineJoin: 'round', objectCaching: false
     });
     p.set({ left: (p.left + dx) * k, top: p.top * k, scaleX: k, scaleY: k });
@@ -528,6 +529,7 @@ function setLabelText(uidOrObj, text) {
     t = nt;
   } else t.set('text', String(text));
   if (type === 'label') r.set({ width: t.width + 2 * g.customData.padding, height: t.height + 2 * g.customData.padding });
+  if (type === 'figure' && _figureFrame(g)) _fitFigureFrame(_figureFrame(g), r, t);
   g.triggerLayout();
   g.setPositionByOrigin(centre, 'center', 'center');
   g.setCoords();
@@ -540,17 +542,20 @@ function setLabelText(uidOrObj, text) {
 // 'none', 'solid' or 'dashed' outline around a label.
 function setLabelBoundary(uidOrObj, boundary) {
   const g = findIfRequired(uidOrObj);
-  if (!isFabricObject(g) || !g.customData || g.customData.type !== 'label') throw new Error(`setLabelBoundary: ${uidOrObj} is not a label`);
-  _setLabelBoundary(g.getObjects()[0], boundary);
+  const type = isFabricObject(g) && g.customData && g.customData.type;
+  const rect = type === 'label' ? g.getObjects()[0] : type === 'figure' ? _figureFrame(g) : null;
+  if (!rect) throw new Error(`setLabelBoundary: ${uidOrObj} is not a label, or a figure drawn with a boundary`);
+  _setLabelBoundary(rect, boundary);
   g.customData.boundary = boundary;
   g.dirty = true;
   if (g.canvas) g.canvas.requestRenderAll();
 }
 
 // A minimal person (head, body, arms, legs), centred on x, y, with an optional label under it.
-// opts: uid, label, color ('#222'), fontSize (18).
+// opts: uid, label, color ('#222'), fontSize (18), boundary ('none' (default) | 'solid' |
+// 'dashed': a rounded frame round the person and label, which setLabelBoundary changes).
 function makeFigure(x, y, opts) {
-  const o = Object.assign({ color: '#222', fontSize: 18 }, opts);
+  const o = Object.assign({ color: '#222', fontSize: 18, boundary: 'none' }, opts);
   const body = new fabric.Path('M 25 0 A 12 12 0 1 1 24.9 0 Z M 25 24 L 25 64 M 5 40 L 45 40 M 25 64 L 8 100 M 25 64 L 42 100', {
     fill: '', stroke: o.color, strokeWidth: 3, strokeLineCap: 'round', strokeLineJoin: 'round', left: 0, top: 0
   });
@@ -561,10 +566,28 @@ function makeFigure(x, y, opts) {
       originX: 'center', originY: 'top', left: body.left + body.width / 2, top: body.top + body.height + 10
     }));
   }
+  if (o.boundary === 'solid' || o.boundary === 'dashed') {
+    const frame = new fabric.Rect({ originX: 'left', originY: 'top', fill: '', stroke: o.color, rx: 12, ry: 12 });
+    _setLabelBoundary(frame, o.boundary);
+    _fitFigureFrame(frame, body, parts[1]);
+    parts.push(frame);
+  }
   const g = new fabric.Group(parts, { originX: 'center', originY: 'center', left: x || 0, top: y || 0 });
   g.uid = o.uid || semanticUid('figure');
-  g.customData = { type: 'figure', text: o.label ? String(o.label) : undefined };
+  g.customData = { type: 'figure', text: o.label ? String(o.label) : undefined, boundary: o.boundary === 'solid' || o.boundary === 'dashed' ? o.boundary : 'none' };
   return g;
+}
+
+// A figure's frame (the one rect in it), if it was drawn with one.
+const _figureFrame = g => g.getObjects().find(p => p.type === 'rect');
+
+// The frame 12px round the person and label (all in the same plane).
+function _fitFigureFrame(frame, body, label) {
+  const pad = 12;
+  const x0 = Math.min(body.left, label ? label.left - label.width / 2 : Infinity);
+  const x1 = Math.max(body.left + body.width, label ? label.left + label.width / 2 : -Infinity);
+  const y0 = body.top, y1 = label ? label.top + label.height : body.top + body.height;
+  frame.set({ left: x0 - pad, top: y0 - pad, width: x1 - x0 + 2 * pad, height: y1 - y0 + 2 * pad });
 }
 
 function addFigure(x, y, opts) {

@@ -726,3 +726,19 @@ test('narration review fixes: comments add no time, cues end when their caption 
   assert.ok(time(cues[0])[1] <= time(cues[1])[0], 'cues do not overlap');
   assert.match(narrationIssues(lines).map(i => i.message).join('\n'), /n2 asks a question/);
 });
+
+test('a figure can have a frame round it, which weaken_boundary dashes; others are refused', async () => {
+  const { model, lines } = await plan([{ op: 'introduce', id: 'kid', kind: 'figure', text: 'BARN', boundary: 'solid' }, { op: 'introduce', id: 'bare', kind: 'figure', text: 'VUXEN' }]);
+  assert.match(lines.join('\n'), /addFigure\(\d+, \d+, \{"uid":"kid".*"boundary":"solid"\}\)/);
+  assert.doesNotMatch(lines.find(l => l.includes('"uid":"bare"')), /boundary/);
+  const { lines: w } = await plan([{ op: 'weaken_boundary', id: 'kid' }], model);
+  assert.match(w.join('\n'), /setLabelBoundary\("kid", "dashed"\)/);
+  assert.equal(model.objects.kid.boundary, 'dashed');
+  await assert.rejects(plan([{ op: 'weaken_boundary', id: 'bare' }], model), /has no boundary \(give the figure boundary/);
+  await assert.rejects(plan([{ op: 'introduce', id: 't', text: 'T', boundary: 'solid' }]), /boundary is for a figure/);
+  // A replacement figure keeps the frame; going back brings the old label back.
+  const { lines: r } = await plan([{ op: 'replace', id: 'kid', with: { id: 'teen', text: 'TONÅRING' } }], model);
+  assert.match(r.join('\n'), /addFigure\(\d+, \d+, \{"uid":"teen".*"boundary":"dashed"/);
+  const { lines: back } = await plan([{ op: 'checkpoint', name: 'c' }, { op: 'revise', id: 'bare', text: 'VUXEN B' }, { op: 'return_to', name: 'c' }], model);
+  assert.match(back.join('\n'), /setLabelText\("bare", "VUXEN"\)/);
+});

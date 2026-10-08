@@ -42,7 +42,7 @@ export const ACTIONS = {
   scene: 'Start a scene: {name}. Objects from earlier scenes stay and can be reused.',
   beat: "Start a beat (one conceptual move): {name, move? (what the narrator does here, e.g. 'the question appears before any answer'), viewer_task?: {type, target}}.",
   viewer_task: `What the viewer should do mentally: {type: ${VIEWER_TASKS.join('|')}, target, constraint?}. Attaches to the current beat (or scene).`,
-  introduce: `Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, color?, place?, pace?}. role names what the concept is (any word); ${ROLES} also colour it (${Object.entries(ROLE_COLORS).map(([r, c]) => `${r} ${c}`).join(', ')}), so a role keeps its colour throughout. color (a CSS colour such as #3B82F6) goes before the role's. background (a CSS colour; text and box only) fills the box behind the text, e.g. a light tint of its colour such as #DBEAFE. The colour stays through revise, question, focus, deemphasize, move_into and return_to. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.`,
+  introduce: `Add one concept: {id, text?, kind?: text|box|figure|picture, size?: small|normal|large|title, role?, color?, place?, pace?}. role names what the concept is (any word); ${ROLES} also colour it (${Object.entries(ROLE_COLORS).map(([r, c]) => `${r} ${c}`).join(', ')}), so a role keeps its colour throughout. color (a CSS colour such as #3B82F6) goes before the role's. background (a CSS colour; text and box only) fills the box behind the text, e.g. a light tint of its colour such as #DBEAFE. The colour stays through revise, question, focus, deemphasize, move_into and return_to. A figure is a minimal person; a picture needs src (an http(s) URL, a path under public/, or a local file, which is copied to public/play-assets/) and takes width (px, default 160); text is the label under a figure or picture. A figure takes boundary?: solid|dashed, a rounded frame round the person and label (weaken_boundary changes it). place: {near: id, side?: around|left|right|above|below}, {between: [id, id]} (ids of concepts or groups), {region: center|top|bottom|left|right|top-left|top-right|bottom-left|bottom-right} or {x, y}.`,
   type: "Type a new text concept in, a character at a time, when a proposition, question, promise or hypothesis is being formulated in front of the viewer: as introduce (text or box only), plus caret?: true|false (default true) and characters_per_second? (default from pace: short 30, deliberate 12). It is then an ordinary concept.",
   write: "Write a new text concept in by hand, stroke after stroke, as a lecturer would: as introduce (text or box only), plus characters_per_second? (default from pace: short 14, deliberate 6). It stays in handwriting through revise and question; a replace or turnover arrival is ordinary text.",
   introduce_group: 'Add several concepts as a row or column: {id, items: [{id, text, role?, color?, background?}] or ["TEXT", ...], layout?: row|column, kind?, size?, role?, color?, background?, place?, pace?}. An item without its own role, color or background takes the group\'s.',
@@ -52,7 +52,7 @@ export const ACTIONS = {
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}.',
   revise: 'Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.',
   question: 'Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.',
-  weaken_boundary: "Dash (or remove) a concept's or enclosure's boundary: {id, style?: dashed|none, pace?}.",
+  weaken_boundary: "Dash (or remove) a concept's or enclosure's boundary (a figure's frame too): {id, style?: dashed|none, pace?}.",
   replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one\'s.',
   deemphasize: 'Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.',
   focus: 'Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.',
@@ -101,7 +101,7 @@ export function parseScene(lines) {
 function addObject(model, rec, o) {
   model.objects[o.id] = {
     id: o.id, kind: o.kind || 'text', text: o.text, role: o.role || null, at: o.at, size: o.size,
-    fontSize: o.fontSize, src: o.src, width: o.width, ...(o.color ? { color: o.color } : {}), ...(o.background ? { background: o.background } : {}), ...(o.hand ? { hand: true } : {}), scale: 1, opacity: 1, boundary: o.boundary || 'none',
+    fontSize: o.fontSize, src: o.src, width: o.width, ...(o.color ? { color: o.color } : {}), ...(o.background ? { background: o.background } : {}), ...(o.hand ? { hand: true } : {}), ...(o.kind === 'figure' && o.boundary && o.boundary !== 'none' ? { framed: true } : {}), scale: 1, opacity: 1, boundary: o.boundary || 'none',
     history: o.text != null ? [o.text] : [], scene: model.scene, beat: model.beat
   };
   delete model.retired[o.id]; // its id now names something else
@@ -609,7 +609,8 @@ function objectSpec(model, a, text) {
   if (!screenFont) throw new Error(`size must be ${Object.keys(TEXT_SIZE).join(', ')} or a font size`);
   if (!pictured && (text == null || text === '')) throw new Error('text is required');
   const fontSize = Math.round(screenFont / zoomOf(model) * 10) / 10;
-  const spec = { kind, text: text == null || text === '' ? undefined : String(text), fontSize, boundary: kind === 'box' ? 'solid' : 'none' };
+  if (a.boundary != null && (kind !== 'figure' || !['solid', 'dashed', 'none'].includes(a.boundary))) throw new Error(kind === 'figure' ? 'boundary must be solid, dashed or none' : `boundary is for a figure; a ${kind === 'text' ? 'text with a boundary is kind box' : kind} has its own`);
+  const spec = { kind, text: text == null || text === '' ? undefined : String(text), fontSize, boundary: kind === 'box' ? 'solid' : kind === 'figure' && a.boundary ? a.boundary : 'none' };
   const color = colorOf(a);
   if (color) spec.color = color;
   if (a.background != null) {
@@ -632,7 +633,7 @@ function createLine(o, ms) {
 // The call making concept o (a picture's gives a promise of it).
 function makeCall(o) {
   if (o.kind === 'picture') return `addPicture(${J(o.src)}, ${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, width: o.width, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}) })})`;
-  if (o.kind === 'figure') return `addFigure(${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}) })})`;
+  if (o.kind === 'figure') return `addFigure(${o.at[0]}, ${o.at[1]}, ${J({ uid: o.id, label: o.text, fontSize: o.fontSize, ...(o.color ? { color: o.color } : {}), ...(o.boundary && o.boundary !== 'none' ? { boundary: o.boundary } : {}) })})`;
   return labelCall(o);
 }
 
@@ -817,7 +818,7 @@ export async function planAction(model, a, measure) {
       if (pictured && !o.text) throw new Error(`revise: "${a.id}" is a ${o.kind} without a label; give it text when introducing it`);
       const text = a.text != null ? String(a.text) : op === 'question' ? (o.text.endsWith('?') ? o.text : o.text + '?') : null;
       if (text == null || text === '') throw new Error('revise: text is required');
-      const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: op === 'question' ? 'dashed' : o.boundary, ...(o.hand ? { hand: true } : {}), ...(o.kind === 'picture' ? { src: o.src, width: o.width } : {}) }]);
+      const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: op === 'question' ? 'dashed' : o.framed ? 'solid' : o.boundary, ...(o.hand ? { hand: true } : {}), ...(o.kind === 'picture' ? { src: o.src, width: o.width } : {}) }]);
       const ms = pace(a, 'deliberate');
       const change = op === 'question'
         ? `(setLabelText(${J(a.id)}, ${J(text)}), setLabelBoundary(${J(a.id)}, "dashed"))`
@@ -837,8 +838,8 @@ export async function planAction(model, a, measure) {
       if (!['dashed', 'none'].includes(style)) throw new Error('weaken_boundary: style must be dashed or none');
       let change;
       if (o.kind === 'enclosure') change = style === 'none' ? `setProp(${J(a.id)}, "strokeWidth", 0)` : `(setProp(${J(a.id)}, "strokeWidth", 2), setProp(${J(a.id)}, "strokeDashArray", [10, 7]))`;
-      else if (o.kind === 'text' || o.kind === 'box') change = `setLabelBoundary(${J(a.id)}, ${J(style)})`;
-      else throw new Error(`weaken_boundary: "${a.id}" has no boundary`);
+      else if (o.kind === 'text' || o.kind === 'box' || o.framed) change = `setLabelBoundary(${J(a.id)}, ${J(style)})`;
+      else throw new Error(`weaken_boundary: "${a.id}" has no boundary${o.kind === 'figure' ? ' (give the figure boundary: solid or dashed when introducing it)' : ''}`);
       const ms = pace(a, 'deliberate');
       return {
         record: { op, id: a.id, style },
@@ -851,7 +852,7 @@ export async function planAction(model, a, measure) {
       const w = a.with || {};
       const id = idFor(w.id, w.text);
       checkNewId(model, id);
-      const keep = { ...(w.role == null && w.color == null ? { role: old.role, color: old.color } : {}), ...(w.background == null && old.background && !['figure', 'picture'].includes(w.kind) ? { background: old.background } : {}) };
+      const keep = { ...(w.role == null && w.color == null ? { role: old.role, color: old.color } : {}), ...(w.background == null && old.background && !['figure', 'picture'].includes(w.kind) ? { background: old.background } : {}), ...(w.boundary == null && old.framed && (w.kind || old.kind) === 'figure' ? { boundary: old.boundary } : {}) };
       const spec = objectSpec(model, { kind: old.kind === 'enclosure' ? 'text' : old.kind, size: old.fontSize * zoomOf(model), ...keep, ...w }, w.text);
       const [size] = await measure([spec]);
       const neu = { id, ...spec, role: w.role || old.role, at: old.at, size };
@@ -997,9 +998,9 @@ export async function planAction(model, a, measure) {
         const revert = `revertState(${J(a.name)}, {duration: ${ms}})${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`;
         lines.push(rebend.length ? `Promise.resolve().then(() => { ${rebend.join('; ')}; }).then(() => ${revert})` : revert);
         // Label text and boundaries are not part of a tag either.
-        const fixes = Object.values(st.objects).filter(o => o.kind === 'text' || o.kind === 'box').flatMap(o => {
+        const fixes = Object.values(st.objects).filter(o => o.kind === 'text' || o.kind === 'box' || o.kind === 'figure').flatMap(o => {
           const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
-          return [...(now.text !== o.text ? [`setLabelText(${J(o.id)}, ${J(o.text)})`] : []),
+          return [...(now.text !== o.text && o.text != null ? [`setLabelText(${J(o.id)}, ${J(o.text)})`] : []),
             ...(now.boundary !== o.boundary ? [`setLabelBoundary(${J(o.id)}, ${J(o.boundary)})`] : [])];
         });
         if (fixes.length) lines.push(`Promise.resolve().then(() => { ${fixes.join('; ')}; })`);

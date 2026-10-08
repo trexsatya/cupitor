@@ -260,7 +260,7 @@ export class PlayPage {
   async measure(specs) {
     const page = await this.open();
     return page.evaluate(async list => Promise.all(list.map(async s => {
-      const o = s.kind === 'figure' ? makeFigure(0, 0, { uid: '__measure', label: s.text, fontSize: s.fontSize })
+      const o = s.kind === 'figure' ? makeFigure(0, 0, { uid: '__measure', label: s.text, fontSize: s.fontSize, boundary: s.boundary })
         : s.kind === 'picture' ? await makePicture(s.src, 0, 0, { uid: '__measure', label: s.text, width: s.width, fontSize: s.fontSize })
         : (s.hand && await handFont(), makeLabel(s.text, 0, 0, { uid: '__measure', fontSize: s.fontSize, boundary: s.boundary, hand: s.hand }));
       return [Math.round(o.width), Math.round(o.height)];
