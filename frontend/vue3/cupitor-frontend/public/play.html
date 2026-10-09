@@ -1890,7 +1890,8 @@ body.screen-recording #screenRecIndicator, body.screen-recording #play-line-badg
     function startCapture(displayMediaOptions) {
         let captureStream = null;
 
-        return navigator.mediaDevices.getDisplayMedia(displayMediaOptions)
+        // Chrome leaves this tab out of the picker unless asked; the board is what is recorded.
+        return navigator.mediaDevices.getDisplayMedia(Object.assign({ selfBrowserSurface: 'include', preferCurrentTab: true }, displayMediaOptions))
             .catch(err => {
                 console.error("Error:" + err);
                 return null;
@@ -3368,6 +3369,9 @@ body.screen-recording #screenRecIndicator, body.screen-recording #play-line-badg
             stream = await navigator.mediaDevices.getDisplayMedia({
                 video: { frameRate: 30 },
                 audio: false,
+                // Chrome leaves this tab out of the picker unless asked; this tab is the one to record.
+                selfBrowserSurface: 'include',
+                preferCurrentTab: true,
             });
         } catch (e) {
             console.warn('Screen capture cancelled or denied:', e);
