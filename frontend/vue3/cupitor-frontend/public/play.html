@@ -1551,7 +1551,10 @@
     <span>REC <span id="screenRecElapsed">0s</span></span>
     <button onclick="stopScreenRecording()" style="margin-left:4px;background:#fff;color:#b71c1c;border:none;border-radius:10px;padding:2px 8px;font-size:11px;cursor:pointer;font-weight:600;">Stop</button>
 </div>
-<style>@keyframes screenRecPulse { 0%,100% { opacity:1 } 50% { opacity:0.3 } }</style>
+<style>@keyframes screenRecPulse { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
+/* Out of the video while it is being recorded: the tab capture would take them in.
+   The browser's own "Stop sharing" bar (not in the capture) or the end of playback stops it. */
+body.screen-recording #screenRecIndicator, body.screen-recording #play-line-badge { visibility: hidden; }</style>
 
 <!-- Clear Before Play Dialog -->
 <div id="clearBeforePlayDialog" style="display:none;position:fixed;inset:0;z-index:9999998;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;">
@@ -3387,6 +3390,7 @@
             a.remove();
             setTimeout(() => URL.revokeObjectURL(url), 5000);
             hideScreenRecIndicator();
+            document.body.classList.remove('screen-recording');
             window._screenRec = null;
         };
         // If user clicks the browser's "Stop sharing" button, end gracefully.
@@ -3396,6 +3400,7 @@
             }
         });
         rec.start();
+        document.body.classList.add('screen-recording');
         window._screenRec = { recorder: rec, startedAt: Date.now() };
         showScreenRecIndicator();
         return true;
