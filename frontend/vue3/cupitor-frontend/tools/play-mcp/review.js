@@ -49,6 +49,7 @@ export function plainMove(rec) {
     case 'steps': return `steps ${rec.items.map(q).join(' → ')} as ${rec.id}${rec.direction === 'horizontal' ? ' (across)' : ''}`;
     case 'step': return `step ${rec.id} to ${rec.n || 'none'}`;
     case 'enclose': return `enclose ${rec.members.join(', ')} in ${rec.id}${rec.style === 'dashed' ? ' (dashed)' : ''}`;
+    case 'brace': return `brace ${rec.members.join(', ')} ${rec.side} as ${rec.id}${rec.label ? `, ${rec.label} at its tip` : ''}`;
     case 'revise': return `revise ${rec.id} → ${q(rec.text)}`;
     case 'question': return `question ${rec.id} → ${q(rec.text)}`;
     case 'weaken_boundary': return `weaken the boundary of ${rec.id} (${rec.style})`;
@@ -71,11 +72,11 @@ export function plainMove(rec) {
 
 // Ids an action refers to that already existed (concepts it reuses).
 function refs(rec) {
-  return [rec.from, rec.to, rec.into, rec.group, ...(rec.ids || []), ...(rec.members || []),
+  return [rec.from, rec.to, rec.into, rec.group, rec.label, ...(rec.ids || []), ...(rec.members || []),
     ...(['revise', 'question', 'weaken_boundary', 'replace', 'move_into', 'move', 'step'].includes(rec.op) ? [rec.id] : [])].filter(Boolean);
 }
 const created = rec => [...(['introduce', 'type', 'write', 'steps'].includes(rec.op) ? [rec.id] : []), ...(rec.op === 'steps' ? [] : (rec.items || rec.arriving || []).map(i => i.id)),
-  ...(rec.op === 'replace' ? [rec.with.id] : []), ...(['enclose', 'dissolve_boundary'].includes(rec.op) ? [rec.id] : [])];
+  ...(rec.op === 'replace' ? [rec.with.id] : []), ...(['enclose', 'brace', 'dissolve_boundary'].includes(rec.op) ? [rec.id] : [])];
 
 const isReadability = i => /hard to read/.test(i.message);
 const isLayout = i => /overlap|out of view|minimap|runs through|sticks out|not one of its members/.test(i.message);
@@ -202,12 +203,13 @@ export function beatSummaries({ lines, stops, issues = {} }) {
   return stops.map((stop, i) => {
     const model = parseScene(lines.slice(0, stop.endIndex));
     const tb = tbs[i] || { start: 0, end: 0 };
-    const shown = Object.values(model.objects).filter(o => o.opacity > 0 && o.kind !== 'enclosure' && o.kind !== 'spectrum');
+    const shown = Object.values(model.objects).filter(o => o.opacity > 0 && o.kind !== 'enclosure' && o.kind !== 'spectrum' && o.kind !== 'brace');
     const came = shown.filter(o => !prev.objects[o.id]).map(o => o.id);
     const went = Object.keys(prev.objects).filter(id => !model.objects[id]);
     const name = o => `${o.id}${o.text != null ? ` ${q(o.text)}` : ''}${['figure', 'picture', 'steps'].includes(o.kind) ? ` (${o.kind})` : ''}`;
     const where = shown.map(o => `${name(o)} ${screenPlace(model, o)}${o.opacity < 1 ? ', faded' : ''}`);
     const frames = Object.values(model.objects).filter(o => o.kind === 'enclosure' && o.opacity > 0).map(o => `${o.id} round ${o.members.join(', ')}`);
+    const braces = Object.values(model.objects).filter(o => o.kind === 'brace' && o.opacity > 0).map(o => `${o.id} ${o.side} ${o.members.join(', ')}`);
     const arrows = Object.values(model.relations).filter(r => r.opacity !== 0).map(r => `${r.from} → ${r.to}`);
     const mine = (issues[i] || []).filter(x => x.at == null || x.at === tb.start);
     const before = new Set((issues[i - 1] || []).map(x => x.message));
@@ -218,6 +220,7 @@ export function beatSummaries({ lines, stops, issues = {} }) {
       `Beat ${i + 1} "${stop.beat}" (${sec(tb.start)}–${sec(tb.end)}${zoom})`,
       `  on screen: ${where.join('; ') || 'nothing'}`,
       ...(frames.length ? [`  frames: ${frames.join('; ')}`] : []),
+      ...(braces.length ? [`  braces: ${braces.join('; ')}`] : []),
       ...(arrows.length ? [`  arrows: ${arrows.join(', ')}`] : []),
       ...(came.length ? [`  new: ${came.join(', ')}`] : []),
       ...(went.length ? [`  removed: ${went.join(', ')}`] : []),

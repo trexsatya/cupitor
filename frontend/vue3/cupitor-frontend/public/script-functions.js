@@ -21,6 +21,12 @@ const SCRIPT_FUNCTIONS = [
             ['angle', 'turn in degrees (default 45)'],
             ['…', 'other Fabric properties'],
         ]],
+        ['addBrace(x1, y1, x2, y2, opts)', 'Curly brace from one end to the other, its tip on the right hand of that way (left to right points down)', [
+            ['depth', 'px from the ends to the tip (default 20)'],
+            ['uid', 'id for later lines; drawing again with the same uid replaces it, keeping its opacity'],
+            ['stroke / strokeWidth', "defaults '#666', 2"],
+            ['…', 'other Fabric properties'],
+        ]],
         ['addEllipse(left, top, rx, ry, opts)', 'Ellipse (rx, ry: radii)', [
             ['uid', 'id for later lines'],
             ['fill / stroke / strokeWidth', "as addRect (defaults 'transparent', '#333', 2)"],

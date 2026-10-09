@@ -86,9 +86,10 @@ them out, or never use that pattern yourself.
 - `connect`: Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.
 - `disconnect`: Remove a relationship: {id} or {from, to}.
 - `enclose`: Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}. A group among the members stands for all of its members.
+- `brace`: A curly brace along one side of concepts, spanning them all, to say that what stands at its tip takes them in: {id, members: [ids] | group: id, side?: below|above|left|right (default below), label?: id of a concept on screen (moved to stand just beyond the tip), role?, color?, pace?}. A group among the members stands for all of its members. The brace keeps to its members when they move; to name it with a new concept, introduce that with place {near: <brace id>, side: <the same side>}.
 - `revise`: Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.
 - `question`: Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.
-- `weaken_boundary`: Dash (or remove) a concept's or enclosure's boundary (a figure's frame too): {id, style?: dashed|none, pace?}.
+- `weaken_boundary`: Dash (or remove) a concept's or enclosure's boundary (a figure's frame and a brace too): {id, style?: dashed|none, pace?}.
 - `replace`: Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one's.
 - `deemphasize`: Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.
 - `focus`: Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.

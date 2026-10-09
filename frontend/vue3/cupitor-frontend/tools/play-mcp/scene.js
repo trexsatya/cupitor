@@ -50,9 +50,10 @@ export const ACTIONS = {
   connect: "Relationship from one concept to another (an arrow that follows both): {from, to, id?, kind?, bend?, from_side?, to_side?, pace?}. bend: 'auto' (default: straight unless that runs through another concept or onto a reverse arrow, then curved), a number (px the middle stands off the straight line), or 0. from = to draws a loop. from or to may be a group: the arrow then joins the group's enclosure, and a dashed one (id <group>_boundary) is drawn first if it has none. An arrow leaves and arrives at the middles of facing edges; from_side / to_side name another point: top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|center.",
   disconnect: 'Remove a relationship: {id} or {from, to}.',
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}. A group among the members stands for all of its members.',
+  brace: "A curly brace along one side of concepts, spanning them all, to say that what stands at its tip takes them in: {id, members: [ids] | group: id, side?: below|above|left|right (default below), label?: id of a concept on screen (moved to stand just beyond the tip), role?, color?, pace?}. A group among the members stands for all of its members. The brace keeps to its members when they move; to name it with a new concept, introduce that with place {near: <brace id>, side: <the same side>}.",
   revise: 'Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.',
   question: 'Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.',
-  weaken_boundary: "Dash (or remove) a concept's or enclosure's boundary (a figure's frame too): {id, style?: dashed|none, pace?}.",
+  weaken_boundary: "Dash (or remove) a concept's or enclosure's boundary (a figure's frame and a brace too): {id, style?: dashed|none, pace?}.",
   replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one\'s.',
   deemphasize: 'Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.',
   focus: 'Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.',
@@ -192,12 +193,22 @@ export function applyRecord(model, rec) {
       delete model.retired[rec.id];
       if (rec.group && model.groups[rec.group]) model.groups[rec.group].enclosure = rec.id;
       break;
+    case 'brace':
+      model.objects[rec.id] = {
+        id: rec.id, kind: 'brace', members: rec.members, side: rec.side, ends: rec.ends, depth: rec.depth, at: rec.at, size: rec.size,
+        ...(rec.color ? { color: rec.color } : {}), ...(rec.label != null ? { label: rec.label } : {}), role: rec.role || null, scale: 1, opacity: 1, boundary: 'solid', history: [], scene: model.scene, beat: model.beat
+      };
+      delete model.retired[rec.id];
+      Object.entries(rec.moves || {}).forEach(([id, at]) => { obj(id).at = at; });
+      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { fitTo(model, id, e); });
+      Object.entries(rec.bends || {}).forEach(([id, b]) => { model.relations[id].bend = b; });
+      break;
     case 'revise':
     case 'question': {
       const o = obj(rec.id);
       o.text = rec.text; o.size = rec.size; o.history.push(rec.text);
       Object.entries(rec.moves || {}).forEach(([id, at]) => { obj(id).at = at; });
-      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
+      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { fitTo(model, id, e); });
       Object.entries(rec.bends || {}).forEach(([id, b]) => { model.relations[id].bend = b; });
       if (rec.op === 'question') { o.boundary = 'dashed'; o.questioned = true; }
       break;
@@ -209,7 +220,7 @@ export function applyRecord(model, rec) {
       obj(rec.id);
       dropObject(model, rec.id);
       Object.entries(rec.moves || {}).forEach(([id, at]) => { obj(id).at = at; });
-      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
+      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { fitTo(model, id, e); });
       Object.entries(rec.bends || {}).forEach(([id, b]) => { model.relations[id].bend = b; });
       addObject(model, rec, rec.with);
       break;
@@ -222,7 +233,7 @@ export function applyRecord(model, rec) {
       break;
     case 'move':
       Object.entries(rec.moves).forEach(([id, at]) => { obj(id).at = at; });
-      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
+      Object.entries(rec.enclosures || {}).forEach(([id, e]) => { fitTo(model, id, e); });
       Object.entries(rec.bends || {}).forEach(([id, b]) => { model.relations[id].bend = b; });
       break;
     case 'move_into': {
@@ -292,7 +303,7 @@ export function applyRecord(model, rec) {
       rec.arriving.forEach(it => addObject(model, rec, it));
       Object.entries(rec.pushed || {}).forEach(([id, at]) => { obj(id).at = at; });
       (rec.joins || []).forEach(id => { obj(id).members.push(...rec.arriving.map(it => it.id)); });
-      Object.entries(rec.refits || {}).forEach(([id, e]) => { const x = obj(id); x.at = e.at; x.size = e.size; });
+      Object.entries(rec.refits || {}).forEach(([id, e]) => { fitTo(model, id, e); });
       Object.entries(rec.bends || {}).forEach(([id, b]) => { if (model.relations[id]) model.relations[id].bend = b; });
       // dropObject deletes a group left empty for a moment; it is the same group.
       const group = model.groups[rec.group] = { ...before, id: rec.group, members: rec.members };
@@ -311,6 +322,7 @@ export function applyRecord(model, rec) {
       break;
     case 'remove':
       rec.ids.forEach(id => dropObject(model, id));
+      Object.entries(rec.braces || {}).forEach(([id, e]) => { fitTo(model, id, e); });
       (rec.reattach || []).forEach(r => {
         const was = model.retiredRelations[r.id];
         delete model.retiredRelations[r.id];
@@ -414,14 +426,15 @@ function pushAside(model, before, after, centre, skip, axis) {
 const atsOf = fits => Object.fromEntries(Object.entries(fits).map(([id, e]) => [id, e.at]));
 const sizesOf = fits => Object.fromEntries(Object.entries(fits).map(([id, e]) => [id, e.size]));
 
-// Enclosures round any of `ids`, refitted round where their members now are.
+// Enclosures and braces round any of `ids`, refitted round where their members now are.
 function refits(model, ids, boxFor, gone = [], extra = {}) {
   const out = {};
   Object.values(model.objects).forEach(e => {
-    if (e.kind !== 'enclosure' || !e.members.some(m => ids.includes(m))) return;
+    if ((e.kind !== 'enclosure' && e.kind !== 'brace') || !e.members.some(m => ids.includes(m))) return;
     const members = [...e.members.filter(m => model.objects[m] && !gone.includes(m)), ...(extra[e.id] || [])];
     if (!members.length) return;
-    const fit = boxAround(model, members.map(boxFor), 20);
+    const fit = e.kind === 'brace' ? { ...braceFit(model, members.map(boxFor), e.side), ...(e.color ? { color: e.color } : {}), ...(e.boundary !== 'solid' ? { boundary: e.boundary } : {}) } : boxAround(model, members.map(boxFor), 20);
+    if (e.kind === 'brace' && e.label && model.objects[e.label] && !gone.includes(e.label)) Object.assign(fit, { label: e.label, labelAt: labelPlace(model, fit, e.side, boxFor(e.label)) });
     if (fit.at.join() !== e.at.join() || fit.size.join() !== e.size.join()) out[e.id] = fit;
   });
   return out;
@@ -445,10 +458,12 @@ function rebends(model, moves, sizes = {}, { gone = [], added = [] } = {}) {
   return out;
 }
 
-// Script lines moving pushed concepts and refitting enclosures.
+// Script lines moving pushed concepts and refitting enclosures (a brace is drawn again where it now goes).
 const shiftLines = (moves, enclosures, ms) => [
   ...Object.entries(moves).map(([id, at]) => `animate(${J(id)}, {left: ${at[0]}, top: ${at[1]}}, {duration: ${ms}})`),
-  ...Object.entries(enclosures).map(([id, e]) => `animate(${J(id)}, {left: ${e.at[0]}, top: ${e.at[1]}, width: ${e.size[0]}, height: ${e.size[1]}}, {duration: ${ms}})`)
+  ...Object.entries(enclosures).flatMap(([id, e]) => (e.ends
+    ? [`Promise.resolve(${braceCall({ id, ...e })})`, ...(e.labelAt ? [`animate(${J(e.label)}, {left: ${e.labelAt[0]}, top: ${e.labelAt[1]}}, {duration: ${ms}})`] : [])]
+    : [`animate(${J(id)}, {left: ${e.at[0]}, top: ${e.at[1]}, width: ${e.size[0]}, height: ${e.size[1]}}, {duration: ${ms}})`]))
 ];
 
 // Script lines redrawing arrows with new curves (a straight arrow and a curved
@@ -695,6 +710,59 @@ function boxAround(model, bs, pad) {
   return { at: [Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2)], size: [Math.round(x1 - x0), Math.round(y1 - y0)] };
 }
 
+// A brace along `side` of boxes `bs`, a little off them: its ends (the way
+// addBrace takes them, so the tip points away from the boxes), its depth, and
+// the box it takes up. Sizes are on screen, as for the concepts.
+function braceFit(model, bs, side) {
+  const z = zoomOf(model), pad = 10 / z;
+  const x0 = Math.min(...bs.map(b => b.x)), y0 = Math.min(...bs.map(b => b.y));
+  const x1 = Math.max(...bs.map(b => b.x + b.w)), y1 = Math.max(...bs.map(b => b.y + b.h));
+  const across = side === 'below' || side === 'above', span = across ? x1 - x0 : y1 - y0;
+  const depth = Math.round(Math.min(26, Math.max(14, span * z * 0.05)) / z);
+  const r = Math.round;
+  if (side === 'below') { const y = y1 + pad; return { ends: [r(x0), r(y), r(x1), r(y)], depth, at: [r((x0 + x1) / 2), r(y + depth / 2)], size: [r(x1 - x0), depth] }; }
+  if (side === 'above') { const y = y0 - pad; return { ends: [r(x1), r(y), r(x0), r(y)], depth, at: [r((x0 + x1) / 2), r(y - depth / 2)], size: [r(x1 - x0), depth] }; }
+  if (side === 'right') { const x = x1 + pad; return { ends: [r(x), r(y1), r(x), r(y0)], depth, at: [r(x + depth / 2), r((y0 + y1) / 2)], size: [depth, r(y1 - y0)] }; }
+  const x = x0 - pad;
+  return { ends: [r(x), r(y0), r(x), r(y1)], depth, at: [r(x - depth / 2), r((y0 + y1) / 2)], size: [depth, r(y1 - y0)] };
+}
+
+// The addBrace call drawing brace b.
+const braceCall = b => `addBrace(${b.ends.join(', ')}, ${J({ uid: b.id, depth: b.depth, ...(b.color ? { stroke: b.color } : {}), ...(b.boundary === 'dashed' ? { strokeDashArray: [10, 7] } : b.boundary === 'none' ? { strokeWidth: 0 } : {}) })})`;
+
+// A refit (from refits) applied to enclosure or brace `id`: a brace is drawn
+// afresh (at full scale) and its label goes with its tip.
+function fitTo(model, id, e) {
+  const x = model.objects[id];
+  if (!x) throw new Error(`no concept "${id}" to refit`);
+  x.at = e.at; x.size = e.size;
+  if (e.ends) { x.ends = e.ends; x.depth = e.depth; x.scale = 1; }
+  if (e.labelAt && model.objects[e.label]) model.objects[e.label].at = e.labelAt;
+}
+
+// Where a brace's label stands: just beyond the tip of `fit`, centred on it.
+function labelPlace(model, fit, side, lb) {
+  const [dx, dy] = SIDES[side], g = 10 / zoomOf(model);
+  const tip = [fit.at[0] + dx * fit.size[0] / 2, fit.at[1] + dy * fit.size[1] / 2];
+  return [Math.round(tip[0] + dx * (g + lb.w / 2)), Math.round(tip[1] + dy * (g + lb.h / 2))];
+}
+
+// Arrows to curve afresh once `trial` (the model with an action's changes) is
+// on screen: those with an end in `moved`, and those now running through one
+// of `boxes`. Loops and bends given by hand stay.
+function rebendAfter(model, trial, moved, boxes) {
+  const out = {};
+  Object.values(model.relations).forEach(r => {
+    if (r.bend === 'loop' || r.fixedBend || !trial.objects[r.from] || !trial.objects[r.to]) return;
+    const ends = connectorEnds(boxOf(model.objects[r.from]), boxOf(model.objects[r.to]), r.sides);
+    const chords = connectorChords(ends, r.bend ? bendMiddle(ends, r.bend) : null);
+    if (!moved.includes(r.from) && !moved.includes(r.to) && !boxes.some(b => chords.some(ch => segmentHitsBox(ch, b)))) return;
+    const b = chooseBend(trial, r.from, r.to, 'auto', r.sides) || 0;
+    if (b !== (r.bend || 0)) out[r.id] = b;
+  });
+  return out;
+}
+
 // Centre of the box round these concepts.
 function centreOf(model, ids) {
   const bs = ids.map(id => boxOf(model.objects[id]));
@@ -880,6 +948,46 @@ export async function planAction(model, a, measure) {
       };
     }
 
+    case 'brace': {
+      checkNewId(model, a.id);
+      // A group among the members stands for its members, as for enclose.
+      const members = a.group ? (model.groups[a.group] || {}).members : Array.isArray(a.members) && a.members.length ? expand(model, a.members, op).filter(m => model.objects[m].kind !== 'enclosure') : null;
+      if (!Array.isArray(members) || !members.length) throw new Error('brace: give members or an existing group');
+      members.forEach(m => need(model, m, op));
+      const side = a.side || 'below';
+      if (!SIDES[side]) throw new Error('brace: side must be below, above, left or right');
+      const color = colorOf(a);
+      const fit = braceFit(model, members.map(m => boxOf(model.objects[m])), side);
+      const brace = { id: a.id, members, side, ...fit, ...(color ? { color } : {}) };
+      const ms = pace(a, 'deliberate');
+      let moves = {}, enclosures = {};
+      if (a.label != null) {
+        const l = need(model, a.label, op);
+        if (members.includes(l.id)) throw new Error(`brace: the label "${l.id}" is one of the members`);
+        if (l.members || l.kind === 'spectrum') throw new Error(`brace: the label "${l.id}" is a ${l.kind}; give a concept`);
+        if (l.inside) throw new Error(`brace: the label "${l.id}" is inside "${l.inside}"`);
+        const holds = Object.values(model.objects).filter(p => p.inside === l.id).map(p => p.id);
+        if (holds.length) throw new Error(`brace: the label "${l.id}" holds ${holds.map(h => `"${h}"`).join(', ')}`);
+        moves = { [l.id]: labelPlace(model, fit, side, boxOf(l)) };
+        enclosures = refits(model, [l.id], id => (id === l.id ? boxOf({ ...l, at: moves[l.id] }) : boxOf(model.objects[id])));
+      }
+      // Arrows of the label, and arrows the brace or the label now stands in the way of, curve afresh.
+      const trial = clone(model);
+      trial.objects[a.id] = { kind: 'brace', scale: 1, opacity: 1, ...clone(brace) };
+      Object.entries(moves).forEach(([id, at]) => { trial.objects[id].at = at; });
+      Object.entries(enclosures).forEach(([id, e]) => fitTo(trial, id, e));
+      const inset = b => ({ x: b.x + 4, y: b.y + 4, w: b.w - 8, h: b.h - 8 });
+      const bends = rebendAfter(model, trial, [...Object.keys(moves), ...Object.keys(enclosures)], [a.id, ...Object.keys(moves)].map(id => inset(boxOf(trial.objects[id]))));
+      const shifts = shiftLines(moves, enclosures, ms), redraws = redrawLines(model, bends);
+      const lines = [`drawOutline(${braceCall(brace)}, {duration: ${ms}})`];
+      if (shifts.length) lines.push(`Promise.all([${shifts.join(', ')}])${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`);
+      else if (redraws.length) lines.push(`Promise.resolve().then(() => { ${redraws.join('; ')}; })`);
+      return {
+        record: { op, ...brace, ...(a.group ? { group: a.group } : {}), ...(a.role ? { role: a.role } : {}), ...(a.label != null ? { label: a.label } : {}), moves, enclosures, bends },
+        lines
+      };
+    }
+
     case 'revise':
     case 'question': {
       const o = need(model, a.id, op);
@@ -907,7 +1015,7 @@ export async function planAction(model, a, measure) {
       const style = a.style || 'dashed';
       if (!['dashed', 'none'].includes(style)) throw new Error('weaken_boundary: style must be dashed or none');
       let change;
-      if (o.kind === 'enclosure') change = style === 'none' ? `setProp(${J(a.id)}, "strokeWidth", 0)` : `(setProp(${J(a.id)}, "strokeWidth", 2), setProp(${J(a.id)}, "strokeDashArray", [10, 7]))`;
+      if (o.kind === 'enclosure' || o.kind === 'brace') change = style === 'none' ? `setProp(${J(a.id)}, "strokeWidth", 0)` : `(setProp(${J(a.id)}, "strokeWidth", 2), setProp(${J(a.id)}, "strokeDashArray", [10, 7]))`;
       else if (o.kind === 'text' || o.kind === 'box' || o.framed) change = `setLabelBoundary(${J(a.id)}, ${J(style)})`;
       else throw new Error(`weaken_boundary: "${a.id}" has no boundary${o.kind === 'figure' ? ' (give the figure boundary: solid or dashed when introducing it)' : ''}`);
       const ms = pace(a, 'deliberate');
@@ -924,7 +1032,7 @@ export async function planAction(model, a, measure) {
       const id = idFor(w.id, w.text);
       checkNewId(model, id);
       const keep = { ...(w.role == null && w.color == null ? { role: old.role, color: old.color } : {}), ...(w.background == null && old.background && !['figure', 'picture'].includes(w.kind) ? { background: old.background } : {}), ...(w.boundary == null && old.framed && (w.kind || old.kind) === 'figure' ? { boundary: old.boundary } : {}) };
-      const spec = objectSpec(model, { kind: old.kind === 'enclosure' ? 'text' : old.kind, size: old.fontSize * zoomOf(model), ...keep, ...w }, w.text);
+      const spec = objectSpec(model, { kind: old.kind === 'enclosure' || old.kind === 'brace' ? 'text' : old.kind, size: old.fontSize * zoomOf(model), ...keep, ...w }, w.text);
       const [size] = await measure([spec]);
       const neu = { id, ...spec, role: w.role || old.role, at: old.at, size };
       const ms = pace(a);
@@ -961,14 +1069,14 @@ export async function planAction(model, a, measure) {
 
     case 'move': {
       const o = need(model, a.id, op);
-      if (o.kind === 'enclosure' || o.kind === 'spectrum') throw new Error(`move: "${a.id}" is a ${o.kind === 'enclosure' ? 'frame' : 'colour band'}; move what it is round instead`);
+      if (o.kind === 'enclosure' || o.kind === 'spectrum' || o.kind === 'brace') throw new Error(`move: "${a.id}" is a ${{ enclosure: 'frame', spectrum: 'colour band', brace: 'brace' }[o.kind]}; move what it is round instead`);
       if (!a.place) throw new Error('move: place is required');
       if (a.place.near === a.id || (a.place.between || []).includes(a.id)) throw new Error('move: place it relative to something else');
       if (o.inside) throw new Error(`move: "${a.id}" is inside "${o.inside}"; move "${o.inside}" instead`);
       const holds = Object.values(model.objects).filter(p => p.inside === o.id).map(p => p.id);
       if (holds.length) throw new Error(`move: "${a.id}" holds ${holds.map(h => `"${h}"`).join(', ')}; it cannot be moved without them`);
-      // Free space as if it (and frames round it alone) were not there.
-      const self = id => id === o.id || (model.objects[id].kind === 'enclosure' && model.objects[id].members.every(m => m === o.id));
+      // Free space as if it (and frames and braces round it alone) were not there.
+      const self = id => id === o.id || (['enclosure', 'brace'].includes(model.objects[id].kind) && model.objects[id].members.every(m => m === o.id));
       const taken = Object.values(model.objects).filter(p => p.opacity > 0 && !self(p.id)).map(boxOf).concat(reservedIn(model).map(r => screenRect(model, r)));
       const b = boxOf(o), at = placeBox(model, [b.w, b.h], a.place, taken);
       const moves = { [o.id]: at };
@@ -1096,6 +1204,11 @@ export async function planAction(model, a, measure) {
           return [...(now.text !== o.text && o.text != null ? [`setLabelText(${J(o.id)}, ${J(o.text)})`] : []),
             ...(now.boundary !== o.boundary ? [`setLabelBoundary(${J(o.id)}, ${J(o.boundary)})`] : [])];
         });
+        // Nor is the shape of a brace drawn again since: it is drawn as it was.
+        Object.values(st.objects).filter(o => o.kind === 'brace').forEach(o => {
+          const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
+          if (J(now.ends) !== J(o.ends)) fixes.push(braceCall(o));
+        });
         // Nor is a step list's progress (bold labels): it is marked again.
         Object.values(st.objects).filter(o => o.kind === 'steps').forEach(o => {
           const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
@@ -1208,7 +1321,7 @@ export async function planAction(model, a, measure) {
       const boxFor = id => (at[id] ? toBox(box([id])) : pushed[id] ? boxOf({ ...model.objects[id], at: pushed[id] }) : boxOf(model.objects[id]));
       // Arrivals also join an enclosure drawn round every member that stays.
       const joins = staying.length ? Object.values(model.objects)
-        .filter(e => e.kind === 'enclosure' && e.id !== g.enclosure && staying.every(m => e.members.includes(m))).map(e => e.id) : [];
+        .filter(e => (e.kind === 'enclosure' || e.kind === 'brace') && e.id !== g.enclosure && staying.every(m => e.members.includes(m))).map(e => e.id) : [];
       const refitted = refits(model, [...order, ...Object.keys(pushed)], boxFor, leaving,
         Object.fromEntries(joins.map(id => [id, arriving.map(x => x.id)])));
       delete refitted[g.enclosure];
@@ -1271,6 +1384,10 @@ export async function planAction(model, a, measure) {
       const ids = left.length ? expand(model, left, op) : [];
       const ms = pace(a);
       if (!ids.length) return { record: { op, ids }, lines: [] };
+      // A brace left over nothing goes with its members; one left over some is drawn again round them.
+      ids.push(...Object.values(model.objects).filter(o => o.kind === 'brace' && !ids.includes(o.id) && o.members.length && o.members.every(m => ids.includes(m))).map(o => o.id));
+      const braces = Object.fromEntries(Object.entries(refits(model, ids, id => boxOf(model.objects[id]), ids)).filter(([id]) => model.objects[id].kind === 'brace' && !ids.includes(id)));
+      const rebrace = shiftLines({}, braces, ms);
       // A frame round one concept that stays: its arrows go back to that concept.
       const lone = Object.fromEntries(ids.map(id => model.objects[id]).filter(o => o && o.kind === 'enclosure' && o.members.length === 1 && !ids.includes(o.members[0])).map(o => [o.id, o.members[0]]));
       const reattach = Object.values(model.relations).filter(r => (lone[r.from] || lone[r.to]) && !(ids.includes(r.from) && !lone[r.from]) && !(ids.includes(r.to) && !lone[r.to]))
@@ -1284,8 +1401,8 @@ export async function planAction(model, a, measure) {
         });
       const redraw = reattach.map(r => `connectObjects(${J(r.from)}, ${J(r.to)}, ${J(r.id)}, {${r.bend ? `bend: ${J(r.bend)}, ` : ''}${r.sides ? `sides: ${J(r.sides)}, ` : ''}animate: true, duration: ${ms}})`);
       return {
-        record: { op, ids, ...(reattach.length ? { reattach } : {}) },
-        lines: [`${fadeAll(ids.map(id => [id, 0]), ms)}.then(() => ${J(ids)}.forEach(removeByUid))${redraw.length ? `.then(() => { ${J(reattach.map(r => r.id))}.forEach(removeByUid); return Promise.all([${redraw.join(', ')}]); })` : ''}`]
+        record: { op, ids, ...(reattach.length ? { reattach } : {}), ...(rebrace.length ? { braces } : {}) },
+        lines: [`${fadeAll(ids.map(id => [id, 0]), ms)}.then(() => ${J(ids)}.forEach(removeByUid))${redraw.length ? `.then(() => { ${J(reattach.map(r => r.id))}.forEach(removeByUid); return Promise.all([${redraw.join(', ')}]); })` : ''}${rebrace.length ? `.then(() => Promise.all([${rebrace.join(', ')}]))` : ''}`]
       };
     }
   }
@@ -1317,7 +1434,7 @@ export async function planActions(model, actions, measure) {
 // When the concepts an action adds, grows or pushes aside would not fit in view
 // without covering others, the camera first pulls back (keeping the centre of
 // the view) just far enough for them to fit: a widen_context of its own, marked auto.
-const ADDS = ['introduce', 'type', 'write', 'steps', 'introduce_group', 'branch', 'revise', 'question', 'replace', 'turnover'];
+const ADDS = ['introduce', 'type', 'write', 'steps', 'introduce_group', 'branch', 'brace', 'revise', 'question', 'replace', 'turnover'];
 const ROOM_STEP = 0.85, ROOM_STEPS = 6;
 async function roomInView(model, a, measure) {
   if (!a || !ADDS.includes(a.op) || (a.op !== 'branch' && a.place && (a.place.x != null || a.place.y != null))) return [];
@@ -1710,6 +1827,7 @@ export function validate(model, live, lines) {
       const enc = isBox(p) ? p : isBox(q) ? q : null;
       if (enc && isBox(p) !== isBox(q)) {
         const other = enc === p ? q : p, be = liveBox(enc), bo = liveBox(other);
+        if (other.kind === 'brace' && other.members.every(m => enc.members.includes(m))) continue;
         if (enc.members.includes(other.id)) {
           if (!contains(be, bo)) issues.push({ level: 'warning', id: enc.id, message: `"${other.id}" belongs in enclosure "${enc.id}" but sticks out of it` });
         } else if (overlaps(be, bo, -2)) {
@@ -1724,7 +1842,7 @@ export function validate(model, live, lines) {
   Object.values(model.relations).forEach(r => {
     const l = liveBy.get(r.id);
     if (!l || !l.ends || !l.visible || !(l.opacity > 0)) return;
-    shown.filter(o => !o.members && o.id !== r.from && o.id !== r.to && o.inside !== r.from && o.inside !== r.to)
+    shown.filter(o => (!o.members || o.kind === 'brace') && o.id !== r.from && o.id !== r.to && o.inside !== r.from && o.inside !== r.to)
       .forEach(o => {
         const b = liveBox(o);
         const inner = { x: b.x + 4, y: b.y + 4, w: b.w - 8, h: b.h - 8 };

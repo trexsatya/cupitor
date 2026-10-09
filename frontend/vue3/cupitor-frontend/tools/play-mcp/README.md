@@ -92,6 +92,7 @@ comment holds the positions and sizes the action settled on, so rebuilding never
 | `type`, `write` | A text concept typed in a character at a time, or written by hand (in Merienda, uncovered as a pen writes it) (still handwritten after a revise or question), for a proposition being formulated in front of the viewer; otherwise as `introduce` |
 | `connect`, `disconnect` | Relationships: arrows that follow both ends. They (and `branch` arrows) curve round concepts in the way and off a reverse arrow; an arrow from a concept to itself is a loop. When a concept is pushed aside, its arrows take the curve that suits where it now is (a curve given by hand stays). A group as an end means its enclosure (a dashed one is drawn first if it has none). Arrows leave and arrive at the middles of facing edges, never a corner unless `from_side` / `to_side` names one (top, bottom, left, right, the four corners or center; `branch` takes them too, for every arrow). A `branch`'s arrows leave the side its children landed on and arrive at the side facing it, unless named, so they fan out from one point. A curve never takes an arrow out of view. Each `branch` child grows out of its source along its arrow, small at first and full size where it lands; `emanate: false` draws it in place and then its arrow |
 | `enclose`, `weaken_boundary` | A boundary round concepts; dash or drop it |
+| `brace` | A curly brace along one side of concepts (below, above, left or right), spanning them all; a `label` concept moves to just beyond its tip, to say it takes them in. It is drawn again where its members go, and `weaken_boundary` dashes it |
 | `revise`, `question`, `replace` | Change a concept's text, or a figure's or picture's label, in place (its revisions are kept), make it uncertain, or swap it for another; a longer text pushes the concepts beside it aside |
 | `deemphasize`, `focus` | Fade concepts back, or bring some forward and dim the rest |
 | `move_into` | Move a concept into another |
@@ -136,7 +137,8 @@ move (no time to think), and beats that move without narration.
 
 ### Review mode
 
-`review_scene` writes one self-contained HTML page for a script (the recorded one, or a file). For each beat it
+`review_scene` writes one self-contained HTML page for a script (the recorded one, or a file), or for a plan (`plan`:
+planned on an empty page and left as the recorded script, in one replay). For each beat it
 shows the narrator's move (`{op: "beat", name, move}`), the viewer task, the narration with its times, the visual
 moves in plain words, a checklist (task and move stated, narration before the first move, questions given time,
 concepts reused, revisions that keep or replace identity, readability and layout warnings, length), the issues
@@ -162,8 +164,8 @@ same text as PLAN-SPEC.md, generated from the action list, so the two cannot dri
 animation instant (a 14-minute film in about a minute and a half) and returns, beat by beat, what is on screen and
 in which ninth of the screen, faded or not, the frames and arrows, what came and went, and the warnings new in that
 beat. The text is written to be pasted back to whoever writes the plan, so they can see what the screen holds
-without the film; `out` also saves it to a file. The plan is left as the recorded script, so `review_scene` can
-follow without building again.
+without the film; `out` also saves it to a file. The plan is left as the recorded script. For screenshots as well,
+give the plan straight to `review_scene` instead.
 
 ## Tools
 

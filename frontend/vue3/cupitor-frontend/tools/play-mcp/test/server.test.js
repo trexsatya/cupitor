@@ -167,6 +167,20 @@ test('check_plan: a plan replayed fast, told beat by beat, left as the script to
   assert.match(script, /"op":"beat"/);
 });
 
+test('review_scene takes a plan: planned on an empty page, reviewed in one go, left as the script', async () => {
+  const dir = path.resolve(path.dirname(server), 'examples');
+  await client.callTool({ name: 'run_script_lines', arguments: { lines: ['addRect(10, 10, 20, 20, {uid: "stray"})'] } });
+  const out = path.join(os.tmpdir(), `play-mcp-review-${process.pid}.html`);
+  const t = textOf(await client.callTool({ name: 'review_scene', arguments: { path: out, plan: path.join(dir, 'spectrum.plan.json') } }, undefined, { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} }));
+  assert.match(t, /Wrote a review of 4 beat\(s\)/);
+  assert.match(fs.readFileSync(out, 'utf8'), /Review: spectrum\.plan\.json/);
+  fs.rmSync(out);
+  const script = textOf(await client.callTool({ name: 'get_script', arguments: {} }));
+  assert.match(script, /"op":"beat"/);
+  assert.doesNotMatch(script, /stray/, 'from an empty page');
+  assert.match(textOf(await client.callTool({ name: 'review_scene', arguments: { path: out, plan: path.join(dir, 'nope.json') } })), /Could not read the plan/);
+});
+
 test('build_from_plan checks fast first: a plan with warnings is not built unless build_anyway', async () => {
   const opts = [undefined, { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} }];
   const file = path.join(os.tmpdir(), `play-mcp-overlap-${process.pid}.json`);

@@ -244,11 +244,22 @@ export function createServer(page, publicDir) {
   });
 
   tool('review_scene', {
-    description: "Write a review page (one self-contained HTML file) for the script: per beat, the narrator's move, the viewer task, the narration with times, the visual moves in plain words, a checklist, the issues found at the end of the beat, and screenshots before the first reveal (when the beat holds one back) and at the end. The script is replayed fast for the screenshots, leaving the canvas at its end.",
-    inputSchema: { path: z.string().describe('the HTML file to write'), script: z.string().optional().describe('a script file to review (loaded as the recorded script first); default: the recorded script') }
-  }, async ({ path: file, script }) => exclusive(async () => {
+    description: "Write a review page (one self-contained HTML file) for the script: per beat, the narrator's move, the viewer task, the narration with times, the visual moves in plain words, a checklist, the issues found at the end of the beat, and screenshots before the first reveal (when the beat holds one back) and at the end. The script is replayed fast for the screenshots, leaving the canvas at its end. Give a plan (as for build_from_plan) to review it in one go: it is planned on an empty page and left as the recorded script.",
+    inputSchema: {
+      path: z.string().describe('the HTML file to write'),
+      script: z.string().optional().describe('a script file to review (loaded as the recorded script first); default: the recorded script'),
+      plan: z.string().optional().describe('a plan (JSON) to review instead: planned as build_from_plan does, without building it at full length')
+    }
+  }, async ({ path: file, script, plan }) => exclusive(async () => {
+    if (script && plan) return text('Give a script or a plan, not both.');
     let lines;
-    if (script) { lines = parseScriptFile(fs.readFileSync(path.resolve(script), 'utf8')); await page.setScript(lines); }
+    if (plan) {
+      const planned = await planFile(plan, true);
+      if (planned.error) return text(planned.error);
+      lines = planned.lines;
+      await page.reset();
+      await page.setScript(lines);
+    } else if (script) { lines = parseScriptFile(fs.readFileSync(path.resolve(script), 'utf8')); await page.setScript(lines); }
     else lines = await page.script();
     const stops = reviewStops(lines);
     if (!stops.length) return text('The script has no beats to review (add {op: "beat", name} actions).');
@@ -264,7 +275,7 @@ export function createServer(page, publicDir) {
       frames[key] = (await look.screenshot()).toString('base64');
       if (beat != null) issues[beat] = validate(parseScene(lines.slice(0, index)), await look.objects(), lines.slice(0, index));
     }));
-    const title = script ? path.basename(script) : 'Recorded script';
+    const title = plan || script ? path.basename(plan || script) : 'Recorded script';
     fs.writeFileSync(path.resolve(file), buildReviewHtml({ title: `Review: ${title}`, lines, stops, frames, issues }));
     const failed = walked.lineErrors.length ? `\n${walked.lineErrors.length} line(s) failed while replaying.` : '';
     return text(`Wrote a review of ${stops.length} beat(s) with ${Object.keys(frames).length} screenshot(s) to ${path.resolve(file)}.${failed}`);
@@ -325,7 +336,7 @@ export function createServer(page, publicDir) {
   };
 
   tool('check_plan', {
-    description: 'Check a plan file fast: plan it as build_from_plan does, replay it with every animation instant (seconds, not the film\'s length) and say, beat by beat, what is on screen and where (a ninth of the screen), the frames and arrows, what came and went, and the warnings new in that beat. The text is meant to be pasted back to whoever writes the plan. The plan is left as the recorded script (review_scene can follow).',
+    description: 'Check a plan file fast: plan it as build_from_plan does, replay it with every animation instant (seconds, not the film\'s length) and say, beat by beat, what is on screen and where (a ninth of the screen), the frames and arrows, what came and went, and the warnings new in that beat. The text is meant to be pasted back to whoever writes the plan. The plan is left as the recorded script; for screenshots too, give the plan to review_scene instead.',
     inputSchema: {
       path: z.string().describe('the plan (JSON)'),
       out: z.string().optional().describe('also write the text to this file')

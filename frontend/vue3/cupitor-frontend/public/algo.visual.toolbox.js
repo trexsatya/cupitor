@@ -1039,6 +1039,39 @@ function addRect(left, top, width, height, opts) {
   return rect;
 }
 
+// A curly brace with its ends at (x1, y1) and (x2, y2), its tip on the right
+// hand of the way from the first to the second (a brace drawn left to right
+// points down). Centre-origin, like an enclosure. opts: depth (px from the
+// ends to the tip, default 20), uid, stroke ('#666'), strokeWidth (2), other
+// Fabric properties. One with the same uid is replaced, keeping its opacity.
+function addBrace(x1, y1, x2, y2, opts) {
+  opts = Object.assign({ depth: 20 }, opts);
+  const len = Math.hypot(x2 - x1, y2 - y1) || 1, t = [(x2 - x1) / len, (y2 - y1) / len], n = [-t[1], t[0]];
+  const D = opts.depth, h = D / 2, r = Math.min(D, len / 6);
+  const P = (u, v) => `${+(x1 + u * t[0] + v * n[0]).toFixed(1)} ${+(y1 + u * t[1] + v * n[1]).toFixed(1)}`;
+  const m = len / 2;
+  const d = `M ${P(0, 0)} Q ${P(0, h)} ${P(r, h)} L ${P(m - r, h)} Q ${P(m, h)} ${P(m, D)} Q ${P(m, h)} ${P(m + r, h)} L ${P(len - r, h)} Q ${P(len, h)} ${P(len, 0)}`;
+  const { depth, uid, ...rest } = opts;
+  const p = new fabric.Path(d, Object.assign({ fill: '', stroke: '#666', strokeWidth: 2, strokeLineCap: 'round', strokeLineJoin: 'round' }, rest));
+  // Where its own coordinates put it, held by its centre.
+  p.set({ originX: 'center', originY: 'center', left: p.left + p.width / 2, top: p.top + p.height / 2 });
+  p.setCoords();
+  if (uid) {
+    const old = findIfRequired(uid);
+    if (isFabricObject(old) && old.canvas) {
+      p.set('opacity', old.opacity);
+      const i = pc.getObjects().indexOf(old);
+      pc.remove(old);
+      p.uid = uid;
+      pc.insertAt(i, p);
+      return p;
+    }
+    p.uid = uid;
+  }
+  pc.add(p);
+  return p;
+}
+
 function addEllipse(left, top, rx, ry, opts) {
   opts = opts || {};
   const ell = new fabric.Ellipse(Object.assign({

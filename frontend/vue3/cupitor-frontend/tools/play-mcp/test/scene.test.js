@@ -856,3 +856,65 @@ test('move refuses a concept inside another, and one holding others', async () =
   await assert.rejects(plan([{ op: 'move', id: 'dot', place: { region: 'right' } }], model), /"dot" is inside "box"/);
 });
 
+
+test('brace: spans its members on the side asked, the label moves just beyond the tip; the script alone rebuilds it', async () => {
+  const row = ['A', 'B', 'C'].map((t, i) => ({ op: 'introduce', id: t.toLowerCase(), text: t, place: i ? { near: ['a', 'b'][i - 1], side: 'right' } : { region: 'left' } }));
+  const { model, lines } = await plan([...row, { op: 'introduce', id: 'all', text: 'ALL', place: { region: 'top-right' } },
+    { op: 'brace', id: 'br', members: ['a', 'b', 'c'], label: 'all' }]);
+  const br = model.objects.br, [a, c, all] = ['a', 'c', 'all'].map(id => boxOf(model.objects[id]));
+  assert.deepEqual([br.ends[0], br.ends[2]], [a.x, c.x + c.w], 'from the first member to the last');
+  assert.ok(br.ends[1] > a.y + a.h && br.ends[1] === br.ends[3], 'just below them, level');
+  assert.equal(model.objects.all.at[0], br.at[0], 'the label is centred on the tip');
+  assert.ok(all.y > br.ends[1] + br.depth, 'and below it');
+  [a, c].forEach(m => assert.ok(!hit(m, boxOf(br)) && !hit(all, boxOf(br))));
+  assert.match(lines.find(l => l.includes('addBrace')), /^drawOutline\(addBrace\(\d+, \d+, \d+, \d+, \{"uid":"br","depth":\d+\}\)/);
+  assert.match(lines.at(-1), /animate\("all", \{left: \d+, top: \d+\}/);
+  const rebuilt = parseScene(lines);
+  assert.deepEqual(rebuilt.objects, model.objects);
+  // The other sides: the tip and the label away from the members.
+  for (const [side, test] of [['above', (l, b) => l.y + l.h < b.y], ['left', (l, b) => l.x + l.w < b.x], ['right', (l, b) => l.x > b.x + b.w]]) {
+    const { model: m } = await plan([...row, { op: 'introduce', id: 'all', text: 'ALL', place: { region: 'top-right' } },
+      { op: 'brace', id: 'br', members: ['a', 'b'], side, label: 'all' }]);
+    assert.ok(test(boxOf(m.objects.all), boxOf(m.objects.br)), side);
+  }
+  await assert.rejects(plan([{ op: 'brace', id: 'b2', members: ['a', 'all'], label: 'all' }], model), /label "all" is one of the members/);
+  await assert.rejects(plan([{ op: 'brace', id: 'b2', members: ['a'], side: 'around' }], model), /side must be below, above, left or right/);
+  await assert.rejects(plan([{ op: 'move', id: 'br', place: { region: 'top' } }], model), /is a brace; move what it is round/);
+});
+
+test('brace: drawn again where its members go; return_to draws it as it was', async () => {
+  const { model } = await plan([
+    { op: 'introduce', id: 'a', text: 'A', place: { region: 'left' } },
+    { op: 'introduce', id: 'b', text: 'B', place: { near: 'a', side: 'right' } },
+    { op: 'brace', id: 'br', members: ['a', 'b'] },
+    { op: 'checkpoint', name: 'start' }
+  ]);
+  const was = model.objects.br.ends;
+  const { model: m, lines } = await plan([{ op: 'move', id: 'b', place: { region: 'right' } }], model);
+  assert.ok(m.objects.br.ends[2] > was[2] + 300, 'the brace reaches the moved member');
+  assert.match(lines.at(-1), /Promise\.resolve\(addBrace\(/);
+  const { model: back, lines: bl } = await plan([{ op: 'return_to', name: 'start' }], m);
+  assert.deepEqual(back.objects.br.ends, was);
+  assert.ok(bl.some(l => l.includes(`addBrace(${was.join(', ')}`)), 'drawn as it was on the page too');
+});
+
+test('brace review fixes: the label follows the tip, a dashed brace stays dashed, removing members redraws or removes it, turnover arrivals join it', async () => {
+  const base = async () => (await plan([
+    { op: 'introduce_group', id: 'g', items: ['EAT', 'STUDY', 'LIVE'], place: { region: 'center' } },
+    { op: 'introduce', id: 'all', text: 'ALL', place: { region: 'top-left' } },
+    { op: 'brace', id: 'br', group: 'g', label: 'all' },
+    { op: 'weaken_boundary', id: 'br' }
+  ])).model;
+  const { model: m, lines } = await plan([{ op: 'revise', id: 'live', text: 'LIVE A MUCH LONGER LIFE' }], await base());
+  assert.equal(m.objects.all.at[0], m.objects.br.at[0], 'the label stays at the tip');
+  assert.match(lines.at(-1), /addBrace\([^)]*"strokeDashArray":\[10,7\]/, 'still dashed when drawn again');
+  assert.match(lines.at(-1), /animate\("all"/);
+  const { model: t } = await plan([{ op: 'turnover', group: 'g', leaving: ['live'], arriving: ['PLAY'] }], await base());
+  assert.ok(t.objects.br.members.includes('play'), 'an arrival joins the brace');
+  const was = (await base()).objects.br.ends;
+  const { model: r, lines: rl } = await plan([{ op: 'remove', ids: ['live'] }], await base());
+  assert.ok(r.objects.br.ends[2] < was[2], 'drawn again round what is left');
+  assert.match(rl.at(-1), /\.then\(\(\) => Promise\.all\(\[Promise\.resolve\(addBrace/);
+  const { model: none } = await plan([{ op: 'remove', ids: ['g'] }], await base());
+  assert.ok(!none.objects.br, 'a brace over nothing goes too');
+});
