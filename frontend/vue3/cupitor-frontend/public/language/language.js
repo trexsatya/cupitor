@@ -1424,6 +1424,23 @@ function openSettingsDialog() {
 }
 window.openSettingsDialog = openSettingsDialog
 
+// A dialog opened from Settings takes its place: Settings closes. Done once
+// here rather than in each opener so a new button in the panel gets it too.
+// "Opened from" = a dialog that opens shortly after a click inside the panel;
+// some openers fetch first, hence the window rather than the same tick.
+const SETTINGS_HANDOFF_MS = 3000
+let _settingsClickAt = 0
+document.addEventListener('click', e => {
+  const t = e.target
+  if (t && t.closest && t.closest('#settingsPanel')) _settingsClickAt = Date.now()
+}, true)
+$(document).on('dialogopen', e => {
+  if (!e.target || e.target.id === 'settingsPanel') return
+  if (Date.now() - _settingsClickAt > SETTINGS_HANDOFF_MS) return
+  _settingsClickAt = 0
+  autoHideSettingsPanel()
+})
+
 // ──────────────────────────────────────────────────────────────────────
 // Build info + in-app Log Viewer
 // ──────────────────────────────────────────────────────────────────────
@@ -13964,6 +13981,49 @@ if ($.ui && $.ui.dialog && !$.ui.dialog.prototype._cupCkAllowed) {
   })
 }
 
+// A picture put into a card is kept in the card itself, as a data: URL — there
+// is no server to upload it to. Cards are synced to GitHub with the rest of
+// the playlist, so it is shrunk first: a phone photo is several megabytes.
+const CARD_IMAGE_MAX_PX = 1024
+const CARD_IMAGE_MAX_BYTES = 600 * 1024
+function _imageFileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onerror = () => reject(new Error('Could not read the picture.'))
+    r.onload = () => {
+      const src = String(r.result || '')
+      // Redrawn, a GIF loses its animation; kept as it is if it is small enough.
+      if (file.type === 'image/gif') {
+        return src.length <= CARD_IMAGE_MAX_BYTES ? resolve(src)
+          : reject(new Error('That GIF is too large for a card (over ' + Math.round(CARD_IMAGE_MAX_BYTES / 1024) + ' KB).'))
+      }
+      const img = new Image()
+      img.onerror = () => reject(new Error('This picture format cannot be read here — try a JPEG or PNG.'))
+      img.onload = () => {
+        const scale = Math.min(1, CARD_IMAGE_MAX_PX / Math.max(img.naturalWidth || 1, img.naturalHeight || 1))
+        const w = Math.max(1, Math.round(img.naturalWidth * scale))
+        const h = Math.max(1, Math.round(img.naturalHeight * scale))
+        const c = document.createElement('canvas')
+        c.width = w; c.height = h
+        const ctx = c.getContext('2d')
+        // A PNG stays a PNG — it may be a drawing with a transparent
+        // background — unless that makes it too large; then JPEG on white.
+        let out = file.type === 'image/png' ? (ctx.drawImage(img, 0, 0, w, h), c.toDataURL('image/png')) : ''
+        if (!out || out.length > CARD_IMAGE_MAX_BYTES) {
+          ctx.fillStyle = '#fff'
+          ctx.fillRect(0, 0, w, h)
+          ctx.drawImage(img, 0, 0, w, h)
+          out = c.toDataURL('image/jpeg', 0.82)
+        }
+        if (out.length > CARD_IMAGE_MAX_BYTES) return reject(new Error('That picture is too large for a card even after shrinking.'))
+        resolve(out)
+      }
+      img.src = src
+    }
+    r.readAsDataURL(file)
+  })
+}
+
 let _richEditorSeq = 0
 async function _openRichCardEditor($box, label) {
   // A second open while the first is still downloading or starting wins; the
@@ -13975,7 +14035,13 @@ async function _openRichCardEditor($box, label) {
   let $d = $('#richCardEditor')
   // Closed properly, so its editor is destroyed by its own close handler.
   if ($d.length) { try { $d.dialog('close') } catch (_) {} $('#richCardEditor').remove() }
-  $d = $('<div id="richCardEditor"><div class="rce-host"></div></div>').appendTo('body')
+  $d = $(`<div id="richCardEditor">
+    <div class="rce-url" style="display:none;">
+      <input type="url" class="rce-url-input" placeholder="https://…/picture.jpg" aria-label="Picture address">
+      <button type="button" class="rce-url-insert">Insert</button>
+    </div>
+    <div class="rce-host"></div>
+  </div>`).appendTo('body')
   let editor = null
   let initial = null
   const done = () => {
@@ -13994,7 +14060,16 @@ async function _openRichCardEditor($box, label) {
     resizable: false,
     position: { my: 'center top', at: 'center top+20', of: window },
     buttons: {
+      '🔗 Image from link'() {
+        const $row = $d.find('.rce-url').toggle()
+        if ($row.is(':visible')) $row.find('.rce-url-input').val('').trigger('focus')
+      },
       Apply() {
+        // A picture still being shrunk is not in the text yet; applying now
+        // would leave it out without a word.
+        try {
+          if (editor && editor.plugins.get('PendingActions').hasAny) { alert('A picture is still being added — try again in a moment.'); return }
+        } catch (_) {}
         // Untouched, the box keeps what it had — a plain face is not turned
         // into paragraphs just by being looked at.
         if (editor && editor.getData() !== initial) $box.val(editor.getData()).trigger('input')
@@ -14014,9 +14089,30 @@ async function _openRichCardEditor($box, label) {
   } catch (_) {}
   try {
     editor = await ClassicEditor.create($d.find('.rce-host')[0], {
-      // No image upload — it needs a server — so it is left off the toolbar.
-      toolbar: ['heading', '|', 'bold', 'italic', 'link', 'bulletedList', 'numberedList',
+      toolbar: ['heading', '|', 'bold', 'italic', 'link', 'uploadImage', 'bulletedList', 'numberedList',
         'blockQuote', 'insertTable', '|', 'undo', 'redo'],
+      image: { toolbar: ['imageTextAlternative'] },
+    })
+    // CKEditor puts a new picture in place of a selected one, and a picture is
+    // left selected once it is in — so a second one would silently replace
+    // the first. A new picture goes after the selected one instead.
+    const besideSelectedImage = () => {
+      const el = editor && editor.model.document.selection.getSelectedElement()
+      if (!el || !/^image/.test(el.name)) return
+      if (el.name === 'imageBlock') {
+        editor.execute('insertParagraph', { position: editor.model.createPositionAfter(el) })
+      } else {
+        editor.model.change(w => w.setSelection(el, 'after'))
+      }
+    }
+    ;['uploadImage', 'insertImage'].forEach(name => {
+      const cmd = editor.commands.get(name)
+      if (cmd) cmd.on('execute', besideSelectedImage, { priority: 'highest' })
+    })
+    // Uploads (the toolbar button, a paste, a drop) go into the card itself.
+    editor.plugins.get('FileRepository').createUploadAdapter = loader => ({
+      upload: () => loader.file.then(f => _imageFileToDataUrl(f)).then(url => ({ default: url })),
+      abort() {},
     })
     // Closed (or replaced) while the editor was starting: nothing will
     // destroy this one later, so do it now.
@@ -14024,6 +14120,15 @@ async function _openRichCardEditor($box, label) {
     editor.setData(_faceToEditorHtml($box.val()))
     initial = editor.getData()
     editor.editing.view.focus()
+    const insertFromLink = () => {
+      const url = String($d.find('.rce-url-input').val() || '').trim()
+      if (!/^https?:\/\/\S+$/i.test(url)) { alert('Give the picture\'s web address, starting with https://'); return }
+      editor.execute('insertImage', { source: url })
+      $d.find('.rce-url').hide()
+      editor.editing.view.focus()
+    }
+    $d.on('click', '.rce-url-insert', insertFromLink)
+    $d.on('keydown', '.rce-url-input', ev => { if (ev.key === 'Enter') { ev.preventDefault(); insertFromLink() } })
   } catch (e) {
     console.warn('[rich editor] could not start', e)
     alert('The rich editor could not start: ' + (e && e.message || e))
@@ -20449,7 +20554,7 @@ function _renderPracticeRecBar(note) {
   const $bar = $('#practiceMode .practice-rec-bar')
   if (!$bar.length) return
   const st = _pracRec
-  if (!st) { $bar.hide().empty(); return }
+  if (!st) { $bar.hide().empty(); _setPracRecBarHeight(0); return }
   const n = st.takes.length
   const unkept = st.takes.filter(t => !st.kept.has(t.url)).length
   const rec = st.phase === 'recording'
@@ -20508,6 +20613,26 @@ function _renderPracticeRecBar(note) {
     $bar.append($takes)
   }
   $bar.show()
+  _setPracRecBarHeight($bar[0].offsetHeight)
+  _watchPracRecBarHeight($bar[0])
+}
+
+// The bar also changes size without being re-rendered: hidden while Practice
+// is minimized and back on restore, re-wrapped by a rotation. Follow its size.
+function _watchPracRecBarHeight(bar) {
+  if (!bar || bar._precSizeWatched || typeof ResizeObserver !== 'function') return
+  bar._precSizeWatched = true
+  new ResizeObserver(() => _setPracRecBarHeight(bar.offsetHeight)).observe(bar)
+}
+
+// The bar is pinned over the foot of the screen; the card ends above it so
+// its last lines can still be scrolled into view. Measured on every render:
+// the row of takes comes and goes, and the bar wraps on a narrow screen.
+function _setPracRecBarHeight(px) {
+  const el = document.getElementById('practiceMode')
+  if (!el) return
+  if (px > 0) el.style.setProperty('--prec-bar-h', px + 'px')
+  else el.style.removeProperty('--prec-bar-h')
 }
 
 // Press and hold a take to delete it. Tapping plays it, which is the common

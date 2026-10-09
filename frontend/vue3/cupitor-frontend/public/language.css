@@ -2563,8 +2563,10 @@ body.practice-manual #practiceMode .practice-card {
     top: calc(64px + min(100vw, 900px) * 0.5625 + 12px);
     /* Fill the full height between the video (top) and the bottom nav
        (fixed at bottom:16px, ~48px tall — clear ~64px). Content scrolls
-       within the card when it overflows. */
-    bottom: 64px;
+       within the card when it overflows. The shadowing bar, when shown, is
+       pinned at bottom:60px over the card's foot — end above it instead
+       (--prec-bar-h, set by _renderPracticeRecBar). */
+    bottom: max(64px, calc(60px + var(--prec-bar-h, 0px) + 6px));
     left: 50%;
     transform: translateX(-50%);
     /* Let the browser scroll vertically but hand horizontal gestures to the
@@ -4658,3 +4660,5 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 }
 .mee-rich { margin-left: 4px; }
 #richCardEditor .ck-editor__editable { min-height: 160px; max-height: 55vh; }
+#richCardEditor .rce-url { display: flex; gap: 6px; margin-bottom: 6px; }
+#richCardEditor .rce-url-input { flex: 1; min-width: 0; padding: 4px 6px; }
