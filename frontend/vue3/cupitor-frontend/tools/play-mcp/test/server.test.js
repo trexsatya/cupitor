@@ -196,8 +196,14 @@ test('revise src on the page: the picture keeps its place and size, a checkpoint
   const after = await live();
   assert.deepEqual(after.box, before.box, 'same place and size');
   assert.match(textOf(await client.callTool({ name: 'validate_scene', arguments: {} })), /No issues found/);
+  assert.match(await run([{ op: 'revise', id: 'kid', text: 'CHILD LOOKING UP', src: 'img/placeholder.svg' }]), /No errors/);
+  const mid = b => Math.round(b.left + b.width / 2);
+  assert.equal(mid((await live()).box), mid(before.box), 'a longer label widens it round the same centre');
   assert.match(await run([{ op: 'return_to', name: 'start' }]), /No errors/);
-  assert.deepEqual((await live()).box, before.box);
+  const back = await live();
+  assert.deepEqual(back.box, before.box, 'back in place, same size');
+  assert.match(JSON.stringify(back), /"CHILD"/, 'and its label as it was');
+  assert.doesNotMatch(JSON.stringify(back), /LOOKING UP/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'play-mcp-pic-'));
   const planFile = path.join(dir, 'plan.json');
   const check = async src => {

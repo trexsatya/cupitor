@@ -65,7 +65,7 @@ export function plainMove(rec) {
     case 'turnover': return `turnover in ${rec.group}: ${rec.leaving.join(', ') || 'none'} leave, ${rec.arriving.map(a => a.id).join(', ') || 'none'} arrive`;
     case 'pause': return `pause ${rec.seconds}s${rec.kind && rec.kind !== 'short' ? ` (${rec.kind})` : ''}`;
     case 'remove': return `remove ${rec.ids.join(', ')}`;
-    case 'move': return `move ${rec.id} to ${rec.moves[rec.id].join(', ')}`;
+    case 'move': return rec.group ? `move group ${rec.id} (${Object.keys(rec.moves).join(', ')})` : `move ${rec.id} to ${rec.moves[rec.id].join(', ')}`;
     default: return describe(rec, { scene: null, beat: null }) + place(rec.place);
   }
 }

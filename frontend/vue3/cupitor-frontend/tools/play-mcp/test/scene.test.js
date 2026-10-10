@@ -112,6 +112,9 @@ test('validation: an arrow running through another concept', async () => {
   live.push({ uid: 'a__c', visible: true, opacity: 1, ends: [236, 300, 564, 300], box: { left: 236, top: 300, width: 328, height: 0 } });
   const issues = validate(model, live).map(i => i.message);
   assert.deepEqual(issues.filter(m => /runs through/.test(m)), ['relationship "a__c" runs through "b"']);
+  // An arrow cutting across its own end (from a's top-left to the far side of c): flagged too.
+  const cut = live.map(o => (o.uid === 'a__c' ? { ...o, ends: [190, 280, 650, 310] } : o));
+  assert.ok(validate(model, cut).some(i => /runs through its own end "c"/.test(i.message)));
 });
 
 test('group items keep their own kind and role', async () => {
@@ -946,7 +949,13 @@ test('revise src: a picture changes its image and stays the same concept; timing
   assert.deepEqual(parseScene(whole.lines).objects, whole.model.objects, 'the script alone rebuilds it');
   // A checkpoint keeps the image; return_to puts it back at once.
   const { lines: rl } = await plan([{ op: 'return_to', name: 'start' }], m);
-  assert.ok(rl.includes('Promise.resolve(setPictureSource("kid", "img/a.png", {duration: 0}))'));
+  const put = rl.indexOf('Promise.resolve(setPictureSource("kid", "img/a.png", {duration: 0}))');
+  assert.ok(put >= 0 && put < rl.findIndex(l => l.includes('revertState(')), 'the image goes back before the saved look of its layers');
+  // A later label change measures the picture by its first image: a new image never resizes it.
+  const asked = [], later = await base();
+  await planActions(later, [{ op: 'revise', id: 'kid', src: 'img/b.png' }, { op: 'revise', id: 'kid', text: 'OLDER' }], async specs => { asked.push(...specs); return measure(specs); });
+  assert.equal(later.objects.kid.src, 'img/b.png');
+  assert.equal(asked[0].src, 'img/a.png');
   const no = (a, re) => assert.rejects(async () => plan([a], await base()), re);
   await no({ op: 'revise', id: 'fig', src: 'img/b.png' }, /"fig" is a figure; only a picture takes src/);
   await no({ op: 'revise', id: 'kid', text: 'X', transition: 'instant' }, /transition goes with src/);
@@ -956,6 +965,45 @@ test('revise src: a picture changes its image and stays the same concept; timing
   await no({ op: 'question', id: 'kid', src: 'img/b.png' }, /src and transition are for revise/);
   const { model: gone } = await plan([{ op: 'remove', ids: ['kid'] }], await base());
   await assert.rejects(plan([{ op: 'revise', id: 'kid', src: 'img/b.png' }], gone), /was removed; bring it back with return_to first/);
+  // A picture made without a label gets one later.
+  const bare = await plan([{ op: 'introduce', id: 'me', kind: 'picture', src: 'img/a.png', text: '' }, { op: 'revise', id: 'me', text: 'ME AS A TEENAGER', src: 'img/b.png' }]);
+  assert.equal(bare.model.objects.me.text, 'ME AS A TEENAGER');
+  const b0 = boxOf({ ...bare.model.objects.me, at: bare.records[0].at, size: bare.records[0].size }), b1 = boxOf(bare.model.objects.me);
+  assert.equal(b1.y, b0.y, 'its image stays where it was; the label grows below');
   // An empty text clears a picture's label; a box still needs words.
   assert.equal((await plan([{ op: 'revise', id: 'kid', text: '' }], await base())).model.objects.kid.text, '');
+});
+
+test('move takes a group: its members go together, keeping their places among themselves, and its frame goes with them', async () => {
+  const { model } = await plan([
+    { op: 'introduce_group', id: 'world', kind: 'box', layout: 'column', items: ['PEOPLE', 'EVENTS', 'IDEAS'], place: { region: 'left' } },
+    { op: 'enclose', id: 'frame', group: 'world' }
+  ]);
+  const was = ['people', 'events', 'ideas'].map(id => model.objects[id].at), fr = model.objects.frame.at;
+  const { model: m, lines } = await plan([{ op: 'move', id: 'world', place: { region: 'right' } }], model);
+  const now = ['people', 'events', 'ideas'].map(id => m.objects[id].at), dx = now[0][0] - was[0][0];
+  assert.ok(dx > 500, `moved right by ${dx}`);
+  now.forEach((p, i) => assert.deepEqual([p[0] - was[i][0], p[1] - was[i][1]], [dx, now[0][1] - was[0][1]], 'all by the same step'));
+  assert.equal(m.objects.frame.at[0] - fr[0], dx, 'the frame went with them');
+  assert.match(lines.at(-1), /^Promise\.all\(\[animate\("people"/);
+  await assert.rejects(plan([{ op: 'move', id: 'world', place: { near: 'world' } }], m), /relative to something else/);
+});
+
+test('an arrow that cannot clear its own boxes from the usual edges goes from the other facing pair (two arrows between offset boxes)', async () => {
+  // As in a scene where the second box landed up and to the right of the first.
+  const { model } = await plan([
+    { op: 'introduce', id: 'world', text: 'UNDERSTAND THE WORLD', kind: 'box', place: { x: 260, y: 400 } },
+    { op: 'introduce', id: 'self', text: 'UNDERSTAND MYSELF', kind: 'box', place: { x: 612, y: 325 } },
+    { op: 'connect', from: 'world', to: 'self' },
+    { op: 'connect', from: 'self', to: 'world' }
+  ]);
+  const inset = id => { const b = boxOf(model.objects[id]); return { x: b.x + 6, y: b.y + 6, w: b.w - 12, h: b.h - 12 }; };
+  for (const r of Object.values(model.relations)) {
+    const ends = connectorEnds(boxOf(model.objects[r.from]), boxOf(model.objects[r.to]), r.sides);
+    const mid = r.bend ? [(ends[0] + ends[2]) / 2 + (ends[3] - ends[1]) / Math.hypot(ends[2] - ends[0], ends[3] - ends[1]) * r.bend, (ends[1] + ends[3]) / 2 - (ends[2] - ends[0]) / Math.hypot(ends[2] - ends[0], ends[3] - ends[1]) * r.bend] : null;
+    ['world', 'self'].forEach(id => assert.ok(!connectorChords(ends, mid).some(ch => segmentHitsBox(ch, inset(id))), `${r.id} runs through ${id}: ${JSON.stringify(r)}`));
+  }
+  assert.deepEqual(model.relations.self__world.sides, { from: 'left', to: 'right' });
+  assert.deepEqual(model.relations.world__self.sides, { from: 'right', to: 'left' }, 'the first one moved to the same edges, so they do not cross');
+  assert.ok(!model.relations.world__self.bend !== !model.relations.self__world.bend, 'one straight, one curved');
 });

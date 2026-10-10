@@ -57,7 +57,7 @@ export const ACTIONS = {
   replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one\'s.',
   deemphasize: 'Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.',
   focus: 'Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.',
-  move: "Move a concept already on screen to a new place, as introduce places one: {id, place, pace?}. Its arrows follow and a frame round it is refitted; use it to make room or line concepts up so their arrows run straight.",
+  move: "Move a concept already on screen to a new place, as introduce places one: {id, place, pace?}. Its arrows follow and a frame round it is refitted; use it to make room or line concepts up so their arrows run straight. A group's id moves the whole group, its members keeping their places among themselves and its frame going with them.",
   move_into: 'Move a concept into another (e.g. a question into a person), smaller: {id, into, scale?, pace?}.',
   widen_context: "Pull the camera back so concepts sit small inside a much larger frame: {ids?: [ids] (default all), scale?: 0.45, region? (where they end up on screen), mode?: camera (default) | objects (shrink the concepts themselves, leaving the rest as it is), pace?}.",
   narrow_context: 'Bring the camera in on concepts: {ids, fill?: 0.7 (share of the screen they fill)} or {reset: true} (back to the starting view), pace?.',
@@ -180,6 +180,11 @@ export function applyRecord(model, rec) {
       (rec.relations || []).forEach(r => addRelation(model, r));
       break;
     case 'connect':
+      if (rec.rerouted && model.relations[rec.rerouted.id]) {
+        const r = model.relations[rec.rerouted.id];
+        r.sides = rec.rerouted.sides;
+        if (rec.rerouted.bend) r.bend = rec.rerouted.bend; else r.bend = 0;
+      }
       addRelation(model, rec);
       break;
     case 'disconnect':
@@ -206,7 +211,8 @@ export function applyRecord(model, rec) {
     case 'revise':
     case 'question': {
       const o = obj(rec.id);
-      if (rec.src !== undefined) o.src = rec.src;
+      // A picture keeps the size of its first image (frameSrc) whatever it shows now (src).
+      if (rec.src !== undefined) { if (!o.frameSrc) o.frameSrc = o.src; o.src = rec.src; }
       if (rec.text !== undefined) { o.text = rec.text; o.size = rec.size; o.history.push(rec.text); }
       Object.entries(rec.moves || {}).forEach(([id, at]) => { obj(id).at = at; });
       Object.entries(rec.enclosures || {}).forEach(([id, e]) => { fitTo(model, id, e); });
@@ -914,11 +920,29 @@ export async function planAction(model, a, measure) {
       }
       need(model, a.from, op); need(model, a.to, op);
       checkNewId(model, id);
-      const sides = sidesOf(a);
-      const bend = a.from === a.to ? 'loop' : chooseBend(model, a.from, a.to, a.bend == null ? 'auto' : a.bend, sides);
-      const rec = { op, id, from: a.from, to: a.to, kind: a.kind || null, ...(bend ? { bend } : {}), ...(a.bend != null && a.bend !== 'auto' ? { fixedBend: true } : {}), ...(sides ? { sides } : {}) };
+      let sides = sidesOf(a), bend, rerouted = null;
+      if (a.from === a.to) bend = 'loop';
+      else if (!sides && (a.bend == null || a.bend === 'auto')) {
+        ({ bend, sides } = routeFor(model, a.from, a.to));
+        // Going from other edges than an arrow the other way between the same two: that
+        // one moves to the same edges, so the pair runs side by side instead of crossing.
+        const back = sides && Object.values(model.relations).find(r => r.from === a.to && r.to === a.from && !r.sides && !r.fixedBend && r.bend !== 'loop');
+        if (back) {
+          const trial = clone(model), mirrored = { from: sides.to, to: sides.from };
+          const first = bendFor(trial, back.from, back.to, mirrored);
+          Object.assign(trial.relations[back.id], { sides: mirrored, bend: first.bend });
+          const second = bendFor(trial, a.from, a.to, sides);
+          if (!first.hits && !second.hits) { rerouted = { id: back.id, sides: mirrored, bend: first.bend }; bend = second.bend; }
+        }
+      } else bend = chooseBend(model, a.from, a.to, a.bend == null ? 'auto' : a.bend, sides);
+      const rec = { op, id, from: a.from, to: a.to, kind: a.kind || null, ...(bend ? { bend } : {}), ...(a.bend != null && a.bend !== 'auto' ? { fixedBend: true } : {}), ...(sides ? { sides } : {}), ...(rerouted ? { rerouted } : {}) };
       const opts = `{${bend ? `bend: ${J(bend)}, ` : ''}${sides ? `sides: ${J(sides)}, ` : ''}animate: true, duration: ${pace(a)}}`;
-      return { record: rec, lines: [`connectObjects(${J(a.from)}, ${J(a.to)}, ${J(id)}, ${opts})`] };
+      const lines = [`connectObjects(${J(a.from)}, ${J(a.to)}, ${J(id)}, ${opts})`];
+      if (rerouted) {
+        const r = model.relations[rerouted.id], fade = r.opacity != null && r.opacity !== 1 ? `; setObjectProps(${J(r.id)}, {opacity: ${r.opacity}})` : '';
+        lines.unshift(`Promise.resolve().then(() => { removeByUid(${J(r.id)}); connectObjects(${J(r.from)}, ${J(r.to)}, ${J(r.id)}, {${rerouted.bend ? `bend: ${rerouted.bend}, ` : ''}sides: ${J(rerouted.sides)}})${fade}; })`);
+      }
+      return { record: rec, lines };
     }
 
     case 'disconnect': {
@@ -1006,24 +1030,31 @@ export async function planAction(model, a, measure) {
         const p = a.pace || 'short';
         if (typeof p !== 'number' && !PACE[p]) throw new Error(`pace must be ${Object.keys(PACE).join(', ')} or ms`);
         const ms = a.transition === 'instant' || p === 'instant' ? 0 : typeof p === 'number' ? num(p, 'pace', 0, 60000) : p === 'deliberate' ? 600 : 250;
-        return { src: a.src.trim(), transition: a.transition || 'crossfade', ms };
+        return { src: a.src, transition: a.transition || 'crossfade', ms };
       })();
       const imageLine = image && image.src !== o.src ? `setPictureSource(${J(a.id)}, ${J(image.src)}, {duration: ${image.ms}})` : null;
       const imageRec = image ? { src: image.src, transition: image.transition } : {};
       if (op === 'revise' && a.text === undefined) return { record: { op, id: a.id, ...imageRec }, lines: imageLine ? [`Promise.resolve(${imageLine})`] : [] };
       if (!(o.kind === 'text' || o.kind === 'box' || (pictured && op === 'revise'))) throw new Error(`${op}: "${a.id}" is a ${o.kind}; ${op === 'question' ? 'only text and box concepts can be questioned' : 'it has no text to change'}`);
-      if (pictured && o.text == null) throw new Error(`revise: "${a.id}" is a ${o.kind} without a label; give it text when introducing it`);
+      // A picture without a label gets one; a figure's label is made with it.
+      if (o.kind === 'figure' && o.text == null) throw new Error(`revise: "${a.id}" is a figure without a label; give it text when introducing it`);
       const text = a.text != null ? String(a.text) : op === 'question' ? (o.text.endsWith('?') ? o.text : o.text + '?') : null;
       // An empty text clears the label under a figure or picture; anything else needs words.
       if (text == null || (text === '' && !pictured)) throw new Error('revise: text is required');
-      const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: op === 'question' ? 'dashed' : o.framed ? 'solid' : o.boundary, ...(o.hand ? { hand: true } : {}), ...(o.kind === 'picture' ? { src: o.src, width: o.width } : {}) }]);
+      // A picture's cleared label keeps its line on the page, so its size stays.
+      const [size] = o.kind === 'picture' && text === '' && o.text != null ? [o.size]
+        : await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: op === 'question' ? 'dashed' : o.framed ? 'solid' : o.boundary, ...(o.hand ? { hand: true } : {}), ...(o.kind === 'picture' ? { src: o.frameSrc || o.src, width: o.width } : {}) }]);
       const ms = pace(a, 'deliberate');
       const change = op === 'question'
         ? `(setLabelText(${J(a.id)}, ${J(text)}), setLabelBoundary(${J(a.id)}, "dashed"))`
         : `setLabelText(${J(a.id)}, ${J(text)})`;
-      const { moves, enclosures, bends } = makeRoom(model, o, size);
+      // A picture made without a label keeps its image where it is when it gets one: the
+      // label grows below it, so its centre moves down (the page does that by itself).
+      const grows = o.kind === 'picture' && o.text == null && text !== '';
+      const self = grows ? { ...o, at: [o.at[0], Math.round(o.at[1] + (size[1] - o.size[1]) / 2)] } : o;
+      const { moves, enclosures, bends } = makeRoom(model, self, size);
       const shifts = shiftLines(moves, enclosures, Math.round(ms * 0.3)), redraws = redrawLines(model, bends);
-      const room = shifts.length || redraws.length ? { moves, enclosures, bends } : {};
+      const room = shifts.length || redraws.length || grows ? { moves: grows ? { ...moves, [a.id]: self.at } : moves, enclosures, bends } : {};
       const textLine = `${shifts.length ? `Promise.all([${shifts.join(', ')}]).then(() => ` : ''}animate(${J(a.id)}, {opacity: 0.15}, {duration: ${Math.round(ms * 0.3)}})${shifts.length ? ')' : ''}.then(() => ${change}).then(() => animate(${J(a.id)}, {opacity: ${o.opacity}}, {duration: ${Math.round(ms * 0.7)}}))${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`;
       return {
         record: { op, id: a.id, text, size, ...room, ...imageRec },
@@ -1090,6 +1121,31 @@ export async function planAction(model, a, measure) {
     }
 
     case 'move': {
+      // A group moves as one: its members keep their places among themselves, its frame goes with them.
+      if (model.groups[a.id] && !model.objects[a.id]) {
+        if (!a.place) throw new Error('move: place is required');
+        if (a.place.near === a.id || (a.place.between || []).includes(a.id)) throw new Error('move: place it relative to something else');
+        const g = model.groups[a.id], ids = g.members.filter(m => model.objects[m]);
+        if (!ids.length) throw new Error(`move: group "${a.id}" has nothing on screen`);
+        ids.forEach(id => {
+          const m = model.objects[id];
+          if (m.inside) throw new Error(`move: "${id}" in group "${a.id}" is inside "${m.inside}"`);
+          const holds = Object.values(model.objects).filter(p => p.inside === id && !ids.includes(p.id)).map(p => p.id);
+          if (holds.length) throw new Error(`move: "${id}" in group "${a.id}" holds ${holds.map(h => `"${h}"`).join(', ')}`);
+        });
+        const along = id => ids.includes(id) || (model.objects[id].members && model.objects[id].members.every(m => ids.includes(m)));
+        const taken = Object.values(model.objects).filter(p => p.opacity > 0 && !along(p.id)).map(boxOf).concat(reservedIn(model).map(r => screenRect(model, r)));
+        const b = anchorBox(model, a.id), at = placeBox(model, [b.w, b.h], a.place, taken);
+        const dx = at[0] - (b.x + b.w / 2), dy = at[1] - (b.y + b.h / 2);
+        const moves = Object.fromEntries(ids.map(id => { const m = model.objects[id]; return [id, [Math.round(m.at[0] + dx), Math.round(m.at[1] + dy)]]; }));
+        const enclosures = refits(model, ids, id => (moves[id] ? boxOf({ ...model.objects[id], at: moves[id] }) : boxOf(model.objects[id])));
+        const bends = rebends(model, { ...moves, ...atsOf(enclosures) }, sizesOf(enclosures));
+        const ms = pace(a, 'deliberate'), redraws = redrawLines(model, bends);
+        return {
+          record: { op, id: a.id, group: true, moves, enclosures, bends },
+          lines: [`Promise.all([${shiftLines(moves, enclosures, ms).join(', ')}])${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`]
+        };
+      }
       const o = need(model, a.id, op);
       if (o.kind === 'enclosure' || o.kind === 'spectrum' || o.kind === 'brace') throw new Error(`move: "${a.id}" is a ${{ enclosure: 'frame', spectrum: 'colour band', brace: 'brace' }[o.kind]}; move what it is round instead`);
       if (!a.place) throw new Error('move: place is required');
@@ -1219,9 +1275,14 @@ export async function planAction(model, a, measure) {
           .map(r => `setCustomData(${J(r.id)}, {bend: ${J(r.bend)}})`);
         const redraws = redrawLines({ relations: st.relations }, Object.fromEntries(turned.map(r => [r.id, r.bend || 0])));
         const revert = `revertState(${J(a.name)}, {duration: ${ms}})${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`;
+        // A picture's image goes back first, at once: the saved look of its layers is the look of that image.
+        Object.values(st.objects).filter(o => o.kind === 'picture' && o.src).forEach(o => {
+          const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
+          if (now.src !== o.src) lines.push(`Promise.resolve(setPictureSource(${J(o.id)}, ${J(o.src)}, {duration: 0}))`);
+        });
         lines.push(rebend.length ? `Promise.resolve().then(() => { ${rebend.join('; ')}; }).then(() => ${revert})` : revert);
         // Label text and boundaries are not part of a tag either.
-        const fixes = Object.values(st.objects).filter(o => o.kind === 'text' || o.kind === 'box' || o.kind === 'figure').flatMap(o => {
+        const fixes = Object.values(st.objects).filter(o => ['text', 'box', 'figure', 'picture'].includes(o.kind)).flatMap(o => {
           const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
           return [...(now.text !== o.text && o.text != null ? [`setLabelText(${J(o.id)}, ${J(o.text)})`] : []),
             ...(now.boundary !== o.boundary ? [`setLabelBoundary(${J(o.id)}, ${J(o.boundary)})`] : [])];
@@ -1230,11 +1291,6 @@ export async function planAction(model, a, measure) {
         Object.values(st.objects).filter(o => o.kind === 'brace').forEach(o => {
           const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
           if (J(now.ends) !== J(o.ends)) fixes.push(braceCall(o));
-        });
-        // Nor is a picture's image: it is put back as it was, at once.
-        Object.values(st.objects).filter(o => o.kind === 'picture' && o.src).forEach(o => {
-          const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
-          if (now.src !== o.src) lines.push(`Promise.resolve(setPictureSource(${J(o.id)}, ${J(o.src)}, {duration: 0}))`);
         });
         // Nor is a step list's progress (bold labels): it is marked again.
         Object.values(st.objects).filter(o => o.kind === 'steps').forEach(o => {
@@ -1611,6 +1667,11 @@ const bendMiddle = ([x1, y1, x2, y2], bend) => {
 // else the one crossing the fewest.
 function chooseBend(model, from, to, bend, sides) {
   if (bend !== 'auto') return num(bend, 'connect: bend', -600, 600);
+  return bendFor(model, from, to, sides).bend;
+}
+
+// The bend chooseBend gives, and how many concepts that arrow still crosses.
+function bendFor(model, from, to, sides) {
   const ends = connectorEnds(boxOf(model.objects[from]), boxOf(model.objects[to]), sides);
   const others = Object.values(model.objects)
     .filter(o => o.id !== from && o.id !== to && o.kind !== 'enclosure' && o.kind !== 'spectrum' && o.opacity > 0)
@@ -1618,7 +1679,12 @@ function chooseBend(model, from, to, bend, sides) {
   // Its own ends too: an arrow coming round to an edge from the far side crosses its own box
   // (inset more, so the edge it starts or ends on does not count).
   const own = [from, to].map(id => { const b = boxOf(model.objects[id]); return { x: b.x + 8, y: b.y + 8, w: b.w - 16, h: b.h - 16 }; });
-  const reverse = Object.values(model.relations).some(r => r.from === to && r.to === from && !r.bend);
+  // A straight arrow the other way, on the same line, rules out going straight.
+  const reverse = Object.values(model.relations).some(r => {
+    if (r.from !== to || r.to !== from || r.bend) return false;
+    const e = connectorEnds(boxOf(model.objects[to]), boxOf(model.objects[from]), r.sides);
+    return Math.hypot(e[0] - ends[2], e[1] - ends[3]) < 3 && Math.hypot(e[2] - ends[0], e[3] - ends[1]) < 3;
+  });
   // Bends grow with the arrow: a short arrow only needs a slight curve.
   const len = Math.hypot(ends[2] - ends[0], ends[3] - ends[1]);
   const k = Math.min(1 / zoomOf(model), Math.max(0.25, len / 260));
@@ -1633,10 +1699,26 @@ function chooseBend(model, from, to, bend, sides) {
     if (mid && !inView(mid)) continue;
     const chords = connectorChords(ends, mid);
     const hits = [...others, ...own].filter(b => chords.some(ch => segmentHitsBox(ch, b))).length;
-    if (!hits) return c && Math.round(c * k);
+    if (!hits) return { bend: c && Math.round(c * k), hits: 0 };
     if (!best || hits < best.hits) best = { c, hits };
   }
-  return best ? best.c && Math.round(best.c * k) : 0;
+  return best ? { bend: best.c && Math.round(best.c * k), hits: best.hits } : { bend: 0, hits: 0 };
+}
+
+// An arrow left to find its own way (no sides named, bend auto) that cannot
+// clear everything from the edges it would take goes from the other pair of
+// facing edges when that is clearer: {bend, sides} (sides null for the usual ones).
+function routeFor(model, from, to) {
+  const usual = bendFor(model, from, to, null);
+  if (!usual.hits) return { bend: usual.bend, sides: null };
+  const a = boxOf(model.objects[from]), b = boxOf(model.objects[to]);
+  const dx = (b.x + b.w / 2) - (a.x + a.w / 2), dy = (b.y + b.h / 2) - (a.y + a.h / 2);
+  const tries = [
+    dx >= 0 ? { from: 'right', to: 'left' } : { from: 'left', to: 'right' },
+    dy >= 0 ? { from: 'bottom', to: 'top' } : { from: 'top', to: 'bottom' }
+  ].map(sides => ({ sides, ...bendFor(model, from, to, sides) }));
+  const best = tries.reduce((p, q) => (q.hits < p.hits || (q.hits === p.hits && Math.abs(q.bend) < Math.abs(p.bend)) ? q : p), { ...usual, sides: null });
+  return { bend: best.bend, sides: best.sides };
 }
 
 // Whether the segment [x1, y1, x2, y2] crosses the box (Liang-Barsky clipping).
@@ -1877,6 +1959,13 @@ export function validate(model, live, lines) {
           issues.push({ level: 'warning', id: r.id, message: `relationship "${r.id}" runs through "${o.id}"` });
         }
       });
+    // Through one of its own two ends (coming round to an edge from the far side), deeper than the edge it meets.
+    [r.from, r.to].map(id => shown.find(o => o.id === id)).filter(o => o && !o.members).forEach(o => {
+      const b = liveBox(o), inner = { x: b.x + 10, y: b.y + 10, w: b.w - 20, h: b.h - 20 };
+      if (connectorChords(l.ends, l.bend).some(ch => segmentHitsBox(ch, inner))) {
+        issues.push({ level: 'warning', id: r.id, message: `relationship "${r.id}" runs through its own end "${o.id}"` });
+      }
+    });
   });
   if (model.scene && !model.viewerTasks.some(t => t.scene === model.scene)) {
     issues.push({ level: 'info', message: `scene "${model.scene}" has no viewer_task: what should the viewer be doing?` });

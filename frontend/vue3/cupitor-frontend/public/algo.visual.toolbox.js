@@ -545,7 +545,13 @@ function setLabelText(uidOrObj, text) {
   const g = findIfRequired(uidOrObj);
   const type = isFabricObject(g) && g.customData && g.customData.type;
   const [r] = type ? g.getObjects() : [];
-  let t = type ? g.getObjects()[1] : undefined;
+  // A picture's label is its text (an image change puts layers before it).
+  let t = type === 'picture' ? g.getObjects().find(o => o instanceof fabric.Text) : type ? g.getObjects()[1] : undefined;
+  // A picture made without a label gets one, under its image area, as makePicture puts it.
+  if (type === 'picture' && !t) {
+    if (String(text) === '') return;
+    t = _pictureLabel(g);
+  }
   if (type !== 'label' && !((type === 'figure' || type === 'picture') && t instanceof fabric.Text)) throw new Error(`setLabelText: ${uidOrObj} is not a label, or a figure or picture with a label`);
   const centre = g.getCenterPoint();
   if (type === 'label' && g.customData.hand) {
@@ -568,6 +574,21 @@ function setLabelText(uidOrObj, text) {
   g.customData.text = String(text);
   if (typeof updateTreeItem === 'function') updateTreeItem(g);
   if (g.canvas) g.canvas.requestRenderAll();
+}
+
+// A new, empty label under a picture's image area (in the picture's own size and colour).
+function _pictureLabel(g) {
+  const frame = _pictureFrame(g), cd = g.customData;
+  // The frame's matrix holds its own scale (the image's) times the picture's; the text takes only the picture's.
+  const m = frame.calcTransformMatrix(), sx = Math.hypot(m[0], m[1]), sy = Math.hypot(m[2], m[3]);
+  const foot = fabric.util.transformPoint(new fabric.Point(0, frame.height / 2), m);
+  const groupScale = sy / (frame.scaleY || 1);
+  const t = new fabric.Text('', {
+    fontSize: cd.fontSize || 18, fill: cd.color || '#222', fontFamily: 'Helvetica, Arial, sans-serif',
+    originX: 'center', originY: 'top', left: foot.x, top: foot.y + 10 * groupScale, scaleX: sx / (frame.scaleX || 1), scaleY: groupScale
+  });
+  g.add(t);
+  return t;
 }
 
 // 'none', 'solid' or 'dashed' outline around a label.
@@ -642,9 +663,13 @@ function makePicture(src, x, y, opts) {
         originX: 'center', originY: 'top', left: o.width / 2, top: img.height * img.scaleY + 10
       }));
     }
+    // The image area, kept when the image changes (see setPictureSource).
+    const frame = new fabric.Rect({ left: 0, top: 0, width: img.width, height: img.height, scaleX: img.scaleX, scaleY: img.scaleY, fill: '', stroke: '', strokeWidth: 0, objectCaching: false });
+    frame._pictureFrame = true;
+    parts.push(frame);
     const g = new fabric.Group(parts, { originX: 'center', originY: 'center', left: x || 0, top: y || 0 });
     g.uid = o.uid || semanticUid('picture');
-    g.customData = { type: 'picture', src: src, text: o.label ? String(o.label) : undefined };
+    g.customData = { type: 'picture', src: src, text: o.label ? String(o.label) : undefined, fontSize: o.fontSize, color: o.color };
     return g;
   });
 }
@@ -663,7 +688,11 @@ function loadPicture(src, opts) {
       const el = new Image();
       el.crossOrigin = 'anonymous';
       const timer = setTimeout(() => reject(new Error(`could not load ${key} (timed out)`)), timeout);
-      el.onload = () => { clearTimeout(timer); (el.decode ? el.decode().catch(() => {}) : Promise.resolve()).then(() => resolve(el)); };
+      el.onload = () => {
+        clearTimeout(timer);
+        if (!(el.naturalWidth > 0 && el.naturalHeight > 0)) return reject(new Error(`${key} has no size to show`));
+        (el.decode ? el.decode().catch(() => {}) : Promise.resolve()).then(() => resolve(el));
+      };
       el.onerror = () => { clearTimeout(timer); reject(new Error(`could not load ${key}`)); };
       el.src = key;
     });
@@ -674,9 +703,9 @@ function loadPicture(src, opts) {
   return _pictureCache.get(key);
 }
 
-// The picture's image area, fixed when it first changes source: an invisible
-// rectangle where the first image was, so the picture's bounds never follow a
-// new image's own size.
+// The picture's image area: an invisible rectangle where the first image was,
+// so the picture's bounds never follow a new image's own size (made with the
+// picture; one saved before that gets it here).
 function _pictureFrame(g) {
   const parts = g.getObjects();
   let frame = parts.find(o => o._pictureFrame);
@@ -710,9 +739,9 @@ function setPictureSource(uidOrObj, src, opts) {
   if (!(isFabricObject(g) && g.customData && g.customData.type === 'picture')) return Promise.reject(new Error(`setPictureSource: ${uidOrObj} is not a picture`));
   if (g.customData.src === String(src)) return Promise.resolve(g);
   const duration = playDuration((opts && opts.duration) || 0);
-  const token = g._pictureToken = {};
+  const token = {};
   return loadPicture(src).then(el => {
-    if (g._pictureToken !== token) return g; // a later change, or a reset, took over
+    g._pictureToken = token; // from here on, a later change takes over from this one
     const frame = _pictureFrame(g);
     const old = g.getObjects().find(o => o instanceof fabric.Image && !o._pictureBlend);
     const neu = _imageInFrame(el, frame);
@@ -728,7 +757,10 @@ function setPictureSource(uidOrObj, src, opts) {
     if (!(duration > 0) || !old) return commit();
     // The blend is drawn off screen: the old image at 1 - t and the new at t,
     // added together, so matching opaque parts stay opaque and clear parts stay clear.
-    const px = 2, W = Math.max(1, Math.round(frame.width * px)), H = Math.max(1, Math.round(frame.height * px));
+    // On screen size, doubled for sharpness, at most 2048 px on its long side.
+    const fw = frame.width * frame.scaleX, fh = frame.height * frame.scaleY;
+    const px = Math.min(2, 2048 / Math.max(fw, fh));
+    const W = Math.max(1, Math.round(fw * px)), H = Math.max(1, Math.round(fh * px));
     const buf = document.createElement('canvas'); buf.width = W; buf.height = H;
     const ctx = buf.getContext('2d');
     const fit = e => {
@@ -746,13 +778,13 @@ function setPictureSource(uidOrObj, src, opts) {
     };
     draw(0);
     const blend = new fabric.Image(buf, { objectCaching: false });
-    fabric.util.applyTransformToObject(blend, fabric.util.multiplyTransformMatrices(frame.calcTransformMatrix(), [1 / px, 0, 0, 1 / px, 0, 0]));
+    fabric.util.applyTransformToObject(blend, fabric.util.multiplyTransformMatrices(frame.calcTransformMatrix(), [frame.width / W, 0, 0, frame.height / H, 0, 0]));
     blend._pictureBlend = true;
     g.insertAt(g.getObjects().indexOf(old) + 1, blend);
     old.set('opacity', 0);
     g.dirty = true;
     return new Promise(resolve => fabric.util.animate({
-      startValue: 0, endValue: 1, duration,
+      startValue: 0, endValue: 1, duration, easing: (t, b, c, d) => b + c * t / d,
       onChange: t => { if (g._pictureToken !== token) return; draw(t); blend.dirty = true; g.dirty = true; if (g.canvas) g.canvas.requestRenderAll(); },
       // Taken over by a later change: that one has already put its own image in.
       onComplete: () => resolve(g._pictureToken === token ? commit() : g)
@@ -763,7 +795,8 @@ function setPictureSource(uidOrObj, src, opts) {
 // A picture that cannot load stops the playback there: a wrong picture is
 // worse than a stopped film. The error says which concept and which source.
 function _pictureFailed(uid, err) {
-  window._stopPlayback = true;
+  // As the page's Stop does: the player halts and leaves play mode (the flag alone leaves it in play mode).
+  if (typeof stopScriptPlayback === 'function') stopScriptPlayback(); else window._stopPlayback = true;
   throw new Error(`picture "${uid}": ${err.message}`);
 }
 

@@ -99,7 +99,7 @@ them out, or never use that pattern yourself.
 - `replace`: Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one's.
 - `deemphasize`: Fade concepts back but keep them where they are: {ids, level?: dim|faint, pace?}.
 - `focus`: Bring concepts to full strength and dim the rest: {ids, dim_others?: true, pace?}.
-- `move`: Move a concept already on screen to a new place, as introduce places one: {id, place, pace?}. Its arrows follow and a frame round it is refitted; use it to make room or line concepts up so their arrows run straight.
+- `move`: Move a concept already on screen to a new place, as introduce places one: {id, place, pace?}. Its arrows follow and a frame round it is refitted; use it to make room or line concepts up so their arrows run straight. A group's id moves the whole group, its members keeping their places among themselves and its frame going with them.
 - `move_into`: Move a concept into another (e.g. a question into a person), smaller: {id, into, scale?, pace?}.
 - `widen_context`: Pull the camera back so concepts sit small inside a much larger frame: {ids?: [ids] (default all), scale?: 0.45, region? (where they end up on screen), mode?: camera (default) | objects (shrink the concepts themselves, leaving the rest as it is), pace?}.
 - `narrow_context`: Bring the camera in on concepts: {ids, fill?: 0.7 (share of the screen they fill)} or {reset: true} (back to the starting view), pace?.
