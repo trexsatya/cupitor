@@ -156,6 +156,8 @@ import {
   cardTranslateDirection as _cardTranslateDirection,
 } from './caption-capture.js';
 import { cardHtml as _cardHtml, cardPlainText as _cardPlainText } from './card-html.js';
+import { openImageViewer } from './image-viewer.js';
+import { installScrollRescue } from './scroll-rescue.js';
 import {
   findManualCards as _findManualCards,
   renderManualResultsHtml as _renderManualResultsHtml,
@@ -19922,6 +19924,22 @@ function openPracticeMode(opts) {
   _renderPracticeCard()
 }
 window.openPracticeMode = openPracticeMode
+
+// The app's WebView can stop touch-scrolling until it is restarted; the page
+// takes over scrolling when it sees that happen (scroll-rescue.js).
+if ('ontouchstart' in window) {
+  try { installScrollRescue() } catch (e) { console.warn('scroll rescue not installed', e) }
+}
+
+// A picture in a card opens full screen to be zoomed: the page itself cannot
+// be pinch-zoomed. In Practice and in the playing view, which both show a
+// card's HTML.
+$(document).on('click', '#practiceMode .card-html img, #recPlayingSubs .card-html img', e => {
+  e.preventDefault()
+  e.stopPropagation()
+  const img = e.currentTarget
+  openImageViewer(img.currentSrc || img.src, img.alt)
+})
 
 function closePracticeMode() {
   window._practiceActive = false

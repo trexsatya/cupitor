@@ -181,6 +181,38 @@ test('review_scene takes a plan: planned on an empty page, reviewed in one go, l
   assert.match(textOf(await client.callTool({ name: 'review_scene', arguments: { path: out, plan: path.join(dir, 'nope.json') } })), /Could not read the plan/);
 });
 
+test('revise src on the page: the picture keeps its place and size, a checkpoint brings the first image back, a missing image fails the check', async () => {
+  await client.callTool({ name: 'reset_page', arguments: {} });
+  const run = async actions => textOf(await client.callTool({ name: 'apply_semantic_action', arguments: { actions } }, undefined, { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} }));
+  const live = async () => JSON.parse(textOf(await client.callTool({ name: 'list_objects', arguments: { uid: 'kid' } })))[0];
+  assert.match(await run([
+    { op: 'introduce', id: 'kid', kind: 'picture', src: 'img/placeholder.png', text: 'CHILD', width: 120, place: { region: 'left' } },
+    { op: 'introduce', id: 'tree', text: 'TREE', place: { region: 'right' } },
+    { op: 'connect', from: 'kid', to: 'tree' },
+    { op: 'checkpoint', name: 'start' }
+  ]), /No errors/);
+  const before = await live();
+  assert.match(await run([{ op: 'revise', id: 'kid', src: 'img/vertical.png' }]), /No errors/);
+  const after = await live();
+  assert.deepEqual(after.box, before.box, 'same place and size');
+  assert.match(textOf(await client.callTool({ name: 'validate_scene', arguments: {} })), /No issues found/);
+  assert.match(await run([{ op: 'return_to', name: 'start' }]), /No errors/);
+  assert.deepEqual((await live()).box, before.box);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'play-mcp-pic-'));
+  const planFile = path.join(dir, 'plan.json');
+  const check = async src => {
+    fs.writeFileSync(planFile, JSON.stringify({ title: 't', scenes: [{ name: 's', beats: [
+      { name: 'a', move: 'a picture', viewer_task: { type: 'notice', target: 'it' }, actions: [{ op: 'introduce', id: 'kid', kind: 'picture', src: 'img/placeholder.png', text: 'CHILD' }] },
+      { name: 'b', move: 'it changes', viewer_task: { type: 'notice', target: 'it changed' }, actions: [{ op: 'revise', id: 'kid', src }] }
+    ] }] }));
+    return textOf(await client.callTool({ name: 'check_plan', arguments: { path: planFile } }, undefined, { timeout: 60000, resetTimeoutOnProgress: true, onprogress: () => {} }));
+  };
+  // A missing file is refused before anything plays; one that cannot load while playing fails the check, naming it.
+  assert.match(await check('img/missing.png'), /scene 1 "s", beat 2 "b", picture not found: img\/missing\.png/);
+  assert.match(await check('http://127.0.0.1:9/missing.png'), /line\(s\) failed while replaying: picture "kid": could not load http:\/\/127\.0\.0\.1:9\/missing\.png/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('build_from_plan checks fast first: a plan with warnings is not built unless build_anyway', async () => {
   const opts = [undefined, { timeout: 30000, resetTimeoutOnProgress: true, onprogress: () => {} }];
   const file = path.join(os.tmpdir(), `play-mcp-overlap-${process.pid}.json`);

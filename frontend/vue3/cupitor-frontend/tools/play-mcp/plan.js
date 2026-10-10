@@ -84,6 +84,12 @@ the thinking to the viewer.
 - Frames and highlights: a figure takes \`boundary: solid|dashed\` when it is introduced (a text gets one by being
   \`kind: box\`). To highlight a concept already on screen, \`enclose\` it alone (\`{"op": "enclose", "id": "…",
   "members": ["…"]}\`) and \`remove\` the enclosure when the moment is over.
+- One concept spanning a row or column of others: a \`brace\` along them with that concept as its \`label\`.
+- A picture that changes but stays the same concept (a person who looks up, starts thinking, grows older) is
+  \`revise\`d with a new \`src\` (\`{"op": "revise", "id": "child", "src": "https://…/child-looking-up.png"}\`; add
+  \`text\` to change its label too); its arrows, place and emphasis stay. Use \`replace\` when it becomes another
+  concept. Give its versions the same canvas size, with the figure in the same place on a transparent ground, so
+  the change reads as one picture changing.
 
 ## How to work, for each passage
 
@@ -127,8 +133,8 @@ Places: \`{"near": id, "side": "left" | "right" | "above" | "below" | "around"}\
 (ids of concepts or groups) or \`{"region": ${Object.keys(REGIONS).map(r => `"${r}"`).join(' | ')}}\`.
 Sizes: ${Object.keys(TEXT_SIZE).map(s => `"${s}"`).join(', ')}. Paces: ${Object.keys(PACE).map(p => `"${p}"`).join(', ')}.
 Pauses: ${Object.keys(PAUSE).map(p => `"${p}"`).join(', ')}.
-In a plan, a picture's \`src\` is an http(s) URL (the other forms above are paths on the server's machine);
-prefer words, figures and boundaries.
+In a plan, a picture's \`src\` (in \`introduce\` or \`revise\`) is an http(s) URL (the other forms above are paths on the
+server's machine), one that always gives the same image; prefer words, figures and boundaries.
 
 ## Example
 

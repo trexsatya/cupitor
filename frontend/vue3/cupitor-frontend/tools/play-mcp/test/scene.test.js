@@ -918,3 +918,44 @@ test('brace review fixes: the label follows the tip, a dashed brace stays dashed
   const { model: none } = await plan([{ op: 'remove', ids: ['g'] }], await base());
   assert.ok(!none.objects.br, 'a brace over nothing goes too');
 });
+
+test('revise src: a picture changes its image and stays the same concept; timing by transition and pace; refused where it does not fit', async () => {
+  const base = async () => (await plan([
+    { op: 'introduce', id: 'kid', kind: 'picture', src: 'img/a.png', text: 'CHILD', place: { region: 'left' } },
+    { op: 'introduce', id: 'fig', kind: 'figure', text: 'ADULT', place: { region: 'right' } },
+    { op: 'connect', from: 'kid', to: 'fig' },
+    { op: 'deemphasize', ids: ['kid'] },
+    { op: 'checkpoint', name: 'start' }
+  ])).model;
+  const m = await base(), before = JSON.parse(JSON.stringify(m.objects.kid));
+  const { lines } = await plan([{ op: 'revise', id: 'kid', src: 'img/b.png' }], m);
+  assert.equal(lines.at(-1), 'Promise.resolve(setPictureSource("kid", "img/b.png", {duration: 250}))');
+  assert.equal(m.objects.kid.src, 'img/b.png');
+  for (const k of ['at', 'size', 'text', 'opacity', 'scale', 'history']) assert.deepEqual(m.objects.kid[k], before[k], k);
+  assert.ok(m.relations.kid__fig, 'its arrow stays');
+  const ms = async a => /duration: (\d+)/.exec((await plan([{ op: 'revise', id: 'kid', src: 'img/c.png', ...a }], await base())).lines.at(-1))[1];
+  assert.equal(await ms({ pace: 'deliberate' }), '600');
+  assert.equal(await ms({ transition: 'instant', pace: 'deliberate' }), '0');
+  assert.equal(await ms({ pace: 'instant' }), '0');
+  assert.deepEqual((await plan([{ op: 'revise', id: 'kid', src: 'img/a.png' }], await base())).lines.filter(l => !l.startsWith('//')), [], 'the same image: nothing to do');
+  // With a label: both once the image has loaded.
+  const { model: both, lines: bl } = await plan([{ op: 'revise', id: 'kid', text: 'CHILD LOOKING UP', src: 'img/b.png' }], await base());
+  assert.match(bl.at(-1), /^Promise\.resolve\(pictureReady\("kid", "img\/b\.png"\)\)\.then\(\(\) => Promise\.all\(\[setPictureSource\("kid", "img\/b\.png", \{duration: 250\}\), .*setLabelText\("kid", "CHILD LOOKING UP"\)/);
+  assert.equal(both.objects.kid.text, 'CHILD LOOKING UP');
+  const whole = await plan([{ op: 'introduce', id: 'kid', kind: 'picture', src: 'img/a.png', text: 'CHILD' }, { op: 'revise', id: 'kid', text: 'UP', src: 'img/b.png' }]);
+  assert.deepEqual(parseScene(whole.lines).objects, whole.model.objects, 'the script alone rebuilds it');
+  // A checkpoint keeps the image; return_to puts it back at once.
+  const { lines: rl } = await plan([{ op: 'return_to', name: 'start' }], m);
+  assert.ok(rl.includes('Promise.resolve(setPictureSource("kid", "img/a.png", {duration: 0}))'));
+  const no = (a, re) => assert.rejects(async () => plan([a], await base()), re);
+  await no({ op: 'revise', id: 'fig', src: 'img/b.png' }, /"fig" is a figure; only a picture takes src/);
+  await no({ op: 'revise', id: 'kid', text: 'X', transition: 'instant' }, /transition goes with src/);
+  await no({ op: 'revise', id: 'kid', src: 'img/b.png', transition: 'fade' }, /transition must be crossfade or instant/);
+  await no({ op: 'revise', id: 'kid' }, /give text, src or both/);
+  await no({ op: 'revise', id: 'kid', src: '' }, /src must be a non-empty string/);
+  await no({ op: 'question', id: 'kid', src: 'img/b.png' }, /src and transition are for revise/);
+  const { model: gone } = await plan([{ op: 'remove', ids: ['kid'] }], await base());
+  await assert.rejects(plan([{ op: 'revise', id: 'kid', src: 'img/b.png' }], gone), /was removed; bring it back with return_to first/);
+  // An empty text clears a picture's label; a box still needs words.
+  assert.equal((await plan([{ op: 'revise', id: 'kid', text: '' }], await base())).model.objects.kid.text, '');
+});

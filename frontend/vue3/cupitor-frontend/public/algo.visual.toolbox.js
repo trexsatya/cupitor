@@ -653,6 +653,126 @@ function addPicture(src, x, y, opts) {
   return makePicture(src, x, y, opts).then(g => { pc.add(g); return g; });
 }
 
+// Decoded pictures by source, shared by revisions, replays and checkpoints.
+const _pictureCache = new Map();
+function loadPicture(src, opts) {
+  const key = String(src);
+  if (!_pictureCache.has(key)) {
+    const timeout = (opts && opts.timeout) || 20000;
+    const p = new Promise((resolve, reject) => {
+      const el = new Image();
+      el.crossOrigin = 'anonymous';
+      const timer = setTimeout(() => reject(new Error(`could not load ${key} (timed out)`)), timeout);
+      el.onload = () => { clearTimeout(timer); (el.decode ? el.decode().catch(() => {}) : Promise.resolve()).then(() => resolve(el)); };
+      el.onerror = () => { clearTimeout(timer); reject(new Error(`could not load ${key}`)); };
+      el.src = key;
+    });
+    // A failed load is not kept: a later try loads afresh.
+    p.catch(() => _pictureCache.delete(key));
+    _pictureCache.set(key, p);
+  }
+  return _pictureCache.get(key);
+}
+
+// The picture's image area, fixed when it first changes source: an invisible
+// rectangle where the first image was, so the picture's bounds never follow a
+// new image's own size.
+function _pictureFrame(g) {
+  const parts = g.getObjects();
+  let frame = parts.find(o => o._pictureFrame);
+  if (!frame) {
+    const img = parts.find(o => o instanceof fabric.Image);
+    frame = new fabric.Rect({ width: img.width, height: img.height, fill: '', stroke: '', strokeWidth: 0, objectCaching: false });
+    fabric.util.applyTransformToObject(frame, img.calcTransformMatrix());
+    frame._pictureFrame = true;
+    g.add(frame);
+  }
+  return frame;
+}
+
+// An image (element el) contained in the frame: as large as fits, centred, not stretched.
+function _imageInFrame(el, frame) {
+  const w = el.naturalWidth || el.width, h = el.naturalHeight || el.height;
+  const k = Math.min(frame.width / w, frame.height / h);
+  const img = new fabric.Image(el, { objectCaching: false });
+  fabric.util.applyTransformToObject(img, fabric.util.multiplyTransformMatrices(frame.calcTransformMatrix(), [k, 0, 0, k, 0, 0]));
+  return img;
+}
+
+// Changes a picture's image, keeping the concept: its uid, label, place, size,
+// emphasis and arrows stay as they are. The new image is fitted into the
+// picture's image area (see _pictureFrame) and crossfades in over
+// opts.duration ms (0: at once). Nothing changes until it has loaded; when it
+// cannot load, the picture stays as it was and the playback stops there.
+// The same source as now: nothing to do.
+function setPictureSource(uidOrObj, src, opts) {
+  const g = findIfRequired(uidOrObj);
+  if (!(isFabricObject(g) && g.customData && g.customData.type === 'picture')) return Promise.reject(new Error(`setPictureSource: ${uidOrObj} is not a picture`));
+  if (g.customData.src === String(src)) return Promise.resolve(g);
+  const duration = playDuration((opts && opts.duration) || 0);
+  const token = g._pictureToken = {};
+  return loadPicture(src).then(el => {
+    if (g._pictureToken !== token) return g; // a later change, or a reset, took over
+    const frame = _pictureFrame(g);
+    const old = g.getObjects().find(o => o instanceof fabric.Image && !o._pictureBlend);
+    const neu = _imageInFrame(el, frame);
+    const commit = () => {
+      g.getObjects().filter(o => o instanceof fabric.Image).forEach(o => g.remove(o));
+      g.insertAt(0, neu);
+      g.setCoords();
+      g.customData.src = String(src);
+      g.dirty = true;
+      if (g.canvas) g.canvas.requestRenderAll();
+      return g;
+    };
+    if (!(duration > 0) || !old) return commit();
+    // The blend is drawn off screen: the old image at 1 - t and the new at t,
+    // added together, so matching opaque parts stay opaque and clear parts stay clear.
+    const px = 2, W = Math.max(1, Math.round(frame.width * px)), H = Math.max(1, Math.round(frame.height * px));
+    const buf = document.createElement('canvas'); buf.width = W; buf.height = H;
+    const ctx = buf.getContext('2d');
+    const fit = e => {
+      const w = e.naturalWidth || e.width, h = e.naturalHeight || e.height, k = Math.min(W / w, H / h);
+      return [(W - w * k) / 2, (H - h * k) / 2, w * k, h * k];
+    };
+    const was = old.getElement(), a = fit(was), b = fit(el);
+    const draw = t => {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.clearRect(0, 0, W, H);
+      ctx.globalAlpha = 1 - t; ctx.drawImage(was, ...a);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = t; ctx.drawImage(el, ...b);
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    };
+    draw(0);
+    const blend = new fabric.Image(buf, { objectCaching: false });
+    fabric.util.applyTransformToObject(blend, fabric.util.multiplyTransformMatrices(frame.calcTransformMatrix(), [1 / px, 0, 0, 1 / px, 0, 0]));
+    blend._pictureBlend = true;
+    g.insertAt(g.getObjects().indexOf(old) + 1, blend);
+    old.set('opacity', 0);
+    g.dirty = true;
+    return new Promise(resolve => fabric.util.animate({
+      startValue: 0, endValue: 1, duration,
+      onChange: t => { if (g._pictureToken !== token) return; draw(t); blend.dirty = true; g.dirty = true; if (g.canvas) g.canvas.requestRenderAll(); },
+      // Taken over by a later change: that one has already put its own image in.
+      onComplete: () => resolve(g._pictureToken === token ? commit() : g)
+    }));
+  }, err => _pictureFailed(g.uid, err));
+}
+
+// A picture that cannot load stops the playback there: a wrong picture is
+// worse than a stopped film. The error says which concept and which source.
+function _pictureFailed(uid, err) {
+  window._stopPlayback = true;
+  throw new Error(`picture "${uid}": ${err.message}`);
+}
+
+// Resolves once src has loaded for picture uid (or stops the playback, as
+// setPictureSource does), so a label can change only together with the image.
+function pictureReady(uid, src) {
+  return loadPicture(src).then(() => findIfRequired(uid), err => _pictureFailed(uid, err));
+}
+
 function textInCircle(textStr, x,y, optsText, optsCirc){
     if(!arguments.length) console.log('textInCircle(text, x,y, optsText, optsCirc)')
     if(!textStr) return null;

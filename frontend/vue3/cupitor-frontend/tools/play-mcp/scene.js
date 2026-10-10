@@ -51,7 +51,7 @@ export const ACTIONS = {
   disconnect: 'Remove a relationship: {id} or {from, to}.',
   enclose: 'Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}. A group among the members stands for all of its members.',
   brace: "A curly brace along one side of concepts, spanning them all, to say that what stands at its tip takes them in: {id, members: [ids] | group: id, side?: below|above|left|right (default below), label?: id of a concept on screen (moved to stand just beyond the tip), role?, color?, pace?}. A group among the members stands for all of its members. The brace keeps to its members when they move; to name it with a new concept, introduce that with place {near: <brace id>, side: <the same side>}.",
-  revise: 'Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.',
+  revise: "Change the text and/or image of the same concept, keeping its identity: {id, text?, src?, transition?: crossfade|instant, pace?}. At least one of text or src is required. For a figure or picture, text changes the label under it (an empty text clears it). src is only for a picture on screen and takes the same sources as introduce; the new image is fitted, whole and centred, into the picture's image area, so the layout, camera, arrows and emphasis stay as they are. It crossfades in (pace short, the default: 0.25 s; deliberate: 0.6 s); transition instant or pace instant swaps it at once. Nothing changes until it has loaded (a text change waits for it too); one that cannot load stops the playback there. Checkpoints keep the image and return_to puts it back. Use replace when it becomes a different concept.",
   question: 'Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.',
   weaken_boundary: "Dash (or remove) a concept's or enclosure's boundary (a figure's frame and a brace too): {id, style?: dashed|none, pace?}.",
   replace: 'Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one\'s.',
@@ -206,7 +206,8 @@ export function applyRecord(model, rec) {
     case 'revise':
     case 'question': {
       const o = obj(rec.id);
-      o.text = rec.text; o.size = rec.size; o.history.push(rec.text);
+      if (rec.src !== undefined) o.src = rec.src;
+      if (rec.text !== undefined) { o.text = rec.text; o.size = rec.size; o.history.push(rec.text); }
       Object.entries(rec.moves || {}).forEach(([id, at]) => { obj(id).at = at; });
       Object.entries(rec.enclosures || {}).forEach(([id, e]) => { fitTo(model, id, e); });
       Object.entries(rec.bends || {}).forEach(([id, b]) => { model.relations[id].bend = b; });
@@ -990,12 +991,31 @@ export async function planAction(model, a, measure) {
 
     case 'revise':
     case 'question': {
+      if (op === 'revise' && !model.objects[a.id] && model.retired[a.id]) throw new Error(`revise: "${a.id}" was removed; bring it back with return_to first`);
       const o = need(model, a.id, op);
       const pictured = o.kind === 'figure' || o.kind === 'picture';
+      // A picture's image: src (and how it comes in) for revise only.
+      if (op === 'question' && (a.src !== undefined || a.transition !== undefined)) throw new Error('question: src and transition are for revise');
+      if (a.transition !== undefined && a.src === undefined) throw new Error('revise: transition goes with src');
+      if (a.transition !== undefined && !['crossfade', 'instant'].includes(a.transition)) throw new Error('revise: transition must be crossfade or instant');
+      if (a.src !== undefined && (typeof a.src !== 'string' || !a.src.trim())) throw new Error('revise: src must be a non-empty string');
+      if (a.src !== undefined && o.kind !== 'picture') throw new Error(`revise: "${a.id}" is a ${o.kind}; only a picture takes src`);
+      if (op === 'revise' && a.text === undefined && a.src === undefined) throw new Error('revise: give text, src or both');
+      if (a.text !== undefined && a.text !== null && typeof a.text !== 'string') throw new Error('revise: text must be a string');
+      const image = a.src === undefined ? null : (() => {
+        const p = a.pace || 'short';
+        if (typeof p !== 'number' && !PACE[p]) throw new Error(`pace must be ${Object.keys(PACE).join(', ')} or ms`);
+        const ms = a.transition === 'instant' || p === 'instant' ? 0 : typeof p === 'number' ? num(p, 'pace', 0, 60000) : p === 'deliberate' ? 600 : 250;
+        return { src: a.src.trim(), transition: a.transition || 'crossfade', ms };
+      })();
+      const imageLine = image && image.src !== o.src ? `setPictureSource(${J(a.id)}, ${J(image.src)}, {duration: ${image.ms}})` : null;
+      const imageRec = image ? { src: image.src, transition: image.transition } : {};
+      if (op === 'revise' && a.text === undefined) return { record: { op, id: a.id, ...imageRec }, lines: imageLine ? [`Promise.resolve(${imageLine})`] : [] };
       if (!(o.kind === 'text' || o.kind === 'box' || (pictured && op === 'revise'))) throw new Error(`${op}: "${a.id}" is a ${o.kind}; ${op === 'question' ? 'only text and box concepts can be questioned' : 'it has no text to change'}`);
-      if (pictured && !o.text) throw new Error(`revise: "${a.id}" is a ${o.kind} without a label; give it text when introducing it`);
+      if (pictured && o.text == null) throw new Error(`revise: "${a.id}" is a ${o.kind} without a label; give it text when introducing it`);
       const text = a.text != null ? String(a.text) : op === 'question' ? (o.text.endsWith('?') ? o.text : o.text + '?') : null;
-      if (text == null || text === '') throw new Error('revise: text is required');
+      // An empty text clears the label under a figure or picture; anything else needs words.
+      if (text == null || (text === '' && !pictured)) throw new Error('revise: text is required');
       const [size] = await measure([{ kind: o.kind, text, fontSize: o.fontSize, boundary: op === 'question' ? 'dashed' : o.framed ? 'solid' : o.boundary, ...(o.hand ? { hand: true } : {}), ...(o.kind === 'picture' ? { src: o.src, width: o.width } : {}) }]);
       const ms = pace(a, 'deliberate');
       const change = op === 'question'
@@ -1004,9 +1024,11 @@ export async function planAction(model, a, measure) {
       const { moves, enclosures, bends } = makeRoom(model, o, size);
       const shifts = shiftLines(moves, enclosures, Math.round(ms * 0.3)), redraws = redrawLines(model, bends);
       const room = shifts.length || redraws.length ? { moves, enclosures, bends } : {};
+      const textLine = `${shifts.length ? `Promise.all([${shifts.join(', ')}]).then(() => ` : ''}animate(${J(a.id)}, {opacity: 0.15}, {duration: ${Math.round(ms * 0.3)}})${shifts.length ? ')' : ''}.then(() => ${change}).then(() => animate(${J(a.id)}, {opacity: ${o.opacity}}, {duration: ${Math.round(ms * 0.7)}}))${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`;
       return {
-        record: { op, id: a.id, text, size, ...room },
-        lines: [`${shifts.length ? `Promise.all([${shifts.join(', ')}]).then(() => ` : ''}animate(${J(a.id)}, {opacity: 0.15}, {duration: ${Math.round(ms * 0.3)}})${shifts.length ? ')' : ''}.then(() => ${change}).then(() => animate(${J(a.id)}, {opacity: ${o.opacity}}, {duration: ${Math.round(ms * 0.7)}}))${redraws.length ? `.then(() => { ${redraws.join('; ')}; })` : ''}`]
+        record: { op, id: a.id, text, size, ...room, ...imageRec },
+        // With a new image, the label changes only once the image has loaded, both together.
+        lines: [imageLine ? `Promise.resolve(pictureReady(${J(a.id)}, ${J(image.src)})).then(() => Promise.all([${imageLine}, ${textLine}]))` : textLine]
       };
     }
 
@@ -1208,6 +1230,11 @@ export async function planAction(model, a, measure) {
         Object.values(st.objects).filter(o => o.kind === 'brace').forEach(o => {
           const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
           if (J(now.ends) !== J(o.ends)) fixes.push(braceCall(o));
+        });
+        // Nor is a picture's image: it is put back as it was, at once.
+        Object.values(st.objects).filter(o => o.kind === 'picture' && o.src).forEach(o => {
+          const now = model.objects[o.id] || (model.retired[o.id] || {}).object || {};
+          if (now.src !== o.src) lines.push(`Promise.resolve(setPictureSource(${J(o.id)}, ${J(o.src)}, {duration: 0}))`);
         });
         // Nor is a step list's progress (bold labels): it is marked again.
         Object.values(st.objects).filter(o => o.kind === 'steps').forEach(o => {

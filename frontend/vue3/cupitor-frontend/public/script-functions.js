@@ -142,6 +142,10 @@ const SCRIPT_FUNCTIONS = [
             ['width', 'px (default 160); the height keeps the proportions'],
             ['color / fontSize', "label colour and size (default '#222', 18)"],
         ]],
+        ['setPictureSource(uid, src, opts)', 'Change a picture\'s image, keeping the concept (uid, label, place, size, emphasis, arrows); the image is fitted into the picture\'s first image area. Nothing changes until it loads; if it cannot, the playback stops there', [
+            ['duration', 'ms of the crossfade (default 0: at once)'],
+        ]],
+        ['pictureReady(uid, src)', 'Resolves once src has loaded for picture uid (stops the playback if it cannot), e.g. to change its label only together with its image'],
         ['addStickyNote(x, y, opts)', 'Sticky note', [
             ['uid', 'id for later lines'],
             ['text', "note text (default '')"],

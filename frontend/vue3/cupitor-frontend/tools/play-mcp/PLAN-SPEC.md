@@ -40,6 +40,12 @@ the thinking to the viewer.
 - Frames and highlights: a figure takes `boundary: solid|dashed` when it is introduced (a text gets one by being
   `kind: box`). To highlight a concept already on screen, `enclose` it alone (`{"op": "enclose", "id": "…",
   "members": ["…"]}`) and `remove` the enclosure when the moment is over.
+- One concept spanning a row or column of others: a `brace` along them with that concept as its `label`.
+- A picture that changes but stays the same concept (a person who looks up, starts thinking, grows older) is
+  `revise`d with a new `src` (`{"op": "revise", "id": "child", "src": "https://…/child-looking-up.png"}`; add
+  `text` to change its label too); its arrows, place and emphasis stay. Use `replace` when it becomes another
+  concept. Give its versions the same canvas size, with the figure in the same place on a transparent ground, so
+  the change reads as one picture changing.
 
 ## How to work, for each passage
 
@@ -87,7 +93,7 @@ them out, or never use that pattern yourself.
 - `disconnect`: Remove a relationship: {id} or {from, to}.
 - `enclose`: Draw a boundary round concepts: {id, members: [ids] | group: id, style?: solid|dashed, pace?}. A group among the members stands for all of its members.
 - `brace`: A curly brace along one side of concepts, spanning them all, to say that what stands at its tip takes them in: {id, members: [ids] | group: id, side?: below|above|left|right (default below), label?: id of a concept on screen (moved to stand just beyond the tip), role?, color?, pace?}. A group among the members stands for all of its members. The brace keeps to its members when they move; to name it with a new concept, introduce that with place {near: <brace id>, side: <the same side>}.
-- `revise`: Change the text of the same concept (identity kept): {id, text, pace?}. For a figure or picture, the label under it.
+- `revise`: Change the text and/or image of the same concept, keeping its identity: {id, text?, src?, transition?: crossfade|instant, pace?}. At least one of text or src is required. For a figure or picture, text changes the label under it (an empty text clears it). src is only for a picture on screen and takes the same sources as introduce; the new image is fitted, whole and centred, into the picture's image area, so the layout, camera, arrows and emphasis stay as they are. It crossfades in (pace short, the default: 0.25 s; deliberate: 0.6 s); transition instant or pace instant swaps it at once. Nothing changes until it has loaded (a text change waits for it too); one that cannot load stops the playback there. Checkpoints keep the image and return_to puts it back. Use replace when it becomes a different concept.
 - `question`: Make a concept uncertain: dashed boundary and a question mark: {id, text?, pace?}.
 - `weaken_boundary`: Dash (or remove) a concept's or enclosure's boundary (a figure's frame and a brace too): {id, style?: dashed|none, pace?}.
 - `replace`: Fade one concept out and another in at its place: {id, with: {id, text, kind?, size?, role?, color?, background?}, pace?}. Without a role, color or background of its own, the new concept keeps the old one's.
@@ -111,8 +117,8 @@ Places: `{"near": id, "side": "left" | "right" | "above" | "below" | "around"}`,
 (ids of concepts or groups) or `{"region": "center" | "top" | "bottom" | "left" | "right" | "top-left" | "top-right" | "bottom-left" | "bottom-right"}`.
 Sizes: "small", "normal", "large", "title". Paces: "instant", "short", "deliberate".
 Pauses: "short", "prediction", "thinking".
-In a plan, a picture's `src` is an http(s) URL (the other forms above are paths on the server's machine);
-prefer words, figures and boundaries.
+In a plan, a picture's `src` (in `introduce` or `revise`) is an http(s) URL (the other forms above are paths on the
+server's machine), one that always gives the same image; prefer words, figures and boundaries.
 
 ## Example
 

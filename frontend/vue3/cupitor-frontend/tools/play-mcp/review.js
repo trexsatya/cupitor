@@ -50,7 +50,7 @@ export function plainMove(rec) {
     case 'step': return `step ${rec.id} to ${rec.n || 'none'}`;
     case 'enclose': return `enclose ${rec.members.join(', ')} in ${rec.id}${rec.style === 'dashed' ? ' (dashed)' : ''}`;
     case 'brace': return `brace ${rec.members.join(', ')} ${rec.side} as ${rec.id}${rec.label ? `, ${rec.label} at its tip` : ''}`;
-    case 'revise': return `revise ${rec.id} → ${q(rec.text)}`;
+    case 'revise': return `revise ${rec.id}${rec.text !== undefined ? ` → ${q(rec.text)}` : ''}${rec.src ? `${rec.text !== undefined ? ',' : ''} new image ${rec.src.split('/').pop()}${rec.transition === 'instant' ? ' (at once)' : ' (crossfade)'}` : ''}`;
     case 'question': return `question ${rec.id} → ${q(rec.text)}`;
     case 'weaken_boundary': return `weaken the boundary of ${rec.id} (${rec.style})`;
     case 'replace': return `replace ${rec.id} with ${q(rec.with.text)} as ${rec.with.id} (a new identity)`;
@@ -89,7 +89,7 @@ export function beatChecklist(tb, issues, earlierIds) {
   const firstNarr = items.findIndex(it => it.op === 'narrate');
   const narrMs = items.filter(it => it.op === 'narrate').reduce((s, it) => s + it.rec.hold, 0);
   const reused = [...new Set(visual.flatMap(it => refs(it.rec)).filter(id => earlierIds.has(id)))];
-  const revisions = items.filter(it => it.op === 'revise' || it.op === 'question').map(it => `${it.rec.id} → ${q(it.rec.text)}`);
+  const revisions = items.filter(it => it.op === 'revise' || it.op === 'question').map(it => `${it.rec.id} → ${[it.rec.text !== undefined ? q(it.rec.text) : '', it.rec.src ? `image ${it.rec.src.split('/').pop()}` : ''].filter(Boolean).join(', ')}`);
   const replaced = items.filter(it => it.op === 'replace').map(it => `${it.rec.id} → ${it.rec.with.id}`);
   const asked = issues.filter(i => /asks a question/.test(i.message));
   return [
