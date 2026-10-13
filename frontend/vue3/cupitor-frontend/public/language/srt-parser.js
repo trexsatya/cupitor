@@ -195,6 +195,17 @@ export function mergeSrtWithResolution(existingText, newItems, resolution) {
   return entriesToSrtText(deduped)
 }
 
+// In-memory text of one language after a capture: `existingText` merged with
+// `newItems`. With no new items the existing text is kept as it is (null when
+// there is none) — never an empty SRT, which reads as a loaded file and hides
+// the translation still to be fetched.
+export function capturedSlotText(existingText, newItems, resolution) {
+  if (!newItems || !newItems.length) return existingText || null
+  return existingText
+    ? mergeSrtWithResolution(existingText, newItems, resolution || null)
+    : linesToSrtText(newItems)
+}
+
 // Insert-or-replace a single SRT block keyed by its explicit index number.
 // Unlike entriesToSrtText/linesToSrtText this keeps each block's own index
 // (the .en.srt mirrors the .sv.srt numbering) and never renumbers:

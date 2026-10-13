@@ -91,6 +91,7 @@ import {
   detectSrtConflicts,
   upsertSrtEntry,
   applyQueuedEditsToText,
+  capturedSlotText,
 } from './srt-parser.js';
 import { translateLines } from './translate-lines.js';
 import { numberRows as _numberRows, plainRows as _plainRows, parseNumbered as _parseNumbered } from './translate-block.js';
@@ -407,6 +408,7 @@ import {
   sliceByHighlightSpans as _sliceByHighlightSpans,
 } from './renderer/highlight-spans-vm.js';
 import { renderAccordions as _coreRenderAccordions } from './renderer/accordion-render.js';
+import { knownVideos as _knownVideos } from './known-videos.js';
 
 function debugLog(x) {
   if (window.DEBUG) {
@@ -4428,6 +4430,8 @@ async function loadAllSubtitles() {
     // single canonical encoding regardless of how the entry was committed.
     if (Array.isArray(srts)) srts = srts.map(it => it ? { ...it, name: _nfc(it.name) } : it)
     window.srts = srts
+    // The index is in: window.cupitorKnownVideos can answer from here on.
+    window._srtsIndexLoaded = true
 
     // Cache pass: populate window.allSubtitles from IndexedDB before queuing
     // any network fetches. Hits are searchable instantly; only entries that
@@ -10027,6 +10031,26 @@ function bufferCapturedSubtitle(detail) {
   catch (e) { console.warn('seed captured subtitle into search index failed', e) }
 }
 
+// A capture of this video is now in the own repo. Its window.srts entry may
+// be one a buffered capture only seeded locally (no `src`); `pushed` tells
+// cupitorKnownVideos it is really in the library now.
+function _markPushedLink(link) {
+  const e = (window.srts || []).find(it => it && it.link === link)
+  if (e) e.pushed = true
+}
+
+// Host hook (Cupitor's Saved videos dialog): which of the given video ids are
+// already in the loaded index or waiting in Review Captured. Synchronous and
+// returns a JSON string, because the host reads it with
+// runJavaScriptReturningResult; it polls until `ready` is true.
+window.cupitorKnownVideos = function (idsJson) {
+  return JSON.stringify(_knownVideos(idsJson, {
+    ready: !!window._srtsIndexLoaded,
+    srts: window.srts,
+    captured: loadCapturedBuffer(),
+  }))
+}
+
 // Merge a captured subtitle into window.allSubtitles + window.srts so search
 // (fetchFromDownloadedFiles) picks it up right away. Reuses the same pure
 // merge the push path uses (mergeSrtWithNewEntries / linesToSrtText) and the
@@ -10152,8 +10176,10 @@ window.openCapturedSubtitlesReview = function () {
         if ($pre.is(':visible')) {
           $pre.hide()
         } else {
+          // An untranslated capture has no target section.
           $pre.text(
-            `# ${d.sourceLang || 'source'}\n${src}\n\n# ${d.targetLang || 'target'}\n${tgt}`
+            `# ${d.sourceLang || 'source'}\n${src}` +
+            (d.targetLang ? `\n\n# ${d.targetLang}\n${tgt}` : '')
           ).show()
         }
         return
@@ -10388,8 +10414,11 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
 
     const allLines = []
     const allTranslations = []
-    const sourceLang = slot.details[0].sourceLang
-    const targetLang = slot.details[0].targetLang
+    // From the first capture that has each: an untranslated capture carries
+    // no targetLang, and a later translated one of the same video still needs
+    // its target file written.
+    const sourceLang = (slot.details.find(d => d.sourceLang) || {}).sourceLang
+    const targetLang = (slot.details.find(d => d.targetLang) || {}).targetLang
     slot.details.forEach(d => {
       if (Array.isArray(d.lines))       allLines.push(...d.lines)
       if (Array.isArray(d.translation)) allTranslations.push(...d.translation)
@@ -10557,11 +10586,12 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
       ? { ...prev, sv: null, en: null, _parsedSv: undefined, _parsedEn: undefined, readOnly: false }
       : prev
     const sv = cached.sv ? mergeSrtWithResolution(cached.sv, u.allLines, u.srcResolution)        : linesToSrtText(u.allLines)
-    const en = cached.en ? mergeSrtWithResolution(cached.en, u.allTranslations, u.tgtResolution) : linesToSrtText(u.allTranslations)
+    const en = capturedSlotText(cached.en, u.allTranslations, u.tgtResolution)
     window.allSubtitles[u.videoId] = { ...cached, sv, en, source: u.source, fileName: u.baseName }
     if (Array.isArray(window.srts) && !window.srts.find(it => it.link === u.videoId)) {
       window.srts.push({ link: u.videoId, name: u.baseName, source: u.source })
     }
+    _markPushedLink(u.videoId)
     // Persist the just-pushed content so a reload doesn't re-fetch (or show a
     // stale cache) for this video.
     _cacheWriteSubtitleFromMemory(u.videoId)
@@ -10604,15 +10634,18 @@ async function handleCapturedSubtitle(detail) {
     const cached = window.allSubtitles[videoId]
     if (cached && cached.sv) existingSourceText = cached.sv
     if (cached && cached.en) existingTargetText = cached.en
-    if ((!existingSourceText && sourceLang) || (!existingTargetText && targetLang)) {
+    // The translation slot is read even for an untranslated capture (its file
+    // is then the `.en.srt`), so the memory copy keeps the existing translation.
+    const tgtLang = targetLang || 'en'
+    if ((!existingSourceText && sourceLang) || !existingTargetText) {
       try {
         if (!existingSourceText && sourceLang) {
           const srcName = `${baseName}.${sourceLang}.srt`
           const r = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(srcName)}`, { cache: 'no-cache' })
           if (r.ok) existingSourceText = await r.text()
         }
-        if (!existingTargetText && targetLang) {
-          const tgtName = `${baseName}.${targetLang}.srt`
+        if (!existingTargetText) {
+          const tgtName = `${baseName}.${tgtLang}.srt`
           const r = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(tgtName)}`, { cache: 'no-cache' })
           if (r.ok) existingTargetText = await r.text()
         }
@@ -10646,9 +10679,7 @@ async function handleCapturedSubtitle(detail) {
   const sourceText = existingSourceText
     ? mergeSrtWithResolution(existingSourceText, lines, sourceResolution)
     : linesToSrtText(lines)
-  const targetText = existingTargetText
-    ? mergeSrtWithResolution(existingTargetText, translation, targetResolution)
-    : linesToSrtText(translation)
+  const targetText = capturedSlotText(existingTargetText, translation, targetResolution)
 
   window.allSubtitles[videoId] = {
     ...(window.allSubtitles[videoId] || {}),
@@ -10681,6 +10712,7 @@ async function handleCapturedSubtitle(detail) {
       window.srts.push({ link: videoId, name: baseName, source })
     }
   }
+  _markPushedLink(videoId)
   // Persist the pushed content to IndexedDB so a reload sees it without a
   // re-fetch from GitHub (whose CDN can lag right after a push).
   _cacheWriteSubtitleFromMemory(videoId)

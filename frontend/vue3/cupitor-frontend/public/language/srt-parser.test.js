@@ -12,7 +12,28 @@ import {
   detectSrtConflicts,
   upsertSrtEntry,
   applyQueuedEditsToText,
+  capturedSlotText,
 } from "./srt-parser";
+
+describe("capturedSlotText", () => {
+  const existing = "1\n00:00:01,000 --> 00:00:02,000\nHello\n";
+  test("no new items keeps the existing text, or null", () => {
+    expect(capturedSlotText(existing, [], null)).toBe(existing);
+    expect(capturedSlotText(existing, undefined)).toBe(existing);
+    expect(capturedSlotText(null, [])).toBeNull();
+    expect(capturedSlotText(undefined, [])).toBeNull();
+  });
+  test("new items merge into the existing text", () => {
+    const out = capturedSlotText(existing, [{ start: 3, end: 4, text: "Bye" }]);
+    expect(out).toBe(mergeSrtWithResolution(existing, [{ start: 3, end: 4, text: "Bye" }], null));
+    expect(out).toContain("Hello");
+    expect(out).toContain("Bye");
+  });
+  test("new items with nothing existing become a fresh file", () => {
+    const items = [{ start: 1, end: 2, text: "Hej" }];
+    expect(capturedSlotText(null, items)).toBe(linesToSrtText(items));
+  });
+});
 
 const SAMPLE_SRT = `1
 00:00:01,000 --> 00:00:03,500
