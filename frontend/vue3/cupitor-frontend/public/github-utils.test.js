@@ -157,6 +157,19 @@ describe('request', () => {
     expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer abc')
   })
 
+  test('reads and writes skip the browser HTTP cache (GitHub sends max-age=60)', async () => {
+    fakeGitHub({
+      'GET /repos/o/r/pulls': reply(200, []),
+      'PUT /repos/o/r/contents/f.json': reply(200, { content: { sha: 'S' } }),
+      'GET /repos/o/r/contents/f.json': reply(200, { content: b64('{}'), encoding: 'base64', sha: 'S0' }),
+    })
+    await window.GitHubUtils.request('GET', '/repos/o/r/pulls')
+    await window.GitHubUtils.request('PUT', '/repos/o/r/contents/f.json', { message: 'm', content: b64('{}') })
+    await window.GitHubUtils.getFile('o', 'r', 'f.json', '')
+    expect(global.fetch).toHaveBeenCalledTimes(3)
+    for (const [, opts] of global.fetch.mock.calls) expect(opts.cache).toBe('no-store')
+  })
+
   test('an empty 204 reply resolves to {}', async () => {
     fakeGitHub({ 'DELETE /repos/o/r/subscription': reply(204) })
     expect(await window.GitHubUtils.request('DELETE', '/repos/o/r/subscription')).toEqual({})

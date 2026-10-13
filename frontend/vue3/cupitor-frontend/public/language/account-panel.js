@@ -22,10 +22,12 @@ import {
 import {
   appBridgeAvailable, installAckListener, requestAppSignIn, requestAppSignOut, requestAppStatus,
 } from './account-bridge.js'
+import { ownerName } from './owner-label.js'
 
 export const TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=public_repo&description=Cupitor'
 export const SETUP_REPO_MSG = 'Set up your repo to save changes.'
 export const NO_TOKEN_MSG = 'Paste your GitHub token to save.'
+export const VISITOR_MSG = 'Sign in to save changes.'
 export const UNCHECKED_MSG = "Couldn't check your sign-in with GitHub. Saving may fail until it can be checked."
 export const SIGNED_OUT_MSG = 'You were signed out because GitHub no longer accepts your sign-in. Your unsaved edits stay on this device.'
 
@@ -143,8 +145,15 @@ export function accountPanelVM({
   const status = statusOf(state)
   const login = state.login
   const noToken = !inApp && reconcile === 'no_token' && status !== 'guest'
+  // A device with no account record counts as the owner's (legacy), so a
+  // stranger's fresh browser lands here too. With no token and outside the
+  // app nothing marks it as the owner's, so it is shown as a visitor reading
+  // the owner's library. Display only: the record stays legacy.
+  const visitor = !!state.legacy && noToken
   const lines = []
-  if (status === 'guest') {
+  if (visitor) {
+    lines.push(`Not signed in. Reading ${ownerName(OWNER.login, null, users) || OWNER.login}'s library.`)
+  } else if (status === 'guest') {
     lines.push('You are not signed in.')
     lines.push(state.other ? `You are reading ${state.other.name}'s library. Sign in to save your own changes.`
       : 'Sign in to save your own changes.')
@@ -161,12 +170,13 @@ export function accountPanelVM({
     lines.push(`Signed in as ${login}.`)
     lines.push(`Your data repo ${login}/${state.missingRepo.repo} can't be found (deleted, renamed or made private).`)
   }
-  if (noToken) lines.push(NO_TOKEN_MSG)
+  if (noToken && !visitor) lines.push(NO_TOKEN_MSG)
   if (reconcile === 'unchecked' && status !== 'guest') lines.push(UNCHECKED_MSG)
   if (signedOutRecently && status === 'guest') lines.push(SIGNED_OUT_MSG)
 
   let banner = null
   if (signedOutRecently && status === 'guest') banner = SIGNED_OUT_MSG
+  else if (visitor) banner = VISITOR_MSG
   else if (noToken) banner = NO_TOKEN_MSG
   else if (status === 'guest' || status === 'no-repo') banner = SETUP_REPO_MSG
   else if (status === 'missing-repo') banner = "Your data repo can't be found. Set it up again to save changes."
@@ -215,7 +225,7 @@ export function accountPanelVM({
     appSignInWorks: !!bridge,
     // Inside the app without the bridge a local sign-out would be undone
     // at the next load (the app keeps its token), so it is not offered.
-    showSignOut: status !== 'guest' && (!inApp || !!bridge),
+    showSignOut: status !== 'guest' && !visitor && (!inApp || !!bridge),
     tokenUrl: TOKEN_URL,
     busy: !!busy || running,
   }

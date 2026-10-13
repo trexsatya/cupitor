@@ -84,10 +84,15 @@
     if (effectiveToken) headers.Authorization = `Bearer ${effectiveToken}`;
     if (body) headers['Content-Type'] = 'application/json';
 
+    // GitHub answers GETs with Cache-Control max-age=60. Without no-store the
+    // browser hands back an answer from before the last write: a PR that was
+    // just opened looks absent, and a stale sha or file is the base of the
+    // next write.
     const res = await fetch(`${GITHUB_API}${path}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      cache: 'no-store',
     });
     // Read as text: a 204 has no body, and an error page may not be JSON.
     const text = await res.text();

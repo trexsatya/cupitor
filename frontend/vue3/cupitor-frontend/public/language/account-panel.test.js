@@ -2,7 +2,7 @@ import jq from 'jquery'
 import {
   accountPanelVM, setupErrorText, appSignInErrorText, tokenErrorText, otherNoticesOf, pickOther,
   renderAccountPanel, initAccountPanel, openAccountDialog, showSetupPrompt, bootAccount,
-  __setAccountPanelDeps, SETUP_REPO_MSG, NO_TOKEN_MSG, SIGNED_OUT_MSG, TOKEN_URL,
+  __setAccountPanelDeps, SETUP_REPO_MSG, NO_TOKEN_MSG, VISITOR_MSG, SIGNED_OUT_MSG, TOKEN_URL,
   SETUP_CLOSE_LOCK_MS, SETUP_RUNNING_MSG, SIGNED_OUT_BY_USER_KEY,
 } from './account-panel.js'
 import { SetupError, UNAUTHORIZED_AT_KEY } from './account.js'
@@ -120,13 +120,38 @@ describe('accountPanelVM: states', () => {
 
 describe('accountPanelVM: boot check', () => {
   test("'no_token' in a browser: token form, banner, no setup", () => {
-    for (const state of [legacy, ownerState, aliceReady, aliceNoRepo]) {
+    for (const state of [ownerState, aliceReady, aliceNoRepo]) {
       const vm = accountPanelVM({ state, users, reconcile: 'no_token' })
       expect(vm.banner).toBe(NO_TOKEN_MSG)
       expect(vm.showTokenForm).toBe(true)
       expect(vm.showSetup).toBe(false)
       expect(text(vm)).toMatch(/Paste your GitHub token to save/)
     }
+  })
+  test("legacy record with 'no_token' in a browser (a fresh visitor): shown as not signed in", () => {
+    const vm = accountPanelVM({ state: legacy, users, reconcile: 'no_token' })
+    expect(vm.status).toBe('owner')
+    expect(vm.lines).toEqual(["Not signed in. Reading Satya's library."])
+    expect(vm.banner).toBe(VISITOR_MSG)
+    expect(vm.showTokenForm).toBe(true)
+    expect(vm.showSetup).toBe(false)
+    expect(vm.showSignOut).toBe(false)
+  })
+  test('the visitor line names the owner by login when the users list has no name for them', () => {
+    const vm = accountPanelVM({ state: legacy, users: [{ login: 'trexsatya', repo: 'trexsatya.github.io' }], reconcile: 'no_token' })
+    expect(vm.lines).toEqual(["Not signed in. Reading trexsatya's library."])
+  })
+  test('legacy record with a token, or in the app, keeps the owner text', () => {
+    for (const args of [{ reconcile: 'ok' }, { reconcile: null }, { reconcile: 'no_token', inApp: true }]) {
+      const vm = accountPanelVM({ state: legacy, users, ...args })
+      expect(vm.lines).toEqual(['This device saves to trexsatya/trexsatya.github.io. The sign-in has not been checked yet.'])
+      expect(vm.banner).toBeNull()
+      expect(vm.showTokenForm).toBe(false)
+      expect(vm.showSignOut).toBe(true)
+    }
+    const unchecked = accountPanelVM({ state: legacy, users, reconcile: 'unchecked' })
+    expect(text(unchecked)).toMatch(/not been checked/)
+    expect(unchecked.banner).toMatch(/Couldn't check your sign-in/)
   })
   test("'no_token' never shows a token form in the app", () => {
     const vm = accountPanelVM({ state: aliceReady, users, inApp: true, reconcile: 'no_token' })
@@ -676,11 +701,17 @@ describe('bootAccount', () => {
     expect(deps.installUnauthorizedHandler).toHaveBeenCalled()
   })
   test("'no_token' shows the token banner; 'unchecked' its banner; a throw counts as unchecked", async () => {
-    const { deps } = setup({ state: legacy })
+    const { deps } = setup({ state: ownerState })
     deps.reconcileLogin.mockResolvedValue('no_token')
     expect(await bootAccount()).toBe('no_token')
     expect(jq('#accountBanner').text()).toContain(NO_TOKEN_MSG)
     expect(deps.reload).not.toHaveBeenCalled()
+    const fresh = setup({ state: legacy })
+    fresh.deps.reconcileLogin.mockResolvedValue('no_token')
+    expect(await bootAccount()).toBe('no_token')
+    expect(jq('#accountBanner').text()).toContain(VISITOR_MSG)
+    expect(jq('#accountBanner').text()).not.toContain(NO_TOKEN_MSG)
+    expect(fresh.deps.saveAccount).not.toHaveBeenCalled()
     setup({ state: aliceReady }).deps.reconcileLogin.mockRejectedValue(new Error('x'))
     jest.spyOn(console, 'warn').mockImplementation(() => {})
     expect(await bootAccount()).toBe('unchecked')
