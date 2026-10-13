@@ -9,7 +9,11 @@ beforeAll(() => {
 })
 
 const b64 = s => Buffer.from(s, 'utf8').toString('base64')
-const reply = (status, body) => ({ ok: status < 400, status, json: async () => body })
+// `body` is an object (sent as JSON), a string (sent as-is) or undefined (empty).
+const reply = (status, body) => {
+  const text = body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body)
+  return { ok: status < 400, status, text: async () => text, json: async () => JSON.parse(text) }
+}
 
 // A fake api.github.com: `routes` maps "METHOD /path" (no query) to a reply
 // or a function returning one. Every call is recorded.
@@ -115,5 +119,46 @@ describe('request', () => {
     await expect(window.GitHubUtils.request('GET', '/user')).rejects.toThrow(/GitHub API error 401/)
     expect(seen).toHaveBeenCalledTimes(1)
     window.removeEventListener('cupitorGithubUnauthorized', seen)
+  })
+
+  test('sends the token as a Bearer header when there is one', async () => {
+    window.GitHubUtils.setGHToken('abc')
+    fakeGitHub({ 'GET /user': reply(200, { login: 'alice' }) })
+    await window.GitHubUtils.request('GET', '/user')
+    expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer abc')
+  })
+
+  test('an empty 204 reply resolves to {}', async () => {
+    fakeGitHub({ 'DELETE /repos/o/r/subscription': reply(204) })
+    expect(await window.GitHubUtils.request('DELETE', '/repos/o/r/subscription')).toEqual({})
+  })
+
+  test('a 401 with a non-JSON body still raises the event and a GitHub API error', async () => {
+    const seen = jest.fn()
+    window.addEventListener('cupitorGithubUnauthorized', seen)
+    fakeGitHub({ 'GET /user': reply(401, '<html>Unauthorized</html>') })
+    await expect(window.GitHubUtils.request('GET', '/user')).rejects.toThrow(/GitHub API error 401: <html>Unauthorized/)
+    expect(seen).toHaveBeenCalledTimes(1)
+    window.removeEventListener('cupitorGithubUnauthorized', seen)
+  })
+
+  describe('inside the app (GitHubProxy channel)', () => {
+    afterEach(() => { delete window.GitHubProxy })
+
+    test('a 401 raises cupitorGithubUnauthorized once and rejects', async () => {
+      window.GitHubProxy = {
+        postMessage: msg => {
+          const { id } = JSON.parse(msg)
+          window._ghProxyHandlers[id](401, JSON.stringify({ message: 'Bad credentials' }))
+        },
+      }
+      global.fetch = jest.fn()
+      const seen = jest.fn()
+      window.addEventListener('cupitorGithubUnauthorized', seen)
+      await expect(window.GitHubUtils.request('GET', '/user')).rejects.toThrow(/GitHub API error 401: Bad credentials/)
+      expect(seen).toHaveBeenCalledTimes(1)
+      expect(global.fetch).not.toHaveBeenCalled()
+      window.removeEventListener('cupitorGithubUnauthorized', seen)
+    })
   })
 })

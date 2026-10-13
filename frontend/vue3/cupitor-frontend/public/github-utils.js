@@ -82,10 +82,13 @@
       headers,
       body: body ? JSON.stringify(body) : undefined,
     });
-    const parsed = await res.json();
+    // Read as text: a 204 has no body, and an error page may not be JSON.
+    const text = await res.text();
+    let parsed;
+    try { parsed = text ? JSON.parse(text) : {}; } catch (_) { parsed = {}; }
     if (!res.ok) {
       if (res.status === 401) _notifyUnauthorized();
-      throw new Error(`GitHub API error ${res.status}: ${parsed.message}`);
+      throw new Error(`GitHub API error ${res.status}: ${parsed.message || text}`);
     }
     return parsed;
   }
