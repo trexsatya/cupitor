@@ -286,6 +286,32 @@ describe('vocabulary layers', () => {
     expect(withoutReadOnlyLines(merged.vocab, merged.readOnly, merged.otherCategories).Adjectives)
       .toEqual(['(small)|liten|'])
   })
+  test('prototype-named categories in either file merge as ordinary categories', () => {
+    const self = '#toString\n(a)|a|\n#__proto__\n(p)|p|'
+    const other = '#toString\n(b)|b|\n#constructor\n(c)|c|\n#__proto__\n(q)|q|\n#valueOf\n(v)|v|'
+    const { vocab, readOnly, otherCategories } = mergeVocabularyLayers(self, other)
+    expect(vocab.toString).toEqual(['(a)|a|', '(b)|b|'])
+    expect(vocab.constructor).toEqual(['(c)|c|'])
+    expect(vocab['__proto__']).toEqual(['(p)|p|', '(q)|q|'])
+    expect(vocab.valueOf).toEqual(['(v)|v|'])
+    expect([...otherCategories]).toEqual(['constructor', 'valueOf'])
+    const editable = withoutReadOnlyLines(vocab, readOnly, otherCategories)
+    expect(Object.keys(editable)).toEqual(['toString', '__proto__'])
+    expect(editable.toString).toEqual(['(a)|a|'])
+    expect(editable['__proto__']).toEqual(['(p)|p|'])
+    // without otherCategories (guessing mode) the same result
+    expect(Object.keys(withoutReadOnlyLines(vocab, readOnly))).toEqual(['toString', '__proto__'])
+  })
+  test('withoutReadOnlyLines takes a plain object with prototype-named keys', () => {
+    const plain = JSON.parse('{"__proto__":["x"],"toString":["y"]}')
+    expect(Object.keys(withoutReadOnlyLines(plain, new Set()))).toEqual(['__proto__', 'toString'])
+  })
+  test('known limitation: a self line with the same text as a read-only line is dropped on save', () => {
+    const merged = mergeVocabularyLayers(selfText, otherText)
+    merged.vocab.Nouns.push('(run)|springa|') // user adds a line other already has
+    expect(withoutReadOnlyLines(merged.vocab, merged.readOnly, merged.otherCategories).Nouns)
+      .toEqual(['(cat)|katt|'])
+  })
   test('a line repeated in one other category is added once', () => {
     const { vocab } = mergeVocabularyLayers('#Verbs\n(eat)|äta|', '#Verbs\n(run)|springa|\n(run)|springa|')
     expect(vocab.Verbs).toEqual(['(eat)|äta|', '(run)|springa|'])
@@ -316,8 +342,21 @@ describe('mergeRecordingLayers', () => {
     const out = mergeRecordingLayers({}, { constructor: { items: {} }, toString: { items: {} }, Bad: [1] })
     expect(out.constructor).toEqual({ items: {}, readOnly: true, src: 'other' })
     expect(Object.keys(out)).toEqual(['constructor', 'toString'])
+    const proto = mergeRecordingLayers(JSON.parse('{"__proto__":{"items":{"a":1}}}'), JSON.parse('{"__proto__":{"items":{}},"X":{}}'))
+    expect(Object.keys(proto)).toEqual(['__proto__', 'X'])
+    expect(proto['__proto__']).toEqual({ items: { a: 1 } })
   })
-  test('categorisation: a link named "constructor" is kept', () => {
-    expect(mergeCategorisationLayers([{ src: 'other', text: 'K || a || b || constructor' }])).toEqual({ constructor: 'K' })
+  test('categorisation: links named like prototype keys are kept, self wins', () => {
+    const out = mergeCategorisationLayers([
+      { src: 'self', text: 'S || a || b || __proto__' },
+      { src: 'other', text: 'K || a || b || constructor\nT || a || b || toString\nO || a || b || __proto__' },
+    ])
+    expect(Object.keys(out)).toEqual(['__proto__', 'constructor', 'toString'])
+    expect(out['__proto__']).toBe('S')
+    expect(out.constructor).toBe('K')
+    expect(out.toString).toBe('T')
+    const parsed = parseCategorisation('X || a || b || __proto__\ntoString')
+    expect(parsed['__proto__']).toBe('X')
+    expect(parsed.toString).toBe('        ')
   })
 })

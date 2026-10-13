@@ -29,6 +29,31 @@ describe("parseVocabularyFile", () => {
     expect(parseVocabularyFile("")).toEqual({});
     expect(parseVocabularyFile(null)).toEqual({});
   });
+  test("headers named like Object.prototype keys are ordinary categories", () => {
+    const out = parseVocabularyFile(`#toString\na\n#constructor\nb\n#__proto__\nc\n#hasOwnProperty\nd`);
+    expect(Object.keys(out)).toEqual(["__empty__", "toString", "constructor", "__proto__", "hasOwnProperty"]);
+    expect(out.toString).toEqual(["a"]);
+    expect(out.constructor).toEqual(["b"]);
+    expect(out["__proto__"]).toEqual(["c"]);
+    expect(JSON.parse(JSON.stringify(out)).__proto__).toEqual(["c"]);
+    expect(vocabularyToText(out)).toBe("#__empty__\n\n#toString\na\n#constructor\nb\n#__proto__\nc\n#hasOwnProperty\nd");
+  });
+});
+
+describe("mergeVocabulary with prototype-named categories", () => {
+  test("keeps them, from parsed text and from a plain local object", () => {
+    const remote = `#toString\nr\n#__proto__\np`;
+    const local = { constructor: ["l"] }; // plain object, as window.vocabulary = {} starts
+    const out = mergeVocabulary("", local, remote);
+    expect(Object.keys(out).sort()).toEqual(["__proto__", "constructor", "toString"]);
+    expect(out.toString).toEqual(["r"]);
+    expect(out["__proto__"]).toEqual(["p"]);
+    expect(out.constructor).toEqual(["l"]);
+  });
+  test("a plain local object without the category does not read its prototype", () => {
+    const out = mergeVocabulary(`#toString\nx`, {}, `#toString\nx`);
+    expect(out.toString).toEqual([]);
+  });
 });
 
 describe("vocabularyToText", () => {

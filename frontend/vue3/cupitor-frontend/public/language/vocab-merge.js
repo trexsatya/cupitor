@@ -16,8 +16,10 @@
 // Lines before the first `#category` header land under the special
 // '__empty__' bucket — callers like `mergeVocabulary` strip that bucket
 // before merging. Returns an empty object for empty input.
+// The map has no prototype, so a header such as `#toString` or `#__proto__`
+// is an ordinary category.
 export function parseVocabularyFile(text) {
-  const out = {}
+  const out = Object.create(null)
   if (!text) return out
   const lines = String(text).split('\n')
   let currentCategory = '__empty__'
@@ -31,6 +33,12 @@ export function parseVocabularyFile(text) {
     }
   }
   return out
+}
+
+// The lines of `cat` in a category map, read as an own key only (so a plain
+// object's `toString` or `constructor` is never taken for a category).
+export function ownLines(vocab, cat) {
+  return (vocab && Object.prototype.hasOwnProperty.call(vocab, cat) && vocab[cat]) || []
 }
 
 // Render a { [category]: [line, ...] } map back into vocabulary text.
@@ -80,7 +88,7 @@ export function mergeVocabulary(baseText, localVocab, remoteText) {
   const base = parseVocabularyFile(baseText || '#__empty__\n')
   const remote = parseVocabularyFile(remoteText || '#__empty__\n')
   const local = localVocab || {}
-  const merged = {}
+  const merged = Object.create(null)
   const allCats = new Set([
     ...Object.keys(base),
     ...Object.keys(remote),
@@ -88,9 +96,9 @@ export function mergeVocabulary(baseText, localVocab, remoteText) {
   ])
   for (const cat of allCats) {
     if (cat === '__empty__') continue
-    const baseLines = base[cat] || []
-    const remoteLines = remote[cat] || []
-    const localLines = local[cat] || []
+    const baseLines = ownLines(base, cat)
+    const remoteLines = ownLines(remote, cat)
+    const localLines = ownLines(local, cat)
     const baseSet = new Set(baseLines)
     const remoteSet = new Set(remoteLines)
     const localSet = new Set(localLines)

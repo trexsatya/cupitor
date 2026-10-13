@@ -154,8 +154,13 @@ export function mergeIndexLayers(layers) {
 // srts/categorisation.txt: lines "category || channel || title || link"
 // (4 parts); any other line has no category (8 spaces, as language.js's
 // fetchCategorisation). Returns { link: category }.
+//
+// Maps built here have no prototype and are checked with hasOwn, so a link
+// or category named `toString`, `constructor` or `__proto__` is an
+// ordinary key.
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k)
 export function parseCategorisation(text) {
-  const out = {}
+  const out = Object.create(null)
   if (text == null) return out
   String(text).split('\n').forEach(raw => {
     const line = raw.replace(/\r$/, '')
@@ -168,10 +173,10 @@ export function parseCategorisation(text) {
 
 // Self wins per link (layers come self first, as readLayers returns them).
 export function mergeCategorisationLayers(layers) {
-  const out = {}
+  const out = Object.create(null)
   for (const layer of layers || []) {
     const map = parseCategorisation(layer.text)
-    for (const k of Object.keys(map)) if (!Object.prototype.hasOwnProperty.call(out, k)) out[k] = map[k]
+    for (const k of Object.keys(map)) if (!hasOwn(out, k)) out[k] = map[k]
   }
   return out
 }
@@ -180,6 +185,7 @@ export function mergeCategorisationLayers(layers) {
 // its category when self does not have that line anywhere. `readOnly` is the
 // set of appended lines (by text) — they never go into a commit.
 // `otherCategories` names the categories that exist only because of other.
+// `vocab` has no prototype (see parseVocabularyFile).
 export function mergeVocabularyLayers(selfText, otherText) {
   const vocab = parseVocabularyFile(selfText || '')
   const readOnly = new Set()
@@ -192,7 +198,7 @@ export function mergeVocabularyLayers(selfText, otherText) {
     const added = new Set()
     for (const line of other[cat]) {
       if (!line || !line.trim() || selfLines.has(line) || added.has(line)) continue
-      if (!vocab[cat]) { vocab[cat] = []; otherCategories.add(cat) }
+      if (!hasOwn(vocab, cat)) { vocab[cat] = []; otherCategories.add(cat) }
       vocab[cat].push(line)
       added.add(line)
       readOnly.add(line)
@@ -206,10 +212,14 @@ export function mergeVocabularyLayers(selfText, otherText) {
 // other (named in `otherCategories` when given, else guessed: every line in
 // it was read-only), and so is an empty pre-header bucket. A line the user
 // added to an other-only category keeps that category.
+//
+// Known limitation: read-only lines are tracked by text, so a line the user
+// adds that is identical to one of other's lines is dropped here too and is
+// not saved.
 export function withoutReadOnlyLines(vocab, readOnly, otherCategories) {
-  const out = {}
+  const out = Object.create(null)
   for (const cat of Object.keys(vocab || {})) {
-    const lines = vocab[cat] || []
+    const lines = (hasOwn(vocab, cat) && vocab[cat]) || []
     const kept = lines.filter(l => !readOnly.has(l))
     const fromOtherOnly = kept.length === 0 &&
       (otherCategories ? otherCategories.has(cat) : lines.length > 0)
@@ -226,14 +236,14 @@ export function withoutReadOnlyLines(vocab, readOnly, otherCategories) {
 // persister skips them.
 function isCollection(c) { return !!c && typeof c === 'object' && !Array.isArray(c) }
 export function mergeRecordingLayers(selfColl, otherColl) {
-  const out = {}
+  const out = Object.create(null)
   for (const name of Object.keys(selfColl || {})) {
     const c = selfColl[name]
     if (isCollection(c)) out[name] = c
   }
   for (const name of Object.keys(otherColl || {})) {
     const c = otherColl[name]
-    if (Object.prototype.hasOwnProperty.call(out, name)) continue
+    if (hasOwn(out, name)) continue
     if (isCollection(c)) out[name] = { ...c, readOnly: true, src: 'other' }
   }
   return out
