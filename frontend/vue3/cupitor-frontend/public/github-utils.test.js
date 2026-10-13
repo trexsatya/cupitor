@@ -89,3 +89,31 @@ describe('reads that fail for a reason other than "not found"', () => {
       .rejects.toThrow(/403/)
   })
 })
+
+describe('request', () => {
+  afterEach(() => { window.GitHubUtils.setGHToken('t'); delete window._suppressGHTokenPrompt })
+
+  test('is the raw API call: parsed JSON back, GitHub API error on failure', async () => {
+    fakeGitHub({ 'GET /user': reply(200, { login: 'alice' }) })
+    expect(await window.GitHubUtils.request('GET', '/user')).toEqual({ login: 'alice' })
+    await expect(window.GitHubUtils.request('GET', '/nope')).rejects.toThrow(/GitHub API error 404/)
+  })
+
+  test('sends no Authorization header when there is no token', async () => {
+    window.GitHubUtils.clearGHToken()
+    window._suppressGHTokenPrompt = true
+    fakeGitHub({ 'GET /repos/o/r': reply(200, { id: 1 }) })
+    await window.GitHubUtils.request('GET', '/repos/o/r')
+    const headers = global.fetch.mock.calls[0][1].headers
+    expect(headers.Authorization).toBeUndefined()
+  })
+
+  test('a 401 raises cupitorGithubUnauthorized on window before throwing', async () => {
+    const seen = jest.fn()
+    window.addEventListener('cupitorGithubUnauthorized', seen)
+    fakeGitHub({ 'GET /user': reply(401, { message: 'Bad credentials' }) })
+    await expect(window.GitHubUtils.request('GET', '/user')).rejects.toThrow(/GitHub API error 401/)
+    expect(seen).toHaveBeenCalledTimes(1)
+    window.removeEventListener('cupitorGithubUnauthorized', seen)
+  })
+})

@@ -50,6 +50,11 @@
     return decodeURIComponent(escape(atob(b64.replace(/\n/g, ""))));
   }
 
+  // Told once per failed call; the account module signs the user out on it.
+  function _notifyUnauthorized() {
+    try { global.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized')); } catch (_) {}
+  }
+
   async function _githubRequest(method, path, body, token) {
     // If running inside the Flutter webview, route through the GitHubProxy
     // JavaScriptChannel. The token is held in Flutter and injected server-side
@@ -64,10 +69,12 @@
     // is set via the auto-prompt or GitHubUtils.setGHToken() from DevTools.
     const effectiveToken = token || getGHToken();
     const headers = {
-      Authorization: `Bearer ${effectiveToken}`,
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
     };
+    // Public repos answer without a token; a header of "Bearer null" turns
+    // those reads into 401s.
+    if (effectiveToken) headers.Authorization = `Bearer ${effectiveToken}`;
     if (body) headers['Content-Type'] = 'application/json';
 
     const res = await fetch(`${GITHUB_API}${path}`, {
@@ -77,6 +84,7 @@
     });
     const parsed = await res.json();
     if (!res.ok) {
+      if (res.status === 401) _notifyUnauthorized();
       throw new Error(`GitHub API error ${res.status}: ${parsed.message}`);
     }
     return parsed;
@@ -101,6 +109,7 @@
         let parsed;
         try { parsed = JSON.parse(responseText); } catch (_) { parsed = {}; }
         if (statusCode === 0 || statusCode >= 400) {
+          if (statusCode === 401) _notifyUnauthorized();
           settle(() => reject(new Error(`GitHub API error ${statusCode}: ${parsed.message || responseText}`)));
         } else {
           settle(() => resolve(parsed));
@@ -153,6 +162,15 @@
       if (!b64) throw new Error(`getFile: ${filePath} is ${response.size} bytes but came back empty`);
     }
     return { content: _b64decode(b64), sha: response.sha };
+  }
+
+  /**
+   * One GitHub REST call: `request('GET', '/user')`. Returns the parsed JSON
+   * body; rejects with `GitHub API error <status>: <message>`. Goes through
+   * GitHubProxy inside the app, direct fetch in a browser.
+   */
+  function request(method, path, body) {
+    return _githubRequest(method, path, body || null, "");
   }
 
   // A read that failed because the file is not there — as opposed to one that
@@ -458,6 +476,6 @@
     throw lastErr || new Error("commitMultipleFiles: exhausted retries");
   }
 
-  global.GitHubUtils = { getGHToken, setGHToken, clearGHToken, getFile, putFile, putFileWithContent, updateFile, deleteFile, deleteFileWithLookup, commitMultipleFiles };
+  global.GitHubUtils = { getGHToken, setGHToken, clearGHToken, request, getFile, putFile, putFileWithContent, updateFile, deleteFile, deleteFileWithLookup, commitMultipleFiles };
 
 })(window);
