@@ -419,3 +419,113 @@ describe('mergeRecordingLayers', () => {
     expect(parsed.toString).toBe('        ')
   })
 })
+
+import { vocabularyFromLayers, relayerVocabulary, pendingVocabCategories } from './data-source.js'
+import { parseVocabularyFile, vocabularyToText, mergeVocabulary } from './vocab-merge.js'
+
+describe('vocabulary from layers (load, buffer, save)', () => {
+  const selfText = 'stray\n#Verbs\n(eat)|äta|\n\n#Empty\n#Nouns\n(cat)|katt|'
+  const otherText = '#Verbs\n(eat)|äta|\n(run)|springa|\n#Adjectives\n(big)|stor|'
+  const remoteText = selfText + '\n(dog)|hund|'
+  const otherOnly = ['(run)|springa|', '(big)|stor|']
+  // What commitVocabularyToGithub sends: own lines only, merged against self's remote.
+  const commitText = (v) => vocabularyToText(mergeVocabulary(v.baselineText,
+    withoutReadOnlyLines(v.vocab, v.readOnly, v.otherCategories), remoteText))
+  const both = () => vocabularyFromLayers([
+    { src: 'self', owner: 'a', text: selfText }, { src: 'other', owner: 'o', text: otherText }])
+
+  test('owner with no other: same map and baseline as parsing the file', () => {
+    const v = vocabularyFromLayers([{ src: 'self', owner: 'o', text: selfText }])
+    expect(v.vocab).toEqual(parseVocabularyFile(selfText))
+    expect(v.baselineText).toBe(selfText)
+    expect(v.readOnly.size).toBe(0)
+    expect(v.otherCategories.size).toBe(0)
+    expect(v.otherText).toBe(null)
+  })
+  test('owner with no other: saved bytes are the same as before layering', () => {
+    const v = vocabularyFromLayers([{ src: 'self', owner: 'o', text: selfText }])
+    v.vocab.Verbs.push('(new)|ny|'); v.vocab.Empty.push('(x)|x|')
+    const before = parseVocabularyFile(selfText)
+    before.Verbs.push('(new)|ny|'); before.Empty.push('(x)|x|')
+    expect(commitText(v)).toBe(vocabularyToText(mergeVocabulary(selfText, before, remoteText)))
+  })
+  test('self missing (404) → empty self, empty baseline, other all read-only', () => {
+    const v = vocabularyFromLayers([{ src: 'self', owner: 'a', text: null }, { src: 'other', owner: 'o', text: otherText }])
+    expect(v.baselineText).toBe('')
+    expect(v.vocab.Verbs).toEqual(['(eat)|äta|', '(run)|springa|'])
+    expect(withoutReadOnlyLines(v.vocab, v.readOnly, v.otherCategories)).toEqual({})
+  })
+  test('with other: the save never contains the other user\'s lines', () => {
+    const v = both()
+    expect(v.vocab.Verbs).toContain('(run)|springa|')
+    expect(v.otherText).toBe(otherText)
+    v.vocab.Adjectives.push('(small)|liten|')
+    v.vocab.Verbs.splice(1, 0, '(new)|ny|')
+    const out = commitText(v)
+    otherOnly.forEach(l => expect(out).not.toContain(l))
+    expect(out).toContain('#Adjectives\n(small)|liten|')
+    expect(out).toContain('(new)|ny|')
+    expect(v.baselineText).toBe(selfText)
+  })
+  test('other layer that is missing (null text) is the same as no other', () => {
+    const v = vocabularyFromLayers([{ src: 'self', owner: 'a', text: selfText }, { src: 'other', owner: 'o', text: null }])
+    expect(v.vocab).toEqual(parseVocabularyFile(selfText))
+    expect(v.otherText).toBe(null)
+  })
+  test('guest: every line is read-only, nothing is editable, baseline is empty', () => {
+    const v = vocabularyFromLayers([{ src: 'other', owner: 'o', text: 'pre\n' + otherText }])
+    expect(v.vocab).toEqual(parseVocabularyFile('pre\n' + otherText))
+    expect(v.baselineText).toBe('')
+    expect(withoutReadOnlyLines(v.vocab, v.readOnly, v.otherCategories)).toEqual({})
+  })
+  test('nothing at all → empty', () => {
+    const v = vocabularyFromLayers([])
+    expect(Object.keys(v.vocab)).toEqual([])
+    expect(v.baselineText).toBe('')
+  })
+  test('pending buffer keeps only own lines of dirty categories', () => {
+    const v = both()
+    v.vocab.Verbs.push('(new)|ny|')
+    v.vocab.Adjectives.push('(small)|liten|')
+    const buf = pendingVocabCategories(v.vocab, ['Verbs', 'Adjectives', 'Missing'], v.readOnly, v.otherCategories)
+    expect({ ...buf }).toEqual({ Verbs: ['(eat)|äta|', '', '(new)|ny|'], Adjectives: ['(small)|liten|'] })
+    expect(JSON.stringify(buf)).not.toContain('springa')
+    expect(JSON.stringify(buf)).not.toContain('stor')
+  })
+  test('pending buffer: an other-only category with no own line is left out', () => {
+    const v = both()
+    expect(Object.keys(pendingVocabCategories(v.vocab, ['Adjectives'], v.readOnly, v.otherCategories))).toEqual([])
+  })
+  test('pending buffer: a prototype-named category is an ordinary key', () => {
+    const vocab = parseVocabularyFile('#__proto__\n(p)|p|')
+    const buf = pendingVocabCategories(vocab, ['__proto__', 'toString'], new Set(), new Set())
+    expect(Object.keys(buf)).toEqual(['__proto__'])
+    expect(JSON.stringify(buf)).toBe('{"__proto__":["(p)|p|"]}')
+  })
+  test('replay then relayer: other lines show again, save still has none of them', () => {
+    const v = both()
+    // a replayed buffer replaces whole categories with own lines only
+    v.vocab.Verbs = ['(eat)|äta|', '(new)|ny|']
+    v.vocab.Adjectives = ['(small)|liten|']
+    const r = relayerVocabulary(v.vocab, v.readOnly, v.otherCategories, v.otherText)
+    expect(r.vocab.Verbs).toEqual(['(eat)|äta|', '(new)|ny|', '(run)|springa|'])
+    expect(r.vocab.Adjectives).toEqual(['(small)|liten|', '(big)|stor|'])
+    expect(r.otherCategories.has('Adjectives')).toBe(false)
+    const out = vocabularyToText(mergeVocabulary(selfText, withoutReadOnlyLines(r.vocab, r.readOnly, r.otherCategories), remoteText))
+    otherOnly.forEach(l => expect(out).not.toContain(l))
+    expect(out).toContain('(small)|liten|')
+  })
+  test('relayer keeps an own empty category without inventing a blank line', () => {
+    const v = both()
+    const r = relayerVocabulary(v.vocab, v.readOnly, v.otherCategories, v.otherText)
+    expect(r.vocab.Empty).toEqual([])
+    expect(r.vocab).toEqual(v.vocab)
+    expect([...r.readOnly]).toEqual([...v.readOnly])
+  })
+  test('relayer does not change the arrays it was given', () => {
+    const v = both()
+    const verbs = v.vocab.Verbs.slice()
+    relayerVocabulary(v.vocab, v.readOnly, v.otherCategories, v.otherText).vocab.Verbs.push('z')
+    expect(v.vocab.Verbs).toEqual(verbs)
+  })
+})

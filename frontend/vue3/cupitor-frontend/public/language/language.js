@@ -131,6 +131,12 @@ import {
   otherListProblem as _dsOtherListProblem,
   cacheRecordMatches as _dsCacheRecordMatches,
   source as _dsSource,
+  vocabularyFromLayers as _dsVocabularyFromLayers,
+  mergeVocabularyLayers as _dsMergeVocabularyLayers,
+  withoutReadOnlyLines as _dsWithoutReadOnlyLines,
+  pendingVocabCategories as _dsPendingVocabCategories,
+  relayerVocabulary as _dsRelayerVocabulary,
+  NoSelfRepoError as _DsNoSelfRepoError,
 } from './data-source.js';
 
 // Notices about the other user's (read-only) layer, e.g. "srts/index.json was
@@ -1312,6 +1318,10 @@ function addToVocab(commitAndClose) {
   // treat that as the old single-shot Save behaviour.
   if (commitAndClose === undefined) commitAndClose = true
 
+  // No own repo (a guest): an edit could never be saved, so say so instead
+  // of keeping it in memory and in the unsaved-edits buffer.
+  if (!_dsHasSelf()) { alert(new _DsNoSelfRepoError().message); return }
+
   const newText = $("#vocabularySegmentTextarea").val().trim()
   if (!newText) {
     // "Save & Close" pressed with an empty textarea: if there are already
@@ -1669,11 +1679,29 @@ function _selfGetFile(filePath) {
 // (in base, absent in remote, unchanged locally) are also dropped.
 // mergeVocabulary lives in ./vocab-merge.js (imported at the top).
 
+// The vocabulary layer state next to window.vocabulary: which lines and
+// categories are the other user's (read-only, never saved) and their file,
+// kept to add their lines again after a save or a replayed buffer.
+window._vocabularyReadOnly = new Set()
+window._vocabularyOtherCategories = new Set()
+window._vocabularyOtherText = null
+function _setVocabularyLayers({ vocab, readOnly, otherCategories, otherText }) {
+  window.vocabulary = vocab
+  window._vocabularyReadOnly = readOnly
+  window._vocabularyOtherCategories = otherCategories
+  if (otherText !== undefined) window._vocabularyOtherText = otherText
+}
+// window.vocabulary without the other user's lines: all a save may hold.
+function _ownVocabulary() {
+  return _dsWithoutReadOnlyLines(window.vocabulary || {},
+    window._vocabularyReadOnly || new Set(), window._vocabularyOtherCategories || new Set())
+}
+
 async function commitVocabularyToGithub() {
   const lang = getLangFromUrl()
   const filePath = `db/language/${lang.fullName}/vocabulary.txt`
   const baselineText = window._vocabularyBaselineText || ''
-  const localVocab = window.vocabulary
+  const localVocab = _ownVocabulary()
 
   try {
     const finalText = await commitWithMerge({
@@ -1687,7 +1715,7 @@ async function commitVocabularyToGithub() {
     // Adopt what we just pushed as the new baseline + UI state. The
     // pending-edit buffer is now stale (everything we cached is on remote);
     // drop it so a future page-load doesn't re-apply the same edits.
-    window.vocabulary = parseVocabularyFile(finalText)
+    _setVocabularyLayers(_dsMergeVocabularyLayers(finalText, window._vocabularyOtherText))
     window._vocabularyBaselineText = finalText
     _clearPendingVocab()
     console.log('Vocabulary committed to GitHub')
@@ -1721,12 +1749,10 @@ function _savePendingVocab() {
       localStorage.removeItem(PENDING_VOCAB_KEY)
       return
     }
-    const categories = {}
-    dirtyNames.forEach(cat => {
-      if (Array.isArray(window.vocabulary[cat])) {
-        categories[cat] = window.vocabulary[cat].slice()
-      }
-    })
+    // Own lines only: the other user's lines never enter the buffer, so a
+    // replay can't carry them into a save.
+    const categories = _dsPendingVocabCategories(window.vocabulary, dirtyNames,
+      window._vocabularyReadOnly || new Set(), window._vocabularyOtherCategories || new Set())
     if (!Object.keys(categories).length) {
       localStorage.removeItem(PENDING_VOCAB_KEY)
       return
@@ -1765,6 +1791,9 @@ function _replayPendingVocab() {
   if (!buf || !buf.categories) return
   const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || ''
   if (buf.lang && buf.lang !== lang) return
+  // No own repo: nothing could be saved, so nothing is replayed (the buffer
+  // is left as it is).
+  if (!_dsHasSelf()) return
   if (!window.vocabulary) window.vocabulary = {}
   if (!window._vocabDirtyCategories) window._vocabDirtyCategories = {}
   const cats = Object.keys(buf.categories)
@@ -1777,6 +1806,12 @@ function _replayPendingVocab() {
     }
   })
   if (any) {
+    // A replayed category holds own lines only; add the other user's lines
+    // to it again.
+    if (window._vocabularyOtherText) {
+      _setVocabularyLayers(_dsRelayerVocabulary(window.vocabulary, window._vocabularyReadOnly || new Set(),
+        window._vocabularyOtherCategories || new Set(), window._vocabularyOtherText))
+    }
     window._vocabHasPendingChanges = true
     // Restore the entry counter persisted alongside the buffer. Older payloads
     // didn't include it — fall back to 0 so the hint just says "unsaved
@@ -1800,8 +1835,9 @@ function getXXX() {
 window.AWS_API = "https://api.satyendra.website/api"
 
 async function makeHttpCallToUpdateVocab() {
-  const data = Object.keys(window.vocabulary)
-      .map(k => `#${k}\n${window.vocabulary[k].join("\n")}`).join("\n")
+  const own = _ownVocabulary()
+  const data = Object.keys(own)
+      .map(k => `#${k}\n${own[k].join("\n")}`).join("\n")
   try {
     let res = await fetch(`${window.AWS_API}/save-vocab`, {
       method: 'POST',
@@ -2885,13 +2921,19 @@ async function fetchVocabulary() {
       res = await res.json()
       if (res) res = res.text
     } else {
-      // Retry — raw.githubusercontent.com sometimes returns transient 5xx
-      // right after a deploy, and a single failed read leaves vocabulary
-      // empty for the whole session.
-      res = await _fetchWithRetry(`${getResourceUrl()}/vocabulary.txt`)
-      res = await res.text()
+      // Own file with the usual retries — raw.githubusercontent.com sometimes
+      // returns transient 5xx right after a deploy, and a single failed read
+      // leaves vocabulary empty for the whole session. The other user's
+      // lines are added read-only (they never go into a save).
+      const layers = await _dsReadLayers('vocabulary.txt', {
+        lang: _dsLangFromLocation(), onNotice: _dsNotice, otherRetry: _OTHER_LAYER_RETRY,
+      })
+      const v = _dsVocabularyFromLayers(layers)
+      _setVocabularyLayers(v)
+      window._vocabularyBaselineText = v.baselineText
+      res = null // already applied
     }
-    if (res) {
+    if (typeof res === 'string' && res) {
       window.vocabulary = parseVocabularyFile(res)
       // Baseline of the file as it was when we loaded it. Used by
       // commitVocabularyToGithub for a 3-way merge against the live remote

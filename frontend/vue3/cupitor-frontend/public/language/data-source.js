@@ -218,7 +218,11 @@ export function mergeCategorisationLayers(layers) {
 // `otherCategories` names the categories that exist only because of other.
 // `vocab` has no prototype (see parseVocabularyFile).
 export function mergeVocabularyLayers(selfText, otherText) {
-  const vocab = parseVocabularyFile(selfText || '')
+  return addOtherVocabulary(parseVocabularyFile(selfText || ''), otherText)
+}
+
+// Adds other's lines to `vocab` (a self map, changed in place) as above.
+function addOtherVocabulary(vocab, otherText) {
   const readOnly = new Set()
   const otherCategories = new Set()
   if (!otherText) return { vocab, readOnly, otherCategories }
@@ -259,6 +263,50 @@ export function withoutReadOnlyLines(vocab, readOnly, otherCategories) {
     out[cat] = kept
   }
   return out
+}
+
+// The vocabulary to show and edit, from readLayers('vocabulary.txt').
+//   vocab           — self's lines with other's added (mergeVocabularyLayers)
+//   readOnly, otherCategories — what withoutReadOnlyLines needs to keep
+//                     other's lines out of a save
+//   baselineText    — self's file as loaded: the base of the 3-way merge on
+//                     save. Never other's text.
+//   otherText       — other's file, kept to add its lines again after a save
+// With no self (a guest) other's vocabulary is shown as it is, and every
+// line and category of it is read-only, so nothing of it can be saved.
+export function vocabularyFromLayers(layers) {
+  const self = (layers || []).find(l => l && l.src === 'self')
+  const other = (layers || []).find(l => l && l.src === 'other')
+  const otherText = other && other.text != null ? other.text : null
+  if (self) {
+    return { ...mergeVocabularyLayers(self.text, otherText), baselineText: self.text || '', otherText }
+  }
+  const vocab = parseVocabularyFile(otherText || '')
+  return {
+    vocab,
+    readOnly: new Set(Object.values(vocab).flat()),
+    otherCategories: new Set(Object.keys(vocab)),
+    baselineText: '',
+    otherText,
+  }
+}
+
+// Own lines of the named categories, for the unsaved-edits buffer in
+// localStorage: read-only lines are left out (so a buffer replayed later,
+// when other's lines may have changed or other is not loaded, holds nothing
+// of theirs), and so is a category with no own line that came only from
+// other. The map has no prototype.
+export function pendingVocabCategories(vocab, names, readOnly, otherCategories) {
+  const picked = Object.create(null)
+  for (const cat of names || []) if (hasOwn(vocab || {}, cat) && Array.isArray(vocab[cat])) picked[cat] = vocab[cat]
+  return withoutReadOnlyLines(picked, readOnly, otherCategories)
+}
+
+// After own categories were replaced (a replayed buffer): take the own lines
+// again and add other's lines from `otherText` anew. Returns what
+// mergeVocabularyLayers returns; the given map and arrays are not changed.
+export function relayerVocabulary(vocab, readOnly, otherCategories, otherText) {
+  return addOtherVocabulary(withoutReadOnlyLines(vocab, readOnly, otherCategories), otherText)
 }
 
 // recordings.json ({ collectionName: { items, ... } }): the name is the key;
