@@ -78,3 +78,68 @@ describe('readUrl lang check', () => {
       .toBe('https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/sv-se/x')
   })
 })
+
+const OWNER_BASE = 'https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish'
+
+describe('readUrl path encoding', () => {
+  // `path` is raw (not pre-encoded); readUrl encodes each segment, the same
+  // way language.js callers encode the filename they append to the base.
+  test.each([
+    ['space', 'srts/My Film.sv.srt', 'srts/My%20Film.sv.srt'],
+    ['||', 'srts/a||b.sv.srt', 'srts/a%7C%7Cb.sv.srt'],
+    ['#', 'srts/Part #2.sv.srt', 'srts/Part%20%232.sv.srt'],
+    ['%', 'srts/100% sure.sv.srt', 'srts/100%25%20sure.sv.srt'],
+    ['Arabic', 'srts/مرحبا.ar.srt', `srts/${encodeURIComponent('مرحبا')}.ar.srt`],
+  ])('%s', (_label, path, encoded) => {
+    configure(guest)
+    const url = readUrl('primary', path, 'swedish')
+    expect(url).toBe(`${OWNER_BASE}/${encoded}`)
+    const name = path.split('/')[1]
+    expect(url).toBe(`${OWNER_BASE}/srts/${encodeURIComponent(name)}`)
+    expect(decodeURIComponent(url.slice(OWNER_BASE.length + 1))).toBe(path)
+  })
+  test('the empty path is the base, as getResourceUrl() is today', () => {
+    configure(guest)
+    expect(readUrl('primary', '', 'swedish')).toBe(OWNER_BASE)
+  })
+  test('rejects . and .. segments', () => {
+    configure(guest)
+    for (const p of ['..', '.', '../x', 'srts/../x', 'srts/./x', 'srts/..']) {
+      expect(() => readUrl('primary', p, 'swedish')).toThrow(/invalid path/)
+    }
+    expect(readUrl('primary', 'srts/..x.srt', 'swedish')).toBe(`${OWNER_BASE}/srts/..x.srt`)
+  })
+})
+
+describe('sources by account', () => {
+  test('owner: primary and self are the owner repo', () => {
+    configure(owner)
+    expect(readUrl('primary', 'vocabulary.txt', 'swedish')).toBe(`${OWNER_BASE}/vocabulary.txt`)
+    expect(readUrl('self', 'vocabulary.txt', 'swedish')).toBe(`${OWNER_BASE}/vocabulary.txt`)
+  })
+  test('user without a repo: primary is the owner repo, self is absent', () => {
+    configure(aliceNoRepo)
+    expect(readUrl('primary', 'vocabulary.txt', 'swedish')).toBe(`${OWNER_BASE}/vocabulary.txt`)
+    expect(() => readUrl('self', 'x', 'swedish')).toThrow(/no self source/)
+    expect(() => writeTarget()).toThrow(NoSelfRepoError)
+    expect(hasSelf()).toBe(false)
+  })
+  test('guest: writeTarget throws', () => {
+    configure(guest)
+    expect(() => writeTarget()).toThrow(NoSelfRepoError)
+  })
+  test('other equal to self is no other', () => {
+    configure({ ...owner, other: { login: 'TrexSatya', name: 'Satya', repo: 'trexsatya.github.io', branch: 'gh-pages' } })
+    expect(hasOther()).toBe(false)
+    expect(() => readUrl('other', 'x', 'swedish')).toThrow(/no other source/)
+  })
+})
+
+describe('configure', () => {
+  test('keeps a copy, so later changes to the given object do not leak in', () => {
+    const s = { ...alice }
+    configure(s)
+    s.login = 'mallory'; s.repo = 'evil'
+    expect(writeTarget()).toEqual({ owner: 'alice', repo: 'cupitor-data', branch: 'main' })
+  })
+})

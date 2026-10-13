@@ -8,8 +8,11 @@
 //   primary — self when present, else other. What the single-source code
 //             paths (practice log, resource base URL) use.
 //
-// Pure: the account state is read once from localStorage and can be set
-// with configure() in tests.
+// The account state is read from localStorage once, on first use, and then
+// kept. Nothing here notices a later sign-in, sign-out or repo setup: after
+// any of those, call configure(loadAccount()) (or reload the page) so reads
+// and writes follow the new account. configure(null) drops the kept state
+// so the next use reads localStorage again.
 
 import { loadAccount, sources } from './account-state.js'
 
@@ -19,7 +22,8 @@ export function resetLayerStats() { _layerStats = { other: { hits: 0, misses: 0,
 export function layerStats() { return JSON.parse(JSON.stringify(_layerStats)) }
 
 let _state = null
-export function configure(state) { _state = state; resetLayerStats() }
+// Keeps a shallow copy, so later changes to the caller's object do not leak in.
+export function configure(state) { _state = state ? { ...state } : null; resetLayerStats() }
 function state() { return _state || (_state = loadAccount()) }
 export function currentSources() { return sources(state()) }
 
@@ -52,13 +56,19 @@ export function hasSelf() { return !!currentSources().self }
 export function hasOther() { return !!currentSources().other }
 
 // Raw URL under db/language/<lang>/ for the given source. `path` may be ''
-// for the directory itself.
+// for the directory itself. `path` is raw, not URL-encoded: each '/'-separated
+// segment is encoded here with encodeURIComponent (so spaces, '||', '#', '%'
+// and non-Latin names survive). A caller that appends a filename to the
+// returned URL encodes that filename itself, as language.js does today.
+// '.' and '..' segments are refused.
 export function readUrl(who, path, lang = langFromLocation()) {
   if (typeof lang !== 'string' || !LANG_RE.test(lang)) throw new Error(`data-source: invalid lang "${lang}"`)
+  const segments = path ? String(path).split('/') : []
+  if (segments.some(s => s === '.' || s === '..')) throw new Error(`data-source: invalid path "${path}"`)
   const src = source(who)
   if (!src) throw new Error(`data-source: no ${who} source`)
   const base = rawBase(src, lang)
-  return path ? `${base}/${path}` : base
+  return segments.length ? `${base}/${segments.map(encodeURIComponent).join('/')}` : base
 }
 
 // { owner, repo, branch } of self. Writes never go anywhere else.
