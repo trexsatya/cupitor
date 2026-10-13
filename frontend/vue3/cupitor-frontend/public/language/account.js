@@ -572,3 +572,37 @@ export async function ensureListing({
     throw asSetupError('listing', e)
   }
 }
+
+// ---- the whole setup ----
+
+// Runs both setup steps for `login` and resolves { status, state }: status
+// from ensureListing, state the account record as saved. The data repo is
+// `repoName`, else the repo recorded for this login (not a missingRepo:
+// pass its name as repoName to set that one up again), else cupitor-data. The record gets the repo as soon as it exists, before the
+// listing step, so a listing failure leaves the user able to write. The
+// same login (ignoring case, never the legacy record) keeps its chosen
+// other; anyone else gets the default. The owner goes through both steps
+// with no network call and records the owner repo. Throws SetupError:
+// step 'repo' or 'listing' from the steps, or step 'repo' code 'not_saved'
+// when the record could not be written (the listing is then not started).
+// A retry with the same arguments resumes.
+export async function runSetup({
+  login, name, repoName, gh, storage, sleep = defaultSleep, now = Date.now, report = () => {},
+} = {}) {
+  const prev = loadAccount(storage)
+  const samePrev = isValidLogin(login) && !prev.legacy && sameLogin(prev.login, login)
+  const wanted = isOwnerLogin(login) ? undefined : repoName || (samePrev && prev.repo) || DATA_REPO
+  const r = await ensureDataRepo({ login, repoName: wanted, gh, sleep, now, report })
+  // Re-read after the network calls: the other may have been changed (e.g.
+  // in another tab) meanwhile.
+  const cur = loadAccount(storage)
+  const same = !cur.legacy && sameLogin(cur.login, login)
+  const state = { login, repo: r.repo, branch: r.branch, other: same ? cur.other : defaultOther(login) }
+  const kept = saveAccount(state, storage) ? loadAccount(storage) : null
+  if (!kept || kept.legacy || kept.login !== login || kept.repo !== r.repo || kept.branch !== r.branch) {
+    throw new SetupError('repo', 'not_saved',
+      `${login}/${r.repo} is ready, but this browser could not save your account. Allow site data for this page and retry.`)
+  }
+  const status = await ensureListing({ login, name, repo: r.repo, branch: r.branch, gh, sleep, now, report })
+  return { status, state: kept }
+}

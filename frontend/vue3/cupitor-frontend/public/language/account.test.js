@@ -2,7 +2,7 @@ import { USERS_CACHE_KEY, OWNER, ACCOUNT_KEY, loadAccount } from './account-stat
 import {
   parseUsers, cachedUsers, fetchUsers, ownerEntry, USERS_RAW_URL,
   MAX_USERS, MAX_USERS_BYTES, fetchLogin, adoptLogin, defaultGh,
-  ensureDataRepo, SetupError, listingStatus, ensureListing,
+  ensureDataRepo, SetupError, listingStatus, ensureListing, runSetup,
 } from './account.js'
 
 export function memStorage(init = {}) {
@@ -979,5 +979,144 @@ describe('ensureListing', () => {
     w.gh.request = async (m, p, b) => { if (p.startsWith(`${UP}/pulls`)) throw err(503); return open2(m, p, b) }
     await expect(ensureListing(args(w.gh))).rejects.toMatchObject({ step: 'listing', code: 'github', status: 503 })
     expect(writes(w.gh)).toEqual([])
+  })
+})
+
+describe('runSetup', () => {
+  const BOB = { login: 'bob', name: 'Bob', repo: 'cupitor-data', branch: 'main' }
+  // A user whose data repo is ready and who is listed (or not, per `users`).
+  const ready = (login = 'alice', repo = 'cupitor-data', users = WITH_ALICE) => fakeGh({
+    [`GET /repos/${login}/${repo}`]: { name: repo },
+    [`GET /repos/${login}/${repo}/contents/cupitor.json`]: { sha: 's' },
+    [`GET ${UP}/contents/users.json`]: { text: users, sha: 'UF1' },
+  })
+  const run = (gh, storage, extra = {}) => runSetup({ login: 'alice', name: 'Alice', gh, storage, sleep: noSleep, now: clock().now, ...extra })
+  const saved = storage => JSON.parse(storage.dump()[ACCOUNT_KEY])
+
+  test('repo then listing; the account record gets the repo as soon as it exists', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: null, branch: null }) })
+    const out = await run(ready(), storage)
+    expect(out.status).toBe('listed')
+    expect(loadAccount(storage)).toMatchObject({ login: 'alice', repo: 'cupitor-data', branch: 'main' })
+    expect(out.state).toEqual(loadAccount(storage))
+  })
+
+  test('the record is written before the listing step starts', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice' }) })
+    const gh = ready()
+    gh.getFile = async () => { expect(loadAccount(storage).repo).toBe('cupitor-data'); return { content: WITH_ALICE, sha: 'UF1' } }
+    expect((await run(gh, storage)).status).toBe('listed')
+  })
+
+  test('a listing failure leaves the repo recorded (the user can already write)', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice' }) })
+    const gh = ready()
+    gh.getFile = async () => { throw err(500) }
+    await expect(run(gh, storage)).rejects.toMatchObject({ step: 'listing', code: 'github', status: 500 })
+    expect(loadAccount(storage).repo).toBe('cupitor-data')
+  })
+
+  test('a repo failure writes nothing to the record', async () => {
+    const rec = JSON.stringify({ login: 'alice', repo: null, branch: null, other: null })
+    const storage = memStorage({ [ACCOUNT_KEY]: rec })
+    await expect(run(fakeGh({ 'GET /repos/alice/cupitor-data': err(503) }), storage)).rejects.toMatchObject({ step: 'repo', code: 'github' })
+    expect(storage.dump()[ACCOUNT_KEY]).toBe(rec)
+  })
+
+  test('a chosen repo name is used and recorded; the listing status passes through', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice' }) })
+    const gh = ready('alice', 'my-data', UPSTREAM_TEXT)
+    gh.getFile = async () => ({ content: UPSTREAM_TEXT, sha: 'UF1' })
+    const routes = gh.request
+    gh.request = async (m, p, b) => (m === 'GET' && p.startsWith(`${UP}/pulls`) ? [{ state: 'open', merged_at: null }] : routes(m, p, b))
+    const out = await run(gh, storage, { repoName: 'my-data' })
+    expect(out.status).toBe('awaiting')
+    expect(out.state).toMatchObject({ login: 'alice', repo: 'my-data', branch: 'main' })
+  })
+
+  test('a retry uses the repo already recorded, unless another name is given', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: 'my-data', branch: 'main' }) })
+    const gh = ready('alice', 'my-data')
+    await run(gh, storage)
+    expect(gh.calls).toContain('GET /repos/alice/my-data')
+    expect(loadAccount(storage).repo).toBe('my-data')
+    const ghCase = ready('Alice', 'my-data')
+    await run(ghCase, storage, { login: 'Alice' })
+    expect(ghCase.calls).toContain('GET /repos/Alice/my-data')
+    expect(loadAccount(storage)).toMatchObject({ login: 'Alice', repo: 'my-data' })
+    const gh2 = ready('alice', 'other-data')
+    await run(gh2, storage, { repoName: 'other-data' })
+    expect(loadAccount(storage).repo).toBe('other-data')
+  })
+
+  test('the same login (any case) keeps its chosen other; the login is stored as given', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: null, branch: null, other: BOB }) })
+    await run(ready('Alice'), storage, { login: 'Alice' })
+    expect(loadAccount(storage)).toMatchObject({ login: 'Alice', repo: 'cupitor-data', other: BOB })
+    const none = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', other: null }) })
+    await run(ready(), none)
+    expect(loadAccount(none).other).toBeNull()
+  })
+
+  test('a different login, a guest record or no record → the default other', async () => {
+    for (const rec of [{ login: 'bob', repo: 'bob-data', branch: 'main', other: null },{ login: null, other: null }, undefined]) {
+      const storage = memStorage(rec ? { [ACCOUNT_KEY]: JSON.stringify(rec) } : {})
+      const out = await run(ready(), storage)
+      expect(out.state).toMatchObject({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: { ...OWNER } })
+      expect(out.state.legacy).toBeUndefined()
+    }
+  })
+
+  test('a recorded missing repo is dropped once the new repo is set', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: null, branch: null, missingRepo: { repo: 'gone', branch: 'main' } }) })
+    expect(loadAccount(storage).missingRepo).toBeTruthy()
+    await run(ready(), storage)
+    expect(saved(storage).missingRepo).toBeUndefined()
+    expect(loadAccount(storage).repo).toBe('cupitor-data')
+  })
+
+  test('progress is reported for both steps', async () => {
+    const steps = []
+    await run(ready(), memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice' }) }), { report: (s, x) => steps.push(`${s}:${x}`) })
+    expect(steps).toEqual(['repo:checking', 'repo:done', 'listing:checking', 'listing:done'])
+  })
+
+  test('a record that cannot be saved → SetupError, the listing is not started', async () => {
+    const base = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice' }) })
+    for (const storage of [
+      { ...base, setItem: () => { throw new Error('QuotaExceededError') } },
+      { getItem: () => null, setItem: () => {}, removeItem: () => {} }, // write accepted, never read back
+    ]) {
+      const gh = ready()
+      await expect(run(gh, storage)).rejects.toMatchObject({ name: 'SetupError', step: 'repo', code: 'not_saved' })
+      expect(gh.calls.some(c => c.includes('cupitor-users'))).toBe(false)
+    }
+  })
+
+  test('the owner needs no setup: no network, the owner repo is recorded', async () => {
+    for (const login of ['trexsatya', 'TrexSatya']) {
+      const storage = memStorage()
+      const gh = fakeGh({})
+      const out = await runSetup({ login, gh, storage })
+      expect(out.status).toBe('listed')
+      expect(gh.calls).toEqual([])
+      expect(out.state).toMatchObject({ login, repo: 'trexsatya.github.io', branch: 'gh-pages', other: null })
+      expect(loadAccount(storage)).toEqual(out.state)
+      expect(loadAccount(storage).legacy).toBeUndefined()
+    }
+  })
+
+  test('the owner keeps a chosen other and ignores a repo name', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'trexsatya', other: BOB }) })
+    const gh = fakeGh({})
+    const out = await runSetup({ login: 'trexsatya', repoName: 'cupitor-data', gh, storage })
+    expect(gh.calls).toEqual([])
+    expect(out.state).toMatchObject({ repo: 'trexsatya.github.io', branch: 'gh-pages', other: BOB })
+  })
+
+  test('no valid login → SetupError bad_login, nothing written', async () => {
+    const storage = memStorage()
+    await expect(runSetup({ login: null, gh: fakeGh({}), storage })).rejects.toMatchObject({ step: 'repo', code: 'bad_login' })
+    expect(storage.dump()).toEqual({})
   })
 })
