@@ -51,12 +51,36 @@ export function isValidBranch(v) {
     !v.startsWith('/') && !BRANCH_BAD_RE.test(v)
 }
 
-function sameLogin(a, b) {
+export function sameLogin(a, b) {
   return typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
 }
 
 export function isOwnerLogin(login) {
   return sameLogin(login, OWNER.login)
+}
+
+// A display name comes from strangers: control characters (C0, DEL, C1),
+// bidi marks/overrides/isolates and invisible characters (soft hyphen,
+// zero-width, line/paragraph separators, BOM) are removed, the rest trimmed
+// and cut to 64 code points (a surrogate pair is never split). Empty →
+// fallback.
+export const MAX_NAME_LENGTH = 64
+// Code point ranges removed from names (kept as numbers so no invisible
+// character ever sits in this source file).
+const NAME_STRIP_RANGES = [
+  [0x0000, 0x001f], [0x007f, 0x009f], [0x00ad, 0x00ad], [0x061c, 0x061c],
+  [0x200b, 0x200f], [0x2028, 0x202e], [0x2060, 0x2069], [0xfeff, 0xfeff],
+]
+const stripped = ch => {
+  const c = ch.codePointAt(0)
+  return NAME_STRIP_RANGES.some(([a, b]) => c >= a && c <= b)
+}
+
+export function cleanName(name, fallback) {
+  if (typeof name !== 'string') return fallback
+  const kept = Array.from(name).filter(ch => !stripped(ch)).join('').trim()
+  const s = Array.from(kept).slice(0, MAX_NAME_LENGTH).join('').trim()
+  return s || fallback
 }
 
 // A users.json entry made safe: login and repo are required, name defaults
@@ -69,7 +93,7 @@ export function normalizeUser(u) {
   if (!isValidBranch(branch)) return null
   return {
     login,
-    name: typeof u.name === 'string' && u.name ? u.name : login,
+    name: cleanName(u.name, login),
     repo,
     branch,
   }

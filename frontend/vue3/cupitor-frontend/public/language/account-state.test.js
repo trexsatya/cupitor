@@ -87,6 +87,21 @@ describe('normalizeUser / defaultOther', () => {
     expect(normalizeUser({ login: 'bob' })).toBeNull()
     expect(normalizeUser(null)).toBeNull()
   })
+  test('name is display text from strangers: trimmed, control characters removed, at most 64 characters', () => {
+    const name = n => normalizeUser({ login: 'bob', repo: 'r', name: n }).name
+    expect(name('  Bob  ')).toBe('Bob')
+    expect(name('Bo\u0000b\n\t\u001b[31m\u007f\u0085')).toBe('Bob[31m')
+    const cp = (...xs) => String.fromCodePoint(...xs)
+    expect(name(`a${cp(0x202e)}evil${cp(0x2066)}x`)).toBe('aevilx')
+    expect(name(`a${cp(0x200b)}b${cp(0xad)}c${cp(0xfeff)}d${cp(0x2028)}e${cp(0x61c)}f`)).toBe('abcdef')
+    expect(name(cp(0x200b, 0x200d))).toBe('bob')
+    expect(name('x'.repeat(100))).toBe('x'.repeat(64))
+    expect(name('😀'.repeat(70))).toBe('😀'.repeat(64))
+    expect(name(`${'y'.repeat(63)} z`)).toBe('y'.repeat(63))
+    expect(name('   ')).toBe('bob')
+    expect(name('\u0000\n')).toBe('bob')
+    expect(name('')).toBe('bob')
+  })
   test('defaultOther is trexsatya for everyone but trexsatya', () => {
     expect(defaultOther(null).login).toBe('trexsatya')
     expect(defaultOther('alice').login).toBe('trexsatya')
