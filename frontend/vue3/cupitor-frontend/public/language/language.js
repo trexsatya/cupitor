@@ -4314,7 +4314,7 @@ $(document).ready(function () {
     if (typeof option.id === 'string' && option.id.indexOf('__cat__:') === 0) {
       return $('<span style="color:#888;font-style:italic;"></span>').text(option.text)
     }
-    return _escapeHtmlForVocab(option.text)
+    return _escapeHtmlForVocab(option.text || '')
   }
   const $sw = $('#searchedWords')
   if ($sw.length) {
@@ -5387,6 +5387,8 @@ function getTimesForSubtitleChunk(el, fl) {
 }
 
 function getWikiLinks(text) {
+  // Tags (and their attributes) go before the split, so only words show.
+  text = removeHtmlTags(String(text == null ? '' : text).replace(/<br\s*\/?>/gi, ' '))
   return text.split(/[ \n]/).flatMap(it => {
     const ws = getWords(it)
     if (ws.length > 1) {

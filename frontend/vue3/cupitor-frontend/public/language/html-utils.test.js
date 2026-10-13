@@ -39,6 +39,12 @@ describe("removeHtmlTags", () => {
   test("handles self-closing tags", () => {
     expect(removeHtmlTags("a<br/>b")).toBe("ab");
   });
+  test("tags with attributes leave only the words (as getWikiLinks needs before splitting)", () => {
+    const out = removeHtmlTags('<font color="#ffff00">Hej</font> <i>Hej då</i> R&amp;B');
+    expect(out).toBe("Hej Hej då R&B");
+    expect(out.split(/[ \n]/)).toEqual(["Hej", "Hej", "då", "R&B"]);
+    expect(out).not.toMatch(/color|#ffff00|>/);
+  });
   test("handles null/undefined gracefully", () => {
     expect(removeHtmlTags(null)).toBe("");
     expect(removeHtmlTags(undefined)).toBe("");

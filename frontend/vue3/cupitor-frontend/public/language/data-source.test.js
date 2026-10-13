@@ -622,7 +622,11 @@ describe('source names are checked before they go into URLs', () => {
   })
 
   test.each([
-    ['branch with a slash', { branch: 'a/b' }],
+    ['branch with a trailing slash', { branch: 'a/' }],
+    ['branch with a leading slash', { branch: '/a' }],
+    ['branch with a . segment', { branch: 'a/./b' }],
+    ['branch with a .. segment', { branch: 'a/../b' }],
+    ['branch with an empty segment', { branch: 'a//b' }],
     ['branch with ? and #', { branch: 'x?y#z' }],
     ['branch ..', { branch: '..' }],
     ['repo with a space', { repo: 'my repo' }],
@@ -645,11 +649,19 @@ describe('source names are checked before they go into URLs', () => {
   })
 
   test('an invalid self is no self: no writes, nothing read from it', () => {
-    configure({ ...alice, branch: 'feature/x' })
+    configure({ ...alice, branch: 'feature/../x' })
     expect(hasSelf()).toBe(false)
     expect(() => writeTarget()).toThrow(NoSelfRepoError)
     expect(readUrl('primary', 'x', 'swedish')).toContain('/trexsatya/trexsatya.github.io/gh-pages/')
     expect(sourceProblems()).toEqual([expect.stringMatching(/Your data repo name/)])
+  })
+
+  test('a branch with slashes is valid and keeps its slashes in raw URLs', () => {
+    configure({ ...alice, branch: 'feature/x/y' })
+    expect(hasSelf()).toBe(true)
+    expect(writeTarget()).toEqual({ owner: 'alice', repo: 'cupitor-data', branch: 'feature/x/y' })
+    expect(readUrl('self', 'a b.json', 'swedish')).toBe('https://raw.githubusercontent.com/alice/cupitor-data/feature/x/y/db/language/swedish/a%20b.json')
+    expect(sourceProblems()).toEqual([])
   })
 })
 

@@ -30,11 +30,13 @@ export function configure(state) { _state = state ? { ...state } : null; _source
 function state() { return _state || (_state = loadAccount()) }
 
 // Owner, repo and branch go into raw URLs and API paths as they are, so each
-// must be a plain name. A source with anything else is left out: no self
+// must be a plain name (a branch may be '/'-separated plain names). A source with anything else is left out: no self
 // means no writes, no other means no layered library.
 const SAFE_NAME_RE = /^[\w.-]+$/
 const safeName = v => typeof v === 'string' && SAFE_NAME_RE.test(v) && v !== '.' && v !== '..'
-const safeSource = s => safeName(s.owner) && safeName(s.repo) && safeName(s.branch)
+const SAFE_BRANCH_RE = /^[\w.-]+(\/[\w.-]+)*$/
+const safeBranch = v => typeof v === 'string' && SAFE_BRANCH_RE.test(v) && v.split('/').every(p => p !== '.' && p !== '..')
+const safeSource = s => safeName(s.owner) && safeName(s.repo) && safeBranch(s.branch)
 
 export function currentSources() {
   const s = sources(state())
