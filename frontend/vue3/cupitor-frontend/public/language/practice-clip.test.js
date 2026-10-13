@@ -4,6 +4,7 @@ import {
   gapSecondsBefore,
   formatGap,
   CLIP_MIN_SECONDS,
+  CLIP_LEAD_SECONDS,
 } from "./practice-clip";
 
 const line = (i, s, e) => ({ index: i, start: { ordinal: s }, end: { ordinal: e } });
@@ -22,23 +23,43 @@ const sparse = [
   line(5, 601, 602),
 ];
 
+// `lines` are one second each and back to back, so neither the lead nor the
+// tail has any room: the clip is exactly the lines shown.
+const L = CLIP_LEAD_SECONDS;
+const near = (r, start, stop) => {
+  expect(r.start).toBeCloseTo(start, 5);
+  expect(r.stop).toBeCloseTo(stop, 5);
+};
+
 describe("clipRange", () => {
-  test("plays the matched line and one more, which is what it always did", () => {
-    expect(clipRange(lines, 2, 0, 0, captured)).toEqual({ start: 12, stop: 14 });
+  test("plays the matched line only — not the line before it nor the one after", () => {
+    near(clipRange(lines, 2, 0, 0, { start: 11, stop: 14 }), 12, 13);
   });
 
   test("a line added after is heard, not just shown", () => {
-    expect(clipRange(lines, 2, 0, 1, captured).stop).toBe(15);
+    near(clipRange(lines, 2, 0, 1, captured), 12, 14);
   });
 
   test("a line added before moves the start back", () => {
-    expect(clipRange(lines, 2, 1, 0, captured).start).toBe(11);
-    expect(clipRange(lines, 2, 2, 0, captured).start).toBe(10);
+    expect(clipRange(lines, 2, 1, 0, captured).start).toBeCloseTo(11, 5);
+    expect(clipRange(lines, 2, 2, 0, captured).start).toBeCloseTo(10 - L, 5); // first line in the file: room to lead
   });
 
-  test("with nothing added the captured start wins over the subtitles", () => {
-    const drifted = lines.map((l) => ({ ...l, start: { ordinal: l.start.ordinal + 5 } }));
-    expect(clipRange(drifted, 2, 0, 0, captured).start).toBe(12);
+  test("a little before and after when the neighbours leave room, but not into them", () => {
+    const spaced = [line(1, 5, 9.9), line(2, 10, 11), line(3, 11.3, 12)];
+    near(clipRange(spaced, 1, 0, 0, captured), 9.9, 11.3);
+    const roomy = [line(1, 10, 11), line(2, 13, 14)];
+    near(clipRange(roomy, 0, 0, 0, captured), 10 - L, 11.6);
+  });
+
+  test("a next line that starts before this one ends gets no run-off", () => {
+    const overlap = [line(1, 10, 11), line(2, 10.8, 12)];
+    expect(clipRange(overlap, 0, 0, 0, captured).stop).toBeCloseTo(11, 5);
+  });
+
+  test("a missing time is unknown, not 0 — the stored times play", () => {
+    const blank = [{ index: 1, start: { ordinal: null }, end: { ordinal: 11 } }];
+    expect(clipRange(blank, 0, 0, 0, captured)).toEqual(captured);
   });
 
   test("falls back to the captured times when the line cannot be placed", () => {
@@ -62,25 +83,18 @@ describe("clipRange over a stitched file", () => {
     // Anchor on the last line of the first snippet, ask for one line after.
     // Line 4 starts at 600s — playing to it would run for ten minutes.
     const r = clipRange(sparse, 2, 0, 1, { start: 12, stop: 13 });
-    expect(r.stop).toBe(13);
+    expect(r.stop).toBeCloseTo(13.6, 5);
     expect(r.stop - r.start).toBeLessThan(5);
   });
 
   test("does not run back across the jump either", () => {
     // Anchor on the first line after the jump, ask for two lines before.
     const r = clipRange(sparse, 3, 2, 0, { start: 600, stop: 601 });
-    expect(r.start).toBe(600);
+    expect(r.start).toBeCloseTo(600 - L, 5);
   });
 
   test("still takes context on the side that is continuous", () => {
-    const r = clipRange(sparse, 2, 2, 0, { start: 12, stop: 13 });
-    expect(r.start).toBe(10);
-    expect(r.stop).toBe(13);
-  });
-
-  test("the run-off is taken when the next line really is next", () => {
-    const r = clipRange(sparse, 1, 0, 0, { start: 11, stop: 12 });
-    expect(r.stop).toBe(13);
+    near(clipRange(sparse, 2, 2, 0, { start: 12, stop: 13 }), 10 - L, 13.6);
   });
 });
 

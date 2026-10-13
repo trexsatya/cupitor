@@ -20494,7 +20494,7 @@ function _watchPracticeClipEnd(stop, token) {
       try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
       clearInterval(window._practiceClipTimer); window._practiceClipTimer = null
     }
-  }, 150)
+  }, 50)
 }
 
 async function playPracticeClip() {
@@ -20514,6 +20514,8 @@ async function playPracticeClip() {
       _pracRec.clipStart = start
       _pracRec.clipStop = stop
     }
+    // A take spoken after the card's lines still has to be reached.
+    const clipEnd = _pracRecClipEnd(stop)
     // The cue normally already loaded the right video; reload only if needed.
     let needLoad = true
     try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
@@ -20545,7 +20547,7 @@ async function playPracticeClip() {
     const rate = parseFloat(window._practicePlaybackRate) || 1
     try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(rate) } catch (_) {}
     try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
-    _watchPracticeClipEnd(stop, token)
+    _watchPracticeClipEnd(clipEnd, token)
   } catch (e) { console.warn('practice: play failed', e) }
 }
 
@@ -20563,6 +20565,25 @@ let _pracRec = null
 
 // Which card a session belongs to. By identity rather than queue position:
 // the index drifts as soon as another card is deleted.
+// Where a pass over the card stops: the end of its lines, or just past the
+// last take when one was spoken after them.
+function _pracRecClipEnd(stop) {
+  const st = _pracRec
+  if (!st || !st.takes.length) return stop
+  return Math.max(stop, st.takes.reduce((m, t) => Math.max(m, Number(t.t1) || 0), 0) + 0.3)
+}
+
+async function _pracRecRefreshClip(st) {
+  const it = (window._practiceCards || [])[window._practiceIdx]
+  if (!it || _pracRecKey(it) !== st.key) return
+  try {
+    const { start, stop } = await _practiceClipRange(
+      it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0)
+    st.clipStart = start
+    st.clipStop = stop
+  } catch (_) {}
+}
+
 function _pracRecKey(it) {
   return it ? [it._recName, it._st, it._w, it.id, it.lineIndex].join('|') : ''
 }
@@ -20942,9 +20963,10 @@ function _pracRecWatch() {
     // stops here instead: at the end of the card's lines, or just past the
     // last take when one was spoken after them.
     if (st.clipStop != null && prev < ct) {
-      const lastMark = st.takes.reduce((m, t) => Math.max(m, Number(t.t1) || 0), 0)
-      const end = Math.max(st.clipStop, lastMark + 0.3)
-      if (prev < end && ct >= end) { _pracRecPauseVideo(); return }
+      const end = _pracRecClipEnd(st.clipStop)
+      // Half a poll early on average rather than half a poll late, so the
+      // pause lands at the end instead of in the next line's speech.
+      if (prev < end && ct + (ct - prev) / 2 >= end) { _pracRecPauseVideo(); return }
     }
     // The mark this pass was aimed at is behind the playhead without having
     // been crossed — the rewind landed past it, which it can when two takes
@@ -20960,11 +20982,15 @@ function _pracRecWatch() {
 function _pracRecReplay(t1) {
   const st = _pracRec
   if (!st) return
-  const from = _rewindPointFor(st.takes, t1, st.clipStart)
   const token = ++st.token
   st.awaiting = null
   _pracRecTakeOverPlayhead()
   ;(async () => {
+    // The card's lines as they are now — the context may have changed since
+    // the clip last played, or it may never have played.
+    await _pracRecRefreshClip(st)
+    if (_pracRec !== st || token !== st.token) return
+    const from = _rewindPointFor(st.takes, t1, st.clipStart)
     try { await seekToYoutubeTime(from) } catch (_) {}
     if (_pracRec !== st || token !== st.token) return
     st.watchPos = _pracRecNow()
