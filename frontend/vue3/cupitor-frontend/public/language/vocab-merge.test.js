@@ -3,7 +3,15 @@ import {
   vocabularyToText,
   isProperlyBracketed,
   mergeVocabulary,
+  removeVocabularyLine,
+  vocabPendingHintText,
 } from "./vocab-merge";
+import {
+  mergeVocabularyLayers,
+  withoutReadOnlyLines,
+  pendingVocabCategories,
+  relayerVocabulary,
+} from "./data-source";
 
 describe("parseVocabularyFile", () => {
   test("buckets lines under their #category headers", () => {
@@ -158,5 +166,115 @@ describe("mergeVocabulary", () => {
     const local = { V: ["x", "x", "y"] };
     const out = mergeVocabulary(text({ V: ["x"] }), local, text({ V: ["x"] }));
     expect(out.V).toEqual(["x", "y"]);
+  });
+});
+
+describe("removeVocabularyLine", () => {
+  const none = new Set();
+
+  test("removes the line from its category and leaves the input unchanged", () => {
+    const vocab = { V: ["a", "b", "c"], A: ["x"] };
+    const res = removeVocabularyLine(vocab, none, "V", "b");
+    expect(res.reason).toBeUndefined();
+    expect(res.vocab.V).toEqual(["a", "c"]);
+    expect(res.vocab.A).toBe(vocab.A);
+    expect(Object.keys(res.vocab)).toEqual(["V", "A"]);
+    expect(vocab.V).toEqual(["a", "b", "c"]);
+  });
+  test("removes only the chosen copy of a repeated line", () => {
+    const vocab = { V: ["a", "dup", "b", "dup"] };
+    expect(removeVocabularyLine(vocab, none, "V", "dup").vocab.V).toEqual(["a", "b", "dup"]);
+    expect(removeVocabularyLine(vocab, none, "V", "dup", 1).vocab.V).toEqual(["a", "dup", "b"]);
+    expect(removeVocabularyLine(vocab, none, "V", "dup", 2)).toEqual({ reason: "not-found" });
+  });
+  test("leaves the same text in another category alone", () => {
+    const vocab = { V: ["same"], A: ["same"] };
+    const res = removeVocabularyLine(vocab, none, "A", "same");
+    expect(res.vocab).toEqual({ V: ["same"], A: [] });
+  });
+  test("keeps a category emptied by the removal", () => {
+    const res = removeVocabularyLine({ V: ["only"], A: ["x"] }, none, "V", "only");
+    expect(res.vocab).toEqual({ V: [], A: ["x"] });
+  });
+  test("refuses the other user's (read-only) line", () => {
+    const vocab = { V: ["mine", "theirs"] };
+    expect(removeVocabularyLine(vocab, new Set(["theirs"]), "V", "theirs")).toEqual({ reason: "read-only" });
+  });
+  test("refuses a blank or missing line", () => {
+    expect(removeVocabularyLine({ V: ["", "a"] }, none, "V", "")).toEqual({ reason: "blank" });
+    expect(removeVocabularyLine({ V: ["a"] }, none, "V", "   ")).toEqual({ reason: "blank" });
+    expect(removeVocabularyLine({ V: ["a"] }, none, "V", undefined)).toEqual({ reason: "blank" });
+  });
+  test("refuses a line that isn't in that category, or an unknown category", () => {
+    expect(removeVocabularyLine({ V: ["a"], A: ["b"] }, none, "V", "b")).toEqual({ reason: "not-found" });
+    expect(removeVocabularyLine({ V: ["a"] }, none, "Nope", "a")).toEqual({ reason: "not-found" });
+    expect(removeVocabularyLine({ V: ["a"] }, none, "toString", "a")).toEqual({ reason: "not-found" });
+  });
+  test("works on a map without a prototype", () => {
+    const vocab = parseVocabularyFile("#V\na\nb");
+    expect(removeVocabularyLine(vocab, none, "V", "a").vocab.V).toEqual(["b"]);
+  });
+});
+
+describe("a deleted line through save and reload", () => {
+  const base = "#V\na\ndoomed\nc\n#A\nx";
+
+  test("stays deleted when remote is unchanged", () => {
+    const local = removeVocabularyLine(parseVocabularyFile(base), new Set(), "V", "doomed").vocab;
+    const out = mergeVocabulary(base, local, base);
+    expect(out.V).toEqual(["a", "c"]);
+    expect(out.A).toEqual(["x"]);
+  });
+  test("keeps a line someone else added on remote meanwhile", () => {
+    const local = removeVocabularyLine(parseVocabularyFile(base), new Set(), "V", "doomed").vocab;
+    const remote = "#V\na\ndoomed\nc\nfrom-remote\n#A\nx";
+    const out = mergeVocabulary(base, local, remote);
+    expect(out.V).toEqual(["a", "c", "from-remote"]);
+  });
+  test("an emptied category keeps its header in the saved text", () => {
+    const b = "#V\nonly\n#A\nx";
+    const local = removeVocabularyLine(parseVocabularyFile(b), new Set(), "V", "only").vocab;
+    const out = mergeVocabulary(b, local, b);
+    expect(out.V).toEqual([]);
+    expect(vocabularyToText(out)).toBe("#V\n\n#A\nx");
+  });
+  test("the unsaved-edits buffer holds the category without the line, even when emptied", () => {
+    const layered = mergeVocabularyLayers("#V\nonly\n#A\nx", null);
+    const local = removeVocabularyLine(layered.vocab, layered.readOnly, "V", "only").vocab;
+    const buf = pendingVocabCategories(local, ["V"], layered.readOnly, layered.otherCategories);
+    expect(Object.keys(buf)).toEqual(["V"]);
+    expect(buf.V).toEqual([]);
+  });
+  test("the other user's lines never reach the save", () => {
+    const layered = mergeVocabularyLayers("#V\nmine\ngone", "#V\ntheirs\n#O\nother-only");
+    const local = removeVocabularyLine(layered.vocab, layered.readOnly, "V", "gone").vocab;
+    const own = withoutReadOnlyLines(local, layered.readOnly, layered.otherCategories);
+    expect(own).toEqual({ V: ["mine"] });
+  });
+  test("the other user's identical line shows again, read-only, after the layers are rebuilt", () => {
+    // Self and other both have "shared": only self's copy is shown (editable).
+    const layered = mergeVocabularyLayers("#V\nshared\nmine", "#V\nshared");
+    expect(layered.readOnly.has("shared")).toBe(false);
+    const local = removeVocabularyLine(layered.vocab, layered.readOnly, "V", "shared").vocab;
+    expect(local.V).toEqual(["mine"]);
+    const re = relayerVocabulary(local, layered.readOnly, layered.otherCategories, "#V\nshared");
+    expect(re.vocab.V).toEqual(["mine", "shared"]);
+    expect(re.readOnly.has("shared")).toBe(true);
+    // ...and is still kept out of the save.
+    expect(withoutReadOnlyLines(re.vocab, re.readOnly, re.otherCategories)).toEqual({ V: ["mine"] });
+  });
+});
+
+describe("vocabPendingHintText", () => {
+  test("names additions and deletions", () => {
+    expect(vocabPendingHintText(2, 0)).toBe("unsaved changes pending — 2 new entries — Save & Close to commit");
+    expect(vocabPendingHintText(1, 0)).toBe("unsaved changes pending — 1 new entry — Save & Close to commit");
+    expect(vocabPendingHintText(0, 1)).toBe("unsaved changes pending — 1 deleted — Save & Close to commit");
+    expect(vocabPendingHintText(3, 2)).toBe("unsaved changes pending — 3 new entries, 2 deleted — Save & Close to commit");
+  });
+  test("gives no number when none is known", () => {
+    expect(vocabPendingHintText(0, 0)).toBe("unsaved changes pending — Save & Close to commit");
+    expect(vocabPendingHintText(undefined, "x")).toBe("unsaved changes pending — Save & Close to commit");
+    expect(vocabPendingHintText(-1, null)).toBe("unsaved changes pending — Save & Close to commit");
   });
 });

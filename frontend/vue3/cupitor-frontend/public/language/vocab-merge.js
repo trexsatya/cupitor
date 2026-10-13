@@ -121,3 +121,46 @@ export function mergeVocabulary(baseText, localVocab, remoteText) {
   }
   return merged
 }
+
+// Remove one line from a category of a vocabulary map, for "Delete line" in
+// the add-to-vocabulary dialog. `occurrence` picks which copy when the
+// category holds the same text more than once (0 = the first).
+// Returns { vocab } — a new map (same category order; only the touched
+// category gets a new array; the input is not changed) — or { reason }:
+//   'blank'     — no line, or a blank (separator) line
+//   'read-only' — the line is in `readOnly` (the other user's; never saved)
+//   'not-found' — the category doesn't hold that copy of the line
+// A category left with no lines is kept, empty: its header stays in the
+// file (the 3-way merge keeps a category's header whenever base or remote
+// has it anyway), and keeping the key is what puts the deletion in the
+// unsaved-edits buffer.
+export function removeVocabularyLine(vocab, readOnly, category, line, occurrence = 0) {
+  if (typeof line !== 'string' || !line.trim()) return { reason: 'blank' }
+  if (readOnly && readOnly.has(line)) return { reason: 'read-only' }
+  const lines = ownLines(vocab, category)
+  let at = -1
+  for (let i = 0, seen = 0; i < lines.length; i++) {
+    if (lines[i] !== line) continue
+    if (seen === occurrence) { at = i; break }
+    seen++
+  }
+  if (at < 0) return { reason: 'not-found' }
+  const out = Object.create(null)
+  for (const cat of Object.keys(vocab)) {
+    out[cat] = cat === category ? lines.filter((_, i) => i !== at) : vocab[cat]
+  }
+  return { vocab: out }
+}
+
+// The "unsaved changes pending" hint in the add-to-vocabulary dialog, from
+// the counts of lines added and deleted since the last save. With neither
+// known (e.g. replayed from an older buffer) it gives no number.
+export function vocabPendingHintText(added, deleted) {
+  const a = Math.max(0, parseInt(added, 10) || 0)
+  const d = Math.max(0, parseInt(deleted, 10) || 0)
+  const parts = []
+  if (a > 0) parts.push(`${a} new entr${a === 1 ? 'y' : 'ies'}`)
+  if (d > 0) parts.push(`${d} deleted`)
+  const countPart = parts.length ? ` — ${parts.join(', ')}` : ''
+  return `unsaved changes pending${countPart} — Save & Close to commit`
+}

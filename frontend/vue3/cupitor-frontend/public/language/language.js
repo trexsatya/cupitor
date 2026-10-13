@@ -326,6 +326,9 @@ import {
   vocabularyToText,
   isProperlyBracketed,
   mergeVocabulary,
+  ownLines,
+  removeVocabularyLine,
+  vocabPendingHintText,
 } from './vocab-merge.js';
 import {
   escapeHtml,
@@ -1107,6 +1110,8 @@ function importSearchesFromVocab() {
 // picker so they don't pollute the user-facing word list.
 const VOCAB_HIDDEN_CATEGORIES = new Set(['expansions', 'Expansions', '_expansions'])
 
+// How many loadWholeVocabulary runs are refilling the selects right now.
+let _vocabSelectRebuilds = 0
 function loadWholeVocabulary(onDone) {
   $('#searchedWords').html('')
   $('#addToVocabularyDialogSelect').html('')
@@ -1115,6 +1120,9 @@ function loadWholeVocabulary(onDone) {
   $('#searchedWords').append(new Option('', '', false, false))
   $('#addToVocabularyDialogSelect').append(new Option('', '', false, false))
   $('#addToVocabBtn').prop('disabled', true)
+  // The dialog's reference list is being refilled: no line to delete yet.
+  _vocabSelectRebuilds++
+  _refreshVocabDeleteBtn()
 
   const vocabCategoriesToPopulate = new Set()
 
@@ -1140,6 +1148,8 @@ function loadWholeVocabulary(onDone) {
     // addToVocabularyDialogSelect: keep the heading as a non-selectable label.
     const dialogHeading = new Option(`${category}`, category, false, false)
     dialogHeading.disabled = true
+    // Marks the heading so "Delete line" can tell which category a line is in.
+    dialogHeading.dataset.vocabCategory = category
     $('#addToVocabularyDialogSelect').append(dialogHeading)
     vocabLines.forEach(line => {
       $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
@@ -1149,10 +1159,15 @@ function loadWholeVocabulary(onDone) {
     $('#vocabLoadingBarFill').css('width', `${(done / total) * 100}%`)
   };
   schedule(categories, .005 , it => {
-    populateLines(it)
+    // A category gone from window.vocabulary meanwhile (a save swapping the
+    // map mid-rebuild) must not stop the run: the completion below re-enables
+    // the dialog buttons.
+    try { populateLines(it) } catch (e) { console.warn('loadWholeVocabulary: skipped category', it, e) }
   }, () => {
     $('#addToVocabBtn').prop('disabled', false)
     $('#vocabLoadingBar').hide()
+    _vocabSelectRebuilds = Math.max(0, _vocabSelectRebuilds - 1)
+    _refreshVocabDeleteBtn()
     if (typeof onDone === 'function') {
       try { onDone() } catch (e) { console.warn('loadWholeVocabulary onDone failed', e) }
     }
@@ -1243,6 +1258,8 @@ function openAddToVocabDialog() {
       $('#addToVocabularyDialogSelect').val(dialogVal).trigger('change.select2')
     }
   } catch (_) { /* leave dialog selection as-is */ }
+  // 'change.select2' above reaches select2 only, not the change handler.
+  _refreshVocabDeleteBtn()
 
   // If Insert position is sticky on "inline" (e.g. from a prior session),
   // pre-fill the textarea with the chosen reference word so the user can
@@ -1363,6 +1380,7 @@ function addToVocab(commitAndClose) {
       commitVocabularyToGithub()
       window._vocabHasPendingChanges = false
       window._vocabPendingCount = 0
+      window._vocabPendingDeleteCount = 0
       _refreshVocabPendingHint()
       $("#addToVocabularyDialog").dialog("close")
       autoHideSettingsPanel()
@@ -1500,6 +1518,7 @@ function addToVocab(commitAndClose) {
     commitVocabularyToGithub()
     window._vocabHasPendingChanges = false
     window._vocabPendingCount = 0
+    window._vocabPendingDeleteCount = 0
     _refreshVocabPendingHint()
     $("#addToVocabularyDialog").dialog("close")
     autoHideSettingsPanel()
@@ -1511,6 +1530,102 @@ function addToVocab(commitAndClose) {
     $("#vocabularySegmentTextarea").val('')
     _refreshVocabPendingHint()
   }
+}
+
+// The line chosen in the dialog's reference select, as
+// { line, category, occurrence } (occurrence: which copy of that text within
+// the category, 0 = first), or null when no line is chosen (nothing, a
+// heading or a blank-line separator).
+function _selectedVocabDialogLine() {
+  const opt = $('#addToVocabularyDialogSelect option:selected')[0]
+  if (!opt || opt.disabled || !opt.value) return null
+  let line
+  try {
+    const parsed = JSON.parse(opt.value)
+    line = parsed && typeof parsed.o === 'string' ? parsed.o : null
+  } catch (_) { return null }
+  if (!line || !line.trim()) return null
+  let category = null
+  let occurrence = 0
+  for (let o = opt.previousElementSibling; o; o = o.previousElementSibling) {
+    if (o.dataset && o.dataset.vocabCategory !== undefined) { category = o.dataset.vocabCategory; break }
+    if (o.value === opt.value) occurrence++
+  }
+  if (category === null) return null
+  return { line, category, occurrence }
+}
+
+// "Delete line" is usable only for a chosen line of the user's own, with an
+// own repo, while the reference list isn't being refilled.
+function _refreshVocabDeleteBtn() {
+  const btn = document.getElementById('addVocabDeleteBtn')
+  if (!btn) return
+  let title = 'Delete the selected line. Nothing is committed until you Save & Close.'
+  let enabled = false
+  const sel = _vocabSelectRebuilds > 0 ? null : _selectedVocabDialogLine()
+  if (!_dsHasSelf()) title = SETUP_REPO_MSG
+  else if (_vocabSelectRebuilds > 0) title = 'Updating the list…'
+  else if (!sel) title = 'Select a line to delete.'
+  else if ((window._vocabularyReadOnly || new Set()).has(sel.line)) {
+    title = "This line is from the other user's vocabulary and can't be deleted here."
+  } else enabled = true
+  btn.disabled = !enabled
+  btn.title = title
+}
+
+function deleteVocabLine() {
+  if (!_requireSelf()) return
+  if (_vocabSelectRebuilds > 0) return
+  const sel = _selectedVocabDialogLine()
+  if (!sel) return
+  const readOnly = window._vocabularyReadOnly || new Set()
+  if (readOnly.has(sel.line)) {
+    alert("This line is from the other user's vocabulary and can't be deleted here.")
+    return
+  }
+  if (!confirm(`Delete this line from "${sel.category}"?\n\n${sel.line}\n\nIt is removed from GitHub when you Save & Close.`)) return
+  const res = removeVocabularyLine(window.vocabulary || {}, readOnly, sel.category, sel.line, sel.occurrence)
+  if (!res.vocab) {
+    alert(`Couldn't delete this line (${res.reason}).`)
+    return
+  }
+  // A line staged earlier and not yet saved just drops out of the "new"
+  // count; a saved one counts as a deletion.
+  const wasSaved = ownLines(parseVocabularyFile(window._vocabularyBaselineText || ''), sel.category).includes(sel.line)
+  window.vocabulary = res.vocab
+
+  // Keep the main select's chosen line across the rebuild, as addToVocab does.
+  try {
+    const rawVal = $('#searchedWords').val()
+    if (typeof rawVal === 'string' && rawVal && !rawVal.startsWith('__cat__:')) {
+      const parsed = JSON.parse(rawVal)
+      if (parsed && typeof parsed.o === 'string') window.preSelectedSearchedWord = parsed.o
+    }
+  } catch (_) {}
+  // In "inline" mode the textarea holds the deleted line; leaving it would
+  // add the line back on Save & Close.
+  const $ta = $('#vocabularySegmentTextarea')
+  if (($ta.val() || '').trim() === sel.line.trim()) $ta.val('')
+
+  window._vocabHasPendingChanges = true
+  if (wasSaved) {
+    window._vocabPendingDeleteCount = (parseInt(window._vocabPendingDeleteCount, 10) || 0) + 1
+  } else {
+    window._vocabPendingCount = Math.max(0, (parseInt(window._vocabPendingCount, 10) || 0) - 1)
+  }
+  if (!window._vocabDirtyCategories) window._vocabDirtyCategories = {}
+  window._vocabDirtyCategories[sel.category] = true
+  _savePendingVocab()
+  _refreshVocabPendingHint()
+
+  const $addAnother = $('#addVocabAddAnotherBtn')
+  const $saveClose  = $('#addVocabSaveCloseBtn')
+  $addAnother.prop('disabled', true)
+  $saveClose.prop('disabled', true)
+  loadWholeVocabulary(() => {
+    $addAnother.prop('disabled', false)
+    $saveClose.prop('disabled', false)
+  })
 }
 
 function onVocabInsertPositionChange(select) {
@@ -1830,7 +1945,8 @@ function _savePendingVocab() {
     }
     const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || ''
     const pendingCount = parseInt(window._vocabPendingCount, 10) || 0
-    localStorage.setItem(PENDING_VOCAB_KEY, JSON.stringify({ lang, categories, pendingCount, ts: Date.now() }))
+    const pendingDeleteCount = parseInt(window._vocabPendingDeleteCount, 10) || 0
+    localStorage.setItem(PENDING_VOCAB_KEY, JSON.stringify({ lang, categories, pendingCount, pendingDeleteCount, ts: Date.now() }))
   } catch (_) {}
 }
 function _clearPendingVocab() {
@@ -1838,21 +1954,19 @@ function _clearPendingVocab() {
   window._vocabDirtyCategories = {}
   window._vocabHasPendingChanges = false
   window._vocabPendingCount = 0
+  window._vocabPendingDeleteCount = 0
   _refreshVocabPendingHint()
 }
 
 // Re-render the in-dialog "unsaved changes pending" hint with the current
-// pending-entry count. Counter is in-session only — added-lines since the
-// last commit, reset on Save & Close. Falls back to a count-less message
-// when no count is known (e.g. categories replayed from localStorage on
-// boot).
+// counts of lines added and deleted since the last commit (reset on Save &
+// Close, kept in the unsaved-edits buffer). Falls back to a count-less
+// message when no count is known (e.g. an older buffer replayed on boot).
 function _refreshVocabPendingHint() {
   const $h = $('#vocabPendingHint')
   if (!$h.length) return
   if (!window._vocabHasPendingChanges) { $h.hide(); return }
-  const n = parseInt(window._vocabPendingCount, 10) || 0
-  const countPart = n > 0 ? ` — ${n} new entr${n === 1 ? 'y' : 'ies'}` : ''
-  $h.text(`unsaved changes pending${countPart} — Save & Close to commit`).show()
+  $h.text(vocabPendingHintText(window._vocabPendingCount, window._vocabPendingDeleteCount)).show()
 }
 // Called once after the initial vocabulary fetch parses into window.vocabulary.
 // Replays any locally-cached category snapshots so the user's unpushed work
@@ -1899,8 +2013,9 @@ function _replayPendingVocab() {
     // didn't include it — fall back to 0 so the hint just says "unsaved
     // changes pending" without a misleading number.
     window._vocabPendingCount = parseInt(buf.pendingCount, 10) || 0
+    window._vocabPendingDeleteCount = parseInt(buf.pendingDeleteCount, 10) || 0
     _refreshVocabPendingHint()
-    console.log(`Replayed ${any} pending vocab categor${any === 1 ? 'y' : 'ies'} (${window._vocabPendingCount} new entries) from local cache — push via Save & Close to sync.`)
+    console.log(`Replayed ${any} pending vocab categor${any === 1 ? 'y' : 'ies'} (${window._vocabPendingCount} new, ${window._vocabPendingDeleteCount} deleted) from local cache — push via Save & Close to sync.`)
   }
 }
 window._replayPendingVocab = _replayPendingVocab
@@ -4337,6 +4452,7 @@ $(document).ready(function () {
     allowClear: true,
     matcher: diacriticAwareMatcher
   }).change(e => {
+    _refreshVocabDeleteBtn()
     // When inline is selected, keep the textarea in sync with the chosen reference word
     if ($('#vocabInsertPosition').val() === 'inline') {
       try {
@@ -22264,6 +22380,7 @@ window.mergeSrtWithResolution   = mergeSrtWithResolution
 
 window.openAddToVocabDialog = openAddToVocabDialog;
 window.addToVocab = addToVocab;
+window.deleteVocabLine = deleteVocabLine;
 window.onVocabInsertPositionChange = onVocabInsertPositionChange;
 window.searchVocabularyByPrefix = searchVocabularyByPrefix;
 window.importSearches = importSearches;
