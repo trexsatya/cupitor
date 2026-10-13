@@ -121,6 +121,12 @@ import {
   parseRemoteList,
 } from './net.js';
 import {
+  readUrl as _dsReadUrl,
+  writeTarget as _dsWriteTarget,
+  hasSelf as _dsHasSelf,
+  langFromLocation as _dsLangFromLocation,
+} from './data-source.js';
+import {
   isVirtual as _coreIsVirtual,
   isManualItem as _isManualItem,
   newManualId as _coreNewManualId,
@@ -1583,9 +1589,18 @@ function autoHideSettingsPanel() {
 }
 window.autoHideSettingsPanel = autoHideSettingsPanel
 
-// Thin wrapper — pure core in ./net.js takes GitHubUtils as a parameter.
+// Every single-file write goes to self. Throws NoSelfRepoError (the "set up
+// your repo" message) when there is no self; callers surface e.message.
 function commitWithMerge(opts) {
-  return _coreCommitWithMerge(opts, { githubUtils: window.GitHubUtils })
+  const t = _dsWriteTarget()
+  return _coreCommitWithMerge({ branch: t.branch, ...opts },
+    { githubUtils: window.GitHubUtils, owner: t.owner, repo: t.repo })
+}
+
+// A GitHub-API (uncached) read of a file in self.
+function _selfGetFile(filePath) {
+  const t = _dsWriteTarget()
+  return window.GitHubUtils.getFile(t.owner, t.repo, filePath, '', t.branch)
 }
 
 // 3-way merge of categorised vocab files. base = text we loaded, localVocab =
@@ -4983,9 +4998,12 @@ function _publishLanguageMeta() {
 }
 _publishLanguageMeta()
 
+// Raw base for the primary source (own repo when set up, else the layered
+// other). Single-source readers use it; layered readers go through
+// data-source directly. The language is the lowercased, validated ?lang=
+// (falling back to swedish), so an odd value cannot make readUrl throw.
 function getResourceUrl() {
-  const value = getLangFromUrl();
-  return `https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/${value.fullName}`
+  return _dsReadUrl('primary', '', _dsLangFromLocation())
 }
 
 function getTargetLangSrtSuffix() {
@@ -5876,9 +5894,7 @@ async function flushPendingSrtEdits() {
   }))
   const msg = `srt: batch edit — ${paths.length} file${paths.length === 1 ? '' : 's'}, ${totalLines} line${totalLines === 1 ? '' : 's'}`
   const result = await window.GitHubUtils.commitMultipleFiles({
-    owner: 'trexsatya',
-    repo: 'trexsatya.github.io',
-    branch: 'gh-pages',
+    ..._dsWriteTarget(),
     commitMessage: msg,
     files
   })
@@ -8855,9 +8871,7 @@ async function fetchSrtIndexEntry(videoId) {
   const filePath = `db/language/${lang.fullName}/srts/index.json`
   let text = null
   try {
-    const file = await window.GitHubUtils.getFile(
-      'trexsatya', 'trexsatya.github.io', filePath, '', 'gh-pages'
-    )
+    const file = await _selfGetFile(filePath)
     text = file.content
   } catch (e) {
     // A failed read is not "this video is new".
@@ -8919,14 +8933,14 @@ async function deleteSelectedMedia() {
   // language and English (target translation). 404 is treated as "already gone".
   const candidates = [`${baseName}.${srcCode}.srt`]
   if (srcCode !== 'en') candidates.push(`${baseName}.en.srt`)
-  const owner = 'trexsatya', repo = 'trexsatya.github.io'
+  const { owner, repo, branch } = _dsWriteTarget()
   for (const fileName of candidates) {
     const filePath = `${srtsDir}/${encodeURIComponent(fileName)}`
     try {
       await window.GitHubUtils.deleteFileWithLookup({
         owner, repo, filePath,
         commitMessage: `srt: delete ${fileName}`,
-        branch: 'gh-pages'
+        branch
       })
     } catch (e) {
       console.warn(`Failed to delete ${fileName}:`, e)
@@ -9078,14 +9092,14 @@ async function _deleteDuplicateSrtEntry(link, baseName) {
   const srcCode = lang.code
   const candidates = [`${baseName}.${srcCode}.srt`]
   if (srcCode !== 'en') candidates.push(`${baseName}.en.srt`)
-  const owner = 'trexsatya', repo = 'trexsatya.github.io'
+  const { owner, repo, branch } = _dsWriteTarget()
   for (const fileName of candidates) {
     const filePath = `${srtsDir}/${encodeURIComponent(fileName)}`
     try {
       await window.GitHubUtils.deleteFileWithLookup({
         owner, repo, filePath,
         commitMessage: `srt: delete duplicate ${fileName}`,
-        branch: 'gh-pages'
+        branch
       })
     } catch (e) { console.warn(`Failed to delete ${fileName}:`, e) }
   }
@@ -9417,14 +9431,14 @@ async function _deleteVideoByLink(link) {
   const srcCode = lang.code
   const candidates = [`${baseName}.${srcCode}.srt`]
   if (srcCode !== 'en') candidates.push(`${baseName}.en.srt`)
-  const owner = 'trexsatya', repo = 'trexsatya.github.io'
+  const { owner, repo, branch } = _dsWriteTarget()
   for (const fileName of candidates) {
     const filePath = `${srtsDir}/${encodeURIComponent(fileName)}`
     try {
       await window.GitHubUtils.deleteFileWithLookup({
         owner, repo, filePath,
         commitMessage: `srt: delete ${fileName} (unavailable)`,
-        branch: 'gh-pages'
+        branch
       })
     } catch (e) { console.warn(`Failed to delete ${fileName}:`, e) }
   }
@@ -9485,7 +9499,7 @@ async function migrateSrtPathsToNFC() {
   const indexPath = `${srtsDir}/index.json`
 
   // Pull the live index from GitHub (uncached real-time read).
-  const file = await window.GitHubUtils.getFile('trexsatya', 'trexsatya.github.io', indexPath, '', 'gh-pages')
+  const file = await _selfGetFile(indexPath)
   let entries
   try { entries = JSON.parse(file.content) } catch (e) { throw new Error('index.json is not valid JSON: ' + e.message) }
   if (!Array.isArray(entries)) throw new Error('index.json is not an array')
@@ -9544,9 +9558,7 @@ async function migrateSrtPathsToNFC() {
   })
 
   await window.GitHubUtils.commitMultipleFiles({
-    owner: 'trexsatya',
-    repo: 'trexsatya.github.io',
-    branch: 'gh-pages',
+    ..._dsWriteTarget(),
     commitMessage: `srts: normalize ${drift.length} index entr${drift.length === 1 ? 'y' : 'ies'} + ${renamed} file rename(s) to NFC`,
     files
   })
@@ -9606,7 +9618,7 @@ async function deleteChannel(channel) {
     return (i > 0 ? s.name.slice(0, i) : s.name).trim() === channel
   })
   if (!videos.length) { alert(`No videos found for channel "${channel}".`); return }
-  if (!confirm(`Delete channel "${channel}" — ${videos.length} video${videos.length === 1 ? '' : 's'}?\n\nThis removes every .sv.srt and .en.srt file from gh-pages and updates index.json. Cannot be undone from the UI.`)) return
+  if (!confirm(`Delete channel "${channel}" — ${videos.length} video${videos.length === 1 ? '' : 's'}?\n\nThis removes every .sv.srt and .en.srt file from your repo and updates index.json. Cannot be undone from the UI.`)) return
 
   const lang = getLangFromUrl()
   const srtsDir = `db/language/${lang.fullName}/srts`
@@ -9628,9 +9640,7 @@ async function deleteChannel(channel) {
   })
 
   await window.GitHubUtils.commitMultipleFiles({
-    owner: 'trexsatya',
-    repo: 'trexsatya.github.io',
-    branch: 'gh-pages',
+    ..._dsWriteTarget(),
     commitMessage: `channel: delete "${channel}" (${videos.length} video${videos.length === 1 ? '' : 's'})`,
     files
   })
@@ -10078,9 +10088,7 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
   // empty; any other failed read stops the push.
   let indexText = null
   try {
-    const file = await window.GitHubUtils.getFile(
-      'trexsatya', 'trexsatya.github.io', indexPath, '', 'gh-pages'
-    )
+    const file = await _selfGetFile(indexPath)
     indexText = file.content
   } catch (e) {
     if (!/GitHub API error 404\b/.test(String(e && e.message))) throw e
@@ -10243,9 +10251,7 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
       : `${commitMessage} [chunk ${ci + 1}/${nonEmpty.length}]`
     _report('committing', { files: chunk.length, chunk: ci + 1, totalChunks: nonEmpty.length })
     const r = await window.GitHubUtils.commitMultipleFiles({
-      owner: 'trexsatya',
-      repo: 'trexsatya.github.io',
-      branch: 'gh-pages',
+      ..._dsWriteTarget(),
       commitMessage: chunkMsg,
       files: chunk
     })
@@ -11233,7 +11239,7 @@ async function _fetchRemoteRecordings() {
   try {
     if (typeof window.GitHubProxy !== 'undefined' && window.GitHubUtils) {
       // Inside the app: its proxy holds the token.
-      const f = await window.GitHubUtils.getFile('trexsatya', 'trexsatya.github.io', path, '', 'gh-pages')
+      const f = await _selfGetFile(path)
       // An empty body is not "the server has nothing" — the contents API
       // sends one for a file over 1 MB — so it does not count as a fresh read.
       const text = f && f.content
@@ -11242,7 +11248,8 @@ async function _fetchRemoteRecordings() {
     } else {
       // A plain browser: the repository is public, so the API answers without
       // a token — and asking GitHubUtils would prompt for one on every load.
-      const r = await fetch(`https://api.github.com/repos/trexsatya/trexsatya.github.io/contents/${path}?ref=gh-pages`,
+      const s = _dsWriteTarget()
+      const r = await fetch(`https://api.github.com/repos/${s.owner}/${s.repo}/contents/${path}?ref=${encodeURIComponent(s.branch)}`,
         { headers: { Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' })
       if (r.status === 404) return { data: {}, fresh: true }
       if (r.ok) {
