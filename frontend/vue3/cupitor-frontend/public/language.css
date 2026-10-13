@@ -4708,3 +4708,17 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 #search-pagination { padding: 4px 0; }
 #search-pagination .btn.disabled { opacity: 0.4; pointer-events: none; }
 #search-pagination select { margin: 0 4px; }
+
+/* Account banner and panel (language/account-panel.js) */
+.account-banner { background: #fff6d6; border: 1px solid #e8d27a; border-radius: 6px; padding: 6px 10px; margin: 6px 0; font-size: 13px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#accountDialog p { margin: 6px 0; }
+#accountDialog .acct-msg { font-weight: bold; }
+#accountDialog .acct-err { color: #a00; }
+#accountDialog .acct-notice { color: #865; font-size: 12px; }
+#accountDialog .acct-step { font-size: 13px; }
+#accountDialog .acct-step-done { color: #2a7; }
+#accountDialog .acct-step-failed { color: #a00; }
+#accountDialog .acct-token input[type="password"] { width: 100%; box-sizing: border-box; }
+#accountDialog .acct-remember { display: block; margin: 4px 0; font-weight: normal; }
+#accountDialog .acct-setup, #accountDialog .acct-token, #accountDialog .acct-other { border-top: 1px solid #eee; padding-top: 6px; margin-top: 6px; }
+#accountDialog .acct-other select { max-width: 100%; margin-left: 4px; }

@@ -142,6 +142,10 @@ import {
   NoSelfRepoError as _DsNoSelfRepoError,
 } from './data-source.js';
 
+// The account panel (account-panel.js) owns sign-in; the legacy in-page PAT
+// prompt in github-utils.js never fires.
+window._suppressGHTokenPrompt = true
+
 // Notices about the other user's (read-only) layer, e.g. "srts/index.json was
 // not found in alice's data". Kept for the account panel, logged, and shown
 // briefly as a toast.
