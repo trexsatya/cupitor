@@ -117,14 +117,7 @@ export function findLineByTime(lines, t) {
 // anywhere. Returns -1 when no anchor resolves (callers then treat as no-match).
 export function resolveMatchIdxByTimeWord(primary, item) {
   if (!primary || !primary.length || !item) return -1
-  const ts = Number(item.timeStart)
-  const te = Number(item.timeEnd)
-  const hasWin = Number.isFinite(ts) && Number.isFinite(te) && te >= ts
-  const word = item.word ? String(item.word).toLowerCase().trim() : ''
-  const overlapsWin = l => hasWin && l && l.start && l.end &&
-    typeof l.start.ordinal === 'number' && typeof l.end.ordinal === 'number' &&
-    l.end.ordinal > ts && l.start.ordinal < te
-  const hasWord = l => !!word && String((l && l.text) || '').toLowerCase().includes(word)
+  const { hasWin, word, overlapsWin, hasWord, ts, te } = _itemAnchors(item)
   if (word && hasWin) {
     const i = primary.findIndex(l => overlapsWin(l) && hasWord(l))
     if (i >= 0) return i
@@ -140,6 +133,43 @@ export function resolveMatchIdxByTimeWord(primary, item) {
   return -1
 }
 
+function _itemAnchors(item) {
+  const ts = Number(item.timeStart)
+  const te = Number(item.timeEnd)
+  const hasWin = Number.isFinite(ts) && Number.isFinite(te) && te >= ts
+  const word = item.word ? String(item.word).toLowerCase().trim() : ''
+  const overlapsWin = l => hasWin && !!l && !!l.start && !!l.end &&
+    typeof l.start.ordinal === 'number' && typeof l.end.ordinal === 'number' &&
+    l.end.ordinal > ts && l.start.ordinal < te
+  // A whole-word match: a short word ("en") must not be found inside another.
+  const wordRe = word ? buildBoundedWordRe(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'iu') : null
+  const hasWord = l => !!wordRe && wordRe.test(String((l && l.text) || ''))
+  return { ts, te, hasWin, word, overlapsWin, hasWord }
+}
+
+// The cue a recorded item was captured on. `lineIndex` is tried first, but a
+// snippet file is renumbered whenever a new capture is stitched in ahead of
+// it, so the stored number can still exist and yet name a different line —
+// one outside the clip, without the word. Such a hit is only trusted when it
+// lies inside the clip window; otherwise time + word decide. Inside the
+// window, a cue carrying the word beats one that doesn't (the number may have
+// shifted by a line or two). Returns -1 when nothing resolves.
+export function locateItemCue(primary, item) {
+  if (!primary || !primary.length || !item) return -1
+  const want = String(item.lineIndex)
+  const pos = item.lineIndex == null ? -1
+    : primary.findIndex(l => l && l.index != null && String(l.index) === want)
+  if (pos < 0) return resolveMatchIdxByTimeWord(primary, item)
+  const { hasWin, word, overlapsWin, hasWord } = _itemAnchors(item)
+  if (!hasWin || overlapsWin(primary[pos])) {
+    if (!word || hasWord(primary[pos]) || !hasWin) return pos
+    const i = primary.findIndex(l => overlapsWin(l) && hasWord(l))
+    return i >= 0 ? i : pos
+  }
+  const r = resolveMatchIdxByTimeWord(primary, item)
+  return r >= 0 ? r : pos
+}
+
 // Recompute a recorded item's clip window from the CURRENT parsed subtitles so a
 // stored [timeStart, timeEnd] built before the sparse-snippet fix (or captured
 // across a temporal gap) doesn't overshoot at play time. Locates the matched cue
@@ -149,9 +179,7 @@ export function resolveMatchIdxByTimeWord(primary, item) {
 // unlocatable cues return null so the caller keeps the stored window.
 export function contiguousPlayWindow(primary, item, opts = {}) {
   if (!primary || !primary.length || !item || isManualItem(item)) return null
-  const want = String(item.lineIndex)
-  let pos = primary.findIndex(l => l && l.index != null && String(l.index) === want)
-  if (pos < 0) pos = resolveMatchIdxByTimeWord(primary, item)
+  const pos = locateItemCue(primary, item)
   if (pos < 0) return null
   const cues = primary.map(l => ({
     ts: l && l.start && l.start.ordinal,
@@ -243,10 +271,7 @@ export function buildPlayingSubsVM({ parsed, lang, item, before, after }) {
   const secondary = _lang === 'sv' ? parsed.en : parsed.sv
   if (!primary || !primary.length) return { state: 'no-primary' }
 
-  const want = String(item && item.lineIndex)
-  let matchIdx = primary.findIndex(l => l && l.index != null && String(l.index) === want)
-  // Stale lineIndex (SRT re-segmented since capture) → recover by time + word.
-  if (matchIdx < 0) matchIdx = resolveMatchIdxByTimeWord(primary, item)
+  const matchIdx = locateItemCue(primary, item || {})
   if (matchIdx < 0) return { state: 'no-match' }
 
   const _before = Math.max(0, parseInt(before, 10) || 0)

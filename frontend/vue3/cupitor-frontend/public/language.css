@@ -1415,28 +1415,30 @@ input:checked + .slider:before {
 #channelManagerDialog .ch-delete:hover { background: #ffebee; }
 #channelManagerDialog .ch-delete:disabled { cursor: progress; opacity: 0.6; }
 
-/* SRT boot-loading progress banner — slides in at the very top of the
-   viewport while the index is being walked. Visible regardless of which
-   panel the user is on, auto-hides ~600ms after the last fetch settles. */
+/* SRT boot-loading progress banner — sits along the bottom of the viewport
+   while the index is being walked. Visible regardless of which panel the user
+   is on, auto-hides ~600ms after the last fetch settles. */
 #srtLoadingBanner {
     position: fixed;
-    top: 0;
+    bottom: 0;
     left: 0;
     right: 0;
     z-index: 99998;
     background: #fffde7;
-    border-bottom: 1px solid #ffc107;
-    padding: 4px 12px 6px;
+    border-top: 1px solid #ffc107;
+    padding: 4px 12px calc(6px + env(safe-area-inset-bottom, 0px));
     font-size: 12px;
     color: #5d4037;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+    box-shadow: 0 -2px 4px rgba(0,0,0,0.08);
     display: none;
+    /* Only a notice — taps go through to whatever sits under it. */
+    pointer-events: none;
 }
 /* Practice covers the screen from 100002 up, so at the banner's own level it
    loads subtitles behind the view with nothing on screen to say so. Above the
-   practice chrome, below any dialog. */
+   practice view, below its bottom buttons (100004) so they stay whole. */
 body.practice-mode #srtLoadingBanner {
-    z-index: 100006;
+    z-index: 100003;
 }
 #srtLoadingBanner #srtLoadingText {
     display: block;
@@ -4702,3 +4704,7 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 #richCardEditor .ck-editor__editable { min-height: 160px; max-height: 55vh; }
 #richCardEditor .rce-url { display: flex; gap: 6px; margin-bottom: 6px; }
 #richCardEditor .rce-url-input { flex: 1; min-width: 0; padding: 4px 6px; }
+
+#search-pagination { padding: 4px 0; }
+#search-pagination .btn.disabled { opacity: 0.4; pointer-events: none; }
+#search-pagination select { margin: 0 4px; }

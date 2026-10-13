@@ -77,3 +77,14 @@ export function groupAndArrangeResults(items, ctx = {}) {
   })
   return arr.filter(Boolean)
 }
+
+// Which slice of the result headings one page shows. `page` is 0-based and is
+// clamped into range, so a page number kept from a longer result list (or a
+// settings redraw after fewer results) still lands on a real page.
+export function searchPageBounds(total, pageSize, page) {
+  const size = Math.max(1, Math.floor(pageSize) || 1)
+  const pageCount = Math.max(1, Math.ceil(Math.max(0, total) / size))
+  const p = Math.min(Math.max(0, Math.floor(page) || 0), pageCount - 1)
+  const start = p * size
+  return { page: p, pageCount, start, end: Math.min(total, start + size) }
+}

@@ -6,6 +6,7 @@ import {
   buildPlayingBannerVM,
   buildPlayingSubsVM,
   contiguousPlayWindow,
+  locateItemCue,
 } from "./playing-ui-vm";
 
 describe("buildBoundedWordRe", () => {
@@ -292,5 +293,48 @@ describe("contiguousPlayWindow", () => {
   test("returns null for empty / missing primary", () => {
     expect(contiguousPlayWindow([], { lineIndex: 1 })).toBeNull();
     expect(contiguousPlayWindow(null, { lineIndex: 1 })).toBeNull();
+  });
+});
+
+describe("locateItemCue", () => {
+  const cue = (index, text, ts, te) => ({ index, text, start: { ordinal: ts }, end: { ordinal: te } });
+  // The real snippet behind "röd tråd" (kcgOlOl2TZQ), cues 5–7 of the clip.
+  const primary = [
+    cue(1, "MIn hjärna säger direkt", 580.4, 585.5),
+    cue(2, "Men det gjorde vi inte", 585.7, 590.0),
+    cue(5, "Jag sitter och gör en matlista", 599.6, 604.0),
+    cue(6, "Här har du maträtten, jag tror jag sett en röd tråd i det hela.", 604.5, 610.2),
+    cue(7, "Det är mjöl i allt jag saknar tydligen.", 610.2, 614.7),
+  ];
+  const item = { word: "röd tråd", timeStart: 599.585, timeEnd: 614.733 };
+
+  test("a renumbered file: the stored number names a line outside the clip → the in-clip line with the word", () => {
+    expect(locateItemCue(primary, { ...item, lineIndex: 2 })).toBe(3);
+  });
+
+  test("a stored number off by one inside the clip → the line with the word", () => {
+    expect(locateItemCue(primary, { ...item, lineIndex: 7 })).toBe(3);
+  });
+
+  test("a stored number on an in-clip line is kept when no line has the literal word (inflected match)", () => {
+    expect(locateItemCue(primary, { ...item, word: "röda trådar", lineIndex: 7 })).toBe(4);
+  });
+
+  test("a correct stored number is kept", () => {
+    expect(locateItemCue(primary, { ...item, lineIndex: 6 })).toBe(3);
+  });
+
+  test("an item without a clip window trusts the stored number", () => {
+    expect(locateItemCue(primary, { word: "röd tråd", lineIndex: 2 })).toBe(1);
+  });
+});
+
+describe("locateItemCue whole words", () => {
+  const cue = (index, text, ts, te) => ({ index, text, start: { ordinal: ts }, end: { ordinal: te } });
+  test("a short word is not found inside another word on a neighbouring line", () => {
+    const primary = [cue(1, "det är en bil", 10, 12), cue(2, "hon kände sig ensam", 12, 14)];
+    // stored line 1 is right; line 2 only has "en" inside "kände"/"ensam"
+    expect(locateItemCue(primary, { word: "en", lineIndex: 1, timeStart: 10, timeEnd: 14 })).toBe(0);
+    expect(locateItemCue(primary, { word: "en", lineIndex: 2, timeStart: 10, timeEnd: 14 })).toBe(0);
   });
 });

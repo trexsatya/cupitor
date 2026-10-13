@@ -3,6 +3,7 @@ import {
   channelOfItem,
   applyBlockedChannelFallback,
   groupAndArrangeResults,
+  searchPageBounds,
 } from './search-results-vm.js'
 
 const srt = (link, name) => ({ link, name })
@@ -126,5 +127,19 @@ describe('groupAndArrangeResults', () => {
       { url: 'v1', line: { index: '40' } },
     ]
     expect(groupAndArrangeResults(items, { lodash: _ })).toHaveLength(2)
+  })
+})
+
+describe('searchPageBounds', () => {
+  test('splits headings into full pages with a short last page', () => {
+    expect(searchPageBounds(120, 50, 0)).toEqual({ page: 0, pageCount: 3, start: 0, end: 50 })
+    expect(searchPageBounds(120, 50, 2)).toEqual({ page: 2, pageCount: 3, start: 100, end: 120 })
+  })
+  test('pages never overlap: the last heading of one page is not the first of the next', () => {
+    expect(searchPageBounds(120, 50, 1).start).toBe(searchPageBounds(120, 50, 0).end)
+  })
+  test('a page past the end clamps to the last page; nothing found is one empty page', () => {
+    expect(searchPageBounds(30, 50, 4)).toEqual({ page: 0, pageCount: 1, start: 0, end: 30 })
+    expect(searchPageBounds(0, 50, 0)).toEqual({ page: 0, pageCount: 1, start: 0, end: 0 })
   })
 })

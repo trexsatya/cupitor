@@ -234,6 +234,7 @@ import {
   computeResumePoint,
   recPlayExternalPauseAction,
 } from './play-queue.js';
+import { createReturnGuard } from './return-guard.js';
 import {
   parseVocabularyFile,
   vocabularyToText,
@@ -294,7 +295,7 @@ import {
   phraseFoundInTexts as _phraseFoundInTexts,
   highlightWordHtml as _highlightWordHtml,
   findLineByTime as _findLineByTime,
-  resolveMatchIdxByTimeWord as _resolveMatchIdxByTimeWord,
+  locateItemCue as _locateItemCue,
   contiguousPlayWindow as _contiguousPlayWindow,
   buildPlayingBannerVM,
   buildPlayingSubsVM,
@@ -311,6 +312,7 @@ import {
   channelOfItem as _coreChannelOfItem,
   applyBlockedChannelFallback as _coreApplyBlockedChannelFallback,
   groupAndArrangeResults as _coreGroupAndArrangeResults,
+  searchPageBounds,
 } from './renderer/search-results-vm.js';
 import {
   buildHighlightSpans as _buildHighlightSpans,
@@ -481,6 +483,34 @@ function _suppressYoutubeAutoplay() {
   }
   setTimeout(tick, 150)
 }
+
+// Android plays a paused video again when the app comes back to the front —
+// see ./return-guard.js. Anything that asks for playback on purpose stands the
+// guard down: the page's own play calls (wrapped below), a tap or key on the
+// page, a tap inside the player (which takes focus from the page), a headset.
+const _ytReturnGuard = createReturnGuard({
+  getState: () => window.ytPlayer.getPlayerState(),
+  pause: () => window.ytPlayer.pauseVideo(),
+})
+function _hookYtForReturnGuard() {
+  const p = window.ytPlayer
+  if (!p || p.__returnGuardHooked || typeof p.playVideo !== 'function') return
+  p.__returnGuardHooked = true
+  ;['playVideo', 'loadVideoById', 'loadVideoByUrl', 'seekTo'].forEach(m => {
+    const orig = p[m]
+    if (typeof orig !== 'function') return
+    p[m] = function (...args) { _ytReturnGuard.cancel(); return orig.apply(this, args) }
+  })
+  try { p.addEventListener('onStateChange', e => _ytReturnGuard.onStateChange(e && e.data)) } catch (_) {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { _hookYtForReturnGuard(); _ytReturnGuard.onHidden() }
+  else { _hookYtForReturnGuard(); _ytReturnGuard.onVisible() }
+})
+;['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
+  document.addEventListener(ev, () => _ytReturnGuard.cancel(), true))
+window.addEventListener('blur', () => { if (!document.hidden) _ytReturnGuard.cancel() })
+window.addEventListener('cupitorMediaKey', () => _ytReturnGuard.cancel(), true)
 
 // Start playback of the currently selected media (used by the "Play" button).
 // Selecting media via #mp3Choice intentionally does NOT load subtitles — the
@@ -1721,7 +1751,6 @@ async function doSearch(searchThis, el) {
     console.log('[search] data not loaded yet, deferring until vocabulary + subtitles ready…');
     await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]);
   }
-  resetSearchResultIndex()
   await fetchSRTs(searchThis);
   // Fire-and-forget: the host answers on its own event, so this never delays
   // the subtitle results. No-op unless the auto toggle is on.
@@ -2063,7 +2092,7 @@ window._subtitlesReadyPromise = Promise.race([
 // its own per-call timeout — which `_withTimeout` provides upstream.
 // Boot-time SRT progress banner. With the index running into the hundreds,
 // the parallel-but-bounded loader can take 10+ seconds; without UI the user
-// thinks the page is frozen. Banner appears at the top of the viewport,
+// thinks the page is frozen. Banner sits along the bottom of the viewport,
 // updates as each SRT pair settles, and auto-hides on completion.
 function _srtProgressShow(total) {
   let $b = $('#srtLoadingBanner')
@@ -6352,18 +6381,16 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
   const WORD_CHUNK = 1
 
-  for (let wStart = window._lastRenderedWordIndex, i=0; wStart < words.length; wStart += WORD_CHUNK, i++) {
-    if(i > getSearchResultPageSize()) {
-      $('#search-pagination').show()
-      console.log(`Populate SRT findings completed in ${(new Date() - startTime)/1000} s`)
-      break
-    }
-    window._lastRenderedWordIndex = wStart
+  const pg = searchPageBounds(words.length, getSearchResultPageSize(), window._searchResultPage)
+  window._searchResultPage = pg.page
+  _renderSearchPagination(pg)
+
+  for (let wStart = pg.start; wStart < pg.end; wStart += WORD_CHUNK) {
     if (token !== undefined && token !== window._subtitleSearchToken) {
       console.log('Token mismatch, aborting populateSRTFindings');
       return
     }
-    const wEnd = Math.min(wStart + WORD_CHUNK, words.length)
+    const wEnd = Math.min(wStart + WORD_CHUNK, pg.end)
     const slice = words.slice(wStart, wEnd)
     slice.forEach(word => {
       try {
@@ -6500,6 +6527,24 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
     // on resize via a one-time listener.
     try { _refreshAccordionStickyHeight() } catch (_) {}
   }
+  console.log(`Populate SRT findings (page ${pg.page + 1}/${pg.pageCount}) completed in ${(new Date() - startTime)/1000} s`)
+}
+
+// The bar under the results: Prev / page picker / Next. Hidden when everything
+// fits on one page.
+function _renderSearchPagination(pg) {
+  const $bar = $('#search-pagination')
+  if (pg.pageCount <= 1) { $bar.hide(); return }
+  const $sel = $('#searchPageSelect')
+  if ($sel.children().length !== pg.pageCount) {
+    $sel.empty()
+    for (let i = 0; i < pg.pageCount; i++) $sel.append(new Option(String(i + 1), String(i)))
+  }
+  $sel.val(String(pg.page))
+  $('#searchPageCount').text(pg.pageCount)
+  $('#searchPrevPageButton').toggleClass('disabled', pg.page <= 0)
+  $('#searchNextPageButton').toggleClass('disabled', pg.page >= pg.pageCount - 1)
+  $bar.show()
 }
 
 let _accordionResizeBound = false
@@ -8201,6 +8246,8 @@ async function render(searchResults, search, className, token) {
   if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
   window._srtGroupedByCorresponding = !!_regrouped
   if (_regrouped) wordToItemsMap = _regrouped
+  // What the headings are drawn from — paging redraws from the same map.
+  window._shownWordToItemsMap = wordToItemsMap
 
   // Matches are ready — swap out the loader for the real content.
   $result.html('')
@@ -8280,7 +8327,7 @@ class SearchResult {
 }
 
 function resetSearchResultIndex() {
-  window._lastRenderedWordIndex = 0
+  window._searchResultPage = 0
 }
 
 // Strip SRT framing (block indices, timestamp lines) and collapse all
@@ -8388,19 +8435,37 @@ window.searchVocabularyBySimilarity = searchVocabularyBySimilarity;
 // the ones that did.
 let _searchRunsInFlight = 0
 
-async function loadNextPageOfSearchResults(reset = false) {
-  if(reset) {
-    resetSearchResultIndex()
-  }
+// Show page `page` (0-based) of the current search's results.
+async function loadSearchResultsPage(page) {
+  const map = window._shownWordToItemsMap
+  if (!map || _searchRunsInFlight > 0) return
+  const token = window._subtitleSearchToken
+  // Clamped by populateSRTFindings, against the headings it actually lists.
+  window._searchResultPage = Math.max(0, page)
   const $result = $('#result')
-  $result.html('<div style="color:grey;padding:6px;">Loading…</div>')
+  $result.html('')
   // The wipe takes the book and manual-card bars with it.
   _ensureLibrarySearchBar()
-  await populateSRTFindings(window.wordToItemsMap, $result, window._subtitleSearchToken);
+  if (window.unprocessedSearchText) {
+    $result.append(`<p class="search-text-info">${
+        unprocessedSearchText.split(SEPARATOR_PIPE).map(it => getWikiLink(it)).join(" | ")
+    }</p>`)
+  }
+  $result.scrollTop(0)
+  await populateSRTFindings(map, $result, token);
+  if (token !== window._subtitleSearchToken) return
+  $result.append("<hr>")
   renderAccordions($result[0])
 }
 
-window.loadNextPageOfSearchResults = loadNextPageOfSearchResults;
+function changeSearchResultsPage(delta) {
+  const $btn = $(delta < 0 ? '#searchPrevPageButton' : '#searchNextPageButton')
+  if ($btn.hasClass('disabled')) return
+  return loadSearchResultsPage((window._searchResultPage || 0) + delta)
+}
+
+window.loadSearchResultsPage = loadSearchResultsPage;
+window.changeSearchResultsPage = changeSearchResultsPage;
 
 async function fetchSRTs(searchText) {
   // Null until this run has a token of its own — a search refused for being too
@@ -8449,6 +8514,10 @@ async function fetchSRTs(searchText) {
     window._subtitleSearchToken = (window._subtitleSearchToken || 0) + 1
     myToken = window._subtitleSearchToken
     _searchRunsInFlight++
+    // A new search starts on its first page, and the old search's page bar
+    // goes with its results — a click on it now would page the old results.
+    resetSearchResultIndex()
+    $('#search-pagination').hide()
 
     $('#result').html('<div style="color:grey;padding:6px;">Loading…</div>')
     // The dictionary panel describes the results being replaced, so it goes
@@ -13111,9 +13180,20 @@ const REC_ITEM_TITLE_MAX = 400
 // subtitles aren't in memory yet — the caller can either show a
 // placeholder or trigger an async fetch via _lazyLoadRecItemPreviews.
 function _previewTextForRecItem(it) {
-  if (!it || it.lineIndex == null) return ''
+  if (!it) return ''
   const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv'
-  try { return _getRawSubtitleLineText(it.id, lang, it.lineIndex) || '' } catch (_) { return '' }
+  try {
+    const stored = window.allSubtitles && window.allSubtitles[it.id]
+    const key = lang === 'en' ? 'en' : 'sv'
+    if (!stored || !stored[key]) return ''
+    // The same line playback shows — the stored number alone can name a
+    // different line once the file has been renumbered.
+    const cacheKey = key === 'en' ? '_parsedEn' : '_parsedSv'
+    if (!stored[cacheKey]) stored[cacheKey] = srtToJson(stored[key])
+    const lines = stored[cacheKey]
+    const pos = _locateItemCue(lines, it)
+    return pos >= 0 ? String(lines[pos].text || '').trim() : ''
+  } catch (_) { return '' }
 }
 
 // After the review dialog renders, lazy-fetch subtitles for any items
@@ -13127,15 +13207,19 @@ async function _lazyLoadRecItemPreviews($dlg) {
     const id = String($(this).attr('data-id') || '')
     if (id) ids.add(id)
   })
-  const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv'
   await Promise.all(Array.from(ids).map(async id => {
     try { await getSubtitlesForLink(id) } catch (_) {}
   }))
   $pending.each(function () {
     const $p = $(this)
     const id   = String($p.attr('data-id') || '')
-    const line = String($p.attr('data-line') || '')
-    const text = _getRawSubtitleLineText(id, lang, line)
+    const text = _previewTextForRecItem({
+      id,
+      lineIndex: String($p.attr('data-line') || ''),
+      timeStart: parseFloat($p.attr('data-ts')),
+      timeEnd: parseFloat($p.attr('data-te')),
+      word: String($p.attr('data-word') || ''),
+    })
     $p.removeAttr('data-pending')
     if (text) {
       // Same limit as the render-time fill below (REC_ITEM_TEXT_MAX) — both
@@ -15962,7 +16046,7 @@ function openRecordingReviewDialog() {
               ${copyOptions}
               ${delBtn}
             </div>
-            ${_isManualItem(it) ? '' : `<div class="rec-item-preview"${_pendingAttr} data-id="${_.escape(it.id)}" data-line="${_.escape(String(it.lineIndex == null ? '' : it.lineIndex))}" title="Source subtitle line">${_.escape(_previewText)}</div>`}
+            ${_isManualItem(it) ? '' : `<div class="rec-item-preview"${_pendingAttr} data-id="${_.escape(it.id)}" data-line="${_.escape(String(it.lineIndex == null ? '' : it.lineIndex))}" data-ts="${_.escape(String(it.timeStart == null ? '' : it.timeStart))}" data-te="${_.escape(String(it.timeEnd == null ? '' : it.timeEnd))}" data-word="${_.escape(it.word || '')}" title="Source subtitle line">${_.escape(_previewText)}</div>`}
           </div>`
         })
         html += `</div></div>`
@@ -16819,15 +16903,15 @@ function _updatePlayingProgress(timeStart, timeEnd, expectedVideoId) {
 // carry the bad bounds — this helper lets us play them as a short
 // clip around the matched line instead of skipping them outright.
 async function _repairMalformedClip(item) {
-  if (!item || item.lineIndex == null) return null
+  if (!item) return null
   try {
     const parsed = await _loadSubtitlesForItem(item)
     if (!parsed) return null
     const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
     const primary = lang === 'sv' ? parsed.sv : parsed.en
     if (!primary || !primary.length) return null
-    const want = String(item.lineIndex)
-    const line = primary.find(l => l && l.index != null && String(l.index) === want)
+    const pos = _locateItemCue(primary, item)
+    const line = pos >= 0 ? primary[pos] : null
     if (!line || !line.start || !line.end) return null
     const lineStart = Number(line.start.ordinal)
     const lineEnd   = Number(line.end.ordinal)
@@ -20371,19 +20455,11 @@ function revealPracticeCard() {
   $p.find('.practice-back').show()
   $p.find('.practice-reveal').hide()
 }
-// Where the practice clip should stop: the END of the subtitle line *after*
-// the shown one (i+1), so the clip plays one line past what's displayed. Falls
-// back to the shown line's own end, then to the item's timeEnd. Times are in
-// seconds (SRT ordinals).
-// The stretch of video a card plays: the lines it is showing.
-//
-// The ↑+ / ↓+ buttons widen the card by whole subtitle lines, and playback
-// follows them — otherwise the extra lines can be read but never heard. The
-// window is the same one _practiceCardLines draws, resolved the same way, so
-// what plays is what is on the card.
-//
-// One line of run-off past the end, as it has always had: subtitle end times
-// clip speech short, and the next line's end is a natural place to stop.
+// The stretch of video a card plays: the lines it is showing (see
+// ./practice-clip.js). The ↑+ / ↓+ buttons widen the card by whole subtitle
+// lines, and playback follows them. The window is the same one
+// _practiceCardLines draws, resolved the same way, so what plays is what is on
+// the card.
 async function _practiceClipRange(it, before, after) {
   const fallback = {
     start: (typeof it.timeStart === 'number') ? it.timeStart : 0,
@@ -20393,11 +20469,9 @@ async function _practiceClipRange(it, before, after) {
   try {
     const parsed = await _loadSubtitlesForItem(it)
     const src = (parsed && parsed.sv) || []
-    const want = String(it.lineIndex)
-    let pos = src.findIndex(x => x && x.index != null && String(x.index) === want)
-    // Stale lineIndex (SRT re-segmented since capture) → recover by time and
-    // word, the same fallback the card itself uses.
-    if (pos < 0) pos = _resolveMatchIdxByTimeWord(src, it)
+    // A stale lineIndex (SRT renumbered since capture) is checked against the
+    // clip window and recovered by time and word, as the card itself does.
+    const pos = _locateItemCue(src, it)
     return _clipRange(src, pos, before, after, fallback)
   } catch (err) { console.warn('practice: clip range resolve failed', err) }
   return _clipRange([], -1, before, after, fallback)
@@ -20434,6 +20508,12 @@ async function playPracticeClip() {
     const { start, stop } = await _practiceClipRange(
       it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0)
     if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
+    // Speaking over runs on the same clip: its first rewind lands here, and
+    // the pass after a take stops where the card's lines end.
+    if (_pracRec && _pracRec.key === _pracRecKey(it)) {
+      _pracRec.clipStart = start
+      _pracRec.clipStop = stop
+    }
     // The cue normally already loaded the right video; reload only if needed.
     let needLoad = true
     try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
@@ -20506,7 +20586,10 @@ function _pracRecBegin(it) {
   const saved = _pracRecSavedTakes(it)
   _pracRec = {
     key: _pracRecKey(it),
+    // The card's clip. Stored capture times until playPracticeClip has worked
+    // out the lines the card shows; then those.
     clipStart: Number(it.timeStart) || 0,
+    clipStop: null,
     takes: saved.slice(),
     // Files the card points at. Everything else is ours to delete.
     kept: new Set(saved.map(t => t.url)),
@@ -20854,6 +20937,14 @@ function _pracRecWatch() {
       _pracRecPauseVideo()
       _pracRecPlayTake(st, due, ++st.token)
       return
+    }
+    // A take's pass takes the playhead from the clip's own end-watcher, so it
+    // stops here instead: at the end of the card's lines, or just past the
+    // last take when one was spoken after them.
+    if (st.clipStop != null && prev < ct) {
+      const lastMark = st.takes.reduce((m, t) => Math.max(m, Number(t.t1) || 0), 0)
+      const end = Math.max(st.clipStop, lastMark + 0.3)
+      if (prev < end && ct >= end) { _pracRecPauseVideo(); return }
     }
     // The mark this pass was aimed at is behind the playhead without having
     // been crossed — the rewind landed past it, which it can when two takes
@@ -21305,10 +21396,8 @@ async function _practiceCardLines(it, before, after) {
   const tgt = parsed.en || []
   const tgtById = new Map()
   tgt.forEach(s => { if (s && s.index != null) tgtById.set(String(s.index), s) })
-  const want = String(it.lineIndex)
-  let matchPos = src.findIndex(x => x && x.index != null && String(x.index) === want)
-  // Stale lineIndex (SRT re-segmented since capture) → recover by time + word.
-  if (matchPos < 0) matchPos = _resolveMatchIdxByTimeWord(src, it)
+  // A stale lineIndex (SRT renumbered since capture) → recover by time + word.
+  const matchPos = _locateItemCue(src, it)
   if (matchPos < 0) return null
   // Only the lines the clip can actually reach. These files stitch captures
   // from distant moments together, so the line next to this one in the file
