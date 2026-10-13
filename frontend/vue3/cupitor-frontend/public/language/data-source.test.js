@@ -163,7 +163,7 @@ describe('configure', () => {
 
 import {
   readLayers, layerStats, mergeIndexLayers, parseCategorisation, mergeCategorisationLayers,
-  otherListProblem, mergeVocabularyLayers, withoutReadOnlyLines, mergeRecordingLayers,
+  otherListProblem, cacheRecordMatches, mergeVocabularyLayers, withoutReadOnlyLines, mergeRecordingLayers,
 } from './data-source.js'
 
 const res = (status, text) => ({ ok: status < 400, status, text: async () => text })
@@ -235,6 +235,28 @@ describe('readLayers', () => {
     expect(out).toEqual([{ src: 'self', owner: 'alice', text: '[]' }])
     expect(calls.filter(u => u.includes('/trexsatya/'))).toHaveLength(1)
     expect(notices).toHaveLength(1)
+  })
+  test('guest: other is the only source, so it keeps the full retry (otherRetry is ignored)', async () => {
+    configure(guest)
+    let n = 0
+    const fetchFn = async () => (++n < 3 ? res(500, '') : res(200, '[]'))
+    const out = await readLayers('srts/index.json', { lang: 'swedish', fetchFn, retry: { tries: 3 }, otherRetry: { tries: 1 } })
+    expect(out).toEqual([{ src: 'other', owner: 'trexsatya', text: '[]' }])
+    expect(n).toBe(3)
+  })
+})
+
+describe('cacheRecordMatches', () => {
+  test('a cached record is used only when it came from the repo the index entry names', () => {
+    expect(cacheRecordMatches({ owner: 'bob' }, { owner: 'bob' }, 'alice')).toBe(true)
+    expect(cacheRecordMatches({ owner: 'bob' }, { owner: 'carol' }, 'alice')).toBe(false)
+    expect(cacheRecordMatches({ owner: 'Bob' }, { owner: 'bob' }, 'alice')).toBe(true)
+  })
+  test('a record or entry without an owner belongs to the primary owner (records cached before owners were stored)', () => {
+    expect(cacheRecordMatches({}, { owner: 'trexsatya' }, 'trexsatya')).toBe(true)
+    expect(cacheRecordMatches({}, { owner: 'bob' }, 'alice')).toBe(false)
+    expect(cacheRecordMatches({ owner: 'alice' }, {}, 'alice')).toBe(true)
+    expect(cacheRecordMatches({}, null, 'alice')).toBe(true)
   })
 })
 

@@ -129,6 +129,8 @@ import {
   mergeIndexLayers as _dsMergeIndexLayers,
   mergeCategorisationLayers as _dsMergeCategorisationLayers,
   otherListProblem as _dsOtherListProblem,
+  cacheRecordMatches as _dsCacheRecordMatches,
+  source as _dsSource,
 } from './data-source.js';
 
 // Notices about the other user's (read-only) layer, e.g. "srts/index.json was
@@ -149,6 +151,38 @@ const _OTHER_LAYER_RETRY = { tries: 2 }
 function _isReadOnlyLink(link) {
   const s = (window.srts || []).find(it => it && it.link === link)
   return !!(s && s.readOnly)
+}
+
+function _sourceOwner(who) {
+  try { const s = _dsSource(who); return (s && s.owner) || null } catch (_) { return null }
+}
+// The login whose repo holds this video's files: its index entry's owner, or
+// the primary repo's for an entry added this session.
+function _ownerOfLink(link) {
+  const s = (window.srts || []).find(it => it && it.link === link)
+  return (s && s.owner) || _sourceOwner('primary')
+}
+
+// After a capture of a video that only the other user's library had has been
+// written to the own repo: the video is now the user's own, so its entry is
+// replaced by a self one (editable, its files read from the own repo).
+function _adoptAsSelfEntry(link, name, source) {
+  const owner = _sourceOwner('self')
+  if (!owner || !Array.isArray(window.srts)) return
+  let adopted = false
+  const out = []
+  for (const s of window.srts) {
+    if (s && s.link === link && s.readOnly) {
+      if (!adopted) out.push({ link, name, source, src: 'self', owner, readOnly: false })
+      adopted = true
+      continue
+    }
+    out.push(s)
+  }
+  if (!adopted) return
+  window.srts = out
+  const sub = window.allSubtitles && window.allSubtitles[link]
+  if (sub) { sub.readOnly = false; delete sub._parsedSv; delete sub._parsedEn }
 }
 import { scopedKey as _scopedKey } from './account-state.js';
 import {
@@ -4183,13 +4217,15 @@ $(document).ready(function () {
 
 // { link: category } from srts/categorisation.txt, own file first, the other
 // user's under it. Own file: one plain request (tries: 1, default cache), as
-// before layering. A failed own read leaves every video uncategorised
-// instead of stopping the boot.
+// before layering. With no own repo (a guest) the other user's file is the
+// only source and gets the usual retries. A failed own read leaves every
+// video uncategorised instead of stopping the boot.
 async function fetchCategorisation() {
   try {
     const layers = await _dsReadLayers('srts/categorisation.txt', {
       lang: _dsLangFromLocation(), onNotice: _dsNotice,
-      retry: { tries: 1, init: { cache: 'default' } }, otherRetry: _OTHER_LAYER_RETRY,
+      retry: _dsHasSelf() ? { tries: 1, init: { cache: 'default' } } : {},
+      otherRetry: _OTHER_LAYER_RETRY,
     })
     return _dsMergeCategorisationLayers(layers)
   } catch (e) {
@@ -4274,8 +4310,13 @@ async function loadAllSubtitles() {
     if (cached.size) {
       const indexLinks = new Set(srts.map(s => s.link))
       const indexByLink = new Map(srts.map(s => [s.link, s]))
+      const primaryOwner = _sourceOwner('primary')
       for (const [link, entry] of cached) {
         if (!indexLinks.has(link)) { deadLinks.push(link); continue }
+        // Cached from another repo than the one the index now names (the
+        // other user changed, or the video moved between libraries): a miss,
+        // so it is fetched again and the record overwritten.
+        if (!_dsCacheRecordMatches(entry, indexByLink.get(link), primaryOwner)) continue
         if (entry && entry.sv && !window.allSubtitles[link]) {
           window.allSubtitles[link] = {
             sv: entry.sv,
@@ -4470,7 +4511,10 @@ function storeSubtitles(subs) {
 // toStringSubtitle + srtError live in ./srt-parser.js (imported at the top).
 
 // ─── IndexedDB cache for SRT subtitle pairs ─────────────────────────────────
-// Stores `{link, name, sv, en, source, cachedAt}` records keyed by `link`.
+// Stores `{link, name, sv, en, source, owner, cachedAt}` records keyed by
+// `link`. `owner` is the login whose repo the files came from; boot ignores a
+// record whose owner is not the one the index now names (a record without
+// one counts as the primary repo's).
 //
 // Versioning model is intentionally opaque: once an SRT is cached, the app
 // trusts it forever. Boot reads the cache, populates window.allSubtitles for
@@ -4566,7 +4610,7 @@ async function _cacheWriteMany(entries) {
       const now = Date.now()
       for (const e of entries) {
         if (!e || !e.link) continue
-        try { store.put({ link: e.link, name: e.name, sv: e.sv, en: e.en, source: e.source, cachedAt: now }) } catch (_) {}
+        try { store.put({ link: e.link, name: e.name, sv: e.sv, en: e.en, source: e.source, owner: e.owner, cachedAt: now }) } catch (_) {}
       }
       tx.oncomplete = () => resolve()
       tx.onerror = (ev) => {
@@ -4605,7 +4649,7 @@ async function _cacheWriteOne(entry) {
 function _cacheWriteSubtitleFromMemory(link) {
   const s = link && window.allSubtitles && window.allSubtitles[link]
   if (!s || (s.sv == null && s.en == null)) return Promise.resolve()
-  return _cacheWriteOne({ link, name: s.fileName, sv: s.sv, en: s.en, source: s.source })
+  return _cacheWriteOne({ link, name: s.fileName, sv: s.sv, en: s.en, source: s.source, owner: _ownerOfLink(link) })
     .catch(e => console.warn('[cache] post-push write failed for', link, e))
 }
 
@@ -4736,7 +4780,7 @@ async function getSubtitlesForLink(link, source) {
   // Write the freshly-fetched pair to IndexedDB so the next boot can skip
   // this network round-trip. Fire-and-forget — failures are swallowed inside
   // the cache layer; a flaky cache must never break this critical path.
-  _cacheWriteOne({ link, name, sv, en, source }).catch(e => console.warn('[cache] write failed for', link, e))
+  _cacheWriteOne({ link, name, sv, en, source, owner: srt.owner || _sourceOwner('primary') }).catch(e => console.warn('[cache] write failed for', link, e))
   return window.allSubtitles[link]
 }
 
@@ -10331,7 +10375,15 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
   // Best-effort in-memory updates so the UI reflects the new state without
   // a reload. Mirrors what the per-item handleCapturedSubtitle used to do.
   for (const u of inMemoryUpdates) {
-    const cached = window.allSubtitles[u.videoId] || {}
+    // A video only the other user's library had: the own repo now has just
+    // these lines (new files), so the other user's text is not merged in,
+    // and the entry becomes the user's own.
+    const wasOther = _isReadOnlyLink(u.videoId)
+    if (wasOther) _adoptAsSelfEntry(u.videoId, u.baseName, u.source)
+    const prev = window.allSubtitles[u.videoId] || {}
+    const cached = wasOther
+      ? { ...prev, sv: null, en: null, _parsedSv: undefined, _parsedEn: undefined, readOnly: false }
+      : prev
     const sv = cached.sv ? mergeSrtWithResolution(cached.sv, u.allLines, u.srcResolution)        : linesToSrtText(u.allLines)
     const en = cached.en ? mergeSrtWithResolution(cached.en, u.allTranslations, u.tgtResolution) : linesToSrtText(u.allTranslations)
     window.allSubtitles[u.videoId] = { ...cached, sv, en, source: u.source, fileName: u.baseName }
@@ -10449,6 +10501,8 @@ async function handleCapturedSubtitle(detail) {
   // Only touch index.json when the entry actually needs to be added.
   if (isNew) {
     await upsertSrtIndexEntry(videoId, baseName, source)
+    // A video only the other user's library had is now the user's own.
+    _adoptAsSelfEntry(videoId, baseName, source)
     if (Array.isArray(window.srts) && !window.srts.find(it => it.link === videoId)) {
       window.srts.push({ link: videoId, name: baseName, source })
     }
@@ -13623,8 +13677,9 @@ function _requestTranslation(text, source, target, opts) {
 // English shows. Overwrites all visible lines (re-translate). Creates the
 // .en.srt / individual en lines when the snippet is source-only.
 async function translateVisibleLines(id, url, $btn) {
-  if (!_haveTranslateBridge()) { alert('Translation needs the Cupitor app.'); return }
   const link = url
+  if (_isReadOnlyLink(link)) { alert("This video is from the other user's library and is read-only."); return }
+  if (!_haveTranslateBridge()) { alert('Translation needs the Cupitor app.'); return }
   const stored = window.allSubtitles[link]
   if (!stored || !stored.sv) { alert('No source subtitles loaded to translate.'); return }
   if (!stored._parsedSv) stored._parsedSv = srtToJson(stored.sv)

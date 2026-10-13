@@ -97,7 +97,9 @@ export function writeTarget() {
 // fail without stopping the app: it is dropped and `onNotice(message)` is
 // called. A self failure that is not a 404 throws. `retry` is passed to
 // fetchWithRetry for every layer; `otherRetry`, when given, replaces it for
-// the other layer, so a failing other repo can be given up on quickly.
+// the other layer when there is also a self layer, so a failing other repo
+// can be given up on quickly. With no self (a guest) other is the only
+// source and keeps `retry`.
 export async function readLayers(path, { lang = langFromLocation(), fetchFn, onNotice = () => {}, retry = {}, otherRetry } = {}) {
   checkLang(lang)
   const segments = pathSegments(path)
@@ -107,7 +109,7 @@ export async function readLayers(path, { lang = langFromLocation(), fetchFn, onN
     if (!cfg) continue
     const url = urlFor(cfg, segments, lang)
     try {
-      const opts = src === 'other' && otherRetry ? otherRetry : retry
+      const opts = src === 'other' && s.self && otherRetry ? otherRetry : retry
       const res = await fetchWithRetry(url, { ...opts, passthrough404: true }, fetchFn ? { fetch: fetchFn } : {})
       const text = res.status === 404 ? null : await res.text()
       if (src === 'other') { if (text == null) _layerStats.other.misses++; else _layerStats.other.hits++ }
@@ -156,6 +158,16 @@ export function mergeIndexLayers(layers) {
     links.forEach(l => seen.add(l))
   }
   return out
+}
+
+// Whether a cached subtitle record ({ owner? }) came from the repo the merged
+// index entry ({ owner? }) names. Either side without an owner belongs to
+// `primaryOwner` (records cached before owners were stored, entries added
+// this session). Logins compare without case.
+export function cacheRecordMatches(record, entry, primaryOwner) {
+  const want = (entry && entry.owner) || primaryOwner || ''
+  const have = (record && record.owner) || primaryOwner || ''
+  return String(want).toLowerCase() === String(have).toLowerCase()
 }
 
 // Why the other layer of a JSON list file (e.g. srts/index.json) adds
