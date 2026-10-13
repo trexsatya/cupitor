@@ -339,6 +339,16 @@ describe('init and the set-up prompt', () => {
     initAccountPanel(); openAccountDialog(); await flush()
     expect(deps.listingStatus).not.toHaveBeenCalled()
   })
+  test('a second open of an existing dialog opens it again', () => {
+    setup({ state: ownerState })
+    initAccountPanel()
+    openAccountDialog()
+    jq('#accountDialog').addClass('ui-dialog-content')
+    jq.fn.dialog.mockClear()
+    openAccountDialog()
+    expect(jq.fn.dialog).toHaveBeenCalledWith('option', expect.objectContaining({ title: 'Account' }))
+    expect(jq.fn.dialog).toHaveBeenCalledWith('open')
+  })
 })
 
 describe('actions', () => {

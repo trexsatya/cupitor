@@ -3435,7 +3435,9 @@ $('document').ready(e => {
       // dialog when Practice is the caller, so the very click that opens it
       // arrives here and would close it again — it stages a picked radio
       // option too, which a stray click should not throw away.
-      $(".ui-dialog-content:visible").not("#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#richCardEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog,#replaceItemDialog").dialog("close");
+      // #accountDialog opens from the Account / banner buttons and from a
+      // blocked save, all outside any dialog, and stages a typed token.
+      $(".ui-dialog-content:visible").not("#accountDialog,#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#richCardEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog,#replaceItemDialog").dialog("close");
     }
   });
 

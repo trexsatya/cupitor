@@ -497,7 +497,7 @@ export function openAccountDialog(message = null) {
   if (ui.bootState === null) ui.bootState = snapshot()
   ui.open = true
   renderAccountPanel()
-  $d.dialog({
+  const opts = {
     title: 'Account',
     width: Math.min(520, $(window).width() - 24),
     modal: true,
@@ -521,7 +521,10 @@ export function openAccountDialog(message = null) {
       // the repo and then failed at the listing step): boot again.
       if (snapshot() !== ui.bootState) D.reload()
     },
-  })
+  }
+  // Options alone never reopen an existing dialog; it needs an explicit open.
+  if ($d.hasClass('ui-dialog-content')) $d.dialog('option', opts).dialog('open')
+  else $d.dialog(opts)
   // Show the cached list now, the fresh one when it arrives.
   Promise.resolve().then(() => D.fetchUsers()).then(u => {
     if (Array.isArray(u) && u.length) { ui.users = u; renderAccountPanel() }
