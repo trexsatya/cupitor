@@ -94,7 +94,9 @@
     let parsed;
     try { parsed = text ? JSON.parse(text) : {}; } catch (_) { parsed = {}; }
     if (!res.ok) {
-      if (res.status === 401) _notifyUnauthorized();
+      // Only a token that was sent can have been refused: a tokenless 401
+      // (e.g. GET /user with no token) says nothing about anyone's sign-in.
+      if (res.status === 401 && headers.Authorization) _notifyUnauthorized();
       throw new Error(`GitHub API error ${res.status}: ${parsed.message || text}`);
     }
     return parsed;

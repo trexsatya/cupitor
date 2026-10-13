@@ -718,7 +718,9 @@ export function carryGuestCaptures(login, { storage } = {}) {
 // On any failure the token that was in use before is back in place, nothing
 // is recorded, and the error is thrown: "did not accept" for a 401, the
 // GitHub error otherwise, or one saying the browser could not keep the
-// token or the account.
+// token or the account. Only a stored token can be put back: one that was
+// in memory only (e.g. typed into the legacy PAT prompt, never stored) is
+// gone after a failed sign-in, and GitHubUtils is left without a token.
 export async function signInWithToken(token, {
   remember = false, gh, ghUtils = defaultGhUtils(), storages = defaultStorages(), storage,
 } = {}) {
@@ -770,10 +772,26 @@ export function signOut({ ghUtils = defaultGhUtils(), storages = defaultStorages
   return true
 }
 
-// A 401 anywhere means the token is gone: sign out and tell the caller once
-// (it reloads so the page boots as a guest). The event can come several
-// times; a guest's 401s (e.g. GET /user with no token) change nothing and
-// are not passed on, so they never cause a reload. Returns an uninstaller.
+// When (ms, this tab's sessionStorage) the 401 handler last signed out.
+// For a minute after it the boot check does not sign a login back in: in
+// the app the token stays with the app, and if GET /user still answers 200
+// for it, re-adopting would reload, hit the same 401 and loop.
+export const UNAUTHORIZED_AT_KEY = 'cupitor:unauthorizedAt'
+export const REFUSED_GRACE_MS = 60000
+function recentlyRefused(storages, now) {
+  const at = Number(readKey(storages.session, UNAUTHORIZED_AT_KEY))
+  if (!(at > 0)) return false
+  const elapsed = now() - at
+  return elapsed >= 0 && elapsed < REFUSED_GRACE_MS
+}
+
+// A 401 on a request that carried a token means the token is gone: sign
+// out and tell the caller once (it reloads so the page boots as a guest).
+// The event can come several times. Ignored: a guest's 401s (nothing to
+// undo, so never a reload), and in a browser any 401 while no token is in
+// memory (the request carried none; GitHubUtils does not raise those
+// either). Inside the app the token is the app's and the page holds none,
+// so the event always counts there. Returns an uninstaller.
 export function installUnauthorizedHandler({
   ghUtils = defaultGhUtils(), storages = defaultStorages(), storage, onSignedOut = () => {},
   target = (typeof window !== 'undefined' ? window : null), now = Date.now,
@@ -782,7 +800,10 @@ export function installUnauthorizedHandler({
   let done = false
   const onEvent = () => {
     if (done || _quiet > 0) return
+    const tokenless = !inApp() && ghUtils && typeof ghUtils.hasGHToken === 'function' && !ghUtils.hasGHToken()
+    if (tokenless) return
     if (!signOut({ ghUtils, storages, storage, now })) return
+    writeKey(storages.session, UNAUTHORIZED_AT_KEY, String(now()))
     done = true
     onSignedOut()
   }
@@ -805,8 +826,10 @@ const sameView = (a, b) =>
 //               legacy PAT prompt or a 401: show "Paste your GitHub token
 //               to save".
 //   'unchecked' GitHub could not be asked (network, rate limit, proxy
-//               timeout) or the record could not be written; the current
-//               record stays, so the legacy owner keeps saving
+//               timeout), the record could not be written, or the 401
+//               handler signed out in this tab under a minute ago
+//               (UNAUTHORIZED_AT_KEY; the login is not adopted again yet).
+//               The current record stays, so the legacy owner keeps saving
 // Only a 401 from GET /user signs out here. A legacy owner (no record) is
 // resolved when the check completes: to the login's record, or on a 401 to
 // the explicit guest record.
@@ -828,6 +851,7 @@ export async function reconcileLogin({
     try { me = await fetchLogin(api) } catch (_) { return 'unchecked' }
     if (!me) return toGuest()
     if (!state.legacy && sameLogin(me.login, state.login)) return 'ok'
+    if (recentlyRefused(storages, now)) return 'unchecked'
     try { await adoptLogin(me, { gh: api, storage }) } catch (_) { return 'unchecked' }
     const saved = loadAccount(storage)
     if (saved.legacy || !sameLogin(saved.login, me.login)) return 'unchecked'

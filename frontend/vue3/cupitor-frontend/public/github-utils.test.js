@@ -138,6 +138,18 @@ describe('request', () => {
     window.removeEventListener('cupitorGithubUnauthorized', seen)
   })
 
+  test('a 401 on a request sent without a token raises no event (nobody to sign out)', async () => {
+    window.GitHubUtils.clearGHToken()
+    window._suppressGHTokenPrompt = true
+    const seen = jest.fn()
+    window.addEventListener('cupitorGithubUnauthorized', seen)
+    fakeGitHub({ 'GET /user': reply(401, { message: 'Requires authentication' }) })
+    await expect(window.GitHubUtils.request('GET', '/user')).rejects.toThrow(/GitHub API error 401/)
+    expect(global.fetch.mock.calls[0][1].headers.Authorization).toBeUndefined()
+    expect(seen).not.toHaveBeenCalled()
+    window.removeEventListener('cupitorGithubUnauthorized', seen)
+  })
+
   test('sends the token as a Bearer header when there is one', async () => {
     window.GitHubUtils.setGHToken('abc')
     fakeGitHub({ 'GET /user': reply(200, { login: 'alice' }) })

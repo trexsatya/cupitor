@@ -3,7 +3,7 @@ import {
   parseUsers, cachedUsers, fetchUsers, ownerEntry, USERS_RAW_URL,
   MAX_USERS, MAX_USERS_BYTES, fetchLogin, adoptLogin, defaultGh,
   ensureDataRepo, SetupError, listingStatus, ensureListing, runSetup,
-  TOKEN_SESSION_KEY, TOKEN_REMEMBER_KEY, GUEST_SINCE_KEY, storedToken, rememberToken, forgetToken, applyStoredToken,
+  TOKEN_SESSION_KEY, TOKEN_REMEMBER_KEY, GUEST_SINCE_KEY, UNAUTHORIZED_AT_KEY, storedToken, rememberToken, forgetToken, applyStoredToken,
   signInWithToken, signOut, reconcileLogin, installUnauthorizedHandler, carryGuestCaptures,
 } from './account.js'
 
@@ -1299,14 +1299,59 @@ describe('signOut and the 401 handler', () => {
   })
 
   test('installUnauthorizedHandler signs out once on the event', () => {
-    const s = storages(); const u = fakeGhUtils(); const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice' }) })
+    const s = storages(); const u = fakeGhUtils('ghp_alice'); const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice' }) })
     const after = jest.fn()
-    const uninstall = installUnauthorizedHandler({ ghUtils: u, storages: s, storage, onSignedOut: after, target: window })
+    const uninstall = installUnauthorizedHandler({ ghUtils: u, storages: s, storage, onSignedOut: after, target: window, now: () => 777 })
     window.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
     window.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
     expect(after).toHaveBeenCalledTimes(1)
     expect(loadAccount(storage).login).toBeNull()
+    expect(s.session.getItem(UNAUTHORIZED_AT_KEY)).toBe('777')
     uninstall()
+  })
+
+  test('in a browser, a 401 with no token in use signs nobody out', () => {
+    const s = storages(); rememberToken('ghp_alice', true, s)
+    const u = fakeGhUtils() // nothing in memory: the failing request carried no token
+    const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    const target = new EventTarget(); const after = jest.fn()
+    installUnauthorizedHandler({ ghUtils: u, storages: s, storage, onSignedOut: after, target })
+    target.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+    expect(after).not.toHaveBeenCalled()
+    expect(loadAccount(storage).login).toBe('alice'); expect(storedToken(s)).toBe('ghp_alice')
+    expect(s.session.getItem(UNAUTHORIZED_AT_KEY)).toBeNull()
+  })
+
+  describe('inside the app', () => {
+    afterEach(() => { delete global.GitHubProxy })
+
+    test('the 401 handler signs out with no token in the page (the app holds it)', () => {
+      global.GitHubProxy = { postMessage: () => {} }
+      const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+      const target = new EventTarget(); const after = jest.fn()
+      installUnauthorizedHandler({ ghUtils: fakeGhUtils(), storages: storages(), storage, onSignedOut: after, target })
+      target.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+      expect(after).toHaveBeenCalledTimes(1)
+      expect(loadAccount(storage).login).toBeNull()
+    })
+
+    test('no reload loop: right after a 401 sign-out the boot check does not sign the same token back in', async () => {
+      global.GitHubProxy = { postMessage: () => {} }
+      const s = storages(); const u = fakeGhUtils()
+      const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+      const target = new EventTarget(); const after = jest.fn()
+      installUnauthorizedHandler({ ghUtils: u, storages: s, storage, onSignedOut: after, target, now: () => 1000 })
+      target.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+      expect(after).toHaveBeenCalledTimes(1)
+      // the reload: GET /user still answers 200 for the app's token
+      const gh = fakeGh({ 'GET /user': { login: 'alice' }, ...ALICE_MARKER })
+      expect(await reconcileLogin({ gh, ghUtils: u, storages: s, storage, bridgeAvailable: true, now: () => 1000 + 5000 })).toBe('unchecked')
+      expect(await reconcileLogin({ gh, ghUtils: u, storages: s, storage, bridgeAvailable: true, now: () => 1000 + 59000 })).toBe('unchecked')
+      expect(loadAccount(storage).login).toBeNull()
+      // a minute later it is a normal boot again
+      expect(await reconcileLogin({ gh, ghUtils: u, storages: s, storage, bridgeAvailable: true, now: () => 1000 + 61000 })).toBe('reload')
+      expect(loadAccount(storage).login).toBe('alice')
+    })
   })
 
   test('a 401 while already a guest changes nothing and does not ask for a reload', () => {
