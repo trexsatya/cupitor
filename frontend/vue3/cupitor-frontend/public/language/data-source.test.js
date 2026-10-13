@@ -160,3 +160,164 @@ describe('configure', () => {
     expect(writeTarget()).toEqual({ owner: 'alice', repo: 'cupitor-data', branch: 'main' })
   })
 })
+
+import {
+  readLayers, layerStats, mergeIndexLayers, parseCategorisation, mergeCategorisationLayers,
+  mergeVocabularyLayers, withoutReadOnlyLines, mergeRecordingLayers,
+} from './data-source.js'
+
+const res = (status, text) => ({ ok: status < 400, status, text: async () => text })
+
+describe('readLayers', () => {
+  test('self then other, 404 is an empty layer (null text), stats count other', async () => {
+    configure(alice)
+    const calls = []
+    const fetchFn = async (url) => {
+      calls.push(url)
+      return url.includes('/alice/') ? res(200, 'mine') : res(404, '')
+    }
+    const out = await readLayers('vocabulary.txt', { lang: 'swedish', fetchFn })
+    expect(out).toEqual([
+      { src: 'self', owner: 'alice', text: 'mine' },
+      { src: 'other', owner: 'trexsatya', text: null },
+    ])
+    expect(calls[0]).toContain('/alice/cupitor-data/main/db/language/swedish/vocabulary.txt')
+    expect(calls[1]).toContain('/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/vocabulary.txt')
+    expect(calls).toHaveLength(2) // a missing file costs one request, no retries
+    expect(layerStats().other).toEqual({ hits: 0, misses: 1, errors: 0 })
+  })
+  test('an other-layer failure is skipped with a notice; a self failure throws', async () => {
+    configure(alice)
+    const notices = []
+    const failing = async (url) => (url.includes('/alice/') ? res(200, 'x') : res(500, ''))
+    const out = await readLayers('srts/index.json', { lang: 'swedish', fetchFn: failing, retry: { tries: 1 }, onNotice: n => notices.push(n) })
+    expect(out).toEqual([{ src: 'self', owner: 'alice', text: 'x' }])
+    expect(notices).toHaveLength(1)
+    expect(layerStats().other.errors).toBe(1)
+    const selfFails = async () => res(500, '')
+    await expect(readLayers('srts/index.json', { lang: 'swedish', fetchFn: selfFails, retry: { tries: 1 } })).rejects.toThrow(/HTTP 500/)
+  })
+  test('guest: only the other layer', async () => {
+    configure(guest)
+    const out = await readLayers('recordings.json', { lang: 'swedish', fetchFn: async () => res(200, '{}') })
+    expect(out).toEqual([{ src: 'other', owner: 'trexsatya', text: '{}' }])
+    expect(layerStats().other.hits).toBe(1)
+  })
+  test('builds URLs like readUrl: per-segment encoding, . and .. refused, lang checked', async () => {
+    configure(alice)
+    const calls = []
+    const fetchFn = async (url) => { calls.push(url); return res(200, '') }
+    await readLayers('srts/Part #2.sv.srt', { lang: 'swedish', fetchFn })
+    expect(calls).toEqual([readUrl('self', 'srts/Part #2.sv.srt', 'swedish'), readUrl('other', 'srts/Part #2.sv.srt', 'swedish')])
+    expect(calls[1]).toBe(`${OWNER_BASE}/srts/Part%20%232.sv.srt`)
+    await expect(readLayers('srts/../x', { lang: 'swedish', fetchFn })).rejects.toThrow(/invalid path/)
+    await expect(readLayers('x', { lang: '../x', fetchFn })).rejects.toThrow(/invalid lang/)
+    expect(calls).toHaveLength(2)
+  })
+  test('owner with no other: only the self layer', async () => {
+    configure(owner)
+    const out = await readLayers('vocabulary.txt', { lang: 'swedish', fetchFn: async () => res(404, '') })
+    expect(out).toEqual([{ src: 'self', owner: 'trexsatya', text: null }])
+    expect(layerStats().other).toEqual({ hits: 0, misses: 0, errors: 0 })
+  })
+})
+
+describe('mergeIndexLayers', () => {
+  test('self wins by link; other entries are tagged read-only', () => {
+    const merged = mergeIndexLayers([
+      { src: 'self', owner: 'alice', text: JSON.stringify([{ link: 'a', name: 'A mine', source: 'yt' }]) },
+      { src: 'other', owner: 'trexsatya', text: JSON.stringify([{ link: 'a', name: 'A theirs' }, { link: 'b', name: 'B' }]) },
+    ])
+    expect(merged).toEqual([
+      { link: 'a', name: 'A mine', source: 'yt', src: 'self', owner: 'alice', readOnly: false },
+      { link: 'b', name: 'B', src: 'other', owner: 'trexsatya', readOnly: true },
+    ])
+  })
+  test('null text is an empty list; invalid self JSON throws; invalid other JSON is skipped', () => {
+    expect(mergeIndexLayers([{ src: 'self', owner: 'a', text: null }])).toEqual([])
+    expect(() => mergeIndexLayers([{ src: 'self', owner: 'a', text: '{' }])).toThrow(/index.json/)
+    expect(mergeIndexLayers([{ src: 'self', owner: 'a', text: '[]' }, { src: 'other', owner: 'b', text: '{' }])).toEqual([])
+  })
+})
+
+describe('categorisation', () => {
+  test('parseCategorisation maps the file name to its category', () => {
+    expect(parseCategorisation('Kids || x || y || file1\nfile2')).toEqual({ file1: 'Kids', file2: '        ' })
+    expect(parseCategorisation(null)).toEqual({})
+  })
+  test('a 3-part line (channel || title || link) has no category, as in the real file', () => {
+    expect(parseCategorisation('Chan || Title || L1\r\n')).toEqual({ L1: '        ' })
+  })
+  test('mergeCategorisationLayers: self wins', () => {
+    expect(mergeCategorisationLayers([
+      { src: 'self', text: 'A || x || y || f1' },
+      { src: 'other', text: 'B || x || y || f1\nC || x || y || f2' },
+    ])).toEqual({ f1: 'A', f2: 'C' })
+  })
+})
+
+describe('vocabulary layers', () => {
+  const selfText = '#Verbs\n(eat)|äta|\n#Nouns\n(cat)|katt|'
+  const otherText = '#Verbs\n(eat)|äta|\n(run)|springa|\n#Adjectives\n(big)|stor|'
+  test('other-only lines are appended and listed as read-only; shared lines are self', () => {
+    const { vocab, readOnly } = mergeVocabularyLayers(selfText, otherText)
+    expect(vocab.Verbs).toEqual(['(eat)|äta|', '(run)|springa|'])
+    expect(vocab.Nouns).toEqual(['(cat)|katt|'])
+    expect(vocab.Adjectives).toEqual(['(big)|stor|'])
+    expect([...readOnly]).toEqual(['(run)|springa|', '(big)|stor|'])
+  })
+  test('no other text → self as is', () => {
+    const { vocab, readOnly } = mergeVocabularyLayers(selfText, null)
+    expect(vocab.Verbs).toEqual(['(eat)|äta|']); expect(readOnly.size).toBe(0)
+  })
+  test('withoutReadOnlyLines drops them and empty categories that came only from other', () => {
+    const { vocab, readOnly } = mergeVocabularyLayers(selfText, otherText)
+    expect(withoutReadOnlyLines(vocab, readOnly)).toEqual({ Verbs: ['(eat)|äta|'], Nouns: ['(cat)|katt|'] })
+  })
+  test('a self category that was empty stays when other fills it', () => {
+    const merged = mergeVocabularyLayers('#Verbs\n#Nouns\n(cat)|katt|', '#Verbs\n(run)|springa|')
+    expect(merged.vocab.Verbs).toEqual(['(run)|springa|'])
+    expect(withoutReadOnlyLines(merged.vocab, merged.readOnly, merged.otherCategories))
+      .toEqual({ Verbs: [], Nouns: ['(cat)|katt|'] })
+  })
+  test('a line the user adds to an other-only category keeps that category', () => {
+    const merged = mergeVocabularyLayers(selfText, otherText)
+    merged.vocab.Adjectives.push('(small)|liten|')
+    expect(withoutReadOnlyLines(merged.vocab, merged.readOnly, merged.otherCategories).Adjectives)
+      .toEqual(['(small)|liten|'])
+  })
+  test('a line repeated in one other category is added once', () => {
+    const { vocab } = mergeVocabularyLayers('#Verbs\n(eat)|äta|', '#Verbs\n(run)|springa|\n(run)|springa|')
+    expect(vocab.Verbs).toEqual(['(eat)|äta|', '(run)|springa|'])
+  })
+  test('the result does not share arrays with a later parse', () => {
+    const a = mergeVocabularyLayers(selfText, otherText)
+    a.vocab.Verbs.push('x')
+    expect(mergeVocabularyLayers(selfText, otherText).vocab.Verbs).not.toContain('x')
+  })
+})
+
+describe('mergeRecordingLayers', () => {
+  test('self wins by name; other collections are tagged read-only', () => {
+    const out = mergeRecordingLayers(
+      { Default: { items: { a: 1 } } },
+      { Default: { items: { b: 2 } }, Theirs: { items: {} } })
+    expect(out.Default).toEqual({ items: { a: 1 } })
+    expect(out.Theirs).toEqual({ items: {}, readOnly: true, src: 'other' })
+  })
+  test('tolerates null sides', () => {
+    expect(mergeRecordingLayers(null, null)).toEqual({})
+    expect(mergeRecordingLayers(null, { X: { items: {} } }).X.readOnly).toBe(true)
+  })
+  test('self collections come first', () => {
+    expect(Object.keys(mergeRecordingLayers({ Mine: {} }, { Theirs: {}, Mine: {} }))).toEqual(['Mine', 'Theirs'])
+  })
+  test('names like "constructor" are ordinary keys; arrays are not collections', () => {
+    const out = mergeRecordingLayers({}, { constructor: { items: {} }, toString: { items: {} }, Bad: [1] })
+    expect(out.constructor).toEqual({ items: {}, readOnly: true, src: 'other' })
+    expect(Object.keys(out)).toEqual(['constructor', 'toString'])
+  })
+  test('categorisation: a link named "constructor" is kept', () => {
+    expect(mergeCategorisationLayers([{ src: 'other', text: 'K || a || b || constructor' }])).toEqual({ constructor: 'K' })
+  })
+})
