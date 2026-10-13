@@ -71,7 +71,7 @@ export async function runInBatches(items, fn, concurrency = 8, onProgress) {
 //
 // `deps` (optional) lets tests inject {fetch, sleep, now} stubs — defaults
 // to globalThis.fetch + setTimeout + Date.now in production.
-export async function fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init = {} } = {}, deps = {}) {
+export async function fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init = {}, passthrough404 = false } = {}, deps = {}) {
   const fetchFn = deps.fetch || (typeof fetch !== 'undefined' ? fetch : null)
   if (!fetchFn) throw new Error('fetchWithRetry: no fetch implementation available')
   const sleep = deps.sleep || ((ms) => new Promise(r => setTimeout(r, ms)))
@@ -87,6 +87,9 @@ export async function fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init =
       : url + (url.indexOf('?') === -1 ? '?' : '&') + '_cb=' + now() + '-' + i
     try {
       const res = await withTimeout(fetchFn(reqUrl, baseInit), timeoutMs, reqUrl, setTimeoutFn)
+      // A missing file is an answer, not a transient failure: callers that
+      // read optional layers ask for the 404 back instead of a retry storm.
+      if (passthrough404 && res.status === 404) return res
       if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + reqUrl)
       return res
     } catch (e) {

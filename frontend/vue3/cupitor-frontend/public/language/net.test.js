@@ -157,6 +157,20 @@ describe("fetchWithRetry", () => {
     await fetchWithRetry("https://x/y", {}, { fetch: fetchFn });
     expect(fetchFn.mock.calls[0][1].cache).toBe("no-store");
   });
+  test("passthrough404 returns the 404 response after a single attempt", async () => {
+    const fetchFn = jest.fn(async () => ({ ok: false, status: 404 }));
+    const out = await fetchWithRetry("https://x/y", { passthrough404: true }, {
+      fetch: fetchFn, sleep: async () => {},
+    });
+    expect(out.status).toBe(404);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+  test("without passthrough404 a 404 is still retried and thrown", async () => {
+    const fetchFn = jest.fn(async () => ({ ok: false, status: 404 }));
+    await expect(fetchWithRetry("https://x/y", { tries: 2 }, { fetch: fetchFn, sleep: async () => {} }))
+      .rejects.toThrow(/HTTP 404/);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("commitWithMerge", () => {
