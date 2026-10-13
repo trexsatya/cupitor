@@ -576,6 +576,7 @@ describe('ensureListing', () => {
       [PRS]: (_b, path) => { expect(path).toBe(PR_QUERY); return st.prs },
       [`GET ${UP}/git/ref/heads/main`]: { object: { sha: 'UP1' } },
       [`GET ${fork}`]: () => forkRepo || (st.forked ? { name: 'cupitor-users', fork: true, parent: { full_name: 'trexsatya/cupitor-users' } } : err(404)),
+      [`GET ${UP}/forks`]: () => (st.forked ? [{ name: 'cupitor-users', owner: { login: 'alice' } }] : []),
       [`POST ${UP}/forks`]: () => { fail('fork'); st.forked = true; return { name: 'cupitor-users', owner: { login: 'alice' } } },
       [`GET ${fork}/git/ref/heads/main`]: () => (st.forked ? { object: { sha: 'F1' } } : err(404)),
       [`POST ${fork}/merge-upstream`]: body => { fail('sync'); expect(body).toEqual({ branch: 'main' }); return { message: 'ok' } },
@@ -681,6 +682,30 @@ describe('ensureListing', () => {
     const { gh, st } = world({ upstreamText })
     expect(await ensureListing(args(gh))).toBe('awaiting')
     expect(st.branchText).toBe(`[\n    {\n        "login": "trexsatya",\n        "repo": "trexsatya.github.io"\n    },\n  ${ALICE_LINE}\n]`)
+  })
+
+  test('CRLF line endings are kept: the usual layout gains one CRLF line', async () => {
+    const crlf = s => s.replace(/\n/g, '\r\n')
+    const upstreamText = crlf(`[\n  ${OWNER_LINE},\n  { "login": "bob", "repo": "data" }\n]\n`)
+    const { gh, st } = world({ upstreamText })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(st.branchText).toBe(crlf(`[\n  ${OWNER_LINE},\n  { "login": "bob", "repo": "data" },\n  ${ALICE_LINE}\n]\n`))
+  })
+
+  test('CRLF in another layout: the spliced entry uses CRLF too', async () => {
+    const upstreamText = '[\r\n    {\r\n        "login": "trexsatya",\r\n        "repo": "trexsatya.github.io"\r\n    }\r\n]\r\n'
+    const { gh, st } = world({ upstreamText })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(st.branchText).toBe(`[\r\n    {\r\n        "login": "trexsatya",\r\n        "repo": "trexsatya.github.io"\r\n    },\r\n  ${ALICE_LINE}\r\n]\r\n`)
+  })
+
+  test('CRLF: replacing an invalid entry and filling an empty list keep CRLF', async () => {
+    let w = world({ upstreamText: `[\r\n  ${OWNER_LINE},\r\n  { "login": "alice", "repo": "../bad" }\r\n]\r\n` })
+    await ensureListing(args(w.gh))
+    expect(w.st.branchText).toBe(`[\r\n  ${OWNER_LINE},\r\n  ${ALICE_LINE}\r\n]\r\n`)
+    w = world({ upstreamText: '[]\r\n' })
+    await ensureListing(args(w.gh))
+    expect(w.st.branchText).toBe(`[\r\n  ${ALICE_LINE}\r\n]\r\n`)
   })
 
   test('an empty list gets the entry', async () => {
@@ -823,24 +848,107 @@ describe('ensureListing', () => {
     expect(body.body).toBe('Adds alice to users.json: data repo alice/cupitor-data.')
   })
 
-  test('a repo named cupitor-users that is not the fork: the fork GitHub returns is used', async () => {
-    const other = '/repos/alice/cupitor-users-1'
-    let forked = false, text = null
-    const gh = fakeGh({
+  // A user whose fork, if any, is not at <login>/cupitor-users. `forks` is
+  // upstream's fork list (each { name, owner }); `cupitorUsers` is what
+  // GET /repos/alice/cupitor-users answers.
+  function namedForkWorld({ forks = [], cupitorUsers = err(404), forkFails = false, created = 'cupitor-users-1' } = {}) {
+    const st = { forks: forks.slice(), text: null, prs: [] }
+    const mine = () => st.forks.find(f => f.owner.login.toLowerCase() === 'alice')
+    const name = () => (mine() ? mine().name : null)
+    const routes = {
       [`GET ${UP}/contents/users.json`]: { text: UPSTREAM_TEXT, sha: 'UF1' },
-      [PRS]: [],
+      [PRS]: () => st.prs,
       [`GET ${UP}/git/ref/heads/main`]: { object: { sha: 'UP1' } },
-      'GET /repos/alice/cupitor-users': { name: 'cupitor-users', fork: false },
-      [`POST ${UP}/forks`]: () => { forked = true; return { name: 'cupitor-users-1', owner: { login: 'alice' } } },
-      [`GET ${other}/git/ref/heads/main`]: () => (forked ? { object: { sha: 'F1' } } : err(404)),
-      [`POST ${other}/merge-upstream`]: {},
-      [`POST ${other}/git/refs`]: () => { text = UPSTREAM_TEXT; return {} },
-      [`PUT ${other}/contents/users.json`]: body => { text = body.content; return {} },
-      [`POST ${UP}/pulls`]: { number: 1 },
-    })
+      'GET /repos/alice/cupitor-users': cupitorUsers,
+      [`GET ${UP}/forks`]: (_b, path) => {
+        const page = Number(/[?&]page=(\d+)/.exec(path)[1])
+        expect(path).toBe(`${UP}/forks?per_page=100&page=${page}`)
+        return st.forks.slice((page - 1) * 100, page * 100)
+      },
+      [`POST ${UP}/forks`]: () => {
+        if (forkFails) throw err(500, 'boom')
+        st.forks.unshift({ name: created, owner: { login: 'alice' } })
+        return { name: created, owner: { login: 'alice' } }
+      },
+      [`POST ${UP}/pulls`]: () => { st.prs.push({ state: 'open', merged_at: null }); return { number: 1 } },
+    }
+    const gh = fakeGh(routes)
+    const real = gh.request
+    // Every /repos/alice/<fork>/… call must name the fork found or made.
+    gh.request = async (m, p, b) => {
+      const at = /^\/repos\/alice\/([^/?]+)\/(git\/ref\/heads\/main|merge-upstream|git\/refs)$/.exec(p)
+      if (at) {
+        expect(at[1]).toBe(name())
+        gh.calls.push(`${m} ${p}`)
+        if (at[2] === 'git/refs') {
+          if (st.text !== null) throw err(422, 'Reference already exists')
+          st.text = UPSTREAM_TEXT
+        }
+        return at[2] === 'git/ref/heads/main' ? { object: { sha: 'F1' } } : {}
+      }
+      return real(m, p, b)
+    }
+    gh.getFile = async (owner, repo, _f, _t, branch) => {
+      if (owner === 'trexsatya') return { content: UPSTREAM_TEXT, sha: 'UF1' }
+      expect([owner, repo, branch]).toEqual(['alice', name(), 'add-alice'])
+      gh.calls.push(`GET /repos/${owner}/${repo}/contents/users.json?ref=${branch}`)
+      if (st.text === null) throw err(404)
+      return { content: st.text, sha: st.text === UPSTREAM_TEXT ? 'UF1' : 'B2' }
+    }
+    gh.putFile = async (owner, repo, _f, content, _msg, sha, _t, branch) => {
+      expect([owner, repo, sha, branch]).toEqual(['alice', name(), 'UF1', 'add-alice'])
+      gh.calls.push(`PUT /repos/${owner}/${repo}/contents/users.json`)
+      st.text = content; return {}
+    }
+    return { gh, st }
+  }
+  const others = n => Array.from({ length: n }, (_, i) => ({ name: 'cupitor-users', owner: { login: `user${i}` } }))
+
+  test('an existing fork under another name (found on a later page, owner in any case) is reused, no fork made', async () => {
+    const { gh, st } = namedForkWorld({ forks: [...others(150), { name: 'my-users', owner: { login: 'Alice' } }] })
     expect(await ensureListing(args(gh))).toBe('awaiting')
-    expect(text).toBe(WITH_ALICE)
-    expect(gh.calls.some(c => c.startsWith('PUT /repos/alice/cupitor-users/'))).toBe(false)
+    expect(gh.calls).not.toContain(`POST ${UP}/forks`)
+    expect(gh.calls).toContain('PUT /repos/alice/my-users/contents/users.json')
+    expect(gh.calls.filter(c => c.startsWith(`GET ${UP}/forks`))).toEqual([
+      `GET ${UP}/forks?per_page=100&page=1`, `GET ${UP}/forks?per_page=100&page=2`,
+    ])
+    expect(st.text).toBe(WITH_ALICE)
+  })
+
+  test('the fork list stops at the first match', async () => {
+    const { gh } = namedForkWorld({ forks: [{ name: 'my-users', owner: { login: 'alice' } }, ...others(250)] })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(gh.calls.filter(c => c.startsWith(`GET ${UP}/forks`))).toHaveLength(1)
+  })
+
+  test('a repo named cupitor-users that is not a fork, and no fork: one fork is made and its name used; a retry does not fork again', async () => {
+    const cupitorUsers = { name: 'cupitor-users', fork: false }
+    const { gh, st } = namedForkWorld({ cupitorUsers, forks: others(3) })
+    // First run fails after forking (at the PR), so the retry starts over.
+    const real = gh.request
+    let failPr = true
+    gh.request = async (m, p, b) => {
+      if (failPr && m === 'POST' && p === `${UP}/pulls`) throw err(502, 'bad gateway')
+      return real(m, p, b)
+    }
+    await expect(ensureListing(args(gh))).rejects.toMatchObject({ step: 'listing', status: 502 })
+    expect(gh.calls.filter(c => c === `POST ${UP}/forks`)).toHaveLength(1)
+    expect(gh.calls).toContain('PUT /repos/alice/cupitor-users-1/contents/users.json')
+    failPr = false
+    gh.calls.length = 0
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(gh.calls).not.toContain(`POST ${UP}/forks`)
+    expect(gh.calls.some(c => c.startsWith('PUT'))).toBe(false)
+    expect(st.text).toBe(WITH_ALICE)
+    expect(st.prs).toHaveLength(1)
+  })
+
+  test('a failing fork list is an error, not a reason to fork', async () => {
+    const { gh } = namedForkWorld()
+    const real = gh.request
+    gh.request = async (m, p, b) => (m === 'GET' && p.startsWith(`${UP}/forks`) ? Promise.reject(err(503)) : real(m, p, b))
+    await expect(ensureListing(args(gh))).rejects.toMatchObject({ step: 'listing', status: 503 })
+    expect(gh.calls).not.toContain(`POST ${UP}/forks`)
   })
 
   test('a fork that is not ready within 30 s → timeout; the retry does not fork again', async () => {

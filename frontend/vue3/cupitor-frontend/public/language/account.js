@@ -341,24 +341,28 @@ function entryLine(e) {
   if (!e || typeof e !== 'object' || Array.isArray(e)) return JSON.stringify(e)
   return `{ ${Object.keys(e).map(k => `${JSON.stringify(k)}: ${JSON.stringify(e[k])}`).join(', ')} }`
 }
-const usersText = list => (list.length ? `[\n${list.map(e => `  ${entryLine(e)}`).join(',\n')}\n]\n` : '[]\n')
+const usersText = (list, eol = '\n') => (list.length
+  ? `[${eol}${list.map(e => `  ${entryLine(e)}`).join(`,${eol}`)}${eol}]${eol}`
+  : `[]${eol}`)
 
 // users.json text with `entry` in it. An (invalid) entry already there for
 // the same login is replaced; otherwise the entry is appended. In the usual
 // layout every other line stays as it was; in any other layout the entry is
-// put in before the closing bracket and the rest of the text is kept. The
-// result is parsed back and must be the old list plus (or with) the entry.
+// put in before the closing bracket and the rest of the text is kept. Lines
+// end the way the file's do (CRLF or LF). The result is parsed back and
+// must be the old list plus (or with) the entry.
 function usersWithEntry(text, entry) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
   const list = JSON.parse(text)
   const i = list.findIndex(u => u && typeof u === 'object' && sameLogin(u.login, entry.login))
   const next = list.slice()
   if (i >= 0) next[i] = entry; else next.push(entry)
   let out
-  if (i >= 0 || !list.length || usersText(list) === text) {
-    out = usersText(next)
+  if (i >= 0 || !list.length || usersText(list, eol) === text) {
+    out = usersText(next, eol)
   } else {
     const end = text.lastIndexOf(']')
-    out = `${text.slice(0, end).replace(/\s+$/, '')},\n  ${entryLine(entry)}\n${text.slice(end)}`
+    out = `${text.slice(0, end).replace(/\s+$/, '')},${eol}  ${entryLine(entry)}${eol}${text.slice(end)}`
   }
   if (JSON.stringify(JSON.parse(out)) !== JSON.stringify(next)) throw new Error('account: users.json could not be updated cleanly')
   return out
@@ -373,6 +377,7 @@ async function prStatus(gh, login) {
   if (!Array.isArray(prs)) throw new Error('account: GitHub answered the PR list without a list')
   const list = prs
   if (list.some(p => p && p.state === 'open')) return 'awaiting'
+  // A merged PR counts as listed even if the entry was later removed.
   if (list.some(p => p && p.merged_at)) return 'listed'
   return list.length ? 'not_approved' : 'none'
 }
@@ -416,13 +421,29 @@ async function forkReady(gh, login, fork) {
   }
 }
 
-// The name of the user's fork of cupitor-users, forking it first when
-// <login>/cupitor-users is not that fork, and waiting (up to SETUP_WAIT_MS)
-// until it can be read. Forking is idempotent on GitHub: an existing fork
-// is returned, under whatever name it has.
+const FORK_PAGES = 5
+
+// The name of the user's fork among upstream's forks (newest first, up to
+// FORK_PAGES pages of 100), or null. Stops at the first match.
+async function findUsersFork(gh, login) {
+  for (let page = 1; page <= FORK_PAGES; page++) {
+    const forks = await gh.request('GET', `${UPSTREAM}/forks?per_page=100&page=${page}`)
+    if (!Array.isArray(forks)) throw new Error('account: GitHub answered the fork list without a list')
+    const f = forks.find(x => x && x.owner && sameLogin(x.owner.login, login) && isValidRepo(x.name))
+    if (f) return f.name
+    if (forks.length < 100) return null
+  }
+  return null
+}
+
+// The name of the user's fork of cupitor-users, whatever it is called:
+// <login>/cupitor-users when that is the fork, else the one in upstream's
+// fork list; only when there is none is a fork made. Then waits (up to
+// SETUP_WAIT_MS) until it can be read.
 async function ensureUsersFork(gh, login, { sleep, now }) {
   const r = await getRepo(gh, login, USERS_REPO)
   let fork = isUsersFork(r) ? (isValidRepo(r.name) ? r.name : USERS_REPO) : null
+  if (!fork) fork = await findUsersFork(gh, login)
   if (!fork) {
     const f = await gh.request('POST', `${UPSTREAM}/forks`, { default_branch_only: true })
     const mine = f && isValidRepo(f.name) && (!f.owner || sameLogin(f.owner.login, login))
