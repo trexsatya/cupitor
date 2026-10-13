@@ -505,7 +505,8 @@ const _playTimers = new Set()
   // Held frames get ids of their own (negative), so callers can still cancel them.
   let heldId = 0
   window.requestAnimationFrame = function (cb) {
-    if (window._playPaused) { const id = --heldId; _heldFrames.push({ id, cb }); return id }
+    // instantly() (a scene rebuilt for a seek) runs even while paused.
+    if (window._playPaused && !window._playInstant) { const id = --heldId; _heldFrames.push({ id, cb }); return id }
     return raf(t => cb(t - _pausedTotal))
   }
   window.cancelAnimationFrame = function (id) {
@@ -2242,6 +2243,80 @@ function scriptCommentLines(lines) {
 // other failing line instead of stopping the whole script.
 function compileScriptLine(src) {
   try { return eval(src) } catch (err) { return () => { throw err } }
+}
+
+// Animations that take a { duration } option, as [function, index of that
+// argument]: made instant by instantly() and by the MCP's fast replay.
+const INSTANT_ANIMATIONS = [['animate', 2], ['drawOutline', 1], ['connectObjects', 3], ['animateViewport', 1], ['revertState', 1], ['reveal', 2], ['typeIn', 1], ['writeIn', 1], ['emanate', 3], ['markStep', 2], ['setPictureSource', 2]]
+window.INSTANT_ANIMATIONS = INSTANT_ANIMATIONS
+
+// Runs fn with the animations above (and sleep) taking no time: the end state
+// at once, as a playback session needs when it rebuilds a scene for a seek
+// (also while paused: its frames are not held). Calls inside one another, and
+// the MCP's fast replay, share it; the page gets its functions back after the
+// outermost. Meanwhile any other animation is instant too.
+let _instantDepth = 0, _instantRestore = []
+async function instantly(fn) {
+  if (_instantDepth++ === 0) {
+    window._playInstant = true
+    const swap = (name, make) => { const orig = window[name]; if (typeof orig !== 'function') return; _instantRestore.push([name, orig]); window[name] = make(orig) }
+    swap('sleep', () => () => Promise.resolve())
+    INSTANT_ANIMATIONS.forEach(([name, at]) => swap(name, orig => function (...args) { args[at] = Object.assign({}, args[at], { duration: 1 }); return orig.apply(this, args) }))
+  }
+  try { return await fn() } finally {
+    if (--_instantDepth === 0) { _instantRestore.forEach(([name, orig]) => { window[name] = orig }); _instantRestore = []; window._playInstant = false }
+  }
+}
+
+// A playback session cue made of script lines: they run one after another at
+// time `at` (seconds), comments skipped, each waited for when it gives a
+// promise (sleep(2), animate(...), reveal(...) …; unlike the script player
+// there is no pause after other lines: the cue's time is its timing). Reached
+// by seeking, they run instantly(). A line that fails stops the cue and is
+// reported with its number; stopping or seeking stops it at once.
+// opts: id, lead (seconds the cue starts early).
+function scriptCue(at, lines, opts) {
+  const src = Array.isArray(lines) ? lines : String(lines).split('\n')
+  const code = scriptCode(src)
+  // An expression line gives its value (so a promise is waited for); a statement just runs.
+  const fns = code.map((c, i) => {
+    if (!c) return null
+    const expr = c.replace(/;\s*$/, '')
+    try { new Function(`return (${expr}\n)`) } catch (_) { return compileScriptLine(buildScriptExecutables([c])[0]) }
+    return compileScriptLine(`() => (${expr}\n)`)
+  })
+  const run = async ctx => {
+    const signal = ctx && ctx.signal
+    const stopped = signal ? new Promise(resolve => signal.addEventListener('abort', resolve, { once: true })) : null
+    for (let i = 0; i < fns.length; i++) {
+      if (!fns[i]) continue
+      if (signal && signal.aborted) return
+      try { await (stopped ? Promise.race([fns[i](), stopped]) : fns[i]()) }
+      catch (err) { throw new Error(`line ${i + 1} (${code[i].slice(0, 60)}): ${err && err.message || err}`) }
+    }
+  }
+  return Object.assign({ at, apply: ctx => (ctx && ctx.immediate ? instantly(() => run(ctx)) : run(ctx)) }, opts)
+}
+
+// A session timeline from plain data (e.g. a JSON file): cues as script lines.
+// spec: {cues: [{id, at, lead, lines}], captions: [{id, start, end, text}],
+// chapters: [{id, at, title}], start: [lines that set up the opening scene]}.
+// Its reset clears the page, resets the camera and runs `start` instantly.
+function scriptTimeline(spec) {
+  const startLines = spec.start && spec.start.length ? scriptCue(0, spec.start, { id: 'start' }) : null
+  return {
+    reset: async () => {
+      // Animations still running from a cue that was cut short change nothing after this.
+      if (fabric.runningAnimations) fabric.runningAnimations.cancelAll()
+      if (typeof stopAnim === 'function') stopAnim()
+      if (typeof clear === 'function') clear()
+      if (window.viewportManager) viewportManager.resetView()
+      if (startLines) await startLines.apply({ immediate: true })
+    },
+    cues: (spec.cues || []).map((c, i) => scriptCue(c.at, c.lines || [], { id: c.id || `cue${i + 1}`, lead: c.lead || 0 })),
+    captions: spec.captions || [],
+    chapters: (spec.chapters || []).map((c, i) => Object.assign({ id: `chapter${i + 1}` }, c))
+  }
 }
 
 // Plays the recorded script, or just `lines` when given (e.g. an import).

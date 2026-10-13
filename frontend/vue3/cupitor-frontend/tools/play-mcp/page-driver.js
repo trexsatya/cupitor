@@ -16,7 +16,8 @@ const MIME = {
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.woff': 'font/woff', '.woff2': 'font/woff2',
   '.ttf': 'font/ttf', '.eot': 'application/vnd.ms-fontobject', '.ico': 'image/x-icon', '.map': 'application/json',
-  '.txt': 'text/plain; charset=utf-8', '.wasm': 'application/wasm', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.webm': 'video/webm'
+  '.txt': 'text/plain; charset=utf-8', '.wasm': 'application/wasm', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.webm': 'video/webm',
+  '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac'
 };
 
 // Serves `root` on 127.0.0.1 at a free port; resolves to the base URL.
@@ -30,7 +31,18 @@ export function serveStatic(root) {
       const target = !err && st.isDirectory() ? path.join(file, 'index.html') : file;
       fs.readFile(target, (err2, data) => {
         if (err2) { res.writeHead(404).end('Not found'); return; }
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(target).toLowerCase()] || 'application/octet-stream' });
+        const type = MIME[path.extname(target).toLowerCase()] || 'application/octet-stream';
+        // Byte ranges: without them the browser cannot seek in audio or video.
+        const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+        if (range && (range[1] || range[2])) {
+          const start = range[1] ? Number(range[1]) : Math.max(0, data.length - Number(range[2]));
+          const end = range[1] && range[2] ? Math.min(Number(range[2]), data.length - 1) : data.length - 1;
+          if (start >= data.length || start > end) { res.writeHead(416, { 'Content-Range': `bytes */${data.length}` }).end(); return; }
+          res.writeHead(206, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${data.length}`, 'Content-Length': end - start + 1 });
+          res.end(data.subarray(start, end + 1));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': data.length });
         res.end(data);
       });
     });
@@ -85,7 +97,8 @@ export class PlayPage {
     if (this.page && !this.page.isClosed()) return this.page;
     if (!this.http) this.http = await serveStatic(this.publicDir);
     if (!this.browser || !this.browser.isConnected()) {
-      this.browser = await chromium.launch({ headless: this.headless });
+      // Narration started by a tool call has no click behind it: this browser lets it play.
+      this.browser = await chromium.launch({ headless: this.headless, args: ['--autoplay-policy=no-user-gesture-required'] });
     }
     this.page = await this.browser.newPage({ viewport: { width: 1400, height: 850 } });
     this.page.on('dialog', d => d.accept().catch(() => {}));
@@ -163,14 +176,9 @@ export class PlayPage {
       window.__mcpLineErrors = [];
       window.__mcpHeld = null;
       window.__mcpHold = k => new Promise(release => { window.__mcpHeld = { k, release }; });
-      window.__mcpRestore = [];
-      if (fast) {
-        const swap = (name, fn) => { const orig = window[name]; if (typeof orig !== 'function') return; window.__mcpRestore.push([name, orig]); window[name] = fn(orig); };
-        swap('sleep', () => () => Promise.resolve());
-        // [function, index of its options argument]
-        [['animate', 2], ['drawOutline', 1], ['connectObjects', 3], ['animateViewport', 1], ['revertState', 1], ['reveal', 2], ['typeIn', 1], ['writeIn', 1], ['emanate', 3], ['markStep', 2], ['setPictureSource', 2]].forEach(([name, at]) =>
-          swap(name, orig => function (...args) { args[at] = Object.assign({}, args[at], { duration: 1 }); return orig.apply(this, args); }));
-      }
+      // Animations and waits take no time until the walk ends: the page's own
+      // instantly() (fabric.play.js), shared with a playback session's seeks.
+      if (fast) window.instantly(() => new Promise(end => { window.__mcpEndFast = end; }));
       if (typeof clear === 'function') clear();
       if (window.viewportManager) viewportManager.resetView(); // from the starting view, as a replay is
       playScript(run);
@@ -188,9 +196,8 @@ export class PlayPage {
     } finally {
       // Whatever happened, the page gets its own functions back, and a walk
       // cut short stops playing instead of waiting on a hold for ever.
-      await page.evaluate(stop => {
-        (window.__mcpRestore || []).forEach(([name, orig]) => { window[name] = orig; });
-        window.__mcpRestore = [];
+      await page.evaluate(async stop => {
+        if (window.__mcpEndFast) { window.__mcpEndFast(); window.__mcpEndFast = null; await new Promise(r => setTimeout(r, 0)); }
         if (stop) {
           window._stopPlayback = true;
           const h = window.__mcpHeld; window.__mcpHeld = null;

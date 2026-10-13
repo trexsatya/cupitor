@@ -42,6 +42,7 @@ function fakeAudio(duration) {
     get playing() { return since != null; },
     play: jest.fn(() => { if (since == null) since = Date.now(); return Promise.resolve(); }),
     pause: jest.fn(() => { if (since != null) { pos = a.currentTime; since = null; } }),
+    _t: t,
     addEventListener: (...x) => t.addEventListener(...x), removeEventListener: (...x) => t.removeEventListener(...x),
     removeAttribute: () => { a.src = ''; },
     load: jest.fn(),
@@ -401,4 +402,54 @@ test('the page\'s Stop (Escape) stops the session; dispose is safe twice and rel
   expect(env.audio.load).toHaveBeenCalled();
   env.pausePlayback(); // no longer listened to
   expect(s.state).toBe('stopped');
+});
+
+test('narration that cannot seek (a server without byte ranges) is reported, not left silently at 0', async () => {
+  const env = fakePage();
+  // As a browser does: the new position at once, then back to 0 once it finds it cannot seek.
+  env.createAudio = () => {
+    const a = fakeAudio(20);
+    let pos = 0;
+    Object.defineProperty(a, 'currentTime', { get: () => pos, set: v => { pos = v; a.seeking = true; setTimeout(() => { pos = 0; a.seeking = false; a.dispatchEvent(new Event('seeked')); }, 10); } });
+    a.dispatchEvent = e => a._t.dispatchEvent(e);
+    return (env.audio = a);
+  };
+  const s = createPlaybackSession({ env });
+  await s.loadAudio('narration.mp3');
+  s.setTimeline({ cues: [] });
+  const seeking = s.seek(5);
+  await advance(30);
+  const { problems } = await seeking;
+  expect(problems.map(p => p.cue)).toEqual(['narration']);
+  expect(String(problems[0].error.message)).toMatch(/cannot be moved to 5 s/);
+});
+
+test('narration from a site without CORS still plays (loaded again without it); recording it is refused by name', async () => {
+  const env = fakePage();
+  env.createAudio = () => {
+    const a = fakeAudio(20);
+    a.readyState = 0;
+    let src = '';
+    Object.defineProperty(a, 'src', { get: () => src, set: v => { src = v; setTimeout(() => { if (a.crossOrigin) a._t.dispatchEvent(new Event('error')); else { a.readyState = 1; a._t.dispatchEvent(new Event('loadedmetadata')); } }, 5); } });
+    return (env.audio = a);
+  };
+  const s = createPlaybackSession({ env });
+  const loading = s.loadAudio('https://elsewhere.example/talk.mp3');
+  await advance(30);
+  await loading;
+  expect(env.audio.crossOrigin).toBeNull();
+  s.setTimeline({ cues: [] });
+  await expect(s.play({ record: true })).rejects.toThrow(/does not allow recording its sound/);
+  expect(s.state).toBe('idle');
+});
+
+test('chapters: the one playing at a time, and seeking to one by id or number', async () => {
+  const { s } = await session({ cues: [], chapters: [{ id: 'b', at: 4, title: 'B' }, { id: 'a', at: 0, title: 'A' }] });
+  expect(s.chapterAt(3).id).toBe('a');
+  expect(s.chapterAt(4).id).toBe('b');
+  await s.seekChapter('b');
+  expect(s.time).toBe(4);
+  await s.seekChapter(0);
+  expect(s.time).toBe(0);
+  await expect(s.seekChapter('nope')).rejects.toThrow(/no chapter "nope"/);
 });

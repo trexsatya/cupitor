@@ -26,7 +26,8 @@ test('lists its tools', async () => {
   const names = (await client.listTools()).tools.map(t => t.name).sort();
   assert.deepEqual(names, ['apply_semantic_action', 'export_captions', 'get_script', 'inspect_scene', 'list_functions',
     'list_objects', 'load_script_file', 'plan_spec', 'replace_script', 'replay_script', 'reset_page', 'review_scene', 'run_script_lines',
-    'save_script_file', 'scene_timeline', 'screenshot', 'undo_last_action', 'validate_scene', 'build_from_plan', 'check_plan'].sort());
+    'save_script_file', 'scene_timeline', 'screenshot', 'undo_last_action', 'validate_scene', 'build_from_plan', 'check_plan',
+    'session_play', 'session_seek', 'session_status', 'session_stop'].sort());
 });
 
 test('function reference includes options', async () => {
@@ -301,4 +302,77 @@ test('reports a connector to a missing object, and overlapping calls run in orde
   assert.match(textOf(b), /Line 1 failed: .*no object "NOPE"/);
   const script = textOf(await client.callTool({ name: 'get_script', arguments: {} }));
   assert.match(script, /^1: addRect.*\n2: animate.*\n3: connectObjects/);
+});
+
+// 3 s of a 440 Hz tone as a WAV file.
+function toneWav(seconds) {
+  const rate = 16000, n = rate * seconds, buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin(i * 2 * Math.PI * 440 / rate) * 12000), 44 + i * 2);
+  return buf;
+}
+
+test('narrated playback: a timeline file plays against its narration and is recorded to a film; seek rebuilds; stop saves', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-'));
+  const assets = path.resolve(path.dirname(server), '../../public/play-assets');
+  const before = new Set(fs.existsSync(assets) ? fs.readdirSync(assets) : []);
+  try {
+    fs.writeFileSync(path.join(dir, 'tone.wav'), toneWav(3));
+    fs.writeFileSync(path.join(dir, 'timeline.json'), JSON.stringify({
+      narration: path.join(dir, 'tone.wav'),
+      start: ["addLabel('TITLE', 700, 120, {uid: 'title'})"],
+      cues: [
+        { id: 'one', at: 0.5, lines: ["addLabel('ONE', 300, 350, {uid: 'one'})"] },
+        { id: 'two', at: 1.5, lines: ["addLabel('TWO', 700, 350, {uid: 'two'})"] },
+        { id: 'broken', at: 2, lines: ['noSuchFunction()'] }
+      ],
+      captions: [{ start: 0.2, end: 2.8, text: 'En ton.' }],
+      chapters: [{ id: 'start', at: 0, title: 'Start' }, { id: 'later', at: 1.5, title: 'Later' }]
+    }));
+    const film = path.join(dir, 'film.webm');
+    const played = textOf(await client.callTool({ name: 'session_play', arguments: { path: path.join(dir, 'timeline.json'), record: { save_to: film, width: 640, height: 360 } } }));
+    assert.match(played, /^ended at 3(\.\d+)? s of 3(\.\d+)? s/);
+    assert.match(played, /3 cue\(s\) played/);
+    assert.match(played, /Cue failed: broken: line 1 \(noSuchFunction\(\)\): noSuchFunction is not defined/);
+    assert.match(played, /Film written to .*film\.webm \((\d+) bytes\)/);
+    const head = fs.readFileSync(film).subarray(0, 4);
+    assert.deepEqual([...head], [0x1a, 0x45, 0xdf, 0xa3], 'a WebM (EBML) file');
+
+    const seek = await client.callTool({ name: 'session_seek', arguments: { chapter: 'later' } });
+    assert.match(textOf(seek), /at 1\.5 s of 3(\.\d+)? s \(chapter later\)/);
+    assert.equal(seek.content[1].type, 'image');
+    const objs = JSON.parse(textOf(await client.callTool({ name: 'list_objects', arguments: {} })));
+    assert.deepEqual(['title', 'one', 'two'].map(u => objs.some(o => o.uid === u)), [true, true, true]);
+    assert.equal(objs.filter(o => o.uid === 'two').length, 1);
+    assert.match(textOf(await client.callTool({ name: 'session_seek', arguments: { t: 0.2 } })), /at 0\.2 s/);
+    assert.ok(!JSON.parse(textOf(await client.callTool({ name: 'list_objects', arguments: {} }))).some(o => o.uid === 'one'), 'back before the first cue');
+
+    const started = textOf(await client.callTool({ name: 'session_play', arguments: { path: path.join(dir, 'timeline.json'), wait: false, record: { save_to: path.join(dir, 'unused.webm') } } }));
+    assert.match(started, /Playing \(3 cue\(s\), 3\.0 s, recording\)/);
+    await new Promise(r => setTimeout(r, 800));
+    const stopped = textOf(await client.callTool({ name: 'session_stop', arguments: { save_to: path.join(dir, 'partial.webm') } }));
+    assert.match(stopped, /^stopped at/);
+    assert.match(stopped, /\(partial\)/);
+    assert.ok(fs.statSync(path.join(dir, 'partial.webm')).size > 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (fs.existsSync(assets)) {
+      fs.readdirSync(assets).filter(f => !before.has(f)).forEach(f => fs.rmSync(path.join(assets, f)));
+      if (!fs.readdirSync(assets).length) fs.rmdirSync(assets);
+    }
+  }
+});
+
+test('a session set up by script lines is the one the session tools see', async () => {
+  await client.callTool({ name: 'reset_page', arguments: {} });
+  assert.match(textOf(await client.callTool({ name: 'session_status', arguments: {} })), /No session yet/);
+  const run = textOf(await client.callTool({ name: 'run_script_lines', arguments: { record: false, lines: [
+    "playbackSession().setTimeline(scriptTimeline({cues: [{id: 'a', at: 0.1, lines: [\"addLabel('A', 300, 300, {uid: 'a'})\"]}], captions: [{start: 0, end: 4, text: 'x'}], chapters: [{id: 'c', at: 2, title: 'C'}]}))"
+  ] } }));
+  assert.match(run, /No errors/);
+  assert.match(textOf(await client.callTool({ name: 'session_status', arguments: {} })), /^idle at 0 s of 4 s/);
+  assert.match(textOf(await client.callTool({ name: 'session_seek', arguments: { chapter: 'c' } })), /^ready at 2 s of 4 s \(chapter c\)/);
+  const objs = JSON.parse(textOf(await client.callTool({ name: 'list_objects', arguments: {} })));
+  assert.ok(objs.some(o => o.uid === 'a'));
 });

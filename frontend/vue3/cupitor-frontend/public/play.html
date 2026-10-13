@@ -43,7 +43,11 @@
         import * as Flow from '/play-flow.js';
         Object.assign(window, Flow);
         import { createPlaybackSession } from '/play-session.js';
-        window.createPlaybackSession = createPlaybackSession;
+        import { attachSessionBar } from '/play-session-bar.js';
+        // Every session made on the page gets the seek bar while it plays.
+        window.createPlaybackSession = opts => { const s = createPlaybackSession(opts); attachSessionBar(s); return s; };
+        // The page's session, shared by script lines and the MCP tools (one at a time).
+        window.playbackSession = () => (window._playbackSession && !window._playbackSession.disposed ? window._playbackSession : (window._playbackSession = window.createPlaybackSession()));
     </script>
     <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
     <script type="text/javascript" src="/fabric.play.js"></script>

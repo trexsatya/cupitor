@@ -167,6 +167,28 @@ beat. The text is written to be pasted back to whoever writes the plan, so they 
 without the film; `out` also saves it to a file. The plan is left as the recorded script. For screenshots as well,
 give the plan straight to `review_scene` instead.
 
+## Narrated playback
+
+`session_play` plays a timeline file through the page's playback session (`playbackSession()` in the page, the same one a
+script uses), so the narration's clock drives the cues:
+
+```json
+{
+  "narration": "/path/to/opening.mp3",
+  "start": ["addLabel('TITLE', 700, 120, {uid: 'title'})"],
+  "cues": [
+    {"id": "first", "at": 2.5, "lines": ["Promise.resolve(addLabel('ONE', 300, 300, {uid: 'one'})).then(l => drawOutline(l))"]},
+    {"id": "second", "at": 6, "lead": 0.3, "lines": ["animate('one', {left: 500}, {duration: 600})"]}
+  ],
+  "captions": [{"start": 2, "end": 5.5, "text": "The first line."}],
+  "chapters": [{"id": "opening", "at": 0, "title": "Opening"}]
+}
+```
+
+A local narration file is copied into `public/play-assets/`. Cue lines are ordinary script lines; a cue reached by
+seeking runs them instantly. With `record: {save_to}`, the film (scene, captions and narration, WebM) is written there
+when the narration ends. While it plays the page shows a seek bar at the top (← → 5 s, Shift 1 s, [ ] chapters).
+
 ## Tools
 
 | Tool | What it does |
@@ -191,6 +213,10 @@ give the plan straight to `review_scene` instead.
 | `load_script_file` | Load a script file (plain lines or a page Export) and replay it. |
 | `save_script_file` | Save the script as plain lines (`lines`, default) or as the page's Export format (`export`). |
 | `reset_page` | Reload the page: empty canvas and empty script. |
+| `session_play` | Play a narrated timeline file (narration, opening lines, cues as script lines at absolute times, captions, chapters) through the page's playback session; waits for the end unless `wait: false`; `record.save_to` writes a film of it. |
+| `session_seek` | Seek the session to a time or chapter: the scene is rebuilt as it is then, with a screenshot and any cue that failed while rebuilding. |
+| `session_status` | The session's state, time, chapter, cues played (late, caught up, failed), errors and whether a film is ready. |
+| `session_stop` | Stop the session; a recorded film is written to `save_to` (or `discard`ed). |
 
 The server also gives clients a short guide to how scripts run (order, waiting, uids,
 coordinates) as its MCP `instructions`.

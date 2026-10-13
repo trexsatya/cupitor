@@ -44,6 +44,7 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
   let timeline = { reset: null, preload: null, cues: [], captions: [], chapters: [] };
   let preloaded = false;
   let audio = null, ownedUrl = null, audioOwned = false, loading = 0, pendingLoad = null;
+  let audioRecordable = true; // false: narration from a site without CORS (plays, but a recording would be silent)
   let current = null;       // the operation that owns the scene: {abort, forPlay, next}
   let run = null;           // that operation while it plays (or is paused)
   const inflight = new Set(); // cue promises not yet settled
@@ -253,16 +254,26 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
       else { ownedUrl = env.URL.createObjectURL(source); a.src = ownedUrl; }
     }
     audio = a;
+    audioRecordable = true;
+    const loaded = () => (a.readyState >= 1 ? null : new Promise((resolve, reject) => {
+      const ok = () => { done(); resolve(); }, bad = () => { done(); reject(new Error('the audio could not be loaded')); };
+      const done = () => { pendingLoad = null; a.removeEventListener('loadedmetadata', ok); a.removeEventListener('error', bad); };
+      // A later load, or disposing, ends this one.
+      pendingLoad = () => { done(); reject(Object.assign(new Error('loadAudio: replaced by a later load'), { replaced: true })); };
+      a.addEventListener('loadedmetadata', ok);
+      a.addEventListener('error', bad);
+    }));
     try {
-      if (!(a.readyState >= 1)) {
-        await new Promise((resolve, reject) => {
-          const ok = () => { done(); resolve(); }, bad = () => { done(); reject(new Error('the audio could not be loaded')); };
-          const done = () => { pendingLoad = null; a.removeEventListener('loadedmetadata', ok); a.removeEventListener('error', bad); };
-          // A later load, or disposing, ends this one.
-          pendingLoad = () => { done(); reject(new Error('loadAudio: replaced by a later load')); };
-          a.addEventListener('loadedmetadata', ok);
-          a.addEventListener('error', bad);
-        });
+      try { await loaded(); }
+      catch (error) {
+        // A server that does not allow CORS refuses the request made with it: load it
+        // without, so it still plays (a recording then cannot take its sound).
+        if (error.replaced || id !== loading || typeof source !== 'string' || !a.crossOrigin) throw error;
+        a.crossOrigin = null;
+        if (a.removeAttribute) a.removeAttribute('crossorigin');
+        a.src = source;
+        await loaded();
+        audioRecordable = false;
       }
     } catch (error) {
       if (id === loading) releaseAudio();
@@ -310,6 +321,21 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
     if (notify) await callHooks('onSeek', t, { signal });
     if (!alive(op)) return gone;
     setClock(t);
+    // A server that does not allow byte ranges leaves the audio unable to seek:
+    // once the browser has tried, it is back at 0.
+    const a = audio;
+    if (a && t > 0.5) {
+      if (a.seeking) {
+        const timer = env.setTimeout || setTimeout;
+        await new Promise(resolve => { const done = () => { a.removeEventListener('seeked', done); resolve(); }; a.addEventListener('seeked', done); timer(done, 1500); });
+        if (!alive(op)) return gone;
+      }
+      if (Math.abs(a.currentTime - t) > 0.5) {
+        const error = new Error(`the narration cannot be moved to ${t} s (its server does not allow seeking, or it is shorter)`);
+        problems.push({ cue: 'narration', error });
+        emit('error', { stage: 'seek', error });
+      }
+    }
     if (captions) { shownCaption = undefined; showCaptionAt(t); }
     emit('timechange', { time: t });
     const next = timeline.cues.findIndex(c => c.at - c.lead > t);
@@ -345,6 +371,9 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
     if (pendingLoad) throw new Error('play: the audio is still loading');
     if (!(Number.isFinite(from) && from >= 0)) throw new Error('play: from must be seconds, 0 or more');
     if (record && env.playRate && env.playRate() !== 1) throw new Error('play: recording needs normal speed (1×)');
+    if (record && audio && record.audio !== false && !audioRecordable) {
+      throw new Error('play: the narration comes from a site that does not allow recording its sound (no CORS); serve it from this site, or record without it (record.audio false)');
+    }
     if (record && audio && record.audio !== false) {
       // Still inside the click: the audio graph may only start from a user action.
       let g;
@@ -546,9 +575,23 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
     return () => { const i = hooks.indexOf(entry); if (i >= 0) hooks.splice(i, 1); };
   }
 
+  // The chapter playing at time t (the last one starting at or before it), or null.
+  function chapterAt(t) {
+    let found = null;
+    for (const c of timeline.chapters) if (c.at <= t) found = c;
+    return found;
+  }
+  // Goes to a chapter by id or by number (0 is the first); playing carries on from there.
+  async function seekChapter(which) {
+    const c = typeof which === 'number' ? timeline.chapters[which] : timeline.chapters.find(x => x.id === which);
+    if (!c) throw new Error(`seekChapter: no chapter ${JSON.stringify(which)}`);
+    return seek(c.at);
+  }
+
   async function dispose() {
     if (disposed) return;
     await stop();
+    emit('dispose');
     cancel();
     disposed = true;
     listen(false);
@@ -567,6 +610,9 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
     get audit() { return audit.slice(); },
     get chapters() { return timeline.chapters.slice(); },
     get recording() { return recording; },
+    get isRecording() { return !!rec; },
+    get disposed() { return disposed; },
+    chapterAt, seekChapter,
     // Saves the last film as a file.
     download(filename) {
       if (!recording) throw new Error('download: nothing has been recorded');

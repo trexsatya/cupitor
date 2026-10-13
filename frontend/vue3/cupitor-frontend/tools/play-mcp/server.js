@@ -63,12 +63,12 @@ export function formatFunctions(groups, filter) {
 // A picture's src: URLs and paths under public/ are used as they are; a local
 // file elsewhere is copied into public/play-assets/ so the script (and the
 // page's Import) can load it by a path under public/.
-export function resolvePictureSrc(src, publicDir) {
+export function resolvePictureSrc(src, publicDir, kind = 'picture') {
   if (/^(https?:|data:)/i.test(src)) return src;
   const inPublic = path.resolve(publicDir, src.replace(/^\/+/, ''));
   if (!path.isAbsolute(src) && fs.existsSync(inPublic)) return path.relative(publicDir, inPublic).split(path.sep).join('/');
   const file = path.resolve(src);
-  if (!fs.existsSync(file)) throw new Error(`picture not found: ${src}`);
+  if (!fs.existsSync(file)) throw new Error(`${kind} not found: ${src}`);
   const rel = path.relative(publicDir, file);
   if (!rel.startsWith('..') && !path.isAbsolute(rel)) return rel.split(path.sep).join('/');
   const data = fs.readFileSync(file);
@@ -105,7 +105,10 @@ Objects have uids (e.g. "R1", "T2"); pass {uid: "..."} when creating objects so 
 Coordinates are canvas pixels (top-left 0,0; the visible canvas is about 1400x800 at zoom 1).
 Workflow: list_functions to see what is available and its options; run_script_lines to add and play lines;
 list_objects / screenshot to check the result; replay_script to watch the whole thing from the start;
-save_script_file to keep it (the page's Import button loads such files).`;
+save_script_file to keep it (the page's Import button loads such files).
+
+Narrated playback: session_play plays a timeline file (narration audio, cues as script lines at absolute times, captions,
+chapters) against the narration's clock, and can record a film; session_seek, session_status and session_stop control it.`;
 
 // Reading the script, planning against it and playing the result happen as
 // one step, so two clients can't plan from the same script and both append.
@@ -388,6 +391,148 @@ export function createServer(page, publicDir) {
     const result = report(await play(null, { clearFirst: true }));
     return text(`Removed ${cut.removed.length} line(s), starting with: ${cut.removed[0]}\n${result}`);
   }));
+
+  // ---- Narrated playback: the page's playbackSession() (public/play-session.js) ----
+  const SESSION_FORMAT = 'A timeline file (JSON): {narration?: audio file (a path under public/, a local file, which is copied to public/play-assets/, or a URL), start?: [script lines for the opening scene], cues: [{id?, at: seconds, lead?: seconds, lines: [script lines]}], captions?: [{id?, start, end, text}], chapters?: [{id, at, title}]}. Cue lines are ordinary script lines (list_functions); a cue reached by seeking runs instantly.';
+  // The page's session (made by these tools or by script lines), with its errors and film kept for them.
+  const watchSession = () => page.evaluate(() => {
+    const s = window._playbackSession;
+    if (!s || s.disposed) return false;
+    if (!window.__mcpSession || window.__mcpSession.s !== s) {
+      const m = window.__mcpSession = { s, errors: [], film: null };
+      s.on('error', e => m.errors.push({ stage: e.stage, cue: e.cue, hook: e.hook, message: String(e.error && e.error.message || e.error) }));
+      s.on('recordingready', e => { m.film = e; });
+    }
+    return true;
+  });
+  const loadSession = async file => {
+    const spec = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8'));
+    if (!Array.isArray(spec.cues)) throw new Error('the timeline needs cues: [{at, lines}]');
+    // A relative narration path is the timeline file's neighbour (or a path under public/).
+    let source = spec.narration;
+    if (source && !/^(https?:|data:)/i.test(source) && !path.isAbsolute(source)) {
+      const beside = path.resolve(path.dirname(path.resolve(file)), source);
+      if (fs.existsSync(beside)) source = beside;
+    }
+    const narration = source ? resolvePictureSrc(source, publicDir, 'narration') : null;
+    await page.evaluate(() => playbackSession().stop());
+    await watchSession();
+    return page.evaluate(async ({ spec, narration }) => {
+      const s = playbackSession();
+      await s.loadAudio(narration);
+      s.setTimeline(scriptTimeline(spec));
+      return { duration: s.duration, cues: spec.cues.length, chapters: s.chapters.length };
+    }, { spec, narration });
+  };
+  const sessionStatus = async () => (await watchSession()) && page.evaluate(() => {
+    const m = window.__mcpSession;
+    if (!m) return null;
+    const s = m.s;
+    const audit = s.audit;
+    const ch = s.chapterAt(s.time);
+    return { state: s.state, time: +s.time.toFixed(2), duration: +s.duration.toFixed(2), chapter: ch && ch.id, recording: s.isRecording,
+      cues: audit.length, late: audit.filter(a => a.late).map(a => a.cue), caughtUp: audit.filter(a => a.caughtUp).map(a => a.cue),
+      failed: audit.filter(a => a.error).map(a => `${a.cue}: ${a.error}`), errors: m.errors.slice(-10), film: m.film ? { size: m.film.recording.size, partial: m.film.partial } : null };
+  });
+  // The film leaves the page in slices (a long film is large).
+  const saveFilm = async file => {
+    const size = await page.evaluate(() => window.__mcpSession && window.__mcpSession.film ? window.__mcpSession.film.recording.size : 0).catch(() => 0);
+    if (!size) return null;
+    const out = path.resolve(file);
+    fs.writeFileSync(out, Buffer.alloc(0));
+    const SLICE = 8 * 1024 * 1024;
+    for (let at = 0; at < size; at += SLICE) {
+      const b64 = await page.evaluate(async ([at, n]) => {
+        const buf = new Uint8Array(await window.__mcpSession.film.recording.slice(at, at + n).arrayBuffer());
+        let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+        return btoa(bin);
+      }, [at, SLICE]);
+      fs.appendFileSync(out, Buffer.from(b64, 'base64'));
+    }
+    return { path: out, bytes: size };
+  };
+  const statusText = st => !st ? 'No session yet: session_play loads one.' : [
+    `${st.state} at ${st.time} s of ${st.duration} s${st.chapter ? ` (chapter ${st.chapter})` : ''}${st.recording ? ', recording' : ''}.`,
+    `${st.cues} cue(s) played${st.late.length ? `; late: ${st.late.join(', ')}` : ''}${st.caughtUp.length ? `; caught up (instant): ${st.caughtUp.join(', ')}` : ''}.`,
+    ...st.failed.map(f => `Cue failed: ${f}`),
+    ...st.errors.filter(e => !e.cue || !st.failed.some(f => f.startsWith(`${e.cue}:`))).map(e => `Error (${e.stage}${e.hook ? `, hook ${e.hook}` : ''}${e.cue ? `, cue ${e.cue}` : ''}): ${e.message}`),
+    ...(st.film ? [`Film ready: ${st.film.size} bytes${st.film.partial ? ' (partial)' : ''}.`] : [])
+  ].join('\n');
+
+  tool('session_play', {
+    description: `Play a narrated timeline in the page through its playback session: the narration's clock drives cues at absolute times, with captions and chapters (the page's seek bar works meanwhile). ${SESSION_FORMAT} Waits until it ends (progress is reported meanwhile) unless wait is false; then use session_status / session_seek / session_stop. record makes a film of the scene, captions and narration, saved to save_to when it ends.`,
+    inputSchema: {
+      path: z.string().describe('the timeline (JSON)'),
+      from: z.number().optional().describe('seconds to start from (default 0)'),
+      until: z.number().optional().describe('stop at this time instead of the end'),
+      wait: z.boolean().optional().describe('wait until it ends (default true)'),
+      record: z.object({
+        save_to: z.string().describe('where to write the film (.webm)'),
+        width: z.number().optional(), height: z.number().optional(), fps: z.number().optional(),
+        captions: z.boolean().optional()
+      }).optional()
+    }
+  }, async ({ path: file, from, until, wait, record }) => exclusive(async () => {
+    const loaded = await loadSession(file);
+    const rec = record ? { width: record.width, height: record.height, fps: record.fps, captions: record.captions, filename: path.basename(record.save_to) } : null;
+    if (rec) Object.keys(rec).forEach(k => rec[k] === undefined && delete rec[k]);
+    await page.evaluate(async ({ from, rec }) => { window.__mcpSession.errors = []; window.__mcpSession.film = null; await playbackSession().play({ from: from || 0, record: rec }); }, { from, rec });
+    if (wait === false) return text(`Playing (${loaded.cues} cue(s), ${loaded.duration.toFixed(1)} s${rec ? ', recording' : ''}). ${statusText(await sessionStatus())}`);
+    let gone = false;
+    await withProgress(async () => {
+      // A pause (on the page) waits as long as it lasts; otherwise the narration's length and a minute.
+      let left = (loaded.duration + 60) * 1000;
+      try {
+        for (;;) {
+          const st = await page.evaluate(() => { const s = window.__mcpSession && window.__mcpSession.s; return s && !s.disposed ? { state: s.state, time: s.time } : null; });
+          if (!st) { gone = true; break; }
+          if (!['playing', 'paused'].includes(st.state)) break;
+          if (until != null && st.time >= until) { await page.evaluate(() => window.__mcpSession.s.stop()); break; }
+          await new Promise(r => setTimeout(r, 250));
+          if (st.state === 'playing' && (left -= 250) <= 0) { await page.evaluate(() => window.__mcpSession.s.stop()); break; }
+        }
+      } catch (e) { gone = true; } // the page was reset or closed meanwhile
+    });
+    if (gone) return text('The page was reset (or its session replaced) while the timeline played; nothing more to report.');
+    let saved = null;
+    if (record) {
+      await page.evaluate(() => new Promise(resolve => { const t0 = Date.now(); (function poll() { if (!window.__mcpSession || window.__mcpSession.film || Date.now() - t0 > 10000) resolve(); else setTimeout(poll, 100); })(); })).catch(() => {});
+      saved = await saveFilm(record.save_to);
+    }
+    return text(`${statusText(await sessionStatus())}${record ? `\n${saved ? `Film written to ${saved.path} (${saved.bytes} bytes).` : 'No film was recorded.'}` : ''}`);
+  }));
+
+  tool('session_seek', {
+    description: "Seek the page's playback session to a time (seconds) or a chapter: the scene is rebuilt as it is then (cues up to it, instantly); playing carries on from there. Returns problems (e.g. a cue that failed while rebuilding) and a screenshot.",
+    inputSchema: { t: z.number().optional(), chapter: z.string().optional() }
+  }, async ({ t, chapter }) => {
+    await watchSession();
+    const r = await page.evaluate(async ({ t, chapter }) => {
+      if (!window.__mcpSession) return { error: 'No session yet: session_play loads one.' };
+      const s = playbackSession();
+      try {
+        const out = chapter != null ? await s.seekChapter(chapter) : await s.seek(t);
+        return { problems: ((out && out.problems) || []).map(p => `${p.cue}: ${p.error && p.error.message || p.error}`) };
+      } catch (e) { return { error: e.message }; }
+    }, { t, chapter });
+    if (r.error) return text(r.error);
+    const png = await page.screenshot();
+    return { content: [{ type: 'text', text: `${statusText(await sessionStatus())}${r.problems.length ? `\nProblems while rebuilding:\n${r.problems.map(p => `- ${p}`).join('\n')}` : ''}` }, { type: 'image', data: png.toString('base64'), mimeType: 'image/png' }] };
+  });
+
+  tool('session_status', {
+    description: "The page's playback session: state, time, chapter, cues played (late, caught up, failed), errors and whether a film is ready."
+  }, async () => text(statusText(await sessionStatus())));
+
+  tool('session_stop', {
+    description: "Stop the page's playback session. When it was recording, the film (what there is of it) is written to save_to, unless discard.",
+    inputSchema: { save_to: z.string().optional(), discard: z.boolean().optional() }
+  }, async ({ save_to, discard }) => {
+    await watchSession();
+    await page.evaluate(d => window.__mcpSession && window.__mcpSession.s.stop({ discard: d }), !!discard);
+    const saved = save_to && !discard ? await saveFilm(save_to) : null;
+    return text(`${statusText(await sessionStatus())}${saved ? `\nFilm written to ${saved.path} (${saved.bytes} bytes).` : ''}`);
+  });
 
   tool('reset_page', {
     description: 'Reload play.html: empty canvas and empty recorded script.'

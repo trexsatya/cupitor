@@ -1225,6 +1225,48 @@ function addBrace(x1, y1, x2, y2, opts) {
   return p;
 }
 
+// A cone opening from its tip at (tipX, tipY): a view, a beam, what a person
+// sees or a theory covers. Its sides bow outward (curve) and its far end is the
+// near half of an ellipse seen at a slant (rim), which gives it depth.
+// opts: angle (degrees it opens towards; 0 right, 90 down; default 0), length
+// (px from tip to far end, default 300), span (opening in degrees, default 40),
+// curve (how far the sides bow, as a share of the far half-width; default
+// 0.15, 0 straight), rim (the far end's depth as a share of its half-width;
+// default 0.25, 0 flat), uid (drawing again with the same uid replaces it,
+// keeping its opacity), fill / stroke / strokeWidth and other Fabric properties.
+// Its Fabric centre is the middle of its drawn outline (tip to the far rim).
+function addCone(tipX, tipY, opts) {
+  opts = Object.assign({ angle: 0, length: 300, span: 40, curve: 0.15, rim: 0.25 }, opts);
+  const { angle, length: L, span, curve, rim, uid, ...rest } = opts;
+  const a = angle * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+  const w = L * Math.tan(Math.min(170, Math.max(1, span)) * Math.PI / 360); // far half-width
+  // Local frame: the tip at 0,0 and the cone along +x; turned by angle and moved to the tip.
+  const P = (u, v) => `${+(tipX + u * cos - v * sin).toFixed(1)} ${+(tipY + u * sin + v * cos).toFixed(1)}`;
+  const bow = curve * w;
+  const far = rim > 0
+    ? `A ${+(rim * w).toFixed(1)} ${+w.toFixed(1)} ${+angle.toFixed(2)} 0 1 ${P(L, w)}`
+    : `L ${P(L, w)}`;
+  const d = `M ${P(0, 0)} Q ${P(L / 2, -w / 2 - bow)} ${P(L, -w)} ${far} Q ${P(L / 2, w / 2 + bow)} ${P(0, 0)} Z`;
+  const p = new fabric.Path(d, Object.assign({ fill: 'rgba(59,130,246,0.15)', stroke: '#3B82F6', strokeWidth: 2, strokeLineJoin: 'round' }, rest));
+  p.set({ originX: 'center', originY: 'center', left: p.left + p.width / 2, top: p.top + p.height / 2 });
+  p.setCoords();
+  p.customData = Object.assign({}, p.customData, { cone: { tip: [tipX, tipY], angle, length: L, span, curve, rim } });
+  if (uid) {
+    const old = findIfRequired(uid);
+    if (isFabricObject(old) && old.canvas) {
+      p.set('opacity', old.opacity);
+      const i = pc.getObjects().indexOf(old);
+      pc.remove(old);
+      p.uid = uid;
+      pc.insertAt(i, p);
+      return p;
+    }
+    p.uid = uid;
+  }
+  pc.add(p);
+  return p;
+}
+
 function addEllipse(left, top, rx, ry, opts) {
   opts = opts || {};
   const ell = new fabric.Ellipse(Object.assign({
