@@ -198,7 +198,7 @@ test('cues start at their times and may overlap; one far behind is played at onc
   const begun = [];
   const { s, env } = await session({
     cues: [
-      { id: 'long', at: 0.2, apply: () => { begun.push('long'); return new Promise(r => setTimeout(r, 2000)); } },
+      { id: 'long', at: 0.2, apply: () => { begun.push('long'); return new Promise(r => setTimeout(r, 500)); } },
       { id: 'next', at: 0.5, apply: () => { begun.push(['next', s.time]); } },
       { id: 'missed', at: 1, apply: ctx => { s.missedImmediate = ctx.immediate; } },
       { id: 'slightly', at: 2.6, apply: () => {} }
@@ -452,4 +452,54 @@ test('chapters: the one playing at a time, and seeking to one by id or number', 
   await s.seekChapter(0);
   expect(s.time).toBe(0);
   await expect(s.seekChapter('nope')).rejects.toThrow(/no chapter "nope"/);
+});
+
+test('a cue far behind while another is still running plays as it is (late, not instant), so the instant speed-up never reaches a running cue; alone, it is instant and the next waits for it', async () => {
+  const log = [];
+  const { s, env } = await session({
+    cues: [
+      { id: 'busy', at: 0.1, apply: () => new Promise(r => setTimeout(r, 1000)) },
+      { id: 'behind', at: 0.5, apply: ctx => { log.push(['behind', ctx.immediate]); } },
+      { id: 'alone', at: 4, apply: ctx => { log.push(['alone', ctx.immediate]); return new Promise(r => setTimeout(() => { log.push(['alone done']); r(); }, 50)); } },
+      { id: 'after', at: 4.1, apply: () => { log.push(['after']); } }
+    ]
+  });
+  await s.play();
+  await advance(200);
+  env.audio.currentTime = 2.5; // stalled while 'busy' runs
+  await advance(1100); // 'busy' is done
+  env.audio.currentTime = 6.5; // stalled again, with nothing running
+  await advance(500);
+  const byId = Object.fromEntries(s.audit.map(a => [a.cue, a]));
+  expect(byId.behind).toMatchObject({ late: true, caughtUp: false });
+  expect(byId.alone).toMatchObject({ late: true, caughtUp: true });
+  expect(log).toEqual([['behind', false], ['alone', true], ['alone done'], ['after']]);
+});
+
+test('an instant catch-up cue that hangs holds the next cue back only `settle` seconds; one still running from a cut-short run keeps the catch-up from being instant', async () => {
+  const log = [];
+  const { s, env } = await session({
+    cues: [
+      { id: 'hangs', at: 0.5, apply: ctx => { log.push(['hangs', ctx.immediate]); return new Promise(() => {}); } },
+      { id: 'next', at: 0.6, apply: () => { log.push(['next', Math.round(env.playNow() / 100) / 10]); } }
+    ]
+  });
+  await s.play();
+  env.audio.currentTime = 3; // far behind both
+  await advance(1500);
+  expect(log[0]).toEqual(['hangs', true]);
+  expect(log[1][0]).toBe('next');
+  expect(log[1][1]).toBeGreaterThanOrEqual(1); // after the one-second cap
+  expect(log[1][1]).toBeLessThan(1.3);
+  await s.stop();
+
+  // 'hangs' is still running from that run (it ignores the signal): a new run's late cue is not instant.
+  s.setTimeline({ cues: [{ id: 'late', at: 2, apply: ctx => { log.push(['late', ctx.immediate]); } }] });
+  log.length = 0;
+  const again = s.play();
+  await advance(1200); // the rebuild gives the leftover cue its second to settle, then goes on
+  await again;
+  env.audio.currentTime = 5;
+  await advance(100);
+  expect(log).toEqual([['late', false]]);
 });

@@ -177,3 +177,39 @@ test('a seek in the middle of a cue\'s animation stops it: nothing changes the r
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('after the narration ends the bar stays: a chapter (the last too) or ▶ plays again from there; Escape or × closes it; a stop while playing leaves none', async () => {
+  const b = await openBoard();
+  try {
+    const look = () => b.eval(() => ({ state: S.state, ended: document.body.classList.contains('play-session-ended'), playing: document.body.classList.contains('play-session'), mode: document.body.classList.contains('play-mode'), shown: getComputedStyle(document.getElementById('play-session-bar')).display !== 'none' }));
+    await b.eval(() => {
+      window.S = playbackSession();
+      S.setTimeline(scriptTimeline({ cues: [{ id: 'b', at: 0.8, lines: ["addLabel('B', 500, 300, {uid: 'b'})"] }], captions: [{ start: 0, end: 1.2, text: 'kort' }], chapters: [{ id: 'one', at: 0, title: 'One' }, { id: 'two', at: 0.8, title: 'Two' }] }));
+      return S.play();
+    });
+    await b.page.waitForFunction(() => S.state === 'ended');
+    assert.deepEqual(await look(), { state: 'ended', ended: true, playing: false, mode: false, shown: true });
+    await b.page.selectOption('#play-session-bar select', 'two');
+    await b.page.waitForFunction(() => S.state === 'playing');
+    const again = await look();
+    assert.equal(again.mode, true, 'back in play mode');
+    assert.ok(await b.eval(() => S.time >= 0.8 && isFabricObject(findIfRequired('b'))), 'from the chapter, with its scene');
+    await b.page.waitForFunction(() => S.state === 'ended');
+    await b.page.click('#play-session-bar .again');
+    await b.page.waitForFunction(() => S.state === 'playing');
+    assert.ok(await b.eval(() => S.time < 0.5), 'at the end, ▶ starts from the beginning');
+    await b.page.waitForFunction(() => S.state === 'ended');
+    await b.page.keyboard.press('Escape');
+    assert.equal((await look()).shown, false, 'Escape closes it');
+    await b.eval(() => S.play({ from: 0.9 }));
+    await b.page.waitForFunction(() => S.state === 'ended');
+    assert.equal((await look()).shown, true, 'shown again after the next play');
+    await b.page.click('#play-session-bar .close');
+    assert.equal((await look()).shown, false, '× closes it');
+    await b.eval(() => S.play());
+    await b.page.keyboard.press('Escape');
+    await b.page.waitForFunction(() => S.state === 'stopped');
+    assert.equal((await look()).shown, false, 'no bar after a stop');
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

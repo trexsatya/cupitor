@@ -13,7 +13,8 @@
 // One operation owns the scene at a time: a rebuild (seek, prepare) or a run
 // (play). Starting another, stopping or disposing cancels it; a cancelled
 // operation makes no further change after its current await. Cues start at
-// their times and may overlap; a cue still running when a new rebuild
+// their times and may overlap (except one played at once to catch up, which
+// runs alone: see schedule()); a cue still running when a new rebuild
 // starts is given a moment to finish before the scene is reset.
 //
 // Recording (play({record})): see play-recorder.js. The recorder starts
@@ -441,7 +442,10 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
     }
   }
 
-  // Starts each cue at its time (cues may overlap); one far behind is played at once.
+  // Starts each cue at its time (cues may overlap). One far behind is played at
+  // once (immediate) when no other cue is running, and the next waits for it:
+  // an instant cue's speed-up (instantly() in the page) then touches nothing
+  // else. With another cue running it plays as it is, late.
   async function schedule(op) {
     while (alive(op) && op.next < timeline.cues.length) {
       const cue = timeline.cues[op.next];
@@ -450,10 +454,14 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
       if (!alive(op)) return;
       op.next += 1;
       const behind = now() - start;
-      const ctx = contextFor(op, { immediate: behind > opts.catchUp, cue });
+      // Nothing else running: none of this run, nor one cut short by a seek or stop.
+      const immediate = behind > opts.catchUp && inflight.size === 0;
+      const ctx = contextFor(op, { immediate, cue });
       await callHooks('beforeCue', cue, ctx);
       if (!alive(op)) return;
-      runCue(op, cue, ctx, start, behind);
+      const { applied } = runCue(op, cue, ctx, start, behind);
+      // The next cue waits for an instant one's apply (not its hooks), at most `settle` seconds.
+      if (immediate) await Promise.race([applied.catch(() => {}), wait(opts.settle * 1000)]);
     }
     // Without audio, the end is the last caption or cue.
     if (alive(op) && !audio) {
@@ -462,12 +470,16 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
       if (alive(op)) finish();
     }
   }
-  async function runCue(op, cue, ctx, start, behind) {
+  // Starts a cue; `applied` settles when its apply does (its hooks come after).
+  function runCue(op, cue, ctx, start, behind) {
     const begun = now();
     let error = null;
+    let applied;
+    try { applied = track(cue.apply(ctx)); } catch (e) { applied = Promise.reject(e); }
+    applied.catch(() => {});
     // Kept per run, so the end without audio can wait for it.
     const p = (async () => {
-      try { await track(cue.apply(ctx)); } catch (e) { error = e; }
+      try { await applied; } catch (e) { error = e; }
       if (!alive(op)) return;
       if (error) emit('error', { stage: 'cue', cue: cue.id, error });
       const timing = { cue: cue.id, target: start, begun, finished: now(), late: behind > opts.late, caughtUp: ctx.immediate };
@@ -477,8 +489,8 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
       await callHooks('afterCue', cue, ctx, timing);
     })();
     op.running.add(p);
-    await p;
-    op.running.delete(p);
+    p.then(() => op.running.delete(p));
+    return { applied };
   }
   const wait = ms => new Promise(resolve => env.playTimeout(resolve, ms));
 
