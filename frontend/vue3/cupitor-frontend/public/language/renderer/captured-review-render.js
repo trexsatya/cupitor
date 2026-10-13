@@ -25,7 +25,7 @@ export function renderCapturedReviewList(buffer, mountEl) {
 }
 
 // Update a row's status block after the SRT existence check resolves.
-//   state: 'modify' | 'new' | 'error'
+//   state: 'modify' | 'new' | 'no-repo' | 'error'
 //   entryName: index.json entry name (for 'modify')
 //
 // 'modify' also updates the Push button label to "Push (merge)" to reflect
@@ -57,6 +57,13 @@ export function applyCapturedRowStatus(rowEl, state, entryName) {
     main.style.color = '#070'
     main.style.fontWeight = 'bold'
     main.textContent = 'new SRT'
+    status.appendChild(main)
+    return
+  }
+  if (state === 'no-repo') {
+    const main = document.createElement('span')
+    main.style.color = '#a60'
+    main.textContent = 'Set up your repo to push'
     status.appendChild(main)
     return
   }

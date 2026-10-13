@@ -138,6 +138,7 @@ import {
   pendingVocabCategories as _dsPendingVocabCategories,
   relayerVocabulary as _dsRelayerVocabulary,
   mergeRecordingLayers as _dsMergeRecordingLayers,
+  claimVocabularyLines as _dsClaimVocabularyLines,
   NoSelfRepoError as _DsNoSelfRepoError,
 } from './data-source.js';
 
@@ -1183,6 +1184,8 @@ function saveSearch(word, count) {
 
 
 function openAddToVocabDialog() {
+  // Without an own repo nothing typed here could be saved.
+  if (!_requireSelf()) return
   const w = window.innerWidth * 0.9
   const h = window.innerHeight * 0.8
 
@@ -1327,7 +1330,7 @@ function addToVocab(commitAndClose) {
 
   // No own repo (a guest): an edit could never be saved, so say so instead
   // of keeping it in memory and in the unsaved-edits buffer.
-  if (!_dsHasSelf()) { alert(new _DsNoSelfRepoError().message); return }
+  if (!_requireSelf()) return
 
   const newText = $("#vocabularySegmentTextarea").val().trim()
   if (!newText) {
@@ -1395,10 +1398,36 @@ function addToVocab(commitAndClose) {
     return;
   }
 
+  // The other user's lines can't be edited in place: an inline edit would
+  // replace their line, which is never saved.
+  const readOnlyLines = window._vocabularyReadOnly || new Set()
+  if (refWord && position === 'inline' && readOnlyLines.has(refWord)) {
+    alert("This line is from the other user's vocabulary and can't be edited here. Choose Above or Below to add your own line.")
+    return
+  }
+  // A line the user adds is theirs, even when the other user has the same
+  // text: their copy is dropped so the user's is the one shown and saved.
+  // When that copy is the reference line itself, the new lines go where it
+  // was: `refSlot` is its position among the lines that stay.
+  const wordsBefore = window.vocabulary[category] || []
+  const refAt = refWord ? wordsBefore.indexOf(refWord) : -1
+  const claimed = _dsClaimVocabularyLines(window.vocabulary, readOnlyLines,
+    window._vocabularyOtherCategories || new Set(), newWords)
+  let refSlot = -1
+  if (claimed.readOnly !== readOnlyLines) {
+    window.vocabulary = claimed.vocab
+    window._vocabularyReadOnly = claimed.readOnly
+    if (refAt >= 0 && !claimed.readOnly.has(refWord) && readOnlyLines.has(refWord)) {
+      refSlot = wordsBefore.slice(0, refAt).filter(l => !(readOnlyLines.has(l) && !claimed.readOnly.has(l))).length
+    }
+  }
+
   const categoryWords = window.vocabulary[category] || []
   if (!refWord) {
     // No reference word — just append to the (possibly new) category.
     categoryWords.push(...newWords)
+  } else if (refSlot >= 0 && categoryWords.indexOf(refWord) < 0) {
+    categoryWords.splice(refSlot, 0, ...newWords)
   } else {
     const idx = categoryWords.indexOf(refWord)
     if (position === 'inline') {
@@ -1679,6 +1708,26 @@ function _selfGetFile(filePath) {
   return window.GitHubUtils.getFile(t.owner, t.repo, filePath, '', t.branch)
 }
 
+// Writes need a self repo. Shows the account panel's set-up prompt (Task 19
+// installs window.cupitorShowSetupPrompt) and returns false otherwise.
+// Called first in every user-facing write action, before any confirm,
+// prompt or network call, so nothing is half done and nothing is queued.
+const SETUP_REPO_MSG = 'Set up your repo to save changes.'
+function _requireSelf() {
+  if (_dsHasSelf()) return true
+  const show = window.cupitorShowSetupPrompt
+  if (typeof show === 'function') show(SETUP_REPO_MSG)
+  else alert(SETUP_REPO_MSG)
+  return false
+}
+
+// The repo folder writes go to: db/language/<lang>, with the same lowercased,
+// validated language the reads use (_dsLangFromLocation), so a mixed-case
+// ?lang= cannot write somewhere the app never reads from.
+function _langRepoDir() {
+  return `db/language/${_dsLangFromLocation()}`
+}
+
 // 3-way merge of categorised vocab files. base = text we loaded, localVocab =
 // in-memory current state, remoteText = latest from api.github.com. Lines
 // added locally are kept; lines removed locally (in base, absent in local)
@@ -1705,8 +1754,8 @@ function _ownVocabulary() {
 }
 
 async function commitVocabularyToGithub() {
-  const lang = getLangFromUrl()
-  const filePath = `db/language/${lang.fullName}/vocabulary.txt`
+  if (!_requireSelf()) return
+  const filePath = `${_langRepoDir()}/vocabulary.txt`
   const baselineText = window._vocabularyBaselineText || ''
   const localVocab = _ownVocabulary()
 
@@ -1804,6 +1853,17 @@ function _replayPendingVocab() {
   if (!window.vocabulary) window.vocabulary = {}
   if (!window._vocabDirtyCategories) window._vocabDirtyCategories = {}
   const cats = Object.keys(buf.categories)
+  // The buffer holds own lines only. One the other user also has (claimed
+  // in addToVocab, not yet saved) is read-only again after a reload; claim
+  // it again so the relayer below keeps it.
+  const bufLines = cats.flatMap(cat => Array.isArray(buf.categories[cat]) ? buf.categories[cat] : [])
+  const roBefore = window._vocabularyReadOnly || new Set()
+  const claimed = _dsClaimVocabularyLines(window.vocabulary, roBefore,
+    window._vocabularyOtherCategories || new Set(), bufLines)
+  if (claimed.readOnly !== roBefore) {
+    window.vocabulary = claimed.vocab
+    window._vocabularyReadOnly = claimed.readOnly
+  }
   let any = 0
   cats.forEach(cat => {
     if (Array.isArray(buf.categories[cat])) {
@@ -2650,8 +2710,7 @@ function _practiceLogLocalKey() {
 }
 
 function _practiceLogGithubPath() {
-  const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || 'default'
-  return `db/language/${lang}/practice-log.json`
+  return `${_langRepoDir()}/practice-log.json`
 }
 
 function _currentWeekLabel() { return _isoWeekLabel(new Date()) }
@@ -2878,6 +2937,7 @@ function _practiceLogAddItem() {
 }
 
 async function _commitPracticeLogToGithub() {
+  if (!_requireSelf()) return
   const $status = $('#practiceLogStatus')
   const data = window._practiceLog
   const filePath = _practiceLogGithubPath()
@@ -5859,7 +5919,7 @@ function _srtPathFor(link, langCode) {
   const baseName = _nfc((srt && srt.name) || (window.allSubtitles[link] && window.allSubtitles[link].fileName))
   if (!baseName) return null
   const suffix = langCode === 'en' ? '.en.srt' : ('.' + lang.code + '.srt')
-  return `db/language/${lang.fullName}/srts/${baseName}${suffix}`
+  return `${_langRepoDir()}/srts/${baseName}${suffix}`
 }
 
 // Replace the text body of the SRT block whose first line is `lineIndex`.
@@ -5893,6 +5953,9 @@ function _replaceSrtLine(rawSrt, lineIndex, newText, opts = null) {
 // re-runs `merge` on a 409/422, so the line-edit is re-applied against the
 // latest remote text.
 async function _saveSubtitleEdit(link, langCode, lineIndex, newText, opts = null) {
+  // No own repo: the edit could never be pushed, so it is not queued. The
+  // editors check _requireSelf before opening; this is the backstop.
+  if (!_dsHasSelf()) throw new _DsNoSelfRepoError()
   if (_isReadOnlyLink(link)) throw new Error("This video is from the other user's library and is read-only.")
   const filePath = _srtPathFor(link, langCode)
   if (!filePath) throw new Error('No SRT path for ' + link)
@@ -5990,6 +6053,7 @@ function _filePathToLink(filePath) {
 }
 
 async function flushPendingSrtEdits() {
+  if (!_requireSelf()) return { committed: false, reason: 'no-repo' }
   const edits = _loadPendingSrtEdits()
   const paths = Object.keys(edits)
   if (!paths.length) return { committed: false, reason: 'empty' }
@@ -6070,6 +6134,7 @@ $(function () {
   // GitHub. The user picks which edits to keep, tweaks any text they want,
   // then explicitly pushes — far less scary for bulk fixes.
   $(document).on('click', '#syncSrtEditsBtn', function () {
+    if (!_requireSelf()) return
     const n = _pendingSrtEditCount()
     if (!n) { alert('No pending subtitle edits to push.'); return }
     openSrtEditsReviewDialog()
@@ -6133,6 +6198,7 @@ function openSrtEditsReviewDialog() {
 window.openSrtEditsReviewDialog = openSrtEditsReviewDialog
 
 async function _onSrtEditsPushSelected() {
+  if (!_requireSelf()) return
   const keep = _collectSrtEditsByCheckbox(true)
   if (!keep.length) { alert('Select at least one edit to push.'); return }
   const buf = _loadPendingSrtEdits()
@@ -8828,6 +8894,7 @@ function export2txt(data, fileName) {
 }
 
 async function saveStarredLines() {
+  if (!_requireSelf()) return
   const lines = $('.starred-sub').map((i, e) => $(e).text()).toArray()
 
   if (window.mediaBeingPlayed.source === 'local') {
@@ -8836,8 +8903,7 @@ async function saveStarredLines() {
     window.mediaBeingPlayed.source = s.trim()
   }
 
-  const lang = getLangFromUrl()
-  const filePath = `db/language/${lang.fullName}/srts/srt_favorites.json`
+  const filePath = `${_langRepoDir()}/srts/srt_favorites.json`
   const record = { ...window.mediaBeingPlayed, lines }
 
   try {
@@ -9005,8 +9071,7 @@ function buildCapturedSubtitleBaseName(detail) {
 // api.github.com (real-time, uncached) instead of raw.githubusercontent.com
 // so we get the latest state even right after a previous push.
 async function fetchSrtIndexEntry(videoId) {
-  const lang = getLangFromUrl()
-  const filePath = `db/language/${lang.fullName}/srts/index.json`
+  const filePath = `${_langRepoDir()}/srts/index.json`
   let text = null
   try {
     const file = await _selfGetFile(filePath)
@@ -9032,10 +9097,12 @@ function inferSubtitleSource(detail) {
 // captures from another client are preserved because we re-read + re-merge
 // + re-PUT on sha conflict via commitWithMerge.
 async function uploadSrtToGithub(baseName, langCode, newEntries, commitMessage, conflictResolution) {
-  const lang = getLangFromUrl()
+  // A helper whose callers read a normal return as "uploaded": without an
+  // own repo it throws (NoSelfRepoError) rather than returning.
+  if (!_dsHasSelf()) throw new _DsNoSelfRepoError()
   baseName = _nfc(baseName)
   const fileName = `${baseName}.${langCode}.srt`
-  const filePath = `db/language/${lang.fullName}/srts/${encodeURIComponent(fileName)}`
+  const filePath = `${_langRepoDir()}/srts/${encodeURIComponent(fileName)}`
   const entries = newEntries || []
   await commitWithMerge({
     filePath,
@@ -9053,6 +9120,7 @@ async function uploadSrtToGithub(baseName, langCode, newEntries, commitMessage, 
 // In-memory state (window.srts, #mp3Choice options, window.allSubtitles) is
 // pruned too so the UI reflects the deletion immediately.
 async function deleteSelectedMedia() {
+  if (!_requireSelf()) return
   const link = $('#mp3Choice').val()
   if (!link) { alert('Pick a media to delete first.'); return }
   if (_isReadOnlyLink(link)) { alert("This video is from the other user's library and cannot be deleted here."); return }
@@ -9066,7 +9134,7 @@ async function deleteSelectedMedia() {
   if (!confirm(`Delete "${label}" from GitHub?\n\nThis removes both SRT files and the index.json entry. The deletion cannot be undone from the UI.`)) return
 
   const lang = getLangFromUrl()
-  const srtsDir = `db/language/${lang.fullName}/srts`
+  const srtsDir = `${_langRepoDir()}/srts`
   const srcCode = lang.code
   // Most files are stored as `${baseName}.${langCode}.srt`. Try the source
   // language and English (target translation). 404 is treated as "already gone".
@@ -9200,6 +9268,7 @@ function _renderDuplicateSrtsList() {
       if (idx > 0 && !_isReadOnlyLink(g.link)) {
         const $btn = $('<button type="button" class="lang-tool-btn dup-srts-del">Delete</button>')
           .on('click', async () => {
+            if (!_requireSelf()) return
             if (!confirm(`Delete "${e.name}" (${g.link})?\n\nThis removes both SRT files and the index entry on GitHub.`)) return
             $btn.prop('disabled', true).text('Deleting…')
             try {
@@ -9225,10 +9294,12 @@ function _renderDuplicateSrtsList() {
 // for this link survive, playlist items pointing at the videoId are still
 // valid.
 async function _deleteDuplicateSrtEntry(link, baseName) {
+  // The caller re-renders on a normal return, so no own repo throws.
+  if (!_dsHasSelf()) throw new _DsNoSelfRepoError()
   if (_isReadOnlyLink(link)) throw new Error("This video is from the other user's library and cannot be deleted here.")
   baseName = _nfc(baseName)
   const lang = getLangFromUrl()
-  const srtsDir = `db/language/${lang.fullName}/srts`
+  const srtsDir = `${_langRepoDir()}/srts`
   const srcCode = lang.code
   const candidates = [`${baseName}.${srcCode}.srt`]
   if (srcCode !== 'en') candidates.push(`${baseName}.en.srt`)
@@ -9528,7 +9599,8 @@ async function _scanUnavailableVideos() {
 }
 
 async function _onUnavailableVideosDelete() {
-  let ids = $('#unavailableVideosList .dup-srts-group').toArray()
+  if (!_requireSelf()) return
+  let ids =$('#unavailableVideosList .dup-srts-group').toArray()
     .filter(g => $(g).find('.unavail-pick').is(':checked'))
     .map(g => $(g).attr('data-id'))
   if (!ids.length) { alert('Select at least one video to delete.'); return }
@@ -9549,6 +9621,7 @@ async function _onUnavailableVideosDelete() {
   )) return
   const $btn = $('#unavailableVideosDelete').prop('disabled', true).text('Deleting…')
   let okCount = 0, failCount = 0
+  const failMessages = []
   for (const id of ids) {
     try {
       await _deleteVideoByLink(id)
@@ -9557,10 +9630,12 @@ async function _onUnavailableVideosDelete() {
     } catch (e) {
       failCount++
       console.error('Failed to delete', id, e)
+      const msg = (e && e.message) || String(e)
+      if (!failMessages.includes(msg)) failMessages.push(msg)
     }
   }
   $btn.prop('disabled', false).text('Delete selected')
-  alert(`Deleted ${okCount}${failCount ? ` — ${failCount} failed (see console)` : ''}.`)
+  alert(`Deleted ${okCount}${failCount ? ` — ${failCount} failed: ${failMessages.slice(0, 3).join('; ')}` : ''}.`)
 }
 
 // Library-style sibling of deleteSelectedMedia: deletes by videoId without
@@ -9573,7 +9648,7 @@ async function _deleteVideoByLink(link) {
   const baseName = _nfc(srt && srt.name)
   if (!baseName) throw new Error(`No index entry for ${link}`)
   const lang = getLangFromUrl()
-  const srtsDir = `db/language/${lang.fullName}/srts`
+  const srtsDir = `${_langRepoDir()}/srts`
   const srcCode = lang.code
   const candidates = [`${baseName}.${srcCode}.srt`]
   if (srcCode !== 'en') candidates.push(`${baseName}.en.srt`)
@@ -9613,8 +9688,9 @@ $(function () {
 })
 
 async function upsertSrtIndexEntry(videoId, baseName, source) {
-  const lang = getLangFromUrl()
-  const filePath = `db/language/${lang.fullName}/srts/index.json`
+  // Callers read a normal return as "added", so no own repo throws.
+  if (!_dsHasSelf()) throw new _DsNoSelfRepoError()
+  const filePath = `${_langRepoDir()}/srts/index.json`
   const record = { link: videoId, name: _nfc(baseName), source }
 
   await commitWithMerge({
@@ -9640,8 +9716,8 @@ async function upsertSrtIndexEntry(videoId, baseName, source) {
 // batched commit. Idempotent: re-running on an already-normalized index
 // reports "nothing to do" and exits without committing.
 async function migrateSrtPathsToNFC() {
-  const lang = getLangFromUrl()
-  const srtsDir = `db/language/${lang.fullName}/srts`
+  if (!_requireSelf()) return { migrated: 0, reason: 'no-repo' }
+  const srtsDir = `${_langRepoDir()}/srts`
   const indexPath = `${srtsDir}/index.json`
 
   // Pull the live index from GitHub (uncached real-time read).
@@ -9759,6 +9835,7 @@ function setChannelBlocked(channel, blocked) {
 // matching index.json entries — all in a single GitHub commit via the
 // new commitMultipleFiles helper.
 async function deleteChannel(channel) {
+  if (!_requireSelf()) return
   if (!channel) return
   const videos = (window.srts || []).filter(s => {
     // Videos from the other user's library are never deleted from here.
@@ -9770,7 +9847,7 @@ async function deleteChannel(channel) {
   if (!confirm(`Delete channel "${channel}" — ${videos.length} video${videos.length === 1 ? '' : 's'}?\n\nThis removes every .sv.srt and .en.srt file from your repo and updates index.json. Cannot be undone from the UI.`)) return
 
   const lang = getLangFromUrl()
-  const srtsDir = `db/language/${lang.fullName}/srts`
+  const srtsDir = `${_langRepoDir()}/srts`
   const code = lang.code
   const files = []
   videos.forEach(v => {
@@ -9959,6 +10036,12 @@ async function renderCapturedReviewBody() {
   // Initial render with "checking…" status so the dialog opens fast.
   renderCapturedReviewList(buf, body)
   if (buf.length === 0) return
+  // No own repo: there is no index to check against and nothing can be
+  // pushed — say so on every row instead of a silent "status unknown".
+  if (!_dsHasSelf()) {
+    if (body) body.querySelectorAll('.captured-item').forEach(rowEl => applyCapturedRowStatus(rowEl, 'no-repo'))
+    return
+  }
   // Resolve each row's true status against the authoritative index.json.
   // window.allSubtitles can be a false positive (purely-local entries /
   // re-pushes), so it's not enough on its own. Cache per videoId so
@@ -10042,6 +10125,7 @@ window.openCapturedSubtitlesReview = function () {
       }
 
       if (action === 'push') {
+        if (!_requireSelf()) return
         const $btn = $(this)
         $btn.prop('disabled', true).text('Pushing…')
         try {
@@ -10095,6 +10179,7 @@ window.openCapturedSubtitlesReview = function () {
       'Push All': async function () {
         const startBuf = loadCapturedBuffer()
         if (!startBuf.length) { $(this).dialog('close'); return }
+        if (!_requireSelf()) return
         if (!confirm(`Push ${startBuf.length} captured subtitle(s) to GitHub in a single commit?`)) return
         const $self = $(this)
         const $rows = $('#captured-subtitles-dialog-content').find('.captured-item')
@@ -10208,9 +10293,11 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
   const _report = (stage, extra) => {
     try { if (typeof onProgress === 'function') onProgress({ stage, ...(extra || {}) }) } catch (_) {}
   }
+  // Callers clear the captured buffer on a normal return (even a
+  // `committed: false` one), so no own repo throws and the captures stay.
+  if (!_dsHasSelf()) throw new _DsNoSelfRepoError()
   if (!items || !items.length) return { pushedIds: [] }
-  const lang = getLangFromUrl()
-  const srtsDir = `db/language/${lang.fullName}/srts`
+  const srtsDir = `${_langRepoDir()}/srts`
   const indexPath = `${srtsDir}/index.json`
 
   // Group by videoId so multiple captures on the same video collapse into a
@@ -10454,6 +10541,8 @@ async function handleCapturedSubtitle(detail) {
     return
   }
   const { videoId, sourceLang, targetLang, lines = [], translation = [] } = detail
+  // Stop before the merge dialogs: nothing could be pushed without an own repo.
+  if (!_dsHasSelf()) throw new _DsNoSelfRepoError()
 
   // Authoritative: check index.json on github. window.allSubtitles can be
   // misleading — it gets populated even by purely-local files / re-pushes —
@@ -11352,8 +11441,7 @@ function _saveRecording() {
 // are preserved.
 
 function recordingsFilePath() {
-  const lang = getLangFromUrl()
-  return `db/language/${lang.fullName}/recordings.json`
+  return `${_langRepoDir()}/recordings.json`
 }
 
 // Thin wrapper — pure core in ./recordings-merge.js.
@@ -11535,8 +11623,14 @@ function _adoptRecordings(persistable) {
   // The open playlist may have been deleted on the other side — move to the
   // first one left, as deleting it here does, so a capture never lands in a
   // playlist that no longer exists.
+  // An own playlist is preferred, so a capture lands where it can be kept.
   let cur = window._recording.currentName
-  if (!window._recordings[cur]) cur = window._recording.currentName = listRecordings()[0]
+  if (!window._recordings[cur]) {
+    const names = listRecordings()
+    const own = _persistableRecordings()
+    cur = window._recording.currentName = names.find(n => Object.prototype.hasOwnProperty.call(own, n))
+      || names.find(n => !_isReadOnlyPlaylist(n)) || names[0]
+  }
   window._recording.virtual = _isVirtual(cur)
   window._recording.items = window._recording.virtual
     ? _resolveVirtualItems(cur)
@@ -11596,7 +11690,8 @@ async function _mergeSelfRemoteRecordings() {
     // No last-synced copy yet (first run), or only the cached copy answered:
     // the plain union, which can bring a deleted item back but can never
     // drop anything. A fresh copy becomes the starting point for next time.
-    window._recordings = mergeRecordingCollections(window._recordings || {}, remote)
+    // The other user's playlists never enter a merge with the user's own.
+    window._recordings = mergeRecordingCollections(_coreWithoutReadOnlyPlaylists(window._recordings), remote)
     if (fresh) _saveRecordingsBase(remote)
   } else {
     const local = _persistableRecordings()
@@ -11646,6 +11741,7 @@ async function _mergeSelfRemoteRecordings() {
 
 const SYNC_CANCELLED = 'sync cancelled'
 async function syncRecordingsToGithub() {
+  if (!_requireSelf()) return
   const filePath = recordingsFilePath()
   let pushed = null
   let syncCollisions = []
@@ -12952,7 +13048,9 @@ function createVirtualRecording(name, members) {
     alert(`A recording named "${name}" already exists.`)
     return false
   }
-  const valid = (members || []).filter(m => window._recordings[m] && !window._recordings[m].virtual)
+  // The other user's playlists are not members: an own playlist is saved,
+  // theirs are not, so the saved member would point at nothing.
+  const valid = (members || []).filter(m => window._recordings[m] && !window._recordings[m].virtual && !_isReadOnlyPlaylist(m))
   if (!valid.length) {
     alert('Pick at least one real playlist to combine.')
     return false
@@ -12973,7 +13071,7 @@ function setVirtualMembers(name, members) {
   const r = window._recordings && window._recordings[name]
   if (!r || !r.virtual) return false
   if (_refuseReadOnlyPlaylist(name)) return false
-  const valid = (members || []).filter(m => window._recordings[m] && !window._recordings[m].virtual)
+  const valid = (members || []).filter(m => window._recordings[m] && !window._recordings[m].virtual && !_isReadOnlyPlaylist(m))
   if (!valid.length) { alert('A virtual playlist needs at least one member.'); return false }
   r.members = valid
   r.updatedAt = Date.now()
@@ -13086,9 +13184,15 @@ function duplicateRecording(name, newName) {
   }
   if (window._recordings[name].virtual) {
     // Duplicating a virtual playlist copies its member list, not items.
+    // The copy is the user's own, so the other user's playlists drop out.
+    const members = (window._recordings[name].members || []).filter(m => !_isReadOnlyPlaylist(m))
+    if (!members.length && (window._recordings[name].members || []).length) {
+      alert("None of this virtual playlist's members are your own playlists, so there is nothing to copy.")
+      return false
+    }
     window._recordings[newName] = {
       virtual: true,
-      members: (window._recordings[name].members || []).slice(),
+      members,
       createdAt: Date.now(),
       updatedAt: Date.now()
     }
@@ -13592,7 +13696,7 @@ function copyItemToPlaylist(srcRecName, st, w, idx, destRecName) {
   dst.items[st][w].push({ ...it })
   dst.updatedAt = Date.now()
   try {
-    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_coreWithoutReadOnlyPlaylists(window._recordings)))
+    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
     window._recordingsDirty = true
     localStorage.setItem(REC_DIRTY_KEY, '1')
     try { _refreshRecordingSyncBtn() } catch (_) {}
@@ -13660,7 +13764,8 @@ window.cycleRecPlayLoopMode = cycleRecPlayLoopMode
 // null → create mode (asks for a name); otherwise edit that virtual
 // playlist's members. Only REAL playlists are offered as members.
 function _openVirtualPlaylistEditor(existingName) {
-  const realNames = listRecordings().filter(n => !_isVirtual(n))
+  // The other user's playlists are never members of an own virtual playlist.
+  const realNames = listRecordings().filter(n => !_isVirtual(n) && !_isReadOnlyPlaylist(n))
   if (!realNames.length) { alert('Create at least one real playlist first.'); return }
   const current = existingName ? _virtualMembers(existingName) : []
   const currentSet = new Set(current)
@@ -13800,6 +13905,7 @@ function _requestTranslation(text, source, target, opts) {
 // .en.srt / individual en lines when the snippet is source-only.
 async function translateVisibleLines(id, url, $btn) {
   const link = url
+  if (!_requireSelf()) return
   if (_isReadOnlyLink(link)) { alert("This video is from the other user's library and is read-only."); return }
   if (!_haveTranslateBridge()) { alert('Translation needs the Cupitor app.'); return }
   const stored = window.allSubtitles[link]
@@ -16491,6 +16597,7 @@ function openRecordingReviewDialog() {
   })
   $dlg.off('click', '#recRecSync').on('click', '#recRecSync', async function (e) {
     e.preventDefault(); e.stopPropagation()
+    if (!_requireSelf()) return
     try {
       await syncRecordingsToGithub()
       // Re-render so the count in the selector reflects the merged remote.
@@ -21578,6 +21685,7 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
 // edit-box that got covered by the keyboard on mobile.
 function _practiceBeginEdit(e) {
   e.preventDefault(); e.stopPropagation()
+  if (!_requireSelf()) return
   const $btn = $(this)
   const $row = $btn.closest('.practice-line')
   const cur = $row.find('.practice-line-text').text()
@@ -21753,6 +21861,7 @@ $(document).on('click', '.edit-line-btn', function (e) {
   e.preventDefault(); e.stopPropagation()
   const $line = $(this).closest('.line')
   if (!$line.length || $line.hasClass('editing')) return
+  if (!_requireSelf()) return
   const link      = $line.attr('data-url') || ''
   const langCode  = $line.attr('data-lang-code') || 'sv'
   const lineIndex = $line.attr('data-line-index') || ''

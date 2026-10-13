@@ -529,3 +529,81 @@ describe('vocabulary from layers (load, buffer, save)', () => {
     expect(v.vocab.Verbs).toEqual(verbs)
   })
 })
+
+import { claimVocabularyLines } from './data-source.js'
+
+describe('claimVocabularyLines (a user adds a line the other user also has)', () => {
+  const selfText = '#Verbs\n(eat)|äta|\n#Nouns\n(cat)|katt|'
+  const otherText = '#Verbs\n(eat)|äta|\n(run)|springa|\n#Adjectives\n(big)|stor|'
+  const remoteText = selfText
+  const commitText = (vocab, readOnly, otherCategories) => vocabularyToText(mergeVocabulary(selfText,
+    withoutReadOnlyLines(vocab, readOnly, otherCategories), remoteText))
+
+  test('no read-only line among the added ones: same objects back', () => {
+    const m = mergeVocabularyLayers(selfText, otherText)
+    const r = claimVocabularyLines(m.vocab, m.readOnly, m.otherCategories, ['(new)|ny|'])
+    expect(r.vocab).toBe(m.vocab)
+    expect(r.readOnly).toBe(m.readOnly)
+  })
+  test('the added line becomes own: other copy removed, not read-only, and it is saved', () => {
+    const m = mergeVocabularyLayers(selfText, otherText)
+    const r = claimVocabularyLines(m.vocab, m.readOnly, m.otherCategories, ['(run)|springa|'])
+    expect(r.readOnly.has('(run)|springa|')).toBe(false)
+    expect(r.readOnly.has('(big)|stor|')).toBe(true)
+    expect(r.vocab.Verbs).toEqual(['(eat)|äta|'])
+    r.vocab.Nouns.push('(run)|springa|')
+    const out = commitText(r.vocab, r.readOnly, m.otherCategories)
+    expect(out).toContain('#Nouns\n(cat)|katt|\n(run)|springa|')
+    expect(out.match(/springa/g)).toHaveLength(1)
+    expect(out).not.toContain('stor')
+  })
+  test('an other-only category left empty is dropped from the map', () => {
+    const m = mergeVocabularyLayers(selfText, otherText)
+    const r = claimVocabularyLines(m.vocab, m.readOnly, m.otherCategories, ['(big)|stor|'])
+    expect(Object.keys(r.vocab)).toEqual(Object.keys(m.vocab).filter(k => k !== 'Adjectives'))
+    expect(Object.keys(r.vocab)).not.toContain('Adjectives')
+    // adding it back into that same category keeps the category (own line)
+    r.vocab.Adjectives = ['(big)|stor|']
+    expect(commitText(r.vocab, r.readOnly, m.otherCategories)).toContain('#Adjectives\n(big)|stor|')
+  })
+  test('claimed, buffered, reloaded: claiming the buffer again keeps the line through relayer', () => {
+    // add + buffer
+    const m = mergeVocabularyLayers(selfText, otherText)
+    const r = claimVocabularyLines(m.vocab, m.readOnly, m.otherCategories, ['(run)|springa|'])
+    r.vocab.Nouns.push('(run)|springa|')
+    const buf = pendingVocabCategories(r.vocab, ['Nouns'], r.readOnly, m.otherCategories)
+    expect(buf.Nouns).toContain('(run)|springa|')
+    // reload: self file unchanged, so the line is read-only again
+    const fresh = mergeVocabularyLayers(selfText, otherText)
+    expect(fresh.readOnly.has('(run)|springa|')).toBe(true)
+    // replay as _replayPendingVocab does: claim buffered lines, put categories back, relayer
+    const bufLines = Object.values(buf).flat()
+    const c = claimVocabularyLines(fresh.vocab, fresh.readOnly, fresh.otherCategories, bufLines)
+    c.vocab.Nouns = buf.Nouns
+    const out = relayerVocabulary(c.vocab, c.readOnly, fresh.otherCategories, otherText)
+    expect(out.vocab.Nouns).toContain('(run)|springa|')
+    expect(out.vocab.Verbs).not.toContain('(run)|springa|')
+    expect(out.readOnly.has('(run)|springa|')).toBe(false)
+    const saved = commitText(out.vocab, out.readOnly, out.otherCategories)
+    expect(saved.match(/springa/g)).toHaveLength(1)
+    // without the claim the line would be lost
+    fresh.vocab.Nouns = buf.Nouns
+    expect(relayerVocabulary(fresh.vocab, fresh.readOnly, fresh.otherCategories, otherText).vocab.Nouns)
+      .not.toContain('(run)|springa|')
+  })
+  test('the inputs are not changed', () => {
+    const m = mergeVocabularyLayers(selfText, otherText)
+    const verbs = m.vocab.Verbs.slice()
+    const ro = [...m.readOnly]
+    claimVocabularyLines(m.vocab, m.readOnly, m.otherCategories, ['(run)|springa|'])
+    expect(m.vocab.Verbs).toEqual(verbs)
+    expect([...m.readOnly]).toEqual(ro)
+  })
+  test('prototype-named categories stay ordinary keys', () => {
+    const m = mergeVocabularyLayers('#__proto__\n(p)|p|', '#__proto__\n(q)|q|\n#toString\n(t)|t|')
+    const r = claimVocabularyLines(m.vocab, m.readOnly, m.otherCategories, ['(q)|q|'])
+    expect(Object.keys(r.vocab)).toEqual(Object.keys(m.vocab))
+    expect(Object.keys(r.vocab)).toContain('__proto__')
+    expect(r.vocab['__proto__']).toEqual(['(p)|p|'])
+  })
+})

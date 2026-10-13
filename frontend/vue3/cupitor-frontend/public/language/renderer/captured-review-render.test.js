@@ -100,6 +100,13 @@ describe("applyCapturedRowStatus", () => {
     applyCapturedRowStatus(row, "error");
     expect(row.querySelector("[data-role='srt-status']").textContent).toBe("status unknown");
   });
+  test("'no-repo' state says to set up a repo and leaves the push button alone", () => {
+    const row = buildRow();
+    applyCapturedRowStatus(row, "no-repo");
+    expect(row.getAttribute("data-srt-state")).toBe("no-repo");
+    expect(row.querySelector("[data-role='srt-status']").textContent).toBe("Set up your repo to push");
+    expect(row.querySelector("button[data-action='push']").textContent).toBe("Push This");
+  });
   test("uses textContent — no innerHTML injection", () => {
     const row = buildRow();
     applyCapturedRowStatus(row, "modify", "<script>x</script>");

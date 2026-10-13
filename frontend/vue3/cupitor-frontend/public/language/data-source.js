@@ -250,7 +250,8 @@ function addOtherVocabulary(vocab, otherText) {
 //
 // Known limitation: read-only lines are tracked by text, so a line the user
 // adds that is identical to one of other's lines is dropped here too and is
-// not saved.
+// not saved — unless claimVocabularyLines took it out of `readOnly` first, as
+// adding a line in the vocabulary dialog does.
 export function withoutReadOnlyLines(vocab, readOnly, otherCategories) {
   const out = Object.create(null)
   for (const cat of Object.keys(vocab || {})) {
@@ -307,6 +308,27 @@ export function pendingVocabCategories(vocab, names, readOnly, otherCategories) 
 // mergeVocabularyLayers returns; the given map and arrays are not changed.
 export function relayerVocabulary(vocab, readOnly, otherCategories, otherText) {
   return addOtherVocabulary(withoutReadOnlyLines(vocab, readOnly, otherCategories), otherText)
+}
+
+// A line the user adds is their own even when the other user has the same
+// text. Read-only lines are tracked by text, so without this the user's line
+// would be dropped on save. The other user's copies of `lines` are taken out
+// of the map (an other-only category left empty goes too) and out of
+// `readOnly`; the caller then inserts the user's copy. Returns
+// { vocab, readOnly } as new objects, or the given ones when none of `lines`
+// is read-only. The inputs are not changed.
+export function claimVocabularyLines(vocab, readOnly, otherCategories, lines) {
+  const claimed = new Set((lines || []).filter(l => readOnly && readOnly.has(l)))
+  if (!claimed.size) return { vocab, readOnly }
+  const nextReadOnly = new Set([...readOnly].filter(l => !claimed.has(l)))
+  const out = Object.create(null)
+  for (const cat of Object.keys(vocab || {})) {
+    const lines = (hasOwn(vocab, cat) && vocab[cat]) || []
+    const kept = lines.filter(l => !claimed.has(l))
+    if (kept.length === 0 && lines.length > 0 && otherCategories && otherCategories.has(cat)) continue
+    out[cat] = kept
+  }
+  return { vocab: out, readOnly: nextReadOnly }
 }
 
 // recordings.json ({ collectionName: { items, ... } }): the name is the key;
