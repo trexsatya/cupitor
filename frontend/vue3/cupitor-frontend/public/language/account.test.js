@@ -2,7 +2,7 @@ import { USERS_CACHE_KEY, OWNER, ACCOUNT_KEY, loadAccount } from './account-stat
 import {
   parseUsers, cachedUsers, fetchUsers, ownerEntry, USERS_RAW_URL,
   MAX_USERS, MAX_USERS_BYTES, fetchLogin, adoptLogin, defaultGh,
-  ensureDataRepo, SetupError,
+  ensureDataRepo, SetupError, listingStatus, ensureListing,
 } from './account.js'
 
 export function memStorage(init = {}) {
@@ -514,5 +514,362 @@ describe('ensureDataRepo', () => {
         .rejects.toMatchObject({ step: 'repo', code })
       expect(gh.calls).toEqual([])
     }
+  })
+})
+
+// users.json as it is on trexsatya/cupitor-users: one entry per line.
+const OWNER_LINE = '{ "login": "trexsatya", "name": "Satya", "repo": "trexsatya.github.io", "branch": "gh-pages" }'
+const ALICE_LINE = '{ "login": "alice", "name": "Alice", "repo": "cupitor-data", "branch": "main" }'
+const UPSTREAM_TEXT = `[\n  ${OWNER_LINE}\n]\n`
+const WITH_ALICE = `[\n  ${OWNER_LINE},\n  ${ALICE_LINE}\n]\n`
+const UP = '/repos/trexsatya/cupitor-users'
+const PRS = `GET ${UP}/pulls`
+const PR_QUERY = `${UP}/pulls?state=all&head=alice%3Aadd-alice`
+
+describe('listingStatus', () => {
+  const users = text => ({ [`GET ${UP}/contents/users.json`]: { text, sha: 'UF1' } })
+  test('a valid entry in users.json (ignoring case) → listed, without looking at PRs', async () => {
+    for (const login of ['alice', 'Alice']) {
+      const gh = fakeGh(users(WITH_ALICE))
+      expect(await listingStatus({ login, gh })).toBe('listed')
+      expect(gh.calls).toEqual([`GET ${UP}/contents/users.json?ref=main`])
+    }
+  })
+  test('otherwise the PRs for add-<login> decide', async () => {
+    const st = async prs => listingStatus({ login: 'alice', gh: fakeGh({ ...users(UPSTREAM_TEXT), [PRS]: prs }) })
+    expect(await st([{ state: 'open', merged_at: null }])).toBe('awaiting')
+    expect(await st([{ state: 'closed', merged_at: '2026-01-01T00:00:00Z' }])).toBe('listed')
+    expect(await st([{ state: 'closed', merged_at: null }])).toBe('not_approved')
+    expect(await st([{ state: 'closed', merged_at: null }, { state: 'open', merged_at: null }])).toBe('awaiting')
+    expect(await st([])).toBe('none')
+  })
+  test('asks for exactly the add-<login> head, all states', async () => {
+    const gh = fakeGh({ ...users(UPSTREAM_TEXT), [PRS]: (_b, path) => { expect(path).toBe(PR_QUERY); return [] } })
+    await listingStatus({ login: 'alice', gh })
+    expect(gh.calls).toContain(`GET ${PR_QUERY}`)
+  })
+  test('an invalid entry for the login does not count as listed', async () => {
+    const text = `[\n  ${OWNER_LINE},\n  { "login": "alice", "repo": "../evil" }\n]\n`
+    expect(await listingStatus({ login: 'alice', gh: fakeGh({ ...users(text), [PRS]: [] }) })).toBe('none')
+  })
+  test('the owner is always listed, with no call', async () => {
+    const gh = fakeGh({})
+    expect(await listingStatus({ login: 'TrexSatya', gh })).toBe('listed')
+    expect(gh.calls).toEqual([])
+  })
+  test('failures throw (never "none", which would start a new PR)', async () => {
+    await expect(listingStatus({ login: 'alice', gh: fakeGh({ [`GET ${UP}/contents/users.json`]: err(500) }) })).rejects.toThrow(/500/)
+    await expect(listingStatus({ login: 'alice', gh: fakeGh({ ...users(UPSTREAM_TEXT), [PRS]: err(403) }) })).rejects.toThrow(/403/)
+    await expect(listingStatus({ login: 'alice', gh: fakeGh(users('{"not":"a list"}')) })).rejects.toThrow(/users.json/)
+  })
+})
+
+describe('ensureListing', () => {
+  // A GitHub where each write changes what the next read sees, so the same
+  // state can be replayed from any failure point.
+  function world({ forked = false, branchText = null, prs = [], upstreamText = UPSTREAM_TEXT, failAt = null, forkRepo } = {}) {
+    const st = { forked, branchText, prs: prs.slice(), upstreamText }
+    const fail = name => { if (failAt === name) throw err(500, `boom at ${name}`) }
+    const fork = `/repos/alice/cupitor-users`
+    const gh = fakeGh({
+      [`GET ${UP}/contents/users.json`]: () => ({ text: st.upstreamText, sha: 'UF1' }),
+      [PRS]: (_b, path) => { expect(path).toBe(PR_QUERY); return st.prs },
+      [`GET ${UP}/git/ref/heads/main`]: { object: { sha: 'UP1' } },
+      [`GET ${fork}`]: () => forkRepo || (st.forked ? { name: 'cupitor-users', fork: true, parent: { full_name: 'trexsatya/cupitor-users' } } : err(404)),
+      [`POST ${UP}/forks`]: () => { fail('fork'); st.forked = true; return { name: 'cupitor-users', owner: { login: 'alice' } } },
+      [`GET ${fork}/git/ref/heads/main`]: () => (st.forked ? { object: { sha: 'F1' } } : err(404)),
+      [`POST ${fork}/merge-upstream`]: body => { fail('sync'); expect(body).toEqual({ branch: 'main' }); return { message: 'ok' } },
+      [`POST ${fork}/git/refs`]: body => {
+        fail('branch')
+        expect(body).toEqual({ ref: 'refs/heads/add-alice', sha: 'UP1' })
+        if (st.branchText !== null) return err(422, 'Reference already exists')
+        st.branchText = st.upstreamText; return {}
+      },
+      [`PATCH ${fork}/git/refs/heads/add-alice`]: body => {
+        fail('reset')
+        expect(body).toEqual({ sha: 'UP1', force: true })
+        st.branchText = st.upstreamText; return {}
+      },
+      [`GET ${fork}/contents/users.json`]: (_b, path) => {
+        expect(path).toBe(`${fork}/contents/users.json?ref=add-alice`)
+        return st.branchText === null ? err(404) : { text: st.branchText, sha: st.branchText === st.upstreamText ? 'UF1' : 'B2' }
+      },
+      [`PUT ${fork}/contents/users.json`]: body => {
+        fail('commit')
+        expect(body).toMatchObject({ branch: 'add-alice', sha: 'UF1', message: 'Add alice' })
+        if (st.branchText !== st.upstreamText) return err(409, 'sha does not match')
+        st.branchText = body.content; return {}
+      },
+      [`POST ${UP}/pulls`]: body => {
+        fail('pr')
+        expect(body).toMatchObject({ head: 'alice:add-alice', base: 'main', title: 'Add alice' })
+        if (st.prs.some(p => p.state === 'open')) return err(422, 'A pull request already exists for alice:add-alice.')
+        st.prs.push({ state: 'open', merged_at: null }); return { number: 7 }
+      },
+    })
+    return { gh, st }
+  }
+  const args = (gh, extra = {}) => ({ login: 'alice', name: 'Alice', repo: 'cupitor-data', branch: 'main', gh, sleep: noSleep, now: clock().now, ...extra })
+  const writes = gh => gh.calls.filter(c => /^(POST|PUT|PATCH|DELETE) /.test(c))
+
+  test('from scratch: fork, sync, branch, commit, PR → awaiting; the file gains exactly one line', async () => {
+    const { gh, st } = world()
+    const steps = []
+    expect(await ensureListing(args(gh, { report: (s, x) => steps.push(`${s}:${x}`) }))).toBe('awaiting')
+    expect(writes(gh)).toEqual([
+      `POST ${UP}/forks`,
+      'POST /repos/alice/cupitor-users/merge-upstream',
+      'POST /repos/alice/cupitor-users/git/refs',
+      'PUT /repos/alice/cupitor-users/contents/users.json',
+      `POST ${UP}/pulls`,
+    ])
+    expect(st.branchText).toBe(WITH_ALICE)
+    expect(st.prs).toHaveLength(1)
+    expect(steps).toEqual(['listing:checking', 'listing:forking', 'listing:syncing', 'listing:branching', 'listing:committing', 'listing:opening-pr', 'listing:done'])
+  })
+
+  test.each(['fork', 'branch', 'commit', 'pr'])('fails at %s, then a retry finishes with one entry and one PR', async at => {
+    const { gh, st } = world({ failAt: at })
+    const p = ensureListing(args(gh))
+    await expect(p).rejects.toThrow(SetupError)
+    await expect(p).rejects.toMatchObject({ step: 'listing', code: 'github', status: 500 })
+    const again = world({ ...st })
+    expect(await ensureListing(args(again.gh))).toBe('awaiting')
+    expect(again.st.branchText).toBe(WITH_ALICE)
+    expect(again.st.prs).toHaveLength(1)
+    // And once more: nothing left to do.
+    const third = world({ ...again.st })
+    expect(await ensureListing(args(third.gh))).toBe('awaiting')
+    expect(writes(third.gh)).toEqual([])
+  })
+
+  test('a PUT that landed but whose answer was lost: the retry finds the branch done', async () => {
+    const { gh } = world({ forked: true, branchText: WITH_ALICE })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(writes(gh)).toEqual([
+      'POST /repos/alice/cupitor-users/merge-upstream',
+      'POST /repos/alice/cupitor-users/git/refs',
+      `POST ${UP}/pulls`,
+    ])
+  })
+
+  test('a stale add-<login> branch (older upstream, other edits) is reset to upstream before the commit', async () => {
+    const stale = `[\n  ${OWNER_LINE},\n  { "login": "alice", "name": "Old", "repo": "x", "branch": "main" },\n  { "login": "junk", "repo": "j" }\n]\n`
+    const { gh, st } = world({ forked: true, branchText: stale })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(writes(gh)).toContain('PATCH /repos/alice/cupitor-users/git/refs/heads/add-alice')
+    expect(st.branchText).toBe(WITH_ALICE)
+  })
+
+  test('a failing reset is resumed too', async () => {
+    const { gh, st } = world({ forked: true, branchText: 'junk', failAt: 'reset' })
+    await expect(ensureListing(args(gh))).rejects.toMatchObject({ step: 'listing', status: 500 })
+    const again = world({ ...st })
+    expect(await ensureListing(args(again.gh))).toBe('awaiting')
+    expect(again.st.branchText).toBe(WITH_ALICE)
+  })
+
+  test('other entries stay byte for byte; the new one is appended', async () => {
+    const upstreamText = `[\n  ${OWNER_LINE},\n  { "login": "bob", "name": "Bøb", "repo": "data", "branch": "dev", "extra": 1 },\n  "junk"\n]\n`
+    const { gh, st } = world({ upstreamText })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(st.branchText).toBe(`[\n  ${OWNER_LINE},\n  { "login": "bob", "name": "Bøb", "repo": "data", "branch": "dev", "extra": 1 },\n  "junk",\n  ${ALICE_LINE}\n]\n`)
+  })
+
+  test('a file in another layout keeps its text; the entry goes in before the closing bracket', async () => {
+    const upstreamText = '[\n    {\n        "login": "trexsatya",\n        "repo": "trexsatya.github.io"\n    }\n]'
+    const { gh, st } = world({ upstreamText })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(st.branchText).toBe(`[\n    {\n        "login": "trexsatya",\n        "repo": "trexsatya.github.io"\n    },\n  ${ALICE_LINE}\n]`)
+  })
+
+  test('an empty list gets the entry', async () => {
+    const { gh, st } = world({ upstreamText: '[]\n' })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(st.branchText).toBe(`[\n  ${ALICE_LINE}\n]\n`)
+  })
+
+  test('an invalid entry already there for the login is replaced, the rest untouched', async () => {
+    const upstreamText = `[\n  ${OWNER_LINE},\n  { "login": "Alice", "repo": "../bad" },\n  { "login": "bob", "repo": "data" }\n]\n`
+    const { gh, st } = world({ upstreamText })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(st.branchText).toBe(`[\n  ${OWNER_LINE},\n  ${ALICE_LINE},\n  { "login": "bob", "repo": "data" }\n]\n`)
+  })
+
+  test('the name is cleaned; a missing name becomes the login', async () => {
+    const bell = String.fromCodePoint(7)
+    let w = world()
+    await ensureListing(args(w.gh, { name: `  Ali${bell}ce  ` }))
+    expect(w.st.branchText).toBe(WITH_ALICE)
+    w = world()
+    await ensureListing(args(w.gh, { name: undefined }))
+    expect(JSON.parse(w.st.branchText)[1]).toEqual({ login: 'alice', name: 'alice', repo: 'cupitor-data', branch: 'main' })
+  })
+
+  test.each([
+    ['awaiting', [{ state: 'open', merged_at: null }]],
+    ['listed', [{ state: 'closed', merged_at: '2026-01-01T00:00:00Z' }]],
+    ['not_approved', [{ state: 'closed', merged_at: null }]],
+  ])('already %s: nothing is written', async (status, prs) => {
+    const { gh } = world({ prs })
+    expect(await ensureListing(args(gh))).toBe(status)
+    expect(writes(gh)).toEqual([])
+  })
+
+  test('already in users.json: nothing is written', async () => {
+    const { gh } = world({ upstreamText: WITH_ALICE })
+    expect(await ensureListing(args(gh))).toBe('listed')
+    expect(writes(gh)).toEqual([])
+  })
+
+  test('the owner is never put through it: no call at all', async () => {
+    const gh = fakeGh({})
+    expect(await ensureListing(args(gh, { login: 'TrexSatya', repo: 'trexsatya.github.io', branch: 'gh-pages' }))).toBe('listed')
+    expect(await ensureListing(args(gh, { login: 'trexsatya', repo: 'cupitor-data', branch: 'main' }))).toBe('listed')
+    expect(await ensureListing(args(gh, { login: 'trexsatya', repo: null, branch: null }))).toBe('listed')
+    expect(gh.calls).toEqual([])
+  })
+
+  test('invalid login, repo or branch is refused before any call', async () => {
+    for (const [extra, code] of [
+      [{ login: 'a/b' }, 'bad_login'], [{ login: null }, 'bad_login'],
+      [{ repo: '../x' }, 'bad_entry'], [{ repo: null }, 'bad_entry'], [{ branch: '../main' }, 'bad_entry'],
+    ]) {
+      const gh = fakeGh({})
+      await expect(ensureListing(args(gh, extra))).rejects.toMatchObject({ step: 'listing', code })
+      expect(gh.calls).toEqual([])
+    }
+  })
+
+  test('PR answering 422 when an open PR is there (another tab) → awaiting', async () => {
+    const { gh, st } = world()
+    const open = gh.request
+    gh.request = async (m, p, b) => {
+      if (m === 'POST' && p === `${UP}/pulls`) { st.prs.push({ state: 'open', merged_at: null }); throw err(422, 'A pull request already exists') }
+      return open(m, p, b)
+    }
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(st.prs).toHaveLength(1)
+  })
+
+  test('PR answering 422 with no PR there (e.g. no commits) → an error, not "awaiting"', async () => {
+    const { gh } = world()
+    const open = gh.request
+    gh.request = async (m, p, b) => {
+      if (m === 'POST' && p === `${UP}/pulls`) throw err(422, 'No commits between main and alice:add-alice')
+      return open(m, p, b)
+    }
+    await expect(ensureListing(args(gh))).rejects.toMatchObject({ step: 'listing', code: 'github', status: 422 })
+  })
+
+  test.each([409, 422, 500])('a failing sync (%s) does not stop the setup: the branch comes from upstream', async status => {
+    const { gh, st } = world()
+    const open = gh.request
+    gh.request = async (m, p, b) => {
+      if (p.endsWith('/merge-upstream')) throw err(status, 'cannot sync')
+      return open(m, p, b)
+    }
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(st.branchText).toBe(WITH_ALICE)
+  })
+
+  test('a sync answering 401 stops as unauthorized', async () => {
+    const { gh } = world()
+    const open = gh.request
+    gh.request = async (m, p, b) => { if (p.endsWith('/merge-upstream')) throw err(401, 'Bad credentials'); return open(m, p, b) }
+    await expect(ensureListing(args(gh))).rejects.toMatchObject({ step: 'listing', code: 'unauthorized' })
+    expect(writes(gh).some(c => c.includes('/git/refs') || c.startsWith('PUT') || c.endsWith('/pulls'))).toBe(false)
+  })
+
+  test('a PR list answered as {} (empty / unreadable body) is an error, never "none"', async () => {
+    const { gh } = world()
+    const open = gh.request
+    gh.request = async (m, p, b) => (m === 'GET' && p.startsWith(`${UP}/pulls`) ? {} : open(m, p, b))
+    await expect(ensureListing(args(gh))).rejects.toMatchObject({ step: 'listing', code: 'github' })
+    expect(writes(gh)).toEqual([])
+  })
+
+  test('a PR that appears before a stale branch is reset: the branch is left alone', async () => {
+    const { gh, st } = world({ forked: true, branchText: 'old' })
+    const open = gh.request
+    let lookups = 0
+    gh.request = async (m, p, b) => {
+      if (m === 'GET' && p.startsWith(`${UP}/pulls`) && ++lookups === 2) st.prs.push({ state: 'open', merged_at: null })
+      return open(m, p, b)
+    }
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(st.branchText).toBe('old')
+    expect(writes(gh).some(c => c.startsWith('PATCH') || c.startsWith('PUT') || c.endsWith('/pulls'))).toBe(false)
+  })
+
+  test('a 422 on branch creation for a branch that is not there surfaces as an error', async () => {
+    const { gh, st } = world({ forked: true })
+    const open = gh.request
+    gh.request = async (m, p, b) => {
+      if (m === 'POST' && p.endsWith('/git/refs')) throw err(422, 'Object does not exist')
+      if (m === 'PATCH') throw err(422, 'Reference does not exist')
+      return open(m, p, b)
+    }
+    await expect(ensureListing(args(gh))).rejects.toMatchObject({ step: 'listing', status: 422 })
+    expect(st.prs).toEqual([])
+  })
+
+  test('the PR body names only login and repo', async () => {
+    const { gh } = world()
+    const open = gh.request
+    let body
+    gh.request = async (m, p, b) => { if (m === 'POST' && p === `${UP}/pulls`) body = b; return open(m, p, b) }
+    await ensureListing(args(gh, { branch: 'x@y`z' }))
+    expect(body.body).toBe('Adds alice to users.json: data repo alice/cupitor-data.')
+  })
+
+  test('a repo named cupitor-users that is not the fork: the fork GitHub returns is used', async () => {
+    const other = '/repos/alice/cupitor-users-1'
+    let forked = false, text = null
+    const gh = fakeGh({
+      [`GET ${UP}/contents/users.json`]: { text: UPSTREAM_TEXT, sha: 'UF1' },
+      [PRS]: [],
+      [`GET ${UP}/git/ref/heads/main`]: { object: { sha: 'UP1' } },
+      'GET /repos/alice/cupitor-users': { name: 'cupitor-users', fork: false },
+      [`POST ${UP}/forks`]: () => { forked = true; return { name: 'cupitor-users-1', owner: { login: 'alice' } } },
+      [`GET ${other}/git/ref/heads/main`]: () => (forked ? { object: { sha: 'F1' } } : err(404)),
+      [`POST ${other}/merge-upstream`]: {},
+      [`POST ${other}/git/refs`]: () => { text = UPSTREAM_TEXT; return {} },
+      [`PUT ${other}/contents/users.json`]: body => { text = body.content; return {} },
+      [`POST ${UP}/pulls`]: { number: 1 },
+    })
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(text).toBe(WITH_ALICE)
+    expect(gh.calls.some(c => c.startsWith('PUT /repos/alice/cupitor-users/'))).toBe(false)
+  })
+
+  test('a fork that is not ready within 30 s → timeout; the retry does not fork again', async () => {
+    const c = clock()
+    let ready = false
+    const { gh, st } = world()
+    const open = gh.request
+    gh.request = async (m, p, b) => {
+      if (p === '/repos/alice/cupitor-users/git/ref/heads/main' && !ready) throw err(404)
+      return open(m, p, b)
+    }
+    await expect(ensureListing(args(gh, { sleep: async () => c.tick(10000), now: c.now })))
+      .rejects.toMatchObject({ step: 'listing', code: 'timeout' })
+    expect(st.forked).toBe(true)
+    gh.calls.length = 0
+    ready = true
+    expect(await ensureListing(args(gh))).toBe('awaiting')
+    expect(gh.calls).not.toContain(`POST ${UP}/forks`)
+  })
+
+  test('401 → unauthorized; a failing status check writes nothing', async () => {
+    let w = world()
+    const open = w.gh.request
+    w.gh.request = async (m, p, b) => { if (m === 'POST' && p.endsWith('/forks')) throw err(401, 'Bad credentials'); return open(m, p, b) }
+    await expect(ensureListing(args(w.gh))).rejects.toMatchObject({ step: 'listing', code: 'unauthorized', status: 401 })
+    w = world()
+    const open2 = w.gh.request
+    w.gh.request = async (m, p, b) => { if (p.startsWith(`${UP}/pulls`)) throw err(503); return open2(m, p, b) }
+    await expect(ensureListing(args(w.gh))).rejects.toMatchObject({ step: 'listing', code: 'github', status: 503 })
+    expect(writes(w.gh)).toEqual([])
   })
 })

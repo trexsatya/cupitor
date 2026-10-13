@@ -310,3 +310,244 @@ export async function ensureDataRepo({
     throw asSetupError('repo', e)
   }
 }
+
+// ---- setup step 2: an entry in users.json ----
+//
+// The user forks cupitor-users, commits their entry on branch add-<login>
+// of the fork and opens a PR to the owner's repo. The PR for head
+// <login>:add-<login> is how every later check finds the request again.
+
+const USERS_FILE = 'users.json'
+const UPSTREAM = `/repos/${OWNER.login}/${USERS_REPO}`
+const UPSTREAM_FULL_NAME = `${OWNER.login}/${USERS_REPO}`.toLowerCase()
+const addBranch = login => `add-${login}`
+
+// users.json at `ref` of <owner>/<repo>: its text, blob sha and raw list.
+// A file that parseUsers refuses (too large, not a list) throws.
+async function readUsersFile(gh, owner, repo, ref) {
+  const f = await gh.getFile(owner, repo, USERS_FILE, '', ref)
+  const text = f && typeof f.content === 'string' ? f.content : ''
+  parseUsers(text)
+  return { text, sha: f.sha, list: JSON.parse(text) }
+}
+
+const hasValidEntry = (list, login) => list.some(u => {
+  const n = normalizeUser(u)
+  return !!n && sameLogin(n.login, login)
+})
+
+// One entry on one line, keys in their own order: the file's usual layout.
+function entryLine(e) {
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return JSON.stringify(e)
+  return `{ ${Object.keys(e).map(k => `${JSON.stringify(k)}: ${JSON.stringify(e[k])}`).join(', ')} }`
+}
+const usersText = list => (list.length ? `[\n${list.map(e => `  ${entryLine(e)}`).join(',\n')}\n]\n` : '[]\n')
+
+// users.json text with `entry` in it. An (invalid) entry already there for
+// the same login is replaced; otherwise the entry is appended. In the usual
+// layout every other line stays as it was; in any other layout the entry is
+// put in before the closing bracket and the rest of the text is kept. The
+// result is parsed back and must be the old list plus (or with) the entry.
+function usersWithEntry(text, entry) {
+  const list = JSON.parse(text)
+  const i = list.findIndex(u => u && typeof u === 'object' && sameLogin(u.login, entry.login))
+  const next = list.slice()
+  if (i >= 0) next[i] = entry; else next.push(entry)
+  let out
+  if (i >= 0 || !list.length || usersText(list) === text) {
+    out = usersText(next)
+  } else {
+    const end = text.lastIndexOf(']')
+    out = `${text.slice(0, end).replace(/\s+$/, '')},\n  ${entryLine(entry)}\n${text.slice(end)}`
+  }
+  if (JSON.stringify(JSON.parse(out)) !== JSON.stringify(next)) throw new Error('account: users.json could not be updated cleanly')
+  return out
+}
+
+// 'awaiting' (an open PR), 'listed' (a merged one), 'not_approved' (only
+// closed ones) or 'none', from the PRs for head <login>:add-<login>.
+async function prStatus(gh, login) {
+  const head = encodeURIComponent(`${login}:${addBranch(login)}`)
+  const prs = await gh.request('GET', `${UPSTREAM}/pulls?state=all&head=${head}`)
+  // An empty or unreadable answer comes back as {}: never read it as "no PRs".
+  if (!Array.isArray(prs)) throw new Error('account: GitHub answered the PR list without a list')
+  const list = prs
+  if (list.some(p => p && p.state === 'open')) return 'awaiting'
+  if (list.some(p => p && p.merged_at)) return 'listed'
+  return list.length ? 'not_approved' : 'none'
+}
+
+// 'listed' | 'awaiting' | 'not_approved' | 'none' for `login`. Listed when
+// users.json on cupitor-users main has a valid entry for the login (read
+// through the API, not the raw file, so a merge shows without the raw
+// file's cache delay); else the add-<login> PRs decide. A merged PR counts
+// as listed even when the entry is not (yet) in the file read. The owner is
+// always listed. Any failure throws — never 'none', which would start a
+// second request.
+export async function listingStatus({ login, gh } = {}) {
+  if (!isValidLogin(login)) throw new Error('account: listingStatus needs a valid login')
+  if (isOwnerLogin(login)) return 'listed'
+  const github = gh || defaultGh()
+  const { list } = await readUsersFile(github, OWNER.login, USERS_REPO, 'main')
+  if (hasValidEntry(list, login)) return 'listed'
+  return prStatus(github, login)
+}
+
+// The sha a ref answer points at.
+function refSha(r) {
+  const sha = r && r.object && r.object.sha
+  if (typeof sha !== 'string' || !sha) throw new Error('account: GitHub answered a ref without a sha')
+  return sha
+}
+
+const isUsersFork = r => !!(r && r.fork === true && [r.parent, r.source].some(p =>
+  p && typeof p.full_name === 'string' && p.full_name.toLowerCase() === UPSTREAM_FULL_NAME))
+
+// Whether the fork's main branch can be read yet (GitHub creates forks
+// asynchronously; 404 / 409 mean "not yet").
+async function forkReady(gh, login, fork) {
+  try {
+    await gh.request('GET', `/repos/${login}/${fork}/git/ref/heads/main`)
+    return true
+  } catch (e) {
+    const s = statusOf(e)
+    if (s === 404 || s === 409) return false
+    throw e
+  }
+}
+
+// The name of the user's fork of cupitor-users, forking it first when
+// <login>/cupitor-users is not that fork, and waiting (up to SETUP_WAIT_MS)
+// until it can be read. Forking is idempotent on GitHub: an existing fork
+// is returned, under whatever name it has.
+async function ensureUsersFork(gh, login, { sleep, now }) {
+  const r = await getRepo(gh, login, USERS_REPO)
+  let fork = isUsersFork(r) ? (isValidRepo(r.name) ? r.name : USERS_REPO) : null
+  if (!fork) {
+    const f = await gh.request('POST', `${UPSTREAM}/forks`, { default_branch_only: true })
+    const mine = f && isValidRepo(f.name) && (!f.owner || sameLogin(f.owner.login, login))
+    fork = mine ? f.name : USERS_REPO
+  }
+  const deadline = now() + SETUP_WAIT_MS
+  while (!(await forkReady(gh, login, fork))) {
+    if (now() >= deadline) throw new SetupError('listing', 'timeout', 'GitHub is still creating your copy of cupitor-users. Retry in a moment.')
+    await sleep(SETUP_POLL_MS)
+  }
+  return fork
+}
+
+// Asks for `login` to be added to users.json, unless it is already listed
+// or has a request (open, merged or closed). Every call checks before
+// acting, so a retry after any failure resumes and never makes a second
+// fork, branch, entry or PR:
+//   fork cupitor-users (or find the fork) → sync it with upstream (best
+//   effort) → branch add-<login> at upstream main → commit users.json =
+//   upstream's file plus the entry → PR <login>:add-<login> into main.
+// The branch carries exactly one change: when add-<login> exists without
+// that content (an earlier attempt, upstream moved on), it is reset to
+// upstream main first, after checking again that no PR uses it. The entry
+// is { login, name, repo, branch } for the user's own repo; the owner gets
+// 'listed' with no call at all. Returns the status ('awaiting' after opening the PR).
+// Throws SetupError (step 'listing'). `report(step, status)` gets
+// 'checking' / 'forking' / 'syncing' / 'branching' / 'committing' /
+// 'opening-pr' / 'done'.
+export async function ensureListing({
+  login, name, repo, branch, gh, sleep = defaultSleep, now = Date.now, report = () => {},
+} = {}) {
+  if (!isValidLogin(login)) throw new SetupError('listing', 'bad_login', 'Sign in before asking to be listed.')
+  if (isOwnerLogin(login)) {
+    report('listing', 'checking')
+    report('listing', 'done')
+    return 'listed'
+  }
+  const entry = normalizeUser({ login, name: cleanName(name, login), repo, branch })
+  if (!entry || entry.branch !== branch) throw new SetupError('listing', 'bad_entry', 'Set up your data repo before asking to be listed.')
+  report('listing', 'checking')
+  try {
+    const github = gh || defaultGh()
+    const status = await listingStatus({ login, gh: github })
+    if (status !== 'none') {
+      report('listing', 'done')
+      return status
+    }
+    // The upstream file at one commit: the branch starts there and the
+    // entry is added to exactly that text.
+    const upSha = refSha(await github.request('GET', `${UPSTREAM}/git/ref/heads/main`))
+    const up = await readUsersFile(github, OWNER.login, USERS_REPO, upSha)
+    if (hasValidEntry(up.list, login)) {
+      report('listing', 'done')
+      return 'listed'
+    }
+    const wanted = usersWithEntry(up.text, entry)
+
+    report('listing', 'forking')
+    const fork = await ensureUsersFork(github, login, { sleep, now })
+
+    report('listing', 'syncing')
+    try {
+      await github.request('POST', `/repos/${login}/${fork}/merge-upstream`, { branch: 'main' })
+    } catch (e) {
+      // The branch is cut from upstream main, so a fork whose main cannot be
+      // synced (409: it has its own commits; anything else) is no reason to
+      // stop; if upstream's commit is missing in the fork, the branch step
+      // fails instead. Only a signed-out user stops here.
+      if (statusOf(e) === 401) throw e
+    }
+
+    report('listing', 'branching')
+    const work = addBranch(login)
+    let fresh = true
+    try {
+      await github.request('POST', `/repos/${login}/${fork}/git/refs`, { ref: `refs/heads/${work}`, sha: upSha })
+    } catch (e) {
+      if (statusOf(e) !== 422) throw e // 422: the branch is already there
+      fresh = false
+    }
+
+    report('listing', 'committing')
+    let done = false
+    if (!fresh) {
+      let current = null
+      try { current = (await github.getFile(login, fork, USERS_FILE, '', work)).content }
+      catch (e) { if (!isNotFound(e)) throw e }
+      done = current === wanted
+      if (!done) {
+        // Reset only a branch no PR uses (another tab may have opened one
+        // since the first check).
+        const latest = await prStatus(github, login)
+        if (latest !== 'none') {
+          report('listing', 'done')
+          return latest
+        }
+        await github.request('PATCH', `/repos/${login}/${fork}/git/refs/heads/${work}`, { sha: upSha, force: true })
+      }
+    }
+    if (!done) {
+      // The branch is at upSha here, so its users.json is upstream's (up.sha).
+      await github.putFile(login, fork, USERS_FILE, wanted, `Add ${login}`, up.sha, '', work)
+    }
+
+    report('listing', 'opening-pr')
+    let result = 'awaiting'
+    try {
+      await github.request('POST', `${UPSTREAM}/pulls`, {
+        title: `Add ${login}`,
+        head: `${login}:${work}`,
+        base: 'main',
+        // Only login and repo (letters, digits, ".", "-", "_"): a branch name
+        // may hold Markdown or an @mention.
+        body: `Adds ${login} to users.json: data repo ${login}/${entry.repo}.`,
+      })
+    } catch (e) {
+      // 422 also means "no commits" or "no such head"; only a PR that is
+      // really there (another tab opened it) makes this a success.
+      if (statusOf(e) !== 422) throw e
+      result = await prStatus(github, login)
+      if (result !== 'awaiting' && result !== 'listed') throw e
+    }
+    report('listing', 'done')
+    return result
+  } catch (e) {
+    throw asSetupError('listing', e)
+  }
+}
