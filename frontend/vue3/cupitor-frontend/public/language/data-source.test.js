@@ -1,6 +1,7 @@
 import {
   configure, readUrl, writeTarget, hasSelf, hasOther, source, langFromLocation, NoSelfRepoError,
 } from './data-source.js'
+import { saveGuest } from './account-state.js'
 
 const guest = { login: null, repo: null, branch: null, other: { login: 'trexsatya', name: 'Satya', repo: 'trexsatya.github.io', branch: 'gh-pages' } }
 const alice = { login: 'alice', repo: 'cupitor-data', branch: 'main', other: { login: 'trexsatya', name: 'Satya', repo: 'trexsatya.github.io', branch: 'gh-pages' } }
@@ -132,6 +133,22 @@ describe('sources by account', () => {
     configure({ ...owner, other: { login: 'TrexSatya', name: 'Satya', repo: 'trexsatya.github.io', branch: 'gh-pages' } })
     expect(hasOther()).toBe(false)
     expect(() => readUrl('other', 'x', 'swedish')).toThrow(/no other source/)
+  })
+})
+
+describe('state read from localStorage (configure(null))', () => {
+  afterEach(() => { localStorage.clear(); configure(null) })
+  test('no account record (legacy owner): writeTarget is the owner repo', () => {
+    localStorage.clear()
+    configure(null)
+    expect(writeTarget()).toEqual({ owner: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages' })
+    expect(hasOther()).toBe(false)
+  })
+  test('explicit guest record: writeTarget throws, other is the owner', () => {
+    saveGuest(localStorage)
+    configure(null)
+    expect(() => writeTarget()).toThrow(NoSelfRepoError)
+    expect(readUrl('primary', 'vocabulary.txt', 'swedish')).toBe(`${OWNER_BASE}/vocabulary.txt`)
   })
 })
 

@@ -1,5 +1,5 @@
 import {
-  ACCOUNT_KEY, OWNER, loadAccount, saveAccount, clearAccount,
+  ACCOUNT_KEY, OWNER, loadAccount, saveAccount, clearAccount, saveGuest,
   normalizeUser, defaultOther, sources, scopedKey,
 } from './account-state.js'
 
@@ -12,16 +12,49 @@ function memStorage(init = {}) {
   }
 }
 
+const LEGACY = { login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null, legacy: true }
+const GUEST_REC = () => memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: null, repo: null, branch: null }) })
+
 describe('loadAccount', () => {
-  test('nothing stored → guest with trexsatya as the other source', () => {
-    expect(loadAccount(memStorage())).toEqual({
+  test('nothing stored → legacy owner (self is the owner repo, no other)', () => {
+    expect(loadAccount(memStorage())).toEqual(LEGACY)
+  })
+  test('garbage stored → legacy owner', () => {
+    expect(loadAccount(memStorage({ [ACCOUNT_KEY]: '{nope' }))).toEqual(LEGACY)
+    expect(loadAccount(memStorage({ [ACCOUNT_KEY]: '[]' }))).toEqual(LEGACY)
+    expect(loadAccount(memStorage({ [ACCOUNT_KEY]: 'null' }))).toEqual(LEGACY)
+    expect(loadAccount(memStorage({ [ACCOUNT_KEY]: '42' }))).toEqual(LEGACY)
+  })
+  test('an explicit guest record → guest with trexsatya as the other source', () => {
+    expect(loadAccount(GUEST_REC())).toEqual({
       login: null, repo: null, branch: null,
       other: { login: 'trexsatya', name: 'Satya', repo: 'trexsatya.github.io', branch: 'gh-pages' },
     })
+    expect(loadAccount(memStorage({ [ACCOUNT_KEY]: '{}' })).login).toBeNull()
   })
-  test('garbage stored → guest', () => {
-    expect(loadAccount(memStorage({ [ACCOUNT_KEY]: '{nope' })).login).toBeNull()
-    expect(loadAccount(memStorage({ [ACCOUNT_KEY]: '[]' })).login).toBeNull()
+  test('a record with an invalid login is guest-like, not legacy owner', () => {
+    const r = loadAccount(memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'a/b', repo: 'x', branch: 'main' }) }))
+    expect(r.login).toBeNull(); expect(r.legacy).toBeUndefined()
+    expect(sources(r).self).toBeNull()
+  })
+  test('a stored owner record is not legacy', () => {
+    expect(loadAccount(memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'trexsatya' }) })).legacy).toBeUndefined()
+  })
+  test('saveGuest writes an explicit guest record', () => {
+    const s = memStorage()
+    saveAccount({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null }, s)
+    expect(saveGuest(s)).toBe(true)
+    expect(loadAccount(s)).toEqual(loadAccount(GUEST_REC()))
+    expect(sources(loadAccount(s))).toEqual({ self: null, other: { owner: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages' } })
+  })
+  test('saveGuest returns false when storage throws', () => {
+    expect(saveGuest({ getItem: () => null, setItem: () => { throw new Error('quota') }, removeItem() {} })).toBe(false)
+  })
+  test('saving the legacy state persists a plain owner record', () => {
+    const s = memStorage()
+    saveAccount(loadAccount(s), s)
+    expect(JSON.parse(s.getItem(ACCOUNT_KEY))).toEqual({ login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null })
+    expect(loadAccount(s).legacy).toBeUndefined()
   })
   test('a signed-in record round-trips', () => {
     const s = memStorage()
@@ -40,11 +73,11 @@ describe('loadAccount', () => {
     const r = loadAccount(memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: 'cupitor-data' }) }))
     expect(r.repo).toBeNull(); expect(r.branch).toBeNull(); expect(r.login).toBe('alice')
   })
-  test('clearAccount returns to guest', () => {
+  test('clearAccount removes the record, which reads back as legacy owner', () => {
     const s = memStorage()
     saveAccount({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null }, s)
     clearAccount(s)
-    expect(loadAccount(s).login).toBeNull()
+    expect(loadAccount(s)).toEqual(LEGACY)
   })
 })
 
@@ -63,8 +96,12 @@ describe('normalizeUser / defaultOther', () => {
 
 describe('sources', () => {
   test('guest: no self, other is the owner', () => {
-    expect(sources(loadAccount(memStorage()))).toEqual({
+    expect(sources(loadAccount(GUEST_REC()))).toEqual({
       self: null, other: { owner: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages' } })
+  })
+  test('no record (legacy owner): self is the owner repo, other none', () => {
+    expect(sources(loadAccount(memStorage()))).toEqual({
+      self: { owner: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages' }, other: null })
   })
   test('signed in with a repo: self is the repo', () => {
     expect(sources({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null })).toEqual({
@@ -78,6 +115,7 @@ describe('sources', () => {
 describe('scopedKey', () => {
   test('owner and guest keep the plain key; other logins get a suffix', () => {
     expect(scopedKey('cupitor:recordings', loadAccount(memStorage()))).toBe('cupitor:recordings')
+    expect(scopedKey('cupitor:recordings', loadAccount(GUEST_REC()))).toBe('cupitor:recordings')
     expect(scopedKey('cupitor:recordings', { login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null })).toBe('cupitor:recordings')
     expect(scopedKey('cupitor:recordings', { login: 'alice', repo: null, branch: null, other: null })).toBe('cupitor:recordings@alice')
   })
@@ -151,7 +189,8 @@ describe('storage robustness', () => {
     const desc = Object.getOwnPropertyDescriptor(window, 'localStorage')
     Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new Error('SecurityError') } })
     try {
-      expect(loadAccount().login).toBeNull()
+      expect(loadAccount()).toEqual(LEGACY)
+      expect(saveGuest()).toBe(false)
       expect(saveAccount({ login: 'alice', repo: null, branch: null, other: null })).toBe(false)
       expect(clearAccount()).toBe(false)
       expect(scopedKey('k')).toBe('k')
