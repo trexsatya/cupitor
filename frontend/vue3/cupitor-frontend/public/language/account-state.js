@@ -9,6 +9,10 @@
 //   repo / branch — the user's data repo; both null until setup created it
 //   other  — a users.json entry { login, name, repo, branch } to layer on
 //            read-only, or null for none. Absent → the default for the login.
+//   missingRepo — optional { repo, branch }: the user's recorded data repo
+//            that had no cupitor.json at the last sign-in (deleted, renamed
+//            or made private). Only while repo is null; the user has no
+//            self until it is found again or setup makes a new one.
 // No record at all means the legacy owner (see legacyOwner); a guest is an
 // explicit record with a null login, written by saveGuest.
 
@@ -147,7 +151,20 @@ export function loadAccount(storage) {
   if ('other' in v && v.other === null) other = null
   else other = normalizeUser(v.other) || defaultOther(login)
   if (other && sameLogin(other.login, login)) other = null
-  return { login, repo, branch, other }
+  const state = { login, repo, branch, other }
+  const missing = missingRepoOf(state, v.missingRepo)
+  if (missing) state.missingRepo = missing
+  return state
+}
+
+// The recorded data repo that could not be found at the last sign-in
+// ({ repo, branch }), kept so it can be named and checked again. Only for a
+// signed-in user other than the owner who has no repo; null otherwise.
+function missingRepoOf(state, m) {
+  if (!state.login || state.repo || isOwnerLogin(state.login)) return null
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return null
+  if (!isValidRepo(m.repo) || !isValidBranch(m.branch)) return null
+  return { repo: m.repo, branch: m.branch }
 }
 
 // Returns true when the record was written, false otherwise; never throws.
@@ -155,8 +172,11 @@ export function saveAccount(state, storage) {
   const s = store(storage)
   if (!s || !state) return false
   const { login, repo, branch, other } = state
+  const rec = { login, repo, branch, other: other ? normalizeUser(other) : null }
+  const missing = missingRepoOf(rec, state.missingRepo)
+  if (missing) rec.missingRepo = missing
   try {
-    s.setItem(ACCOUNT_KEY, JSON.stringify({ login, repo, branch, other: other ? normalizeUser(other) : null }))
+    s.setItem(ACCOUNT_KEY, JSON.stringify(rec))
     return true
   } catch (_) {
     return false

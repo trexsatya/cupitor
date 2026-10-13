@@ -305,3 +305,32 @@ describe('sources — more states', () => {
     expect(JSON.parse(s.getItem(ACCOUNT_KEY)).other).toBeNull()
   })
 })
+
+describe('missingRepo (a recorded data repo that cannot be found)', () => {
+  const rec = v => memStorage({ [ACCOUNT_KEY]: JSON.stringify(v) })
+  test('kept across save and load; the user has no self, so writes are blocked', () => {
+    const s = memStorage()
+    const state = { login: 'alice', repo: null, branch: null, other: null, missingRepo: { repo: 'my-data', branch: 'dev' } }
+    expect(saveAccount(state, s)).toBe(true)
+    expect(loadAccount(s)).toEqual(state)
+    expect(sources(loadAccount(s)).self).toBeNull()
+  })
+  test('absent unless set: no key on ordinary states', () => {
+    expect('missingRepo' in loadAccount(rec({ login: 'alice', repo: 'cupitor-data', branch: 'main' }))).toBe(false)
+    const s = memStorage()
+    saveAccount({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null }, s)
+    expect('missingRepo' in JSON.parse(s.getItem(ACCOUNT_KEY))).toBe(false)
+  })
+  test('dropped when the user has a repo, is a guest or the owner, or the value is not a usable repo/branch', () => {
+    const m = { repo: 'my-data', branch: 'main' }
+    expect(loadAccount(rec({ login: 'alice', repo: 'cupitor-data', branch: 'main', missingRepo: m })).missingRepo).toBeUndefined()
+    expect(loadAccount(rec({ login: null, repo: null, branch: null, missingRepo: m })).missingRepo).toBeUndefined()
+    expect(loadAccount(rec({ login: 'trexsatya', repo: null, branch: null, missingRepo: m })).missingRepo).toBeUndefined()
+    for (const bad of [null, 'my-data', [], { repo: '../x', branch: 'main' }, { repo: 'my-data', branch: 'a..b' }, { repo: 'my-data' }]) {
+      expect(loadAccount(rec({ login: 'alice', repo: null, branch: null, missingRepo: bad })).missingRepo).toBeUndefined()
+    }
+    const s = memStorage()
+    saveAccount({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null, missingRepo: m }, s)
+    expect('missingRepo' in JSON.parse(s.getItem(ACCOUNT_KEY))).toBe(false)
+  })
+})

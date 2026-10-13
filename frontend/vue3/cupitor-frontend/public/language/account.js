@@ -174,9 +174,13 @@ export async function fetchLogin(gh = defaultGh()) {
 
 // Records `me` (from fetchLogin) as the account and returns the new state.
 // The owner always writes to the owner repo. Anyone else is ready when
-// their data repo — the one recorded for this login before, else (or when
-// that one has no marker) cupitor-data on main — carries cupitor.json; otherwise they are signed
-// in with no repo. The same login (ignoring case) keeps its chosen other;
+// their data repo — the one recorded for this login before (or recorded as
+// missing), else cupitor-data on main — carries cupitor.json; otherwise
+// they are signed in with no repo. A recorded repo without the marker is
+// never swapped for another one (a 404 may only mean the repo went
+// private): the state gets `missingRepo: { repo, branch }` instead, kept in
+// the record and checked again at the next sign-in. The same login
+// (ignoring case) keeps its chosen other;
 // a new login gets the default. A failed repo check throws and leaves the
 // record as it was. When storage cannot be written, the adopted state is
 // still returned (the device keeps reading its old record).
@@ -185,18 +189,19 @@ export async function adoptLogin(me, { gh = defaultGh(), storage } = {}) {
   if (!isValidLogin(login)) throw new Error('account: adoptLogin needs a valid login')
   const prev = loadAccount(storage)
   const same = !prev.legacy && sameLogin(prev.login, login)
-  let repo = null, branch = null
+  let repo = null, branch = null, missingRepo = null
   if (isOwnerLogin(login)) {
     repo = OWNER.repo; branch = OWNER.branch
   } else {
-    const name = (same && prev.repo) || DATA_REPO
-    const onBranch = (same && prev.repo && prev.branch) || 'main'
+    const recorded = !same ? null
+      : prev.repo ? { repo: prev.repo, branch: prev.branch }
+      : prev.missingRepo || null
+    const name = recorded ? recorded.repo : DATA_REPO
+    const onBranch = recorded ? recorded.branch : 'main'
     if (await repoHasMarker(gh, login, name, onBranch)) {
       repo = name; branch = onBranch
-    } else if ((name !== DATA_REPO || onBranch !== 'main') && await repoHasMarker(gh, login, DATA_REPO, 'main')) {
-      // The recorded repo is gone (deleted, renamed, marker removed): the
-      // default one may still be there.
-      repo = DATA_REPO; branch = 'main'
+    } else if (recorded) {
+      missingRepo = { repo: name, branch: onBranch }
     }
   }
   // Re-read after the network call: the other may have been changed (e.g.
@@ -204,6 +209,7 @@ export async function adoptLogin(me, { gh = defaultGh(), storage } = {}) {
   const cur = loadAccount(storage)
   const other = !cur.legacy && sameLogin(cur.login, login) ? cur.other : defaultOther(login)
   const next = { login, repo, branch, other }
+  if (missingRepo) next.missingRepo = missingRepo
   const saved = saveAccount(next, storage) ? loadAccount(storage) : null
   if (!saved || saved.legacy) return { ...next, other: other ? normalizeUser(other) : null }
   return saved

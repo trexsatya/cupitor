@@ -303,30 +303,42 @@ describe('adoptLogin', () => {
     })
     expect((await adoptLogin({ login: 'alice' }, { gh, storage })).other).toEqual(bob)
   })
-  test('a recorded repo that is gone falls back to cupitor-data on main, once', async () => {
-    const storage = () => memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: 'my-data', branch: 'dev', other: null }) })
-    const found = fakeGh({ 'GET /repos/alice/cupitor-data/contents/cupitor.json': { sha: 's' } })
-    expect(await adoptLogin({ login: 'alice' }, { gh: found, storage: storage() }))
-      .toEqual({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null })
-    expect(found.calls).toEqual([
-      'GET /repos/alice/my-data/contents/cupitor.json?ref=dev',
-      'GET /repos/alice/cupitor-data/contents/cupitor.json?ref=main',
-    ])
-    const none = fakeGh({})
-    expect(await adoptLogin({ login: 'alice' }, { gh: none, storage: storage() }))
-      .toEqual({ login: 'alice', repo: null, branch: null, other: null })
-    expect(none.calls).toHaveLength(2)
+  test('a recorded repo that has no marker is reported missing, never swapped for another repo', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: 'my-data', branch: 'dev', other: null }) })
+    // cupitor-data exists too, but a 404 may only mean "private now": no switching.
+    const gh = fakeGh({ 'GET /repos/alice/cupitor-data/contents/cupitor.json': { sha: 's' } })
+    const state = await adoptLogin({ login: 'alice' }, { gh, storage })
+    expect(state).toEqual({ login: 'alice', repo: null, branch: null, other: null, missingRepo: { repo: 'my-data', branch: 'dev' } })
+    expect(gh.calls).toEqual(['GET /repos/alice/my-data/contents/cupitor.json?ref=dev'])
+    // Kept across a reload, and it is "no self": writes stay blocked.
+    expect(loadAccount(storage)).toEqual(state)
   })
-  test('the default repo is checked once; a failure of the fallback check throws', async () => {
-    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null }) })
+  test('a missing repo is checked again on the next sign-in and comes back when visible', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: null, branch: null, other: null, missingRepo: { repo: 'my-data', branch: 'dev' } }) })
+    const still = fakeGh({})
+    expect((await adoptLogin({ login: 'ALICE' }, { gh: still, storage })).missingRepo).toEqual({ repo: 'my-data', branch: 'dev' })
+    expect(still.calls).toEqual(['GET /repos/ALICE/my-data/contents/cupitor.json?ref=dev'])
+    const back = fakeGh({ 'GET /repos/alice/my-data/contents/cupitor.json': { sha: 's' } })
+    const state = await adoptLogin({ login: 'alice' }, { gh: back, storage })
+    expect(state).toEqual({ login: 'alice', repo: 'my-data', branch: 'dev', other: null })
+    expect(loadAccount(storage).missingRepo).toBeUndefined()
+  })
+  test('no recorded repo and no cupitor-data: no repo, nothing reported missing', async () => {
+    const state = await adoptLogin({ login: 'alice' }, { gh: fakeGh({}), storage: memStorage() })
+    expect(state).toEqual({ login: 'alice', repo: null, branch: null, other: ownerEntry() })
+  })
+  test('a failing check of a missing repo throws and keeps the record', async () => {
+    const before = JSON.stringify({ login: 'alice', repo: null, branch: null, other: null, missingRepo: { repo: 'my-data', branch: 'main' } })
+    const storage = memStorage({ [ACCOUNT_KEY]: before })
+    const gh = fakeGh({ 'GET /repos/alice/my-data/contents/cupitor.json': err(500) })
+    await expect(adoptLogin({ login: 'alice' }, { gh, storage })).rejects.toThrow(/500/)
+    expect(storage.getItem(ACCOUNT_KEY)).toBe(before)
+  })
+  test('another login does not inherit a missing repo', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: null, branch: null, other: null, missingRepo: { repo: 'my-data', branch: 'main' } }) })
     const gh = fakeGh({})
-    expect((await adoptLogin({ login: 'alice' }, { gh, storage })).repo).toBeNull()
-    expect(gh.calls).toEqual(['GET /repos/alice/cupitor-data/contents/cupitor.json?ref=main'])
-    const before = JSON.stringify({ login: 'alice', repo: 'my-data', branch: 'main', other: null })
-    const s2 = memStorage({ [ACCOUNT_KEY]: before })
-    const flaky = fakeGh({ 'GET /repos/alice/cupitor-data/contents/cupitor.json': err(500) })
-    await expect(adoptLogin({ login: 'alice' }, { gh: flaky, storage: s2 })).rejects.toThrow(/500/)
-    expect(s2.getItem(ACCOUNT_KEY)).toBe(before)
+    expect(await adoptLogin({ login: 'bob' }, { gh, storage })).toEqual({ login: 'bob', repo: null, branch: null, other: ownerEntry() })
+    expect(gh.calls).toEqual(['GET /repos/bob/cupitor-data/contents/cupitor.json?ref=main'])
   })
   test('a different login does not inherit the previous one\'s repo or other', async () => {
     const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: 'my-data', branch: 'main', other: null }) })
