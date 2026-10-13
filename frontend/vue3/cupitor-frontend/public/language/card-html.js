@@ -44,9 +44,26 @@ function safeStyle(v) {
 function safeHref(v) {
   return /^(https?:|mailto:)/i.test(String(v).trim()) ? String(v).trim() : null
 }
+// A Google Drive share link opens Drive's viewer page, not the picture; the
+// picture itself is served from googleusercontent by the file's id. The file
+// has to be shared as "Anyone with the link".
+const DRIVE_ID_RES = [
+  /^https?:\/\/(?:drive|docs)\.google\.com\/file\/(?:u\/\d+\/)?d\/([\w-]{10,})/i,
+  /^https?:\/\/(?:drive|docs)\.google\.com\/(?:open|uc|thumbnail)\?(?:[^#]*&)?id=([\w-]{10,})/i,
+]
+export function driveImageUrl(url) {
+  const s = String(url == null ? '' : url).trim()
+  for (const re of DRIVE_ID_RES) {
+    const m = s.match(re)
+    if (m) return `https://lh3.googleusercontent.com/d/${m[1]}`
+  }
+  return s
+}
+
 function safeSrc(v) {
   const s = String(v).trim()
-  return /^https?:/i.test(s) || /^data:image\/(png|jpe?g|gif|webp);/i.test(s) ? s : null
+  if (/^https?:/i.test(s)) return driveImageUrl(s)
+  return /^data:image\/(png|jpe?g|gif|webp);/i.test(s) ? s : null
 }
 
 const ATTRS = {

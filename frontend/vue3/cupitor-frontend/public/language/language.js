@@ -234,7 +234,7 @@ import {
   captionFieldOf as _captionFieldOf,
   cardTranslateDirection as _cardTranslateDirection,
 } from './caption-capture.js';
-import { cardHtml as _cardHtml, cardPlainText as _cardPlainText } from './card-html.js';
+import { cardHtml as _cardHtml, cardPlainText as _cardPlainText, driveImageUrl as _driveImageUrl } from './card-html.js';
 import { openImageViewer } from './image-viewer.js';
 import { installScrollRescue } from './scroll-rescue.js';
 import {
@@ -14477,7 +14477,7 @@ async function _openRichCardEditor($box, label) {
   if ($d.length) { try { $d.dialog('close') } catch (_) {} $('#richCardEditor').remove() }
   $d = $(`<div id="richCardEditor">
     <div class="rce-url" style="display:none;">
-      <input type="url" class="rce-url-input" placeholder="https://…/picture.jpg" aria-label="Picture address">
+      <input type="url" class="rce-url-input" placeholder="https://…/picture.jpg or a Google Drive link" aria-label="Picture address">
       <button type="button" class="rce-url-insert">Insert</button>
     </div>
     <div class="rce-host"></div>
@@ -14563,7 +14563,8 @@ async function _openRichCardEditor($box, label) {
     const insertFromLink = () => {
       const url = String($d.find('.rce-url-input').val() || '').trim()
       if (!/^https?:\/\/\S+$/i.test(url)) { alert('Give the picture\'s web address, starting with https://'); return }
-      editor.execute('insertImage', { source: url })
+      // A Drive share link becomes the picture's own address.
+      editor.execute('insertImage', { source: _driveImageUrl(url) })
       $d.find('.rce-url').hide()
       editor.editing.view.focus()
     }

@@ -1,4 +1,4 @@
-import { isCardHtml, cardHtml, cardPlainText } from './card-html.js'
+import { isCardHtml, cardHtml, cardPlainText, driveImageUrl } from './card-html.js'
 
 describe('isCardHtml', () => {
   test('a known tag makes it HTML', () => {
@@ -35,6 +35,21 @@ describe('cardHtml', () => {
     expect(html).toContain('<a href="https://x.se/a" target="_blank" rel="noopener noreferrer">länk</a>')
     expect(html).toContain('<img src="https://x.se/i.png">')
     expect(html).not.toMatch(/onclick|onerror|evil/)
+  })
+
+  test('a Google Drive share link shows the picture itself', () => {
+    const id = '1AbCdEfGhIjKlMnOp_qr-StUv'
+    const direct = `https://lh3.googleusercontent.com/d/${id}`
+    ;[`https://drive.google.com/file/d/${id}/view?usp=sharing`,
+      `https://drive.google.com/file/u/0/d/${id}/view`,
+      `https://drive.google.com/open?id=${id}`,
+      `https://drive.google.com/uc?export=view&id=${id}`,
+      `https://docs.google.com/uc?id=${id}`,
+    ].forEach(src => expect(cardHtml(`<img src="${src}">`).html).toBe(`<img src="${direct}">`))
+    // Links stay as they are: they open Drive, as given.
+    expect(cardHtml(`<a href="https://drive.google.com/open?id=${id}">x</a>`).html).toContain(`href="https://drive.google.com/open?id=${id}"`)
+    expect(driveImageUrl('https://x.se/i.png')).toBe('https://x.se/i.png')
+    expect(driveImageUrl('https://drive.google.com/drive/folders/abc')).toBe('https://drive.google.com/drive/folders/abc')
   })
 
   test('script, script links and styles that fetch are removed', () => {
