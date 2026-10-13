@@ -832,7 +832,8 @@ const sameView = (a, b) =>
 //               The current record stays, so the legacy owner keeps saving
 // Only a 401 from GET /user signs out here. A legacy owner (no record) is
 // resolved when the check completes: to the login's record, or on a 401 to
-// the explicit guest record.
+// the explicit guest record. That sign-out sets the same UNAUTHORIZED_AT_KEY
+// mark as the 401 handler, so the reloaded page says why.
 export async function reconcileLogin({
   gh, ghUtils = defaultGhUtils(), storages = defaultStorages(), storage, bridgeAvailable = inApp(), now = Date.now,
 } = {}) {
@@ -840,7 +841,10 @@ export async function reconcileLogin({
   const guest = !state.legacy && !state.login
   const toGuest = () => {
     const changed = signOut({ ghUtils, storages, storage, now })
-    return guest ? 'ok' : changed ? 'reload' : 'unchecked'
+    if (guest) return 'ok'
+    if (!changed) return 'unchecked'
+    writeKey(storages.session, UNAUTHORIZED_AT_KEY, String(now()))
+    return 'reload'
   }
   const canAsk = bridgeAvailable || applyStoredToken(ghUtils, storages) || holdsToken(ghUtils)
   if (!canAsk) return guest ? 'ok' : 'no_token'

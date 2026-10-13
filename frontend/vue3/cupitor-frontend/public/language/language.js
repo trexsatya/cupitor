@@ -198,6 +198,7 @@ function _adoptAsSelfEntry(link, name, source) {
   if (sub) { sub.readOnly = false; delete sub._parsedSv; delete sub._parsedEn }
 }
 import { scopedKey as _scopedKey } from './account-state.js';
+import { initAccountPanel as _initAccountPanel, bootAccount as _bootAccount } from './account-panel.js';
 import {
   isVirtual as _coreIsVirtual,
   isManualItem as _isManualItem,
@@ -22117,6 +22118,13 @@ window.addEventListener('cupitorMediaKey', function (ev) {
 })
 
 $(function () {
+  // The account panel and the boot sign-in check. bootAccount puts a stored
+  // browser token in GitHubUtils before its first await, so GitHubUtils
+  // calls from here on carry it. A failure here must not stop the page.
+  try { _initAccountPanel() } catch (e) { console.warn('[account] panel init failed', e) }
+  try {
+    _bootAccount().catch(e => console.warn('[account] boot check failed', e))
+  } catch (e) { console.warn('[account] boot check failed', e) }
   _loadRecording()
   // Must follow _loadRecording — a capture that arrived before this page
   // finished loading needs the real playlist collection to choose from.

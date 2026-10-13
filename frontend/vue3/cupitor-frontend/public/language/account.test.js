@@ -1453,6 +1453,35 @@ describe('reconcileLogin (boot)', () => {
     expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': err(401) }), ghUtils: u, storages: s, storage, bridgeAvailable: true })).toBe('ok')
   })
 
+  test('a 401 sign-out at boot leaves the same mark as the 401 handler, so the next page says why', async () => {
+    for (const rec of [ALICE_REC, null]) { // a login, and the legacy owner (no record)
+      const s = storages(); const u = fakeGhUtils(); rememberToken('ghp_old', false, s)
+      const storage = memStorage(rec ? { [ACCOUNT_KEY]: rec } : {})
+      expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': err(401) }), ghUtils: u, storages: s, storage, bridgeAvailable: false, now: () => 4242 })).toBe('reload')
+      expect(s.session.getItem(UNAUTHORIZED_AT_KEY)).toBe('4242')
+    }
+  })
+
+  test('no mark when nothing was signed out: already a guest, or the guest record could not be written', async () => {
+    const s1 = storages()
+    const guest = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: null }) })
+    expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': err(401) }), ghUtils: fakeGhUtils(), storages: s1, storage: guest, bridgeAvailable: true })).toBe('ok')
+    expect(s1.session.getItem(UNAUTHORIZED_AT_KEY)).toBeNull()
+    const s2 = storages()
+    const stale = brokenStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': err(401) }), ghUtils: fakeGhUtils(), storages: s2, storage: stale, bridgeAvailable: true })).toBe('unchecked')
+    expect(s2.session.getItem(UNAUTHORIZED_AT_KEY)).toBeNull()
+  })
+
+  test('right after a boot 401 sign-out, pasting a new token still signs in', async () => {
+    const s = storages(); const u = fakeGhUtils(); rememberToken('ghp_old', false, s)
+    const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': err(401) }), ghUtils: u, storages: s, storage, bridgeAvailable: false })).toBe('reload')
+    expect(s.session.getItem(UNAUTHORIZED_AT_KEY)).not.toBeNull()
+    const gh = fakeGh({ 'GET /user': { login: 'alice' }, ...ALICE_MARKER })
+    expect(await signInWithToken('ghp_new', { gh, ghUtils: u, storages: s, storage })).toMatchObject({ login: 'alice', repo: 'cupitor-data' })
+  })
+
   test('its own 401 never triggers the handler, so there is one sign-out and no reload loop', async () => {
     const target = new EventTarget(); const after = jest.fn()
     const s = storages(); const u = fakeGhUtils(); rememberToken('ghp_old', true, s)
