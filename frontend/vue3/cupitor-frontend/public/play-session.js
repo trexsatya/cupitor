@@ -16,10 +16,17 @@
 // their times and may overlap; a cue still running when a new rebuild
 // starts is given a moment to finish before the scene is reset.
 //
+// Recording (play({record})): see play-recorder.js. The recorder starts
+// before the narration, pauses with the page (so a pause is not in the
+// film), and stop() gives the film; 'recordingready' announces it however
+// the run ended. Seeking is refused while recording.
+//
 // env (default: the page's globals): pausePlayback, resumePlayback, playNow,
 // playTimeout, setTimeout, caption, enterPlayMode, exitPlayMode,
 // requestAnimationFrame, cancelAnimationFrame, addEventListener,
 // removeEventListener, URL, createAudio().
+
+import { createRecorder, audioGraph, downloadBlob } from './play-recorder.js';
 
 export const STATES = ['idle', 'ready', 'playing', 'paused', 'ended', 'stopped', 'error'];
 const HOOKS = ['beforeCue', 'afterCue', 'onReset', 'onSeek', 'onStateChange', 'exportFrame', 'rasterize', 'formatCaption'];
@@ -41,6 +48,10 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
   let run = null;           // that operation while it plays (or is paused)
   const inflight = new Set(); // cue promises not yet settled
   let shownCaption;         // the caption on screen (undefined: unknown)
+  let captionText = null;   // its text as shown (after formatCaption)
+  let rec = null;           // the recorder while recording
+  let finishing = null;     // the film being finished
+  let recording = null;     // the last film: {blob, filename, partial}
   let audit = [];
   let frame = null;
   let clockBase = 0, clockStart = 0, clockRunning = false; // the clock without audio
@@ -129,9 +140,11 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
     if (!run) return;
     if (e.detail && e.detail.paused) {
       if (audio) audio.pause();
+      if (rec) rec.pause();
       if (state === 'playing') setState('paused');
     } else if (state === 'paused') {
       const r = run;
+      if (rec) rec.resume();
       if (audio) audio.play().catch(error => { if (run === r && state === 'playing' && error.name !== 'AbortError') fail('audio', error); });
       setState('playing');
     }
@@ -145,20 +158,22 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
     env[how]('playstop', onPageStop);
   }
 
-  function fail(stage, error) {
-    emit('error', { stage, error });
-    halt();
-    env.caption(null);
+  function fail(stage, error, extra) {
+    emit('error', { stage, error, ...extra });
+    halt({ partial: true });
+    clearCaption();
     setState('error');
   }
 
   // ---- captions ----
+  function clearCaption() { captionText = null; env.caption(null); }
   function showCaptionAt(t) {
     const c = timeline.captions.find(x => x.start <= t && t < x.end) || null;
     if (c === shownCaption) return;
     shownCaption = c;
-    if (!c) { env.caption(null); return; }
+    if (!c) { captionText = null; env.caption(null); return; }
     const f = formatCaption({ ...c });
+    captionText = f.text;
     env.caption(f.text, { id: f.id });
   }
 
@@ -233,7 +248,8 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
       a = env.createAudio ? env.createAudio() : new env.Audio();
       audioOwned = true;
       a.preload = 'auto';
-      if (typeof source === 'string') a.src = source;
+      // Without CORS, narration from another site would be silent in the audio graph a recording uses.
+      if (typeof source === 'string') { a.crossOrigin = 'anonymous'; a.src = source; }
       else { ownedUrl = env.URL.createObjectURL(source); a.src = ownedUrl; }
     }
     audio = a;
@@ -321,16 +337,26 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
 
   // ---- playing ----
   // Starts paused when the page is paused.
-  async function play({ from = 0 } = {}) {
+  // record: true or options (play-recorder.js RECORD_DEFAULTS); call it from
+  // the user's click, so the audio can start.
+  async function play({ from = 0, record = null } = {}) {
     if (disposed) throw new Error('play: the session is disposed');
     if (run) throw new Error('play: already playing');
     if (pendingLoad) throw new Error('play: the audio is still loading');
     if (!(Number.isFinite(from) && from >= 0)) throw new Error('play: from must be seconds, 0 or more');
-    return start(from, from > 0);
+    if (record && env.playRate && env.playRate() !== 1) throw new Error('play: recording needs normal speed (1×)');
+    if (record && audio && record.audio !== false) {
+      // Still inside the click: the audio graph may only start from a user action.
+      let g;
+      try { g = audioGraph(env, audio); } catch (error) { throw new Error(`play: the narration cannot be recorded here (${error.message})`); }
+      if (g.context.state === 'suspended') Promise.resolve(g.context.resume()).catch(error => emit('error', { stage: 'audio', error }));
+    }
+    return start(from, from > 0, record);
   }
   // Play mode is on from the start, so the page's Escape stops a run still being rebuilt.
-  async function start(from, notify) {
+  async function start(from, notify, record = null) {
     const op = begin(true);
+    finishing = null; // stop() gives this run's film, not an earlier one
     listen(true);
     if (!inPlayMode) { env.enterPlayMode && env.enterPlayMode(); inPlayMode = true; }
     // Cancelled before it ran (a stop, or a seek or prepare that took over).
@@ -339,11 +365,27 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
       return { problems: [], aborted: true };
     };
     let stage = 'preload';
+    let r = null; // this run's recorder (set as the session's once it runs)
     try {
       if (timeline.preload && !preloaded) { await timeline.preload({ signal: op.abort.signal }); if (!alive(op)) return abandoned(); preloaded = true; }
       stage = 'reconstruct';
       const rebuilt = await reconstruct(from, op, { notify });
       if (rebuilt.aborted) return abandoned();
+      if (record) {
+        stage = 'record';
+        r = createRecorder({
+          env, options: record === true ? {} : record,
+          canvases: ((record && record.canvases) || [env.pc, env.oc]).filter(Boolean),
+          caption: () => captionText, hooks: () => hooks, audio, time: now,
+          onError: error => { if (rec === r) failRecording(error); }
+        });
+        await r.prepare();
+        if (!alive(op)) { r.finish({ discard: true }); return abandoned(); }
+        await r.start();
+        if (!alive(op)) { r.finish({ discard: true }); return abandoned(); }
+        if (r.error) throw r.error; // a first frame that failed
+        rec = r;
+      }
       op.next = rebuilt.next;
       op.problems = rebuilt.problems;
       op.running = new Set();
@@ -351,6 +393,7 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
       audit = [];
       if (duration() > 0 && from >= duration()) { finish(); return { problems: op.problems }; }
       const paused = !!env._playPaused;
+      if (paused && rec) rec.pause();
       if (!audio) { setClock(from); clockRunning = true; }
       setState(paused ? 'paused' : 'playing');
       tick();
@@ -359,8 +402,10 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
       if (audio && !paused) await audio.play();
       return { problems: op.problems };
     } catch (error) {
+      if (r && rec !== r) r.finish({ discard: true });
       // Our own stop or pause interrupting audio.play() is not a failure.
       if (!alive(op)) return run ? { problems: op.problems || [] } : abandoned();
+      if (stage === 'record') { failRecording(error); throw error; }
       if ((stage === 'audio' && (state === 'paused' || error.name === 'AbortError'))) return { problems: op.problems || [] };
       fail(stage, error);
       throw error;
@@ -409,8 +454,8 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
   const wait = ms => new Promise(resolve => env.playTimeout(resolve, ms));
 
   function finish() {
-    halt();
-    env.caption(null);
+    halt({ partial: false, tail: 300 });
+    clearCaption();
     emit('timechange', { time: now() });
     setState('ended');
     emit('ended', { audit: audit.slice() });
@@ -418,13 +463,31 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
 
   // Stops what is running: cues, frames, audio. `keep` (a seek that carries
   // on) leaves the page's play mode and pause as they are.
-  function halt({ keep = false } = {}) {
+  // A recording is finished with it: whole (`partial` false) only when the
+  // narration came to its end; `discard` keeps no film.
+  function halt({ keep = false, partial = true, discard = false, tail = 0 } = {}) {
     cancel();
     run = null;
     if (frame != null) { env.cancelAnimationFrame(frame); frame = null; }
     if (!audio && clockRunning) { clockBase = now(); clockRunning = false; }
     if (audio) { try { audio.pause(); } catch (_) {} }
+    if (rec) finishRecording({ partial, discard, tail });
     if (!keep) leavePlayMode();
+  }
+  // Ends the recorder; a film (or what there is of it) is announced.
+  function finishRecording({ partial, discard, tail }) {
+    const r = rec;
+    rec = null;
+    finishing = r.finish({ discard, tail }).then(blob => {
+      if (!blob) return null;
+      recording = { blob, filename: r.filename, partial };
+      emit('recordingready', { recording: blob, filename: r.filename, partial });
+      return blob;
+    });
+    return finishing;
+  }
+  function failRecording(error) {
+    fail(error.stage || 'record', error, error.hook ? { hook: error.hook } : undefined);
   }
   function leavePlayMode() {
     listen(false);
@@ -438,18 +501,21 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
   function pause() { if (state === 'playing') env.pausePlayback(); }
   async function resume() { if (state === 'paused') env.resumePlayback(); }
 
-  async function stop() {
+  // Gives the film of the run (also after it ended by itself); discard: true keeps none.
+  async function stop({ discard = false } = {}) {
     if (run || going() || (current && current.forPlay)) {
-      halt();
-      env.caption(null);
+      halt({ discard });
+      clearCaption();
       setState('stopped');
     } else cancel();
-    return { recording: null, audit: audit.slice() };
+    const film = finishing ? await finishing : null;
+    return { recording: film, audit: audit.slice() };
   }
 
   async function seek(t) {
     if (disposed) throw new Error('seek: the session is disposed');
     if (!(Number.isFinite(t) && t >= 0)) throw new Error('seek: time must be seconds, 0 or more');
+    if (rec) throw new Error('seek: not while recording (stop first)');
     const at = Math.min(t, duration() || t);
     // Playing or paused carries on (or stays paused) from the new time; otherwise it is only shown there.
     if (going()) {
@@ -500,6 +566,12 @@ export function createPlaybackSession({ scene = null, env = globalThis, options 
     get duration() { return duration(); },
     get audit() { return audit.slice(); },
     get chapters() { return timeline.chapters.slice(); },
+    get recording() { return recording; },
+    // Saves the last film as a file.
+    download(filename) {
+      if (!recording) throw new Error('download: nothing has been recorded');
+      downloadBlob(env.document, recording.blob, filename || recording.filename);
+    },
     hooks: () => hooks.map(h => h.name),
     on, define, use, loadAudio, setTimeline, prepare, play, pause, resume, stop, seek, dispose,
     // A defined function called from a script line (not a cue): stopping the session aborts it.
