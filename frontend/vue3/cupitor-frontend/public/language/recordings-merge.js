@@ -232,6 +232,91 @@ export function mergeRecordingsLocalAuthoritative(localColl, remoteColl, nowFn =
   return mergeRecordingCollections(local, remoteSubset, nowFn)
 }
 
+// Two kinds of playlist live in the collection for the session only and are
+// never saved or synced: `external` ones (the native app's book playlists,
+// re-sent on every load) and `readOnly` ones (the other user's playlists,
+// read from their repo on every load).
+const _hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k)
+
+// True when `name` is one of the other user's playlists.
+export function isReadOnlyPlaylist(coll, name) {
+  if (!coll || name == null || !_hasOwn(coll, name)) return false
+  const p = coll[name]
+  return !!(p && p.readOnly)
+}
+
+// The user's own playlists: what is written to localStorage and pushed to
+// recordings.json.
+export function persistableRecordings(all) {
+  const coll = all || {}
+  const out = {}
+  Object.keys(coll).forEach(n => { const p = coll[n]; if (p && !p.external && !p.readOnly) out[n] = p })
+  return out
+}
+
+// The collection minus the other user's playlists, everything else as it is.
+export function withoutReadOnlyPlaylists(all) {
+  const coll = all || {}
+  const out = {}
+  Object.keys(coll).forEach(n => { const p = coll[n]; if (!(p && p.readOnly)) out[n] = p })
+  return out
+}
+
+// `persistable` (own playlists, e.g. a merge result) with the session-only
+// playlists of `current` put back. An app playlist replaces an own one of the
+// same name, as it always has; an own playlist hides the other user's one of
+// the same name.
+export function withSessionPlaylists(persistable, current) {
+  const own = persistable || {}
+  const cur = current || {}
+  const readOnly = {}
+  const externals = {}
+  Object.keys(cur).forEach(n => {
+    const p = cur[n]
+    if (p && p.external) externals[n] = p
+    else if (p && p.readOnly && !_hasOwn(own, n)) readOnly[n] = p
+  })
+  return Object.assign({}, own, readOnly, externals)
+}
+
+// The other user's playlists arrive straight from their file. In place, on
+// the read-only entries of `coll` only: items rebuilt to the
+// { searchText: { word: [item] } } shape (anything else dropped) so counting
+// and listing cannot throw; device-only and app-only fields removed; a
+// virtual playlist keeps only members that are theirs too, so it never
+// resolves to the user's own playlist of the same name.
+const _isPlainObject = v => !!v && typeof v === 'object' && !Array.isArray(v)
+export function tidyReadOnlyPlaylists(coll) {
+  if (!coll) return coll
+  Object.keys(coll).forEach(n => {
+    const p = coll[n]
+    if (!p || !p.readOnly) return
+    delete p.notifKey
+    delete p.extId
+    delete p.external
+    if (p.virtual) {
+      const members = Array.isArray(p.members) ? p.members : []
+      p.members = members.filter(m => typeof m === 'string' && isReadOnlyPlaylist(coll, m) && !coll[m].virtual)
+      delete p.items
+      return
+    }
+    const items = {}
+    if (_isPlainObject(p.items)) {
+      Object.keys(p.items).forEach(st => {
+        const byWord = p.items[st]
+        if (!_isPlainObject(byWord)) return
+        const out = {}
+        Object.keys(byWord).forEach(w => {
+          if (Array.isArray(byWord[w])) out[w] = byWord[w].filter(it => _isPlainObject(it))
+        })
+        if (Object.keys(out).length) items[st] = out
+      })
+    }
+    p.items = items
+  })
+  return coll
+}
+
 // Convert a native PlaylistBridge payload
 //   { version, active_id, playlists: [{ id, name, created_at,
 //       cards: [{ id, text, book_key, book_title, chapter_idx, chapter_title,

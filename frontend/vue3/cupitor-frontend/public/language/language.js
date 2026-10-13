@@ -124,6 +124,7 @@ import {
   readUrl as _dsReadUrl,
   writeTarget as _dsWriteTarget,
   hasSelf as _dsHasSelf,
+  hasOther as _dsHasOther,
   langFromLocation as _dsLangFromLocation,
   readLayers as _dsReadLayers,
   mergeIndexLayers as _dsMergeIndexLayers,
@@ -136,6 +137,7 @@ import {
   withoutReadOnlyLines as _dsWithoutReadOnlyLines,
   pendingVocabCategories as _dsPendingVocabCategories,
   relayerVocabulary as _dsRelayerVocabulary,
+  mergeRecordingLayers as _dsMergeRecordingLayers,
   NoSelfRepoError as _DsNoSelfRepoError,
 } from './data-source.js';
 
@@ -206,6 +208,11 @@ import {
   mergeRecordingCollections as _coreMergeRecordingCollections,
   mergeRecordingsLocalAuthoritative as _coreMergeRecordingsLocalAuthoritative,
   bridgePlaylistsToRecordings as _coreBridgePlaylistsToRecordings,
+  isReadOnlyPlaylist as _coreIsReadOnlyPlaylist,
+  persistableRecordings as _corePersistableRecordings,
+  withoutReadOnlyPlaylists as _coreWithoutReadOnlyPlaylists,
+  withSessionPlaylists as _coreWithSessionPlaylists,
+  tidyReadOnlyPlaylists as _coreTidyReadOnlyPlaylists,
 } from './recordings-merge.js';
 import {
   threeWayRecordings as _threeWayRecordings,
@@ -6436,6 +6443,7 @@ function _syncCapturedItemTimes(containerId, url) {
   const word       = ($container.closest('.srt-file').find('h4[data-file]').first().text() || '').trim()
   const searchText = (window.searchText || '').trim()
   if (!word || !searchText) return
+  if (_isReadOnlyPlaylist(window._recording && window._recording.currentName)) return
   const items = window._recording && window._recording.items
   const arr = items && items[searchText] && items[searchText][word]
   if (!arr || !arr.length) return
@@ -10815,14 +10823,22 @@ window._markCapturedButtons = _markCapturedButtons
 const REC_DIRTY_KEY = _scopedKey('cupitor:recordings:dirty')
 
 // External (native-bridge) playlists are owned by the Cupitor app and
-// re-supplied on every load, so they must NOT be written to localStorage or
-// pushed to GitHub. This returns a shallow copy of the collection with them
-// stripped out — used by both persistence and sync.
+// re-supplied on every load, and read-only ones belong to the other user and
+// are re-read from their repo on every load, so neither may be written to
+// localStorage or pushed to GitHub. This returns a shallow copy of the
+// collection with both stripped out — used by both persistence and sync.
 function _persistableRecordings() {
-  const all = window._recordings || {}
-  const out = {}
-  Object.keys(all).forEach(n => { if (all[n] && !all[n].external) out[n] = all[n] })
-  return out
+  return _corePersistableRecordings(window._recordings)
+}
+
+// The other user's playlists can be played and copied from, never changed.
+const READ_ONLY_PLAYLIST_MSG = 'This playlist belongs to the other user and is read-only.'
+function _isReadOnlyPlaylist(name) { return _coreIsReadOnlyPlaylist(window._recordings, name) }
+// True (after telling the user) when `name` cannot be changed.
+function _refuseReadOnlyPlaylist(name) {
+  if (!_isReadOnlyPlaylist(name)) return false
+  alert(READ_ONLY_PLAYLIST_MSG)
+  return true
 }
 
 // Ingest a native PlaylistBridge payload (see the cupitorPlaylists listener) as
@@ -11293,7 +11309,11 @@ function _saveRecording() {
     // reference, and the collection entry is the same object, so this just
     // bumps updatedAt and serialises.
     const name = window._recording.currentName
-    if (window._recordings[name]) {
+    // The other user's playlist is never touched, but the save goes on: it
+    // also persists changes to the user's own playlists (e.g. a video removed
+    // from all of them while one of the other user's is open). Theirs are
+    // left out of what is written by _persistableRecordings.
+    if (window._recordings[name] && !_isReadOnlyPlaylist(name)) {
       // Never write resolved items back into a virtual playlist — that would
       // materialise (and duplicate) the union, defeating the whole point.
       if (!window._recordings[name].virtual) {
@@ -11346,7 +11366,10 @@ function mergeRecordingsLocalAuthoritative(localColl, remoteColl) {
 
 async function loadRecordingsFromGithub() {
   try {
-    const r = await fetch(`${getResourceUrl()}/recordings.json`, { cache: 'no-cache' })
+    // Only the user's own playlists are merged into the editable collection;
+    // the other user's are read by _loadOtherRecordings, read-only.
+    if (!_dsHasSelf()) return null
+    const r = await fetch(_dsReadUrl('self', 'recordings.json', _dsLangFromLocation()), { cache: 'no-cache' })
     if (!r.ok) return null
     const text = await r.text()
     if (!text || !text.trim()) return null
@@ -11503,12 +11526,10 @@ function _reportRecordingCollisions(collided) {
 }
 
 function _adoptRecordings(persistable) {
-  const externals = {}
-  Object.keys(window._recordings || {}).forEach(n => {
-    if (window._recordings[n] && window._recordings[n].external) externals[n] = window._recordings[n]
-  })
-  window._recordings = Object.assign({}, persistable, externals)
-  if (!Object.keys(window._recordings).length) {
+  // The app's playlists and the other user's ride along unchanged.
+  window._recordings = _coreWithSessionPlaylists(persistable, window._recordings)
+  // Always one playlist a capture can go into: the other user's do not count.
+  if (!Object.keys(window._recordings).some(n => !_isReadOnlyPlaylist(n))) {
     window._recordings[REC_DEFAULT_NAME] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }
   }
   // The open playlist may have been deleted on the other side — move to the
@@ -11522,10 +11543,52 @@ function _adoptRecordings(persistable) {
     : window._recordings[cur].items
 }
 
+// The other user's playlists, shown read-only beside the user's own. Added to
+// the in-memory collection only: _persistableRecordings leaves them out of
+// localStorage and every sync, _adoptRecordings carries them across a merge,
+// and the next load reads them from their repo again. tidyReadOnlyPlaylists
+// shapes their entries so a malformed file cannot break the dialog, and
+// drops their device-only keys (notification list, app playlist id).
+async function _loadOtherRecordings() {
+  if (!_dsHasOther()) return
+  let coll = null
+  try {
+    const url = _dsReadUrl('other', 'recordings.json', _dsLangFromLocation())
+    // One retry beside the user's own data; a guest has only this source.
+    const opts = _dsHasSelf() ? _OTHER_LAYER_RETRY : {}
+    const res = await fetchWithRetry(url, { ...opts, passthrough404: true })
+    if (res.status === 404) return // no playlists of theirs in this language
+    const text = await res.text()
+    if (!text || !text.trim()) return
+    try { coll = JSON.parse(text) } catch (_) { coll = null }
+    if (!coll || typeof coll !== 'object' || Array.isArray(coll)) {
+      _dsNotice("The other user's recordings.json is not valid — their playlists are not shown.")
+      return
+    }
+  } catch (e) {
+    _dsNotice(`Could not load the other user's playlists: ${e && e.message}`)
+    return
+  }
+  window._recordings = _coreTidyReadOnlyPlaylists(_dsMergeRecordingLayers(window._recordings || {}, coll))
+  try { _updateRecordingUI() } catch (_) {}
+  try { if ($('#recordingReviewDialog').is(':visible')) openRecordingReviewDialog() } catch (_) {}
+}
+
+// Boot: the user's own playlists from their repo (merged into the editable
+// collection), then the other user's beside them, read-only. A guest has no
+// repo of their own, so only the second step runs.
+async function _mergeRemoteRecordingsIntoLocal() {
+  try {
+    if (_dsHasSelf()) await _mergeSelfRemoteRecordings()
+  } finally {
+    await _loadOtherRecordings()
+  }
+}
+
 // Merge whatever's currently on github into the local in-memory collection.
 // Called once during boot so the user's other-device captures show up. Does
 // NOT clear the dirty flag — local captures since last sync stay dirty.
-async function _mergeRemoteRecordingsIntoLocal() {
+async function _mergeSelfRemoteRecordings() {
   const { data: remote, fresh } = await _fetchRemoteRecordings()
   if (!remote) return
   const base = _loadRecordingsBase()
@@ -11640,13 +11703,10 @@ async function syncRecordingsToGithub() {
         const merged = window._recordingsRemoteMerged
           ? mergeRecordingsLocalAuthoritative(localPersistable, remote)
           : mergeRecordingCollections(localPersistable, remote)
-        const externals = {}
-        Object.keys(window._recordings || {}).forEach(n => {
-          if (window._recordings[n] && window._recordings[n].external) externals[n] = window._recordings[n]
-        })
         // Adopt the merge result so subsequent local edits start from the
-        // post-sync baseline, and a 409/422 retry sees fresh state.
-        window._recordings = Object.assign({}, merged, externals)
+        // post-sync baseline, and a 409/422 retry sees fresh state. The app's
+        // and the other user's playlists stay in memory beside it.
+        window._recordings = _coreWithSessionPlaylists(merged, window._recordings)
         const cur = window._recording.currentName
         if (window._recordings[cur]) window._recording.items = window._recordings[cur].items
         try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(merged)) } catch (_) {}
@@ -12106,6 +12166,7 @@ async function _translatePlaylistPhrases($btn) {
   if (!_haveTranslateBridge()) { alert('Translation needs the Cupitor app.'); return }
   const name = window._recording && window._recording.currentName
   if (!name || _isVirtual(name)) { alert('Pick a normal (non-virtual) playlist to translate.'); return }
+  if (_refuseReadOnlyPlaylist(name)) return
   const items = (window._recording && window._recording.items) || {}
   // phrase → item refs that share it (all get the same translation).
   const groups = new Map()
@@ -12357,6 +12418,7 @@ function addManualEntry(playlistName, opts) {
     alert(`"${playlistName}" comes from the Cupitor app and can't hold manual cards. Pick one of your own playlists.`)
     return null
   }
+  if (_refuseReadOnlyPlaylist(playlistName)) return null
   const source = String(opts.source == null ? '' : opts.source).trim()
   const target = String(opts.target == null ? '' : opts.target).trim()
   if (!source && !target) { alert('At least one of Source / Target must be filled in.'); return null }
@@ -12395,6 +12457,7 @@ function addManualEntry(playlistName, opts) {
 function updateManualEntry(playlistName, manualId, patch) {
   const rec = window._recordings && window._recordings[playlistName]
   if (!rec || !rec.items) return false
+  if (_refuseReadOnlyPlaylist(playlistName)) return false
   for (const st of Object.keys(rec.items)) {
     for (const w of Object.keys(rec.items[st] || {})) {
       const arr = rec.items[st][w] || []
@@ -12472,7 +12535,7 @@ function updateManualEntry(playlistName, manualId, patch) {
 function _captionDestinations() {
   return listRecordings().filter(n => {
     const r = window._recordings && window._recordings[n]
-    return r && !_isVirtual(n) && !r.external
+    return r && !_isVirtual(n) && !r.external && !r.readOnly
   })
 }
 
@@ -12909,6 +12972,7 @@ window.createVirtualRecording = createVirtualRecording
 function setVirtualMembers(name, members) {
   const r = window._recordings && window._recordings[name]
   if (!r || !r.virtual) return false
+  if (_refuseReadOnlyPlaylist(name)) return false
   const valid = (members || []).filter(m => window._recordings[m] && !window._recordings[m].virtual)
   if (!valid.length) { alert('A virtual playlist needs at least one member.'); return false }
   r.members = valid
@@ -12926,6 +12990,7 @@ function renameRecording(oldName, newName) {
   oldName = String(oldName || '')
   newName = String(newName || '').trim()
   if (!newName || !window._recordings[oldName]) return false
+  if (_refuseReadOnlyPlaylist(oldName)) return false
   if (newName === oldName) return true
   if (window._recordings[newName]) {
     alert(`A recording named "${newName}" already exists.`)
@@ -12976,6 +13041,7 @@ function _pruneOrphanAudio(urls) {
 
 function deleteRecording(name) {
   if (!window._recordings[name]) return false
+  if (_refuseReadOnlyPlaylist(name)) return false
   const isV = _isVirtual(name)
   const count = isV ? _recordingItemCountByName(name) : _recordingItemCountIn(window._recordings[name].items)
   const kind = isV ? 'virtual playlist' : 'recording'
@@ -12988,13 +13054,14 @@ function deleteRecording(name) {
   const notifKey = window._recordings[name].notifKey
   delete window._recordings[name]
   if (notifKey && _haveNotifBridge()) { notifRpc('deleteList', { external_key: notifKey }).catch(() => {}) }
-  if (!Object.keys(window._recordings).length) {
+  // Always one playlist of the user's own: the other user's do not count.
+  if (!Object.keys(window._recordings).some(n => !_isReadOnlyPlaylist(n))) {
     window._recordings[REC_DEFAULT_NAME] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }
   }
-  // If we deleted the active one, switch to the first remaining (resolving
-  // virtual items if that happens to be a virtual playlist).
+  // If we deleted the active one, switch to the first remaining own one
+  // (resolving virtual items if that happens to be a virtual playlist).
   if (window._recording.currentName === name) {
-    const next = Object.keys(window._recordings)[0]
+    const next = Object.keys(window._recordings).find(n => !_isReadOnlyPlaylist(n))
     window._recording.currentName = next
     window._recording.virtual = _isVirtual(next)
     window._recording.items = window._recording.virtual
@@ -13062,6 +13129,7 @@ function startRecording()  {
     alert(`"${window._recording.currentName}" is a virtual playlist (a combination of others). Switch to a real playlist to record into.`)
     return
   }
+  if (_refuseReadOnlyPlaylist(window._recording.currentName)) return
   window._recording.state = 'recording'
   _saveRecording()
   _updateRecordingUI()
@@ -13078,6 +13146,7 @@ function clearRecording()  {
     alert('A virtual playlist has no items of its own — clear its member playlists instead.')
     return
   }
+  if (_refuseReadOnlyPlaylist(window._recording.currentName)) return
   if (!confirm(`Discard all items in "${window._recording.currentName}"?`)) return
   // Capture the recordings before the items go, so the files can be freed.
   const _clearedAudio = _collectAudioUrls(window._recording.items)
@@ -13098,6 +13167,7 @@ function clearRecording()  {
 // is now an explicit action (the rec-dup icon in the review dialog).
 function _captureMatchFromButton($capBtn) {
   if (window._recording.state !== 'recording') return
+  if (_refuseReadOnlyPlaylist(window._recording.currentName)) return
   const $linesCntnr = $capBtn.closest('.lines-cntnr')
   if (!$linesCntnr.length) return
   const $pbc = $linesCntnr.find('.play-btn-container').first()
@@ -13143,6 +13213,7 @@ function _captureMatchFromButton($capBtn) {
 }
 
 function removeRecordedItem(searchText, word, idx) {
+  if (_refuseReadOnlyPlaylist(window._recording.currentName)) return
   const items = window._recording.items
   if (!items[searchText] || !items[searchText][word]) return
   // Capture the card's recordings BEFORE it goes, then prune the files once
@@ -13172,6 +13243,7 @@ function _removeQueueItem(it) {
   if (!it || !it._recName) return false
   const rec = window._recordings && window._recordings[it._recName]
   if (!rec || rec.virtual || !rec.items) return false
+  if (_refuseReadOnlyPlaylist(it._recName)) return false
   const st = it._st, w = it._w
   const arr = rec.items[st] && rec.items[st][w]
   if (!Array.isArray(arr)) return false
@@ -13205,7 +13277,8 @@ function removeVideoFromAllPlaylists(videoId) {
   let removed = 0
   Object.keys(window._recordings).forEach(name => {
     const pl = window._recordings[name]
-    if (!pl || pl.virtual || !pl.items) return
+    // The other user's playlists are theirs to clean up.
+    if (!pl || pl.virtual || !pl.items || pl.readOnly) return
     const items = pl.items
     Object.keys(items).forEach(st => {
       Object.keys(items[st]).forEach(w => {
@@ -13238,6 +13311,7 @@ window.removeVideoFromAllPlaylists = removeVideoFromAllPlaylists
 // checkboxes). Doesn't refresh the dialog — the checkbox state is already
 // reflected in the DOM by the user's click.
 function _setRecordedItemEnabled(searchText, word, idx, enabled) {
+  if (_refuseReadOnlyPlaylist(window._recording.currentName)) return
   const items = window._recording.items
   const arr = items && items[searchText] && items[searchText][word]
   if (!arr || !arr[idx]) return
@@ -13249,6 +13323,7 @@ function _setRecordedItemEnabled(searchText, word, idx, enabled) {
 // We rewrite the (searchText, word) array in the order the DOM presents,
 // keyed by data-idx so the original indices stay intact regardless of order.
 function _reorderWordItems(searchText, word, newOrderIdxs) {
+  if (_refuseReadOnlyPlaylist(window._recording.currentName)) return
   const items = window._recording.items
   const arr = items && items[searchText] && items[searchText][word]
   if (!arr) return
@@ -13274,6 +13349,7 @@ let _recDragJustSorted = false
 
 function moveRecordedItem(st, w, idx, newIdx) {
   if (window._recording && window._recording.virtual) return false
+  if (_refuseReadOnlyPlaylist(window._recording && window._recording.currentName)) return false
   const items = window._recording && window._recording.items
   const arr = items && items[st] && items[st][w]
   if (!Array.isArray(arr)) return false
@@ -13291,6 +13367,7 @@ window.moveRecordedItem = moveRecordedItem
 // original. Useful for repetition without leaving the review dialog.
 // Returns true on success.
 function duplicateRecordedItem(st, w, idx) {
+  if (_refuseReadOnlyPlaylist(window._recording && window._recording.currentName)) return false
   const items = window._recording && window._recording.items
   const arr = items && items[st] && items[st][w]
   if (!arr || !arr[idx]) return false
@@ -13427,6 +13504,7 @@ async function _openReplaceItemDialog(st, w, idx, opts = {}) {
   const recObj = (window._recordings && window._recordings[recName]) || null
   if (!recObj) return
   if (_isVirtual(recName) || recObj.virtual) { alert('This is a virtual playlist (read-only).'); return }
+  if (_refuseReadOnlyPlaylist(recName)) return
   const arr = recObj.items && recObj.items[st] && recObj.items[st][w]
   const it = arr && arr[idx]
   if (!it || _isManualItem(it)) return
@@ -13505,6 +13583,8 @@ function copyItemToPlaylist(srcRecName, st, w, idx, destRecName) {
   const dst = window._recordings && window._recordings[destRecName]
   if (!src || !dst) return false
   if (dst.virtual) { alert('Cannot copy into a virtual playlist — add the source playlist as a member instead.'); return false }
+  // Copying OUT of the other user's playlist is fine; into it is not.
+  if (_refuseReadOnlyPlaylist(destRecName)) return false
   const it = src.items && src.items[st] && src.items[st][w] && src.items[st][w][idx]
   if (!it) return false
   if (!dst.items[st])       dst.items[st]       = {}
@@ -13512,7 +13592,7 @@ function copyItemToPlaylist(srcRecName, st, w, idx, destRecName) {
   dst.items[st][w].push({ ...it })
   dst.updatedAt = Date.now()
   try {
-    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(window._recordings))
+    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_coreWithoutReadOnlyPlaylists(window._recordings)))
     window._recordingsDirty = true
     localStorage.setItem(REC_DIRTY_KEY, '1')
     try { _refreshRecordingSyncBtn() } catch (_) {}
@@ -14383,6 +14463,7 @@ async function _openRichCardEditor($box, label) {
 window._openRichCardEditor = _openRichCardEditor
 
 function _openManualEntryEditor(playlistName, existing) {
+  if (_refuseReadOnlyPlaylist(playlistName)) return
   // A minimized editor still holds an unsaved card, and the body is rebuilt
   // below — opening on top of it would throw that card away without asking.
   // It may also be a different card, or a card in a different playlist, than
@@ -15389,6 +15470,7 @@ function _notifResyncAll() {
 async function _notifEnablePlaylist(name, scheduleKey, introKey) {
   const rec = (window._recordings || {})[name]
   if (!rec) return
+  if (_refuseReadOnlyPlaylist(name)) return
   const built = _notifItemsForPlaylist(name)
   if (!built.length) { alert('This playlist has no items with text to notify about.'); return }
   const items = _notifBuildDecorated(name)
@@ -16029,6 +16111,10 @@ function openRecordingReviewDialog() {
   // so the list said nothing about what was coming next.
   const searchTexts = Object.keys(items)
   const isVirtualCurrent = _isVirtual(currentName)
+  // The other user's playlist: play it, practise it, copy cards out of it.
+  const isReadOnlyCurrent = _isReadOnlyPlaylist(currentName)
+  // No item of the list can be changed here.
+  const itemsLocked = isVirtualCurrent || isReadOnlyCurrent
   const allNames = listRecordings()
   // Last-played item (for highlighting). Only highlight when the displayed
   // playlist matches where the item came from.
@@ -16055,7 +16141,7 @@ function openRecordingReviewDialog() {
     <select id="recRecSelect" style="flex:1;min-width:140px;max-width:260px;">`
   allNames.forEach(n => {
     const count = _recordingItemCountByName(n)
-    const marker = _isVirtual(n) ? '🔗 ' : ''
+    const marker = _isVirtual(n) ? '🔗 ' : (_isReadOnlyPlaylist(n) ? '🔒 ' : '')
     html += `<option value="${_.escape(n)}"${n === currentName ? ' selected' : ''}>${marker}${_.escape(n)} (${count})</option>`
   })
   html += `</select>
@@ -16063,11 +16149,11 @@ function openRecordingReviewDialog() {
     <button type="button" id="recRecNewVirtual" class="btn rec-rec-btn" title="Create a virtual playlist (combine existing playlists)" aria-label="Create a virtual playlist"><span class="rec-rec-ico">🔗</span><span class="rec-rec-lbl">Virtual</span></button>
     <button type="button" id="recRecRandom"     class="btn rec-rec-btn" title="Build a random-sample playlist from all real playlists" aria-label="Practice Random"><span class="rec-rec-ico">🎲</span><span class="rec-rec-lbl">Practice Random</span></button>
     <button type="button" id="recRecFromCategory" class="btn rec-rec-btn" title="Build a playlist of subtitle examples for every word in one vocabulary category" aria-label="Build playlist from category"><span class="rec-rec-ico">📚</span><span class="rec-rec-lbl">From Category</span></button>
-    <button type="button" id="recRecAddManual"  class="btn rec-rec-btn" title="Add a manual flashcard entry (source/target + optional media link)" aria-label="Add manual entry"${isVirtualCurrent ? ' disabled' : ''}><span class="rec-rec-ico">📝</span><span class="rec-rec-lbl">Add card</span></button>
-    <button type="button" id="recRecTranslate" class="btn rec-rec-btn" title="Translate each word/phrase (only where a translation is missing) and store it as a placeholder translation" aria-label="Translate phrases"${isVirtualCurrent ? ' disabled' : ''}><span class="rec-rec-ico">🌐</span><span class="rec-rec-lbl">Translate</span></button>
-    <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
+    <button type="button" id="recRecAddManual"  class="btn rec-rec-btn" title="Add a manual flashcard entry (source/target + optional media link)" aria-label="Add manual entry"${itemsLocked ? ' disabled' : ''}><span class="rec-rec-ico">📝</span><span class="rec-rec-lbl">Add card</span></button>
+    <button type="button" id="recRecTranslate" class="btn rec-rec-btn" title="Translate each word/phrase (only where a translation is missing) and store it as a placeholder translation" aria-label="Translate phrases"${itemsLocked ? ' disabled' : ''}><span class="rec-rec-ico">🌐</span><span class="rec-rec-lbl">Translate</span></button>
+    <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"${isReadOnlyCurrent ? ' disabled' : ''}><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
     <button type="button" id="recRecDuplicate" class="btn rec-rec-btn" title="Duplicate this playlist" aria-label="Duplicate this playlist"><span class="rec-rec-ico">⎘</span><span class="rec-rec-lbl">Duplicate</span></button>
-    <button type="button" id="recRecDelete"    class="btn rec-rec-btn rec-rec-danger" title="Delete this playlist" aria-label="Delete this playlist"><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
+    <button type="button" id="recRecDelete"    class="btn rec-rec-btn rec-rec-danger" title="Delete this playlist" aria-label="Delete this playlist"${isReadOnlyCurrent ? ' disabled' : ''}><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
     <button type="button" id="recRecSync"      class="btn rec-rec-btn" title="Push local playlists to GitHub" aria-label="Sync to GitHub"><span class="rec-rec-ico">⤴</span><span class="rec-rec-lbl">Sync</span></button>
   </div>`
   // Virtual playlist banner: shows members + an "Edit members" affordance,
@@ -16077,8 +16163,15 @@ function openRecordingReviewDialog() {
     html += `<div class="rec-virtual-banner">
       🔗 <b>Virtual playlist</b> — a live combination of:
       ${members.length ? members.map(m => `<span class="rec-virtual-member">${_.escape(m)}</span>`).join(' ') : '<span style="color:#a00;">(no valid members)</span>'}
-      <button type="button" id="recVirtualEdit" class="btn rec-rec-btn" style="margin-left:8px;">Edit members</button>
+      ${isReadOnlyCurrent ? '' : '<button type="button" id="recVirtualEdit" class="btn rec-rec-btn" style="margin-left:8px;">Edit members</button>'}
       <div class="rec-virtual-note">Items are read-only here. Edit them in their source playlists.</div>
+    </div>`
+  }
+  if (isReadOnlyCurrent) {
+    const owner = _sourceOwner('other')
+    html += `<div class="rec-virtual-banner">
+      🔒 <b>Read-only playlist</b>${owner ? ` from ${_.escape(owner)}` : ''}.
+      <div class="rec-virtual-note">You can play and practise it, and copy cards into your own playlists.</div>
     </div>`
   }
   if (!searchTexts.length) {
@@ -16100,7 +16193,7 @@ function openRecordingReviewDialog() {
           // "Copy to…" picker — lists every other REAL recording (can't copy
           // into a virtual one). Hidden when current playlist is virtual
           // (read-only) or there are no eligible targets.
-          const otherNames = allNames.filter(n => n !== currentName && !_isVirtual(n))
+          const otherNames = allNames.filter(n => n !== currentName && !_isVirtual(n) && !_isReadOnlyPlaylist(n))
           const copyOptions = (!isVirtualCurrent && otherNames.length)
             ? `<select class="rec-copy-to" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Copy this item to another playlist">
                 <option value="">Copy to…</option>
@@ -16115,18 +16208,18 @@ function openRecordingReviewDialog() {
           const _pendingAttr = _initialPreview ? '' : ' data-pending="1"'
           // On a virtual playlist the list is read-only: only ▶ Play-from is
           // offered; drag / toggle / duplicate / copy / delete are omitted.
-          const editControls = isVirtualCurrent ? '' : `
+          const editControls = itemsLocked ? '' : `
               <button type="button" class="rec-drag" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}"
                       title="Move this item — drag it, or tap to type a position">⋮⋮</button>
               <label class="rec-toggle" title="Include in Play All">
                 <input type="checkbox" class="rec-enable" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" ${checked}>
                 <span class="rec-toggle-track"><span class="rec-toggle-knob"></span></span>
               </label>`
-          const dupBtn = isVirtualCurrent ? '' : `<button type="button" class="rec-dup" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Duplicate this item">⎘</button>`
+          const dupBtn = itemsLocked ? '' : `<button type="button" class="rec-dup" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Duplicate this item">⎘</button>`
           // Replace an auto-captured clip with a different SRT example of the
           // same word (picker). Manual cards have no SRT source, so no 🎲.
-          const replBtn = (isVirtualCurrent || _isManualItem(it)) ? '' : `<button type="button" class="rec-replace" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Replace with a different auto-captured example">🎲</button>`
-          const delBtn = isVirtualCurrent ? '' : `<button type="button" class="rec-del" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Remove this item">✕</button>`
+          const replBtn = (itemsLocked || _isManualItem(it)) ? '' : `<button type="button" class="rec-replace" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Replace with a different auto-captured example">🎲</button>`
+          const delBtn = itemsLocked ? '' : `<button type="button" class="rec-del" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Remove this item">✕</button>`
           const _isLast = _lpHere && _lpHere.st === st && _lpHere.w === w && _lpHere.idx === idx
           // Manual entries: render the source/target text on the main row
           // and the optional media link as a small badge instead of the
@@ -16178,7 +16271,7 @@ function openRecordingReviewDialog() {
               ? ` <button type="button" class="rec-item-media rec-item-epub" data-book-key="${_.escape(String(it.book_key))}" data-chapter-idx="${_.escape(String(it.chapter_idx))}" title="Open in ${_.escape(String(it.chapter_title || it.book_title || 'the book'))}">📖</button>`
               : ''
             _itemTextHtml = `<span class="rec-item-text rec-item-manual${it.enabled === false ? ' rec-item-off' : ''}"${_titleAttr}>📝 ${src}${tgt ? ` → ${tgt}` : ''}</span>${faceBadges}${mediaBadge}${epubBadge}` +
-                            (isVirtualCurrent ? '' : `<button type="button" class="rec-manual-edit" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Edit this card">✎</button>`)
+                            (itemsLocked ? '' : `<button type="button" class="rec-manual-edit" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Edit this card">✎</button>`)
           } else {
             // A captured item's gloss is usually a short phrase, but nothing
             // enforces that — a translated long line lands here in full and
@@ -16194,7 +16287,7 @@ function openRecordingReviewDialog() {
               : ''
             _itemTextHtml = `<span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${it.timeStart}s–${it.timeEnd}s${glossHtml}</span>`
           }
-          html += `<div class="rec-item${isVirtualCurrent ? ' rec-item-readonly' : ''}${_isLast ? ' rec-item-lastplayed' : ''}" data-idx="${idx}">
+          html += `<div class="rec-item${itemsLocked ? ' rec-item-readonly' : ''}${_isLast ? ' rec-item-lastplayed' : ''}" data-idx="${idx}">
             <div class="rec-item-row1">
               <span class="rec-item-no"></span>
               ${editControls}
@@ -16382,6 +16475,7 @@ function openRecordingReviewDialog() {
   $dlg.off('click', '#recRecRename').on('click', '#recRecRename', function (e) {
     e.preventDefault(); e.stopPropagation()
     const oldN = window._recording.currentName
+    if (_refuseReadOnlyPlaylist(oldN)) return
     const newN = prompt('Rename recording:', oldN)
     if (newN && renameRecording(oldN, newN)) openRecordingReviewDialog()
   })
@@ -16419,7 +16513,7 @@ function openRecordingReviewDialog() {
   const _coarsePointer = ('ontouchstart' in window)
     || (navigator.maxTouchPoints > 0)
     || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
-  if ($.fn.sortable && !isVirtualCurrent && !_coarsePointer) {
+  if ($.fn.sortable && !itemsLocked && !_coarsePointer) {
     $dlg.find('.rec-item-list').each(function () {
       const $list = $(this)
       try { $list.sortable('destroy') } catch (_) {}
@@ -18346,6 +18440,7 @@ function _openMusicPanel() {
   $d.on('change.mp', '#mpListTrack', function () {
     const rec = _recordOfPlaylist()
     if (!rec || rec.virtual || rec.external) return
+    if (_refuseReadOnlyPlaylist(window._recording && window._recording.currentName)) return
     const v = String($(this).val() || '')
     if (v) rec.musicTrackId = v
     else delete rec.musicTrackId
@@ -20411,6 +20506,7 @@ function _editCurrentPracticeCard() {
   if (!it || !_isManualItem(it)) return
   const found = _storedManualCard(it)
   if (!found) { alert('Cannot locate this card in its playlist.'); return }
+  if (_refuseReadOnlyPlaylist(found.name)) return
   _openManualEntryEditor(found.name, found.item)
   // When the editor goes, bring the edit onto the card on screen. Saving can
   // replace the stored object, so look it up again rather than reuse it.
@@ -20432,6 +20528,7 @@ function _deleteCurrentPracticeCard() {
   if (!Array.isArray(cards) || idx < 0 || idx >= cards.length) return
   const it = cards[idx]
   if (!it || !it._recName) return
+  if (_refuseReadOnlyPlaylist(it._recName)) return
   const isManual = !!it.manual
   const label = isManual
     ? `"${_cardPlainText(it.source).slice(0, 40)}${_cardPlainText(it.source).length > 40 ? '…' : ''}"`
@@ -21199,6 +21296,7 @@ function _pracRecKeep() {
   if (!st) return
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
+  if (_refuseReadOnlyPlaylist(it._recName)) return
   const rec = window._recordings && window._recordings[it._recName]
   const arr = rec && rec.items && rec.items[it._st] && rec.items[it._st][it._w]
   if (!Array.isArray(arr)) { alert('Cannot locate this card in its playlist.'); return }
@@ -21320,6 +21418,8 @@ async function _renderPracticeCard() {
   $p.find('.practice-replace').show()
   // Only manual cards have an editor.
   $p.find('.practice-edit').hide()
+  // The other user's cards cannot be changed (the handlers refuse too).
+  $p.find('.practice-replace, .practice-delete').toggle(!_isReadOnlyPlaylist(it._recName))
   $p.find('.practice-ctx-ctrl').show()
   $p.find('.practice-play, .practice-speed').show()
   $p.find('.practice-media-link').remove()
@@ -21398,7 +21498,8 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   $p.find('.practice-play, .practice-speed').hide()
   // Manual cards have no SRT source to swap → no replace option.
   $p.find('.practice-replace').hide()
-  $p.find('.practice-edit').show()
+  // The other user's cards cannot be changed (the handlers refuse too).
+  $p.find('.practice-edit, .practice-delete').toggle(!_isReadOnlyPlaylist(it._recName))
 
   const frontText = frontIsSource ? (it.source || '') : (it.target || '')
   const backText  = frontIsSource ? (it.target || '') : (it.source || '')

@@ -13,6 +13,11 @@ import {
   mergeRecordingCollections,
   mergeRecordingsLocalAuthoritative,
   bridgePlaylistsToRecordings,
+  isReadOnlyPlaylist,
+  persistableRecordings,
+  withoutReadOnlyPlaylists,
+  withSessionPlaylists,
+  tidyReadOnlyPlaylists,
 } from "./recordings-merge";
 
 describe("bridgePlaylistsToRecordings", () => {
@@ -376,5 +381,114 @@ describe('youtubeStartSeconds', () => {
     expect(youtubeStartSeconds('https://www.youtube.com/watch?v=abcdefghijk&t=')).toBe(0)
     expect(youtubeStartSeconds('https://www.youtube.com/watch?v=abcdefghijk&tt=9')).toBe(0)
     expect(youtubeStartSeconds(null)).toBe(0)
+  })
+})
+
+// The other user's playlists (readOnly) are shown beside the user's own but
+// must never reach recordings.json, localStorage or the sync base.
+describe('read-only (other user) playlists', () => {
+  const mine = () => ({ Mine: { items: { a: { w: [{ id: 'x', lineIndex: 1 }] } }, createdAt: 1, updatedAt: 2 } })
+  const ext = { Book: { external: true, extId: 7, items: {} } }
+  const theirs = { Theirs: { items: { b: {} }, readOnly: true, src: 'other' } }
+
+  test('isReadOnlyPlaylist: only an own-key entry flagged readOnly', () => {
+    const coll = { ...mine(), ...theirs }
+    expect(isReadOnlyPlaylist(coll, 'Theirs')).toBe(true)
+    expect(isReadOnlyPlaylist(coll, 'Mine')).toBe(false)
+    expect(isReadOnlyPlaylist(coll, 'missing')).toBe(false)
+    expect(isReadOnlyPlaylist(coll, 'toString')).toBe(false)
+    expect(isReadOnlyPlaylist(null, 'Theirs')).toBe(false)
+    expect(isReadOnlyPlaylist(coll, null)).toBe(false)
+    const np = Object.assign(Object.create(null), theirs)
+    expect(isReadOnlyPlaylist(np, 'Theirs')).toBe(true)
+  })
+
+  test('persistableRecordings drops externals and read-only playlists', () => {
+    const coll = { ...mine(), ...ext, ...theirs }
+    expect(Object.keys(persistableRecordings(coll))).toEqual(['Mine'])
+    expect(persistableRecordings(coll).Mine).toBe(coll.Mine)
+    expect(persistableRecordings(null)).toEqual({})
+  })
+
+  test('without other playlists: persistable output is byte-identical to the old rule', () => {
+    const coll = { ...mine(), ...ext, Two: { virtual: true, members: ['Mine'] } }
+    const old = {}
+    Object.keys(coll).forEach(n => { if (coll[n] && !coll[n].external) old[n] = coll[n] })
+    expect(JSON.stringify(persistableRecordings(coll))).toBe(JSON.stringify(old))
+  })
+
+  test("persisted JSON never contains the other user's data", () => {
+    const coll = Object.assign(Object.create(null), mine(), theirs)
+    const json = JSON.stringify(persistableRecordings(coll))
+    expect(json).not.toContain('Theirs')
+    expect(json).not.toContain('readOnly')
+  })
+
+  test('withoutReadOnlyPlaylists keeps externals (old full-collection save) but not read-only', () => {
+    const coll = { ...mine(), ...ext, ...theirs }
+    expect(Object.keys(withoutReadOnlyPlaylists(coll))).toEqual(['Mine', 'Book'])
+    const noOther = { ...mine(), ...ext }
+    expect(JSON.stringify(withoutReadOnlyPlaylists(noOther))).toBe(JSON.stringify(noOther))
+  })
+
+  test('withSessionPlaylists puts externals and read-only playlists back after a merge', () => {
+    const current = { ...mine(), ...ext, ...theirs }
+    const merged = { Mine: { items: {} }, New: { items: {} } }
+    const out = withSessionPlaylists(merged, current)
+    expect(Object.keys(out).sort()).toEqual(['Book', 'Mine', 'New', 'Theirs'])
+    expect(out.Theirs).toBe(current.Theirs)
+    expect(out.Book).toBe(current.Book)
+    expect(out.Mine).toBe(merged.Mine)
+  })
+
+  test('withSessionPlaylists: an own playlist wins over a read-only one of the same name', () => {
+    const out = withSessionPlaylists({ Theirs: { items: { own: {} } } }, { ...theirs })
+    expect(out.Theirs.readOnly).toBeUndefined()
+    expect(out.Theirs.items).toEqual({ own: {} })
+  })
+
+  test('withSessionPlaylists without other playlists equals the old Object.assign(persistable, externals)', () => {
+    const current = { ...mine(), ...ext }
+    const merged = { Mine: { items: {} }, Book: { items: { stale: {} } } }
+    const old = Object.assign({}, merged, { Book: current.Book })
+    expect(JSON.stringify(withSessionPlaylists(merged, current))).toBe(JSON.stringify(old))
+  })
+
+  test('tidyReadOnlyPlaylists: malformed entries of theirs cannot break counting; own entries untouched', () => {
+    const ownItems = { s: { w: null } } // own data is never rewritten here
+    const coll = Object.assign(Object.create(null), {
+      Mine: { items: ownItems },
+      A: { readOnly: true, src: 'other', items: { s: { w: [{ id: 1 }], bad: null, worse: 3 }, nil: null }, notifKey: 'k', extId: 9, external: true },
+      B: { readOnly: true, src: 'other', items: [1, 2] },
+      C: { readOnly: true, src: 'other' },
+    })
+    tidyReadOnlyPlaylists(coll)
+    expect(coll.Mine.items).toBe(ownItems)
+    expect(coll.A.items).toEqual({ s: { w: [{ id: 1 }] } })
+    expect(coll.A.notifKey).toBeUndefined()
+    expect(coll.A.extId).toBeUndefined()
+    expect(coll.A.external).toBeUndefined()
+    expect(coll.A.readOnly).toBe(true)
+    expect(coll.B.items).toEqual({})
+    expect(coll.C.items).toEqual({})
+    expect(recordingItemCountByName(coll, 'A')).toBe(1)
+  })
+
+  test('tidyReadOnlyPlaylists: their virtual playlists keep only members that are theirs', () => {
+    const coll = {
+      A: { items: {} }, // own A hides their A
+      T: { readOnly: true, items: {} },
+      V: { readOnly: true, virtual: true, members: ['A', 'T', 'missing', 7], items: { x: {} } },
+      W: { readOnly: true, virtual: true, members: 'nope' },
+    }
+    tidyReadOnlyPlaylists(coll)
+    expect(coll.V.members).toEqual(['T'])
+    expect(coll.V.items).toBeUndefined()
+    expect(coll.W.members).toEqual([])
+  })
+
+  test('the session copy never feeds back: persistable(withSessionPlaylists(x)) has no read-only entry', () => {
+    const out = withSessionPlaylists({ Mine: { items: {} } }, { ...theirs, ...ext })
+    expect(Object.keys(persistableRecordings(out))).toEqual(['Mine'])
   })
 })
