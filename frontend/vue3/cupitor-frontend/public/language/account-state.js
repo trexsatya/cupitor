@@ -18,28 +18,64 @@ export const USERS_REPO = 'cupitor-users'
 export const TEMPLATE_REPO = 'cupitor-data-template'
 export const DATA_REPO = 'cupitor-data'
 
+// Any access to the global localStorage can throw (SecurityError when site
+// data is blocked), so reaching it is guarded too.
 function store(storage) {
   if (storage) return storage
-  return typeof localStorage !== 'undefined' ? localStorage : null
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null
+  } catch (_) {
+    return null
+  }
+}
+
+// These values are put into raw URLs and API paths, so only GitHub-shaped
+// names pass.
+const LOGIN_RE = /^[A-Za-z0-9-]+$/
+const REPO_RE = /^[A-Za-z0-9_.-]+$/
+// eslint-disable-next-line no-control-regex
+const BRANCH_BAD_RE = /[\s\u0000-\u001f\u007f]/
+
+export function isValidLogin(v) {
+  return typeof v === 'string' && LOGIN_RE.test(v)
+}
+
+export function isValidRepo(v) {
+  return typeof v === 'string' && REPO_RE.test(v) && v !== '.' && v !== '..'
+}
+
+export function isValidBranch(v) {
+  return typeof v === 'string' && v.length > 0 && !v.includes('..') &&
+    !v.startsWith('/') && !BRANCH_BAD_RE.test(v)
+}
+
+function sameLogin(a, b) {
+  return typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
+}
+
+export function isOwnerLogin(login) {
+  return sameLogin(login, OWNER.login)
 }
 
 // A users.json entry made safe: login and repo are required, name defaults
-// to the login, branch to main. Anything else is null.
+// to the login, a missing or empty branch to main. Anything invalid is null.
 export function normalizeUser(u) {
-  if (!u || typeof u !== 'object') return null
+  if (!u || typeof u !== 'object' || Array.isArray(u)) return null
   const { login, repo } = u
-  if (typeof login !== 'string' || !login || typeof repo !== 'string' || !repo) return null
+  if (!isValidLogin(login) || !isValidRepo(repo)) return null
+  const branch = u.branch == null || u.branch === '' ? 'main' : u.branch
+  if (!isValidBranch(branch)) return null
   return {
     login,
     name: typeof u.name === 'string' && u.name ? u.name : login,
     repo,
-    branch: typeof u.branch === 'string' && u.branch ? u.branch : 'main',
+    branch,
   }
 }
 
 // Guests and every user but the owner start out reading the owner's library.
 export function defaultOther(login) {
-  return login === OWNER.login ? null : { ...OWNER }
+  return isOwnerLogin(login) ? null : { ...OWNER }
 }
 
 export function loadAccount(storage) {
@@ -49,43 +85,65 @@ export function loadAccount(storage) {
   let v = null
   try { v = raw ? JSON.parse(raw) : null } catch (_) {}
   if (!v || typeof v !== 'object' || Array.isArray(v)) v = {}
-  const login = typeof v.login === 'string' && v.login ? v.login : null
-  const repo = login && typeof v.repo === 'string' && v.repo ? v.repo : null
-  const branch = repo && typeof v.branch === 'string' && v.branch ? v.branch : null
-  let other = ('other' in v) ? normalizeUser(v.other) : defaultOther(login)
-  if (other && other.login === login) other = null
-  return { login, repo: branch ? repo : null, branch, other }
+  const login = isValidLogin(v.login) ? v.login : null
+  let repo = login && isValidRepo(v.repo) ? v.repo : null
+  let branch = repo && isValidBranch(v.branch) ? v.branch : null
+  if (!branch) repo = null
+  if (!repo && isOwnerLogin(login)) { repo = OWNER.repo; branch = OWNER.branch }
+  // Explicit null means "none"; absent or invalid means the default.
+  let other
+  if ('other' in v && v.other === null) other = null
+  else other = normalizeUser(v.other) || defaultOther(login)
+  if (other && sameLogin(other.login, login)) other = null
+  return { login, repo, branch, other }
 }
 
+// Returns true when the record was written, false otherwise; never throws.
 export function saveAccount(state, storage) {
   const s = store(storage)
-  if (!s) return
+  if (!s || !state) return false
   const { login, repo, branch, other } = state
-  s.setItem(ACCOUNT_KEY, JSON.stringify({ login, repo, branch, other: other ? normalizeUser(other) : null }))
+  try {
+    s.setItem(ACCOUNT_KEY, JSON.stringify({ login, repo, branch, other: other ? normalizeUser(other) : null }))
+    return true
+  } catch (_) {
+    return false
+  }
 }
 
+// Returns true when the record was removed, false otherwise; never throws.
 export function clearAccount(storage) {
   const s = store(storage)
-  if (!s) return
-  s.removeItem(ACCOUNT_KEY)
+  if (!s) return false
+  try {
+    s.removeItem(ACCOUNT_KEY)
+    return true
+  } catch (_) {
+    return false
+  }
 }
 
-// { self, other } as { owner, repo, branch } or null.
+// { self, other } as { owner, repo, branch } or null. The owner without a
+// repo of record writes to the owner repo; an other equal to self is none.
 export function sources(state) {
-  const self = state.login && state.repo && state.branch
-    ? { owner: state.login, repo: state.repo, branch: state.branch }
-    : null
-  const o = state.other && (!self || state.other.login !== self.owner)
+  let self = null
+  if (state.login && state.repo && state.branch) {
+    self = { owner: state.login, repo: state.repo, branch: state.branch }
+  } else if (isOwnerLogin(state.login)) {
+    self = { owner: state.login, repo: OWNER.repo, branch: OWNER.branch }
+  }
+  const o = state.other && !sameLogin(state.other.login, state.login)
     ? { owner: state.other.login, repo: state.other.repo, branch: state.other.branch }
     : null
   return { self, other: o }
 }
 
-// Whose local data a storage key belongs to. A guest shares the device's
-// plain keys with the owner (that is where the pre-account data lives); any
-// other login gets its own suffix.
+// Whose local data a storage key belongs to, lowercased so a login's case
+// never splits its data. A guest shares the device's plain keys with the
+// owner (that is where the pre-account data lives); any other login gets its
+// own suffix.
 export function storageOwner(state) {
-  return state.login || OWNER.login
+  return state.login ? state.login.toLowerCase() : OWNER.login
 }
 
 export function scopedKey(base, state = loadAccount()) {
