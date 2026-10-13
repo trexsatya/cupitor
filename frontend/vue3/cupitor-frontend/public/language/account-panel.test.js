@@ -3,6 +3,7 @@ import {
   accountPanelVM, setupErrorText, appSignInErrorText, tokenErrorText, otherNoticesOf, pickOther,
   renderAccountPanel, initAccountPanel, openAccountDialog, showSetupPrompt, bootAccount,
   __setAccountPanelDeps, SETUP_REPO_MSG, NO_TOKEN_MSG, SIGNED_OUT_MSG, TOKEN_URL,
+  SETUP_CLOSE_LOCK_MS, SETUP_RUNNING_MSG, SIGNED_OUT_BY_USER_KEY,
 } from './account-panel.js'
 import { SetupError, UNAUTHORIZED_AT_KEY } from './account.js'
 import { BridgeError } from './account-bridge.js'
@@ -554,6 +555,72 @@ describe('actions', () => {
     expect(opts.beforeClose()).toBe(false)
     finish({ status: 'awaiting' }); await flush()
     expect(deps.reload).toHaveBeenCalled()
+  })
+  test('closing is refused with a message during setup, allowed after the lock; a later failure that changed the account reloads', async () => {
+    let t = 1000
+    const { deps, set } = setup({ state: aliceNoRepo, now: () => t })
+    let fail
+    deps.runSetup.mockImplementation(() => new Promise((_, rej) => { fail = rej }))
+    initAccountPanel(); openAccountDialog()
+    jq('#acctSetup').trigger('click'); await flush()
+    const opts = jq('#accountDialog').data('dlgOpts')
+    expect(opts.beforeClose()).toBe(false)
+    expect(jq('.acct-msg').text()).toBe(SETUP_RUNNING_MSG)
+    t += SETUP_CLOSE_LOCK_MS
+    expect(opts.beforeClose()).toBe(true)
+    opts.close()
+    expect(deps.reload).not.toHaveBeenCalled() // nothing recorded yet
+    set(aliceReady) // the repo got recorded, then the listing step fails
+    fail(new SetupError('listing', 'github', 'x', { status: 502 })); await flush()
+    expect(deps.reload).toHaveBeenCalled()
+  })
+  test('a listing failure after the repo was recorded: not listed (no endless "Checking")', async () => {
+    const { deps, set } = setup({ state: aliceNoRepo })
+    deps.runSetup.mockImplementation(async () => { set(aliceReady); throw new SetupError('listing', 'timeout', 'Retry in a moment.') })
+    initAccountPanel(); openAccountDialog()
+    jq('#acctSetup').trigger('click'); await flush()
+    const t = jq('#accountDialog').text()
+    expect(t).not.toMatch(/Checking whether you are listed/)
+    expect(t).toMatch(/Not listed yet/)
+    expect(jq('#acctSetup').text()).toBe('Retry')
+  })
+  test('app sign-in the app confirms but GitHub does not: no "Signed in." claim', async () => {
+    const { deps } = setup({ state: guest, inApp: true, bridge: true })
+    deps.reconcileLogin.mockResolvedValue('ok') // still a guest (e.g. GET /user 401)
+    initAccountPanel(); openAccountDialog()
+    jq('#acctAppSignIn').trigger('click'); await flush(); await flush()
+    expect(jq('.acct-msg').text()).toMatch(/didn't confirm who you are/)
+    expect(deps.reload).not.toHaveBeenCalled()
+  })
+  test('a voluntary sign-out is not explained as GitHub refusing the sign-in', async () => {
+    setup({ state: aliceReady, inApp: true, bridge: true }).deps.requestAppSignOut.mockRejectedValue(new BridgeError('timeout', 'signOut'))
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
+    initAccountPanel(); openAccountDialog()
+    jq('#acctSignOut').trigger('click'); await flush()
+    console.warn.mockRestore()
+    // The boot check's guard is still set...
+    expect(Number(window.sessionStorage.getItem(UNAUTHORIZED_AT_KEY))).toBeGreaterThan(0)
+    // ...but the guest view after the reload does not blame GitHub.
+    setup({ state: guest })
+    renderAccountPanel()
+    expect(jq('#accountBanner').text()).not.toContain(SIGNED_OUT_MSG)
+    expect(jq('#accountBanner').text()).toContain(SETUP_REPO_MSG)
+  })
+  test('a 401 after a voluntary sign-out is explained again', () => {
+    setup()
+    window.sessionStorage.setItem(SIGNED_OUT_BY_USER_KEY, String(Date.now() - 5000))
+    window.sessionStorage.setItem(UNAUTHORIZED_AT_KEY, String(Date.now()))
+    renderAccountPanel()
+    expect(jq('#accountBanner').text()).toContain(SIGNED_OUT_MSG)
+  })
+  test('token sign-in clears both sign-out marks', async () => {
+    setup()
+    window.sessionStorage.setItem(UNAUTHORIZED_AT_KEY, String(Date.now()))
+    window.sessionStorage.setItem(SIGNED_OUT_BY_USER_KEY, String(Date.now()))
+    initAccountPanel(); openAccountDialog()
+    jq('#acctToken').val('ghp_x'); jq('#acctTokenSignIn').trigger('click'); await flush()
+    expect(window.sessionStorage.getItem(UNAUTHORIZED_AT_KEY)).toBeNull()
+    expect(window.sessionStorage.getItem(SIGNED_OUT_BY_USER_KEY)).toBeNull()
   })
   test("app sign-in that ends 'ok' clears an earlier 'unchecked' warning", async () => {
     const { deps } = setup({ state: guest, inApp: true, bridge: true })

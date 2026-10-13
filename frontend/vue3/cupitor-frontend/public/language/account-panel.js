@@ -236,8 +236,16 @@ const defaultDeps = () => ({
 let D = defaultDeps()
 let ui = freshUi()
 function freshUi() {
-  return { users: null, listing: null, setup: null, reconcile: null, message: null, busy: false, repoName: null, bootState: null }
+  return { users: null, listing: null, setup: null, reconcile: null, message: null, busy: false, repoName: null, bootState: null, open: false }
 }
+
+// The panel cannot be closed while setup runs, for at most this long (a
+// hung request must not trap the modal).
+export const SETUP_CLOSE_LOCK_MS = 60000
+export const SETUP_RUNNING_MSG = 'Setup is running. You can close this in a moment.'
+// When (ms, sessionStorage) the user signed out on purpose. A 401 mark
+// (UNAUTHORIZED_AT_KEY) not newer than this is no forced sign-out to explain.
+export const SIGNED_OUT_BY_USER_KEY = 'cupitor:signedOutByUser'
 
 // Tests only: swap dependencies and reset the panel's state.
 export function __setAccountPanelDeps(overrides = {}) {
@@ -250,8 +258,10 @@ const snapshot = () => JSON.stringify(D.loadAccount())
 function signedOutRecently() {
   const s = D.session()
   let at = 0
+  let byUser = 0
   try { at = Number(s ? s.getItem(UNAUTHORIZED_AT_KEY) : 0) } catch (_) {}
-  if (!(at > 0)) return false
+  try { byUser = Number(s ? s.getItem(SIGNED_OUT_BY_USER_KEY) : 0) } catch (_) {}
+  if (!(at > 0) || byUser >= at) return false
   const elapsed = D.now() - at
   return elapsed >= 0 && elapsed < REFUSED_GRACE_MS
 }
@@ -359,7 +369,7 @@ async function doSetup() {
   if (typed) ui.repoName = typed
   const repoName = state.repo ? undefined
     : typed || ui.repoName || (state.missingRepo ? state.missingRepo.repo : undefined)
-  ui.setup = { steps: {}, error: null, running: true }
+  ui.setup = { steps: {}, error: null, running: true, startedAt: D.now() }
   setBusy(true, null)
   try {
     let name = state.login
@@ -379,8 +389,13 @@ async function doSetup() {
       : { step: 'repo', code: 'failed', message: `Something went wrong: ${(e && e.message) || e}` }
     ui.setup = { steps: { ...((ui.setup && ui.setup.steps) || {}), [err.step]: 'failed' }, error: err, running: false }
     // A failure after the repo was recorded: the account changed, so closing
-    // the panel reloads (see the dialog's close handler).
-    setBusy(false, D.loadAccount().repo && !state.repo ? 'Your repo is ready; close this panel to start saving to it.' : null)
+    // the panel reloads (see the dialog's close handler). The listing step
+    // did not finish, so the user is not listed yet.
+    const recorded = !!D.loadAccount().repo && !state.repo
+    if (D.loadAccount().repo && err.step === 'listing') ui.listing = 'none'
+    // Closed meanwhile (after the close lock ran out): boot again if needed.
+    if (!ui.open && snapshot() !== ui.bootState) { D.reload(); return }
+    setBusy(false, recorded ? 'Your repo is ready; close this panel to start saving to it.' : null)
   }
 }
 
@@ -409,6 +424,10 @@ async function doAppSignIn() {
   try { r = await D.reconcileLogin({ bridgeAvailable: true }) } catch (_) {}
   if (r === 'reload') { D.reload(); return }
   ui.reconcile = r
+  if (!D.loadAccount().login) {
+    setBusy(false, "The app signed in, but GitHub didn't confirm who you are. Try again in a moment.")
+    return
+  }
   setBusy(false, r === 'ok' ? 'Signed in.' : "Signed in, but couldn't check your sign-in with GitHub. Close this panel to try again.")
 }
 
@@ -420,6 +439,10 @@ async function doTokenSignIn() {
   setBusy(true, 'Checking the token...')
   try {
     await D.signInWithToken(token, { remember })
+    try {
+      const s = D.session()
+      if (s) { s.removeItem(UNAUTHORIZED_AT_KEY); s.removeItem(SIGNED_OUT_BY_USER_KEY) }
+    } catch (_) {}
     D.reload()
   } catch (e) {
     setBusy(false, tokenErrorText(e))
@@ -438,6 +461,8 @@ async function doSignOut() {
       try { const s = D.session(); if (s) s.setItem(UNAUTHORIZED_AT_KEY, String(D.now())) } catch (_) {}
     }
   }
+  // On purpose: the guest view must not say GitHub refused the sign-in.
+  try { const s = D.session(); if (s) s.setItem(SIGNED_OUT_BY_USER_KEY, String(D.now())) } catch (_) {}
   D.signOut()
   const after = D.loadAccount()
   if (after.legacy || after.login) {
@@ -470,6 +495,7 @@ export function openAccountDialog(message = null) {
   let $d = $('#accountDialog')
   if (!$d.length) $d = $('<div id="accountDialog" title="Account"></div>').appendTo('body')
   if (ui.bootState === null) ui.bootState = snapshot()
+  ui.open = true
   renderAccountPanel()
   $d.dialog({
     title: 'Account',
@@ -479,9 +505,17 @@ export function openAccountDialog(message = null) {
     draggable: false,
     resizable: false,
     position: { my: 'center top', at: 'center top+30', of: window },
-    // Setup keeps going until it ends in a reload or an error on screen.
-    beforeClose: () => !(ui.setup && ui.setup.running),
+    // Setup keeps going until it ends in a reload or an error on screen;
+    // after SETUP_CLOSE_LOCK_MS the panel may close anyway.
+    beforeClose: () => {
+      const s = ui.setup
+      if (!s || !s.running || D.now() - (s.startedAt || 0) >= SETUP_CLOSE_LOCK_MS) return true
+      ui.message = SETUP_RUNNING_MSG
+      renderAccountPanel()
+      return false
+    },
     close: () => {
+      ui.open = false
       if (!ui.busy) ui.message = null
       // The account changed while the panel was open (e.g. setup recorded
       // the repo and then failed at the listing step): boot again.
