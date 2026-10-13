@@ -1510,52 +1510,61 @@ describe('reconcileLogin (boot)', () => {
 
 describe("a guest's unsent captures follow them into their new account", () => {
   const BASE = 'cupitor:capturedSubtitles'
+  const GUEST = `${BASE}@~guest`
 
-  test('captures made since becoming a guest move to the new login; older ones stay', async () => {
+  test("the guest's captures move to the new login; the owner's plain-key captures stay", async () => {
     const storage = memStorage({
       [ACCOUNT_KEY]: ALICE_REC,
       [`${BASE}@alice`]: JSON.stringify([capture('a0', 10)]),
+      [BASE]: JSON.stringify([capture('owner', 50)]),
     })
     const s = storages(); const u = fakeGhUtils()
     signOut({ ghUtils: u, storages: s, storage, now: () => 100 })
-    storage.setItem(BASE, JSON.stringify([capture('owner', 50), capture('g1', 150), capture('g2', 160)]))
+    storage.setItem(GUEST, JSON.stringify([capture('g1', 150), capture('g2', 160)]))
     const gh = fakeGh({ 'GET /user': { login: 'Alice' }, 'GET /repos/Alice/cupitor-data/contents/cupitor.json': { sha: 's' } })
     await signInWithToken('ghp', { gh, ghUtils: u, storages: s, storage })
     expect(JSON.parse(storage.getItem(BASE)).map(c => c.id)).toEqual(['owner'])
     expect(JSON.parse(storage.getItem(`${BASE}@alice`)).map(c => c.id)).toEqual(['a0', 'g1', 'g2'])
+    expect(storage.getItem(GUEST)).toBeNull()
     expect(storage.getItem(GUEST_SINCE_KEY)).toBeNull()
   })
 
   test('the same happens when the app signs a guest in (boot reconcile)', async () => {
-    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: null }), [GUEST_SINCE_KEY]: '100', [BASE]: JSON.stringify([capture('g1', 150)]) })
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: null }), [GUEST_SINCE_KEY]: '100', [GUEST]: JSON.stringify([capture('g1', 150)]) })
     const gh = fakeGh({ 'GET /user': { login: 'alice' }, ...ALICE_MARKER })
     expect(await reconcileLogin({ gh, ghUtils: fakeGhUtils(), storages: storages(), storage, bridgeAvailable: true })).toBe('reload')
-    expect(storage.getItem(BASE)).toBeNull()
+    expect(storage.getItem(GUEST)).toBeNull()
     expect(JSON.parse(storage.getItem(`${BASE}@alice`)).map(c => c.id)).toEqual(['g1'])
   })
 
-  test('the owner shares the guest keys, so nothing moves; no guest start → nothing moves', () => {
-    const storage = memStorage({ [GUEST_SINCE_KEY]: '100', [BASE]: JSON.stringify([capture('g1', 150)]) })
-    expect(carryGuestCaptures('trexsatya', { storage })).toBe(0)
+  test("a guest signing in as the owner: the guest's captures join the owner's plain key", () => {
+    const storage = memStorage({ [GUEST_SINCE_KEY]: '100', [GUEST]: JSON.stringify([capture('g1', 150)]), [BASE]: JSON.stringify([capture('o1', 5)]) })
+    expect(carryGuestCaptures('trexsatya', { storage })).toBe(1)
+    expect(JSON.parse(storage.getItem(BASE)).map(c => c.id)).toEqual(['o1', 'g1'])
+    expect(storage.getItem(GUEST)).toBeNull()
     expect(storage.getItem(GUEST_SINCE_KEY)).toBeNull()
+  })
+
+  test("nothing in the guest's buffer: nothing moves, the owner's plain key is untouched", () => {
+    const storage = memStorage({ [BASE]: JSON.stringify([capture('o1', 150)]) })
     expect(carryGuestCaptures('alice', { storage })).toBe(0)
-    expect(JSON.parse(storage.getItem(BASE)).map(c => c.id)).toEqual(['g1'])
+    expect(JSON.parse(storage.getItem(BASE)).map(c => c.id)).toEqual(['o1'])
+    expect(storage.getItem(`${BASE}@alice`)).toBeNull()
   })
 
   test('captures without an id are moved too, never taken for duplicates', () => {
     const storage = memStorage({
-      [GUEST_SINCE_KEY]: '100',
-      [BASE]: JSON.stringify([{ capturedAt: 150, detail: {} }, capture('dup', 160)]),
+      [GUEST]: JSON.stringify([{ capturedAt: 150, detail: {} }, capture('dup', 160)]),
       [`${BASE}@alice`]: JSON.stringify([{ capturedAt: 5, detail: {} }, capture('dup', 160)]),
     })
     expect(carryGuestCaptures('alice', { storage })).toBe(2)
     expect(JSON.parse(storage.getItem(`${BASE}@alice`))).toHaveLength(3)
-    expect(storage.getItem(BASE)).toBeNull()
+    expect(storage.getItem(GUEST)).toBeNull()
   })
 
   test('a target that cannot be written leaves the captures where they are', () => {
-    const storage = brokenStorage({ [GUEST_SINCE_KEY]: '100', [BASE]: JSON.stringify([capture('g1', 150)]) }, `${BASE}@alice`)
+    const storage = brokenStorage({ [GUEST]: JSON.stringify([capture('g1', 150)]) }, `${BASE}@alice`)
     expect(carryGuestCaptures('alice', { storage })).toBe(0)
-    expect(JSON.parse(storage.getItem(BASE)).map(c => c.id)).toEqual(['g1'])
+    expect(JSON.parse(storage.getItem(GUEST)).map(c => c.id)).toEqual(['g1'])
   })
 })

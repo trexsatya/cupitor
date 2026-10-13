@@ -139,6 +139,7 @@ import {
   relayerVocabulary as _dsRelayerVocabulary,
   mergeRecordingLayers as _dsMergeRecordingLayers,
   claimVocabularyLines as _dsClaimVocabularyLines,
+  fetchSelfJson as _dsFetchSelfJson,
   NoSelfRepoError as _DsNoSelfRepoError,
 } from './data-source.js';
 
@@ -331,6 +332,9 @@ import {
   removeHtmlTags,
   encodeHtmlTags as _coreEncodeHtmlTags,
   decodeHtmlTags,
+  subtitleText as _subtitleText,
+  safeSubtitleTag as _safeSubtitleTag,
+  safeSubtitleHtml as _safeSubtitleHtml,
 } from './html-utils.js';
 import {
   LOG_BUFFER_MAX,
@@ -652,7 +656,7 @@ function getSearchesFromStorage() {
   // time the user searched on a fresh device. Migrate any legacy object
   // shape on read so old localStorage values still load.
   try {
-    const v = JSON.parse(localStorage.getItem('searches') || '[]')
+    const v = JSON.parse(localStorage.getItem(_searchesKey()) || '[]')
     if (Array.isArray(v)) return v
     if (v && typeof v === 'object') return Object.keys(v)
     return []
@@ -662,8 +666,11 @@ function getSearchesFromStorage() {
 }
 
 function saveSearchesIntoStorage(searches) {
-  localStorage.setItem('searches', JSON.stringify(searches))
+  localStorage.setItem(_searchesKey(), JSON.stringify(searches))
 }
+
+// Saved searches are personal: one list per account on this device.
+function _searchesKey() { return _scopedKey('searches') }
 
 function exportSearches() {
   const searches = getSearchesFromStorage()
@@ -1167,7 +1174,7 @@ function importSearchesFromFile() {
 }
 
 function clearSearches() {
-  localStorage.removeItem('searches')
+  localStorage.removeItem(_searchesKey())
   $('#toggleSearchesControlCheckbox').click()
 }
 
@@ -1703,7 +1710,7 @@ window.autoHideSettingsPanel = autoHideSettingsPanel
 // your repo" message) when there is no self; callers surface e.message.
 function commitWithMerge(opts) {
   const t = _dsWriteTarget()
-  return _coreCommitWithMerge({ branch: t.branch, ...opts },
+  return _coreCommitWithMerge({ ...opts, branch: t.branch },
     { githubUtils: window.GitHubUtils, owner: t.owner, repo: t.repo })
 }
 
@@ -1948,7 +1955,7 @@ async function doSearch(searchThis, el) {
   }
 }
 
-const SEARCH_NAV_HISTORY_KEY = 'searchNavHistory'
+const SEARCH_NAV_HISTORY_KEY = _scopedKey('searchNavHistory')
 const SEARCH_NAV_HISTORY_MAX = 200
 
 // Storage shape: Array<string | { t: string, l: 'en' }>. Plain strings are
@@ -2631,7 +2638,7 @@ function _syncSrcTgtGapUI() {
 
 function appSettingsLocalKey() {
   const lang = getLangFromUrl()
-  return `cupitor:appSettings:${lang.fullName}`
+  return _scopedKey(`cupitor:appSettings:${lang.fullName}`)
 }
 
 function loadAppSettings() {
@@ -2739,12 +2746,14 @@ function _savePracticeLogLocal(data) {
   try { localStorage.setItem(_practiceLogLocalKey(), JSON.stringify(data)) } catch (_) {}
 }
 
+// The user's own practice log only (never the other user's); null without
+// a data repo, so the dialog stays local-only.
 async function _fetchPracticeLogRemote() {
   try {
-    const url = `${getResourceUrl()}/practice-log.json?_=${Date.now()}`
-    const r = await fetch(url, { cache: 'no-cache' })
-    if (!r.ok) return null
-    return normalizePracticeLog(await r.json())
+    const v = await _dsFetchSelfJson('practice-log.json', {
+      lang: _dsLangFromLocation(), query: `?_=${Date.now()}`, init: { cache: 'no-cache' }, fallback: null,
+    })
+    return v == null ? null : normalizePracticeLog(v)
   } catch (_) { return null }
 }
 
@@ -2920,7 +2929,7 @@ async function openPracticeLogDialog() {
     else _renderPracticeLogPlan()
     $status.text('synced ' + new Date().toLocaleTimeString())
   } else {
-    $status.text('offline — local only')
+    $status.text(_dsHasSelf() ? 'offline — local only' : 'local only')
   }
 }
 window.openPracticeLogDialog = openPracticeLogDialog
@@ -3125,7 +3134,7 @@ export function renderVocabularyCategory(category) {
   vocab.html('');
 
   vocab.append(
-    `<div class="vocabulary-category-header" style="color:grey;font-style:italic;font-weight:bold;padding:6px 0;">${category}</div>`
+    `<div class="vocabulary-category-header" style="color:grey;font-style:italic;font-weight:bold;padding:6px 0;">${_.escape(category)}</div>`
   );
 
   const vocabItem = $('<div class="vocabulary-segment"></div>');
@@ -3139,7 +3148,7 @@ export function renderVocabularyCategory(category) {
     } else {
       txt = "------------------";
     }
-    $line.append(`<span>${txt.replaceAll(SEPARATOR_PIPE, " | ")}</span>`);
+    $line.append($('<span></span>').text(txt.replaceAll(SEPARATOR_PIPE, " | ")));
     $line.data({ text: txt });
     vocabItemContent.append($line);
   });
@@ -3768,7 +3777,8 @@ const clearSubtitles = () => {
 function getWikiLink(word, uri = null, cls = 'link', index = null) {
   let uriComponent = uri || word;
   uriComponent = uriComponent.toLowerCase()
-  return `<span> <span data-index="${index}" class="${cls}" href="https://${getLangFromUrl().code}.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${word}</span></span>`;
+  // `word` is subtitle / vocabulary text (possibly another user's): text only.
+  return `<span> <span data-index="${_.escape(String(index))}" class="${cls}" href="https://${getLangFromUrl().code}.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${_subtitleText(word)}</span></span>`;
 }
 
 // Lazy-create + show the small popover that lets the user choose between
@@ -3789,15 +3799,16 @@ function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLa
     $pop = $(`<div id="${popoverId}" class="subtitle-word-popover" hidden>
       <button type="button" data-action="search-here">Search here</button>
       <button type="button" data-action="search-wiki">Search on wiki</button>
-      ${index !== null ? `<button type="button" id="${popoverId}-add-favorite" data-action="add-favorite">Mark (${word})</button>` : ''}
+      ${index !== null ? `<button type="button" id="${popoverId}-add-favorite" data-action="add-favorite"></button>` : ''}
     </div>`)
+    $pop.find('[data-action="add-favorite"]').text(`Mark (${word})`)
     $('body').append($pop)
   }
   if(index != null) {
     if(addStaredLine) {
-      $(`#${popoverId}-add-favorite`).attr('data-action', 'add-favorite').html(`Mark (${word})`)
+      $(`#${popoverId}-add-favorite`).attr('data-action', 'add-favorite').text(`Mark (${word})`)
     } else {
-      $(`#${popoverId}-add-favorite`).attr('data-action', 'remove-favorite').html(`Unmark (${word})`)
+      $(`#${popoverId}-add-favorite`).attr('data-action', 'remove-favorite').text(`Unmark (${word})`)
     }
   }
 
@@ -3862,9 +3873,11 @@ function populateWikiLinks(text, $el, index = null) {
   $el && $el.html('')
   const [encoded, encodings] = encodeHtmlTags(text)
 
+  // Words become text-only links; the subtitle's own tags come back only as
+  // the formatting tags safeSubtitleTag keeps.
   const fn = (it, second) => {
-    if (it.trim().length < 2) return it
     if (Object.values(encodings).map(it => it.trim()).includes(it)) return it
+    if (it.trim().length < 2) return _.escape(it)
     return getWikiLinkSpecial(it, second, index)
   }
   const withLinks = encoded.split(/[ \n]/).flatMap(it => {
@@ -3875,7 +3888,7 @@ function populateWikiLinks(text, $el, index = null) {
     return fn(it, ws[0])
   }).join(' ');
 
-  const finalHtml = decodeHtmlTags(withLinks, encodings);
+  const finalHtml = decodeHtmlTags(withLinks, encodings, _safeSubtitleTag);
   $el && $el.append(finalHtml)
 
   
@@ -3886,7 +3899,7 @@ function populateSearchWords(sub, $el) {
   $el.html('')
 
   const wordLink = (word, uri = null) => {
-    return $(`<span style="cursor: pointer;" data-uri="${uri || word}"> ${word}</span>`)
+    return $('<span style="cursor: pointer;"></span>').attr('data-uri', uri || word).text(` ${word}`)
   };
 
   removeHtmlTags(sub.sv).split(/[ \n]/).flatMap(it => {
@@ -4070,7 +4083,7 @@ function renderStarredLines() {
   window.starredLines.forEach(index => {
     const hit = subs.find(it => it && it.index === index)
     const ts = hit ? hit.ts : null
-    const x = $(`<span data-index="${index}">${index}</span>`)
+    const x = $('<span></span>').attr('data-index', index).text(index)
       .addClass('starred-sub')
 
     x.click(starredLineSelected(x, index, ts))
@@ -4094,8 +4107,8 @@ const renderSubtitles = () => {
     populateWikiLinks(currentSub.sv, $('#sv-sub'), currentSub.index);
     populateSearchWords(currentSub, $('#sv-sub-mirror'));
 
-    $('#en-sub').html(currentSub.en)
-    $('#currentTime').html(currentSub.index)
+    $('#en-sub').html(_safeSubtitleHtml(currentSub.en))
+    $('#currentTime').text(currentSub.index)
     // Show the subtitle's start-end timestamp above the line so the
     // user can see where in the media they are without checking the player.
     if (typeof currentSub.ts === 'number' && typeof currentSub.te === 'number') {
@@ -4286,7 +4299,7 @@ $(document).ready(function () {
            _escapeHtmlForVocab(text.slice(idx + term.length))
   }
   const _searchedWordsStyleCategory = (option) => {
-    if (!option || !option.id) return option && option.text
+    if (!option || !option.id) return option && _escapeHtmlForVocab(option.text || '')
     if (typeof option.id === 'string' && option.id.indexOf('__cat__:') === 0) {
       // Category heading — italic grey + highlight match.
       return $(`<span style="color:#888;font-style:italic;">${_highlightMatchInText(option.text)}</span>`)
@@ -4294,12 +4307,14 @@ $(document).ready(function () {
     return $('<span>').html(_highlightMatchInText(option.text))
   }
   // Selection (closed-state) doesn't need highlighting — the search term is gone.
+  // escapeMarkup below passes strings through as HTML, so every string
+  // returned here is escaped (vocabulary text may be another user's).
   const _searchedWordsStyleSelection = (option) => {
-    if (!option || !option.id) return option && option.text
+    if (!option || !option.id) return option && _escapeHtmlForVocab(option.text || '')
     if (typeof option.id === 'string' && option.id.indexOf('__cat__:') === 0) {
-      return $(`<span style="color:#888;font-style:italic;">${option.text}</span>`)
+      return $('<span style="color:#888;font-style:italic;"></span>').text(option.text)
     }
-    return option.text
+    return _escapeHtmlForVocab(option.text)
   }
   const $sw = $('#searchedWords')
   if ($sw.length) {
@@ -4377,13 +4392,14 @@ function populateAllLinks() {
 
       const cnt = Object.values(window.categories).filter(filter).length
       label += " (" + cnt + ")"
-      ogs[category] = $(`<optgroup label="${label}">`)
+      ogs[category] = $('<optgroup>').attr('label', label)
     }
     return ogs[category]
   }
   srtLinks.forEach(link => {
     const item = srts.find(it => it.link === link)
-    const $opt = $(`<option>${item.name.replace(".en.srt", "").replace(getTargetLangSrtSuffix(), "")}</option>`).attr('value', item.link)
+    // Index names and categories may be another user's: text and attributes only.
+    const $opt = $('<option>').text(String(item.name).replace(".en.srt", "").replace(getTargetLangSrtSuffix(), "")).attr('value', item.link)
     getOptgroup(getCategory(item)).append($opt)
   })
 
@@ -5135,7 +5151,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   }
   loadSubtitlesForLink(sv, en);
 
-  $('#currentMedia').html(`${link}, ${source}`)
+  $('#currentMedia').text(`${link}, ${source}`)
   $('#toggleSearchBtn').show()
 }
 
@@ -5217,10 +5233,10 @@ async function loadStarredLines(link, source) {
   $('#starredLines').html('')
   $('#starredLinesSelect').html('')
 
-  let res = await fetch(`${getResourceUrl()}/srts/srt_favorites.json`)
-  res = await res.json()
-
-  const d = res.find(it => it.link === link)
+  // The user's own stars only. No data repo, a missing file (a fresh repo)
+  // or a failed read all mean no stars; picking media never fails on it.
+  const favs = await _dsFetchSelfJson('srts/srt_favorites.json', { lang: _dsLangFromLocation(), fallback: [] })
+  const d = Array.isArray(favs) ? favs.find(it => it && it.link === link) : null
   console.log(d)
   d && d.lines && d.lines.forEach(it => addStarredLine(it))
   // Snapshot the loaded set as the saved baseline — Save stays hidden until
@@ -5786,7 +5802,7 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
 
   Object.keys(wordToItemsMap).toSorted().filter(word => wordToItemsMap[word].length).forEach(word => {
     const items = wordToItemsMap[word]
-    const wordBlock = $(`<div><h5 class="l-accordion non-srt" style="background-color: #b6d4fe">${word}</h5></div>`)
+    const wordBlock = $(`<div><h5 class="l-accordion non-srt" style="background-color: #b6d4fe">${_.escape(word)}</h5></div>`)
 
     _.take(items, numberOfItemsToShow()).forEach(item => {
       // let parts = item.file.split("/")
@@ -5878,8 +5894,8 @@ function showInfo(id, source, time_start, time_end) {
   const {fileName, url} = getInfoAboutMedia(id, source, time_start);
 
   const $dlg = $('#info-dialog-content').html(`
-    <h3><a href="${url}" target="_blank">${fileName}</a></h3>
-    <h4>${source}</h4>
+    <h3><a href="${_.escape(url)}" target="_blank">${_.escape(fileName)}</a></h3>
+    <h4>${_.escape(source)}</h4>
     <h4>${fromSeconds(time_start)} - ${fromSeconds(time_end)}</h4>
   `)
   // Pin to the top of the viewport — by default jQuery UI centers in the
@@ -6378,17 +6394,20 @@ function renderLines(id, url) {
       `<img src="/img/icons/play_icon.png" alt="" style="display:none; width: 20px;height: 20px;cursor: pointer;" class="play-btn">`
 
 
+  // Escaped: names and links come from index.json (possibly another user's).
   function truncate(str, n) {
-    return (str.length > n) ? str.slice(0, n - 1) + '&hellip;' : str;
+    str = String(str == null ? '' : str)
+    return (str.length > n) ? _.escape(str.slice(0, n - 1)) + '&hellip;' : _.escape(str);
   };
 
   const infoButton = () => {
     if (window.showInfoWithoutPopup) {
       const {fileName, url} = getInfoAboutMedia(subtitleFile.url, subtitleFile.source, timeStart);
-      return `<a href="${url}" target="_blank" title="${fileName}">${truncate(fileName, 20)}</a>`
+      return `<a href="${_.escape(url)}" target="_blank" title="${_.escape(fileName)}">${truncate(fileName, 20)}</a>`
     }
     return showInfoBtn;
   };
+  const eId = _.escape(id), eUrl = _.escape(url)
 
   // A video from the other user's library is read-only: no ✎ and no 🌐
   // (both write to the subtitle files).
@@ -6400,13 +6419,13 @@ function renderLines(id, url) {
   <span class="add-prev-btn btn" > + </span>
   <span class="remove-next-btn btn"> - </span>
 
-  <span class="play-btn-container" style="text-align: center;" data-id="${id}" data-url="${url}" data-source="${subtitleFile.source || ''}" data-time-start="${timeStart}" data-time-end="${timeEnd}" data-match-line-index="${Number.isFinite(matchLineIndex) ? matchLineIndex : ''}">
+  <span class="play-btn-container" style="text-align: center;" data-id="${eId}" data-url="${eUrl}" data-source="${_.escape(subtitleFile.source || '')}" data-time-start="${timeStart}" data-time-end="${timeEnd}" data-match-line-index="${Number.isFinite(matchLineIndex) ? matchLineIndex : ''}">
      <span class="info btn collapse-sub-lines"> 🗖 </span>
-     <span class="info source-tag" data-source="${(subtitleFile.source || '').toLowerCase()}" title="${_.escape(subtitleFile.source || '')}">${_sourceBadgeHtml(subtitleFile.source)}</span>
+     <span class="info source-tag" data-source="${_.escape(String(subtitleFile.source || '').toLowerCase())}" title="${_.escape(subtitleFile.source || '')}">${_sourceBadgeHtml(subtitleFile.source)}</span>
      ${infoButton()}
   </span>
   <span class="capture-btn btn" title="Add this match to the current recording">●</span>
-  ${readOnly ? '' : `<span class="translate-lines-btn btn" data-id="${id}" data-url="${url}" title="Translate the visible lines to English">🌐</span>`}
+  ${readOnly ? '' : `<span class="translate-lines-btn btn" data-id="${eId}" data-url="${eUrl}" title="Translate the visible lines to English">🌐</span>`}
   <span style="float: right;">
     <span class="remove-prev-btn btn" > - </span>
     <span class="add-next-btn btn"> + </span>
@@ -6444,11 +6463,11 @@ function renderLines(id, url) {
       mainSubPanel.append(_mark)
       if (secondarySub && secondarySub.text) secondarySubPanel.append(_mark)
     }
-    const lineMain = `<div class="line main-line" data-url="${url}" data-line-index="${subIdx}" data-lang-code="${mainLangCode}"><span class="line-text">${mainSub.text}</span>${editBtn}</div>`;
+    const lineMain = `<div class="line main-line" data-url="${eUrl}" data-line-index="${_.escape(subIdx)}" data-lang-code="${mainLangCode}"><span class="line-text">${mainSub.text}</span>${editBtn}</div>`;
     subForLines += lineMain
     mainSubPanel.append(lineMain)
     if (secondarySub && secondarySub.text) {
-      const lineSec = `<div class="line secondary-line" data-url="${url}" data-line-index="${subIdx}" data-lang-code="en"><span class="line-text">${secondarySub.text}</span>${editBtn}</div>`;
+      const lineSec = `<div class="line secondary-line" data-url="${eUrl}" data-line-index="${_.escape(subIdx)}" data-lang-code="en"><span class="line-text">${secondarySub.text}</span>${editBtn}</div>`;
       subForLines += lineSec
       secondarySubPanel.append(lineSec)
     }
@@ -6639,7 +6658,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         // came in through the guess. Dimmed, so the eye goes to the headings that
         // answer what was actually asked.
         const viaGuessOnly = grouped && !isSweepUp && items.length > 0 && items.every(it => it && it._viaGuess)
-        const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}${viaGuessOnly ? ' srt-guess-only' : ''}"${viaGuessOnly ? ' title="No English line here contains the search word — these are lines whose ' + _.escape(getLangFromUrl().fullName || 'studied-language') + ' side uses this guess"' : ''}><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${title} <span class="match-count"></span></h5></div>`)
+        const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}${viaGuessOnly ? ' srt-guess-only' : ''}"${viaGuessOnly ? ' title="No English line here contains the search word — these are lines whose ' + _.escape(getLangFromUrl().fullName || 'studied-language') + ' side uses this guess"' : ''}><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${_.escape(title)} <span class="match-count"></span></h5></div>`)
         items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
 
         const isMultiWord = word.trim().split(/\s+/).length > 1
@@ -6648,14 +6667,14 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         // shows the same "Search here / Search on wiki" popover as single words.
         // The href carries the phrase-search Wiktionary URL for the wiki action.
         const wikiPart = isMultiWord
-            ? `<span> <span class="link" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}">${word}</span></span>`
+            ? `<span> <span class="link" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}">${_.escape(word)}</span></span>`
             : getWikiLinks(word)
         // The sweep-up heading is not a word, so there is nothing to look it up
         // in — a Wiktionary link for "_everything_else" would be a dead end.
         if (!isSweepUp) {
           wordBlock.append(`<div style=""> Wiki: ${wikiPart} 丨
-            <a href="https://www.google.com/search?q=${word}&udm=2" target="_blank">Images</a> 丨
-            <a href="https://filmot.com/search/%22${word}%22/1?lang=${getLangFromUrl().code}" target="_blank">YouTube (Filmot)</a> </div> <br>`)
+            <a href="https://www.google.com/search?q=${_.escape(encodeURIComponent(word))}&udm=2" target="_blank">Images</a> 丨
+            <a href="https://filmot.com/search/%22${_.escape(encodeURIComponent(word))}%22/1?lang=${getLangFromUrl().code}" target="_blank">YouTube (Filmot)</a> </div> <br>`)
         }
 
         $result.append(wordBlock)
@@ -6690,8 +6709,8 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
             // filed under. They are the same thing for an ordinary search; under a
             // guessed grouping the heading is a guess, and one of them is the
             // sweep-up marker, which nobody typed and nothing should be saved as.
-            const $fileBlock = $(`<div class="srt-file" title="${item['name']}">
-                                  <h4 data-file="${item.url}" style="display: none;"> ${item.word || word} </h4>
+            const $fileBlock = $(`<div class="srt-file" title="${_.escape(item['name'])}">
+                                  <h4 data-file="${_.escape(item.url)}" style="display: none;"> ${_.escape(item.word || word)} </h4>
                               </div>`)
             if (item._viaGuess) {
               $fileBlock.append(
@@ -6794,7 +6813,7 @@ function _refreshAccordionStickyHeight() {
 
 function resultNotFound(search) {
   return `
-<h3>No results found for ${search}</h3>
+<h3>No results found for ${_.escape(search)}</h3>
 Try Wiki ${getWikiLinks(search)}
 `;
 }
@@ -9184,7 +9203,7 @@ async function deleteSelectedMedia() {
   // since it's no longer in srts/index.json, but cleaning up here keeps the
   // cache and in-memory state in sync this session.)
   _cacheDeleteOne(link).catch(e => console.warn('[cache] delete failed for', link, e))
-  $(`#mp3Choice option[value="${link}"]`).remove()
+  $('#mp3Choice option').filter(function () { return this.value === link }).remove()
   $('#mp3Choice').val('').trigger('change')
 
   // The video is gone — drop every playlist item that still points at it so
@@ -9683,7 +9702,7 @@ async function _deleteVideoByLink(link) {
   window.srts = (window.srts || []).filter(it => it.link !== link)
   if (window.allSubtitles && window.allSubtitles[link]) delete window.allSubtitles[link]
   _cacheDeleteOne(link).catch(e => console.warn('[cache] delete failed for', link, e))
-  $(`#mp3Choice option[value="${link}"]`).remove()
+  $('#mp3Choice option').filter(function () { return this.value === link }).remove()
   try { removeVideoFromAllPlaylists(link) } catch (_) {}
 }
 
@@ -13663,7 +13682,7 @@ async function _openReplaceItemDialog(st, w, idx, opts = {}) {
       <input type="radio" name="replCand" value="${i}"${i === 0 ? ' checked' : ''}>
       <span class="repl-cand-body">
         <span class="repl-cand-text">${_.escape(preview)}</span>
-        <span class="repl-cand-meta">${_.escape(c.id)} · ${c.timeStart}s–${c.timeEnd}s</span>
+        <span class="repl-cand-meta">${_.escape(c.id)} · ${_.escape(c.timeStart)}s–${_.escape(c.timeEnd)}s</span>
       </span>
     </label>`
   }).join('')
@@ -14170,6 +14189,8 @@ async function ensureMicPermissionViaBridge() {
 
 // True when a mediaUrl is one of our recorded audio files.
 function _isAudioMediaUrl(u) { return typeof u === 'string' && u.startsWith('file://') }
+// Links from playlist files are opened only when they are http(s).
+function _isWebUrl(u) { return typeof u === 'string' && /^https?:\/\//i.test(u.trim()) }
 
 // ── Manual-card recordings ───────────────────────────────────────────────
 // A card can carry an independent pronunciation recording for each face:
@@ -16380,7 +16401,8 @@ function openRecordingReviewDialog() {
               : ''
             const faceBadges = audioBadge(_cardSourceAudio(it), '🎙ᔆ', 'Play the Source recording')
                              + audioBadge(_cardTargetAudio(it), '🎙ᵀ', 'Play the Target recording')
-            const mediaBadge = it.mediaUrl
+            // A link from a playlist file opens only as http(s) (no javascript: etc.).
+            const mediaBadge = it.mediaUrl && (_isAudio || _isWebUrl(it.mediaUrl))
               ? (_isAudio
                   // Legacy card: its single recording still lives in mediaUrl.
                   ? audioBadge(it.mediaUrl, '🎙', 'Play recorded audio')
@@ -16406,7 +16428,7 @@ function openRecordingReviewDialog() {
             const glossHtml = _glossFull
               ? ` <span class="rec-item-gloss"${_glossTitle ? ` title="${_.escape(_glossTitle)}"` : ''}>→ ${_.escape(_glossShown)}</span>`
               : ''
-            _itemTextHtml = `<span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${it.timeStart}s–${it.timeEnd}s${glossHtml}</span>`
+            _itemTextHtml = `<span class="rec-item-text${it.enabled === false ? ' rec-item-off' : ''}">${_.escape(it.id)} · ${_.escape(it.timeStart)}s–${_.escape(it.timeEnd)}s${glossHtml}</span>`
           }
           html += `<div class="rec-item${itemsLocked ? ' rec-item-readonly' : ''}${_isLast ? ' rec-item-lastplayed' : ''}" data-idx="${idx}">
             <div class="rec-item-row1">
@@ -17541,7 +17563,7 @@ function _saveQueueOrder(queue, mode) {
 // was killed with a view still open. Reopening it then is what makes a
 // relaunched app feel like it never closed, while a view the user deliberately
 // left stays closed.
-const OPEN_VIEW_KEY = 'cupitor:openView'
+const OPEN_VIEW_KEY = _scopedKey('cupitor:openView')
 
 // Mirror the flag to the native host.
 //
@@ -17744,7 +17766,7 @@ const YT_UNAVAILABLE_CANONICAL_CODES = new Set([100, 101, 150])
 // nagged with a confirm() in the middle of a play session.
 //
 // Shape: { [videoId]: { firstSeenAt, lastSeenAt, count, code, label? } }
-const PLAY_UNAVAILABLE_KEY = 'cupitor:playUnavailable'
+const PLAY_UNAVAILABLE_KEY = _scopedKey('cupitor:playUnavailable')
 function _loadPlayUnavailable() {
   try {
     const raw = localStorage.getItem(PLAY_UNAVAILABLE_KEY)
@@ -17902,8 +17924,8 @@ function _renderPlayUnavailableList() {
       </div>
       <div class="pud-actions">
         <a class="pud-open lang-tool-btn" target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=${encodeURIComponent(id)}">Open</a>
-        <button type="button" class="pud-remove lang-tool-btn" data-id="${id}" title="Remove this video from every playlist">Remove from playlists</button>
-        <button type="button" class="pud-forget lang-tool-btn" data-id="${id}" title="Clear this entry from the review list">Forget</button>
+        <button type="button" class="pud-remove lang-tool-btn" data-id="${_.escape(id)}" title="Remove this video from every playlist">Remove from playlists</button>
+        <button type="button" class="pud-forget lang-tool-btn" data-id="${_.escape(id)}" title="Clear this entry from the review list">Forget</button>
       </div>
     </div>`)
     $row.find('.pud-label').text(label)
@@ -21665,7 +21687,7 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
         // Bridge-loaded preview with toggle: click while playing stops it;
         // navigating away or closing Practice also stops it.
         _startManualAudioPreview(it.mediaUrl, $btn)
-      } else {
+      } else if (_isWebUrl(it.mediaUrl)) {
         window.open(it.mediaUrl, '_blank', 'noopener')
       }
     })

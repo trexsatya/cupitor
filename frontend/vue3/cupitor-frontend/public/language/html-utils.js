@@ -53,11 +53,54 @@ export function encodeHtmlTags(text, uuidFn) {
 // to the original tag using the `encodings` map produced by the encoder.
 // The placeholder is `trim()`-compared because intermediate processing
 // may have collapsed the surrounding whitespace.
-export function decodeHtmlTags(text, encodings) {
+// `mapTag`, when given, turns each original tag into what is put back (e.g.
+// safeSubtitleTag).
+export function decodeHtmlTags(text, encodings, mapTag) {
   let out = String(text == null ? '' : text)
   Object.keys(encodings || {}).forEach(key => {
     const enc = encodings[key]
-    out = out.replaceAll(enc.trim(), key)
+    out = out.replaceAll(enc.trim(), mapTag ? mapTag(key) : key)
   })
   return out
+}
+
+// ---- subtitle and library text from data files ----
+// Subtitle files, index names, vocabulary and playlists can come from
+// another user's repo, so none of their text may reach the page as markup.
+
+// The plain text of a fragment, escaped for HTML. Entities show as their
+// characters (SRT files use e.g. &#9654;) and any tags are dropped. Plain
+// text (no '&' or '<') skips the parser. Whitespace at the ends is kept (the
+// parser would drop the leading part).
+export function subtitleText(s) {
+  const str = String(s == null ? '' : s)
+  if (!/[&<]/.test(str)) return escapeHtml(str)
+  const [, lead, body, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(str)
+  return escapeHtml(lead + decodeHtmlEntities(body) + trail)
+}
+
+// The formatting tags subtitle files use (<b>, <i>, <u>, <em>, <strong>,
+// <br>, <font color>) rebuilt without anything else; every other tag is
+// dropped.
+const SUB_TAGS = ['b', 'i', 'u', 'em', 'strong', 'font']
+export function safeSubtitleTag(tag) {
+  const t = String(tag == null ? '' : tag)
+  let m = /^<\s*\/\s*([a-z]+)\s*>$/i.exec(t)
+  if (m) return SUB_TAGS.includes(m[1].toLowerCase()) ? `</${m[1].toLowerCase()}>` : ''
+  if (/^<\s*br\s*\/?\s*>$/i.test(t)) return '<br>'
+  m = /^<\s*([a-z]+)(\s[^<>]*)?\/?\s*>$/i.exec(t)
+  if (!m) return ''
+  const name = m[1].toLowerCase()
+  if (!SUB_TAGS.includes(name)) return ''
+  if (name !== 'font') return `<${name}>`
+  const c = /\bcolor\s*=\s*["']?(#?[a-z0-9]+)["']?/i.exec(m[2] || '')
+  return c ? `<font color="${c[1]}">` : '<font>'
+}
+
+// Subtitle text as safe HTML: formatting tags kept (safeSubtitleTag), the
+// rest as escaped text.
+export function safeSubtitleHtml(s) {
+  return String(s == null ? '' : s).split(/(<[^<>]+>)/g)
+    .map((part, i) => (i % 2 ? safeSubtitleTag(part) : subtitleText(part)))
+    .join('')
 }

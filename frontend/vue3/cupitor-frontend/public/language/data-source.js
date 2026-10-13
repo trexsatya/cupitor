@@ -24,10 +24,34 @@ export function resetLayerStats() { _layerStats = { other: { hits: 0, misses: 0,
 export function layerStats() { return JSON.parse(JSON.stringify(_layerStats)) }
 
 let _state = null
+let _sourceNoticeSent = false
 // Keeps a shallow copy, so later changes to the caller's object do not leak in.
-export function configure(state) { _state = state ? { ...state } : null; resetLayerStats() }
+export function configure(state) { _state = state ? { ...state } : null; _sourceNoticeSent = false; resetLayerStats() }
 function state() { return _state || (_state = loadAccount()) }
-export function currentSources() { return sources(state()) }
+
+// Owner, repo and branch go into raw URLs and API paths as they are, so each
+// must be a plain name. A source with anything else is left out: no self
+// means no writes, no other means no layered library.
+const SAFE_NAME_RE = /^[\w.-]+$/
+const safeName = v => typeof v === 'string' && SAFE_NAME_RE.test(v) && v !== '.' && v !== '..'
+const safeSource = s => safeName(s.owner) && safeName(s.repo) && safeName(s.branch)
+
+export function currentSources() {
+  const s = sources(state())
+  return {
+    self: s.self && safeSource(s.self) ? s.self : null,
+    other: s.other && safeSource(s.other) ? s.other : null,
+  }
+}
+
+// Messages for the sources left out by currentSources (empty when none).
+export function sourceProblems() {
+  const s = sources(state())
+  const out = []
+  if (s.self && !safeSource(s.self)) out.push('Your data repo name in this browser is not valid, so changes cannot be saved. Set up your repo again.')
+  if (s.other && !safeSource(s.other)) out.push("The other user's library could not be loaded: its repo name is not valid.")
+  return out
+}
 
 // The language goes into raw URL paths, so only plain names pass.
 const LANG_RE = /^[a-z][a-z-]*$/
@@ -91,6 +115,32 @@ export function writeTarget() {
   return { owner: s.owner, repo: s.repo, branch: s.branch }
 }
 
+// The parsed JSON of one of the user's own files (practice log, starred
+// lines): never the other user's. `fallback` when there is no self (no
+// request is made), the file is missing, the request fails or the text is
+// not JSON; never throws. Failures other than a 404 go to `log`. `query` is
+// appended to the URL as given; `init` is passed to fetch.
+export async function fetchSelfJson(path, {
+  lang = langFromLocation(), query = '', init, fallback = null, fetchFn,
+  log = (m, e) => { try { console.warn(m, e) } catch (_) {} },
+} = {}) {
+  let url
+  try {
+    if (!hasSelf()) return fallback
+    url = readUrl('self', path, lang) + query
+  } catch (e) { log(`fetchSelfJson: no URL for ${path}`, e); return fallback }
+  try {
+    const f = fetchFn || fetch
+    const res = init === undefined ? await f(url) : await f(url, init)
+    if (res.status === 404) return fallback
+    if (!res.ok) { log(`fetchSelfJson: ${path} answered ${res.status}`); return fallback }
+    return await res.json()
+  } catch (e) {
+    log(`fetchSelfJson: could not read ${path}`, e)
+    return fallback
+  }
+}
+
 // Fetch one file from every present source, self first. Each layer is
 // { src, owner, text } with text null when the file is not there (404, one
 // request, no retries). `path` is raw, as for readUrl. The other layer may
@@ -99,11 +149,17 @@ export function writeTarget() {
 // fetchWithRetry for every layer; `otherRetry`, when given, replaces it for
 // the other layer when there is also a self layer, so a failing other repo
 // can be given up on quickly. With no self (a guest) other is the only
-// source and keeps `retry`.
-export async function readLayers(path, { lang = langFromLocation(), fetchFn, onNotice = () => {}, retry = {}, otherRetry } = {}) {
+// source and keeps `retry`. A source left out for an invalid repo name (see
+// sourceProblems) is reported through `onNotice` once per configure, to the
+// first caller that passes one.
+export async function readLayers(path, { lang = langFromLocation(), fetchFn, onNotice, retry = {}, otherRetry } = {}) {
   checkLang(lang)
   const segments = pathSegments(path)
   const s = currentSources()
+  if (onNotice && !_sourceNoticeSent) {
+    _sourceNoticeSent = true
+    for (const m of sourceProblems()) { try { onNotice(m) } catch (_) {} }
+  }
   const out = []
   for (const [src, cfg] of [['self', s.self], ['other', s.other]]) {
     if (!cfg) continue
@@ -117,7 +173,7 @@ export async function readLayers(path, { lang = langFromLocation(), fetchFn, onN
     } catch (e) {
       if (src === 'self') throw e
       _layerStats.other.errors++
-      try { onNotice(`Could not load ${path} from ${cfg.owner}/${cfg.repo}: ${e && e.message}`) } catch (_) {}
+      if (onNotice) try { onNotice(`Could not load ${path} from ${cfg.owner}/${cfg.repo}: ${e && e.message}`) } catch (_) {}
     }
   }
   return out

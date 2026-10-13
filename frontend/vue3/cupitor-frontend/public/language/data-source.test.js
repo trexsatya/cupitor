@@ -607,3 +607,92 @@ describe('claimVocabularyLines (a user adds a line the other user also has)', ()
     expect(r.vocab['__proto__']).toEqual(['(p)|p|'])
   })
 })
+
+describe('source names are checked before they go into URLs', () => {
+  const { currentSources, sourceProblems } = require('./data-source.js')
+  const otherWith = o => ({ ...alice, other: { login: 'bob', name: 'Bob', repo: 'cupitor-data', branch: 'main', ...o } })
+
+  test('the owner, a user and the default other all pass unchanged', () => {
+    configure(owner)
+    expect(currentSources()).toEqual({ self: { owner: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages' }, other: null })
+    expect(sourceProblems()).toEqual([])
+    configure(alice)
+    expect(currentSources().self).toEqual({ owner: 'alice', repo: 'cupitor-data', branch: 'main' })
+    expect(currentSources().other).toEqual({ owner: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages' })
+  })
+
+  test.each([
+    ['branch with a slash', { branch: 'a/b' }],
+    ['branch with ? and #', { branch: 'x?y#z' }],
+    ['branch ..', { branch: '..' }],
+    ['repo with a space', { repo: 'my repo' }],
+    ['login with a slash', { login: 'bob/../x' }],
+  ])('an invalid other (%s) is no other layer, with a notice', async (_, o) => {
+    configure(otherWith(o))
+    expect(currentSources().other).toBeNull()
+    expect(hasOther()).toBe(false)
+    expect(() => readUrl('other', 'x', 'swedish')).toThrow(/no other source/)
+    expect(sourceProblems()).toHaveLength(1)
+    const calls = []; const notices = []
+    const fetchFn = async (url) => { calls.push(url); return res(200, '[]') }
+    const out = await readLayers('srts/index.json', { lang: 'swedish', fetchFn, onNotice: n => notices.push(n) })
+    expect(out.map(l => l.src)).toEqual(['self'])
+    expect(calls.every(u => u.includes('/alice/cupitor-data/main/'))).toBe(true)
+    expect(notices).toEqual([expect.stringMatching(/other user's library could not be loaded/)])
+    // Once per configure.
+    await readLayers('vocabulary.txt', { lang: 'swedish', fetchFn, onNotice: n => notices.push(n) })
+    expect(notices).toHaveLength(1)
+  })
+
+  test('an invalid self is no self: no writes, nothing read from it', () => {
+    configure({ ...alice, branch: 'feature/x' })
+    expect(hasSelf()).toBe(false)
+    expect(() => writeTarget()).toThrow(NoSelfRepoError)
+    expect(readUrl('primary', 'x', 'swedish')).toContain('/trexsatya/trexsatya.github.io/gh-pages/')
+    expect(sourceProblems()).toEqual([expect.stringMatching(/Your data repo name/)])
+  })
+})
+
+describe('fetchSelfJson (own files only)', () => {
+  const { fetchSelfJson } = require('./data-source.js')
+  const jres = (status, body) => ({ ok: status < 400, status, json: async () => (typeof body === 'string' ? JSON.parse(body) : body) })
+
+  test('the owner reads the same URL as before, from the own repo', async () => {
+    configure(owner)
+    const calls = []
+    const fetchFn = async (...args) => { calls.push(args); return jres(200, [{ link: 'a' }]) }
+    expect(await fetchSelfJson('srts/srt_favorites.json', { lang: 'swedish', fetchFn, fallback: [] })).toEqual([{ link: 'a' }])
+    expect(calls).toEqual([['https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/srts/srt_favorites.json']])
+    calls.length = 0
+    await fetchSelfJson('practice-log.json', { lang: 'swedish', fetchFn, query: '?_=5', init: { cache: 'no-cache' } })
+    expect(calls).toEqual([['https://raw.githubusercontent.com/trexsatya/trexsatya.github.io/gh-pages/db/language/swedish/practice-log.json?_=5', { cache: 'no-cache' }]])
+  })
+
+  test('a user reads their own repo, never the other user\'s', async () => {
+    configure(alice)
+    const calls = []
+    await fetchSelfJson('practice-log.json', { lang: 'swedish', fetchFn: async (u) => { calls.push(u); return jres(200, {}) } })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain('/alice/cupitor-data/main/')
+  })
+
+  test('no self (guest, or a user without a repo): fallback and no request', async () => {
+    for (const st of [guest, aliceNoRepo]) {
+      configure(st)
+      const fetchFn = jest.fn()
+      expect(await fetchSelfJson('srts/srt_favorites.json', { lang: 'swedish', fetchFn, fallback: [] })).toEqual([])
+      expect(fetchFn).not.toHaveBeenCalled()
+    }
+  })
+
+  test('404 (a fresh data repo) is the fallback, silently; other failures are logged, never thrown', async () => {
+    configure(alice)
+    const log = jest.fn()
+    expect(await fetchSelfJson('f.json', { lang: 'swedish', fetchFn: async () => jres(404, ''), fallback: [], log })).toEqual([])
+    expect(log).not.toHaveBeenCalled()
+    expect(await fetchSelfJson('f.json', { lang: 'swedish', fetchFn: async () => jres(500, ''), fallback: [], log })).toEqual([])
+    expect(await fetchSelfJson('f.json', { lang: 'swedish', fetchFn: async () => { throw new TypeError('Failed to fetch') }, fallback: [], log })).toEqual([])
+    expect(await fetchSelfJson('f.json', { lang: 'swedish', fetchFn: async () => jres(200, 'not json{'), fallback: [], log })).toEqual([])
+    expect(log).toHaveBeenCalledTimes(3)
+  })
+})

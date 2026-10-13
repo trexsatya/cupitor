@@ -110,16 +110,16 @@ export async function fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init =
 // — so the merge function MUST be safe to invoke multiple times with
 // different remote inputs.
 //
-// `deps.githubUtils` defaults to window.GitHubUtils. `deps.owner` /
-// `deps.repo` default to trexsatya/trexsatya.github.io (the owner's repo);
-// callers pass the signed-in user's repo when it is someone else's.
+// `deps.githubUtils` defaults to window.GitHubUtils. The target is always
+// given: `branch`, `deps.owner` and `deps.repo` (the signed-in user's repo);
+// a missing one throws before anything is read or written.
 export async function commitWithMerge({
-  filePath, branch = 'gh-pages', commitMessage, merge, maxAttempts = 5
+  filePath, branch, commitMessage, merge, maxAttempts = 5
 }, deps = {}) {
   const githubUtils = deps.githubUtils || (typeof window !== 'undefined' ? window.GitHubUtils : null)
   if (!githubUtils) throw new Error('commitWithMerge: no GitHubUtils available')
-  const owner = deps.owner || 'trexsatya'
-  const repo = deps.repo || 'trexsatya.github.io'
+  const { owner, repo } = deps
+  if (!owner || !repo || !branch) throw new Error('commitWithMerge: owner, repo and branch are required')
   const log = deps.log || ((msg) => { try { console.warn(msg) } catch (_) {} })
 
   let lastErr

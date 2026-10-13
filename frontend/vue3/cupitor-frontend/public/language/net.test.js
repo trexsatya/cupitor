@@ -174,6 +174,7 @@ describe("fetchWithRetry", () => {
 });
 
 describe("commitWithMerge", () => {
+  const TARGET = { owner: "alice", repo: "cupitor-data" };
   function makeUtils({ initialContent = "BASE\n", initialSha = "sha0", failAttempts = 0 } = {}) {
     let attempts = 0;
     let stored = { content: initialContent, sha: initialSha };
@@ -193,9 +194,12 @@ describe("commitWithMerge", () => {
     const utils = makeUtils();
     const merge = jest.fn(async (remote) => (remote || "") + "added\n");
     const out = await commitWithMerge({
-      filePath: "db/file.txt", commitMessage: "msg", merge
-    }, { githubUtils: utils, log: () => {} });
+      filePath: "db/file.txt", branch: "main", commitMessage: "msg", merge
+    }, { ...TARGET, githubUtils: utils, log: () => {} });
     expect(merge).toHaveBeenCalledWith("BASE\n");
+    expect(utils.getFile).toHaveBeenCalledWith("alice", "cupitor-data", "db/file.txt", "", "main");
+    expect(utils.putFile.mock.calls[0].slice(0, 3)).toEqual(["alice", "cupitor-data", "db/file.txt"]);
+    expect(utils.putFile.mock.calls[0][7]).toBe("main");
     expect(out).toBe("BASE\nadded\n");
     expect(utils.putFile).toHaveBeenCalledTimes(1);
   });
@@ -204,8 +208,8 @@ describe("commitWithMerge", () => {
     const utils = makeUtils({ failAttempts: 1 });
     const merge = jest.fn(async (remote) => (remote || "") + "x\n");
     const out = await commitWithMerge({
-      filePath: "f", commitMessage: "m", merge, maxAttempts: 3
-    }, { githubUtils: utils, log: () => {} });
+      filePath: "f", branch: "main", commitMessage: "m",merge, maxAttempts: 3
+    }, { ...TARGET, githubUtils: utils, log: () => {} });
     // Two getFile calls (initial + retry), two putFile attempts.
     expect(utils.getFile).toHaveBeenCalledTimes(2);
     expect(utils.putFile).toHaveBeenCalledTimes(2);
@@ -219,16 +223,16 @@ describe("commitWithMerge", () => {
       putFile: jest.fn(async () => { throw new Error("GitHub API error 401: unauthorized"); })
     };
     await expect(commitWithMerge({
-      filePath: "f", commitMessage: "m", merge: async () => "x", maxAttempts: 3
-    }, { githubUtils: utils, log: () => {} })).rejects.toThrow(/401/);
+      filePath: "f", branch: "main", commitMessage: "m",merge: async () => "x", maxAttempts: 3
+    }, { ...TARGET, githubUtils: utils, log: () => {} })).rejects.toThrow(/401/);
     expect(utils.putFile).toHaveBeenCalledTimes(1);
   });
 
   test("merge returning null throws a descriptive error", async () => {
     const utils = makeUtils();
     await expect(commitWithMerge({
-      filePath: "f", commitMessage: "m", merge: async () => null
-    }, { githubUtils: utils })).rejects.toThrow(/merge returned no content/);
+      filePath: "f", branch: "main", commitMessage: "m",merge: async () => null
+    }, { ...TARGET, githubUtils: utils })).rejects.toThrow(/merge returned no content/);
   });
 
   test("file-not-found is silent — merge sees null remote", async () => {
@@ -238,8 +242,8 @@ describe("commitWithMerge", () => {
     };
     const merge = jest.fn(async (remote) => `${remote}|done`);
     const out = await commitWithMerge({
-      filePath: "f", commitMessage: "m", merge
-    }, { githubUtils: utils, log: () => {} });
+      filePath: "f", branch: "main", commitMessage: "m",merge
+    }, { ...TARGET, githubUtils: utils, log: () => {} });
     expect(merge).toHaveBeenCalledWith(null);
     expect(out).toBe("null|done");
   });
@@ -249,8 +253,8 @@ describe("commitWithMerge", () => {
       getFile: jest.fn(async () => { throw new Error("GitHubProxy timeout (30000ms) for GET x"); }),
       putFile: jest.fn()
     };
-    await expect(commitWithMerge({ filePath: "f", commitMessage: "m", merge: async () => "x" },
-      { githubUtils: utils, log: () => {} })).rejects.toThrow(/timeout/);
+    await expect(commitWithMerge({ filePath: "f", branch: "main", commitMessage: "m", merge: async () => "x" },
+      { ...TARGET, githubUtils: utils, log: () => {} })).rejects.toThrow(/timeout/);
     expect(utils.putFile).not.toHaveBeenCalled();
   });
 
@@ -260,9 +264,23 @@ describe("commitWithMerge", () => {
       putFile: jest.fn(async () => { throw new Error("GitHub API error 409: conflict"); })
     };
     await expect(commitWithMerge({
-      filePath: "f", commitMessage: "m", merge: async () => "x", maxAttempts: 2
-    }, { githubUtils: utils, log: () => {} })).rejects.toThrow(/409/);
+      filePath: "f", branch: "main", commitMessage: "m",merge: async () => "x", maxAttempts: 2
+    }, { ...TARGET, githubUtils: utils, log: () => {} })).rejects.toThrow(/409/);
     expect(utils.putFile).toHaveBeenCalledTimes(2);
+  });
+
+  test("a missing owner, repo or branch throws before any read or write (no default repo)", async () => {
+    for (const [opts, deps] of [
+      [{ branch: "main" }, { repo: "r" }],
+      [{ branch: "main" }, { owner: "o" }],
+      [{}, { owner: "o", repo: "r" }],
+    ]) {
+      const utils = makeUtils();
+      await expect(commitWithMerge({ filePath: "f", commitMessage: "m", merge: async () => "x", ...opts },
+        { ...deps, githubUtils: utils, log: () => {} })).rejects.toThrow(/owner, repo and branch are required/);
+      expect(utils.getFile).not.toHaveBeenCalled();
+      expect(utils.putFile).not.toHaveBeenCalled();
+    }
   });
 
   test("throws when no GitHubUtils is available", async () => {
@@ -271,7 +289,7 @@ describe("commitWithMerge", () => {
     global.window = {};
     try {
       await expect(commitWithMerge({
-        filePath: "f", commitMessage: "m", merge: async () => "x"
+        filePath: "f", branch: "main", commitMessage: "m",merge: async () => "x"
       })).rejects.toThrow(/no GitHubUtils available/);
     } finally {
       global.window = originalWindow;

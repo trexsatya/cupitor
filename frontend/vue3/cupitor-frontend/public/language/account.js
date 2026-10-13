@@ -615,8 +615,8 @@ export async function runSetup({
 
 export const TOKEN_SESSION_KEY = 'cupitor:ghToken:session'
 export const TOKEN_REMEMBER_KEY = 'cupitor:ghToken'
-// When this device became a guest (ms). Captures buffered after it are the
-// guest's own and follow them into the account they sign in to.
+// When this device became a guest (ms). Written on sign-out, cleared once a
+// sign-in has carried the guest's captures (carryGuestCaptures).
 export const GUEST_SINCE_KEY = 'cupitor:guestSince'
 // The captured-subtitle buffer's base key (language.js scopes it per owner).
 export const CAPTURED_SUBTITLES_BASE = 'cupitor:capturedSubtitles'
@@ -682,31 +682,26 @@ function readList(s, key) {
   } catch (_) { return [] }
 }
 
-// A guest shares the device's plain storage keys with the owner, so after
-// signing in as anyone else their unsent captured subtitles would be left
-// behind under those keys. This moves the captures buffered since the
-// device became a guest (GUEST_SINCE_KEY) to `login`'s key; older ones (the
-// owner's) stay. Pending subtitle and vocabulary edits and recordings are
+// A guest's local data lives under the guest's own keys, so after signing in
+// their unsent captured subtitles would be left behind there. This moves
+// every capture in the guest's buffer to `login`'s key (the plain key for
+// the owner), skipping ids the target already has, and clears
+// GUEST_SINCE_KEY. Pending subtitle and vocabulary edits and recordings are
 // not moved: they are edits of the library the guest was reading, not new
-// data of their own. Clears the guest start once settled. Returns the
-// number moved; never throws.
+// data of their own. Returns the number moved; never throws.
 export function carryGuestCaptures(login, { storage } = {}) {
   const s = store(storage)
   if (!s || !isValidLogin(login)) return 0
   const settled = n => { dropKey(s, GUEST_SINCE_KEY); return n }
+  const from = scopedKey(CAPTURED_SUBTITLES_BASE, { login: null })
   const to = scopedKey(CAPTURED_SUBTITLES_BASE, { login })
-  const since = Number(readKey(s, GUEST_SINCE_KEY))
-  if (to === CAPTURED_SUBTITLES_BASE || !(since > 0)) return settled(0)
-  const from = readList(s, CAPTURED_SUBTITLES_BASE)
-  const moving = from.filter(c => c && typeof c.capturedAt === 'number' && c.capturedAt >= since)
+  const moving = readList(s, from).filter(c => c && typeof c === 'object')
   if (!moving.length) return settled(0)
   const target = readList(s, to)
   const have = new Set(target.map(c => c && c.id).filter(id => id != null))
   const fresh = moving.filter(c => c.id == null || !have.has(c.id))
   if (!writeKey(s, to, JSON.stringify(target.concat(fresh)))) return 0
-  const rest = from.filter(c => !moving.includes(c))
-  if (rest.length) writeKey(s, CAPTURED_SUBTITLES_BASE, JSON.stringify(rest))
-  else dropKey(s, CAPTURED_SUBTITLES_BASE)
+  dropKey(s, from)
   return settled(moving.length)
 }
 

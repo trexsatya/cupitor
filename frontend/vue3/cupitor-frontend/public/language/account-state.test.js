@@ -1,6 +1,6 @@
 import {
   ACCOUNT_KEY, OWNER, loadAccount, saveAccount, clearAccount, saveGuest,
-  normalizeUser, defaultOther, sources, scopedKey,
+  normalizeUser, defaultOther, sources, scopedKey, storageOwner, GUEST_STORAGE_OWNER,
 } from './account-state.js'
 
 function memStorage(init = {}) {
@@ -145,11 +145,22 @@ describe('sources', () => {
 })
 
 describe('scopedKey', () => {
-  test('owner and guest keep the plain key; other logins get a suffix', () => {
+  test('the owner (with or without a record) keeps the plain key; other logins get a suffix', () => {
     expect(scopedKey('cupitor:recordings', loadAccount(memStorage()))).toBe('cupitor:recordings')
-    expect(scopedKey('cupitor:recordings', loadAccount(GUEST_REC()))).toBe('cupitor:recordings')
     expect(scopedKey('cupitor:recordings', { login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null })).toBe('cupitor:recordings')
+    expect(scopedKey('cupitor:recordings', loadAccount(memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages' }) })))).toBe('cupitor:recordings')
     expect(scopedKey('cupitor:recordings', { login: 'alice', repo: null, branch: null, other: null })).toBe('cupitor:recordings@alice')
+  })
+  test('a guest has its own keys, never the plain (owner) ones nor any login\'s', () => {
+    expect(storageOwner(loadAccount(GUEST_REC()))).toBe(GUEST_STORAGE_OWNER)
+    expect(scopedKey('cupitor:recordings', loadAccount(GUEST_REC()))).toBe('cupitor:recordings@~guest')
+    // A record whose login is not valid reads as a guest.
+    expect(scopedKey('k', loadAccount(memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'not valid!' }) })))).toBe('k@~guest')
+    // A GitHub user literally called "guest" is not the guest.
+    expect(scopedKey('k', { login: 'guest', repo: null, branch: null, other: null })).toBe('k@guest')
+    // The legacy owner (no record) is not a guest.
+    expect(loadAccount(memStorage()).legacy).toBe(true)
+    expect(storageOwner(loadAccount(memStorage()))).toBe('trexsatya')
   })
   test('the owner in any case keeps the plain key; other logins are lowercased in the suffix', () => {
     expect(scopedKey('k', { login: 'TrexSatya', repo: null, branch: null, other: null })).toBe('k')

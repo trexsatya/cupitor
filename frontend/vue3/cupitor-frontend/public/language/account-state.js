@@ -227,11 +227,14 @@ export function sources(state) {
 }
 
 // Whose local data a storage key belongs to, lowercased so a login's case
-// never splits its data. A guest shares the device's plain keys with the
-// owner (that is where the pre-account data lives); any other login gets its
-// own suffix.
+// never splits its data. The owner, with or without a record (legacy), keeps
+// the plain keys (where the pre-account data lives); any other login gets
+// its own suffix, and a guest (a record with no valid login) gets
+// GUEST_STORAGE_OWNER, which no GitHub login can equal ('~' is never in
+// one), so a guest's data never mixes with the owner's or a user's.
+export const GUEST_STORAGE_OWNER = '~guest'
 export function storageOwner(state) {
-  return state.login ? state.login.toLowerCase() : OWNER.login
+  return state.login ? state.login.toLowerCase() : GUEST_STORAGE_OWNER
 }
 
 export function scopedKey(base, state = loadAccount()) {

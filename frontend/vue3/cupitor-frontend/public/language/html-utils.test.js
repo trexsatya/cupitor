@@ -99,3 +99,62 @@ describe("decodeHtmlTags edge cases", () => {
     expect(decodeHtmlTags(null, { "<b>": " _x_ " })).toBe("");
   });
 });
+
+describe("subtitle text from data files never becomes markup", () => {
+  const { subtitleText, safeSubtitleTag, safeSubtitleHtml } = require("./html-utils");
+  const ATTACKS = [
+    `<img src=x onerror="window.__pwned=1">`,
+    `&lt;img src=x onerror=window.__pwned=1&gt;`,
+    `<script>window.__pwned=1</script>`,
+    `<svg onload=window.__pwned=1>`,
+    `<a href="javascript:window.__pwned=1">x</a>`,
+    `<i onclick="window.__pwned=1">x</i>`,
+    `<font color="red" onmouseover="window.__pwned=1">x</font>`,
+    `<img src=x onerror=window.__pwned=1`,
+  ];
+  const render = html => { const d = document.createElement("div"); d.innerHTML = html; return d };
+  const noActiveMarkup = d => {
+    expect(d.querySelector("img, script, svg, a, iframe, [onerror], [onload], [onclick], [onmouseover]")).toBeNull();
+  };
+
+  test("subtitleText: plain text, entities shown as characters, tags dropped", () => {
+    expect(subtitleText("Dalen & Greken")).toBe("Dalen &amp; Greken");
+    expect(render(subtitleText("&#9654; Hej")).textContent).toBe("▶ Hej");
+    expect(subtitleText(`a"b'c`)).toBe("a&quot;b&#39;c");
+    expect(subtitleText(null)).toBe("");
+    for (const a of ATTACKS) noActiveMarkup(render(subtitleText(a)));
+  });
+
+  test("safeSubtitleTag keeps only bare formatting tags", () => {
+    expect(safeSubtitleTag("<i>")).toBe("<i>");
+    expect(safeSubtitleTag("</I>")).toBe("</i>");
+    expect(safeSubtitleTag("<b class=x onclick=y>")).toBe("<b>");
+    expect(safeSubtitleTag("<br/>")).toBe("<br>");
+    expect(safeSubtitleTag(`<font color="#ffff00">`)).toBe(`<font color="#ffff00">`);
+    expect(safeSubtitleTag(`<font color="red" onmouseover="x">`)).toBe(`<font color="red">`);
+    expect(safeSubtitleTag(`<font color="x&quot;onclick=y">`)).toBe(`<font color="x">`);
+    expect(safeSubtitleTag("<img src=x onerror=y>")).toBe("");
+    expect(safeSubtitleTag("<script>")).toBe("");
+    expect(safeSubtitleTag("</script>")).toBe("");
+  });
+
+  test("safeSubtitleHtml keeps formatting, neutralises everything else", () => {
+    expect(safeSubtitleHtml("<i>Hej</i> &amp; <b>då</b>")).toBe("<i>Hej</i> &amp; <b>då</b>");
+    expect(render(safeSubtitleHtml("&#9654; Hej")).textContent).toBe("▶ Hej");
+    for (const a of ATTACKS) {
+      const d = render(safeSubtitleHtml(a));
+      noActiveMarkup(d);
+    }
+    expect(window.__pwned).toBeUndefined();
+  });
+
+  test("the tag round trip used for clickable subtitle words puts back only safe tags", () => {
+    const text = `<i>Hej</i> <img src=x onerror="window.__pwned=1"> du`;
+    const [encoded, encodings] = encodeHtmlTags(text);
+    const words = encoded.split(" ").map(w => (Object.values(encodings).map(e => e.trim()).includes(w) ? w : subtitleText(w)));
+    const d = render(decodeHtmlTags(words.join(" "), encodings, safeSubtitleTag));
+    noActiveMarkup(d);
+    expect(d.querySelector("i").textContent.trim()).toBe("Hej");
+    expect(d.textContent).toContain("du");
+  });
+});
