@@ -126,6 +126,7 @@ import {
   hasSelf as _dsHasSelf,
   langFromLocation as _dsLangFromLocation,
 } from './data-source.js';
+import { scopedKey as _scopedKey } from './account-state.js';
 import {
   isVirtual as _coreIsVirtual,
   isManualItem as _isManualItem,
@@ -1644,7 +1645,7 @@ async function commitVocabularyToGithub() {
 // we replay the buffer onto the freshly-fetched remote vocabulary; on a
 // successful commit we drop it. The buffer is keyed by language so opening
 // a different language tab doesn't replay foreign categories.
-const PENDING_VOCAB_KEY = 'cupitor:pendingVocab'
+const PENDING_VOCAB_KEY = _scopedKey('cupitor:pendingVocab')
 function _loadPendingVocab() {
   try {
     const raw = localStorage.getItem(PENDING_VOCAB_KEY)
@@ -2544,7 +2545,7 @@ const PRACTICE_LOG_OPENED_KEY = 'cupitor:practiceLog:openedOnce'
 
 function _practiceLogLocalKey() {
   const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || 'default'
-  return `cupitor:practiceLog:${lang}`
+  return _scopedKey(`cupitor:practiceLog:${lang}`)
 }
 
 function _practiceLogGithubPath() {
@@ -4458,7 +4459,7 @@ let _cacheDbDisabled = false
 function _cacheDbName() {
   // Per-language DB so swedish/spanish caches don't trample each other.
   const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || 'default'
-  return `${CUPITOR_CACHE_DB_PREFIX}-${lang}`
+  return _scopedKey(`${CUPITOR_CACHE_DB_PREFIX}-${lang}`)
 }
 
 function _openSubtitlesCache() {
@@ -5803,7 +5804,7 @@ async function _saveSubtitleEdit(link, langCode, lineIndex, newText, opts = null
 // buffer in one commit using GitHubUtils.commitMultipleFiles. This stops
 // per-line edits from racking up dozens of commits when the user fixes
 // translations in bulk.
-const SRT_EDITS_KEY = 'cupitor:pendingSrtEdits'
+const SRT_EDITS_KEY = _scopedKey('cupitor:pendingSrtEdits')
 const SRT_EDITS_FLUSH_MS = 10000  // 10s after the last edit
 let _srtEditsFlushTimer = null
 
@@ -9727,7 +9728,7 @@ function openChannelManagerDialog() {
 }
 
 // --- Captured subtitle buffer (localStorage) ---
-const CAPTURED_SUBTITLES_KEY = 'cupitor:capturedSubtitles'
+const CAPTURED_SUBTITLES_KEY = _scopedKey('cupitor:capturedSubtitles')
 
 function loadCapturedBuffer() {
   try {
@@ -10531,16 +10532,16 @@ async function playMediaSlice(url, start, end, source) {
 //   cupitor:recording:current — name of the currently-active recording
 //   cupitor:recording:state   — idle | recording | paused
 //   cupitor:recording (legacy)— single buffer; migrated to "Default" on load
-const REC_KEY            = 'cupitor:recording'           // legacy
-const REC_STATE_KEY      = 'cupitor:recording:state'
-const REC_COLLECTION_KEY = 'cupitor:recordings'
-const REC_CURRENT_KEY    = 'cupitor:recording:current'
+const REC_KEY            = _scopedKey('cupitor:recording')           // legacy
+const REC_STATE_KEY      = _scopedKey('cupitor:recording:state')
+const REC_COLLECTION_KEY = _scopedKey('cupitor:recordings')
+const REC_CURRENT_KEY    = _scopedKey('cupitor:recording:current')
 // The active playlist's stable id, when it has one. Only the app's own
 // playlists do; they arrive carrying `extId` and keep it across a rename,
 // whereas the name above is just what they were called last time. Absent for
 // playlists this page owns, where the name IS the identity and a rename here
 // rewrites it in place.
-const REC_CURRENT_EXT_KEY = 'cupitor:recording:currentExtId'
+const REC_CURRENT_EXT_KEY = _scopedKey('cupitor:recording:currentExtId')
 
 // Which playlist a remembered reference points at in `coll` now.
 //
@@ -10661,7 +10662,7 @@ function _markCapturedButtons() {
 }
 window._markCapturedButtons = _markCapturedButtons
 
-const REC_DIRTY_KEY = 'cupitor:recordings:dirty'
+const REC_DIRTY_KEY = _scopedKey('cupitor:recordings:dirty')
 
 // External (native-bridge) playlists are owned by the Cupitor app and
 // re-supplied on every load, so they must NOT be written to localStorage or
@@ -11214,7 +11215,7 @@ async function loadRecordingsFromGithub() {
 // apart from "added there", and finds the playlists changed on BOTH sides —
 // those are put to the person rather than merged behind their back.
 // Per file, since each language syncs its own recordings.json.
-function _recordingsBaseKey() { return 'cupitor:recordings:base:' + recordingsFilePath() }
+function _recordingsBaseKey() { return _scopedKey('cupitor:recordings:base:' + recordingsFilePath()) }
 function _loadRecordingsBase() {
   try {
     const raw = localStorage.getItem(_recordingsBaseKey())
@@ -17115,7 +17116,7 @@ function _shuffleQueue(q) { _coreShuffleQueue(q) }
 // Two entries per playlist (play + practice) — so resuming Play vs Practice
 // on the same playlist tracks independent positions. Legacy (single object)
 // shape is migrated on first load.
-const REC_LAST_PLAYED_KEY = 'cupitor:recLastPlayed'
+const REC_LAST_PLAYED_KEY = _scopedKey('cupitor:recLastPlayed')
 // Thin wrappers — pure cores in ./play-queue.js. localStorage I/O and
 // confirm() stay here; the cores take/return plain JS objects.
 function _loadLastPlayedMap() {
