@@ -215,6 +215,8 @@ export function accountPanelVM({
     message: message || null,
     notices: otherNoticesOf(state, null, notices),
     otherOptions,
+    // A visitor already reads the owner's library and cannot add another.
+    showOtherPicker: !visitor,
     setupSteps,
     setupError: err ? { step: err.step, code: err.code, text: setupErrorText(err) } : null,
     showSetup,
@@ -357,9 +359,11 @@ export function renderAccountPanel() {
     if (vm.showSetup) $s.append($('<p></p>').append(btn('acctSetup', vm.setupLabel, vm.busy)))
     $root.append($s)
   }
-  const $sel = $('<select id="acctOther"></select>').prop('disabled', vm.busy)
-  vm.otherOptions.forEach(o => $sel.append($('<option></option>').val(o.value).text(o.label).prop('selected', o.selected)))
-  $root.append($('<div class="acct-other"></div>').append($('<label></label>').append('Also load data from ', $sel)))
+  if (vm.showOtherPicker) {
+    const $sel = $('<select id="acctOther"></select>').prop('disabled', vm.busy)
+    vm.otherOptions.forEach(o => $sel.append($('<option></option>').val(o.value).text(o.label).prop('selected', o.selected)))
+    $root.append($('<div class="acct-other"></div>').append($('<label></label>').append('Also load data from ', $sel)))
+  }
   if (vm.showSignOut) $root.append($('<p></p>').append(btn('acctSignOut', 'Sign out', vm.busy)))
   $d.empty().append($root)
 }

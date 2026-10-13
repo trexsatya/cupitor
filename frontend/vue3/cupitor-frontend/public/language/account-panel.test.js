@@ -136,6 +136,11 @@ describe('accountPanelVM: boot check', () => {
     expect(vm.showTokenForm).toBe(true)
     expect(vm.showSetup).toBe(false)
     expect(vm.showSignOut).toBe(false)
+    expect(vm.showOtherPicker).toBe(false)
+  })
+  test('the "Also load data from" picker shows for everyone but a visitor', () => {
+    expect(accountPanelVM({ state: legacy, users, reconcile: 'ok' }).showOtherPicker).toBe(true)
+    expect(accountPanelVM({ state: legacy, users, reconcile: 'no_token', inApp: true }).showOtherPicker).toBe(true)
   })
   test('the visitor line names the owner by login when the users list has no name for them', () => {
     const vm = accountPanelVM({ state: legacy, users: [{ login: 'trexsatya', repo: 'trexsatya.github.io' }], reconcile: 'no_token' })
