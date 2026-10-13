@@ -532,6 +532,8 @@ function pausePlayback() {
   _pausedAt = performance.now()
   _playTimers.forEach(t => { clearTimeout(t.id); t.remaining = Math.max(0, t.remaining - (_pausedAt - t.start)) })
   document.body.classList.add('play-paused')
+  // Others that keep time (a playback session's audio) pause with it.
+  window.dispatchEvent(new CustomEvent('playpause', { detail: { paused: true } }))
 }
 
 function resumePlayback() {
@@ -544,6 +546,7 @@ function resumePlayback() {
   held.forEach(f => _resumedFrames.set(f.id, window.requestAnimationFrame(f.cb)))
   _playTimers.forEach(t => t.arm())
   document.body.classList.remove('play-paused')
+  window.dispatchEvent(new CustomEvent('playpause', { detail: { paused: false } }))
 }
 
 // The time playback has run, in ms: performance.now() without the paused stretches.

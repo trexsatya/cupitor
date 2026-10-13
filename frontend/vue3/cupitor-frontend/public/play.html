@@ -42,6 +42,8 @@
         Object.assign(window, Layers);
         import * as Flow from '/play-flow.js';
         Object.assign(window, Flow);
+        import { createPlaybackSession } from '/play-session.js';
+        window.createPlaybackSession = createPlaybackSession;
     </script>
     <script type="text/javascript" src="/algo.visual.toolbox.js"></script>
     <script type="text/javascript" src="/fabric.play.js"></script>
@@ -3087,6 +3089,8 @@ body.screen-recording #screenRecIndicator, body.screen-recording #play-line-badg
 
     // Esc during playback: the line in progress finishes, the rest are skipped.
     function stopScriptPlayback() {
+        // A playback session (play-session.js) stops too, before anything resumes.
+        window.dispatchEvent(new CustomEvent('playstop'));
         resumePlayback(); // a paused line finishes too
         window._stopPlayback = true;
         window.isRecordingPlayback = false;
