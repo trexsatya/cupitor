@@ -4,7 +4,8 @@
  * via the GitHub REST API, using the browser's native fetch.
  *
  * Exposes window.GitHubUtils with:
- *   getGHToken()             - Prompt/cache a GitHub PAT in localStorage
+ *   getGHToken()             - The in-memory GitHub token (prompts for one when absent, unless suppressed)
+ *   setGHToken / clearGHToken / hasGHToken - set, drop or check it without prompting
  *   getFile(...)             - Fetch file content + current blob SHA
  *   putFile(...)             - Create or update a file (raw)
  *   putFileWithContent(...)  - Write specific content without a prior read
@@ -13,9 +14,10 @@
 (function (global) {
   const GITHUB_API = "https://api.github.com";
 
-  // Token is kept only in memory for this page session.
-  // It is intentionally NOT persisted to localStorage or any other
-  // storage to reduce the risk of XSS token theft.
+  // This module keeps the token in memory only. Whether a token pasted in a
+  // browser is also kept (sessionStorage, or localStorage when remembered)
+  // is the account module's choice (language/account.js); it hands the
+  // token over with setGHToken.
   let _cachedToken = null;
 
   function getGHToken() {
@@ -34,6 +36,11 @@
 
   function clearGHToken() {
     _cachedToken = null;
+  }
+
+  /** Whether a token is in memory. Never prompts. */
+  function hasGHToken() {
+    return !!_cachedToken;
   }
 
   /** Set the token programmatically (e.g. injected by a native webview). */
@@ -479,6 +486,6 @@
     throw lastErr || new Error("commitMultipleFiles: exhausted retries");
   }
 
-  global.GitHubUtils = { getGHToken, setGHToken, clearGHToken, request, getFile, putFile, putFileWithContent, updateFile, deleteFile, deleteFileWithLookup, commitMultipleFiles };
+  global.GitHubUtils = { getGHToken, setGHToken, clearGHToken, hasGHToken, request, getFile, putFile, putFileWithContent, updateFile, deleteFile, deleteFileWithLookup, commitMultipleFiles };
 
 })(window);

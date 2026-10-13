@@ -112,6 +112,23 @@ describe('request', () => {
     expect(headers.Authorization).toBeUndefined()
   })
 
+  test('hasGHToken tells whether a token is in memory, without prompting', () => {
+    const prompt = jest.spyOn(window, 'prompt').mockImplementation(() => 'typed')
+    window.GitHubUtils.clearGHToken()
+    expect(window.GitHubUtils.hasGHToken()).toBe(false)
+    window.GitHubUtils.setGHToken(' ghp_x ')
+    expect(window.GitHubUtils.hasGHToken()).toBe(true)
+    expect(prompt).not.toHaveBeenCalled()
+    prompt.mockRestore()
+  })
+
+  test('a token set with setGHToken is the one requests send', async () => {
+    window.GitHubUtils.setGHToken(' ghp_set ')
+    fakeGitHub({ 'GET /user': reply(200, { login: 'alice' }) })
+    await window.GitHubUtils.request('GET', '/user')
+    expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer ghp_set')
+  })
+
   test('a 401 raises cupitorGithubUnauthorized on window before throwing', async () => {
     const seen = jest.fn()
     window.addEventListener('cupitorGithubUnauthorized', seen)

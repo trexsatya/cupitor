@@ -8,7 +8,7 @@
 import {
   OWNER, USERS_REPO, USERS_CACHE_KEY, DATA_REPO, TEMPLATE_REPO,
   normalizeUser, isOwnerLogin, sameLogin, isValidLogin, isValidRepo, cleanName, defaultOther,
-  loadAccount, saveAccount,
+  loadAccount, saveAccount, saveGuest, sources, storageOwner, scopedKey,
 } from './account-state.js'
 import { fetchWithRetry } from './net.js'
 
@@ -605,4 +605,235 @@ export async function runSetup({
   }
   const status = await ensureListing({ login, name, repo: r.repo, branch: r.branch, gh, sleep, now, report })
   return { status, state: kept }
+}
+
+// ---- the browser's token ----
+// A token pasted in a browser lives in sessionStorage (this tab only; it
+// survives the reload that applies the account) unless "remember on this
+// device" puts it in localStorage. Inside the app the webapp never holds a
+// token: GitHubProxy attaches the app's own.
+
+export const TOKEN_SESSION_KEY = 'cupitor:ghToken:session'
+export const TOKEN_REMEMBER_KEY = 'cupitor:ghToken'
+// When this device became a guest (ms). Captures buffered after it are the
+// guest's own and follow them into the account they sign in to.
+export const GUEST_SINCE_KEY = 'cupitor:guestSince'
+// The captured-subtitle buffer's base key (language.js scopes it per owner).
+export const CAPTURED_SUBTITLES_BASE = 'cupitor:capturedSubtitles'
+const UNAUTHORIZED_EVENT = 'cupitorGithubUnauthorized'
+
+// Reaching a global storage can throw (SecurityError when site data is
+// blocked), and so can every call on it.
+function globalStorage(name) {
+  try { return typeof globalThis[name] !== 'undefined' ? globalThis[name] : null } catch (_) { return null }
+}
+function defaultStorages() {
+  return { session: globalStorage('sessionStorage'), local: globalStorage('localStorage') }
+}
+const readKey = (s, k) => { try { return s ? s.getItem(k) : null } catch (_) { return null } }
+const writeKey = (s, k, v) => { try { if (!s) return false; s.setItem(k, v); return true } catch (_) { return false } }
+const dropKey = (s, k) => { try { if (s) s.removeItem(k) } catch (_) {} }
+
+function defaultGhUtils() { return typeof window !== 'undefined' ? window.GitHubUtils || null : null }
+// Inside the Cupitor app every GitHub request goes through GitHubProxy.
+function inApp() { return typeof GitHubProxy !== 'undefined' }
+const holdsToken = u => !!(u && typeof u.hasGHToken === 'function' && u.hasGHToken())
+
+export function storedToken(storages = defaultStorages()) {
+  return readKey(storages.local, TOKEN_REMEMBER_KEY) || readKey(storages.session, TOKEN_SESSION_KEY) || null
+}
+
+// Keeps the token in one place only. Returns whether it reads back.
+export function rememberToken(token, remember, storages = defaultStorages()) {
+  if (remember) { writeKey(storages.local, TOKEN_REMEMBER_KEY, token); dropKey(storages.session, TOKEN_SESSION_KEY) }
+  else { writeKey(storages.session, TOKEN_SESSION_KEY, token); dropKey(storages.local, TOKEN_REMEMBER_KEY) }
+  const other = remember ? readKey(storages.session, TOKEN_SESSION_KEY) : readKey(storages.local, TOKEN_REMEMBER_KEY)
+  return storedToken(storages) === token && other == null
+}
+
+export function forgetToken(storages = defaultStorages()) {
+  dropKey(storages.local, TOKEN_REMEMBER_KEY); dropKey(storages.session, TOKEN_SESSION_KEY)
+}
+
+// Puts the stored token into GitHubUtils; true when there was one.
+export function applyStoredToken(ghUtils = defaultGhUtils(), storages = defaultStorages()) {
+  const t = storedToken(storages)
+  if (t && ghUtils) ghUtils.setGHToken(t)
+  return !!t
+}
+
+const snapshotTokens = storages => ({ local: readKey(storages.local, TOKEN_REMEMBER_KEY), session: readKey(storages.session, TOKEN_SESSION_KEY) })
+function restoreTokens(storages, snap) {
+  if (snap.local == null) dropKey(storages.local, TOKEN_REMEMBER_KEY); else writeKey(storages.local, TOKEN_REMEMBER_KEY, snap.local)
+  if (snap.session == null) dropKey(storages.session, TOKEN_SESSION_KEY); else writeKey(storages.session, TOKEN_SESSION_KEY, snap.session)
+}
+
+// While a sign-in or the boot check runs, the 401s it causes are its own to
+// handle (a token being tried, or the check that finds the token gone), so
+// the 401 handler stays out of the way.
+let _quiet = 0
+
+// ---- a guest's captures ----
+
+function readList(s, key) {
+  try {
+    const v = JSON.parse(readKey(s, key) || '[]')
+    return Array.isArray(v) ? v : []
+  } catch (_) { return [] }
+}
+
+// A guest shares the device's plain storage keys with the owner, so after
+// signing in as anyone else their unsent captured subtitles would be left
+// behind under those keys. This moves the captures buffered since the
+// device became a guest (GUEST_SINCE_KEY) to `login`'s key; older ones (the
+// owner's) stay. Pending subtitle and vocabulary edits and recordings are
+// not moved: they are edits of the library the guest was reading, not new
+// data of their own. Clears the guest start once settled. Returns the
+// number moved; never throws.
+export function carryGuestCaptures(login, { storage } = {}) {
+  const s = store(storage)
+  if (!s || !isValidLogin(login)) return 0
+  const settled = n => { dropKey(s, GUEST_SINCE_KEY); return n }
+  const to = scopedKey(CAPTURED_SUBTITLES_BASE, { login })
+  const since = Number(readKey(s, GUEST_SINCE_KEY))
+  if (to === CAPTURED_SUBTITLES_BASE || !(since > 0)) return settled(0)
+  const from = readList(s, CAPTURED_SUBTITLES_BASE)
+  const moving = from.filter(c => c && typeof c.capturedAt === 'number' && c.capturedAt >= since)
+  if (!moving.length) return settled(0)
+  const target = readList(s, to)
+  const have = new Set(target.map(c => c && c.id).filter(id => id != null))
+  const fresh = moving.filter(c => c.id == null || !have.has(c.id))
+  if (!writeKey(s, to, JSON.stringify(target.concat(fresh)))) return 0
+  const rest = from.filter(c => !moving.includes(c))
+  if (rest.length) writeKey(s, CAPTURED_SUBTITLES_BASE, JSON.stringify(rest))
+  else dropKey(s, CAPTURED_SUBTITLES_BASE)
+  return settled(moving.length)
+}
+
+// ---- sign in / out ----
+
+// Browser only. Checks the token with GET /user, keeps it (session, or
+// local when `remember`), records the account and returns the saved state;
+// the caller reloads the page so it boots with the new sources and keys.
+// On any failure the token that was in use before is back in place, nothing
+// is recorded, and the error is thrown: "did not accept" for a 401, the
+// GitHub error otherwise, or one saying the browser could not keep the
+// token or the account.
+export async function signInWithToken(token, {
+  remember = false, gh, ghUtils = defaultGhUtils(), storages = defaultStorages(), storage,
+} = {}) {
+  const t = String(token || '').trim()
+  if (!t) throw new Error('No token given')
+  if (inApp()) throw new Error('In the app, sign in through the app')
+  if (!ghUtils) throw new Error('account: GitHubUtils is not loaded')
+  const api = gh || defaultGh()
+  const prev = loadAccount(storage)
+  const before = snapshotTokens(storages)
+  _quiet++
+  try {
+    ghUtils.setGHToken(t)
+    const me = await fetchLogin(api)
+    if (!me) throw new Error('GitHub did not accept this token')
+    if (!rememberToken(t, remember, storages)) {
+      throw new Error('This browser could not keep the token. Allow site data for this page and try again.')
+    }
+    await adoptLogin(me, { gh: api, storage })
+    const saved = loadAccount(storage)
+    if (saved.legacy || !sameLogin(saved.login, me.login)) {
+      throw new Error(`GitHub knows you as ${me.login}, but this browser could not save your account. Allow site data for this page and try again.`)
+    }
+    if (!prev.legacy && !prev.login) carryGuestCaptures(me.login, { storage })
+    return saved
+  } catch (e) {
+    restoreTokens(storages, before)
+    const p = storedToken(storages)
+    if (p) ghUtils.setGHToken(p); else ghUtils.clearGHToken()
+    throw e
+  } finally {
+    _quiet--
+  }
+}
+
+// Back to guest: forgets the browser's token and writes the explicit guest
+// record (never removes it: no record reads as the legacy owner). Pending-
+// edit keys are per owner and stay where they are, so the same person
+// signing in again finds their unsent edits. Returns true when the record
+// changed (the caller reloads), false when it was a guest already or the
+// guest record could not be written.
+export function signOut({ ghUtils = defaultGhUtils(), storages = defaultStorages(), storage, now = Date.now } = {}) {
+  if (ghUtils) ghUtils.clearGHToken()
+  forgetToken(storages)
+  const was = loadAccount(storage)
+  if (!was.legacy && !was.login) return false
+  if (!saveGuest(storage)) return false
+  writeKey(store(storage), GUEST_SINCE_KEY, String(now()))
+  return true
+}
+
+// A 401 anywhere means the token is gone: sign out and tell the caller once
+// (it reloads so the page boots as a guest). The event can come several
+// times; a guest's 401s (e.g. GET /user with no token) change nothing and
+// are not passed on, so they never cause a reload. Returns an uninstaller.
+export function installUnauthorizedHandler({
+  ghUtils = defaultGhUtils(), storages = defaultStorages(), storage, onSignedOut = () => {},
+  target = (typeof window !== 'undefined' ? window : null), now = Date.now,
+} = {}) {
+  if (!target) return () => {}
+  let done = false
+  const onEvent = () => {
+    if (done || _quiet > 0) return
+    if (!signOut({ ghUtils, storages, storage, now })) return
+    done = true
+    onSignedOut()
+  }
+  target.addEventListener(UNAUTHORIZED_EVENT, onEvent)
+  return () => target.removeEventListener(UNAUTHORIZED_EVENT, onEvent)
+}
+
+// Same sources and same local keys: the running page is still right.
+const sameView = (a, b) =>
+  JSON.stringify(sources(a)) === JSON.stringify(sources(b)) && storageOwner(a) === storageOwner(b)
+
+// At boot: make the stored record agree with the token actually in use (the
+// app's, via GitHubProxy, or the browser's stored or in-memory one). Returns
+//   'reload'    the record changed; boot again with the new sources and keys
+//   'ok'        the record already matches (a guest with no token is 'ok')
+//   'no_token'  a browser with no token at all (none stored or in memory)
+//               and a record that is not a guest (legacy owner, owner or
+//               any login). Nothing is asked or changed — e.g. a second tab
+//               without the first tab's session token. Saving would hit the
+//               legacy PAT prompt or a 401: show "Paste your GitHub token
+//               to save".
+//   'unchecked' GitHub could not be asked (network, rate limit, proxy
+//               timeout) or the record could not be written; the current
+//               record stays, so the legacy owner keeps saving
+// Only a 401 from GET /user signs out here. A legacy owner (no record) is
+// resolved when the check completes: to the login's record, or on a 401 to
+// the explicit guest record.
+export async function reconcileLogin({
+  gh, ghUtils = defaultGhUtils(), storages = defaultStorages(), storage, bridgeAvailable = inApp(), now = Date.now,
+} = {}) {
+  const state = loadAccount(storage)
+  const guest = !state.legacy && !state.login
+  const toGuest = () => {
+    const changed = signOut({ ghUtils, storages, storage, now })
+    return guest ? 'ok' : changed ? 'reload' : 'unchecked'
+  }
+  const canAsk = bridgeAvailable || applyStoredToken(ghUtils, storages) || holdsToken(ghUtils)
+  if (!canAsk) return guest ? 'ok' : 'no_token'
+  _quiet++
+  try {
+    const api = gh || defaultGh()
+    let me
+    try { me = await fetchLogin(api) } catch (_) { return 'unchecked' }
+    if (!me) return toGuest()
+    if (!state.legacy && sameLogin(me.login, state.login)) return 'ok'
+    try { await adoptLogin(me, { gh: api, storage }) } catch (_) { return 'unchecked' }
+    const saved = loadAccount(storage)
+    if (saved.legacy || !sameLogin(saved.login, me.login)) return 'unchecked'
+    if (guest) carryGuestCaptures(me.login, { storage })
+    return sameView(state, saved) ? 'ok' : 'reload'
+  } finally {
+    _quiet--
+  }
 }

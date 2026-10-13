@@ -3,6 +3,8 @@ import {
   parseUsers, cachedUsers, fetchUsers, ownerEntry, USERS_RAW_URL,
   MAX_USERS, MAX_USERS_BYTES, fetchLogin, adoptLogin, defaultGh,
   ensureDataRepo, SetupError, listingStatus, ensureListing, runSetup,
+  TOKEN_SESSION_KEY, TOKEN_REMEMBER_KEY, GUEST_SINCE_KEY, storedToken, rememberToken, forgetToken, applyStoredToken,
+  signInWithToken, signOut, reconcileLogin, installUnauthorizedHandler, carryGuestCaptures,
 } from './account.js'
 
 export function memStorage(init = {}) {
@@ -1118,5 +1120,368 @@ describe('runSetup', () => {
     const storage = memStorage()
     await expect(runSetup({ login: null, gh: fakeGh({}), storage })).rejects.toMatchObject({ step: 'repo', code: 'bad_login' })
     expect(storage.dump()).toEqual({})
+  })
+})
+
+// ---- browser token, sign-in / sign-out, 401, boot reconcile ----
+
+function fakeGhUtils(initial = null) {
+  let token = initial
+  return {
+    setGHToken: t => { token = t ? String(t).trim() : null },
+    clearGHToken: () => { token = null },
+    hasGHToken: () => !!token,
+    get token() { return token },
+  }
+}
+const storages = () => ({ session: memStorage(), local: memStorage() })
+// A storage whose writes to `badKey` (or every key when omitted) throw.
+function brokenStorage(init = {}, badKey) {
+  const s = memStorage(init)
+  const setItem = s.setItem
+  s.setItem = (k, v) => { if (!badKey || k === badKey) throw new Error('QuotaExceededError'); setItem(k, v) }
+  return s
+}
+// Like fakeGh, but a 401 raises cupitorGithubUnauthorized on `target` before
+// throwing, as GitHubUtils does.
+function loudGh(routes, target) {
+  const g = fakeGh(routes)
+  const request = g.request
+  g.request = async (...a) => {
+    try { return await request(...a) } catch (e) {
+      if (/GitHub API error 401\b/.test(e.message)) target.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+      throw e
+    }
+  }
+  return g
+}
+const ALICE_REC = JSON.stringify({ login: 'alice', repo: 'cupitor-data', branch: 'main' })
+const ALICE_MARKER = { 'GET /repos/alice/cupitor-data/contents/cupitor.json': { sha: 's' } }
+const capture = (id, capturedAt) => ({ id, capturedAt, detail: { videoId: 'v' + id } })
+
+describe('browser token', () => {
+  test('session by default, local when remembered, forget clears both', () => {
+    const s = storages()
+    expect(rememberToken('ghp_1', false, s)).toBe(true)
+    expect(s.session.getItem(TOKEN_SESSION_KEY)).toBe('ghp_1'); expect(s.local.getItem(TOKEN_REMEMBER_KEY)).toBeNull()
+    expect(rememberToken('ghp_2', true, s)).toBe(true)
+    expect(s.local.getItem(TOKEN_REMEMBER_KEY)).toBe('ghp_2'); expect(s.session.getItem(TOKEN_SESSION_KEY)).toBeNull()
+    expect(storedToken(s)).toBe('ghp_2')
+    rememberToken('ghp_3', false, s)
+    expect(s.local.getItem(TOKEN_REMEMBER_KEY)).toBeNull(); expect(storedToken(s)).toBe('ghp_3')
+    forgetToken(s)
+    expect(storedToken(s)).toBeNull()
+    expect(s.session.dump()).toEqual({}); expect(s.local.dump()).toEqual({})
+  })
+
+  test('a storage that refuses the write → false; unreadable storages read as no token', () => {
+    expect(rememberToken('ghp_1', false, { session: brokenStorage(), local: memStorage() })).toBe(false)
+    expect(rememberToken('ghp_1', true, { session: memStorage(), local: null })).toBe(false)
+    const throwing = { getItem: () => { throw new Error('SecurityError') }, setItem: () => { throw new Error('x') }, removeItem: () => { throw new Error('x') } }
+    expect(storedToken({ session: throwing, local: throwing })).toBeNull()
+    expect(() => forgetToken({ session: throwing, local: throwing })).not.toThrow()
+    // a copy that cannot be removed from the other storage is a failure, not two copies
+    const stuck = memStorage({ [TOKEN_SESSION_KEY]: 'old' }); stuck.removeItem = () => { throw new Error('x') }
+    expect(rememberToken('ghp_2', true, { session: stuck, local: memStorage() })).toBe(false)
+  })
+
+  test('applyStoredToken hands the token to GitHubUtils', () => {
+    const s = storages(); const u = fakeGhUtils()
+    expect(applyStoredToken(u, s)).toBe(false)
+    expect(u.token).toBeNull()
+    rememberToken('ghp_3', false, s)
+    expect(applyStoredToken(u, s)).toBe(true); expect(u.token).toBe('ghp_3')
+  })
+})
+
+describe('signInWithToken', () => {
+  afterEach(() => { delete global.GitHubProxy })
+
+  test('a good token signs in, is kept and used for requests', async () => {
+    const s = storages(); const u = fakeGhUtils(); const storage = memStorage()
+    const gh = fakeGh({ 'GET /user': { login: 'alice', name: 'Alice' }, ...ALICE_MARKER })
+    const state = await signInWithToken(' ghp_ok ', { remember: true, gh, ghUtils: u, storages: s, storage })
+    expect(state).toMatchObject({ login: 'alice', repo: 'cupitor-data', branch: 'main' })
+    expect(loadAccount(storage)).toEqual(state)
+    expect(storedToken(s)).toBe('ghp_ok'); expect(s.session.getItem(TOKEN_SESSION_KEY)).toBeNull(); expect(u.token).toBe('ghp_ok')
+  })
+
+  test('a token GitHub refuses is dropped and the previous one is back in use', async () => {
+    const s = storages(); const u = fakeGhUtils(); const storage = memStorage()
+    const bad = fakeGh({ 'GET /user': err(401) })
+    await expect(signInWithToken('ghp_bad', { gh: bad, ghUtils: u, storages: s, storage })).rejects.toThrow(/did not accept/)
+    expect(u.token).toBeNull(); expect(storedToken(s)).toBeNull(); expect(storage.dump()).toEqual({})
+
+    rememberToken('ghp_alice', true, s); u.setGHToken('ghp_alice')
+    const aliceStorage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    await expect(signInWithToken('ghp_bad', { remember: false, gh: bad, ghUtils: u, storages: s, storage: aliceStorage })).rejects.toThrow(/did not accept/)
+    expect(u.token).toBe('ghp_alice'); expect(storedToken(s)).toBe('ghp_alice')
+    expect(s.session.getItem(TOKEN_SESSION_KEY)).toBeNull()
+    expect(loadAccount(aliceStorage).login).toBe('alice')
+  })
+
+  test('GitHub unreachable → the error is passed on and nothing changes', async () => {
+    const s = storages(); const u = fakeGhUtils(); const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    rememberToken('ghp_alice', false, s); u.setGHToken('ghp_alice')
+    await expect(signInWithToken('ghp_new', { gh: fakeGh({ 'GET /user': err(502) }), ghUtils: u, storages: s, storage })).rejects.toThrow(/502/)
+    expect(u.token).toBe('ghp_alice'); expect(storedToken(s)).toBe('ghp_alice'); expect(loadAccount(storage).login).toBe('alice')
+    // the marker check failing is the same
+    const gh = fakeGh({ 'GET /user': { login: 'bob' }, 'GET /repos/bob/cupitor-data/contents/cupitor.json': err(500) })
+    await expect(signInWithToken('ghp_bob', { remember: true, gh, ghUtils: u, storages: s, storage })).rejects.toThrow(/500/)
+    expect(u.token).toBe('ghp_alice'); expect(storedToken(s)).toBe('ghp_alice'); expect(s.local.getItem(TOKEN_REMEMBER_KEY)).toBeNull()
+    expect(loadAccount(storage).login).toBe('alice')
+  })
+
+  test('an account record that cannot be saved is an error, and the token is not kept', async () => {
+    const s = storages(); const u = fakeGhUtils(); const storage = brokenStorage({}, ACCOUNT_KEY)
+    const gh = fakeGh({ 'GET /user': { login: 'alice' }, ...ALICE_MARKER })
+    await expect(signInWithToken('ghp_ok', { remember: true, gh, ghUtils: u, storages: s, storage })).rejects.toThrow(/could not save/)
+    expect(u.token).toBeNull(); expect(storedToken(s)).toBeNull()
+    expect(loadAccount(storage).legacy).toBe(true)
+  })
+
+  test('a token the browser cannot keep is an error before anything is recorded', async () => {
+    const s = { session: brokenStorage(), local: memStorage() }; const u = fakeGhUtils(); const storage = memStorage()
+    const gh = fakeGh({ 'GET /user': { login: 'alice' }, ...ALICE_MARKER })
+    await expect(signInWithToken('ghp_ok', { gh, ghUtils: u, storages: s, storage })).rejects.toThrow(/could not keep/)
+    expect(u.token).toBeNull(); expect(storage.dump()).toEqual({})
+  })
+
+  test('no token, or inside the app → refused without a request', async () => {
+    const u = fakeGhUtils(); const gh = fakeGh({})
+    await expect(signInWithToken('  ', { gh, ghUtils: u, storages: storages(), storage: memStorage() })).rejects.toThrow(/No token/)
+    global.GitHubProxy = { postMessage: () => {} }
+    await expect(signInWithToken('ghp_ok', { gh, ghUtils: u, storages: storages(), storage: memStorage() })).rejects.toThrow(/app/)
+    expect(gh.calls).toEqual([]); expect(u.token).toBeNull()
+  })
+
+  test("a 401 from the token being tried does not sign the current user out", async () => {
+    const s = storages(); const u = fakeGhUtils('ghp_alice'); const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    rememberToken('ghp_alice', false, s)
+    const target = new EventTarget(); const after = jest.fn()
+    installUnauthorizedHandler({ ghUtils: u, storages: s, storage, onSignedOut: after, target })
+    await expect(signInWithToken('ghp_bad', { gh: loudGh({ 'GET /user': err(401) }, target), ghUtils: u, storages: s, storage })).rejects.toThrow(/did not accept/)
+    expect(after).not.toHaveBeenCalled()
+    expect(loadAccount(storage).login).toBe('alice'); expect(u.token).toBe('ghp_alice')
+    // ...but a 401 afterwards still does
+    target.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+    expect(after).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('signOut and the 401 handler', () => {
+  test('signOut forgets the token and returns to guest, keeping pending-edit keys', () => {
+    const s = storages(); const u = fakeGhUtils()
+    const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC, 'cupitor:pendingSrtEdits@alice': '{"x":1}' })
+    rememberToken('t', true, s); u.setGHToken('t')
+    expect(signOut({ ghUtils: u, storages: s, storage, now: () => 500 })).toBe(true)
+    expect(loadAccount(storage)).toEqual({ login: null, repo: null, branch: null, other: ownerEntry() })
+    expect(storedToken(s)).toBeNull(); expect(u.token).toBeNull()
+    expect(storage.getItem('cupitor:pendingSrtEdits@alice')).toBe('{"x":1}')
+    expect(storage.getItem(GUEST_SINCE_KEY)).toBe('500')
+    // already a guest: nothing changes, the guest clock keeps its start
+    expect(signOut({ ghUtils: u, storages: s, storage, now: () => 900 })).toBe(false)
+    expect(storage.getItem(GUEST_SINCE_KEY)).toBe('500')
+  })
+
+  test('the legacy owner (no record) signs out to an explicit guest', () => {
+    const storage = memStorage()
+    expect(signOut({ ghUtils: fakeGhUtils(), storages: storages(), storage })).toBe(true)
+    expect(loadAccount(storage)).toMatchObject({ login: null })
+    expect(loadAccount(storage).legacy).toBeUndefined()
+  })
+
+  test('a guest record that cannot be written → false (the caller must not reload)', () => {
+    const storage = brokenStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    const u = fakeGhUtils('t')
+    expect(signOut({ ghUtils: u, storages: storages(), storage })).toBe(false)
+    expect(u.token).toBeNull()
+  })
+
+  test('installUnauthorizedHandler signs out once on the event', () => {
+    const s = storages(); const u = fakeGhUtils(); const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice' }) })
+    const after = jest.fn()
+    const uninstall = installUnauthorizedHandler({ ghUtils: u, storages: s, storage, onSignedOut: after, target: window })
+    window.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+    window.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+    expect(after).toHaveBeenCalledTimes(1)
+    expect(loadAccount(storage).login).toBeNull()
+    uninstall()
+  })
+
+  test('a 401 while already a guest changes nothing and does not ask for a reload', () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: null }) })
+    const target = new EventTarget(); const after = jest.fn()
+    installUnauthorizedHandler({ ghUtils: fakeGhUtils(), storages: storages(), storage, onSignedOut: after, target })
+    target.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+    expect(after).not.toHaveBeenCalled()
+  })
+
+  test('when the guest record cannot be written the handler does not ask for a reload', () => {
+    const storage = brokenStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    const target = new EventTarget(); const after = jest.fn()
+    installUnauthorizedHandler({ ghUtils: fakeGhUtils('t'), storages: storages(), storage, onSignedOut: after, target })
+    target.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+    expect(after).not.toHaveBeenCalled()
+  })
+})
+
+describe('reconcileLogin (boot)', () => {
+  test('a guest with no token source → ok, no request', async () => {
+    const gh = fakeGh({})
+    const guest = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: null }) })
+    expect(await reconcileLogin({ gh, ghUtils: fakeGhUtils(), storages: storages(), storage: guest, bridgeAvailable: false })).toBe('ok')
+    expect(gh.calls).toEqual([])
+  })
+
+  test('no token source never downgrades an account: no_token, record untouched, every boot', async () => {
+    for (const rec of [undefined, ALICE_REC, JSON.stringify({ login: 'trexsatya' }), JSON.stringify({ login: 'bob' })]) {
+      const storage = memStorage(rec ? { [ACCOUNT_KEY]: rec } : {})
+      const before = storage.dump(); const gh = fakeGh({})
+      for (let boot = 0; boot < 2; boot++) {
+        expect(await reconcileLogin({ gh, ghUtils: fakeGhUtils(), storages: storages(), storage, bridgeAvailable: false })).toBe('no_token')
+      }
+      expect(storage.dump()).toEqual(before)
+      expect(gh.calls).toEqual([])
+    }
+  })
+
+  test('a second tab without the session token leaves the first tab signed in', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    const tab1 = storages(); rememberToken('ghp_alice', false, tab1)
+    const tab2 = storages()
+    expect(await reconcileLogin({ gh: fakeGh({}), ghUtils: fakeGhUtils(), storages: tab2, storage, bridgeAvailable: false })).toBe('no_token')
+    expect(loadAccount(storage).login).toBe('alice'); expect(storedToken(tab1)).toBe('ghp_alice')
+  })
+
+  test('the legacy owner with a token in use is recorded as the owner without a reload', async () => {
+    const gh = fakeGh({ 'GET /user': { login: 'trexsatya' } })
+    for (const opts of [{ bridgeAvailable: true, ghUtils: fakeGhUtils() }, { bridgeAvailable: false, ghUtils: fakeGhUtils('ghp_prompted') }]) {
+      const storage = memStorage()
+      expect(await reconcileLogin({ gh, storages: storages(), storage, ...opts })).toBe('ok')
+      expect(loadAccount(storage)).toEqual({ login: 'trexsatya', repo: 'trexsatya.github.io', branch: 'gh-pages', other: null })
+    }
+  })
+
+  test('the legacy owner keeps saving when the check cannot complete', async () => {
+    for (const fail of [err(502), err(403, 'rate limit'), new Error('GitHubProxy timeout')]) {
+      const storage = memStorage()
+      expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': fail }), ghUtils: fakeGhUtils(), storages: storages(), storage, bridgeAvailable: true })).toBe('unchecked')
+      expect(loadAccount(storage).legacy).toBe(true)
+      expect(storage.dump()).toEqual({})
+    }
+  })
+
+  test('a stored token is put to use; a network failure keeps the account and the token', async () => {
+    const s = storages(); const u = fakeGhUtils(); rememberToken('ghp_alice', true, s)
+    const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': err(500) }), ghUtils: u, storages: s, storage, bridgeAvailable: false })).toBe('unchecked')
+    expect(u.token).toBe('ghp_alice'); expect(storedToken(s)).toBe('ghp_alice'); expect(loadAccount(storage).login).toBe('alice')
+    const gh = fakeGh({ 'GET /user': { login: 'Alice' } })
+    expect(await reconcileLogin({ gh, ghUtils: u, storages: s, storage, bridgeAvailable: false })).toBe('ok')
+    expect(gh.calls).toEqual(['GET /user'])
+  })
+
+  test('in the app: GET /user decides; a changed login is adopted and reloads; the same login is ok', async () => {
+    const s = storages(); const u = fakeGhUtils()
+    const gh = fakeGh({ 'GET /user': { login: 'alice' }, ...ALICE_MARKER })
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: null }) })
+    expect(await reconcileLogin({ gh, ghUtils: u, storages: s, storage, bridgeAvailable: true })).toBe('reload')
+    expect(loadAccount(storage)).toMatchObject({ login: 'alice', repo: 'cupitor-data' })
+    expect(await reconcileLogin({ gh, ghUtils: u, storages: s, storage, bridgeAvailable: true })).toBe('ok')
+    expect(u.token).toBeNull()
+  })
+
+  test('another login than the record → adopted, reload', async () => {
+    const s = storages(); const u = fakeGhUtils(); rememberToken('ghp_bob', false, s)
+    const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    const gh = fakeGh({ 'GET /user': { login: 'bob' }, 'GET /repos/bob/cupitor-data/contents/cupitor.json': { sha: 's' } })
+    expect(await reconcileLogin({ gh, ghUtils: u, storages: s, storage, bridgeAvailable: false })).toBe('reload')
+    expect(loadAccount(storage)).toMatchObject({ login: 'bob', repo: 'cupitor-data' })
+  })
+
+  test('in the app with no token and a stale record → signed out, reload', async () => {
+    const s = storages(); const u = fakeGhUtils()
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice' }) })
+    expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': err(401) }), ghUtils: u, storages: s, storage, bridgeAvailable: true })).toBe('reload')
+    expect(loadAccount(storage).login).toBeNull()
+    expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': err(401) }), ghUtils: u, storages: s, storage, bridgeAvailable: true })).toBe('ok')
+  })
+
+  test('its own 401 never triggers the handler, so there is one sign-out and no reload loop', async () => {
+    const target = new EventTarget(); const after = jest.fn()
+    const s = storages(); const u = fakeGhUtils(); rememberToken('ghp_old', true, s)
+    const storage = memStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    installUnauthorizedHandler({ ghUtils: u, storages: s, storage, onSignedOut: after, target })
+    const gh = loudGh({ 'GET /user': err(401) }, target)
+    expect(await reconcileLogin({ gh, ghUtils: u, storages: s, storage, bridgeAvailable: false })).toBe('reload')
+    expect(after).not.toHaveBeenCalled()
+    expect(storedToken(s)).toBeNull(); expect(u.token).toBeNull()
+    // the next boot (no token now) is quiet
+    expect(await reconcileLogin({ gh, ghUtils: u, storages: s, storage, bridgeAvailable: false })).toBe('ok')
+    // and a guest's 401s never ask for a reload either
+    target.dispatchEvent(new CustomEvent('cupitorGithubUnauthorized'))
+    expect(after).not.toHaveBeenCalled()
+  })
+
+  test('a record that cannot be written never asks for a reload (no reload loop)', async () => {
+    const gh = fakeGh({ 'GET /user': { login: 'alice' }, ...ALICE_MARKER })
+    const guest = brokenStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: null }) })
+    expect(await reconcileLogin({ gh, ghUtils: fakeGhUtils(), storages: storages(), storage: guest, bridgeAvailable: true })).toBe('unchecked')
+    const stale = brokenStorage({ [ACCOUNT_KEY]: ALICE_REC })
+    expect(await reconcileLogin({ gh: fakeGh({ 'GET /user': err(401) }), ghUtils: fakeGhUtils(), storages: storages(), storage: stale, bridgeAvailable: true })).toBe('unchecked')
+    expect(loadAccount(stale).login).toBe('alice')
+  })
+})
+
+describe("a guest's unsent captures follow them into their new account", () => {
+  const BASE = 'cupitor:capturedSubtitles'
+
+  test('captures made since becoming a guest move to the new login; older ones stay', async () => {
+    const storage = memStorage({
+      [ACCOUNT_KEY]: ALICE_REC,
+      [`${BASE}@alice`]: JSON.stringify([capture('a0', 10)]),
+    })
+    const s = storages(); const u = fakeGhUtils()
+    signOut({ ghUtils: u, storages: s, storage, now: () => 100 })
+    storage.setItem(BASE, JSON.stringify([capture('owner', 50), capture('g1', 150), capture('g2', 160)]))
+    const gh = fakeGh({ 'GET /user': { login: 'Alice' }, 'GET /repos/Alice/cupitor-data/contents/cupitor.json': { sha: 's' } })
+    await signInWithToken('ghp', { gh, ghUtils: u, storages: s, storage })
+    expect(JSON.parse(storage.getItem(BASE)).map(c => c.id)).toEqual(['owner'])
+    expect(JSON.parse(storage.getItem(`${BASE}@alice`)).map(c => c.id)).toEqual(['a0', 'g1', 'g2'])
+    expect(storage.getItem(GUEST_SINCE_KEY)).toBeNull()
+  })
+
+  test('the same happens when the app signs a guest in (boot reconcile)', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: null }), [GUEST_SINCE_KEY]: '100', [BASE]: JSON.stringify([capture('g1', 150)]) })
+    const gh = fakeGh({ 'GET /user': { login: 'alice' }, ...ALICE_MARKER })
+    expect(await reconcileLogin({ gh, ghUtils: fakeGhUtils(), storages: storages(), storage, bridgeAvailable: true })).toBe('reload')
+    expect(storage.getItem(BASE)).toBeNull()
+    expect(JSON.parse(storage.getItem(`${BASE}@alice`)).map(c => c.id)).toEqual(['g1'])
+  })
+
+  test('the owner shares the guest keys, so nothing moves; no guest start → nothing moves', () => {
+    const storage = memStorage({ [GUEST_SINCE_KEY]: '100', [BASE]: JSON.stringify([capture('g1', 150)]) })
+    expect(carryGuestCaptures('trexsatya', { storage })).toBe(0)
+    expect(storage.getItem(GUEST_SINCE_KEY)).toBeNull()
+    expect(carryGuestCaptures('alice', { storage })).toBe(0)
+    expect(JSON.parse(storage.getItem(BASE)).map(c => c.id)).toEqual(['g1'])
+  })
+
+  test('captures without an id are moved too, never taken for duplicates', () => {
+    const storage = memStorage({
+      [GUEST_SINCE_KEY]: '100',
+      [BASE]: JSON.stringify([{ capturedAt: 150, detail: {} }, capture('dup', 160)]),
+      [`${BASE}@alice`]: JSON.stringify([{ capturedAt: 5, detail: {} }, capture('dup', 160)]),
+    })
+    expect(carryGuestCaptures('alice', { storage })).toBe(2)
+    expect(JSON.parse(storage.getItem(`${BASE}@alice`))).toHaveLength(3)
+    expect(storage.getItem(BASE)).toBeNull()
+  })
+
+  test('a target that cannot be written leaves the captures where they are', () => {
+    const storage = brokenStorage({ [GUEST_SINCE_KEY]: '100', [BASE]: JSON.stringify([capture('g1', 150)]) }, `${BASE}@alice`)
+    expect(carryGuestCaptures('alice', { storage })).toBe(0)
+    expect(JSON.parse(storage.getItem(BASE)).map(c => c.id)).toEqual(['g1'])
   })
 })
