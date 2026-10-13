@@ -4,6 +4,7 @@ import {
   renderAccountPanel, initAccountPanel, openAccountDialog, showSetupPrompt, bootAccount,
   __setAccountPanelDeps, SETUP_REPO_MSG, NO_TOKEN_MSG, VISITOR_MSG, SIGNED_OUT_MSG, TOKEN_URL,
   SETUP_CLOSE_LOCK_MS, SETUP_RUNNING_MSG, SIGNED_OUT_BY_USER_KEY,
+  bannerKey, bannerVisible, DISMISSED_BANNERS_KEY, DISMISSIBLE_FOR_GOOD,
 } from './account-panel.js'
 import { SetupError, UNAUTHORIZED_AT_KEY } from './account.js'
 import { BridgeError } from './account-bridge.js'
@@ -273,6 +274,7 @@ function setup({ state = guest, inApp = false, bridge = false, ...over } = {}) {
     inApp: jest.fn(() => inApp),
     reload: jest.fn(),
     session: () => window.sessionStorage,
+    local: () => window.localStorage,
     now: () => Date.now(),
     ...over,
   }
@@ -282,6 +284,7 @@ function setup({ state = guest, inApp = false, bridge = false, ...over } = {}) {
 
 afterEach(() => {
   window.sessionStorage.clear()
+  window.localStorage.clear()
   delete window._otherLayerNotices
   delete window.cupitorShowSetupPrompt
   delete window._suppressGHTokenPrompt
@@ -331,6 +334,111 @@ describe('render', () => {
     jq('#acctToken').val('ghp_abc')
     renderAccountPanel()
     expect(jq('#acctToken').val()).toBe('ghp_abc')
+  })
+})
+
+describe('closing the banner', () => {
+  const visitorReconcile = () => setup({ state: legacy, reconcileLogin: jest.fn(async () => 'no_token') })
+  const shown = () => jq('#accountBanner').css('display') !== 'none'
+  // A later page load: fresh panel state, same localStorage.
+  const reload = (opts) => { const r = setup(opts); initAccountPanel(); return r }
+
+  test('bannerVisible: pure decision', () => {
+    const k = bannerKey('guest', SETUP_REPO_MSG)
+    expect(k).toBe(`guest|${SETUP_REPO_MSG}`)
+    expect(bannerKey('ready', null)).toBeNull()
+    expect(bannerVisible(null, null, [])).toBe(false)
+    expect(bannerVisible(SETUP_REPO_MSG, k, [])).toBe(true)
+    expect(bannerVisible(SETUP_REPO_MSG, k, [k])).toBe(false)
+    expect(bannerVisible(SETUP_REPO_MSG, k, [bannerKey('no-repo', SETUP_REPO_MSG)])).toBe(true)
+    expect(bannerVisible(SETUP_REPO_MSG, k, null)).toBe(true)
+    expect(DISMISSIBLE_FOR_GOOD).toEqual(expect.arrayContaining([VISITOR_MSG, SETUP_REPO_MSG, NO_TOKEN_MSG]))
+    expect(DISMISSIBLE_FOR_GOOD).not.toContain(SIGNED_OUT_MSG)
+  })
+
+  test('the close button is a labelled button and does not open the dialog', () => {
+    setup()
+    initAccountPanel()
+    const $x = jq('#accountBannerClose')
+    expect($x.is('button')).toBe(true)
+    expect($x.attr('type')).toBe('button')
+    expect($x.attr('aria-label')).toBe('Close')
+    jq.fn.dialog.mockClear()
+    $x.trigger('click')
+    expect(shown()).toBe(false)
+    expect(jq.fn.dialog).not.toHaveBeenCalled()
+    // Account stays reachable from Settings.
+    jq('#accountBtn').trigger('click')
+    expect(jq.fn.dialog).toHaveBeenCalled()
+  })
+
+  test('a closed guest prompt stays hidden across loads', () => {
+    setup()
+    initAccountPanel()
+    jq('#accountBannerClose').trigger('click')
+    expect(JSON.parse(window.localStorage.getItem(DISMISSED_BANNERS_KEY))).toEqual([`guest|${SETUP_REPO_MSG}`])
+    reload()
+    expect(shown()).toBe(false)
+  })
+
+  test('a closed visitor prompt stays hidden across loads', async () => {
+    visitorReconcile()
+    initAccountPanel()
+    await bootAccount()
+    expect(jq('#accountBanner').text()).toContain(VISITOR_MSG)
+    jq('#accountBannerClose').trigger('click')
+    expect(shown()).toBe(false)
+    setup({ state: legacy, reconcileLogin: jest.fn(async () => 'no_token') })
+    initAccountPanel()
+    await bootAccount()
+    expect(shown()).toBe(false)
+  })
+
+  test('a different message still shows after a prompt was closed', () => {
+    setup()
+    initAccountPanel()
+    jq('#accountBannerClose').trigger('click')
+    // Signed in now, no repo: same words, different account status.
+    reload({ state: aliceNoRepo })
+    expect(shown()).toBe(true)
+    expect(jq('#accountBanner').text()).toContain(SETUP_REPO_MSG)
+    reload({ state: aliceMissing })
+    expect(shown()).toBe(true)
+    expect(jq('#accountBanner').text()).toContain("can't be found")
+  })
+
+  test('the signed-out warning closes for this page view only', () => {
+    window.sessionStorage.setItem(UNAUTHORIZED_AT_KEY, String(Date.now()))
+    setup()
+    initAccountPanel()
+    expect(jq('#accountBanner').text()).toContain(SIGNED_OUT_MSG)
+    jq('#accountBannerClose').trigger('click')
+    expect(shown()).toBe(false)
+    expect(window.localStorage.getItem(DISMISSED_BANNERS_KEY)).toBeNull()
+    reload()
+    expect(jq('#accountBanner').text()).toContain(SIGNED_OUT_MSG)
+  })
+
+  test('storage that throws still shows the banner, and closing still hides it', () => {
+    const bad = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } }
+    setup({ local: () => bad })
+    initAccountPanel()
+    expect(shown()).toBe(true)
+    jq('#accountBannerClose').trigger('click')
+    expect(shown()).toBe(false)
+    setup({ local: () => { throw new Error('denied') } })
+    initAccountPanel()
+    expect(shown()).toBe(true)
+  })
+
+  test('garbage in storage is ignored', () => {
+    window.localStorage.setItem(DISMISSED_BANNERS_KEY, '{not json')
+    setup()
+    initAccountPanel()
+    expect(shown()).toBe(true)
+    window.localStorage.setItem(DISMISSED_BANNERS_KEY, '{"a":1}')
+    reload()
+    expect(shown()).toBe(true)
   })
 })
 
