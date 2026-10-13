@@ -111,8 +111,8 @@ export async function fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init =
 // different remote inputs.
 //
 // `deps.githubUtils` defaults to window.GitHubUtils. `deps.owner` /
-// `deps.repo` default to trexsatya/trexsatya.github.io (the only writer
-// in this app today).
+// `deps.repo` default to trexsatya/trexsatya.github.io (the owner's repo);
+// callers pass the signed-in user's repo when it is someone else's.
 export async function commitWithMerge({
   filePath, branch = 'gh-pages', commitMessage, merge, maxAttempts = 5
 }, deps = {}) {

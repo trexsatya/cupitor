@@ -5916,7 +5916,7 @@ function _sourceBadgeHtml(source) {
   return _.escape(source || '')
 }
 
-// Path on gh-pages for a given (link, langCode) — `code` is 'en' or the
+// Path in the repo for a given (link, langCode) — `code` is 'en' or the
 // current target language (sv / es). Falls back to allSubtitles[link].fileName
 // if the srts index lookup misses (e.g. local-loaded files).
 function _srtPathFor(link, langCode) {
@@ -9122,7 +9122,7 @@ async function uploadSrtToGithub(baseName, langCode, newEntries, commitMessage, 
 }
 
 // Delete the media currently selected in #mp3Choice: drops both source-lang
-// and en SRT files from gh-pages and removes the entry from index.json.
+// and en SRT files from the signed-in user's repo and removes the entry from index.json.
 // In-memory state (window.srts, #mp3Choice options, window.allSubtitles) is
 // pruned too so the UI reflects the deletion immediately.
 async function deleteSelectedMedia() {
@@ -9880,7 +9880,7 @@ async function deleteChannel(channel) {
     files
   })
 
-  // Local cleanup so the UI matches gh-pages without a reload.
+  // Local cleanup so the UI matches the repo without a reload.
   videos.forEach(v => {
     try { delete window.allSubtitles[v.link] } catch (_) {}
   })
@@ -10565,7 +10565,7 @@ async function handleCapturedSubtitle(detail) {
   const isNew = !indexEntry
 
   // For existing entries, reuse the deployed filename (existing .sv.srt /
-  // .en.srt on gh-pages already use it). For new entries, build a fresh,
+  // .en.srt in the repo already use it). For new entries, build a fresh,
   // URL-safe, length-capped name. Both languages use the same baseName so
   // the .sv / .en pair share a filesystem-friendly prefix.
   const baseName = _nfc(indexEntry
@@ -10576,7 +10576,7 @@ async function handleCapturedSubtitle(detail) {
     : inferSubtitleSource(detail)
 
   // Existing SRT content for merging: prefer in-memory if loaded; otherwise
-  // fetch from gh-pages. Skip the fetch entirely for new entries.
+  // fetch from the repo. Skip the fetch entirely for new entries.
   let existingSourceText = null
   let existingTargetText = null
   if (!isNew) {
@@ -21870,7 +21870,7 @@ $(document).on('click', '.translate-lines-btn', function (e) {
 
 // ── Inline subtitle line edit ────────────────────────────────────────────
 // Pencil icon next to each main/secondary line opens a textarea + Save/Cancel.
-// Save commits the edited line back to the matching SRT on gh-pages via
+// Save commits the edited line back to the matching SRT in the signed-in user's repo via
 // _saveSubtitleEdit, then re-renders the .line content in place.
 $(document).on('click', '.edit-line-btn', function (e) {
   e.preventDefault(); e.stopPropagation()
