@@ -1708,8 +1708,9 @@ function _selfGetFile(filePath) {
   return window.GitHubUtils.getFile(t.owner, t.repo, filePath, '', t.branch)
 }
 
-// Writes need a self repo. Shows the account panel's set-up prompt (Task 19
-// installs window.cupitorShowSetupPrompt) and returns false otherwise.
+// Writes need a self repo. Without one, shows the set-up prompt
+// (window.cupitorShowSetupPrompt when present, else an alert with the same
+// text) and returns false.
 // Called first in every user-facing write action, before any confirm,
 // prompt or network call, so nothing is half done and nothing is queued.
 const SETUP_REPO_MSG = 'Set up your repo to save changes.'
@@ -9600,7 +9601,7 @@ async function _scanUnavailableVideos() {
 
 async function _onUnavailableVideosDelete() {
   if (!_requireSelf()) return
-  let ids =$('#unavailableVideosList .dup-srts-group').toArray()
+  let ids = $('#unavailableVideosList .dup-srts-group').toArray()
     .filter(g => $(g).find('.unavail-pick').is(':checked'))
     .map(g => $(g).attr('data-id'))
   if (!ids.length) { alert('Select at least one video to delete.'); return }
@@ -9643,6 +9644,7 @@ async function _onUnavailableVideosDelete() {
 // Used by the bulk "Unavailable" cleanup which batches confirmations into
 // a single prompt before looping.
 async function _deleteVideoByLink(link) {
+  if (!_dsHasSelf()) throw new _DsNoSelfRepoError()
   if (_isReadOnlyLink(link)) throw new Error("This video is from the other user's library and cannot be deleted here.")
   const srt =(window.srts || []).find(it => it && it.link === link)
   const baseName = _nfc(srt && srt.name)
@@ -9834,17 +9836,19 @@ function setChannelBlocked(channel, blocked) {
 // Delete every SRT file belonging to the given channel and prune the
 // matching index.json entries — all in a single GitHub commit via the
 // new commitMultipleFiles helper.
+// Returns true when the channel was deleted, false when nothing was (no own
+// repo, nothing to delete, or the user said no).
 async function deleteChannel(channel) {
-  if (!_requireSelf()) return
-  if (!channel) return
+  if (!_requireSelf()) return false
+  if (!channel) return false
   const videos = (window.srts || []).filter(s => {
     // Videos from the other user's library are never deleted from here.
     if (!s || !s.name || s.readOnly) return false
     const i = s.name.indexOf(' || ')
     return (i > 0 ? s.name.slice(0, i) : s.name).trim() === channel
   })
-  if (!videos.length) { alert(`No videos found for channel "${channel}".`); return }
-  if (!confirm(`Delete channel "${channel}" — ${videos.length} video${videos.length === 1 ? '' : 's'}?\n\nThis removes every .sv.srt and .en.srt file from your repo and updates index.json. Cannot be undone from the UI.`)) return
+  if (!videos.length) { alert(`No videos found for channel "${channel}".`); return false }
+  if (!confirm(`Delete channel "${channel}" — ${videos.length} video${videos.length === 1 ? '' : 's'}?\n\nThis removes every .sv.srt and .en.srt file from your repo and updates index.json. Cannot be undone from the UI.`)) return false
 
   const lang = getLangFromUrl()
   const srtsDir = `${_langRepoDir()}/srts`
@@ -9883,6 +9887,7 @@ async function deleteChannel(channel) {
   }
   // Also drop from the optional block-list (deleted channel can't be matched).
   setChannelBlocked(channel, false)
+  return true
 }
 
 function openChannelManagerDialog() {
@@ -9923,12 +9928,16 @@ function openChannelManagerDialog() {
   })
   $dlg.off('click', '.ch-delete').on('click', '.ch-delete', async function (e) {
     e.preventDefault(); e.stopPropagation()
+    if (!_requireSelf()) return
     const $btn = $(this)
     const ch = String($btn.closest('.ch-row').data('channel') || '')
     $btn.prop('disabled', true).find('.rec-rec-lbl').text('Deleting…')
     try {
-      await deleteChannel(ch)
-      openChannelManagerDialog()   // refresh list
+      if (await deleteChannel(ch)) {
+        openChannelManagerDialog()   // refresh list
+      } else {
+        $btn.prop('disabled', false).find('.rec-rec-lbl').text('Delete')
+      }
     } catch (err) {
       console.error('deleteChannel failed', err)
       alert('Delete failed: ' + (err && err.message || err))
