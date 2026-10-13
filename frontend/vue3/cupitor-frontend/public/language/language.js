@@ -199,7 +199,30 @@ function _adoptAsSelfEntry(link, name, source) {
   const sub = window.allSubtitles && window.allSubtitles[link]
   if (sub) { sub.readOnly = false; delete sub._parsedSv; delete sub._parsedEn }
 }
-import { scopedKey as _scopedKey } from './account-state.js';
+import { scopedKey as _scopedKey, loadAccount as _loadAccount } from './account-state.js';
+import { cachedUsers as _cachedUsers } from './account.js';
+import { ownerLabel as _ownerLabel, withOwnerLabel as _withOwnerLabel } from './owner-label.js';
+
+// Display-only owner labels ("🔒 Satya") for items of the other user's
+// library; '' for own items and when there is no other layer. The account
+// and users list are read once per call, so a list renders with one read.
+// Never put a label into a value, key or anything that is saved.
+function _ownerLabeller() {
+  let account = null, users = null
+  try { account = _loadAccount() } catch (_) {}
+  try { users = _cachedUsers() } catch (_) {}
+  const label = item => _ownerLabel(item, account, users)
+  label.prefix = (text, item) => _withOwnerLabel(text, item, account, users)
+  return label
+}
+function _srtEntryOf(link) {
+  return (window.srts || []).find(it => it && it.link === link) || null
+}
+function _ownerLabelOfLink(link) { return _ownerLabeller()(_srtEntryOf(link)) }
+function _ownerLabelOfPlaylist(name) {
+  const r = window._recordings && Object.prototype.hasOwnProperty.call(window._recordings, name) ? window._recordings[name] : null
+  return _ownerLabeller()(r)
+}
 import { initAccountPanel as _initAccountPanel, bootAccount as _bootAccount } from './account-panel.js';
 import {
   isVirtual as _coreIsVirtual,
@@ -4516,10 +4539,12 @@ function populateAllLinks() {
     }
     return ogs[category]
   }
+  const owner = _ownerLabeller()
   srtLinks.forEach(link => {
     const item = srts.find(it => it.link === link)
     // Index names and categories may be another user's: text and attributes only.
-    const $opt = $('<option>').text(String(item.name).replace(".en.srt", "").replace(getTargetLangSrtSuffix(), "")).attr('value', item.link)
+    const shown = String(item.name).replace(".en.srt", "").replace(getTargetLangSrtSuffix(), "")
+    const $opt = $('<option>').text(owner.prefix(shown, item)).attr('value', item.link)
     getOptgroup(getCategory(item)).append($opt)
   })
 
@@ -6017,8 +6042,10 @@ function getInfoAboutMedia(mediaId, source, time_start) {
 function showInfo(id, source, time_start, time_end) {
   const {fileName, url} = getInfoAboutMedia(id, source, time_start);
 
+  const owner = _ownerLabelOfLink(id)
   const $dlg = $('#info-dialog-content').html(`
     <h3><a href="${_.escape(url)}" target="_blank">${_.escape(fileName)}</a></h3>
+    ${owner ? `<h4 class="owner-label">${_.escape(owner)}</h4>` : ''}
     <h4>${_.escape(source)}</h4>
     <h4>${fromSeconds(time_start)} - ${fromSeconds(time_end)}</h4>
   `)
@@ -6536,6 +6563,10 @@ function renderLines(id, url) {
   // A video from the other user's library is read-only: no ✎ and no 🌐
   // (both write to the subtitle files).
   const readOnly = _isReadOnlyLink(url)
+  const ownerLabel = readOnly ? _ownerLabelOfLink(url) : ''
+  const ownerTag = ownerLabel
+    ? `<span class="info owner-label" style="font-size:12px;color:#666;white-space:nowrap;" title="From ${_.escape(ownerLabel.replace(/^🔒 /, ''))}'s library (read-only)">${_.escape(ownerLabel)}</span>`
+    : ''
 
   let html = `
 <hr>
@@ -6547,6 +6578,7 @@ function renderLines(id, url) {
      <span class="info btn collapse-sub-lines"> 🗖 </span>
      <span class="info source-tag" data-source="${_.escape(String(subtitleFile.source || '').toLowerCase())}" title="${_.escape(subtitleFile.source || '')}">${_sourceBadgeHtml(subtitleFile.source)}</span>
      ${infoButton()}
+     ${ownerTag}
   </span>
   <span class="capture-btn btn" title="Add this match to the current recording">●</span>
   ${readOnly ? '' : `<span class="translate-lines-btn btn" data-id="${eId}" data-url="${eUrl}" title="Translate the visible lines to English">🌐</span>`}
@@ -9403,13 +9435,14 @@ window.openDuplicateSrtsDialog = openDuplicateSrtsDialog
 function _renderDuplicateSrtsList() {
   const $list = $('#duplicateSrtsList').empty()
   const groups = _findDuplicateSrtGroups()
+  const owner = _ownerLabeller()
   if (!groups.length) {
     $list.append('<div class="dup-srts-empty">No duplicate index entries found.</div>')
     return
   }
   groups.forEach(g => {
     const $g = $('<div class="dup-srts-group"></div>')
-    $g.append($('<div class="dup-srts-head"></div>').text(`${g.link} — ${g.entries.length} entries`))
+    $g.append($('<div class="dup-srts-head"></div>').text(`${owner.prefix(g.link, _srtEntryOf(g.link))} — ${g.entries.length} entries`))
     g.entries.forEach((e, idx) => {
       const $row = $('<div class="dup-srts-row"></div>')
       const tag  = idx === 0 ? '<span class="dup-srts-keep">keep</span>' : ''
@@ -9726,8 +9759,10 @@ async function _scanUnavailableVideos() {
 
   // Render rows: checkbox + id + baseName + list of uniquely-covered words.
   unavailable.sort()
+  const owner = _ownerLabeller()
   unavailable.forEach(id => {
-    const baseName = (((window.srts || []).find(s => s && s.link === id) || {}).name) || '(unknown)'
+    const srtEntry = _srtEntryOf(id)
+    const baseName = owner.prefix((srtEntry && srtEntry.name) || '(unknown)', srtEntry)
     const uniqWords = _uniqueWordsForVideo(id, wordMap)
     const $row = $(`
       <div class="dup-srts-group" data-id="${_.escape(id)}">
@@ -10050,6 +10085,7 @@ function openChannelManagerDialog() {
     html += '<p style="color:#888;">No channels found in this language.</p>'
   } else {
     html += '<div class="ch-mgr-list">'
+    const owner = _ownerLabeller()
     channels.forEach(c => {
       const id = 'ch-' + encodeURIComponent(c.channel).replace(/[^A-Za-z0-9_-]/g, '_')
       const isBlocked = blocked.has(c.channel)
@@ -10061,7 +10097,7 @@ function openChannelManagerDialog() {
           </label>
           <span class="ch-name${isBlocked ? ' ch-name-blocked' : ''}">${_.escape(c.channel)}</span>
           <span class="ch-count">${c.videos}</span>
-          ${c.readOnly ? '<span class="ch-count" title="From the other user\'s library">read-only</span>' : '<button type="button" class="btn ch-delete rec-rec-danger" title="Delete channel"><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>'}
+          ${c.readOnly ? `<span class="ch-count" title="From the other user's library">${_.escape(owner({ readOnly: true }) || 'read-only')}</span>` : '<button type="button" class="btn ch-delete rec-rec-danger" title="Delete channel"><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>'}
         </div>`
     })
     html += '</div>'
@@ -11417,8 +11453,10 @@ function _renderManualSearchResults() {
   const term = _librarySearchTerm()
   if (!on || !term || !String(term).trim()) { $out.html(''); return }
   const hits = _findManualCards(window._recordings, term)
+  const owner = _ownerLabeller()
   $out.html(_renderManualResultsHtml(hits, term, {
     collapsed: !!(window._appSettings && window._appSettings.manualResultsCollapsed),
+    ownerLabel: name => owner(window._recordings && window._recordings[name]),
   }))
 }
 
@@ -12273,9 +12311,10 @@ function _openRandomBuilderDialog() {
   $d = $('<div id="randomBuilderDialog"></div>').appendTo('body')
 
   const catOpts = cats.map(c => `<option value="${_.escape(c)}">${_.escape(c)} (${(vocab[c] || []).length})</option>`).join('')
+  const owner = _ownerLabeller()
   const plOpts = realNames.map(n => {
     const cnt = _collectManualItems(window._recordings, [n]).length
-    return `<option value="${_.escape(n)}">${_.escape(n)} (${cnt})</option>`
+    return `<option value="${_.escape(n)}">${_.escape(owner.prefix(n, window._recordings[n]))} (${cnt})</option>`
   }).join('')
   const suggestedName = _nextRandomPlaylistName(listRecordings())
 
@@ -13404,7 +13443,8 @@ function _updateRecordingUI() {
   $('body').toggleClass('rec-active', s !== 'idle')
   $('body').toggleClass('rec-paused', s === 'paused')
   const n = _recordingItemCount()
-  const name = window._recording.currentName || REC_DEFAULT_NAME
+  const name = _ownerLabeller().prefix(window._recording.currentName || REC_DEFAULT_NAME,
+    window._recordings && window._recordings[window._recording.currentName])
   $('#recStatus').text(
     s === 'idle'      ? (n ? `[${name}] · ${n} item${n===1?'':'s'} saved` : `[${name}]`)
     : s === 'paused'  ? `[${name}] · paused · ${n} item${n===1?'':'s'}`
@@ -15901,8 +15941,9 @@ function _openNotifDialog() {
 
   // Playlist select2 — real (non-virtual) playlists.
   const $pl = $d.find('#notifPlaylist')
+  const owner = _ownerLabeller()
   listRecordings().filter(n => !_isVirtual(n)).forEach(n => {
-    $pl.append(`<option value="${_.escape(n)}">${_.escape(n)} (${_recordingItemCountByName(n)})</option>`)
+    $pl.append(`<option value="${_.escape(n)}">${_.escape(owner.prefix(n, window._recordings[n]))} (${_recordingItemCountByName(n)})</option>`)
   })
   const curName = window._recording && window._recording.currentName
   if (curName && !_isVirtual(curName)) $pl.val(curName)
@@ -16433,10 +16474,14 @@ function openRecordingReviewDialog() {
   html += `<div class="rec-rec-header" style="margin-bottom:10px;padding:6px 6px 8px;border-bottom:1px solid #ddd;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
     <label style="font-size:12px;color:#555;">Playlist:</label>
     <select id="recRecSelect" style="flex:1;min-width:140px;max-width:260px;">`
+  const owner = _ownerLabeller()
   allNames.forEach(n => {
     const count = _recordingItemCountByName(n)
-    const marker = _isVirtual(n) ? '🔗 ' : (_isReadOnlyPlaylist(n) ? '🔒 ' : '')
-    html += `<option value="${_.escape(n)}"${n === currentName ? ' selected' : ''}>${marker}${_.escape(n)} (${count})</option>`
+    // Display only: the value stays the plain playlist name.
+    const ownerTag = _isReadOnlyPlaylist(n) ? owner(window._recordings[n]) : ''
+    const marker = (_isVirtual(n) ? '🔗 ' : '') +
+      (ownerTag ? `${ownerTag} · ` : (!_isVirtual(n) && _isReadOnlyPlaylist(n) ? '🔒 ' : ''))
+    html += `<option value="${_.escape(n)}"${n === currentName ? ' selected' : ''}>${_.escape(marker)}${_.escape(n)} (${count})</option>`
   })
   html += `</select>
     <button type="button" id="recRecNew"       class="btn rec-rec-btn" title="Create a new playlist" aria-label="Create a new playlist"><span class="rec-rec-ico">＋</span><span class="rec-rec-lbl">New</span></button>
@@ -16456,15 +16501,15 @@ function openRecordingReviewDialog() {
     const members = _virtualMembers(currentName)
     html += `<div class="rec-virtual-banner">
       🔗 <b>Virtual playlist</b> — a live combination of:
-      ${members.length ? members.map(m => `<span class="rec-virtual-member">${_.escape(m)}</span>`).join(' ') : '<span style="color:#a00;">(no valid members)</span>'}
+      ${members.length ? members.map(m => `<span class="rec-virtual-member">${_.escape(owner.prefix(m, window._recordings[m]))}</span>`).join(' ') : '<span style="color:#a00;">(no valid members)</span>'}
       ${isReadOnlyCurrent ? '' : '<button type="button" id="recVirtualEdit" class="btn rec-rec-btn" style="margin-left:8px;">Edit members</button>'}
       <div class="rec-virtual-note">Items are read-only here. Edit them in their source playlists.</div>
     </div>`
   }
   if (isReadOnlyCurrent) {
-    const owner = _sourceOwner('other')
+    const ownerShown = _ownerLabelOfPlaylist(currentName).replace(/^🔒 /, '') || _sourceOwner('other')
     html += `<div class="rec-virtual-banner">
-      🔒 <b>Read-only playlist</b>${owner ? ` from ${_.escape(owner)}` : ''}.
+      🔒 <b>Read-only playlist</b>${ownerShown ? ` from ${_.escape(ownerShown)}` : ''}.
       <div class="rec-virtual-note">You can play and practise it, and copy cards into your own playlists.</div>
     </div>`
   }
@@ -17891,7 +17936,10 @@ function _maybeResumeStartItem(mode) {
   const cur = window._recording && window._recording.currentName
   const point = computeResumePoint(_loadLastPlayedMap(), window._recordings, cur, mode)
   if (!point) return null
-  if (!confirm(point.message)) return null
+  // The prompt names the playlist; the other user's carries its owner label.
+  const shown = _ownerLabeller().prefix(cur, window._recordings[cur])
+  const message = shown === cur ? point.message : point.message.replace(`"${cur}"`, () => `"${shown}"`)
+  if (!confirm(message)) return null
   return { queue: point.queue, pos: point.pos }
 }
 
@@ -17983,9 +18031,10 @@ function _labelForVideoId(videoId, recordedLabel) {
     if (srt && srt.name) {
       // SRT names are "<channel> || <title> || <id>"; the title segment is
       // the most useful for a human review list.
+      // Display only (text and confirm prompts): never stored.
       const parts = String(srt.name).split(' || ')
-      if (parts.length >= 2) return parts[1] || srt.name
-      return srt.name
+      const shown = parts.length >= 2 ? (parts[1] || srt.name) : srt.name
+      return _ownerLabeller().prefix(String(shown), srt)
     }
   } catch (_) {}
   if (recordedLabel) return recordedLabel
@@ -18637,7 +18686,7 @@ function _renderMusicPanel() {
   $d.find('#mpListHint').toggle(showListRow)
   if (showListRow) {
     $d.find('#mpListTrack').html(_musicChoiceOptions(listRec.musicTrackId, '(use the track above)'))
-    $d.find('#mpListHint').text(`Plays under everything in "${listName}", unless a card names its own.`)
+    $d.find('#mpListHint').text(`Plays under everything in "${_ownerLabeller().prefix(listName, listRec)}", unless a card names its own.`)
   }
 
   const hushed = _musicHushed()
@@ -20968,7 +21017,8 @@ function _updatePracticeInfo() {
   let rowIdx = Array.isArray(bucket) ? bucket.findIndex(x => x && x.id === it.id && x.lineIndex === it.lineIndex) : -1
   if (rowIdx < 0) rowIdx = it._idx
   const at = _rowPositionIn(items, it._st, it._w, rowIdx)
-  const where = `${name || '?'}${at ? ` · #${at.pos} of ${at.total}` : ''}`
+  const shownName = name ? _ownerLabeller().prefix(name, window._recordings && window._recordings[name]) : '?'
+  const where = `${shownName}${at ? ` · #${at.pos} of ${at.total}` : ''}`
   // A preview, not the card: the card itself is on screen right below.
   const INFO_MAX = 45
   if (it.manual) {

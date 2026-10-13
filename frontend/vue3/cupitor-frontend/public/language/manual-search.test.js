@@ -103,4 +103,15 @@ describe('renderManualResultsHtml', () => {
   test('nothing found says so', () => {
     expect(renderManualResultsHtml([], 'hem')).toContain('No manual cards')
   })
+
+  test('an owner label is shown escaped before the name, never in data-playlist', () => {
+    const html = renderManualResultsHtml([
+      { playlist: 'Theirs', item: card('x', 'hus', '') },
+      { playlist: 'Mine', item: card('y', 'hus', '') },
+    ], 'hus', { ownerLabel: p => (p === 'Theirs' ? '🔒 <i>Sat</i>' : '') })
+    expect(html).toContain('data-playlist="Theirs"')
+    expect(html).toContain('<span class="manual-hit-playlist">🔒 &lt;i&gt;Sat&lt;/i&gt; · Theirs</span>')
+    expect(html).toContain('<span class="manual-hit-playlist">Mine</span>')
+    expect(html).not.toContain('<i>')
+  })
 })

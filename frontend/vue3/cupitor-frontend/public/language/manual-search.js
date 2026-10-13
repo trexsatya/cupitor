@@ -98,15 +98,19 @@ export function matchSnippetHtml(text, search, radius = 40) {
 // The manual-card block for the results area: a header that folds it, and
 // one line per card — the matching face cut down to the match. `collapsed`
 // renders it folded; the header stays so the count is still visible.
-export function renderManualResultsHtml(hits, search, { collapsed = false } = {}) {
+// `ownerLabel(playlist)` gives a display-only owner label shown before the
+// playlist name ('' for none); data-playlist always holds the plain name.
+export function renderManualResultsHtml(hits, search, { collapsed = false, ownerLabel = () => '' } = {}) {
   if (!hits || !hits.length) {
     return '<div class="manual-results-empty">No manual cards match.</div>'
   }
   const rows = hits.map(({ playlist, item }) => {
     const snippet = matchSnippetHtml(cardPlainText(item.source), search) ||
       matchSnippetHtml(cardPlainText(item.target), search) || ''
+    const label = ownerLabel(playlist)
+    const shown = label ? `${label} · ${playlist}` : playlist
     return `<button type="button" class="manual-hit" data-playlist="${escapeHtml(playlist)}" data-id="${escapeHtml(item.id)}" title="Practice this card">` +
-      `<span class="manual-hit-playlist">${escapeHtml(playlist)}</span> ${snippet}</button>`
+      `<span class="manual-hit-playlist">${escapeHtml(shown)}</span> ${snippet}</button>`
   })
   const n = hits.length
   return `<div class="lib-wrap manual-wrap${collapsed ? ' lib-collapsed' : ''}">
