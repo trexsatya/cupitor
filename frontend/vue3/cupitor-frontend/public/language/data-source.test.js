@@ -163,7 +163,7 @@ describe('configure', () => {
 
 import {
   readLayers, layerStats, mergeIndexLayers, parseCategorisation, mergeCategorisationLayers,
-  mergeVocabularyLayers, withoutReadOnlyLines, mergeRecordingLayers,
+  otherListProblem, mergeVocabularyLayers, withoutReadOnlyLines, mergeRecordingLayers,
 } from './data-source.js'
 
 const res = (status, text) => ({ ok: status < 400, status, text: async () => text })
@@ -220,6 +220,36 @@ describe('readLayers', () => {
     expect(out).toEqual([{ src: 'self', owner: 'trexsatya', text: null }])
     expect(layerStats().other).toEqual({ hits: 0, misses: 0, errors: 0 })
   })
+  test('otherRetry applies to the other layer only; self keeps retry', async () => {
+    configure(alice)
+    const calls = []
+    const fetchFn = async (url) => { calls.push(url); return res(500, '') }
+    const notices = []
+    // self: 2 tries then throws — other is never reached
+    await expect(readLayers('srts/index.json', { lang: 'swedish', fetchFn, retry: { tries: 2, timeoutMs: 50 }, otherRetry: { tries: 1 } }))
+      .rejects.toThrow(/HTTP 500/)
+    expect(calls.filter(u => u.includes('/alice/'))).toHaveLength(2)
+    calls.length = 0
+    const otherFails = async (url) => { calls.push(url); return url.includes('/alice/') ? res(200, '[]') : res(500, '') }
+    const out = await readLayers('srts/index.json', { lang: 'swedish', fetchFn: otherFails, retry: { tries: 3 }, otherRetry: { tries: 1 }, onNotice: n => notices.push(n) })
+    expect(out).toEqual([{ src: 'self', owner: 'alice', text: '[]' }])
+    expect(calls.filter(u => u.includes('/trexsatya/'))).toHaveLength(1)
+    expect(notices).toHaveLength(1)
+  })
+})
+
+describe('otherListProblem', () => {
+  test('no other layer, or a valid / empty list: no problem', () => {
+    expect(otherListProblem([{ src: 'self', owner: 'a', text: null }], 'srts/index.json')).toBe(null)
+    expect(otherListProblem([{ src: 'other', owner: 'b', text: '[]' }], 'srts/index.json')).toBe(null)
+    expect(otherListProblem([{ src: 'other', owner: 'b', text: '' }], 'srts/index.json')).toBe(null)
+    expect(otherListProblem([], 'srts/index.json')).toBe(null)
+  })
+  test('missing file (404) or not a list: a message naming the owner', () => {
+    expect(otherListProblem([{ src: 'other', owner: 'bob', text: null }], 'srts/index.json')).toMatch(/bob.*srts\/index\.json|srts\/index\.json.*bob/)
+    expect(otherListProblem([{ src: 'other', owner: 'bob', text: '{' }], 'srts/index.json')).toMatch(/bob/)
+    expect(otherListProblem([{ src: 'other', owner: 'bob', text: '{}' }], 'srts/index.json')).toMatch(/bob/)
+  })
 })
 
 describe('mergeIndexLayers', () => {
@@ -232,6 +262,13 @@ describe('mergeIndexLayers', () => {
       { link: 'a', name: 'A mine', source: 'yt', src: 'self', owner: 'alice', readOnly: false },
       { link: 'b', name: 'B', src: 'other', owner: 'trexsatya', readOnly: true },
     ])
+  })
+  test('repeated links inside one layer are all kept (the duplicate cleanup needs them); only other is deduped against self', () => {
+    const merged = mergeIndexLayers([
+      { src: 'self', owner: 'alice', text: JSON.stringify([{ link: 'a', name: 'A1' }, { link: 'a', name: 'A2' }]) },
+      { src: 'other', owner: 'bob', text: JSON.stringify([{ link: 'a', name: 'A3' }, { link: 'c', name: 'C' }]) },
+    ])
+    expect(merged.map(e => e.name)).toEqual(['A1', 'A2', 'C'])
   })
   test('null text is an empty list; invalid self JSON throws; invalid other JSON is skipped', () => {
     expect(mergeIndexLayers([{ src: 'self', owner: 'a', text: null }])).toEqual([])

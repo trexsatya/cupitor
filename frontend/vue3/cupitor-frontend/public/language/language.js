@@ -125,7 +125,31 @@ import {
   writeTarget as _dsWriteTarget,
   hasSelf as _dsHasSelf,
   langFromLocation as _dsLangFromLocation,
+  readLayers as _dsReadLayers,
+  mergeIndexLayers as _dsMergeIndexLayers,
+  mergeCategorisationLayers as _dsMergeCategorisationLayers,
+  otherListProblem as _dsOtherListProblem,
 } from './data-source.js';
+
+// Notices about the other user's (read-only) layer, e.g. "srts/index.json was
+// not found in alice's data". Kept for the account panel, logged, and shown
+// briefly as a toast.
+window._otherLayerNotices = []
+function _dsNotice(msg) {
+  window._otherLayerNotices.push(msg)
+  console.warn('[layer]', msg)
+  try { _cpBuildToast(msg) } catch (_) {}
+}
+// The other layer gets one retry: a repo that is down or gone must not hold
+// up startup the way four slow attempts would.
+const _OTHER_LAYER_RETRY = { tries: 2 }
+
+// True when the index entry for this video comes from the other user's
+// library (read-only): its lines cannot be edited and it cannot be deleted.
+function _isReadOnlyLink(link) {
+  const s = (window.srts || []).find(it => it && it.link === link)
+  return !!(s && s.readOnly)
+}
 import { scopedKey as _scopedKey } from './account-state.js';
 import {
   isVirtual as _coreIsVirtual,
@@ -4157,20 +4181,21 @@ $(document).ready(function () {
   videoPlayer && hidePlayer(videoPlayer)
 });
 
+// { link: category } from srts/categorisation.txt, own file first, the other
+// user's under it. Own file: one plain request (tries: 1, default cache), as
+// before layering. A failed own read leaves every video uncategorised
+// instead of stopping the boot.
 async function fetchCategorisation() {
-  let categorisation = await fetch(`${getResourceUrl()}/srts/categorisation.txt`)
-  categorisation = await categorisation.text()
-  categorisation = categorisation.split("\n")
-  const categories = {}
-  categorisation.forEach(it => {
-    const l = it.split(" || ")
-    let c = '        '
-    if (l.length === 4) {
-      c = l[0]
-    }
-    categories[l[l.length - 1]] = c
-  })
-  return categories
+  try {
+    const layers = await _dsReadLayers('srts/categorisation.txt', {
+      lang: _dsLangFromLocation(), onNotice: _dsNotice,
+      retry: { tries: 1, init: { cache: 'default' } }, otherRetry: _OTHER_LAYER_RETRY,
+    })
+    return _dsMergeCategorisationLayers(layers)
+  } catch (e) {
+    console.warn('fetchCategorisation failed', e)
+    return {}
+  }
 }
 
 function populateAllLinks() {
@@ -4223,8 +4248,15 @@ async function loadAllSubtitles() {
     // rest of the session.
     const vocabReady = fetchVocabulary()
     const settingsReady = loadAppSettings()
-    let srtsRes = await _fetchWithRetry(`${getResourceUrl()}/srts/index.json`)
-    let srts = await srtsRes.json()
+    // Own index first, the other user's under it (self wins per link). A
+    // missing file on either side is an empty layer, so a fresh data repo
+    // boots clean; the other layer's problems are reported, never fatal.
+    const indexLayers = await _dsReadLayers('srts/index.json', {
+      lang: _dsLangFromLocation(), onNotice: _dsNotice, otherRetry: _OTHER_LAYER_RETRY,
+    })
+    const otherIndexProblem = _dsOtherListProblem(indexLayers, 'srts/index.json')
+    if (otherIndexProblem) _dsNotice(otherIndexProblem)
+    let srts = _dsMergeIndexLayers(indexLayers)
     // Normalize names to NFC on read so every downstream consumer sees a
     // single canonical encoding regardless of how the entry was committed.
     if (Array.isArray(srts)) srts = srts.map(it => it ? { ...it, name: _nfc(it.name) } : it)
@@ -4241,6 +4273,7 @@ async function loadAllSubtitles() {
     const deadLinks = []
     if (cached.size) {
       const indexLinks = new Set(srts.map(s => s.link))
+      const indexByLink = new Map(srts.map(s => [s.link, s]))
       for (const [link, entry] of cached) {
         if (!indexLinks.has(link)) { deadLinks.push(link); continue }
         if (entry && entry.sv && !window.allSubtitles[link]) {
@@ -4250,6 +4283,7 @@ async function loadAllSubtitles() {
             source: entry.source,
             fileName: entry.name,
             fetchedFrom: 'cache',
+            readOnly: !!(indexByLink.get(link) || {}).readOnly,
           }
           cacheHits.push(link)
         }
@@ -4683,19 +4717,22 @@ async function getSubtitlesForLink(link, source) {
   const name = _nfc(srt.name)
   const svName = name + getTargetLangSrtSuffix()
   const enName = name + ".en.srt"
-  const sv = await _fetchSrtFile(`${getResourceUrl()}/srts/${encodeURIComponent(svName)}`)
+  // The files live in the repo the index entry came from (self or other);
+  // an entry added this session (no src) is in the primary repo.
+  const base = _dsReadUrl(srt.src || 'primary', 'srts', _dsLangFromLocation())
+  const sv = await _fetchSrtFile(`${base}/${encodeURIComponent(svName)}`)
   // The .en.srt is optional — source-only snippets (CLI `srt --no-translate`,
   // or lines still awaiting the in-app 🌐 translate) have none. A genuine 404
   // must NOT discard the source we just fetched; only a transient failure
   // propagates so the boot retry pool tops it up later.
   let en = null
   try {
-    en = await _fetchSrtFile(`${getResourceUrl()}/srts/${encodeURIComponent(enName)}`)
+    en = await _fetchSrtFile(`${base}/${encodeURIComponent(enName)}`)
   } catch (e) {
     if (!(e && e.kind === 'notfound')) throw e
   }
 
-  window.allSubtitles[link] = {sv, en, source, fileName: name}
+  window.allSubtitles[link] = {sv, en, source, fileName: name, readOnly: !!srt.readOnly}
   // Write the freshly-fetched pair to IndexedDB so the next boot can skip
   // this network round-trip. Fire-and-forget — failures are swallowed inside
   // the cache layer; a flaky cache must never break this critical path.
@@ -5763,6 +5800,7 @@ function _replaceSrtLine(rawSrt, lineIndex, newText, opts = null) {
 // re-runs `merge` on a 409/422, so the line-edit is re-applied against the
 // latest remote text.
 async function _saveSubtitleEdit(link, langCode, lineIndex, newText, opts = null) {
+  if (_isReadOnlyLink(link)) throw new Error("This video is from the other user's library and is read-only.")
   const filePath = _srtPathFor(link, langCode)
   if (!filePath) throw new Error('No SRT path for ' + link)
   const key = langCode === 'en' ? 'en' : 'sv'
@@ -6187,6 +6225,10 @@ function renderLines(id, url) {
     return showInfoBtn;
   };
 
+  // A video from the other user's library is read-only: no ✎ and no 🌐
+  // (both write to the subtitle files).
+  const readOnly = _isReadOnlyLink(url)
+
   let html = `
 <hr>
 <div class="buttons" style="text-align: center;">
@@ -6199,7 +6241,7 @@ function renderLines(id, url) {
      ${infoButton()}
   </span>
   <span class="capture-btn btn" title="Add this match to the current recording">●</span>
-  <span class="translate-lines-btn btn" data-id="${id}" data-url="${url}" title="Translate the visible lines to English">🌐</span>
+  ${readOnly ? '' : `<span class="translate-lines-btn btn" data-id="${id}" data-url="${url}" title="Translate the visible lines to English">🌐</span>`}
   <span style="float: right;">
     <span class="remove-prev-btn btn" > - </span>
     <span class="add-next-btn btn"> + </span>
@@ -6214,6 +6256,7 @@ function renderLines(id, url) {
 
 
   const mainLangCode = getLangFromUrl().code  // sv / es / …
+  const editBtn = readOnly ? '' : '<span class="edit-line-btn" title="Edit translation">✎</span>'
   // These files stitch captures from distant moments together, so two lines
   // shown one under the other can be minutes apart in the video. The play
   // bounds above already stop at the break; this marks where it is, so the
@@ -6236,11 +6279,11 @@ function renderLines(id, url) {
       mainSubPanel.append(_mark)
       if (secondarySub && secondarySub.text) secondarySubPanel.append(_mark)
     }
-    const lineMain = `<div class="line main-line" data-url="${url}" data-line-index="${subIdx}" data-lang-code="${mainLangCode}"><span class="line-text">${mainSub.text}</span><span class="edit-line-btn" title="Edit translation">✎</span></div>`;
+    const lineMain = `<div class="line main-line" data-url="${url}" data-line-index="${subIdx}" data-lang-code="${mainLangCode}"><span class="line-text">${mainSub.text}</span>${editBtn}</div>`;
     subForLines += lineMain
     mainSubPanel.append(lineMain)
     if (secondarySub && secondarySub.text) {
-      const lineSec = `<div class="line secondary-line" data-url="${url}" data-line-index="${subIdx}" data-lang-code="en"><span class="line-text">${secondarySub.text}</span><span class="edit-line-btn" title="Edit translation">✎</span></div>`;
+      const lineSec = `<div class="line secondary-line" data-url="${url}" data-line-index="${subIdx}" data-lang-code="en"><span class="line-text">${secondarySub.text}</span>${editBtn}</div>`;
       subForLines += lineSec
       secondarySubPanel.append(lineSec)
     }
@@ -8918,6 +8961,7 @@ async function uploadSrtToGithub(baseName, langCode, newEntries, commitMessage, 
 async function deleteSelectedMedia() {
   const link = $('#mp3Choice').val()
   if (!link) { alert('Pick a media to delete first.'); return }
+  if (_isReadOnlyLink(link)) { alert("This video is from the other user's library and cannot be deleted here."); return }
   const srt = (window.srts || []).find(it => it.link === link)
   const baseName = _nfc(srt && srt.name)
   if (!baseName) {
@@ -9059,7 +9103,7 @@ function _renderDuplicateSrtsList() {
       const $row = $('<div class="dup-srts-row"></div>')
       const tag  = idx === 0 ? '<span class="dup-srts-keep">keep</span>' : ''
       $row.append($(`<span class="dup-srts-name">${tag}${_.escape(e.name)}</span>`))
-      if (idx > 0) {
+      if (idx > 0 && !_isReadOnlyLink(g.link)) {
         const $btn = $('<button type="button" class="lang-tool-btn dup-srts-del">Delete</button>')
           .on('click', async () => {
             if (!confirm(`Delete "${e.name}" (${g.link})?\n\nThis removes both SRT files and the index entry on GitHub.`)) return
@@ -9087,6 +9131,7 @@ function _renderDuplicateSrtsList() {
 // for this link survive, playlist items pointing at the videoId are still
 // valid.
 async function _deleteDuplicateSrtEntry(link, baseName) {
+  if (_isReadOnlyLink(link)) throw new Error("This video is from the other user's library and cannot be deleted here.")
   baseName = _nfc(baseName)
   const lang = getLangFromUrl()
   const srtsDir = `db/language/${lang.fullName}/srts`
@@ -9389,10 +9434,15 @@ async function _scanUnavailableVideos() {
 }
 
 async function _onUnavailableVideosDelete() {
-  const ids = $('#unavailableVideosList .dup-srts-group').toArray()
+  let ids = $('#unavailableVideosList .dup-srts-group').toArray()
     .filter(g => $(g).find('.unavail-pick').is(':checked'))
     .map(g => $(g).attr('data-id'))
   if (!ids.length) { alert('Select at least one video to delete.'); return }
+  // Videos from the other user's library are read-only: left out.
+  const skipped = ids.filter(_isReadOnlyLink).length
+  ids = ids.filter(id => !_isReadOnlyLink(id))
+  if (skipped) alert(`${skipped} video${skipped === 1 ? ' is' : 's are'} from the other user's library and cannot be deleted here.`)
+  if (!ids.length) return
   // Surface orphaned-word counts in the confirm so the user isn't surprised
   // by suddenly losing vocab coverage they were relying on.
   const orphanCount = ids.reduce((n, id) => {
@@ -9424,7 +9474,8 @@ async function _onUnavailableVideosDelete() {
 // Used by the bulk "Unavailable" cleanup which batches confirmations into
 // a single prompt before looping.
 async function _deleteVideoByLink(link) {
-  const srt = (window.srts || []).find(it => it && it.link === link)
+  if (_isReadOnlyLink(link)) throw new Error("This video is from the other user's library and cannot be deleted here.")
+  const srt =(window.srts || []).find(it => it && it.link === link)
   const baseName = _nfc(srt && srt.name)
   if (!baseName) throw new Error(`No index entry for ${link}`)
   const lang = getLangFromUrl()
@@ -9586,11 +9637,13 @@ function listChannels() {
     if (!s || !s.name) return
     const idx = s.name.indexOf(' || ')
     const ch = (idx > 0 ? s.name.slice(0, idx) : s.name).trim() || '(unknown)'
-    if (!counts.has(ch)) counts.set(ch, { videos: 0, source: s.source || '' })
+    if (!counts.has(ch)) counts.set(ch, { videos: 0, source: s.source || '', readOnly: false })
     counts.get(ch).videos += 1
+    // A channel with any video from the other user's library is not deletable.
+    if (s.readOnly) counts.get(ch).readOnly = true
   })
   return [...counts.entries()]
-    .map(([channel, meta]) => ({ channel, videos: meta.videos, source: meta.source }))
+    .map(([channel, meta]) => ({ channel, videos: meta.videos, source: meta.source, readOnly: meta.readOnly }))
     .sort((a, b) => b.videos - a.videos || a.channel.localeCompare(b.channel))
 }
 
@@ -9614,7 +9667,8 @@ function setChannelBlocked(channel, blocked) {
 async function deleteChannel(channel) {
   if (!channel) return
   const videos = (window.srts || []).filter(s => {
-    if (!s || !s.name) return false
+    // Videos from the other user's library are never deleted from here.
+    if (!s || !s.name || s.readOnly) return false
     const i = s.name.indexOf(' || ')
     return (i > 0 ? s.name.slice(0, i) : s.name).trim() === channel
   })
@@ -9683,7 +9737,7 @@ function openChannelManagerDialog() {
           </label>
           <span class="ch-name${isBlocked ? ' ch-name-blocked' : ''}">${_.escape(c.channel)}</span>
           <span class="ch-count">${c.videos}</span>
-          <button type="button" class="btn ch-delete rec-rec-danger" title="Delete channel"><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
+          ${c.readOnly ? '<span class="ch-count" title="From the other user\'s library">read-only</span>' : '<button type="button" class="btn ch-delete rec-rec-danger" title="Delete channel"><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>'}
         </div>`
     })
     html += '</div>'
@@ -21100,6 +21154,9 @@ function _practiceRenderLines($container, rows, langKey, highlightWord) {
   const allowTokens = (langKey === 'source' && highlightWord)
     ? !_phraseFoundInTexts(sourceTexts, highlightWord)
     : false
+  // No ✎ on a video from the other user's library (read-only).
+  const practiceItem = $('#practiceMode').data('item')
+  const readOnly = !!(practiceItem && _isReadOnlyLink(practiceItem.id))
   rows.forEach(r => {
     const text = (langKey === 'source') ? r.source : r.target
     const $row = $(`<div class="practice-line${r.isMatch ? ' practice-line-match' : ''}" data-line-index="${r.lineIndex}"></div>`)
@@ -21110,7 +21167,7 @@ function _practiceRenderLines($container, rows, langKey, highlightWord) {
       $text.text(text || '(empty)')
     }
     $row.append($text)
-    $row.append($(`<button type="button" class="practice-line-edit" title="Edit this line" data-lang="${langKey === 'source' ? 'src' : 'en'}" data-line-index="${r.lineIndex}">✎</button>`))
+    if (!readOnly) $row.append($(`<button type="button" class="practice-line-edit" title="Edit this line" data-lang="${langKey === 'source' ? 'src' : 'en'}" data-line-index="${r.lineIndex}">✎</button>`))
     $container.append($row)
   })
 }

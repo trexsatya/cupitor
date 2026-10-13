@@ -95,8 +95,10 @@ export function writeTarget() {
 // { src, owner, text } with text null when the file is not there (404, one
 // request, no retries). `path` is raw, as for readUrl. The other layer may
 // fail without stopping the app: it is dropped and `onNotice(message)` is
-// called. A self failure that is not a 404 throws.
-export async function readLayers(path, { lang = langFromLocation(), fetchFn, onNotice = () => {}, retry = {} } = {}) {
+// called. A self failure that is not a 404 throws. `retry` is passed to
+// fetchWithRetry for every layer; `otherRetry`, when given, replaces it for
+// the other layer, so a failing other repo can be given up on quickly.
+export async function readLayers(path, { lang = langFromLocation(), fetchFn, onNotice = () => {}, retry = {}, otherRetry } = {}) {
   checkLang(lang)
   const segments = pathSegments(path)
   const s = currentSources()
@@ -105,7 +107,8 @@ export async function readLayers(path, { lang = langFromLocation(), fetchFn, onN
     if (!cfg) continue
     const url = urlFor(cfg, segments, lang)
     try {
-      const res = await fetchWithRetry(url, { ...retry, passthrough404: true }, fetchFn ? { fetch: fetchFn } : {})
+      const opts = src === 'other' && otherRetry ? otherRetry : retry
+      const res = await fetchWithRetry(url, { ...opts, passthrough404: true }, fetchFn ? { fetch: fetchFn } : {})
       const text = res.status === 404 ? null : await res.text()
       if (src === 'other') { if (text == null) _layerStats.other.misses++; else _layerStats.other.hits++ }
       out.push({ src, owner: cfg.owner, text })
@@ -131,24 +134,40 @@ function parseList(text, src, label) {
 }
 
 // srts/index.json layers ([{ link, name, source }]) → one list. Key: link.
-// Self wins; every entry carries src, owner and readOnly — strip those
-// before writing a list back.
+// Self wins: an entry is left out when an earlier layer has its link. Links
+// repeated inside one layer are all kept, as the file has them (the
+// duplicate-entry cleanup lists them). Every entry carries src, owner and
+// readOnly — strip those before writing a list back.
 export function mergeIndexLayers(layers) {
   const out = []
   const seen = new Set()
   for (const layer of layers || []) {
     const arr = parseList(layer.text, layer.src, 'index.json')
     if (!arr) continue
+    const links = []
     for (const it of arr) {
       if (!it || typeof it !== 'object') continue
       if (it.link != null) {
         if (seen.has(it.link)) continue
-        seen.add(it.link)
+        links.push(it.link)
       }
       out.push({ ...it, src: layer.src, owner: layer.owner, readOnly: layer.src !== 'self' })
     }
+    links.forEach(l => seen.add(l))
   }
   return out
+}
+
+// Why the other layer of a JSON list file (e.g. srts/index.json) adds
+// nothing, as a message for the user, or null when it is fine or absent.
+// A missing file is the usual sign of a repo that was renamed, deleted or
+// made private (raw.githubusercontent.com answers 404 for all three).
+export function otherListProblem(layers, path) {
+  const o = (layers || []).find(l => l && l.src === 'other')
+  if (!o) return null
+  if (o.text == null) return `${path} was not found in ${o.owner}'s data — the repo may have been renamed, deleted or made private.`
+  if (parseList(o.text, 'other', path) === null) return `${path} from ${o.owner} is not a valid list and was skipped.`
+  return null
 }
 
 // srts/categorisation.txt: lines "category || channel || title || link"
