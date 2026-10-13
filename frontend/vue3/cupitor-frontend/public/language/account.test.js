@@ -2,6 +2,7 @@ import { USERS_CACHE_KEY, OWNER, ACCOUNT_KEY, loadAccount } from './account-stat
 import {
   parseUsers, cachedUsers, fetchUsers, ownerEntry, USERS_RAW_URL,
   MAX_USERS, MAX_USERS_BYTES, fetchLogin, adoptLogin, defaultGh,
+  ensureDataRepo, SetupError,
 } from './account.js'
 
 export function memStorage(init = {}) {
@@ -302,6 +303,31 @@ describe('adoptLogin', () => {
     })
     expect((await adoptLogin({ login: 'alice' }, { gh, storage })).other).toEqual(bob)
   })
+  test('a recorded repo that is gone falls back to cupitor-data on main, once', async () => {
+    const storage = () => memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: 'my-data', branch: 'dev', other: null }) })
+    const found = fakeGh({ 'GET /repos/alice/cupitor-data/contents/cupitor.json': { sha: 's' } })
+    expect(await adoptLogin({ login: 'alice' }, { gh: found, storage: storage() }))
+      .toEqual({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null })
+    expect(found.calls).toEqual([
+      'GET /repos/alice/my-data/contents/cupitor.json?ref=dev',
+      'GET /repos/alice/cupitor-data/contents/cupitor.json?ref=main',
+    ])
+    const none = fakeGh({})
+    expect(await adoptLogin({ login: 'alice' }, { gh: none, storage: storage() }))
+      .toEqual({ login: 'alice', repo: null, branch: null, other: null })
+    expect(none.calls).toHaveLength(2)
+  })
+  test('the default repo is checked once; a failure of the fallback check throws', async () => {
+    const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: null }) })
+    const gh = fakeGh({})
+    expect((await adoptLogin({ login: 'alice' }, { gh, storage })).repo).toBeNull()
+    expect(gh.calls).toEqual(['GET /repos/alice/cupitor-data/contents/cupitor.json?ref=main'])
+    const before = JSON.stringify({ login: 'alice', repo: 'my-data', branch: 'main', other: null })
+    const s2 = memStorage({ [ACCOUNT_KEY]: before })
+    const flaky = fakeGh({ 'GET /repos/alice/cupitor-data/contents/cupitor.json': err(500) })
+    await expect(adoptLogin({ login: 'alice' }, { gh: flaky, storage: s2 })).rejects.toThrow(/500/)
+    expect(s2.getItem(ACCOUNT_KEY)).toBe(before)
+  })
   test('a different login does not inherit the previous one\'s repo or other', async () => {
     const storage = memStorage({ [ACCOUNT_KEY]: JSON.stringify({ login: 'alice', repo: 'my-data', branch: 'main', other: null }) })
     const gh = fakeGh({ 'GET /repos/bob/cupitor-data/contents/cupitor.json': { sha: 's' } })
@@ -341,5 +367,140 @@ describe('adoptLogin', () => {
     const gh = fakeGh({ 'GET /repos/alice/cupitor-data/contents/cupitor.json': { sha: 's' } })
     expect(await adoptLogin({ login: 'alice' }, { gh, storage: broken }))
       .toEqual({ login: 'alice', repo: 'cupitor-data', branch: 'main', other: ownerEntry() })
+  })
+})
+
+function clock(start = 0) { let t = start; return { now: () => t, tick: ms => { t += ms } } }
+const GENERATE = 'POST /repos/trexsatya/cupitor-data-template/generate'
+const FROM_TEMPLATE = { name: 'cupitor-data', template_repository: { full_name: 'trexsatya/cupitor-data-template' } }
+
+describe('ensureDataRepo', () => {
+  test('from scratch: generates from the template and waits for cupitor.json', async () => {
+    let created = false, polls = 0
+    const gh = fakeGh({
+      'GET /repos/alice/cupitor-data': () => (created ? FROM_TEMPLATE : err(404)),
+      [GENERATE]: (body) => {
+        expect(body).toEqual({ owner: 'alice', name: 'cupitor-data', private: false, include_all_branches: false, description: 'Cupitor language data' })
+        created = true; return { name: 'cupitor-data' }
+      },
+      'GET /repos/alice/cupitor-data/contents/cupitor.json': () => (++polls >= 2 ? { sha: 's' } : err(404)),
+    })
+    const steps = []
+    const out = await ensureDataRepo({ login: 'alice', gh, sleep: noSleep, now: clock().now, report: (s, st) => steps.push(`${s}:${st}`) })
+    expect(out).toEqual({ repo: 'cupitor-data', branch: 'main', created: true })
+    expect(gh.calls.filter(c => c === GENERATE)).toHaveLength(1)
+    expect(gh.calls).toContain('GET /repos/alice/cupitor-data/contents/cupitor.json?ref=main')
+    expect(steps).toEqual(['repo:checking', 'repo:creating', 'repo:done'])
+  })
+  test('already done: no generate call', async () => {
+    const gh = fakeGh({
+      'GET /repos/alice/cupitor-data': FROM_TEMPLATE,
+      'GET /repos/alice/cupitor-data/contents/cupitor.json': { sha: 's' },
+    })
+    expect(await ensureDataRepo({ login: 'alice', gh, sleep: noSleep, now: clock().now })).toEqual({ repo: 'cupitor-data', branch: 'main', created: false })
+    expect(gh.calls).not.toContain(GENERATE)
+  })
+  test('a repo of that name that is not a Cupitor data repo → repo_taken, nothing created', async () => {
+    const gh = fakeGh({ 'GET /repos/alice/cupitor-data': { name: 'cupitor-data', template_repository: null } })
+    const p = ensureDataRepo({ login: 'alice', gh, sleep: noSleep, now: clock().now })
+    await expect(p).rejects.toThrow(SetupError)
+    await expect(p).rejects.toMatchObject({ step: 'repo', code: 'repo_taken' })
+    expect(gh.calls).not.toContain(GENERATE)
+  })
+  test('a different repo name is honoured', async () => {
+    const gh = fakeGh({
+      'GET /repos/alice/my-cupitor': { name: 'my-cupitor' },
+      'GET /repos/alice/my-cupitor/contents/cupitor.json': { sha: 's' },
+    })
+    expect((await ensureDataRepo({ login: 'alice', repoName: 'my-cupitor', gh, sleep: noSleep, now: clock().now })).repo).toBe('my-cupitor')
+  })
+  test('generation that never shows cupitor.json within 30 s → timeout; the retry resumes without generating again', async () => {
+    const c = clock()
+    let created = false, markerReady = false
+    const gh = fakeGh({
+      'GET /repos/alice/cupitor-data': () => (created ? FROM_TEMPLATE : err(404)),
+      [GENERATE]: () => { created = true; return { name: 'cupitor-data' } },
+      'GET /repos/alice/cupitor-data/contents/cupitor.json': () => (markerReady ? { sha: 's' } : err(404)),
+    })
+    const sleeps = []
+    const sleep = async ms => { sleeps.push(ms); c.tick(10000) }
+    const p = ensureDataRepo({ login: 'alice', gh, sleep, now: c.now })
+    await expect(p).rejects.toMatchObject({ step: 'repo', code: 'timeout' })
+    expect(sleeps.length).toBeGreaterThan(0)
+    expect(sleeps.length).toBeLessThan(10)
+    // Retry: the repo exists (from the template) but is still filling in.
+    let polls = 0
+    gh.calls.length = 0
+    const steps = []
+    const retry = ensureDataRepo({
+      login: 'alice', gh, now: c.now, report: (s, st) => steps.push(`${s}:${st}`),
+      sleep: async () => { c.tick(2000); if (++polls === 2) markerReady = true },
+    })
+    expect(await retry).toEqual({ repo: 'cupitor-data', branch: 'main', created: false })
+    expect(gh.calls).not.toContain(GENERATE)
+    expect(steps).toEqual(['repo:checking', 'repo:creating', 'repo:done'])
+  })
+  test('generate answering 422 (the repo appeared meanwhile) resumes when it came from the template', async () => {
+    let exists = false, polls = 0
+    const gh = fakeGh({
+      'GET /repos/alice/cupitor-data': () => (exists ? FROM_TEMPLATE : err(404)),
+      [GENERATE]: () => { exists = true; return err(422, 'Name already exists on this account') },
+      'GET /repos/alice/cupitor-data/contents/cupitor.json': () => (++polls >= 2 ? { sha: 's' } : err(404)),
+    })
+    const steps = []
+    expect(await ensureDataRepo({ login: 'alice', gh, sleep: noSleep, now: clock().now, report: (s, st) => steps.push(`${s}:${st}`) }))
+      .toEqual({ repo: 'cupitor-data', branch: 'main', created: false })
+    expect(steps).toEqual(['repo:checking', 'repo:creating', 'repo:done'])
+  })
+  test('generate answering 422 for a repo that is not from the template → repo_taken', async () => {
+    let exists = false
+    const gh = fakeGh({
+      'GET /repos/alice/cupitor-data': () => (exists ? { name: 'cupitor-data' } : err(404)),
+      [GENERATE]: () => { exists = true; return err(422, 'Name already exists on this account') },
+    })
+    await expect(ensureDataRepo({ login: 'alice', gh, sleep: noSleep, now: clock().now }))
+      .rejects.toMatchObject({ step: 'repo', code: 'repo_taken' })
+  })
+  test('generate answering 422 with no repo there → a setup error for the step', async () => {
+    const gh = fakeGh({ 'GET /repos/alice/cupitor-data': err(404), [GENERATE]: err(422, 'Unprocessable') })
+    await expect(ensureDataRepo({ login: 'alice', gh, sleep: noSleep, now: clock().now }))
+      .rejects.toMatchObject({ step: 'repo', code: 'github', status: 422 })
+  })
+  test('a repo that is still empty (409 on contents) is waited for', async () => {
+    let polls = 0
+    const gh = fakeGh({
+      'GET /repos/alice/cupitor-data': FROM_TEMPLATE,
+      'GET /repos/alice/cupitor-data/contents/cupitor.json': () => (++polls >= 3 ? { sha: 's' } : err(409, 'Git Repository is empty.')),
+    })
+    expect((await ensureDataRepo({ login: 'alice', gh, sleep: noSleep, now: clock().now })).repo).toBe('cupitor-data')
+  })
+  test('GitHub failures become setup errors for the step and never create anything', async () => {
+    for (const [e, code, status] of [[err(500), 'github', 500], [err(401, 'Bad credentials'), 'unauthorized', 401], [new Error('GitHubProxy timeout'), 'github', 0]]) {
+      const gh = fakeGh({ 'GET /repos/alice/cupitor-data': e })
+      const p = ensureDataRepo({ login: 'alice', gh, sleep: noSleep, now: clock().now })
+      await expect(p).rejects.toThrow(SetupError)
+      await expect(p).rejects.toMatchObject({ step: 'repo', code, status })
+      expect(gh.calls).not.toContain(GENERATE)
+    }
+    // A failing marker check on an existing repo is not "not a data repo".
+    const gh = fakeGh({ 'GET /repos/alice/cupitor-data': FROM_TEMPLATE, 'GET /repos/alice/cupitor-data/contents/cupitor.json': err(503) })
+    await expect(ensureDataRepo({ login: 'alice', gh, sleep: noSleep, now: clock().now }))
+      .rejects.toMatchObject({ step: 'repo', code: 'github', status: 503 })
+  })
+  test('the owner never gets a repo created', async () => {
+    for (const login of ['trexsatya', 'TrexSatya']) {
+      const gh = fakeGh({})
+      expect(await ensureDataRepo({ login, gh, sleep: noSleep, now: clock().now }))
+        .toEqual({ repo: 'trexsatya.github.io', branch: 'gh-pages', created: false })
+      expect(gh.calls).toEqual([])
+    }
+  })
+  test('invalid login or repo name is refused before any call', async () => {
+    for (const [login, repoName, code] of [['a/b', undefined, 'bad_login'], [null, undefined, 'bad_login'], ['alice', '../x', 'bad_name'], ['alice', 'a b', 'bad_name'], ['alice', '', 'bad_name']]) {
+      const gh = fakeGh({})
+      await expect(ensureDataRepo({ login, repoName, gh, sleep: noSleep, now: clock().now }))
+        .rejects.toMatchObject({ step: 'repo', code })
+      expect(gh.calls).toEqual([])
+    }
   })
 })

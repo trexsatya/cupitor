@@ -61,26 +61,42 @@ export function isOwnerLogin(login) {
 
 // A display name comes from strangers: control characters (C0, DEL, C1),
 // bidi marks/overrides/isolates and invisible characters (soft hyphen,
-// zero-width, line/paragraph separators, BOM) are removed, the rest trimmed
-// and cut to 64 code points (a surrogate pair is never split). Empty →
+// zero-width space, line/paragraph separators, BOM, Hangul fillers, braille
+// blank, combining grapheme joiner, tag characters) are removed. The
+// zero-width non-joiner and joiner stay: Persian, Hindi and emoji sequences
+// need them. The rest is cut to 64 code points (a surrogate pair is never
+// split) and trimmed of whitespace and joiners at both ends. Nothing left →
 // fallback.
 export const MAX_NAME_LENGTH = 64
 // Code point ranges removed from names (kept as numbers so no invisible
 // character ever sits in this source file).
 const NAME_STRIP_RANGES = [
-  [0x0000, 0x001f], [0x007f, 0x009f], [0x00ad, 0x00ad], [0x061c, 0x061c],
-  [0x200b, 0x200f], [0x2028, 0x202e], [0x2060, 0x2069], [0xfeff, 0xfeff],
+  [0x0000, 0x001f], [0x007f, 0x009f], [0x00ad, 0x00ad], [0x034f, 0x034f],
+  [0x061c, 0x061c], [0x115f, 0x1160], [0x200b, 0x200b], [0x200e, 0x200f],
+  [0x2028, 0x202e], [0x2060, 0x2069], [0x2800, 0x2800], [0x3164, 0x3164],
+  [0xfeff, 0xfeff], [0xffa0, 0xffa0], [0xe0000, 0xe007f],
 ]
-const stripped = ch => {
+const JOINERS = [0x200c, 0x200d]
+const inRanges = (ch, ranges) => {
   const c = ch.codePointAt(0)
-  return NAME_STRIP_RANGES.some(([a, b]) => c >= a && c <= b)
+  return ranges.some(([a, b]) => c >= a && c <= b)
+}
+const stripped = ch => inRanges(ch, NAME_STRIP_RANGES)
+const blankEnd = ch => ch.trim() === '' || JOINERS.includes(ch.codePointAt(0))
+
+// Array of characters → the same without blank / joiner characters at the ends.
+function trimEnds(chars) {
+  let a = 0, b = chars.length
+  while (a < b && blankEnd(chars[a])) a++
+  while (b > a && blankEnd(chars[b - 1])) b--
+  return chars.slice(a, b)
 }
 
 export function cleanName(name, fallback) {
   if (typeof name !== 'string') return fallback
-  const kept = Array.from(name).filter(ch => !stripped(ch)).join('').trim()
-  const s = Array.from(kept).slice(0, MAX_NAME_LENGTH).join('').trim()
-  return s || fallback
+  const kept = trimEnds(Array.from(name).filter(ch => !stripped(ch)))
+  const s = trimEnds(kept.slice(0, MAX_NAME_LENGTH))
+  return s.length ? s.join('') : fallback
 }
 
 // A users.json entry made safe: login and repo are required, name defaults

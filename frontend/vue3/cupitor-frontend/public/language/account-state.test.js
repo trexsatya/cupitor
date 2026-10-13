@@ -95,6 +95,23 @@ describe('normalizeUser / defaultOther', () => {
     expect(name(`a${cp(0x202e)}evil${cp(0x2066)}x`)).toBe('aevilx')
     expect(name(`a${cp(0x200b)}b${cp(0xad)}c${cp(0xfeff)}d${cp(0x2028)}e${cp(0x61c)}f`)).toBe('abcdef')
     expect(name(cp(0x200b, 0x200d))).toBe('bob')
+    expect(name(cp(0x200c, 0x200d, 0x20))).toBe('bob')
+  })
+  test('name keeps the joiners real scripts and emoji need, drops other invisible fillers', () => {
+    const name = n => normalizeUser({ login: 'bob', repo: 'r', name: n }).name
+    const cp = (...xs) => String.fromCodePoint(...xs)
+    // Persian "salam-donya" with a zero-width non-joiner (U+200C) between the words.
+    const persian = cp(0x633, 0x644, 0x627, 0x645, 0x200c, 0x62f, 0x646, 0x6cc, 0x627)
+    expect(name(persian)).toBe(persian)
+    // Family emoji: man ZWJ woman ZWJ girl.
+    const family = cp(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467)
+    expect(name(`Ann ${family}`)).toBe(`Ann ${family}`)
+    // Joiners at the ends carry nothing and are trimmed.
+    expect(name(`${cp(0x200d)}Ann${cp(0x200c)}`)).toBe('Ann')
+    // Hangul fillers, combining grapheme joiner, braille blank, tag characters.
+    expect(name(cp(0x3164, 0x115f, 0x1160, 0xffa0))).toBe('bob')
+    expect(name(`A${cp(0x34f)}n${cp(0x2800)}n${cp(0xe0001, 0xe0041, 0xe007f)}`)).toBe('Ann')
+    expect(name(cp(0x2800, 0x3164, 0x200d))).toBe('bob')
     expect(name('x'.repeat(100))).toBe('x'.repeat(64))
     expect(name('😀'.repeat(70))).toBe('😀'.repeat(64))
     expect(name(`${'y'.repeat(63)} z`)).toBe('y'.repeat(63))
