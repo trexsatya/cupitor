@@ -1,0 +1,92 @@
+# Language app: recordings, search and device storage
+
+The language app source is under `public/language/`, with its page and styles
+in `public/language.html` and `public/language.css`.
+
+## Recordings storage
+
+Reading supports both the original playlist collection in `recordings.json`
+and the new `cupitor-recordings-v1` manifest. The next **Sync** migrates a
+legacy collection in one atomic GitHub commit. No separate migration step
+or changes in the native app are required.
+
+`db/language/<language>/recordings.json` contains playlist names, metadata,
+and ordered part paths. Each playlist has its own parts under `recordings/`.
+A large playlist is split into parts of at most 256 KiB. Parts are JSON arrays
+of rows: `[searchText]` creates a section, `[searchText, word]` creates a bucket,
+and `[searchText, word, card]` appends a card. Empty buckets, card order,
+manual card content, playlist settings and virtual members are preserved.
+A single card over 256 KiB is refused with a message; the sync writes nothing.
+
+Each part filename is the SHA-256 of its contents. Unchanged parts are reused.
+A cached manifest therefore always points to its own immutable snapshot. Old
+parts are retained, so a device reading an older manifest can finish loading.
+Only the current manifest's parts are loaded. Changing one playlist does not
+rewrite other playlists' parts.
+
+The existing three-way merge and conflict chooser operate on the reassembled
+collection. The root and new parts are committed together, with an index guard
+that retries if another device changes the manifest. A missing or unreadable
+part aborts the load/sync, rather than being interpreted as deleted cards.
+Local edits made during sync remain dirty afterwards. Other users' legacy or
+split playlists use the same reader and remain read-only.
+
+Deploy the updated client before the first migration; old clients only
+understand the legacy collection. A successful Sync uses browser Web Crypto
+SHA-256 support (HTTPS or localhost).
+
+## Search
+
+**Search channels** below the search box opens a searchable checklist of
+YouTube channels from both loaded libraries. No selection means all sources.
+Selecting channels restricts subtitle matching and corresponding-word guesses
+strictly to those channels. A filter that finds nothing stays empty; blocked
+channel fallback cannot pull in another channel. The selection is saved with
+the account's language settings. Local media and vocabulary results remain
+available when searching all sources; vocabulary results are independent of
+the channel filter.
+
+The translation summary has a reserved row. Its expanded answer overlays the
+results in a scrollable popup, so late answers and expansion do not move the
+results. The existing preference for open/closed translation is retained.
+
+Complete compound-word splits also run for already-known words. For example,
+`färgsprakande` can expose `färg` and `sprakande` instead of stopping at the
+whole word or consuming only `sprak` during the greedy scan.
+
+## Practice speed
+
+In Practice, open **⋯ → Speed cycle**, enter an ordered list such as
+`1, 0.75, 0.5` or `0.7, 0.5`, then press **Save speeds**. The speed button cycles
+through exactly that list and wraps to its beginning. Decimal points are used
+inside rates; commas, spaces or semicolons separate rates. Allowed rates are
+0.1–4. The list and selected rate persist across cards and sessions.
+YouTube receives the closest speed supported by the current video; the
+settings show the actual rate when it differs from the requested rate.
+
+## Cached data
+
+**Settings → Manage → Cached data** lists other accounts' and languages'
+subtitle databases, plus source users within the current cache. Removing a
+source clears only that user's downloaded subtitle pairs. Further writes for
+that source are suppressed until reload. Removing an inactive account/language
+cache deletes only that subtitle database. Playlists, pending edits, music,
+localStorage and credentials are unaffected. Libraries that remain enabled
+are downloaded again on the next reload.
+
+Connections close on IndexedDB version-change requests. A database held open
+by an older tab reports that the tab must be closed. Browsers without
+`indexedDB.databases()` list the current cache and caches recorded since this
+update.
+
+Number-of-results and context-line inputs debounce redraws without dismissing
+Settings or moving focus. Settings closes through its close button, Escape,
+the gear, or an action that opens another dialog.
+
+## Verification
+
+Run `npx jest public/language public/github-utils.test.js --runInBand` for the
+language and sync tests, and `npm run build` for the production bundle.
+The new tests cover legacy migration, large-file splitting, round trips,
+concurrent index edits, failed/missing reads, cache isolation, strict channel
+limits, compound heads and custom speed cycling.
