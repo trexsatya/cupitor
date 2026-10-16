@@ -55,7 +55,7 @@ SHA-256 support (HTTPS or localhost).
 
 ## Search
 
-**Search channels** below the search box opens a searchable checklist of
+**Settings → Search channels** opens a searchable checklist of
 YouTube channels from both loaded libraries. No selection means all sources.
 Selecting channels restricts subtitle matching and corresponding-word guesses
 strictly to those channels. A filter that finds nothing stays empty; blocked
@@ -63,6 +63,16 @@ channel fallback cannot pull in another channel. The selection is saved with
 the account's language settings. Local media and vocabulary results remain
 available when searching all sources; vocabulary results are independent of
 the channel filter.
+
+Dialogs close through their X, Escape, or action buttons. Clicking elsewhere
+does not dismiss a dialog or discard staged input. Opening a dialog from
+Settings still replaces Settings. Outside-click dismissal is scoped to small
+popovers and menus, so a new dialog needs no exception in a global handler.
+
+The browser regression test runs in the frontend deployment workflow. To run
+it locally, install Chromium with `npx playwright install chromium`, then run
+`node tests/browser/language-dialogs.cjs` from the frontend directory. It uses
+fixture subtitles without accessing real accounts or libraries.
 
 The translation summary has a reserved row. Its expanded answer overlays the
 results in a scrollable popup, so late answers and expansion do not move the
