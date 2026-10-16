@@ -228,6 +228,7 @@ if (require.main === module) (async () => {
   try {
     await checkDialogs(browser, false)
     await checkDialogs(browser, true)
+    await require('./practice-controls.cjs').checkPracticeControls(browser)
   } finally {
     await browser.close()
   }

@@ -1,4 +1,6 @@
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
+import { createPracticeVideoCues } from './practice-video.js';
+import { keyboardShortcut, KEYBOARD_SHORTCUTS } from './keyboard-shortcuts.js';
 import { parsePracticeSpeeds, practiceSpeeds, nextPracticeSpeed, supportedPracticeSpeed } from './practice-speed.js';
 import { loadRecordingsFiles, syncRecordingsFiles } from './recordings-store.js';
 import { listRecordingsParts } from './recordings-gc.js';
@@ -3743,6 +3745,12 @@ $('document').ready(e => {
 
   try {
     document.onkeyup = result.onkeyup = e => {
+      // Practice and playlist playback handle keydown themselves. Running the
+      // old transport again on keyup resumes a just-paused clip or seeks a
+      // newly cued card, which can start it playing.
+      if (window._practiceActive || window._playingRecording || e.defaultPrevented || e.isComposing ||
+          e.ctrlKey || e.altKey || e.metaKey || $('.ui-dialog:visible').length ||
+          e.target?.isContentEditable || $(e.target).closest('input,textarea,select,audio,video,[role="textbox"],[role="combobox"],[role="slider"],.ck').length) return
       if (e.which === 32 && !$(e.target).is('input')) { //Space
         togglePlay()
         e.preventDefault()
@@ -4127,10 +4135,10 @@ function populateSearchWords(sub, $el) {
   });
 }
 
-function changeMediaIfNeededTo(media) {
+function changeMediaIfNeededTo(media, options) {
   const alreadyBeingPlayed = window.playingYoutubeVideo && _.isEqual(window.mediaBeingPlayed, media);
   if (!alreadyBeingPlayed && media.source === 'link') {
-    return loadYoutubeVideo(media.link)
+    return loadYoutubeVideo(media.link, options)
   }
   return new Promise(resolve => resolve())
 }
@@ -4322,13 +4330,16 @@ const renderSubtitles = () => {
   lastSub = currentSub
 }
 
-async function seekToYoutubeTime(t) {
+async function seekToYoutubeTime(t, { isCurrent = () => true } = {}) {
+  if (!isCurrent()) return
   if (!window.ytPlayer || typeof window.ytPlayer.seekTo !== 'function') return
   const target = Number(t) || 0
   let beforeCt = 0
   try { beforeCt = window.ytPlayer.getCurrentTime() || 0 } catch (_) {}
   console.log('Seek request, target=', fromSeconds(target), 'currentTime=', fromSeconds(beforeCt))
   window.seekRequestProcessing = true
+  const request = window._youtubeSeekToken = (window._youtubeSeekToken || 0) + 1
+  const finish = () => { if (request === window._youtubeSeekToken) window.seekRequestProcessing = false }
   try { window.ytPlayer.seekTo(target, true) } catch (_) {}
 
   // Bounded poll: every 100ms for up to 3s, looking for the playhead to land
@@ -4347,12 +4358,13 @@ async function seekToYoutubeTime(t) {
   return new Promise(resolve => {
     let ticks = 0
     const id = setInterval(() => {
+      if (!isCurrent() || request !== window._youtubeSeekToken) { clearInterval(id); finish(); resolve(); return }
       ticks++
       let ct = 0
       try { ct = window.ytPlayer.getCurrentTime() || 0 } catch (_) {}
       if (Math.abs(ct - target) <= TOLERANCE) {
         clearInterval(id)
-        window.seekRequestProcessing = false
+        finish()
         window.proxyYoutubeCurrentTime = target
         console.log('Seek request completed', fromSeconds(target), 'currentTime=', fromSeconds(ct))
         return resolve()
@@ -4362,7 +4374,7 @@ async function seekToYoutubeTime(t) {
       }
       if (ticks >= MAX_TICKS) {
         clearInterval(id)
-        window.seekRequestProcessing = false
+        finish()
         console.warn('seekToYoutubeTime: timed out without converging — proceeding anyway', { target, currentTime: ct })
         return resolve()
       }
@@ -8828,8 +8840,9 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 // 3. This function creates an <iframe> (and YouTube player)
 //    after the API code downloads.
 
-async function loadYoutubeVideo(videoId) {
-  await waitUntil(() => window.ytPlayerReady && window.ytPlayer.getIframe())
+async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds, respectInterval = true } = {}) {
+  await waitUntil(() => !isCurrent() || (window.ytPlayerReady && window.ytPlayer.getIframe()))
+  if (!isCurrent()) return
   showMediaContainer()
   // Play / practice modes drive everything through their own floating overlay,
   // so the side player panel (speed controls, starred lines, etc.) just gets in
@@ -8848,8 +8861,9 @@ async function loadYoutubeVideo(videoId) {
     // covers the first; callers that only want the video loaded still call
     // _suppressYoutubeAutoplay(), unchanged.
     const settle = () => {
+      if (!isCurrent()) { resolve(); return }
       try { setSpeed() } catch (_) {}
-      if (window.youtubePlayInterval) {
+      if (respectInterval && window.youtubePlayInterval) {
         try { seekToYoutubeTime(window.youtubePlayInterval.start) } catch (_) {}
       }
       resolve()
@@ -8859,13 +8873,14 @@ async function loadYoutubeVideo(videoId) {
       // navigation tore down a player document and built another, and each
       // player holds a hardware video decoder — a small, fixed, per-device
       // allowance that has nothing to do with how much memory is free.
-      window.ytPlayer.loadVideoById(videoId)
+      window.ytPlayer.loadVideoById(startSeconds == null ? videoId : { videoId, startSeconds })
       // There is no `load` event to wait on any more, so poll the player for
       // the new id. Bounded deliberately: waitUntil never gives up, and a
       // video that turns out to be unplayable must not leave every caller
       // awaiting a promise that can no longer settle.
       const deadline = Date.now() + 10000
       const tick = () => {
+        if (!isCurrent()) { resolve(); return }
         let loaded = false
         try {
           const d = window.ytPlayer.getVideoData && window.ytPlayer.getVideoData()
@@ -14176,15 +14191,16 @@ async function _cueManualCardVideo(it) {
   // Only the latest cue may move the player: a cue still loading when another
   // card asks for its own video must not seek that one to its time.
   const tok = window._manualCueToken = (window._manualCueToken || 0) + 1
+  const target = _youtubeStartSeconds(it.mediaUrl)
+  const isCurrent = () => tok === window._manualCueToken
   window.mediaSelected = { link: id, source: 'link' }
-  await changeMediaIfNeededTo(window.mediaSelected)
+  await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: target, respectInterval: false })
   if (tok !== window._manualCueToken) return
   // Always made, so a video already loaded also goes back to the start a link
   // without a time means. A seek issued while a fresh video is still starting
   // up is dropped by the player, so it is repeated until it holds — but only
   // while this is still the latest cue and the player still holds this video,
   // never onto another card's.
-  const target = _youtubeStartSeconds(it.mediaUrl)
   const mine = () => {
     if (tok !== window._manualCueToken) return false
     try { const d = window.ytPlayer.getVideoData(); return !d || !d.video_id || d.video_id === id } catch (_) { return true }
@@ -20053,6 +20069,18 @@ function stopPlayingRecording() {
 }
 
 // ─── Practice (flashcard) mode ───────────────────────────────────────────
+const _practiceVideoCues = createPracticeVideoCues({
+  getPlayer: () => window.ytPlayer,
+  isReady: () => window.ytPlayerReady && typeof window.ytPlayer?.cueVideoById === 'function',
+  isActive: () => !!window._practiceActive,
+  waitUntil
+})
+let _practiceRenderToken = 0
+function _newPracticeVideoRequest() {
+  window._manualCueToken = (window._manualCueToken || 0) + 1
+  if (!window.ytPlayerReady) window._ytReadyAutoplaySuppressed = true
+  return _practiceVideoCues.invalidate()
+}
 // Card-based, no timer. Each card is a shuffled playlist item showing the
 // matched subtitle line in the "front" language, a Reveal button for the
 // other language, and the YouTube clip cued (NOT auto-played) at the item's
@@ -20156,6 +20184,7 @@ function openPracticeMode(opts) {
         <div class="practice-info-meta"></div>
       </div>
       <div class="practice-settings-panel" style="display:none;">
+        <button type="button" class="keyboard-shortcuts-btn">Keyboard shortcuts (?)</button>
         <div class="practice-settings-row practice-speeds-row">
           <label><span class="practice-settings-lbl">Speed cycle</span>
             <input type="text" class="practice-speeds-input" aria-label="Speed cycle" placeholder="1, 0.75, 0.5">
@@ -20354,6 +20383,8 @@ $(document).on('click', '#practiceMode .card-html img, #recPlayingSubs .card-htm
 
 function closePracticeMode() {
   window._practiceActive = false
+  _practiceRenderToken++
+  _newPracticeVideoRequest()
   // The card may have been deleted or changed while it was open.
   if (window._practiceSingle) {
     window._practiceSingle = false
@@ -20863,13 +20894,16 @@ async function playPracticeClip() {
   const idx = window._practiceIdx
   const it = window._practiceCards && window._practiceCards[idx]
   if (!it) return
+  const videoRequest = _newPracticeVideoRequest()
   // Each clip gets a token so a stale stop-watcher (or a card switch mid-load)
   // can't pause a later clip.
   const token = (window._practiceClipToken = (window._practiceClipToken || 0) + 1)
+  const isCurrent = () => _practiceVideoCues.isCurrent(videoRequest) && window._practiceIdx === idx && token === window._practiceClipToken
+  window._practicePlayPending = token
   try {
     const { start, stop } = await _practiceClipRange(
       it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0)
-    if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
+    if (!isCurrent()) return
     // Speaking over runs on the same clip: its first rewind lands here, and
     // the pass after a take stops where the card's lines end.
     if (_pracRec && _pracRec.key === _pracRecKey(it)) {
@@ -20883,10 +20917,11 @@ async function playPracticeClip() {
     try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
     if (needLoad) {
       window.mediaSelected = { link: it.id, source: 'link' }
-      await changeMediaIfNeededTo(window.mediaSelected)
+      await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: start, respectInterval: false })
     }
-    await seekToYoutubeTime(start)
-    if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
+    if (!isCurrent()) return
+    await seekToYoutubeTime(start, { isCurrent })
+    if (!isCurrent()) return
     // Playing the clip again is a fresh listen, so every take sounds at its
     // mark — including any the pass after a recording was holding back. The
     // watcher also lets go on a big enough jump, but starting from near the
@@ -20910,8 +20945,10 @@ async function playPracticeClip() {
     _updatePracticeSpeedBtn()
     try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(rate) } catch (_) {}
     try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
+    window._practicePlaybackCard = it
     _watchPracticeClipEnd(clipEnd, token)
   } catch (e) { console.warn('practice: play failed', e) }
+  finally { if (window._practicePlayPending === token) window._practicePlayPending = null }
 }
 
 // ─── Shadowing takes in Practice ──────────────────────────────────────────
@@ -21477,6 +21514,10 @@ function _practiceRenderLines($container, rows, langKey, highlightWord) {
 async function _renderPracticeCard() {
   const $p = $('#practiceMode')
   if (!$p.length) return
+  const renderToken = ++_practiceRenderToken
+  const videoRequest = _newPracticeVideoRequest()
+  window._practicePlayPending = null
+  window._practicePlaybackCard = null
   // Switching cards invalidates any running clip stop-watcher so it can't pause
   // the freshly-cued clip.
   window._practiceClipToken = (window._practiceClipToken || 0) + 1
@@ -21518,7 +21559,7 @@ async function _renderPracticeCard() {
   // Show the card only after subtitles + vocabulary are loaded, so the subtitle
   // lines and the word-translation fallback below are complete rather than empty.
   try { await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise].map(p => Promise.resolve(p).catch(() => {}))) } catch (_) {}
-  if (window._practiceIdx !== idx) return  // user moved on while we waited
+  if (!window._practiceActive || renderToken !== _practiceRenderToken) return
   // Video card path follows — first restore any controls the manual path hides,
   // and hand the slot back to the video.
   _showPracticeAudioPanel(null)
@@ -21555,10 +21596,10 @@ async function _renderPracticeCard() {
   _updatePracticeRestoreCount()
 
   // Cue the clip (paused — it must NOT auto-play in practice mode).
-  _cuePracticeVideo(it)
+  _cuePracticeVideo(it, videoRequest)
 
   const rows = await _practiceCardLines(it, window._practiceCtxBefore || 0, window._practiceCtxAfter || 0)
-  if (window._practiceIdx !== idx) return   // user moved on while we awaited
+  if (!window._practiceActive || renderToken !== _practiceRenderToken) return
   if (!rows || !rows.length) {
     $p.find('.practice-front').html('<div class="practice-loading">(subtitle text unavailable)</div>')
     return
@@ -21768,19 +21809,14 @@ async function _practiceCommitEdit() {
   _renderPracticeCard()
 }
 
-async function _cuePracticeVideo(it) {
+async function _cuePracticeVideo(it, request) {
   try {
+    if (!_practiceVideoCues.isCurrent(request)) return
     showMediaContainer()
     window.mediaSelected = { link: it.id, source: 'link' }
     window.playingYoutubeVideo = true
     window.syncSubtitle = false
-    let needLoad = true
-    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
-    if (needLoad) await changeMediaIfNeededTo(window.mediaSelected)
-    await seekToYoutubeTime(it.timeStart)
-    // Pause insistently so the cued clip doesn't run on its own.
-    try { window.ytPlayer.pauseVideo() } catch (_) {}
-    setTimeout(() => { try { window.ytPlayer.pauseVideo() } catch (_) {} }, 120)
+    await _practiceVideoCues.cue(it.id, it.timeStart, request)
   } catch (e) { console.warn('practice: cue video failed', e) }
 }
 
@@ -21816,19 +21852,86 @@ async function _practiceCardLines(it, before, after) {
   return rows
 }
 
-// Keyboard: arrows navigate, R reveals, Esc closes — only while practicing
-// and not while typing in the inline editor.
+// The reference and shortcuts share the same definitions. Dialogs and text
+// editing keep their own keyboard behavior, including IME composition.
+function openKeyboardShortcuts() {
+  try { autoHideSettingsPanel() } catch (_) {}
+  let $dlg = $('#keyboardShortcutsDialog')
+  if (!$dlg.length) $dlg = $('<div id="keyboardShortcutsDialog" title="Keyboard shortcuts"></div>').appendTo('body')
+  $dlg.empty()
+  for (const scope of ['General', 'Search', 'Practice']) {
+    $dlg.append($('<h3></h3>').text(scope))
+    const $table = $('<table class="keyboard-shortcuts-table"></table>').appendTo($dlg)
+    KEYBOARD_SHORTCUTS.filter(s => s.scope === scope).forEach(s => {
+      const $row = $('<tr></tr>').appendTo($table)
+      $('<td></td>').append(s.keys.map(key => $('<kbd></kbd>').text(key).get(0))).appendTo($row)
+      $('<td></td>').text(s.label).appendTo($row)
+    })
+  }
+  $dlg.append('<p>Shortcuts pause while typing or editing a dialog. If YouTube has keyboard focus, click the card first. Focused buttons keep their normal Space action.</p>')
+  const options = {
+    width: Math.min(560, window.innerWidth - 24), maxHeight: window.innerHeight - 40,
+    modal: true, draggable: false, resizable: false,
+    open: function () {
+      $(this).closest('.ui-dialog').addClass('above-practice-mode').css('z-index', 100020)
+        .attr('tabindex', '-1').trigger('focus')
+    }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) $dlg.dialog('option', options).dialog('open')
+  else $dlg.dialog(options)
+}
+window.openKeyboardShortcuts = openKeyboardShortcuts
+$(document).on('click', '.keyboard-shortcuts-btn', openKeyboardShortcuts)
+
+function _togglePracticePlayback() {
+  const it = (window._practiceCards || [])[window._practiceIdx]
+  if (!it) return
+  if (_isManualItem(it)) {
+    const audio = $('#practiceAudio .rec-pa-el')[0]
+    if (audio && audio.src) {
+      if (!audio.paused) audio.pause()
+      else { try { Promise.resolve(audio.play()).catch(() => {}) } catch (_) {} }
+    } else if (_cardHasVideoLink(it)) {
+      try {
+        if ([1, 3].includes(window.ytPlayer?.getPlayerState())) window.ytPlayer.pauseVideo()
+        else $('#practiceMode .practice-media-link').trigger('click')
+      } catch (_) {}
+    }
+    return
+  }
+  const player = window.ytPlayer
+  let state = -1
+  try { state = player?.getPlayerState() } catch (_) {}
+  if ([1, 3].includes(state) || window._practicePlayPending) {
+    _newPracticeVideoRequest()
+    window._practicePlayPending = null
+  } else if (state === 2 && window._practicePlaybackCard === it && window._practiceClipTimer) {
+    // Resume a paused listen, retaining its original clip-end watcher.
+    _newPracticeVideoRequest()
+    try { player.playVideo() } catch (_) {}
+  } else playPracticeClip()
+}
+
 $(document).on('keydown', function (e) {
-  if (!window._practiceActive) return
-  const tag = (e.target && e.target.tagName || '').toLowerCase()
-  if (tag === 'input' || tag === 'textarea') return
-  // Keys typed into a dialog over Practice (the card editor, its rich-text
-  // editor — a contenteditable, not a textarea) are that dialog's, not ours.
-  if (e.target && (e.target.isContentEditable || $(e.target).closest('.ui-dialog, .ck').length)) return
-  if (e.key === 'Escape')          { e.preventDefault(); closePracticeMode() }
-  else if (e.key === 'ArrowLeft')  { e.preventDefault(); practiceNav(-1) }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); practiceNav(1) }
-  else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); revealPracticeCard() }
+  const target = e.target
+  const action = keyboardShortcut(e.originalEvent || e, {
+    practice: !!window._practiceActive,
+    typing: !!(target && (target.isContentEditable || $(target).closest('input,textarea,select,audio,video,[role="textbox"],[role="combobox"],[role="slider"],.ck').length)),
+    dialogOpen: $('.ui-dialog:visible').length > 0,
+    buttonFocused: !!(target && $(target).closest('button,a,[role="button"]').length),
+    searchAvailable: $('#searchText').is(':visible') && !window._playingRecording
+  })
+  if (!action) return
+  e.preventDefault()
+  const actions = {
+    help: openKeyboardShortcuts,
+    search: () => { const input = $('#searchText')[0]; input.focus(); input.select() },
+    previous: () => practiceNav(-1), next: () => practiceNav(1),
+    play: _togglePracticePlayback, reveal: revealPracticeCard,
+    direction: togglePracticeDir, speed: () => { if (!$('#practiceMode .practice-play').is(':hidden')) cyclePracticePlaybackRate() },
+    close: closePracticeMode
+  }
+  actions[action]()
 })
 
 // Delegated handlers — wired once at document ready below.
@@ -21934,6 +22037,9 @@ $(document).on('keydown', '.edit-line-input', function (e) {
 // type in dialogs that happen to be open.
 $(document).on('keydown', function (e) {
   if (!window._playingRecording) return
+  if (e.isDefaultPrevented() || e.originalEvent?.isComposing || e.ctrlKey || e.altKey || e.metaKey ||
+      $('.ui-dialog:visible').length || e.target?.isContentEditable ||
+      $(e.target).closest('input,textarea,select,audio,video,[role="textbox"],[role="combobox"],[role="slider"],.ck').length) return
   // Not while Practice is up. A session does not end when Practice opens — it
   // is only paused — and both views bind the document, so without this the
   // arrow keys turn a Practice card AND move the deck's queue behind it, and

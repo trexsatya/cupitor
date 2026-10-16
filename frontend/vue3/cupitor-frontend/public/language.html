@@ -76,10 +76,12 @@
         const {ytVideoWidth, ytHeight, subWidth} = getDimensionsForPlayer();
         // 4. The API will call this function when the video player is ready.
         function onPlayerReady(event) {
-            event.target.playVideo();
+            if (window._practiceActive || window._ytReadyAutoplaySuppressed) event.target.pauseVideo();
+            else event.target.playVideo();
+            window._ytReadyAutoplaySuppressed = false;
             window.ytPlayerReady = true
 
-            if (window.youtubePlayInterval) {
+            if (!window._practiceActive && window.youtubePlayInterval) {
                 seekToYoutubeTime(window.youtubePlayInterval.start)
             }
         }
@@ -251,6 +253,7 @@
                 <div id="settingsPanel" class="lang-panel" style="display: none;">
                 <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
                     <button type="button" id="searchChannelsBtn" class="lang-tool-btn">Search channels: all</button>
+                    <button type="button" class="lang-tool-btn keyboard-shortcuts-btn">Keyboard shortcuts</button>
                     <label class="lang-panel-label">
                         Show
                         <input type="number" id="numberOfFindingsToShow" value="10" style="width: 46px; margin-left: 4px;">

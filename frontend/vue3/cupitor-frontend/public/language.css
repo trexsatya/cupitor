@@ -4737,3 +4737,10 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 #accountDialog .acct-remember { display: block; margin: 4px 0; font-weight: normal; }
 #accountDialog .acct-setup, #accountDialog .acct-token, #accountDialog .acct-other { border-top: 1px solid #eee; padding-top: 6px; margin-top: 6px; }
 #accountDialog .acct-other select { max-width: 100%; margin-left: 4px; }
+
+#keyboardShortcutsDialog, #keyboardShortcutsDialog table { color: #24292f; background: #fff; }
+.keyboard-shortcuts-table { width: 100%; border-collapse: collapse; }
+.keyboard-shortcuts-table td { padding: 5px 8px; vertical-align: top; }
+.keyboard-shortcuts-table td:first-child { white-space: nowrap; width: 7em; }
+.keyboard-shortcuts-table kbd { display: inline-block; margin-right: 4px; padding: 2px 5px; border: 1px solid #bcc4cc; border-radius: 3px; background: #f6f8fa; color: #24292f; }
+#keyboardShortcutsDialog p { font-size: .85em; color: #57606a; }
