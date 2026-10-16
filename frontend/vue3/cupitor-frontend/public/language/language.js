@@ -1,3 +1,7 @@
+import { parsePracticeSpeeds, practiceSpeeds, nextPracticeSpeed, supportedPracticeSpeed } from './practice-speed.js';
+import { parseRecordingsRoot, readRecordings, syncRecordingsFiles } from './recordings-store.js';
+import { rememberCache, listSubtitleCaches, cacheSources, removeCacheSource, deleteSubtitleCache } from './cache-manager.js';
+import { filterSearchChannels, searchChannelOptions } from './search-channels.js';
 import {computeIfAbsent, range, schedule, uuid} from '../data-structures.js';
 import {conjugateTableSpanish} from './spanish.js';
 import {
@@ -1727,7 +1731,9 @@ const SETTINGS_HANDOFF_MS = 3000
 let _settingsClickAt = 0
 document.addEventListener('click', e => {
   const t = e.target
-  if (t && t.closest && t.closest('#settingsPanel')) _settingsClickAt = Date.now()
+  if (t && t.closest && t.closest('#settingsPanel')) {
+    _settingsClickAt = t.closest('button, a') ? Date.now() : 0
+  }
 }, true)
 $(document).on('dialogopen', e => {
   if (!e.target || e.target.id === 'settingsPanel') return
@@ -2477,6 +2483,9 @@ window._appSettings = {
   // Channel names whose subtitles are demoted to fallback — shown ONLY when
   // a word has no match from a non-blocked channel.
   blockedChannels: [],
+  searchChannels: [],
+  practicePlaybackRate: 1,
+  practiceSpeedOptions: [1, 0.75, 0.5],
   // Seconds the recording-playback waits between items.
   recPlayGapSeconds: 30,
   // Background music hushed by hand from its panel. Kept with the settings
@@ -2833,6 +2842,111 @@ function saveAppSettings() {
   }
 }
 window.saveAppSettings = saveAppSettings
+
+// Numeric settings redraw results without opening/closing dialogs or taking
+// focus. Debounce typing and give each redraw a token so stale work retires.
+let _settingsRedrawTimer = null
+function _redrawSearchSettings() {
+  clearTimeout(_settingsRedrawTimer)
+  if (!window.searchResult || !window.searchText) return
+  const token = window._subtitleSearchToken = (window._subtitleSearchToken || 0) + 1
+  _settingsRedrawTimer = setTimeout(() => {
+    if (token !== window._subtitleSearchToken) return
+    window._searchResultPage = 0
+    render(window.searchResult, window.searchText, undefined, token)
+      .catch(e => console.warn('settings redraw failed', e))
+  }, 120)
+}
+
+function _filterSearchChannels(items) {
+  return filterSearchChannels(items, window._appSettings.searchChannels, window.srts || [])
+}
+function _updateSearchChannelsButton() {
+  const chosen = window._appSettings.searchChannels || []
+  $('#searchChannelsBtn').text(chosen.length ? `Search channels: ${chosen.length} selected` : 'Search channels: all')
+}
+function openSearchChannelsDialog() {
+  let $dlg = $('#searchChannelsDialog')
+  if (!$dlg.length) $dlg = $('<div id="searchChannelsDialog"></div>').appendTo('body')
+  const selected = new Set(window._appSettings.searchChannels || [])
+  const channels = searchChannelOptions(window.srts || [], [...selected])
+  $dlg.empty().append('<p>Search only these YouTube channels. Leave all unchecked to search every source.</p>')
+  const $find = $('<input type="search" placeholder="Find a channel…" aria-label="Find a channel">').appendTo($dlg)
+  const $list = $('<div class="channel-filter-list"></div>').appendTo($dlg)
+  channels.forEach(channel => {
+    const $row = $('<label></label>').appendTo($list)
+    $('<input type="checkbox">').val(channel).prop('checked', selected.has(channel)).appendTo($row)
+    $row.append(document.createTextNode(' ' + channel))
+  })
+  if (!channels.length) $list.text('No YouTube channels are loaded yet.')
+  $find.on('input', () => {
+    const query = String($find.val() || '').toLowerCase()
+    $list.children('label').each(function () { $(this).toggle($(this).text().toLowerCase().includes(query)) })
+  })
+  const options = {
+    title: 'Limit search by YouTube channel', width: Math.min(560, window.innerWidth - 24),
+    maxHeight: window.innerHeight - 40, modal: false,
+    buttons: {
+      'Select all': () => $list.find('input').prop('checked', true),
+      'Clear': () => $list.find('input').prop('checked', false),
+      'Apply': () => {
+        window._appSettings.searchChannels = $list.find('input:checked').map((i, e) => e.value).get()
+        saveAppSettings()
+        _updateSearchChannelsButton()
+        $dlg.dialog('close')
+        _redrawSearchSettings()
+      },
+      'Cancel': () => $dlg.dialog('close')
+    },
+    open: function () { $(this).closest('.ui-dialog').attr('tabindex', -1).trigger('focus') }
+  }
+  if ($dlg.hasClass('ui-dialog-content')) $dlg.dialog('option', options).dialog('open')
+  else $dlg.dialog(options)
+}
+window.openSearchChannelsDialog = openSearchChannelsDialog
+
+async function openSubtitleCacheDialog() {
+  let $dlg = $('#subtitleCacheDialog')
+  if (!$dlg.length) $dlg = $('<div id="subtitleCacheDialog"></div>').appendTo('body')
+  $dlg.empty().append('<p>Remove downloaded subtitles by account or source. Your playlists and pending edits are kept. Enabled libraries download again on the next reload.</p>')
+  const $body = $('<div>Loading cached data…</div>').appendTo($dlg)
+  const options = { title: 'Cached data on this device', width: Math.min(620, window.innerWidth - 24),
+    maxHeight: window.innerHeight - 40, modal: false,
+    buttons: { Close: () => $dlg.dialog('close') } }
+  if ($dlg.hasClass('ui-dialog-content')) $dlg.dialog('option', options).dialog('open')
+  else $dlg.dialog(options)
+  if (typeof indexedDB === 'undefined') { $body.text('IndexedDB is unavailable.'); return }
+  try {
+    const current = _cacheDbName()
+    const databases = await listSubtitleCaches(indexedDB, localStorage, current)
+    const db = await _openSubtitlesCache()
+    const sources = db ? await cacheSources(db, _sourceOwner('primary')) : []
+    $body.empty()
+    const row = (label, action) => {
+      const $row = $('<div class="cache-manager-row"></div>').appendTo($body)
+      $('<span></span>').text(label).appendTo($row)
+      const $btn = $('<button type="button" class="lang-tool-btn">Remove</button>').appendTo($row)
+      $btn.on('click', async () => {
+        if (!confirm(`Remove cached subtitles for ${label}?`)) return
+        $btn.prop('disabled', true)
+        try { await action(); $row.remove() }
+        catch (e) { alert(e.message || String(e)); $btn.prop('disabled', false) }
+      })
+    }
+    databases.filter(d => d.name !== current).forEach(d => row(`${d.account} / ${d.language}`, () => deleteSubtitleCache(indexedDB, d.name)))
+    sources.forEach(source => row(`${source.owner} / ${getLangFromUrl().fullName} (${source.count} subtitle pair${source.count === 1 ? '' : 's'}, current account)`, async () => {
+      _cacheSuppressedOwners.add(source.owner)
+      try { await removeCacheSource(db, source.owner, _sourceOwner('primary')) }
+      catch (e) { _cacheSuppressedOwners.delete(source.owner); throw e }
+    }))
+    if (!$body.children().length) $body.text('No cached subtitles found.')
+    if (typeof indexedDB.databases !== 'function') {
+      $('<p></p>').text('This browser can list only caches opened since this update.').appendTo($body)
+    }
+  } catch (e) { $body.text('Could not read cached data: ' + (e.message || e)) }
+}
+window.openSubtitleCacheDialog = openSubtitleCacheDialog
+
 
 // ──────────────────────────────────────────────────────────────────────
 // Practice Log / Schedule
@@ -3575,7 +3689,7 @@ $('document').ready(e => {
       // option too, which a stray click should not throw away.
       // #accountDialog opens from the Account / banner buttons and from a
       // blocked save, all outside any dialog, and stages a typed token.
-      $(".ui-dialog-content:visible").not("#accountDialog,#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#richCardEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog,#replaceItemDialog").dialog("close");
+      $(".ui-dialog-content:visible").not("#settingsPanel,#subtitleCacheDialog,#searchChannelsDialog,#accountDialog,#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#richCardEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog,#replaceItemDialog").dialog("close");
     }
   });
 
@@ -3708,9 +3822,7 @@ $('document').ready(e => {
     setSpeed()
   })
 
-  $('#numberOfFindingsToShow').change(e => {
-    render(window.searchResult, window.searchText)
-  })
+  $('#numberOfFindingsToShow').change(_redrawSearchSettings)
 
   // Context-lines settings: update the in-memory copy, re-render the
   // current results so the new window takes effect, and debounce-save to
@@ -3721,11 +3833,13 @@ $('document').ready(e => {
     const after = parseInt($('#contextLinesAfter').val(), 10)
     if (Number.isFinite(before)) window._appSettings.contextLinesBefore = Math.max(0, Math.min(20, before))
     if (Number.isFinite(after)) window._appSettings.contextLinesAfter = Math.max(0, Math.min(20, after))
-    if (window.searchResult) render(window.searchResult, window.searchText)
+    _redrawSearchSettings()
     saveAppSettings()
   }
   $('#contextLinesBefore').on('change input', _onContextChange)
   $('#contextLinesAfter').on('change input', _onContextChange)
+  $('#searchChannelsBtn').on('click', openSearchChannelsDialog)
+  _updateSearchChannelsButton()
 
   // Clip-window bounds (see contiguousClipWindow). Gap threshold applies to both
   // auto-built and captured clips; max duration caps auto-built clips only.
@@ -4811,6 +4925,7 @@ const CUPITOR_CACHE_SCHEMA = 1
 
 let _cacheDbPromise = null
 let _cacheDbDisabled = false
+const _cacheSuppressedOwners = new Set()
 
 function _cacheDbName() {
   // Per-language DB so swedish/spanish caches don't trample each other.
@@ -4840,7 +4955,12 @@ function _openSubtitlesCache() {
         db.createObjectStore(CUPITOR_CACHE_STORE, { keyPath: 'link' })
       }
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      const db = req.result
+      db.onversionchange = () => { db.close(); _cacheDbPromise = null }
+      try { rememberCache(db.name, localStorage) } catch (_) {}
+      resolve(db)
+    }
     req.onerror = () => {
       console.warn('[cache] indexedDB.open errored — running in no-cache mode', req.error)
       _cacheDbDisabled = true
@@ -4887,7 +5007,7 @@ async function _cacheWriteMany(entries) {
       const tx = store.transaction
       const now = Date.now()
       for (const e of entries) {
-        if (!e || !e.link) continue
+        if (!e || !e.link || _cacheSuppressedOwners.has(e.owner || _sourceOwner('primary'))) continue
         try { store.put({ link: e.link, name: e.name, sv: e.sv, en: e.en, source: e.source, owner: e.owner, cachedAt: now }) } catch (_) {}
       }
       tx.oncomplete = () => resolve()
@@ -6746,7 +6866,7 @@ function _applyBlockedChannelFallback(items) {
 }
 
 function groupAndArrangeResults(items) {
-  return _coreGroupAndArrangeResults(items, {
+  return _coreGroupAndArrangeResults(_filterSearchChannels(items), {
     lodash: _,
     categories: window.categories || {},
     mediaFileNames: window.allMediaFileNames || [],
@@ -7889,11 +8009,14 @@ export function renderVocabularyFindings(search) {
   // wordIsInVocabularyLine fallback, which also expands). wordIsExactInVocabularyLine
   // then compares the search against the line's `|`-separated PHRASES.
   const _vlang = (typeof getLangFromUrl === 'function' ? getLangFromUrl().code : null) || 'sv'
-  let matcher = (ln) => wordIsExactInVocabularyLine(expandWords(ln, _vlang), search)
+  const compoundTerms = getSelectedLang() === 'en' ? []
+    : search.split(SEPARATOR_PIPE).flatMap(part => vocabCompoundParts(part.trim()))
+  const compoundMatch = ln => compoundTerms.some(term => wordIsInVocabularyLine(ln, term))
+  let matcher = (ln) => wordIsExactInVocabularyLine(expandWords(ln, _vlang), search) || compoundMatch(ln)
   let categories = visibleCategories.filter(cat => window.vocabulary[cat].find(matcher))
 
   if (categories.length === 0) {
-    matcher = (ln) => wordIsInVocabularyLine(ln, search)
+    matcher = (ln) => wordIsInVocabularyLine(ln, search) || compoundMatch(ln)
     categories = visibleCategories.filter(cat => window.vocabulary[cat].find(matcher))
   }
 
@@ -7976,7 +8099,7 @@ function _buildStudiedLineIndex() {
   const byUrl = new Map()
   const background = new Map()
   let backgroundLines = 0
-  ;(window.searchResult || []).forEach(entry => {
+  ;_filterSearchChannels(window.searchResult || []).forEach(entry => {
     const data = entry && entry.sv_subs && entry.sv_subs.data
     if (!entry || !Array.isArray(data)) return
     const lines = new Map()
@@ -8233,7 +8356,7 @@ function _extraMatchesForGuesses(candidates, existing) {
   if (!wanted.length) return []
   const have = new Set((existing || []).map(it => `${it.url}|${it.line && it.line.index}`))
   const out = []
-  ;(window.searchResult || []).forEach(entry => {
+  ;_filterSearchChannels(window.searchResult || []).forEach(entry => {
     const sv = entry && entry.sv_subs && entry.sv_subs.data
     const en = entry && entry.en_subs && entry.en_subs.data
     if (!Array.isArray(sv) || !Array.isArray(en)) return
@@ -8427,7 +8550,9 @@ function _translationPanelEl() {
   let $p = $('#translationPanel')
   if (!$p.length) {
     $p = $('<details id="translationPanel"><summary class="xl-summary"></summary><div class="xl-body"></div></details>')
-    $p.insertBefore('#result')
+    let $slot = $('#translationSlot')
+    if (!$slot.length) $slot = $('<div id="translationSlot"></div>').insertBefore('#result')
+    $slot.append($p)
     // Remembered, because this is either the first thing you want to see on
     // every search or something you never want in the way, and which of the two
     // it is does not change from one search to the next.
@@ -8635,7 +8760,7 @@ async function render(searchResults, search, className, token) {
     $result.css({backgroundColor: 'white'})
   }
 
-  const searchResultsFiltered = filterByLanguage(searchResults);
+  const searchResultsFiltered = _filterSearchChannels(filterByLanguage(searchResults));
 
   let wordToItemsMap = await getMatchingWords(searchResultsFiltered, search, token);
   window.wordToItemsMap = wordToItemsMap
@@ -11657,11 +11782,10 @@ function _saveRecording() {
 // ── GitHub sync for recordings ───────────────────────────────────────────
 // Recordings live primarily in localStorage so they're free and instant.
 // The Sync button in the review dialog pushes the local collection to
-// db/language/${lang}/recordings.json so the same playlists show up on
-// other devices. Conflict resolution is union-by-item: on commit, the
-// merge callback unions remote+local per (recordingName, searchText, word)
-// keyed by (id, lineIndex), so concurrent captures from another device
-// are preserved.
+// a small recordings.json index plus content-addressed recordings/ parts.
+// Legacy single-file collections still load; Sync migrates them atomically.
+// The existing three-way playlist conflict policy applies to the reassembled
+// collection. Other-user playlists use the same reader and remain read-only.
 
 function recordingsFilePath() {
   return `${_langRepoDir()}/recordings.json`
@@ -11675,18 +11799,36 @@ function mergeRecordingsLocalAuthoritative(localColl, remoteColl) {
   return _coreMergeRecordingsLocalAuthoritative(localColl, remoteColl)
 }
 
+async function _readRecordingsFile(who, path, fresh = false) {
+  if (fresh && who === 'self' && typeof window.GitHubProxy !== 'undefined' && window.GitHubUtils) {
+    try { return (await _selfGetFile(`${_langRepoDir()}/${path}`)).content }
+    catch (e) {
+      if (path === 'recordings.json' && /^GitHub API error 404\b/.test(String(e.message))) return null
+      throw e
+    }
+  }
+  const src = _dsSource(who)
+  const url = fresh
+    ? `https://api.github.com/repos/${src.owner}/${src.repo}/contents/${_langRepoDir()}/${path}?ref=${encodeURIComponent(src.branch)}`
+    : _dsReadUrl(who, path, _dsLangFromLocation())
+  const r = await fetchWithRetry(url, { ..._OTHER_LAYER_RETRY, passthrough404: true,
+    init: fresh ? { headers: { Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' } : { cache: 'no-cache' } })
+  if (r.status === 404) {
+    if (path === 'recordings.json') return null
+    throw new Error(`Missing recordings part: ${path}`)
+  }
+  return r.text()
+}
+
+async function _readRecordingsCollection(who, fresh = false) {
+  const root = parseRecordingsRoot(await _readRecordingsFile(who, 'recordings.json', fresh))
+  return readRecordings(root, path => _readRecordingsFile(who, path, fresh))
+}
+
 async function loadRecordingsFromGithub() {
   try {
-    // Only the user's own playlists are merged into the editable collection;
-    // the other user's are read by _loadOtherRecordings, read-only.
     if (!_dsHasSelf()) return null
-    const r = await fetch(_dsReadUrl('self', 'recordings.json', _dsLangFromLocation()), { cache: 'no-cache' })
-    if (!r.ok) return null
-    const text = await r.text()
-    if (!text || !text.trim()) return null
-    const parsed = JSON.parse(text)
-    if (!parsed || typeof parsed !== 'object') return null
-    return parsed
+    return await _readRecordingsCollection('self')
   } catch (e) {
     console.warn('loadRecordingsFromGithub failed', e)
     return null
@@ -11716,35 +11858,8 @@ function _saveRecordingsBase(coll) {
 // copy looks exactly like "the server undid your changes" to a three-way
 // merge. `fresh` says which one answered.
 async function _fetchRemoteRecordings() {
-  const path = recordingsFilePath()
-  const parse = text => {
-    const v = text && String(text).trim() ? JSON.parse(text) : {}
-    return v && typeof v === 'object' ? v : null
-  }
-  try {
-    if (typeof window.GitHubProxy !== 'undefined' && window.GitHubUtils) {
-      // Inside the app: its proxy holds the token.
-      const f = await _selfGetFile(path)
-      // An empty body is not "the server has nothing" — the contents API
-      // sends one for a file over 1 MB — so it does not count as a fresh read.
-      const text = f && f.content
-      const data = text && String(text).trim() ? parse(text) : null
-      if (data) return { data, fresh: true }
-    } else {
-      // A plain browser: the repository is public, so the API answers without
-      // a token — and asking GitHubUtils would prompt for one on every load.
-      const s = _dsWriteTarget()
-      const r = await fetch(`https://api.github.com/repos/${s.owner}/${s.repo}/contents/${path}?ref=${encodeURIComponent(s.branch)}`,
-        { headers: { Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' })
-      if (r.status === 404) return { data: {}, fresh: true }
-      if (r.ok) {
-        const data = parse(await r.text())
-        if (data) return { data, fresh: true }
-      }
-    }
-  } catch (e) {
-    console.warn('[recordings] fresh read failed, using the cached copy', e)
-  }
+  try { return { data: await _readRecordingsCollection('self', true), fresh: true } }
+  catch (e) { console.warn('[recordings] fresh read failed, using the cached copy', e) }
   return { data: await loadRecordingsFromGithub(), fresh: false }
 }
 
@@ -11870,18 +11985,7 @@ async function _loadOtherRecordings() {
   if (!_dsHasOther()) return
   let coll = null
   try {
-    const url = _dsReadUrl('other', 'recordings.json', _dsLangFromLocation())
-    // One retry beside the user's own data; a guest has only this source.
-    const opts = _dsHasSelf() ? _OTHER_LAYER_RETRY : {}
-    const res = await fetchWithRetry(url, { ...opts, passthrough404: true })
-    if (res.status === 404) return // no playlists of theirs in this language
-    const text = await res.text()
-    if (!text || !text.trim()) return
-    try { coll = JSON.parse(text) } catch (_) { coll = null }
-    if (!coll || typeof coll !== 'object' || Array.isArray(coll)) {
-      _dsNotice("The other user's recordings.json is not valid — their playlists are not shown.")
-      return
-    }
+    coll = await _readRecordingsCollection('other')
   } catch (e) {
     _dsNotice(`Could not load the other user's playlists: ${e && e.message}`)
     return
@@ -11965,85 +12069,56 @@ async function _mergeSelfRemoteRecordings() {
 const SYNC_CANCELLED = 'sync cancelled'
 async function syncRecordingsToGithub() {
   if (!_requireSelf()) return
-  const filePath = recordingsFilePath()
-  let pushed = null
   let syncCollisions = []
-  // Taken once: a 409 retry runs the merge again, and it must start from what
-  // this device had, not from the previous attempt's result. Choices are kept
-  // per playlist for the same reason — a retry must not ask twice.
   const localSnapshot = JSON.parse(JSON.stringify(_persistableRecordings()))
   const chosen = {}
   const $btn = $('#recRecSync')
   $btn.prop('disabled', true).addClass('syncing')
   try {
-    await commitWithMerge({
-      filePath,
-      commitMessage: 'recordings: sync via language tool',
-      merge: async (remoteText) => {
-        const base = _loadRecordingsBase()
-        if (base) {
-          // Three-way against the last-synced copy: one-sided changes go
-          // through, deletions included. So an answer that cannot be read must
-          // never pass for "the server has nothing" — that would delete every
-          // playlist. commitWithMerge hands over null for a failed read as
-          // well as a missing file; with a last-synced copy on record, the
-          // file existed, so null is a failed read.
-          let remote = null
-          try { remote = remoteText && remoteText.trim() ? JSON.parse(remoteText) : null } catch (_) {}
-          if (!remote || typeof remote !== 'object') {
-            if (Object.keys(base).length) {
-              throw new Error("couldn't read GitHub's copy of the playlists — nothing was changed. Try again.")
-            }
-            remote = {}
-          }
-          const { merged, conflicts } = _threeWayRecordings(base, localSnapshot, remote)
-          const open = conflicts.filter(c => !chosen[c.name])
-          if (open.length) {
-            const choices = await _askRecordingConflicts(open, 'sync')
-            if (!choices) throw new Error(SYNC_CANCELLED)
-            Object.assign(chosen, choices)
-          }
-          syncCollisions = _applyRecordingChoices(merged, conflicts, chosen)
-          // Adopted only once the push has gone through (below), so a failed
-          // sync leaves this device exactly as it was.
-          pushed = merged
-          return JSON.stringify(merged, null, 2) + '\n'
+    const pushed = await syncRecordingsFiles({
+      readFile: async path => {
+        try { return (await _selfGetFile(`${_langRepoDir()}/${path}`)).content }
+        catch (e) {
+          if (path === 'recordings.json' && /^GitHub API error 404\b/.test(String(e.message))) return null
+          throw e
         }
-        let remote = {}
-        try { remote = remoteText ? JSON.parse(remoteText) : {} } catch (_) {}
-        if (!remote || typeof remote !== 'object') remote = {}
-        // Local-authoritative merge (deletions propagate) only when we've
-        // confirmed the remote was pulled into local this session; otherwise
-        // fall back to a safe union so a cold/failed boot can't wipe remote.
-        // External (native-bridge) playlists are never pushed; sync only the
-        // persistable set, then splice the externals back into memory so they
-        // stay available for the rest of the session.
-        const localPersistable = _persistableRecordings()
-        const merged = window._recordingsRemoteMerged
-          ? mergeRecordingsLocalAuthoritative(localPersistable, remote)
-          : mergeRecordingCollections(localPersistable, remote)
-        // Adopt the merge result so subsequent local edits start from the
-        // post-sync baseline, and a 409/422 retry sees fresh state. The app's
-        // and the other user's playlists stay in memory beside it.
-        window._recordings = _coreWithSessionPlaylists(merged, window._recordings)
-        const cur = window._recording.currentName
-        if (window._recordings[cur]) window._recording.items = window._recordings[cur].items
-        try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(merged)) } catch (_) {}
-        pushed = merged
-        return JSON.stringify(merged, null, 2) + '\n'
+      },
+      commitFiles: files => window.GitHubUtils.commitMultipleFiles({
+        ..._dsWriteTarget(), commitMessage: 'recordings: sync playlists in separate files',
+        files: files.map(f => ({ ...f, path: `${_langRepoDir()}/${f.path}` }))
+      }),
+      merge: async remote => {
+        const base = _loadRecordingsBase()
+        if (!base) {
+          return window._recordingsRemoteMerged
+            ? mergeRecordingsLocalAuthoritative(localSnapshot, remote)
+            : mergeRecordingCollections(localSnapshot, remote)
+        }
+        const { merged, conflicts } = _threeWayRecordings(base, localSnapshot, remote)
+        const open = conflicts.filter(c => !chosen[c.name])
+        if (open.length) {
+          const choices = await _askRecordingConflicts(open, 'sync')
+          if (!choices) throw new Error(SYNC_CANCELLED)
+          Object.assign(chosen, choices)
+        }
+        syncCollisions = _applyRecordingChoices(merged, conflicts, chosen)
+        return merged
       }
     })
-    // What was just pushed is what the server has now.
-    if (pushed) {
-      _adoptRecordings(pushed)
-      try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings())) } catch (_) {}
-      _saveRecordingsBase(pushed)
-    }
+    // Captures made while the sync was running are still unsynced local work.
+    const current = _persistableRecordings()
+    const next = _threeWayRecordings(localSnapshot, current, pushed)
+    next.conflicts.forEach(c => { if (c.local) next.merged[c.name] = c.local; else delete next.merged[c.name] })
+    _adoptRecordings(next.merged)
+    try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings())) } catch (_) {}
+    _saveRecordingsBase(pushed)
     _reportRecordingCollisions(syncCollisions)
-    window._recordingsDirty = false
-    try { localStorage.removeItem(REC_DIRTY_KEY) } catch (_) {}
+    window._recordingsDirty = !_sameJson(_persistableRecordings(), pushed)
+    try {
+      if (window._recordingsDirty) localStorage.setItem(REC_DIRTY_KEY, '1')
+      else localStorage.removeItem(REC_DIRTY_KEY)
+    } catch (_) {}
   } catch (e) {
-    // Choosing not to decide is not a failure worth an alert.
     if (e && e.message === SYNC_CANCELLED) return
     console.error('syncRecordingsToGithub failed', e)
     alert('Sync failed: ' + (e && e.message || e))
@@ -20398,7 +20473,7 @@ function openPracticeMode(opts) {
   }
   window._practiceCtxBefore = 0
   window._practiceCtxAfter = 0
-  window._practicePlaybackRate = 1
+  window._practicePlaybackRate = _preferredPracticeSpeed()
   window._practiceFlipped = false
   window._practiceMinimized = false
   // One card on its own (from the search results): not a session. It is not
@@ -20438,6 +20513,15 @@ function openPracticeMode(opts) {
         <div class="practice-info-meta"></div>
       </div>
       <div class="practice-settings-panel" style="display:none;">
+        <div class="practice-settings-row practice-speeds-row">
+          <label><span class="practice-settings-lbl">Speed cycle</span>
+            <input type="text" class="practice-speeds-input" aria-label="Speed cycle" placeholder="1, 0.75, 0.5">
+          </label>
+          <button type="button" class="practice-speeds-save">Save speeds</button>
+          <small>Comma-separated speeds, in click order. Use decimal points. YouTube uses the closest speed supported by the video.</small>
+          <span class="practice-speed-actual"></span>
+          <span class="practice-speeds-status" role="status"></span>
+        </div>
         <label class="practice-settings-row">
           <span class="practice-settings-lbl">Reveal</span>
           <select class="practice-reveal-select">
@@ -20481,7 +20565,7 @@ function openPracticeMode(opts) {
         <button type="button" class="practice-prev" aria-label="Previous (←)" title="Previous (←)">‹</button>
         <button type="button" class="practice-unflip" title="Show source again" aria-label="Show source again">↶</button>
         <button type="button" class="practice-play" aria-label="Play clip" title="Play clip">▶</button>
-        <button type="button" class="practice-speed" aria-label="Playback speed" title="Cycle playback speed">1×</button>
+        <button type="button" class="practice-speed" aria-label="Cycle playback speed" title="Cycle playback speed">1×</button>
         <button type="button" class="practice-next" aria-label="Next (→)" title="Next (→)">›</button>
       </div>
       <div class="practice-restore">
@@ -20527,6 +20611,7 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-dir', togglePracticeDir)
     $p.on('click', '.practice-play', playPracticeClip)
     $p.on('click', '.practice-speed', cyclePracticePlaybackRate)
+    $p.on('click', '.practice-speeds-save', _savePracticeSpeeds)
     $p.on('click', '.practice-ctx-before', () => { window._practiceCtxBefore++; _renderPracticeCard() })
     $p.on('click', '.practice-ctx-after',  () => { window._practiceCtxAfter++;  _renderPracticeCard() })
     $p.on('click', '.practice-ctx-reset',  () => { window._practiceCtxBefore = 0; window._practiceCtxAfter = 0; _renderPracticeCard() })
@@ -20664,35 +20749,64 @@ function practiceNav(dir) {
   if (!window._practiceActive || !window._practiceCards || !window._practiceCards.length) return
   const n = window._practiceCards.length
   window._practiceIdx = (window._practiceIdx + dir + n) % n
-  // A new card is a fresh attempt — drop any per-card overrides so the user
-  // isn't surprised by half-speed playback or extra context lines that were
-  // meant for the previous card.
+  // A new card starts without extra context or a revealed answer. The chosen
+  // speed belongs to the session and is kept.
   window._practiceCtxBefore = 0
   window._practiceCtxAfter = 0
-  window._practicePlaybackRate = 1
+  window._practicePlaybackRate = _preferredPracticeSpeed()
   window._practiceFlipped = false
   _renderPracticeCard()
 }
 
-// Cycle playback speed for the practice clip. The button label reflects the
-// active rate; the rate is applied next time .practice-play is hit.
-const PRACTICE_SPEED_OPTIONS = [0.75, 1]
+// The speed button cycles only through this person's ordered list.
+function _practiceSpeeds() { return practiceSpeeds(window._appSettings.practiceSpeedOptions) }
+function _preferredPracticeSpeed() {
+  const options = _practiceSpeeds()
+  const preferred = Number(window._appSettings.practicePlaybackRate)
+  return options.includes(preferred) ? preferred : options[0]
+}
+function _practiceVideoRate() {
+  const requested = Number(window._practicePlaybackRate) || _preferredPracticeSpeed()
+  let available = []
+  try { available = window.ytPlayer.getAvailablePlaybackRates() } catch (_) {}
+  return supportedPracticeSpeed(requested, available)
+}
+function _savePracticeSpeeds() {
+  const $p = $('#practiceMode')
+  const options = parsePracticeSpeeds($p.find('.practice-speeds-input').val())
+  if (!options) {
+    $p.find('.practice-speeds-status').text('Enter speeds from 0.1 to 4, separated by commas (e.g. 1, 0.75, 0.5).')
+    return
+  }
+  window._appSettings.practiceSpeedOptions = options
+  if (!options.includes(window._practicePlaybackRate)) window._practicePlaybackRate = options[0]
+  window._appSettings.practicePlaybackRate = window._practicePlaybackRate
+  saveAppSettings()
+  $p.find('.practice-speeds-input').val(options.join(', '))
+  $p.find('.practice-speeds-status').text('Saved')
+  _applyPracticeSpeed()
+}
 function cyclePracticePlaybackRate() {
-  const cur = parseFloat(window._practicePlaybackRate) || 1
-  const i = PRACTICE_SPEED_OPTIONS.indexOf(cur)
-  const next = PRACTICE_SPEED_OPTIONS[(i + 1) % PRACTICE_SPEED_OPTIONS.length]
-  window._practicePlaybackRate = next
+  window._practicePlaybackRate = nextPracticeSpeed(window._practicePlaybackRate, _practiceSpeeds())
+  window._appSettings.practicePlaybackRate = window._practicePlaybackRate
+  saveAppSettings()
+  _applyPracticeSpeed()
+}
+function _applyPracticeSpeed() {
   _updatePracticeSpeedBtn()
-  // If the clip is currently playing, apply the new rate immediately.
   try {
     if (window._practiceClipTimer && window.ytPlayer && window.ytPlayer.setPlaybackRate) {
-      window.ytPlayer.setPlaybackRate(next)
+      window.ytPlayer.setPlaybackRate(_practiceVideoRate())
     }
   } catch (_) {}
 }
 function _updatePracticeSpeedBtn() {
-  const r = parseFloat(window._practicePlaybackRate) || 1
-  $('#practiceMode .practice-speed').text(`${r}×`)
+  const requested = Number(window._practicePlaybackRate) || _preferredPracticeSpeed()
+  const actual = _practiceVideoRate()
+  const title = `Cycle speeds: ${_practiceSpeeds().join(' → ')}×` +
+    (actual !== requested ? `. This video uses ${actual}×, the closest supported speed to ${requested}×.` : '')
+  $('#practiceMode .practice-speed').text(`${requested}×`).attr('title', title)
+  $('#practiceMode .practice-speed-actual').text(actual !== requested ? `This video: ${actual}×` : '')
 }
 
 function getSelectionText() {
@@ -20902,7 +21016,7 @@ function _deleteCurrentPracticeCard() {
   // showing a fresh card.
   window._practiceCtxBefore = 0
   window._practiceCtxAfter = 0
-  window._practicePlaybackRate = 1
+  window._practicePlaybackRate = _preferredPracticeSpeed()
   window._practiceFlipped = false
   _renderPracticeCard()
 }
@@ -20990,6 +21104,9 @@ function _togglePracticeSettingsPanel() {
     $p.find('.practice-info').attr('aria-expanded', 'false').removeClass('active')
     const mode = (window._appSettings && window._appSettings.practiceRevealMode) || 'flip'
     $panel.find('.practice-reveal-select').val(mode)
+    $panel.find('.practice-speeds-input').val(_practiceSpeeds().join(', '))
+    $panel.find('.practice-speeds-status').text('')
+    _updatePracticeSpeedBtn()
   }
   _syncPracticePanelOpen()
 }
@@ -21146,7 +21263,8 @@ async function playPracticeClip() {
     // Apply the user's chosen playback rate just before play — must happen
     // AFTER the video has been loaded/seeked, else YT silently snaps it
     // back to 1× when the new video kicks in.
-    const rate = parseFloat(window._practicePlaybackRate) || 1
+    const rate = _practiceVideoRate()
+    _updatePracticeSpeedBtn()
     try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(rate) } catch (_) {}
     try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
     _watchPracticeClipEnd(clipEnd, token)

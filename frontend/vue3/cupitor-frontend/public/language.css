@@ -4422,6 +4422,21 @@ body.rec-playing #recPlayingSubs { display: block; }
     background: #f7f9fc;
     font-size: 13px;
 }
+/* Reserve one summary row before the asynchronous answer arrives. Opening
+   the answer overlays the results, so neither arrival nor expansion moves them. */
+#translationSlot { position: relative; height: 40px; margin-bottom: 8px; clear: both; z-index: 20; }
+#translationSlot #translationPanel { position: absolute; top: 0; left: 0; right: 0; margin: 0; }
+#translationSlot .xl-summary { height: 38px; box-sizing: border-box; overflow: hidden; white-space: nowrap; }
+#translationSlot .xl-word { overflow: hidden; text-overflow: ellipsis; }
+#translationSlot .xl-body { max-height: min(40vh, 260px); overflow-y: auto; border-top: 1px solid #cfd8e3; box-shadow: 0 5px 8px #0002; }
+body.rec-playing #translationSlot, body.practice-mode #translationSlot { display: none; }
+.channel-filter-list { max-height: 45vh; overflow: auto; margin-top: 10px; }
+.channel-filter-list label { display: block; padding: 5px; }
+.cache-manager-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid #ddd; }
+#practiceMode .practice-speeds-row { flex-wrap: wrap; }
+#practiceMode .practice-speeds-input { width: 160px; max-width: 100%; color: #fff; background: #333; border: 1px solid #777; border-radius: 5px; padding: 6px; }
+#practiceMode .practice-speeds-save { color: #fff; background: #444; border: 1px solid #777; border-radius: 5px; padding: 6px; }
+#practiceMode .practice-speeds-row small, #practiceMode .practice-speeds-status { flex-basis: 100%; font-size: 12px; }
 #translationPanel .xl-summary {
     display: flex;
     align-items: center;

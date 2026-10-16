@@ -304,3 +304,18 @@ describe("expansion markers are transparent to overlap matching", () => {
     expect(vocabCompoundParts("förtränga", known, buildPrefixSet(known))).toEqual([]);
   });
 });
+
+describe('compound heads when the whole word is already known', () => {
+  const vocabulary = { Color: ['(stain)|färg|färga|färgning|', '(colorful)|färgsprakande|'], Sound: ['(crackle)|spraka|sprakande|sprak|'] }
+  const lexicon = buildKnownWordSet(vocabulary)
+  const prefixSet = buildPrefixSet(lexicon)
+  test('färgsprakande exposes sprakande instead of being skipped or greedily consumed as sprak', () => {
+    expect(vocabCompoundParts('färgsprakande', lexicon, prefixSet)).toEqual(['färg', 'sprakande'])
+    const expanded = [...vocabCompoundParts('färgsprakande', lexicon, prefixSet), 'färgsprakande'].join('|')
+    expect(vocabPrefixOverlapDetail(vocabulary.Sound[0], expanded).len).toBeGreaterThanOrEqual(9)
+  })
+  test('ordinary known words are not split into arbitrary internal fragments', () => {
+    const known = new Set(['förtränga', 'tränga', 'träng', 'för'])
+    expect(vocabCompoundParts('förtränga', known, buildPrefixSet(known))).toEqual([])
+  })
+})

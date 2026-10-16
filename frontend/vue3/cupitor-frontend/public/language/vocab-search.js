@@ -248,6 +248,17 @@ export function vocabCompoundParts(word, knownSet, prefixSet) {
   const w = word.toLowerCase()
   const known = knownSet || new Set()
   const prefixes = prefixSet || new Set()
+  // A known compound still has meaningful constituents. Prefer a complete
+  // two-part split over the greedy scan: it can consume "sprak" (an inflected
+  // "spraka") and lose "sprakande" in "färgsprakande". Requiring both parts
+  // to be known keeps ordinary known words out of the fragment fallback.
+  for (let i = 3; i <= w.length - 4; i++) {
+    const left = w.slice(0, i)
+    if (!known.has(left) || VOCAB_OVERLAP_STOP_WORDS.has(left)) continue
+    for (const right of [w.slice(i), w[i] === 's' ? w.slice(i + 1) : '']) {
+      if (right.length >= 4 && known.has(right) && !VOCAB_OVERLAP_STOP_WORDS.has(right)) return [left, right]
+    }
+  }
   if (known.has(w)) return []
   for (const sfx of VOCAB_COMPOUND_SUFFIXES) {
     if (!sfx) continue
