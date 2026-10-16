@@ -6,7 +6,7 @@
 // and return strings/numbers/arrays. Callers in language.js wrap them with
 // the live window.vocabulary cache.
 
-import { guessStems } from './stemming.js'
+import { createWordFormMatcher } from './word-forms.js'
 
 export const SEPARATOR_PIPE = '|'
 
@@ -131,7 +131,7 @@ export function vocabPrefixOverlapLen(vocabLine, searchText, lang = 'sv') {
   return vocabPrefixOverlapDetail(vocabLine, searchText, lang).len
 }
 
-function _prefixMatchLen(token, search, lang) {
+function _prefixMatchLen(token, search, lang, forms) {
   const lim = Math.min(token.length, search.length)
   let lcp = 0
   while (lcp < lim && token.charCodeAt(lcp) === search.charCodeAt(lcp)) lcp++
@@ -142,9 +142,7 @@ function _prefixMatchLen(token, search, lang) {
   // Both words must reduce to a shared stem. A normalized stem need not
   // occur as a literal prefix: hagel and hagla both reduce to hagl, while
   // their visible shared prefix is hag. Group/highlight that visible part.
-  const searchStems = new Set(guessStems(search, lang))
-  return guessStems(token, lang).some(stem => stem.length >= 3 && searchStems.has(stem))
-    ? lcp : 0
+  return forms.related(token, search) ? lcp : 0
 }
 
 // Like vocabPrefixOverlapLen but also reports which search part won and the
@@ -158,11 +156,12 @@ export function vocabPrefixOverlapDetail(vocabLine, searchText, lang = 'sv') {
   let bestLen = 0
   let bestPart = ''
   let bestToken = ''
+  const forms = createWordFormMatcher(lang)
   for (const p of vocabParts) {
     const tokens = _tokensForSegment(p)
     for (const s of searchParts) {
       for (const t of tokens) {
-        const lcp = _prefixMatchLen(t, s, lang)
+        const lcp = _prefixMatchLen(t, s, lang, forms)
         if (lcp > bestLen) {
           bestLen = lcp; bestPart = s; bestToken = t
         }

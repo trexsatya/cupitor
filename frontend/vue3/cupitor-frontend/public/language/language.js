@@ -1,3 +1,4 @@
+import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { parsePracticeSpeeds, practiceSpeeds, nextPracticeSpeed, supportedPracticeSpeed } from './practice-speed.js';
 import { loadRecordingsFiles, syncRecordingsFiles } from './recordings-store.js';
 import { listRecordingsParts } from './recordings-gc.js';
@@ -7,14 +8,8 @@ import {computeIfAbsent, range, schedule, uuid} from '../data-structures.js';
 import {conjugateTableSpanish} from './spanish.js';
 import {
   VOCAB_OVERLAP_STOP_WORDS,
-  VOCAB_COMPOUND_SUFFIXES,
   commonWordsToIgnore,
-  vocabPrefixOverlapLen,
   vocabSuffixOverlapLen,
-  vocabPrefixOverlapDetail,
-  buildKnownWordSet,
-  buildPrefixSet,
-  vocabCompoundParts as _coreVocabCompoundParts,
   stripExpansionMarkers as _stripExpansionMarkers,
 } from './vocab-search.js';
 import { STEM_RULES, guessStems } from './stemming.js';
@@ -2194,15 +2189,6 @@ function replaySearchHistoryAt(newIdx) {
   // renderVocabularyFindings path runs).
   window.unprocessedSearchText = term
   Promise.resolve(doSearch(term, $('#searchedWords')))
-      .then(() => {
-        // Mirror searchTextChanged's auto-prefix branch — navigating history
-        // bypasses that handler entirely, so without this the prefix pane is
-        // never refreshed when stepping Prev/Next. Single-word only (see
-        // _shouldAutoPrefixSearch) so a phrase replay keeps its exact findings.
-        if ($('#toggleAutoPrefixSearchCheckbox').is(':checked') && _shouldAutoPrefixSearch(term)) {
-          try { searchVocabularyByPrefix() } catch (e) { console.warn('Auto prefix search failed', e) }
-        }
-      })
       .finally(() => { window._navigatingHistory = false })
 }
 
@@ -2343,31 +2329,16 @@ function _wireSearchHistoryLongPress() {
 
 const $searchText1 = $('#searchText');
 
-// Auto prefix-search is a SINGLE-WORD tool: it groups vocab lines whose words
-// share a prefix with the search term. For a multi-word phrase (e.g. "går an")
-// the overlap only catches the first word ("går"), and its results OVERWRITE
-// the exact phrase findings renderVocabularyFindings already produced (so the
-// vocab line that actually contains the phrase — e.g. "<*gå an" — disappears).
-// Only auto-run it for single-word searches; the manual "Search by prefix" menu
-// still works for any term.
+// Automatic prefix suggestions are a single-word tool. Exact and related
+// findings use the same matcher in both modes; phrase searches keep their
+// full phrase semantics. The manual prefix action remains available.
 function _shouldAutoPrefixSearch(term) {
   return typeof term === 'string' && term.trim().length > 0 && !/\s/.test(term.trim())
 }
 
 export async function searchTextChanged() {
-  const el = $('#searchedWords')
-  const w = $searchText1.val()
   window.unprocessedSearchText = null
-  await doSearch(this, el);
-  // Optional auto-prefix-search: when the toggle in the settings panel is
-  // on (default), run a vocabulary prefix search on the same term so the
-  // user doesn't have to click the "…" → "Search by prefix" menu item.
-  // Skipped for multi-word phrases so it doesn't clobber the exact findings.
-  // (Mirrored inside navigateSearchHistory so Prev/Next replays also refresh
-  // the prefix pane.)
-  if ($('#toggleAutoPrefixSearchCheckbox').is(':checked') && _shouldAutoPrefixSearch(w)) {
-    try { searchVocabularyByPrefix() } catch (e) { console.warn('Auto prefix search failed', e) }
-  }
+  await doSearch(this, $('#searchedWords'))
 }
 
 // parseVocabularyFile lives in ./vocab-merge.js (imported at the top).
@@ -3865,6 +3836,10 @@ $('document').ready(e => {
     }
   })
 
+  $('#toggleAutoPrefixSearchCheckbox').on('change', () => {
+    if (window.searchText) renderVocabularyFindings(window.searchText)
+  })
+
   $('#numberOfPrefixFindings').on('change input', e => {
     const v = parseInt($(e.target).val(), 10)
     if (Number.isFinite(v) && v > 0) {
@@ -3872,7 +3847,7 @@ $('document').ready(e => {
       saveAppSettings()
       // Re-run the prefix search so the new cap takes effect immediately.
       if ($('#toggleAutoPrefixSearchCheckbox').is(':checked') && window.searchText) {
-        try { searchVocabularyByPrefix() } catch (_) {}
+        try { renderVocabularyFindings(window.searchText) } catch (_) {}
       }
     }
   })
@@ -7123,93 +7098,25 @@ function filterByLanguage(searchResults) {
 
 // wordIsExactInVocabularyLine lives in ./search-text.js.
 
+let _vocabularyMatcherCache = null
+function _getVocabularyMatcher() {
+  const lang = getSelectedLang() === 'en' ? 'en' : getLangFromUrl().code
+  // Include the full contents: edits often replace a line without changing
+  // the number of categories/lines. The previous count-only caches missed it.
+  const signature = lang + ':' + JSON.stringify(window.vocabulary || {})
+  if (!_vocabularyMatcherCache || _vocabularyMatcherCache.signature !== signature) {
+    const expansions = getExpansionForWords()
+    const matcher = createVocabularyMatcher(window.vocabulary, {
+      lang, expansions, hiddenCategories: VOCAB_HIDDEN_CATEGORIES,
+      expandLine: line => _sharedExpandWords(line, lang, expansions, lang === 'es' ? conjugateTableSpanish : null)
+    })
+    _vocabularyMatcherCache = { signature, matcher }
+  }
+  return _vocabularyMatcherCache.matcher
+}
+
 export function wordIsInVocabularyLine(vocabLine, search) {
-  try {
-    const lang = getLangFromUrl().code;
-    const expandedVocab = expandWords(vocabLine, lang);
-    const expandedVocabLower = expandedVocab.toLowerCase();
-    const vocabWords = getWords(expandedVocab)
-        .filter(it => it.trim().length > 2)
-        .map(it => it.toLowerCase().trim());
-    const s = (search || '').toLowerCase().trim();
-    if (!s) return false;
-    if (vocabWords.includes(s)) return true;
-
-    // The search can be a pipe-expanded form (e.g. "<*göra susen" becomes
-    // "göra susen|gör susen|gjorde susen|gjort susen"). Try each alternative
-    // independently — a single-token equality on the joined string will
-    // never match, and multi-word phrases need a substring check against
-    // the expanded vocab line.
-    const terms = s.split(SEPARATOR_PIPE).map(t => t.trim()).filter(Boolean);
-    for (const t of terms) {
-      if (t.indexOf(' ') > 0) {
-        if (expandedVocabLower.includes(t)) return true;
-      } else if (vocabWords.includes(t)) {
-        return true;
-      }
-    }
-
-    // Stem-aware match (bidirectional). E.g. vocab "förvärva" + search
-    // "förvärvat" should match — and vice versa — by reducing both sides
-    // to a common stem. Run per single-word term so a pipe-expanded query
-    // still gets stem coverage.
-    const fn = typeof guessStems === 'function' ? guessStems : null;
-    if (!fn) return false;
-    const singleTerms = terms.length ? terms.filter(t => t.indexOf(' ') < 0) : [s];
-    for (const t of singleTerms) {
-      const searchVariants = new Set([t, ...fn(t, lang)]);
-      for (const w of vocabWords) {
-        if (searchVariants.has(w)) return true;
-        const wStems = fn(w, lang);
-        for (const ws of wStems) if (searchVariants.has(ws) || ws === t) return true;
-      }
-    }
-    return false;
-  } catch (e) {
-    console.log(vocabLine, e)
-    return false
-  }
-}
-
-/**
- * Returns true if any pipe-separated word in vocabLine shares a prefix OR
- * suffix with any pipe-separated alternative in searchText, in either
- * direction. So `cd` matches `bcd` (bcd ends with cd), and conversely
- * `bcd` matches `cd` for the same reason. `xyz` matches `xyzw` (prefix)
- * and `xyzw` matches `xyz` (also prefix) — the four combinations cover
- * every "one is a prefix/suffix of the other" relationship.
- */
-// Pure prefix/suffix overlap helpers, the stop-word/suffix lists and the
-// compound-decomposition algorithm all live in ./vocab-search.js so they
-// can be unit-tested without dragging in jQuery / DOM. The wrappers below
-// keep an on-window cache of the lexicon sets so we don't rebuild them per
-// keystroke; they invalidate when window.vocabulary changes shape.
-function _vocabKnownWordSet() {
-  const vocab = window.vocabulary || {}
-  const key = Object.keys(vocab).length + ':' + Object.values(vocab).reduce((n, ls) => n + (Array.isArray(ls) ? ls.length : 0), 0)
-  if (window._vocabKnownWordsCache && window._vocabKnownWordsCacheKey === key) {
-    return window._vocabKnownWordsCache
-  }
-  const set = buildKnownWordSet(vocab, VOCAB_HIDDEN_CATEGORIES)
-  window._vocabKnownWordsCache = set
-  window._vocabKnownWordsCacheKey = key
-  return set
-}
-
-function _vocabPrefixSet() {
-  const vocab = window.vocabulary || {}
-  const key = Object.keys(vocab).length + ':' + Object.values(vocab).reduce((n, ls) => n + (Array.isArray(ls) ? ls.length : 0), 0)
-  if (window._vocabPrefixSetCache && window._vocabPrefixSetCacheKey === key) {
-    return window._vocabPrefixSetCache
-  }
-  const set = buildPrefixSet(_vocabKnownWordSet())
-  window._vocabPrefixSetCache = set
-  window._vocabPrefixSetCacheKey = key
-  return set
-}
-
-function vocabCompoundParts(word) {
-  return _coreVocabCompoundParts(word, _vocabKnownWordSet(), _vocabPrefixSet())
+  return !!_getVocabularyMatcher().matchLine(vocabLine, search)
 }
 
 // Does any pipe-segment in the vocabulary corpus contain `word` as an exact
@@ -7774,257 +7681,99 @@ function _pinDialogToViewport($dlg) {
   $wrap.css({ position: 'fixed', top: top + 'px', left: left + 'px' })
 }
 
-function searchVocabularyByPrefix() {
-  const rawSearchText = window.searchText ? window.searchText.toLowerCase().trim() : ''
-  if (!rawSearchText || !window.vocabulary) return
-
-  // Compound-word expansion. For each pipe-alternative in the raw search,
-  // try to split it into known vocabulary words (e.g. "trollguldet" →
-  // "troll" + "guld") and append the parts as additional search terms.
-  // The expanded form is the one used for overlap matching and highlights;
-  // the closure keeps the raw form so the Different-prefixes dialog still
-  // strips a meaningful prefix off the original word.
-  //
-  // Only for the studied language. Splitting is morphology, not string search:
-  // it looks for vocabulary words INSIDE the term, which is how Swedish builds
-  // compounds. An English term is not built from them, so every hit is a
-  // coincidence of spelling — "colander" contains "land", and a search for a
-  // kitchen sieve comes back with landa, land and mark.
-  const decomp = new Set()
-  if (getSelectedLang() !== 'en') {
-    for (const part of rawSearchText.split(SEPARATOR_PIPE).map(s => s.trim()).filter(Boolean)) {
-      for (const w of vocabCompoundParts(part)) decomp.add(w)
-    }
-  }
-  // Compound parts go FIRST so that on equal-LCP ties (e.g. a vocab segment
-  // "kväll" matches both "kväll" and "kvällstysta" with LCP=5) the compound
-  // part wins — bestPart in vocabPrefixOverlapDetail uses `>`, so the first
-  // search alternative to hit a given length sticks.
-  const searchText = decomp.size > 0
-    ? [...decomp, rawSearchText].join(SEPARATOR_PIPE)
-    : rawSearchText
-  if (decomp.size > 0) {
-    // Expose for highlights — _buildVocabLine reads window.searchText by
-    // default. Mirrors the existing pattern used by the stem-fallback.
-    window.searchText = searchText
-    console.log(`[prefix] compound parts: ${Array.from(decomp).join(', ')}`)
-  }
-
-  // Build flat-line array along with each line's category so we can group
-  // matches by category later for round-robin ordering (mirrors similarity search).
-  const allWords = []
-  const lineCategory = []
-  Object.entries(window.vocabulary).forEach(([cat, lines]) => {
-    if (!Array.isArray(lines)) return
-    if (VOCAB_HIDDEN_CATEGORIES.has(cat)) return
-    lines.forEach(line => {
-      allWords.push(line)
-      lineCategory.push(cat)
-    })
+function _appendVocabularyMatch($target, match, rows, allWords) {
+  const surroundings = getSurrounding(match.index, allWords)
+    .filter(entry => rows[entry.index].category === match.category)
+  const entry = surroundings.find(it => it.index === match.index) || { item: match.line, index: match.index }
+  const $item = $('<div class="vocabulary-segment"></div>').attr('data-vocab-match-kind', match.kind)
+  const $content = $('<div class="vocabulary-segment-content"></div>').appendTo($item)
+  const $header = match.kind === 'exact'
+    ? _buildVocabLine(entry)
+    : _buildVocabLine(entry, undefined, match.matched)
+  $header.addClass('highlighted similar-segment-header')
+    .prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
+    .append($('<span style="font-size:0.75em;color:#666;margin-left:6px;"></span>').text('[' + match.category + ']'))
+  $content.append($header)
+  const $body = $('<div class="similar-segment-body" hidden></div>').appendTo($content)
+  surroundings.forEach(it => {
+    const $line = _buildVocabLine(it)
+    if (it.index === match.index) $line.addClass('highlighted')
+    $body.append($line)
   })
+  $target.append($item)
+}
 
-  // Per-line overlap detail: max overlap length + matched substring (the
-  // actual common-prefix portion, used as the group label). The matched
-  // substring is the group key so e.g. a "stor" token matching "stoft"
-  // (LCP=3) goes under a "sto" group, not a "stoft" group.
-  const overlapByIdx = new Map()
-  const matchedByIdx = new Map()
-  const overlapLang = getSelectedLang() === 'en' ? 'en' : getLangFromUrl().code
-  allWords.forEach((line, i) => {
-    const { len, matched } = vocabPrefixOverlapDetail(line, searchText, overlapLang)
-    if (len >= 3) {
-      overlapByIdx.set(i, len)
-      matchedByIdx.set(i, matched)
+function _renderVocabularySearch(search, includePrefix) {
+  const query = String(search || '').toLowerCase().trim()
+  const $vocab = $('#vocabularyResult').empty()
+  window._prefixOverflow = null
+  if (!query || commonWordsToIgnore.includes(query)) return
+  const matcher = _getVocabularyMatcher()
+  const matches = matcher.search(query, { includePrefix })
+  const allWords = matcher.rows.map(row => row.line)
+  const direct = matches.filter(match => match.kind !== 'prefix')
+  // Exact phrases, tokens, word families and known compound constituents
+  // always stay visible. The prefix cap applies only to extra suggestions.
+  direct.forEach(match => _appendVocabularyMatch($vocab, match, matcher.rows, allWords))
+
+  if (includePrefix) {
+    const prefixMatches = matches.filter(match => match.kind === 'prefix')
+    const shownByPart = new Map(), overflowByPart = new Map(), overlapByIdx = new Map()
+    let shown = 0
+    for (const match of prefixMatches) {
+      const bucket = shown < _getPrefixResultsMax() ? shownByPart : overflowByPart
+      if (!bucket.has(match.matched)) bucket.set(match.matched, [])
+      bucket.get(match.matched).push(match.index)
+      overlapByIdx.set(match.index, match.len)
+      shown++
     }
-  })
-
-  // Bucket lines by their matched substring. Within each bucket, sort by
-  // overlap desc so the strongest line shows first when the group opens.
-  const groupsByPart = new Map()
-  for (const [idx, m] of matchedByIdx) {
-    if (!groupsByPart.has(m)) groupsByPart.set(m, [])
-    groupsByPart.get(m).push(idx)
-  }
-  for (const list of groupsByPart.values()) {
-    list.sort((a, b) => (overlapByIdx.get(b) || 0) - (overlapByIdx.get(a) || 0))
-  }
-
-  // Order groups by matched length desc — longer matched substring = more
-  // specific / stronger signal — with ties broken alphabetically for a
-  // stable display.
-  const partOrder = Array.from(groupsByPart.keys()).sort((a, b) => {
-    if (b.length !== a.length) return b.length - a.length
-    return a.localeCompare(b)
-  })
-
-  // Cap applies to TOTAL lines: walk groups in priority order, take up to
-  // maxRows lines total, and dispatch the rest as overflow into the dialog.
-  const maxRows = _getPrefixResultsMax()
-  const shownByPart = new Map()
-  const overflowByPart = new Map()
-  let shownCount = 0
-  for (const part of partOrder) {
-    const lines = groupsByPart.get(part) || []
-    const head = []
-    const tail = []
-    for (const idx of lines) {
-      if (shownCount < maxRows) { head.push(idx); shownCount++ }
-      else { tail.push(idx) }
+    const partOrder = [...new Set(prefixMatches.map(match => match.matched))]
+    if (overflowByPart.size) {
+      window._prefixOverflow = {
+        searchText: query, allWords,
+        lineCategory: matcher.rows.map(row => row.category),
+        groups: overflowByPart, partOrder, overlapByIdx
+      }
     }
-    if (head.length) shownByPart.set(part, head)
-    if (tail.length) overflowByPart.set(part, tail)
-  }
-
-  window._prefixOverflow = overflowByPart.size > 0
-    ? { searchText: rawSearchText, allWords, lineCategory, groups: overflowByPart, partOrder, overlapByIdx }
-    : null
-
-  const totalMatches = overlapByIdx.size
-  console.log(`[prefix] ${totalMatches} matches across ${groupsByPart.size} group(s) — showing ${shownCount} upfront, ${totalMatches - shownCount} in dialog`)
-
-  const $vocab = $('#vocabularyResult')
-  $vocab.html('')
-
-  if (shownByPart.size === 0) {
-    $vocab.html(`<div style="color:grey;padding:4px;">No prefix matches for "${_.escape(searchText)}"</div>`)
-  } else {
+    if (shownByPart.size) $vocab.append('<div style="font-size:0.85em;color:#666;margin:8px 0 4px;">More prefix matches</div>')
+    const byIndex = new Map(prefixMatches.map(match => [match.index, match]))
     for (const part of partOrder) {
-      const head = shownByPart.get(part) || []
-      const overflow = overflowByPart.get(part) || []
-      if (head.length === 0) continue
-      const totalForPart = head.length + overflow.length
-      const $group = $('<div class="prefix-group"></div>')
-      const $gh = $(`<div class="prefix-group-header"><i class="fa fa-chevron-right prefix-group-chevron" aria-hidden="true"></i><span class="prefix-group-part">${_.escape(part)}</span><span class="prefix-group-count">(${head.length}${overflow.length ? ` of ${totalForPart}` : ''})</span></div>`)
-      const $gb = $('<div class="prefix-group-body" hidden></div>')
-      head.forEach(idx => {
-        const category = lineCategory[idx] || '?'
-        const surroundings = getSurrounding(idx, allWords)
-        const matchEntry = surroundings.find(it => it.index === idx) || { item: allWords[idx], index: idx }
-        const vocabItem = $('<div class="vocabulary-segment"></div>')
-        const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
-        const $header = _buildVocabLine(matchEntry)
-        $header.addClass('highlighted similar-segment-header')
-        $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
-        $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}]</span>`)
-        vocabItemContent.append($header)
-        const $body = $('<div class="similar-segment-body" hidden></div>')
-        surroundings.forEach(it => {
-          const $line = _buildVocabLine(it)
-          if (it.index === idx) $line.addClass('highlighted')
-          $body.append($line)
-        })
-        vocabItemContent.append($body)
-        vocabItem.append(vocabItemContent)
-        $gb.append(vocabItem)
-      })
+      const head = shownByPart.get(part) || [], tail = overflowByPart.get(part) || []
+      if (!head.length) continue
+      const $group = $('<div class="prefix-group"></div>').appendTo($vocab)
+      const count = tail.length ? `${head.length} of ${head.length + tail.length}` : String(head.length)
+      const $gh = $('<div class="prefix-group-header"><i class="fa fa-chevron-right prefix-group-chevron" aria-hidden="true"></i></div>')
+        .append($('<span class="prefix-group-part"></span>').text(part))
+        .append($('<span class="prefix-group-count"></span>').text(' (' + count + ')')).appendTo($group)
+      const $body = $('<div class="prefix-group-body" hidden></div>').appendTo($group)
+      head.forEach(idx => _appendVocabularyMatch($body, byIndex.get(idx), matcher.rows, allWords))
       $gh.on('click', () => {
         const open = $gh.hasClass('is-open')
-        if (open) { $gb.attr('hidden', ''); $gh.removeClass('is-open') }
-        else { $gb.removeAttr('hidden'); $gh.addClass('is-open') }
+        $body.prop('hidden', open)
+        $gh.toggleClass('is-open', !open)
       })
-      $group.append($gh)
-      $group.append($gb)
-      $vocab.append($group)
     }
-    _attachAccordionDelegate($vocab)
+    let overflowCount = 0
+    for (const list of overflowByPart.values()) overflowCount += list.length
+    const suffix = overflowCount ? ` (+${overflowCount} more)` : ''
+    $('<button type="button" class="lang-tool-btn" id="showDiffPrefixesBtn" style="margin-top:6px;"></button>')
+      .text('Different prefixes' + suffix + ' →').on('click', e => {
+        e.preventDefault()
+        _openDifferentPrefixDialog(query, getSelectedLang() === 'en' ? 'en' : getLangFromUrl().code)
+      }).appendTo($vocab)
   }
+  _attachAccordionDelegate($vocab)
+}
 
-  // "Different prefixes" button — strips the leading prefix from the
-  // search term and looks for vocabulary lines containing words formed by
-  // attaching a different prefix to the same stem (e.g. "bevara" → stem
-  // "vara" → matches "förvara"). Shown regardless of whether the primary
-  // prefix search produced hits, since the user might want suggestions
-  // even when there are zero direct matches.
-  const lang = (typeof getLangFromUrl === 'function' ? getLangFromUrl().code : null) || 'sv'
-  let overflowCount = 0
-  for (const list of overflowByPart.values()) overflowCount += list.length
-  const overflowLabel = overflowCount > 0 ? ` (+${overflowCount} more)` : ''
-  const $diffBtn = $(`<button type="button" class="lang-tool-btn" id="showDiffPrefixesBtn" style="margin-top:6px;">Different prefixes${overflowLabel} →</button>`)
-  $diffBtn.on('click', e => {
-    e.preventDefault()
-    e.stopPropagation()
-    // Pass the raw search (not the compound-expanded form) so prefix-strip
-    // logic in _findDifferentPrefixMatches keeps working on a real word.
-    _openDifferentPrefixDialog(rawSearchText, lang)
-  })
-  $vocab.append($diffBtn)
-
-  // Ensure the result container is visible
+function searchVocabularyByPrefix() {
+  const query = window.searchText
+  _renderVocabularySearch(query, true)
   const $rc = $('#resultContainer')
-  if ($rc.is(':hidden')) {
-    $rc.show()
-    updateToggleButtonView('resultContainer')
-  }
+  if ($rc.is(':hidden')) { $rc.show(); updateToggleButtonView('resultContainer') }
 }
 
 export function renderVocabularyFindings(search) {
-  search = search.toLowerCase().trim()
-
-  if (commonWordsToIgnore.includes(search)) {
-    $('#vocabularyResult').html('')
-    return
-  }
-
-  const visibleCategories = Object.keys(window.vocabulary)
-      .filter(cat => !VOCAB_HIDDEN_CATEGORIES.has(cat))
-  // Expand each line to its inflected forms before phrase-matching, so a search
-  // for a conjugated form still hits its base vocab line (mirrors the lenient
-  // wordIsInVocabularyLine fallback, which also expands). wordIsExactInVocabularyLine
-  // then compares the search against the line's `|`-separated PHRASES.
-  const _vlang = (typeof getLangFromUrl === 'function' ? getLangFromUrl().code : null) || 'sv'
-  const compoundTerms = getSelectedLang() === 'en' ? []
-    : search.split(SEPARATOR_PIPE).flatMap(part => vocabCompoundParts(part.trim()))
-  const compoundMatch = ln => compoundTerms.some(term => wordIsInVocabularyLine(ln, term))
-  let matcher = (ln) => wordIsExactInVocabularyLine(expandWords(ln, _vlang), search) || compoundMatch(ln)
-  let categories = visibleCategories.filter(cat => window.vocabulary[cat].find(matcher))
-
-  if (categories.length === 0) {
-    matcher = (ln) => wordIsInVocabularyLine(ln, search) || compoundMatch(ln)
-    categories = visibleCategories.filter(cat => window.vocabulary[cat].find(matcher))
-  }
-
-  // Build words alongside per-line category so the collapsible header can
-  // show which category the matched line came from.
-  const words = []
-  const lineCategory = []
-  categories.forEach(cat => {
-    (window.vocabulary[cat] || []).forEach(line => {
-      words.push(line)
-      lineCategory.push(cat)
-    })
-  })
-
-  const indexesOfAppearance = _clusterByKey(
-      words.map((vocabLine, i) => matcher(vocabLine) ? i : null).filter(it => it !== null),
-      idx => _vocabLineFirstWord(words[idx]))
-
-  const vocab = $('#vocabularyResult')
-  vocab.html('')
-  indexesOfAppearance.forEach(idx => {
-    const category = lineCategory[idx] || '?'
-    const vocabItem = $('<div class="vocabulary-segment"></div>')
-    const vocabItemContent = $('<div class="vocabulary-segment-content"></div>')
-    const surroundings = getSurrounding(idx, words)
-    const matchEntry = surroundings.find(it => it.index === idx) || { item: words[idx], index: idx }
-    // Matched line acts as the collapsible header.
-    const $header = _buildVocabLine(matchEntry)
-    $header.addClass('highlighted similar-segment-header')
-    $header.prepend('<i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i>')
-    $header.append(`<span style="font-size:0.75em;color:#666;margin-left:6px;">[${_.escape(category)}]</span>`)
-    vocabItemContent.append($header)
-    // Surrounding context (including the matched line at its original
-    // position so ordering is preserved) goes into the collapsible body.
-    const $body = $('<div class="similar-segment-body" hidden></div>')
-    surroundings.forEach(it => {
-      const $line = _buildVocabLine(it)
-      if (it.index === idx) $line.addClass('highlighted')
-      $body.append($line)
-    })
-    vocabItemContent.append($body)
-    vocabItem.append(vocabItemContent)
-    vocab.append(vocabItem)
-  })
-  _attachAccordionDelegate(vocab)
+  _renderVocabularySearch(search, $('#toggleAutoPrefixSearchCheckbox').is(':checked') && _shouldAutoPrefixSearch(search))
 }
 
 // ─── Grouping an English search by the word it corresponds to ────────────
@@ -8988,11 +8737,8 @@ async function fetchSRTs(searchText) {
     //To fix the mistakes in vocabulary list with double spaces
     window.searchText = window.searchText.split(" ").map(it => it.trim()).join(" ")
 
-    // Snapshot the clean expanded term for Book Search NOW — before the
-    // auto-prefix pass (searchVocabularyByPrefix) prepends compound-word parts
-    // to window.searchText for highlighting. Those bare parts (e.g. splitting
-    // "tagit i med hårdhandskarna" into "tagit"/"hårdhandskarna") would
-    // otherwise leak into the library query and match unrelated books.
+    // Book Search uses the expanded query. Vocabulary matching keeps its
+    // compound constituents and family forms inside its own index.
     window._librarySearchText = window.searchText
 
     window.allSubtitles = window.allSubtitles || {}
@@ -9039,11 +8785,7 @@ async function fetchSRTs(searchText) {
         if (myToken !== window._subtitleSearchToken) return
         console.log("[stem-fallback] secondary results:", window.searchResult.length)
         await render(window.searchResult, window.searchText, "secondary", myToken)
-        // Removed: searchVocabularyByPrefix() — it would overwrite the
-        // primary's stem-aware vocab matches with prefix-only matches,
-        // dropping rows like "förvärvat" that don't share a prefix with
-        // the typed search term. Stem matching in renderVocabularyFindings
-        // already subsumes the useful cases.
+
       }
     }
   } finally {

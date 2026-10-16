@@ -12,7 +12,7 @@ const index = [
   { link: 'testVideo02', name: 'Anders på landet || Höns i trädgård || testVideo02', source: 'youtube' },
   { link: 'testVideo03', name: 'Ljudbok Klubb||ROBINSON CRUSOE||testVideo03', source: 'YOUTUBE' }
 ]
-const cue = '1\n00:00:01,000 --> 00:00:03,000\nEn färgsprakande kväll. Han är en översittare.\n\n2\n00:00:03,000 --> 00:00:05,000\nDet börjar hagla.\n'
+const cue = '1\n00:00:01,000 --> 00:00:03,000\nEn färgsprakande kväll. Han är en översittare.\n\n2\n00:00:03,000 --> 00:00:05,000\nDet börjar hagla.\n\n3\n00:00:05,000 --> 00:00:07,000\nEn stor väljarkår.\n\n4\n00:00:07,000 --> 00:00:09,000\nJag hörde översittarens röst. Det haglade.\n\n5\n00:00:09,000 --> 00:00:11,000\nCyklarnas färg. Han uppskattar måleriet. Jag har sovit. Allt går an.\n'
 
 async function serveFixtures(route) {
   const url = new URL(route.request().url())
@@ -30,7 +30,7 @@ async function serveFixtures(route) {
   let contentType = 'application/json'
   if (file.endsWith('/srts/index.json')) body = JSON.stringify(index)
   else if (file.endsWith('/vocabulary.txt')) {
-    body = '#Color\n(colorful)|färgsprakande|\n#Conduct\n(bullying)|översitteri|\n#Language\n(translate)|översätta|\n#Weather\n(hail)|hagel(sl-pl)|hagelskur|hagelskurar|hagelkorn(sl-pl)\n(pastures)|hagar|\n'
+    body = '#Color\n(colorful)|färgsprakande|\n(stain)|färg|\n#Sound\n(crackle)|spraka|sprakande|\n#Conduct\n(bully)|översittare|\n(bullying)|översitteri|\n(spelling neighbor)|översittaraktig|\n(spelling neighbor)|översittarfasoner|\n#Language\n(translate)|översätta|\n#Weather\n(hail verb)|hagla|\n(hail)|hagel(sl-pl)|hagelskur|hagelskurar|hagelkorn(sl-pl)\n(pastures)|hagar|\n#People\n(choose)|välja|\n(corps)|kår|kårar|\n(year)|år|\n#Objects\n(bicycle)|cykel|\n(painter)|målare|\n(sleep)|sova|\n#Phrases\n(acceptable)|<*gå an|\n#Expansions\nsova=sova,sover,sov,sovit\ngå=gå,går,gick,gått\n'
     contentType = 'text/plain'
   } else if (file.endsWith('.srt')) {
     body = cue
@@ -74,31 +74,52 @@ async function checkDialogs(browser, mobile) {
       if (await page.locator('#toggleAutoPrefixSearchCheckbox').isChecked() !== autoPrefix) {
         await click('#settingsPanel label[for="toggleAutoPrefixSearchCheckbox"] .slider')
       }
+      await page.locator('#numberOfPrefixFindings').fill('1')
+      await page.locator('#numberOfPrefixFindings').press('Tab')
       await page.locator('#settingsPanel').locator('..').locator('.ui-dialog-titlebar-close').click()
-      for (const [query, expected, group] of [['översittare', 'översitteri', 'översitt'], ['hagla', 'hagel', 'hag']]) {
+      for (const [query, expected] of [['översittare', 'översitteri'], ['översittarens', 'översitteri'], ['hagla', 'hagel'], ['haglade', 'hagel'], ['väljarkår', '(corps)'], ['cyklarnas', 'cykel'], ['måleriet', 'målare'], ['sovit', 'sova'], ['går an', '(acceptable)'], ['färgsprakande', '(crackle)']]) {
         await page.locator('#searchText').fill(autoPrefix ? query : query.toUpperCase())
         await page.locator('#searchText').press('Tab')
-        await page.waitForFunction(({ auto, expected, query }) => {
+        await page.waitForFunction(({ expected, query }) => {
           const headers = [...document.querySelectorAll('#vocabularyResult .similar-segment-header')]
           return headers.some(h => h.textContent.includes(expected)) &&
-            !!document.querySelector('#vocabularyResult .prefix-group') === auto &&
             Object.keys(window._lastWordToItemsMap || {}).includes(query) &&
             !document.querySelector('#result').textContent.includes('Loading…')
-        }, { auto: autoPrefix, expected, query })
+        }, { expected, query })
         const row = page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: expected })
         assert.equal(await row.count(), 1)
-        for (const unrelated of ['översätta', 'hagar']) {
+        await row.waitFor({ state: 'visible' })
+        for (const unrelated of ['översätta', 'hagar', '(year)']) {
           assert.equal(await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: unrelated }).count(), 0)
         }
         assert.equal(await page.evaluate(() => window._librarySearchText), query, 'vocabulary matching must not broaden the clean search query')
         assert((await page.evaluate(() => Object.values(window._lastWordToItemsMap || {}).flat().length)) > 0)
-        if (autoPrefix) {
-          await page.locator('#vocabularyResult .prefix-group-header').filter({ hasText: group }).click()
-          assert.equal(await row.isVisible(), true)
-          await screenshot(`cupitor-${query}-vocabulary`)
+        assert.equal(await row.isVisible(), true, 'valid matches remain visible even with the prefix limit set to one')
+        assert.equal(await row.locator('xpath=ancestor::*[contains(@class, "prefix-group")]').count(), 0)
+        if (query === 'översittare') {
+          assert.equal(await page.locator('#vocabularyResult [data-vocab-match-kind=exact]').count(), 1)
+          assert.equal(await page.locator('#vocabularyResult [data-vocab-match-kind=family]').count(), 1)
+          if (autoPrefix) assert(await page.locator('#showDiffPrefixesBtn').innerText().then(t => t.includes('+1 more')))
         }
+        if (autoPrefix && query === 'väljarkår') await screenshot('cupitor-vocabulary-general-matching')
       }
     }
+    // History and manual prefix searches use the same retained findings.
+    await click('#prevSearchBtn')
+    await page.waitForFunction(() => window._librarySearchText === 'går an' && !document.querySelector('#result').textContent.includes('Loading…'))
+    await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: '(acceptable)' }).waitFor({ state: 'visible' })
+    await click('#nextSearchBtn')
+    await page.waitForFunction(() => window._librarySearchText === 'färgsprakande' && !document.querySelector('#result').textContent.includes('Loading…'))
+    await click('#searchVocabularyByPrefixBtn')
+    await click('#searchVocabularyMenu [data-mode=prefix]')
+    await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: '(crackle)' }).waitFor({ state: 'visible' })
+    assert.equal(await page.evaluate(() => window._librarySearchText), 'färgsprakande')
+    // Same-size edits must invalidate the compiled vocabulary index.
+    await page.evaluate(() => { window.vocabulary.CacheCheck = ['(cache)|gammal|']; window.renderVocabularyFindings('gamla') })
+    assert(await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: 'gammal' }).count())
+    await page.evaluate(() => { window.vocabulary.CacheCheck[0] = '(cache)|cykel|'; window.renderVocabularyFindings('gamla') })
+    assert.equal(await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: 'gammal' }).count(), 0)
+    await page.evaluate(() => window.renderVocabularyFindings(window.searchText))
     assert.equal(await page.locator('#settingsPanel #searchChannelsBtn').count(), 1)
     assert.equal(await page.locator('#searchChannelsBtn:visible').count(), 0)
     await page.locator('#searchText').fill('färgsprakande')
@@ -135,7 +156,7 @@ async function checkDialogs(browser, mobile) {
     // A newly added dialog must survive its opening click without an ID exception,
     // outside taps, and a handler that removes its own clicked element.
     await page.evaluate(() => {
-      $('<button id="fixtureOpen" style="position:fixed;bottom:10px;right:10px">Open test dialog</button>')
+      $('<button id="fixtureOpen" style="position:fixed;bottom:10px;right:10px;z-index:100010">Open test dialog</button>')
         .appendTo('body').on('click', () => {
           if (!$('#fixtureDialog').length) {
             $('<div id="fixtureDialog"><input aria-label="Draft"><button id="fixtureReplace">Refresh row</button></div>')
@@ -143,7 +164,7 @@ async function checkDialogs(browser, mobile) {
               .dialog({ title: 'New dialog' })
           } else $('#fixtureDialog').dialog('open')
         })
-      $('<button id="fixtureOutside" style="position:fixed;bottom:10px;left:10px">Outside</button>').appendTo('body')
+      $('<button id="fixtureOutside" style="position:fixed;bottom:10px;left:10px;z-index:100010">Outside</button>').appendTo('body')
     })
     await click('#fixtureOpen')
     assert.equal(await isOpen('fixtureDialog'), true, 'opening click must not close a new dialog')
