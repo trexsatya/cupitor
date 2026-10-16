@@ -10734,7 +10734,8 @@ function test_data() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function playMediaSlice(url, start, end, source) {
+async function playMediaSlice(url, start, end, source, { isCurrent = () => true } = {}) {
+  if (!isCurrent()) return
   if (source === 'YouTube') {
     showMediaContainer()
     showMediaRelatedContainer();
@@ -10742,9 +10743,10 @@ async function playMediaSlice(url, start, end, source) {
       window.mediaSelected = {link: url, source: 'link'}
       window.playingYoutubeVideo = true
       window.syncSubtitle = false
-      await changeMediaIfNeededTo(window.mediaSelected)
+      await changeMediaIfNeededTo(window.mediaSelected, { isCurrent })
     }
-    await seekToYoutubeTime(start)
+    if (!isCurrent()) return
+    await seekToYoutubeTime(start, { isCurrent })
     return
   }
   if (location.href.indexOf('localhost') < 0) {
@@ -16818,6 +16820,14 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
     let lastTickAt = begin
     const tick = () => {
       if (!window._playingRecording) return resolve()
+      // Practice shares the YouTube iframe. Its Play action must not be
+      // mistaken for a headset resuming the parked Player session.
+      if (window._practiceActive) {
+        const now = Date.now()
+        pausedAccum += now - lastTickAt
+        lastTickAt = now
+        return setTimeout(tick, 200)
+      }
       // Bail immediately on a prev/next/goto request so the navigation
       // feels responsive — the outer loop in playRecording reads the
       // flag and routes to the right index.
@@ -17059,6 +17069,7 @@ function _renderPlayingBanner(it, idx, total) {
         <button type="button" class="rec-pb-replay-btn" title="Replay this item from the beginning" aria-label="Replay current item">↻ Replay</button>
         <button type="button" class="rec-pb-swap-btn" title="Practise the other way round — Target first" aria-label="Swap Source and Target">⇄</button>
         <button type="button" class="rec-pb-music-btn" title="Background music" aria-label="Background music">♫</button>
+        <button type="button" class="rec-pb-practice-btn" title="Practice this item" aria-label="Switch to Practice">Practice</button>
         <button type="button" class="rec-pb-info-btn" title="Show details" aria-label="Show details" aria-expanded="false">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
@@ -17112,6 +17123,7 @@ function _renderPlayingBanner(it, idx, total) {
       $b.toggleClass('rec-pb-expanded', open)
       $(this).attr('aria-expanded', open ? 'true' : 'false')
     })
+    $b.on('click', '.rec-pb-practice-btn', switchPlayerToPractice)
     // _setItemGap writes the value, persists it, and refreshes both the
     // Settings input and the two readouts in this banner.
     const GAP_STEP = 5
@@ -19167,6 +19179,8 @@ async function playRecording(opts) {
     // saved order matches what we're about to play.
     _saveQueueOrder(queue, 'play')
   }
+  window._recPlayPracticeSingle = !!opts.practiceSingle
+  window._recPlaySilentItem = opts.keepCurrentItem ? queue[startIdx] : null
   // Expose for prev/next/loop-aware UI status.
   window._recPlayLoopMode = loop
 
@@ -19396,7 +19410,9 @@ async function playRecording(opts) {
       i = _curLooping() ? queue.length - 1 : 0
     }
     window._recPlayIndex = i
-    window._recPlayItemToken = {}
+    const itemToken = window._recPlayItemToken = {}
+    const ownsVideo = () => window._playingRecording && window._recPlayItemToken === itemToken &&
+      !window._practiceActive && !window._recPlayPaused && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)
     window._recPlayQueueLen = queue.length
     const it = queue[i]
     // Manual cards carry the card's front text in `source`, not a media source,
@@ -19419,7 +19435,7 @@ async function playRecording(opts) {
     // belong to Practice, not the play queue. Move in the direction the user
     // last navigated (backward after a prev tap) so skipping feels natural, and
     // stop if the whole queue turns out to have nothing to play.
-    if (_isManualItem(it) && !_cardHasPlayableMedia(it)) {
+    if (_isManualItem(it) && !_cardHasPlayableMedia(it) && window._recPlaySilentItem !== it) {
       if (++textOnlySkips >= queue.length) { stopPlayingRecording(); break }
       i = _stepOverSkipped()
       continue
@@ -19441,6 +19457,7 @@ async function playRecording(opts) {
     _syncBackgroundMusic()
 
     _renderPlayingBanner(it, i, queue.length)
+    if (_isManualItem(it)) _renderPlayingManualText(it)
     // Remember the item currently playing so the review dialog can highlight
     // it after the player is closed (and so a follow-up Play All / Practice
     // on this playlist can offer to resume from this exact item, in the
@@ -19458,7 +19475,7 @@ async function playRecording(opts) {
     // leaving the clip running past its end with the queue stuck behind it.
     // Holding here keeps the banner up and the deck silent until the play
     // button is pressed, which is the state a restored session opens in.
-    while (window._playingRecording && window._recPlayPaused) {
+    while (window._playingRecording && window._recPlayPaused && !Number.isInteger(window._recNavGotoIndex)) {
       await new Promise(r => setTimeout(r, 200))
     }
     if (!window._playingRecording) break
@@ -19473,7 +19490,6 @@ async function playRecording(opts) {
     if (_isManualItem(it)) {
       // Show the card's text in the subtitle overlay (the banner head is
       // collapsed on mobile) so it's visible for the whole item.
-      _renderPlayingManualText(it)
       if (_cardHasVideoLink(it)) {
         try {
           await _cueManualCardVideo(it)
@@ -19634,7 +19650,8 @@ async function playRecording(opts) {
     const _src = (it.source || '').toLowerCase() === 'youtube' ? 'YouTube' : (it.source || 'YouTube')
     try {
       if (Number.isInteger(window._recNavGotoIndex)) continue
-      await playMediaSlice(it.id, _playStart, _playEnd, _src)
+      if (!ownsVideo()) continue
+      await playMediaSlice(it.id, _playStart, _playEnd, _src, { isCurrent: ownsVideo })
     } catch (e) {
       console.warn('playRecording: playMediaSlice failed for', it, e)
       i++
@@ -19642,6 +19659,7 @@ async function playRecording(opts) {
     }
     if (!window._playingRecording) break
     if (Number.isInteger(window._recNavGotoIndex)) continue
+    if (!ownsVideo()) continue
     // _waitYTUntilEnd pauses the player when ct >= timeEnd, so when the next
     // item reuses the same video, playMediaSlice short-circuits to just a
     // seek — leaving the player paused and the clip never starts. Kick it
@@ -20089,7 +20107,7 @@ function minimizePlayingRecording() {
   $('#recPlayingRestorePill .rec-pill-count').text(`${idx + 1}/${queue.length}`)
   $('#recPlayingRestorePill').show()
 }
-function restorePlayingRecording() {
+function restorePlayingRecording({ resume = true } = {}) {
   if (!window._playingRecording) return
   window._recPlayMinimized = false
   $('body').addClass('rec-playing').removeClass('rec-playing-minimized')
@@ -20098,10 +20116,50 @@ function restorePlayingRecording() {
   // back up (video + the inter-item timer, which the wait loops gate on
   // _recPlayPaused). Same code path as tapping the ▶/⏸ button, matching the
   // practice-mode restore behaviour.
-  if (window._recPlayPaused) { try { togglePlayingRecordingPause() } catch (_) {} }
+  if (resume && window._recPlayPaused) { try { togglePlayingRecordingPause() } catch (_) {} }
 }
 window.minimizePlayingRecording = minimizePlayingRecording
 window.restorePlayingRecording = restorePlayingRecording
+
+function switchPlayerToPractice() {
+  if (!window._playingRecording || window._practiceActive) return
+  const queue = window._recPlayQueue
+  if (!Array.isArray(queue) || !queue.length) return
+  const pos = Number.isInteger(window._recNavGotoIndex) ? window._recNavGotoIndex : window._recPlayIndex
+  const single = !!window._recPlayPracticeSingle
+  minimizePlayingRecording()
+  _interruptRecordingPlayback()
+  if (!single) _saveQueueOrder(queue, 'practice')
+  openPracticeMode({ resumeQueue: { queue, pos }, single })
+}
+
+function switchPracticeToPlayer() {
+  if (!window._practiceActive) return
+  const queue = (window._practiceCards || []).slice()
+  const pos = window._practiceIdx
+  if (!queue[pos]) return
+  const single = !!window._practiceSingle
+  const silent = _isManualItem(queue[pos]) && !_cardHasPlayableMedia(queue[pos])
+  closePracticeMode()
+  if (!single) _saveQueueOrder(queue, 'play')
+  if (window._playingRecording && Array.isArray(window._recPlayQueue)) {
+    // Keep the running loop's array identity, including a changed Practice
+    // shuffle order or edits; hand back exactly the item now on screen.
+    window._recPlayQueue.length = 0
+    for (const item of queue) window._recPlayQueue.push(item)
+    window._recPlayPracticeSingle = single
+    window._recPlaySilentItem = silent ? queue[pos] : null
+    window._recNavRequest = null
+    window._recNavGotoIndex = pos
+    window._recPlaySlowdown = false
+    _interruptRecordingPlayback()
+    _stopGapCountdown()
+    _applyRecPlayPause(silent, false)
+    restorePlayingRecording({ resume: false })
+  } else {
+    playRecording({ resumeQueue: { queue, pos }, practiceSingle: single, keepCurrentItem: true, startPaused: silent })
+  }
+}
 
 // Sleep `ms` milliseconds, but stretch the wall-clock wait whenever
 // the user has paused playback so the inter-item gap doesn't tick down
@@ -20275,6 +20333,7 @@ function openPracticeMode(opts) {
         <button type="button" class="practice-search" aria-label="Search this word" title="Search this word (minimizes)">🔎</button>
         <button type="button" class="practice-minimize" aria-label="Minimize" title="Minimize">⌄</button>
         <button type="button" class="practice-close" aria-label="Close practice" title="Close">✕</button>
+        <button type="button" class="practice-player-btn" aria-label="Switch to Player" title="Play this item">Player</button>
       </div>
       <div class="practice-info-panel" style="display:none;">
         <div class="practice-info-head"></div>
@@ -20355,6 +20414,7 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-restore-close', closePracticeMode)
     $p.on('click', '.practice-minimize', minimizePracticeMode)
     $p.on('click', '.practice-search', _searchCurrentPracticeWord)
+    $p.on('click', '.practice-player-btn', switchPracticeToPlayer)
     $p.on('click', '.practice-restore-btn', restorePracticeMode)
     $p.on('click', '.practice-delete', _deleteCurrentPracticeCard)
     $p.on('click', '.practice-replace', _replaceCurrentPracticeCard)

@@ -2110,6 +2110,23 @@ body.practice-mode {
     background: #0a0a0a !important;
     color: #f5f5f5;
 }
+/* A separate opaque layer covers page widgets without painting over the
+   shared video (100001), audio panel or Practice controls (100002+). */
+body.practice-mode::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: #0a0a0a;
+}
+body.practice-mode #recPlayingBanner,
+body.practice-mode #recPlayingSubs,
+body.practice-mode #recPlayingWord,
+body.practice-mode #recPlayingTransport,
+body.practice-mode #recPlayingMinimizeBtn,
+body.practice-mode #recPlayingCloseBtn,
+body.practice-mode #recPlayingRestorePill,
+body.practice-mode #recPlayNavToast { display: none !important; }
 body.rec-playing #mainControlInputs,
 body.rec-playing #vocabularyResult,
 body.rec-playing #result,
@@ -2290,10 +2307,30 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     left: 8px;
     right: 8px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     z-index: 100004;
 }
+#practiceMode .practice-player-btn,
+#recPlayingBanner .rec-pb-practice-btn {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 4px 10px;
+    border: none;
+    border-radius: 16px;
+    color: #f5f5f5;
+    background: #304b69;
+    cursor: pointer;
+    font-size: 13px;
+}
+#practiceMode .practice-player-btn { margin-left: auto; }
+@media (max-width: 480px) {
+    #practiceMode .practice-topbar { gap: 4px; }
+    #practiceMode .practice-player-btn { padding: 4px 7px; font-size: 12px; }
+}
+#practiceMode .practice-player-btn:focus-visible,
+#recPlayingBanner .rec-pb-practice-btn:focus-visible { outline: 2px solid #80cbc4; outline-offset: 2px; }
 #practiceMode .practice-count {
     font-family: monospace;
     font-size: 13px;
@@ -3670,6 +3707,7 @@ body.rec-playing #recPlayingWord { display: block; }
 }
 #recPlayingBanner .rec-pb-top {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
 }
@@ -3677,7 +3715,7 @@ body.rec-playing #recPlayingWord { display: block; }
     /* Taller bar so the count text reads on top of it. The count is
        absolutely-positioned + centered so it stays put as the fill
        grows/shrinks behind it. */
-    flex: 1 1 auto;
+    flex: 1 1 100px;
     position: relative;
     height: 22px;
     background: rgba(255,255,255,0.14);

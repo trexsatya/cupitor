@@ -230,6 +230,7 @@ if (require.main === module) (async () => {
     await checkDialogs(browser, true)
     await require('./practice-controls.cjs').checkPracticeControls(browser)
     await require('./player-replay.cjs').checkPlayerReplay(browser)
+    await require('./view-switching.cjs').checkViewSwitching(browser)
   } finally {
     await browser.close()
   }

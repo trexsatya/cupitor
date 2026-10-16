@@ -175,7 +175,7 @@ async function checkPlayerReplay(browser) {
     } finally { await page.close() }
   }
 }
-module.exports = { checkPlayerReplay }
+module.exports = { checkPlayerReplay, silentWav }
 if (require.main === module) (async () => {
   const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required'] })

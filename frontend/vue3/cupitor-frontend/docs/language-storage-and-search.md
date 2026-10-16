@@ -162,6 +162,13 @@ settings show the actual rate when it differs from the requested rate.
 
 ## Keyboard shortcuts
 
+Practice and Player have **Player** / **Practice** buttons to switch views at
+the current item. The exact queue order and index are retained, including
+shuffled queues and multiple clips from the same video. Practice pauses the
+Player session; returning to Player starts the selected item. Text-only cards
+remain visible and paused instead of being skipped during this handoff.
+Practice covers the underlying page; minimizing it restores the main page.
+
 Open **Settings → Keyboard shortcuts**, **Practice → ⋯ → Keyboard shortcuts**,
 or press **?** for the in-app reference.
 
