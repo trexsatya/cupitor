@@ -96,6 +96,8 @@ async function checkPracticeControls(browser) {
       await input.press('j')
       await input.press('Space')
       await input.press('?')
+      await input.press('/')
+      assert((await input.inputValue()).includes('/'), 'slash remains normal text in settings inputs')
       assert.equal(await page.evaluate(() => window._practiceIdx), 0)
       assert.equal(await page.locator('#keyboardShortcutsDialog:visible').count(), 0)
       await page.evaluate(() => {
@@ -112,9 +114,11 @@ async function checkPracticeControls(browser) {
       assert.equal(await page.evaluate(() => window._practiceIdx), 0)
       await page.keyboard.press('?')
       await page.locator('#keyboardShortcutsDialog').waitFor({ state: 'visible' })
-      assert.equal(await page.locator('#keyboardShortcutsDialog tr').count(), 9)
+      assert.equal(await page.locator('#keyboardShortcutsDialog tr').count(), 10)
       await page.keyboard.press('ArrowRight')
       assert.equal(await page.evaluate(() => window._practiceIdx), 0)
+      await page.keyboard.press('/')
+      assert.equal(await page.evaluate(() => !!window._practiceMinimized), false, 'slash cannot search through an open dialog')
       if (!mobile && process.env.SCREENSHOT_DIR) {
         fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
         await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, 'cupitor-keyboard-shortcuts.png') })
@@ -122,6 +126,40 @@ async function checkPracticeControls(browser) {
       await page.keyboard.press('Escape')
       assert.equal(await page.locator('#keyboardShortcutsDialog:visible').count(), 0)
       assert.equal(await page.evaluate(() => window._practiceActive), true)
+
+      // Slash must click the existing search button: it searches this word
+      // and minimizes Practice, retaining the current card. A minimized
+      // session must then route slash to the visible main search instead.
+      await blur()
+      await page.evaluate(() => {
+        window.getSelection()?.removeAllRanges()
+        window.__practiceSearchClicks = 0
+        $('#practiceMode .practice-search').on('click.shortcutTest', () => window.__practiceSearchClicks++)
+        $('#toggleClearTextOnClickCheckbox').prop('checked', false)
+      })
+      await page.keyboard.press('/')
+      assert.equal(await page.evaluate(() => window.__practiceSearchClicks), 1)
+      assert.equal(await page.evaluate(() => window._practiceMinimized), true)
+      assert.equal(await page.locator('#searchText').inputValue(), 'färgsprakande')
+      await page.waitForFunction(() => window._librarySearchText === 'färgsprakande' && !document.querySelector('#result').textContent.includes('Loading…'))
+      await blur()
+      await page.keyboard.press('/')
+      assert.deepEqual(await page.locator('#searchText').evaluate(el => [document.activeElement.id, el.value, el.selectionStart, el.selectionEnd]),
+        ['searchText', 'färgsprakande', 0, 'färgsprakande'.length])
+      await page.keyboard.press('/')
+      assert.equal(await page.locator('#searchText').inputValue(), 'färgsprakande', 'slash never inserts itself in the main search field')
+      await page.keyboard.down('/')
+      await page.keyboard.down('/')
+      await page.keyboard.up('/')
+      assert.equal(await page.locator('#searchText').inputValue(), 'färgsprakande', 'holding slash cannot replace the selected query with slashes')
+      assert.equal(await page.evaluate(() => window.__practiceSearchClicks), 1, 'hidden Practice does not intercept main search shortcuts')
+      await page.keyboard.type('hagla')
+      assert.equal(await page.locator('#searchText').inputValue(), 'hagla', 'typing replaces the query selected by slash')
+      await blur()
+      await page.keyboard.press('j')
+      assert.equal(await page.evaluate(() => window._practiceIdx), 0, 'hidden Practice does not navigate behind the search page')
+      await page.locator('#practiceMode .practice-restore-btn').click()
+      await blur()
 
       // A Play request awaiting video metadata is cancelled on navigation.
       await blur()
@@ -157,6 +195,9 @@ async function checkPracticeControls(browser) {
       await blur()
       await page.keyboard.press('/')
       assert.equal(await page.evaluate(() => document.activeElement.id), 'searchText')
+      await page.keyboard.press('/')
+      assert.equal(await page.locator('#searchText').inputValue(), 'hagla', 'slash selects an already-focused main search field without inserting text')
+      assert.deepEqual(await page.locator('#searchText').evaluate(el => [el.selectionStart, el.selectionEnd]), [0, 5])
       await page.keyboard.press('?')
       assert.equal(await page.locator('#keyboardShortcutsDialog:visible').count(), 0)
       await page.locator('#toggleSettingsPanelBtn').click()

@@ -6,16 +6,22 @@ test.each([
 ])('Practice key %s performs %s', (key, action) => {
   expect(keyboardShortcut({ key }, { practice: true })).toBe(action)
 })
-test('search focus is available outside Practice, and help is available in both views', () => {
+test('slash focuses search or clicks the Practice search button', () => {
   expect(keyboardShortcut({ key: '/' })).toBe('search')
-  expect(keyboardShortcut({ key: '/' }, { practice: true })).toBeNull()
+  expect(keyboardShortcut({ key: '/' }, { practice: true })).toBe('practice-search')
+  expect(keyboardShortcut({ key: '/' }, { practice: true, searchAvailable: false })).toBe('practice-search')
+  expect(keyboardShortcut({ key: '/' }, { typing: true, searchFocused: true })).toBe('search')
+  expect(keyboardShortcut({ key: '/', repeat: true }, { typing: true, searchFocused: true })).toBe('search')
   expect(keyboardShortcut({ key: '/' }, { searchAvailable: false })).toBeNull()
+})
+test('help is available in both views and main search retains other typing keys', () => {
   expect(keyboardShortcut({ key: '?' })).toBe('help')
+  expect(keyboardShortcut({ key: '?' }, { typing: true, searchFocused: true })).toBeNull()
   expect(keyboardShortcut({ key: 'r' })).toBeNull()
 })
 test.each(['ctrlKey', 'altKey', 'metaKey', 'isComposing', 'defaultPrevented'])(
   '%s preserves browser, editor and IME behavior', flag => {
-    expect(keyboardShortcut({ key: 'j', [flag]: true }, { practice: true })).toBeNull()
+    for (const key of ['j', '/']) expect(keyboardShortcut({ key, [flag]: true }, { practice: true })).toBeNull()
   }
 )
 test('typing, composition and open dialogs cannot change cards or open help', () => {
@@ -29,5 +35,7 @@ test('focused buttons keep native Space behavior; toggles do not repeat when hel
   expect(keyboardShortcut({ key: ' ' }, { practice: true, buttonFocused: true })).toBeNull()
   expect(keyboardShortcut({ key: 'r', repeat: true }, { practice: true })).toBeNull()
   expect(keyboardShortcut({ key: '?', repeat: true })).toBeNull()
+  expect(keyboardShortcut({ key: '/', repeat: true })).toBe('search')
+  expect(keyboardShortcut({ key: '/', repeat: true }, { practice: true })).toBeNull()
   expect(keyboardShortcut({ key: 'ArrowRight', repeat: true }, { practice: true })).toBe('next')
 })

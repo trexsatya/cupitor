@@ -21910,7 +21910,7 @@ function openKeyboardShortcuts() {
       $('<td></td>').text(s.label).appendTo($row)
     })
   }
-  $dlg.append('<p>Shortcuts pause while typing or editing a dialog. If YouTube has keyboard focus, click the card first. Focused buttons keep their normal Space action.</p>')
+  $dlg.append('<p>Shortcuts pause while typing or editing a dialog. In the main search field, / selects the query. If YouTube has keyboard focus, click the card first. Focused buttons keep their normal Space action.</p>')
   const options = {
     width: Math.min(560, window.innerWidth - 24), maxHeight: window.innerHeight - 40,
     modal: true, draggable: false, resizable: false,
@@ -21957,17 +21957,19 @@ function _togglePracticePlayback() {
 $(document).on('keydown', function (e) {
   const target = e.target
   const action = keyboardShortcut(e.originalEvent || e, {
-    practice: !!window._practiceActive,
+    practice: !!window._practiceActive && !window._practiceMinimized,
     typing: !!(target && (target.isContentEditable || $(target).closest('input,textarea,select,audio,video,[role="textbox"],[role="combobox"],[role="slider"],.ck').length)),
+    searchFocused: target === $('#searchText')[0],
     dialogOpen: $('.ui-dialog:visible').length > 0,
     buttonFocused: !!(target && $(target).closest('button,a,[role="button"]').length),
-    searchAvailable: $('#searchText').is(':visible') && !window._playingRecording
+    searchAvailable: $('#searchText').is(':visible')
   })
   if (!action) return
   e.preventDefault()
   const actions = {
     help: openKeyboardShortcuts,
     search: () => { const input = $('#searchText')[0]; input.focus(); input.select() },
+    'practice-search': () => $('#practiceMode .practice-search').trigger('click'),
     previous: () => practiceNav(-1), next: () => practiceNav(1),
     play: _togglePracticePlayback, reveal: revealPracticeCard,
     direction: togglePracticeDir, speed: () => { if (!$('#practiceMode .practice-play').is(':hidden')) cyclePracticePlaybackRate() },
