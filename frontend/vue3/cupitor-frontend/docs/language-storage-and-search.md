@@ -167,7 +167,8 @@ or press **?** for the in-app reference.
 
 | Key | Action |
 | --- | --- |
-| `/` | Focus and select search, outside Practice/playback |
+| `/` | Focus and select the main search field, including when it already has focus |
+| `/` in Practice | Click Search this word and minimize Practice |
 | `←` / `K` | Previous Practice card |
 | `→` / `J` | Next Practice card |
 | `Space` | Play/pause the Practice clip or recording; resume a paused clip |
@@ -178,7 +179,9 @@ or press **?** for the in-app reference.
 | `?` | Show the shortcut reference |
 
 Typing in inputs, textareas, selects and rich-text editors, IME composition,
-modifier shortcuts, and open dialogs retain their own keys. Focused buttons
+modifier shortcuts, and open dialogs retain their own keys. The main search
+field reserves `/` to select its query; the slash is not inserted. A minimized
+Practice session leaves shortcuts with the visible main view. Focused buttons
 keep native Space activation. Click the card first if YouTube has keyboard
 focus. Practice/playback shortcuts bypass the old key-release transport so a
 single press cannot also seek or toggle the shared player behind the view.
