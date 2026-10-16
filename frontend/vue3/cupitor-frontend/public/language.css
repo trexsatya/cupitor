@@ -2110,6 +2110,23 @@ body.practice-mode {
     background: #0a0a0a !important;
     color: #f5f5f5;
 }
+/* A separate opaque layer covers page widgets without painting over the
+   shared video (100001), audio panel or Practice controls (100002+). */
+body.practice-mode::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: #0a0a0a;
+}
+body.practice-mode #recPlayingBanner,
+body.practice-mode #recPlayingSubs,
+body.practice-mode #recPlayingWord,
+body.practice-mode #recPlayingTransport,
+body.practice-mode #recPlayingMinimizeBtn,
+body.practice-mode #recPlayingCloseBtn,
+body.practice-mode #recPlayingRestorePill,
+body.practice-mode #recPlayNavToast { display: none !important; }
 body.rec-playing #mainControlInputs,
 body.rec-playing #vocabularyResult,
 body.rec-playing #result,
@@ -2290,10 +2307,30 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     left: 8px;
     right: 8px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     z-index: 100004;
 }
+#practiceMode .practice-player-btn,
+#recPlayingBanner .rec-pb-practice-btn {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding: 4px 10px;
+    border: none;
+    border-radius: 16px;
+    color: #f5f5f5;
+    background: #304b69;
+    cursor: pointer;
+    font-size: 13px;
+}
+#practiceMode .practice-player-btn { margin-left: auto; }
+@media (max-width: 480px) {
+    #practiceMode .practice-topbar { gap: 4px; }
+    #practiceMode .practice-player-btn { padding: 4px 7px; font-size: 12px; }
+}
+#practiceMode .practice-player-btn:focus-visible,
+#recPlayingBanner .rec-pb-practice-btn:focus-visible { outline: 2px solid #80cbc4; outline-offset: 2px; }
 #practiceMode .practice-count {
     font-family: monospace;
     font-size: 13px;
@@ -3302,15 +3339,32 @@ body.dialog-above-practice .ui-widget-overlay { z-index: 100019 !important; }
     #playUnavailableDialog .pud-actions { width: 100%; justify-content: flex-end; }
 }
 
+/* The row owns positioning for all seven controls. It can wrap on very
+   narrow screens; landscape keeps it above the bottom edge of the viewport. */
+#recPlayingTransport {
+    position: fixed;
+    top: min(calc(76px + min(100vw, 900px) * 0.5625), calc(100vh - 64px));
+    top: min(calc(76px + min(100vw, 900px) * 0.5625), calc(100dvh - 64px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100003;
+    width: max-content;
+    max-width: calc(100% - 16px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: clamp(4px, 1.5vw, 12px);
+}
+#recPlayingTransport > button { flex: 0 0 auto; }
+body.rec-playing #recPlayingTransport { display: flex; }
+body.rec-playing-minimized #recPlayingTransport,
+body.practice-mode #recPlayingTransport { display: none; }
+
 /* Queue / playlist button: sits in the middle of the transport row where
    the old Stop button used to live. Stop has moved up to a Close (✕)
    button in the top-right corner. */
 #recPlayingQueueBtn {
-    position: fixed;
-    top: calc(76px + min(100vw, 900px) * 0.5625);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 100003;
     width: 44px;
     height: 44px;
     padding: 0;
@@ -3332,10 +3386,6 @@ body.rec-playing #recPlayingQueueBtn { display: inline-flex; }
    of the YouTube player. Same vertical anchor as #recPlayingStopBtn so
    the two read as a single control group. */
 #recPlayingPauseBtn {
-    position: fixed;
-    top: calc(76px + min(100vw, 900px) * 0.5625);
-    left: calc(50% - 56px);
-    z-index: 100003;
     width: 44px;
     height: 44px;
     padding: 0;
@@ -3358,9 +3408,6 @@ body.rec-paused #recPlayingPauseBtn:hover { background: #388e3c; }
    [Prev] [Pause] [Stop] [Next]. Same vertical anchor as the stop button. */
 #recPlayingPrevBtn,
 #recPlayingNextBtn {
-    position: fixed;
-    top: calc(76px + min(100vw, 900px) * 0.5625);
-    z-index: 100003;
     width: 44px;
     height: 44px;
     padding: 0;
@@ -3374,8 +3421,6 @@ body.rec-paused #recPlayingPauseBtn:hover { background: #388e3c; }
     cursor: pointer;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
 }
-#recPlayingPrevBtn { left: calc(50% - 112px); }
-#recPlayingNextBtn { left: calc(50% + 112px); }
 body.rec-playing #recPlayingPrevBtn,
 body.rec-playing #recPlayingNextBtn { display: inline-flex; }
 
@@ -3412,10 +3457,6 @@ body.rec-playing #recPlayingCloseBtn { display: inline-flex; }
    (center) button and the Next button. Tapping minimises the overlay and
    drops the current word into the main search box. */
 #recPlayingSearchBtn {
-    position: fixed;
-    top: calc(76px + min(100vw, 900px) * 0.5625);
-    left: calc(50% + 56px);
-    z-index: 100003;
     width: 44px;
     height: 44px;
     padding: 0;
@@ -3512,9 +3553,6 @@ body.rec-playing-minimized #recPlayingCloseBtn { display: none !important; }
    visual cue that shuffle is on / loop is non-off. */
 #recPlayingShuffleBtn,
 #recPlayingLoopBtn {
-    position: fixed;
-    top: calc(76px + min(100vw, 900px) * 0.5625);
-    z-index: 100003;
     width: 36px;
     height: 36px;
     padding: 0;
@@ -3535,8 +3573,6 @@ body.rec-playing-minimized #recPlayingCloseBtn { display: none !important; }
        color-blind users and blends into the dark overlay). */
     opacity: 0.45;
 }
-#recPlayingShuffleBtn { left: calc(50% - 168px); }
-#recPlayingLoopBtn    { left: calc(50% + 132px); }
 body.rec-playing #recPlayingShuffleBtn,
 body.rec-playing #recPlayingLoopBtn { display: inline-flex; }
 #recPlayingShuffleBtn:hover,
@@ -3550,21 +3586,15 @@ body.rec-playing #recPlayingLoopBtn { display: inline-flex; }
 #recPlayingShuffleBtn.active:hover,
 #recPlayingLoopBtn.active:hover { background: #1565c0; }
 
-/* On narrow viewports the 6-button row can hit the screen edge — drop
-   the side modes by 6px so they're vertically offset from the transport
-   group. Keeps them tappable without overlapping. */
+/* Compact sizes keep all seven controls in one row on 320px screens. */
 @media (max-width: 480px) {
     #recPlayingShuffleBtn,
     #recPlayingLoopBtn {
         width: 32px;
         height: 32px;
         font-size: 13px;
-        top: calc(76px + min(100vw, 900px) * 0.5625 + 6px);
     }
-    #recPlayingShuffleBtn { left: calc(50% - 152px); }
-    /* Shifted further out so it doesn't overlap the new Search/Next slot. */
-    #recPlayingLoopBtn    { left: calc(50% + 180px); }
-    /* Tighter transport pack: 40px buttons, 8px gaps. */
+    /* The row supplies even gaps; every button keeps its full hit area. */
     #recPlayingPrevBtn,
     #recPlayingPauseBtn,
     #recPlayingQueueBtn,
@@ -3574,10 +3604,6 @@ body.rec-playing #recPlayingLoopBtn { display: inline-flex; }
         height: 40px;
         font-size: 16px;
     }
-    #recPlayingPrevBtn   { left: calc(50% - 96px); }
-    #recPlayingPauseBtn  { left: calc(50% - 48px); }
-    #recPlayingSearchBtn { left: calc(50% + 48px); }
-    #recPlayingNextBtn   { left: calc(50% + 96px); }
 }
 
 /* Current word — big bold display pinned at the top of the viewport
@@ -3681,6 +3707,7 @@ body.rec-playing #recPlayingWord { display: block; }
 }
 #recPlayingBanner .rec-pb-top {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
 }
@@ -3688,7 +3715,7 @@ body.rec-playing #recPlayingWord { display: block; }
     /* Taller bar so the count text reads on top of it. The count is
        absolutely-positioned + centered so it stays put as the fill
        grows/shrinks behind it. */
-    flex: 1 1 auto;
+    flex: 1 1 100px;
     position: relative;
     height: 22px;
     background: rgba(255,255,255,0.14);
@@ -3736,6 +3763,20 @@ body.rec-playing #recPlayingWord { display: block; }
 }
 #recPlayingBanner .rec-pb-info-btn:hover { background: rgba(255,255,255,0.22); }
 #recPlayingBanner .rec-pb-info-btn svg { display: block; }
+#recPlayingBanner .rec-pb-replay-btn {
+    flex: 0 0 auto;
+    min-height: 32px;
+    padding: 4px 8px;
+    border: none;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.12);
+    color: #f5f5f5;
+    cursor: pointer;
+    font-size: 13px;
+    white-space: nowrap;
+}
+#recPlayingBanner .rec-pb-replay-btn:hover { background: rgba(255,255,255,0.22); }
+#recPlayingBanner .rec-pb-replay-btn:focus-visible { outline: 2px solid #80cbc4; outline-offset: 2px; }
 /* Same shape as ℹ, but deliberately NOT covered by the desktop rule that
    hides ℹ: that one is a details toggle the wide layout makes redundant,
    while this opens the music panel and is wanted at every width. */
