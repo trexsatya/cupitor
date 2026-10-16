@@ -20572,6 +20572,7 @@ function closePracticeMode() {
   // regular search-result / recording playback after the session ends.
   try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+  _practiceVideoCues.releaseMute()
   $('#toggleMediaContainer').click() 
 }
 window.closePracticeMode = closePracticeMode
@@ -21070,6 +21071,7 @@ async function playPracticeClip() {
     // A take spoken after the card's lines still has to be reached.
     const clipEnd = _pracRecClipEnd(stop)
     // The cue normally already loaded the right video; reload only if needed.
+    if (!_practiceVideoCues.beginPlayback(videoRequest)) return
     let needLoad = true
     try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
     if (needLoad) {
@@ -21226,6 +21228,7 @@ function _pracRecPauseVideo() {
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
 }
 function _pracRecPlayVideo() {
+  _practiceVideoCues.beginPlayback(_newPracticeVideoRequest())
   try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
 }
 
@@ -21540,16 +21543,17 @@ function _pracRecReplay(t1) {
   const st = _pracRec
   if (!st) return
   const token = ++st.token
+  const isCurrent = () => window._practiceActive && _pracRec === st && token === st.token
   st.awaiting = null
   _pracRecTakeOverPlayhead()
   ;(async () => {
     // The card's lines as they are now — the context may have changed since
     // the clip last played, or it may never have played.
     await _pracRecRefreshClip(st)
-    if (_pracRec !== st || token !== st.token) return
+    if (!isCurrent()) return
     const from = _rewindPointFor(st.takes, t1, st.clipStart)
-    try { await seekToYoutubeTime(from) } catch (_) {}
-    if (_pracRec !== st || token !== st.token) return
+    try { await seekToYoutubeTime(from, { isCurrent }) } catch (_) {}
+    if (!isCurrent()) return
     st.watchPos = _pracRecNow()
     // This pass belongs to the take just recorded. It begins sitting on the
     // mark of the one before it, which the watcher would otherwise sound.
@@ -21843,6 +21847,7 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
 
       if (isYT) {
         // Cue into the embedded player, at the moment the link names.
+        _practiceVideoCues.beginPlayback(_newPracticeVideoRequest())
         _cueManualCardVideo(it)
       } else if (isAudio) {
         // Bridge-loaded preview with toggle: click while playing stops it;
@@ -22064,7 +22069,7 @@ function _togglePracticePlayback() {
     window._practicePlayPending = null
   } else if (state === 2 && window._practicePlaybackCard === it && window._practiceClipTimer) {
     // Resume a paused listen, retaining its original clip-end watcher.
-    _newPracticeVideoRequest()
+    _practiceVideoCues.beginPlayback(_newPracticeVideoRequest())
     try { player.playVideo() } catch (_) {}
   } else playPracticeClip()
 }

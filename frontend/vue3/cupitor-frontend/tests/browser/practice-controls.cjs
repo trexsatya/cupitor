@@ -20,13 +20,22 @@ async function checkPracticeControls(browser) {
       await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
       await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
       await page.evaluate(() => {
-        const s = window.__yt = { id: 'boot-video', time: 0, state: 2, rate: 1, events: [], holdSeek: false, holdId: false }
-        const log = (action, data) => s.events.push({ action, id: s.id, time: s.time, ...data })
+        const s = window.__yt = { id: 'boot-video', time: 0, state: 2, rate: 1, muted: false, events: [], holdSeek: false, holdId: false }
+        const log = (action, data) => s.events.push({ action, id: s.id, time: s.time, muted: s.muted, ...data })
         window.ytPlayer = {
-          pauseVideo: () => { s.state = 2; log('pause') },
+          isMuted: () => s.muted,
+          mute: () => { s.muted = true; log('mute') },
+          unMute: () => { s.muted = false; log('unmute') },
+          pauseVideo: () => { log('pause'); if (s.delayedCommands) setTimeout(() => { s.state = 2 }, 80); else s.state = 2 },
           playVideo: () => { s.state = 1; log('play') },
           loadVideoById: value => { s.id = typeof value === 'string' ? value : value.videoId; s.time = value.startSeconds || 0; s.state = 1; log('load') },
-          cueVideoById: value => { s.id = value.videoId; s.time = value.startSeconds; s.state = 5; log('cue') },
+          cueVideoById: value => {
+            const cue = () => { s.id = value.videoId; s.time = value.startSeconds; s.state = 5; log('cue') }
+            if (s.delayedCommands) {
+              setTimeout(() => { s.state = 1; log('buffered-play') }, 100)
+              setTimeout(cue, 200)
+            } else cue()
+          },
           seekTo: value => { log('seek', { target: value }); if (!s.holdSeek) s.time = value },
           getPlayerState: () => s.state, getCurrentTime: () => s.time, getDuration: () => 1000,
           getVideoUrl: () => 'https://youtube.com/watch?v=' + s.id,
@@ -64,7 +73,7 @@ async function checkPracticeControls(browser) {
       await page.evaluate(() => { window.__yt.state = 1; window.__yt.events = [] })
       await page.keyboard.press('j')
       assert([2, 5].includes(await page.evaluate(() => window.__yt.state)))
-      assert.equal((await state()).events[0].action, 'pause')
+      assert.equal((await state()).events[0].action, 'mute', 'sound stops before the iframe processes pause')
       await page.waitForFunction(() => window.__yt.id === 'testVideo02' && window.__yt.state === 5)
       assert.equal((await state()).events.filter(e => ['play', 'load', 'seek'].includes(e.action)).length, 0)
       await page.keyboard.press('Space')
@@ -87,6 +96,19 @@ async function checkPracticeControls(browser) {
       await page.keyboard.press('s')
       assert.equal(await page.evaluate(() => window._practicePlaybackRate), 0.75)
       await page.keyboard.press('k')
+      await page.waitForFunction(() => window._practiceIdx === 0 && window.__yt.state === 5)
+
+      // Cross-frame commands and state acknowledgments arrive later. The
+      // previous video must remain inaudible throughout that transition.
+      await page.waitForFunction(() => !window.__yt.muted)
+      await page.evaluate(() => { window.__yt.state = 1; window.__yt.events = []; window.__yt.delayedCommands = true })
+      await page.keyboard.press('ArrowRight')
+      assert.equal((await state()).muted, true)
+      await page.waitForFunction(() => window.__yt.id === 'testVideo02' && window.__yt.state === 5 && !window.__yt.muted)
+      const buffered = (await state()).events.filter(e => e.action === 'buffered-play')
+      assert(buffered.length > 0 && buffered.every(e => e.muted), 'late buffered playback never becomes audible')
+      await page.evaluate(() => { window.__yt.delayedCommands = false })
+      await page.keyboard.press('ArrowLeft')
       await page.waitForFunction(() => window._practiceIdx === 0 && window.__yt.state === 5)
 
       // Inputs, editable text, composition and dialogs retain their keys.
@@ -184,6 +206,31 @@ async function checkPracticeControls(browser) {
       await page.waitForFunction(() => window.__yt.events.some(e => e.action === 'cue' && e.id === 'testVideo01'))
       assert.equal((await state()).events.filter(e => ['play', 'load', 'seek'].includes(e.action)).length, 0,
         'a delayed manual YouTube link must not start over the next card')
+
+      // A shadowing-take rewind uses the shared seek retry loop too. Its
+      // retry must not seek (and start) a new card after navigation.
+      await page.evaluate(() => {
+        window.closePracticeMode()
+        window.AudioBridge = { postMessage: message => {
+          const { rid } = JSON.parse(message)
+          queueMicrotask(() => window.__cupAudio({ rid, result: null }))
+        } }
+        const cards = window.__practiceTestCards.map((it, i) => i ? it :
+          { ...it, practiceTakes: [{ t1: 2.5, url: 'file:///saved-take.wav' }] })
+        window.openPracticeMode({ queue: cards, single: true })
+      })
+      await page.waitForFunction(() => window.__yt.id === 'testVideo01' && window.__yt.state === 5)
+      await page.evaluate(() => { window.__yt.time = 90; window.__yt.holdSeek = true; window.__yt.events = [] })
+      await page.locator('#practiceMode .prec-take').click()
+      await page.waitForFunction(() => window.__yt.events.some(e => e.action === 'seek'))
+      await blur()
+      await page.keyboard.press('ArrowRight')
+      await page.waitForFunction(() => window.__yt.id === 'testVideo02' && window.__yt.state === 5)
+      const afterTakeNavigation = (await state()).events.length
+      await page.waitForTimeout(1200)
+      assert.equal((await state()).events.slice(afterTakeNavigation).filter(e => ['play', 'load', 'seek'].includes(e.action)).length, 0,
+        'a previous card shadowing rewind cannot retry its seek on the new card')
+      await page.evaluate(() => { window.__yt.holdSeek = false })
 
       // Closing before the player becomes ready also suppresses boot autoplay.
       await page.evaluate(() => { window.ytPlayerReady = false; window.__yt.events = []; window.openPracticeMode({ queue: window.__practiceTestCards, single: true }) })

@@ -7,7 +7,8 @@
  *
  * Appends `?v=<hash>` to every RELATIVE .js module specifier (static `import`/`export … from`,
  * side-effect `import`, and dynamic `import()`), in dist's user JS files AND the HTML entry points'
- * inline module scripts. `<hash>` is a content hash of all rewritten files, so it changes ONLY when
+ * inline module scripts, plus local script src and stylesheet href attributes.
+ * `<hash>` covers user JS, HTML and CSS, so it changes ONLY when
  * the code changes — unchanged deploys reuse the same URLs and the browser cache stays warm.
  *
  * Untouched: absolute specifiers (e.g. `/vendor/…`), vue-cli's webpack output (dist/js/, already
@@ -33,6 +34,28 @@ function bustImports(code, version) {
   );
 }
 
+// Imports are reached only after the HTML entry script has loaded. Version
+// those URLs too, together with local styles, so a warm browser cannot keep
+// an old UI while fetching a new generation of its child modules.
+function bustHtmlAssets(html, version, rel, exists) {
+  return html.replace(/<(script|link)\b[^>]*>/gi, tag => {
+    const script = /^<script\b/i.test(tag)
+    if (!script && !/\brel\s*=\s*['"]stylesheet['"]/i.test(tag)) return tag
+    return tag.replace(/\b(src|href)(\s*=\s*)(['"])([^'"]+)\3/i, (attr, name, gap, quote, url) => {
+      if ((script ? name.toLowerCase() !== 'src' : name.toLowerCase() !== 'href') ||
+          /^(?:[a-z][\w+.-]*:|\/\/|#)/i.test(url)) return attr
+      const [pathname, query = ''] = url.split('?')
+      if (!/\.(?:js|css)$/i.test(pathname)) return attr
+      const asset = path.posix.normalize(pathname.startsWith('/') ? pathname.slice(1) :
+        path.posix.join(path.posix.dirname(rel), pathname))
+      if (asset.startsWith('../') || ['vendor', 'js'].includes(asset.split('/')[0]) || !exists(asset)) return attr
+      const params = new URLSearchParams(query)
+      params.set('v', version)
+      return `${name}${gap}${quote}${pathname}?${params}${quote}`
+    })
+  })
+}
+
 // A dist-relative path is a target if it's user-authored JS or an HTML entry point (not index.html),
 // and not inside a skipped top-level dir or a .test.js / .min.js.
 function isTarget(rel) {
@@ -40,7 +63,7 @@ function isTarget(rel) {
   if (SKIP_DIRS.has(top)) return false;
   if (rel === 'index.html') return false;
   if (rel.endsWith('.min.js') || rel.endsWith('.test.js')) return false;
-  return rel.endsWith('.js') || rel.endsWith('.html');
+  return rel.endsWith('.js') || rel.endsWith('.html') || rel.endsWith('.css');
 }
 
 function collectTargets(dir, out = []) {
@@ -72,22 +95,20 @@ function main() {
   }
   const version = h.digest('hex').slice(0, 10);
 
-  let rewritten = 0; let touchedSpecifiers = 0;
+  let rewritten = 0;
   for (const rel of targets) {
     const code = contents.get(rel);
-    let count = 0;
-    const out = code.replace(
-      /(?<!\.)\b(from|import)(\s*\(?\s*)(['"])(\.\.?\/[^'"?]+\.js)\3/g,
-      (_m, kw, gap, q, spec) => { count++; return `${kw}${gap}${q}${spec}?v=${version}${q}`; },
-    );
-    if (count > 0) {
+    let out = bustImports(code, version);
+    if (rel.endsWith('.html')) out = bustHtmlAssets(out, version, rel,
+      asset => fs.existsSync(path.join(DIST, asset)));
+    if (out !== code) {
       fs.writeFileSync(path.join(DIST, rel), out, 'utf8');
-      rewritten++; touchedSpecifiers += count;
+      rewritten++;
     }
   }
-  console.log(`cache-bust v=${version}: rewrote ${touchedSpecifiers} import(s) across ${rewritten} file(s)`);
+  console.log(`cache-bust v=${version}: versioned imports and entry assets across ${rewritten} file(s)`);
 }
 
-module.exports = { bustImports };
+module.exports = { bustImports, bustHtmlAssets };
 
 if (require.main === module) main();

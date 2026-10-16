@@ -6,7 +6,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 
-const root = path.resolve(__dirname, '../../public')
+const root = path.resolve(__dirname, '../..', process.env.CUPITOR_TEST_ASSETS || 'public')
 const index = [
   { link: 'testVideo01', name: 'Ljudbok Klubb || HARRY POTTER och FÅNGEN FRÅN AZKABAN || testVideo01', source: 'YouTube' },
   { link: 'testVideo02', name: 'Anders på landet || Höns i trädgård || testVideo02', source: 'youtube' },
