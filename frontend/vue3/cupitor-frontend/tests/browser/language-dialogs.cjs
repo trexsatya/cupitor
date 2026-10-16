@@ -12,7 +12,7 @@ const index = [
   { link: 'testVideo02', name: 'Anders på landet || Höns i trädgård || testVideo02', source: 'youtube' },
   { link: 'testVideo03', name: 'Ljudbok Klubb||ROBINSON CRUSOE||testVideo03', source: 'YOUTUBE' }
 ]
-const cue = '1\n00:00:01,000 --> 00:00:03,000\nEn färgsprakande kväll. Han är en översittare.\n'
+const cue = '1\n00:00:01,000 --> 00:00:03,000\nEn färgsprakande kväll. Han är en översittare.\n\n2\n00:00:03,000 --> 00:00:05,000\nDet börjar hagla.\n'
 
 async function serveFixtures(route) {
   const url = new URL(route.request().url())
@@ -30,7 +30,7 @@ async function serveFixtures(route) {
   let contentType = 'application/json'
   if (file.endsWith('/srts/index.json')) body = JSON.stringify(index)
   else if (file.endsWith('/vocabulary.txt')) {
-    body = '#Color\n(colorful)|färgsprakande|\n#Conduct\n(bullying)|översitteri|\n#Language\n(translate)|översätta|\n'
+    body = '#Color\n(colorful)|färgsprakande|\n#Conduct\n(bullying)|översitteri|\n#Language\n(translate)|översätta|\n#Weather\n(hail)|hagel(sl-pl)|hagelskur|hagelskurar|hagelkorn(sl-pl)\n(pastures)|hagar|\n'
     contentType = 'text/plain'
   } else if (file.endsWith('.srt')) {
     body = cue
@@ -75,24 +75,28 @@ async function checkDialogs(browser, mobile) {
         await click('#settingsPanel label[for="toggleAutoPrefixSearchCheckbox"] .slider')
       }
       await page.locator('#settingsPanel').locator('..').locator('.ui-dialog-titlebar-close').click()
-      await page.locator('#searchText').fill(autoPrefix ? 'ÖVERSITTARE' : 'översittare')
-      await page.locator('#searchText').press('Tab')
-      await page.waitForFunction(auto => {
-        const headers = [...document.querySelectorAll('#vocabularyResult .similar-segment-header')]
-        return headers.some(h => h.textContent.includes('översitteri')) &&
-          !!document.querySelector('#vocabularyResult .prefix-group') === auto &&
-          !document.querySelector('#result').textContent.includes('Loading…')
-      }, autoPrefix)
-      const row = page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: 'översitteri' })
-      assert.equal(await row.count(), 1)
-      assert.equal(await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: 'översätta' }).count(), 0)
-      assert.equal(await page.evaluate(() => window._librarySearchText), 'översittare', 'vocabulary matching must not broaden the clean search query')
-      assert((await page.evaluate(() => Object.keys(window._lastWordToItemsMap || {}))).includes('översittare'))
-      assert((await page.evaluate(() => Object.values(window._lastWordToItemsMap || {}).flat().length)) > 0)
-      if (autoPrefix) {
-        await page.locator('#vocabularyResult .prefix-group-header').filter({ hasText: 'översitt' }).click()
-        assert.equal(await row.isVisible(), true)
-        await screenshot('cupitor-oversittare-vocabulary')
+      for (const [query, expected, group] of [['översittare', 'översitteri', 'översitt'], ['hagla', 'hagel', 'hag']]) {
+        await page.locator('#searchText').fill(autoPrefix ? query : query.toUpperCase())
+        await page.locator('#searchText').press('Tab')
+        await page.waitForFunction(({ auto, expected, query }) => {
+          const headers = [...document.querySelectorAll('#vocabularyResult .similar-segment-header')]
+          return headers.some(h => h.textContent.includes(expected)) &&
+            !!document.querySelector('#vocabularyResult .prefix-group') === auto &&
+            Object.keys(window._lastWordToItemsMap || {}).includes(query) &&
+            !document.querySelector('#result').textContent.includes('Loading…')
+        }, { auto: autoPrefix, expected, query })
+        const row = page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: expected })
+        assert.equal(await row.count(), 1)
+        for (const unrelated of ['översätta', 'hagar']) {
+          assert.equal(await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: unrelated }).count(), 0)
+        }
+        assert.equal(await page.evaluate(() => window._librarySearchText), query, 'vocabulary matching must not broaden the clean search query')
+        assert((await page.evaluate(() => Object.values(window._lastWordToItemsMap || {}).flat().length)) > 0)
+        if (autoPrefix) {
+          await page.locator('#vocabularyResult .prefix-group-header').filter({ hasText: group }).click()
+          assert.equal(await row.isVisible(), true)
+          await screenshot(`cupitor-${query}-vocabulary`)
+        }
       }
     }
     assert.equal(await page.locator('#settingsPanel #searchChannelsBtn').count(), 1)

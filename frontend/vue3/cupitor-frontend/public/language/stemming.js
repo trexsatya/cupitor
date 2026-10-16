@@ -20,6 +20,8 @@ export const STEM_RULES = {
     // Agent / activity nouns: översittare ↔ översitteri, målare ↔ måleri.
     ['are', ['']],
     ['eri', ['']],
+    // Unstressed e drops before l: hagel/hagla, segel/segla, cykel/cykla.
+    ['el', ['l']],
     ['arna', ['a', '']],
     ['erna', ['']],
     ['orna', ['a']],

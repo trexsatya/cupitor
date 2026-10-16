@@ -125,8 +125,8 @@ function _tokensForSegment(p) {
 // Longest common prefix between any per-word vocab token and any search
 // part, with "near-containment": the shorter must be consumed by the longer
 // with at most 1 char of divergence, or both endings reduce to the same
-// prefix stem in the search language. Returns the LCP length (>= 3 is a
-// strong match). Keep the length and detail APIs on the same matching rule.
+// Swedish stem, including vowel deletion (hagel / hagla). Returns the LCP
+// length (>= 3 is a strong match). Keep both APIs on the same matching rule.
 export function vocabPrefixOverlapLen(vocabLine, searchText, lang = 'sv') {
   return vocabPrefixOverlapDetail(vocabLine, searchText, lang).len
 }
@@ -139,10 +139,11 @@ function _prefixMatchLen(token, search, lang) {
   if (lcp < 3 || lang !== 'sv') return 0
 
   // A long common prefix alone is insufficient (översittare / översätta).
-  // Both words must reduce to a shared stem that is fully inside that
-  // prefix, rather than relaxing near-containment for arbitrary endings.
+  // Both words must reduce to a shared stem. A normalized stem need not
+  // occur as a literal prefix: hagel and hagla both reduce to hagl, while
+  // their visible shared prefix is hag. Group/highlight that visible part.
   const searchStems = new Set(guessStems(search, lang))
-  return guessStems(token, lang).some(stem => stem.length >= 3 && stem.length <= lcp && searchStems.has(stem))
+  return guessStems(token, lang).some(stem => stem.length >= 3 && searchStems.has(stem))
     ? lcp : 0
 }
 

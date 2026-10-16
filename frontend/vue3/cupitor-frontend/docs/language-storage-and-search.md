@@ -88,8 +88,9 @@ whole word or consuming only `sprak` during the greedy scan.
 Swedish vocabulary matching also connects agent/activity noun endings such
 as `översittare` / `översitteri`, including automatic prefix search. It uses
 a shared stem from the language's suffix rules rather than accepting any
-words with a similar beginning. Subtitle queries keep the typed term when
-it already finds subtitle results.
+words with a similar beginning. Vowel deletion in pairs such as `hagel` /
+`hagla` and `cykel` / `cykla` also normalizes to a shared stem. Subtitle queries
+keep the typed term when it already finds subtitle results.
 
 ## Practice speed
 

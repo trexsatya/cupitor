@@ -2,6 +2,18 @@ import { guessStems, STEM_RULES } from "./stemming";
 
 describe("guessStems — Swedish", () => {
   test.each([
+    ['hagel', 'hagla', 'hagl'], ['segel', 'segla', 'segl'],
+    ['cykel', 'cykla', 'cykl'], ['tvivel', 'tvivla', 'tvivl']
+  ])('normalizes %s and %s to the same stem', (noun, verb, stem) => {
+    expect(guessStems(noun, 'sv')).toEqual([stem]);
+    expect(guessStems(verb, 'sv')).toEqual([stem]);
+  });
+  test('vowel deletion remains Swedish and retains the minimum root length', () => {
+    expect(guessStems('hagel', 'en')).toEqual([]);
+    expect(guessStems('hagel', 'es')).toEqual([]);
+    expect(guessStems('adel', 'sv')).toEqual([]);
+  });
+  test.each([
     ['översittare', 'översitt'], ['översitteri', 'översitt'],
     ['målare', 'mål'], ['måleri', 'mål'],
     ['fiskare', 'fisk'], ['fiskeri', 'fisk']

@@ -82,6 +82,22 @@ describe("buildKnownWordSet", () => {
 
 describe("vocabPrefixOverlapLen", () => {
   test.each([
+    ['(hail)|hagel(sl-pl)|hagelskur|hagelskurar|hagelkorn(sl-pl)', 'hagla', 'hag'],
+    ['(hail)|hagla|', 'hagel', 'hag'],
+    ['(sail)|segel|', 'segla', 'seg'],
+    ['(bicycle)|cykel|', 'cykla', 'cyk'],
+    ['(doubt)|tvivel|', 'tvivla', 'tviv']
+  ])('matches vowel-deletion families in %s for %s', (line, search, matched) => {
+    expect(vocabPrefixOverlapDetail(line, search, 'sv')).toEqual({ len: matched.length, bestPart: search, matched });
+    expect(vocabPrefixOverlapLen(line, search, 'sv')).toBe(matched.length);
+  });
+  test('vowel deletion does not admit unrelated prefixes or leak to other languages', () => {
+    expect(vocabPrefixOverlapLen('hagar', 'hagla', 'sv')).toBe(0);
+    expect(vocabPrefixOverlapLen('hagel', 'hagna', 'sv')).toBe(0);
+    expect(vocabPrefixOverlapLen('hagel', 'hagla', 'en')).toBe(0);
+    expect(vocabPrefixOverlapLen('hagel', 'hagla', 'es')).toBe(0);
+  });
+  test.each([
     ['(bullying)|översitteri|', 'översittare', 'översitt'],
     ['(bully)|översittare|', 'översitteri', 'översitt'],
     ['(painting)|måleri|', 'målare', 'mål'],
