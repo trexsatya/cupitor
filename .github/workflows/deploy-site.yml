@@ -56,7 +56,9 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Test dialogs with desktop clicks and mobile taps
-        run: node tests/browser/language-dialogs.cjs
+        run: |
+          node tests/browser/language-dialogs.cjs
+          node tests/browser/recorded-searches-scroll.cjs --huge
 
       - name: Test complete subtitle capture merges and cache recovery
         run: node tests/browser/subtitle-completeness.cjs
