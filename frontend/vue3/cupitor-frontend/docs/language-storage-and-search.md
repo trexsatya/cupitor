@@ -57,6 +57,9 @@ SHA-256 support (HTTPS or localhost).
 
 **Settings → Search channels** opens a searchable checklist of
 YouTube channels from both loaded libraries. No selection means all sources.
+Channel names come from the first `||`-separated part of each SRT filename,
+for example `Ljudbok Klubb` from `Ljudbok Klubb || HARRY POTTER || videoId`.
+Source labels such as `YouTube`, `youtube`, and `link` are matched without case.
 Selecting channels restricts subtitle matching and corresponding-word guesses
 strictly to those channels. A filter that finds nothing stays empty; blocked
 channel fallback cannot pull in another channel. The selection is saved with

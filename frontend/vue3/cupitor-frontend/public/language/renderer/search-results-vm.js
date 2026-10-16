@@ -18,8 +18,8 @@ export function channelOfItem(item, srts) {
   const srt = Array.isArray(srts) ? srts.find(s => s && s.link === link) : null
   if (!srt) return null
   const name = String(srt.name || '')
-  const i = name.indexOf(' || ')
-  return (i > 0 ? name.slice(0, i) : name).trim() || null
+  const i = name.indexOf('||')
+  return (i >= 0 ? name.slice(0, i) : name).trim() || null
 }
 
 // Drop items whose channel is in the blocked set, unless that would empty

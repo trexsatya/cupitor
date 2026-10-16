@@ -8,8 +8,9 @@ const path = require('node:path')
 
 const root = path.resolve(__dirname, '../../public')
 const index = [
-  { link: 'testVideo01', name: 'Channel A || First video || testVideo01', source: 'link' },
-  { link: 'testVideo02', name: 'Channel B || Second video || testVideo02', source: 'link' }
+  { link: 'testVideo01', name: 'Ljudbok Klubb || HARRY POTTER och FÅNGEN FRÅN AZKABAN || testVideo01', source: 'YouTube' },
+  { link: 'testVideo02', name: 'Anders på landet || Höns i trädgård || testVideo02', source: 'youtube' },
+  { link: 'testVideo03', name: 'Ljudbok Klubb||ROBINSON CRUSOE||testVideo03', source: 'YOUTUBE' }
 ]
 const cue = '1\n00:00:01,000 --> 00:00:03,000\nEn färgsprakande kväll.\n'
 
@@ -63,7 +64,7 @@ async function checkDialogs(browser, mobile) {
   }
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
-    await page.waitForFunction(() => window.srts?.length === 2)
+    await page.waitForFunction(() => window.srts?.length === 3)
     await page.evaluate(async () => { await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]) })
     assert.equal(await page.locator('#settingsPanel #searchChannelsBtn').count(), 1)
     assert.equal(await page.locator('#searchChannelsBtn:visible').count(), 0)
@@ -80,22 +81,23 @@ async function checkDialogs(browser, mobile) {
     await click('#searchChannelsBtn')
     await page.locator('#searchChannelsDialog').waitFor({ state: 'visible' })
     assert.equal(await isOpen('settingsPanel'), false, 'the channel picker replaces Settings')
-    await page.locator('#searchChannelsDialog input[type=search]').fill('Channel A')
+    assert.deepEqual(await page.locator('#searchChannelsDialog label').allTextContents(), [' Anders på landet', ' Ljudbok Klubb'])
+    await page.locator('#searchChannelsDialog input[type=search]').fill('Ljudbok')
     assert.equal(await page.locator('#searchChannelsDialog label:visible').count(), 1)
-    await page.locator('#searchChannelsDialog input[value="Channel A"]').check()
-    await screenshot('cupitor-settings-channel-picker')
+    await page.locator('#searchChannelsDialog input[value="Ljudbok Klubb"]').check()
+    await screenshot('cupitor-channel-names')
     await page.getByRole('button', { name: 'Apply', exact: true }).click()
     await page.waitForFunction(() => {
       const urls = Object.values(window._lastWordToItemsMap || {}).flat().map(item => item.url)
-      return urls.length > 0 && urls.every(url => url === 'testVideo01')
+      return urls.includes('testVideo01') && urls.includes('testVideo03') && urls.every(url => url === 'testVideo01' || url === 'testVideo03')
     })
     await click('#toggleSettingsPanelBtn')
     assert.match(await page.locator('#searchChannelsBtn').innerText(), /1 selected/)
     await click('#searchChannelsBtn')
-    assert.equal(await page.locator('#searchChannelsDialog input[value="Channel A"]').isChecked(), true)
-    await page.locator('#searchChannelsDialog input[value="Channel A"]').uncheck()
+    assert.equal(await page.locator('#searchChannelsDialog input[value="Ljudbok Klubb"]').isChecked(), true)
+    await page.locator('#searchChannelsDialog input[value="Ljudbok Klubb"]').uncheck()
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
-    assert.deepEqual(await page.evaluate(() => window._appSettings.searchChannels), ['Channel A'])
+    assert.deepEqual(await page.evaluate(() => window._appSettings.searchChannels), ['Ljudbok Klubb'])
 
     // A newly added dialog must survive its opening click without an ID exception,
     // outside taps, and a handler that removes its own clicked element.
@@ -136,7 +138,7 @@ async function checkDialogs(browser, mobile) {
     await click('#fixtureOutside')
     assert.notEqual(await page.locator('#subtitleWordPopover').getAttribute('hidden'), null)
     await page.reload({ waitUntil: 'networkidle' })
-    await page.waitForFunction(() => window._appSettings?.searchChannels?.[0] === 'Channel A')
+    await page.waitForFunction(() => window._appSettings?.searchChannels?.[0] === 'Ljudbok Klubb')
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile touch' : 'Desktop'}: dialog opening, Settings handoff, filtering, cancel, persistence, dismissal and popovers passed`)
   } finally {
