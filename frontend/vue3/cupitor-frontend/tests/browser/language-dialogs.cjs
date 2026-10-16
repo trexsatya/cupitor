@@ -30,7 +30,7 @@ async function serveFixtures(route) {
   let contentType = 'application/json'
   if (file.endsWith('/srts/index.json')) body = JSON.stringify(index)
   else if (file.endsWith('/vocabulary.txt')) {
-    body = '#Color\n(colorful)|färgsprakande|\n(stain)|färg|\n#Sound\n(crackle)|spraka|sprakande|\n#Conduct\n(bully)|översittare|\n(bullying)|översitteri|\n(spelling neighbor)|översittaraktig|\n(spelling neighbor)|översittarfasoner|\n#Language\n(translate)|översätta|\n#Weather\n(hail verb)|hagla|\n(hail)|hagel(sl-pl)|hagelskur|hagelskurar|hagelkorn(sl-pl)\n(pastures)|hagar|\n#People\n(choose)|välja|\n(corps)|kår|kårar|\n(year)|år|\n#Objects\n(bicycle)|cykel|\n(painter)|målare|\n(sleep)|sova|\n#Phrases\n(acceptable)|<*gå an|\n#Expansions\nsova=sova,sover,sov,sovit\ngå=gå,går,gick,gått\n'
+    body = '#Color\n(colorful)|färgsprakande|\n(stain)|färg|\n#Sound\n(crackle)|spraka|sprakande|\n#Conduct\n(bully)|översittare|\n(bullying)|översitteri|\n(spelling neighbor)|översittaraktig|\n(spelling neighbor)|översittarfasoner|\n#Language\n(translate)|översätta|\n#Weather\n(hail verb)|hagla|\n(hail)|hagel(sl-pl)|hagelskur|hagelskurar|hagelkorn(sl-pl)\n(pastures)|hagar|\n#People\n(choose)|välja|\n(corps)|kår|kårar|\n(year)|år|\n#Objects\n(bicycle)|cykel|\n(painter)|målare|\n(sleep)|sova|\n#Phrases\n(acceptable)|<*gå an|\n#Common-word noise\n(noise only)|se till|\n(noise only)|till!|\n(noise only)|för|\n(noise only)|för sig|\n#Manufacturing\n(manufacture)|tillverka|tillverkning|\n#Expansions\nsova=sova,sover,sov,sovit\ngå=gå,går,gick,gått\n'
     contentType = 'text/plain'
   } else if (file.endsWith('.srt')) {
     body = cue
@@ -114,6 +114,27 @@ async function checkDialogs(browser, mobile) {
     await click('#searchVocabularyMenu [data-mode=prefix]')
     await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: '(crackle)' }).waitFor({ state: 'visible' })
     assert.equal(await page.evaluate(() => window._librarySearchText), 'färgsprakande')
+    // Common words cannot be the sole match, including alternatives,
+    // punctuation and prefix suggestions. Complete expressions still work.
+    for (const autoPrefix of [false, true]) {
+      await click('#toggleSettingsPanelBtn')
+      if (await page.locator('#toggleAutoPrefixSearchCheckbox').isChecked() !== autoPrefix) {
+        await click('#settingsPanel label[for="toggleAutoPrefixSearchCheckbox"] .slider')
+      }
+      await page.locator('#settingsPanel').locator('..').locator('.ui-dialog-titlebar-close').click()
+      for (const query of ['tillverkning', 'till|tillverkning', 'för|tillverkning']) {
+        await page.evaluate(query => window.renderVocabularyFindings(query), query)
+        const headers = page.locator('#vocabularyResult .similar-segment-header')
+        assert.equal(await headers.count(), 1)
+        assert.match(await headers.innerText(), /manufacture/)
+      }
+      await page.evaluate(() => window.renderVocabularyFindings('till!|för'))
+      assert.equal(await page.locator('#vocabularyResult .vocabulary-segment').count(), 0)
+      await page.evaluate(() => window.renderVocabularyFindings('se till'))
+      const expression = page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: 'se till' })
+      await expression.waitFor({ state: 'visible' })
+      assert.equal(await expression.count(), 1)
+    }
     // Same-size edits must invalidate the compiled vocabulary index.
     await page.evaluate(() => { window.vocabulary.CacheCheck = ['(cache)|gammal|']; window.renderVocabularyFindings('gamla') })
     assert(await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: 'gammal' }).count())

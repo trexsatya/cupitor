@@ -88,3 +88,39 @@ test('rebuilding after a same-size edit changes the results', () => {
   expect(matcher(data).search('hagla')).toEqual([])
   expect(matcher(data).search('cyklade')).toHaveLength(1)
 })
+
+test.each(['till', 'för', 'som', 'med', 'från', 'över', 'under', 'utan', 'mellan', 'genom', 'eftersom', 'men'])(
+  '%s cannot be the only matching word, including exact query alternatives', stop => {
+    const noise = [`(bare)|${stop}|`, `(punctuated)|${stop.toUpperCase()}!|`, `(phrase)|gå ${stop}|`]
+    const useful = '(bullying)|översitteri|'
+    const m = matcher({ Noise: noise, Useful: [useful] })
+    for (const includePrefix of [false, true]) {
+      expect(m.search(stop, { includePrefix })).toEqual([])
+      expect(m.search(stop.toUpperCase().normalize('NFD') + '!', { includePrefix })).toEqual([])
+      expect(m.search(`${stop}|översittare`, { includePrefix }).map(r => r.line)).toEqual([useful])
+      expect(m.search(`översittare|${stop}`, { includePrefix }).map(r => r.line)).toEqual([useful])
+    }
+    for (const line of noise) expect(m.matchLine(line, `${stop}|översittare`)).toBeNull()
+  }
+)
+
+test('filters common-only compound and prefix anchors while keeping content words with those prefixes', () => {
+  const useful = '(manufacture)|till<*verka|tillverkning|'
+  const m = matcher({ Noise: ['(to)|till|', '(ensure)|se till|', '(for)|för!|'], Useful: [useful],
+    Expansions: ['verka=verka,verkar,verkade,verkat'] })
+  for (const includePrefix of [false, true]) {
+    expect(m.search('tillverkade', { includePrefix }).map(r => r.line)).toEqual([useful])
+    expect(m.search('tillverkning', { includePrefix }).map(r => r.line)).toEqual([useful])
+    expect(m.search('kryptotill', { includePrefix })).toEqual([])
+    expect(m.search('förneka', { includePrefix })).toEqual([])
+  }
+})
+
+test.each(['se till', 'till och från', 'för sig'])(
+  'keeps the complete expression %s instead of removing its common words', query => {
+    const line = `(expression)|${query}|`
+    const m = matcher({ Phrases: [line], Noise: ['(to)|till|', '(for)|för|', '(from)|från|'] })
+    for (const includePrefix of [false, true]) expect(m.search(query, { includePrefix }).map(r => r.line)).toEqual([line])
+    expect(m.matchLine(line, query).kind).toBe('exact')
+  }
+)

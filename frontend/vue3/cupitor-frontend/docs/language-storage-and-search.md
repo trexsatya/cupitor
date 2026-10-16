@@ -92,6 +92,14 @@ never hides a related line. All of those findings remain visible; the Prefix
 limit applies only to extra, collapsed spelling-prefix suggestions and their
 overflow dialog.
 
+A common word such as `till`, `för`, `som` or `med` cannot be the sole
+reason for a vocabulary result. The filter applies to each query alternative,
+punctuated tokens, compound constituents and prefix/suffix suggestions,
+including the Different-prefixes dialog. A useful match on the same row still
+keeps it. Complete expressions such as `se till` or `till och från` remain
+searchable as phrases; common prefixes inside content words such as
+`tillverkning` are preserved.
+
 Related-word normalization applies bounded stages for Swedish genitives,
 inflections, derivations and spelling changes, so layered forms such as
 `översittarens`, `måleriet`, `haglade` and `cyklarnas` can find their family.

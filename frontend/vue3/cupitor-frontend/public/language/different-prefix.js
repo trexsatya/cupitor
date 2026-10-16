@@ -5,7 +5,7 @@
 // dependency (vocabSuffixOverlapLen for the weak-overlap fallback) is
 // passed in, and the caller supplies the line list.
 
-import { SEPARATOR_PIPE, stripExpansionMarkers } from './vocab-search.js'
+import { SEPARATOR_PIPE, stripExpansionMarkers, isVocabularyStopWord } from './vocab-search.js'
 
 // Derivational prefixes per language. Sorted longest-first by _stripPrefix
 // so stripping picks `under-` before `un-`, `genom-` before `ge-`, etc.
@@ -36,7 +36,7 @@ export function _stripPrefix(word, prefixList) {
 // Returns { stem, origPrefix, results: [{ kind, prefix?, candidate?, lineIdx, category }] }.
 export function findDifferentPrefixMatches(searchText, lang, lines, lineCategory, suffixOverlap) {
   const lc = (searchText || '').toLowerCase().trim()
-  if (!lc) return { stem: '', origPrefix: '', results: [] }
+  if (!lc || isVocabularyStopWord(lc)) return { stem: '', origPrefix: '', results: [] }
   const prefixes = (COMMON_PREFIXES[lang] || COMMON_PREFIXES.sv)
     .slice().sort((a, b) => b.length - a.length)
   const { prefix: origPrefix, stem } = _stripPrefix(lc, prefixes)
@@ -65,8 +65,8 @@ export function findDifferentPrefixMatches(searchText, lang, lines, lineCategory
     })
   }
   // (b) Weak overlap matches — pipe-segments that share a 2-char full-segment
-  // suffix with the search (e.g. "äta|åt|ätit" hitting "gråt" via the bare
-  // "åt" segment). Filtered from the main panel as noise but useful here.
+  // suffix with the search. The supplied overlap helper excludes common
+  // words here too, so the dialog cannot reintroduce common-word-only rows.
   if (typeof suffixOverlap === 'function') {
     lines.forEach((vocabLine, idx) => {
       if (seen.has(idx)) return

@@ -3,7 +3,7 @@
 import { createWordFormMatcher, normalizeWord } from './word-forms.js'
 import {
   stripBracketHints, stripExpansionMarkers, VOCAB_OVERLAP_STOP_WORDS,
-  vocabPrefixOverlapDetail
+  vocabPrefixOverlapDetail, isVocabularyStopWord
 } from './vocab-search.js'
 import { COMMON_PREFIXES } from './different-prefix.js'
 
@@ -40,7 +40,7 @@ export function createVocabularyMatcher(vocabulary, {
   const known = new Set(rows.flatMap(row => row.words).filter(w => w.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(w)))
   const knownForms = new Set([...known].flatMap(word => [...forms.forms(word)]).filter(w => w.length >= 3))
   const derivationalPrefixes = new Set(COMMON_PREFIXES.sv)
-  const recognized = word => [...forms.forms(word)].some(form => knownForms.has(form))
+  const recognized = word => !isVocabularyStopWord(word) && [...forms.forms(word)].some(form => knownForms.has(form))
   // Unlike the old greedy fragment scan, every character must be accounted
   // for by known constituents. A known/inflected right half is allowed, but
   // a derivational prefix such as över- is not a compound word by itself.
@@ -92,10 +92,13 @@ export function createVocabularyMatcher(vocabulary, {
     }
     return null
   }
-  const matchLine = (line, query) => matchPrepared(prepare(line), termsOf(query), [])
+  // Filter alternatives before the exact branch too. A useful alternative
+  // does not give a common-word-only alternative permission to match.
+  const queryTerms = query => termsOf(query).filter(term => !isVocabularyStopWord(term))
+  const matchLine = (line, query) => matchPrepared(prepare(line), queryTerms(query), [])
   const search = (query, { includePrefix = false } = {}) => {
-    const terms = termsOf(query)
-    if (!terms.length || terms.every(t => VOCAB_OVERLAP_STOP_WORDS.has(t))) return []
+    const terms = queryTerms(query)
+    if (!terms.length) return []
     const compounds = lang === 'sv'
       ? [...new Set(terms.filter(t => !/\s/.test(t)).flatMap(t => constituents(t)))]
         .filter(t => !terms.includes(t))
