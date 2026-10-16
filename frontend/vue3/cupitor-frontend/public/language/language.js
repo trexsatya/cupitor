@@ -4,6 +4,7 @@ import { loadRecordingsFiles, syncRecordingsFiles } from './recordings-store.js'
 import { listRecordingsParts } from './recordings-gc.js';
 import { rememberCache, listSubtitleCaches, cacheSources, removeCacheSource, deleteSubtitleCache } from './cache-manager.js';
 import { filterSearchChannels, searchChannelOptions } from './search-channels.js';
+import { SUBTITLE_CONTENT_VERSION, reusableSubtitleCache, subtitleSnapshot } from './subtitle-state.js';
 import {computeIfAbsent, range, schedule, uuid} from '../data-structures.js';
 import {conjugateTableSpanish} from './spanish.js';
 import {
@@ -91,7 +92,6 @@ import {
   detectSrtConflicts,
   upsertSrtEntry,
   applyQueuedEditsToText,
-  capturedSlotText,
 } from './srt-parser.js';
 import { translateLines } from './translate-lines.js';
 import { numberRows as _numberRows, plainRows as _plainRows, parseNumbered as _parseNumbered } from './translate-block.js';
@@ -4654,15 +4654,15 @@ async function loadAllSubtitles() {
         // other user changed, or the video moved between libraries): a miss,
         // so it is fetched again and the record overwritten.
         if (!_dsCacheRecordMatches(entry, indexByLink.get(link), primaryOwner)) continue
-        if (entry && entry.sv && !window.allSubtitles[link]) {
-          window.allSubtitles[link] = {
+        if (reusableSubtitleCache(entry) && window.allSubtitles[link]?._remoteComplete !== true) {
+          _applySubtitleSnapshot(link, {
             sv: entry.sv,
             en: entry.en || null,
             source: entry.source,
             fileName: entry.name,
             fetchedFrom: 'cache',
             readOnly: !!(indexByLink.get(link) || {}).readOnly,
-          }
+          })
           cacheHits.push(link)
         }
       }
@@ -4689,7 +4689,7 @@ async function loadAllSubtitles() {
     // Only fetch what the cache didn't satisfy. On a steady-state boot this
     // is typically empty (everything came from IDB); on first boot it's the
     // whole corpus; on a deploy that added videos it's just the new ones.
-    const toFetch = srts.filter(it => !window.allSubtitles[it.link])
+    const toFetch = srts.filter(it => !window.allSubtitles[it.link] || window.allSubtitles[it.link]._partial)
     if (cacheHits.length || deadLinks.length || toFetch.length !== srts.length) {
       console.log(`[cache] boot: ${cacheHits.length} hits, ${toFetch.length} to fetch, ${deadLinks.length} evicted`)
     }
@@ -4763,7 +4763,7 @@ async function _retrySrtsInBackground(items, maxRounds = 4) {
       const stillFailing = []
       await _runInBatches(pending, async (it) => {
         // Skip ones a prior round (or a normal search) already recovered.
-        if (window.allSubtitles[it['link']]) return
+        if (window.allSubtitles[it['link']] && !window.allSubtitles[it['link']]._partial) return
         try {
           // A touch more patience per attempt than the initial 15s.
           await _withTimeout(getSubtitlesForLink(it['link'], it['source']), 20000, it['link'])
@@ -4848,13 +4848,14 @@ function storeSubtitles(subs) {
 // toStringSubtitle + srtError live in ./srt-parser.js (imported at the top).
 
 // ─── IndexedDB cache for SRT subtitle pairs ─────────────────────────────────
-// Stores `{link, name, sv, en, source, owner, cachedAt}` records keyed by
+// Stores `{link, name, sv, en, source, owner, cachedAt, contentVersion, complete}` records keyed by
 // `link`. `owner` is the login whose repo the files came from; boot ignores a
 // record whose owner is not the one the index now names (a record without
 // one counts as the primary repo's).
 //
-// Versioning model is intentionally opaque: once an SRT is cached, the app
-// trusts it forever. Boot reads the cache, populates window.allSubtitles for
+// Only complete, current-version SRT snapshots are reusable. Older records
+// can contain a partial capture and are automatically fetched again. Boot
+// reads the cache, populates window.allSubtitles for
 // hits, fetches the remaining entries from GitHub, and evicts cache entries
 // whose link no longer appears in srts/index.json. To pull fresh server-side
 // content, the user clicks "Refresh subtitles" in the Manage menu (which
@@ -4953,7 +4954,8 @@ async function _cacheWriteMany(entries) {
       const now = Date.now()
       for (const e of entries) {
         if (!e || !e.link || _cacheSuppressedOwners.has(e.owner || _sourceOwner('primary'))) continue
-        try { store.put({ link: e.link, name: e.name, sv: e.sv, en: e.en, source: e.source, owner: e.owner, cachedAt: now }) } catch (_) {}
+        try { store.put({ link: e.link, name: e.name, sv: e.sv, en: e.en, source: e.source, owner: e.owner,
+          cachedAt: now, contentVersion: SUBTITLE_CONTENT_VERSION, complete: e.complete === true }) } catch (_) {}
       }
       tx.oncomplete = () => resolve()
       tx.onerror = (ev) => {
@@ -4985,14 +4987,14 @@ async function _cacheWriteOne(entry) {
 // IndexedDB cache. Called right after a capture / inline edit / translation is
 // pushed to GitHub, so a reload (or another view) sees the new content
 // immediately — no waiting for GitHub's CDN to catch up, and no re-fetch.
-// Single-user assumption: window.allSubtitles[link] already holds what we just
-// pushed (optimistic edits, or the same merge used to build the commit). A
+// Capture pushes install the exact complete API merge before calling this.
+// A partial/unverified record is tagged so boot will fetch the full SRT. A
 // concurrent remote change from another device is reconciled on an explicit
 // "Refresh subtitles".
 function _cacheWriteSubtitleFromMemory(link) {
   const s = link && window.allSubtitles && window.allSubtitles[link]
   if (!s || (s.sv == null && s.en == null)) return Promise.resolve()
-  return _cacheWriteOne({ link, name: s.fileName, sv: s.sv, en: s.en, source: s.source, owner: _ownerOfLink(link) })
+  return _cacheWriteOne({ link, name: s.fileName, sv: s.sv, en: s.en, source: s.source, owner: _ownerOfLink(link), complete: s._remoteComplete === true })
     .catch(e => console.warn('[cache] post-push write failed for', link, e))
 }
 
@@ -5095,7 +5097,8 @@ async function _fetchSrtFile(url) {
 }
 
 async function getSubtitlesForLink(link, source) {
-  if (window.allSubtitles[link]) {
+  const before = window.allSubtitles[link]
+  if (before && !before._partial) {
     return window.allSubtitles[link]
   }
   const srt = window.srts.find(it => it.link === link);
@@ -5119,11 +5122,15 @@ async function getSubtitlesForLink(link, source) {
     if (!(e && e.kind === 'notfound')) throw e
   }
 
-  window.allSubtitles[link] = {sv, en, source, fileName: name, readOnly: !!srt.readOnly}
+  // A push/edit may have installed a fresher complete snapshot during this
+  // fetch. Do not replace it with an older CDN response.
+  const current = window.allSubtitles[link]
+  if (current !== before && current?._remoteComplete) return current
+  _applySubtitleSnapshot(link, {sv, en, source, fileName: name, readOnly: !!srt.readOnly})
   // Write the freshly-fetched pair to IndexedDB so the next boot can skip
   // this network round-trip. Fire-and-forget — failures are swallowed inside
   // the cache layer; a flaky cache must never break this critical path.
-  _cacheWriteOne({ link, name, sv, en, source, owner: srt.owner || _sourceOwner('primary') }).catch(e => console.warn('[cache] write failed for', link, e))
+  _cacheWriteSubtitleFromMemory(link)
   return window.allSubtitles[link]
 }
 
@@ -10035,10 +10042,19 @@ window.cupitorKnownVideos = function (idsJson) {
   }))
 }
 
-// Merge a captured subtitle into window.allSubtitles + window.srts so search
-// (fetchFromDownloadedFiles) picks it up right away. Reuses the same pure
-// merge the push path uses (mergeSrtWithNewEntries / linesToSrtText) and the
-// shared naming/source helpers. No network — purely local cache seeding.
+// Install a full repository pair while preserving captures that arrived
+// during its fetch/push. Completed captures are excluded after a push so
+// discarded conflicts cannot be reintroduced from the review buffer.
+function _applySubtitleSnapshot(link, snapshot, excludedIds = new Set()) {
+  const pending = loadCapturedBuffer()
+    .filter(item => !excludedIds.has(item.id) && item.detail?.videoId === link)
+    .map(item => item.detail)
+  window.allSubtitles[link] = subtitleSnapshot(snapshot, pending)
+  return window.allSubtitles[link]
+}
+
+// Make captures searchable immediately. Missing remote lines are fetched in
+// the background; this partial overlay never counts as a loaded full file.
 function _seedCapturedIntoSearchIndex(detail) {
   const videoId = detail && detail.videoId
   if (!videoId) return
@@ -10055,9 +10071,10 @@ function _seedCapturedIntoSearchIndex(detail) {
     en = existing.en ? mergeSrtWithNewEntries(existing.en, detail.translation) : linesToSrtText(detail.translation)
   }
 
-  const baseName = _nfc(buildCapturedSubtitleBaseName(detail))
-  const source = inferSubtitleSource(detail)
-  window.allSubtitles[videoId] = { ...existing, sv, en, source, fileName: baseName, fetchedFrom: 'captured' }
+  const indexed = (window.srts || []).find(s => s && s.link === videoId)
+  const baseName = _nfc(existing.fileName || indexed?.name || buildCapturedSubtitleBaseName(detail))
+  const source = existing.source || indexed?.source || inferSubtitleSource(detail)
+  window.allSubtitles[videoId] = { ...existing, sv, en, source, fileName: baseName, fetchedFrom: 'captured', _partial: !existing._remoteComplete }
   // Drop cached parses so subsequent reads reflect the merged text.
   delete window.allSubtitles[videoId]._parsedSv
   delete window.allSubtitles[videoId]._parsedEn
@@ -10067,6 +10084,13 @@ function _seedCapturedIntoSearchIndex(detail) {
   const srtEntry = { link: videoId, name: baseName, source }
   if (at >= 0) window.srts[at] = { ...window.srts[at], ...srtEntry }
   else window.srts.push(srtEntry)
+  // A partial capture is searchable now, but must not stand in for the
+  // complete indexed SRT. Recover it even if the initial load already ended.
+  if (window.allSubtitles[videoId]._partial && indexed?.src) {
+    // Reuse the bounded retry pool instead of starting an unbounded fetch
+    // for every event in a burst of partial captures.
+    _retrySrtsInBackground([indexed]).catch(e => console.warn('[capture] full SRT still unavailable', videoId, e))
+  }
 }
 
 // escapeHtml lives in ./html-utils.js (re-exported from ./highlight.js).
@@ -10384,6 +10408,10 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
   const indexAdditions = []     // [{link, name, source}] for index.json
   const allIds = []             // ids to drop from the buffer on success
   const inMemoryUpdates = []    // [{videoId, baseName, source, sv, en}] for window.allSubtitles
+  // Populated by the actual commit transforms, including retries and no-op
+  // commits. These are the complete API snapshots, not the partial memory
+  // copy or the potentially stale CDN prefetch used to show conflicts.
+  const committedText = new Map()
 
   // Pre-compute per-video specs (everything needed before remote prefetch).
   const videoSpecs = []
@@ -10453,9 +10481,11 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
       }
       fileSpecs.push({
         path: `${srtsDir}/${baseName}.${sourceLang}.srt`,
-        getContent: (current) => current
-          ? mergeSrtWithResolution(current, allLines, srcResolution)
-          : linesToSrtText(allLines)
+        getContent: (current) => {
+          const text = current ? mergeSrtWithResolution(current, allLines, srcResolution) : linesToSrtText(allLines)
+          committedText.set(`${videoId}|src`, text)
+          return text
+        }
       })
     }
     if (targetLang) {
@@ -10469,9 +10499,18 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
       }
       fileSpecs.push({
         path: `${srtsDir}/${baseName}.${targetLang}.srt`,
-        getContent: (current) => current
-          ? mergeSrtWithResolution(current, allTranslations, tgtResolution)
-          : linesToSrtText(allTranslations)
+        getContent: (current) => {
+          const text = current ? mergeSrtWithResolution(current, allTranslations, tgtResolution) : linesToSrtText(allTranslations)
+          committedText.set(`${videoId}|tgt`, text)
+          return text
+        }
+      })
+    } else if (sourceLang) {
+      // No new translation does not mean no existing translation. Read its
+      // authoritative contents without writing an empty .en.srt.
+      fileSpecs.push({
+        path: `${srtsDir}/${baseName}.en.srt`,
+        getContent: (current) => { committedText.set(`${videoId}|tgt`, current); return null }
       })
     }
 
@@ -10551,14 +10590,10 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
       await new Promise(res => setTimeout(res, INTER_CHUNK_SLEEP_MS))
     }
   }
-  // If every chunk was a no-op, surface that so the caller doesn't silently
-  // clear the buffer thinking the commit happened.
-  if (!anyCommitted) {
-    return { pushedIds: allIds, committed: false, reason: lastNoCommitReason || 'no-changes' }
-  }
-
-  // Best-effort in-memory updates so the UI reflects the new state without
-  // a reload. Mirrors what the per-item handleCapturedSubtitle used to do.
+  // Synchronize even when everything was already on remote. Otherwise a
+  // no-op push leaves a partial local copy cached indefinitely.
+  const excludedIds = new Set(allIds)
+  const cacheWrites = []
   for (const u of inMemoryUpdates) {
     // A video only the other user's library had: the own repo now has just
     // these lines (new files), so the other user's text is not merged in,
@@ -10569,19 +10604,27 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
     const cached = wasOther
       ? { ...prev, sv: null, en: null, _parsedSv: undefined, _parsedEn: undefined, readOnly: false }
       : prev
-    const sv = cached.sv ? mergeSrtWithResolution(cached.sv, u.allLines, u.srcResolution)        : linesToSrtText(u.allLines)
-    const en = capturedSlotText(cached.en, u.allTranslations, u.tgtResolution)
-    window.allSubtitles[u.videoId] = { ...cached, sv, en, source: u.source, fileName: u.baseName }
+    const hasSource = committedText.has(`${u.videoId}|src`)
+    const hasTarget = committedText.has(`${u.videoId}|tgt`)
+    if (hasSource && hasTarget) {
+      _applySubtitleSnapshot(u.videoId, { ...cached,
+        sv: committedText.get(`${u.videoId}|src`), en: committedText.get(`${u.videoId}|tgt`),
+        source: u.source, fileName: u.baseName }, excludedIds)
+    } else {
+      // An incomplete/malformed capture must never become a trusted cache.
+      window.allSubtitles[u.videoId] = { ...cached, _remoteComplete: false, _partial: true }
+    }
     if (Array.isArray(window.srts) && !window.srts.find(it => it.link === u.videoId)) {
       window.srts.push({ link: u.videoId, name: u.baseName, source: u.source })
     }
     _markPushedLink(u.videoId)
     // Persist the just-pushed content so a reload doesn't re-fetch (or show a
     // stale cache) for this video.
-    _cacheWriteSubtitleFromMemory(u.videoId)
+    cacheWrites.push(_cacheWriteSubtitleFromMemory(u.videoId))
   }
-
-  return { pushedIds: allIds }
+  await Promise.all(cacheWrites)
+  return anyCommitted ? { pushedIds: allIds }
+    : { pushedIds: allIds, committed: false, reason: lastNoCommitReason || 'no-changes' }
 }
 
 async function handleCapturedSubtitle(detail) {
@@ -10589,117 +10632,9 @@ async function handleCapturedSubtitle(detail) {
     console.warn('capturedSubtitle: missing videoId', detail)
     return
   }
-  const { videoId, sourceLang, targetLang, lines = [], translation = [] } = detail
-  // Stop before the merge dialogs: nothing could be pushed without an own repo.
-  if (!_dsHasSelf()) throw new _DsNoSelfRepoError()
-
-  // Authoritative: check index.json on github. window.allSubtitles can be
-  // misleading — it gets populated even by purely-local files / re-pushes —
-  // whereas the index is the single source of truth for what's deployed.
-  const indexEntry = await fetchSrtIndexEntry(videoId)
-  const isNew = !indexEntry
-
-  // For existing entries, reuse the deployed filename (existing .sv.srt /
-  // .en.srt in the repo already use it). For new entries, build a fresh,
-  // URL-safe, length-capped name. Both languages use the same baseName so
-  // the .sv / .en pair share a filesystem-friendly prefix.
-  const baseName = _nfc(indexEntry
-    ? indexEntry.name
-    : buildCapturedSubtitleBaseName(detail))
-  const source = indexEntry && indexEntry.source
-    ? indexEntry.source
-    : inferSubtitleSource(detail)
-
-  // Existing SRT content for merging: prefer in-memory if loaded; otherwise
-  // fetch from the repo. Skip the fetch entirely for new entries.
-  let existingSourceText = null
-  let existingTargetText = null
-  if (!isNew) {
-    const cached = window.allSubtitles[videoId]
-    if (cached && cached.sv) existingSourceText = cached.sv
-    if (cached && cached.en) existingTargetText = cached.en
-    // The translation slot is read even for an untranslated capture (its file
-    // is then the `.en.srt`), so the memory copy keeps the existing translation.
-    const tgtLang = targetLang || 'en'
-    if ((!existingSourceText && sourceLang) || !existingTargetText) {
-      try {
-        if (!existingSourceText && sourceLang) {
-          const srcName = `${baseName}.${sourceLang}.srt`
-          const r = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(srcName)}`, { cache: 'no-cache' })
-          if (r.ok) existingSourceText = await r.text()
-        }
-        if (!existingTargetText) {
-          const tgtName = `${baseName}.${tgtLang}.srt`
-          const r = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(tgtName)}`, { cache: 'no-cache' })
-          if (r.ok) existingTargetText = await r.text()
-        }
-      } catch (e) { console.warn('failed to fetch existing srt for merge', e) }
-    }
-  }
-
-  // Detect conflicting entries (same start, different text) before merging
-  // anything. If any exist, show the merge dialog so the user picks per
-  // timestamp; we thread the resolution into uploadSrtToGithub so it's
-  // re-applied on every retry of the commit (in case of 409/422).
-  let sourceResolution = null
-  let targetResolution = null
-  if (existingSourceText) {
-    const conflicts = detectSrtConflicts(existingSourceText, lines)
-    if (conflicts.length) {
-      sourceResolution = await presentSrtMergeDialog(`${(sourceLang || 'source').toUpperCase()} subtitle`, conflicts)
-      if (sourceResolution === null) throw new Error('Merge cancelled by user')
-    }
-  }
-  if (existingTargetText) {
-    const conflicts = detectSrtConflicts(existingTargetText, translation)
-    if (conflicts.length) {
-      targetResolution = await presentSrtMergeDialog(`${(targetLang || 'target').toUpperCase()} translation`, conflicts)
-      if (targetResolution === null) throw new Error('Merge cancelled by user')
-    }
-  }
-
-  // sourceLang corresponds to the language being studied (stored under `sv` in allSubtitles),
-  // targetLang corresponds to the translation (stored under `en`).
-  const sourceText = existingSourceText
-    ? mergeSrtWithResolution(existingSourceText, lines, sourceResolution)
-    : linesToSrtText(lines)
-  const targetText = capturedSlotText(existingTargetText, translation, targetResolution)
-
-  window.allSubtitles[videoId] = {
-    ...(window.allSubtitles[videoId] || {}),
-    sv: sourceText,
-    en: targetText,
-    source,
-    fileName: baseName
-  }
-
-  // Push only the new entries; uploadSrtToGithub re-fetches the real-time
-  // remote and merges them in (with the user's conflict resolution
-  // re-applied), so concurrent captures on another client are preserved.
-  if (sourceLang) {
-    await uploadSrtToGithub(baseName, sourceLang, lines,
-      `srt: ${isNew ? 'add' : 'merge'} ${sourceLang} subtitle for ${videoId}`,
-      sourceResolution)
-  }
-  if (targetLang) {
-    await uploadSrtToGithub(baseName, targetLang, translation,
-      `srt: ${isNew ? 'add' : 'merge'} ${targetLang} subtitle for ${videoId}`,
-      targetResolution)
-  }
-
-  // Only touch index.json when the entry actually needs to be added.
-  if (isNew) {
-    await upsertSrtIndexEntry(videoId, baseName, source)
-    // A video only the other user's library had is now the user's own.
-    _adoptAsSelfEntry(videoId, baseName, source)
-    if (Array.isArray(window.srts) && !window.srts.find(it => it.link === videoId)) {
-      window.srts.push({ link: videoId, name: baseName, source })
-    }
-  }
-  _markPushedLink(videoId)
-  // Persist the pushed content to IndexedDB so a reload sees it without a
-  // re-fetch from GitHub (whose CDN can lag right after a push).
-  _cacheWriteSubtitleFromMemory(videoId)
+  // Keep the legacy single-capture entry point on the same authoritative
+  // merge/cache path as Push This and Push All.
+  return pushCapturedSubtitlesBatched([{ id: uuid(), detail }])
 }
 
 function isLocalhost() {
