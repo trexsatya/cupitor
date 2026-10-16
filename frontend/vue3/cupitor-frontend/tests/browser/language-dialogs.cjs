@@ -221,14 +221,17 @@ async function checkDialogs(browser, mobile) {
   }
 }
 
-;(async () => {
+if (require.main === module) (async () => {
   const browser = await chromium.launch({ headless: true,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ['--no-sandbox', '--disable-dev-shm-usage'] })
   try {
     await checkDialogs(browser, false)
     await checkDialogs(browser, true)
+    await require('./practice-controls.cjs').checkPracticeControls(browser)
   } finally {
     await browser.close()
   }
 })().catch(error => { console.error(error); process.exitCode = 1 })
+
+module.exports = { serveFixtures }

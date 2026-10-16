@@ -122,6 +122,12 @@ meanings, and genuinely irregular families can be supplied in Expansions.
 
 ## Practice speed
 
+Practice card changes stop the previous clip immediately and prepare the next
+video with YouTube's non-playing cue command. They do not load an autoplaying
+video and try to silence it afterwards. Pending ready/load/seek operations are
+cancelled when the card changes, Play takes over or Practice closes. An iframe
+that becomes ready during or after a closed Practice request stays silent.
+
 In Practice, open **⋯ → Speed cycle**, enter an ordered list such as
 `1, 0.75, 0.5` or `0.7, 0.5`, then press **Save speeds**. The speed button cycles
 through exactly that list and wraps to its beginning. Decimal points are used
@@ -129,6 +135,29 @@ inside rates; commas, spaces or semicolons separate rates. Allowed rates are
 0.1–4. The list and selected rate persist across cards and sessions.
 YouTube receives the closest speed supported by the current video; the
 settings show the actual rate when it differs from the requested rate.
+
+## Keyboard shortcuts
+
+Open **Settings → Keyboard shortcuts**, **Practice → ⋯ → Keyboard shortcuts**,
+or press **?** for the in-app reference.
+
+| Key | Action |
+| --- | --- |
+| `/` | Focus and select search, outside Practice/playback |
+| `←` / `K` | Previous Practice card |
+| `→` / `J` | Next Practice card |
+| `Space` | Play/pause the Practice clip or recording; resume a paused clip |
+| `R` | Reveal/flip the answer |
+| `D` | Switch the language direction |
+| `S` | Cycle the configured playback speeds |
+| `Esc` | Close Practice; when help is open, close help first |
+| `?` | Show the shortcut reference |
+
+Typing in inputs, textareas, selects and rich-text editors, IME composition,
+modifier shortcuts, and open dialogs retain their own keys. Focused buttons
+keep native Space activation. Click the card first if YouTube has keyboard
+focus. Practice/playback shortcuts bypass the old key-release transport so a
+single press cannot also seek or toggle the shared player behind the view.
 
 ## Cached data
 
