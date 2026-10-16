@@ -10047,7 +10047,7 @@ window.cupitorKnownVideos = function (idsJson) {
 // discarded conflicts cannot be reintroduced from the review buffer.
 function _applySubtitleSnapshot(link, snapshot, excludedIds = new Set()) {
   const pending = loadCapturedBuffer()
-    .filter(item => !excludedIds.has(item.id) && item.detail?.videoId === link)
+    .filter(item => item && !excludedIds.has(item.id) && item.detail?.videoId === link)
     .map(item => item.detail)
   window.allSubtitles[link] = subtitleSnapshot(snapshot, pending)
   return window.allSubtitles[link]

@@ -78,7 +78,7 @@ async function check(browser, mobile) {
         const detail = { videoId: id, sourceLang: 'sv', videoUrl: 'https://www.youtube.com/watch?v=' + id,
           lines: [{ start: 6.919, end: 10.759, text: '>> Ja, både burka och är ju uttryck för eh' }] }
         const item = { id: 'pushed', detail }
-        t.saveCapturedBuffer([item])
+        t.saveCapturedBuffer([null, item])
         window.allSubtitles[id] = { sv: partial, en: null, _partial: true, _parsedSv: ['stale'], _parsedEn: ['stale'] }
         window.GitHubUtils.getFile = async () => ({ content: JSON.stringify([{ link: id, name, source: 'youtube' }]) })
         window.GitHubUtils.commitMultipleFiles = async ({ files }) => {
