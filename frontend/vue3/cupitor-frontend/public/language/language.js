@@ -294,7 +294,7 @@ import {
   pruneMissingLocalTracks as _pruneMissingLocalTracks,
   musicNeedsReload as _musicNeedsReload,
 } from './music-bed.js';
-import { gestureAxis as _gestureAxis, nativeScrollVerdictStale as _nativeScrollVerdictStale } from './scroll-gesture.js';
+import { gestureAxis as _gestureAxis, nativeScrollVerdictStale as _nativeScrollVerdictStale, createScrollVelocity } from './scroll-gesture.js';
 import {
   clipRange as _clipRange,
   contiguousLineWindow as _contiguousLineWindow,
@@ -16037,6 +16037,9 @@ function _installWebViewScroll(el) {
     const existing = el.firstElementChild
     const reuse = el.childNodes.length === 1 && existing &&
       existing.classList && existing.classList.contains('wv-fakescroll-inner')
+    // A refreshed/replaced playlist must not inherit the old list's gesture
+    // or animation. A size-only recheck of the same wrapper can keep moving.
+    if (!reuse && el._fsStop) el._fsStop()
     const inner = reuse ? existing : document.createElement('div')
     if (!reuse) {
       inner.className = 'wv-fakescroll-inner'
@@ -16082,41 +16085,43 @@ function _installWebViewScroll(el) {
     if (el._fsBound) return
     el._fsBound = true
     let startY = 0, startX = 0, startOff = 0, dragging = false
-    let lastY = 0, lastDy = 0, momentum = null
+    let momentum = null
+    const motion = createScrollVelocity()
     // Which way this gesture turned out to go. Undecided until it has moved far
     // enough to tell: claiming it on the first pixel makes a sideways drag
     // jump the list, and never claiming it leaves the list unable to move.
     let axis = null
     const AXIS_SLOP = 6
     const stopMomentum = () => { if (momentum) { cancelAnimationFrame(momentum); momentum = null } }
-    const arm = (t) => {
+    el._fsStop = () => { stopMomentum(); dragging = false; axis = null }
+    const arm = (t, at) => {
       startY = t.clientY
       startX = t.clientX
       startOff = el._fsOff || 0
-      lastY = startY; lastDy = 0; dragging = true; axis = null
+      motion.reset(startY, at); dragging = true; axis = null
       // The list may have been rebuilt since the last gesture.
       el._fsMax = null
     }
     el.addEventListener('touchstart', e => {
-      if (!e.touches || e.touches.length !== 1) { dragging = false; return }
       stopMomentum()
-      arm(e.touches[0])
+      if (!e.touches || e.touches.length !== 1) { dragging = false; return }
+      arm(e.touches[0], e.timeStamp)
     }, { passive: true })
     el.addEventListener('touchmove', e => {
       if (!dragging || !el._fsInner || !e.touches || !e.touches.length) return
       const y = e.touches[0].clientY
       const x = e.touches[0].clientX
+      motion.record(y, e.timeStamp)
       if (axis === null) {
         // Sideways is only worth giving away when there is somewhere sideways
         // to go; otherwise a thumb's diagonal start kills the whole gesture.
         const canX = el.scrollWidth > el.clientWidth + 1
         axis = _gestureAxis(x - startX, y - startY, canX, AXIS_SLOP)
-        if (axis === null) { lastY = y; return }
+        if (axis === null) return
       }
       // Sideways is the browser's to handle, and preventing it here is exactly
       // what stopped it working.
       if (axis === 'x') return
-      lastDy = y - lastY; lastY = y
       if (el._fsApply) el._fsApply(startOff + (startY - y))
       if (e.cancelable) e.preventDefault()
     }, { passive: false })
@@ -16124,22 +16129,24 @@ function _installWebViewScroll(el) {
       // A second finger disarms the gesture. When it lifts and one is still
       // down, take that one up — otherwise the list stays dead under a finger
       // that never left the screen, until every finger has gone.
-      if (e && e.touches && e.touches.length === 1) { stopMomentum(); arm(e.touches[0]); return }
+      if (e && e.touches && e.touches.length === 1) { stopMomentum(); arm(e.touches[0], e.timeStamp); return }
       if (!dragging) return
       dragging = false
-      if (axis === 'x') { axis = null; return }
+      if (axis !== 'y') { axis = null; return }
       axis = null
-      let v = -lastDy * 1.3
+      let v = -motion.velocity(e.timeStamp) * 16
       const step = () => {
         if (Math.abs(v) < 0.5 || !el._fsInner) { momentum = null; return }
-        if (el._fsApply) el._fsApply((el._fsOff || 0) + v)
+        const before = el._fsOff || 0
+        if (el._fsApply) el._fsApply(before + v)
+        if (el._fsOff === before) { momentum = null; return }
         v *= 0.93
         momentum = requestAnimationFrame(step)
       }
       if (Math.abs(v) >= 0.5) momentum = requestAnimationFrame(step)
     }
     el.addEventListener('touchend', end)
-    el.addEventListener('touchcancel', end)
+    el.addEventListener('touchcancel', () => el._fsStop())
   }
   // Already in fake-scroll mode (a prior open detected the bug) → just re-wrap.
   if (el._fsBound) { rewrap(); return }
@@ -16168,20 +16175,40 @@ function _installWebViewScroll(el) {
   // a touch-only scroller anyway, leaving a desktop with a dead mouse wheel.
   if (el._fsProbing) return
   el._fsProbing = true
-  // Probe native scroll: set a small scrollTop and see if it survives a frame.
+  // Probe near the current position. Moving to 2px while previews arrive
+  // visibly pulls a long list upwards, even when native scrolling works.
   const before = el.scrollTop
   const probedAt = el.scrollHeight
+  let interrupted = false
+  const onInput = () => { interrupted = true }
+  const inputs = ['touchstart', 'touchmove', 'wheel', 'pointerdown', 'keydown']
+  inputs.forEach(type => el.addEventListener(type, onInput, { passive: true, capture: true }))
   // Only a restore that happens while this probe is in flight should be
   // honoured below; anything left over from a previous open is not where the
   // user is now.
   el._fsWantTop = null
-  el.scrollTop = 2
+  const probeTop = before < el.scrollHeight - el.clientHeight - 2 ? before + 2 : Math.max(1, before - 2)
+  el.scrollTop = probeTop
+  const appliedTop = el.scrollTop
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    const nativeWorks = el.scrollTop >= 1
+    const current = el.scrollTop
+    const nativeWorks = current >= 1
     el._fsProbing = false
+    inputs.forEach(type => el.removeEventListener(type, onInput, { capture: true }))
+    if (!el.clientHeight) return
+    // Reaching the top during a gesture is not evidence of broken native
+    // scrolling. Ask again after that input has had a chance to settle.
+    if (interrupted) {
+      clearTimeout(el._fsProbeRetry)
+      el._fsProbeRetry = setTimeout(() => _installWebViewScroll(el), 160)
+      return
+    }
     // Back where it was, not to the top — and if the caller restored the
-    // user's position before this frame came round, back to that instead.
-    el.scrollTop = el._fsWantTop != null ? el._fsWantTop : before
+    // position, honour that too. A gesture or native momentum that moved
+    // since the probe takes precedence over either saved position.
+    if (current === appliedTop || current === el._fsWantTop) {
+      el.scrollTop = el._fsWantTop != null ? el._fsWantTop : before
+    }
     if (nativeWorks) { el._fsNativeOk = true; el._fsOkAt = probedAt }
     else rewrap()
   }))
@@ -16638,12 +16665,27 @@ function openRecordingReviewDialog() {
     || (navigator.maxTouchPoints > 0)
     || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
   if ($.fn.sortable && !itemsLocked && !_coarsePointer) {
+    if (!$.cupitor || !$.cupitor.recordingSortable) {
+      // jQuery UI registers each handle with _addClass separately. Its
+      // tracked collection is merged/sorted on every call, making a huge
+      // playlist take minutes to initialise. Register the same handles as
+      // one collection, keeping normal widget cleanup and drag behavior.
+      $.widget('cupitor.recordingSortable', $.ui.sortable, {
+        _setHandleClassName: function () {
+          this._removeClass(this.element.find('.ui-sortable-handle'), 'ui-sortable-handle')
+          const handles = this.items.flatMap(entry =>
+            (entry.instance.options.handle ? entry.item.find(entry.instance.options.handle) : entry.item).get())
+          this._addClass($(handles), 'ui-sortable-handle')
+        }
+      })
+    }
     $dlg.find('.rec-item-list').each(function () {
       const $list = $(this)
-      try { $list.sortable('destroy') } catch (_) {}
-      $list.sortable({
+      try { $list.recordingSortable('destroy') } catch (_) {}
+      $list.recordingSortable({
         items: '> .rec-item',
         handle: '.rec-drag',
+        cancel: 'input,textarea,select,option',
         axis: 'y',
         tolerance: 'pointer',
         forcePlaceholderSize: true,

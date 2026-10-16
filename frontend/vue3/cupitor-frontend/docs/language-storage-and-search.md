@@ -151,6 +151,21 @@ the gear, or an action that opens another dialog.
 
 ## Verification
 
+Recorded Searches keeps native scrolling where it works. Its background
+WebView check probes within two pixels of the current position and yields to
+new input instead of restoring an older position. The Android fallback and
+page scroll rescue estimate momentum from the last 100 ms of motion so a tiny
+finger reversal at release cannot send a downward swipe upwards. Holding
+still clears stale velocity; cancelled gestures stop without momentum, and
+replacing the displayed playlist cancels its old animation.
+
+`node tests/browser/recorded-searches-scroll.cjs --huge` exercises a 10,000-item
+fixture playlist, native wheel scrolling, the preview-check race, both touch fallback
+paths, release jitter, cancellation, pause, refresh, playlist switching and
+horizontal scrolling. Desktop drag handles are registered in a single batch
+to avoid quadratic widget setup on huge lists; the test also verifies actual
+drag-reordering. It runs in CI alongside the existing dialog checks.
+
 Run `npx jest public/language public/github-utils.test.js --runInBand` for the
 language and sync tests, and `npm run build` for the production bundle.
 The new tests cover legacy migration, large-file splitting, round trips,

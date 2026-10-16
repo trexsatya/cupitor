@@ -16,6 +16,35 @@
 
 export const GESTURE_SLOP = 6;
 
+// Finger velocity in px/ms, averaged over recent motion rather than the last
+// event. A tiny reversal while lifting must not fling a long swipe backwards.
+// The caller supplies the event's monotonic timestamp for every sample.
+export function createScrollVelocity() {
+  let samples = [];
+  const prune = at => { samples = samples.filter(s => at - s.at <= 100); };
+  const reset = (y, at) => { samples = [{ y, at }]; };
+  const record = (y, at) => {
+    if (!Number.isFinite(y) || !Number.isFinite(at)) return;
+    const last = samples[samples.length - 1];
+    if (last && at <= last.at) {
+      if (at < last.at) reset(y, at);
+      else last.y = y;
+      return;
+    }
+    samples.push({ y, at });
+    prune(at);
+  };
+  const velocity = at => {
+    prune(at);
+    if (samples.length < 2) return 0;
+    const first = samples[0], last = samples[samples.length - 1];
+    const dy = last.y - first.y, dt = last.at - first.at;
+    if (dt <= 0 || at - last.at > 80 || Math.abs(dy) < 4) return 0;
+    return Math.max(-2.5, Math.min(2.5, dy / dt));
+  };
+  return { reset, record, velocity };
+}
+
 // Whether an earlier "native scroll works here" answer can still be trusted.
 //
 // What breaks on the old WebView is a content-height limit, so the answer

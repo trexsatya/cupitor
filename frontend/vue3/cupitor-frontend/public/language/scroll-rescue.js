@@ -12,7 +12,7 @@
 // drives touch scrolling itself from then on. Where scrolling works, drags
 // move things and there are no misses.
 
-import { gestureAxis } from './scroll-gesture.js'
+import { gestureAxis, createScrollVelocity } from './scroll-gesture.js'
 
 export const MIN_DRAG_PX = 40
 export const MISSES_TO_ENGAGE = 2
@@ -93,7 +93,9 @@ export function installScrollRescue({ log = (m) => console.log(m) } = {}) {
     if (!target || target.closest(LEAVE_ALONE)) return
     const box = scrollerFor(target, 0)
     if (!box) return
-    g = { target, x0: t.clientX, y0: t.clientY, y: t.clientY, vy: 0, at: Date.now(),
+    const motion = createScrollVelocity()
+    motion.reset(t.clientY, e.timeStamp)
+    g = { target, x0: t.clientX, y0: t.clientY, y: t.clientY, motion,
       box, top0: box.scrollTop, axis: null, prevented: false }
   }, { passive: true })
 
@@ -117,11 +119,8 @@ export function installScrollRescue({ log = (m) => console.log(m) } = {}) {
       }
     }
     if (!st.engaged || g.axis !== 'y') return
-    const now = Date.now()
-    const dt = Math.max(1, now - g.at)
-    g.vy = (t.clientY - g.y) / dt
+    g.motion.record(t.clientY, e.timeStamp)
     g.y = t.clientY
-    g.at = now
     g.box.scrollTop = g.top0 - (t.clientY - g.y0)
     if (e.cancelable) e.preventDefault()
   }
@@ -147,11 +146,13 @@ export function installScrollRescue({ log = (m) => console.log(m) } = {}) {
           `${done.box.id ? '#' + done.box.id : done.box.tagName.toLowerCase()}`)
       }
       // A little glide, so a flick does not stop dead under the finger.
-      let v = -done.vy * 16
+      let v = -done.motion.velocity(e.timeStamp) * 16
       const box = done.box
       const step = () => {
         if (Math.abs(v) < 0.5) { momentum = null; return }
+        const before = box.scrollTop
         box.scrollTop += v
+        if (box.scrollTop === before) { momentum = null; return }
         v *= 0.94
         momentum = requestAnimationFrame(step)
       }
