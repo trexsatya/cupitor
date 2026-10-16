@@ -15,6 +15,42 @@ function silentWav() {
   return 'data:audio/wav;base64,' + wav.toString('base64')
 }
 
+async function checkControlLayout(page) {
+  const original = page.viewportSize()
+  assert.deepEqual(await page.locator('#recPlayingTransport > button').evaluateAll(els => els.map(el => el.id)),
+    ['recPlayingShuffleBtn', 'recPlayingPrevBtn', 'recPlayingPauseBtn', 'recPlayingQueueBtn',
+      'recPlayingSearchBtn', 'recPlayingNextBtn', 'recPlayingLoopBtn'])
+  for (const [width, height] of [[320, 568], [360, 640], [390, 844], [430, 900], [480, 900], [768, 900], [844, 390], [1280, 900]]) {
+    await page.setViewportSize({ width, height })
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const controls = await page.evaluate(() => {
+      const ids = ['recPlayingShuffleBtn', 'recPlayingPrevBtn', 'recPlayingPauseBtn', 'recPlayingQueueBtn',
+        'recPlayingSearchBtn', 'recPlayingNextBtn', 'recPlayingLoopBtn', 'recPlayingMinimizeBtn', 'recPlayingCloseBtn']
+      const buttons = ids.map(id => document.getElementById(id))
+        .concat([...document.querySelectorAll('#recPlayingBanner button')].filter(el => el.getClientRects().length))
+      return buttons.map(el => {
+        const r = el.getBoundingClientRect()
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+        return { name: el.getAttribute('aria-label'), x: r.x, y: r.y, width: r.width, height: r.height,
+          visible: !!el.getClientRects().length, reachable: !!hit && (hit === el || el.contains(hit)) }
+      })
+    })
+    for (const c of controls) {
+      assert(c.visible && c.width > 0 && c.height > 0, `${width}×${height}: ${c.name} must be visible`)
+      assert(c.x >= 0 && c.y >= 0 && c.x + c.width <= width + 0.5 && c.y + c.height <= height + 0.5,
+        `${width}×${height}: ${c.name} leaves the viewport: ${JSON.stringify(c)}`)
+      assert(c.reachable, `${width}×${height}: ${c.name} is covered by another element`)
+    }
+    for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
+      const a = controls[i], b = controls[j]
+      const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)
+      const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y)
+      assert(overlapX <= 0.5 || overlapY <= 0.5, `${width}×${height}: ${a.name} overlaps ${b.name}`)
+    }
+  }
+  await page.setViewportSize(original)
+}
+
 async function checkPlayerReplay(browser) {
   for (const mobile of [false, true]) {
     const page = await browser.newPage({ viewport: { width: mobile ? 390 : 1280, height: 900 }, isMobile: mobile, hasTouch: mobile })
@@ -69,6 +105,7 @@ async function checkPlayerReplay(browser) {
         ]
         window.__playerTask = window.playRecording({ queue, startPaused: true })
       }, silentWav())
+      await checkControlLayout(page)
 
       // Replay starts a paused item, resets a playing/paused clip to its
       // own start (not video zero), and keeps the queue index unchanged.
@@ -99,6 +136,7 @@ async function checkPlayerReplay(browser) {
         await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `cupitor-player-replay-${mobile ? 'mobile' : 'desktop'}.png`) })
       }
       await stop()
+      assert.equal(await page.locator('#recPlayingTransport').count(), 0)
 
       // A dual recording restarts from Source, including when waiting for
       // Target, playing Target, or paused. A reference video stays silent.

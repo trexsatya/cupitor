@@ -19287,6 +19287,12 @@ async function playRecording(opts) {
       .on('click', '.rec-pill-restore', restorePlayingRecording)
       .on('click', '.rec-pill-close', stopPlayingRecording)
   }
+  let $transport = $('#recPlayingTransport')
+  if (!$transport.length) $transport = $('<div id="recPlayingTransport" role="group" aria-label="Playback controls"></div>').appendTo('body')
+  // A shared row keeps every control inside the viewport. Moving the
+  // existing buttons preserves their handlers and stable IDs.
+  $transport.append(['recPlayingShuffleBtn', 'recPlayingPrevBtn', 'recPlayingPauseBtn', 'recPlayingQueueBtn',
+    'recPlayingSearchBtn', 'recPlayingNextBtn', 'recPlayingLoopBtn'].map(id => document.getElementById(id)))
   _refreshRecPlayModeBtns()
   // Normally false — starting the deck means starting to hear it. A restore
   // passes startPaused: the app coming back is not the user asking for audio,
@@ -19752,6 +19758,7 @@ async function playRecording(opts) {
   $('#recPlayingPauseBtn').remove()
   $('#recPlayingPrevBtn').remove()
   $('#recPlayingNextBtn').remove()
+  $('#recPlayingTransport').remove()
   $('#recPlayingShuffleBtn').remove()
   $('#recPlayingLoopBtn').remove()
   $('#recPlayingMinimizeBtn').remove()
@@ -20138,6 +20145,7 @@ function stopPlayingRecording() {
   $('#recPlayingPauseBtn').remove()
   $('#recPlayingPrevBtn').remove()
   $('#recPlayingNextBtn').remove()
+  $('#recPlayingTransport').remove()
   $('#recPlayingShuffleBtn').remove()
   $('#recPlayingLoopBtn').remove()
   $('#recPlayingMinimizeBtn').remove()
