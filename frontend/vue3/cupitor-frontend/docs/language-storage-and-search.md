@@ -53,6 +53,30 @@ Deploy the updated client before the first migration; old clients only
 understand the legacy collection. A successful Sync uses browser Web Crypto
 SHA-256 support (HTTPS or localhost).
 
+## Subtitle completeness
+
+A captured excerpt is available to search immediately, but it is marked
+partial until the full indexed SRT pair has loaded. Loading the pair merges
+pending captures without losing any repository lines or translation, and
+keeps the indexed filename. Partial captures cannot suppress initial loads
+or background retries.
+
+After Push This/All, memory and IndexedDB receive the complete text produced
+by the successful GitHub merge, including its final retry. This also runs for
+an already-up-to-date push. An untranslated capture reads the existing
+translation without writing an empty file. Captures arriving during a push
+are retained; cached parses are invalidated.
+
+Cache records now carry a content version and a completeness flag. Older
+records, which may contain only captured excerpts, are automatically fetched
+again once. No manual cache deletion is needed. Corrected complete records
+are reusable on subsequent loads, and account/owner isolation still applies.
+
+The browser regression `node tests/browser/subtitle-completeness.cjs` uses
+the reported 17-cue `ivOW01v4VXc` SRT with real app state and IndexedDB on
+desktop and mobile. GitHub writes are simulated, including a retry and a
+no-op push. The deployment workflow runs this check before building.
+
 ## Search
 
 **Settings → Search channels** opens a searchable checklist of
