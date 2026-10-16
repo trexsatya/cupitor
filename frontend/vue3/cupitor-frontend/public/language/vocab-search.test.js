@@ -81,6 +81,23 @@ describe("buildKnownWordSet", () => {
 });
 
 describe("vocabPrefixOverlapLen", () => {
+  test.each([
+    ['(bullying)|översitteri|', 'översittare', 'översitt'],
+    ['(bully)|översittare|', 'översitteri', 'översitt'],
+    ['(painting)|måleri|', 'målare', 'mål'],
+    ['(fishing)|fiskeri|', 'fiskare', 'fisk'],
+    ['(bullying)|ett översitteri|', 'okänd|översittare', 'översitt']
+  ])('matches related word endings in %s for %s', (line, search, matched) => {
+    expect(vocabPrefixOverlapLen(line, search, 'sv')).toBe(matched.length);
+    expect(vocabPrefixOverlapDetail(line, search, 'sv')).toEqual({ len: matched.length, bestPart: search.split('|').pop(), matched });
+  });
+  test('keeps unrelated shared prefixes and other languages out of Swedish noun families', () => {
+    expect(vocabPrefixOverlapLen('(translate)|översätta|', 'översittare', 'sv')).toBe(0);
+    expect(vocabPrefixOverlapLen('(overview)|översikt|', 'översittare', 'sv')).toBe(0);
+    expect(vocabPrefixOverlapLen('(bullying)|översitteri|', 'översittare', 'en')).toBe(0);
+    expect(vocabPrefixOverlapLen('(bullying)|översitteri|', 'översittare', 'es')).toBe(0);
+    expect(vocabPrefixOverlapLen('flower', 'flowing', 'en')).toBe(0);
+  });
   test("LCP near-containment accepts inflectional siblings", () => {
     // "trolla" + "trollguldet" share 5 of 6 — match.
     expect(vocabPrefixOverlapLen("trolla", "trollguldet")).toBe(5);

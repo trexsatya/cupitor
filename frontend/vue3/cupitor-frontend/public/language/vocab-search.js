@@ -6,6 +6,8 @@
 // and return strings/numbers/arrays. Callers in language.js wrap them with
 // the live window.vocabulary cache.
 
+import { guessStems } from './stemming.js'
+
 export const SEPARATOR_PIPE = '|'
 
 // Swedish stop-words that show up so often inside multi-word vocab segments
@@ -122,33 +124,33 @@ function _tokensForSegment(p) {
 
 // Longest common prefix between any per-word vocab token and any search
 // part, with "near-containment": the shorter must be consumed by the longer
-// with at most 1 char of divergence. Returns the LCP length (>= 3 is a
-// strong match).
-export function vocabPrefixOverlapLen(vocabLine, searchText) {
-  const searchParts = _splitSearchParts(searchText)
-  if (searchParts.length === 0) return 0
-  const vocabParts = _splitVocabParts(vocabLine)
-  let max = 0
-  for (const p of vocabParts) {
-    const tokens = _tokensForSegment(p)
-    for (const s of searchParts) {
-      for (const t of tokens) {
-        const lim = Math.min(t.length, s.length)
-        const needed = Math.max(1, lim - 1)
-        let lcp = 0
-        while (lcp < lim && t.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
-        if (lcp >= needed && lcp > max) max = lcp
-      }
-    }
-  }
-  return max
+// with at most 1 char of divergence, or both endings reduce to the same
+// prefix stem in the search language. Returns the LCP length (>= 3 is a
+// strong match). Keep the length and detail APIs on the same matching rule.
+export function vocabPrefixOverlapLen(vocabLine, searchText, lang = 'sv') {
+  return vocabPrefixOverlapDetail(vocabLine, searchText, lang).len
+}
+
+function _prefixMatchLen(token, search, lang) {
+  const lim = Math.min(token.length, search.length)
+  let lcp = 0
+  while (lcp < lim && token.charCodeAt(lcp) === search.charCodeAt(lcp)) lcp++
+  if (lcp >= Math.max(1, lim - 1)) return lcp
+  if (lcp < 3 || lang !== 'sv') return 0
+
+  // A long common prefix alone is insufficient (översittare / översätta).
+  // Both words must reduce to a shared stem that is fully inside that
+  // prefix, rather than relaxing near-containment for arbitrary endings.
+  const searchStems = new Set(guessStems(search, lang))
+  return guessStems(token, lang).some(stem => stem.length >= 3 && stem.length <= lcp && searchStems.has(stem))
+    ? lcp : 0
 }
 
 // Like vocabPrefixOverlapLen but also reports which search part won and the
 // actual common-prefix substring. The matched substring is what the UI
 // groups under, so a token "stor" matching "stoft" with LCP=3 ends up in
 // the "sto" group instead of the "stoft" group.
-export function vocabPrefixOverlapDetail(vocabLine, searchText) {
+export function vocabPrefixOverlapDetail(vocabLine, searchText, lang = 'sv') {
   const searchParts = _splitSearchParts(searchText)
   if (searchParts.length === 0) return { len: 0, bestPart: '', matched: '' }
   const vocabParts = _splitVocabParts(vocabLine)
@@ -159,11 +161,8 @@ export function vocabPrefixOverlapDetail(vocabLine, searchText) {
     const tokens = _tokensForSegment(p)
     for (const s of searchParts) {
       for (const t of tokens) {
-        const lim = Math.min(t.length, s.length)
-        const needed = Math.max(1, lim - 1)
-        let lcp = 0
-        while (lcp < lim && t.charCodeAt(lcp) === s.charCodeAt(lcp)) lcp++
-        if (lcp >= needed && lcp > bestLen) {
+        const lcp = _prefixMatchLen(t, s, lang)
+        if (lcp > bestLen) {
           bestLen = lcp; bestPart = s; bestToken = t
         }
       }

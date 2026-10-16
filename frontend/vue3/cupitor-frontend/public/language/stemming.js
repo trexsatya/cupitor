@@ -17,6 +17,9 @@ export const STEM_RULES = {
     ['ning', ['']],
     ['ande', ['a']],
     ['ende', ['a']],
+    // Agent / activity nouns: översittare ↔ översitteri, målare ↔ måleri.
+    ['are', ['']],
+    ['eri', ['']],
     ['arna', ['a', '']],
     ['erna', ['']],
     ['orna', ['a']],
