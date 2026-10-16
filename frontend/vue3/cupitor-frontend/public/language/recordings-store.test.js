@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { TextEncoder } from 'util'
-import { parseRecordingsRoot, readRecordings, splitRecordings, syncRecordingsFiles, RECORDINGS_PART_BYTES } from './recordings-store.js'
+import { parseRecordingsRoot, readRecordings, loadRecordingsFiles, splitRecordings, syncRecordingsFiles, RECORDINGS_PART_BYTES } from './recordings-store.js'
 
 global.TextEncoder = TextEncoder
 const digest = text => createHash('sha256').update(text).digest('hex')
@@ -99,4 +99,120 @@ test('read failures and oversized cards never publish a partial collection', asy
   await expect(syncRecordingsFiles({ readFile: () => { throw new Error('offline') }, commitFiles, merge: x => x })).rejects.toThrow('offline')
   await expect(syncRecordingsFiles({ readFile: () => null, commitFiles, merge: () => collection(), splitOptions: { ...options, maxBytes: 30 } })).rejects.toThrow('exceeds')
   expect(commitFiles).not.toHaveBeenCalled()
+})
+
+// Realistic atomic delete handling: all guards resolve before any file moves.
+function syncDisk(initial, now = 1) {
+  const disk = new Map([['recordings.json', JSON.stringify(initial)]])
+  const clock = { value: now }
+  const commitFiles = jest.fn(async files => {
+    const changes = await Promise.all(files.map(async f => [f.path, f.delete ? null : await f.getContent(disk.get(f.path) ?? null)]))
+    changes.forEach(([path, text]) => text === null ? disk.delete(path) : disk.set(path, text))
+  })
+  return { disk, clock, commitFiles, args: {
+    readFile: path => disk.get(path) ?? null, commitFiles, now: () => clock.value,
+    listParts: jest.fn(async () => [...disk.keys()].filter(path => path.startsWith('recordings/'))),
+    merge: remote => remote, splitOptions: { digest }
+  } }
+}
+const simpleCards = id => ({ Playlist: { items: { search: { word: [{ id, lineIndex: 1, source: id }] } } } })
+const retention = 7 * 24 * 60 * 60 * 1000
+
+test('sync automatically marks obsolete parts, retains them for seven days, then atomically removes them', async () => {
+  const h = syncDisk(simpleCards('first'))
+  await syncRecordingsFiles(h.args)
+  const first = JSON.parse(h.disk.get('recordings.json')).playlists[0].parts[0]
+  h.clock.value = 2
+  await syncRecordingsFiles({ ...h.args, merge: () => simpleCards('second') })
+  const second = JSON.parse(h.disk.get('recordings.json')).playlists[0].parts[0]
+  expect(h.disk.has(first)).toBe(true)
+  expect(JSON.parse(h.disk.get('recordings.json')).retiredParts).toEqual({ [first]: 2 })
+  h.clock.value = 2 + retention - 1
+  await syncRecordingsFiles(h.args)
+  expect(h.disk.has(first)).toBe(true)
+  expect(JSON.parse(h.disk.get('recordings.json')).retiredParts[first]).toBe(2)
+  h.clock.value++
+  await syncRecordingsFiles(h.args)
+  expect(h.disk.has(first)).toBe(false)
+  expect(h.disk.has(second)).toBe(true)
+  expect(JSON.parse(h.disk.get('recordings.json')).retiredParts).toBeUndefined()
+  expect(h.commitFiles.mock.calls[3][0]).toEqual(expect.arrayContaining([{ path: first, delete: true }]))
+  expect(await readRecordings(JSON.parse(h.disk.get('recordings.json')), p => h.disk.get(p))).toEqual(simpleCards('second'))
+})
+
+test('reused retired parts stay live, and discovery finds pre-cleanup orphans on a daily schedule', async () => {
+  const h = syncDisk(simpleCards('first'))
+  const orphan = 'recordings/' + 'f'.repeat(64) + '.json'
+  h.disk.set(orphan, '["old orphan"]')
+  h.disk.set('recordings/manual.json', 'unrelated')
+  await syncRecordingsFiles(h.args)
+  const first = JSON.parse(h.disk.get('recordings.json')).playlists[0].parts[0]
+  await syncRecordingsFiles({ ...h.args, merge: () => simpleCards('second') })
+  expect(h.args.listParts).toHaveBeenCalledTimes(1)
+  h.clock.value += retention
+  await syncRecordingsFiles({ ...h.args, merge: () => simpleCards('first') })
+  expect(h.disk.has(first)).toBe(true)
+  expect(h.disk.has(orphan)).toBe(false)
+  expect(h.disk.has('recordings/manual.json')).toBe(true)
+  expect(h.args.listParts).toHaveBeenCalledTimes(2)
+  expect(JSON.parse(h.disk.get('recordings.json')).retiredParts[first]).toBeUndefined()
+})
+
+test('a concurrent index edit rescuing an expired part aborts the deletion and replans cleanup', async () => {
+  const h = syncDisk(simpleCards('first'))
+  await syncRecordingsFiles(h.args)
+  const old = h.disk.get('recordings.json')
+  const first = JSON.parse(old).playlists[0].parts[0]
+  h.clock.value = 2
+  await syncRecordingsFiles({ ...h.args, merge: () => simpleCards('second') })
+  h.clock.value += retention
+  let conflict = true
+  await syncRecordingsFiles({ ...h.args, commitFiles: async files => {
+    if (conflict) {
+      conflict = false
+      expect(files.some(f => f.delete && f.path === first)).toBe(true)
+      h.disk.set('recordings.json', old) // Another device reused the part.
+    }
+    return h.commitFiles(files)
+  } })
+  expect(h.disk.has(first)).toBe(true)
+  expect(await readRecordings(JSON.parse(h.disk.get('recordings.json')), p => h.disk.get(p))).toEqual(simpleCards('first'))
+})
+
+test('discovery failure does not block sync, and a failed cleanup commit leaves parts and retirement markers intact', async () => {
+  const h = syncDisk(simpleCards('first'))
+  const log = jest.fn()
+  await syncRecordingsFiles({ ...h.args, log, listParts: async () => { throw new Error('offline') } })
+  expect(log).toHaveBeenCalled()
+  expect(JSON.parse(h.disk.get('recordings.json')).partsScannedAt).toBeUndefined()
+  await syncRecordingsFiles({ ...h.args, merge: () => simpleCards('second') })
+  h.clock.value += retention
+  const before = new Map(h.disk)
+  await expect(syncRecordingsFiles({ ...h.args, commitFiles: async () => { throw new Error('push failed') } })).rejects.toThrow('push failed')
+  expect(h.disk).toEqual(before)
+})
+
+test('a cached index whose parts were cleaned up is retried once against the fresh index', async () => {
+  const old = await splitRecordings(simpleCards('old'), { digest })
+  const current = await splitRecordings(simpleCards('current'), { digest })
+  const read = jest.fn((path, fresh) => {
+    if (path === 'recordings.json') return fresh ? current.text : old.text
+    if (current.files.has(path)) return current.files.get(path)
+    throw Object.assign(new Error('not found'), { code: 'recordings-part-missing' })
+  })
+  expect(await loadRecordingsFiles(read)).toEqual(simpleCards('current'))
+  expect(read.mock.calls.filter(([path]) => path === 'recordings.json')).toEqual([['recordings.json', false], ['recordings.json', true]])
+})
+
+test('a still-missing active part fails after one refresh, and unrelated read failures do not retry', async () => {
+  const split = await splitRecordings(simpleCards('one'), { digest })
+  const read = jest.fn(path => {
+    if (path === 'recordings.json') return split.text
+    throw Object.assign(new Error('missing active part'), { code: 'recordings-part-missing' })
+  })
+  await expect(loadRecordingsFiles(read)).rejects.toThrow('missing active part')
+  expect(read.mock.calls.filter(([path]) => path === 'recordings.json')).toHaveLength(2)
+  const offline = jest.fn(() => { throw new Error('offline') })
+  await expect(loadRecordingsFiles(offline)).rejects.toThrow('offline')
+  expect(offline).toHaveBeenCalledTimes(1)
 })

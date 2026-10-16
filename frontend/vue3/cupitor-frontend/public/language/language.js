@@ -1,5 +1,6 @@
 import { parsePracticeSpeeds, practiceSpeeds, nextPracticeSpeed, supportedPracticeSpeed } from './practice-speed.js';
-import { parseRecordingsRoot, readRecordings, syncRecordingsFiles } from './recordings-store.js';
+import { loadRecordingsFiles, syncRecordingsFiles } from './recordings-store.js';
+import { listRecordingsParts } from './recordings-gc.js';
 import { rememberCache, listSubtitleCaches, cacheSources, removeCacheSource, deleteSubtitleCache } from './cache-manager.js';
 import { filterSearchChannels, searchChannelOptions } from './search-channels.js';
 import {computeIfAbsent, range, schedule, uuid} from '../data-structures.js';
@@ -11803,7 +11804,10 @@ async function _readRecordingsFile(who, path, fresh = false) {
   if (fresh && who === 'self' && typeof window.GitHubProxy !== 'undefined' && window.GitHubUtils) {
     try { return (await _selfGetFile(`${_langRepoDir()}/${path}`)).content }
     catch (e) {
-      if (path === 'recordings.json' && /^GitHub API error 404\b/.test(String(e.message))) return null
+      if (/^GitHub API error 404\b/.test(String(e.message))) {
+        if (path === 'recordings.json') return null
+        throw Object.assign(new Error(`Missing recordings part: ${path}`), { code: 'recordings-part-missing' })
+      }
       throw e
     }
   }
@@ -11815,14 +11819,13 @@ async function _readRecordingsFile(who, path, fresh = false) {
     init: fresh ? { headers: { Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' } : { cache: 'no-cache' } })
   if (r.status === 404) {
     if (path === 'recordings.json') return null
-    throw new Error(`Missing recordings part: ${path}`)
+    throw Object.assign(new Error(`Missing recordings part: ${path}`), { code: 'recordings-part-missing' })
   }
   return r.text()
 }
 
 async function _readRecordingsCollection(who, fresh = false) {
-  const root = parseRecordingsRoot(await _readRecordingsFile(who, 'recordings.json', fresh))
-  return readRecordings(root, path => _readRecordingsFile(who, path, fresh))
+  return loadRecordingsFiles((path, retryFresh) => _readRecordingsFile(who, path, fresh || retryFresh))
 }
 
 async function loadRecordingsFromGithub() {
@@ -12076,6 +12079,10 @@ async function syncRecordingsToGithub() {
   $btn.prop('disabled', true).addClass('syncing')
   try {
     const pushed = await syncRecordingsFiles({
+      listParts: () => listRecordingsParts({
+        ..._dsWriteTarget(), directory: `${_langRepoDir()}/recordings`,
+        request: (method, path) => window.GitHubUtils.request(method, path)
+      }),
       readFile: async path => {
         try { return (await _selfGetFile(`${_langRepoDir()}/${path}`)).content }
         catch (e) {
