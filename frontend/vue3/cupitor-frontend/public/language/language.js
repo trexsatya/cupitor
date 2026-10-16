@@ -16779,6 +16779,7 @@ function openRecordingReviewDialog() {
 const MAX_REASONABLE_CLIP_S = 600
 
 function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
+  const itemToken = window._recPlayItemToken
   let _effectiveTimeEnd = parseFloat(timeEnd) || 0
   const _timeStartNum   = parseFloat(timeStart) || 0
   // Malformed-clip safety net. playRecording tries to repair these into a
@@ -16802,6 +16803,7 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
   const hardPause = () => {
     try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
     setTimeout(() => {
+      if (!window._playingRecording || window._recPlayItemToken !== itemToken) return
       try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
     }, 50)
   }
@@ -16997,7 +16999,7 @@ function _speakWordGoogle(text) {
       }
       audio.onended = () => done()
       audio.onerror = () => done(new Error('Google TTS audio error'))
-      window._recTTS = { kind: 'audio', audio }
+      window._recTTS = { kind: 'audio', audio, cancel: () => done() }
       const p = audio.play()
       if (p && typeof p.then === 'function') p.catch(err => done(err))
       // Bail out if the request hangs (no audio progress within 8s).
@@ -17025,7 +17027,7 @@ function _speakWordBrowser(text) {
       u.onend = done
       u.onerror = done
       window.speechSynthesis.cancel()
-      window._recTTS = { kind: 'speech', utterance: u }
+      window._recTTS = { kind: 'speech', utterance: u, cancel: done }
       window.speechSynthesis.speak(u)
       // Some engines never fire onend if the utterance is short or interrupted.
       setTimeout(done, 6000)
@@ -17054,6 +17056,7 @@ function _renderPlayingBanner(it, idx, total) {
           <span class="rec-pb-bar"></span>
           <span class="rec-pb-count"></span>
         </div>
+        <button type="button" class="rec-pb-replay-btn" title="Replay this item from the beginning" aria-label="Replay current item">↻ Replay</button>
         <button type="button" class="rec-pb-swap-btn" title="Practise the other way round — Target first" aria-label="Swap Source and Target">⇄</button>
         <button type="button" class="rec-pb-music-btn" title="Background music" aria-label="Background music">♫</button>
         <button type="button" class="rec-pb-info-btn" title="Show details" aria-label="Show details" aria-expanded="false">
@@ -17085,6 +17088,10 @@ function _renderPlayingBanner(it, idx, total) {
     // Turn the whole deck over. A session-wide switch, so it stays put from
     // one card to the next and survives a reload — practising backwards is a
     // mode, not a one-card detour. The cards are not touched.
+    $b.on('click', '.rec-pb-replay-btn', function (e) {
+      e.preventDefault(); e.stopPropagation()
+      replayCurrentRecordingItem()
+    })
     $b.on('click', '.rec-pb-swap-btn', function (e) {
       e.preventDefault(); e.stopPropagation()
       window._appSettings.recPlayReverse = !_recPlayReversed()
@@ -18911,13 +18918,14 @@ function _renderManualFaceButtons($wrap, it) {
 // now", and the alternative (rewriting the card's remaining sequence from a
 // button press) would be a good deal more surprising.
 async function _playManualFace(url, label) {
+  const itemToken = window._recPlayItemToken
   let dataUrl = null
   try { dataUrl = await loadManualAudioData(url) } catch (_) {}
   // Loading goes through the host bridge, so the session can end while we
   // wait. Without this check _recPlayAudioEl would rebuild the panel that
   // stopPlayingRecording had just removed and play into a finished session,
   // where nothing is left that could pause it.
-  if (!dataUrl || !window._playingRecording) return
+  if (!dataUrl || !window._playingRecording || window._recPlayItemToken !== itemToken || window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) return
   // Only one recording sounds at a time, whichever mode started it.
   const a = _recPlayAudioEl()
   _silenceOtherAudio('deck')
@@ -19077,9 +19085,10 @@ async function _showPracticeAudioPanel(it) {
 }
 
 async function _playManualAudioAndWait(url, faceLabel) {
+  const itemToken = window._recPlayItemToken
   let dataUrl = null
   try { dataUrl = await loadManualAudioData(url) } catch (_) {}
-  if (!dataUrl || !window._playingRecording) return
+  if (!dataUrl || !window._playingRecording || window._recPlayItemToken !== itemToken || window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) return
   // Only one recording sounds at a time, whichever mode started it — and
   // stopPlayingRecording / navigation can silence this one.
   _silenceOtherAudio('deck')
@@ -19365,6 +19374,13 @@ async function playRecording(opts) {
     return i + 1 < queue.length ? i + 1 : (_curLooping() ? 0 : queue.length)
   }
   while (window._playingRecording) {
+    // A replay/queue jump can arrive during the trailing gap, after the
+    // per-clip navigation check. Apply it before starting another item.
+    if (Number.isInteger(window._recNavGotoIndex)) {
+      const target = window._recNavGotoIndex
+      window._recNavGotoIndex = null
+      if (target >= 0 && target < queue.length) i = target
+    }
     // Boundary handling: with no loop we exit at queue end; otherwise wrap.
     if (i >= queue.length) {
       if (_curLooping()) i = 0
@@ -19374,6 +19390,7 @@ async function playRecording(opts) {
       i = _curLooping() ? queue.length - 1 : 0
     }
     window._recPlayIndex = i
+    window._recPlayItemToken = {}
     window._recPlayQueueLen = queue.length
     const it = queue[i]
     // Manual cards carry the card's front text in `source`, not a media source,
@@ -19439,6 +19456,7 @@ async function playRecording(opts) {
       await new Promise(r => setTimeout(r, 200))
     }
     if (!window._playingRecording) break
+    if (Number.isInteger(window._recNavGotoIndex)) continue
     // Manual entries: no clip to play. If the media is a YouTube link we
     // still cue it into the embedded player at t=0 (so the user can hit
     // play manually if they want) but never auto-play — the playlist's
@@ -19539,6 +19557,7 @@ async function playRecording(opts) {
       await _speakWord(it.word)
       if (!window._playingRecording) break
       prevWord = it.word
+      if (Number.isInteger(window._recNavGotoIndex)) continue
     }
     // Render the subtitle overlay in PARALLEL with playback. Awaiting it
     // here would block the video on a (potentially slow) SRT fetch via
@@ -19608,12 +19627,15 @@ async function playRecording(opts) {
     _setRecPlayPhase('video')
     const _src = (it.source || '').toLowerCase() === 'youtube' ? 'YouTube' : (it.source || 'YouTube')
     try {
+      if (Number.isInteger(window._recNavGotoIndex)) continue
       await playMediaSlice(it.id, _playStart, _playEnd, _src)
     } catch (e) {
       console.warn('playRecording: playMediaSlice failed for', it, e)
       i++
       continue
     }
+    if (!window._playingRecording) break
+    if (Number.isInteger(window._recNavGotoIndex)) continue
     // _waitYTUntilEnd pauses the player when ct >= timeEnd, so when the next
     // item reuses the same video, playMediaSlice short-circuits to just a
     // seek — leaving the player paused and the clip never starts. Kick it
@@ -19782,23 +19804,48 @@ function navigateRecordingPlayback(direction) {
   if (!window._playingRecording) return false
   if (direction !== 'prev' && direction !== 'next') return false
   window._recNavRequest = direction
+  window._recNavGotoIndex = null
   _showRecPlayNavToast(direction)
+  _interruptRecordingPlayback()
+  if (window._recPlayPaused) togglePlayingRecordingPause()
+  return true
+}
+
+function replayCurrentRecordingItem() {
+  if (!window._playingRecording || !window._recPlayCurrentItem) return false
+  const index = window._recPlayIndex
+  if (!Number.isInteger(index) || !window._recPlayQueue?.[index]) return false
+  window._recNavRequest = null
+  window._recNavGotoIndex = index
+  window._recPlaySlowdown = false
+  _interruptRecordingPlayback()
+  _stopGapCountdown()
+  // Resume the session without resuming the old clip at its old position.
+  if (window._recPlayPaused) _applyRecPlayPause(false, false)
+  return true
+}
+
+function _interruptRecordingPlayback() {
+  // Cancel delayed pauses left by the previous clip, even when replaying
+  // the same card/video: identity alone cannot distinguish those attempts.
+  window._recPlayItemToken = {}
   // Stop the currently-playing video and any in-flight TTS RIGHT NOW so the
   // transition into the next item is clean. The playback loop will see
   // _recNavRequest and route to the right index — but without this the
   // user hears the old clip continue for up to one poll-tick (~100ms) and,
   // worse, any active TTS audio overlaps the next item.
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+  const audio = window._recPlayManualAudio
+  if (audio) { _recPaExpectPause(audio); try { audio.pause() } catch (_) {} }
   try {
     const t = window._recTTS
     if (t && t.kind === 'audio' && t.audio) { t.audio.pause(); t.audio.src = '' }
+    if (t && t.cancel) t.cancel()
     if (window.speechSynthesis && typeof window.speechSynthesis.cancel === 'function') {
       window.speechSynthesis.cancel()
     }
   } catch (_) {}
   window._recTTS = null
-  if (window._recPlayPaused) togglePlayingRecordingPause()
-  return true
 }
 
 // Pause/resume both the YouTube player and the active TTS (Google audio or

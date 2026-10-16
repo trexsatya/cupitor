@@ -3736,6 +3736,20 @@ body.rec-playing #recPlayingWord { display: block; }
 }
 #recPlayingBanner .rec-pb-info-btn:hover { background: rgba(255,255,255,0.22); }
 #recPlayingBanner .rec-pb-info-btn svg { display: block; }
+#recPlayingBanner .rec-pb-replay-btn {
+    flex: 0 0 auto;
+    min-height: 32px;
+    padding: 4px 8px;
+    border: none;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.12);
+    color: #f5f5f5;
+    cursor: pointer;
+    font-size: 13px;
+    white-space: nowrap;
+}
+#recPlayingBanner .rec-pb-replay-btn:hover { background: rgba(255,255,255,0.22); }
+#recPlayingBanner .rec-pb-replay-btn:focus-visible { outline: 2px solid #80cbc4; outline-offset: 2px; }
 /* Same shape as ℹ, but deliberately NOT covered by the desktop rule that
    hides ℹ: that one is a details toggle the wide layout makes redundant,
    while this opens the music panel and is wanted at every width. */
