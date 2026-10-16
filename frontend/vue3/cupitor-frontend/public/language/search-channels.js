@@ -1,5 +1,11 @@
 import { channelOfItem } from './renderer/search-results-vm.js'
 
+// The existing library uses "YouTube"; captures also use "youtube" / "link".
+function isYouTubeEntry(entry) {
+  const source = String(entry?.source || '').trim().toLowerCase()
+  return source === 'youtube' || source === 'link'
+}
+
 // An explicit include filter is strict, including when it yields no hits.
 // It must run before blocked-channel fallback and corresponding-word guesses.
 export function filterSearchChannels(items, selected = [], srts = []) {
@@ -9,7 +15,7 @@ export function filterSearchChannels(items, selected = [], srts = []) {
   return items.filter(item => {
     if (!item) return false
     const srt = byLink.get(item.url || item.id || item.link)
-    if (!srt || (srt.source !== 'youtube' && srt.source !== 'link')) return false
+    if (!isYouTubeEntry(srt)) return false
     return wanted.has(channelOfItem(item, [srt]))
   })
 }
@@ -17,7 +23,7 @@ export function filterSearchChannels(items, selected = [], srts = []) {
 export function searchChannelOptions(srts = [], selected = []) {
   const names = new Set(selected)
   for (const s of srts) {
-    if (!s || (s.source !== 'youtube' && s.source !== 'link')) continue
+    if (!isYouTubeEntry(s)) continue
     const channel = channelOfItem(s, [s])
     if (channel) names.add(channel)
   }

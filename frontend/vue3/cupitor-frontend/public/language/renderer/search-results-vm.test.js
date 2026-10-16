@@ -13,7 +13,17 @@ describe('channelOfItem', () => {
     const srts = [srt('u1', 'Foo Channel || Some Title || abc123')]
     expect(channelOfItem({ url: 'u1' }, srts)).toBe('Foo Channel')
   })
-  test('returns trimmed full name when no " || " separator', () => {
+  test.each([
+    'Ljudbok Klubb || HARRY POTTER och FÅNGEN FRÅN AZKABAN BOK 3 || video',
+    'Ljudbok Klubb||HARRY POTTER||video',
+    '  Ljudbok Klubb \t|| HARRY POTTER ||video'
+  ])('uses only the first filename segment: %s', name => {
+    expect(channelOfItem({ url: 'u1' }, [srt('u1', name)])).toBe('Ljudbok Klubb')
+  })
+  test('an empty channel prefix stays unknown instead of becoming the title', () => {
+    expect(channelOfItem({ url: 'u1' }, [srt('u1', ' || Title || video')])).toBeNull()
+  })
+  test('returns trimmed full name when no "||" separator', () => {
     expect(channelOfItem({ url: 'u1' }, [srt('u1', '   Solo Name  ')])).toBe('Solo Name')
   })
   test('falls back to item.id / item.link when url is absent', () => {
