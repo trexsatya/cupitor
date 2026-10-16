@@ -7829,8 +7829,9 @@ function searchVocabularyByPrefix() {
   // (LCP=3) goes under a "sto" group, not a "stoft" group.
   const overlapByIdx = new Map()
   const matchedByIdx = new Map()
+  const overlapLang = getSelectedLang() === 'en' ? 'en' : getLangFromUrl().code
   allWords.forEach((line, i) => {
-    const { len, matched } = vocabPrefixOverlapDetail(line, searchText)
+    const { len, matched } = vocabPrefixOverlapDetail(line, searchText, overlapLang)
     if (len >= 3) {
       overlapByIdx.set(i, len)
       matchedByIdx.set(i, matched)

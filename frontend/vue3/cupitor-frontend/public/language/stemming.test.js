@@ -1,6 +1,13 @@
 import { guessStems, STEM_RULES } from "./stemming";
 
 describe("guessStems — Swedish", () => {
+  test.each([
+    ['översittare', 'översitt'], ['översitteri', 'översitt'],
+    ['målare', 'mål'], ['måleri', 'mål'],
+    ['fiskare', 'fisk'], ['fiskeri', 'fisk']
+  ])('reduces the agent / activity noun %s to %s', (word, stem) => {
+    expect(guessStems(word, 'sv')).toEqual([stem]);
+  });
   test("strips '-at' to '-a' (group-1 supinum / past participle)", () => {
     expect(guessStems("förvärvat", "sv")).toEqual(["förvärva"]);
   });

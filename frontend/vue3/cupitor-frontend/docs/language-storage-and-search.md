@@ -85,6 +85,12 @@ Complete compound-word splits also run for already-known words. For example,
 `färgsprakande` can expose `färg` and `sprakande` instead of stopping at the
 whole word or consuming only `sprak` during the greedy scan.
 
+Swedish vocabulary matching also connects agent/activity noun endings such
+as `översittare` / `översitteri`, including automatic prefix search. It uses
+a shared stem from the language's suffix rules rather than accepting any
+words with a similar beginning. Subtitle queries keep the typed term when
+it already finds subtitle results.
+
 ## Practice speed
 
 In Practice, open **⋯ → Speed cycle**, enter an ordered list such as

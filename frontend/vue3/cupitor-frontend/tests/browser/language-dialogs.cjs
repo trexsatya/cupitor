@@ -12,7 +12,7 @@ const index = [
   { link: 'testVideo02', name: 'Anders på landet || Höns i trädgård || testVideo02', source: 'youtube' },
   { link: 'testVideo03', name: 'Ljudbok Klubb||ROBINSON CRUSOE||testVideo03', source: 'YOUTUBE' }
 ]
-const cue = '1\n00:00:01,000 --> 00:00:03,000\nEn färgsprakande kväll.\n'
+const cue = '1\n00:00:01,000 --> 00:00:03,000\nEn färgsprakande kväll. Han är en översittare.\n'
 
 async function serveFixtures(route) {
   const url = new URL(route.request().url())
@@ -30,7 +30,7 @@ async function serveFixtures(route) {
   let contentType = 'application/json'
   if (file.endsWith('/srts/index.json')) body = JSON.stringify(index)
   else if (file.endsWith('/vocabulary.txt')) {
-    body = '#Color\n(colorful)|färgsprakande|\n'
+    body = '#Color\n(colorful)|färgsprakande|\n#Conduct\n(bullying)|översitteri|\n#Language\n(translate)|översätta|\n'
     contentType = 'text/plain'
   } else if (file.endsWith('.srt')) {
     body = cue
@@ -66,6 +66,35 @@ async function checkDialogs(browser, mobile) {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
     await page.waitForFunction(() => window.srts?.length === 3)
     await page.evaluate(async () => { await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]) })
+    // Related vocabulary must survive both the ordinary finder and the
+    // automatic prefix pass, even when subtitles already match the exact
+    // typed word (so subtitle stem fallback never runs).
+    for (const autoPrefix of [false, true]) {
+      await click('#toggleSettingsPanelBtn')
+      if (await page.locator('#toggleAutoPrefixSearchCheckbox').isChecked() !== autoPrefix) {
+        await click('#settingsPanel label[for="toggleAutoPrefixSearchCheckbox"] .slider')
+      }
+      await page.locator('#settingsPanel').locator('..').locator('.ui-dialog-titlebar-close').click()
+      await page.locator('#searchText').fill(autoPrefix ? 'ÖVERSITTARE' : 'översittare')
+      await page.locator('#searchText').press('Tab')
+      await page.waitForFunction(auto => {
+        const headers = [...document.querySelectorAll('#vocabularyResult .similar-segment-header')]
+        return headers.some(h => h.textContent.includes('översitteri')) &&
+          !!document.querySelector('#vocabularyResult .prefix-group') === auto &&
+          !document.querySelector('#result').textContent.includes('Loading…')
+      }, autoPrefix)
+      const row = page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: 'översitteri' })
+      assert.equal(await row.count(), 1)
+      assert.equal(await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: 'översätta' }).count(), 0)
+      assert.equal(await page.evaluate(() => window._librarySearchText), 'översittare', 'vocabulary matching must not broaden the clean search query')
+      assert((await page.evaluate(() => Object.keys(window._lastWordToItemsMap || {}))).includes('översittare'))
+      assert((await page.evaluate(() => Object.values(window._lastWordToItemsMap || {}).flat().length)) > 0)
+      if (autoPrefix) {
+        await page.locator('#vocabularyResult .prefix-group-header').filter({ hasText: 'översitt' }).click()
+        assert.equal(await row.isVisible(), true)
+        await screenshot('cupitor-oversittare-vocabulary')
+      }
+    }
     assert.equal(await page.locator('#settingsPanel #searchChannelsBtn').count(), 1)
     assert.equal(await page.locator('#searchChannelsBtn:visible').count(), 0)
     await page.locator('#searchText').fill('färgsprakande')
