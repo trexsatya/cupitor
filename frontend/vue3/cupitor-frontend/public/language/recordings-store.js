@@ -1,4 +1,5 @@
 import { runInBatches } from './net.js'
+import { planRecordingsCleanup, RECORDINGS_SCAN_MS } from './recordings-gc.js'
 
 // Backwards-compatible recordings storage. The root is either the legacy
 // collection or a small manifest. Content-addressed parts are immutable, so a
@@ -62,6 +63,19 @@ export async function readRecordings(root, readPart) {
   return out
 }
 
+// A manifest cached longer than the retention period may reference a removed
+// part. Retry once with a fresh index; a genuinely missing active part still
+// fails the entire read, never masquerading as deleted cards.
+export async function loadRecordingsFiles(readFile) {
+  const load = async fresh => readRecordings(parseRecordingsRoot(await readFile('recordings.json', fresh)),
+    path => readFile(path, fresh))
+  try { return await load(false) }
+  catch (e) {
+    if (e.code !== 'recordings-part-missing') throw e
+    return load(true)
+  }
+}
+
 export async function splitRecordings(collection, { maxBytes = RECORDINGS_PART_BYTES, digest } = {}) {
   const hash = digest || (async text => {
     const result = await globalThis.crypto.subtle.digest('SHA-256', bytes(text))
@@ -106,19 +120,38 @@ export async function splitRecordings(collection, { maxBytes = RECORDINGS_PART_B
 // One atomic commit holds both the index and its new parts. If the index
 // changes after our read, re-read it and re-run the existing conflict policy.
 // commitFiles also retries ref conflicts; its root guard runs on every retry.
-export async function syncRecordingsFiles({ readFile, commitFiles, merge, maxAttempts = 5, splitOptions }) {
+export async function syncRecordingsFiles({ readFile, commitFiles, merge, listParts, now = Date.now,
+  log = (message, error) => console.warn(message, error), maxAttempts = 5, splitOptions }) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const before = await readFile('recordings.json')
     const root = parseRecordingsRoot(before)
     const remote = await readRecordings(root, readFile)
     const merged = await merge(remote)
     const split = await splitRecordings(merged, splitOptions)
+    const previous = root.format === RECORDINGS_FORMAT ? root : {}
+    const timestamp = now()
+    let scannedAt = previous.partsScannedAt
+    let discovered = []
+    if (listParts && (!Number.isFinite(scannedAt) || timestamp - scannedAt >= RECORDINGS_SCAN_MS)) {
+      try {
+        const paths = await listParts()
+        if (!Array.isArray(paths)) throw new Error('Invalid recordings directory listing')
+        discovered = paths; scannedAt = timestamp
+      }
+      catch (e) { log('[recordings] part discovery failed; sync will still clean up tracked files', e) }
+    }
+    const cleanup = planRecordingsCleanup(previous, split.files.keys(), timestamp, discovered)
+    const manifest = JSON.parse(split.text)
+    if (Object.keys(cleanup.retired).length) manifest.retiredParts = cleanup.retired
+    if (Number.isFinite(scannedAt)) manifest.partsScannedAt = scannedAt
+    const text = JSON.stringify(manifest, null, 2) + '\n'
     const existing = new Set(root.format === RECORDINGS_FORMAT ? root.playlists.flatMap(e => e.parts) : [])
     const files = [...split.files].filter(([path]) => !existing.has(path))
       .map(([path, text]) => ({ path, getContent: () => text }))
+    files.push(...cleanup.remove.map(path => ({ path, delete: true })))
     files.push({ path: 'recordings.json', getContent: current => {
       if (current !== before) throw new Error('recordings-index-changed')
-      return split.text
+      return text
     } })
     try {
       await commitFiles(files)

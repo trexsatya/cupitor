@@ -19,10 +19,28 @@ manual card content, playlist settings and virtual members are preserved.
 A single card over 256 KiB is refused with a message; the sync writes nothing.
 
 Each part filename is the SHA-256 of its contents. Unchanged parts are reused.
-A cached manifest therefore always points to its own immutable snapshot. Old
-parts are retained, so a device reading an older manifest can finish loading.
-Only the current manifest's parts are loaded. Changing one playlist does not
-rewrite other playlists' parts.
+A cached manifest therefore points to its own immutable snapshot. Only the
+current manifest's parts are loaded. Changing one playlist does not rewrite
+other playlists' parts.
+
+**Automatic cleanup runs during Sync.** Parts no longer referenced by any
+playlist are marked in the index and kept for seven days from that first
+observation. A later Sync deletes expired parts in the same atomic commit as
+the updated index. Reusing a part cancels its retirement; active parts are
+never deleted. Files whose timestamps are invalid or in the future cannot
+be removed early.
+
+At most once per day during Sync, the app inventories the generated files in
+this language's recordings directory in the user's own repo. This also finds
+old orphaned parts from before cleanup was enabled. Discovery uses a fixed
+commit's directory trees, including directories over 1,000 files; unrelated
+files and directories are ignored. A discovery failure is logged and retried
+on a later Sync without blocking normal sync or cleaning an incomplete list.
+
+If an old cached index references a part removed after the grace period, the
+reader fetches the current index and retries once. A still-missing active part
+fails the entire read. Git history is retained; cleanup removes obsolete files
+from the current branch without rewriting history.
 
 The existing three-way merge and conflict chooser operate on the reassembled
 collection. The root and new parts are committed together, with an index guard
@@ -88,5 +106,6 @@ the gear, or an action that opens another dialog.
 Run `npx jest public/language public/github-utils.test.js --runInBand` for the
 language and sync tests, and `npm run build` for the production bundle.
 The new tests cover legacy migration, large-file splitting, round trips,
-concurrent index edits, failed/missing reads, cache isolation, strict channel
+concurrent index edits, retention expiry, part reuse, old-orphan discovery,
+stale-index recovery, failed/missing reads, cache isolation, strict channel
 limits, compound heads and custom speed cycling.
