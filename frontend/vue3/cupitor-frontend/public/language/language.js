@@ -20231,10 +20231,10 @@ const _practiceVideoCues = createPracticeVideoCues({
   waitUntil
 })
 let _practiceRenderToken = 0
-function _newPracticeVideoRequest() {
+function _newPracticeVideoRequest({ mute = false } = {}) {
   window._manualCueToken = (window._manualCueToken || 0) + 1
   if (!window.ytPlayerReady) window._ytReadyAutoplaySuppressed = true
-  return _practiceVideoCues.invalidate()
+  return _practiceVideoCues.invalidate({ mute })
 }
 // Card-based, no timer. Each card is a shuffled playlist item showing the
 // matched subtitle line in the "front" language, a Reveal button for the
@@ -20686,6 +20686,8 @@ function minimizePracticeMode() {
   window._practiceClipToken = (window._practiceClipToken || 0) + 1
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+  _newPracticeVideoRequest()
+  _practiceVideoCues.releaseMute()
   _updatePracticeRestoreCount()
   $('#toggleMediaContainer').click()  
 }
@@ -21676,7 +21678,7 @@ async function _renderPracticeCard() {
   const $p = $('#practiceMode')
   if (!$p.length) return
   const renderToken = ++_practiceRenderToken
-  const videoRequest = _newPracticeVideoRequest()
+  const videoRequest = _newPracticeVideoRequest({ mute: true })
   window._practicePlayPending = null
   window._practicePlaybackCard = null
   // Switching cards invalidates any running clip stop-watcher so it can't pause

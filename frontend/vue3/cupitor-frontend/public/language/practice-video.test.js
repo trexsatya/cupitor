@@ -106,3 +106,11 @@ test('transition cleanup preserves a user-muted player', async () => {
   cues.releaseMute()
   expect(state.muted).toBe(true)
 })
+
+test('a normal pause or leaving Practice does not acquire a new transition mute', () => {
+  const { cues, player, state } = delayedSound()
+  cues.invalidate({ mute: false })
+  expect(state.muted).toBe(false)
+  expect(player.mute).not.toHaveBeenCalled()
+  expect(player.pauseVideo).toHaveBeenCalled()
+})

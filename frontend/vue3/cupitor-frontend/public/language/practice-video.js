@@ -20,11 +20,11 @@ export function createPracticeVideoCues({ getPlayer, isReady, isActive, waitUnti
     player.mute()
   }
   const isCurrent = token => token === latest && isActive()
-  const invalidate = () => {
+  const invalidate = ({ mute: silence = true } = {}) => {
     latest++
     // Iframe commands are asynchronous. Silence before pause/cue, so a
     // buffered frame from the previous card cannot sound during navigation.
-    try { mute() } catch (_) {}
+    if (silence) { try { mute() } catch (_) {} }
     try { getPlayer()?.pauseVideo() } catch (_) {}
     return latest
   }
