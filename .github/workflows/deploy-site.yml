@@ -52,6 +52,12 @@ jobs:
           npx jest public/language public/github-utils.test.js --runInBand --silent
           node --test scripts/deploy-site.test.cjs
 
+      - name: Install Chromium for dialog tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Test dialogs with desktop clicks and mobile taps
+        run: node tests/browser/language-dialogs.cjs
+
       - name: Build production site
         run: npm run build
         env:

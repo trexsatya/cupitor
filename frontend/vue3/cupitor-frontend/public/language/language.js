@@ -787,9 +787,6 @@ function _makeDialogPill(icon, label, title, onPick) {
     .append($('<span class="dlg-pill-label"></span>').text(label))
   const go = (e) => {
     e.preventDefault()
-    // The document-level outside-click handler closes every visible dialog
-    // that isn't whitelisted. Without this, the same click that restores a
-    // dialog would travel on and close whatever else is open.
     e.stopPropagation()
     onPick()
   }
@@ -1087,10 +1084,6 @@ function _minimizeRareWordsDialog() {
     </div>`).appendTo(_minimizedDialogsBar())
     $pill.on('click', function (e) {
       if ($(e.target).closest('.rare-pill-close').length) return
-      // Stop propagation — the document-level outside-click handler at
-      // L2086 closes any visible non-whitelisted dialog, and the rare-words
-      // dialog isn't on that list. Without this, the click would re-open
-      // the dialog and then immediately close it back.
       e.stopPropagation()
       _restoreRareWordsDialog()
     })
@@ -1254,7 +1247,7 @@ function openAddToVocabDialog() {
 
   // Discard any in-progress text so the new dialog starts blank — saves only
   // happen on the Save button via addToVocab(); closing the dialog (via the
-  // X, Escape, or click-outside) must NOT carry over typed words.
+  // X or Escape) must NOT carry over typed words.
   const discardSegment = () => {
     $('#vocabularySegmentTextarea').val('')
     $('#vocabNewCategory').val('')
@@ -1308,9 +1301,6 @@ function openAddToVocabDialog() {
     $('#vocabPendingHint').hide()
   }
 
-  // Defer opening until after the current click event has finished bubbling.
-  // Without this, the document-level "close on outside click" handler fires
-  // on the same click and immediately closes the dialog.
   setTimeout(() => {
     if (_restoreMinimizedDialog('addToVocabularyDialog')) return
     const $dialog = $("#addToVocabularyDialog")
@@ -1710,17 +1700,11 @@ function openSettingsDialog() {
       if ($wrap.length) $wrap.attr('tabindex', '-1').focus()
     }
   }
-  // Defer the open so the current click event finishes bubbling first.
-  // Otherwise the document-level "close visible dialogs on outside click"
-  // handler fires on this same click and immediately closes the dialog
-  // we just opened. Same pattern as openAddToVocabDialog.
-  setTimeout(() => {
-    if ($panel.hasClass('ui-dialog-content')) {
-      $panel.dialog('option', opts).dialog('open')
-    } else {
-      $panel.dialog(opts)
-    }
-  }, 0)
+  if ($panel.hasClass('ui-dialog-content')) {
+    $panel.dialog('option', opts).dialog('open')
+  } else {
+    $panel.dialog(opts)
+  }
 }
 window.openSettingsDialog = openSettingsDialog
 
@@ -3660,39 +3644,24 @@ $('document').ready(e => {
     }
   });
 
-  let closePopover = (popoverId) => {
+  const closePopover = (popoverId, e) => {
     const $pop = $('#' + popoverId)
     if ($pop.length === 0) return
     if ($pop.attr('hidden') !== undefined) return
-    if ($(e.target).closest('#' + popoverId + ', .link').length) return
+    if ($(e.target).closest('#' + popoverId + ', .link, .link-special').length) return
     $pop.attr('hidden', '')
   }
   // Close the subtitle-word popover when the user clicks anywhere outside
   // it (and outside another `.link` that would just reopen it).
   $(document).on('click', function (e) {
-    closePopover('subtitleWordPopover')
-    closePopover('subtitleWordPopoverSpecial')
+    closePopover('subtitleWordPopover', e)
+    closePopover('subtitleWordPopoverSpecial', e)
   });
 
-  $(document).on("click", function(e) {
-    // CKEditor draws its link balloon and menus on <body>, outside the dialog
-    // it belongs to — a click in them is not a click outside.
-    if ($(".ui-dialog:visible").length && !$(e.target).closest(".ui-dialog,.show-info-btn,#reviewCapturedBtn,.ck-body-wrapper,.ck").length) {
-      // The add-vocabulary dialog stages user input (typed words, picked
-      // category) that's easy to lose to a stray outside click — keep it
-      // open and require an explicit X / Escape / Save to dismiss. Same
-      // for the captured-subtitles review: each row has a Delete / Push
-      // action we don't want clobbered, plus the trigger button click
-      // itself shouldn't immediately re-close the dialog it just opened.
-      // #replaceItemDialog is opened by a button that is itself outside any
-      // dialog when Practice is the caller, so the very click that opens it
-      // arrives here and would close it again — it stages a picked radio
-      // option too, which a stray click should not throw away.
-      // #accountDialog opens from the Account / banner buttons and from a
-      // blocked save, all outside any dialog, and stages a typed token.
-      $(".ui-dialog-content:visible").not("#settingsPanel,#subtitleCacheDialog,#searchChannelsDialog,#accountDialog,#addToVocabularyDialog,#captured-subtitles-dialog,#recordingReviewDialog,#srt-merge-dialog,#channelManagerDialog,#srtEditsReviewDialog,#practiceLineEditDialog,#duplicateSrtsDialog,#unavailableVideosDialog,#manualEntryEditor,#richCardEditor,#meeDirAsk,#playingQueueDialog,#rareWordsDialog,#playUnavailableDialog,#randomBuilderDialog,#replaceItemDialog").dialog("close");
-    }
-  });
+  // Dialogs use their own X / Escape / action controls. Closing every dialog
+  // on a document click races the opening click and loses staged input when
+  // a click handler replaces its own DOM. Outside-click dismissal belongs to
+  // the individual popovers above, never to a global list of dialog IDs.
 
   $searchText1.change(function (e) {
     searchTextChanged(e).then(r => {})
@@ -7725,10 +7694,6 @@ function _renderSimilarMatches($vocab, tier1Top, otherFull, limit, allLines, raw
   if (otherFull.length > 0) {
     const initialBatch = Math.min(limit, otherFull.length)
     const $more = $(`<button type="button" class="lang-tool-btn" id="showMoreSimilarBtn" style="margin-top:6px;">Show ${initialBatch} more groups (consonant diff / edit dist) →</button>`)
-    // Stop propagation: a document-level click handler in the search-vocab
-    // setup closes any visible jQuery-UI dialog when the click target is
-    // outside `.ui-dialog`. Without this, the dialog opens and is closed
-    // by the same click event on the very next bubbling step.
     $more.on('click', e => {
       e.preventDefault()
       e.stopPropagation()
@@ -7776,10 +7741,6 @@ function _openSimilarMoreDialog(otherFull, limit, allLines, raw) {
     updateLoadMore()
   }
   $loadMore.on('click', e => {
-    // Match the outer button's stop-propagation logic: the document-level
-    // click handler closes any visible dialog when the click target is
-    // outside `.ui-dialog`. The button is inside `.ui-dialog`, so this is
-    // belt-and-suspenders, but consistent.
     e.preventDefault()
     e.stopPropagation()
     renderMore()
@@ -16732,9 +16693,6 @@ function openRecordingReviewDialog() {
   _renumberRecItems($dlg)
 
   $dlg.off('click', '.rec-del').on('click', '.rec-del', function (e) {
-    // Stop the click from bubbling to the document-level outside-click
-    // handler, which would otherwise see a detached e.target (we replace
-    // $dlg's HTML below) and close every visible dialog.
     e.preventDefault()
     e.stopPropagation()
     const st  = String($(this).data('st'))
