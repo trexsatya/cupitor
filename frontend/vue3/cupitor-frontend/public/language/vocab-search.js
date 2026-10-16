@@ -6,7 +6,7 @@
 // and return strings/numbers/arrays. Callers in language.js wrap them with
 // the live window.vocabulary cache.
 
-import { guessStems } from './stemming.js'
+import { createWordFormMatcher } from './word-forms.js'
 
 export const SEPARATOR_PIPE = '|'
 
@@ -19,7 +19,10 @@ export const commonWordsToIgnore = [
   'här', 'där', 'var', 'dit', 'där', 'ditt', 'mitt', 'sitt', 'vårt', 'vem', 'vad', 'vilken', 'vilket', 'vilka', 'någon',
   'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många', 'mycket', 'lite', 'få', 'färre',
   'flera', 'mest', 'minst', 'någon', 'något', 'några', 'ingen', 'inget', 'inga', 'både', 'all', 'allt', 'alla', 'många',
-  'dig', 'mig', 'oss', 'er', 'dem', 'honom', 'henne'
+  'dig', 'mig', 'oss', 'er', 'dem', 'honom', 'henne',
+  'till', 'tills', 'från', 'hos', 'mot', 'utan', 'mellan', 'genom', 'under', 'över',
+  'före', 'efter', 'inom', 'utom', 'bland', 'längs', 'via',
+  'men', 'även', 'än', 'då', 'ju', 'ty', 'fast', 'medan', 'eftersom'
 ]
 
 // Common stop-words + bare inflectional clitics that should never anchor a
@@ -31,6 +34,13 @@ export const VOCAB_OVERLAP_STOP_WORDS = new Set([
   'sin', 'sitt', 'sina', 'din', 'dina', 'min', 'mina', 'vår', 'våra', 'era',
   'ert', 'denna', 'detta', 'dessa', 'samma', 'andra', 'samt'
 ])
+
+// Ignore a common word even with punctuation or decomposed diacritics.
+// Keep complete expressions ("se till", "till och från") intact.
+export function isVocabularyStopWord(text) {
+  const words = String(text || '').normalize('NFC').toLowerCase().match(/[\p{L}\p{M}]+/gu) || []
+  return words.length === 1 && VOCAB_OVERLAP_STOP_WORDS.has(words[0])
+}
 
 // Common Swedish noun/verb inflectional + derivational suffixes used both
 // when checking whether a search word is "just an inflection of a known
@@ -98,7 +108,7 @@ function _splitSearchParts(searchText) {
   const stRaw = (searchText || '').toLowerCase().trim()
   if (!stRaw) return []
   return stRaw.split(SEPARATOR_PIPE).map(s => s.trim())
-    .filter(s => s.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(s))
+    .filter(s => s.length >= 3 && !isVocabularyStopWord(s))
 }
 
 function _splitVocabParts(vocabLine) {
@@ -113,10 +123,10 @@ function _splitVocabParts(vocabLine) {
 // inside multi-word segments (so "rik som ett troll" can hit "troll").
 function _tokensForSegment(p) {
   const tokens = []
-  if (!VOCAB_OVERLAP_STOP_WORDS.has(p)) tokens.push(p)
+  if (!isVocabularyStopWord(p)) tokens.push(p)
   if (/\s/.test(p)) {
     for (const w of p.split(/\s+/)) {
-      if (w.length >= 2 && !VOCAB_OVERLAP_STOP_WORDS.has(w)) tokens.push(w)
+      if (w.length >= 2 && !isVocabularyStopWord(w)) tokens.push(w)
     }
   }
   return tokens
@@ -125,13 +135,13 @@ function _tokensForSegment(p) {
 // Longest common prefix between any per-word vocab token and any search
 // part, with "near-containment": the shorter must be consumed by the longer
 // with at most 1 char of divergence, or both endings reduce to the same
-// prefix stem in the search language. Returns the LCP length (>= 3 is a
-// strong match). Keep the length and detail APIs on the same matching rule.
+// Swedish stem, including vowel deletion (hagel / hagla). Returns the LCP
+// length (>= 3 is a strong match). Keep both APIs on the same matching rule.
 export function vocabPrefixOverlapLen(vocabLine, searchText, lang = 'sv') {
   return vocabPrefixOverlapDetail(vocabLine, searchText, lang).len
 }
 
-function _prefixMatchLen(token, search, lang) {
+function _prefixMatchLen(token, search, lang, forms) {
   const lim = Math.min(token.length, search.length)
   let lcp = 0
   while (lcp < lim && token.charCodeAt(lcp) === search.charCodeAt(lcp)) lcp++
@@ -139,11 +149,10 @@ function _prefixMatchLen(token, search, lang) {
   if (lcp < 3 || lang !== 'sv') return 0
 
   // A long common prefix alone is insufficient (översittare / översätta).
-  // Both words must reduce to a shared stem that is fully inside that
-  // prefix, rather than relaxing near-containment for arbitrary endings.
-  const searchStems = new Set(guessStems(search, lang))
-  return guessStems(token, lang).some(stem => stem.length >= 3 && stem.length <= lcp && searchStems.has(stem))
-    ? lcp : 0
+  // Both words must reduce to a shared stem. A normalized stem need not
+  // occur as a literal prefix: hagel and hagla both reduce to hagl, while
+  // their visible shared prefix is hag. Group/highlight that visible part.
+  return forms.related(token, search) ? lcp : 0
 }
 
 // Like vocabPrefixOverlapLen but also reports which search part won and the
@@ -157,12 +166,13 @@ export function vocabPrefixOverlapDetail(vocabLine, searchText, lang = 'sv') {
   let bestLen = 0
   let bestPart = ''
   let bestToken = ''
+  const forms = createWordFormMatcher(lang)
   for (const p of vocabParts) {
     const tokens = _tokensForSegment(p)
     for (const s of searchParts) {
       for (const t of tokens) {
-        const lcp = _prefixMatchLen(t, s, lang)
-        if (lcp > bestLen) {
+        const lcp = _prefixMatchLen(t, s, lang, forms)
+        if (lcp > bestLen && !isVocabularyStopWord(t.slice(0, lcp))) {
           bestLen = lcp; bestPart = s; bestToken = t
         }
       }
@@ -172,20 +182,17 @@ export function vocabPrefixOverlapDetail(vocabLine, searchText, lang = 'sv') {
   return { len: bestLen, bestPart, matched }
 }
 
-// Longest common suffix — only used by the Different-prefixes dialog's weak-
-// overlap fallback. Requires the vocab segment to be entirely the suffix of
-// the search (so a 3-char "bet" with only 2 chars in common with "trollguldet"
-// is rejected, but the bare 2-char "åt" inside "äta|åt|ätit" still surfaces
-// for "gråt").
+// Full-segment suffix overlap for the Different-prefixes dialog. A short
+// content word ("vy" in "envy") can be useful; function words such as
+// "åt" or "för" must never be the sole reason a row appears.
 export function vocabSuffixOverlapLen(vocabLine, searchText) {
   const searchParts = _splitSearchParts(searchText)
   if (searchParts.length === 0) return 0
-  // Vocab parts here are NOT stop-word filtered — see "åt" comment above.
   const vocabParts = vocabLine.split(SEPARATOR_PIPE)
     .map(p => p.toLowerCase().trim())
     .map(p => { try { return stripBracketHints(p).trim() } catch (_) { return p } })
     .map(p => stripExpansionMarkers(p).trim())
-    .filter(p => p.length >= 2)
+    .filter(p => p.length >= 2 && !isVocabularyStopWord(p))
   let max = 0
   for (const p of vocabParts) {
     for (const s of searchParts) {

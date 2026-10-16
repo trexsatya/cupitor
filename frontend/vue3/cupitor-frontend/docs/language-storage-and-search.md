@@ -85,11 +85,40 @@ Complete compound-word splits also run for already-known words. For example,
 `färgsprakande` can expose `färg` and `sprakande` instead of stopping at the
 whole word or consuming only `sprak` during the greedy scan.
 
-Swedish vocabulary matching also connects agent/activity noun endings such
-as `översittare` / `översitteri`, including automatic prefix search. It uses
-a shared stem from the language's suffix rules rather than accepting any
-words with a similar beginning. Subtitle queries keep the typed term when
-it already finds subtitle results.
+Vocabulary search uses one compiled matcher for ordinary findings, automatic
+prefix search and the manual prefix action. Exact phrases come first, followed
+by exact word tokens, related forms and compound constituents. An exact match
+never hides a related line. All of those findings remain visible; the Prefix
+limit applies only to extra, collapsed spelling-prefix suggestions and their
+overflow dialog.
+
+A common word such as `till`, `för`, `som` or `med` cannot be the sole
+reason for a vocabulary result. The filter applies to each query alternative,
+punctuated tokens, compound constituents and prefix/suffix suggestions,
+including the Different-prefixes dialog. A useful match on the same row still
+keeps it. Complete expressions such as `se till` or `till och från` remain
+searchable as phrases; common prefixes inside content words such as
+`tillverkning` are preserved.
+
+Related-word normalization applies bounded stages for Swedish genitives,
+inflections, derivations and spelling changes, so layered forms such as
+`översittarens`, `måleriet`, `haglade` and `cyklarnas` can find their family.
+Explicit lexical forms in Expansions also provide irregular families. Pronoun
+and placeholder expansions are excluded from those families. Diacritics stay
+distinct, and Swedish rules do not apply to searches in other languages.
+
+Compound matching accounts for complete constituents, including inflected
+modifiers and three-letter heads. `väljarkår` finds `kår` without matching the
+embedded `år`; `färgsprakande` can find `färg` and `spraka` even when the compound
+itself is already listed. An unfamiliar modifier may still have a known head:
+only its longest recognized head is offered. Recognized inflected words are
+not broken into unrelated scraps.
+
+The compiled index is replaced when the language or vocabulary contents change,
+including edits that retain the same line count. Vocabulary matching does not
+add fragments to the subtitle or book query. These are rule-based word-family
+relationships, not a full semantic dictionary: ambiguous stems can have several
+meanings, and genuinely irregular families can be supplied in Expansions.
 
 ## Practice speed
 

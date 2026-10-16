@@ -39,7 +39,7 @@ describe("findDifferentPrefixMatches", () => {
   const lines = [
     "(preserve)|förvara|förvarade|förvarar|",        // 0
     "(beware)|akta|akta sig|",                       // 1
-    "(eat)| äta | åt | ätit |",                      // 2 — for weak-overlap path
+    "(eat)| äta | åt | ätit |",                      // 2 — common-only overlap must be excluded
     "(stop)|stoppa|hejda|",                          // 3 — unrelated
     "(spell)|trolla|förtrolla|trollkarl|",           // 4
     "(believe)|tro|tror|trodde|",                    // 5 — too generic, but matches "tro" stem
@@ -58,14 +58,21 @@ describe("findDifferentPrefixMatches", () => {
     expect(forVaraHit.prefix).toBe("för");
   });
 
-  test("'gråt' → stem 'råt' (g- isn't a Swedish prefix here) → falls through to suffix overlap", () => {
+  test("'gråt' does not surface the eat row solely because it contains 'åt'", () => {
     const res = findDifferentPrefixMatches("gråt", "sv", lines, cats, vocabSuffixOverlapLen);
     // 'g' isn't in COMMON_PREFIXES.sv, so no strip; stem stays "gråt".
     expect(res.origPrefix).toBe("");
     expect(res.stem).toBe("gråt");
-    // (b) pass: "äta|åt|ätit" has the bare "åt" segment with LCS=2 vs "gråt".
     const overlapHits = res.results.filter(r => r.kind === "overlap");
-    expect(overlapHits.some(r => r.lineIdx === 2)).toBe(true);
+    expect(overlapHits.some(r => r.lineIdx === 2)).toBe(false);
+  });
+
+  test('keeps short content-word overlap and rejects common-word-only queries', () => {
+    const res = findDifferentPrefixMatches('envy', 'sv', ['(view)|utsikt|vy|vyer|'], ['View'], vocabSuffixOverlapLen);
+    expect(res.results).toEqual([{ kind: 'overlap', lineIdx: 0, category: 'View' }]);
+    for (const query of ['till', 'för', 'FÖR!']) {
+      expect(findDifferentPrefixMatches(query, 'sv', lines, cats, vocabSuffixOverlapLen).results).toEqual([]);
+    }
   });
 
   test("returns empty when stem is too short", () => {

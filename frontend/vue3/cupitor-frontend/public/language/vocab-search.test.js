@@ -10,6 +10,7 @@ import {
   vocabCompoundParts,
   VOCAB_OVERLAP_STOP_WORDS,
   VOCAB_COMPOUND_SUFFIXES,
+  isVocabularyStopWord,
 } from "./vocab-search";
 
 // Tiny synthetic vocabulary covering every interesting case from the user's
@@ -82,6 +83,22 @@ describe("buildKnownWordSet", () => {
 
 describe("vocabPrefixOverlapLen", () => {
   test.each([
+    ['(hail)|hagel(sl-pl)|hagelskur|hagelskurar|hagelkorn(sl-pl)', 'hagla', 'hag'],
+    ['(hail)|hagla|', 'hagel', 'hag'],
+    ['(sail)|segel|', 'segla', 'seg'],
+    ['(bicycle)|cykel|', 'cykla', 'cyk'],
+    ['(doubt)|tvivel|', 'tvivla', 'tviv']
+  ])('matches vowel-deletion families in %s for %s', (line, search, matched) => {
+    expect(vocabPrefixOverlapDetail(line, search, 'sv')).toEqual({ len: matched.length, bestPart: search, matched });
+    expect(vocabPrefixOverlapLen(line, search, 'sv')).toBe(matched.length);
+  });
+  test('vowel deletion does not admit unrelated prefixes or leak to other languages', () => {
+    expect(vocabPrefixOverlapLen('hagar', 'hagla', 'sv')).toBe(0);
+    expect(vocabPrefixOverlapLen('hagel', 'hagna', 'sv')).toBe(0);
+    expect(vocabPrefixOverlapLen('hagel', 'hagla', 'en')).toBe(0);
+    expect(vocabPrefixOverlapLen('hagel', 'hagla', 'es')).toBe(0);
+  });
+  test.each([
     ['(bullying)|översitteri|', 'översittare', 'översitt'],
     ['(bully)|översittare|', 'översitteri', 'översitt'],
     ['(painting)|måleri|', 'målare', 'mål'],
@@ -128,9 +145,10 @@ describe("vocabPrefixOverlapLen", () => {
 });
 
 describe("vocabSuffixOverlapLen", () => {
-  test("surfaces 2-char full-token suffix overlap", () => {
-    // "äta|åt|ätit" + "gråt" — "åt" is fully consumed as the 2-char suffix.
-    expect(vocabSuffixOverlapLen("äta|åt|ätit", "gråt")).toBe(2);
+  test("excludes common-word-only suffix overlap", () => {
+    expect(vocabSuffixOverlapLen("äta|åt|ätit", "gråt")).toBe(0);
+    expect(vocabSuffixOverlapLen("(to)|till|", "till")).toBe(0);
+    expect(vocabSuffixOverlapLen("(for)|för|", "utför")).toBe(0);
   });
   test("rejects partial 2-char suffix of a longer token", () => {
     // "(injure)|...|bet|..." vs "trollguldet": "bet" shares "et" (2/3) — reject.
@@ -145,6 +163,22 @@ describe("vocabSuffixOverlapLen", () => {
     expect(
       vocabSuffixOverlapLen("(believe)|tro|tror|trodde|", "trollguldet")
     ).toBe(0);
+  });
+});
+
+describe('common-word-only matches', () => {
+  test.each(['till', 'för', 'från', 'under', 'över', 'som', 'med'])('%s cannot anchor prefix matches', word => {
+    for (const line of [`(bare)|${word}|`, `(phrase)|${word} något|`, `(punctuated)|${word.toUpperCase()}!|`]) {
+      expect(vocabPrefixOverlapLen(line, word + 'xyz')).toBe(0);
+      expect(vocabPrefixOverlapLen(line, word + '!')).toBe(0);
+    }
+    expect(isVocabularyStopWord(word.toUpperCase().normalize('NFD') + '!')).toBe(true);
+  });
+  test('ignores overlap that consists only of a common word, without discarding a better match', () => {
+    expect(vocabPrefixOverlapLen('(lead)|föra|', 'förneka')).toBe(0);
+    expect(vocabPrefixOverlapDetail('(deny)|föra|förneka|', 'förneka').matched).toBe('förneka');
+    expect(isVocabularyStopWord('tillverkning')).toBe(false);
+    expect(isVocabularyStopWord('till och från')).toBe(false);
   });
 });
 
