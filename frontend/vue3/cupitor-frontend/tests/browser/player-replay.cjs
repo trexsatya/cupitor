@@ -63,11 +63,14 @@ async function checkPlayerReplay(browser) {
     const replay = () => mobile ? page.getByRole('button', { name: 'Replay current item' }).tap()
       : page.getByRole('button', { name: 'Replay current item' }).click()
     const seekCount = () => page.evaluate(() => window.__yt.events.filter(e => e.action === 'seek' && e.time === 1).length)
-    const finishAudio = () => page.evaluate(() => {
-      const audio = window._recPlayManualAudio
-      audio.currentTime = audio.duration
-      audio.dispatchEvent(new Event('ended'))
-    })
+    const finishAudio = async () => {
+      await page.waitForFunction(() => Number.isFinite(window._recPlayManualAudio?.duration))
+      return page.evaluate(() => {
+        const audio = window._recPlayManualAudio
+        audio.currentTime = audio.duration
+        audio.dispatchEvent(new Event('ended'))
+      })
+    }
     const waitFace = label => page.waitForFunction(label => document.querySelector('#recPlayingAudio .rec-pa-face')?.textContent === label &&
       window._recPlayManualAudio && !window._recPlayManualAudio.paused, label)
     const stop = async () => {

@@ -14,8 +14,11 @@ async function checkViewSwitching(browser) {
     page.on('dialog', dialog => { errors.push(dialog.message()); dialog.dismiss() })
     await page.route('**/*', serveFixtures)
     await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
-    const switchTo = name => mobile ? page.getByRole('button', { name: 'Switch to ' + name, exact: true }).tap()
-      : page.getByRole('button', { name: 'Switch to ' + name, exact: true }).click()
+    const switchTo = async name => {
+      const button = page.getByRole('button', { name: 'Switch to ' + name, exact: true })
+      if (name === 'Practice' && !await button.isVisible()) await page.getByRole('button', { name: 'Show details', exact: true }).click()
+      return mobile ? button.tap() : button.click()
+    }
     const practiceAt = index => page.waitForFunction(index => window._practiceActive && window._practiceIdx === index &&
       !document.querySelector('#practiceMode .practice-loading'), index)
     const playerAt = index => page.waitForFunction(index => !window._practiceActive && window._playingRecording &&
@@ -61,7 +64,7 @@ async function checkViewSwitching(browser) {
       }, silentWav())
       await playerAt(2)
       await page.getByRole('button', { name: 'Replay current item', exact: true }).waitFor({ state: 'visible' })
-      await page.getByRole('button', { name: 'Switch to Practice', exact: true }).waitFor({ state: 'visible' })
+      assert.equal(await page.getByRole('button', { name: 'Switch to Practice', exact: true }).isVisible(), false)
       if (process.env.SCREENSHOT_DIR) {
         fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
         await page.evaluate(() => { document.getElementById('underlying-page-widget').style.visibility = 'hidden' })

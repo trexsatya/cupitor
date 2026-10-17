@@ -1,5 +1,6 @@
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
+import { installStudyDivider } from './study-divider.js';
 import { keyboardShortcut, KEYBOARD_SHORTCUTS } from './keyboard-shortcuts.js';
 import { parsePracticeSpeeds, practiceSpeeds, nextPracticeSpeed, supportedPracticeSpeed } from './practice-speed.js';
 import { loadRecordingsFiles, syncRecordingsFiles } from './recordings-store.js';
@@ -279,6 +280,7 @@ import {
   MUSIC_VOL_IN_GAPS,
   musicVideoIdFromUrl as _musicVideoIdFromUrl,
   musicMode as _musicModeOf,
+  musicSettingsFor as _musicSettingsFor,
   musicTracks as _musicTracksOf,
   musicSelectedId as _musicSelectedIdOf,
   musicSelectedTrack as _musicSelectedTrackOf,
@@ -2636,11 +2638,17 @@ function _setSrcTgtGap(v) {
 
 // Thin bindings onto the live settings object; the rules themselves live in
 // music-bed.js, where they can be tested without a player or a DOM.
-function _musicHushed()    { return !!(window._appSettings && window._appSettings.recMusicPaused) }
+function _musicKind() { return _isManualItem(window._recPlayCurrentItem) ? 'manual' : 'video' }
+let _musicPanelKind = 'manual'
+function _writeMusicProfile(changes) {
+  const key = _musicPanelKind === 'video' ? 'recMusicVideo' : 'recMusicManual'
+  window._appSettings[key] = { ...window._appSettings[key], ...changes }
+}
+function _musicSettings(kind = _musicKind()) { return _musicSettingsFor(window._appSettings, kind) }
+function _musicHushed()    { return !!_musicSettings().recMusicPaused }
 function _musicVideoId()   { return _musicSelectedIdOf(window._appSettings) }
 function _musicTracks()    { return _musicTracksOf(window._appSettings) }
-function _musicTrack()     { return _musicSelectedTrackOf(window._appSettings) }
-function _musicMode()      { return _musicModeOf(window._appSettings) }
+function _musicMode()      { return _musicModeOf(_musicSettings()) }
 
 // The playlist record the item being played belongs to. An item carries the
 // name of the playlist it came from when the queue was built from several.
@@ -2657,7 +2665,7 @@ function _recordOfPlaylist(name) {
 function _musicTrackNow() {
   const it = window._recPlayCurrentItem
   const rec = _recordOfPlaylist(it && it._recName)
-  return _resolveMusicTrack(window._appSettings, {
+  return _resolveMusicTrack(_musicSettings(), {
     cardTrackId: it && it.musicTrackId,
     playlistTrackId: rec && rec.musicTrackId,
   })
@@ -2679,7 +2687,21 @@ function _musicChoiceOptions(selected, inheritLabel) {
 // The level for whatever the playlist is doing right now — the quiet one only
 // while something else is sounding.
 function _musicVolume() {
-  return _musicVolumeForPhase(window._appSettings, window._recPlayPhase || 'idle')
+  const phase = window._recPlayPhase === 'video' ? 'clip' : (window._recPlayPhase || 'idle')
+  return _musicVolumeForPhase(_musicSettings(), phase)
+}
+
+installStudyDivider({
+  readRatio: view => window._appSettings[`studySplit_${view}`],
+  saveRatio: (view, ratio) => { window._appSettings[`studySplit_${view}`] = ratio; saveAppSettings() }
+})
+
+function _studyControlIcon(kind, label) {
+  const paths = kind === 'replay'
+    ? '<path d="M4 9a8 8 0 1 1 0 7M4 3v6h6"/>'
+    : kind === 'player' ? '<path d="m9 5 11 7-11 7Z"/>'
+      : '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/>'
+  return `<span class="study-mobile-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg></span><span class="study-desktop-label">${label}</span>`
 }
 
 // Keep the Settings input and the overlay stepper showing the same thing. An
@@ -17066,10 +17088,9 @@ function _renderPlayingBanner(it, idx, total) {
           <span class="rec-pb-bar"></span>
           <span class="rec-pb-count"></span>
         </div>
-        <button type="button" class="rec-pb-replay-btn" title="Replay this item from the beginning" aria-label="Replay current item">↻ Replay</button>
+        <button type="button" class="rec-pb-replay-btn" title="Replay this item at 0.75×" aria-label="Replay current item">${_studyControlIcon('replay', '↻ Replay')}</button>
         <button type="button" class="rec-pb-swap-btn" title="Practise the other way round — Target first" aria-label="Swap Source and Target">⇄</button>
         <button type="button" class="rec-pb-music-btn" title="Background music" aria-label="Background music">♫</button>
-        <button type="button" class="rec-pb-practice-btn" title="Practice this item" aria-label="Switch to Practice">Practice</button>
         <button type="button" class="rec-pb-info-btn" title="Show details" aria-label="Show details" aria-expanded="false">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/>
@@ -17078,6 +17099,7 @@ function _renderPlayingBanner(it, idx, total) {
         </button>
       </div>
       <div class="rec-pb-details">
+        <button type="button" class="rec-pb-practice-btn" title="Practice this item" aria-label="Switch to Practice">${_studyControlIcon('practice', 'Practice')}</button>
         <div class="rec-pb-head"></div>
         <div class="rec-pb-meta"></div>
         <div class="rec-pb-times">
@@ -18454,9 +18476,11 @@ function _renderMusicPanel() {
   const $d = $('#musicPanelDialog')
   if (!$d.length) return
   const tracks = _musicTracks()
-  const sel = _musicVideoId()
-  const mode = _musicMode()
-  const s = window._appSettings || {}
+  const s = _musicSettings(_musicPanelKind)
+  const sel = _musicSelectedIdOf(s)
+  const mode = _musicModeOf(s)
+  $d.find('#mpScope').val(_musicPanelKind)
+  $d.find('#mpEnabled').prop('checked', s.recMusicEnabled)
 
   // Each row carries its kind — ♪ for a file on the device, ▶ for YouTube —
   // so the two are told apart at a glance in a plain <select>.
@@ -18484,9 +18508,9 @@ function _renderMusicPanel() {
     $d.find('#mpListHint').text(`Plays under everything in "${_ownerLabeller().prefix(listName, listRec)}", unless a card names its own.`)
   }
 
-  const hushed = _musicHushed()
+  const hushed = !!window._appSettings.recMusicPaused
   $d.find('#mpHush')
-    .text(hushed ? '▶ Resume music' : '⏸ Pause music')
+    .text(hushed ? '▶ Resume all music' : '⏸ Pause all music')
     .toggleClass('mp-hush-on', hushed)
     .attr('aria-pressed', hushed ? 'true' : 'false')
     .prop('disabled', !tracks.length)
@@ -18510,7 +18534,7 @@ function _renderMusicPanel() {
   // replacing the input under their finger would drop the gesture.
   const fields = _musicVolumeFieldsFor(mode)
   const $vol = $d.find('#mpVolumes')
-  const sig = fields.join(',')
+  const sig = _musicPanelKind + ':' + fields.join(',')
   if ($vol.attr('data-fields') !== sig) {
     const rows = []
     if (fields.indexOf('withAudio') >= 0) {
@@ -18526,9 +18550,15 @@ function _renderMusicPanel() {
 }
 
 function _openMusicPanel() {
+  _musicPanelKind = window._playingRecording ? _musicKind() : 'manual'
   let $d = $('#musicPanelDialog')
   if (!$d.length) $d = $('<div id="musicPanelDialog"></div>').appendTo('body')
   $d.html(`
+    <div class="mp-row">
+      <label class="mp-lbl" for="mpScope">Music for</label>
+      <select id="mpScope" class="mp-grow"><option value="manual">Manual cards</option><option value="video">YouTube clips</option></select>
+    </div>
+    <label class="mp-row"><input type="checkbox" id="mpEnabled"> Enable music for these items</label>
     <div class="mp-row">
       <label class="mp-lbl" for="mpTrack">Track</label>
       <select id="mpTrack" class="mp-grow"></select>
@@ -18557,7 +18587,7 @@ function _openMusicPanel() {
     <div class="mp-hint" id="mpDiskUse"></div>
     <div class="mp-row mp-modes">
       <span class="mp-lbl">Play</span>
-      <label class="mp-radio"><input type="radio" name="mpMode" value="item"> With recording</label>
+      <label class="mp-radio"><input type="radio" name="mpMode" value="item"> With audio</label>
       <label class="mp-radio"><input type="radio" name="mpMode" value="gap"> In the gaps</label>
       <label class="mp-radio"><input type="radio" name="mpMode" value="nonstop"> Non-stop</label>
     </div>
@@ -18569,8 +18599,17 @@ function _openMusicPanel() {
   _refreshLocalMusic()
 
   $d.off('.mp')
+  $d.on('change.mp', '#mpScope', function () {
+    _musicPanelKind = $(this).val() === 'video' ? 'video' : 'manual'
+    _renderMusicPanel()
+  })
+  $d.on('change.mp', '#mpEnabled', function () {
+    _writeMusicProfile({ enabled: $(this).prop('checked') })
+    saveAppSettings()
+    _syncBackgroundMusic()
+  })
   $d.on('change.mp', '#mpTrack', function () {
-    window._appSettings.recMusicSelected = String($(this).val() || '')
+    _writeMusicProfile({ selected: String($(this).val() || '') })
     saveAppSettings()
     _resetBackgroundMusic()
     // Redraw: the "can't play this one" line belongs to the track that failed,
@@ -18591,13 +18630,13 @@ function _openMusicPanel() {
   // Silence the bed without touching the mode, the track or the playlist —
   // the playlist plays on, this only stops the music underneath it.
   $d.on('click.mp', '#mpHush', function () {
-    window._appSettings.recMusicPaused = !_musicHushed()
+    window._appSettings.recMusicPaused = !window._appSettings.recMusicPaused
     saveAppSettings()
     _syncBackgroundMusic()
     _renderMusicPanel()
   })
   $d.on('click.mp', '#mpDelete', function () {
-    const t = _musicTrack()
+    const t = _musicSelectedTrackOf(_musicSettings(_musicPanelKind))
     if (!t) return
     if (!confirm(`Remove "${t.name}" from the music list?`)) return
     window._appSettings.recMusicTracks = _removeMusicTrack(_musicTracks(), t.id)
@@ -18652,7 +18691,7 @@ function _openMusicPanel() {
     }
     window._appSettings.recMusicTracks = list
     // The last file picked becomes the selection.
-    if (lastId) window._appSettings.recMusicSelected = lastId
+    if (lastId) _writeMusicProfile({ selected: lastId })
     saveAppSettings()
     _renderMusicPanel()
     _resetBackgroundMusic()
@@ -18687,7 +18726,7 @@ function _openMusicPanel() {
     const res = _addMusicTrack(_musicTracks(), url, name)
     if (res.reason === 'full') { alert('The music list is full — remove a track first.'); return }
     window._appSettings.recMusicTracks = res.tracks
-    if (res.id) window._appSettings.recMusicSelected = res.id
+    if (res.id) _writeMusicProfile({ selected: res.id })
     saveAppSettings()
     $d.find('#mpUrl').val('')
     $d.find('#mpName').val('')
@@ -18701,7 +18740,7 @@ function _openMusicPanel() {
   $d.on('change.mp', 'input[name="mpMode"]', function () {
     const v = String($(this).val() || 'gap')
     if (REC_MUSIC_MODES.indexOf(v) < 0) return
-    window._appSettings.recMusicMode = v
+    _writeMusicProfile({ mode: v })
     saveAppSettings()
     // Which sliders apply depends on the mode, so the panel redraws.
     _renderMusicPanel()
@@ -18713,8 +18752,8 @@ function _openMusicPanel() {
   $d.on('input.mp', '.mp-slider', function () {
     const which = String($(this).closest('.mp-vol').attr('data-vol') || '')
     const n = Math.max(0, Math.min(100, parseInt($(this).val(), 10) || 0))
-    if (which === 'withAudio') window._appSettings.recMusicVolume = n
-    else if (which === 'inGaps') window._appSettings.recMusicGapVolume = n
+    if (which === 'withAudio') _writeMusicProfile({ volume: n })
+    else if (which === 'inGaps') _writeMusicProfile({ gapVolume: n })
     else return
     $(this).siblings('.mp-vol-val').text(`${n}%`)
     saveAppSettings()
@@ -18751,6 +18790,7 @@ function _syncBackgroundMusic() {
     _musicErrorId = ''
   }
   const want = _musicShouldPlay({
+    kind: _musicKind(),
     mode: _musicMode(),
     phase: window._recPlayPhase || 'idle',
     // Whether anything is going to sound under THIS card — a card or a
@@ -18870,6 +18910,7 @@ function _recPlayAudioEl() {
 function _setManualAudioSrc(a, dataUrl) {
   _recPaExpectPause(a)
   a.src = dataUrl
+  a.playbackRate = window._recReplaySpeed ? 0.75 : 1
 }
 
 // Show/hide the audio player, and with it the YouTube slot it replaces.
@@ -19415,6 +19456,8 @@ async function playRecording(opts) {
       !window._practiceActive && !window._recPlayPaused && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)
     window._recPlayQueueLen = queue.length
     const it = queue[i]
+    const restoredRate = window._recReplaySpeed && (window._recReplaySpeed.item !== it || window._recReplaySpeed.index !== i)
+      ? _restoreRecordingReplaySpeed() : null
     // Manual cards carry the card's front text in `source`, not a media source,
     // so exclude them here — they're handled by the _isManualItem branch below.
     // Hand the YouTube slot back unless THIS item is going to sound through
@@ -19664,18 +19707,20 @@ async function playRecording(opts) {
     // item reuses the same video, playMediaSlice short-circuits to just a
     // seek — leaving the player paused and the clip never starts. Kick it
     // back into play explicitly here so consecutive same-video items work.
-    try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
-    // If the user navigated backwards, play this item at 0.75x so they can
-    // catch what they missed. Restored to 1x as soon as the wait resolves.
+    // Backward navigation slows one listen. Replay retains 0.75x for this
+    // item, including subsequent replays, until the selected item changes.
     const slowedThisRound = !!window._recPlaySlowdown
-    if (slowedThisRound) {
+    if (slowedThisRound || window._recReplaySpeed) {
       try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(0.75) } catch (_) {}
+    } else if (restoredRate != null) {
+      try { window.ytPlayer?.setPlaybackRate(restoredRate) } catch (_) {}
     }
+    try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
     await _waitYTUntilEnd(_playStart, _playEnd, () => {
       _updatePlayingProgress(_playStart, _playEnd, it.id)
       _refreshPlayingSubtitles(subHolder.ctx)
     }, it.id)
-    if (slowedThisRound) {
+    if (slowedThisRound && !window._recReplaySpeed) {
       try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
       window._recPlaySlowdown = false
     }
@@ -19742,6 +19787,7 @@ async function playRecording(opts) {
       }
     }
   } catch (_) {}
+  _restoreRecordingReplaySpeed()
   window._recPlayQueue = null
   window._playingRecording = false
   // A deck that played to its end is finished, not interrupted — so it is not
@@ -19840,6 +19886,12 @@ function replayCurrentRecordingItem() {
   if (!window._playingRecording || !window._recPlayCurrentItem) return false
   const index = window._recPlayIndex
   if (!Number.isInteger(index) || !window._recPlayQueue?.[index]) return false
+  if (!window._recReplaySpeed) {
+    let rate = 1
+    try { rate = window.ytPlayer.getPlaybackRate() || 1 } catch (_) {}
+    window._recReplaySpeed = { item: window._recPlayQueue[index], index, rate }
+  }
+  try { window.ytPlayer?.setPlaybackRate(0.75) } catch (_) {}
   window._recNavRequest = null
   window._recNavGotoIndex = index
   window._recPlaySlowdown = false
@@ -19848,6 +19900,15 @@ function replayCurrentRecordingItem() {
   // Resume the session without resuming the old clip at its old position.
   if (window._recPlayPaused) _applyRecPlayPause(false, false)
   return true
+}
+
+function _restoreRecordingReplaySpeed() {
+  const replay = window._recReplaySpeed
+  if (!replay) return
+  window._recReplaySpeed = null
+  try { window.ytPlayer?.setPlaybackRate(replay.rate) } catch (_) {}
+  if (window._recPlayManualAudio) window._recPlayManualAudio.playbackRate = 1
+  return replay.rate
 }
 
 function _interruptRecordingPlayback() {
@@ -20127,6 +20188,7 @@ function switchPlayerToPractice() {
   if (!Array.isArray(queue) || !queue.length) return
   const pos = Number.isInteger(window._recNavGotoIndex) ? window._recNavGotoIndex : window._recPlayIndex
   const single = !!window._recPlayPracticeSingle
+  _restoreRecordingReplaySpeed()
   minimizePlayingRecording()
   _interruptRecordingPlayback()
   if (!single) _saveQueueOrder(queue, 'practice')
@@ -20185,6 +20247,7 @@ function _sleepRespectingPause(ms) {
 }
 
 function stopPlayingRecording() {
+  _restoreRecordingReplaySpeed()
   window._playingRecording = false
   // Stopping IS putting the view away, so there is nothing to restore.
   _clearOpenView()
@@ -20333,7 +20396,7 @@ function openPracticeMode(opts) {
         <button type="button" class="practice-search" aria-label="Search this word" title="Search this word (minimizes)">🔎</button>
         <button type="button" class="practice-minimize" aria-label="Minimize" title="Minimize">⌄</button>
         <button type="button" class="practice-close" aria-label="Close practice" title="Close">✕</button>
-        <button type="button" class="practice-player-btn" aria-label="Switch to Player" title="Play this item">Player</button>
+        <button type="button" class="practice-player-btn" aria-label="Switch to Player" title="Play this item">${_studyControlIcon('player', 'Player')}</button>
       </div>
       <div class="practice-info-panel" style="display:none;">
         <div class="practice-info-head"></div>
@@ -22080,7 +22143,7 @@ $(document).on('keydown', function (e) {
   const target = e.target
   const action = keyboardShortcut(e.originalEvent || e, {
     practice: !!window._practiceActive && !window._practiceMinimized,
-    typing: !!(target && (target.isContentEditable || $(target).closest('input,textarea,select,audio,video,[role="textbox"],[role="combobox"],[role="slider"],.ck').length)),
+    typing: !!(target && (target.isContentEditable || $(target).closest('input,textarea,select,audio,video,[role="textbox"],[role="combobox"],[role="slider"],[role="separator"],.ck').length)),
     searchFocused: target === $('#searchText')[0],
     dialogOpen: $('.ui-dialog:visible').length > 0,
     buttonFocused: !!(target && $(target).closest('button,a,[role="button"]').length),

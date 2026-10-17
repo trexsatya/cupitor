@@ -21,10 +21,36 @@ import {
   pruneMissingLocalTracks,
   resolveMusicTrack,
   MUSIC_NONE,
+  musicSettingsFor,
 } from "./music-bed";
 
 const YT = "https://www.youtube.com/watch?v=aBcDeFgHiJk";
 const SHORT = "https://youtu.be/aBcDeFgHiJk";
+
+test('manual and video music retain independent timing, track, volume and enable settings', () => {
+  const settings = { recMusicTracks: [{ id: 'a' }, { id: 'b' }], recMusicMode: 'nonstop',
+    recMusicManual: { selected: 'a', mode: 'gap', volume: 10, gapVolume: 45 },
+    recMusicVideo: { selected: 'b', mode: 'item', volume: 5, enabled: false } };
+  const manual = musicSettingsFor(settings, 'manual'), video = musicSettingsFor(settings, 'video');
+  expect(musicSelectedId(manual)).toBe('a');
+  expect(musicSelectedId(video)).toBe('b');
+  expect(musicVolumeFor(manual, 'clip')).toBe(10);
+  expect(musicVolumeFor(video, 'clip')).toBe(5);
+  expect(manual.recMusicMode).toBe('gap');
+  expect(video.recMusicMode).toBe('item');
+  expect(video.recMusicPaused).toBe(true);
+  expect(manual.recMusicPaused).toBe(false);
+  expect(musicSettingsFor({ ...settings, recMusicPaused: true }, 'manual').recMusicPaused).toBe(true);
+});
+
+test('old music settings preserve video silence during clips until a video profile is chosen', () => {
+  for (const mode of ['item', 'gap', 'nonstop']) {
+    const profile = musicSettingsFor({ recMusicMode: mode }, 'video');
+    expect(musicShouldPlay({ hasTrack: true, playing: true, kind: 'video', phase: 'video',
+      mode: profile.recMusicMode, hushed: profile.recMusicPaused })).toBe(false);
+  }
+  expect(musicShouldPlay({ hasTrack: true, playing: true, kind: 'video', phase: 'video', mode: 'item' })).toBe(true);
+});
 
 describe("musicVideoIdFromUrl", () => {
   it("accepts the YouTube URL forms and rejects everything else", () => {

@@ -2325,6 +2325,20 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     font-size: 13px;
 }
 #practiceMode .practice-player-btn { margin-left: auto; }
+#recPlayingBanner .rec-pb-practice-btn { display: none; }
+#recPlayingBanner.rec-pb-expanded .rec-pb-practice-btn { display: inline-flex; align-items: center; justify-content: center; }
+.study-mobile-icon { display: none; }
+@media (max-width: 999px) {
+    .keyboard-shortcuts-btn { display: none !important; }
+    .study-desktop-label { display: none; }
+    .study-mobile-icon { display: inline-flex; align-items: center; justify-content: center; }
+    #recPlayingBanner .rec-pb-replay-btn,
+    #recPlayingBanner .rec-pb-practice-btn,
+    #practiceMode .practice-player-btn { width: 34px; height: 34px; padding: 4px; }
+}
+@media (pointer: coarse) {
+    .keyboard-shortcuts-btn { display: none !important; }
+}
 @media (max-width: 480px) {
     #practiceMode .practice-topbar { gap: 4px; }
     #practiceMode .practice-player-btn { padding: 4px 7px; font-size: 12px; }
@@ -3933,10 +3947,9 @@ body.music-on #recPlayingBanner .rec-pb-music-btn {
     gap: 8px;
 }
 
-/* Desktop layout — banner is wide enough to always show details, so the
-   ℹ button is redundant. Count is also redundant (it's in the head). */
+/* Desktop keeps the item details readable. Info reveals the Practice action;
+   the count is redundant because it also appears in the head. */
 @media (min-width: 1000px) {
-    #recPlayingBanner .rec-pb-info-btn { display: none; }
     #recPlayingBanner .rec-pb-count    { display: none; }
 }
 
@@ -3987,6 +4000,49 @@ body.music-on #recPlayingBanner .rec-pb-music-btn {
     display: none;
 }
 body.rec-playing #recPlayingSubs { display: block; }
+
+/* The media region includes the transport in Player. Both text panes grow
+   into the remaining viewport instead of retaining a fixed maximum height. */
+#studyMediaDivider {
+    position: fixed;
+    top: calc(var(--study-split-y) - 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(100vw, 900px);
+    height: 18px;
+    z-index: 100006;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: row-resize;
+    touch-action: none;
+    background: #171717;
+    border-top: 1px solid #555;
+    border-bottom: 1px solid #333;
+}
+#studyMediaDivider[hidden] { display: none; }
+#studyMediaDivider > span { width: 52px; border-top: 3px solid #aaa; border-radius: 3px; }
+#studyMediaDivider:focus-visible { outline: 2px solid #80cbc4; outline-offset: -2px; }
+@media (max-width: 999px) {
+    #recPlayingBanner .rec-pb-top { gap: 6px; }
+    #recPlayingBanner .rec-pb-progress { flex-basis: 64px; min-width: 36px; }
+}
+body.study-resizing { user-select: none; cursor: row-resize; }
+body.study-split-active #mediaContainer { height: var(--study-media-h); overflow: hidden; }
+body.study-split-active #mediaContainer iframe,
+body.study-split-active #mediaContainer #youtubePlayer,
+body.study-split-active #mediaContainer #youtubePlayer iframe {
+    height: var(--study-media-h) !important;
+    aspect-ratio: auto;
+}
+body.study-split-active.rec-playing #recPlayingAudio,
+body.study-split-active.practice-mode #practiceAudio {
+    height: var(--study-media-h);
+    overflow-y: auto;
+}
+body.study-split-active.rec-playing #recPlayingTransport { top: calc(var(--study-split-y) - 56px); }
+body.study-split-active.rec-playing #recPlayingSubs { top: calc(var(--study-split-y) + 10px); max-height: none; padding-bottom: 20px; }
+body.study-split-active.practice-mode #practiceMode .practice-card { top: calc(var(--study-split-y) + 10px); }
 #recPlayingSubs .rec-ps-row {
     padding: 4px 6px;
     opacity: 0.55;
