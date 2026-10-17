@@ -15,17 +15,31 @@ async function checkStudyChrome(browser) {
     await page.route('**/*', route => new URL(route.request().url()).hostname === 'video.example.test'
       ? route.fulfill({ contentType: 'text/html', body: '<body data-clicks="0" style="margin:0"><button style="position:absolute;inset:0;width:100%;height:100%" onclick="document.body.dataset.clicks=Number(document.body.dataset.clicks)+1">Embedded player</button></body>' })
       : serveFixtures(route))
-    await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
+    await page.addInitScript(mobile => {
+      window.dontConfirmOnRefresh = true
+      if (mobile) {
+        window.__youtubeControlsCalls = []
+        window.CupitorYouTubeControls = {
+          visible: true,
+          setVisible(visible) { this.visible = visible; window.__youtubeControlsCalls.push(visible) }
+        }
+      }
+    }, mobile)
+    const checkHost = async visible => {
+      if (mobile) assert.equal(await page.evaluate(() => window.CupitorYouTubeControls.visible), visible, 'YouTube host controls follow the study UI')
+    }
     const tap = (x, y) => mobile ? page.touchscreen.tap(x, y) : page.mouse.click(x, y)
     const hide = async () => {
       await page.clock.fastForward(3500)
       await page.waitForFunction(() => document.body.classList.contains('study-controls-hidden'))
       await page.locator('#studyMediaDivider').waitFor({ state: 'hidden' })
+      await checkHost(false)
     }
     const wakeCard = async () => {
       const box = await page.locator('#practiceMode .practice-card, body.rec-playing #recPlayingSubs').boundingBox()
       await tap(box.x + box.width / 2, box.y + Math.min(90, box.height / 2))
       await page.waitForFunction(() => !document.body.classList.contains('study-controls-hidden'))
+      await checkHost(true)
     }
     const screenshot = async name => {
       if (!mobile || !process.env.SCREENSHOT_DIR) return
@@ -77,6 +91,7 @@ async function checkStudyChrome(browser) {
       await page.locator('#srtLoadingBanner').waitFor({ state: 'hidden' })
       await page.clock.install()
       const before = await page.locator('#practiceMode .practice-card').boundingBox()
+      await checkHost(true)
       await screenshot('cupitor-practice-controls-shown')
       await hide()
       assert.equal(await page.locator('#practiceMode .practice-topbar').isVisible(), false)
@@ -93,6 +108,7 @@ async function checkStudyChrome(browser) {
       const video = await page.locator('#mediaContainer').boundingBox()
       await tap(video.x + video.width / 2, video.y + video.height / 2)
       await page.locator('#practiceMode .practice-nav').waitFor({ state: 'visible' })
+      await checkHost(true)
       assert.equal(await page.frameLocator('#testStudyFrame').locator('body').getAttribute('data-clicks'), '0', 'wake tap cannot click through into the iframe')
       assert.equal(await page.evaluate(() => window.__yt.plays), 1)
       await tap(video.x + video.width / 2, video.y + video.height / 2)
@@ -127,6 +143,7 @@ async function checkStudyChrome(browser) {
       await page.locator('#practiceMode .prec-toggle.on').waitFor()
       await page.clock.fastForward(5000)
       assert.equal(await page.locator('#practiceMode .prec-toggle').isVisible(), true, 'recording Stop remains available')
+      await checkHost(true)
       await page.locator('#practiceMode .prec-toggle').click()
       await page.waitForFunction(() => !document.querySelector('#practiceMode .prec-toggle.on'))
       await hide()
@@ -136,8 +153,10 @@ async function checkStudyChrome(browser) {
       await page.locator('#practiceMode .practice-minimize').click()
       assert.equal(await page.locator('#practiceMode .practice-restore').isVisible(), true)
       assert.equal(await page.locator('#studyControlsWakeSurface').isVisible(), false)
+      await checkHost(true)
       await page.locator('#practiceMode .practice-restore-btn').click()
       await page.locator('#practiceMode .practice-close').click()
+      await checkHost(true)
 
       await page.evaluate(() => { window.__playerTask = window.playRecording({ resumeQueue: { queue: window.__chromeCards, pos: 0 } }) })
       await page.waitForFunction(() => window.__yt.state === 1 && !!document.querySelector('#recPlayingSubs'))
@@ -184,7 +203,9 @@ async function checkStudyChrome(browser) {
       await hide()
       await page.keyboard.press('Tab')
       await page.locator('#recPlayingTransport').waitFor({ state: 'visible' })
+      await checkHost(true)
       await page.locator('#recPlayingCloseBtn').click()
+      await checkHost(true)
       await page.evaluate(() => window.__playerTask)
       await page.evaluate(() => { window.__playerTask = window.playRecording({ queue: [
         { id: 'manual', manual: true, source: 'Hej', target: 'Hello', sourceAudioUrl: 'file:///source.wav' }] }) })
@@ -195,7 +216,13 @@ async function checkStudyChrome(browser) {
       assert.equal(await page.locator('#recPlayingAudio audio').isVisible(), false)
       await tap(audio.x + audio.width / 2, audio.y + 60)
       await page.locator('#recPlayingAudio audio').waitFor({ state: 'visible' })
+      await checkHost(true)
       assert.equal(await page.evaluate(() => window._recPlayManualAudio.paused), true, 'first tap cannot activate native audio controls')
+      if (mobile) {
+        const calls = await page.evaluate(() => window.__youtubeControlsCalls)
+        assert(calls.includes(false) && calls.includes(true), 'calls both public host API operations')
+        await page.evaluate(() => { window.CupitorYouTubeControls.setVisible = () => { throw new Error('Host unavailable') } })
+      }
       await page.locator('#recPlayingCloseBtn').click()
       await page.evaluate(() => window.__playerTask)
       assert.equal(await page.locator('#studyControlsWakeSurface').isVisible(), false)

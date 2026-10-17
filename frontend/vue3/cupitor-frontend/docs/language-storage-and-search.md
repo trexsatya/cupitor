@@ -187,10 +187,14 @@ scrolling still work while controls are hidden. Keyboard input also reveals
 controls. Open panels, text editing, keyboard focus on controls, dragging the
 divider and active microphone recording keep controls visible.
 
-YouTube's native controls use its own automatic hiding behavior. Its iframe API
-does not expose a runtime control-visibility option, so those controls cannot
-follow the app's fade timer without recreating the player. Playback is kept
-uninterrupted.
+In Android dialog1, the app calls
+`window.CupitorYouTubeControls?.setVisible(visible)` whenever the study controls
+hide or appear. YouTube's native controls therefore follow the same idle timer,
+tap and keyboard actions. Closing or minimizing a view restores them. The host
+bridge applies visibility inside the embed without recreating or seeking the
+player; keep YouTube's initial `controls` setting at its default of `1`.
+In ordinary browsers or older hosts where the API is absent, YouTube keeps its
+own automatic hiding behavior. A host API error cannot block web controls.
 
 Background music has independent **Manual cards** and **YouTube clips**
 profiles in its dialog. Each has its own enable switch, track, timing and

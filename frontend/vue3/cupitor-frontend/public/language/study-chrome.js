@@ -51,6 +51,9 @@ export function installStudyChrome() {
   const chrome = createStudyChrome({ blocked, render: visible => {
     body.classList.toggle('study-controls-hidden', !!view && !visible);
     coverVideo();
+    // Android's dialog1 bridge also updates cross-origin YouTube frames.
+    // An absent or unavailable host must not interrupt the web controls.
+    try { window.CupitorYouTubeControls?.setVisible(visible); } catch (_) {}
   } });
   const update = () => {
     const next = viewNow();
