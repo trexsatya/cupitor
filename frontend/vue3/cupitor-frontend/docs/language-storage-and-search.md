@@ -178,13 +178,19 @@ Drag the horizontal divider between media and text to resize either view.
 Player and Practice remember separate positions. The divider also supports
 the up/down arrow keys; Home or double-click restores the default size.
 
-Both views fade their controls after three idle seconds. Tap the text or
-player to bring them back; the first tap only reveals controls, including
+Both views fade their controls after three idle seconds. The Player timer and
+progress bar stay visible and keep updating while the other controls are hidden.
+Tap the text or player to bring them back; the first tap only reveals controls, including
 over the YouTube iframe and native audio controls. The next tap operates
 them normally. Text and media keep their positions, and card swipes and text
 scrolling still work while controls are hidden. Keyboard input also reveals
 controls. Open panels, text editing, keyboard focus on controls, dragging the
 divider and active microphone recording keep controls visible.
+
+YouTube's native controls use its own automatic hiding behavior. Its iframe API
+does not expose a runtime control-visibility option, so those controls cannot
+follow the app's fade timer without recreating the player. Playback is kept
+uninterrupted.
 
 Background music has independent **Manual cards** and **YouTube clips**
 profiles in its dialog. Each has its own enable switch, track, timing and

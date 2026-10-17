@@ -3947,12 +3947,6 @@ body.music-on #recPlayingBanner .rec-pb-music-btn {
     gap: 8px;
 }
 
-/* Desktop keeps the item details readable. Info reveals the Practice action;
-   the count is redundant because it also appears in the head. */
-@media (min-width: 1000px) {
-    #recPlayingBanner .rec-pb-count    { display: none; }
-}
-
 /* Mobile / narrow viewports — collapse to the compact row by default,
    show details only when the user toggles the ℹ button. The banner
    takes the top strip; #recPlayingWord stacks right below it so they
@@ -4025,7 +4019,7 @@ body.rec-playing #recPlayingSubs { display: block; }
 #studyMediaDivider:focus-visible { outline: 2px solid #80cbc4; outline-offset: -2px; }
 @media (max-width: 999px) {
     #recPlayingBanner .rec-pb-top { gap: 6px; }
-    #recPlayingBanner .rec-pb-progress { flex-basis: 64px; min-width: 36px; }
+    #recPlayingBanner .rec-pb-progress { flex-basis: 128px; min-width: 128px; }
 }
 body.study-resizing { user-select: none; cursor: row-resize; }
 body.study-split-active #mediaContainer { height: var(--study-media-h); overflow: hidden; }
@@ -4045,14 +4039,16 @@ body.study-split-active.rec-playing #recPlayingSubs { top: calc(var(--study-spli
 body.study-split-active.practice-mode #practiceMode .practice-card { top: calc(var(--study-split-y) + 10px); }
 
 /* Hide only the controls: visibility preserves every media/text measurement. */
-:is(#recPlayingBanner, #recPlayingTransport, #recPlayingMinimizeBtn, #recPlayingCloseBtn,
+:is(#recPlayingBanner .rec-pb-top > :not(.rec-pb-progress), #recPlayingBanner .rec-pb-details,
+    #recPlayingTransport, #recPlayingMinimizeBtn, #recPlayingCloseBtn,
     #recPlayNavToast, #studyMediaDivider, #practiceMode .practice-topbar,
     #practiceMode .practice-nav, #practiceMode .practice-ctx-ctrl,
     #practiceMode .practice-line-edit, #practiceMode .practice-rec-bar,
     #practiceMode .practice-restore, #practiceAudio > *, #recPlayingAudio > *) {
     transition: opacity .18s ease, visibility .18s;
 }
-body.study-controls-hidden :is(#recPlayingBanner, #recPlayingTransport, #recPlayingMinimizeBtn,
+body.study-controls-hidden :is(#recPlayingBanner .rec-pb-top > :not(.rec-pb-progress),
+    #recPlayingBanner .rec-pb-details, #recPlayingTransport, #recPlayingMinimizeBtn,
     #recPlayingCloseBtn, #recPlayNavToast, #studyMediaDivider, #practiceMode .practice-topbar,
     #practiceMode .practice-nav, #practiceMode .practice-ctx-ctrl,
     #practiceMode .practice-line-edit, #practiceMode .practice-rec-bar,
@@ -4061,6 +4057,13 @@ body.study-controls-hidden :is(#recPlayingBanner, #recPlayingTransport, #recPlay
     visibility: hidden !important;
     pointer-events: none !important;
 }
+/* Keep the live countdown/progress readout in place while its buttons fade. */
+body.study-controls-hidden #recPlayingBanner {
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+}
+body.study-controls-hidden #recPlayingBanner .rec-pb-progress { background: rgba(33,33,33,0.92); }
 #studyControlsWakeSurface {
     position: fixed;
     z-index: 100007;
