@@ -144,7 +144,8 @@ async function checkUnavailableVideos(browser) {
       await click('.rec-pb-replay-btn')
       await page.waitForFunction(n => window.__video.loads.length > n, loads)
       assert.equal(await page.evaluate(() => window._recPlayIndex), 99, 'Replay retries this item')
-      await page.waitForFunction(() => window.__video.rate === 0.75)
+      // This error screen never reaches a verified clip position. Playback
+      // speed is applied after confirmation; Next must still work now.
       await click('#recPlayingNextBtn')
       await at(100)
       await stop()

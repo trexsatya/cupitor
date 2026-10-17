@@ -1,6 +1,6 @@
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
-import { createRecordingVideoAttempt, VIDEO_RECOVERY_MS } from './recording-video.js';
+import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video.js';
 import { createAppLifecycleClock } from './app-lifecycle.js';
 import { installStudyDivider } from './study-divider.js';
 import { installStudyChrome } from './study-chrome.js';
@@ -4356,7 +4356,7 @@ const renderSubtitles = () => {
   lastSub = currentSub
 }
 
-async function seekToYoutubeTime(t, { isCurrent = () => true } = {}) {
+async function seekToYoutubeTime(t, { isCurrent = () => true, confirmVideoId, requirePlaying = false, now, isForeground } = {}) {
   if (!isCurrent()) return
   if (!window.ytPlayer || typeof window.ytPlayer.seekTo !== 'function') return
   const target = Number(t) || 0
@@ -4366,6 +4366,15 @@ async function seekToYoutubeTime(t, { isCurrent = () => true } = {}) {
   window.seekRequestProcessing = true
   const request = window._youtubeSeekToken = (window._youtubeSeekToken || 0) + 1
   const finish = () => { if (request === window._youtubeSeekToken) window.seekRequestProcessing = false }
+  if (confirmVideoId) {
+    try {
+      const landed = await confirmRecordingSeek({ player: window.ytPlayer, videoId: confirmVideoId,
+        start: t, requirePlaying, now, isForeground,
+        isCurrent: () => isCurrent() && request === window._youtubeSeekToken })
+      if (landed) window.proxyYoutubeCurrentTime = target
+      return landed
+    } finally { finish() }
+  }
   try { window.ytPlayer.seekTo(target, true) } catch (_) {}
 
   // Bounded poll: every 100ms for up to 3s, looking for the playhead to land
@@ -4374,9 +4383,8 @@ async function seekToYoutubeTime(t, { isCurrent = () => true } = {}) {
   // enough" check pass instantly (apparent success, no actual seek). Also
   // dropped the "delta nudge" loop that walked the seek target backwards by
   // 1s per tick; YouTube's own seek is reliable enough without it. On
-  // timeout we RESOLVE (not reject) so callers like playMediaSlice keep
-  // moving — better to proceed slightly off-target than to throw and abort
-  // the whole playback.
+  // timeout these ordinary seek callers resolve. Player uses the confirmed
+  // branch above and never treats this best-effort timeout as success.
   const TICK_MS = 100
   const MAX_TICKS = 30        // 3s overall budget
   const TOLERANCE = 1.5       // seconds — close enough that playback will be visibly at the right spot
@@ -8866,7 +8874,7 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 // 3. This function creates an <iframe> (and YouTube player)
 //    after the API code downloads.
 
-async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds, respectInterval = true, now = () => Date.now() } = {}) {
+async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds, respectInterval = true, now = () => Date.now(), beforeLoad } = {}) {
   const readyDeadline = now() + VIDEO_RECOVERY_MS
   const ready = () => { try { return !!(window.ytPlayerReady && window.ytPlayer?.getIframe?.()) } catch (_) { return false } }
   await waitUntil(() => !isCurrent() || ready() || now() >= readyDeadline)
@@ -8902,6 +8910,7 @@ async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds,
       // navigation tore down a player document and built another, and each
       // player holds a hardware video decoder — a small, fixed, per-device
       // allowance that has nothing to do with how much memory is free.
+      if (beforeLoad) beforeLoad(window.ytPlayer)
       window.ytPlayer.loadVideoById(startSeconds == null ? videoId : { videoId, startSeconds })
       // There is no `load` event to wait on any more, so poll the player for
       // the new id. Bounded deliberately: waitUntil never gives up, and a
@@ -10763,21 +10772,39 @@ function test_data() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function playMediaSlice(url, start, end, source, { isCurrent = () => true, forceLoad = false, now } = {}) {
+async function playMediaSlice(url, start, end, source, { isCurrent = () => true, forceLoad = false, now,
+  confirmSeek = false, isForeground, preparePlayer } = {}) {
   if (!isCurrent()) return
   if (source === 'YouTube') {
     showMediaContainer()
     showMediaRelatedContainer();
     let needsLoad = true
     try { needsLoad = forceLoad || !window.ytPlayer || !window.ytPlayer.getVideoUrl().includes(url) } catch (_) {}
-    if (needsLoad) {
-      window.mediaSelected = {link: url, source: 'link'}
-      window.playingYoutubeVideo = true
-      window.syncSubtitle = false
-      await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: start, respectInterval: false, forceLoad, now })
+    while (isCurrent()) {
+      if (needsLoad) {
+        window.mediaSelected = {link: url, source: 'link'}
+        window.playingYoutubeVideo = true
+        window.syncSubtitle = false
+        await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: start,
+          respectInterval: false, forceLoad, now, beforeLoad: preparePlayer })
+      }
+      if (!isCurrent()) return
+      try {
+        if (preparePlayer) preparePlayer(window.ytPlayer)
+        const landed = await seekToYoutubeTime(start, { isCurrent, confirmVideoId: confirmSeek ? url : undefined,
+          requirePlaying: needsLoad, now, isForeground })
+        if (confirmSeek && !landed) throw Object.assign(new Error('Seek cancelled'), { kind: 'cancelled' })
+        return
+      } catch (e) {
+        if (!confirmSeek || e.kind !== 'seek-failed') throw e
+        if (!isCurrent()) return
+        // The iframe can ignore seekTo while a load is settling. Reload
+        // with startSeconds and verify again; never play video zero as a
+        // fallback. The owning attempt still enforces its total 20s budget.
+        needsLoad = true
+        forceLoad = true
+      }
     }
-    if (!isCurrent()) return
-    await seekToYoutubeTime(start, { isCurrent })
     return
   }
   if (location.href.indexOf('localhost') < 0) {
@@ -19577,6 +19604,14 @@ async function playRecording(opts) {
         }
       }
 
+      // Validate before loading or restoring sound, so an unrepaired range
+      // cannot start media even briefly before the end-watcher rejects it.
+      if (!Number.isFinite(Number(_playStart)) || Number(_playStart) < 0 ||
+        !Number.isFinite(Number(_playEnd)) || Number(_playEnd) <= Number(_playStart) ||
+        Number(_playEnd) - Number(_playStart) > MAX_REASONABLE_CLIP_S) {
+        throw Object.assign(new Error('Invalid clip range'), { kind: 'invalid-clip' })
+      }
+
       // Set the end boundary for the existing markIntervalPlayDone() hook
       // (defensive — _waitYTUntilEnd also pauses). videoId lets the hook
       // ignore stale ct reads that belong to the PREVIOUS clip's video.
@@ -19605,7 +19640,9 @@ async function playRecording(opts) {
       const forceLoad = !!window._recPlayForceVideoReload
       window._recPlayForceVideoReload = false
       await attempt.wait(playMediaSlice(it.id, _playStart, _playEnd, _src, {
-        isCurrent: () => attempt.active() && ownsVideo(), forceLoad, now: _playerLifecycle.now }))
+        isCurrent: () => attempt.active() && ownsVideo(), forceLoad, now: _playerLifecycle.now,
+        confirmSeek: true, isForeground: _playerLifecycle.isForeground,
+        preparePlayer: player => attempt.preparePlayer(player) }))
       if (!sessionPlaying()) break
       if (Number.isInteger(window._recNavGotoIndex)) continue
       if (!ownsVideo()) continue
@@ -19620,6 +19657,7 @@ async function playRecording(opts) {
       } else if (restoredRate != null) {
         try { window.ytPlayer?.setPlaybackRate(restoredRate) } catch (_) {}
       }
+      attempt.releaseMute()
       try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
       await attempt.wait(_waitYTUntilEnd(_playStart, _playEnd, () => {
         _updatePlayingProgress(_playStart, _playEnd, it.id)

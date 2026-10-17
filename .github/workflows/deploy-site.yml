@@ -76,6 +76,7 @@ jobs:
           node tests/browser/study-controls.cjs
           node tests/browser/study-chrome.cjs
           node tests/browser/unavailable-videos.cjs
+          node tests/browser/player-seek.cjs
         env:
           CUPITOR_TEST_ASSETS: dist
 

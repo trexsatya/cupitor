@@ -246,6 +246,15 @@ Previous, Next, Replay, queue jumps and Stop cancel the pending attempt immediat
 Replay retries the current item with a fresh load when its previous load never
 started. Old loads, subtitle responses and errors cannot control a newer item.
 
+Player verifies that the requested video has reached the clip timestamp before
+restoring sound. Two settled samples are required; stale timestamps, buffering
+and video zero do not count as successful positioning. Ignored seeks are retried,
+then the video is reloaded with `startSeconds` and checked again within the same
+20-second recovery budget. A clip that still cannot be positioned is skipped
+instead of playing from the beginning. Preparation preserves intentional mute,
+and cancellation pauses the pending load before restoring the previous sound
+setting. Practice and ordinary search playback keep their existing seek behavior.
+
 Confirmed unavailable-video errors skip immediately. Other stuck videos skip
 after 20 seconds without progress. A short message explains the skip, and the
 normal inter-item gap and repeat-one setting are bypassed. Consecutive clips
@@ -258,6 +267,10 @@ list; transient and player-configuration errors do not label a video removed.
 at item 100 of a 145-item fixture playlist, failed and stale loads, shared
 timeouts, retries, pauses, late errors, recovery, looping and Stop/restart.
 The suite also runs against the production build in CI.
+`node tests/browser/player-seek.cjs` additionally checks ignored seeks, reload
+recovery, buffering, silent preparation, cancellation, same-video clips and
+intentional mute on desktop and mobile, using clip timestamps two minutes into
+the video. Both source and built assets are covered in CI.
 
 ## Cached data
 
