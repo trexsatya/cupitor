@@ -50,7 +50,7 @@ jobs:
       - name: Test language, sync and deployment
         run: |
           npx jest public/language public/github-utils.test.js --runInBand --silent
-          node --test scripts/deploy-site.test.cjs
+          node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs
 
       - name: Install Chromium for dialog tests
         run: npx playwright install --with-deps chromium
@@ -67,6 +67,14 @@ jobs:
         run: npm run build
         env:
           NODE_OPTIONS: --openssl-legacy-provider
+
+      - name: Test built Player and Practice controls
+        run: |
+          node tests/browser/player-replay.cjs
+          node tests/browser/view-switching.cjs
+          node tests/browser/practice-controls.cjs
+        env:
+          CUPITOR_TEST_ASSETS: dist
 
       # A separate repo needs its own write credential. The normal
       # GITHUB_TOKEN is scoped to cupitor and cannot publish to this repo.

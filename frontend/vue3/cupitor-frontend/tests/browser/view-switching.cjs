@@ -60,8 +60,18 @@ async function checkViewSwitching(browser) {
         window.__playerTask = window.playRecording({ resumeQueue: { queue: window.__switchQueue, pos: 2 }, startPaused: true })
       }, silentWav())
       await playerAt(2)
+      await page.getByRole('button', { name: 'Replay current item', exact: true }).waitFor({ state: 'visible' })
+      await page.getByRole('button', { name: 'Switch to Practice', exact: true }).waitFor({ state: 'visible' })
+      if (process.env.SCREENSHOT_DIR) {
+        fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+        await page.evaluate(() => { document.getElementById('underlying-page-widget').style.visibility = 'hidden' })
+        await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `cupitor-player-switch-${mobile ? 'mobile' : 'desktop'}.png`) })
+        await page.evaluate(() => { document.getElementById('underlying-page-widget').style.visibility = '' })
+      }
       await switchTo('Practice')
       await practiceAt(2)
+      assert.equal(await page.getByRole('button', { name: 'Replay current item', exact: true }).isVisible(), false,
+        'Player Replay is hidden in Practice; its source-reveal arrow is a different control')
       assert.deepEqual(await order(), expected, 'Player → Practice does not reshuffle or rotate the queue')
       assert.equal(await page.evaluate(() => window._recPlayPaused), true)
       const backdrop = await page.evaluate(() => {

@@ -58,3 +58,59 @@ test('closing practice ends the ready wait without loading a hidden video', asyn
   await expect(pending).resolves.toBe(false)
   expect(player.cueVideoById).not.toHaveBeenCalled()
 })
+
+function delayedSound(initiallyMuted = false) {
+  const state = { muted: initiallyMuted, id: 'old', status: 1 }
+  const waiters = []
+  const player = {
+    isMuted: () => state.muted,
+    mute: jest.fn(() => { state.muted = true }), unMute: jest.fn(() => { state.muted = false }),
+    pauseVideo: jest.fn(), cueVideoById: jest.fn(),
+    getPlayerState: () => state.status, getVideoData: () => ({ video_id: state.id })
+  }
+  const cues = createPracticeVideoCues({ getPlayer: () => player, isReady: () => true, isActive: () => true,
+    waitUntil: predicate => new Promise(resolve => waiters.push(() => { if (predicate()) resolve() })) })
+  return { cues, player, state, settle: (id) => { state.id = id; state.status = 5; waiters.forEach(check => check()) } }
+}
+
+test('transition mutes before the asynchronous pause and restores sound only after the new cue is acknowledged', async () => {
+  const { cues, player, state, settle } = delayedSound()
+  const token = cues.invalidate()
+  const pending = cues.cue('new', 10, token)
+  expect(state.muted).toBe(true)
+  expect(player.mute.mock.invocationCallOrder[0]).toBeLessThan(player.pauseVideo.mock.invocationCallOrder[0])
+  expect(player.unMute).not.toHaveBeenCalled()
+  settle('new')
+  await pending
+  expect(state.muted).toBe(false)
+})
+
+test('a superseded cue cannot restore sound; deliberate Play can cancel the transition mute', async () => {
+  const { cues, state, settle } = delayedSound()
+  const pending = cues.cue('old', 10, cues.invalidate())
+  const current = cues.invalidate()
+  settle('old')
+  await expect(pending).resolves.toBe(false)
+  expect(state.muted).toBe(true)
+  expect(cues.beginPlayback(current - 1)).toBe(false)
+  expect(state.muted).toBe(true)
+  expect(cues.beginPlayback(current)).toBe(true)
+  expect(state.muted).toBe(false)
+})
+
+test('transition cleanup preserves a user-muted player', async () => {
+  const { cues, state, settle } = delayedSound(true)
+  const pending = cues.cue('new', 10, cues.invalidate())
+  settle('new')
+  await pending
+  cues.releaseMute()
+  expect(state.muted).toBe(true)
+})
+
+test('a normal pause or leaving Practice does not acquire a new transition mute', () => {
+  const { cues, player, state } = delayedSound()
+  cues.invalidate({ mute: false })
+  expect(state.muted).toBe(false)
+  expect(player.mute).not.toHaveBeenCalled()
+  expect(player.pauseVideo).toHaveBeenCalled()
+})
