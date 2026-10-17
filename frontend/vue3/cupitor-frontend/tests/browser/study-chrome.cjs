@@ -158,8 +158,12 @@ async function checkStudyChrome(browser) {
       await page.locator('#practiceMode .practice-close').click()
       await checkHost(true)
 
-      await page.evaluate(() => { window.__playerTask = window.playRecording({ resumeQueue: { queue: window.__chromeCards, pos: 0 } }) })
-      await page.waitForFunction(() => window.__yt.state === 1 && !!document.querySelector('#recPlayingSubs'))
+      await page.evaluate(() => {
+        window.__seekBeforePlayer = window._youtubeSeekToken || 0
+        window.__playerTask = window.playRecording({ resumeQueue: { queue: window.__chromeCards, pos: 0 } })
+      })
+      await page.waitForFunction(() => window.__yt.state === 1 && window._youtubeSeekToken > window.__seekBeforePlayer &&
+        !window.seekRequestProcessing && !!document.querySelector('#recPlayingSubs'))
       await page.locator('#recPlayingPauseBtn').click()
       const textBefore = await page.locator('#recPlayingSubs').boundingBox()
       const progressBefore = await page.locator('#recPlayingBanner .rec-pb-progress').boundingBox()
