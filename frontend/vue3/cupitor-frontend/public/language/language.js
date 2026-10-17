@@ -1,5 +1,6 @@
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
+import { createRecordingVideoAttempt, VIDEO_RECOVERY_MS } from './recording-video.js';
 import { installStudyDivider } from './study-divider.js';
 import { installStudyChrome } from './study-chrome.js';
 import { keyboardShortcut, KEYBOARD_SHORTCUTS } from './keyboard-shortcuts.js';
@@ -4161,7 +4162,7 @@ function populateSearchWords(sub, $el) {
 
 function changeMediaIfNeededTo(media, options) {
   const alreadyBeingPlayed = window.playingYoutubeVideo && _.isEqual(window.mediaBeingPlayed, media);
-  if (!alreadyBeingPlayed && media.source === 'link') {
+  if ((!alreadyBeingPlayed || options?.forceLoad) && media.source === 'link') {
     return loadYoutubeVideo(media.link, options)
   }
   return new Promise(resolve => resolve())
@@ -8865,8 +8866,11 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 //    after the API code downloads.
 
 async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds, respectInterval = true } = {}) {
-  await waitUntil(() => !isCurrent() || (window.ytPlayerReady && window.ytPlayer.getIframe()))
+  const readyDeadline = Date.now() + VIDEO_RECOVERY_MS
+  const ready = () => { try { return !!(window.ytPlayerReady && window.ytPlayer?.getIframe?.()) } catch (_) { return false } }
+  await waitUntil(() => !isCurrent() || ready() || Date.now() >= readyDeadline)
   if (!isCurrent()) return
+  if (!ready()) throw new Error('YouTube player did not become ready within 20 seconds')
   showMediaContainer()
   // Play / practice modes drive everything through their own floating overlay,
   // so the side player panel (speed controls, starred lines, etc.) just gets in
@@ -8888,7 +8892,7 @@ async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds,
       if (!isCurrent()) { resolve(); return }
       try { setSpeed() } catch (_) {}
       if (respectInterval && window.youtubePlayInterval) {
-        try { seekToYoutubeTime(window.youtubePlayInterval.start) } catch (_) {}
+        try { seekToYoutubeTime(window.youtubePlayInterval.start, { isCurrent }) } catch (_) {}
       }
       resolve()
     }
@@ -10758,16 +10762,18 @@ function test_data() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function playMediaSlice(url, start, end, source, { isCurrent = () => true } = {}) {
+async function playMediaSlice(url, start, end, source, { isCurrent = () => true, forceLoad = false } = {}) {
   if (!isCurrent()) return
   if (source === 'YouTube') {
     showMediaContainer()
     showMediaRelatedContainer();
-    if (window.ytPlayer.getVideoUrl().indexOf(url) < 0) {
+    let needsLoad = true
+    try { needsLoad = forceLoad || !window.ytPlayer || !window.ytPlayer.getVideoUrl().includes(url) } catch (_) {}
+    if (needsLoad) {
       window.mediaSelected = {link: url, source: 'link'}
       window.playingYoutubeVideo = true
       window.syncSubtitle = false
-      await changeMediaIfNeededTo(window.mediaSelected, { isCurrent })
+      await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: start, respectInterval: false, forceLoad })
     }
     if (!isCurrent()) return
     await seekToYoutubeTime(start, { isCurrent })
@@ -16784,198 +16790,67 @@ function openRecordingReviewDialog() {
   }
 }
 
-// Wait until YouTube's currentTime crosses `timeEnd`, then pause it. Bails
-// out early if:
-//   • the user stopped playback,
-//   • the playhead never started moving within the load-grace window
-//     (video failed to load — typical when the video is private/removed
-//     or the embed errors silently),
-//   • the playhead stopped advancing for `stallMs` after it had been
-//     advancing (paused mid-clip due to network / 403 / ads bailout),
-//   • or a generous overall cap of (clip-dur + 15s) elapses.
-// Optional `onTick` is invoked every ~500ms so the caller can refresh UI.
-// `expectedVideoId` (optional) gates ct-reads on the player actually having
-// the right video loaded — without it, a slow-loading transition can let the
-// previous clip's playhead satisfy this clip's end-check.
-// Threshold (seconds) above which a clip's recorded [timeStart, timeEnd]
-// is considered malformed — typically the result of a context window
-// straddling a temporal discontinuity in a sparse SRT. Anything longer
-// is either skipped (in _waitYTUntilEnd) or repaired to a ~20s window
-// around the matched line (in playRecording via _repairMalformedClip).
+// Poll a captured clip to its end. The surrounding attempt bounds every
+// preparation/playback wait and cancels stale commands on navigation.
+// Malformed windows are repaired before playback where possible, otherwise
+// skipped rather than waiting on an unreachable timestamp.
 const MAX_REASONABLE_CLIP_S = 600
 
-function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
+function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt) {
   const itemToken = window._recPlayItemToken
-  let _effectiveTimeEnd = parseFloat(timeEnd) || 0
-  const _timeStartNum   = parseFloat(timeStart) || 0
-  // Malformed-clip safety net. playRecording tries to repair these into a
-  // 20s window first (see _repairMalformedClip); we only reach this skip
-  // when the repair couldn't find a matched-line anchor in the SRT.
-  if ((_effectiveTimeEnd - _timeStartNum) > MAX_REASONABLE_CLIP_S) {
-    console.warn(
-      `[_waitYTUntilEnd] skipping malformed clip: dur=${(_effectiveTimeEnd - _timeStartNum).toFixed(0)}s > ${MAX_REASONABLE_CLIP_S}s ` +
-      `(start=${_timeStartNum} end=${_effectiveTimeEnd}). Likely a bad capture — manually fix the recorded times or re-capture.`
-    )
-    try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+  const start = Number(timeStart)
+  let end = Number(timeEnd)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > MAX_REASONABLE_CLIP_S) {
+    attempt.fail('invalid-clip')
     return Promise.resolve()
   }
-  const dur          = Math.max(2, _effectiveTimeEnd - _timeStartNum)
-  const maxWaitMs    = (dur + 15) * 1000     // clip length + buffer
-  const loadGraceMs  = 12000                  // time we give the player to actually start
-  const stallMs      = 6000                   // post-start, how long a frozen playhead means dead
-  // Pause fast & insistently — YT pauseVideo is best-effort and a single
-  // call sometimes loses to a buffering / state transition. Two paired
-  // calls (immediate + a 50ms follow-up) virtually always sticks.
+  const current = () => window._playingRecording && window._recPlayItemToken === itemToken && attempt.active()
   const hardPause = () => {
-    try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+    if (!current()) return
+    try { window.ytPlayer?.pauseVideo() } catch (_) {}
     setTimeout(() => {
-      if (!window._playingRecording || window._recPlayItemToken !== itemToken) return
-      try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+      if (window._playingRecording && window._recPlayItemToken === itemToken && !window._practiceActive) {
+        try { window.ytPlayer?.pauseVideo() } catch (_) {}
+      }
     }, 50)
   }
   return new Promise(resolve => {
-    const begin = Date.now()
-    let lastCt = -1
-    let lastChangeAt = begin
-    let everPlayed = false
-    let observedBelowEnd = false  // seen ct STRICTLY below timeEnd while videoId matches — proves playhead entered the clip
-    let pausedAccum = 0          // ms accumulated while user-paused
-    let bufferingAccum = 0       // ms accumulated while YT player reported BUFFERING (state 3)
-    let lastTickAt = begin
+    let observedBelowEnd = false
     const tick = () => {
-      if (!window._playingRecording) return resolve()
-      // Practice shares the YouTube iframe. Its Play action must not be
-      // mistaken for a headset resuming the parked Player session.
-      if (window._practiceActive) {
-        const now = Date.now()
-        pausedAccum += now - lastTickAt
-        lastTickAt = now
-        return setTimeout(tick, 200)
-      }
-      // Bail immediately on a prev/next/goto request so the navigation
-      // feels responsive — the outer loop in playRecording reads the
-      // flag and routes to the right index.
-      if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) {
-        hardPause()
-        return resolve()
-      }
-      const now = Date.now()
-      // Read the player's actual state once per tick (reused below).
-      let playerState = 1
-      try { if (window.ytPlayer && window.ytPlayer.getPlayerState) playerState = window.ytPlayer.getPlayerState() } catch (_) {}
-      // Headset / hardware media keys pause & resume the YT iframe directly,
-      // bypassing our ⏸ button. Mirror that into the app's pause state so the
-      // clip timer freezes (and the button updates) instead of running on and
-      // auto-advancing to the next clip. controlYt=false — the player is
-      // already in that state, so don't re-command it.
-      const _extAction = recPlayExternalPauseAction({
-        appPaused: !!window._recPlayPaused,
-        playerState,
-        everPlayed,
-        sinceCmdMs: now - (window._recPlayPauseCmdAt || 0),
+      if (!current()) return resolve()
+      let playerState = -1
+      try { playerState = window.ytPlayer?.getPlayerState() } catch (_) {}
+      // Only a moving PLAYING playhead proves this clip started. A failed
+      // load often retains a plausible timestamp while reporting PAUSED;
+      // treating that as a headset pause disabled every recovery deadline.
+      const action = recPlayExternalPauseAction({
+        appPaused: !!window._recPlayPaused, playerState, everPlayed: attempt.played && !attempt.recovering,
+        sinceCmdMs: Date.now() - (window._recPlayPauseCmdAt || 0),
       })
-      if (_extAction === 'pause') _applyRecPlayPause(true, false)
-      else if (_extAction === 'resume') _applyRecPlayPause(false, false)
-      // While paused (by the button OR an external media key), don't accrue
-      // stall/load/max time. Just bookkeep how long we've been paused so we can
-      // subtract it below.
-      if (window._recPlayPaused) {
-        pausedAccum += (now - lastTickAt)
-        lastTickAt = now
-        return setTimeout(tick, 300)
-      }
-      // YT often sits in BUFFERING (3), UNSTARTED (-1) or CUED (5) for many
-      // seconds on a slow connection while it fetches segments. Without this the
-      // stall detector would skip the clip the moment playback pauses to refill
-      // the buffer. PLAYING (1) is the only state in which the playhead is
-      // supposed to be advancing.
-      const NON_PLAYING = (playerState === -1 || playerState === 3 || playerState === 5)
-      if (NON_PLAYING) {
-        bufferingAccum += (now - lastTickAt)
-        lastChangeAt = now    // don't let buffering count against the stall window either
-      }
-      lastTickAt = now
+      if (action === 'pause') _applyRecPlayPause(true, false)
+      else if (action === 'resume') _applyRecPlayPause(false, false)
+      if (window._recPlayPaused) return setTimeout(tick, 100)
       try {
-        if (window.ytPlayer && typeof window.ytPlayer.getCurrentTime === 'function') {
-          // Stale-ct guard. Until the player reports the expected videoId
-          // AND ct has been seen strictly below timeEnd inside this clip,
-          // refuse to trust ct for end/progress. Without this, a slow load
-          // leaves getCurrentTime() returning the PREVIOUS clip's playhead,
-          // which can fall inside the new window (e.g. prev ended at 55,
-          // new clip is 45→55 — stale ct=55 satisfies ct≥timeEnd on the
-          // first tick and fires a bogus natural-end. The progress bar
-          // animates to 100% via its CSS width-transition and the clip
-          // never plays.) The load-grace timer below still skips for-real
-          // unplayable clips.
-          const loadedId = (window.ytPlayer.getVideoData && window.ytPlayer.getVideoData().video_id) || null
-          const idOk = !expectedVideoId || !loadedId || loadedId === expectedVideoId
-          const ct = window.ytPlayer.getCurrentTime() || 0
-          // Once the video has loaded and reports a duration, clamp the
-          // effective end to it. Otherwise a clip whose recorded timeEnd
-          // overshoots the video's natural end (e.g. SRT timestamps
-          // extending past EOF) would wait forever for ct≥timeEnd.
-          if (idOk && loadedId === expectedVideoId) {
-            try {
-              const vDur = window.ytPlayer.getDuration && window.ytPlayer.getDuration()
-              if (vDur && Number.isFinite(vDur) && vDur > 0 && _effectiveTimeEnd > vDur + 1) {
-                console.warn(`[_waitYTUntilEnd] clamping timeEnd ${_effectiveTimeEnd}s → video duration ${vDur}s for ${expectedVideoId}`)
-                _effectiveTimeEnd = vDur
-              }
-            } catch (_) {}
-          }
-          if (idOk && ct >= 0 && ct < _effectiveTimeEnd - 0.05 && ct <= _effectiveTimeEnd + 5) {
-            observedBelowEnd = true
-          }
-          if (idOk && observedBelowEnd && ct >= _effectiveTimeEnd && ct <= _effectiveTimeEnd + 5) {
-            // Snap the playhead to timeEnd so a slow pause doesn't bleed an
-            // extra few frames of audio after the clip's nominal end.
-            try { window.ytPlayer.seekTo && window.ytPlayer.seekTo(_effectiveTimeEnd, true) } catch (_) {}
-            hardPause()
-            return resolve()
-          }
-          // Also gate the everPlayed tracker — a stale reading wildly past
-          // the clip's end shouldn't satisfy the load-grace check, otherwise
-          // a permanently-stuck stale ct would never get skipped.
-          if (idOk && observedBelowEnd && ct > 0.1 && Math.abs(ct - lastCt) > 0.05) {
-            lastCt = ct
-            lastChangeAt = now
-            everPlayed = true
-          }
+        const player = window.ytPlayer
+        const loadedId = player?.getVideoData?.().video_id || null
+        const ct = Number(player?.getCurrentTime?.())
+        const idOk = loadedId === expectedVideoId
+        if (idOk) {
+          const duration = player.getDuration?.()
+          if (Number.isFinite(duration) && duration > start && end > duration + 1) end = duration
         }
+        const inWindow = idOk && Number.isFinite(ct) && ct >= start - 1.5 && ct <= end + 5
+        if (inWindow && ct < end - 0.05) observedBelowEnd = true
+        if (inWindow && observedBelowEnd && ct >= end) {
+          try { player.seekTo(end, true) } catch (_) {}
+          hardPause()
+          return resolve()
+        }
+        attempt.observe(inWindow ? ct : NaN, playerState, loadedId)
       } catch (_) {}
       if (typeof onTick === 'function') { try { onTick() } catch (_) {} }
-      // Active elapsed excludes user-pause AND buffering — used by the
-      // load-grace check so a slow CDN can finish prebuffering without
-      // tripping the "video failed to start" skip.
-      const activeElapsed = (now - begin) - pausedAccum - bufferingAccum
-      // Raw elapsed only excludes user-pause — used by maxWaitMs as a
-      // true hard ceiling so a dead-stuck buffering state can't keep us
-      // here forever.
-      const rawElapsed = (now - begin) - pausedAccum
-      // hardPause() on every bail — without it a video that finally starts
-      // AFTER we've decided to skip (e.g. load-grace expired but the player
-      // resolves a few seconds later) keeps playing audio through the gap
-      // period until the next item's playMediaSlice() resets it.
-      if (!everPlayed && activeElapsed > loadGraceMs) {
-        console.warn('playRecording: video failed to start within', loadGraceMs, 'ms — skipping')
-        hardPause()
-        return resolve()
-      }
-      if (everPlayed && (now - lastChangeAt) > stallMs) {
-        console.warn('playRecording: playhead stalled — skipping')
-        hardPause()
-        return resolve()
-      }
-      // maxWait uses raw elapsed PLUS a buffering ceiling — even an
-      // ever-buffering clip eventually gives up.
-      if (rawElapsed > maxWaitMs + 30000) {
-        console.warn('playRecording: max wait exceeded — skipping')
-        hardPause()
-        return resolve()
-      }
-      // 100ms keeps the playhead-overrun ≤ 100ms in the steady state, which
-      // is well below the perceptual threshold for "video kept playing past
-      // the end". Cost is ~10 ticks/sec vs ~2/sec — negligible.
+      // The attempt's watchdog covers readiness, load and seek too. Unlike
+      // the old buffering exclusions, it guarantees a 20s recovery bound.
       setTimeout(tick, 100)
     }
     tick()
@@ -17383,12 +17258,13 @@ async function _loadSubtitlesForItem(item) {
 // the pure VM + DOM emitter in ./renderer/playing-ui-*.js. The non-pure
 // bits — subtitle fetching, language selection, scroll positioning — stay
 // here. Returns metadata used by _refreshPlayingSubtitles.
-async function _renderPlayingSubtitles(item) {
+async function _renderPlayingSubtitles(item, { isCurrent = () => true } = {}) {
   let $sub = $('#recPlayingSubs')
   if (!$sub.length) $sub = $('<div id="recPlayingSubs"></div>').appendTo('body')
   $sub.html('<div class="rec-ps-loading">Loading subtitles…</div>')
 
   const parsed = await _loadSubtitlesForItem(item)
+  if (!isCurrent() || !document.body.contains($sub[0])) return null
   if (!parsed || (!parsed.sv.length && !parsed.en.length)) {
     $sub.html('<div class="rec-ps-err">Subtitles unavailable for this video.</div>')
     return null
@@ -17771,12 +17647,9 @@ function _maybeResumeStartItem(mode) {
 //   101, 150 — owner disallowed embedded playback — canonical (identical
 //          per the YT docs)
 //
-// We only treat 100/101/150 as immediate skip+record. For 2/5 we let
-// _waitYTUntilEnd's 12s load-grace decide: the player gets a chance to
-// recover, and if it doesn't, the natural skip path still moves the loop
-// forward without permanently marking the video as broken. Empirically a
-// lot of "video didn't play but it's actually fine" reports trace back to
-// a transient code 5 from an ad/codec issue.
+// Only 100/101/150 are recorded as unavailable videos. Invalid requests and
+// client-identity errors skip without labelling a video removed. Other errors
+// get the same bounded recovery window as a silent buffering/seek failure.
 const YT_UNAVAILABLE_CANONICAL_CODES = new Set([100, 101, 150])
 
 // Persistent record of videos that have failed to play during recording
@@ -17954,34 +17827,37 @@ function _renderPlayUnavailableList() {
   })
 }
 
-// Wired to the YT player's onError event (see language.html). When a video
-// fails to play DURING recording playback, silently log it to a persistent
-// list and advance to the next item — no modal interruption. The user can
-// review and clean up via Settings → "Unavailable (N)…" at a calm moment.
-function handleYoutubePlayerError(code) {
-  if (!window._playingRecording) return            // only record during playback
+// Attribute errors only to the captured-video attempt that issued the load.
+// An error from a parked Practice/manual reference or the previous iframe
+// request must never navigate the current playlist or overwrite a button press.
+function handleYoutubePlayerError(code, player = window.ytPlayer) {
+  const attempt = window._recVideoAttempt
+  if (!window._playingRecording || window._practiceActive || !attempt?.requested || !attempt.active()) return
+  let reportedId = null
+  try { reportedId = player?.getVideoData?.().video_id || null } catch (_) {}
+  if (reportedId && reportedId !== attempt.videoId) return
   const n = Number(code)
-  if (!YT_UNAVAILABLE_CANONICAL_CODES.has(n)) {
-    // Transient code (2 / 5 / anything else). Don't immediately skip and
-    // don't record; the load-grace timeout in _waitYTUntilEnd will handle
-    // it if the player genuinely can't recover. Logging only so the user
-    // can trace "why didn't this video play?" via devtools.
-    if (n) console.warn(`[play] non-canonical YT error code ${n} — letting load-grace handle it`)
-    return
+  if (!n) return
+  if (YT_UNAVAILABLE_CANONICAL_CODES.has(n)) {
+    const seen = window._recPlayUnavailableSeen || (window._recPlayUnavailableSeen = new Set())
+    if (!seen.has(attempt.videoId)) {
+      seen.add(attempt.videoId)
+      const it = window._recPlayCurrentItem
+      _recordPlayUnavailable(attempt.videoId, n, it && (it.word || it.searchText))
+    }
+    // Deduplication affects review bookkeeping only. Every failed attempt,
+    // including Replay and another clip from the same video, must settle.
+    attempt.fail('unavailable', n)
+  } else if (n === 2 || n === 153) {
+    // Invalid request / missing client identity: fail this attempt without
+    // labelling the video itself removed or adding it to the permanent list.
+    attempt.fail('request-error', n)
+  } else {
+    // A codec/ad error can recover; the same 20s no-progress budget still
+    // applies and cannot be extended by the player's buffering state.
+    attempt.noteError()
+    console.warn(`[play] YT error ${n}; waiting for playback recovery`)
   }
-  const it = window._recPlayCurrentItem
-  const lp = _loadLastPlayed()
-  const vid = (it && it.id) || (lp && lp.id)
-  if (!vid) return
-  // Record at most once per video per playback session.
-  if (window._recPlayErrorPromptedFor === vid) return
-  window._recPlayErrorPromptedFor = vid
-  // Skip past the broken item right away so playback doesn't hang on it
-  // (_waitYTUntilEnd bails on _recNavRequest).
-  window._recNavRequest = 'next'
-  const label = (it && (it.word || it.searchText)) || null
-  _recordPlayUnavailable(vid, n, label)
-  console.warn(`[play] video ${vid} unavailable (YT code ${n}) — recorded for review`)
 }
 window.handleYoutubePlayerError = handleYoutubePlayerError
 
@@ -19224,6 +19100,12 @@ async function playRecording(opts) {
   }
   window._recPlayPracticeSingle = !!opts.practiceSingle
   window._recPlaySilentItem = opts.keepCurrentItem ? queue[startIdx] : null
+  // A stopped/replaced session must not resume a late load or clean up the
+  // DOM and queue belonging to its replacement.
+  const sessionToken = window._recPlaySessionToken = {}
+  const sessionCurrent = () => window._recPlaySessionToken === sessionToken
+  const sessionPlaying = () => sessionCurrent() && window._playingRecording
+  _interruptRecordingPlayback()
   // Expose for prev/next/loop-aware UI status.
   window._recPlayLoopMode = loop
 
@@ -19398,9 +19280,9 @@ async function playRecording(opts) {
   window._recNavRequest = null
   window._recNavGotoIndex = null
   window._recPlaySlowdown = false
-  // Per-session "video unavailable" prompt tracking (see
-  // handleYoutubePlayerError). Reset so a fresh session can re-prompt.
-  window._recPlayErrorPromptedFor = null
+  // Deduplicate unavailable-video review entries within this session.
+  window._recPlayUnavailableSeen = new Set()
+  window._recPlayForceVideoReload = true
   window._recPlayCurrentItem = null
   _recPlayCardReversed = null
   // Expose the queue so the player-overlay Shuffle button can re-randomise
@@ -19415,7 +19297,7 @@ async function playRecording(opts) {
   let i = startIdx
   // Guard against a queue with nothing playable in it: count the cards we skip
   // and bail once we have circled the whole queue with nothing to play.
-  let textOnlySkips = 0
+  let unplayableSkips = 0
   // Where to look next after skipping a card, in the direction the user last
   // navigated — a "previous" tap has to keep going backwards past the cards it
   // cannot play, or Prev lands back on the card it started from and looks
@@ -19430,19 +19312,31 @@ async function playRecording(opts) {
       // there to catch a queue with nothing in it, not to punish a change of
       // direction.
       window._recPlaySlowdown = false
-      textOnlySkips = 0
+      unplayableSkips = 0
       return 1
     }
     if (backward) return i > 0 ? i - 1 : queue.length - 1
     return i + 1 < queue.length ? i + 1 : (_curLooping() ? 0 : queue.length)
   }
-  while (window._playingRecording) {
+  while (sessionPlaying()) {
     // A replay/queue jump can arrive during the trailing gap, after the
     // per-clip navigation check. Apply it before starting another item.
     if (Number.isInteger(window._recNavGotoIndex)) {
       const target = window._recNavGotoIndex
       window._recNavGotoIndex = null
       if (target >= 0 && target < queue.length) i = target
+    }
+    else if (window._recNavRequest) {
+      // A command may interrupt ANY await, before the clip-end handler is
+      // reached. Consume it here as well; otherwise a pending flag makes
+      // ownsVideo() false on every iteration and spins the same item forever.
+      const direction = window._recNavRequest
+      window._recNavRequest = null
+      const from = Number.isInteger(window._recPlayIndex) ? window._recPlayIndex : i
+      i = direction === 'prev'
+        ? (from > 0 ? from - 1 : (_curLooping() ? queue.length - 1 : 0))
+        : (from + 1 < queue.length ? from + 1 : (_curLooping() ? 0 : queue.length))
+      window._recPlaySlowdown = direction === 'prev'
     }
     // Boundary handling: with no loop we exit at queue end; otherwise wrap.
     if (i >= queue.length) {
@@ -19454,7 +19348,7 @@ async function playRecording(opts) {
     }
     window._recPlayIndex = i
     const itemToken = window._recPlayItemToken = {}
-    const ownsVideo = () => window._playingRecording && window._recPlayItemToken === itemToken &&
+    const ownsVideo = () => sessionPlaying() && window._recPlayItemToken === itemToken &&
       !window._practiceActive && !window._recPlayPaused && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)
     window._recPlayQueueLen = queue.length
     const it = queue[i]
@@ -19472,7 +19366,7 @@ async function playRecording(opts) {
     }
     if (!_isManualItem(it) && it.source && it.source.toLowerCase() !== 'youtube') {
       console.warn('playRecording: skipping non-YouTube item', it)
-      if (++textOnlySkips >= queue.length) { stopPlayingRecording(); break }
+      if (++unplayableSkips >= queue.length) { stopPlayingRecording(); break }
       i = _stepOverSkipped()
       continue
     }
@@ -19481,11 +19375,10 @@ async function playRecording(opts) {
     // last navigated (backward after a prev tap) so skipping feels natural, and
     // stop if the whole queue turns out to have nothing to play.
     if (_isManualItem(it) && !_cardHasPlayableMedia(it) && window._recPlaySilentItem !== it) {
-      if (++textOnlySkips >= queue.length) { stopPlayingRecording(); break }
+      if (++unplayableSkips >= queue.length) { stopPlayingRecording(); break }
       i = _stepOverSkipped()
       continue
     }
-    textOnlySkips = 0
 
     // Both of these have to be in place BEFORE the banner draws: it renders
     // the pause pill from the current item and the pinned direction, and
@@ -19520,10 +19413,10 @@ async function playRecording(opts) {
     // leaving the clip running past its end with the queue stuck behind it.
     // Holding here keeps the banner up and the deck silent until the play
     // button is pressed, which is the state a restored session opens in.
-    while (window._playingRecording && window._recPlayPaused && !Number.isInteger(window._recNavGotoIndex)) {
+    while (sessionPlaying() && window._recPlayPaused && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)) {
       await new Promise(r => setTimeout(r, 200))
     }
-    if (!window._playingRecording) break
+    if (!sessionPlaying()) break
     if (Number.isInteger(window._recNavGotoIndex)) continue
     // Manual entries: no clip to play. If the media is a YouTube link we
     // still cue it into the embedded player at t=0 (so the user can hit
@@ -19533,6 +19426,7 @@ async function playRecording(opts) {
     // in a new tab mid-playlist would break flow); the user can click
     // the link badge in the Review dialog instead.
     if (_isManualItem(it)) {
+      unplayableSkips = 0
       // Show the card's text in the subtitle overlay (the banner head is
       // collapsed on mobile) so it's visible for the whole item.
       if (_cardHasVideoLink(it)) {
@@ -19565,15 +19459,15 @@ async function playRecording(opts) {
               await _sleepRespectingPause(stMs)
               _stopGapCountdown()
             }
-            if (!window._playingRecording || navPending()) break
+            if (!sessionPlaying() || navPending()) break
           }
           // Label the player so it's obvious which face is sounding, since
           // both faces of one card play back to back with no visual break.
           await _playManualAudioAndWait(clips[ci].url, clips.length > 1 ? clips[ci].label : '')
           // Stop / prev / next during a clip must not start the next one.
-          if (!window._playingRecording || navPending()) break
+          if (!sessionPlaying() || navPending()) break
         }
-        if (!window._playingRecording) break
+        if (!sessionPlaying()) break
       }
       // A playable manual card was reached — clear the backward-nav flag (the
       // YT path does this after its clip; the manual path must too) so the
@@ -19584,7 +19478,7 @@ async function playRecording(opts) {
       // Then handle prev/next/goto/loop the same way video items do,
       // except we skip the trailing _sleepRespectingPause (the hold
       // already consumed the gap).
-      if (window._playingRecording) {
+      if (sessionPlaying()) {
         const _gapMs = currentGapMs()
         if (_gapMs > 0) _startGapCountdown(_gapMs)
         await _sleepRespectingPause(_gapMs)
@@ -19622,106 +19516,137 @@ async function playRecording(opts) {
       // of treating the announcement as silence to fill.
       _setRecPlayPhase('clip')
       await _speakWord(it.word)
-      if (!window._playingRecording) break
+      if (!sessionPlaying()) break
       prevWord = it.word
       if (Number.isInteger(window._recNavGotoIndex)) continue
     }
-    // Render the subtitle overlay in PARALLEL with playback. Awaiting it
-    // here would block the video on a (potentially slow) SRT fetch via
-    // getSubtitlesForLink. Stash the promise's resolved value in a holder
-    // so _refreshPlayingSubtitles can pick it up once it arrives.
-    const subHolder = { ctx: null }
-    _renderPlayingSubtitles(it)
-      .then(c => { subHolder.ctx = c })
-      .catch(e => console.warn('playRecording: subtitle render failed', it, e))
-
-    // Recover a sane play window for malformed clips (recorded duration
-    // > MAX_REASONABLE_CLIP_S, almost always from an old capture whose
-    // context window straddled a sparse-SRT discontinuity). Falls through
-    // to the original bounds when there's nothing to repair against —
-    // _waitYTUntilEnd's final safety-net skip still catches the
-    // unrecoverable case.
-    let _playStart = it.timeStart
-    let _playEnd   = it.timeEnd
-    // Retroactive clip clamp: recompute the window from the CURRENT snippet so a
-    // stored [timeStart, timeEnd] built before the sparse-snippet fix (or across a
-    // temporal gap) doesn't overshoot. Shrink-only — never lengthens the clip; and
-    // skips manual/unlocatable items (contiguousPlayWindow returns null). Subtitle
-    // load is cached (the overlay uses the same call), so this is usually instant.
+    const attempt = createRecordingVideoAttempt({ videoId: it.id,
+      isCurrent: () => sessionPlaying() && window._recPlayItemToken === itemToken && !window._practiceActive &&
+        !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex),
+      isPaused: () => !!window._recPlayPaused })
+    window._recVideoAttempt = attempt
+    const slowedThisRound = !!window._recPlaySlowdown
+    let videoFailure = null
     try {
-      const parsed = await _loadSubtitlesForItem(it)
-      const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
-      let primary = parsed && (lang === 'sv' ? parsed.sv : parsed.en)
-      if (!primary || !primary.length) primary = parsed && (lang === 'sv' ? parsed.en : parsed.sv)
-      const win = _contiguousPlayWindow(primary, it, { gapThreshold: _clipGapThresholdSec() })
-      if (win) { _playStart = win.timeStart; _playEnd = win.timeEnd }
-    } catch (e) { console.warn('playRecording: play-window clamp failed', it && it.id, e) }
-    const _rawDur = (parseFloat(_playEnd) || 0) - (parseFloat(_playStart) || 0)
-    if (Number.isFinite(_rawDur) && _rawDur > MAX_REASONABLE_CLIP_S) {
-      const repaired = await _repairMalformedClip(it)
-      if (repaired) {
-        console.warn(
-          `[playRecording] malformed clip ${it.id} dur=${_rawDur.toFixed(0)}s — playing ` +
-          `${(repaired.timeEnd - repaired.timeStart).toFixed(1)}s around lineIndex ${it.lineIndex} ` +
-          `(${repaired.timeStart.toFixed(1)}→${repaired.timeEnd.toFixed(1)})`
-        )
-        _playStart = repaired.timeStart
-        _playEnd   = repaired.timeEnd
+      // Render the subtitle overlay in PARALLEL with playback. Awaiting it
+      // here would block the video on a (potentially slow) SRT fetch via
+      // getSubtitlesForLink. Stash the promise's resolved value in a holder
+      // so _refreshPlayingSubtitles can pick it up once it arrives.
+      const subHolder = { ctx: null }
+      _renderPlayingSubtitles(it, { isCurrent: () => sessionPlaying() && window._recPlayItemToken === itemToken })
+        .then(c => { subHolder.ctx = c })
+        .catch(e => console.warn('playRecording: subtitle render failed', it, e))
+
+      // Recover a sane play window for malformed clips (recorded duration
+      // > MAX_REASONABLE_CLIP_S, almost always from an old capture whose
+      // context window straddled a sparse-SRT discontinuity). Falls through
+      // to the original bounds when there's nothing to repair against —
+      // _waitYTUntilEnd's final safety-net skip still catches the
+      // unrecoverable case.
+      let _playStart = it.timeStart
+      let _playEnd   = it.timeEnd
+      // Retroactive clip clamp: recompute the window from the CURRENT snippet so a
+      // stored [timeStart, timeEnd] built before the sparse-snippet fix (or across a
+      // temporal gap) doesn't overshoot. Shrink-only — never lengthens the clip; and
+      // skips manual/unlocatable items (contiguousPlayWindow returns null). Subtitle
+      // load is cached (the overlay uses the same call), so this is usually instant.
+      try {
+        const parsed = await attempt.wait(_loadSubtitlesForItem(it))
+        const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
+        let primary = parsed && (lang === 'sv' ? parsed.sv : parsed.en)
+        if (!primary || !primary.length) primary = parsed && (lang === 'sv' ? parsed.en : parsed.sv)
+        const win = _contiguousPlayWindow(primary, it, { gapThreshold: _clipGapThresholdSec() })
+        if (win) { _playStart = win.timeStart; _playEnd = win.timeEnd }
+      } catch (e) { if (!attempt.active()) throw e; console.warn('playRecording: play-window clamp failed', it && it.id, e) }
+      const _rawDur = (parseFloat(_playEnd) || 0) - (parseFloat(_playStart) || 0)
+      if (Number.isFinite(_rawDur) && _rawDur > MAX_REASONABLE_CLIP_S) {
+        const repaired = await attempt.wait(_repairMalformedClip(it))
+        if (repaired) {
+          console.warn(
+            `[playRecording] malformed clip ${it.id} dur=${_rawDur.toFixed(0)}s — playing ` +
+            `${(repaired.timeEnd - repaired.timeStart).toFixed(1)}s around lineIndex ${it.lineIndex} ` +
+            `(${repaired.timeStart.toFixed(1)}→${repaired.timeEnd.toFixed(1)})`
+          )
+          _playStart = repaired.timeStart
+          _playEnd   = repaired.timeEnd
+        }
       }
-    }
 
-    // Set the end boundary for the existing markIntervalPlayDone() hook
-    // (defensive — _waitYTUntilEnd also pauses). videoId lets the hook
-    // ignore stale ct reads that belong to the PREVIOUS clip's video.
-    window.youtubePlayInterval = { start: _playStart, end: _playEnd, videoId: it.id }
-    window.playingYoutubeVideo = true
-    // Reset the progress bar without the width-transition so it doesn't
-    // visibly drain from 100% → 0% over 400ms at every clip boundary; the
-    // bar should already read 0 when the next clip begins.
-    $('#recPlayingBanner .rec-pb-bar')
-      .css('transition', 'none').css('width', '0%')
-      .each(function () { void this.offsetWidth })
-      .css('transition', '')
-    // Play media directly via playMediaSlice — search results aren't
-    // deterministic so we deliberately don't drive playback via the live
-    // DOM. playMediaSlice loads/seeks the YouTube player with the
-    // recorded url + timeStart, which is all we need.
-    // Lift the gap-guard before playing — without this the guard would
-    // immediately re-pause the player we just asked to start.
-    window._recPlayGapGuard = false
-    // A captured clip carries its own audio, so the music steps aside for the
-    // whole of it and comes back on the gap that follows.
-    _setRecPlayPhase('video')
-    const _src = (it.source || '').toLowerCase() === 'youtube' ? 'YouTube' : (it.source || 'YouTube')
-    try {
+      // Set the end boundary for the existing markIntervalPlayDone() hook
+      // (defensive — _waitYTUntilEnd also pauses). videoId lets the hook
+      // ignore stale ct reads that belong to the PREVIOUS clip's video.
+      window.youtubePlayInterval = { start: _playStart, end: _playEnd, videoId: it.id }
+      window.playingYoutubeVideo = true
+      // Reset the progress bar without the width-transition so it doesn't
+      // visibly drain from 100% → 0% over 400ms at every clip boundary; the
+      // bar should already read 0 when the next clip begins.
+      $('#recPlayingBanner .rec-pb-bar')
+        .css('transition', 'none').css('width', '0%')
+        .each(function () { void this.offsetWidth })
+        .css('transition', '')
+      // Play media directly via playMediaSlice — search results aren't
+      // deterministic so we deliberately don't drive playback via the live
+      // DOM. playMediaSlice loads/seeks the YouTube player with the
+      // recorded url + timeStart, which is all we need.
+      // Lift the gap-guard before playing — without this the guard would
+      // immediately re-pause the player we just asked to start.
+      window._recPlayGapGuard = false
+      // A captured clip carries its own audio, so the music steps aside for the
+      // whole of it and comes back on the gap that follows.
+      _setRecPlayPhase('video')
+      const _src = (it.source || '').toLowerCase() === 'youtube' ? 'YouTube' : (it.source || 'YouTube')
+      if (!attempt.active()) continue
+      attempt.request()
+      const forceLoad = !!window._recPlayForceVideoReload
+      window._recPlayForceVideoReload = false
+      await attempt.wait(playMediaSlice(it.id, _playStart, _playEnd, _src, { isCurrent: () => attempt.active() && ownsVideo(), forceLoad }))
+      if (!sessionPlaying()) break
       if (Number.isInteger(window._recNavGotoIndex)) continue
       if (!ownsVideo()) continue
-      await playMediaSlice(it.id, _playStart, _playEnd, _src, { isCurrent: ownsVideo })
+      // _waitYTUntilEnd pauses the player when ct >= timeEnd, so when the next
+      // item reuses the same video, playMediaSlice short-circuits to just a
+      // seek — leaving the player paused and the clip never starts. Kick it
+      // back into play explicitly here so consecutive same-video items work.
+      // Backward navigation slows one listen. Replay retains 0.75x for this
+      // item, including subsequent replays, until the selected item changes.
+      if (slowedThisRound || window._recReplaySpeed) {
+        try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(0.75) } catch (_) {}
+      } else if (restoredRate != null) {
+        try { window.ytPlayer?.setPlaybackRate(restoredRate) } catch (_) {}
+      }
+      try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
+      await attempt.wait(_waitYTUntilEnd(_playStart, _playEnd, () => {
+        _updatePlayingProgress(_playStart, _playEnd, it.id)
+        _refreshPlayingSubtitles(subHolder.ctx)
+      }, it.id, attempt))
     } catch (e) {
-      console.warn('playRecording: playMediaSlice failed for', it, e)
-      i++
+      videoFailure = e
+    } finally {
+      attempt.dispose()
+      if (window._recVideoAttempt === attempt) window._recVideoAttempt = null
+    }
+    if (!sessionPlaying()) break
+    if (videoFailure) {
+      if (videoFailure.kind === 'cancelled' || window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) continue
+      // Failed videos do not incur the ordinary inter-item gap or Loop=one.
+      // A late load cannot sound after this attempt has lost ownership.
+      try { window.ytPlayer?.pauseVideo() } catch (_) {}
+      window._recPlayGapGuard = true
+      window._recPlayForceVideoReload = true
+      const reason = videoFailure.kind === 'timeout' ? 'no playback progress for 20s'
+        : videoFailure.code === 153 ? 'YouTube player configuration error'
+        : videoFailure.code === 2 ? 'invalid video request'
+        : videoFailure.kind === 'invalid-clip' ? 'invalid clip range' : 'video unavailable'
+      _studyChrome.show()
+      _recPlayToast(`Skipped ${i + 1}/${queue.length}: ${reason}`)
+      if (++unplayableSkips >= queue.length) {
+        _cpBuildToast('No playable items found. Playback stopped.')
+        break
+      }
+      i = _stepOverSkipped()
       continue
     }
-    if (!window._playingRecording) break
-    if (Number.isInteger(window._recNavGotoIndex)) continue
-    if (!ownsVideo()) continue
-    // _waitYTUntilEnd pauses the player when ct >= timeEnd, so when the next
-    // item reuses the same video, playMediaSlice short-circuits to just a
-    // seek — leaving the player paused and the clip never starts. Kick it
-    // back into play explicitly here so consecutive same-video items work.
-    // Backward navigation slows one listen. Replay retains 0.75x for this
-    // item, including subsequent replays, until the selected item changes.
-    const slowedThisRound = !!window._recPlaySlowdown
-    if (slowedThisRound || window._recReplaySpeed) {
-      try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(0.75) } catch (_) {}
-    } else if (restoredRate != null) {
-      try { window.ytPlayer?.setPlaybackRate(restoredRate) } catch (_) {}
-    }
-    try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
-    await _waitYTUntilEnd(_playStart, _playEnd, () => {
-      _updatePlayingProgress(_playStart, _playEnd, it.id)
-      _refreshPlayingSubtitles(subHolder.ctx)
-    }, it.id)
+    unplayableSkips = 0
     if (slowedThisRound && !window._recReplaySpeed) {
       try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(1) } catch (_) {}
       window._recPlaySlowdown = false
@@ -19755,7 +19680,7 @@ async function playRecording(opts) {
 
     // Loop=one: replay this same item indefinitely (until prev/next/stop).
     if (_curLoop() === 'one') {
-      if (window._playingRecording) {
+      if (sessionPlaying()) {
         const _gapMs = currentGapMs()
         if (_gapMs > 0) _startGapCountdown(_gapMs)
         await _sleepRespectingPause(_gapMs)
@@ -19765,7 +19690,7 @@ async function playRecording(opts) {
     }
     // Natural advance — gap between items, including before a wrap.
     const willHaveNext = (i + 1 < queue.length) || _curLooping()
-    if (willHaveNext && window._playingRecording) {
+    if (willHaveNext && sessionPlaying()) {
       const _gapMs = currentGapMs()
       if (_gapMs > 0) _startGapCountdown(_gapMs)
       await _sleepRespectingPause(_gapMs)
@@ -19773,6 +19698,7 @@ async function playRecording(opts) {
     }
     i++
   }
+  if (!sessionCurrent()) return
   // If we exited the loop because i >= queue.length AND looping is off,
   // the session played to natural completion. Mark queuePos past the end
   // so the next Play All doesn't pop the "1 of N remaining" resume
@@ -19862,6 +19788,10 @@ function _showRecPlayNavToast(direction) {
     msg = `Will play ${target + 1}/${total} next` + (word ? ` · "${word}"` : '')
   }
 
+  _recPlayToast(msg)
+}
+
+function _recPlayToast(msg) {
   let $t = $('#recPlayNavToast')
   if (!$t.length) $t = $('<div id="recPlayNavToast" role="status" aria-live="polite"></div>').appendTo('body')
   $t.text(msg).addClass('visible')
@@ -19876,6 +19806,7 @@ function _showRecPlayNavToast(direction) {
 function navigateRecordingPlayback(direction) {
   if (!window._playingRecording) return false
   if (direction !== 'prev' && direction !== 'next') return false
+  window._recPlayForceVideoReload = false
   window._recNavRequest = direction
   window._recNavGotoIndex = null
   _showRecPlayNavToast(direction)
@@ -19894,6 +19825,8 @@ function replayCurrentRecordingItem() {
     window._recReplaySpeed = { item: window._recPlayQueue[index], index, rate }
   }
   try { window.ytPlayer?.setPlaybackRate(0.75) } catch (_) {}
+  // A silent/error screen must be loaded again, not merely seeked.
+  window._recPlayForceVideoReload = !!window._recVideoAttempt && !window._recVideoAttempt.played
   window._recNavRequest = null
   window._recNavGotoIndex = index
   window._recPlaySlowdown = false
@@ -19914,9 +19847,14 @@ function _restoreRecordingReplaySpeed() {
 }
 
 function _interruptRecordingPlayback() {
+  // getVideoUrl/getVideoData can still name an older video while a broken
+  // load is pending. A navigation must issue a fresh load, even when its
+  // destination happens to match that stale URL.
+  if (window._recVideoAttempt && !window._recVideoAttempt.played) window._recPlayForceVideoReload = true
   // Cancel delayed pauses left by the previous clip, even when replaying
   // the same card/video: identity alone cannot distinguish those attempts.
   window._recPlayItemToken = {}
+  window._recVideoAttempt?.cancel()
   // Stop the currently-playing video and any in-flight TTS RIGHT NOW so the
   // transition into the next item is clean. The playback loop will see
   // _recNavRequest and route to the right index — but without this the
@@ -20107,6 +20045,7 @@ function openPlayingQueueDialog() {
   const jumpTo = (i) => {
     if (!Number.isInteger(i) || i < 0 || i >= queue.length) return
     window._recNavGotoIndex = i
+    _interruptRecordingPlayback()
     try { $dlg.dialog('close') } catch (_) {}
   }
   $dlg.off('click', '.pqd-play').on('click', '.pqd-play', function (e) {
@@ -20229,11 +20168,12 @@ function switchPracticeToPlayer() {
 // the user has paused playback so the inter-item gap doesn't tick down
 // while paused. Bails out if playback is stopped.
 function _sleepRespectingPause(ms) {
+  const sessionToken = window._recPlaySessionToken
   return new Promise(resolve => {
     let remaining = ms
     let lastTick = Date.now()
     const id = setInterval(() => {
-      if (!window._playingRecording) { clearInterval(id); return resolve() }
+      if (!window._playingRecording || window._recPlaySessionToken !== sessionToken) { clearInterval(id); return resolve() }
       // Bail the gap-sleep on any nav request so jumping via the queue
       // dialog or prev/next feels instant rather than waiting out the gap.
       if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) {
@@ -20249,6 +20189,7 @@ function _sleepRespectingPause(ms) {
 }
 
 function stopPlayingRecording() {
+  window._recVideoAttempt?.cancel()
   _restoreRecordingReplaySpeed()
   window._playingRecording = false
   // Stopping IS putting the view away, so there is nothing to restore.

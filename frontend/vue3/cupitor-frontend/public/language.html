@@ -107,7 +107,7 @@
         function onPlayerError(event) {
             try {
                 if (typeof window.handleYoutubePlayerError === 'function') {
-                    window.handleYoutubePlayerError(event && event.data)
+                    window.handleYoutubePlayerError(event && event.data, event && event.target)
                 }
             } catch (e) { console.warn('onPlayerError handler failed', e) }
         }

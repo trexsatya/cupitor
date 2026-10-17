@@ -227,6 +227,30 @@ keep native Space activation. Click the card first if YouTube has keyboard
 focus. Practice/playback shortcuts bypass the old key-release transport so a
 single press cannot also seek or toggle the shared player behind the view.
 
+## Unavailable videos in Player
+
+Each captured-video attempt has one 20-second recovery window covering subtitle
+preparation, iframe readiness, loading, seeking and playback without progress.
+Real playback refreshes the window; buffering, stale timestamps and an error
+screen do not. Deliberate Pause freezes the window until playback resumes.
+
+Previous, Next, Replay, queue jumps and Stop cancel the pending attempt immediately.
+Replay retries the current item with a fresh load when its previous load never
+started. Old loads, subtitle responses and errors cannot control a newer item.
+
+Confirmed unavailable-video errors skip immediately. Other stuck videos skip
+after 20 seconds without progress. A short message explains the skip, and the
+normal inter-item gap and repeat-one setting are bypassed. Consecutive clips
+from the same failed video are retried independently. If no item in a full
+pass is playable, playback stops instead of looping forever. Only confirmed
+removed/private or embedding-disabled errors enter the unavailable-video review
+list; transient and player-configuration errors do not label a video removed.
+
+`node tests/browser/unavailable-videos.cjs` tests desktop and mobile navigation
+at item 100 of a 145-item fixture playlist, failed and stale loads, shared
+timeouts, retries, pauses, late errors, recovery, looping and Stop/restart.
+The suite also runs against the production build in CI.
+
 ## Cached data
 
 **Settings → Manage → Cached data** lists other accounts' and languages'
