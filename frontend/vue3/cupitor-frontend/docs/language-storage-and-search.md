@@ -167,7 +167,8 @@ the current item. The exact queue order and index are retained, including
 shuffled queues and multiple clips from the same video. Practice pauses the
 Player session; returning to Player starts the selected item. Text-only cards
 remain visible and paused instead of being skipped during this handoff.
-Practice covers the underlying page; minimizing it restores the main page.
+Player and Practice cover the underlying page, including search pagination,
+even while their controls are hidden. Minimizing either view restores the main page.
 
 On phones the view controls use icons. Player's **Practice** action is inside
 its info panel; **Replay** remains in its top bar. Replay uses 0.75× for the
