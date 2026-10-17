@@ -4043,6 +4043,34 @@ body.study-split-active.practice-mode #practiceAudio {
 body.study-split-active.rec-playing #recPlayingTransport { top: calc(var(--study-split-y) - 56px); }
 body.study-split-active.rec-playing #recPlayingSubs { top: calc(var(--study-split-y) + 10px); max-height: none; padding-bottom: 20px; }
 body.study-split-active.practice-mode #practiceMode .practice-card { top: calc(var(--study-split-y) + 10px); }
+
+/* Hide only the controls: visibility preserves every media/text measurement. */
+:is(#recPlayingBanner, #recPlayingTransport, #recPlayingMinimizeBtn, #recPlayingCloseBtn,
+    #recPlayNavToast, #studyMediaDivider, #practiceMode .practice-topbar,
+    #practiceMode .practice-nav, #practiceMode .practice-ctx-ctrl,
+    #practiceMode .practice-line-edit, #practiceMode .practice-rec-bar,
+    #practiceMode .practice-restore, #practiceAudio > *, #recPlayingAudio > *) {
+    transition: opacity .18s ease, visibility .18s;
+}
+body.study-controls-hidden :is(#recPlayingBanner, #recPlayingTransport, #recPlayingMinimizeBtn,
+    #recPlayingCloseBtn, #recPlayNavToast, #studyMediaDivider, #practiceMode .practice-topbar,
+    #practiceMode .practice-nav, #practiceMode .practice-ctx-ctrl,
+    #practiceMode .practice-line-edit, #practiceMode .practice-rec-bar,
+    #practiceMode .practice-restore, #practiceAudio > *, #recPlayingAudio > *) {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+#studyControlsWakeSurface {
+    position: fixed;
+    z-index: 100007;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+}
+#studyControlsWakeSurface[hidden] { display: none; }
+body.rec-playing #scrollButton, body.practice-mode #scrollButton { display: none; }
 #recPlayingSubs .rec-ps-row {
     padding: 4px 6px;
     opacity: 0.55;

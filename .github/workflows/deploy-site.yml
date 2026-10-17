@@ -74,6 +74,7 @@ jobs:
           node tests/browser/view-switching.cjs
           node tests/browser/practice-controls.cjs
           node tests/browser/study-controls.cjs
+          node tests/browser/study-chrome.cjs
         env:
           CUPITOR_TEST_ASSETS: dist
 
