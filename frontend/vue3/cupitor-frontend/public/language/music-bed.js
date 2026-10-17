@@ -113,6 +113,24 @@ export function musicMode(settings) {
   return MUSIC_MODES.indexOf(v) >= 0 ? v : 'gap';
 }
 
+// Independent defaults for the two kinds of study item, sharing one library.
+// Older settings still apply to manual cards. Video clips previously only
+// allowed music in gaps, even when the old mode was "nonstop".
+export function musicSettingsFor(settings = {}, kind = 'manual') {
+  const saved = settings[kind === 'video' ? 'recMusicVideo' : 'recMusicManual'] || {};
+  const oldMode = musicMode(settings);
+  const enabled = saved.enabled == null ? !(kind === 'video' && oldMode === 'item') : saved.enabled !== false;
+  return {
+    ...settings,
+    recMusicSelected: saved.selected == null ? settings.recMusicSelected : saved.selected,
+    recMusicMode: saved.mode || (kind === 'video' ? 'gap' : oldMode),
+    recMusicVolume: saved.volume == null ? settings.recMusicVolume : saved.volume,
+    recMusicGapVolume: saved.gapVolume == null ? settings.recMusicGapVolume : saved.gapVolume,
+    recMusicEnabled: enabled,
+    recMusicPaused: !!settings.recMusicPaused || !enabled,
+  };
+}
+
 export function musicTracks(settings) {
   return normalizeMusicTracks(settings && settings.recMusicTracks);
 }
@@ -192,11 +210,12 @@ export function musicShouldPlay(state) {
   if (s.hushed) return false;
   if (!s.playing || s.paused) return false;
   // A captured clip brings its own audio; the bed stands aside for it.
-  if (s.phase === 'video') return false;
+  if (s.phase === 'video' && s.kind !== 'video') return false;
+  const phase = s.phase === 'video' ? 'clip' : s.phase;
   const mode = MUSIC_MODES.indexOf(s.mode) >= 0 ? s.mode : 'gap';
   if (mode === 'nonstop') return true;
-  if (mode === 'item') return s.phase === 'clip';
-  return s.phase === 'gap';
+  if (mode === 'item') return phase === 'clip';
+  return phase === 'gap';
 }
 
 // How close to the end counts as being at it. Position updates land a few times

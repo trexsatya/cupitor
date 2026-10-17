@@ -169,6 +169,21 @@ Player session; returning to Player starts the selected item. Text-only cards
 remain visible and paused instead of being skipped during this handoff.
 Practice covers the underlying page; minimizing it restores the main page.
 
+On phones the view controls use icons. Player's **Practice** action is inside
+its info panel; **Replay** remains in its top bar. Replay uses 0.75× for the
+current item, including manual recordings, and restores normal speed when
+the selected item changes. Keyboard-shortcut buttons are hidden on phones.
+
+Drag the horizontal divider between media and text to resize either view.
+Player and Practice remember separate positions. The divider also supports
+the up/down arrow keys; Home or double-click restores the default size.
+
+Background music has independent **Manual cards** and **YouTube clips**
+profiles in its dialog. Each has its own enable switch, track, timing and
+volume settings. The library and the pause-all control are shared; existing
+playlist/card track overrides continue to apply. Old settings retain silent
+music during YouTube clips until their profile is changed explicitly.
+
 Open **Settings → Keyboard shortcuts**, **Practice → ⋯ → Keyboard shortcuts**,
 or press **?** for the in-app reference.
 

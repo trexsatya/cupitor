@@ -262,10 +262,15 @@ async function checkPracticeControls(browser) {
       await page.keyboard.press('?')
       assert.equal(await page.locator('#keyboardShortcutsDialog:visible').count(), 0)
       await page.locator('#toggleSettingsPanelBtn').click()
-      await page.locator('#settingsPanel .keyboard-shortcuts-btn').click()
-      await page.locator('#keyboardShortcutsDialog').waitFor({ state: 'visible' })
-      assert.equal(await page.locator('#settingsPanel:visible').count(), 0)
-      await page.keyboard.press('Escape')
+      if (mobile) {
+        assert.equal(await page.locator('#settingsPanel .keyboard-shortcuts-btn').isVisible(), false)
+        await page.keyboard.press('Escape')
+      } else {
+        await page.locator('#settingsPanel .keyboard-shortcuts-btn').click()
+        await page.locator('#keyboardShortcutsDialog').waitFor({ state: 'visible' })
+        assert.equal(await page.locator('#settingsPanel:visible').count(), 0)
+        await page.keyboard.press('Escape')
+      }
       assert.deepEqual(errors, [])
       console.log(`${mobile ? 'Mobile' : 'Desktop'}: silent Practice transitions, cancelled loads and keyboard shortcuts passed`)
     } finally { await page.close() }

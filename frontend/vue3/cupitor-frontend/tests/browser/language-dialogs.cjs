@@ -224,13 +224,14 @@ async function checkDialogs(browser, mobile) {
 if (require.main === module) (async () => {
   const browser = await chromium.launch({ headless: true,
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'] })
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required'] })
   try {
     await checkDialogs(browser, false)
     await checkDialogs(browser, true)
     await require('./practice-controls.cjs').checkPracticeControls(browser)
     await require('./player-replay.cjs').checkPlayerReplay(browser)
     await require('./view-switching.cjs').checkViewSwitching(browser)
+    await require('./study-controls.cjs').checkStudyControls(browser)
   } finally {
     await browser.close()
   }
