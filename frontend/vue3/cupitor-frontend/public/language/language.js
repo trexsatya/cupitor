@@ -1,6 +1,7 @@
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
 import { installStudyDivider } from './study-divider.js';
+import { installStudyChrome } from './study-chrome.js';
 import { keyboardShortcut, KEYBOARD_SHORTCUTS } from './keyboard-shortcuts.js';
 import { parsePracticeSpeeds, practiceSpeeds, nextPracticeSpeed, supportedPracticeSpeed } from './practice-speed.js';
 import { loadRecordingsFiles, syncRecordingsFiles } from './recordings-store.js';
@@ -2695,6 +2696,7 @@ installStudyDivider({
   readRatio: view => window._appSettings[`studySplit_${view}`],
   saveRatio: (view, ratio) => { window._appSettings[`studySplit_${view}`] = ratio; saveAppSettings() }
 })
+const _studyChrome = installStudyChrome()
 
 function _studyControlIcon(kind, label) {
   const paths = kind === 'replay'
@@ -21305,6 +21307,7 @@ function _renderPracticeRecBar(note) {
   const n = st.takes.length
   const unkept = st.takes.filter(t => !st.kept.has(t.url)).length
   const rec = st.phase === 'recording'
+  if (rec) _studyChrome.show()
   // Mid-loop the video is being driven for the user; a second Rec on top of
   // that would pin a moment they did not choose.
   const busy = st.phase === 'playback'
