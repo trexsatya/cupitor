@@ -167,7 +167,8 @@ the current item. The exact queue order and index are retained, including
 shuffled queues and multiple clips from the same video. Practice pauses the
 Player session; returning to Player starts the selected item. Text-only cards
 remain visible and paused instead of being skipped during this handoff.
-Practice covers the underlying page; minimizing it restores the main page.
+Player and Practice cover the underlying page, including search pagination,
+even while their controls are hidden. Minimizing either view restores the main page.
 
 On phones the view controls use icons. Player's **Practice** action is inside
 its info panel; **Replay** remains in its top bar. Replay uses 0.75× for the
@@ -178,13 +179,23 @@ Drag the horizontal divider between media and text to resize either view.
 Player and Practice remember separate positions. The divider also supports
 the up/down arrow keys; Home or double-click restores the default size.
 
-Both views fade their controls after three idle seconds. Tap the text or
-player to bring them back; the first tap only reveals controls, including
+Both views fade their controls after three idle seconds. The Player timer and
+progress bar stay visible and keep updating while the other controls are hidden.
+Tap the text or player to bring them back; the first tap only reveals controls, including
 over the YouTube iframe and native audio controls. The next tap operates
 them normally. Text and media keep their positions, and card swipes and text
 scrolling still work while controls are hidden. Keyboard input also reveals
 controls. Open panels, text editing, keyboard focus on controls, dragging the
 divider and active microphone recording keep controls visible.
+
+In Android dialog1, the app calls
+`window.CupitorYouTubeControls?.setVisible(visible)` whenever the study controls
+hide or appear. YouTube's native controls therefore follow the same idle timer,
+tap and keyboard actions. Closing or minimizing a view restores them. The host
+bridge applies visibility inside the embed without recreating or seeking the
+player; keep YouTube's initial `controls` setting at its default of `1`.
+In ordinary browsers or older hosts where the API is absent, YouTube keeps its
+own automatic hiding behavior. A host API error cannot block web controls.
 
 Background music has independent **Manual cards** and **YouTube clips**
 profiles in its dialog. Each has its own enable switch, track, timing and

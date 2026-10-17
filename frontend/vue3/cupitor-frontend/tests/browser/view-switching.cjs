@@ -26,6 +26,15 @@ async function checkViewSwitching(browser) {
     const order = () => page.evaluate(() => (window._practiceActive ? window._practiceCards : window._recPlayQueue)
       .map(item => item.id + ':' + (item.timeStart || 0)))
     const expected = ['testVideo02:3', 'recorded-card:0', 'testVideo01:5', 'text-only:0', 'testVideo01:1']
+    const checkBackdrop = async () => {
+      const state = await page.evaluate(() => {
+        const style = getComputedStyle(document.body, '::before')
+        return { color: style.backgroundColor, position: style.position, content: style.content,
+          underlyingHit: document.elementFromPoint(2, 52)?.id === 'underlying-page-widget' }
+      })
+      assert.deepEqual(state, { color: 'rgb(10, 10, 10)', position: 'fixed', content: '""', underlyingHit: false })
+      assert.equal(await page.locator('#search-pagination').isVisible(), false, 'search pagination is hidden in either study view')
+    }
     try {
       await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
       await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
@@ -50,7 +59,7 @@ async function checkViewSwitching(browser) {
         window.__switchQueue = [
           { id: 'testVideo02', source: 'YouTube', searchText: 'hagla', timeStart: 3, timeEnd: 5, lineIndex: 2 },
           { id: 'recorded-card', manual: true, source: 'Hej', target: 'Hello', sourceAudioUrl: 'file:///source.wav' },
-          { id: 'testVideo01', source: 'YouTube', searchText: 'väljarkår', timeStart: 5, timeEnd: 7, lineIndex: 3 },
+          { id: 'testVideo01', source: 'YouTube', word: 'väljarkår', searchText: 'väljarkår', timeStart: 5, timeEnd: 7, lineIndex: 3 },
           { id: 'text-only', manual: true, source: 'Text-only card', target: 'No recording' },
           { id: 'testVideo01', source: 'YouTube', searchText: 'färgsprakande', timeStart: 1, timeEnd: 3, lineIndex: 1 }
         ]
@@ -60,28 +69,47 @@ async function checkViewSwitching(browser) {
         window.__underlyingClicks = 0
         leak.onclick = () => window.__underlyingClicks++
         document.body.appendChild(leak)
+        document.getElementById('resultContainer').style.display = 'block'
+        document.getElementById('search-pagination').style.display = 'block'
+        window.__paginationWasVisible = !!document.getElementById('search-pagination').getClientRects().length
         window.__playerTask = window.playRecording({ resumeQueue: { queue: window.__switchQueue, pos: 2 }, startPaused: true })
       }, silentWav())
       await playerAt(2)
+      assert.equal(await page.evaluate(() => window.__paginationWasVisible), true, 'fixture starts with visible search pagination')
       await page.getByRole('button', { name: 'Replay current item', exact: true }).waitFor({ state: 'visible' })
       assert.equal(await page.getByRole('button', { name: 'Switch to Practice', exact: true }).isVisible(), false)
+      await page.locator('#recPlayingPauseBtn').click()
+      await page.locator('#recPlayingSubs .rec-ps-row').first().waitFor({ state: 'visible' })
+      await page.locator('#recPlayingPauseBtn').click()
+      await checkBackdrop()
+      await page.waitForFunction(() => document.body.classList.contains('study-controls-hidden'))
+      await page.locator('#studyMediaDivider').waitFor({ state: 'hidden' })
+      await checkBackdrop()
+      assert.equal(await page.locator('#recPlayingWord').isVisible(), true, 'foreground word stays above the backdrop')
+      assert.equal(await page.locator('#recPlayingSubs .rec-ps-row').first().isVisible(), true, 'foreground subtitles stay above the backdrop')
       if (process.env.SCREENSHOT_DIR) {
         fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
-        await page.evaluate(() => { document.getElementById('underlying-page-widget').style.visibility = 'hidden' })
-        await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `cupitor-player-switch-${mobile ? 'mobile' : 'desktop'}.png`) })
-        await page.evaluate(() => { document.getElementById('underlying-page-widget').style.visibility = '' })
+        await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `cupitor-player-backdrop-${mobile ? 'mobile' : 'desktop'}.png`), animations: 'disabled' })
       }
+      if (mobile) await page.touchscreen.tap(2, 52)
+      else await page.mouse.click(2, 52)
+      await page.locator('#recPlayingMinimizeBtn').waitFor({ state: 'visible' })
+      assert.equal(await page.evaluate(() => window.__underlyingClicks), 0, 'underlying page cannot receive Player taps')
+      await page.locator('#recPlayingMinimizeBtn').click()
+      assert.equal(await page.evaluate(() => getComputedStyle(document.body, '::before').content), 'none')
+      assert.equal(await page.locator('#search-pagination').isVisible(), true, 'minimizing restores search pagination')
+      await page.mouse.click(2, 52)
+      assert.equal(await page.evaluate(() => window.__underlyingClicks), 1, 'Player minimize returns interaction to the main page')
+      await page.locator('.rec-pill-restore').click()
+      await checkBackdrop()
+      await page.evaluate(() => { window.__underlyingClicks = 0 })
       await switchTo('Practice')
       await practiceAt(2)
       assert.equal(await page.getByRole('button', { name: 'Replay current item', exact: true }).isVisible(), false,
         'Player Replay is hidden in Practice; its source-reveal arrow is a different control')
       assert.deepEqual(await order(), expected, 'Player → Practice does not reshuffle or rotate the queue')
       assert.equal(await page.evaluate(() => window._recPlayPaused), true)
-      const backdrop = await page.evaluate(() => {
-        const style = getComputedStyle(document.body, '::before')
-        return { color: style.backgroundColor, position: style.position, content: style.content }
-      })
-      assert.deepEqual(backdrop, { color: 'rgb(10, 10, 10)', position: 'fixed', content: '""' })
+      await checkBackdrop()
       await page.mouse.click(2, 880)
       assert.equal(await page.evaluate(() => window.__underlyingClicks), 0, 'underlying page cannot receive Practice clicks')
       for (const selector of ['#recPlayingBanner', '#recPlayingSubs', '#recPlayingTransport', '#recPlayingRestorePill']) {
@@ -182,7 +210,7 @@ async function checkViewSwitching(browser) {
       await page.evaluate(() => window.stopPlayingRecording())
       await page.evaluate(() => window.__coldPlayerTask)
       assert.deepEqual(errors, [])
-      console.log(`${mobile ? 'Mobile' : 'Desktop'}: opaque Practice, same-item two-way switching, duplicate video ids, recorded/text-only cards and queue order passed`)
+      console.log(`${mobile ? 'Mobile' : 'Desktop'}: opaque Player/Practice, same-item two-way switching, duplicate video ids, recorded/text-only cards and queue order passed`)
     } finally { await page.close() }
   }
 }
