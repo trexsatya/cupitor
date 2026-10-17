@@ -233,6 +233,8 @@ if (require.main === module) (async () => {
     await require('./view-switching.cjs').checkViewSwitching(browser)
     await require('./study-controls.cjs').checkStudyControls(browser)
     await require('./study-chrome.cjs').checkStudyChrome(browser)
+    await require('./unavailable-videos.cjs').checkUnavailableVideos(browser)
+    await require('./player-seek.cjs').checkPlayerSeek(browser)
   } finally {
     await browser.close()
   }
