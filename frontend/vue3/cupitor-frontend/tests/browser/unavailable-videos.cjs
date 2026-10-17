@@ -10,7 +10,18 @@ async function checkUnavailableVideos(browser) {
     page.on('dialog', d => { errors.push(d.message()); d.dismiss() })
     page.setDefaultTimeout(6000)
     await page.route('**/*', serveFixtures)
-    await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
+    await page.addInitScript(() => {
+      window.dontConfirmOnRefresh = true
+      window.__lifecycleRequests = []
+      window.AppLifecycleBridge = { postMessage: message => {
+        window.__lifecycleRequests.push(message)
+        // A synchronous reply proves the listener was registered first.
+        window.dispatchEvent(new CustomEvent('cupitorAppLifecycle', { detail: { isForeground: false } }))
+      } }
+    })
+    const foreground = value => page.evaluate(value => {
+      window.dispatchEvent(new CustomEvent('cupitorAppLifecycle', { detail: { isForeground: value } }))
+    }, value)
     const at = index => page.waitForFunction(index => window._recPlayIndex === index &&
       window._recPlayCurrentItem === window._recPlayQueue?.[index] &&
       window.__video.requested === window._recPlayQueue[index].id && !window._recNavRequest && window._recNavGotoIndex == null, index)
@@ -64,6 +75,55 @@ async function checkUnavailableVideos(browser) {
       await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
       await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
       await page.clock.install()
+
+      assert.deepEqual(await page.evaluate(() => window.__lifecycleRequests), ['getState'])
+      await start('not-ready')
+      await page.waitForFunction(() => window._recVideoAttempt?.requested)
+      await page.clock.fastForward(60000)
+      assert.equal(await page.evaluate(() => window._recPlayIndex), 99, 'initial background state freezes readiness/recovery')
+      await foreground(true)
+      await page.evaluate(() => { window.ytPlayerReady = true })
+      await at(99)
+      await stop()
+
+      // Foreground-only budgets survive a fully suspended JS runtime: no
+      // intermediate ticks run between the background and foreground events.
+      for (const mode of ['stale-id', 'not-ready']) {
+        await start(mode)
+        await page.waitForFunction(() => window._recVideoAttempt?.requested)
+        await page.clock.fastForward(5000)
+        await foreground(false)
+        const wall = await page.evaluate(() => Date.now())
+        await page.clock.setSystemTime(wall + 120000)
+        await foreground(true)
+        if (mode === 'not-ready') await page.evaluate(() => { window.ytPlayerReady = true })
+        await page.clock.fastForward(14000)
+        assert.equal(await page.evaluate(() => window._recPlayIndex), 99, mode + ': background must not spend the recovery budget')
+        await page.clock.fastForward(1500)
+        await at(100)
+        assert.equal(await page.evaluate(() => window._recPlayPaused), false, 'lifecycle does not change explicit Pause')
+        await stop()
+      }
+
+      await start('recovered')
+      await at(99)
+      await page.clock.runFor(500)
+      await page.evaluate(() => { window.__video.time = 1.2 })
+      await page.clock.runFor(200)
+      await page.evaluate(() => { window.__video.time = 3 })
+      await page.waitForFunction(() => window._recPlayGapActive)
+      await page.clock.runFor(1000)
+      await foreground(false)
+      const gapText = await page.locator('#recPlayingBanner .rec-pb-count').innerText()
+      await page.clock.fastForward(60000)
+      assert.equal(await page.evaluate(() => window._recPlayIndex), 99)
+      assert.equal(await page.locator('#recPlayingBanner .rec-pb-count').innerText(), gapText, 'visible gap countdown freezes')
+      await foreground(true)
+      await page.clock.fastForward(27000)
+      assert.equal(await page.evaluate(() => window._recPlayIndex), 99, 'returning must not catch up background gap time')
+      await page.clock.fastForward(2500)
+      await at(100)
+      await stop()
 
       // Reproduce #100/145 while loading a video that never acknowledges it.
       await start('stale-id')
@@ -185,7 +245,7 @@ async function checkUnavailableVideos(browser) {
       assert.equal(await page.locator('#recPlayingBanner').isVisible(), true)
       await stop()
       assert.deepEqual(errors, [])
-      console.log(`${mobile ? 'Mobile' : 'Desktop'}: #100/145 unavailable-video navigation, retry, 20s recovery, error isolation, pause, loops and stop/restart passed`)
+      console.log(`${mobile ? 'Mobile' : 'Desktop'}: #100/145 unavailable-video navigation, retry, 20s recovery, lifecycle timers, error isolation, pause, loops and stop/restart passed`)
     } catch (error) {
       console.error(await page.evaluate(() => ({ video: window.__video, index: window._recPlayIndex,
         playing: window._playingRecording, paused: window._recPlayPaused, nav: window._recNavRequest,

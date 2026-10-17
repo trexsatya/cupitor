@@ -1,6 +1,7 @@
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
 import { createRecordingVideoAttempt, VIDEO_RECOVERY_MS } from './recording-video.js';
+import { createAppLifecycleClock } from './app-lifecycle.js';
 import { installStudyDivider } from './study-divider.js';
 import { installStudyChrome } from './study-chrome.js';
 import { keyboardShortcut, KEYBOARD_SHORTCUTS } from './keyboard-shortcuts.js';
@@ -8865,10 +8866,10 @@ firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
 // 3. This function creates an <iframe> (and YouTube player)
 //    after the API code downloads.
 
-async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds, respectInterval = true } = {}) {
-  const readyDeadline = Date.now() + VIDEO_RECOVERY_MS
+async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds, respectInterval = true, now = () => Date.now() } = {}) {
+  const readyDeadline = now() + VIDEO_RECOVERY_MS
   const ready = () => { try { return !!(window.ytPlayerReady && window.ytPlayer?.getIframe?.()) } catch (_) { return false } }
-  await waitUntil(() => !isCurrent() || ready() || Date.now() >= readyDeadline)
+  await waitUntil(() => !isCurrent() || ready() || now() >= readyDeadline)
   if (!isCurrent()) return
   if (!ready()) throw new Error('YouTube player did not become ready within 20 seconds')
   showMediaContainer()
@@ -8906,7 +8907,7 @@ async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds,
       // the new id. Bounded deliberately: waitUntil never gives up, and a
       // video that turns out to be unplayable must not leave every caller
       // awaiting a promise that can no longer settle.
-      const deadline = Date.now() + 10000
+      const deadline = now() + 10000
       const tick = () => {
         if (!isCurrent()) { resolve(); return }
         let loaded = false
@@ -8914,7 +8915,7 @@ async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds,
           const d = window.ytPlayer.getVideoData && window.ytPlayer.getVideoData()
           loaded = !!(d && d.video_id === videoId)
         } catch (_) {}
-        if (loaded || Date.now() > deadline) { settle(); return }
+        if (loaded || now() > deadline) { settle(); return }
         setTimeout(tick, 100)
       }
       tick()
@@ -10762,7 +10763,7 @@ function test_data() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function playMediaSlice(url, start, end, source, { isCurrent = () => true, forceLoad = false } = {}) {
+async function playMediaSlice(url, start, end, source, { isCurrent = () => true, forceLoad = false, now } = {}) {
   if (!isCurrent()) return
   if (source === 'YouTube') {
     showMediaContainer()
@@ -10773,7 +10774,7 @@ async function playMediaSlice(url, start, end, source, { isCurrent = () => true,
       window.mediaSelected = {link: url, source: 'link'}
       window.playingYoutubeVideo = true
       window.syncSubtitle = false
-      await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: start, respectInterval: false, forceLoad })
+      await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: start, respectInterval: false, forceLoad, now })
     }
     if (!isCurrent()) return
     await seekToYoutubeTime(start, { isCurrent })
@@ -16795,6 +16796,7 @@ function openRecordingReviewDialog() {
 // Malformed windows are repaired before playback where possible, otherwise
 // skipped rather than waiting on an unreachable timestamp.
 const MAX_REASONABLE_CLIP_S = 600
+const _playerLifecycle = createAppLifecycleClock(window)
 
 function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt) {
   const itemToken = window._recPlayItemToken
@@ -16818,6 +16820,9 @@ function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt) {
     let observedBelowEnd = false
     const tick = () => {
       if (!current()) return resolve()
+      // A host-paused iframe is not a headset pause or a stalled clip while
+      // the app is in the background. Leave progress/end checks parked too.
+      if (!_playerLifecycle.isForeground()) return setTimeout(tick, 100)
       let playerState = -1
       try { playerState = window.ytPlayer?.getPlayerState() } catch (_) {}
       // Only a moving PLAYING playhead proves this clip started. A failed
@@ -17113,7 +17118,7 @@ function _startGapCountdown(ms, hint) {
   const $count = $banner.find('.rec-pb-count')
   // Cache the original count text so we can put it back when the gap ends.
   if ($count.length) $count.data('preGapText', $count.text())
-  const begin = Date.now()
+  const begin = _playerLifecycle.now()
   let lastTick = begin
   let remaining = ms
   $bar.css('width', '100%')
@@ -17123,7 +17128,7 @@ function _startGapCountdown(ms, hint) {
   _gapCountdownTimerId = setInterval(() => {
     if (!window._playingRecording) { _stopGapCountdown(); return }
     if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) { _stopGapCountdown(); return }
-    const now = Date.now()
+    const now = _playerLifecycle.now()
     const elapsed = now - lastTick
     lastTick = now
     if (!window._recPlayPaused) remaining -= elapsed
@@ -19523,7 +19528,7 @@ async function playRecording(opts) {
     const attempt = createRecordingVideoAttempt({ videoId: it.id,
       isCurrent: () => sessionPlaying() && window._recPlayItemToken === itemToken && !window._practiceActive &&
         !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex),
-      isPaused: () => !!window._recPlayPaused })
+      isPaused: () => !!window._recPlayPaused, now: _playerLifecycle.now })
     window._recVideoAttempt = attempt
     const slowedThisRound = !!window._recPlaySlowdown
     let videoFailure = null
@@ -19599,7 +19604,8 @@ async function playRecording(opts) {
       attempt.request()
       const forceLoad = !!window._recPlayForceVideoReload
       window._recPlayForceVideoReload = false
-      await attempt.wait(playMediaSlice(it.id, _playStart, _playEnd, _src, { isCurrent: () => attempt.active() && ownsVideo(), forceLoad }))
+      await attempt.wait(playMediaSlice(it.id, _playStart, _playEnd, _src, {
+        isCurrent: () => attempt.active() && ownsVideo(), forceLoad, now: _playerLifecycle.now }))
       if (!sessionPlaying()) break
       if (Number.isInteger(window._recNavGotoIndex)) continue
       if (!ownsVideo()) continue
@@ -20171,7 +20177,7 @@ function _sleepRespectingPause(ms) {
   const sessionToken = window._recPlaySessionToken
   return new Promise(resolve => {
     let remaining = ms
-    let lastTick = Date.now()
+    let lastTick = _playerLifecycle.now()
     const id = setInterval(() => {
       if (!window._playingRecording || window._recPlaySessionToken !== sessionToken) { clearInterval(id); return resolve() }
       // Bail the gap-sleep on any nav request so jumping via the queue
@@ -20179,7 +20185,7 @@ function _sleepRespectingPause(ms) {
       if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) {
         clearInterval(id); return resolve()
       }
-      const now = Date.now()
+      const now = _playerLifecycle.now()
       const elapsed = now - lastTick
       lastTick = now
       if (!window._recPlayPaused) remaining -= elapsed

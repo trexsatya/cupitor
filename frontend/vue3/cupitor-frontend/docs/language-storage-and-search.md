@@ -234,6 +234,14 @@ preparation, iframe readiness, loading, seeking and playback without progress.
 Real playback refreshes the window; buffering, stale timestamps and an error
 screen do not. Deliberate Pause freezes the window until playback resumes.
 
+The Android host's `cupitorAppLifecycle` event also freezes Player's recovery,
+readiness and gap timers while `detail.isForeground` is false. The listener
+is registered before calling `window.AppLifecycleBridge?.postMessage('getState')`,
+so an already-backgrounded page receives the current state. Returning resumes
+the remaining foreground time without counting time when JavaScript was
+suspended. Lifecycle events do not change the user's explicit Pause setting.
+Browsers without this bridge retain their normal behavior.
+
 Previous, Next, Replay, queue jumps and Stop cancel the pending attempt immediately.
 Replay retries the current item with a fresh load when its previous load never
 started. Old loads, subtitle responses and errors cannot control a newer item.
