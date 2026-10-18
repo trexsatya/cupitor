@@ -5906,25 +5906,10 @@ async function getMatchingWords(list, search, token) {
     wordToItemsMap = Object.assign(wordToItemsMap, wordToItemsMap2)
   }
 
-  // The dedup pass below removes lines that already appeared under a longer
-  // word-key, so we keep the most specific match per line. But the synthetic
-  // "whole search text" key — added above when the entire pipe / multi-word
-  // search matches a line — is by far the longest key, so without exclusion it
-  // would absorb every line and then get filtered out at render time
-  // (populateSRTFindings drops the exact-window.searchText key), leaving every
-  // per-word accordion empty. Skip it here so per-word keys keep their items.
-  const wholeSearchKey = (searchText || '').toLowerCase().trim()
-  const matchingWords = Object.keys(wordToItemsMap).filter(w => w !== wholeSearchKey)
-  matchingWords.sort((a, b) => b.length - a.length)
-
-  const _matchResultId = it => ` ${it.url} ${it.source} ${it.line.index}`
-  for (let i = 0; i < matchingWords.length; i++) {
-    const prevMatches = matchingWords.slice(0, i).map(it => wordToItemsMap[it]).flat().map(_matchResultId)
-    const word = matchingWords[i]
-    wordToItemsMap[word] = wordToItemsMap[word].filter(it => {
-      return !prevMatches.includes(_matchResultId(it))
-    })
-  }
+  // A subtitle can contain several matching words. Each word must keep its
+  // own findings: assigning the line only to the longest heading makes a
+  // broad search like "för.*" falsely report no hits for the other words.
+  // groupAndArrangeResults removes duplicate cards within each group later.
 
   getSearchedTerms(transformedSearchText).forEach(it => {
     if (!wordToItemsMap[it] && !isRegExp(it)) {
