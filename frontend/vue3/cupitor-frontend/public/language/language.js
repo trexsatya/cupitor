@@ -20307,6 +20307,10 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-info', _togglePracticeInfoPanel)
     $p.on('click', '.practice-shuffle', _togglePracticeShuffle)
     $p.on('click', '.practice-settings', _togglePracticeSettingsPanel)
+    // Pointer-down dismisses on touch as well as mouse, including the start
+    // of a card scroll/swipe. Keep the event intact for the card's own action;
+    // click also covers keyboard activation and programmatic card clicks.
+    $p.on('pointerdown click', '.practice-card', _closePracticePanels)
     $p.on('change', '.practice-reveal-select', function () {
       const v = String($(this).val() || 'flip')
       if (['flip', 'both', 'hide'].indexOf(v) < 0) return
@@ -20790,6 +20794,14 @@ function _syncPracticePanelOpen() {
   $p.toggleClass('panel-open', open)
 }
 
+function _closePracticePanels() {
+  const $p = $('#practiceMode')
+  $p.find('.practice-info-panel, .practice-settings-panel').hide()
+  $p.find('.practice-info, .practice-settings')
+    .attr('aria-expanded', 'false').removeClass('active')
+  _syncPracticePanelOpen()
+}
+
 function _togglePracticeInfoPanel() {
   const $p = $('#practiceMode')
   const $panel = $p.find('.practice-info-panel')
@@ -20854,12 +20866,13 @@ function _updatePracticeInfo() {
   // A preview, not the card: the card itself is on screen right below.
   const INFO_MAX = 45
   if (it.manual) {
-    const linkLbl = it.mediaUrl ? ` · ${it.mediaKind === 'youtube' ? '▶ YouTube' : '🔗 link'}` : ''
+    const video = _manualCardVideo(it)
+    const linkLbl = video ? ` · ▶ YouTube · ${fromSeconds(video.timeStart)}` : it.mediaUrl ? ' · 🔗 link' : ''
     $head.text(`📝 ${where}`)
     $meta.text(`${_truncatePreview(_cardPlainText(it.source), INFO_MAX) || '(empty)'}  →  ${_truncatePreview(_cardPlainText(it.target), INFO_MAX) || '(empty)'}${linkLbl}`)
   } else {
     $head.text(`${where} — "${_truncatePreview(it._st || '', 40)}" → ${_truncatePreview(it._w || '', 30)}`)
-    $meta.text(`${it.id} · ${it.source || '?'} · ${it.timeStart}s – ${it.timeEnd}s`)
+    $meta.text(`${it.id} · ${it.source || '?'} · ${fromSeconds(it.timeStart)} – ${fromSeconds(it.timeEnd)}`)
   }
 }
 

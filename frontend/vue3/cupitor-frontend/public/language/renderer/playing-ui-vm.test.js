@@ -117,8 +117,12 @@ describe("buildPlayingBannerVM", () => {
     }, 0, 1, 30);
     expect(out.isManual).toBe(false);
     expect(out.headText).toBe('▶ "hej" → world');
-    expect(out.metaText).toBe("vid · yt · 10s – 15s");
+    expect(out.metaText).toBe("vid · yt · 00:00:10 – 00:00:15");
     expect(out.word).toBe("world");
+  });
+  test('clip details use hours, minutes and seconds across hour boundaries', () => {
+    const out = buildPlayingBannerVM({ id: 'film', source: 'YouTube', timeStart: 3599.9, timeEnd: 3723.8 }, 0, 1, 30);
+    expect(out.metaText).toBe('film · YouTube · 00:59:59 – 01:02:03');
   });
   // Practising the deck backwards turns the card over: the Target face becomes
   // the prompt. Only the two faces swap — the link badge stays where it is.

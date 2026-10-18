@@ -62,6 +62,7 @@ jobs:
           node tests/browser/compound-vocabulary-groups.cjs
           node tests/browser/regex-search.cjs
           node tests/browser/practice-manual-video.cjs
+          node tests/browser/practice-panels.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
           node tests/browser/recorded-scroll-momentum.cjs
@@ -85,6 +86,7 @@ jobs:
           node tests/browser/view-switching.cjs
           node tests/browser/practice-controls.cjs
           node tests/browser/practice-manual-video.cjs
+          node tests/browser/practice-panels.cjs
           node tests/browser/study-controls.cjs
           node tests/browser/study-chrome.cjs
           node tests/browser/unavailable-videos.cjs
