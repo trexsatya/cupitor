@@ -39,6 +39,19 @@ async function swipe(page, session, dy) {
   await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
 }
 
+// Use the actual picker: selecting calls the dialog's change handler while
+// Select2 still has its dropdown open and its ancestor scroll lock attached.
+async function choosePlaylist(page, name, mobile) {
+  const picker = page.locator('#recordingReviewDialog .rec-rec-header .select2-selection')
+  if (mobile) await picker.tap(); else await picker.click()
+  await page.locator('.select2-container--open .select2-search__field').fill(name)
+  const option = page.locator('.select2-results__option--selectable').filter({ hasText: name })
+  if (mobile) await option.tap(); else await option.click()
+  await page.waitForFunction(name => window._recording.currentName === name &&
+    document.getElementById('recRecSelect').value === name &&
+    !document.querySelector('.select2-dropdown'), name)
+}
+
 async function checkPages(browser, mobile, width = mobile ? 430 : 1280) {
   const page = await browser.newPage({ viewport: { width, height: 900 }, isMobile: mobile, hasTouch: mobile })
   const errors = []
@@ -61,9 +74,10 @@ async function checkPages(browser, mobile, width = mobile ? 430 : 1280) {
       requestAnimationFrame(sample)
     }, fixture)
     const session = mobile ? await page.context().newCDPSession(page) : null
+    await page.evaluate(() => window.openRecordingReviewDialog())
     for (const [name, rec] of Object.entries(fixture.playlists)) {
       const expected = flatten(rec.items), seen = []
-      await page.evaluate(name => { window.selectRecording(name); window.openRecordingReviewDialog() }, name)
+      await choosePlaylist(page, name, mobile)
       const pageCount = Math.ceil(expected.length / 50)
       let maxHeight = 0
       for (let p = 0; p < pageCount; p++) {
@@ -82,7 +96,7 @@ async function checkPages(browser, mobile, width = mobile ? 430 : 1280) {
         const subset = expected.slice(p * 50, (p + 1) * 50)
         assert.deepEqual(state.rows, subset.map((r, i) => ({ st: r.st, w: r.w, idx: r.idx, number: p * 50 + i + 1 })))
         seen.push(...state.rows)
-        await page.locator('#recordingReviewDialog').evaluate(el => { el.scrollTop = 300; window._scrollSamples = []; window._trackScroll = true })
+        await page.locator('#recordingReviewDialog').evaluate(el => { el.scrollTop = 0; window._scrollSamples = []; window._trackScroll = true })
         if (mobile) await swipe(page, session, -220)
         else {
           const box = await page.locator('#recordingReviewDialog').boundingBox()
@@ -91,7 +105,7 @@ async function checkPages(browser, mobile, width = mobile ? 430 : 1280) {
         }
         await page.waitForTimeout(900)
         const samples = await page.evaluate(() => { window._trackScroll = false; return window._scrollSamples })
-        assert(samples.at(-1) > 400, 'trusted input scrolls the actual playlist')
+        assert(samples.at(-1) > 100, 'trusted input scrolls from the first card after selecting a playlist')
         assert(samples.every((top, i) => !i || top >= samples[i - 1] - 1), 'downward scrolling never reverses after lifting')
         await page.waitForFunction(() => !document.querySelector('#recordingReviewDialog [data-pending]'))
         const refreshed = await page.locator('#recordingReviewDialog').evaluate(async el => {
@@ -164,4 +178,4 @@ if (require.main === module) (async () => {
   } finally { await browser.close() }
 })().catch(e => { console.error(e); process.exitCode = 1 })
 
-module.exports = { fixtures }
+module.exports = { fixtures, choosePlaylist }

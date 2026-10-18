@@ -16291,6 +16291,15 @@ function openRecordingReviewDialog() {
       html += `</div>`
     })
   }
+  // Close while the old picker is still attached. Select2 locks scrollable
+  // ancestors while open and finds those ancestors again when closing.
+  // Removing its container first strands that handler on this dialog, so
+  // every subsequent scroll is forced back to the dropdown's old offset.
+  const $oldPicker = $dlg.find('#recRecSelect.select2-hidden-accessible')
+  if ($oldPicker.length) {
+    $oldPicker.select2('close')
+    $oldPicker.select2('destroy')
+  }
   $dlg.html(html + pageNav)
   _renumberRecItems($dlg)
 
@@ -16617,13 +16626,11 @@ function openRecordingReviewDialog() {
   } else {
     $dlg.dialog(opts)
   }
-  // Make the playlist switcher searchable. The dialog HTML is rebuilt each open,
-  // so destroy any stale select2 before re-initialising. dropdownParent keeps
-  // the search dropdown layered inside the dialog.
+  // The previous picker was closed and destroyed before replacing the HTML.
+  // dropdownParent keeps the new search dropdown layered inside the dialog.
   try {
     const $sel = $dlg.find('#recRecSelect')
     if ($sel.length) {
-      if ($sel.hasClass('select2-hidden-accessible')) { try { $sel.select2('destroy') } catch (_) {} }
       $sel.select2({ width: 'resolve', dropdownParent: $dlg })
     }
   } catch (_) {}
