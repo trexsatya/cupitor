@@ -58,6 +58,7 @@ jobs:
       - name: Test dialogs with desktop clicks and mobile taps
         run: |
           node tests/browser/language-dialogs.cjs
+          node tests/browser/search-result-counts.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
 
       - name: Test complete subtitle capture merges and cache recovery
