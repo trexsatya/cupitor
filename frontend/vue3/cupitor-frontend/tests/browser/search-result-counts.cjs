@@ -1,5 +1,6 @@
 // Browser-level regression for a broad search reporting no results for a word
-// that has matches when searched directly. Uses only local fixture data.
+// that has matches when searched directly, and for regex highlighting in the
+// surrounding subtitle context. Uses only local fixture data.
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -10,7 +11,19 @@ const index = [{ link: 'testVideo01', name: 'Test channel || Shared subtitle mat
 // Both words genuinely occur in every cue. Repeating one in a cue also checks
 // that preserving results per word does not duplicate a card within a group.
 const cues = Array.from({ length: 13 }, (_, i) =>
-  `${i + 1}\n00:00:${String(i * 2 + 1).padStart(2, '0')},000 --> 00:00:${String(i * 2 + 3).padStart(2, '0')},000\nVi måste förhålla oss till förutsättningarna och förhålla oss lugna.\n`).join('\n')
+  `${i + 1}\n00:00:${String(i * 2 + 1).padStart(2, '0')},000 --> 00:00:${String(i * 2 + 3).padStart(2, '0')},000\nVi måste förhålla oss till förutsättningarna och förhålla oss lugna.\n`).join('\n') + `
+14
+00:00:27,000 --> 00:00:29,000
+"Hellre för många dåliga konstnärer än för få bra."
+
+15
+00:00:29,000 --> 00:00:31,000
+Men utan att förringa en viktig diskussion om politisk styrning av kultur och konst –
+
+16
+00:00:31,000 --> 00:00:33,000
+– ter det sig ändå i dagsläget kanske som en västanfläkt –
+`
 
 async function fixtures(route) {
   const url = new URL(route.request().url())
@@ -71,12 +84,31 @@ async function checkCounts(browser, mobile) {
     await search('förhålla|förutsättningarna')
     await checkWord('förhålla')
     await checkWord('förutsättningarna')
+    // A space inside [^ ] is part of the regex. It must not turn the
+    // neighbouring "för många ... för få" quote into one long highlight.
+    await page.evaluate(() => {
+      window._appSettings.contextLinesBefore = 1
+      window._appSettings.contextLinesAfter = 1
+    })
+    await search('för[^ ]+')
+    const header = group('förringa')
+    if (!(await header.evaluate(el => el.classList.contains('active')))) {
+      if (mobile) await header.tap()
+      else await header.click()
+    }
+    const panel = header.locator('..')
+    const quote = panel.locator('.main-line[data-line-index="14"]')
+    await quote.waitFor({ state: 'visible' })
+    assert.match(await quote.innerText(), /Hellre för många dåliga konstnärer än för få bra/)
+    assert.equal(await quote.locator('.highlight').count(), 0, 'unmatched context text stays unhighlighted')
+    const highlighted = await panel.locator('.main-line[data-line-index="15"] .highlight').allTextContents()
+    assert.deepEqual(highlighted.map(text => text.trim()), ['förringa'])
     if (process.env.SCREENSHOT_DIR) {
       fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
-      await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `search-result-counts-${mobile ? 'mobile' : 'desktop'}.png`) })
+      await panel.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `search-result-counts-${mobile ? 'mobile' : 'desktop'}.png`) })
     }
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'Mobile' : 'Desktop'}: direct, regex and alternative searches preserve each word's 13 matches, counts and render limits`)
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: direct/regex/alternative result counts and character-class highlighting passed`)
   } finally { await page.close() }
 }
 

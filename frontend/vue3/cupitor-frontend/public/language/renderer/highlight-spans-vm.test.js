@@ -72,6 +72,36 @@ describe('buildHighlightSpans — defensive', () => {
   })
 })
 
+describe('buildHighlightSpans — regex syntax', () => {
+  const marked = (text, pattern) => buildHighlightSpans(text, pattern).map(span => slice(text, span))
+
+  test('a space inside a negated class is not a phrase separator', () => {
+    const text = 'Hellre för många dåliga konstnärer än för få bra.'
+    expect(marked(text, 'för[^ ]+')).toEqual([])
+    expect(marked('Men utan att förringa en viktig diskussion', 'för[^ ]+')).toEqual(['förringa'])
+  })
+  test('character classes keep their spaces and quantifiers intact in phrases', () => {
+    expect(marked('för+ och för++', 'för[ ]+och')).toEqual([])
+    expect(marked('för++ nu', 'för[+ ]+ nu')).toEqual(['för++ nu'])
+  })
+  test('pipes inside classes and nested groups are not top-level alternatives', () => {
+    expect(marked('för många men förringa och överdriva', '(?:för|över)[^ ]+'))
+      .toEqual(['förringa', 'överdriva'])
+    expect(marked('för många men förringa och bra', 'för[^ |]+|bra')).toEqual(['förringa', 'bra'])
+  })
+  test('escaped bracket literals do not change class parsing', () => {
+    expect(marked('[förringa] och [för många]', '\\[för[^ ]+\\]')).toEqual(['[förringa]'])
+  })
+  test('an unmatched regex phrase never falls back to incomplete regex fragments', () => {
+    expect(marked('foo alone', 'foo [^ ]+ bar')).toEqual([])
+    expect(marked('foo   baz  bar', 'foo [^ ]+ bar')).toEqual(['foo   baz  bar'])
+    expect(marked('för många bra', 'för[^ ]+|bra')).toEqual(['bra'])
+  })
+  test('malformed regex phrases do not invent highlights', () => {
+    expect(marked('för många bra', 'för[^ ]+ [')).toEqual([])
+  })
+})
+
 describe('sliceByHighlightSpans', () => {
   test('returns single plain chunk when no spans', () => {
     expect(sliceByHighlightSpans('hi', [])).toEqual([{ kind: 'plain', text: 'hi' }])
