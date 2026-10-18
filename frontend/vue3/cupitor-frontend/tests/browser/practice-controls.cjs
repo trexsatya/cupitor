@@ -211,7 +211,8 @@ async function checkPracticeControls(browser) {
       assert.equal((await state()).events.slice(afterNavigation).filter(e => ['play', 'load', 'seek'].includes(e.action)).length, 0,
         'a superseded load cannot seek or play the later card')
       await page.keyboard.press('ArrowRight')
-      assert.equal((await state()).state, 2, 'navigating to a manual card also stops YouTube immediately')
+      await page.waitForFunction(() => window.__yt.id === 'testVideo03' && window.__yt.state === 5 && window.__yt.time === 12)
+      assert.equal((await state()).state, 5, 'a manual video link is silently cued at its URL timestamp')
       await page.evaluate(() => { window.ytPlayerReady = false; window.__yt.holdId = false; window.__yt.events = [] })
       await page.locator('#practiceMode .practice-media-link').click()
       await blur()
