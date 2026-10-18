@@ -61,6 +61,7 @@ jobs:
           node tests/browser/search-result-counts.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
+          node tests/browser/recorded-scroll-momentum.cjs
 
       - name: Test complete subtitle capture merges and cache recovery
         run: node tests/browser/subtitle-completeness.cjs
@@ -74,6 +75,7 @@ jobs:
         run: |
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
+          node tests/browser/recorded-scroll-momentum.cjs
           node tests/browser/player-replay.cjs
           node tests/browser/view-switching.cjs
           node tests/browser/practice-controls.cjs

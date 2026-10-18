@@ -163,3 +163,5 @@ if (require.main === module) (async () => {
     }
   } finally { await browser.close() }
 })().catch(e => { console.error(e); process.exitCode = 1 })
+
+module.exports = { fixtures }

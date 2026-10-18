@@ -16039,8 +16039,8 @@ function openRecordingReviewDialog() {
   // full re-render ($dlg.html below wipes the content and resets scrollTop to
   // 0), and it's called not just on user actions but whenever the native app
   // pushes a fresh playlist payload (cupitorPlaylists → buildPlaylistsWithManualCards).
-  // Without this, every native push while the user is scrolling snaps the list
-  // back to the top — the WebView-only "slowly scrolls back to top" bug.
+  // A background refresh while the user is scrolling must not snap the list
+  // back to the top. This applies to browser and native-app updates alike.
   const _wasOpen = $dlg.hasClass('ui-dialog-content') && $dlg.is(':visible')
   const _prevDialogPosition = _wasOpen ? {
     position: 'fixed', top: $dlg.closest('.ui-dialog').css('top'), left: $dlg.closest('.ui-dialog').css('left')
@@ -16056,8 +16056,7 @@ function openRecordingReviewDialog() {
   Object.assign($dlg[0], { _recShowing: currentName, _recPage: review.page, _recRenderedPage: review.page })
   $dlg.attr('data-rec-start', review.start)
   const searchTexts = Object.keys(review.groups)
-  // Native scrolling stays within a bounded page. Android WebViews can fail
-  // to scroll/paint a single very tall playlist even without page handlers.
+  // Keep each page's native scroll surface bounded.
   const pageNav = review.pageCount > 1 ? `<nav class="rec-page-nav" aria-label="Playlist pages">
     <button type="button" class="rec-page-step" data-page="${review.page - 1}" aria-label="Previous playlist page"${review.page === 0 ? ' disabled' : ''}>‹</button>
     <label>Page <input class="rec-page-input" type="number" min="1" max="${review.pageCount}" value="${review.page + 1}" aria-label="Playlist page"> / ${review.pageCount}</label>
