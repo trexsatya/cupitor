@@ -4,7 +4,7 @@ const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { fixtures } = require('./recorded-playlist-pages.cjs')
+const { fixtures, choosePlaylist } = require('./recorded-playlist-pages.cjs')
 const data = require('./fixtures/recorded-playlists.json')
 const root = path.resolve(__dirname, '../..', process.env.CUPITOR_TEST_ASSETS || 'public')
 
@@ -56,12 +56,20 @@ async function checkMomentum(browser, full) {
       }, { passive: true })
     }, data)
     const session = await page.context().newCDPSession(page)
+    await page.evaluate(() => window.openRecordingReviewDialog())
     for (const [name, rec] of Object.entries(data.playlists)) {
-      await page.evaluate(name => { window.selectRecording(name); window.openRecordingReviewDialog() }, name)
+      await choosePlaylist(page, name, true)
       await page.waitForFunction(() => !document.querySelector('#recordingReviewDialog [data-pending]'))
       const total = Object.values(rec.items).flatMap(words => Object.values(words).flat()).length
       assert.equal(await page.locator('#recordingReviewDialog .rec-item').count(), full ? total : 50)
-      for (const mode of ['plain', 'refresh', 'resize']) {
+      for (const mode of ['plain', 'refresh', 'resize', 'picker-refresh']) {
+        if (mode === 'picker-refresh') {
+          // A native playlist update can rebuild the dialog while the user
+          // is still searching in its picker, without selecting an option.
+          await page.locator('#recordingReviewDialog .rec-rec-header .select2-selection').tap()
+          await page.evaluate(() => window.openRecordingReviewDialog())
+          assert.equal(await page.locator('.select2-dropdown').count(), 0)
+        }
         const start = await page.locator('#recordingReviewDialog').evaluate((el, mode) => {
           window.scrollTo({ top: 5000, behavior: 'instant' })
           el.scrollTop = Math.min(2500, Math.floor((el.scrollHeight - el.clientHeight) / 2))
