@@ -272,7 +272,6 @@ import {
 } from './caption-capture.js';
 import { cardHtml as _cardHtml, cardPlainText as _cardPlainText, driveImageUrl as _driveImageUrl } from './card-html.js';
 import { openImageViewer } from './image-viewer.js';
-import { installScrollRescue } from './scroll-rescue.js';
 import {
   findManualCards as _findManualCards,
   renderManualResultsHtml as _renderManualResultsHtml,
@@ -301,7 +300,6 @@ import {
   pruneMissingLocalTracks as _pruneMissingLocalTracks,
   musicNeedsReload as _musicNeedsReload,
 } from './music-bed.js';
-import { gestureAxis as _gestureAxis, nativeScrollVerdictStale as _nativeScrollVerdictStale, createScrollVelocity } from './scroll-gesture.js';
 import {
   clipRange as _clipRange,
   contiguousLineWindow as _contiguousLineWindow,
@@ -16014,241 +16012,6 @@ $(function () {
   if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 50 }).catch(() => {})
 })
 
-// Make a dialog's content element scrollable on old Android System WebView,
-// which cannot scroll an overflow:auto element whose content exceeds its max
-// compositing-layer/texture height (~16384px). The Recorded Searches list can
-// be ~23000px tall, so native scroll (and even programmatic scrollTop) silently
-// reverts to 0 there — while it works everywhere else. Confirmed on-device: the
-// dialog had identical computed styles to the Playback Queue dialog (which
-// scrolls fine at ~11600px); only the content height differed, and neither
-// position:fixed nor position:absolute changed it.
-//
-// The fix drives the scroll ourselves WITHOUT the native scroll mechanism and
-// WITHOUT a composited transform (a transform would allocate the same
-// oversized layer): wrap the content and offset it with `position:relative;
-// top:-N`, which is a paint-path move — the browser only rasterises the visible
-// slice, so there's no height limit. overflow:hidden clips it; a touch handler
-// translates it from finger deltas with light momentum.
-//
-// Feature-detected: only engages when native scroll is actually broken (a
-// probe scrollTop that reverts within a frame), so mobile Chrome / desktop keep
-// native scrolling, momentum, and jQuery UI drag-reorder untouched.
-function _installWebViewScroll(el) {
-  if (!el) return
-  // Nothing here can be measured while the dialog is shut, and the re-check
-  // that follows the previews can easily land after someone has closed it. A
-  // hidden element measures zero, which would clamp the remembered position to
-  // the top and lose the user's place for the next open.
-  if (!el.clientHeight) return
-  const rewrap = () => {
-    // Where the user was. The dialog re-renders on every native playlist push,
-    // and the offset lives on the container, which survives that — so it can be
-    // put back rather than snapping the list to the top under someone's thumb.
-    // Arriving here from native scroll the offset is still 0, so take the
-    // position from whichever mechanism was carrying it.
-    const keep = el._fsOff || el.scrollTop || el._fsWantTop || 0
-    // (Re)wrap the freshly-rendered children — the dialog HTML is rebuilt each
-    // open — into a single relatively-positioned inner element we can offset.
-    // Wrapping is also asked for without a re-render, when the list changes
-    // size under us; wrapping a wrapper would leave two `top` offsets in the
-    // chain and move the content by their sum, so an existing one is reused.
-    const existing = el.firstElementChild
-    const reuse = el.childNodes.length === 1 && existing &&
-      existing.classList && existing.classList.contains('wv-fakescroll-inner')
-    // A refreshed/replaced playlist must not inherit the old list's gesture
-    // or animation. A size-only recheck of the same wrapper can keep moving.
-    if (!reuse && el._fsStop) el._fsStop()
-    const inner = reuse ? existing : document.createElement('div')
-    if (!reuse) {
-      inner.className = 'wv-fakescroll-inner'
-      inner.style.position = 'relative'
-      while (el.firstChild) inner.appendChild(el.firstChild)
-      el.appendChild(inner)
-    }
-    inner.style.top = '0px'
-    // Only the vertical axis has a height problem. Sideways the content is
-    // nowhere near the layer ceiling, so that axis keeps native scrolling —
-    // clipping both was what left a wide row with no way to reach its end.
-    el.style.overflowX = 'auto'
-    el.style.overflowY = 'hidden'
-    // pan-x, not none: the browser still owns sideways dragging, and we take
-    // over only once a gesture turns out to be a vertical one.
-    el.style.touchAction = 'pan-x'
-    el._fsInner = inner
-    el._fsOff = 0
-    // Moving the inner element changes layout — that is the whole point of
-    // offsetting it rather than transforming it — so reading its height right
-    // after writing `top` forces the layout to be redone. Once per gesture is
-    // enough: the list cannot grow under a finger that is already down.
-    el._fsMax = null
-    el._fsApply = (v) => {
-      if (el._fsMax == null) el._fsMax = Math.max(0, inner.offsetHeight - el.clientHeight)
-      el._fsOff = Math.min(el._fsMax, Math.max(0, v))
-      inner.style.top = (-el._fsOff) + 'px'
-    }
-    el._fsMax = null
-    el._fsApply(keep)
-    // The playlist-switcher select2 dropdown would be clipped by overflow:hidden,
-    // so re-home it on <body> when we're in fake-scroll mode.
-    try {
-      const $sel = $(el).find('#recRecSelect')
-      if ($sel.length && $sel.hasClass('select2-hidden-accessible')) {
-        $sel.select2('destroy')
-        $sel.select2({ width: 'resolve', dropdownParent: $(document.body) })
-      }
-    } catch (_) {}
-    bindOnce()
-  }
-  function bindOnce() {
-    if (el._fsBound) return
-    el._fsBound = true
-    let startY = 0, startX = 0, startOff = 0, dragging = false
-    let momentum = null
-    const motion = createScrollVelocity()
-    // Which way this gesture turned out to go. Undecided until it has moved far
-    // enough to tell: claiming it on the first pixel makes a sideways drag
-    // jump the list, and never claiming it leaves the list unable to move.
-    let axis = null
-    const AXIS_SLOP = 6
-    const stopMomentum = () => { if (momentum) { cancelAnimationFrame(momentum); momentum = null } }
-    el._fsStop = () => { stopMomentum(); dragging = false; axis = null }
-    const arm = (t, at) => {
-      startY = t.clientY
-      startX = t.clientX
-      startOff = el._fsOff || 0
-      motion.reset(startY, at); dragging = true; axis = null
-      // The list may have been rebuilt since the last gesture.
-      el._fsMax = null
-    }
-    el.addEventListener('touchstart', e => {
-      stopMomentum()
-      if (!e.touches || e.touches.length !== 1) { dragging = false; return }
-      arm(e.touches[0], e.timeStamp)
-    }, { passive: true })
-    el.addEventListener('touchmove', e => {
-      if (!dragging || !el._fsInner || !e.touches || !e.touches.length) return
-      const y = e.touches[0].clientY
-      const x = e.touches[0].clientX
-      motion.record(y, e.timeStamp)
-      if (axis === null) {
-        // Sideways is only worth giving away when there is somewhere sideways
-        // to go; otherwise a thumb's diagonal start kills the whole gesture.
-        const canX = el.scrollWidth > el.clientWidth + 1
-        axis = _gestureAxis(x - startX, y - startY, canX, AXIS_SLOP)
-        if (axis === null) return
-      }
-      // Sideways is the browser's to handle, and preventing it here is exactly
-      // what stopped it working.
-      if (axis === 'x') return
-      if (el._fsApply) el._fsApply(startOff + (startY - y))
-      if (e.cancelable) e.preventDefault()
-    }, { passive: false })
-    const end = (e) => {
-      // A second finger disarms the gesture. When it lifts and one is still
-      // down, take that one up — otherwise the list stays dead under a finger
-      // that never left the screen, until every finger has gone.
-      if (e && e.touches && e.touches.length === 1) { stopMomentum(); arm(e.touches[0], e.timeStamp); return }
-      if (!dragging) return
-      dragging = false
-      if (axis !== 'y') { axis = null; return }
-      axis = null
-      let v = -motion.velocity(e.timeStamp) * 16
-      const step = () => {
-        if (Math.abs(v) < 0.5 || !el._fsInner) { momentum = null; return }
-        const before = el._fsOff || 0
-        if (el._fsApply) el._fsApply(before + v)
-        if (el._fsOff === before) { momentum = null; return }
-        v *= 0.93
-        momentum = requestAnimationFrame(step)
-      }
-      if (Math.abs(v) >= 0.5) momentum = requestAnimationFrame(step)
-    }
-    el.addEventListener('touchend', end)
-    el.addEventListener('touchcancel', () => el._fsStop())
-  }
-  // Already in fake-scroll mode (a prior open detected the bug) → just re-wrap.
-  if (el._fsBound) { rewrap(); return }
-  // Asked and answered — but an answer is only good for the height it was
-  // given at. What fails here is a content-height limit: the same element
-  // scrolls perfectly at 12000px and stops at 23000px. The row previews are
-  // fetched after the first render and each one turns an empty span into a
-  // line of text, which is easily enough to carry a long list over that line
-  // — so a list that was measured before they landed gets a "native scroll is
-  // fine" that stops being true a moment later, and the answer used to be
-  // kept for the life of the element.
-  //
-  // So the verdict is remembered against the height it was taken at, and asked
-  // again once the list is a different size. Only where the limit is anywhere
-  // near, though: the probe moves the list to find out whether it can be
-  // moved, and running it on every re-render dragged people back to the top on
-  // the browsers where scrolling worked perfectly well.
-  if (el._fsNativeOk && !_nativeScrollVerdictStale(el.scrollHeight, el._fsOkAt)) return
-  // Nothing to scroll → leave alone.
-  if (el.scrollHeight <= el.clientHeight + 4) return
-  // One question at a time. The re-check after the previews land is a
-  // microtask, so when there is nothing left to fetch it runs before this
-  // probe's frames do — and a second probe started in the meantime would watch
-  // the first one put the list back and read that as proof that the list
-  // cannot be moved. The list was moving perfectly well; it would be handed to
-  // a touch-only scroller anyway, leaving a desktop with a dead mouse wheel.
-  if (el._fsProbing) return
-  el._fsProbing = true
-  // Probe near the current position. Moving to 2px while previews arrive
-  // visibly pulls a long list upwards, even when native scrolling works.
-  const before = el.scrollTop
-  const probedAt = el.scrollHeight
-  let interrupted = false
-  const onInput = () => { interrupted = true }
-  const inputs = ['touchstart', 'touchmove', 'wheel', 'pointerdown', 'keydown']
-  inputs.forEach(type => el.addEventListener(type, onInput, { passive: true, capture: true }))
-  // Only a restore that happens while this probe is in flight should be
-  // honoured below; anything left over from a previous open is not where the
-  // user is now.
-  el._fsWantTop = null
-  const probeTop = before < el.scrollHeight - el.clientHeight - 2 ? before + 2 : Math.max(1, before - 2)
-  el.scrollTop = probeTop
-  const appliedTop = el.scrollTop
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    const current = el.scrollTop
-    const nativeWorks = current >= 1
-    el._fsProbing = false
-    inputs.forEach(type => el.removeEventListener(type, onInput, { capture: true }))
-    if (!el.clientHeight) return
-    // Reaching the top during a gesture is not evidence of broken native
-    // scrolling. Ask again after that input has had a chance to settle.
-    if (interrupted) {
-      clearTimeout(el._fsProbeRetry)
-      el._fsProbeRetry = setTimeout(() => _installWebViewScroll(el), 160)
-      return
-    }
-    // Back where it was, not to the top — and if the caller restored the
-    // position, honour that too. A gesture or native momentum that moved
-    // since the probe takes precedence over either saved position.
-    if (current === appliedTop || current === el._fsWantTop) {
-      el.scrollTop = el._fsWantTop != null ? el._fsWantTop : before
-    }
-    if (nativeWorks) { el._fsNativeOk = true; el._fsOkAt = probedAt }
-    else rewrap()
-  }))
-}
-
-// Where a dialog is scrolled to, and how to put it back — asked of whichever
-// mechanism is actually moving it. On a WebView driven by the fake scroller
-// above, scrollTop is always 0 and always will be; reading it there is what
-// made every attempt to preserve the position a no-op.
-function _recDlgScrollPos(el) {
-  if (!el) return 0
-  return el._fsInner ? (el._fsOff || 0) : (el.scrollTop || 0)
-}
-
-function _recDlgScrollTo(el, v) {
-  if (!el) return
-  if (typeof el._fsApply === 'function') el._fsApply(v)
-  // Remembered as well as set: a native-scroll probe may be in flight, and it
-  // puts back the position it read before this ran.
-  else { el._fsWantTop = v; el.scrollTop = v }
-}
-
 // Number every row in the dialog, top to bottom, so an item can be named by
 // position and the length of a playlist is visible at a glance.
 //
@@ -16298,7 +16061,7 @@ function openRecordingReviewDialog() {
   // opens the new list part-way down, or at its end if it is the shorter of
   // the two — so only a refresh of the same list gets its place kept.
   const _sameList = !!($dlg[0] && $dlg[0]._recShowing === currentName)
-  const _prevScrollTop = _wasOpen && _sameList ? _recDlgScrollPos($dlg[0]) : 0
+  const _prevScrollTop = _wasOpen && _sameList ? $dlg[0].scrollTop : 0
   if ($dlg[0]) $dlg[0]._recShowing = currentName
   let html = ''
   // ── Header: switch / create / new-virtual / rename / duplicate / delete ──
@@ -16799,30 +16562,13 @@ function openRecordingReviewDialog() {
       $sel.select2({ width: 'resolve', dropdownParent: $dlg })
     }
   } catch (_) {}
-  // After the dialog renders, fetch any missing subtitles in the background
-  // and populate the per-row preview spans. Fire-and-forget — if it fails
-  // the row just shows "(no preview available)".
-  // Each preview turns an empty span into a line of text, so the list is
-  // taller once they land than it was when the scroller sized it up — and on a
-  // WebView that difference decides whether native scroll works at all. Hand
-  // back once they are in so the list is judged at the size it ended up.
+  // Previews update in place; native scrolling and scroll anchoring handle
+  // their layout changes without probing or rewriting the scroll position.
   _lazyLoadRecItemPreviews($dlg)
-    .then(() => { try { _installWebViewScroll($dlg[0]) } catch (_) {} })
     .catch(e => console.warn('preview lazy-load failed', e))
-  // Install first: on a WebView this re-wraps the freshly-rendered rows, and
-  // the position can only be set once there is something to set it on.
-  try { _installWebViewScroll($dlg[0]) } catch (_) {}
-  // Put the user back where they were. This runs on every native playlist push
-  // and every return from an editor, not just on a deliberate re-open — a list
-  // that jumps to the top each time is unusable at any length.
-  if (_wasOpen && _prevScrollTop) {
-    try { _recDlgScrollTo($dlg[0], _prevScrollTop) } catch (_) {}
-  } else if (_wasOpen && !_sameList) {
-    // A different playlist starts at its beginning. The fake scroller keeps
-    // its offset on the element and puts it back when it re-wraps, so leaving
-    // it alone would open the new list wherever the old one had been left.
-    try { _recDlgScrollTo($dlg[0], 0) } catch (_) {}
-  }
+  // Restore only as part of this synchronous render. A later callback must
+  // never overwrite a newer user scroll. Switching playlists starts at 0.
+  if (_wasOpen) $dlg[0].scrollTop = _prevScrollTop
 }
 
 // Poll a captured clip to its end. The surrounding attempt bounds every
@@ -20577,12 +20323,6 @@ function openPracticeMode(opts) {
 }
 window.openPracticeMode = openPracticeMode
 
-// The app's WebView can stop touch-scrolling until it is restarted; the page
-// takes over scrolling when it sees that happen (scroll-rescue.js).
-if ('ontouchstart' in window) {
-  try { installScrollRescue() } catch (e) { console.warn('scroll rescue not installed', e) }
-}
-
 // A picture in a card opens full screen to be zoomed: the page itself cannot
 // be pinch-zoomed. In Practice and in the playing view, which both show a
 // card's HTML.
@@ -22488,7 +22228,6 @@ window.resumeRecording          = resumeRecording
 window.stopRecording            = stopRecording
 window.clearRecording           = clearRecording
 window.openRecordingReviewDialog= openRecordingReviewDialog
-window._installWebViewScroll    = _installWebViewScroll
 window.playRecording            = playRecording
 window.stopPlayingRecording     = stopPlayingRecording
 window.togglePlayingRecordingPause = togglePlayingRecordingPause
