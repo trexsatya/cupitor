@@ -58,12 +58,12 @@ async function checkScroll(browser, mobile) {
         deepNative.push({ wanted: top, actual: el.scrollTop })
         console.info('[recorded-scroll] refreshed at ' + el.scrollTop)
       }
-      el.scrollTop = 1200
+      el.scrollTop = 800
       window.openRecordingReviewDialog()
       await frames()
       const refreshed = el.scrollTop
       // A user scroll after rendering must survive all pending preview work.
-      el.scrollTop = 1600
+      el.scrollTop = 1000
       await frames(20)
       const afterPreviews = el.scrollTop
       window._recordings.Other = { items }
@@ -74,22 +74,31 @@ async function checkScroll(browser, mobile) {
       window._recording.currentName = 'Scroll test'
       window.openRecordingReviewDialog()
       await frames()
-      el.scrollTop = 1600
+      el.scrollTop = 1000
       return { height: el.scrollHeight, rows: el.querySelectorAll('.rec-item').length,
         deepNative, refreshed, afterPreviews, switched }
     }, itemCount)
-    assert.equal(native.rows, itemCount)
+    assert.equal(native.rows, Math.min(50, itemCount), 'only a bounded page enters the DOM')
     assert(native.deepNative.every(p => p.actual === p.wanted), 'deep native positions survive refresh')
-    assert(native.height > 16384, 'exercise a list beyond the former fallback threshold')
-    assert.equal(native.refreshed, 1200)
-    assert.equal(native.afterPreviews, 1600, 'pending previews cannot overwrite a newer user scroll')
+    assert(native.height < 16384, 'a huge playlist must not create an oversized scroll surface')
+    assert.equal(native.refreshed, 800)
+    assert.equal(native.afterPreviews, 1000, 'pending previews cannot overwrite a newer user scroll')
     assert.equal(native.switched, 0, 'switching playlists starts at the beginning')
+
+    for (const p of [Math.ceil(itemCount / 100), Math.ceil(itemCount / 50), 1]) {
+      await page.locator('.rec-page-input').first().fill(String(p))
+      await page.locator('.rec-page-input').first().press('Tab')
+      const start = (p - 1) * 50 + 1
+      assert.equal(await page.locator('#recordingReviewDialog .rec-item-no').first().innerText(), String(start))
+      assert.equal(await page.locator('#recordingReviewDialog .rec-item').count(), Math.min(50, itemCount - start + 1))
+    }
+    await page.locator('#recordingReviewDialog').evaluate(el => { el.scrollTop = 1000 })
 
     if (!mobile) {
       const box = await page.locator('#recordingReviewDialog').boundingBox()
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
       await page.mouse.wheel(0, 240)
-      await page.waitForFunction(() => document.getElementById('recordingReviewDialog').scrollTop > 1700)
+      await page.waitForFunction(() => document.getElementById('recordingReviewDialog').scrollTop > 1100)
       await page.evaluate(async () => { const { el, frames } = window._scrollTest; el.scrollTop = 0; await frames() })
       const first = await page.locator('#recordingReviewDialog .rec-item:nth-child(1) .rec-drag').boundingBox()
       const third = await page.locator('#recordingReviewDialog .rec-item:nth-child(3) .rec-drag').boundingBox()
@@ -99,6 +108,7 @@ async function checkScroll(browser, mobile) {
       await page.mouse.up()
       await page.waitForFunction(() => window._recording.items.word.word[0].id !== 'mc-0', undefined, { timeout: 10000 })
       assert.equal(await page.locator('#recordingReviewDialog .rec-item-no').first().innerText(), '1')
+      assert.equal(await page.evaluate(() => window._recording.items.word.word.length), itemCount, 'dragging retains items on other pages')
     } else {
       // Repeated DOM-only gestures must never activate a page-driven scroller
       // or cancel touchmove. This reproduces the old rescue's two-miss trigger.
@@ -172,7 +182,7 @@ async function checkScroll(browser, mobile) {
       assert.equal(sideways, 100)
     }
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'Mobile' : 'Desktop'} native Recorded Searches scrolling passed: ${native.rows} rows, ${native.height}px tall`)
+    console.log(`${mobile ? 'Mobile' : 'Desktop'} native Recorded Searches scrolling passed: ${itemCount} items, ${native.rows} rendered rows, ${native.height}px tall`)
   } finally { await page.close() }
 }
 
