@@ -10814,7 +10814,7 @@ function test_data() {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function playMediaSlice(url, start, end, source, { isCurrent = () => true, forceLoad = false, now,
-  confirmSeek = false, isForeground, preparePlayer } = {}) {
+  confirmSeek = false, requirePlaying = false, isForeground, preparePlayer } = {}) {
   if (!isCurrent()) return
   if (source === 'YouTube') {
     showMediaContainer()
@@ -10833,7 +10833,7 @@ async function playMediaSlice(url, start, end, source, { isCurrent = () => true,
       try {
         if (preparePlayer) preparePlayer(window.ytPlayer)
         const landed = await seekToYoutubeTime(start, { isCurrent, confirmVideoId: confirmSeek ? url : undefined,
-          requirePlaying: needsLoad, now, isForeground })
+          requirePlaying: requirePlaying || needsLoad, now, isForeground })
         if (confirmSeek && !landed) throw Object.assign(new Error('Seek cancelled'), { kind: 'cancelled' })
         return
       } catch (e) {
@@ -14285,14 +14285,19 @@ function _cardHasPlayableMedia(it) {
 // Load a manual card's YouTube link into the embedded player at the moment
 // the link names (`t=95`, as a captured caption or video note writes it) —
 // not at the start of the video. A video already loaded is just moved there.
-async function _cueManualCardVideo(it) {
+function _manualCardVideo(it) {
   const media = _parseMediaUrl(it && it.mediaUrl)
   const id = (it && it.mediaVideoId) || (media && media.kind === 'youtube' ? media.id : null)
-  if (!id) return
+  return id ? { id, timeStart: _youtubeStartSeconds(it && it.mediaUrl) } : null
+}
+
+async function _cueManualCardVideo(it) {
+  const video = _manualCardVideo(it)
+  if (!video) return
+  const { id, timeStart: target } = video
   // Only the latest cue may move the player: a cue still loading when another
   // card asks for its own video must not seek that one to its time.
   const tok = window._manualCueToken = (window._manualCueToken || 0) + 1
-  const target = _youtubeStartSeconds(it.mediaUrl)
   const isCurrent = () => tok === window._manualCueToken
   window.mediaSelected = { link: id, source: 'link' }
   await changeMediaIfNeededTo(window.mediaSelected, { isCurrent, startSeconds: target, respectInterval: false })
@@ -16576,6 +16581,9 @@ function openRecordingReviewDialog() {
     })
   }
 
+  // Inspect the entire playlist, including entries beyond the current page.
+  const hasCapturedItems = Object.values(items).some(words => Object.values(words || {}).some(arr =>
+    Array.isArray(arr) && arr.some(it => it && !_isManualItem(it))))
   const opts = {
     title: 'Recorded Searches',
     width: Math.min(720, $(window).width() - 40),
@@ -16598,14 +16606,14 @@ function openRecordingReviewDialog() {
       // Both action buttons prompt to resume-or-restart when there's a
       // recoverable last-played item on THIS playlist (see
       // _maybeResumeStartItem). Cancel in the confirm = start fresh.
-      'Play All':  function () {
+      'Play All': { text: 'Play All', disabled: !hasCapturedItems, click: function () {
         const $w = $(this).closest('.ui-dialog')
         try { $(this).dialog('close') } catch (_) {}
         $w.hide()
         try { autoHideSettingsPanel() } catch (_) {}
         const resumeQueue = _maybeResumeStartItem('play')
         playRecording(resumeQueue ? { resumeQueue } : undefined)
-      },
+      } },
       'Practice':  function () {
         const $w = $(this).closest('.ui-dialog')
         try { $(this).dialog('close') } catch (_) {}
@@ -21590,7 +21598,7 @@ async function _renderPracticeCard() {
   // and surface an optional media link. Reuses the same flip/hide/both
   // reveal modes and the same .practice-front / .practice-back faces.
   if (_isManualItem(it)) {
-    _renderPracticeManualCard($p, it, idx, cards.length, frontIsSource, mode, srcCode)
+    _renderPracticeManualCard($p, it, idx, cards.length, frontIsSource, mode, srcCode, videoRequest)
     return
   }
   // Show the card only after subtitles + vocabulary are loaded, so the subtitle
@@ -21676,7 +21684,42 @@ function _cardTextEl(text) {
   return $el.toggleClass('card-html', isHtml).html(html)
 }
 
-function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcCode) {
+async function _playPracticeManualVideo(it) {
+  const video = _manualCardVideo(it)
+  if (!video) return
+  const request = _newPracticeVideoRequest({ mute: true })
+  const ownsRequest = () => _practiceVideoCues.isCurrent(request)
+  const deadline = Date.now() + VIDEO_RECOVERY_MS
+  const isCurrent = () => ownsRequest() && Date.now() < deadline
+  const pending = {}
+  window._practicePlayPending = pending
+  try {
+    await waitUntil(() => !isCurrent() || window.ytPlayerReady)
+    if (!ownsRequest()) return
+    if (!isCurrent()) throw new Error('The linked video player did not become ready')
+    // A cued iframe can report zero, or a cached time from the previous
+    // card. Confirm the linked moment while PLAYING and still muted; retry
+    // ignored seeks by loading at startSeconds, within one bounded request.
+    await playMediaSlice(video.id, video.timeStart, null, 'YouTube', {
+      isCurrent, confirmSeek: true, requirePlaying: true,
+    })
+    if (!ownsRequest()) return
+    if (!isCurrent()) throw new Error('The linked video did not reach its timestamp')
+    _practiceVideoCues.beginPlayback(request)
+    window._practicePlaybackCard = it
+  } catch (e) {
+    if (ownsRequest()) {
+      try { window.ytPlayer.pauseVideo() } catch (_) {}
+      _practiceVideoCues.releaseMute()
+      console.warn('practice: linked video failed', e)
+      _cpBuildToast('Could not start the linked video at its timestamp. Try Play again.')
+    }
+  } finally {
+    if (window._practicePlayPending === pending) window._practicePlayPending = null
+  }
+}
+
+function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcCode, videoRequest) {
   // Hide controls that only apply to video clips. Removed when the next
   // (video) card renders by the restore-block at the top of _renderPracticeCard.
   $p.find('.practice-ctx-ctrl').hide()
@@ -21722,9 +21765,7 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
       ev.preventDefault(); ev.stopPropagation()
 
       if (isYT) {
-        // Cue into the embedded player, at the moment the link names.
-        _practiceVideoCues.beginPlayback(_newPracticeVideoRequest())
-        _cueManualCardVideo(it)
+        _playPracticeManualVideo(it)
       } else if (isAudio) {
         // Bridge-loaded preview with toggle: click while playing stops it;
         // navigating away or closing Practice also stops it.
@@ -21734,6 +21775,9 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
       }
     })
     $p.find('.practice-nav .practice-play').after($btn)
+    // Preparing each card must also update the iframe's own Play button.
+    // Reusing the previous card's player leaves its old/zero start in place.
+    if (isYT) _cuePracticeVideo(_manualCardVideo(it), videoRequest)
   }
 
   // "Open in EPUB" — for cards that carry book/chapter metadata (from the
@@ -21925,6 +21969,7 @@ function _togglePracticePlayback() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
   if (_isManualItem(it)) {
+    if (window._practicePlayPending) { _renderPracticeCard(); return }
     const audio = $('#practiceAudio .rec-pa-el')[0]
     if (audio && audio.src) {
       if (!audio.paused) audio.pause()
