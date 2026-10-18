@@ -25,6 +25,10 @@ async function checkViewSwitching(browser) {
       window._recPlayIndex === index && window._recPlayCurrentItem === window._recPlayQueue[index] && window._recNavGotoIndex == null, index)
     const order = () => page.evaluate(() => (window._practiceActive ? window._practiceCards : window._recPlayQueue)
       .map(item => item.id + ':' + (item.timeStart || 0)))
+    const playOnMain = () => page.evaluate(async () => {
+      window.mediaSelected = { link: 'testVideo01', source: 'link' }
+      await window.playSelectedMedia()
+    })
     const expected = ['testVideo02:3', 'recorded-card:0', 'testVideo01:5', 'text-only:0', 'testVideo01:1']
     const checkBackdrop = async () => {
       const state = await page.evaluate(() => {
@@ -34,6 +38,7 @@ async function checkViewSwitching(browser) {
       })
       assert.deepEqual(state, { color: 'rgb(10, 10, 10)', position: 'fixed', content: '""', underlyingHit: false })
       assert.equal(await page.locator('#search-pagination').isVisible(), false, 'search pagination is hidden in either study view')
+      assert.equal(await page.locator('#mediaControls').isVisible(), false, 'main-page speed panel is hidden in either study view')
     }
     try {
       await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
@@ -70,6 +75,7 @@ async function checkViewSwitching(browser) {
         leak.onclick = () => window.__underlyingClicks++
         document.body.appendChild(leak)
         document.getElementById('resultContainer').style.display = 'block'
+        document.getElementById('mediaRelatedContainer').style.display = 'block'
         document.getElementById('search-pagination').style.display = 'block'
         window.__paginationWasVisible = !!document.getElementById('search-pagination').getClientRects().length
         window.__playerTask = window.playRecording({ resumeQueue: { queue: window.__switchQueue, pos: 2 }, startPaused: true })
@@ -96,8 +102,16 @@ async function checkViewSwitching(browser) {
       await page.locator('#recPlayingMinimizeBtn').waitFor({ state: 'visible' })
       assert.equal(await page.evaluate(() => window.__underlyingClicks), 0, 'underlying page cannot receive Player taps')
       await page.locator('#recPlayingMinimizeBtn').click()
+      assert.equal(await page.locator('#mediaControls').isVisible(), false, 'Player minimize cannot uncover its old main-page speed panel')
       assert.equal(await page.evaluate(() => getComputedStyle(document.body, '::before').content), 'none')
       assert.equal(await page.locator('#search-pagination').isVisible(), true, 'minimizing restores search pagination')
+      if (process.env.SCREENSHOT_DIR) {
+        // The click-catching fixture covers the page in magenta. Hide only
+        // that fixture while capturing the real minimized page and pill.
+        await page.locator('#underlying-page-widget').evaluate(el => { el.style.visibility = 'hidden' })
+        await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `cupitor-player-minimized-${mobile ? 'mobile' : 'desktop'}.png`), animations: 'disabled' })
+        await page.locator('#underlying-page-widget').evaluate(el => { el.style.visibility = '' })
+      }
       await page.mouse.click(2, 52)
       assert.equal(await page.evaluate(() => window.__underlyingClicks), 1, 'Player minimize returns interaction to the main page')
       await page.locator('.rec-pill-restore').click()
@@ -165,6 +179,7 @@ async function checkViewSwitching(browser) {
         await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `cupitor-practice-switch-${mobile ? 'mobile' : 'desktop'}.png`) })
       }
       await page.locator('#practiceMode .practice-minimize').click()
+      assert.equal(await page.locator('#mediaControls').isVisible(), false, 'Practice minimize cannot uncover the main-page speed panel')
       assert.equal(await page.evaluate(() => getComputedStyle(document.body, '::before').content), 'none')
       await page.mouse.click(2, 200)
       assert.equal(await page.evaluate(() => window.__underlyingClicks), 1, 'minimize returns interaction to the main page')
@@ -209,6 +224,24 @@ async function checkViewSwitching(browser) {
       await page.locator('#practiceMode .practice-close').click()
       await page.evaluate(() => window.stopPlayingRecording())
       await page.evaluate(() => window.__coldPlayerTask)
+      // Ordinary search-result playback still opens the main-page panel,
+      // including after closing either study view.
+      await playOnMain()
+      assert.equal(await page.locator('#mediaControls').isVisible(), true, 'main-page playback opens its speed controls')
+      await page.evaluate(() => window.openPracticeMode({ resumeQueue: { queue: window.__switchQueue, pos: 4 } }))
+      await practiceAt(4)
+      assert.equal(await page.locator('#mediaControls').isVisible(), false)
+      await page.locator('#practiceMode .practice-minimize').click()
+      assert.equal(await page.locator('#mediaControls').isVisible(), false, 'Practice clears a previously open main-page panel')
+      await playOnMain()
+      assert.equal(await page.locator('#mediaControls').isVisible(), true, 'explicit main-page playback works with Practice parked')
+      await page.locator('#practiceMode .practice-restore-btn').click()
+      await page.locator('#practiceMode .practice-minimize').click()
+      assert.equal(await page.locator('#mediaControls').isVisible(), false, 'restoring/minimizing Practice clears main-page controls again')
+      await page.locator('#practiceMode .practice-restore-btn').click()
+      await page.locator('#practiceMode .practice-close').click()
+      await playOnMain()
+      assert.equal(await page.locator('#mediaControls').isVisible(), true, 'closing Practice does not disable main-page controls')
       assert.deepEqual(errors, [])
       console.log(`${mobile ? 'Mobile' : 'Desktop'}: opaque Player/Practice, same-item two-way switching, duplicate video ids, recorded/text-only cards and queue order passed`)
     } finally { await page.close() }

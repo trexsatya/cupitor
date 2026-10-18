@@ -5335,6 +5335,13 @@ function hideResultContainer() {
 }
 
 function showMediaRelatedContainer() {
+  // Shared playback helpers must not open main-page controls behind either
+  // study overlay. Main-page playback can open them again when it is visible.
+  if ((window._playingRecording && !window._recPlayMinimized) ||
+    (window._practiceActive && !window._practiceMinimized)) {
+    hideMediaRelatedContainer()
+    return
+  }
   $('#mediaRelatedContainer').show()
   updateToggleButtonView('mediaRelatedContainer')
 }
@@ -10777,7 +10784,7 @@ async function playMediaSlice(url, start, end, source, { isCurrent = () => true,
   if (!isCurrent()) return
   if (source === 'YouTube') {
     showMediaContainer()
-    showMediaRelatedContainer();
+    if (!confirmSeek) showMediaRelatedContainer()
     let needsLoad = true
     try { needsLoad = forceLoad || !window.ytPlayer || !window.ytPlayer.getVideoUrl().includes(url) } catch (_) {}
     while (isCurrent()) {
@@ -19155,12 +19162,9 @@ async function playRecording(opts) {
   $('.ui-dialog-content:visible').each(function () {
     try { $(this).dialog('close') } catch (_) {}
   })
-  // The side player panel is redundant in play mode (the floating overlay owns
-  // the controls). `body.rec-playing #mediaRelatedContainer { display:none
-  // !important }` already hides it for the duration — no need to set inline
-  // display:none here. Doing so would leave the panel stuck-hidden after the
-  // user closes playback, since the inline style outlives the body class.
-  // (loadYoutubeVideo's re-show is already guarded by _playingRecording.)
+  // Clear the main-page panel's open state, rather than only covering it
+  // with overlay CSS: it must not reappear when Player is minimized.
+  hideMediaRelatedContainer()
   if (!$('#recPlayingQueueBtn').length) {
     // Sits in the middle of the transport row where the old Stop button
     // used to live. The real Close (✕) is now in the top-right corner.
@@ -20142,6 +20146,7 @@ function _searchCurrentRecPlayWord() {
 
 function minimizePlayingRecording() {
   if (!window._playingRecording) return
+  hideMediaRelatedContainer()
   window._recPlayMinimized = true
   // Pause playback so audio/video doesn't keep playing while the user is
   // doing something else on the main page.
@@ -20155,6 +20160,7 @@ function minimizePlayingRecording() {
 }
 function restorePlayingRecording({ resume = true } = {}) {
   if (!window._playingRecording) return
+  hideMediaRelatedContainer()
   window._recPlayMinimized = false
   $('body').addClass('rec-playing').removeClass('rec-playing-minimized')
   $('#recPlayingRestorePill').hide()
@@ -20361,10 +20367,9 @@ function openPracticeMode(opts) {
   _setOpenView('practice')
   // Any dialog left open before this covered the screen would be behind it.
   _liftOpenDialogsAboveOverlay()
-  // `body.practice-mode #mediaRelatedContainer { display:none !important }`
-  // already hides the side player panel while practice is open — no need to
-  // set inline display:none here, which would otherwise outlive the body
-  // class and leave the panel stuck-hidden after close.
+  // Practice owns its controls. Discard the main-page panel's open state
+  // so minimizing/closing Practice cannot uncover an unrelated speed panel.
+  hideMediaRelatedContainer()
 
   let $p = $('#practiceMode')
   if (!$p.length) {
@@ -20729,6 +20734,7 @@ function minimizePracticeMode() {
   try { _stopManualAudioPreview() } catch (_) {}
   if (!window._practiceActive) return
   window._practiceMinimized = true
+  hideMediaRelatedContainer()
   $('#practiceMode').addClass('minimized')
   $('body').removeClass('practice-mode')
   // Cancel any running stop-watcher so it doesn't fire on the restored clip
@@ -20747,6 +20753,7 @@ function restorePracticeMode() {
   // that no longer exists, with no visible way back. Exported, so it can be
   // called from outside the button that normally guarantees this.
   if (!window._practiceActive) return
+  hideMediaRelatedContainer()
   window._practiceMinimized = false
   $('#practiceMode').removeClass('minimized')
   $('body').addClass('practice-mode')

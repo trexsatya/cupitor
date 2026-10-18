@@ -179,6 +179,11 @@ Drag the horizontal divider between media and text to resize either view.
 Player and Practice remember separate positions. The divider also supports
 the up/down arrow keys; Home or double-click restores the default size.
 
+The main page's separate speed-radio and transport panel is cleared when
+Player or Practice opens, restores or minimizes. Study playback never opens
+it underneath the overlay. Playing a clip from the main page opens it normally,
+including when a study session is parked in its restore pill.
+
 Both views fade their controls after three idle seconds. The Player timer and
 progress bar stay visible and keep updating while the other controls are hidden.
 Tap the text or player to bring them back; the first tap only reveals controls, including
