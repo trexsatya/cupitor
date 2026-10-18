@@ -59,6 +59,7 @@ jobs:
         run: |
           node tests/browser/language-dialogs.cjs
           node tests/browser/search-result-counts.cjs
+          node tests/browser/compound-vocabulary-groups.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
 
       - name: Test complete subtitle capture merges and cache recovery
@@ -71,6 +72,7 @@ jobs:
 
       - name: Test built Player and Practice controls
         run: |
+          node tests/browser/compound-vocabulary-groups.cjs
           node tests/browser/player-replay.cjs
           node tests/browser/view-switching.cjs
           node tests/browser/practice-controls.cjs

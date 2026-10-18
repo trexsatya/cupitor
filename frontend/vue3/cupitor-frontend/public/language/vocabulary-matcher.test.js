@@ -54,6 +54,13 @@ test('an unknown compound modifier still retains the longest known head', () => 
   const results = matcher({ People: ['(corps)|kår|', '(year)|år|'] }).search('väljarkår')
   expect(results.map(r => r.line)).toEqual(['(corps)|kår|'])
 })
+test('compound matches retain their component and the actual inflected word', () => {
+  const m = matcher({ Words: ['(flow)|ränna|', '(stone)|sten|', '(persistence)|Droppen kan urholka stenen|'] })
+  for (const [query, constituent] of [['rännsten', 'sten'], ['rännstenar', 'stenar']]) {
+    const match = m.search(query).find(row => row.line.includes('Droppen'))
+    expect(match).toMatchObject({ kind: 'compound', constituent, matched: 'stenen' })
+  }
+})
 test('recognizes whole inflected families before trying unrelated compound fragments', () => {
   const m = matcher({ Words: ['(bullying)|översitteri|', '(clean)|rensa|ren|', '(hail)|hagel|', '(greedy)|hagalen|', '(lay)|lägga|'] })
   expect(m.search('översittarens').map(r => r.line)).toEqual(['(bullying)|översitteri|'])

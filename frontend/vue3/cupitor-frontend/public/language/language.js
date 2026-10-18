@@ -7746,6 +7746,21 @@ function _appendVocabularyMatch($target, match, rows, allWords) {
   $target.append($item)
 }
 
+function _appendVocabularyGroup($target, part, matches, rows, allWords, kind, count = String(matches.length)) {
+  const $group = $('<div class="prefix-group"></div>').addClass(kind + '-group')
+    .attr('data-vocab-group-kind', kind).appendTo($target)
+  const $header = $('<div class="prefix-group-header"><i class="fa fa-chevron-right prefix-group-chevron" aria-hidden="true"></i></div>')
+    .append($('<span class="prefix-group-part"></span>').text(part))
+    .append($('<span class="prefix-group-count"></span>').text(' (' + count + ')')).appendTo($group)
+  const $body = $('<div class="prefix-group-body" hidden></div>').appendTo($group)
+  matches.forEach(match => _appendVocabularyMatch($body, match, rows, allWords))
+  $header.on('click', () => {
+    const open = $header.hasClass('is-open')
+    $body.prop('hidden', open)
+    $header.toggleClass('is-open', !open)
+  })
+}
+
 function _renderVocabularySearch(search, includePrefix) {
   const query = String(search || '').toLowerCase().trim()
   const $vocab = $('#vocabularyResult').empty()
@@ -7754,10 +7769,23 @@ function _renderVocabularySearch(search, includePrefix) {
   const matcher = _getVocabularyMatcher()
   const matches = matcher.search(query, { includePrefix })
   const allWords = matcher.rows.map(row => row.line)
-  const direct = matches.filter(match => match.kind !== 'prefix')
-  // Exact phrases, tokens, word families and known compound constituents
-  // always stay visible. The prefix cap applies only to extra suggestions.
+  const direct = matches.filter(match => match.kind !== 'prefix' && match.kind !== 'compound')
+  // Exact phrases, tokens and word families stay outside the component groups.
   direct.forEach(match => _appendVocabularyMatch($vocab, match, matcher.rows, allWords))
+  const compounds = new Map()
+  for (const match of matches.filter(match => match.kind === 'compound')) {
+    if (!compounds.has(match.constituent)) compounds.set(match.constituent, [])
+    compounds.get(match.constituent).push(match)
+  }
+  // These are recognized component words, not capped prefix suggestions.
+  // Group inflected matches together (sten / stenen). Label each component
+  // with its shortest matched vocabulary form; retain the actual highlights.
+  const compoundGroups = [...compounds.values()].map(findings => ({
+    findings, part: findings.map(match => match.matched).sort((a, b) => a.length - b.length || a.localeCompare(b, 'sv'))[0]
+  }))
+  for (const { part, findings } of compoundGroups.sort((a, b) => a.part.localeCompare(b.part, 'sv'))) {
+    _appendVocabularyGroup($vocab, part, findings, matcher.rows, allWords, 'compound')
+  }
 
   if (includePrefix) {
     const prefixMatches = matches.filter(match => match.kind === 'prefix')
@@ -7783,18 +7811,8 @@ function _renderVocabularySearch(search, includePrefix) {
     for (const part of partOrder) {
       const head = shownByPart.get(part) || [], tail = overflowByPart.get(part) || []
       if (!head.length) continue
-      const $group = $('<div class="prefix-group"></div>').appendTo($vocab)
       const count = tail.length ? `${head.length} of ${head.length + tail.length}` : String(head.length)
-      const $gh = $('<div class="prefix-group-header"><i class="fa fa-chevron-right prefix-group-chevron" aria-hidden="true"></i></div>')
-        .append($('<span class="prefix-group-part"></span>').text(part))
-        .append($('<span class="prefix-group-count"></span>').text(' (' + count + ')')).appendTo($group)
-      const $body = $('<div class="prefix-group-body" hidden></div>').appendTo($group)
-      head.forEach(idx => _appendVocabularyMatch($body, byIndex.get(idx), matcher.rows, allWords))
-      $gh.on('click', () => {
-        const open = $gh.hasClass('is-open')
-        $body.prop('hidden', open)
-        $gh.toggleClass('is-open', !open)
-      })
+      _appendVocabularyGroup($vocab, part, head.map(idx => byIndex.get(idx)), matcher.rows, allWords, 'prefix', count)
     }
     let overflowCount = 0
     for (const list of overflowByPart.values()) overflowCount += list.length
