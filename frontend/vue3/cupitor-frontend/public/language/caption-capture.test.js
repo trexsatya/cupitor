@@ -9,7 +9,100 @@ import {
   captionMediaLink,
   captionPageKey,
   cardTranslateDirection,
+  appendCaptionBlock,
+  captionKeysInItem,
 } from "./caption-capture";
+
+describe('appendCaptionBlock', () => {
+  const cap = { url: 'https://www.youtube.com/watch?v=testVideo01', timeParam: 't' };
+  const line = (start, text, translation = '') => ({ start, text, translation });
+  const keys = (it, page = cap) => [...captionKeysInItem(it, page.url, page.timeParam)];
+
+  it('appends both faces without changing identity, media, recordings or history', () => {
+    const item = { manual: true, id: 'keep', source: 'Min anteckning', target: 'My note',
+      mediaUrl: 'https://example.org/original', sourceAudioUrl: 'file://voice',
+      musicTrackId: 'music', enabled: false, correct: 3 };
+    const before = JSON.parse(JSON.stringify(item));
+    const next = appendCaptionBlock(item, cap, [line(12, 'Hej.', 'Hello.')], 'source');
+    expect(item).toEqual(before);
+    expect(next).toMatchObject({ ...before, source: 'Min anteckning\nHej.', target: 'My note\nHello.' });
+    expect(keys(next)).toEqual([captionKey(cap.url, 12, 'Hej.')]);
+    expect(keys(JSON.parse(JSON.stringify(next)))).toEqual(keys(next));
+  });
+
+  it('retains old capture keys when converting a whole-face card to blocks', () => {
+    const item = { source: 'Första\nAndra', target: '', captionUrl: cap.url + '&t=10',
+      captionStarts: [10, 11], captionRows: [1, 1] };
+    const next = appendCaptionBlock(item, cap, [line(20, 'Tredje', 'Third')], 'source');
+    expect(next.captionStarts).toBeUndefined();
+    expect(next.source).toBe('Första\nAndra\nTredje');
+    expect(next.target).toBe('—\n—\nThird');
+    expect(keys(next)).toEqual([captionKey(cap.url, 10, 'Första'), captionKey(cap.url, 11, 'Andra'), captionKey(cap.url, 20, 'Tredje')]);
+  });
+
+  it('keeps separately timed repeats and captures from different pages', () => {
+    let next = appendCaptionBlock({ source: '', target: '' }, cap, [line(12, 'Ja.')], 'source');
+    next = appendCaptionBlock(next, cap, [line(40, 'Ja.')], 'source');
+    const other = { url: 'https://example.org/another', timeParam: '' };
+    next = appendCaptionBlock(next, other, [line(0, 'Ja.')], 'source');
+    expect(keys(next)).toHaveLength(2);
+    expect(keys(next, other)).toEqual([captionKey(other.url, 0, 'Ja.')]);
+  });
+
+  it('supports Target captions and pads missing translations after a prior answer', () => {
+    const next = appendCaptionBlock({ source: 'Old answer', target: 'Gammal' }, cap,
+      [line(3, 'Ny'), line(4, 'Nyare', 'Newer')], 'target');
+    expect(next.source).toBe('Old answer\n—\nNewer');
+    expect(next.target).toBe('Gammal\nNy\nNyare');
+    expect(next.captionField).toBe('target');
+    expect(keys(next)).toHaveLength(2);
+  });
+
+  it('leaves an entirely untranslated face empty', () => {
+    const next = appendCaptionBlock({ source: 'Anteckning', target: '' }, cap,
+      [line(1, 'Mer text')], 'source');
+    expect(next.source).toBe('Anteckning\nMer text');
+    expect(next.target).toBe('');
+  });
+
+  it('pads unequal preexisting faces before appending a translated passage', () => {
+    const next = appendCaptionBlock({ source: 'En\nTvå', target: 'One' }, cap,
+      [line(3, 'Tre', 'Three')], 'source');
+    expect(next.source).toBe('En\nTvå\nTre');
+    expect(next.target).toBe('One\n—\nThree');
+  });
+
+  it('preserves multiline page sentences and their duplicate keys', () => {
+    const page = { source: 'page', url: 'https://example.org/book' };
+    let next = appendCaptionBlock({ source: 'Note', target: 'Answer' }, page,
+      [line(0, 'Han gick,\nsa hon.')], 'source');
+    next = appendCaptionBlock(next, page, [line(0, 'Hem.')], 'source');
+    expect(next.source).toBe('Note\nHan gick,\nsa hon.\nHem.');
+    expect(next.target).toBe('Answer\n—\n—\n—');
+    expect(keys(next, page)).toEqual([captionKey(page.url, 0, 'Han gick,\nsa hon.'), captionKey(page.url, 0, 'Hem.')]);
+  });
+
+  it('preserves existing HTML and displays incoming text literally with its breaks', () => {
+    const next = appendCaptionBlock({ source: '<p><b>Min anteckning</b></p>', target: '<i>My note</i>' }, cap,
+      [line(1, 'a < b & c', 'a < b & c'), line(2, '<b>text</b>', 'Text')], 'source');
+    expect(next.source).toBe('<p><b>Min anteckning</b></p>\n<div>a &lt; b &amp; c<br>&lt;b&gt;text&lt;/b&gt;</div>');
+    expect(keys(next)).toEqual([captionKey(cap.url, 1, 'a < b & c'), captionKey(cap.url, 2, '<b>text</b>')]);
+  });
+
+  it('does not retain invalid legacy provenance after the caption face was edited', () => {
+    const item = { source: 'Changed', target: '', captionUrl: cap.url, captionStarts: [1, 2] };
+    const next = appendCaptionBlock(item, cap, [line(3, 'New')], 'source');
+    expect(keys(next)).toEqual([captionKey(cap.url, 3, 'New')]);
+  });
+
+  it('rejects malformed or truncated block ranges instead of dropping incoming cues', () => {
+    const next = appendCaptionBlock({ source: '', target: '' }, cap, [line(1, 'Hej')], 'source');
+    for (const patch of [{ offset: -1 }, { length: 100 }, { rows: [2] }, { starts: [] }, { field: 'other' }]) {
+      expect(keys({ ...next, captionBlocks: [{ ...next.captionBlocks[0], ...patch }] })).toEqual([]);
+    }
+    expect(keys({ ...next, source: 'H' })).toEqual([]);
+  });
+});
 
 describe("captionLinesFrom", () => {
   it("accepts both sources the host sends", () => {

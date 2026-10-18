@@ -266,7 +266,8 @@ import {
   captionWords as _captionWords,
   captionFaces as _captionFaces,
   captionRowCounts as _captionRowCounts,
-  captionRowGroups as _captionRowGroups,
+  captionKeysInItem as _captionKeysInItem,
+  appendCaptionBlock as _appendCaptionBlock,
   captionFieldOf as _captionFieldOf,
   cardTranslateDirection as _cardTranslateDirection,
 } from './caption-capture.js';
@@ -12632,6 +12633,9 @@ function updateManualEntry(playlistName, manualId, patch) {
           delete it.captionStarts
           delete it.captionRows
         }
+        if (next !== it[k] && Array.isArray(it.captionBlocks)) {
+          it.captionBlocks = it.captionBlocks.filter(b => b && b.field !== k)
+        }
         it[k] = next
       })
       if (Object.prototype.hasOwnProperty.call(patch, 'mediaUrl')) {
@@ -12696,61 +12700,69 @@ function _captionDestinations() {
   })
 }
 
+function _captionManualItems(playlistName) {
+  const rec = window._recordings && window._recordings[playlistName]
+  if (!rec || rec.virtual || rec.external || rec.readOnly) return []
+  return Object.values(rec.items || {}).flatMap(words => Object.values(words || {})
+    .flatMap(arr => Array.isArray(arr) ? arr.filter(it => it && it.manual && it.id) : []))
+}
+
 // Which cues from `url` are already sitting in this playlist, rebuilt from the
 // cards themselves rather than a side index so a deleted card takes its keys
 // with it.
 //
-// A card's rows are paired with `captionStarts` BY POSITION, which only holds
-// while the rows are exactly as captured. A captured line may occupy several
-// rows — a page sentence keeps the breaks the document gave it — so
-// `captionRows` says how many each line took and the rows are regrouped before
-// they are matched. A card saved before that existed has one row per line.
-// The manual-card editor can rewrite the text freely, so updateManualEntry
-// drops both when the caption field is edited, and the regrouping here rejects
-// anything that slipped through. Distrusting a card costs a duplicate the user
-// can delete; trusting a stale one produces keys matching no real cue,
-// silently dropping good lines.
+// Legacy cards pair the whole face with captionStarts/captionRows; merged
+// cards keep a range for each passage in captionBlocks. The editor drops a
+// face's provenance when its text changes, and the pure reader also rejects
+// invalid ranges rather than silently skipping uncaptured lines.
 function _captionKeysInPlaylist(playlistName, url, timeParam) {
   const keys = new Set()
-  const rec = window._recordings && window._recordings[playlistName]
-  const bucket = rec && rec.items && rec.items[MANUAL_ST] && rec.items[MANUAL_ST][MANUAL_W]
-  if (!Array.isArray(bucket)) return keys
-  bucket.forEach(it => {
+  _captionManualItems(playlistName).forEach(it => {
     // The stored address is put through the same normalisation as the
     // incoming one. A card holds whatever the address bar said when it was
     // filed, and a player writes its own playback position there — so
     // comparing the two raw would make every card from a video watched past
     // the start invisible, and file its lines again as duplicates.
-    if (!it || _captionPageKey(it.captionUrl, timeParam) !== url ||
-        !Array.isArray(it.captionStarts)) return
-    const rows = String(it[_captionFieldOf(it)] || '').split('\n')
-    const counts = Array.isArray(it.captionRows)
-      ? it.captionRows
-      : it.captionStarts.map(() => 1)
-    const texts = _captionRowGroups(rows, counts)
-    if (!texts || texts.length !== it.captionStarts.length) return
-    it.captionStarts.forEach((st, i) => keys.add(_captionKey(url, st, texts[i])))
+    _captionKeysInItem(it, url, timeParam).forEach(key => keys.add(key))
   })
   return keys
 }
 
-// Add the block to `playlistName`, skipping cues already captured from the
-// same page. Returns a short human summary, or null when nothing was added.
-// Returns a summary string on success, '' when every line was already there,
+// Add the block to `playlistName`, or append it to `manualId`, skipping cues
+// already captured from the same page. Returns a summary string on success,
 // or false when the write was refused (the caller then keeps the dialog open).
 // `field` is which face the caption text lands on — 'source' (the caption is
 // the prompt, its translation the answer) or 'target' (the caption is the
 // answer, and you supply the prompt, or its translation becomes one).
-function _addCaptionBlock(playlistName, cap, lines, field) {
+function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
   const w = _captionWords(cap)
   const n = c => `${c} ${c === 1 ? w.unit : w.units}`
+  const rec = window._recordings && window._recordings[playlistName]
+  // Recheck at commit time: the playlist or item may have changed while the
+  // capture was waiting. Never turn a stale merge choice into a new card.
+  if (!rec || rec.virtual || rec.external) {
+    alert('Choose one of your own playlists for these lines.')
+    return false
+  }
+  if (_refuseReadOnlyPlaylist(playlistName)) return false
+  const existing = manualId
+    ? _captionManualItems(playlistName).find(it => it.id === manualId) : null
+  if (manualId && !existing) {
+    alert('That item is no longer available. Choose another item or New item.')
+    return false
+  }
   const timeParam = String(cap.timeParam || '')
   // Belt and braces: the page sends its address with no offset on it, and an
   // older one that does not is normalised here rather than becoming a second
   // identity for the same video.
   const url = _captionPageKey(cap.url, timeParam)
   const seen = _captionKeysInPlaylist(playlistName, url, timeParam)
-  const fresh = url ? lines.filter(l => !seen.has(_captionKey(url, l.start, l.text))) : lines
+  const fresh = url ? lines.filter(l => {
+    const key = _captionKey(url, l.start, l.text)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }) : lines
   const skipped = lines.length - fresh.length
   if (!fresh.length) {
     // Returned rather than announced here: the caller decides where this is
@@ -12772,6 +12784,25 @@ function _addCaptionBlock(playlistName, cap, lines, field) {
   // keyed on the plain page address: the link moves with each selection, and a
   // de-dupe keyed on something that moves would recognise nothing.
   const faces = _captionFaces(fresh, field)
+  if (existing) {
+    const merged = _appendCaptionBlock(existing, { ...cap, url }, fresh, field)
+    // Preserve the existing media, recordings, music, ID and practice history.
+    // An unlinked card can acquire the incoming passage's media link.
+    if (!existing.mediaUrl) {
+      const media = _parseMediaUrl(_captionMediaLink({ url, timeParam, timeLink: cap.timeLink }, fresh))
+      if (media) {
+        merged.mediaUrl = media.url
+        merged.mediaKind = media.kind
+        if (media.kind === 'youtube') merged.mediaVideoId = media.id
+      }
+    }
+    Object.keys(existing).forEach(k => { if (!(k in merged)) delete existing[k] })
+    Object.assign(existing, merged)
+    rec.updatedAt = Date.now()
+    _saveRecording()
+    return `Merged ${n(fresh.length)} into the item in "${playlistName}"`
+      + (skipped ? ` · ${skipped} already there` : '')
+  }
   const it = addManualEntry(playlistName, {
     mediaUrl: _captionMediaLink({ url, timeParam, timeLink: cap.timeLink }, fresh),
     source: faces.source,
@@ -12913,6 +12944,11 @@ function _openCaptionCaptureDialog(cap, lines) {
       <select id="capCapPlaylist">${opts}</select>
       <button type="button" id="capCapNew" class="btn" title="Create a new playlist for these lines">＋ New</button>
     </div>
+    <div class="cap-cap-row">
+      <label class="cap-cap-lbl" for="capCapItem">Item</label>
+      <select id="capCapItem"><option value="">New item</option></select>
+    </div>
+    <div class="cap-cap-hint" id="capCapMergeHint"></div>
     ${names.length ? '' : `<div class="cap-cap-hint">Nothing here can hold cards yet — ＋ New makes a playlist for them.</div>`}
   `)
   // Spell out what lands on the other face, since that flips with the choice
@@ -12941,8 +12977,8 @@ function _openCaptionCaptureDialog(cap, lines) {
       // Let this close finish before the shared element is re-opened.
       setTimeout(_openNextCaptionCapture, 0)
     },
-    buttons: {
-      Add: function () {
+    buttons: [
+      { text: 'Add', id: 'capCapSave', click: function () {
         const $sel = $('#capCapPlaylist')
         const name = String($sel.val() || '')
         // Empty only when the picker has no options at all — say so rather
@@ -12960,7 +12996,7 @@ function _openCaptionCaptureDialog(cap, lines) {
         // repeatedly and wants the same orientation each time.
         window._appSettings.captionTextField = chosen
         saveAppSettings()
-        const res = _addCaptionBlock(name, cap, lines, chosen)
+        const res = _addCaptionBlock(name, cap, lines, chosen, String($('#capCapItem').val() || ''))
         // false = the write was refused and already explained. Stay open so
         // the user can pick elsewhere instead of losing the capture.
         if (res === false) return
@@ -12982,11 +13018,33 @@ function _openCaptionCaptureDialog(cap, lines) {
         if (_captionQueue.length || !_notifyCaptureFiled(name, res)) {
           if (res) _cpBuildToast(res)
         }
-      },
-      Cancel: function () { $(this).dialog('close') }
-    }
+      } },
+      { text: 'Cancel', click: function () { $(this).dialog('close') } }
+    ]
   })
   _renderHint()
+  const renderMergeHint = () => {
+    const merging = !!$d.find('#capCapItem').val()
+    $d.find('#capCapMergeHint').text(merging
+      ? 'Incoming lines are appended. Existing text and media are kept.'
+      : 'Creates a new item from these lines.')
+    $('#capCapSave').text(merging ? 'Merge' : 'Add')
+  }
+  const renderItems = () => {
+    const items = _captionManualItems(String($d.find('#capCapPlaylist').val() || ''))
+    const $items = $d.find('#capCapItem').empty()
+      .append($('<option></option>').val('').text('New item'))
+    items.forEach((it, i) => {
+      const label = _cardPlainText(it.source || it.target || '').replace(/\s+/g, ' ').trim()
+      $items.append($('<option></option>').val(it.id)
+        .text(`Merge into ${i + 1}: ${label.slice(0, 90) || '(empty item)'}${label.length > 90 ? '…' : ''}`))
+    })
+    $items.prop('disabled', !items.length)
+    renderMergeHint()
+  }
+  $d.find('#capCapPlaylist').on('change', renderItems)
+  $d.find('#capCapItem').on('change', renderMergeHint)
+  renderItems()
   // In front of anything already open — the playlist a previous capture was
   // filed in is kept open on purpose (_keepFiledPlaylistOpen). Every dialog
   // is pinned at one z-index (language.css), so the later one in the page
@@ -13017,7 +13075,7 @@ function _openCaptionCaptureDialog(cap, lines) {
     $sel.find('option[data-new]').remove()
     $sel.append(
       $('<option></option>').val(name).text(`${name} (new)`).attr('data-new', '1')
-    ).val(name)
+    ).val(name).trigger('change')
   })
 }
 
@@ -15127,8 +15185,8 @@ function _openManualEntryEditor(playlistName, existing) {
       // the per-line timings that pair its rows with the video, and with them
       // its place in the re-capture de-dupe. Same as typing over it, but the
       // button is one tap and the cost is not obvious from the card.
-      const destHoldsCaptions = !!(existing && existing.captionStarts
-        && _captionFieldOf(existing) === face)
+      const destHoldsCaptions = !!(existing && ((existing.captionStarts
+        && _captionFieldOf(existing) === face) || (existing.captionBlocks || []).some(b => b.field === face)))
       const destBefore = String($dest.val() || '')
       let confirmed = false
       if (destBefore.trim()) {
@@ -15234,7 +15292,7 @@ function _openManualEntryEditor(playlistName, existing) {
     if (anyRecording()) { alert('Stop the recording first.'); return }
     // Replacing the caption-bearing face's text is what costs the card its
     // per-line timings, and a swap replaces both faces.
-    if (existing && existing.captionStarts
+    if (existing && (existing.captionStarts || (existing.captionBlocks || []).length)
       && !confirm("Swap Source and Target?\n\nThis card's text was captured from subtitles — swapping the faces drops its line timings.")) return
     const $src = $d.find('#meeSource'), $tgt = $d.find('#meeTarget')
     const sv = $src.val(), tv = $tgt.val()
