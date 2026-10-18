@@ -439,6 +439,7 @@ import {
   sliceByHighlightSpans as _sliceByHighlightSpans,
 } from './renderer/highlight-spans-vm.js';
 import { renderAccordions as _coreRenderAccordions } from './renderer/accordion-render.js';
+import { recordingReviewPage, recordingReviewOrder } from './recording-review-page.js';
 import { knownVideos as _knownVideos } from './known-videos.js';
 
 function debugLog(x) {
@@ -16007,8 +16008,9 @@ $(function () {
 // all. Filled in after the render rather than built into the markup, so a
 // drag-reorder can renumber without rebuilding the whole dialog.
 function _renumberRecItems($dlg) {
+  const start = Number($dlg.attr('data-rec-start')) || 0
   $dlg.find('.rec-item').each(function (i) {
-    $(this).children('.rec-item-row1').children('.rec-item-no').text(i + 1)
+    $(this).children('.rec-item-row1').children('.rec-item-no').text(start + i + 1)
   })
 }
 
@@ -16023,7 +16025,6 @@ function openRecordingReviewDialog() {
   // in with shuffle off — buildPlayQueue walks these same keys. Sorting here
   // instead listed a playlist alphabetically while it played in another order,
   // so the list said nothing about what was coming next.
-  const searchTexts = Object.keys(items)
   const isVirtualCurrent = _isVirtual(currentName)
   // The other user's playlist: play it, practise it, copy cards out of it.
   const isReadOnlyCurrent = _isReadOnlyPlaylist(currentName)
@@ -16041,13 +16042,28 @@ function openRecordingReviewDialog() {
   // Without this, every native push while the user is scrolling snaps the list
   // back to the top — the WebView-only "slowly scrolls back to top" bug.
   const _wasOpen = $dlg.hasClass('ui-dialog-content') && $dlg.is(':visible')
+  const _prevDialogPosition = _wasOpen ? {
+    position: 'fixed', top: $dlg.closest('.ui-dialog').css('top'), left: $dlg.closest('.ui-dialog').css('left')
+  } : null
   // A position belongs to the list it was taken from. Picking a different
   // playlist re-renders through here too, and carrying the old offset over
   // opens the new list part-way down, or at its end if it is the shorter of
   // the two — so only a refresh of the same list gets its place kept.
   const _sameList = !!($dlg[0] && $dlg[0]._recShowing === currentName)
-  const _prevScrollTop = _wasOpen && _sameList ? $dlg[0].scrollTop : 0
-  if ($dlg[0]) $dlg[0]._recShowing = currentName
+  const review = recordingReviewPage(items, _sameList ? $dlg[0]._recPage : 0)
+  const _samePage = $dlg[0]._recRenderedPage === review.page
+  const _prevScrollTop = _wasOpen && _sameList && _samePage ? $dlg[0].scrollTop : 0
+  Object.assign($dlg[0], { _recShowing: currentName, _recPage: review.page, _recRenderedPage: review.page })
+  $dlg.attr('data-rec-start', review.start)
+  const searchTexts = Object.keys(review.groups)
+  // Native scrolling stays within a bounded page. Android WebViews can fail
+  // to scroll/paint a single very tall playlist even without page handlers.
+  const pageNav = review.pageCount > 1 ? `<nav class="rec-page-nav" aria-label="Playlist pages">
+    <button type="button" class="rec-page-step" data-page="${review.page - 1}" aria-label="Previous playlist page"${review.page === 0 ? ' disabled' : ''}>‹</button>
+    <label>Page <input class="rec-page-input" type="number" min="1" max="${review.pageCount}" value="${review.page + 1}" aria-label="Playlist page"> / ${review.pageCount}</label>
+    <button type="button" class="rec-page-step" data-page="${review.page + 1}" aria-label="Next playlist page"${review.page + 1 === review.pageCount ? ' disabled' : ''}>›</button>
+    <span class="rec-page-range">${review.start + 1}–${review.end} of ${review.total}</span>
+  </nav>` : ''
   let html = ''
   // ── Header: switch / create / new-virtual / rename / duplicate / delete ──
   html += `<div class="rec-rec-header" style="margin-bottom:10px;padding:6px 6px 8px;border-bottom:1px solid #ddd;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
@@ -16092,6 +16108,7 @@ function openRecordingReviewDialog() {
       <div class="rec-virtual-note">You can play and practise it, and copy cards into your own playlists.</div>
     </div>`
   }
+  html += pageNav
   if (!searchTexts.length) {
     html += isVirtualCurrent
       ? '<p style="color:#888;">This virtual playlist resolves to no items — its members may be empty.</p>'
@@ -16100,13 +16117,13 @@ function openRecordingReviewDialog() {
     searchTexts.forEach(st => {
       html += `<div class="rec-grp" style="margin-bottom:10px;padding:6px;border:1px solid #eee;border-radius:4px;">
         <div style="font-weight:bold;font-size:14px;">🔎 ${_.escape(st)}</div>`
-      Object.keys(items[st]).forEach(w => {
+      Object.keys(review.groups[st]).forEach(w => {
         const wEsc = _.escape(w)
         const stEsc = _.escape(st)
         html += `<div style="margin-left:10px;margin-top:4px;">
           <div style="color:#555;font-style:italic;font-size:13px;">${wEsc}</div>
           <div class="rec-item-list" data-st="${stEsc}" data-w="${wEsc}" style="margin-left:6px;">`
-        items[st][w].forEach((it, idx) => {
+        review.groups[st][w].forEach(({ item: it, idx }) => {
           const checked = (it.enabled !== false) ? 'checked' : ''
           // "Copy to…" picker — lists every other REAL recording (can't copy
           // into a virtual one). Hidden when current playlist is virtual
@@ -16225,8 +16242,19 @@ function openRecordingReviewDialog() {
       html += `</div>`
     })
   }
-  $dlg.html(html)
+  $dlg.html(html + pageNav)
   _renumberRecItems($dlg)
+
+  $dlg.off('click', '.rec-page-step').on('click', '.rec-page-step', function (e) {
+    e.preventDefault(); e.stopPropagation()
+    $dlg[0]._recPage = Number($(this).attr('data-page'))
+    openRecordingReviewDialog()
+  })
+  $dlg.off('change', '.rec-page-input').on('change', '.rec-page-input', function (e) {
+    e.stopPropagation()
+    $dlg[0]._recPage = Number($(this).val()) - 1
+    openRecordingReviewDialog()
+  })
 
   $dlg.off('click', '.rec-del').on('click', '.rec-del', function (e) {
     e.preventDefault()
@@ -16472,14 +16500,17 @@ function openRecordingReviewDialog() {
           const order = $list.find('> .rec-item').map(function () {
             return parseInt($(this).attr('data-idx'), 10)
           }).get()
-          _reorderWordItems(st, w, order)
+          const fullOrder = recordingReviewOrder(order, items[st][w].length)
+          if (!fullOrder) return
+          _reorderWordItems(st, w, fullOrder)
+          const positions = order.slice().sort((a, b) => a - b)
           // Refresh data-idx attrs so subsequent removes/edits hit the right
           // entries without a full re-render — and drop the cached copies with
           // them, since the delete, duplicate, toggle and copy handlers all
           // read through .data() and would otherwise act on the old position.
           $list.find('> .rec-item').each(function (i) {
-            $(this).attr('data-idx', i).removeData('idx')
-              .find('[data-idx]').attr('data-idx', i).removeData('idx')
+            $(this).attr('data-idx', positions[i]).removeData('idx')
+              .find('[data-idx]').attr('data-idx', positions[i]).removeData('idx')
           })
           _renumberRecItems($dlg)
         }
@@ -16551,8 +16582,12 @@ function openRecordingReviewDialog() {
   // their layout changes without probing or rewriting the scroll position.
   _lazyLoadRecItemPreviews($dlg)
     .catch(e => console.warn('preview lazy-load failed', e))
-  // Restore only as part of this synchronous render. A later callback must
-  // never overwrite a newer user scroll. Switching playlists starts at 0.
+  // dialog('option', opts) re-centres even an already-open widget, without
+  // firing dialogopen (which normally pins it). Keep the viewport position
+  // through refreshes as well as the native scroll offset.
+  if (_prevDialogPosition) $dlg.closest('.ui-dialog').css(_prevDialogPosition)
+  // Restore synchronously. Later callbacks must not overwrite a newer scroll.
+  // Switching playlists or pages starts at 0.
   if (_wasOpen) $dlg[0].scrollTop = _prevScrollTop
 }
 

@@ -1,0 +1,3120 @@
+{
+  "source": "trexsatya/trexsatya.github.io gh-pages/db/language/swedish/recordings.json, 2026-10-18. Retains fields used by the review layout.",
+  "otherNames": [
+    "assimilation",
+    "Default",
+    "Demokrati",
+    "Den sista resan | SVT Play",
+    "Familjen Andersson",
+    "Globalisering",
+    "Konferensrum AV",
+    "Muntlig interaktion - 4",
+    "Muntlig interaktion i akademiska sammanhang - 3",
+    "Muntlig interaktion i akademiska sammanhang – 2",
+    "Random-1",
+    "Random-2",
+    "SAS-1",
+    "Scener",
+    "Skilsmässobarn",
+    "SVT Play - Diagnoser",
+    "Taare-Zameen-Par-svenskt-manus",
+    "Tillåt mig tvivla - bok"
+  ],
+  "playlists": {
+    "Taare Zameen Par - 2": {
+      "items": {
+        "Manual": {
+          "Card": [
+            {
+              "manual": true,
+              "id": "mc-wvcr8iju0t",
+              "source": "När killen bakom eran han biter på naglarna",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2410",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-oxa2rphtw1",
+              "source": "Ishan gör en triumferande min som om han hade besegrat tentan eller han ser triumferande ut som om han just hade besegrat tentan",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2419",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-q89mc32p8d",
+              "source": "Han inser att han har blivit påkommen med sin lögn eller han inser att hans lön har avslöjats",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2515",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-regajnwk1z",
+              "source": "När Ishan inser att han har blivit avslöja han till och göra nervös grimas eller han spärrar upp ögonen och drar på munnen inser att han blivit. Kniper ihop ögonen och grimaserar",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2525",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-owylgrb8b5",
+              "source": "Han svarar på en fråga och lämnar resten obesvarade eller han besvarar en fråga men lämnar dem resterande frågorna obesvarade",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2702",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-z74w6ux1qr",
+              "source": "Rektorn lutar sig fram och säger “Mr. Awasthi”.\nPappan rätar på sig (el. ändrar sin sittställning, inte justerar sig) lutar sig också lite framåt för att lyssna - Yes.\nHur som helst går ert barn tredje klass för andra året i rad. Hur som helst är det här andra året som ert barn går i tredje klass",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2716",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-vvd0jkyvc7",
+              "source": "När bilen stannar i trafiken rosa flera barn fram och försöker sälja tidningar. Flera barn springer fram och hoppar upp på motorhuven för att sälja tidningar. Flera barn hoppar fram framför bilen och försöker sälja tidningar",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2754",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-o60gmy4vqc",
+              "source": "Så här kommer han aldrig att bli bättre. Han kommer inte att förbättras om det fortsätter så här (inte på det här sättet).",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2796",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-rpsjyckbbt",
+              "source": "Lutar huvudet åt sidan och Klämmer fast telefonen mellan örat och axeln så att han har händerna fria. Pratar i telefon medan han håller den kladdiga handen en bit från kroppen med armen lätt böjd för att inte smutsa ner kläderna. Han håller handen ut från kroppen för att inte få mat på kläderna.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2807",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-d51k6dkcsf",
+              "source": "Isan slår näven i bordet Eller slår den knutna handen i bordet. (näve kan användas trots att det är det är undersidan av handen istället för knogarna som träffar bordet).\nHan protesterar, “Jag tänker inte gå på internatskola”/ vill inte",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2826",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-7ioiryjh94",
+              "source": "Han har inte varit utan mig förut. Far svarar att han måste vänja sig vid det. \nKan vi inte låta honom gå klart det här skolåret. (inte bli färdig med..)\nIshan frustar (el. flåsar) av ilska.\nTitta på honom, han ångrar sig inte ens. Idiot! På internatskolan kommer de att ge dig genom stryk och lära honom veta hut. (Där kommer de minsann att få ordning på honom). Den här gången(I dag) fick han sin bror att skriva (förfalska) frånvarlapp åt honom. Vem vet vad tar sig till härnäst. (Gud vet vad han kommer att göra imorgon.)\nIshan tittar på sin bror, hans bror sneglar försiktigt mot sin pappa nästan rädd.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2836",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-woxr06ctf6",
+              "source": "Ishan blir förtvivlad  och vädjar: pappa snälla skicka inte ditt. Han ser gråtfärdig ut",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2887",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-qa9ypuzghf",
+              "source": "Det vimlar av människor på gatan. De går bland folkmassa plötsligt tappa i sjön taget om sin mammas sorg eller hand han ser förvirrad (förbryllad, överrumplad) ut och tittar sig omkring för att hitta henne. Musiken stegras medan hans oro gradvis övergår i panik.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2906",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-bevlm8rnky",
+              "source": "I nästa scen pågår ett Diwalifirande Ishan sitter tyst och ser lite butter ut, en pojke kommer fram och säger: “Ishan, jag vet att du är rädd för att börja på (inte gå/åka till) internatskolan\". Ishan säger att han inte är rädd. Pojken fortsätter att provocera honom  \"Jo du är rädd det vet jag”. Ishan biter ihop tänderna och spänner käkarna och upprepar trotsig: \"Jag är inte rädd\". sen tar han ett fyrverkeri tänder det och håller det i handen medan han säger jag är inte rädd. Pojken ryggar tillbaka och utbrister “Har du blivit galen?!” (Drar sig bakåt, hasar sig bakåt i halvt stående ställning, rusar därifrån och ropar.., inte hoppar undan). I bakgrunden viftar några barn med brinnande med tomtebloss som sprakar och gnistrar.\nMed tårar i ögonen (tårögd) och gråten i rösten ropar Ishan, “Jag kommer inte gå på internatskola”.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=2991",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-oe8d6hddnk",
+              "source": "Marschera eleverna i takt till trummorna.Längst fram går några elever och slår på trummor, medan de andra marscherar efter dem till kommandot: vänster höger vänster!",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3034",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-s51afohthi",
+              "source": "Skolbyggnaden ser inbäddat i grönska (omgivet av träd) ut. Det står en rad stora träd framför byggnaden .",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3045",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-siy4xazovi",
+              "source": "I denna scen talar rektorn eller föreståndaren med Ishan medan Ishan står stelt och lyssnar, märkbart rädd. Han säger \"lyssna noga på mig (eller hör nu noga på). Din pappa har berättat för oss att du är envis och trotsig. Sånt går inte an här, här är det disciplin som gäller\". Sedan vänder han sig till pappan och säger \"Oroa er inte, vi har fått ordning på många besvärliga elever här”. (Vi har fått bukt med många bångstyriga pojkar här)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3056",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-t6hbrzdi9w",
+              "source": "När bilmotorn plötsligt startar rycker Ishan till, han står där och ser bilen åka iväg medan han blir tårögd (ögonen fylls med tårar), drar lite på munnen (underläppen börjar darra). Ishans mamma håller händerna framför ansiktet, sen sänker hon dem, knäpper händerna (eller flätar samman fingrarna), försöker samla sig (behärska sig) och hålla tillbaka gråten medan hon snyftar och håller händerna sammanpressade. (En man står och sopar med en kvast)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3094",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-qwrxqhxzmg",
+              "source": "Föreståndaren säger till Ishan \"är du klar nu? kom\" sen säger han åt honom att gå till sovsalen och byta om. Ishan går mycket långsamt, tveksamt. Kuvad av situationen ser han rädd och försagd ut.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3158",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-gtl7c8eli1",
+              "source": "I sovsalen sitter Ishan hopsjunken på sängen med sänkt huvud och en butter, nedstämd min. Runt omkring honom är det full fart. De andra pojkarna stojar, byter om leker och springer omkring och några klättrar eller hoppar upp i överslafarna.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3213",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-zx9o92b4og",
+              "source": "I denna scen sitter Ishans mamma i bilen tårögd och tårstrimmig efter att ha gråtit, hans storebror vilar huvudet mot hennes axel och ser också ledsen ut. Mamman håller handen på hans huvud och stryker (smeker) honom försiktigt över håret. Några lösa hårstrån fladdrar över hennes ansikte i vinden.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3222",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-n0p4yyivx1",
+              "source": "En tår (inte tårdroppe) som är väg på att rinna nerför kinden. just då kommer föreståndaren fram och säger strängt: \"har du inte bytt om än? gå och byta om.”\nI matsalen sitter han bara tyst med maten framför sig på bordet utan att äta. (Pojken bredvid håller på att röra runt i maten (och för ihop till en tugga) med sked och gaffel och ser helt nöjd ut, röra runt=cirkla + blanda. Pojken till vänster bryter av en bit papad). Senare på natten syns hans tomma säng. I nästa scen står han ensam i badrummet lutad mot väggen, pannan vilande en handflatan mellan väggen och huvudet medan han gråter tyst.\nIshan är förtvivlad, känner sig övergiven, djupt nedstämd och har svårt och finna sig till rätta på internatskolan.\nSången i bakgrunden betonar (tyder på) att Ishaan är känslig och sårbar, även om han inte visar det utåt. (Som en kokosnöt, hårt skal på utsidan och mjukt fruktkött på insidan)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3244",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-9qki931yup",
+              "source": "Hon snabbbläddrar genom tecknigsblocket med tummen så att teckningarna blir till animation. (flippa genom: anglicerat). I teckningarna glider Ishaan längre och längre bort tills han försvinner ur bilden.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3364",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-t49w2cba3r",
+              "source": "Den pojken bakom ser dåsig (tankspridd) ut, armbågen på bänken och huvudet vilande mot näven, andra handen mot kinden, stryker frånvarande under näsan. (stödjer huvudet mot näven med armbågen på bänken). På lärarens uppmaning läser pojken upp en dikt. (läser upp, recitera rytmiskt, inte skandera- skandera innebär stark rytm)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3496",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-rh2i2obki8",
+              "source": "De var faktiskt du som tolkade dikten rätt. De andra eleverna rabblade bara upp det de hade lärt sig utantill. Pojken går med kryckor och har en stödskena med metallstänger och remmar på ena benet (ortos).\nHan sätter kryckorna framför sig, stödjer sig på dem och för kroppen framåt steg för steg, kryckorna klackar mot golvet när han går. (det hörs ett rytmiskt klackande från kryckorna).\nRabbla upp = återge ett inlärt svar/innehåll.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3578",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-m6gi2roe90",
+              "source": "Han tittar ut genom fönstret och ser en fågel mata sina ungar som piper högljutt efter mat (tiggar om mat). Fågelungarna gapar och låter för att få mat, fågeln för näbben (eller ryckar huvudet) fram och tillbaka mot deras öppna näbbar. (Duvor guppar, guppa är en regelbunden rörelse)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3644",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-e6m679vgyi",
+              "source": "När läraren märker att han sitter och tittar ut genom fönstret, ritar han en punkt på tavlan, kastar en kritbit på Ishan. Kritan träffar Ihsan i huvudet och får honom att reagera. Sen ber läraren Ishan att peka ut punkten, eftersom Ishan har suttit och tittat ut genom fönstret har han inte varit uppmärksam och vet inte vilken punkt läraren menar. Han står bara där och glor med uppspärrade ögon. Läraren blir arg och skäller på honom: vad glor du på? varför står du där och glor som en groda med ögonen uppspärrade.\"",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3674",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-oefcl2sl0m",
+              "source": "Läraren ber Ishan att föra fram hande och knyta näven.  (\"Fram med handen, knyt näven\"). Ishan håller först även med handflatesidan uppåt men läraren tar tag i hans hand och vrider den så att knogarna är vända uppåt. Sen slår han honom över knogarna med trälinjalen. (en platt trästicka/ en lång, platt träbit). (Inte käpp - käpp, pekpinne är lång och smal stav ofta rund.)\nIshan rycker till och gapar till (grimaserar) av smärta. (reflexmässiga rörelse på munnen när slaget träffar)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3731",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-4e93r99ihz",
+              "source": "Bokstäverna på tavlan och i böckerna börjar röra sig (lossnar från sina platser och flytar/glider omkring och byter plats med varandra), några bökstäver vänds och spegelvänds (vänds åt motsatt håll) och flyga omkring, vilket gestaltar Ishans dyslexi. Han dunkar huvudet lätt mot tavlan, krafsar (skrapa, gör en krafsande, kloliknande rörelse) med fingrarna på tavlan, kritan gör liknande rörelse över tavlan och lämnar streck efter sig. (inte klösa - klösa brukar innebära en rep).\nBokstäverna börjar bölja, lösas upp och glida iväg, nästand som om de förångas. Han sliter sig i håret av frustation.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3810",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-w6hy5lbqjb",
+              "source": "Pressar/biter ihop tänderna  (spänner käkarna) och böjer linjalen i frustation och bryter sönder den. ( Han böjer linjalen och pennan tills de går av) (knyter händerna hårt runt linjalen..) \nRiver ut en sida ur boken och rullar ihop den (knyckla ihop om det formas till en boll, press/skynkla ihop: allmänt), placerar rullen i slangbellan, spänner gummibandet och skjuter iväg den. \nSitter hopsjunken (framåtböjd) med armbågarna stödda mot låren och handflatorna pressade mot ögonen (eller med ansiktet begravt i händerna). (med händerna för ögonen - kort sagt)\nIshan sitter med armarna på bordet och vilar huvudet mot den ena armen. Med den andra handen knackar han tavelsuddet rythmiskt mot bordet.\nHan sitter på sängen, framåtböjd med huvudet vilande mot kudden. Han slår upprepade gånger med båda händerna mot sängen på varsin sida om sig, så att kroppen gungar i takt med slagen, sen ger han och sjunker ner på sängen. [frustationen övergår i uppgivenhet].",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3852",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-b8ts0y8c4k",
+              "source": "Han vänder skolväskan upp och ner häller ut alla böckerna i soptunnan / Han tömmer hela skolväskan i soptunnan.\nHan slänger ut skolväskan genom fönstret. Sedan föreställer han sig att spindlar kryper ut ur väskan, tar sig uppför väggen och kryper in genom fönstret mot hans bänk. Plötsligt känner han något krypa på nacken och upptäcker till sin förskräckelse att det är en spindel. (Han rycker till när han upptäcker en spindel som kryper uppför hans nacke)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3875",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-42cs8b5uns",
+              "source": "Han krossar en av de inbillade spindlarna som kryper på bordet genom att slå till den med tavelsuddet. (slår ihjäl den ..) Han grimaserar av äckel och rycker till med munnen. (Han kväljs av äckel)\nHan för handen häftigt fram och tillbaka över tavlan och drar täta, sammanhängande streck åt höger och vänster. Sedan syns han göra samma rörelse med en penna på pappret. Han trycker så hårt att pennspetsen går av. (drar pennan häftigt i ett sicksackmönster) [inte klottra - klottra innebär slumpmässig ritning].\nKlasskaraterna hånskrattar (skrattar hånfullt) åt Ishan och sången frågar varför har han skräphandstil",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3910",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-5xnh3vicss",
+              "source": "bokstav förvandlas till en ormliknande varelse och slingrar sig blixsnabbt ut ur tavlan med ett väsande ljud.\nIshan begravar huvudet i sängen och gråter.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=3964",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-js99lwuk94",
+              "source": "Kom, nu går vi. Jag har fått lov/tillåtelse av föreståndaren.\nSluta vara arg nu / var inte arg nu..",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4045",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-h35sc7pqzp",
+              "source": "Sången beskriver att han har blivit avtrubbad, att han har tappat känselförmåga/sinnesförnimmelser och kan inte ens känna smärta",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4156",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-njx9yuf4yp",
+              "source": "Lägger undan vattenfärgerna som man fick av sin bror i en låda och skjuter igen den. (utdragbar skrivbordslåda)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4176",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-fs0rnvgdsl",
+              "source": "Det är stökigt, stojigt och livligt i klassrummet. några elever kastar boll till varandra medan andra leker med sina pennor på bänkarna. plötsligt hörs en ton från en flöjt. Eleverna blir överraskade, tystnar och vänder sig mot det håll ljudet kommer ifrån. då kommer läraren in utklädd till clown med en röd clownnäsa. Läraren kommer in Fladdrar/sveper framåt  tyget på dräkten och gör en skrämmande grimas mot barnen. Eleverna ryggar tillbaka förskräckt och läraren börjar sjunga på ett tokigt/tramsigt sätt (/sluddrigt). Han far runt i klassrummet med tokiga, överdrivna rörelser medan han sjunger. När eleverna börjar skratta för han ett finger till läpparna (/sätter fingret mot läpparna) och hyssjar åt dem.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4280",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-1x492y1ms6",
+              "source": "Han sjunger och rör sig dansande genom klassrummet han sjunger medan han dansar omkring med yviga lekfulla rörelser. Vaggar från sida till sida, svänger med armarna, gunga i takt med musiken, Svänger benen växelvis från sida till sida. Han pekar mot trädet utanför fönstret och får eleverna att rikta blicken dit. Han tar stöd med ena handen mot bänken och svingar sig ner. (svepande rörelse)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4371",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-hk8gj6h53o",
+              "source": "Sången uppmuntrar barnen att slå ut (/breda ut) vingarna, (sprida färger) släppa fantasin fri och väva sina egna drömmar",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4402",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-0p2strjovm",
+              "source": "Ligger på bordet med huvudet vilande på ena armen och benen korsade med det ena benet uppdraget.\npumpar den böjda armbågen/armen i luften",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4445",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-af4eofe9pz",
+              "source": "doppar penseln i vatten (fuktar penseln), tar upp lite färg (blandar färgen med vatten), stryker penseln över pappret gör penseldrag",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4689",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-85qkyrewbw",
+              "source": "Läraren håller armen om hans bröst går bakifrån och gungar/svänger honom lekfullt från sida till sida. (inte gunga - gungar låter mer tröstande eller omhändertagande)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4781",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-1oey36a2yb",
+              "source": "Jag står på en liten upphöjning vid sjön och betraktar (eftertänsamt) vattnet. (inte kulle - kulle är mer hög)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=4834",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-bpl6jdr680",
+              "source": "en gönsak faller ner försälningsvagnen/handkärran/försäljningskärran överlastad me grönsaker",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5292",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-mtmni557xl",
+              "source": "En stor boll med små utgående piggar över hela ytan / en taggig boll / en boll täckt av små piggar / piggarna sticker ut från ytan",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5303",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-qe2bqfgw5d",
+              "source": "Hon skjuter kulorna fram och tillbaka längs metallstavarna på en kulram. (En kulram med   små kulor trädda på tunna metallstavar)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5321",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-g97vn56qp3",
+              "source": "Har någon redan hållit upp en spegel för dig? (bildligt) (Hållit fram en spegel framför/åt - det är mer bokstavlig beskrivning)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5386",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-ye2o882uhg",
+              "source": "är tystlåten, pratar inte med någon, har nästand alltid ett ängsligt uttryck. / ser vettskrämd ut / går omkring med en ständigt rädd min / ser ständigt skrämd ut.\nHans ögonen.. ropar på hjälp\nJag är rädd för att han kommer att drunkna",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5410",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-icz392jnug",
+              "source": "\"Idag Öppnar i våra hjärtans fönster och blickar ut små små regndroppar möter den strålande solen och en regnbåge tar form (bildas).\"",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5451",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-uvjoo5i4vq",
+              "source": "drar reflexmässigt ihop kinderna (/spänner ansiktet) som att solen bländer henne. / kisar och grimaserar mot det starka solljuset",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5459",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-z94vmp3y8z",
+              "source": "Han gör en swing med racketen. Han springer efter (/svingar efter) bollen men missar och följer med i rörelsen med hela överkroppen. (missar och vinglar till) Frusterat, fadern rycker av sig hatten och slänger den i marken. Sen slår han ut med armarna i en frågande gest, som om han ville säga: “vad håller du på med?”",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5626",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-7w1ah1ea8c",
+              "source": "går med släpande steg och armarna slappt hängande längs sidorna / går långsamt och håglöst",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5693",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-rb5azert4e",
+              "source": "Det är skymning. Solen håller på att gå ner och omgivningen är höljd i ett svagt, dämpat ljus.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5792",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-2j9akvnh4h",
+              "source": "Hunden ligger platt på marken med kroppen utsträckt och hakan vilande mellan framtassarna.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5796",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-htxulfturi",
+              "source": "tar loss luckan på framsidan och tittar in i konstruktionen. (slottliknande modell gjort av papper eller kartong)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5869",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-x62gox931t",
+              "source": "Pappan sitter med fingret mot tinningen / finger vilande mot kinden eller strax ovanför kinden",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=5940",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-cwdwyqe891",
+              "source": "Han för ihop fingerblommarna (alla fingertopparna samlade mot varandra så att de vidrör varandra), nickar lätt och gör en nästan omedveten gest med handen i Rams riktning / för handen lite framåt i en vag, nästan omedveten gest mot Ram",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6014",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-zddncgll5l",
+              "source": "Nedsatt fin- och grovmotorik färdigheter / svårigheter med fin- och grovmotoriken. När jag kastar bollen har han svårt att bedöma bollens bana.\nFinmotorik - t.e. knäppa knappar, använda sax, knyta skosnören.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6186",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-0lkx6u6t08",
+              "source": "flackar med blicken från sida till sida (inte rullar med ögonen - det innebär irritation, förakt eller otålighet)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6211",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-f6nrysmoxe",
+              "source": "tänk hur jobbigt han måste ha det / vad han måste kämpa med / hur det måste kännas för honom / vad han går igenom .. blir hans självförtrående fullständigt knäckt (tappar självförtrående - mild version), självförtrående raseras / bryts ner\nHan skulle göra uppror mot omvärlden och dölja sina svårigheter bakom en fasad av trots och busighet. Hans utagerande beteende skulle …\nHan skulle försöka slingra sig undan (undvika) situationen i stället för att erkänna att han inte kan",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6226",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-ut2sul0ura",
+              "source": "Nu har till och med hans upproriskhet blivit nedtryckt och kuvad där. Det är sorgligt.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6259",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-qb59epsfm3",
+              "source": "Det är en neurologisk funktionsnedsättning som vem som helst kan ha. Om man ska uttrycka det på ett enkelt sätt kan man säga att det är som ett litet problem med kopplingarna i hjärnan. / På lekmannaspråk kan man säga att det är lite fel i hjärnans ledningar.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6287",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-a0u7ubes58",
+              "source": "Så ni menar att min son inte är normal? Att han är intellektuellt funktionsnedsatt? Vad är det för fel på er? (Ni är ju helt otrolig!) Titta här \nHan rafsar ihop teckningarna så att papperen prasslar.\n”Titta här, herr Awasthi. Det här skarpa intellektet väver tusentals tankar i färg, långt bortom vad både ni och jag är kapabla till.”\n\n”Men vad är det för nytta med det?”\n\n”Varför måste ni hitta någon nytta med det?”\n\n”Vad ska jag annars leta efter? Vad ska det bli av honom? Ska han bli någon högt uppsatt tjänsteman? Hur ska han kunna hävda sig i den här världen? Ska jag försörja honom hemma resten av livet?”",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6300",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-a067fkzbin",
+              "source": "”Jag vet. Där ute finns en skoningslös värld full av konkurrens. Och i den världen ska alla odla fram toppstudenter och högpresterare i sina egna hem. Alla vill att deras barn ska vara bäst. Läkare, ingenjör, chef inom näringslivet. Allt annat är tydligen oacceptabelt. 95,5 procent, 95,6 procent, 95,7 procent. Allt under det betraktas nästan som en förolämpning. Varför? Tänk efter lite. Varje barn har sina egna styrkor, sina egna förmågor och sina egna drömmar. Men nej. Alla är fullt upptagna med att dra och sträcka i varje finger för att göra det längre. Fortsätt bara. Även om fingret till slut går av.”\n\nRam reser sig från stolen med stöd av armarna. Sedan ställer han sig med händerna på höfterna. Han går fram till fönstret och tar tag i spjälorna. Efter en stund vänder han sig om mot de andra igen. / griper tag i gallret / tar tag i stängerna i fönstergallret. (fönstergallret är hela konstruktionen med flera spjälor). Han för handen uppåt i en gest, som för att illustrera hur något växer.\nHan gör en bestämd, nedåtriktad handgest (gest av avsmak/förakt) för att betona det han säger “.. nästan som en förolämpning”. Han viftar avvärjande med handen “Men nej”. \nHan håller ihop tummen och fingertopparna och snärtar handen framåt. / snärtande rörelse (“Fortsätt..”) / ströende rörelse (som att strödde något framför sig)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6340",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-a8nhjwpbsb",
+              "source": "”Att lägga bördan av sina egna ambitioner på sina barns späda /sköra axlar? Fan, det är värre än barnarbete.”\nI scenen sår han frön. Med en liten trädgårdsspade föser han undan jorden, lägger ner fröna och täcker dem sedan med jord igen. (handhacka eller planteringshacka mer exakt än spade) / Han luckrar upp jorden med en handhacka, sår fröna och föser sedan tillbaka jorden över dem",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6411",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-3rp99fe8et",
+              "source": "\"Och om ett barn inte klarar av att bära den bördan då? När ska vi förstå att varje barn klarar olika mycket? Om inte i dag, så lär det sig i morgon. Alla utvecklas i sin egen takt. Det krävs fem olika fingrar för att bilda en hand.”\nMedan han sår fröna står han på knä på ena knät och har det andra benet böjt framför sig.\nHan släpper ifrån sig en tung, irriterad suck medan han arbetar. / frustar av irritation..",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6409",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-ucjfk1nt4p",
+              "source": "\"Och här går vi och drömmer om att få de här små barnen att passa in i samhällets huvudfåra.\" / Och ändå drömmer vi om att de här små barnen ska passa in i samhällets mall.”",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6431",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-2n82vkay91",
+              "source": "Hoppsan! Han sätter foten rakt i en lerpöl. / trampar han rakt ner i leran",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6484",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-swq2476xz9",
+              "source": "hissar upp Ishaan i luften och gungar honom lekfullt. Läraren hänger en medalj runt halsen på honom.\nI nästa scen sitter Ishaans mamma i soffan och håller fast honom. Ishaan sprattlar (vrider och rör på kroppen för att komma loss) och fäktar med armar och ben, medan hans bror försöker få på honom byxorna.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6497",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-pbf2ygrsyo",
+              "source": "sitter lutad mot väggen med knäna uppdragna / sitter på sängen med knäna uppdragna. Hon stödjer armbågen mot knät och vilar ansiktet i handen.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6530",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-dhmzqiih2i",
+              "source": "Det var en gång en pojke, fråga inte var. Han kunde varken läsa eller skriva särskilt bra. Hur mycket han än försökte kunde han aldrig minnas om Y kom före eller efter X. Orden var hans fiender. De dansade framför ögonen på honom och dansade och dansade av hjärtans lust, bara för att plåga den stackars pojken. Att läsa och skriva gjorde honom alldeles utmattad, men vem skulle han berätta sina bekymmer för? Hjärnan var full, startmotorn hade lagt av, och ovanpå allt detta: ABC-disco! En dag blev den stackars pojken underkänd, nedtyngd av allt läsande och skrivande. Folk kallade honom åsna och idiot, men pojken uthärdade alla förolämpningar modigt. Men så, en morgon, spottade han plötsligt ur sig rent guld. När världen fick höra hans teori smälte allas hjärtan. Säg då, säg: Vem var han?",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6577",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-r0zhc9br03",
+              "source": "”Kritan skrapar mot tavlan.” eller ”Det hörs ett skrapande ljud när han skriver med kritan.” (inte gnissla - som innebär obehagliga, högfrekventa screeech-ljud)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6685",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-8lu2f861ke",
+              "source": "Han kisar och försöker urskilja vad han ser. (smalnar av ögonen, alltså håller dem nästan halvslutna, för att försöka se något tydligare. Det kan till exempel bero på starkt ljus, långt avstånd eller att något är suddigt.)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6698",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-q0g7z79agl",
+              "source": "slår ut med armarna eller sträcka upp/ut armarna i jubel. / De sträcker upp armarna i luften och jublar.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6724",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-tw2ltpascy",
+              "source": "När han säger att pojken plågas av bokstäverna, lyfter han händerna och gör virvlande rörelser med fingrarna, som för att gestalta bokstäver som dansar omkring.\nJust det. Walt Disney. Plågad av bokstäver gav han liv åt sina tecknade figurer.\n\nNeil Diamond, den populäre sångaren. Dränkt i skammen över sina rödmarkerade betyg började han skriva sånger.\n\nAgatha Christie, den berömda deckarförfattaren. Kan ni tro det? En författare som som barn inte kunde läsa och skriva ordentligt.\n\nMen varför berättar jag plötsligt allt det här för er i dag?\n\nFör att visa er att världen har sett sådana här diamanter födas, människor som förändrade hela världens karta, just för att de kunde se världen med andra ögon.\n\nDeras hjärnor fungerade lite annorlunda. Människorna omkring dem kunde inte acceptera det och gjorde livet svårt för dem.\n\nTrots det segrade de. Och de segrade på ett sådant sätt att resten av världen bara kunde stå och häpna.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6809",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-y5sawl2fh1",
+              "source": "Pojken skjuter fram läpparna och gör en frågande min, som om han inte visste. (inte Pojken putar med läpparna - puta innebär medveten posering)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6830",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-pj0hea2bwj",
+              "source": "sätta sig på huk = böja knäna och sänka kroppen, med fötterna kvar på marken\ngår ner på knä framför Ishaan",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6930",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-3da56u4ply",
+              "source": "Han pressar ihop läpparna. ler svagt med slutna läppar. / Ett svagt leende spelar över hans läppar. Mungiporna dras lätt uppåt Han pressar ihop läpparna och drar lätt på munnen [dra på munnen är särskilt användbart när någon gör en liten, antydd leende rörelse utan att öppna munnen eller le fullt.]",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6973",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-hwgaj1uiuj",
+              "source": "slår pinnen upprepade gånger mot vattenytan så att vattnet stänker omkring. / piska vattenytan med en pinne / plaska med pinnen i vattnet\nRam sticker in en liten träpinne i ett stenliknande föremål och vrider på den",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=6996",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-85c1wup1rz",
+              "source": "Först tar Ishaan fram flera små träbitar och träpinnar. Han gör hål i några av träbitarna och filar eller slipar dem för att forma dem och jämna till kanterna. [Om han drar ett grovt material fram och tillbaka över träet är slipa troligen rätt verb, särskilt om det är sandpapper. Om han använder ett metallverktyg är fila mer sannolikt.] \n\nHan lindar/virar ett snöre flera varv runt en av pinnarna eller axeln och fäster gummiband i konstruktionen.\nSedan sätter han ihop trädelarna och för in två träpinnar genom hålen, kanske som axlar eller stöd. Han fäster ett par gummiband mellan delarna och kopplar dem till en liten propeller eller paddelmekanism. \n\nFör att få båten att gå vrider han upp mekanismen, så att gummibanden tvinnas och lagrar energi. När han sedan sätter båten på vattnet och släpper den, tvinnas gummibanden tillbaka och driver propellern/paddeln, vilket får båten att röra sig framåt.\n\n/\nIshaan formar små träbitar genom att fila och slipa dem, gör hål i några av delarna och sätter ihop en liten flygplanskropp med vingar. Framtill monterar han en trebladig propeller på en liten axel. Han lindar snöre eller tråd runt en del av konstruktionen, antingen för att hålla ihop delarna eller som en del av mekanismen, och använder gummiband för att skapa spänning.\n\nRam ropar/utbrister upphetsat/entusiastiskt och uppmuntrande: ’Titta! Den rör ju på sig!’",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7010",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-n4vkv5vdxg",
+              "source": "Barnen flockas runt modellen och börjar stojigt ropa och prata i mun på varandra. / Barnen samlas runt modellen och börjar ropa och jubla av nyfikenhet och entusiasm. ’Ja! Ja!’ och ’Vem har gjort den?’ hörs bland barnen [👉 flockas runt passar väldigt bra när många barn snabbt samlas kring något intressant. 👉 stoja passar när de låter mycket av glädje och upphetsning.]\n\nMen Ishaan ser fortfarande nedstämd ut och smyger tyst bort från folkmassan. / Men Ishaan ser fortfarande ledsen ut och drar sig tyst undan från de andra\n[”drar sig tyst undan” här. Det fångar både rörelsen och att han känslomässigt isolerar sig från de andra]",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7074",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-ui4bddkgdd",
+              "source": "Ram vrider på dörrknoppen/dörrhandtaget flera gånger och drar sedan dörren mot sig\nFärgen har flagnat på flera ställen, vilket får dörren att se gammal och sliten ut.\nRam snärtar till propellern med fingret så att den börjar snurra. / Ram ger propellern en liten knuff med fingret så att den börjar snurra\n[👉 snärta till med fingret = en snabb, kort fingerrörelse som sätter något i rörelse. ]",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7103",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-9z6736iyet",
+              "source": "Ishaan böjer sig fram över vattenytan och tittar ner i vattnet på fiskarna och de andra vattenlevande djuren.\nFiskarna simmar omkring under vattenytan. Några slingrar sig mjukt framåt och vickar på stjärtfenorna, medan andra nästan svävar stilla och fläktar försiktigt med fenorna",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7134",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-nql55ch0oi",
+              "source": "”Vi tror inte att han kommer att klara sig här ens ett år.” ”Nej, sir. Han är en mycket intelligent pojke. Han har bara vissa svårigheter med att läsa och skriva. Ni känner säkert till dyslexi.” ”Jag förstår, jag förstår.” ”Ja, sir.” ”Du har faktiskt gjort vårt jobb mycket enklare. Vi undrade just vad vi skulle säga till hans pappa. Pojken har ju kommit hit genom skolans styrelse, förstår du. Bra, bra. Då är väl en specialskola rätt plats för honom, eller hur?” ”Nej, sir. Han är ett barn med intelligens över genomsnittet.”\n\nPå rektorns skrivbord ligger en rund brevpress av glas, \nstår flera pärmar och mappar med dokument på bordet",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7186",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-ye66qiucfg",
+              "source": "”Han har all rätt att gå i en vanlig skola. Han behöver bara lite hjälp från oss. Och dessutom går alla möjliga barn runt om i världen i vanliga skolor tillsammans, oavsett vilka svårigheter de har. Faktum är att barn som de på min skola har full rätt att gå i vilken vanlig skola som helst. Ursäkta mig, sir, men det är inte jag som säger det. Det säger indisk lag. Genom Sarva Shiksha Abhiyan har varje barn den rätten. Det är en annan sak att väldigt få skolor faktiskt följer lagen.” ”Nikumbh, säg mig en sak. Hur ska den här pojken klara sig här? Han har matematik, historia, geografi, naturvetenskap och språk.” ”Han kommer att klara det, sir. Om lärarna bara hjälper honom lite så går det.” ”Var ska lärarna få den tiden ifrån? Att ägna särskild uppmärksamhet åt ett enda barn bland fyrtio elever? Kom igen, Nikumbh. Det är omöjligt.” ”Sir, det kommer inte att ta så mycket tid som ni tror. Bara två eller tre timmar i veckan. Låt mig visa att det går. Och i alla de här ämnena behöver han egentligen bara bli godkänd. Hans verkliga väg i livet ligger någon annanstans, sir.” ”Jaså? Så bortsett från ditt ämne är alla andra ämnen vi undervisar i värdelösa?” ”Nej, sir, det är inte det jag menar. Men varje barn har sin egen begåvning. Och som Oscar Wilde säger: ’Vem vill känna priset på allt men värdet av ingenting?’ Sir, snälla. Titta bara på pojkens målningar. Titta här, sir.” (inte ”Ram är trilsk.” = Han är motsträvig och vägrar rätta sig.) I scenen med rektorn skulle jag hellre beskriva Ram som envis eller ihärdig än trilsk, eftersom han argumenterar bestämt för Ishaan snarare än att bara vara motsträvig.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7209",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-smmm74fk5x",
+              "source": "Ram öppnar genast mappen, plockar snabbt fram teckningarna och visar dem för rektorn / Då öppnar Ram snabbt mappen, tar fram teckningarna ur den och visar dem för rektorn.\n\n”Här, titta. Ett slagfält. En soldat gräver en tunnel, och medan han gräver vidare vänder man blad och plötsligt, vips, är han borta genom tunneln. Vilken fantasi, sir!\n\nOch titta på de här självsäkra penseldragen. Verkligen ett djärvt och orädd användande av färg.\n\nOch titta på den här, sir. En helt unik blädderbok, en berättelse om att skiljas från sitt hem och sin familj. Vilken idé, sir! Och allt det här är skapat av ett barn som bara är åtta år.\n\nSir, det är väldigt få människor som klarar av att tänka utanför de vanliga ramarna. Snälla, sir. Ge honom en chans. Han behöver bara en enda möjlighet. Annars kommer hans hopp att släckas.”\n\nRektorn tar av sig glasögonen.\n”Vad är det egentligen du vill att jag ska göra?”",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7307",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-w3tyzo1m5k",
+              "source": "Jag vet inte. Tänk om vi lyssnar på en vikarie och i slutändan orsakar en skada som inte går att reparera. / Tänk om vi, genom att lyssna på en tillfällig lärare, orsakar permanent skada\n/ Jag vet inte… tänk om vi låter oss påverkas av en tillfällig lärares ord och råkar orsaka permanent skada\n\nHan kniper nästan ihop ögonen mot ljuset\nhöjer ögonbrynen och kisar mot det starka ljuset, som om han försöker hålla ögonen öppna.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7371",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-3mxaba4m15",
+              "source": "slätar de ut sanden med handen / stryker handen över sanden för att jämna ut den ristar en bokstav i sanden med fingret. (not släta över - Släta över används oftare bildligt, exempelvis ”försöka släta över ett gräl”)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7409",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-rxk66rmdcm",
+              "source": "formar bokstäver och djurfigurer av modellera / rulla, böja och forma till bokstäver\nnyper av en bit modellera / tar en liten bit från klumpen / drar loss en bit modellera",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7439",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-0pphrlat8m",
+              "source": "Ram ler och spärrar lekfullt upp ögonen / gör en lekfull min med ögonen mot Ishaan.\n\ndrar munnen lite åt sidan, mungipan darrar svagt / Det rycker till i ena mungipan",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7446",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-z3dp05wkvr",
+              "source": "bra idé att kombinera fysisk rörelse med matte. intoning, uttoning av texter",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7510",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-rmihhj3a11",
+              "source": "styr en liten fågel genom banan. Fågeln rör sig mellan olika platser och äter upp äpplena som ligger utspridda längs vägen / samlar in äpplen som ligger utspridda på olika platser.\n lägger handen på hans axel och ger den en uppmuntrande kläm och ryckning. / ger honom en uppskattande klapp på axeln / klappar på axeln",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7548",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-vh63kawrwt",
+              "source": "Han sätter upp en affisch på tavlan Han sätter upp affischen på tavlan och spikar fast den i de två övre hörnen Han håller affischen mot tavlan och slår i en spik i vart och ett av de övre hörnen.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7617",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-fqux3z3ajx",
+              "source": "fingra på pennan: små, ofta omedvetna rörelser med pennan, till exempel av nervositet eller rastlöshet. / snurra pennan runt fingret / rulla pennan mellan fingrarna\n\nNej, nej, allvarligt. Vad är egentligen meningen med konst?\n\nAtt släppa fram känslorna som finns gömda inom en.\n\nÄr du glad i dag, söker sig handen automatiskt till de ljusa färgerna.\n\nVar lunchen urusel? Då kommer alla de mörka, dystra färgerna ut på pappret. / ge utlopp för känslorna man bär inom sig.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7630",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-jgnay8ap1f",
+              "source": "”Sätt er.” ”Förlåt, det är lite trångt här.” ”Vad gör ni här?” ”Jag var på väg tillbaka från fabriken.” ”Har ni träffat Ishaan?” ”Nej, inte än. Jag ska träffa honom. Men först ville jag prata lite med er.” ”Säg.” ”Min fru har ägnat flera dagar åt att söka på internet. Hon har läst allt hon kunnat hitta om dyslexi. Jag ville bara berätta det för er.” ”Varför? Varför behövde ni berätta det för mig?” ”Jag ville inte att ni skulle tro att vi är sådana föräldrar som inte bryr sig om sitt barn.” ”Att bry sig är väldigt viktigt, herr Awasthi. Det har en läkande kraft. Det är som balsam som lindrar smärtan. Barnet får känna tryggheten i att veta att det finns någon som bryr sig om honom. En kram då och då, en kärleksfull puss. Bara för att visa: ’Jag bryr mig om dig. Min son, jag älskar dig. Om det är något som bekymrar dig kan du alltid komma till mig. Och vad gör det om du snubblar? Om du gör ett misstag? Jag finns här.’ Just den tryggheten. Den trösten.”\n\nHan sitter på stolen med benen i kors / med det ena benet lagt över det andra. Ram sitter på stolen och rättar till skon och drar upp byxbenet lite med handen. / Ram böjer sig ner och drar lite i skon och byxbenet för att rätta till dem",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7659",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-171i7rvrmv",
+              "source": "Ram reser sig, vänder sig om med ryggen mot honom (int ”vänder honom ryggen” - det är mer aktivt och kan ibland låta avvisande)\n\nPappan blir lite nervös och ser sig omkring åt båda hållen, som om han letar efter sin väska / flackar med blicken, .. / kastar en blick åt båda sidor",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7759",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-q2cdeaumcp",
+              "source": "”Okej, då går jag.” ”Herr Awasthi, har er fru läst något på internet om Salomonöarna?” ”Det vet jag inte.” ”På Salomonöarna, när ursprungsbefolkningen behöver röja en del av skogen för att odla, hugger de inte ner träden. I stället samlas de allihop runt trädet och öser förolämpningar över det. De skäller ut det och förbannar det så mycket de bara kan. Och innan man vet ordet av, på bara några dagar, börjar trädet vissna. Till slut dör det av sig självt.”\n\n[berättelsen som en liknelse: hårda och nedbrytande ord kan skada ett barn, precis som trädet i berättelsen påstås vissna av alla förbannelser.]",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7783",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-8vsslig9xl",
+              "source": "rättar till skjortan och stoppar in den i byxlinningen. / stoppa in skjortan i byxorna\n\nHan tar på sig tröjan genom att först trä armarna genom ärmarna och sedan dra tröjan över huvudet och ner över överkroppen. / trär armarna i ärmarna, drar tröjan över huvudet och rättar sedan till den",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7907",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-krfy4nszcy",
+              "source": "Ishaan drar kammen genom håret några gånger och rättar till frisyren / kammar håret åt sidan / för kammen genom håret från hårfästet och bakåt över huvudet (inte sidåt - sidåt = rörelseriktning, Han lutar sig sidåt.)\n\nIshaan trär väskremmen över huvudet och låter väskan hänga på andra sidan av kroppen / Ishaan trär väskan över huvudet och bär den tvärs över kroppen.",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=7954",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            },
+            {
+              "manual": true,
+              "id": "mc-q2trqwlc64",
+              "source": "”Oj, vilket ståhej det är här!” / Oj, vad mycket folk och liv det är här! ”Välkommen, sir. Välkommen!” ”Titta, min vän, nu är vi här. Du har äntligen lyckats övertala mig att bli söndagsmålare.” ”Välkommen, ma’am. Välkommen! Kom, kom!” Det finns flera rader av breda trappsteg som stiger upp bakom varandra, ungefär som på en läktare. [steg som stiger i nivåer bakom varandra] [trappstegsformad avsats om det inte egentligen är sittplatser] [inte gradäng - En gradäng är mer specifikt en trappstegsformad uppbyggnad med nivåer som stiger bakom varandra. Den behöver inte ha separata stolar.] (mela = folkfest)",
+              "target": "",
+              "enabled": true,
+              "mediaUrl": "https://www.youtube.com/watch?app=desktop&v=KX6xaWY99wQ&t=8051",
+              "mediaKind": "youtube",
+              "mediaVideoId": "KX6xaWY99wQ"
+            }
+          ]
+        }
+      }
+    },
+    "Tillåt mig tvivla - Ord": {
+      "items": {
+        "tvingad|tvång|påtvånga|tvinga|nödsakad|tvungen|nödd|krysta| krystad sätt": {
+          "krysta": [
+            {
+              "id": "zyTgocvh4cA",
+              "source": "YouTube",
+              "target": "forced twisted way",
+              "enabled": true,
+              "searchText": "tvingad|tvång|påtvånga|tvinga|nödsakad|tvungen|nödd|krysta| krystad sätt",
+              "word": "krysta",
+              "timeStart": 2831,
+              "timeEnd": 2841,
+              "lineIndex": 363
+            }
+          ]
+        },
+        "tvingad|tvång|påtvånga|tvinga|nödsakad|tvungen|nödd|krysta| krystat sätt": {
+          "krystat sätt": [
+            {
+              "id": "W-ay9MS2iiQ",
+              "source": "youtube",
+              "target": "forced twisted way",
+              "enabled": true,
+              "searchText": "tvingad|tvång|påtvånga|tvinga|nödsakad|tvungen|nödd|krysta| krystat sätt",
+              "word": "krystat sätt",
+              "timeStart": 1832,
+              "timeEnd": 1843,
+              "lineIndex": 3
+            }
+          ],
+          "nödsakad": [
+            {
+              "id": "cDOarefXz0A",
+              "source": "youtube",
+              "target": "forced twisted way",
+              "enabled": true,
+              "searchText": "tvingad|tvång|påtvånga|tvinga|nödsakad|tvungen|nödd|krysta| krystat sätt",
+              "word": "nödsakad",
+              "timeStart": 325,
+              "timeEnd": 336,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "stre|streta": {
+          "streta": [
+            {
+              "id": "lRsEXaWRkp8",
+              "source": "youtube",
+              "target": "str|stre",
+              "enabled": true,
+              "searchText": "stre|streta",
+              "word": "streta",
+              "timeStart": 1579,
+              "timeEnd": 1591,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "omsider": {
+          "omsider": [
+            {
+              "id": "-uhkst1exbY",
+              "source": "youtube",
+              "target": "finally",
+              "enabled": true,
+              "searchText": "omsider",
+              "word": "omsider",
+              "timeStart": 128,
+              "timeEnd": 140,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "heder|förtryck|hedersförtryck": {
+          "hedersförtryck": [
+            {
+              "id": "ivOW01v4VXc",
+              "source": "youtube",
+              "target": "honor|oppression|honor oppression",
+              "enabled": true,
+              "searchText": "heder|förtryck|hedersförtryck",
+              "word": "hedersförtryck",
+              "timeStart": 6,
+              "timeEnd": 15,
+              "lineIndex": 6
+            }
+          ]
+        },
+        "emell|emellertid": {
+          "emellertid": [
+            {
+              "id": "o9ikLvIlcmg",
+              "source": "youtube",
+              "target": "however|however",
+              "enabled": true,
+              "searchText": "emell|emellertid",
+              "word": "emellertid",
+              "timeStart": 54,
+              "timeEnd": 63,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "förringa|spela ner|nedvärdera|underskatta|ringakta|eftersätta|eftersätter|eftersatte|eftersatt|försumbar|försummelse|se ner på|ser ner på|såg ner på|sett ner på": {
+          "underskatta": [
+            {
+              "id": "txyLSShILKY",
+              "source": "YouTube",
+              "target": "belittle|play down|disparage|underestimate|disregard|put down|put down|put down|put down|negligible|neglect|look down on|looks down on|looked down on|looked down on",
+              "enabled": true,
+              "searchText": "förringa|spela ner|nedvärdera|underskatta|ringakta|eftersätta|eftersätter|eftersatte|eftersatt|försumbar|försummelse|se ner på|ser ner på|såg ner på|sett ner på",
+              "word": "underskatta",
+              "timeStart": 1144,
+              "timeEnd": 1158,
+              "lineIndex": 59
+            }
+          ]
+        },
+        "föregicks av": {
+          "föregicks av": [
+            {
+              "id": "_NvPoONf26I",
+              "source": "youtube",
+              "target": "was preceded by",
+              "enabled": true,
+              "searchText": "föregicks av",
+              "word": "föregicks av",
+              "timeStart": 417,
+              "timeEnd": 424,
+              "lineIndex": 5
+            }
+          ]
+        },
+        "förmå": {
+          "förmått": [
+            {
+              "id": "yeUxzYmmpAo",
+              "source": "YouTube",
+              "target": "induce",
+              "enabled": true,
+              "searchText": "förmå",
+              "word": "förmått",
+              "timeStart": 584,
+              "timeEnd": 596,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "angreps": {
+          "angreps": [
+            {
+              "id": "H4gble7OMmE",
+              "source": "youtube",
+              "target": "attacked",
+              "enabled": true,
+              "searchText": "angreps",
+              "word": "angreps",
+              "timeStart": 59,
+              "timeEnd": 69,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "krig|föra|krigförande": {
+          "krigförande": [
+            {
+              "id": "R_0WM9WKvbI",
+              "source": "youtube",
+              "target": "war|wage|belligerent",
+              "enabled": true,
+              "searchText": "krig|föra|krigförande",
+              "word": "krigförande",
+              "timeStart": 575,
+              "timeEnd": 583,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "mynna ut i": {
+          "mynna ut i": [
+            {
+              "id": "ppDx0noP0RU",
+              "source": "youtube",
+              "target": "flow into",
+              "enabled": true,
+              "searchText": "mynna ut i",
+              "word": "mynna ut i",
+              "timeStart": 258,
+              "timeEnd": 264,
+              "lineIndex": 12
+            }
+          ]
+        },
+        "ge vika": {
+          "ge vika": [
+            {
+              "id": "1xeHveqNN7Q",
+              "source": "youtube",
+              "target": "truckle",
+              "enabled": true,
+              "searchText": "ge vika",
+              "word": "ge vika",
+              "timeStart": 3471,
+              "timeEnd": 3479,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "uppdaga": {
+          "uppdagat": [
+            {
+              "id": "NnaHKhcS-kU",
+              "source": "YouTube",
+              "target": "discover",
+              "enabled": true,
+              "searchText": "uppdaga",
+              "word": "uppdagat",
+              "timeStart": 445,
+              "timeEnd": 452,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "strid|motstridig": {
+          "motstridiga": [
+            {
+              "id": "-3YS5a89zhc",
+              "source": "YouTube",
+              "target": "conflict|conflicting",
+              "enabled": true,
+              "searchText": "strid|motstridig",
+              "word": "motstridiga",
+              "timeStart": 19849,
+              "timeEnd": 19856,
+              "lineIndex": 7
+            }
+          ]
+        },
+        "åberopa": {
+          "åberopa": [
+            {
+              "id": "Zi8LWC5g6Ag",
+              "source": "youtube",
+              "target": "invoke",
+              "enabled": true,
+              "searchText": "åberopa",
+              "word": "åberopa",
+              "timeStart": 893,
+              "timeEnd": 900,
+              "lineIndex": 9
+            }
+          ]
+        },
+        "hävst|äng|hävstänger": {
+          "hävstänger": [
+            {
+              "id": "k2wukBUO2aw",
+              "source": "youtube",
+              "target": "lever|meadow|leverage",
+              "enabled": true,
+              "searchText": "hävst|äng|hävstänger",
+              "word": "hävstänger",
+              "timeStart": 2722,
+              "timeEnd": 2729,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "i övrigt": {
+          "i övrigt": [
+            {
+              "id": "oYOUqURIAjE",
+              "source": "YouTube",
+              "target": "otherwise",
+              "enabled": true,
+              "searchText": "i övrigt",
+              "word": "i övrigt",
+              "timeStart": 1120,
+              "timeEnd": 1195,
+              "lineIndex": 107
+            }
+          ]
+        },
+        "omvälva|omvälvande": {
+          "omvälvande": [
+            {
+              "id": "gVeOBod0gNs",
+              "source": "YouTube",
+              "target": "upheaval|upheaval",
+              "enabled": true,
+              "searchText": "omvälva|omvälvande",
+              "word": "omvälvande",
+              "timeStart": 1,
+              "timeEnd": 17,
+              "lineIndex": 2
+            }
+          ]
+        },
+        "skeppa": {
+          "skeppad": [
+            {
+              "id": "XxIarYXdK5U",
+              "source": "YouTube",
+              "target": "ship",
+              "enabled": true,
+              "searchText": "skeppa",
+              "word": "skeppad",
+              "timeStart": 662,
+              "timeEnd": 684,
+              "lineIndex": 79
+            }
+          ]
+        },
+        "prop|upprop": {
+          "upprop": [
+            {
+              "id": "Ezzwug3eov0",
+              "source": "YouTube",
+              "target": "prop|prompt",
+              "enabled": true,
+              "searchText": "prop|upprop",
+              "word": "upprop",
+              "timeStart": 740,
+              "timeEnd": 945,
+              "lineIndex": 28
+            }
+          ]
+        },
+        "samhäll|skikt|samhällsskikt": {
+          "samhällsskikt": [
+            {
+              "id": "C8piV870aRk",
+              "source": "YouTube",
+              "target": "society|layer|society layer",
+              "enabled": true,
+              "searchText": "samhäll|skikt|samhällsskikt",
+              "word": "samhällsskikt",
+              "timeStart": 899,
+              "timeEnd": 912,
+              "lineIndex": 74
+            }
+          ]
+        },
+        "för fullt": {
+          "för fullt": [
+            {
+              "id": "MstSimscx0M",
+              "source": "YouTube",
+              "target": "to full",
+              "enabled": true,
+              "searchText": "för fullt",
+              "word": "för fullt",
+              "timeStart": 11929,
+              "timeEnd": 11937,
+              "lineIndex": 31
+            }
+          ]
+        },
+        "rättfärdigande": {
+          "rättfärdigande": [
+            {
+              "id": "JX11A5KonUU",
+              "source": "youtube",
+              "target": "justification",
+              "enabled": true,
+              "searchText": "rättfärdigande",
+              "word": "rättfärdigande",
+              "timeStart": 617,
+              "timeEnd": 624,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "själ|eldsjäl": {
+          "eldsjälar": [
+            {
+              "id": "EGPrvE43aLU",
+              "source": "YouTube",
+              "target": "soul|ardent soul",
+              "enabled": true,
+              "searchText": "själ|eldsjäl",
+              "word": "eldsjälar",
+              "timeStart": 1118,
+              "timeEnd": 1127,
+              "lineIndex": 44
+            }
+          ]
+        },
+        "tunnas ut": {
+          "tunnas ut": [
+            {
+              "id": "fRdRK7G9s_0",
+              "source": "youtube",
+              "target": "thinned out",
+              "enabled": true,
+              "searchText": "tunnas ut",
+              "word": "tunnas ut",
+              "timeStart": 3257,
+              "timeEnd": 3268,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "hålla sig med": {
+          "hålla sig med": [
+            {
+              "id": "Nw6SRIrPN5g",
+              "source": "youtube",
+              "target": "stick with",
+              "enabled": true,
+              "searchText": "hålla sig med",
+              "word": "hålla sig med",
+              "timeStart": 1671,
+              "timeEnd": 1680,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "åskådning": {
+          "åskådning": [
+            {
+              "id": "duL-8Ly6Tww",
+              "source": "YouTube",
+              "target": "spectacle",
+              "enabled": true,
+              "searchText": "åskådning",
+              "word": "åskådning",
+              "timeStart": 2067,
+              "timeEnd": 2075,
+              "lineIndex": 25
+            }
+          ]
+        },
+        "förefalla som": {
+          "förefalla som": [
+            {
+              "id": "WEDx7vFdZkI",
+              "source": "youtube",
+              "target": "appear as",
+              "enabled": true,
+              "searchText": "förefalla som",
+              "word": "förefalla som",
+              "timeStart": 8420,
+              "timeEnd": 8429,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "utgör": {
+          "utgör": [
+            {
+              "id": "sQfADAasLpU",
+              "source": "YouTube",
+              "target": "constitutes",
+              "enabled": true,
+              "searchText": "utgör",
+              "word": "utgör",
+              "timeStart": 241,
+              "timeEnd": 251,
+              "lineIndex": 29
+            }
+          ]
+        },
+        "genväg": {
+          "genväg": [
+            {
+              "id": "inkM1XTOa80",
+              "source": "YouTube",
+              "target": "shortcut",
+              "enabled": true,
+              "searchText": "genväg",
+              "word": "genväg",
+              "timeStart": 11683,
+              "timeEnd": 11691,
+              "lineIndex": 4498
+            }
+          ]
+        },
+        "satt sig i": {
+          "satt sig i": [
+            {
+              "id": "inkM1XTOa80",
+              "source": "YouTube",
+              "target": "sat in",
+              "enabled": true,
+              "searchText": "satt sig i",
+              "word": "satt sig i",
+              "timeStart": 9908.359,
+              "timeEnd": 9920.2,
+              "lineIndex": 3805
+            }
+          ]
+        },
+        "rutin|mässi|rutinmässigt": {
+          "rutinmässigt": [
+            {
+              "id": "gt8OX0FFb6I",
+              "source": "YouTube",
+              "target": "routine|messy|routinely",
+              "enabled": true,
+              "searchText": "rutin|mässi|rutinmässigt",
+              "word": "rutinmässigt",
+              "timeStart": 135,
+              "timeEnd": 144,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "fresta|frestande": {
+          "frestande": [
+            {
+              "id": "82dwrfQd99s",
+              "source": "youtube",
+              "target": "tempting|tempting",
+              "enabled": true,
+              "searchText": "fresta|frestande",
+              "word": "frestande",
+              "timeStart": 204,
+              "timeEnd": 211,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "utar|bet|utarbetad": {
+          "utarbetad": [
+            {
+              "id": "u0A-79rA_3s",
+              "source": "YouTube",
+              "target": "worked out|worked out|worked out",
+              "enabled": true,
+              "searchText": "utar|bet|utarbetad",
+              "word": "utarbetad",
+              "timeStart": 434,
+              "timeEnd": 441,
+              "lineIndex": 37
+            }
+          ]
+        },
+        "himl|himlavalvet": {
+          "himlavalvet": [
+            {
+              "id": "JQs1mm6HXDY",
+              "source": "youtube",
+              "target": "sky|the firmament",
+              "enabled": true,
+              "searchText": "himl|himlavalvet",
+              "word": "himlavalvet",
+              "timeStart": 118,
+              "timeEnd": 128,
+              "lineIndex": 6
+            }
+          ]
+        },
+        "yttersta": {
+          "yttersta": [
+            {
+              "id": "zyTgocvh4cA",
+              "source": "YouTube",
+              "target": "utmost",
+              "enabled": true,
+              "searchText": "yttersta",
+              "word": "yttersta",
+              "timeStart": 593,
+              "timeEnd": 608,
+              "lineIndex": 85
+            }
+          ]
+        },
+        "färdig|färdigställa": {
+          "färdigställa": [
+            {
+              "id": "am1QhEoYVfQ",
+              "source": "YouTube",
+              "target": "finish|finish",
+              "enabled": true,
+              "searchText": "färdig|färdigställa",
+              "word": "färdigställa",
+              "timeStart": 3421,
+              "timeEnd": 3433,
+              "lineIndex": 686
+            }
+          ]
+        },
+        "mäkta": {
+          "mäkta": [
+            {
+              "id": "qwJVGmtLl2I",
+              "source": "YouTube",
+              "target": "mighty",
+              "enabled": true,
+              "searchText": "mäkta",
+              "word": "mäkta",
+              "timeStart": 860,
+              "timeEnd": 869,
+              "lineIndex": 11
+            }
+          ]
+        },
+        "störtar ner": {
+          "störtar ner": [
+            {
+              "id": "4CWRPuXlhPc",
+              "source": "youtube",
+              "target": "plunging down",
+              "enabled": true,
+              "searchText": "störtar ner",
+              "word": "störtar ner",
+              "timeStart": 1,
+              "timeEnd": 8,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "framställdes": {
+          "framställdes": [
+            {
+              "id": "-6_ugp9bsxQ",
+              "source": "youtube",
+              "target": "was produced",
+              "enabled": true,
+              "searchText": "framställdes",
+              "word": "framställdes",
+              "timeStart": 98,
+              "timeEnd": 109,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "avvisa": {
+          "avvisa": [
+            {
+              "id": "rgGKwMKLzp8",
+              "source": "YouTube",
+              "target": "reject",
+              "enabled": true,
+              "searchText": "avvisa",
+              "word": "avvisa",
+              "timeStart": 1026,
+              "timeEnd": 1037,
+              "lineIndex": 38
+            }
+          ]
+        },
+        "vansklig": {
+          "vansklig": [
+            {
+              "id": "Nb5ux-gulb0",
+              "source": "YouTube",
+              "target": "precarious",
+              "enabled": true,
+              "searchText": "vansklig",
+              "word": "vansklig",
+              "timeStart": 862,
+              "timeEnd": 870,
+              "lineIndex": 12
+            }
+          ]
+        },
+        "snäv": {
+          "snäv": [
+            {
+              "id": "9ohd7Bk-tQ0",
+              "source": "YouTube",
+              "target": "narrow",
+              "enabled": true,
+              "searchText": "snäv",
+              "word": "snäv",
+              "timeStart": 1571,
+              "timeEnd": 1587,
+              "lineIndex": 206
+            }
+          ]
+        },
+        "ligga|någo|ligga någonting i": {
+          "ligga någonting i": [
+            {
+              "id": "gTufNXqhVf4",
+              "source": "youtube",
+              "target": "lie|something|lie something in",
+              "enabled": true,
+              "searchText": "ligga|någo|ligga någonting i",
+              "word": "ligga någonting i",
+              "timeStart": 1019,
+              "timeEnd": 1023,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "åsidosätta": {
+          "åsidosätta": [
+            {
+              "id": "WG8ffu65S7w",
+              "source": "youtube",
+              "target": "override",
+              "enabled": true,
+              "searchText": "åsidosätta",
+              "word": "åsidosätta",
+              "timeStart": 4936,
+              "timeEnd": 4945,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "upphov": {
+          "upphov": [
+            {
+              "id": "ntABjM-aC-g",
+              "source": "youtube",
+              "target": "origin",
+              "enabled": true,
+              "searchText": "upphov",
+              "word": "upphov",
+              "timeStart": 822,
+              "timeEnd": 832,
+              "lineIndex": 2
+            }
+          ]
+        },
+        "en smula": {
+          "en smula": [
+            {
+              "id": "D-gHBbwn7T4",
+              "source": "youtube",
+              "target": "a little bit",
+              "enabled": true,
+              "searchText": "en smula",
+              "word": "en smula",
+              "timeStart": 497,
+              "timeEnd": 508,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "försåtlig": {
+          "försåtlig": [
+            {
+              "id": "4nMJvAezHM8",
+              "source": "YouTube",
+              "target": "malicious",
+              "enabled": true,
+              "searchText": "försåtlig",
+              "word": "försåtlig",
+              "timeStart": 835,
+              "timeEnd": 844,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "mörkas": {
+          "mörkas": [
+            {
+              "id": "uJiGTtH1Vw0",
+              "source": "YouTube",
+              "target": "darkened",
+              "enabled": true,
+              "searchText": "mörkas",
+              "word": "mörkas",
+              "timeStart": 1064,
+              "timeEnd": 1074,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "anför|anföra": {
+          "anföra": [
+            {
+              "id": "5iCut2QRK2w",
+              "source": "youtube",
+              "target": "lead",
+              "enabled": true,
+              "searchText": "anför|anföra",
+              "word": "anföra",
+              "timeStart": 1139,
+              "timeEnd": 1148,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "skrämd": {
+          "skrämd": [
+            {
+              "id": "inkM1XTOa80",
+              "source": "YouTube",
+              "target": "frightened",
+              "enabled": true,
+              "searchText": "skrämd",
+              "word": "skrämd",
+              "timeStart": 10068,
+              "timeEnd": 10076,
+              "lineIndex": 3865
+            }
+          ]
+        },
+        "komplott": {
+          "komplott": [
+            {
+              "id": "UFJkTqtDGpQ",
+              "source": "youtube",
+              "target": "conspiracy",
+              "enabled": true,
+              "searchText": "komplott",
+              "word": "komplott",
+              "timeStart": 5884,
+              "timeEnd": 5897,
+              "lineIndex": 2
+            }
+          ]
+        },
+        "spela|efter|atte|sett|förringa|spela ner|nedvärdera|underskatta|ringakta|eftersätta|eftersätter|eftersatte|eftersatt|försumbar|försummelse|se ner på|ser ner på|såg ner på|sett ner på": {
+          "nedvärdera": [
+            {
+              "id": "5EkEyExXhrk",
+              "source": "YouTube",
+              "target": "play|after|seen|seen|belittle|play down|disparage|underestimate|disregard|put down",
+              "enabled": true,
+              "searchText": "spela|efter|atte|sett|förringa|spela ner|nedvärdera|underskatta|ringakta|eftersätta|eftersätter|eftersatte|eftersatt|försumbar|försummelse|se ner på|ser ner på|såg ner på|sett ner på",
+              "word": "nedvärdera",
+              "timeStart": 65,
+              "timeEnd": 86,
+              "lineIndex": 5
+            }
+          ],
+          "eftersätta": [
+            {
+              "id": "aWcrtirPOpI",
+              "source": "youtube",
+              "target": "play|after|seen|seen|belittle|play down|disparage|underestimate|disregard|put down",
+              "enabled": true,
+              "searchText": "spela|efter|atte|sett|förringa|spela ner|nedvärdera|underskatta|ringakta|eftersätta|eftersätter|eftersatte|eftersatt|försumbar|försummelse|se ner på|ser ner på|såg ner på|sett ner på",
+              "word": "eftersätta",
+              "timeStart": 110,
+              "timeEnd": 117,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "ursprung|källa|källan|källor|tillblivelse|tillblivelsen|uppkomst|upphov|skapelse|skapelser|mynna ut i": {
+          "tillblivelsen": [
+            {
+              "id": "6aiYpM-gKvA",
+              "source": "YouTube",
+              "target": "origin|source|the source|sources|genesis|genesis|origin|origination|creation|creations|flow into",
+              "enabled": true,
+              "searchText": "ursprung|källa|källan|källor|tillblivelse|tillblivelsen|uppkomst|upphov|skapelse|skapelser|mynna ut i",
+              "word": "tillblivelsen",
+              "timeStart": 454,
+              "timeEnd": 468,
+              "lineIndex": 81
+            }
+          ],
+          "upphov": [
+            {
+              "id": "ntABjM-aC-g",
+              "source": "youtube",
+              "target": "origin|source|the source|sources|genesis|genesis|origin|origination|creation|creations|flow into",
+              "enabled": true,
+              "searchText": "ursprung|källa|källan|källor|tillblivelse|tillblivelsen|uppkomst|upphov|skapelse|skapelser|mynna ut i",
+              "word": "upphov",
+              "timeStart": 822,
+              "timeEnd": 832,
+              "lineIndex": 2
+            }
+          ]
+        },
+        "disparat|oförenlig|olikartad|motstridig": {
+          "disparat": [
+            {
+              "id": "i-CHIhQ5FmY",
+              "source": "youtube",
+              "target": "disparate|incompatible|dissimilar|contradictory",
+              "enabled": true,
+              "searchText": "disparat|oförenlig|olikartad|motstridig",
+              "word": "disparat",
+              "timeStart": 1232,
+              "timeEnd": 1241,
+              "lineIndex": 3
+            }
+          ],
+          "oförenlig": [
+            {
+              "id": "8XisveYK58o",
+              "source": "youtube",
+              "target": "disparate|incompatible|dissimilar|contradictory",
+              "enabled": true,
+              "searchText": "disparat|oförenlig|olikartad|motstridig",
+              "word": "oförenlig",
+              "timeStart": 744,
+              "timeEnd": 752,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "stödja|stödjer|stödde|stött|citera|åberopa|stödja sig på|stödjer sig på|stödde sig på|stött sig på": {
+          "citera": [
+            {
+              "id": "v_3A7JglnTE",
+              "source": "YouTube",
+              "target": "support|supports|supported|supported|cite|invoke|rely on|relies on|relied on|relied on",
+              "enabled": true,
+              "searchText": "stödja|stödjer|stödde|stött|citera|åberopa|stödja sig på|stödjer sig på|stödde sig på|stött sig på",
+              "word": "citera",
+              "timeStart": 414,
+              "timeEnd": 424,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "rättskaffens|rättfärdig|rättmätig": {
+          "rättmätiga": [
+            {
+              "id": "-tsPe-1MlRM",
+              "source": "YouTube",
+              "target": "righteous|righteous|righteous",
+              "enabled": true,
+              "searchText": "rättskaffens|rättfärdig|rättmätig",
+              "word": "rättmätiga",
+              "timeStart": 146,
+              "timeEnd": 160,
+              "lineIndex": 24
+            }
+          ],
+          "rättskaffens": [
+            {
+              "id": "sqvvkjo0WOc",
+              "source": "youtube",
+              "target": "righteous|righteous|righteous",
+              "enabled": true,
+              "searchText": "rättskaffens|rättfärdig|rättmätig",
+              "word": "rättskaffens",
+              "timeStart": 1225,
+              "timeEnd": 1236,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "sträng": {
+          "sträng": [
+            {
+              "id": "k8jNKW6ANRk",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "sträng",
+              "word": "sträng",
+              "timeStart": 205,
+              "timeEnd": 213,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "sträng syn": {
+          "sträng syn": [
+            {
+              "id": "nGxPYwz4Nlg",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "sträng syn",
+              "word": "sträng syn",
+              "timeStart": 191,
+              "timeEnd": 200,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "klarlägga": {
+          "klarlägga": [
+            {
+              "id": "NTpm00YjAWM",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "klarlägga",
+              "word": "klarlägga",
+              "timeStart": 335,
+              "timeEnd": 343,
+              "lineIndex": 34
+            }
+          ]
+        },
+        "lysande|upplysande": {
+          "upplysande": [
+            {
+              "id": "p7-AvTxO4Bw",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "lysande|upplysande",
+              "word": "upplysande",
+              "timeStart": 2167,
+              "timeEnd": 2176,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "tämligen": {
+          "tämligen": [
+            {
+              "id": "egBj1WIin8E",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "tämligen",
+              "word": "tämligen",
+              "timeStart": 1480,
+              "timeEnd": 1488,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "singla slant": {
+          "singla slant": [
+            {
+              "id": "cCwL3K5-o2c",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "singla slant",
+              "word": "singla slant",
+              "timeStart": 11330,
+              "timeEnd": 11337,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "slut|utesluter": {
+          "utesluter": [
+            {
+              "id": "0h7P5LWn3oA",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "slut|utesluter",
+              "word": "utesluter",
+              "timeStart": 1245,
+              "timeEnd": 1254,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "anspråk på": {
+          "anspråk på": [
+            {
+              "id": "H9PjdyS4PL0",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "anspråk på",
+              "word": "anspråk på",
+              "timeStart": 1868,
+              "timeEnd": 1876,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "gör anspråk på": {
+          "gör anspråk på": [
+            {
+              "id": "uVe0QM01ayc",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "gör anspråk på",
+              "word": "gör anspråk på",
+              "timeStart": 3780,
+              "timeEnd": 3788,
+              "lineIndex": 9
+            }
+          ]
+        },
+        "manar fram": {
+          "manar fram": [
+            {
+              "id": "5V7UnUOiqRc",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "manar fram",
+              "word": "manar fram",
+              "timeStart": 300,
+              "timeEnd": 308,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "bort|gång|bortgångne": {
+          "bortgångne": [
+            {
+              "id": "HiWjSRjH9-c",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "bort|gång|bortgångne",
+              "word": "bortgångne",
+              "timeStart": 202,
+              "timeEnd": 211,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "missvisa|missvisande": {
+          "missvisande": [
+            {
+              "id": "Rd7XYnoedeQ",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "missvisa|missvisande",
+              "word": "missvisande",
+              "timeStart": 25572,
+              "timeEnd": 25580,
+              "lineIndex": 31
+            }
+          ]
+        },
+        "klämde till med": {
+          "klämde till med": [
+            {
+              "id": "1vz4vSoQxJs",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "klämde till med",
+              "word": "klämde till med",
+              "timeStart": 1218,
+              "timeEnd": 1229,
+              "lineIndex": 2
+            }
+          ]
+        },
+        "ljus|helljus|strålkastare|sken|dager|dagrar": {
+          "sken": [
+            {
+              "id": "5GODLWq8tTI",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "ljus|helljus|strålkastare|sken|dager|dagrar",
+              "word": "sken",
+              "timeStart": 1186,
+              "timeEnd": 1196,
+              "lineIndex": 194
+            }
+          ]
+        },
+        "huggit tag i": {
+          "huggit tag i": [
+            {
+              "id": "6ziHtkhI8Us",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "huggit tag i",
+              "word": "huggit tag i",
+              "timeStart": 355,
+              "timeEnd": 363,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "vrede|vredesmod": {
+          "vredesmod": [
+            {
+              "id": "zqVO_r4GAMY",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "vrede|vredesmod",
+              "word": "vredesmod",
+              "timeStart": 2083,
+              "timeEnd": 2093,
+              "lineIndex": 16
+            }
+          ]
+        },
+        "tornat upp sig": {
+          "tornat upp sig": [
+            {
+              "id": "jyQ1Aw6YhuI",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "tornat upp sig",
+              "word": "tornat upp sig",
+              "timeStart": 1091,
+              "timeEnd": 1101,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "ved|vedertagen|vedertag": {
+          "vedertaget": [
+            {
+              "id": "tcq_5B4ZCyc",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "ved|vedertagen|vedertag",
+              "word": "vedertaget",
+              "timeStart": 928,
+              "timeEnd": 955,
+              "lineIndex": 58
+            }
+          ]
+        },
+        "rov|kontrovers": {
+          "kontrovers": [
+            {
+              "id": "yz_ZOztCPyc",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "rov|kontrovers",
+              "word": "kontrovers",
+              "timeStart": 405,
+              "timeEnd": 411,
+              "lineIndex": 6
+            }
+          ]
+        },
+        "anhängare": {
+          "anhängare": [
+            {
+              "id": "r_EpaQnK4_A",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "anhängare",
+              "word": "anhängare",
+              "timeStart": 209,
+              "timeEnd": 218,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "utsläpp|utsläppen": {
+          "utsläppen": [
+            {
+              "id": "R_KJEZyUjGw",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "utsläpp|utsläppen",
+              "word": "utsläppen",
+              "timeStart": 960,
+              "timeEnd": 970,
+              "lineIndex": 39
+            }
+          ]
+        },
+        "vars|status|vars status": {
+          "vars status": [
+            {
+              "id": "UqHTjp9QHMk",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "vars|status|vars status",
+              "word": "vars status",
+              "timeStart": 1520,
+              "timeEnd": 1527,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "beska|beskaffad": {
+          "beskaffad": [
+            {
+              "id": "eWKShBhCSCQ",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "beska|beskaffad",
+              "word": "beskaffad",
+              "timeStart": 3448,
+              "timeEnd": 3454,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "avfärdas|avfärda": {
+          "avfärda": [
+            {
+              "id": "BNp9jjbslvk",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "avfärdas|avfärda",
+              "word": "avfärda",
+              "timeStart": 225,
+              "timeEnd": 242,
+              "lineIndex": 14
+            }
+          ]
+        },
+        "däri|bland|däri|bland|däribland": {
+          "däribland": [
+            {
+              "id": "dtK4RY6gbhY",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "däri|bland|däri|bland|däribland",
+              "word": "däribland",
+              "timeStart": 18,
+              "timeEnd": 25,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "salig": {
+          "salig": [
+            {
+              "id": "YJogQqWS6j8",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "salig",
+              "word": "salig",
+              "timeStart": 2055,
+              "timeEnd": 2065,
+              "lineIndex": 2
+            }
+          ]
+        },
+        "ägnar oss åt": {
+          "ägnar oss åt": [
+            {
+              "id": "u0A-79rA_3s",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "ägnar oss åt",
+              "word": "ägnar oss åt",
+              "timeStart": 543,
+              "timeEnd": 549,
+              "lineIndex": 93
+            }
+          ]
+        },
+        "att det i regel": {
+          "att det i regel": [
+            {
+              "id": "xMoN5KHiAoY",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "att det i regel",
+              "word": "att det i regel",
+              "timeStart": 708,
+              "timeEnd": 712,
+              "lineIndex": 1
+            }
+          ]
+        },
+        "fäster oss": {
+          "fäster oss": [
+            {
+              "id": "D3ela-XK--Q",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "fäster oss",
+              "word": "fäster oss",
+              "timeStart": 4124,
+              "timeEnd": 4138,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "tar ställning till": {
+          "tar ställning till": [
+            {
+              "id": "HnPhaNnVmd0",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "tar ställning till",
+              "word": "tar ställning till",
+              "timeStart": 1110,
+              "timeEnd": 1122,
+              "lineIndex": 34
+            }
+          ]
+        },
+        "räkna upp": {
+          "räkna upp": [
+            {
+              "id": "o_k9d-u3d_s",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "räkna upp",
+              "word": "räkna upp",
+              "timeStart": 721,
+              "timeEnd": 728,
+              "lineIndex": 18
+            }
+          ]
+        },
+        "vistats": {
+          "vistats": [
+            {
+              "id": "y_8tcbe8bEs",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "vistats",
+              "word": "vistats",
+              "timeStart": 104,
+              "timeEnd": 121,
+              "lineIndex": 5
+            }
+          ]
+        },
+        "till|tillrop": {
+          "tillrop": [
+            {
+              "id": "e9g_PxyJCcc",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "till|tillrop",
+              "word": "tillrop",
+              "timeStart": 307,
+              "timeEnd": 316,
+              "lineIndex": 8
+            }
+          ]
+        },
+        "intet ont anande": {
+          "intet ont anande": [
+            {
+              "id": "oIm1uKt8zQk",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "intet ont anande",
+              "word": "intet ont anande",
+              "timeStart": 620,
+              "timeEnd": 629,
+              "lineIndex": 5
+            }
+          ]
+        },
+        "spärrarna|spärra|spärr": {
+          "spärrar": [
+            {
+              "id": "aoWbwajT0a0",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "spärrarna|spärra|spärr",
+              "word": "spärrar",
+              "timeStart": 922,
+              "timeEnd": 931,
+              "lineIndex": 35
+            }
+          ]
+        },
+        "vräka ur sig": {
+          "vräka ur sig": [
+            {
+              "id": "ChJB8BJ8pTY",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "vräka ur sig",
+              "word": "vräka ur sig",
+              "timeStart": 1335,
+              "timeEnd": 1343,
+              "lineIndex": 2
+            }
+          ]
+        },
+        "räkna med": {
+          "räkna med": [
+            {
+              "id": "z-vVlmrYQsU",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "räkna med",
+              "word": "räkna med",
+              "timeStart": 457,
+              "timeEnd": 530,
+              "lineIndex": 28
+            }
+          ]
+        },
+        "skopor": {
+          "skopor": [
+            {
+              "id": "cR-Bz38LC_4",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "skopor",
+              "word": "skopor",
+              "timeStart": 124,
+              "timeEnd": 132,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "förr|förrädare": {
+          "förrädare": [
+            {
+              "id": "bTVyKyhkdAM",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "förr|förrädare",
+              "word": "förrädare",
+              "timeStart": 347,
+              "timeEnd": 362,
+              "lineIndex": 15
+            }
+          ]
+        },
+        "förrädare": {
+          "förrädare": [
+            {
+              "id": "bTVyKyhkdAM",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "förrädare",
+              "word": "förrädare",
+              "timeStart": 347,
+              "timeEnd": 362,
+              "lineIndex": 15
+            }
+          ]
+        },
+        "fört|förtäckta|förtäckt": {
+          "förtäckt": [
+            {
+              "id": "Ezzwug3eov0",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "fört|förtäckta|förtäckt",
+              "word": "förtäckt",
+              "timeStart": 395,
+              "timeEnd": 404,
+              "lineIndex": 6
+            }
+          ]
+        },
+        "förfal|förfall": {
+          "förfall": [
+            {
+              "id": "oDWMvvW-4qg",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "förfal|förfall",
+              "word": "förfall",
+              "timeStart": 455,
+              "timeEnd": 465,
+              "lineIndex": 24
+            }
+          ]
+        },
+        "hyckla|hycklande": {
+          "hycklande": [
+            {
+              "id": "-tsPe-1MlRM",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "hyckla|hycklande",
+              "word": "hycklande",
+              "timeStart": 339,
+              "timeEnd": 350,
+              "lineIndex": 41
+            }
+          ]
+        },
+        "övers|översittare": {
+          "översittare": [
+            {
+              "id": "5lKwjvECnuM",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "övers|översittare",
+              "word": "översittare",
+              "timeStart": 804,
+              "timeEnd": 811,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "övers|översitt": {
+          "översittare": [
+            {
+              "id": "5lKwjvECnuM",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "övers|översitt",
+              "word": "översittare",
+              "timeStart": 804,
+              "timeEnd": 811,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "avta": {
+          "avtar": [
+            {
+              "id": "JzJNXFxBjZs",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "avta",
+              "word": "avtar",
+              "timeStart": 107,
+              "timeEnd": 115,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "fördömelse": {
+          "fördömelse": [
+            {
+              "id": "CwQNmKM3b04",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "fördömelse",
+              "word": "fördömelse",
+              "timeStart": 4658,
+              "timeEnd": 4666,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "utfrysning": {
+          "utfrysning": [
+            {
+              "id": "GZ6L1Ou8zm4",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "utfrysning",
+              "word": "utfrysning",
+              "timeStart": 458,
+              "timeEnd": 470,
+              "lineIndex": 14
+            }
+          ]
+        },
+        "press|repression": {
+          "repression": [
+            {
+              "id": "vH3N0oVxdiY",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "press|repression",
+              "word": "repression",
+              "timeStart": 1233,
+              "timeEnd": 1242,
+              "lineIndex": 2
+            }
+          ]
+        },
+        "skräms": {
+          "skräms": [
+            {
+              "id": "nLkGIAk_NUg",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "skräms",
+              "word": "skräms",
+              "timeStart": 1092,
+              "timeEnd": 1097,
+              "lineIndex": 1
+            }
+          ]
+        },
+        "samman|tag|sammantagna": {
+          "sammantagna": [
+            {
+              "id": "yeUxzYmmpAo",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "samman|tag|sammantagna",
+              "word": "sammantagna",
+              "timeStart": 4751,
+              "timeEnd": 6484,
+              "lineIndex": 56
+            }
+          ]
+        },
+        "käpp|rätt|käpprätt": {
+          "käpprätt": [
+            {
+              "id": "Mt6qROJ_hh4",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "käpp|rätt|käpprätt",
+              "word": "käpprätt",
+              "timeStart": 2644,
+              "timeEnd": 2653,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "stupet": {
+          "stupet": [
+            {
+              "id": "PdBrtfmCnyI",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "stupet",
+              "word": "stupet",
+              "timeStart": 609,
+              "timeEnd": 619,
+              "lineIndex": 6
+            }
+          ]
+        },
+        "till|fråga|tillfrågade|tillfråga": {
+          "tillfrågad": [
+            {
+              "id": "ZWmQ18HStm4",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "till|fråga|tillfrågade|tillfråga",
+              "word": "tillfrågad",
+              "timeStart": 36974,
+              "timeEnd": 37845,
+              "lineIndex": 161
+            }
+          ]
+        },
+        "hån|fulla|hånfulla": {
+          "hånfulla": [
+            {
+              "id": "inkM1XTOa80",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "hån|fulla|hånfulla",
+              "word": "hånfulla",
+              "timeStart": 9419,
+              "timeEnd": 9426,
+              "lineIndex": 3615
+            }
+          ]
+        },
+        "glad|haglade": {
+          "haglade": [
+            {
+              "id": "-4cjYY7eRmE",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "glad|haglade",
+              "word": "haglade",
+              "timeStart": 1628,
+              "timeEnd": 1640,
+              "lineIndex": 120
+            }
+          ]
+        },
+        "sekle|seklet": {
+          "halvseklet": [
+            {
+              "id": "Py9YnOr4v7g",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "sekle|seklet",
+              "word": "halvseklet",
+              "timeStart": 2660,
+              "timeEnd": 2669,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "allehanda": {
+          "allehanda": [
+            {
+              "id": "CKqR5qCeU0U",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "allehanda",
+              "word": "allehanda",
+              "timeStart": 2592,
+              "timeEnd": 2600,
+              "lineIndex": 8
+            }
+          ]
+        },
+        "i färd med": {
+          "i färd med": [
+            {
+              "id": "inkM1XTOa80",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "i färd med",
+              "word": "i färd med",
+              "timeStart": 8131,
+              "timeEnd": 8140,
+              "lineIndex": 3118
+            }
+          ]
+        },
+        "varpå": {
+          "varpå": [
+            {
+              "id": "yneFwkz0rrw",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "varpå",
+              "word": "varpå",
+              "timeStart": 124,
+              "timeEnd": 140,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "glädja|glädjande": {
+          "glädjande": [
+            {
+              "id": "zLLHMRXbA3M",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "glädja|glädjande",
+              "word": "glädjande",
+              "timeStart": 148,
+              "timeEnd": 154,
+              "lineIndex": 7
+            }
+          ]
+        },
+        "underlig|ande|underliggande": {
+          "underliggande": [
+            {
+              "id": "ucfIavwkYdY",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "underlig|ande|underliggande",
+              "word": "underliggande",
+              "timeStart": 2811,
+              "timeEnd": 2819,
+              "lineIndex": 8
+            }
+          ]
+        },
+        "betinga|betingade": {
+          "betingade": [
+            {
+              "id": "am1QhEoYVfQ",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "betinga|betingade",
+              "word": "betingade",
+              "timeStart": 870,
+              "timeEnd": 878,
+              "lineIndex": 167
+            }
+          ]
+        },
+        "slår mynt av": {
+          "slår mynt av": [
+            {
+              "id": "GsseD-AbSGI",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "slår mynt av",
+              "word": "slår mynt av",
+              "timeStart": 3381,
+              "timeEnd": 3388,
+              "lineIndex": 1
+            }
+          ]
+        },
+        "upp|rymd|upprymda|upprymd": {
+          "upprymd": [
+            {
+              "id": "VUxJw8wWjbs",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "upp|rymd|upprymda|upprymd",
+              "word": "upprymd",
+              "timeStart": 508,
+              "timeEnd": 518,
+              "lineIndex": 45
+            }
+          ]
+        },
+        "hejar": {
+          "hejar": [
+            {
+              "id": "H4oUOiq9XLs",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "hejar",
+              "word": "hejar",
+              "timeStart": 141,
+              "timeEnd": 148,
+              "lineIndex": 5
+            }
+          ]
+        },
+        "täpper": {
+          "täpper": [
+            {
+              "id": "eaqbHKTDWH4",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "täpper",
+              "word": "täpper",
+              "timeStart": 1016,
+              "timeEnd": 1028,
+              "lineIndex": 2
+            }
+          ]
+        },
+        "täpper till truten": {
+          "täpper till truten": [
+            {
+              "id": "YNCYTVQSmdI",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "täpper till truten",
+              "word": "täpper till truten",
+              "timeStart": 369,
+              "timeEnd": 377,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "roat sig": {
+          "roat sig": [
+            {
+              "id": "XxIarYXdK5U",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "roat sig",
+              "word": "roat sig",
+              "timeStart": 683,
+              "timeEnd": 695,
+              "lineIndex": 82
+            }
+          ]
+        },
+        "ställningstaganden": {
+          "ställningstaganden": [
+            {
+              "id": "sBfh6eLSkJM",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "ställningstaganden",
+              "word": "ställningstaganden",
+              "timeStart": 372,
+              "timeEnd": 380,
+              "lineIndex": 11
+            }
+          ]
+        },
+        "pålä|pålästa": {
+          "pålästa": [
+            {
+              "id": "VrCI7pkRUcI",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "pålä|pålästa",
+              "word": "pålästa",
+              "timeStart": 37,
+              "timeEnd": 55,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "förbe|stäm|förbestämda": {
+          "förbestämda": [
+            {
+              "id": "MH116yvbfwg",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "förbe|stäm|förbestämda",
+              "word": "förbestämda",
+              "timeStart": 140,
+              "timeEnd": 157,
+              "lineIndex": 24
+            }
+          ]
+        },
+        "ute|lämnar|utelämnar": {
+          "utelämnar": [
+            {
+              "id": "_bo9cPmdv_0",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "ute|lämnar|utelämnar",
+              "word": "utelämnar",
+              "timeStart": 1104,
+              "timeEnd": 1116,
+              "lineIndex": 73
+            }
+          ]
+        },
+        "vederbörlig": {
+          "vederbörlig": [
+            {
+              "id": "-jEgy4L2Tyk",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "vederbörlig",
+              "word": "vederbörlig",
+              "timeStart": 14277,
+              "timeEnd": 14287,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "vederbörlig ordning": {
+          "vederbörlig ordning": [
+            {
+              "id": "-jEgy4L2Tyk",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "vederbörlig ordning",
+              "word": "vederbörlig ordning",
+              "timeStart": 14277,
+              "timeEnd": 14287,
+              "lineIndex": 4
+            }
+          ]
+        },
+        "påhopp": {
+          "påhopp": [
+            {
+              "id": "5lKwjvECnuM",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "påhopp",
+              "word": "påhopp",
+              "timeStart": 12182,
+              "timeEnd": 12196,
+              "lineIndex": 24
+            }
+          ]
+        },
+        "nära till hands": {
+          "nära till hands": [
+            {
+              "id": "PJBd2-acgVY",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "nära till hands",
+              "word": "nära till hands",
+              "timeStart": 1017,
+              "timeEnd": 1026,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "dräpa|dräpande": {
+          "dräpande": [
+            {
+              "id": "yEnzCjEnU6I",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "dräpa|dräpande",
+              "word": "dräpande",
+              "timeStart": 163,
+              "timeEnd": 171,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "missr|missriktat": {
+          "missriktat": [
+            {
+              "id": "ih0hmv3DuWE",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "missr|missriktat",
+              "word": "missriktat",
+              "timeStart": 549,
+              "timeEnd": 557,
+              "lineIndex": 3
+            }
+          ]
+        },
+        "utlopp": {
+          "utlopp": [
+            {
+              "id": "ltZBMfN1A0M",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "utlopp",
+              "word": "utlopp",
+              "timeStart": 1380,
+              "timeEnd": 1394,
+              "lineIndex": 92
+            }
+          ]
+        },
+        "prest|prestige": {
+          "prestige": [
+            {
+              "id": "lFWGL1KPOUo",
+              "source": "YouTube",
+              "enabled": true,
+              "searchText": "prest|prestige",
+              "word": "prestige",
+              "timeStart": 393,
+              "timeEnd": 399,
+              "lineIndex": 1
+            }
+          ]
+        },
+        "mothugg": {
+          "mothugg": [
+            {
+              "id": "uCcpPMtNFKE",
+              "source": "youtube",
+              "enabled": true,
+              "searchText": "mothugg",
+              "word": "mothugg",
+              "timeStart": 1953,
+              "timeEnd": 1961,
+              "lineIndex": 11
+            }
+          ]
+        }
+      }
+    }
+  }
+}

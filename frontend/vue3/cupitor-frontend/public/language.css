@@ -1614,6 +1614,7 @@ h5.l-accordion.srt-guess-only:hover {
 }
 
 #recordingReviewDialog .rec-item {
+    min-width: 0;
     font-size: 12px;
     display: flex;
     flex-direction: column;
@@ -1623,6 +1624,18 @@ h5.l-accordion.srt-guess-only:hover {
     border-radius: 3px;
     cursor: grab;
 }
+#recordingReviewDialog .rec-grp { overflow-wrap: anywhere; }
+#recordingReviewDialog .rec-page-nav {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+    font-size: 12px;
+}
+#recordingReviewDialog .rec-page-input { width: 4em; }
+#recordingReviewDialog .rec-page-step { min-width: 30px; min-height: 30px; }
+#recordingReviewDialog .rec-page-range { color: #666; }
 #recordingReviewDialog .rec-item-row1 {
     display: flex;
     align-items: center;
@@ -1833,12 +1846,16 @@ h5.l-accordion.srt-guess-only:hover {
     overflow-wrap: anywhere;
     min-width: 0;             /* allow flex shrink past intrinsic content width */
 }
-/* Mobile: the flex row has too many fixed-width buttons + a wide "Copy to…"
-   select for the manual text to share the line. Stack the manual row so
-   the source → target text gets the full row width above the controls.
-   We only re-flow rows that contain a manual text node — captured items
-   (id · timestamps) keep the single-line layout. */
+/* Give card text and captured clip details their own line on mobile so long
+   translations cannot force the entire scroll area wider than the dialog. */
 @media (max-width: 600px) {
+    #recordingReviewDialog .rec-item-row1 { flex-wrap: wrap; }
+    #recordingReviewDialog .rec-item-text {
+        flex: 1 1 100%;
+        min-width: 0;
+        order: -1;
+        overflow-wrap: anywhere;
+    }
     #recordingReviewDialog .rec-item-row1:has(.rec-item-manual) {
         flex-wrap: wrap;
         row-gap: 4px;
