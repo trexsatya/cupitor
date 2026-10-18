@@ -8,6 +8,7 @@
 import { isManualItem } from '../recordings-merge.js'
 import { cardPlainText } from '../card-html.js'
 import { contiguousClipWindow } from '../random-playlist.js'
+import { fromSeconds } from '../time-format.js'
 
 // Build a Unicode-bounded regex from `pattern` (already a regex source —
 // caller is responsible for escaping). Falls back to unbounded for old
@@ -247,7 +248,7 @@ export function buildPlayingBannerVM(it, idx, total, gapSeconds, reversed = fals
     isManual: false,
     progressText: `${safeIdx + 1}/${safeTotal}`,
     headText: `▶ "${it.searchText}" → ${it.word}`,
-    metaText: `${it.id} · ${it.source || '?'} · ${it.timeStart}s – ${it.timeEnd}s`,
+    metaText: `${it.id} · ${it.source || '?'} · ${fromSeconds(it.timeStart)} – ${fromSeconds(it.timeEnd)}`,
     word: it.word || '',
     gapLabel: `${gap}s`,
   }

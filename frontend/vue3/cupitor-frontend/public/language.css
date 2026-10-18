@@ -2424,14 +2424,18 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     top: 46px;
     left: 8px;
     right: 8px;
-    z-index: 100004;
-    background: rgba(33, 33, 33, 0.94);
+    z-index: 100006;
+    background: #212121;
     color: #f5f5f5;
     padding: 8px 12px;
     border-radius: 6px;
     font-size: 13px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.35);
     pointer-events: auto;
+    max-height: calc(100vh - 58px);
+    max-height: calc(100dvh - 58px);
+    overflow-y: auto;
+    box-sizing: border-box;
 }
 #practiceMode .practice-info-head { font-weight: bold; margin-bottom: 4px; }
 #practiceMode .practice-info-meta { color: #ccc; font-family: monospace; word-break: break-all; }
@@ -2556,12 +2560,11 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     white-space: nowrap;
 }
 
-/* While a panel is open the whole overlay is lifted over #practiceAudio
-   (100003). The panels sit inside #practiceMode, which is a stacking context,
-   so their own z-index cannot outrank a sibling of their container — the
-   manual-card audio player would cover the settings panel and the Delete
-   button in it. Dropped again on close so the audio controls come back. */
-#practiceMode.panel-open:not(.minimized) { z-index: 100005; }
+/* Panels must also clear the shared resize divider (100006) and the video
+   wake surface (100007). Their parent is a stacking context, so raising only
+   the panel cannot lift it over those siblings. Restore the normal stacking
+   when closed so media and resize controls remain reachable. */
+#practiceMode.panel-open:not(.minimized) { z-index: 100008; }
 
 /* Settings-panel rows. Each row is a label + control; rows stack so they
    read top-to-bottom on the narrow phone width. */
