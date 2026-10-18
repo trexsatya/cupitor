@@ -6156,10 +6156,19 @@ function getInfoAboutMedia(mediaId, source, time_start) {
 }
 
 function showInfo(id, source, time_start, time_end) {
+  const $dlg = $('#info-dialog-content')
+  const clipKey = JSON.stringify([id, source, Number(time_start), Number(time_end)])
+  // Repeating a result's info action closes it; a different clip replaces
+  // the details in the shared panel. A closed panel always opens again.
+  if ($dlg.hasClass('ui-dialog-content') && $dlg.dialog('isOpen') &&
+      $dlg.data('clipKey') === clipKey) {
+    $dlg.dialog('close')
+    return
+  }
   const {fileName, url} = getInfoAboutMedia(id, source, time_start);
 
   const owner = _ownerLabelOfLink(id)
-  const $dlg = $('#info-dialog-content').html(`
+  $dlg.data('clipKey', clipKey).html(`
     <h3><a href="${_.escape(url)}" target="_blank">${_.escape(fileName)}</a></h3>
     ${owner ? `<h4 class="owner-label">${_.escape(owner)}</h4>` : ''}
     <h4>${_.escape(source)}</h4>
