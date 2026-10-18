@@ -88,7 +88,7 @@ export function createVocabularyMatcher(vocabulary, {
     }
     for (const term of compounds) {
       const word = row.words.find(w => !VOCAB_OVERLAP_STOP_WORDS.has(w) && forms.related(w, term))
-      if (word) return { kind: 'compound', matched: word }
+      if (word) return { kind: 'compound', matched: word, constituent: term }
     }
     return null
   }

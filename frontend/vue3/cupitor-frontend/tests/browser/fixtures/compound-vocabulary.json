@@ -1,0 +1,77 @@
+[
+  {
+    "category": "Investigation, examination and analysis",
+    "line": "(thorough)|Vända på varje sten|Under lupp|Syna i sömmarna|Gå till botten med",
+    "part": "sten"
+  },
+  {
+    "category": "Feelings, emotions",
+    "line": "(irreversible)|Sagt ord och kastad sten kan inte tas tillbaka",
+    "part": "sten"
+  },
+  {
+    "category": "Movement: flowing, floating and dripping",
+    "line": "(flow)|rinna|ränna|drypande|rinnande|rinnande vatten|",
+    "part": "ränna"
+  },
+  {
+    "category": "Damage, destruction, injury and suffering",
+    "line": "(sharp)|brännande|stickande|frän|",
+    "part": null
+  },
+  {
+    "category": "Effect: success, failure and evaluation of outcomes",
+    "line": "(fail)|torska|åka dit( på)|misslyckas( med)|Sjunka som en sten|Gå bet på något",
+    "part": "sten"
+  },
+  {
+    "category": "Social relations",
+    "line": "(hypocrisy)|Kasta sten i glashus",
+    "part": "sten"
+  },
+  {
+    "category": "Social relations",
+    "line": "(hypocrisy)|Kasta inte sten i glashus",
+    "part": "sten"
+  },
+  {
+    "category": "Personality: diligence, persistence and initiative",
+    "line": "(persistence)|Droppen kan urholka stenen|",
+    "part": "sten"
+  },
+  {
+    "category": "Personality: diligence, persistence and initiative",
+    "line": "(cautious undertaking)|Gräv inte upp större sten än du kan bära|",
+    "part": "sten"
+  },
+  {
+    "category": "Ability: intelligence, competence and experience",
+    "line": "(fool)|Tala inte med en dåre om en sten, om du inte vill ha den i huvudet|Våld är den enfaldiges sista utväg",
+    "part": "sten"
+  },
+  {
+    "category": "Buildings, houses etc",
+    "line": "(gutter)|hängränna|hängrännor|stuprör(sl-pl)|",
+    "part": null
+  },
+  {
+    "category": "Fire, burning and extinguishing",
+    "line": "(burn)|bränna|",
+    "part": null
+  },
+  {
+    "category": "Nature, Plants, Trees, Farming, Agriculture",
+    "line": "(furrow)|fåra|fåror|bana|kanal|kanaler|ränna|rännor|dikning|dikningar|åder|ådror|rilla|rillor|räffla|räfflor",
+    "part": "ränna"
+  },
+  {
+    "category": "Mistakes, confusion and learning from experience",
+    "line": "(futile)|Hugga i sten",
+    "part": "sten"
+  },
+  {
+    "category": "Entertainment",
+    "line": "(slide)|rutschkana|rutschkanor|ränna|rännor|",
+    "part": "ränna"
+  }
+]

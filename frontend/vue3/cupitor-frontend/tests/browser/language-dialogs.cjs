@@ -57,6 +57,19 @@ async function checkDialogs(browser, mobile) {
   await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
   const click = selector => mobile ? page.locator(selector).tap() : page.locator(selector).click()
   const isOpen = id => page.evaluate(id => $('#' + id).dialog('isOpen'), id)
+  const revealVocabularyMatch = async expected => {
+    const row = page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: expected })
+    await row.waitFor({ state: 'attached' })
+    const group = row.locator('xpath=ancestor::*[@data-vocab-group-kind="compound"]')
+    if (await group.count()) {
+      const heading = group.locator(':scope > .prefix-group-header')
+      if (!(await heading.evaluate(el => el.classList.contains('is-open')))) {
+        if (mobile) await heading.tap(); else await heading.click()
+      }
+    }
+    await row.waitFor({ state: 'visible' })
+    return row
+  }
   const screenshot = async name => {
     if (!mobile || !process.env.SCREENSHOT_DIR) return
     fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
@@ -86,16 +99,17 @@ async function checkDialogs(browser, mobile) {
             Object.keys(window._lastWordToItemsMap || {}).includes(query) &&
             !document.querySelector('#result').textContent.includes('Loading…')
         }, { expected, query })
-        const row = page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: expected })
+        const row = await revealVocabularyMatch(expected)
         assert.equal(await row.count(), 1)
-        await row.waitFor({ state: 'visible' })
         for (const unrelated of ['översätta', 'hagar', '(year)']) {
-          assert.equal(await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: unrelated }).count(), 0)
+          assert.equal(await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: unrelated }).count(), 0,
+            query + ' must not include ' + unrelated + ' (autoPrefix=' + autoPrefix + ')')
         }
         assert.equal(await page.evaluate(() => window._librarySearchText), query, 'vocabulary matching must not broaden the clean search query')
         assert((await page.evaluate(() => Object.values(window._lastWordToItemsMap || {}).flat().length)) > 0)
         assert.equal(await row.isVisible(), true, 'valid matches remain visible even with the prefix limit set to one')
-        assert.equal(await row.locator('xpath=ancestor::*[contains(@class, "prefix-group")]').count(), 0)
+        assert.equal(await row.locator('xpath=ancestor::*[@data-vocab-group-kind="prefix"]').count(), 0,
+          'known related words must not enter capped prefix-suggestion groups')
         if (query === 'översittare') {
           assert.equal(await page.locator('#vocabularyResult [data-vocab-match-kind=exact]').count(), 1)
           assert.equal(await page.locator('#vocabularyResult [data-vocab-match-kind=family]').count(), 1)
@@ -112,7 +126,7 @@ async function checkDialogs(browser, mobile) {
     await page.waitForFunction(() => window._librarySearchText === 'färgsprakande' && !document.querySelector('#result').textContent.includes('Loading…'))
     await click('#searchVocabularyByPrefixBtn')
     await click('#searchVocabularyMenu [data-mode=prefix]')
-    await page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: '(crackle)' }).waitFor({ state: 'visible' })
+    await revealVocabularyMatch('(crackle)')
     assert.equal(await page.evaluate(() => window._librarySearchText), 'färgsprakande')
     // Common words cannot be the sole match, including alternatives,
     // punctuation and prefix suggestions. Complete expressions still work.

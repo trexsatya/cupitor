@@ -59,6 +59,7 @@ jobs:
         run: |
           node tests/browser/language-dialogs.cjs
           node tests/browser/search-result-counts.cjs
+          node tests/browser/compound-vocabulary-groups.cjs
           node tests/browser/regex-search.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
@@ -74,6 +75,7 @@ jobs:
 
       - name: Test built regex search, Player and Practice controls
         run: |
+          node tests/browser/compound-vocabulary-groups.cjs
           node tests/browser/regex-search.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
