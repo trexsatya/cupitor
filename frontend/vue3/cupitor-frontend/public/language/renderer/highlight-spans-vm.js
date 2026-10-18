@@ -5,8 +5,8 @@
 //
 // The algorithm mirrors `_highlightWordHtml` (Player/Practice) but with
 // two search-result-specific rules:
-//   • each match expands outward to the enclosing whitespace boundary, so
-//     a stem hit like "design" still covers the whole "designing"
+//   • plain stem matches expand to the enclosing whitespace boundary, so
+//     "design" still covers "designing"; regexes keep their exact spans
 //   • multi-word phrases have priority over their constituent single
 //     words — if any phrase matches, ONLY phrase spans are emitted, so
 //     the "x y z|x|y|z" pattern doesn't light up the whole phrase AND
@@ -14,57 +14,30 @@
 //
 // Pure: no DOM, no globals, no HTML emission. The caller composes the HTML.
 
-// Escaped characters and whole character classes are regex atoms: their
-// spaces and pipes belong to the expression, not to phrase/term splitting.
-const REGEX_ATOMS = /\\[\s\S]|\[(?:\\[\s\S]|[^\]\\])*\]/g
-const PHRASE_SPACES = /\\[\s\S]|\[(?:\\[\s\S]|[^\]\\])*\]| +/g
-
-function splitAlternatives(pattern) {
-  const tokens = []
-  let start = 0, inClass = false, depth = 0
-  for (let i = 0; i < pattern.length; i++) {
-    const ch = pattern[i]
-    if (ch === '\\') { i++; continue }
-    if (inClass) { if (ch === ']') inClass = false; continue }
-    if (ch === '[') inClass = true
-    else if (ch === '(') depth++
-    else if (ch === ')') depth = Math.max(0, depth - 1)
-    else if (ch === '|' && depth === 0) {
-      tokens.push(pattern.slice(start, i))
-      start = i + 1
-    }
-  }
-  tokens.push(pattern.slice(start))
-  return tokens.map(t => t.trim()).filter(t => t && tryRe(t, 'gi'))
-}
-
-function isPhrase(token) {
-  return /\s/.test(token.replace(REGEX_ATOMS, ''))
-}
-
-function relaxPhraseSpaces(token) {
-  return token.replace(PHRASE_SPACES, part => part[0] === ' ' ? '\\s+' : part)
-}
+import { compileRegex, splitRegexAlternatives, hasPhraseWhitespace, relaxRegexSpaces, hasRegexSyntax } from '../regex-pattern.js'
 
 function tryRe(src, flags) {
-  try { return new RegExp(src, flags) } catch (_) { return null }
+  try { return compileRegex(src, flags) } catch (_) { return null }
 }
 function tryBoundedRe(src) {
   try { return new RegExp(`(?<![\\p{L}\\p{N}])(?:${src})(?![\\p{L}\\p{N}])`, 'giu') }
   catch (_) { return tryRe(src, 'gi') }
 }
 
-function collect(re, text) {
+function collect(re, text, expandWord = true) {
   const spans = []
   if (!re) return spans
   re.lastIndex = 0
   let m
   while ((m = re.exec(text)) !== null) {
-    if (m[0].length === 0) { re.lastIndex++; continue }
+    if (m[0].length === 0) {
+      re.lastIndex += re.unicode && text.codePointAt(re.lastIndex) > 0xFFFF ? 2 : 1
+      continue
+    }
     let x = m.index
-    while (x > 0 && text[x - 1] !== ' ' && text[x - 1] !== '\n') x--
+    while (expandWord && x > 0 && !/\s/.test(text[x - 1])) x--
     let y = m.index + m[0].length
-    while (y < text.length && text[y] !== ' ' && text[y] !== '\n') y++
+    while (expandWord && y < text.length && !/\s/.test(text[y])) y++
     spans.push({ start: x, end: y })
     if (m.index === re.lastIndex) re.lastIndex++
   }
@@ -87,16 +60,19 @@ function mergeSpans(spans) {
 //
 // Returns [] when no match is found OR when the pattern has no usable
 // tokens — caller treats this as "nothing to highlight".
-export function buildHighlightSpans(text, pattern) {
-  const tokens = splitAlternatives(String(pattern || ''))
+export function buildHighlightSpans(text, pattern, regexMode = false) {
+  // Keep the complete expression: splitting alternatives would change capture
+  // numbering, alternation precedence and which branches are highlighted.
+  if (regexMode) return mergeSpans(collect(tryRe(relaxRegexSpaces(pattern), 'gi'), text, false))
+  const tokens = splitRegexAlternatives(pattern).map(t => t.trim()).filter(t => t && tryRe(t, 'gi'))
   if (!tokens.length) return []
 
-  const multiWord  = tokens.filter(isPhrase)
-  const singleWord = tokens.filter(t => !isPhrase(t))
+  const multiWord  = tokens.filter(hasPhraseWhitespace)
+  const singleWord = tokens.filter(t => !hasPhraseWhitespace(t))
 
   // 1) Multi-word phrases first. Internal spaces relax to \s+.
   let spans = multiWord.length
-    ? collect(tryRe(multiWord.map(relaxPhraseSpaces).join('|'), 'gi'), text)
+    ? multiWord.flatMap(t => collect(tryRe(relaxRegexSpaces(t), 'gi'), text, !hasRegexSyntax(t)))
     : []
 
   // 2) Fall back to single-word matches when no phrase was found:
@@ -105,12 +81,12 @@ export function buildHighlightSpans(text, pattern) {
   //      lookaround so short tokens like "i" don't light up inside "vi"
   if (!spans.length) {
     if (singleWord.length) {
-      spans = spans.concat(collect(tryRe(singleWord.join('|'), 'gi'), text))
+      spans = spans.concat(singleWord.flatMap(t => collect(tryRe(t, 'gi'), text, !hasRegexSyntax(t))))
     }
     const subFromMulti = multiWord
       // Only plain phrases can fall back to individual words. Splitting a
       // regex such as "foo [^ ]+ bar" can turn its fragments into a new regex.
-      .filter(t => !/[\\^$.*+?()[\]{}]/.test(t))
+      .filter(t => !hasRegexSyntax(t))
       .flatMap(t => t.split(/\s+/))
       .map(s => s.trim())
       .filter(Boolean)

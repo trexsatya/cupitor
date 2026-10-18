@@ -100,6 +100,21 @@ describe('buildHighlightSpans — regex syntax', () => {
   test('malformed regex phrases do not invent highlights', () => {
     expect(marked('för många bra', 'för[^ ]+ [')).toEqual([])
   })
+  test('regexes highlight exact spans instead of expanding partial matches', () => {
+    expect(marked('förringa', 'för(?=ringa)')).toEqual(['för'])
+    expect(marked('för1234', String.raw`för\d{2,3}`)).toEqual(['för123'])
+    expect(marked('för++', String.raw`för\+`)).toEqual(['för+'])
+  })
+  test('Unicode regexes and zero-width matches make progress safely', () => {
+    expect(marked('överdriva över123', String.raw`över\p{L}+`)).toEqual(['överdriva'])
+    expect(marked('🙂foo', '(?=.)')).toEqual([])
+  })
+  test('typed regexes preserve complete-expression alternation and captures', () => {
+    const exact = (text, pattern) => buildHighlightSpans(text, pattern, true).map(span => slice(text, span))
+    expect(exact('foo bar and baz', 'foo bar|baz')).toEqual(['foo bar', 'baz'])
+    expect(exact('förringa', 'för|förringa')).toEqual(['för'])
+    expect(exact('foo and barbar', String.raw`(foo)|(bar)\2`)).toEqual(['foo', 'barbar'])
+  })
 })
 
 describe('sliceByHighlightSpans', () => {

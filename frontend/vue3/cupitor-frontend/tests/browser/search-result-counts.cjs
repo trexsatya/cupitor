@@ -52,7 +52,7 @@ async function checkCounts(browser, mobile) {
     const search = async query => {
       await page.locator('#searchText').fill(query)
       await page.locator('#searchText').press('Tab')
-      await page.waitForFunction(query => window._librarySearchText === query.toLowerCase() &&
+      await page.waitForFunction(query => String(window._librarySearchText || '').toLowerCase() === query.toLowerCase() &&
         document.querySelector('#result .l-accordion') &&
         !document.querySelector('#result').textContent.includes('Loading…') &&
         document.querySelector('#result .l-accordion').hasAttribute('accordion-rendered'), query)
