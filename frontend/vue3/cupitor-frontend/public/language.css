@@ -3955,7 +3955,8 @@ body.music-on #recPlayingBanner .rec-pb-music-btn {
     color: #666;
     margin: 4px 0 8px;
 }
-#captionCaptureDialog #capCapPlaylist { flex: 1 1 160px; min-width: 0; }
+#captionCaptureDialog #capCapPlaylist,
+#captionCaptureDialog #capCapItem { flex: 1 1 160px; min-width: 0; max-width: 100%; }
 
 /* Both time steppers, inside the ℹ details block. They are set now and then,
    not watched, so they cost the top row nothing while the deck runs — and the

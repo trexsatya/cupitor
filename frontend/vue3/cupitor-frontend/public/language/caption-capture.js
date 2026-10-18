@@ -10,6 +10,7 @@
 // The wire contract lives in docs/caption-capture-integration-spec.md in the
 // Cupitor repo. Everything here is a pure function of the event so it can be
 // tested without a host, a DOM, or a playlist.
+import { isCardHtml, cardPlainText } from './card-html.js';
 
 // Shown in the opposite face for a line with no translation, so every row
 // stays occupied and keeps its alignment with the line it belongs to.
@@ -259,6 +260,87 @@ export function captionRowGroups(rows, counts) {
 // reading, where Source is the studied language and Target the English side.
 export function captionFieldOf(item) {
   return (item && item.captionField === 'target') ? 'target' : 'source';
+}
+
+// A merged card can contain passages from several pages. Each block names a
+// substring of one face, not the whole face, so earlier notes and passages
+// keep their text and each passage keeps its own capture identity.
+function captionBlocksOf(item) {
+  if (!item) return [];
+  if (Array.isArray(item.captionBlocks)) return item.captionBlocks;
+  if (!Array.isArray(item.captionStarts)) return [];
+  const field = captionFieldOf(item);
+  return [{ url: item.captionUrl, field, offset: 0,
+    length: String(item[field] || '').length, starts: item.captionStarts,
+    rows: item.captionRows || item.captionStarts.map(() => 1) }];
+}
+
+function captionBlockTexts(item, block) {
+  if (!block || !['source', 'target'].includes(block.field) ||
+      !Array.isArray(block.starts) || !block.starts.length ||
+      !Array.isArray(block.rows) || block.rows.length !== block.starts.length ||
+      !Number.isSafeInteger(block.offset) || block.offset < 0 ||
+      !Number.isSafeInteger(block.length) || block.length < 1) return null;
+  const face = String(item[block.field] || '');
+  if (block.offset + block.length > face.length) return null;
+  const raw = face.slice(block.offset, block.offset + block.length);
+  const text = block.html ? cardPlainText(raw) : raw;
+  return captionRowGroups(text.split('\n'), block.rows);
+}
+
+export function captionKeysInItem(item, url, timeParam) {
+  const keys = new Set();
+  captionBlocksOf(item).forEach(block => {
+    if (!block || captionPageKey(block.url, timeParam) !== url) return;
+    const texts = captionBlockTexts(item, block);
+    if (texts) block.starts.forEach((start, i) => keys.add(captionKey(url, start, texts[i])));
+  });
+  return keys;
+}
+
+// Return a new card; the caller commits it only after validating that the
+// destination still exists and is writable. Padding keeps newly appended
+// translations paired with their source, even after unequal handwritten
+// faces or a previous capture with no translations.
+export function appendCaptionBlock(item, cap, lines, field) {
+  const faces = captionFaces(lines, field);
+  const before = { source: String(item.source || ''), target: String(item.target || '') };
+  const rowCount = text => text ? cardPlainText(text).split('\n').length : 0;
+  const oldRows = Math.max(rowCount(before.source), rowCount(before.target));
+  const newRows = captionRowCounts(lines).reduce((n, c) => n + c, 0);
+  const blocks = captionBlocksOf(item).filter(b => captionBlockTexts(item, b))
+    .map(b => ({ ...b }));
+  const next = { ...item };
+  for (const face of ['source', 'target']) {
+    let text = faces[face];
+    // An entirely untranslated answer stays empty. Once either part has an
+    // answer, missing rows need visible placeholders to survive editor trim.
+    if (!text && !before[face]) { next[face] = ''; continue; }
+    if (!text) text = Array(newRows).fill(CAPTION_NO_TRANSLATION).join('\n');
+    const padding = Array(oldRows - rowCount(before[face])).fill(CAPTION_NO_TRANSLATION);
+    const html = isCardHtml(before[face]);
+    const encode = value => html
+      ? '<div>' + value.replace(/[&<>\"]/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]))
+        .replace(/\n/g, '<br>') + '</div>'
+      : value;
+    let prefix = before[face];
+    if (padding.length) prefix += (prefix ? '\n' : '') + encode(padding.join('\n'));
+    if (prefix) prefix += '\n';
+    const added = encode(text);
+    next[face] = prefix + added;
+    if (face === faces.textField && cap.url) {
+      blocks.push({ url: captionPageKey(cap.url, cap.timeParam), field: face,
+        offset: prefix.length, length: added.length,
+        starts: lines.map(l => l.start), rows: captionRowCounts(lines), ...(html ? { html: true } : {}) });
+    }
+  }
+  next.captionBlocks = blocks;
+  // The old whole-face positions are now represented by the first block.
+  delete next.captionStarts;
+  delete next.captionRows;
+  if (!item.captionField) next.captionField = faces.textField;
+  return next;
 }
 
 // Which way a "fill this face from the other one" translation runs.
