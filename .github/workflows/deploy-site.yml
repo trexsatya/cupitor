@@ -55,10 +55,11 @@ jobs:
       - name: Install Chromium for dialog tests
         run: npx playwright install --with-deps chromium
 
-      - name: Test dialogs with desktop clicks and mobile taps
+      - name: Test search, scrolling and dialogs on desktop and mobile
         run: |
           node tests/browser/language-dialogs.cjs
           node tests/browser/search-result-counts.cjs
+          node tests/browser/regex-search.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
           node tests/browser/recorded-scroll-momentum.cjs
@@ -71,8 +72,9 @@ jobs:
         env:
           NODE_OPTIONS: --openssl-legacy-provider
 
-      - name: Test built Player and Practice controls
+      - name: Test built regex search, Player and Practice controls
         run: |
+          node tests/browser/regex-search.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
           node tests/browser/recorded-scroll-momentum.cjs

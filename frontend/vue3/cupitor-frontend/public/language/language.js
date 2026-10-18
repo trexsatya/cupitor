@@ -438,6 +438,7 @@ import {
   buildHighlightSpans as _buildHighlightSpans,
   sliceByHighlightSpans as _sliceByHighlightSpans,
 } from './renderer/highlight-spans-vm.js';
+import { compileRegex, splitRegexAlternatives, hasPhraseWhitespace, isTypedRegex } from './regex-pattern.js';
 import { renderAccordions as _coreRenderAccordions } from './renderer/accordion-render.js';
 import { recordingReviewPage, recordingReviewOrder } from './recording-review-page.js';
 import { knownVideos as _knownVideos } from './known-videos.js';
@@ -5660,6 +5661,8 @@ function getTimesForSubtitleChunk(el, fl) {
 function getWikiLinks(text) {
   // Tags (and their attributes) go before the split, so only words show.
   text = removeHtmlTags(String(text == null ? '' : text).replace(/<br\s*\/?>/gi, ' '))
+  // getWords omits vocabulary separators, but a pipe in a subtitle is literal.
+  if (text.includes('|')) return text.split(/(\|)/).map(part => part === '|' ? '|' : getWikiLinks(part)).join('')
   return text.split(/[ \n]/).flatMap(it => {
     const ws = getWords(it)
     if (ws.length > 1) {
@@ -5670,14 +5673,18 @@ function getWikiLinks(text) {
 }
 
 function highlightedText(text, populateWikiLinks = false) {
-  text = _.trim(text, "-:_")
-  text = text.replaceAll("\n", " ")
+  // Match regexes against the original cue body; normalise display whitespace
+  // only after computing spans, so anchors and escaped newlines retain meaning.
+  if (!window._resultsSearchRegex) {
+    text = _.trim(text, "-:_")
+    text = text.replaceAll("\n", " ")
+  }
   // Pure span computation lives in renderer/highlight-spans-vm.js — see
   // there for the multi-word-priority + bounded-sub-word rules. We add the
   // search-result-specific HTML emit here: wrap matches in
   // <span class='highlight'>, run getWikiLinks over both halves, and
   // trim each segment so stray boundary spaces don't produce empty spans.
-  const spans = _buildHighlightSpans(text, window.searchText || '')
+  const spans = _buildHighlightSpans(text, window.searchText || '', window._resultsSearchRegex)
   if (!spans.length) return getWikiLinks(text)
 
   const wikiSeg = (s) => {
@@ -5754,12 +5761,14 @@ async function getMatchingWords(list, search, token) {
   let wordToItemsMap = {}
   let searchText = search
   const transformedSearchText = search
+  const regexMode = !!window._resultsSearchRegex
+  const bounded = pattern => regexMode ? pattern : withWordBoundaries(pattern)
 
   const isNotTooShort = w => w.trim().length > 2
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
   const ITEM_CHUNK = 25
 
-  const transformedRe = new RegExp(_relaxSpaces(transformedSearchText), "i")
+  const transformedRe = compileRegex(_relaxSpaces(transformedSearchText), "i")
   // English does not compound or inflect the way the studied language does, so
   // a loose match there lands on a different word almost every time: "thin"
   // answered with think, thing and nothing, each dragging its own unrelated
@@ -5776,10 +5785,9 @@ async function getMatchingWords(list, search, token) {
   // the test string. Build a parallel regex with each alternative trimmed so
   // those individual words still produce per-word accordions. The whole-line
   // regex below keeps the spaced form for phrase-level matching.
-  const perWordRe = new RegExp(
+  const perWordRe = compileRegex(
     '^(?:' +
-    transformedSearchText
-      .split(SEPARATOR_PIPE)
+    splitRegexAlternatives(transformedSearchText)
       .map(s => s.trim())
       .filter(s => s.length > 0)
       .join(SEPARATOR_PIPE) +
@@ -5792,11 +5800,10 @@ async function getMatchingWords(list, search, token) {
   // above can't match these (segmenter gives single words), and the
   // combined whole-pipe key would later be filtered out at render. So we
   // tag each phrase term independently here.
-  const phraseTerms = (transformedSearchText || '')
-    .split(SEPARATOR_PIPE)
-    .map(s => s.trim().toLowerCase())
-    .filter(s => s.length > 1 && s.indexOf(' ') > 0)
-  const phraseRes = phraseTerms.map(t => ({ term: t, re: new RegExp(_relaxSpaces(withWordBoundaries(t)), "i") }))
+  const phraseTerms = (regexMode ? [] : splitRegexAlternatives(transformedSearchText))
+    .map(s => s.trim())
+    .filter(s => s.length > 1 && hasPhraseWhitespace(s))
+  const phraseRes = phraseTerms.map(t => ({ term: t, re: compileRegex(_relaxSpaces(bounded(t)), "i") }))
 
   for (let start = 0; start < list.length; start += ITEM_CHUNK) {
     if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
@@ -5813,7 +5820,7 @@ async function getMatchingWords(list, search, token) {
         // step in this loop — for a search that file-matches in 180 SRTs
         // with ~100 lines each, the bulk of the 18k segmentations are on
         // lines that never had a chance of matching. Every downstream
-        // matcher (perWordRe, withWordBoundaries(searchText), phraseRes)
+        // matcher (perWordRe, bounded(searchText), phraseRes)
         // is strictly more restrictive than transformedRe, so if
         // transformedRe doesn't match this line, none of them can either.
         // Skipping here lets the loop finish in a small fraction of the
@@ -5834,8 +5841,8 @@ async function getMatchingWords(list, search, token) {
               wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
             })
         // Whole search text as a word
-        const word = searchText.toLowerCase().trim()
-        if (word.indexOf(" ") > 0 && new RegExp(_relaxSpaces(withWordBoundaries(word)), "i").test(line.text)) {
+        const word = searchText.trim()
+        if (hasPhraseWhitespace(word) && compileRegex(_relaxSpaces(bounded(word)), "i").test(line.text)) {
           wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
         }
         // Per-phrase terms (so each expansion of "<*göra susen" gets its
@@ -5852,9 +5859,9 @@ async function getMatchingWords(list, search, token) {
       // already treats spaces as \s+ (via _relaxSpaces), so joining with a
       // newline preserves intent. Only register when neither line alone
       // matched, so we don't double-count the easy single-line case.
-      const wholeWord = searchText.toLowerCase().trim()
-      const wholeRe = wholeWord.indexOf(" ") > 0
-          ? new RegExp(_relaxSpaces(withWordBoundaries(wholeWord)), "i")
+      const wholeWord = searchText.trim()
+      const wholeRe = hasPhraseWhitespace(wholeWord)
+          ? compileRegex(_relaxSpaces(bounded(wholeWord)), "i")
           : null
       for (let i = 0; i + 1 < lines.length; i++) {
         const a = lines[i], b = lines[i + 1]
@@ -5882,7 +5889,7 @@ async function getMatchingWords(list, search, token) {
     searchText = searchText.trim()
   }
 
-  const searchRe = new RegExp(_relaxSpaces(withWordBoundaries(searchText)), "i")
+  const searchRe = compileRegex(_relaxSpaces(bounded(searchText)), "i")
   for (let start = 0; start < list.length; start += ITEM_CHUNK) {
     if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
     const end = Math.min(start + ITEM_CHUNK, list.length)
@@ -5892,7 +5899,7 @@ async function getMatchingWords(list, search, token) {
       for (const line of lines) {
         const matches = line.text.match(searchRe)
         const alreadyIncludedInResults = it => it.toLowerCase().indexOf(searchText.toLowerCase()) >= 0
-            && wordToItemsMap[it.toLowerCase()].length > 0;
+            && (wordToItemsMap[it] || []).length > 0;
 
         if (matches && !Object.keys(wordToItemsMap).some(alreadyIncludedInResults)) {
           const matchedPart = matches[0].toLowerCase()
@@ -5912,7 +5919,7 @@ async function getMatchingWords(list, search, token) {
   // broad search like "för.*" falsely report no hits for the other words.
   // groupAndArrangeResults removes duplicate cards within each group later.
 
-  getSearchedTerms(transformedSearchText).forEach(it => {
+  if (!regexMode) getSearchedTerms(transformedSearchText).forEach(it => {
     if (!wordToItemsMap[it] && !isRegExp(it)) {
       wordToItemsMap[it] = []
     }
@@ -6823,11 +6830,11 @@ function _syncCapturedItemTimes(containerId, url) {
 // stripper as args; here we fall back to window.searchText if omitted.
 function getSearchedTerms(search) {
   const s = (search === null || search === undefined) ? window.searchText : search
-  return _coreGetSearchedTerms(s, removeHintsInBrackets)
+  return window._resultsSearchRegex ? splitRegexAlternatives(s).map(t => t.trim()).filter(Boolean) : _coreGetSearchedTerms(s, removeHintsInBrackets)
 }
 
 function getWordsOrdered(words) {
-  return _coreGetWordsOrdered(words, window.searchText, removeHintsInBrackets)
+  return _coreGetWordsOrdered(words, window.searchText, window._resultsSearchRegex ? s => s : removeHintsInBrackets)
 }
 
 // commonWordsToIgnore is now imported from ./vocab-search.js
@@ -8594,7 +8601,11 @@ async function render(searchResults, search, className, token) {
 } // end render
 
 function getSubs(text, file, url, source, fetchedFrom) {
-  return {data: srtToJson(text), path: file, url, source, fetchedFrom: fetchedFrom}
+  const data = srtToJson(text)
+  // The legacy parser appends SRT block separators to .text. They are framing,
+  // not part of the cue against which a user means to evaluate an end anchor.
+  return {data: window._resultsSearchRegex ? data.map(line => ({ ...line, text: line.text.trimEnd() })) : data,
+    path: file, url, source, fetchedFrom: fetchedFrom}
 }
 
 class SearchResult {
@@ -8621,12 +8632,12 @@ function resetSearchResultIndex() {
 // _cleanSrtForMatch lives in ./search-text.js (imported at the top).
 
 async function fetchFromDownloadedFiles(lookingFor, token) {
-  lookingFor = expandWords(lookingFor)
+  // The query is already prepared. Expanding it again would strip regex groups.
 
   const keys = Object.keys(window.allSubtitles)
       .filter(it => window.allSubtitles[it].sv || window.allSubtitles[it].en)
   const out = []
-  const re = new RegExp(_relaxSpaces(lookingFor), "i")
+  const re = compileRegex(_relaxSpaces(lookingFor), "i")
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
   const CHUNK = 100
 
@@ -8640,8 +8651,20 @@ async function fetchFromDownloadedFiles(lookingFor, token) {
       // Match on the cleaned-text variants so multi-word phrases that
       // straddle two consecutive subtitle lines are kept (e.g. "a b"
       // across ".... a" then "b ....").
-      const svMatch = svText && _cleanSrtForMatch(svText).match(re)
-      const enMatch = enText && _cleanSrtForMatch(enText).match(re)
+      let svMatch = svText && _cleanSrtForMatch(svText).match(re)
+      let enMatch = enText && _cleanSrtForMatch(enText).match(re)
+      // Flattened file text cannot decide ^/$ matches for individual cues.
+      if (window._resultsSearchRegex) {
+        const stored = window.allSubtitles[it]
+        if (!svMatch && svText) {
+          stored._parsedSv = stored._parsedSv || srtToJson(svText)
+          svMatch = stored._parsedSv.some(line => re.test(line.text.trimEnd()))
+        }
+        if (!enMatch && enText) {
+          stored._parsedEn = stored._parsedEn || srtToJson(enText)
+          enMatch = stored._parsedEn.some(line => re.test(line.text.trimEnd()))
+        }
+      }
       if (svMatch || enMatch) {
         out.push(new SearchResult(
             window.allSubtitles[it].source,
@@ -8758,7 +8781,7 @@ async function fetchSRTs(searchText) {
       searchText = null
     }
     const $searchText = $("#searchText");
-    const txt = searchText || $searchText.val().toLowerCase()
+    const txt = searchText || $searchText.val()
     // $searchText.val(txt)
 
     if (txt.length < 3) return
@@ -8774,8 +8797,8 @@ async function fetchSRTs(searchText) {
     // one-search override is gone and the toggle may say the opposite.
     window._resultsSearchLang = getSelectedLang()
 
-    window.searchText = txt;
-    window.searchText = expandWords(window.searchText)
+    window._resultsSearchRegex = !window.unprocessedSearchText && isTypedRegex(txt)
+    window.searchText = window._resultsSearchRegex ? txt : expandWords(txt.toLowerCase())
     window.searchText = _.trim(window.searchText, SEPARATOR_PIPE)
 
     //To fix the mistakes in vocabulary list with double spaces
@@ -8807,13 +8830,22 @@ async function fetchSRTs(searchText) {
     _ensureLibrarySearchBar()
 
     console.log("Loading from local")
+    try { compileRegex(_relaxSpaces(window.searchText)) } catch (_) {
+      window.searchResult = []
+      window.wordToItemsMap = window._shownWordToItemsMap = window._lastWordToItemsMap = {}
+      $('#vocabularyResult').empty()
+      $('#result').empty().append($('<p class="search-pattern-error" role="alert"></p>')
+        .text('Invalid regular expression — check brackets, groups and quantifiers.'))
+      showResultContainer()
+      return
+    }
     window.searchResult = await fetchFromDownloadedFiles(window.searchText.trim(), myToken);
     if (myToken !== window._subtitleSearchToken) return
     const words = await render(window.searchResult, window.searchText, "primary", myToken)
     if (myToken !== window._subtitleSearchToken) return
     const primaryHits = Object.values(words).flat().length
     console.log("[stem-fallback] primary hits:", primaryHits, "searchText:", window.searchText)
-    if (!window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && primaryHits === 0) {
+    if (!window._resultsSearchRegex && !window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && primaryHits === 0) {
       // Honor forceLangForNextSearch via getSelectedLang() so a "Search here"
       // on an EN word stems against English even when the UI toggle is on SV
       // (and vice-versa). Non-en uses the URL's lang for language-specific

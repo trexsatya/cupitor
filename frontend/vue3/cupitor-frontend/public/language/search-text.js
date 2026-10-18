@@ -5,6 +5,7 @@
 // as native JS so the module stays standalone.
 
 import { SEPARATOR_PIPE } from './vocab-search.js'
+import { relaxRegexSpaces, hasRegexSyntax, splitRegexAlternatives } from './regex-pattern.js'
 
 // Split a paragraph into sentence-strings using Intl.Segmenter. Filters
 // out fragments shorter than 2 chars (lone punctuation / whitespace
@@ -83,15 +84,14 @@ export function withWordBoundaries(pattern) {
 // the search is whitespace-insensitive — "a b", "a  b" and "a\nb" all
 // match the user's "a b" query.
 export function relaxSpaces(pattern) {
-  return String(pattern || '').replace(/ +/g, '\\s+')
+  return relaxRegexSpaces(pattern)
 }
 
-// Heuristic: does `text` look like a regex (contain '.', '*', or '?')?
+// Does `text` contain regex syntax, including groups, classes and escapes?
 // Cheap pre-filter so the search pipeline knows when to compile a regex
 // vs do plain string contains.
 export function isRegExp(text) {
-  if (!text) return false
-  return ['.', '*', '?'].some(it => text.includes(it))
+  return hasRegexSyntax(text)
 }
 
 // Slice a window of size `2*size+1` centered on the entry with the given
@@ -132,8 +132,7 @@ export function getSearchedTerms(searchText, stripBracketHints = (s => s)) {
     return s.slice(start, end)
   }
   const raw = trimPipe(String(searchText).toLowerCase())
-  const terms = raw
-    .split(SEPARATOR_PIPE)
+  const terms = splitRegexAlternatives(raw)
     .filter(it => it.trim().length > 0)
     .map(stripBracketHints)
     .map(it => {
