@@ -143,9 +143,47 @@ export async function fetchSelfJson(path, {
   }
 }
 
+// raw.githubusercontent.com answers 404 both for a file a repo does not have
+// (a new repo made from the template has almost none) and for a repo that is
+// gone (renamed, deleted or made private). The GitHub API tells them apart:
+// GET /repos/<owner>/<repo> answers 404 only when the repo cannot be seen.
+// One answer per repo per page load: true (there), false (gone), null (could
+// not tell: network error, rate limit). The promise is kept, so files missing
+// at the same time share one request; a "could not tell" is kept too, so a
+// gone repo seen through a failed check stays unreported until a reload.
+const _repoChecks = new Map()
+const _repoGoneNoticed = new Set()
+export function resetRepoChecks() { _repoChecks.clear(); _repoGoneNoticed.clear() }
+
+export function repoExists(src, { fetchFn } = {}) {
+  const key = `${src.owner}/${src.repo}`.toLowerCase()
+  if (!_repoChecks.has(key)) {
+    const url = `https://api.github.com/repos/${encodeURIComponent(src.owner)}/${encodeURIComponent(src.repo)}`
+    _repoChecks.set(key, fetchWithRetry(url, { tries: 1, timeoutMs: 8000, passthrough404: true, init: { cache: 'no-store' } }, fetchFn ? { fetch: fetchFn } : {})
+      .then(res => res.status !== 404, () => null))
+  }
+  return _repoChecks.get(key)
+}
+
+// After a 404 from the other layer: tells `onNotice` (once per page load per
+// repo) when the other repo itself is gone. A missing file in a repo that is
+// there is an empty layer and says nothing; so does a check that could not
+// be made.
+export async function checkOtherRepo(onNotice, { fetchFn } = {}) {
+  const o = currentSources().other
+  if (!o || !onNotice) return
+  const exists = await repoExists(o, { fetchFn })
+  const key = `${o.owner}/${o.repo}`.toLowerCase()
+  if (exists !== false || _repoGoneNoticed.has(key)) return
+  _repoGoneNoticed.add(key)
+  try { onNotice(`${o.owner}/${o.repo} could not be found — the repo may have been renamed, deleted or made private, so ${o.owner}'s library is not shown.`) } catch (_) {}
+}
+
 // Fetch one file from every present source, self first. Each layer is
 // { src, owner, text } with text null when the file is not there (404, one
-// request, no retries). `path` is raw, as for readUrl. The other layer may
+// request, no retries). With `onNotice`, an other-layer 404 also starts
+// checkOtherRepo (in the background), so a gone repo is reported and an
+// empty one is not. `path` is raw, as for readUrl. The other layer may
 // fail without stopping the app: it is dropped and `onNotice(message)` is
 // called. A self failure that is not a 404 throws. `retry` is passed to
 // fetchWithRetry for every layer; `otherRetry`, when given, replaces it for
@@ -171,6 +209,8 @@ export async function readLayers(path, { lang = langFromLocation(), fetchFn, onN
       const res = await fetchWithRetry(url, { ...opts, passthrough404: true }, fetchFn ? { fetch: fetchFn } : {})
       const text = res.status === 404 ? null : await res.text()
       if (src === 'other') { if (text == null) _layerStats.other.misses++; else _layerStats.other.hits++ }
+      // Not awaited: the answer is only a notice, and a slow API must not hold up the read.
+      if (src === 'other' && text == null && onNotice) checkOtherRepo(onNotice, { fetchFn }).catch(() => {})
       out.push({ src, owner: cfg.owner, text })
     } catch (e) {
       if (src === 'self') throw e
@@ -230,12 +270,12 @@ export function cacheRecordMatches(record, entry, primaryOwner) {
 
 // Why the other layer of a JSON list file (e.g. srts/index.json) adds
 // nothing, as a message for the user, or null when it is fine or absent.
-// A missing file is the usual sign of a repo that was renamed, deleted or
-// made private (raw.githubusercontent.com answers 404 for all three).
+// A missing file is an empty list (a gone repo is reported by
+// checkOtherRepo instead).
 export function otherListProblem(layers, path) {
   const o = (layers || []).find(l => l && l.src === 'other')
   if (!o) return null
-  if (o.text == null) return `${path} was not found in ${o.owner}'s data — the repo may have been renamed, deleted or made private.`
+  if (o.text == null) return null
   if (parseList(o.text, 'other', path) === null) return `${path} from ${o.owner} is not a valid list and was skipped.`
   return null
 }

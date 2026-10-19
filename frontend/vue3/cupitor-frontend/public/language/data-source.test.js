@@ -246,6 +246,118 @@ describe('readLayers', () => {
   })
 })
 
+describe('a missing other-layer file: empty repo or gone repo', () => {
+  const { resetRepoChecks, checkOtherRepo } = require('./data-source.js')
+  const API = 'https://api.github.com/repos/trexsatya/trexsatya.github.io'
+  const LAYERED = ['srts/index.json', 'srts/categorisation.txt', 'recordings.json', 'vocabulary.txt']
+  // Every raw file 404s (a new repo from the template); the API answers `api`.
+  const setup = (api) => {
+    resetRepoChecks()
+    const calls = []
+    const fetchFn = async (url, init) => {
+      calls.push({ url, init })
+      if (url.startsWith('https://api.github.com/')) {
+        if (api === 'network') throw new TypeError('Failed to fetch')
+        return res(api, '{}')
+      }
+      return res(404, '')
+    }
+    return { calls, fetchFn, apiCalls: () => calls.filter(c => c.url.startsWith('https://api.github.com/')) }
+  }
+  afterEach(() => resetRepoChecks())
+  // readLayers starts the repo check without waiting for it.
+  const settle = () => new Promise(r => setTimeout(r, 0))
+
+  test.each(LAYERED)('%s missing, repo there: empty layer, no notice', async (path) => {
+    configure(alice)
+    const { fetchFn, apiCalls } = setup(200)
+    const notices = []
+    const out = await readLayers(path, { lang: 'swedish', fetchFn, onNotice: n => notices.push(n) })
+    await settle()
+    expect(out).toEqual([{ src: 'self', owner: 'alice', text: null }, { src: 'other', owner: 'trexsatya', text: null }])
+    expect(notices).toEqual([])
+    expect(apiCalls()).toEqual([{ url: API, init: expect.objectContaining({ cache: 'no-store' }) }])
+  })
+
+  test('repo gone (API 404): one notice for several files, one API request', async () => {
+    configure(alice)
+    const { fetchFn, apiCalls } = setup(404)
+    const notices = []
+    const onNotice = n => notices.push(n)
+    await Promise.all(LAYERED.map(p => readLayers(p, { lang: 'swedish', fetchFn, onNotice })))
+    await readLayers('vocabulary.txt', { lang: 'swedish', fetchFn, onNotice })
+    await checkOtherRepo(onNotice, { fetchFn })
+    await settle()
+    expect(notices).toEqual([expect.stringMatching(/trexsatya\/trexsatya\.github\.io could not be found.*renamed, deleted or made private/)])
+    expect(apiCalls()).toHaveLength(1)
+  })
+
+  test('several missing files in a repo that is there: one API request', async () => {
+    configure(guest)
+    const { fetchFn, apiCalls } = setup(200)
+    const notices = []
+    for (const p of LAYERED) await readLayers(p, { lang: 'swedish', fetchFn, onNotice: n => notices.push(n) })
+    await settle()
+    expect(notices).toEqual([])
+    expect(apiCalls()).toHaveLength(1)
+  })
+
+  test('a hung repo check does not hold up the read; its answer still reports a gone repo', async () => {
+    configure(alice)
+    resetRepoChecks()
+    let answer
+    const fetchFn = async (url) => (url.startsWith('https://api.github.com/')
+      ? new Promise(r => { answer = r })
+      : res(404, ''))
+    const notices = []
+    const out = await readLayers('srts/index.json', { lang: 'swedish', fetchFn, onNotice: n => notices.push(n) })
+    expect(out.map(l => l.text)).toEqual([null, null])
+    expect(notices).toEqual([])
+    answer(res(404, ''))
+    await settle()
+    expect(notices).toHaveLength(1)
+  })
+
+  test.each([['a network error', 'network'], ['a rate limit (403)', 403], ['a server error', 500]])('%s on the check: no notice', async (_, api) => {
+    configure(alice)
+    const { fetchFn } = setup(api)
+    const notices = []
+    const out = await readLayers('srts/index.json', { lang: 'swedish', fetchFn, onNotice: n => notices.push(n) })
+    await settle()
+    expect(out.map(l => l.text)).toEqual([null, null])
+    expect(notices).toEqual([])
+  })
+
+  test('a file that is there makes no API request', async () => {
+    configure(alice)
+    resetRepoChecks()
+    const calls = []
+    const fetchFn = async (url) => { calls.push(url); return res(200, '[]') }
+    await readLayers('srts/index.json', { lang: 'swedish', fetchFn, onNotice: () => {} })
+    expect(calls.some(u => u.startsWith('https://api.github.com/'))).toBe(false)
+  })
+
+  test('own files missing (no other layer, or a brand-new own repo): no API request, no notice', async () => {
+    for (const s of [owner, aliceNoRepo, alice]) {
+      configure(s.other ? { ...s, other: null } : s)
+      const { fetchFn, apiCalls } = setup(404)
+      const notices = []
+      for (const p of LAYERED) await readLayers(p, { lang: 'swedish', fetchFn, onNotice: n => notices.push(n) })
+      await settle()
+      expect(notices).toEqual([])
+      expect(apiCalls()).toEqual([])
+    }
+  })
+
+  test('without onNotice nothing is checked', async () => {
+    configure(alice)
+    const { fetchFn, apiCalls } = setup(404)
+    await readLayers('vocabulary.txt', { lang: 'swedish', fetchFn })
+    await settle()
+    expect(apiCalls()).toEqual([])
+  })
+})
+
 describe('cacheRecordMatches', () => {
   test('a cached record is used only when it came from the repo the index entry names', () => {
     expect(cacheRecordMatches({ owner: 'bob' }, { owner: 'bob' }, 'alice')).toBe(true)
@@ -267,8 +379,10 @@ describe('otherListProblem', () => {
     expect(otherListProblem([{ src: 'other', owner: 'b', text: '' }], 'srts/index.json')).toBe(null)
     expect(otherListProblem([], 'srts/index.json')).toBe(null)
   })
-  test('missing file (404) or not a list: a message naming the owner', () => {
-    expect(otherListProblem([{ src: 'other', owner: 'bob', text: null }], 'srts/index.json')).toMatch(/bob.*srts\/index\.json|srts\/index\.json.*bob/)
+  test('a missing file (404) is an empty list: no problem (a gone repo is checkOtherRepo\'s job)', () => {
+    expect(otherListProblem([{ src: 'other', owner: 'bob', text: null }], 'srts/index.json')).toBe(null)
+  })
+  test('not a list: a message naming the owner', () => {
     expect(otherListProblem([{ src: 'other', owner: 'bob', text: '{' }], 'srts/index.json')).toMatch(/bob/)
     expect(otherListProblem([{ src: 'other', owner: 'bob', text: '{}' }], 'srts/index.json')).toMatch(/bob/)
   })
