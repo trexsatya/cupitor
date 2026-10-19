@@ -137,6 +137,7 @@ import {
   mergeIndexLayers as _dsMergeIndexLayers,
   mergeCategorisationLayers as _dsMergeCategorisationLayers,
   otherListProblem as _dsOtherListProblem,
+  checkOtherRepo as _dsCheckOtherRepo,
   cacheRecordMatches as _dsCacheRecordMatches,
   source as _dsSource,
   vocabularyFromLayers as _dsVocabularyFromLayers,
@@ -154,8 +155,8 @@ import {
 // prompt in github-utils.js never fires.
 window._suppressGHTokenPrompt = true
 
-// Notices about the other user's (read-only) layer, e.g. "srts/index.json was
-// not found in alice's data". Kept for the account panel, logged, and shown
+// Notices about the other user's (read-only) layer, e.g. "alice/cupitor-data
+// could not be found". Kept for the account panel, logged, and shown
 // briefly as a toast.
 window._otherLayerNotices = []
 function _dsNotice(msg) {
@@ -11753,7 +11754,25 @@ async function _loadOtherRecordings() {
   if (!_dsHasOther()) return
   let coll = null
   try {
+<<<<<<< HEAD
     coll = await _readRecordingsCollection('other')
+=======
+    const url = _dsReadUrl('other', 'recordings.json', _dsLangFromLocation())
+    // One retry beside the user's own data; a guest has only this source.
+    const opts = _dsHasSelf() ? _OTHER_LAYER_RETRY : {}
+    const res = await fetchWithRetry(url, { ...opts, passthrough404: true })
+    if (res.status === 404) { // no playlists of theirs in this language, or the repo is gone
+      await _dsCheckOtherRepo(_dsNotice)
+      return
+    }
+    const text = await res.text()
+    if (!text || !text.trim()) return
+    try { coll = JSON.parse(text) } catch (_) { coll = null }
+    if (!coll || typeof coll !== 'object' || Array.isArray(coll)) {
+      _dsNotice("The other user's recordings.json is not valid — their playlists are not shown.")
+      return
+    }
+>>>>>>> ab0c47a (language: only report the other library as unavailable when its repo is gone)
   } catch (e) {
     _dsNotice(`Could not load the other user's playlists: ${e && e.message}`)
     return

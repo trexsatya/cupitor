@@ -243,12 +243,64 @@ const defaultDeps = () => ({
   inApp: () => appBridgeAvailable() || typeof GitHubProxy !== 'undefined',
   reload: () => window.location.reload(),
   session: () => { try { return typeof sessionStorage !== 'undefined' ? sessionStorage : null } catch (_) { return null } },
+  local: () => { try { return typeof localStorage !== 'undefined' ? localStorage : null } catch (_) { return null } },
   now: () => Date.now(),
 })
 let D = defaultDeps()
 let ui = freshUi()
 function freshUi() {
-  return { users: null, listing: null, setup: null, reconcile: null, message: null, busy: false, repoName: null, bootState: null, open: false }
+  return {
+    users: null, listing: null, setup: null, reconcile: null, message: null, busy: false, repoName: null, bootState: null, open: false,
+    hiddenBanners: [],
+  }
+}
+
+// ---- closing the banner ----
+
+// Banner keys the user closed for good on this device (localStorage, JSON
+// array). A key is the account status plus the message, so a closed prompt
+// stays closed on later loads while a different message, or the same words
+// after the account changed, still shows.
+export const DISMISSED_BANNERS_KEY = 'cupitor:dismissedBanners'
+// Only these invitations stay closed across loads. Warnings (signed out by
+// GitHub, repo not found, sign-in not checked) close for this page view only.
+export const DISMISSIBLE_FOR_GOOD = [VISITOR_MSG, SETUP_REPO_MSG, NO_TOKEN_MSG]
+const MAX_DISMISSED = 20
+
+export function bannerKey(status, banner) {
+  return banner ? `${status}|${banner}` : null
+}
+
+// Whether the banner shows: there is one and its key is not among the
+// closed ones (stored or for this page view).
+export function bannerVisible(banner, key, dismissed) {
+  if (!banner) return false
+  return !(Array.isArray(dismissed) && dismissed.includes(key))
+}
+
+function storedDismissals() {
+  try {
+    const s = D.local()
+    const v = s ? JSON.parse(s.getItem(DISMISSED_BANNERS_KEY) || '[]') : []
+    return Array.isArray(v) ? v.filter(k => typeof k === 'string') : []
+  } catch (_) { return [] }
+}
+
+function dismissBanner() {
+  const vm = currentVM()
+  const key = bannerKey(vm.status, vm.banner)
+  if (!key) return
+  if (!ui.hiddenBanners.includes(key)) ui.hiddenBanners.push(key)
+  if (DISMISSIBLE_FOR_GOOD.includes(vm.banner)) {
+    try {
+      const s = D.local()
+      if (s) {
+        const keys = storedDismissals().filter(k => k !== key).concat(key).slice(-MAX_DISMISSED)
+        s.setItem(DISMISSED_BANNERS_KEY, JSON.stringify(keys))
+      }
+    } catch (_) {}
+  }
+  renderAccountPanel()
 }
 
 // The panel cannot be closed while setup runs, for at most this long (a
@@ -306,8 +358,11 @@ export function renderAccountPanel() {
   if (typeof $ !== 'function') return
   const vm = currentVM()
   const $b = $('#accountBanner')
-  if (vm.banner) {
-    $b.empty().append($('<span></span>').text(vm.banner), ' ', btn('accountBannerBtn', 'Account')).show()
+  const key = bannerKey(vm.status, vm.banner)
+  if (bannerVisible(vm.banner, key, storedDismissals().concat(ui.hiddenBanners))) {
+    const $close = $('<button type="button" id="accountBannerClose" class="account-banner-close"></button>')
+      .attr({ 'aria-label': 'Close', title: 'Hide this message. Account stays in Settings.' }).text('✕')
+    $b.empty().append($('<span></span>').text(vm.banner), ' ', btn('accountBannerBtn', 'Account'), $close).show()
   } else {
     $b.hide().empty()
   }
@@ -566,6 +621,7 @@ export function initAccountPanel() {
   $(document)
     .off('.acctPanel')
     .on('click.acctPanel', '#accountBtn, #accountBannerBtn', () => openAccountDialog())
+    .on('click.acctPanel', '#accountBannerClose', dismissBanner)
     .on('click.acctPanel', '#acctSetup', doSetup)
     .on('click.acctPanel', '#acctAppSignIn', doAppSignIn)
     .on('click.acctPanel', '#acctTokenSignIn', doTokenSignIn)

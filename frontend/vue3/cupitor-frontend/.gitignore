@@ -3,7 +3,7 @@
 **/**/.DS_Store
 node_modules
 /dist
-
+venv
 /tests/e2e/videos/
 /tests/e2e/screenshots/
 
