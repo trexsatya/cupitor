@@ -49,12 +49,12 @@ async function check(browser, mobile) {
   }
   const playing = () => page.waitForFunction(() => !window.__spotify.paused)
   const takePlaying = () => page.waitForFunction(() => document.querySelector('.prec-status')?.textContent === 'your take' && window.__takeAudios.some(a => !a.paused))
-  const finishTake = () => page.evaluate(() => window.__takeAudios.at(-1).dispatchEvent(new Event('ended')))
+  const finishTake = () => page.evaluate(() => { const audio = window.__takeAudios.at(-1); audio.pause(); audio.dispatchEvent(new Event('ended')) })
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
     await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
     await page.evaluate(() => {
-      const spotify = (id, start, end) => ({ id, manual: true, source: id, target: 'translation', mediaUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionStarts: [start], captionEnds: [end] })
+      const spotify = (id, start, end) => ({ id, manual: true, source: id, target: 'translation', mediaUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionStarts: [start], captionEnds: [end] })
       const stored = [spotify('first', 30, 34), spotify('second', 60, 64), { id: 'text', manual: true, source: 'Text only', target: 'Text' }]
       window._recordings.Speak = { items: { Manual: { Card: stored } } }
       Object.assign(window._appSettings, { recPlayShuffle: false, practiceRevealMode: 'flip' })
@@ -86,6 +86,13 @@ async function check(browser, mobile) {
     await page.waitForFunction(() => window._practiceIdx === 1 && window.__spotify.position === 60)
     assert.equal(await page.locator('.prec-take').count(), 0, 'takes stay with their original card')
     await click('.prec-toggle'); await click('.prec-toggle.on'); await takePlaying()
+    await finishTake(); await playing()
+    await page.evaluate(() => {
+      const s = window.__spotify; s.position = 64
+      s.listeners.playback_update({data: {playingURI: s.uri, position: 64000, duration: 120000, isPaused: false, isBuffering: false}})
+    })
+    await page.getByRole('button', {name: 'Replay Spotify clip', exact: true}).waitFor({state: 'visible'})
+    await click('.practice-play'); await takePlaying()
     await finishTake(); await playing()
     await click('.prec-drop')
     await page.waitForFunction(() => window.__audioRequests.some(r => r.op === 'delete'))

@@ -22223,8 +22223,11 @@ function _togglePracticePlayback() {
   if (spotifyClips(it).length) {
     const st = _pracRec
     if (st?.phase === 'recording') return
+    const media = spotifyPlayer.media
+    const restarting = !media || media.ended || !Number.isFinite(media.currentTime)
     if (st) {
-      st.awaiting = null; st.token++; st.watchPos = null
+      st.awaiting = null; st.token++
+      st.watchPos = restarting ? spotifyClips(it)[0].start - 0.001 : null
       if (st.audio) { try { st.audio.pause() } catch (_) {} st.audio = null }
       if (st.phase === 'playback') st.phase = 'idle'
       _renderPracticeRecBar()
