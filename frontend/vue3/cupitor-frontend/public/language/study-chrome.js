@@ -72,7 +72,7 @@ export function installStudyChrome() {
   document.addEventListener('pointerdown', event => {
     if (!view || event.button !== 0 || event.target.closest('.ui-dialog')) return;
     keyboard = false;
-    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, hidden: !chrome.isVisible() && !event.target.closest('#practiceMode .practice-unflip'), moved: false, view };
+    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, hidden: !chrome.isVisible() && !event.target.closest('#practiceMode .practice-unflip,#practiceMode .practice-rec-bar'), moved: false, view };
     if (!pointer.hidden) chrome.show();
   }, true);
   document.addEventListener('pointermove', event => {

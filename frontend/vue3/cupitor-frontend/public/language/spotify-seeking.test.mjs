@@ -63,7 +63,7 @@ function fixture() {
     }
     clock = end;
   };
-  return {player, calls, options, state, flush, advance, ready: () => emit('ready'),
+  return {win, player, calls, options, state, flush, advance, ready: () => emit('ready'),
     count: name => calls.filter(call => call[0] === name).length,
     get ownerPaused() {return ownerPaused;},
     onPause(callback) {nextPause = callback;}, onSeek(callback) {nextSeek = callback;},
@@ -470,6 +470,32 @@ test('buffering suspends prediction of a nearby clip end', async () => {
     assert.equal(f.player.media.ended, false);
     f.state(30.6, false, false); f.advance(1100);
     assert.equal(await done, true);
+  } finally {f.close();}
+});
+
+for (const mode of ['practice', 'player']) test(`${mode} minimize holds the existing session against late Play, then restores its position`, async () => {
+  const f = fixture();
+  try {
+    const card = item();
+    f.player.cue(card, {...f.options, mode, autoplay: true}); await f.flush(); f.ready();
+    f.state(30, false); f.state(31.2, false); f.advance(200);
+    const media = f.player.media;
+    f.player.hide();
+    const pinned = media.currentTime, loads = f.count('load'), seeks = f.count('seek');
+    assert.equal(f.win.document.body.classList.contains('study-spotify'), false);
+    f.advance(4000); f.state(35, false);
+    assert.equal(media.currentTime, pinned, 'late iframe progress cannot change the minimized position');
+    assert.equal(f.ownerPaused, false, 'late iframe Play cannot change the queue pause intent');
+    assert.equal(media.paused, true);
+    const resumes = f.count('resume'); await media.play(); f.advance(300);
+    assert.equal(f.count('resume'), resumes, 'a hidden iframe cannot resume');
+    f.player.show({focus: false});
+    assert.equal(f.win.document.body.classList.contains('study-spotify'), true);
+    assert.equal(f.player.media, media, 'restoring keeps the same transport');
+    assert.equal(f.count('load'), loads); assert.equal(f.count('seek'), seeks);
+    await media.play(); f.state(pinned + 0.1, false);
+    assert.equal(media.paused, false);
+    assert.equal(media.ended, false);
   } finally {f.close();}
 });
 

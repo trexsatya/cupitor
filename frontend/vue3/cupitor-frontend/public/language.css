@@ -4108,7 +4108,7 @@ body.study-controls-hidden :is(#recPlayingBanner .rec-pb-top > :not(.rec-pb-prog
     #recPlayingBanner .rec-pb-details, #recPlayingTransport, #recPlayingMinimizeBtn,
     #recPlayingCloseBtn, #recPlayNavToast, #studyMediaDivider, #practiceMode .practice-topbar,
     #practiceMode .practice-nav > :not(.practice-unflip), #practiceMode .practice-ctx-ctrl,
-    #practiceMode .practice-line-edit, #practiceMode .practice-rec-bar,
+    #practiceMode .practice-line-edit,
     #practiceMode .practice-restore, #practiceAudio > *, #recPlayingAudio > *) {
     opacity: 0 !important;
     visibility: hidden !important;

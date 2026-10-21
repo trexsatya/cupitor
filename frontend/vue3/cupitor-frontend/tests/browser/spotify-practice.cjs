@@ -55,7 +55,8 @@ async function check(browser, mobile) {
     await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
     await page.evaluate(() => {
       const spotify = (id, start, end) => ({ id, manual: true, source: id, target: 'translation', mediaUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionStarts: [start], captionEnds: [end] })
-      const stored = [spotify('first', 30, 34), spotify('second', 60, 64), { id: 'text', manual: true, source: 'Text only', target: 'Text' }]
+      const stored = [spotify('first', 30, 50), spotify('second', 60, 64), { id: 'text', manual: true, source: 'Text only', target: 'Text' }]
+      window.__spotifyCards = stored
       window._recordings.Speak = { items: { Manual: { Card: stored } } }
       Object.assign(window._appSettings, { recPlayShuffle: false, practiceRevealMode: 'flip' })
       window.__ytPlays = 0
@@ -67,8 +68,23 @@ async function check(browser, mobile) {
     await click('.practice-play'); await playing()
     assert.equal(await page.evaluate(() => document.querySelector('#spotifyClipPlayer iframe') === window.__originalSpotifyIframe && document.body.classList.contains('study-spotify')), true)
     assert.equal(await page.evaluate(() => window.__ytPlays), 0, 'visible Play must never dispatch to YouTube')
+    const restorePractice = async () => {
+      const before = await page.evaluate(() => ({position: window.__spotify.position, commands: window.__spotify.commands.filter(c => ['load', 'seek'].includes(c[0])).length}))
+      await click('.practice-minimize')
+      before.position = await page.evaluate(() => window.__spotify.position)
+      assert.equal(await page.evaluate(() => window.__spotify.paused), true)
+      assert.equal(await page.locator('#spotifyClipPlayer iframe').isVisible(), false)
+      await page.waitForTimeout(350) // let stale-session/timer bugs surface
+      await click('.practice-restore-btn')
+      await page.locator('#spotifyClipPlayer iframe').waitFor({state: 'visible'})
+      assert.deepEqual(await page.evaluate(() => ({position: window.__spotify.position, commands: window.__spotify.commands.filter(c => ['load', 'seek'].includes(c[0])).length})), before, 'Practice restore retains its clip and position')
+      assert.equal(await page.evaluate(() => window.__spotify.paused && window._practiceIdx === 0 && document.querySelector('#spotifyClipPlayer iframe') === window.__originalSpotifyIframe), true)
+    }
+    await restorePractice()
+    await click('.practice-play'); await playing()
     await click('.practice-play')
     assert.equal(await page.evaluate(() => window.__spotify.paused), true)
+    await restorePractice()
     await page.evaluate(() => document.activeElement?.blur())
     await page.keyboard.press('Space'); await playing()
     await page.waitForTimeout(350)
@@ -80,8 +96,14 @@ async function check(browser, mobile) {
     await finishTake(); await playing()
     await click('.prec-keep')
     const saved = await page.evaluate(() => window._recordings.Speak.items.Manual.Card[0].practiceTakes)
-    assert.equal(saved.length, 1); assert(saved[0].t1 >= 30 && saved[0].t1 < 34, 'take uses Spotify time, not the YouTube clock at 900s')
-    await click('.prec-take'); await takePlaying(); await finishTake(); await playing()
+    assert.equal(saved.length, 1); assert(saved[0].t1 >= 30 && saved[0].t1 < 50, 'take uses Spotify time, not the YouTube clock at 900s')
+    await click('.prec-take'); await takePlaying()
+    await click('.practice-minimize'); await finishTake()
+    await page.waitForTimeout(350)
+    assert.equal(await page.evaluate(() => window.__spotify.paused && window.__takeAudios.every(a => a.paused)), true, 'minimizing parks a take and stale ended cannot resume it')
+    await click('.practice-restore-btn')
+    assert.equal(await page.locator('.prec-take').count(), 1, 'restoring preserves takes on the current card')
+    await click('.practice-play'); await playing()
     await click('.practice-next')
     await page.waitForFunction(() => window._practiceIdx === 1 && window.__spotify.position === 60)
     assert.equal(await page.locator('.prec-take').count(), 0, 'takes stay with their original card')
@@ -107,8 +129,48 @@ async function check(browser, mobile) {
     await page.waitForFunction(() => window._practiceIdx === 2 && window.__audioRequests.some(r => r.op === 'recordCancel'))
     assert.equal(await page.locator('.practice-rec-bar').isVisible(), false, 'text-only cards have no speakover controls')
     assert.equal(await page.evaluate(() => document.body.classList.contains('study-spotify')), false)
+
+    await page.evaluate(() => {
+      window.closePracticeMode()
+      window._appSettings.recPlayGapSeconds = 0
+      window.playRecording({queue: [window.__spotifyCards[0]], shuffle: false, loop: 'off'})
+    })
+    await playing()
+    await page.locator('#spotifyClipPlayer iframe').waitFor({state: 'visible'})
+    for (const resume of [true, false]) {
+      if (!resume) await click('#recPlayingPauseBtn')
+      const before = await page.evaluate(() => ({position: window.__spotify.position, loads: window.__spotify.commands.filter(c => ['load', 'seek'].includes(c[0])).length}))
+      await click('#recPlayingMinimizeBtn')
+      assert.equal(await page.locator('#spotifyClipPlayer iframe').isVisible(), false)
+      await page.waitForTimeout(350)
+      assert.equal(await page.evaluate(() => window.__spotify.paused && window._recPlayPaused), true)
+      if (resume) { await click('.rec-pill-restore'); await playing() }
+      else await page.evaluate(() => window.restorePlayingRecording({resume: false}))
+      await page.locator('#spotifyClipPlayer iframe').waitFor({state: 'visible'})
+      const after = await page.evaluate(() => ({position: window.__spotify.position, loads: window.__spotify.commands.filter(c => ['load', 'seek'].includes(c[0])).length, index: window._recPlayIndex, paused: window._recPlayPaused}))
+      assert.equal(after.loads, before.loads, 'Player restore must not load or seek again')
+      assert(after.position >= before.position && after.position < before.position + 1)
+      assert.equal(after.index, 0); assert.equal(after.paused, !resume)
+      assert.equal(await page.evaluate(() => document.querySelector('#spotifyClipPlayer iframe') === window.__originalSpotifyIframe && window.__ytPlays === 0), true)
+    }
+    await page.evaluate(() => { window.stopPlayingRecording(); window.openPracticeMode({single: true, queue: [window.__spotifyCards[0]]}) })
+    await click('.practice-settings')
+    await page.getByRole('checkbox', {name: 'Show speakover', exact: true}).uncheck()
+    assert.equal(await page.locator('.practice-rec-bar').isVisible(), false)
+    await page.evaluate(() => window.closePracticeMode())
+    await page.reload({waitUntil: 'networkidle'})
+    await page.evaluate(() => window.openPracticeMode({single: true, queue: [{id: 'persisted', manual: true, source: 'Spotify', mediaUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionStarts: [30], captionEnds: [50]}]}))
+    await click('.practice-settings')
+    const toggle = page.getByRole('checkbox', {name: 'Show speakover', exact: true})
+    assert.equal(await toggle.isChecked(), false, 'speakover preference survives reload')
+    assert.equal(await page.locator('.practice-rec-bar').isVisible(), false)
+    await toggle.check(); await click('.practice-settings')
+    await page.clock.install(); await page.clock.fastForward(4000)
+    await page.waitForFunction(() => document.body.classList.contains('study-controls-hidden'))
+    await page.locator('.practice-topbar').waitFor({state: 'hidden'})
+    assert.equal(await page.locator('.practice-rec-bar').isVisible(), true, 'Spotify speakover stays visible when enabled')
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'Mobile' : 'Desktop'}: real Practice Play routing, Spotify clock, Rec/Stop/replay, Keep/discard and navigation cancellation passed`)
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: Spotify Practice/Player restore, persistent speakover toggle, Rec/replay, Keep/discard and navigation cancellation passed`)
   } catch (error) {
     fs.mkdirSync('test-results/dialog-browser-results/spotify', { recursive: true })
     await page.screenshot({path: 'test-results/dialog-browser-results/spotify/failure.png'}).catch(() => {})
