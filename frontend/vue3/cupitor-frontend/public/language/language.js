@@ -751,7 +751,9 @@ function _liftDialogAboveOverlay($wrap) {
 function _coverOpenDialogsForStudy() {
   $('.ui-dialog:visible').addClass('behind-study-view').removeClass('above-practice-mode')
     .each(function () {
-      this.style.removeProperty('z-index')
+      // Some dialogs have ID-specific !important rules above the backdrop.
+      // Override those too; closing/minimizing study restores their CSS.
+      this.style.setProperty('z-index', '99999', 'important')
       const $content = $(this).children('.ui-dialog-content')
       if ($content.dialog('option', 'modal')) {
         _coveredStudyModals.add($content[0])
@@ -760,6 +762,10 @@ function _coverOpenDialogsForStudy() {
         $content.dialog('option', 'modal', false)
       }
     })
+  $('.select2-hidden-accessible').each(function () {
+    if ($(this).data('select2')?.isOpen()) $(this).select2('close')
+  })
+  _notifCloseBell()
   if ($(document.activeElement).closest('.behind-study-view').length) document.activeElement.blur()
   $('body').removeClass('dialog-above-practice')
 }
@@ -767,6 +773,7 @@ function _coverOpenDialogsForStudy() {
 function _restoreCoveredStudyDialogs() {
   if (_screenOverlayOpen()) return
   $('.ui-dialog.behind-study-view').removeClass('behind-study-view')
+    .each(function () { this.style.removeProperty('z-index') })
   for (const element of _coveredStudyModals) {
     const $content = $(element)
     if ($content.dialog('instance') && $content.dialog('isOpen')) $content.dialog('option', 'modal', true)

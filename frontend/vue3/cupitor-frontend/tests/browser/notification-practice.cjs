@@ -29,6 +29,8 @@ async function check(browser, mobile) {
       assert.equal(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.behind-study-view'), point), false)
     }
     assert.equal(await page.evaluate(() => getComputedStyle(document.body, '::before').backgroundColor), 'rgb(10, 10, 10)')
+    assert(await page.locator('#playingQueueDialog').evaluate(el =>
+      +getComputedStyle(el.closest('.ui-dialog')).zIndex < +getComputedStyle(document.body, '::before').zIndex))
   }
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
@@ -62,6 +64,9 @@ async function check(browser, mobile) {
     await page.mouse.wheel(0, 600)
     await page.waitForFunction(() => document.getElementById('settingsPanel').scrollTop > 0)
     assert(await page.locator('#settingsPanel').evaluate(el => el.closest('.ui-dialog').getBoundingClientRect().bottom <= innerHeight + 1))
+    // This dialog has an ID-specific !important z-index rule; it must be
+    // covered as well as an ordinary Settings dialog.
+    await page.evaluate(() => $('<div id="playingQueueDialog">Previous queue</div>').appendTo('body').dialog({ modal: false }))
     // Real inbox row handler captures unread state before acknowledgement.
     await page.locator('#notifBellBtn').scrollIntoViewIfNeeded()
     await page.evaluate(() => $('#notifBellBtn').trigger('click'))
@@ -107,10 +112,23 @@ async function check(browser, mobile) {
     assert.equal(await page.evaluate(() => JSON.stringify(window._recLastPlayedMap || {}) === window.__originalResume), true)
     assert.equal(await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter(k => /recLastPlayed/.test(k)).map(k => [k, localStorage.getItem(k)]))) === JSON.stringify(window.__storageBefore)), true)
     assert.equal(await page.evaluate(() => Object.keys(localStorage).some(k => /openView/.test(k))), false)
-    // Native event includes clicked even if host already marked it read.
-    await page.evaluate(() => window.dispatchEvent(new CustomEvent('cupitorNotificationOpened', { detail: { external_key: 'key-a', item_external_id: 'card:a2' } })))
+    // Native event includes clicked even if host already marked it read,
+    // and the bridge request retains the 200-event bound.
+    await page.evaluate(() => {
+      window.__notifRequests = []
+      window.NotifBridge = { postMessage: raw => {
+        const request = JSON.parse(raw)
+        window.__notifRequests.push(request)
+        queueMicrotask(() => {
+          if (request.op === 'getNotifications') window.dispatchEvent(new CustomEvent('cupitorNotifFeed', { detail: window.__cupitorNotifFeed }))
+          window.dispatchEvent(new CustomEvent('cupitorNotifAck', { detail: { request_id: request.request_id, ok: true } }))
+        })
+      } }
+      window.dispatchEvent(new CustomEvent('cupitorNotificationOpened', { detail: { external_key: 'key-a', item_external_id: 'card:a2' } }))
+    })
     await ready()
     assert.deepEqual(await page.evaluate(() => window._practiceCards.map(i => i.id)), ['a2', 'b1'])
+    assert(await page.evaluate(() => window.__notifRequests.filter(r => r.op === 'getNotifications').every(r => r.limit === 200 && !r.include_unread)))
     await click('.practice-close')
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'} notification queue, read state, shuffle, view switching, discard, storage and opaque dialogs passed`)
