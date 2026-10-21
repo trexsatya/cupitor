@@ -133,3 +133,50 @@ describe("webpageNotifLists", () => {
     expect(webpageNotifLists({})).toEqual([]);
   });
 });
+
+describe('buildUnreadNotifQueue', () => {
+  const { buildUnreadNotifQueue } = require('./notif-bridge')
+  const recordings = {
+    A: { notifKey: 'a', items: { Manual: { Card: [card(), card({ id: 'm2' }), card({ id: 'off', enabled: false })] } } },
+    B: { notifKey: 'b', items: { 'gå an': { går: [word(), word({ id: 'disabled', enabled: false }),
+      card({ id: 'unrelated' }), word({ id: 'vid2' })] } } }
+  }
+  const event = (key, xid, fired_at, responded_at = null) =>
+    ({ external_key: key, item_external_id: xid, fired_at, responded_at })
+  test('clicked item first even after native acknowledgement, unread across lists, duplicate fires collapse', () => {
+    const before = JSON.stringify(recordings)
+    const feed = [event('a', 'card:m1', 1), event('b', 'w:gå an|går', 3),
+      event('b', 'w:gå an|går', 2), event('a', 'card:m2', 4, 5), event(null, 'app-only', 6)]
+    const queue = buildUnreadNotifQueue({ recordings, feed, clicked: event('a', 'card:m2', 4, 5) })
+    expect(queue.map(i => i.id)).toEqual(['m2', 'vid1', 'vid2', 'm1'])
+    expect(queue.map(i => i._recName)).toEqual(['A', 'B', 'B', 'A'])
+    expect(queue.every(i => i._temporary)).toBe(true)
+    expect(queue[1]).toMatchObject({ _st: 'gå an', _w: 'går', _idx: 0, _notifKey: 'b', _notifItemId: 'w:gå an|går' })
+    queue[0].source = 'edited copy'
+    expect(JSON.stringify(recordings)).toBe(before)
+    expect(feed[0].responded_at).toBeNull()
+  })
+  test('disabled, removed and unmapped items never broaden the queue to a whole playlist', () => {
+    const feed = [event('a', 'card:off', 5), event('a', 'card:removed', 6), event('gone', 'card:m1', 7)]
+    expect(buildUnreadNotifQueue({ recordings, feed })).toEqual([])
+    expect(buildUnreadNotifQueue({ recordings, feed, clicked: event('a', 'card:missing', 9) })).toEqual([])
+  })
+  test('cold URL payload resolves clicked item and virtual resolver is honored', () => {
+    const queue = buildUnreadNotifQueue({ recordings, clicked: { payload: { pl: 'A' }, item_external_id: 'card:m2' },
+      resolveItems: name => recordings[name].items })
+    expect(queue.map(i => i.id)).toEqual(['m2'])
+    expect(buildUnreadNotifQueue({})).toEqual([])
+  })
+  test('same external id in distinct playlists is not collapsed', () => {
+    const copies = { ...recordings, C: { notifKey: 'c', items: recordings.A.items } }
+    const queue = buildUnreadNotifQueue({ recordings: copies, feed: [event('a', 'card:m1', 1), event('c', 'card:m1', 2)] })
+    expect(queue.map(i => i._recName)).toEqual(['C', 'A'])
+  })
+  test('large unread snapshot is not truncated', () => {
+    const items = Array.from({ length: 275 }, (_, n) => card({ id: 'n' + n }))
+    const recordings = { Many: { notifKey: 'many', items: { Manual: { Card: items } } } }
+    const queue = buildUnreadNotifQueue({ recordings, feed: items.map((i, n) => event('many', 'card:' + i.id, n)) })
+    expect(queue).toHaveLength(275)
+    expect(queue[0].id).toBe('n274')
+  })
+})

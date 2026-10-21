@@ -686,6 +686,9 @@
 .ui-dialog.cupitor-scroll-dialog > .ui-dialog-content {
     flex: 1 1 auto;
     min-height: 0 !important;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow-x: auto;
     overflow-y: auto;
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
@@ -2160,6 +2163,12 @@ body.practice-mode::before {
     inset: 0;
     z-index: 100000;
     background: #0a0a0a;
+}
+/* Existing dialogs belong to the covered page. Only dialogs explicitly
+   opened from a study view may sit above its opaque backdrop. */
+body:is(.rec-playing, .practice-mode) .ui-dialog.behind-study-view,
+body:is(.rec-playing, .practice-mode):not(.dialog-above-practice) .ui-widget-overlay {
+    z-index: 99999 !important;
 }
 body.practice-mode #recPlayingBanner,
 body.practice-mode #recPlayingSubs,
