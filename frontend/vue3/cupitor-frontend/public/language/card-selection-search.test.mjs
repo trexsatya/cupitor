@@ -100,6 +100,24 @@ for (const mode of ['player', 'practice']) {
     } finally {p.close();}
   });
 
+  test(`${mode}: dragging only reveals Search for the selection left after the gesture`, async () => {
+    const p = boot(mode);
+    try {
+      p.advance(3100);
+      const pointer = type => p.root.dispatchEvent(new p.window.MouseEvent(type, {button: 0, bubbles: true, clientX: type === 'pointerdown' ? 200 : 100}));
+      pointer('pointerdown');
+      pointer('pointermove');
+      p.select(); await p.flush();
+      assert.equal(p.window.testChrome.isVisible(), false, 'transient drag selections do not wake controls');
+      p.root.replaceChildren(p.doc.createTextNode('Next card')); await p.flush();
+      pointer('pointerup');
+      assert.equal(p.window.testChrome.isVisible(), false, 'a navigation gesture leaves controls hidden');
+      pointer('pointerdown'); p.select(); pointer('pointerup');
+      assert.equal(p.window.testChrome.isVisible(), true, 'completed text selection reveals Search');
+      assert.equal(p.button.classList.contains('study-selection-search'), true);
+    } finally {p.close();}
+  });
+
   test(`${mode}: collapsed, whitespace and out-of-card selections do not reveal Search`, async () => {
     const p = boot(mode);
     try {

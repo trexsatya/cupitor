@@ -129,14 +129,15 @@ async function checkStudyChrome(browser) {
       if (mobile) await swipe(true)
       else {
         const card = await page.locator('#practiceMode .practice-card').boundingBox()
-        // Drag the blank lower part: dragging words is a text selection and
-        // intentionally reveals Search, rather than this navigation case.
-        const y = card.y + card.height - 30
+        // Drag across the text as a user can: transient browser selection
+        // must not wake Search after the swipe replaces the card.
+        const y = card.y + 120
         await page.mouse.move(card.x + card.width * 0.8, y); await page.mouse.down()
         await page.mouse.move(card.x + card.width * 0.2, y, { steps: 8 }); await page.mouse.up()
       }
       await page.waitForFunction(() => window._practiceIdx === 1 && !document.querySelector('#practiceMode .practice-loading'))
-      assert.equal(await page.locator('#practiceMode .practice-prev').isVisible(), false, 'swipes still navigate without revealing chrome')
+      assert.equal(await page.locator('#practiceMode .practice-prev').isVisible(), false,
+        'swipes still navigate without revealing chrome: ' + JSON.stringify(await page.evaluate(() => ({classes: document.body.className, selection: getSelection().toString()}))))
       assert.equal(await page.locator('#practiceMode .practice-unflip').isVisible(), true)
       await page.locator('#practiceMode .practice-front').evaluate(el => { el.innerHTML += '<p>Scroll this study text.</p>'.repeat(35) })
       if (mobile) await swipe(false)
