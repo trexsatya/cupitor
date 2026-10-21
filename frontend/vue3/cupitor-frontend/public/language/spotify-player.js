@@ -73,6 +73,14 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
   };
   const current = session => active === session && session.isCurrent();
   const rangeOf = session => session.segments[session.index];
+  function playbackTime(session) {
+    if (session.mode !== 'practice') return session.position;
+    if (session.pendingSeek) return NaN;
+    const elapsed = now() - session.positionAt;
+    return !session.paused && !session.desiredPaused && !session.buffering &&
+      !session.complete && elapsed >= 0 && elapsed <= 1500
+      ? Math.min(rangeOf(session).end, session.position + elapsed / 1000) : session.position;
+  }
   function message(text) {if (status) status.textContent = text;}
   function paint(session) {
     if (!current(session)) return;
@@ -138,6 +146,10 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     try {controller[method]();} catch (error) {fail(session, error);}
   }
   function setPaused(session, paused) {
+    if (paused && session.mode === 'practice') {
+      session.position = playbackTime(session);
+      session.positionAt = now();
+    }
     session.desiredPaused = paused; session.userPaused = paused;
     log('intent', {paused});
     session.resumeAttempts = 0;
@@ -172,8 +184,10 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
   function loadRange(session) {
     if (!current(session) || !controller) return;
     const range = rangeOf(session);
+    const start = session.practiceSeekTarget ?? range.start;
+    session.practiceSeekTarget = null;
     session.pendingSeek = true; session.seekAt = now(); session.everPlayed = false;
-    session.seekTarget = range.start; session.seekAttempts = 0;
+    session.seekTarget = start; session.seekAttempts = 0;
     session.recovering = true; session.resumePending = false; session.resumeAttempts = 0;
     session.position = NaN; session.paused = true; session.complete = false;
     session.loadedForRange = loadedUri !== range.uri;
@@ -182,10 +196,10 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
       loadedUri = range.uri; ready = false;
       try {
         const load = controller.loadEntity || controller.loadUri;
-        log('command:load', {uri: range.uri, startAt: range.start});
-        load.call(controller, range.uri, false, range.start);
+        log('command:load', {uri: range.uri, startAt: start});
+        load.call(controller, range.uri, false, start);
       } catch (error) {fail(session, error);}
-    } else if (ready) seekStart(session);
+    } else if (ready) seekTo(session, start);
     paint(session);
   }
   function atEnd(session, estimated = false) {
@@ -195,6 +209,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
       session.index++; loadRange(session);
     } else {
       // Mark completion before Pause can report back to the playlist owner.
+      session.position = rangeOf(session).end; session.positionAt = now();
       session.complete = true; session.paused = true; session.resumePending = false;
       pauseController(); paint(session); settle(session, null, true);
     }
@@ -209,6 +224,13 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     if (state.position == null) return;
     const position = Number(state.position) / 1000;
     if (!Number.isFinite(position)) return;
+    // Recording a take and listening to it hold Practice's clock in place.
+    // Late iframe progress must not unpause or move that pinned position.
+    if (session.mode === 'practice' && session.isPaused()) {
+      session.paused = true;
+      if (!state.isPaused) pauseController();
+      paint(session); return;
+    }
     const wasPaused = session.paused, wasBuffering = session.buffering;
     const reportedPaused = !!state.isPaused;
     session.duration = Number(state.duration) / 1000;
@@ -372,7 +394,12 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
       seekAt: now(), lastSeekAt: now(), commandAt: now(), lastProgressAt: now()};
     session.media = {
       get paused() {return session.paused;}, get ended() {return session.complete;},
-      get duration() {return rangeOf(session).end;}, get currentTime() {return session.position;},
+      get duration() {return rangeOf(session).end;},
+      get currentTime() {
+        // Take marks need a clock between Spotify's roughly 1s updates.
+        // Never predict through buffering, a seek, Pause or stale reports.
+        return playbackTime(session);
+      },
       set currentTime(time) {
         if (current(session) && Number.isFinite(time)) {
           if (time >= rangeOf(session).end) atEnd(session);
@@ -405,7 +432,25 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     }
     if (session) paint(session);
   }
-  return {cue, playCard, togglePractice, stop, getPlaybackLog, show: () => {
+  function seekPractice(item, time) {
+    const session = active;
+    if (!session || session.item !== item || session.mode !== 'practice' || !current(session) || !Number.isFinite(time)) return false;
+    // Rewinds can cross retained passages and reopen a completed clip. Keep
+    // this session and iframe: cueing again would invalidate take playback.
+    let index = session.segments.findIndex(range => time < range.end);
+    if (index < 0) index = session.segments.length - 1;
+    const range = session.segments[index];
+    session.index = index; session.complete = false;
+    session.practiceSeekTarget = Math.max(range.start, Math.min(time, range.end - 0.001));
+    session.pendingSeek = true; session.position = NaN;
+    session.seekTarget = session.practiceSeekTarget;
+    // Pause can synchronously report the old passage's end. Own the seek
+    // before that callback can mistakenly advance the newly selected range.
+    setPaused(session, true);
+    if (controller) loadRange(session);
+    return true;
+  }
+  return {cue, playCard, togglePractice, seekPractice, stop, getPlaybackLog, show: () => {
     if (!active || !current(active)) return;
     show(); holder.querySelector('iframe')?.focus();
   },
