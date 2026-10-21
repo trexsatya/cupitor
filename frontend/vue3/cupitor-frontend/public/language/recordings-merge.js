@@ -1,3 +1,5 @@
+import { spotifyEpisode } from './spotify-clips.js';
+
 // Pure recording-collection helpers: the playlist merge across devices,
 // virtual-playlist resolution, item-count rollups, manual-entry id minting,
 // and media-URL classification. All take their collection by argument so
@@ -40,6 +42,8 @@ export function parseMediaUrl(raw) {
   const url = String(raw == null ? '' : raw).trim()
   if (!url) return null
   if (url.startsWith('file://')) return { kind: 'audio', url }
+  const spotify = spotifyEpisode(url)
+  if (spotify) return { kind: 'spotify', id: spotify.id, url }
   const yt = url.match(/(?:youtube\.com\/(?:watch\?(?:[^&]*&)*v=|embed\/|shorts\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/)
   if (yt && yt[1]) return { kind: 'youtube', id: yt[1], url }
   return { kind: 'link', url }
