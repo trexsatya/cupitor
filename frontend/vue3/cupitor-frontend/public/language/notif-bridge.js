@@ -105,6 +105,37 @@ export function locateNotifItem(items, externalId) {
   return null;
 }
 
+// Snapshot unread reminders across playlists. The clicked reminder is included
+// even when the native host has already acknowledged it. A grouped reminder
+// contributes its enabled clips, never unrelated manual cards in that bucket.
+export function buildUnreadNotifQueue({ feed = [], recordings = {}, clicked, resolveItems }) {
+  const entries = feed.filter(e => e && e.responded_at == null)
+    .sort((a, b) => (b.fired_at || 0) - (a.fired_at || 0));
+  if (clicked) entries.unshift(clicked);
+  const queue = [], seen = new Set();
+  for (const entry of entries) {
+    const key = entry.external_key;
+    const xid = entry.item_external_id;
+    const name = Object.keys(recordings).find(n => key && recordings[n]?.notifKey === key)
+      || entry.payload?.pl;
+    if (!name || !xid || seen.has(JSON.stringify([name, xid]))) continue;
+    seen.add(JSON.stringify([name, xid]));
+    const rec = recordings[name];
+    if (!rec) continue;
+    const items = resolveItems ? resolveItems(name) : rec.items;
+    const loc = locateNotifItem(items, xid);
+    if (!loc) continue;
+    const bucket = items[loc.st][loc.w];
+    bucket.forEach((item, idx) => {
+      if (!item || item.enabled === false) return;
+      if (loc.manual ? idx !== loc.idx : isManualItem(item)) return;
+      queue.push({ ...item, _recName: name, _st: loc.st, _w: loc.w, _idx: idx,
+        _temporary: true, _notifKey: key || rec.notifKey, _notifItemId: xid });
+    });
+  }
+  return queue;
+}
+
 // The webpage-owned lists out of a `cupitorNotifLists` payload — i.e. the ones
 // we can address by external_key. Lists created in the app's own UI have
 // source:'app' / external_key:null and are excluded.

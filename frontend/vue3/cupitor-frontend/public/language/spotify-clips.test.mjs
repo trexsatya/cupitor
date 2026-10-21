@@ -243,7 +243,7 @@ function appPlaylist(f, events, overrides = {}) {
     _cardHasAudio: () => false, _isAudioMediaUrl: () => false, _cardHasVideoLink: () => false, _cardClipsInOrder: () => [], _recPlayReversed: () => false,
     _interItemGapSeconds: () => 0, _effectiveSrcTgtGapSeconds: () => 0, _sleepRespectingPause: () => Promise.resolve(),
     setInterval: () => 1, clearInterval: noop, setTimeout: f.win.setTimeout,
-    _saveQueueOrder: noop, _interruptRecordingPlayback: noop, hideMediaRelatedContainer: noop, _refreshRecPlayModeBtns: noop, _postMediaState: noop, _setOpenView: noop, _syncBackgroundMusic: noop, _setLastPlayed: noop,
+    _coverOpenDialogsForStudy: noop, _ackVisitedNotification: noop, _saveQueueOrder: noop, _interruptRecordingPlayback: noop, hideMediaRelatedContainer: noop, _refreshRecPlayModeBtns: noop, _postMediaState: noop, _setOpenView: noop, _syncBackgroundMusic: noop, _setLastPlayed: noop,
     _renderPlayingManualText: noop, _stopGapCountdown: noop, _restoreRecordingReplaySpeed: noop, _clearOpenView: noop, _stopBackgroundMusic: noop, _startGapCountdown: noop, _setRecPlayPhase: noop, _saveLastPlayedMap: noop, _loadLastPlayedMap: () => ({}),
     openPlayingQueueDialog: noop, stopPlayingRecording: noop, togglePlayingRecordingPause: noop, navigateRecordingPlayback: noop, toggleRecPlayShuffle: noop, cycleRecPlayLoopMode: noop, _searchCurrentRecPlayWord: noop, minimizePlayingRecording: noop, restorePlayingRecording: noop,
     _showManualAudioPlayer: () => {f.win._recPlayManualAudio = null;},

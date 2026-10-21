@@ -337,7 +337,7 @@ import {
   makeNotifKey as _makeNotifKey,
   buildNotifItems as _buildNotifItems,
   webpageNotifLists as _webpageNotifLists,
-  locateNotifItem as _locateNotifItem,
+  buildUnreadNotifQueue as _buildUnreadNotifQueue,
 } from './notif-bridge.js';
 import {
   buildLibraryQuery as _buildLibraryQuery,
@@ -725,19 +725,14 @@ function importSearches() {
 }
 
 // --- Minimized dialogs ----------------------------------------------------
-// Practice and the player cover the whole screen from z-index 100001 up, and
-// both are deliberately see-through so the video keeps showing past them.
-// Every jQuery UI dialog is pinned at 100000, so while either is up a dialog
-// paints BEHIND the overlay: parts of it show through, the view reads as
-// fragmented, and a tap in the middle of it lands on whatever is in front.
-//
-// So while an overlay is up, dialogs go in front of it — all of them, rather
-// than each one having to remember to ask.
+// Study views cover existing page dialogs. Dialogs opened while studying
+// (editors, queue, settings) are explicitly lifted above the view.
 const DIALOG_ABOVE_OVERLAY_Z = 100020
+const _coveredStudyModals = new Set()
 
 function _screenOverlayOpen() {
   const $p = $('#practiceMode')
-  return !!($p.length && $p.is(':visible') && !$p.hasClass('minimized'))
+  return $('body').hasClass('rec-playing') || !!($p.length && $p.is(':visible') && !$p.hasClass('minimized'))
 }
 
 function _liftDialogAboveOverlay($wrap) {
@@ -745,21 +740,50 @@ function _liftDialogAboveOverlay($wrap) {
   // Last in <body> as well as highest: inside a nested stacking context a
   // z-index cannot outrank that context's own siblings, however large it is.
   // Being last also settles the order between two lifted dialogs.
-  $wrap.appendTo('body').addClass('above-practice-mode')
+  $wrap.appendTo('body').removeClass('behind-study-view').addClass('above-practice-mode')
   const el = $wrap[0]
   // Inline and important too, in case the stylesheet has not arrived yet.
   if (el) el.style.setProperty('z-index', String(DIALOG_ABOVE_OVERLAY_Z), 'important')
   $('body').addClass('dialog-above-practice')
 }
 
-// For dialogs that were already open when the overlay went up.
-function _liftOpenDialogsAboveOverlay() {
-  if (!_screenOverlayOpen()) return
-  $('.ui-dialog:visible').each(function () { _liftDialogAboveOverlay($(this)) })
+// Keep drafts open underneath, so leaving a study view restores the page.
+function _coverOpenDialogsForStudy() {
+  $('.ui-dialog:visible').addClass('behind-study-view').removeClass('above-practice-mode')
+    .each(function () {
+      // Some dialogs have ID-specific !important rules above the backdrop.
+      // Override those too; closing/minimizing study restores their CSS.
+      this.style.setProperty('z-index', '99999', 'important')
+      const $content = $(this).children('.ui-dialog-content')
+      if ($content.dialog('option', 'modal')) {
+        _coveredStudyModals.add($content[0])
+        // A covered modal must also release its focus trap. Keep its draft
+        // and open state; restore modality when the page is visible again.
+        $content.dialog('option', 'modal', false)
+      }
+    })
+  $('.select2-hidden-accessible').each(function () {
+    if ($(this).data('select2')?.isOpen()) $(this).select2('close')
+  })
+  _notifCloseBell()
+  if ($(document.activeElement).closest('.behind-study-view').length) document.activeElement.blur()
+  $('body').removeClass('dialog-above-practice')
+}
+
+function _restoreCoveredStudyDialogs() {
+  if (_screenOverlayOpen()) return
+  $('.ui-dialog.behind-study-view').removeClass('behind-study-view')
+    .each(function () { this.style.removeProperty('z-index') })
+  for (const element of _coveredStudyModals) {
+    const $content = $(element)
+    if ($content.dialog('instance') && $content.dialog('isOpen')) $content.dialog('option', 'modal', true)
+  }
+  _coveredStudyModals.clear()
 }
 
 $(function () {
-  $(document).on('dialogopen', function (e) {
+  new MutationObserver(_restoreCoveredStudyDialogs).observe(document.body, { attributes: true, attributeFilter: ['class'] })
+  $(document).on('dialogopen dialogfocus', function (e) {
     if (!_screenOverlayOpen()) return
     _liftDialogAboveOverlay($(e.target).closest('.ui-dialog'))
   })
@@ -15565,50 +15589,55 @@ function _playlistForNotifKey(key) {
   return Object.keys(coll).find(n => coll[n] && coll[n].notifKey === key) || null
 }
 
-// Open Practice View directly on the item a notification points at. Resolves
-// the item via the pure locateNotifItem (same id-construction in both
-// directions), makes its playlist current, then launches Practice rotated so
-// that item is first.
-function _displayNotifItem(playlistName, xid) {
-  if (!playlistName || !xid) return
+// The feed snapshot survives acknowledgements and late native feed pushes.
+// Nothing is inserted into recordings or selected as a saved playlist.
+function _displayNotifItem(playlistName, xid, feed) {
   const rec = window._recordings && window._recordings[playlistName]
-  if (!rec) { console.warn('[notif] playlist not found for deep link:', playlistName, '· known:', Object.keys(window._recordings || {})); return }
-  const items = _isVirtual(playlistName) ? _resolveVirtualItems(playlistName) : rec.items
-  const loc = _locateNotifItem(items, xid)
-  try { if (typeof selectRecording === 'function') selectRecording(playlistName) } catch (_) {}
-  if (!loc) { console.warn('[notif] item not located, opening practice from start:', xid); try { openPracticeMode() } catch (_) {} return }
-  // A word group collapses many clips into one notif item — start at the first
-  // ENABLED clip (disabled items are absent from the practice queue). Manual
-  // cards are 1:1 so their own index is used.
-  let idx = loc.idx
-  if (idx == null) {
-    const arr = (items[loc.st] && items[loc.st][loc.w]) || []
-    idx = arr.findIndex(it => it && it.enabled !== false)
-    if (idx < 0) idx = 0
-  }
-  try {
-    console.log('[notif] opening practice', { playlistName, st: loc.st, w: loc.w, idx })
-    openPracticeMode({ startItem: { recName: playlistName, st: loc.st, w: loc.w, idx } })
-  } catch (e) { console.warn('[notif] openPracticeMode failed', e) }
+  const clicked = { external_key: rec && rec.notifKey, item_external_id: xid,
+    payload: { pl: playlistName } }
+  const queue = _buildUnreadNotifQueue({ feed, clicked, recordings: window._recordings,
+    resolveItems: name => _isVirtual(name) ? _resolveVirtualItems(name) : window._recordings[name].items })
+  if (!queue.length) { console.warn('[notif] no available items for reminder:', playlistName, xid); return }
+  openPracticeMode({ queue, temporary: true })
 }
 
-// Open a deep-linked item in Practice once the app is ready. Both the event and
-// the cold-start URL land here. Recordings may arrive slightly after the page
-// (localStorage load or the native cupitorPlaylists push), and openPracticeMode
-// needs the page booted — so poll up to ~20s rather than firing too early.
+let _notifOpenRequest = 0
 function _notifOpenWhenReady(pl, xid) {
-  if (!pl || !xid) { console.warn('[notif] deep link missing pl/xid', { pl, xid }); return }
+  if (!pl || !xid) return
+  const request = ++_notifOpenRequest
+  const feed = _notifFeed().map(entry => ({ ...entry }))
   const start = Date.now()
+  let feedReady = !_haveNotifBridge()
+  if (!feedReady) {
+    // The host emits the feed before acknowledging this RPC. Bound the wait
+    // so older hosts can still open the clicked item from their warm feed.
+    const timeout = setTimeout(() => { feedReady = true }, 1500)
+    notifRpc('getNotifications', { limit: 200 }).catch(() => {}).finally(() => {
+      clearTimeout(timeout)
+      feedReady = true
+    })
+  }
   const tick = () => {
-    if (window._recordings && window._recordings[pl] && typeof openPracticeMode === 'function') {
-      _displayNotifItem(pl, xid)
+    if (request !== _notifOpenRequest) return
+    if (feedReady && window._recordings && window._recordings[pl] && typeof openPracticeMode === 'function') {
+      // On cold start the feed can arrive after the playlists. Merge it with
+      // the pre-acknowledgement snapshot; duplicate reminders collapse below.
+      _displayNotifItem(pl, xid, feed.concat(_notifFeed()))
     } else if (Date.now() - start < 20000) {
       setTimeout(tick, 250)
     } else {
-      console.warn('[notif] gave up waiting for playlist:', pl, '· known:', Object.keys(window._recordings || {}))
+      console.warn('[notif] gave up waiting for playlist:', pl)
     }
   }
   tick()
+}
+
+// Mark only reminders actually visited, leaving the rest unread on early exit.
+function _ackVisitedNotification(it) {
+  if (it && it._notifKey && it._notifItemId && !it._notifAcknowledged) {
+    it._notifAcknowledged = true
+    _notifAckItem(it._notifKey, it._notifItemId)
+  }
 }
 
 // Cold-start path: the app opens this page fresh at the item's open_url
@@ -16058,7 +16087,7 @@ function _toggleNotifBell() {
   _positionBellPanel()
   // Pull the freshest feed on open (warm-push may predate this); the listener
   // re-renders when it lands.
-  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 50 }).catch(() => {})
+  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 200 }).catch(() => {})
 }
 // Optimistically stamp responded_at so the badge/row update instantly, then let
 // the next feed push reconcile.
@@ -16076,7 +16105,7 @@ function _notifAckItem(key, xid) {
   _notifMarkReadLocal(e => e.external_key === key && e.item_external_id === xid)
   if (!_haveNotifBridge()) return
   notifRpc('ackItem', { external_key: key, item_external_id: xid })
-    .then(() => notifRpc('getNotifications', { limit: 50 }))
+    .then(() => notifRpc('getNotifications', { limit: 200 }))
     .catch(() => {})
 }
 
@@ -16112,7 +16141,6 @@ $(function () {
     const $row = $(this)
     if ($row.attr('data-open') !== '1') return
     const key = $row.attr('data-key'), xid = $row.attr('data-xid')
-    _notifAckItem(key, xid)
     _notifCloseBell()
     const pl = _playlistForNotifKey(key)
     if (pl) _notifOpenWhenReady(pl, xid)
@@ -16145,7 +16173,7 @@ $(function () {
   if (_haveNotifBridge() || _notifDebug()) $('#notifSettingsBtn').show()
   _notifUpdateBell()
   // Prime the inbox: request the feed (the app also warm-pushes it on load).
-  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 50 }).catch(() => {})
+  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 200 }).catch(() => {})
 })
 
 // Number every row in the dialog, top to bottom, so an item can be named by
@@ -17412,6 +17440,7 @@ function _saveLastPlayedMap(map) {
   } catch (_) {}
 }
 function _setLastPlayed(it, mode, pos) {
+  if (it && it._temporary) return
   const map = _loadLastPlayedMap()
   const next = setLastPlayedEntry(map, it, mode, pos)
   if (next !== map) {
@@ -17423,7 +17452,7 @@ function _loadLastPlayed() {
   return getNewestEntry(_loadLastPlayedMap(), window._recording && window._recording.currentName)
 }
 function _saveQueueOrder(queue, mode) {
-  if (!Array.isArray(queue) || !queue.length) return
+  if (!Array.isArray(queue) || !queue.length || queue.some(it => it._temporary)) return
   const recName = (window._recording && window._recording.currentName) || queue[0]._recName
   const map = _loadLastPlayedMap()
   const next = saveQueueOrderInto(map, queue, mode, recName)
@@ -17470,6 +17499,12 @@ function _activeExtId() {
 }
 
 function _setOpenView(view) {
+  if ((view === 'practice' && window._practiceTemporary) ||
+      (view === 'player' && window._recPlayTemporary)) {
+    _postViewStateToHost('')
+    try { localStorage.removeItem(OPEN_VIEW_KEY) } catch (_) {}
+    return
+  }
   // A lone card from the search results is not worth reopening after a
   // restart, and reopening Practice there would line up the whole playlist —
   // so record what is underneath it instead: a deck still playing, or nothing.
@@ -19084,6 +19119,7 @@ async function playRecording(opts) {
     _saveQueueOrder(queue, 'play')
   }
   window._recPlayPracticeSingle = !!opts.practiceSingle
+  window._recPlayTemporary = !!opts.temporary || queue.some(it => it._temporary)
   window._recPlaySilentItem = opts.keepCurrentItem ? queue[startIdx] : null
   // A stopped/replaced session must not resume a late load or clean up the
   // DOM and queue belonging to its replacement.
@@ -19243,6 +19279,7 @@ async function playRecording(opts) {
       } catch (_) {}
     }, 200)
   }
+  _coverOpenDialogsForStudy()
   $('body').addClass('rec-playing').removeClass('rec-paused rec-playing-minimized')
 
   window._playingRecording = true
@@ -19383,6 +19420,7 @@ async function playRecording(opts) {
     // it after the player is closed (and so a follow-up Play All / Practice
     // on this playlist can offer to resume from this exact item, in the
     // same queue order). The `i` advances queuePos so Resume picks up here.
+    _ackVisitedNotification(it)
     _setLastPlayed(it, 'play', i)
     // Refresh the session with this item's title, and re-assert that we are
     // playing — the previous item's end will have pushed "not playing".
@@ -19722,7 +19760,7 @@ async function playRecording(opts) {
   // so the next Play All doesn't pop the "1 of N remaining" resume
   // prompt for what was actually a finished session.
   try {
-    if (!_curLooping() && queue.length && i >= queue.length) {
+    if (!queue.some(it => it._temporary) && !_curLooping() && queue.length && i >= queue.length) {
       const recName = (window._recording && window._recording.currentName) || (queue[0] && queue[0]._recName)
       if (recName) {
         const map = _loadLastPlayedMap()
@@ -19735,6 +19773,7 @@ async function playRecording(opts) {
   } catch (_) {}
   _restoreRecordingReplaySpeed()
   window._recPlayQueue = null
+  window._recPlayTemporary = false
   window._playingRecording = false
   // A deck that played to its end is finished, not interrupted — so it is not
   // something to put back on screen next launch.
@@ -20132,6 +20171,7 @@ function restorePlayingRecording({ resume = true } = {}) {
   if (!window._playingRecording) return
   hideMediaRelatedContainer()
   window._recPlayMinimized = false
+  _coverOpenDialogsForStudy()
   $('body').addClass('rec-playing').removeClass('rec-playing-minimized')
   $('#recPlayingRestorePill').hide()
   // Auto-resume on restore: minimize paused playback, so restoring should pick it
@@ -20149,11 +20189,12 @@ function switchPlayerToPractice() {
   if (!Array.isArray(queue) || !queue.length) return
   const pos = Number.isInteger(window._recNavGotoIndex) ? window._recNavGotoIndex : window._recPlayIndex
   const single = !!window._recPlayPracticeSingle
+  const temporary = !!window._recPlayTemporary
   _restoreRecordingReplaySpeed()
   minimizePlayingRecording()
   _interruptRecordingPlayback()
   if (!single) _saveQueueOrder(queue, 'practice')
-  openPracticeMode({ resumeQueue: { queue, pos }, single })
+  openPracticeMode({ resumeQueue: { queue, pos }, single, temporary })
 }
 
 function switchPracticeToPlayer() {
@@ -20162,6 +20203,7 @@ function switchPracticeToPlayer() {
   const pos = window._practiceIdx
   if (!queue[pos]) return
   const single = !!window._practiceSingle
+  const temporary = !!window._practiceTemporary
   const silent = _isManualItem(queue[pos]) && !_cardHasPlayableMedia(queue[pos])
   closePracticeMode()
   if (!single) _saveQueueOrder(queue, 'play')
@@ -20171,6 +20213,8 @@ function switchPracticeToPlayer() {
     window._recPlayQueue.length = 0
     for (const item of queue) window._recPlayQueue.push(item)
     window._recPlayPracticeSingle = single
+    window._recPlayTemporary = temporary
+    _setOpenView('player')
     window._recPlaySilentItem = silent ? queue[pos] : null
     window._recNavRequest = null
     window._recNavGotoIndex = pos
@@ -20180,7 +20224,7 @@ function switchPracticeToPlayer() {
     _applyRecPlayPause(silent, false)
     restorePlayingRecording({ resume: false })
   } else {
-    playRecording({ resumeQueue: { queue, pos }, practiceSingle: single, keepCurrentItem: true, startPaused: silent })
+    playRecording({ resumeQueue: { queue, pos }, practiceSingle: single, temporary, keepCurrentItem: true, startPaused: silent })
   }
 }
 
@@ -20212,6 +20256,11 @@ function stopPlayingRecording() {
   spotifyPlayer.stop()
   window._recVideoAttempt?.cancel()
   _restoreRecordingReplaySpeed()
+  if (window._recPlayTemporary) {
+    window._recPlayQueue = null
+    window._recPlayCurrentItem = null
+    window._recPlayTemporary = false
+  }
   window._playingRecording = false
   // Stopping IS putting the view away, so there is nothing to restore.
   _clearOpenView()
@@ -20295,7 +20344,7 @@ function openPracticeMode(opts) {
     // Match Player's order semantics: respect the recPlayShuffle setting.
     // Default off → natural playlist order, same as Player when shuffle is
     // off. The in-practice shuffle button (top bar) flips this same setting.
-    if (window._appSettings && window._appSettings.recPlayShuffle && !opts.single) {
+    if (window._appSettings && window._appSettings.recPlayShuffle && !opts.single && !opts.temporary) {
       _shuffleQueue(queue)
     }
     // Optional startItem rotation — rotates the queue so the requested card
@@ -20318,6 +20367,8 @@ function openPracticeMode(opts) {
     if (!opts.single) _saveQueueOrder(queue, 'practice')
   }
   window._practiceCards = queue
+  window._practiceTemporary = !!opts.temporary || queue.some(it => it._temporary)
+  window._practiceTemporaryOrder = window._practiceTemporary ? queue.slice() : null
   window._practiceIdx = startIdx
   // Restore direction toggle from persisted settings on first entry of the
   // session; subsequent re-opens keep whatever the user toggled to.
@@ -20338,7 +20389,7 @@ function openPracticeMode(opts) {
   window._practiceActive = true
   _setOpenView('practice')
   // Any dialog left open before this covered the screen would be behind it.
-  _liftOpenDialogsAboveOverlay()
+  _coverOpenDialogsForStudy()
   // Practice owns its controls. Discard the main-page panel's open state
   // so minimizing/closing Practice cannot uncover an unrelated speed panel.
   hideMediaRelatedContainer()
@@ -20564,7 +20615,12 @@ $(document).on('click', '#practiceMode .card-html img, #recPlayingSubs .card-htm
 })
 
 function closePracticeMode() {
+  if (window._practiceTemporary) window._practiceCards = []
+  const temporary = window._practiceTemporary
+  window._practiceTemporary = false
+  window._practiceTemporaryOrder = null
   window._practiceActive = false
+  if (temporary && window._recPlayTemporary) stopPlayingRecording()
   _practiceRenderToken++
   _newPracticeVideoRequest()
   // The card may have been deleted or changed while it was open.
@@ -20735,7 +20791,7 @@ function restorePracticeMode() {
   $('#practiceMode').removeClass('minimized')
   $('body').addClass('practice-mode')
   // The overlay is back over anything that was opened while it was parked.
-  _liftOpenDialogsAboveOverlay()
+  _coverOpenDialogsForStudy()
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
   // Manual cards have no clip — just re-cue them (parked), as before.
@@ -20842,7 +20898,8 @@ function _editCurrentPracticeCard() {
   $('#manualEntryEditor').off('dialogclose.practiceEdit').one('dialogclose.practiceEdit', () => {
     const again = _storedManualCard(it)
     if (!again) return
-    const keep = { _recName: it._recName, _st: it._st, _w: it._w, _idx: it._idx }
+    const keep = { _recName: it._recName, _st: it._st, _w: it._w, _idx: it._idx,
+      _temporary: it._temporary, _notifKey: it._notifKey, _notifItemId: it._notifItemId }
     Object.keys(it).forEach(k => { if (!(k in keep)) delete it[k] })
     Object.assign(it, again.item, keep)
     try { _renderPracticeCard() } catch (_) {}
@@ -20915,7 +20972,9 @@ function _togglePracticeShuffle() {
     const cur = window._practiceCards[window._practiceIdx] || null
     // Rebuild from the playlist in natural order, then shuffle if enabled.
     // This restores order when shuffle is being turned OFF.
-    const fresh = _buildPlayQueue('off')
+    const fresh = window._practiceTemporary
+      ? (window._practiceTemporaryOrder || window._practiceCards).filter(item => window._practiceCards.includes(item))
+      : _buildPlayQueue('off')
     if (next) _shuffleQueue(fresh)
     if (fresh.length) {
       const newIdx = cur
@@ -21737,6 +21796,7 @@ async function _renderPracticeCard() {
   const cards = window._practiceCards || []
   const it = cards[idx]
   if (!it) return
+  _ackVisitedNotification(it)
   // Persist resume-target on every card change. Mode='practice' so the
   // next Play All / Practice click on this playlist offers to resume here.
   // `idx` advances queuePos so the saved queue tracks where we are.
