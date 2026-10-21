@@ -115,11 +115,25 @@ async function checkStudyChrome(browser) {
       await page.waitForFunction(() => document.activeElement?.tagName === 'IFRAME')
       assert.equal(await page.frameLocator('#testStudyFrame').locator('body').getAttribute('data-clicks'), '1', 'the player is usable after controls return')
       await hide()
+      // Selecting card text deliberately wakes Search. Clear that selection
+      // before testing navigation gestures, which should leave chrome hidden.
+      await page.locator('#practiceMode .practice-front').evaluate(node => {
+        const range = document.createRange(); range.selectNodeContents(node)
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range)
+        document.dispatchEvent(new Event('selectionchange'))
+      })
+      await page.locator('#practiceMode .practice-search.study-selection-search').waitFor({ state: 'visible' })
+      await page.evaluate(() => { getSelection().removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+      await page.waitForFunction(() => !document.querySelector('#practiceMode .practice-search.study-selection-search'))
+      await hide()
       if (mobile) await swipe(true)
       else {
         const card = await page.locator('#practiceMode .practice-card').boundingBox()
-        await page.mouse.move(card.x + card.width * 0.8, card.y + 120); await page.mouse.down()
-        await page.mouse.move(card.x + card.width * 0.2, card.y + 120, { steps: 8 }); await page.mouse.up()
+        // Drag the blank lower part: dragging words is a text selection and
+        // intentionally reveals Search, rather than this navigation case.
+        const y = card.y + card.height - 30
+        await page.mouse.move(card.x + card.width * 0.8, y); await page.mouse.down()
+        await page.mouse.move(card.x + card.width * 0.2, y, { steps: 8 }); await page.mouse.up()
       }
       await page.waitForFunction(() => window._practiceIdx === 1 && !document.querySelector('#practiceMode .practice-loading'))
       assert.equal(await page.locator('#practiceMode .practice-prev').isVisible(), false, 'swipes still navigate without revealing chrome')
