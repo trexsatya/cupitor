@@ -1,6 +1,8 @@
 import { retainCaptionEnds } from './caption-capture.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
+import { installDialogScrolling } from './dialog-scrolling.js';
+import { recordingsHaveChanges } from './recordings-sync-state.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
 import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video.js';
@@ -4488,18 +4490,7 @@ $(document).ready(function () {
   // current scroll position, so a dialog opened after the user scrolled
   // lands offscreen. Fixed + a small top offset keeps every dialog
   // consistent without per-call _pinDialogToViewport sprinkles.
-  $(document).on('dialogopen', function (e) {
-    const $wrap = $(e.target).closest('.ui-dialog')
-    if (!$wrap.length) return
-    const w = $wrap.outerWidth() || 0
-    const left = Math.max(10, Math.round((window.innerWidth - w) / 2))
-    $wrap.css({
-      position: 'fixed',
-      top: '20px',
-      left: left + 'px',
-      margin: '0'
-    })
-  })
+  installDialogScrolling($)
   // Default select2 matcher strips diacritics, so typing "a" matches "ä"
   // and vice-versa — wrong for Swedish vocab where ä/ö/å are distinct
   // letters. This matcher does a plain case-insensitive substring match
@@ -11511,6 +11502,12 @@ $(document).on('click', '.lib-open', e => {
 
 function _saveRecording() {
   try {
+    const syncBaseline = _loadRecordingsBase()
+    let syncPrevious = syncBaseline
+    if (!syncPrevious) {
+      try { syncPrevious = JSON.parse(localStorage.getItem(REC_COLLECTION_KEY) || '{}') || {} }
+      catch (_) { syncPrevious = {} }
+    }
     // Keep the active recording's items pointer in sync with the collection
     // entry — capture/remove/reorder mutate window._recording.items by
     // reference, and the collection entry is the same object, so this just
@@ -11538,10 +11535,10 @@ function _saveRecording() {
     // Best-effort cleanup of the legacy single-buffer key once we've fully
     // moved to the collection model.
     try { localStorage.removeItem(REC_KEY) } catch (_) {}
-    // Mark dirty so the Sync button in the review dialog lights up. Cleared
-    // on a successful sync to GitHub.
-    window._recordingsDirty = true
-    try { localStorage.setItem(REC_DIRTY_KEY, '1') } catch (_) {}
+    // Compare playlist content with the confirmed baseline. Saving selection
+    // or recording state alone must not create pending changes.
+    window._recordingsDirty = recordingsHaveChanges(_persistableRecordings(), syncPrevious) ||
+      (!syncBaseline && !!window._recordingsDirty)
     _refreshRecordingSyncBtn()
     // Keep notification lists in step with playlist edits (debounced, no-op
     // unless a playlist has notifications enabled and the bridge is present).
@@ -11615,6 +11612,8 @@ async function loadRecordingsFromGithub() {
 // Per file, since each language syncs its own recordings.json.
 function _recordingsBaseKey() { return _scopedKey('cupitor:recordings:base:' + recordingsFilePath()) }
 function _loadRecordingsBase() {
+  const cached = window._recordingsSyncBaseline
+  if (cached && cached.key === _recordingsBaseKey()) return cached.value
   try {
     const raw = localStorage.getItem(_recordingsBaseKey())
     const v = raw ? JSON.parse(raw) : null
@@ -11622,7 +11621,9 @@ function _loadRecordingsBase() {
   } catch (_) { return null }
 }
 function _saveRecordingsBase(coll) {
-  try { localStorage.setItem(_recordingsBaseKey(), JSON.stringify(coll || {})) } catch (_) {}
+  const value = JSON.parse(JSON.stringify(coll || {}))
+  window._recordingsSyncBaseline = { key: _recordingsBaseKey(), value }
+  try { localStorage.setItem(_recordingsBaseKey(), JSON.stringify(value)) } catch (_) {}
 }
 
 // The server's copy, fresh. Through the GitHub API, which always answers with
@@ -11844,12 +11845,14 @@ async function _mergeSelfRemoteRecordings() {
 
 const SYNC_CANCELLED = 'sync cancelled'
 async function syncRecordingsToGithub() {
-  if (!_requireSelf()) return
+  if (window._recordingsSyncing) return
+  _refreshRecordingSyncBtn()
+  if (!window._recordingsDirty || !_requireSelf()) return
   let syncCollisions = []
   const localSnapshot = JSON.parse(JSON.stringify(_persistableRecordings()))
   const chosen = {}
-  const $btn = $('#recRecSync')
-  $btn.prop('disabled', true).addClass('syncing')
+  window._recordingsSyncing = true
+  _refreshRecordingSyncBtn()
   try {
     const pushed = await syncRecordingsFiles({
       listParts: () => listRecordingsParts({
@@ -11904,20 +11907,26 @@ async function syncRecordingsToGithub() {
     alert('Sync failed: ' + (e && e.message || e))
     throw e
   } finally {
-    $btn.prop('disabled', false).removeClass('syncing')
+    window._recordingsSyncing = false
     _refreshRecordingSyncBtn()
     _updateRecordingUI()
   }
 }
 
 function _refreshRecordingSyncBtn() {
+  window._recordingsDirty = recordingsHaveChanges(
+    _persistableRecordings(), _loadRecordingsBase(), window._recordingsDirty)
+  try {
+    if (window._recordingsDirty) localStorage.setItem(REC_DIRTY_KEY, '1')
+    else localStorage.removeItem(REC_DIRTY_KEY)
+  } catch (_) {}
   const $btn = $('#recRecSync')
-  if (!$btn.length) return
-  $btn.toggleClass('rec-rec-dirty', !!window._recordingsDirty)
-  $btn.find('.rec-rec-lbl').text(window._recordingsDirty ? 'Sync*' : 'Sync')
-  $btn.attr('title', window._recordingsDirty
-    ? 'Push local recordings to GitHub (unsynced changes)'
-    : 'Push local recordings to GitHub (in sync)')
+  const syncing = !!window._recordingsSyncing, dirty = !!window._recordingsDirty
+  $btn.prop('disabled', !dirty || syncing)
+    .toggleClass('syncing', syncing).toggleClass('rec-rec-dirty', dirty)
+  $btn.find('.rec-rec-lbl').text(dirty ? 'Sync*' : 'Sync')
+  $btn.attr('title', syncing ? 'Syncing playlists to GitHub' : dirty
+    ? 'Push local recordings to GitHub (unsynced changes)' : 'Playlists are in sync')
 }
 
 // ── Multi-recording CRUD ────────────────────────────────────────────────
@@ -12835,8 +12844,8 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
     target: faces.target,
   })
   if (!it) return false  // refused, and addManualEntry already said why
-  // Provenance, for the next send's de-dupe. Starts only — the texts are the
-  // card's own rows, so nothing is stored twice. Without a url there is nothing
+  // Provenance for de-dupe and timed playback. Text stays in the card's own
+  // rows; aligned start/end arrays retain its captured clip boundaries. Without a url there is nothing
   // to match against later, so don't leave unusable starts behind either.
   if (url) {
     it.captionUrl = url
@@ -16228,7 +16237,7 @@ function openRecordingReviewDialog() {
     <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"${isReadOnlyCurrent ? ' disabled' : ''}><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
     <button type="button" id="recRecDuplicate" class="btn rec-rec-btn" title="Duplicate this playlist" aria-label="Duplicate this playlist"><span class="rec-rec-ico">⎘</span><span class="rec-rec-lbl">Duplicate</span></button>
     <button type="button" id="recRecDelete"    class="btn rec-rec-btn rec-rec-danger" title="Delete this playlist" aria-label="Delete this playlist"${isReadOnlyCurrent ? ' disabled' : ''}><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
-    <button type="button" id="recRecSync"      class="btn rec-rec-btn" title="Push local playlists to GitHub" aria-label="Sync to GitHub"><span class="rec-rec-ico">⤴</span><span class="rec-rec-lbl">Sync</span></button>
+    <button type="button" id="recRecSync" disabled class="btn rec-rec-btn" title="Push local playlists to GitHub" aria-label="Sync to GitHub"><span class="rec-rec-ico">⤴</span><span class="rec-rec-lbl">Sync</span></button>
   </div>`
   // Virtual playlist banner: shows members + an "Edit members" affordance,
   // and signals that the item list below is read-only.
@@ -20595,6 +20604,13 @@ window.closePracticeMode = closePracticeMode
 
 function practiceNav(dir) {
   if (!window._practiceActive || !window._practiceCards || !window._practiceCards.length) return
+  // Live browser ranges can follow replaced text into the next card. A
+  // completed navigation discards the old card's selection before rendering.
+  const selection = window.getSelection()
+  const card = document.querySelector('#practiceMode .practice-card')
+  if (card && (card.contains(selection?.anchorNode) || card.contains(selection?.focusNode))) {
+    selection.removeAllRanges()
+  }
   const n = window._practiceCards.length
   window._practiceIdx = (window._practiceIdx + dir + n) % n
   // A new card starts without extra context or a revealed answer. The chosen

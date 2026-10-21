@@ -668,6 +668,29 @@
     z-index: 100000 !important;
 }
 
+/* Shared viewport limit for all jQuery UI dialogs, including asynchronously
+   populated Study notifications. Flex lets the body shrink without hiding
+   the titlebar or footer actions; scrolling remains native. */
+.ui-dialog.cupitor-scroll-dialog {
+    box-sizing: border-box;
+    max-height: var(--cupitor-dialog-height, calc(100dvh - 40px));
+    max-width: var(--cupitor-dialog-width, calc(100vw - 20px));
+    min-height: 0 !important;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ui-dialog.cupitor-scroll-dialog > .ui-dialog-titlebar,
+.ui-dialog.cupitor-scroll-dialog > .ui-dialog-buttonpane {
+    flex: 0 0 auto;
+}
+.ui-dialog.cupitor-scroll-dialog > .ui-dialog-content {
+    flex: 1 1 auto;
+    min-height: 0 !important;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
 /* Select2 attaches its open dropdown to <body>, so it must outrank
    .ui-dialog above — otherwise dropdowns opened from inside a dialog
    (e.g. "Reference word" in #addToVocabularyDialog) render behind it. */
@@ -2053,6 +2076,7 @@ h5.l-accordion.srt-guess-only:hover {
     background: #2e7d32;
     border-color: #1b5e20;
 }
+#recordingReviewDialog #recRecSync:disabled { opacity: 0.5; cursor: default; }
 #recordingReviewDialog #recRecSync.syncing { opacity: 0.6; cursor: progress; }
 /* Shuffle / Loop mode buttons in the review-dialog header. Show an
    "active" state for shuffle (toggle) and the cycled loop label. */

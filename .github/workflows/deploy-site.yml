@@ -18,12 +18,15 @@ permissions:
 
 concurrency:
   group: cupitor-${{ github.event_name == 'pull_request' && github.ref || 'gh-pages-deploy' }}
-  cancel-in-progress: false
+  # Superseded PR checks can stop; publishing jobs remain serialized.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TZ: UTC
     defaults:
       run:
         working-directory: source/frontend/vue3/cupitor-frontend
@@ -47,16 +50,20 @@ jobs:
           CYPRESS_INSTALL_BINARY: '0'
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 
-      - name: Install Spotify test runtime
-        run: npm install --prefix "$RUNNER_TEMP/cupitor-spotify-tests" --no-audit --no-fund jsdom@26.1.0 jquery@3.7.1 @babel/parser@7.28.5
+      - name: Check application syntax
+        run: node --check public/language/language.js
+
+      - name: Install isolated feature test dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/cupitor-feature-tests" --no-audit --no-fund jsdom@26.1.0 jquery@3.7.1 @babel/parser@7.28.5
+          echo "CUPITOR_JSDOM=$RUNNER_TEMP/cupitor-feature-tests/node_modules/jsdom" >> "$GITHUB_ENV"
+          echo "CUPITOR_PLAYWRIGHT=$PWD/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
 
       - name: Test language, sync and deployment
-        env:
-          CUPITOR_JSDOM: ${{ runner.temp }}/cupitor-spotify-tests/node_modules/jsdom
         run: |
           npx jest public/language public/github-utils.test.js --runInBand --silent
           node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs
-          node --test public/language/spotify-*.test.mjs public/language/card-selection-search.test.mjs
+          node --test public/language/spotify-*.test.mjs public/language/card-selection-search.test.mjs public/language/recordings-sync-state.test.mjs
 
       - name: Install Chromium for dialog tests
         run: npx playwright install --with-deps chromium
@@ -72,6 +79,7 @@ jobs:
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
           node tests/browser/recorded-scroll-momentum.cjs
+          (cd public && node ../tests/browser/dialog-scrolling.mjs)
 
       - name: Test complete subtitle capture merges and cache recovery
         run: |
@@ -100,8 +108,18 @@ jobs:
           node tests/browser/study-chrome.cjs
           node tests/browser/unavailable-videos.cjs
           node tests/browser/player-seek.cjs
+          (cd dist && node ../tests/browser/dialog-scrolling.mjs)
         env:
           CUPITOR_TEST_ASSETS: dist
+
+      - name: Save dialog regression screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dialog-source-and-build-screenshots
+          path: source/frontend/vue3/cupitor-frontend/test-results/dialog-browser-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
       # A separate repo needs its own write credential. The normal
       # GITHUB_TOKEN is scoped to cupitor and cannot publish to this repo.

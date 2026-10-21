@@ -5,6 +5,15 @@ files change on `music-study-app`, then publishes the build to
 `trexsatya/trexsatya.github.io`, branch `gh-pages`. Pull requests to that branch
 run the same validation and build without publishing or reading deploy secrets.
 
+## Source ownership
+
+Application fixes belong in this frontend's public/ source. Matching files in
+trexsatya.github.io/gh-pages are generated and overwritten on the next deploy.
+The db/ tree, including db/js/, remains site-owned. See the
+[source/deployment audit](source-deployment-audit.md) for recovered fixes and
+pending site-only work. The active deployment branch is music-study-app;
+master is not the branch this workflow builds.
+
 ## One-time credential setup
 
 1. Create a fine-grained GitHub personal access token owned by `trexsatya`.

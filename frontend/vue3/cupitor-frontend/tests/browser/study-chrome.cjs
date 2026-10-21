@@ -122,20 +122,31 @@ async function checkStudyChrome(browser) {
       await tap(video.x + video.width / 2, video.y + video.height / 2)
       await page.waitForFunction(() => document.activeElement?.tagName === 'IFRAME')
       assert.equal(await page.frameLocator('#testStudyFrame').locator('body').getAttribute('data-clicks'), '1', 'the player is usable after controls return')
-      // Selecting card text deliberately reveals Search. Keep this navigation
-      // gesture free of text selection; verify selection independently below.
-      await page.locator('#practiceMode .practice-card').evaluate(el => { el.style.userSelect = 'none' })
+      await hide()
+      // Selecting card text deliberately wakes Search. Clear that selection
+      // before testing navigation gestures, which should leave chrome hidden.
+      await page.locator('#practiceMode .practice-front').evaluate(node => {
+        const range = document.createRange(); range.selectNodeContents(node)
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range)
+        document.dispatchEvent(new Event('selectionchange'))
+      })
+      await page.locator('#practiceMode .practice-search.study-selection-search').waitFor({ state: 'visible' })
+      await page.evaluate(() => { getSelection().removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+      await page.waitForFunction(() => !document.querySelector('#practiceMode .practice-search.study-selection-search'))
       await hide()
       if (mobile) await swipe(true)
       else {
         const card = await page.locator('#practiceMode .practice-card').boundingBox()
-        await page.mouse.move(card.x + card.width * 0.8, card.y + 120); await page.mouse.down()
-        await page.mouse.move(card.x + card.width * 0.2, card.y + 120, { steps: 8 }); await page.mouse.up()
+        // Drag across the text as a user can: transient browser selection
+        // must not wake Search after the swipe replaces the card.
+        const y = card.y + 120
+        await page.mouse.move(card.x + card.width * 0.8, y); await page.mouse.down()
+        await page.mouse.move(card.x + card.width * 0.2, y, { steps: 8 }); await page.mouse.up()
       }
       await page.waitForFunction(() => window._practiceIdx === 1 && !document.querySelector('#practiceMode .practice-loading'))
-      await page.locator('#practiceMode .practice-card').evaluate(el => { el.style.userSelect = '' })
-      assert.equal(await page.locator('#practiceMode .practice-prev').isVisible(), false, 'swipes still navigate without revealing navigation controls')
-      assert.equal(await flip.isVisible(), true, 'Flip remains available after navigation')
+      assert.equal(await page.locator('#practiceMode .practice-prev').isVisible(), false,
+        'swipes still navigate without revealing chrome: ' + JSON.stringify(await page.evaluate(() => ({classes: document.body.className, selection: getSelection().toString()}))))
+      assert.equal(await page.locator('#practiceMode .practice-unflip').isVisible(), true)
       await page.locator('#practiceMode .practice-front').evaluate(el => { el.innerHTML += '<p>Scroll this study text.</p>'.repeat(35) })
       if (mobile) await swipe(false)
       else {
@@ -144,17 +155,6 @@ async function checkStudyChrome(browser) {
       }
       await page.waitForFunction(() => document.querySelector('#practiceMode .practice-front-face').scrollTop > 0)
       assert.equal(await page.evaluate(() => window._practiceIdx), 1)
-      await page.locator('#practiceMode .practice-front').evaluate(el => {
-        const range = document.createRange(); range.selectNodeContents(el)
-        const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
-      })
-      const searchSelection = page.locator('#practiceMode .practice-search.study-selection-search')
-      await searchSelection.waitFor({ state: 'visible' })
-      await page.clock.fastForward(5000)
-      assert.equal(await searchSelection.isVisible(), true, 'selected text keeps Search visible and highlighted')
-      await page.evaluate(() => window.getSelection().removeAllRanges())
-      await page.waitForFunction(() => !document.querySelector('#practiceMode .practice-search.study-selection-search'))
-      await hide()
       await wakeCard()
       await page.locator('#practiceMode .practice-settings').click()
       await page.clock.fastForward(5000)

@@ -4,6 +4,7 @@ export function installCardSelectionSearch({doc = document, onChange = () => {}}
   let activeButton = null;
   let selectedText = '';
   let originalLabels = null;
+  let selecting = false;
 
   const elementOf = node => node?.nodeType === 1 ? node : node?.parentElement;
   function selectedButton() {
@@ -41,6 +42,9 @@ export function installCardSelectionSearch({doc = document, onChange = () => {}}
   }
 
   function update() {
+    // A mouse drag may briefly select text before the card's swipe handler
+    // replaces it. Wait for that handler to finish before waking Search.
+    if (selecting) return;
     const next = selectedButton();
     if ((next?.button || null) === activeButton && (next?.text || '') === selectedText) return;
     clearButton();
@@ -66,9 +70,20 @@ export function installCardSelectionSearch({doc = document, onChange = () => {}}
     if (activeButton?.contains(event.target)) event.preventDefault();
   }
 
-  const events = ['selectionchange', 'pointerup', 'keyup'];
+  function startSelection(event) {
+    preserveSelection(event);
+    if (event.button === 0 && !event.defaultPrevented) selecting = true;
+  }
+  function finishSelection() {
+    selecting = false;
+    update();
+  }
+
+  const events = ['selectionchange', 'keyup'];
   for (const name of events) doc.addEventListener(name, update);
-  doc.addEventListener('pointerdown', preserveSelection, true);
+  doc.addEventListener('pointerdown', startSelection, true);
+  doc.addEventListener('pointerup', finishSelection);
+  doc.addEventListener('pointercancel', finishSelection);
   doc.addEventListener('mousedown', preserveSelection, true);
   const observer = new doc.defaultView.MutationObserver(update);
   observer.observe(doc.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['class']});
@@ -78,7 +93,9 @@ export function installCardSelectionSearch({doc = document, onChange = () => {}}
     dispose() {
       observer.disconnect();
       for (const name of events) doc.removeEventListener(name, update);
-      doc.removeEventListener('pointerdown', preserveSelection, true);
+      doc.removeEventListener('pointerdown', startSelection, true);
+      doc.removeEventListener('pointerup', finishSelection);
+      doc.removeEventListener('pointercancel', finishSelection);
       doc.removeEventListener('mousedown', preserveSelection, true);
       clearButton();
       selectedText = '';

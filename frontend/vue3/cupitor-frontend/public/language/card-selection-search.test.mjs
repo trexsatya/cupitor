@@ -9,6 +9,11 @@ const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const selectionSource = read('./card-selection-search.js').replace(/^export /gm, '');
 const chromeSource = read('./study-chrome.js').replace(/^import .*;\n/, '').replace(/export /g, '');
 const css = read('../language.css');
+const runtimeRequire = createRequire(require.resolve(process.env.CUPITOR_JSDOM || 'jsdom'));
+const {parse} = runtimeRequire('@babel/parser');
+const app = read('./language.js');
+const navigation = parse(app, {sourceType: 'module'}).program.body.find(node =>
+  node.type === 'FunctionDeclaration' && node.id.name === 'practiceNav');
 
 function boot(mode = 'player') {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>
@@ -100,6 +105,24 @@ for (const mode of ['player', 'practice']) {
     } finally {p.close();}
   });
 
+  test(`${mode}: dragging only reveals Search for the selection left after the gesture`, async () => {
+    const p = boot(mode);
+    try {
+      p.advance(3100);
+      const pointer = type => p.root.dispatchEvent(new p.window.MouseEvent(type, {button: 0, bubbles: true, clientX: type === 'pointerdown' ? 200 : 100}));
+      pointer('pointerdown');
+      pointer('pointermove');
+      p.select(); await p.flush();
+      assert.equal(p.window.testChrome.isVisible(), false, 'transient drag selections do not wake controls');
+      p.root.replaceChildren(p.doc.createTextNode('Next card')); await p.flush();
+      pointer('pointerup');
+      assert.equal(p.window.testChrome.isVisible(), false, 'a navigation gesture leaves controls hidden');
+      pointer('pointerdown'); p.select(); pointer('pointerup');
+      assert.equal(p.window.testChrome.isVisible(), true, 'completed text selection reveals Search');
+      assert.equal(p.button.classList.contains('study-selection-search'), true);
+    } finally {p.close();}
+  });
+
   test(`${mode}: collapsed, whitespace and out-of-card selections do not reveal Search`, async () => {
     const p = boot(mode);
     try {
@@ -147,5 +170,18 @@ test('Practice keeps Flip visible and interactive when the other controls auto-h
     flip.click(); assert.equal(flips, 1);
     p.doc.getElementById('practiceMode').classList.add('minimized');
     assert.equal(p.window.getComputedStyle(p.doc.querySelector('.practice-nav')).display, 'none');
+  } finally {p.close();}
+});
+
+test('actual Practice navigation clears only the previous card selection', () => {
+  const p = boot('practice');
+  try {
+    Object.assign(p.window, {_practiceActive: true, _practiceCards: [{}, {}], _practiceIdx: 0});
+    p.window.eval('const _preferredPracticeSpeed = () => 1; const _renderPracticeCard = () => {};\n' + app.slice(navigation.start, navigation.end));
+    p.select(); p.window.practiceNav(1);
+    assert.equal(p.window.getSelection().toString(), '');
+    assert.equal(p.window._practiceIdx, 1);
+    p.select(p.doc.getElementById('outside')); p.window.practiceNav(1);
+    assert.equal(p.window.getSelection().toString(), 'Outside text', 'other page selections remain intact');
   } finally {p.close();}
 });
