@@ -47,10 +47,16 @@ jobs:
           CYPRESS_INSTALL_BINARY: '0'
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 
+      - name: Install Spotify test runtime
+        run: npm install --prefix "$RUNNER_TEMP/cupitor-spotify-tests" --no-audit --no-fund jsdom@26.1.0 jquery@3.7.1 @babel/parser@7.28.5
+
       - name: Test language, sync and deployment
+        env:
+          CUPITOR_JSDOM: ${{ runner.temp }}/cupitor-spotify-tests/node_modules/jsdom
         run: |
           npx jest public/language public/github-utils.test.js --runInBand --silent
           node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs
+          node --test public/language/spotify-*.test.mjs public/language/card-selection-search.test.mjs
 
       - name: Install Chromium for dialog tests
         run: npx playwright install --with-deps chromium

@@ -1,3 +1,6 @@
+import { retainCaptionEnds } from './caption-capture.js';
+import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
+import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
 import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video.js';
@@ -11754,25 +11757,11 @@ async function _loadOtherRecordings() {
   if (!_dsHasOther()) return
   let coll = null
   try {
-<<<<<<< HEAD
     coll = await _readRecordingsCollection('other')
-=======
-    const url = _dsReadUrl('other', 'recordings.json', _dsLangFromLocation())
-    // One retry beside the user's own data; a guest has only this source.
-    const opts = _dsHasSelf() ? _OTHER_LAYER_RETRY : {}
-    const res = await fetchWithRetry(url, { ...opts, passthrough404: true })
-    if (res.status === 404) { // no playlists of theirs in this language, or the repo is gone
+    if (!coll) {
       await _dsCheckOtherRepo(_dsNotice)
       return
     }
-    const text = await res.text()
-    if (!text || !text.trim()) return
-    try { coll = JSON.parse(text) } catch (_) { coll = null }
-    if (!coll || typeof coll !== 'object' || Array.isArray(coll)) {
-      _dsNotice("The other user's recordings.json is not valid — their playlists are not shown.")
-      return
-    }
->>>>>>> ab0c47a (language: only report the other library as unavailable when its repo is gone)
   } catch (e) {
     _dsNotice(`Could not load the other user's playlists: ${e && e.message}`)
     return
@@ -12659,6 +12648,7 @@ function updateManualEntry(playlistName, manualId, patch) {
         const next = String(patch[k] || '').trim()
         if (k === capField && next !== it[k]) {
           delete it.captionStarts
+          delete it.captionEnds
           delete it.captionRows
         }
         if (next !== it[k] && Array.isArray(it.captionBlocks)) {
@@ -12784,6 +12774,12 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
   // older one that does not is normalised here rather than becoming a second
   // identity for the same video.
   const url = _captionPageKey(cap.url, timeParam)
+  let timingUpdates = 0
+  _captionManualItems(playlistName).forEach(card => {
+    const updated = retainCaptionEnds(card, { ...cap, url }, lines)
+    if (updated !== card) { Object.assign(card, updated); timingUpdates++ }
+  })
+  if (timingUpdates) { rec.updatedAt = Date.now(); _saveRecording() }
   const seen = _captionKeysInPlaylist(playlistName, url, timeParam)
   const fresh = url ? lines.filter(l => {
     const key = _captionKey(url, l.start, l.text)
@@ -12796,7 +12792,9 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
     // Returned rather than announced here: the caller decides where this is
     // said, and inside Cupitor it has to be said outside this page. Nothing
     // was written, but that is not a failure — let the dialog close.
-    return `Already captured — all ${n(lines.length)} are in "${playlistName}".`
+    return timingUpdates
+      ? `Updated clip timings for ${timingUpdates} existing item(s) in "${playlistName}".`
+      : `Already captured — all ${n(lines.length)} are in "${playlistName}".`
   }
   // The link back to where the text came from rides along as the card's media
   // link, which parseMediaUrl classifies. A page or a non-YouTube video becomes
@@ -12843,6 +12841,7 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
   if (url) {
     it.captionUrl = url
     it.captionStarts = fresh.map(l => l.start)
+    it.captionEnds = fresh.map(l => Number.isFinite(l.end) ? l.end : null)
     // How many rows each of those lines took, since a line that kept its own
     // breaks is more than one row of the card.
     it.captionRows = _captionRowCounts(fresh)
@@ -14359,6 +14358,7 @@ function _cardHasAudio(it) { return _cardAudioUrls(it).length > 0 }
 // never make a sound. A video it can play; a recording it can play; a link it
 // cannot.
 function _cardHasPlayableMedia(it) {
+  if (spotifyClips(it).length) return true
   if (_cardHasAudio(it)) return true
   if (_cardHasVideoLink(it)) return true
   const media = _parseMediaUrl(it && it.mediaUrl)
@@ -16669,7 +16669,7 @@ function openRecordingReviewDialog() {
 
   // Inspect the entire playlist, including entries beyond the current page.
   const hasCapturedItems = Object.values(items).some(words => Object.values(words || {}).some(arr =>
-    Array.isArray(arr) && arr.some(it => it && !_isManualItem(it))))
+    Array.isArray(arr) && arr.some(it => it && (!_isManualItem(it) || spotifyClips(it).length))))
   const opts = {
     title: 'Recorded Searches',
     width: Math.min(720, $(window).width() - 40),
@@ -16747,6 +16747,27 @@ function openRecordingReviewDialog() {
 // skipped rather than waiting on an unreachable timestamp.
 const MAX_REASONABLE_CLIP_S = 600
 const _playerLifecycle = createAppLifecycleClock(window)
+const spotifyPlayer = createSpotifyStudyPlayer({
+  win: window, isForeground: () => _playerLifecycle.isForeground(),
+  now: () => _playerLifecycle.now(), onStatus: message => _cpBuildToast(message)
+})
+window.getSpotifyPlaybackLog = () => spotifyPlayer.getPlaybackLog()
+window.copySpotifyPlaybackLog = async () => {
+  const text = JSON.stringify(spotifyPlayer.getPlaybackLog(), null, 2)
+  try {
+    await navigator.clipboard.writeText(text)
+    _cpBuildToast('Spotify playback log copied.')
+  } catch (_) {
+    $('#logViewerAutoRefresh').prop('checked', false)
+    if (_logViewerInterval) { clearInterval(_logViewerInterval); _logViewerInterval = null }
+    const body = document.getElementById('logViewerBody')
+    if (!body) return
+    body.textContent = text
+    const range = document.createRange(); range.selectNodeContents(body)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    _cpBuildToast('Spotify log selected. Long-press the selection to copy.')
+  }
+}
 
 function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt) {
   const itemToken = window._recPlayItemToken
@@ -19304,6 +19325,7 @@ async function playRecording(opts) {
       !window._practiceActive && !window._recPlayPaused && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)
     window._recPlayQueueLen = queue.length
     const it = queue[i]
+    spotifyPlayer.stop({ hide: !spotifyClips(it).length })
     const restoredRate = window._recReplaySpeed && (window._recReplaySpeed.item !== it || window._recReplaySpeed.index !== i)
       ? _restoreRecordingReplaySpeed() : null
     // Manual cards carry the card's front text in `source`, not a media source,
@@ -19378,7 +19400,30 @@ async function playRecording(opts) {
     // in a new tab mid-playlist would break flow); the user can click
     // the link badge in the Review dialog instead.
     if (_isManualItem(it)) {
-      unplayableSkips = 0
+      if (spotifyClips(it).length) {
+        _setRecPlayPhase('clip')
+        try {
+          await spotifyPlayer.playCard(it, {
+            isCurrent: () => sessionPlaying() && window._recPlayItemToken === itemToken &&
+              !window._practiceActive && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex),
+            isPaused: () => !!window._recPlayPaused,
+            onExternalPause: paused => _applyRecPlayPause(paused, false),
+            onMedia: media => { window._recPlayManualAudio = media }
+          })
+          if (!sessionPlaying()) break
+          if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) continue
+          unplayableSkips = 0
+        } catch (error) {
+          if (!sessionPlaying() || window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) continue
+          _recPlayToast('Skipped Spotify clip: ' + error.message)
+          if (++unplayableSkips >= queue.length) {
+            _cpBuildToast('No playable items found. Playback stopped.')
+            break
+          }
+          i = _stepOverSkipped()
+          continue
+        }
+      } else unplayableSkips = 0
       // Show the card's text in the subtitle overlay (the banner head is
       // collapsed on mobile) so it's visible for the whole item.
       if (_cardHasVideoLink(it)) {
@@ -20155,6 +20200,7 @@ function _sleepRespectingPause(ms) {
 }
 
 function stopPlayingRecording() {
+  spotifyPlayer.stop()
   window._recVideoAttempt?.cancel()
   _restoreRecordingReplaySpeed()
   window._playingRecording = false
@@ -20204,6 +20250,7 @@ const _practiceVideoCues = createPracticeVideoCues({
 })
 let _practiceRenderToken = 0
 function _newPracticeVideoRequest({ mute = false } = {}) {
+  spotifyPlayer.stop()
   window._manualCueToken = (window._manualCueToken || 0) + 1
   if (!window.ytPlayerReady) window._ytReadyAutoplaySuppressed = true
   return _practiceVideoCues.invalidate({ mute })
@@ -20362,7 +20409,7 @@ function openPracticeMode(opts) {
       </div>
       <div class="practice-nav">
         <button type="button" class="practice-prev" aria-label="Previous (←)" title="Previous (←)">‹</button>
-        <button type="button" class="practice-unflip" title="Show source again" aria-label="Show source again">↶</button>
+        <button type="button" class="practice-unflip" title="Flip card" aria-label="Flip card">↶</button>
         <button type="button" class="practice-play" aria-label="Play clip" title="Play clip">▶</button>
         <button type="button" class="practice-speed" aria-label="Cycle playback speed" title="Cycle playback speed">1×</button>
         <button type="button" class="practice-next" aria-label="Next (→)" title="Next (→)">›</button>
@@ -21834,7 +21881,7 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   $p.find('.practice-dir').text(frontIsSource ? `${srcCode} → EN` : `EN → ${srcCode}`)
   // The "word" slot becomes a manual badge so the user can see at a glance
   // that this is a typed card vs a captured clip.
-  $p.find('.practice-word').text('📝 manual').css('visibility', 'visible')
+  $p.find('.practice-word').text(spotifyClips(it).length ? 'Spotify clip' : '📝 manual').css('visibility', 'visible')
 
   const $front = $p.find('.practice-front').empty()
   $front.append(_cardTextEl(frontText))
@@ -21858,10 +21905,12 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
     const icon    = isYT ? '▶' : (isAudio ? '🎙' : '🔗')
     const title   = isYT    ? 'Play the linked YouTube video'
                   : isAudio ? 'Play the recorded audio'
+                  : spotifyClips(it).length ? 'Show the Spotify player'
                   : 'Open the linked media in a new tab'
-    const $btn = $(`<button type="button" class="practice-media-link" title="${title}" aria-label="Open linked media">${icon}</button>`)
+    const $btn = $(`<button type="button" class="practice-media-link" title="${title}" aria-label="${spotifyClips(it).length ? 'Show Spotify player' : 'Open linked media'}">${icon}</button>`)
     $btn.on('click', async (ev) => {
       ev.preventDefault(); ev.stopPropagation()
+      if (spotifyClips(it).length) { spotifyPlayer.show(); return }
 
       if (isYT) {
         _playPracticeManualVideo(it)
@@ -21899,6 +21948,10 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   $p.data('item', it)
   _updatePracticeSpeedBtn()
   _updatePracticeRestoreCount()
+  if (spotifyClips(it).length) spotifyPlayer.cue(it, {
+    mode: 'practice', isCurrent: () => _practiceVideoCues.isCurrent(videoRequest) &&
+      window._practiceCards?.[window._practiceIdx] === it && !window._practiceMinimized
+  })
 }
 
 // Open a jQuery UI dialog to edit a practice line. Centred on the viewport
@@ -22067,6 +22120,11 @@ $(document).on('click', '.keyboard-shortcuts-btn', openKeyboardShortcuts)
 function _togglePracticePlayback() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
+  if (spotifyClips(it).length) {
+    spotifyPlayer.togglePractice(it, { isCurrent: () => window._practiceActive &&
+      window._practiceCards?.[window._practiceIdx] === it && !window._practiceMinimized })
+    return
+  }
   if (_isManualItem(it)) {
     if (window._practicePlayPending) { _renderPracticeCard(); return }
     const audio = $('#practiceAudio .rec-pa-el')[0]

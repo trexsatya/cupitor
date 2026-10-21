@@ -1,10 +1,12 @@
 // One shared, accessible separator for the active view. Ratios are stored per
 // view; viewport changes and a different media type are clamped on each paint.
-export function splitGeometry({ height, width, top = 64, bottom = 0, transport = 0, audio = false, ratio }) {
+export function splitGeometry({ height, width, top = 64, bottom = 0, transport = 0, audio = false, ratio, mediaMin = 0 }) {
   const available = Math.max(60, height - top - bottom - 12);
-  const min = Math.min(available * 0.45, (audio ? 100 : 90) + transport);
+  const min = mediaMin > 0
+    ? Math.min(available, Math.max(mediaMin + transport, Math.min(available * 0.45, (audio ? 100 : 90) + transport)))
+    : Math.min(available * 0.45, (audio ? 100 : 90) + transport);
   const max = Math.max(min, available - Math.min(100, available * 0.4));
-  const natural = (audio ? 140 : Math.min(width, 900) * 9 / 16) + transport;
+  const natural = (mediaMin > 0 ? mediaMin : audio ? 140 : Math.min(width, 900) * 9 / 16) + transport;
   const upper = Math.max(min, Math.min(max, Number.isFinite(ratio) ? ratio * available : natural));
   return { top, available, min, max, upper, y: top + upper, media: Math.max(20, upper - transport) };
 }
@@ -37,7 +39,8 @@ export function installStudyDivider({ readRatio, saveRatio }) {
     const bottom = view === 'practice' ? Math.max(64, visible(bar) ? bar.getBoundingClientRect().height + 66 : 64) : 0;
     const ratio = Object.prototype.hasOwnProperty.call(local, view) ? local[view] : readRatio(view);
     geometry = splitGeometry({ height: window.innerHeight, width: window.innerWidth, bottom,
-      transport: view === 'player' ? 60 : 0, audio, ratio });
+      transport: view === 'player' ? 60 : 0, audio, ratio,
+      mediaMin: body.classList.contains('study-spotify') ? 190 : 0 });
     body.style.setProperty('--study-media-h', geometry.media + 'px');
     body.style.setProperty('--study-split-y', geometry.y + 'px');
     divider.setAttribute('aria-label', `Resize ${view === 'player' ? 'Player' : 'Practice'} player and text`);

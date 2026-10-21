@@ -1,3 +1,5 @@
+import { installCardSelectionSearch } from './card-selection-search.js';
+
 // Chrome is transient; the learning content and section sizes never change.
 export function createStudyChrome({ render, blocked, idleMs = 3000, setTimer = setTimeout, clearTimer = clearTimeout }) {
   let active = false, timer = null, visible = true;
@@ -21,6 +23,7 @@ export function createStudyChrome({ render, blocked, idleMs = 3000, setTimer = s
 }
 
 export function installStudyChrome() {
+  let selectionSearch = null;
   const body = document.body;
   const wake = document.createElement('button');
   wake.id = 'studyControlsWakeSurface'; wake.type = 'button'; wake.hidden = true;
@@ -31,7 +34,7 @@ export function installStudyChrome() {
   let view = null, pointer = null, keyboard = false, swallow = null, releaseTimer = null, ignoreDoubleUntil = 0;
   const controls = '#recPlayingBanner,#recPlayingTransport,#recPlayingMinimizeBtn,#recPlayingCloseBtn,#practiceMode .practice-topbar,#practiceMode .practice-nav,#practiceMode .practice-ctx-ctrl,#practiceMode .practice-rec-bar,#practiceAudio,#recPlayingAudio,#studyMediaDivider';
   const blocked = () => {
-    if (pointer || body.classList.contains('study-resizing')) return true;
+    if (selectionSearch?.hasSelection() || pointer || body.classList.contains('study-resizing')) return true;
     if ([...document.querySelectorAll('.ui-dialog,#practiceMode .practice-info-panel,#practiceMode .practice-settings-panel,#recPlayingBanner.rec-pb-expanded')].some(shown)) return true;
     if (document.querySelector('#practiceMode .prec-toggle.on')) return true;
     const focus = document.activeElement;
@@ -62,14 +65,15 @@ export function installStudyChrome() {
       if (view) chrome.activate(); else chrome.deactivate();
     } else coverVideo();
   };
+  selectionSearch = installCardSelectionSearch({ onChange: () => chrome.show() });
   new MutationObserver(update).observe(body, { attributes: true, attributeFilter: ['class'], childList: true });
   window.addEventListener('resize', coverVideo);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', coverVideo);
   document.addEventListener('pointerdown', event => {
     if (!view || event.button !== 0 || event.target.closest('.ui-dialog')) return;
     keyboard = false;
-    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, hidden: !chrome.isVisible(), moved: false, view };
-    if (chrome.isVisible()) chrome.show();
+    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, hidden: !chrome.isVisible() && !event.target.closest('#practiceMode .practice-unflip'), moved: false, view };
+    if (!pointer.hidden) chrome.show();
   }, true);
   document.addEventListener('pointermove', event => {
     if (pointer && pointer.id === event.pointerId && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 10) pointer.moved = true;
