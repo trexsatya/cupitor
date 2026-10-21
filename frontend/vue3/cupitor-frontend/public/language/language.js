@@ -20214,6 +20214,7 @@ function switchPracticeToPlayer() {
     for (const item of queue) window._recPlayQueue.push(item)
     window._recPlayPracticeSingle = single
     window._recPlayTemporary = temporary
+    _setOpenView('player')
     window._recPlaySilentItem = silent ? queue[pos] : null
     window._recNavRequest = null
     window._recNavGotoIndex = pos

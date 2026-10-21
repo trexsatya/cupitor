@@ -54,6 +54,20 @@ async function check(browser, mobile) {
         { external_key: 'key-b', item_external_id: 'card:off', title: 'Excluded', fired_at: 1, responded_at: null }
       ])
     })
+    // Start with a paused saved session underneath. Notification practice
+    // must not overwrite that session's cursor, even when Player is reused.
+    await page.evaluate(() => {
+      const queue = window._recordings.A.items.Manual.Card.map((item, idx) => ({
+        ...item, _recName: 'A', _st: 'Manual', _w: 'Card', _idx: idx,
+      }))
+      window.__normalPlayer = window.playRecording({ resumeQueue: { queue, pos: 2 }, startPaused: true, keepCurrentItem: true })
+    })
+    await page.waitForFunction(() => window._playingRecording && window._recPlayIndex === 2)
+    await page.evaluate(() => {
+      window.minimizePlayingRecording()
+      window.__originalResume = JSON.stringify(window._recLastPlayedMap || {})
+      window.__storageBefore = Object.fromEntries(Object.keys(localStorage).filter(k => /recLastPlayed/.test(k)).map(k => [k, localStorage.getItem(k)]))
+    })
     await page.locator('#toggleSettingsPanelBtn').click()
     await page.evaluate(() => {
       $('#settingsPanel').append('<div id="long-settings-test">' + '<p>Extra settings content</p>'.repeat(90) + '</div>')
@@ -101,6 +115,7 @@ async function check(browser, mobile) {
     await page.waitForFunction(() => window._playingRecording && !window._practiceActive && window._recPlayIndex === 1)
     assert.deepEqual(await page.evaluate(() => window._recPlayQueue.map(i => i.id)), ['a2', 'a1', 'b1'])
     await checkCovered()
+    assert.equal(await page.evaluate(() => Object.keys(localStorage).some(k => /openView/.test(k))), false, 'reusing a saved Player keeps notification practice temporary')
     await page.locator('#recPlayingBanner .rec-pb-info-btn').click()
     await page.locator('.rec-pb-practice-btn').click()
     await ready()
