@@ -111,6 +111,15 @@ jobs:
         env:
           CUPITOR_TEST_ASSETS: dist
 
+      - name: Save dialog regression screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dialog-source-and-build-screenshots
+          path: source/frontend/vue3/cupitor-frontend/test-results/dialog-browser-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
       # A separate repo needs its own write credential. The normal
       # GITHUB_TOKEN is scoped to cupitor and cannot publish to this repo.
       - name: Check publishing credential

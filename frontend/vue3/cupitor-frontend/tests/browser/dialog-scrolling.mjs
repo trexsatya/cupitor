@@ -9,7 +9,7 @@ const {parse} = runtimeRequire('@babel/parser');
 
 const {chromium} = await import(pathToFileURL(process.env.CUPITOR_PLAYWRIGHT).href);
 const browser = await chromium.launch({headless: true});
-const output = resolve('dialog-browser-results');
+const output = resolve('../test-results/dialog-browser-results', process.env.CUPITOR_TEST_ASSETS || 'public');
 await mkdir(output, {recursive: true});
 const app = await readFile(new URL('../../public/language/language.js', import.meta.url), 'utf8');
 const ast = parse(app, {sourceType: 'module'});
