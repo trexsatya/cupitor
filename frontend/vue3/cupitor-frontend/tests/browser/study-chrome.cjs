@@ -178,7 +178,7 @@ async function checkStudyChrome(browser) {
       // needs a wake tap. That tap must not be swallowed by the wake handler.
       await page.locator('#practiceMode .prec-toggle').click()
       await page.locator('#practiceMode .prec-toggle.on').waitFor()
-      assert.equal(await speakover.isEnabled(), false, 'active recording cannot be hidden')
+      assert.equal(await page.locator('.practice-speakover-toggle').isDisabled(), true, 'active recording cannot be hidden')
       await page.clock.fastForward(5000)
       assert.equal(await page.locator('#practiceMode .prec-toggle').isVisible(), true, 'recording Stop remains available')
       await checkHost(true)

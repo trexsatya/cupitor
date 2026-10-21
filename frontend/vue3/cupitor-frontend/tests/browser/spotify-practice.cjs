@@ -167,8 +167,8 @@ async function check(browser, mobile) {
     await toggle.check(); await click('.practice-settings')
     await page.clock.install(); await page.clock.fastForward(4000)
     await page.waitForFunction(() => document.body.classList.contains('study-controls-hidden'))
+    await page.locator('.practice-topbar').waitFor({state: 'hidden'})
     assert.equal(await page.locator('.practice-rec-bar').isVisible(), true, 'Spotify speakover stays visible when enabled')
-    assert.equal(await page.locator('.practice-topbar').isVisible(), false)
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'}: Spotify Practice/Player restore, persistent speakover toggle, Rec/replay, Keep/discard and navigation cancellation passed`)
   } catch (error) {
