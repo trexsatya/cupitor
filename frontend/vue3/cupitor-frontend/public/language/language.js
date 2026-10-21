@@ -1,3 +1,8 @@
+import { retainCaptionEnds } from './caption-capture.js';
+import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
+import { createSpotifyStudyPlayer } from './spotify-player.js';
+import { installDialogScrolling } from './dialog-scrolling.js';
+import { recordingsHaveChanges } from './recordings-sync-state.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
 import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video.js';
@@ -4485,18 +4490,7 @@ $(document).ready(function () {
   // current scroll position, so a dialog opened after the user scrolled
   // lands offscreen. Fixed + a small top offset keeps every dialog
   // consistent without per-call _pinDialogToViewport sprinkles.
-  $(document).on('dialogopen', function (e) {
-    const $wrap = $(e.target).closest('.ui-dialog')
-    if (!$wrap.length) return
-    const w = $wrap.outerWidth() || 0
-    const left = Math.max(10, Math.round((window.innerWidth - w) / 2))
-    $wrap.css({
-      position: 'fixed',
-      top: '20px',
-      left: left + 'px',
-      margin: '0'
-    })
-  })
+  installDialogScrolling($)
   // Default select2 matcher strips diacritics, so typing "a" matches "ä"
   // and vice-versa — wrong for Swedish vocab where ä/ö/å are distinct
   // letters. This matcher does a plain case-insensitive substring match
@@ -11508,6 +11502,12 @@ $(document).on('click', '.lib-open', e => {
 
 function _saveRecording() {
   try {
+    const syncBaseline = _loadRecordingsBase()
+    let syncPrevious = syncBaseline
+    if (!syncPrevious) {
+      try { syncPrevious = JSON.parse(localStorage.getItem(REC_COLLECTION_KEY) || '{}') || {} }
+      catch (_) { syncPrevious = {} }
+    }
     // Keep the active recording's items pointer in sync with the collection
     // entry — capture/remove/reorder mutate window._recording.items by
     // reference, and the collection entry is the same object, so this just
@@ -11535,10 +11535,10 @@ function _saveRecording() {
     // Best-effort cleanup of the legacy single-buffer key once we've fully
     // moved to the collection model.
     try { localStorage.removeItem(REC_KEY) } catch (_) {}
-    // Mark dirty so the Sync button in the review dialog lights up. Cleared
-    // on a successful sync to GitHub.
-    window._recordingsDirty = true
-    try { localStorage.setItem(REC_DIRTY_KEY, '1') } catch (_) {}
+    // Compare playlist content with the confirmed baseline. Saving selection
+    // or recording state alone must not create pending changes.
+    window._recordingsDirty = recordingsHaveChanges(_persistableRecordings(), syncPrevious) ||
+      (!syncBaseline && !!window._recordingsDirty)
     _refreshRecordingSyncBtn()
     // Keep notification lists in step with playlist edits (debounced, no-op
     // unless a playlist has notifications enabled and the bridge is present).
@@ -11612,6 +11612,8 @@ async function loadRecordingsFromGithub() {
 // Per file, since each language syncs its own recordings.json.
 function _recordingsBaseKey() { return _scopedKey('cupitor:recordings:base:' + recordingsFilePath()) }
 function _loadRecordingsBase() {
+  const cached = window._recordingsSyncBaseline
+  if (cached && cached.key === _recordingsBaseKey()) return cached.value
   try {
     const raw = localStorage.getItem(_recordingsBaseKey())
     const v = raw ? JSON.parse(raw) : null
@@ -11619,7 +11621,9 @@ function _loadRecordingsBase() {
   } catch (_) { return null }
 }
 function _saveRecordingsBase(coll) {
-  try { localStorage.setItem(_recordingsBaseKey(), JSON.stringify(coll || {})) } catch (_) {}
+  const value = JSON.parse(JSON.stringify(coll || {}))
+  window._recordingsSyncBaseline = { key: _recordingsBaseKey(), value }
+  try { localStorage.setItem(_recordingsBaseKey(), JSON.stringify(value)) } catch (_) {}
 }
 
 // The server's copy, fresh. Through the GitHub API, which always answers with
@@ -11754,25 +11758,11 @@ async function _loadOtherRecordings() {
   if (!_dsHasOther()) return
   let coll = null
   try {
-<<<<<<< HEAD
     coll = await _readRecordingsCollection('other')
-=======
-    const url = _dsReadUrl('other', 'recordings.json', _dsLangFromLocation())
-    // One retry beside the user's own data; a guest has only this source.
-    const opts = _dsHasSelf() ? _OTHER_LAYER_RETRY : {}
-    const res = await fetchWithRetry(url, { ...opts, passthrough404: true })
-    if (res.status === 404) { // no playlists of theirs in this language, or the repo is gone
+    if (!coll) {
       await _dsCheckOtherRepo(_dsNotice)
       return
     }
-    const text = await res.text()
-    if (!text || !text.trim()) return
-    try { coll = JSON.parse(text) } catch (_) { coll = null }
-    if (!coll || typeof coll !== 'object' || Array.isArray(coll)) {
-      _dsNotice("The other user's recordings.json is not valid — their playlists are not shown.")
-      return
-    }
->>>>>>> ab0c47a (language: only report the other library as unavailable when its repo is gone)
   } catch (e) {
     _dsNotice(`Could not load the other user's playlists: ${e && e.message}`)
     return
@@ -11855,12 +11845,14 @@ async function _mergeSelfRemoteRecordings() {
 
 const SYNC_CANCELLED = 'sync cancelled'
 async function syncRecordingsToGithub() {
-  if (!_requireSelf()) return
+  if (window._recordingsSyncing) return
+  _refreshRecordingSyncBtn()
+  if (!window._recordingsDirty || !_requireSelf()) return
   let syncCollisions = []
   const localSnapshot = JSON.parse(JSON.stringify(_persistableRecordings()))
   const chosen = {}
-  const $btn = $('#recRecSync')
-  $btn.prop('disabled', true).addClass('syncing')
+  window._recordingsSyncing = true
+  _refreshRecordingSyncBtn()
   try {
     const pushed = await syncRecordingsFiles({
       listParts: () => listRecordingsParts({
@@ -11915,20 +11907,26 @@ async function syncRecordingsToGithub() {
     alert('Sync failed: ' + (e && e.message || e))
     throw e
   } finally {
-    $btn.prop('disabled', false).removeClass('syncing')
+    window._recordingsSyncing = false
     _refreshRecordingSyncBtn()
     _updateRecordingUI()
   }
 }
 
 function _refreshRecordingSyncBtn() {
+  window._recordingsDirty = recordingsHaveChanges(
+    _persistableRecordings(), _loadRecordingsBase(), window._recordingsDirty)
+  try {
+    if (window._recordingsDirty) localStorage.setItem(REC_DIRTY_KEY, '1')
+    else localStorage.removeItem(REC_DIRTY_KEY)
+  } catch (_) {}
   const $btn = $('#recRecSync')
-  if (!$btn.length) return
-  $btn.toggleClass('rec-rec-dirty', !!window._recordingsDirty)
-  $btn.find('.rec-rec-lbl').text(window._recordingsDirty ? 'Sync*' : 'Sync')
-  $btn.attr('title', window._recordingsDirty
-    ? 'Push local recordings to GitHub (unsynced changes)'
-    : 'Push local recordings to GitHub (in sync)')
+  const syncing = !!window._recordingsSyncing, dirty = !!window._recordingsDirty
+  $btn.prop('disabled', !dirty || syncing)
+    .toggleClass('syncing', syncing).toggleClass('rec-rec-dirty', dirty)
+  $btn.find('.rec-rec-lbl').text(dirty ? 'Sync*' : 'Sync')
+  $btn.attr('title', syncing ? 'Syncing playlists to GitHub' : dirty
+    ? 'Push local recordings to GitHub (unsynced changes)' : 'Playlists are in sync')
 }
 
 // ── Multi-recording CRUD ────────────────────────────────────────────────
@@ -12659,6 +12657,7 @@ function updateManualEntry(playlistName, manualId, patch) {
         const next = String(patch[k] || '').trim()
         if (k === capField && next !== it[k]) {
           delete it.captionStarts
+          delete it.captionEnds
           delete it.captionRows
         }
         if (next !== it[k] && Array.isArray(it.captionBlocks)) {
@@ -12784,6 +12783,12 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
   // older one that does not is normalised here rather than becoming a second
   // identity for the same video.
   const url = _captionPageKey(cap.url, timeParam)
+  let timingUpdates = 0
+  _captionManualItems(playlistName).forEach(card => {
+    const updated = retainCaptionEnds(card, { ...cap, url }, lines)
+    if (updated !== card) { Object.assign(card, updated); timingUpdates++ }
+  })
+  if (timingUpdates) { rec.updatedAt = Date.now(); _saveRecording() }
   const seen = _captionKeysInPlaylist(playlistName, url, timeParam)
   const fresh = url ? lines.filter(l => {
     const key = _captionKey(url, l.start, l.text)
@@ -12796,7 +12801,9 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
     // Returned rather than announced here: the caller decides where this is
     // said, and inside Cupitor it has to be said outside this page. Nothing
     // was written, but that is not a failure — let the dialog close.
-    return `Already captured — all ${n(lines.length)} are in "${playlistName}".`
+    return timingUpdates
+      ? `Updated clip timings for ${timingUpdates} existing item(s) in "${playlistName}".`
+      : `Already captured — all ${n(lines.length)} are in "${playlistName}".`
   }
   // The link back to where the text came from rides along as the card's media
   // link, which parseMediaUrl classifies. A page or a non-YouTube video becomes
@@ -12837,12 +12844,13 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
     target: faces.target,
   })
   if (!it) return false  // refused, and addManualEntry already said why
-  // Provenance, for the next send's de-dupe. Starts only — the texts are the
-  // card's own rows, so nothing is stored twice. Without a url there is nothing
+  // Provenance for de-dupe and timed playback. Text stays in the card's own
+  // rows; aligned start/end arrays retain its captured clip boundaries. Without a url there is nothing
   // to match against later, so don't leave unusable starts behind either.
   if (url) {
     it.captionUrl = url
     it.captionStarts = fresh.map(l => l.start)
+    it.captionEnds = fresh.map(l => Number.isFinite(l.end) ? l.end : null)
     // How many rows each of those lines took, since a line that kept its own
     // breaks is more than one row of the card.
     it.captionRows = _captionRowCounts(fresh)
@@ -14359,6 +14367,7 @@ function _cardHasAudio(it) { return _cardAudioUrls(it).length > 0 }
 // never make a sound. A video it can play; a recording it can play; a link it
 // cannot.
 function _cardHasPlayableMedia(it) {
+  if (spotifyClips(it).length) return true
   if (_cardHasAudio(it)) return true
   if (_cardHasVideoLink(it)) return true
   const media = _parseMediaUrl(it && it.mediaUrl)
@@ -16228,7 +16237,7 @@ function openRecordingReviewDialog() {
     <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"${isReadOnlyCurrent ? ' disabled' : ''}><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
     <button type="button" id="recRecDuplicate" class="btn rec-rec-btn" title="Duplicate this playlist" aria-label="Duplicate this playlist"><span class="rec-rec-ico">⎘</span><span class="rec-rec-lbl">Duplicate</span></button>
     <button type="button" id="recRecDelete"    class="btn rec-rec-btn rec-rec-danger" title="Delete this playlist" aria-label="Delete this playlist"${isReadOnlyCurrent ? ' disabled' : ''}><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
-    <button type="button" id="recRecSync"      class="btn rec-rec-btn" title="Push local playlists to GitHub" aria-label="Sync to GitHub"><span class="rec-rec-ico">⤴</span><span class="rec-rec-lbl">Sync</span></button>
+    <button type="button" id="recRecSync" disabled class="btn rec-rec-btn" title="Push local playlists to GitHub" aria-label="Sync to GitHub"><span class="rec-rec-ico">⤴</span><span class="rec-rec-lbl">Sync</span></button>
   </div>`
   // Virtual playlist banner: shows members + an "Edit members" affordance,
   // and signals that the item list below is read-only.
@@ -16669,7 +16678,7 @@ function openRecordingReviewDialog() {
 
   // Inspect the entire playlist, including entries beyond the current page.
   const hasCapturedItems = Object.values(items).some(words => Object.values(words || {}).some(arr =>
-    Array.isArray(arr) && arr.some(it => it && !_isManualItem(it))))
+    Array.isArray(arr) && arr.some(it => it && (!_isManualItem(it) || spotifyClips(it).length))))
   const opts = {
     title: 'Recorded Searches',
     width: Math.min(720, $(window).width() - 40),
@@ -16747,6 +16756,10 @@ function openRecordingReviewDialog() {
 // skipped rather than waiting on an unreachable timestamp.
 const MAX_REASONABLE_CLIP_S = 600
 const _playerLifecycle = createAppLifecycleClock(window)
+const spotifyPlayer = createSpotifyStudyPlayer({
+  win: window, isForeground: () => _playerLifecycle.isForeground(),
+  now: () => _playerLifecycle.now(), onStatus: message => _cpBuildToast(message)
+})
 
 function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt) {
   const itemToken = window._recPlayItemToken
@@ -19304,6 +19317,7 @@ async function playRecording(opts) {
       !window._practiceActive && !window._recPlayPaused && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)
     window._recPlayQueueLen = queue.length
     const it = queue[i]
+    spotifyPlayer.stop({ hide: !spotifyClips(it).length })
     const restoredRate = window._recReplaySpeed && (window._recReplaySpeed.item !== it || window._recReplaySpeed.index !== i)
       ? _restoreRecordingReplaySpeed() : null
     // Manual cards carry the card's front text in `source`, not a media source,
@@ -19378,7 +19392,30 @@ async function playRecording(opts) {
     // in a new tab mid-playlist would break flow); the user can click
     // the link badge in the Review dialog instead.
     if (_isManualItem(it)) {
-      unplayableSkips = 0
+      if (spotifyClips(it).length) {
+        _setRecPlayPhase('clip')
+        try {
+          await spotifyPlayer.playCard(it, {
+            isCurrent: () => sessionPlaying() && window._recPlayItemToken === itemToken &&
+              !window._practiceActive && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex),
+            isPaused: () => !!window._recPlayPaused,
+            onExternalPause: paused => _applyRecPlayPause(paused, false),
+            onMedia: media => { window._recPlayManualAudio = media }
+          })
+          if (!sessionPlaying()) break
+          if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) continue
+          unplayableSkips = 0
+        } catch (error) {
+          if (!sessionPlaying() || window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) continue
+          _recPlayToast('Skipped Spotify clip: ' + error.message)
+          if (++unplayableSkips >= queue.length) {
+            _cpBuildToast('No playable items found. Playback stopped.')
+            break
+          }
+          i = _stepOverSkipped()
+          continue
+        }
+      } else unplayableSkips = 0
       // Show the card's text in the subtitle overlay (the banner head is
       // collapsed on mobile) so it's visible for the whole item.
       if (_cardHasVideoLink(it)) {
@@ -20155,6 +20192,7 @@ function _sleepRespectingPause(ms) {
 }
 
 function stopPlayingRecording() {
+  spotifyPlayer.stop()
   window._recVideoAttempt?.cancel()
   _restoreRecordingReplaySpeed()
   window._playingRecording = false
@@ -20204,6 +20242,7 @@ const _practiceVideoCues = createPracticeVideoCues({
 })
 let _practiceRenderToken = 0
 function _newPracticeVideoRequest({ mute = false } = {}) {
+  spotifyPlayer.stop()
   window._manualCueToken = (window._manualCueToken || 0) + 1
   if (!window.ytPlayerReady) window._ytReadyAutoplaySuppressed = true
   return _practiceVideoCues.invalidate({ mute })
@@ -20362,7 +20401,7 @@ function openPracticeMode(opts) {
       </div>
       <div class="practice-nav">
         <button type="button" class="practice-prev" aria-label="Previous (←)" title="Previous (←)">‹</button>
-        <button type="button" class="practice-unflip" title="Show source again" aria-label="Show source again">↶</button>
+        <button type="button" class="practice-unflip" title="Flip card" aria-label="Flip card">↶</button>
         <button type="button" class="practice-play" aria-label="Play clip" title="Play clip">▶</button>
         <button type="button" class="practice-speed" aria-label="Cycle playback speed" title="Cycle playback speed">1×</button>
         <button type="button" class="practice-next" aria-label="Next (→)" title="Next (→)">›</button>
@@ -21834,7 +21873,7 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   $p.find('.practice-dir').text(frontIsSource ? `${srcCode} → EN` : `EN → ${srcCode}`)
   // The "word" slot becomes a manual badge so the user can see at a glance
   // that this is a typed card vs a captured clip.
-  $p.find('.practice-word').text('📝 manual').css('visibility', 'visible')
+  $p.find('.practice-word').text(spotifyClips(it).length ? 'Spotify clip' : '📝 manual').css('visibility', 'visible')
 
   const $front = $p.find('.practice-front').empty()
   $front.append(_cardTextEl(frontText))
@@ -21858,10 +21897,12 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
     const icon    = isYT ? '▶' : (isAudio ? '🎙' : '🔗')
     const title   = isYT    ? 'Play the linked YouTube video'
                   : isAudio ? 'Play the recorded audio'
+                  : spotifyClips(it).length ? 'Show the Spotify player'
                   : 'Open the linked media in a new tab'
-    const $btn = $(`<button type="button" class="practice-media-link" title="${title}" aria-label="Open linked media">${icon}</button>`)
+    const $btn = $(`<button type="button" class="practice-media-link" title="${title}" aria-label="${spotifyClips(it).length ? 'Show Spotify player' : 'Open linked media'}">${icon}</button>`)
     $btn.on('click', async (ev) => {
       ev.preventDefault(); ev.stopPropagation()
+      if (spotifyClips(it).length) { spotifyPlayer.show(); return }
 
       if (isYT) {
         _playPracticeManualVideo(it)
@@ -21899,6 +21940,10 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   $p.data('item', it)
   _updatePracticeSpeedBtn()
   _updatePracticeRestoreCount()
+  if (spotifyClips(it).length) spotifyPlayer.cue(it, {
+    mode: 'practice', isCurrent: () => _practiceVideoCues.isCurrent(videoRequest) &&
+      window._practiceCards?.[window._practiceIdx] === it && !window._practiceMinimized
+  })
 }
 
 // Open a jQuery UI dialog to edit a practice line. Centred on the viewport
@@ -22067,6 +22112,11 @@ $(document).on('click', '.keyboard-shortcuts-btn', openKeyboardShortcuts)
 function _togglePracticePlayback() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
+  if (spotifyClips(it).length) {
+    spotifyPlayer.togglePractice(it, { isCurrent: () => window._practiceActive &&
+      window._practiceCards?.[window._practiceIdx] === it && !window._practiceMinimized })
+    return
+  }
   if (_isManualItem(it)) {
     if (window._practicePlayPending) { _renderPracticeCard(); return }
     const audio = $('#practiceAudio .rec-pa-el')[0]

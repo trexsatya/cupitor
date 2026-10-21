@@ -1,3 +1,4 @@
+import { spotifyClipSegments } from '../spotify-clips.js';
 // View-model + pure helpers for the Playing UI (the now-playing banner
 // over the recording playback + the subtitle context overlay shown
 // alongside YouTube during play). DOM emission lives in the sibling
@@ -229,7 +230,10 @@ export function buildPlayingBannerVM(it, idx, total, gapSeconds, reversed = fals
     }
   }
   if (isManualItem(it)) {
-    const linkLbl = it.mediaUrl
+    const spotify = spotifyClipSegments(it)
+    const linkLbl = spotify.length
+      ? ` · Spotify · ${fromSeconds(spotify[0].start)} – ${fromSeconds(spotify.at(-1).end)}${spotify.length > 1 ? ` · ${spotify.length} passages` : ''}`
+      : it.mediaUrl
       ? ` · ${it.mediaKind === 'youtube' ? '▶ YouTube' : '🔗 link'}`
       : ''
     // One-line text: the words of a card written as HTML, without the tags.
@@ -238,7 +242,7 @@ export function buildPlayingBannerVM(it, idx, total, gapSeconds, reversed = fals
     return {
       isManual: true,
       progressText: `${safeIdx + 1}/${safeTotal}`,
-      headText: `📝 ${head || '(empty)'}`,
+      headText: `${spotify.length ? '▶' : '📝'} ${head || '(empty)'}`,
       metaText: `${meta || '(empty)'}${linkLbl}`,
       word: it.word || '',
       gapLabel: `${gap}s`,

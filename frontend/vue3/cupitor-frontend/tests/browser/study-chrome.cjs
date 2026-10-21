@@ -122,7 +122,8 @@ async function checkStudyChrome(browser) {
         await page.mouse.move(card.x + card.width * 0.2, card.y + 120, { steps: 8 }); await page.mouse.up()
       }
       await page.waitForFunction(() => window._practiceIdx === 1 && !document.querySelector('#practiceMode .practice-loading'))
-      assert.equal(await page.locator('#practiceMode .practice-nav').isVisible(), false, 'swipes still navigate without revealing chrome')
+      assert.equal(await page.locator('#practiceMode .practice-prev').isVisible(), false, 'swipes still navigate without revealing chrome')
+      assert.equal(await page.locator('#practiceMode .practice-unflip').isVisible(), true)
       await page.locator('#practiceMode .practice-front').evaluate(el => { el.innerHTML += '<p>Scroll this study text.</p>'.repeat(35) })
       if (mobile) await swipe(false)
       else {

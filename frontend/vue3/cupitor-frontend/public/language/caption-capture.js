@@ -43,7 +43,9 @@ export function captionLinesFrom(cap) {
     const tr = l.translation == null
       ? ''
       : String(l.translation).replace(/\s*\n\s*/g, ' ').trim();
-    return { start: Number.isFinite(start) ? start : 0, text, translation: tr };
+    return { start: Number.isFinite(start) ? start : 0,
+      ...(Number.isFinite(Number(l.end)) && Number(l.end) > start ? { end: Number(l.end) } : {}),
+      text, translation: tr };
   }).filter(Boolean);
 }
 
@@ -272,6 +274,7 @@ function captionBlocksOf(item) {
   const field = captionFieldOf(item);
   return [{ url: item.captionUrl, field, offset: 0,
     length: String(item[field] || '').length, starts: item.captionStarts,
+    ...(Array.isArray(item.captionEnds) ? { ends: item.captionEnds } : {}),
     rows: item.captionRows || item.captionStarts.map(() => 1) }];
 }
 
@@ -332,12 +335,15 @@ export function appendCaptionBlock(item, cap, lines, field) {
     if (face === faces.textField && cap.url) {
       blocks.push({ url: captionPageKey(cap.url, cap.timeParam), field: face,
         offset: prefix.length, length: added.length,
-        starts: lines.map(l => l.start), rows: captionRowCounts(lines), ...(html ? { html: true } : {}) });
+        starts: lines.map(l => l.start),
+        ...(lines.some(l => Number.isFinite(l.end)) ? { ends: lines.map(l => Number.isFinite(l.end) ? l.end : null) } : {}),
+        rows: captionRowCounts(lines), ...(html ? { html: true } : {}) });
     }
   }
   next.captionBlocks = blocks;
   // The old whole-face positions are now represented by the first block.
   delete next.captionStarts;
+  delete next.captionEnds;
   delete next.captionRows;
   if (!item.captionField) next.captionField = faces.textField;
   return next;
@@ -365,4 +371,32 @@ export function cardTranslateDirection(item, face, studiedCode) {
     fromLang: from === studied ? studiedCode : 'en',
     toLang: face === studied ? studiedCode : 'en',
   };
+}
+
+// Resending a previously captured cue can add its missing end time without
+// creating a duplicate card. Text and ownership remain unchanged.
+export function retainCaptionEnds(item, detail, lines) {
+  if (!item || !detail?.url) return item;
+  const page = captionPageKey(detail.url, detail.timeParam);
+  const incoming = new Map((lines || []).filter(line => Number.isFinite(line.end) && line.end > line.start)
+    .map(line => [captionKey(page, line.start, line.text), line.end]));
+  if (!incoming.size) return item;
+  let changed = false;
+  const blocks = captionBlocksOf(item).map(block => {
+    if (captionPageKey(block.url, detail.timeParam) !== page) return block;
+    const text = captionBlockTexts(item, block);
+    if (!text) return block;
+    const ends = Array.isArray(block.ends) && block.ends.length === block.starts.length
+      ? block.ends.slice() : block.starts.map(() => null);
+    let updated = false;
+    block.starts.forEach((start, i) => {
+      const end = incoming.get(captionKey(page, start, text[i]));
+      if (end != null && end !== ends[i]) {ends[i] = end; updated = true;}
+    });
+    if (!updated) return block;
+    changed = true;
+    return {...block, ends};
+  });
+  if (!changed) return item;
+  return Array.isArray(item.captionBlocks) ? {...item, captionBlocks: blocks} : {...item, captionEnds: blocks[0].ends};
 }

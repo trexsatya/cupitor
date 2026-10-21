@@ -668,6 +668,29 @@
     z-index: 100000 !important;
 }
 
+/* Shared viewport limit for all jQuery UI dialogs, including asynchronously
+   populated Study notifications. Flex lets the body shrink without hiding
+   the titlebar or footer actions; scrolling remains native. */
+.ui-dialog.cupitor-scroll-dialog {
+    box-sizing: border-box;
+    max-height: var(--cupitor-dialog-height, calc(100dvh - 40px));
+    max-width: var(--cupitor-dialog-width, calc(100vw - 20px));
+    min-height: 0 !important;
+    flex-direction: column;
+    overflow: hidden;
+}
+.ui-dialog.cupitor-scroll-dialog > .ui-dialog-titlebar,
+.ui-dialog.cupitor-scroll-dialog > .ui-dialog-buttonpane {
+    flex: 0 0 auto;
+}
+.ui-dialog.cupitor-scroll-dialog > .ui-dialog-content {
+    flex: 1 1 auto;
+    min-height: 0 !important;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
 /* Select2 attaches its open dropdown to <body>, so it must outrank
    .ui-dialog above — otherwise dropdowns opened from inside a dialog
    (e.g. "Reference word" in #addToVocabularyDialog) render behind it. */
@@ -2053,6 +2076,7 @@ h5.l-accordion.srt-guess-only:hover {
     background: #2e7d32;
     border-color: #1b5e20;
 }
+#recordingReviewDialog #recRecSync:disabled { opacity: 0.5; cursor: default; }
 #recordingReviewDialog #recRecSync.syncing { opacity: 0.6; cursor: progress; }
 /* Shuffle / Loop mode buttons in the review-dialog header. Show an
    "active" state for shuffle (toggle) and the cycled loop label. */
@@ -4074,7 +4098,7 @@ body.study-split-active.practice-mode #practiceMode .practice-card { top: calc(v
 body.study-controls-hidden :is(#recPlayingBanner .rec-pb-top > :not(.rec-pb-progress),
     #recPlayingBanner .rec-pb-details, #recPlayingTransport, #recPlayingMinimizeBtn,
     #recPlayingCloseBtn, #recPlayNavToast, #studyMediaDivider, #practiceMode .practice-topbar,
-    #practiceMode .practice-nav, #practiceMode .practice-ctx-ctrl,
+    #practiceMode .practice-nav > :not(.practice-unflip), #practiceMode .practice-ctx-ctrl,
     #practiceMode .practice-line-edit, #practiceMode .practice-rec-bar,
     #practiceMode .practice-restore, #practiceAudio > *, #recPlayingAudio > *) {
     opacity: 0 !important;
@@ -4088,6 +4112,17 @@ body.study-controls-hidden #recPlayingBanner {
     pointer-events: none;
 }
 body.study-controls-hidden #recPlayingBanner .rec-pb-progress { background: rgba(33,33,33,0.92); }
+
+/* Selection makes Search stand out without changing its size or position. */
+#recPlayingSearchBtn.study-selection-search,
+#practiceMode .practice-search.study-selection-search {
+    background: #ffd54f;
+    color: #111;
+    outline: 3px solid #ffb300;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px #111, 0 4px 12px rgba(0,0,0,0.45);
+}
+
 #studyControlsWakeSurface {
     position: fixed;
     z-index: 100007;
@@ -4097,6 +4132,32 @@ body.study-controls-hidden #recPlayingBanner .rec-pb-progress { background: rgba
     cursor: pointer;
 }
 #studyControlsWakeSurface[hidden] { display: none; }
+
+/* Spotify's visible embed shares the study media slot with YouTube. */
+#spotifyClipPlayer { display: none; }
+body.study-spotify.rec-playing:not(.practice-mode) #mediaContainer,
+body.study-spotify.practice-mode #mediaContainer { display: block !important; overflow-y: auto; }
+body.study-spotify #mediaContainer > :not(#spotifyClipPlayer) { display: none !important; }
+body.study-spotify #spotifyClipPlayer {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 190px;
+    height: var(--study-media-h, 190px);
+    width: 100%;
+    background: #121212;
+}
+body.study-spotify #mediaContainer #spotifyClipPlayer iframe {
+    width: 100% !important;
+    height: 152px !important;
+    aspect-ratio: auto;
+    border: 0;
+}
+.spotify-clip-status { padding: 8px 12px; color: #eee; font: 13px system-ui, sans-serif; min-height: 22px; }
+body.study-spotify #studyControlsWakeSurface { display: none !important; }
+body.study-spotify.practice-mode #practiceMode .practice-play { display: inline-flex !important; }
+body.study-spotify.practice-mode #practiceMode .practice-speed { display: none !important; }
+body.study-spotify.practice-mode:not(.study-split-active) #practiceMode .practice-card { top: 266px; }
 body.rec-playing #scrollButton, body.practice-mode #scrollButton { display: none; }
 #recPlayingSubs .rec-ps-row {
     padding: 4px 6px;
