@@ -20587,6 +20587,13 @@ window.closePracticeMode = closePracticeMode
 
 function practiceNav(dir) {
   if (!window._practiceActive || !window._practiceCards || !window._practiceCards.length) return
+  // Live browser ranges can follow replaced text into the next card. A
+  // completed navigation discards the old card's selection before rendering.
+  const selection = window.getSelection()
+  const card = document.querySelector('#practiceMode .practice-card')
+  if (card && (card.contains(selection?.anchorNode) || card.contains(selection?.focusNode))) {
+    selection.removeAllRanges()
+  }
   const n = window._practiceCards.length
   window._practiceIdx = (window._practiceIdx + dir + n) % n
   // A new card starts without extra context or a revealed answer. The chosen

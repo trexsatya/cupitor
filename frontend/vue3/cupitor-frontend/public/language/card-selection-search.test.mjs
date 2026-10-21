@@ -9,6 +9,11 @@ const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const selectionSource = read('./card-selection-search.js').replace(/^export /gm, '');
 const chromeSource = read('./study-chrome.js').replace(/^import .*;\n/, '').replace(/export /g, '');
 const css = read('../language.css');
+const runtimeRequire = createRequire(require.resolve(process.env.CUPITOR_JSDOM || 'jsdom'));
+const {parse} = runtimeRequire('@babel/parser');
+const app = read('./language.js');
+const navigation = parse(app, {sourceType: 'module'}).program.body.find(node =>
+  node.type === 'FunctionDeclaration' && node.id.name === 'practiceNav');
 
 function boot(mode = 'player') {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>
@@ -165,5 +170,18 @@ test('Practice keeps Flip visible and interactive when the other controls auto-h
     flip.click(); assert.equal(flips, 1);
     p.doc.getElementById('practiceMode').classList.add('minimized');
     assert.equal(p.window.getComputedStyle(p.doc.querySelector('.practice-nav')).display, 'none');
+  } finally {p.close();}
+});
+
+test('actual Practice navigation clears only the previous card selection', () => {
+  const p = boot('practice');
+  try {
+    Object.assign(p.window, {_practiceActive: true, _practiceCards: [{}, {}], _practiceIdx: 0});
+    p.window.eval('const _preferredPracticeSpeed = () => 1; const _renderPracticeCard = () => {};\n' + app.slice(navigation.start, navigation.end));
+    p.select(); p.window.practiceNav(1);
+    assert.equal(p.window.getSelection().toString(), '');
+    assert.equal(p.window._practiceIdx, 1);
+    p.select(p.doc.getElementById('outside')); p.window.practiceNav(1);
+    assert.equal(p.window.getSelection().toString(), 'Outside text', 'other page selections remain intact');
   } finally {p.close();}
 });

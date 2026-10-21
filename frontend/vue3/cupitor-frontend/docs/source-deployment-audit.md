@@ -16,8 +16,8 @@ afbec8f932ab9744942205f83e4363859f4cfe76.
 | [23](https://github.com/trexsatya/trexsatya.github.io/pull/23) | Captured Spotify cue ends, embedded Player/Practice, Play All, media sizing | Ported into readable source |
 | [24](https://github.com/trexsatya/trexsatya.github.io/pull/24) | Saved Spotify start timestamps and seek/resume | Ported current merged player and regressions |
 | [25](https://github.com/trexsatya/trexsatya.github.io/pull/25) | Buffering/seek recovery and item advancement | Ported current merged player and regressions |
-| [27](https://github.com/trexsatya/trexsatya.github.io/pull/27), open | Dialog scrolling and Sync pending-change state | Reimplemented in source with regressions |
-| [26](https://github.com/trexsatya/trexsatya.github.io/pull/26), open | Additional Spotify activation and whole-second seek changes | Pending work; also requires a source-based PR before production merge |
+| [27](https://github.com/trexsatya/trexsatya.github.io/pull/27) | Dialog scrolling and Sync pending-change state | Reimplemented in source [PR 30](https://github.com/trexsatya/cupitor/pull/30) with regressions; supersedes the site PR |
+| [26](https://github.com/trexsatya/trexsatya.github.io/pull/26), open | Additional Spotify activation and whole-second seek changes | Now carried by source [PR 31](https://github.com/trexsatya/cupitor/pull/31); review both source PRs together before deployment |
 
 The next deployment replaces language/language.js, language.css, language.html
 and the other owned application assets. Even if a site-only new module remains
@@ -44,8 +44,9 @@ copying into the frontend source.
 
 Source deployment now runs the recovered feature tests. Site-only tests tied
 to minified local variable names are not a durable substitute for source tests.
-The open site PR 26 has additional work that this audit intentionally does not
-silently merge into the recovery of already-merged features.
+Source PR 31 carries the additional site PR 26 work and overlaps the recovered
+Spotify integration in PR 30. Preserve both its newer transport behavior and
+PR 30's dialog/Sync changes when combining the source PRs.
 
 ## Future work
 
