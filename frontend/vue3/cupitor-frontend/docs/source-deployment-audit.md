@@ -45,8 +45,9 @@ copying into the frontend source.
 Source deployment now runs the recovered feature tests. Site-only tests tied
 to minified local variable names are not a durable substitute for source tests.
 Source PR 31 carries the additional site PR 26 work and overlaps the recovered
-Spotify integration in PR 30. Preserve both its newer transport behavior and
-PR 30's dialog/Sync changes when combining the source PRs.
+Spotify integration in PR 30. PR 30 incorporates its commit 0a0a591e and resolves
+the overlap while preserving the newer transport behavior and dialog/Sync
+changes. Merging PR 31 first leaves a focused remaining PR 30 diff.
 
 ## Future work
 

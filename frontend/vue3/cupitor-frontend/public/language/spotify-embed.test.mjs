@@ -51,8 +51,9 @@ for (const nativeBridge of [false, true]) {
       f.readyApi(); await f.flush(); f.emit('ready');
       assert.equal(f.win.document.querySelectorAll('iframe').length, 1);
       assert.deepEqual(f.calls.find(call => call[0] === 'load'), ['load', 'spotify:episode:' + id, false, 12.52]);
-      assert.deepEqual(f.calls.at(-1), ['seek', 12.52]);
-      f.state(0); assert.equal(f.calls.some(call => call[0] === 'play'), false);
+      assert.deepEqual(f.calls.at(-1), ['play']);
+      const plays = f.calls.filter(call => call[0] === 'play').length;
+      f.state(0); assert.equal(f.calls.filter(call => call[0] === 'play').length, plays);
       f.state(12.52); assert.deepEqual(f.calls.at(-1), ['play']);
       f.state(12.6, false); f.state(14.16, false);
       assert.equal(await done, true); assert.deepEqual(f.calls.at(-1), ['pause']);
@@ -85,7 +86,7 @@ test('Show Spotify focuses the embedded Practice player without starting playbac
     assert.equal(f.calls.some(call => call[0] === 'play'), false); assert.equal(opened, false);
     f.player.togglePractice(card); assert.deepEqual(f.calls.at(-1), ['play']);
     f.state(12.6, false); f.state(14.16, false); assert.equal(f.player.media.ended, true);
-    f.player.togglePractice(card); await f.flush(); assert.deepEqual(f.calls.at(-1), ['seek', 12.52]);
+    f.player.togglePractice(card); await f.flush(); assert.deepEqual(f.calls.filter(call => call[0] === 'seek').at(-1), ['seek', 12]);
   } finally {f.close();}
 });
 

@@ -94,7 +94,8 @@ function fixture() {
   const controller = {
     addListener(name, fn) {if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push(fn);},
     loadEntity(...args) {calls.push(['load', ...args]);},
-    seek(time) {calls.push(['seek', time]);}, play() {calls.push(['play']);}, pause() {calls.push(['pause']);},
+    seek(time) {calls.push(['seek', time]);}, play() {calls.push(['play']);},
+    resume() {calls.push(['resume']);}, pause() {calls.push(['pause']);},
   };
   const api = {createController(mount, options, callback) {
     calls.push(['create', options]); mount.replaceWith(win.document.createElement('iframe')); callback(controller);
@@ -109,13 +110,14 @@ function fixture() {
   return {win, player, calls, notices, advance, flush, emit, state, foreground(value) {foreground = value;}, close() {player.stop(); win.close();}};
 }
 
-test('playlist playback confirms the fractional start, stops at the end and resolves once', async () => {
+test('playlist activates the saved fractional start, stops at the end and resolves once', async () => {
   const f = fixture();
   try {
     const done = f.player.playCard(card()); await f.flush(); f.emit('ready');
-    assert.equal(f.calls.filter(call => call[0] === 'play').length, 0);
-    f.state(0); assert.equal(f.calls.filter(call => call[0] === 'play').length, 0, 'zero must not play before seek confirmation');
-    f.state(12.52); assert.equal(f.calls.filter(call => call[0] === 'play').length, 1);
+    assert.equal(f.calls.filter(call => call[0] === 'play').length, 1, 'Play activates the saved startAt');
+    assert.equal(f.calls.some(call => call[0] === 'seek'), false);
+    f.state(0); assert.equal(f.calls.filter(call => call[0] === 'play').length, 1, 'idle updates must not restart Play');
+    f.state(12.52); assert.equal(f.calls.filter(call => call[0] === 'resume').length, 1);
     f.state(12.6, false); f.state(14.15, false);
     assert.equal(f.player.media.ended, false);
     f.state(14.16, false); assert.equal(await done, true);
@@ -128,7 +130,7 @@ test('multiple captured passages seek over gaps before a card completes', async 
   try {
     const done = f.player.playCard(card([0, 12.52], [2.38, 14.16])); await f.flush(); f.emit('ready');
     f.state(0); f.state(0.1, false); f.state(2.38, false);
-    assert.deepEqual(f.calls.at(-1), ['seek', 12.52]);
+    assert.deepEqual(f.calls.filter(call => call[0] === 'seek').at(-1), ['seek', 12]);
     assert.equal(f.player.media.ended, false);
     f.state(2.5, false); assert.equal(f.player.media.ended, false, 'late updates from the preceding passage cannot finish the next one');
     f.state(12.52); f.state(12.6, false); f.state(14.16, false);
@@ -150,11 +152,11 @@ test('Practice play/pause toggles and replay keep using the captured bounds', as
   const f = fixture(), item = card();
   try {
     f.player.cue(item); await f.flush(); f.emit('ready'); f.state(12.52);
-    f.player.togglePractice(item); assert.equal(f.calls.at(-1)[0], 'play');
+    f.player.togglePractice(item); assert.equal(f.calls.at(-1)[0], 'resume');
     f.state(12.6, false); f.player.togglePractice(item); assert.equal(f.calls.at(-1)[0], 'pause');
     f.player.togglePractice(item); f.state(14.16, false); assert.equal(f.player.media.ended, true);
     f.player.togglePractice(item); await f.flush();
-    assert.deepEqual(f.calls.at(-1), ['seek', 12.52]);
+    assert.deepEqual(f.calls.filter(call => call[0] === 'seek').at(-1), ['seek', 12]);
   } finally {f.close();}
 });
 
@@ -263,7 +265,7 @@ test('the actual Play All loop waits for each Spotify clip end before advancing'
     assert.deepEqual(events.filter(event => event[0] === 'item').map(event => event[1]), [0]);
     f.state(14.16, false); await f.flush(); await f.flush();
     assert.deepEqual(events.filter(event => event[0] === 'item').map(event => event[1]), [0, 1]);
-    assert.deepEqual(f.calls.at(-1), ['seek', 20.8]);
+    assert.deepEqual(f.calls.filter(call => call[0] === 'seek').at(-1), ['seek', 20]);
     f.state(20.8); f.state(21, false); f.state(24.1, false);
     await done;
     assert.equal(f.win._playingRecording, false);
@@ -300,5 +302,42 @@ test('Next cancels the current Spotify card before its remaining recorded audio'
     assert.deepEqual(recordings, []);
     assert.deepEqual(events.filter(event => event[0] === 'item').map(event => event[1]), [0, 1]);
     f.state(30); f.state(30.1, false); f.state(32, false); await done;
+  } finally {f.close();}
+});
+
+
+test('the supplied playlist advances through every retained passage using whole-second acknowledgements', {timeout: 5000}, async () => {
+  const f = fixture(), events = [];
+  try {
+    const rows = JSON.parse(fs.readFileSync(new URL(
+      '../../tests/browser/fixtures/spotify-captured-playlist.json',
+      import.meta.url), 'utf8'));
+    const cards = rows.filter(row => row?.[2] && spotifyClipSegments(row[2]).length).map(row => row[2]);
+    assert.ok(cards.length > 1);
+    const original = JSON.stringify(cards);
+    const done = appPlaylist(f, events)({queue: cards, shuffle: false, loop: 'off'});
+    let previousEpisode = null, passages = 0;
+    for (let index = 0; index < cards.length; index++) {
+      await f.flush(); await f.flush();
+      assert.equal(f.win._recPlayCurrentItem, cards[index]);
+      const ranges = spotifyClipSegments(cards[index]);
+      if (ranges[0].id !== previousEpisode) {
+        f.emit('ready'); previousEpisode = ranges[0].id;
+      }
+      for (const range of ranges) {
+        f.state(Math.floor(range.start), true, range.id);
+        f.state(range.start + (range.end - range.start) / 2, false, range.id);
+        f.state(range.end - 0.001, false, range.id);
+        assert.equal(f.player.media.ended, false, 'a fractional end must not be rounded down');
+        f.state(range.end, false, range.id);
+        assert.equal(f.win._recPlayPaused, false, 'an internal boundary pause cannot pause the playlist');
+        passages++;
+      }
+    }
+    await done;
+    assert.equal(passages, cards.reduce((count, card) => count + spotifyClipSegments(card).length, 0));
+    assert.equal(events.filter(event => event[0] === 'item').length, cards.length);
+    assert.equal(events.some(event => event[0] === 'skip'), false);
+    assert.equal(JSON.stringify(cards), original, 'playing must preserve the captured cue data');
   } finally {f.close();}
 });

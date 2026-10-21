@@ -1,0 +1,78 @@
+name: Live Spotify production playback
+
+on:
+  pull_request:
+    branches: [music-study-app]
+    paths:
+      - 'frontend/vue3/cupitor-frontend/public/language/**'
+      - 'frontend/vue3/cupitor-frontend/public/language.html'
+      - 'frontend/vue3/cupitor-frontend/public/language.css'
+      - 'frontend/vue3/cupitor-frontend/tests/browser/spotify-live.mjs'
+      - 'frontend/vue3/cupitor-frontend/tests/browser/fixtures/spotify-captured-playlist.json'
+      - '.github/workflows/spotify-live.yml'
+  workflow_dispatch:
+    inputs:
+      playlist_path:
+        description: Repository JSON playlist path
+        default: tests/browser/fixtures/spotify-captured-playlist.json
+        required: true
+      control_episode:
+        description: Optional control episode ID (empty tests the original playlist)
+        required: false
+      control_card_limit:
+        description: Control card limit (0 runs all supplied cards)
+        default: '0'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  real-chrome-playback:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"label":"spotify-example","episode":"7makk4oTQel546B0PZlDM5","cards":3},{"label":"full-timing-pattern","episode":"5D4rToJ6IW2JsilsvuKeA1","cards":0}]' || '[{"label":"requested-playlist","episode":"","cards":0}]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend/vue3/cupitor-frontend
+    env:
+      SPOTIFY_PLAYLIST_PATH: ${{ inputs.playlist_path || 'tests/browser/fixtures/spotify-captured-playlist.json' }}
+      SPOTIFY_CONTROL_EPISODE: ${{ github.event_name == 'pull_request' && matrix.episode || inputs.control_episode }}
+      SPOTIFY_CONTROL_CARD_LIMIT: ${{ github.event_name == 'pull_request' && matrix.cards || inputs.control_card_limit || '0' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Install application dependencies
+        run: npm ci --no-audit --no-fund
+        env:
+          CYPRESS_INSTALL_BINARY: '0'
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - name: Build production assets
+        run: npm run build
+        env:
+          NODE_OPTIONS: --openssl-legacy-provider
+      - name: Install browser tooling
+        run: |
+          npm install --prefix "$RUNNER_TEMP/cupitor-browser" --no-audit --no-fund playwright@1.64.1
+          "$RUNNER_TEMP/cupitor-browser/node_modules/.bin/playwright" install --with-deps chrome
+      - name: Run playback and export checks in Chrome
+        env:
+          CUPITOR_TEST_ASSETS: dist
+          CUPITOR_PLAYWRIGHT: ${{ runner.temp }}/cupitor-browser/node_modules/playwright/index.mjs
+        run: xvfb-run --auto-servernum node tests/browser/spotify-live.mjs
+      - name: Save video, screenshot and playback event log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: spotify-browser-results-${{ matrix.label }}
+          path: frontend/vue3/cupitor-frontend/spotify-browser-results/
+          if-no-files-found: warn
+          retention-days: 14

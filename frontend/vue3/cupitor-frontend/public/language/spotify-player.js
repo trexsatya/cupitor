@@ -37,6 +37,36 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
   const doc = win.document;
   let active = null, controller = null, creating = null, ready = false, loadedUri = '';
   let holder = null, status = null, embedMount = null, timer = null;
+  const playbackLog = [];
+  let droppedLogEvents = 0, lastPlaybackLogAt = -Infinity, lastPlaybackLogState = '';
+  function log(event, details = {}) {
+    const range = active && rangeOf(active);
+    playbackLog.push({at: new Date().toISOString(), elapsedMs: now(), event,
+      cardId: active?.item?.id || null, mode: active?.mode || null,
+      episodeId: range?.id || null, segment: active?.index ?? null,
+      start: range?.start ?? null, end: range?.end ?? null,
+      desiredPaused: active?.desiredPaused ?? null,
+      pendingSeek: active?.pendingSeek ?? null, ...details});
+    if (playbackLog.length > 2000) {
+      droppedLogEvents += playbackLog.length - 2000;
+      playbackLog.splice(0, playbackLog.length - 2000);
+    }
+  }
+  function logPlayback(state) {
+    const key = JSON.stringify([state.isPaused, state.isBuffering, state.playingURI,
+      active?.index, active?.pendingSeek, active?.complete]);
+    if (key === lastPlaybackLogState && now() - lastPlaybackLogAt < 1000) return;
+    lastPlaybackLogState = key; lastPlaybackLogAt = now();
+    const numeric = value => value == null || !Number.isFinite(Number(value)) ? null : Number(value);
+    log('playback', {position: numeric(state.position), duration: numeric(state.duration),
+      isPaused: !!state.isPaused, isBuffering: !!state.isBuffering,
+      playingURI: spotifyEpisode(state.playingURI)?.uri || null});
+  }
+  function getPlaybackLog() {
+    return {version: 1, playerVersion: '20261020-spotify-integer-seek',
+      exportedAt: new Date().toISOString(), userAgent: win.navigator?.userAgent || '',
+      droppedEvents: droppedLogEvents, events: playbackLog.map(entry => ({...entry}))};
+  }
   const stamp = value => {
     const minutes = Math.floor(value / 60), seconds = (value % 60).toFixed(2).padStart(5, '0');
     return minutes + ':' + seconds;
@@ -70,7 +100,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     doc.body.classList.add('study-spotify');
     try {win.ytPlayer?.pauseVideo();} catch (_) {}
   }
-  function pauseController() {try {controller?.pause();} catch (_) {}}
+  function pauseController() {if (controller) log('command:pause'); try {controller?.pause();} catch (_) {}}
   function settle(session, error, result = false) {
     if (session.settled) return;
     session.settled = true;
@@ -78,11 +108,14 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
   }
   function fail(session, error) {
     if (!current(session)) return;
+    log('error', {message: error.message});
     session.complete = true; session.paused = true; pauseController();
     message(error.message); onStatus(error.message); settle(session, error);
   }
   function stop({hide = true} = {}) {
-    const previous = active; active = null;
+    const previous = active;
+    if (previous) log('stop');
+    active = null;
     pauseController();
     if (timer != null) win.clearInterval(timer);
     timer = null;
@@ -92,16 +125,21 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     if (button) {button.textContent = '▶'; button.setAttribute('aria-label', 'Play clip');}
   }
   function commandPlay(session, {retry = false} = {}) {
-    if (!current(session) || !ready || session.pendingSeek || session.buffering ||
-        session.desiredPaused || session.complete || !isForeground()) return;
+    if (!current(session) || !ready || (session.pendingSeek && !session.initializing && !session.seekAttempts) || session.buffering ||
+        session.desiredPaused || session.isPaused() || session.complete || !isForeground()) return;
     if (retry && session.resumeAttempts >= 3) return;
     session.resumeAttempts = retry ? session.resumeAttempts + 1 : 1;
     session.resumePending = true; session.recovering = true; session.commandAt = now();
-    // Play can restart the loaded entity. Resume preserves the confirmed seek.
-    try {(controller.resume || controller.play).call(controller);} catch (error) {fail(session, error);}
+    // Activate loadEntity(startAt) with Play once. After activation, Play may
+    // restart the episode, so subsequent seek/buffering recovery uses Resume.
+    const method = session.initializing && typeof controller.play === 'function' ? 'play'
+      : typeof controller.resume === 'function' ? 'resume' : 'play';
+    log('command:' + method, {attempt: session.resumeAttempts});
+    try {controller[method]();} catch (error) {fail(session, error);}
   }
   function setPaused(session, paused) {
     session.desiredPaused = paused; session.userPaused = paused;
+    log('intent', {paused});
     session.resumeAttempts = 0;
     if (paused) {
       session.resumePending = false; session.commandAt = now(); pauseController();
@@ -109,12 +147,23 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
   }
   function requestSeek(session) {
     session.lastSeekAt = now(); session.seekAttempts++;
-    try {controller.seek(session.seekTarget);} catch (error) {fail(session, error);}
+    // Spotify documents seek() in whole seconds. Floor preserves the beginning
+    // of a fractional cue, at the cost of less than one second of lead-in.
+    const seconds = Math.floor(session.seekTarget);
+    log('command:seek', {seconds, requestedSeconds: session.seekTarget, attempt: session.seekAttempts});
+    try {
+      controller.seek(seconds);
+      // An already-paused iframe can hold its position notifications until it
+      // resumes. Seek must be posted first, but waiting for its acknowledgement
+      // before Resume can deadlock every card after the first.
+      if (session.pendingSeek) commandPlay(session);
+    } catch (error) {fail(session, error);}
   }
   function seekTo(session, target) {
     if (!current(session) || !ready || session.complete) return;
     // Own the temporary pause before issuing commands: callbacks may be synchronous.
-    session.pendingSeek = true; session.recovering = true; session.resumePending = false;
+    session.pendingSeek = true; session.initializing = false;
+    session.recovering = true; session.resumePending = false;
     session.seekTarget = target; session.seekAt = now(); session.seekAttempts = 0;
     session.position = NaN; session.paused = true; session.resumeAttempts = 0;
     pauseController(); requestSeek(session); paint(session);
@@ -128,18 +177,20 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     session.recovering = true; session.resumePending = false; session.resumeAttempts = 0;
     session.position = NaN; session.paused = true; session.complete = false;
     session.loadedForRange = loadedUri !== range.uri;
+    session.initializing = session.loadedForRange;
     if (session.loadedForRange) {
       loadedUri = range.uri; ready = false;
-      pauseController();
       try {
         const load = controller.loadEntity || controller.loadUri;
+        log('command:load', {uri: range.uri, startAt: range.start});
         load.call(controller, range.uri, false, range.start);
       } catch (error) {fail(session, error);}
     } else if (ready) seekStart(session);
     paint(session);
   }
-  function atEnd(session) {
+  function atEnd(session, estimated = false) {
     if (!current(session) || session.complete) return;
+    log('clip-end', {estimated});
     if (session.index + 1 < session.segments.length) {
       session.index++; loadRange(session);
     } else {
@@ -150,6 +201,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
   }
   function playbackUpdate(event) {
     const session = active, state = event?.data || {};
+    logPlayback(state);
     if (!session || !current(session)) {if (!state.isPaused) pauseController(); return;}
     const range = rangeOf(session);
     if (state.playingURI && spotifyEpisode(state.playingURI)?.id !== range.id) return;
@@ -173,7 +225,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
         mayAdoptPlay && !session.backgroundHeld && isForeground() &&
         (!session.userPaused || now() - session.commandAt > 300)) {
       session.desiredPaused = false; session.userPaused = false; session.resumeAttempts = 0;
-      session.onExternalPause(false);
+      log('external-play'); session.onExternalPause(false);
     }
 
     if (session.pendingSeek) {
@@ -181,9 +233,9 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
       // Accept a nearby position inside the clip, not a buffering placeholder or
       // the far-away clock left over from the preceding passage.
       const ahead = reportedPaused ? 1 : Math.max(1.5, (now() - session.seekAt) / 1000 + 0.25);
-      if (!session.buffering && position >= session.seekTarget - 0.25 &&
+      if (!session.buffering && position >= Math.floor(session.seekTarget) - 0.25 &&
           position <= session.seekTarget + ahead && position < range.end) {
-        session.pendingSeek = false; session.position = position;
+        session.pendingSeek = false; session.initializing = false; session.position = position; session.positionAt = now();
         session.lastProgressAt = now(); session.paused = reportedPaused;
         if (!reportedPaused) {
           session.everPlayed = true;
@@ -193,6 +245,11 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
         } else if (!session.desiredPaused) commandPlay(session);
         else session.recovering = false;
         paint(session);
+      } else if (session.initializing) {
+        // loadEntity(startAt) owns initial activation. An idle iframe may have no
+        // audio list yet, so Pause/Seek can fail before the first real Play.
+        // Correct a wrong clock only once Spotify reports actual playback.
+        if (!reportedPaused && !session.buffering) seekTo(session, session.seekTarget);
       } else {
         if (!reportedPaused && !session.buffering) pauseController();
         if (ready && !session.buffering && session.seekAttempts < 3 &&
@@ -205,17 +262,19 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     // Only a stable, independent pause is a change to the listener's intent.
     if (reportedPaused && !session.buffering && !session.recovering &&
         !session.resumePending && session.everPlayed && !wasPaused &&
-        position >= range.start - 0.25 && position < range.end &&
+        position >= Math.floor(range.start) - 0.25 && position < range.end &&
         now() - session.commandAt > 300 && !session.desiredPaused) {
       session.desiredPaused = true; session.userPaused = true;
-      session.onExternalPause(true);
+      log('external-pause'); session.onExternalPause(true);
     }
     if (position >= range.end) {
       if (session.everPlayed || !reportedPaused) {session.position = position; atEnd(session);}
       else seekStart(session);
       return;
     }
-    if (!session.buffering && position < range.start - 0.25) {seekStart(session); return;}
+    // A whole-second seek can legitimately land just before the SRT start.
+    // Accept that short lead-in rather than pause/seek back on every update.
+    if (!session.buffering && position < Math.floor(range.start) - 0.25) {seekStart(session); return;}
 
     const progressed = !reportedPaused && !session.buffering &&
       Number.isFinite(session.position) && position > session.position + 0.01;
@@ -223,7 +282,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
       session.lastProgressAt = now(); session.recovering = false;
       session.resumePending = false; session.resumeAttempts = 0;
     }
-    session.position = position; session.paused = reportedPaused;
+    session.position = position; session.positionAt = now(); session.paused = reportedPaused;
     if (!reportedPaused && !session.buffering) session.everPlayed = true;
     if (session.recovering && !session.resumePending && reportedPaused &&
         !session.buffering && !session.desiredPaused) commandPlay(session);
@@ -242,7 +301,13 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
         // initial URI alone makes the iframe's first Play start from zero.
         api.createController(embedMount, {width: '100%', height: 152}, value => {
           controller = value; loadedUri = '';
-          value.addListener('ready', () => {ready = true; if (active?.pendingSeek) seekTo(active, active.seekTarget); else if (!active) pauseController();});
+          value.addListener('ready', () => {
+            ready = true; log('ready');
+            if (active?.pendingSeek) {
+              if (active.initializing) commandPlay(active);
+              else seekTo(active, active.seekTarget);
+            } else if (!active) pauseController();
+          });
           value.addListener('playback_update', playbackUpdate);
           value.addListener('error', event => {
             if (active) fail(active, new Error(event?.data?.message || 'This Spotify episode could not be played.'));
@@ -267,8 +332,20 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     if (session.desiredPaused && (session.mode === 'player' || session.backgroundHeld)) {
       session.backgroundHeld = false; session.desiredPaused = false; session.userPaused = false; session.resumeAttempts = 0; commandPlay(session);
     }
+    // Spotify can report progress only about once a second. Stop between those
+    // reports using its latest playing position, while the observation is fresh.
+    // Pauses, buffering and unconfirmed seeks never consume this interval.
+    const sincePosition = now() - session.positionAt;
+    if (!session.pendingSeek && !session.paused && !session.buffering &&
+        !session.desiredPaused && Number.isFinite(session.position) &&
+        sincePosition >= 0 && sincePosition <= 1500 &&
+        session.position + sincePosition / 1000 >= rangeOf(session).end) {
+      atEnd(session, true); return;
+    }
     if (session.recovering && !session.pendingSeek && !session.buffering && session.paused &&
         !session.desiredPaused && now() - session.commandAt >= 1000) commandPlay(session, {retry: true});
+    if (session.pendingSeek && !session.initializing && ready && !session.buffering &&
+        session.seekAttempts < 3 && now() - session.lastSeekAt >= 1500) requestSeek(session);
     if (session.pendingSeek && now() - session.seekAt > 20000) {
       fail(session, new Error('Spotify could not reach the clip timestamp. Try Play in the Spotify player.'));
     } else if (session.everPlayed && !session.desiredPaused && now() - session.lastProgressAt > 20000) {
@@ -290,8 +367,8 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     done.catch(() => {});
     const session = active = {item, mode, segments, index: 0, isCurrent, isPaused, onExternalPause,
       resolve, reject, done, settled: false, complete: false, paused: true, pendingSeek: true,
-      desiredPaused: !autoplay, userPaused: false, position: NaN, duration: NaN, buffering: false, everPlayed: false,
-      recovering: false, resumePending: false, resumeAttempts: 0, seekAttempts: 0, seekTarget: segments[0].start, loadedForRange: false,
+      desiredPaused: !autoplay, userPaused: false, position: NaN, positionAt: NaN, duration: NaN, buffering: false, everPlayed: false,
+      recovering: false, resumePending: false, resumeAttempts: 0, seekAttempts: 0, seekTarget: segments[0].start, loadedForRange: false, initializing: false,
       seekAt: now(), lastSeekAt: now(), commandAt: now(), lastProgressAt: now()};
     session.media = {
       get paused() {return session.paused;}, get ended() {return session.complete;},
@@ -309,6 +386,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
       },
       set src(value) {if (!value && active === session) stop();},
     };
+    log('cue', {segments: segments.length});
     timer = win.setInterval(() => tick(session), 100);
     ensureController().then(() => {if (current(session)) loadRange(session);}).catch(error => fail(session, error));
     return session;
@@ -327,7 +405,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     }
     if (session) paint(session);
   }
-  return {cue, playCard, togglePractice, stop, show: () => {
+  return {cue, playCard, togglePractice, stop, getPlaybackLog, show: () => {
     if (!active || !current(active)) return;
     show(); holder.querySelector('iframe')?.focus();
   },

@@ -157,8 +157,8 @@ test('an explicit Pause during seeking is preserved through acknowledgement and 
   try {
     const card = item(), session = f.player.cue(card);
     await f.flush(); f.ready(); f.player.togglePractice(card);
-    session.media.pause(); f.state(30); f.advance(5000);
-    assert.equal(f.count('resume'), 0);
+    session.media.pause(); const resumes = f.count('resume'); f.state(30); f.advance(5000);
+    assert.equal(f.count('resume'), resumes);
     assert.equal(session.media.ended, false);
   } finally {f.close();}
 });
@@ -235,5 +235,240 @@ test('separated passages in one card preserve Play through their boundary pauses
     const resumes = f.count('resume'); f.state(50);
     assert.ok(f.count('resume') > resumes);
     f.state(50.2, false); f.state(52, false); assert.equal(await done, true);
+  } finally {f.close();}
+});
+
+
+test('a fractional cue accepts the whole-second seek and plays through its lead-in', async () => {
+  const f = fixture();
+  try {
+    const done = f.player.playCard(item(46.48, 48.6), f.options); await f.flush(); f.ready(); f.state(0, false);
+    assert.deepEqual(f.calls.filter(call => call[0] === 'seek').at(-1), ['seek', 46]);
+    const seeks = f.count('seek'), resumes = f.count('resume');
+    f.state(46);
+    assert.ok(f.count('resume') > resumes, 'the rounded seek must be acknowledged');
+    f.state(46.1, false); f.state(46.2, false); f.state(46.49, false);
+    assert.equal(f.count('seek'), seeks, 'lead-in must not trigger another corrective seek');
+    assert.equal(f.ownerPaused, false);
+    f.state(48.59, false); assert.equal(f.player.media.ended, false);
+    f.state(48.6, false); assert.equal(await done, true);
+  } finally {f.close();}
+});
+
+test('a cue near the next whole second accepts the floor without losing its first words', async () => {
+  const f = fixture();
+  try {
+    const done = f.player.playCard(item(148.92, 155.42), f.options); await f.flush(); f.ready(); f.state(0, false);
+    assert.deepEqual(f.calls.filter(call => call[0] === 'seek').at(-1), ['seek', 148]);
+    const resumes = f.count('resume'); f.state(148);
+    assert.ok(f.count('resume') > resumes);
+    const seeks = f.count('seek'); f.state(148.1, false); f.state(148.8, false);
+    assert.equal(f.count('seek'), seeks);
+    f.state(149, false); f.state(155.41, false);
+    assert.equal(f.player.media.ended, false);
+    f.state(155.42, false); assert.equal(await done, true);
+  } finally {f.close();}
+});
+
+test('a subsecond cue is not skipped by rounding its start up', async () => {
+  const f = fixture();
+  try {
+    const done = f.player.playCard(item(46.92, 47.08), f.options); await f.flush(); f.ready(); f.state(0, false);
+    assert.deepEqual(f.calls.filter(call => call[0] === 'seek').at(-1), ['seek', 46]);
+    f.state(46); f.state(46.2, false); f.state(46.95, false);
+    assert.equal(f.player.media.ended, false);
+    f.state(47.08, false); assert.equal(await done, true);
+  } finally {f.close();}
+});
+
+test('fractional passages and the next card advance using whole-second seeks without taps', async () => {
+  const f = fixture();
+  try {
+    const card = {...item(), captionStarts: [30, 46.48], captionEnds: [31, 48.6]};
+    const first = f.player.playCard(card, f.options); await f.flush(); f.ready();
+    f.state(30); f.state(30.2, false);
+    f.onPause(() => f.state(31)); f.state(31, false);
+    assert.deepEqual(f.calls.filter(call => call[0] === 'seek').at(-1), ['seek', 46]);
+    f.state(46); f.state(46.2, false); f.state(48.6, false);
+    assert.equal(await first, true); assert.equal(f.ownerPaused, false);
+    const next = f.player.playCard(item(148.92, 155.42), f.options); await f.flush();
+    assert.deepEqual(f.calls.filter(call => call[0] === 'seek').at(-1), ['seek', 148]);
+    const resumes = f.count('resume'); f.state(148);
+    assert.ok(f.count('resume') > resumes);
+    f.state(148.2, false); f.state(155.42, false);
+    assert.equal(await next, true);
+  } finally {f.close();}
+});
+
+test('an explicit Pause during a fractional seek prevents automatic resume', async () => {
+  const f = fixture();
+  try {
+    const session = f.player.cue(item(46.48, 48.6)); await f.flush(); f.ready();
+    session.media.play(); session.media.pause(); const resumes = f.count('resume');
+    f.state(46); f.advance(5000);
+    assert.equal(f.count('resume'), resumes);
+    assert.equal(f.player.media.ended, false);
+  } finally {f.close();}
+});
+
+test('a stable embedded Pause in the fractional cue lead-in is still user intent', async () => {
+  const f = fixture();
+  try {
+    f.player.playCard(item(46.92, 48.6), f.options); await f.flush(); f.ready();
+    f.state(46); f.state(46.1, false); f.advance(1000);
+    f.state(46.3, false); f.advance(1000); f.state(46.3, true);
+    assert.equal(f.ownerPaused, true);
+    const resumes = f.count('resume'); f.advance(5000);
+    assert.equal(f.count('resume'), resumes);
+  } finally {f.close();}
+});
+
+test('whole-second seek acceptance still rejects a stale clock from the preceding passage', async () => {
+  const f = fixture();
+  try {
+    const done = f.player.playCard(item(148.92, 155.42), f.options); await f.flush(); f.ready(); f.state(0, false);
+    const resumes = f.count('resume'); f.state(48.6);
+    assert.equal(f.count('resume'), resumes);
+    assert.equal(Number.isNaN(f.player.media.currentTime), true);
+    f.state(148); f.state(148.1, false); f.state(155.42, false);
+    assert.equal(await done, true);
+  } finally {f.close();}
+});
+
+test('playback diagnostics retain commands and observations without card text or source URLs', async () => {
+  const f = fixture();
+  try {
+    const card = {...item(46.48, 48.6), id: 'capture-1', target: 'private text', source: 'private source'};
+    f.player.playCard(card, f.options); await f.flush(); f.ready(); f.state(0, false);
+    f.state(46); f.state(46.1, false); f.advance(1000); f.state(47.2, false);
+    const snapshot = f.player.getPlaybackLog();
+    assert.ok(snapshot.events.some(event => event.event === 'command:seek' &&
+      event.requestedSeconds === 46.48 && event.seconds === 46));
+    assert.ok(snapshot.events.some(event => event.event === 'playback' && event.position === 46000));
+    const text = JSON.stringify(snapshot);
+    assert.equal(text.includes('private text'), false);
+    assert.equal(text.includes('private source'), false);
+    assert.equal(text.includes('https://'), false);
+    const length = snapshot.events.length;
+    snapshot.events.pop();
+    assert.equal(f.player.getPlaybackLog().events.length, length, 'export is a detached snapshot');
+  } finally {f.close();}
+});
+
+test('playback diagnostics are bounded during a long session', async () => {
+  const f = fixture();
+  try {
+    f.player.playCard(item(0, 10000), f.options); await f.flush(); f.ready();
+    f.state(0); f.state(0.1, false);
+    for (let i = 1; i <= 2100; i++) {f.advance(1000); f.state(i, false);}
+    const snapshot = f.player.getPlaybackLog();
+    assert.equal(snapshot.events.length, 2000);
+    assert.ok(snapshot.droppedEvents > 0);
+    assert.ok(snapshot.events.at(-1).elapsedMs >= 2100000);
+  } finally {f.close();}
+});
+
+
+test('the first episode activates with startAt before any Pause or Seek command', async () => {
+  const f = fixture();
+  try {
+    const done = f.player.playCard(item(46.48, 48.6), f.options); await f.flush();
+    assert.deepEqual(f.calls, [['load', uri, false, 46.48]]);
+    f.ready();
+    assert.equal(f.count('seek'), 0);
+    assert.equal(f.count('pause'), 0);
+    assert.equal(f.count('resume'), 1);
+    f.state(0, true); f.advance(1000); f.state(0, true);
+    assert.equal(f.count('seek'), 0, 'an idle clock is not evidence of a bad seek');
+    f.state(46.48, false); f.state(46.8, false); f.state(48.6, false);
+    assert.equal(await done, true);
+  } finally {f.close();}
+});
+
+test('Practice waits for initial Play without seeking an unactivated iframe', async () => {
+  const f = fixture();
+  try {
+    const session = f.player.cue(item(46.48, 48.6)); await f.flush(); f.ready();
+    assert.equal(f.count('seek'), 0);
+    assert.equal(f.count('resume'), 0);
+    f.state(0, true); f.advance(1000);
+    assert.equal(f.count('seek'), 0);
+    f.player.togglePractice(session.item);
+    assert.equal(f.count('resume'), 1);
+    f.state(46.48, false); f.state(48.6, false);
+    assert.equal(await session.done, true);
+  } finally {f.close();}
+});
+
+
+test('an idle seek is resumed without waiting for a position event that Spotify may withhold', async () => {
+  const f = fixture();
+  try {
+    const first = f.player.playCard(item(30, 31), f.options); await f.flush(); f.ready();
+    f.state(30); f.state(30.2, false); f.state(31, false); assert.equal(await first, true);
+    const resumes = f.count('resume');
+    const next = f.player.playCard(item(148.92, 155.42), f.options); await f.flush();
+    assert.ok(f.count('resume') > resumes, 'Resume must follow Seek before an idle acknowledgement arrives');
+    assert.deepEqual(f.calls.slice(-2), [['seek', 148], ['resume']]);
+    assert.equal(f.ownerPaused, false);
+    const seeks = f.count('seek'); f.advance(1600);
+    assert.ok(f.count('seek') > seeks, 'missing acknowledgements are retried without relying on more events');
+    f.state(148.6, false); f.state(155.42, false);
+    assert.equal(await next, true);
+  } finally {f.close();}
+});
+
+test('Practice keeps an idle seek paused until the listener presses Play', async () => {
+  const f = fixture();
+  try {
+    const first = f.player.playCard(item(30, 31)); await f.flush(); f.ready();
+    f.state(30); f.state(30.2, false); f.state(31, false); await first;
+    const resumes = f.count('resume'), card = item(148.92, 155.42);
+    const session = f.player.cue(card); await f.flush();
+    assert.equal(f.count('resume'), resumes);
+    f.advance(5000); assert.equal(f.count('resume'), resumes);
+    f.player.togglePractice(card);
+    assert.ok(f.count('resume') > resumes);
+    f.state(148.5, false); f.state(155.42, false);
+    assert.equal(await session.done, true);
+  } finally {f.close();}
+});
+
+test('an explicit Pause cancels idle-seek resume retries', async () => {
+  const f = fixture();
+  try {
+    const first = f.player.playCard(item(30, 31)); await f.flush(); f.ready();
+    f.state(30); f.state(30.2, false); f.state(31, false); await first;
+    f.player.playCard(item(148.92, 155.42), f.options); await f.flush();
+    f.options.onExternalPause(true); f.player.media.pause();
+    const resumes = f.count('resume'); f.advance(5000);
+    assert.equal(f.count('resume'), resumes);
+    assert.equal(f.player.media.ended, false);
+  } finally {f.close();}
+});
+
+
+test('the fractional end is enforced between Spotify progress reports', async () => {
+  const f = fixture();
+  try {
+    const done = f.player.playCard(item(30, 31.6), f.options); await f.flush(); f.ready();
+    f.state(30); f.state(30.1, false);
+    f.advance(1400); assert.equal(f.player.media.ended, false);
+    f.advance(200); assert.equal(f.player.media.ended, true);
+    assert.equal(await done, true);
+    assert.ok(f.player.getPlaybackLog().events.some(event =>
+      event.event === 'clip-end' && event.estimated));
+  } finally {f.close();}
+});
+
+test('buffering suspends prediction of a nearby clip end', async () => {
+  const f = fixture();
+  try {
+    const done = f.player.playCard(item(30, 31.6), f.options); await f.flush(); f.ready();
+    f.state(30); f.state(30.1, false); f.advance(500);
+    f.state(30.6, true, true); f.advance(3000);
+    assert.equal(f.player.media.ended, false);
+    f.state(30.6, false, false); f.advance(1100);
+    assert.equal(await done, true);
   } finally {f.close();}
 });

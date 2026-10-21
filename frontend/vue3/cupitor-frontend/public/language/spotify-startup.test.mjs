@@ -37,7 +37,11 @@ function fixture() {
     seek(time) {calls.push(['seek', time]); position = time; report();},
     pause() {calls.push(['pause']); if (!paused) {paused = true; report();}},
     play() {calls.push(['play']); start(true);},
-    resume() {calls.push(['resume']); start(false);},
+    resume() {
+      calls.push(['resume']);
+      if (!activated) throw new Error('Cannot resume; no list was loaded.');
+      start(false);
+    },
   };
   const api = {createController(mount, options, callback) {
     mount.replaceWith(win.document.createElement('iframe'));
@@ -63,7 +67,8 @@ test('the first embedded Play starts the Practice clip at 0:30 and keeps playing
   const f = fixture();
   try {
     f.player.cue(item()); await f.flush();
-    assert.equal(f.position, 30); assert.equal(f.paused, true);
+    assert.equal(f.position, 0); assert.equal(f.paused, true);
+    assert.equal(f.calls.some(call => call[0] === 'seek'), false, 'do not seek before first activation');
     f.embedPlay(); await f.flush();
     assert.equal(f.position, 30); assert.equal(f.paused, false);
     f.progress(41); await f.flush();
@@ -76,9 +81,11 @@ test('autoplay resumes the saved seek for another clip in the same episode', asy
   try {
     const first = f.player.playCard(item(30, 31)); await f.flush();
     assert.equal(f.position, 30); assert.equal(f.paused, false);
+    assert.equal(f.calls.filter(call => call[0] === 'play').length, 1);
     f.progress(31); await f.flush(); assert.equal(await first, true);
     const next = f.player.playCard(item(90, 92)); await f.flush();
     assert.equal(f.position, 90); assert.equal(f.paused, false);
+    assert.equal(f.calls.filter(call => call[0] === 'play').length, 1, 'later clips must use Resume');
     f.progress(92); await f.flush(); assert.equal(await next, true);
   } finally {f.close();}
 });

@@ -16760,6 +16760,23 @@ const spotifyPlayer = createSpotifyStudyPlayer({
   win: window, isForeground: () => _playerLifecycle.isForeground(),
   now: () => _playerLifecycle.now(), onStatus: message => _cpBuildToast(message)
 })
+window.getSpotifyPlaybackLog = () => spotifyPlayer.getPlaybackLog()
+window.copySpotifyPlaybackLog = async () => {
+  const text = JSON.stringify(spotifyPlayer.getPlaybackLog(), null, 2)
+  try {
+    await navigator.clipboard.writeText(text)
+    _cpBuildToast('Spotify playback log copied.')
+  } catch (_) {
+    $('#logViewerAutoRefresh').prop('checked', false)
+    if (_logViewerInterval) { clearInterval(_logViewerInterval); _logViewerInterval = null }
+    const body = document.getElementById('logViewerBody')
+    if (!body) return
+    body.textContent = text
+    const range = document.createRange(); range.selectNodeContents(body)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    _cpBuildToast('Spotify log selected. Long-press the selection to copy.')
+  }
+}
 
 function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, attempt) {
   const itemToken = window._recPlayItemToken
