@@ -122,6 +122,9 @@ async function checkStudyChrome(browser) {
       await tap(video.x + video.width / 2, video.y + video.height / 2)
       await page.waitForFunction(() => document.activeElement?.tagName === 'IFRAME')
       assert.equal(await page.frameLocator('#testStudyFrame').locator('body').getAttribute('data-clicks'), '1', 'the player is usable after controls return')
+      // Selecting card text deliberately reveals Search. Keep this navigation
+      // gesture free of text selection; verify selection independently below.
+      await page.locator('#practiceMode .practice-card').evaluate(el => { el.style.userSelect = 'none' })
       await hide()
       if (mobile) await swipe(true)
       else {
@@ -130,6 +133,7 @@ async function checkStudyChrome(browser) {
         await page.mouse.move(card.x + card.width * 0.2, card.y + 120, { steps: 8 }); await page.mouse.up()
       }
       await page.waitForFunction(() => window._practiceIdx === 1 && !document.querySelector('#practiceMode .practice-loading'))
+      await page.locator('#practiceMode .practice-card').evaluate(el => { el.style.userSelect = '' })
       assert.equal(await page.locator('#practiceMode .practice-prev').isVisible(), false, 'swipes still navigate without revealing navigation controls')
       assert.equal(await flip.isVisible(), true, 'Flip remains available after navigation')
       await page.locator('#practiceMode .practice-front').evaluate(el => { el.innerHTML += '<p>Scroll this study text.</p>'.repeat(35) })
@@ -140,6 +144,17 @@ async function checkStudyChrome(browser) {
       }
       await page.waitForFunction(() => document.querySelector('#practiceMode .practice-front-face').scrollTop > 0)
       assert.equal(await page.evaluate(() => window._practiceIdx), 1)
+      await page.locator('#practiceMode .practice-front').evaluate(el => {
+        const range = document.createRange(); range.selectNodeContents(el)
+        const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+      })
+      const searchSelection = page.locator('#practiceMode .practice-search.study-selection-search')
+      await searchSelection.waitFor({ state: 'visible' })
+      await page.clock.fastForward(5000)
+      assert.equal(await searchSelection.isVisible(), true, 'selected text keeps Search visible and highlighted')
+      await page.evaluate(() => window.getSelection().removeAllRanges())
+      await page.waitForFunction(() => !document.querySelector('#practiceMode .practice-search.study-selection-search'))
+      await hide()
       await wakeCard()
       await page.locator('#practiceMode .practice-settings').click()
       await page.clock.fastForward(5000)
