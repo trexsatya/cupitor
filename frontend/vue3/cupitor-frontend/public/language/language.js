@@ -21116,6 +21116,8 @@ function revealPracticeCard() {
 // _practiceCardLines draws, resolved the same way, so what plays is what is on
 // the card.
 async function _practiceClipRange(it, before, after) {
+  const segments = spotifyClips(it)
+  if (segments.length) return { start: segments[0].start, stop: segments[segments.length - 1].end }
   const fallback = {
     start: (typeof it.timeStart === 'number') ? it.timeStart : 0,
     stop: (typeof it.timeEnd === 'number') ? it.timeEnd : null,
@@ -21156,6 +21158,9 @@ async function playPracticeClip() {
   const idx = window._practiceIdx
   const it = window._practiceCards && window._practiceCards[idx]
   if (!it) return
+  // The visible Play button uses this entry point. Dispatch before creating
+  // a YouTube request, which intentionally stops/hides the Spotify session.
+  if (spotifyClips(it).length) return _togglePracticePlayback()
   const videoRequest = _newPracticeVideoRequest()
   // Each clip gets a token so a stale stop-watcher (or a card switch mid-load)
   // can't pause a later clip.
@@ -21254,7 +21259,8 @@ function _pracRecKey(it) {
 // A card can carry takes when there is a clip to speak over and a host that
 // can hold the bytes. A manual card already has its own two recordings.
 function _pracRecEligible(it) {
-  return !!(it && !it.manual && typeof it.timeStart === 'number' && _haveAudioBridge())
+  return !!(it && _haveAudioBridge() &&
+    (spotifyClips(it).length || (!it.manual && typeof it.timeStart === 'number')))
 }
 
 // Takes the card already holds. They open the session read-only: the files
@@ -21268,12 +21274,14 @@ function _pracRecSavedTakes(it) {
 
 function _pracRecBegin(it) {
   const saved = _pracRecSavedTakes(it)
+  const segments = spotifyClips(it)
   _pracRec = {
+    item: it,
     key: _pracRecKey(it),
     // The card's clip. Stored capture times until playPracticeClip has worked
     // out the lines the card shows; then those.
-    clipStart: Number(it.timeStart) || 0,
-    clipStop: null,
+    clipStart: segments[0]?.start ?? (Number(it.timeStart) || 0),
+    clipStop: segments.length ? segments[segments.length - 1].end : null,
     takes: saved.slice(),
     // Files the card points at. Everything else is ours to delete.
     kept: new Set(saved.map(t => t.url)),
@@ -21325,13 +21333,22 @@ function _pracRecTakeOverPlayhead() {
 }
 
 function _pracRecNow() {
+  if (spotifyClips(_pracRec?.item).length) {
+    const time = spotifyPlayer.media?.currentTime
+    return Number.isFinite(time) ? time : null
+  }
   try { return (window.ytPlayer && window.ytPlayer.getCurrentTime && window.ytPlayer.getCurrentTime()) || 0 }
   catch (_) { return 0 }
 }
 function _pracRecPauseVideo() {
+  if (spotifyClips(_pracRec?.item).length) { spotifyPlayer.media?.pause(); return }
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
 }
 function _pracRecPlayVideo() {
+  if (spotifyClips(_pracRec?.item).length) {
+    if (!window._practiceMinimized) spotifyPlayer.media?.play().catch(() => {})
+    return
+  }
   _practiceVideoCues.beginPlayback(_newPracticeVideoRequest())
   try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
 }
@@ -21606,6 +21623,7 @@ function _pracRecWatch() {
   st.timer = setInterval(() => {
     if (_pracRec !== st) { clearInterval(st.timer); st.timer = null; return }
     const ct = _pracRecNow()
+    if (!Number.isFinite(ct)) return // no clock while Spotify is seeking
     const prev = st.watchPos
     // Tracked even while the video is held, so resuming compares against
     // where it actually is rather than against where it was long ago.
@@ -21657,9 +21675,13 @@ function _pracRecReplay(t1) {
     await _pracRecRefreshClip(st)
     if (!isCurrent()) return
     const from = _rewindPointFor(st.takes, t1, st.clipStart)
-    try { await seekToYoutubeTime(from, { isCurrent }) } catch (_) {}
+    if (spotifyClips(st.item).length) {
+      if (!spotifyPlayer.seekPractice(st.item, from)) return
+    } else {
+      try { await seekToYoutubeTime(from, { isCurrent }) } catch (_) {}
+    }
     if (!isCurrent()) return
-    st.watchPos = _pracRecNow()
+    st.watchPos = spotifyClips(st.item).length ? from - 0.001 : _pracRecNow()
     // This pass belongs to the take just recorded. It begins sitting on the
     // mark of the one before it, which the watcher would otherwise sound.
     st.awaiting = t1
@@ -22025,7 +22047,9 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   _updatePracticeSpeedBtn()
   _updatePracticeRestoreCount()
   if (spotifyClips(it).length) spotifyPlayer.cue(it, {
-    mode: 'practice', isCurrent: () => _practiceVideoCues.isCurrent(videoRequest) &&
+    mode: 'practice', isPaused: () => _pracRec?.key === _pracRecKey(it) &&
+      ['recording', 'playback'].includes(_pracRec.phase),
+    isCurrent: () => _practiceVideoCues.isCurrent(videoRequest) &&
       window._practiceCards?.[window._practiceIdx] === it && !window._practiceMinimized
   })
 }
@@ -22197,6 +22221,14 @@ function _togglePracticePlayback() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
   if (spotifyClips(it).length) {
+    const st = _pracRec
+    if (st?.phase === 'recording') return
+    if (st) {
+      st.awaiting = null; st.token++; st.watchPos = null
+      if (st.audio) { try { st.audio.pause() } catch (_) {} st.audio = null }
+      if (st.phase === 'playback') st.phase = 'idle'
+      _renderPracticeRecBar()
+    }
     spotifyPlayer.togglePractice(it, { isCurrent: () => window._practiceActive &&
       window._practiceCards?.[window._practiceIdx] === it && !window._practiceMinimized })
     return

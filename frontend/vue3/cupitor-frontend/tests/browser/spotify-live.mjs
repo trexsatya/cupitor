@@ -300,6 +300,34 @@ if (await page.evaluate(() => typeof window.copySpotifyPlaybackLog === 'function
   }
   console.log('SPOTIFY_LOG_EXPORT ' + JSON.stringify(result.logExport));
 }
+// Exercise the visible Practice button against the same real iframe. This
+// catches a YouTube-only click handler even when keyboard/Play All works.
+if (result.status === 'passed') {
+  try {
+    const first = spotifyClipSegments(cards[0])[0];
+    await page.evaluate(card => {
+      window.stopPlayingRecording();
+      window.openPracticeMode({queue: [card], single: true});
+    }, cards[0]);
+    await page.locator('#spotifyClipPlayer iframe').waitFor({state: 'visible'});
+    await page.keyboard.press('Shift');
+    await page.locator('#practiceMode .practice-play').click();
+    await page.waitForFunction(({start, end}) => {
+      const state = window.__spotifyLiveEvents.filter(e => e.kind === 'playback_update').at(-1)?.data;
+      return document.body.classList.contains('study-spotify') && state &&
+        !state.isPaused && !state.isBuffering && state.position / 1000 >= start + 0.2 && state.position / 1000 < end;
+    }, first, {timeout: 25000});
+    await page.keyboard.press('Shift');
+    await page.locator('#practiceMode .practice-play').click();
+    await page.waitForFunction(() => window.__spotifyLiveEvents.filter(e => e.kind === 'playback_update').at(-1)?.data?.isPaused, null, {timeout: 10000});
+    if (!await page.locator('#spotifyClipPlayer iframe').isVisible()) throw new Error('Practice Play hid the Spotify iframe');
+    result.practicePlayback = {passed: true};
+    await page.screenshot({path: resolve(output, 'practice-play.png')});
+  } catch (error) {
+    result.practicePlayback = {passed: false, reason: String(error)};
+    result.status = 'failed'; result.reason = 'Visible Practice Spotify Play/Pause failed';
+  }
+}
 await writeFile(resolve(output, 'result.json'), JSON.stringify(result, null, 2));
 await writeFile(resolve(output, 'events.json'), JSON.stringify(events, null, 2));
 console.log('LIVE_SPOTIFY_RESULT ' + JSON.stringify(result));

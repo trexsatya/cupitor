@@ -472,3 +472,42 @@ test('buffering suspends prediction of a nearby clip end', async () => {
     assert.equal(await done, true);
   } finally {f.close();}
 });
+
+test('Practice take clock predicts between reports, freezes on pause and ignores progress during recording', async () => {
+  const f = fixture(); let held = false;
+  try {
+    const card = item(30, 41);
+    f.player.cue(card, {mode: 'practice', autoplay: true, isPaused: () => held});
+    await f.flush(); f.ready(); f.state(30, false); f.state(30.1, false);
+    f.advance(400);
+    assert.ok(Math.abs(f.player.media.currentTime - 30.5) < 0.001);
+    f.player.media.pause(); held = true;
+    const pinned = f.player.media.currentTime;
+    f.state(31, false); f.advance(1200);
+    assert.equal(f.player.media.currentTime, pinned, 'recording cannot drift or adopt a late Play');
+    held = false; await f.player.media.play(); f.state(30.6, false);
+    assert.equal(f.player.media.paused, false);
+  } finally {f.close();}
+});
+
+test('Practice take rewind crosses retained passages and reopens the completed clip without replacing its session', async () => {
+  const f = fixture();
+  try {
+    const card = {...item(30, 32), captionStarts: [30, 40], captionEnds: [32, 42]};
+    f.player.cue(card, {mode: 'practice', autoplay: true}); await f.flush(); f.ready();
+    f.state(30, false); f.state(32, false); f.state(40, false); f.state(42, false);
+    const media = f.player.media;
+    assert.equal(media.ended, true);
+    f.onPause(() => f.state(42, true));
+    assert.equal(f.player.seekPractice(card, 30.8), true);
+    assert.equal(f.player.media, media);
+    assert.equal(media.ended, false);
+    assert.ok(Number.isNaN(media.currentTime), 'no fictional playhead while seeking');
+    assert.deepEqual(f.calls.filter(c => c[0] === 'seek').at(-1), ['seek', 30]);
+    await media.play(); f.state(30.8, false); f.advance(200);
+    assert.ok(media.currentTime >= 31);
+    assert.equal(f.player.seekPractice({...card}, 30), false, 'a stale card cannot rewind the current clip');
+    assert.equal(f.player.seekPractice(card, 35), true);
+    assert.deepEqual(f.calls.filter(c => c[0] === 'seek').at(-1), ['seek', 40], 'gap rewinds clamp to retained audio');
+  } finally {f.close();}
+});
