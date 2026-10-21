@@ -323,9 +323,45 @@ if (result.status === 'passed') {
     if (!await page.locator('#spotifyClipPlayer iframe').isVisible()) throw new Error('Practice Play hid the Spotify iframe');
     result.practicePlayback = {passed: true};
     await page.screenshot({path: resolve(output, 'practice-play.png')});
+    const click = async selector => {await page.keyboard.press('Shift'); await page.locator(selector).click();};
+    const freshPlayback = async after => page.waitForFunction(({start, end, after}) => {
+      const event = window.__spotifyLiveEvents.filter(e => e.kind === 'playback_update').at(-1);
+      return event?.ms >= after && !event.data.isPaused && !event.data.isBuffering &&
+        event.data.position / 1000 >= start && event.data.position / 1000 < end;
+    }, {...first, after}, {timeout: 25000});
+    const snapshot = () => page.evaluate(() => ({
+      loads: window.__spotifyLiveEvents.filter(e => ['command:loadEntity', 'command:loadUri', 'command:seek'].includes(e.kind)).length,
+      index: window._recPlayIndex
+    }));
+    await page.evaluate(() => {window.__restoreSpotifyIframe = document.querySelector('#spotifyClipPlayer iframe');});
+    const practiceBefore = await snapshot();
+    await click('.practice-minimize');
+    await page.waitForTimeout(350);
+    if (await page.locator('#spotifyClipPlayer iframe').isVisible()) throw new Error('Minimized Practice left Spotify visible');
+    await click('.practice-restore-btn');
+    await page.locator('#spotifyClipPlayer iframe').waitFor({state: 'visible'});
+    if ((await snapshot()).loads !== practiceBefore.loads) throw new Error('Practice restore reloaded or sought the clip');
+    const practiceResumeAt = await page.evaluate(() => performance.now());
+    await click('.practice-play'); await freshPlayback(practiceResumeAt);
+    await click('.practice-player-btn');
+    await page.waitForFunction(() => window._playingRecording && !window._practiceActive);
+    const playerStartAt = await page.evaluate(() => performance.now());
+    await freshPlayback(playerStartAt);
+    const playerBefore = await snapshot();
+    await click('#recPlayingMinimizeBtn');
+    await page.waitForTimeout(350);
+    if (await page.locator('#spotifyClipPlayer iframe').isVisible()) throw new Error('Minimized Player left Spotify visible');
+    const playerResumeAt = await page.evaluate(() => performance.now());
+    await click('.rec-pill-restore'); await freshPlayback(playerResumeAt);
+    await page.locator('#spotifyClipPlayer iframe').waitFor({state: 'visible'});
+    const playerAfter = await snapshot();
+    if (playerAfter.loads !== playerBefore.loads || playerAfter.index !== playerBefore.index) throw new Error('Player restore changed the clip or position');
+    if (!await page.evaluate(() => document.querySelector('#spotifyClipPlayer iframe') === window.__restoreSpotifyIframe)) throw new Error('Restoring replaced the Spotify iframe');
+    result.restorePlayback = {practice: true, player: true};
+    await page.screenshot({path: resolve(output, 'restored-player.png')});
   } catch (error) {
     result.practicePlayback = {passed: false, reason: String(error)};
-    result.status = 'failed'; result.reason = 'Visible Practice Spotify Play/Pause failed';
+    result.status = 'failed'; result.reason = 'Spotify Practice/Player controls or minimize/restore failed';
   }
 }
 await writeFile(resolve(output, 'result.json'), JSON.stringify(result, null, 2));

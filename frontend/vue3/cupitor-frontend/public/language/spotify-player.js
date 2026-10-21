@@ -134,7 +134,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
   }
   function commandPlay(session, {retry = false} = {}) {
     if (!current(session) || !ready || (session.pendingSeek && !session.initializing && !session.seekAttempts) || session.buffering ||
-        session.desiredPaused || session.isPaused() || session.complete || !isForeground()) return;
+        session.hidden || session.desiredPaused || session.isPaused() || session.complete || !isForeground()) return;
     if (retry && session.resumeAttempts >= 3) return;
     session.resumeAttempts = retry ? session.resumeAttempts + 1 : 1;
     session.resumePending = true; session.recovering = true; session.commandAt = now();
@@ -224,9 +224,9 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     if (state.position == null) return;
     const position = Number(state.position) / 1000;
     if (!Number.isFinite(position)) return;
-    // Recording a take and listening to it hold Practice's clock in place.
-    // Late iframe progress must not unpause or move that pinned position.
-    if (session.mode === 'practice' && session.isPaused()) {
+    // Minimized views and Practice takes hold the clock in place. Late
+    // iframe progress must not unpause or move that pinned position.
+    if (session.hidden || (session.mode === 'practice' && session.isPaused())) {
       session.paused = true;
       if (!state.isPaused) pauseController();
       paint(session); return;
@@ -343,7 +343,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
   function tick(session) {
     if (!current(session)) {if (active === session) stop(); return;}
     if (session.complete) return;
-    const paused = !!session.isPaused();
+    const paused = session.hidden || !!session.isPaused();
     if (!isForeground() || paused) {
       if (paused) session.backgroundHeld = false;
       else if (!session.desiredPaused) session.backgroundHeld = true;
@@ -450,9 +450,15 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     if (controller) loadRange(session);
     return true;
   }
-  return {cue, playCard, togglePractice, seekPractice, stop, getPlaybackLog, show: () => {
+  return {cue, playCard, togglePractice, seekPractice, stop, getPlaybackLog,
+    hide: () => {
+      if (active) {active.hidden = true; setPaused(active, true); active.paused = true;}
+      doc.body.classList.remove('study-spotify');
+    },
+    show: ({focus = true} = {}) => {
     if (!active || !current(active)) return;
-    show(); holder.querySelector('iframe')?.focus();
+    active.hidden = false;
+    show(); if (focus) holder.querySelector('iframe')?.focus();
   },
     get media() {return active?.media || null;}};
 }

@@ -2540,6 +2540,7 @@ window._appSettings = {
   //   'both' — back shown alongside the front from the start, no Reveal button
   //   'hide' — back appears below the front when Reveal is clicked
   practiceRevealMode: 'flip',
+  practiceSpeakOver: true,
   // Max rows shown upfront in the prefix-search vocabulary panel. The rest
   // (strongest matches that overflow this cap) move into the "Different
   // prefixes" dialog at the top so they're still reachable in one click.
@@ -20160,6 +20161,7 @@ function minimizePlayingRecording() {
   // Pause playback so audio/video doesn't keep playing while the user is
   // doing something else on the main page.
   if (!window._recPlayPaused) togglePlayingRecordingPause()
+  if (spotifyClips(window._recPlayCurrentItem).length) spotifyPlayer.hide()
   $('body').removeClass('rec-playing').addClass('rec-playing-minimized')
   const cur = window._recPlayCurrentItem
   const queue = window._recPlayQueue || []
@@ -20174,6 +20176,7 @@ function restorePlayingRecording({ resume = true } = {}) {
   _coverOpenDialogsForStudy()
   $('body').addClass('rec-playing').removeClass('rec-playing-minimized')
   $('#recPlayingRestorePill').hide()
+  if (spotifyClips(window._recPlayCurrentItem).length) spotifyPlayer.show({ focus: false })
   // Auto-resume on restore: minimize paused playback, so restoring should pick it
   // back up (video + the inter-item timer, which the wait loops gate on
   // _recPlayPaused). Same code path as tapping the ▶/⏸ button, matching the
@@ -20307,8 +20310,8 @@ const _practiceVideoCues = createPracticeVideoCues({
   waitUntil
 })
 let _practiceRenderToken = 0
-function _newPracticeVideoRequest({ mute = false } = {}) {
-  spotifyPlayer.stop()
+function _newPracticeVideoRequest({ mute = false, keepSpotify = false } = {}) {
+  if (!keepSpotify) spotifyPlayer.stop()
   window._manualCueToken = (window._manualCueToken || 0) + 1
   if (!window.ytPlayerReady) window._ytReadyAutoplaySuppressed = true
   return _practiceVideoCues.invalidate({ mute })
@@ -20419,6 +20422,10 @@ function openPracticeMode(opts) {
       </div>
       <div class="practice-settings-panel" style="display:none;">
         <button type="button" class="keyboard-shortcuts-btn">Keyboard shortcuts (?)</button>
+        <label class="practice-settings-row">
+          <input type="checkbox" class="practice-speakover-toggle">
+          <span>Show speakover</span>
+        </label>
         <div class="practice-settings-row practice-speeds-row">
           <label><span class="practice-settings-lbl">Speed cycle</span>
             <input type="text" class="practice-speeds-input" aria-label="Speed cycle" placeholder="1, 0.75, 0.5">
@@ -20500,6 +20507,12 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-info', _togglePracticeInfoPanel)
     $p.on('click', '.practice-shuffle', _togglePracticeShuffle)
     $p.on('click', '.practice-settings', _togglePracticeSettingsPanel)
+    $p.on('change', '.practice-speakover-toggle', function () {
+      window._appSettings.practiceSpeakOver = this.checked
+      saveAppSettings()
+      if (_pracRec) { _pracRec.token++; _pracRec.awaiting = null; _pracRec.watchPos = null }
+      _renderPracticeRecBar()
+    })
     // Pointer-down dismisses on touch as well as mouse, including the start
     // of a card scroll/swipe. Keep the event intact for the card's own action;
     // click also covers keyboard activation and programmatic card clicks.
@@ -20775,7 +20788,18 @@ function minimizePracticeMode() {
   window._practiceClipToken = (window._practiceClipToken || 0) + 1
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
   try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
-  _newPracticeVideoRequest()
+  const spotify = spotifyClips(window._practiceCards?.[window._practiceIdx]).length > 0
+  if (spotify) spotifyPlayer.hide()
+  // Park a take as well as its source clip. A recording finishes as an
+  // unkept take; neither its replay nor the microphone runs behind the page.
+  if (_pracRec) {
+    _pracRec.token++
+    if (_pracRec.audio) { try { _pracRec.audio.pause() } catch (_) {} _pracRec.audio = null }
+    if (_pracRec.phase === 'playback') _pracRec.phase = 'idle'
+    if (_pracRec.phase === 'recording') _pracRecStop()
+    _renderPracticeRecBar()
+  }
+  _newPracticeVideoRequest({ keepSpotify: spotify })
   _practiceVideoCues.releaseMute()
   _updatePracticeRestoreCount()
   $('#toggleMediaContainer').click()  
@@ -20794,6 +20818,7 @@ function restorePracticeMode() {
   _coverOpenDialogsForStudy()
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
+  if (spotifyClips(it).length) { spotifyPlayer.show({ focus: false }); return }
   // Manual cards have no clip — just re-cue them (parked), as before.
   if (_isManualItem(it)) {
     if (_cardHasVideoLink(it)) { try { _cueManualCardVideo(it) } catch (_) {} }
@@ -21039,6 +21064,7 @@ function _togglePracticeSettingsPanel() {
     $p.find('.practice-info').attr('aria-expanded', 'false').removeClass('active')
     const mode = (window._appSettings && window._appSettings.practiceRevealMode) || 'flip'
     $panel.find('.practice-reveal-select').val(mode)
+    _renderPracticeRecBar()
     $panel.find('.practice-speeds-input').val(_practiceSpeeds().join(', '))
     $panel.find('.practice-speeds-status').text('')
     _updatePracticeSpeedBtn()
@@ -21263,6 +21289,8 @@ function _pracRecEligible(it) {
     (spotifyClips(it).length || (!it.manual && typeof it.timeStart === 'number')))
 }
 
+function _practiceSpeakOverShown() { return window._appSettings.practiceSpeakOver !== false }
+
 // Takes the card already holds. They open the session read-only: the files
 // belong to the card, so leaving without keeping must not delete them.
 function _pracRecSavedTakes(it) {
@@ -21357,7 +21385,11 @@ function _renderPracticeRecBar(note) {
   const $bar = $('#practiceMode .practice-rec-bar')
   if (!$bar.length) return
   const st = _pracRec
-  if (!st) { $bar.hide().empty(); _setPracRecBarHeight(0); return }
+  $('#practiceMode .practice-speakover-toggle')
+    .prop('checked', _practiceSpeakOverShown())
+    .prop('disabled', !!st && st.phase !== 'idle')
+    .attr('title', st && st.phase !== 'idle' ? 'Finish recording or replay before hiding speakover' : '')
+  if (!st || !_practiceSpeakOverShown()) { $bar.hide().empty(); _setPracRecBarHeight(0); return }
   const n = st.takes.length
   const unkept = st.takes.filter(t => !st.kept.has(t.url)).length
   const rec = st.phase === 'recording'
@@ -21530,7 +21562,7 @@ function _pracRecGoToTake(e) {
 
 function _pracRecToggle() {
   const st = _pracRec
-  if (!st) return
+  if (!st || !_practiceSpeakOverShown()) return
   if (st.phase === 'recording') { _pracRecStop(); return }
   if (st.phase !== 'idle') return
   _pracRecStart()
@@ -21622,6 +21654,7 @@ function _pracRecWatch() {
   if (!st || st.timer) return
   st.timer = setInterval(() => {
     if (_pracRec !== st) { clearInterval(st.timer); st.timer = null; return }
+    if (window._practiceMinimized) { st.watchPos = null; return }
     const ct = _pracRecNow()
     if (!Number.isFinite(ct)) return // no clock while Spotify is seeking
     const prev = st.watchPos
@@ -21635,7 +21668,7 @@ function _pracRecWatch() {
     // Going somewhere ends the pass that followed a recording, and every mark
     // is live again — which is what makes a rewind play the takes back.
     if (Math.abs(ct - prev) > _TAKE_MAX_STEP) st.awaiting = null
-    const due = _takeDueForPass(st.takes, prev, ct, st.awaiting)
+    const due = _practiceSpeakOverShown() && _takeDueForPass(st.takes, prev, ct, st.awaiting)
     if (due) {
       st.awaiting = null
       _pracRecPauseVideo()
@@ -21666,7 +21699,7 @@ function _pracRecReplay(t1) {
   const st = _pracRec
   if (!st) return
   const token = ++st.token
-  const isCurrent = () => window._practiceActive && _pracRec === st && token === st.token
+  const isCurrent = () => window._practiceActive && !window._practiceMinimized && _pracRec === st && token === st.token
   st.awaiting = null
   _pracRecTakeOverPlayhead()
   ;(async () => {
@@ -22046,12 +22079,7 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   $p.data('item', it)
   _updatePracticeSpeedBtn()
   _updatePracticeRestoreCount()
-  if (spotifyClips(it).length) spotifyPlayer.cue(it, {
-    mode: 'practice', isPaused: () => _pracRec?.key === _pracRecKey(it) &&
-      ['recording', 'playback'].includes(_pracRec.phase),
-    isCurrent: () => _practiceVideoCues.isCurrent(videoRequest) &&
-      window._practiceCards?.[window._practiceIdx] === it && !window._practiceMinimized
-  })
+  if (spotifyClips(it).length) spotifyPlayer.cue(it, _practiceSpotifyOptions(it))
 }
 
 // Open a jQuery UI dialog to edit a practice line. Centred on the viewport
@@ -22217,6 +22245,15 @@ function openKeyboardShortcuts() {
 window.openKeyboardShortcuts = openKeyboardShortcuts
 $(document).on('click', '.keyboard-shortcuts-btn', openKeyboardShortcuts)
 
+function _practiceSpotifyOptions(it) {
+  return {
+    mode: 'practice',
+    isCurrent: () => window._practiceActive && window._practiceCards?.[window._practiceIdx] === it,
+    isPaused: () => window._practiceMinimized || (_pracRec?.key === _pracRecKey(it) &&
+      ['recording', 'playback'].includes(_pracRec.phase))
+  }
+}
+
 function _togglePracticePlayback() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
@@ -22232,10 +22269,7 @@ function _togglePracticePlayback() {
       if (st.phase === 'playback') st.phase = 'idle'
       _renderPracticeRecBar()
     }
-    spotifyPlayer.togglePractice(it, {
-      isPaused: () => _pracRec?.key === _pracRecKey(it) && ['recording', 'playback'].includes(_pracRec.phase),
-      isCurrent: () => window._practiceActive &&
-      window._practiceCards?.[window._practiceIdx] === it && !window._practiceMinimized })
+    spotifyPlayer.togglePractice(it, _practiceSpotifyOptions(it))
     return
   }
   if (_isManualItem(it)) {
