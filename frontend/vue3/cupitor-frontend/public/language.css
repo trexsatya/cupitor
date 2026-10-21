@@ -1460,11 +1460,11 @@ input:checked + .slider:before {
     /* Only a notice — taps go through to whatever sits under it. */
     pointer-events: none;
 }
-/* Practice covers the screen from 100002 up, so at the banner's own level it
-   loads subtitles behind the view with nothing on screen to say so. Above the
-   practice view, below its bottom buttons (100004) so they stay whole. */
+/* Study cards show their own loading state. Keep the main-page notice from
+   showing through the full-screen study views, including during fade-out. */
+body.rec-playing #srtLoadingBanner,
 body.practice-mode #srtLoadingBanner {
-    z-index: 100003;
+    display: none !important;
 }
 #srtLoadingBanner #srtLoadingText {
     display: block;

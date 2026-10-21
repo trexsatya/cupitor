@@ -20,6 +20,7 @@ async function check(browser, mobile) {
     if (mobile) await page.locator(selector).tap(); else await page.locator(selector).click()
   }
   const checkCovered = async () => {
+    assert.equal(await page.locator('#srtLoadingBanner').isVisible(), false, 'main-page loading notice stays covered')
     assert.equal(await page.locator('#settingsPanel').evaluate(el => el.closest('.ui-dialog').classList.contains('behind-study-view')), true)
     assert(await page.evaluate(() => {
       const dialog = document.querySelector('#settingsPanel').closest('.ui-dialog')
