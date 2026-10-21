@@ -15605,7 +15605,7 @@ function _notifOpenWhenReady(pl, xid) {
     // The host emits the feed before acknowledging this RPC. Bound the wait
     // so older hosts can still open the clicked item from their warm feed.
     const timeout = setTimeout(() => { feedReady = true }, 1500)
-    notifRpc('getNotifications', { limit: 200, include_unread: true }).catch(() => {}).finally(() => {
+    notifRpc('getNotifications', { limit: 200 }).catch(() => {}).finally(() => {
       clearTimeout(timeout)
       feedReady = true
     })
@@ -16080,7 +16080,7 @@ function _toggleNotifBell() {
   _positionBellPanel()
   // Pull the freshest feed on open (warm-push may predate this); the listener
   // re-renders when it lands.
-  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 200, include_unread: true }).catch(() => {})
+  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 200 }).catch(() => {})
 }
 // Optimistically stamp responded_at so the badge/row update instantly, then let
 // the next feed push reconcile.
@@ -16098,7 +16098,7 @@ function _notifAckItem(key, xid) {
   _notifMarkReadLocal(e => e.external_key === key && e.item_external_id === xid)
   if (!_haveNotifBridge()) return
   notifRpc('ackItem', { external_key: key, item_external_id: xid })
-    .then(() => notifRpc('getNotifications', { limit: 200, include_unread: true }))
+    .then(() => notifRpc('getNotifications', { limit: 200 }))
     .catch(() => {})
 }
 
@@ -16166,7 +16166,7 @@ $(function () {
   if (_haveNotifBridge() || _notifDebug()) $('#notifSettingsBtn').show()
   _notifUpdateBell()
   // Prime the inbox: request the feed (the app also warm-pushes it on load).
-  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 200, include_unread: true }).catch(() => {})
+  if (_haveNotifBridge()) notifRpc('getNotifications', { limit: 200 }).catch(() => {})
 })
 
 // Number every row in the dialog, top to bottom, so an item can be named by

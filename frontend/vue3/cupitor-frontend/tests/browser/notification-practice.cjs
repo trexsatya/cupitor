@@ -63,6 +63,7 @@ async function check(browser, mobile) {
     await page.waitForFunction(() => document.getElementById('settingsPanel').scrollTop > 0)
     assert(await page.locator('#settingsPanel').evaluate(el => el.closest('.ui-dialog').getBoundingClientRect().bottom <= innerHeight + 1))
     // Real inbox row handler captures unread state before acknowledgement.
+    await page.locator('#notifBellBtn').scrollIntoViewIfNeeded()
     await page.evaluate(() => $('#notifBellBtn').trigger('click'))
     await page.locator('.notif-bell-row[data-xid="card:a2"]').click()
     await ready()
@@ -113,6 +114,14 @@ async function check(browser, mobile) {
     await click('.practice-close')
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'} notification queue, read state, shuffle, view switching, discard, storage and opaque dialogs passed`)
+  } catch (error) {
+    const output = process.env.SCREENSHOT_DIR || 'test-results/dialog-browser-results/notifications'
+    fs.mkdirSync(output, { recursive: true })
+    await page.screenshot({ path: path.join(output, 'notification-failure.png') }).catch(() => {})
+    console.error(await page.evaluate(() => ({ body: document.body.className, practice: window._practiceActive,
+      index: window._practiceIdx, queue: window._practiceCards?.map(i => i.id), player: window._playingRecording,
+      playerIndex: window._recPlayIndex, errors: window.__errors })))
+    throw error
   } finally { await page.close() }
 }
 
