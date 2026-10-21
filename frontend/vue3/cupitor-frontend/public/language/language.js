@@ -22232,7 +22232,9 @@ function _togglePracticePlayback() {
       if (st.phase === 'playback') st.phase = 'idle'
       _renderPracticeRecBar()
     }
-    spotifyPlayer.togglePractice(it, { isCurrent: () => window._practiceActive &&
+    spotifyPlayer.togglePractice(it, {
+      isPaused: () => _pracRec?.key === _pracRecKey(it) && ['recording', 'playback'].includes(_pracRec.phase),
+      isCurrent: () => window._practiceActive &&
       window._practiceCards?.[window._practiceIdx] === it && !window._practiceMinimized })
     return
   }

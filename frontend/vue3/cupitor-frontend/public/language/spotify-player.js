@@ -227,6 +227,7 @@ export function createSpotifyStudyPlayer({win = window, loadApi = () => loadSpot
     // Recording a take and listening to it hold Practice's clock in place.
     // Late iframe progress must not unpause or move that pinned position.
     if (session.mode === 'practice' && session.isPaused()) {
+      session.paused = true;
       if (!state.isPaused) pauseController();
       paint(session); return;
     }

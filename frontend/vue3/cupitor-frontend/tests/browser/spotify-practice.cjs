@@ -98,6 +98,11 @@ async function check(browser, mobile) {
     await page.waitForFunction(() => window.__audioRequests.some(r => r.op === 'delete'))
     assert.equal(await page.locator('.prec-take').count(), 0)
     await click('.prec-toggle')
+    await page.evaluate(() => {
+      const s = window.__spotify; s.paused = false
+      s.listeners.playback_update({data: {playingURI: s.uri, position: 61300, duration: 120000, isPaused: false, isBuffering: false}})
+    })
+    assert.equal(await page.evaluate(() => window.__spotify.paused), true, 'recording hold survives a completed-clip replay and late SDK Play')
     await click('.practice-next')
     await page.waitForFunction(() => window._practiceIdx === 2 && window.__audioRequests.some(r => r.op === 'recordCancel'))
     assert.equal(await page.locator('.practice-rec-bar').isVisible(), false, 'text-only cards have no speakover controls')
