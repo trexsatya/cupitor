@@ -15842,7 +15842,8 @@ async function _notifShowSchedule(key) {
   let $preview = $('#notifSchedulePreview')
   if (!$preview.length) $preview = $('<div id="notifSchedulePreview"></div>').appendTo('body')
   $preview.empty().append($('<p role="status">').text('Loading schedule…'))
-  $preview.dialog({ title: 'Notification schedule', width: Math.min(680, $(window).width() - 30), modal: true, autoOpen: true })
+  $preview.dialog({ title: 'Notification schedule', dialogClass: 'cupitor-panel-window', width: Math.min(680, $(window).width() - 30), modal: true, autoOpen: true })
+  $preview.closest('.ui-dialog').find('.ui-dialog-titlebar-close').empty().text('×').attr('aria-label', 'Close notification schedule')
   try {
     const data = await notifRpc('getSchedulePreview', { external_key: key })
     $preview.empty().append($('<h3>').text(data.name || 'Schedule'))
@@ -16008,12 +16009,14 @@ function _openNotifDialog() {
 
   $d.dialog({
     title: 'Study reminders — notifications',
+    dialogClass: 'cupitor-panel-window',
     maxHeight: Math.max(180, window.innerHeight - 40),
     width: Math.min(460, $(window).width() - 40),
     modal: true,
     autoOpen: true,
     close: () => { try { $pl.select2('destroy') } catch (_) {} }
   })
+  $d.closest('.ui-dialog').find('.ui-dialog-titlebar-close').empty().text('×').attr('aria-label', 'Close study reminders')
   try { $pl.select2({ width: '100%', dropdownParent: $d, minimumResultsForSearch: 8 }) } catch (_) {}
   _notifBootCapabilities().finally(() => $(window).trigger('resize'))
 }
