@@ -275,6 +275,47 @@ test('settings persist queue capacity and voice; large imports paginate and supp
   installed.client.dispose(); win.close()
 })
 
+test('Back follows nested screens and leaves unfinished edits without changing calls', async () => {
+  const { win, $ } = fixture(), sent = []
+  const pending = { ...CALL_IMPORT_EXAMPLE.calls[0], id: 'pending', status: 'scheduled', when_ms: Date.now() + 3600000 }
+  win.CallBridge = { postMessage(raw) {
+    const r = JSON.parse(raw); sent.push(r)
+    const data = r.op === 'getCapabilities' ? { supported: true, permission: 'granted', settings: true, edit_scheduled: true } :
+      r.op === 'getCalls' ? { calls: [pending] } : true
+    win.dispatchEvent(new win.CustomEvent('cupitorCallAck', { detail: { ...r, ok: true, data } }))
+  } }
+  const installed = installStudyCalls(win, $); installed.open()
+  const flush = () => new Promise(resolve => setImmediate(resolve)); await flush()
+  const view = () => $('[data-call-view]').filter((_, el) => $(el).css('display') !== 'none').attr('data-call-view')
+  const back = () => $('[data-call-back-top]').trigger('click')
+  assert.equal($('[data-call-back-bar]').css('display'), 'none')
+  $('[data-call-open-import]').trigger('click')
+  $('[data-call-import-load-example]').trigger('click')
+  $('[data-call-open-settings]').trigger('click'); await flush()
+  assert.match($('[data-call-back-top]').text(), /Back to import review/)
+  $('[data-call-history-toggle]').trigger('click')
+  assert.match($('[data-call-back-top]').text(), /Back to settings/)
+  back(); assert.equal(view(), 'settings')
+  back(); assert.equal(view(), 'import')
+  assert.equal($('[data-call-import-drafts] .study-call-history-row').length, 2)
+  $('[data-call-import-drafts] button').filter((_, el) => el.textContent === 'Edit').first().trigger('click')
+  assert.match($('[data-call-back-top]').text(), /Back to import review/)
+  $('[data-call-question]').val('') // Invalid form must still allow Back, without autosaving.
+  back(); assert.equal(view(), 'import')
+  $('[data-call-import-drafts] button').filter((_, el) => el.textContent === 'Edit').first().trigger('click')
+  assert.equal($('[data-call-question]').val(), CALL_IMPORT_EXAMPLE.calls[0].question)
+  $('[data-call-editor-cancel]').trigger('click'); assert.equal(view(), 'import')
+  back(); assert.equal(view(), 'list')
+  $('[data-call-pending] button').filter((_, el) => el.textContent === 'Edit call').trigger('click')
+  $('[data-call-question]').val('Unsaved change')
+  back(); assert.equal(view(), 'list')
+  $('[data-call-add]').trigger('click'); assert.equal($('[data-call-submit=later]').text(), 'Schedule call')
+  back(); assert.equal(view(), 'list')
+  assert.equal(sent.filter(r => ['update', 'schedule', 'scheduleBatch', 'callNow'].includes(r.op)).length, 0)
+  assert.equal($('[data-call-back-bar]').css('display'), 'none')
+  installed.client.dispose(); win.close()
+})
+
 test('voice import settings preserve overrides and reject invalid types and speeds', () => {
   const call={...CALL_IMPORT_EXAMPLE.calls[0],voice_name:'sv-test',speech_rate:0.75}
   assert.equal(parseCallImport(JSON.stringify([call]))[0].voice_name,'sv-test')

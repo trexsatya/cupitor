@@ -183,6 +183,7 @@ export function installStudyCalls(win, $) {
   let defaultVoice = ''
   let defaultRate = 1
   let currentView = 'list'
+  const viewTrail = []
   const active = new Set(['scheduled', 'disabled', 'ringing', 'answered'])
   const errorMessages = {
     permission_denied: 'Enable study-call notifications first.',
@@ -196,7 +197,10 @@ export function installStudyCalls(win, $) {
   const status = (text, error = false) => $dialog?.find('[data-call-status]').text(text).toggleClass('study-call-error', error)
   const reportError = error => status(errorMessages[error.message] || error.message, true)
 
-  function showView(view) {
+  function showView(view, remember = false) {
+    if (view === 'list') viewTrail.length = 0
+    else if (remember && view !== currentView) viewTrail.push(currentView)
+    else if (!remember && viewTrail.includes(view)) viewTrail.splice(viewTrail.lastIndexOf(view))
     currentView = view
     if (voiceSelection && view !== 'settings') client.rpc('stopVoicePreview').catch(() => {})
     if (voiceSelection && ['settings', 'editor'].includes(view)) loadVoices()
@@ -206,6 +210,10 @@ export function installStudyCalls(win, $) {
     const descriptions = { list: 'Your questions, ready for voice practice.', import: 'Choose a file, review your questions, then schedule.', history: 'Your latest 100 finished calls.', settings: 'Control the size of your call list.', editor: 'Set the question and the answer you want to practice.' }
     $dialog.find('[data-call-view-title]').text(titles[view])
     $dialog.find('[data-call-view-description]').text(descriptions[view])
+    const parent = viewTrail[viewTrail.length - 1] || (view === 'editor' && importedIndex >= 0 ? 'import' : 'list')
+    const backLabels = { list: 'pending calls', import: 'import review', history: 'call history', settings: 'settings' }
+    $dialog.find('[data-call-back]').text(`← Back to ${backLabels[parent] || 'pending calls'}`)
+    $dialog.find('[data-call-back-bar]').toggle(view !== 'list')
     $dialog.find('[data-call-nav]').toggle(view !== 'editor')
     $dialog.find('[data-call-history-toggle]').attr('aria-expanded', String(view === 'history'))
     $dialog.find('[data-call-history]').toggle(view === 'history')
@@ -215,6 +223,13 @@ export function installStudyCalls(win, $) {
     if (editingId) $dialog.find('[data-call-submit=now]').hide()
     $dialog.scrollTop(0)
     $(win).trigger('resize')
+  }
+
+  function goBack() {
+    const parent = viewTrail.pop() || (currentView === 'editor' && importedIndex >= 0 ? 'import' : 'list')
+    // Back leaves the editor without submitting or saving an unfinished draft.
+    if (currentView === 'editor') { editingId = null; importedIndex = -1 }
+    showView(parent)
   }
 
   function renderHistory() {
@@ -263,7 +278,7 @@ export function installStudyCalls(win, $) {
           $dialog.find('[data-call-submit=now]').hide()
           $dialog.find('[data-call-submit=later]').text('Save scheduled call')
           $dialog.find('[data-call-cancel-edit]').show()
-          showView('editor'); status('Editing scheduled call.')
+          showView('editor', true); status('Editing scheduled call.')
         })
       }
       if (['scheduled', 'disabled'].includes(call.status) && pendingControls) {
@@ -403,7 +418,7 @@ export function installStudyCalls(win, $) {
       $('<p>').text(call.question).appendTo($row)
       $('<span class="study-call-meta">').text(call.response_type === 'text' ? 'Free response' : `${call.choices.length} alternatives`).appendTo($row)
       $('<button type="button" class="btn">').text('Edit').appendTo($row).on('click', () => {
-        importedIndex = i; loadQuestion(call); renderImported(); showView('editor')
+        importedIndex = i; loadQuestion(call); renderImported(); showView('editor', true)
       })
       $('<button type="button" class="btn">').text('Remove').addClass('study-call-danger').appendTo($row).on('click', () => {
         imported.splice(i, 1); importedIndex = -1; batchScheduled = false; renderImported()
@@ -496,6 +511,7 @@ export function installStudyCalls(win, $) {
   function open() {
     if ($dialog) { showView('list'); $dialog.find('[data-call-history]').hide(); $dialog.find('[data-call-history-toggle]').attr('aria-expanded', 'false'); $dialog.dialog('open'); refresh().catch(e => reportError(e)); return }
     $dialog = $('<div id="studyCallsDialog" class="study-calls-dialog">').appendTo('body').html(`
+      <div class="study-call-navigation" data-call-back-bar style="display:none;"><button type="button" class="btn" data-call-back data-call-back-top>← Back to pending calls</button></div>
       <div class="study-call-heading"><span class="study-call-phone" aria-hidden="true">☎</span><div><h2 data-call-view-title>Pending calls</h2><p data-call-view-description>Your questions, ready for voice practice.</p></div></div>
       <div class="study-call-nav" data-call-nav>
         <button type="button" class="btn" data-call-history-toggle aria-expanded="false" aria-controls="studyCallHistory"><span data-call-history-count>History</span></button>
@@ -596,11 +612,11 @@ export function installStudyCalls(win, $) {
       try { saveImported() } catch (e) { reportError(e); return }
       importedIndex = -1
       loadQuestion({ title: 'Study question', question: '', response_type: 'choice', choices: ['Yes', 'No'] })
-      renderImported(); showView('editor'); $dialog.find('[data-call-question]').trigger('focus')
+      renderImported(); showView('editor', true); $dialog.find('[data-call-question]').trigger('focus')
       status('Enter the question, answer and date, then choose Schedule call.')
     })
-    $dialog.on('click', '[data-call-open-import]', () => { importedIndex = -1; showView('import') })
-    $dialog.on('click', '[data-call-open-settings]', () => { showView('settings'); refresh().then(() => loadVoices()).catch(reportError) })
+    $dialog.on('click', '[data-call-open-import]', () => { importedIndex = -1; showView('import', true) })
+    $dialog.on('click', '[data-call-open-settings]', () => { showView('settings', true); refresh().then(() => loadVoices()).catch(reportError) })
     $dialog.on('click', '[data-call-save-settings]', async function () {
       const limit = Number($dialog.find('[data-call-limit]').val())
       if (!Number.isInteger(limit) || limit < 1 || limit > MAX_CALL_IMPORT) { status('Choose a whole number from 1 to 5,000.', true); return }
@@ -620,10 +636,10 @@ export function installStudyCalls(win, $) {
     $dialog.on('click', '[data-call-pending-more]', () => { pendingShown += 50; renderHistory() })
     $dialog.on('click', '[data-call-import-more]', () => { importShown += 50; renderImported() })
     $dialog.on('click', '[data-call-choose-file]', () => $dialog.find('[data-call-import-file]')[0].click())
-    $dialog.on('click', '[data-call-back]', () => showView('list'))
-    $dialog.on('click', '[data-call-editor-cancel]', () => { editingId = null; const view = importedIndex >= 0 ? 'import' : 'list'; importedIndex = -1; showView(view) })
+    $dialog.on('click', '[data-call-back], [data-call-editor-cancel]', goBack)
     $dialog.on('click', '[data-call-history-toggle]', function () {
-      showView(currentView === 'history' ? 'list' : 'history')
+      if (currentView === 'history') goBack()
+      else showView('history', true)
     })
     $dialog.on('click', '[data-call-cancel-edit]', () => {
       editingId = null; $dialog.find('[data-call-submit=now]').show()

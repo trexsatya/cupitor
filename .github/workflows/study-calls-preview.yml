@@ -4,8 +4,10 @@ on:
     branches: [music-study-app]
     paths:
       - frontend/vue3/cupitor-frontend/public/language/study-calls*
+      - frontend/vue3/cupitor-frontend/public/language/language.js
       - frontend/vue3/cupitor-frontend/public/language.css
       - frontend/vue3/cupitor-frontend/tests/browser/study-calls.cjs
+      - frontend/vue3/cupitor-frontend/tests/browser/dialog-scrolling.mjs
       - .github/workflows/study-calls-preview.yml
   workflow_dispatch:
 permissions:
@@ -37,6 +39,11 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
       - name: Verify Study calls and capture mobile and desktop screenshots
         run: node tests/browser/study-calls.cjs
+      - name: Verify reminders and schedule Back navigation
+        run: |
+          export CUPITOR_PLAYWRIGHT="$PWD/node_modules/playwright/index.mjs"
+          cd public
+          node ../tests/browser/dialog-scrolling.mjs
       - name: Save screenshots for design review
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

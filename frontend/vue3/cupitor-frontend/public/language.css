@@ -4989,6 +4989,7 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 #studyCallsDialog button:disabled, #notifDialog button:disabled { opacity:.48; cursor:default; box-shadow:none; }
 #studyCallsDialog [hidden] { display:none!important; }
 #studyCallsDialog .study-call-heading { display:flex; align-items:flex-start; gap:12px; margin-bottom:16px; }
+#studyCallsDialog .study-call-navigation, #notifSchedulePreview .notif-schedule-navigation { position:sticky; top:0; z-index:2; padding:4px 0 12px; background:#f8faf9; }
 #studyCallsDialog .study-call-heading p { margin:5px 0 0; color:#62796f; font-size:13px; }
 #studyCallsDialog .study-call-phone { display:flex; width:44px; height:44px; align-items:center; justify-content:center; flex:none; border-radius:13px; background:#e2f0e9; color:#17694f; font-size:25px; }
 #studyCallsDialog .study-call-nav, #studyCallsDialog .study-call-actions, #studyCallsDialog .study-call-permissions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }

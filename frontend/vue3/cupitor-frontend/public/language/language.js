@@ -15841,18 +15841,21 @@ function _notifRenderEnabled() {
 async function _notifShowSchedule(key) {
   let $preview = $('#notifSchedulePreview')
   if (!$preview.length) $preview = $('<div id="notifSchedulePreview"></div>').appendTo('body')
-  $preview.empty().append($('<p role="status">').text('Loading schedule…'))
+  $preview.empty()
+  const $navigation = $('<div class="notif-schedule-navigation">').appendTo($preview)
+  $('<button type="button" class="btn notif-schedule-back">').text('← Back to study reminders').appendTo($navigation).on('click', () => $preview.dialog('close'))
+  const $content = $('<div>').appendTo($preview).append($('<p role="status">').text('Loading schedule…'))
   $preview.dialog({ title: 'Notification schedule', dialogClass: 'cupitor-panel-window', width: Math.min(680, $(window).width() - 30), modal: true, autoOpen: true })
   $preview.closest('.ui-dialog').find('.ui-dialog-titlebar-close').empty().text('×').attr('aria-label', 'Close notification schedule')
   try {
     const data = await notifRpc('getSchedulePreview', { external_key: key })
-    $preview.empty().append($('<h3>').text(data.name || 'Schedule'))
-    $('<p>').text('Current plan for the next 48 hours. Times use this device’s timezone and may be approximate. Later rotation and introduction times appear after the next delivery.').appendTo($preview)
-    if (data.status === 'paused') $('<p>').text('This list is paused. No notifications are scheduled.').appendTo($preview)
+    $content.empty().append($('<h3>').text(data.name || 'Schedule'))
+    $('<p>').text('Current plan for the next 48 hours. Times use this device’s timezone and may be approximate. Later rotation and introduction times appear after the next delivery.').appendTo($content)
+    if (data.status === 'paused') $('<p>').text('This list is paused. No notifications are scheduled.').appendTo($content)
     const rows = data.rows || []
-    if (!rows.length) $('<p>').text('No items in this list.').appendTo($preview)
+    if (!rows.length) $('<p>').text('No items in this list.').appendTo($content)
     else {
-      const $table = $('<table class="notif-schedule-table">').appendTo($preview)
+      const $table = $('<table class="notif-schedule-table">').appendTo($content)
       $('<thead><tr><th>Item number</th><th>Item</th><th>When</th><th>Status</th></tr></thead>').appendTo($table)
       const $body = $('<tbody>').appendTo($table)
       rows.forEach(row => {
@@ -15863,11 +15866,11 @@ async function _notifShowSchedule(key) {
           row.state === 'Outside the next 48 hours' && row.next_due_at ? new Date(row.next_due_at).toLocaleString() : '—').appendTo($row)
         $('<td>').text(row.state).appendTo($row)
       })
-      if (data.item_count > rows.length) $('<p>').text(`Showing ${rows.length} of ${data.item_count} items.`).appendTo($preview)
+      if (data.item_count > rows.length) $('<p>').text(`Showing ${rows.length} of ${data.item_count} items.`).appendTo($content)
     }
-    $('<button type="button" class="btn">').text('Refresh schedule').appendTo($preview).on('click', () => _notifShowSchedule(key))
+    $('<button type="button" class="btn">').text('Refresh schedule').appendTo($content).on('click', () => _notifShowSchedule(key))
   } catch (error) {
-    $preview.empty().append($('<p role="status">').text(error.message === 'unknown_op' || error.message === 'unsupported'
+    $content.empty().append($('<p role="status">').text(error.message === 'unknown_op' || error.message === 'unsupported'
       ? 'Update the Cupitor app to view the notification schedule.' : 'Could not load schedule: ' + error.message))
   }
   $(window).trigger('resize')
