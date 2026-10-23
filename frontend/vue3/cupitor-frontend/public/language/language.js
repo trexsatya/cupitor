@@ -15764,6 +15764,7 @@ function _notifLoadCallSettings(name, list) {
 function _notifPreviewCalls() {
   const calls = $('#notifDelivery').val() === 'call'
   $('#notifCallOptions').toggle(calls)
+  $('#notifEnableBtn').prop('disabled', calls && $('#notifDelivery').data('calls-supported') === false)
   if (!calls) return
   const name = $('#notifPlaylist').val()
   const result = _buildPlaylistCallItems(name || '', _notifRawItems(name), _notifCallSettings())
@@ -15921,8 +15922,10 @@ async function _notifBootCapabilities() {
   try { caps = await notifRpc('getCapabilities') } catch (_) {}
   if (!caps || caps.supported === false) { $uns.show(); $perm.hide(); $body.hide(); return }
   $uns.hide()
-  $('#notifDelivery option[value=call]').prop('disabled', !(caps.delivery_modes || []).includes('call'))
-  $('#notifCallCompatibility').toggle(!(caps.delivery_modes || []).includes('call'))
+  const callsSupported = (caps.delivery_modes || []).includes('call')
+  $('#notifDelivery').data('calls-supported', callsSupported)
+  $('#notifCallCompatibility').toggle(!callsSupported)
+  _notifPreviewCalls()
   if (caps.permission !== 'granted') { $perm.show(); $body.hide() }
   else { $perm.hide(); $body.show() }
 }

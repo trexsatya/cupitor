@@ -18,6 +18,7 @@ test('the real playlist dialog creates calls, preserves the schedule and resyncs
   window.__cupitorNotifSchedules = { schedules: [{ key: 'ebbinghaus', name: 'Ebbinghaus', kind: 'series' }] }
   window.__cupitorNotifLists = { lists: [] }
   const sent = []
+  let compatible = true
   window.NotifBridge = { postMessage(raw) {
     const r = JSON.parse(raw); sent.push(r)
     const lists = window.__cupitorNotifLists.lists
@@ -28,7 +29,7 @@ test('the real playlist dialog creates calls, preserves the schedule and resyncs
       const { response_type, ...config } = r.call_config
       Object.assign(list, { delivery: r.delivery, call_config: { ...config, answer_type: response_type } })
     }
-    const data = r.op === 'getCapabilities' ? { supported: true, permission: 'granted', delivery_modes: ['notification', 'call'] } : undefined
+    const data = r.op === 'getCapabilities' ? { supported: true, permission: 'granted', delivery_modes: compatible ? ['notification', 'call'] : ['notification'] } : undefined
     window.dispatchEvent(new CustomEvent('cupitorNotifAck', { detail: { ...r, ok: true, data } }))
   } }
   const source = fs.readFileSync(path.join(__dirname, 'language.js'), 'utf8')
@@ -66,4 +67,9 @@ test('the real playlist dialog creates calls, preserves the schedule and resyncs
   window._recordings.Animals.items.Manual.Card.forEach(i => { i.enabled = false })
   api.resync(); await flush()
   expect(sent.filter(r => r.op === 'syncItems').pop().items).toEqual([])
+  compatible = false
+  window._openPlaylistCalls(); await flush()
+  expect($('#notifEnableBtn').prop('disabled')).toBe(true)
+  $('#notifDelivery').val('notification').trigger('change')
+  expect($('#notifEnableBtn').prop('disabled')).toBe(false)
 })

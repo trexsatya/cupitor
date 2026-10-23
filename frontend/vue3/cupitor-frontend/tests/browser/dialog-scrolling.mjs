@@ -22,8 +22,13 @@ const extract = name => {
 const notificationCode = [
   '_notifSchedules', '_notifLists', '_playlistForNotifKey',
   '_notifScheduleKind', '_notifPopulateSchedules', '_notifSyncIntroAvailability',
+  '_notifRawItems', '_notifCallSettings', '_notifLoadCallSettings', '_notifPreviewCalls',
   '_notifRenderEnabled', '_notifBootCapabilities', '_openNotifDialog',
 ].map(extract).join('\n') + '\nwindow._openNotifDialog = _openNotifDialog;';
+const calls = await readFile(new URL('../../public/language/playlist-calls.js', import.meta.url), 'utf8');
+const defaultsNode = parse(calls, {sourceType: 'module'}).program.body.find(node =>
+  node.type === 'ExportNamedDeclaration' && node.declaration?.declarations?.[0]?.id.name === 'playlistCallDefaults').declaration;
+const callDefaults = calls.slice(defaultsNode.start, defaultsNode.end).replace('playlistCallDefaults', '_playlistCallDefaults');
 const errors = [];
 let lastPage;
 try {
@@ -44,6 +49,7 @@ try {
     // The real notification dialog/list renderer; substitute only the native
     // app bridge and data providers, never layout or scrolling.
     const providers = [
+      callDefaults,
       "const $ = jQuery, _ = {escape: value => jQuery('<div>').text(value).html()};",
       "window._recordings = Object.fromEntries(Array.from({length: 100}, (_, i) =>",
       "  ['Playlist ' + (i + 1), {notifKey: 'key-' + i, items: {}}]));",
