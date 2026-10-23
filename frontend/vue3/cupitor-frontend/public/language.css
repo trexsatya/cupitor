@@ -651,6 +651,17 @@
     background: #fff;
 }
 
+/* On phones the results belong to the document's scroll surface. A second
+   viewport-height scroller here competes with the page above/below it: a
+   gesture can latch to the wrong surface, especially at the list's edges
+   in Android WebView. Dialogs keep their own bounded native scroll areas. */
+@media (max-width: 999px) {
+    #result {
+        height: auto !important;
+        overflow: visible !important;
+    }
+}
+
 /* Pin the similar / different-prefix dialogs to the viewport. jQuery UI
    uses position: absolute by default, which means re-opening the dialog
    after the user scrolls anchors it at the original document offset
