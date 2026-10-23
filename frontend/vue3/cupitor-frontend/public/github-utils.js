@@ -158,7 +158,18 @@
   /**
    * Fetches a file from GitHub. Returns { content, sha }.
    */
+  let subtitleAdapter = null;
+  function setSubtitleAdapter(adapter) { subtitleAdapter = adapter; }
   async function getFile(owner, repo, filePath, token, branch) {
+    if (subtitleAdapter && subtitleAdapter.handles(filePath)) {
+      const virtual = await subtitleAdapter.read({ path: filePath,
+        read: async path => { try { return await getPhysicalFile(owner, repo, path, token, branch); }
+          catch (e) { if (isNotFound(e)) return null; throw e; } } });
+      if (virtual !== undefined) return virtual;
+    }
+    return getPhysicalFile(owner, repo, filePath, token, branch);
+  }
+  async function getPhysicalFile(owner, repo, filePath, token, branch) {
     const query = branch ? `?ref=${encodeURIComponent(branch)}` : "";
     const path = `/repos/${owner}/${repo}/contents/${filePath}${query}`;
     const response = await _githubRequest("GET", path, null, token);
@@ -201,6 +212,10 @@
    * Creates or updates a file in a GitHub repository.
    */
   async function putFile(owner, repo, filePath, newContent, message, sha, token, branch) {
+    if (subtitleAdapter && subtitleAdapter.handles(filePath)) {
+      return commitMultipleFiles({ owner, repo, branch, commitMessage: message,
+        files: [{ path: filePath, expectedSha: sha, getContent: () => newContent }] });
+    }
     const path = `/repos/${owner}/${repo}/contents/${filePath}`;
     const body = {
       message,
@@ -242,6 +257,10 @@
    * Resolves with the API response on success; rejects on error.
    */
   async function deleteFile(owner, repo, filePath, message, sha, token, branch) {
+    if (subtitleAdapter && subtitleAdapter.handles(filePath)) {
+      return commitMultipleFiles({ owner, repo, branch, commitMessage: message,
+        files: [{ path: filePath, delete: true }] });
+    }
     const path = `/repos/${owner}/${repo}/contents/${filePath}`;
     const body = {
       message,
@@ -317,6 +336,15 @@
         const headSha = ref.object.sha;
         const headCommit = await _githubRequest("GET", `/repos/${owner}/${repo}/git/commits/${headSha}`, null, token);
         const baseTreeSha = headCommit.tree.sha;
+        // Plan virtual subtitle writes against this exact commit, again on
+        // every retry. Several logical SRT edits become one physical bundle.
+        const reads = new Map();
+        const read = path => {
+          if (!reads.has(path)) reads.set(path, getPhysicalFile(owner, repo, path, token, headSha)
+            .catch(e => { if (isNotFound(e)) return null; throw e; }));
+          return reads.get(path);
+        };
+        const prepared = subtitleAdapter ? await subtitleAdapter.prepare({ files, read }) : { files };
 
         // 2. For each file: read current content (in parallel batches),
         //    run the transform, then create a blob (also in parallel).
@@ -342,10 +370,10 @@
           return out;
         };
 
-        const fileFetches = await runInBatches(files, async (f) => {
+        const fileFetches = await runInBatches(prepared.files, async (f) => {
           if (f.delete) {
             try {
-              await getFile(owner, repo, f.path, token, branch);
+              if (!await read(f.path)) return { f, action: 'skip' };
               return { f, action: 'delete' };
             } catch (e) {
               if (isNotFound(e)) return { f, action: 'skip' };  // already gone
@@ -354,8 +382,13 @@
           }
           let currentText = null;
           try {
-            const existing = await getFile(owner, repo, f.path, token, branch);
-            currentText = existing.content;
+            const existing = await read(f.path);
+            currentText = existing?.content ?? null;
+            if (f.expectedSha && existing?.sha !== f.expectedSha) {
+              const error = new Error('GitHub API error 409: file changed');
+              error.conditionalWrite = true;
+              throw error;
+            }
           } catch (e) {
             // File doesn't exist yet — getContent will receive null. Any other
             // failure aborts: building on "nothing" would overwrite the file.
@@ -394,6 +427,7 @@
         });
 
         if (!treeEntries.length) {
+          prepared.afterCommit?.();
           console.warn(`[commitMultipleFiles] no tree entries — nothing to commit (all files unchanged or skipped)`);
           return { committed: false, reason: "no-changes" };
         }
@@ -480,10 +514,11 @@
           );
         }
         console.log(`[commitMultipleFiles] verified (${verifySource}): ${branch} → ${newCommit.sha.slice(0, 8)}`);
+        prepared.afterCommit?.();
         return { committed: true, commitSha: newCommit.sha, files: treeEntries.map(t => t.path) };
       } catch (e) {
         lastErr = e;
-        if (attempt < maxAttempts - 1 && /GitHub API error (409|422)\b/.test(String(e && e.message))) {
+        if (!e.conditionalWrite && attempt < maxAttempts - 1 && /GitHub API error (409|422)\b/.test(String(e && e.message))) {
           console.warn(`commitMultipleFiles: conflict, retrying (${attempt + 2}/${maxAttempts})`);
           continue;
         }
@@ -493,6 +528,6 @@
     throw lastErr || new Error("commitMultipleFiles: exhausted retries");
   }
 
-  global.GitHubUtils = { getGHToken, setGHToken, clearGHToken, hasGHToken, request, getFile, putFile, putFileWithContent, updateFile, deleteFile, deleteFileWithLookup, commitMultipleFiles };
+  global.GitHubUtils = { getGHToken, setGHToken, clearGHToken, hasGHToken, request, getFile, putFile, putFileWithContent, updateFile, deleteFile, deleteFileWithLookup, commitMultipleFiles, setSubtitleAdapter };
 
 })(window);

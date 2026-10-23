@@ -18,8 +18,8 @@ describe("saveHit writeTarget", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("writeTarget:false writes only the source snippet (no translation file)", () => {
-    const { svPath, targetPath } = saveHit(dir, hit, null, {
+  test("writeTarget:false writes only the source snippet (no translation file)", async () => {
+    const { svPath, targetPath } = await saveHit(dir, hit, null, {
       sourceLang: "sv",
       targetLang: "en",
       writeTarget: false,
@@ -32,8 +32,8 @@ describe("saveHit writeTarget", () => {
     expect(idx.some((e) => e.link === "vid123")).toBe(true);
   });
 
-  test("default writes both source and target files", () => {
-    const { svPath, targetPath } = saveHit(dir, hit, ["hi", "bye"], {
+  test("default writes both source and target files", async () => {
+    const { svPath, targetPath } = await saveHit(dir, hit, ["hi", "bye"], {
       sourceLang: "sv",
       targetLang: "en",
     });

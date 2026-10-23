@@ -12,6 +12,7 @@
 //   node tools/language/lang-manage.js srt        [--chunk N] [--category "<name>"] [--no-translate] [--reset]
 //   node tools/language/lang-manage.js prune       [--minSpan N] [--window N] [--apply]  (shrink full-video transcripts to windows around items found only there)
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, unlinkSync } from "node:fs";
+import { readSubtitleFiles, commitLocalSubtitleFiles } from './bundle-store.js';
 import { join } from "node:path";
 
 import { parseVocabularyFile } from "../../public/language/vocab-merge.js";
@@ -64,14 +65,15 @@ const log = (...a) => console.log(...a);
 // --- step 1: rare words ----------------------------------------------------
 
 function loadLocalSubtitles(srtsDir) {
-  const files = readdirSync(srtsDir).filter((f) => /\.(\w{2,3})\.srt$/.test(f));
+  const documents = readSubtitleFiles(srtsDir);
+  const files = Object.keys(documents).filter((f) => /\.(\w{2,3})\.srt$/.test(f));
   const byBase = new Map();
   for (const f of files) {
     const m = f.match(/^(.*)\.(\w{2,3})\.srt$/);
     if (!m) continue;
     const [, base, lang] = m;
     if (!byBase.has(base)) byBase.set(base, {});
-    const raw = readFileSync(join(srtsDir, f), "utf8");
+    const raw = documents[f];
     byBase.get(base)[lang] = cleanSrtForMatch(raw);
   }
   return [...byBase.values()].map((s) => ({ sv: s.sv || "", en: s.en || "" }));
@@ -317,7 +319,7 @@ async function cmdSrt(cfg) {
             delayMs: cfg.translateDelayMs,
           })
         : null;
-      const { baseName } = saveHit(cfg.srtsDir, hit, translations, {
+      const { baseName } = await saveHit(cfg.srtsDir, hit, translations, {
         sourceLang: cfg.lang,
         targetLang: cfg.targetLang,
         defaultDurSec: cfg.defaultDurSec,
@@ -351,7 +353,8 @@ function cmdCategories(cfg) {
 // Load subtitle file-sets grouped by base name (channel || title || id), keeping
 // the raw text (for the timespan test) and per-lang filenames (for deletion).
 function loadSrtDocs(srtsDir) {
-  const files = readdirSync(srtsDir).filter((f) => /\.(\w{2,3})\.srt$/.test(f));
+  const documents = readSubtitleFiles(srtsDir);
+  const files = Object.keys(documents).filter((f) => /\.(\w{2,3})\.srt$/.test(f));
   const byBase = new Map();
   for (const f of files) {
     const m = f.match(/^(.*)\.(\w{2,3})\.srt$/);
@@ -359,7 +362,7 @@ function loadSrtDocs(srtsDir) {
     const [, base, lang] = m;
     if (!byBase.has(base)) byBase.set(base, { name: base, raw: {}, files: {} });
     const rec = byBase.get(base);
-    rec.raw[lang] = readFileSync(join(srtsDir, f), "utf8");
+    rec.raw[lang] = documents[f];
     rec.files[lang] = f;
   }
   return [...byBase.values()];
@@ -453,6 +456,20 @@ async function cmdPrune(cfg) {
   log(`Wrote the plan → ${planPath}`);
 
   if (!(cfg.apply || cfg.delete)) return log(`(dry run — re-run with --apply to rewrite/delete the files.)`);
+
+  if (existsSync(join(cfg.srtsDir, 'storage.json'))) {
+    const operations = [];
+    for (const entry of plan) {
+      if (entry.action === 'delete') entry.files.forEach(path => operations.push({ path, delete: true }));
+      if (entry.action === 'shrink') for (const [path, text] of Object.entries(entry.write)) {
+        if (path) operations.push(text ? { path, getContent: () => text } : { path, delete: true });
+      }
+    }
+    const deletedNames = new Set(deleted.map(p => p.name));
+    operations.push({ path: 'index.json', getContent: current => JSON.stringify(JSON.parse(current || '[]').filter(e => !deletedNames.has(e.name)), null, 2) + '\n' });
+    await commitLocalSubtitleFiles(cfg.srtsDir, operations);
+    return log('Applied prune changes to subtitle bundles and index.json.');
+  }
 
   let wrote = 0;
   let removed = 0;
