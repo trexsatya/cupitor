@@ -154,8 +154,21 @@ export function scheduleImportedCalls(calls, start, spacingMinutes = 5, now = Da
     when_ms: call.when_ms ?? first + index * interval * 60000 }, index, now))
 }
 
+export function callLanguageFromLocation(location) {
+  const names = { swedish: 'sv', spanish: 'es', english: 'en', french: 'fr', german: 'de', hindi: 'hi', greek: 'el' }
+  const locales = { sv: 'sv-SE', es: 'es-ES', en: 'en-US', fr: 'fr-FR', de: 'de-DE', hi: 'hi-IN', el: 'el-GR' }
+  try {
+    const value = new URL(location.href).searchParams.get('lang')?.trim().toLowerCase() || 'swedish'
+    const code = names[value] || value
+    if (!/^[a-z]{2,3}(-[a-z]{2,4})?$/.test(code)) return 'sv-SE'
+    const tag = Intl.getCanonicalLocales(code)[0]
+    return locales[tag] || tag
+  } catch (_) { return 'sv-SE' }
+}
+
 export function installStudyCalls(win, $) {
   const client = createCallClient(win)
+  const pageLanguage = callLanguageFromLocation(win.location)
   // Public programmatic API for custom study flows.
   win.cupitorCallRpc = (op, payload) => client.rpc(op, payload)
   let snapshot = win.__cupitorCalls || { calls: [] }
@@ -182,6 +195,8 @@ export function installStudyCalls(win, $) {
   let voicesBusy = false
   let defaultVoice = ''
   let defaultRate = 1
+  let settingsRevision = 0
+  let savedSettingsRevision = 0
   let currentView = 'list'
   const viewTrail = []
   const active = new Set(['scheduled', 'disabled', 'ringing', 'answered'])
@@ -317,7 +332,7 @@ export function installStudyCalls(win, $) {
     $select.val(current || '')
   }
 
-  async function refresh() {
+  async function refresh({ preserveForms = false } = {}) {
     if (!client.available() || !$dialog) return
     const caps = await client.rpc('getCapabilities')
     const enabled = caps.supported === true
@@ -329,13 +344,20 @@ export function installStudyCalls(win, $) {
     voiceSelection = caps.voice_selection === true
     defaultVoice = typeof caps.voice_name === 'string' ? caps.voice_name : ''
     defaultRate = typeof caps.speech_rate === 'number' ? Number(caps.speech_rate.toFixed(2)) : 1
-    selectValue('[data-call-default-voice]', defaultVoice, defaultVoice || 'Device default')
-    selectValue('[data-call-default-rate]', String(defaultRate), `${defaultRate}×`)
+    // Android select/system dialogs can send a foreground event while a form
+    // is being edited. Refresh capabilities without replacing that draft.
+    const applySettings = !preserveForms && settingsRevision === savedSettingsRevision
+    if (applySettings) {
+      selectValue('[data-call-default-voice]', defaultVoice, defaultVoice || 'Device default')
+      selectValue('[data-call-default-rate]', String(defaultRate), `${defaultRate}×`)
+    }
     $dialog.find('[data-call-voice-name], [data-call-speech-rate], [data-call-default-voice], [data-call-default-rate], [data-call-preview-voice], [data-call-preview-editor], [data-call-stop-preview], [data-call-reload-voices], [data-call-manage-voices]').prop('disabled', !voiceSelection)
     $dialog.find('[data-call-voices-note]').text(voiceSelection ? 'Choose an available Android text-to-speech voice. Other question languages keep their device voice.' : 'Update the Cupitor app to choose a speaking voice.')
     pendingLimit = Number.isInteger(caps.pending_limit) ? caps.pending_limit : 50
     globalPending = Number.isInteger(caps.pending_count) ? caps.pending_count : 0
-    $dialog.find('[data-call-limit]').val(pendingLimit).attr('max', caps.max_pending_limit || MAX_CALL_IMPORT)
+    if (applySettings) $dialog.find('[data-call-limit]').val(pendingLimit)
+    $dialog.find('[data-call-limit]').attr('max', caps.max_pending_limit || MAX_CALL_IMPORT)
+    if (applySettings) { renderLanguages(); renderVoices() }
     $dialog.find('[data-call-save-settings], [data-call-limit]').prop('disabled', !settingsAvailable)
     $dialog.find('[data-call-limit-note]').text(settingsAvailable
       ? `${globalPending.toLocaleString()} pending across all profiles. Lowering the limit keeps existing questions and only stops new additions.`
@@ -385,7 +407,8 @@ export function installStudyCalls(win, $) {
     $dialog.find('[data-call-choices]').trigger('input')
     value('correct', call.correct_choice_index == null ? '' : String(call.correct_choice_index))
     value('accepted', (call.accepted_answers || []).join('\n'))
-    value('language', call.language || 'sv-SE'); value('retries', call.max_retries ?? 3)
+    selectValue('[data-call-language]', call.language || pageLanguage, languageLabel(call.language || pageLanguage))
+    renderLanguages(); value('retries', call.max_retries ?? 3)
     selectValue('[data-call-voice-name]', call.voice_name ?? '__default__', call.voice_name || 'Device default for this language')
     selectValue('[data-call-speech-rate]', call.speech_rate == null ? '__default__' : String(call.speech_rate), `${call.speech_rate}×`)
     renderVoices()
@@ -443,19 +466,50 @@ export function installStudyCalls(win, $) {
     if (!$select.find('option').toArray().some(option => option.value === value)) $('<option>').val(value).text(label).appendTo($select)
     $select.val(value)
   }
-  function renderVoices() {
+  function renderVoices(resetUnknown = false) {
     if (!$dialog) return
     for (const selector of ['[data-call-default-voice]', '[data-call-voice-name]']) {
       const $select = $dialog.find(selector), previous = $select.val()
       $select.empty()
       if (selector.includes('voice-name')) $('<option>').val('__default__').text('Use Settings voice').appendTo($select)
       $('<option>').val('').text('Device default for this language').appendTo($select)
-      const language = String($dialog.find('[data-call-language]').val() || 'sv-SE').split('-')[0].toLowerCase()
-      voices.filter(voice => !selector.includes('voice-name') || voice.language.split('-')[0].toLowerCase() === language).forEach(voice => {
+      const language = $dialog.find(selector.includes('voice-name') ? '[data-call-language]' : '[data-call-preview-language]').val() || pageLanguage
+      const applicable = voices.filter(voice => sameLanguage(voice.language, language))
+      applicable.forEach(voice => {
         $('<option>').val(voice.name).text(`${voice.label || voice.name}${voice.network ? ' (online)' : ''}`).appendTo($select)
       })
-      selectValue(selector, previous ?? (selector.includes('voice-name') ? '__default__' : defaultVoice), previous ? `Saved voice: ${previous}` : 'Device default for this language')
+      const fallback = selector.includes('voice-name') ? '__default__' : ''
+      const known = voices.find(voice => voice.name === previous)
+      const value = (known && !sameLanguage(known.language, language)) || (resetUnknown && !known && previous !== '__default__') ? fallback : previous ?? fallback
+      selectValue(selector, value, value ? `Unavailable voice: ${value}` : 'Device default for this language')
     }
+    renderVoiceNotes()
+  }
+  function sameLanguage(a, b) { return String(a).split('-')[0].toLowerCase() === String(b).split('-')[0].toLowerCase() }
+  function languageLabel(tag) {
+    try { return `${new Intl.DisplayNames(['en'], { type: 'language' }).of(tag)} — ${tag}` }
+    catch (_) { return tag }
+  }
+  function renderLanguages() {
+    for (const selector of ['[data-call-language]', '[data-call-preview-language]']) {
+      const $select = $dialog.find(selector), current = $select.val() || pageLanguage
+      const tags = [...new Set(['sv-SE', 'es-ES', 'en-GB', 'en-US', pageLanguage, ...voices.map(voice => voice.language), current])]
+      $select.empty()
+      tags.sort((a, b) => languageLabel(a).localeCompare(languageLabel(b))).forEach(tag => $('<option>').val(tag).text(languageLabel(tag)).appendTo($select))
+      $select.val(current)
+    }
+  }
+  function renderVoiceNotes() {
+    const language = $dialog.find('[data-call-preview-language]').val() || pageLanguage
+    const count = voices.filter(voice => sameLanguage(voice.language, language)).length
+    $dialog.find('[data-call-default-voice-note]').text(`${count} voices for ${languageLabel(language)}. Applies to calls using Settings voice in this language. Calls with their own voice keep that override.`)
+    const selected = $dialog.find('[data-call-voice-name]').val()
+    const name = selected === '__default__' ? defaultVoice : selected
+    const chosen = voices.find(voice => voice.name === name)
+    const callLanguage = $dialog.find('[data-call-language]').val() || pageLanguage
+    $dialog.find('[data-call-editor-voice-note]').text(chosen && !sameLanguage(chosen.language, callLanguage)
+      ? `The Settings voice is for ${languageLabel(chosen.language)}. This question uses the device default for ${languageLabel(callLanguage)}. Choose a voice below to override it.`
+      : selected === '__default__' ? 'Uses the saved Settings voice for this language. Save Settings before previewing an inherited voice.' : name ? 'This call uses its own voice instead of Settings.' : 'Uses the device default for this language.')
   }
   async function loadVoices(force = false) {
     if (!voiceSelection || voicesBusy || (voicesLoaded && !force)) return
@@ -464,8 +518,9 @@ export function installStudyCalls(win, $) {
     try {
       const data = await client.rpc('getVoices')
       voices = (data.voices || []).filter(voice => typeof voice.name === 'string' && typeof voice.language === 'string')
-      voicesLoaded = true; renderVoices()
-      $dialog.find('[data-call-voices-note]').text(voices.length ? `${voices.length} available voices. A selected voice is used for questions in its language; other languages keep the device default.` : 'No voices found. Install a voice in Android speech settings, then refresh voices.')
+      voicesLoaded = true
+      renderLanguages(); renderVoices()
+      $dialog.find('[data-call-voices-note]').text(voices.length ? 'Voices are filtered by the selected language. Choose a voice, preview it, then Save settings.' : 'No voices found. Install a voice in Android speech settings, then refresh voices.')
     } catch (e) { $dialog.find('[data-call-voices-note]').text('Could not load voices. Use Device default or open Android speech settings.') }
     finally { voicesBusy = false }
   }
@@ -475,8 +530,10 @@ export function installStudyCalls(win, $) {
     if (name === '__default__') name = defaultVoice
     if (rate === '__default__') rate = defaultRate
     const chosen = voices.find(voice => voice.name === name)
-    const language = editor ? $dialog.find('[data-call-language]').val() : chosen?.language || $dialog.find('[data-call-preview-language]').val()
-    try { await client.rpc('previewVoice', { voice_name: name || '', speech_rate: Number(rate), language }); status('Voice preview playing.') }
+    const language = $dialog.find(editor ? '[data-call-language]' : '[data-call-preview-language]').val()
+    const fallback = chosen && !sameLanguage(chosen.language, language)
+    if (name && voicesLoaded && !chosen) { status('This voice is unavailable. Refresh voices or choose another voice.', true); return }
+    try { await client.rpc('previewVoice', { voice_name: fallback ? '' : name || '', speech_rate: Number(rate), language }); status(fallback ? `Previewing the device default for ${languageLabel(language)}; the Settings voice is for another language.` : 'Voice preview playing.') }
     catch (e) { reportError(e) }
   }
 
@@ -542,9 +599,10 @@ export function installStudyCalls(win, $) {
           <p class="study-call-hint">Your whole list is kept. Upcoming calls are scheduled automatically as the queue moves forward.</p>
         </section>
         <section class="study-call-section"><h3>Speaking voice</h3>
+          <label>Voice language<select data-call-preview-language><option value="sv-SE">Swedish — sv-SE</option><option value="en-GB">English — en-GB</option><option value="en-US">English — en-US</option></select></label>
           <label>Default voice<select data-call-default-voice><option value="">Device default for this language</option></select></label>
+          <p class="study-call-hint" data-call-default-voice-note></p>
           <label>Speaking speed<select data-call-default-rate><option value="0.5">0.5× — very slow</option><option value="0.75">0.75× — slower</option><option value="1" selected>1× — normal</option><option value="1.25">1.25× — faster</option><option value="1.5">1.5× — very fast</option></select></label>
-          <label>Preview language<input data-call-preview-language value="sv-SE" placeholder="sv-SE or en-GB"></label>
           <p class="study-call-hint" data-call-voices-note></p>
           <div class="study-call-actions"><button type="button" class="btn" data-call-preview-voice>▶ Preview voice</button><button type="button" class="btn" data-call-stop-preview>Stop</button><button type="button" class="btn" data-call-reload-voices>Refresh voices</button><button type="button" class="btn" data-call-manage-voices>Android speech settings</button></div>
         </section>
@@ -588,8 +646,9 @@ export function installStudyCalls(win, $) {
         <section class="study-call-section"><h3>When to call</h3><label>Date and time<input type="datetime-local" data-call-when></label><label class="study-call-inline"><input type="checkbox" checked data-call-enabled>Enabled</label></section>
         <details class="study-call-settings"><summary>Voice and answer settings</summary>
           <label><input type="checkbox" checked data-call-voice>Allow spoken answers</label><p class="study-call-hint" data-call-voice-note></p>
-          <label>Speech language<input data-call-language value="sv-SE" placeholder="sv-SE or en-GB"></label>
+          <label>Speech language<select data-call-language><option value="sv-SE">Swedish — sv-SE</option><option value="en-GB">English — en-GB</option><option value="en-US">English — en-US</option></select></label>
           <label>Speaking voice<select data-call-voice-name><option value="__default__">Use Settings voice</option><option value="">Device default for this language</option></select></label>
+          <p class="study-call-hint" data-call-editor-voice-note></p>
           <label>Speaking speed<select data-call-speech-rate><option value="__default__">Use Settings speed</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1">1× — normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></label>
           <button type="button" class="btn" data-call-preview-editor>▶ Preview voice</button>
           <label>Retries after first attempt<input type="number" min="0" max="10" step="1" value="3" data-call-retries></label><p class="study-call-hint">Stops as soon as the answer is correct. Incorrect or unclear answers retry automatically.</p>
@@ -617,11 +676,17 @@ export function installStudyCalls(win, $) {
     })
     $dialog.on('click', '[data-call-open-import]', () => { importedIndex = -1; showView('import', true) })
     $dialog.on('click', '[data-call-open-settings]', () => { showView('settings', true); refresh().then(() => loadVoices()).catch(reportError) })
+    $dialog.on('input change', '[data-call-limit], [data-call-default-voice], [data-call-default-rate], [data-call-preview-language]', () => { settingsRevision++ })
     $dialog.on('click', '[data-call-save-settings]', async function () {
       const limit = Number($dialog.find('[data-call-limit]').val())
       if (!Number.isInteger(limit) || limit < 1 || limit > MAX_CALL_IMPORT) { status('Choose a whole number from 1 to 5,000.', true); return }
       this.disabled = true
-      try { await client.rpc('setSettings', { pending_limit: limit, ...(voiceSelection ? { voice_name: $dialog.find('[data-call-default-voice]').val(), speech_rate: Number($dialog.find('[data-call-default-rate]').val()) } : {}) }); await refresh(); status('Settings saved.') }
+      const revision = settingsRevision
+      try {
+        await client.rpc('setSettings', { pending_limit: limit, ...(voiceSelection ? { voice_name: $dialog.find('[data-call-default-voice]').val(), speech_rate: Number($dialog.find('[data-call-default-rate]').val()) } : {}) })
+        savedSettingsRevision = revision
+        await refresh(); status(settingsRevision === revision ? 'Settings saved.' : 'Settings saved. You have newer unsaved changes.')
+      }
       catch (e) { reportError(e) }
       finally { this.disabled = !settingsAvailable }
     })
@@ -630,8 +695,9 @@ export function installStudyCalls(win, $) {
     $dialog.on('click', '[data-call-stop-preview]', () => client.rpc('stopVoicePreview').catch(reportError))
     $dialog.on('click', '[data-call-reload-voices]', () => loadVoices(true))
     $dialog.on('click', '[data-call-manage-voices]', () => client.rpc('openVoiceSettings').catch(reportError))
-    $dialog.on('change', '[data-call-language]', renderVoices)
-    $dialog.on('dialogclose', () => { if (voiceSelection) client.rpc('stopVoicePreview').catch(() => {}) })
+    $dialog.on('change', '[data-call-language], [data-call-preview-language]', () => renderVoices(true))
+    $dialog.on('change', '[data-call-voice-name], [data-call-default-voice]', renderVoiceNotes)
+    $dialog.on('dialogclose', () => { savedSettingsRevision = settingsRevision; if (voiceSelection) client.rpc('stopVoicePreview').catch(() => {}) })
     $dialog.on('input', '[data-call-search]', () => { pendingShown = 50; renderHistory() })
     $dialog.on('click', '[data-call-pending-more]', () => { pendingShown += 50; renderHistory() })
     $dialog.on('click', '[data-call-import-more]', () => { importShown += 50; renderImported() })
@@ -738,6 +804,9 @@ export function installStudyCalls(win, $) {
       $dialog.find('[data-call-choice-fields]').toggle(choice)
       $dialog.find('[data-call-text-fields]').toggle(!choice)
     })
+    selectValue('[data-call-language]', pageLanguage, languageLabel(pageLanguage))
+    selectValue('[data-call-preview-language]', pageLanguage, languageLabel(pageLanguage))
+    renderLanguages(); renderVoices()
     updateCorrectChoices(); renderAlternatives()
     $dialog.on('change', '[data-call-source]', function () {
       const item = $(this).find('option:selected').data('item')
@@ -757,7 +826,7 @@ export function installStudyCalls(win, $) {
   })
   win.addEventListener('cupitorNotifLists', renderSources)
   win.addEventListener('cupitorAppLifecycle', e => {
-    if (e.detail?.isForeground && $dialog?.is(':visible')) refresh().catch(() => {})
+    if (e.detail?.isForeground && $dialog?.is(':visible')) refresh({ preserveForms: true }).catch(() => {})
   })
   win._openStudyCalls = open
   const ready = () => $('#studyCallsBtn').toggle(client.available()).on('click', open)

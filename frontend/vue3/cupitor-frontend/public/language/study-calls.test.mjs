@@ -7,14 +7,34 @@ const require = createRequire(import.meta.url)
 const { JSDOM } = require('jsdom')
 const jquery = require('jquery')
 const source = fs.readFileSync(new URL('./study-calls.js', import.meta.url), 'utf8')
-const { createCallClient, callPayload, installStudyCalls, parseCallImport, scheduleImportedCalls, CALL_IMPORT_EXAMPLE } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
+const { createCallClient, callPayload, callLanguageFromLocation, installStudyCalls, parseCallImport, scheduleImportedCalls, CALL_IMPORT_EXAMPLE } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
 
-function fixture() {
-  const { window: win } = new JSDOM('<button id="studyCallsBtn"></button>')
+function fixture(url = 'https://cupitor.test/language.html') {
+  const { window: win } = new JSDOM('<button id="studyCallsBtn"></button>', { url })
   const $ = jquery(win)
   $.fn.dialog = function () { return this }
   return { win, $ }
 }
+
+test('page lang selects defaults for new calls and Settings without changing imported questions', () => {
+  for (const [query, expected] of [['', 'sv-SE'], ['swedish', 'sv-SE'], ['spanish', 'es-ES'], ['en', 'en-US'],
+    ['es-MX', 'es-MX'], ['HI', 'hi-IN'], ['not-a-language', 'sv-SE']]) {
+    assert.equal(callLanguageFromLocation({ href: `https://cupitor.test/language.html?lang=${query}` }), expected)
+  }
+  const { win, $ } = fixture('https://cupitor.test/language.html?lang=spanish')
+  const installed = installStudyCalls(win, $); installed.open()
+  assert.equal($('[data-call-preview-language]').val(), 'es-ES')
+  $('[data-call-add]').trigger('click')
+  assert.equal($('[data-call-language]').val(), 'es-ES')
+  $('[data-call-language]').val('en-US').trigger('change')
+  $('[data-call-back-top]').trigger('click'); $('[data-call-add]').trigger('click')
+  assert.equal($('[data-call-language]').val(), 'es-ES', 'each new question starts from the page language')
+  $('[data-call-back-top]').trigger('click'); $('[data-call-open-import]').trigger('click')
+  $('[data-call-import-load-example]').trigger('click')
+  $('[data-call-import-drafts] button').filter((_, el) => el.textContent === 'Edit').first().trigger('click')
+  assert.equal($('[data-call-language]').val(), 'sv-SE', 'an explicit imported language takes priority')
+  installed.client.dispose(); win.close()
+})
 
 test('RPC correlates acks, ignores duplicates, and fixes caller-supplied protocol fields', async () => {
   const { win } = fixture()
@@ -272,6 +292,83 @@ test('settings persist queue capacity and voice; large imports paginate and supp
   $('[data-call-import-more]').trigger('click')
   assert.equal($('[data-call-import-drafts] .study-call-history-row').length,100)
   assert.match($('[data-call-import-name]').text(),/Pasted JSON/)
+  installed.client.dispose(); win.close()
+})
+
+test('foreground refresh preserves voice settings until the user saves them', async () => {
+  const { win, $ } = fixture(), sent = []
+  let saved = { pending_limit: 50, voice_name: '', speech_rate: 1 }
+  win.CallBridge = { postMessage(raw) {
+    const r = JSON.parse(raw); sent.push(r)
+    if (r.op === 'setSettings') saved = { pending_limit: r.pending_limit, voice_name: r.voice_name, speech_rate: r.speech_rate }
+    const data = r.op === 'getCapabilities' ? { supported: true, permission: 'granted', settings: true, voice_selection: true, ...saved } :
+      r.op === 'getVoices' ? { voices: [{ name: 'sv-one', language: 'sv-SE' }, { name: 'sv-two', language: 'sv-SE' }] } :
+        r.op === 'getCalls' ? { calls: [] } : true
+    win.dispatchEvent(new win.CustomEvent('cupitorCallAck', { detail: { ...r, ok: true, data } }))
+  } }
+  const installed = installStudyCalls(win, $); installed.open()
+  // Native select/system dialogs can emit a foreground event before Save is tapped.
+  Object.defineProperty($('#studyCallsDialog')[0], 'offsetWidth', { configurable: true, value: 400 })
+  const flush = () => new Promise(resolve => setImmediate(resolve)); await flush()
+  $('[data-call-open-settings]').trigger('click'); await flush()
+  $('[data-call-default-voice]').val('sv-two')
+  win.dispatchEvent(new win.CustomEvent('cupitorAppLifecycle', { detail: { isForeground: true } })); await flush()
+  assert.equal($('[data-call-default-voice]').val(), 'sv-two', 'resume before the native change event must preserve the selection')
+  $('[data-call-default-voice]').val('sv-two').trigger('change')
+  $('[data-call-default-rate]').val('0.75').trigger('change')
+  $('[data-call-limit]').val('200').trigger('input')
+  win.dispatchEvent(new win.CustomEvent('cupitorAppLifecycle', { detail: { isForeground: true } })); await flush()
+  assert.equal($('[data-call-default-voice]').val(), 'sv-two')
+  assert.equal($('[data-call-default-rate]').val(), '0.75')
+  assert.equal($('[data-call-limit]').val(), '200')
+  $('[data-call-save-settings]').trigger('click'); await flush()
+  assert.deepEqual(saved, { pending_limit: 200, voice_name: 'sv-two', speech_rate: 0.75 })
+  $('[data-call-back-top]').trigger('click'); $('[data-call-open-settings]').trigger('click'); await flush()
+  assert.equal($('[data-call-default-voice]').val(), 'sv-two')
+  installed.client.dispose(); win.close()
+})
+
+test('language dropdowns filter voices, reset incompatible choices and preserve imported locales', async () => {
+  const { win, $ } = fixture(), sent = []
+  const voices = [{ name: 'sv-one', language: 'sv-SE' }, { name: 'sv-two', language: 'sv-FI' },
+    { name: 'en-one', language: 'en-GB' }, { name: 'en-two', language: 'en-US' }]
+  win.CallBridge = { postMessage(raw) {
+    const r = JSON.parse(raw); sent.push(r)
+    const data = r.op === 'getCapabilities' ? { supported: true, permission: 'granted', settings: true, voice_selection: true, voice_name: 'en-one', speech_rate: 1 } :
+      r.op === 'getVoices' ? { voices } : r.op === 'getCalls' ? { calls: [] } : true
+    win.dispatchEvent(new win.CustomEvent('cupitorCallAck', { detail: { ...r, ok: true, data } }))
+  } }
+  const installed = installStudyCalls(win, $); installed.open()
+  const flush = () => new Promise(resolve => setImmediate(resolve)); await flush()
+  $('[data-call-open-settings]').trigger('click'); await flush()
+  const options = selector => $(selector).find('option').toArray().map(option => option.value)
+  assert.equal($('[data-call-preview-language]')[0].tagName, 'SELECT')
+  assert.equal($('[data-call-preview-language]').val(), 'sv-SE', 'the page language selects the initial filter')
+  assert.deepEqual(options('[data-call-default-voice]'), ['', 'sv-one', 'sv-two'])
+  $('[data-call-preview-language]').val('en-GB').trigger('change')
+  assert.deepEqual(options('[data-call-default-voice]'), ['', 'en-one', 'en-two'])
+  $('[data-call-preview-language]').val('sv-SE').trigger('change')
+  assert.deepEqual(options('[data-call-default-voice]'), ['', 'sv-one', 'sv-two'])
+  assert.equal($('[data-call-default-voice]').val(), '', 'the previous English voice is cleared')
+  $('[data-call-default-voice]').val('sv-two').trigger('change')
+  $('[data-call-preview-voice]').trigger('click'); await flush()
+  assert.deepEqual([sent.at(-1).op, sent.at(-1).voice_name, sent.at(-1).language], ['previewVoice', 'sv-two', 'sv-SE'])
+  $('[data-call-back-top]').trigger('click'); $('[data-call-add]').trigger('click'); await flush()
+  assert.equal($('[data-call-language]')[0].tagName, 'SELECT')
+  assert.deepEqual(options('[data-call-voice-name]'), ['__default__', '', 'sv-one', 'sv-two'])
+  assert.match($('[data-call-editor-voice-note]').text(), /Settings voice is for .*en-GB/)
+  $('[data-call-preview-editor]').trigger('click'); await flush()
+  assert.equal(sent.at(-1).voice_name, '', 'a different-language Settings voice previews the actual device fallback')
+  $('[data-call-voice-name]').val('sv-one').trigger('change')
+  $('[data-call-language]').val('en-GB').trigger('change')
+  assert.deepEqual(options('[data-call-voice-name]'), ['__default__', '', 'en-one', 'en-two'])
+  assert.equal($('[data-call-voice-name]').val(), '__default__')
+  $('[data-call-back-top]').trigger('click'); $('[data-call-open-import]').trigger('click')
+  $('[data-call-import-paste]').val(JSON.stringify({ calls: [{ ...CALL_IMPORT_EXAMPLE.calls[0], language: 'fr-CA' }] }))
+  $('[data-call-import-paste-submit]').trigger('click')
+  $('[data-call-import-drafts] button').filter((_, el) => el.textContent === 'Edit').trigger('click')
+  assert.equal($('[data-call-language]').val(), 'fr-CA', 'an imported language absent from installed voices is preserved')
+  assert.deepEqual(options('[data-call-voice-name]'), ['__default__', ''])
   installed.client.dispose(); win.close()
 })
 
