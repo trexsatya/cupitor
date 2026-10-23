@@ -8810,6 +8810,11 @@ async function loadSearchResultsPage(page) {
   if (token !== window._subtitleSearchToken) return
   $result.append("<hr>")
   renderAccordions($result[0])
+  // Mobile results scroll with the document, so resetting the element's
+  // scrollTop above is insufficient when changing pages from the footer.
+  if (getComputedStyle($result[0]).overflowY === 'visible') {
+    $result[0].scrollIntoView({ block: 'start', behavior: 'instant' })
+  }
 }
 
 function changeSearchResultsPage(delta) {
