@@ -712,6 +712,30 @@
     z-index: 100001 !important;
 }
 
+.full-srt-open { display: inline-flex; align-items: center; gap: 6px; }
+#fullSrtDialog { background: #fff; color: #212529; }
+#fullSrtDialog .full-srt-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #fff;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #d6dce1;
+}
+#fullSrtDialog .full-srt-name { font-weight: 600; overflow-wrap: anywhere; margin-bottom: 8px; }
+#fullSrtDialog .full-srt-language-label { display: flex; align-items: center; gap: 8px; margin: 0; }
+#fullSrtDialog .full-srt-language { max-width: 100%; padding: 4px 8px; }
+#fullSrtDialog .full-srt-text {
+    margin: 12px 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    font-size: 14px;
+    line-height: 1.5;
+    color: inherit;
+    user-select: text;
+}
+
 /* Pin the captured-subtitles review dialog to the viewport so a scrolled
    page doesn't render it above the fold (top:0 in document coords). */
 .ui-dialog:has(> #captured-subtitles-dialog) {

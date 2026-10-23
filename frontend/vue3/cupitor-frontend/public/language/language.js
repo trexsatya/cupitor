@@ -2,6 +2,7 @@ import { retainCaptionEnds } from './caption-capture.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
+import { createFullSrtDialog } from './full-srt-dialog.js';
 import { recordingsHaveChanges } from './recordings-sync-state.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
@@ -6177,6 +6178,11 @@ function getInfoAboutMedia(mediaId, source, time_start) {
   return {fileName, url};
 }
 
+const openFullSrtDialog = createFullSrtDialog($, {
+  loadSubtitle: async (id, source) => (await getSubtitlesForLink(id, source)) || window.allSubtitles[id],
+  getLanguage: getLangFromUrl,
+})
+
 function showInfo(id, source, time_start, time_end) {
   const $dlg = $('#info-dialog-content')
   const clipKey = JSON.stringify([id, source, Number(time_start), Number(time_end)])
@@ -6195,7 +6201,14 @@ function showInfo(id, source, time_start, time_end) {
     ${owner ? `<h4 class="owner-label">${_.escape(owner)}</h4>` : ''}
     <h4>${_.escape(source)}</h4>
     <h4>${fromSeconds(time_start)} - ${fromSeconds(time_end)}</h4>
+    <button type="button" class="full-srt-open lang-tool-btn" title="Show complete SRT" aria-label="Show complete SRT">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 12h8M8 16h8"/>
+      </svg>
+      Full SRT
+    </button>
   `)
+  $dlg.find('.full-srt-open').on('click', () => openFullSrtDialog(id, source, fileName))
   // Pin to the top of the viewport — by default jQuery UI centers in the
   // window, which on a scrolled page can land it below the fold.
   const position = { my: 'center top', at: 'center top+20', of: window }
