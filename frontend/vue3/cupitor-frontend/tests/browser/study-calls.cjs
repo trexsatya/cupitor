@@ -16,7 +16,7 @@ async function check(browser, mobile) {
     window.CallBridge = { postMessage(raw) {
       const request = JSON.parse(raw); window.__callRequests.push(request)
       const data = request.op === 'getCapabilities'
-        ? { supported: true, permission: 'granted', full_screen: false, exact_alarms: false }
+        ? { supported: true, permission: 'granted', full_screen: false, exact_alarms: false, speech_input: true }
         : request.op === 'getCalls' ? { version: 1, calls } : { id: 'new-call' }
       window.dispatchEvent(new CustomEvent('cupitorCallAck', { detail: { ...request, ok: true, data } }))
       if (request.op === 'getCalls') window.dispatchEvent(new CustomEvent('cupitorCalls', { detail: data }))
@@ -28,9 +28,14 @@ async function check(browser, mobile) {
     await page.locator('#studyCallsDialog').waitFor({ state: 'visible' })
     await page.locator('[data-call-question]').fill('Which article goes with katt?')
     await page.locator('[data-call-choices]').fill('ett\nen')
+    await page.locator('[data-call-correct]').selectOption('1')
     await page.locator('[data-call-submit=now]').click()
     await page.waitForFunction(() => window.__callRequests.some(r => r.op === 'callNow'))
     assert.deepEqual(await page.evaluate(() => window.__callRequests.find(r => r.op === 'callNow').choices), ['ett', 'en'])
+    assert.deepEqual(await page.evaluate(() => {
+      const r = window.__callRequests.find(r => r.op === 'callNow')
+      return [r.correct_choice_index, r.max_retries, r.match_threshold, r.voice_response]
+    }), [1, 3, 0.8, true])
     await page.locator('[data-call-when]').fill('2030-01-01T12:00')
     await page.locator('[data-call-submit=later]').click()
     assert.equal(await page.evaluate(() => window.__callRequests.filter(r => r.op === 'schedule').length), 0, 'invalid future time is not scheduled')
@@ -51,8 +56,18 @@ async function check(browser, mobile) {
     await page.locator('[data-call-history] button').click()
     await page.waitForFunction(() => window.__callRequests.some(r => r.op === 'cancel'))
     assert.equal(await page.evaluate(() => window.__callRequests.find(r => r.op === 'cancel').id), 'call-199')
+    await page.locator('[data-call-type]').selectOption('text')
+    await page.locator('[data-call-question]').fill('What is the capital of Sweden?')
+    await page.locator('[data-call-accepted]').fill('Stockholm\nStockholms stad')
+    await page.locator('[data-call-retries]').fill('2')
+    await page.locator('[data-call-submit=now]').click()
+    await page.waitForFunction(() => window.__callRequests.some(r => r.op === 'callNow' && r.response_type === 'text'))
+    assert.deepEqual(await page.evaluate(() => {
+      const r = window.__callRequests.filter(r => r.op === 'callNow').at(-1)
+      return [r.choices, r.accepted_answers, r.max_retries, r.voice_response]
+    }), [[], ['Stockholm', 'Stockholms stad'], 2, true])
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'Mobile' : 'Desktop'}: call composer, scheduling, cancellation and 200-row scrolling passed`)
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: choice/free responses, voice, retry and fuzzy settings, scheduling, cancellation and 200-row scrolling passed`)
   } finally { await page.close() }
 }
 

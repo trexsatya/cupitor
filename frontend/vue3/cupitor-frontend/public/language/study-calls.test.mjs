@@ -52,7 +52,8 @@ test('RPC errors, unavailable bridge, synchronous failure and timeout settle', a
 
 test('composer validates real choices, language, and future times', () => {
   const form = { title: ' Question ', question: 'Which?', choices: ' ett\r\n\nen ', language: 'sv-SE' }
-  assert.deepEqual(callPayload(form), { title: 'Question', question: 'Which?', choices: ['ett', 'en'], language: 'sv-SE' })
+  assert.deepEqual(callPayload(form), { title: 'Question', question: 'Which?', choices: ['ett', 'en'], language: 'sv-SE',
+    response_type: 'choice', max_retries: 3, match_threshold: 0.8, voice_response: true })
   for (const change of [{ choices: 'one' }, { choices: 'a\n'.repeat(10) }, { question: '' }, { language: 'bad-value-long' }]) {
     assert.throws(() => callPayload({ ...form, ...change }))
   }
@@ -60,16 +61,34 @@ test('composer validates real choices, language, and future times', () => {
   assert.throws(() => callPayload({ ...form, when: '2020-01-01T12:00' }))
 })
 
+test('free responses require accepted answers and preserve retry and fuzzy settings', () => {
+  const form = { title: 'Capital', question: 'Capital of Sweden?', language: 'sv-SE', responseType: 'text',
+    acceptedAnswers: 'Stockholm\nStockholms stad', maxRetries: 3, matchThreshold: 0.8 }
+  const payload = callPayload(form)
+  assert.deepEqual(payload.choices, [])
+  assert.deepEqual(payload.accepted_answers, ['Stockholm', 'Stockholms stad'])
+  assert.equal(payload.max_retries, 3)
+  assert.equal(payload.match_threshold, 0.8)
+  assert.equal(payload.voice_response, true)
+  for (const change of [{ acceptedAnswers: '' }, { acceptedAnswers: '...' }, { maxRetries: -1 }, { maxRetries: 1.5 },
+    { maxRetries: 11 }, { matchThreshold: 0.2 }]) assert.throws(() => callPayload({ ...form, ...change }))
+  assert.equal(callPayload({ ...form, maxRetries: 0, voiceResponse: false }).max_retries, 0)
+  assert.equal(callPayload({ ...form, voiceResponse: false }).voice_response, false)
+  assert.throws(() => callPayload({ ...form, responseType: 'choice', choices: 'a\nb', correctChoice: '' }))
+})
+
 test('dialog restores durable history safely, selects reminder text, submits and cancels', async () => {
   const { win, $ } = fixture()
   const sent = []
   const calls = [{ id: 'one', title: '<img src=x onerror=alert(1)>', created_at: 1, when_ms: 2,
-    status: 'completed', choice: '<b>en</b>' }, { id: 'two', title: 'Later', status: 'scheduled', created_at: 3, when_ms: 4 }]
+    status: 'completed', choice: '<b>en</b>', spoken_response: '<script>bad</script>', correct: true,
+    attempts: [{ answer: 'one', correct: false }, { answer: '<b>en</b>', correct: true }] },
+    { id: 'two', title: 'Later', status: 'scheduled', created_at: 3, when_ms: 4 }]
   win.__cupitorCalls = { calls }
   win.__cupitorNotifLists = { lists: [{ external_key: 'list', name: 'Words', items: [{ external_id: 'word', title: 'en katt', body: 'a cat' }] }] }
   win.CallBridge = { postMessage(raw) {
     const request = JSON.parse(raw); sent.push(request)
-    const data = request.op === 'getCapabilities' ? { supported: true, permission: 'granted', full_screen: true, exact_alarms: true } :
+    const data = request.op === 'getCapabilities' ? { supported: true, permission: 'granted', full_screen: true, exact_alarms: true, speech_input: true } :
       request.op === 'getCalls' ? { calls } : { id: 'three' }
     win.dispatchEvent(new win.CustomEvent('cupitorCallAck', { detail: { ...request, ok: true, data } }))
   } }
@@ -78,11 +97,25 @@ test('dialog restores durable history safely, selects reminder text, submits and
   await new Promise(resolve => setImmediate(resolve))
   assert.equal($('#studyCallsDialog img').length, 0)
   assert.match($('[data-call-history]').text(), /Answer: <b>en<\/b>/)
+  assert.match($('[data-call-history]').text(), /Attempts \(2\)/)
+  assert.equal($('#studyCallsDialog script').length, 0)
   $('[data-call-source]').val(JSON.stringify(['list', 'word'])).trigger('change')
   assert.equal($('[data-call-question]').val(), 'en katt\na cat')
+  $('[data-call-correct]').val('1')
   $('[data-call-submit=now]').trigger('click')
   await new Promise(resolve => setImmediate(resolve))
   assert.deepEqual(sent.find(r => r.op === 'callNow').choices, ['Yes', 'No'])
+  assert.equal(sent.find(r => r.op === 'callNow').correct_choice_index, 1)
+  assert.equal(sent.find(r => r.op === 'callNow').voice_response, true)
+  $('[data-call-type]').val('text').trigger('change')
+  $('[data-call-accepted]').val('Stockholm\nStockholms stad')
+  $('[data-call-retries]').val('2')
+  $('[data-call-submit=now]').trigger('click')
+  await new Promise(resolve => setImmediate(resolve))
+  const free = sent.filter(r => r.op === 'callNow').at(-1)
+  assert.equal(free.response_type, 'text')
+  assert.equal(free.max_retries, 2)
+  assert.deepEqual(free.accepted_answers, ['Stockholm', 'Stockholms stad'])
   $('[data-call-history] button').trigger('click')
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(sent.find(r => r.op === 'cancel').id, 'two')

@@ -4971,5 +4971,6 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 .study-calls-dialog input, .study-calls-dialog textarea, .study-calls-dialog select {
     display: block; width: 100%; box-sizing: border-box; font-weight: normal;
 }
+.study-calls-dialog input[type="checkbox"] { display: inline-block; width: auto; margin-right: 8px; }
 .study-call-actions, .study-call-permissions { display: flex; flex-wrap: wrap; gap: 8px; }
 .study-call-history-row { padding: 12px 0; border-bottom: 1px solid #aaa; overflow-wrap: anywhere; }

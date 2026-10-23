@@ -40,17 +40,36 @@ export function createCallClient(win, timeoutMs = 15000) {
   }
 }
 
-export function callPayload({ title, question, choices, language, when }, now = Date.now()) {
+export function callPayload({ title, question, choices, language, when, responseType = 'choice',
+  correctChoice, acceptedAnswers, maxRetries = 3, matchThreshold = 0.8, voiceResponse = true }, now = Date.now()) {
   title = String(title || '').trim()
   question = String(question || '').trim()
-  choices = String(choices || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+  const lines = value => String(value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+  choices = responseType === 'text' ? [] : lines(choices)
   language = String(language || '').trim()
   if (!title || title.length > 120 || !question || question.length > 4000 ||
-      choices.length < 2 || choices.length > 9 || choices.some(s => s.length > 200) ||
+      !['choice', 'text'].includes(responseType) ||
+      (responseType === 'choice' && (choices.length < 2 || choices.length > 9 || choices.some(s => s.length > 200))) ||
       !/^[a-zA-Z]{2,3}(-[a-zA-Z]{2,4})?$/.test(language)) {
     throw new Error('Enter a title, a question, 2–9 alternatives and a language such as sv-SE.')
   }
-  const result = { title, question, choices, language }
+  const retries = Number(maxRetries)
+  const threshold = Number(matchThreshold)
+  if (maxRetries === '' || !Number.isInteger(retries) || retries < 0 || retries > 10) throw new Error('Choose 0–10 retries after the first attempt.')
+  if (!Number.isFinite(threshold) || threshold < 0.7 || threshold > 1) throw new Error('Choose a valid answer matching setting.')
+  const result = { title, question, choices, language, response_type: responseType, max_retries: retries,
+    match_threshold: threshold, voice_response: voiceResponse !== false }
+  if (responseType === 'text') {
+    const accepted = lines(acceptedAnswers)
+    if (!accepted.length || accepted.length > 20 || accepted.some(s => s.length > 500 || !s.replace(/[.!?\s]/g, ''))) {
+      throw new Error('Enter 1–20 accepted answers, one per line.')
+    }
+    result.accepted_answers = accepted
+  } else if (correctChoice !== undefined) {
+    const index = Number(correctChoice)
+    if (correctChoice === '' || !Number.isInteger(index) || index < 0 || index >= choices.length) throw new Error('Choose the correct alternative.')
+    result.correct_choice_index = index
+  }
   if (when) {
     const timestamp = new Date(when).getTime()
     if (!Number.isFinite(timestamp) || timestamp <= now || timestamp > now + 366 * 86400000) {
@@ -68,6 +87,7 @@ export function installStudyCalls(win, $) {
   let snapshot = win.__cupitorCalls || { calls: [] }
   let $dialog = null
   let permitted = false
+  let voiceAvailable = false
   const active = new Set(['scheduled', 'ringing', 'answered'])
   const errorMessages = {
     permission_denied: 'Enable study-call notifications first.',
@@ -87,6 +107,17 @@ export function installStudyCalls(win, $) {
       $('<strong>').text(call.title).appendTo($row)
       $('<div>').text(`${new Date(call.when_ms).toLocaleString()} · ${call.status}`).appendTo($row)
       if (call.choice != null) $('<div>').text(`Answer: ${call.choice}`).appendTo($row)
+      else if (call.answer) $('<div>').text(`Answer: ${call.answer}`).appendTo($row)
+      if (call.spoken_response) $('<div>').text(`Heard: ${call.spoken_response}`).appendTo($row)
+      if (call.correct === true) $('<div>').text('Correct answer').appendTo($row)
+      if (Array.isArray(call.attempts) && call.attempts.length) {
+        const $attempts = $('<details>').appendTo($row)
+        $('<summary>').text(`Attempts (${call.attempts.length})`).appendTo($attempts)
+        call.attempts.forEach((attempt, index) => {
+          const outcome = attempt.correct === true ? 'Correct' : attempt.reason ? 'Not understood' : attempt.correct === false ? 'Incorrect' : 'Saved'
+          $('<div>').text(`${index + 1}. ${attempt.answer || 'No answer heard'} — ${outcome}`).appendTo($attempts)
+        })
+      }
       if (active.has(call.status)) {
         $('<button type="button" class="btn">').text('Cancel call').appendTo($row).on('click', async function () {
           this.disabled = true
@@ -115,6 +146,11 @@ export function installStudyCalls(win, $) {
     if (!client.available() || !$dialog) return
     const caps = await client.rpc('getCapabilities')
     const enabled = caps.supported === true
+    voiceAvailable = caps.speech_input === true
+    $dialog.find('[data-call-voice]').prop('disabled', !voiceAvailable)
+    $dialog.find('[data-call-voice-note]').text(voiceAvailable
+      ? 'Say your answer after the question. Microphone permission is requested when needed.'
+      : 'Speech recognition is unavailable on this device. You can answer on screen.')
     permitted = enabled && caps.permission === 'granted'
     $dialog.find('[data-call-submit]').prop('disabled', !permitted)
     $dialog.find('[data-call-permission]').toggle(enabled && caps.permission !== 'granted')
@@ -122,7 +158,7 @@ export function installStudyCalls(win, $) {
     $dialog.find('[data-call-exact]').toggle(enabled && !caps.exact_alarms)
     $dialog.find('[data-call-capabilities]').text(!enabled ? 'Study calls need an updated Cupitor Android app.' :
       caps.permission !== 'granted' ? 'Enable notifications to let Cupitor ring.' :
-        'Cupitor rings for up to 45 seconds. Answer to hear the question, then tap an alternative.')
+        'Cupitor rings for up to 45 seconds. Answer to hear the question, then speak or answer on screen.')
     await client.rpc('getCalls')
   }
 
@@ -134,7 +170,10 @@ export function installStudyCalls(win, $) {
       const when = immediate ? null : value('when')
       if (!immediate && !when) throw new Error('Choose a date and time.')
       const payload = callPayload({ title: value('title'), question: value('question'),
-        choices: value('choices'), language: value('language'), when })
+        choices: value('choices'), language: value('language'), when,
+        responseType: value('type'), correctChoice: value('correct'), acceptedAnswers: value('accepted'),
+        maxRetries: value('retries'), matchThreshold: value('match'),
+        voiceResponse: voiceAvailable && $dialog.find('[data-call-voice]').is(':checked') })
       await client.rpc(immediate ? 'callNow' : 'schedule', payload)
       saved = true
       status(immediate ? 'Calling…' : 'Call scheduled.')
@@ -156,7 +195,19 @@ export function installStudyCalls(win, $) {
       <label>From study reminders<select data-call-source></select></label>
       <label>Call title<input data-call-title maxlength="120" value="Study question"></label>
       <label>Question<textarea data-call-question rows="4" maxlength="4000"></textarea></label>
-      <label>Alternatives — one per line<textarea data-call-choices rows="4">Yes\nNo</textarea></label>
+      <label>Answer type<select data-call-type><option value="choice">Multiple choice</option><option value="text">Free response</option></select></label>
+      <div data-call-choice-fields>
+        <label>Alternatives — one per line<textarea data-call-choices rows="4">Yes\nNo</textarea></label>
+        <label>Correct alternative<select data-call-correct></select></label>
+      </div>
+      <div data-call-text-fields style="display:none;">
+        <label>Accepted answers — one per line<textarea data-call-accepted rows="3" placeholder="Add accepted answers or phrasings"></textarea></label>
+      </div>
+      <label>Retries after first attempt<input type="number" min="0" max="10" step="1" value="3" data-call-retries></label>
+      <p>Stops as soon as the answer is correct. Incorrect or unclear answers retry automatically.</p>
+      <label>Answer matching<select data-call-match><option value="0.8">Tolerant of speech-to-text errors</option><option value="0.9">Stricter</option><option value="1">Exact</option></select></label>
+      <label><input type="checkbox" checked data-call-voice>Allow spoken answers</label>
+      <p data-call-voice-note></p>
       <label>Speech language<input data-call-language value="sv-SE" placeholder="sv-SE or en-GB"></label>
       <label>Date and time<input type="datetime-local" data-call-when></label>
       <div class="study-call-actions">
@@ -174,6 +225,21 @@ export function installStudyCalls(win, $) {
     $dialog.on('click', '[data-call-fullscreen]', () => request('openFullScreenSettings'))
     $dialog.on('click', '[data-call-exact]', () => request('openAlarmSettings'))
     $dialog.on('click', '[data-call-refresh]', () => refresh().catch(e => status(e.message)))
+    const updateCorrectChoices = () => {
+      const $correct = $dialog.find('[data-call-correct]')
+      const previous = $correct.find('option:selected').data('label')
+      $correct.empty().append($('<option>').val('').text('Choose the correct alternative'))
+      const labels = $dialog.find('[data-call-choices]').val().split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+      labels.forEach((label, index) => $('<option>').val(String(index)).text(`${index + 1}. ${label}`).data('label', label).appendTo($correct))
+      if (previous && labels.filter(label => label === previous).length === 1) $correct.val(String(labels.indexOf(previous)))
+    }
+    $dialog.on('input', '[data-call-choices]', updateCorrectChoices)
+    $dialog.on('change', '[data-call-type]', function () {
+      const choice = this.value === 'choice'
+      $dialog.find('[data-call-choice-fields]').toggle(choice)
+      $dialog.find('[data-call-text-fields]').toggle(!choice)
+    })
+    updateCorrectChoices()
     $dialog.on('change', '[data-call-source]', function () {
       const item = $(this).find('option:selected').data('item')
       if (!item) return
