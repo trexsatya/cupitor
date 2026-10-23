@@ -74,7 +74,6 @@ jobs:
           node tests/browser/spotify-practice.cjs
           node tests/browser/notification-practice.cjs
           node tests/browser/study-calls.cjs
-          node tests/browser/playlist-calls.cjs
           node tests/browser/language-dialogs.cjs
           node tests/browser/search-result-counts.cjs
           node tests/browser/compound-vocabulary-groups.cjs
@@ -109,7 +108,6 @@ jobs:
           node tests/browser/spotify-practice.cjs
           node tests/browser/notification-practice.cjs
           node tests/browser/study-calls.cjs
-          node tests/browser/playlist-calls.cjs
           node tests/browser/practice-controls.cjs
           node tests/browser/practice-manual-video.cjs
           node tests/browser/practice-panels.cjs

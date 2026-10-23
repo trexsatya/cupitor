@@ -3,7 +3,6 @@ import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
 import { recordingsHaveChanges } from './recordings-sync-state.js';
-import { buildPlaylistCallItems as _buildPlaylistCallItems, playlistCallDefaults as _playlistCallDefaults } from './playlist-calls.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
@@ -15738,39 +15737,6 @@ function _notifItemsForPlaylist(name) {
 // tap fires cupitorNotificationOpened into the already-loaded page, which we
 // handle in place by opening Practice — no navigation, no reload. The payload
 // (pl + xid) rides along in the event so we can resolve the item.
-function _notifRawItems(name) {
-  const rec = (window._recordings || {})[name]
-  return rec ? (_isVirtual(name) ? _resolveVirtualItems(name) : rec.items || {}) : {}
-}
-function _notifCallSettings() {
-  return {
-    direction: $('#notifCallDirection').val(), response_type: $('#notifCallType').val(),
-    language: $('#notifCallLanguage').val(), max_retries: $('#notifCallRetries').val() === '' ? NaN : Number($('#notifCallRetries').val()),
-    match_threshold: Number($('#notifCallMatch').val()), voice_response: $('#notifCallVoice').is(':checked'),
-  }
-}
-function _notifLoadCallSettings(name, list) {
-  list = list || _webpageNotifLists(_notifLists()).find(l => l.external_key === window._recordings?.[name]?.notifKey)
-  const settings = { ..._playlistCallDefaults, ...list?.call_config,
-    ...(list?.call_config?.answer_type ? { response_type: list.call_config.answer_type } : {}),
-    ...window._recordings?.[name]?.callSettings }
-  $('#notifCallDirection').val(settings.direction)
-  $('#notifCallType').val(settings.response_type)
-  $('#notifCallLanguage').val(settings.language)
-  $('#notifCallRetries').val(settings.max_retries)
-  $('#notifCallMatch').val(String(settings.match_threshold))
-  $('#notifCallVoice').prop('checked', settings.voice_response)
-}
-function _notifPreviewCalls() {
-  const calls = $('#notifDelivery').val() === 'call'
-  $('#notifCallOptions').toggle(calls)
-  $('#notifEnableBtn').prop('disabled', calls && $('#notifDelivery').data('calls-supported') === false)
-  if (!calls) return
-  const name = $('#notifPlaylist').val()
-  const result = _buildPlaylistCallItems(name || '', _notifRawItems(name), _notifCallSettings())
-  $('#notifCallPreview').text(`${result.items.length} question(s) ready${result.skipped.length ? `; ${result.skipped.length} skipped (missing or oversized text, or not enough distinct alternatives)` : ''}.`)
-}
-
 function _notifBuildDecorated(name) {
   return _notifItemsForPlaylist(name).map(it => ({
     ...it,
@@ -15796,13 +15762,10 @@ function _notifResyncAll() {
   Object.keys(coll).forEach(name => {
     const key = coll[name] && coll[name].notifKey
     if (!key || !onBridge.has(key)) return
-    const list = _webpageNotifLists(_notifLists()).find(l => l.external_key === key)
-    const items = list?.delivery === 'call'
-      ? _buildPlaylistCallItems(name, _notifRawItems(name), coll[name].callSettings || list.call_config).items
-      : _notifBuildDecorated(name)
+    const items = _notifBuildDecorated(name)
     // Don't auto-wipe to empty — an all-disabled/emptied playlist keeps its last
     // items until the user explicitly disables it in the dialog.
-    if (!items.length && list?.delivery !== 'call') return
+    if (!items.length) return
     notifRpc('syncItems', { external_key: key, items, mode: 'replace' }).catch(() => {})
   })
 }
@@ -15811,12 +15774,9 @@ async function _notifEnablePlaylist(name, scheduleKey, introKey) {
   const rec = (window._recordings || {})[name]
   if (!rec) return
   if (_refuseReadOnlyPlaylist(name)) return
-  const delivery = $('#notifDelivery').val() || 'notification'
-  const callSettings = _notifCallSettings()
-  const callItems = delivery === 'call' ? _buildPlaylistCallItems(name, _notifRawItems(name), callSettings) : null
-  const built = callItems ? callItems.items : _notifItemsForPlaylist(name)
-  if (!built.length) { alert(delivery === 'call' ? 'No usable call questions. Use free response, or add at least two distinct answers for multiple choice.' : 'This playlist has no items with text to notify about.'); return }
-  const items = callItems ? callItems.items : _notifBuildDecorated(name)
+  const built = _notifItemsForPlaylist(name)
+  if (!built.length) { alert('This playlist has no items with text to notify about.'); return }
+  const items = _notifBuildDecorated(name)
   const existingKey = rec.notifKey
   const alreadyOnBridge = existingKey && _webpageNotifLists(_notifLists()).some(l => l.external_key === existingKey)
   const key = existingKey || _makeNotifKey()
@@ -15825,25 +15785,20 @@ async function _notifEnablePlaylist(name, scheduleKey, introKey) {
   const $st = $('#notifEnableStatus').text('Enabling…').css('color', '#666')
   try {
     if (alreadyOnBridge) {
-      const current = _webpageNotifLists(_notifLists()).find(l => l.external_key === key)
-      if (current?.delivery === 'call' && delivery !== 'call') await notifRpc('setDelivery', { external_key: key, delivery })
       // Playlist is the source of truth — replace so removed items are cancelled.
       await notifRpc('syncItems', { external_key: key, items, mode: 'replace' })
-      if (delivery === 'call') await notifRpc('setDelivery', { external_key: key, delivery, call_config: callSettings })
       // setSchedule sets FULL scheduling — omitting intro_schedule_key clears it.
       const sched = { external_key: key, schedule_key: scheduleKey }
       if (useIntro) sched.intro_schedule_key = introKey
-      if (current?.schedule_key !== scheduleKey || (current?.intro_schedule_key || '') !== (useIntro ? introKey : '')) await notifRpc('setSchedule', sched)
+      await notifRpc('setSchedule', sched)
     } else {
-      const create = { external_key: key, name, schedule_key: scheduleKey, items, delivery,
-        ...(delivery === 'call' ? { call_config: callSettings } : {}) }
+      const create = { external_key: key, name, schedule_key: scheduleKey, items }
       if (useIntro) create.intro_schedule_key = introKey
       await notifRpc('createList', create)
     }
     rec.notifKey = key
-    if (delivery === 'call') rec.callSettings = callSettings
     _saveRecording()
-    $st.text(`Enabled ${delivery === 'call' ? 'calls' : 'notifications'} — ${built.length} item${built.length === 1 ? '' : 's'}${callItems?.skipped.length ? ` (${callItems.skipped.length} skipped)` : ''}`).css('color', '#070')
+    $st.text(`Enabled — ${built.length} item${built.length === 1 ? '' : 's'}`).css('color', '#070')
     _notifRenderEnabled()
   } catch (err) {
     console.warn('[notif] enable failed', err)
@@ -15871,15 +15826,50 @@ function _notifRenderEnabled() {
         `<option value="${_.escape(s.key)}"${s.key === l.intro_schedule_key ? ' selected' : ''}>${_.escape(s.name)}</option>`)
     ).join('')
     html += `<div class="notif-row" data-key="${_.escape(l.external_key)}" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #f0f0f0;">
-      <span style="flex:1;min-width:120px;font-size:13px;"><b>${_.escape(plName)}</b> ${l.delivery === 'call' ? '☎ Calls' : '🔔 Notifications'} <span style="color:#888;">(${count})</span>${paused ? ' <span style="color:#a60;">paused</span>' : ''}</span>
+      <span style="flex:1;min-width:120px;font-size:13px;"><b>${_.escape(plName)}</b> <span style="color:#888;">(${count})</span>${paused ? ' <span style="color:#a60;">paused</span>' : ''}</span>
       <select class="notif-sched" title="Schedule" style="max-width:140px;">${schedOpts}</select>
       <select class="notif-intro" title="Introduction cadence (series schedule only)" style="max-width:120px;"${mainIsSeries ? '' : ' disabled'}>${introOpts}</select>
-      ${l.delivery === 'call' ? '<button type="button" class="btn notif-call-edit">Call settings</button>' : ''}
+      <button type="button" class="btn notif-view-schedule">View schedule</button>
       <button type="button" class="btn notif-toggle">${paused ? '▶ Resume' : '⏸ Pause'}</button>
       <button type="button" class="btn notif-disable" style="color:#a00;">Disable</button>
     </div>`
   })
   $wrap.html(html)
+}
+
+// Show the native arming plan; never estimate future dates in the browser.
+async function _notifShowSchedule(key) {
+  let $preview = $('#notifSchedulePreview')
+  if (!$preview.length) $preview = $('<div id="notifSchedulePreview"></div>').appendTo('body')
+  $preview.empty().append($('<p role="status">').text('Loading schedule…'))
+  $preview.dialog({ title: 'Notification schedule', width: Math.min(680, $(window).width() - 30), modal: true, autoOpen: true })
+  try {
+    const data = await notifRpc('getSchedulePreview', { external_key: key })
+    $preview.empty().append($('<h3>').text(data.name || 'Schedule'))
+    $('<p>').text('Current plan for the next 48 hours. Times use this device’s timezone and may be approximate. Later rotation and introduction times appear after the next delivery.').appendTo($preview)
+    if (data.status === 'paused') $('<p>').text('This list is paused. No notifications are scheduled.').appendTo($preview)
+    const rows = data.rows || []
+    if (!rows.length) $('<p>').text('No items in this list.').appendTo($preview)
+    else {
+      const $table = $('<table class="notif-schedule-table">').appendTo($preview)
+      $('<thead><tr><th>Item number</th><th>Item</th><th>When</th><th>Status</th></tr></thead>').appendTo($table)
+      const $body = $('<tbody>').appendTo($table)
+      rows.forEach(row => {
+        const $row = $('<tr>').appendTo($body)
+        $('<td>').text(row.item_number).appendTo($row)
+        $('<td>').text(row.title).appendTo($row)
+        $('<td>').text(row.when_ms ? new Date(row.when_ms).toLocaleString() :
+          row.state === 'Outside the next 48 hours' && row.next_due_at ? new Date(row.next_due_at).toLocaleString() : '—').appendTo($row)
+        $('<td>').text(row.state).appendTo($row)
+      })
+      if (data.item_count > rows.length) $('<p>').text(`Showing ${rows.length} of ${data.item_count} items.`).appendTo($preview)
+    }
+    $('<button type="button" class="btn">').text('Refresh schedule').appendTo($preview).on('click', () => _notifShowSchedule(key))
+  } catch (error) {
+    $preview.empty().append($('<p role="status">').text(error.message === 'unknown_op' || error.message === 'unsupported'
+      ? 'Update the Cupitor app to view the notification schedule.' : 'Could not load schedule: ' + error.message))
+  }
+  $(window).trigger('resize')
 }
 
 // Push a row's full scheduling (main + optional intro). Omitting the intro key
@@ -15922,15 +15912,11 @@ async function _notifBootCapabilities() {
   try { caps = await notifRpc('getCapabilities') } catch (_) {}
   if (!caps || caps.supported === false) { $uns.show(); $perm.hide(); $body.hide(); return }
   $uns.hide()
-  const callsSupported = (caps.delivery_modes || []).includes('call')
-  $('#notifDelivery').data('calls-supported', callsSupported)
-  $('#notifCallCompatibility').toggle(!callsSupported)
-  _notifPreviewCalls()
   if (caps.permission !== 'granted') { $perm.show(); $body.hide() }
   else { $perm.hide(); $body.show() }
 }
 
-function _openNotifDialog(delivery = 'notification') {
+function _openNotifDialog() {
   let $d = $('#notifDialog')
   if (!$d.length) $d = $('<div id="notifDialog"></div>').appendTo('body')
   $d.html(`
@@ -15940,22 +15926,8 @@ function _openNotifDialog(delivery = 'notification') {
       <button type="button" id="notifPermBtn" class="btn" style="margin-left:6px;">Enable notifications</button>
     </div>
     <div id="notifBody" style="display:none;">
-      <div class="mee-row"><label class="mee-lbl" for="notifDelivery">Delivery</label>
-        <select id="notifDelivery"><option value="notification">Notifications</option><option value="call">Calls</option></select></div>
-      <p id="notifCallCompatibility" style="display:none;">Playlist calls need an updated Cupitor Android app.</p>
       <div class="mee-row"><label class="mee-lbl">Playlist</label>
         <select id="notifPlaylist" style="width:100%;"></select></div>
-      <div id="notifCallOptions" class="study-calls-dialog">
-        <label>Question direction<select id="notifCallDirection"><option value="source-target">Read source → answer target</option><option value="target-source">Read target → answer source</option></select></label>
-        <p>Cards use the other side as the answer. Text-only cards and word entries ask you to repeat the text. Disabled items are excluded.</p>
-        <label>Answer type<select id="notifCallType"><option value="text">Free response</option><option value="choice">Multiple choice — alternatives from this playlist</option></select></label>
-        <label>Speech language<input id="notifCallLanguage" value="sv-SE"></label>
-        <label>Retries after the first attempt<input id="notifCallRetries" type="number" min="0" max="10" step="1" value="3"></label>
-        <label>Answer matching<select id="notifCallMatch"><option value="0.8">Tolerant of speech-to-text errors</option><option value="0.9">Stricter</option><option value="1">Exact</option></select></label>
-        <label><input id="notifCallVoice" type="checkbox" checked>Allow spoken answers</label>
-        <p id="notifCallPreview" role="status"></p>
-        <button type="button" class="btn" id="notifCallHistory">Call history / one-off call</button>
-      </div>
       <div class="mee-row"><label class="mee-lbl">Schedule</label>
         <select id="notifSchedule" style="width:100%;"></select></div>
       <div class="mee-row" id="notifIntroRow"><label class="mee-lbl">Introduce</label>
@@ -15966,7 +15938,7 @@ function _openNotifDialog(delivery = 'notification') {
         <span id="notifEnableStatus" style="font-size:12px;margin-left:6px;"></span>
       </div>
       <div style="margin-top:14px;border-top:1px solid #eee;padding-top:8px;">
-        <div style="font-weight:bold;font-size:13px;margin-bottom:6px;">Enabled study reminders</div>
+        <div style="font-weight:bold;font-size:13px;margin-bottom:6px;">Enabled notifications</div>
         <div id="notifEnabledList"><div style="color:#888;font-size:12px;">None yet.</div></div>
       </div>
     </div>
@@ -15981,9 +15953,6 @@ function _openNotifDialog(delivery = 'notification') {
   const curName = window._recording && window._recording.currentName
   if (curName && !_isVirtual(curName)) $pl.val(curName)
 
-  $('#notifDelivery').val(delivery)
-  _notifLoadCallSettings($pl.val())
-  _notifPreviewCalls()
   _notifPopulateSchedules()
   _notifRenderEnabled()
 
@@ -15994,21 +15963,6 @@ function _openNotifDialog(delivery = 'notification') {
   $d.off('click', '#notifPermBtn').on('click', '#notifPermBtn', async () => {
     try { await notifRpc('requestPermission') } catch (_) {}
     _notifBootCapabilities()
-  })
-  $d.off('change input', '#notifDelivery, #notifCallOptions input, #notifCallOptions select').on('change input', '#notifDelivery, #notifCallOptions input, #notifCallOptions select', _notifPreviewCalls)
-  $d.off('change', '#notifPlaylist').on('change', '#notifPlaylist', () => { _notifLoadCallSettings($pl.val()); _notifPreviewCalls() })
-  $d.off('click', '#notifCallHistory').on('click', '#notifCallHistory', () => window._openStudyCalls?.())
-  $d.off('click', '.notif-call-edit').on('click', '.notif-call-edit', function () {
-    const key = $(this).closest('.notif-row').data('key')
-    const list = _webpageNotifLists(_notifLists()).find(l => l.external_key === key)
-    const name = _playlistForNotifKey(key)
-    if (!name) return
-    $pl.val(name).trigger('change.select2')
-    $('#notifDelivery').val('call')
-    _notifLoadCallSettings(name, list)
-    $('#notifSchedule').val(list.schedule_key)
-    $('#notifIntroSchedule').val(list.intro_schedule_key || '')
-    _notifSyncIntroAvailability(); _notifPreviewCalls()
   })
   $d.off('change', '#notifSchedule').on('change', '#notifSchedule', _notifSyncIntroAvailability)
   $d.off('click', '#notifEnableBtn').on('click', '#notifEnableBtn', () => {
@@ -16033,6 +15987,9 @@ function _openNotifDialog(delivery = 'notification') {
   $d.off('change', '.notif-intro').on('change', '.notif-intro', function () {
     _notifApplyRowSchedule($(this).closest('.notif-row'))
   })
+  $d.off('click', '.notif-view-schedule').on('click', '.notif-view-schedule', function () {
+    _notifShowSchedule($(this).closest('.notif-row').data('key'))
+  })
   $d.off('click', '.notif-toggle').on('click', '.notif-toggle', function () {
     const $row = $(this).closest('.notif-row')
     const key = $row.data('key')
@@ -16042,7 +15999,7 @@ function _openNotifDialog(delivery = 'notification') {
   })
   $d.off('click', '.notif-disable').on('click', '.notif-disable', function () {
     const key = $(this).closest('.notif-row').data('key')
-    if (!confirm('Turn off study reminders for this playlist?')) return
+    if (!confirm('Turn off notifications for this playlist?')) return
     notifRpc('deleteList', { external_key: key }).then(() => {
       const pl = _playlistForNotifKey(key)
       if (pl && window._recordings[pl]) { delete window._recordings[pl].notifKey; _saveRecording() }
@@ -16050,17 +16007,17 @@ function _openNotifDialog(delivery = 'notification') {
   })
 
   $d.dialog({
-    title: 'Study reminders — notifications and calls',
+    title: 'Study reminders — notifications',
+    maxHeight: Math.max(180, window.innerHeight - 40),
     width: Math.min(460, $(window).width() - 40),
     modal: true,
     autoOpen: true,
     close: () => { try { $pl.select2('destroy') } catch (_) {} }
   })
   try { $pl.select2({ width: '100%', dropdownParent: $d, minimumResultsForSearch: 8 }) } catch (_) {}
-  _notifBootCapabilities()
+  _notifBootCapabilities().finally(() => $(window).trigger('resize'))
 }
 window._openNotifDialog = _openNotifDialog
-window._openPlaylistCalls = () => _openNotifDialog('call')
 installStudyCalls(window, $)
 
 // Browser test helper (no NotifBridge needed): simulate a notification tap for

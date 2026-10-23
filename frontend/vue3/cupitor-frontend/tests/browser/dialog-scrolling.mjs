@@ -22,13 +22,8 @@ const extract = name => {
 const notificationCode = [
   '_notifSchedules', '_notifLists', '_playlistForNotifKey',
   '_notifScheduleKind', '_notifPopulateSchedules', '_notifSyncIntroAvailability',
-  '_notifRawItems', '_notifCallSettings', '_notifLoadCallSettings', '_notifPreviewCalls',
-  '_notifRenderEnabled', '_notifBootCapabilities', '_openNotifDialog',
+  '_notifRenderEnabled', '_notifShowSchedule', '_notifBootCapabilities', '_openNotifDialog',
 ].map(extract).join('\n') + '\nwindow._openNotifDialog = _openNotifDialog;';
-const calls = await readFile(new URL('../../public/language/playlist-calls.js', import.meta.url), 'utf8');
-const defaultsNode = parse(calls, {sourceType: 'module'}).program.body.find(node =>
-  node.type === 'ExportNamedDeclaration' && node.declaration?.declarations?.[0]?.id.name === 'playlistCallDefaults').declaration;
-const callDefaults = calls.slice(defaultsNode.start, defaultsNode.end).replace('playlistCallDefaults', '_playlistCallDefaults');
 const errors = [];
 let lastPage;
 try {
@@ -49,7 +44,6 @@ try {
     // The real notification dialog/list renderer; substitute only the native
     // app bridge and data providers, never layout or scrolling.
     const providers = [
-      callDefaults,
       "const $ = jQuery, _ = {escape: value => jQuery('<div>').text(value).html()};",
       "window._recordings = Object.fromEntries(Array.from({length: 100}, (_, i) =>",
       "  ['Playlist ' + (i + 1), {notifKey: 'key-' + i, items: {}}]));",
@@ -62,8 +56,12 @@ try {
       "const listRecordings = () => Object.keys(window._recordings), _isVirtual = () => false, _recordingItemCountByName = () => 1;",
       "const _ownerLabeller = () => ({prefix: name => name});",
       "const _webpageNotifLists = data => data.lists.filter(row => row.source === 'webpage' && row.external_key);",
-      "const _haveNotifBridge = () => true, notifRpc = async name => name === 'getCapabilities'",
-      "  ? {supported: true, permission: 'granted'} : {};",
+      "window.previewRequests = [];",
+      "const _haveNotifBridge = () => true, notifRpc = async (name, payload) => {",
+      "  if (name === 'getCapabilities') return {supported: true, permission: 'granted'};",
+      "  if (name !== 'getSchedulePreview') return {}; window.previewRequests.push(payload);",
+      "  return {name: 'Schedule <test>', status: 'active', item_count: 250, rows: Array.from({length: 200}, (_, i) =>",
+      "    ({item_number: i + 1, title: '<img src=x onerror=alert(1)> Question ' + (i + 1), when_ms: Date.now() + 60000 * (i + 1), state: 'Planned'}))}; };",
     ].join('\n');
     await page.addScriptTag({content: providers + '\n' + notificationCode +
       '\nwindow.refreshNotifications=_notifRenderEnabled;window._openNotifDialog();'});
@@ -115,7 +113,20 @@ try {
     await page.locator('.select2-results__option').last().scrollIntoViewIfNeeded();
     await page.locator('.select2-results__option').last().click();
     assert.equal(await page.locator('#notifPlaylist').inputValue(), 'Playlist 100');
-    await page.evaluate(() => jQuery('#notifDialog').dialog('close'));
+    await page.setViewportSize(viewport);
+    await page.locator('.notif-view-schedule').first().click();
+    await page.locator('#notifSchedulePreview tbody tr').first().waitFor();
+    assert.equal(await page.locator('#notifSchedulePreview tbody tr').count(), 200);
+    assert.equal(await page.locator('#notifSchedulePreview tbody tr').first().locator('td').first().textContent(), '1');
+    assert.equal(await page.locator('#notifSchedulePreview img').count(), 0, 'question titles remain plain text');
+    assert.match(await page.locator('#notifSchedulePreview').textContent(), /Showing 200 of 250 items/);
+    await assertBounds('notifSchedulePreview');
+    assert.ok((await metrics('notifSchedulePreview')).scrollHeight > (await metrics('notifSchedulePreview')).clientHeight);
+    await page.locator('#notifSchedulePreview').getByRole('button', {name: 'Refresh schedule'}).click();
+    await page.waitForFunction(() => window.previewRequests.length === 2);
+    assert.equal(await page.evaluate(() => window.previewRequests[0].external_key), 'key-0');
+    await page.screenshot({path: resolve(output, 'notification-schedule-' + viewport.width + '.png')});
+    await page.evaluate(() => { jQuery('#notifSchedulePreview').dialog('close'); jQuery('#notifDialog').dialog('close'); });
     await page.setViewportSize(viewport);
 
     for (const id of ['recordingReviewDialog', 'manualEntryEditor', 'practiceLogDialog', 'logViewerDialog']) {
