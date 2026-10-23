@@ -3,6 +3,7 @@ import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
 import { recordingsHaveChanges } from './recordings-sync-state.js';
+import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { createPracticeVideoCues } from './practice-video.js';
 import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video.js';
@@ -15977,6 +15978,7 @@ function _openNotifDialog() {
   _notifBootCapabilities()
 }
 window._openNotifDialog = _openNotifDialog
+installStudyCalls(window, $)
 
 // Browser test helper (no NotifBridge needed): simulate a notification tap for
 // a playlist item by dispatching the real cupitorNotificationOpened event, so
