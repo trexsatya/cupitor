@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url)
 const { JSDOM } = require('jsdom')
 const jquery = require('jquery')
 const source = fs.readFileSync(new URL('./study-calls.js', import.meta.url), 'utf8')
-const { createCallClient, callPayload, installStudyCalls } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
+const { createCallClient, callPayload, installStudyCalls, parseCallImport, scheduleImportedCalls, CALL_IMPORT_EXAMPLE } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
 
 function fixture() {
   const { window: win } = new JSDOM('<button id="studyCallsBtn"></button>')
@@ -116,10 +116,117 @@ test('dialog restores durable history safely, selects reminder text, submits and
   assert.equal(free.response_type, 'text')
   assert.equal(free.max_retries, 2)
   assert.deepEqual(free.accepted_answers, ['Stockholm', 'Stockholms stad'])
-  $('[data-call-history] button').trigger('click')
+  $('[data-call-pending] button').filter((_, el) => el.textContent === 'Cancel call').trigger('click')
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(sent.find(r => r.op === 'cancel').id, 'two')
   win.dispatchEvent(new win.CustomEvent('cupitorCalls', { detail: { calls: [] } }))
   assert.match($('[data-call-history]').text(), /No calls yet/)
+  installed.client.dispose(); win.close()
+})
+
+
+test('JSON imports validate all questions, custom alternatives and free response aliases', () => {
+  const calls = parseCallImport(JSON.stringify(CALL_IMPORT_EXAMPLE))
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].correct_choice_index, 0)
+  assert.equal(calls[0].max_retries, 3)
+  assert.deepEqual(calls[1].accepted_answers, ['Stockholm', 'Stockholms stad'])
+  for (const bad of ['{broken', JSON.stringify({ version: 2, calls: [] }),
+    JSON.stringify([{ question: 'Bad', choices: ['A', 'B'] }]),
+    JSON.stringify({ calls: [CALL_IMPORT_EXAMPLE.calls[0], { question: 'Missing answer', response_type: 'text' }] }),
+    JSON.stringify(Array(51).fill(CALL_IMPORT_EXAMPLE.calls[0]))]) assert.throws(() => parseCallImport(bad))
+  assert.throws(() => parseCallImport('x'.repeat(1024 * 1024 + 1)))
+  const now = Date.now(), start = now + 600000
+  const planned = scheduleImportedCalls(calls, start, 5, now)
+  assert.equal(planned[1].when_ms - planned[0].when_ms, 300000)
+  const explicit = { ...calls[1], when_ms: start + 900000 }
+  assert.equal(scheduleImportedCalls([calls[0], explicit], start, 5, now)[1].when_ms, explicit.when_ms)
+  assert.throws(() => scheduleImportedCalls(calls, '', 5, now))
+  assert.throws(() => scheduleImportedCalls(calls, start, 0, now))
+})
+
+test('file calls remain editable, schedule together once, and scheduled calls can be edited', async () => {
+  const { win, $ } = fixture()
+  const sent = []
+  let calls = []
+  win.CallBridge = { postMessage(raw) {
+    const r = JSON.parse(raw); sent.push(r)
+    if (r.op === 'scheduleBatch') calls = r.calls.map((c, i) => ({ ...c, id: String(i), status: 'scheduled', created_at: Date.now() }))
+    if (r.op === 'setEnabled') calls = calls.map(c => c.id === r.id ? { ...c, enabled: r.enabled, status: r.enabled ? 'scheduled' : 'disabled' } : c)
+    if (r.op === 'remove') calls = calls.filter(c => c.id !== r.id)
+    if (r.op === 'update') calls = calls.map(c => c.id === r.id ? { ...c, ...r } : c)
+    const data = r.op === 'getCapabilities' ? { supported: true, permission: 'granted', speech_input: true,
+      batch_schedule: true, edit_scheduled: true, pending_controls: true } : r.op === 'getCalls' ? { calls } : true
+    win.dispatchEvent(new win.CustomEvent('cupitorCallAck', { detail: { ...r, ok: true, data } }))
+  } }
+  const installed = installStudyCalls(win, $)
+  installed.open()
+  const flush = () => new Promise(resolve => setImmediate(resolve))
+  await flush()
+  const file = $('[data-call-import-file]')[0]
+  Object.defineProperty(file, 'files', { configurable: true, value: [{ size: 100, text: async () => JSON.stringify(CALL_IMPORT_EXAMPLE) }] })
+  $(file).trigger('change'); await flush()
+  assert.equal($('[data-call-import-drafts] .study-call-history-row').length, 2)
+  $('[data-call-import-drafts] button').filter((_, el) => el.textContent === 'Edit').first().trigger('click')
+  assert.equal($('[data-call-question]').val(), CALL_IMPORT_EXAMPLE.calls[0].question)
+  $('[data-call-question]').val('Edited multiple choice question')
+  $('[data-call-choices]').val('One\nTwo\nThree').trigger('input')
+  $('[data-call-correct]').val('1')
+  $('[data-call-import-select]').val('1').trigger('change')
+  assert.equal($('[data-call-type]').val(), 'text')
+  $('[data-call-accepted]').val('Stockholm\nStockholms stad\nStockholm city')
+  $('[data-call-import-save]').trigger('click')
+  const start = new Date(Date.now() + 600000)
+  $('[data-call-import-start]').val(new Date(start - start.getTimezoneOffset() * 60000).toISOString().slice(0, 16))
+  $('[data-call-import-schedule]').trigger('click'); await flush()
+  const batch = sent.find(r => r.op === 'scheduleBatch')
+  assert.equal(batch.calls[0].question, 'Edited multiple choice question')
+  assert.deepEqual(batch.calls[0].choices, ['One', 'Two', 'Three'])
+  assert.equal(batch.calls[0].correct_choice_index, 1)
+  assert.equal(batch.calls[1].accepted_answers.length, 3)
+  $('[data-call-import-schedule]').trigger('click'); await flush()
+  assert.equal(sent.filter(r => r.op === 'scheduleBatch').length, 1)
+  $('[data-call-pending] button').filter((_, el) => el.textContent === 'Edit call').first().trigger('click')
+  $('[data-call-question]').val('Edited after scheduling')
+  $('[data-call-submit=later]').trigger('click'); await flush()
+  assert.equal(sent.find(r => r.op === 'update').question, 'Edited after scheduling')
+  $('[data-call-pending] button').filter((_, el) => el.textContent === 'Disable').first().trigger('click'); await flush()
+  assert.equal(sent.find(r => r.op === 'setEnabled').enabled, false)
+  assert.match($('[data-call-pending]').text(), /disabled/)
+  $('[data-call-pending] button').filter((_, el) => el.textContent === 'Enable').first().trigger('click'); await flush()
+  assert.equal(sent.filter(r => r.op === 'setEnabled').at(-1).enabled, true)
+  $('[data-call-pending] button').filter((_, el) => el.textContent === 'Remove').first().trigger('click'); await flush()
+  assert.equal(calls.length, 1)
+  assert.equal($('[data-call-pending] .study-call-history-row').length, 1)
+  installed.client.dispose(); win.close()
+})
+
+test('history is hidden until requested and keeps only the newest 100 terminal calls', async () => {
+  const { win, $ } = fixture()
+  win.__cupitorCalls = { calls: Array.from({ length: 150 }, (_, i) => ({ id: String(i), title: 'Done ' + i,
+    status: 'completed', created_at: i, finished_at: i, when_ms: 1 })) }
+  const installed = installStudyCalls(win, $); installed.open()
+  assert.equal($('[data-call-history]').css('display'), 'none')
+  assert.equal($('[data-call-history] .study-call-history-row').length, 100)
+  assert.match($('[data-call-history]').text(), /Done 149/)
+  assert.doesNotMatch($('[data-call-history]').text(), /Done 49(?:[^0-9]|$)/)
+  $('[data-call-history-toggle]').trigger('click')
+  assert.equal($('[data-call-history-toggle]').attr('aria-expanded'), 'true')
+  assert.notEqual($('[data-call-history]').css('display'), 'none')
+  installed.client.dispose(); win.close()
+})
+
+test('new alternatives keep the selected correct answer while typing and removing rows', async () => {
+  const { win, $ } = fixture()
+  const installed = installStudyCalls(win, $); installed.open()
+  $('[data-call-add]').trigger('click')
+  $('[data-call-alternative-add]').trigger('click')
+  $('[data-call-alternatives] input[type=radio]').eq(2).prop('checked', true).trigger('change')
+  $('[data-call-alternatives] input[type=text]').eq(2).val('Third answer').trigger('input')
+  assert.equal($('[data-call-correct]').val(), '2')
+  $('[data-call-alternatives] button').first().trigger('click')
+  assert.equal($('[data-call-correct]').val(), '1')
+  assert.deepEqual($('[data-call-choices]').val().split('\n'), ['No', 'Third answer'])
+  assert.equal($('[data-call-alternatives] input[type=radio]').eq(1).prop('checked'), true)
   installed.client.dispose(); win.close()
 })

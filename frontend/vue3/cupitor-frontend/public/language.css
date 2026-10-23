@@ -4974,3 +4974,31 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 .study-calls-dialog input[type="checkbox"] { display: inline-block; width: auto; margin-right: 8px; }
 .study-call-actions, .study-call-permissions { display: flex; flex-wrap: wrap; gap: 8px; }
 .study-call-history-row { padding: 12px 0; border-bottom: 1px solid #aaa; overflow-wrap: anywhere; }
+
+/* Notification content must remain scrollable after async list updates. */
+#notifDialog, #notifSchedulePreview {
+    min-height: 0 !important;
+    max-height: calc(100dvh - 120px);
+    overflow-y: auto !important;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+}
+.notif-schedule-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.notif-schedule-table th, .notif-schedule-table td { padding: 8px; text-align: left; border-bottom: 1px solid #aaa; overflow-wrap: anywhere; }
+
+.study-calls-dialog .study-call-toolbar,
+.study-calls-dialog .study-call-inline,
+.study-calls-dialog .study-call-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.study-calls-dialog .study-call-toolbar h3 { flex:1; margin:12px 0; }
+.study-calls-dialog .study-call-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.study-calls-dialog .study-call-alternative { display:flex; align-items:center; gap:8px; margin:8px 0; }
+.study-calls-dialog .study-call-alternative input[type=text] { flex:1; min-width:0; }
+.study-calls-dialog .study-call-alternative input[type=radio],
+.study-calls-dialog .study-call-inline input[type=checkbox] { width:auto; margin:0; flex:none; }
+.study-calls-dialog .study-call-history-row { border:1px solid #d8dde5; border-radius:10px; padding:14px; margin:12px 0; }
+.study-calls-dialog .study-call-history-row p { margin:8px 0; }
+.study-calls-dialog .study-call-history-row button { margin:10px 8px 0 0; }
+.study-calls-dialog .study-call-meta { display:block; opacity:.75; font-size:.9em; }
+.study-calls-dialog .study-call-settings { margin:14px 0; padding:12px; border:1px solid #d8dde5; border-radius:8px; }
+.study-calls-dialog [hidden] { display:none!important; }
+@media(max-width:480px) { .study-calls-dialog .study-call-grid { grid-template-columns:1fr; } }
