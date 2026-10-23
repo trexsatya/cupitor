@@ -76,6 +76,7 @@ jobs:
           node tests/browser/study-calls.cjs
           node tests/browser/language-dialogs.cjs
           node tests/browser/search-result-counts.cjs
+          node tests/browser/full-srt-dialog.cjs
           node tests/browser/results-scrolling.cjs
           node tests/browser/compound-vocabulary-groups.cjs
           node tests/browser/regex-search.cjs
@@ -102,6 +103,7 @@ jobs:
           node tests/browser/regex-search.cjs
           node tests/browser/caption-capture-merge.cjs
           node tests/browser/results-scrolling.cjs
+          node tests/browser/full-srt-dialog.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
           node tests/browser/recorded-scroll-momentum.cjs
