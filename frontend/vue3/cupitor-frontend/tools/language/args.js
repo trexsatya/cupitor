@@ -69,7 +69,7 @@ export function coerceFlags(flags) {
     } else if (k === "reset" || typeof v === "boolean") {
       out[k] = v;
     } else if (
-      ["lang", "targetLang", "dataDir", "srtsDir", "outDir", "config", "srtConflict", "category"].includes(k)
+      ["lang", "targetLang", "dataDir", "srtsDir", "outDir", "config", "srtConflict", "category", "input", "link", "title", "channel", "source"].includes(k)
     ) {
       out[k] = v;
     }

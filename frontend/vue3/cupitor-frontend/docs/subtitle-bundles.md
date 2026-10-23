@@ -34,6 +34,22 @@ commit. Bulk capture does this automatically, without splitting its index into a
 later transaction. The local Manage CLI uses the same planner for captures and
 pruning and can scan bundled and legacy data.
 
+For SRTs authored/downloaded outside the capture workflow, use the Manage CLI:
+
+```bash
+node tools/language/lang-manage.js import --srtsDir /path/to/data/db/language/swedish/srts --input /path/to/new-srts
+node tools/language/lang-manage.js import --srtsDir /path/to/data/db/language/swedish/srts --input /path/to/new-srts --apply
+```
+
+Omit `--input` to import loose SRTs dropped into the storage directory. The
+command updates bundles/index/manifest together and verifies the stored tracks
+before removing in-place loose copies. External inputs are retained. Existing
+different text needs an explicit `--merge` or `--replace`; identical imports are
+no-ops. Filenames can supply `channel || title || id` and language suffixes;
+otherwise provide `--link` for a single media or an input `index.json` for a batch.
+See [the CLI README](../tools/language/README.md) for `make-srt.py`, metadata,
+language selection and Git commit/push examples.
+
 ## Migration and verification
 
 Run from the frontend project directory:
