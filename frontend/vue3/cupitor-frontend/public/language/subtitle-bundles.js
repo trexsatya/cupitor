@@ -205,7 +205,7 @@ async function prepareDirectory(dir, storage, operations, read) {
     }
     const found = next || old
     if (!found) throw new Error('A new subtitle must include its index entry in the same commit: ' + file)
-    const oldPack = old?.entry.bundle
+    const oldPack = old?.entry.bundle || next?.entry.bundle
     const oldFiles = oldPack ? await load(oldPack) : null
     const oldKey = old?.key || found.key
     let text = oldFiles && owns(oldFiles, oldKey) ? oldFiles[oldKey] : null
@@ -213,10 +213,12 @@ async function prepareDirectory(dir, storage, operations, read) {
     if (operation.expectedSha && operation.expectedSha !== originals.get(oldPack)?.sha) conflict()
     const changed = operation.delete ? null : await operation.getContent(text)
     if (!operation.delete && changed == null) continue
-    if ((!operation.delete && changed === text) || (operation.delete && text == null)) continue
+    // An indexed loose track still needs an assignment when its text is
+    // unchanged. This happens when local SRT files are imported in place.
+    if ((!operation.delete && changed === text && oldPack) || (operation.delete && text == null)) continue
     const base = found.entry.bundleKey || found.entry.name
     if (!staged.has(base)) staged.set(base, { entry: next?.entry, oldPack, files: oldFiles ?
-      Object.fromEntries(Object.entries(oldFiles).filter(([key]) => baseOf(key) === (old?.entry.bundleKey || old?.entry.name))) : {} })
+      Object.fromEntries(Object.entries(oldFiles).filter(([key]) => baseOf(key) === (old?.entry.bundleKey || old?.entry.name || base))) : {} })
     const group = staged.get(base)
     if (operation.delete) delete group.files[found.key]
     else Object.defineProperty(group.files, found.key, { value: changed, enumerable: true, configurable: true, writable: true })

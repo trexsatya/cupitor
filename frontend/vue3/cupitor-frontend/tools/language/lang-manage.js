@@ -11,6 +11,7 @@
 //   node tools/language/lang-manage.js filmot     [--chunk N] [--max N] [--before N] [--after N] [--words a,b] [--category "<name>"] [--browser] [--reset]
 //   node tools/language/lang-manage.js srt        [--chunk N] [--category "<name>"] [--no-translate] [--reset]
 //   node tools/language/lang-manage.js prune       [--minSpan N] [--window N] [--apply]  (shrink full-video transcripts to windows around items found only there)
+//   node tools/language/lang-manage.js import      [--input file-or-folder] [--link media-id] [--merge|--replace] [--apply]
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, unlinkSync } from "node:fs";
 import { readSubtitleFiles, commitLocalSubtitleFiles } from './bundle-store.js';
 import { join } from "node:path";
@@ -40,6 +41,7 @@ import { collectRankedPool } from "./filmot-collect.js";
 import { resolveChannel, loadChannelCache, saveChannelCache } from "./youtube-channel.js";
 import { translateBatch } from "./google-translate.js";
 import { saveHit, readIndex, writeIndex } from "./srt-store.js";
+import { planSrtImport, applySrtImport } from './srt-import.js';
 import {
   isFullSrt,
   scanUncoveredOwners,
@@ -507,8 +509,21 @@ async function cmdPrune(cfg) {
 
 // --- main ------------------------------------------------------------------
 
+async function cmdImport(cfg) {
+  const dir = cfg.srtsDir || (cfg.dataDir ? join(cfg.dataDir, 'srts') : '')
+  const plan = await planSrtImport(dir, cfg)
+  if (cfg.apply) applySrtImport(plan)
+  log(JSON.stringify({ ...plan.summary, applied: !!cfg.apply }, null, 2))
+  if (!cfg.apply) log('Dry run: rerun with --apply to import. Then commit and push the listed files in your data repository.')
+}
+
 async function main() {
   const { command, flags } = parseArgs(process.argv.slice(2));
+  if (command === 'import' && flags.help) {
+    log('Usage: lang-manage.js import [--input file-or-folder] [--srtsDir directory] [--link media-id] [--lang sv] [--title title] [--channel channel] [--source YouTube] [--merge|--replace] [--apply]');
+    log('Defaults to a dry run. With no --input, imports loose SRTs dropped into srtsDir. Files named "channel || title || id.sv.srt" supply their id; other names need --link or an input index.json.');
+    return;
+  }
   const overrides = coerceFlags(flags);
   const cfg = loadConfig(flags.config || "config.json", overrides);
   if (overrides.reset) cfg.reset = true;
@@ -524,8 +539,9 @@ async function main() {
   if (command === "srt") return cmdSrt(cfg);
   if (command === "categories") return cmdCategories(cfg);
   if (command === "prune") return cmdPrune(cfg);
+  if (command === "import") return cmdImport(cfg);
 
-  log(`Unknown command "${command}". Use one of: rare | filmot | srt | categories | prune`);
+  log(`Unknown command "${command}". Use one of: rare | filmot | srt | categories | prune | import`);
   process.exitCode = 1;
 }
 

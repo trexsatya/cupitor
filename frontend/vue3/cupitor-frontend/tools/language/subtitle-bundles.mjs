@@ -18,7 +18,7 @@ export function planMigration(srtsDir, options = {}) {
   if (!Array.isArray(index)) throw new Error('Subtitle index must be an array')
   if (existsSync(join(srtsDir, 'storage.json'))) {
     const loose = looseSubtitleNames(srtsDir)
-    if (loose.length) throw new Error('Storage is already bundled but loose SRTs were added. Resolve those files before migrating again.')
+    if (loose.length) throw new Error('Storage is already bundled but loose SRTs were added. Use lang-manage.js import --srtsDir "' + srtsDir + '" --apply to import them.')
     return { alreadyBundled: true, files: Object.keys(documents).length, inventorySha256: inventory(documents) }
   }
   const { storage, packs, assignments } = packDocuments(documents, options)
