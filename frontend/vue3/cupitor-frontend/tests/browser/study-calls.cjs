@@ -24,7 +24,7 @@ async function check(browser, mobile) {
   })
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
-    await page.evaluate(() => document.querySelector('#studyCallsBtn').click())
+    await page.evaluate(() => window._openStudyCalls())
     await page.locator('#studyCallsDialog').waitFor({ state: 'visible' })
     await page.locator('[data-call-question]').fill('Which article goes with katt?')
     await page.locator('[data-call-choices]').fill('ett\nen')

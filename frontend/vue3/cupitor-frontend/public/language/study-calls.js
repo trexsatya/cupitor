@@ -260,7 +260,8 @@ export function installStudyCalls(win, $) {
   win.addEventListener('cupitorAppLifecycle', e => {
     if (e.detail?.isForeground && $dialog?.is(':visible')) refresh().catch(() => {})
   })
-  const ready = () => $('#studyCallsBtn').toggle(client.available()).on('click', open)
+  win._openStudyCalls = open
+  const ready = () => $('#studyCallsBtn').toggle(client.available()).on('click', () => win._openPlaylistCalls ? win._openPlaylistCalls() : open())
   if (win.document.readyState === 'loading') $(ready); else ready()
   return { client, open }
 }
