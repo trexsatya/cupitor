@@ -3,6 +3,7 @@ import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
 import { createFullSrtDialog } from './full-srt-dialog.js';
+import { createBundleLoader, createSubtitleBundleAdapter } from './subtitle-bundles.js';
 import { recordingsHaveChanges } from './recordings-sync-state.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
@@ -1885,6 +1886,24 @@ function _selfGetFile(filePath) {
   const t = _dsWriteTarget()
   return window.GitHubUtils.getFile(t.owner, t.repo, filePath, '', t.branch)
 }
+
+let _committedSubtitleIndex = new Map()
+// Keep virtual single-SRT edits compatible with the bundled repository.
+window.GitHubUtils?.setSubtitleAdapter?.(createSubtitleBundleAdapter({
+  onCommitted({ index }) {
+    _subtitleBundleLoader.clear()
+    const byLink = new Map(index.map(entry => [entry.link, entry]))
+    _committedSubtitleIndex = byLink
+    window.srts = (window.srts || []).map(entry => {
+      if (entry.readOnly) return entry
+      const next = byLink.get(entry.link)
+      return next ? { ...entry, ...next } : entry
+    })
+    for (const entry of index) if (!(window.srts || []).some(e => e.link === entry.link)) {
+      window.srts.push({ ...entry, src: 'self', owner: _sourceOwner('self'), readOnly: false })
+    }
+  },
+}))
 
 // Writes need a self repo. Without one, shows the set-up prompt
 // (window.cupitorShowSetupPrompt when present, else an alert with the same
@@ -4730,6 +4749,7 @@ async function loadAllSubtitles() {
             source: entry.source,
             fileName: entry.name,
             fetchedFrom: 'cache',
+            bundle: entry.bundle, bundleRevision: entry.bundleRevision,
             readOnly: !!(indexByLink.get(link) || {}).readOnly,
           })
           cacheHits.push(link)
@@ -5024,6 +5044,7 @@ async function _cacheWriteMany(entries) {
       for (const e of entries) {
         if (!e || !e.link || _cacheSuppressedOwners.has(e.owner || _sourceOwner('primary'))) continue
         try { store.put({ link: e.link, name: e.name, sv: e.sv, en: e.en, source: e.source, owner: e.owner,
+          bundle: e.bundle, bundleRevision: e.bundleRevision,
           cachedAt: now, contentVersion: SUBTITLE_CONTENT_VERSION, complete: e.complete === true }) } catch (_) {}
       }
       tx.oncomplete = () => resolve()
@@ -5063,7 +5084,9 @@ async function _cacheWriteOne(entry) {
 function _cacheWriteSubtitleFromMemory(link) {
   const s = link && window.allSubtitles && window.allSubtitles[link]
   if (!s || (s.sv == null && s.en == null)) return Promise.resolve()
-  return _cacheWriteOne({ link, name: s.fileName, sv: s.sv, en: s.en, source: s.source, owner: _ownerOfLink(link), complete: s._remoteComplete === true })
+  const entry = (window.srts || []).find(entry => entry.link === link)
+  return _cacheWriteOne({ link, name: s.fileName, sv: s.sv, en: s.en, source: s.source, owner: _ownerOfLink(link), complete: s._remoteComplete === true,
+    bundle: entry?.bundle, bundleRevision: entry?.bundleRevision })
     .catch(e => console.warn('[cache] post-push write failed for', link, e))
 }
 
@@ -5165,6 +5188,17 @@ async function _fetchSrtFile(url) {
   return res.text()
 }
 
+const _subtitleBundleLoader = createBundleLoader(_fetchSrtFile)
+async function _fetchIndexedSrt(entry, code, who) {
+  const base = _dsReadUrl(who || entry.src || 'primary', 'srts', _dsLangFromLocation())
+  if (entry.bundle) {
+    const text = await _subtitleBundleLoader.track(entry, code, base)
+    if (text == null) throw _srtError('notfound', 'Subtitle track is absent from bundle')
+    return text
+  }
+  return _fetchSrtFile(`${base}/${encodeURIComponent(_nfc(entry.name) + '.' + code + '.srt')}`)
+}
+
 async function getSubtitlesForLink(link, source) {
   const before = window.allSubtitles[link]
   if (before && !before._partial) {
@@ -5174,19 +5208,16 @@ async function getSubtitlesForLink(link, source) {
   if (!srt) return
 
   const name = _nfc(srt.name)
-  const svName = name + getTargetLangSrtSuffix()
-  const enName = name + ".en.srt"
   // The files live in the repo the index entry came from (self or other);
   // an entry added this session (no src) is in the primary repo.
-  const base = _dsReadUrl(srt.src || 'primary', 'srts', _dsLangFromLocation())
-  const sv = await _fetchSrtFile(`${base}/${encodeURIComponent(svName)}`)
+  const sv = await _fetchIndexedSrt(srt, getLangFromUrl().code)
   // The .en.srt is optional — source-only snippets (CLI `srt --no-translate`,
   // or lines still awaiting the in-app 🌐 translate) have none. A genuine 404
   // must NOT discard the source we just fetched; only a transient failure
   // propagates so the boot retry pool tops it up later.
   let en = null
   try {
-    en = await _fetchSrtFile(`${base}/${encodeURIComponent(enName)}`)
+    en = await _fetchIndexedSrt(srt, 'en')
   } catch (e) {
     if (!(e && e.kind === 'notfound')) throw e
   }
@@ -5195,7 +5226,8 @@ async function getSubtitlesForLink(link, source) {
   // fetch. Do not replace it with an older CDN response.
   const current = window.allSubtitles[link]
   if (current !== before && current?._remoteComplete) return current
-  _applySubtitleSnapshot(link, {sv, en, source, fileName: name, readOnly: !!srt.readOnly})
+  _applySubtitleSnapshot(link, {sv, en, source, fileName: name, readOnly: !!srt.readOnly,
+    bundle: srt.bundle, bundleRevision: srt.bundleRevision})
   // Write the freshly-fetched pair to IndexedDB so the next boot can skip
   // this network round-trip. Fire-and-forget — failures are swallowed inside
   // the cache layer; a flaky cache must never break this critical path.
@@ -10597,9 +10629,13 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
   _report('prefetching-srts', { done: 0, total: prefetchTargets.length })
   await _runInBatches(prefetchTargets, async (t) => {
     try {
-      const r = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(t.baseName + '.' + t.suffix + '.srt')}`, { cache: 'no-cache' })
-      if (r.ok) prefetchMap.set(t.key, await r.text())
-      else prefetchMap.set(t.key, null)
+      const videoId = t.key.slice(0, t.key.lastIndexOf('|'))
+      const indexed = indexByLink.get(videoId)
+      if (indexed?.bundle) prefetchMap.set(t.key, await _fetchIndexedSrt(indexed, t.suffix, 'self'))
+      else {
+        const r = await fetch(`${getResourceUrl()}/srts/${encodeURIComponent(t.baseName + '.' + t.suffix + '.srt')}`, { cache: 'no-cache' })
+        prefetchMap.set(t.key, r.ok ? await r.text() : null)
+      }
     } catch (_) {
       prefetchMap.set(t.key, null)
     }
@@ -10701,8 +10737,16 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
   const indexSpec = indexSpecIdx >= 0 ? fileSpecs[indexSpecIdx] : null
   const dataSpecs = indexSpec ? fileSpecs.filter((_, i) => i !== indexSpecIdx) : fileSpecs
   const chunks = []
-  for (let i = 0; i < dataSpecs.length; i += CHUNK_SIZE) {
-    chunks.push(dataSpecs.slice(i, i + CHUNK_SIZE))
+  // Bundle storage coalesces these logical edits before creating blobs. Keep
+  // new tracks and their index allocation in one atomic repository commit.
+  let bundled = indexArr.some(entry => entry.bundle)
+  if (!bundled) {
+    try { bundled = JSON.parse((await _selfGetFile(`${srtsDir}/storage.json`)).content)?.format === 'cupitor-srt-bundles' }
+    catch (error) { if (!/GitHub API error 404\b/.test(String(error?.message))) throw error }
+  }
+  const chunkSize = bundled ? Math.max(dataSpecs.length, 1) : CHUNK_SIZE
+  for (let i = 0; i < dataSpecs.length; i += chunkSize) {
+    chunks.push(dataSpecs.slice(i, i + chunkSize))
   }
   if (!chunks.length) chunks.push([])
   if (indexSpec) chunks[chunks.length - 1].push(indexSpec)
@@ -10743,6 +10787,8 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
     // and the entry becomes the user's own.
     const wasOther = _isReadOnlyLink(u.videoId)
     if (wasOther) _adoptAsSelfEntry(u.videoId, u.baseName, u.source)
+    const ownEntry = (window.srts || []).find(entry => entry.link === u.videoId && !entry.readOnly)
+    if (ownEntry && _committedSubtitleIndex.has(u.videoId)) Object.assign(ownEntry, _committedSubtitleIndex.get(u.videoId))
     const prev = window.allSubtitles[u.videoId] || {}
     const cached = wasOther
       ? { ...prev, sv: null, en: null, _parsedSv: undefined, _parsedEn: undefined, readOnly: false }

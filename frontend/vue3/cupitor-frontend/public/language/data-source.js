@@ -263,6 +263,8 @@ export function mergeIndexLayers(layers) {
 // `primaryOwner` (records cached before owners were stored, entries added
 // this session). Logins compare without case.
 export function cacheRecordMatches(record, entry, primaryOwner) {
+  if ((entry?.bundle || record?.bundle) &&
+      (entry?.bundle !== record?.bundle || entry?.bundleRevision !== record?.bundleRevision)) return false
   const want = (entry && entry.owner) || primaryOwner || ''
   const have = (record && record.owner) || primaryOwner || ''
   return String(want).toLowerCase() === String(have).toLowerCase()
