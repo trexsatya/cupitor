@@ -46,3 +46,10 @@ test('invalid and oversized answers are counted as skipped, never truncated into
   expect(result.items).toEqual([])
   expect(result.skipped).toHaveLength(1)
 })
+
+
+test('native snapshots retain choice mode and direction when local settings are absent', () => {
+  const result = buildPlaylistCallItems('Animals', items([card('cat', 'katt', 'cat'), card('dog', 'hund', 'dog')]),
+    { answer_type: 'choice', direction: 'target-source' })
+  expect(result.items[0].payload.study_call).toMatchObject({ question: 'cat', response_type: 'choice' })
+})

@@ -12,6 +12,7 @@ export const playlistCallDefaults = {
 // Full question/answer text lives in payload, separate from shade truncation.
 export function buildPlaylistCallItems(name, items, settings = {}) {
   const config = { ...playlistCallDefaults, ...settings }
+  if (settings.answer_type && !settings.response_type) config.response_type = settings.answer_type
   const pairs = new Map()
   const plain = value => cardPlainText(value || '').trim()
   Object.entries(items || {}).forEach(([st, byWord]) => {

@@ -15745,12 +15745,15 @@ function _notifRawItems(name) {
 function _notifCallSettings() {
   return {
     direction: $('#notifCallDirection').val(), response_type: $('#notifCallType').val(),
-    language: $('#notifCallLanguage').val(), max_retries: Number($('#notifCallRetries').val()),
+    language: $('#notifCallLanguage').val(), max_retries: $('#notifCallRetries').val() === '' ? NaN : Number($('#notifCallRetries').val()),
     match_threshold: Number($('#notifCallMatch').val()), voice_response: $('#notifCallVoice').is(':checked'),
   }
 }
 function _notifLoadCallSettings(name, list) {
-  const settings = { ..._playlistCallDefaults, ...list?.call_config, ...window._recordings?.[name]?.callSettings }
+  list = list || _webpageNotifLists(_notifLists()).find(l => l.external_key === window._recordings?.[name]?.notifKey)
+  const settings = { ..._playlistCallDefaults, ...list?.call_config,
+    ...(list?.call_config?.answer_type ? { response_type: list.call_config.answer_type } : {}),
+    ...window._recordings?.[name]?.callSettings }
   $('#notifCallDirection').val(settings.direction)
   $('#notifCallType').val(settings.response_type)
   $('#notifCallLanguage').val(settings.language)
