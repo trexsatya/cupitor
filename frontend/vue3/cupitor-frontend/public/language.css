@@ -4966,3 +4966,11 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 .keyboard-shortcuts-table td:first-child { white-space: nowrap; width: 7em; }
 .keyboard-shortcuts-table kbd { display: inline-block; margin-right: 4px; padding: 2px 5px; border: 1px solid #bcc4cc; border-radius: 3px; background: #f6f8fa; color: #24292f; }
 #keyboardShortcutsDialog p { font-size: .85em; color: #57606a; }
+/* Study-call composer shares the viewport-bounded, scrolling dialog shell. */
+.study-calls-dialog label { display: block; margin: 12px 0; font-weight: 600; }
+.study-calls-dialog input, .study-calls-dialog textarea, .study-calls-dialog select {
+    display: block; width: 100%; box-sizing: border-box; font-weight: normal;
+}
+.study-calls-dialog input[type="checkbox"] { display: inline-block; width: auto; margin-right: 8px; }
+.study-call-actions, .study-call-permissions { display: flex; flex-wrap: wrap; gap: 8px; }
+.study-call-history-row { padding: 12px 0; border-bottom: 1px solid #aaa; overflow-wrap: anywhere; }

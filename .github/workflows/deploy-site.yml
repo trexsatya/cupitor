@@ -64,6 +64,7 @@ jobs:
           npx jest public/language public/github-utils.test.js --runInBand --silent
           node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs
           node --test public/language/spotify-*.test.mjs public/language/card-selection-search.test.mjs public/language/recordings-sync-state.test.mjs
+          node --test public/language/study-calls.test.mjs
 
       - name: Install Chromium for dialog tests
         run: npx playwright install --with-deps chromium
@@ -72,6 +73,7 @@ jobs:
         run: |
           node tests/browser/spotify-practice.cjs
           node tests/browser/notification-practice.cjs
+          node tests/browser/study-calls.cjs
           node tests/browser/language-dialogs.cjs
           node tests/browser/search-result-counts.cjs
           node tests/browser/compound-vocabulary-groups.cjs
@@ -105,6 +107,7 @@ jobs:
           node tests/browser/view-switching.cjs
           node tests/browser/spotify-practice.cjs
           node tests/browser/notification-practice.cjs
+          node tests/browser/study-calls.cjs
           node tests/browser/practice-controls.cjs
           node tests/browser/practice-manual-video.cjs
           node tests/browser/practice-panels.cjs
