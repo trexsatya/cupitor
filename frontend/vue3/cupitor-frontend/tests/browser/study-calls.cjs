@@ -1,5 +1,9 @@
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const shots=path.resolve(__dirname,'../../test-results/dialog-browser-results/study-calls',process.env.CUPITOR_TEST_ASSETS||'public')
+fs.mkdirSync(shots,{recursive:true})
 const { serveFixtures } = require('./language-dialogs.cjs')
 
 async function check(browser, mobile) {
@@ -9,16 +13,17 @@ async function check(browser, mobile) {
   await page.route('**/*', serveFixtures)
   await page.addInitScript(() => {
     window.__callRequests = []
-    let sequence = 0
+    let sequence = 0, limit = 50, voiceName = '', rate = 1
     let calls = Array.from({ length: 150 }, (_, i) => ({
       id: 'done-' + i, title: 'Finished question ' + i, created_at: i, finished_at: i, when_ms: Date.now(),
       status: 'completed', choice: 'en',
     }))
-    calls.push({ id: 'pending', title: 'Existing question', question: 'Which word?', choices: ['ett', 'en'],
+    calls.push({ id: 'pending', title: 'Swedish vocabulary', question: 'Vilken artikel passar framför ordet katt?', choices: ['ett', 'en'],
       correct_choice_index: 1, response_type: 'choice', language: 'sv-SE', when_ms: Date.now() + 3600000, status: 'scheduled' })
     window.CallBridge = { postMessage(raw) {
       const request = JSON.parse(raw); window.__callRequests.push(request)
       const add = call => calls.push({ ...call, id: 'new-' + sequence++, created_at: Date.now(), status: call.enabled === false ? 'disabled' : 'scheduled' })
+      if (request.op === 'setSettings') { limit=request.pending_limit; voiceName=request.voice_name; rate=request.speech_rate }
       if (request.op === 'scheduleBatch') request.calls.forEach(add)
       if (request.op === 'schedule') add(request)
       if (request.op === 'setEnabled') calls = calls.map(c => c.id === request.id ? { ...c, enabled: request.enabled, status: request.enabled ? 'scheduled' : 'disabled' } : c)
@@ -26,8 +31,8 @@ async function check(browser, mobile) {
       if (request.op === 'update') calls = calls.map(c => c.id === request.id ? { ...c, ...request } : c)
       const data = request.op === 'getCapabilities'
         ? { supported: true, permission: 'granted', full_screen: true, exact_alarms: true, speech_input: true,
-          batch_schedule: true, edit_scheduled: true, pending_controls: true, history_limit: 100 }
-        : request.op === 'getCalls' ? { version: 1, calls } : { id: 'new-call' }
+          batch_schedule: true, edit_scheduled: true, pending_controls: true, history_limit: 100, settings:true, pending_limit:limit, pending_count:calls.filter(c=>c.status==='scheduled'||c.status==='disabled').length, max_pending_limit:5000, voice_selection:true, voice_name:voiceName, speech_rate:rate }
+        : request.op === 'getCalls' ? { version: 1, calls } : request.op === 'getVoices' ? {voices:[{name:'sv-test', language:'sv-SE',label:'Swedish · Voice 1'},{name:'en-test',language:'en-GB',label:'English · Voice 1'}]} : { id: 'new-call' }
       window.dispatchEvent(new CustomEvent('cupitorCallAck', { detail: { ...request, ok: true, data } }))
     } }
   })
@@ -36,12 +41,17 @@ async function check(browser, mobile) {
     const date = new Date(Date.now() + 3600000)
     return new Date(date - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
   })
+  const shot=async name=>{await page.evaluate(()=>document.querySelector('#studyCallsDialog').scrollTop=0);await page.locator('.study-call-window').screenshot({path:path.join(shots,`${mobile?'mobile':'desktop'}-${name}.png`)})}
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
     await page.evaluate(() => document.querySelector('#studyCallsBtn').click())
     await page.locator('[data-call-pending] .study-call-history-row').waitFor()
     assert.equal(await page.locator('[data-call-view=editor]').isVisible(), false)
     assert.equal(await page.locator('[data-call-history]').isVisible(), false)
+    assert.equal(await page.locator('[data-call-back-top]').isVisible(), false)
+    await shot('pending')
+    const style=await page.locator('[data-call-add]').evaluate(el=>{const c=getComputedStyle(el);return {background:c.backgroundColor,border:c.borderStyle,height:el.getBoundingClientRect().height}})
+    assert.equal(style.background,'rgb(23, 105, 79)'); assert.equal(style.border,'solid'); assert(style.height>=44)
     await page.locator('[data-call-history-toggle]').click()
     assert.equal(await page.locator('[data-call-history] .study-call-history-row').count(), 100)
     const dimensions = await page.locator('#studyCallsDialog').evaluate(el => {
@@ -50,7 +60,8 @@ async function check(browser, mobile) {
     })
     assert(dimensions.bottom <= dimensions.height + 1, 'dialog stays inside viewport')
     assert(dimensions.scroll, '100-row history scrolls within the dialog')
-    await page.locator('[data-call-history-toggle]').click()
+    await page.locator('[data-call-back-top]').click()
+    assert.equal(await page.locator('[data-call-view=list]').isVisible(), true)
     await button('[data-call-pending]', 'Disable').click()
     await button('[data-call-pending]', 'Enable').click()
     await button('[data-call-pending]', 'Edit call').click()
@@ -77,7 +88,7 @@ async function check(browser, mobile) {
     await page.locator('[data-call-type]').selectOption('text')
     await page.locator('[data-call-question]').fill('What is the capital of Sweden?')
     await page.locator('[data-call-accepted]').fill('Stockholm\nStockholms stad')
-    await page.locator('.study-call-settings summary').click()
+    await page.locator('[data-call-view=editor] .study-call-settings summary').click()
     await page.locator('[data-call-retries]').fill('2')
     await page.locator('[data-call-when]').fill('2030-01-01T12:00')
     await page.locator('[data-call-submit=later]').click()
@@ -90,18 +101,48 @@ async function check(browser, mobile) {
       return [r.choices, r.accepted_answers, r.max_retries, r.voice_response]
     }), [[], ['Stockholm', 'Stockholms stad'], 2, true])
 
+    await page.locator('[data-call-open-settings]').click()
+    await page.locator('[data-call-default-voice] option[value=sv-test]').waitFor({state:'attached'})
+    await page.locator('[data-call-limit]').fill('500')
+    await page.locator('[data-call-default-voice]').selectOption('sv-test')
+    await page.locator('[data-call-default-rate]').selectOption('0.75')
+    await page.locator('[data-call-preview-voice]').click()
+    await page.waitForFunction(()=>window.__callRequests.some(r=>r.op==='previewVoice'))
+    await page.locator('[data-call-save-settings]').click()
+    await page.waitForFunction(()=>window.__callRequests.some(r=>r.op==='setSettings'))
+    await shot('settings')
+    await page.locator('[data-call-preview-voice]').scrollIntoViewIfNeeded()
+    await page.locator('.study-call-window').screenshot({path:path.join(shots,`${mobile?'mobile':'desktop'}-voice.png`)})
+    await page.locator('[data-call-view=settings] [data-call-back]').click()
     await page.locator('[data-call-open-import]').click()
-    await page.locator('[data-call-import-file]').setInputFiles({ name: 'calls.json', mimeType: 'application/json',
+    await shot('import')
+    const chooserEvent=page.waitForEvent('filechooser')
+    await page.locator('[data-call-choose-file]').click()
+    const chooser=await chooserEvent
+    await chooser.setFiles({ name: 'calls.json', mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify({ calls: [
         { title: 'Imported choice', question: 'Choose one', choices: ['One', 'Two'], correct_choice_index: 0 },
         { title: 'Imported text', question: 'Name a city', response_type: 'text', accepted_answers: ['Stockholm'] },
       ] })) })
     await page.locator('[data-call-import-drafts] .study-call-history-row').first().waitFor()
+    await page.locator('[data-call-open-settings]').click()
+    assert.match(await page.locator('[data-call-back-top]').textContent(), /Back to import review/)
+    await page.locator('[data-call-back-top]').click()
+    assert.equal(await page.locator('[data-call-import-drafts] .study-call-history-row').count(), 2)
+    await shot('import-review')
     await button('[data-call-import-drafts]', 'Edit').first().click()
+    await page.locator('[data-call-question]').fill('')
+    await page.evaluate(() => { const el = document.querySelector('#studyCallsDialog'); el.scrollTop = el.scrollHeight })
+    const backBounds = await page.locator('[data-call-back-top]').boundingBox()
+    assert(backBounds && backBounds.y >= 0 && backBounds.y + backBounds.height <= 800, 'Back stays visible while editing long forms')
+    await page.locator('[data-call-back-top]').click()
+    await button('[data-call-import-drafts]', 'Edit').first().click()
+    assert.equal(await page.locator('[data-call-question]').inputValue(), 'Choose one')
     await page.locator('[data-call-question]').fill('Edited imported question')
     await page.locator('[data-call-alternative-add]').click()
     await page.locator('[data-call-alternatives] input[type=text]').nth(2).fill('Three')
     await page.locator('[data-call-alternatives] input[type=radio]').nth(2).check()
+    await shot('editor')
     await page.locator('[data-call-import-save]').click()
     await page.locator('[data-call-import-start]').fill(await future())
     await page.locator('[data-call-import-schedule]').click()
@@ -113,7 +154,7 @@ async function check(browser, mobile) {
     assert.equal(await page.locator('[data-call-pending] .study-call-history-row').count(), 3)
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'}: editable import, pending controls, choice/voice/free responses, hidden capped history and scrolling passed`)
-  } finally { await page.close() }
+  } catch(error) {await page.screenshot({path:path.join(shots,`${mobile?'mobile':'desktop'}-failure.png`)}).catch(()=>{});throw error} finally { await page.close() }
 }
 
 ;(async () => {

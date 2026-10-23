@@ -134,7 +134,9 @@ test('JSON imports validate all questions, custom alternatives and free response
   for (const bad of ['{broken', JSON.stringify({ version: 2, calls: [] }),
     JSON.stringify([{ question: 'Bad', choices: ['A', 'B'] }]),
     JSON.stringify({ calls: [CALL_IMPORT_EXAMPLE.calls[0], { question: 'Missing answer', response_type: 'text' }] }),
-    JSON.stringify(Array(51).fill(CALL_IMPORT_EXAMPLE.calls[0]))]) assert.throws(() => parseCallImport(bad))
+    JSON.stringify(Array(5001).fill(CALL_IMPORT_EXAMPLE.calls[0]))]) assert.throws(() => parseCallImport(bad))
+  assert.throws(() => parseCallImport(JSON.stringify(Array(51).fill(CALL_IMPORT_EXAMPLE.calls[0])), Date.now(), 50), /Settings/)
+  assert.equal(parseCallImport(JSON.stringify(Array(120).fill(CALL_IMPORT_EXAMPLE.calls[0]))).length, 120)
   assert.throws(() => parseCallImport('x'.repeat(1024 * 1024 + 1)))
   const now = Date.now(), start = now + 600000
   const planned = scheduleImportedCalls(calls, start, 5, now)
@@ -192,7 +194,7 @@ test('file calls remain editable, schedule together once, and scheduled calls ca
   assert.equal(sent.find(r => r.op === 'update').question, 'Edited after scheduling')
   $('[data-call-pending] button').filter((_, el) => el.textContent === 'Disable').first().trigger('click'); await flush()
   assert.equal(sent.find(r => r.op === 'setEnabled').enabled, false)
-  assert.match($('[data-call-pending]').text(), /disabled/)
+  assert.match($('[data-call-pending]').text(), /Disabled/)
   $('[data-call-pending] button').filter((_, el) => el.textContent === 'Enable').first().trigger('click'); await flush()
   assert.equal(sent.filter(r => r.op === 'setEnabled').at(-1).enabled, true)
   $('[data-call-pending] button').filter((_, el) => el.textContent === 'Remove').first().trigger('click'); await flush()
@@ -229,4 +231,95 @@ test('new alternatives keep the selected correct answer while typing and removin
   assert.deepEqual($('[data-call-choices]').val().split('\n'), ['No', 'Third answer'])
   assert.equal($('[data-call-alternatives] input[type=radio]').eq(1).prop('checked'), true)
   installed.client.dispose(); win.close()
+})
+
+test('settings persist queue capacity and voice; large imports paginate and support pasted JSON', async () => {
+  const { win, $ } = fixture(), sent = []
+  let limit = 50, voiceName = '', rate = 1
+  const questions = Array.from({length:120}, (_, i) => ({...CALL_IMPORT_EXAMPLE.calls[0], title:`Question ${i + 1}`}))
+  const pending = questions.map((call, i) => ({...call, id:String(i), when_ms:Date.now()+3600000+i*60000, status:'scheduled'}))
+  win.CallBridge = {postMessage(raw) {
+    const r=JSON.parse(raw); sent.push(r)
+    if(r.op==='setSettings') { limit=r.pending_limit; voiceName=r.voice_name; rate=r.speech_rate }
+    const data=r.op==='getCapabilities' ? {supported:true, permission:'granted', batch_schedule:true, settings:true,
+      pending_limit:limit, pending_count:120, voice_selection:true, voice_name:voiceName, speech_rate:rate} :
+      r.op==='getCalls' ? {calls:pending} : r.op==='getVoices' ? {voices:[{name:'sv-test',language:'sv-SE',label:'Swedish voice'}]} : true
+    win.dispatchEvent(new win.CustomEvent('cupitorCallAck',{detail:{...r,ok:true,data}}))
+  }}
+  const installed=installStudyCalls(win,$); installed.open()
+  const flush=()=>new Promise(resolve=>setImmediate(resolve)); await flush()
+  assert.equal($('[data-call-pending] .study-call-history-row').length,50)
+  $('[data-call-pending-more]').trigger('click')
+  assert.equal($('[data-call-pending] .study-call-history-row').length,100)
+  $('[data-call-search]').val('Question 120').trigger('input')
+  assert.equal($('[data-call-pending] .study-call-history-row').length,1)
+  $('[data-call-open-import]').trigger('click')
+  assert.equal($('[data-call-status]').text(),'')
+  $('[data-call-import-paste]').val(JSON.stringify({calls:questions}))
+  $('[data-call-import-paste-submit]').trigger('click')
+  assert.match($('[data-call-status]').text(),/Settings/)
+  $('[data-call-open-settings]').trigger('click'); await flush()
+  $('[data-call-limit]').val('500')
+  $('[data-call-default-voice]').val('sv-test'); $('[data-call-default-rate]').val('0.75')
+  $('[data-call-preview-voice]').trigger('click'); await flush()
+  const preview=sent.find(r=>r.op==='previewVoice')
+  assert.equal(preview.voice_name,'sv-test'); assert.equal(preview.speech_rate,0.75)
+  $('[data-call-save-settings]').trigger('click'); await flush()
+  assert.equal(limit,500); assert.equal(voiceName,'sv-test'); assert.equal(rate,0.75)
+  $('[data-call-open-import]').trigger('click'); $('[data-call-import-paste-submit]').trigger('click')
+  assert.equal($('[data-call-import-drafts] .study-call-history-row').length,50)
+  assert.match($('[data-call-import-count]').text(),/120/)
+  $('[data-call-import-more]').trigger('click')
+  assert.equal($('[data-call-import-drafts] .study-call-history-row').length,100)
+  assert.match($('[data-call-import-name]').text(),/Pasted JSON/)
+  installed.client.dispose(); win.close()
+})
+
+test('Back follows nested screens and leaves unfinished edits without changing calls', async () => {
+  const { win, $ } = fixture(), sent = []
+  const pending = { ...CALL_IMPORT_EXAMPLE.calls[0], id: 'pending', status: 'scheduled', when_ms: Date.now() + 3600000 }
+  win.CallBridge = { postMessage(raw) {
+    const r = JSON.parse(raw); sent.push(r)
+    const data = r.op === 'getCapabilities' ? { supported: true, permission: 'granted', settings: true, edit_scheduled: true } :
+      r.op === 'getCalls' ? { calls: [pending] } : true
+    win.dispatchEvent(new win.CustomEvent('cupitorCallAck', { detail: { ...r, ok: true, data } }))
+  } }
+  const installed = installStudyCalls(win, $); installed.open()
+  const flush = () => new Promise(resolve => setImmediate(resolve)); await flush()
+  const view = () => $('[data-call-view]').filter((_, el) => $(el).css('display') !== 'none').attr('data-call-view')
+  const back = () => $('[data-call-back-top]').trigger('click')
+  assert.equal($('[data-call-back-bar]').css('display'), 'none')
+  $('[data-call-open-import]').trigger('click')
+  $('[data-call-import-load-example]').trigger('click')
+  $('[data-call-open-settings]').trigger('click'); await flush()
+  assert.match($('[data-call-back-top]').text(), /Back to import review/)
+  $('[data-call-history-toggle]').trigger('click')
+  assert.match($('[data-call-back-top]').text(), /Back to settings/)
+  back(); assert.equal(view(), 'settings')
+  back(); assert.equal(view(), 'import')
+  assert.equal($('[data-call-import-drafts] .study-call-history-row').length, 2)
+  $('[data-call-import-drafts] button').filter((_, el) => el.textContent === 'Edit').first().trigger('click')
+  assert.match($('[data-call-back-top]').text(), /Back to import review/)
+  $('[data-call-question]').val('') // Invalid form must still allow Back, without autosaving.
+  back(); assert.equal(view(), 'import')
+  $('[data-call-import-drafts] button').filter((_, el) => el.textContent === 'Edit').first().trigger('click')
+  assert.equal($('[data-call-question]').val(), CALL_IMPORT_EXAMPLE.calls[0].question)
+  $('[data-call-editor-cancel]').trigger('click'); assert.equal(view(), 'import')
+  back(); assert.equal(view(), 'list')
+  $('[data-call-pending] button').filter((_, el) => el.textContent === 'Edit call').trigger('click')
+  $('[data-call-question]').val('Unsaved change')
+  back(); assert.equal(view(), 'list')
+  $('[data-call-add]').trigger('click'); assert.equal($('[data-call-submit=later]').text(), 'Schedule call')
+  back(); assert.equal(view(), 'list')
+  assert.equal(sent.filter(r => ['update', 'schedule', 'scheduleBatch', 'callNow'].includes(r.op)).length, 0)
+  assert.equal($('[data-call-back-bar]').css('display'), 'none')
+  installed.client.dispose(); win.close()
+})
+
+test('voice import settings preserve overrides and reject invalid types and speeds', () => {
+  const call={...CALL_IMPORT_EXAMPLE.calls[0],voice_name:'sv-test',speech_rate:0.75}
+  assert.equal(parseCallImport(JSON.stringify([call]))[0].voice_name,'sv-test')
+  assert.equal(parseCallImport(JSON.stringify([call]))[0].speech_rate,0.75)
+  for(const change of [{speech_rate:0.1},{speech_rate:2},{speech_rate:'0.75'},{voice_name:4}])
+    assert.throws(()=>parseCallImport(JSON.stringify([{...call,...change}])))
 })

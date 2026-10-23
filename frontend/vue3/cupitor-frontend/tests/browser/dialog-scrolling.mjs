@@ -8,7 +8,7 @@ const runtimeRequire = createRequire(require.resolve(process.env.CUPITOR_JSDOM |
 const {parse} = runtimeRequire('@babel/parser');
 
 const {chromium} = await import(pathToFileURL(process.env.CUPITOR_PLAYWRIGHT).href);
-const browser = await chromium.launch({headless: true});
+const browser = await chromium.launch({headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined});
 const output = resolve('../test-results/dialog-browser-results', process.env.CUPITOR_TEST_ASSETS || 'public');
 await mkdir(output, {recursive: true});
 const app = await readFile(new URL('../../public/language/language.js', import.meta.url), 'utf8');
@@ -126,7 +126,10 @@ try {
     await page.waitForFunction(() => window.previewRequests.length === 2);
     assert.equal(await page.evaluate(() => window.previewRequests[0].external_key), 'key-0');
     await page.screenshot({path: resolve(output, 'notification-schedule-' + viewport.width + '.png')});
-    await page.evaluate(() => { jQuery('#notifSchedulePreview').dialog('close'); jQuery('#notifDialog').dialog('close'); });
+    await page.locator('.notif-schedule-back').click();
+    assert.equal(await page.locator('#notifSchedulePreview').isVisible(), false);
+    assert.equal(await page.locator('#notifDialog').isVisible(), true, 'Back returns to the existing reminders dialog');
+    await page.evaluate(() => jQuery('#notifDialog').dialog('close'));
     await page.setViewportSize(viewport);
 
     for (const id of ['recordingReviewDialog', 'manualEntryEditor', 'practiceLogDialog', 'logViewerDialog']) {
