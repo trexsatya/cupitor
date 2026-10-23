@@ -215,3 +215,18 @@ test('history is hidden until requested and keeps only the newest 100 terminal c
   assert.notEqual($('[data-call-history]').css('display'), 'none')
   installed.client.dispose(); win.close()
 })
+
+test('new alternatives keep the selected correct answer while typing and removing rows', async () => {
+  const { win, $ } = fixture()
+  const installed = installStudyCalls(win, $); installed.open()
+  $('[data-call-add]').trigger('click')
+  $('[data-call-alternative-add]').trigger('click')
+  $('[data-call-alternatives] input[type=radio]').eq(2).prop('checked', true).trigger('change')
+  $('[data-call-alternatives] input[type=text]').eq(2).val('Third answer').trigger('input')
+  assert.equal($('[data-call-correct]').val(), '2')
+  $('[data-call-alternatives] button').first().trigger('click')
+  assert.equal($('[data-call-correct]').val(), '1')
+  assert.deepEqual($('[data-call-choices]').val().split('\n'), ['No', 'Third answer'])
+  assert.equal($('[data-call-alternatives] input[type=radio]').eq(1).prop('checked'), true)
+  installed.client.dispose(); win.close()
+})

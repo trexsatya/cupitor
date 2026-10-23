@@ -529,7 +529,7 @@ export function installStudyCalls(win, $) {
       const $correct = $dialog.find('[data-call-correct]')
       const previous = $correct.find('option:selected').data('label')
       $correct.empty().append($('<option>').val('').text('Choose the correct alternative'))
-      const labels = $dialog.find('[data-call-choices]').val().split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+      const labels = $dialog.find('[data-call-choices]').val().split(/\r?\n/).map(s => s.trim())
       labels.forEach((label, index) => $('<option>').val(String(index)).text(`${index + 1}. ${label}`).data('label', label).appendTo($correct))
       if (previous && labels.filter(label => label === previous).length === 1) $correct.val(String(labels.indexOf(previous)))
     }
@@ -556,7 +556,7 @@ export function installStudyCalls(win, $) {
       $dialog.find('[data-call-alternative-add]').prop('disabled', labels.length >= 9)
     }
     $dialog.on('click', '[data-call-alternative-add]', () => {
-      $dialog.find('[data-call-choices]').val($dialog.find('[data-call-choices]').val() + '\n'); renderAlternatives()
+      $dialog.find('[data-call-choices]').val($dialog.find('[data-call-choices]').val() + '\n'); updateCorrectChoices(); renderAlternatives()
     })
     $dialog.on('input', '[data-call-choices]', () => { updateCorrectChoices(); renderAlternatives() })
     $dialog.on('change', '[data-call-correct]', renderAlternatives)
