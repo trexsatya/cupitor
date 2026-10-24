@@ -40,6 +40,7 @@ async function check(browser, mobile) {
       const result = r.op === 'ensureMicPerm' ? 'granted'
         : ['recordStart', 'recordStop'].includes(r.op) ? window.__recordURL
         : r.op === 'load' ? wav : r.op === 'musicList' ? '[]' : null
+      if (r.op === 'recordStart' && window.__holdRecordStart) { window.__heldRecordStart = {rid:r.rid,result}; return }
       queueMicrotask(() => window.__cupAudio?.({rid: r.rid, result}))
     } }
   }, silentWav())
@@ -88,6 +89,20 @@ async function check(browser, mobile) {
     await page.evaluate(() => document.activeElement?.blur())
     await page.keyboard.press('Space'); await playing()
     await page.waitForTimeout(350)
+    await page.evaluate(() => { window.__holdRecordStart = true })
+    await click('.prec-toggle')
+    await page.locator('.prec-toggle[aria-label="Cancel recording start"]').waitFor()
+    assert.match(await page.locator('.prec-status').textContent(), /starting microphone/)
+    fs.mkdirSync('test-results/dialog-browser-results/spotify', { recursive:true })
+    await page.screenshot({path:`test-results/dialog-browser-results/spotify/speakover-start-${mobile?'mobile':'desktop'}.png`})
+    await click('.prec-toggle')
+    await page.evaluate(() => {
+      window.__holdRecordStart = false
+      window.__cupAudio(window.__heldRecordStart)
+    })
+    await page.locator('.prec-toggle[aria-label="Rec"]').waitFor()
+    assert.equal(await page.evaluate(() => window.__audioRequests.filter(r=>r.op==='recordStop').length), 0,
+      'a cancelled startup must not send a late global Stop')
     await click('.prec-toggle')
     await page.waitForFunction(() => window.__audioRequests.some(r => r.op === 'recordStart'))
     assert.equal(await page.evaluate(() => window.__spotify.paused), true, 'Rec pauses Spotify at its own clock')
