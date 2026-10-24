@@ -41,7 +41,7 @@ export function createCallClient(win, timeoutMs = 15000) {
 }
 
 export function callPayload({ title, question, choices, language, when, responseType = 'choice',
-  correctChoice, acceptedAnswers, maxRetries = 3, matchThreshold = 0.8, voiceResponse = true, voiceName, speechRate }, now = Date.now()) {
+  correctChoice, acceptedAnswers, maxRetries = 3, matchThreshold = 0.8, voiceResponse = true, voiceName, speechRate, repetitionPause }, now = Date.now()) {
   title = String(title || '').trim()
   question = String(question || '').trim()
   const lines = value => String(value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
@@ -77,6 +77,10 @@ export function callPayload({ title, question, choices, language, when, response
   if (speechRate !== undefined) {
     if (typeof speechRate !== 'number' || !Number.isFinite(speechRate) || speechRate < 0.5 || speechRate > 1.5) throw new Error('Choose a speaking speed from 0.5 to 1.5.')
     result.speech_rate = speechRate
+  }
+  if (repetitionPause !== undefined) {
+    if (typeof repetitionPause !== 'number' || !Number.isFinite(repetitionPause) || repetitionPause < 0 || repetitionPause > 120) throw new Error('Choose a repetition pause from 0 to 120 seconds.')
+    result.repetition_pause_seconds = repetitionPause
   }
   if (when) {
     const timestamp = new Date(when).getTime()
@@ -121,7 +125,7 @@ function validateImportedCall(raw, index, now) {
     language: raw.language || 'sv-SE', choices: choices.join('\n'), responseType: type,
     correctChoice: raw.correct_choice_index ?? '', acceptedAnswers: answers.map(s => s.replace(/\s+/g, ' ')).join('\n'),
     maxRetries: raw.max_retries ?? 3, matchThreshold: raw.match_threshold ?? 0.8,
-    voiceResponse: raw.voice_response !== false, voiceName: raw.voice_name, speechRate: raw.speech_rate, when }, now)
+    voiceResponse: raw.voice_response !== false, voiceName: raw.voice_name, speechRate: raw.speech_rate, repetitionPause: raw.repetition_pause_seconds, when }, now)
   if (type === 'text') payload.accepted_answers = answers.map(s => s.replace(/\s+/g, ' ').trim())
   payload.enabled = raw.enabled !== false
   return payload
@@ -195,6 +199,9 @@ export function installStudyCalls(win, $) {
   let voicesBusy = false
   let defaultVoice = ''
   let defaultRate = 1
+  let repetitionControls = false
+  let defaultPause = 3
+  let commandHints = {}
   let settingsRevision = 0
   let savedSettingsRevision = 0
   let currentView = 'list'
@@ -206,6 +213,7 @@ export function installStudyCalls(win, $) {
     busy: 'Audio is busy. Finish the active call or playback first.',
     speech_unavailable: 'This voice is unavailable. Check Android speech settings or choose another voice.',
     bad_time: 'Choose a future date and time before enabling this call.',
+    bad_timing: 'Choose a repetition pause from 0 to 120 seconds.',
     not_scheduled: 'This call has already started or finished. Refresh the pending list.',
     timeout: 'Cupitor did not reply. Refresh the call history before trying again.',
   }
@@ -222,7 +230,7 @@ export function installStudyCalls(win, $) {
     status('')
     $dialog.find('[data-call-view]').hide().filter(`[data-call-view=${view}]`).show()
     const titles = { list: 'Pending calls', import: 'Import calls', history: 'Call history', settings: 'Settings', editor: editingId ? 'Edit scheduled call' : importedIndex >= 0 ? 'Edit imported call' : 'Add call' }
-    const descriptions = { list: 'Your questions, ready for voice practice.', import: 'Choose a file, review your questions, then schedule.', history: 'Your latest 100 finished calls.', settings: 'Control the size of your call list.', editor: 'Set the question and the answer you want to practice.' }
+    const descriptions = { list: 'Your questions, ready for voice practice.', import: 'Choose a file, review your questions, then schedule.', history: 'Your latest 100 finished calls.', settings: 'Choose your call list, voice and repetition defaults.', editor: 'Set the question and the answer you want to practice.' }
     $dialog.find('[data-call-view-title]').text(titles[view])
     $dialog.find('[data-call-view-description]').text(descriptions[view])
     const parent = viewTrail[viewTrail.length - 1] || (view === 'editor' && importedIndex >= 0 ? 'import' : 'list')
@@ -342,6 +350,15 @@ export function installStudyCalls(win, $) {
     pendingControls = caps.pending_controls === true
     settingsAvailable = caps.settings === true
     voiceSelection = caps.voice_selection === true
+    repetitionControls = caps.repetition_controls === true
+    defaultPause = typeof caps.repetition_pause_seconds === 'number' ? caps.repetition_pause_seconds : 3
+    commandHints = caps.command_hints || {}
+    $dialog.find('[data-call-repetition-pause], [data-call-default-pause]').prop('disabled', !repetitionControls)
+    $dialog.find('[data-call-repetition-pause]').attr('placeholder', `Use Settings (${defaultPause} s)`)
+    $dialog.find('[data-call-pause-note]').text(repetitionControls
+      ? `Leave blank to use Settings (${defaultPause} seconds). Applies before automatic retries and Read again. Continue starts immediately.`
+      : 'Update the Cupitor Android app to configure repetition pauses and voice commands.')
+    renderCommandHint()
     defaultVoice = typeof caps.voice_name === 'string' ? caps.voice_name : ''
     defaultRate = typeof caps.speech_rate === 'number' ? Number(caps.speech_rate.toFixed(2)) : 1
     // Android select/system dialogs can send a foreground event while a form
@@ -350,6 +367,7 @@ export function installStudyCalls(win, $) {
     if (applySettings) {
       selectValue('[data-call-default-voice]', defaultVoice, defaultVoice || 'Device default')
       selectValue('[data-call-default-rate]', String(defaultRate), `${defaultRate}×`)
+      $dialog.find('[data-call-default-pause]').val(defaultPause)
     }
     $dialog.find('[data-call-voice-name], [data-call-speech-rate], [data-call-default-voice], [data-call-default-rate], [data-call-preview-voice], [data-call-preview-editor], [data-call-stop-preview], [data-call-reload-voices], [data-call-manage-voices]').prop('disabled', !voiceSelection)
     $dialog.find('[data-call-voices-note]').text(voiceSelection ? 'Choose an available Android text-to-speech voice. Other question languages keep their device voice.' : 'Update the Cupitor app to choose a speaking voice.')
@@ -381,8 +399,17 @@ export function installStudyCalls(win, $) {
     renderImported()
   }
 
+  function renderCommandHint() {
+    if (!$dialog) return
+    const language = String($dialog.find('[data-call-language]').val() || pageLanguage).split('-')[0].toLowerCase()
+    $dialog.find('[data-call-command-hint]').text(repetitionControls
+      ? commandHints[language] || 'Use Pause, Continue and Read again on the call screen. Voice commands are unavailable for this language.'
+      : 'Update the Cupitor Android app to use voice commands.')
+  }
+
   function readForm(includeTime = true) {
     const value = key => $dialog.find(`[data-call-${key}]`).val()
+    if (!repetitionControls && value('repetition-pause') !== '') throw new Error('Update the Cupitor Android app to use repetition pauses.')
     if (value('type') === 'choice' && value('choices').split(/\r?\n/).some(s => !s.trim())) throw new Error('Fill in or remove each alternative.')
     return { ...callPayload({ title: value('title'), question: value('question'),
       choices: value('choices'), language: value('language'), when: includeTime ? value('when') : null,
@@ -390,7 +417,8 @@ export function installStudyCalls(win, $) {
       maxRetries: value('retries'), matchThreshold: value('match'),
       voiceResponse: $dialog.find('[data-call-voice]').is(':checked'),
       voiceName: value('voice-name') === '__default__' ? undefined : value('voice-name'),
-      speechRate: value('speech-rate') === '__default__' ? undefined : Number(value('speech-rate')) }), enabled: $dialog.find('[data-call-enabled]').is(':checked') }
+      speechRate: value('speech-rate') === '__default__' ? undefined : Number(value('speech-rate')),
+      repetitionPause: value('repetition-pause') === '' ? undefined : Number(value('repetition-pause')) }), enabled: $dialog.find('[data-call-enabled]').is(':checked') }
   }
   function localTime(ms) {
     const date = new Date(ms)
@@ -409,6 +437,7 @@ export function installStudyCalls(win, $) {
     value('accepted', (call.accepted_answers || []).join('\n'))
     selectValue('[data-call-language]', call.language || pageLanguage, languageLabel(call.language || pageLanguage))
     renderLanguages(); value('retries', call.max_retries ?? 3)
+    value('repetition-pause', call.repetition_pause_seconds ?? ''); renderCommandHint()
     selectValue('[data-call-voice-name]', call.voice_name ?? '__default__', call.voice_name || 'Device default for this language')
     selectValue('[data-call-speech-rate]', call.speech_rate == null ? '__default__' : String(call.speech_rate), `${call.speech_rate}×`)
     renderVoices()
@@ -606,6 +635,11 @@ export function installStudyCalls(win, $) {
           <p class="study-call-hint" data-call-voices-note></p>
           <div class="study-call-actions"><button type="button" class="btn" data-call-preview-voice>▶ Preview voice</button><button type="button" class="btn" data-call-stop-preview>Stop</button><button type="button" class="btn" data-call-reload-voices>Refresh voices</button><button type="button" class="btn" data-call-manage-voices>Android speech settings</button></div>
         </section>
+        <section class="study-call-section"><h3>Repetitions</h3>
+          <label>Silence before repeating (seconds)<input type="number" min="0" max="120" step="any" value="3" data-call-default-pause></label>
+          <p class="study-call-hint">0–120 seconds before retrying a question or repeating on request. Voice commands and the Pause button let you wait longer without using an attempt.</p>
+          <p class="study-call-hint">Decline an incoming call to choose a callback in 5, 10 or 15 minutes.</p>
+        </section>
         <div class="study-call-actions"><button type="button" class="btn btn-primary" data-call-save-settings>Save settings</button><button type="button" class="btn" data-call-back>Back to pending calls</button></div>
       </div>
       <div data-call-view="import" style="display:none;">
@@ -652,6 +686,9 @@ export function installStudyCalls(win, $) {
           <label>Speaking speed<select data-call-speech-rate><option value="__default__">Use Settings speed</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1">1× — normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></label>
           <button type="button" class="btn" data-call-preview-editor>▶ Preview voice</button>
           <label>Retries after first attempt<input type="number" min="0" max="10" step="1" value="3" data-call-retries></label><p class="study-call-hint">Stops as soon as the answer is correct. Incorrect or unclear answers retry automatically.</p>
+          <label>Silence before repeating (seconds)<input type="number" min="0" max="120" step="any" placeholder="Use Settings (3 s)" data-call-repetition-pause></label>
+          <p class="study-call-hint" data-call-pause-note></p>
+          <p class="study-call-hint" data-call-command-hint></p>
           <label>Answer matching<select data-call-match><option value="0.8">Fuzzy — tolerate speech errors</option><option value="0.9">Stricter</option><option value="1">Exact after normalization</option></select></label>
         </details>
         <div class="study-call-actions study-call-editor-actions">
@@ -676,14 +713,17 @@ export function installStudyCalls(win, $) {
     })
     $dialog.on('click', '[data-call-open-import]', () => { importedIndex = -1; showView('import', true) })
     $dialog.on('click', '[data-call-open-settings]', () => { showView('settings', true); refresh().then(() => loadVoices()).catch(reportError) })
-    $dialog.on('input change', '[data-call-limit], [data-call-default-voice], [data-call-default-rate], [data-call-preview-language]', () => { settingsRevision++ })
+    $dialog.on('input change', '[data-call-limit], [data-call-default-voice], [data-call-default-rate], [data-call-preview-language], [data-call-default-pause]', () => { settingsRevision++ })
     $dialog.on('click', '[data-call-save-settings]', async function () {
       const limit = Number($dialog.find('[data-call-limit]').val())
       if (!Number.isInteger(limit) || limit < 1 || limit > MAX_CALL_IMPORT) { status('Choose a whole number from 1 to 5,000.', true); return }
+      const pauseText = $dialog.find('[data-call-default-pause]').val()
+      const pause = Number(pauseText)
+      if (repetitionControls && (pauseText === '' || !Number.isFinite(pause) || pause < 0 || pause > 120)) { status('Choose a repetition pause from 0 to 120 seconds.', true); return }
       this.disabled = true
       const revision = settingsRevision
       try {
-        await client.rpc('setSettings', { pending_limit: limit, ...(voiceSelection ? { voice_name: $dialog.find('[data-call-default-voice]').val(), speech_rate: Number($dialog.find('[data-call-default-rate]').val()) } : {}) })
+        await client.rpc('setSettings', { pending_limit: limit, ...(repetitionControls ? { repetition_pause_seconds: pause } : {}), ...(voiceSelection ? { voice_name: $dialog.find('[data-call-default-voice]').val(), speech_rate: Number($dialog.find('[data-call-default-rate]').val()) } : {}) })
         savedSettingsRevision = revision
         await refresh(); status(settingsRevision === revision ? 'Settings saved.' : 'Settings saved. You have newer unsaved changes.')
       }
@@ -695,7 +735,7 @@ export function installStudyCalls(win, $) {
     $dialog.on('click', '[data-call-stop-preview]', () => client.rpc('stopVoicePreview').catch(reportError))
     $dialog.on('click', '[data-call-reload-voices]', () => loadVoices(true))
     $dialog.on('click', '[data-call-manage-voices]', () => client.rpc('openVoiceSettings').catch(reportError))
-    $dialog.on('change', '[data-call-language], [data-call-preview-language]', () => renderVoices(true))
+    $dialog.on('change', '[data-call-language], [data-call-preview-language]', () => { renderVoices(true); renderCommandHint() })
     $dialog.on('change', '[data-call-voice-name], [data-call-default-voice]', renderVoiceNotes)
     $dialog.on('dialogclose', () => { savedSettingsRevision = settingsRevision; if (voiceSelection) client.rpc('stopVoicePreview').catch(() => {}) })
     $dialog.on('input', '[data-call-search]', () => { pendingShown = 50; renderHistory() })
@@ -752,6 +792,7 @@ export function installStudyCalls(win, $) {
       try {
         saveImported()
         const calls = scheduleImportedCalls(imported, $dialog.find('[data-call-import-start]').val(), $dialog.find('[data-call-import-spacing]').val())
+        if (!repetitionControls && calls.some(c => c.repetition_pause_seconds !== undefined)) throw new Error('Update the Cupitor Android app to use repetition pauses.')
         if (!voiceAvailable) calls.forEach(c => { c.voice_response = false })
         await client.rpc('scheduleBatch', { calls })
         batchScheduled = true; importedIndex = -1; showView('list'); status(`Added ${calls.length} calls to the pending list.`); await refresh()

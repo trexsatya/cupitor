@@ -13,7 +13,7 @@ async function check(browser, mobile) {
   await page.route('**/*', serveFixtures)
   await page.addInitScript(() => {
     window.__callRequests = []
-    let sequence = 0, limit = 50, voiceName = '', rate = 1
+    let sequence = 0, limit = 50, voiceName = '', rate = 1, repetitionPause = 3
     let calls = Array.from({ length: 150 }, (_, i) => ({
       id: 'done-' + i, title: 'Finished question ' + i, created_at: i, finished_at: i, when_ms: Date.now(),
       status: 'completed', choice: 'en',
@@ -23,7 +23,7 @@ async function check(browser, mobile) {
     window.CallBridge = { postMessage(raw) {
       const request = JSON.parse(raw); window.__callRequests.push(request)
       const add = call => calls.push({ ...call, id: 'new-' + sequence++, created_at: Date.now(), status: call.enabled === false ? 'disabled' : 'scheduled' })
-      if (request.op === 'setSettings') { limit=request.pending_limit; voiceName=request.voice_name; rate=request.speech_rate }
+      if (request.op === 'setSettings') { limit=request.pending_limit; voiceName=request.voice_name; rate=request.speech_rate; repetitionPause=request.repetition_pause_seconds }
       if (request.op === 'scheduleBatch') request.calls.forEach(add)
       if (request.op === 'schedule') add(request)
       if (request.op === 'setEnabled') calls = calls.map(c => c.id === request.id ? { ...c, enabled: request.enabled, status: request.enabled ? 'scheduled' : 'disabled' } : c)
@@ -31,7 +31,7 @@ async function check(browser, mobile) {
       if (request.op === 'update') calls = calls.map(c => c.id === request.id ? { ...c, ...request } : c)
       const data = request.op === 'getCapabilities'
         ? { supported: true, permission: 'granted', full_screen: true, exact_alarms: true, speech_input: true,
-          batch_schedule: true, edit_scheduled: true, pending_controls: true, history_limit: 100, settings:true, pending_limit:limit, pending_count:calls.filter(c=>c.status==='scheduled'||c.status==='disabled').length, max_pending_limit:5000, voice_selection:true, voice_name:voiceName, speech_rate:rate }
+          batch_schedule: true, edit_scheduled: true, pending_controls: true, history_limit: 100, settings:true, pending_limit:limit, pending_count:calls.filter(c=>c.status==='scheduled'||c.status==='disabled').length, max_pending_limit:5000, voice_selection:true, voice_name:voiceName, speech_rate:rate, repetition_controls:true, repetition_pause_seconds:repetitionPause, command_hints:{sv:'Voice commands: vänta = pause; kör = continue; igen / en gång till = repeat. Say commands while the microphone is listening.',en:'Voice commands: wait = pause; go = continue; again / once more = repeat. Say commands while the microphone is listening.'} }
         : request.op === 'getCalls' ? { version: 1, calls } : request.op === 'getVoices' ? {voices:[{name:'sv-test', language:'sv-SE',label:'Swedish · Voice 1'},{name:'en-test',language:'en-GB',label:'English · Voice 1'}]} : { id: 'new-call' }
       window.dispatchEvent(new CustomEvent('cupitorCallAck', { detail: { ...request, ok: true, data } }))
     } }
@@ -114,12 +114,16 @@ async function check(browser, mobile) {
     await page.locator('[data-call-limit]').fill('500')
     await page.locator('[data-call-default-voice]').selectOption('sv-test')
     await page.locator('[data-call-default-rate]').selectOption('0.75')
+    await page.locator('[data-call-default-pause]').fill('7.5')
     await page.evaluate(()=>window.dispatchEvent(new CustomEvent('cupitorAppLifecycle',{detail:{isForeground:true}})))
     await page.locator('[data-call-preview-voice]').click()
     await page.waitForFunction(()=>window.__callRequests.some(r=>r.op==='previewVoice'))
     await page.locator('[data-call-save-settings]').click()
     await page.waitForFunction(()=>window.__callRequests.some(r=>r.op==='setSettings'))
+    assert.equal(await page.evaluate(()=>window.__callRequests.find(r=>r.op==='setSettings').repetition_pause_seconds),7.5)
     await shot('settings')
+    await page.locator('[data-call-default-pause]').scrollIntoViewIfNeeded()
+    await page.locator('.study-call-window').screenshot({path:path.join(shots,`${mobile?'mobile':'desktop'}-repetitions.png`)})
     await page.locator('[data-call-preview-voice]').scrollIntoViewIfNeeded()
     await page.locator('.study-call-window').screenshot({path:path.join(shots,`${mobile?'mobile':'desktop'}-voice.png`)})
     await page.locator('[data-call-view=settings] [data-call-back]').click()
@@ -154,18 +158,22 @@ async function check(browser, mobile) {
     await page.locator('[data-call-language]').selectOption('en-GB')
     assert.equal(await page.locator('[data-call-voice-name] option[value=sv-test]').count(), 0)
     await page.locator('[data-call-voice-name]').selectOption('en-test')
+    await page.locator('[data-call-repetition-pause]').fill('2.5')
+    assert.match(await page.locator('[data-call-command-hint]').textContent(),/wait.*again/)
     await page.locator('[data-call-alternative-add]').click()
     await page.locator('[data-call-alternatives] input[type=text]').nth(2).fill('Three')
     await page.locator('[data-call-alternatives] input[type=radio]').nth(2).check()
     await shot('editor')
+    await page.locator('[data-call-repetition-pause]').scrollIntoViewIfNeeded()
+    await page.locator('.study-call-window').screenshot({path:path.join(shots,`${mobile?'mobile':'desktop'}-repetition-editor.png`)})
     await page.locator('[data-call-import-save]').click()
     await page.locator('[data-call-import-start]').fill(await future())
     await page.locator('[data-call-import-schedule]').click()
     await page.waitForFunction(() => window.__callRequests.some(r => r.op === 'scheduleBatch'))
     assert.deepEqual(await page.evaluate(() => {
       const calls = window.__callRequests.find(r => r.op === 'scheduleBatch').calls
-      return [calls[0].question, calls[0].choices, calls[0].correct_choice_index, calls[1].when_ms - calls[0].when_ms]
-    }), ['Edited imported question', ['One', 'Two', 'Three'], 2, 300000])
+      return [calls[0].question, calls[0].choices, calls[0].correct_choice_index, calls[1].when_ms - calls[0].when_ms, calls[0].repetition_pause_seconds]
+    }), ['Edited imported question', ['One', 'Two', 'Three'], 2, 300000, 2.5])
     assert.equal(await page.locator('[data-call-pending] .study-call-history-row').count(), 3)
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'}: editable import, pending controls, choice/voice/free responses, hidden capped history and scrolling passed`)
