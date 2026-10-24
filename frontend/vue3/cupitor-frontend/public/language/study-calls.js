@@ -205,6 +205,8 @@ export function installStudyCalls(win, $) {
   let settingsRevision = 0
   let savedSettingsRevision = 0
   let currentView = 'list'
+  let historyDetailId = null
+  let historyScroll = 0
   const viewTrail = []
   const active = new Set(['scheduled', 'disabled', 'ringing', 'answered'])
   const errorMessages = {
@@ -229,15 +231,16 @@ export function installStudyCalls(win, $) {
     if (voiceSelection && ['settings', 'editor'].includes(view)) loadVoices()
     status('')
     $dialog.find('[data-call-view]').hide().filter(`[data-call-view=${view}]`).show()
-    const titles = { list: 'Pending calls', import: 'Import calls', history: 'Call history', settings: 'Settings', editor: editingId ? 'Edit scheduled call' : importedIndex >= 0 ? 'Edit imported call' : 'Add call' }
-    const descriptions = { list: 'Your questions, ready for voice practice.', import: 'Choose a file, review your questions, then schedule.', history: 'Your latest 100 finished calls.', settings: 'Choose your call list, voice and repetition defaults.', editor: 'Set the question and the answer you want to practice.' }
+    const titles = { list: 'Pending calls', import: 'Import calls', history: 'Call history', 'history-detail': 'Call details', settings: 'Settings', editor: editingId ? 'Edit scheduled call' : importedIndex >= 0 ? 'Edit imported call' : 'Add call' }
+    const descriptions = { list: 'Your questions, ready for voice practice.', import: 'Choose a file, review your questions, then schedule.', history: 'Your latest 100 finished calls.', 'history-detail': 'The full question, expected answer and saved responses.', settings: 'Choose your call list, voice and repetition defaults.', editor: 'Set the question and the answer you want to practice.' }
     $dialog.find('[data-call-view-title]').text(titles[view])
     $dialog.find('[data-call-view-description]').text(descriptions[view])
     const parent = viewTrail[viewTrail.length - 1] || (view === 'editor' && importedIndex >= 0 ? 'import' : 'list')
     const backLabels = { list: 'pending calls', import: 'import review', history: 'call history', settings: 'settings' }
     $dialog.find('[data-call-back]').text(`← Back to ${backLabels[parent] || 'pending calls'}`)
     $dialog.find('[data-call-back-bar]').toggle(view !== 'list')
-    $dialog.find('[data-call-nav]').toggle(view !== 'editor')
+    $dialog.find('[data-call-nav]').toggle(!['editor', 'history-detail'].includes(view))
+    $dialog.find('[data-call-capabilities], .study-call-permissions').toggle(view !== 'history-detail')
     $dialog.find('[data-call-history-toggle]').attr('aria-expanded', String(view === 'history'))
     $dialog.find('[data-call-history]').toggle(view === 'history')
     const draft = importedIndex >= 0 && !editingId
@@ -249,10 +252,80 @@ export function installStudyCalls(win, $) {
   }
 
   function goBack() {
+    const fromDetail = currentView === 'history-detail'
     const parent = viewTrail.pop() || (currentView === 'editor' && importedIndex >= 0 ? 'import' : 'list')
     // Back leaves the editor without submitting or saving an unfinished draft.
     if (currentView === 'editor') { editingId = null; importedIndex = -1 }
     showView(parent)
+    if (fromDetail && parent === 'history') {
+      $dialog.find('[data-call-view-details]').filter((_, el) => $(el).closest('[data-call-id]').attr('data-call-id') === historyDetailId)[0]?.focus({ preventScroll: true })
+      $dialog.scrollTop(historyScroll)
+    }
+  }
+
+  function historyCalls() {
+    return (Array.isArray(snapshot.calls) ? snapshot.calls : []).filter(c => !active.has(c.status)).sort((a, b) =>
+      (b.finished_at || b.created_at || 0) - (a.finished_at || a.created_at || 0)).slice(0, 100)
+  }
+
+  function renderHistoryDetail() {
+    const $content = $dialog.find('[data-call-history-detail]').empty()
+    const call = historyCalls().find(c => c.id === historyDetailId)
+    if (!call) {
+      $('<p class="study-call-empty">').text('This call is no longer in this profile’s latest 100 finished calls.').appendTo($content)
+      return
+    }
+    const section = title => {
+      const $section = $('<section class="study-call-section study-call-detail-section">').appendTo($content)
+      $('<h3>').text(title).appendTo($section)
+      return $section
+    }
+    const paragraph = ($parent, value) => $('<p class="study-call-detail-text">').text(value).appendTo($parent)
+    const date = value => typeof value === 'number' && Number.isFinite(value) && value > 0 ? new Date(value).toLocaleString() : ''
+    const outcome = response => response.reason === 'no_input' ? 'No speech heard' : response.reason ? 'Not understood' :
+      response.correct === true ? 'Correct' : response.correct === false ? 'Incorrect' : 'Saved without grading'
+    const answer = response => response.choice || response.answer || ''
+    $('<h3 class="study-call-detail-title" tabindex="-1" data-call-detail-title>').text(call.title || 'Study call').appendTo($content)
+    $('<span class="study-call-badge">').text(call.status).appendTo($content)
+    if (date(call.finished_at)) $('<p class="study-call-meta">').text(`Finished ${date(call.finished_at)}`).appendTo($content)
+    if (date(call.when_ms)) $('<p class="study-call-meta">').text(`Scheduled ${date(call.when_ms)}`).appendTo($content)
+    paragraph(section('Question'), call.question || 'The question was not saved for this older call.')
+    const choices = Array.isArray(call.choices) ? call.choices : []
+    const correctIndex = Number.isInteger(call.correct_choice_index) && call.correct_choice_index >= 0 && call.correct_choice_index < choices.length ? call.correct_choice_index : null
+    if (call.response_type === 'text') {
+      const $accepted = section('Accepted answers')
+      const accepted = Array.isArray(call.accepted_answers) ? call.accepted_answers : []
+      if (accepted.length) {
+        const $list = $('<ul class="study-call-detail-list">').appendTo($accepted)
+        accepted.forEach(value => $('<li class="study-call-detail-text">').text(value).appendTo($list))
+      } else paragraph($accepted, 'No accepted answers were saved for this older call.')
+    } else {
+      if (choices.length) {
+        const $list = $('<ol class="study-call-detail-list">').appendTo(section('Alternatives'))
+        choices.forEach((value, index) => {
+          const $item = $('<li>').appendTo($list)
+          $('<span class="study-call-detail-text">').text(value).appendTo($item)
+          if (index === correctIndex) $('<span class="study-call-badge">').text('Correct answer').appendTo($item)
+        })
+      }
+      paragraph(section('Correct answer'), correctIndex === null ? 'No correct answer was configured for this call.' : `${correctIndex + 1}. ${choices[correctIndex]}`)
+    }
+    const $response = section('Your answer')
+    paragraph($response, answer(call) || 'No answer was recorded.')
+    if (answer(call)) $('<span class="study-call-badge">').text(outcome(call)).appendTo($response)
+    if (call.spoken_response) paragraph($response, `Heard: ${call.spoken_response}`)
+    const attempts = Array.isArray(call.attempts) ? call.attempts : []
+    const $attempts = section(`Attempts (${attempts.length})`)
+    if (!attempts.length) paragraph($attempts, 'No individual attempts were recorded.')
+    attempts.forEach((attempt, index) => {
+      const $attempt = $('<div class="study-call-detail-attempt">').appendTo($attempts)
+      $('<strong>').text(`Attempt ${index + 1}`).appendTo($attempt)
+      $('<span class="study-call-badge">').text(outcome(attempt)).appendTo($attempt)
+      paragraph($attempt, answer(attempt) || 'No answer heard')
+      if (attempt.spoken_response) paragraph($attempt, `Heard: ${attempt.spoken_response}`)
+      const mode = { voice: 'Voice', typed: 'Typed', tap: 'On screen' }[attempt.response_mode]
+      $('<div class="study-call-meta">').text([mode, date(attempt.at)].filter(Boolean).join(' · ')).appendTo($attempt)
+    })
   }
 
   function renderHistory() {
@@ -267,8 +340,7 @@ export function installStudyCalls(win, $) {
     $dialog.find('[data-call-capacity]').text(`Limit: ${pendingLimit.toLocaleString()} across all profiles`)
     $dialog.find('[data-call-search-wrap]').toggle(pending.length > 5 || !!query)
     $dialog.find('[data-call-pending-more]').toggle(matches.length > pendingShown).text(`Show more (${Math.max(0, matches.length - pendingShown)} remaining)`)
-    const history = all.filter(c => !active.has(c.status)).sort((a, b) =>
-      (b.finished_at || b.created_at || 0) - (a.finished_at || a.created_at || 0)).slice(0, 100)
+    const history = historyCalls()
     $dialog.find('[data-call-history-count]').text(`History (${history.length})`)
     if (!history.length) $('<p>').text('No calls yet.').appendTo($history)
     if (!matches.length) $('<p class="study-call-empty">').text(query ? 'No matching calls.' : 'No pending calls. Add a question or import a JSON file to get started.').appendTo($pending)
@@ -289,6 +361,15 @@ export function installStudyCalls(win, $) {
         call.attempts.forEach((attempt, index) => {
           const outcome = attempt.correct === true ? 'Correct' : attempt.reason ? 'Not understood' : attempt.correct === false ? 'Incorrect' : 'Saved'
           $('<div>').text(`${index + 1}. ${attempt.answer || 'No answer heard'} — ${outcome}`).appendTo($attempts)
+        })
+      }
+      if (!active.has(call.status)) {
+        $('<button type="button" class="btn btn-primary" data-call-view-details>').text('View question & answer').appendTo($row).on('click', () => {
+          historyDetailId = call.id
+          historyScroll = $dialog.scrollTop()
+          renderHistoryDetail()
+          showView('history-detail', true)
+          $dialog.find('[data-call-detail-title]')[0]?.focus({ preventScroll: true })
         })
       }
       if (['scheduled', 'disabled'].includes(call.status) && editingAvailable) {
@@ -324,6 +405,7 @@ export function installStudyCalls(win, $) {
         })
       }
     }
+    if (currentView === 'history-detail') renderHistoryDetail()
   }
 
   function renderSources() {
@@ -619,6 +701,10 @@ export function installStudyCalls(win, $) {
       <div data-call-view="history" style="display:none;">
         <div id="studyCallHistory" data-call-history style="display:none;"><div data-call-history-rows></div></div>
         <button type="button" class="btn" data-call-back>Back to pending calls</button>
+      </div>
+      <div data-call-view="history-detail" style="display:none;">
+        <div data-call-history-detail></div>
+        <button type="button" class="btn" data-call-back>Back to call history</button>
       </div>
       <div data-call-view="settings" style="display:none;">
         <section class="study-call-section"><h3>Call list capacity</h3>

@@ -15,9 +15,14 @@ async function check(browser, mobile) {
     window.__callRequests = []
     let sequence = 0, limit = 50, voiceName = '', rate = 1, repetitionPause = 3
     let calls = Array.from({ length: 150 }, (_, i) => ({
-      id: 'done-' + i, title: 'Finished question ' + i, created_at: i, finished_at: i, when_ms: Date.now(),
+      id: 'done-' + i, title: 'Finished question ' + i, created_at: Date.now() - (150 - i) * 60000, finished_at: Date.now() - (150 - i) * 60000, when_ms: Date.now() - 150 * 60000,
       status: 'completed', choice: 'en',
     }))
+    Object.assign(calls[149], { title: 'Swedish vocabulary', question: 'Vilken artikel passar framför ordet katt?\nVälj ett av alternativen.',
+      choices: ['ett', 'en'], correct_choice_index: 1, response_type: 'choice', answer: 'en', correct: true, spoken_response: 'en',
+      attempts: [{ answer: 'ett', correct: false, response_mode: 'tap' }, { answer: 'en', correct: true, response_mode: 'voice' }] })
+    Object.assign(calls[148], { title: 'Swedish geography', question: 'Vad heter Sveriges huvudstad?', response_type: 'text',
+      accepted_answers: ['Stockholm', 'Stockholms stad'], choice: undefined, answer: 'Stockholm', correct: true })
     calls.push({ id: 'pending', title: 'Swedish vocabulary', question: 'Vilken artikel passar framför ordet katt?', choices: ['ett', 'en'],
       correct_choice_index: 1, response_type: 'choice', language: 'sv-SE', when_ms: Date.now() + 3600000, status: 'scheduled' })
     window.CallBridge = { postMessage(raw) {
@@ -60,6 +65,23 @@ async function check(browser, mobile) {
     })
     assert(dimensions.bottom <= dimensions.height + 1, 'dialog stays inside viewport')
     assert(dimensions.scroll, '100-row history scrolls within the dialog')
+    await page.locator('[data-call-id=done-149] [data-call-view-details]').click()
+    const details = page.locator('[data-call-history-detail]')
+    assert.equal(await details.locator('section').filter({ has: page.getByRole('heading', { name: 'Question', exact: true }) }).locator('p').textContent(), 'Vilken artikel passar framför ordet katt?\nVälj ett av alternativen.')
+    assert.match(await details.textContent(), /2\. en/)
+    assert.match(await details.textContent(), /Attempts \(2\)/)
+    assert.equal(await page.locator('[data-call-back-top]').textContent(), '← Back to call history')
+    await shot('history-question')
+    await details.getByRole('heading', { name: 'Your answer', exact: true }).scrollIntoViewIfNeeded()
+    await page.locator('.study-call-window').screenshot({path:path.join(shots,`${mobile?'mobile':'desktop'}-history-answer.png`)})
+    const detailDimensions = await page.locator('#studyCallsDialog').evaluate(el => ({ width: el.clientWidth, content: el.scrollWidth }))
+    assert(detailDimensions.content <= detailDimensions.width + 1, 'complete question and answers fit the dialog width')
+    await page.locator('[data-call-back-top]').click()
+    assert.equal(await page.locator('[data-call-view=history]').isVisible(), true)
+    await page.locator('[data-call-id=done-148] [data-call-view-details]').click()
+    assert.match(await details.textContent(), /Accepted answersStockholmStockholms stad/)
+    await shot('history-free-response')
+    await page.locator('[data-call-view=history-detail] [data-call-back]').click()
     await page.locator('[data-call-back-top]').click()
     assert.equal(await page.locator('[data-call-view=list]').isVisible(), true)
     await button('[data-call-pending]', 'Disable').click()
