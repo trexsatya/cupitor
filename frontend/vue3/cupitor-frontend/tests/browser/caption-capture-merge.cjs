@@ -85,7 +85,7 @@ async function check(browser, mobile) {
     assert.equal(added.mediaUrl, cap.url + '&t=10')
 
     await send(nextCap)
-    assert.equal(await page.locator('#capCapItem').inputValue(), '', 'each capture starts with an explicit New item choice')
+    assert.equal(await page.locator('#capCapItem').inputValue(), '', 'New item remains selected after adding a card')
     await select(added.id)
     assert.equal(await page.locator('#capCapSave').innerText(), 'Merge')
     assert.match(await page.locator('#capCapMergeHint').innerText(), /Existing text and media are kept/)
@@ -103,7 +103,9 @@ async function check(browser, mobile) {
     assert.match(await page.evaluate(() => window.__filed.at(-1).message), /Merged 2 lines.*2 already there/)
     const afterMerge = await read()
     await send({ ...cap, lines: [...cap.lines, ...nextCap.lines] })
-    await select(added.id)
+    assert.equal(await page.locator('#capCapPlaylist').inputValue(), playlist)
+    assert.equal(await page.locator('#capCapItem').inputValue(), added.id, 'next send restores the last merged item')
+    assert.equal(await page.locator('#capCapSave').innerText(), 'Merge')
     await commit()
     assert.deepEqual(await read(), afterMerge, 'legacy and merged passages are deduplicated together')
 
@@ -125,7 +127,8 @@ async function check(browser, mobile) {
     await page.evaluate(async () => { await window._subtitlesReadyPromise })
     assert.deepEqual((await cards())[0], note, 'merged blocks persist across reloads')
     await send(pageCap)
-    await select('notes')
+    assert.equal(await page.locator('#capCapPlaylist').inputValue(), playlist, 'playlist survives reload')
+    assert.equal(await page.locator('#capCapItem').inputValue(), 'notes', 'merge item survives reload')
     await commit()
     assert.deepEqual((await cards())[0], note, 'persisted multiline page capture is not duplicated')
 
@@ -140,9 +143,27 @@ async function check(browser, mobile) {
     await cancel()
     const beforeCancel = await read()
     await send({ ...cap, lines: [{ start: 99, text: 'Do not save' }] })
-    await select('notes')
+    assert.equal(await page.locator('#capCapItem').inputValue(), 'notes', 'cancelled selection does not replace the saved target')
+    await select(added.id)
     await cancel()
     assert.deepEqual(await read(), beforeCancel)
+
+    // Restore by stable ID after reordering; an identical ID in another
+    // playlist must never inherit this playlist's merge choice.
+    await page.evaluate(name => {
+      window._recordings[name].items.Manual.Card.reverse()
+      window._recordings.Empty.items = { Manual: { Card: [
+        { manual: true, id: 'notes', source: 'Unrelated card', target: '', enabled: true }
+      ] } }
+    }, playlist)
+    await send(cap)
+    assert.equal(await page.locator('#capCapItem').inputValue(), 'notes', 'reordering keeps the same item')
+    await page.locator('#capCapPlaylist').selectOption('Empty')
+    assert.equal(await page.locator('#capCapItem').inputValue(), '', 'merge target is scoped to its playlist')
+    await page.locator('#capCapPlaylist').selectOption(playlist)
+    assert.equal(await page.locator('#capCapItem').inputValue(), 'notes', 'returning to the saved playlist restores the item')
+    await cancel()
+    await page.evaluate(name => { window._recordings[name].items.Manual.Card.reverse() }, playlist)
 
     // A stale item or a playlist that became read-only refuses the write and
     // keeps the incoming capture on screen for a different destination.
@@ -174,7 +195,7 @@ async function check(browser, mobile) {
     await commit()
     assert.equal((await cards()).find(it => it.id === added.id).source,
       'Edited notes\n—\n—\n—\nTillåt mig tvivla.\nJag vill förstå.')
-    // Queued events retain their own capture and begin with New item again.
+    // Queued events use the target just committed by the preceding capture.
     await send({ ...cap, lines: [{ start: 200, text: 'En köad rad.' }] })
     await select('notes')
     await page.evaluate(cap => window.dispatchEvent(new CustomEvent('cupitorCaptionCapture', {
@@ -183,12 +204,39 @@ async function check(browser, mobile) {
     assert.match(await page.locator('#captionCaptureDialog').locator('..').locator('.ui-dialog-title').innerText(), /1 more waiting/)
     await click('#capCapSave')
     await page.waitForFunction(() => document.querySelector('.cap-cap-line')?.textContent === 'Nästa block.')
-    assert.equal(await page.locator('#capCapItem').inputValue(), '')
+    assert.equal(await page.locator('#capCapItem').inputValue(), 'notes')
     await commit()
-    assert.equal((await cards()).length, 3, 'queued second capture creates one new item')
+    assert.equal((await cards()).length, 2, 'both queued captures merge into the same item')
+    assert.match((await cards()).find(it => it.id === 'notes').source, /En köad rad\.\nNästa block\./)
+
+    // Removing the remembered item falls back to New item.
+    const removed = await page.evaluate(name => {
+      const item = window._recordings[name].items.Manual.Card.find(it => it.id === 'notes')
+      window._recordings[name].items.Manual.Card = window._recordings[name].items.Manual.Card.filter(it => it.id !== 'notes')
+      return item
+    }, playlist)
+    await send({ ...cap, lines: [{ start: 300, text: 'En ny rad.' }] })
+    assert.equal(await page.locator('#capCapItem').inputValue(), '', 'deleted merge item falls back to New item')
+    assert.equal(await page.locator('#capCapSave').innerText(), 'Add')
+    await cancel()
+
+    // An explicit New item choice clears the previous merge target even
+    // while that target still exists, including across a page reload.
+    await page.evaluate(({ name, item }) => {
+      window._recordings[name].items.Manual.Card.push(item)
+    }, { name: playlist, item: removed })
+    await send({ ...cap, lines: [{ start: 301, text: 'Spara som nytt kort.' }] })
+    assert.equal(await page.locator('#capCapItem').inputValue(), 'notes')
+    await page.locator('#capCapItem').selectOption('')
+    await commit()
+    await page.reload({ waitUntil: 'networkidle' })
+    await page.evaluate(async () => { await window._subtitlesReadyPromise })
+    await send(cap)
+    assert.equal(await page.locator('#capCapItem').inputValue(), '', 'Add clears the remembered merge target')
+    await cancel()
     assert.deepEqual(alerts, [])
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'Mobile' : 'Desktop'}: capture create/merge, paired translations, deduplication, multiline pages, reload, cancellation, stale destinations and edits passed`)
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: capture create/merge, remembered targets, reload, cancellation, reordering, stale destinations and queued sends passed`)
   } catch (e) {
     console.error(await page.evaluate(() => ({ errors: window.__filed,
       item: document.querySelector('#capCapItem')?.value,
