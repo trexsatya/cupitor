@@ -20905,6 +20905,7 @@ function minimizePracticeMode() {
   // Park a take as well as its source clip. A recording finishes as an
   // unkept take; neither its replay nor the microphone runs behind the page.
   if (_pracRec) {
+    if (_pracRec.phase === 'starting') _pracRecCancelStart(_pracRec)
     _pracRec.token++
     if (_pracRec.audio) { try { _pracRec.audio.pause() } catch (_) {} _pracRec.audio = null }
     if (_pracRec.phase === 'playback') _pracRec.phase = 'idle'
@@ -21459,7 +21460,7 @@ function _pracRecEnd(discard) {
   // is going to ask for.
   // Not awaited — the session is already gone. The catch is on the promise
   // because the rejection arrives long after this frame has returned.
-  if (st.phase === 'recording') {
+  if (st.phase === 'recording' || st.phase === 'starting') {
     try { Promise.resolve(_audioRpc('recordCancel', {})).catch(() => {}) } catch (_) {}
   }
   if (discard) st.takes.forEach(t => { if (!st.kept.has(t.url)) deleteManualAudio(t.url) })
@@ -21505,7 +21506,8 @@ function _renderPracticeRecBar(note) {
   const n = st.takes.length
   const unkept = st.takes.filter(t => !st.kept.has(t.url)).length
   const rec = st.phase === 'recording'
-  if (rec) _studyChrome.show()
+  const starting = st.phase === 'starting'
+  if (rec || starting) _studyChrome.show()
   // Mid-loop the video is being driven for the user; a second Rec on top of
   // that would pin a moment they did not choose.
   const busy = st.phase === 'playback'
@@ -21513,6 +21515,7 @@ function _renderPracticeRecBar(note) {
   // used to explain, the button now says by being round, red and in the
   // middle — and its tooltip still spells it out.
   const status = note ? note
+    : starting ? 'starting microphone…'
     : rec ? 'recording…'
     : st.phase === 'playback' ? 'your take'
     : n ? n + (n === 1 ? ' take · ' : ' takes · ') + Math.round(_takesDuration(st.takes)) + 's'
@@ -21527,18 +21530,18 @@ function _renderPracticeRecBar(note) {
       $('<span class="prec-side"></span>').append(
         $('<button type="button" class="prec-btn prec-keep"></button>')
           .text(unkept ? '✔ Keep ' + unkept : '✔ Keep')
-          .prop('disabled', !unkept || rec || busy)
+          .prop('disabled', !unkept || rec || starting || busy)
           .attr('title', 'Save these takes on the card'),
         $('<button type="button" class="prec-btn prec-drop">🗑</button>')
-          .prop('disabled', !unkept || rec || busy)
+          .prop('disabled', !unkept || rec || starting || busy)
           .attr('title', 'Throw away the takes that were never kept')
       ),
       $('<button type="button" class="prec-btn prec-toggle"></button>')
-        .text(rec ? '⏸' : '●')
+        .text(starting ? '✕' : rec ? '⏸' : '●')
         .toggleClass('on', rec)
         .prop('disabled', busy)
-        .attr('aria-label', rec ? 'Pause' : 'Rec')
-        .attr('title', rec ? 'Stop and hear it back in place' : 'Record over the clip from here')
+        .attr('aria-label', starting ? 'Cancel recording start' : rec ? 'Pause' : 'Rec')
+        .attr('title', starting ? 'Cancel microphone startup' : rec ? 'Stop and hear it back in place' : 'Record over the clip from here')
     )
   )
   // One small button per take, numbered the way they sit in the clip, to hear
@@ -21553,7 +21556,7 @@ function _renderPracticeRecBar(note) {
           .text(String(i + 1))
           .attr('data-t1', String(tk.t1))
           .toggleClass('unkept', !st.kept.has(tk.url))
-          .prop('disabled', rec || busy)
+          .prop('disabled', rec || starting || busy)
           .attr('title', 'Back to take ' + (i + 1) + ' (' +
             _takeOffsetLabel(tk, st.clipStart) + ') and play it')
       )
@@ -21675,55 +21678,73 @@ function _pracRecGoToTake(e) {
 function _pracRecToggle() {
   const st = _pracRec
   if (!st || !_practiceSpeakOverShown()) return
+  if (st.phase === 'starting') { _pracRecCancelStart(st); return }
   if (st.phase === 'recording') { _pracRecStop(); return }
   if (st.phase !== 'idle') return
   _pracRecStart()
+}
+
+function _pracRecCancelStart(st) {
+  if (_pracRec !== st || st.phase !== 'starting') return
+  st.token++
+  st.phase = 'idle'; st.t1 = null; st.url = null
+  Promise.resolve(_audioRpc('recordCancel', {})).catch(() => {})
+  _renderPracticeRecBar('recording cancelled')
+}
+
+function _pracRecStartError(error) {
+  const message = String(error?.message || error || '')
+  if (/permission|denied/i.test(message)) return 'Microphone permission needed. Enable it in Android app permissions.'
+  if (/busy/i.test(message)) return 'Microphone is busy. Stop other recording and try again.'
+  if (/cancel/i.test(message)) return 'recording cancelled'
+  return 'Microphone could not start. Try recording again.'
 }
 
 async function _pracRecStart() {
   const st = _pracRec
   if (!st || st.phase !== 'idle') return
   const t1 = _pracRecNow() || st.clipStart
-  // Speaking again ends whatever pass was running — including one whose rewind
-  // has not landed yet. Without the token that seek would finish in its own
-  // time and start the video moving again, and the take would be spoken over a
-  // clip that is running rather than the moment Rec pinned.
   st.awaiting = null
-  st.token++
+  const token = ++st.token
+  // Claim before permissions or a bridge await: a second tap cancels this
+  // start instead of launching another recorder against the same microphone.
+  st.phase = 'starting'; st.t1 = t1; st.url = null
+  const current = () => _pracRec === st && st.token === token && st.phase === 'starting'
   _pracRecTakeOverPlayhead()
   _pracRecPauseVideo()
+  _renderPracticeRecBar()
   let perm = 'unknown'
   try { perm = await ensureMicPermissionViaBridge() } catch (_) {}
-  if (_pracRec !== st) return
+  if (!current()) return
   if (perm === 'denied') {
+    st.phase = 'idle'; st.t1 = null
+    _renderPracticeRecBar('Microphone permission needed.')
     alert('Microphone permission was denied. Enable it in Settings → Apps → Cupitor → Permissions.')
     return
   }
-  // Claimed before the round trip: until the bridge answers, anything asking
-  // whether this is recording would otherwise be told no.
-  st.phase = 'recording'
-  st.t1 = t1
-  st.startedMs = Date.now()
-  _renderPracticeRecBar()
   const id = 'prec_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
   let url
-  try { url = await _audioRpc('recordStart', { id }) }
-  catch (e) {
-    if (_pracRec === st) {
+  try {
+    url = await _audioRpc('recordStart', { id })
+    if (!url) throw new Error('start-failed')
+  } catch (e) {
+    if (current()) {
       st.phase = 'idle'; st.t1 = null
-      _renderPracticeRecBar('could not start recording')
+      _renderPracticeRecBar(_pracRecStartError(e))
     }
     console.warn('[practiceRec] recordStart failed', e)
     return
   }
-  // The card changed while the bridge was answering — the file belongs to
-  // nobody now.
-  if (_pracRec !== st) {
-    try { await _audioRpc('recordStop', {}) } catch (_) {}
+  if (!current()) {
+    // End/cancel already sent recordCancel. Never send a late global Stop:
+    // the user may now be recording a different card.
     if (url) deleteManualAudio(url)
     return
   }
+  st.phase = 'recording'
+  st.startedMs = Date.now()
   st.url = url
+  _renderPracticeRecBar()
 }
 
 async function _pracRecStop() {
@@ -21775,7 +21796,7 @@ function _pracRecWatch() {
     st.watchPos = ct
     // Recording holds the video still, and a take playing has already paused
     // it. Neither is playback crossing a mark.
-    if (st.phase === 'recording' || st.phase === 'playback') return
+    if (st.phase === 'starting' || st.phase === 'recording' || st.phase === 'playback') return
     if (prev == null) return
     // Going somewhere ends the pass that followed a recording, and every mark
     // is live again — which is what makes a rewind play the takes back.
@@ -22362,7 +22383,7 @@ function _practiceSpotifyOptions(it) {
     mode: 'practice',
     isCurrent: () => window._practiceActive && window._practiceCards?.[window._practiceIdx] === it,
     isPaused: () => window._practiceMinimized || (_pracRec?.key === _pracRecKey(it) &&
-      ['recording', 'playback'].includes(_pracRec.phase))
+      ['starting', 'recording', 'playback'].includes(_pracRec.phase))
   }
 }
 
