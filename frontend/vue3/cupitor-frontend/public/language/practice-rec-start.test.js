@@ -5,6 +5,7 @@ const path = require('node:path')
 const source = fs.readFileSync(path.join(__dirname, 'language.js'), 'utf8')
 const endCode = source.slice(source.indexOf('function _pracRecEnd(discard)'), source.indexOf('// Stop the clip\'s own end-watcher'))
 const startCode = source.slice(source.indexOf('function _pracRecToggle()'), source.indexOf('\nasync function _pracRecStop()'))
+const minimizeCode = source.match(/function minimizePracticeMode\(\) \{[\s\S]*?\n\}/)[0]
 const flush = () => new Promise(resolve => require('node:timers').setImmediate(resolve))
 function deferred() {
   let resolve, reject
@@ -18,6 +19,9 @@ function fixture(options = {}) {
   const recordings = (options.recordings || []).slice()
   const context = {
     _pracRec:state, Promise, Date:{now:()=>time}, Math, clearInterval(){},
+    window:{_practiceActive:true}, $:()=>({addClass(){},removeClass(){},click(){}}),
+    hideMediaRelatedContainer(){}, spotifyClips:()=>[], _newPracticeVideoRequest(){},
+    _practiceVideoCues:{releaseMute(){}}, _updatePracticeRestoreCount(){},
     console:{warn(){}}, alert:message=>alerts.push(message),
     _practiceSpeakOverShown:()=>true, _pracRecNow:()=>10,
     _pracRecTakeOverPlayhead(){}, _pracRecPauseVideo(){},
@@ -29,7 +33,7 @@ function fixture(options = {}) {
     },
     deleteManualAudio:url=>deleted.push(url),
   }
-  vm.createContext(context); vm.runInContext(endCode + '\n' + startCode, context)
+  vm.createContext(context); vm.runInContext(endCode + '\n' + startCode + '\n' + minimizeCode, context)
   return {context,state,requests,notes,deleted,alerts,setTime:value=>{time=value},checks:()=>permissionChecks}
 }
 
@@ -106,4 +110,17 @@ test('permission and recorder failures restore a usable idle state with a specif
   assert.match(f.notes.at(-1).note,/Microphone is busy/)
   await f.context._pracRecStart()
   assert.equal(f.state.phase,'recording')
+})
+
+
+test('minimizing Practice cancels microphone startup before a late bridge response', async () => {
+  const recording=deferred(), f=fixture({recordings:[recording]})
+  const pending=f.context._pracRecStart(); await flush()
+  f.context.minimizePracticeMode()
+  assert.equal(f.state.phase,'idle')
+  assert.equal(f.requests.filter(r=>r.op==='recordCancel').length,1)
+  recording.resolve('file:///abandoned.ogg'); await pending
+  assert.equal(f.state.phase,'idle')
+  assert.deepEqual(f.deleted,['file:///abandoned.ogg'])
+  assert.equal(f.requests.filter(r=>r.op==='recordStop').length,0)
 })

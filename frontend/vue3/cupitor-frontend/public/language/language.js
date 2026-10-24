@@ -20905,6 +20905,7 @@ function minimizePracticeMode() {
   // Park a take as well as its source clip. A recording finishes as an
   // unkept take; neither its replay nor the microphone runs behind the page.
   if (_pracRec) {
+    if (_pracRec.phase === 'starting') _pracRecCancelStart(_pracRec)
     _pracRec.token++
     if (_pracRec.audio) { try { _pracRec.audio.pause() } catch (_) {} _pracRec.audio = null }
     if (_pracRec.phase === 'playback') _pracRec.phase = 'idle'
@@ -22382,7 +22383,7 @@ function _practiceSpotifyOptions(it) {
     mode: 'practice',
     isCurrent: () => window._practiceActive && window._practiceCards?.[window._practiceIdx] === it,
     isPaused: () => window._practiceMinimized || (_pracRec?.key === _pracRecKey(it) &&
-      ['recording', 'playback'].includes(_pracRec.phase))
+      ['starting', 'recording', 'playback'].includes(_pracRec.phase))
   }
 }
 
