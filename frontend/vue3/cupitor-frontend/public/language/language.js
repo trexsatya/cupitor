@@ -2523,6 +2523,9 @@ window._appSettings = {
   // happen to be practising. Only ever set from a destination that accepted a
   // block, so a refused one is never remembered. '' means nothing yet.
   captionPlaylist: '',
+  // Last successful merge target within captionPlaylist. An empty ID means
+  // the user chose New item; keep that choice on later sends as well.
+  captionItemId: '',
   // Seconds to wait between a manual card's Source and Target recordings —
   // the "try to recall it" pause. null means unset, in which case the
   // inter-item gap above is used, so one control covers both until the user
@@ -13122,13 +13125,15 @@ function _openCaptionCaptureDialog(cap, lines) {
         // repeatedly and wants the same orientation each time.
         window._appSettings.captionTextField = chosen
         saveAppSettings()
-        const res = _addCaptionBlock(name, cap, lines, chosen, String($('#capCapItem').val() || ''))
+        const itemId = String($('#capCapItem').val() || '')
+        const res = _addCaptionBlock(name, cap, lines, chosen, itemId)
         // false = the write was refused and already explained. Stay open so
         // the user can pick elsewhere instead of losing the capture.
         if (res === false) return
         // Remembered only now: a destination that refused the block is not
         // one to offer first next time.
         window._appSettings.captionPlaylist = name
+        window._appSettings.captionItemId = itemId
         saveAppSettings()
         $(this).dialog('close')
         // Show where it went, and keep it there: the host is about to close
@@ -13157,7 +13162,8 @@ function _openCaptionCaptureDialog(cap, lines) {
     $('#capCapSave').text(merging ? 'Merge' : 'Add')
   }
   const renderItems = () => {
-    const items = _captionManualItems(String($d.find('#capCapPlaylist').val() || ''))
+    const playlistName = String($d.find('#capCapPlaylist').val() || '')
+    const items = _captionManualItems(playlistName)
     const $items = $d.find('#capCapItem').empty()
       .append($('<option></option>').val('').text('New item'))
     items.forEach((it, i) => {
@@ -13165,6 +13171,13 @@ function _openCaptionCaptureDialog(cap, lines) {
       $items.append($('<option></option>').val(it.id)
         .text(`Merge into ${i + 1}: ${label.slice(0, 90) || '(empty item)'}${label.length > 90 ? '…' : ''}`))
     })
+    // IDs belong to their playlist. Restore by ID rather than position so
+    // reordering cards cannot select a different item. Deleted/unavailable
+    // targets fall back to New item instead of another merge destination.
+    const settings = window._appSettings || {}
+    const itemId = playlistName === settings.captionPlaylist
+      ? String(settings.captionItemId || '') : ''
+    $items.val(items.some(it => it.id === itemId) ? itemId : '')
     $items.prop('disabled', !items.length)
     renderMergeHint()
   }
