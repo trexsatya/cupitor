@@ -420,3 +420,58 @@ test('voice import settings preserve overrides and reject invalid types and spee
   for(const change of [{speech_rate:0.1},{speech_rate:2},{speech_rate:'0.75'},{voice_name:4}])
     assert.throws(()=>parseCallImport(JSON.stringify([{...call,...change}])))
 })
+
+
+test('repetition pauses inherit or override across import, export and scheduling', () => {
+  const form = { title: 'Words', question: 'Which?', choices: 'A\nB', language: 'sv-SE', correctChoice: 0 }
+  assert.equal(callPayload(form).repetition_pause_seconds, undefined)
+  for (const value of [0, 0.5, 3, 120]) assert.equal(callPayload({ ...form, repetitionPause: value }).repetition_pause_seconds, value)
+  for (const value of [null, '3', -1, 120.1, NaN, Infinity]) assert.throws(() => callPayload({ ...form, repetitionPause: value }), /repetition pause/)
+  const file = { version: 1, defaults: { language: 'sv-SE', repetition_pause_seconds: 7.5 }, calls: [
+    CALL_IMPORT_EXAMPLE.calls[0], { ...CALL_IMPORT_EXAMPLE.calls[1], repetition_pause_seconds: 0 },
+  ] }
+  const calls = parseCallImport(JSON.stringify(file))
+  assert.deepEqual(calls.map(c => c.repetition_pause_seconds), [7.5, 0])
+  const scheduled = scheduleImportedCalls(parseCallImport(JSON.stringify({version:1,calls})), Date.now()+600000)
+  assert.deepEqual(scheduled.map(c => c.repetition_pause_seconds), [7.5, 0])
+  assert.throws(() => parseCallImport(JSON.stringify({ ...file, defaults: { repetition_pause_seconds: '5' } })), /Call 1.*repetition pause/)
+})
+
+test('repetition Settings preserve drafts on foreground and editor overrides survive import', async () => {
+  const { win, $ } = fixture(), sent = []
+  let pause = 3
+  win.CallBridge = { postMessage(raw) {
+    const r = JSON.parse(raw); sent.push(r)
+    if (r.op === 'setSettings') pause = r.repetition_pause_seconds
+    const data = r.op === 'getCapabilities' ? { supported:true, permission:'granted', settings:true,
+      pending_limit:50, repetition_controls:true, repetition_pause_seconds:pause,
+      command_hints:{sv:'vänta / kör / igen / en gång till',en:'wait / go / again'} } :
+      r.op === 'getCalls' ? { calls:[] } : true
+    win.dispatchEvent(new win.CustomEvent('cupitorCallAck',{detail:{...r,ok:true,data}}))
+  } }
+  const flush = () => new Promise(resolve=>setImmediate(resolve))
+  const installed = installStudyCalls(win,$); installed.open(); await flush()
+  $('[data-call-open-settings]').trigger('click'); await flush()
+  assert.equal($('[data-call-default-pause]').val(),'3')
+  $('[data-call-default-pause]').val('7.5').trigger('input')
+  win.dispatchEvent(new win.CustomEvent('cupitorAppLifecycle',{detail:{isForeground:true}})); await flush()
+  assert.equal($('[data-call-default-pause]').val(),'7.5')
+  $('[data-call-save-settings]').trigger('click'); await flush()
+  assert.equal(pause,7.5)
+  $('[data-call-add]').trigger('click')
+  assert.equal($('[data-call-repetition-pause]').val(),'')
+  assert.match($('[data-call-repetition-pause]').attr('placeholder'),/7.5/)
+  assert.match($('[data-call-command-hint]').text(),/vänta/)
+  $('[data-call-language]').val('en-US').trigger('change')
+  assert.match($('[data-call-command-hint]').text(),/wait/)
+  $('[data-call-back-top]').trigger('click'); $('[data-call-open-import]').trigger('click')
+  $('[data-call-import-paste]').val(JSON.stringify({calls:[{...CALL_IMPORT_EXAMPLE.calls[0],repetition_pause_seconds:2.5}]}))
+  $('[data-call-import-paste-submit]').trigger('click')
+  $('[data-call-import-drafts] button').filter((_,el)=>el.textContent==='Edit').first().trigger('click')
+  assert.equal($('[data-call-repetition-pause]').val(),'2.5')
+  $('[data-call-repetition-pause]').val('4')
+  $('[data-call-import-save]').trigger('click')
+  $('[data-call-import-drafts] button').filter((_,el)=>el.textContent==='Edit').first().trigger('click')
+  assert.equal($('[data-call-repetition-pause]').val(),'4')
+  installed.client.dispose(); win.close()
+})
