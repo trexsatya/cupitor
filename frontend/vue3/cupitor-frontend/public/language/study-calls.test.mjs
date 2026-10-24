@@ -238,6 +238,91 @@ test('history is hidden until requested and keeps only the newest 100 terminal c
   installed.client.dispose(); win.close()
 })
 
+test('history details show the complete choice question, correct answer, response and attempts safely', () => {
+  const { win, $ } = fixture()
+  const question = 'Question line one\n' + 'Long question. '.repeat(275) + '<img src=x onerror=alert(1)>'
+  const choice = '<b>correct answer</b>'
+  const call = { id: 'details', title: '<script>title</script>', question, choices: [choice, 'Other'],
+    correct_choice_index: 0, response_type: 'choice', status: 'completed', when_ms: 1700000000000,
+    finished_at: 1700000060000, choice, answer: choice, correct: true, spoken_response: 'correct anser',
+    attempts: [{ answer: 'Other', correct: false, response_mode: 'tap', at: 1700000010000 },
+      { answer: '', reason: 'no_input', correct: false, response_mode: 'voice' },
+      { answer: choice, correct: true, response_mode: 'voice', at: 1700000050000 }] }
+  win.__cupitorCalls = { calls: [call] }
+  const installed = installStudyCalls(win, $); installed.open()
+  $('[data-call-history-toggle]').trigger('click')
+  $('#studyCallsDialog').scrollTop(123)
+  $('[data-call-view-details]').trigger('click')
+  const $details = $('[data-call-history-detail]')
+  assert.equal($('[data-call-view=history-detail]').css('display'), 'block')
+  assert.equal($('[data-call-back-top]').text(), '← Back to call history')
+  const section = name => $details.find('section').filter((_, el) => $(el).find('h3').text() === name)
+  assert.equal(section('Question').find('p').text(), question, 'no truncation or loss of line breaks')
+  assert.deepEqual(section('Alternatives').find('li').map((_, el) => $(el).find('.study-call-detail-text').text()).get(), call.choices)
+  assert.equal(section('Correct answer').find('p').text(), '1. ' + choice, 'index zero is a valid correct answer')
+  assert.match(section('Your answer').text(), /Heard: correct anser/)
+  assert.equal(section('Attempts (3)').find('.study-call-detail-attempt').length, 3)
+  assert.match(section('Attempts (3)').text(), /No speech heard/)
+  assert.match(section('Attempts (3)').text(), /On screen/)
+  assert.equal($details.find('img, script, b').length, 0, 'imported text never becomes markup')
+  assert.equal($('[data-call-nav]').css('display'), 'none')
+  $('[data-call-back-top]').trigger('click')
+  assert.equal($('[data-call-view=history]').css('display'), 'block')
+  assert.equal($('#studyCallsDialog').scrollTop(), 123, 'Back restores the history position')
+  assert.equal(win.document.activeElement, $('[data-call-view-details]')[0])
+  $('[data-call-back-top]').trigger('click')
+  assert.equal($('[data-call-view=list]').css('display'), 'block')
+  installed.client.dispose(); win.close()
+})
+
+test('history details include all accepted answers and handle unanswered and older calls', () => {
+  const { win, $ } = fixture()
+  const aliases = Array.from({ length: 20 }, (_, i) => `Accepted phrasing ${i + 1}`)
+  win.__cupitorCalls = { calls: [
+    { id: 'free', title: 'Capital', question: 'Capital?\nExplain your answer.', response_type: 'text',
+      accepted_answers: aliases, status: 'failed', answer: 'Gothenburg', correct: false,
+      attempts: [{ answer: 'Gothenburg', correct: false, response_mode: 'typed' }] },
+    { id: 'missed', title: 'Missed', question: 'A missed question', choices: ['A', 'B'], correct_choice_index: 1, status: 'missed' },
+    { id: 'legacy', title: 'Older call', status: 'completed', choice: 'Legacy answer' },
+  ] }
+  const installed = installStudyCalls(win, $); installed.open()
+  $('[data-call-history-toggle]').trigger('click')
+  const open = id => $(`[data-call-history-rows] [data-call-id=${id}] [data-call-view-details]`).trigger('click')
+  open('free')
+  assert.deepEqual($('[data-call-history-detail] li').map((_, el) => $(el).text()).get(), aliases)
+  assert.match($('[data-call-history-detail]').text(), /GothenburgIncorrect/)
+  assert.match($('[data-call-history-detail]').text(), /Typed/)
+  $('[data-call-back-top]').trigger('click'); open('missed')
+  assert.match($('[data-call-history-detail]').text(), /2\. B/)
+  assert.match($('[data-call-history-detail]').text(), /No answer was recorded/)
+  $('[data-call-back-top]').trigger('click'); open('legacy')
+  assert.match($('[data-call-history-detail]').text(), /question was not saved/)
+  assert.match($('[data-call-history-detail]').text(), /No correct answer was configured/)
+  assert.match($('[data-call-history-detail]').text(), /Legacy answer/)
+  assert.doesNotMatch($('[data-call-history-detail]').text(), /undefined|Invalid Date/)
+  installed.client.dispose(); win.close()
+})
+
+test('an open history detail follows snapshots and clears data when a call leaves the retained profile history', () => {
+  const { win, $ } = fixture()
+  const call = { id: 'current', title: 'Current', question: 'Original question', status: 'completed', finished_at: 1 }
+  win.__cupitorCalls = { calls: [call] }
+  const installed = installStudyCalls(win, $); installed.open()
+  $('[data-call-history-toggle]').trigger('click'); $('[data-call-view-details]').trigger('click')
+  const update = calls => win.dispatchEvent(new win.CustomEvent('cupitorCalls', { detail: { calls } }))
+  update([{ ...call, question: 'Updated full question' }])
+  assert.match($('[data-call-history-detail]').text(), /Updated full question/)
+  update([call, ...Array.from({ length: 100 }, (_, i) => ({ id: 'new-' + i, title: 'New', status: 'completed', finished_at: i + 2 }))])
+  assert.match($('[data-call-history-detail]').text(), /no longer in this profile’s latest 100/)
+  assert.doesNotMatch($('[data-call-history-detail]').text(), /Original question|Updated full question/)
+  assert.equal($('[data-call-history-rows] [data-call-view-details]').length, 100)
+  update([])
+  assert.doesNotMatch($('[data-call-history-detail]').text(), /Original question/)
+  $('[data-call-back-top]').trigger('click')
+  assert.match($('[data-call-history-rows]').text(), /No calls yet/)
+  installed.client.dispose(); win.close()
+})
+
 test('new alternatives keep the selected correct answer while typing and removing rows', async () => {
   const { win, $ } = fixture()
   const installed = installStudyCalls(win, $); installed.open()

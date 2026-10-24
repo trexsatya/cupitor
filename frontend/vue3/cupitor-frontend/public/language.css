@@ -5041,6 +5041,12 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 #studyCallsDialog .study-call-history-row p { color:#3f594b; margin:8px 0; }
 #studyCallsDialog .study-call-history-row button { margin:12px 6px 0 0; padding:8px 12px; font-size:12px; }
 #studyCallsDialog .study-call-meta { display:block; color:#718376; font-size:12px; }
+#studyCallsDialog .study-call-detail-title { margin:12px 0 8px; font-size:18px; overflow-wrap:anywhere; }
+#studyCallsDialog .study-call-detail-text { white-space:pre-wrap; overflow-wrap:anywhere; }
+#studyCallsDialog .study-call-detail-section { overflow-wrap:anywhere; }
+#studyCallsDialog .study-call-detail-list { margin:0; padding-left:24px; }
+#studyCallsDialog .study-call-detail-list li { padding:6px 0; }
+#studyCallsDialog .study-call-detail-attempt + .study-call-detail-attempt { margin-top:14px; padding-top:14px; border-top:1px solid #e2eae5; }
 #studyCallsDialog .study-call-section, #studyCallsDialog .study-call-settings { border:1px solid #dbe5df; border-radius:12px; background:#fff; padding:15px; margin:14px 0; }
 #studyCallsDialog .study-call-section-title { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:20px 0 8px; }
 #studyCallsDialog .study-call-section-title h3 { margin:0; }
