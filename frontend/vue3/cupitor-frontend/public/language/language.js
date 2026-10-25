@@ -10394,13 +10394,13 @@ function openRecordingReviewDialog() {
 // around the matched line (in playRecording via _repairMalformedClip).
 const MAX_REASONABLE_CLIP_S = 600
 
-function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId) {
+function _waitYTUntilEnd(timeStart, timeEnd, onTick, expectedVideoId, allowLong = false) {
   let _effectiveTimeEnd = parseFloat(timeEnd) || 0
   const _timeStartNum   = parseFloat(timeStart) || 0
   // Malformed-clip safety net. playRecording tries to repair these into a
   // 20s window first (see _repairMalformedClip); we only reach this skip
   // when the repair couldn't find a matched-line anchor in the SRT.
-  if ((_effectiveTimeEnd - _timeStartNum) > MAX_REASONABLE_CLIP_S) {
+  if (!allowLong && (_effectiveTimeEnd - _timeStartNum) > MAX_REASONABLE_CLIP_S) {
     console.warn(
       `[_waitYTUntilEnd] skipping malformed clip: dur=${(_effectiveTimeEnd - _timeStartNum).toFixed(0)}s > ${MAX_REASONABLE_CLIP_S}s ` +
       `(start=${_timeStartNum} end=${_effectiveTimeEnd}). Likely a bad capture — manually fix the recorded times or re-capture.`
@@ -11451,7 +11451,7 @@ async function playRecording(opts) {
     window._recPlayIndex = i
     window._recPlayQueueLen = queue.length
     const it = queue[i]
-    if (it.source && it.source.toLowerCase() !== 'youtube') {
+    if (!_isManualItem(it) && it.source && it.source.toLowerCase() !== 'youtube') {
       console.warn('playRecording: skipping non-YouTube item', it)
       i++
       continue
@@ -11466,19 +11466,32 @@ async function playRecording(opts) {
     // Also expose the live item object so the YT onError handler knows which
     // video failed (and can label the delete prompt).
     window._recPlayCurrentItem = it
-    // Manual entries: no clip to play. If the media is a YouTube link we
-    // still cue it into the embedded player at t=0 (so the user can hit
-    // play manually if they want) but never auto-play — the playlist's
-    // own timing comes from the inter-item gap, which doubles as the
-    // hold-on-text duration. Non-YT links are ignored here (opening them
-    // in a new tab mid-playlist would break flow); the user can click
-    // the link badge in the Review dialog instead.
+    // Manual cards can carry a bounded video clip too. Only bounded clips
+    // autoplay in Play All; old unbounded cards keep their read-the-text
+    // gap behaviour. Non-YouTube links remain manual (no surprise new tabs).
     if (_isManualItem(it)) {
+      const clip = _manualMediaClip(it)
       if (it.mediaKind === 'youtube' && it.mediaVideoId) {
-        try {
-          window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
-          await changeMediaIfNeededTo(window.mediaSelected)
-        } catch (e) { console.warn('playRecording: manual YT cue failed', it, e) }
+        if (clip && clip.end != null) {
+          window.youtubePlayInterval = { start: clip.start, end: clip.end, videoId: it.mediaVideoId }
+          window.playingYoutubeVideo = true
+          window._recPlayGapGuard = false
+          try {
+            await playMediaSlice(it.mediaVideoId, clip.start, clip.end, 'YouTube')
+            try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
+            await _waitYTUntilEnd(clip.start, clip.end, () => {
+              _updatePlayingProgress(clip.start, clip.end, it.mediaVideoId)
+            }, it.mediaVideoId, true)
+          } catch (e) { console.warn('playRecording: manual clip failed', it, e) }
+          window._recPlayGapGuard = true
+        } else {
+          try {
+            window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
+            await changeMediaIfNeededTo(window.mediaSelected)
+            if (clip && clip.start > 0) await seekToYoutubeTime(clip.start)
+            try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
+          } catch (e) { console.warn('playRecording: manual YT cue failed', it, e) }
+        }
       }
       // Hold for the inter-item gap so the user reads the text, honoring
       // pause / stop. The gap-countdown progress bar shows time-until-next.
