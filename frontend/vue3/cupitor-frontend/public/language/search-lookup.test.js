@@ -97,7 +97,7 @@ describe('native filterData handoff', () => {
   function attachRealHandler(ui) {
     const code = bodyBetween(source, 'function _applyIncomingLookup(rawText) {',
       "window.addEventListener('capturedSubtitle',")
-    return new Function('window', '
+    return new Function('window', '$', code + ';return _flushPendingLookup')(ui.win, ui.$)
   }
 
   test('native lookup clears the stale dropdown and searches the input term', () => {
@@ -126,33 +126,6 @@ describe('native filterData handoff', () => {
     expect(ui.fields['#searchText']).toBe(undefined)
     ui.win.__cupitorSearchReady = true
     flush()
-    expect(ui.win.__cupitorPendingLookup).toBeNull()
-    expect(ui.fields['#searchText'].value).toBe('gäll')
-  })
-})
-, code + ';return _flushPendingLookup')(ui.win, ui.$)
-  }
-
-  test('native lookup clears the stale dropdown and searches the input term', () => {
-    const ui = mockUi()
-    attachRealHandler(ui)
-    ui.win.dispatch('filterData', { text: 'gäll' })
-    expect(ui.fields['#searchText'].value).toBe('gäll')
-    expect(ui.fields['#searchedWords'].value).toBe('')
-    expect(ui.win.unprocessedSearchText).toBeNull()
-    expect(ui.calls).toContainEqual(['#searchedWords', 'change.select2'])
-    expect(ui.calls).toContainEqual(['#searchText', 'change'])
-  })
-
-  test('lookup arriving before deferred module initialization is replayed', () => {
-    const ui = mockUi()
-    const early = bodyBetween(html, '// Flutter can send a lookup from onPageFinished',
-      '</script>')
-    new Function('window', early)(ui.win)
-    ui.win.dispatch('filterData', { text: 'ovetande' })
-    ui.win.dispatch('filterData', { text: 'gäll' })
-    expect(ui.win.__cupitorPendingLookup).toBe('gäll')
-    attachRealHandler(ui)
     expect(ui.win.__cupitorPendingLookup).toBeNull()
     expect(ui.fields['#searchText'].value).toBe('gäll')
   })
