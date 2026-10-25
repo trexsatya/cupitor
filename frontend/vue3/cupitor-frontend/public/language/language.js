@@ -234,26 +234,29 @@ window.onbeforeunload = function (event) {
   return confirm("Confirm refresh");
 };
 
+// Native lookups must start from the selected word, not a stale dropdown
+// selection or the previous card's unprocessed vocabulary-line text.
+function _applyIncomingLookup(rawText) {
+  const term = String(rawText == null ? '' : rawText).trim()
+  if (!term) return
+  $('#saveRevisionBtn').show()
+  window.unprocessedSearchText = null
+  window.preSelectedSearchedWord = null
+  // Namespaced event refreshes Select2 without firing vocabularyLineSelected.
+  $('#searchedWords').val('').trigger('change.select2')
+  $('#searchText').val(term).trigger('change')
+}
 window.addEventListener('filterData', (e) => {
-  $('#saveRevisionBtn').show();
-  // Save/Play-starred visibility is driven by whether any line is starred —
-  // see _updateStarredLinesBtns(). Don't force them visible here.
-  const text = e.detail?.text;
-  // The native app can pass a GitHub token alongside the search text.
-  // It is stored in memory only (never persisted) and used for vocab commits.
-  if (e.detail?.token) {
-    //window.GitHubUtils?.setGHToken(e.detail.token)
-  }
-  if (text) {
-    // Trigger 'change' so we go through searchTextChanged → doSearch →
-    // fetchSRTs, which clears window.unprocessedSearchText first. Calling
-    // fetchSRTs directly would leak any stale unprocessedSearchText from a
-    // previous dropdown click and route vocab rendering through
-    // renderVocabularyLineByText with the wrong line, leaving the panel
-    // empty (or showing the old line) for the new search term.
-    $("#searchText").val(text).trigger('change');
-  }
-});
+  _applyIncomingLookup(e.detail && e.detail.text)
+})
+window.__cupitorLookupHandlerReady = true
+// A lookup may arrive in onPageFinished before this deferred module runs.
+// language.html buffers those early events until the handler is ready.
+if (window.__cupitorPendingLookup != null) {
+  const term = window.__cupitorPendingLookup
+  window.__cupitorPendingLookup = null
+  _applyIncomingLookup(term)
+}
 
 window.addEventListener('capturedSubtitle', (e) => {
   if (!e.detail) return
@@ -1414,23 +1417,25 @@ async function makeHttpCallToUpdateVocab() {
   }
 }
 
+// Allocate a search identity BEFORE waiting for initial data to be ready.
+// Otherwise a stale request can begin last and overwrite the user's latest
+// lookup, even if downstream fetch loops have cancellation checks.
 async function doSearch(searchThis, el) {
-  if ((typeof searchThis) !== 'string') {
-    searchThis = null
-  }
+  const query = typeof searchThis === 'string' ? searchThis : $('#searchText').val()
+  const token = (window._subtitleSearchToken || 0) + 1
+  window._subtitleSearchToken = token
   if (!window.vocabulary || !window._subtitlesLoaded) {
-    console.log('[search] data not loaded yet, deferring until vocabulary + subtitles ready…');
-    await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]);
+    console.log('[search] data not loaded yet, deferring until vocabulary + subtitles ready…')
+    await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise])
   }
-  await fetchSRTs(searchThis);
-  // let count = wordsToItems[searchThis] && wordsToItems[searchThis].length
-  // count = count || 0
-  if (!el) return
-
-  const newItem = saveSearch(searchThis, null)
-  if (newItem) {
-    el.append(new Option(`${searchThis}`, searchThis, false, false))
+  if (token !== window._subtitleSearchToken) return false
+  const completed = await fetchSRTs(query, token)
+  if (!completed || token !== window._subtitleSearchToken) return false
+  if (el) {
+    const newItem = saveSearch(query, null)
+    if (newItem) el.append(new Option(`${query}`, query, false, false))
   }
+  return true
 }
 
 const SEARCH_NAV_HISTORY_KEY = 'searchNavHistory'
@@ -1529,7 +1534,8 @@ function navigateSearchHistory(direction) {
   // renderVocabularyFindings path runs).
   window.unprocessedSearchText = term
   Promise.resolve(doSearch(term, $('#searchedWords')))
-      .then(() => {
+      .then(completed => {
+        if (!completed) return
         // Mirror searchTextChanged's auto-prefix branch — navigating history
         // bypasses that handler entirely, so without this the prefix pane is
         // never refreshed when stepping Prev/Next.
@@ -1546,7 +1552,10 @@ export async function searchTextChanged() {
   const el = $('#searchedWords')
   const w = $searchText1.val()
   window.unprocessedSearchText = null
-  await doSearch(this, el);
+  // Use the event's own text, not `this` (the input element), which makes
+  // an async fetch silently pick up some later text from the global box.
+  const completed = await doSearch(w, el)
+  if (!completed) return
   // Optional auto-prefix-search: when the toggle in the settings panel is
   // on (default), run a vocabulary prefix search on the same term so the
   // user doesn't have to click the "…" → "Search by prefix" menu item.
@@ -6316,6 +6325,7 @@ export function renderVocabularyFindings(search) {
 }
 
 async function render(searchResults, search, className, token) {
+  if (token !== undefined && token !== window._subtitleSearchToken) return {}
   // The vocab list is rendered once on the primary pass. The secondary pass
   // (fired by fetchSRTs' stem fallback) gets a multi-pipe `search` like
   // "förvärvad|förvärva|förvärv" which never satisfies word-equality and
@@ -6607,7 +6617,11 @@ window.renderVocabularyFindings = renderVocabularyFindings;
 window.findUnknownExpansionRefs = findUnknownExpansionRefs;
 window.searchVocabularyBySimilarity = searchVocabularyBySimilarity;
 
-async function fetchSRTs(searchText) {
+async function fetchSRTs(searchText, requestToken) {
+  const myToken = requestToken == null
+    ? (window._subtitleSearchToken = (window._subtitleSearchToken || 0) + 1)
+    : requestToken
+  if (myToken !== window._subtitleSearchToken) return false
   try {
     if ((typeof searchText) !== 'string') {
       searchText = null
@@ -6616,7 +6630,7 @@ async function fetchSRTs(searchText) {
     const txt = searchText || $searchText.val().toLowerCase()
     // $searchText.val(txt)
 
-    if (txt.length < 3) return
+    if (txt.length < 3) return false
 
     const _historyTerm = (window.unprocessedSearchText && window.unprocessedSearchText.trim()) || txt.trim()
     // Capture the lang at record time so Prev/Next can replay the search in
@@ -6634,19 +6648,15 @@ async function fetchSRTs(searchText) {
 
     window.allSubtitles = window.allSubtitles || {}
 
-    // Cancellation: each fetchSRTs invocation gets a fresh token; older runs
-    // bail out as soon as they observe a newer token, so the UI stays responsive
-    // when the user types quickly.
-    window._subtitleSearchToken = (window._subtitleSearchToken || 0) + 1
-    const myToken = window._subtitleSearchToken
-
     $('#result').html('<div style="color:grey;padding:6px;">Loading…</div>')
 
     console.log("Loading from local")
-    window.searchResult = await fetchFromDownloadedFiles(window.searchText.trim(), myToken);
-    if (myToken !== window._subtitleSearchToken) return
-    const words = await render(window.searchResult, window.searchText, "primary", myToken)
-    if (myToken !== window._subtitleSearchToken) return
+    const primaryQuery = window.searchText
+    const primaryResults = await fetchFromDownloadedFiles(primaryQuery.trim(), myToken)
+    if (myToken !== window._subtitleSearchToken) return false
+    window.searchResult = primaryResults
+    const words = await render(primaryResults, primaryQuery, "primary", myToken)
+    if (myToken !== window._subtitleSearchToken) return false
     const primaryHits = Object.values(words).flat().length
     console.log("[stem-fallback] primary hits:", primaryHits, "searchText:", window.searchText)
     if (!window.searchText.includes(SEPARATOR_PIPE) && window.searchText.trim().length > 4 && primaryHits === 0) {
@@ -6660,10 +6670,12 @@ async function fetchSRTs(searchText) {
       console.log("[stem-fallback] stems:", stems)
       if (stems.length) {
         window.searchText = [window.searchText, ...stems].join(SEPARATOR_PIPE)
-        window.searchResult = await fetchFromDownloadedFiles(window.searchText, myToken);
-        if (myToken !== window._subtitleSearchToken) return
-        console.log("[stem-fallback] secondary results:", window.searchResult.length)
-        await render(window.searchResult, window.searchText, "secondary", myToken)
+        const secondaryQuery = window.searchText
+        const secondaryResults = await fetchFromDownloadedFiles(secondaryQuery, myToken)
+        if (myToken !== window._subtitleSearchToken) return false
+        window.searchResult = secondaryResults
+        console.log("[stem-fallback] secondary results:", secondaryResults.length)
+        await render(secondaryResults, secondaryQuery, "secondary", myToken)
         // Removed: searchVocabularyByPrefix() — it would overwrite the
         // primary's stem-aware vocab matches with prefix-only matches,
         // dropping rows like "förvärvat" that don't share a prefix with
@@ -6671,9 +6683,12 @@ async function fetchSRTs(searchText) {
         // already subsumes the useful cases.
       }
     }
+    return myToken === window._subtitleSearchToken
   } finally {
-    window.forceMainLangForNextSearch = false
-    window.forceLangForNextSearch = null
+    if (myToken === window._subtitleSearchToken) {
+      window.forceMainLangForNextSearch = false
+      window.forceLangForNextSearch = null
+    }
   }
 }
 
