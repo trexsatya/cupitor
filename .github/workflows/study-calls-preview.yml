@@ -1,7 +1,7 @@
 name: Study calls UI preview
 on:
   pull_request:
-    branches: [music-study-app]
+    branches: [master]
     paths:
       - frontend/vue3/cupitor-frontend/public/language/study-calls*
       - frontend/vue3/cupitor-frontend/public/language/language.js
