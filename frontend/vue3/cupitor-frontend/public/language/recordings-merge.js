@@ -45,6 +45,79 @@ export function parseMediaUrl(raw) {
   return { kind: 'link', url }
 }
 
+// A manual card's media may have a bounded clip even though the card has no
+// subtitles. Numeric values are seconds; mm:ss and hh:mm:ss are also accepted.
+export function parseMediaTime(value) {
+  if (value == null || String(value).trim() === '') return null
+  const raw = String(value).trim()
+  if (!/^\d+(?:\.\d+)?$/.test(raw) &&
+      !/^\d+:\d{1,2}(?::\d{1,2}(?:\.\d+)?)?$/.test(raw)) return NaN
+  const parts = raw.split(':').map(Number)
+  if (parts.length > 1 && (parts[parts.length - 1] >= 60 ||
+      (parts.length === 3 && parts[1] >= 60))) return NaN
+  const seconds = parts.reduce((total, n) => total * 60 + n, 0)
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : NaN
+}
+
+// Respect a YouTube link's own start position if the editor's start field is
+// blank. Handles t=90, t=1m30s, start=90 and #t=1:30.
+export function mediaStartFromUrl(url) {
+  try {
+    const parsed = new URL(url)
+    const hash = parsed.hash.match(/(?:^#|[&#])t=([^&]+)/)
+    const raw = parsed.searchParams.get('t') || parsed.searchParams.get('start') ||
+      (hash && decodeURIComponent(hash[1]))
+    if (!raw) return 0
+    const hms = raw.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/i)
+    if (hms && /[hms]/i.test(raw)) {
+      return (Number(hms[1]) || 0) * 3600 + (Number(hms[2]) || 0) * 60 + (Number(hms[3]) || 0)
+    }
+    const secs = parseMediaTime(raw)
+    return Number.isFinite(secs) ? secs : 0
+  } catch (_) { return 0 }
+}
+
+// Validate editor inputs and convert either an absolute end or a duration
+// into the same persisted mediaStart/mediaEnd seconds pair. A null end means
+// no automatic stop, preserving the behaviour of existing manual cards.
+export function buildManualMediaTiming({ url, start, end, duration }) {
+  const has = v => v != null && String(v).trim() !== ''
+  if (!url && (has(start) || has(end) || has(duration))) {
+    throw new Error('Enter a media URL before setting clip times.')
+  }
+  if (has(end) && has(duration)) {
+    throw new Error('Enter either an end time or a duration, not both.')
+  }
+  const parsedStart = parseMediaTime(start)
+  const parsedEnd = parseMediaTime(end)
+  const parsedDuration = parseMediaTime(duration)
+  if (Number.isNaN(parsedStart) || Number.isNaN(parsedEnd) || Number.isNaN(parsedDuration)) {
+    throw new Error('Times must be seconds, mm:ss or hh:mm:ss.')
+  }
+  const mediaStart = parsedStart == null ? mediaStartFromUrl(url) : parsedStart
+  const mediaEnd = parsedEnd != null ? parsedEnd :
+    parsedDuration != null ? mediaStart + parsedDuration : null
+  if (parsedDuration != null && parsedDuration <= 0) {
+    throw new Error('Duration must be greater than zero.')
+  }
+  if (mediaEnd != null && mediaEnd <= mediaStart) {
+    throw new Error('End time must be later than start time.')
+  }
+  return {
+    mediaStart,
+    mediaEnd,
+    mediaTimeMode: parsedDuration != null ? 'duration' : 'end'
+  }
+}
+
+export function manualMediaClip(item) {
+  if (!item || !item.mediaUrl) return null
+  const s = item.mediaStart == null ? mediaStartFromUrl(item.mediaUrl) : Number(item.mediaStart)
+  const e = item.mediaEnd == null ? null : Number(item.mediaEnd)
+  const start = Number.isFinite(s) && s >= 0 ? s : 0
+  return { start, end: Number.isFinite(e) && e > start ? e : null }
+}
+
 // Members of a virtual playlist, filtered to existing non-virtual entries
 // (so a deleted / renamed member silently drops out — and nested virtual
 // playlists are forbidden by collapsing them away).
