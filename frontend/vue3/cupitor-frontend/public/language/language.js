@@ -12267,7 +12267,9 @@ function restorePracticeMode() {
   // Play (the practice-mode class flip above re-pins the YT player; we want
   // it parked at the right timestamp again).
   const it = (window._practiceCards || [])[window._practiceIdx]
-  if (it) { try { _cuePracticeVideo(it) } catch (_) {} }
+  if (it && (!it.manual || (it.mediaKind === 'youtube' && it.mediaVideoId))) {
+    try { _cuePracticeVideo(it) } catch (_) {}
+  }
 }
 function _updatePracticeRestoreCount() {
   const cards = window._practiceCards || []
@@ -12422,8 +12424,10 @@ function _updatePracticeInfo() {
   const $meta = $p.find('.practice-info-meta')
   if (it.manual) {
     const linkLbl = it.mediaUrl ? ` · ${it.mediaKind === 'youtube' ? '▶ YouTube' : '🔗 link'}` : ''
+    const clip = _manualMediaClip(it)
+    const times = clip && it.mediaUrl ? ` · ${clip.start}s${clip.end != null ? '–' + clip.end + 's' : ' onwards'}` : ''
     $head.text(`📝 Manual — ${it._recName || '?'}`)
-    $meta.text(`${it.source || '(empty)'}  →  ${it.target || '(empty)'}${linkLbl}`)
+    $meta.text(`${it.source || '(empty)'}  →  ${it.target || '(empty)'}${linkLbl}${times}`)
   } else {
     $head.text(`${it._recName || '?'} — "${it._st || ''}" → ${it._w || ''}`)
     $meta.text(`${it.id} · ${it.source || '?'} · ${it.timeStart}s – ${it.timeEnd}s`)
@@ -12461,6 +12465,7 @@ function revealPracticeCard() {
 // back to the shown line's own end, then to the item's timeEnd. Times are in
 // seconds (SRT ordinals).
 async function _practiceClipStopTime(it) {
+  if (_isManualItem(it)) return (_manualMediaClip(it) || {}).end ?? null
   let stop = (typeof it.timeEnd === 'number') ? it.timeEnd : (it.timeStart + 4)
   try {
     const parsed = await _loadSubtitlesForItem(it)
@@ -12505,16 +12510,19 @@ async function playPracticeClip() {
   // can't pause a later clip.
   const token = (window._practiceClipToken = (window._practiceClipToken || 0) + 1)
   try {
+    if (_isManualItem(it) && !(it.mediaKind === 'youtube' && it.mediaVideoId)) return
+    const videoId = _isManualItem(it) ? it.mediaVideoId : it.id
+    const start = _isManualItem(it) ? (_manualMediaClip(it) || {start:0}).start : it.timeStart
     const stop = await _practiceClipStopTime(it)
     if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
     // The cue normally already loaded the right video; reload only if needed.
     let needLoad = true
-    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
+    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(videoId) < 0 } catch (_) {}
     if (needLoad) {
-      window.mediaSelected = { link: it.id, source: 'link' }
+      window.mediaSelected = { link: videoId, source: 'link' }
       await changeMediaIfNeededTo(window.mediaSelected)
     }
-    await seekToYoutubeTime(it.timeStart)
+    await seekToYoutubeTime(start)
     if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
     // Apply the user's chosen playback rate just before play — must happen
     // AFTER the video has been loaded/seeked, else YT silently snaps it
@@ -12522,7 +12530,7 @@ async function playPracticeClip() {
     const rate = parseFloat(window._practicePlaybackRate) || 1
     try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(rate) } catch (_) {}
     try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
-    _watchPracticeClipEnd(stop, token)
+    if (stop != null) _watchPracticeClipEnd(stop, token)
   } catch (e) { console.warn('practice: play failed', e) }
 }
 
@@ -12645,7 +12653,10 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   // Hide controls that only apply to video clips. Removed when the next
   // (video) card renders by the restore-block at the top of _renderPracticeCard.
   $p.find('.practice-ctx-ctrl').hide()
-  $p.find('.practice-play, .practice-speed').hide()
+  const isYT = it.mediaKind === 'youtube' && !!it.mediaVideoId
+  $p.find('.practice-play, .practice-speed').toggle(!!isYT)
+  if (isYT) _cuePracticeVideo(it)
+  else { try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {} }
 
   const frontText = frontIsSource ? (it.source || '') : (it.target || '')
   const backText  = frontIsSource ? (it.target || '') : (it.source || '')
@@ -12667,29 +12678,18 @@ function _renderPracticeManualCard($p, it, idx, total, frontIsSource, mode, srcC
   // alongside prev/next where the hidden play-clip button used to be.
   $p.find('.practice-media-link').remove()
   if (it.mediaUrl) {
-    const isYT    = it.mediaKind === 'youtube' && it.mediaVideoId
     const isAudio = it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)
-    const icon    = isYT ? '▶' : (isAudio ? '🎙' : '🔗')
-    const title   = isYT    ? 'Play the linked YouTube video'
-                  : isAudio ? 'Play the recorded audio'
-                  : 'Open the linked media in a new tab'
-    const $btn = $(`<button type="button" class="practice-media-link" title="${title}" aria-label="Open linked media">${icon}</button>`)
-    $btn.on('click', async (ev) => {
-      ev.preventDefault(); ev.stopPropagation()
-      if (isYT) {
-        // Cue into the embedded player at t=0. Don't auto-play (Practice
-        // mode is for studying — the user clicks again to play).
-        window.mediaSelected = { link: it.mediaVideoId, source: 'link' }
-        try { changeMediaIfNeededTo(window.mediaSelected) } catch (_) {}
-      } else if (isAudio) {
-        // Bridge-loaded preview with toggle: click while playing stops it;
-        // navigating away or closing Practice also stops it.
-        _startManualAudioPreview(it.mediaUrl, $btn)
-      } else {
-        window.open(it.mediaUrl, '_blank', 'noopener')
-      }
-    })
-    $p.find('.practice-nav .practice-play').after($btn)
+    if (!isYT) {
+      const icon  = isAudio ? '🎙' : '🔗'
+      const title = isAudio ? 'Play the recorded audio' : 'Open the linked media in a new tab'
+      const $btn = $(`<button type="button" class="practice-media-link" title="${title}" aria-label="Open linked media">${icon}</button>`)
+      $btn.on('click', async (ev) => {
+        ev.preventDefault(); ev.stopPropagation()
+        if (isAudio) _startManualAudioPreview(it.mediaUrl, $btn, _manualMediaClip(it))
+        else window.open(it.mediaUrl, '_blank', 'noopener')
+      })
+      $p.find('.practice-nav .practice-play').after($btn)
+    }
   }
 
   $p.find('.practice-reveal').show()
@@ -12792,13 +12792,16 @@ async function _practiceCommitEdit() {
 async function _cuePracticeVideo(it) {
   try {
     showMediaContainer()
-    window.mediaSelected = { link: it.id, source: 'link' }
+    if (_isManualItem(it) && !(it.mediaKind === 'youtube' && it.mediaVideoId)) return
+    const videoId = _isManualItem(it) ? it.mediaVideoId : it.id
+    const start = _isManualItem(it) ? (_manualMediaClip(it) || {start:0}).start : it.timeStart
+    window.mediaSelected = { link: videoId, source: 'link' }
     window.playingYoutubeVideo = true
     window.syncSubtitle = false
     let needLoad = true
-    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(it.id) < 0 } catch (_) {}
+    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(videoId) < 0 } catch (_) {}
     if (needLoad) await changeMediaIfNeededTo(window.mediaSelected)
-    await seekToYoutubeTime(it.timeStart)
+    await seekToYoutubeTime(start)
     // Pause insistently so the cued clip doesn't run on its own.
     try { window.ytPlayer.pauseVideo() } catch (_) {}
     setTimeout(() => { try { window.ytPlayer.pauseVideo() } catch (_) {} }, 120)
