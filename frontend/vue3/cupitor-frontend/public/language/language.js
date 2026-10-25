@@ -12503,16 +12503,25 @@ async function _practiceClipStopTime(it) {
 // with syncSubtitle=false, so the global ontimeupdate interval-stopper is
 // inactive — this is the practice-specific equivalent. Cancelled when a newer
 // clip starts, the card changes, or practice closes (via the token).
-function _watchPracticeClipEnd(stop, token) {
+function _watchPracticeClipEnd(stop, token, expectedVideoId, start) {
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
+  // Don't mistake the previous video's playhead for this clip's endpoint
+  // while the IFrame API switches videos after restore or first Play.
+  let observedInClip = false
   window._practiceClipTimer = setInterval(() => {
     if (!window._practiceActive || token !== window._practiceClipToken) {
       clearInterval(window._practiceClipTimer); window._practiceClipTimer = null
       return
     }
     let ct = 0
-    try { ct = (window.ytPlayer && window.ytPlayer.getCurrentTime && window.ytPlayer.getCurrentTime()) || 0 } catch (_) {}
-    if (ct >= stop) {
+    try {
+      const player = window.ytPlayer
+      const loadedId = player && player.getVideoData && player.getVideoData().video_id
+      if (expectedVideoId && loadedId && loadedId !== expectedVideoId) return
+      ct = (player && player.getCurrentTime && player.getCurrentTime()) || 0
+    } catch (_) { return }
+    if (ct >= start && ct < stop) observedInClip = true
+    if (observedInClip && ct >= stop) {
       try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {}
       clearInterval(window._practiceClipTimer); window._practiceClipTimer = null
     }
@@ -12523,31 +12532,50 @@ async function playPracticeClip() {
   const idx = window._practiceIdx
   const it = window._practiceCards && window._practiceCards[idx]
   if (!it) return
-  // Each clip gets a token so a stale stop-watcher (or a card switch mid-load)
-  // can't pause a later clip.
+  // Each Play invalidates any pending (re)cue, including a cue started
+  // during restore, so it cannot reset playback after this click.
   const token = (window._practiceClipToken = (window._practiceClipToken || 0) + 1)
+  window._practiceCueToken = (window._practiceCueToken || 0) + 1
   try {
-    if (_isManualItem(it) && !(it.mediaKind === 'youtube' && it.mediaVideoId)) return
-    const videoId = _isManualItem(it) ? it.mediaVideoId : it.id
-    const start = _isManualItem(it) ? (_manualMediaClip(it) || {start:0}).start : it.timeStart
+    const target = _practiceVideoTarget(it)
+    if (!target) return
+    const {videoId, start} = target
     const stop = await _practiceClipStopTime(it)
-    if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
-    // The cue normally already loaded the right video; reload only if needed.
-    let needLoad = true
-    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(videoId) < 0 } catch (_) {}
-    if (needLoad) {
-      window.mediaSelected = { link: videoId, source: 'link' }
-      await changeMediaIfNeededTo(window.mediaSelected)
+    if (window._practiceIdx !== idx || token !== window._practiceClipToken ||
+        window._practiceMinimized) return
+    await waitUntil(() => window.ytPlayerReady && window.ytPlayer &&
+      typeof window.ytPlayer.playVideo === 'function')
+    if (window._practiceIdx !== idx || token !== window._practiceClipToken ||
+        window._practiceMinimized) return
+    const player = window.ytPlayer
+    const media = { link: videoId, source: 'link' }
+    window.mediaSelected = media
+    window.mediaBeingPlayed = media
+    window.playingYoutubeVideo = true
+    window.syncSubtitle = false
+    let currentId = null
+    try { currentId = player.getVideoData && player.getVideoData().video_id } catch (_) {}
+    const differentVideo = currentId !== videoId
+    if (differentVideo && typeof player.loadVideoById === 'function') {
+      // Unlike reassigning iframe.src, startSeconds survives loading.
+      player.loadVideoById({ videoId, startSeconds: start })
+    } else {
+      await seekToYoutubeTime(start)
+      if (window._practiceIdx !== idx || token !== window._practiceClipToken ||
+          window._practiceMinimized) return
+      try { player.playVideo() } catch (_) {}
     }
-    await seekToYoutubeTime(start)
-    if (window._practiceIdx !== idx || token !== window._practiceClipToken) return
-    // Apply the user's chosen playback rate just before play — must happen
-    // AFTER the video has been loaded/seeked, else YT silently snaps it
-    // back to 1× when the new video kicks in.
     const rate = parseFloat(window._practicePlaybackRate) || 1
-    try { window.ytPlayer && window.ytPlayer.setPlaybackRate && window.ytPlayer.setPlaybackRate(rate) } catch (_) {}
-    try { window.ytPlayer && window.ytPlayer.playVideo && window.ytPlayer.playVideo() } catch (_) {}
-    if (stop != null) _watchPracticeClipEnd(stop, token)
+    try { player.setPlaybackRate && player.setPlaybackRate(rate) } catch (_) {}
+    // A new video may reset its rate when it becomes ready. Reapply once,
+    // but never to a different card or to a minimized/stopped session.
+    if (differentVideo) setTimeout(() => {
+      if (window._practiceActive && !window._practiceMinimized &&
+          token === window._practiceClipToken) {
+        try { player.setPlaybackRate && player.setPlaybackRate(rate) } catch (_) {}
+      }
+    }, 350)
+    if (stop != null) _watchPracticeClipEnd(stop, token, videoId, start)
   } catch (e) { console.warn('practice: play failed', e) }
 }
 
