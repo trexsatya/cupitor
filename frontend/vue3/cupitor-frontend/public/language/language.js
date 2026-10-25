@@ -246,17 +246,25 @@ function _applyIncomingLookup(rawText) {
   $('#searchedWords').val('').trigger('change.select2')
   $('#searchText').val(term).trigger('change')
 }
-window.addEventListener('filterData', (e) => {
-  _applyIncomingLookup(e.detail && e.detail.text)
-})
-window.__cupitorLookupHandlerReady = true
-// A lookup may arrive in onPageFinished before this deferred module runs.
-// language.html buffers those early events until the handler is ready.
-if (window.__cupitorPendingLookup != null) {
+function _flushPendingLookup() {
+  if (!window.__cupitorSearchReady || window.__cupitorPendingLookup == null) return
   const term = window.__cupitorPendingLookup
   window.__cupitorPendingLookup = null
   _applyIncomingLookup(term)
 }
+window.addEventListener('filterData', (e) => {
+  const term = e.detail && e.detail.text
+  if (!term) return
+  if (!window.__cupitorSearchReady) {
+    window.__cupitorPendingLookup = term
+    return
+  }
+  _applyIncomingLookup(term)
+})
+window.__cupitorLookupHandlerReady = true
+// A lookup may arrive in onPageFinished before this deferred module runs,
+// or after it loads but before $(document).ready attaches the search handler.
+// Both cases are buffered and flushed by the search initialization below.
 
 window.addEventListener('capturedSubtitle', (e) => {
   if (!e.detail) return
@@ -2446,6 +2454,10 @@ $('document').ready(e => {
   $searchText1.change(function (e) {
     searchTextChanged(e).then(r => {})
   })
+  // The native lookup can be replayed only after this change handler has
+  // actually been bound. Flushing earlier silently discards the search.
+  window.__cupitorSearchReady = true
+  _flushPendingLookup()
 
   // X-clear button on the search input — show only when there's text;
   // clicking clears the input and re-fires the search-changed flow.
