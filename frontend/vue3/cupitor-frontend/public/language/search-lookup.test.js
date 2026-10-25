@@ -114,7 +114,7 @@ describe('native filterData handoff', () => {
 
   test('lookup arriving before deferred module initialization is replayed', () => {
     const ui = mockUi()
-    const early = bodyBetween(html, '// Flutter can send a lookup from onPageFinished',
+    const early = bodyBetween(html, '// The native Flutter lookup can arrive while deferred JavaScript imports',
       '</script>')
     new Function('window', early)(ui.win)
     ui.win.dispatch('filterData', { text: 'ovetande' })
