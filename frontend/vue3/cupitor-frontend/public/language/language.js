@@ -89,6 +89,8 @@ import {
   parseMediaUrl as _parseMediaUrl,
   buildManualMediaTiming as _buildManualMediaTiming,
   manualMediaClip as _manualMediaClip,
+  practiceVideoTarget as _practiceVideoTarget,
+  cuePracticeYoutubeVideo as _cuePracticeYoutubeVideo,
   virtualMembers as _coreVirtualMembers,
   resolveVirtualItems as _coreResolveVirtualItems,
   itemsForRecording as _coreItemsForRecording,
@@ -12196,6 +12198,7 @@ function closePracticeMode() {
   window._practiceActive = false
   window._practiceMinimized = false
   window._practiceClipToken = (window._practiceClipToken || 0) + 1
+  window._practiceCueToken = (window._practiceCueToken || 0) + 1
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
   try { _stopManualAudioPreview() } catch (_) {}
   if (window.visualViewport && window._practiceViewportWired) {
@@ -12261,6 +12264,8 @@ function _updatePracticeSpeedBtn() {
 function minimizePracticeMode() {
   if (!window._practiceActive) return
   window._practiceMinimized = true
+  // Invalidate a pending initial cue so it cannot finish after restore.
+  window._practiceCueToken = (window._practiceCueToken || 0) + 1
   $('#practiceMode').addClass('minimized')
   $('body').removeClass('practice-mode')
   // Cancel any running stop-watcher so it doesn't fire on the restored clip
@@ -12279,8 +12284,8 @@ function restorePracticeMode() {
   // Play (the practice-mode class flip above re-pins the YT player; we want
   // it parked at the right timestamp again).
   const it = (window._practiceCards || [])[window._practiceIdx]
-  if (it && (!it.manual || (it.mediaKind === 'youtube' && it.mediaVideoId))) {
-    try { _cuePracticeVideo(it) } catch (_) {}
+  if (_practiceVideoTarget(it)) {
+    _cuePracticeVideo(it).catch(e => console.warn('practice: restore cue failed', e))
   }
 }
 function _updatePracticeRestoreCount() {
@@ -12587,6 +12592,7 @@ async function _renderPracticeCard() {
   // Switching cards invalidates any running clip stop-watcher so it can't pause
   // the freshly-cued clip.
   window._practiceClipToken = (window._practiceClipToken || 0) + 1
+  window._practiceCueToken = (window._practiceCueToken || 0) + 1
   if (window._practiceClipTimer) { clearInterval(window._practiceClipTimer); window._practiceClipTimer = null }
   // Any manual-audio preview is tied to the *previous* card's media-link
   // button (which is about to be removed and rebuilt). Stop it so the clip
@@ -12802,21 +12808,26 @@ async function _practiceCommitEdit() {
 }
 
 async function _cuePracticeVideo(it) {
+  const target = _practiceVideoTarget(it)
+  if (!target) return
+  const token = (window._practiceCueToken = (window._practiceCueToken || 0) + 1)
   try {
     showMediaContainer()
-    if (_isManualItem(it) && !(it.mediaKind === 'youtube' && it.mediaVideoId)) return
-    const videoId = _isManualItem(it) ? it.mediaVideoId : it.id
-    const start = _isManualItem(it) ? (_manualMediaClip(it) || {start:0}).start : it.timeStart
-    window.mediaSelected = { link: videoId, source: 'link' }
+    // Do not use changeMediaIfNeededTo/loadYoutubeVideo here: it rewrites
+    // iframe.src, which reloads the video at 0 after a seek. This is most
+    // noticeable when a minimized manual card is restored.
+    await waitUntil(() => window.ytPlayerReady && window.ytPlayer &&
+      typeof window.ytPlayer.cueVideoById === 'function')
+    if (token !== window._practiceCueToken || !window._practiceActive ||
+        window._practiceMinimized ||
+        (window._practiceCards || [])[window._practiceIdx] !== it) return
+    window.mediaSelected = { link: target.videoId, source: 'link' }
+    window.mediaBeingPlayed = window.mediaSelected
     window.playingYoutubeVideo = true
     window.syncSubtitle = false
-    let needLoad = true
-    try { needLoad = !window.ytPlayer || (window.ytPlayer.getVideoUrl() || '').indexOf(videoId) < 0 } catch (_) {}
-    if (needLoad) await changeMediaIfNeededTo(window.mediaSelected)
-    await seekToYoutubeTime(start)
-    // Pause insistently so the cued clip doesn't run on its own.
-    try { window.ytPlayer.pauseVideo() } catch (_) {}
-    setTimeout(() => { try { window.ytPlayer.pauseVideo() } catch (_) {} }, 120)
+    _cuePracticeYoutubeVideo(window.ytPlayer, target)
+    // cueVideoById is PAUSED, with the requested startSeconds preserved by
+    // the YouTube API until Play. No delayed pause/seek to race the Play click.
   } catch (e) { console.warn('practice: cue video failed', e) }
 }
 
