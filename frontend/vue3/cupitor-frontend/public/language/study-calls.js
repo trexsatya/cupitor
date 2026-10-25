@@ -206,6 +206,7 @@ export function installStudyCalls(win, $) {
   let savedSettingsRevision = 0
   let currentView = 'list'
   let historyDetailId = null
+  let lastHistoryOpenId = null
   let historyScroll = 0
   const viewTrail = []
   const active = new Set(['scheduled', 'disabled', 'ringing', 'answered'])
@@ -952,11 +953,30 @@ export function installStudyCalls(win, $) {
     renderHistory()
   })
   win.addEventListener('cupitorNotifLists', renderSources)
+  function openHistoryItem(detail) {
+    if (typeof detail?.id !== 'string' || !detail.id.trim() || detail.id.length > 128) return
+    if (detail.open_id && detail.open_id === lastHistoryOpenId) return
+    lastHistoryOpenId = detail.open_id || null
+    // Consume the warm/cold delivery once. Later module initialization must
+    // not reopen the same item after the user has pressed Back.
+    win.__cupitorStudyCallOpened = null
+    open()
+    historyDetailId = detail.id
+    historyScroll = 0
+    showView('history', true)
+    renderHistoryDetail()
+    showView('history-detail', true)
+    $dialog.find('[data-call-detail-title]')[0]?.focus({ preventScroll: true })
+  }
+  win.addEventListener('cupitorStudyCallOpened', e => openHistoryItem(e.detail))
   win.addEventListener('cupitorAppLifecycle', e => {
     if (e.detail?.isForeground && $dialog?.is(':visible')) refresh({ preserveForms: true }).catch(() => {})
   })
   win._openStudyCalls = open
-  const ready = () => $('#studyCallsBtn').toggle(client.available()).on('click', open)
+  const ready = () => {
+    $('#studyCallsBtn').toggle(client.available()).on('click', open)
+    if (win.__cupitorStudyCallOpened) openHistoryItem(win.__cupitorStudyCallOpened)
+  }
   if (win.document.readyState === 'loading') $(ready); else ready()
   return { client, open }
 }

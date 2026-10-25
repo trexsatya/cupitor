@@ -323,6 +323,54 @@ test('an open history detail follows snapshots and clears data when a call leave
   installed.client.dispose(); win.close()
 })
 
+test('a cold notification tap opens the exact missed history item and Back returns through history', async () => {
+  const { win, $ } = fixture()
+  win.__cupitorCalls = { calls: [
+    { id: 'other', title: 'Another call', question: 'Other question', status: 'completed', finished_at: 2 },
+    { id: 'missed', title: 'Missed Swedish question', question: 'Vad betyder försynt?', choices: ['Stillsam', 'Högljudd'],
+      correct_choice_index: 0, status: 'missed', finished_at: 1 },
+  ] }
+  win.__cupitorStudyCallOpened = { id: 'missed', open_id: 'cold-tap' }
+  const installed = installStudyCalls(win, $)
+  await new Promise(resolve => $(resolve))
+  assert.equal($('[data-call-view=history-detail]').css('display'), 'block')
+  assert.match($('[data-call-history-detail]').text(), /Vad betyder försynt\?/)
+  assert.match($('[data-call-history-detail]').text(), /1\. Stillsam/)
+  assert.match($('[data-call-history-detail]').text(), /No answer was recorded/)
+  assert.doesNotMatch($('[data-call-history-detail]').text(), /Other question/)
+  assert.equal(win.__cupitorStudyCallOpened, null)
+  $('[data-call-back-top]').trigger('click')
+  assert.equal($('[data-call-view=history]').css('display'), 'block')
+  win.dispatchEvent(new win.CustomEvent('cupitorStudyCallOpened', { detail: { id: 'missed', open_id: 'cold-tap' } }))
+  assert.equal($('[data-call-view=history]').css('display'), 'block', 'duplicate delivery must not undo Back')
+  $('[data-call-back-top]').trigger('click')
+  assert.equal($('[data-call-view=list]').css('display'), 'block')
+  installed.client.dispose(); win.close()
+})
+
+test('a warm notification tap opens details before a delayed snapshot and handles expired history', () => {
+  const { win, $ } = fixture()
+  const installed = installStudyCalls(win, $); installed.open()
+  const tap = detail => win.dispatchEvent(new win.CustomEvent('cupitorStudyCallOpened', { detail }))
+  for (const detail of [{}, { id: 7 }, { id: '' }, { id: 'x'.repeat(129) }]) tap(detail)
+  assert.equal($('[data-call-view=list]').css('display'), 'block')
+  $('[data-call-open-settings]').trigger('click')
+  tap({ id: 'later', open_id: 'tap-1', profile_id: 99 })
+  assert.equal($('[data-call-back-top]').text(), '← Back to call history')
+  assert.match($('[data-call-history-detail]').text(), /no longer in this profile’s latest 100/)
+  win.dispatchEvent(new win.CustomEvent('cupitorCalls', { detail: { calls: [
+    { id: 'later', title: 'Later', question: 'Full missed question', status: 'missed' },
+  ] } }))
+  assert.match($('[data-call-history-detail]').text(), /Full missed question/)
+  $('[data-call-back-top]').trigger('click')
+  tap({ id: 'later', open_id: 'tap-2' })
+  assert.equal($('[data-call-view=history-detail]').css('display'), 'block', 'a new tap may reopen the same call')
+  tap({ id: 'evicted', open_id: 'tap-3' })
+  assert.match($('[data-call-history-detail]').text(), /no longer in this profile’s latest 100/)
+  assert.doesNotMatch($('[data-call-history-detail]').text(), /Full missed question/)
+  installed.client.dispose(); win.close()
+})
+
 test('new alternatives keep the selected correct answer while typing and removing rows', async () => {
   const { win, $ } = fixture()
   const installed = installStudyCalls(win, $); installed.open()

@@ -44,6 +44,10 @@ export function installDialogScrolling($, win = window) {
   win.visualViewport?.addEventListener('resize', schedule);
   win.visualViewport?.addEventListener('scroll', schedule);
 
+  // A cold notification can open a dialog before the document-ready
+  // installer runs. Adopt those open windows without restoring hidden ones.
+  $('.ui-dialog:visible > .ui-dialog-content').each(function () { layout(this, true); });
+
   return () => {
     $(doc).off('.cupitorScrolling');
     win.removeEventListener('resize', schedule);
