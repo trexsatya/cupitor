@@ -87,6 +87,8 @@ import {
   isManualItem as _isManualItem,
   newManualId as _coreNewManualId,
   parseMediaUrl as _parseMediaUrl,
+  buildManualMediaTiming as _buildManualMediaTiming,
+  manualMediaClip as _manualMediaClip,
   virtualMembers as _coreVirtualMembers,
   resolveVirtualItems as _coreResolveVirtualItems,
   itemsForRecording as _coreItemsForRecording,
@@ -8962,6 +8964,10 @@ function addManualEntry(playlistName, opts) {
     it.mediaUrl = media.url
     it.mediaKind = media.kind                // 'youtube' | 'link' | 'audio'
     if (media.kind === 'youtube') it.mediaVideoId = media.id
+    const timing = opts.mediaTiming || {}
+    if (Number.isFinite(timing.mediaStart)) it.mediaStart = timing.mediaStart
+    if (Number.isFinite(timing.mediaEnd)) it.mediaEnd = timing.mediaEnd
+    if (timing.mediaTimeMode) it.mediaTimeMode = timing.mediaTimeMode
   }
   if (!rec.items)                          rec.items = {}
   if (!rec.items[MANUAL_ST])               rec.items[MANUAL_ST] = {}
@@ -8990,6 +8996,15 @@ function updateManualEntry(playlistName, manualId, patch) {
         const m = _parseMediaUrl(patch.mediaUrl)
         if (m) { it.mediaUrl = m.url; it.mediaKind = m.kind; if (m.kind === 'youtube') it.mediaVideoId = m.id; else delete it.mediaVideoId }
         else   { delete it.mediaUrl; delete it.mediaKind; delete it.mediaVideoId }
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'mediaTiming')) {
+        delete it.mediaStart; delete it.mediaEnd; delete it.mediaTimeMode
+        if (it.mediaUrl && patch.mediaTiming) {
+          const timing = patch.mediaTiming
+          if (Number.isFinite(timing.mediaStart)) it.mediaStart = timing.mediaStart
+          if (Number.isFinite(timing.mediaEnd)) it.mediaEnd = timing.mediaEnd
+          if (timing.mediaTimeMode) it.mediaTimeMode = timing.mediaTimeMode
+        }
       }
       rec.updatedAt = Date.now()
       _saveRecording()
@@ -9689,7 +9704,14 @@ function _openManualEntryEditor(playlistName, existing) {
       <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation…"></textarea></div>
     <div class="mee-row"><label class="mee-lbl">Media URL <span class="mee-lbl-hint">(optional — YouTube link or any web link)</span></label>
       <input id="meeMedia" class="mee-input" type="url" placeholder="https://…"></div>
-    <div class="mee-hint" style="font-size:12px;color:#666;">YouTube URLs are recognised automatically and will play in the embedded player during Practice / Play. Other URLs open in a new tab.</div>
+    <div class="mee-hint" style="font-size:12px;color:#666;">YouTube links play inside Practice / Play; recorded audio can play a selected portion. Other web links open in a new tab and cannot enforce a stop time.</div>
+    <div class="mee-row"><label class="mee-lbl">Start time <span class="mee-lbl-hint">(optional; seconds, mm:ss or hh:mm:ss)</span></label>
+      <input id="meeMediaStart" class="mee-input" type="text" inputmode="decimal" placeholder="0:00"></div>
+    <div class="mee-row"><label class="mee-lbl">End time <span class="mee-lbl-hint">(optional; absolute time in media)</span></label>
+      <input id="meeMediaEnd" class="mee-input" type="text" inputmode="decimal" placeholder="1:30"></div>
+    <div class="mee-row"><label class="mee-lbl">Or duration <span class="mee-lbl-hint">(optional; how long to play)</span></label>
+      <input id="meeMediaDuration" class="mee-input" type="text" inputmode="decimal" placeholder="0:15"></div>
+    <div class="mee-hint" style="font-size:12px;color:#666;">Fill in either End time or Duration, not both. A start time in the YouTube URL is used if Start is blank. Leave both blank for unrestricted playback.</div>
     ${showAudio ? `
     <div class="mee-row" style="margin-top:10px;border-top:1px solid #eee;padding-top:8px;">
       <label class="mee-lbl">Audio <span class="mee-lbl-hint">(optional — recorded pronunciation, saved on device)</span></label>
@@ -9712,6 +9734,16 @@ function _openManualEntryEditor(playlistName, existing) {
     $d.find('#meeMedia').val(_isAudioMediaUrl(mu) ? '' : mu)
   }
 
+  // Restore a bounded media clip as the same input mode the user entered.
+  const oldClip = _manualMediaClip(existing)
+  if (existing && existing.mediaStart != null) $d.find('#meeMediaStart').val(String(existing.mediaStart))
+  if (oldClip && oldClip.end != null) {
+    if (existing.mediaTimeMode === 'duration') {
+      $d.find('#meeMediaDuration').val(String(oldClip.end - oldClip.start))
+    } else {
+      $d.find('#meeMediaEnd').val(String(oldClip.end))
+    }
+  }
   // ── Audio recorder state (scoped to this dialog instance) ──
   // Only wired up when `showAudio` is true (i.e. we're inside the Cupitor
   // app's WebView, where AudioBridge can persist to the device file system).
@@ -9899,14 +9931,24 @@ function _openManualEntryEditor(playlistName, existing) {
     //     Recording is the more recent, explicit declaration of media.
     //  3. Otherwise the entry takes the typed Media URL.
     let finalMediaUrl = audioUrl ? audioUrl : typedMediaUrl
+    let mediaTiming
+    try {
+      mediaTiming = _buildManualMediaTiming({
+        url: finalMediaUrl, start: $d.find('#meeMediaStart').val(),
+        end: $d.find('#meeMediaEnd').val(), duration: $d.find('#meeMediaDuration').val()
+      })
+    } catch (err) {
+      alert(err.message || String(err))
+      return false
+    }
     // Original audio file we may need to delete (replaced or removed).
     const originalAudioUrl = _isAudioMediaUrl(existing && existing.mediaUrl) ? existing.mediaUrl : null
 
     let saved
     if (isEdit) {
-      saved = updateManualEntry(playlistName, existing.id, { source, target, mediaUrl: finalMediaUrl })
+      saved = updateManualEntry(playlistName, existing.id, { source, target, mediaUrl: finalMediaUrl, mediaTiming })
     } else {
-      const it = addManualEntry(playlistName, { source, target, mediaUrl: finalMediaUrl })
+      const it = addManualEntry(playlistName, { source, target, mediaUrl: finalMediaUrl, mediaTiming })
       saved = !!it
     }
 
