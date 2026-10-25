@@ -63,10 +63,10 @@ export function parseMediaTime(value) {
 // blank. Handles t=90, t=1m30s, start=90 and #t=1:30.
 export function mediaStartFromUrl(url) {
   try {
-    const parsed = new URL(url)
-    const hash = parsed.hash.match(/(?:^#|[&#])t=([^&]+)/)
-    const raw = parsed.searchParams.get('t') || parsed.searchParams.get('start') ||
-      (hash && decodeURIComponent(hash[1]))
+    // Match ?t=, &start= or #t= without needing URL construction (also
+    // works in offline / embedded runtimes that omit the URL class).
+    const param = String(url || '').match(/[?&#](?:t|start)=([^&#]+)/i)
+    const raw = param ? decodeURIComponent(param[1].replace(/\+/g, ' ')) : null
     if (!raw) return 0
     const hms = raw.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/i)
     if (hms && /[hms]/i.test(raw)) {
