@@ -23,6 +23,9 @@ async function check(browser, mobile) {
       attempts: [{ answer: 'ett', correct: false, response_mode: 'tap' }, { answer: 'en', correct: true, response_mode: 'voice' }] })
     Object.assign(calls[148], { title: 'Swedish geography', question: 'Vad heter Sveriges huvudstad?', response_type: 'text',
       accepted_answers: ['Stockholm', 'Stockholms stad'], choice: undefined, answer: 'Stockholm', correct: true })
+    Object.assign(calls[147], { title: 'Swedish vocabulary — missed call', question: 'Vad betyder försynt?', choices: ['Stillsam', 'Högljudd'],
+      correct_choice_index: 0, status: 'missed', choice: undefined })
+    window.__cupitorStudyCallOpened = { id: 'done-147', open_id: 'cold-missed-tap' }
     calls.push({ id: 'pending', title: 'Swedish vocabulary', question: 'Vilken artikel passar framför ordet katt?', choices: ['ett', 'en'],
       correct_choice_index: 1, response_type: 'choice', language: 'sv-SE', when_ms: Date.now() + 3600000, status: 'scheduled' })
     window.CallBridge = { postMessage(raw) {
@@ -49,6 +52,21 @@ async function check(browser, mobile) {
   const shot=async name=>{await page.evaluate(()=>document.querySelector('#studyCallsDialog').scrollTop=0);await page.locator('.study-call-window').screenshot({path:path.join(shots,`${mobile?'mobile':'desktop'}-${name}.png`)})}
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
+    await page.locator('[data-call-view=history-detail]').waitFor()
+    assert.match(await page.locator('[data-call-history-detail]').textContent(), /Vad betyder försynt\?/)
+    assert.match(await page.locator('[data-call-history-detail]').textContent(), /No answer was recorded/)
+    assert.equal(await page.locator('[data-call-back-top]').textContent(), '← Back to call history')
+    await shot('missed-call-history')
+    await page.locator('[data-call-back-top]').click()
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('cupitorStudyCallOpened', { detail: { id: 'done-147', open_id: 'cold-missed-tap' } })))
+    assert.equal(await page.locator('[data-call-view=history]').isVisible(), true)
+    await page.locator('[data-call-back-top]').click()
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('cupitorStudyCallOpened', { detail: { id: 'done-147', open_id: 'warm-missed-tap' } })))
+    assert.equal(await page.locator('[data-call-view=history-detail]').isVisible(), true)
+    assert.match(await page.locator('[data-call-history-detail]').textContent(), /1\. Stillsam/)
+    assert.equal(await page.evaluate(() => window.__callRequests.some(r => ['callNow', 'schedule', 'scheduleBatch'].includes(r.op))), false)
+    await page.locator('[data-call-back-top]').click()
+    await page.locator('[data-call-back-top]').click()
     await page.evaluate(() => document.querySelector('#studyCallsBtn').click())
     await page.locator('[data-call-pending] .study-call-history-row').waitFor()
     assert.equal(await page.locator('[data-call-view=editor]').isVisible(), false)
