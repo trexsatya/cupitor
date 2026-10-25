@@ -7,6 +7,8 @@ import {
   mediaStartFromUrl,
   buildManualMediaTiming,
   manualMediaClip,
+  practiceVideoTarget,
+  cuePracticeYoutubeVideo,
   virtualMembers,
   resolveVirtualItems,
   itemsForRecording,
@@ -277,5 +279,41 @@ describe("manual media clip times", () => {
     expect(() => buildManualMediaTiming({url, start:"5",duration:"0"})).toThrow(/greater/);
     expect(() => buildManualMediaTiming({url, start:"1:70"})).toThrow(/Times/);
     expect(() => buildManualMediaTiming({url:"", end:"10"})).toThrow(/media URL/);
+  });
+});
+
+describe("Practice YouTube cues for manual cards", () => {
+  const mediaUrl = "https://youtu.be/aBcDeFgHiJk";
+  test("restoring a manual card cues the saved start, not zero", () => {
+    const item = { manual:true, mediaKind:"youtube", mediaVideoId:"aBcDeFgHiJk",
+      mediaUrl, mediaStart:90, mediaEnd:115 };
+    const target = practiceVideoTarget(item);
+    expect(target).toEqual({videoId:"aBcDeFgHiJk",start:90,end:115});
+    const player = {cueVideoById: jest.fn()};
+    expect(cuePracticeYoutubeVideo(player, target)).toBe(true);
+    expect(player.cueVideoById).toHaveBeenCalledWith({
+      videoId:"aBcDeFgHiJk",startSeconds:90
+    });
+    // Restoring again must re-cue to the same start even if the playhead
+    // was previously elsewhere. In particular, it must not use 0.
+    cuePracticeYoutubeVideo(player, practiceVideoTarget(item));
+    expect(player.cueVideoById).toHaveBeenCalledTimes(2);
+    expect(player.cueVideoById).toHaveBeenLastCalledWith({
+      videoId:"aBcDeFgHiJk",startSeconds:90
+    });
+  });
+  test("older manual cards get the start from the YouTube URL", () => {
+    const target = practiceVideoTarget({manual:true, mediaKind:"youtube",
+      mediaVideoId:"aBcDeFgHiJk", mediaUrl:mediaUrl+"?t=1m30s"});
+    expect(target).toEqual({videoId:"aBcDeFgHiJk",start:90,end:null});
+  });
+  test("captured cards retain their own timestamps", () => {
+    expect(practiceVideoTarget({id:"aBcDeFgHiJk",timeStart:45,timeEnd:60}))
+      .toEqual({videoId:"aBcDeFgHiJk",start:45,end:60});
+  });
+  test("doesn't cue manual cards with non-YouTube media", () => {
+    expect(practiceVideoTarget({manual:true,mediaKind:"audio",
+      mediaUrl:"file:///audio.m4a"})).toBeNull();
+    expect(cuePracticeYoutubeVideo(null,{videoId:"x",start:10})).toBe(false);
   });
 });
