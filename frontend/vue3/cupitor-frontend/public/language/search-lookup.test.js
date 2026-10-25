@@ -66,7 +66,7 @@ describe('lookup search request isolation', () => {
     const fn = new Function('$searchText1', 'window', 'doSearch', '$',
       'searchVocabularyByPrefix', 'console', snippet + ';return searchTextChanged')(
       { val: () => 'gäll' }, win, doSearch,
-      () => ({ is: () => false }), () => {}, { warn: () => {} })
+      () => ({ is: () => false, val: () => 'gäll' }), () => {}, { warn: () => {} })
     await fn({ type: 'change' })
     expect(doSearch.mock.calls[0][0]).toBe('gäll')
     expect(win.unprocessedSearchText).toBeNull()
