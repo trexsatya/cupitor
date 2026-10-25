@@ -32,6 +32,20 @@
     <script src="/github-utils.js"></script>
     <script type="module" src="/data-structures.js"></script>
     <script type="module" src="/language/spanish.js"></script>
+    <script>
+      // Flutter can send a lookup from onPageFinished while language.js is
+      // still loading its imported modules. Remember the latest query until
+      // its full filterData listener is attached, instead of dropping it and
+      // accidentally showing the preceding search's results.
+      window.__cupitorLookupHandlerReady = false;
+      window.addEventListener('filterData', function (event) {
+        if (window.__cupitorLookupHandlerReady) return;
+        const text = event.detail && event.detail.text;
+        if (typeof text === 'string' && text.trim()) {
+          window.__cupitorPendingLookup = text;
+        }
+      });
+    </script>
     <script type="module" src="/language/language.js"></script>
     <link href="/language.css" rel="stylesheet"/>
     <link rel="stylesheet" href="/vendor/fontawesome-all.css">
