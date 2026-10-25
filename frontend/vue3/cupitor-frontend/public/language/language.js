@@ -9662,7 +9662,7 @@ function _stopManualAudioPreview() {
 // Toggle-style entry point used by every "play this audio mediaUrl" button
 // outside the manual-entry editor. Returns immediately; logs+gives up on
 // failure rather than alerting (these are casual previews, not saves).
-async function _startManualAudioPreview(url, $btn) {
+async function _startManualAudioPreview(url, $btn, clip = null) {
   if (!url) return
   // Same button clicked again → stop.
   const cur = window._manualAudioPreview
@@ -9683,6 +9683,18 @@ async function _startManualAudioPreview(url, $btn) {
   const settle = () => { if (window._manualAudioPreview === state) _stopManualAudioPreview() }
   a.addEventListener('ended', settle)
   a.addEventListener('error', settle)
+  // A native file:// recording is loaded as data: audio. Seek only after
+  // metadata is available, and stop at the optional bounded end timestamp.
+  const start = clip && Number.isFinite(clip.start) ? clip.start : 0
+  const end = clip && Number.isFinite(clip.end) ? clip.end : null
+  const seekStart = () => {
+    if (window._manualAudioPreview !== state) return
+    try { a.currentTime = start } catch (_) {}
+  }
+  if (start > 0) a.addEventListener('loadedmetadata', seekStart, { once: true })
+  if (end != null) a.addEventListener('timeupdate', () => {
+    if (window._manualAudioPreview === state && a.currentTime >= end) settle()
+  })
   try { await a.play() } catch (e) { console.warn('[manualAudio] play failed', e); settle() }
 }
 window._stopManualAudioPreview = _stopManualAudioPreview
