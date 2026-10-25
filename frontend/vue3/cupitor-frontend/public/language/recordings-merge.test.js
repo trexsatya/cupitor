@@ -3,6 +3,10 @@ import {
   isManualItem,
   newManualId,
   parseMediaUrl,
+  parseMediaTime,
+  mediaStartFromUrl,
+  buildManualMediaTiming,
+  manualMediaClip,
   virtualMembers,
   resolveVirtualItems,
   itemsForRecording,
@@ -237,5 +241,41 @@ describe("mergeRecordingCollections", () => {
     const a = { p: { items: {}, updatedAt: 1, createdAt: 1 } };
     expect(mergeRecordingCollections(a, null, fixedNow).p).toBe(a.p);
     expect(mergeRecordingCollections(null, a, fixedNow).p).toBe(a.p);
+  });
+});
+
+describe("manual media clip times", () => {
+  test("parses seconds, mm:ss and hh:mm:ss", () => {
+    expect(parseMediaTime("90.5")).toBe(90.5);
+    expect(parseMediaTime("1:30")).toBe(90);
+    expect(parseMediaTime("01:02:03")).toBe(3723);
+    expect(parseMediaTime("")).toBeNull();
+    expect(Number.isNaN(parseMediaTime("1:99"))).toBe(true);
+    expect(Number.isNaN(parseMediaTime("-3"))).toBe(true);
+  });
+  test("uses YouTube start from URL unless overridden", () => {
+    expect(mediaStartFromUrl("https://youtu.be/aBcDeFgHiJk?t=1m30s")).toBe(90);
+    expect(mediaStartFromUrl("https://youtu.be/aBcDeFgHiJk?start=120")).toBe(120);
+    expect(mediaStartFromUrl("https://youtu.be/aBcDeFgHiJk#t=1:20")).toBe(80);
+    expect(buildManualMediaTiming({url:"https://youtu.be/aBcDeFgHiJk?t=90",start:"",duration:"0:15"}))
+      .toMatchObject({mediaStart:90,mediaEnd:105,mediaTimeMode:"duration"});
+    expect(buildManualMediaTiming({url:"https://youtu.be/aBcDeFgHiJk?t=90",start:"10",end:"20"}))
+      .toMatchObject({mediaStart:10,mediaEnd:20});
+  });
+  test("accepts an unbounded clip for backward compatibility", () => {
+    expect(manualMediaClip({mediaUrl:"https://youtu.be/aBcDeFgHiJk"}))
+      .toEqual({start:0,end:null});
+    expect(manualMediaClip({mediaUrl:"https://youtu.be/aBcDeFgHiJk?t=30"}))
+      .toEqual({start:30,end:null});
+    expect(manualMediaClip({mediaUrl:"file:///x.wav", mediaStart:5,mediaEnd:11}))
+      .toEqual({start:5,end:11});
+  });
+  test("rejects mutually exclusive, inverted, missing and invalid times", () => {
+    const url="https://youtu.be/aBcDeFgHiJk";
+    expect(() => buildManualMediaTiming({url, start:"5",end:"10",duration:"5"})).toThrow(/either/);
+    expect(() => buildManualMediaTiming({url, start:"5",end:"4"})).toThrow(/later/);
+    expect(() => buildManualMediaTiming({url, start:"5",duration:"0"})).toThrow(/greater/);
+    expect(() => buildManualMediaTiming({url, start:"1:70"})).toThrow(/Times/);
+    expect(() => buildManualMediaTiming({url:"", end:"10"})).toThrow(/media URL/);
   });
 });
