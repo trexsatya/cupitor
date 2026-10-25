@@ -2,7 +2,7 @@ name: Live Spotify production playback
 
 on:
   pull_request:
-    branches: [music-study-app]
+    branches: [master]
     paths:
       - 'frontend/vue3/cupitor-frontend/public/language/**'
       - 'frontend/vue3/cupitor-frontend/public/language.html'
