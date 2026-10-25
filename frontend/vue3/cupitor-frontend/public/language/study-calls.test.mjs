@@ -332,7 +332,7 @@ test('a cold notification tap opens the exact missed history item and Back retur
   ] }
   win.__cupitorStudyCallOpened = { id: 'missed', open_id: 'cold-tap' }
   const installed = installStudyCalls(win, $)
-  await new Promise(resolve => setImmediate(resolve))
+  await new Promise(resolve => $(resolve))
   assert.equal($('[data-call-view=history-detail]').css('display'), 'block')
   assert.match($('[data-call-history-detail]').text(), /Vad betyder försynt\?/)
   assert.match($('[data-call-history-detail]').text(), /1\. Stillsam/)
