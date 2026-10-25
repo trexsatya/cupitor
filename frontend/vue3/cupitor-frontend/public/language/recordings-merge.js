@@ -118,6 +118,34 @@ export function manualMediaClip(item) {
   return { start, end: Number.isFinite(e) && e > start ? e : null }
 }
 
+// Resolve a Practice card's YouTube cue in one place, including manual
+// cards whose clip time lives in mediaStart/mediaEnd rather than timeStart.
+// Used on initial render, restore and explicit playback so they cannot
+// disagree about the media id or start position.
+export function practiceVideoTarget(item) {
+  if (!item) return null
+  if (item.manual) {
+    if (item.mediaKind !== 'youtube' || !item.mediaVideoId) return null
+    const clip = manualMediaClip(item)
+    return { videoId: item.mediaVideoId, start: clip ? clip.start : 0,
+      end: clip ? clip.end : null }
+  }
+  if (!item.id) return null
+  const start = Number(item.timeStart)
+  const end = Number(item.timeEnd)
+  return { videoId: item.id, start: Number.isFinite(start) && start >= 0 ? start : 0,
+    end: Number.isFinite(end) && end > start ? end : null }
+}
+
+// Unlike rewriting an iframe's src (which reloads at t=0), the YouTube
+// IFrame API accepts startSeconds for a paused cue. Also works when
+// the same video is already loaded: restore should seek to the card start.
+export function cuePracticeYoutubeVideo(player, target) {
+  if (!player || typeof player.cueVideoById !== 'function' || !target) return false
+  player.cueVideoById({ videoId: target.videoId, startSeconds: target.start })
+  return true
+}
+
 // Members of a virtual playlist, filtered to existing non-virtual entries
 // (so a deleted / renamed member silently drops out — and nested virtual
 // playlists are forbidden by collapsing them away).
