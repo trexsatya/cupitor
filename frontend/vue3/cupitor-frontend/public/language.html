@@ -33,6 +33,19 @@
     <script src="/github-utils.js"></script>
     <script type="module" src="/data-structures.js"></script>
     <script type="module" src="/language/spanish.js"></script>
+    <script>
+      // The native Flutter lookup can arrive while deferred JavaScript imports
+      // and document-ready handlers are still initializing. Hold the newest
+      // requested term instead of leaving stale results visible.
+      window.__cupitorLookupHandlerReady = false;
+      window.addEventListener('filterData', function (event) {
+        if (window.__cupitorLookupHandlerReady) return;
+        const term = event.detail && event.detail.text;
+        if (typeof term === 'string' && term.trim()) {
+          window.__cupitorPendingLookup = term;
+        }
+      });
+    </script>
     <script type="module" src="/language/language.js"></script>
     <link href="/language.css" rel="stylesheet"/>
     <link rel="stylesheet" href="/vendor/fontawesome-all.css">
