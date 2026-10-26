@@ -20963,9 +20963,16 @@ function restorePracticeMode() {
   const it = (window._practiceCards || [])[window._practiceIdx]
   if (!it) return
   if (spotifyClips(it).length) { spotifyPlayer.show({ focus: false }); return }
-  // Manual cards have no clip — just re-cue them (parked), as before.
+  // A manual card's linked YouTube video must be re-cued at its own
+  // timestamp when Practice is restored. _cueManualCardVideo uses the
+  // general media loader (which may reload/autoplay from 0); Practice has
+  // a guarded, paused cueVideoById path designed for this exact transition.
   if (_isManualItem(it)) {
-    if (_cardHasVideoLink(it)) { try { _cueManualCardVideo(it) } catch (_) {} }
+    const video = _manualCardVideo(it)
+    if (video) {
+      const request = _newPracticeVideoRequest({ mute: true })
+      _cuePracticeVideo(video, request).catch(e => console.warn('practice: restore manual video failed', e))
+    }
     return
   }
 }

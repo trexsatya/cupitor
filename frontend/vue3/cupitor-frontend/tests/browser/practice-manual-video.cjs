@@ -85,6 +85,28 @@ async function checkManualVideo(browser, mobile) {
       await page.waitForFunction(start => window.__manualYT.state === 1 &&
         Math.abs(window.__manualYT.time - start) < 0.5 && !window._practicePlayPending, starts[i])
     }
+    // Regression: restoring a minimized manual card must prepare its saved
+    // YouTube timestamp without going through the generic 0-second media
+    // loader or starting playback. A parked iframe can report 0 even when
+    // the restored card is linked to a later moment.
+    await page.evaluate(() => {
+      window.minimizePracticeMode()
+      window.__manualYT.events = []
+      window.__manualYT.time = 0
+      window.__manualYT.start = 0
+      window.__manualYT.state = 2
+      window.restorePracticeMode()
+    })
+    await page.waitForFunction(expected => window.__manualYT.state === 5
+      && window.__manualYT.start === expected
+      && window.__manualYT.events.some(e => e.action === 'cue'), starts.at(-1))
+    assert.equal(await page.evaluate(() => window.__manualYT.events
+      .filter(e => ['load', 'play', 'seek'].includes(e.action)).length), 0,
+      'restore only cues at the card timestamp, it does not reload or autoplay')
+    await click(page.locator('#fixtureEmbeddedPlay'))
+    assert.equal(await page.evaluate(() => window.__manualYT.time), starts.at(-1),
+      'the iframe Play button resumes from the timestamp after restore')
+
     // If the iframe ignores seeking back from zero, reload with startSeconds.
     // Sound is restored only once playback has been verified at that time.
     await page.evaluate(() => { window.__manualYT.time = 0; window.__manualYT.ignoreSeeks = true; window.__manualYT.events = [] })
