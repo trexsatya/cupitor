@@ -15,6 +15,7 @@ import { createAppLifecycleClock } from './app-lifecycle.js';
 import { installStudyDivider } from './study-divider.js';
 import { installStudyChrome } from './study-chrome.js';
 import { keyboardShortcut, KEYBOARD_SHORTCUTS, studyShortcutView } from './keyboard-shortcuts.js';
+import { isPracticeTouchGesture, isPracticeTouchDoubleTap } from './practice-gestures.js';
 import { parsePracticeSpeeds, practiceSpeeds, nextPracticeSpeed, supportedPracticeSpeed } from './practice-speed.js';
 import { loadRecordingsFiles, syncRecordingsFiles } from './recordings-store.js';
 import { listRecordingsParts } from './recordings-gc.js';
@@ -20686,8 +20687,11 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-next', () => practiceNav(1))
     $p.on('click', '.practice-reveal', revealPracticeCard)
     $p.on('click', '.practice-unflip', revealPracticeCard)   // toggles flip back
-    $p.on('dblclick', '.practice-front-face', revealPracticeCard)
-    $p.on('dblclick', '.practice-back-face', revealPracticeCard)
+    // Mouse double-click must select a word, not replace the card face.
+    // Touch double-tap remains a convenience on supported devices.
+    $p.on('dblclick', '.practice-front-face, .practice-back-face', function (e) {
+      if (isPracticeTouchDoubleTap(e.originalEvent, matchMedia('(pointer: coarse)').matches)) revealPracticeCard()
+    })
     $p.on('click', '.practice-dir', togglePracticeDir)
     $p.on('click', '.practice-play', playPracticeClip)
     $p.on('click', '.practice-speed', cyclePracticePlaybackRate)
@@ -20701,8 +20705,8 @@ function openPracticeMode(opts) {
     $p.on('click', '.practice-line-edit', _practiceBeginEdit)
 
     // Horizontal swipe / drag on the card: left → next, right → prev. Uses
-    // Pointer Events so it covers touch, mouse and pen. The card follows the
-    // pointer for feedback, then either navigates (past threshold) or snaps
+    // Touch Pointer Events only: mouse dragging must select words instead
+    // of navigating. The card follows a touch swipe and either navigates or snaps
     // back. Ignored when starting on an interactive element (edit box, button,
     // textarea) so those keep working. Direction is locked in on first move so
     // a vertical scroll isn't hijacked.
@@ -20716,7 +20720,7 @@ function openPracticeMode(opts) {
         if (animate) setTimeout(() => { card.style.transition = '' }, 220)
       }
       card.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'mouse' && e.button !== 0) return
+        if (!isPracticeTouchGesture(e)) return
         if ($(e.target).closest('.practice-edit-box, button, textarea, input, a').length) { dragging = false; return }
         sx = e.clientX; sy = e.clientY
         dragging = true; decided = false; horizontal = false
@@ -22486,8 +22490,15 @@ function _togglePracticePlayback() {
 
 $(document).on('keydown', function (e) {
   const target = e.target
+  const currentPracticeCard = window._practiceActive && !window._practiceMinimized
+    ? (window._practiceCards || [])[window._practiceIdx] : null
+  const storedPracticeCard = currentPracticeCard && _isManualItem(currentPracticeCard)
+    ? _storedManualCard(currentPracticeCard) : null
   const action = keyboardShortcut(e.originalEvent || e, {
     practice: !!window._practiceActive && !window._practiceMinimized,
+    playerVisible: !!window._playingRecording && !window._recPlayMinimized &&
+      !(window._practiceActive && !window._practiceMinimized),
+    editAvailable: !!(storedPracticeCard && !_isReadOnlyPlaylist(storedPracticeCard.name)),
     studyActive: !!(window._practiceActive || window._playingRecording),
     studyVisible: !!((window._practiceActive && !window._practiceMinimized) ||
       (window._playingRecording && !window._recPlayMinimized)),
@@ -22503,6 +22514,13 @@ $(document).on('keydown', function (e) {
     help: openKeyboardShortcuts,
     'add-vocabulary': openAddToVocabDialog,
     playlists: openRecordingReviewDialog,
+    'edit-practice-card': _editCurrentPracticeCard,
+    'practice-details': _togglePracticeInfoPanel,
+    'switch-study-view': () => {
+      if (window._practiceActive && !window._practiceMinimized) switchPracticeToPlayer()
+      else if (window._practiceActive && window._practiceMinimized) restorePracticeMode()
+      else switchPlayerToPractice()
+    },
     'study-toggle': () => {
       const view = studyShortcutView({
         practiceActive: !!window._practiceActive,

@@ -126,6 +126,42 @@ async function checkViewSwitching(browser) {
       await page.evaluate(() => { window.__underlyingClicks = 0 })
       await switchTo('Practice')
       await practiceAt(2)
+      // The keyboard uses the existing flip, details and view-switch controls.
+      await page.evaluate(() => document.activeElement?.blur())
+      await page.keyboard.press('f')
+      assert.equal(await page.evaluate(() => window._practiceFlipped), true, 'F flips the card')
+      await page.keyboard.press('r')
+      assert.equal(await page.evaluate(() => window._practiceFlipped), false, 'R flips it back')
+      await page.keyboard.press('i')
+      assert.equal(await page.locator('#practiceMode .practice-info-panel').isVisible(), true, 'I shows card details')
+      await page.keyboard.press('i')
+      assert.equal(await page.locator('#practiceMode .practice-info-panel').isVisible(), false, 'I hides card details')
+      await page.keyboard.press('e')
+      assert.equal(await page.locator('#manualEntryEditor:visible').count(), 0,
+        'E ignores captured video clips rather than opening the manual-card editor')
+      // Mouse double-click must not flip the card on desktop; touch devices
+      // still intentionally support double-tap reveal.
+      if (!mobile) {
+        await page.locator('#practiceMode .practice-front-face').dblclick({ force: true })
+        assert.equal(await page.evaluate(() => window._practiceFlipped), false,
+          'desktop double-click should select text instead of flipping')
+      }
+      const cardRect = await page.locator('#practiceMode .practice-card').boundingBox()
+      if (cardRect) {
+        const x = cardRect.x + cardRect.width / 2
+        const y = cardRect.y + Math.min(cardRect.height / 2, 70)
+        await page.mouse.move(x + 100, y)
+        await page.mouse.down()
+        await page.mouse.move(x - 100, y, { steps: 5 })
+        await page.mouse.up()
+        assert.equal(await page.evaluate(() => window._practiceIdx), 2,
+          'mouse dragging across the card must not swipe to another item')
+      }
+      await page.keyboard.press('p')
+      await playerAt(2)
+      await page.keyboard.press('p')
+      await practiceAt(2)
+      assert.deepEqual(await order(), expected, 'P keeps playlist order and the current item')
       assert.equal(await page.getByRole('button', { name: 'Replay current item', exact: true }).isVisible(), false,
         'Player Replay is hidden in Practice; its source-reveal arrow is a different control')
       assert.deepEqual(await order(), expected, 'Player → Practice does not reshuffle or rotate the queue')
@@ -212,6 +248,37 @@ async function checkViewSwitching(browser) {
       await switchTo('Practice')
       await practiceAt(1)
       assert.equal(await page.evaluate(() => window._recPlayManualAudio.paused), true)
+      // E must use the exact edit action of the current editable manual card.
+      // Fixture deck entries need their playlist backlink for that action.
+      await page.evaluate(() => {
+        const it = window._practiceCards[window._practiceIdx]
+        const name = '__keyboard_edit_fixture__'
+        it._recName = name
+        it._st = 'sample'
+        it._w = 'sample'
+        it._idx = 0
+        window._recordings[name] = { items: { sample: { sample: [{ ...it }] } } }
+      })
+      await page.evaluate(() => document.activeElement?.blur())
+      // On desktop, double-clicking the displayed word should select it for copying.
+      if (!mobile) {
+        const manualText = page.locator('#practiceMode .practice-front-face .practice-manual-text').first()
+        await manualText.dblclick()
+        const selected = await page.evaluate(() => String(window.getSelection() || '').trim())
+        assert(selected.length > 0, 'desktop double-click selects manual-card text')
+        assert.equal(await page.evaluate(() => window._practiceFlipped), false,
+          'selecting a word must not flip the Practice card')
+        await page.evaluate(() => window.getSelection()?.removeAllRanges())
+      }
+      await page.keyboard.press('e')
+      await page.locator('#manualEntryEditor:visible').waitFor({ state: 'visible' })
+      assert.equal(await page.evaluate(() => window._practiceIdx), 1,
+        'E opens editing without changing the current Practice item')
+      // Editor must be modal; unrelated keys must not navigate or flip behind it.
+      await page.keyboard.press('f')
+      assert.equal(await page.evaluate(() => window._practiceFlipped), false)
+      await page.evaluate(() => $('#manualEntryEditor').dialog('close'))
+      await page.waitForFunction(() => !$('#manualEntryEditor').is(':visible'))
       await page.setViewportSize({ width: 320, height: 900 })
       const reachable = await page.getByRole('button', { name: 'Switch to Player', exact: true }).evaluate(el => {
         const r = el.getBoundingClientRect()
