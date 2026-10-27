@@ -150,7 +150,13 @@ async function checkPracticeControls(browser) {
       assert.equal(await page.evaluate(() => window._practiceIdx), 0)
       await page.keyboard.press('?')
       await page.locator('#keyboardShortcutsDialog').waitFor({ state: 'visible' })
-      assert.equal(await page.locator('#keyboardShortcutsDialog tr').count(), 10)
+      // The dialog is generated from the same list as the keyboard matcher.
+      // New shortcuts must not break the browser test's stale row count.
+      const shortcutCount = await page.evaluate(async () => {
+        const { KEYBOARD_SHORTCUTS } = await import('/language/keyboard-shortcuts.js')
+        return KEYBOARD_SHORTCUTS.length
+      })
+      assert.equal(await page.locator('#keyboardShortcutsDialog tr').count(), shortcutCount)
       await page.keyboard.press('ArrowRight')
       assert.equal(await page.evaluate(() => window._practiceIdx), 0)
       await page.keyboard.press('/')
