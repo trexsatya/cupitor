@@ -19,6 +19,12 @@ describe('cardHtml', () => {
     expect(cardHtml('a < b\nc & d')).toEqual({ html: 'a &lt; b\nc &amp; d', isHtml: false })
   })
 
+  test('strikethrough from a manual card round-trips as HTML', () => {
+    expect(cardHtml('<p>Det är <s>fel</s> rätt</p>').html)
+      .toBe('<p>Det är <s>fel</s> rätt</p>')
+    expect(cardPlainText('<p>Det är <s>fel</s> rätt</p>')).toBe('Det är fel rätt')
+  })
+
   test('inline formatting is kept, line breaks become <br>', () => {
     expect(cardHtml('Ett <b>stort</b>\n<i>hus</i>').html)
       .toBe('Ett <b>stort</b><br><i>hus</i>')
