@@ -107,6 +107,9 @@ export function installRichCardFormatting(editor) {
 
   const toolbar = editor.ui.view.toolbar.element;
   const items = toolbar.querySelector('.ck-toolbar__items') || toolbar;
+  // The prebuilt toolbar has no registered overflow grouping for buttons
+  // injected after creation. Wrap them instead of clipping colors on phones.
+  items.style.flexWrap = 'wrap';
 
   for (const [kind, spec] of Object.entries(COLORS)) {
     const wrapper = document.createElement('span');
