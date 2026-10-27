@@ -16849,8 +16849,14 @@ function openRecordingReviewDialog() {
   }
 
   // Inspect the entire playlist, including entries beyond the current page.
-  const hasCapturedItems = Object.values(items).some(words => Object.values(words || {}).some(arr =>
-    Array.isArray(arr) && arr.some(it => it && (!_isManualItem(it) || spotifyClips(it).length))))
+  // A manual card with a face recording (or legacy audio in mediaUrl) can
+  // already play in the deck's native audio element. Enable Player for it,
+  // while keeping text-only / reference-link-only manual playlists in Practice.
+  const hasPlayerItems = Object.values(items).some(words => Object.values(words || {}).some(arr =>
+    Array.isArray(arr) && arr.some(it => it && (
+      !_isManualItem(it) || spotifyClips(it).length > 0 ||
+      _cardHasAudio(it) || _isAudioMediaUrl(it.mediaUrl)
+    ))))
   const opts = {
     title: 'Recorded Searches',
     width: Math.min(720, $(window).width() - 40),
@@ -16873,7 +16879,7 @@ function openRecordingReviewDialog() {
       // Both action buttons prompt to resume-or-restart when there's a
       // recoverable last-played item on THIS playlist (see
       // _maybeResumeStartItem). Cancel in the confirm = start fresh.
-      'Play All': { text: 'Play All', disabled: !hasCapturedItems, click: function () {
+      'Play All': { text: 'Play All', disabled: !hasPlayerItems, click: function () {
         const $w = $(this).closest('.ui-dialog')
         try { $(this).dialog('close') } catch (_) {}
         $w.hide()
