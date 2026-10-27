@@ -77,6 +77,7 @@ jobs:
           node tests/browser/notification-practice.cjs
           node tests/browser/study-calls.cjs
           node tests/browser/language-dialogs.cjs
+          node tests/browser/local-file-picker.cjs
           node tests/browser/search-result-counts.cjs
           node tests/browser/full-srt-dialog.cjs
           node tests/browser/results-scrolling.cjs
@@ -121,6 +122,7 @@ jobs:
           node tests/browser/practice-panels.cjs
           node tests/browser/study-controls.cjs
           node tests/browser/study-chrome.cjs
+          node tests/browser/local-file-picker.cjs
           node tests/browser/unavailable-videos.cjs
           node tests/browser/player-seek.cjs
           (cd dist && node ../tests/browser/dialog-scrolling.mjs)
