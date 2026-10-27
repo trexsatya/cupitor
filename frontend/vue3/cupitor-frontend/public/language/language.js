@@ -5494,7 +5494,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   // missing-subtitle alert for that deliberate choice.
   if (sv || source !== 'local') loadSubtitlesForLink(sv, en);
 
-  $('#currentMedia').text(`${link}, ${source}`)
+  $('#currentMedia').text(`${source === 'local' && mediaFile ? mediaFile.name : link}, ${source}`)
   $('#toggleSearchBtn').show()
 }
 
