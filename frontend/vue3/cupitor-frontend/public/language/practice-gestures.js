@@ -8,5 +8,5 @@ export function isPracticeTouchDoubleTap(event, coarsePointer = false) {
   const pointerType = event?.pointerType || ''
   if (pointerType) return pointerType === 'touch'
   // Some mobile engines dispatch a MouseEvent for synthesized double taps.
-  return !!coarsePointer && !!event?.sourceCapabilities?.firesTouchEvents
+  return !!coarsePointer && event?.sourceCapabilities?.firesTouchEvents !== false
 }
