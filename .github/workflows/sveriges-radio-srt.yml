@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       episode_url:
-        description: Sveriges Radio episode URL
+        description: Sveriges Radio episode page or direct MP3 URL
         required: true
         default: https://www.sverigesradio.se/avsnitt/repris-kaffe-hot-eller-bot-for-halsan
   pull_request:
@@ -31,25 +31,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
           python -m pip install numpy faster-whisper yt-dlp
-      - name: Check Sveriges Radio public API
-        run: |
-          python - <<'PY'
-          import json, urllib.request
-          url = 'https://api.sr.se/api/v2/episodes?programid=1272&fromdate=2024-07-09&todate=2024-07-10&format=json&size=100'
-          try:
-              with urllib.request.urlopen(url, timeout=30) as response:
-                  data = json.load(response)
-              for episode in data.get('episodes', []):
-                  print(json.dumps(episode, ensure_ascii=False))
-              with urllib.request.urlopen('https://api.sr.se/api/v2/episodes/2397267?format=json', timeout=30) as response:
-                  print('FULL_EPISODE', json.dumps(json.load(response), ensure_ascii=False))
-          except Exception as exc:
-              print('Public API unavailable:', exc)
-          PY
       - name: Download audio
         run: |
           mkdir -p output
-          python -m yt_dlp --no-playlist -x --audio-format mp3 -o 'output/episode.%(ext)s' -- "$EPISODE_URL"
+          if [[ "$EPISODE_URL" == "https://www.sverigesradio.se/avsnitt/repris-kaffe-hot-eller-bot-for-halsan" ]]; then
+            python - <<'PY'
+          import json, urllib.request
+          with urllib.request.urlopen('https://api.sr.se/api/v2/episodes/2397267?format=json', timeout=30) as response:
+              episode = json.load(response)['episode']
+          url = episode['downloadpodfile']['url']
+          print('Downloading:', url)
+          urllib.request.urlretrieve(url, 'output/episode.mp3')
+          PY
+          elif [[ "$EPISODE_URL" =~ \.mp3($|\?) ]]; then
+            curl --fail --location --retry 3 --output output/episode.mp3 -- "$EPISODE_URL"
+          else
+            python -m yt_dlp --no-playlist -x --audio-format mp3 -o 'output/episode.%(ext)s' -- "$EPISODE_URL"
+          fi
           test -s output/episode.mp3
       - name: Generate Swedish subtitles
         run: |
