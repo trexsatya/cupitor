@@ -2,7 +2,7 @@ import { keyboardShortcut, studyShortcutView, KEYBOARD_SHORTCUTS } from './keybo
 
 test.each([
   ['ArrowLeft', 'previous'], ['K', 'previous'], ['ArrowRight', 'next'], ['j', 'next'],
-  [' ', 'play'], ['r', 'reveal'], ['d', 'direction'], ['s', 'speed'], ['Escape', 'close'], ['?', 'help']
+  [' ', 'play'], ['r', 'reveal'], ['f', 'reveal'], ['d', 'direction'], ['s', 'speed'], ['Escape', 'close'], ['?', 'help']
 ])('Practice key %s performs %s', (key, action) => {
   expect(keyboardShortcut({ key }, { practice: true })).toBe(action)
 })
@@ -131,4 +131,13 @@ test('E/I/P cannot steal focus from text editing, dialogs, system keys or hold r
       expect(keyboardShortcut({ key, [mod]: true }, opts)).toBeNull()
     }
   }
+})
+
+test('F is an alias for R; flip keys do not fire during text selection or editing', () => {
+  expect(keyboardShortcut({ key: 'F' }, { practice: true })).toBe('reveal')
+  expect(keyboardShortcut({ key: 'r' }, { practice: true })).toBe('reveal')
+  expect(keyboardShortcut({ key: 'f' }, { practice: true, typing: true })).toBeNull()
+  expect(keyboardShortcut({ key: 'f' }, { practice: true, dialogOpen: true })).toBeNull()
+  expect(keyboardShortcut({ key: 'f', repeat: true }, { practice: true })).toBeNull()
+  expect(KEYBOARD_SHORTCUTS.find(x => x.keys.includes('F')).label).toMatch(/flip/i)
 })
