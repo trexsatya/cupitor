@@ -139,10 +139,13 @@ async function checkViewSwitching(browser) {
       await page.keyboard.press('e')
       assert.equal(await page.locator('#manualEntryEditor:visible').count(), 0,
         'E ignores captured video clips rather than opening the manual-card editor')
-      // A mouse double-click and swipe cannot flip/navigate the desktop card.
-      await page.locator('#practiceMode .practice-front-face').dblclick({ force: true })
-      assert.equal(await page.evaluate(() => window._practiceFlipped), false,
-        'double-click should select text instead of flipping')
+      // Mouse double-click must not flip the card on desktop; touch devices
+      // still intentionally support double-tap reveal.
+      if (!mobile) {
+        await page.locator('#practiceMode .practice-front-face').dblclick({ force: true })
+        assert.equal(await page.evaluate(() => window._practiceFlipped), false,
+          'desktop double-click should select text instead of flipping')
+      }
       const cardRect = await page.locator('#practiceMode .practice-card').boundingBox()
       if (cardRect) {
         const x = cardRect.x + cardRect.width / 2
