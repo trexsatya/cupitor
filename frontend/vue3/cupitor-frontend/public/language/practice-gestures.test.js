@@ -12,6 +12,7 @@ test('double click selects text on desktop; touch double-tap can reveal', () => 
   expect(isPracticeTouchDoubleTap({ pointerType: 'pen' }, true)).toBe(false)
   expect(isPracticeTouchDoubleTap({ pointerType: 'touch' }, false)).toBe(true)
   expect(isPracticeTouchDoubleTap({ pointerType: '' }, false)).toBe(false)
+  expect(isPracticeTouchDoubleTap({ pointerType: '' }, true)).toBe(true)
   expect(isPracticeTouchDoubleTap({ sourceCapabilities: { firesTouchEvents: true } }, true)).toBe(true)
   expect(isPracticeTouchDoubleTap({ sourceCapabilities: { firesTouchEvents: false } }, true)).toBe(false)
 })
