@@ -129,7 +129,8 @@ export function installRichCardFormatting(editor) {
     };
     input.addEventListener('pointerdown', remember);
     input.addEventListener('focus', () => { if (!saved) remember(); });
-    input.addEventListener('input', () => applyRichCardColor(editor, kind, input.value, saved));
+    // Apply after the native picker closes: refocusing the editor on every
+    // intermediate 'input' event can dismiss the OS color chooser.
     input.addEventListener('change', () => {
       applyRichCardColor(editor, kind, input.value, saved);
       saved = null;
