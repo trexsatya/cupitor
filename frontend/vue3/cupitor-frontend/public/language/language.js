@@ -8,6 +8,7 @@ import { createBundleLoader, createSubtitleBundleAdapter } from './subtitle-bund
 import { recordingsHaveChanges } from './recordings-sync-state.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
+import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
 import { createPracticeVideoCues } from './practice-video.js';
 import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video.js';
 import { createAppLifecycleClock } from './app-lifecycle.js';
@@ -14814,6 +14815,7 @@ async function _openRichCardEditor($box, label) {
         'blockQuote', 'insertTable', '|', 'undo', 'redo'],
       image: { toolbar: ['imageTextAlternative'] },
     })
+    installRichCardStrikethrough(editor)
     // CKEditor puts a new picture in place of a selected one, and a picture is
     // left selected once it is in — so a second one would silently replace
     // the first. A new picture goes after the selected one instead.

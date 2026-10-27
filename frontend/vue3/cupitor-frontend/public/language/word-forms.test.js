@@ -55,3 +55,14 @@ test('isolates languages and preserves existing English/Spanish stemming', () =>
   expect(createWordFormMatcher('en').related('hagel', 'hagla')).toBe(false)
   expect(createWordFormMatcher('de').related('översittare', 'översitteri')).toBe(false)
 })
+
+test('recognizes -dd/-dda Swedish participles without changing other languages', () => {
+  expect(vocabularyForms('beströdda', 'sv')).toContain('beströ')
+  expect(vocabularyForms('beströdd', 'sv')).toContain('beströ')
+  const match = createWordFormMatcher('sv')
+  expect(match.related('beströ', 'beströdda')).toBe(true)
+  expect(match.related('beströ', 'beströdd')).toBe(true)
+  expect(match.related('beströ', 'bestämda')).toBe(false)
+  expect(match.related('beströ', 'ström')).toBe(false)
+  expect(vocabularyForms('beströdda', 'en')).not.toContain('beströ')
+})
