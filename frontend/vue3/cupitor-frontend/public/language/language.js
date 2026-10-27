@@ -14,7 +14,7 @@ import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } 
 import { createAppLifecycleClock } from './app-lifecycle.js';
 import { installStudyDivider } from './study-divider.js';
 import { installStudyChrome } from './study-chrome.js';
-import { keyboardShortcut, KEYBOARD_SHORTCUTS } from './keyboard-shortcuts.js';
+import { keyboardShortcut, KEYBOARD_SHORTCUTS, studyShortcutView } from './keyboard-shortcuts.js';
 import { parsePracticeSpeeds, practiceSpeeds, nextPracticeSpeed, supportedPracticeSpeed } from './practice-speed.js';
 import { loadRecordingsFiles, syncRecordingsFiles } from './recordings-store.js';
 import { listRecordingsParts } from './recordings-gc.js';
@@ -20313,6 +20313,7 @@ function minimizePlayingRecording() {
   if (!window._playingRecording) return
   hideMediaRelatedContainer()
   window._recPlayMinimized = true
+  window._lastMinimizedStudyView = 'player'
   // Pause playback so audio/video doesn't keep playing while the user is
   // doing something else on the main page.
   if (!window._recPlayPaused) togglePlayingRecordingPause()
@@ -20935,6 +20936,7 @@ function minimizePracticeMode() {
   try { _stopManualAudioPreview() } catch (_) {}
   if (!window._practiceActive) return
   window._practiceMinimized = true
+  window._lastMinimizedStudyView = 'practice'
   hideMediaRelatedContainer()
   $('#practiceMode').addClass('minimized')
   $('body').removeClass('practice-mode')
@@ -22486,9 +22488,12 @@ $(document).on('keydown', function (e) {
   const target = e.target
   const action = keyboardShortcut(e.originalEvent || e, {
     practice: !!window._practiceActive && !window._practiceMinimized,
+    studyActive: !!(window._practiceActive || window._playingRecording),
+    studyVisible: !!((window._practiceActive && !window._practiceMinimized) ||
+      (window._playingRecording && !window._recPlayMinimized)),
     typing: !!(target && (target.isContentEditable || $(target).closest('input,textarea,select,audio,video,[role="textbox"],[role="combobox"],[role="slider"],[role="separator"],.ck').length)),
     searchFocused: target === $('#searchText')[0],
-    dialogOpen: $('.ui-dialog:visible').length > 0,
+    dialogOpen: $('.ui-dialog:visible').not('.behind-study-view').length > 0,
     buttonFocused: !!(target && $(target).closest('button,a,[role="button"]').length),
     searchAvailable: $('#searchText').is(':visible')
   })
@@ -22496,6 +22501,21 @@ $(document).on('keydown', function (e) {
   e.preventDefault()
   const actions = {
     help: openKeyboardShortcuts,
+    'add-vocabulary': openAddToVocabDialog,
+    playlists: openRecordingReviewDialog,
+    'study-toggle': () => {
+      const view = studyShortcutView({
+        practiceActive: !!window._practiceActive,
+        practiceMinimized: !!window._practiceMinimized,
+        playerActive: !!window._playingRecording,
+        playerMinimized: !!window._recPlayMinimized,
+        lastMinimized: window._lastMinimizedStudyView,
+      })
+      if (view === 'minimize-practice') minimizePracticeMode()
+      else if (view === 'restore-practice') restorePracticeMode()
+      else if (view === 'minimize-player') minimizePlayingRecording()
+      else if (view === 'restore-player') restorePlayingRecording()
+    },
     search: () => { const input = $('#searchText')[0]; input.focus(); input.select() },
     'practice-search': () => $('#practiceMode .practice-search').trigger('click'),
     previous: () => practiceNav(-1), next: () => practiceNav(1),

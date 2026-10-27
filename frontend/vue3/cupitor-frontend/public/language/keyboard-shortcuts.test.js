@@ -1,4 +1,4 @@
-import { keyboardShortcut } from './keyboard-shortcuts.js'
+import { keyboardShortcut, studyShortcutView, KEYBOARD_SHORTCUTS } from './keyboard-shortcuts.js'
 
 test.each([
   ['ArrowLeft', 'previous'], ['K', 'previous'], ['ArrowRight', 'next'], ['j', 'next'],
@@ -38,4 +38,66 @@ test('focused buttons keep native Space behavior; toggles do not repeat when hel
   expect(keyboardShortcut({ key: '/', repeat: true })).toBe('search')
   expect(keyboardShortcut({ key: '/', repeat: true }, { practice: true })).toBeNull()
   expect(keyboardShortcut({ key: 'ArrowRight', repeat: true }, { practice: true })).toBe('next')
+})
+
+test('main-page shortcuts open the existing vocabulary and playlist dialogs', () => {
+  expect(keyboardShortcut({ key: 'v' })).toBe('add-vocabulary')
+  expect(keyboardShortcut({ key: 'L' })).toBe('playlists')
+  expect(keyboardShortcut({ key: 'v' }, { practice: true, studyVisible: true })).toBeNull()
+  expect(keyboardShortcut({ key: 'l' }, { studyActive: true, studyVisible: true })).toBeNull()
+  // The main page is usable again when a study view is parked.
+  expect(keyboardShortcut({ key: 'l' }, { studyActive: true, studyVisible: false })).toBe('playlists')
+})
+
+test('M toggles any existing Player or Practice view, never creates one', () => {
+  expect(keyboardShortcut({ key: 'm' })).toBeNull()
+  expect(keyboardShortcut({ key: 'm' }, { practice: true, studyActive: true, studyVisible: true })).toBe('study-toggle')
+  expect(keyboardShortcut({ key: 'M' }, { studyActive: true, studyVisible: false })).toBe('study-toggle')
+})
+
+test('Shift + / displays help, including on key layouts reporting slash', () => {
+  expect(keyboardShortcut({ key: '?', shiftKey: true })).toBe('help')
+  expect(keyboardShortcut({ key: '/', shiftKey: true })).toBe('help')
+  expect(keyboardShortcut({ key: '/', shiftKey: false })).toBe('search')
+  expect(KEYBOARD_SHORTCUTS.filter(x => x.scope === 'General').map(x => x.keys[0])).toEqual(
+    expect.arrayContaining(['Shift + /', 'V', 'L', 'M'])
+  )
+})
+
+test('new shortcuts respect typing, open dialogs and OS shortcuts', () => {
+  for (const key of ['v', 'l', 'm', '?']) {
+    expect(keyboardShortcut({ key }, { typing: true, studyActive: true })).toBeNull()
+    expect(keyboardShortcut({ key }, { dialogOpen: true, studyActive: true })).toBeNull()
+    expect(keyboardShortcut({ key, ctrlKey: true }, { studyActive: true })).toBeNull()
+    expect(keyboardShortcut({ key, metaKey: true }, { studyActive: true })).toBeNull()
+    expect(keyboardShortcut({ key, altKey: true }, { studyActive: true })).toBeNull()
+    expect(keyboardShortcut({ key, repeat: true }, { studyActive: true })).toBeNull()
+  }
+  expect(keyboardShortcut({ key: '/', shiftKey: true }, { typing: true })).toBeNull()
+})
+
+test('M minimizes the visible study view and restores the last parked view', () => {
+  expect(studyShortcutView()).toBeNull()
+  expect(studyShortcutView({ practiceActive: true })).toBe('minimize-practice')
+  expect(studyShortcutView({ playerActive: true })).toBe('minimize-player')
+  expect(studyShortcutView({ practiceActive: true, practiceMinimized: true })).toBe('restore-practice')
+  expect(studyShortcutView({ playerActive: true, playerMinimized: true })).toBe('restore-player')
+  expect(studyShortcutView({
+    practiceActive: true, practiceMinimized: true,
+    playerActive: true, playerMinimized: false,
+  })).toBe('minimize-player')
+  expect(studyShortcutView({
+    practiceActive: true, practiceMinimized: false,
+    playerActive: true, playerMinimized: false,
+  })).toBe('minimize-practice')
+  expect(studyShortcutView({
+    practiceActive: true, practiceMinimized: true,
+    playerActive: true, playerMinimized: true,
+    lastMinimized: 'player',
+  })).toBe('restore-player')
+  expect(studyShortcutView({
+    practiceActive: true, practiceMinimized: true,
+    playerActive: true, playerMinimized: true,
+    lastMinimized: 'practice',
+  })).toBe('restore-practice')
 })
