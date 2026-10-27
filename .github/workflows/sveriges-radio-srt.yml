@@ -40,7 +40,9 @@ jobs:
               with urllib.request.urlopen(url, timeout=30) as response:
                   data = json.load(response)
               for episode in data.get('episodes', []):
-                  print(json.dumps({key: episode.get(key) for key in ('id', 'title', 'podfile', 'broadcast')}, ensure_ascii=False))
+                  print(json.dumps(episode, ensure_ascii=False))
+              with urllib.request.urlopen('https://api.sr.se/api/v2/episodes/2397267?format=json', timeout=30) as response:
+                  print('FULL_EPISODE', json.dumps(json.load(response), ensure_ascii=False))
           except Exception as exc:
               print('Public API unavailable:', exc)
           PY
