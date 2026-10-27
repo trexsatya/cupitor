@@ -139,8 +139,31 @@ async function checkManualVideo(browser, mobile) {
     await page.clock.resume()
     await page.evaluate(() => { window.ytPlayerReady = true })
     await page.evaluate(() => { window.closePracticeMode(); window.openRecordingReviewDialog() })
-    assert.equal(await playAll.isEnabled(), false, 'manual-only playlists use Practice')
+    assert.equal(await playAll.isEnabled(), false, 'manual-only playlists without sound use Practice')
     assert.equal(await dialog.getByRole('button', { name: 'Practice', exact: true }).isEnabled(), true)
+    // A manual-only playlist becomes playable when a card has recorded audio.
+    // Keep all other manual cards untouched, including those with YouTube
+    // reference links; the audio can be on the very last card, beyond page 1.
+    const audioVariants = ['sourceAudioUrl', 'targetAudioUrl', 'mediaUrl']
+    for (const field of audioVariants) {
+      await page.evaluate(({ name, field }) => {
+        const cards = window._recordings[name].items.Manual.Card
+        const card = cards[cards.length - 1]
+        card[field] = 'file:///tmp/cupitor-test-pronunciation.m4a'
+        if (field === 'mediaUrl') card.mediaKind = 'audio'
+        window.openRecordingReviewDialog()
+      }, { name, field })
+      assert.equal(await playAll.isEnabled(), true,
+        `Player should accept manual cards with ${field} audio`)
+      await page.evaluate(({ name, field }) => {
+        const card = window._recordings[name].items.Manual.Card.at(-1)
+        delete card[field]
+        if (field === 'mediaUrl') delete card.mediaKind
+        window.openRecordingReviewDialog()
+      }, { name, field })
+      assert.equal(await playAll.isEnabled(), false,
+        `Player should disable again after removing the ${field} audio`)
+    }
     // The whole playlist decides, including captured items beyond page one.
     await choosePlaylist(page, 'Tillåt mig tvivla - Ord', mobile)
     assert.equal(await playAll.isEnabled(), true, 'captured playlists keep Play All')
