@@ -11,23 +11,7 @@ on:
         description: 'Spoken language code (sv, en, de, etc.) or auto-detect'
         required: true
         default: auto
-        type: choice
-        options:
-          - auto
-          - sv
-          - en
-          - de
-          - fr
-          - es
-          - hi
-          - it
-          - pt
-          - nl
-          - da
-          - no
-          - fi
-          - pl
-          - other
+        type: string
 
 permissions:
   contents: read
