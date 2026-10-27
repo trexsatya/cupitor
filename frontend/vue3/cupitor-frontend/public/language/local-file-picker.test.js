@@ -49,6 +49,7 @@ describe('local subtitle picker', () => {
     expect(matchingEnglishSubtitle('x.mp3', [other, primary, english], primary))
       .toBe(english);
     expect(matchingEnglishSubtitle('x.mp3', [other, primary], primary)).toBe(null);
+    expect(matchingEnglishSubtitle('x.mp3', [other, primary, english], other)).toBe(null);
     expect(matchingEnglishSubtitle('x.mp3', [english], english)).toBe(null);
   });
 });
