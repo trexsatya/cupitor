@@ -5090,3 +5090,42 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
   .notif-schedule-table td:nth-child(3)::before { content:'When: '; font-weight:650; }
   .notif-schedule-table td:nth-child(4)::before { content:'Status: '; font-weight:650; }
 }
+
+
+/* Local media picker: matching SRT files take priority over other chosen files. */
+#localSubtitlePickerDialog { color:#284237; font-size:14px; line-height:1.4; }
+#localSubtitlePickerDialog .local-subtitle-media {
+  display:flex; flex-direction:column; gap:5px; padding:12px;
+  background:#f1f7f3; border:1px solid #d7e5db; border-radius:9px;
+  overflow-wrap:anywhere; margin-bottom:12px;
+}
+#localSubtitlePickerDialog .local-subtitle-media small {
+  color:#587365; font-size:11px; letter-spacing:.06em; font-weight:650;
+}
+#localSubtitlePickerDialog h4 {
+  font-size:13px; color:#395749; font-weight:650; margin:14px 0 8px;
+}
+#localSubtitlePickerDialog .local-subtitle-list { display:grid; gap:7px; }
+#localSubtitlePickerDialog .local-subtitle-file {
+  display:flex; align-items:center; gap:11px; padding:11px 12px; margin:0;
+  border:1px solid #d9e5df; border-radius:9px; cursor:pointer;
+  background:#fff; min-height:44px; overflow-wrap:anywhere;
+}
+#localSubtitlePickerDialog .local-subtitle-file.is-selected {
+  background:#eff7f2; border:2px solid #478668; padding:10px 11px;
+}
+#localSubtitlePickerDialog .local-subtitle-file input { flex:none; accent-color:#347b57; }
+#localSubtitlePickerDialog .local-subtitle-file-body { display:grid; min-width:0; }
+#localSubtitlePickerDialog .local-subtitle-file-body strong { font-size:13px; overflow-wrap:anywhere; }
+#localSubtitlePickerDialog .local-subtitle-file-body small { color:#507c63; font-size:11px; }
+#localSubtitlePickerDialog .local-subtitle-note { color:#647d71; font-size:12px; margin:8px 0; }
+#localSubtitlePickerDialog .local-subtitle-error { color:#a52e24; font-size:12px; margin:8px 0; }
+#localSubtitlePickerDialog .local-subtitle-actions {
+  display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;
+  border-top:1px solid #e2eae5; padding-top:12px; margin-top:14px;
+}
+#localSubtitlePickerDialog .local-subtitle-actions button { min-height:36px; }
+#localSubtitlePickerDialog button:disabled { opacity:.45; cursor:default; }
+@media(max-width:460px) {
+  #localSubtitlePickerDialog .local-subtitle-actions button { flex:1 1 auto; }
+}
