@@ -5129,3 +5129,14 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 @media(max-width:460px) {
   #localSubtitlePickerDialog .local-subtitle-actions button { flex:1 1 auto; }
 }
+
+/* Desktop Practice faces must allow selecting and copying their text.
+   Card navigation is limited to touch gestures in language.js. */
+#practiceMode .practice-front-face,
+#practiceMode .practice-back-face,
+#practiceMode .practice-front-face .practice-front,
+#practiceMode .practice-back-face .practice-back-target,
+#practiceMode .practice-manual-text {
+    user-select: text;
+    -webkit-user-select: text;
+}
