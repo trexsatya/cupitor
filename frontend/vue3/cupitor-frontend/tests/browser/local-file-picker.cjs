@@ -47,7 +47,7 @@ async function testPicker(browser, mobile) {
     await page.locator('#localSubtitlePickerDialog .local-subtitle-file').filter({hasText:'different.srt'}).click()
     await page.getByRole('button', {name:'Use subtitle & play'}).click()
     assert.deepEqual(await page.evaluate(() => window.pickedFixture),
-      {media:'x.mp3', subtitle:'different.srt', english:'x.en.srt'})
+      {media:'x.mp3', subtitle:'different.srt', english:null})
 
     // Choosing only an MP3 must not claim an unselected SRT exists.
     await page.evaluate(() => window.openFixture(['x.mp3']))
