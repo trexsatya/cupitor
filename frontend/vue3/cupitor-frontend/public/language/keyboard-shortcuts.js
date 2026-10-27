@@ -48,3 +48,18 @@ export function keyboardShortcut(event, {
   if (key === ' ' && !buttonFocused) return 'play'
   return { r: 'reveal', d: 'direction', s: 'speed', escape: 'close' }[key] || null
 }
+
+// Prefer the view currently on top. When both are parked, restore the last
+// one minimized; neither shortcut closes or creates a study session.
+export function studyShortcutView({
+  practiceActive = false, practiceMinimized = false,
+  playerActive = false, playerMinimized = false, lastMinimized = null
+} = {}) {
+  if (practiceActive && !practiceMinimized) return 'minimize-practice'
+  if (playerActive && !playerMinimized) return 'minimize-player'
+  if (lastMinimized === 'player' && playerActive) return 'restore-player'
+  if (lastMinimized === 'practice' && practiceActive) return 'restore-practice'
+  if (practiceActive) return 'restore-practice'
+  if (playerActive) return 'restore-player'
+  return null
+}
