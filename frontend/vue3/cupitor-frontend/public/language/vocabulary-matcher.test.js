@@ -131,3 +131,38 @@ test.each(['se till', 'till och från', 'för sig'])(
     expect(m.matchLine(line, query).kind).toBe('exact')
   }
 )
+
+test('stjärnbeströdda recognizes the second compound head as beströ', () => {
+  const m = matcher({
+    Stars: ['(star)|stjärna|stjärnor|'],
+    Sprinkle: ['(sprinkle)|beströ|strö över|strö|'],
+    Unrelated: ['(dispute)|bestrida|', '(stream)|ström|'],
+  })
+  for (const includePrefix of [false, true]) {
+    const hits = m.search('stjärnbeströdda', { includePrefix })
+    expect(hits).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        category: 'Sprinkle',
+        kind: 'compound',
+        matched: 'beströ',
+        constituent: 'beströdda',
+      }),
+    ]))
+    expect(hits.some(hit => hit.category === 'Unrelated' && hit.kind === 'compound')).toBe(false)
+  }
+  expect(m.search('stjärnljus').some(hit => hit.category === 'Sprinkle')).toBe(false)
+})
+
+test('existing related compound participles still work', () => {
+  const m = matcher({
+    Snow: ['(snow)|snö|'], Sun: ['(sun)|sol|'],
+    Cover: ['(cover)|täcka|täckte|täckt|'],
+    Illuminate: ['(illuminate)|belysa|belyst|'],
+  })
+  expect(m.search('snötäckt')).toEqual(expect.arrayContaining([
+    expect.objectContaining({ category: 'Cover', kind: 'compound', constituent: 'täckt' }),
+  ]))
+  expect(m.search('solbelysta')).toEqual(expect.arrayContaining([
+    expect.objectContaining({ category: 'Illuminate', kind: 'compound', constituent: 'belysta' }),
+  ]))
+})
