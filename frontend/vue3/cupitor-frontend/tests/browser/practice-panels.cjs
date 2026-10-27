@@ -108,11 +108,12 @@ async function check(browser, mobile) {
     await touchCard(false)
     await closed()
     const r = await page.locator('#practiceMode .practice-card').boundingBox()
-    // Closing panels leaves the ordinary double-click flip interaction intact.
+    // Desktop double-click must select text rather than flip the card.
+    // Touch double-tap still uses the separate mobile gesture handler.
     if (!mobile) {
       await page.mouse.dblclick(r.x + r.width / 2, r.y + r.height - 30)
-      assert.equal(await page.evaluate(() => window._practiceFlipped), true)
-      await click('#practiceMode .practice-unflip')
+      assert.equal(await page.evaluate(() => window._practiceFlipped), false,
+        'desktop mouse double-click must not flip the selectable card')
     }
 
     // Captured clips display a full range, including the hour boundary.
@@ -134,10 +135,19 @@ async function check(browser, mobile) {
     await closed()
     await click('#practiceMode .practice-settings')
     await touchCard(true)
+    if (!mobile) {
+      assert.equal(await page.evaluate(() => window._practiceIdx), 0,
+        'desktop mouse drag must select text, not swipe to the next card')
+      await page.evaluate(() => {
+        getSelection()?.removeAllRanges()
+        document.activeElement?.blur()
+      })
+      await page.keyboard.press('ArrowRight')
+    }
     await page.waitForFunction(() => window._practiceIdx === 1)
     await closed()
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'Mobile' : 'Desktop'}: opaque panels above divider, immediate card dismissal, panel actions, swipe/flip and hh:mm:ss details passed`)
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: opaque panels above divider, immediate card dismissal, panel actions, touch swipes, desktop text selection and hh:mm:ss details passed`)
   } catch (e) {
     console.error(await page.evaluate(() => ({ body: document.body.className,
       panels: [...document.querySelectorAll('.practice-info-panel,.practice-settings-panel')].map(el => ({ cls: el.className, display: getComputedStyle(el).display, text: el.textContent })),

@@ -1,0 +1,91 @@
+name: Transcribe MP3 to SRT
+
+on:
+  workflow_dispatch:
+    inputs:
+      mp3_url:
+        description: 'Direct HTTP(S) URL to a downloadable MP3 file'
+        required: true
+        type: string
+      language:
+        description: 'Spoken language code (sv, en, de, etc.) or auto-detect'
+        required: true
+        default: auto
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  transcribe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      MP3_URL: ${{ inputs.mp3_url }}
+      TRANSCRIPTION_LANGUAGE: ${{ inputs.language }}
+      OMP_NUM_THREADS: "2"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Restore Python environment
+        id: python-cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: mp3-to-srt-venv-ubuntu-24.04-python-3.11-v1
+      - name: Restore Whisper models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub
+          key: mp3-to-srt-whisper-${{ inputs.language }}-v1
+      - name: Install dependencies
+        run: |
+          if [[ "${{ steps.python-cache.outputs.cache-hit }}" != "true" ]]; then
+            python -m venv .venv
+            .venv/bin/python -m pip install numpy faster-whisper imageio-ffmpeg
+          fi
+          ffmpeg_binary="$(.venv/bin/python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+          ln -sf "$ffmpeg_binary" .venv/bin/ffmpeg
+          .venv/bin/ffmpeg -version
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+      - name: Validate MP3 URL and language
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$MP3_URL" in
+            http://*|https://*) ;;
+            *) echo "::error::A direct HTTP(S) URL is required."; exit 1 ;;
+          esac
+          if [[ ! "$TRANSCRIPTION_LANGUAGE" =~ ^(auto|[a-z]{2,3})$ ]]; then
+            echo "::error::Use 'auto' or a lowercase language code (e.g. sv, en, de, hi)."
+            exit 1
+          fi
+      - name: Download MP3
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          # The URL may use redirects or query parameters and need not end
+          # in .mp3. The transcription decoder checks its real audio format.
+          curl --fail --location --retry 3 \
+            --proto '=http,https' --proto-redir '=http,https' \
+            --connect-timeout 30 --max-time 3600 \
+            --output output/audio.mp3 -- "$MP3_URL"
+          test -s output/audio.mp3 || { echo "::error::Downloaded MP3 is empty."; exit 1; }
+      - name: Transcribe to SRT
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -u frontend/vue3/cupitor-frontend/tools/language/make-srt.py \
+            output/audio.mp3 -l "$TRANSCRIPTION_LANGUAGE" -o output/audio.srt
+          test -s output/audio.srt || { echo "::error::No subtitle content was generated."; exit 1; }
+      - name: Upload audio and subtitles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp3-transcription
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7

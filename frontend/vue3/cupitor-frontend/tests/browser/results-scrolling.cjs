@@ -38,8 +38,9 @@ async function check(browser, mobile) {
     // than a page of headings also exercises a footer-triggered page change.
     await page.evaluate(async () => {
       const items = Object.values(window._lastWordToItemsMap).find(items => items.length)
-      window._shownWordToItemsMap = Object.fromEntries(
+      window.__scrollPaginationFixture = Object.fromEntries(
         Array.from({ length: 65 }, (_, i) => ['ord' + String(i).padStart(3, '0'), items]))
+      window._shownWordToItemsMap = window.__scrollPaginationFixture
       window.SEARCH_RESULT_PAGE_SIZE = 50
       await window.loadSearchResultsPage(0)
     })
@@ -107,6 +108,16 @@ async function check(browser, mobile) {
     await page.setViewportSize({ width: 393, height: 780 })
     await pageSwipe(-1)
 
+    // Switching playlists may refresh search state and replace the synthetic
+    // results fixture. Reset it explicitly before testing footer pagination;
+    // this checks paging separately from the dialog's change of playlist.
+    await page.evaluate(async () => {
+      window._shownWordToItemsMap = window.__scrollPaginationFixture
+      await window.loadSearchResultsPage(0)
+    })
+    assert.equal(await page.locator('#result .l-accordion').count(), 50)
+    assert.equal(await page.locator('#searchPageCount').innerText(), '2')
+    assert.equal(await page.locator('#searchNextPageButton').evaluate(el => el.classList.contains('disabled')), false)
     await page.locator('#searchNextPageButton').tap()
     await page.waitForFunction(() => window._searchResultPage === 1 &&
       document.querySelectorAll('#result .l-accordion').length === 15)
