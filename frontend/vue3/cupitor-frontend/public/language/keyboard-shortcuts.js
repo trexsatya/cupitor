@@ -3,12 +3,15 @@ export const KEYBOARD_SHORTCUTS = [
   { scope: 'General', keys: ['V'], label: 'Add a vocabulary item (main page)' },
   { scope: 'General', keys: ['L'], label: 'Open playlists (main page)' },
   { scope: 'General', keys: ['M'], label: 'Minimize / restore the active Player or Practice view' },
+  { scope: 'General', keys: ['P'], label: 'Switch between Player and Practice (when visible)' },
   { scope: 'Search', keys: ['/'], label: 'Focus and select the search field' },
   { scope: 'Practice', keys: ['/'], label: 'Search the current word (minimize Practice)' },
   { scope: 'Practice', keys: ['←', 'K'], label: 'Previous card' },
   { scope: 'Practice', keys: ['→', 'J'], label: 'Next card' },
   { scope: 'Practice', keys: ['Space'], label: 'Play or pause the clip / recording' },
   { scope: 'Practice', keys: ['R'], label: 'Reveal or flip the answer' },
+  { scope: 'Practice', keys: ['E'], label: 'Edit this card (editable manual cards only)' },
+  { scope: 'Practice', keys: ['I'], label: 'Show / hide details for this card' },
   { scope: 'Practice', keys: ['D'], label: 'Switch language direction' },
   { scope: 'Practice', keys: ['S'], label: 'Cycle the configured playback speeds' },
   { scope: 'Practice', keys: ['Esc'], label: 'Close Practice' }
@@ -16,6 +19,7 @@ export const KEYBOARD_SHORTCUTS = [
 
 export function keyboardShortcut(event, {
   practice = false, studyActive = false, studyVisible = false,
+  playerVisible = false, editAvailable = false,
   typing = false, searchFocused = false, dialogOpen = false, buttonFocused = false, searchAvailable = true
 } = {}) {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
@@ -34,14 +38,17 @@ export function keyboardShortcut(event, {
   if (event.repeat) {
     // Previous / next cards may repeat, but opening dialogs or minimizing
     // a study view must never repeat while the key remains pressed.
-    if (key === 'm' || key === 'v' || key === 'l') return null
+    if (key === 'm' || key === 'v' || key === 'l' || key === 'e' || key === 'i' || key === 'p') return null
   }
   if (key === 'm' && (practice || studyActive)) return 'study-toggle'
+  if (key === 'p' && (practice || playerVisible)) return 'switch-study-view'
   if (!practice && !studyVisible) {
     if (key === 'v') return 'add-vocabulary'
     if (key === 'l') return 'playlists'
   }
   if (!practice) return null
+  if (key === 'e' && editAvailable) return 'edit-practice-card'
+  if (key === 'i') return 'practice-details'
   if (key === 'arrowleft' || key === 'k') return 'previous'
   if (key === 'arrowright' || key === 'j') return 'next'
   if (event.repeat) return null
