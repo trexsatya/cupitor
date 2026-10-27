@@ -42,7 +42,10 @@ export function rankLocalSubtitles(mediaName, files, targetLanguage = 'sv') {
 }
 
 export function matchingEnglishSubtitle(mediaName, files, primary) {
-  if (!primary) return null;
+  // An unrelated user-chosen SRT may have different timing; do not silently
+  // attach a same-named English track to it.
+  if (!primary || localSubtitleRank(mediaName, primary.name, 'sv') >= 4 ||
+      localSubtitleRank(mediaName, primary.name, 'sv') === null) return null;
   return (files || []).find(file => file !== primary &&
     /\.en\.srt$/i.test(file.name || '') &&
     localSubtitleRank(mediaName, file.name, 'sv') === 2) || null;
