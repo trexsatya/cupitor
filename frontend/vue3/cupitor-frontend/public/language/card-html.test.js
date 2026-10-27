@@ -19,6 +19,13 @@ describe('cardHtml', () => {
     expect(cardHtml('a < b\nc & d')).toEqual({ html: 'a &lt; b\nc &amp; d', isHtml: false })
   })
 
+  test('text/background colors and both ruler orientations survive sanitizing', () => {
+    const source = '<p><span style="color:#d81b60">pink</span> ' +
+      '<span style="background-color:#fff59d">yellow</span> │ separator</p><hr>';
+    expect(cardHtml(source).html).toBe(source);
+    expect(cardPlainText(source)).toContain('pink yellow │ separator');
+  });
+
   test('strikethrough from a manual card round-trips as HTML', () => {
     expect(cardHtml('<p>Det är <s>fel</s> rätt</p>').html)
       .toBe('<p>Det är <s>fel</s> rätt</p>')
