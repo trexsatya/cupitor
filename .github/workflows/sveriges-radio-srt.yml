@@ -1,0 +1,50 @@
+name: Sveriges Radio subtitles
+
+on:
+  workflow_dispatch:
+    inputs:
+      episode_url:
+        description: Sveriges Radio episode URL
+        required: true
+        default: https://www.sverigesradio.se/avsnitt/repris-kaffe-hot-eller-bot-for-halsan
+  push:
+    branches: [codex/sr-subtitle-workflow]
+    paths: [.github/workflows/sveriges-radio-srt.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  transcribe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      EPISODE_URL: ${{ inputs.episode_url || 'https://www.sverigesradio.se/avsnitt/repris-kaffe-hot-eller-bot-for-halsan' }}
+      OMP_NUM_THREADS: "2"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install numpy faster-whisper yt-dlp
+      - name: Download audio
+        run: |
+          mkdir -p output
+          python -m yt_dlp --no-playlist -x --audio-format mp3 -o 'output/episode.%(ext)s' -- "$EPISODE_URL"
+          test -s output/episode.mp3
+      - name: Generate Swedish subtitles
+        run: |
+          python -u frontend/vue3/cupitor-frontend/tools/language/make-srt.py output/episode.mp3 -l sv -o output/episode.srt
+          test -s output/episode.srt
+      - name: Upload audio and subtitles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sveriges-radio-episode
+          path: output/
+          if-no-files-found: warn
+          retention-days: 7
