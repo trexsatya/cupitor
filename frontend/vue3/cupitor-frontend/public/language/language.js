@@ -1,4 +1,5 @@
 import { retainCaptionEnds } from './caption-capture.js';
+import { openLocalSubtitlePicker } from './local-file-picker.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
@@ -5259,49 +5260,50 @@ async function loadCombinedSrts(combinedJson) {
 }
 
 async function loadLocalFiles() {
-  const files = Array.from(localFiles.files);
-  const combinedJson = files.find(it => it.name.match(/combined.json$/))
+  const input = document.getElementById('localFiles');
+  const files = Array.from((input && input.files) || []);
+  const combinedJson = files.find(it => /combined\.json$/i.test(it.name));
 
-
+  // Preserve the existing bulk subtitle import format.
   if (combinedJson) {
     await loadCombinedSrts(combinedJson);
-    const indexJson = files.find(it => it.name.match(/index.json$/))
+    const indexJson = files.find(it => /index\.json$/i.test(it.name));
     if (indexJson) {
-      const index = await new Response(indexJson).json()
+      const index = await new Response(indexJson).json();
       index.forEach(it => {
-        window.allSubtitles[it.link].source = it.source
-        window.allSubtitles[it.link].fileName = it.name
-      })
+        if (!window.allSubtitles[it.link]) return;
+        window.allSubtitles[it.link].source = it.source;
+        window.allSubtitles[it.link].fileName = it.name;
+      });
     }
-    return
+    input.value = '';
+    return;
   }
 
-  let sv = null, en = null;
-  const audioFile = files.find(it => it.name.match(/.mp3$/) || it.name.match(/.wav$/))
-  const videoFile = files.find(it => it.name.match(/.mp4$/))
-  const svSrtFile = files.find(it => it.name.match(new RegExp(getTargetLangSrtSuffix() + "$")))
-  const enSrtFile = files.find(it => it.name.match(/.en.srt$/))
-
-  sv = svSrtFile && await new Response(svSrtFile).text()
-  en = enSrtFile && await new Response(enSrtFile).text()
-
-  if (videoFile) {
-    videoPlayer.setSrc(URL.createObjectURL(videoFile))
-  }
-
-  const mediaNameWithoutExtension = (audioFile || videoFile).name.replace(".mp3", "").replaceAll(".mp4", "").replaceAll(".wav", "");
-  const link = _.last(mediaNameWithoutExtension.split(/ [|-]{2} /)).trim()
-
-  if (sv && en) {
-    window.allSubtitles[link] = {
-      sv,
-      en,
-      source: 'local',
-      fileName: mediaNameWithoutExtension
-    }
-  }
-
-  await playNewMedia(link, 'local', videoFile || audioFile)
+  if (!files.length) return;
+  openLocalSubtitlePicker({
+    files,
+    targetLanguage: getLangFromUrl().code,
+    onPlay: async ({ mediaFile, subtitleFile, englishFile }) => {
+      const baseName = mediaFile.name.replace(/\.(mp3|wav|mp4)$/i, '');
+      // Local files must never accidentally pick up the remotely indexed SRT
+      // of a different item which happens to have the same basename.
+      const link = 'local:' + mediaFile.name;
+      let sv = '', en = '';
+      if (subtitleFile) {
+        sv = await new Response(subtitleFile).text();
+        en = englishFile ? await new Response(englishFile).text() : sv;
+      }
+      if (sv) {
+        window.allSubtitles[link] = {
+          sv, en, source: 'local', fileName: baseName,
+        };
+      } else {
+        delete window.allSubtitles[link];
+      }
+      await playNewMedia(link, 'local', mediaFile);
+    },
+  });
 }
 
 async function loadSubtitlesForLink(sv, en) {
@@ -5488,9 +5490,11 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   } catch (e) {
     console.warn('subtitles unavailable for', link, e && e.message)
   }
-  loadSubtitlesForLink(sv, en);
+  // A local media file can be played without an SRT. Do not show the remote
+  // missing-subtitle alert for that deliberate choice.
+  if (sv || source !== 'local') loadSubtitlesForLink(sv, en);
 
-  $('#currentMedia').text(`${link}, ${source}`)
+  $('#currentMedia').text(`${source === 'local' && mediaFile ? mediaFile.name : link}, ${source}`)
   $('#toggleSearchBtn').show()
 }
 
