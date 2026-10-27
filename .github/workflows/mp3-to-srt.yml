@@ -39,7 +39,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface/hub
-          key: mp3-to-srt-whisper-models-v1
+          key: mp3-to-srt-whisper-${{ inputs.language }}-v1
       - name: Install dependencies
         run: |
           if [[ "${{ steps.python-cache.outputs.cache-hit }}" != "true" ]]; then
