@@ -7,8 +7,7 @@ on:
         description: Sveriges Radio episode URL
         required: true
         default: https://www.sverigesradio.se/avsnitt/repris-kaffe-hot-eller-bot-for-halsan
-  push:
-    branches: [codex/sr-subtitle-workflow]
+  pull_request:
     paths: [.github/workflows/sveriges-radio-srt.yml]
 
 permissions:
@@ -16,6 +15,7 @@ permissions:
 
 jobs:
   transcribe:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'codex/sr-subtitle-workflow'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
