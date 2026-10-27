@@ -53,6 +53,13 @@ export function vocabularyForms(word, lang) {
     // Never turn arbitrary doubled consonants into single ones.
     forms.add(reduced.replace(/([mn])\1(?=[lnr]$)/u, '$1'))
   }
+  // Swedish past participles ending in -dd/-dda: beströdd(a) -> beströ.
+  // This is deliberately limited to vowel-final stems so unrelated doubled
+  // consonants elsewhere are not collapsed.
+  for (const form of [...forms]) {
+    const participle = form.match(/^(.{2,}[aeiouyåäö])dd$/u)
+    if (participle && participle[1].length >= 3) forms.add(participle[1])
+  }
   return [...forms]
 }
 
