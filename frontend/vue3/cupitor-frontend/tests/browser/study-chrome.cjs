@@ -134,18 +134,30 @@ async function checkStudyChrome(browser) {
       await page.evaluate(() => { getSelection().removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
       await page.waitForFunction(() => !document.querySelector('#practiceMode .practice-search.study-selection-search'))
       await hide()
-      if (mobile) await swipe(true)
-      else {
+      if (mobile) {
+        await swipe(true)
+      } else {
         const card = await page.locator('#practiceMode .practice-card').boundingBox()
-        // Drag across the text as a user can: transient browser selection
-        // must not wake Search after the swipe replaces the card.
+        // Desktop drag selects/copies text; it must NOT navigate cards.
+        // Mouse-swipe navigation was intentionally disabled in Practice.
         const y = card.y + 120
         await page.mouse.move(card.x + card.width * 0.8, y); await page.mouse.down()
         await page.mouse.move(card.x + card.width * 0.2, y, { steps: 8 }); await page.mouse.up()
+        assert.equal(await page.evaluate(() => window._practiceIdx), 0,
+          'desktop mouse drag must not navigate away from selectable text')
+        await page.evaluate(() => {
+          getSelection().removeAllRanges()
+          document.dispatchEvent(new Event('selectionchange'))
+          document.activeElement?.blur()
+        })
+        await page.keyboard.press('ArrowRight')
       }
       await page.waitForFunction(() => window._practiceIdx === 1 && !document.querySelector('#practiceMode .practice-loading'))
+      // Keyboard navigation intentionally wakes controls, unlike a touch
+      // swipe. Hide them again before asserting chrome behavior.
+      if (!mobile) await hide()
       assert.equal(await page.locator('#practiceMode .practice-prev').isVisible(), false,
-        'swipes still navigate without revealing chrome: ' + JSON.stringify(await page.evaluate(() => ({classes: document.body.className, selection: getSelection().toString()}))))
+        'navigation leaves chrome hideable: ' + JSON.stringify(await page.evaluate(() => ({classes: document.body.className, selection: getSelection().toString()}))))
       assert.equal(await page.locator('#practiceMode .practice-unflip').isVisible(), true)
       await page.locator('#practiceMode .practice-front').evaluate(el => { el.innerHTML += '<p>Scroll this study text.</p>'.repeat(35) })
       if (mobile) await swipe(false)
