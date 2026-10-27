@@ -22486,8 +22486,15 @@ function _togglePracticePlayback() {
 
 $(document).on('keydown', function (e) {
   const target = e.target
+  const currentPracticeCard = window._practiceActive && !window._practiceMinimized
+    ? (window._practiceCards || [])[window._practiceIdx] : null
+  const storedPracticeCard = currentPracticeCard && _isManualItem(currentPracticeCard)
+    ? _storedManualCard(currentPracticeCard) : null
   const action = keyboardShortcut(e.originalEvent || e, {
     practice: !!window._practiceActive && !window._practiceMinimized,
+    playerVisible: !!window._playingRecording && !window._recPlayMinimized &&
+      !(window._practiceActive && !window._practiceMinimized),
+    editAvailable: !!(storedPracticeCard && !_isReadOnlyPlaylist(storedPracticeCard.name)),
     studyActive: !!(window._practiceActive || window._playingRecording),
     studyVisible: !!((window._practiceActive && !window._practiceMinimized) ||
       (window._playingRecording && !window._recPlayMinimized)),
@@ -22503,6 +22510,13 @@ $(document).on('keydown', function (e) {
     help: openKeyboardShortcuts,
     'add-vocabulary': openAddToVocabDialog,
     playlists: openRecordingReviewDialog,
+    'edit-practice-card': _editCurrentPracticeCard,
+    'practice-details': _togglePracticeInfoPanel,
+    'switch-study-view': () => {
+      if (window._practiceActive && !window._practiceMinimized) switchPracticeToPlayer()
+      else if (window._practiceActive && window._practiceMinimized) restorePracticeMode()
+      else switchPlayerToPractice()
+    },
     'study-toggle': () => {
       const view = studyShortcutView({
         practiceActive: !!window._practiceActive,
