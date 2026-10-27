@@ -92,3 +92,24 @@ test('publisher retries a racing data commit without losing data or force pushin
   assert.equal(git(root, '--git-dir=' + remote, 'show', 'gh-pages:js/app.js'), 'built app');
   assert.equal(git(root, '--git-dir=' + remote, 'rev-list', '--count', 'gh-pages'), '3');
 });
+
+test('MP3 transcription workflow is generic, uses safe URL arguments and emits SRT', () => {
+  const workflows = path.resolve(__dirname, '../../../../.github/workflows');
+  const workflowPath = path.join(workflows, 'mp3-to-srt.yml');
+  assert(fs.existsSync(workflowPath), 'generic transcription workflow must exist');
+  assert(!fs.existsSync(path.join(workflows, 'sveriges-radio-srt.yml')),
+    'provider-specific transcription workflow must be replaced');
+  const yaml = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(yaml, /name: Transcribe MP3 to SRT/);
+  assert.match(yaml, /workflow_dispatch:/);
+  assert.match(yaml, /mp3_url:\s*\n\s*description:/);
+  assert.match(yaml, /required: true/);
+  assert.match(yaml, /TRANSCRIPTION_LANGUAGE:/);
+  assert.match(yaml, /default: auto/);
+  assert.match(yaml, /curl --fail --location --retry 3/);
+  assert.match(yaml, /--proto '=http,https' --proto-redir '=http,https'/);
+  assert.match(yaml, /--output output\/audio\.mp3 -- "\$MP3_URL"/);
+  assert.match(yaml, /output\/audio\.mp3 -l "\$TRANSCRIPTION_LANGUAGE" -o output\/audio\.srt/);
+  assert.match(yaml, /name: mp3-transcription/);
+  assert.doesNotMatch(yaml, /sveriges.?radio|api\.sr\.se|avsnitt\/repris|episode_url/i);
+});
