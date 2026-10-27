@@ -257,6 +257,16 @@ async function checkViewSwitching(browser) {
         window._recordings[name] = { items: { sample: { sample: [{ ...it }] } } }
       })
       await page.evaluate(() => document.activeElement?.blur())
+      // On desktop, double-clicking the displayed word should select it for copying.
+      if (!mobile) {
+        const manualText = page.locator('#practiceMode .practice-front-face .practice-manual-text').first()
+        await manualText.dblclick()
+        const selected = await page.evaluate(() => String(window.getSelection() || '').trim())
+        assert(selected.length > 0, 'desktop double-click selects manual-card text')
+        assert.equal(await page.evaluate(() => window._practiceFlipped), false,
+          'selecting a word must not flip the Practice card')
+        await page.evaluate(() => window.getSelection()?.removeAllRanges())
+      }
       await page.keyboard.press('e')
       await page.locator('#manualEntryEditor:visible').waitFor({ state: 'visible' })
       assert.equal(await page.evaluate(() => window._practiceIdx), 1,
