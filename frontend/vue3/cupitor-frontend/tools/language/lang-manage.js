@@ -149,12 +149,20 @@ async function captureCandidates(ordered, ctx) {
   }
 }
 
+// Filmot expects literal phrases, not vocabulary regexes or expansion definitions.
+function isFilmotSearchable(value) {
+  return typeof value === "string" && value.trim() !== "" && !/[=\[\]{}*+\\|^$]/.test(value);
+}
+
 async function cmdFilmot(cfg) {
   const rare = readJson(join(cfg.outDir, "rare-words.json"), null);
   if (!rare) throw new Error("Run `rare` first — out/rare-words.json not found.");
   const byLine = new Map(rare.map((r) => [r.line, r]));
   // Optionally scope to a vocabulary category (progress stays global by word).
-  const pool = rare.filter((r) => matchCategory(r.category, cfg.category));
+  const scoped = rare.filter((r) => matchCategory(r.category, cfg.category));
+  const pool = scoped.filter((r) => isFilmotSearchable(r.line) && isFilmotSearchable(r.expanded ?? r.line));
+  const skipped = scoped.length - pool.length;
+  if (skipped) log(`Skipping ${skipped} regex or = entr${skipped === 1 ? "y" : "ies"}.`);
   const allWords = pool.map((r) => r.line);
   if (cfg.category && !allWords.length) {
     log(`No rare words match category "${cfg.category}". Try: lang-manage categories`);
@@ -166,11 +174,13 @@ async function cmdFilmot(cfg) {
   const done = loadProgress(progressPath).doneKeys;
 
   const words = cfg.words && cfg.words.length
-    ? cfg.words
+    ? cfg.words.filter((word) => isFilmotSearchable(word) && (!byLine.has(word) || isFilmotSearchable(byLine.get(word).expanded ?? word)))
     : selectChunk(allWords, done, cfg.chunk || cfg.chunkFilmot);
+  if (cfg.words?.length && words.length < cfg.words.length) log(`Skipping ${cfg.words.length - words.length} requested regex or = entr${cfg.words.length - words.length === 1 ? "y" : "ies"}.`);
   const summary = progressSummary(allWords, done);
   const scope = cfg.category ? ` [${cfg.category}]` : "";
   log(`filmot${scope}: ${summary.done}/${summary.total} done; processing ${words.length} this run.`);
+  if (!words.length) return;
 
   const hitsPath = join(cfg.outDir, "filmot-hits.json");
   const hits = readJson(hitsPath, {});

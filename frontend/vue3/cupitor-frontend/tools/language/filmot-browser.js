@@ -5,6 +5,8 @@
 // optional dependency, only browser mode needs it:
 //   npm i playwright && npx playwright install chromium
 import { mkdirSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
+import { stdin, stdout } from "node:process";
 
 async function getChromium() {
   try {
@@ -58,6 +60,24 @@ export async function openFilmotSession({ userDataDir, headless = false, delayMs
     }
   }
   const page = context.pages()[0] || (await context.newPage());
+
+  // In a headed interactive session, let the user sign in or complete any
+  // verification before navigating away to the first search. The persistent
+  // profile keeps the session for future runs. Headless runs never wait.
+  if (!headless && stdin.isTTY) {
+    try {
+      await page.goto("https://filmot.com/", { waitUntil: "domcontentloaded", timeout: 60000 });
+      const prompt = createInterface({ input: stdin, output: stdout });
+      try {
+        await prompt.question("Log in or complete any verification in the Filmot window, then press Enter here to continue: ");
+      } finally {
+        prompt.close();
+      }
+    } catch (e) {
+      await context.close();
+      throw e;
+    }
+  }
 
   const getPage = async (url) => {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
