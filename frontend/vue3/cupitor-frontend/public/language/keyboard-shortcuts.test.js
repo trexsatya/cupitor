@@ -101,3 +101,34 @@ test('M minimizes the visible study view and restores the last parked view', () 
     lastMinimized: 'practice',
   })).toBe('restore-practice')
 })
+
+test('E edits only the current editable manual Practice card', () => {
+  expect(keyboardShortcut({ key: 'e' }, { practice: true, editAvailable: true })).toBe('edit-practice-card')
+  expect(keyboardShortcut({ key: 'E' }, { practice: true, editAvailable: false })).toBeNull()
+  expect(keyboardShortcut({ key: 'e' }, { studyActive: true, studyVisible: false, editAvailable: true })).toBeNull()
+  expect(keyboardShortcut({ key: 'e' }, { playerVisible: true, editAvailable: true })).toBeNull()
+  expect(KEYBOARD_SHORTCUTS.find(x => x.keys.includes('E')).label).toMatch(/editable manual/)
+})
+
+test('I toggles Practice information; P switches the visible study mode', () => {
+  expect(keyboardShortcut({ key: 'i' }, { practice: true })).toBe('practice-details')
+  expect(keyboardShortcut({ key: 'i' })).toBeNull()
+  expect(keyboardShortcut({ key: 'p' }, { practice: true })).toBe('switch-study-view')
+  expect(keyboardShortcut({ key: 'p' }, { playerVisible: true, studyVisible: true })).toBe('switch-study-view')
+  expect(keyboardShortcut({ key: 'p' }, { studyActive: true, studyVisible: false })).toBeNull()
+  expect(keyboardShortcut({ key: 'p' })).toBeNull()
+  expect(KEYBOARD_SHORTCUTS.find(x => x.keys.includes('P')).label).toMatch(/Player and Practice/)
+})
+
+test('E/I/P cannot steal focus from text editing, dialogs, system keys or hold repeat', () => {
+  for (const key of ['e', 'i', 'p']) {
+    const opts = { practice: true, playerVisible: true, editAvailable: true }
+    expect(keyboardShortcut({ key, repeat: true }, opts)).toBeNull()
+    expect(keyboardShortcut({ key }, { ...opts, typing: true })).toBeNull()
+    expect(keyboardShortcut({ key }, { ...opts, dialogOpen: true })).toBeNull()
+    expect(keyboardShortcut({ key, isComposing: true }, opts)).toBeNull()
+    for (const mod of ['ctrlKey', 'altKey', 'metaKey']) {
+      expect(keyboardShortcut({ key, [mod]: true }, opts)).toBeNull()
+    }
+  }
+})
