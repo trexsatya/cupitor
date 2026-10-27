@@ -28,7 +28,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: sr-srt-venv-ubuntu-24.04-python-3.11-v1
+          key: sr-srt-venv-ubuntu-24.04-python-3.11-v2
       - name: Restore Whisper model
         uses: actions/cache@v4
         with:
@@ -36,14 +36,13 @@ jobs:
           key: sr-srt-kb-whisper-medium-v1
       - name: Install dependencies
         run: |
-          if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y ffmpeg
-          fi
           if [[ "${{ steps.python-cache.outputs.cache-hit }}" != "true" ]]; then
             python -m venv .venv
-            .venv/bin/python -m pip install numpy faster-whisper yt-dlp
+            .venv/bin/python -m pip install numpy faster-whisper yt-dlp imageio-ffmpeg
           fi
+          ffmpeg_binary="$(.venv/bin/python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+          ln -sf "$ffmpeg_binary" .venv/bin/ffmpeg
+          .venv/bin/ffmpeg -version | head -n 1
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
       - name: Download audio
         run: |
