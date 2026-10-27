@@ -9,7 +9,7 @@ export const KEYBOARD_SHORTCUTS = [
   { scope: 'Practice', keys: ['←', 'K'], label: 'Previous card' },
   { scope: 'Practice', keys: ['→', 'J'], label: 'Next card' },
   { scope: 'Practice', keys: ['Space'], label: 'Play or pause the clip / recording' },
-  { scope: 'Practice', keys: ['R'], label: 'Reveal or flip the answer' },
+  { scope: 'Practice', keys: ['F', 'R'], label: 'Flip / reveal the card' },
   { scope: 'Practice', keys: ['E'], label: 'Edit this card (editable manual cards only)' },
   { scope: 'Practice', keys: ['I'], label: 'Show / hide details for this card' },
   { scope: 'Practice', keys: ['D'], label: 'Switch language direction' },
@@ -53,7 +53,7 @@ export function keyboardShortcut(event, {
   if (key === 'arrowright' || key === 'j') return 'next'
   if (event.repeat) return null
   if (key === ' ' && !buttonFocused) return 'play'
-  return { r: 'reveal', d: 'direction', s: 'speed', escape: 'close' }[key] || null
+  return { f: 'reveal', r: 'reveal', d: 'direction', s: 'speed', escape: 'close' }[key] || null
 }
 
 // Prefer the view currently on top. When both are parked, restore the last
