@@ -196,15 +196,27 @@ async function prepareDirectory(dir, storage, operations, read) {
     const file = splitPath(operation.path).file
     let old = entryForFile(before, file)
     const next = entryForFile(index, file)
-    // A newly indexed video may already have orphaned tracks in an old pack.
-    // Search those packs even when the updated index contains a new (unassigned)
-    // entry; otherwise this capture allocates another copy of the same key.
-    if (!old) {
-      for (const metadata of storage.packs) {
-        const contents = await load(metadata.path)
-        const key = [file, decode(file)].find(key => owns(contents, key))
-        if (key) { old = { entry: { name: baseOf(key), bundle: metadata.path }, key }; break }
+    // Never trust an index pointer alone: it can point to only one pack even
+    // when a track has accidentally been copied into several packs. Detect
+    // that corruption before changing any content, without choosing, merging,
+    // or discarding any of the copies.
+    const matchingKeys = [...new Set([file, decode(file), old?.key, next?.key].filter(Boolean))]
+    const locations = []
+    for (const metadata of storage.packs) {
+      const contents = await load(metadata.path)
+      for (const key of matchingKeys) if (owns(contents, key)) {
+        locations.push({ path: metadata.path, key })
       }
+    }
+    if (locations.length > 1) {
+      throw new Error('Duplicate subtitle track: ' + file + ' in ' +
+        locations.map(location => location.path).join(', ') +
+        '. Capture aborted without changes; inspect with lang-manage.js repair --inspect.')
+    }
+    // Find an orphaned track even when a newly written index has no pack yet.
+    if (!old && locations.length === 1) {
+      const location = locations[0]
+      old = { entry: { name: baseOf(location.key), bundle: location.path }, key: location.key }
     }
     const found = next || old
     if (!found) throw new Error('A new subtitle must include its index entry in the same commit: ' + file)
