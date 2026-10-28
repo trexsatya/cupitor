@@ -217,7 +217,29 @@ It creates a sibling backup folder (`<srtsDir>-repair-backup-XXXXXX`) containing
 the original files it changed or deleted. Review `git diff` before committing.
 
 If copies contain different text, nothing is written and the conflicting
-packs are listed. If they have *different timestamp ranges*, you can opt in
+packs are listed. To **read the actual subtitle text**, without opening raw
+bundle JSON (which escapes all line breaks), run:
+
+```bash
+# Print full readable SRTs from every pack containing a conflicting copy
+node tools/language/lang-manage.js repair --inspect
+
+# Show only conflicts for a particular YouTube video
+node tools/language/lang-manage.js repair --inspect --link gJKWuME2fhc
+
+# Save both versions as normal .srt files, along with a manifest naming
+# the original packs. Choose a new, empty directory outside srtsDir.
+node tools/language/lang-manage.js repair --exportDir ./out/srt-conflicts
+```
+
+The `--inspect` mode prints each version with timestamps and its pack name.
+`--exportDir` writes the **exact original SRT text** from each conflicting
+bundle, plus `manifest.json` recording the full subtitle filename and pack.
+Neither mode repairs, merges, or changes any existing bundle. You cannot
+combine these modes with `--apply`. The export destination must be an empty
+directory *outside* the SRT storage folder.
+
+If copies have *different timestamp ranges*, you can opt in
 to combining their SRT cues with:
 
 ```bash

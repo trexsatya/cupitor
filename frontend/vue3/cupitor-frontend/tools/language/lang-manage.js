@@ -45,6 +45,7 @@ import { translateBatch } from "./google-translate.js";
 import { saveHit, readIndex, writeIndex } from "./srt-store.js";
 import { planSrtImport, applySrtImport } from './srt-import.js';
 import { planBundleRepair, applyBundleRepair } from './bundle-repair.js';
+import { inspectBundleConflicts, formatBundleConflicts, exportBundleConflicts } from './bundle-inspect.js';
 import {
   isFullSrt,
   scanUncoveredOwners,
@@ -579,6 +580,14 @@ async function cmdPrune(cfg) {
 
 function cmdRepair(cfg) {
   const dir = cfg.srtsDir || (cfg.dataDir ? join(cfg.dataDir, 'srts') : '')
+  if (cfg.inspect || cfg.exportDir) {
+    if (cfg.apply) throw new Error('--inspect/--exportDir only examine copies; do not combine with --apply')
+    const conflicts = inspectBundleConflicts(dir, { link: cfg.link || '' })
+    log(`Found ${conflicts.length} differing duplicate subtitle track(s).`)
+    if (cfg.inspect) log(formatBundleConflicts(conflicts))
+    if (cfg.exportDir) log(JSON.stringify(exportBundleConflicts(dir, conflicts, cfg.exportDir), null, 2))
+    return
+  }
   const plan = planBundleRepair(dir, { merge: cfg.merge })
   log(JSON.stringify(plan.summary, null, 2))
   if (plan.blocked) {
