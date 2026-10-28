@@ -120,3 +120,8 @@ test('collect recognizes a local UTF-8 word-list file', () => {
     wordsFile: './wanted-words.txt', rareThreshold: 4, filmotMode: 'api',
   });
 });
+
+test('collect pagination offset is a nonnegative integer', () => {
+  expect(coerceFlags(parseArgs(['collect', '--start', '100']).flags).start).toBe(100);
+  expect(coerceFlags(parseArgs(['collect', '--start', '0']).flags).start).toBe(0);
+});
