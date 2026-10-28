@@ -75,10 +75,9 @@ export function createLocalSpeakOver({
       watchPos:null, awaiting:null, audio:null, tick:null, resetPosition:null,
     };
     session = st;
-    const myGeneration = generation;
     st.resetPosition = () => { st.watchPos = null; st.awaiting = null; };
     st.tick = () => {
-      if (session !== st || generation !== myGeneration) return;
+      if (session !== st) return;
       const pos = Number(st.element.currentTime);
       if (!Number.isFinite(pos)) return;
       const prev = st.watchPos;
