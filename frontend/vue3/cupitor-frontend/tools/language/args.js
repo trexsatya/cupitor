@@ -53,6 +53,7 @@ const NUMERIC = {
   channelLimit: "apiChannelLimit",
   channelGroups: "apiChannelGroups",
   apiCredits: "apiMaxCreditsPerWord",
+  apiBudget: "apiBudget",
   minSpan: "pruneMinSpanSec",
   window: "pruneWindowLines",
 };

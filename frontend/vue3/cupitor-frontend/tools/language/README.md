@@ -51,39 +51,63 @@ See `config.example.json` for a ready-to-edit copy.
 ## Steps
 
 
-### Approved F1 vocabulary: threshold five
+### Approved F1: one-click, automatically resumable collection
 
 The reviewed playlist-derived `tools/language/word-lists/f1.txt` contains
-1,828 unique candidate terms. A source-language-only audit of the existing
-Swedish subtitle library found **802** terms below the target of five distinct
-videos, with **2,410** additional video matches needed. The audit report is
-generated anew from the current data repository, so these values can change.
+1,828 unique candidate terms. Collection targets **five distinct Swedish
+subtitle videos per term**. The original pre-collection baseline was 802
+under-covered alternatives, but the collector always recalculates from the
+current data, including already merged captures.
 
-The dedicated GitHub Actions workflow
-[`F1 SRT coverage audit`](../../../../../.github/workflows/f1-srt-coverage.yml)
-runs a read-only audit when the branch is updated. After the workflow is
-available on the default branch, use **Run workflow** with `collect=true`
-and a small `chunk` (default 10) to collect live captions using the
-`FILMOT_API_KEY` repository Actions secret. The publishing credential
-`PAGES_DEPLOY_TOKEN` is also required. No key is ever committed.
+Open **Actions → F1 Swedish SRT coverage and auto-collection → Run workflow**
+on `master`. Enable **collect** and use these defaults:
 
-Each capture run has a per-word estimated credit cap of 15 and stores
-*source-language* SRTs on the separate data-repository branch
-`ai/f1-srt-threshold5`, **not directly on gh-pages**. The command reads from
-that branch on later runs and uploads a run report. The `start` input
-selects an offset within the currently under-covered words so unsuccessful
-searches do not permanently block later words. Review and merge the
-data-repository branch only after inspecting the generated SRTs.
+| Input | Default | Meaning |
+|---|---:|---|
+| collect | false | Opt in to charged API calls; off means audit only |
+| budget | 100 | Conservative maximum new Filmot credits in this run |
+| batch_size | 20 | Save each 20-word checkpoint to the review branch |
+| max_words | 120 | Upper bound on attempted words in one run |
+| skip_after | 2 | Stop retrying a word after two no-yield searches |
+
+The workflow requires repository Actions secrets `FILMOT_API_KEY` and
+`PAGES_DEPLOY_TOKEN`. The latter requires **Contents read/write** to
+`trexsatya.github.io`, and **Pull requests read/write** if you want the
+workflow to create review PRs automatically. No keys are committed.
+
+The first run starts **from the latest published `gh-pages`**, including
+merged PR #4, and creates a fresh review branch named
+`ai/f1-srt-threshold5-auto-RUN_ID-ATTEMPT`. If an open automatic F1 PR exists,
+later runs resume it and merge current `gh-pages` into the review branch
+before proceeding (abort on a real merge conflict). After merging that
+review PR, the next run creates another fresh branch; it never reuses a
+merged branch.
+
+New Swedish SRTs and the progress file
+`db/language/swedish/srt-collection/f1-state.json` are committed and
+pushed **after every batch**, so cancelled and quota-limited runs retain
+their prior completed work. Each batch recomputes missing coverage; it never
+collects additional videos for words already at 5/5. Terms which yield no
+new source videos repeatedly are skipped and reported as still outstanding,
+not incorrectly marked complete. Increase `skip_after` for a later retry.
+No run is allowed to exceed its configured conservative API-request budget;
+the workflow also retains the per-word estimated 15-credit limit.
+
+At the end, review the new data PR and merge it into `gh-pages` only after
+inspecting the captions. A run publishes **nothing directly** to the site.
+
+For local manual, targeted collection, the old `collect` command remains:
 
 ```bash
 node tools/language/lang-manage.js collect \
   --wordsFile tools/language/word-lists/f1.txt \
   --threshold 5 --chunk 0 --dry-run
 
-# Optional targeted batch, after securely setting FILMOT_API_KEY:
+# Local offline/interactive collection example after securely setting key:
 node tools/language/lang-manage.js collect \
   --wordsFile tools/language/word-lists/f1.txt \
-  --threshold 5 --start 0 --chunk 10 --api --no-translate --apiCredits 15
+  --threshold 5 --start 0 --chunk 10 \
+  --api --no-translate --apiCredits 15 --apiBudget 100
 ```
 
 ### On-demand SRT collection for a word list

@@ -1,56 +1,71 @@
-name: F1 SRT coverage audit
+name: F1 Swedish SRT coverage and auto-collection
 
 on:
   push:
-    branches: [feature/collect-f1-threshold5-20261028]
+    branches: [feature/auto-resume-f1-srt-20261028]
     paths:
-      - '.github/workflows/f1-srt-coverage.yml'
-      - 'frontend/vue3/cupitor-frontend/tools/language/**'
-      - 'frontend/vue3/cupitor-frontend/public/language/rare-words.js'
+      - .github/workflows/f1-srt-coverage.yml
+      - frontend/vue3/cupitor-frontend/tools/language/**
   workflow_dispatch:
     inputs:
       collect:
-        description: 'Capture one bounded F1 batch (requires stored GitHub Actions secrets)'
+        description: 'Automatically collect unfinished F1 words (otherwise only audit)'
+        required: true
         type: boolean
         default: false
-      start:
-        description: 'Skip this many currently under-covered words (0-based)'
+      budget:
+        description: 'Maximum new Filmot credits for the entire run'
+        required: true
         type: number
-        default: 0
-      chunk:
-        description: 'Maximum words in this batch'
+        default: 100
+      batch_size:
+        description: 'Words to process before each saved checkpoint'
+        required: true
         type: number
-        default: 10
+        default: 20
+      max_words:
+        description: 'Maximum attempted words in this run'
+        required: true
+        type: number
+        default: 120
+      skip_after:
+        description: 'Skip a word after this many searches with no new videos'
+        required: true
+        type: number
+        default: 2
 
 permissions:
   contents: read
 
+# Never allow two runs to write the same review branch concurrently.
 concurrency:
-  group: f1-srt-coverage-${{ github.ref }}
-  cancel-in-progress: true
+  group: f1-auto-collection
+  cancel-in-progress: false
 
 jobs:
-  coverage:
+  collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 180
     steps:
-      - name: Check out Cupitor tool
+      - name: Check out Cupitor tools
         uses: actions/checkout@v4
         with:
           path: source
           persist-credentials: false
 
-      - name: Check out Swedish SRT library
+      - name: Check out current published SRTs
         uses: actions/checkout@v4
         with:
           repository: trexsatya/trexsatya.github.io
           ref: gh-pages
+          fetch-depth: 0
           path: data
           token: ${{ secrets.PAGES_DEPLOY_TOKEN || github.token }}
           persist-credentials: true
           sparse-checkout: |
             db/language/swedish/srts
             db/language/swedish/vocabulary.txt
+            db/language/swedish/srt-collection
           sparse-checkout-cone-mode: false
 
       - name: Set up Node
@@ -58,27 +73,15 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Smoke-test collection matching
+      - name: Test auto-resume selection and credit safety
         working-directory: source/frontend/vue3/cupitor-frontend
         run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import { planCollection } from './tools/language/collect-plan.js';
-          const samples = [
-            { videoId: 'a1234567890', sv: 'Vi kan streta emot.', en: 'Fine' },
-            { videoId: 'a1234567890', sv: 'Streta emot något.', en: 'Okay' },
-            { videoId: 'b1234567890', sv: 'Annat här.', en: 'We streta.' },
-          ];
-          const sv = planCollection([{line:'streta'}], samples, 5, {sourceLang:'sv'});
-          assert.equal(sv[0].count, 1, 'one indexed Swedish video, despite duplicate bundles');
-          assert.equal(sv[0].missing, 4);
-          assert.deepEqual(sv[0].existingVideoIds, ['a1234567890']);
-          const en = planCollection([{line:'streta'}], samples, 5, {sourceLang:'en'});
-          assert.equal(en[0].count, 1, 'English-only mention does not affect Swedish count');
-          console.log('Coverage matching smoke test passed');
-          NODE
+          node --test tools/language/collect-auto.test.mjs tools/language/filmot-budget.test.mjs
+          node --check tools/language/collect-auto.js
+          node --check tools/language/lang-manage.js
+          node --check tools/language/filmot-api.js
 
-      - name: Plan all F1 deficits at a threshold of five
+      - name: Audit current published F1 SRT coverage
         working-directory: source/frontend/vue3/cupitor-frontend
         run: |
           node tools/language/lang-manage.js collect \
@@ -86,113 +89,111 @@ jobs:
             --threshold 5 --chunk 0 --dry-run \
             --dataDir "$GITHUB_WORKSPACE/data/db/language/swedish" \
             --srtsDir "$GITHUB_WORKSPACE/data/db/language/swedish/srts" \
-            --outDir "$RUNNER_TEMP/f1-srt-collection"
+            --outDir "$RUNNER_TEMP/f1-auto"
 
-      - name: Summarize deficits
-        if: success()
+      - name: Verify automatic batch selection in no-API dry run
+        working-directory: source/frontend/vue3/cupitor-frontend
         run: |
-          node - <<'NODE'
-          const fs = require('node:fs');
-          const p = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/f1-srt-collection/collect-plan.json', 'utf8'));
-          const h = Object.fromEntries([0,1,2,3,4,5].map(k => [k, 0]));
-          let needed = 0;
-          for (const w of p.selected) {
-            h[w.count] = (h[w.count] || 0) + 1;
-            needed += w.missing;
-          }
-          console.log(JSON.stringify({ threshold: p.threshold, underCovered: p.selected.length, totalAdditionalVideosNeeded: needed, existingSourceCounts: h }, null, 2));
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-            '## f1 threshold-5 coverage\n\nUnder-covered terms: **' + p.selected.length +
-            '**. Additional distinct video matches needed: **' + needed + '**.\n\n');
-          NODE
+          node tools/language/collect-auto.js \
+            --wordsFile tools/language/word-lists/f1.txt \
+            --dataDir "$GITHUB_WORKSPACE/data/db/language/swedish" \
+            --outDir "$RUNNER_TEMP/f1-auto" \
+            --dryRun true
 
-      - name: Save f1 coverage plan
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: f1-srt-coverage-plan
-          path: ${{ runner.temp }}/f1-srt-collection/collect-plan.json
-          if-no-files-found: warn
-          retention-days: 14
-
-      # Collection is never started by a push or by a coverage-only run.
-      # Secrets are only passed to the live capture step, never to the audit.
-      - name: Require secure Filmot and publishing credentials
+      - name: Verify secure credentials
         if: github.event_name == 'workflow_dispatch' && inputs.collect
         env:
           FILMOT_API_KEY: ${{ secrets.FILMOT_API_KEY }}
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
         run: |
-          if [[ -z "$FILMOT_API_KEY" ]]; then
-            echo '::error::Add FILMOT_API_KEY as a Cupitor Actions secret; do not paste it into YAML or logs.'
-            exit 1
-          fi
-          if [[ -z "$PAGES_DEPLOY_TOKEN" ]]; then
-            echo '::error::Add PAGES_DEPLOY_TOKEN for writes to trexsatya.github.io.'
+          if [[ -z "$FILMOT_API_KEY" || -z "$PAGES_DEPLOY_TOKEN" ]]; then
+            echo "::error::FILMOT_API_KEY and PAGES_DEPLOY_TOKEN are required as GitHub Actions secrets."
             exit 1
           fi
 
-      - name: Open or resume isolated data branch
+      - name: Create or resume a review branch from gh-pages
+        id: branch
         if: github.event_name == 'workflow_dispatch' && inputs.collect
+        env:
+          GH_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
         working-directory: data
         run: |
-          if git ls-remote --exit-code --heads origin 'refs/heads/ai/f1-srt-threshold5' >/dev/null; then
-            git fetch origin 'refs/heads/ai/f1-srt-threshold5'
-            git checkout -B ai/f1-srt-threshold5 FETCH_HEAD
+          set -euo pipefail
+          EXISTING="$(gh pr list --repo trexsatya/trexsatya.github.io --state open --limit 100 \
+            --json headRefName,title \
+            --jq '[.[] | select(.headRefName | startswith("ai/f1-srt-threshold5-auto-")) | .headRefName] | first // ""')"
+          if [[ -n "$EXISTING" ]]; then
+            echo "Resuming existing open F1 collection PR branch: $EXISTING"
+            git fetch origin "refs/heads/$EXISTING:refs/remotes/origin/$EXISTING"
+            git switch --create "$EXISTING" "refs/remotes/origin/$EXISTING"
+            git fetch origin "refs/heads/gh-pages:refs/remotes/origin/gh-pages"
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                merge --no-edit origin/gh-pages
+            DATA_BRANCH="$EXISTING"
           else
-            git checkout -b ai/f1-srt-threshold5
+            DATA_BRANCH="ai/f1-srt-threshold5-auto-${{ github.run_id }}-${{ github.run_attempt }}"
+            echo "Starting a new review branch from merged gh-pages: $DATA_BRANCH"
+            git switch --create "$DATA_BRANCH"
           fi
+          echo "DATA_BRANCH=$DATA_BRANCH" >> "$GITHUB_ENV"
 
-      - name: Restore successful Filmot API response cache
-        if: github.event_name == 'workflow_dispatch' && inputs.collect
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/f1-srt-collection/filmot-api-cache
-          key: filmot-f1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            filmot-f1-${{ runner.os }}-
-
-      - name: Collect one Filmot batch (source subtitles only)
-        id: capture
+      - name: Auto-collect, checkpoint and push each batch
         if: github.event_name == 'workflow_dispatch' && inputs.collect
         working-directory: source/frontend/vue3/cupitor-frontend
         env:
           FILMOT_API_KEY: ${{ secrets.FILMOT_API_KEY }}
+          GH_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
         run: |
-          node tools/language/lang-manage.js collect \
+          node tools/language/collect-auto.js \
             --wordsFile tools/language/word-lists/f1.txt \
-            --threshold 5 --start "${{ inputs.start }}" --chunk "${{ inputs.chunk }}" \
-            --api --no-translate --apiCredits 15 \
             --dataDir "$GITHUB_WORKSPACE/data/db/language/swedish" \
-            --srtsDir "$GITHUB_WORKSPACE/data/db/language/swedish/srts" \
-            --outDir "$RUNNER_TEMP/f1-srt-collection"
+            --gitDir "$GITHUB_WORKSPACE/data" \
+            --outDir "$RUNNER_TEMP/f1-auto" \
+            --branch "$DATA_BRANCH" \
+            --threshold 5 \
+            --budget "${{ inputs.budget }}" \
+            --batchSize "${{ inputs.batch_size }}" \
+            --maxWords "${{ inputs.max_words }}" \
+            --maxNoYield "${{ inputs.skip_after }}"
 
-      # Keep successful captures even if a later Filmot query exhausts quota.
-      - name: Save captured SRT packs to isolated review branch
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.collect
+      - name: Open or update the F1 subtitle review pull request
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.collect && steps.branch.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
         working-directory: data
+        shell: bash
         run: |
-          if [[ "$(git branch --show-current)" != "ai/f1-srt-threshold5" ]]; then
-            echo 'Data review branch not initialized; no data published.'
-            exit 1
+          set -euo pipefail
+          git fetch origin gh-pages
+          if [[ "$(git rev-list --count origin/gh-pages..HEAD)" == "0" ]]; then
+            echo "No changes to review."
+            exit 0
           fi
-          git add db/language/swedish/srts
-          if ! git diff --cached --quiet; then
-            git -c user.name='github-actions[bot]' \
-                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-                commit -m 'Capture f1 Swedish SRT examples toward five distinct videos per word'
-            git push origin HEAD:refs/heads/ai/f1-srt-threshold5
-          else
-            echo 'No new SRTs to commit.'
+          URL="$(gh pr list --repo trexsatya/trexsatya.github.io --head "$DATA_BRANCH" --state open \
+            --json url --jq '.[0].url // ""' || true)"
+          if [[ -z "$URL" ]]; then
+            URL="$(gh pr create --repo trexsatya/trexsatya.github.io --base gh-pages \
+              --head "$DATA_BRANCH" --title 'Review automatic F1 Swedish SRT captures (5 videos per word)' \
+              --body 'Resumable F1 subtitle collection. Generated Swedish SRT packs and progress state are checkpointed after each batch. Review before merging.' 2>&1)" || {
+                echo "::warning::Could not create review PR. Check whether PAGES_DEPLOY_TOKEN has Pull requests: Read and write permission."
+                echo "Create a PR from $DATA_BRANCH to gh-pages in trexsatya/trexsatya.github.io."
+                exit 0
+              }
           fi
+          echo "Review PR: $URL"
+          echo "### Review captions" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Save collection progress and errors
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.collect
+      - name: Save the latest collection report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: f1-srt-batch-report
+          name: f1-auto-collection-report
           path: |
-            ${{ runner.temp }}/f1-srt-collection/collect-plan.json
-            ${{ runner.temp }}/f1-srt-collection/collect-results.json
+            ${{ runner.temp }}/f1-auto/auto-summary.json
+            ${{ runner.temp }}/f1-auto/collect-plan.json
+            ${{ runner.temp }}/f1-auto/collect-results.json
+            ${{ runner.temp }}/f1-auto/collect-metrics.json
           if-no-files-found: warn
           retention-days: 30

@@ -173,6 +173,9 @@ async function cmdCollect(cfg) {
   for (const p of pending) log('  ' + p.line + ': ' + p.count + '/' + threshold + ', need ' + p.missing);
   log('Plan: ' + planPath);
   if (cfg.dryRun || !pending.length) return;
+  if (cfg.apiBudget !== undefined && (!Number.isSafeInteger(cfg.apiBudget) || cfg.apiBudget < 0)) {
+    throw new Error('collect --apiBudget must be a non-negative whole number.');
+  }
   if (cfg.filmotMode !== 'api') {
     throw new Error('collect currently uses the official Filmot API; run with --api and FILMOT_API_KEY.');
   }
@@ -183,15 +186,34 @@ async function cmdCollect(cfg) {
   const client = createFilmotApiClient({
     key: process.env.FILMOT_API_KEY,
     cacheDir: join(cfg.outDir, 'filmot-api-cache'),
-    delayMs: cfg.filmotDelayMs, log,
+    delayMs: cfg.filmotDelayMs, maxCredits: cfg.apiBudget ?? Infinity, log,
   });
-  const localIndex = readIndex(cfg.srtsDir);
-  const channels = await resolveCupitorChannels(
-    localIndex, client, join(cfg.outDir, 'filmot-api-channels.json'),
-    { channelLimit: cfg.apiChannelLimit }
-  );
   const reportPath = join(cfg.outDir, 'collect-results.json');
+  const metricsPath = join(cfg.outDir, 'collect-metrics.json');
   const report = [];
+  let channels = [];
+  const writeReport = () => {
+    writeJson(reportPath, report);
+    writeJson(metricsPath, {
+      apiCreditsUsed: client.spentCredits,
+      apiBudget: cfg.apiBudget ?? null,
+      providerCreditsRemaining: client.creditsRemaining,
+      stoppedByBudget: client.budgetRemaining < 2,
+      processed: report.length,
+    });
+  };
+  try {
+    channels = await resolveCupitorChannels(
+      readIndex(cfg.srtsDir), client, join(cfg.outDir, 'filmot-api-channels.json'),
+      { channelLimit: cfg.apiChannelLimit }
+    );
+  } catch (e) {
+    writeReport();
+    if (!e.budget) throw e;
+    log('Global Filmot credit budget prevents channel lookup; stopping safely.');
+    return;
+  }
+  writeReport();
   for (const planned of pending) {
     // Re-evaluate before each search: capturing one word may incidentally cover
     // another requested word. This prevents unnecessary paid API searches.
@@ -202,13 +224,13 @@ async function cmdCollect(cfg) {
     if (!current) {
       log('  ✓ ' + planned.line + ' already covered by other captures.');
       report.push({ word: planned.line, count: threshold, remaining: 0, added: 0 });
-      writeJson(reportPath, report);
+      writeReport();
       continue;
     }
     if (!isFilmotSearchable(current.line)) {
       log('  · ' + current.line + ' cannot be searched as a literal Filmot phrase.');
       report.push({ word: current.line, count: current.count, remaining: current.missing, skipped: 'not searchable' });
-      writeJson(reportPath, report);
+      writeReport();
       continue;
     }
     const quota = Math.min(current.missing, cfg.maxItemsPerWord);
@@ -228,7 +250,11 @@ async function cmdCollect(cfg) {
       });
     } catch (e) {
       report.push({ word: current.line, count: current.count, remaining: current.missing, error: e.message });
-      writeJson(reportPath, report);
+      writeReport();
+      if (e?.budget) {
+        log('  ! Filmot run budget reached: stopping after saving previous captures.');
+        break;
+      }
       if (e?.quota || /key was rejected/.test(e?.message || '')) {
         log('  ! Filmot quota/key problem: stopping; completed captures are preserved.');
         process.exitCode = 1;
@@ -267,12 +293,17 @@ async function cmdCollect(cfg) {
     const remaining = after ? after.missing : 0;
     report.push({
       word: current.line, before: current.count, count: finalCount, remaining,
-      added, searchComplete: result.complete, estimatedCredits: result.plannedCredits, errors,
+      added, searchComplete: result.complete, budgetExhausted: result.budgetExhausted,
+      estimatedCredits: result.plannedCredits, errors,
     });
-    writeJson(reportPath, report);
+    writeReport();
     log('  → ' + finalCount + '/' + threshold +
       (remaining ? ' (' + remaining + ' still needed)' : ' (target met)') +
       (result.complete ? '' : ' [credit cap hit]'));
+    if (result.budgetExhausted) {
+      log('Global Filmot credit budget reached; unprocessed words stay pending.');
+      break;
+    }
   }
   log('\nCollection report: ' + reportPath +
     '. Re-run the same command to resume any remaining gaps.');
