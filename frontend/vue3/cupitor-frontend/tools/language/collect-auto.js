@@ -26,7 +26,7 @@ const threshold = validPositive(flags.threshold ?? 5, 'threshold');
 const dryRun = flags.dryRun === 'true';
 if (!dryRun) {
   if (!process.env.FILMOT_API_KEY) throw new Error('FILMOT_API_KEY must be supplied through a secure environment secret');
-  if (!branch || !/^ai\/f1-srt-threshold5-auto-[0-9]+$/.test(branch)) {
+  if (!branch || !/^ai\/f1-srt-threshold5-auto-[0-9]+-[0-9]+$/.test(branch)) {
     throw new Error('Refusing to push outside an F1 auto review branch');
   }
   const current = execFileSync('git', ['-C',gitDir,'branch','--show-current'], {encoding:'utf8'}).trim();
