@@ -77,7 +77,7 @@ workflow to create review PRs automatically. No keys are committed.
 
 The first run starts **from the latest published `gh-pages`**, including
 merged PR #4, and creates a fresh review branch named
-`ai/f1-srt-threshold5-auto-RUN_ID`. If an open automatic F1 PR exists,
+`ai/f1-srt-threshold5-auto-RUN_ID-ATTEMPT`. If an open automatic F1 PR exists,
 later runs resume it and merge current `gh-pages` into the review branch
 before proceeding (abort on a real merge conflict). After merging that
 review PR, the next run creates another fresh branch; it never reuses a
