@@ -61,6 +61,7 @@ export function loadConfig(path, flags = {}) {
     try {
       file = JSON.parse(readFileSync(path, "utf8"));
     } catch (e) {
+      console.log("Failed to load file: "+ path, e);
       /* no/invalid config file — fall back to defaults + flags */
     }
   }
