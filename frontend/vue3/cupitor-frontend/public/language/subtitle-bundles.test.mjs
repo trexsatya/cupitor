@@ -169,3 +169,27 @@ test('new index entry reuses previously orphaned bundled tracks instead of dupli
   assert.equal(saved['orphan.sv.srt'], 'Old Swedish + captured')
   assert.equal(saved['orphan.en.srt'], 'Old English')
 })
+
+test('index-only removal must not silently delete an existing subtitle track', async () => {
+  const r = repository({ 'a.sv.srt': 'A original', 'b.sv.srt': 'B original' })
+  await assert.rejects(
+    r.apply([indexWrite(index => index.filter(e => e.name !== 'a'))]),
+    /silently remove existing track/
+  )
+  const documents = [...r.data.entries()].filter(([path]) => path.includes('/packs/pack-'))
+  assert(documents.some(([, value]) => JSON.parse(value).files['a.sv.srt'] === 'A original'))
+})
+
+test('capture aborts when the same subtitle key exists in multiple packs', async () => {
+  const r = repository({ 'a.sv.srt': 'A original' })
+  const storagePath = dir + '/storage.json'
+  const storage = JSON.parse(r.data.get(storagePath))
+  const duplicatePath = 'packs/pack-000002.json'
+  r.data.set(dir + '/' + duplicatePath, bundleText({ 'a.sv.srt': 'Conflicting copy' }))
+  storage.packs.push({ path: duplicatePath, revision: 1, files: 1,
+    bytes: bundleText({ 'a.sv.srt': 'Conflicting copy' }).length })
+  storage.nextPack = 3
+  r.data.set(storagePath, jsonText(storage))
+  await assert.rejects(r.apply([edit('a', () => 'New')]), /Duplicate subtitle track/)
+  assert.equal(JSON.parse(r.data.get(dir + '/' + duplicatePath)).files['a.sv.srt'], 'Conflicting copy')
+})
