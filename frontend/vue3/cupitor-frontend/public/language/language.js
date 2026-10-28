@@ -21668,7 +21668,6 @@ function _renderPracticeRecBar(note) {
   const unkept = st.takes.filter(t => !st.kept.has(t.url)).length
   const rec = st.phase === 'recording'
   const starting = st.phase === 'starting'
-  if (rec || starting) _studyChrome.show()
   // Mid-loop the video is being driven for the user; a second Rec on top of
   // that would pin a moment they did not choose.
   const busy = st.phase === 'playback'

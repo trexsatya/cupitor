@@ -32,6 +32,7 @@ export function installStudyChrome() {
   const viewNow = () => body.classList.contains('practice-mode') ? 'practice' : body.classList.contains('rec-playing') ? 'player' : null;
   const shown = el => !!el && !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
   let view = null, pointer = null, keyboard = false, swallow = null, releaseTimer = null, ignoreDoubleUntil = 0;
+  const persistentControls = '#practiceMode .practice-unflip,#practiceMode .practice-ctx-ctrl,#practiceMode .practice-play.practice-keep-visible,#practiceMode .practice-rec-bar';
   const controls = '#recPlayingBanner,#recPlayingTransport,#recPlayingMinimizeBtn,#recPlayingCloseBtn,#practiceMode .practice-topbar,#practiceMode .practice-nav,#practiceMode .practice-ctx-ctrl,#practiceMode .practice-rec-bar,#practiceAudio,#recPlayingAudio,#studyMediaDivider';
   const blocked = () => {
     if (selectionSearch?.hasSelection() || pointer || body.classList.contains('study-resizing')) return true;
@@ -72,8 +73,9 @@ export function installStudyChrome() {
   document.addEventListener('pointerdown', event => {
     if (!view || event.button !== 0 || event.target.closest('.ui-dialog')) return;
     keyboard = false;
-    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, hidden: !chrome.isVisible() && !event.target.closest('#practiceMode .practice-unflip,#practiceMode .practice-ctx-ctrl,#practiceMode .practice-play.practice-keep-visible,#practiceMode .practice-rec-bar'), moved: false, view };
-    if (!pointer.hidden) chrome.show();
+    const persistent = !!event.target.closest(persistentControls);
+    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, hidden: !chrome.isVisible() && !persistent, persistent, moved: false, view };
+    if (!pointer.hidden && !persistent) chrome.show();
   }, true);
   document.addEventListener('pointermove', event => {
     if (pointer && pointer.id === event.pointerId && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 10) pointer.moved = true;
@@ -81,7 +83,7 @@ export function installStudyChrome() {
   document.addEventListener('pointerup', event => {
     if (!pointer || pointer.id !== event.pointerId) return;
     const tap = pointer; pointer = null;
-    if (tap.view !== view) return;
+    if (tap.view !== view || tap.persistent) return;
     if (tap.moved) { if (!tap.hidden) chrome.show(); return; }
     if (tap.hidden) {
       const pending = swallow = { x: event.clientX, y: event.clientY, until: Date.now() + 700, video: event.target === wake };
@@ -91,7 +93,7 @@ export function installStudyChrome() {
     }
     chrome.show();
   }, true);
-  document.addEventListener('pointercancel', () => { const visible = pointer && !pointer.hidden; pointer = null; if (visible) chrome.show(); }, true);
+  document.addEventListener('pointercancel', () => { const visible = pointer && !pointer.hidden && !pointer.persistent; pointer = null; if (visible) chrome.show(); }, true);
   document.addEventListener('click', event => {
     if (!view || !swallow || !event.isTrusted || event.detail === 0) return;
     const pending = swallow; swallow = null; clearTimeout(releaseTimer); coverVideo();
@@ -102,7 +104,12 @@ export function installStudyChrome() {
   document.addEventListener('dblclick', event => {
     if (view && event.target.closest('#practiceMode .practice-card') && Date.now() < ignoreDoubleUntil) { event.preventDefault(); event.stopImmediatePropagation(); }
   }, true);
-  document.addEventListener('keydown', () => { if (view) { keyboard = true; chrome.show(); } }, true);
+  document.addEventListener('keydown', event => {
+    if (!view) return;
+    // Enter/Space on a persistent button activate it without waking chrome.
+    if ((event.key === 'Enter' || event.key === ' ') && event.target.closest(persistentControls)) return;
+    keyboard = true; chrome.show();
+  }, true);
   wake.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); chrome.show(); }
   });
