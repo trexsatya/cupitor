@@ -266,20 +266,23 @@ async function prepareDirectory(dir, storage, operations, read) {
       for (const key of Object.keys(files)) if (baseOf(key) === base) delete files[key]
     }
   }
-  // A capture must never silently remove unrelated subtitle tracks.
-  // Moves are allowed only when the exact original track is still present
-  // elsewhere in the planned packs; explicitly deleted tracks are exempt.
-  const explicitlyDeleted = new Set(operations.filter(operation => operation.delete && /\\.srt$/i.test(splitPath(operation.path).file))
-    .map(operation => splitPath(operation.path).file))
+  // Validate all loaded bundles, including newly allocated packs. A media
+  // moved to a new pack retains its keys; explicit track and index deletion
+  // are authorized, but no unrelated key may vanish.
+  const explicitlyDeleted = new Set(operations.filter(operation =>
+    operation.delete && /\.srt$/i.test(splitPath(operation.path).file)
+  ).map(operation => splitPath(operation.path).file))
+  const removedBases = new Set(before.filter(entry =>
+    !index.some(next => (next.bundleKey || next.name) === (entry.bundleKey || entry.name))
+  ).map(entry => entry.bundleKey || entry.name))
   const surviving = new Set()
-  for (const metadata of storage.packs) {
-    const contents = await load(metadata.path)
+  for (const contents of packs.values()) {
     for (const key of Object.keys(contents)) surviving.add(key)
   }
   for (const [path, original] of originals) {
-    const beforeFiles = parseBundle(original.content)
-    for (const key of Object.keys(beforeFiles)) {
-      if (!surviving.has(key) && !explicitlyDeleted.has(key)) {
+    for (const key of Object.keys(parseBundle(original.content))) {
+      if (!surviving.has(key) && !explicitlyDeleted.has(key) &&
+          !removedBases.has(baseOf(key))) {
         throw new Error('Subtitle write would silently remove existing track: ' + key +
           ' (from ' + path + '). Aborted without changes.')
       }
