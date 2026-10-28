@@ -33,7 +33,11 @@ See `config.example.json` for a ready-to-edit copy.
 | `excludeChannels` | `[]` | channel names to **hard-drop** (resolved via oembed, cached) |
 | `blacklistChannels` | `[]` | channel names to **soft de-prioritize** — captured only if non-blacklisted videos are insufficient (see `maxSearchPages`) |
 | `preferManualCaptions` | `true` | use auto-generated captions only to fill the quota |
-| **`filmotMode`** | `http` | how to fetch filmot: **`"browser"`** (recommended — real Chromium via Playwright, gets past the captcha wall) or `"http"` (pasted cookie, often blocked) |
+| **`filmotMode`** | `http` | **`"api"`** (recommended with a Filmot API key), `"browser"` (legacy), or `"http"` (legacy) |
+| `apiChannelLimit` | `10` | Number of most-represented channels in the local Cupitor SRT index to prioritize. Fewer = cheaper. |
+| `apiChannelGroups` | `2` | At most two discounted Filmot searches per term (5 UC IDs each). |
+| `apiMaxCreditsPerWord` | `30` | Conservative maximum estimated **new** search/details credits for one word; cached responses are free. |
+| `apiUnrestrictedFallback` | `true` | After discounted channel searches, search all other Filmot channels only if more examples are needed. |
 | **`browserHeadless`** | `false` | browser mode: `true` hides the window. Keep `false` the first time so you can log in / solve the captcha once |
 | **`browserUserDataDir`** | `./out/filmot-browser` | persistent Chromium profile dir — keeps you logged into filmot across runs |
 | `filmotCookie` | `""` | **http mode only:** your logged-in filmot `Cookie` header (or `FILMOT_COOKIE` env) |
@@ -64,6 +68,27 @@ node tools/language/lang-manage.js rare --category "Feelings, emotions"  # resca
 `--category` scans only that category's vocab lines (faster) and **merges** the
 result into `rare-words.json` — it replaces that category's entries and leaves the
 rest of the file untouched, so scanning one category never wipes the others.
+
+### Official Filmot API (recommended for step 2)
+
+Obtain a Filmot API key at <https://filmot.com/api-keys>. Keep it **outside the repo**, in your shell environment:
+
+```bash
+export FILMOT_API_KEY='your-api-key'
+node tools/language/lang-manage.js filmot --api --chunk 10
+# Tune the budget: at most 10 Cupitor channels, in 2 groups of 5.
+node tools/language/lang-manage.js filmot --api --channelLimit 10 --channelGroups 2 --apiCredits 30
+# Optional: only discounted Cupitor channels, do not broaden to the whole Filmot index.
+node tools/language/lang-manage.js filmot --api --no-unrestricted
+```
+
+First run `rare` and configure `srtsDir` to your **local Cupitor subtitle library**. The API mode reads `srtsDir/index.json`, ranks the channels represented there by distinct video count, then asks Filmot's `getvideos` API for the real UC channel IDs of representative videos. This is one batched, cached lookup for the chosen channel names, not a paid name lookup for every channel. If a channel name cannot be verified against the matching video's Filmot metadata, it is skipped instead of guessing an unrelated ID.
+
+For each rare word, API mode searches the priority channel IDs in **groups of at most five** (Filmot's discounted rate), stopping early when it finds enough verified transcript matches. It then searches **unrestricted** only when necessary. It requests the caption lines and preserves the existing `filmot-hits.json` format for translation and SRT import. The index may contain thousands of channels; searching each of them individually would be *more expensive* than one unrestricted request, so the priority set is intentionally bounded and configurable.
+
+The API client caches successful responses under `out/filmot-api-cache/`, channel IDs in `out/filmot-api-channels.json`, and retains standard `filmot-progress.json` resumability. A 429 quota response aborts the run without marking the affected word done. A per-word budget limits unexpected charges and unfinished words remain pending. The actual request costs/remaining allowance are printed from response headers when available. **No live request is performed until an API key is supplied.**
+
+The older HTTP/Playwright fetching methods remain available for existing configs and are described below.
 
 > **Getting past filmot's captcha.** filmot shows an hCaptcha "Verify You're
 > Human" wall to non-browser clients (it fingerprints the client, so a pasted
@@ -274,6 +299,9 @@ each key means).
 | `--category "<name>"` | scope rare/filmot/srt to one vocab category (case-insensitive substring); on `rare` it merges into the existing file | — |
 | `--reset` | clear the step's progress | — |
 | `--no-translate` | `srt` writes only the source snippet, no translation call | — |
+| `--api` | sets `filmotMode: "api"` | (config `filmotMode`) |
+| `--channelLimit N` / `--channelGroups N` | `apiChannelLimit` / `apiChannelGroups` | 10 / 2 |
+| `--apiCredits N` / `--no-unrestricted` | `apiMaxCreditsPerWord` / `apiUnrestrictedFallback: false` | 30 / unrestricted enabled |
 | `--browser` | sets `filmotMode: "browser"` | (config `filmotMode`) |
 | `--headed` / `--headless` | sets `browserHeadless: false` / `true` | headed |
 | `--minSpan N` | `pruneMinSpanSec` (a transcript counts as "full-video" if it spans > N s) | 60 |
@@ -292,7 +320,7 @@ each key means).
   possibly contain a word before running the (slow) Unicode-boundary regex, so the
   full scan is roughly 3× faster; it still takes a few minutes and prints progress.
 - **Resumability:** `filmot`/`srt` skip already-done units; just re-run to continue.
-- **Rate limits:** filmot and the free translate endpoint throttle
+- **Rate limits:** Filmot API quota is respected; 429 stops and preserves progress. Legacy filmot and the free translate endpoint throttle
   (`filmotDelayMs` / `translateDelayMs`) and retry with backoff; on failure a unit
   is left pending for the next run.
 - Tests: `npx jest "(public/language|tools/language)/.*\.test\.js$"`.
