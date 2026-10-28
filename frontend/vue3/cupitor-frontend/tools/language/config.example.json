@@ -11,10 +11,9 @@
   "excludeChannels": [],
   "blacklistChannels": [],
   "preferManualCaptions": true,
-  "filmotMode": "browser",
+  "filmotMode": "api",
   "browserHeadless": false,
   "browserUserDataDir": "./out/filmot-browser",
-  "filmotCookie": "(http mode only) paste your logged-in filmot Cookie (request) header, or set env FILMOT_COOKIE",
   "userAgent": "(http mode only) paste the same browser's User-Agent",
   "maxSearchPages": 3,
   "filmotDelayMs": 1500,
@@ -22,5 +21,9 @@
   "chunkFilmot": 10,
   "chunkSrt": 20,
   "srtConflict": "keep",
-  "defaultDurSec": 3
+  "defaultDurSec": 3,
+  "apiChannelLimit": 10,
+  "apiChannelGroups": 2,
+  "apiMaxCreditsPerWord": 30,
+  "apiUnrestrictedFallback": true
 }
