@@ -89,9 +89,9 @@ function summary(status, state, pending, spent, tried) {
   log(JSON.stringify(result,null,2));
 }
 const state = parseAutoState(json(statePath,null));
-let spent = 0, tried = 0, status = 'all-covered', pending = coverage();
+let spent = 0, tried = 0, status = dryRun ? 'audit-only' : 'all-covered', pending = coverage();
 log('Starting F1 auto collector: '+pending.length+' under-covered words; '+budget+' credit budget.');
-while (true) {
+while (!dryRun) {
   const batch = chooseAutoBatch(pending, state, {batchSize:Math.min(batchSize,maxWords-tried),maxNoYield});
   if (!pending.length) {status='all-covered';break;}
   if (!batch.length) {status=tried >= maxWords ? 'word-cap' : 'no-actionable-words';break;}
