@@ -2,7 +2,7 @@
 // Automatically collect F1 Swedish SRT gaps with a bounded credit budget.
 // Successful batches are committed and pushed before proceeding to the next.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, appendFileSync, unlinkSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { parseAutoState, chooseAutoBatch, updateAutoState, autoProgress, validPositive } from './collect-auto-plan.js';
 
@@ -56,6 +56,7 @@ function coverage() {
   if (!plan || !Array.isArray(plan.selected)) throw new Error('Missing complete coverage plan');
   return plan.selected;
 }
+let reviewPrChecked = false;
 function persist(state) {
   atomicJson(statePath, state);
   execFileSync('git',['-C',gitDir,'add','--','db/language/swedish/srts','db/language/swedish/srt-collection/f1-state.json']);
@@ -66,6 +67,26 @@ function persist(state) {
     '-c','user.email=41898282+github-actions[bot]@users.noreply.github.com',
     'commit','-m','Collect F1 Swedish subtitle contexts (resumable batch)']);
   execFileSync('git',['-C',gitDir,'push','origin','HEAD:refs/heads/'+branch]);
+  // Create the review PR after the FIRST successful checkpoint, rather than
+  // waiting until the job exits. This makes unexpected runner termination
+  // resumable via the same open PR on the next invocation.
+  if (process.env.GH_TOKEN && !reviewPrChecked) {
+    reviewPrChecked = true;
+    try {
+      const repo = 'trexsatya/trexsatya.github.io';
+      const opened = execFileSync('gh',['pr','list','--repo',repo,'--state','open',
+        '--head',branch,'--json','number'],{encoding:'utf8'});
+      if (!JSON.parse(opened).length) {
+        execFileSync('gh',['pr','create','--repo',repo,'--head',branch,
+          '--base','gh-pages',
+          '--title','Review automatic F1 Swedish SRT captures (5 videos per word)',
+          '--body','F1 automatic collection; each completed batch is checkpointed. Review the SRTs and progress file before merging.'],
+          {encoding:'utf8'});
+      }
+    } catch {
+      log('Could not open review PR automatically; the data branch has still been pushed. Check PAGES_DEPLOY_TOKEN pull-request permissions.');
+    }
+  }
 }
 function summary(status, state, pending, spent, tried) {
   const progress = autoProgress(pending, state, maxNoYield);
@@ -99,6 +120,12 @@ while (!dryRun) {
   if (tried >= maxWords) {status='word-cap';break;}
   const batchFile = join(outDir,'batch-words.txt');
   writeFileSync(batchFile,batch.map(w=>w.line).join('\n')+'\n');
+  // Never treat results from a previous batch as if they belong to a failed
+  // current invocation.
+  for (const file of ['collect-results.json','collect-metrics.json']) {
+    const path = join(outDir,file);
+    if (existsSync(path)) unlinkSync(path);
+  }
   const run = nodeCollect(['--wordsFile',batchFile,'--threshold',String(threshold),
     '--chunk','0','--api','--no-translate','--apiCredits','15',
     '--apiBudget',String(budget-spent),'--dataDir',dataDir,'--srtsDir',srtsDir,
