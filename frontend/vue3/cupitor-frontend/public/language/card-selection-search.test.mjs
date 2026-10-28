@@ -22,8 +22,8 @@ function boot(mode = 'player') {
     <div id="recPlayingSubs"><div class="rec-ps-main">Selected <mark>card</mark> text</div></div>
     <div id="recPlayingTransport"><button id="recPlayingSearchBtn" aria-label="Search this word" title="Original search">Search</button></div>
     <div id="practiceMode"><div class="practice-topbar"><button class="practice-search" aria-label="Search this word" title="Original search">Search</button></div>
-      <div class="practice-card"><div class="practice-front">Selected <mark>card</mark> text</div></div>
-      <div class="practice-nav"><button class="practice-prev">Previous</button><button class="practice-unflip" aria-label="Flip card">Flip</button><button class="practice-next">Next</button></div>
+      <div class="practice-card"><div class="practice-ctx-ctrl"><button class="practice-ctx-before" aria-label="Before"></button><button class="practice-ctx-after" aria-label="After"></button></div><div class="practice-front">Selected <mark>card</mark> text</div></div>
+      <div class="practice-nav"><button class="practice-prev">Previous</button><button class="practice-unflip" aria-label="Flip card">Flip</button><button class="practice-play">Play</button><button class="practice-next">Next</button></div>
     </div>
   </body></html>`, {runScripts: 'outside-only', pretendToBeVisual: true});
   const {window} = dom, doc = window.document;
@@ -183,5 +183,31 @@ test('actual Practice navigation clears only the previous card selection', () =>
     assert.equal(p.window._practiceIdx, 1);
     p.select(p.doc.getElementById('outside')); p.window.practiceNav(1);
     assert.equal(p.window.getSelection().toString(), 'Outside text', 'other page selections remain intact');
+  } finally {p.close();}
+});
+
+test('Practice context stays interactive and Speak over can keep Play visible while controls hide', () => {
+  const p = boot('practice');
+  try {
+    p.advance(3100);
+    for (const selector of ['.practice-ctx-before', '.practice-ctx-after']) {
+      const style = p.window.getComputedStyle(p.doc.querySelector(selector));
+      assert.equal(style.visibility, 'visible');
+      assert.notEqual(style.pointerEvents, 'none');
+    }
+    const play = p.doc.querySelector('.practice-play');
+    assert.equal(p.window.getComputedStyle(play).visibility, 'hidden');
+    play.classList.add('practice-keep-visible');
+    assert.equal(p.window.getComputedStyle(play).visibility, 'visible');
+    assert.notEqual(p.window.getComputedStyle(play).pointerEvents, 'none');
+    let plays = 0;
+    play.addEventListener('click', () => plays++);
+    play.dispatchEvent(new p.window.MouseEvent('pointerdown', {button: 0, bubbles: true}));
+    play.dispatchEvent(new p.window.MouseEvent('pointerup', {button: 0, bubbles: true}));
+    play.click();
+    assert.equal(plays, 1, 'persistent Play works on the first tap');
+    p.advance(3100);
+    play.classList.remove('practice-keep-visible');
+    assert.equal(p.window.getComputedStyle(play).visibility, 'hidden');
   } finally {p.close();}
 });

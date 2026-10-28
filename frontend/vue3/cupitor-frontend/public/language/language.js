@@ -21656,6 +21656,7 @@ function _renderPracticeRecBar(note) {
   const $bar = $('#practiceMode .practice-rec-bar')
   if (!$bar.length) return
   const st = _pracRec
+  $('#practiceMode .practice-play').toggleClass('practice-keep-visible', _practiceSpeakOverShown())
   $('#practiceMode .practice-speakover-toggle')
     .prop('checked', _practiceSpeakOverShown())
     .prop('disabled', !!st && st.phase !== 'idle')
