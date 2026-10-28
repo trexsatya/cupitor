@@ -160,7 +160,11 @@ async function check(browser, mobile) {
     // settings control is a toggle, so blindly clicking it would CLOSE the
     // panel and leave Edit hidden (especially after touch navigation).
     if (!(await page.locator('#practiceMode .practice-settings-panel').isVisible())) {
-      await click('#practiceMode .practice-settings')
+      // The earlier panel scenarios validate real touch. Here a second
+      // immediate mobile tap can be consumed by the study-chrome wake/gesture
+      // handler; dispatch a normal DOM click so this case tests the actual
+      // manual-card Edit/Save/Cancel flow, not the separate tap-wake behavior.
+      await page.locator('#practiceMode .practice-settings').evaluate(el => el.click())
     }
     await page.locator('#practiceMode .practice-settings-panel').waitFor({ state: 'visible' })
     await page.locator('#practiceMode .practice-edit').waitFor({ state: 'visible' })
