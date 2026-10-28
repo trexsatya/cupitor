@@ -105,13 +105,13 @@ test('non-overlapping differing SRTs require opt-in merge and preserve all cues'
   assert.equal(plan.blocked, false)
   const done = applyBundleRepair(plan)
   assert(existsSync(done.backup))
-  assert.deepEqual(parseSrtEntries(docs(root)[source]).map(x => x.text), ['Second cue', 'Hej'])
+  assert.deepEqual(parseSrtEntries(docs(root)[source]).map(x => x.text), ['Hej', 'Second cue'])
   assert.equal(planBundleRepair(root).summary.duplicateTracks, 0)
 })
 
 test('full existing preferred pack allocates a new pack and keeps index pointers valid', t => {
   const root = setup(t, {
-    maxFiles: 2,
+    maxFiles: 1,
     first: { [source]: cue('Hej'), [other]: cue('Other') },
     second: { [source]: cue('Hej'), [unrelated]: cue('Third') },
   })
