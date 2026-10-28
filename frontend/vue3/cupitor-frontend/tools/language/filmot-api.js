@@ -129,11 +129,18 @@ export function apiHit(row, word, regex, cfg, manual = null) {
 
 export function createFilmotApiClient({
   key, cacheDir, fetchFn = fetch, delayMs = 1500,
-  log = () => {},
+  maxCredits = Infinity, log = () => {},
 } = {}) {
   if (!key || !String(key).trim()) throw new Error('Set FILMOT_API_KEY before running filmot --api.');
   let lastRequest = 0;
   let credits = null;
+  let spentCredits = 0;
+  if (maxCredits !== Infinity && (!Number.isSafeInteger(maxCredits) || maxCredits < 0)) {
+    throw new Error('Maximum Filmot credits must be a non-negative integer.');
+  }
+  const estimate = (endpoint, params = {}) => endpoint === 'getsubtitlesearch'
+    ? (params.channelID ? API_COST.restricted : API_COST.unrestricted)
+    : API_COST.getvideos;
   const urlFor = (endpoint, params) => {
     const u = new URL(BASE + '/' + endpoint);
     for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, String(v));
@@ -147,6 +154,12 @@ export function createFilmotApiClient({
     if (path && existsSync(path)) {
       const cached = json(path, null);
       if (cached != null) return cached;
+    }
+    const upperCost = estimate(endpoint, params);
+    if (spentCredits + upperCost > maxCredits) {
+      const error = new Error('Filmot collection credit budget reached; remaining words are pending');
+      error.budget = true;
+      throw error;
     }
     for (let attempt = 0; attempt < maxTries; attempt++) {
       const wait = Math.max(0, lastRequest + delayMs - Date.now());
@@ -172,13 +185,22 @@ export function createFilmotApiClient({
       const data = await response.json();
       const remaining = response.headers?.get?.('X-API-Credits-Remaining');
       if (remaining != null) credits = Number(remaining);
+      const actualCost = Number(response.headers?.get?.('X-API-Credit-Cost'));
+      spentCredits += Number.isFinite(actualCost) && actualCost >= 0 ? actualCost : upperCost;
       log('    API ' + endpoint + ': ' + (response.headers?.get?.('X-API-Credit-Cost') || '?') +
         ' credit(s); ' + (credits == null ? 'remaining unknown' : credits + ' remaining'));
       if (path) save(path, data);
       return data;
     }
   }
-  return { get, hasCached, get creditsRemaining() { return credits; } };
+  return { get, hasCached,
+    canSpend(endpoint, params) {
+      return hasCached(endpoint, params) || spentCredits + estimate(endpoint, params) <= maxCredits;
+    },
+    get spentCredits() { return spentCredits; },
+    get budgetRemaining() { return maxCredits - spentCredits; },
+    get creditsRemaining() { return credits; },
+  };
 }
 
 export async function resolveCupitorChannels(index, client, cachePath, { channelLimit = 10 } = {}) {
@@ -219,12 +241,18 @@ export async function collectFilmotApiWord({
   const budget = Number(cfg.apiMaxCreditsPerWord ?? 30);
   let planned = 0;
   let complete = true;
+  let budgetExhausted = false;
 
   async function scan(term, channelIds, manual) {
     const params = apiSearchParams(term, cfg.lang, channelIds, manual);
     const cost = client.hasCached('getsubtitlesearch', params) ? 0 :
       channelIds.length ? API_COST.restricted : API_COST.unrestricted;
     if (planned + cost > budget) { complete = false; return false; }
+    if (client.canSpend && !client.canSpend('getsubtitlesearch', params)) {
+      budgetExhausted = true;
+      complete = false;
+      return false;
+    }
     planned += cost;
     const rows = apiRows(await client.get('getsubtitlesearch', params));
     const candidates = rows.map(row => ({
@@ -253,6 +281,9 @@ export async function collectFilmotApiWord({
       const detailCost = client.hasCached('getvideos', detailParams) ? 0 : API_COST.getvideos;
       if (planned + detailCost > budget) {
         complete = false;
+      } else if (client.canSpend && !client.canSpend('getvideos', detailParams)) {
+        complete = false;
+        budgetExhausted = true;
       } else {
         planned += detailCost;
         const records = apiRows(await client.get('getvideos', detailParams));
@@ -294,5 +325,5 @@ export async function collectFilmotApiWord({
       if (hits.length >= cfg.maxItemsPerWord || !complete) break;
     }
   }
-  return { hits, complete, plannedCredits: planned, restrictedGroups: groups.length };
+  return { hits, complete, budgetExhausted, plannedCredits: planned, restrictedGroups: groups.length };
 }
