@@ -5140,3 +5140,49 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
     user-select: text;
     -webkit-user-select: text;
 }
+
+
+/* Native Speak Over for an MP3/WAV/MP4 opened from the device. */
+#localSpeakOverBar {
+  box-sizing: border-box; clear: both; width: min(100%, 700px);
+  margin: 12px 0 18px; padding: 12px;
+  background: #f6faf8; border: 1px solid #d8e6dd;
+  border-radius: 12px; color: #2b4538; font-size: 13px;
+}
+#localSpeakOverBar .local-sprec-heading {
+  font-size: 14px; font-weight: 700; margin-bottom: 9px;
+}
+#localSpeakOverBar .local-sprec-note {
+  font-weight: 400; color: #617b6d; font-size: 12px;
+}
+#localSpeakOverBar .local-sprec-controls {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+#localSpeakOverBar .local-sprec-rec {
+  min-height: 42px; font-weight: 700; border-radius: 9px;
+}
+#localSpeakOverBar .local-sprec-rec.recording { color: #a62229; border-color: #d87881; }
+#localSpeakOverBar .local-sprec-status { flex: 1 1 140px; color: #4d6d5a; }
+#localSpeakOverBar .local-sprec-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+}
+#localSpeakOverBar .local-sprec-takes {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px;
+}
+#localSpeakOverBar .local-sprec-take-row {
+  display: inline-flex; align-items: center;
+  border-radius: 8px; border: 1px solid #dce8df; overflow: hidden;
+}
+#localSpeakOverBar .local-sprec-take-row button {
+  border-radius: 0; border: 0; min-height: 38px;
+}
+#localSpeakOverBar .local-sprec-delete-take { font-size: 18px; }
+#localSpeakOverBar .local-sprec-message {
+  margin: 9px 0 0; font-size: 12px; color: #596f60;
+  overflow-wrap: anywhere;
+}
+#localSpeakOverBar button:disabled { opacity: .45; cursor: default; }
+@media (max-width: 520px) {
+  #localSpeakOverBar { width: 100%; }
+  #localSpeakOverBar .local-sprec-rec { flex: 0 0 auto; }
+}
