@@ -132,7 +132,7 @@ jobs:
                 merge --no-edit origin/gh-pages
             DATA_BRANCH="$EXISTING"
           else
-            DATA_BRANCH="ai/f1-srt-threshold5-auto-${{ github.run_id }}"
+            DATA_BRANCH="ai/f1-srt-threshold5-auto-${{ github.run_id }}-${{ github.run_attempt }}"
             echo "Starting a new review branch from merged gh-pages: $DATA_BRANCH"
             git switch --create "$DATA_BRANCH"
           fi
