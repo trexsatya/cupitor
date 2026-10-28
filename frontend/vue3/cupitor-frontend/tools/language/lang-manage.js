@@ -38,6 +38,7 @@ import {
   isChallengePage,
 } from "./filmot-fetch.js";
 import { collectRankedPool } from "./filmot-collect.js";
+import { createFilmotApiClient, resolveCupitorChannels, collectFilmotApiWord } from "./filmot-api.js";
 import { resolveChannel, loadChannelCache, saveChannelCache } from "./youtube-channel.js";
 import { translateBatch } from "./google-translate.js";
 import { saveHit, readIndex, writeIndex } from "./srt-store.js";
@@ -189,6 +190,60 @@ async function cmdFilmot(cfg) {
   const channelCache = loadChannelCache(channelCachePath);
   const excludeChannels = cfg.excludeChannels || [];
   const blacklistChannels = cfg.blacklistChannels || [];
+
+  if (cfg.filmotMode === "api") {
+    // The locally indexed Cupitor transcripts provide channel names and
+    // representative video IDs. Filmot resolves their UC IDs in one batch.
+    // No API key or user data is committed to the repository.
+    const key = process.env.FILMOT_API_KEY;
+    if (!key) throw new Error('Set FILMOT_API_KEY to run filmot --api (never store the key in config.json).');
+    const client = createFilmotApiClient({
+      key, cacheDir: join(cfg.outDir, "filmot-api-cache"),
+      delayMs: cfg.filmotDelayMs, log,
+    });
+    const localIndex = readJson(join(cfg.srtsDir, "index.json"), []);
+    const channels = await resolveCupitorChannels(
+      localIndex, client, join(cfg.outDir, "filmot-api-channels.json"),
+      { channelLimit: cfg.apiChannelLimit }
+    );
+    const known = channels.filter(ch => ch.channelid);
+    log(`Cupitor: ${localIndex.length} indexed media, ${channels.length} priority channels, ${known.length} resolved UC IDs.`);
+    if (!known.length) log('No channel IDs resolved; the API will use unrestricted searches.');
+    const restrictedGroups = Math.ceil(known.length / 5);
+    log(`Filmot API: at most ${Math.min(cfg.apiChannelGroups, restrictedGroups)} discounted searches per term, then unrestricted fallback if needed.`);
+    for (const word of words) {
+      const entry = byLine.get(word);
+      const expanded = entry ? entry.expanded : expandWords(word, cfg.lang);
+      const regex = buildRareWordRegex(expanded);
+      const terms = searchTermsForWord(expanded);
+      log(`\n▶ "${word}" → ${terms.join(' | ')}`);
+      try {
+        const result = await collectFilmotApiWord({
+          word, terms, regex, cfg, channels, client, log,
+        });
+        // A throttling/quota/network error must never mark a word complete.
+        // If a credit cap is reached, retain any hits but retry on the next run.
+        const old = hits[word] || [];
+        const seen = new Set(result.hits.map(x => x.videoId));
+        hits[word] = [...result.hits, ...old.filter(x => !seen.has(x.videoId))]
+          .slice(0, cfg.maxItemsPerWord);
+        writeJson(hitsPath, hits);
+        if (result.complete) markDone(progressPath, word);
+        log(`  → ${hits[word].length} hit(s), estimated ${result.plannedCredits} new credits` +
+          (result.complete ? '' : ' (credit cap reached: word NOT marked done)'));
+      } catch (e) {
+        if (e?.quota) {
+          log('Filmot API credits exhausted (429). Stopping safely; remaining words stay pending.');
+          break;
+        }
+        log(`  ! API failed for "${word}": ${e.message}; word remains pending.`);
+        if (/key was rejected/.test(e?.message || '')) break;
+      }
+    }
+    const after = progressSummary(allWords, loadProgress(progressPath).doneKeys);
+    log(`\nfilmot API: ${after.done}/${after.total} done. Wrote ${hitsPath}`);
+    return;
+  }
 
   // Build a page fetcher: a real browser (recommended — filmot fingerprints
   // plain HTTP even with a login cookie) or raw HTTP with a pasted cookie.
