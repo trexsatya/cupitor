@@ -51,6 +51,41 @@ See `config.example.json` for a ready-to-edit copy.
 ## Steps
 
 
+### Approved F1 vocabulary: threshold five
+
+The reviewed playlist-derived `tools/language/word-lists/f1.txt` contains
+1,828 unique candidate terms. A source-language-only audit of the existing
+Swedish subtitle library found **802** terms below the target of five distinct
+videos, with **2,410** additional video matches needed. The audit report is
+generated anew from the current data repository, so these values can change.
+
+The dedicated GitHub Actions workflow
+[`F1 SRT coverage audit`](../../../../.github/workflows/f1-srt-coverage.yml)
+runs a read-only audit when the branch is updated. After the workflow is
+available on the default branch, use **Run workflow** with `collect=true`
+and a small `chunk` (default 10) to collect live captions using the
+`FILMOT_API_KEY` repository Actions secret. The publishing credential
+`PAGES_DEPLOY_TOKEN` is also required. No key is ever committed.
+
+Each capture run has a per-word estimated credit cap of 15 and stores
+*source-language* SRTs on the separate data-repository branch
+`ai/f1-srt-threshold5`, **not directly on gh-pages**. The command reads from
+that branch on later runs and uploads a run report. The `start` input
+selects an offset within the currently under-covered words so unsuccessful
+searches do not permanently block later words. Review and merge the
+data-repository branch only after inspecting the generated SRTs.
+
+```bash
+node tools/language/lang-manage.js collect \
+  --wordsFile tools/language/word-lists/f1.txt \
+  --threshold 5 --chunk 0 --dry-run
+
+# Optional targeted batch, after securely setting FILMOT_API_KEY:
+node tools/language/lang-manage.js collect \
+  --wordsFile tools/language/word-lists/f1.txt \
+  --threshold 5 --start 0 --chunk 10 --api --no-translate --apiCredits 15
+```
+
 ### On-demand SRT collection for a word list
 
 Use **collect** when you want at least N *different subtitle videos* containing
