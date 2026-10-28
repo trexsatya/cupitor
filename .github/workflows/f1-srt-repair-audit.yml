@@ -1,0 +1,65 @@
+name: Inspect F1 subtitle bundle duplication
+
+on:
+  push:
+    branches: [repair/f1-bundle-conflicts-20261028]
+    paths:
+      - .github/workflows/f1-srt-repair-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Get Cupitor repair tools
+        uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Get captured SRT review branch
+        uses: actions/checkout@v4
+        with:
+          repository: trexsatya/trexsatya.github.io
+          ref: ai/f1-srt-threshold5
+          path: data
+          persist-credentials: false
+          sparse-checkout: |
+            db/language/swedish/srts
+          sparse-checkout-cone-mode: false
+
+      - name: Check exact conflicting subtitle copies
+        working-directory: source/frontend/vue3/cupitor-frontend
+        run: |
+          node tools/language/lang-manage.js repair \
+            --srtsDir "$GITHUB_WORKSPACE/data/db/language/swedish/srts" \
+            --inspect --link Y4S4WZ0vj0w | tee "$RUNNER_TEMP/duplicate-inspection.txt"
+
+      - name: Preview safe merge across all duplicates
+        working-directory: source/frontend/vue3/cupitor-frontend
+        shell: bash
+        run: |
+          set +e
+          node tools/language/lang-manage.js repair \
+            --srtsDir "$GITHUB_WORKSPACE/data/db/language/swedish/srts" \
+            --merge > "$RUNNER_TEMP/repair-preview.txt" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/repair-preview.txt"
+          echo "Repair preview status: $status"
+          echo "REPAIR_PREVIEW_STATUS=$status" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Save readable duplicate inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f1-bundle-duplicate-inspection
+          path: |
+            ${{ runner.temp }}/duplicate-inspection.txt
+            ${{ runner.temp }}/repair-preview.txt
+          retention-days: 30
+          if-no-files-found: warn
