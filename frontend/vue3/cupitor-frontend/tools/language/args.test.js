@@ -113,3 +113,10 @@ test('official Filmot API flags select channel-first mode and cap new credit spe
     apiUnrestrictedFallback: false,
   });
 });
+
+test('collect recognizes a local UTF-8 word-list file', () => {
+  const cli = parseArgs(['collect', '--wordsFile', './wanted-words.txt', '--threshold', '4', '--api']);
+  expect(coerceFlags(cli.flags)).toMatchObject({
+    wordsFile: './wanted-words.txt', rareThreshold: 4, filmotMode: 'api',
+  });
+});
