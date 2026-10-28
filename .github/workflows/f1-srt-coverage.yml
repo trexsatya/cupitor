@@ -76,7 +76,7 @@ jobs:
       - name: Test auto-resume selection and credit safety
         working-directory: source/frontend/vue3/cupitor-frontend
         run: |
-          node --test tools/language/collect-auto.test.mjs
+          node --test tools/language/collect-auto.test.mjs tools/language/filmot-budget.test.mjs
           node --check tools/language/collect-auto.js
           node --check tools/language/lang-manage.js
           node --check tools/language/filmot-api.js
@@ -90,6 +90,15 @@ jobs:
             --dataDir "$GITHUB_WORKSPACE/data/db/language/swedish" \
             --srtsDir "$GITHUB_WORKSPACE/data/db/language/swedish/srts" \
             --outDir "$RUNNER_TEMP/f1-auto"
+
+      - name: Verify automatic batch selection in no-API dry run
+        working-directory: source/frontend/vue3/cupitor-frontend
+        run: |
+          node tools/language/collect-auto.js \
+            --wordsFile tools/language/word-lists/f1.txt \
+            --dataDir "$GITHUB_WORKSPACE/data/db/language/swedish" \
+            --outDir "$RUNNER_TEMP/f1-auto" \
+            --dryRun true
 
       - name: Verify secure credentials
         if: github.event_name == 'workflow_dispatch' && inputs.collect
