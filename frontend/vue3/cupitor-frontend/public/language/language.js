@@ -14864,7 +14864,7 @@ async function _openRichCardEditor($box, label) {
 }
 window._openRichCardEditor = _openRichCardEditor
 
-function _openManualEntryEditor(playlistName, existing) {
+function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave = true } = {}) {
   if (_refuseReadOnlyPlaylist(playlistName)) return
   // A minimized editor still holds an unsaved card, and the body is rebuilt
   // below — opening on top of it would throw that card away without asking.
@@ -15615,7 +15615,12 @@ function _openManualEntryEditor(playlistName, existing) {
       [isEdit ? 'Save' : 'Add']: async function () {
         const $btn = $(this)
         const ok = await finish()
-        if (ok) { try { $btn.dialog('close') } catch (_) {} openRecordingReviewDialog() }
+        if (ok) {
+          try { $btn.dialog('close') } catch (_) {}
+          // Direct edits from Practice return to the current card. Only
+          // playlist-driven editing should reopen the playlist review.
+          if (showPlaylistAfterSave) openRecordingReviewDialog()
+        }
       },
       'Cancel': function () { try { $(this).dialog('close') } catch (_) {} }
     }
@@ -21086,7 +21091,7 @@ function _editCurrentPracticeCard() {
   const found = _storedManualCard(it)
   if (!found) { alert('Cannot locate this card in its playlist.'); return }
   if (_refuseReadOnlyPlaylist(found.name)) return
-  _openManualEntryEditor(found.name, found.item)
+  _openManualEntryEditor(found.name, found.item, { showPlaylistAfterSave: false })
   // When the editor goes, bring the edit onto the card on screen. Saving can
   // replace the stored object, so look it up again rather than reuse it.
   // Namespaced and replaced each time, so repeated Edits never stack up
