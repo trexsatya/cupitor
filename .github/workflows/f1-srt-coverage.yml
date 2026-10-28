@@ -1,0 +1,82 @@
+name: F1 SRT coverage audit
+
+on:
+  push:
+    branches: [feature/collect-f1-threshold5-20261028]
+    paths:
+      - '.github/workflows/f1-srt-coverage.yml'
+      - 'frontend/vue3/cupitor-frontend/tools/language/**'
+      - 'frontend/vue3/cupitor-frontend/public/language/rare-words.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: f1-srt-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out Cupitor tool
+        uses: actions/checkout@v4
+        with:
+          path: source
+          persist-credentials: false
+
+      - name: Check out Swedish SRT library
+        uses: actions/checkout@v4
+        with:
+          repository: trexsatya/trexsatya.github.io
+          ref: gh-pages
+          path: data
+          persist-credentials: false
+          sparse-checkout: |
+            db/language/swedish/srts
+            db/language/swedish/vocabulary.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Plan all F1 deficits at a threshold of five
+        working-directory: source/frontend/vue3/cupitor-frontend
+        run: |
+          node tools/language/lang-manage.js collect \
+            --wordsFile tools/language/word-lists/f1.txt \
+            --threshold 5 --chunk 0 --dry-run \
+            --dataDir "$GITHUB_WORKSPACE/data/db/language/swedish" \
+            --srtsDir "$GITHUB_WORKSPACE/data/db/language/swedish/srts" \
+            --outDir "$RUNNER_TEMP/f1-srt-collection"
+
+      - name: Summarize deficits
+        if: success()
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const p = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/f1-srt-collection/collect-plan.json', 'utf8'));
+          const h = Object.fromEntries([0,1,2,3,4,5].map(k => [k, 0]));
+          let needed = 0;
+          for (const w of p.selected) {
+            h[w.count] = (h[w.count] || 0) + 1;
+            needed += w.missing;
+          }
+          console.log(JSON.stringify({ threshold: p.threshold, underCovered: p.selected.length, totalAdditionalVideosNeeded: needed, existingSourceCounts: h }, null, 2));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            '## f1 threshold-5 coverage\n\nUnder-covered terms: **' + p.selected.length +
+            '**. Additional distinct video matches needed: **' + needed + '**.\n\n');
+          NODE
+
+      - name: Save f1 coverage plan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f1-srt-coverage-plan
+          path: ${{ runner.temp }}/f1-srt-collection/collect-plan.json
+          if-no-files-found: warn
+          retention-days: 14
