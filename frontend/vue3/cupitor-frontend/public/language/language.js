@@ -13904,7 +13904,9 @@ async function _openReplaceItemDialog(st, w, idx, opts = {}) {
   const arr = recObj.items && recObj.items[st] && recObj.items[st][w]
   const it = arr && arr[idx]
   if (!it || _isManualItem(it)) return
-  const searchWord = String(it.searchText || it.word || w || '').trim()
+  // searchText can contain the broad query that originally captured this
+  // card. Replace the matched word/phrase, rather than all query alternatives.
+  const searchWord = String(it.word || w || it.searchText || '').trim()
   if (!searchWord) return
   const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().code) || 'sv'
 
