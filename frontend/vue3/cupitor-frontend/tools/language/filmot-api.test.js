@@ -227,3 +227,29 @@ test('nonmatching complete transcripts never trigger extra getvideos credits', a
   });
   expect(calls.every(call => call.endpoint === 'getsubtitlesearch')).toBe(true);
 });
+
+
+test('targeted Filmot collection excludes videos already covering the word', async () => {
+  const calls = [];
+  const client = {
+    hasCached: () => false,
+    get: async (endpoint, params) => {
+      calls.push({ endpoint, params });
+      if (endpoint === 'getsubtitlesearch') {
+        return { result: [
+          responseRow(vid[0], 'One', sampleLines),
+          responseRow(vid[1], 'One', sampleLines),
+        ] };
+      }
+      throw new Error('Should not need detail lookup');
+    },
+  };
+  const res = await collectFilmotApiWord({
+    word: 'gäller', terms: ['gäller'], regex: /gäller/,
+    cfg: { ...config, maxItemsPerWord: 1, apiUnrestrictedFallback: false },
+    channels: [{ channelid: ids[0] }], client,
+    excludedVideoIds: [vid[0]],
+  });
+  expect(res.hits.map(hit => hit.videoId)).toEqual([vid[1]]);
+  expect(calls.every(call => call.endpoint === 'getsubtitlesearch')).toBe(true);
+});
