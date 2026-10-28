@@ -14,6 +14,20 @@ export function isLocalMediaFile(name) {
   return /\.(mp3|wav|mp4)$/i.test(String(name || ''));
 }
 
+export async function readLocalSubtitleText(file) {
+  const bytes = new Uint8Array(await new Response(file).arrayBuffer());
+  let encoding = 'utf-8';
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) encoding = 'utf-16le';
+  else if (bytes[0] === 0xfe && bytes[1] === 0xff) encoding = 'utf-16be';
+  let text;
+  try { text = new TextDecoder(encoding, {fatal:true}).decode(bytes); }
+  catch (error) {
+    if (encoding !== 'utf-8') throw error;
+    text = new TextDecoder('windows-1252').decode(bytes);
+  }
+  return text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+}
+
 export function localSubtitleRank(mediaName, subtitleName, targetLanguage = 'sv') {
   const stem = normalised(localMediaStem(mediaName));
   const name = normalised(subtitleName);
@@ -53,8 +67,8 @@ export function matchingEnglishSubtitle(mediaName, files, primary) {
 
 // UI integration. onPlay owns player state, while this module owns only the
 // temporary File handles and their selection.
-export function openLocalSubtitlePicker({files, targetLanguage = 'sv', onPlay}) {
-  const mediaFile = (files || []).find(file => isLocalMediaFile(file && file.name));
+export function openLocalSubtitlePicker({files, mediaFile: currentMedia, targetLanguage = 'sv', attachOnly = false, onPlay}) {
+  const mediaFile = currentMedia || (files || []).find(file => isLocalMediaFile(file && file.name));
   if (!mediaFile) {
     alert('Choose an MP3, WAV or MP4 media file first.');
     return;
@@ -82,8 +96,10 @@ export function openLocalSubtitlePicker({files, targetLanguage = 'sv', onPlay}) 
   const $input = $('<input type="file" multiple accept=".srt" aria-label="Choose SRT files">')
     .hide().appendTo($dlg);
   const $footer = $('<div class="local-subtitle-actions"></div>').appendTo($dlg);
-  const $use = $('<button type="button" class="lang-tool-btn">Use subtitle & play</button>').appendTo($footer);
-  const $without = $('<button type="button" class="lang-tool-btn">Play without subtitles</button>').appendTo($footer);
+  const $use = $('<button type="button" class="lang-tool-btn"></button>')
+    .text(attachOnly ? 'Apply subtitles' : 'Use subtitle & play').appendTo($footer);
+  const $without = $('<button type="button" class="lang-tool-btn"></button>')
+    .text(attachOnly ? 'Remove subtitles' : 'Play without subtitles').appendTo($footer);
   const $cancel = $('<button type="button" class="lang-tool-btn">Cancel</button>').appendTo($footer);
 
   function render() {
@@ -134,8 +150,12 @@ export function openLocalSubtitlePicker({files, targetLanguage = 'sv', onPlay}) 
   $browse.on('click', () => $input.trigger('click'));
   $input.on('change', function () {
     for (const file of Array.from(this.files || [])) {
-      if (/\.srt$/i.test(file.name) && !subtitleFiles.some(old =>
-        old.name === file.name && old.size === file.size && old.lastModified === file.lastModified)) {
+      if (/\.srt$/i.test(file.name)) {
+        const index = subtitleFiles.findIndex(old => old.name === file.name);
+        if (index >= 0) {
+          if (selected === subtitleFiles[index]) selected = file;
+          subtitleFiles.splice(index, 1);
+        }
         subtitleFiles.push(file);
       }
     }
@@ -168,10 +188,11 @@ export function openLocalSubtitlePicker({files, targetLanguage = 'sv', onPlay}) 
   $without.on('click', () => play(false));
   $cancel.on('click', () => $dlg.dialog('close'));
   $dlg.dialog({
-    title: 'Select subtitles',
+    title: attachOnly ? 'Change subtitles' : 'Select subtitles',
     width: Math.max(280, Math.min(510, window.innerWidth - 24)),
     maxHeight: window.innerHeight - 24,
-    modal: false,
+    modal: true,
+    resizable: false,
     close: function () {
       const input = document.getElementById('localFiles');
       if (input) input.value = '';

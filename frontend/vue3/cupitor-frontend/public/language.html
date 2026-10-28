@@ -191,7 +191,7 @@
 <body style="padding: 0.5em;">
 
 <button id="scrollButton" style="display: none;"  data-direction="down">&#x25BC;</button>
-<div>
+<div id="languageColumns">
     <div style="float: left; width: 59%; position: relative;" class="fl-left">
         <div id="mainControlInputs" style="clear: both">
             <!-- Primary toolbar: always visible -->
@@ -455,9 +455,11 @@
                     </span>
                 </div>
                 <div id="localMediaContainer" style="display: none; margin-top: 4px;">
-                    <input type="file" accept="video/*,audio/*,.srt,.json" multiple="multiple" id="localFiles"
+                    <label for="localFiles" class="lang-tool-btn local-file-open">Open audio or video</label>
+                    <button type="button" id="localResumePlayer" class="lang-tool-btn" style="display:none;">Return to local player</button>
+                    <input type="file" class="local-file-input" aria-label="Open local media and subtitles" accept="video/*,audio/*,.srt,.json" multiple="multiple" id="localFiles"
                            onchange="loadLocalFiles()">
-                    <div class="local-subtitle-note" style="font-size:12px;opacity:.75;margin-top:5px;">Choose audio/video and optional SRT files. Matching subtitles appear first.</div>
+                    <div class="local-subtitle-note">MP3, WAV or MP4. You can add SRT subtitles now or during playback.</div>
                 </div>
                 </div>
 
@@ -635,6 +637,13 @@
         </div>
 
         <div id="localMedia" style="float: left; margin-top: 1.5em;">
+            <div id="localMediaHeader" style="display:none;">
+                <div class="local-media-title"><strong id="localMediaName"></strong>
+                    <button type="button" id="localClosePlayer" class="lang-tool-btn" aria-label="Minimize local player">−</button>
+                </div>
+                <div id="localSubtitleStatus" role="status"></div>
+                <input type="file" id="localSubtitleFiles" class="local-file-input" accept=".srt" multiple aria-label="Add SRT subtitles">
+            </div>
             <audio id="localAudio" src="" width="700" height="500" style="display: none;"></audio>
 
             <div id="localVideoContainer">
@@ -650,7 +659,7 @@
     </div>
 
     <div style="float: left; left: 2%; width: 40%; position: relative; border-left: 1px solid blue; margin-bottom: 12em;"
-         class="fl-right">
+         class="fl-right" id="subtitleColumn">
         <div style="display: none;" id="mediaRelatedContainer">
             <div style="margin-top: 8em; position: absolute; bottom: 0; right: 4em;background-color: springgreen; padding-top: 1rem;" id="mediaControls">
                 <div style="margin-top: 2em;display: none;" id="starredLines">

@@ -5168,6 +5168,7 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 }
 #localSpeakOverBar .local-sprec-takes {
   display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px;
+  max-height: 132px; overflow-y: auto;
 }
 #localSpeakOverBar .local-sprec-take-row {
   display: inline-flex; align-items: center;
@@ -5185,4 +5186,51 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 @media (max-width: 520px) {
   #localSpeakOverBar { width: 100%; }
   #localSpeakOverBar .local-sprec-rec { flex: 0 0 auto; }
+}
+
+/* The main WebView's shared split panel, also used for local playback. */
+.local-file-input {
+  position: absolute; width: 1px; height: 1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.local-file-open { display: inline-flex; align-items: center; margin: 0; min-height: 40px; cursor: pointer; }
+#localMediaContainer:focus-within .local-file-open { outline: 2px solid #347b57; outline-offset: 2px; }
+#mediaControlPanel { box-sizing: border-box; max-width: 100%; padding-bottom: 12px; }
+#localMediaContainer .local-subtitle-note { margin-top: 6px; font-size: 12px; color: #617367; }
+body.local-media-mode #localMedia {
+  box-sizing: border-box; float: none !important; position: fixed;
+  top: 0; left: 0; right: 0; z-index: 19990;
+  width: 100%; max-width: 100%; min-width: 0; margin: 0 !important;
+  height: var(--cup-vid-h, 50vh); overflow: auto;
+  padding: 10px; background: #111; color: #eee;
+}
+#localMediaHeader { margin-bottom: 8px; }
+.local-media-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+#localMediaName { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+#localAddSubtitles { flex: 0 0 auto; min-height: 40px; }
+#localSubtitleStatus { color: #b9c5bd; font-size: 12px; margin-top: 5px; overflow-wrap: anywhere; }
+body.local-media-mode #localMedia .mejs__container { max-width: 100%; box-sizing: border-box; }
+body.local-media-mode #localVideoContainer { max-width: 100%; max-height: calc(var(--cup-vid-h, 50vh) - 84px); overflow: hidden; }
+body.local-media-mode #localVideo { max-width: 100%; object-fit: contain; }
+body.local-media-mode #subtitleColumn { display: none; }
+body.local-media-mode #mainControlInputs { visibility: hidden; }
+body.local-media-mode #localCaptionPanel { width: 100%; box-sizing: border-box; }
+body.local-media-mode #localSpeakOverBar {
+  flex: 0 0 auto; box-sizing: border-box; width: 100%; max-width: none;
+  max-height: 30vh; overflow-y: auto; margin: 0; padding: 6px 10px;
+  background: #1a1a1a; border: 0; border-bottom: 1px solid #333;
+  border-radius: 0; color: #eee;
+}
+body.local-media-mode #localSpeakOverBar .local-sprec-heading { margin: 0 0 4px; font-size: 12px; }
+body.local-media-mode #localSpeakOverBar .local-sprec-note { display: none; }
+body.local-media-mode #localSpeakOverBar .local-sprec-status,
+body.local-media-mode #localSpeakOverBar .local-sprec-message { color: #c2d6ca; }
+body.local-media-mode #localSpeakOverBar .local-sprec-actions { margin-top: 6px; }
+body.local-media-mode #localSpeakOverBar .local-sprec-takes { max-height: 80px; }
+body.local-media-mode .ui-dialog { z-index: 2147483647 !important; }
+body.local-media-mode .ui-widget-overlay { z-index: 2147483646 !important; }
+@media (max-width: 999px) {
+  #languageColumns > .fl-left, #languageColumns > .fl-right { box-sizing: border-box; min-width: 0; max-width: 100%; }
+  body.local-media-mode #subtitleColumn { display: none; }
+  #mediaControlPanel, #localMediaContainer { min-width: 0; }
 }

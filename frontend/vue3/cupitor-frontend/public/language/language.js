@@ -1,6 +1,7 @@
 import { retainCaptionEnds } from './caption-capture.js';
-import { openLocalSubtitlePicker } from './local-file-picker.js';
-import { createLocalSpeakOver } from './local-speakover.js';
+import { openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
+import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.js';
+import { createLocalCaptionPanel } from './local-caption-panel.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
@@ -3505,20 +3506,12 @@ const ontimeupdate = e => {
   //   }
   // }
 
-  if (window.currentSub && ct > window.currentSub.te + window.marginStartSubtitle) {
-    window.currentSubIndex += 1;
-    window.currentSub = window.subtitles[window.currentSubIndex]
-    debugLog("Current player time", ct, "Changed to subtitle", toStringSubtitle(window.currentSub))
-  }
-
   markIntervalPlayDone(ct);
-
-  renderSubtitles()
-
   setCurrentSub(ct)
   renderSubtitles()
 
-  setSpeed();
+  // Local replay speeds belong to the shared subtitle panel's strategy.
+  if (window.mediaBeingPlayed?.source !== 'local') setSpeed();
 }
 
 const addListeners = it => {
@@ -4067,8 +4060,13 @@ const currentMediaTime = () => {
 }
 
 const clearSubtitles = () => {
+  window.subtitles = []
+  window.currentSub = null
+  window.currentSubIndex = 0
+  lastSub = null
   $('#sv-sub').html('')
   $('#en-sub').html('')
+  $('#subtitle-timestamp').text('')
   $('#en-sub-mirror').html('')
   $('#starredLines').html('')
   $('#starredLinesSelect').html('')
@@ -4408,7 +4406,7 @@ let lastSub = null
 const renderSubtitles = () => {
   const currentSub = window.currentSub
 
-  if (lastSub && currentSub !== lastSub) {
+  if (currentSub && currentSub !== lastSub) {
     populateWikiLinks(currentSub.sv, $('#sv-sub'), currentSub.index);
     populateSearchWords(currentSub, $('#sv-sub-mirror'));
 
@@ -4926,7 +4924,7 @@ function storeSubtitles(subs) {
   let originalSubs = subs.map(it => ({...it}))
 
 
-  for (let i = 0; i < originalSubs.length - 1; i++) {
+  for (let i = 0; i < originalSubs.length; i++) {
     const it = originalSubs[i];
     it['ts_o'] = it['ts']
     it['ts'] = toSeconds(it['ts'])
@@ -4947,7 +4945,7 @@ function storeSubtitles(subs) {
   window.currentSubIndex = 0;
   window.currentSub = window.subtitles[0];
 
-  console.log("set currentSub", toStringSubtitle(window.currentSub))
+  if (window.currentSub) console.log("set currentSub", toStringSubtitle(window.currentSub))
   return originalSubs;
 }
 
@@ -5263,6 +5261,114 @@ async function loadCombinedSrts(combinedJson) {
   })
 }
 
+// File handles stay in this tab so subtitles can be attached after opening
+// media. Changing the SRT must not restart playback or discard speaking takes.
+let _localMediaSelection = null
+let _localCaptionPanel = null
+
+function _localMediaElement(file) {
+  const audio = file ? /\.(mp3|wav)$/i.test(file.name) : window.playingAudio
+  // MediaElement replaces the original id with a proxy wrapper. Timed cue
+  // listeners and Speak Over need the real native audio/video underneath it.
+  return document.querySelector('#localMedia ' + (audio ? 'audio' : 'video'))
+}
+
+function _getLocalCaptionPanel() {
+  if (!_localCaptionPanel) _localCaptionPanel = createLocalCaptionPanel({
+    onOpenSubtitles: () => $('#localSubtitleFiles').trigger('click'),
+    onClearCues: () => {
+      if (!_localMediaSelection) return
+      _localMediaSelection.subtitleFile = null
+      _localMediaSelection.englishFile = null
+      delete window.allSubtitles['local:' + _localMediaSelection.mediaFile.name]
+      clearSubtitles()
+      _renderLocalSubtitleStatus()
+    },
+    onWord: word => {
+      const media = _localMediaElement()
+      media.pause()
+      _localMediaLayout(false)
+      $('#searchText').val(word).trigger('change')
+    },
+    onCapture: payload => {
+      const selection = _localMediaSelection
+      if (!selection) return
+      const media = _localMediaElement()
+      media.pause()
+      _handleCaptionCapture({...payload, source:'caption', title:selection.mediaFile.name,
+        url:'local:' + localSpeakOverIdentity(selection.mediaFile)})
+    },
+    translateText: (text, source, target) => _requestTranslation(text, source, target),
+  })
+  return _localCaptionPanel
+}
+
+function _localMediaLayout(local) {
+  document.body.classList.toggle('local-media-mode', local)
+  if (local) _getLocalCaptionPanel().open(_localMediaElement())
+  else if (_localCaptionPanel) _localCaptionPanel.close()
+  $('#localMedia').toggle(local)
+  $('#localMediaHeader').toggle(local)
+  $('#localResumePlayer').toggle(!local && window.mediaBeingPlayed?.source === 'local')
+}
+
+function _renderLocalSubtitleStatus() {
+  const selection = _localMediaSelection
+  if (!selection) return
+  $('#localMediaName').text(selection.mediaFile.name)
+  const count = (window.subtitles || []).length
+  $('#localSubtitleStatus').text(selection.subtitleFile
+    ? selection.subtitleFile.name + ' · ' + count + ' subtitle' + (count === 1 ? '' : 's')
+    : 'No subtitles attached. Add an SRT file to see captions.')
+  const pair = window.allSubtitles['local:' + selection.mediaFile.name]
+  _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
+  if (window.playingAudio) showAudioPlayer()
+  else if (window.playingVideo) showVideoPlayer()
+}
+
+async function _chooseLocalSubtitles(files, mediaFile) {
+  const current = _localMediaSelection
+  const sameMedia = current && current.mediaFile === mediaFile
+  const available = sameMedia ? current.files.slice() : []
+  // New selections replace old handles with the same name (including revised
+  // SRTs whose size and modification date happen to be unchanged).
+  for (const file of files) {
+    const index = available.findIndex(old => old.name === file.name)
+    if (index >= 0) available[index] = file
+    else available.push(file)
+  }
+  openLocalSubtitlePicker({
+    files: available, mediaFile,
+    targetLanguage: getLangFromUrl().code,
+    attachOnly: sameMedia,
+    onPlay: async ({ mediaFile, subtitleFile, englishFile }) => {
+      const baseName = mediaFile.name.replace(/\.(mp3|wav|mp4)$/i, '')
+      const link = 'local:' + mediaFile.name
+      let sv = '', en = ''
+      if (subtitleFile) {
+        sv = await readLocalSubtitleText(subtitleFile)
+        if (!srtToJson(sv).length) throw new Error('This SRT has no readable timestamped subtitles. Choose another file.')
+        en = englishFile ? await readLocalSubtitleText(englishFile) : sv
+      }
+      if (sv) window.allSubtitles[link] = {sv, en, source:'local', fileName:baseName}
+      else delete window.allSubtitles[link]
+      _localMediaSelection = {mediaFile, subtitleFile, englishFile, files:available}
+      if (sameMedia && window.mediaBeingPlayed?.source === 'local' && window.mediaBeingPlayed.link === link) {
+        clearSubtitles()
+        window.syncSubtitle = true
+        if (sv) {
+          await loadSubtitlesForLink(sv, en)
+          setCurrentSub(getCurrentTime() || 0)
+          renderSubtitles()
+        }
+        _renderLocalSubtitleStatus()
+      } else {
+        await playNewMedia(link, 'local', mediaFile)
+      }
+    },
+  })
+}
+
 async function loadLocalFiles() {
   const input = document.getElementById('localFiles');
   const files = Array.from((input && input.files) || []);
@@ -5285,30 +5391,21 @@ async function loadLocalFiles() {
   }
 
   if (!files.length) return;
-  openLocalSubtitlePicker({
-    files,
-    targetLanguage: getLangFromUrl().code,
-    onPlay: async ({ mediaFile, subtitleFile, englishFile }) => {
-      const baseName = mediaFile.name.replace(/\.(mp3|wav|mp4)$/i, '');
-      // Local files must never accidentally pick up the remotely indexed SRT
-      // of a different item which happens to have the same basename.
-      const link = 'local:' + mediaFile.name;
-      let sv = '', en = '';
-      if (subtitleFile) {
-        sv = await new Response(subtitleFile).text();
-        en = englishFile ? await new Response(englishFile).text() : sv;
-      }
-      if (sv) {
-        window.allSubtitles[link] = {
-          sv, en, source: 'local', fileName: baseName,
-        };
-      } else {
-        delete window.allSubtitles[link];
-      }
-      await playNewMedia(link, 'local', mediaFile);
-    },
-  });
+  const mediaFile = files.find(file => /\.(mp3|wav|mp4)$/i.test(file.name))
+    || (window.mediaBeingPlayed?.source === 'local' && _localMediaSelection?.mediaFile)
+  await _chooseLocalSubtitles(files, mediaFile)
 }
+
+$(document).on('click', '#localClosePlayer', () => {
+  _localMediaElement().pause()
+  _localMediaLayout(false)
+})
+$(document).on('click', '#localResumePlayer', () => _localMediaLayout(true))
+$(document).on('change', '#localSubtitleFiles', async function () {
+  const files = Array.from(this.files || [])
+  this.value = ''
+  if (files.length && _localMediaSelection) await _chooseLocalSubtitles(files, _localMediaSelection.mediaFile)
+})
 
 async function loadSubtitlesForLink(sv, en) {
   if (!sv) {
@@ -5334,6 +5431,8 @@ async function loadSubtitlesForLink(sv, en) {
   // console.log(en)
   console.log(combined)
   storeSubtitles(combined)
+  lastSub = null
+  renderSubtitles()
 
   try {
     $('#subtitlePagination').pagination('destroy')
@@ -5360,25 +5459,20 @@ function hidePlayer(player) {
 }
 
 function showAudioPlayer() {
-  window.audioPlayer.setPlayerSize(600, 50)
-  $('.mejs__controls').show()
+  const width = $('#localMedia').width() || 300
+  window.audioPlayer.setPlayerSize(width, 50)
+  $('#localAudio').closest('.mejs__container').show().find('.mejs__controls').show()
+  $('#localVideo').closest('.mejs__container').hide()
 }
 
 function showVideoPlayer() {
-  const {ytVideoWidth, ytHeight, subWidth} = getDimensionsForPlayer();
+  const ytVideoWidth = $('#localMedia').width() || 300
+  const availableHeight = $('#localMedia').height() - $('#localMediaHeader').outerHeight(true)
+  const ytHeight = Math.max(60, Math.min(ytVideoWidth * 9 / 16, availableHeight))
   window.videoPlayer.setPlayerSize(ytVideoWidth, ytHeight)
-  $('video').css({'width': ytVideoWidth, 'height': ytHeight})
-
-  $('.mejs__controls').show()
-  $('.mejs__overlay-button').show()
-  $('#subtitle-container').css({
-    left: ytVideoWidth,
-    marginLeft: '1em',
-    width: subWidth,
-    maxHeight: '85%',
-    overflow: 'scroll',
-    paddingRight: '1em'
-  })
+  $('#localVideo').css({'width': ytVideoWidth, 'height': ytHeight})
+    .closest('.mejs__container').show().find('.mejs__controls, .mejs__overlay-button').show()
+  $('#localAudio').closest('.mejs__container').hide()
 }
 
 function showOnlySubtitle() {
@@ -5438,29 +5532,32 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   _localSpeakOver.detach()
   clearSubtitles()
   stopMedia(source)
+  _localMediaLayout(source === 'local')
+  if (source === 'local') window.syncSubtitle = true
 
   //Load subtitle
 
   function _playMedia() {
     if (source === 'link') {
       showMediaContainer()
-      $('#localVideoContainer').hide()
+      $('#localMedia').hide()
       showMediaRelatedContainer()
       loadYoutubeVideo(link)
       window.playingYoutubeVideo = true;
       if (!autoPlay) _suppressYoutubeAutoplay()
     } else if (source === 'local') {
       hideMediaContainer()
-      $('#localVideoContainer').show()
+      $('#localMedia').show()
+      $('#localVideoContainer').toggle(/\.mp4$/i.test(mediaFile.name))
       window.playingYoutubeVideo = false;
-      if (mediaFile.name.endsWith(".mp3") || mediaFile.name.endsWith(".wav")) {
+      if (/\.(mp3|wav)$/i.test(mediaFile.name)) {
         audioPlayer.setSrc(URL.createObjectURL(mediaFile))
         if (autoPlay) audioPlayer.play()
         window.playingAudio = true;
         window.playingVideo = false;
         hidePlayer(window.videoPlayer)
         showAudioPlayer()
-      } else if (mediaFile.name.endsWith(".mp4")) {
+      } else if (/\.mp4$/i.test(mediaFile.name)) {
         videoPlayer.setSrc(URL.createObjectURL(mediaFile))
         window.playingAudio = false;
         window.playingVideo = true;
@@ -5471,11 +5568,12 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
       // The existing local <audio>/<video> is the source of truth for the
       // recording timestamp, pause/resume and playback-crossing watcher.
       if (_haveAudioBridge() && mediaFile) {
-        _localSpeakOver.attach(mediaFile, document.getElementById(
-          /\.(mp3|wav)$/i.test(mediaFile.name) ? 'localAudio' : 'localVideo'))
+        _localSpeakOver.attach(mediaFile, _localMediaElement(mediaFile))
       }
+      _getLocalCaptionPanel().open(_localMediaElement(mediaFile))
     }
     window.mediaBeingPlayed = {link, source}
+    $('#localResumePlayer').hide()
     //$('#subControls').hide()
   }
 
@@ -5486,7 +5584,8 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
     $('#toggleEnSubBtn').show()
   } else {
     _playMedia();
-    showMediaRelatedContainer()
+    if (source === 'local') hideMediaRelatedContainer()
+    else showMediaRelatedContainer()
     $('#sv-sub-mirror').show()
     $('#toggleEnSubBtn').show()
   }
@@ -5503,7 +5602,8 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   }
   // A local media file can be played without an SRT. Do not show the remote
   // missing-subtitle alert for that deliberate choice.
-  if (sv || source !== 'local') loadSubtitlesForLink(sv, en);
+  if (sv || source !== 'local') await loadSubtitlesForLink(sv, en);
+  if (source === 'local') _renderLocalSubtitleStatus()
 
   $('#currentMedia').text(`${source === 'local' && mediaFile ? mediaFile.name : link}, ${source}`)
   $('#toggleSearchBtn').show()
@@ -14475,7 +14575,7 @@ function _renderLocalSpeakOver(st) {
             : st.takes.length ? st.takes.length + ' take(s), ' + Math.round(st.duration) + 's total'
               : 'Play local media, then record at any point')
     .appendTo($controls)
-  const $buttons = $('<div class="local-sprec-actions"></div>').appendTo($bar)
+  const $buttons = $('<div class="local-sprec-actions"></div>').toggle(st.dirty).appendTo($bar)
   $('<button type="button" class="lang-tool-btn local-sprec-keep">✔ Keep</button>')
     .prop('disabled', !st.dirty || st.phase !== 'idle').appendTo($buttons)
   $('<button type="button" class="lang-tool-btn local-sprec-discard">Discard changes</button>')
@@ -14486,7 +14586,7 @@ function _renderLocalSpeakOver(st) {
       const $row = $('<span class="local-sprec-take-row"></span>').appendTo($takes)
       $('<button type="button" class="lang-tool-btn local-sprec-play-take"></button>')
         .attr('data-t1', tk.t1)
-        .text('▶ ' + (i + 1) + ' · ' + tk.t1.toFixed(1) + 's')
+        .text('▶ Take ' + (i + 1) + ' · ' + fromSeconds(tk.t1))
         .prop('disabled', st.phase !== 'idle').appendTo($row)
       $('<button type="button" class="lang-tool-btn local-sprec-delete-take" aria-label="Delete take">×</button>')
         .attr('data-t1', tk.t1).prop('disabled', st.phase !== 'idle')
@@ -14513,6 +14613,12 @@ $(document).on('click', '#localSpeakOverBar .local-sprec-delete-take', function 
 })
 $(document).on('click', '#localSpeakOverBar .local-sprec-keep', () => _localSpeakOver.keep())
 $(document).on('click', '#localSpeakOverBar .local-sprec-discard', () => _localSpeakOver.discard())
+
+$(window).on('resize.localMedia', () => {
+  if (!document.body.classList.contains('local-media-mode')) return
+  if (window.playingAudio) showAudioPlayer()
+  else if (window.playingVideo) showVideoPlayer()
+})
 
 // Ask Dart to make sure the host app holds Android's RECORD_AUDIO runtime
 // permission, prompting the user if needed. Returns one of:
@@ -19206,7 +19312,10 @@ function _practiceAudioEl() {
 // 'preview'. Silencing the deck is a different act from silencing the other
 // two, which is why it needs saying.
 function _silenceOtherAudio(starting) {
-  if (starting !== 'local') _localSpeakOver.detach()
+  if (starting !== 'local') {
+    _localSpeakOver.detach()
+    if (document.body.classList.contains('local-media-mode')) _localMediaLayout(false)
+  }
   if (starting !== 'preview') { try { _stopManualAudioPreview() } catch (_) {} }
   if (starting !== 'practice') _stopPracticeAudio()
   if (starting !== 'deck') {
