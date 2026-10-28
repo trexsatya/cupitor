@@ -190,8 +190,9 @@ async function check(browser, mobile) {
       'Practice must stay open after editing the current card')
     // Cancel an edit without modifying the stored card or opening Review.
     if (!(await page.locator('#practiceMode .practice-edit').isVisible())) {
-      await click('#practiceMode .practice-settings')
+      await page.locator('#practiceMode .practice-settings').evaluate(el => el.click())
     }
+    await page.locator('#practiceMode .practice-edit').waitFor({ state: 'visible' })
     await page.locator('#practiceMode .practice-edit').evaluate(el => el.click())
     await page.locator('#manualEntryEditor #meeSource').waitFor({ state: 'visible' })
     await page.locator('#manualEntryEditor #meeSource').fill('This should not be saved')
