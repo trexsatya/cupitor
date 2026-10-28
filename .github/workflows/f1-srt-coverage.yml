@@ -115,12 +115,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # Single-use explicit push trigger from this approved f1 batch-002 commit.
+      # Single-use explicit push trigger from this approved f1 batch-003 commit.
       # Other commits on this branch only audit coverage. Default branch and
       # workflow_dispatch keep their existing gated behavior.
       # Secrets are only passed to the live capture step, never to the audit.
       - name: Require secure Filmot and publishing credentials
-        if: (github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-002]'))
+        if: (github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-003]'))
         env:
           FILMOT_API_KEY: ${{ secrets.FILMOT_API_KEY }}
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
@@ -135,7 +135,7 @@ jobs:
           fi
 
       - name: Open or resume isolated data branch
-        if: (github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-002]'))
+        if: (github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-003]'))
         working-directory: data
         run: |
           if git ls-remote --exit-code --heads origin 'refs/heads/ai/f1-srt-threshold5' >/dev/null; then
@@ -146,7 +146,7 @@ jobs:
           fi
 
       - name: Restore successful Filmot API response cache
-        if: (github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-002]'))
+        if: (github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-003]'))
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/f1-srt-collection/filmot-api-cache
@@ -156,14 +156,14 @@ jobs:
 
       - name: Collect one Filmot batch (source subtitles only)
         id: capture
-        if: (github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-002]'))
+        if: (github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-003]'))
         working-directory: source/frontend/vue3/cupitor-frontend
         env:
           FILMOT_API_KEY: ${{ secrets.FILMOT_API_KEY }}
         run: |
           node tools/language/lang-manage.js collect \
             --wordsFile tools/language/word-lists/f1.txt \
-            --threshold 5 --start "${{ inputs.start || 0 }}" --chunk "${{ inputs.chunk || 25 }}" \
+            --threshold 5 --start "${{ inputs.start || 18 }}" --chunk "${{ inputs.chunk || 50 }}" \
             --api --no-translate --apiCredits 15 \
             --dataDir "$GITHUB_WORKSPACE/data/db/language/swedish" \
             --srtsDir "$GITHUB_WORKSPACE/data/db/language/swedish/srts" \
@@ -171,7 +171,7 @@ jobs:
 
       # Keep successful captures even if a later Filmot query exhausts quota.
       - name: Save captured SRT packs to isolated review branch
-        if: always() && ((github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-002]')))
+        if: always() && ((github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-003]')))
         working-directory: data
         run: |
           if [[ "$(git branch --show-current)" != "ai/f1-srt-threshold5" ]]; then
@@ -189,7 +189,7 @@ jobs:
           fi
 
       - name: Save collection progress and errors
-        if: always() && ((github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-002]')))
+        if: always() && ((github.event_name == 'workflow_dispatch' && inputs.collect) || (github.event_name == 'push' && github.ref == 'refs/heads/automation/f1-batch-001-20261028' && contains(github.event.head_commit.message, '[start-f1-batch-003]')))
         uses: actions/upload-artifact@v4
         with:
           name: f1-srt-batch-report
