@@ -146,6 +146,48 @@ async function check(browser, mobile) {
     }
     await page.waitForFunction(() => window._practiceIdx === 1)
     await closed()
+    // Edit was launched from Practice, not the playlist. Save and Cancel
+    // should both return to this card without opening Review.
+    await page.evaluate(name => {
+      window.closePracticeMode()
+      const stored = window._recordings[name].items.Manual.Card[0]
+      window.openPracticeMode({ single: true, queue: [{
+        ...stored, _recName: name, _st: 'Manual', _w: 'Card', _idx: 0,
+      }] })
+    }, name)
+    await page.locator('#practiceMode .practice-settings').waitFor({state:'visible'})
+    await click('#practiceMode .practice-settings')
+    await page.locator('#practiceMode .practice-edit').waitFor({state:'visible'})
+    await click('#practiceMode .practice-edit')
+    await page.locator('#manualEntryEditor #meeSource').waitFor({state:'visible'})
+    assert.equal(await page.locator('#manualEntryEditor #meeSource').inputValue(),
+      saved.playlists[name].items.Manual.Card[0].source)
+    const changed = 'Edited directly from Practice'
+    await page.locator('#manualEntryEditor #meeSource').fill(changed)
+    await page.locator('#manualEntryEditor').locator('..')
+      .getByRole('button', {name:'Save', exact:true}).click()
+    await page.waitForFunction(({name, changed}) =>
+      !$('#manualEntryEditor').dialog('isOpen') &&
+      window._recordings[name].items.Manual.Card[0].source === changed &&
+      window._practiceCards?.[0]?.source === changed, {name, changed})
+    const reviewOpen = () => page.evaluate(() =>
+      !!($('#recordingReviewDialog').length && $('#recordingReviewDialog').dialog('isOpen')))
+    assert.equal(await reviewOpen(), false, 'saving from Practice must not open the playlist')
+    assert.equal(await page.locator('#practiceMode').isVisible(), true,
+      'Practice must stay open after editing the current card')
+    // Cancel an edit without modifying the stored card or opening Review.
+    if (!(await page.locator('#practiceMode .practice-edit').isVisible())) {
+      await click('#practiceMode .practice-settings')
+    }
+    await click('#practiceMode .practice-edit')
+    await page.locator('#manualEntryEditor #meeSource').fill('This should not be saved')
+    await page.locator('#manualEntryEditor').locator('..')
+      .getByRole('button', {name:'Cancel', exact:true}).click()
+    await page.waitForFunction(() => !$('#manualEntryEditor').dialog('isOpen'))
+    assert.equal(await page.evaluate(name => window._recordings[name].items.Manual.Card[0].source, name),
+      changed, 'Cancel does not modify the stored card')
+    assert.equal(await reviewOpen(), false, 'cancelling Practice edit must not open the playlist')
+
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'}: opaque panels above divider, immediate card dismissal, panel actions, touch swipes, desktop text selection and hh:mm:ss details passed`)
   } catch (e) {
