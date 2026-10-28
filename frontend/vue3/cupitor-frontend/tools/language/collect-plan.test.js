@@ -19,6 +19,14 @@ describe('collection plan', () => {
       count: 2, missing: 1, existingVideoIds: ['one11111111', 'tri33333333'],
     });
   });
+  test('does not count duplicate subtitle bases from the same video twice', () => {
+    const duplicates = [
+      { videoId: 'one11111111', sv: 'Det gäller.' },
+      { videoId: 'one11111111', sv: 'Nu gäller det också.' },
+    ];
+    expect(planCollection([{ line: 'gäller' }], duplicates, 2)[0])
+      .toMatchObject({ count: 1, missing: 1, existingVideoIds: ['one11111111'] });
+  });
   test('counts alternatives separately, preserving familiar rarity rules', () => {
     const result = planCollection([{ line: 'gäller|saknas', category: 'Words' }], subs, 2);
     expect(result).toMatchObject([{ line: 'saknas', count: 0, missing: 2 }]);
