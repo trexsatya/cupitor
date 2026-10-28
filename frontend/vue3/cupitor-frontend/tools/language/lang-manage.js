@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // "Manage" CLI for the Swedish study data. Three independently-runnable,
 // chunkable/resumable steps:
+//   collect: a specified list + local SRT coverage -> targeted Filmot API + merged SRTs
 //   rare   : vocabulary.txt + local srts   -> out/rare-words.json
 //   filmot : rare-words.json + live filmot -> out/filmot-hits.json     (chunk by word)
 //   srt    : filmot-hits.json + translate  -> srts/*.srt + index.json   (chunk by video)
 //
 // Usage:
+//   node tools/language/lang-manage.js collect    --words a,b [--wordsFile path] [--threshold N] [--api] [--dry-run] [--no-translate]
 //   node tools/language/lang-manage.js rare       [--threshold N] [--category "<name>"] [--config path]
 //   node tools/language/lang-manage.js categories                       (list vocab categories + counts)
 //   node tools/language/lang-manage.js filmot     [--chunk N] [--max N] [--before N] [--after N] [--words a,b] [--category "<name>"] [--browser] [--reset]
@@ -44,6 +46,7 @@ import { resolveChannel, loadChannelCache, saveChannelCache } from "./youtube-ch
 import { translateBatch } from "./google-translate.js";
 import { saveHit, readIndex, writeIndex } from "./srt-store.js";
 import { planSrtImport, applySrtImport } from './srt-import.js';
+import { planCollection, selectedCollectionWords } from './collect-plan.js';
 import { planBundleRepair, applyBundleRepair } from './bundle-repair.js';
 import { inspectBundleConflicts, formatBundleConflicts, exportBundleConflicts } from './bundle-inspect.js';
 import {
@@ -82,7 +85,14 @@ function loadLocalSubtitles(srtsDir) {
     const raw = documents[f];
     byBase.get(base)[lang] = cleanSrtForMatch(raw);
   }
-  return [...byBase.values()].map((s) => ({ sv: s.sv || "", en: s.en || "" }));
+  // Preserve the video identity for the targeted collector. A Swedish and an
+  // English track count as one source; an existing indexed video can be skipped
+  // by Filmot if it already contributes to that word's coverage.
+  const byName = new Map(readIndex(srtsDir).map(row => [row.name, row.link]));
+  return [...byBase].map(([base, s]) => ({
+    sv: s.sv || "", en: s.en || "",
+    videoId: byName.get(base) || (base.match(/\|\|\s*([A-Za-z0-9_-]{11})$/)?.[1] || null),
+  }));
 }
 
 function cmdRare(cfg) {
@@ -114,6 +124,158 @@ function cmdRare(cfg) {
   writeJson(outPath, out);
   const scope = cfg.category ? ` for "${cfg.category}" (${out.length} total in file)` : "";
   log(`Found ${fresh.length} rare word(s)${scope}. Wrote ${outPath}`);
+}
+
+
+// --- targeted collection: only source gaps for the requested words ---------
+
+async function cmdCollect(cfg) {
+  const listText = cfg.wordsFile ? readFileSync(cfg.wordsFile, 'utf8') : '';
+  const requested = selectedCollectionWords(cfg.words, listText);
+  if (!requested.length && !cfg.category) {
+    throw new Error('Specify --words a,b or --wordsFile path (or --category to select a vocabulary category).');
+  }
+  if (!cfg.srtsDir) throw new Error('Configure srtsDir to the local SRT library first.');
+  const vocabPath = join(cfg.dataDir || '.', 'vocabulary.txt');
+  const vocabulary = existsSync(vocabPath) ? parseVocabularyFile(readFileSync(vocabPath, 'utf8')) : {};
+  const vocabularyEntries = flattenVocabEntries(vocabulary);
+  const categories = new Map(vocabularyEntries.map(e => [e.line, e.category]));
+  const selected = (requested.length
+    ? requested.map(line => ({ line, category: categories.get(line) || 'Requested words' }))
+    : vocabularyEntries).filter(e => matchCategory(e.category, cfg.category));
+  if (!selected.length) throw new Error('No words match the requested selection/category.');
+
+  const expansionMap = buildExpansionMap(vocabulary);
+  const expand = line => expandWords(line, cfg.lang, expansionMap);
+  const threshold = cfg.rareThreshold;
+  // Targeted words can be two letters (e.g. "gå"); unrestricted category
+  // scans retain the existing three-character noise filter.
+  const minAltLen = requested.length ? 2 : 3;
+  // The planner uses the same per-alternative matching as the existing "rare"
+  // command. Every count is per distinct SRT video, not per textual occurrence.
+  const initial = planCollection(selected, loadLocalSubtitles(cfg.srtsDir), threshold, { expand, minAltLen, sourceLang: cfg.lang });
+  const chunk = cfg.chunk ?? cfg.chunkFilmot;
+  const start = cfg.start ?? 0;
+  if (!Number.isSafeInteger(start) || start < 0) {
+    throw new Error('collect --start must be a non-negative whole number.');
+  }
+  // Paging helps move past words where Filmot finds no new captions, so those
+  // words cannot monopolize the first chunk on each subsequent run.
+  const pending = chunk > 0 ? initial.slice(start, start + chunk) : initial.slice(start);
+  const planPath = join(cfg.outDir, 'collect-plan.json');
+  writeJson(planPath, {
+    threshold, start, requested: requested.length ? requested : cfg.category,
+    pending: initial.length,
+    selected: pending.map(({ line, category, count, missing }) => ({ line, category, count, missing })),
+  });
+  log('collect: ' + initial.length + ' under-covered alternative(s); processing ' +
+    pending.length + ' (target: ' + threshold + ' distinct subtitle videos per word).');
+  for (const p of pending) log('  ' + p.line + ': ' + p.count + '/' + threshold + ', need ' + p.missing);
+  log('Plan: ' + planPath);
+  if (cfg.dryRun || !pending.length) return;
+  if (cfg.filmotMode !== 'api') {
+    throw new Error('collect currently uses the official Filmot API; run with --api and FILMOT_API_KEY.');
+  }
+  if (!process.env.FILMOT_API_KEY) {
+    throw new Error('Set FILMOT_API_KEY before collecting (the key must not be committed).');
+  }
+
+  const client = createFilmotApiClient({
+    key: process.env.FILMOT_API_KEY,
+    cacheDir: join(cfg.outDir, 'filmot-api-cache'),
+    delayMs: cfg.filmotDelayMs, log,
+  });
+  const localIndex = readIndex(cfg.srtsDir);
+  const channels = await resolveCupitorChannels(
+    localIndex, client, join(cfg.outDir, 'filmot-api-channels.json'),
+    { channelLimit: cfg.apiChannelLimit }
+  );
+  const reportPath = join(cfg.outDir, 'collect-results.json');
+  const report = [];
+  for (const planned of pending) {
+    // Re-evaluate before each search: capturing one word may incidentally cover
+    // another requested word. This prevents unnecessary paid API searches.
+    const current = planCollection(
+      [{ line: planned.line, category: planned.category }],
+      loadLocalSubtitles(cfg.srtsDir), threshold, { minAltLen, sourceLang: cfg.lang }
+    )[0];
+    if (!current) {
+      log('  ✓ ' + planned.line + ' already covered by other captures.');
+      report.push({ word: planned.line, count: threshold, remaining: 0, added: 0 });
+      writeJson(reportPath, report);
+      continue;
+    }
+    if (!isFilmotSearchable(current.line)) {
+      log('  · ' + current.line + ' cannot be searched as a literal Filmot phrase.');
+      report.push({ word: current.line, count: current.count, remaining: current.missing, skipped: 'not searchable' });
+      writeJson(reportPath, report);
+      continue;
+    }
+    const quota = Math.min(current.missing, cfg.maxItemsPerWord);
+    if (!Number.isSafeInteger(quota) || quota < 1) {
+      throw new Error('maxItemsPerWord must be a positive integer.');
+    }
+    log('\n▶ ' + current.line + ': ' + current.count + '/' + threshold +
+      ' → request up to ' + quota + ' new videos');
+    const regex = buildRareWordRegex(current.line, { minAltLen });
+    let result;
+    try {
+      result = await collectFilmotApiWord({
+        word: current.line,
+        terms: searchTermsForWord(current.expanded),
+        regex, cfg: { ...cfg, maxItemsPerWord: quota },
+        channels, client, excludedVideoIds: current.existingVideoIds, log,
+      });
+    } catch (e) {
+      report.push({ word: current.line, count: current.count, remaining: current.missing, error: e.message });
+      writeJson(reportPath, report);
+      if (e?.quota || /key was rejected/.test(e?.message || '')) {
+        log('  ! Filmot quota/key problem: stopping; completed captures are preserved.');
+        process.exitCode = 1;
+        break;
+      }
+      log('  ! Filmot failed: ' + e.message);
+      continue;
+    }
+    let added = 0;
+    const errors = [];
+    for (const hit of result.hits) {
+      try {
+        const translations = cfg.skipTranslate ? null :
+          await translateBatch(hit.lines.map(l => l.text), cfg.lang, cfg.targetLang, {
+            delayMs: cfg.translateDelayMs,
+          });
+        await saveHit(cfg.srtsDir, hit, translations, {
+          sourceLang: cfg.lang, targetLang: cfg.targetLang,
+          defaultDurSec: cfg.defaultDurSec,
+          writeTarget: !cfg.skipTranslate, srtConflict: cfg.srtConflict,
+        });
+        added++;
+        log('  ✓ saved ' + hit.videoId);
+      } catch (e) {
+        errors.push(hit.videoId + ': ' + e.message);
+        log('  ! failed to save ' + hit.videoId + ': ' + e.message);
+      }
+    }
+    // Verify against the actual SRTs after merging; no credit for an unsaved
+    // hit, a repeated indexed video or a cue conflict that kept old text.
+    const after = planCollection(
+      [{ line: current.line, category: current.category }],
+      loadLocalSubtitles(cfg.srtsDir), threshold, { minAltLen, sourceLang: cfg.lang }
+    )[0];
+    const finalCount = after ? after.count : threshold;
+    const remaining = after ? after.missing : 0;
+    report.push({
+      word: current.line, before: current.count, count: finalCount, remaining,
+      added, searchComplete: result.complete, estimatedCredits: result.plannedCredits, errors,
+    });
+    writeJson(reportPath, report);
+    log('  → ' + finalCount + '/' + threshold +
+      (remaining ? ' (' + remaining + ' still needed)' : ' (target met)') +
+      (result.complete ? '' : ' [credit cap hit]'));
+  }
+  log('\nCollection report: ' + reportPath +
+    '. Re-run the same command to resume any remaining gaps.');
 }
 
 // --- step 2: filmot --------------------------------------------------------
@@ -615,16 +777,28 @@ async function main() {
     log('Defaults to a dry run. With no --input, imports loose SRTs dropped into srtsDir. Files named "channel || title || id.sv.srt" supply their id; other names need --link or an input index.json.');
     return;
   }
+  // A threshold is a count of distinct subtitle videos. Fractions or
+  // invalid strings must not silently round to a different coverage goal.
+  if (command === 'collect' && flags.threshold !== undefined &&
+      !/^[1-9]\d*$/.test(String(flags.threshold))) {
+    throw new Error('collect --threshold must be a positive whole number.');
+  }
+  if (command === 'collect' && flags.start !== undefined &&
+      !/^(?:0|[1-9]\d*)$/.test(String(flags.start))) {
+    throw new Error('collect --start must be a non-negative whole number.');
+  }
   const overrides = coerceFlags(flags);
   const cfg = loadConfig(flags.config || "config.json", overrides);
   if (overrides.reset) cfg.reset = true;
   if (overrides.words) cfg.words = overrides.words;
+  if (flags['dry-run']) cfg.dryRun = true;
   if (overrides.category) cfg.category = overrides.category;
   if (overrides.browser) cfg.filmotMode = "browser";
   if (overrides.headed) cfg.browserHeadless = false;
   if (overrides.headless) cfg.browserHeadless = true;
   if (flags["no-translate"] || flags.skipTranslate) cfg.skipTranslate = true;
 
+  if (command === "collect") return cmdCollect(cfg);
   if (command === "rare") return cmdRare(cfg);
   if (command === "filmot") return cmdFilmot(cfg);
   if (command === "srt") return cmdSrt(cfg);
@@ -633,7 +807,7 @@ async function main() {
   if (command === "import") return cmdImport(cfg);
   if (command === "repair") return cmdRepair(cfg);
 
-  log(`Unknown command "${command}". Use one of: rare | filmot | srt | categories | prune | import | repair`);
+  log(`Unknown command "${command}". Use one of: collect | rare | filmot | srt | categories | prune | import | repair`);
   process.exitCode = 1;
 }
 

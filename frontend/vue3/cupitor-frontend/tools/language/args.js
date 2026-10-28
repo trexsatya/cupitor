@@ -48,6 +48,7 @@ const NUMERIC = {
   before: "linesBefore",
   after: "linesAfter",
   chunk: "chunk",
+  start: "start",
   maxPages: "maxSearchPages",
   channelLimit: "apiChannelLimit",
   channelGroups: "apiChannelGroups",
@@ -76,7 +77,7 @@ export function coerceFlags(flags) {
     } else if (k === "reset" || typeof v === "boolean") {
       out[k] = v;
     } else if (
-      ["lang", "targetLang", "dataDir", "srtsDir", "outDir", "config", "srtConflict", "category", "input", "link", "title", "channel", "source", "exportDir"].includes(k)
+      ["lang", "targetLang", "dataDir", "srtsDir", "outDir", "config", "srtConflict", "category", "wordsFile", "input", "link", "title", "channel", "source", "exportDir"].includes(k)
     ) {
       out[k] = v;
     }
