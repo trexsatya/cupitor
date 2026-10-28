@@ -65,7 +65,7 @@ jobs:
           node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs
           node --test public/language/spotify-*.test.mjs public/language/card-selection-search.test.mjs public/language/recordings-sync-state.test.mjs
           node --test public/language/study-calls.test.mjs
-          node --test public/language/subtitle-bundles.test.mjs tools/language/subtitle-bundles.test.mjs tools/language/srt-import.test.mjs
+          node --test public/language/subtitle-bundles.test.mjs tools/language/subtitle-bundles.test.mjs tools/language/srt-import.test.mjs tools/language/bundle-repair.test.mjs
           npx jest tools/language --runInBand --silent
 
       - name: Install Chromium for dialog tests

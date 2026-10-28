@@ -196,6 +196,42 @@ Useful to grab snippets fast without the translate rate-limit. It still advances
 progress, so to translate those videos later, re-run `srt --reset` (or clear
 `out/srt-progress.json`) and run again without the flag.
 
+### Repair duplicate subtitle tracks across bundles (offline)
+
+If `rare`, `prune`, or another command fails with
+`Subtitle appears in more than one bundle: ...`, **do not delete a pack**.
+A pack contains many unrelated videos. Run the offline repair preview:
+
+```bash
+node tools/language/lang-manage.js repair
+node tools/language/lang-manage.js repair --apply
+node tools/language/lang-manage.js prune
+```
+
+`repair` reads `storage.json`, every referenced pack, and `index.json`.
+It reports each duplicate key and the packs holding it. The dry run modifies
+nothing. `--apply` removes only duplicate tracks whose contents are identical,
+moves the **whole media's language tracks together**, preserves other media in
+those packs, and updates bundle file counts, revisions, and index pointers.
+It creates a sibling backup folder (`<srtsDir>-repair-backup-XXXXXX`) containing
+the original files it changed or deleted. Review `git diff` before committing.
+
+If copies contain different text, nothing is written and the conflicting
+packs are listed. If they have *different timestamp ranges*, you can opt in
+to combining their SRT cues with:
+
+```bash
+node tools/language/lang-manage.js repair --merge     # preview
+node tools/language/lang-manage.js repair --merge --apply
+```
+
+If copies disagree at the **same** timestamp, the repair refuses to choose
+a subtitle automatically, even with `--merge`. Compare the reported pack
+files and resolve their text manually, then rerun `repair`. Use
+`--srtsDir /path/to/db/language/swedish/srts` if your configured data
+directory is not the one you want to repair. GitHub-published files may differ
+from uncommitted files on your computer.
+
 ### 4. Prune / shrink full-video transcripts (offline)
 Full-video transcripts (span > `pruneMinSpanSec`, default 60s) eat disk; the small
 captured snippets (a few seconds' span) are what you keep. Rather than delete a
