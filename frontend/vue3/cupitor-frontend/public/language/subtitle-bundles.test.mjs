@@ -170,14 +170,12 @@ test('new index entry reuses previously orphaned bundled tracks instead of dupli
   assert.equal(saved['orphan.en.srt'], 'Old English')
 })
 
-test('index-only removal must not silently delete an existing subtitle track', async () => {
+test('explicit index deletion removes only the selected media while preserving sibling tracks', async () => {
   const r = repository({ 'a.sv.srt': 'A original', 'b.sv.srt': 'B original' })
-  await assert.rejects(
-    r.apply([indexWrite(index => index.filter(e => e.name !== 'a'))]),
-    /silently remove existing track/
-  )
+  await r.apply([indexWrite(index => index.filter(e => e.name !== 'a'))])
   const documents = [...r.data.entries()].filter(([path]) => path.includes('/packs/pack-'))
-  assert(documents.some(([, value]) => JSON.parse(value).files['a.sv.srt'] === 'A original'))
+  assert(!documents.some(([, value]) => 'a.sv.srt' in JSON.parse(value).files))
+  assert(documents.some(([, value]) => JSON.parse(value).files['b.sv.srt'] === 'B original'))
 })
 
 test('capture aborts when the same subtitle key exists in multiple packs', async () => {
