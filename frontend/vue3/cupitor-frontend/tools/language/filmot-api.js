@@ -241,9 +241,9 @@ export async function collectFilmotApiWord({
     // not match it. Only missing transcripts require a detail lookup.
     // getvideos with raw subtitles accepts up to ten IDs for the SAME
     // two-credit cost, so resolve all missing tracks in one batch.
-    const candidates = ordered.map(item => item.row)
+    const candidateRows = ordered.map(item => item.row)
       .filter(row => VIDEO_ID.test(String(row.id || '')) && !seen.has(row.id));
-    const missingIds = candidates.filter(row => !apiTranscriptLines(row, cfg.lang, manual).length)
+    const missingIds = candidateRows.filter(row => !apiTranscriptLines(row, cfg.lang, manual).length)
       .slice(0, 10).map(row => row.id);
     const details = new Map();
     if (missingIds.length) {
@@ -257,7 +257,7 @@ export async function collectFilmotApiWord({
         for (const record of records) details.set(record.id, record);
       }
     }
-    for (const row of candidates) {
+    for (const row of candidateRows) {
       if (hits.length >= cfg.maxItemsPerWord) break;
       const full = details.get(row.id);
       const result = apiHit(full ? { ...row, subtitles: full.subtitles } : row, word, regex, cfg, manual);
