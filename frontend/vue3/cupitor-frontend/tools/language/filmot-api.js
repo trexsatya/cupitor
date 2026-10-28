@@ -185,7 +185,8 @@ export function createFilmotApiClient({
       const data = await response.json();
       const remaining = response.headers?.get?.('X-API-Credits-Remaining');
       if (remaining != null) credits = Number(remaining);
-      const actualCost = Number(response.headers?.get?.('X-API-Credit-Cost'));
+      const chargeHeader = response.headers?.get?.('X-API-Credit-Cost');
+      const actualCost = chargeHeader == null ? NaN : Number(chargeHeader);
       spentCredits += Number.isFinite(actualCost) && actualCost >= 0 ? actualCost : upperCost;
       log('    API ' + endpoint + ': ' + (response.headers?.get?.('X-API-Credit-Cost') || '?') +
         ' credit(s); ' + (credits == null ? 'remaining unknown' : credits + ' remaining'));
