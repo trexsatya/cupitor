@@ -126,7 +126,7 @@ jobs:
             echo "Resuming existing open F1 collection PR branch: $EXISTING"
             git fetch origin "refs/heads/$EXISTING:refs/remotes/origin/$EXISTING"
             git switch --create "$EXISTING" "refs/remotes/origin/$EXISTING"
-            git fetch origin gh-pages
+            git fetch origin "refs/heads/gh-pages:refs/remotes/origin/gh-pages"
             git -c user.name='github-actions[bot]' \
                 -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
                 merge --no-edit origin/gh-pages
@@ -143,6 +143,7 @@ jobs:
         working-directory: source/frontend/vue3/cupitor-frontend
         env:
           FILMOT_API_KEY: ${{ secrets.FILMOT_API_KEY }}
+          GH_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
         run: |
           node tools/language/collect-auto.js \
             --wordsFile tools/language/word-lists/f1.txt \
