@@ -8,6 +8,19 @@ on:
       - 'frontend/vue3/cupitor-frontend/tools/language/**'
       - 'frontend/vue3/cupitor-frontend/public/language/rare-words.js'
   workflow_dispatch:
+    inputs:
+      collect:
+        description: 'Capture one bounded F1 batch (requires stored GitHub Actions secrets)'
+        type: boolean
+        default: false
+      start:
+        description: 'Skip this many currently under-covered words (0-based)'
+        type: number
+        default: 0
+      chunk:
+        description: 'Maximum words in this batch'
+        type: number
+        default: 10
 
 permissions:
   contents: read
@@ -33,7 +46,8 @@ jobs:
           repository: trexsatya/trexsatya.github.io
           ref: gh-pages
           path: data
-          persist-credentials: false
+          token: ${{ secrets.PAGES_DEPLOY_TOKEN || github.token }}
+          persist-credentials: true
           sparse-checkout: |
             db/language/swedish/srts
             db/language/swedish/vocabulary.txt
@@ -80,3 +94,76 @@ jobs:
           path: ${{ runner.temp }}/f1-srt-collection/collect-plan.json
           if-no-files-found: warn
           retention-days: 14
+
+      # Collection is never started by a push or by a coverage-only run.
+      # Secrets are only passed to the live capture step, never to the audit.
+      - name: Require secure Filmot and publishing credentials
+        if: github.event_name == 'workflow_dispatch' && inputs.collect
+        env:
+          FILMOT_API_KEY: ${{ secrets.FILMOT_API_KEY }}
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+        run: |
+          if [[ -z "$FILMOT_API_KEY" ]]; then
+            echo '::error::Add FILMOT_API_KEY as a Cupitor Actions secret; do not paste it into YAML or logs.'
+            exit 1
+          fi
+          if [[ -z "$PAGES_DEPLOY_TOKEN" ]]; then
+            echo '::error::Add PAGES_DEPLOY_TOKEN for writes to trexsatya.github.io.'
+            exit 1
+          fi
+
+      - name: Open or resume isolated data branch
+        if: github.event_name == 'workflow_dispatch' && inputs.collect
+        working-directory: data
+        run: |
+          if git ls-remote --exit-code --heads origin 'refs/heads/ai/f1-srt-threshold5' >/dev/null; then
+            git fetch origin 'refs/heads/ai/f1-srt-threshold5'
+            git checkout -B ai/f1-srt-threshold5 FETCH_HEAD
+          else
+            git checkout -b ai/f1-srt-threshold5
+          fi
+
+      - name: Collect one Filmot batch (source subtitles only)
+        id: capture
+        if: github.event_name == 'workflow_dispatch' && inputs.collect
+        working-directory: source/frontend/vue3/cupitor-frontend
+        env:
+          FILMOT_API_KEY: ${{ secrets.FILMOT_API_KEY }}
+        run: |
+          node tools/language/lang-manage.js collect \
+            --wordsFile tools/language/word-lists/f1.txt \
+            --threshold 5 --start "${{ inputs.start }}" --chunk "${{ inputs.chunk }}" \
+            --api --no-translate --apiCredits 15 \
+            --dataDir "$GITHUB_WORKSPACE/data/db/language/swedish" \
+            --srtsDir "$GITHUB_WORKSPACE/data/db/language/swedish/srts" \
+            --outDir "$RUNNER_TEMP/f1-srt-collection"
+
+      # Keep successful captures even if a later Filmot query exhausts quota.
+      - name: Save captured SRT packs to isolated review branch
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.collect
+        working-directory: data
+        run: |
+          if [[ "$(git branch --show-current)" != "ai/f1-srt-threshold5" ]]; then
+            echo 'Data review branch not initialized; no data published.'
+            exit 1
+          fi
+          git add db/language/swedish/srts
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit -m 'Capture f1 Swedish SRT examples toward five distinct videos per word'
+            git push origin HEAD:refs/heads/ai/f1-srt-threshold5
+          else
+            echo 'No new SRTs to commit.'
+          fi
+
+      - name: Save collection progress and errors
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.collect
+        uses: actions/upload-artifact@v4
+        with:
+          name: f1-srt-batch-report
+          path: |
+            ${{ runner.temp }}/f1-srt-collection/collect-plan.json
+            ${{ runner.temp }}/f1-srt-collection/collect-results.json
+          if-no-files-found: warn
+          retention-days: 30
