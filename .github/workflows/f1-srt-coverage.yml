@@ -123,6 +123,15 @@ jobs:
             git checkout -b ai/f1-srt-threshold5
           fi
 
+      - name: Restore successful Filmot API response cache
+        if: github.event_name == 'workflow_dispatch' && inputs.collect
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/f1-srt-collection/filmot-api-cache
+          key: filmot-f1-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            filmot-f1-${{ runner.os }}-
+
       - name: Collect one Filmot batch (source subtitles only)
         id: capture
         if: github.event_name == 'workflow_dispatch' && inputs.collect
