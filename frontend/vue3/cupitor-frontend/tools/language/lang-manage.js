@@ -771,7 +771,7 @@ async function main() {
   // A threshold is a count of distinct subtitle videos. Fractions or
   // invalid strings must not silently round to a different coverage goal.
   if (command === 'collect' && flags.threshold !== undefined &&
-      !/^[1-9]\\d*$/.test(String(flags.threshold))) {
+      !/^[1-9]\d*$/.test(String(flags.threshold))) {
     throw new Error('collect --threshold must be a positive whole number.');
   }
   const overrides = coerceFlags(flags);
