@@ -100,3 +100,16 @@ describe("coerceFlags", () => {
     expect(coerceFlags({ reset: true, unknown: "x" })).toEqual({ reset: true });
   });
 });
+
+test('official Filmot API flags select channel-first mode and cap new credit spend', () => {
+  const parsed = parseArgs(['filmot', '--api', '--channelLimit', '10', '--channelGroups', '2',
+    '--apiCredits', '30', '--no-unrestricted']);
+  expect(parsed.command).toBe('filmot');
+  expect(coerceFlags(parsed.flags)).toMatchObject({
+    filmotMode: 'api',
+    apiChannelLimit: 10,
+    apiChannelGroups: 2,
+    apiMaxCreditsPerWord: 30,
+    apiUnrestrictedFallback: false,
+  });
+});
