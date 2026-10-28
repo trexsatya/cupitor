@@ -31,6 +31,13 @@ describe('collection plan', () => {
     const result = planCollection([{ line: 'gäller|saknas', category: 'Words' }], subs, 2);
     expect(result).toMatchObject([{ line: 'saknas', count: 0, missing: 2 }]);
   });
+  test('allows explicitly selected two-letter words without changing bulk rarity defaults', () => {
+    const entry = [{ line: 'gå' }];
+    const s = [{ videoId: 'abc12345678', sv: 'Jag vill gå hem.' }];
+    expect(planCollection(entry, s, 2)).toEqual([]);
+    expect(planCollection(entry, s, 2, { minAltLen: 2 })[0])
+      .toMatchObject({ line: 'gå', count: 1, missing: 1 });
+  });
   test('rejects non-positive, non-integer thresholds', () => {
     expect(() => planCollection([], [], 0)).toThrow('positive integer');
     expect(() => planCollection([], [], 1.5)).toThrow('positive integer');
