@@ -24,6 +24,7 @@ function boot(mode = 'player') {
     <div id="practiceMode"><div class="practice-topbar"><button class="practice-search" aria-label="Search this word" title="Original search">Search</button></div>
       <div class="practice-card"><div class="practice-ctx-ctrl"><button class="practice-ctx-before" aria-label="Before"></button><button class="practice-ctx-after" aria-label="After"></button></div><div class="practice-front">Selected <mark>card</mark> text</div></div>
       <div class="practice-nav"><button class="practice-prev">Previous</button><button class="practice-unflip" aria-label="Flip card">Flip</button><button class="practice-play">Play</button><button class="practice-next">Next</button></div>
+      <div class="practice-rec-bar"><button class="prec-toggle">Record</button></div>
     </div>
   </body></html>`, {runScripts: 'outside-only', pretendToBeVisual: true});
   const {window} = dom, doc = window.document;
@@ -165,7 +166,7 @@ test('Practice keeps Flip visible and interactive when the other controls auto-h
     assert.equal(p.window.getComputedStyle(prev).visibility, 'hidden');
     let flips = 0; flip.addEventListener('click', () => flips++);
     flip.dispatchEvent(new p.window.MouseEvent('pointerdown', {button: 0, bubbles: true, cancelable: true}));
-    assert.equal(p.window.testChrome.isVisible(), true, 'visible Flip acts on the first tap');
+    assert.equal(p.window.testChrome.isVisible(), false, 'Flip does not wake hidden controls');
     flip.dispatchEvent(new p.window.MouseEvent('pointerup', {button: 0, bubbles: true}));
     flip.click(); assert.equal(flips, 1);
     p.doc.getElementById('practiceMode').classList.add('minimized');
@@ -211,3 +212,31 @@ test('Practice context stays interactive and Speak over can keep Play visible wh
     assert.equal(p.window.getComputedStyle(play).visibility, 'hidden');
   } finally {p.close();}
 });
+
+for (const selector of ['.practice-unflip', '.practice-ctx-before', '.practice-ctx-after', '.practice-play', '.prec-toggle']) {
+  test(`persistent ${selector} acts without waking controls on pointer or keyboard activation`, () => {
+    const p = boot('practice');
+    try {
+      const button = p.doc.querySelector(selector);
+      if (selector === '.practice-play') button.classList.add('practice-keep-visible');
+      const child = p.doc.createElement('span'); button.append(child);
+      let actions = 0; button.addEventListener('click', () => actions++);
+      p.advance(3100);
+      for (const kind of ['click', 'drag', 'cancel']) {
+        child.dispatchEvent(new p.window.MouseEvent('pointerdown', {button: 0, bubbles: true}));
+        if (kind === 'drag') child.dispatchEvent(new p.window.MouseEvent('pointermove', {clientX: 50, bubbles: true}));
+        child.dispatchEvent(new p.window.MouseEvent(kind === 'cancel' ? 'pointercancel' : 'pointerup', {bubbles: true}));
+        if (kind === 'click') child.click();
+        assert.equal(p.window.testChrome.isVisible(), false, kind + ' leaves chrome hidden');
+      }
+      for (const key of ['Enter', ' ']) {
+        button.dispatchEvent(new p.window.KeyboardEvent('keydown', {key, bubbles: true}));
+        button.click();
+        assert.equal(p.window.testChrome.isVisible(), false, key + ' leaves chrome hidden');
+      }
+      assert.equal(actions, 3, 'actions are not swallowed');
+      p.doc.dispatchEvent(new p.window.KeyboardEvent('keydown', {key: 'Tab', bubbles: true}));
+      assert.equal(p.window.testChrome.isVisible(), true, 'normal keyboard navigation still reveals controls');
+    } finally {p.close();}
+  });
+}
