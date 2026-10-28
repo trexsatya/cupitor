@@ -11,7 +11,6 @@ import { applyLocalSubtitleFiles, readSubtitleFiles } from './bundle-store.js'
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const baseOf = name => name.replace(/\.[^.]+\.srt$/i, '')
 const normalized = name => String(name || '').normalize('NFC')
-const owns = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key)
 const packName = n => `packs/pack-${String(n).padStart(6, '0')}.json`
 
 export function planBundleRepair(srtsDir, { merge = false } = {}) {
@@ -47,7 +46,6 @@ export function planBundleRepair(srtsDir, { merge = false } = {}) {
   const duplicates = [...byKey].filter(([, sources]) => sources.length > 1)
   const bases = [...new Set(duplicates.map(([key]) => baseOf(key)))]
   const collisions = [], assignments = new Map(), unindexed = []
-  const hasTrack = (path, base) => Object.keys(working.get(path) || {}).some(key => baseOf(key) === base)
 
   for (const base of bases) {
     const grouped = [...byKey].filter(([key]) => baseOf(key) === base)
@@ -103,13 +101,14 @@ export function planBundleRepair(srtsDir, { merge = false } = {}) {
       working.set(destination, {})
     }
     Object.assign(working.get(destination), resolved)
-    assignments.set(base, destination)
+    assignments.set(normalized(base), destination)
   }
 
   const summary = { duplicateTracks: duplicates.length, affectedMedia: bases.length,
     duplicates: duplicates.map(([key, sources]) => ({ file: key, packs: sources.map(s => s.path) })),
     unindexedMedia: unindexed, conflicts: collisions, changedFiles: [] }
   if (collisions.length) return { root, blocked: true, summary, reads: [], changes: [] }
+  if (!duplicates.length) return { root, blocked: false, summary, reads: [], changes: [] }
 
   // The planner must not emit a repair which still contains duplicate keys.
   const seen = new Set()
