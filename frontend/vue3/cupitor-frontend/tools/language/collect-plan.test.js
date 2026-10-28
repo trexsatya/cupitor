@@ -27,6 +27,15 @@ describe('collection plan', () => {
     expect(planCollection([{ line: 'gäller' }], duplicates, 2)[0])
       .toMatchObject({ count: 1, missing: 1, existingVideoIds: ['one11111111'] });
   });
+  test('Swedish coverage does not count English-only translated mentions', () => {
+    const captions = [
+      { videoId: 'abc12345678', sv: 'Det är helt annorlunda.', en: 'She says förargas.' },
+    ];
+    const x = planCollection([{ line: 'förargas' }], captions, 2, { sourceLang: 'sv' });
+    expect(x[0]).toMatchObject({ count: 0, missing: 2, existingVideoIds: [] });
+    const y = planCollection([{ line: 'förargas' }], captions, 2, { sourceLang: 'en' });
+    expect(y[0]).toMatchObject({ count: 1, missing: 1 });
+  });
   test('counts alternatives separately, preserving familiar rarity rules', () => {
     const result = planCollection([{ line: 'gäller|saknas', category: 'Words' }], subs, 2);
     expect(result).toMatchObject([{ line: 'saknas', count: 0, missing: 2 }]);
