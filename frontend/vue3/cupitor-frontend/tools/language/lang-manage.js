@@ -148,9 +148,12 @@ async function cmdCollect(cfg) {
   const expansionMap = buildExpansionMap(vocabulary);
   const expand = line => expandWords(line, cfg.lang, expansionMap);
   const threshold = cfg.rareThreshold;
+  // Targeted words can be two letters (e.g. "gå"); unrestricted category
+  // scans retain the existing three-character noise filter.
+  const minAltLen = requested.length ? 2 : 3;
   // The planner uses the same per-alternative matching as the existing "rare"
   // command. Every count is per distinct SRT video, not per textual occurrence.
-  const initial = planCollection(selected, loadLocalSubtitles(cfg.srtsDir), threshold, { expand });
+  const initial = planCollection(selected, loadLocalSubtitles(cfg.srtsDir), threshold, { expand, minAltLen });
   const chunk = cfg.chunk ?? cfg.chunkFilmot;
   const pending = chunk > 0 ? initial.slice(0, chunk) : initial;
   const planPath = join(cfg.outDir, 'collect-plan.json');
@@ -188,7 +191,7 @@ async function cmdCollect(cfg) {
     // another requested word. This prevents unnecessary paid API searches.
     const current = planCollection(
       [{ line: planned.line, category: planned.category }],
-      loadLocalSubtitles(cfg.srtsDir), threshold
+      loadLocalSubtitles(cfg.srtsDir), threshold, { minAltLen }
     )[0];
     if (!current) {
       log('  ✓ ' + planned.line + ' already covered by other captures.');
@@ -208,7 +211,7 @@ async function cmdCollect(cfg) {
     }
     log('\n▶ ' + current.line + ': ' + current.count + '/' + threshold +
       ' → request up to ' + quota + ' new videos');
-    const regex = buildRareWordRegex(current.line);
+    const regex = buildRareWordRegex(current.line, { minAltLen });
     let result;
     try {
       result = await collectFilmotApiWord({
@@ -252,7 +255,7 @@ async function cmdCollect(cfg) {
     // hit, a repeated indexed video or a cue conflict that kept old text.
     const after = planCollection(
       [{ line: current.line, category: current.category }],
-      loadLocalSubtitles(cfg.srtsDir), threshold
+      loadLocalSubtitles(cfg.srtsDir), threshold, { minAltLen }
     )[0];
     const finalCount = after ? after.count : threshold;
     const remaining = after ? after.missing : 0;
