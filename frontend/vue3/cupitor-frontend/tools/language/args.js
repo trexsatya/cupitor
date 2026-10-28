@@ -49,6 +49,9 @@ const NUMERIC = {
   after: "linesAfter",
   chunk: "chunk",
   maxPages: "maxSearchPages",
+  channelLimit: "apiChannelLimit",
+  channelGroups: "apiChannelGroups",
+  apiCredits: "apiMaxCreditsPerWord",
   minSpan: "pruneMinSpanSec",
   window: "pruneWindowLines",
 };
@@ -61,6 +64,10 @@ export function coerceFlags(flags) {
     if (NUMERIC[k] != null) {
       const n = parseInt(v, 10);
       if (!Number.isNaN(n)) out[NUMERIC[k]] = n;
+    } else if (k === "api") {
+      if (v === true) out.filmotMode = "api";
+    } else if (k === "no-unrestricted") {
+      if (v === true) out.apiUnrestrictedFallback = false;
     } else if (k === "words") {
       out.words = String(v)
         .split(",")
