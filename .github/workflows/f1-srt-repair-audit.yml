@@ -26,6 +26,7 @@ jobs:
         with:
           repository: trexsatya/trexsatya.github.io
           ref: ai/f1-srt-threshold5
+          fetch-depth: 0
           path: data
           persist-credentials: false
           sparse-checkout: |
