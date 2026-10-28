@@ -1,5 +1,4 @@
 export const KEYBOARD_SHORTCUTS = [
-  { scope: 'General', keys: ['Shift + /', '?'], label: 'Show keyboard shortcuts' },
   { scope: 'General', keys: ['V'], label: 'Add a vocabulary item (main page)' },
   { scope: 'General', keys: ['L'], label: 'Open playlists (main page)' },
   { scope: 'General', keys: ['M'], label: 'Minimize / restore the active Player or Practice view' },
@@ -25,12 +24,11 @@ export function keyboardShortcut(event, {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
       event.ctrlKey || event.altKey || event.metaKey || dialogOpen) return null
   const key = String(event.key || '').toLowerCase()
-  // Shift+/ produces "?" on most layouts, but some browsers report
-  // "/" with shiftKey still set. Keep the existing bare ? shortcut too.
-  if ((key === '?' || (key === '/' && event.shiftKey)) && !typing && !event.repeat) return 'help'
+  // There is no '?' shortcut for the reference dialog. Shift+/ is normal
+  // text; only the unshifted slash invokes search.
   // Slash is reserved in the main search field too: select its query rather
   // than inserting "/". Other inputs and editors retain ordinary typing.
-  if (key === '/') {
+  if (key === '/' && !event.shiftKey) {
     if (practice) return typing || event.repeat ? null : 'practice-search'
     if (searchAvailable && (!typing || searchFocused)) return 'search'
   }
