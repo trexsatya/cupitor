@@ -155,9 +155,15 @@ async function check(browser, mobile) {
         ...stored, _recName: name, _st: 'Manual', _w: 'Card', _idx: 0,
       }] })
     }, name)
-    await page.locator('#practiceMode .practice-settings').waitFor({state:'visible'})
-    await click('#practiceMode .practice-settings')
-    await page.locator('#practiceMode .practice-edit').waitFor({state:'visible'})
+    await page.locator('#practiceMode .practice-settings').waitFor({ state: 'visible' })
+    // Re-entering Practice may restore a still-open settings panel. The
+    // settings control is a toggle, so blindly clicking it would CLOSE the
+    // panel and leave Edit hidden (especially after touch navigation).
+    if (!(await page.locator('#practiceMode .practice-settings-panel').isVisible())) {
+      await click('#practiceMode .practice-settings')
+    }
+    await page.locator('#practiceMode .practice-settings-panel').waitFor({ state: 'visible' })
+    await page.locator('#practiceMode .practice-edit').waitFor({ state: 'visible' })
     await click('#practiceMode .practice-edit')
     await page.locator('#manualEntryEditor #meeSource').waitFor({state:'visible'})
     assert.equal(await page.locator('#manualEntryEditor #meeSource').inputValue(),
