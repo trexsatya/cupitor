@@ -20680,7 +20680,7 @@ function openPracticeMode(opts) {
         <div class="practice-info-meta"></div>
       </div>
       <div class="practice-settings-panel" style="display:none;">
-        <button type="button" class="keyboard-shortcuts-btn">Keyboard shortcuts (?)</button>
+        <button type="button" class="keyboard-shortcuts-btn">Keyboard shortcuts</button>
         <label class="practice-settings-row">
           <input type="checkbox" class="practice-speakover-toggle">
           <span>Show speakover</span>
