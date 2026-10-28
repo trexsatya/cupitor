@@ -147,3 +147,25 @@ test('15,000 media with two SRTs each fit into 150 bundles at the file-count tar
   assert.equal(p.packs.size, 150)
   assert.equal([...p.packs.values()].reduce((sum, files) => sum + Object.keys(files).length, 0), 30000)
 })
+
+test('new index entry reuses previously orphaned bundled tracks instead of duplicating them', async () => {
+  const r = repository({ 'orphan.sv.srt': 'Old Swedish', 'orphan.en.srt': 'Old English', 'neighbor.sv.srt': 'Neighbor' })
+  const indexPath = dir + '/index.json'
+  const original = JSON.parse(r.data.get(indexPath))
+  r.data.set(indexPath, jsonText(original.filter(e => e.name !== 'orphan')))
+  const oldPack = original.find(e => e.name === 'orphan').bundle
+  await r.apply([
+    edit('orphan', text => text + ' + captured'),
+    indexWrite(index => [...index, indexEntry('orphan', 'video-orphan')]),
+  ])
+  const index = JSON.parse(r.data.get(indexPath))
+  assert.equal(index.find(e => e.link === 'video-orphan').bundle, oldPack)
+  const documents = [...r.data.entries()]
+    .filter(([path]) => path.includes('/packs/pack-'))
+    .map(([, text]) => JSON.parse(text).files)
+  assert.equal(documents.filter(pack => 'orphan.sv.srt' in pack).length, 1)
+  assert.equal(documents.filter(pack => 'orphan.en.srt' in pack).length, 1)
+  const saved = Object.assign({}, ...documents)
+  assert.equal(saved['orphan.sv.srt'], 'Old Swedish + captured')
+  assert.equal(saved['orphan.en.srt'], 'Old English')
+})

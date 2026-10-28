@@ -13,7 +13,8 @@ const baseOf = name => name.replace(/\.[^.]+\.srt$/i, '')
 const normalized = name => String(name || '').normalize('NFC')
 const packName = n => `packs/pack-${String(n).padStart(6, '0')}.json`
 
-export function planBundleRepair(srtsDir, { merge = false } = {}) {
+export function planBundleRepair(srtsDir, { merge = false, preferIndexed = false } = {}) {
+  if (merge && preferIndexed) throw new Error('Choose either merge or preferIndexed, not both');
   if (!srtsDir || typeof srtsDir !== 'string') throw new Error('Supply --srtsDir or configure srtsDir')
   const root = resolve(srtsDir), snapshots = new Map()
   const read = name => {
@@ -58,12 +59,20 @@ export function planBundleRepair(srtsDir, { merge = false } = {}) {
     const found = storage.packs.map(p => p.path).filter(path => grouped.some(([, sources]) => sources.some(s => s.path === path)))
     const indicated = entries[0]?.bundle
     const preferred = indicated && found.includes(indicated) ? indicated : found[0]
+    if (preferIndexed && (!indicated || !found.includes(indicated))) {
+      collisions.push({ media: base, reason: 'No existing indexed pack to prefer; manual review needed', packs: found })
+      continue
+    }
     const resolved = {}
     for (const [key, sources] of grouped) {
       const ordered = [...sources].sort((a, b) => (a.path === preferred ? -1 : 0) - (b.path === preferred ? -1 : 0))
       let text = ordered[0].text
       for (const source of ordered.slice(1)) {
         if (source.text === text) continue
+        // Explicitly prefer the indexed pack for transcripts of the same
+        // overlapping time range (e.g. clean manual vs rough auto captions).
+        // Never join overlapping, incompatible subtitle tracks implicitly.
+        if (preferIndexed) continue
         if (!merge) {
           collisions.push({ media: base, file: key, reason: 'Different subtitle contents; inspect or rerun with --merge',
             packs: sources.map(s => s.path) })

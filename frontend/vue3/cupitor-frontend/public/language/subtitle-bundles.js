@@ -196,7 +196,10 @@ async function prepareDirectory(dir, storage, operations, read) {
     const file = splitPath(operation.path).file
     let old = entryForFile(before, file)
     const next = entryForFile(index, file)
-    if (!old && !next) {
+    // A newly indexed video may already have orphaned tracks in an old pack.
+    // Search those packs even when the updated index contains a new (unassigned)
+    // entry; otherwise this capture allocates another copy of the same key.
+    if (!old) {
       for (const metadata of storage.packs) {
         const contents = await load(metadata.path)
         const key = [file, decode(file)].find(key => owns(contents, key))

@@ -204,3 +204,30 @@ test('CLI provides readable console inspection and export, without applying or m
   assert.match(invalid.stderr, /do not combine with --apply/)
   assert.equal(readFileSync(join(root, p1), 'utf8'), original)
 })
+
+test('explicit indexed-preference repair keeps clean SV, retains orphan EN and backs up originals', t => {
+  const manual = cue('Clean manually transcribed Swedish', 11)
+  const rough = cue('Rough automatic speech', 10)
+  const root = setup(t, {
+    first: { [source]: rough, [translated]: cue('English translation', 10), [other]: cue('Other') },
+    second: { [source]: manual, [unrelated]: cue('Third') },
+  })
+  assert.equal(planBundleRepair(root).blocked, true)
+  const plan = planBundleRepair(root, { preferIndexed: true })
+  assert.equal(plan.blocked, false)
+  const done = applyBundleRepair(plan)
+  assert(existsSync(join(done.backup, p1)))
+  assert.equal(parseBundle(readFileSync(join(done.backup, p1), 'utf8'))[source], rough)
+  const files = docs(root)
+  assert.equal(files[source], manual)
+  assert.equal(files[translated], cue('English translation', 10))
+  assert.equal(getIndex(root).find(e => e.link === 'video001').bundle, p2)
+  assert.equal(planBundleRepair(root).summary.duplicateTracks, 0)
+})
+
+test('indexed-preference repair refuses unindexed duplicate data and incompatible merging options', t => {
+  const root = setup(t, { includeIndex: false, second: { [source]: cue('Different', 20) } })
+  assert.equal(planBundleRepair(root, { preferIndexed: true }).blocked, true)
+  assert.match(planBundleRepair(root, { preferIndexed: true }).summary.conflicts[0].reason, /indexed pack/)
+  assert.throws(() => planBundleRepair(root, { merge: true, preferIndexed: true }), /either/)
+})
