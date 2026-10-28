@@ -183,3 +183,47 @@ test('API client uses X-API-Key headers (never the URL), caches responses, and f
     await expect(exhausted.get('getsubtitlesearch', opts)).rejects.toMatchObject({ quota: true });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('missing captions are fetched in one batched two-credit request', async () => {
+  const calls = [];
+  const client = {
+    hasCached: () => false,
+    get: async (endpoint, params) => {
+      calls.push({ endpoint, params });
+      if (endpoint === 'getsubtitlesearch') return { result: [
+        responseRow(vid[0], 'One', []),
+        responseRow(vid[1], 'One', []),
+      ] };
+      return [
+        { id: vid[0], subtitles: [{ lang: 'sv', isauto: 0, transcript: sampleLines }] },
+        { id: vid[1], subtitles: [{ lang: 'sv', isauto: 0, transcript: sampleLines }] },
+      ];
+    },
+  };
+  const res = await collectFilmotApiWord({
+    word: 'gäller', terms: ['gäller'], regex: /gäller/, cfg: config,
+    channels: [{ channelid: ids[0] }], client,
+  });
+  expect(res.hits).toHaveLength(2);
+  expect(calls).toHaveLength(2);
+  expect(calls[1].endpoint).toBe('getvideos');
+  expect(calls[1].params.id).toBe(vid.slice(0, 2).join(','));
+  expect(res.plannedCredits).toBe(3);
+});
+
+test('nonmatching complete transcripts never trigger extra getvideos credits', async () => {
+  const calls = [];
+  const client = {
+    hasCached: () => false,
+    get: async (endpoint, params) => {
+      calls.push({ endpoint, params });
+      return { result: [responseRow(vid[0], 'One', [{ s: 1, t: 'A different word.' }])] };
+    },
+  };
+  await collectFilmotApiWord({
+    word: 'gäller', terms: ['gäller'], regex: /gäller/,
+    cfg: { ...config, apiUnrestrictedFallback: false },
+    channels: [{ channelid: ids[0] }], client,
+  });
+  expect(calls.every(call => call.endpoint === 'getsubtitlesearch')).toBe(true);
+});
