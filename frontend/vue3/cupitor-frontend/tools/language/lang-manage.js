@@ -153,7 +153,7 @@ async function cmdCollect(cfg) {
   const minAltLen = requested.length ? 2 : 3;
   // The planner uses the same per-alternative matching as the existing "rare"
   // command. Every count is per distinct SRT video, not per textual occurrence.
-  const initial = planCollection(selected, loadLocalSubtitles(cfg.srtsDir), threshold, { expand, minAltLen });
+  const initial = planCollection(selected, loadLocalSubtitles(cfg.srtsDir), threshold, { expand, minAltLen, sourceLang: cfg.lang });
   const chunk = cfg.chunk ?? cfg.chunkFilmot;
   const pending = chunk > 0 ? initial.slice(0, chunk) : initial;
   const planPath = join(cfg.outDir, 'collect-plan.json');
@@ -191,7 +191,7 @@ async function cmdCollect(cfg) {
     // another requested word. This prevents unnecessary paid API searches.
     const current = planCollection(
       [{ line: planned.line, category: planned.category }],
-      loadLocalSubtitles(cfg.srtsDir), threshold, { minAltLen }
+      loadLocalSubtitles(cfg.srtsDir), threshold, { minAltLen, sourceLang: cfg.lang }
     )[0];
     if (!current) {
       log('  ✓ ' + planned.line + ' already covered by other captures.');
@@ -255,7 +255,7 @@ async function cmdCollect(cfg) {
     // hit, a repeated indexed video or a cue conflict that kept old text.
     const after = planCollection(
       [{ line: current.line, category: current.category }],
-      loadLocalSubtitles(cfg.srtsDir), threshold, { minAltLen }
+      loadLocalSubtitles(cfg.srtsDir), threshold, { minAltLen, sourceLang: cfg.lang }
     )[0];
     const finalCount = after ? after.count : threshold;
     const remaining = after ? after.missing : 0;
