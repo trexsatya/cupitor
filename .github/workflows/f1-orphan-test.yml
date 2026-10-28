@@ -1,0 +1,27 @@
+name: Subtitle orphan collision regression tests
+
+on:
+  push:
+    branches: [fix/f1-orphan-caption-bundle-collision-20261028]
+    paths:
+      - 'frontend/vue3/cupitor-frontend/public/language/subtitle-bundles*'
+      - 'frontend/vue3/cupitor-frontend/tools/language/bundle-repair*'
+      - '.github/workflows/f1-orphan-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  orphan-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run targeted subtitle regressions
+        working-directory: frontend/vue3/cupitor-frontend
+        run: |
+          node --test public/language/subtitle-bundles.test.mjs tools/language/bundle-repair.test.mjs
