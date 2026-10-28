@@ -209,10 +209,12 @@ export async function resolveCupitorChannels(index, client, cachePath, { channel
 // for remaining quota. A fixed per-word request budget protects API credits.
 // All hits match the old filmot-hits.json structure for the existing SRT step.
 export async function collectFilmotApiWord({
-  word, terms, regex, cfg, channels, client, log = () => {},
+  word, terms, regex, cfg, channels, client, excludedVideoIds = [], log = () => {},
 }) {
   const hits = [];
-  const seen = new Set();
+  // A known video may already contain this word locally. Do not spend detail
+  // credits or fill the quota with a source that cannot improve coverage.
+  const seen = new Set(excludedVideoIds);
   const groups = restrictedChannelGroups(channels, cfg.apiChannelGroups ?? 2);
   const budget = Number(cfg.apiMaxCreditsPerWord ?? 30);
   let planned = 0;
