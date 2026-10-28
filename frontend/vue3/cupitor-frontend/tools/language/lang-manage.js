@@ -12,6 +12,7 @@
 //   node tools/language/lang-manage.js srt        [--chunk N] [--category "<name>"] [--no-translate] [--reset]
 //   node tools/language/lang-manage.js prune       [--minSpan N] [--window N] [--apply]  (shrink full-video transcripts to windows around items found only there)
 //   node tools/language/lang-manage.js import      [--input file-or-folder] [--link media-id] [--merge|--replace] [--apply]
+//   node tools/language/lang-manage.js repair      [--merge] [--apply] (duplicate SRTs across bundles)
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, unlinkSync } from "node:fs";
 import { readSubtitleFiles, commitLocalSubtitleFiles } from './bundle-store.js';
 import { join } from "node:path";
@@ -43,6 +44,7 @@ import { resolveChannel, loadChannelCache, saveChannelCache } from "./youtube-ch
 import { translateBatch } from "./google-translate.js";
 import { saveHit, readIndex, writeIndex } from "./srt-store.js";
 import { planSrtImport, applySrtImport } from './srt-import.js';
+import { planBundleRepair, applyBundleRepair } from './bundle-repair.js';
 import {
   isFullSrt,
   scanUncoveredOwners,
@@ -575,6 +577,20 @@ async function cmdPrune(cfg) {
 
 // --- main ------------------------------------------------------------------
 
+function cmdRepair(cfg) {
+  const dir = cfg.srtsDir || (cfg.dataDir ? join(cfg.dataDir, 'srts') : '')
+  const plan = planBundleRepair(dir, { merge: cfg.merge })
+  log(JSON.stringify(plan.summary, null, 2))
+  if (plan.blocked) {
+    log('No files changed. Conflicting copies require review; use --merge only if differing timestamp ranges should be combined.')
+    process.exitCode = 1
+    return
+  }
+  if (!cfg.apply) return log('Dry run: rerun with repair --apply to back up and repair the listed bundle files.')
+  log(JSON.stringify(applyBundleRepair(plan), null, 2))
+}
+
+
 async function cmdImport(cfg) {
   const dir = cfg.srtsDir || (cfg.dataDir ? join(cfg.dataDir, 'srts') : '')
   const plan = await planSrtImport(dir, cfg)
@@ -606,8 +622,9 @@ async function main() {
   if (command === "categories") return cmdCategories(cfg);
   if (command === "prune") return cmdPrune(cfg);
   if (command === "import") return cmdImport(cfg);
+  if (command === "repair") return cmdRepair(cfg);
 
-  log(`Unknown command "${command}". Use one of: rare | filmot | srt | categories | prune | import`);
+  log(`Unknown command "${command}". Use one of: rare | filmot | srt | categories | prune | import | repair`);
   process.exitCode = 1;
 }
 
