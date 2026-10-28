@@ -81,7 +81,13 @@ export function createLocalSpeakOver({
     // through our automatic post-recording rewind, then clear it once reached.
     st.resetPosition = () => { st.watchPos = null; };
     st.preventOverlap = () => {
-      if (['starting','recording','stopping','playback'].includes(st.phase)) pauseMedia(st);
+      if (['starting','recording','stopping','playback'].includes(st.phase)) {
+        pauseMedia(st);
+      } else {
+        // Seed the watcher at the start of playback, including at t=0.
+        // A take stamped at the beginning must be heard on the next replay.
+        st.watchPos = Math.max(-0.001, (Number(element.currentTime) || 0) - 0.001);
+      }
     };
     st.tick = () => {
       if (session !== st) return;
