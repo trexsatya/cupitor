@@ -20,9 +20,10 @@ const other = `${b}.sv.srt`
 const unrelated = `${c}.sv.srt`
 
 function setup(t, { first, second, indexBundle = p2, includeIndex = true, maxFiles = 200, rawIndex = null } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'bundle-repair-'))
-  t.after(() => rmSync(root, { recursive: true, force: true }))
-  mkdirSync(join(root, 'packs'))
+  const parent = mkdtempSync(join(tmpdir(), 'bundle-repair-test-'))
+  const root = join(parent, 'srts')
+  t.after(() => rmSync(parent, { recursive: true, force: true }))
+  mkdirSync(join(root, 'packs'), { recursive: true })
   const one = first || { [source]: cue('Hej'), [other]: cue('Other') }
   const two = second || { [source]: cue('Hej'), [translated]: cue('Hello'), [unrelated]: cue('Third') }
   writeFileSync(join(root, p1), bundleText(one))
