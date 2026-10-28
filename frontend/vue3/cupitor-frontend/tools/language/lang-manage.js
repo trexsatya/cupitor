@@ -391,6 +391,7 @@ async function cmdSrt(cfg) {
         targetLang: cfg.targetLang,
         defaultDurSec: cfg.defaultDurSec,
         writeTarget: translate,
+        srtConflict: cfg.srtConflict,
       });
       markDone(progressPath, key);
       log(`  ✓ ${baseName}`);
