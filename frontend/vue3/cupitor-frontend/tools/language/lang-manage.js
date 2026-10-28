@@ -768,6 +768,12 @@ async function main() {
     log('Defaults to a dry run. With no --input, imports loose SRTs dropped into srtsDir. Files named "channel || title || id.sv.srt" supply their id; other names need --link or an input index.json.');
     return;
   }
+  // A threshold is a count of distinct subtitle videos. Fractions or
+  // invalid strings must not silently round to a different coverage goal.
+  if (command === 'collect' && flags.threshold !== undefined &&
+      !/^[1-9]\\d*$/.test(String(flags.threshold))) {
+    throw new Error('collect --threshold must be a positive whole number.');
+  }
   const overrides = coerceFlags(flags);
   const cfg = loadConfig(flags.config || "config.json", overrides);
   if (overrides.reset) cfg.reset = true;
