@@ -44,6 +44,7 @@ export function createLocalSpeakOver({
     generation++;
     if (!st) { render(); return; }
     st.element.removeEventListener('timeupdate', st.tick);
+    st.element.removeEventListener('play', st.preventOverlap);
     st.element.removeEventListener('seeking', st.resetPosition);
     st.element.removeEventListener('seeked', st.resetPosition);
     st.element.removeEventListener('ended', st.resetPosition);
@@ -73,9 +74,18 @@ export function createLocalSpeakOver({
       kept: new Set(saved.map(t => t.url)), orphans: [],
       phase:'idle', error:'', startedAt:0, startAt:0, playToken:0,
       watchPos:null, awaiting:null, audio:null, tick:null, resetPosition:null,
+      preventOverlap:null,
     };
     session = st;
-    st.resetPosition = () => { st.watchPos = null; st.awaiting = null; };
+    st.resetPosition = () => {
+      st.watchPos = null;
+      // Automatic post-recording rewind is an intentional pass to this mark.
+      // Seek events from the media element must not forget which take is due.
+      if (st.awaiting == null) st.awaiting = null;
+    };
+    st.preventOverlap = () => {
+      if (['starting','recording','stopping','playback'].includes(st.phase)) pauseMedia(st);
+    };
     st.tick = () => {
       if (session !== st) return;
       const pos = Number(st.element.currentTime);
@@ -91,6 +101,7 @@ export function createLocalSpeakOver({
       } else if (st.awaiting != null && pos > st.awaiting + 0.25) st.awaiting = null;
     };
     element.addEventListener('timeupdate', st.tick);
+    element.addEventListener('play', st.preventOverlap);
     for (const name of ['seeking','seeked','ended']) element.addEventListener(name, st.resetPosition);
     render();
     return snapshot();
