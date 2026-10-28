@@ -2,7 +2,7 @@ import { keyboardShortcut, studyShortcutView, KEYBOARD_SHORTCUTS } from './keybo
 
 test.each([
   ['ArrowLeft', 'previous'], ['K', 'previous'], ['ArrowRight', 'next'], ['j', 'next'],
-  [' ', 'play'], ['r', 'reveal'], ['f', 'reveal'], ['d', 'direction'], ['s', 'speed'], ['Escape', 'close'], ['?', 'help']
+  [' ', 'play'], ['r', 'reveal'], ['f', 'reveal'], ['d', 'direction'], ['s', 'speed'], ['Escape', 'close']
 ])('Practice key %s performs %s', (key, action) => {
   expect(keyboardShortcut({ key }, { practice: true })).toBe(action)
 })
@@ -14,8 +14,8 @@ test('slash focuses search or clicks the Practice search button', () => {
   expect(keyboardShortcut({ key: '/', repeat: true }, { typing: true, searchFocused: true })).toBe('search')
   expect(keyboardShortcut({ key: '/' }, { searchAvailable: false })).toBeNull()
 })
-test('help is available in both views and main search retains other typing keys', () => {
-  expect(keyboardShortcut({ key: '?' })).toBe('help')
+test('question mark no longer opens help and main search retains other typing keys', () => {
+  expect(keyboardShortcut({ key: '?' })).toBeNull()
   expect(keyboardShortcut({ key: '?' }, { typing: true, searchFocused: true })).toBeNull()
   expect(keyboardShortcut({ key: 'r' })).toBeNull()
 })
@@ -55,13 +55,17 @@ test('M toggles any existing Player or Practice view, never creates one', () => 
   expect(keyboardShortcut({ key: 'M' }, { studyActive: true, studyVisible: false })).toBe('study-toggle')
 })
 
-test('Shift + / displays help, including on key layouts reporting slash', () => {
-  expect(keyboardShortcut({ key: '?', shiftKey: true })).toBe('help')
-  expect(keyboardShortcut({ key: '/', shiftKey: true })).toBe('help')
+test('Shift + / and question mark are ordinary keys and not help shortcuts', () => {
+  for (const practice of [false, true]) {
+    expect(keyboardShortcut({ key: '?', shiftKey: true }, { practice })).toBeNull()
+    expect(keyboardShortcut({ key: '?' }, { practice })).toBeNull()
+    expect(keyboardShortcut({ key: '/', shiftKey: true }, { practice })).toBeNull()
+  }
   expect(keyboardShortcut({ key: '/', shiftKey: false })).toBe('search')
   expect(KEYBOARD_SHORTCUTS.filter(x => x.scope === 'General').map(x => x.keys[0])).toEqual(
-    expect.arrayContaining(['Shift + /', 'V', 'L', 'M'])
+    expect.arrayContaining(['V', 'L', 'M'])
   )
+  expect(KEYBOARD_SHORTCUTS.some(x => x.keys.includes('Shift + /') || x.keys.includes('?'))).toBe(false)
 })
 
 test('new shortcuts respect typing, open dialogs and OS shortcuts', () => {

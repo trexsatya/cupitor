@@ -149,6 +149,12 @@ async function checkPracticeControls(browser) {
       await page.evaluate(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', isComposing: true, bubbles: true })))
       assert.equal(await page.evaluate(() => window._practiceIdx), 0)
       await page.keyboard.press('?')
+      assert.equal(await page.locator('#keyboardShortcutsDialog:visible').count(), 0, 'question mark no longer opens help')
+      await page.locator('#practiceMode .practice-settings').click()
+      // The shortcut-reference button is intentionally hidden on phones. Use
+      // its existing handler directly here to verify dialog behavior on both
+      // viewports without reinstating a question-mark hotkey.
+      await page.locator('#practiceMode .keyboard-shortcuts-btn').evaluate(el => el.click())
       await page.locator('#keyboardShortcutsDialog').waitFor({ state: 'visible' })
       // The dialog is generated from the same list as the keyboard matcher.
       // New shortcuts must not break the browser test's stale row count.

@@ -209,7 +209,7 @@ playlist/card track overrides continue to apply. Old settings retain silent
 music during YouTube clips until their profile is changed explicitly.
 
 Open **Settings → Keyboard shortcuts**, **Practice → ⋯ → Keyboard shortcuts**,
-or press **?** for the in-app reference.
+to view the in-app reference. The `Shift + /` (`?`) shortcut is no longer assigned.
 
 | Key | Action |
 | --- | --- |
@@ -222,7 +222,6 @@ or press **?** for the in-app reference.
 | `D` | Switch the language direction |
 | `S` | Cycle the configured playback speeds |
 | `Esc` | Close Practice; when help is open, close help first |
-| `?` | Show the shortcut reference |
 
 Typing in inputs, textareas, selects and rich-text editors, IME composition,
 modifier shortcuts, and open dialogs retain their own keys. The main search
