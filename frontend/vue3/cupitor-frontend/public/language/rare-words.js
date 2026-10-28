@@ -122,9 +122,9 @@ function lowercaseSubs(subs) {
 // expanded are the alternative itself (deduped across lines, first category wins).
 // Either way, sorted by count asc then line.
 export function findRareWords(entries, subs, threshold, opts = {}) {
-  const { expand, langCode, perAlternative = false } = opts;
+  const { expand, langCode, perAlternative = false, minAltLen = MIN_ALT_LEN } = opts;
   const lo = lowercaseSubs(subs);
-  if (perAlternative) return findRareAlternatives(entries, lo, threshold, expand, langCode);
+  if (perAlternative) return findRareAlternatives(entries, lo, threshold, expand, langCode, minAltLen);
 
   const found = [];
   for (const entry of entries) {
@@ -133,12 +133,12 @@ export function findRareWords(entries, subs, threshold, opts = {}) {
     let expanded;
     try {
       expanded = expand ? expand(line, langCode) : line;
-      re = buildRareWordRegex(expanded);
+      re = buildRareWordRegex(expanded, { minAltLen });
     } catch (e) {
       re = null;
     }
     if (!re) continue;
-    const sigs = buildRareWordPrefilter(expanded);
+    const sigs = buildRareWordPrefilter(expanded, { minAltLen });
     const count = countMatchingFiles(re, sigs, lo, threshold);
     if (count < threshold) found.push({ line, category, count });
   }
@@ -149,7 +149,7 @@ export function findRareWords(entries, subs, threshold, opts = {}) {
 // Collect every expanded `|`-alternative across all vocab lines, deduped (first
 // category wins). Returns [{ alt, category }]. Shared by per-alternative rarity
 // and the srt-prune command (both treat one alternative as one dictionary item).
-export function expandedAlternatives(entries, { expand, langCode } = {}) {
+export function expandedAlternatives(entries, { expand, langCode, minAltLen = MIN_ALT_LEN } = {}) {
   const catOf = new Map(); // alternative -> category
   for (const entry of entries || []) {
     let expanded;
@@ -158,7 +158,7 @@ export function expandedAlternatives(entries, { expand, langCode } = {}) {
     } catch (e) {
       continue;
     }
-    for (const alt of strippedAlternatives(expanded)) {
+    for (const alt of strippedAlternatives(expanded, minAltLen)) {
       const a = alt.trim();
       if (!catOf.has(a)) catOf.set(a, entry.category);
     }
@@ -167,17 +167,17 @@ export function expandedAlternatives(entries, { expand, langCode } = {}) {
 }
 
 // Per-alternative rarity: judge each expanded alternative individually.
-function findRareAlternatives(entries, lo, threshold, expand, langCode) {
+function findRareAlternatives(entries, lo, threshold, expand, langCode, minAltLen) {
   const found = [];
-  for (const { alt, category } of expandedAlternatives(entries, { expand, langCode })) {
+  for (const { alt, category } of expandedAlternatives(entries, { expand, langCode, minAltLen })) {
     let re;
     try {
-      re = buildRareWordRegex(alt);
+      re = buildRareWordRegex(alt, { minAltLen });
     } catch (e) {
       re = null;
     }
     if (!re) continue;
-    const sigs = buildRareWordPrefilter(alt);
+    const sigs = buildRareWordPrefilter(alt, { minAltLen });
     const count = countMatchingFiles(re, sigs, lo, threshold);
     if (count < threshold) found.push({ line: alt, category, count, expanded: alt });
   }
