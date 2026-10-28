@@ -115,7 +115,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # Single-use explicit push trigger from the approved f1 batch-001 commit.
+      # Single-use explicit push trigger from this approved f1 batch-001 commit.
       # Other commits on this branch only audit coverage. Default branch and
       # workflow_dispatch keep their existing gated behavior.
       # Secrets are only passed to the live capture step, never to the audit.
