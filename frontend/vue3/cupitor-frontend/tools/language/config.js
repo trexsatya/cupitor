@@ -22,7 +22,11 @@ export const DEFAULTS = {
   // Playwright with a persistent, logged-in session — the only reliable way past
   // filmot's hCaptcha/fingerprint wall. "http" uses a pasted cookie (often still
   // blocked). Browser mode needs: npm i playwright && npx playwright install chromium
-  filmotMode: "http",
+  filmotMode: "http", // choose "api" or --api to use Filmot's official API
+  apiChannelLimit: 10, // most represented Cupitor channels; UC IDs resolved in one batch
+  apiChannelGroups: 2, // up to 5 UC IDs per discounted search
+  apiMaxCreditsPerWord: 30, // conservative estimate, includes fallback
+  apiUnrestrictedFallback: true, // search the wider Filmot index if still short
   browserHeadless: false, // headed so you can log in / solve the captcha once
   browserUserDataDir: "./out/filmot-browser",
   // http mode only: paste your logged-in filmot Cookie header (or FILMOT_COOKIE env)
