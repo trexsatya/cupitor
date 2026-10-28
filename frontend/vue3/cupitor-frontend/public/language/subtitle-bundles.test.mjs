@@ -161,7 +161,7 @@ test('new index entry reuses previously orphaned bundled tracks instead of dupli
   const index = JSON.parse(r.data.get(indexPath))
   assert.equal(index.find(e => e.link === 'video-orphan').bundle, oldPack)
   const documents = [...r.data.entries()]
-    .filter(([path]) => /packs\\/pack-/.test(path))
+    .filter(([path]) => path.includes('/packs/pack-'))
     .map(([, text]) => JSON.parse(text).files)
   assert.equal(documents.filter(pack => 'orphan.sv.srt' in pack).length, 1)
   assert.equal(documents.filter(pack => 'orphan.en.srt' in pack).length, 1)
