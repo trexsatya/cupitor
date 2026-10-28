@@ -51,6 +51,8 @@ test('discounted calls always have at most five genuine included IDs', () => {
   expect(() => apiSearchParams('gäller', 'sv', ids)).toThrow(/1-5/);
   const params = apiSearchParams('gäller', 'sv', ids.slice(0, 5));
   expect(params.query).toBe('"gäller"');
+  expect(params.searchManualSubs).toBe(1);
+  expect(apiSearchParams('gäller', 'sv', ids.slice(0, 2), false).searchManualSubs).toBe(0);
   expect(params.channelID).toBe(ids.slice(0, 5).join(','));
   expect(params.columns).toMatch(/subtitles/);
   expect(params.perPageCount).toBe(10);
@@ -138,7 +140,9 @@ test('unrestricted search only follows unsuccessful scoped groups and avoids dup
     channels: [{ channelid: ids[0] }], client,
   });
   expect(res.hits.map(h => h.videoId)).toEqual([vid[0], vid[1]]);
-  expect(calls.map(x => !!x.channelID)).toEqual([true, false]);
+  expect(calls.map(x => [!!x.channelID, x.searchManualSubs])).toEqual([
+    [true, 1], [true, 0], [false, 1],
+  ]);
   expect(res.complete).toBe(true);
 });
 
