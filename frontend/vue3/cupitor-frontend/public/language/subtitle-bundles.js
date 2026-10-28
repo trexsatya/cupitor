@@ -266,6 +266,25 @@ async function prepareDirectory(dir, storage, operations, read) {
       for (const key of Object.keys(files)) if (baseOf(key) === base) delete files[key]
     }
   }
+  // A capture must never silently remove unrelated subtitle tracks.
+  // Moves are allowed only when the exact original track is still present
+  // elsewhere in the planned packs; explicitly deleted tracks are exempt.
+  const explicitlyDeleted = new Set(operations.filter(operation => operation.delete && /\\.srt$/i.test(splitPath(operation.path).file))
+    .map(operation => splitPath(operation.path).file))
+  const surviving = new Set()
+  for (const metadata of storage.packs) {
+    const contents = await load(metadata.path)
+    for (const key of Object.keys(contents)) surviving.add(key)
+  }
+  for (const [path, original] of originals) {
+    const beforeFiles = parseBundle(original.content)
+    for (const key of Object.keys(beforeFiles)) {
+      if (!surviving.has(key) && !explicitlyDeleted.has(key)) {
+        throw new Error('Subtitle write would silently remove existing track: ' + key +
+          ' (from ' + path + '). Aborted without changes.')
+      }
+    }
+  }
   const physical = []
   for (const [path, contents] of packs) {
     const text = bundleText(contents), original = originals.get(path)
