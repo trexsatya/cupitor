@@ -1,5 +1,6 @@
 import { retainCaptionEnds } from './caption-capture.js';
 import { openLocalSubtitlePicker } from './local-file-picker.js';
+import { createLocalSpeakOver } from './local-speakover.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
@@ -5434,6 +5435,7 @@ function hideMediaContainer() {
 }
 
 async function playNewMedia(link, source, mediaFile, autoPlay = true) {
+  _localSpeakOver.detach()
   clearSubtitles()
   stopMedia(source)
 
@@ -5465,6 +5467,12 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
         if (autoPlay) videoPlayer.play()
         hidePlayer(window.audioPlayer)
         showVideoPlayer()
+      }
+      // The existing local <audio>/<video> is the source of truth for the
+      // recording timestamp, pause/resume and playback-crossing watcher.
+      if (_haveAudioBridge() && mediaFile) {
+        _localSpeakOver.attach(mediaFile, document.getElementById(
+          /\.(mp3|wav)$/i.test(mediaFile.name) ? 'localAudio' : 'localVideo'))
       }
     }
     window.mediaBeingPlayed = {link, source}
@@ -14418,6 +14426,92 @@ async function deleteManualAudio(url) {
   catch (e) { console.warn('[manualAudio] delete failed', e) }
 }
 
+// Speak Over for the main-page local media player. Keep audio takes in the
+// app's native recording store; only metadata is saved to localStorage.
+// A media File itself is never persisted (Android/browser must re-grant it).
+const _localSpeakOver = createLocalSpeakOver({
+  permission: () => ensureMicPermissionViaBridge(),
+  startRecording: id => _audioRpc('recordStart', { id }),
+  stopRecording: () => _audioRpc('recordStop', {}),
+  cancelRecording: () => _audioRpc('recordCancel', {}),
+  loadAudio: url => loadManualAudioData(url),
+  deleteAudio: url => deleteManualAudio(url),
+  readSaved: identity => {
+    const value = localStorage.getItem(_scopedKey(
+      'cupitor:localSpeakOver:' + getLangFromUrl().fullName + ':' + identity))
+    return value ? JSON.parse(value) : []
+  },
+  writeSaved: (identity, takes) => {
+    const key = _scopedKey('cupitor:localSpeakOver:' + getLangFromUrl().fullName + ':' + identity)
+    if (takes.length) localStorage.setItem(key, JSON.stringify(takes))
+    else localStorage.removeItem(key)
+  },
+  onChange: _renderLocalSpeakOver,
+});
+
+function _renderLocalSpeakOver(st) {
+  const $bar = $('#localSpeakOverBar')
+  if (!$bar.length) return
+  if (!st || !_haveAudioBridge()) { $bar.hide().empty(); return }
+  $bar.empty()
+  $('<div class="local-sprec-heading">Speak Over · ' + 
+    '<span class="local-sprec-note">local media</span></div>').appendTo($bar)
+  const $controls = $('<div class="local-sprec-controls"></div>').appendTo($bar)
+  const recording = st.phase === 'recording'
+  const starting = st.phase === 'starting'
+  const busy = st.phase !== 'idle' && !recording && !starting
+  $('<button type="button" class="lang-tool-btn local-sprec-rec"></button>')
+    .text(starting ? '✕ Cancel' : recording ? '⏸ Stop' : '● Record')
+    .attr('aria-label', starting ? 'Cancel microphone start' : recording ? 'Stop recording' : 'Record speak-over')
+    .prop('disabled', busy).toggleClass('recording', recording)
+    .appendTo($controls)
+  $('<span class="local-sprec-status" role="status"></span>')
+    .text(st.phase === 'recording' ? 'Microphone recording; media paused'
+      : starting ? 'Starting microphone…'
+        : st.phase === 'stopping' ? 'Saving take…'
+          : st.phase === 'playback' ? 'Playing your take…'
+            : st.takes.length ? st.takes.length + ' take(s), ' + Math.round(st.duration) + 's total'
+              : 'Play local media, then record at any point')
+    .appendTo($controls)
+  const $buttons = $('<div class="local-sprec-actions"></div>').appendTo($bar)
+  $('<button type="button" class="lang-tool-btn local-sprec-keep">✔ Keep</button>')
+    .prop('disabled', !st.dirty || st.phase !== 'idle').appendTo($buttons)
+  $('<button type="button" class="lang-tool-btn local-sprec-discard">Discard changes</button>')
+    .prop('disabled', !st.dirty || st.phase !== 'idle').appendTo($buttons)
+  if (st.takes.length) {
+    const $takes = $('<div class="local-sprec-takes"></div>').appendTo($bar)
+    st.takes.forEach((tk, i) => {
+      const $row = $('<span class="local-sprec-take-row"></span>').appendTo($takes)
+      $('<button type="button" class="lang-tool-btn local-sprec-play-take"></button>')
+        .attr('data-t1', tk.t1)
+        .text('▶ ' + (i + 1) + ' · ' + tk.t1.toFixed(1) + 's')
+        .prop('disabled', st.phase !== 'idle').appendTo($row)
+      $('<button type="button" class="lang-tool-btn local-sprec-delete-take" aria-label="Delete take">×</button>')
+        .attr('data-t1', tk.t1).prop('disabled', st.phase !== 'idle')
+        .appendTo($row)
+    })
+  }
+  if (st.error) $('<p class="local-sprec-message" role="status"></p>').text(st.error).appendTo($bar)
+  $bar.show()
+}
+
+$(document).on('click', '#localSpeakOverBar .local-sprec-rec', async () => {
+  const st = _localSpeakOver.getState()
+  if (!st) return
+  if (st.phase === 'starting') _localSpeakOver.cancel()
+  else if (st.phase === 'recording') await _localSpeakOver.stop()
+  else if (st.phase === 'idle') await _localSpeakOver.start()
+})
+$(document).on('click', '#localSpeakOverBar .local-sprec-play-take', function () {
+  _localSpeakOver.replay(Number($(this).attr('data-t1')))
+})
+$(document).on('click', '#localSpeakOverBar .local-sprec-delete-take', function () {
+  const n = Number($(this).attr('data-t1'))
+  if (confirm('Delete this speak-over take?')) _localSpeakOver.remove(n)
+})
+$(document).on('click', '#localSpeakOverBar .local-sprec-keep', () => _localSpeakOver.keep())
+$(document).on('click', '#localSpeakOverBar .local-sprec-discard', () => _localSpeakOver.discard())
+
 // Ask Dart to make sure the host app holds Android's RECORD_AUDIO runtime
 // permission, prompting the user if needed. Returns one of:
 //   'granted'   — RECORD_AUDIO is now held (or was already)
@@ -19105,6 +19199,7 @@ function _practiceAudioEl() {
 // 'preview'. Silencing the deck is a different act from silencing the other
 // two, which is why it needs saying.
 function _silenceOtherAudio(starting) {
+  if (starting !== 'local') _localSpeakOver.detach()
   if (starting !== 'preview') { try { _stopManualAudioPreview() } catch (_) {} }
   if (starting !== 'practice') _stopPracticeAudio()
   if (starting !== 'deck') {
