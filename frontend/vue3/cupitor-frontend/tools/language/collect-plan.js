@@ -17,7 +17,13 @@ export function planCollection(entries, subtitles, threshold, options = {}) {
       current.en += ' ' + (sub.en || '');
     } else unique.set(key, { ...sub, sv: sub.sv || '', en: sub.en || '' });
   }
-  const sources = [...unique.values()];
+  // Count coverage in the requested source language only. A Swedish-looking
+  // string in an English translation must not satisfy a Swedish SRT target.
+  const sources = [...unique.values()].map(sub => ({
+    ...sub,
+    sv: options.sourceLang === 'en' ? '' : sub.sv,
+    en: options.sourceLang === 'sv' ? '' : sub.en,
+  }));
   const rare = findRareWords(entries, sources, threshold, { ...options, perAlternative: true });
   return rare.map(entry => {
     const regex = buildRareWordRegex(entry.expanded, { minAltLen: options.minAltLen ?? 3 });
