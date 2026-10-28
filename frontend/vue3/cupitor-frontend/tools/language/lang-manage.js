@@ -91,7 +91,7 @@ function loadLocalSubtitles(srtsDir) {
   const byName = new Map(readIndex(srtsDir).map(row => [row.name, row.link]));
   return [...byBase].map(([base, s]) => ({
     sv: s.sv || "", en: s.en || "",
-    videoId: byName.get(base) || (base.match(/\\|\\|\\s*([A-Za-z0-9_-]{11})$/)?.[1] || null),
+    videoId: byName.get(base) || (base.match(/\|\|\s*([A-Za-z0-9_-]{11})$/)?.[1] || null),
   }));
 }
 
@@ -145,12 +145,13 @@ async function cmdCollect(cfg) {
     : vocabularyEntries).filter(e => matchCategory(e.category, cfg.category));
   if (!selected.length) throw new Error('No words match the requested selection/category.');
 
-  const expand = line => expandWords(line, cfg.lang, buildExpansionMap(vocabulary));
+  const expansionMap = buildExpansionMap(vocabulary);
+  const expand = line => expandWords(line, cfg.lang, expansionMap);
   const threshold = cfg.rareThreshold;
   // The planner uses the same per-alternative matching as the existing "rare"
   // command. Every count is per distinct SRT video, not per textual occurrence.
   const initial = planCollection(selected, loadLocalSubtitles(cfg.srtsDir), threshold, { expand });
-  const chunk = cfg.chunk || cfg.chunkFilmot;
+  const chunk = cfg.chunk ?? cfg.chunkFilmot;
   const pending = chunk > 0 ? initial.slice(0, chunk) : initial;
   const planPath = join(cfg.outDir, 'collect-plan.json');
   writeJson(planPath, {
