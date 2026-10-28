@@ -1,9 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { planBundleRepair, applyBundleRepair } from './bundle-repair.js'
+import { inspectBundleConflicts, formatBundleConflicts, exportBundleConflicts } from './bundle-inspect.js'
 import { readSubtitleFiles } from './bundle-store.js'
 import { bundleText, jsonText, emptyStorage, parseBundle } from '../../public/language/subtitle-bundles.js'
 import { parseSrtEntries } from '../../public/language/srt-parser.js'
@@ -146,4 +149,58 @@ test('a valid store without duplicate keys is unchanged, including original inde
   assert.deepEqual(plan.summary.changedFiles, [])
   assert.equal(applyBundleRepair(plan).backup, null)
   assert.equal(readFileSync(join(root, 'index.json'), 'utf8'), original)
+})
+
+test('inspect reports differing pack copies with legible SRT text and exact timestamps', t => {
+  const root = setup(t, { second: { [source]: cue('Andra versionen', 20), [translated]: cue('Hello') } })
+  const conflicts = inspectBundleConflicts(root, { link: 'video001' })
+  assert.equal(conflicts.length, 1)
+  assert.equal(conflicts[0].key, source)
+  assert.deepEqual(conflicts[0].copies.map(c => c.pack), [p1, p2])
+  const readable = formatBundleConflicts(conflicts)
+  assert.match(readable, /SUBTITLE: Channel/)
+  assert.match(readable, /pack-000001.json/)
+  assert.match(readable, /00:00:10,000 --> 00:00:12,000\nHej/)
+  assert.match(readable, /00:00:20,000 --> 00:00:22,000\nAndra versionen/)
+  assert.equal(inspectBundleConflicts(root, { link: 'different-video' }).length, 0)
+  assert.match(formatBundleConflicts([]), /No differing duplicate/)
+  assert.equal(readFileSync(join(root, p1), 'utf8').includes('Andra versionen'), false, 'inspection is read-only')
+})
+
+test('export writes unchanged readable SRTs with source-pack mapping outside the data store', t => {
+  const root = setup(t, { second: { [source]: cue('Second', 20) } })
+  const out = join(dirname(root), 'readable-conflicts')
+  const conflicts = inspectBundleConflicts(root)
+  const result = exportBundleConflicts(root, conflicts, out)
+  assert.equal(result.files.length, 2)
+  for (const file of result.files) {
+    assert.equal(readFileSync(join(out, file.file), 'utf8'),
+      conflicts[0].copies.find(c => c.pack === file.pack).text)
+    assert(file.file.endsWith('.srt'))
+  }
+  const manifest = JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8'))
+  assert.equal(manifest[0].subtitle, source)
+  assert.deepEqual(manifest.map(x => x.pack), [p1, p2])
+  assert.equal(readdirSync(out).length, 3)
+  assert.throws(() => exportBundleConflicts(root, conflicts, out), /empty regular directory/)
+  assert.throws(() => exportBundleConflicts(root, conflicts, join(root, 'extracted')), /outside srtsDir/)
+  assert.throws(() => docs(root), /more than one bundle/, 'export does not touch the original packs')
+})
+
+test('CLI provides readable console inspection and export, without applying or modifying bundles', t => {
+  const root = setup(t, { second: { [source]: cue('Second', 20) } })
+  const cli = fileURLToPath(new URL('./lang-manage.js', import.meta.url))
+  const original = readFileSync(join(root, p1), 'utf8')
+  const lines = execFileSync(process.execPath, [cli, 'repair', '--srtsDir', root, '--inspect', '--link', 'video001'], { encoding: 'utf8' })
+  assert.match(lines, /pack-000001.json/)
+  assert.match(lines, /00:00:20,000 --> 00:00:22,000\nSecond/)
+  assert.equal(readFileSync(join(root, p1), 'utf8'), original)
+  const output = join(dirname(root), 'cli-conflicts')
+  const shown = execFileSync(process.execPath, [cli, 'repair', '--srtsDir', root, '--exportDir', output], { encoding: 'utf8' })
+  assert.match(shown, /readable|cli-conflicts/)
+  assert.equal(readdirSync(output).filter(x => x.endsWith('.srt')).length, 2)
+  const invalid = spawnSync(process.execPath, [cli, 'repair', '--srtsDir', root, '--inspect', '--apply'], { encoding: 'utf8' })
+  assert.equal(invalid.status, 1)
+  assert.match(invalid.stderr, /do not combine with --apply/)
+  assert.equal(readFileSync(join(root, p1), 'utf8'), original)
 })
