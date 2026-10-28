@@ -167,7 +167,20 @@ rarely appear verbatim on YouTube; single-word categories yield more hits.)
 Translate each captured hit (SV→`targetLang`, Google's free endpoint) and
 save the paired source/target tracks, updating `index.json`. Bundled directories
 update their existing packs and manifest directly; legacy directories write
-individual `.srt` files. Existing tracks are **merged** (union of entries).
+individual `.srt` files. Existing tracks are **merged by video ID**, not replaced: capturing another word
+from the same YouTube video adds its non-overlapping timestamped cues to the
+existing source and translated tracks, without creating another indexed video.
+Overlapping context lines are deduplicated by start timestamp, and an identical
+rerun leaves the store unchanged. An existing filename and index metadata are
+retained even if Filmot later supplies a different video title/channel.
+
+If two captured cues disagree at the same timestamp, `srtConflict: "keep"`
+(the default) preserves the earlier cue instead of writing competing SRT blocks.
+Use `--srtConflict replace` to accept the new cue or
+`--srtConflict error` to reject the capture without writing either track.
+The selected policy applies independently to each language; on error, a failed
+hit is left pending for retry. A source-only capture retains any previously
+translated cues and does not generate an empty target track.
 
 ```bash
 node tools/language/lang-manage.js srt --chunk 20
