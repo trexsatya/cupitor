@@ -58,6 +58,26 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Smoke-test collection matching
+        working-directory: source/frontend/vue3/cupitor-frontend
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { planCollection } from './tools/language/collect-plan.js';
+          const samples = [
+            { videoId: 'a1234567890', sv: 'Vi kan streta emot.', en: 'Fine' },
+            { videoId: 'a1234567890', sv: 'Streta emot något.', en: 'Okay' },
+            { videoId: 'b1234567890', sv: 'Annat här.', en: 'We streta.' },
+          ];
+          const sv = planCollection([{line:'streta'}], samples, 5, {sourceLang:'sv'});
+          assert.equal(sv[0].count, 1, 'one indexed Swedish video, despite duplicate bundles');
+          assert.equal(sv[0].missing, 4);
+          assert.deepEqual(sv[0].existingVideoIds, ['a1234567890']);
+          const en = planCollection([{line:'streta'}], samples, 5, {sourceLang:'en'});
+          assert.equal(en[0].count, 1, 'English-only mention does not affect Swedish count');
+          console.log('Coverage matching smoke test passed');
+          NODE
+
       - name: Plan all F1 deficits at a threshold of five
         working-directory: source/frontend/vue3/cupitor-frontend
         run: |
