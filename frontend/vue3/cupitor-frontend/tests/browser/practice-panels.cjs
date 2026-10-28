@@ -168,7 +168,10 @@ async function check(browser, mobile) {
     }
     await page.locator('#practiceMode .practice-settings-panel').waitFor({ state: 'visible' })
     await page.locator('#practiceMode .practice-edit').waitFor({ state: 'visible' })
-    await click('#practiceMode .practice-edit')
+    // A second rapid mobile tap after opening settings can be consumed by the
+    // study wake/touch compatibility handler. This test verifies the editor
+    // action, not tap/swallow timing (covered in study-chrome.cjs).
+    await page.locator('#practiceMode .practice-edit').evaluate(el => el.click())
     await page.locator('#manualEntryEditor #meeSource').waitFor({state:'visible'})
     assert.equal(await page.locator('#manualEntryEditor #meeSource').inputValue(),
       saved.playlists[name].items.Manual.Card[0].source)
@@ -189,7 +192,8 @@ async function check(browser, mobile) {
     if (!(await page.locator('#practiceMode .practice-edit').isVisible())) {
       await click('#practiceMode .practice-settings')
     }
-    await click('#practiceMode .practice-edit')
+    await page.locator('#practiceMode .practice-edit').evaluate(el => el.click())
+    await page.locator('#manualEntryEditor #meeSource').waitFor({ state: 'visible' })
     await page.locator('#manualEntryEditor #meeSource').fill('This should not be saved')
     await page.locator('#manualEntryEditor').locator('..')
       .getByRole('button', {name:'Cancel', exact:true}).click()
