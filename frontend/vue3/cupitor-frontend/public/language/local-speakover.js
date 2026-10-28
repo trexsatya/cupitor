@@ -77,12 +77,9 @@ export function createLocalSpeakOver({
       preventOverlap:null,
     };
     session = st;
-    st.resetPosition = () => {
-      st.watchPos = null;
-      // Automatic post-recording rewind is an intentional pass to this mark.
-      // Seek events from the media element must not forget which take is due.
-      if (st.awaiting == null) st.awaiting = null;
-    };
+    // Seek jumps re-baseline the crossing watcher. Keep the awaited mark
+    // through our automatic post-recording rewind, then clear it once reached.
+    st.resetPosition = () => { st.watchPos = null; };
     st.preventOverlap = () => {
       if (['starting','recording','stopping','playback'].includes(st.phase)) pauseMedia(st);
     };
