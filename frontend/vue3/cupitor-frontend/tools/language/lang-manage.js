@@ -155,10 +155,16 @@ async function cmdCollect(cfg) {
   // command. Every count is per distinct SRT video, not per textual occurrence.
   const initial = planCollection(selected, loadLocalSubtitles(cfg.srtsDir), threshold, { expand, minAltLen, sourceLang: cfg.lang });
   const chunk = cfg.chunk ?? cfg.chunkFilmot;
-  const pending = chunk > 0 ? initial.slice(0, chunk) : initial;
+  const start = cfg.start ?? 0;
+  if (!Number.isSafeInteger(start) || start < 0) {
+    throw new Error('collect --start must be a non-negative whole number.');
+  }
+  // Paging helps move past words where Filmot finds no new captions, so those
+  // words cannot monopolize the first chunk on each subsequent run.
+  const pending = chunk > 0 ? initial.slice(start, start + chunk) : initial.slice(start);
   const planPath = join(cfg.outDir, 'collect-plan.json');
   writeJson(planPath, {
-    threshold, requested: requested.length ? requested : cfg.category,
+    threshold, start, requested: requested.length ? requested : cfg.category,
     pending: initial.length,
     selected: pending.map(({ line, category, count, missing }) => ({ line, category, count, missing })),
   });
@@ -776,6 +782,10 @@ async function main() {
   if (command === 'collect' && flags.threshold !== undefined &&
       !/^[1-9]\d*$/.test(String(flags.threshold))) {
     throw new Error('collect --threshold must be a positive whole number.');
+  }
+  if (command === 'collect' && flags.start !== undefined &&
+      !/^(?:0|[1-9]\d*)$/.test(String(flags.start))) {
+    throw new Error('collect --start must be a non-negative whole number.');
   }
   const overrides = coerceFlags(flags);
   const cfg = loadConfig(flags.config || "config.json", overrides);
