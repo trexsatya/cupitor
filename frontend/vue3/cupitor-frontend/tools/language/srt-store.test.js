@@ -2,9 +2,13 @@ import { contextLinesToEntries, upsertIndexEntry, saveHit, mergeCapturedEntries 
 import { mkdtempSync, existsSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { TextEncoder } from "node:util";
 import { parseSrtEntries } from "../../public/language/srt-parser.js";
 import { emptyStorage } from "../../public/language/subtitle-bundles.js";
 import { readSubtitleFiles } from "./bundle-store.js";
+
+// Jest 27's jsdom environment lacks TextEncoder, unlike Node and browsers.
+if (!globalThis.TextEncoder) globalThis.TextEncoder = TextEncoder;
 
 describe("saveHit writeTarget", () => {
   const hit = {
