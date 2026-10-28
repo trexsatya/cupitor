@@ -98,6 +98,23 @@ describe('Speak Over for local media', () => {
     expect(media.playCount).toBe(2);
   });
 
+  test('a take stamped at zero replays when the file is played again', async () => {
+    const h = harness();
+    const media = new Media(0);
+    const id = localSpeakOverIdentity(file());
+    h.saved[id] = [{t1:0,url:'file:///beginning.m4a',ms:500}];
+    h.controller.attach(file(), media);
+    media.play();
+    media.emit('play');
+    media.currentTime = 0.2;
+    media.emit('timeupdate');
+    await flush();
+    expect(h.controller.getState().phase).toBe('playback');
+    expect(h.audios).toHaveLength(1);
+    h.audios[0].emit('ended');
+    expect(media.paused).toBe(false);
+  });
+
   test('saved takes return when re-selecting the exact same local file', async () => {
     const h = harness();
     const media = new Media(5);
