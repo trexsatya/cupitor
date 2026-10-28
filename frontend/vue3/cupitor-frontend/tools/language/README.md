@@ -60,7 +60,7 @@ videos, with **2,410** additional video matches needed. The audit report is
 generated anew from the current data repository, so these values can change.
 
 The dedicated GitHub Actions workflow
-[`F1 SRT coverage audit`](../../../../.github/workflows/f1-srt-coverage.yml)
+[`F1 SRT coverage audit`](../../../../../.github/workflows/f1-srt-coverage.yml)
 runs a read-only audit when the branch is updated. After the workflow is
 available on the default branch, use **Run workflow** with `collect=true`
 and a small `chunk` (default 10) to collect live captions using the
