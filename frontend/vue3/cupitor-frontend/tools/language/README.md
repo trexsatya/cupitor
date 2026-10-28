@@ -50,6 +50,61 @@ See `config.example.json` for a ready-to-edit copy.
 
 ## Steps
 
+
+### On-demand SRT collection for a word list
+
+Use **collect** when you want at least N *different subtitle videos* containing
+each requested word or phrase. Unlike "filmot --words", this checks local
+coverage **before spending Filmot credits**, fetches only missing videos and
+merges clips into existing SRTs, rather than capturing a fixed number for every
+word. The threshold means distinct subtitle videos, **not occurrences within
+one video**. Counts use the same per-alternative expansion and Swedish/English
+matching as the existing "rare" scan.
+
+Provide either comma-separated words or a UTF-8 file with one item per line
+(blank lines and lines beginning with \`#\` are ignored). You may combine both.
+Alternatively, scope the vocabulary via \`--category\`. You do **not** need to
+run \`rare\`, \`filmot\` or \`srt\` first.
+
+\`\`\`bash
+# Inspect which terms need more SRT coverage, without calling Filmot.
+node tools/language/lang-manage.js collect --words 'gäller,förargas,uppmana' --threshold 3 --dry-run
+
+# Search for missing coverage and merge the new clips into srtsDir.
+export FILMOT_API_KEY='your-api-key'
+node tools/language/lang-manage.js collect --wordsFile ./wanted-words.txt --threshold 3 --api
+
+# Fast source-only captures; no translations.
+node tools/language/lang-manage.js collect --wordsFile ./wanted-words.txt --threshold 3 --api --no-translate
+
+# Collect the next 20 under-covered words from one vocabulary category.
+node tools/language/lang-manage.js collect --category 'Feelings' --threshold 3 --chunk 20 --api
+\`\`\`
+
+A word with 0 sources needs 3; one with 2 needs 1; one with 3 or more
+causes **no Filmot request**. The tool avoids requesting videos already
+covering a word, and rechecks coverage against the real SRT store after
+every word, including videos captured for earlier words in the same run.
+Partial runs and interrupted runs are **resumed by running the same command
+again**. No separate progress reset is needed, and the previous \`rare\`,
+\`filmot\` and \`srt\` progress files are left untouched.
+
+Filmot's channel-restricted API search remains the first choice, with the
+configured fallback/budget. \`collect\` currently requires \`--api\` (or
+\`filmotMode: "api"\`). \`maxItemsPerWord\` / \`--max\` caps the number of
+new videos requested per word in one invocation (default 5), so high
+thresholds may take multiple runs. When Filmot returns fewer matches than
+the deficit, the tool records the remaining gap instead of pretending the
+threshold was reached.
+
+Each run writes a preview to \`out/collect-plan.json\` and, for a live run,
+results to \`out/collect-results.json\`. Translation errors, cue conflicts,
+quota limits and unsearchable expressions are reported instead of silently
+being counted as collected. Existing indexed video names and timestamps
+are retained by the normal SRT merge logic. Keep \`FILMOT_API_KEY\` in your
+environment, never in the repository.
+
+
 ### 1. Rare words (offline)
 Find vocabulary items occurring in fewer than `rareThreshold` local subtitle files.
 Vocab lines are expanded first (`<*`, `(hints)`, `a|b|c`), then **each expanded
