@@ -93,7 +93,7 @@ export function apiTranscriptLines(row, lang, manual = true) {
   if (!Array.isArray(tracks)) return [];
   if (tracks.some(x => Array.isArray(x?.transcript))) {
     const relevant = tracks.filter(x => String(x.lang || '').split('-')[0] === lang);
-    const first = relevant.find(x => Number(x.isauto) === (manual ? 0 : 1)) || relevant[0];
+    const first = relevant.find(x => Number(x.isauto) === (manual ? 0 : 1));
     tracks = first?.transcript || [];
   }
   return tracks
@@ -236,27 +236,35 @@ export async function collectFilmotApiWord({
       blacklistChannels: cfg.blacklistChannels || [],
       channelOf: id => rows.find(row => row.id === id)?.channelname,
     });
-    for (const { row } of ordered) {
-      if (hits.length >= cfg.maxItemsPerWord) break;
-      if (seen.has(row.id)) continue;
-      let result = apiHit(row, word, regex, cfg, manual);
-      if (!result) {
-        // Some search rows have snippets but no full track; getvideos returns
-        // that track when indexed. Avoid a second request when no ID exists.
-        if (!VIDEO_ID.test(String(row.id || ''))) continue;
-        const detailParams = { id: row.id, columns: 'subtitles', lang: cfg.lang };
-        const detailCost = client.hasCached('getvideos', detailParams) ? 0 : API_COST.getvideos;
-        if (planned + detailCost > budget) { complete = false; continue; }
+    // Search exports normally include the transcript already. Never spend
+    // extra credits re-fetching a track just because the verified regex did
+    // not match it. Only missing transcripts require a detail lookup.
+    // getvideos with raw subtitles accepts up to ten IDs for the SAME
+    // two-credit cost, so resolve all missing tracks in one batch.
+    const candidates = ordered.map(item => item.row)
+      .filter(row => VIDEO_ID.test(String(row.id || '')) && !seen.has(row.id));
+    const missingIds = candidates.filter(row => !apiTranscriptLines(row, cfg.lang, manual).length)
+      .slice(0, 10).map(row => row.id);
+    const details = new Map();
+    if (missingIds.length) {
+      const detailParams = { id: missingIds.join(','), columns: 'subtitles', lang: cfg.lang };
+      const detailCost = client.hasCached('getvideos', detailParams) ? 0 : API_COST.getvideos;
+      if (planned + detailCost > budget) {
+        complete = false;
+      } else {
         planned += detailCost;
         const records = apiRows(await client.get('getvideos', detailParams));
-        const full = records.find(x => x.id === row.id);
-        if (full) result = apiHit({ ...row, subtitles: full.subtitles }, word, regex, cfg, manual);
+        for (const record of records) details.set(record.id, record);
       }
-      if (result) {
-        seen.add(result.videoId);
-        hits.push(result);
-        log('  ✓ ' + result.videoId + ' @ ' + result.tsStart + 's (' + (channelIds.length ? 'Cupitor channel' : 'unrestricted') + ')');
-      }
+    }
+    for (const row of candidates) {
+      if (hits.length >= cfg.maxItemsPerWord) break;
+      const full = details.get(row.id);
+      const result = apiHit(full ? { ...row, subtitles: full.subtitles } : row, word, regex, cfg, manual);
+      if (!result) continue;
+      seen.add(result.videoId);
+      hits.push(result);
+      log('  ✓ ' + result.videoId + ' @ ' + result.tsStart + 's (' + (channelIds.length ? 'Cupitor channel' : 'unrestricted') + ')');
     }
     return true;
   }
