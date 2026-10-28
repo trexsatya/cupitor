@@ -86,14 +86,14 @@ export function apiRows(response) {
   throw new Error('Unexpected Filmot API response shape');
 }
 
-export function apiTranscriptLines(row, lang) {
+export function apiTranscriptLines(row, lang, manual = true) {
   // Subtitle searches export [{s,t}], whereas getvideos returns subtitle
   // tracks [{lang,isauto,transcript:[{s,t}]}].
   let tracks = row?.subtitles;
   if (!Array.isArray(tracks)) return [];
   if (tracks.some(x => Array.isArray(x?.transcript))) {
     const relevant = tracks.filter(x => String(x.lang || '').split('-')[0] === lang);
-    const first = relevant.find(x => x.isauto === 0) || relevant[0];
+    const first = relevant.find(x => Number(x.isauto) === (manual ? 0 : 1)) || relevant[0];
     tracks = first?.transcript || [];
   }
   return tracks
@@ -110,7 +110,7 @@ function autoTrack(row, lang) {
 }
 
 export function apiHit(row, word, regex, cfg, manual = null) {
-  const lines = apiTranscriptLines(row, cfg.lang);
+  const lines = apiTranscriptLines(row, cfg.lang, manual !== false);
   const matched = regex && findMatchWithContext(lines, regex, cfg.linesBefore, cfg.linesAfter);
   if (!matched || !VIDEO_ID.test(String(row.id || ''))) return null;
   return {
