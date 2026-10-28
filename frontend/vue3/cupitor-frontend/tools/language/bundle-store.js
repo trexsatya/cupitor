@@ -21,7 +21,7 @@ export function readSubtitleFiles(srtsDir, { includeLoose = true } = {}) {
     const storage = parseStorage(readFileSync(manifestPath, 'utf8'))
     for (const pack of storage.packs) {
       for (const [name, text] of Object.entries(parseBundle(readFileSync(join(srtsDir, pack.path), 'utf8')))) {
-        if (Object.prototype.hasOwnProperty.call(files, name)) throw new Error('Subtitle appears in more than one bundle: ' + name)
+        if (Object.prototype.hasOwnProperty.call(files, name)) throw new Error('Subtitle appears in more than one bundle: ' + name + '. Run lang-manage.js repair (dry-run) to inspect the copies before pruning.')
         files[name] = text
       }
     }
