@@ -48,6 +48,7 @@ const NUMERIC = {
   before: "linesBefore",
   after: "linesAfter",
   chunk: "chunk",
+  start: "start",
   maxPages: "maxSearchPages",
   channelLimit: "apiChannelLimit",
   channelGroups: "apiChannelGroups",
