@@ -66,6 +66,16 @@ async function verify(browser, mobile) {
     await page.locator('#localSpeakOverBar .local-sprec-rec').click()
     await page.locator('#localSpeakOverBar .local-sprec-play-take').waitFor()
     assert.equal(await page.locator('#localSpeakOverBar .local-sprec-play-take').count(),1)
+    // Attaching an SRT later uses the shared video panel and keeps this
+    // unkept take; it must not tear down or restart the local recorder session.
+    await page.locator('#localSubtitleFiles').setInputFiles({
+      name:'lesson.srt', mimeType:'text/plain',
+      buffer:Buffer.from('1\n00:00:00,000 --> 00:00:01,000\nEn mening.\n'),
+    })
+    await page.getByRole('button', {name:'Apply subtitles',exact:true}).click()
+    await page.locator('#localSubtitlePickerDialog').waitFor({state:'hidden'})
+    assert.equal(await page.locator('#localSpeakOverBar .local-sprec-play-take').count(),1)
+    assert.equal(await page.locator('#localCaptionPanel .cup-sub-cue').count(),1)
     // The Keep action preserves the timestamped recording for the same file.
     await page.locator('#localSpeakOverBar .local-sprec-keep').click()
     assert.match(await page.locator('#localSpeakOverBar').innerText(), /kept for this local file/i)
