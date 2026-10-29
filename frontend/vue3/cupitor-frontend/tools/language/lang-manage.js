@@ -650,7 +650,7 @@ async function cmdPrune(cfg) {
   const snippets = docs.filter((d) => !isFull(d));
   log(
     `${docs.length} subtitle file-sets in ${cfg.srtsDir}; ` +
-      `${transcripts.length} full-video transcripts (span > ${minSpanSec}s), keeping ${snippets.length} snippets.`
+      `${transcripts.length} continuous full-video transcripts (coverage > ${minSpanSec}s), keeping ${snippets.length} excerpt/uncertain file-sets.`
   );
   if (!transcripts.length) return log("No full-video transcripts to shrink.");
 

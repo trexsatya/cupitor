@@ -43,8 +43,8 @@ export const DEFAULTS = {
   chunkSrt: 20,
   srtConflict: "keep",
   defaultDurSec: 3,
-  // `prune`: an srt counts as a full-video transcript (removal candidate) if it
-  // spans more than this many seconds; captured snippets span only seconds.
+  // `prune`: a removal candidate needs continuous cue coverage longer than
+  // this threshold. Disconnected captures are kept regardless of elapsed span.
   pruneMinSpanSec: 60,
   // `prune`: lines of context kept on each side of a preserved dictionary item
   // when shrinking a transcript to windows.

@@ -10,6 +10,7 @@ import {
   greedyCover,
   scanUncoveredOwners,
 } from "./srt-prune.js";
+import { linesToSrtText } from "../../public/language/srt-parser.js";
 
 const snippet = `1
 00:09:36,000 --> 00:09:38,000
@@ -40,10 +41,34 @@ describe("srtSpanSeconds / isFullSrt", () => {
     expect(isFullSrt("just text", { minSpanSec: 60 })).toBe(false);
   });
 
-  test("full = duration longer than minSpanSec (default 60s)", () => {
-    expect(isFullSrt(fullTranscript)).toBe(true); // 115s > 60
-    expect(isFullSrt(snippet)).toBe(false); // 10s span
-    expect(isFullSrt(fullTranscript, { minSpanSec: 200 })).toBe(false); // tunable
+  test("elapsed span must not classify separated captures as a full transcript", () => {
+    expect(isFullSrt(fullTranscript)).toBe(false); // 115s elapsed, only 7s of cues
+    expect(isFullSrt(snippet)).toBe(false);
+    const manyClips = linesToSrtText([
+      { start: 0, end: 40, text: 'first capture' },
+      { start: 300, end: 340, text: 'later capture' },
+    ]);
+    expect(isFullSrt(manyClips)).toBe(false); // even >60s of actual cues is sparse
+  });
+
+  test("continuous coverage longer than minSpanSec remains a full transcript", () => {
+    const dense = linesToSrtText(Array.from({ length: 60 }, (_, i) => ({ start: i * 2, end: i * 2 + 2, text: 'rad' })));
+    expect(isFullSrt(dense)).toBe(true);
+    expect(isFullSrt(dense, { minSpanSec: 200 })).toBe(false);
+    expect(isFullSrt(dense, { minSpanSec: 120 })).toBe(false);
+  });
+
+  test("overlap, duplicates and unsorted cues use union coverage; gaps and invalid intervals are kept", () => {
+    const overlapping = linesToSrtText([
+      { start: 30, end: 70, text: 'later' }, { start: 0, end: 40, text: 'earlier' },
+      { start: 0, end: 40, text: 'duplicate interval' },
+    ]);
+    expect(isFullSrt(overlapping)).toBe(true);
+    expect(isFullSrt(overlapping, { minSpanSec: 80 })).toBe(false);
+    expect(isFullSrt(linesToSrtText([{ start: 0, end: 30, text: 'a' },
+      { start: 30.001, end: 70, text: 'b' }]))).toBe(false);
+    expect(isFullSrt(linesToSrtText([{ start: 0, end: 70, text: 'a' },
+      { start: 90, end: 80, text: 'invalid' }]))).toBe(false);
   });
 });
 
