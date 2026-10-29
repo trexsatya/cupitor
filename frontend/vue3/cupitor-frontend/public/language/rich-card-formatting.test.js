@@ -114,6 +114,43 @@ test('inserts horizontal block and vertical inline separators', () => {
   expect(calls).toContainEqual(['insertContent', { text: ' │ ' }]);
 });
 
+test.each([
+  ['Text color', 'cupCardTextColor'],
+  ['Background color', 'cupCardBackgroundColor'],
+])('reuses %s on successive selections without a picker change', (title, attribute) => {
+  const { editor, calls, toolbar, selection, range } = editorFixture();
+  installRichCardFormatting(editor);
+  const picker = toolbar.querySelector(`input[aria-label="${title}"]`);
+  picker.dispatchEvent(new Event('pointerdown'));
+  picker.value = '#993355';
+  picker.dispatchEvent(new Event('change'));
+  expect(calls).toContainEqual(['set', attribute, '#993355', range]);
+
+  const apply = toolbar.querySelector(`button[aria-label="Apply ${title.toLowerCase()}"]`);
+  for (const nextRange of [{ start: 4, end: 7 }, { start: 8, end: 12 }]) {
+    selection.getRanges = () => [nextRange];
+    editor.model.schema.getValidRanges = ranges => ranges;
+    calls.length = 0;
+    apply.click();
+    expect(calls).toContainEqual(['set', attribute, '#993355', nextRange]);
+    expect(calls.some(call => call[0] === 'restoreSelection')).toBe(false);
+  }
+});
+
+test('keyboard picker focus refreshes selection after a cancelled picker', () => {
+  const { editor, calls, toolbar, selection } = editorFixture();
+  installRichCardFormatting(editor);
+  const picker = toolbar.querySelector('input[aria-label="Text color"]');
+  picker.dispatchEvent(new Event('focus'));
+  // Closing without changing the color emits no change event.
+  const nextRange = { clone() { return this; }, start: 4, end: 7 };
+  selection.getRanges = () => [nextRange];
+  picker.dispatchEvent(new Event('focus'));
+  picker.value = '#993355';
+  picker.dispatchEvent(new Event('change'));
+  expect(calls).toContainEqual(['restoreSelection', [nextRange]]);
+});
+
 test('uses CKEditor native horizontalLine command when available', () => {
   const { editor, calls, converters } = editorFixture({ nativeRule: true });
   installRichCardFormatting(editor);
