@@ -87,6 +87,7 @@ jobs:
           node tests/browser/regex-search.cjs
           node tests/browser/practice-manual-video.cjs
           node tests/browser/practice-panels.cjs
+          node tests/browser/rich-card-colors.cjs
           node tests/browser/recorded-searches-scroll.cjs --huge
           node tests/browser/recorded-playlist-pages.cjs
           node tests/browser/recorded-scroll-momentum.cjs

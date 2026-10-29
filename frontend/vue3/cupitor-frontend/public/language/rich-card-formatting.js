@@ -115,9 +115,6 @@ export function installRichCardFormatting(editor) {
     const wrapper = document.createElement('span');
     wrapper.className = 'cup-card-color-control';
     wrapper.style.cssText = 'display:inline-flex;align-items:center;gap:2px;padding:0 2px;';
-    const label = document.createElement('label');
-    label.style.cssText = 'display:inline-flex;align-items:center;gap:3px;font-size:12px;white-space:nowrap;';
-    label.textContent = kind === 'text' ? 'Text' : 'BG';
     const input = document.createElement('input');
     input.type = 'color';
     input.value = spec.initial;
@@ -125,25 +122,31 @@ export function installRichCardFormatting(editor) {
     input.setAttribute('aria-label', spec.title);
     input.style.cssText = 'width:30px;height:27px;padding:1px;border:1px solid #aaa;cursor:pointer;';
     let saved = null;
+    // Native color inputs emit no change when the same color is chosen again.
+    // Keep a separate action to reuse that color on the current selection.
+    const apply = makeToolbarButton('Apply ' + spec.title.toLowerCase(), kind === 'text' ? 'Text' : 'BG', () => {
+      applyRichCardColor(editor, kind, input.value);
+      saved = null;
+    });
+    apply.style.cssText = 'min-width:28px;padding:2px 3px;font-size:12px;';
     // The browser's native color picker moves DOM focus away from CKEditor.
     // Preserve model selection so formatting still targets highlighted text.
     const remember = () => {
       saved = Array.from(editor.model.document.selection.getRanges()).map(range => range.clone());
     };
     input.addEventListener('pointerdown', remember);
-    input.addEventListener('focus', () => { if (!saved) remember(); });
+    input.addEventListener('focus', remember);
     // Apply after the native picker closes: refocusing the editor on every
     // intermediate 'input' event can dismiss the OS color chooser.
     input.addEventListener('change', () => {
       applyRichCardColor(editor, kind, input.value, saved);
       saved = null;
     });
-    label.appendChild(input);
     const clear = makeToolbarButton('Remove ' + spec.title.toLowerCase(), '×', () => {
       applyRichCardColor(editor, kind, null);
     });
     clear.style.cssText = 'min-width:22px;padding:2px 3px;';
-    wrapper.append(label, clear);
+    wrapper.append(apply, input, clear);
     items.appendChild(wrapper);
   }
   items.appendChild(makeToolbarButton('Insert horizontal ruler', '─', () => insertRichCardHorizontalRule(editor)));
