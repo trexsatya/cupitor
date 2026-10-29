@@ -6,6 +6,9 @@ import { tmpdir } from 'node:os'
 import { planMigration, applyMigration } from './subtitle-bundles.mjs'
 import { readSubtitleFiles, commitLocalSubtitleFiles, looseSubtitleNames } from './bundle-store.js'
 import { saveHit } from './srt-store.js'
+import { execFileSync } from 'node:child_process'
+import { parseSrtEntries, linesToSrtText, srtTimeToSeconds } from '../../public/language/srt-parser.js'
+import { emptyStorage } from '../../public/language/subtitle-bundles.js'
 
 test('migration preserves Unicode, CRLF, indexed and orphan tracks exactly; reruns are no-ops', () => {
   const dir = mkdtempSync(join(tmpdir(), 'subtitle-migration-'))
@@ -64,3 +67,110 @@ test('migration refuses to delete data which changed after the dry run', () => {
     assert(!existsSync(join(dir, 'storage.json')))
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+// Real captures from before/after a9471fea. The merger keeps the old context;
+// span-only pruning subsequently mistook the sparse union for a full transcript.
+const captureFixture = suffix => parseSrtEntries(readFileSync(new URL(
+  '../../tests/fixtures/captured-context/CwQNmKM3b04.' + suffix + '.sv.srt', import.meta.url), 'utf8'))
+
+for (const bundled of [false, true]) for (const allCovered of [false, true]) {
+  test(`capture → merge → prune preserves fördömelse and context (bundled=${bundled}, allCovered=${allCovered})`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'captured-context-prune-'))
+    const srts = join(root, 'srts'), out = join(root, 'out')
+    mkdirSync(srts)
+    try {
+      if (bundled) writeFileSync(join(srts, 'storage.json'), JSON.stringify(emptyStorage()))
+      writeFileSync(join(root, 'vocabulary.txt'), '# Test\n(condemnation)|fördömelse|\n(sermon)|predikan|\n(unique)|unikord|\n')
+      const original = captureFixture('original'), later = captureFixture('later')
+      const videoId = 'CwQNmKM3b04', opts = { sourceLang: 'sv', targetLang: 'en', writeTarget: false }
+      const capture = async (entries, extra = {}) => saveHit(srts, {
+        videoId, title: 'Fredag morgon _ Marie-Louise Nilsson', channel: 'Word of Life Play',
+        lines: entries.map(cue => ({ ts: srtTimeToSeconds(cue.start), text: cue.text })),
+      }, null, { ...opts, defaultDurSec: srtTimeToSeconds(entries.at(-1).end) - srtTimeToSeconds(entries.at(-1).start), ...extra })
+      const { baseName } = await capture(original)
+      const key = baseName + '.sv.srt'
+      await saveHit(srts, { videoId: 'other', title: 'Other example', channel: 'Test',
+        lines: [{ ts: 1, text: allCovered ? 'fördömelse och predikan' : 'fördömelse' }] }, null, opts)
+
+      // A genuine continuous transcript must still shrink around its unique
+      // vocabulary; a fully redundant continuous transcript must still delete.
+      const full = linesToSrtText(Array.from({ length: 100 }, (_, i) => ({ start: i * 2, end: i * 2 + 2,
+        text: i === 30 ? 'unikord' : 'en neutral rad' })))
+      const redundant = full.replace('unikord', 'en neutral rad')
+      await commitLocalSubtitleFiles(srts, [
+        { path: 'full.sv.srt', getContent: () => full },
+        { path: 'redundant.sv.srt', getContent: () => redundant },
+        { path: baseName + '.en.srt', getContent: () => '1\n01:17:40,280 --> 01:17:42,880\nExisting translation\n' },
+        { path: 'index.json', getContent: text => JSON.stringify([...JSON.parse(text),
+          { name: 'full', link: 'full', source: 'YouTube' }, { name: 'redundant', link: 'redundant', source: 'YouTube' }]) },
+      ])
+      await capture(later.slice(0, 7))
+      await capture(later.slice(7))
+      const before = readSubtitleFiles(srts)
+      assert.equal(parseSrtEntries(before[key]).length, 14, 'the real capture/store path retained both windows')
+      const legacyIndex = JSON.parse(readFileSync(join(srts, 'index.json')))
+      assert.equal(legacyIndex.find(entry => entry.link === videoId).preserveCapturedContext, true)
+      // Exercise the layout fallback for legacy captures saved before the
+      // explicit capture marker was introduced.
+      legacyIndex.forEach(entry => { if (entry.link === videoId) delete entry.preserveCapturedContext })
+      writeFileSync(join(srts, 'index.json'), JSON.stringify(legacyIndex))
+      for (const cue of original) assert(parseSrtEntries(before[key]).some(saved =>
+        saved.start === cue.start && saved.end === cue.end && saved.text === cue.text))
+      const run = () => execFileSync(process.execPath, ['tools/language/lang-manage.js', 'prune',
+        '--dataDir', root, '--srtsDir', srts, '--outDir', out, '--apply'], { encoding: 'utf8', timeout: 15000 })
+      run()
+      const after = readSubtitleFiles(srts)
+      assert.equal(after[key], before[key], 'pruning must preserve every merged cue, even if its word exists elsewhere')
+      assert.equal(after[baseName + '.en.srt'], before[baseName + '.en.srt'], 'paired translation remains unchanged')
+      assert.equal(parseSrtEntries(after['full.sv.srt']).length, 9, 'continuous full transcript still shrinks to context')
+      assert(!Object.hasOwn(after, 'redundant.sv.srt'), 'redundant continuous full transcript still deletes')
+      const plan = JSON.parse(readFileSync(join(out, 'prune-plan.json')))
+      assert(!plan.some(entry => entry.name === baseName), 'captured excerpts never enter the destructive plan')
+      const index = JSON.parse(readFileSync(join(srts, 'index.json')))
+      assert(index.some(entry => entry.link === videoId))
+      assert(!index.some(entry => entry.link === 'redundant'))
+      const state = JSON.stringify(after)
+      run()
+      assert.equal(JSON.stringify(readSubtitleFiles(srts)), state, 'a second prune is a no-op')
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+}
+
+for (const bundled of [false, true]) for (const origin of ['capture', 'recovery']) {
+  test(`explicit ${origin} protection keeps continuous examples intact (bundled=${bundled})`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'protected-context-prune-')), srts = join(root, 'srts')
+    mkdirSync(srts)
+    try {
+      if (bundled) writeFileSync(join(srts, 'storage.json'), JSON.stringify(emptyStorage()))
+      writeFileSync(join(root, 'vocabulary.txt'), '# Test\n(word)|ord|\n')
+      const captured = await saveHit(srts, { videoId: 'continuous', title: 'Long example', channel: 'Test',
+        lines: Array.from({ length: 50 }, (_, n) => ({ ts: n * 2, text: 'ord ' + n })) }, null,
+      { sourceLang: 'sv', targetLang: 'en', writeTarget: false, defaultDurSec: 2 })
+      if (origin === 'recovery') {
+        const index = JSON.parse(readFileSync(join(srts, 'index.json')))
+        // Recovery may retain a legacy bundleKey behind a normalized name.
+        index[0].bundleKey = captured.baseName
+        index[0].name = 'Normalized name'
+        index[0].preserveCapturedContext = true
+        writeFileSync(join(srts, 'index.json'), JSON.stringify(index))
+        const alias = 'Legacy title || continuous.sv.srt'
+        const original = readSubtitleFiles(srts)[captured.baseName + '.sv.srt']
+        if (bundled) {
+          const path = join(srts, index[0].bundle), data = JSON.parse(readFileSync(path))
+          data.files[alias] = original
+          const raw = JSON.stringify(data, null, 2) + '\n'
+          writeFileSync(path, raw)
+          const storage = JSON.parse(readFileSync(join(srts, 'storage.json')))
+          const meta = storage.packs.find(meta => meta.path === index[0].bundle)
+          meta.bytes = Buffer.byteLength(raw); meta.files = Object.keys(data.files).length
+          writeFileSync(join(srts, 'storage.json'), JSON.stringify(storage))
+        } else writeFileSync(join(srts, alias), original)
+      }
+      const before = readSubtitleFiles(srts)
+      execFileSync(process.execPath, ['tools/language/lang-manage.js', 'prune', '--dataDir', root,
+        '--srtsDir', srts, '--outDir', join(root, 'out'), '--apply'], { encoding: 'utf8', timeout: 15000 })
+      assert.deepEqual(readSubtitleFiles(srts), before)
+      assert.equal(parseSrtEntries(before[captured.baseName + '.sv.srt']).length, 50)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+}

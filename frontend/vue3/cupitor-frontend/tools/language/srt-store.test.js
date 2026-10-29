@@ -124,6 +124,7 @@ describe.each([false, true])("multiple captures of one YouTube video (bundled=%s
     expect(index[0].category).toBe("Keep existing metadata");
     expect(index[0].link).toBe("sameVideo001");
     expect(index[0].name).toBe(initial.baseName);
+    expect(index[0].preserveCapturedContext).toBe(true);
     expect(cues(dir, initial.baseName, "sv").map(x => x.text)).toEqual(["Första ordet", "Gemensam rad", "Andra ordet"]);
     expect(cues(dir, initial.baseName, "en").map(x => x.text)).toEqual(["First word", "Shared cue", "Second word"]);
     expect(cues(dir, initial.baseName, "sv").map(x => x.start)).toEqual([

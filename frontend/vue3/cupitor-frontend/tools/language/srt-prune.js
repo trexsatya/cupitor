@@ -23,12 +23,21 @@ export function srtSpanSeconds(srtText) {
   return Math.max(...ends) - Math.min(...starts);
 }
 
-// A "full-video transcript" (removal candidate) spans more than `minSpanSec` of
-// video. Captured snippets span only their few context lines (~seconds), so this
-// cleanly separates them from full transcripts.
+// A removal candidate must contain one continuous range of timed cues longer
+// than minSpanSec. Elapsed span alone is unsafe: two short captures far apart in
+// a video can span hours while still being excerpts the user intends to keep.
+// There is no capture provenance in legacy SRTs, so any uncovered gap makes the
+// classification conservative: retain the whole file. Overlapping/touching cues
+// count as continuous; duplicate cues must not inflate the covered duration.
 export function isFullSrt(srtText, { minSpanSec = 60 } = {}) {
-  const span = srtSpanSeconds(srtText);
-  return span !== null && span > minSpanSec;
+  const entries = parseSrtEntries(srtText);
+  if (!entries.length) return false;
+  const ranges = entries.map(entry => ({
+    start: srtTimeToSeconds(entry.start), end: srtTimeToSeconds(entry.end),
+  }));
+  if (ranges.some(range => range.end <= range.start)) return false;
+  const covered = mergeRanges(ranges);
+  return covered.length === 1 && covered[0].end - covered[0].start > minSpanSec;
 }
 
 // For each item { key, expanded }, find up to `maxOwners` srts (by name) whose sv

@@ -369,8 +369,13 @@ directory is not the one you want to repair. GitHub-published files may differ
 from uncommitted files on your computer.
 
 ### 4. Prune / shrink full-video transcripts (offline)
-Full-video transcripts (span > `pruneMinSpanSec`, default 60s) eat disk; the small
-captured snippets (a few seconds' span) are what you keep. Rather than delete a
+Full-video transcripts eat disk; captured snippets are what you keep. A removal
+candidate must have **one continuous range of subtitle cues** longer than
+`pruneMinSpanSec` (default 60s). Overlapping/touching cues count as continuous.
+Any gap keeps the whole file: captures at 00:49 and 01:17 are excerpts, even
+though their first-to-last span is 28 minutes. This deliberately also keeps
+full transcripts with silent gaps, because older SRTs have no reliable capture
+provenance. Rather than delete a
 whole 30-minute transcript just because it holds one rare word, `prune` **shrinks**
 each transcript to `±pruneWindowLines` (default 4) lines around only the dictionary
 items that live *nowhere else* — one window per item (its first occurrence; a
@@ -382,9 +387,20 @@ is deleted outright.
 ```bash
 node tools/language/lang-manage.js prune                 # dry run: writes out/prune-plan.json, changes nothing
 node tools/language/lang-manage.js prune --window 6      # keep ±6 lines of context
-node tools/language/lang-manage.js prune --minSpan 120   # only shrink transcripts spanning > 2 min
+node tools/language/lang-manage.js prune --minSpan 120   # require > 2 min of continuous cue coverage
 node tools/language/lang-manage.js prune --apply         # rewrite/delete the files + prune index.json
 ```
+
+Merged, disconnected capture windows remain unchanged even when their words
+also occur in other videos. Vocabulary coverage alone is insufficient to
+replace a saved example at a specific timestamp.
+
+New captures and recovered media are explicitly marked
+`preserveCapturedContext: true` in the subtitle index. `prune` keeps those
+media and all their language tracks intact, including long, continuous sets of
+adjacent captures. The layout check above is the fallback for legacy files
+without that provenance. Full transcripts imported without this capture marker
+remain eligible for pruning.
 
 Coverage is preserved: items already in a snippet need no window; items found only
 in transcripts are assigned to the fewest transcripts (greedy set cover) so every
@@ -489,7 +505,7 @@ each key means).
 | `--apiCredits N` / `--no-unrestricted` | `apiMaxCreditsPerWord` / `apiUnrestrictedFallback: false` | 30 / unrestricted enabled |
 | `--browser` | sets `filmotMode: "browser"` | (config `filmotMode`) |
 | `--headed` / `--headless` | sets `browserHeadless: false` / `true` | headed |
-| `--minSpan N` | `pruneMinSpanSec` (a transcript counts as "full-video" if it spans > N s) | 60 |
+| `--minSpan N` | `pruneMinSpanSec` (a removal candidate needs > N s of continuous cue coverage) | 60 |
 | `--window N` | `pruneWindowLines` (context lines kept each side of a preserved item) | 4 |
 | `--apply` | `prune` actually rewrites/deletes (default is a dry-run plan) | — |
 | `--input <file-or-folder>` | SRT import source; omit to ingest loose files in `srtsDir` | `srtsDir` |

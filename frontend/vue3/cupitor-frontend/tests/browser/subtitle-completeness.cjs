@@ -78,13 +78,19 @@ async function check(browser, mobile) {
         const detail = { videoId: id, sourceLang: 'sv', videoUrl: 'https://www.youtube.com/watch?v=' + id,
           lines: [{ start: 6.919, end: 10.759, text: '>> Ja, både burka och är ju uttryck för eh' }] }
         const item = { id: 'pushed', detail }
+        let committedIndex
+        const indexText = JSON.stringify([{ link: id, name, source: 'youtube', category: 'concurrent metadata' },
+          { link: 'unrelated', name: 'Other media', source: 'youtube' }])
         t.saveCapturedBuffer([null, item])
         window.allSubtitles[id] = { sv: partial, en: null, _partial: true, _parsedSv: ['stale'], _parsedEn: ['stale'] }
         window.GitHubUtils.getFile = async () => ({ content: JSON.stringify([{ link: id, name, source: 'youtube' }]) })
         window.GitHubUtils.commitMultipleFiles = async ({ files }) => {
           // First transform pass is superseded by a simulated 409 retry.
-          for (const file of files) await file.getContent(file.path.endsWith('.sv.srt') ? partial : null)
-          for (const file of files) await file.getContent(file.path.endsWith('.sv.srt') ? full : english)
+          for (const file of files) await file.getContent(file.path.endsWith('/index.json') ? indexText : file.path.endsWith('.sv.srt') ? partial : null)
+          for (const file of files) {
+            const text = await file.getContent(file.path.endsWith('/index.json') ? indexText : file.path.endsWith('.sv.srt') ? full : english)
+            if (file.path.endsWith('/index.json')) committedIndex = JSON.parse(text)
+          }
           return { committed: !noOp, reason: noOp ? 'no-changes' : undefined }
         }
         const result = await t.pushCapturedSubtitlesBatched([item])
@@ -92,7 +98,7 @@ async function check(browser, mobile) {
         const cache = (await t._cacheReadAll()).get(id)
         return { result, sv: window.allSubtitles[id].sv, en: window.allSubtitles[id].en,
           staleParse: !!window.allSubtitles[id]._parsedSv || !!window.allSubtitles[id]._parsedEn,
-          cache, cueCount: t.srtToJson(window.allSubtitles[id].sv).length }
+          cache, cueCount: t.srtToJson(window.allSubtitles[id].sv).length, committedIndex }
       }, { id, name, full, english, partial, noOp })
       assert.equal(out.cueCount, 17)
       assert.equal(out.en, english, 'untranslated capture retains the full translation')
@@ -100,6 +106,9 @@ async function check(browser, mobile) {
       assert.equal(out.cache.sv, out.sv)
       assert.equal(out.cache.complete, true)
       assert.equal(out.cache.contentVersion, 2)
+      assert.equal(out.committedIndex.find(entry => entry.link === id).preserveCapturedContext, true)
+      assert.equal(out.committedIndex.find(entry => entry.link === id).category, 'concurrent metadata')
+      assert.equal(out.committedIndex.find(entry => entry.link === 'unrelated').name, 'Other media')
       if (noOp) assert.equal(out.result.committed, false)
     }
     const beforeReload = sourceReads
