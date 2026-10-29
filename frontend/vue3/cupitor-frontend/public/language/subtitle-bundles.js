@@ -196,15 +196,27 @@ async function prepareDirectory(dir, storage, operations, read) {
     const file = splitPath(operation.path).file
     let old = entryForFile(before, file)
     const next = entryForFile(index, file)
-    // A newly indexed video may already have orphaned tracks in an old pack.
-    // Search those packs even when the updated index contains a new (unassigned)
-    // entry; otherwise this capture allocates another copy of the same key.
-    if (!old) {
-      for (const metadata of storage.packs) {
-        const contents = await load(metadata.path)
-        const key = [file, decode(file)].find(key => owns(contents, key))
-        if (key) { old = { entry: { name: baseOf(key), bundle: metadata.path }, key }; break }
+    // Never trust an index pointer alone: it can point to only one pack even
+    // when a track has accidentally been copied into several packs. Detect
+    // that corruption before changing any content, without choosing, merging,
+    // or discarding any of the copies.
+    const matchingKeys = [...new Set([file, decode(file), old?.key, next?.key].filter(Boolean))]
+    const locations = []
+    for (const metadata of storage.packs) {
+      const contents = await load(metadata.path)
+      for (const key of matchingKeys) if (owns(contents, key)) {
+        locations.push({ path: metadata.path, key })
       }
+    }
+    if (locations.length > 1) {
+      throw new Error('Duplicate subtitle track: ' + file + ' in ' +
+        locations.map(location => location.path).join(', ') +
+        '. Capture aborted without changes; inspect with lang-manage.js repair --inspect.')
+    }
+    // Find an orphaned track even when a newly written index has no pack yet.
+    if (!old && locations.length === 1) {
+      const location = locations[0]
+      old = { entry: { name: baseOf(location.key), bundle: location.path }, key: location.key }
     }
     const found = next || old
     if (!found) throw new Error('A new subtitle must include its index entry in the same commit: ' + file)
@@ -252,6 +264,28 @@ async function prepareDirectory(dir, storage, operations, read) {
     if (entry.bundle && !index.some(e => (e.bundleKey || e.name) === base)) {
       const files = await load(entry.bundle)
       for (const key of Object.keys(files)) if (baseOf(key) === base) delete files[key]
+    }
+  }
+  // Validate all loaded bundles, including newly allocated packs. A media
+  // moved to a new pack retains its keys; explicit track and index deletion
+  // are authorized, but no unrelated key may vanish.
+  const explicitlyDeleted = new Set(operations.filter(operation =>
+    operation.delete && /\.srt$/i.test(splitPath(operation.path).file)
+  ).map(operation => splitPath(operation.path).file))
+  const removedBases = new Set(before.filter(entry =>
+    !index.some(next => (next.bundleKey || next.name) === (entry.bundleKey || entry.name))
+  ).map(entry => entry.bundleKey || entry.name))
+  const surviving = new Set()
+  for (const contents of packs.values()) {
+    for (const key of Object.keys(contents)) surviving.add(key)
+  }
+  for (const [path, original] of originals) {
+    for (const key of Object.keys(parseBundle(original.content))) {
+      if (!surviving.has(key) && !explicitlyDeleted.has(key) &&
+          !removedBases.has(baseOf(key))) {
+        throw new Error('Subtitle write would silently remove existing track: ' + key +
+          ' (from ' + path + '). Aborted without changes.')
+      }
     }
   }
   const physical = []
