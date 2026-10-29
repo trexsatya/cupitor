@@ -4,6 +4,7 @@ import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.
 import { createLocalCaptionPanel } from './local-caption-panel.js';
 import { playLocalMedia } from './local-playback.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
+import { youtubeClipForItem, manualPlaybackPlan, clipFallbackSeconds } from './card-playback.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
 import { createFullSrtDialog } from './full-srt-dialog.js';
@@ -2518,6 +2519,8 @@ window._appSettings = {
   practiceSpeedOptions: [1, 0.75, 0.5],
   // Seconds the recording-playback waits between items.
   recPlayGapSeconds: 30,
+  recPlayYouTubeClipSeconds: 20,
+  recManualPlaybackMode: 'both',
   // Background music hushed by hand from its panel. Kept with the settings
   // rather than in a variable that dies with the page: someone who silenced
   // the music did so for a reason, and having it start again on its own after
@@ -2637,6 +2640,35 @@ function _srcTgtGapSeconds() {
   if (raw == null || raw === '') return null
   const n = parseInt(raw, 10)
   return Number.isFinite(n) ? Math.max(0, Math.min(600, n)) : null
+}
+
+function _manualPlaybackPreference() {
+  const mode = window._appSettings?.recManualPlaybackMode
+  return ['linked', 'recordings', 'both'].includes(mode) ? mode : 'both'
+}
+
+function _playlistPlaybackPlan(it) { return manualPlaybackPlan(it, _manualPlaybackPreference()) }
+
+function _runtimeYouTubeClip(it, queue, index) {
+  if (!queue) {
+    queue = window._practiceActive ? window._practiceCards : window._recPlayQueue
+    queue = queue || []
+    index = queue.indexOf(it)
+    if (index < 0) index = queue.findIndex(q => q?.id === it?.id && q?.lineIndex === it?.lineIndex && q?.timeStart === it?.timeStart)
+  }
+  return youtubeClipForItem(it, queue, index, clipFallbackSeconds(window._appSettings?.recPlayYouTubeClipSeconds))
+}
+
+function _setManualPlaybackPreference(mode) {
+  if (!['linked', 'recordings', 'both'].includes(mode)) return
+  window._appSettings.recManualPlaybackMode = mode
+  saveAppSettings()
+  $('#recManualPlaybackMode, #recPlayingBanner .rec-pb-media-mode').val(mode)
+  if (window._playingRecording && !window._practiceActive && _isManualItem(window._recPlayCurrentItem)) {
+    window._recNavGotoIndex = window._recPlayIndex
+    _interruptRecordingPlayback()
+    _stopGapCountdown()
+  }
 }
 
 // The wait between playlist items, in seconds. Read live so the ± stepper in
@@ -2878,6 +2910,8 @@ function loadAppSettings() {
   // 0 is a legitimate gap (items run straight into each other), so it must
   // survive the round trip instead of being read as "missing" and shown as 30.
   $('#recPlayGapSeconds').val(_interItemGapSeconds())
+  $('#recPlayYouTubeClipSeconds').val(clipFallbackSeconds(window._appSettings.recPlayYouTubeClipSeconds))
+  $('#recManualPlaybackMode').val(_manualPlaybackPreference())
   // Blank input = "no override", so an unset source→target gap must render
   // empty rather than as a 0 the user never chose.
   const _stGap = _srcTgtGapSeconds()
@@ -3919,6 +3953,13 @@ $('document').ready(e => {
   })
 
   $('#recPlayGapSeconds').on('change input', e => { _setItemGap($(e.target).val()) })
+  $('#recPlayYouTubeClipSeconds').on('change', e => {
+    const value = clipFallbackSeconds($(e.target).val())
+    window._appSettings.recPlayYouTubeClipSeconds = value
+    $(e.target).val(value)
+    saveAppSettings()
+  })
+  $('#recManualPlaybackMode').on('change', e => _setManualPlaybackPreference($(e.target).val()))
 
   // Leaving either box empty or half-typed ("-") is rejected by the setters,
   // which would otherwise strand the field showing something the setting
@@ -7107,13 +7148,14 @@ function _syncSearchPlaylistSelection(state) {
 
 function _renderSearchPlaylistToolbar(state, $result) {
   if (!state.groups.some(group => group.items.length)) return
+  const $options = $result.children('#manualSearchBar')
   const $toolbar = $(`<form id="searchPlaylistToolbar" aria-label="Playlist from search results">
     <button id="searchPlaylistSelectBtn" type="button" title="Select headings for a temporary playlist" aria-label="Select headings for playlist" aria-pressed="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m2 5 2 2 4-4m-6 10 2 2 4-4m2-6h12M10 13h12M2 21h20"/></svg><span id="searchPlaylistSelectedCount" aria-live="polite"></span></button>
     <span id="searchPlaylistActions" hidden>
       <label title="Maximum clips from each selected heading; leave blank to include all">Max per heading <input id="searchPlaylistMaxClips" type="number" min="1" max="9007199254740991" step="1" inputmode="numeric" placeholder="All" aria-label="Max clips per heading"></label>
-      <button id="searchPlaylistCreateBtn" type="submit" title="Create a temporary playlist and open Player with a 30-second gap" aria-label="Create playlist from selected headings">${_searchPlaylistIcon}</button>
+      <button id="searchPlaylistCreateBtn" type="submit" title="Create a temporary playlist and open Player with a 5-second gap" aria-label="Create playlist from selected headings">${_searchPlaylistIcon}</button>
     </span>
-  </form>`).appendTo($result)
+  </form>`).appendTo($options.length ? $options : $result)
   const $limit = $toolbar.find('#searchPlaylistMaxClips').val(state.maxPerHeader)
   $toolbar.find('#searchPlaylistSelectBtn').on('click', () => {
     state.selecting = !state.selecting
@@ -7137,7 +7179,7 @@ function _renderSearchPlaylistToolbar(state, $result) {
     if (!queue.length) { alert('No playable clips for the selected headings.'); return }
     if (window._practiceActive) closePracticeMode()
     if (window._playingRecording) stopPlayingRecording()
-    playRecording({ queue, temporary: true, gapSeconds: 30 })
+    playRecording({ queue, temporary: true, gapSeconds: 5 })
   })
   _syncSearchPlaylistSelection(state)
 }
@@ -14800,9 +14842,44 @@ function _cardHasPlayableMedia(it) {
 // the link names (`t=95`, as a captured caption or video note writes it) —
 // not at the start of the video. A video already loaded is just moved there.
 function _manualCardVideo(it) {
-  const media = _parseMediaUrl(it && it.mediaUrl)
-  const id = (it && it.mediaVideoId) || (media && media.kind === 'youtube' ? media.id : null)
-  return id ? { id, timeStart: _youtubeStartSeconds(it && it.mediaUrl) } : null
+  return _runtimeYouTubeClip(it)
+}
+
+async function _playPlaylistLinkedVideo(it, queue, index) {
+  const clip = _runtimeYouTubeClip(it, queue, index)
+  if (!clip) return
+  const sessionToken = window._recPlaySessionToken
+  const itemToken = window._recPlayItemToken
+  const current = () => window._playingRecording && window._recPlaySessionToken === sessionToken &&
+    window._recPlayItemToken === itemToken && !window._practiceActive &&
+    !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)
+  const attempt = createRecordingVideoAttempt({ videoId: clip.id, isCurrent: current,
+    isPaused: () => !!window._recPlayPaused, now: _playerLifecycle.now })
+  window._recVideoAttempt = attempt
+  window._recPlayLinkedVideo = attempt
+  _showManualAudioPlayer(false)
+  window._recPlayGapGuard = false
+  _setRecPlayPhase('video')
+  try {
+    attempt.request()
+    await attempt.wait(playMediaSlice(clip.id, clip.timeStart, clip.timeEnd, 'YouTube', {
+      isCurrent: () => attempt.active(), confirmSeek: true, now: _playerLifecycle.now,
+      isForeground: _playerLifecycle.isForeground, preparePlayer: player => attempt.preparePlayer(player) }))
+    if (!attempt.active()) return
+    if (window._recPlayPaused) { try { window.ytPlayer?.pauseVideo() } catch (_) {} }
+    if (window._recReplaySpeed) { try { window.ytPlayer?.setPlaybackRate(0.75) } catch (_) {} }
+    attempt.releaseMute()
+    if (!window._recPlayPaused) window.ytPlayer?.playVideo()
+    await attempt.wait(_waitYTUntilEnd(clip.timeStart, clip.timeEnd,
+      () => _updatePlayingProgress(clip.timeStart, clip.timeEnd, clip.id), clip.id, attempt))
+  } finally {
+    attempt.dispose()
+    if (window._recVideoAttempt === attempt) window._recVideoAttempt = null
+    if (window._recPlayLinkedVideo === attempt) {
+      window._recPlayLinkedVideo = null
+      window._recPlayGapGuard = true
+    }
+  }
 }
 
 async function _cueManualCardVideo(it) {
@@ -17464,6 +17541,14 @@ function _renderPlayingBanner(it, idx, total) {
             <button type="button" class="rec-pb-sgap-inc" aria-label="Increase source-to-target pause">+</button>
           </span>
         </div>
+        <label class="rec-pb-media-choice" title="Playback preference for cards with a link and recordings. Changing it restarts the current card." style="display:none;">Play
+          <select class="rec-pb-media-mode" aria-label="Playback for this card">
+            <option value="linked">Linked media</option>
+            <option value="recordings">Recorded audio</option>
+            <option value="both">Both (linked first)</option>
+          </select>
+        </label>
+        <div class="rec-pb-clip-range" style="display:none;"></div>
       </div>
     </div>`).appendTo('body')
     // Reachable while a playlist is running, which is when someone actually
@@ -17496,6 +17581,7 @@ function _renderPlayingBanner(it, idx, total) {
       $(this).attr('aria-expanded', open ? 'true' : 'false')
     })
     $b.on('click', '.rec-pb-practice-btn', switchPlayerToPractice)
+    $b.on('change', '.rec-pb-media-mode', e => _setManualPlaybackPreference($(e.target).val()))
     // _setItemGap updates the active gap and both readouts. A session override
     // stays in memory; ordinary playlist gaps are saved as a preference.
     const GAP_STEP = 5
@@ -17545,6 +17631,11 @@ function _renderPlayingBanner(it, idx, total) {
   // the card in front of you is worse than no knob.
   const dual = !!(_cardSourceAudio(it) && _cardTargetAudio(it))
   $b.find('.rec-pb-sgap').toggle(dual)
+  $b.find('.rec-pb-media-choice').toggle(!!it.manual && _playlistPlaybackPlan(it).hasBoth)
+  $b.find('.rec-pb-media-mode').val(_manualPlaybackPreference())
+  const linkedClip = it.manual ? _runtimeYouTubeClip(it) : null
+  $b.find('.rec-pb-clip-range').toggle(!!linkedClip).text(linkedClip
+    ? `YouTube clip ${fromSeconds(linkedClip.timeStart)} – ${fromSeconds(linkedClip.timeEnd)}${linkedClip.inferredEnd ? ' · automatic end' : ''}` : '')
   _syncRecPlayReverseBtn()
   _syncItemGapUI()
   if (dual) _syncSrcTgtGapUI()
@@ -19282,6 +19373,7 @@ function _setManualAudioSrc(a, dataUrl) {
 // started a video nobody asked for.
 function _showManualAudioPlayer(show, faceLabel) {
   $('body').toggleClass('rec-playing-manual', !!show)
+  $('body').toggleClass('rec-playing-manual-video', !!show && _cardHasVideoLink(window._recPlayCurrentItem))
   if (!show) {
     // Hiding an <audio> does not silence it. A face button pressed during the
     // card's text hold is still sounding when the next item takes the slot,
@@ -19395,7 +19487,11 @@ function _practiceAudioEl() {
     // Pressing Play on the controls is as much a request for sound as pressing
     // a face button, so it silences the other sources too.
     const el = $wrap.find('.rec-pa-el')[0]
-    el.addEventListener('play', () => _silenceOtherAudio('practice'))
+    el.addEventListener('play', () => {
+      _silenceOtherAudio('practice')
+      try { window.ytPlayer?.pauseVideo() } catch (_) {}
+      try { spotifyPlayer.media?.pause() } catch (_) {}
+    })
   }
   return $wrap.find('.rec-pa-el')[0]
 }
@@ -19846,7 +19942,8 @@ async function playRecording(opts) {
     // it being manual: a manual card carrying only a YouTube link still wants
     // the video, and would otherwise inherit the hidden slot from whichever
     // recorded card came before it.
-    if (!(_isManualItem(it) && (_cardHasAudio(it) || _isAudioMediaUrl(it.mediaUrl)))) {
+    if (!(_isManualItem(it) && (_cardHasAudio(it) || _isAudioMediaUrl(it.mediaUrl))) ||
+        (_isManualItem(it) && _playlistPlaybackPlan(it).linked)) {
       _showManualAudioPlayer(false)
     }
     if (!_isManualItem(it) && it.source && it.source.toLowerCase() !== 'youtube') {
@@ -19904,15 +20001,11 @@ async function playRecording(opts) {
     }
     if (!sessionPlaying()) break
     if (Number.isInteger(window._recNavGotoIndex)) continue
-    // Manual entries: no clip to play. If the media is a YouTube link we
-    // still cue it into the embedded player at t=0 (so the user can hit
-    // play manually if they want) but never auto-play — the playlist's
-    // own timing comes from the inter-item gap, which doubles as the
-    // hold-on-text duration. Non-YT links are ignored here (opening them
-    // in a new tab mid-playlist would break flow); the user can click
-    // the link badge in the Review dialog instead.
+    // Linked media and face recordings share one per-card playback plan.
+    // In Both mode the linked clip finishes before the recordings begin.
     if (_isManualItem(it)) {
-      if (spotifyClips(it).length) {
+      const playback = _playlistPlaybackPlan(it)
+      if (playback.linked && spotifyClips(it).length) {
         _setRecPlayPhase('clip')
         try {
           await spotifyPlayer.playCard(it, {
@@ -19928,30 +20021,39 @@ async function playRecording(opts) {
         } catch (error) {
           if (!sessionPlaying() || window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) continue
           _recPlayToast('Skipped Spotify clip: ' + error.message)
-          if (++unplayableSkips >= queue.length) {
-            _cpBuildToast('No playable items found. Playback stopped.')
-            break
+          if (!playback.recordings) {
+            if (++unplayableSkips >= queue.length) {
+              _cpBuildToast('No playable items found. Playback stopped.')
+              break
+            }
+            i = _stepOverSkipped()
+            continue
           }
-          i = _stepOverSkipped()
-          continue
         }
-      } else unplayableSkips = 0
-      // Show the card's text in the subtitle overlay (the banner head is
-      // collapsed on mobile) so it's visible for the whole item.
-      if (_cardHasVideoLink(it)) {
+      }
+      if (playback.linked && _cardHasVideoLink(it)) {
         try {
-          await _cueManualCardVideo(it)
-        } catch (e) { console.warn('playRecording: manual YT cue failed', it, e) }
+          await _playPlaylistLinkedVideo(it, queue, i)
+        } catch (error) {
+          if (!sessionPlaying() || window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) continue
+          _recPlayToast('Skipped YouTube clip: ' + error.message)
+          if (!playback.recordings) {
+            if (++unplayableSkips >= queue.length) break
+            i = _stepOverSkipped()
+            continue
+          }
+        }
+        if (!sessionPlaying()) break
+        if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) continue
       }
       // Recorded-audio card: play the Source recording, then the Target one,
       // back to back — together they play the role the video clip plays for
       // YouTube items — then fall through to the inter-item gap hold below.
-      // A YouTube link is only a reference now (cued above, never auto-played),
-      // so a card can carry both a link and its own pronunciations.
+      // In Both mode these follow the linked clip; Recorded audio skips it.
       {
-        const clips = _cardClipsInOrder(it)
+        const clips = playback.recordings ? _cardClipsInOrder(it) : []
         // Legacy cards kept their single recording in mediaUrl.
-        if (!clips.length && (it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)) && it.mediaUrl) {
+        if (playback.recordings && !clips.length && (it.mediaKind === 'audio' || _isAudioMediaUrl(it.mediaUrl)) && it.mediaUrl) {
           clips.push({ key: 'source', label: 'Source', icon: 'ᔆ', text: (it && it.source) || '', url: it.mediaUrl })
         }
         const navPending = () => window._recNavRequest || Number.isInteger(window._recNavGotoIndex)
@@ -19981,6 +20083,7 @@ async function playRecording(opts) {
       // A playable manual card was reached — clear the backward-nav flag (the
       // YT path does this after its clip; the manual path must too) so the
       // text-only skip above resumes forward once we advance past here.
+      unplayableSkips = 0
       window._recPlaySlowdown = false
       // Hold for the inter-item gap so the user reads the text, honoring
       // pause / stop. The gap-countdown progress bar shows time-until-next.
@@ -20052,8 +20155,9 @@ async function playRecording(opts) {
       // to the original bounds when there's nothing to repair against —
       // _waitYTUntilEnd's final safety-net skip still catches the
       // unrecoverable case.
-      let _playStart = it.timeStart
-      let _playEnd   = it.timeEnd
+      const runtimeClip = _runtimeYouTubeClip(it, queue, i)
+      let _playStart = runtimeClip?.timeStart ?? it.timeStart
+      let _playEnd   = runtimeClip?.timeEnd ?? it.timeEnd
       // Retroactive clip clamp: recompute the window from the CURRENT snippet so a
       // stored [timeStart, timeEnd] built before the sparse-snippet fix (or across a
       // temporal gap) doesn't overshoot. Shrink-only — never lengthens the clip; and
@@ -20064,7 +20168,7 @@ async function playRecording(opts) {
         const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
         let primary = parsed && (lang === 'sv' ? parsed.sv : parsed.en)
         if (!primary || !primary.length) primary = parsed && (lang === 'sv' ? parsed.en : parsed.sv)
-        const win = _contiguousPlayWindow(primary, it, { gapThreshold: _clipGapThresholdSec() })
+        const win = _contiguousPlayWindow(primary, { ...it, timeStart: _playStart, timeEnd: _playEnd }, { gapThreshold: _clipGapThresholdSec() })
         if (win) { _playStart = win.timeStart; _playEnd = win.timeEnd }
       } catch (e) { if (!attempt.active()) throw e; console.warn('playRecording: play-window clamp failed', it && it.id, e) }
       const _rawDur = (parseFloat(_playEnd) || 0) - (parseFloat(_playStart) || 0)
@@ -20265,7 +20369,7 @@ async function playRecording(opts) {
   window._recPlayMinimized = false
   window._recPlayGapGuard = false
   if (window._recPlayGapGuardId) { clearInterval(window._recPlayGapGuardId); window._recPlayGapGuardId = null }
-  $('body').removeClass('rec-playing rec-paused rec-playing-minimized rec-playing-manual')
+  $('body').removeClass('rec-playing rec-paused rec-playing-minimized rec-playing-manual rec-playing-manual-video')
   $('#recPlayingAudio').remove()
   $('#recPlayingBanner').remove()
   $('#recPlayingSubs').remove()
@@ -20411,9 +20515,9 @@ function _interruptRecordingPlayback() {
 function _applyRecPlayPause(paused, controlYt = true) {
   window._recPlayPaused = !!paused
   const t = window._recTTS
-  // A manual card's YouTube link is only ever cued as a reference — never let
-  // pause/resume command that player. Read once: both branches need it.
-  const _manualItem = _isManualItem(window._recPlayCurrentItem)
+  // Drive YouTube while its linked clip is active; during recordings or the
+  // card's recall pause, its parked video must stay paused.
+  const _manualItem = _isManualItem(window._recPlayCurrentItem) && !window._recPlayLinkedVideo
   if (paused) {
     $('body').addClass('rec-paused')
     $('#recPlayingPauseBtn .rec-icon-pause').hide()
@@ -20514,19 +20618,17 @@ function _recPlaySeekRelative(delta) {
     return true
   }
   const it = window._recPlayCurrentItem
-  // The same rule pause and resume follow: a manual card's YouTube link is a
-  // reference, cued and never played, so it is not what a seek key means. Read
-  // from the item, not from the audio pointer — that pointer is null on a
-  // manual card with no recordings, and null again in the window before the
-  // first clip's bytes have loaded. Seeking a cued player starts it.
-  if (!it || _isManualItem(it)) return false
+  // Seek the linked video only during its playback phase. When recordings or
+  // the recall pause own a manual card, its parked video stays put.
+  if (!it || (_isManualItem(it) && !window._recPlayLinkedVideo)) return false
   try {
     if (!window.ytPlayer || typeof window.ytPlayer.getCurrentTime !== 'function') return false
     const cur = window.ytPlayer.getCurrentTime() || 0
     // A recorded item is a slice of a longer video, so its own start is the
     // floor — rewinding past it would drop the user into unrelated footage.
-    const lo  = (it && Number.isFinite(+it.timeStart)) ? +it.timeStart : 0
-    const hi  = (it && Number.isFinite(+it.timeEnd))   ? +it.timeEnd   : Infinity
+    const clip = _runtimeYouTubeClip(it)
+    const lo  = clip?.timeStart ?? ((it && Number.isFinite(+it.timeStart)) ? +it.timeStart : 0)
+    const hi  = clip?.timeEnd ?? ((it && Number.isFinite(+it.timeEnd)) ? +it.timeEnd : Infinity)
     const target = cur + delta
     if (target < lo) return REC_SEEK_UNDERFLOW
     if (target > hi) return REC_SEEK_OVERFLOW
@@ -20745,7 +20847,7 @@ function stopPlayingRecording() {
   window._recPlayGapGuard = false
   if (window._recPlayGapGuardId) { clearInterval(window._recPlayGapGuardId); window._recPlayGapGuardId = null }
   try { _stopGapCountdown() } catch (_) {}
-  $('body').removeClass('rec-playing rec-paused rec-playing-minimized rec-playing-manual')
+  $('body').removeClass('rec-playing rec-paused rec-playing-minimized rec-playing-manual rec-playing-manual-video')
   $('#recPlayingAudio').remove()
   $('#recPlayingBanner').remove()
   $('#recPlayingSubs').remove()
@@ -21625,6 +21727,10 @@ function revealPracticeCard() {
 // _practiceCardLines draws, resolved the same way, so what plays is what is on
 // the card.
 async function _practiceClipRange(it, before, after) {
+  if (it.manual && _cardHasVideoLink(it)) {
+    const clip = _runtimeYouTubeClip(it)
+    return { start: clip.timeStart, stop: clip.timeEnd }
+  }
   const segments = spotifyClips(it)
   if (segments.length) return { start: segments[0].start, stop: segments[segments.length - 1].end }
   const fallback = {
@@ -22467,11 +22573,13 @@ function _cardTextEl(text) {
 async function _playPracticeManualVideo(it) {
   const video = _manualCardVideo(it)
   if (!video) return
+  _stopPracticeAudio()
   const request = _newPracticeVideoRequest({ mute: true })
   const ownsRequest = () => _practiceVideoCues.isCurrent(request)
   const deadline = Date.now() + VIDEO_RECOVERY_MS
   const isCurrent = () => ownsRequest() && Date.now() < deadline
   const pending = {}
+  const clipToken = window._practiceClipToken = (window._practiceClipToken || 0) + 1
   window._practicePlayPending = pending
   try {
     await waitUntil(() => !isCurrent() || window.ytPlayerReady)
@@ -22480,13 +22588,14 @@ async function _playPracticeManualVideo(it) {
     // A cued iframe can report zero, or a cached time from the previous
     // card. Confirm the linked moment while PLAYING and still muted; retry
     // ignored seeks by loading at startSeconds, within one bounded request.
-    await playMediaSlice(video.id, video.timeStart, null, 'YouTube', {
+    await playMediaSlice(video.id, video.timeStart, video.timeEnd, 'YouTube', {
       isCurrent, confirmSeek: true, requirePlaying: true,
     })
     if (!ownsRequest()) return
     if (!isCurrent()) throw new Error('The linked video did not reach its timestamp')
     _practiceVideoCues.beginPlayback(request)
     window._practicePlaybackCard = it
+    _watchPracticeClipEnd(video.timeEnd, clipToken)
   } catch (e) {
     if (ownsRequest()) {
       try { window.ytPlayer.pauseVideo() } catch (_) {}

@@ -7,6 +7,7 @@ import {captionLinesFrom, appendCaptionBlock, retainCaptionEnds} from './caption
 import {parseMediaUrl} from './recordings-merge.js';
 import {createSpotifyStudyPlayer, loadSpotifyEmbedApi} from './spotify-player.js';
 import {splitGeometry} from './study-divider.js';
+import {manualPlaybackPlan} from './card-playback.js';
 import {buildPlayingBannerVM} from './renderer/playing-ui-vm.js';
 
 const require = createRequire(import.meta.url);
@@ -240,6 +241,7 @@ function appPlaylist(f, events, overrides = {}) {
   const noop = () => {};
   const scope = {window: f.win, document: f.win.document, $: $, spotifyPlayer: f.player,
     spotifyClips: spotifyClipSegments, _isManualItem: item => !!item?.manual, _parseMediaUrl: parseMediaUrl,
+    _playlistPlaybackPlan: item => manualPlaybackPlan(item, f.win._appSettings?.recManualPlaybackMode),
     _cardHasAudio: () => false, _isAudioMediaUrl: () => false, _cardHasVideoLink: () => false, _cardClipsInOrder: () => [], _recPlayReversed: () => false,
     _interItemGapSeconds: () => 0, _effectiveSrcTgtGapSeconds: () => 0, _sleepRespectingPause: () => Promise.resolve(),
     _syncItemGapUI: noop, _syncSrcTgtGapUI: noop,
@@ -291,7 +293,7 @@ test('the actual Play All loop skips an unavailable Spotify item and continues',
 test('Next cancels the current Spotify card before its remaining recorded audio', async () => {
   const f = fixture(), events = [], recordings = [];
   try {
-    const first = card(), second = card([30], [32]);
+    const first = {...card(), sourceAudioUrl: 'file:///recorded-source.wav'}, second = card([30], [32]);
     const play = appPlaylist(f, events, {
       _cardClipsInOrder: item => item === first ? [{url: 'recorded-source.webm'}] : [],
       _playManualAudioAndWait: async url => {recordings.push(url);},
@@ -305,6 +307,29 @@ test('Next cancels the current Spotify card before its remaining recorded audio'
     f.state(30); f.state(30.1, false); f.state(32, false); await done;
   } finally {f.close();}
 });
+
+for (const mode of ['linked', 'recordings', 'both']) {
+  test(`Spotify and recorded audio follow the ${mode} playback choice`, async () => {
+    const f = fixture(), events = [], audio = [];
+    try {
+      f.win._appSettings = {recManualPlaybackMode: mode};
+      const item = {...card(), sourceAudioUrl: 'file:///recorded-source.wav'};
+      const play = appPlaylist(f, events, {
+        _cardClipsInOrder: () => [{url: item.sourceAudioUrl}],
+        _playManualAudioAndWait: async url => {audio.push(url);},
+      });
+      const done = play({queue: [item], shuffle: false});
+      await f.flush();
+      if (mode !== 'recordings') {
+        assert.deepEqual(audio, [], 'recordings wait for the linked clip');
+        f.emit('ready'); f.state(12.52); f.state(12.6, false); f.state(14.16, false);
+      }
+      await done;
+      assert.deepEqual(audio, mode === 'linked' ? [] : [item.sourceAudioUrl]);
+      if (mode === 'recordings') assert.equal(f.calls.some(c => c[0] === 'play'), false);
+    } finally {f.close();}
+  });
+}
 
 
 test('the supplied playlist advances through every retained passage using whole-second acknowledgements', {timeout: 5000}, async () => {

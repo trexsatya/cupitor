@@ -325,6 +325,18 @@
                         S→T gap
                         <input type="number" id="recPlaySrcTgtGapSeconds" value="" min="0" max="600" step="1" placeholder="item" style="width: 46px; margin-left: 4px;">
                     </label>
+                    <label class="lang-panel-label" title="Length of a YouTube clip without an end timestamp. It stops sooner when the next clip in the same video starts.">
+                        YouTube fallback (s)
+                        <input type="number" id="recPlayYouTubeClipSeconds" value="20" min="1" max="600" step="1" style="width:60px; margin-left:4px;">
+                    </label>
+                    <label class="lang-panel-label" title="When a card has both a YouTube/Spotify link and recordings. Cards with only one source play that source.">
+                        Cards with link + audio
+                        <select id="recManualPlaybackMode" aria-label="Playback for cards with link and recorded audio">
+                            <option value="linked">Linked media</option>
+                            <option value="recordings">Recorded audio</option>
+                            <option value="both" selected>Both (linked first)</option>
+                        </select>
+                    </label>
                     <button type="button" id="openMusicPanel" class="btn lang-panel-btn"
                             title="Background music that plays under a playlist: saved tracks, when it sounds, and how loud.">♫ Music…</button>
                     <label class="lang-panel-label" title="Clear search text on click">

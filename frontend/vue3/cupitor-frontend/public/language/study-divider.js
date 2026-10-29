@@ -1,12 +1,12 @@
 // One shared, accessible separator for the active view. Ratios are stored per
 // view; viewport changes and a different media type are clamped on each paint.
-export function splitGeometry({ height, width, top = 64, bottom = 0, transport = 0, audio = false, ratio, mediaMin = 0 }) {
+export function splitGeometry({ height, width, top = 64, bottom = 0, transport = 0, audio = false, ratio, mediaMin = 0, naturalMedia }) {
   const available = Math.max(60, height - top - bottom - 12);
   const min = mediaMin > 0
     ? Math.min(available, Math.max(mediaMin + transport, Math.min(available * 0.45, (audio ? 100 : 90) + transport)))
     : Math.min(available * 0.45, (audio ? 100 : 90) + transport);
   const max = Math.max(min, available - Math.min(100, available * 0.4));
-  const natural = (mediaMin > 0 ? mediaMin : audio ? 140 : Math.min(width, 900) * 9 / 16) + transport;
+  const natural = (naturalMedia > 0 ? naturalMedia : mediaMin > 0 ? mediaMin : audio ? 140 : Math.min(width, 900) * 9 / 16) + transport;
   const upper = Math.max(min, Math.min(max, Number.isFinite(ratio) ? ratio * available : natural));
   return { top, available, min, max, upper, y: top + upper, media: Math.max(20, upper - transport) };
 }
@@ -24,13 +24,23 @@ export function installStudyDivider({ readRatio, saveRatio }) {
   body.appendChild(divider);
   let view, geometry, drag = null, frame = 0;
   const local = {};
+  const observed = new WeakSet();
+  const sizes = typeof ResizeObserver === 'function' ? new ResizeObserver(() => refresh()) : null;
   const visible = el => !!el && !!el.getClientRects().length && getComputedStyle(el).display !== 'none';
   const paint = () => {
     frame = 0;
     view = body.classList.contains('practice-mode') ? 'practice' : body.classList.contains('rec-playing') ? 'player' : null;
     const audioNode = document.getElementById(view === 'practice' ? 'practiceAudio' : 'recPlayingAudio');
     const audio = visible(audioNode);
-    const media = audio ? audioNode : document.getElementById('mediaContainer');
+    const videoNode = document.getElementById('mediaContainer');
+    if (sizes && audioNode) {
+      for (const node of [audioNode, ...audioNode.children]) {
+        if (!observed.has(node)) { sizes.observe(node); observed.add(node); }
+      }
+    }
+    const combined = audio && visible(videoNode);
+    body.classList.toggle('study-media-combined', combined);
+    const media = audio ? audioNode : videoNode;
     const active = !!view && visible(media);
     divider.hidden = !active;
     body.classList.toggle('study-split-active', active);
@@ -38,9 +48,20 @@ export function installStudyDivider({ readRatio, saveRatio }) {
     const bar = view === 'practice' ? document.querySelector('#practiceMode .practice-rec-bar') : null;
     const bottom = view === 'practice' ? Math.max(64, visible(bar) ? bar.getBoundingClientRect().height + 66 : 64) : 0;
     const ratio = Object.prototype.hasOwnProperty.call(local, view) ? local[view] : readRatio(view);
+    let audioHeight = 0;
+    if (combined) {
+      const oldHeight = audioNode.style.height;
+      audioNode.style.height = 'auto';
+      audioHeight = Math.ceil(audioNode.getBoundingClientRect().height);
+      audioNode.style.height = oldHeight;
+    }
+    const spotify = body.classList.contains('study-spotify');
     geometry = splitGeometry({ height: window.innerHeight, width: window.innerWidth, bottom,
       transport: view === 'player' ? 60 : 0, audio, ratio,
-      mediaMin: body.classList.contains('study-spotify') ? 190 : 0 });
+      mediaMin: combined ? audioHeight + (spotify ? 190 : 90) : spotify ? 190 : 0,
+      naturalMedia: combined ? audioHeight + (spotify ? 190 : Math.min(window.innerWidth, 900) * 9 / 16) : undefined });
+    body.style.setProperty('--study-audio-h', audioHeight + 'px');
+    body.style.setProperty('--study-video-h', Math.max(20, geometry.media - audioHeight) + 'px');
     body.style.setProperty('--study-media-h', geometry.media + 'px');
     body.style.setProperty('--study-split-y', geometry.y + 'px');
     divider.setAttribute('aria-label', `Resize ${view === 'player' ? 'Player' : 'Practice'} player and text`);

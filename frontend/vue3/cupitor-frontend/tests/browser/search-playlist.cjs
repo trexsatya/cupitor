@@ -41,7 +41,8 @@ async function checkSearchPlaylist(browser, mobile) {
   }
   const storedGap = () => page.evaluate(() => Object.entries(localStorage)
     .filter(([key]) => key.includes('appSettings')).map(([, value]) => JSON.parse(value).recPlayGapSeconds))
-  const gap = () => page.locator('#recPlayingBanner .rec-pb-gap-val').innerText()
+  // The readout can be inside collapsed or auto-hidden Player details.
+  const gap = () => page.locator('#recPlayingBanner .rec-pb-gap-val').textContent()
   let clockInstalled = false
   const start = async (savedGap = 7, count = 4) => {
     const plays = await page.evaluate(() => window.__yt.plays)
@@ -50,7 +51,7 @@ async function checkSearchPlaylist(browser, mobile) {
     await page.waitForFunction(({ plays, count }) => window._playingRecording && window._recPlayQueue?.length === count &&
       window.__yt.state === 1 && window.__yt.plays > plays && !window.seekRequestProcessing &&
       document.querySelector('#recPlayingBanner'), { plays, count })
-    assert.equal(await gap(), '30s')
+    assert.equal(await gap(), '5s')
     assert.equal(await page.evaluate(() => window._appSettings.recPlayGapSeconds), savedGap)
   }
   const search = async (query, count) => {
@@ -83,6 +84,8 @@ async function checkSearchPlaylist(browser, mobile) {
     })
     await search('händer|behöver|saknas', 2)
     assert.equal(await page.locator('#searchPlaylistSelectBtn').isVisible(), true)
+    assert.equal(await page.locator('#manualSearchBar #searchPlaylistToolbar').count(), 1,
+      'playlist controls share the existing results options row')
     assert.equal(await page.locator('#result .l-accordion #searchPlaylistSelectBtn').count(), 0,
       'one playlist button sits outside all headings')
     assert.equal(await page.locator('#searchPlaylistActions').isVisible(), false)
@@ -140,7 +143,11 @@ async function checkSearchPlaylist(browser, mobile) {
     const active = await page.locator('#result .l-accordion').evaluate(el => el.classList.contains('active'))
     const button = page.locator('#searchPlaylistCreateBtn')
     const box = await button.boundingBox()
-    assert(box && box.width >= 44 && box.x >= 0 && box.x + box.width <= (mobile ? 360 : 1280))
+    const toolbarBox = await page.locator('#searchPlaylistToolbar').boundingBox()
+    assert(box && box.width >= 30 && box.width <= 36 && box.height <= 36 &&
+      box.x >= 0 && box.x + box.width <= (mobile ? 360 : 1280) &&
+      toolbarBox.x + toolbarBox.width - box.x - box.width <= 12,
+      'compact playlist controls sit on the right above the results')
     if (process.env.SCREENSHOT_DIR) {
       fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
       await page.locator('#result').screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `search-playlist-${mobile ? 'mobile' : 'desktop'}.png`) })
@@ -154,11 +161,11 @@ async function checkSearchPlaylist(browser, mobile) {
     assert.deepEqual(queue.filter(it => it.id === 'testVideo01').map(it => [it.lineIndex, it.timeStart, it.timeEnd]),
       [['2', 1, 7], ['6', 900, 902], ['4', 120, 124]])
     await click('#recPlayingMinimizeBtn')
-    assert.equal(await gap(), '30s', 'minimize keeps the session gap')
+    assert.equal(await gap(), '5s', 'minimize keeps the session gap')
     await click('.rec-pill-restore')
     if (mobile) await click('#recPlayingBanner .rec-pb-info-btn')
     await click('#recPlayingBanner .rec-pb-gap-inc')
-    assert.equal(await gap(), '35s')
+    assert.equal(await gap(), '10s')
     await page.evaluate(() => window.saveAppSettings())
     assert.deepEqual(await storedGap(), [7], 'saving another setting cannot persist the temporary gap')
     await click('#recPlayingCloseBtn')
@@ -170,7 +177,7 @@ async function checkSearchPlaylist(browser, mobile) {
     await page.waitForFunction(() => window._practiceActive)
     await page.keyboard.press('p')
     await page.waitForFunction(() => !window._practiceActive && window._playingRecording)
-    assert.equal(await gap(), '30s', 'Practice to Player preserves the temporary gap')
+    assert.equal(await gap(), '5s', 'Practice to Player preserves the temporary gap')
     await page.keyboard.press('p')
     await page.waitForFunction(() => window._practiceActive)
     await click('#practiceMode .practice-close')
@@ -197,8 +204,8 @@ async function checkSearchPlaylist(browser, mobile) {
     assert.equal(await page.locator('#recPlayingBanner .rec-pb-bar').evaluate(el => el.classList.contains('gap')), true,
       JSON.stringify(await page.evaluate(() => ({ yt: window.__yt, paused: window._recPlayPaused,
         phase: window._recPlayPhase, index: window._recPlayIndex, playing: window._playingRecording }))))
-    await page.clock.runFor(28000)
-    assert.equal(await page.evaluate(() => window._recPlayIndex), 0, 'next clip waits for 30 seconds')
+    await page.clock.runFor(3000)
+    assert.equal(await page.evaluate(() => window._recPlayIndex), 0, 'next clip waits for 5 seconds')
     await page.clock.runFor(2100)
     assert.equal(await page.evaluate(() => window._recPlayIndex), 1)
     // Finish the last card naturally; completion must restore the gap too.
@@ -219,7 +226,7 @@ async function checkSearchPlaylist(browser, mobile) {
     assert.equal(await page.locator('#recPlayGapSeconds').inputValue(), '0', 'a saved zero-second gap also restores')
     assert.deepEqual(await storedGap(), [0])
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'Mobile' : 'Desktop'}: phrase queue, sparse/cross-line clips, 30s gap, minimize, Practice, close and completion passed`)
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: phrase queue, sparse/cross-line clips, 5s gap, minimize, Practice, close and completion passed`)
   } catch (error) {
     console.error(await page.evaluate(() => ({ search: window._librarySearchText,
       headings: [...document.querySelectorAll('#result .l-accordion')].map(el => el.textContent),
