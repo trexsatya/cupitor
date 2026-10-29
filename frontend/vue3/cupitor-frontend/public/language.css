@@ -655,7 +655,6 @@
     top: 0;
     z-index: 10;
     background: #fff;
-    min-height: 44px;
 }
 
 /* On phones the results belong to the document's scroll surface. A second
@@ -914,27 +913,64 @@ div.l-accordion h2, div.l-accordion h1, div.l-accordion h3, div.l-accordion h4, 
     font-weight: 500;
 }
 
-#result .search-play-all {
-    float: right;
+#searchPlaylistToolbar,
+#searchPlaylistActions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+#searchPlaylistToolbar {
+    padding: 8px 12px;
+    border-bottom: 1px solid #ddd;
+}
+#searchPlaylistToolbar button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     vertical-align: middle;
     min-width: 44px;
     min-height: 44px;
-    margin-left: 8px;
     border: 1px solid currentColor;
     border-radius: 50%;
     background: transparent;
     color: inherit;
     cursor: pointer;
 }
-#result .search-play-all:hover,
-#result .search-play-all:focus-visible {
+#searchPlaylistToolbar button:hover,
+#searchPlaylistToolbar button:focus-visible {
     background: #ddd;
     outline: 2px solid currentColor;
     outline-offset: 2px;
 }
+#searchPlaylistSelectBtn[aria-pressed="true"] { background: #dceef5; }
+#searchPlaylistSelectBtn { position: relative; }
+#searchPlaylistActions label { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-size: 0.85rem; }
+#searchPlaylistMaxClips { width: 3.5em; min-height: 36px; }
+#searchPlaylistSelectedCount:not(:empty) {
+    position: absolute;
+    top: -3px;
+    right: -5px;
+    min-width: 18px;
+    border-radius: 9px;
+    background: #247e9c;
+    color: white;
+    font: 12px/18px sans-serif;
+}
+#result .search-playlist-choice {
+    float: right;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    margin: 0 0 0 8px;
+    cursor: pointer;
+}
+#result .search-playlist-checkbox { width: 20px; height: 20px; cursor: pointer; }
+#result .search-playlist-choice[hidden],
+#searchPlaylistActions[hidden] { display: none !important; }
+#result .l-accordion:has(.search-playlist-choice:not([hidden])) { min-height: 44px; }
 
 #playBtn {
     border-radius: 10%;

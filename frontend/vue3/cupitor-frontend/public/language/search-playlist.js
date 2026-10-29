@@ -33,3 +33,13 @@ export function buildSearchPlaylist(items, { files = [], lang = 'sv', word = '',
   }
   return queue
 }
+
+export function buildSelectedSearchPlaylist(groups, selectedWords, { maxPerHeader = '', ...options } = {}) {
+  const limit = maxPerHeader === '' ? Infinity : Number(maxPerHeader)
+  if (maxPerHeader !== '' && (!Number.isSafeInteger(limit) || limit < 1)) {
+    throw new RangeError('Max clips per heading must be a positive whole number.')
+  }
+  const selected = new Set(selectedWords)
+  return groups.filter(group => selected.has(group.word)).flatMap(group =>
+    buildSearchPlaylist(group.items, { ...options, word: group.word }).slice(0, limit))
+}

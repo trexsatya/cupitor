@@ -1,4 +1,4 @@
-import { buildSearchPlaylist } from './search-playlist.js'
+import { buildSearchPlaylist, buildSelectedSearchPlaylist } from './search-playlist.js'
 
 const cue = (index, start, end) => ({ index: String(index), start: { ordinal: start }, end: { ordinal: end } })
 const lines = [cue(1, 1, 3), cue(2, 3, 5), cue(3, 5, 7), cue(4, 120, 122)]
@@ -23,4 +23,16 @@ test('uses the selected language, preserves other sources, and skips unplayable 
   const queue = buildSearchPlaylist([audio, null, match(2), { ...audio, url: '' }], { files, lang: 'en' })
   expect(queue).toEqual([expect.objectContaining({ id: 'audio.mp3', source: 'Audio', timeStart: 60, timeEnd: 65 })])
   expect(buildSearchPlaylist([], options)).toEqual([])
+})
+
+test('limits playable clips separately for every selected heading', () => {
+  const groups = ['first', 'second', 'unselected'].map(word => ({ word, items: [match(2), match(2), match(3), match(4)] }))
+  const opts = { ...options, maxPerHeader: '2' }
+  const selected = ['first', 'second']
+  expect(buildSelectedSearchPlaylist(groups, selected, opts).map(it => it.lineIndex)).toEqual(['2', '3', '2', '3'])
+  expect(buildSelectedSearchPlaylist(groups, selected, { ...opts, maxPerHeader: '' })).toHaveLength(6)
+  expect(buildSelectedSearchPlaylist(groups, [], opts)).toEqual([])
+  for (const maxPerHeader of ['0', '-1', '1.5', 'invalid', 'Infinity']) {
+    expect(() => buildSelectedSearchPlaylist(groups, selected, { ...opts, maxPerHeader })).toThrow(RangeError)
+  }
 })

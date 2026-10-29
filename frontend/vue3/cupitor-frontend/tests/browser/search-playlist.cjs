@@ -43,15 +43,22 @@ async function checkSearchPlaylist(browser, mobile) {
     .filter(([key]) => key.includes('appSettings')).map(([, value]) => JSON.parse(value).recPlayGapSeconds))
   const gap = () => page.locator('#recPlayingBanner .rec-pb-gap-val').innerText()
   let clockInstalled = false
-  const start = async (savedGap = 7) => {
+  const start = async (savedGap = 7, count = 4) => {
     const plays = await page.evaluate(() => window.__yt.plays)
-    await click('#result .search-play-all')
+    await click('#searchPlaylistCreateBtn')
     if (clockInstalled) await page.clock.runFor(500)
-    await page.waitForFunction(plays => window._playingRecording && window._recPlayQueue?.length === 4 &&
+    await page.waitForFunction(({ plays, count }) => window._playingRecording && window._recPlayQueue?.length === count &&
       window.__yt.state === 1 && window.__yt.plays > plays && !window.seekRequestProcessing &&
-      document.querySelector('#recPlayingBanner'), plays)
+      document.querySelector('#recPlayingBanner'), { plays, count })
     assert.equal(await gap(), '30s')
     assert.equal(await page.evaluate(() => window._appSettings.recPlayGapSeconds), savedGap)
+  }
+  const search = async (query, count) => {
+    await page.locator('#searchText').fill(query)
+    await page.locator('#searchText').press('Tab')
+    await page.waitForFunction(({ query, count }) => window._librarySearchText === query &&
+      document.querySelectorAll('#result .l-accordion[accordion-rendered]').length === count &&
+      !document.querySelector('#result').textContent.includes('Loading…'), { query, count })
   }
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
@@ -74,14 +81,64 @@ async function checkSearchPlaylist(browser, mobile) {
       window.ytPlayerReady = true
       window.__savedPlaylists = JSON.stringify(window._recordings)
     })
-    await page.locator('#searchText').fill('i rätta händer')
-    await page.locator('#searchText').press('Tab')
-    await page.waitForFunction(() => document.querySelector('#result .match-count')?.textContent === '(4)' &&
-      document.querySelector('#result .l-accordion[accordion-rendered]'))
+    await search('händer|behöver|saknas', 2)
+    assert.equal(await page.locator('#searchPlaylistSelectBtn').isVisible(), true)
+    assert.equal(await page.locator('#result .l-accordion #searchPlaylistSelectBtn').count(), 0,
+      'one playlist button sits outside all headings')
+    assert.equal(await page.locator('#searchPlaylistActions').isVisible(), false)
+    assert.equal(await page.locator('.search-playlist-checkbox:visible').count(), 0)
+    await click('#searchPlaylistSelectBtn')
+    const phrase = page.getByRole('checkbox', { name: 'Select clips for händer', exact: true })
+    const other = page.getByRole('checkbox', { name: 'Select clips for behöver', exact: true })
+    const wasOpen = await phrase.locator('xpath=ancestor::h5').evaluate(el => el.classList.contains('active'))
+    await phrase.check()
+    assert.equal(await phrase.locator('xpath=ancestor::h5').evaluate(el => el.classList.contains('active')), wasOpen,
+      'selecting a heading does not expand or collapse it')
+    assert.equal(await page.locator('#searchPlaylistActions').isVisible(), true)
+    await other.check()
+    assert.equal(await page.locator('#searchPlaylistSelectedCount').innerText(), '2')
+    await page.locator('#searchPlaylistMaxClips').fill('0')
+    await click('#searchPlaylistCreateBtn')
+    assert.equal(await page.evaluate(() => !!window._playingRecording), false, 'zero is rejected')
+    await page.locator('#searchPlaylistMaxClips').fill('1.5')
+    assert.equal(await page.locator('#searchPlaylistMaxClips').evaluate(el => el.checkValidity()), false, 'fractional limits are rejected')
+    await page.locator('#searchPlaylistMaxClips').fill('2')
+    await other.uncheck()
+    await phrase.uncheck()
+    assert.equal(await page.locator('#searchPlaylistActions').isVisible(), false, 'no selection hides creation controls')
+    await phrase.check()
+    await other.check()
+    if (process.env.SCREENSHOT_DIR) {
+      fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+      await page.locator('#result').screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `search-selection-${mobile ? 'mobile' : 'desktop'}.png`) })
+    }
+    // Paging rebuilds the result DOM, but retains all selected headings and the limit.
+    await page.evaluate(async () => { window.SEARCH_RESULT_PAGE_SIZE = 1; await window.loadSearchResultsPage(1) })
+    assert.equal(await page.locator('#result .l-accordion').count(), 1)
+    assert.equal(await page.locator('#searchPlaylistSelectedCount').innerText(), '2')
+    assert.equal(await page.locator('#searchPlaylistMaxClips').inputValue(), '2')
+    await start(7, 3)
+    assert.deepEqual(await page.evaluate(() => window._recPlayQueue.map(it => it.word).sort()), ['behöver', 'händer', 'händer'],
+      'the cap applies to each selected heading, including selections on another page')
+    await page.evaluate(() => window.stopPlayingRecording())
+    await page.waitForFunction(() => !window._playingRecording)
+    await page.evaluate(async () => { window.SEARCH_RESULT_PAGE_SIZE = 50; await window.loadSearchResultsPage(0) })
+    await click('#searchPlaylistSelectBtn')
+    assert.equal(await page.locator('.search-playlist-checkbox:visible').count(), 0, 'cancel hides all checkboxes')
+    await click('#searchPlaylistSelectBtn')
+    assert.equal(await page.locator('.search-playlist-checkbox:checked').count(), 0, 'cancel clears selection')
+    await search('zzzzzzzznotfound', 1)
+    assert.equal(await page.locator('#searchPlaylistSelectBtn').count(), 0, 'no clips means no playlist button')
+    await search('i rätta händer', 1)
+    assert.equal(await page.locator('#searchPlaylistActions').isVisible(), false, 'new search resets selection')
+    assert.equal(await page.locator('.search-playlist-checkbox:visible').count(), 0)
+    await click('#searchPlaylistSelectBtn')
+    await page.getByRole('checkbox', { name: 'Select clips for i rätta händer', exact: true }).check()
+    assert.equal(await page.locator('#searchPlaylistMaxClips').inputValue(), '', 'new search resets the cap to all clips')
     assert.equal(await page.locator('#result .srt-file').count(), 1, 'fixture renders one of four hits')
     assert.deepEqual(await storedGap(), [7])
     const active = await page.locator('#result .l-accordion').evaluate(el => el.classList.contains('active'))
-    const button = page.locator('#result .search-play-all')
+    const button = page.locator('#searchPlaylistCreateBtn')
     const box = await button.boundingBox()
     assert(box && box.width >= 44 && box.x >= 0 && box.x + box.width <= (mobile ? 360 : 1280))
     if (process.env.SCREENSHOT_DIR) {
@@ -163,6 +220,11 @@ async function checkSearchPlaylist(browser, mobile) {
     assert.deepEqual(await storedGap(), [0])
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'}: phrase queue, sparse/cross-line clips, 30s gap, minimize, Practice, close and completion passed`)
+  } catch (error) {
+    console.error(await page.evaluate(() => ({ search: window._librarySearchText,
+      headings: [...document.querySelectorAll('#result .l-accordion')].map(el => el.textContent),
+      result: document.querySelector('#result')?.textContent.slice(0, 1000) })), errors)
+    throw error
   } finally { await page.close() }
 }
 

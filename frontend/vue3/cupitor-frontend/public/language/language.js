@@ -456,7 +456,7 @@ import {
   sliceByHighlightSpans as _sliceByHighlightSpans,
 } from './renderer/highlight-spans-vm.js';
 import { compileRegex, splitRegexAlternatives, hasPhraseWhitespace, isTypedRegex } from './regex-pattern.js';
-import { buildSearchPlaylist } from './search-playlist.js';
+import { buildSelectedSearchPlaylist } from './search-playlist.js';
 import { renderAccordions as _coreRenderAccordions } from './renderer/accordion-render.js';
 import { recordingReviewPage, recordingReviewOrder } from './recording-review-page.js';
 import { knownVideos as _knownVideos } from './known-videos.js';
@@ -7093,6 +7093,55 @@ function getSearchResultPageSize() {
   return window.SEARCH_RESULT_PAGE_SIZE || 50
 }
 
+// Keep selection across result pages, but never carry it into another search.
+let _searchPlaylistSelection = null
+const _searchPlaylistIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 4h12v2H3zm0 5h12v2H3zm0 5h7v2H3zm11-1 8 5-8 5z"/></svg>'
+
+function _syncSearchPlaylistSelection(state) {
+  $('#result .search-playlist-choice').prop('hidden', !state.selecting)
+  $('#searchPlaylistSelectBtn').attr('aria-pressed', String(state.selecting))
+  $('#searchPlaylistActions').prop('hidden', !state.selecting || !state.selected.size)
+  $('#searchPlaylistSelectedCount').text(state.selected.size || '').attr('aria-label', `${state.selected.size} headings selected`)
+  _refreshAccordionStickyHeight()
+}
+
+function _renderSearchPlaylistToolbar(state, $result) {
+  if (!state.groups.some(group => group.items.length)) return
+  const $toolbar = $(`<form id="searchPlaylistToolbar" aria-label="Playlist from search results">
+    <button id="searchPlaylistSelectBtn" type="button" title="Select headings for a temporary playlist" aria-label="Select headings for playlist" aria-pressed="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m2 5 2 2 4-4m-6 10 2 2 4-4m2-6h12M10 13h12M2 21h20"/></svg><span id="searchPlaylistSelectedCount" aria-live="polite"></span></button>
+    <span id="searchPlaylistActions" hidden>
+      <label title="Maximum clips from each selected heading; leave blank to include all">Max per heading <input id="searchPlaylistMaxClips" type="number" min="1" max="9007199254740991" step="1" inputmode="numeric" placeholder="All" aria-label="Max clips per heading"></label>
+      <button id="searchPlaylistCreateBtn" type="submit" title="Create a temporary playlist and open Player with a 30-second gap" aria-label="Create playlist from selected headings">${_searchPlaylistIcon}</button>
+    </span>
+  </form>`).appendTo($result)
+  const $limit = $toolbar.find('#searchPlaylistMaxClips').val(state.maxPerHeader)
+  $toolbar.find('#searchPlaylistSelectBtn').on('click', () => {
+    state.selecting = !state.selecting
+    if (!state.selecting) {
+      state.selected.clear()
+      $('#result .search-playlist-checkbox').prop('checked', false)
+    }
+    _syncSearchPlaylistSelection(state)
+  })
+  $limit.on('input', () => { state.maxPerHeader = $limit.val() })
+  $toolbar.on('submit', e => {
+    e.preventDefault()
+    if (!state.selecting || !state.selected.size || !$limit[0].reportValidity()) return
+    const raw = String($limit.val()).trim()
+    if (raw && (!Number.isSafeInteger(Number(raw)) || Number(raw) < 1)) return
+    const queue = buildSelectedSearchPlaylist(state.groups, state.selected, {
+      files: state.files, lang: state.lang, searchText: state.searchText, maxPerHeader: raw,
+      contextBefore: parseInt(window._appSettings?.contextLinesBefore, 10) || 0,
+      contextAfter: parseInt(window._appSettings?.contextLinesAfter, 10) || 0,
+      gapThreshold: _clipGapThresholdSec() })
+    if (!queue.length) { alert('No playable clips for the selected headings.'); return }
+    if (window._practiceActive) closePracticeMode()
+    if (window._playingRecording) stopPlayingRecording()
+    playRecording({ queue, temporary: true, gapSeconds: 30 })
+  })
+  _syncSearchPlaylistSelection(state)
+}
+
 async function populateSRTFindings(wordToItemsMap, $result, token) {
   const startTime = new Date()
   // Expose for debugging: inspect via `window._lastWordToItemsMap` in console.
@@ -7113,6 +7162,22 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
   }
   window._lastRenderedWords = words
 
+  if (_searchPlaylistSelection?.map !== wordToItemsMap) {
+    _searchPlaylistSelection = { map: wordToItemsMap, selected: new Set(), selecting: false, maxPerHeader: '' }
+  }
+  const selection = _searchPlaylistSelection
+  selection.files = window.searchResult
+  selection.lang = getSelectedLang()
+  selection.searchText = window.searchText
+  selection.groups = words.map(word => {
+    const key = Object.hasOwn(wordToItemsMap, word) ? word : Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
+    const items = (wordToItemsMap[key] || []).toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
+    return { word, items: groupAndArrangeResults(items) }
+  })
+  const available = new Set(selection.groups.filter(group => group.items.length).map(group => group.word))
+  for (const word of selection.selected) if (!available.has(word)) selection.selected.delete(word)
+  _renderSearchPlaylistToolbar(selection, $result)
+
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
   const WORD_CHUNK = 1
 
@@ -7129,11 +7194,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
     const slice = words.slice(wStart, wEnd)
     slice.forEach(word => {
       try {
-        let items = wordToItemsMap[word] || []
-        if (!items.length) {
-          const w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
-          if (w) items = wordToItemsMap[w]
-        }
+        const items = selection.groups.find(group => group.word === word).items
         const isSweepUp = grouped && word === _EVERYTHING_ELSE
         let title = word
         if (isSweepUp) {
@@ -7149,7 +7210,17 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         // answer what was actually asked.
         const viaGuessOnly = grouped && !isSweepUp && items.length > 0 && items.every(it => it && it._viaGuess)
         const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}${viaGuessOnly ? ' srt-guess-only' : ''}"${viaGuessOnly ? ' title="No English line here contains the search word — these are lines whose ' + _.escape(getLangFromUrl().fullName || 'studied-language') + ' side uses this guess"' : ''}><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${_.escape(title)} <span class="match-count"></span></h5></div>`)
-        items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
+        const $choice = $('<label class="search-playlist-choice"><input type="checkbox" class="search-playlist-checkbox"></label>')
+          .prop('hidden', !selection.selecting)
+          .on('click', e => e.stopPropagation())
+          .appendTo(wordBlock.find('.l-accordion'))
+        $choice.find('input').attr('aria-label', `Select clips for ${title}`)
+          .prop({ checked: selection.selected.has(word), disabled: !items.length })
+          .on('change', e => {
+            if (e.target.checked) selection.selected.add(word)
+            else selection.selected.delete(word)
+            _syncSearchPlaylistSelection(selection)
+          })
 
         const isMultiWord = word.trim().split(/\s+/).length > 1
         // Multi-word phrase: render as a popover-triggering `.link` span (NOT an
@@ -7169,31 +7240,10 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
 
         $result.append(wordBlock)
 
-        items = groupAndArrangeResults(items)
         // Total available matches after source-filter / dedup grouping. Shown
         // in the accordion header so the user knows how many hits a word has,
         // even when only `numberOfItemsToShow()` are rendered below.
         const totalMatches = items.length
-        if (totalMatches > 0) {
-          const files = window.searchResult
-          const lang = getSelectedLang()
-          const searchText = window.searchText
-          $('<button type="button" class="search-play-all" aria-label="Play all matching clips" title="Play all matching clips in a temporary playlist with a 30-second gap">' +
-            '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 4h12v2H3zm0 5h12v2H3zm0 5h7v2H3zm11-1 8 5-8 5z"/></svg></button>')
-            .appendTo(wordBlock.find('.l-accordion'))
-            .on('click', e => {
-              e.preventDefault()
-              e.stopPropagation()
-              const queue = buildSearchPlaylist(items, { files, lang, word, searchText,
-                contextBefore: parseInt(window._appSettings?.contextLinesBefore, 10) || 0,
-                contextAfter: parseInt(window._appSettings?.contextLinesAfter, 10) || 0,
-                gapThreshold: _clipGapThresholdSec() })
-              if (!queue.length) { alert('No playable clips for this phrase.'); return }
-              if (window._practiceActive) closePracticeMode()
-              if (window._playingRecording) stopPlayingRecording()
-              playRecording({ queue, temporary: true, gapSeconds: 30 })
-            })
-        }
 
         // (Previously: when toggle=EN, dedup items whose parallel-index SV text
         // shared any non-common word with an already-rendered item's SV side.
