@@ -4,6 +4,12 @@
     font-weight: bold;
 }
 
+:root {
+    --practice-card-background: #141414;
+    --practice-card-front-color: #f5f5f5;
+    --practice-card-back-color: #80cbc4;
+}
+
 /* ── Toolbar ──────────────────────────────────────── */
 .lang-toolbar {
     display: flex;
@@ -2015,7 +2021,7 @@ h5.l-accordion.srt-guess-only:hover {
     text-align: center;
 }
 #practiceMode .practice-back .practice-manual-text,
-#practiceMode .practice-back-target .practice-manual-text { color: #80cbc4; }
+#practiceMode .practice-back-target .practice-manual-text { color: var(--practice-card-back-color); }
 @media (max-width: 480px) {
     #practiceMode .practice-manual-text {
         font-size: 16px;
@@ -2384,7 +2390,7 @@ body.practice-mode #mediaContainer #youtubePlayer iframe {
     display: flex;
     flex-direction: column;
     pointer-events: none;   /* let taps reach the YT player up top */
-    color: #f5f5f5;
+    color: var(--practice-card-front-color);
 }
 #practiceMode .practice-topbar,
 #practiceMode .practice-card,
@@ -2728,6 +2734,11 @@ body.practice-manual #practiceMode .practice-card {
     text-align: center;
     box-shadow: none;
 }
+@media (min-width: 1000px) {
+    #practiceMode .practice-card {
+        width: min(94vw, 1100px);
+    }
+}
 /* Flipper: holds front + back faces and rotates as a unit when reveal mode
    is 'flip'. In 'hide'/'both' modes the front-face spans the whole card and
    the back-face stays hidden (no flip mechanics in play). */
@@ -2744,7 +2755,7 @@ body.practice-manual #practiceMode .practice-card {
     inset: 0;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
-    background: rgba(20,20,20,0.92);
+    background: var(--practice-card-background);
     border: 1px solid #333;
     border-radius: 10px;
     padding: 14px 16px;
@@ -2775,7 +2786,7 @@ body.practice-manual #practiceMode .practice-card {
 #practiceMode .practice-back-target {
     font-size: 17px;
     line-height: 1.4;
-    color: #80cbc4;
+    color: var(--practice-card-back-color);
     margin-bottom: 14px;
 }
 #practiceMode .practice-unflip {
@@ -2807,7 +2818,7 @@ body.practice-manual #practiceMode .practice-card {
     border-top: 1px dashed #444;
     font-size: 17px;
     line-height: 1.4;
-    color: #80cbc4;
+    color: var(--practice-card-back-color);
 }
 #practiceMode .practice-loading { color: #888; font-size: 14px; }
 /* Context controls — small pills above the front text. */
@@ -4974,6 +4985,18 @@ body.practice-manual.practice-manual-video #practiceMode .practice-card {
 }
 .mee-rich { margin-left: 4px; }
 #richCardEditor .ck-editor__editable { min-height: 160px; max-height: 55vh; }
+/* Use one opaque writing surface so colors look the same while formatting,
+   previewing and practising, regardless of the dialog underneath the editor. */
+#richCardEditor .ck-editor__editable,
+#manualEntryEditor .mee-html-preview {
+    background: var(--practice-card-background);
+    color: var(--practice-card-front-color);
+    caret-color: currentColor;
+}
+#richCardEditor[data-practice-face="back"] .ck-editor__editable,
+#manualEntryEditor .mee-html-preview[data-practice-face="back"] {
+    color: var(--practice-card-back-color);
+}
 #richCardEditor .rce-url { display: flex; gap: 6px; margin-bottom: 6px; }
 #richCardEditor .rce-url-input { flex: 1; min-width: 0; padding: 4px 6px; }
 

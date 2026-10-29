@@ -14,6 +14,17 @@ test('slash focuses search or clicks the Practice search button', () => {
   expect(keyboardShortcut({ key: '/', repeat: true }, { typing: true, searchFocused: true })).toBe('search')
   expect(keyboardShortcut({ key: '/' }, { searchAvailable: false })).toBeNull()
 })
+test('slash follows the typed character on layouts where Shift+7 produces it', () => {
+  const slash = {key:'/',code:'Digit7',shiftKey:true}
+  expect(keyboardShortcut(slash, {practice:true})).toBe('practice-search')
+  expect(keyboardShortcut(slash, {practice:true,typing:true,searchFocused:true})).toBe('practice-search')
+  expect(keyboardShortcut({key:'/'}, {practice:true,typing:true,searchFocused:true})).toBe('practice-search')
+  expect(keyboardShortcut(slash, {typing:true,searchFocused:true})).toBe('search')
+  expect(keyboardShortcut(slash, {practice:true,typing:true})).toBeNull()
+  expect(keyboardShortcut({...slash,repeat:true}, {practice:true,typing:true,searchFocused:true})).toBeNull()
+  expect(keyboardShortcut(slash, {practice:true,dialogOpen:true})).toBeNull()
+  expect(keyboardShortcut({key:'&',code:'Digit7',shiftKey:true}, {practice:true})).toBeNull()
+})
 test('question mark no longer opens help and main search retains other typing keys', () => {
   expect(keyboardShortcut({ key: '?' })).toBeNull()
   expect(keyboardShortcut({ key: '?' }, { typing: true, searchFocused: true })).toBeNull()
@@ -55,11 +66,11 @@ test('M toggles any existing Player or Practice view, never creates one', () => 
   expect(keyboardShortcut({ key: 'M' }, { studyActive: true, studyVisible: false })).toBe('study-toggle')
 })
 
-test('Shift + / and question mark are ordinary keys and not help shortcuts', () => {
+test('question mark remains ordinary text; a typed slash searches regardless of Shift', () => {
   for (const practice of [false, true]) {
     expect(keyboardShortcut({ key: '?', shiftKey: true }, { practice })).toBeNull()
     expect(keyboardShortcut({ key: '?' }, { practice })).toBeNull()
-    expect(keyboardShortcut({ key: '/', shiftKey: true }, { practice })).toBeNull()
+    expect(keyboardShortcut({ key: '/', shiftKey: true }, { practice })).toBe(practice ? 'practice-search' : 'search')
   }
   expect(keyboardShortcut({ key: '/', shiftKey: false })).toBe('search')
   expect(KEYBOARD_SHORTCUTS.filter(x => x.scope === 'General').map(x => x.keys[0])).toEqual(
