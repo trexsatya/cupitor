@@ -7107,13 +7107,14 @@ function _syncSearchPlaylistSelection(state) {
 
 function _renderSearchPlaylistToolbar(state, $result) {
   if (!state.groups.some(group => group.items.length)) return
+  const $options = $result.children('#manualSearchBar')
   const $toolbar = $(`<form id="searchPlaylistToolbar" aria-label="Playlist from search results">
     <button id="searchPlaylistSelectBtn" type="button" title="Select headings for a temporary playlist" aria-label="Select headings for playlist" aria-pressed="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m2 5 2 2 4-4m-6 10 2 2 4-4m2-6h12M10 13h12M2 21h20"/></svg><span id="searchPlaylistSelectedCount" aria-live="polite"></span></button>
     <span id="searchPlaylistActions" hidden>
       <label title="Maximum clips from each selected heading; leave blank to include all">Max per heading <input id="searchPlaylistMaxClips" type="number" min="1" max="9007199254740991" step="1" inputmode="numeric" placeholder="All" aria-label="Max clips per heading"></label>
-      <button id="searchPlaylistCreateBtn" type="submit" title="Create a temporary playlist and open Player with a 30-second gap" aria-label="Create playlist from selected headings">${_searchPlaylistIcon}</button>
+      <button id="searchPlaylistCreateBtn" type="submit" title="Create a temporary playlist and open Player with a 5-second gap" aria-label="Create playlist from selected headings">${_searchPlaylistIcon}</button>
     </span>
-  </form>`).appendTo($result)
+  </form>`).appendTo($options.length ? $options : $result)
   const $limit = $toolbar.find('#searchPlaylistMaxClips').val(state.maxPerHeader)
   $toolbar.find('#searchPlaylistSelectBtn').on('click', () => {
     state.selecting = !state.selecting
@@ -7137,7 +7138,7 @@ function _renderSearchPlaylistToolbar(state, $result) {
     if (!queue.length) { alert('No playable clips for the selected headings.'); return }
     if (window._practiceActive) closePracticeMode()
     if (window._playingRecording) stopPlayingRecording()
-    playRecording({ queue, temporary: true, gapSeconds: 30 })
+    playRecording({ queue, temporary: true, gapSeconds: 5 })
   })
   _syncSearchPlaylistSelection(state)
 }

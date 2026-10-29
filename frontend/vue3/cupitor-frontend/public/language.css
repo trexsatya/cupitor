@@ -921,22 +921,25 @@ div.l-accordion h2, div.l-accordion h1, div.l-accordion h3, div.l-accordion h4, 
     gap: 8px;
 }
 #searchPlaylistToolbar {
-    padding: 8px 12px;
-    border-bottom: 1px solid #ddd;
+    justify-content: flex-end;
+    margin-left: auto;
+    padding: 0;
 }
 #searchPlaylistToolbar button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     vertical-align: middle;
-    min-width: 44px;
-    min-height: 44px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 4px;
     border: 1px solid currentColor;
     border-radius: 50%;
     background: transparent;
     color: inherit;
     cursor: pointer;
 }
+#searchPlaylistToolbar svg { width: 16px; height: 16px; }
 #searchPlaylistToolbar button:hover,
 #searchPlaylistToolbar button:focus-visible {
     background: #ddd;
@@ -946,31 +949,31 @@ div.l-accordion h2, div.l-accordion h1, div.l-accordion h3, div.l-accordion h4, 
 #searchPlaylistSelectBtn[aria-pressed="true"] { background: #dceef5; }
 #searchPlaylistSelectBtn { position: relative; }
 #searchPlaylistActions label { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-size: 0.85rem; }
-#searchPlaylistMaxClips { width: 3.5em; min-height: 36px; }
+#searchPlaylistMaxClips { width: 3.5em; min-height: 30px; }
 #searchPlaylistSelectedCount:not(:empty) {
     position: absolute;
     top: -3px;
     right: -5px;
-    min-width: 18px;
-    border-radius: 9px;
+    min-width: 14px;
+    border-radius: 7px;
     background: #247e9c;
     color: white;
-    font: 12px/18px sans-serif;
+    font: 10px/14px sans-serif;
 }
 #result .search-playlist-choice {
     float: right;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 44px;
-    min-height: 44px;
+    min-width: 32px;
+    min-height: 32px;
     margin: 0 0 0 8px;
     cursor: pointer;
 }
-#result .search-playlist-checkbox { width: 20px; height: 20px; cursor: pointer; }
+#result .search-playlist-checkbox { width: 16px; height: 16px; cursor: pointer; }
 #result .search-playlist-choice[hidden],
 #searchPlaylistActions[hidden] { display: none !important; }
-#result .l-accordion:has(.search-playlist-choice:not([hidden])) { min-height: 44px; }
+#result .l-accordion:has(.search-playlist-choice:not([hidden])) { min-height: 32px; }
 
 #playBtn {
     border-radius: 10%;
