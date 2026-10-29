@@ -2,6 +2,7 @@ import { retainCaptionEnds } from './caption-capture.js';
 import { openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
 import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.js';
 import { createLocalCaptionPanel } from './local-caption-panel.js';
+import { playLocalMedia } from './local-playback.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
@@ -586,13 +587,13 @@ function togglePlay(el) {
     }
   } else if (window.playingAudio) {
     if (audioPlayer.paused) {
-      audioPlayer.play()
+      playLocalMedia(audioPlayer)
     } else {
       audioPlayer.pause()
     }
   } else if (window.playingVideo) {
     if (videoPlayer.paused) {
-      videoPlayer.play()
+      playLocalMedia(videoPlayer)
       // $('#result').hide()
     } else {
       videoPlayer.pause()
@@ -606,9 +607,9 @@ function playMedia() {
   if (window.playingYoutubeVideo) {
     window.ytPlayer.playVideo()
   } else if (window.playingAudio) {
-    audioPlayer.play()
+    playLocalMedia(audioPlayer)
   } else if (window.playingVideo) {
-    videoPlayer.play()
+    playLocalMedia(videoPlayer)
   }
 }
 
@@ -5552,7 +5553,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
       window.playingYoutubeVideo = false;
       if (/\.(mp3|wav)$/i.test(mediaFile.name)) {
         audioPlayer.setSrc(URL.createObjectURL(mediaFile))
-        if (autoPlay) audioPlayer.play()
+        if (autoPlay) playLocalMedia(audioPlayer)
         window.playingAudio = true;
         window.playingVideo = false;
         hidePlayer(window.videoPlayer)
@@ -5561,7 +5562,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
         videoPlayer.setSrc(URL.createObjectURL(mediaFile))
         window.playingAudio = false;
         window.playingVideo = true;
-        if (autoPlay) videoPlayer.play()
+        if (autoPlay) playLocalMedia(videoPlayer)
         hidePlayer(window.audioPlayer)
         showVideoPlayer()
       }
@@ -6312,10 +6313,10 @@ const playClickedMedia = (url, times, source) => {
   } else {
     if (window.playingVideo) {
       videoPlayer.setCurrentTime(times.start)
-      videoPlayer.play()
+      playLocalMedia(videoPlayer)
     } else if (window.playingAudio) {
       audioPlayer.setCurrentTime(times.start)
-      audioPlayer.play()
+      playLocalMedia(audioPlayer)
     }
   }
 

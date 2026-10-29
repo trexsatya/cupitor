@@ -28,7 +28,24 @@ async function verify(browser, width, video = false) {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   page.on('dialog', dialog => dialog.dismiss())
-  await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
+  await page.addInitScript(() => {
+    window.dontConfirmOnRefresh = true
+    window.__localInterruptedStarts = 0
+    const nativePlay = HTMLMediaElement.prototype.play
+    HTMLMediaElement.prototype.play = function (...args) {
+      const started = nativePlay.apply(this, args)
+      if (this.src.startsWith('blob:') && window.__localInterruptedStarts === 0) {
+        window.__localInterruptedStarts++
+        // Reproduce Chromium's play/pause race on every browser version.
+        // The real source still loads; only its first asynchronous start is
+        // interrupted. The application must consume this rejected promise.
+        if (started && started.catch) started.catch(() => {})
+        this.pause()
+        return Promise.reject(new DOMException('The play() request was interrupted by a call to pause().', 'AbortError'))
+      }
+      return started
+    }
+  })
   await page.route('**/*', serveFixtures)
   try {
     await page.goto('http://127.0.0.1:3000/language.html', {waitUntil:'networkidle'})
@@ -40,6 +57,8 @@ async function verify(browser, width, video = false) {
     ])
     await page.getByRole('button', {name:'Use subtitle & play',exact:true}).click()
     await page.locator('#localCaptionPanel .cup-sub-cue').first().waitFor()
+    assert.equal(await page.evaluate(() => window.__localInterruptedStarts), 1)
+    assert.equal(await page.locator(mediaSelector).evaluate(media => media.paused), true)
     assert.equal(await page.locator('#localCaptionPanel .cup-sub-cue').count(), 3)
     assert.equal(await page.evaluate(() => window.syncSubtitle), true)
     assert.equal(await page.evaluate(() => window.subtitles.every(c => Number.isFinite(c.ts) && Number.isFinite(c.te))), true)
