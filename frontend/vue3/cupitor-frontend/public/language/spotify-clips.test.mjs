@@ -232,7 +232,7 @@ function appPlaylist(f, events, overrides = {}) {
   const $ = runtimeRequire('jquery')(f.win);
   const source = fs.readFileSync(new URL('./language.js', import.meta.url), 'utf8');
   const ast = parse(source, {sourceType: 'module'});
-  const code = ['_cardHasPlayableMedia', 'playRecording'].map(name => {
+  const code = ['_cardHasPlayableMedia', '_setSessionItemGap', 'playRecording'].map(name => {
     const node = ast.program.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === name);
     assert.ok(node, 'the real playlist handler must be present');
     return source.slice(node.start, node.end);
@@ -242,6 +242,7 @@ function appPlaylist(f, events, overrides = {}) {
     spotifyClips: spotifyClipSegments, _isManualItem: item => !!item?.manual, _parseMediaUrl: parseMediaUrl,
     _cardHasAudio: () => false, _isAudioMediaUrl: () => false, _cardHasVideoLink: () => false, _cardClipsInOrder: () => [], _recPlayReversed: () => false,
     _interItemGapSeconds: () => 0, _effectiveSrcTgtGapSeconds: () => 0, _sleepRespectingPause: () => Promise.resolve(),
+    _syncItemGapUI: noop, _syncSrcTgtGapUI: noop,
     setInterval: () => 1, clearInterval: noop, setTimeout: f.win.setTimeout,
     _coverOpenDialogsForStudy: noop, _ackVisitedNotification: noop, _saveQueueOrder: noop, _interruptRecordingPlayback: noop, hideMediaRelatedContainer: noop, _refreshRecPlayModeBtns: noop, _postMediaState: noop, _setOpenView: noop, _syncBackgroundMusic: noop, _setLastPlayed: noop,
     _renderPlayingManualText: noop, _stopGapCountdown: noop, _restoreRecordingReplaySpeed: noop, _clearOpenView: noop, _stopBackgroundMusic: noop, _startGapCountdown: noop, _setRecPlayPhase: noop, _saveLastPlayedMap: noop, _loadLastPlayedMap: () => ({}),

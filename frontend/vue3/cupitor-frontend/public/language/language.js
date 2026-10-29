@@ -456,6 +456,7 @@ import {
   sliceByHighlightSpans as _sliceByHighlightSpans,
 } from './renderer/highlight-spans-vm.js';
 import { compileRegex, splitRegexAlternatives, hasPhraseWhitespace, isTypedRegex } from './regex-pattern.js';
+import { buildSelectedSearchPlaylist } from './search-playlist.js';
 import { renderAccordions as _coreRenderAccordions } from './renderer/accordion-render.js';
 import { recordingReviewPage, recordingReviewOrder } from './recording-review-page.js';
 import { knownVideos as _knownVideos } from './known-videos.js';
@@ -2641,7 +2642,7 @@ function _srcTgtGapSeconds() {
 // The wait between playlist items, in seconds. Read live so the ± stepper in
 // the playback overlay takes effect mid-playback.
 function _interItemGapSeconds() {
-  const raw = window._appSettings && window._appSettings.recPlayGapSeconds
+  const raw = window._recPlayGapSeconds ?? window._appSettings?.recPlayGapSeconds
   const sec = parseInt(raw != null ? raw : $('#recPlayGapSeconds').val(), 10)
   // Same [0, 600] rails the setters enforce, so a hand-edited or legacy
   // localStorage value can't produce an uncappable wait — nor, by
@@ -2663,8 +2664,21 @@ function _effectiveSrcTgtGapSeconds() {
 function _setItemGap(v) {
   const n = parseInt(v, 10)
   if (!Number.isFinite(n)) return
-  window._appSettings.recPlayGapSeconds = Math.max(0, Math.min(600, n))
-  saveAppSettings()
+  const seconds = Math.max(0, Math.min(600, n))
+  if (window._recPlayGapSeconds != null) window._recPlayGapSeconds = seconds
+  else {
+    window._appSettings.recPlayGapSeconds = seconds
+    saveAppSettings()
+  }
+  _syncItemGapUI()
+  _syncSrcTgtGapUI()
+}
+
+// A playlist override lives only in memory. Saving any other setting while it
+// is open must never persist its gap; closing simply reveals the saved value.
+function _setSessionItemGap(value) {
+  const n = value == null ? NaN : parseInt(value, 10)
+  window._recPlayGapSeconds = Number.isFinite(n) ? Math.max(0, Math.min(600, n)) : null
   _syncItemGapUI()
   _syncSrcTgtGapUI()
 }
@@ -7079,6 +7093,55 @@ function getSearchResultPageSize() {
   return window.SEARCH_RESULT_PAGE_SIZE || 50
 }
 
+// Keep selection across result pages, but never carry it into another search.
+let _searchPlaylistSelection = null
+const _searchPlaylistIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 4h12v2H3zm0 5h12v2H3zm0 5h7v2H3zm11-1 8 5-8 5z"/></svg>'
+
+function _syncSearchPlaylistSelection(state) {
+  $('#result .search-playlist-choice').prop('hidden', !state.selecting)
+  $('#searchPlaylistSelectBtn').attr('aria-pressed', String(state.selecting))
+  $('#searchPlaylistActions').prop('hidden', !state.selecting || !state.selected.size)
+  $('#searchPlaylistSelectedCount').text(state.selected.size || '').attr('aria-label', `${state.selected.size} headings selected`)
+  _refreshAccordionStickyHeight()
+}
+
+function _renderSearchPlaylistToolbar(state, $result) {
+  if (!state.groups.some(group => group.items.length)) return
+  const $toolbar = $(`<form id="searchPlaylistToolbar" aria-label="Playlist from search results">
+    <button id="searchPlaylistSelectBtn" type="button" title="Select headings for a temporary playlist" aria-label="Select headings for playlist" aria-pressed="false"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m2 5 2 2 4-4m-6 10 2 2 4-4m2-6h12M10 13h12M2 21h20"/></svg><span id="searchPlaylistSelectedCount" aria-live="polite"></span></button>
+    <span id="searchPlaylistActions" hidden>
+      <label title="Maximum clips from each selected heading; leave blank to include all">Max per heading <input id="searchPlaylistMaxClips" type="number" min="1" max="9007199254740991" step="1" inputmode="numeric" placeholder="All" aria-label="Max clips per heading"></label>
+      <button id="searchPlaylistCreateBtn" type="submit" title="Create a temporary playlist and open Player with a 30-second gap" aria-label="Create playlist from selected headings">${_searchPlaylistIcon}</button>
+    </span>
+  </form>`).appendTo($result)
+  const $limit = $toolbar.find('#searchPlaylistMaxClips').val(state.maxPerHeader)
+  $toolbar.find('#searchPlaylistSelectBtn').on('click', () => {
+    state.selecting = !state.selecting
+    if (!state.selecting) {
+      state.selected.clear()
+      $('#result .search-playlist-checkbox').prop('checked', false)
+    }
+    _syncSearchPlaylistSelection(state)
+  })
+  $limit.on('input', () => { state.maxPerHeader = $limit.val() })
+  $toolbar.on('submit', e => {
+    e.preventDefault()
+    if (!state.selecting || !state.selected.size || !$limit[0].reportValidity()) return
+    const raw = String($limit.val()).trim()
+    if (raw && (!Number.isSafeInteger(Number(raw)) || Number(raw) < 1)) return
+    const queue = buildSelectedSearchPlaylist(state.groups, state.selected, {
+      files: state.files, lang: state.lang, searchText: state.searchText, maxPerHeader: raw,
+      contextBefore: parseInt(window._appSettings?.contextLinesBefore, 10) || 0,
+      contextAfter: parseInt(window._appSettings?.contextLinesAfter, 10) || 0,
+      gapThreshold: _clipGapThresholdSec() })
+    if (!queue.length) { alert('No playable clips for the selected headings.'); return }
+    if (window._practiceActive) closePracticeMode()
+    if (window._playingRecording) stopPlayingRecording()
+    playRecording({ queue, temporary: true, gapSeconds: 30 })
+  })
+  _syncSearchPlaylistSelection(state)
+}
+
 async function populateSRTFindings(wordToItemsMap, $result, token) {
   const startTime = new Date()
   // Expose for debugging: inspect via `window._lastWordToItemsMap` in console.
@@ -7099,6 +7162,22 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
   }
   window._lastRenderedWords = words
 
+  if (_searchPlaylistSelection?.map !== wordToItemsMap) {
+    _searchPlaylistSelection = { map: wordToItemsMap, selected: new Set(), selecting: false, maxPerHeader: '' }
+  }
+  const selection = _searchPlaylistSelection
+  selection.files = window.searchResult
+  selection.lang = getSelectedLang()
+  selection.searchText = window.searchText
+  selection.groups = words.map(word => {
+    const key = Object.hasOwn(wordToItemsMap, word) ? word : Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
+    const items = (wordToItemsMap[key] || []).toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
+    return { word, items: groupAndArrangeResults(items) }
+  })
+  const available = new Set(selection.groups.filter(group => group.items.length).map(group => group.word))
+  for (const word of selection.selected) if (!available.has(word)) selection.selected.delete(word)
+  _renderSearchPlaylistToolbar(selection, $result)
+
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
   const WORD_CHUNK = 1
 
@@ -7115,11 +7194,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
     const slice = words.slice(wStart, wEnd)
     slice.forEach(word => {
       try {
-        let items = wordToItemsMap[word] || []
-        if (!items.length) {
-          const w = Object.keys(wordToItemsMap).find(it => it.trim() === word.trim())
-          if (w) items = wordToItemsMap[w]
-        }
+        const items = selection.groups.find(group => group.word === word).items
         const isSweepUp = grouped && word === _EVERYTHING_ELSE
         let title = word
         if (isSweepUp) {
@@ -7135,7 +7210,17 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         // answer what was actually asked.
         const viaGuessOnly = grouped && !isSweepUp && items.length > 0 && items.every(it => it && it._viaGuess)
         const wordBlock = $(`<div ><h5 class="l-accordion ${items.length ? '' : 'no-result'}${viaGuessOnly ? ' srt-guess-only' : ''}"${viaGuessOnly ? ' title="No English line here contains the search word — these are lines whose ' + _.escape(getLangFromUrl().fullName || 'studied-language') + ' side uses this guess"' : ''}><i class="fa fa-chevron-right similar-chevron" aria-hidden="true"></i> ${_.escape(title)} <span class="match-count"></span></h5></div>`)
-        items = items.toSorted((x, y) => x.path === window.preferredFile ? -1 : 1)
+        const $choice = $('<label class="search-playlist-choice"><input type="checkbox" class="search-playlist-checkbox"></label>')
+          .prop('hidden', !selection.selecting)
+          .on('click', e => e.stopPropagation())
+          .appendTo(wordBlock.find('.l-accordion'))
+        $choice.find('input').attr('aria-label', `Select clips for ${title}`)
+          .prop({ checked: selection.selected.has(word), disabled: !items.length })
+          .on('change', e => {
+            if (e.target.checked) selection.selected.add(word)
+            else selection.selected.delete(word)
+            _syncSearchPlaylistSelection(selection)
+          })
 
         const isMultiWord = word.trim().split(/\s+/).length > 1
         // Multi-word phrase: render as a popover-triggering `.link` span (NOT an
@@ -7155,7 +7240,6 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
 
         $result.append(wordBlock)
 
-        items = groupAndArrangeResults(items)
         // Total available matches after source-filter / dedup grouping. Shown
         // in the accordion header so the user knows how many hits a word has,
         // even when only `numberOfItemsToShow()` are rendered below.
@@ -17412,8 +17496,8 @@ function _renderPlayingBanner(it, idx, total) {
       $(this).attr('aria-expanded', open ? 'true' : 'false')
     })
     $b.on('click', '.rec-pb-practice-btn', switchPlayerToPractice)
-    // _setItemGap writes the value, persists it, and refreshes both the
-    // Settings input and the two readouts in this banner.
+    // _setItemGap updates the active gap and both readouts. A session override
+    // stays in memory; ordinary playlist gaps are saved as a preference.
     const GAP_STEP = 5
     $b.on('click', '.rec-pb-gap-dec, .rec-pb-gap-inc', (e) => {
       e.preventDefault(); e.stopPropagation()
@@ -17454,7 +17538,7 @@ function _renderPlayingBanner(it, idx, total) {
   // skeleton (and its one-shot click wiring above) stays in this file.
   let $w = $('#recPlayingWord')
   if (!$w.length) $w = $('<div id="recPlayingWord"></div>').appendTo('body')
-  const gap = window._appSettings && window._appSettings.recPlayGapSeconds
+  const gap = _interItemGapSeconds()
   updatePlayingBanner(buildPlayingBannerVM(it, idx, total, gap, _cardFacesReversed()), $b[0], $w[0])
   // The source→target pause only bites on a card that carries both
   // recordings, so its stepper only shows there — a knob that does nothing to
@@ -19500,6 +19584,7 @@ async function playRecording(opts) {
   }
   window._recPlayPracticeSingle = !!opts.practiceSingle
   window._recPlayTemporary = !!opts.temporary || queue.some(it => it._temporary)
+  _setSessionItemGap(opts.gapSeconds)
   window._recPlaySilentItem = opts.keepCurrentItem ? queue[startIdx] : null
   // A stopped/replaced session must not resume a late load or clean up the
   // DOM and queue belonging to its replacement.
@@ -20155,6 +20240,7 @@ async function playRecording(opts) {
   window._recPlayQueue = null
   window._recPlayTemporary = false
   window._playingRecording = false
+  _setSessionItemGap(null)
   // A deck that played to its end is finished, not interrupted — so it is not
   // something to put back on screen next launch.
   _clearOpenView()
@@ -20587,6 +20673,9 @@ function switchPracticeToPlayer() {
   if (!queue[pos]) return
   const single = !!window._practiceSingle
   const temporary = !!window._practiceTemporary
+  const sameTemporaryQueue = temporary && window._recPlayTemporary &&
+    queue.some(it => window._recPlayQueue?.includes(it))
+  const gapSeconds = sameTemporaryQueue ? window._recPlayGapSeconds : null
   const silent = _isManualItem(queue[pos]) && !_cardHasPlayableMedia(queue[pos])
   closePracticeMode()
   if (!single) _saveQueueOrder(queue, 'play')
@@ -20597,6 +20686,7 @@ function switchPracticeToPlayer() {
     for (const item of queue) window._recPlayQueue.push(item)
     window._recPlayPracticeSingle = single
     window._recPlayTemporary = temporary
+    _setSessionItemGap(gapSeconds)
     _setOpenView('player')
     window._recPlaySilentItem = silent ? queue[pos] : null
     window._recNavRequest = null
@@ -20607,7 +20697,7 @@ function switchPracticeToPlayer() {
     _applyRecPlayPause(silent, false)
     restorePlayingRecording({ resume: false })
   } else {
-    playRecording({ resumeQueue: { queue, pos }, practiceSingle: single, temporary, keepCurrentItem: true, startPaused: silent })
+    playRecording({ resumeQueue: { queue, pos }, practiceSingle: single, temporary, gapSeconds, keepCurrentItem: true, startPaused: silent })
   }
 }
 
@@ -20636,6 +20726,7 @@ function _sleepRespectingPause(ms) {
 }
 
 function stopPlayingRecording() {
+  _setSessionItemGap(null)
   spotifyPlayer.stop()
   window._recVideoAttempt?.cancel()
   _restoreRecordingReplaySpeed()
