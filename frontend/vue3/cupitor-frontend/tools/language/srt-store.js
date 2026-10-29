@@ -135,6 +135,10 @@ export async function saveHit(srtsDir, hit, translations, {
     tracks.push({ code: targetLang, entries: contextLinesToEntries(hit.lines, { defaultDurSec, texts: translations }) });
   }
   const index = upsertIndexEntry(currentIndex, { videoId: hit.videoId, name: baseName, source: "YouTube" });
+  // A saved capture is an example at a specific time, even when many adjacent
+  // captures eventually form a continuous transcript. Vocabulary coverage in
+  // another video must never make prune discard it.
+  index.find(entry => entry.link === hit.videoId).preserveCapturedContext = true;
 
   if (existsSync(join(srtsDir, "storage.json"))) {
     await commitLocalSubtitleFiles(srtsDir, [

@@ -395,6 +395,13 @@ Merged, disconnected capture windows remain unchanged even when their words
 also occur in other videos. Vocabulary coverage alone is insufficient to
 replace a saved example at a specific timestamp.
 
+New captures and recovered media are explicitly marked
+`preserveCapturedContext: true` in the subtitle index. `prune` keeps those
+media and all their language tracks intact, including long, continuous sets of
+adjacent captures. The layout check above is the fallback for legacy files
+without that provenance. Full transcripts imported without this capture marker
+remain eligible for pruning.
+
 Coverage is preserved: items already in a snippet need no window; items found only
 in transcripts are assigned to the fewest transcripts (greedy set cover) so every
 dictionary item still lives in at least one file. Dry-run is the default; only

@@ -108,6 +108,12 @@ for (const bundled of [false, true]) for (const allCovered of [false, true]) {
       await capture(later.slice(7))
       const before = readSubtitleFiles(srts)
       assert.equal(parseSrtEntries(before[key]).length, 14, 'the real capture/store path retained both windows')
+      const legacyIndex = JSON.parse(readFileSync(join(srts, 'index.json')))
+      assert.equal(legacyIndex.find(entry => entry.link === videoId).preserveCapturedContext, true)
+      // Exercise the layout fallback for legacy captures saved before the
+      // explicit capture marker was introduced.
+      legacyIndex.forEach(entry => { if (entry.link === videoId) delete entry.preserveCapturedContext })
+      writeFileSync(join(srts, 'index.json'), JSON.stringify(legacyIndex))
       for (const cue of original) assert(parseSrtEntries(before[key]).some(saved =>
         saved.start === cue.start && saved.end === cue.end && saved.text === cue.text))
       const run = () => execFileSync(process.execPath, ['tools/language/lang-manage.js', 'prune',
@@ -126,6 +132,33 @@ for (const bundled of [false, true]) for (const allCovered of [false, true]) {
       const state = JSON.stringify(after)
       run()
       assert.equal(JSON.stringify(readSubtitleFiles(srts)), state, 'a second prune is a no-op')
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+}
+
+for (const bundled of [false, true]) for (const origin of ['capture', 'recovery']) {
+  test(`explicit ${origin} protection keeps continuous examples intact (bundled=${bundled})`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'protected-context-prune-')), srts = join(root, 'srts')
+    mkdirSync(srts)
+    try {
+      if (bundled) writeFileSync(join(srts, 'storage.json'), JSON.stringify(emptyStorage()))
+      writeFileSync(join(root, 'vocabulary.txt'), '# Test\n(word)|ord|\n')
+      const captured = await saveHit(srts, { videoId: 'continuous', title: 'Long example', channel: 'Test',
+        lines: Array.from({ length: 50 }, (_, n) => ({ ts: n * 2, text: 'ord ' + n })) }, null,
+      { sourceLang: 'sv', targetLang: 'en', writeTarget: false, defaultDurSec: 2 })
+      if (origin === 'recovery') {
+        const index = JSON.parse(readFileSync(join(srts, 'index.json')))
+        // Recovery may retain a legacy bundleKey behind a normalized name.
+        index[0].bundleKey = captured.baseName
+        index[0].name = 'Normalized name'
+        index[0].preserveCapturedContext = true
+        writeFileSync(join(srts, 'index.json'), JSON.stringify(index))
+      }
+      const before = readSubtitleFiles(srts)
+      execFileSync(process.execPath, ['tools/language/lang-manage.js', 'prune', '--dataDir', root,
+        '--srtsDir', srts, '--outDir', join(root, 'out'), '--apply'], { encoding: 'utf8', timeout: 15000 })
+      assert.deepEqual(readSubtitleFiles(srts), before)
+      assert.equal(parseSrtEntries(before[captured.baseName + '.sv.srt']).length, 50)
     } finally { rmSync(root, { recursive: true, force: true }) }
   })
 }

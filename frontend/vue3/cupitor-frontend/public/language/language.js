@@ -10842,8 +10842,11 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
     'fileSpecs=', fileSpecs.map(f => f.path),
     'indexAdditions=', indexAdditions.length)
 
-  // Add a single index.json update if any new entries.
-  if (indexAdditions.length) {
+  // Protect saved examples independently of their layout: adjacent captures
+  // can eventually look like a continuous transcript. Re-read the index on
+  // retries so protection never replaces concurrent metadata or new entries.
+  const capturedVideoIds = new Set(videoSpecs.filter(v => v.allLines.length || v.allTranslations.length).map(v => v.videoId))
+  if (indexAdditions.length || capturedVideoIds.size) {
     fileSpecs.push({
       path: indexPath,
       getContent: (current) => {
@@ -10851,6 +10854,7 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
         indexAdditions.forEach(ne => {
           if (!arr.find(it => it.link === ne.link)) arr.push(ne)
         })
+        arr.forEach(entry => { if (capturedVideoIds.has(entry.link)) entry.preserveCapturedContext = true })
         return JSON.stringify(arr, null, 2) + '\n'
       }
     })
