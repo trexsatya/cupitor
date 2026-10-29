@@ -655,6 +655,7 @@
     top: 0;
     z-index: 10;
     background: #fff;
+    min-height: 44px;
 }
 
 /* On phones the results belong to the document's scroll surface. A second
@@ -911,6 +912,28 @@ div.l-accordion h2, div.l-accordion h1, div.l-accordion h3, div.l-accordion h4, 
     font-size: 0.85em;
     color: #6c757d;
     font-weight: 500;
+}
+
+#result .search-play-all {
+    float: right;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    min-width: 44px;
+    min-height: 44px;
+    margin-left: 8px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+#result .search-play-all:hover,
+#result .search-play-all:focus-visible {
+    background: #ddd;
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
 }
 
 #playBtn {

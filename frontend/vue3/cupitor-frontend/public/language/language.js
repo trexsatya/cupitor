@@ -456,6 +456,7 @@ import {
   sliceByHighlightSpans as _sliceByHighlightSpans,
 } from './renderer/highlight-spans-vm.js';
 import { compileRegex, splitRegexAlternatives, hasPhraseWhitespace, isTypedRegex } from './regex-pattern.js';
+import { buildSearchPlaylist } from './search-playlist.js';
 import { renderAccordions as _coreRenderAccordions } from './renderer/accordion-render.js';
 import { recordingReviewPage, recordingReviewOrder } from './recording-review-page.js';
 import { knownVideos as _knownVideos } from './known-videos.js';
@@ -2641,7 +2642,7 @@ function _srcTgtGapSeconds() {
 // The wait between playlist items, in seconds. Read live so the ± stepper in
 // the playback overlay takes effect mid-playback.
 function _interItemGapSeconds() {
-  const raw = window._appSettings && window._appSettings.recPlayGapSeconds
+  const raw = window._recPlayGapSeconds ?? window._appSettings?.recPlayGapSeconds
   const sec = parseInt(raw != null ? raw : $('#recPlayGapSeconds').val(), 10)
   // Same [0, 600] rails the setters enforce, so a hand-edited or legacy
   // localStorage value can't produce an uncappable wait — nor, by
@@ -2663,8 +2664,21 @@ function _effectiveSrcTgtGapSeconds() {
 function _setItemGap(v) {
   const n = parseInt(v, 10)
   if (!Number.isFinite(n)) return
-  window._appSettings.recPlayGapSeconds = Math.max(0, Math.min(600, n))
-  saveAppSettings()
+  const seconds = Math.max(0, Math.min(600, n))
+  if (window._recPlayGapSeconds != null) window._recPlayGapSeconds = seconds
+  else {
+    window._appSettings.recPlayGapSeconds = seconds
+    saveAppSettings()
+  }
+  _syncItemGapUI()
+  _syncSrcTgtGapUI()
+}
+
+// A playlist override lives only in memory. Saving any other setting while it
+// is open must never persist its gap; closing simply reveals the saved value.
+function _setSessionItemGap(value) {
+  const n = value == null ? NaN : parseInt(value, 10)
+  window._recPlayGapSeconds = Number.isFinite(n) ? Math.max(0, Math.min(600, n)) : null
   _syncItemGapUI()
   _syncSrcTgtGapUI()
 }
@@ -7160,6 +7174,26 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         // in the accordion header so the user knows how many hits a word has,
         // even when only `numberOfItemsToShow()` are rendered below.
         const totalMatches = items.length
+        if (totalMatches > 0) {
+          const files = window.searchResult
+          const lang = getSelectedLang()
+          const searchText = window.searchText
+          $('<button type="button" class="search-play-all" aria-label="Play all matching clips" title="Play all matching clips in a temporary playlist with a 30-second gap">' +
+            '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 4h12v2H3zm0 5h12v2H3zm0 5h7v2H3zm11-1 8 5-8 5z"/></svg></button>')
+            .appendTo(wordBlock.find('.l-accordion'))
+            .on('click', e => {
+              e.preventDefault()
+              e.stopPropagation()
+              const queue = buildSearchPlaylist(items, { files, lang, word, searchText,
+                contextBefore: parseInt(window._appSettings?.contextLinesBefore, 10) || 0,
+                contextAfter: parseInt(window._appSettings?.contextLinesAfter, 10) || 0,
+                gapThreshold: _clipGapThresholdSec() })
+              if (!queue.length) { alert('No playable clips for this phrase.'); return }
+              if (window._practiceActive) closePracticeMode()
+              if (window._playingRecording) stopPlayingRecording()
+              playRecording({ queue, temporary: true, gapSeconds: 30 })
+            })
+        }
 
         // (Previously: when toggle=EN, dedup items whose parallel-index SV text
         // shared any non-common word with an already-rendered item's SV side.
@@ -17412,8 +17446,8 @@ function _renderPlayingBanner(it, idx, total) {
       $(this).attr('aria-expanded', open ? 'true' : 'false')
     })
     $b.on('click', '.rec-pb-practice-btn', switchPlayerToPractice)
-    // _setItemGap writes the value, persists it, and refreshes both the
-    // Settings input and the two readouts in this banner.
+    // _setItemGap updates the active gap and both readouts. A session override
+    // stays in memory; ordinary playlist gaps are saved as a preference.
     const GAP_STEP = 5
     $b.on('click', '.rec-pb-gap-dec, .rec-pb-gap-inc', (e) => {
       e.preventDefault(); e.stopPropagation()
@@ -17454,7 +17488,7 @@ function _renderPlayingBanner(it, idx, total) {
   // skeleton (and its one-shot click wiring above) stays in this file.
   let $w = $('#recPlayingWord')
   if (!$w.length) $w = $('<div id="recPlayingWord"></div>').appendTo('body')
-  const gap = window._appSettings && window._appSettings.recPlayGapSeconds
+  const gap = _interItemGapSeconds()
   updatePlayingBanner(buildPlayingBannerVM(it, idx, total, gap, _cardFacesReversed()), $b[0], $w[0])
   // The source→target pause only bites on a card that carries both
   // recordings, so its stepper only shows there — a knob that does nothing to
@@ -19500,6 +19534,7 @@ async function playRecording(opts) {
   }
   window._recPlayPracticeSingle = !!opts.practiceSingle
   window._recPlayTemporary = !!opts.temporary || queue.some(it => it._temporary)
+  _setSessionItemGap(opts.gapSeconds)
   window._recPlaySilentItem = opts.keepCurrentItem ? queue[startIdx] : null
   // A stopped/replaced session must not resume a late load or clean up the
   // DOM and queue belonging to its replacement.
@@ -20155,6 +20190,7 @@ async function playRecording(opts) {
   window._recPlayQueue = null
   window._recPlayTemporary = false
   window._playingRecording = false
+  _setSessionItemGap(null)
   // A deck that played to its end is finished, not interrupted — so it is not
   // something to put back on screen next launch.
   _clearOpenView()
@@ -20587,6 +20623,9 @@ function switchPracticeToPlayer() {
   if (!queue[pos]) return
   const single = !!window._practiceSingle
   const temporary = !!window._practiceTemporary
+  const sameTemporaryQueue = temporary && window._recPlayTemporary &&
+    queue.some(it => window._recPlayQueue?.includes(it))
+  const gapSeconds = sameTemporaryQueue ? window._recPlayGapSeconds : null
   const silent = _isManualItem(queue[pos]) && !_cardHasPlayableMedia(queue[pos])
   closePracticeMode()
   if (!single) _saveQueueOrder(queue, 'play')
@@ -20597,6 +20636,7 @@ function switchPracticeToPlayer() {
     for (const item of queue) window._recPlayQueue.push(item)
     window._recPlayPracticeSingle = single
     window._recPlayTemporary = temporary
+    _setSessionItemGap(gapSeconds)
     _setOpenView('player')
     window._recPlaySilentItem = silent ? queue[pos] : null
     window._recNavRequest = null
@@ -20607,7 +20647,7 @@ function switchPracticeToPlayer() {
     _applyRecPlayPause(silent, false)
     restorePlayingRecording({ resume: false })
   } else {
-    playRecording({ resumeQueue: { queue, pos }, practiceSingle: single, temporary, keepCurrentItem: true, startPaused: silent })
+    playRecording({ resumeQueue: { queue, pos }, practiceSingle: single, temporary, gapSeconds, keepCurrentItem: true, startPaused: silent })
   }
 }
 
@@ -20636,6 +20676,7 @@ function _sleepRespectingPause(ms) {
 }
 
 function stopPlayingRecording() {
+  _setSessionItemGap(null)
   spotifyPlayer.stop()
   window._recVideoAttempt?.cancel()
   _restoreRecordingReplaySpeed()
