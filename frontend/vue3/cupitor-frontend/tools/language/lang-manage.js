@@ -643,11 +643,14 @@ async function cmdPrune(cfg) {
   log(`Dictionary items (expanded alternatives): ${items.length}`);
 
   const docs = loadSrtDocs(cfg.srtsDir);
-  const protectedBases = new Set(readIndex(cfg.srtsDir).filter(entry => entry.preserveCapturedContext === true)
+  const protectedEntries = readIndex(cfg.srtsDir).filter(entry => entry.preserveCapturedContext === true);
+  const protectedLinks = new Set(protectedEntries.map(entry => entry.link));
+  const protectedBases = new Set(protectedEntries
     .flatMap(entry => [entry.name, entry.bundleKey].filter(Boolean)));
   const minSpanSec = cfg.pruneMinSpanSec || 60;
   const windowLines = cfg.pruneWindowLines || 4;
-  const isFull = (d) => !protectedBases.has(d.name) && isFullSrt(d.raw.sv || d.raw.en || "", { minSpanSec });
+  const isFull = (d) => !protectedBases.has(d.name) && !protectedLinks.has(d.name.split(' || ').at(-1).trim()) &&
+    isFullSrt(d.raw.sv || d.raw.en || "", { minSpanSec });
   const transcripts = docs.filter(isFull);
   const snippets = docs.filter((d) => !isFull(d));
   log(

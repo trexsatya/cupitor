@@ -153,6 +153,18 @@ for (const bundled of [false, true]) for (const origin of ['capture', 'recovery'
         index[0].name = 'Normalized name'
         index[0].preserveCapturedContext = true
         writeFileSync(join(srts, 'index.json'), JSON.stringify(index))
+        const alias = 'Legacy title || continuous.sv.srt'
+        const original = readSubtitleFiles(srts)[captured.baseName + '.sv.srt']
+        if (bundled) {
+          const path = join(srts, index[0].bundle), data = JSON.parse(readFileSync(path))
+          data.files[alias] = original
+          const raw = JSON.stringify(data, null, 2) + '\n'
+          writeFileSync(path, raw)
+          const storage = JSON.parse(readFileSync(join(srts, 'storage.json')))
+          const meta = storage.packs.find(meta => meta.path === index[0].bundle)
+          meta.bytes = Buffer.byteLength(raw); meta.files = Object.keys(data.files).length
+          writeFileSync(join(srts, 'storage.json'), JSON.stringify(storage))
+        } else writeFileSync(join(srts, alias), original)
       }
       const before = readSubtitleFiles(srts)
       execFileSync(process.execPath, ['tools/language/lang-manage.js', 'prune', '--dataDir', root,
