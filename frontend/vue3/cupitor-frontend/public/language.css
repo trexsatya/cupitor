@@ -4030,6 +4030,15 @@ body.music-on #recPlayingBanner .rec-pb-music-btn {
     border-radius: 50%;
 }
 #recPlayingBanner .rec-pb-gap > button:hover { background: rgba(255,255,255,0.18); }
+#recPlayingBanner .rec-pb-media-choice {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0 0;
+}
+#recPlayingBanner .rec-pb-media-mode { max-width: 100%; padding: 4px; color: #222; background: #fff; }
+#recPlayingBanner .rec-pb-clip-range { margin-top: 6px; font-size: 12px; }
 #recPlayingBanner .rec-pb-gap-val,
 #recPlayingBanner .rec-pb-sgap-val {
     min-width: 36px;
@@ -5034,6 +5043,28 @@ body.practice-mode.practice-manual.practice-manual-video #practiceAudio {
 }
 body.practice-manual.practice-manual-video #practiceMode .practice-card {
     top: calc(64px + min(100vw, 900px) * 0.5625 + var(--practice-media-h, 150px) + 12px);
+}
+
+/* Video and recordings occupy one measured stack above the text. The divider
+   reserves both heights, including after recording or resizing the viewport. */
+body.rec-playing.rec-playing-manual.rec-playing-manual-video:not(.practice-mode) #mediaContainer {
+    display: block !important;
+}
+body.study-split-active.study-media-combined #mediaContainer {
+    height: var(--study-video-h);
+}
+body.study-split-active.study-media-combined #mediaContainer iframe,
+body.study-split-active.study-media-combined #mediaContainer #youtubePlayer,
+body.study-split-active.study-media-combined #mediaContainer #youtubePlayer iframe {
+    height: var(--study-video-h) !important;
+}
+body.study-split-active.study-media-combined.practice-mode #practiceAudio,
+body.study-split-active.study-media-combined.rec-playing #recPlayingAudio {
+    top: calc(64px + var(--study-video-h));
+    height: var(--study-audio-h);
+}
+body.study-split-active.study-media-combined.practice-mode #practiceMode .practice-card {
+    top: calc(var(--study-split-y) + 10px);
 }
 
 /* Rich-text editor for a card face (_openRichCardEditor). CKEditor's floating
