@@ -14969,6 +14969,8 @@ async function _openRichCardEditor($box, label) {
     </div>
     <div class="rce-host"></div>
   </div>`).appendTo('body')
+  const backFace = $box.is('#meeTarget') === (window._practiceFrontIsSource !== false)
+  $d.attr('data-practice-face', backFace ? 'back' : 'front')
   let editor = null
   let initial = null
   const done = () => {
@@ -15153,6 +15155,9 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
   `)
   $d.find('#meeSource').val(existing ? existing.source || '' : '')
   $d.find('#meeTarget').val(existing ? existing.target || '' : '')
+  const frontIsSource = window._practiceFrontIsSource !== false
+  $d.find('#meeSourcePreview').attr('data-practice-face', frontIsSource ? 'front' : 'back')
+  $d.find('#meeTargetPreview').attr('data-practice-face', frontIsSource ? 'back' : 'front')
   $d.find('#meeRichSource').on('click', () => _openRichCardEditor($d.find('#meeSource'), 'Source'))
   $d.find('#meeRichTarget').on('click', () => _openRichCardEditor($d.find('#meeTarget'), 'Target'))
   // A face written as HTML shows how it will look, under its box. Polled

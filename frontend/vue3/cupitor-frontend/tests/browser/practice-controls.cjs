@@ -190,6 +190,20 @@ async function checkPracticeControls(browser) {
       assert.equal(await page.evaluate(() => window._practiceMinimized), true)
       assert.equal(await page.locator('#searchText').inputValue(), 'färgsprakande')
       await page.waitForFunction(() => window._librarySearchText === 'färgsprakande' && !document.querySelector('#result').textContent.includes('Loading…'))
+      // On Swedish Mac keyboards '/' is Shift+7. Match event.key rather
+      // than rejecting Shift, including a stale main-search event target.
+      for (const target of ['body', '#searchText']) {
+        await page.locator('#practiceMode .practice-restore-btn').click()
+        await page.waitForFunction(() => !window._practiceMinimized)
+        await page.evaluate(() => window.getSelection()?.removeAllRanges())
+        const consumed = await page.locator(target).evaluate(el => !el.dispatchEvent(new KeyboardEvent('keydown', {
+          key:'/', code:'Digit7', shiftKey:true, bubbles:true, cancelable:true,
+        })))
+        assert.equal(consumed, true, 'Shift+7 slash must prevent insertion in the main search')
+        assert.equal(await page.evaluate(() => window._practiceMinimized), true)
+        assert.equal(await page.locator('#searchText').inputValue(), 'färgsprakande')
+        await page.waitForFunction(() => window._librarySearchText === 'färgsprakande' && !document.querySelector('#result').textContent.includes('Loading…'))
+      }
       await blur()
       await page.keyboard.press('/')
       assert.deepEqual(await page.locator('#searchText').evaluate(el => [document.activeElement.id, el.value, el.selectionStart, el.selectionEnd]),
@@ -200,7 +214,7 @@ async function checkPracticeControls(browser) {
       await page.keyboard.down('/')
       await page.keyboard.up('/')
       assert.equal(await page.locator('#searchText').inputValue(), 'färgsprakande', 'holding slash cannot replace the selected query with slashes')
-      assert.equal(await page.evaluate(() => window.__practiceSearchClicks), 1, 'hidden Practice does not intercept main search shortcuts')
+      assert.equal(await page.evaluate(() => window.__practiceSearchClicks), 3, 'hidden Practice does not intercept main search shortcuts')
       await page.keyboard.type('hagla')
       assert.equal(await page.locator('#searchText').inputValue(), 'hagla', 'typing replaces the query selected by slash')
       await blur()

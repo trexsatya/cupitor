@@ -24,12 +24,14 @@ export function keyboardShortcut(event, {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 ||
       event.ctrlKey || event.altKey || event.metaKey || dialogOpen) return null
   const key = String(event.key || '').toLowerCase()
-  // There is no '?' shortcut for the reference dialog. Shift+/ is normal
-  // text; only the unshifted slash invokes search.
+  // Match the typed character: some layouts need Shift+7 to produce '/'.
+  // A question mark remains ordinary text, with no reference-dialog shortcut.
   // Slash is reserved in the main search field too: select its query rather
   // than inserting "/". Other inputs and editors retain ordinary typing.
-  if (key === '/' && !event.shiftKey) {
-    if (practice) return typing || event.repeat ? null : 'practice-search'
+  if (key === '/') {
+    // The main search can retain focus behind Practice. Route that slash to
+    // the visible card while preserving normal typing in actual editors.
+    if (practice) return (typing && !searchFocused) || event.repeat ? null : 'practice-search'
     if (searchAvailable && (!typing || searchFocused)) return 'search'
   }
   if (typing) return null
