@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mp3_url:
-        description: 'Direct HTTP(S) URL to a downloadable MP3 file'
+        description: 'Direct audio URL or public Google Drive file share link'
         required: true
         type: string
       language:
@@ -34,7 +34,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: mp3-to-srt-venv-ubuntu-24.04-python-3.11-v1
+          key: mp3-to-srt-venv-ubuntu-24.04-python-3.11-v2
       - name: Restore Whisper models
         uses: actions/cache@v4
         with:
@@ -44,19 +44,21 @@ jobs:
         run: |
           if [[ "${{ steps.python-cache.outputs.cache-hit }}" != "true" ]]; then
             python -m venv .venv
-            .venv/bin/python -m pip install numpy faster-whisper imageio-ffmpeg
+            .venv/bin/python -m pip install numpy faster-whisper imageio-ffmpeg gdown==5.2.0
           fi
           ffmpeg_binary="$(.venv/bin/python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
           ln -sf "$ffmpeg_binary" .venv/bin/ffmpeg
           .venv/bin/ffmpeg -version
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+      - name: Test audio downloader
+        run: python -m unittest discover -s frontend/vue3/cupitor-frontend/tools/language -p test_download_audio.py -v
       - name: Validate MP3 URL and language
         shell: bash
         run: |
           set -euo pipefail
           case "$MP3_URL" in
             http://*|https://*) ;;
-            *) echo "::error::A direct HTTP(S) URL is required."; exit 1 ;;
+            *) echo "::error::An HTTP(S) audio URL or public Google Drive file link is required."; exit 1 ;;
           esac
           if [[ ! "$TRANSCRIPTION_LANGUAGE" =~ ^(auto|[a-z]{2,3})$ ]]; then
             echo "::error::Use 'auto' or a lowercase language code (e.g. sv, en, de, hi)."
@@ -67,13 +69,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p output
-          # The URL may use redirects or query parameters and need not end
-          # in .mp3. The transcription decoder checks its real audio format.
-          curl --fail --location --retry 3 \
-            --proto '=http,https' --proto-redir '=http,https' \
-            --connect-timeout 30 --max-time 3600 \
-            --output output/audio.mp3 -- "$MP3_URL"
-          test -s output/audio.mp3 || { echo "::error::Downloaded MP3 is empty."; exit 1; }
+          python frontend/vue3/cupitor-frontend/tools/language/download-audio.py \
+            "$MP3_URL" output/audio.mp3
       - name: Transcribe to SRT
         shell: bash
         run: |
