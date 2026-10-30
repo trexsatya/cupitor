@@ -84,8 +84,68 @@ async function checkGroups(browser, mobile) {
       fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
       await page.locator('#vocabularyResult').screenshot({ path: path.join(process.env.SCREENSHOT_DIR, 'compound-groups-' + (mobile ? 'mobile' : 'desktop') + '.png') })
     }
+    // Competing root fragments must not consume a real component and send it
+    // into the capped prefix suggestions. These are the reported vocabulary
+    // rows, including the misleading shorter split and an unrelated ending.
+    await page.evaluate(() => {
+      window.vocabulary = { Words: [
+        '(threshold)|tröskel|trösklar|', '(host)|värd|', '(value)|Sätta värde på något|',
+        '(learning)|Lärdom är mer värt än guld|', '(strabismus, squint)|strabism|skelning|skelningar|',
+        '(run out, end)|tryta|tryter|tröt|truttit|tryt|', '(thresh)|tröska|',
+        '(crackle)|spraka|', '(color)|färg|', '(spirit)|ande|',
+      ] }
+      $('#numberOfPrefixFindings').val('1')
+      window._appSettings.prefixResultsMax = 1
+    })
+    const componentLabels = () => page.locator('#vocabularyResult .compound-group > .prefix-group-header .prefix-group-part').allTextContents()
+    for (const autoPrefix of [false, true]) {
+      await page.evaluate(auto => {
+        $('#toggleAutoPrefixSearchCheckbox').prop('checked', auto)
+        window._appSettings.autoPrefixSearch = auto
+      }, autoPrefix)
+      for (const query of ['tröskelvärde', 'tröskelvärden']) {
+        await page.locator('#searchText').fill(query)
+        await page.locator('#searchText').press('Tab')
+        await page.waitForFunction(({query, autoPrefix}) => String(window._librarySearchText || '').split('|')[0] === query &&
+          !document.getElementById('result').textContent.includes('Loading…') &&
+          document.querySelectorAll('#vocabularyResult .compound-group').length === 2 &&
+          document.querySelectorAll('#vocabularyResult [data-vocab-group-kind="prefix"]').length === (autoPrefix ? 1 : 0), {query, autoPrefix})
+        assert.deepEqual(await componentLabels(), ['tröskel', 'värd'])
+        assert.equal(await page.locator('#vocabularyResult .compound-group .similar-segment-header').filter({ hasText: /skelning|tröt/ }).count(), 0)
+        const kinds = await page.locator('#vocabularyResult > .prefix-group').evaluateAll(els => els.map(el => el.dataset.vocabGroupKind))
+        assert.deepEqual(kinds, autoPrefix ? ['compound', 'compound', 'prefix'] : ['compound', 'compound'])
+        if (autoPrefix) assert.equal(await page.locator('#vocabularyResult .prefix-group[data-vocab-group-kind="prefix"] .vocabulary-segment').count(), 1)
+      }
+    }
+    // The explicit prefix-search action uses the same classification.
+    assert(await page.evaluate(() => window.searchText.includes('|')), 'exercise the subtitle stem-fallback path before changing modes')
+    await page.evaluate(() => {
+      $('#toggleAutoPrefixSearchCheckbox').prop('checked', false)
+      window.renderVocabularyFindings(window._vocabularySearchText)
+    })
+    await page.locator('#searchVocabularyByPrefixBtn').click()
+    await page.locator('#searchVocabularyMenu [data-mode="prefix"]').click()
+    assert.deepEqual(await componentLabels(), ['tröskel', 'värd'])
+    assert.equal(await page.locator('#vocabularyResult [data-vocab-group-kind="prefix"]').count(), 1)
+    // Changing the setting redraws the same query, not the subtitle fallback.
+    await page.evaluate(() => $('#toggleAutoPrefixSearchCheckbox').prop('checked', true).trigger('change'))
+    assert.deepEqual(await componentLabels(), ['tröskel', 'värd'])
+    assert.equal(await page.locator('#vocabularyResult [data-vocab-group-kind="prefix"]').count(), 1)
+    if (process.env.SCREENSHOT_DIR) {
+      await page.locator('#vocabularyResult').screenshot({ path: path.join(process.env.SCREENSHOT_DIR, 'primary-components-' + (mobile ? 'mobile' : 'desktop') + '.png') })
+    }
+    await page.evaluate(() => { window.searchText = 'färgsprakande'; window.renderVocabularyFindings('färgsprakande') })
+    assert.deepEqual(await componentLabels(), ['färg', 'spraka'])
+    assert.equal(await page.locator('#vocabularyResult .compound-group .similar-segment-header').filter({ hasText: /\|ande\|/ }).count(), 0)
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'Mobile' : 'Desktop'} compound groups passed: ränna (3), sten (9); ordinary/prefix modes, inflections, exact hits and expansion`)
+    console.log(`${mobile ? 'Mobile' : 'Desktop'} compound groups passed: ordinary/manual/automatic prefix search, competing splits, complete components, inflections, exact hits and expansion`)
+  } catch (error) {
+    console.error(await page.evaluate(() => ({query: $('#searchText').val(), search: window.searchText,
+      library: window._librarySearchText, autoPrefix: $('#toggleAutoPrefixSearchCheckbox').is(':checked'),
+      prefixMax: window._appSettings.prefixResultsMax,
+      groups: [...document.querySelectorAll('#vocabularyResult > .prefix-group')].map(el => ({kind: el.dataset.vocabGroupKind, label: el.querySelector('.prefix-group-part')?.textContent})),
+      loading: document.getElementById('result').textContent.includes('Loading…')})))
+    throw error
   } finally { await page.close() }
 }
 

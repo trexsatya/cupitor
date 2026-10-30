@@ -4001,7 +4001,7 @@ $('document').ready(e => {
   })
 
   $('#toggleAutoPrefixSearchCheckbox').on('change', () => {
-    if (window.searchText) renderVocabularyFindings(window.searchText)
+    if (window.searchText) renderVocabularyFindings(window._vocabularySearchText || window.searchText)
   })
 
   $('#numberOfPrefixFindings').on('change input', e => {
@@ -4011,7 +4011,7 @@ $('document').ready(e => {
       saveAppSettings()
       // Re-run the prefix search so the new cap takes effect immediately.
       if ($('#toggleAutoPrefixSearchCheckbox').is(':checked') && window.searchText) {
-        try { renderVocabularyFindings(window.searchText) } catch (_) {}
+        try { renderVocabularyFindings(window._vocabularySearchText || window.searchText) } catch (_) {}
       }
     }
   })
@@ -8112,6 +8112,7 @@ function _appendVocabularyGroup($target, part, matches, rows, allWords, kind, co
 
 function _renderVocabularySearch(search, includePrefix) {
   const query = String(search || '').toLowerCase().trim()
+  window._vocabularySearchText = query
   const $vocab = $('#vocabularyResult').empty()
   window._prefixOverflow = null
   if (!query || commonWordsToIgnore.includes(query)) return
@@ -8176,7 +8177,7 @@ function _renderVocabularySearch(search, includePrefix) {
 }
 
 function searchVocabularyByPrefix() {
-  const query = window.searchText
+  const query = window._vocabularySearchText || window.searchText
   _renderVocabularySearch(query, true)
   const $rc = $('#resultContainer')
   if ($rc.is(':hidden')) { $rc.show(); updateToggleButtonView('resultContainer') }
@@ -8863,7 +8864,7 @@ async function render(searchResults, search, className, token) {
     if (window.unprocessedSearchText && renderVocabularyLineByText(window.unprocessedSearchText)) {
       // rendered
     } else {
-      renderVocabularyFindings(search)
+      renderVocabularyFindings(window._vocabularySearchText || search)
     }
     // Fire-and-forget: the dictionary comes over the host bridge and the
     // results must not wait on it.
@@ -9169,6 +9170,11 @@ async function fetchSRTs(searchText, requestToken) {
 
     //To fix the mistakes in vocabulary list with double spaces
     window.searchText = window.searchText.split(" ").map(it => it.trim()).join(" ")
+
+    // Subtitle fallback may append speculative stems to searchText later.
+    // Keep the vocabulary query stable across manual prefix searches,
+    // settings redraws and result pagination.
+    window._vocabularySearchText = window.searchText
 
     // Book Search uses the expanded query. Vocabulary matching keeps its
     // compound constituents and family forms inside its own index.

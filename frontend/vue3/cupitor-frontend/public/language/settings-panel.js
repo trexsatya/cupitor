@@ -28,10 +28,10 @@ export function organizeSettingsPanel(panel) {
     select.value = key
   }
   for (const [key, title, hint] of [
+    ['tools', 'Tools', 'Vocabulary, recordings and subtitle maintenance.'],
     ['search', 'Search', 'Results, context and vocabulary searches.'],
     ['playback', 'Playback', 'Timing and media for playlist playback.'],
     ['practice', 'Practice', 'Your practice plan and study reminders.'],
-    ['tools', 'Tools', 'Vocabulary, recordings and subtitle maintenance.'],
     ['data', 'Data & account', 'Account, synchronization and diagnostics.']
   ]) {
     const button = document.createElement('button')

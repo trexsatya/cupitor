@@ -61,10 +61,63 @@ test('compound matches retain their component and the actual inflected word', ()
     expect(match).toMatchObject({ kind: 'compound', constituent, matched: 'stenen' })
   }
 })
+test.each(['tröskelvärde', 'tröskelvärden', 'tröskelvärdes', 'TRÖSKELVÄRDE'.normalize('NFD')])(
+  '%s keeps complete vocabulary components ahead of inferred fragments and prefix suggestions', query => {
+    const m = matcher({ Words: [
+      '(threshold)|tröskel|trösklar|', '(host)|värd|',
+      '(value)|Sätta värde på något|', '(learning)|Lärdom är mer värt än guld|',
+      '(strabismus, squint)|strabism|skelning|skelningar|',
+      '(run out, end)|tryta|tryter|tröt|truttit|tryt|', '(thresh)|tröska|',
+    ] })
+    for (const includePrefix of [false, true]) {
+      const hits = m.search(query, { includePrefix })
+      expect(hits).toEqual(expect.arrayContaining([
+        expect.objectContaining({ line: '(threshold)|tröskel|trösklar|', kind: 'compound', constituent: 'tröskel' }),
+        expect.objectContaining({ line: '(host)|värd|', kind: 'compound' }),
+      ]))
+      expect(hits.filter(hit => hit.kind === 'compound').some(hit => /skelning|tröt/.test(hit.line))).toBe(false)
+      if (includePrefix) {
+        expect(hits.findIndex(hit => hit.line === '(host)|värd|')).toBeLessThan(hits.findIndex(hit => hit.kind === 'prefix'))
+      }
+    }
+  }
+)
 test('recognizes whole inflected families before trying unrelated compound fragments', () => {
   const m = matcher({ Words: ['(bullying)|översitteri|', '(clean)|rensa|ren|', '(hail)|hagel|', '(greedy)|hagalen|', '(lay)|lägga|'] })
   expect(m.search('översittarens').map(r => r.line)).toEqual(['(bullying)|översitteri|'])
   expect(m.search('haglade').map(r => r.line)).toEqual(['(hail)|hagel|'])
+})
+test('strong three-part evidence beats a shorter split inferred through a derivational suffix', () => {
+  const m = matcher({ Parts: ['(summer)|sommar|', '(sun)|sol|', '(protection)|skydd|'],
+    Noise: ['(summer sunbathing)|sommarsolning|'] })
+  for (const includePrefix of [false, true]) {
+    const hits = m.search('sommarsolskydd', { includePrefix }).filter(hit => hit.kind === 'compound')
+    expect(hits.map(hit => hit.matched)).toEqual(['sommar', 'sol', 'skydd'])
+    expect(hits.some(hit => hit.category === 'Noise')).toBe(false)
+  }
+})
+test('an inflected component stays whole instead of inventing a match for its ending', () => {
+  const vocabulary = { Parts: ['(color)|färg|', '(crackle)|spraka|'],
+    Noise: ['(spirit)|ande|'], Whole: ['(crackling)|sprakande|'] }
+  const m = matcher(vocabulary)
+  expect(m.search('färgsprakande').filter(hit => hit.kind === 'compound').map(hit => hit.constituent))
+    .toEqual(['färg', 'sprakande', 'sprakande'])
+  expect(m.search('färgsprakande').some(hit => hit.category === 'Noise')).toBe(false)
+  expect(m.search('sprakande').some(hit => hit.category === 'Noise')).toBe(false)
+})
+test('a compound can contain more than four components, including linking s at multiple boundaries', () => {
+  const parts = ['skog', 'bil', 'väg', 'kant', 'sten']
+  const m = matcher({ Parts: parts.map(part => `(${part})|${part}|`) })
+  expect(m.search('skogsbilvägskantsten').map(hit => hit.matched)).toEqual(parts)
+})
+test('adding a known whole compound does not hide its components in an inflected search', () => {
+  const parts = { Parts: ['(boat)|båt|', '(motor)|motor|'] }
+  for (const vocabulary of [parts, { ...parts, Whole: ['(boat motor)|båtmotor|'] }]) {
+    for (const query of ['båtmotor', 'båtmotorer', 'båtmotorernas']) {
+      const hits = matcher(vocabulary).search(query)
+      expect(hits.filter(hit => hit.kind === 'compound').map(hit => hit.matched)).toEqual(['båt', 'motor'])
+    }
+  }
 })
 test('expands phrases, respects word boundaries, and does not replace a phrase with individual words', () => {
   const m = matcher(vocab)
