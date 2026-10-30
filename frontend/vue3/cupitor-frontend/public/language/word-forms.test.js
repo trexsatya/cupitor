@@ -11,7 +11,8 @@ const families = [
   ['verklighetens', 'verklig'], ['vänskapens', 'vän'],
   ['störningarna', 'störa'], ['byggnader', 'byggnad'],
   ['kvällarna', 'kväll'], ['flickornas', 'flicka'],
-  ['hoppades', 'hoppa'], ['förvärvade', 'förvärva'], ['förvärvningarnas', 'förvärva']
+  ['hoppades', 'hoppa'], ['förvärvade', 'förvärva'], ['förvärvningarnas', 'förvärva'],
+  ['värde', 'värd'], ['värdes', 'värd']
 ]
 test.each(families)('relates %s / %s in both directions', (a, b) => {
   const m = createWordFormMatcher('sv')

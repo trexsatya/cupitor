@@ -38,30 +38,67 @@ export function createVocabularyMatcher(vocabulary, {
     }
   }
   const known = new Set(rows.flatMap(row => row.words).filter(w => w.length >= 3 && !VOCAB_OVERLAP_STOP_WORDS.has(w)))
-  const knownForms = new Set([...known].flatMap(word => [...forms.forms(word)]).filter(w => w.length >= 3))
+  const knownByForm = new Map()
+  for (const word of known) {
+    for (const form of forms.forms(word)) {
+      if (form.length < 3) continue
+      if (!knownByForm.has(form)) knownByForm.set(form, new Set())
+      knownByForm.get(form).add(word)
+    }
+  }
   const derivationalPrefixes = new Set(COMMON_PREFIXES.sv)
-  const recognized = word => !isVocabularyStopWord(word) && [...forms.forms(word)].some(form => knownForms.has(form))
+  const recognized = word => !isVocabularyStopWord(word) && [...forms.forms(word)].some(form => knownByForm.has(form))
+  const compoundCache = new Map()
+  const coverageCache = new Map()
+  const supportedCoverage = parts => parts.reduce((n, part) => {
+    if (!coverageCache.has(part)) {
+      // A whole vocabulary word or its normalized form is stronger evidence
+      // than merely sharing an inferred root with a longer vocabulary word.
+      coverageCache.set(part, [...forms.forms(part)].some(form => known.has(form)) ? part.length : 0)
+    }
+    return n + coverageCache.get(part)
+  }, 0)
+  const bestSplit = candidates => candidates.sort((a, b) => supportedCoverage(b) - supportedCoverage(a) || a.length - b.length)[0] || []
   // Unlike the old greedy fragment scan, every character must be accounted
   // for by known constituents. A known/inflected right half is allowed, but
   // a derivational prefix such as över- is not a compound word by itself.
-  function compoundParts(word, depth = 0) {
-    if (word.length < 6 || word.length > 64 || depth > 2) return []
+  function compoundParts(word) {
+    if (word.length < 6 || word.length > 64) return []
+    if (compoundCache.has(word)) return compoundCache.get(word)
+    const candidates = []
     for (let i = 3; i <= word.length - 3; i++) {
       const left = word.slice(0, i)
       if (!recognized(left) || [...forms.forms(left)].some(f => derivationalPrefixes.has(f))) continue
       for (const right of [word.slice(i), word[i] === 's' ? word.slice(i + 1) : '']) {
         if (right.length < 3) continue
-        if (recognized(right)) return [left, right]
-        const rest = compoundParts(right, depth + 1)
-        if (rest.length) return [left, ...rest]
+        if (recognized(right)) candidates.push([left, right])
+        const rest = compoundParts(right)
+        if (rest.length) candidates.push([left, ...rest])
       }
     }
-    return []
+    // Compare complete segmentations by how much vocabulary-backed text they
+    // preserve, then prefer fewer pieces when the evidence is tied. Choosing
+    // the first split, or always choosing two pieces, can promote inferred
+    // root fragments over complete words. Memoizing each suffix bounds the
+    // search without imposing an arbitrary limit on the number of parts.
+    const result = bestSplit(candidates)
+    compoundCache.set(word, result)
+    return result
   }
   function constituents(word) {
+    const normalizedBases = [...forms.forms(word)].filter(form => form !== word && known.has(form))
+    // A recognized ending belongs to its base word before it can be mistaken
+    // for a separate constituent (sprakande -> spraka, not sprak + ande).
+    if (normalizedBases.length && !normalizedBases.some(base => compoundParts(base).length)) return []
     // Inflected/derived words already recognized as a whole must not be
     // reinterpreted as unrelated fragments (översittarens -> rensa, ens).
-    if (!known.has(word) && recognized(word)) return []
+    if (!known.has(word) && recognized(word)) {
+      const bases = new Set([...forms.forms(word)].flatMap(form => [...(knownByForm.get(form) || [])]))
+      // Inflecting a known compound must not hide the same constituents that
+      // are shown for its base. An ordinary word family still blocks the
+      // unrelated suffix-fragment fallback below.
+      if (![...bases].some(base => compoundParts(base).length)) return []
+    }
     const complete = compoundParts(word)
     if (complete.length) return complete
     if (known.has(word)) return []

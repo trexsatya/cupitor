@@ -13,7 +13,9 @@ const SV_INFLECTIONS = [
   ['eln', ['el']], ['ern', ['er']], ['an', ['a', '']],
   ['ar', ['a', '']], ['or', ['a']], ['er', ['', 'a']],
   ['en', ['']], ['et', ['']], ['na', ['', 'en', 'et']],
-  ['de', ['']], ['te', ['']], ['t', ['']]
+  // -de can be a verb ending or a d-final adjective followed by -e.
+  // Keep both readings: hörde -> hör, värde -> värd.
+  ['de', ['', 'd']], ['te', ['']], ['t', ['']]
 ]
 const SV_DERIVATIONS = [
   ['ande', ['a', '']], ['ende', ['a', '']], ['ning', ['', 'a']],
