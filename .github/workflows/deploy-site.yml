@@ -178,7 +178,11 @@ jobs:
           persist-credentials: true
           sparse-checkout: |
             /*
-            !/db/
+            !/db/*
+            /db/js/
+            !/db/js/*
+            /db/js/snippet.js
+            /db/js/frame-boot.js
           sparse-checkout-cone-mode: false
 
       - name: Publish frontend without replacing site data

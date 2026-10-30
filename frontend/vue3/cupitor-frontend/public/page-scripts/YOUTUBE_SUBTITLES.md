@@ -127,6 +127,7 @@ CUPITOR_JSDOM=/path/to/jsdom node public/page-scripts/caption-link.test.mjs
 CUPITOR_CHROME_PATH=/path/to/chrome node --test public/page-scripts/youtube-layout.browser.cjs
 ```
 
-The app update is in `trexsatya/cupitor-flutter`; the two changes can be merged
-in either order. Refresh the video page after both are deployed. Older apps
-continue their existing caption capture flow without a download button.
+Runtime delivery is part of Cupitor's production build. It packages the minified
+`snippet.js` and `frame-boot.js` at `dist/db/js/`, and the existing publisher pushes
+those two endpoints to `trexsatya.github.io:gh-pages`. The native app retains its
+existing URLs; no companion app change is needed.

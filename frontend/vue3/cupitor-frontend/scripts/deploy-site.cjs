@@ -4,7 +4,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const STATE = '.cupitor-deployed-files.json';
-const protectedPath = file => ['db', '.git', '.github', 'cname'].includes(file.split('/')[0].toLowerCase()) || file === STATE;
+// These generated entry points are the only build-owned paths inside db/.
+const RUNTIME_FILES = ['db/js/snippet.js', 'db/js/frame-boot.js'];
+const runtimeParents = new Set(['db', 'db/js']);
+const protectedPath = file => !RUNTIME_FILES.includes(file) &&
+  (['db', '.git', '.github', 'cname'].includes(file.split('/')[0].toLowerCase()) || file === STATE);
 const safePath = file => typeof file === 'string' && file.length > 0 && !file.includes('\\') &&
   !path.posix.isAbsolute(file) && path.posix.normalize(file) === file && !file.split('/').some(p => p === '.' || p === '..');
 
@@ -32,7 +36,7 @@ function stageSite(dist, destination, revision = '') {
   if (dist === destination || dist.startsWith(destination + path.sep) || destination.startsWith(dist + path.sep)) {
     throw new Error('Build and publishing directories must be separate');
   }
-  for (const required of ['index.html', 'language.html', 'language/language.js']) {
+  for (const required of ['index.html', 'language.html', 'language/language.js', ...RUNTIME_FILES]) {
     if (!fs.statSync(path.join(dist, required)).isFile()) throw new Error(`Incomplete frontend build: ${required}`);
   }
   const files = [];
@@ -40,7 +44,7 @@ function stageSite(dist, destination, revision = '') {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const rel = prefix + entry.name;
       if (!safePath(rel)) throw new Error(`Invalid build path: ${rel}`);
-      if (protectedPath(rel) || /\.test\.[cm]?js$/.test(rel)) continue;
+      if ((protectedPath(rel) && !runtimeParents.has(rel)) || rel === 'page-scripts' || /\.test\.[cm]?js$/.test(rel)) continue;
       if (entry.isSymbolicLink()) throw new Error(`Build contains a symbolic link: ${rel}`);
       if (entry.isDirectory()) walk(path.join(directory, entry.name), rel + '/');
       else if (entry.isFile()) files.push(rel);
@@ -77,4 +81,4 @@ if (require.main === module) {
   if (!dist || !destination) throw new Error('Usage: node deploy-site.cjs DIST PUBLISHING_CHECKOUT [SOURCE_SHA]');
   console.log(JSON.stringify(stageSite(dist, destination, revision)));
 }
-module.exports = { stageSite, STATE };
+module.exports = { stageSite, STATE, RUNTIME_FILES };

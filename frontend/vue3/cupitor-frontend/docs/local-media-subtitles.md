@@ -22,10 +22,12 @@ second sidebar source is maintained. Run `node scripts/build-page-scripts.cjs`
 after a runtime or component edit. `--check` rejects a stale committed bundle,
 and the production build regenerates it before minification.
 
-The native app fetches `snippet.js` and `frame-boot.js` from Cupitor's master
-branch under `frontend/vue3/cupitor-frontend/public/page-scripts/`. Older native
-installs can continue using the legacy site copy until updated. Data in the
-publishing repository remains under its existing ownership.
+The native app keeps fetching `db/js/snippet.js` and `db/js/frame-boot.js` from
+`trexsatya.github.io:gh-pages`. Cupitor's production build minifies the runtime,
+then packages these exact endpoints under `dist/db/js/`. The existing publisher
+pushes them alongside the webapp. Only these two generated files are build-owned
+inside `db/`; subtitle data, recordings, other scripts, CNAME and site workflows
+remain protected. No native app update or URL change is required.
 
 `media-caption-panel.js` parses paired SRTs and adapts callbacks and recorder
 placement for both media types. `youtube-media-adapter.js` supplies the IFrame
