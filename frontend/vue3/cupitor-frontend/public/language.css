@@ -253,6 +253,54 @@
 }
 
 /* Settings panel footer: build info + Logs button */
+.settings-shell { display: grid; grid-template-columns: 152px minmax(0, 1fr); gap: 22px; }
+.settings-nav { display: flex; flex-direction: column; gap: 5px; border-right: 1px solid #d8e0e8; padding-right: 14px; }
+.settings-nav button { text-align: left; border: 0; background: transparent; color: #4b596b; border-radius: 7px; padding: 10px 12px; font: inherit; cursor: pointer; }
+.settings-nav button[aria-current="page"] { color: #1457b5; background: #eaf2ff; font-weight: 600; }
+.settings-content { min-width: 0; }
+.settings-content section[hidden] { display: none; }
+.settings-content h2 { font-size: 19px; margin: 0 0 5px; color: #202d40; }
+.settings-intro { font-size: 13px; color: #687587; margin: 0 0 16px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0; border-bottom: 1px solid #edf0f4; }
+.settings-row > label { margin: 0; min-width: 0; flex: 1; font-size: 13px; color: #26374c; }
+.settings-row small { display: block; font-weight: 400; color: #667588; font-size: 12px; margin-top: 4px; line-height: 1.4; }
+#settingsPanel .settings-row input[type="number"] { width: 76px !important; margin: 0 !important; padding: 7px; box-sizing: border-box; }
+.settings-row > select { max-width: 170px; min-width: 0; padding: 6px; font-size: 12px; }
+.settings-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+.settings-actions .manage-item { width: auto; border: 1px solid #ccd5e0; border-radius: 5px; background: #fff; color: #31465f; padding: 8px 10px; }
+.settings-recording { display: flex; gap: 6px; flex-wrap: wrap; padding: 12px 0 !important; border-left: 0 !important; }
+.settings-extra { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings-content details { margin-top: 18px; }
+.settings-content summary { cursor: pointer; font-size: 13px; color: #526780; padding: 8px 0; }
+.settings-done { display: flex; justify-content: flex-end; border-top: 1px solid #d8e0e8; padding-top: 12px; margin-top: 18px; }
+.settings-section-picker { display: none; }
+#settingsPanel .settings-footer { margin: 0; border: 0; flex-wrap: wrap; }
+.card-placement { border-top: 1px solid #d9e2ec; padding-top: 16px; margin-top: 16px; color: #29394e; font-size: 13px; }
+.card-placement label { display: block; font-size: 13px; font-weight: 600; margin: 0 0 12px; }
+.card-placement label > span { font-weight: 400; color: #65758a; }
+.card-placement select { display: block; width: 100%; min-width: 0; margin-top: 7px; padding: 8px; box-sizing: border-box; }
+.card-placement input { display: block; width: 120px; margin-top: 7px; padding: 8px; box-sizing: border-box; }
+.card-placement input[aria-invalid="true"] { border-color: #b33b31; }
+.card-placement-hint { font-size: 12px; line-height: 1.5; color: #617187; }
+.card-placement-preview { margin-top: 10px; border: 1px solid #e0e6ee; border-radius: 7px; overflow: hidden; }
+.card-placement-preview:empty { display: none; }
+.card-placement-preview > div { display: flex; gap: 10px; padding: 9px 10px; border-bottom: 1px solid #edf0f4; }
+.card-placement-preview > div:last-child { border-bottom: 0; }
+.card-placement-preview span:first-child { min-width: 32px; color: #61748b; }
+.card-placement-preview span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.card-placement-preview .card-placement-new { background: #eaf2ff; color: #1457b5; font-weight: 600; }
+.mee-media { margin-top: 15px; }
+.mee-media summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #435b76; padding: 8px 0; }
+.mee-media[open] summary { margin-bottom: 8px; }
+@media (max-width: 560px) {
+  .settings-shell { display: block; }
+  .settings-nav { display: none; }
+  .settings-section-picker { display: block; font-size: 12px; color: #526780; margin: 0 0 20px; }
+  .settings-section-picker select { display: block; width: 100%; margin-top: 6px; padding: 9px; box-sizing: border-box; }
+  .settings-row { gap: 10px; }
+  .settings-row > select { max-width: 120px; }
+}
+
 .settings-footer {
     margin-top: 14px;
     padding-top: 10px;
