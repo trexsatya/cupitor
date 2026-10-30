@@ -331,6 +331,16 @@ describe("wordsForCategories", () => {
 });
 
 describe("sampleAndGroup", () => {
+  test("source insertion ranks do not reorder a newly sampled playlist", () => {
+    const tuples = [
+      { st: 's', w: 'w', it: { id: 'a', playlistOrder: 9 } },
+      { st: 's', w: 'w', it: { id: 'b', playlistOrder: 0 } },
+    ];
+    const sampled = sampleAndGroup(tuples, { count: 2, shuffle: a => a });
+    expect(sampled.s.w.map(it => it.id)).toEqual(['a', 'b']);
+    expect(sampled.s.w.every(it => it.playlistOrder === undefined)).toBe(true);
+    expect(tuples[0].it.playlistOrder).toBe(9);
+  });
   const tup = (id, lineIndex, st = "s", w = "wd") => ({ st, w, it: { id, lineIndex, searchText: st, word: w } });
 
   test("dedupes by (id, lineIndex)", () => {

@@ -460,6 +460,8 @@ import { compileRegex, splitRegexAlternatives, hasPhraseWhitespace, isTypedRegex
 import { buildSelectedSearchPlaylist } from './search-playlist.js';
 import { renderAccordions as _coreRenderAccordions } from './renderer/accordion-render.js';
 import { recordingReviewPage, recordingReviewOrder } from './recording-review-page.js';
+import { organizeSettingsPanel } from './settings-panel.js';
+import { orderedRecordingEntries, insertionIndex, insertRecordingItem, reorderRecordingBucket } from './recordings-order.js';
 import { knownVideos as _knownVideos } from './known-videos.js';
 
 function debugLog(x) {
@@ -518,6 +520,11 @@ window.onbeforeunload = function (event) {
 function _applyIncomingLookup(rawText) {
   const term = String(rawText == null ? '' : rawText).trim()
   if (!term) return
+  window.__cupitorLookupWantsSearch = true
+  // A native word lookup hands the foreground to Search, retaining the study
+  // sessions and their positions behind their restore pills.
+  if (window._playingRecording && !window._recPlayMinimized) window.minimizePlayingRecording()
+  if (window._practiceActive && !window._practiceMinimized) window.minimizePracticeMode()
   $('#saveRevisionBtn').show()
   window.unprocessedSearchText = null
   window.preSelectedSearchedWord = null
@@ -1726,6 +1733,8 @@ function onVocabInsertPositionChange(select) {
 // open. Clicking the gear again closes the dialog (toggle).
 function openSettingsDialog() {
   const $panel = $('#settingsPanel')
+  organizeSettingsPanel($panel[0])
+  $('#practiceRevealMode').val(window._appSettings.practiceRevealMode || 'flip')
   if ($panel.hasClass('ui-dialog-content') && $panel.dialog('isOpen')) {
     $panel.dialog('close')
     return
@@ -1769,7 +1778,8 @@ let _settingsClickAt = 0
 document.addEventListener('click', e => {
   const t = e.target
   if (t && t.closest && t.closest('#settingsPanel')) {
-    _settingsClickAt = t.closest('button, a') ? Date.now() : 0
+    const action = t.closest('button, a')
+    _settingsClickAt = action && !action.closest('.settings-nav, .settings-done') ? Date.now() : 0
   }
 }, true)
 $(document).on('dialogopen', e => {
@@ -2541,6 +2551,7 @@ window._appSettings = {
   // happen to be practising. Only ever set from a destination that accepted a
   // block, so a refused one is never remembered. '' means nothing yet.
   captionPlaylist: '',
+  cardPlaylist: '',
   // Last successful merge target within captionPlaylist. An empty ID means
   // the user chose New item; keep that choice on later sends as well.
   captionItemId: '',
@@ -12393,7 +12404,9 @@ function createRandomFromAllPlaylist({ count = 50 } = {}) {
     if (!grouped[st]) grouped[st] = {}
     if (!grouped[st][w]) grouped[st][w] = []
     // Deep copy so source-playlist mutations don't bleed through.
-    grouped[st][w].push(JSON.parse(JSON.stringify(it)))
+    const copy = JSON.parse(JSON.stringify(it))
+    delete copy.playlistOrder
+    grouped[st][w].push(copy)
   })
 
   const prev = window._recordings[RANDOM_REC_NAME]
@@ -12945,6 +12958,90 @@ window._openCategoryPlaylistDialog = _openCategoryPlaylistDialog
 // and opens generic web links in a new tab.
 const MANUAL_ST = 'Manual'
 const MANUAL_W  = 'Card'
+
+function _rememberCardPlaylist(name) {
+  if (window._appSettings.captionPlaylist !== name) window._appSettings.captionItemId = ''
+  window._appSettings.cardPlaylist = name
+  window._appSettings.captionPlaylist = name
+  saveAppSettings()
+}
+
+function _preferredCardPlaylist(names, fallback) {
+  const settings = window._appSettings || {}
+  return [settings.cardPlaylist, settings.captionPlaylist, fallback, names[0]].find(n => names.includes(n)) || ''
+}
+
+// Shared destination/index picker for new cards, captures and copies. An index
+// is local to this insertion; only the last successful destination is saved.
+function _cardPlacement($host, { initial, getName, onValidity = () => {}, destinations = _captionDestinations() } = {}) {
+  const names = destinations
+  const $box = $('<div class="card-placement"></div>').appendTo($host)
+  let $select = null
+  if (!getName) {
+    const $label = $('<label class="card-placement-dest">Playlist / recorded search</label>').appendTo($box)
+    $select = $('<select aria-label="Playlist / recorded search"></select>').appendTo($label)
+    names.forEach(name => $('<option></option>').val(name).text(name).appendTo($select))
+    $select.val(names.includes(initial) ? initial : _preferredCardPlaylist(names, initial))
+    getName = () => String($select.val() || '')
+  }
+  const $label = $('<label class="card-placement-index">Insert at index <span>(optional)</span></label>').appendTo($box)
+  const $input = $('<input type="number" min="1" step="1" placeholder="Append" aria-label="Insert at index">').appendTo($label)
+  const $hint = $('<div class="card-placement-hint" aria-live="polite"></div>').appendTo($box)
+  const $preview = $('<div class="card-placement-preview" aria-label="Insertion preview"></div>').appendTo($box)
+  const refresh = () => {
+    const entries = orderedRecordingEntries(_itemsForRecording(getName()))
+    const total = entries.length
+    const pos = insertionIndex($input.val(), total)
+    $input.attr('max', total + 1)
+    const valid = !!getName() && pos != null
+    $input[0].setCustomValidity(pos == null ? `Enter a whole number from 1 to ${total + 1}.` : '')
+    $input.attr('aria-invalid', String(!valid))
+    $hint.text(!getName() ? 'Choose a writable playlist.' : pos == null
+      ? `Enter a whole number from 1 to ${total + 1}.`
+      : `${total} card${total === 1 ? '' : 's'} · ${String($input.val()).trim() ? (pos === total + 1 ? 'Add after the last card.' : `The new card becomes #${pos}.`) : `Leave empty to append as #${pos}.`} 1 means the first card.`)
+    $preview.empty()
+    const row = (n, label, fresh = false) => $('<div></div>').toggleClass('card-placement-new', fresh)
+      .append($('<span></span>').text('#' + n), $('<span></span>').text(label)).appendTo($preview)
+    const text = e => _truncatePreview(_cardPlainText(_isManualItem(e.item)
+      ? (e.item.source || e.item.target || '')
+      : (_previewTextForRecItem(e.item) || e.item?.searchText || e.item?.word || e.st)), 80)
+    if (valid) {
+      if (pos > 1) row(pos - 1, text(entries[pos - 2]))
+      row(pos, 'New card', true)
+      if (pos <= total) row(pos + 1, text(entries[pos - 1]))
+    }
+    onValidity(valid)
+    return valid
+  }
+  $input.on('input change', refresh)
+  $select?.on('change', () => { $input.val(''); refresh() })
+  refresh()
+  return {
+    $box, refresh,
+    read() {
+      if (!refresh()) { $input[0].reportValidity(); return null }
+      return { name: getName(), index: insertionIndex($input.val(), orderedRecordingEntries(_itemsForRecording(getName())).length) }
+    }
+  }
+}
+
+function _openCardDestinationDialog(title, initial, onAdd, destinations) {
+  let $d = $('#cardDestinationDialog')
+  if (!$d.length) $d = $('<div id="cardDestinationDialog"></div>').appendTo('body')
+  $d.empty()
+  const placement = _cardPlacement($d, { initial, destinations, onValidity: valid => {
+    $d.closest('.ui-dialog').find('.card-destination-save').prop('disabled', !valid)
+  } })
+  $d.dialog({ title, modal: true, width: Math.min(480, $(window).width() - 20),
+    draggable: false, resizable: false,
+    buttons: [{ text: 'Add card', class: 'card-destination-save', click() {
+      const at = placement.read()
+      if (at && onAdd(at)) $(this).dialog('close')
+    } }, { text: 'Cancel', click() { $(this).dialog('close') } }]
+  })
+  placement.refresh()
+}
+
 function addManualEntry(playlistName, opts) {
   opts = opts || {}
   const rec = window._recordings && window._recordings[playlistName]
@@ -12983,10 +13080,9 @@ function addManualEntry(playlistName, opts) {
   if (_isAudioMediaUrl(opts.sourceAudioUrl)) it.sourceAudioUrl = opts.sourceAudioUrl
   if (_isAudioMediaUrl(opts.targetAudioUrl)) it.targetAudioUrl = opts.targetAudioUrl
   if (!rec.items)                          rec.items = {}
-  if (!rec.items[MANUAL_ST])               rec.items[MANUAL_ST] = {}
-  if (!Array.isArray(rec.items[MANUAL_ST][MANUAL_W])) rec.items[MANUAL_ST][MANUAL_W] = []
-  rec.items[MANUAL_ST][MANUAL_W].push(it)
+  if (!insertRecordingItem(rec.items, MANUAL_ST, MANUAL_W, it, opts.insertIndex)) return null
   rec.updatedAt = Date.now()
+  _rememberCardPlaylist(playlistName)
   _saveRecording()
   // Refresh the live items pointer if this is the active playlist (so the
   // Review dialog and play-queue builder see the new entry immediately).
@@ -13118,7 +13214,7 @@ function _captionKeysInPlaylist(playlistName, url, timeParam) {
 // `field` is which face the caption text lands on — 'source' (the caption is
 // the prompt, its translation the answer) or 'target' (the caption is the
 // answer, and you supply the prompt, or its translation becomes one).
-function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
+function _addCaptionBlock(playlistName, cap, lines, field, manualId = '', insertIndex) {
   const w = _captionWords(cap)
   const n = c => `${c} ${c === 1 ? w.unit : w.units}`
   const rec = window._recordings && window._recordings[playlistName]
@@ -13196,6 +13292,7 @@ function _addCaptionBlock(playlistName, cap, lines, field, manualId = '') {
       + (skipped ? ` · ${skipped} already there` : '')
   }
   const it = addManualEntry(playlistName, {
+    insertIndex,
     mediaUrl: _captionMediaLink({ url, timeParam, timeLink: cap.timeLink }, fresh),
     source: faces.source,
     target: faces.target,
@@ -13310,9 +13407,7 @@ function _openCaptionCaptureDialog(cap, lines) {
   // offered rather than preselecting something that cannot hold the block.
   // With neither valid, nothing is marked and the browser takes the first
   // option, rather than pretending some arbitrary playlist was the one.
-  const remembered =
-    String((window._appSettings && window._appSettings.captionPlaylist) || '')
-  const preselect = names.indexOf(remembered) >= 0 ? remembered : active
+  const preselect = _preferredCardPlaylist(names, active)
   const opts = names.map(n =>
     `<option value="${_.escape(n)}"${n === preselect ? ' selected' : ''}>${_.escape(n)}</option>`
   ).join('')
@@ -13344,6 +13439,8 @@ function _openCaptionCaptureDialog(cap, lines) {
     <div class="cap-cap-hint" id="capCapMergeHint"></div>
     ${names.length ? '' : `<div class="cap-cap-hint">Nothing here can hold cards yet — ＋ New makes a playlist for them.</div>`}
   `)
+  const placement = _cardPlacement($d, { getName: () => String($('#capCapPlaylist').val() || ''),
+    onValidity: valid => $('#capCapSave').prop('disabled', !valid && !$('#capCapItem').val()) })
   // Spell out what lands on the other face, since that flips with the choice
   // and decides which way round the card is practised.
   const _renderHint = () => {
@@ -13390,13 +13487,16 @@ function _openCaptionCaptureDialog(cap, lines) {
         window._appSettings.captionTextField = chosen
         saveAppSettings()
         const itemId = String($('#capCapItem').val() || '')
-        const res = _addCaptionBlock(name, cap, lines, chosen, itemId)
+        const at = itemId ? null : placement.read()
+        if (!itemId && !at) return
+        const res = _addCaptionBlock(name, cap, lines, chosen, itemId, at?.index)
         // false = the write was refused and already explained. Stay open so
         // the user can pick elsewhere instead of losing the capture.
         if (res === false) return
         // Remembered only now: a destination that refused the block is not
         // one to offer first next time.
         window._appSettings.captionPlaylist = name
+        _rememberCardPlaylist(name)
         window._appSettings.captionItemId = itemId
         saveAppSettings()
         $(this).dialog('close')
@@ -13424,6 +13524,8 @@ function _openCaptionCaptureDialog(cap, lines) {
       ? 'Incoming lines are appended. Existing text and media are kept.'
       : 'Creates a new item from these lines.')
     $('#capCapSave').text(merging ? 'Merge' : 'Add')
+    placement.$box.toggle(!merging)
+    placement.refresh()
   }
   const renderItems = () => {
     const playlistName = String($d.find('#capCapPlaylist').val() || '')
@@ -13626,6 +13728,10 @@ function renameRecording(oldName, newName) {
   if (window._rememberedActiveName === oldName) {
     window._rememberedActiveName = newName
   }
+  for (const key of ['cardPlaylist', 'captionPlaylist']) {
+    if (window._appSettings[key] === oldName) window._appSettings[key] = newName
+  }
+  saveAppSettings()
   _saveRecording()
   return true
 }
@@ -13812,9 +13918,7 @@ function _captureMatchFromButton($capBtn) {
   }
 
   const items = window._recording.items
-  if (!items[searchText])       items[searchText]       = {}
-  if (!items[searchText][word]) items[searchText][word] = []
-  const arr = items[searchText][word]
+  const arr = items[searchText]?.[word] || []
   const before = arr.length
   // Toggle: remove every existing entry that matches (id, lineIndex), or
   // add a fresh one if there were none.
@@ -13825,7 +13929,21 @@ function _captureMatchFromButton($capBtn) {
     if (!filtered.length) delete items[searchText][word]
     if (!Object.keys(items[searchText]).length) delete items[searchText]
   } else {
-    arr.push({ searchText, word, id: url, source, timeStart, timeEnd, lineIndex, enabled: true })
+    const names = _captionDestinations()
+    _openCardDestinationDialog('Save search result', _preferredCardPlaylist(names, window._recording.currentName), at => {
+      const rec = window._recordings[at.name]
+      if (!rec || rec.virtual || rec.external || _refuseReadOnlyPlaylist(at.name)) return false
+      if (!rec.items) rec.items = {}
+      if (!insertRecordingItem(rec.items, searchText, word,
+        { searchText, word, id: url, source, timeStart, timeEnd, lineIndex, enabled: true }, at.index)) return false
+      rec.updatedAt = Date.now()
+      _rememberCardPlaylist(at.name)
+      selectRecording(at.name)
+      _updateRecordingUI()
+      _markCapturedButtons()
+      return true
+    })
+    return
   }
   _saveRecording()
   _updateRecordingUI()
@@ -13955,7 +14073,7 @@ function _reorderWordItems(searchText, word, newOrderIdxs) {
   const arr = items && items[searchText] && items[searchText][word]
   if (!arr) return
   const next = newOrderIdxs.map(i => arr[i]).filter(Boolean)
-  items[searchText][word] = next
+  reorderRecordingBucket(items, searchText, word, next)
   _saveRecording()
 }
 
@@ -13983,8 +14101,10 @@ function moveRecordedItem(st, w, idx, newIdx) {
   if (!Number.isInteger(idx) || idx < 0 || idx >= arr.length) return false
   const to = Math.max(0, Math.min(arr.length - 1, newIdx))
   if (!Number.isInteger(to) || to === idx) return false
-  const [moved] = arr.splice(idx, 1)
-  arr.splice(to, 0, moved)
+  const next = arr.slice()
+  const [moved] = next.splice(idx, 1)
+  next.splice(to, 0, moved)
+  reorderRecordingBucket(items, st, w, next)
   _saveRecording()
   return true
 }
@@ -13999,7 +14119,8 @@ function duplicateRecordedItem(st, w, idx) {
   const arr = items && items[st] && items[st][w]
   if (!arr || !arr[idx]) return false
   const copy = { ...arr[idx] }
-  arr.splice(idx + 1, 0, copy)
+  const at = _rowPositionIn(items, st, w, idx)
+  if (!insertRecordingItem(items, st, w, copy, at.pos + 1)) return false
   _saveRecording()
   _updateRecordingUI()
   try { _markCapturedButtons() } catch (_) {}
@@ -14206,20 +14327,21 @@ window._openReplaceItemDialog = _openReplaceItemDialog
 // Copy a single recorded item from one playlist (recording) to another.
 // The source entry is left intact — useful for sharing a clip across
 // playlists without losing the original. Returns true on success.
-function copyItemToPlaylist(srcRecName, st, w, idx, destRecName) {
+function copyItemToPlaylist(srcRecName, st, w, idx, destRecName, insertIndex) {
   if (!srcRecName || !destRecName || srcRecName === destRecName) return false
   const src = window._recordings && window._recordings[srcRecName]
   const dst = window._recordings && window._recordings[destRecName]
   if (!src || !dst) return false
   if (dst.virtual) { alert('Cannot copy into a virtual playlist — add the source playlist as a member instead.'); return false }
+  if (dst.external) return false
   // Copying OUT of the other user's playlist is fine; into it is not.
   if (_refuseReadOnlyPlaylist(destRecName)) return false
   const it = src.items && src.items[st] && src.items[st][w] && src.items[st][w][idx]
   if (!it) return false
-  if (!dst.items[st])       dst.items[st]       = {}
-  if (!dst.items[st][w])    dst.items[st][w]    = []
-  dst.items[st][w].push({ ...it })
+  if (!dst.items) dst.items = {}
+  if (!insertRecordingItem(dst.items, st, w, { ...it }, insertIndex)) return false
   dst.updatedAt = Date.now()
+  _rememberCardPlaylist(destRecName)
   try {
     localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
     window._recordingsDirty = true
@@ -15253,6 +15375,7 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
   let $d = $('#manualEntryEditor')
   if (!$d.length) $d = $('<div id="manualEntryEditor"></div>').appendTo('body')
   const isEdit = !!existing
+  if (!isEdit) playlistName = _preferredCardPlaylist(_captionDestinations(), playlistName)
   // Audio recording requires the Cupitor app's AudioBridge so we can persist
   // the bytes on the device file system. In a plain browser there's no such
   // bridge, and we deliberately don't fall back to localStorage here — audio
@@ -15302,7 +15425,7 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
       <div class="mee-lbl-row"><label class="mee-lbl" for="meeSource">Source</label>${micBtn('meeSttSource')}${trBtn('meeTrSource', 'source')}${richBtn('meeRichSource')}${trNote('meeTrSourceNote')}</div>
       <textarea id="meeSource" class="mee-input" rows="2" placeholder="Question, source text, prompt… (HTML allowed)"></textarea>
       <div id="meeSourcePreview" class="mee-html-preview card-html" style="display:none;"></div>
-      ${audioBar('meeSrcAudio')}</div>
+      </div>
     <div class="mee-swap-row">
       <button type="button" id="meeSwap" class="mee-swap" title="Swap Source and Target — text and recordings change places">⇅<span class="mee-swap-lbl">Swap</span></button>
     </div>
@@ -15310,14 +15433,21 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
       <div class="mee-lbl-row"><label class="mee-lbl" for="meeTarget">Target</label>${micBtn('meeSttTarget')}${trBtn('meeTrTarget', 'target')}${richBtn('meeRichTarget')}${trNote('meeTrTargetNote')}</div>
       <textarea id="meeTarget" class="mee-input" rows="2" placeholder="Answer, target text, translation… (HTML allowed)"></textarea>
       <div id="meeTargetPreview" class="mee-html-preview card-html" style="display:none;"></div>
-      ${audioBar('meeTgtAudio')}</div>
+      </div>
+    <details class="mee-media"${isEdit && (existing.mediaUrl || _cardHasAudio(existing)) ? ' open' : ''}>
+      <summary>Media &amp; recordings <span class="mee-lbl-hint">(optional)</span></summary>
+      ${showAudio ? `<div class="mee-row"><div class="mee-lbl">Source recording</div>${audioBar('meeSrcAudio')}</div>
+      <div class="mee-row"><div class="mee-lbl">Target recording</div>${audioBar('meeTgtAudio')}</div>` : ''}
     <div class="mee-row"><label class="mee-lbl">Media URL <span class="mee-lbl-hint">(optional — YouTube link or any web link)</span></label>
       <input id="meeMedia" class="mee-input" type="url" placeholder="https://…"></div>
     ${showMusic ? `
     <div class="mee-row"><label class="mee-lbl" for="meeMusic">Background music <span class="mee-lbl-hint">(optional — while this card plays)</span></label>
       <select id="meeMusic" class="mee-input">${_musicChoiceOptions(existing && existing.musicTrackId, '(whatever the playlist plays)')}</select></div>` : ''}
     <div class="mee-hint" style="font-size:12px;color:#666;">YouTube URLs are recognised automatically and will play in the embedded player during Practice / Play. Other URLs open in a new tab.${showAudio ? ' Recordings are saved on the device; in Play All both play in turn — Source first, unless the player is set to practise the deck backwards.' : ''}</div>
+    </details>
   `)
+  const placement = isEdit ? null : _cardPlacement($d, { initial: playlistName,
+    onValidity: valid => $d.closest('.ui-dialog').find('.ui-dialog-buttonpane button').first().prop('disabled', !valid) })
   $d.find('#meeSource').val(existing ? existing.source || '' : '')
   $d.find('#meeTarget').val(existing ? existing.target || '' : '')
   const frontIsSource = window._practiceFrontIsSource !== false
@@ -15860,6 +15990,8 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
   })
 
   const finish = async () => {
+    const at = isEdit ? null : placement.read()
+    if (!isEdit && !at) return false
     // A translation in flight is about to rewrite one of the boxes this reads.
     // Saving now would store the text it is replacing and silently discard the
     // answer, because closing the dialog drops it.
@@ -15914,7 +16046,8 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
     if (isEdit) {
       saved = updateManualEntry(playlistName, existing.id, patch)
     } else {
-      saved = !!addManualEntry(playlistName, patch)
+      saved = !!addManualEntry(at.name, { ...patch, insertIndex: at.index })
+      if (saved) selectRecording(at.name)
     }
 
     if (showAudio && saved) {
@@ -16001,6 +16134,7 @@ function _openManualEntryEditor(playlistName, existing, { showPlaylistAfterSave 
   // Parking is refused while the mic or the translator is working: a hidden
   // dialog holding an open microphone has nothing on screen to say so, and a
   // translation lands in textareas the user can no longer see.
+  placement?.refresh()
   _addDialogMinimizeButton('manualEntryEditor', '📝', isEdit ? 'Edit card' : 'Add manual card',
     () => (anyRecording() && 'Stop the recording first — minimizing would leave the microphone open with nothing on screen to show it.')
        || (_speechListening && 'Finish dictating first.')
@@ -16822,26 +16956,24 @@ function openRecordingReviewDialog() {
       ? '<p style="color:#888;">This virtual playlist resolves to no items — its members may be empty.</p>'
       : '<p style="color:#888;">No recorded items yet. Click ● Record, then the capture button next to a match.</p>'
   } else {
-    searchTexts.forEach(st => {
-      html += `<div class="rec-grp" style="margin-bottom:10px;padding:6px;border:1px solid #eee;border-radius:4px;">
+    review.runs.forEach((run, runIndex) => {
+      const st = run.st
+      if (runIndex === 0 || review.runs[runIndex - 1].st !== st) html += `<div class="rec-grp" style="margin-bottom:10px;padding:6px;border:1px solid #eee;border-radius:4px;">
         <div style="font-weight:bold;font-size:14px;">🔎 ${_.escape(st)}</div>`
-      Object.keys(review.groups[st]).forEach(w => {
+      ;[run.w].forEach(w => {
         const wEsc = _.escape(w)
         const stEsc = _.escape(st)
         html += `<div style="margin-left:10px;margin-top:4px;">
           <div style="color:#555;font-style:italic;font-size:13px;">${wEsc}</div>
           <div class="rec-item-list" data-st="${stEsc}" data-w="${wEsc}" style="margin-left:6px;">`
-        review.groups[st][w].forEach(({ item: it, idx }) => {
+        run.entries.forEach(({ item: it, idx }) => {
           const checked = (it.enabled !== false) ? 'checked' : ''
           // "Copy to…" picker — lists every other REAL recording (can't copy
           // into a virtual one). Hidden when current playlist is virtual
           // (read-only) or there are no eligible targets.
-          const otherNames = allNames.filter(n => n !== currentName && !_isVirtual(n) && !_isReadOnlyPlaylist(n))
+          const otherNames = _captionDestinations().filter(n => n !== currentName)
           const copyOptions = (!isVirtualCurrent && otherNames.length)
-            ? `<select class="rec-copy-to" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Copy this item to another playlist">
-                <option value="">Copy to…</option>
-                ${otherNames.map(n => `<option value="${_.escape(n)}">${_.escape(n)}</option>`).join('')}
-              </select>`
+            ? `<button type="button" class="rec-copy-to" data-st="${stEsc}" data-w="${wEsc}" data-idx="${idx}" title="Copy this item to another playlist">Copy…</button>`
             : ''
           // Subtitle preview — try sync first (subs already in memory), else
           // mark pending and let _lazyLoadRecItemPreviews fill it in after
@@ -16947,7 +17079,7 @@ function openRecordingReviewDialog() {
         })
         html += `</div></div>`
       })
-      html += `</div>`
+      if (review.runs[runIndex + 1]?.st !== st) html += `</div>`
     })
   }
   // Close while the old picker is still attached. Select2 locks scrollable
@@ -17050,21 +17182,19 @@ function openRecordingReviewDialog() {
     _openReplaceItemDialog(st, w, idx)
   })
 
-  // Copy a single item to another playlist via the inline select.
-  $dlg.off('change', '.rec-copy-to').on('change', '.rec-copy-to', function (e) {
+  // Choose the destination and insertion index before copying a card.
+  $dlg.off('click', '.rec-copy-to').on('click', '.rec-copy-to', function (e) {
     e.stopPropagation()
-    const dest = String($(this).val() || '')
-    if (!dest) return
     const st  = String($(this).data('st'))
     const w   = String($(this).data('w'))
     const idx = parseInt($(this).data('idx'), 10)
     const src = window._recording.currentName
-    const ok = copyItemToPlaylist(src, st, w, idx, dest)
-    // Reset the select either way so the same target can be reused.
-    $(this).val('')
-    if (!ok) { alert('Copy failed — destination playlist not found.'); return }
-    // Refresh dialog so the destination's item count in the dropdown is current.
-    openRecordingReviewDialog()
+    _openCardDestinationDialog('Copy card', _preferredCardPlaylist(_captionDestinations(), ''), at => {
+      const ok = copyItemToPlaylist(src, st, w, idx, at.name, at.index)
+      if (!ok) { alert('Copy failed — choose another writable playlist.'); return false }
+      openRecordingReviewDialog()
+      return true
+    }, _captionDestinations().filter(n => n !== src))
   })
 
   // ── Recordings-header CRUD handlers ──────────────────────────────────
@@ -18123,6 +18253,8 @@ function _takeOpenView() {
 // after the page, and opening before the boot has settled gets the view torn
 // straight back down.
 function _restoreOpenView() {
+  // A lookup can arrive during boot, before this delayed restoration runs.
+  if (window.__cupitorLookupWantsSearch) return
   const saved = _takeOpenView()
   if (!saved) return
   // Without any reference to the playlist there is no way to tell whether the
@@ -18139,6 +18271,7 @@ function _restoreOpenView() {
 
   const start = Date.now()
   const tick = () => {
+    if (window.__cupitorLookupWantsSearch) return
     // Something opened a view while we were waiting; leave it alone.
     if (window._practiceActive || window._playingRecording) return
     const cur = (window._recording && window._recording.currentName) || ''
@@ -19435,6 +19568,7 @@ async function _playManualFace(url, label) {
   $('#recPlayingAudio').find('.rec-pa-face').text(label)
   _setManualAudioSrc(a, dataUrl)
   window._recPlayManualAudio = a
+  a._recPlayItemToken = itemToken
   // Pressing a face button is the user asking for sound. If the session was
   // paused, lift the pause rather than start a clip the session thinks is
   // stopped — controlYt:false because we do the playing ourselves, right here.
@@ -19539,6 +19673,7 @@ async function _playPracticeFace(face) {
   const el = _practiceAudioEl()
   $('#practiceAudio').find('.rec-pa-face').text(face.label)
   el.src = dataUrl
+  el._practiceCard = (window._practiceCards || [])[window._practiceIdx]
   try { await el.play() } catch (e) { console.warn('[practiceAudio] play failed', e) }
 }
 
@@ -19560,6 +19695,13 @@ async function _showPracticeAudioPanel(it) {
   // goes under it, so either can be played.
   $('body').toggleClass('practice-manual-video', clips.length > 0 && _cardHasVideoLink(it))
   _stopPracticeAudio()
+  // A hidden/reused element must never retain another card's pronunciation.
+  const previous = $('#practiceAudio .rec-pa-el')[0]
+  if (previous) {
+    previous._practiceCard = null
+    previous.removeAttribute('src')
+    previous.load()
+  }
   if (!clips.length) {
     $('#practiceAudio').hide()
     _setPracticeMediaHeight(0)
@@ -19593,6 +19735,7 @@ async function _showPracticeAudioPanel(it) {
   // recording is still in there — Play would sound the wrong card.
   if (!dataUrl) { try { el.removeAttribute('src'); el.load() } catch (_) {}; return }
   el.src = dataUrl
+  el._practiceCard = it
 }
 
 async function _playManualAudioAndWait(url, faceLabel) {
@@ -19604,6 +19747,7 @@ async function _playManualAudioAndWait(url, faceLabel) {
   // stopPlayingRecording / navigation can silence this one.
   _silenceOtherAudio('deck')
   const a = _showManualAudioPlayer(true, faceLabel)
+  a._recPlayItemToken = itemToken
   _setManualAudioSrc(a, dataUrl)
   // A recording is about to sound: 'item' mode plays under it, 'gap' mode
   // stands aside for it.
@@ -19928,6 +20072,7 @@ async function playRecording(opts) {
     }
     window._recPlayIndex = i
     const itemToken = window._recPlayItemToken = {}
+    _showManualAudioPlayer(false)
     const ownsVideo = () => sessionPlaying() && window._recPlayItemToken === itemToken &&
       !window._practiceActive && !window._recPlayPaused && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex)
     window._recPlayQueueLen = queue.length
@@ -20013,7 +20158,7 @@ async function playRecording(opts) {
               !window._practiceActive && !window._recNavRequest && !Number.isInteger(window._recNavGotoIndex),
             isPaused: () => !!window._recPlayPaused,
             onExternalPause: paused => _applyRecPlayPause(paused, false),
-            onMedia: media => { window._recPlayManualAudio = media }
+            onMedia: media => { window._recPlayManualAudio = media; if (media) media._recPlayItemToken = itemToken }
           })
           if (!sessionPlaying()) break
           if (window._recNavRequest || Number.isInteger(window._recNavGotoIndex)) continue
@@ -20530,7 +20675,7 @@ function _applyRecPlayPause(paused, controlYt = true) {
     // is null on a manual card with no recordings, and null again in the
     // window before the first clip's bytes have loaded.
     if (controlYt) {
-      const _ma = window._recPlayManualAudio
+      const _ma = window._recPlayManualAudio?._recPlayItemToken === window._recPlayItemToken ? window._recPlayManualAudio : null
       if (_ma) { try { _ma.pause() } catch (_) {} }
       else if (!_manualItem) { try { window.ytPlayer && window.ytPlayer.pauseVideo && window.ytPlayer.pauseVideo() } catch (_) {} }
     }
@@ -20548,7 +20693,7 @@ function _applyRecPlayPause(paused, controlYt = true) {
     // through the YouTube player, which no element listener would catch.
     if (controlYt) _silenceOtherAudio('deck')
     if (controlYt) {
-      const _ma = window._recPlayManualAudio
+      const _ma = window._recPlayManualAudio?._recPlayItemToken === window._recPlayItemToken ? window._recPlayManualAudio : null
       // An ended clip means the card is in a gap — the pause being lifted was a
       // pause of silence, so resuming must not replay what already sounded.
       if (_ma) { if (!_ma.ended) { try { _ma.play().catch(() => {}) } catch (_) {} } }
@@ -22887,7 +23032,7 @@ function _togglePracticePlayback() {
   if (_isManualItem(it)) {
     if (window._practicePlayPending) { _renderPracticeCard(); return }
     const audio = $('#practiceAudio .rec-pa-el')[0]
-    if (audio && audio.src) {
+    if (_practiceClipsInOrder(it).length && audio && audio.src && audio._practiceCard === it) {
       if (!audio.paused) audio.pause()
       else { try { Promise.resolve(audio.play()).catch(() => {}) } catch (_) {} }
     } else if (_cardHasVideoLink(it)) {

@@ -70,6 +70,8 @@ async function check(browser, mobile) {
       window.__storageBefore = Object.fromEntries(Object.keys(localStorage).filter(k => /recLastPlayed/.test(k)).map(k => [k, localStorage.getItem(k)]))
     })
     await page.locator('#toggleSettingsPanelBtn').click()
+    if (mobile) await page.locator('.settings-section-picker select').selectOption('practice')
+    else await page.locator('[data-settings-section="practice"]').click()
     await page.evaluate(() => {
       $('#settingsPanel').append('<div id="long-settings-test">' + '<p>Extra settings content</p>'.repeat(90) + '</div>')
       $('#settingsPanel').dialog('option', 'modal', true)

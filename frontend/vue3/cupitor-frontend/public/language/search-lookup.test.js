@@ -112,6 +112,25 @@ describe('native filterData handoff', () => {
     expect(ui.calls).toContainEqual(['#searchText', 'change'])
   })
 
+  test('a native lookup minimizes each open study view before showing search, retaining parked sessions', () => {
+    const ui = mockUi()
+    ui.win.__cupitorSearchReady = true
+    ui.win._playingRecording = true
+    ui.win._practiceActive = true
+    ui.win.minimizePlayingRecording = jest.fn(() => { ui.win._recPlayMinimized = true })
+    ui.win.minimizePracticeMode = jest.fn(() => { ui.win._practiceMinimized = true })
+    attachRealHandler(ui)
+    ui.win.dispatch('filterData', { text: 'gäll' })
+    expect(ui.win.minimizePlayingRecording).toHaveBeenCalledTimes(1)
+    expect(ui.win.minimizePracticeMode).toHaveBeenCalledTimes(1)
+    expect(ui.win._playingRecording).toBe(true)
+    expect(ui.win._practiceActive).toBe(true)
+    ui.win.dispatch('filterData', { text: 'nästa' })
+    expect(ui.win.minimizePlayingRecording).toHaveBeenCalledTimes(1)
+    expect(ui.win.minimizePracticeMode).toHaveBeenCalledTimes(1)
+    expect(ui.fields['#searchText'].value).toBe('nästa')
+  })
+
   test('lookup arriving before deferred module initialization is replayed', () => {
     const ui = mockUi()
     const early = bodyBetween(html, '// The native Flutter lookup can arrive while deferred JavaScript imports',

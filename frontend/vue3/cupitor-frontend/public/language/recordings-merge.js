@@ -1,4 +1,5 @@
 import { spotifyEpisode } from './spotify-clips.js';
+import { orderedRecordingEntries } from './recordings-order.js'
 
 // Pure recording-collection helpers: the playlist merge across devices,
 // virtual-playlist resolution, item-count rollups, manual-entry id minting,
@@ -75,26 +76,26 @@ export function virtualMembers(coll, name) {
 
 // Resolve a virtual playlist's items to a single items-map (the same
 // { [searchText]: { [word]: [items] } } shape as a real playlist). Item
-// objects are REFERENCED, not copied, so this stays memory-cheap. Order
+// objects are shallow copies with ranks local to the combined list. Order
 // follows the members list, then each member's own order, unioned by
 // (id, lineIndex) within each (searchText, word).
 export function resolveVirtualItems(coll, name) {
   const out = {}
+  const seenByBucket = new Map()
+  let rank = 0
   virtualMembers(coll, name).forEach(m => {
     const items = (coll[m] && coll[m].items) || {}
-    Object.keys(items).forEach(st => {
+    orderedRecordingEntries(items).forEach(({ st, w, item: it }) => {
+      if (!it) return
       if (!out[st]) out[st] = {}
-      Object.keys(items[st]).forEach(w => {
-        if (!out[st][w]) out[st][w] = []
-        const seen = new Set(out[st][w].map(it => `${it.id}|${it.lineIndex}`))
-        ;(items[st][w] || []).forEach(it => {
-          if (!it) return
-          const k = `${it.id}|${it.lineIndex}`
-          if (seen.has(k)) return
-          seen.add(k)
-          out[st][w].push(it)
-        })
-      })
+      if (!out[st][w]) out[st][w] = []
+      const bucket = JSON.stringify([st, w])
+      if (!seenByBucket.has(bucket)) seenByBucket.set(bucket, new Set())
+      const seen = seenByBucket.get(bucket)
+      const identity = `${it.id}|${it.lineIndex}`
+      if (seen.has(identity)) return
+      seen.add(identity)
+      out[st][w].push({ ...it, playlistOrder: rank++ })
     })
   })
   return out
@@ -109,20 +110,13 @@ export function itemsForRecording(coll, name) {
 
 // Total recordable items across all (searchText, word) buckets.
 // Where an item sits in a playlist as the Recorded Searches dialog numbers it:
-// every row, top to bottom — search text, then word, then the word's list, in
-// stored order, disabled rows included. { pos (1-based), total }, or null when
+// every row, top to bottom, respecting explicit insertion ranks or the legacy
+// bucket order, disabled rows included. { pos (1-based), total }, or null when
 // the item is not there.
 export function rowPositionIn(items, st, w, idx) {
-  let n = 0
-  let pos = null
-  for (const s of Object.keys(items || {})) {
-    for (const ww of Object.keys(items[s] || {})) {
-      const arr = items[s][ww] || []
-      if (s === st && ww === w && idx >= 0 && idx < arr.length) pos = n + idx + 1
-      n += arr.length
-    }
-  }
-  return pos == null ? null : { pos, total: n }
+  const entries = orderedRecordingEntries(items)
+  const at = entries.findIndex(e => e.st === st && e.w === w && e.idx === idx)
+  return at < 0 ? null : { pos: at + 1, total: entries.length }
 }
 
 export function recordingItemCountIn(items) {

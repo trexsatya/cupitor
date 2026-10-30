@@ -262,7 +262,10 @@ export function sampleAndGroup(tuples, opts = {}) {
   pick.forEach(({ st, w, it }) => {
     if (!grouped[st]) grouped[st] = {};
     if (!grouped[st][w]) grouped[st][w] = [];
-    grouped[st][w].push(JSON.parse(JSON.stringify(it)));
+    const copy = JSON.parse(JSON.stringify(it));
+    // An insertion rank belongs to its source playlist, not to this sample.
+    delete copy.playlistOrder;
+    grouped[st][w].push(copy);
   });
   return grouped;
 }

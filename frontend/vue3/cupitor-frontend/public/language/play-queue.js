@@ -18,20 +18,15 @@
 // Each entry: { recName, st, w, idx, id, lineIndex, mode, queueKeys, queuePos, ts }
 
 import { resolveVirtualItems } from './recordings-merge.js'
+import { orderedRecordingEntries } from './recordings-order.js'
 
 // Walk a single recording's items map into a queue, skipping items where
 // `enabled === false`. Caller controls which items are passed in.
 function _pushFrom(queue, recName, items) {
   if (!items) return
-  for (const st of Object.keys(items)) {
-    const byW = items[st] || {}
-    for (const w of Object.keys(byW)) {
-      const arr = byW[w] || []
-      arr.forEach((it, idx) => {
-        if (!it || it.enabled === false) return
-        queue.push({ ...it, _recName: recName, _st: st, _w: w, _idx: idx })
-      })
-    }
+  for (const { st, w, idx, item: it } of orderedRecordingEntries(items)) {
+    if (!it || it.enabled === false) continue
+    queue.push({ ...it, _recName: recName, _st: st, _w: w, _idx: idx })
   }
 }
 

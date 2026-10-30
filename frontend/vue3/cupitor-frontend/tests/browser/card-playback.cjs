@@ -127,6 +127,8 @@ async function checkCardPlayback(browser, mobile) {
     await screenshot('card-playback-player')
     await stop()
     await click('#toggleSettingsPanelBtn')
+    if (mobile) await page.selectOption('.settings-section-picker select', 'playback')
+    else await click('[data-settings-section="playback"]')
     await page.locator('#recPlayYouTubeClipSeconds').fill('8')
     await page.locator('#recPlayYouTubeClipSeconds').press('Tab')
     await page.locator('#settingsPanel').locator('..').locator('.ui-dialog-titlebar-close').click()

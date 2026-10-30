@@ -28,9 +28,11 @@ async function checkMomentum(browser, full) {
   await page.route('**/*', route => {
     const url = new URL(route.request().url())
     if (full && url.hostname === '127.0.0.1') {
-      if (url.pathname === '/_scroll-test-review-page.js') return route.fulfill({ contentType: 'application/javascript', body: fs.readFileSync(path.join(root, 'language/recording-review-page.js')) })
+      // Keep the original module's directory: its relative imports (including
+      // versioned production imports) must resolve under /language/ too.
+      if (url.pathname === '/language/_scroll-test-review-page.js') return route.fulfill({ contentType: 'application/javascript', body: fs.readFileSync(path.join(root, 'language/recording-review-page.js')) })
       if (url.pathname === '/language/recording-review-page.js') return route.fulfill({ contentType: 'application/javascript', body:
-        'import {recordingReviewPage as original,recordingReviewOrder} from "/_scroll-test-review-page.js";export {recordingReviewOrder};export function recordingReviewPage(items){return original(items,0,Number.MAX_SAFE_INTEGER)}' })
+        'import {recordingReviewPage as original,recordingReviewOrder} from "/language/_scroll-test-review-page.js";export {recordingReviewOrder};export function recordingReviewPage(items){return original(items,0,Number.MAX_SAFE_INTEGER)}' })
     }
     return fixtures(route)
   })
