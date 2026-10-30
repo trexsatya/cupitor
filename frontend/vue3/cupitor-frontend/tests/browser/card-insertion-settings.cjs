@@ -110,6 +110,10 @@ async function check(browser, mobile) {
     await close('recordingReviewDialog')
     // All settings remain reachable, with one visible section at a time.
     await click('#toggleSettingsPanelBtn')
+    assert.equal(await page.locator('.settings-section-picker select').inputValue(), 'tools', 'Settings opens on Tools')
+    assert.equal(await page.locator('.settings-nav [aria-current="page"]').innerText(), 'Tools')
+    assert.equal(await page.locator('.settings-content section:visible').count(), 1)
+    assert.equal(await page.locator('#settings-section-tools').isVisible(), true)
     const choose = async key => {
       if (mobile) await page.locator('.settings-section-picker select').selectOption(key)
       else await click(`[data-settings-section="${key}"]`)
