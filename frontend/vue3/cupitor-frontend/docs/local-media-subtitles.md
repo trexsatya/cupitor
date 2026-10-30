@@ -14,15 +14,26 @@ file. Local File handles last for the current tab; the source media is not saved
 
 ## Shared source ownership
 
-`public/language/caption-sidebar.js` is a verbatim mirror of
-`trexsatya/trexsatya.github.io:db/js/src/20-caption-sidebar.js`, including the
-optional `onWord`, `onCapture`, and `translateText` callbacks. When changing that
-component, update both source copies and regenerate the publishing repository's
-`db/js/snippet.js` with `sh db/js/build.sh`. Do not edit generated snippets by hand.
+`public/language/caption-sidebar.js` is the canonical component for local files,
+YouTube in the language app, and injected panels in the native app. All runtime
+scripts and their tests now live in `public/page-scripts/` in Cupitor. The bundle
+builder inserts the canonical sidebar between the numbered site adapters; no
+second sidebar source is maintained. Run `node scripts/build-page-scripts.cjs`
+after a runtime or component edit. `--check` rejects a stale committed bundle,
+and the production build regenerates it before minification.
 
-`local-caption-panel.js` only adapts native audio/video, SRT parsing, callbacks,
-and recorder placement. Its translation callback uses the webapp's existing
-request broker, so the component cannot replace `window.__cupTranslated`.
+The native app fetches `snippet.js` and `frame-boot.js` from Cupitor's master
+branch under `frontend/vue3/cupitor-frontend/public/page-scripts/`. Older native
+installs can continue using the legacy site copy until updated. Data in the
+publishing repository remains under its existing ownership.
+
+`media-caption-panel.js` parses paired SRTs and adapts callbacks and recorder
+placement for both media types. `youtube-media-adapter.js` supplies the IFrame
+API clock and transport; polling stops when the panel closes or Practice/Player
+opens. YouTube and local media share the transcript toolbar, divider, translation,
+replay, selection, and capture. Closing and reopening retains the playback
+position. The translation callback uses the webapp's existing request broker,
+so the component cannot replace `window.__cupTranslated`.
 
 MediaElement's original element id points to its proxy wrapper. Both the subtitle
 panel and Speak Over bind to the real nested native `<audio>`/`<video>` instead.
@@ -41,3 +52,6 @@ and replacement SRTs, UTF-16, capture preview, minimization, and width constrain
 `local-speakover.cjs` and the focused unit suites cover recorder persistence and
 translation/capture callbacks. CI runs the browser checks against source and the
 production build.
+
+`node tests/browser/youtube-media-subtitles.cjs` checks the same YouTube paths at
+desktop, 390px and 320px, including rotation, iframe bounds and study handoff.
