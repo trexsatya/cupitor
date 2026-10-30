@@ -56,6 +56,11 @@ async function checkDialogs(browser, mobile) {
   await page.route('**/*', serveFixtures)
   await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
   const click = selector => mobile ? page.locator(selector).tap() : page.locator(selector).click()
+  const openSearchSettings = async () => {
+    await click('#toggleSettingsPanelBtn')
+    if (mobile) await page.locator('.settings-section-picker select').selectOption('search')
+    else await click('[data-settings-section="search"]')
+  }
   const isOpen = id => page.evaluate(id => $('#' + id).dialog('isOpen'), id)
   const revealVocabularyMatch = async expected => {
     const row = page.locator('#vocabularyResult .similar-segment-header').filter({ hasText: expected })
@@ -83,7 +88,7 @@ async function checkDialogs(browser, mobile) {
     // automatic prefix pass, even when subtitles already match the exact
     // typed word (so subtitle stem fallback never runs).
     for (const autoPrefix of [false, true]) {
-      await click('#toggleSettingsPanelBtn')
+      await openSearchSettings()
       if (await page.locator('#toggleAutoPrefixSearchCheckbox').isChecked() !== autoPrefix) {
         await click('#settingsPanel label[for="toggleAutoPrefixSearchCheckbox"] .slider')
       }
@@ -131,7 +136,7 @@ async function checkDialogs(browser, mobile) {
     // Common words cannot be the sole match, including alternatives,
     // punctuation and prefix suggestions. Complete expressions still work.
     for (const autoPrefix of [false, true]) {
-      await click('#toggleSettingsPanelBtn')
+      await openSearchSettings()
       if (await page.locator('#toggleAutoPrefixSearchCheckbox').isChecked() !== autoPrefix) {
         await click('#settingsPanel label[for="toggleAutoPrefixSearchCheckbox"] .slider')
       }
@@ -160,7 +165,7 @@ async function checkDialogs(browser, mobile) {
     await page.locator('#searchText').fill('färgsprakande')
     await page.locator('#searchText').press('Tab')
     await page.waitForFunction(() => window._lastWordToItemsMap && !document.querySelector('#result').textContent.includes('Loading…'))
-    await click('#toggleSettingsPanelBtn')
+    await openSearchSettings()
     await page.locator('#settingsPanel').waitFor({ state: 'visible' })
     await page.locator('#numberOfFindingsToShow').fill('2')
     await page.locator('#numberOfFindingsToShow').press('Tab')
@@ -180,7 +185,7 @@ async function checkDialogs(browser, mobile) {
       const urls = Object.values(window._lastWordToItemsMap || {}).flat().map(item => item.url)
       return urls.includes('testVideo01') && urls.includes('testVideo03') && urls.every(url => url === 'testVideo01' || url === 'testVideo03')
     })
-    await click('#toggleSettingsPanelBtn')
+    await openSearchSettings()
     assert.match(await page.locator('#searchChannelsBtn').innerText(), /1 selected/)
     await click('#searchChannelsBtn')
     assert.equal(await page.locator('#searchChannelsDialog input[value="Ljudbok Klubb"]').isChecked(), true)

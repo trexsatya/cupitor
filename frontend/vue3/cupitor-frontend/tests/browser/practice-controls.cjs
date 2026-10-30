@@ -289,6 +289,8 @@ async function checkPracticeControls(browser) {
       await page.keyboard.press('?')
       assert.equal(await page.locator('#keyboardShortcutsDialog:visible').count(), 0)
       await page.locator('#toggleSettingsPanelBtn').click()
+      if (mobile) await page.locator('.settings-section-picker select').selectOption('search')
+      else await page.locator('[data-settings-section="search"]').click()
       if (mobile) {
         assert.equal(await page.locator('#settingsPanel .keyboard-shortcuts-btn').isVisible(), false)
         await page.keyboard.press('Escape')

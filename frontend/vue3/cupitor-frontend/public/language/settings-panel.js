@@ -120,5 +120,5 @@ export function organizeSettingsPanel(panel) {
   const button = document.createElement('button'); button.type = 'button'; button.className = 'lang-tool-btn'; button.textContent = 'Done'
   button.addEventListener('click', () => window.jQuery(panel).dialog('close'))
   done.append(button); panel.append(done)
-  choose('search')
+  choose(sections.keys().next().value)
 }
