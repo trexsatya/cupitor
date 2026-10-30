@@ -80,6 +80,7 @@ jobs:
           node tests/browser/local-file-picker.cjs
           node tests/browser/local-speakover.cjs
           node tests/browser/local-media-subtitles.cjs
+          node --test tests/browser/subtitle-video-height.cjs
           node tests/browser/search-result-counts.cjs
           node tests/browser/search-playlist.cjs
           node tests/browser/card-playback.cjs
