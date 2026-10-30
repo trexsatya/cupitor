@@ -5398,3 +5398,26 @@ body.local-media-mode .ui-widget-overlay { z-index: 2147483646 !important; }
   body.local-media-mode #subtitleColumn { display: none; }
   #mediaControlPanel, #localMediaContainer { min-width: 0; }
 }
+
+/* YouTube uses the same split viewport and caption component as local files. */
+body.youtube-media-mode #mediaContainer {
+  box-sizing: border-box; position: fixed; inset: 0 0 auto; float: none !important;
+  width: 100% !important; height: var(--cup-vid-h, 50vh); margin: 0 !important;
+  display: flex !important; flex-direction: column; overflow: hidden;
+  padding: 10px; background: #111; color: #eee; z-index: 19990;
+}
+#youtubeMediaHeader { flex: 0 0 auto; margin-bottom: 8px; }
+#youtubeMediaName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+body.youtube-media-mode #youtubePlayer {
+  display: block; flex: 1 1 0; min-height: 0; width: 100% !important;
+  height: 100% !important; margin: 0 !important; border: 0;
+}
+body.youtube-media-mode #subtitleColumn,
+body.youtube-media-mode #mediaRelatedContainer { display: none !important; }
+body.youtube-media-mode #mainControlInputs { visibility: hidden; }
+body.youtube-media-mode #youtubeCaptionPanel { width: 100%; box-sizing: border-box; }
+body.youtube-media-mode .ui-dialog { z-index: 2147483647 !important; }
+body.youtube-media-mode .ui-widget-overlay { z-index: 2147483646 !important; }
+/* Parked study sessions remain reachable above the shared transcript. */
+body.youtube-media-mode #practiceMode.minimized,
+body.youtube-media-mode #recPlayingRestorePill { z-index: 2147483647; }

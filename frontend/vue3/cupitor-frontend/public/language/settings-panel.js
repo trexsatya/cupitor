@@ -107,7 +107,7 @@ export function organizeSettingsPanel(panel) {
   if (recording) { recording.classList.add('settings-recording'); section('tools').append(recording) }
   const maintenance = document.createElement('div'); maintenance.className = 'settings-actions'
   panel.querySelectorAll('#manageMenu .manage-item').forEach(button => maintenance.append(button))
-  section('tools').append(maintenance)
+  advancedSection('tools').append(maintenance)
   const searches = panel.querySelector('#searchesControl')
   if (searches) section('search').append(searches)
   const footer = panel.querySelector('#settingsFooter')

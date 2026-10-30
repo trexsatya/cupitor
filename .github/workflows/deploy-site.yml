@@ -51,7 +51,9 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 
       - name: Check application syntax
-        run: node --check public/language/language.js
+        run: |
+          node --check public/language/language.js
+          node scripts/build-page-scripts.cjs --check
 
       - name: Install isolated feature test dependencies
         run: |
@@ -62,6 +64,7 @@ jobs:
       - name: Test language, sync and deployment
         run: |
           npx jest public/language public/github-utils.test.js --runInBand --silent
+          node --test public/page-scripts/*.test.mjs
           node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs
           node --test public/language/spotify-*.test.mjs public/language/card-selection-search.test.mjs public/language/recordings-sync-state.test.mjs
           node --test public/language/study-calls.test.mjs
@@ -80,7 +83,8 @@ jobs:
           node tests/browser/local-file-picker.cjs
           node tests/browser/local-speakover.cjs
           node tests/browser/local-media-subtitles.cjs
-          node --test tests/browser/subtitle-video-height.cjs
+          node tests/browser/youtube-media-subtitles.cjs
+          node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
           node tests/browser/search-result-counts.cjs
           node tests/browser/search-playlist.cjs
           node tests/browser/card-playback.cjs
@@ -135,6 +139,7 @@ jobs:
           node tests/browser/local-file-picker.cjs
           node tests/browser/local-speakover.cjs
           node tests/browser/local-media-subtitles.cjs
+          node tests/browser/youtube-media-subtitles.cjs
           node tests/browser/unavailable-videos.cjs
           node tests/browser/player-seek.cjs
           (cd dist && node ../tests/browser/dialog-scrolling.mjs)
@@ -173,7 +178,11 @@ jobs:
           persist-credentials: true
           sparse-checkout: |
             /*
-            !/db/
+            !/db/*
+            /db/js/
+            !/db/js/*
+            /db/js/snippet.js
+            /db/js/frame-boot.js
           sparse-checkout-cone-mode: false
 
       - name: Publish frontend without replacing site data

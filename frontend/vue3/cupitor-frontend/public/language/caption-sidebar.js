@@ -10,6 +10,16 @@
 // setSplit, setVideoElement); it knows nothing about any particular site.
 (function () {
   const shared = window.__cupShared || (window.__cupShared = {});
+  // YouTube enforces Trusted Types. Build DOM directly so opening a panel,
+  // rendering a cue or changing settings never needs an HTML policy.
+  function node(tag, attrs = {}, children = []) {
+    const el = document.createElement(tag);
+    for (const [name, value] of Object.entries(attrs)) {
+      if (value != null && value !== false) el.setAttribute(name, value === true ? '' : String(value));
+    }
+    el.append(...children);
+    return el;
+  }
   // -----------------------------------------------------------------------
   // Shared subtitle UI: split-view sidebar with draggable divider, time-
   // synced highlight, click-to-seek on cue rows, and clickable words that
@@ -299,27 +309,26 @@
       injectCss();
       const sb = document.createElement('div');
       sb.className = 'cup-sub-sidebar';
-      sb.innerHTML = `
-        <div class="cup-sub-drag" title="Drag to resize"></div>
-        <div class="cup-sub-head">
-          <button data-act="split" class="cup-on" title="Toggle split view">⇋</button>
-          <button data-act="scroll" class="cup-on" title="Auto-scroll">⇩</button>
-          <button data-act="translate" title="Toggle translation">🌐</button>
-          <button data-act="download" title="Download YouTube subtitles" style="display:none">⤓CC</button>
-          <button data-act="open-srt" title="Open a local SRT subtitle file" style="display:none">Open SRT</button>
-          <button data-act="settings" title="Strategy &amp; settings">⚙</button>
-          <button data-act="prev" title="Previous cue">⟨</button>
-          <button data-act="next" title="Next cue">⟩</button>
-          <button data-act="copy" title="Copy transcript">⧉</button>
-          <button data-act="clear" title="Clear transcript">🗑</button>
-          <button data-act="pick" title="Select lines">☑</button>
-          <button data-act="all" title="Select all / none" style="display:none">⊞</button>
-          <button data-act="send" title="Send selected to Cupitor" style="display:none">⤴</button>
-          <span class="cup-sub-status cup-nolookup" data-r="status"></span>
-        </div>
-        <div data-r="notice" class="cup-nolookup" hidden style="padding:10px 14px;flex:0 0 auto;font-size:14px"></div>
-        <div class="cup-sub-list"></div>
-      `;
+      const buttons = [
+        ['split', '⇋', 'Toggle split view'], ['scroll', '⇩', 'Auto-scroll'],
+        ['translate', '🌐', 'Toggle translation'], ['download', '⤓CC', 'Download YouTube subtitles'],
+        ['open-srt', 'Open SRT', 'Open a local SRT subtitle file'], ['settings', '⚙', 'Strategy & settings'],
+        ['prev', '⟨', 'Previous cue'], ['next', '⟩', 'Next cue'], ['copy', '⧉', 'Copy transcript'],
+        ['clear', '🗑', 'Clear transcript'], ['pick', '☑', 'Select lines'],
+        ['all', '⊞', 'Select all / none'], ['send', '⤴', 'Send selected to Cupitor'],
+      ].map(([act, label, title]) => node('button', {
+        'data-act': act, title, type: 'button',
+        class: ['split', 'scroll'].includes(act) ? 'cup-on' : null,
+        style: ['download', 'open-srt', 'all', 'send'].includes(act) ? 'display:none' : null,
+      }, [label]));
+      sb.append(
+        node('div', {class: 'cup-sub-drag', title: 'Drag to resize'}),
+        node('div', {class: 'cup-sub-head'}, [...buttons,
+          node('span', {class: 'cup-sub-status cup-nolookup', 'data-r': 'status'})]),
+        node('div', {'data-r': 'notice', class: 'cup-nolookup', hidden: true,
+          style: 'padding:10px 14px;flex:0 0 auto;font-size:14px'}),
+        node('div', {class: 'cup-sub-list'}),
+      );
       (document.body || document.documentElement).appendChild(sb);
       state.sidebar = sb;
       state.listEl = sb.querySelector('.cup-sub-list');
@@ -450,9 +459,6 @@
       document.addEventListener('touchcancel', onUp);
     }
 
-    const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-    const escHtml = s => String(s).replace(/[&<>"']/g, c => HTML_ESC[c]);
-
     function fmtTime(sec) {
       sec = Math.max(0, Math.floor(sec || 0));
       const h = Math.floor(sec / 3600);
@@ -463,14 +469,19 @@
     }
 
     function tokenize(text) {
-      return text.split(/(\s+)/).map(tok => {
-        if (/^\s+$/.test(tok)) return tok;
+      const fragment = document.createDocumentFragment();
+      for (const tok of text.split(/(\s+)/)) {
         const m = tok.match(/^([^\p{L}\p{N}]*)([\p{L}\p{N}][\p{L}\p{N}'’\-]*)(.*)$/u);
-        if (!m) return escHtml(tok);
-        return escHtml(m[1])
-          + '<span class="cup-w" data-w="' + escHtml(m[2]) + '">' + escHtml(m[2]) + '</span>'
-          + escHtml(m[3]);
-      }).join('');
+        if (!m) fragment.append(tok);
+        else fragment.append(m[1], node('span', {class: 'cup-w', 'data-w': m[2]}, [m[2]]), m[3]);
+      }
+      return fragment;
+    }
+
+    function renderCueText(block, cue) {
+      block.replaceChildren(tokenize(cue.text));
+      if (cue.translation) block.append(node('div', {class: 'cup-sub-tr'}, [cue.translation]));
+      else if (cue.trPending) block.append(node('div', {class: 'cup-sub-tr cup-tr-pending'}, ['…']));
     }
 
     function attachWordClicks(scope) {
@@ -712,14 +723,11 @@
       row.className = 'cup-sub-cue';
       row.dataset.start = String(cue.start);
       row.dataset.end = String(cue.end);
-      const trHtml = cue.translation
-        ? '<div class="cup-sub-tr">' + escHtml(cue.translation) + '</div>'
-        : (cue.trPending ? '<div class="cup-sub-tr cup-tr-pending">…</div>' : '');
       row.dataset.cueId = String(cue.id);
-      row.innerHTML =
-        '<input type="checkbox" class="cup-sub-pick">' +
-        '<span class="cup-sub-time cup-nolookup">' + fmtTime(cue.start) + '</span>' +
-        '<div class="cup-sub-text">' + tokenize(cue.text) + trHtml + '</div>';
+      const textBlock = node('div', {class: 'cup-sub-text'});
+      renderCueText(textBlock, cue);
+      row.append(node('input', {type: 'checkbox', class: 'cup-sub-pick'}),
+        node('span', {class: 'cup-sub-time cup-nolookup'}, [fmtTime(cue.start)]), textBlock);
       const pick = row.querySelector('.cup-sub-pick');
       pick.checked = state.selected.has(cue.id);
       // Outside select mode a row tap seeks and a word tap looks the word up.
@@ -760,10 +768,7 @@
       // Cheaper than re-creating: rewrite the inner blocks.
       const textBlock = row.querySelector('.cup-sub-text');
       if (textBlock) {
-        const trHtml = cue.translation
-          ? '<div class="cup-sub-tr">' + escHtml(cue.translation) + '</div>'
-          : (cue.trPending ? '<div class="cup-sub-tr cup-tr-pending">…</div>' : '');
-        textBlock.innerHTML = tokenize(cue.text) + trHtml;
+        renderCueText(textBlock, cue);
         attachWordClicks(textBlock);
       }
       if (wasActive) row.classList.add('cup-active');
@@ -925,7 +930,7 @@
       resetChunk();
       if (resume && replaying && state.currentVideo && state.currentVideo.paused) ourPlay();
       state.chunkFloor = 0;
-      if (state.listEl) state.listEl.innerHTML = '';
+      if (state.listEl) state.listEl.replaceChildren();
       syncPickUi();
     }
 
@@ -1095,48 +1100,39 @@
       injectCss();
       const wrap = document.createElement('div');
       wrap.className = 'cup-sub-modal cup-nolookup';
-      wrap.innerHTML = `
-        <div class="cup-sub-modal-box">
-          <h3>Subtitles · settings</h3>
-          <label>Translation
-            <input type="checkbox" data-f="enabled" ${state.translationEnabled ? 'checked' : ''}>
-          </label>
-          <label>Source language
-            <input type="text" data-f="source" value="${escHtml(state.translationSource)}" placeholder="sv">
-          </label>
-          <label>Target language
-            <input type="text" data-f="target" value="${escHtml(state.translationTarget)}" placeholder="en">
-          </label>
-          <label>Strategy
-            <select data-f="strategy">
-              <option value="1" ${state.strategy===1?'selected':''}>1 · Keep playing, translate as cues arrive</option>
-              <option value="2" ${state.strategy===2?'selected':''}>2 · Pause until current cue is translated</option>
-              <option value="3" ${state.strategy===3?'selected':''}>3 · Play N lines, then replay with translations</option>
-              <option value="4" ${state.strategy===4?'selected':''}>4 · Like 3, but configurable replay speed &amp; repeats</option>
-              <option value="5" ${state.strategy===5?'selected':''}>5 · Like 4, plus configurable gap between passes</option>
-            </select>
-          </label>
-          <label data-show-for="3 4 5">Lines per chunk
-            <input type="number" data-f="lines" min="1" max="50" value="${state.linesPerChunk}">
-          </label>
-          <label data-show-for="4 5">Repeats
-            <input type="number" data-f="repeatCount" min="0" max="10" value="${state.repeatCount}">
-          </label>
-          <label data-show-for="4 5" title="Hyphen-separated speeds, one per pass. First value is the original (pass 0); subsequent values are repeats. Last value extends. Examples: '1' (no slowdown), '1-0.7' (default — repeat at 0.7x), '1-0.5-1' (0.5x first repeat, 1x after), '1-0.5-0.7' (0.5x then 0.7x)">Speed schedule
-            <input type="text" data-f="schedule" value="${escHtml(state.replaySchedule)}" placeholder="1-0.7">
-          </label>
-          <label data-show-for="5" title="Pause this many seconds between consecutive passes (replays). 0 = no gap.">Gap seconds
-            <input type="number" data-f="gap" min="0" max="30" step="0.5" value="${state.replayGap}">
-          </label>
-          <label title="Log strategy transitions to the console — useful when reporting bugs.">Debug logging
-            <input type="checkbox" data-f="debug" ${state.debug ? 'checked' : ''}>
-          </label>
-          <div class="cup-sub-modal-actions">
-            <button data-act="cancel">Cancel</button>
-            <button data-act="save">Save</button>
-          </div>
-        </div>
-      `;
+      const field = (label, name, type, value, attrs = {}, labelAttrs = {}) =>
+        node('label', labelAttrs, [label, node('input', {
+          type, 'data-f': name, ...attrs,
+          ...(type === 'checkbox' ? {checked: !!value} : {value}),
+        })]);
+      const strategies = [
+        'Keep playing, translate as cues arrive', 'Pause until current cue is translated',
+        'Play N lines, then replay with translations', 'Like 3, but configurable replay speed & repeats',
+        'Like 4, plus configurable gap between passes',
+      ];
+      wrap.append(node('div', {class: 'cup-sub-modal-box'}, [
+        node('h3', {}, ['Subtitles · settings']),
+        field('Translation', 'enabled', 'checkbox', state.translationEnabled),
+        field('Source language', 'source', 'text', state.translationSource, {placeholder: 'sv'}),
+        field('Target language', 'target', 'text', state.translationTarget, {placeholder: 'en'}),
+        node('label', {}, ['Strategy', node('select', {'data-f': 'strategy'},
+          strategies.map((label, i) => node('option', {value: i + 1, selected: state.strategy === i + 1},
+            [(i + 1) + ' · ' + label])))]),
+        field('Lines per chunk', 'lines', 'number', state.linesPerChunk,
+          {min: 1, max: 50}, {'data-show-for': '3 4 5'}),
+        field('Repeats', 'repeatCount', 'number', state.repeatCount,
+          {min: 0, max: 10}, {'data-show-for': '4 5'}),
+        field('Speed schedule', 'schedule', 'text', state.replaySchedule, {placeholder: '1-0.7'},
+          {'data-show-for': '4 5', title: 'Hyphen-separated speeds, one per pass; last value extends. Example: 1-0.7'}),
+        field('Gap seconds', 'gap', 'number', state.replayGap, {min: 0, max: 30, step: 0.5},
+          {'data-show-for': '5', title: 'Pause this many seconds between consecutive passes.'}),
+        field('Debug logging', 'debug', 'checkbox', state.debug, {},
+          {title: 'Log strategy transitions to the console.'}),
+        node('div', {class: 'cup-sub-modal-actions'}, [
+          node('button', {'data-act': 'cancel', type: 'button'}, ['Cancel']),
+          node('button', {'data-act': 'save', type: 'button'}, ['Save']),
+        ]),
+      ]));
       document.body.appendChild(wrap);
       wrap.addEventListener('click', (e) => { if (e.target === wrap) wrap.remove(); });
       // Per-strategy field visibility — update on initial render and whenever
@@ -1227,7 +1223,7 @@
     }
 
     function setVideoElement(v) {
-      if (!v || v === state.currentVideo) return;
+      if (v === state.currentVideo) return;
       // SVT swaps the <video> across ad breaks / source switches. Strip
       // listeners from the previous element so they don't fire on a
       // detached node and double-advance the strategy state.
@@ -1249,6 +1245,8 @@
       state.playDeferred = false;
       state.userOverrode = false;
       state.currentVideo = v;
+      state.videoListeners = null;
+      if (!v) return;
       const listeners = {
         timeupdate: syncHighlight,
         pause: () => {

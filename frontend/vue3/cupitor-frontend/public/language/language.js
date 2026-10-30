@@ -1,7 +1,8 @@
 import { retainCaptionEnds } from './caption-capture.js';
 import { openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
 import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.js';
-import { createLocalCaptionPanel } from './local-caption-panel.js';
+import { createMediaCaptionPanel } from './media-caption-panel.js';
+import { createYoutubeMediaAdapter } from './youtube-media-adapter.js';
 import { playLocalMedia } from './local-playback.js';
 import { spotifyClipSegments as spotifyClips } from './spotify-clips.js';
 import { youtubeClipForItem, manualPlaybackPlan, clipFallbackSeconds } from './card-playback.js';
@@ -3571,7 +3572,7 @@ const ontimeupdate = e => {
   renderSubtitles()
 
   // Local replay speeds belong to the shared subtitle panel's strategy.
-  if (window.mediaBeingPlayed?.source !== 'local') setSpeed();
+  if (window.mediaBeingPlayed?.source !== 'local' && !document.body.classList.contains('youtube-media-mode')) setSpeed();
 }
 
 const addListeners = it => {
@@ -5330,6 +5331,7 @@ async function loadCombinedSrts(combinedJson) {
 
 // File handles stay in this tab so subtitles can be attached after opening
 // media. Changing the SRT must not restart playback or discard speaking takes.
+let _mainMediaLoadSeq = 0
 let _localMediaSelection = null
 let _localCaptionPanel = null
 
@@ -5341,9 +5343,11 @@ function _localMediaElement(file) {
 }
 
 function _getLocalCaptionPanel() {
-  if (!_localCaptionPanel) _localCaptionPanel = createLocalCaptionPanel({
+  if (!_localCaptionPanel) _localCaptionPanel = createMediaCaptionPanel({
     onOpenSubtitles: () => $('#localSubtitleFiles').trigger('click'),
+    onSplitChange: on => { if (!on) { _localMediaLayout(false); _minimizeYoutubeMedia() } },
     onClearCues: () => {
+      if (document.body.classList.contains('youtube-media-mode')) { clearSubtitles(); return }
       if (!_localMediaSelection) return
       _localMediaSelection.subtitleFile = null
       _localMediaSelection.englishFile = null
@@ -5352,12 +5356,20 @@ function _getLocalCaptionPanel() {
       _renderLocalSubtitleStatus()
     },
     onWord: word => {
-      const media = _localMediaElement()
+      const youtube = document.body.classList.contains('youtube-media-mode')
+      const media = youtube ? _youtubeCaptionMedia : _localMediaElement()
       media.pause()
       _localMediaLayout(false)
+      _minimizeYoutubeMedia()
       $('#searchText').val(word).trigger('change')
     },
     onCapture: payload => {
+      if (document.body.classList.contains('youtube-media-mode')) {
+        _youtubeCaptionMedia.pause()
+        const link = window.mediaBeingPlayed?.link
+        if (link) _handleCaptionCapture({...payload, source:'caption', title:window.srts?.find(it => it.link === link)?.name || link, url:'https://www.youtube.com/watch?v=' + link})
+        return
+      }
       const selection = _localMediaSelection
       if (!selection) return
       const media = _localMediaElement()
@@ -5369,6 +5381,31 @@ function _getLocalCaptionPanel() {
   })
   return _localCaptionPanel
 }
+
+const _youtubeCaptionMedia = createYoutubeMediaAdapter(() => window.ytPlayer, () => { window.youtubePlayInterval = null })
+
+function _youtubeMediaLayout(on) {
+  document.body.classList.toggle('youtube-media-mode', on)
+  if (on) {
+    _youtubeCaptionMedia.start()
+    _getLocalCaptionPanel().open(_youtubeCaptionMedia, true)
+  } else {
+    _youtubeCaptionMedia.stop()
+    if (!document.body.classList.contains('local-media-mode')) _localCaptionPanel?.close()
+  }
+  $('#youtubeMediaHeader').toggle(on)
+  $('#youtubeResumePlayer').toggle(!on && window.mediaBeingPlayed?.source === 'link')
+}
+
+function _minimizeYoutubeMedia() {
+  if (!document.body.classList.contains('youtube-media-mode')) return
+  _youtubeCaptionMedia.pause()
+  _youtubeMediaLayout(false)
+  hideMediaContainer()
+  showResultContainer()
+}
+$(document).on('click', '#youtubeClosePlayer', _minimizeYoutubeMedia)
+$(document).on('click', '#youtubeResumePlayer', () => { showMediaContainer(); _youtubeMediaLayout(true) })
 
 function _localMediaLayout(local) {
   document.body.classList.toggle('local-media-mode', local)
@@ -5596,21 +5633,28 @@ function hideMediaContainer() {
 }
 
 async function playNewMedia(link, source, mediaFile, autoPlay = true) {
+  const loadSeq = ++_mainMediaLoadSeq
+  const isCurrent = () => loadSeq === _mainMediaLoadSeq
   _localSpeakOver.detach()
   clearSubtitles()
   stopMedia(source)
+  _youtubeMediaLayout(false)
   _localMediaLayout(source === 'local')
   if (source === 'local') window.syncSubtitle = true
 
   //Load subtitle
 
-  function _playMedia() {
+  async function _playMedia() {
     if (source === 'link') {
       showMediaContainer()
       $('#localMedia').hide()
       showMediaRelatedContainer()
-      loadYoutubeVideo(link)
+      window.youtubePlayInterval = null
+      await loadYoutubeVideo(link, {isCurrent})
+      if (!isCurrent()) return
       window.playingYoutubeVideo = true;
+      window.syncSubtitle = true
+      _youtubeMediaLayout(true)
       if (!autoPlay) _suppressYoutubeAutoplay()
     } else if (source === 'local') {
       hideMediaContainer()
@@ -5640,7 +5684,7 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
       _getLocalCaptionPanel().open(_localMediaElement(mediaFile))
     }
     window.mediaBeingPlayed = {link, source}
-    $('#localResumePlayer').hide()
+    $('#localResumePlayer, #youtubeResumePlayer').hide()
     //$('#subControls').hide()
   }
 
@@ -5650,8 +5694,9 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
     $('#sv-sub-mirror').show()
     $('#toggleEnSubBtn').show()
   } else {
-    _playMedia();
-    if (source === 'local') hideMediaRelatedContainer()
+    await _playMedia();
+    if (!isCurrent()) return
+    if (source === 'local' || source === 'link') hideMediaRelatedContainer()
     else showMediaRelatedContainer()
     $('#sv-sub-mirror').show()
     $('#toggleEnSubBtn').show()
@@ -5667,10 +5712,15 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
   } catch (e) {
     console.warn('subtitles unavailable for', link, e && e.message)
   }
+  if (!isCurrent()) return
   // A local media file can be played without an SRT. Do not show the remote
   // missing-subtitle alert for that deliberate choice.
-  if (sv || source !== 'local') await loadSubtitlesForLink(sv, en);
+  if (sv || $('#onlySubsCheckbox').is(':checked')) await loadSubtitlesForLink(sv, en);
   if (source === 'local') _renderLocalSubtitleStatus()
+  else if (document.body.classList.contains('youtube-media-mode')) {
+    _getLocalCaptionPanel().load(sv, en, getLangFromUrl().code)
+    $('#youtubeMediaName').text(window.srts?.find(it => it.link === link)?.name || link)
+  }
 
   $('#currentMedia').text(`${source === 'local' && mediaFile ? mediaFile.name : link}, ${source}`)
   $('#toggleSearchBtn').show()
@@ -9283,10 +9333,27 @@ async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds,
   if (!isCurrent()) return
   if (!ready()) throw new Error('YouTube player did not become ready within 20 seconds')
   showMediaContainer()
+  if (!window._playingRecording && !window._practiceActive) {
+    _localMediaLayout(false)
+    window.playingYoutubeVideo = true
+    window.playingAudio = window.playingVideo = false
+    window.syncSubtitle = true
+    window.mediaBeingPlayed = {link:videoId, source:'link'}
+    _youtubeMediaLayout(true)
+    $('#youtubeResumePlayer').hide()
+    $('#youtubeMediaName').text(window.srts?.find(it => it.link === videoId)?.name || videoId)
+    const pair = window.allSubtitles[videoId]
+    _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
+    getSubtitlesForLink(videoId, 'link').then(pair => {
+      if (isCurrent() && document.body.classList.contains('youtube-media-mode') && window.mediaBeingPlayed?.link === videoId) {
+        _getLocalCaptionPanel().load(pair?.sv, pair?.en, getLangFromUrl().code)
+      }
+    }).catch(e => console.warn('subtitles unavailable for', videoId, e?.message))
+  }
   // Play / practice modes drive everything through their own floating overlay,
   // so the side player panel (speed controls, starred lines, etc.) just gets in
   // the way — keep it hidden while either mode is active.
-  if (!window._playingRecording && !window._practiceActive) showMediaRelatedContainer()
+  if (!window._playingRecording && !window._practiceActive && !document.body.classList.contains('youtube-media-mode')) showMediaRelatedContainer()
   return new Promise((resolve, reject) => {
     // Finish the way a reload used to.
     //
@@ -9301,7 +9368,7 @@ async function loadYoutubeVideo(videoId, { isCurrent = () => true, startSeconds,
     // _suppressYoutubeAutoplay(), unchanged.
     const settle = () => {
       if (!isCurrent()) { resolve(); return }
-      try { setSpeed() } catch (_) {}
+      if (!document.body.classList.contains('youtube-media-mode')) { try { setSpeed() } catch (_) {} }
       if (respectInterval && window.youtubePlayInterval) {
         try { seekToYoutubeTime(window.youtubePlayInterval.start, { isCurrent }) } catch (_) {}
       }
@@ -19643,8 +19710,10 @@ function _practiceAudioEl() {
 // two, which is why it needs saying.
 function _silenceOtherAudio(starting) {
   if (starting !== 'local') {
+    _mainMediaLoadSeq++
     _localSpeakOver.detach()
     if (document.body.classList.contains('local-media-mode')) _localMediaLayout(false)
+    if (document.body.classList.contains('youtube-media-mode')) _youtubeMediaLayout(false)
   }
   if (starting !== 'preview') { try { _stopManualAudioPreview() } catch (_) {} }
   if (starting !== 'practice') _stopPracticeAudio()

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "serve": "vue-cli-service serve --port 3000",
-    "build": "vue-cli-service build && node scripts/minify-public.js && node scripts/cache-bust.js",
+    "build": "node scripts/build-page-scripts.cjs && vue-cli-service build && node scripts/minify-public.js && node scripts/build-page-scripts.cjs --package && node scripts/cache-bust.js",
     "test:unit": "vue-cli-service test:unit",
     "test:e2e": "vue-cli-service test:e2e",
     "test:whiteboard": "node --test tests/whiteboard/",

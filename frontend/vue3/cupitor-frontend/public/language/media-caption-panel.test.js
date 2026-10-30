@@ -1,4 +1,4 @@
-import {createLocalCaptionPanel} from './local-caption-panel';
+import {createMediaCaptionPanel} from './media-caption-panel';
 
 const srt = '1\n00:00:00,000 --> 00:00:02,000\nEn mening\n\n2\n00:00:03,250 --> 00:00:06,750\nSista meningen\n';
 
@@ -9,7 +9,7 @@ test('the shared panel keeps the webapp translation callback and sends exact sel
   window.__cupTranslated = bridgeReply;
   const onCapture = jest.fn(), onWord = jest.fn(), onOpenSubtitles = jest.fn();
   const translateText = jest.fn(() => Promise.resolve('A sentence'));
-  const panel = createLocalCaptionPanel({onCapture,onWord,onOpenSubtitles,translateText});
+  const panel = createMediaCaptionPanel({onCapture,onWord,onOpenSubtitles,translateText});
   panel.open(native);
   panel.load(srt, '', 'sv');
   const root = document.getElementById('localCaptionPanel');
