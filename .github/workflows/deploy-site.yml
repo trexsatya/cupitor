@@ -86,6 +86,7 @@ jobs:
           node tests/browser/youtube-media-subtitles.cjs
           node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
           node tests/browser/search-result-counts.cjs
+          node tests/browser/dictionary-lookup.cjs
           node tests/browser/search-playlist.cjs
           node tests/browser/card-playback.cjs
           node tests/browser/card-insertion-settings.cjs
@@ -118,6 +119,7 @@ jobs:
           node tests/browser/compound-vocabulary-groups.cjs
           node tests/browser/regex-search.cjs
           node tests/browser/caption-capture-merge.cjs
+          node tests/browser/dictionary-lookup.cjs
           node tests/browser/results-scrolling.cjs
           node tests/browser/full-srt-dialog.cjs
           node tests/browser/subtitle-bundles.cjs

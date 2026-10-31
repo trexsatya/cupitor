@@ -3757,13 +3757,14 @@ $('document').ready(e => {
     // Only sv / en are actually wired into the search path; anything else
     // would silently degrade to "sv-or-en via the toggle", so clamp here.
     if (wordLang !== 'sv' && wordLang !== 'en') wordLang = 'sv'
+    const lookupWord = $(e.target).attr('data-lookup-word') || word
 
     if($(e.target).hasClass('link-special')) {
         stopMedia()
-        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, $(e.target).attr('data-index'), wordLang)
+        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, $(e.target).attr('data-index'), wordLang, lookupWord)
     } else if($(e.target).hasClass('link')) {
         stopMedia() //otherswise the popover might open and close immediately due to the click bubbling to the document listener below
-        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, null, wordLang)
+        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, null, wordLang, lookupWord)
     }
   });
 
@@ -4151,13 +4152,24 @@ function getWikiLink(word, uri = null, cls = 'link', index = null) {
   let uriComponent = uri || word;
   uriComponent = uriComponent.toLowerCase()
   // `word` is subtitle / vocabulary text (possibly another user's): text only.
-  return `<span> <span data-index="${_.escape(String(index))}" class="${cls}" href="https://${getLangFromUrl().code}.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${_subtitleText(word)}</span></span>`;
+  return `<span> <span data-index="${_.escape(String(index))}" data-lookup-word="${_.escape(uriComponent)}" class="${cls}" href="https://${getLangFromUrl().code}.wiktionary.org/wiki/${encodeURIComponent(uriComponent)}">${_subtitleText(word)}</span></span>`;
+}
+
+function getSwedishDictionaryUrl(word, language = getLangFromUrl().code) {
+  const term = String(word || '').trim().toLowerCase().normalize('NFC').replace(/\s+/g, ' ')
+  if (language !== 'sv' || !term) return ''
+  return `https://spraakbanken.gu.se/resurser/data/karp/so-2009-webbversion/${encodeURIComponent(term)}.html`
+}
+
+function getSwedishDictionaryLink(word, language = getLangFromUrl().code) {
+  const href = getSwedishDictionaryUrl(word, language)
+  return href ? ` 丨 <a href="${_.escape(href)}" target="_blank" rel="noopener noreferrer">Svensk ordbok</a>` : ''
 }
 
 // Lazy-create + show the small popover that lets the user choose between
 // "Search here" (populate the search box) and "Search on wiki" (open the
-// stored Wiktionary URL) for a clicked subtitle word.
-function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLang = null) {
+// stored Wiktionary URL), plus Svensk ordbok for Swedish words.
+function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLang = null, lookupWord = word) {
   let popoverId = 'subtitleWordPopover'
   if(index != null) {
     popoverId = 'subtitleWordPopoverSpecial'
@@ -4172,6 +4184,7 @@ function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLa
     $pop = $(`<div id="${popoverId}" class="subtitle-word-popover" hidden>
       <button type="button" data-action="search-here">Search here</button>
       <button type="button" data-action="search-wiki">Search on wiki</button>
+      <button type="button" data-action="search-so">Svensk ordbok</button>
       ${index !== null ? `<button type="button" id="${popoverId}-add-favorite" data-action="add-favorite"></button>` : ''}
     </div>`)
     $pop.find('[data-action="add-favorite"]').text(`Mark (${word})`)
@@ -4211,6 +4224,12 @@ function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLa
   $pop.find('[data-action="search-wiki"]').on('click.swp', e => {
     fn(e)
     if (href) window.open(href, '_blank').focus()
+  })
+  // The URL language is the studied language; #en-sub words always stay English.
+  const soHref = getSwedishDictionaryUrl(lookupWord, wordLang === 'en' ? 'en' : getLangFromUrl().code)
+  $pop.find('[data-action="search-so"]').toggle(!!soHref).on('click.swp', e => {
+    fn(e)
+    if (soHref) window.open(soHref, '_blank', 'noopener,noreferrer')
   })
   $pop.find('[data-action="add-favorite"]').on('click.swp', e => {
     fn(e)
@@ -7333,12 +7352,12 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         // shows the same "Search here / Search on wiki" popover as single words.
         // The href carries the phrase-search Wiktionary URL for the wiki action.
         const wikiPart = isMultiWord
-            ? `<span> <span class="link" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}">${_.escape(word)}</span></span>`
+            ? `<span> <span class="link" data-lookup-word="${_.escape(word.trim())}" href="https://${getLangFromUrl().code}.wiktionary.org/w/index.php?search=${encodeURIComponent(word.trim()).replace(/%20/g, '+')}">${_.escape(word)}</span></span>`
             : getWikiLinks(word)
         // The sweep-up heading is not a word, so there is nothing to look it up
         // in — a Wiktionary link for "_everything_else" would be a dead end.
         if (!isSweepUp) {
-          wordBlock.append(`<div style=""> Wiki: ${wikiPart} 丨
+          wordBlock.append(`<div style=""> Wiki: ${wikiPart}${getSwedishDictionaryLink(word)} 丨
             <a href="https://www.google.com/search?q=${_.escape(encodeURIComponent(word))}&udm=2" target="_blank">Images</a> 丨
             <a href="https://filmot.com/search/%22${_.escape(encodeURIComponent(word))}%22/1?lang=${getLangFromUrl().code}" target="_blank">YouTube (Filmot)</a> </div> <br>`)
         }
@@ -7479,7 +7498,7 @@ function _refreshAccordionStickyHeight() {
 function resultNotFound(search) {
   return `
 <h3>No results found for ${_.escape(search)}</h3>
-Try Wiki ${getWikiLinks(search)}
+Try Wiki ${getWikiLinks(search)}${getSwedishDictionaryLink(search, getSelectedLang() === 'en' ? 'en' : getLangFromUrl().code)}
 `;
 }
 
