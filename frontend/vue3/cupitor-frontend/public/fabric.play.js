@@ -163,20 +163,44 @@ class WhiteToTransparent extends fabric.filters.BaseFilter {
 fabric.filters.WhiteToTransparent = WhiteToTransparent;
 fabric.classRegistry.setClass(WhiteToTransparent, 'filters.WhiteToTransparent');
 
+// arrowheads: 'end' (legacy default), 'start', 'both', or 'none'.
+function _drawConnectorHead(ctx, line, x, y, angle) {
+  const sz = line.arrowSize || 8;
+  ctx.save();
+  if (line._innerAlpha != null) ctx.globalAlpha *= line._innerAlpha;
+  ctx.translate(x, y); ctx.rotate(angle);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-sz, -sz * 0.5);
+  ctx.moveTo(0, 0); ctx.lineTo(-sz, sz * 0.5);
+  ctx.strokeStyle = line.stroke; ctx.lineWidth = line.strokeWidth;
+  ctx.lineCap = 'round'; ctx.stroke(); ctx.restore();
+}
+
+function setConnectorArrows(uid, arrowheads) {
+  if (!['start', 'end', 'both', 'none'].includes(arrowheads)) throw new Error('Arrowheads must be start, end, both, or none.');
+  const line = findIfRequired(uid);
+  if (!(line instanceof fabric.LineArrow) && !(line instanceof fabric.ArrowPath)) throw new Error('Select a connector line.');
+  line.set('arrowheads', arrowheads);
+  if (line.canvas) line.canvas.requestRenderAll();
+  return line;
+}
+
 // --- Fabric.js v6 custom class: LineArrow (Miro-style) ---
 class LineArrow extends fabric.Line {
   static type = 'LineArrow';
+  static cacheProperties = [...fabric.Line.cacheProperties, 'arrowheads'];
 
   // arrowSize: length of arrowhead wings (default 8)
   constructor(points, options) {
-    const opts = Object.assign({ arrowSize: 8 }, options || {});
+    const opts = Object.assign({ arrowSize: 8, arrowheads: 'end' }, options || {});
     super(points, opts);
     this.arrowSize = opts.arrowSize;
+    this.arrowheads = opts.arrowheads;
   }
 
   toObject(propertiesToInclude) {
     const obj = super.toObject(propertiesToInclude);
     obj.arrowSize = this.arrowSize;
+    obj.arrowheads = this.arrowheads;
     return obj;
   }
 
@@ -184,26 +208,10 @@ class LineArrow extends fabric.Line {
     super._render(ctx);
     if ((this.width === 0 && this.height === 0) || !this.visible) return;
 
-    // Draw arrowhead at the end point (x2,y2)
-    const xDiff = this.x2 - this.x1;
-    const yDiff = this.y2 - this.y1;
-    const angle = Math.atan2(yDiff, xDiff);
-    const sz = this.arrowSize || 8;
-
-    ctx.save();
-    if (this._innerAlpha != null) ctx.globalAlpha *= this._innerAlpha; // drawOutline fades it in
-    ctx.translate((this.x2 - this.x1) / 2, (this.y2 - this.y1) / 2);
-    ctx.rotate(angle);
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(-sz, -sz * 0.5);
-    ctx.moveTo(0, 0);
-    ctx.lineTo(-sz, sz * 0.5);
-    ctx.strokeStyle = this.stroke;
-    ctx.lineWidth = this.strokeWidth;
-    ctx.lineCap = 'round';
-    ctx.stroke();
-    ctx.restore();
+    const dx = (this.x2 - this.x1) / 2, dy = (this.y2 - this.y1) / 2;
+    const angle = Math.atan2(dy, dx);
+    if (this.arrowheads === 'end' || this.arrowheads === 'both') _drawConnectorHead(ctx, this, dx, dy, angle);
+    if (this.arrowheads === 'start' || this.arrowheads === 'both') _drawConnectorHead(ctx, this, -dx, -dy, angle + Math.PI);
   }
 
   static fromObject(object) {
@@ -276,11 +284,13 @@ fabric.classRegistry.setClass(CurvableLine, 'CurvableLine');
 // along the curve.
 class ArrowPath extends CurvableLine {
   static type = 'ArrowPath';
+  static cacheProperties = [...CurvableLine.cacheProperties, 'arrowheads'];
 
   constructor(pts, options) {
-    const opts = Object.assign({ arrowSize: 8 }, options || {});
+    const opts = Object.assign({ arrowSize: 8, arrowheads: 'end' }, options || {});
     super(pts, opts);
     this.arrowSize = opts.arrowSize;
+    this.arrowheads = opts.arrowheads;
   }
 
   _render(ctx) {
@@ -288,26 +298,16 @@ class ArrowPath extends CurvableLine {
     if (!this.visible) return;
     // The curve leaves its control point heading for (x2, y2).
     const cpx = 2 * this.cx - (this.x1 + this.x2) / 2, cpy = 2 * this.cy - (this.y1 + this.y2) / 2;
-    const angle = Math.atan2(this.y2 - cpy, this.x2 - cpx);
-    const sz = this.arrowSize || 8;
-    ctx.save();
-    if (this._innerAlpha != null) ctx.globalAlpha *= this._innerAlpha; // drawOutline fades it in
-    ctx.translate(this.x2 - this.pathOffset.x, this.y2 - this.pathOffset.y);
-    ctx.rotate(angle);
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(-sz, -sz * 0.5);
-    ctx.moveTo(0, 0);
-    ctx.lineTo(-sz, sz * 0.5);
-    ctx.strokeStyle = this.stroke;
-    ctx.lineWidth = this.strokeWidth;
-    ctx.lineCap = 'round';
-    ctx.stroke();
-    ctx.restore();
+    if (this.arrowheads === 'end' || this.arrowheads === 'both') {
+      _drawConnectorHead(ctx, this, this.x2 - this.pathOffset.x, this.y2 - this.pathOffset.y, Math.atan2(this.y2 - cpy, this.x2 - cpx));
+    }
+    if (this.arrowheads === 'start' || this.arrowheads === 'both') {
+      _drawConnectorHead(ctx, this, this.x1 - this.pathOffset.x, this.y1 - this.pathOffset.y, Math.atan2(this.y1 - cpy, this.x1 - cpx));
+    }
   }
 
   toObject(propertiesToInclude) {
-    return Object.assign(super.toObject(propertiesToInclude), { arrowSize: this.arrowSize });
+    return Object.assign(super.toObject(propertiesToInclude), { arrowSize: this.arrowSize, arrowheads: this.arrowheads });
   }
 
   static fromObject(object) {
@@ -848,19 +848,20 @@ function connectObjects(fromUidOrObj, toUidOrObj, lineUid, opts) {
   // Thrown so a script's player reports the line instead of skipping it quietly.
   if (!isFabricObject(a)) throw new Error(`connectObjects: no object ${JSON.stringify(fromUidOrObj)}`)
   if (!isFabricObject(b)) throw new Error(`connectObjects: no object ${JSON.stringify(toUidOrObj)}`)
+  if (opts && opts.arrowheads != null && !['start', 'end', 'both', 'none'].includes(opts.arrowheads)) throw new Error('Invalid connector arrowheads');
   const bend = opts && opts.bend
   const sides = opts && opts.sides && (opts.sides.from || opts.sides.to) ? opts.sides : null
   if (a === b && bend !== 'loop') return null
   if (bend) {
     const [x1, y1, x2, y2, cx, cy] = _bentEnds(a, b, bend, sides)
-    const line = new fabric.ArrowPath([x1, y1, x2, y2], { cx, cy, stroke: '#555', strokeWidth: 1.5 })
+    const line = new fabric.ArrowPath([x1, y1, x2, y2], { cx, cy, stroke: '#555', strokeWidth: 1.5, arrowheads: (opts && opts.arrowheads) || 'end' })
     if (lineUid) line.uid = lineUid
     pc.add(line)
     Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid, bend }, sides ? { sides } : {})
     _listConnector(line)
     return opts.animate ? drawOutline(line, { duration: opts.duration || 800 }).then(() => line) : line
   }
-  const line = connect(pc, a, b, { uid: lineUid, sides })
+  const line = connect(pc, a, b, { uid: lineUid, sides, arrowheads: (opts && opts.arrowheads) || 'end' })
   Object.assign(customData(line), { type: 'connector', source: a.uid, target: b.uid }, sides ? { sides } : {})
   _listConnector(line)
   if (!(opts && opts.animate)) return line
@@ -2192,7 +2193,7 @@ function exportCanvas() {
 function buildScriptExecutables(lines) {
   return (lines || window.recordedScriptLines || []).map(raw => {
     const line = raw.trim()
-    const executable = (line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal') || line.startsWith('drawOutline') || line.startsWith('revertState') || line.startsWith('timelineStep') || line.startsWith('markStep'))
+    const executable = (line.startsWith('addComposite') || line.startsWith('animate') || line.startsWith('Promise') || line.startsWith('connectObjects') || line.startsWith('reveal') || line.startsWith('drawOutline') || line.startsWith('revertState') || line.startsWith('timelineStep') || line.startsWith('markStep'))
       ? `return ${line};`
       : raw.replace(/\s+$/, '') // indentation kept (e.g. inside a /* … */)
     // The brace on its own line: a comment at the end of the line can't swallow it.
