@@ -7,6 +7,7 @@ test('paths are normalized independently of playlist names and unsafe segments a
   const source={'name / with slashes':{items:{},folder:'Svenska/Lyssna'}}
   expect(folderPaths(source)).toEqual(['Svenska','Svenska/Lyssna'])
   expect(Object.keys(source)).toEqual(['name / with slashes'])
+  expect(folderPaths({},Object.fromEntries(['A-other','A/B','A'].map(p=>[p,{updatedAt:1}])))).toEqual(['A','A/B','A-other'])
 })
 test('nested folders can be created empty, renamed and moved without changing cards or identities',()=>{
   let result=folderChange({}, {}, {name:'Svenska'},1)

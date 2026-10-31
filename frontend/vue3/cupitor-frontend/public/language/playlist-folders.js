@@ -31,7 +31,11 @@ export function folderPaths(playlists, catalog = {}) {
   }
   for (const [path, entry] of Object.entries(catalog)) if (!entry.deleted) add(path)
   for (const playlist of Object.values(playlists || {})) add(playlist?.folder)
-  return [...paths].sort((a,b)=>a.localeCompare(b))
+  return [...paths].sort((a,b)=>{
+    const left=a.split('/'),right=b.split('/')
+    for(let i=0;i<Math.min(left.length,right.length);i++){const order=left[i].localeCompare(right[i]);if(order)return order}
+    return left.length-right.length
+  })
 }
 export function folderChange(playlists, catalog, {from = null, name, parent = '', remove = false}, now = Date.now()) {
   const paths = folderPaths(playlists, catalog)
