@@ -39,17 +39,19 @@ async function swipe(page, session, dy) {
   await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
 }
 
-// Use the actual picker: selecting calls the dialog's change handler while
-// Select2 still has its dropdown open and its ancestor scroll lock attached.
+// Choose through the folder browser, then exercise native card scrolling.
 async function choosePlaylist(page, name, mobile) {
-  const picker = page.locator('#recordingReviewDialog .rec-rec-header .select2-selection')
-  if (mobile) await picker.tap(); else await picker.click()
-  await page.locator('.select2-container--open .select2-search__field').fill(name)
-  const option = page.locator('.select2-results__option--selectable').filter({ hasText: name })
-  if (mobile) await option.tap(); else await option.click()
-  await page.waitForFunction(name => window._recording.currentName === name &&
-    document.getElementById('recRecSelect').value === name &&
-    !document.querySelector('.select2-dropdown'), name)
+  const panel=page.locator('#playlistBrowserPanel')
+  if(!await panel.evaluate(el=>el.open))await panel.locator(':scope > summary').click()
+  const folders=page.locator('.pl-folder-pane')
+  if(!await folders.evaluate(el=>el.open))await folders.locator('summary').click()
+  await page.locator('.pl-folder-list button[data-folder="*"]').click()
+  await page.locator('#playlistTypeFilter').selectOption('all')
+  await page.locator('#playlistFilter').fill(name)
+  const option=page.locator('.pl-playlist-row').filter({has:page.getByText(name,{exact:true})})
+  if(mobile)await option.tap();else await option.click()
+  await page.waitForFunction(name=>window._recording.currentName===name&&
+    document.getElementById('recRecSelect').value===name&&!document.getElementById('playlistBrowserPanel').open,name)
 }
 
 async function checkPages(browser, mobile, width = mobile ? 430 : 1280) {

@@ -5,6 +5,7 @@ import test from 'node:test';
 import {recordingsHaveChanges} from './recordings-sync-state.js';
 import {persistableRecordings} from './recordings-merge.js';
 import {sameJson, threeWayRecordings} from './recordings-3way.js';
+import {mergeFolderCatalog} from './playlist-folders.js';
 
 const require = createRequire(import.meta.url);
 const {JSDOM} = require(process.env.CUPITOR_JSDOM || 'jsdom');
@@ -39,9 +40,10 @@ function fixture(baseline = original()) {
   w._recordingsDirty = false;
   if (baseline) w.localStorage.setItem("baseline", JSON.stringify(baseline));
   w.localStorage.setItem('recordings', JSON.stringify(w._recordings));
-  let calls = 0, fail = false, release = null;
+  let calls = 0, fail = false, release = null, remoteFolders = {};
   Object.assign(w, {
-    $: w.jQuery, recordingsHaveChanges, _sameJson: sameJson, _threeWayRecordings: threeWayRecordings,
+    $: w.jQuery, recordingsHaveChanges, mergeFolderCatalog,
+    _scopedKey: key => key, getLangFromUrl: () => ({fullName:"swedish"}), _sameJson: sameJson, _threeWayRecordings: threeWayRecordings,
     REC_COLLECTION_KEY: 'recordings', REC_CURRENT_KEY: 'currentName', REC_CURRENT_EXT_KEY: 'extId', REC_STATE_KEY: 'recordingState',
     REC_KEY: 'legacy', REC_DIRTY_KEY: 'dirty', SYNC_CANCELLED: 'sync cancelled',
     _persistableRecordings: () => persistableRecordings(w._recordings),
@@ -53,19 +55,28 @@ function fixture(baseline = original()) {
       w._recording.items = value[w._recording.currentName]?.items || {};
     },
     alert() {},
-    async syncRecordingsFiles() {
+    async syncRecordingsFiles({mergeFolders}) {
       calls++;
       const sent = copy(persistableRecordings(w._recordings));
+      const folders = copy(mergeFolders(remoteFolders));
       if (release) await new Promise(resolve => {release = resolve;});
       if (fail) throw new Error('network unavailable');
+      remoteFolders = folders;
       return sent;
     },
   });
   w.console.error = () => {};
-  w.eval([appFunction('_loadRecordingsBase'), appFunction('_saveRecordingsBase'), appFunction('_saveRecording'), appFunction('syncRecordingsToGithub'), appFunction('_refreshRecordingSyncBtn')].join('\n') +
+  w.eval('const _playlistFolderStates = new Map();\n' + [
+    ...['_playlistFolderKey','_playlistFolderState','_persistPlaylistFolders','_playlistFoldersDirty'].map(appFunction),
+    appFunction('_loadRecordingsBase'), appFunction('_saveRecordingsBase'), appFunction('_saveRecording'), appFunction('syncRecordingsToGithub'), appFunction('_refreshRecordingSyncBtn')].join('\n') +
     '\nwindow.saveRecording=_saveRecording;window.refreshSync=_refreshRecordingSyncBtn;window.syncRecordings=syncRecordingsToGithub;');
   return {w, get button() {return w.document.getElementById('recRecSync');},
-    get calls() {return calls;}, fail() {fail = true;},
+    get calls() {return calls;}, get remoteFolders() {return copy(remoteFolders);}, fail() {fail = true;},
+    editFolder(name, deleted=false) {
+      const folders=w._playlistFolderState();
+      folders.catalog=mergeFolderCatalog(folders.catalog,{[name]:{updatedAt:Date.now(),deleted}});
+      w._persistPlaylistFolders();w.refreshSync();
+    },
     hold() {release = true;}, release() {const resolve = release; release = null; resolve();},
     edit(text = 'Edited') {w._recording.items.Manual.Card[0].source = text; w.saveRecording();},
     close() {dom.window.close();}};
@@ -160,9 +171,9 @@ test('Sync stays disabled during a request, including after rerender, and preser
 
 test('a successful sync stays clean if baseline storage is full, and later edits cannot mutate that baseline', async () => {
   const p = fixture();
+  const setItem = p.w.Storage.prototype.setItem;
   try {
     p.edit();
-    const setItem = p.w.Storage.prototype.setItem;
     p.w.Storage.prototype.setItem = function(key, value) {
       if (key === 'baseline') throw new p.w.DOMException('Storage full', 'QuotaExceededError');
       return setItem.call(this, key, value);
@@ -171,5 +182,50 @@ test('a successful sync stays clean if baseline storage is full, and later edits
     assert.equal(p.button.disabled, true, 'successful sync is clean even when storage cannot cache its baseline');
     p.edit('Later edit');
     assert.equal(p.button.disabled, false, 'baseline is an independent snapshot');
-  } finally {p.close();}
+  } finally {p.w.Storage.prototype.setItem = setItem;p.close();}
+});
+
+
+test('empty-folder edits alone enable Sync and a successful upload saves their confirmed baseline', async()=>{
+  const p=fixture();
+  try {
+    p.w.refreshSync();assert.equal(p.button.disabled,true);
+    p.editFolder('Language/Empty');
+    assert.equal(p.button.disabled,false);
+    assert.equal(p.w.localStorage.getItem('dirty'),'1');
+    await p.w.syncRecordings();
+    assert.equal(p.remoteFolders['Language/Empty'].deleted,false);
+    assert.equal(p.button.disabled,true);
+    assert.equal(p.w.localStorage.getItem('dirty'),null);
+    assert.equal(p.w._playlistFoldersDirty(),false);
+  }finally{p.close();}
+});
+
+test('a failed folder-only sync leaves the folder pending for retry', async()=>{
+  const p=fixture();
+  try {
+    p.editFolder('Pending');p.fail();
+    await assert.rejects(p.w.syncRecordings(),/network unavailable/);
+    assert.equal(p.button.disabled,false);
+    assert.equal(p.w._playlistFoldersDirty(),true);
+    assert.deepEqual(p.remoteFolders,{});
+  }finally{p.close();}
+});
+
+test('folders added during an upload stay pending and are included in the next sync', async()=>{
+  const p=fixture();
+  try {
+    p.editFolder('Before');p.hold();
+    const pending=p.w.syncRecordings();
+    p.editFolder('During');
+    assert.equal(p.button.disabled,true);
+    p.release();await pending;
+    assert.equal(p.remoteFolders.Before.deleted,false);
+    assert.equal(p.remoteFolders.During,undefined);
+    assert.equal(p.button.disabled,false);
+    assert.equal(p.w._playlistFolderState().catalog.During.deleted,false);
+    await p.w.syncRecordings();
+    assert.equal(p.remoteFolders.During.deleted,false);
+    assert.equal(p.button.disabled,true);
+  }finally{p.close();}
 });
