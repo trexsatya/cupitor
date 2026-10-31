@@ -6,6 +6,19 @@
 // "Other Fabric properties" means any other key is passed on to the Fabric.js
 // object (e.g. opacity, angle, strokeDashArray, shadow).
 const SCRIPT_FUNCTIONS = [
+    ['Reusable objects', [
+        ['defineComposite(name, items)', 'Save a reusable snapshot of objects (UID array, one UID, or Fabric objects). Originals stay on the board; saves in this browser. Names can be redefined.'],
+        ['addComposite(name, x, y, opts)', 'Async: insert an independent group centred at canvas point x,y. Await it (or use a standalone script line). Built-in name: not-connected.', [
+            ['uid', 'optional group ID for later script lines'],
+            ['scaleX / scaleY / angle / opacity', 'group transform and appearance'],
+        ]],
+        ['listComposites()', 'Return saved names, including not-connected.'],
+        ['removeComposite(name)', 'Remove a saved definition; existing copies stay.'],
+        ['defineCompositeData(name, data)', 'Register serialized {objects: [...]} Fabric data, for portable definitions.'],
+        ['addNotConnected(x1, y1, x2, y2, opts)', 'Create a line with a centred cross, at any angle. Returns a normal group.', [
+            ['stroke / strokeWidth / crossSize / uid', 'defaults: #333, 2, 16, generated ID'],
+        ]],
+    ]],
     ['Create', [
         ['addRect(left, top, width, height, opts)', 'Rectangle', [
             ['uid', 'id for later lines (default: next R<n>)'],
@@ -250,11 +263,13 @@ const SCRIPT_FUNCTIONS = [
         ['ungroupObjects(groupUid)', 'Ungroup'],
         ['connectObjects(fromUid, toUid, lineUid, opts)', 'Arrow that stays attached to both objects when they move', [
             ['lineUid', 'id for the arrow'],
+            ['opts.arrowheads', "'end' (default), 'start', 'both', or 'none'; straight, curved and loop connectors"],
             ['opts.animate', 'grow the arrow from the source to the target; the next line waits'],
             ['opts.duration', 'how long it grows, ms (default 800)'],
             ['opts.bend', "curve it: px its middle stands off the straight line (to the left of its direction when positive), or 'loop' for an arrow from an object back to itself"],
             ['opts.sides', "{from, to}: where the arrow leaves and arrives instead of the middles of the facing edges: 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right' or 'center'"],
         ]],
+        ['setConnectorArrows(uid, arrowheads)', "Change an existing connector's arrowheads: 'start', 'end', 'both', or 'none'"],
         ['emanate(fromUid, obj, lineUid, opts)', 'A new object grows out of fromUid along a new connector: small where the arrow leaves, full size where it was put; the next line waits (wrap in Promise.resolve)', [
             ['obj', 'the new object, or a promise of it (e.g. addLabel(...) or addPicture(...))'],
             ['opts.bend, opts.sides', 'as connectObjects'],

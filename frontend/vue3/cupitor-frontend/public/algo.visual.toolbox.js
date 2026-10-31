@@ -2625,6 +2625,7 @@ function connect(canvas, it, other, opts){
     const [x1, y1, x2, y2] = connectorEnds(it, other, opts.sides);
 
     var line = new fabric.LineArrow([x1, y1, x2, y2], {
+        arrowheads: opts.arrowheads || 'end',
         strokeWidth: 1.5,
         fill: '',
         stroke: '#555',
@@ -3054,7 +3055,8 @@ function flowPath(obj) {
     const s = findIfRequired(obj.customData.source);
     src = s && typeof s.getCenterPoint === 'function' ? s.getCenterPoint() : null;
   }
-  return flowEnds(kind, p1, p2, src);
+  if (obj.arrowheads === 'none' || obj.arrowheads === 'both') return null;
+  return obj.arrowheads === 'start' ? flowEnds(kind, p2, p1, src) : flowEnds(kind, p1, p2, src);
 }
 
 function canFlow(obj) {

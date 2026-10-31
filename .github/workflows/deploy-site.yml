@@ -66,6 +66,7 @@ jobs:
           npx jest public/language public/github-utils.test.js --runInBand --silent
           node --test public/page-scripts/*.test.mjs
           node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs
+          node --test tests/whiteboard/composites.unit.test.cjs
           node --test public/language/spotify-*.test.mjs public/language/card-selection-search.test.mjs public/language/recordings-sync-state.test.mjs
           node --test public/language/study-calls.test.mjs
           node --test public/language/subtitle-bundles.test.mjs tools/language/subtitle-bundles.test.mjs tools/language/srt-import.test.mjs tools/language/bundle-repair.test.mjs
