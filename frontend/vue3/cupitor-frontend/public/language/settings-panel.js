@@ -102,7 +102,7 @@ export function organizeSettingsPanel(panel) {
   actions('practice', ['practiceLogSettingsBtn', 'notifBellWrap', 'notifSettingsBtn', 'studyCallsBtn'])
   const shortcuts = panel.querySelector('.keyboard-shortcuts-btn')
   if (shortcuts) section('search').append(shortcuts)
-  actions('tools', ['addToVocabBtn', 'saveStarredLinesBtn', 'reviewCapturedBtn'])
+  actions('tools', ['wordMapsBtn', 'addToVocabBtn', 'saveStarredLinesBtn', 'reviewCapturedBtn'])
   const recording = panel.querySelector('#recStartBtn')?.closest('.lang-panel-label')
   if (recording) { recording.classList.add('settings-recording'); section('tools').append(recording) }
   const maintenance = document.createElement('div'); maintenance.className = 'settings-actions'
