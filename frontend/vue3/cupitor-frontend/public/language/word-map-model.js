@@ -7,6 +7,31 @@ export const RELATIONS = [
   'related origin',
   'not related',
 ]
+export const LINE_STYLES = ['solid', 'dashed', 'dotted', 'dash-dot']
+export const MAX_IMAGES = 12
+// Only plain http(s) links are accepted: no javascript:, data: or file: URLs.
+export function imageLink(v) {
+  if (typeof v !== 'string') return ''
+  const t = v.trim()
+  if (!t || t.length > 2000) return ''
+  try {
+    const u = new URL(t)
+    return u.protocol === 'http:' || u.protocol === 'https:' ? t : ''
+  } catch (_) {
+    return ''
+  }
+}
+// Turns pasted text (one link per line, or space separated) into a clean list.
+export function parseImageLinks(text) {
+  const links = []
+  let rejected = 0
+  for (const token of String(text || '').split(/\s+/).filter(Boolean)) {
+    const link = imageLink(token)
+    if (!link) rejected++
+    else if (!links.includes(link)) links.push(link)
+  }
+  return { links: links.slice(0, MAX_IMAGES), rejected, truncated: Math.max(0, links.length - MAX_IMAGES) }
+}
 export const newId = () =>
   globalThis.crypto?.randomUUID?.() ||
   'wm-' + Date.now().toString(36) + Math.random().toString(36).slice(2)
@@ -55,6 +80,10 @@ export function readMap(value) {
       note: str(n.note),
       color: color(n.color),
       shape: n.shape === 'ellipse' ? 'ellipse' : 'rectangle',
+      images: [...new Set((Array.isArray(n.images) ? n.images : []).map(imageLink).filter(Boolean))].slice(
+        0,
+        MAX_IMAGES
+      ),
     }
   })
   const edges = data.edges.map((e) => {
@@ -79,6 +108,7 @@ export function readMap(value) {
       source: str(e.source),
       uncertain: !!e.uncertain,
       dashed: !!e.dashed,
+      lineStyle: LINE_STYLES.includes(e.lineStyle) ? e.lineStyle : '',
       marker: e.marker === '×' ? '×' : '',
       arrows: ['none', 'start', 'end', 'both'].includes(e.arrows) ? e.arrows : 'none',
     }
