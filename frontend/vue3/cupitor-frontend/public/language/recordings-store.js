@@ -66,9 +66,13 @@ export async function readRecordings(root, readPart) {
 // A manifest cached longer than the retention period may reference a removed
 // part. Retry once with a fresh index; a genuinely missing active part still
 // fails the entire read, never masquerading as deleted cards.
-export async function loadRecordingsFiles(readFile) {
-  const load = async fresh => readRecordings(parseRecordingsRoot(await readFile('recordings.json', fresh)),
-    path => readFile(path, fresh))
+export async function loadRecordingsFiles(readFile, {onMetadata} = {}) {
+  const load = async fresh => {
+    const root = parseRecordingsRoot(await readFile('recordings.json', fresh))
+    const collection = await readRecordings(root, path => readFile(path, fresh))
+    if (onMetadata) onMetadata(root.format === RECORDINGS_FORMAT ? root : {}, fresh)
+    return collection
+  }
   try { return await load(false) }
   catch (e) {
     if (e.code !== 'recordings-part-missing') throw e
@@ -121,6 +125,7 @@ export async function splitRecordings(collection, { maxBytes = RECORDINGS_PART_B
 // changes after our read, re-read it and re-run the existing conflict policy.
 // commitFiles also retries ref conflicts; its root guard runs on every retry.
 export async function syncRecordingsFiles({ readFile, commitFiles, merge, listParts, now = Date.now,
+  mergeFolders,
   log = (message, error) => console.warn(message, error), maxAttempts = 5, splitOptions }) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const before = await readFile('recordings.json')
@@ -142,6 +147,8 @@ export async function syncRecordingsFiles({ readFile, commitFiles, merge, listPa
     }
     const cleanup = planRecordingsCleanup(previous, split.files.keys(), timestamp, discovered)
     const manifest = JSON.parse(split.text)
+    if (mergeFolders) manifest.folders = await mergeFolders(previous.folders || {})
+    else if (previous.folders) manifest.folders = previous.folders
     if (Object.keys(cleanup.retired).length) manifest.retiredParts = cleanup.retired
     if (Number.isFinite(scannedAt)) manifest.partsScannedAt = scannedAt
     const text = JSON.stringify(manifest, null, 2) + '\n'

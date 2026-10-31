@@ -89,6 +89,7 @@ jobs:
           node tests/browser/search-playlist.cjs
           node tests/browser/card-playback.cjs
           node tests/browser/card-insertion-settings.cjs
+          node tests/browser/playlist-folders.cjs
           node tests/browser/full-srt-dialog.cjs
           node tests/browser/results-scrolling.cjs
           node tests/browser/compound-vocabulary-groups.cjs
@@ -126,6 +127,7 @@ jobs:
           node tests/browser/player-replay.cjs
           node tests/browser/card-playback.cjs
           node tests/browser/card-insertion-settings.cjs
+          node tests/browser/playlist-folders.cjs
           node tests/browser/search-playlist.cjs
           node tests/browser/view-switching.cjs
           node tests/browser/spotify-practice.cjs

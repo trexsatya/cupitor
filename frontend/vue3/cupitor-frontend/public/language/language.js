@@ -1,3 +1,5 @@
+import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
+import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js';
 import { retainCaptionEnds } from './caption-capture.js';
 import { openLocalSubtitlePicker, readLocalSubtitleText } from './local-file-picker.js';
 import { createLocalSpeakOver, localSpeakOverIdentity } from './local-speakover.js';
@@ -11978,7 +11980,7 @@ function _saveRecording() {
     try { localStorage.removeItem(REC_KEY) } catch (_) {}
     // Compare playlist content with the confirmed baseline. Saving selection
     // or recording state alone must not create pending changes.
-    window._recordingsDirty = recordingsHaveChanges(_persistableRecordings(), syncPrevious) ||
+    window._recordingsDirty = recordingsHaveChanges(_persistableRecordings(), syncPrevious) || _playlistFoldersDirty() ||
       (!syncBaseline && !!window._recordingsDirty)
     _refreshRecordingSyncBtn()
     // Keep notification lists in step with playlist edits (debounced, no-op
@@ -12032,7 +12034,15 @@ async function _readRecordingsFile(who, path, fresh = false) {
 }
 
 async function _readRecordingsCollection(who, fresh = false) {
-  return loadRecordingsFiles((path, retryFresh) => _readRecordingsFile(who, path, fresh || retryFresh))
+  return loadRecordingsFiles((path, retryFresh) => _readRecordingsFile(who, path, fresh || retryFresh), {
+    onMetadata: (root, retried) => {
+      if (who !== 'self') return
+      const state = _playlistFolderState()
+      state.catalog = mergeFolderCatalog(state.catalog, root.folders)
+      if (fresh || retried) state.base = mergeFolderCatalog(root.folders)
+      _persistPlaylistFolders()
+    }
+  })
 }
 
 async function loadRecordingsFromGithub() {
@@ -12291,11 +12301,14 @@ async function syncRecordingsToGithub() {
   if (!window._recordingsDirty || !_requireSelf()) return
   let syncCollisions = []
   const localSnapshot = JSON.parse(JSON.stringify(_persistableRecordings()))
+  const folderSnapshot = mergeFolderCatalog(_playlistFolderState().catalog)
+  let pushedFolders = folderSnapshot
   const chosen = {}
   window._recordingsSyncing = true
   _refreshRecordingSyncBtn()
   try {
     const pushed = await syncRecordingsFiles({
+      mergeFolders: remote => (pushedFolders = mergeFolderCatalog(folderSnapshot, remote)),
       listParts: () => listRecordingsParts({
         ..._dsWriteTarget(), directory: `${_langRepoDir()}/recordings`,
         request: (method, path) => window.GitHubUtils.request(method, path)
@@ -12336,8 +12349,12 @@ async function syncRecordingsToGithub() {
     _adoptRecordings(next.merged)
     try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings())) } catch (_) {}
     _saveRecordingsBase(pushed)
+    const folders = _playlistFolderState()
+    folders.catalog = mergeFolderCatalog(folders.catalog, pushedFolders)
+    folders.base = pushedFolders
+    _persistPlaylistFolders()
     _reportRecordingCollisions(syncCollisions)
-    window._recordingsDirty = !_sameJson(_persistableRecordings(), pushed)
+    window._recordingsDirty = !_sameJson(_persistableRecordings(), pushed) || _playlistFoldersDirty()
     try {
       if (window._recordingsDirty) localStorage.setItem(REC_DIRTY_KEY, '1')
       else localStorage.removeItem(REC_DIRTY_KEY)
@@ -12356,7 +12373,7 @@ async function syncRecordingsToGithub() {
 
 function _refreshRecordingSyncBtn() {
   window._recordingsDirty = recordingsHaveChanges(
-    _persistableRecordings(), _loadRecordingsBase(), window._recordingsDirty)
+    _persistableRecordings(), _loadRecordingsBase(), window._recordingsDirty) || _playlistFoldersDirty()
   try {
     if (window._recordingsDirty) localStorage.setItem(REC_DIRTY_KEY, '1')
     else localStorage.removeItem(REC_DIRTY_KEY)
@@ -12419,10 +12436,10 @@ function createRecording(name) {
   name = String(name || '').trim()
   if (!name) return false
   if (window._recordings[name]) {
-    alert(`A recording named "${name}" already exists.`)
+    alert(`A playlist named "${name}" already exists.`)
     return false
   }
-  window._recordings[name] = { items: {}, createdAt: Date.now(), updatedAt: Date.now() }
+  window._recordings[name] = { items: {}, folder:playlistBrowserState(_playlistFolderKey()).folder || '', createdAt: Date.now(), updatedAt: Date.now() }
   selectRecording(name)
   return true
 }
@@ -12485,6 +12502,7 @@ function createRandomFromAllPlaylist({ count = 50 } = {}) {
   const prev = window._recordings[RANDOM_REC_NAME]
   window._recordings[RANDOM_REC_NAME] = {
     items: grouped,
+    folder:prev ? folderPath(prev.folder) : (playlistBrowserState(_playlistFolderKey()).folder || ''),
     createdAt: (prev && prev.createdAt) || Date.now(),
     updatedAt: Date.now(),
     random: true
@@ -12726,6 +12744,7 @@ function _openRandomBuilderDialog() {
     const prev = window._recordings[targetName]
     window._recordings[targetName] = {
       items: grouped,
+      folder:prev ? folderPath(prev.folder) : (playlistBrowserState(_playlistFolderKey()).folder || ''),
       createdAt: (prev && prev.createdAt) || Date.now(),
       updatedAt: Date.now(),
       random: true
@@ -12993,6 +13012,7 @@ function _openCategoryPlaylistDialog() {
       // category (see _detectItemCategory). Stored once per playlist (the name),
       // not per item.
       vocabCategory: cat,
+      folder:prev ? folderPath(prev.folder) : (playlistBrowserState(_playlistFolderKey()).folder || ''),
       createdAt: (prev && prev.createdAt) || Date.now(),
       updatedAt: Date.now()
     }
@@ -13742,7 +13762,7 @@ function createVirtualRecording(name, members) {
   name = String(name || '').trim()
   if (!name) return false
   if (window._recordings[name]) {
-    alert(`A recording named "${name}" already exists.`)
+    alert(`A playlist named "${name}" already exists.`)
     return false
   }
   // The other user's playlists are not members: an own playlist is saved,
@@ -13755,6 +13775,7 @@ function createVirtualRecording(name, members) {
   window._recordings[name] = {
     virtual: true,
     members: valid,
+    folder:playlistBrowserState(_playlistFolderKey()).folder || '',
     createdAt: Date.now(),
     updatedAt: Date.now()
   }
@@ -13788,7 +13809,7 @@ function renameRecording(oldName, newName) {
   if (_refuseReadOnlyPlaylist(oldName)) return false
   if (newName === oldName) return true
   if (window._recordings[newName]) {
-    alert(`A recording named "${newName}" already exists.`)
+    alert(`A playlist named "${newName}" already exists.`)
     return false
   }
   window._recordings[newName] = window._recordings[oldName]
@@ -13843,7 +13864,7 @@ function deleteRecording(name) {
   if (_refuseReadOnlyPlaylist(name)) return false
   const isV = _isVirtual(name)
   const count = isV ? _recordingItemCountByName(name) : _recordingItemCountIn(window._recordings[name].items)
-  const kind = isV ? 'virtual playlist' : 'recording'
+  const kind = isV ? 'virtual playlist' : 'playlist'
   if (!confirm(`Delete ${kind} "${name}"${count ? ` (${count} item${count === 1 ? '' : 's'})` : ''}? This cannot be undone.`)) return false
   // Voice recordings of the deleted playlist's manual cards (virtual playlists
   // only reference their members' items, so they own no audio to delete).
@@ -13880,7 +13901,7 @@ function duplicateRecording(name, newName) {
   if (!window._recordings[name]) return false
   newName = String(newName || (name + ' (copy)')).trim()
   if (window._recordings[newName]) {
-    alert(`A recording named "${newName}" already exists.`)
+    alert(`A playlist named "${newName}" already exists.`)
     return false
   }
   if (window._recordings[name].virtual) {
@@ -13902,6 +13923,7 @@ function duplicateRecording(name, newName) {
     const copy = JSON.parse(JSON.stringify(window._recordings[name].items || {}))
     window._recordings[newName] = { items: copy, createdAt: Date.now(), updatedAt: Date.now() }
   }
+  window._recordings[newName].folder = folderPath(window._recordings[name].folder)
   selectRecording(newName)
   return true
 }
@@ -16930,6 +16952,95 @@ function _renumberRecItems($dlg) {
   })
 }
 
+// Folder metadata is synced in the recordings manifest, separately from cards.
+const _playlistFolderStates = new Map()
+function _playlistFolderKey() { return _scopedKey('cupitor:playlistFolders:' + getLangFromUrl().fullName) }
+function _playlistFolderState() {
+  const key = _playlistFolderKey()
+  if (!_playlistFolderStates.has(key)) {
+    const read = suffix => { try { return mergeFolderCatalog(JSON.parse(localStorage.getItem(key + suffix) || '{}')) } catch (_) { return {} } }
+    _playlistFolderStates.set(key, {catalog:read(''),base:read(':base')})
+  }
+  return _playlistFolderStates.get(key)
+}
+function _persistPlaylistFolders() {
+  const state = _playlistFolderState(), key = _playlistFolderKey()
+  try {
+    localStorage.setItem(key, JSON.stringify(state.catalog))
+    localStorage.setItem(key + ':base', JSON.stringify(state.base))
+  } catch(e) { console.warn('Could not persist playlist folders', e) }
+}
+function _playlistFoldersDirty() {
+  const state = _playlistFolderState()
+  return !_sameJson(state.catalog,state.base)
+}
+function _folderSelect(value = '') {
+  const $select = $('<select aria-label="Parent folder">').append($('<option value="">').text('Unfiled / root'))
+  folderPaths(window._recordings,_playlistFolderState().catalog).forEach(path => $select.append($('<option>').val(path).text(path)))
+  return $select.val(value)
+}
+function _openPlaylistFolderEditor(from = null, parent = '') {
+  const $dialog = $('<div class="pl-folder-editor">').appendTo('body')
+  const $name = $('<input type="text" aria-label="Folder name" autocomplete="off">').val(from ? from.split('/').at(-1) : '')
+  const $parent = _folderSelect(from ? from.split('/').slice(0,-1).join('/') : parent)
+  $dialog.append($('<label>').text('Folder name').append($name),$('<label>').text('Parent folder').append($parent))
+  const $error = $('<p class="pl-form-error" role="alert">').appendTo($dialog)
+  const save = () => {
+    try {
+      const result = folderChange(window._recordings,_playlistFolderState().catalog,{from,name:$name.val(),parent:$parent.val()})
+      window._recordings = result.playlists
+      _playlistFolderState().catalog = result.catalog
+      playlistBrowserState(_playlistFolderKey()).folder = result.path
+      _persistPlaylistFolders(); _saveRecording()
+      $dialog.dialog('close'); openRecordingReviewDialog()
+    } catch(e) { $error.text(e.message) }
+  }
+  $name.on('keydown',e=>{if(e.key==='Enter'){e.preventDefault();save()}})
+  $dialog.dialog({title:from?'Rename or move folder':'New folder',modal:true,width:Math.min(440,innerWidth-24),
+    buttons:[{text:from?'Save folder':'Create folder',click:save},{text:'Cancel',click:()=>$dialog.dialog('close')}],
+    close:()=>$dialog.dialog('destroy').remove()})
+  $name.trigger('focus')
+}
+function _openPlaylistMove(name) {
+  const playlist=window._recordings[name]
+  if (!playlist || playlist.external || _refuseReadOnlyPlaylist(name)) return
+  const $dialog=$('<div class="pl-folder-editor">').appendTo('body')
+  const $folder=_folderSelect(folderPath(playlist.folder)).attr('aria-label','Destination folder')
+  $dialog.append($('<p>').text('Move “'+name+'” into a folder.'),$('<label>').text('Destination folder').append($folder))
+  $dialog.dialog({title:'Move playlist',modal:true,width:Math.min(440,innerWidth-24),buttons:{
+    Move:()=>{
+      const target=String($folder.val() || '')
+      if(target&&!folderPaths(window._recordings,_playlistFolderState().catalog).includes(target))return
+      playlist.folder=target;playlist.updatedAt=Date.now();_saveRecording()
+      playlistBrowserState(_playlistFolderKey()).folder=target
+      $dialog.dialog('close');openRecordingReviewDialog()
+    },Cancel:()=>$dialog.dialog('close')},close:()=>$dialog.dialog('destroy').remove()})
+}
+function _collapsePlaylistBrowser() {
+  playlistBrowserState(_playlistFolderKey()).detailsOpen=false
+  const panel=document.getElementById('playlistBrowserPanel')
+  if(panel)panel.open=false
+}
+function _mountPlaylistLibrary($dialog) {
+  $dialog.find('#playlistBrowserPanel').on('toggle', function () { if(this.isConnected)playlistBrowserState(_playlistFolderKey()).detailsOpen=this.open })
+  mountPlaylistBrowser($dialog.find('#playlistBrowser')[0],{
+    playlists:window._recordings,catalog:_playlistFolderState().catalog,currentName:window._recording.currentName,
+    scope:_playlistFolderKey(),count:_recordingItemCountByName,
+    onSelect:name=>{_collapsePlaylistBrowser();if(selectRecording(name))openRecordingReviewDialog()},
+    onNew:()=>{const name=prompt('Name for the new playlist:');if(name&&createRecording(name)){_collapsePlaylistBrowser();openRecordingReviewDialog()}},
+    onCreate:parent=>_openPlaylistFolderEditor(null,parent),onEdit:from=>_openPlaylistFolderEditor(from),
+    onDelete:from=>{
+      try {
+        const result=folderChange(window._recordings,_playlistFolderState().catalog,{from,remove:true})
+        _playlistFolderState().catalog=result.catalog
+        playlistBrowserState(_playlistFolderKey()).folder=result.path
+        _persistPlaylistFolders();_saveRecording();openRecordingReviewDialog()
+      }catch(e){alert(e.message)}
+    }
+  })
+  $dialog.off('click','#playlistMove').on('click','#playlistMove',()=>_openPlaylistMove(window._recording.currentName))
+}
+
 function openRecordingReviewDialog() {
   let $dlg = $('#recordingReviewDialog')
   if (!$dlg.length) {
@@ -16979,7 +17090,14 @@ function openRecordingReviewDialog() {
     <button type="button" class="rec-page-step" data-page="${review.page + 1}" aria-label="Next playlist page"${review.page + 1 === review.pageCount ? ' disabled' : ''}>›</button>
     <span class="rec-page-range">${review.start + 1}–${review.end} of ${review.total}</span>
   </nav>` : ''
-  let html = ''
+  const browserState = playlistBrowserState(_playlistFolderKey())
+  if (!_wasOpen) browserState.detailsOpen = true
+  else {
+    const previousBrowser=$dlg.find('#playlistBrowserPanel')[0], previousFolders=$dlg.find('.pl-folder-pane')[0]
+    if(previousBrowser)browserState.detailsOpen=previousBrowser.open
+    if(previousFolders)browserState.foldersOpen=previousFolders.open
+  }
+  let html = '<details id="playlistBrowserPanel"' + (browserState.detailsOpen === false ? '' : ' open') + '><summary>Browse playlists</summary><div id="playlistBrowser"></div></details><div class="pl-details-heading"><span>Selected playlist</span><strong>' + _.escape(currentName) + '</strong><small>' + _.escape(folderPath(window._recordings[currentName]?.folder) || 'Unfiled') + '</small></div>'
   // ── Header: switch / create / new-virtual / rename / duplicate / delete ──
   html += `<div class="rec-rec-header" style="margin-bottom:10px;padding:6px 6px 8px;border-bottom:1px solid #ddd;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
     <label style="font-size:12px;color:#555;">Playlist:</label>
@@ -17000,6 +17118,7 @@ function openRecordingReviewDialog() {
     <button type="button" id="recRecFromCategory" class="btn rec-rec-btn" title="Build a playlist of subtitle examples for every word in one vocabulary category" aria-label="Build playlist from category"><span class="rec-rec-ico">📚</span><span class="rec-rec-lbl">From Category</span></button>
     <button type="button" id="recRecAddManual"  class="btn rec-rec-btn" title="Add a manual flashcard entry (source/target + optional media link)" aria-label="Add manual entry"${itemsLocked ? ' disabled' : ''}><span class="rec-rec-ico">📝</span><span class="rec-rec-lbl">Add card</span></button>
     <button type="button" id="recRecTranslate" class="btn rec-rec-btn" title="Translate each word/phrase (only where a translation is missing) and store it as a placeholder translation" aria-label="Translate phrases"${itemsLocked ? ' disabled' : ''}><span class="rec-rec-ico">🌐</span><span class="rec-rec-lbl">Translate</span></button>
+    <button type="button" id="playlistMove" class="btn rec-rec-btn" aria-label="Move playlist to folder"${isReadOnlyCurrent || window._recordings[currentName]?.external ? ' disabled' : ''}>▱ Move to folder</button>
     <button type="button" id="recRecRename"    class="btn rec-rec-btn" title="Rename this playlist" aria-label="Rename this playlist"${isReadOnlyCurrent ? ' disabled' : ''}><span class="rec-rec-ico">✎</span><span class="rec-rec-lbl">Rename</span></button>
     <button type="button" id="recRecDuplicate" class="btn rec-rec-btn" title="Duplicate this playlist" aria-label="Duplicate this playlist"><span class="rec-rec-ico">⎘</span><span class="rec-rec-lbl">Duplicate</span></button>
     <button type="button" id="recRecDelete"    class="btn rec-rec-btn rec-rec-danger" title="Delete this playlist" aria-label="Delete this playlist"${isReadOnlyCurrent ? ' disabled' : ''}><span class="rec-rec-ico">🗑</span><span class="rec-rec-lbl">Delete</span></button>
@@ -17164,7 +17283,9 @@ function openRecordingReviewDialog() {
     $oldPicker.select2('close')
     $oldPicker.select2('destroy')
   }
+  const filterFocus = document.activeElement?.id === 'playlistFilter' ? {start:document.activeElement.selectionStart,end:document.activeElement.selectionEnd} : null
   $dlg.html(html + pageNav)
+  _mountPlaylistLibrary($dlg)
   _renumberRecItems($dlg)
 
   $dlg.off('click', '.rec-page-step').on('click', '.rec-page-step', function (e) {
@@ -17274,11 +17395,12 @@ function openRecordingReviewDialog() {
   $dlg.off('change', '#recRecSelect').on('change', '#recRecSelect', function (e) {
     e.stopPropagation()
     const name = String($(this).val() || '')
+    _collapsePlaylistBrowser()
     if (selectRecording(name)) openRecordingReviewDialog()
   })
   $dlg.off('click', '#recRecNew').on('click', '#recRecNew', function (e) {
     e.preventDefault(); e.stopPropagation()
-    const name = prompt('Name for the new recording:')
+    const name = prompt('Name for the new playlist:')
     if (name && createRecording(name)) openRecordingReviewDialog()
   })
   $dlg.off('click', '#recRecNewVirtual').on('click', '#recRecNewVirtual', function (e) {
@@ -17448,9 +17570,10 @@ function openRecordingReviewDialog() {
       _cardHasAudio(it) || _isAudioMediaUrl(it.mediaUrl)
     ))))
   const opts = {
-    title: 'Recorded Searches',
-    width: Math.min(720, $(window).width() - 40),
-    height: Math.min(560, $(window).height() - 60),
+    title: 'Playlists',
+    dialogClass: 'playlist-library-dialog',
+    width: Math.min(1000, $(window).width() - 24),
+    height: Math.min(820, $(window).height() - 48),
     modal: false,
     autoOpen: true,
     // No drag/resize: the global dialogopen handler pins the position anyway,
@@ -17497,14 +17620,6 @@ function openRecordingReviewDialog() {
   } else {
     $dlg.dialog(opts)
   }
-  // The previous picker was closed and destroyed before replacing the HTML.
-  // dropdownParent keeps the new search dropdown layered inside the dialog.
-  try {
-    const $sel = $dlg.find('#recRecSelect')
-    if ($sel.length) {
-      $sel.select2({ width: 'resolve', dropdownParent: $dlg })
-    }
-  } catch (_) {}
   // Previews update in place; native scrolling and scroll anchoring handle
   // their layout changes without probing or rewriting the scroll position.
   _lazyLoadRecItemPreviews($dlg)
@@ -17515,6 +17630,10 @@ function openRecordingReviewDialog() {
   if (_prevDialogPosition) $dlg.closest('.ui-dialog').css(_prevDialogPosition)
   // Restore synchronously. Later callbacks must not overwrite a newer scroll.
   // Switching playlists or pages starts at 0.
+  if (filterFocus) {
+    const input=$dlg.find('#playlistFilter')[0]
+    input.focus({preventScroll:true});input.setSelectionRange(filterFocus.start,filterFocus.end)
+  }
   if (_wasOpen) $dlg[0].scrollTop = _prevScrollTop
 }
 

@@ -68,9 +68,12 @@ async function checkMomentum(browser, full) {
         if (mode === 'picker-refresh') {
           // A native playlist update can rebuild the dialog while the user
           // is still searching in its picker, without selecting an option.
-          await page.locator('#recordingReviewDialog .rec-rec-header .select2-selection').tap()
+          await page.locator('#playlistBrowserPanel > summary').tap()
+          await page.locator('#playlistFilter').fill(name)
           await page.evaluate(() => window.openRecordingReviewDialog())
-          assert.equal(await page.locator('.select2-dropdown').count(), 0)
+          assert.equal(await page.locator('#playlistFilter').inputValue(),name)
+          assert.equal(await page.evaluate(()=>document.activeElement.id),'playlistFilter')
+          await page.locator('#playlistBrowserPanel > summary').tap()
         }
         const start = await page.locator('#recordingReviewDialog').evaluate((el, mode) => {
           window.scrollTo({ top: 5000, behavior: 'instant' })

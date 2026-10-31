@@ -216,3 +216,46 @@ test('a still-missing active part fails after one refresh, and unrelated read fa
   await expect(loadRecordingsFiles(offline)).rejects.toThrow('offline')
   expect(offline).toHaveBeenCalledTimes(1)
 })
+
+test('folder catalogs sync atomically with playlists, preserve empty folders and survive callers without folder edits', async () => {
+  const initial=await splitRecordings({A:{folder:'Swedish/Listening',items:{}}},options)
+  const root=JSON.parse(initial.text);root.folders={'Swedish/Empty':{updatedAt:1,deleted:false}}
+  const disk=new Map([['recordings.json',JSON.stringify(root)],...initial.files])
+  const readFile=path=>disk.get(path)??null
+  const commitFiles=async files=>{
+    const updates=await Promise.all(files.map(async f=>[f.path,await f.getContent(disk.get(f.path)??null)]))
+    for(const [path,text] of updates)disk.set(path,text)
+  }
+  await syncRecordingsFiles({readFile,commitFiles,merge:r=>r,splitOptions:options,
+    mergeFolders:remote=>({...remote,New:{updatedAt:2,deleted:false}})})
+  const metadata=jest.fn()
+  const loaded=await loadRecordingsFiles(readFile,{onMetadata:metadata})
+  expect(loaded.A.folder).toBe('Swedish/Listening')
+  expect(metadata.mock.calls[0][0].folders).toEqual({'Swedish/Empty':{updatedAt:1,deleted:false},New:{updatedAt:2,deleted:false}})
+  await syncRecordingsFiles({readFile,commitFiles,merge:r=>r,splitOptions:options})
+  expect(JSON.parse(disk.get('recordings.json')).folders).toEqual(metadata.mock.calls[0][0].folders)
+})
+test('folder metadata is not adopted from an incomplete playlist snapshot', async()=>{
+  const split=await splitRecordings(simpleCards('test'),options),root=JSON.parse(split.text)
+  root.folders={Empty:{updatedAt:1,deleted:false}}
+  const onMetadata=jest.fn()
+  await expect(loadRecordingsFiles(path=>path==='recordings.json'?JSON.stringify(root):Promise.reject(new Error('missing')),{onMetadata})).rejects.toThrow('missing')
+  expect(onMetadata).not.toHaveBeenCalled()
+})
+
+test('a racing folder edit retries against the fresh catalog and preserves both devices', async()=>{
+  const initial=await splitRecordings({A:{items:{}}},options),disk=new Map([['recordings.json',initial.text],...initial.files])
+  let calls=0
+  const mergeFolders=remote=>({...remote,Local:{updatedAt:4,deleted:false}})
+  await syncRecordingsFiles({readFile:path=>disk.get(path)??null,merge:r=>r,mergeFolders,splitOptions:options,
+    commitFiles:async files=>{
+      if(++calls===1){
+        const root=JSON.parse(disk.get('recordings.json'));root.folders={Remote:{updatedAt:3,deleted:false}}
+        disk.set('recordings.json',JSON.stringify(root))
+      }
+      const updates=await Promise.all(files.map(async f=>[f.path,await f.getContent(disk.get(f.path)??null)]))
+      for(const [path,text] of updates)disk.set(path,text)
+    }})
+  expect(calls).toBe(2)
+  expect(Object.keys(JSON.parse(disk.get('recordings.json')).folders).sort()).toEqual(['Local','Remote'])
+})
