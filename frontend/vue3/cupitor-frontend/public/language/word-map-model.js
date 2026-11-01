@@ -25,18 +25,31 @@ export function imageLink(v) {
 export function parseImageLinks(text) {
   const links = []
   let rejected = 0
-  for (const token of String(text || '').split(/\s+/).filter(Boolean)) {
+  for (const token of String(text || '')
+    .split(/\s+/)
+    .filter(Boolean)) {
     const link = imageLink(token)
     if (!link) rejected++
     else if (!links.includes(link)) links.push(link)
   }
-  return { links: links.slice(0, MAX_IMAGES), rejected, truncated: Math.max(0, links.length - MAX_IMAGES) }
+  return {
+    links: links.slice(0, MAX_IMAGES),
+    rejected,
+    truncated: Math.max(0, links.length - MAX_IMAGES),
+  }
 }
 export const newId = () =>
   globalThis.crypto?.randomUUID?.() ||
   'wm-' + Date.now().toString(36) + Math.random().toString(36).slice(2)
 export function emptyMap(name = 'Untitled map') {
   return { version: 1, id: newId(), name, nodes: [], edges: [] }
+}
+// Native colour pickers use six-digit hex; accept shorthand and pasted codes too.
+export function normalizeNodeColor(value, fallback = '') {
+  if (typeof value !== 'string') return fallback
+  let hex = value.trim().replace(/^#/, '')
+  if (/^[\da-f]{3}$/i.test(hex)) hex = [...hex].map((c) => c + c).join('')
+  return /^[\da-f]{6}$/i.test(hex) ? '#' + hex.toLowerCase() : fallback
 }
 export function readMap(value) {
   const data = typeof value === 'string' ? JSON.parse(value) : value
@@ -54,7 +67,6 @@ export function readMap(value) {
   const ids = new Set(),
     edgeIds = new Set()
   const str = (v) => (typeof v === 'string' ? v.slice(0, 10000) : '')
-  const color = (v) => (/^#[\da-f]{6}$/i.test(v) ? v : '#dc3636')
   const nodes = data.nodes.map((n) => {
     if (
       !n ||
@@ -78,12 +90,12 @@ export function readMap(value) {
       y: Math.max(40, Math.min(1560, n.y)),
       lookup: str(n.lookup),
       note: str(n.note),
-      color: color(n.color),
+      color: normalizeNodeColor(n.color, '#dc3636'),
+      textColor: normalizeNodeColor(n.textColor, '#ffffff'),
       shape: n.shape === 'ellipse' ? 'ellipse' : 'rectangle',
-      images: [...new Set((Array.isArray(n.images) ? n.images : []).map(imageLink).filter(Boolean))].slice(
-        0,
-        MAX_IMAGES
-      ),
+      images: [
+        ...new Set((Array.isArray(n.images) ? n.images : []).map(imageLink).filter(Boolean)),
+      ].slice(0, MAX_IMAGES),
     }
   })
   const edges = data.edges.map((e) => {

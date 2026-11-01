@@ -223,3 +223,107 @@ test('lookup minimizes and restoring preserves the selected word, mode and zoom'
   click('Close')
   assert.equal(document.querySelector('#wordMapsDialog'), null)
 })
+
+function colourInput(label, value) {
+  const input = document.querySelector('[aria-label="' + label + '"]')
+  assert.ok(input, label)
+  input.value = value
+  input.dispatchEvent(new window.Event('input'))
+  return input
+}
+function finishNewWord() {
+  document
+    .querySelector('foreignObject input')
+    .dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }))
+}
+test('node foreground/background codes update swatches, canvas and saved maps', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  click('+ Word')
+  finishNewWord()
+  colourInput('Background color hex code', '#AbC')
+  colourInput('Text color hex code', '123456')
+  assert.equal(
+    document.querySelector('[aria-label="Background color picker"]').value,
+    '#aabbcc'
+  )
+  assert.equal(
+    document.querySelector('[aria-label="Text color picker"]').value,
+    '#123456'
+  )
+  submit()
+  assert.equal(saved().nodes[0].color, '#aabbcc')
+  assert.equal(saved().nodes[0].textColor, '#123456')
+  assert.equal(
+    document.querySelector('[data-node] rect').getAttribute('fill'),
+    '#aabbcc'
+  )
+  assert.equal(
+    document.querySelector('[data-node] text').getAttribute('fill'),
+    '#123456'
+  )
+  colourInput('Text color picker', '#654321')
+  assert.equal(
+    document.querySelector('[aria-label="Text color hex code"]').value,
+    '#654321'
+  )
+  submit()
+  click('Close')
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  assert.equal(
+    document.querySelector('[data-node] text').getAttribute('fill'),
+    '#654321'
+  )
+  assert.equal(
+    document.querySelector('[data-node] rect').getAttribute('fill'),
+    '#aabbcc'
+  )
+  document.querySelector('[role=switch]').click()
+  document
+    .querySelector('[data-node]')
+    .dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }))
+  document
+    .querySelector('[data-node]')
+    .dispatchEvent(
+      new window.KeyboardEvent('keydown', { key: 'F2', bubbles: true })
+    )
+  const editor = document.querySelector('foreignObject input')
+  assert.equal(editor.style.color, 'rgb(101, 67, 33)')
+  assert.equal(editor.style.background, 'rgb(170, 187, 204)')
+})
+test('invalid colour codes cannot overwrite a saved node', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  click('+ Word')
+  finishNewWord()
+  const before = localStorage.getItem('maps')
+  const code = colourInput('Text color hex code', '#invalid')
+  assert.equal(code.checkValidity(), false)
+  submit()
+  assert.equal(localStorage.getItem('maps'), before)
+  colourInput('Text color hex code', '#111')
+  assert.equal(code.checkValidity(), true)
+  submit()
+  assert.equal(saved().nodes[0].textColor, '#111111')
+})
+test('group styling accepts foreground and background colour codes', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  click('+ Word')
+  finishNewWord()
+  click('+ Word')
+  finishNewWord()
+  const ids = [...document.querySelectorAll('[data-node]')].map((n) =>
+    n.getAttribute('data-node')
+  )
+  document
+    .querySelector('[data-node="' + ids[0] + '"]')
+    .onpointerdown(new window.MouseEvent('pointerdown', { button: 0, shiftKey: true }))
+  colourInput('Background color for all hex code', '#001122')
+  colourInput('Text color for all hex code', '#ffeedd')
+  submit()
+  for (const n of saved().nodes) {
+    assert.equal(n.color, '#001122')
+    assert.equal(n.textColor, '#ffeedd')
+  }
+})

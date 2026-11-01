@@ -229,3 +229,34 @@ test('failed upload keeps the prior baseline and unsynced local changes', async 
   assert.equal(f.options.storage.getItem('maps:base:self/main/swedish'), before)
   assert.equal(sync.dirty(f.local), true)
 })
+
+test('foreground and background colours survive GitHub sync and another device pull', async () => {
+  const coloured = readMap({
+    ...map('colours'),
+    nodes: [
+      {
+        id: 'n',
+        word: 'Ljus',
+        x: 200,
+        y: 100,
+        color: '#abc',
+        textColor: '#123',
+      },
+    ],
+  })
+  const f = fixture([coloured], []),
+    sync = createWordMapSync(f.options)
+  await sync.push(f.get, f.adopt)
+  const other = createWordMapSync({
+    ...f.options,
+    storage: memory(),
+    storageKey: 'another-device',
+  })
+  let pulled
+  await other.pull(
+    () => [],
+    (maps) => (pulled = maps)
+  )
+  assert.equal(pulled[0].nodes[0].color, '#aabbcc')
+  assert.equal(pulled[0].nodes[0].textColor, '#112233')
+})
