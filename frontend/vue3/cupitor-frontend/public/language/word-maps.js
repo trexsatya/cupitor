@@ -64,11 +64,17 @@ export function hostBridge(postMessage) {
 export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, onImport, sync }) {
   const existing = document.querySelector('#wordMapsDialog')
   if (existing) {
-    existing.showModal()
-    return
+    if (existing.dataset.scope === storageKey) {
+      existing.dispatchEvent(new window.Event('wordmapsrestore'))
+      return
+    }
+    existing.close()
+    existing.remove()
+    document.querySelector('#wordMapsRestore')?.remove()
   }
   const dialog = el('dialog', null, 'word-maps')
   dialog.id = 'wordMapsDialog'
+  dialog.dataset.scope = storageKey
   dialog.setAttribute('aria-label', 'Word maps')
   let maps = [],
     map = null,
@@ -83,7 +89,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     inline = null,
     lastTap = null,
     transientId = null,
-    syncing = false
+    syncing = false,
+    minimized = false
   const editing = () => mode === 'edit'
   const editOnly = []
   const status = el('span', '', 'wm-status')
@@ -109,12 +116,17 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   syncButton.className = 'wm-sync'
   const toolbar = el('div', null, 'wm-toolbar'),
     picker = el('select'),
-    modeGroup = el('div', null, 'wm-modes'),
-    modeEdit = button('Edit', () => setMode('edit')),
-    modeRead = button('Read', () => setMode('read'))
-  modeGroup.setAttribute('role', 'group')
-  modeGroup.setAttribute('aria-label', 'Mode')
-  modeGroup.append(modeEdit, modeRead)
+    modeGroup = el('label', null, 'wm-mode-toggle'),
+    modeToggle = el('input')
+  modeToggle.type = 'checkbox'
+  modeToggle.setAttribute('role', 'switch')
+  modeToggle.setAttribute('aria-label', 'Edit mode')
+  modeToggle.onchange = () => setMode(modeToggle.checked ? 'edit' : 'read')
+  modeGroup.append(el('span', 'Read'), modeToggle, el('span', 'Edit'))
+  const restoreButton = button('Restore Word map', restoreMap)
+  restoreButton.id = 'wordMapsRestore'
+  restoreButton.className = 'wm-restore'
+  restoreButton.setAttribute('aria-label', 'Restore Word map')
   picker.setAttribute('aria-label', 'Saved word map')
   const name = el('input')
   name.setAttribute('aria-label', 'Map name')
@@ -296,10 +308,27 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   dialog.addEventListener('cancel', (e) => {
     if (inline || connecting) e.preventDefault()
   })
+  dialog.addEventListener('wordmapsrestore', restoreMap)
   dialog.addEventListener('close', () => {
+    // Native close events are queued; a quick restore may already be open.
+    if (dialog.open || minimized) return
     if (inline) finishInline(true)
+    restoreButton.remove()
     dialog.remove()
   })
+  function minimizeMap() {
+    if (inline) finishInline(true)
+    minimized = true
+    restoreButton.textContent = '↗ Word map: ' + map.name
+    restoreButton.title = 'Restore ' + map.name
+    document.body.append(restoreButton)
+    dialog.close()
+  }
+  function restoreMap() {
+    minimized = false
+    restoreButton.remove()
+    if (!dialog.open) dialog.showModal()
+  }
   function button(text, fn) {
     const b = el('button', text)
     b.type = 'button'
@@ -324,8 +353,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     viewport.hidden = false
     for (const b of editOnly) b.hidden = !editing()
     name.readOnly = !editing()
-    modeEdit.setAttribute('aria-pressed', String(editing()))
-    modeRead.setAttribute('aria-pressed', String(!editing()))
+    modeToggle.checked = editing()
     hint.textContent = editing() ? EDIT_HINT : READ_HINT
     draw()
     details()
@@ -923,7 +951,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     } else if (editing() && lastTap?.id === d.id && e.timeStamp - lastTap.t < 400) {
       lastTap = null,
     transientId = null,
-    syncing = false
+    syncing = false,
+    minimized = false
       startInline(d.id)
     } else {
       lastTap = { id: d.id, t: e.timeStamp }
@@ -1004,7 +1033,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       if (n.images?.length) inspector.append(el('h4', 'Images'), imageGallery(n.images, false, n.word))
       inspector.append(
         button('Find vocabulary & clips', () => {
-          dialog.close()
+          minimizeMap()
           onLookup(n.lookup || n.word)
         })
       )
@@ -1159,7 +1188,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       }
       inspector.append(
         button('Find vocabulary & clips', () => {
-          dialog.close()
+          minimizeMap()
           onLookup(n.lookup || n.word)
         }),
         button('Connect to another word (C)', () => startConnecting(n.id)),

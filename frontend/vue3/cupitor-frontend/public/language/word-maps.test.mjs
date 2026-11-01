@@ -123,7 +123,10 @@ test('GitHub load does not publish a phantom blank map and Sync marks changes cl
   await new Promise((r) => setTimeout(r, 0))
   assert.deepEqual(JSON.parse(localStorage.getItem('maps')), [])
   click('New map')
-  assert.equal(document.querySelector('[aria-label="Saved word map"]').options.length, 1)
+  assert.equal(
+    document.querySelector('[aria-label="Saved word map"]').options.length,
+    1
+  )
   click('+ Word')
   const inline = document.querySelector('foreignObject input')
   inline.value = 'Synced word'
@@ -164,4 +167,59 @@ test('closing during GitHub load keeps newly saved local edits', async () => {
     JSON.parse(localStorage.getItem('maps'))[0].name,
     'changed after closing'
   )
+})
+
+test('one Read/Edit switch toggles editing controls', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  const toggle = document.querySelector('[role=switch][aria-label="Edit mode"]')
+  assert.ok(toggle)
+  assert.equal(toggle.checked, true)
+  toggle.click()
+  assert.equal(toggle.checked, false)
+  assert.equal(
+    [...document.querySelectorAll('button')].find(
+      (b) => b.textContent === '+ Word'
+    ).hidden,
+    true
+  )
+  toggle.click()
+  assert.equal(toggle.checked, true)
+  assert.equal(
+    [...document.querySelectorAll('button')].find(
+      (b) => b.textContent === '+ Word'
+    ).hidden,
+    false
+  )
+})
+test('lookup minimizes and restoring preserves the selected word, mode and zoom', () => {
+  setup()
+  let lookup
+  openWordMaps({ storageKey: 'maps', onLookup: (word) => (lookup = word) })
+  click('+ Word')
+  const inline = document.querySelector('foreignObject input')
+  inline.value = 'Lodrät'
+  inline.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }))
+  click('+')
+  const dialog = document.querySelector('#wordMapsDialog'),
+    canvas = dialog.querySelector('svg')
+  const width = canvas.style.width,
+    word = dialog.querySelector('[data-node]')
+  click('Find vocabulary & clips')
+  assert.equal(lookup, 'Lodrät')
+  assert.equal(dialog.hasAttribute('open'), false)
+  assert.ok(document.querySelector('#wordMapsRestore'))
+  document.querySelector('#wordMapsRestore').click()
+  assert.equal(document.querySelector('#wordMapsDialog'), dialog)
+  assert.equal(dialog.hasAttribute('open'), true)
+  assert.equal(canvas.style.width, width)
+  assert.equal(dialog.querySelector('[data-node]'), word)
+  assert.equal(dialog.querySelector('[role=switch]').checked, true)
+  assert.equal(document.querySelector('#wordMapsRestore'), null)
+  click('Find vocabulary & clips')
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  assert.equal(document.querySelectorAll('#wordMapsDialog').length, 1)
+  assert.equal(document.querySelector('#wordMapsRestore'), null)
+  click('Close')
+  assert.equal(document.querySelector('#wordMapsDialog'), null)
 })
