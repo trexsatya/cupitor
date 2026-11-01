@@ -106,7 +106,12 @@ async function checkGroups(browser, mobile) {
       for (const query of ['tröskelvärde', 'tröskelvärden']) {
         await page.locator('#searchText').fill(query)
         await page.locator('#searchText').press('Tab')
-        await page.waitForFunction(({query, autoPrefix}) => String(window._librarySearchText || '').split('|')[0] === query &&
+        // Primary vocabulary results render before asynchronous subtitle
+        // fallback. Wait for this query's stems too: matching groups alone
+        // can still be the previous query's DOM, especially on mobile.
+        await page.waitForFunction(({query, autoPrefix}) => window._vocabularySearchText === query &&
+          String(window.searchText || '').startsWith(query + '|') &&
+          String(window._librarySearchText || '').split('|')[0] === query &&
           !document.getElementById('result').textContent.includes('Loading…') &&
           document.querySelectorAll('#vocabularyResult .compound-group').length === 2 &&
           document.querySelectorAll('#vocabularyResult [data-vocab-group-kind="prefix"]').length === (autoPrefix ? 1 : 0), {query, autoPrefix})
