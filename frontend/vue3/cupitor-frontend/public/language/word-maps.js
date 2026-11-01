@@ -1,3 +1,4 @@
+import { findWordMaps } from './word-map-search.js'
 import {
   emptyMap,
   readMap,
@@ -64,11 +65,13 @@ export function hostBridge(postMessage) {
     onImport: () => ask({ type: 'import' }),
   }
 }
-export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, onImport, sync }) {
+export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, onImport, sync, focus }) {
   const existing = document.querySelector('#wordMapsDialog')
   if (existing) {
     if (existing.dataset.scope === storageKey) {
-      existing.dispatchEvent(new window.Event('wordmapsrestore'))
+      existing.dispatchEvent(focus
+        ? new window.CustomEvent('wordmapsfocus', { detail: focus })
+        : new window.Event('wordmapsrestore'))
       return
     }
     existing.close()
@@ -94,6 +97,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     transientId = null,
     syncing = false,
     minimized = false
+  let searchFocus = null, searchNodes = new Set()
   let lastDetailsKey = ''
   const editing = () => mode === 'edit'
   const editOnly = []
@@ -115,7 +119,16 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   const header = el('header'),
     title = el('h2', 'Word maps'),
     close = button('Close', () => dialog.close())
-  header.append(title, close)
+  const fullscreenButton = button('', toggleFullscreen)
+  const fullscreenIcon = svgEl('path', { d: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5' })
+  const fullscreenSvg = svgEl('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'aria-hidden': 'true' })
+  fullscreenSvg.append(fullscreenIcon)
+  fullscreenButton.append(fullscreenSvg)
+  fullscreenButton.className = 'wm-fullscreen-toggle'
+  fullscreenButton.setAttribute('aria-label', 'Enter fullscreen')
+  fullscreenButton.setAttribute('aria-pressed', 'false')
+  fullscreenButton.title = 'Enter fullscreen'
+  header.append(title, fullscreenButton, close)
   const syncButton = button('Sync', () => runSync(false))
   syncButton.className = 'wm-sync'
   const toolbar = el('div', null, 'wm-toolbar wm-main-toolbar'),
@@ -326,6 +339,11 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       moreButton.focus()
       return
     }
+    if (e.key === 'Escape' && dialog.classList.contains('wm-fullscreen') && document.fullscreenElement !== dialog) {
+      e.preventDefault()
+      leaveFullscreen()
+      return
+    }
     if (e.key === 'Escape' && connecting) {
       e.preventDefault()
       cancelConnecting()
@@ -352,14 +370,20 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     if (inline || connecting) e.preventDefault()
   })
   dialog.addEventListener('wordmapsrestore', restoreMap)
+  dialog.addEventListener('wordmapsfocus', event => {
+    restoreMap()
+    revealSearchResult(event.detail)
+  })
   dialog.addEventListener('close', () => {
     // Native close events are queued; a quick restore may already be open.
     if (dialog.open || minimized) return
     if (inline) finishInline(true)
+    leaveFullscreen()
     restoreButton.remove()
     dialog.remove()
   })
   function minimizeMap() {
+    leaveFullscreen()
     if (inline) finishInline(true)
     minimized = true
     restoreButton.textContent = '↗ Word map: ' + map.name
@@ -371,6 +395,70 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     minimized = false
     restoreButton.remove()
     if (!dialog.open) dialog.showModal()
+  }
+  let nativeFullscreen = false
+  function setExpanded(on) {
+    dialog.classList.toggle('wm-fullscreen', on)
+    fullscreenIcon.setAttribute('d', on ? 'M3 8h5V3m8 0v5h5M8 21v-5H3m18 0h-5v5' : 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5')
+    fullscreenButton.setAttribute('aria-pressed', String(on))
+    fullscreenButton.setAttribute('aria-label', on ? 'Exit fullscreen' : 'Enter fullscreen')
+    fullscreenButton.title = on ? 'Exit fullscreen' : 'Enter fullscreen'
+    setTimeout(() => {
+      if (!dialog.open) return
+      if (searchFocus) centerSearchMatch()
+      else fitMap()
+    }, 0)
+  }
+  function leaveFullscreen() {
+    setExpanded(false)
+    if (document.fullscreenElement === dialog) document.exitFullscreen?.()?.catch?.(() => {})
+  }
+  async function toggleFullscreen() {
+    if (dialog.classList.contains('wm-fullscreen')) return leaveFullscreen()
+    // Fill the WebView even where the Fullscreen API is unavailable or
+    // refused. On supported browsers/the Mac host, also enter native fullscreen.
+    setExpanded(true)
+    try {
+      await dialog.requestFullscreen?.()
+      if (!dialog.open) leaveFullscreen()
+    } catch (_) { /* expanded WebView remains usable */ }
+  }
+  dialog.addEventListener('fullscreenchange', () => {
+    const on = document.fullscreenElement === dialog
+    if (on || nativeFullscreen) setExpanded(on)
+    nativeFullscreen = on
+  })
+  function centerSearchMatch() {
+    const node = map.nodes.find(node => node.id === selection?.id)
+    if (!node) return fitMap()
+    if (!viewport.clientWidth || !viewport.clientHeight) return
+    zoom = Math.min(1, (viewport.clientWidth - 32) / (nodeWidth(node) + 32))
+    scale(0)
+    viewport.scrollTo(Math.max(0, node.x * zoom - viewport.clientWidth / 2),
+      Math.max(0, node.y * zoom - viewport.clientHeight / 2))
+  }
+  function revealSearchResult(target) {
+    const found = maps.find(map => map.id === target?.mapId)
+    if (!found) {
+      status.textContent = 'This map is no longer available.'
+      return
+    }
+    if (inline) finishInline(true)
+    activate(found)
+    // Recompute against live data: a sync may have changed the map while a
+    // result was open. A saved hit must never recolor or modify the map.
+    const hit = findWordMaps([found], target.query)[0]
+    searchNodes = new Set((hit?.nodes || []).map(node => node.id))
+    searchFocus = target
+    const id = searchNodes.has(target.nodeId) ? target.nodeId : [...searchNodes][0]
+    selection = id ? { kind: 'node', id } : null
+    name.classList.toggle('wm-search-title', !!hit?.nameMatched)
+    picker.classList.toggle('wm-search-title', !!hit?.nameMatched)
+    setMode('read')
+    const count = searchNodes.size
+    hint.textContent = count ? `${count} matching word${count === 1 ? '' : 's'} highlighted for “${target.query}”.` : READ_HINT
+    centerSearchMatch()
+    nodeEl(id)?.focus?.({ preventScroll: true })
   }
   function button(text, fn) {
     const b = el('button', text)
@@ -603,9 +691,12 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         localStorage.setItem(storageKey, JSON.stringify(next))
         if (!dialog.isConnected) return
         const currentId = map.id
+        const focused = searchFocus
         maps = next
         transientId = null
         activate(maps.find(m => m.id === currentId) || maps[0] || null)
+        if (focused && map.id === focused.mapId) revealSearchResult(focused)
+        window.dispatchEvent(new window.CustomEvent('wordmapschanged', { detail: { storageKey } }))
       }
       const result = await sync[pull ? 'pull' : 'push'](getMaps, adopt)
       status.textContent = result.conflicts
@@ -631,6 +722,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     try {
       if (persistDraft && map.id === transientId) transientId = null
       localStorage.setItem(storageKey, JSON.stringify(savedMaps()))
+      window.dispatchEvent(new window.CustomEvent('wordmapschanged', { detail: { storageKey } }))
       status.textContent = sync ? 'Saved locally · unsynced changes' : 'Saved on this device'
       refreshSync()
     } catch (_) {
@@ -648,6 +740,10 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     details()
   }
   function activate(value) {
+    searchFocus = null
+    searchNodes.clear()
+    name.classList.remove('wm-search-title')
+    picker.classList.remove('wm-search-title')
     map = value
     selection = null
     group.clear()
@@ -781,6 +877,12 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
           transform: `translate(${n.x},${n.y})`,
         })
       g.classList.add('wm-node')
+      if (searchNodes.has(n.id)) {
+        g.classList.add('wm-search-match')
+        g.append(svgEl('rect', { x: -w / 2 - 7, y: -34, width: w + 14, height: 68, rx: 16,
+          fill: 'none', stroke: '#d97706', 'stroke-width': 6, 'stroke-dasharray': '10 4',
+          'pointer-events': 'none', 'aria-hidden': 'true' }))
+      }
       if (!editing()) g.style.cursor = 'pointer'
       const attrs = {
         fill: n.color || '#dc3636',
@@ -1375,6 +1477,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   dialog.showModal()
   scale(window.innerWidth < 700 ? -0.65 : -0.45)
   if (window.innerWidth < 700) fitMap()
+  if (focus) revealSearchResult(focus)
   refreshSync()
   if (sync && !storageBroken) runSync(true)
 }

@@ -411,3 +411,90 @@ test('Fit map keeps an empty phone canvas at a readable entry scale', () => {
   click('Fit map')
   assert.equal(document.querySelector('.wm-viewport svg').style.width, '2400px')
 })
+
+test('search opens the correct map, highlights all matching nodes and restores a minimized editor', () => {
+  setup()
+  const maps = ['first', 'second'].map(id => ({ version: 1, id, name: id, edges: [], nodes: [
+    { id: id + '-a', word: 'Gräl', x: 1800, y: 1200 },
+    { id: id + '-b', word: 'Bråk', x: 2100, y: 1300 },
+  ] }))
+  localStorage.setItem('maps', JSON.stringify(maps))
+  const original = localStorage.getItem('maps')
+  openWordMaps({ storageKey: 'maps', onLookup() {}, focus: { mapId: 'second', nodeId: 'second-b', query: 'gräl|bråk' } })
+  assert.equal(document.querySelector('[aria-label="Saved word map"]').value, 'second')
+  assert.equal(document.querySelectorAll('.wm-search-match').length, 2)
+  assert.equal(document.querySelector('[aria-label="Edit mode"]').checked, false)
+  assert.equal(document.querySelector('.wm-inspector h3').textContent, 'Bråk')
+  // Lookup minimizes this exact instance. A different result must retarget it,
+  // instead of just restoring the previously selected map.
+  click('Find vocabulary & clips')
+  assert.ok(document.querySelector('#wordMapsRestore'))
+  openWordMaps({ storageKey: 'maps', onLookup() {}, focus: { mapId: 'first', nodeId: 'first-a', query: 'gräl' } })
+  assert.equal(document.querySelector('#wordMapsRestore'), null)
+  assert.equal(document.querySelectorAll('#wordMapsDialog').length, 1)
+  assert.equal(document.querySelector('[aria-label="Saved word map"]').value, 'first')
+  assert.equal(document.querySelector('.wm-search-match').getAttribute('data-node'), 'first-a')
+  assert.equal(localStorage.getItem('maps'), original, 'search highlights never change saved node colors or data')
+})
+
+test('fullscreen uses the native API, follows Escape and exits when the map closes', async () => {
+  setup()
+  let active = null
+  Object.defineProperty(document, 'fullscreenElement', { get: () => active })
+  window.HTMLElement.prototype.requestFullscreen = async function () {
+    active = this
+    this.dispatchEvent(new window.Event('fullscreenchange', { bubbles: true }))
+  }
+  document.exitFullscreen = async () => {
+    const previous = active
+    active = null
+    previous?.dispatchEvent(new window.Event('fullscreenchange', { bubbles: true }))
+  }
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  const dialog = document.querySelector('#wordMapsDialog')
+  document.querySelector('[aria-label="Enter fullscreen"]').click()
+  await Promise.resolve()
+  assert.equal(active, dialog)
+  assert.ok(dialog.classList.contains('wm-fullscreen'))
+  assert.equal(document.querySelector('[aria-label="Exit fullscreen"]').getAttribute('aria-pressed'), 'true')
+  await document.exitFullscreen() // native Escape
+  assert.equal(dialog.classList.contains('wm-fullscreen'), false)
+  document.querySelector('[aria-label="Enter fullscreen"]').click()
+  await Promise.resolve()
+  click('Close')
+  assert.equal(active, null)
+})
+
+test('fullscreen fills the WebView when its native API is unavailable or refused', async () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  const dialog = document.querySelector('#wordMapsDialog')
+  document.querySelector('[aria-label="Enter fullscreen"]').click()
+  await Promise.resolve()
+  assert.ok(dialog.classList.contains('wm-fullscreen'))
+  document.querySelector('[aria-label="Exit fullscreen"]').click()
+  assert.equal(dialog.classList.contains('wm-fullscreen'), false)
+  dialog.requestFullscreen = () => Promise.reject(new Error('unsupported in this WebView'))
+  document.querySelector('[aria-label="Enter fullscreen"]').click()
+  await Promise.resolve()
+  assert.ok(dialog.classList.contains('wm-fullscreen'))
+})
+
+test('GitHub refresh preserves a search highlight using the new map content', async () => {
+  setup()
+  const local = { version: 1, id: 'm', name: 'Map', edges: [], nodes: [{id:'a', word:'Gräl', x:200,y:200}] }
+  localStorage.setItem('maps', JSON.stringify([local]))
+  let finishPull
+  const ready = new Promise(resolve => { finishPull = resolve })
+  const sync = {dirty: () => false, pull: async (_getMaps, adopt) => {
+    await ready
+    adopt([{...local, nodes:[{id:'b', word:'Gräl', x:1500,y:1200}]}])
+    return {conflicts:0}
+  }}
+  openWordMaps({storageKey:'maps', onLookup() {}, sync, focus:{mapId:'m',nodeId:'a',query:'gräl'}})
+  assert.equal(document.querySelector('.wm-search-match').getAttribute('data-node'), 'a')
+  finishPull()
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(document.querySelector('.wm-search-match').getAttribute('data-node'), 'b')
+  assert.equal(document.querySelector('.wm-inspector h3').textContent, 'Gräl')
+})
