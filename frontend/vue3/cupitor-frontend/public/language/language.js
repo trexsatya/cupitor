@@ -3764,10 +3764,10 @@ $('document').ready(e => {
 
     if($(e.target).hasClass('link-special')) {
         stopMedia()
-        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, $(e.target).attr('data-index'), wordLang, lookupWord)
+        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, $(e.target).attr('data-index'), wordLang, lookupWord, e.target)
     } else if($(e.target).hasClass('link')) {
         stopMedia() //otherswise the popover might open and close immediately due to the click bubbling to the document listener below
-        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, null, wordLang, lookupWord)
+        _showSubtitleWordPopover(e.pageX, e.pageY, word, href, null, wordLang, lookupWord, e.target)
     }
   });
 
@@ -4172,7 +4172,7 @@ function getSwedishDictionaryLink(word, language = getLangFromUrl().code) {
 // Lazy-create + show the small popover that lets the user choose between
 // "Search here" (populate the search box) and "Search on wiki" (open the
 // stored Wiktionary URL), plus Svensk ordbok for Swedish words.
-function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLang = null, lookupWord = word) {
+function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLang = null, lookupWord = word, anchor = null) {
   let popoverId = 'subtitleWordPopover'
   if(index != null) {
     popoverId = 'subtitleWordPopoverSpecial'
@@ -4242,15 +4242,22 @@ function _showSubtitleWordPopover(pageX, pageY, word, href, index = null, wordLa
     fn(e)
     removeStarredLine(index)
   })
-  // Position next to the click, then clamp to the viewport.
+  // Keep the panel outside the tapped word, including a touch-safe gap.
+  // A panel starting four pixels from the tap overlaps the word's hit area:
+  // Chromium can retarget a second tap to its larger "Search here" button.
   $pop.removeAttr('hidden').css({ position: 'absolute', left: 0, top: 0, visibility: 'hidden' })
   const pw = $pop.outerWidth(), ph = $pop.outerHeight()
   const ww = window.innerWidth, wh = window.innerHeight
-  let left = pageX + 4
-  let top = pageY + 4
+  const rect = anchor?.getBoundingClientRect()
+  const gap = 12
+  const anchorTop = rect ? rect.top + window.scrollY : pageY
+  const anchorBottom = rect ? rect.bottom + window.scrollY : pageY
+  let left = rect ? rect.left + window.scrollX : pageX + gap
+  let top = anchorBottom + gap
   if (left + pw > window.scrollX + ww) left = window.scrollX + ww - pw - 6
-  if (top + ph > window.scrollY + wh) top = pageY - ph - 6
-  $pop.css({ left: Math.max(2, left), top: Math.max(2, top), visibility: 'visible' })
+  if (top + ph > window.scrollY + wh - 6) top = anchorTop - ph - gap
+  $pop.css({ left: Math.max(window.scrollX + 2, left),
+    top: Math.max(window.scrollY + 2, top), visibility: 'visible' })
 }
 
 function getWikiLinkSpecial(word, uri = null, index = null) {

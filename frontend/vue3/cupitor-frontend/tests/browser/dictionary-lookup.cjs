@@ -48,6 +48,13 @@ async function checkLookup(browser, language, mobile = false) {
     await click(wiki)
     const popup = page.locator('#subtitleWordPopover')
     await popup.waitFor({ state: 'visible' })
+    const assertOutsideWord = async () => {
+      const wordBox = await wiki.boundingBox(), popupBox = await popup.boundingBox()
+      assert.ok(popupBox.y >= wordBox.y + wordBox.height + 10 ||
+        popupBox.y + popupBox.height <= wordBox.y - 10,
+      'dictionary actions stay outside the word and its touch target')
+    }
+    await assertOutsideWord()
     assert.equal(await popup.locator('[data-action="search-so"]').isVisible(), language === 'swedish')
     await click(popup.locator('[data-action="search-wiki"]'))
     assert.match((await page.evaluate(() => window.dictionaryOpenedUrls)).at(-1), /wiktionary\.org\/wiki\/hagla$/)
@@ -57,13 +64,18 @@ async function checkLookup(browser, language, mobile = false) {
       await click(popup.locator('[data-action="search-so"]'))
       assert.equal((await page.evaluate(() => window.dictionaryOpenedUrls)).at(-1), base + 'hagla.html')
       // Popup reuse must hide SO for an English line, then restore it for SV.
+      const searchToken = await page.evaluate(() => window._subtitleSearchToken)
       await wiki.evaluate(el => el.parentElement.setAttribute('data-lang-code', 'en'))
       await wiki.evaluate(el => el.parentElement.classList.add('line'))
       await click(wiki)
       assert.equal(await popup.locator('[data-action="search-so"]').isVisible(), false)
+      await assertOutsideWord()
       await wiki.evaluate(el => el.parentElement.setAttribute('data-lang-code', 'sv'))
       await click(wiki)
       assert.equal(await popup.locator('[data-action="search-so"]').isVisible(), true)
+      await assertOutsideWord()
+      assert.equal(await page.evaluate(() => window._subtitleSearchToken), searchToken,
+        'reopening the dictionary popup must not activate Search here')
       await page.locator('#searchText').click()
     }
 
