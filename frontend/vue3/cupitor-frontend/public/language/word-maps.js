@@ -39,7 +39,29 @@ const EDIT_HINT =
 const READ_HINT =
   'Read mode: select a word or connection to see its details. Switch to edit mode to change the map.'
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
-export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
+// For webviews that cannot download or pick files (for example Flutter on macOS).
+// postMessage(text) must deliver the text to the host app. The host receives
+//   {"id":1,"type":"export","name":"map.json","text":"…"}  or  {"id":2,"type":"import"}
+// and answers by running  wordMapsHostReply(id, textOrNull)  in the page.
+export function hostBridge(postMessage) {
+  const pending = new Map()
+  let seq = 0
+  window.wordMapsHostReply = (id, value) => {
+    pending.get(id)?.(value)
+    pending.delete(id)
+  }
+  const ask = (message) =>
+    new Promise((resolve) => {
+      const id = ++seq
+      pending.set(id, resolve)
+      postMessage(JSON.stringify({ ...message, id }))
+    })
+  return {
+    onExport: (name, text) => ask({ type: 'export', name, text }),
+    onImport: () => ask({ type: 'import' }),
+  }
+}
+export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, onImport }) {
   const existing = document.querySelector('#wordMapsDialog')
   if (existing) {
     existing.showModal()
@@ -131,6 +153,16 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
         status.textContent = e.message
       }
     }),
+    button('Import as new map', () => {
+      try {
+        importText(script.value)
+        script.hidden = true
+        scriptTools.hidden = true
+        viewport.hidden = false
+      } catch (e) {
+        status.textContent = e.message
+      }
+    }),
     button('Cancel', () => {
       script.hidden = true
       scriptTools.hidden = true
@@ -147,11 +179,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
     try {
       if (!file.files[0]) return
       if (file.files[0].size > 2000000) throw Error('Please select a JSON file smaller than 2 MB.')
-      const imported = readMap(await file.files[0].text())
-      imported.id = newId()
-      maps.push(imported)
-      activate(imported)
-      save()
+      importText(await file.files[0].text())
     } catch (e) {
       status.textContent = e.message
     } finally {
@@ -187,10 +215,30 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
       scriptTools.hidden = false
       viewport.hidden = true
     }),
-    editBtn('Import', () => file.click()),
-    button('Export', () =>
-      download(JSON.stringify(map, null, 2), map.name + '.json', 'application/json')
-    ),
+    editBtn('Import', async () => {
+      if (!onImport) return file.click()
+      try {
+        const text = await onImport()
+        if (typeof text === 'string') importText(text)
+      } catch (e) {
+        status.textContent = 'Import failed: ' + e.message
+      }
+    }),
+    button('Export', async () => {
+      const text = JSON.stringify(map, null, 2),
+        filename = (map.name.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'word-map') + '.json'
+      try {
+        if (onExport) await onExport(filename, text)
+        else download(text, filename, 'application/json')
+      } catch (e) {
+        status.textContent = 'Export failed: ' + e.message + ' Try Copy JSON instead.'
+      }
+    }),
+    button('Copy JSON', async () => {
+      status.textContent = (await copyText(JSON.stringify(map, null, 2)))
+        ? 'Map JSON copied. Paste it into a file, or into JSON → Import as new map.'
+        : 'Could not copy. Use JSON, then select all and copy.'
+    }),
     editBtn('Delete map', () => {
       if (confirm('Delete “' + map.name + '”?')) {
         maps = maps.filter((m) => m !== map)
@@ -272,8 +320,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
     draw()
     details()
   }
-  const nodeEl = (id) => [...canvas.querySelectorAll('[data-node]')].find((g) => g.dataset.node === id)
-  const edgeEl = (id) => [...canvas.querySelectorAll('[data-edge]')].find((g) => g.dataset.edge === id)
+  const nodeEl = (id) => [...canvas.querySelectorAll('[data-node]')].find((g) => g.getAttribute('data-node') === id)
+  const edgeEl = (id) => [...canvas.querySelectorAll('[data-edge]')].find((g) => g.getAttribute('data-edge') === id)
   function undoLast() {
     if (!history.length) return
     Object.assign(map, JSON.parse(history.pop()))
@@ -345,6 +393,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
   function startConnecting(id) {
     const n = map.nodes.find((x) => x.id === id)
     if (!n || !editing()) return
+    if (inline) finishInline(true)
     connecting = id
     details()
     inspector.append(button('Cancel connection', cancelConnecting))
@@ -388,6 +437,33 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
     canvas.style.width = 2400 * zoom + 'px'
     canvas.style.height = 1600 * zoom + 'px'
   }
+  function importText(text) {
+    if (text.length > 2000000) throw Error('Please select a JSON file smaller than 2 MB.')
+    const imported = readMap(text)
+    imported.id = newId()
+    maps.push(imported)
+    activate(imported)
+    save()
+  }
+  async function copyText(text) {
+    try {
+      await globalThis.navigator.clipboard.writeText(text)
+      return true
+    } catch (_) {
+      // Webviews often lack the async clipboard API; fall back to selecting a temporary field.
+      const t = document.createElement('textarea')
+      t.value = text
+      t.style.cssText = 'position:fixed;top:0;left:0;opacity:0'
+      dialog.append(t)
+      t.select()
+      let ok = false
+      try {
+        ok = document.execCommand('copy')
+      } catch (_) {}
+      t.remove()
+      return ok
+    }
+  }
   function download(text, filename, type) {
     const url = URL.createObjectURL(new Blob([text], { type })),
       a = el('a')
@@ -411,6 +487,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
   }
   function commit(fn) {
     if (!editing()) return
+    if (inline) finishInline(true)
     history.push(JSON.stringify(map))
     if (history.length > 50) history.shift()
     fn()
@@ -440,8 +517,10 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
     name.value = map.name
     undo.disabled = !history.length
     const active = !inline && canvas.contains(document.activeElement) ? document.activeElement : null,
-      focusNode = active?.closest?.('[data-node]')?.dataset.node,
-      focusEdge = active?.closest?.('[data-edge]')?.dataset.edge
+      focusNode = active?.closest?.('[data-node]')?.getAttribute('data-node'),
+      focusEdge = active?.closest?.('[data-edge]')?.getAttribute('data-edge')
+    const oldInput = canvas.querySelector('foreignObject input')
+    if (oldInput) oldInput.onblur = null // removing a focused input fires blur during the redraw
     canvas.replaceChildren()
     const defs = svgEl('defs')
     const marker = svgEl('marker', {
@@ -825,7 +904,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
       nodes = ids.map((id) => map.nodes.find((n) => n.id === id)).filter(Boolean),
       dx = clamp(dir[0] * step, 190 - Math.min(...nodes.map((n) => n.x)), 2210 - Math.max(...nodes.map((n) => n.x))),
       dy = clamp(dir[1] * step, 40 - Math.min(...nodes.map((n) => n.y)), 1560 - Math.max(...nodes.map((n) => n.y)))
-    const focusId = e.target.closest?.('[data-node]')?.dataset.node
+    const focusId = e.target.closest?.('[data-node]')?.getAttribute('data-node')
     commit(() =>
       nodes.forEach((n) => {
         n.x += dx
@@ -862,19 +941,6 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [] }) {
         inspector.append(el('h4', 'Notes'), p)
       }
       if (n.images?.length) inspector.append(el('h4', 'Images'), imageGallery(n.images, false, n.word))
-      const links = map.edges.filter((x) => x.from === n.id || x.to === n.id)
-      if (links.length) {
-        inspector.append(el('h4', 'Connections'))
-        const list = el('ul')
-        for (const x of links) {
-          const a = map.nodes.find((m) => m.id === x.from),
-            b = map.nodes.find((m) => m.id === x.to),
-            li = el('li')
-          li.append(button(a.word + ' — ' + x.relation + ' — ' + b.word, () => select('edge', x.id)))
-          list.append(li)
-        }
-        inspector.append(list)
-      }
       inspector.append(
         button('Find vocabulary & clips', () => {
           dialog.close()

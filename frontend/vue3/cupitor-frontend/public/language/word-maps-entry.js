@@ -1,5 +1,5 @@
-import { openWordMaps } from './word-maps.js'
 import { scopedKey } from './account-state.js'
+import { openWordMaps, hostBridge } from './word-maps.js'
 
 // Resolve the account and studied language at open time, just like other tools.
 window.openWordMaps = () =>
@@ -17,4 +17,5 @@ window.openWordMaps = () =>
       window.jQuery('#settingsPanel').dialog('close')
       window.jQuery('#searchText').val(term).trigger('change')
     },
+    ...hostBridge((m) => WordMapsHost.postMessage(m))
   })
