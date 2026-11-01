@@ -8,6 +8,9 @@ import {
   parseImageLinks,
   MAX_IMAGES,
   normalizeNodeColor,
+  NODE_SHAPES,
+  nodeWidth,
+  nodePolygon,
 } from './word-map-model.js'
 const el = (tag, text, cls) => {
   const e = document.createElement(tag)
@@ -34,7 +37,6 @@ const edgeStyle = (edge) =>
     : edge.dashed || edge.uncertain
       ? 'dashed'
       : 'solid'
-const nodeWidth = (n) => Math.max(110, Math.min(380, n.word.length * 12 + 30))
 const EDIT_HINT =
   'Press N to add a word and type straight into it. Select a word, then press C to connect it, or F2 / double-click to rename it in place. Drag it into position; drag on empty space (or Shift-click words) to select a group and move them together.'
 const READ_HINT =
@@ -92,6 +94,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     transientId = null,
     syncing = false,
     minimized = false
+  let lastDetailsKey = ''
   const editing = () => mode === 'edit'
   const editOnly = []
   const status = el('span', '', 'wm-status')
@@ -115,7 +118,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   header.append(title, close)
   const syncButton = button('Sync', () => runSync(false))
   syncButton.className = 'wm-sync'
-  const toolbar = el('div', null, 'wm-toolbar'),
+  const toolbar = el('div', null, 'wm-toolbar wm-main-toolbar'),
     picker = el('select'),
     modeGroup = el('label', null, 'wm-mode-toggle'),
     modeToggle = el('input')
@@ -132,11 +135,17 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   const name = el('input')
   name.setAttribute('aria-label', 'Map name')
   name.maxLength = 200
+  name.className = 'wm-map-name'
   const layout = el('div', null, 'wm-layout'),
     work = el('div', null, 'wm-work'),
     viewport = el('div', null, 'wm-viewport'),
     inspector = el('aside', null, 'wm-inspector')
   inspector.setAttribute('aria-label', 'Word or connection details')
+  inspector.id = 'wordMapDetails'
+  const detailsButton = button('Details', () => setInspector(!inspector.classList.contains('wm-inspector-open')))
+  detailsButton.className = 'wm-details-toggle'
+  detailsButton.setAttribute('aria-controls', inspector.id)
+  detailsButton.setAttribute('aria-expanded', 'false')
   const canvas = svgEl('svg', {
     viewBox: '0 0 2400 1600',
     role: 'group',
@@ -187,7 +196,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     })
   )
   work.append(hint, viewport, script, scriptTools)
-  layout.append(work, inspector)
+  layout.append(work, detailsButton, inspector)
   const file = el('input')
   file.type = 'file'
   file.accept = '.json,application/json'
@@ -203,6 +212,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       file.value = ''
     }
   }
+  const addWordButton = editBtn('+ Word', addWord, 'New word (N)')
   const undo = editBtn('Undo', undoLast)
   toolbar.append(
     picker,
@@ -217,7 +227,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       activate(m)
       save()
     }),
-    editBtn('+ Word', addWord, 'New word (N)'),
+    addWordButton,
     undo,
     editBtn('Arrange', () =>
       commit(() =>
@@ -227,6 +237,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         })
       )
     ),
+    button('Fit map', fitMap),
     button('−', () => scale(-0.2)),
     button('+', () => scale(0.2)),
     editBtn('JSON', () => {
@@ -267,12 +278,37 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       }
     })
   )
+  const moreActions = el('div', null, 'wm-more-actions')
+  moreActions.id = 'wordMapMoreActions'
+  moreActions.setAttribute('role', 'group')
+  moreActions.setAttribute('aria-label', 'Map actions')
+  const moreButton = button('More', () => setMore(!moreActions.classList.contains('is-open')))
+  moreButton.className = 'wm-more-toggle'
+  moreButton.setAttribute('aria-label', 'More map actions')
+  moreButton.setAttribute('aria-expanded', 'false')
+  moreButton.setAttribute('aria-controls', moreActions.id)
+  const primary = new Set([picker, modeGroup, syncButton, addWordButton])
+  for (const control of [...toolbar.children]) if (!primary.has(control)) moreActions.append(control)
+  toolbar.append(moreButton, moreActions)
   const footer = el('footer')
   footer.append(el('small', sync
     ? 'Saved locally · Sync to GitHub to use your maps on other devices.'
     : 'Saved locally · Sign in and set up your repository to sync with GitHub.'), status)
   dialog.append(header, toolbar, layout, footer, file)
   document.body.append(dialog)
+  dialog.addEventListener('click', e => {
+    if (moreButton.contains(e.target)) return
+    if (!moreActions.contains(e.target) || e.target.closest('button')) setMore(false)
+  })
+  function setMore(open) {
+    moreActions.classList.toggle('is-open', open)
+    moreButton.setAttribute('aria-expanded', String(open))
+  }
+  function setInspector(open) {
+    inspector.classList.toggle('wm-inspector-open', open)
+    detailsButton.textContent = open ? 'Hide details' : 'Details'
+    detailsButton.setAttribute('aria-expanded', String(open))
+  }
   picker.onchange = () => activate(maps.find((m) => m.id === picker.value))
   name.onchange = () => {
     if (!name.value.trim()) {
@@ -284,6 +320,12 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   dialog.addEventListener('keydown', (e) => {
     e.stopPropagation()
     if (e.defaultPrevented) return
+    if (e.key === 'Escape' && moreActions.classList.contains('is-open')) {
+      e.preventDefault()
+      setMore(false)
+      moreButton.focus()
+      return
+    }
     if (e.key === 'Escape' && connecting) {
       e.preventDefault()
       cancelConnecting()
@@ -390,6 +432,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       group.clear()
       selection = { kind: 'node', id: created.id }
     })
+    setInspector(false)
     startInline(created.id, true)
   }
   // Type a word straight into its box on the canvas.
@@ -473,7 +516,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     return wrap
   }
   function scale(delta) {
-    zoom = Math.max(0.3, Math.min(1.8, zoom + delta))
+    zoom = Math.max(0.1, Math.min(1.8, zoom + delta))
     canvas.style.width = 2400 * zoom + 'px'
     canvas.style.height = 1600 * zoom + 'px'
   }
@@ -505,6 +548,27 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       t.remove()
       return ok
     }
+  }
+  function fitMap() {
+    if (!viewport.clientWidth || !viewport.clientHeight) return
+    if (!map.nodes.length) {
+      zoom = 1
+      scale(0)
+      viewport.scrollTo(0, 0)
+      return
+    }
+    const left = Math.min(...map.nodes.map(n => n.x - nodeWidth(n) / 2))
+    const right = Math.max(...map.nodes.map(n => n.x + nodeWidth(n) / 2))
+    const top = Math.min(...map.nodes.map(n => n.y - 27))
+    const bottom = Math.max(...map.nodes.map(n => n.y + 27))
+    zoom = Math.max(0.1, Math.min(1.1,
+      (viewport.clientWidth - 32) / (right - left),
+      (viewport.clientHeight - 32) / (bottom - top)))
+    scale(0)
+    viewport.scrollTo(
+      Math.max(0, (left + right) / 2 * zoom - viewport.clientWidth / 2),
+      Math.max(0, (top + bottom) / 2 * zoom - viewport.clientHeight / 2)
+    )
   }
   function download(text, filename, type) {
     const url = URL.createObjectURL(new Blob([text], { type })),
@@ -599,6 +663,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     draw()
     details()
     viewport.scrollTo(0, 0)
+    if (dialog.open && window.innerWidth < 700) fitMap()
   }
   function draw() {
     picker.replaceChildren(...maps.map((m) => new Option(m.name, m.id)))
@@ -723,10 +788,13 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         'stroke-width': selection?.id === n.id || inGroup ? 4 : 2,
       }
       if (inGroup) attrs['stroke-dasharray'] = '8 4'
+      const points = nodePolygon(n)
       g.append(
         n.shape === 'ellipse'
           ? svgEl('ellipse', { ...attrs, rx: w / 2, ry: 27 })
-          : svgEl('rect', { ...attrs, x: -w / 2, y: -27, width: w, height: 54, rx: 13 })
+          : points
+            ? svgEl('polygon', { ...attrs, points: points.map(p => p.join(',')).join(' ') })
+            : svgEl('rect', { ...attrs, x: -w / 2, y: -27, width: w, height: 54, rx: 13 })
       )
       if (inline?.id === n.id) {
         const iw = Math.max(w, 240),
@@ -862,6 +930,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     }
     group.clear()
     selection = { kind, id }
+    setInspector(true)
     draw()
     details()
   }
@@ -1086,6 +1155,9 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     }
   }
   function details() {
+    const key = selection?.id || [...group].sort().join('|')
+    if (key && key !== lastDetailsKey) setInspector(true)
+    lastDetailsKey = key
     inspector.replaceChildren()
     if (group.size > 1) {
       const members = map.nodes.filter((n) => group.has(n.id))
@@ -1101,8 +1173,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         textColor = colorFields(form, 'Text color for all', members[0]?.textColor || '#ffffff'),
         shape = field(form, 'Shape for all', '', 'text', [
           ['', 'Keep each shape'],
-          ['rectangle', 'Rounded rectangle'],
-          ['ellipse', 'Ellipse'],
+          ...NODE_SHAPES,
         ]),
         apply = button('Apply to group', () => {})
       apply.type = 'submit'
@@ -1186,8 +1257,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       const color = colorFields(form, 'Background color', n.color || '#dc3636'),
         textColor = colorFields(form, 'Text color', n.textColor || '#ffffff'),
         shape = field(form, 'Shape', n.shape || 'rectangle', 'text', [
-          ['rectangle', 'Rounded rectangle'],
-          ['ellipse', 'Ellipse'],
+          ...NODE_SHAPES,
         ]),
         note = field(form, 'Notes', n.note, 'textarea'),
         images = field(
@@ -1304,6 +1374,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   setMode(map.nodes.length ? 'read' : 'edit')
   dialog.showModal()
   scale(window.innerWidth < 700 ? -0.65 : -0.45)
+  if (window.innerWidth < 700) fitMap()
   refreshSync()
   if (sync && !storageBroken) runSync(true)
 }

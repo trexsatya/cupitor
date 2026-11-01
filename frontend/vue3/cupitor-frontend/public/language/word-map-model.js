@@ -38,6 +38,39 @@ export function parseImageLinks(text) {
     truncated: Math.max(0, links.length - MAX_IMAGES),
   }
 }
+export const NODE_SHAPES = [
+  ['rectangle', 'Rounded rectangle'],
+  ['ellipse', 'Ellipse'],
+  ['hexagon', 'Hexagon (triangular ends)'],
+  ['parallelogram', 'Parallelogram (slanted sides)'],
+]
+export function nodeWidth(node) {
+  const base = Math.max(110, Math.min(380, node.word.length * 12 + 30))
+  // Keep the same space for text when the sides taper inward.
+  return base + (['hexagon', 'parallelogram'].includes(node.shape) ? 44 : 0)
+}
+export function nodePolygon(node) {
+  const w = nodeWidth(node) / 2,
+    h = 27,
+    inset = 22
+  if (node.shape === 'hexagon')
+    return [
+      [-w + inset, -h],
+      [w - inset, -h],
+      [w, 0],
+      [w - inset, h],
+      [-w + inset, h],
+      [-w, 0],
+    ]
+  if (node.shape === 'parallelogram')
+    return [
+      [-w + inset, -h],
+      [w, -h],
+      [w - inset, h],
+      [-w, h],
+    ]
+  return null
+}
 export const newId = () =>
   globalThis.crypto?.randomUUID?.() ||
   'wm-' + Date.now().toString(36) + Math.random().toString(36).slice(2)
@@ -92,7 +125,7 @@ export function readMap(value) {
       note: str(n.note),
       color: normalizeNodeColor(n.color, '#dc3636'),
       textColor: normalizeNodeColor(n.textColor, '#ffffff'),
-      shape: n.shape === 'ellipse' ? 'ellipse' : 'rectangle',
+      shape: NODE_SHAPES.some(([shape]) => shape === n.shape) ? n.shape : 'rectangle',
       images: [
         ...new Set((Array.isArray(n.images) ? n.images : []).map(imageLink).filter(Boolean)),
       ].slice(0, MAX_IMAGES),
@@ -133,12 +166,30 @@ export function removeNode(map, id) {
 }
 export function edgeEnds(a, b) {
   const boundary = (n, dx, dy) => {
-    const w = Math.max(110, Math.min(380, n.word.length * 12 + 30)) / 2,
-      h = 27
-    const t =
-      n.shape === 'ellipse'
-        ? 1 / Math.sqrt((dx * dx) / (w * w) + (dy * dy) / (h * h))
-        : Math.min(w / Math.max(Math.abs(dx), 0.001), h / Math.max(Math.abs(dy), 0.001))
+    const w = nodeWidth(n) / 2,
+      h = 27,
+      polygon = nodePolygon(n)
+    let t
+    if (n.shape === 'ellipse') {
+      t = 1 / Math.sqrt((dx * dx) / (w * w) + (dy * dy) / (h * h))
+    } else if (polygon) {
+      // Intersect the centre-to-centre ray with the rendered polygon rather
+      // than its bounding rectangle, so arrowheads touch the slanted sides.
+      t = Infinity
+      for (let i = 0; i < polygon.length; i++) {
+        const p = polygon[i],
+          q = polygon[(i + 1) % polygon.length]
+        const ex = q[0] - p[0],
+          ey = q[1] - p[1]
+        const cross = dx * ey - dy * ex
+        if (Math.abs(cross) < 1e-10) continue
+        const ray = (p[0] * ey - p[1] * ex) / cross
+        const side = (p[0] * dy - p[1] * dx) / cross
+        if (ray >= 0 && side >= -1e-10 && side <= 1 + 1e-10) t = Math.min(t, ray)
+      }
+    } else {
+      t = Math.min(w / Math.max(Math.abs(dx), 0.001), h / Math.max(Math.abs(dy), 0.001))
+    }
     return { x: n.x + dx * t, y: n.y + dy * t }
   }
   const dx = b.x - a.x,

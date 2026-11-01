@@ -306,7 +306,7 @@ test('invalid colour codes cannot overwrite a saved node', () => {
   submit()
   assert.equal(saved().nodes[0].textColor, '#111111')
 })
-test('group styling accepts foreground and background colour codes', () => {
+test('group styling accepts colour codes and angled shapes', () => {
   setup()
   openWordMaps({ storageKey: 'maps', onLookup() {} })
   click('+ Word')
@@ -318,12 +318,96 @@ test('group styling accepts foreground and background colour codes', () => {
   )
   document
     .querySelector('[data-node="' + ids[0] + '"]')
-    .onpointerdown(new window.MouseEvent('pointerdown', { button: 0, shiftKey: true }))
+    .onpointerdown(
+      new window.MouseEvent('pointerdown', { button: 0, shiftKey: true })
+    )
   colourInput('Background color for all hex code', '#001122')
   colourInput('Text color for all hex code', '#ffeedd')
+  input('Shape for all', 'parallelogram')
   submit()
   for (const n of saved().nodes) {
     assert.equal(n.color, '#001122')
     assert.equal(n.textColor, '#ffeedd')
+    assert.equal(n.shape, 'parallelogram')
   }
+})
+
+test('hexagon and parallelogram shapes render polygons and persist on reload', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  click('+ Word')
+  finishNewWord()
+  for (const shape of ['hexagon', 'parallelogram']) {
+    input('Shape', shape)
+    submit()
+    assert.equal(saved().nodes[0].shape, shape)
+    const points = document
+      .querySelector('[data-node] polygon')
+      .getAttribute('points')
+      .split(' ')
+    assert.equal(points.length, shape === 'hexagon' ? 6 : 4)
+    assert.equal(document.querySelector('[data-node] rect'), null)
+    const polygon = document.querySelector('[data-node] polygon')
+    assert.equal(polygon.getAttribute('fill'), saved().nodes[0].color)
+  }
+  click('Close')
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  assert.ok(document.querySelector('[data-node] polygon'))
+})
+
+test('compact toolbar keeps secondary actions in More and closes after an action', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  const more = document.querySelector('.wm-more-toggle'),
+    actions = document.querySelector('.wm-more-actions')
+  assert.equal(more.getAttribute('aria-expanded'), 'false')
+  assert.ok(actions.contains(document.querySelector('[aria-label="Map name"]')))
+  assert.ok(
+    [...actions.querySelectorAll('button')].find(
+      (b) => b.textContent === 'JSON'
+    )
+  )
+  assert.ok(
+    !actions.contains(
+      [...document.querySelectorAll('button')].find(
+        (b) => b.textContent === '+ Word'
+      )
+    )
+  )
+  more.click()
+  assert.equal(more.getAttribute('aria-expanded'), 'true')
+  click('New map')
+  assert.equal(more.getAttribute('aria-expanded'), 'false')
+  assert.equal(actions.classList.contains('is-open'), false)
+})
+test('details can collapse, reopen for the same word, and stay closed while adding inline', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  const details = document.querySelector('.wm-details-toggle')
+  assert.equal(details.getAttribute('aria-expanded'), 'false')
+  click('+ Word')
+  assert.equal(details.getAttribute('aria-expanded'), 'false')
+  finishNewWord()
+  document.querySelector('[role=switch]').click()
+  const selectWord = () =>
+    document
+      .querySelector('[data-node]')
+      .dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }))
+  selectWord()
+  assert.equal(details.getAttribute('aria-expanded'), 'true')
+  details.click()
+  assert.equal(details.getAttribute('aria-expanded'), 'false')
+  selectWord()
+  assert.equal(details.getAttribute('aria-expanded'), 'true')
+})
+
+test('Fit map keeps an empty phone canvas at a readable entry scale', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  const viewport = document.querySelector('.wm-viewport')
+  Object.defineProperty(viewport, 'clientWidth', { value: 360 })
+  Object.defineProperty(viewport, 'clientHeight', { value: 600 })
+  click('−')
+  click('Fit map')
+  assert.equal(document.querySelector('.wm-viewport svg').style.width, '2400px')
 })

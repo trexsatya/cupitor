@@ -71,3 +71,36 @@ test('node colours keep legacy backgrounds and round-trip both hex values', () =
   assert.equal(map.nodes[1].textColor, '#ffffff')
   assert.deepEqual(readMap(JSON.stringify(map)), map)
 })
+
+test('angled node shapes survive import/export and unknown shapes fall back', () => {
+  const data = sample()
+  data.nodes[0].shape = 'hexagon'
+  data.nodes[1].shape = 'parallelogram'
+  const map = readMap(data)
+  assert.equal(map.nodes[0].shape, 'hexagon')
+  assert.equal(map.nodes[1].shape, 'parallelogram')
+  assert.deepEqual(readMap(JSON.stringify(map)), map)
+  data.nodes[0].shape = 'unknown'
+  assert.equal(readMap(data).nodes[0].shape, 'rectangle')
+})
+test('arrows touch the triangular tips and slanted sides, not bounding boxes', () => {
+  const a = { id: 'a', word: 'Rät', x: 100, y: 100, shape: 'hexagon' }
+  const b = { id: 'b', word: 'Rätt', x: 500, y: 100, shape: 'rectangle' }
+  assert.equal(edgeEnds(a, b)[0].x, 177)
+  a.shape = 'parallelogram'
+  assert.equal(edgeEnds(a, b)[0].x, 166)
+  b.x = 400
+  b.y = 180
+  for (const shape of ['hexagon', 'parallelogram']) {
+    a.shape = shape
+    const [p] = edgeEnds(a, b)
+    const t =
+      shape === 'hexagon'
+        ? 77 / (300 + (22 / 27) * 80)
+        : 66 / (300 + (22 / 54) * 80)
+    assert.ok(Math.abs(p.x - (100 + 300 * t)) < 1e-8)
+    assert.ok(Math.abs(p.y - (100 + 80 * t)) < 1e-8)
+    const reversed = edgeEnds(b, a)
+    assert.deepEqual(reversed[1], p)
+  }
+})

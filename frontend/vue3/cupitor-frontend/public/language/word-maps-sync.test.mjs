@@ -260,3 +260,29 @@ test('foreground and background colours survive GitHub sync and another device p
   assert.equal(pulled[0].nodes[0].color, '#aabbcc')
   assert.equal(pulled[0].nodes[0].textColor, '#112233')
 })
+
+test('angled shapes survive syncing and loading on another device', async () => {
+  const shaped = readMap({
+    ...map('shapes'),
+    nodes: [
+      { id: 'hex', word: 'Lodrät', x: 200, y: 100, shape: 'hexagon' },
+      { id: 'slant', word: 'Räta', x: 500, y: 100, shape: 'parallelogram' },
+    ],
+  })
+  const f = fixture([shaped], []),
+    sync = createWordMapSync(f.options)
+  await sync.push(f.get, f.adopt)
+  let pulled
+  await createWordMapSync({
+    ...f.options,
+    storage: memory(),
+    storageKey: 'another-device',
+  }).pull(
+    () => [],
+    (maps) => (pulled = maps)
+  )
+  assert.deepEqual(
+    pulled[0].nodes.map((n) => n.shape),
+    ['hexagon', 'parallelogram']
+  )
+})
