@@ -7,6 +7,7 @@ import {
   edgeEnds,
   parseImageLinks,
   MAX_IMAGES,
+  normalizeNodeColor,
 } from './word-map-model.js'
 const el = (tag, text, cls) => {
   const e = document.createElement(tag)
@@ -379,6 +380,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         x: 220 + (map.nodes.length % 6) * 260,
         y: 160 + Math.floor(map.nodes.length / 6) * 110,
         color: '#dc3636',
+        textColor: '#ffffff',
         shape: 'rectangle',
         lookup: '',
         note: '',
@@ -735,7 +737,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         input.setAttribute('aria-label', 'Word text. Enter to save, Escape to cancel.')
         input.style.cssText =
           'width:100%;height:100%;box-sizing:border-box;padding:0 10px;text-align:center;' +
-          'font:inherit;font-size:22px;color:#fff;border:3px solid #fff;border-radius:13px;outline:none;' +
+          'font:inherit;font-size:22px;border:3px solid #fff;border-radius:13px;outline:none;' +
+          'color:' + (n.textColor || '#ffffff') + ';' +
           'background:' +
           (n.color || '#dc3636')
         input.onpointerdown = (ev) => ev.stopPropagation()
@@ -760,7 +763,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
             {
               'text-anchor': 'middle',
               'dominant-baseline': 'central',
-              fill: 'white',
+              fill: n.textColor || '#ffffff',
               'font-size': 22,
             },
             n.word
@@ -949,10 +952,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       save()
       draw()
     } else if (editing() && lastTap?.id === d.id && e.timeStamp - lastTap.t < 400) {
-      lastTap = null,
-    transientId = null,
-    syncing = false,
-    minimized = false
+      lastTap = null
       startInline(d.id)
     } else {
       lastTap = { id: d.id, t: e.timeStamp }
@@ -1014,6 +1014,38 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     form.append(wrap)
     return input
   }
+  function colorFields(form, label, initial) {
+    const group = el('fieldset', null, 'wm-color-fields')
+    group.append(el('legend', label))
+    const row = el('div', null, 'wm-color-row')
+    group.append(row)
+    const picker = field(row, 'Picker', initial, 'color')
+    const code = field(row, 'Hex code', initial)
+    picker.setAttribute('aria-label', label + ' picker')
+    code.setAttribute('aria-label', label + ' hex code')
+    code.placeholder = '#ffffff'
+    code.spellcheck = false
+    code.autocomplete = 'off'
+    code.maxLength = 7
+    picker.oninput = picker.onchange = () => {
+      code.value = picker.value
+      code.setCustomValidity('')
+    }
+    code.oninput = code.onchange = () => {
+      const color = normalizeNodeColor(code.value)
+      code.setCustomValidity(color ? '' : 'Enter a hex colour such as #1e293b or #abc.')
+      if (color) picker.value = color
+    }
+    code.onblur = () => {
+      const color = normalizeNodeColor(code.value)
+      if (color) code.value = color
+    }
+    form.append(group)
+    return {
+      get value() { return normalizeNodeColor(code.value) },
+      valid() { if (normalizeNodeColor(code.value)) return true; code.reportValidity(); return false },
+    }
+  }
   function row(label, value) {
     if (!value) return null
     const p = el('p')
@@ -1065,7 +1097,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         )
       )
       const form = el('form'),
-        color = field(form, 'Colour for all', members[0]?.color || '#dc3636', 'color'),
+        color = colorFields(form, 'Background color for all', members[0]?.color || '#dc3636'),
+        textColor = colorFields(form, 'Text color for all', members[0]?.textColor || '#ffffff'),
         shape = field(form, 'Shape for all', '', 'text', [
           ['', 'Keep each shape'],
           ['rectangle', 'Rounded rectangle'],
@@ -1076,9 +1109,11 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       form.append(apply)
       form.onsubmit = (ev) => {
         ev.preventDefault()
+        if (!color.valid() || !textColor.valid()) return
         commit(() =>
           members.forEach((n) => {
             n.color = color.value
+            n.textColor = textColor.value
             if (shape.value) n.shape = shape.value
           })
         )
@@ -1148,7 +1183,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       }
       lookup.setAttribute('list', list.id)
       form.append(list)
-      const color = field(form, 'Colour', n.color || '#dc3636', 'color'),
+      const color = colorFields(form, 'Background color', n.color || '#dc3636'),
+        textColor = colorFields(form, 'Text color', n.textColor || '#ffffff'),
         shape = field(form, 'Shape', n.shape || 'rectangle', 'text', [
           ['rectangle', 'Rounded rectangle'],
           ['ellipse', 'Ellipse'],
@@ -1169,13 +1205,14 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       form.append(apply)
       form.onsubmit = (ev) => {
         ev.preventDefault()
-        if (!word.value.trim()) return
+        if (!word.value.trim() || !color.valid() || !textColor.valid()) return
         const parsed = parseImageLinks(images.value)
         commit(() =>
           Object.assign(n, {
             word: word.value.trim(),
             lookup: lookup.value.trim(),
             color: color.value,
+            textColor: textColor.value,
             shape: shape.value,
             note: note.value,
             images: parsed.links,

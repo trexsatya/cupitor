@@ -56,3 +56,18 @@ test('connection endpoints stop at word boundaries in both directions', () => {
   assert.equal(p.y, 100)
   assert.deepEqual(edgeEnds(b, a), [q, p])
 })
+
+test('node colours keep legacy backgrounds and round-trip both hex values', () => {
+  const legacy = readMap(sample())
+  assert.equal(legacy.nodes[0].color, '#dc3636')
+  assert.equal(legacy.nodes[0].textColor, '#ffffff')
+  const data = sample()
+  data.nodes[0].color = '  #AbC  '
+  data.nodes[0].textColor = '123456'
+  data.nodes[1].textColor = 'red; background:url(x)'
+  const map = readMap(data)
+  assert.equal(map.nodes[0].color, '#aabbcc')
+  assert.equal(map.nodes[0].textColor, '#123456')
+  assert.equal(map.nodes[1].textColor, '#ffffff')
+  assert.deepEqual(readMap(JSON.stringify(map)), map)
+})
