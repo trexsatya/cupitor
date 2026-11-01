@@ -1,14 +1,13 @@
 import { githubWordMapSync } from './word-maps-github.js'
-import { scopedKey } from './account-state.js'
+import { wordMapStorageKey } from './word-map-search.js'
 import { openWordMaps, hostBridge } from './word-maps.js'
 
 // Resolve the account and studied language at open time, just like other tools.
-window.openWordMaps = () => {
-  const storageKey = scopedKey(
-    'cupitor:wordMaps:' + (new URLSearchParams(location.search).get('lang') || 'swedish')
-  )
+window.openWordMaps = (focus) => {
+  const storageKey = wordMapStorageKey()
   return openWordMaps({
     storageKey,
+    focus,
     sync: githubWordMapSync(storageKey),
     vocabulary: Object.values(window.vocabulary || {})
       .flat()
@@ -17,7 +16,8 @@ window.openWordMaps = () => {
       .map((word) => word.trim())
       .filter(Boolean),
     onLookup: (term) => {
-      window.jQuery('#settingsPanel').dialog('close')
+      const settings = window.jQuery('#settingsPanel')
+      if (settings.hasClass('ui-dialog-content')) settings.dialog('close')
       window.jQuery('#searchText').val(term).trigger('change')
     },
     ...(typeof WordMapsHost !== 'undefined' ? hostBridge((m) => WordMapsHost.postMessage(m)) : {}),

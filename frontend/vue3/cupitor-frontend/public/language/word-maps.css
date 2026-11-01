@@ -442,3 +442,24 @@
     overflow-wrap: anywhere;
   }
 }
+
+.word-maps.wm-fullscreen,
+.word-maps:fullscreen {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.word-maps .wm-fullscreen-toggle {
+  margin-left: auto;
+  font-size: 21px;
+  min-width: 38px;
+  line-height: 1;
+}
+.word-maps .wm-search-title {
+  outline: 3px solid #d97706;
+  outline-offset: 2px;
+}

@@ -297,6 +297,7 @@ import {
   findManualCards as _findManualCards,
   renderManualResultsHtml as _renderManualResultsHtml,
 } from './manual-search.js';
+import { wordMapStorageKey, readSearchMaps, findWordMaps, renderWordMapResultsHtml } from './word-map-search.js';
 import {
   MUSIC_MODES as REC_MUSIC_MODES,
   MUSIC_VOL_WITH_AUDIO,
@@ -2623,6 +2624,8 @@ window._appSettings = {
   includeManualInSearch: false,
   // Whether that block starts folded. Sticky, like libraryResultsCollapsed.
   manualResultsCollapsed: false,
+  includeWordMapsInSearch: true,
+  wordMapResultsCollapsed: false,
   // Whether the book-results block inside #result starts folded. Sticky so a
   // user who keeps the books out of the way isn't re-shown them every search.
   libraryResultsCollapsed: false,
@@ -11840,12 +11843,71 @@ $(document).on('click', '#manualResults .manual-head', e => {
   saveAppSettings()
 })
 
+// Word maps share the current account/language scope with their editor. Read
+// the saved data on every redraw so imports, edits and sync appear immediately.
+function _ensureWordMapSearchBar() {
+  const $result = $('#result')
+  if (!$result.length) return
+  if (!$result.children('#wordMapSearchBar').length) {
+    const $bar = $('<div id="wordMapSearchBar" class="lib-search-bar"><label class="lib-auto-label"><input type="checkbox" id="wordMapSearchIncludeCb"> ◇ Include word maps</label></div><div id="wordMapResults" class="lib-results"></div>')
+    const $manual = $result.children('#manualResults')
+    if ($manual.length) $bar.insertAfter($manual)
+    else $result.prepend($bar)
+  }
+  $('#wordMapSearchIncludeCb').prop('checked', window._appSettings?.includeWordMapsInSearch !== false)
+  _renderWordMapSearchResults()
+}
+function _renderWordMapSearchResults() {
+  const $out = $('#wordMapResults')
+  if (!$out.length) return
+  const term = _librarySearchTerm()
+  if (window._appSettings?.includeWordMapsInSearch === false || !String(term || '').trim()) {
+    $out.empty()
+    return
+  }
+  try {
+    const hits = findWordMaps(readSearchMaps(wordMapStorageKey()), term)
+    $out.html(renderWordMapResultsHtml(hits, term, { collapsed: !!window._appSettings?.wordMapResultsCollapsed }))
+  } catch (_) {
+    $out.text('Saved word maps could not be read. Open Word maps to recover them.')
+  }
+}
+$(document).on('change', '#wordMapSearchIncludeCb', e => {
+  window._appSettings.includeWordMapsInSearch = $(e.target).is(':checked')
+  saveAppSettings()
+  _renderWordMapSearchResults()
+})
+$(document).on('click', '#wordMapResults .word-map-hit', e => {
+  const id = $(e.currentTarget).attr('data-map-id')
+  const term = _librarySearchTerm()
+  try {
+    const hit = findWordMaps(readSearchMaps(wordMapStorageKey()), term).find(hit => hit.map.id === id)
+    if (!hit) return _renderWordMapSearchResults()
+    window.openWordMaps?.({ mapId: id, nodeId: hit.nodes[0]?.id,
+      nodeIds: hit.nodes.map(node => node.id), query: term, nameMatched: hit.nameMatched })
+  } catch (_) { _renderWordMapSearchResults() }
+})
+$(document).on('click', '#wordMapResults .word-map-head', e => {
+  const $wrap = $(e.currentTarget).closest('.word-map-wrap')
+  const collapsed = !$wrap.hasClass('lib-collapsed')
+  $wrap.toggleClass('lib-collapsed', collapsed)
+  $(e.currentTarget).attr('aria-expanded', String(!collapsed)).find('.lib-caret').text(collapsed ? '▸' : '▾')
+  window._appSettings.wordMapResultsCollapsed = collapsed
+  saveAppSettings()
+})
+window.addEventListener('wordmapschanged', _renderWordMapSearchResults)
+window.addEventListener('storage', event => {
+  if (event.key === wordMapStorageKey() || event.key === 'cupitor:account' || event.key == null)
+    _renderWordMapSearchResults()
+})
+
 // The results bar lives inside #result, which every render() rebuilds — so
 // re-insert it (and restore the last results) whenever it has been wiped.
 // Idempotent: safe to call from every point that touches #result.
 function _ensureLibrarySearchBar() {
   // First, so the book bar (prepended below) sits above it.
   _ensureManualSearchBar()
+  _ensureWordMapSearchBar()
   if (!_haveLibrarySearchBridge()) return
   const $result = $('#result')
   if (!$result.length || $result.children('#librarySearchBar').length) return
