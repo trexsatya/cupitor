@@ -331,3 +331,114 @@
   gap: 8px;
   align-items: end;
 }
+/* Secondary actions retain their original controls and listeners on desktop. */
+.wm-more-actions {
+  display: contents;
+}
+.wm-more-toggle,
+.wm-details-toggle {
+  display: none;
+}
+@media (max-width: 700px) {
+  .word-maps {
+    width: 100%;
+    max-width: 100%;
+    position: fixed;
+    inset: 0;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    padding: 8px;
+    border: 0;
+    border-radius: 0;
+    gap: 8px;
+  }
+  .word-maps header h2 {
+    font-size: 20px;
+  }
+  .word-maps header button {
+    padding: 6px 10px;
+  }
+  .wm-main-toolbar {
+    position: relative;
+    overflow: visible;
+    max-height: none;
+    gap: 6px;
+    align-items: center;
+  }
+  .wm-main-toolbar > select {
+    flex: 1 1 160px;
+    max-width: none;
+    width: 0;
+  }
+  .wm-main-toolbar > .wm-mode-toggle {
+    flex: 0 0 auto;
+    padding: 0;
+  }
+  .wm-main-toolbar > button {
+    min-height: 36px;
+    padding: 7px 10px;
+  }
+  .wm-main-toolbar .wm-more-actions {
+    display: none;
+  }
+  .wm-main-toolbar .wm-more-actions.is-open {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    width: min(300px, calc(100vw - 32px));
+    max-height: 50dvh;
+    overflow: auto;
+    padding: 12px;
+    background: #f8fafc;
+    border: 1px solid #c6cdd7;
+    border-radius: 9px;
+    box-shadow: 0 4px 16px #0003;
+  }
+  .wm-main-toolbar .wm-map-name {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+  .wm-more-toggle,
+  .wm-details-toggle {
+    display: block;
+  }
+  .wm-details-toggle {
+    flex-shrink: 0;
+    width: 100%;
+    min-height: 34px;
+    text-align: center;
+  }
+  .wm-hint {
+    display: none;
+  }
+  .wm-layout {
+    gap: 6px;
+  }
+  .wm-inspector {
+    display: none;
+    max-height: 38dvh;
+    padding: 10px;
+  }
+  .wm-inspector.wm-inspector-open {
+    display: block;
+  }
+  .wm-inspector h3 {
+    font-size: 18px;
+  }
+  .word-maps footer small {
+    display: none;
+  }
+  .wm-status {
+    width: 100%;
+    max-height: 2.8em;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+}
