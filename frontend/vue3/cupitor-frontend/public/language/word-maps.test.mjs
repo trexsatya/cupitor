@@ -56,7 +56,7 @@ test('edit, connect, save and reopen; appearance and lookup survive', () => {
   click('+ Word')
   input('Word / phrase', 'Rät')
   submit()
-  click('Connect to another word')
+  click('Connect to another word (C)')
   document
     .querySelector('[data-node]')
     .dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }))
@@ -100,5 +100,68 @@ test('unreadable stored data is preserved and save failure is visible', () => {
   assert.match(
     document.querySelector('.wm-status').textContent,
     /Saving blocked/
+  )
+})
+
+test('GitHub load does not publish a phantom blank map and Sync marks changes clean', async () => {
+  setup()
+  const { createWordMapSync } = await import('./word-maps-sync.js')
+  let remote = [],
+    changes
+  const sync = createWordMapSync({
+    storageKey: 'maps',
+    sourceKey: 'self/main',
+    storage: localStorage,
+    readFile: async () => JSON.stringify(remote),
+    resolveConflicts: async () => null,
+    commitFile: async (transform) => {
+      changes = JSON.parse(await transform(JSON.stringify(remote)))
+      remote = changes.maps
+    },
+  })
+  openWordMaps({ storageKey: 'maps', onLookup() {}, sync })
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual(JSON.parse(localStorage.getItem('maps')), [])
+  click('New map')
+  assert.equal(document.querySelector('[aria-label="Saved word map"]').options.length, 1)
+  click('+ Word')
+  const inline = document.querySelector('foreignObject input')
+  inline.value = 'Synced word'
+  inline.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter' }))
+  assert.equal(document.querySelector('.wm-sync').textContent, 'Sync*')
+  click('Sync*')
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(changes.maps[0].nodes[0].word, 'Synced word')
+  assert.equal(document.querySelector('.wm-sync').textContent, 'Sync')
+  click('Delete map')
+  assert.deepEqual(JSON.parse(localStorage.getItem('maps')), [])
+  click('Sync*')
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual(remote, [])
+})
+test('closing during GitHub load keeps newly saved local edits', async () => {
+  setup()
+  const { createWordMapSync } = await import('./word-maps-sync.js')
+  let release
+  const pending = new Promise((r) => (release = r))
+  const sync = createWordMapSync({
+    storageKey: 'maps',
+    sourceKey: 'self/main',
+    storage: localStorage,
+    readFile: () => pending,
+    commitFile: async () => {},
+    resolveConflicts: async () => null,
+  })
+  openWordMaps({ storageKey: 'maps', onLookup() {}, sync })
+  click('+ Word')
+  click('Close')
+  const newer = JSON.parse(localStorage.getItem('maps'))
+  newer[0].name = 'changed after closing'
+  localStorage.setItem('maps', JSON.stringify(newer))
+  release('[]')
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(
+    JSON.parse(localStorage.getItem('maps'))[0].name,
+    'changed after closing'
   )
 })

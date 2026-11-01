@@ -199,3 +199,42 @@
     width: 140px;
   }
 }
+.word-maps-conflicts {
+  width: min(680px, 90vw);
+  max-height: 85dvh;
+  overflow: auto;
+  border: 1px solid #c7ccd3;
+  border-radius: 12px;
+  padding: 20px;
+  color: #263343;
+  font: 15px system-ui, sans-serif;
+}
+.word-maps-conflicts::backdrop {
+  background: #16233199;
+}
+.word-maps-conflicts section {
+  padding: 14px 0;
+  border-top: 1px solid #ddd;
+}
+.word-maps-conflicts label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+}
+.word-maps-conflicts select,
+.word-maps-conflicts button {
+  font: inherit;
+  padding: 8px;
+  margin: 6px 6px 0 0;
+}
+.word-maps-conflicts details {
+  margin-top: 8px;
+}
+.word-maps-conflicts pre {
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+  background: #f2f5f8;
+  padding: 8px;
+}

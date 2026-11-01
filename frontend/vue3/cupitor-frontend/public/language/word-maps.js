@@ -61,7 +61,7 @@ export function hostBridge(postMessage) {
     onImport: () => ask({ type: 'import' }),
   }
 }
-export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, onImport }) {
+export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, onImport, sync }) {
   const existing = document.querySelector('#wordMapsDialog')
   if (existing) {
     existing.showModal()
@@ -81,7 +81,9 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     marquee = null,
     mode = 'edit',
     inline = null,
-    lastTap = null
+    lastTap = null,
+    transientId = null,
+    syncing = false
   const editing = () => mode === 'edit'
   const editOnly = []
   const status = el('span', '', 'wm-status')
@@ -103,6 +105,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     title = el('h2', 'Word maps'),
     close = button('Close', () => dialog.close())
   header.append(title, close)
+  const syncButton = button('Sync', () => runSync(false))
+  syncButton.className = 'wm-sync'
   const toolbar = el('div', null, 'wm-toolbar'),
     picker = el('select'),
     modeGroup = el('div', null, 'wm-modes'),
@@ -191,8 +195,11 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     picker,
     name,
     modeGroup,
+    syncButton,
     editBtn('New map', () => {
       const m = emptyMap()
+      maps = savedMaps()
+      transientId = null
       maps.push(m)
       activate(m)
       save()
@@ -243,12 +250,14 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       if (confirm('Delete “' + map.name + '”?')) {
         maps = maps.filter((m) => m !== map)
         activate(maps[0] || null)
-        save()
+        save(false)
       }
     })
   )
   const footer = el('footer')
-  footer.append(el('small', 'Saved on this device · Export to back up or transfer maps.'), status)
+  footer.append(el('small', sync
+    ? 'Saved locally · Sync to GitHub to use your maps on other devices.'
+    : 'Saved locally · Sign in and set up your repository to sync with GitHub.'), status)
   dialog.append(header, toolbar, layout, footer, file)
   document.body.append(dialog)
   picker.onchange = () => activate(maps.find((m) => m.id === picker.value))
@@ -288,6 +297,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     if (inline || connecting) e.preventDefault()
   })
   dialog.addEventListener('close', () => {
+    if (inline) finishInline(true)
     dialog.remove()
   })
   function button(text, fn) {
@@ -441,6 +451,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     if (text.length > 2000000) throw Error('Please select a JSON file smaller than 2 MB.')
     const imported = readMap(text)
     imported.id = newId()
+    maps = savedMaps()
+    transientId = null
     maps.push(imported)
     activate(imported)
     save()
@@ -472,15 +484,61 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
-  function save() {
+  const savedMaps = () => maps.filter(m => m.id !== transientId)
+  function refreshSync() {
+    syncButton.disabled = !sync || syncing || storageBroken
+    syncButton.textContent = syncing ? 'Syncing…' : sync?.dirty(savedMaps()) ? 'Sync*' : 'Sync'
+    syncButton.title = !sync
+      ? 'Sign in and set up your repository to sync'
+      : 'Load and save word maps in your GitHub repository'
+  }
+  async function runSync(pull) {
+    if (!sync || syncing || storageBroken) return
+    if (inline) finishInline(true)
+    syncing = true
+    refreshSync()
+    status.textContent = pull ? 'Loading maps from GitHub…' : 'Syncing maps to GitHub…'
+    try {
+      const getMaps = () => {
+        if (!dialog.isConnected) return JSON.parse(localStorage.getItem(storageKey) || '[]')
+        // Inline text may have changed while the network request was pending.
+        if (inline) finishInline(true)
+        return savedMaps()
+      }
+      const adopt = next => {
+        localStorage.setItem(storageKey, JSON.stringify(next))
+        if (!dialog.isConnected) return
+        const currentId = map.id
+        maps = next
+        transientId = null
+        activate(maps.find(m => m.id === currentId) || maps[0] || null)
+      }
+      const result = await sync[pull ? 'pull' : 'push'](getMaps, adopt)
+      status.textContent = result.conflicts
+        ? 'Loaded from GitHub. Conflicting maps kept locally; resolve them with Sync.'
+        : sync.dirty(getMaps())
+          ? 'Saved locally · unsynced changes'
+          : 'Maps are in sync with GitHub'
+    } catch (e) {
+      status.textContent = e.code === 'word-maps-sync-cancelled'
+        ? e.message
+        : 'GitHub sync failed: ' + e.message + '. Your local changes are kept.'
+    } finally {
+      syncing = false
+      refreshSync()
+    }
+  }
+  function save(persistDraft = true) {
     if (storageBroken) {
       status.textContent =
         'Saving blocked: existing stored maps could not be read. Export your work to keep it.'
       return
     }
     try {
-      localStorage.setItem(storageKey, JSON.stringify(maps))
-      status.textContent = 'Saved on this device'
+      if (persistDraft && map.id === transientId) transientId = null
+      localStorage.setItem(storageKey, JSON.stringify(savedMaps()))
+      status.textContent = sync ? 'Saved locally · unsynced changes' : 'Saved on this device'
+      refreshSync()
     } catch (_) {
       status.textContent = 'Could not save. Export your map to keep your changes.'
     }
@@ -506,6 +564,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     if (!map) {
       map = emptyMap()
       maps.push(map)
+      transientId = map.id
     }
     draw()
     details()
@@ -862,7 +921,9 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       save()
       draw()
     } else if (editing() && lastTap?.id === d.id && e.timeStamp - lastTap.t < 400) {
-      lastTap = null
+      lastTap = null,
+    transientId = null,
+    syncing = false
       startInline(d.id)
     } else {
       lastTap = { id: d.id, t: e.timeStamp }
@@ -1177,4 +1238,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   setMode(map.nodes.length ? 'read' : 'edit')
   dialog.showModal()
   scale(window.innerWidth < 700 ? -0.65 : -0.45)
+  refreshSync()
+  if (sync && !storageBroken) runSync(true)
 }
+
