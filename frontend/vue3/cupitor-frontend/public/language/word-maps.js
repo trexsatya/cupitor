@@ -230,7 +230,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   const undo = editBtn('Undo', undoLast)
   const redo = editBtn('Redo', redoLast)
   const zoomControls = el('div', null, 'wm-zoom-controls')
-  zoomControls.append(button('Fit', fitMap), button('−', () => scale(-0.2)), button('+', () => scale(0.2)))
+  zoomControls.append(button('Fit map', fitMap), button('−', () => scale(-0.2)), button('+', () => scale(0.2)))
   toolbar.append(
     picker,
     name,
