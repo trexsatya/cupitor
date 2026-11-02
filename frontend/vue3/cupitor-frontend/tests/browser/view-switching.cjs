@@ -43,6 +43,10 @@ async function checkViewSwitching(browser) {
     try {
       await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
       await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
+      assert.equal(await page.locator('#youtubePlayer iframe').count(), 0,
+        'the search/front page must not eagerly create a YouTube iframe')
+      assert.equal(await page.locator('#mediaContainer').isVisible(), false,
+        'the YouTube video surface is reserved for Player and Practice')
       await page.evaluate(wav => {
         const s = window.__yt = { id: 'testVideo01', time: 0, state: 2, events: [] }
         const log = action => s.events.push({ action, id: s.id, time: s.time })
