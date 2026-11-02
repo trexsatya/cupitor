@@ -1106,11 +1106,21 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     details()
   }
   function toCanvas(e) {
-    const rect = canvas.getBoundingClientRect()
-    return {
-      x: ((e.clientX - rect.left) * 2400) / rect.width,
-      y: ((e.clientY - rect.top) * 1600) / rect.height,
+    // Use the SVG's actual viewBox transform so clicks stay aligned even when
+    // preserveAspectRatio introduces letterboxing in a differently sized view.
+    if (canvas.createSVGPoint && canvas.getScreenCTM) {
+      const matrix = canvas.getScreenCTM()
+      if (matrix) {
+        const point = canvas.createSVGPoint()
+        point.x = e.clientX
+        point.y = e.clientY
+        const local = point.matrixTransform(matrix.inverse())
+        return { x: local.x, y: local.y }
+      }
     }
+    const rect = canvas.getBoundingClientRect()
+    return { x: ((e.clientX - rect.left) * 2400) / rect.width,
+      y: ((e.clientY - rect.top) * 1600) / rect.height }
   }
   canvas.addEventListener('dblclick', (e) => {
     const node = e.target.closest?.('[data-node]')
