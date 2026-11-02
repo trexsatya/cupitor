@@ -547,7 +547,12 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     const dx = minX + 70 > 2210 ? -minX + 120 : 70, dy = minY + 50 > 1560 ? -minY + 80 : 50
     const nodes = copiedSelection.nodes.map(node => ({ ...node, id: idMap.get(node.id), x: clamp(node.x + dx, 190, 2210), y: clamp(node.y + dy, 40, 1560), images: [...(node.images || [])] }))
     const edges = copiedSelection.edges.filter(edge => oldIds.has(edge.from) && oldIds.has(edge.to)).map(edge => ({ ...edge, id: newId(), from: idMap.get(edge.from), to: idMap.get(edge.to) }))
-    commit(() => { map.nodes.push(...nodes); map.edges.push(...edges); group = new Set(nodes.map(node => node.id)); selection = null })
+    commit(() => {
+      map.nodes.push(...nodes)
+      map.edges.push(...edges)
+      if (nodes.length === 1) { selection = { kind: 'node', id: nodes[0].id }; group.clear() }
+      else { group = new Set(nodes.map(node => node.id)); selection = null }
+    })
     status.textContent = nodes.length + ' word(s) pasted.'
     return true
   }
@@ -1435,6 +1440,18 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       return
     }
     inspector.append(el('h3', n ? 'Word' : 'Connection'))
+    if (n) {
+      const relatedMaps = maps.filter(other => other.id !== map.id && other.nodes.some(candidate => candidate.word.trim().toLocaleLowerCase() === n.word.trim().toLocaleLowerCase()))
+      if (relatedMaps.length) {
+        inspector.append(el('h4', 'Also appears in'))
+        for (const other of relatedMaps) inspector.append(button(other.name, () => {
+          const word = n.word
+          activate(other)
+          const match = other.nodes.find(candidate => candidate.word.trim().toLocaleLowerCase() === word.trim().toLocaleLowerCase())
+          if (match) select('node', match.id)
+        }))
+      }
+    }
     const form = el('form')
     inspector.append(form)
     if (n) {
