@@ -1123,12 +1123,6 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       y: ((e.clientY - rect.top) * 1600) / rect.height }
   }
   canvas.addEventListener('dblclick', (e) => {
-    const node = e.target.closest?.('[data-node]')
-    if (node && !editing()) {
-      const item = map.nodes.find(candidate => candidate.id === node.getAttribute('data-node'))
-      if (item && onLookup) { e.preventDefault(); minimizeMap(); onLookup(item.lookup || item.word) }
-      return
-    }
     if (!editing() || e.target.closest?.('[data-node],[data-edge]')) return
     e.preventDefault()
     addWord(toCanvas(e))
