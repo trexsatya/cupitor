@@ -354,6 +354,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     }
     if (e.target.closest?.('input,textarea,select,[contenteditable="true"]')) return
     const mod = e.ctrlKey || e.metaKey
+    if (editing() && !e.repeat && mod && !e.altKey && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redoLast() : undoLast(); return }
+    if (editing() && !e.repeat && mod && !e.altKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redoLast(); return }
     if (editing() && !e.repeat && mod && !e.altKey && e.key.toLowerCase() === 'c') { if (copySelection()) e.preventDefault(); return }
     if (editing() && !e.repeat && mod && !e.altKey && e.key.toLowerCase() === 'v') { if (pasteSelection()) e.preventDefault(); return }
     if (editing() && !e.repeat && !mod && !e.altKey && ['Delete', 'Backspace'].includes(e.key)) { if (deleteSelection()) e.preventDefault(); return }
