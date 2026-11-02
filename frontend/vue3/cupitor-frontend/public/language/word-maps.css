@@ -74,6 +74,20 @@
 .wm-toolbar select {
   max-width: 210px;
 }
+.wm-main-toolbar > select {
+  box-sizing: border-box;
+  flex: 0 0 210px;
+  width: 210px;
+  max-width: min(210px, 42vw);
+}
+.wm-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wm-zoom-controls button {
+  min-width: 38px;
+}
 .wm-layout {
   display: flex;
   flex: 1;
@@ -367,9 +381,16 @@
     align-items: center;
   }
   .wm-main-toolbar > select {
-    flex: 1 1 160px;
-    max-width: none;
-    width: 0;
+    flex: 0 0 210px;
+    width: 210px;
+    max-width: min(210px, 48vw);
+  }
+  .wm-zoom-controls {
+    flex: 0 0 auto;
+  }
+  .wm-zoom-controls button {
+    min-width: 34px;
+    padding: 6px 9px;
   }
   .wm-main-toolbar > .wm-mode-toggle {
     flex: 0 0 auto;
@@ -445,16 +466,56 @@
 
 .word-maps.wm-fullscreen,
 .word-maps:fullscreen {
+  position: fixed;
+  inset: 0;
+  display: flex;
   width: 100vw;
   height: 100dvh;
   max-width: none;
   max-height: none;
   margin: 0;
+  padding: 0;
   border: 0;
   border-radius: 0;
+  gap: 0;
 }
-.word-maps .wm-fullscreen-toggle {
-  margin-left: auto;
+.word-maps.wm-fullscreen > header,
+.word-maps.wm-fullscreen > .wm-main-toolbar,
+.word-maps.wm-fullscreen > footer {
+  display: none;
+}
+.word-maps.wm-fullscreen > .wm-layout {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  gap: 0;
+}
+.word-maps.wm-fullscreen .wm-work {
+  padding: 8px;
+}
+.word-maps.wm-fullscreen .wm-inspector {
+  display: block;
+  width: min(320px, 30vw);
+  max-height: none;
+  border-radius: 0;
+  overflow: auto;
+}
+.word-maps.wm-fullscreen .wm-details-toggle {
+  display: none;
+}
+.word-maps.wm-fullscreen .wm-fullscreen-toggle {
+  position: fixed;
+  z-index: 30;
+  top: 8px;
+  right: 8px;
+  opacity: .75;
+}
+.wm-layout > .wm-fullscreen-toggle {
+  display: none;
+}
+.word-maps.wm-fullscreen .wm-fullscreen-toggle {
+  display: block;
+  margin-left: 0;
   font-size: 21px;
   min-width: 38px;
   line-height: 1;
@@ -462,4 +523,17 @@
 .word-maps .wm-search-title {
   outline: 3px solid #d97706;
   outline-offset: 2px;
+}
+
+@media (max-width: 700px) {
+  .word-maps.wm-fullscreen .wm-layout { flex-direction: column; }
+  .word-maps.wm-fullscreen .wm-work { flex: 1 1 auto; min-height: 0; }
+  .word-maps.wm-fullscreen .wm-inspector {
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    width: 100%;
+    max-height: 34dvh;
+    padding: 10px;
+    border-top: 1px solid #c6cdd7;
+  }
 }
