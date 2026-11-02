@@ -129,7 +129,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   fullscreenButton.setAttribute('aria-label', 'Enter fullscreen')
   fullscreenButton.setAttribute('aria-pressed', 'false')
   fullscreenButton.title = 'Enter fullscreen'
-  header.append(title, fullscreenButton, close)
+  header.append(title, close)
   const syncButton = button('Sync', () => runSync(false))
   syncButton.className = 'wm-sync'
   const toolbar = el('div', null, 'wm-toolbar wm-main-toolbar'),
@@ -229,6 +229,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   const addWordButton = editBtn('+ Word', addWord, 'New word (N)')
   const undo = editBtn('Undo', undoLast)
   const redo = editBtn('Redo', redoLast)
+  const zoomControls = el('div', null, 'wm-zoom-controls')
+  zoomControls.append(button('Fit', fitMap), button('−', () => scale(-0.2)), button('+', () => scale(0.2)))
   toolbar.append(
     picker,
     name,
@@ -253,9 +255,6 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         })
       )
     ),
-    button('Fit map', fitMap),
-    button('−', () => scale(-0.2)),
-    button('+', () => scale(0.2)),
     editBtn('JSON', () => {
       script.value = JSON.stringify(map, null, 2)
       script.hidden = false
@@ -303,13 +302,14 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   moreButton.setAttribute('aria-label', 'More map actions')
   moreButton.setAttribute('aria-expanded', 'false')
   moreButton.setAttribute('aria-controls', moreActions.id)
-  const primary = new Set([picker, modeGroup, syncButton, addWordButton])
+  const primary = new Set([picker, modeGroup, syncButton, addWordButton, zoomControls])
   for (const control of [...toolbar.children]) if (!primary.has(control)) moreActions.append(control)
-  toolbar.append(moreButton, moreActions)
+  toolbar.append(zoomControls, moreButton, moreActions)
   const footer = el('footer')
   footer.append(el('small', sync
     ? 'Saved locally · Sync to GitHub to use your maps on other devices.'
     : 'Saved locally · Sign in and set up your repository to sync with GitHub.'), status)
+  layout.append(fullscreenButton)
   dialog.append(header, toolbar, layout, footer, file)
   document.body.append(dialog)
   dialog.addEventListener('click', e => {
