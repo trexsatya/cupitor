@@ -5523,3 +5523,10 @@ body.youtube-media-mode.practice-mode #mediaContainer #youtubePlayer {
     width: 100% !important;
     max-width: 100% !important;
 }
+
+
+/* When a modal is opened from a study view, its backdrop is raised above
+   the study UI. Keep the dialog itself immediately above that backdrop. */
+body.dialog-above-practice .ui-dialog {
+    z-index: 100020 !important;
+}
