@@ -22,6 +22,9 @@ async function verify(browser, width) {
         getAvailablePlaybackRates:()=>[0.5,0.7,0.8,1],playVideo:()=>s.state=1,pauseVideo:()=>s.state=2,
         seekTo:t=>s.time=t,loadVideoById:id=>{s.id=id;s.time=0;s.state=1;s.loads++}}
       window.ytPlayerReady=true
+      // YouTube video and caption-panel layout now belong to Player/Practice,
+      // not the search front page. Exercise the shared player in Player mode.
+      document.body.classList.add('rec-playing')
       window.mediaSelected={link:'testVideo01',source:'link'}
       await window.playSelectedMedia()
     })

@@ -2480,6 +2480,9 @@ body.practice-mode #mediaContainer {
 }
 body.rec-playing #mediaContainer #youtubePlayer,
 body.practice-mode #mediaContainer #youtubePlayer {
+    box-sizing: border-box;
+    width: 100% !important;
+    max-width: 100% !important;
     margin-top: 0 !important;
 }
 body.rec-playing #mediaContainer iframe,
@@ -5489,3 +5492,12 @@ body.youtube-media-mode #recPlayingRestorePill { z-index: 2147483647; }
 #playlistBrowserPanel { margin-bottom: 18px; }
 #playlistBrowserPanel > summary { cursor: pointer; color: #245c40; font-size: 13px; padding: 4px 0 12px; }
 #playlistBrowserPanel .playlist-browser { margin-bottom: 0; }
+
+
+/* YouTube is a study-view surface, not part of the search/front page.
+   Player and Practice opt back in through their body classes. */
+body:not(.rec-playing):not(.practice-mode) #mediaContainer,
+body:not(.rec-playing):not(.practice-mode) #youtubeResumePlayer,
+body:not(.rec-playing):not(.practice-mode) #toggleMediaContainer {
+    display: none !important;
+}

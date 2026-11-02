@@ -91,14 +91,10 @@
         const {ytVideoWidth, ytHeight, subWidth} = getDimensionsForPlayer();
         // 4. The API will call this function when the video player is ready.
         function onPlayerReady(event) {
-            if (window._practiceActive || window._ytReadyAutoplaySuppressed) event.target.pauseVideo();
-            else event.target.playVideo();
+            // Do not autoplay a placeholder/sample clip. The active study item
+            // issues its own cue/load command after the player becomes ready.
             window._ytReadyAutoplaySuppressed = false;
-            window.ytPlayerReady = true
-
-            if (!window._practiceActive && window.youtubePlayInterval) {
-                seekToYoutubeTime(window.youtubePlayInterval.start)
-            }
+            window.ytPlayerReady = true;
         }
 
         // window.ytPlaying is what the host reads to decide whether this page
@@ -127,14 +123,21 @@
             } catch (e) { console.warn('onPlayerError handler failed', e) }
         }
 
-        window.onYouTubeIframeAPIReady = () => {
+        // The search/front page does not need a YouTube iframe. Create the
+        // shared player only when Player or Practice is opened. This avoids
+        // loading an unrelated sample video (and avoids its autoplay) on page
+        // entry. Player/Practice continue to use window.ytPlayer as before.
+        window.__youtubeIframeApiReady = false;
+        window.ensureStudyYoutubePlayer = () => {
+            if (!window.__youtubeIframeApiReady || window.ytPlayer) return window.ytPlayer || null;
+            if (!document.body.classList.contains('rec-playing') &&
+                !document.body.classList.contains('practice-mode')) return null;
+            const host = document.getElementById('youtubePlayer');
+            if (!host) return null;
             window.ytPlayer = new YT.Player("youtubePlayer", {
                 height: ytHeight,
                 width: ytVideoWidth,
-                videoId: 'K8P_USOppfs',
-                playerVars: {
-                    'playsinline': 1
-                },
+                playerVars: { 'playsinline': 1 },
                 events: {
                     'onReady': onPlayerReady,
                     'onStateChange': onPlayerStateChange,
@@ -148,8 +151,30 @@
                 maxHeight: '85%',
                 overflow: 'scroll',
                 paddingRight: '1em'
-            })
-        }
+            });
+            return window.ytPlayer;
+        };
+        window.onYouTubeIframeAPIReady = () => {
+            window.__youtubeIframeApiReady = true;
+            window.ensureStudyYoutubePlayer();
+        };
+        // Study views are body-class driven and can be opened from several
+        // entry points. Observe that single source of truth rather than
+        // coupling player creation to one particular launch button.
+        const observeStudyViews = () => {
+            if (!document.body) return;
+            const studyPlayerObserver = new MutationObserver(() => {
+                if (document.body.classList.contains('rec-playing') ||
+                    document.body.classList.contains('practice-mode')) {
+                    window.ensureStudyYoutubePlayer();
+                }
+            });
+            studyPlayerObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+            // Covers a study view opened before the observer was attached.
+            window.ensureStudyYoutubePlayer();
+        };
+        if (document.body) observeStudyViews();
+        else document.addEventListener('DOMContentLoaded', observeStudyViews, { once: true });
     </script>
     <style>
         #scrollButton {
