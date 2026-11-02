@@ -93,7 +93,6 @@
         function onPlayerReady(event) {
             // Do not autoplay a placeholder/sample clip. The active study item
             // issues its own cue/load command after the player becomes ready.
-            event.target.pauseVideo();
             window._ytReadyAutoplaySuppressed = false;
             window.ytPlayerReady = true;
         }
@@ -162,13 +161,20 @@
         // Study views are body-class driven and can be opened from several
         // entry points. Observe that single source of truth rather than
         // coupling player creation to one particular launch button.
-        const studyPlayerObserver = new MutationObserver(() => {
-            if (document.body.classList.contains('rec-playing') ||
-                document.body.classList.contains('practice-mode')) {
-                window.ensureStudyYoutubePlayer();
-            }
-        });
-        studyPlayerObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        const observeStudyViews = () => {
+            if (!document.body) return;
+            const studyPlayerObserver = new MutationObserver(() => {
+                if (document.body.classList.contains('rec-playing') ||
+                    document.body.classList.contains('practice-mode')) {
+                    window.ensureStudyYoutubePlayer();
+                }
+            });
+            studyPlayerObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+            // Covers a study view opened before the observer was attached.
+            window.ensureStudyYoutubePlayer();
+        };
+        if (document.body) observeStudyViews();
+        else document.addEventListener('DOMContentLoaded', observeStudyViews, { once: true });
     </script>
     <style>
         #scrollButton {
