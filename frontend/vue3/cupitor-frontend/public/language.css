@@ -5494,9 +5494,7 @@ body.youtube-media-mode #recPlayingRestorePill { z-index: 2147483647; }
 /* YouTube is a study-view surface, not part of the search/front page.
    Player and Practice opt back in through their body classes. */
 body:not(.rec-playing):not(.practice-mode) #mediaContainer,
-body:not(.rec-playing):not(.practice-mode) #mediaRelatedContainer,
 body:not(.rec-playing):not(.practice-mode) #youtubeResumePlayer,
-body:not(.rec-playing):not(.practice-mode) #toggleMediaContainer,
-body:not(.rec-playing):not(.practice-mode) #toggleMediaRelatedContainer {
+body:not(.rec-playing):not(.practice-mode) #toggleMediaContainer {
     display: none !important;
 }
