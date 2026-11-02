@@ -1004,7 +1004,13 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         if (e.button !== 0) return
         e.preventDefault()
         if (!editing()) {
-          select('node', n.id)
+          if (lastTap?.id === n.id && e.timeStamp - lastTap.t < 400) {
+            lastTap = null
+            if (onLookup) { minimizeMap(); onLookup(n.lookup || n.word) }
+          } else {
+            lastTap = { id: n.id, t: e.timeStamp }
+            select('node', n.id)
+          }
           return
         }
         if (e.shiftKey || e.ctrlKey || e.metaKey) {
