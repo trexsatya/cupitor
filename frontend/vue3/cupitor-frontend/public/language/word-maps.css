@@ -510,8 +510,12 @@
   right: 8px;
   opacity: .75;
 }
-.word-maps .wm-fullscreen-toggle {
-  margin-left: auto;
+.wm-layout > .wm-fullscreen-toggle {
+  display: none;
+}
+.word-maps.wm-fullscreen .wm-fullscreen-toggle {
+  display: block;
+  margin-left: 0;
   font-size: 21px;
   min-width: 38px;
   line-height: 1;
