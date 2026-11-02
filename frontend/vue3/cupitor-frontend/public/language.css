@@ -5489,3 +5489,14 @@ body.youtube-media-mode #recPlayingRestorePill { z-index: 2147483647; }
 #playlistBrowserPanel { margin-bottom: 18px; }
 #playlistBrowserPanel > summary { cursor: pointer; color: #245c40; font-size: 13px; padding: 4px 0 12px; }
 #playlistBrowserPanel .playlist-browser { margin-bottom: 0; }
+
+
+/* YouTube is a study-view surface, not part of the search/front page.
+   Player and Practice opt back in through their body classes. */
+body:not(.rec-playing):not(.practice-mode) #mediaContainer,
+body:not(.rec-playing):not(.practice-mode) #mediaRelatedContainer,
+body:not(.rec-playing):not(.practice-mode) #youtubeResumePlayer,
+body:not(.rec-playing):not(.practice-mode) #toggleMediaContainer,
+body:not(.rec-playing):not(.practice-mode) #toggleMediaRelatedContainer {
+    display: none !important;
+}
