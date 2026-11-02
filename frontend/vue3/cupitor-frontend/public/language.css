@@ -5501,3 +5501,25 @@ body:not(.rec-playing):not(.practice-mode) #youtubeResumePlayer,
 body:not(.rec-playing):not(.practice-mode) #toggleMediaContainer {
     display: none !important;
 }
+
+
+/* Keep the YouTube study player within the same centered width as the
+   Player/Practice content. The media-mode viewport rule above is full-width,
+   but the embedded player must not overflow on desktop. */
+body.youtube-media-mode.rec-playing #mediaContainer,
+body.youtube-media-mode.practice-mode #mediaContainer {
+    box-sizing: border-box;
+    left: 50% !important;
+    right: auto !important;
+    transform: translateX(-50%) !important;
+    width: min(100vw, 900px) !important;
+    max-width: 100vw !important;
+}
+body.youtube-media-mode.rec-playing #mediaContainer iframe,
+body.youtube-media-mode.practice-mode #mediaContainer iframe,
+body.youtube-media-mode.rec-playing #mediaContainer #youtubePlayer,
+body.youtube-media-mode.practice-mode #mediaContainer #youtubePlayer {
+    box-sizing: border-box;
+    width: 100% !important;
+    max-width: 100% !important;
+}
