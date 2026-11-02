@@ -39,9 +39,9 @@ const edgeStyle = (edge) =>
       ? 'dashed'
       : 'solid'
 const EDIT_HINT =
-  'Press N to add a word and type straight into it. Select a word, then press C to connect it, or F2 / double-click to rename it in place. Drag it into position; drag on empty space (or Shift-click words) to select a group and move them together.'
+  'Press N to add a word, or double-click empty canvas to add one at that spot. Select a word, then press C to connect it, or F2 / double-click to rename it. Delete/Backspace removes the selection; Ctrl/⌘+C and Ctrl/⌘+V copy/paste words. Drag words to move them; drag empty space or Shift-click to select a group.'
 const READ_HINT =
-  'Read mode: select a word or connection to see its details. Switch to edit mode to change the map.'
+  'Read mode: select a word or connection to see its details. Double-click a word to search subtitles. Switch to edit mode to change the map.'
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
 // For webviews that cannot download or pick files (for example Flutter on macOS).
 // postMessage(text) must deliver the text to the host app. The host receives
