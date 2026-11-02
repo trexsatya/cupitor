@@ -39,9 +39,9 @@ const edgeStyle = (edge) =>
       ? 'dashed'
       : 'solid'
 const EDIT_HINT =
-  'Press N to add a word and type straight into it. Select a word, then press C to connect it, or F2 / double-click to rename it in place. Drag it into position; drag on empty space (or Shift-click words) to select a group and move them together.'
+  'Press N to add a word, or double-click empty canvas to add one at that spot. Select a word, then press C to connect it, or F2 / double-click to rename it. Delete/Backspace removes the selection; Ctrl/⌘+C and Ctrl/⌘+V copy/paste words. Drag words to move them; drag empty space or Shift-click to select a group.'
 const READ_HINT =
-  'Read mode: select a word or connection to see its details. Switch to edit mode to change the map.'
+  'Read mode: select a word or connection to see its details. Double-click a word to search subtitles. Switch to edit mode to change the map.'
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
 // For webviews that cannot download or pick files (for example Flutter on macOS).
 // postMessage(text) must deliver the text to the host app. The host receives
@@ -87,6 +87,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     selection = null,
     connecting = null,
     history = [],
+    redoHistory = [],
     zoom = 1,
     drag = null,
     group = new Set(),
@@ -227,6 +228,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   }
   const addWordButton = editBtn('+ Word', addWord, 'New word (N)')
   const undo = editBtn('Undo', undoLast)
+  const redo = editBtn('Redo', redoLast)
   toolbar.append(
     picker,
     name,
@@ -242,6 +244,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     }),
     addWordButton,
     undo,
+    redo,
     editBtn('Arrange', () =>
       commit(() =>
         map.nodes.forEach((n, i) => {
@@ -349,8 +352,14 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       cancelConnecting()
       return
     }
-    if (!editing() || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
     if (e.target.closest?.('input,textarea,select,[contenteditable="true"]')) return
+    const mod = e.ctrlKey || e.metaKey
+    if (editing() && !e.repeat && mod && !e.altKey && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redoLast() : undoLast(); return }
+    if (editing() && !e.repeat && mod && !e.altKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redoLast(); return }
+    if (editing() && !e.repeat && mod && !e.altKey && e.key.toLowerCase() === 'c') { if (copySelection()) e.preventDefault(); return }
+    if (editing() && !e.repeat && mod && !e.altKey && e.key.toLowerCase() === 'v') { if (pasteSelection()) e.preventDefault(); return }
+    if (editing() && !e.repeat && !mod && !e.altKey && ['Delete', 'Backspace'].includes(e.key)) { if (deleteSelection()) e.preventDefault(); return }
+    if (!editing() || e.repeat || mod || e.altKey) return
     const key = e.key.toLowerCase(),
       single = selection?.kind === 'node' ? selection.id : null
     if (key === 'n') {
@@ -493,6 +502,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   const edgeEl = (id) => [...canvas.querySelectorAll('[data-edge]')].find((g) => g.getAttribute('data-edge') === id)
   function undoLast() {
     if (!history.length) return
+    redoHistory.push(JSON.stringify(map))
     Object.assign(map, JSON.parse(history.pop()))
     selection = null
     group.clear()
@@ -500,15 +510,61 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     draw()
     details()
   }
-  function addWord() {
+  function redoLast() {
+    if (!redoHistory.length) return
+    history.push(JSON.stringify(map))
+    Object.assign(map, JSON.parse(redoHistory.pop()))
+    selection = null
+    group.clear()
+    save()
+    draw()
+    details()
+  }
+  function selectedNodeIds() {
+    return group.size ? [...group] : selection?.kind === 'node' ? [selection.id] : []
+  }
+  function deleteSelection() {
+    if (group.size) { const ids = [...group]; commit(() => { ids.forEach(id => removeNode(map, id)); group.clear(); selection = null }); return true }
+    if (selection?.kind === 'node') { const id = selection.id; commit(() => { removeNode(map, id); selection = null }); return true }
+    if (selection?.kind === 'edge') { const id = selection.id; commit(() => { map.edges = map.edges.filter(edge => edge.id !== id); selection = null }); return true }
+    return false
+  }
+  let copiedSelection = null
+  function copySelection() {
+    const ids = selectedNodeIds()
+    if (!ids.length) return false
+    const nodes = map.nodes.filter(node => ids.includes(node.id)).map(node => ({ ...node, images: [...(node.images || [])] }))
+    const edges = map.edges.filter(edge => ids.includes(edge.from) && ids.includes(edge.to)).map(edge => ({ ...edge }))
+    copiedSelection = { nodes, edges }
+    status.textContent = nodes.length + ' word(s) copied. Press Ctrl/⌘+V to paste.'
+    return true
+  }
+  function pasteSelection() {
+    if (!copiedSelection?.nodes?.length || copiedSelection.nodes.length + map.nodes.length > 500) return false
+    const oldIds = new Set(copiedSelection.nodes.map(node => node.id))
+    const idMap = new Map(copiedSelection.nodes.map(node => [node.id, newId()]))
+    const minX = Math.min(...copiedSelection.nodes.map(node => node.x)), minY = Math.min(...copiedSelection.nodes.map(node => node.y))
+    const dx = minX + 70 > 2210 ? -minX + 120 : 70, dy = minY + 50 > 1560 ? -minY + 80 : 50
+    const nodes = copiedSelection.nodes.map(node => ({ ...node, id: idMap.get(node.id), x: clamp(node.x + dx, 190, 2210), y: clamp(node.y + dy, 40, 1560), images: [...(node.images || [])] }))
+    const edges = copiedSelection.edges.filter(edge => oldIds.has(edge.from) && oldIds.has(edge.to)).map(edge => ({ ...edge, id: newId(), from: idMap.get(edge.from), to: idMap.get(edge.to) }))
+    commit(() => {
+      map.nodes.push(...nodes)
+      map.edges.push(...edges)
+      if (nodes.length === 1) { selection = { kind: 'node', id: nodes[0].id }; group.clear() }
+      else { group = new Set(nodes.map(node => node.id)); selection = null }
+    })
+    status.textContent = nodes.length + ' word(s) pasted.'
+    return true
+  }
+  function addWord(position) {
     if (!editing()) return
     let created
     commit(() => {
       created = {
         id: newId(),
         word: 'New word',
-        x: 220 + (map.nodes.length % 6) * 260,
-        y: 160 + Math.floor(map.nodes.length / 6) * 110,
+        x: position ? clamp(position.x, 190, 2210) : 220 + (map.nodes.length % 6) * 260,
+        y: position ? clamp(position.y, 40, 1560) : 160 + Math.floor(map.nodes.length / 6) * 110,
         color: '#dc3636',
         textColor: '#ffffff',
         shape: 'rectangle',
@@ -552,6 +608,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       // that moved focus out of the box, so only its Word field is updated.
       history.push(JSON.stringify(map))
       if (history.length > 50) history.shift()
+      redoHistory = []
       n.word = value
       save()
       draw()
@@ -734,6 +791,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     if (inline) finishInline(true)
     history.push(JSON.stringify(map))
     if (history.length > 50) history.shift()
+    redoHistory = []
     fn()
     save()
     draw()
@@ -751,6 +809,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     inline = null
     connecting = null
     history = []
+    redoHistory = []
     if (!map) {
       map = emptyMap()
       maps.push(map)
@@ -766,6 +825,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     picker.value = map.id
     name.value = map.name
     undo.disabled = !history.length
+    redo.disabled = !redoHistory.length
     const active = !inline && canvas.contains(document.activeElement) ? document.activeElement : null,
       focusNode = active?.closest?.('[data-node]')?.getAttribute('data-node'),
       focusEdge = active?.closest?.('[data-edge]')?.getAttribute('data-edge')
@@ -877,6 +937,14 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
           transform: `translate(${n.x},${n.y})`,
         })
       g.classList.add('wm-node')
+      const otherMaps = maps.filter(other => other.id !== map.id && other.nodes.some(candidate => candidate.word.trim().toLocaleLowerCase() === n.word.trim().toLocaleLowerCase()))
+      if (otherMaps.length) {
+        const badge = svgEl('g', { class: 'wm-cross-map-indicator', 'aria-label': 'Also in ' + otherMaps.map(other => other.name).join(', ') })
+        badge.append(svgEl('circle', { cx: w / 2 - 2, cy: -25, r: 12, fill: '#1769c2', stroke: 'white', 'stroke-width': 2 }))
+        badge.append(svgEl('text', { x: w / 2 - 2, y: -20, 'text-anchor': 'middle', fill: 'white', 'font-size': 14, 'font-weight': 700 }, String(otherMaps.length)))
+        badge.style.pointerEvents = 'none'
+        g.append(badge)
+      }
       if (searchNodes.has(n.id)) {
         g.classList.add('wm-search-match')
         g.append(svgEl('rect', { x: -w / 2 - 7, y: -34, width: w + 14, height: 68, rx: 16,
@@ -943,7 +1011,13 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         if (e.button !== 0) return
         e.preventDefault()
         if (!editing()) {
-          select('node', n.id)
+          if (lastTap?.id === n.id && e.timeStamp - lastTap.t < 400) {
+            lastTap = null
+            if (onLookup) { minimizeMap(); onLookup(n.lookup || n.word) }
+          } else {
+            lastTap = { id: n.id, t: e.timeStamp }
+            select('node', n.id)
+          }
           return
         }
         if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -1037,12 +1111,27 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     details()
   }
   function toCanvas(e) {
-    const rect = canvas.getBoundingClientRect()
-    return {
-      x: ((e.clientX - rect.left) * 2400) / rect.width,
-      y: ((e.clientY - rect.top) * 1600) / rect.height,
+    // Use the SVG's actual viewBox transform so clicks stay aligned even when
+    // preserveAspectRatio introduces letterboxing in a differently sized view.
+    if (canvas.createSVGPoint && canvas.getScreenCTM) {
+      const matrix = canvas.getScreenCTM()
+      if (matrix) {
+        const point = canvas.createSVGPoint()
+        point.x = e.clientX
+        point.y = e.clientY
+        const local = point.matrixTransform(matrix.inverse())
+        return { x: local.x, y: local.y }
+      }
     }
+    const rect = canvas.getBoundingClientRect()
+    return { x: ((e.clientX - rect.left) * 2400) / rect.width,
+      y: ((e.clientY - rect.top) * 1600) / rect.height }
   }
+  canvas.addEventListener('dblclick', (e) => {
+    if (!editing() || e.target.closest?.('[data-node],[data-edge]')) return
+    e.preventDefault()
+    addWord(toCanvas(e))
+  })
   canvas.onpointerdown = (e) => {
     // Node and edge handlers deal with their own presses; this is empty canvas only.
     if (e.button !== 0 || e.target.closest?.('[data-node],[data-edge]')) return
@@ -1120,6 +1209,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     drag = null
     if (d.moved) {
       history.push(d.before)
+      if (history.length > 50) history.shift()
+      redoHistory = []
       save()
       draw()
     } else if (editing() && lastTap?.id === d.id && e.timeStamp - lastTap.t < 400) {
@@ -1228,6 +1319,16 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     if (n) {
       inspector.append(el('h3', n.word))
       inspector.append(...[row('Looks up as', n.lookup)].filter(Boolean))
+      const relatedMaps = maps.filter(other => other.id !== map.id && other.nodes.some(candidate => candidate.word.trim().toLocaleLowerCase() === n.word.trim().toLocaleLowerCase()))
+      if (relatedMaps.length) {
+        inspector.append(el('h4', 'Also appears in'))
+        for (const other of relatedMaps) inspector.append(button(other.name, () => {
+          activate(other)
+          const match = other.nodes.find(candidate => candidate.word.trim().toLocaleLowerCase() === n.word.trim().toLocaleLowerCase())
+          if (match) select('node', match.id)
+          setMode('read')
+        }))
+      }
       if (n.note) {
         const p = el('p', n.note)
         p.style.whiteSpace = 'pre-wrap'
@@ -1339,6 +1440,18 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       return
     }
     inspector.append(el('h3', n ? 'Word' : 'Connection'))
+    if (n) {
+      const relatedMaps = maps.filter(other => other.id !== map.id && other.nodes.some(candidate => candidate.word.trim().toLocaleLowerCase() === n.word.trim().toLocaleLowerCase()))
+      if (relatedMaps.length) {
+        inspector.append(el('h4', 'Also appears in'))
+        for (const other of relatedMaps) inspector.append(button(other.name, () => {
+          const word = n.word
+          activate(other)
+          const match = other.nodes.find(candidate => candidate.word.trim().toLocaleLowerCase() === word.trim().toLocaleLowerCase())
+          if (match) select('node', match.id)
+        }))
+      }
+    }
     const form = el('form')
     inspector.append(form)
     if (n) {
