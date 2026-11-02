@@ -498,3 +498,59 @@ test('GitHub refresh preserves a search highlight using the new map content', as
   assert.equal(document.querySelector('.wm-search-match').getAttribute('data-node'), 'b')
   assert.equal(document.querySelector('.wm-inspector h3').textContent, 'Gräl')
 })
+
+test('matching words show cross-map destinations and open the matching map', () => {
+  setup()
+  const first = {
+    version: 1, id: 'first', name: 'Movement', edges: [],
+    nodes: [{ id: 'n1', word: 'störtdyka', x: 300, y: 200, lookup: '', note: '' }]
+  }
+  const second = {
+    version: 1, id: 'second', name: 'Actions', edges: [],
+    nodes: [{ id: 'n2', word: 'Störtdyka', x: 400, y: 300, lookup: '', note: '' }]
+  }
+  localStorage.setItem('maps', JSON.stringify([first, second]))
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  assert.ok(document.querySelector('.wm-cross-map-indicator'))
+  const destination = [...document.querySelectorAll('.wm-inspector button')].find(b => b.textContent === 'Actions')
+  assert.ok(destination)
+  destination.click()
+  assert.equal(document.querySelector('[aria-label="Saved word map"]').value, 'second')
+  assert.equal(document.querySelector('[data-node]').getAttribute('data-node'), 'n2')
+})
+
+test('read-mode double tap searches subtitles and minimizes the map', () => {
+  setup()
+  let lookup = ''
+  const map = {
+    version: 1, id: 'one', name: 'Words', edges: [],
+    nodes: [{ id: 'n1', word: 'vansinnig', lookup: 'vansinnig|galen', x: 300, y: 200 }]
+  }
+  localStorage.setItem('maps', JSON.stringify([map]))
+  openWordMaps({ storageKey: 'maps', onLookup: value => { lookup = value } })
+  let node = document.querySelector('[data-node]')
+  node.onpointerdown({ button: 0, preventDefault() {}, timeStamp: 100 })
+  node = document.querySelector('[data-node]')
+  node.onpointerdown({ button: 0, preventDefault() {}, timeStamp: 250 })
+  assert.equal(lookup, 'vansinnig|galen')
+  assert.equal(document.querySelector('#wordMapsDialog').hasAttribute('open'), false)
+})
+
+test('selected nodes can be copied, pasted, deleted and restored with undo/redo', () => {
+  setup()
+  openWordMaps({ storageKey: 'maps', onLookup() {} })
+  click('+ Word')
+  finishNewWord()
+  const node = document.querySelector('[data-node]')
+  node.onkeydown({ target: node, key: 'Enter', preventDefault() {} })
+  const dialog = document.querySelector('#wordMapsDialog')
+  dialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true }))
+  dialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true, cancelable: true }))
+  assert.equal(saved().nodes.length, 2)
+  dialog.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }))
+  assert.equal(saved().nodes.length, 1)
+  click('Undo')
+  assert.equal(saved().nodes.length, 2)
+  click('Redo')
+  assert.equal(saved().nodes.length, 1)
+})
