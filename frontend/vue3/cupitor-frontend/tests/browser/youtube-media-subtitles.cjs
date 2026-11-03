@@ -60,14 +60,31 @@ async function verify(browser, width) {
       assert(r.left>=0&&r.right<=r.width+1&&r.bottom<=r.divider+1&&r.bottom>r.top,JSON.stringify(r))
     }
     await assertFit()
-    const drag=await panel.locator('.cup-sub-drag').boundingBox()
-    await page.mouse.move(drag.x+20,drag.y+3);await page.mouse.down();await page.mouse.move(20,230);await page.mouse.up()
-    await assertFit()
+    for(const y of [230,600,230]) {
+      const drag=await panel.locator('.cup-sub-drag').boundingBox()
+      await page.mouse.move(drag.x+20,drag.y+3);await page.mouse.down();await page.mouse.move(20,y);await page.mouse.up()
+      assert.equal(await panel.locator('.cup-dragging').count(),0,'release over the iframe must end the resize')
+      assert.equal(await page.evaluate(()=>document.body.classList.contains('cup-sub-dragging')),false)
+      await assertFit()
+    }
     await page.setViewportSize({width:820,height:390});await assertFit()
     await page.setViewportSize({width,height:820})
     await panel.locator('[data-act=pick]').click();await panel.locator('[data-act=all]').click();await panel.locator('[data-act=send]').click()
     await page.locator('#captionCaptureDialog').waitFor()
     assert.match(await page.locator('#captionCaptureDialog').innerText(),/färgsprakande/)
+    // The inline study-dialog layer must outrank both the shared sidebar
+    // and its modal backdrop. Disabling backdrop pointer events would allow
+    // clicks through to the player, so keep the modal shield active too.
+    const layers=await page.evaluate(()=>{
+      const dialog=document.querySelector('#captionCaptureDialog').closest('.ui-dialog')
+      const overlay=document.querySelector('.ui-widget-overlay')
+      return {dialog:Number(getComputedStyle(dialog).zIndex),
+        overlay:Number(getComputedStyle(overlay).zIndex),
+        panel:Number(getComputedStyle(document.querySelector('#youtubeCaptionPanel')).zIndex),
+        shield:getComputedStyle(overlay).pointerEvents}
+    })
+    assert(layers.dialog>layers.overlay&&layers.dialog>layers.panel,JSON.stringify(layers))
+    assert.equal(layers.shield,'auto','modal backdrop must still intercept background clicks')
     await page.locator('#captionCaptureDialog').locator('..').getByRole('button',{name:'Cancel',exact:true}).click()
     const before=await page.evaluate(()=>({...window.__yt}))
     await page.locator('#youtubeClosePlayer').click()
