@@ -1,3 +1,4 @@
+import { LANGUAGE_KEY, languageKeyFromLocation, defaultDataRoot } from './language-config.js'
 // Where the language app reads from and writes to. Every raw URL and every
 // GitHub write target in language.js comes from here; nothing else names an
 // owner, repo or branch.
@@ -24,9 +25,21 @@ export function resetLayerStats() { _layerStats = { other: { hits: 0, misses: 0,
 export function layerStats() { return JSON.parse(JSON.stringify(_layerStats)) }
 
 let _state = null
+let _generation = 0
 let _sourceNoticeSent = false
-// Keeps a shallow copy, so later changes to the caller's object do not leak in.
-export function configure(state) { _state = state ? { ...state } : null; _sourceNoticeSent = false; resetLayerStats() }
+function configuredIdentity(value) {
+  const s = sources(value)
+  const key = src => src && [String(src.owner).toLowerCase(), String(src.repo).toLowerCase(), src.branch]
+  return JSON.stringify([String(value.login || '').toLowerCase(), key(s.self), key(s.other)])
+}
+// Copy both source settings so later caller mutations cannot redirect a read.
+export function configure(state) {
+  const before = configuredIdentity(_state || loadAccount())
+  _state = state ? { ...state, ...(state.other ? { other: { ...state.other } } : {}) } : null
+  if (configuredIdentity(_state || loadAccount()) !== before) _generation++
+  _sourceNoticeSent = false
+  resetLayerStats()
+}
 function state() { return _state || (_state = loadAccount()) }
 
 // Owner, repo and branch go into raw URLs and API paths as they are, so each
@@ -56,17 +69,46 @@ export function sourceProblems() {
 }
 
 // The language goes into raw URL paths, so only plain names pass.
-const LANG_RE = /^[a-z][a-z-]*$/
+const LANG_RE = LANGUAGE_KEY
+export const langFromLocation = languageKeyFromLocation
 
-export function langFromLocation(loc = (typeof window !== 'undefined' ? window.location : null)) {
-  try {
-    const v = (new URL(loc.href).searchParams.get('lang') || '').toLowerCase()
-    return LANG_RE.test(v) ? v : 'swedish'
-  } catch (_) { return 'swedish' }
+// All readers/writers can share this descriptor without changing the legacy
+// target shape accepted by GitHubUtils. Repository overrides will be enabled
+// only after the user-data storage migration can isolate pending edits.
+export function sourceDescriptor(who = 'primary', lang = langFromLocation()) {
+  checkLang(lang)
+  const target = source(who)
+  if (!target) throw new Error(`data-source: no ${who} source`)
+  const root = defaultDataRoot(lang)
+  return Object.freeze({ ...target, language: lang, root,
+    identity: JSON.stringify([target.owner.toLowerCase(), target.repo.toLowerCase(), target.branch, lang, root]) })
 }
-
+export function dataRoot(lang = langFromLocation()) { return defaultDataRoot(lang) }
+export function sourceIdentity(who = 'primary', lang = langFromLocation()) {
+  return sourceDescriptor(who, lang).identity
+}
+// Capture before starting asynchronous work. The generation also detects a
+// switch away and back to the same account while a request was in flight.
+// Include both layers: adding/removing a shared library invalidates its old
+// merged results even when the editable repository has not changed.
+export function captureSourceContext(lang = langFromLocation()) {
+  checkLang(lang)
+  const generation = _generation
+  const activeLanguage = langFromLocation()
+  const signature = () => JSON.stringify(['self', 'other'].map(who =>
+    source(who) ? sourceIdentity(who, lang) : null))
+  const identity = signature()
+  return Object.freeze({
+    language: lang,
+    assertCurrent() {
+      if (_generation !== generation || langFromLocation() !== activeLanguage || signature() !== identity)
+        throw Object.assign(new Error('The account, repository, shared library or language changed. Reopen this view before continuing; pending changes are kept.'),
+          { code: 'stale-data-source' })
+    },
+  })
+}
 export function rawBase(src, lang) {
-  return `https://raw.githubusercontent.com/${src.owner}/${src.repo}/${src.branch}/db/language/${lang}`
+  return `https://raw.githubusercontent.com/${src.owner}/${src.repo}/${src.branch}/${defaultDataRoot(lang)}`
 }
 
 export class NoSelfRepoError extends Error {
@@ -92,9 +134,8 @@ export function hasOther() { return !!currentSources().other }
 export function readUrl(who, path, lang = langFromLocation()) {
   checkLang(lang)
   const segments = pathSegments(path)
-  const src = source(who)
-  if (!src) throw new Error(`data-source: no ${who} source`)
-  return urlFor(src, segments, lang)
+  const descriptor = sourceDescriptor(who, lang)
+  return urlFor(descriptor, segments, descriptor.language)
 }
 
 function checkLang(lang) {
@@ -112,9 +153,9 @@ function urlFor(src, segments, lang) {
 
 // { owner, repo, branch } of self. Writes never go anywhere else.
 export function writeTarget() {
-  const s = currentSources().self
-  if (!s) throw new NoSelfRepoError()
-  return { owner: s.owner, repo: s.repo, branch: s.branch }
+  if (!currentSources().self) throw new NoSelfRepoError()
+  const { owner, repo, branch } = sourceDescriptor('self')
+  return { owner, repo, branch }
 }
 
 // The parsed JSON of one of the user's own files (practice log, starred
@@ -194,6 +235,7 @@ export async function checkOtherRepo(onNotice, { fetchFn } = {}) {
 // first caller that passes one.
 export async function readLayers(path, { lang = langFromLocation(), fetchFn, onNotice, retry = {}, otherRetry } = {}) {
   checkLang(lang)
+  const context = captureSourceContext(lang)
   const segments = pathSegments(path)
   const s = currentSources()
   if (onNotice && !_sourceNoticeSent) {
@@ -203,16 +245,19 @@ export async function readLayers(path, { lang = langFromLocation(), fetchFn, onN
   const out = []
   for (const [src, cfg] of [['self', s.self], ['other', s.other]]) {
     if (!cfg) continue
+    context.assertCurrent()
     const url = urlFor(cfg, segments, lang)
     try {
       const opts = src === 'other' && s.self && otherRetry ? otherRetry : retry
       const res = await fetchWithRetry(url, { ...opts, passthrough404: true }, fetchFn ? { fetch: fetchFn } : {})
       const text = res.status === 404 ? null : await res.text()
+      context.assertCurrent()
       if (src === 'other') { if (text == null) _layerStats.other.misses++; else _layerStats.other.hits++ }
       // Not awaited: the answer is only a notice, and a slow API must not hold up the read.
       if (src === 'other' && text == null && onNotice) checkOtherRepo(onNotice, { fetchFn }).catch(() => {})
-      out.push({ src, owner: cfg.owner, text })
+      out.push({ src, owner: cfg.owner, text, sourceIdentity: sourceIdentity(src, lang) })
     } catch (e) {
+      context.assertCurrent()
       if (src === 'self') throw e
       _layerStats.other.errors++
       if (onNotice) try { onNotice(`Could not load ${path} from ${cfg.owner}/${cfg.repo}: ${e && e.message}`) } catch (_) {}
@@ -251,18 +296,23 @@ export function mergeIndexLayers(layers) {
         if (seen.has(it.link)) continue
         links.push(it.link)
       }
-      out.push({ ...it, src: layer.src, owner: layer.owner, readOnly: layer.src !== 'self' })
+      out.push({ ...it, src: layer.src, owner: layer.owner, readOnly: layer.src !== 'self',
+        ...(layer.sourceIdentity ? { sourceIdentity: layer.sourceIdentity } : {}) })
     }
     links.forEach(l => seen.add(l))
   }
   return out
 }
 
-// Whether a cached subtitle record ({ owner? }) came from the repo the merged
-// index entry ({ owner? }) names. Either side without an owner belongs to
+// Whether a cached subtitle record came from the exact source the merged
+// index entry names. Legacy callers without source identities still compare
+// owners. Either side without an owner belongs to
 // `primaryOwner` (records cached before owners were stored, entries added
 // this session). Logins compare without case.
 export function cacheRecordMatches(record, entry, primaryOwner) {
+  // Older owner-only cache records cannot prove which repository/branch the
+  // content came from. Refetch those once rather than reusing a wrong corpus.
+  if (entry?.sourceIdentity && record?.sourceIdentity !== entry.sourceIdentity) return false
   if ((entry?.bundle || record?.bundle) &&
       (entry?.bundle !== record?.bundle || entry?.bundleRevision !== record?.bundleRevision)) return false
   const want = (entry && entry.owner) || primaryOwner || ''

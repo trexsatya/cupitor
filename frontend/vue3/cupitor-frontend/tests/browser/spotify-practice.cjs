@@ -53,6 +53,7 @@ async function check(browser, mobile) {
   const finishTake = () => page.evaluate(() => { const audio = window.__takeAudios.at(-1); audio.pause(); audio.dispatchEvent(new Event('ended')) })
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
+    await page.waitForFunction(() => window._vocabularyReadyPromise && window._subtitlesReadyPromise && window._recordings)
     await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
     await page.evaluate(() => {
       const spotify = (id, start, end) => ({ id, manual: true, source: id, target: 'translation', mediaUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionStarts: [start], captionEnds: [end] })

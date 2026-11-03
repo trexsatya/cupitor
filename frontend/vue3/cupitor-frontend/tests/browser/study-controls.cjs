@@ -57,6 +57,7 @@ async function checkStudyControls(browser) {
     }
     try {
       await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
+      await page.waitForFunction(() => window._vocabularyReadyPromise && window._subtitlesReadyPromise && window._appSettings)
       await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
       await page.evaluate(wav => {
         const s = window.__yt = { id: 'testVideo01', time: 0, state: 2, rate: 1.25, muted: false }

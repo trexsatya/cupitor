@@ -1,3 +1,4 @@
+import { languageFromLocation, requireStudyLanguage, speechLocale } from './language-config.js';
 import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
 import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js';
 import { retainCaptionEnds } from './caption-capture.js';
@@ -148,6 +149,9 @@ import {
 } from './net.js';
 import {
   readUrl as _dsReadUrl,
+  dataRoot as _dsDataRoot,
+  sourceIdentity as _dsSourceIdentity,
+  captureSourceContext as _dsCaptureSourceContext,
   writeTarget as _dsWriteTarget,
   hasSelf as _dsHasSelf,
   hasOther as _dsHasOther,
@@ -1908,15 +1912,20 @@ window.autoHideSettingsPanel = autoHideSettingsPanel
 // Every single-file write goes to self. Throws NoSelfRepoError (the "set up
 // your repo" message) when there is no self; callers surface e.message.
 function commitWithMerge(opts) {
+  requireStudyLanguage(window.location)
+  const context = _dsCaptureSourceContext()
   const t = _dsWriteTarget()
   return _coreCommitWithMerge({ ...opts, branch: t.branch },
-    { githubUtils: window.GitHubUtils, owner: t.owner, repo: t.repo })
+    { githubUtils: window.GitHubUtils, owner: t.owner, repo: t.repo, assertCurrent: context.assertCurrent })
 }
 
 // A GitHub-API (uncached) read of a file in self.
-function _selfGetFile(filePath) {
+async function _selfGetFile(filePath) {
+  const context = _dsCaptureSourceContext()
   const t = _dsWriteTarget()
-  return window.GitHubUtils.getFile(t.owner, t.repo, filePath, '', t.branch)
+  const file = await window.GitHubUtils.getFile(t.owner, t.repo, filePath, '', t.branch)
+  context.assertCurrent()
+  return file
 }
 
 let _committedSubtitleIndex = new Map()
@@ -1955,7 +1964,7 @@ function _requireSelf() {
 // validated language the reads use (_dsLangFromLocation), so a mixed-case
 // ?lang= cannot write somewhere the app never reads from.
 function _langRepoDir() {
-  return `db/language/${_dsLangFromLocation()}`
+  return _dsDataRoot()
 }
 
 // 3-way merge of categorised vocab files. base = text we loaded, localVocab =
@@ -3371,6 +3380,7 @@ function _initPracticeLogFrontBanner() {
 }
 
 async function fetchVocabulary() {
+  const context = _dsCaptureSourceContext()
   try {
     let res;
     if (isLocalhost()) {
@@ -3385,12 +3395,14 @@ async function fetchVocabulary() {
       const layers = await _dsReadLayers('vocabulary.txt', {
         lang: _dsLangFromLocation(), onNotice: _dsNotice, otherRetry: _OTHER_LAYER_RETRY,
       })
+      context.assertCurrent()
       const v = _dsVocabularyFromLayers(layers)
       _setVocabularyLayers(v)
       window._vocabularyBaselineText = v.baselineText
       res = null // already applied
     }
     if (typeof res === 'string' && res) {
+      context.assertCurrent()
       window.vocabulary = parseVocabularyFile(res)
       // Baseline of the file as it was when we loaded it. Used by
       // commitVocabularyToGithub for a 3-way merge against the live remote
@@ -3400,6 +3412,7 @@ async function fetchVocabulary() {
   } catch (e) {
     console.warn('Vocabulary fetch failed', e);
   } finally {
+    try { context.assertCurrent() } catch (_) { return }
     if (!window.vocabulary) window.vocabulary = {};
     // Re-apply any unpushed local edits cached from a previous session.
     // Must run BEFORE loadWholeVocabulary() so the rebuilt selects already
@@ -4816,7 +4829,9 @@ function populateAllLinks() {
 }
 
 async function loadAllSubtitles() {
+  const context = _dsCaptureSourceContext()
   try {
+    requireStudyLanguage(window.location)
     // Kick the vocabulary fetch off in parallel so a flaky srts/index.json
     // can't strand it. Used to live inside this try-block, where any earlier
     // throw skipped over it and left window.vocabulary undefined for the
@@ -4846,6 +4861,7 @@ async function loadAllSubtitles() {
     // silently no-ops if IDB is unavailable (private mode, quota, etc.), so
     // a first boot or a degraded environment falls back to the old behavior.
     const cached = await _cacheReadAll().catch(() => new Map())
+    context.assertCurrent()
     const cacheHits = []
     const deadLinks = []
     if (cached.size) {
@@ -4900,9 +4916,13 @@ async function loadAllSubtitles() {
     }
     _srtProgressShow(toFetch.length)
     const srtLoadingDone = _runInBatches(toFetch, async (it) => {
+      // Queued work belongs to this boot, including batches that have not
+      // started yet when the account/language changes.
+      try { context.assertCurrent() } catch (_) { return }
       try {
         await _withTimeout(getSubtitlesForLink(it['link'], it['source']), 15000, it['link'])
       } catch (e) {
+        if (e?.code === 'stale-data-source') return
         // A timeout from _withTimeout carries no .kind — treat it as transient.
         if (e && e.kind === 'notfound') notFound.push(it['link'])
         else transientFailures.push(it)
@@ -4910,18 +4930,22 @@ async function loadAllSubtitles() {
     }, SRT_FETCH_CONCURRENCY, (done, total) => _srtProgressUpdate(done, total))
       .finally(() => _srtProgressHide())
 
-    window.categories = await fetchCategorisation()
+    const categories = await fetchCategorisation()
+    context.assertCurrent()
+    window.categories = categories
 
     populateAllLinks();
 
     await vocabReady
     await settingsReady
+    context.assertCurrent()
 
     populateVocabularyHeadings($('#vocabularySelect'))
 
     // Now make sure any still-in-flight SRT fetches have settled before we
     // declare subtitles ready — searches deferred in doSearch will fire here.
     await srtLoadingDone
+    context.assertCurrent()
     if (notFound.length > 0) {
       console.log("Not found", notFound.join('\n'))
     }
@@ -4934,6 +4958,11 @@ async function loadAllSubtitles() {
   } catch (e) {
     console.warn('loadAllSubtitles error', e);
   } finally {
+    try { context.assertCurrent() } catch (_) { return }
+    if (!getLangFromUrl().supported) {
+      window.srts = []; window.vocabulary = {}
+      window._vocabularyReadyResolve?.()
+    }
     window._subtitlesLoaded = true;
     window._subtitlesReadyResolve();
   }
@@ -4947,6 +4976,7 @@ async function loadAllSubtitles() {
 // lands in window.allSubtitles and becomes searchable immediately. Re-entrancy
 // is guarded so overlapping invocations don't double-fetch.
 async function _retrySrtsInBackground(items, maxRounds = 4) {
+  const context = _dsCaptureSourceContext()
   if (window._srtRetryRunning) {
     // Fold new items into the in-flight retry set and let it pick them up.
     window._srtRetryPending = (window._srtRetryPending || []).concat(items || [])
@@ -4964,9 +4994,11 @@ async function _retrySrtsInBackground(items, maxRounds = 4) {
       if (!pending.length) break
       // Backoff before each round, growing: 2s, 4s, 8s, 16s.
       await new Promise(r => setTimeout(r, 2000 * Math.pow(2, round - 1)))
+      context.assertCurrent()
 
       const stillFailing = []
       await _runInBatches(pending, async (it) => {
+        context.assertCurrent()
         // Skip ones a prior round (or a normal search) already recovered.
         if (window.allSubtitles[it['link']] && !window.allSubtitles[it['link']]._partial) return
         try {
@@ -4990,6 +5022,8 @@ async function _retrySrtsInBackground(items, maxRounds = 4) {
     } else if (items && items.length) {
       console.log('[srt] background retry: all transient failures recovered')
     }
+  } catch (e) {
+    if (e?.code !== 'stale-data-source') throw e
   } finally {
     window._srtRetryRunning = false
   }
@@ -5054,9 +5088,9 @@ function storeSubtitles(subs) {
 
 // ─── IndexedDB cache for SRT subtitle pairs ─────────────────────────────────
 // Stores `{link, name, sv, en, source, owner, cachedAt, contentVersion, complete}` records keyed by
-// `link`. `owner` is the login whose repo the files came from; boot ignores a
-// record whose owner is not the one the index now names (a record without
-// one counts as the primary repo's).
+// `link`. `sourceIdentity` names the repository, branch, language and root.
+// Boot refetches owner-only legacy records once, and ignores records from a
+// different source even when the owner and video link still match.
 //
 // Only complete, current-version SRT snapshots are reusable. Older records
 // can contain a partial capture and are automatically fetched again. Boot
@@ -5160,6 +5194,7 @@ async function _cacheWriteMany(entries) {
       for (const e of entries) {
         if (!e || !e.link || _cacheSuppressedOwners.has(e.owner || _sourceOwner('primary'))) continue
         try { store.put({ link: e.link, name: e.name, sv: e.sv, en: e.en, source: e.source, owner: e.owner,
+          sourceIdentity: e.sourceIdentity,
           bundle: e.bundle, bundleRevision: e.bundleRevision,
           cachedAt: now, contentVersion: SUBTITLE_CONTENT_VERSION, complete: e.complete === true }) } catch (_) {}
       }
@@ -5202,6 +5237,7 @@ function _cacheWriteSubtitleFromMemory(link) {
   if (!s || (s.sv == null && s.en == null)) return Promise.resolve()
   const entry = (window.srts || []).find(entry => entry.link === link)
   return _cacheWriteOne({ link, name: s.fileName, sv: s.sv, en: s.en, source: s.source, owner: _ownerOfLink(link), complete: s._remoteComplete === true,
+    sourceIdentity: entry?.sourceIdentity || _dsSourceIdentity(entry?.src || 'primary'),
     bundle: entry?.bundle, bundleRevision: entry?.bundleRevision })
     .catch(e => console.warn('[cache] post-push write failed for', link, e))
 }
@@ -5316,12 +5352,16 @@ async function _fetchIndexedSrt(entry, code, who) {
 }
 
 async function getSubtitlesForLink(link, source) {
+  const context = _dsCaptureSourceContext()
   const before = window.allSubtitles[link]
   if (before && !before._partial) {
     return window.allSubtitles[link]
   }
   const srt = window.srts.find(it => it.link === link);
   if (!srt) return
+  if (srt.sourceIdentity && srt.sourceIdentity !== _dsSourceIdentity(srt.src || 'primary'))
+    throw Object.assign(new Error('The subtitle index belongs to another source. Reload before opening it.'),
+      { code: 'stale-data-source' })
 
   const name = _nfc(srt.name)
   // The files live in the repo the index entry came from (self or other);
@@ -5333,10 +5373,12 @@ async function getSubtitlesForLink(link, source) {
   // propagates so the boot retry pool tops it up later.
   let en = null
   try {
+    context.assertCurrent()
     en = await _fetchIndexedSrt(srt, 'en')
   } catch (e) {
     if (!(e && e.kind === 'notfound')) throw e
   }
+  context.assertCurrent()
 
   // A push/edit may have installed a fresher complete snapshot during this
   // fetch. Do not replace it with an older CDN response.
@@ -5760,25 +5802,21 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
 }
 
 function getLangFromUrl() {
-  function alpha2Code(lang) {
-    switch (lang) {
-      case 'swedish':
-        return 'sv'
-      case 'spanish':
-        return 'es'
-      default:
-        return null
-    }
-  }
-
-  const url = new URL(window.location.href);
-  const params = new URLSearchParams(url.search);
-  let value = params.get('lang');
-  if (!value) {
-    value = 'swedish'
-  }
-  return {fullName: value, code: alpha2Code(value)};
+  return languageFromLocation(window.location)
 }
+
+// Unsupported URLs retain their own data key, but cannot silently run the
+// Swedish study pipeline or send edits to an unsupported dataset.
+$(function () {
+  const language = getLangFromUrl()
+  if (language.supported) return
+  const notice = document.createElement('p')
+  notice.id = 'unsupportedStudyLanguage'
+  notice.setAttribute('role', 'alert')
+  notice.textContent = `The study app does not support “${language.fullName}” yet. Choose Swedish or Spanish.`
+  document.getElementById('mainControlInputs')?.prepend(notice)
+  $('#searchText').prop('disabled', true).attr('title', notice.textContent)
+})
 
 // Publish the page's language pair where the host app can read it without
 // running any of our code — it only has to parse the document it already
@@ -5792,7 +5830,7 @@ function getLangFromUrl() {
 // someone opened ?lang=spanish. This runs while the module loads, which is
 // before the host finishes the page, so the host never reads a stale value.
 // The full name goes out too: the two-letter code is only known for the
-// languages alpha2Code lists, and is left empty rather than guessed.
+// languages in the shared registry, and is left empty rather than guessed.
 function _publishLanguageMeta() {
   try {
     const lang = getLangFromUrl()
@@ -5800,6 +5838,7 @@ function _publishLanguageMeta() {
       'cupitor-target-lang': lang.code || '',
       'cupitor-target-lang-name': lang.fullName || '',
       'cupitor-source-lang': 'en',
+      'cupitor-study-supported': String(lang.supported),
     }
     Object.keys(tags).forEach(name => {
       let el = document.head && document.head.querySelector(`meta[name="${name}"]`)
@@ -5824,7 +5863,7 @@ function getResourceUrl() {
 }
 
 function getTargetLangSrtSuffix() {
-  return "." + getLangFromUrl().code + ".srt"
+  return requireStudyLanguage(window.location).definition.subtitleSuffix
 }
 
 async function loadStarredLines(link, source) {
@@ -12124,8 +12163,15 @@ async function _readRecordingsFile(who, path, fresh = false) {
 }
 
 async function _readRecordingsCollection(who, fresh = false) {
-  return loadRecordingsFiles((path, retryFresh) => _readRecordingsFile(who, path, fresh || retryFresh), {
+  const context = _dsCaptureSourceContext()
+  const result = await loadRecordingsFiles(async (path, retryFresh) => {
+    context.assertCurrent()
+    const text = await _readRecordingsFile(who, path, fresh || retryFresh)
+    context.assertCurrent()
+    return text
+  }, {
     onMetadata: (root, retried) => {
+      context.assertCurrent()
       if (who !== 'self') return
       const state = _playlistFolderState()
       state.catalog = mergeFolderCatalog(state.catalog, root.folders)
@@ -12133,6 +12179,8 @@ async function _readRecordingsCollection(who, fresh = false) {
       _persistPlaylistFolders()
     }
   })
+  context.assertCurrent()
+  return result
 }
 
 async function loadRecordingsFromGithub() {
@@ -12140,6 +12188,7 @@ async function loadRecordingsFromGithub() {
     if (!_dsHasSelf()) return null
     return await _readRecordingsCollection('self')
   } catch (e) {
+    if (e?.code === 'stale-data-source') throw e
     console.warn('loadRecordingsFromGithub failed', e)
     return null
   }
@@ -12172,8 +12221,12 @@ function _saveRecordingsBase(coll) {
 // copy looks exactly like "the server undid your changes" to a three-way
 // merge. `fresh` says which one answered.
 async function _fetchRemoteRecordings() {
+  const context = _dsCaptureSourceContext()
   try { return { data: await _readRecordingsCollection('self', true), fresh: true } }
-  catch (e) { console.warn('[recordings] fresh read failed, using the cached copy', e) }
+  catch (e) {
+    context.assertCurrent()
+    console.warn('[recordings] fresh read failed, using the cached copy', e)
+  }
   return { data: await loadRecordingsFromGithub(), fresh: false }
 }
 
@@ -12328,7 +12381,9 @@ async function _mergeRemoteRecordingsIntoLocal() {
 // Called once during boot so the user's other-device captures show up. Does
 // NOT clear the dirty flag — local captures since last sync stay dirty.
 async function _mergeSelfRemoteRecordings() {
+  const context = _dsCaptureSourceContext()
   const { data: remote, fresh } = await _fetchRemoteRecordings()
+  context.assertCurrent()
   if (!remote) return
   const base = _loadRecordingsBase()
   if (!fresh || !base) {
@@ -12346,6 +12401,7 @@ async function _mergeSelfRemoteRecordings() {
     let collided = []
     if (conflicts.length) {
       const choices = await _askRecordingConflicts(conflicts, 'load')
+      context.assertCurrent()
       if (choices) {
         collided = _applyRecordingChoices(merged, conflicts, choices)
       } else {
@@ -12389,6 +12445,9 @@ async function syncRecordingsToGithub() {
   if (window._recordingsSyncing) return
   _refreshRecordingSyncBtn()
   if (!window._recordingsDirty || !_requireSelf()) return
+  requireStudyLanguage(window.location)
+  const context = _dsCaptureSourceContext()
+  const target = _dsWriteTarget(), root = _langRepoDir()
   let syncCollisions = []
   const localSnapshot = JSON.parse(JSON.stringify(_persistableRecordings()))
   const folderSnapshot = mergeFolderCatalog(_playlistFolderState().catalog)
@@ -12399,22 +12458,30 @@ async function syncRecordingsToGithub() {
   try {
     const pushed = await syncRecordingsFiles({
       mergeFolders: remote => (pushedFolders = mergeFolderCatalog(folderSnapshot, remote)),
-      listParts: () => listRecordingsParts({
-        ..._dsWriteTarget(), directory: `${_langRepoDir()}/recordings`,
-        request: (method, path) => window.GitHubUtils.request(method, path)
-      }),
+      listParts: () => {
+        context.assertCurrent()
+        return listRecordingsParts({
+          ...target, directory: `${root}/recordings`,
+          request: (method, path) => window.GitHubUtils.request(method, path)
+        })
+      },
       readFile: async path => {
-        try { return (await _selfGetFile(`${_langRepoDir()}/${path}`)).content }
+        context.assertCurrent()
+        try { return (await _selfGetFile(`${root}/${path}`)).content }
         catch (e) {
           if (path === 'recordings.json' && /^GitHub API error 404\b/.test(String(e.message))) return null
           throw e
         }
       },
-      commitFiles: files => window.GitHubUtils.commitMultipleFiles({
-        ..._dsWriteTarget(), commitMessage: 'recordings: sync playlists in separate files',
-        files: files.map(f => ({ ...f, path: `${_langRepoDir()}/${f.path}` }))
-      }),
+      commitFiles: files => {
+        context.assertCurrent()
+        return window.GitHubUtils.commitMultipleFiles({
+          ...target, commitMessage: 'recordings: sync playlists in separate files',
+          files: files.map(f => ({ ...f, path: `${root}/${f.path}` }))
+        })
+      },
       merge: async remote => {
+        context.assertCurrent()
         const base = _loadRecordingsBase()
         if (!base) {
           return window._recordingsRemoteMerged
@@ -12425,6 +12492,7 @@ async function syncRecordingsToGithub() {
         const open = conflicts.filter(c => !chosen[c.name])
         if (open.length) {
           const choices = await _askRecordingConflicts(open, 'sync')
+          context.assertCurrent()
           if (!choices) throw new Error(SYNC_CANCELLED)
           Object.assign(chosen, choices)
         }
@@ -12432,6 +12500,7 @@ async function syncRecordingsToGithub() {
         return merged
       }
     })
+    context.assertCurrent()
     // Captures made while the sync was running are still unsynced local work.
     const current = _persistableRecordings()
     const next = _threeWayRecordings(localSnapshot, current, pushed)
@@ -17886,7 +17955,7 @@ function _speakWordBrowser(text) {
     try {
       const u = new SpeechSynthesisUtterance(String(text).trim())
       const code = _ttsLangCode()
-      u.lang = code === 'sv' ? 'sv-SE' : code === 'es' ? 'es-ES' : 'en-US'
+      u.lang = speechLocale(code, 'en-US')
       u.rate = 0.9
       u.volume = 1.0
       let settled = false

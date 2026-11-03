@@ -12,6 +12,9 @@ async function checkStudyChrome(browser) {
     page.on('pageerror', e => errors.push(e.message))
     page.on('dialog', d => { errors.push(d.message()); d.dismiss() })
     page.setDefaultTimeout(10000)
+    // Capture the application's idle timer from startup. Installing after
+    // opening Practice leaves that first timer on the real clock.
+    await page.clock.install()
     await page.route('**/*', route => new URL(route.request().url()).hostname === 'video.example.test'
       ? route.fulfill({ contentType: 'text/html', body: '<body data-clicks="0" style="margin:0"><button style="position:absolute;inset:0;width:100%;height:100%" onclick="document.body.dataset.clicks=Number(document.body.dataset.clicks)+1">Embedded player</button></body>' })
       : serveFixtures(route))
@@ -89,7 +92,6 @@ async function checkStudyChrome(browser) {
       await page.waitForFunction(() => !document.querySelector('#practiceMode .practice-loading') && window.__yt.state === 5)
       await page.frameLocator('#testStudyFrame').getByRole('button', { name: 'Embedded player' }).waitFor()
       await page.locator('#srtLoadingBanner').waitFor({ state: 'hidden' })
-      await page.clock.install()
       const before = await page.locator('#practiceMode .practice-card').boundingBox()
       await checkHost(true)
       await screenshot('cupitor-practice-controls-shown')

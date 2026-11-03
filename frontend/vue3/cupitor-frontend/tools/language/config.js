@@ -1,10 +1,11 @@
+import { LANGUAGES, languageDefinition } from "../../public/language/language-config.js";
 // Config for the "Manage" CLI: documented defaults, a JSON config file, and CLI
 // flag overrides (later layers win).
 import { readFileSync } from "node:fs";
 
 export const DEFAULTS = {
-  lang: "sv",
-  targetLang: "en",
+  lang: LANGUAGES.swedish.code,
+  targetLang: LANGUAGES.english.code,
   dataDir: "",
   srtsDir: "",
   outDir: "./out",
@@ -65,5 +66,12 @@ export function loadConfig(path, flags = {}) {
       /* no/invalid config file — fall back to defaults + flags */
     }
   }
-  return mergeConfig(DEFAULTS, file, flags);
+  const config = mergeConfig(DEFAULTS, file, flags);
+  for (const field of ['lang', 'targetLang']) {
+    const language = languageDefinition(config[field]);
+    if (language) config[field] = language.code;
+    else if (!/^[a-z]{2,3}(-[a-z]{2,4})?$/i.test(String(config[field] || '')))
+      throw new Error(`Unsupported ${field}: ${config[field]}. Use a language code or a registered language name.`);
+  }
+  return config;
 }

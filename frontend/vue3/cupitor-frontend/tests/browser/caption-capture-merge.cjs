@@ -48,6 +48,7 @@ async function check(browser, mobile) {
   }
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
+    await page.waitForFunction(() => window._vocabularyReadyPromise && window._subtitlesReadyPromise)
     await page.evaluate(async playlist => {
       await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise])
       window._recordings = {
@@ -124,6 +125,7 @@ async function check(browser, mobile) {
     assert.equal(note.musicTrackId, 'keep-music')
     assert.equal(note.mediaUrl, 'https://example.org/notes')
     await page.reload({ waitUntil: 'networkidle' })
+    await page.waitForFunction(() => window._vocabularyReadyPromise && window._subtitlesReadyPromise)
     await page.evaluate(async () => { await window._subtitlesReadyPromise })
     assert.deepEqual((await cards())[0], note, 'merged blocks persist across reloads')
     await send(pageCap)
@@ -230,6 +232,7 @@ async function check(browser, mobile) {
     await page.locator('#capCapItem').selectOption('')
     await commit()
     await page.reload({ waitUntil: 'networkidle' })
+    await page.waitForFunction(() => window._vocabularyReadyPromise && window._subtitlesReadyPromise)
     await page.evaluate(async () => { await window._subtitlesReadyPromise })
     await send(cap)
     assert.equal(await page.locator('#capCapItem').inputValue(), '', 'Add clears the remembered merge target')
@@ -241,7 +244,8 @@ async function check(browser, mobile) {
     console.error(await page.evaluate(() => ({ errors: window.__filed,
       item: document.querySelector('#capCapItem')?.value,
       hint: document.querySelector('#capCapMergeHint')?.textContent,
-      buttons: [...document.querySelectorAll('#capCapSave')].map(el => el.outerHTML) })))
+      buttons: [...document.querySelectorAll('#capCapSave')].map(el => el.outerHTML) }))
+      .catch(error => ({ diagnosticError: error.message, url: page.url() })))
     console.error('Page errors:', errors)
     throw e
   } finally { await page.close() }

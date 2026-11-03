@@ -40,10 +40,17 @@ function fixture(baseline = original()) {
   w._recordingsDirty = false;
   if (baseline) w.localStorage.setItem("baseline", JSON.stringify(baseline));
   w.localStorage.setItem('recordings', JSON.stringify(w._recordings));
-  let calls = 0, fail = false, release = null, remoteFolders = {};
+  let calls = 0, fail = false, release = null, remoteFolders = {}, generation = 0;
   Object.assign(w, {
     $: w.jQuery, recordingsHaveChanges, mergeFolderCatalog,
     _scopedKey: key => key, getLangFromUrl: () => ({fullName:"swedish"}), _sameJson: sameJson, _threeWayRecordings: threeWayRecordings,
+    requireStudyLanguage() {},
+    _dsWriteTarget: () => ({owner:'alice', repo:'data', branch:'main'}),
+    _langRepoDir: () => 'db/language/swedish',
+    _dsCaptureSourceContext: () => {
+      const captured = generation;
+      return {assertCurrent() {if (captured !== generation) throw Object.assign(new Error('Source changed'), {code:'stale-data-source'});}};
+    },
     REC_COLLECTION_KEY: 'recordings', REC_CURRENT_KEY: 'currentName', REC_CURRENT_EXT_KEY: 'extId', REC_STATE_KEY: 'recordingState',
     REC_KEY: 'legacy', REC_DIRTY_KEY: 'dirty', SYNC_CANCELLED: 'sync cancelled',
     _persistableRecordings: () => persistableRecordings(w._recordings),
@@ -72,6 +79,7 @@ function fixture(baseline = original()) {
     '\nwindow.saveRecording=_saveRecording;window.refreshSync=_refreshRecordingSyncBtn;window.syncRecordings=syncRecordingsToGithub;');
   return {w, get button() {return w.document.getElementById('recRecSync');},
     get calls() {return calls;}, get remoteFolders() {return copy(remoteFolders);}, fail() {fail = true;},
+    switchSource() {generation++;},
     editFolder(name, deleted=false) {
       const folders=w._playlistFolderState();
       folders.catalog=mergeFolderCatalog(folders.catalog,{[name]:{updatedAt:Date.now(),deleted}});
@@ -165,6 +173,24 @@ test('Sync stays disabled during a request, including after rerender, and preser
     p.release(); await pending;
     assert.equal(p.button.disabled, false);
     assert.equal(p.w._recording.items.Manual.Card[0].source, 'Changed while syncing');
+    assert.equal(p.w._recordingsDirty, true);
+  } finally {p.close();}
+});
+
+test('a late sync response after a source switch cannot adopt data or advance the saved baseline', async () => {
+  const p = fixture();
+  try {
+    p.edit(); p.hold();
+    const pending = p.w.syncRecordings();
+    const baseline = p.w.localStorage.getItem('baseline');
+    p.switchSource();
+    p.edit('New pending edit');
+    const saved = p.w.localStorage.getItem('recordings');
+    p.release();
+    await assert.rejects(pending, {code:'stale-data-source'});
+    assert.equal(p.w.localStorage.getItem('baseline'), baseline);
+    assert.equal(p.w.localStorage.getItem('recordings'), saved);
+    assert.equal(p.w._recording.items.Manual.Card[0].source, 'New pending edit');
     assert.equal(p.w._recordingsDirty, true);
   } finally {p.close();}
 });

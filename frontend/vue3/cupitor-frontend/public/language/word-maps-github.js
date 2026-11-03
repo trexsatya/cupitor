@@ -1,5 +1,5 @@
 import { fetchWithRetry } from './net.js'
-import { hasSelf, writeTarget, langFromLocation } from './data-source.js'
+import { hasSelf, writeTarget, langFromLocation, sourceDescriptor, captureSourceContext } from './data-source.js'
 import { createWordMapSync } from './word-maps-sync.js'
 import { resolveWordMapConflicts } from './word-maps-sync-dialog.js'
 
@@ -11,7 +11,9 @@ export function githubWordMapSync(
   if (!hasSelf() || !github) return null
   const target = writeTarget(),
     lang = langFromLocation(),
-    path = `db/language/${lang}/word-maps.json`
+    descriptor = sourceDescriptor('self', lang),
+    path = `${descriptor.root}/word-maps.json`
+  const context = captureSourceContext()
   const sourceKey = JSON.stringify([
     target.owner.toLowerCase(),
     target.repo.toLowerCase(),
@@ -19,8 +21,11 @@ export function githubWordMapSync(
     lang,
   ])
   const checkAccount = () => {
-    if (!hasSelf() || JSON.stringify(writeTarget()) !== JSON.stringify(target))
-      throw new Error('The account or repository changed. Reopen Word maps before syncing.')
+    try { context.assertCurrent() }
+    catch (_) {
+      throw Object.assign(new Error('The account or repository changed, or another language is active. Reopen Word maps before syncing.'),
+        { code: 'stale-data-source' })
+    }
   }
   const branchPath = `/repos/${target.owner}/${target.repo}/git/ref/heads/${target.branch}`
   const publicRequest = (url) =>
@@ -43,12 +48,15 @@ export function githubWordMapSync(
       checkAccount()
       if (typeof window.GitHubProxy !== 'undefined' || github.hasGHToken?.()) {
         try {
-          return (await github.getFile(target.owner, target.repo, path, '', target.branch)).content
+          const file = await github.getFile(target.owner, target.repo, path, '', target.branch)
+          checkAccount()
+          return file.content
         } catch (e) {
           if (/^GitHub API error 404\b/.test(String(e.message))) {
             // GitHub also returns 404 for inaccessible repos and missing
             // branches. Those must never look like an empty collection.
             await github.request('GET', branchPath)
+            checkAccount()
             return null
           }
           throw e
@@ -74,14 +82,17 @@ export function githubWordMapSync(
           throw new Error(
             'The repository or branch could not be read. Sign in again or check your repository setup'
           )
+        checkAccount()
         return null
       }
       if (!response.ok) throw new Error(`Could not load word maps (${response.status})`)
-      return response.text()
-    },
-    commitFile: (getContent) => {
+      const text = await response.text()
       checkAccount()
-      return github.commitMultipleFiles({
+      return text
+    },
+    commitFile: async (getContent) => {
+      checkAccount()
+      const result = await github.commitMultipleFiles({
         ...target,
         commitMessage: 'word maps: sync maps',
         files: [
@@ -96,6 +107,8 @@ export function githubWordMapSync(
           },
         ],
       })
+      checkAccount()
+      return result
     },
   })
 }

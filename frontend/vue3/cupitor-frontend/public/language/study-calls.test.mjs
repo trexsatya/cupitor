@@ -1,13 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const { JSDOM } = require('jsdom')
-const jquery = require('jquery')
-const source = fs.readFileSync(new URL('./study-calls.js', import.meta.url), 'utf8')
-const { createCallClient, callPayload, callLanguageFromLocation, installStudyCalls, parseCallImport, scheduleImportedCalls, CALL_IMPORT_EXAMPLE } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))
+const { JSDOM } = require(process.env.CUPITOR_JSDOM || 'jsdom')
+const jquery = createRequire(require.resolve(process.env.CUPITOR_JSDOM || 'jsdom'))('jquery')
+import { createCallClient, callPayload, callLanguageFromLocation, installStudyCalls, parseCallImport, scheduleImportedCalls, CALL_IMPORT_EXAMPLE } from './study-calls.js'
 
 function fixture(url = 'https://cupitor.test/language.html') {
   const { window: win } = new JSDOM('<button id="studyCallsBtn"></button>', { url })

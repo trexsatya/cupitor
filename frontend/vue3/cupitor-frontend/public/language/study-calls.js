@@ -1,3 +1,4 @@
+import { speechLocale } from './language-config.js'
 // CallBridge follows NotifBridge: JSON requests with request_id, an ack per
 // request, and durable snapshots pushed on page load and app resume.
 export function createCallClient(win, timeoutMs = 15000) {
@@ -159,15 +160,9 @@ export function scheduleImportedCalls(calls, start, spacingMinutes = 5, now = Da
 }
 
 export function callLanguageFromLocation(location) {
-  const names = { swedish: 'sv', spanish: 'es', english: 'en', french: 'fr', german: 'de', hindi: 'hi', greek: 'el' }
-  const locales = { sv: 'sv-SE', es: 'es-ES', en: 'en-US', fr: 'fr-FR', de: 'de-DE', hi: 'hi-IN', el: 'el-GR' }
   try {
-    const value = new URL(location.href).searchParams.get('lang')?.trim().toLowerCase() || 'swedish'
-    const code = names[value] || value
-    if (!/^[a-z]{2,3}(-[a-z]{2,4})?$/.test(code)) return 'sv-SE'
-    const tag = Intl.getCanonicalLocales(code)[0]
-    return locales[tag] || tag
-  } catch (_) { return 'sv-SE' }
+    return speechLocale(new URL(location.href).searchParams.get('lang') || 'swedish')
+  } catch (_) { return speechLocale('swedish') }
 }
 
 export function installStudyCalls(win, $) {

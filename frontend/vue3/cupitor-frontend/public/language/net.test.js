@@ -309,3 +309,23 @@ describe("parseRemoteList", () => {
     expect(() => parseRemoteList("{}", "index.json")).toThrow(/not a list/);
   });
 });
+
+
+test.each(['read', 'merge', 'write', 'retry'])('single-file commits stop on a source change during %s', async stage => {
+  let current = true
+  const stale = Object.assign(new Error('Source changed'), {code:'stale-data-source'})
+  const utils = {
+    getFile: jest.fn(async () => { if (stage === 'read') current = false; return {content:'before', sha:'sha'} }),
+    putFile: jest.fn(async () => {
+      if (stage === 'write' || stage === 'retry') current = false
+      if (stage === 'retry') throw new Error('GitHub API error 409: conflict')
+    }),
+  }
+  const merge = jest.fn(async text => { if (stage === 'merge') current = false; return text + 'edited' })
+  await expect(commitWithMerge({filePath:'f', branch:'main', commitMessage:'m', merge}, {
+    owner:'alice', repo:'data', githubUtils:utils, log:()=>{},
+    assertCurrent:() => { if (!current) throw stale },
+  })).rejects.toMatchObject({code:'stale-data-source'})
+  expect(utils.putFile).toHaveBeenCalledTimes(['write','retry'].includes(stage) ? 1 : 0)
+  expect(utils.getFile).toHaveBeenCalledTimes(1)
+})

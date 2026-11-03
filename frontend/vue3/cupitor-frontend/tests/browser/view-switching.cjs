@@ -15,6 +15,7 @@ async function checkViewSwitching(browser) {
     await page.route('**/*', serveFixtures)
     await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
     const switchTo = async name => {
+      await page.keyboard.press('Shift') // wake controls before using the mode button
       const button = page.getByRole('button', { name: 'Switch to ' + name, exact: true })
       if (name === 'Practice' && !await button.isVisible()) await page.getByRole('button', { name: 'Show details', exact: true }).click()
       return mobile ? button.tap() : button.click()
@@ -183,6 +184,7 @@ async function checkViewSwitching(browser) {
       assert.equal(await page.evaluate(() => window._recPlayIndex), 2)
 
       // Text-only cards must be displayed at n, rather than silently skipped.
+      await page.keyboard.press('Shift')
       await page.locator('#practiceMode .practice-next').click()
       await practiceAt(3)
       await switchTo('Player')
@@ -194,6 +196,7 @@ async function checkViewSwitching(browser) {
       await practiceAt(3)
       // Move to the other occurrence of testVideo01. Preserve its position,
       // not just a matching video id, when returning to Player.
+      await page.keyboard.press('Shift')
       await page.locator('#practiceMode .practice-next').click()
       await practiceAt(4)
       await switchTo('Player')
