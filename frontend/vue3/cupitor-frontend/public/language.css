@@ -5531,3 +5531,11 @@ body.dialog-above-practice .ui-dialog {
     /* Must stay above the media-mode overlay (2147483646). */
     z-index: 2147483647 !important;
 }
+
+/* The media-mode viewport already shields the page behind a study session.
+   A modal opened from that viewport must remain clickable even when another
+   jQuery UI modal left its overlay later in the stacking order. Keep the
+   overlay visually available, but let the active dialog receive pointer input. */
+body.youtube-media-mode.dialog-above-practice .ui-widget-overlay {
+    pointer-events: none;
+}
