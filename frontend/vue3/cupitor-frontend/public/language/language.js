@@ -1,3 +1,4 @@
+import { languageFromLocation, requireStudyLanguage } from './language-config.js';
 import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
 import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js';
 import { retainCaptionEnds } from './caption-capture.js';
@@ -148,6 +149,7 @@ import {
 } from './net.js';
 import {
   readUrl as _dsReadUrl,
+  dataRoot as _dsDataRoot,
   writeTarget as _dsWriteTarget,
   hasSelf as _dsHasSelf,
   hasOther as _dsHasOther,
@@ -1908,6 +1910,7 @@ window.autoHideSettingsPanel = autoHideSettingsPanel
 // Every single-file write goes to self. Throws NoSelfRepoError (the "set up
 // your repo" message) when there is no self; callers surface e.message.
 function commitWithMerge(opts) {
+  requireStudyLanguage(window.location)
   const t = _dsWriteTarget()
   return _coreCommitWithMerge({ ...opts, branch: t.branch },
     { githubUtils: window.GitHubUtils, owner: t.owner, repo: t.repo })
@@ -1955,7 +1958,7 @@ function _requireSelf() {
 // validated language the reads use (_dsLangFromLocation), so a mixed-case
 // ?lang= cannot write somewhere the app never reads from.
 function _langRepoDir() {
-  return `db/language/${_dsLangFromLocation()}`
+  return _dsDataRoot()
 }
 
 // 3-way merge of categorised vocab files. base = text we loaded, localVocab =
@@ -4817,6 +4820,7 @@ function populateAllLinks() {
 
 async function loadAllSubtitles() {
   try {
+    requireStudyLanguage(window.location)
     // Kick the vocabulary fetch off in parallel so a flaky srts/index.json
     // can't strand it. Used to live inside this try-block, where any earlier
     // throw skipped over it and left window.vocabulary undefined for the
@@ -4934,6 +4938,10 @@ async function loadAllSubtitles() {
   } catch (e) {
     console.warn('loadAllSubtitles error', e);
   } finally {
+    if (!getLangFromUrl().supported) {
+      window.srts = []; window.vocabulary = {}
+      window._vocabularyReadyResolve?.()
+    }
     window._subtitlesLoaded = true;
     window._subtitlesReadyResolve();
   }
@@ -5760,25 +5768,21 @@ async function playNewMedia(link, source, mediaFile, autoPlay = true) {
 }
 
 function getLangFromUrl() {
-  function alpha2Code(lang) {
-    switch (lang) {
-      case 'swedish':
-        return 'sv'
-      case 'spanish':
-        return 'es'
-      default:
-        return null
-    }
-  }
-
-  const url = new URL(window.location.href);
-  const params = new URLSearchParams(url.search);
-  let value = params.get('lang');
-  if (!value) {
-    value = 'swedish'
-  }
-  return {fullName: value, code: alpha2Code(value)};
+  return languageFromLocation(window.location)
 }
+
+// Unsupported URLs retain their own data key, but cannot silently run the
+// Swedish study pipeline or send edits to an unsupported dataset.
+$(function () {
+  const language = getLangFromUrl()
+  if (language.supported) return
+  const notice = document.createElement('p')
+  notice.id = 'unsupportedStudyLanguage'
+  notice.setAttribute('role', 'alert')
+  notice.textContent = `The study app does not support “${language.fullName}” yet. Choose Swedish or Spanish.`
+  document.getElementById('mainControlInputs')?.prepend(notice)
+  $('#searchText').prop('disabled', true).attr('title', notice.textContent)
+})
 
 // Publish the page's language pair where the host app can read it without
 // running any of our code — it only has to parse the document it already
@@ -5792,7 +5796,7 @@ function getLangFromUrl() {
 // someone opened ?lang=spanish. This runs while the module loads, which is
 // before the host finishes the page, so the host never reads a stale value.
 // The full name goes out too: the two-letter code is only known for the
-// languages alpha2Code lists, and is left empty rather than guessed.
+// languages in the shared registry, and is left empty rather than guessed.
 function _publishLanguageMeta() {
   try {
     const lang = getLangFromUrl()
@@ -5800,6 +5804,7 @@ function _publishLanguageMeta() {
       'cupitor-target-lang': lang.code || '',
       'cupitor-target-lang-name': lang.fullName || '',
       'cupitor-source-lang': 'en',
+      'cupitor-study-supported': String(lang.supported),
     }
     Object.keys(tags).forEach(name => {
       let el = document.head && document.head.querySelector(`meta[name="${name}"]`)
@@ -5824,7 +5829,7 @@ function getResourceUrl() {
 }
 
 function getTargetLangSrtSuffix() {
-  return "." + getLangFromUrl().code + ".srt"
+  return requireStudyLanguage(window.location).definition.subtitleSuffix
 }
 
 async function loadStarredLines(link, source) {

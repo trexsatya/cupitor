@@ -822,3 +822,42 @@ describe('fetchSelfJson (own files only)', () => {
     expect(log).toHaveBeenCalledTimes(3)
   })
 })
+
+describe('resolved language source descriptors', () => {
+  const { sourceDescriptor, sourceIdentity, dataRoot } = require('./data-source.js')
+  test('reads and writes use the same root without changing legacy GitHub target arguments', () => {
+    configure(alice)
+    const descriptor = sourceDescriptor('self', 'spanish')
+    expect(descriptor.root).toBe(dataRoot('spanish'))
+    expect(descriptor.language).toBe('spanish')
+    expect(readUrl('self', 'word-maps.json', 'spanish')).toContain('/' + descriptor.root + '/word-maps.json')
+    expect(writeTarget()).toEqual({owner:'alice',repo:'cupitor-data',branch:'main'})
+    expect(Object.isFrozen(descriptor)).toBe(true)
+  })
+  test('identity distinguishes language, branch, repository and owner while preserving GitHub name case semantics', () => {
+    configure(alice)
+    const original = sourceIdentity('self', 'swedish')
+    expect(sourceIdentity('self', 'spanish')).not.toBe(original)
+    for (const changes of [{repo:'new-data'}, {branch:'next'}, {login:'bob'}]) {
+      configure({...alice, ...changes})
+      expect(sourceIdentity('self', 'swedish')).not.toBe(original)
+    }
+    configure({...alice, login:'ALICE', repo:'CUPITOR-DATA'})
+    expect(sourceIdentity('self', 'swedish')).toBe(original)
+  })
+  test('guest descriptors remain read-only and invalid roots cannot be used', () => {
+    configure(guest)
+    expect(sourceDescriptor('primary', 'swedish').owner).toBe('trexsatya')
+    expect(() => sourceDescriptor('self', 'swedish')).toThrow(/no self source/)
+    expect(() => sourceDescriptor('primary', '../escape')).toThrow(/invalid lang/)
+    configure(null)
+  })
+})
+
+test('generic data routing remains usable for language-independent features without enabling study capabilities', () => {
+  const {sourceDescriptor} = require('./data-source.js')
+  configure(alice)
+  expect(sourceDescriptor('self', 'hindi').root).toBe('db/language/hindi')
+  expect(writeTarget()).toEqual({owner:'alice', repo:'cupitor-data', branch:'main'})
+  configure(null)
+})

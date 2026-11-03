@@ -20,3 +20,13 @@ describe("mergeConfig", () => {
     expect(DEFAULTS.preferManualCaptions).toBe(true);
   });
 });
+
+describe('registered CLI language configuration', () => {
+  const {loadConfig} = require('./config.js')
+  test('normalizes registered names and locales without changing arbitrary explicit language-code support', () => {
+    expect(loadConfig(null, {lang:'spanish', targetLang:'english'})).toMatchObject({lang:'es',targetLang:'en'})
+    expect(loadConfig(null, {lang:'sv-SE'}).lang).toBe('sv')
+    expect(loadConfig(null, {lang:'uk'}).lang).toBe('uk')
+    expect(() => loadConfig(null, {lang:'../swedish'})).toThrow(/Unsupported lang/)
+  })
+})

@@ -165,3 +165,42 @@ test('a 404 means no maps only when the repo branch is accessible', async () => 
   )
   assert.equal(adopted, null)
 })
+
+test('a delayed response cannot adopt maps after the active language changes', async () => {
+  globalThis.window = {location: {href:'https://cupitor.test/language.html?lang=swedish'}}
+  configure(self)
+  let release, adopted = false
+  const github = {hasGHToken: () => true, getFile: () => new Promise(resolve => {release = resolve})}
+  const local = storage()
+  const sync = githubWordMapSync('swedish-maps', {github, storage:local})
+  const pending = sync.pull(() => [], () => {adopted = true})
+  window.location.href = 'https://cupitor.test/language.html?lang=spanish'
+  release({content:'[]'})
+  await assert.rejects(pending, /account or repository changed/i)
+  assert.equal(adopted, false)
+  assert.equal(local.getItem('swedish-maps'), null)
+})
+
+test('account changes during upload cannot mark the old editor synced', async () => {
+  globalThis.window = {location: {href:'https://cupitor.test/language.html?lang=swedish'}}
+  configure(self)
+  let release, entered
+  const started = new Promise(resolve => {entered = resolve})
+  const github = {hasGHToken: () => true, commitMultipleFiles: async opts => {
+    assert.equal(opts.owner, 'alice')
+    assert.equal(opts.files[0].path, 'db/language/swedish/word-maps.json')
+    await opts.files[0].getContent(null)
+    entered()
+    await new Promise(resolve => {release = resolve})
+  }}
+  const local = storage()
+  const sync = githubWordMapSync('maps', {github, storage:local})
+  let adopted = false
+  const pending = sync.push(() => [], () => {adopted = true})
+  await started
+  configure({...self, login:'charlie'})
+  release()
+  await assert.rejects(pending, /account or repository changed/i)
+  assert.equal(adopted, false)
+  configure(null)
+})

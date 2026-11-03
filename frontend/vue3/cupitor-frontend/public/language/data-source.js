@@ -1,3 +1,4 @@
+import { LANGUAGE_KEY, languageKeyFromLocation, defaultDataRoot } from './language-config.js'
 // Where the language app reads from and writes to. Every raw URL and every
 // GitHub write target in language.js comes from here; nothing else names an
 // owner, repo or branch.
@@ -56,17 +57,26 @@ export function sourceProblems() {
 }
 
 // The language goes into raw URL paths, so only plain names pass.
-const LANG_RE = /^[a-z][a-z-]*$/
+const LANG_RE = LANGUAGE_KEY
+export const langFromLocation = languageKeyFromLocation
 
-export function langFromLocation(loc = (typeof window !== 'undefined' ? window.location : null)) {
-  try {
-    const v = (new URL(loc.href).searchParams.get('lang') || '').toLowerCase()
-    return LANG_RE.test(v) ? v : 'swedish'
-  } catch (_) { return 'swedish' }
+// All readers/writers can share this descriptor without changing the legacy
+// target shape accepted by GitHubUtils. Repository overrides will be enabled
+// only after the user-data storage migration can isolate pending edits.
+export function sourceDescriptor(who = 'primary', lang = langFromLocation()) {
+  checkLang(lang)
+  const target = source(who)
+  if (!target) throw new Error(`data-source: no ${who} source`)
+  const root = defaultDataRoot(lang)
+  return Object.freeze({ ...target, language: lang, root,
+    identity: JSON.stringify([target.owner.toLowerCase(), target.repo.toLowerCase(), target.branch, lang, root]) })
 }
-
+export function dataRoot(lang = langFromLocation()) { return defaultDataRoot(lang) }
+export function sourceIdentity(who = 'primary', lang = langFromLocation()) {
+  return sourceDescriptor(who, lang).identity
+}
 export function rawBase(src, lang) {
-  return `https://raw.githubusercontent.com/${src.owner}/${src.repo}/${src.branch}/db/language/${lang}`
+  return `https://raw.githubusercontent.com/${src.owner}/${src.repo}/${src.branch}/${defaultDataRoot(lang)}`
 }
 
 export class NoSelfRepoError extends Error {
@@ -92,9 +102,8 @@ export function hasOther() { return !!currentSources().other }
 export function readUrl(who, path, lang = langFromLocation()) {
   checkLang(lang)
   const segments = pathSegments(path)
-  const src = source(who)
-  if (!src) throw new Error(`data-source: no ${who} source`)
-  return urlFor(src, segments, lang)
+  const descriptor = sourceDescriptor(who, lang)
+  return urlFor(descriptor, segments, descriptor.language)
 }
 
 function checkLang(lang) {
@@ -112,9 +121,9 @@ function urlFor(src, segments, lang) {
 
 // { owner, repo, branch } of self. Writes never go anywhere else.
 export function writeTarget() {
-  const s = currentSources().self
-  if (!s) throw new NoSelfRepoError()
-  return { owner: s.owner, repo: s.repo, branch: s.branch }
+  if (!currentSources().self) throw new NoSelfRepoError()
+  const { owner, repo, branch } = sourceDescriptor('self')
+  return { owner, repo, branch }
 }
 
 // The parsed JSON of one of the user's own files (practice log, starred
