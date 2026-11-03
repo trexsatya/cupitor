@@ -31,7 +31,8 @@ function bustImports(code, version) {
   return code.replace(
     /(?<!\.)\b(from|import)(\s*\(?\s*)(['"])(\.\.?\/[^'"?]+\.js)\3/g,
     (_m, kw, gap, q, spec) => `${kw}${gap}${q}${spec}?v=${version}${q}`,
-  );
+  ).replace(/\bnew\s+URL\(\s*(['\"])(\.\.?\/[^'\"?]+\.js)\1\s*,\s*import\.meta\.url\s*\)/g,
+    (_m, q, spec) => `new URL(${q}${spec}?v=${version}${q},import.meta.url)`);
 }
 
 // Imports are reached only after the HTML entry script has loaded. Version

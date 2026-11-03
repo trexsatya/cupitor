@@ -109,7 +109,7 @@ async function checkLibrary(browser, width) {
     await dialog.getByRole('switch', {name:'Edit mode'}).check()
     await dialog.locator('[aria-label="Map folder path"]').fill('Swedish/People/Conflict')
     await dialog.getByRole('button', {name:'Move map', exact:true}).click()
-    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('cupitor:wordMaps:swedish@~guest')).find(m=>m.id==='conflict').folder), 'Swedish/People/Conflict')
+    assert.equal(await page.evaluate(async () => { await window.cupitorUserData.flush(); return JSON.parse(window.cupitorUserData.getItem('cupitor:wordMaps:swedish@~guest')).find(m=>m.id==='conflict').folder }), 'Swedish/People/Conflict')
     await screenshot('folders')
     await dialog.locator('[data-folder="*"]').click()
     await dialog.getByRole('searchbox', {name:'Filter maps'}).fill('Ljus')
@@ -143,7 +143,51 @@ async function checkLibrary(browser, width) {
   } finally { await page.close() }
 }
 
+async function checkLargeLibrary(browser) {
+  const page=await browser.newPage({viewport:{width:1280,height:900}})
+  await page.route('**/*',serveFixtures)
+  await page.addInitScript(()=>{
+    window.dontConfirmOnRefresh=true
+    localStorage.setItem('cupitor:account',JSON.stringify({login:null}))
+    localStorage.setItem('cupitor:wordMaps:swedish@~guest',JSON.stringify(Array.from({length:550},(_,i)=>({
+      version:1,id:'map'+i,name:'Large map '+i,folder:'Folder '+i,
+      nodes:[{id:'a',word:'Shared',x:400,y:200},{id:'b',word:'Stable',x:800,y:400}],edges:[{id:'edge',from:'a',to:'b'}],
+    }))))
+  })
+  try {
+    await page.goto('http://127.0.0.1:3000/language.html',{waitUntil:'networkidle'})
+    await page.evaluate(()=>window.openWordMaps())
+    const dialog=page.locator('#wordMapsDialog')
+    await dialog.getByRole('button',{name:'Browse maps',exact:true}).click()
+    assert.ok(await dialog.locator('[aria-label="Saved word map"] option').count()<=101)
+    assert.equal(await dialog.locator('.wm-library-map').count(),100)
+    await dialog.getByRole('button',{name:'Next maps',exact:true}).click()
+    assert.equal(await dialog.locator('.wm-library-map').count(),100)
+    await dialog.getByRole('searchbox',{name:'Filter maps'}).fill('Large map 549')
+    assert.equal(await dialog.locator('.wm-library-map').count(),1)
+    await dialog.locator('[data-map-id="map549"]').click()
+    if(await dialog.locator('.wm-library').isVisible())await dialog.getByRole('button',{name:'Close browser',exact:true}).click()
+    await dialog.getByRole('switch',{name:'Edit mode'}).check()
+    const node=dialog.locator('[data-node="a"]'),bounds=await node.boundingBox()
+    await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);await page.mouse.down()
+    await page.evaluate(()=>{
+      window.__stableNode=document.querySelector('[data-node="b"]')
+      window.__draggedNode=document.querySelector('[data-node="a"]')
+      window.__beforeTransform=window.__draggedNode.getAttribute('transform')
+    })
+    await page.mouse.move(bounds.x+bounds.width/2+45,bounds.y+bounds.height/2+25,{steps:5})
+    assert.equal(await page.evaluate(()=>window.__stableNode===document.querySelector('[data-node="b"]')&&window.__draggedNode===document.querySelector('[data-node="a"]')),true,'dragging preserves SVG element identity')
+    assert.notEqual(await page.evaluate(()=>window.__draggedNode.getAttribute('transform')),await page.evaluate(()=>window.__beforeTransform))
+    await page.mouse.up()
+    await page.evaluate(()=>window.cupitorUserData.flush())
+    const saved=await page.evaluate(()=>JSON.parse(window.cupitorUserData.getItem('cupitor:wordMaps:swedish@~guest')))
+    assert.equal(saved.length,550);assert.notEqual(saved.find(map=>map.id==='map549').nodes[0].x,400)
+    assert.equal(saved[0].nodes[0].x,400,'other map records are preserved')
+    console.log('Large map library: bounded pickers and pages, complete filtering, stable SVG drag and isolated record persistence passed')
+  } finally {await page.close()}
+}
+
 ;(async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined, args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-zygote']})
-  try { await check(browser, false); await check(browser, true); for (const width of [1280, 390, 320]) await checkLibrary(browser, width) } finally { await browser.close() }
+  try { await checkLargeLibrary(browser); await check(browser, false); await check(browser, true); for (const width of [1280, 390, 320]) await checkLibrary(browser, width) } finally { await browser.close() }
 })().catch(error => {console.error(error);process.exitCode=1})

@@ -68,19 +68,32 @@ export function packDocuments(documents, options = {}) {
   return { storage, packs, assignments }
 }
 
-export function createBundleLoader(fetchText) {
-  const pending = new Map()
+export function createBundleLoader(fetchText, {maxBytes=8*1024*1024}={}) {
+  const pending = new Map(), sizes = new Map()
+  let bytes=0
   return {
-    clear() { pending.clear() },
+    clear() { pending.clear();sizes.clear();bytes=0 },
     async track(entry, code, baseUrl) {
       const path = bundlePath(entry.bundle)
       const url = baseUrl.replace(/\/$/, '') + '/' + path + '?v=' + encodeURIComponent(entry.bundleRevision || 1)
       if (!pending.has(url)) {
         const promise = Promise.resolve().then(() => fetchText(url)).then(parseBundle)
         pending.set(url, promise)
+        promise.then(files=>{
+          if(pending.get(url)!==promise)return
+          const size=2*Object.values(files).reduce((sum,text)=>sum+text.length,0)
+          sizes.set(url,size);bytes+=size
+          for(const key of pending.keys()){
+            if(bytes<=maxBytes)break
+            if(!sizes.has(key))continue
+            bytes-=sizes.get(key);sizes.delete(key);pending.delete(key)
+          }
+        },()=>{})
         promise.catch(() => { if (pending.get(url) === promise) pending.delete(url) })
       }
-      const files = await pending.get(url)
+      const promise=pending.get(url)
+      pending.delete(url);pending.set(url,promise)
+      const files = await promise
       const key = (entry.bundleKey || entry.name) + '.' + code + '.srt'
       return owns(files, key) ? files[key] : null
     },

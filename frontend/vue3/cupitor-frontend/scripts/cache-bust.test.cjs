@@ -24,3 +24,9 @@ test('entry URLs preserve local queries and resolve relative paths without modif
   assert(out.endsWith(html.slice(html.indexOf('<script src="/vendor'))))
   assert.equal(bustHtmlAssets(out, 'new', 'language/card.html', () => true).includes('v=new&v='), false)
 })
+
+
+test('worker module URLs change with each deployment', () => {
+  const code="new Worker(new URL('./subtitle-search-worker.js',import.meta.url),{type:'module'})"
+  assert.equal(bustImports(code,'release'),"new Worker(new URL('./subtitle-search-worker.js?v=release',import.meta.url),{type:'module'})")
+})

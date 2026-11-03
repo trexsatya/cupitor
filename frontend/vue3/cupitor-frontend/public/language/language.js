@@ -1,3 +1,7 @@
+import { attributeSubtitleMatches } from './subtitle-search-engine.js';
+import { createSubtitleSearchClient, observeSubtitleCorpus } from './subtitle-search-client.js';
+import { userDataReady } from './user-data.js';
+const _userData = await userDataReady();
 import { languageFromLocation, requireStudyLanguage, speechLocale } from './language-config.js';
 import {folderPath, folderPaths, folderChange, mergeFolderCatalog} from './playlist-folders.js';
 import {mountPlaylistBrowser, playlistBrowserState} from './playlist-browser.js';
@@ -1004,70 +1008,28 @@ async function scanRareWords() {
   const threshold = Math.max(1, parseInt($('#rareWordsThreshold').val(), 10) || 1)
   const token = ++window._rareWordsScanToken
 
-  // Precompute cleaned subtitle text once per scan (sv + en kept separate so a
-  // word counts as "present" when it appears in either, mirroring the main
-  // search's file-level filter).
-  const subs = Object.values(window.allSubtitles || {})
-    .filter(s => s && (s.sv || s.en))
-    .map(s => {
-      const sv = s.sv ? _cleanSrtForMatch(s.sv) : ''
-      const en = s.en ? _cleanSrtForMatch(s.en) : ''
-      // Lowercased copies feed the cheap substring pre-filter below (the regex
-      // is case-insensitive and still runs on the original text).
-      return { sv, en, svLo: sv.toLowerCase(), enLo: en.toLowerCase() }
-    })
-
-  // Flatten vocabulary into unique {line, category} entries. Shared logic in
-  // ./rare-words.js (drops <3-char function words, keeps first category seen).
-  const entries = _flattenVocabEntries(window.vocabulary)
-
-  const found = []
-  const total = entries.length
+  const entries = _flattenVocabEntries(window.vocabulary).map(entry => {
+    try {
+      const re = _buildRareWordRegex(expandWords(entry.line, getLangFromUrl().code))
+      return {...entry,pattern:re?.source,flags:re?.flags}
+    } catch (_) { return entry }
+  })
   $('#rareWordsProgress').show()
   $('#rareWordsProgressFill').css('width', '0%')
   $('#rareWordsScanBtn').prop('disabled', true)
-  $('#rareWordsStatus').text(`Scanning ${total} words…`)
-
-  // Time-sliced so the main thread is never held longer than SLICE_MS at a
-  // stretch — the scan stays fully non-blocking no matter how big the
-  // vocabulary / subtitle set is. We yield on a time budget rather than a
-  // fixed word count because per-word cost varies wildly (a rare word scans
-  // every subtitle; a common one early-exits almost immediately).
-  const yieldToUI = () => new Promise(r => setTimeout(r, 0))
-  const SLICE_MS = 25
-  const now = () => (window.performance && performance.now) ? performance.now() : Date.now()
-  let lastYield = now()
-  for (let i = 0; i < total; i++) {
-    if (token !== window._rareWordsScanToken) { $('#rareWordsScanBtn').prop('disabled', false); return }
-    const { line, category: cat } = entries[i]
-    // Build the boundary-anchored match regex from the expanded line. Shared
-    // logic in ./rare-words.js: drops short alternatives, relaxes spaces, and
-    // falls back to a non-/u regex when needed. null ⇒ nothing to test against.
-    let re, sigs = null
-    try {
-      const expanded = expandWords(line, getLangFromUrl().code)
-      re = _buildRareWordRegex(expanded)
-      sigs = _buildRareWordPrefilter(expanded)
-    } catch (e) { re = null }
-    if (re) {
-      let count = 0
-      for (const sub of subs) {
-        // Cheap substring gate: skip the /u regex for subtitles that can't
-        // possibly contain any alternative (see ./rare-words.js).
-        if (sigs && !_prefilterHit(sub.svLo, sub.enLo, sigs)) continue
-        if ((sub.sv && re.test(sub.sv)) || (sub.en && re.test(sub.en))) {
-          count++
-          if (count >= threshold) break // can't be "fewer than threshold" any more
-        }
-      }
-      if (count < threshold) found.push({ line, category: cat, count })
-    }
-    if (now() - lastYield > SLICE_MS) {
-      $('#rareWordsProgressFill').css('width', `${Math.round(((i + 1) / total) * 100)}%`)
-      await yieldToUI()
-      if (token !== window._rareWordsScanToken) { $('#rareWordsScanBtn').prop('disabled', false); return }
-      lastYield = now()
-    }
+  $('#rareWordsStatus').text(`Scanning ${entries.length} words…`)
+  let found
+  try {
+    const result = await _subtitleSearch.run('vocabScan', {ids:_subtitleDocumentIds(),entries,threshold},
+      {isCurrent:()=>token===window._rareWordsScanToken})
+    if (token !== window._rareWordsScanToken) return
+    found = result.filter(entry=>entry.valid&&entry.count<threshold)
+  } catch (error) {
+    $('#rareWordsStatus').text('Scan incomplete: ' + error.message)
+    return
+  } finally {
+    $('#rareWordsProgress').hide()
+    $('#rareWordsScanBtn').prop('disabled',false)
   }
 
   found.sort((a, b) => (a.count - b.count) || a.line.localeCompare(b.line))
@@ -1997,8 +1959,11 @@ async function commitVocabularyToGithub() {
   const filePath = `${_langRepoDir()}/vocabulary.txt`
   const baselineText = window._vocabularyBaselineText || ''
   const localVocab = _ownVocabulary()
-
+  const pendingSnapshot = _userData.getItem(PENDING_VOCAB_KEY)
+  const context = _dsCaptureSourceContext()
   try {
+    await _userData.flush()
+    context.assertCurrent()
     const finalText = await commitWithMerge({
       filePath,
       commitMessage: 'vocab: update vocabulary via language tool',
@@ -2007,12 +1972,16 @@ async function commitVocabularyToGithub() {
         return vocabularyToText(merged)
       }
     })
-    // Adopt what we just pushed as the new baseline + UI state. The
-    // pending-edit buffer is now stale (everything we cached is on remote);
-    // drop it so a future page-load doesn't re-apply the same edits.
-    _setVocabularyLayers(_dsMergeVocabularyLayers(finalText, window._vocabularyOtherText))
+    context.assertCurrent()
+    const concurrent = _userData.getItem(PENDING_VOCAB_KEY) !== pendingSnapshot
+    const nextText = concurrent
+      ? vocabularyToText(mergeVocabulary(baselineText, _ownVocabulary(), finalText))
+      : finalText
+    _setVocabularyLayers(_dsMergeVocabularyLayers(nextText, window._vocabularyOtherText))
     window._vocabularyBaselineText = finalText
-    _clearPendingVocab()
+    if (concurrent) _savePendingVocab()
+    else _clearPendingVocab()
+    await _userData.flush()
     console.log('Vocabulary committed to GitHub')
   } catch (e) {
     console.error('Failed to commit vocabulary to GitHub:', e)
@@ -2029,7 +1998,7 @@ async function commitVocabularyToGithub() {
 const PENDING_VOCAB_KEY = _scopedKey('cupitor:pendingVocab')
 function _loadPendingVocab() {
   try {
-    const raw = localStorage.getItem(PENDING_VOCAB_KEY)
+    const raw = _userData.getItem(PENDING_VOCAB_KEY)
     if (!raw) return null
     const obj = JSON.parse(raw)
     if (!obj || typeof obj !== 'object' || !obj.categories) return null
@@ -2041,7 +2010,7 @@ function _savePendingVocab() {
     const dirty = window._vocabDirtyCategories || {}
     const dirtyNames = Object.keys(dirty)
     if (!dirtyNames.length || !window.vocabulary) {
-      localStorage.removeItem(PENDING_VOCAB_KEY)
+      _userData.removeItem(PENDING_VOCAB_KEY)
       return
     }
     // Own lines only: the other user's lines never enter the buffer, so a
@@ -2049,17 +2018,17 @@ function _savePendingVocab() {
     const categories = _dsPendingVocabCategories(window.vocabulary, dirtyNames,
       window._vocabularyReadOnly || new Set(), window._vocabularyOtherCategories || new Set())
     if (!Object.keys(categories).length) {
-      localStorage.removeItem(PENDING_VOCAB_KEY)
+      _userData.removeItem(PENDING_VOCAB_KEY)
       return
     }
     const lang = (typeof getLangFromUrl === 'function' && getLangFromUrl().fullName) || ''
     const pendingCount = parseInt(window._vocabPendingCount, 10) || 0
     const pendingDeleteCount = parseInt(window._vocabPendingDeleteCount, 10) || 0
-    localStorage.setItem(PENDING_VOCAB_KEY, JSON.stringify({ lang, categories, pendingCount, pendingDeleteCount, ts: Date.now() }))
+    _userData.setItem(PENDING_VOCAB_KEY, JSON.stringify({ lang, categories, pendingCount, pendingDeleteCount, ts: Date.now() }))
   } catch (_) {}
 }
 function _clearPendingVocab() {
-  try { localStorage.removeItem(PENDING_VOCAB_KEY) } catch (_) {}
+  try { _userData.removeItem(PENDING_VOCAB_KEY) } catch (_) {}
   window._vocabDirtyCategories = {}
   window._vocabHasPendingChanges = false
   window._vocabPendingCount = 0
@@ -2165,6 +2134,7 @@ async function doSearch(searchThis, el) {
   const query = typeof searchThis === 'string' ? searchThis : $('#searchText').val()
   const token = (window._subtitleSearchToken || 0) + 1
   window._subtitleSearchToken = token
+  window.cupitorSubtitleSearch?.cancel()
   if (!window.vocabulary || !window._subtitlesLoaded) {
     console.log('[search] data not loaded yet, deferring until vocabulary + subtitles ready…')
     await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise])
@@ -3069,6 +3039,19 @@ async function openSubtitleCacheDialog() {
       try { await removeCacheSource(db, source.owner, _sourceOwner('primary')) }
       catch (e) { _cacheSuppressedOwners.delete(source.owner); throw e }
     }))
+    const derived=await _subtitleSearch.run('caches',{})
+    for (const entry of derived) {
+      let label=entry.baseScope
+      try {
+        const [user,shared]=JSON.parse(entry.baseScope),[account,language,source]=JSON.parse(user)
+        label=`${account} / ${language} / ${source || shared || 'local'}`
+      } catch (_) {}
+      const size=((entry.bytes||0)/1024/1024).toFixed(1)
+      const text=`Search cache: ${label} · ${entry.count||0} subtitles · about ${size} MiB of raw text`
+      if (entry.baseScope===_subtitleSearchScope || entry.leaseUntil>Date.now()) {
+        $('<p></p>').text(text+' (active session)').appendTo($body)
+      } else row(text,()=>_subtitleSearch.run('clearCache',{scope:entry.scope}))
+    }
     if (!$body.children().length) $body.text('No cached subtitles found.')
     if (typeof indexedDB.databases !== 'function') {
       $('<p></p>').text('This browser can list only caches opened since this update.').appendTo($body)
@@ -3115,7 +3098,7 @@ function _nextWeekLabel() { return _isoWeekLabel(_addDays(new Date(), 7)) }
 
 function _loadPracticeLogLocal() {
   try {
-    const raw = localStorage.getItem(_practiceLogLocalKey())
+    const raw = _userData.getItem(_practiceLogLocalKey())
     if (!raw) return _defaultPracticeLog()
     return normalizePracticeLog(JSON.parse(raw)) || _defaultPracticeLog()
   } catch (_) { return _defaultPracticeLog() }
@@ -3127,7 +3110,7 @@ function _prunePracticeLogWeeks(data) {
 }
 
 function _savePracticeLogLocal(data) {
-  try { localStorage.setItem(_practiceLogLocalKey(), JSON.stringify(data)) } catch (_) {}
+  try { _userData.setItem(_practiceLogLocalKey(), JSON.stringify(data)) } catch (_) {}
 }
 
 // The user's own practice log only (never the other user's); null without
@@ -3343,6 +3326,7 @@ async function _commitPracticeLogToGithub() {
   const baseline = JSON.stringify(data)
   $status.text('pushing…')
   try {
+    await _userData.flush()
     await commitWithMerge({
       filePath,
       commitMessage: 'practice-log: update weekly plan/notes',
@@ -3358,6 +3342,7 @@ async function _commitPracticeLogToGithub() {
         return JSON.stringify(merged, null, 2) + '\n'
       }
     })
+    await _userData.flush()
     window._practiceLogPending = false
     _refreshPracticeLogPendingHint()
     if (window._practiceLogActiveTab === 'history') _renderPracticeLogHistory()
@@ -3627,6 +3612,34 @@ window.marginEndSubtitle = 1
 
 window.starredLines = []
 window.allSubtitles = {}
+const _subtitleSearchContext = _dsCaptureSourceContext()
+const _subtitleSearchScope = JSON.stringify([_userData.scope, _dsHasOther() ? _dsSourceIdentity('other') : null])
+const _subtitleSearch = createSubtitleSearchClient({
+  scope: _subtitleSearchScope,
+  assertCurrent: () => _subtitleSearchContext.assertCurrent(),
+  onProgress: progress => _setSubtitleSearchStatus(`Searching subtitles: ${progress.visited} / ${progress.total}`, true),
+  onMode: mode => { window._subtitleSearchMode = mode },
+  onCommitted: documents => _subtitleCorpusView.committed(documents),
+})
+window.cupitorSubtitleSearch = _subtitleSearch
+let _observedSubtitleIds = new Set()
+let _subtitleFlushTimer = null
+const _subtitleCorpusView = observeSubtitleCorpus(window, (id,document) => {
+  if (document) _observedSubtitleIds.add(id)
+  else _observedSubtitleIds.delete(id)
+  _subtitleSearch.update(id,document)
+  clearTimeout(_subtitleFlushTimer)
+  _subtitleFlushTimer = setTimeout(() => _subtitleSearch.flush().catch(error => {
+    window._subtitleSearchStorageError = error.message
+    _setSubtitleSearchStatus('Subtitle search storage is incomplete: '+error.message,false)
+  }), _subtitleSearch.pendingSize >= 32 ? 0 : 50)
+}, () => {
+  _subtitleSearch.cancel()
+  for (const id of _observedSubtitleIds) _subtitleSearch.update(id,null)
+  _observedSubtitleIds = new Set()
+})
+window._subtitleCoverageIndexReady = false
+window.cupitorSubtitleMemoryStats = () => _subtitleCorpusView.stats
 // Safety default — set early so a flaky boot (failed srts/index.json fetch)
 // doesn't leave us with `undefined` when groupAndArrangeResults runs.
 // fetchCategorisation overwrites this in loadAllSubtitles when it succeeds.
@@ -4788,6 +4801,24 @@ function populateAllLinks() {
   const $mp3Choice = $('#mp3Choice');
   $mp3Choice.html('').append($(`<option>-</option>`).attr('value', ''))
   const srts = window.srts
+  if ($mp3Choice.data('select2')) $mp3Choice.select2('destroy')
+  if (srts.length > 200) {
+    const owner = _ownerLabeller()
+    const entries = srts.map(item=>({id:item.link,text:owner.prefix(String(item.name),item),category:getCategory(item)}))
+    $mp3Choice.select2({ajax:{delay:100,transport:(params,success)=>{
+      const term=String(params.data.term || '').toLocaleLowerCase(),page=Number(params.data.page)||1
+      const matches=entries.filter(item=>(item.text+' '+item.category).toLocaleLowerCase().includes(term))
+      success({results:matches.slice((page-1)*50,page*50),pagination:{more:page*50<matches.length}})
+      return {abort(){}}
+    },processResults:data=>data}})
+    // Select2 keeps selected options; discard old unselected options so a
+    // long session does not gradually recreate the full subtitle index DOM.
+    $mp3Choice.off('select2:select.bounded').on('select2:select.bounded',()=>{
+      $mp3Choice.find('option').filter(function(){return this.value&&!this.selected}).remove()
+    })
+    return srts
+  }
+  $mp3Choice.select2()
   let srtLinks = Array.from(new Set(window.srts.map(it => it.link)));
 
   srtLinks = _(srtLinks).chain()
@@ -4853,6 +4884,7 @@ async function loadAllSubtitles() {
     window.srts = srts
     // The index is in: window.cupitorKnownVideos can answer from here on.
     window._srtsIndexLoaded = true
+    window._subtitleCoverageIndexReady = true
 
     // Cache pass: populate window.allSubtitles from IndexedDB before queuing
     // any network fetches. Hits are searchable instantly; only entries that
@@ -4860,14 +4892,15 @@ async function loadAllSubtitles() {
     // no longer in index.json are evicted in the background. The cache layer
     // silently no-ops if IDB is unavailable (private mode, quota, etc.), so
     // a first boot or a degraded environment falls back to the old behavior.
-    const cached = await _cacheReadAll().catch(() => new Map())
     context.assertCurrent()
     const cacheHits = []
     const deadLinks = []
-    if (cached.size) {
+    {
       const indexLinks = new Set(srts.map(s => s.link))
       const indexByLink = new Map(srts.map(s => [s.link, s]))
       const primaryOwner = _sourceOwner('primary')
+      for await (const cached of _cachedSubtitleBatches()) {
+      context.assertCurrent()
       for (const [link, entry] of cached) {
         if (!indexLinks.has(link)) { deadLinks.push(link); continue }
         // Cached from another repo than the one the index now names (the
@@ -4886,6 +4919,8 @@ async function loadAllSubtitles() {
           })
           cacheHits.push(link)
         }
+      }
+      await _subtitleSearch.flush()
       }
       if (deadLinks.length) {
         // Evict in the background — never block subtitle readiness on this.
@@ -4906,7 +4941,7 @@ async function loadAllSubtitles() {
     // the in-flight count bounded so the browser doesn't bail out. The host
     // (raw.githubusercontent.com) is HTTP/2, so this isn't the old 6-per-host
     // cap — the practical ceiling is the host's rate limiter.
-    const SRT_FETCH_CONCURRENCY = 15
+    const SRT_FETCH_CONCURRENCY = 4
     // Only fetch what the cache didn't satisfy. On a steady-state boot this
     // is typically empty (everything came from IDB); on first boot it's the
     // whole corpus; on a deploy that added videos it's just the new ones.
@@ -4920,7 +4955,7 @@ async function loadAllSubtitles() {
       // started yet when the account/language changes.
       try { context.assertCurrent() } catch (_) { return }
       try {
-        await _withTimeout(getSubtitlesForLink(it['link'], it['source']), 15000, it['link'])
+        await _withTimeout(getSubtitlesForLink(it['link'], it['source'], {prepareOnly:true}), 15000, it['link'])
       } catch (e) {
         if (e?.code === 'stale-data-source') return
         // A timeout from _withTimeout carries no .kind — treat it as transient.
@@ -5163,6 +5198,31 @@ function _cacheStore(db, mode) {
   return db.transaction(CUPITOR_CACHE_STORE, mode).objectStore(CUPITOR_CACHE_STORE)
 }
 
+async function* _cachedSubtitleBatches() {
+  const db = await _openSubtitlesCache()
+  if (!db) return
+  let after = null
+  for (;;) {
+    const {rows,last} = await new Promise((resolve,reject) => {
+      const rows=[];let last=null,bytes=0
+      const range=after==null?undefined:IDBKeyRange.lowerBound(after,true)
+      const req=_cacheStore(db,'readonly').openCursor(range)
+      req.onerror=()=>reject(req.error)
+      req.onsuccess=()=>{
+        const cursor=req.result
+        if(!cursor){resolve({rows,last});return}
+        const value=cursor.value;last=cursor.key
+        if(value?.link){rows.push([value.link,value]);bytes+=2*((value.sv?.length||0)+(value.en?.length||0))}
+        if(rows.length>=32||bytes>=2*1024*1024)resolve({rows,last})
+        else cursor.continue()
+      }
+    })
+    if(last==null)return
+    yield rows
+    after=last
+  }
+}
+
 async function _cacheReadAll() {
   const db = await _openSubtitlesCache()
   if (!db) return new Map()
@@ -5232,7 +5292,8 @@ async function _cacheWriteOne(entry) {
 // A partial/unverified record is tagged so boot will fetch the full SRT. A
 // concurrent remote change from another device is reconciled on an explicit
 // "Refresh subtitles".
-function _cacheWriteSubtitleFromMemory(link) {
+async function _cacheWriteSubtitleFromMemory(link) {
+  if (window.allSubtitles[link]?._evicted) await _restoreSubtitleDocument(link)
   const s = link && window.allSubtitles && window.allSubtitles[link]
   if (!s || (s.sv == null && s.en == null)) return Promise.resolve()
   const entry = (window.srts || []).find(entry => entry.link === link)
@@ -5351,9 +5412,23 @@ async function _fetchIndexedSrt(entry, code, who) {
   return _fetchSrtFile(`${base}/${encodeURIComponent(_nfc(entry.name) + '.' + code + '.srt')}`)
 }
 
-async function getSubtitlesForLink(link, source) {
+const _subtitleRestores = new Map()
+async function _restoreSubtitleDocument(id) {
+  if (!window.allSubtitles[id]?._evicted) return window.allSubtitles[id]
+  if (_subtitleRestores.has(id)) return _subtitleRestores.get(id)
+  const pending = (async () => {
+    const document = await _subtitleSearch.run('document', {id})
+    if (!window.allSubtitles[id]?._evicted) return window.allSubtitles[id]
+    return _subtitleCorpusView.hydrate(id,document)
+  })()
+  _subtitleRestores.set(id,pending)
+  try {return await pending} finally {_subtitleRestores.delete(id)}
+}
+
+async function getSubtitlesForLink(link, source, {prepareOnly=false}={}) {
   const context = _dsCaptureSourceContext()
-  const before = window.allSubtitles[link]
+  let before = window.allSubtitles[link]
+  if (before?._evicted) before = await _restoreSubtitleDocument(link)
   if (before && !before._partial) {
     return window.allSubtitles[link]
   }
@@ -5390,6 +5465,7 @@ async function getSubtitlesForLink(link, source) {
   // this network round-trip. Fire-and-forget — failures are swallowed inside
   // the cache layer; a flaky cache must never break this critical path.
   _cacheWriteSubtitleFromMemory(link)
+  if (prepareOnly) await _subtitleSearch.flush()
   return window.allSubtitles[link]
 }
 
@@ -5905,7 +5981,10 @@ window.onload = e => {
     waitUntil(() => window.ytPlayerReady)
         .then(() => {
           console.log("Playing video", link)
-          $('#mp3Choice').val(link).trigger('change')
+          const $picker=$('#mp3Choice')
+          if (!$picker.find('option').toArray().some(option=>option.value===link))
+            $picker.append(new Option(window.srts.find(item=>item.link===link)?.name || link,link))
+          $picker.val(link).trigger('change')
         })
   }
 }
@@ -6128,175 +6207,20 @@ class MatchResult {
 // expandRegex, withWordBoundaries, _relaxSpaces live in ./search-text.js.
 
 async function getMatchingWords(list, search, token) {
-  const startTime = new Date().getTime()
-  let wordToItemsMap = {}
-  let searchText = search
-  const transformedSearchText = search
-  const regexMode = !!window._resultsSearchRegex
-  const bounded = pattern => regexMode ? pattern : withWordBoundaries(pattern)
-
-  const isNotTooShort = w => w.trim().length > 2
-  const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
-  const ITEM_CHUNK = 25
-
-  const transformedRe = compileRegex(_relaxSpaces(transformedSearchText), "i")
-  // English does not compound or inflect the way the studied language does, so
-  // a loose match there lands on a different word almost every time: "thin"
-  // answered with think, thing and nothing, each dragging its own unrelated
-  // subtitles in behind it. Whole words only is what an English search means.
-  //
-  // The studied language keeps the loose match, and needs it — "hus" genuinely
-  // belongs with huset and husrannsakan. The explicit leading/trailing-space
-  // conventions below stay in both languages: those are a deliberate gesture
-  // for "words ending in…", not an accident of substring matching.
-  const exactWordsOnly = getSelectedLang() === 'en'
-  // Per-word matching test: alternatives like " ber ", " be ", " bad " (the
-  // user's convention for forcing word-boundary semantics) can never match a
-  // bare segmented word like "ber" because the literal spaces have to be in
-  // the test string. Build a parallel regex with each alternative trimmed so
-  // those individual words still produce per-word accordions. The whole-line
-  // regex below keeps the spaced form for phrase-level matching.
-  const perWordRe = compileRegex(
-    '^(?:' +
-    splitRegexAlternatives(transformedSearchText)
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
-      .join(SEPARATOR_PIPE) +
-    ')$',
-    "i"
-  )
-
-  // Multi-word phrase terms (e.g. expansion of "<*göra susen" produces
-  // "göra susen|gör susen|gjorde susen|gjort susen"). The per-word filter
-  // above can't match these (segmenter gives single words), and the
-  // combined whole-pipe key would later be filtered out at render. So we
-  // tag each phrase term independently here.
-  const phraseTerms = (regexMode ? [] : splitRegexAlternatives(transformedSearchText))
-    .map(s => s.trim())
-    .filter(s => s.length > 1 && hasPhraseWhitespace(s))
-  const phraseRes = phraseTerms.map(t => ({ term: t, re: compileRegex(_relaxSpaces(bounded(t)), "i") }))
-
-  for (let start = 0; start < list.length; start += ITEM_CHUNK) {
-    if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
-    const end = Math.min(start + ITEM_CHUNK, list.length)
-    for (let ix = start; ix < end; ix++) {
-      const item = list[ix]
-      const lines = item.data;
-      for (const line of lines) {
-        if (new Date().getTime() - startTime > 60000) {
-          return wordToItemsMap;
-        }
-        // Fast-skip lines that can't contain a match. getWords() runs
-        // Intl.Segmenter on every line, which is the single most expensive
-        // step in this loop — for a search that file-matches in 180 SRTs
-        // with ~100 lines each, the bulk of the 18k segmentations are on
-        // lines that never had a chance of matching. Every downstream
-        // matcher (perWordRe, bounded(searchText), phraseRes)
-        // is strictly more restrictive than transformedRe, so if
-        // transformedRe doesn't match this line, none of them can either.
-        // Skipping here lets the loop finish in a small fraction of the
-        // old wall-clock budget, so the timeout below never fires under
-        // realistic search loads. (Was hitting the 20s ceiling and
-        // returning before reaching files later in the iteration order —
-        // user-visible symptom: a search for a rare word that genuinely
-        // appears in some file but the file doesn't show up because the
-        // loop bailed before processing it.)
-        if (!transformedRe.test(line.text)) continue
-        const words = getWords(line.text, search).map(it => it.trim().toLowerCase())
-        const endsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.endsWith(" ") && !transformedSearchText.startsWith(" ") && word.endsWith(transformedSearchText.trim());
-        const startsWith = word => isNotTooShort(transformedSearchText) && transformedSearchText.startsWith(" ") && !transformedSearchText.endsWith(" ") && word.startsWith(transformedSearchText.trim());
-        words.filter(word => word.match(perWordRe)
-                || (!exactWordsOnly && word.match(transformedRe))
-                || endsWith(word) || startsWith(word))
-            .forEach(word => {
-              wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
-            })
-        // Whole search text as a word
-        const word = searchText.trim()
-        if (hasPhraseWhitespace(word) && compileRegex(_relaxSpaces(bounded(word)), "i").test(line.text)) {
-          wordToItemsMap[word] = computeIfAbsent(wordToItemsMap, word, it => []).concat(new MatchResult(word, line, item.url, item.source))
-        }
-        // Per-phrase terms (so each expansion of "<*göra susen" gets its
-        // own accordion key, instead of all collapsing into the whole-pipe
-        // key that populateSRTFindings drops).
-        for (const { term, re } of phraseRes) {
-          if (re.test(line.text)) {
-            wordToItemsMap[term] = computeIfAbsent(wordToItemsMap, term, it => []).concat(new MatchResult(term, line, item.url, item.source))
-          }
-        }
-      }
-      // Cross-line phrase match: catch phrases like "a b" where "a" sits
-      // at the end of line N and "b" at the start of line N+1. The regex
-      // already treats spaces as \s+ (via _relaxSpaces), so joining with a
-      // newline preserves intent. Only register when neither line alone
-      // matched, so we don't double-count the easy single-line case.
-      const wholeWord = searchText.trim()
-      const wholeRe = hasPhraseWhitespace(wholeWord)
-          ? compileRegex(_relaxSpaces(bounded(wholeWord)), "i")
-          : null
-      for (let i = 0; i + 1 < lines.length; i++) {
-        const a = lines[i], b = lines[i + 1]
-        if (!a || !b || !a.text || !b.text) continue
-        const combined = a.text + '\n' + b.text
-        for (const { term, re } of phraseRes) {
-          if (re.test(combined) && !re.test(a.text) && !re.test(b.text)) {
-            wordToItemsMap[term] = computeIfAbsent(wordToItemsMap, term, it => []).concat(new MatchResult(term, a, item.url, item.source))
-          }
-        }
-        if (wholeRe && wholeRe.test(combined) && !wholeRe.test(a.text) && !wholeRe.test(b.text)) {
-          wordToItemsMap[wholeWord] = computeIfAbsent(wordToItemsMap, wholeWord, it => []).concat(new MatchResult(wholeWord, a, item.url, item.source))
-        }
-      }
-    }
-    await yieldToUI()
-  }
-
-  if (wordToItemsMap[searchText.trim()] === undefined) {
-    wordToItemsMap[searchText] = []
-  }
-
-  const wordToItemsMap2 = {}
-  if (isNotTooShort(searchText)) {
-    searchText = searchText.trim()
-  }
-
-  const searchRe = compileRegex(_relaxSpaces(bounded(searchText)), "i")
-  for (let start = 0; start < list.length; start += ITEM_CHUNK) {
-    if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
-    const end = Math.min(start + ITEM_CHUNK, list.length)
-    for (let ix = start; ix < end; ix++) {
-      const item = list[ix]
-      const lines = item.data;
-      for (const line of lines) {
-        const matches = line.text.match(searchRe)
-        const alreadyIncludedInResults = it => it.toLowerCase().indexOf(searchText.toLowerCase()) >= 0
-            && (wordToItemsMap[it] || []).length > 0;
-
-        if (matches && !Object.keys(wordToItemsMap).some(alreadyIncludedInResults)) {
-          const matchedPart = matches[0].toLowerCase()
-          wordToItemsMap2[matchedPart] = computeIfAbsent(wordToItemsMap2, matchedPart, it => []).concat(new MatchResult(matchedPart, line, item.url, item.source))
-        }
-      }
-    }
-    await yieldToUI()
-  }
-
-  if (!wordToItemsMap[searchText.trim()] || wordToItemsMap[searchText.trim()].length === 0) {
-    wordToItemsMap = Object.assign(wordToItemsMap, wordToItemsMap2)
-  }
-
-  // A subtitle can contain several matching words. Each word must keep its
-  // own findings: assigning the line only to the longest heading makes a
-  // broad search like "för.*" falsely report no hits for the other words.
-  // groupAndArrangeResults removes duplicate cards within each group later.
-
-  if (!regexMode) getSearchedTerms(transformedSearchText).forEach(it => {
-    if (!wordToItemsMap[it] && !isRegExp(it)) {
-      wordToItemsMap[it] = []
-    }
-  })
-
-  return wordToItemsMap;
+  const isCurrent = () => token === undefined || token === window._subtitleSearchToken
+  const options = { regexMode: !!window._resultsSearchRegex, exactWordsOnly: getSelectedLang() === 'en' }
+  if (!list.length || list.some(file => file.nonSrt || !file.url || !window.allSubtitles[file.url]))
+    return attributeSubtitleMatches(list, search, { ...options, check: () => { if (!isCurrent()) throw Object.assign(new Error('Search cancelled.'), {code:'subtitle-search-cancelled'}) } })
+  const compact = list.some(file => file._contextOnly)
+  const result = await _subtitleSearch.run('attribute', {
+    files: list.map(file => ({id:file.url, language:file.path.endsWith('.en.srt')?'en':'sv', suffix:getTargetLangSrtSuffix()})),
+    query:search, ...options, compact,
+    englishParts: compact && getSelectedLang() === 'en' && (!options.regexMode || !/[()[\]{}?*+\\]/.test(search))
+      ? String(window.unprocessedSearchText || search).split(SEPARATOR_PIPE).map(part => removeHintsInBrackets(_stripExpansionMarkers(part)).trim().toLowerCase()).filter(Boolean) : [],
+  }, {isCurrent})
+  window._compactEnglishWord = compact ? result.englishWord : null
+  window._compactSubtitleResults = compact
+  return compact ? result.map : result
 }
 
 // Copy `text` to the clipboard, best-effort and silent. Tries the async
@@ -6464,12 +6388,12 @@ function populateNonSRTFindings(wordToItemsMap, $result) {
   return numberOfResults
 }
 
-function getMainSubAndSecondarySub(file, line) {
+function getMainSubAndSecondarySub(file, line, pair = null) {
   let mainSub = {text: ""}, secondarySub = {text: ""};
   if (file.path.endsWith(getTargetLangSrtSuffix())) {
     mainSub = {...line};
     mainSub.text = highlightedText(mainSub.text, true)
-    const found = window.searchResult.find(it => it['en_subs'] && it['en_subs'].path === file.path.replaceAll(getTargetLangSrtSuffix(), ".en.srt"));
+    const found = pair || window.searchResult.find(it => it['en_subs'] && it['en_subs'].path === file.path.replaceAll(getTargetLangSrtSuffix(), ".en.srt"));
     const counterpart = found && found.en_subs.data.find(it => it.index === line.index)
     if (counterpart) {
       // Match parity with the other branch: wrap the secondary EN text via
@@ -6480,7 +6404,7 @@ function getMainSubAndSecondarySub(file, line) {
       secondarySub.text = highlightedText(secondarySub.text)
     }
   } else {
-    mainSub = window.searchResult.find(it => it['sv_subs'] && it['sv_subs'].path === file.path.replaceAll(".en.srt", getTargetLangSrtSuffix()))
+    mainSub = (pair || window.searchResult.find(it => it['sv_subs'] && it['sv_subs'].path === file.path.replaceAll(".en.srt", getTargetLangSrtSuffix())))
         .sv_subs.data.find(it => it.index === line.index)
     mainSub = {...mainSub}
     mainSub.text = getWikiLinks(mainSub.text)
@@ -6641,7 +6565,7 @@ async function _saveSubtitleEdit(link, langCode, lineIndex, newText, opts = null
   const filePath = _srtPathFor(link, langCode)
   if (!filePath) throw new Error('No SRT path for ' + link)
   const key = langCode === 'en' ? 'en' : 'sv'
-  const stored = window.allSubtitles[link]
+  const stored = await _restoreSubtitleDocument(link)
   if (!stored) throw new Error('SRT not loaded for ' + link)
   // A translation insert (opts carries the source line's timestamp) may target
   // a line — or a whole .en.srt — that doesn't exist yet; treat a missing body
@@ -6685,7 +6609,7 @@ let _srtEditsFlushTimer = null
 
 function _loadPendingSrtEdits() {
   try {
-    const raw = localStorage.getItem(SRT_EDITS_KEY)
+    const raw = _userData.getItem(SRT_EDITS_KEY)
     if (!raw) return {}
     const obj = JSON.parse(raw)
     return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
@@ -6693,8 +6617,8 @@ function _loadPendingSrtEdits() {
 }
 function _savePendingSrtEdits(edits) {
   try {
-    if (!edits || !Object.keys(edits).length) localStorage.removeItem(SRT_EDITS_KEY)
-    else localStorage.setItem(SRT_EDITS_KEY, JSON.stringify(edits))
+    if (!edits || !Object.keys(edits).length) _userData.removeItem(SRT_EDITS_KEY)
+    else _userData.setItem(SRT_EDITS_KEY, JSON.stringify(edits))
   } catch (_) {}
 }
 function _pendingSrtEditCount(edits) {
@@ -6733,9 +6657,12 @@ function _filePathToLink(filePath) {
   } catch (_) { return null }
 }
 
-async function flushPendingSrtEdits() {
+async function flushPendingSrtEdits(selected = null) {
   if (!_requireSelf()) return { committed: false, reason: 'no-repo' }
-  const edits = _loadPendingSrtEdits()
+  const context = _dsCaptureSourceContext()
+  await _userData.flush()
+  context.assertCurrent()
+  const edits = selected || _loadPendingSrtEdits()
   const paths = Object.keys(edits)
   if (!paths.length) return { committed: false, reason: 'empty' }
   const totalLines = _pendingSrtEditCount(edits)
@@ -6756,6 +6683,7 @@ async function flushPendingSrtEdits() {
   const files = paths.map(filePath => ({
     path: filePath,
     getContent: (current) => {
+      context.assertCurrent()
       // Replaces existing lines; inserts lines that carry a timestamp (a
       // translation of a line the remote doesn't have yet); when there's no
       // remote file and no timestamped edits, returns null so we don't create
@@ -6775,23 +6703,35 @@ async function flushPendingSrtEdits() {
     commitMessage: msg,
     files
   })
+  context.assertCurrent()
   // Clear the buffer if the commit landed OR if nothing actually changed
   // (every queued edit already matched remote — buffer is stale, drop it).
   if (!result || result.committed !== false || result.reason === 'no-changes') {
-    _savePendingSrtEdits({})
+    const remaining = _loadPendingSrtEdits()
+    for (const [path, lines] of Object.entries(edits)) {
+      for (const [line, sent] of Object.entries(lines)) {
+        if (_sameJson(remaining[path]?.[line], sent)) delete remaining[path][line]
+      }
+      if (remaining[path] && !Object.keys(remaining[path]).length) delete remaining[path]
+    }
+    _savePendingSrtEdits(remaining)
+    await _userData.flush()
+    context.assertCurrent()
     // The commit just rewrote one or more server-side SRTs. Rather than evict
     // and force a re-fetch (which races GitHub's CDN lag), fold the exact
     // committed text back into memory + IndexedDB so a reload sees it at once.
-    committedByPath.forEach((text, filePath) => {
+    for (const [textPath, text] of committedByPath) {
+      const filePath = textPath
       const link = _filePathToLink(filePath)
-      if (!link) return
+      if (!link) continue
+      await _restoreSubtitleDocument(link)
       const key = /\.en\.srt$/i.test(filePath) ? 'en' : 'sv'
       window.allSubtitles[link] = { ...(window.allSubtitles[link] || {}), [key]: text }
       // Drop stale parsed caches for the language we just rewrote.
       if (key === 'sv') delete window.allSubtitles[link]._parsedSv
       else delete window.allSubtitles[link]._parsedEn
-    })
-    editedLinks.forEach(link => { _cacheWriteSubtitleFromMemory(link) })
+    }
+    await Promise.all(Array.from(editedLinks, link => _cacheWriteSubtitleFromMemory(link)))
   }
   _updateSrtEditsUi()
   return result
@@ -6883,30 +6823,19 @@ async function _onSrtEditsPushSelected() {
   const keep = _collectSrtEditsByCheckbox(true)
   if (!keep.length) { alert('Select at least one edit to push.'); return }
   const buf = _loadPendingSrtEdits()
-  // The flush pushes whatever is in the buffer, so the buffer is narrowed to
-  // the picked edits — carrying the user's in-dialog text tweaks. Everything
-  // else on an entry is kept: `start`/`end` are what let an insert create a
-  // line the remote file doesn't have, and rebuilding the entry from scratch
-  // would drop them, leaving the flush nothing committable to write.
   const push = {}
   keep.forEach(({ filePath, lineIndex, newText }) => {
-    const li = String(lineIndex)
-    const prev = (buf[filePath] || {})[li] || {}
+    const li = String(lineIndex), prev = (buf[filePath] || {})[li] || {}
     if (!push[filePath]) push[filePath] = {}
     push[filePath][li] = { ...prev, newText, ts: Date.now() }
-    if (buf[filePath]) delete buf[filePath][li]
+    if (!buf[filePath]) buf[filePath] = {}
+    buf[filePath][li] = push[filePath][li]
   })
-  // What was left unticked. That means "not this one now", never "throw it
-  // away" — and the flush empties the buffer, so these are put back after it.
-  const hold = {}
-  Object.keys(buf).forEach(fp => {
-    if (Object.keys(buf[fp] || {}).length) hold[fp] = buf[fp]
-  })
-  _savePendingSrtEdits(push)
+  _savePendingSrtEdits(buf)
   _updateSrtEditsUi()
   const $btn = $('#srtEditsPushSelected').prop('disabled', true).text('Pushing…')
   try {
-    const r = await flushPendingSrtEdits()
+    const r = await flushPendingSrtEdits(push)
     if (r && r.committed === false) {
       alert('No commit produced: ' + (r.reason || 'remote already matches'))
     }
@@ -6914,15 +6843,6 @@ async function _onSrtEditsPushSelected() {
   } catch (e) {
     alert('Push failed: ' + (e && e.message || e))
   } finally {
-    // Put the unticked edits back, whether the push landed or not. A failed
-    // push leaves its own edits in the buffer; those win, since they carry the
-    // text the user just tweaked.
-    const after = _loadPendingSrtEdits()
-    Object.keys(hold).forEach(fp => {
-      if (!after[fp]) after[fp] = {}
-      Object.keys(hold[fp]).forEach(li => { if (!after[fp][li]) after[fp][li] = hold[fp][li] })
-    })
-    _savePendingSrtEdits(after)
     $btn.prop('disabled', false).text('Push selected')
     _updateSrtEditsUi()
   }
@@ -6966,7 +6886,7 @@ function _getRawSubtitleLineText(link, langCode, lineIndex) {
   return ''
 }
 
-function renderLines(id, url) {
+async function renderLines(id, url) {
   const $container = $('#' + id).addClass('lines-cntnr');
   let fromLineIndex = parseInt($container.data('fromIndex'))
   let toLineIndex = parseInt($container.data('toIndex'))
@@ -6983,7 +6903,18 @@ function renderLines(id, url) {
   }
 
   const lang = getSelectedLang()
-  const subtitleFile = window.searchResult.find(it => it.url === url)[lang === 'sv' ? 'sv_subs' : 'en_subs']
+  const original = window.searchResult.find(it => it.url === url)
+  if (!original) throw new Error('Search result is no longer available.')
+  const key = lang === 'sv' ? 'sv_subs' : 'en_subs'
+  const lastIndex = original[key].lastIndex
+  if (lastIndex) { toLineIndex = Math.min(toLineIndex, lastIndex); fromLineIndex = Math.min(fromLineIndex, lastIndex) }
+  let pair = original
+  if (original[key]._contextOnly) {
+    const context = await _subtitleSearch.run('context', {id:url,from:fromLineIndex,to:toLineIndex,regexMode:!!window._resultsSearchRegex})
+    if (!document.getElementById(id)) return
+    pair = {...original,sv_subs:{...original.sv_subs,...context.sv_subs},en_subs:{...original.en_subs,...context.en_subs}}
+  }
+  const subtitleFile = pair[key]
 
   // Clamp toLineIndex to the file's last index so a default-context window
   // (or repeated "+" clicks) that overshoots doesn't crash on getSub() →
@@ -6997,6 +6928,7 @@ function renderLines(id, url) {
   const getSub = x => subtitleFile.data.find(it => it.index + '' === x + '');
   const st = getSub(fromLineIndex);
   const end = getSub(toLineIndex)
+  if (!st || !end) throw Object.assign(new Error('The requested subtitle context is unavailable. Search again after downloading the full file.'),{code:'subtitle-search-incomplete'})
   // Contract the play-bounds to the contiguous temporal segment that
   // contains matchLineIndex. SRTs in this app are SPARSE — multiple captures
   // across distant moments of the same video get stitched into one file, so
@@ -7112,7 +7044,8 @@ function renderLines(id, url) {
   let _prevEnd = null
   range(fromLineIndex, toLineIndex - fromLineIndex + 1).forEach(idx => {
     const sub = getSub(idx)
-    const {mainSub, secondarySub} = getMainSubAndSecondarySub(subtitleFile, ({...sub}));
+    if (!sub) return
+    const {mainSub, secondarySub} = getMainSubAndSecondarySub(subtitleFile, ({...sub}), pair);
     const subIdx = (sub && sub.index != null) ? String(sub.index) : ''
     const _thisStart = (sub && sub.start && typeof sub.start.ordinal === 'number') ? sub.start.ordinal : null
     const _gap = (_prevEnd != null && _thisStart != null && (_thisStart - _prevEnd) > MAX_GAP_S)
@@ -7165,16 +7098,16 @@ function renderLines(id, url) {
     } catch (_) {}
   }
   $($container).find('.add-prev-btn').click(e => {
-    changeIndices(''+id, fromLineIndex - 1, toLineIndex); renderLines(''+id, ''+url); _syncOnWindowChange();
+    changeIndices(''+id, fromLineIndex - 1, toLineIndex); renderLines(''+id, ''+url).then(_syncOnWindowChange).catch(error => $container.append($('<p role="alert"></p>').text('Context could not be loaded: ' + error.message)));
   })
   $($container).find('.remove-next-btn').click(e => {
-    changeIndices(''+id, fromLineIndex + 1, toLineIndex); renderLines(''+id, ''+url); _syncOnWindowChange();
+    changeIndices(''+id, fromLineIndex + 1, toLineIndex); renderLines(''+id, ''+url).then(_syncOnWindowChange).catch(error => $container.append($('<p role="alert"></p>').text('Context could not be loaded: ' + error.message)));
   })
   $($container).find('.remove-prev-btn').click(e => {
-    changeIndices(''+id, fromLineIndex, toLineIndex - 1); renderLines(''+id, ''+url); _syncOnWindowChange();
+    changeIndices(''+id, fromLineIndex, toLineIndex - 1); renderLines(''+id, ''+url).then(_syncOnWindowChange).catch(error => $container.append($('<p role="alert"></p>').text('Context could not be loaded: ' + error.message)));
   })
   $($container).find('.add-next-btn').click(e => {
-    changeIndices(''+id, fromLineIndex, toLineIndex + 1); renderLines(''+id, ''+url); _syncOnWindowChange();
+    changeIndices(''+id, fromLineIndex, toLineIndex + 1); renderLines(''+id, ''+url).then(_syncOnWindowChange).catch(error => $container.append($('<p role="alert"></p>').text('Context could not be loaded: ' + error.message)));
   })
 
   if (!isDesktop()) {
@@ -7299,16 +7232,24 @@ function _renderSearchPlaylistToolbar(state, $result) {
     _syncSearchPlaylistSelection(state)
   })
   $limit.on('input', () => { state.maxPerHeader = $limit.val() })
-  $toolbar.on('submit', e => {
+  $toolbar.on('submit', async e => {
     e.preventDefault()
     if (!state.selecting || !state.selected.size || !$limit[0].reportValidity()) return
     const raw = String($limit.val()).trim()
     if (raw && (!Number.isSafeInteger(Number(raw)) || Number(raw) < 1)) return
-    const queue = buildSelectedSearchPlaylist(state.groups, state.selected, {
+    const options = {
       files: state.files, lang: state.lang, searchText: state.searchText, maxPerHeader: raw,
       contextBefore: parseInt(window._appSettings?.contextLinesBefore, 10) || 0,
       contextAfter: parseInt(window._appSettings?.contextLinesAfter, 10) || 0,
-      gapThreshold: _clipGapThresholdSec() })
+      gapThreshold: _clipGapThresholdSec() }
+    let queue
+    const $button = $toolbar.find('#searchPlaylistCreateBtn').prop('disabled',true)
+    try {
+      queue = state.files.some(file => file.sv_subs?._contextOnly)
+        ? await _subtitleSearch.run('playlist',{groups:state.groups,selected:[...state.selected],options:{...options,files:[]}})
+        : buildSelectedSearchPlaylist(state.groups,state.selected,options)
+    } catch (error) { alert('Playlist could not be prepared: ' + error.message); return }
+    finally { $button.prop('disabled',false) }
     if (!queue.length) { alert('No playable clips for the selected headings.'); return }
     if (window._practiceActive) closePracticeMode()
     if (window._playingRecording) stopPlayingRecording()
@@ -7338,7 +7279,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
   window._lastRenderedWords = words
 
   if (_searchPlaylistSelection?.map !== wordToItemsMap) {
-    _searchPlaylistSelection = { map: wordToItemsMap, selected: new Set(), selecting: false, maxPerHeader: '' }
+    _searchPlaylistSelection = { map: wordToItemsMap, selected: new Set(), selecting: false, maxPerHeader: '', headingPages:new Map() }
   }
   const selection = _searchPlaylistSelection
   selection.files = window.searchResult
@@ -7367,7 +7308,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
     }
     const wEnd = Math.min(wStart + WORD_CHUNK, pg.end)
     const slice = words.slice(wStart, wEnd)
-    slice.forEach(word => {
+    for (const word of slice) {
       try {
         const items = selection.groups.find(group => group.word === word).items
         const isSweepUp = grouped && word === _EVERYTHING_ELSE
@@ -7431,8 +7372,11 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
         // duplicates aren't a real UX problem.)
         const rendered = [];
 
-        for (let i = 0; i < items.length; i++) {
-          if (rendered.length >= numberOfItemsToShow()) {
+        const batchSize = Math.min(100, numberOfItemsToShow())
+        const pageCount = Math.max(1, Math.ceil(items.length / batchSize))
+        const headingPage = Math.min(selection.headingPages.get(word) || 0, pageCount - 1)
+        for (let i = headingPage * batchSize; i < items.length; i++) {
+          if (rendered.length >= batchSize) {
             break;
           }
 
@@ -7474,13 +7418,21 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
             $lines.data({fromIndex: matchIdx - _before, toIndex: matchIdx + _after, matchLineIndex: matchIdx})
             $fileBlock.append($lines)
 
-            renderLines(id, item.url)
+            await renderLines(id, item.url)
             rendered.push(item)
           } catch (perItemErr) {
+            if (perItemErr.code?.startsWith('subtitle-search')) throw perItemErr
             // One bad item shouldn't kill the whole word block. Log and move on.
             console.error('populateSRTFindings: failed to render item for', word, item, perItemErr)
           }
         }//end for
+        if (pageCount > 1) {
+          const $pager = $('<div class="subtitle-heading-pages"></div>').appendTo(wordBlock)
+          const move = delta => { selection.headingPages.set(word,headingPage+delta); loadSearchResultsPage(pg.page) }
+          $('<button type="button">Previous matches</button>').prop('disabled',!headingPage).on('click',()=>move(-1)).appendTo($pager)
+          $('<span></span>').text(` ${headingPage * batchSize + 1}–${Math.min(items.length,(headingPage+1)*batchSize)} of ${items.length} `).appendTo($pager)
+          $('<button type="button">Next matches</button>').prop('disabled',headingPage>=pageCount-1).on('click',()=>move(1)).appendTo($pager)
+        }
 
         // Header bookkeeping: show a match count, and grey the header out if
         // the post-filter pipeline produced nothing (sources disabled, all
@@ -7493,12 +7445,13 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
           wordBlock.find('.l-accordion').addClass('no-result')
         }
       } catch (perWordErr) {
+        if (perWordErr.code?.startsWith('subtitle-search')) throw perWordErr
         // Per-word failures (missing categories, bad item shape, …) used to
         // break the entire results render. Log and continue so the user
         // still sees results for the other words.
         console.error('populateSRTFindings: failed for word', word, perWordErr)
       }
-    }) //end slice.forEach
+    } //end word slice
     await yieldToUI()
     // Measure the sticky accordion height once we've rendered enough chunks
     // for one to be on the page, and feed it back as a CSS variable so
@@ -7516,10 +7469,10 @@ function _renderSearchPagination(pg) {
   const $bar = $('#search-pagination')
   if (pg.pageCount <= 1) { $bar.hide(); return }
   const $sel = $('#searchPageSelect')
-  if ($sel.children().length !== pg.pageCount) {
-    $sel.empty()
-    for (let i = 0; i < pg.pageCount; i++) $sel.append(new Option(String(i + 1), String(i)))
-  }
+  $sel.empty()
+  const pages = new Set([0, pg.pageCount - 1])
+  for (let i = Math.max(0, pg.page - 10); i <= Math.min(pg.pageCount - 1, pg.page + 10); i++) pages.add(i)
+  for (const i of [...pages].sort((a,b) => a-b)) $sel.append(new Option(String(i + 1), String(i)))
   $sel.val(String(pg.page))
   $('#searchPageCount').text(pg.pageCount)
   $('#searchPrevPageButton').toggleClass('disabled', pg.page <= 0)
@@ -8896,7 +8849,8 @@ async function _renderTranslationPanel(token) {
 }
 
 // Returns a replacement for wordToItemsMap, or null to leave the search alone.
-async function _regroupByCorrespondingWord(wordToItemsMap, search) {
+async function _regroupByCorrespondingWord(wordToItemsMap, search, token) {
+  const isCurrent = () => token === undefined || token === window._subtitleSearchToken
   try {
     if (getSelectedLang() !== 'en') return null
     // The map holds one key per matched form plus a key for the whole search
@@ -8913,6 +8867,22 @@ async function _regroupByCorrespondingWord(wordToItemsMap, search) {
       return true
     })
     if (items.length < 2) return null
+
+    if (window._compactSubtitleResults) {
+      const searchWord = window._compactEnglishWord
+      if (!searchWord) return null
+      const ids = _filterSearchChannels(window.searchResult || []).map(file => file.url)
+      const statistics = await _subtitleSearch.run('statistics', {ids,matches:items,regexMode:!!window._resultsSearchRegex},{isCurrent})
+      if (!statistics.matchedLineCount) return null
+      const candidates = _guessCorrespondingWords({
+        lines:[], frequencies:new Map(statistics.frequencies), matchedLineCount:statistics.matchedLineCount,
+        searchWord, vocabWords:_vocabWordsForEnglish(searchWord), translatedWords:await _translationGuesses(searchWord),
+        stopWords:VOCAB_OVERLAP_STOP_WORDS, background:new Map(statistics.background),
+        backgroundLines:statistics.backgroundLines, max:_MAX_GROUPS * 3,
+      })
+      const checked = _confirmByBackTranslation(candidates,searchWord,await _backTranslations(candidates))
+      return _subtitleSearch.run('regroup', {ids,items,candidates:checked,max:_MAX_GROUPS,regexMode:!!window._resultsSearchRegex},{isCurrent})
+    }
 
     const { byUrl, background, backgroundLines } = _buildStudiedLineIndex()
     const lineOf = it => _studiedLineTextOf(byUrl, it)
@@ -8964,6 +8934,7 @@ async function _regroupByCorrespondingWord(wordToItemsMap, search) {
     })
     return out
   } catch (e) {
+    if (e.code?.startsWith('subtitle-search')) throw e
     console.warn('grouping by corresponding word failed', e)
     return null
   }
@@ -9014,7 +8985,7 @@ async function render(searchResults, search, className, token) {
 
   // An English search reads better split by the studied-language word behind
   // each hit. Falls through untouched whenever there is nothing to split on.
-  const _regrouped = await _regroupByCorrespondingWord(wordToItemsMap, search)
+  const _regrouped = await _regroupByCorrespondingWord(wordToItemsMap, search, token)
   if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
   window._srtGroupedByCorresponding = !!_regrouped
   if (_regrouped) wordToItemsMap = _regrouped
@@ -9114,54 +9085,36 @@ function resetSearchResultIndex() {
 // here; per-line attribution still uses the parsed entries below.
 // _cleanSrtForMatch lives in ./search-text.js (imported at the top).
 
-async function fetchFromDownloadedFiles(lookingFor, token) {
-  // The query is already prepared. Expanding it again would strip regex groups.
-
-  const keys = Object.keys(window.allSubtitles)
-      .filter(it => window.allSubtitles[it].sv || window.allSubtitles[it].en)
-  const out = []
-  const re = compileRegex(_relaxSpaces(lookingFor), "i")
-  const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
-  const CHUNK = 100
-
-  for (let start = 0; start < keys.length; start += CHUNK) {
-    if (token !== undefined && token !== window._subtitleSearchToken) return out
-    const end = Math.min(start + CHUNK, keys.length)
-    for (let i = start; i < end; i++) {
-      const it = keys[i]
-      const svText = window.allSubtitles[it].sv
-      const enText = window.allSubtitles[it].en
-      // Match on the cleaned-text variants so multi-word phrases that
-      // straddle two consecutive subtitle lines are kept (e.g. "a b"
-      // across ".... a" then "b ....").
-      let svMatch = svText && _cleanSrtForMatch(svText).match(re)
-      let enMatch = enText && _cleanSrtForMatch(enText).match(re)
-      // Flattened file text cannot decide ^/$ matches for individual cues.
-      if (window._resultsSearchRegex) {
-        const stored = window.allSubtitles[it]
-        if (!svMatch && svText) {
-          stored._parsedSv = stored._parsedSv || srtToJson(svText)
-          svMatch = stored._parsedSv.some(line => re.test(line.text.trimEnd()))
-        }
-        if (!enMatch && enText) {
-          stored._parsedEn = stored._parsedEn || srtToJson(enText)
-          enMatch = stored._parsedEn.some(line => re.test(line.text.trimEnd()))
-        }
-      }
-      if (svMatch || enMatch) {
-        out.push(new SearchResult(
-            window.allSubtitles[it].source,
-            it,
-            getSubs(enText, it + ".en.srt", it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
-            getSubs(svText, it + getTargetLangSrtSuffix(), it, window.allSubtitles[it].source, window.allSubtitles[it].fetchedFrom),
-            !!enMatch,
-            !!svMatch,
-        ))
-      }
+function _setSubtitleSearchStatus(text, running) {
+  let row=document.getElementById('subtitleSearchStatus')
+  if(!row) {
+    row=document.createElement('div');row.id='subtitleSearchStatus';row.setAttribute('role','status')
+    const label=document.createElement('span');label.className='subtitle-search-status-text'
+    const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Cancel';cancel.className='subtitle-search-cancel'
+    cancel.onclick=()=>{
+      window._subtitleSearchToken=(window._subtitleSearchToken||0)+1
+      _subtitleSearch.cancel();window._subtitleSearchCompletion={complete:false,reason:'cancelled'}
+      _setSubtitleSearchStatus('Search cancelled; results are incomplete.',false)
+      $('#result').empty().append($('<p></p>').text('Search cancelled; results are incomplete.'))
     }
-    await yieldToUI()
+    row.append(label,' ',cancel);document.getElementById('result')?.before(row)
   }
-  return out
+  row.querySelector('span').textContent=text
+  row.querySelector('button').hidden=!running
+  row.dataset.complete=String(!running && !!window._subtitleSearchCompletion?.complete)
+  row.title=window._subtitleSearchMode==='cooperative' ? 'This host uses cooperative search. A single regular-expression evaluation cannot be interrupted.' : ''
+}
+
+async function fetchFromDownloadedFiles(lookingFor, token) {
+  await _captureSeedWork
+  for (const [detail] of _failedCaptureSeeds) {
+    await _seedCapturedIntoSearchIndex(detail)
+    _failedCaptureSeeds.delete(detail)
+  }
+  return _subtitleSearch.run('files', {
+    ids: Object.keys(window.allSubtitles).filter(id => {const doc=window.allSubtitles[id];return doc.sv || doc.en || doc._hasSv || doc._hasEn}),
+    query: lookingFor, regexMode: !!window._resultsSearchRegex, suffix: getTargetLangSrtSuffix(), compact: _subtitleCorpusView.stats.evicted > 0,
+  }, { isCurrent: () => token === undefined || token === window._subtitleSearchToken })
 }
 
 export function removeHintsInBrackets(txt) {
@@ -9325,6 +9278,8 @@ async function fetchSRTs(searchText, requestToken) {
     // the placeholder — it is a separate, slower search than this one.
     _ensureLibrarySearchBar()
 
+    _setSubtitleSearchStatus('Searching subtitles…', true)
+    window._subtitleSearchCompletion = {complete:false, reason:'running'}
     console.log("Loading from local")
     try { compileRegex(_relaxSpaces(window.searchText)) } catch (_) {
       window.searchResult = []
@@ -9364,7 +9319,22 @@ async function fetchSRTs(searchText, requestToken) {
 
       }
     }
+    const expected=(window.srts || []).filter(item=>item && item.source !== 'local')
+    const missing=expected.filter(item=>!window.allSubtitles[item.link] || window.allSubtitles[item.link]._partial)
+    const complete=window._subtitleCoverageIndexReady && !missing.length
+    window._subtitleSearchCompletion={complete,visited:Object.keys(window.allSubtitles).length,total:expected.length,missing:missing.map(item=>item.link)}
+    _setSubtitleSearchStatus(complete ? `Search complete · ${expected.length} subtitles` :
+      !window._subtitleCoverageIndexReady ? 'Search incomplete: the subtitle index could not be loaded.' :
+      `Search incomplete: ${missing.length} of ${expected.length} subtitles are not downloaded.`, false)
     return myToken === window._subtitleSearchToken
+  } catch (error) {
+    if (myToken === window._subtitleSearchToken) {
+      window._subtitleSearchCompletion={complete:false,reason:error.code || 'failed'}
+      _setSubtitleSearchStatus('Search incomplete: '+error.message,false)
+      $('#result').empty().append($('<p role="alert" class="search-incomplete"></p>').text('Search incomplete. '+error.message))
+      _ensureLibrarySearchBar();showResultContainer()
+    }
+    return false
   } finally {
     if (myToken !== null) _searchRunsInFlight--
     // The override belongs to whichever search is current. An older run
@@ -10033,13 +10003,6 @@ function _confirmUnavailableViaPlayer(videoId) {
 // _relaxSpaces from the rare-words pipeline so the matching rules stay
 // consistent. Time-sliced to keep the UI responsive on large vocabularies.
 async function _buildVocabToVideosMap(progressFn) {
-  const subs = Object.entries(window.allSubtitles || {})
-    .filter(([, s]) => s && (s.sv || s.en))
-    .map(([link, s]) => ({
-      link,
-      sv: s.sv ? _cleanSrtForMatch(s.sv) : '',
-      en: s.en ? _cleanSrtForMatch(s.en) : ''
-    }))
   const seen = new Map()
   Object.entries(window.vocabulary || {}).forEach(([cat, lines]) => {
     if (!Array.isArray(lines)) return
@@ -10049,34 +10012,13 @@ async function _buildVocabToVideosMap(progressFn) {
       if (!seen.has(l)) seen.set(l, cat)
     })
   })
-  const entries = Array.from(seen.keys())
-  const out = new Map()  // word -> Set<videoId>
-  const yieldToUI = () => new Promise(r => setTimeout(r, 0))
-  const SLICE_MS = 25
-  const now = () => (window.performance && performance.now) ? performance.now() : Date.now()
-  let lastYield = now()
-  for (let i = 0; i < entries.length; i++) {
-    const line = entries[i]
-    let re = null
-    try {
-      const expanded = expandWords(line, getLangFromUrl().code)
-      re = new RegExp(_relaxSpaces(expanded), 'i')
-    } catch (_) {}
-    if (re) {
-      const set = new Set()
-      for (const sub of subs) {
-        if ((sub.sv && re.test(sub.sv)) || (sub.en && re.test(sub.en))) set.add(sub.link)
-      }
-      if (set.size) out.set(line, set)
-    }
-    if (now() - lastYield > SLICE_MS) {
-      if (progressFn) progressFn((i + 1) / entries.length)
-      await yieldToUI()
-      lastYield = now()
-    }
-  }
+  const entries = Array.from(seen.keys()).map(line=>{
+    try { return {line,pattern:_relaxSpaces(expandWords(line,getLangFromUrl().code)),flags:'i'} }
+    catch (_) { return {line} }
+  })
+  const result = await _subtitleSearch.run('vocabScan',{ids:_subtitleDocumentIds(),entries})
   if (progressFn) progressFn(1)
-  return out
+  return new Map(result.filter(entry=>entry.ids.length).map(entry=>[entry.line,new Set(entry.ids)]))
 }
 
 function _uniqueWordsForVideo(videoId, wordMap) {
@@ -10581,7 +10523,7 @@ const CAPTURED_SUBTITLES_KEY = _scopedKey('cupitor:capturedSubtitles')
 
 function loadCapturedBuffer() {
   try {
-    const raw = localStorage.getItem(CAPTURED_SUBTITLES_KEY)
+    const raw = _userData.getItem(CAPTURED_SUBTITLES_KEY)
     const arr = raw ? JSON.parse(raw) : []
     return Array.isArray(arr) ? arr : []
   } catch (_) { return [] }
@@ -10589,7 +10531,7 @@ function loadCapturedBuffer() {
 
 function saveCapturedBuffer(buf) {
   try {
-    localStorage.setItem(CAPTURED_SUBTITLES_KEY, JSON.stringify(buf))
+    _userData.setItem(CAPTURED_SUBTITLES_KEY, JSON.stringify(buf))
   } catch (e) {
     console.error('Failed to persist captured subtitles', e)
   }
@@ -10612,8 +10554,7 @@ function bufferCapturedSubtitle(detail) {
   // merging it into the in-memory index (allSubtitles + srts). The push path
   // still does the authoritative remote write + merge; this only mirrors it
   // locally so the next search finds the captured line without a reload.
-  try { _seedCapturedIntoSearchIndex(detail) }
-  catch (e) { console.warn('seed captured subtitle into search index failed', e) }
+  _queueCapturedSubtitle(detail)
 }
 
 // A capture of this video is now in the own repo. Its window.srts entry may
@@ -10649,10 +10590,22 @@ function _applySubtitleSnapshot(link, snapshot, excludedIds = new Set()) {
 
 // Make captures searchable immediately. Missing remote lines are fetched in
 // the background; this partial overlay never counts as a loaded full file.
-function _seedCapturedIntoSearchIndex(detail) {
+let _captureSeedWork = Promise.resolve()
+const _failedCaptureSeeds = new Map()
+let _captureSeedPending = 0
+function _queueCapturedSubtitle(detail) {
+  const run = () => _seedCapturedIntoSearchIndex(detail)
+  const work = _captureSeedPending++ ? _captureSeedWork.then(run) : run()
+  _captureSeedWork = work.catch(error => {
+    _failedCaptureSeeds.set(detail,error)
+    _setSubtitleSearchStatus('Captured text is saved, but search preparation failed: ' + error.message, false)
+  }).finally(() => { _captureSeedPending-- })
+}
+async function _seedCapturedIntoSearchIndex(detail) {
   const videoId = detail && detail.videoId
   if (!videoId) return
-  const existing = window.allSubtitles[videoId] || {}
+  let existing = window.allSubtitles[videoId] || {}
+  if (existing._evicted) existing = await _restoreSubtitleDocument(videoId)
 
   let sv = existing.sv || null
   if (detail.lines && detail.lines.length) {
@@ -10803,12 +10756,14 @@ window.openCapturedSubtitlesReview = function () {
             console.log('[push-this] no commit needed', result.reason)
             const buf2 = loadCapturedBuffer().filter(b => b.id !== id)
             saveCapturedBuffer(buf2)
+            await _userData.flush()
             $row.remove()
             updateCapturedBtn()
             return
           }
           const buf2 = loadCapturedBuffer().filter(b => b.id !== id)
           saveCapturedBuffer(buf2)
+          await _userData.flush()
           $row.remove()
           updateCapturedBtn()
         } catch (err) {
@@ -10864,6 +10819,7 @@ window.openCapturedSubtitlesReview = function () {
             console.log('[push-all] no commit needed', result.reason)
             const pushedIds = new Set(result.pushedIds || startBuf.map(b => b.id))
             saveCapturedBuffer(loadCapturedBuffer().filter(b => !pushedIds.has(b.id)))
+            await _userData.flush()
             pushedIds.forEach(id => {
               $(`#captured-subtitles-dialog-content .captured-item[data-id="${id}"]`).remove()
             })
@@ -10874,6 +10830,7 @@ window.openCapturedSubtitlesReview = function () {
           // Drop pushed items from the buffer (concurrent captures preserved).
           const pushedIds = new Set(result.pushedIds || startBuf.map(b => b.id))
           saveCapturedBuffer(loadCapturedBuffer().filter(b => !pushedIds.has(b.id)))
+          await _userData.flush()
           pushedIds.forEach(id => {
             $(`#captured-subtitles-dialog-content .captured-item[data-id="${id}"]`).remove()
           })
@@ -10953,6 +10910,10 @@ window.openCapturedSubtitlesReview = function () {
 // Returns { pushedIds }. Throws if the user cancels a conflict dialog or the
 // commit ultimately fails after retries.
 async function pushCapturedSubtitlesBatched(items, onProgress) {
+  const context = _dsCaptureSourceContext()
+  const target = _dsWriteTarget()
+  await _userData.flush()
+  context.assertCurrent()
   const _report = (stage, extra) => {
     try { if (typeof onProgress === 'function') onProgress({ stage, ...(extra || {}) }) } catch (_) {}
   }
@@ -11183,8 +11144,9 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
       ? commitMessage
       : `${commitMessage} [chunk ${ci + 1}/${nonEmpty.length}]`
     _report('committing', { files: chunk.length, chunk: ci + 1, totalChunks: nonEmpty.length })
+    context.assertCurrent()
     const r = await window.GitHubUtils.commitMultipleFiles({
-      ..._dsWriteTarget(),
+      ...target,
       commitMessage: chunkMsg,
       files: chunk
     })
@@ -11212,7 +11174,7 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
     if (wasOther) _adoptAsSelfEntry(u.videoId, u.baseName, u.source)
     const ownEntry = (window.srts || []).find(entry => entry.link === u.videoId && !entry.readOnly)
     if (ownEntry && _committedSubtitleIndex.has(u.videoId)) Object.assign(ownEntry, _committedSubtitleIndex.get(u.videoId))
-    const prev = window.allSubtitles[u.videoId] || {}
+    const prev = (await _restoreSubtitleDocument(u.videoId)) || {}
     const cached = wasOther
       ? { ...prev, sv: null, en: null, _parsedSv: undefined, _parsedEn: undefined, readOnly: false }
       : prev
@@ -11234,7 +11196,9 @@ async function pushCapturedSubtitlesBatched(items, onProgress) {
     // stale cache) for this video.
     cacheWrites.push(_cacheWriteSubtitleFromMemory(u.videoId))
   }
+  context.assertCurrent()
   await Promise.all(cacheWrites)
+  context.assertCurrent()
   return anyCommitted ? { pushedIds: allIds }
     : { pushedIds: allIds, committed: false, reason: lastNoCommitReason || 'no-changes' }
 }
@@ -11441,16 +11405,16 @@ function _backfillEnabled(items) {
 
 function _loadRecording() {
   try {
-    const state = localStorage.getItem(REC_STATE_KEY) || 'idle'
+    const state = _userData.getItem(REC_STATE_KEY) || 'idle'
     let coll = {}
-    let raw = localStorage.getItem(REC_COLLECTION_KEY)
+    let raw = _userData.getItem(REC_COLLECTION_KEY)
     if (raw) {
       try { coll = JSON.parse(raw) } catch (_) { coll = {} }
     }
     // Migrate from the legacy single-buffer key if the collection key is empty.
     if (!coll || typeof coll !== 'object' || !Object.keys(coll).length) {
       try {
-        const legacy = JSON.parse(localStorage.getItem(REC_KEY) || '{}')
+        const legacy = JSON.parse(_userData.getItem(REC_KEY) || '{}')
         if (legacy && typeof legacy === 'object' && Object.keys(legacy).length) {
           coll = { [REC_DEFAULT_NAME]: { items: legacy, createdAt: Date.now(), updatedAt: Date.now() } }
         }
@@ -11474,7 +11438,7 @@ function _loadRecording() {
       _backfillEnabled(r.items)
     })
 
-    const currentName = localStorage.getItem(REC_CURRENT_KEY)
+    const currentName = _userData.getItem(REC_CURRENT_KEY)
     const activeName = (currentName && coll[currentName]) ? currentName : Object.keys(coll)[0]
     // Held whether or not it resolved just now. Anything the native app owns
     // is stripped before this collection is saved (see _persistableRecordings)
@@ -11483,7 +11447,7 @@ function _loadRecording() {
     // Keeping it is what lets the push put the user back where they were
     // instead of on whichever playlist happens to sort first.
     window._rememberedActiveName = currentName || null
-    window._rememberedActiveExtId = localStorage.getItem(REC_CURRENT_EXT_KEY)
+    window._rememberedActiveExtId = _userData.getItem(REC_CURRENT_EXT_KEY)
 
     window._recordings = coll
     const activeVirtual = !!(coll[activeName] && coll[activeName].virtual)
@@ -11914,7 +11878,7 @@ function _renderWordMapSearchResults() {
     return
   }
   try {
-    const hits = findWordMaps(readSearchMaps(wordMapStorageKey()), term)
+    const hits = findWordMaps(readSearchMaps(wordMapStorageKey(), _userData), term)
     $out.html(renderWordMapResultsHtml(hits, term, { collapsed: !!window._appSettings?.wordMapResultsCollapsed }))
   } catch (_) {
     $out.text('Saved word maps could not be read. Open Word maps to recover them.')
@@ -11929,7 +11893,7 @@ $(document).on('click', '#wordMapResults .word-map-hit', e => {
   const id = $(e.currentTarget).attr('data-map-id')
   const term = _librarySearchTerm()
   try {
-    const hit = findWordMaps(readSearchMaps(wordMapStorageKey()), term).find(hit => hit.map.id === id)
+    const hit = findWordMaps(readSearchMaps(wordMapStorageKey(), _userData), term).find(hit => hit.map.id === id)
     if (!hit) return _renderWordMapSearchResults()
     window.openWordMaps?.({ mapId: id, nodeId: hit.nodes[0]?.id,
       nodeIds: hit.nodes.map(node => node.id), query: term, nameMatched: hit.nameMatched })
@@ -12077,7 +12041,7 @@ function _saveRecording() {
     const syncBaseline = _loadRecordingsBase()
     let syncPrevious = syncBaseline
     if (!syncPrevious) {
-      try { syncPrevious = JSON.parse(localStorage.getItem(REC_COLLECTION_KEY) || '{}') || {} }
+      try { syncPrevious = JSON.parse(_userData.getItem(REC_COLLECTION_KEY) || '{}') || {} }
       catch (_) { syncPrevious = {} }
     }
     // Keep the active recording's items pointer in sync with the collection
@@ -12097,16 +12061,16 @@ function _saveRecording() {
       }
       window._recordings[name].updatedAt = Date.now()
     }
-    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
-    localStorage.setItem(REC_CURRENT_KEY, name)
+    _userData.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
+    _userData.setItem(REC_CURRENT_KEY, name)
     // Stored beside the name so a rename on either side cannot strand it.
     const _activeExt = window._recordings[name] && window._recordings[name].extId
-    if (_activeExt != null) localStorage.setItem(REC_CURRENT_EXT_KEY, String(_activeExt))
-    else localStorage.removeItem(REC_CURRENT_EXT_KEY)
-    localStorage.setItem(REC_STATE_KEY, window._recording.state)
+    if (_activeExt != null) _userData.setItem(REC_CURRENT_EXT_KEY, String(_activeExt))
+    else _userData.removeItem(REC_CURRENT_EXT_KEY)
+    _userData.setItem(REC_STATE_KEY, window._recording.state)
     // Best-effort cleanup of the legacy single-buffer key once we've fully
     // moved to the collection model.
-    try { localStorage.removeItem(REC_KEY) } catch (_) {}
+    try { _userData.removeItem(REC_KEY) } catch (_) {}
     // Compare playlist content with the confirmed baseline. Saving selection
     // or recording state alone must not create pending changes.
     window._recordingsDirty = recordingsHaveChanges(_persistableRecordings(), syncPrevious) || _playlistFoldersDirty() ||
@@ -12205,7 +12169,7 @@ function _loadRecordingsBase() {
   const cached = window._recordingsSyncBaseline
   if (cached && cached.key === _recordingsBaseKey()) return cached.value
   try {
-    const raw = localStorage.getItem(_recordingsBaseKey())
+    const raw = _userData.getItem(_recordingsBaseKey())
     const v = raw ? JSON.parse(raw) : null
     return v && typeof v === 'object' ? v : null
   } catch (_) { return null }
@@ -12213,7 +12177,7 @@ function _loadRecordingsBase() {
 function _saveRecordingsBase(coll) {
   const value = JSON.parse(JSON.stringify(coll || {}))
   window._recordingsSyncBaseline = { key: _recordingsBaseKey(), value }
-  try { localStorage.setItem(_recordingsBaseKey(), JSON.stringify(value)) } catch (_) {}
+  try { _userData.setItem(_recordingsBaseKey(), JSON.stringify(value)) } catch (_) {}
 }
 
 // The server's copy, fresh. Through the GitHub API, which always answers with
@@ -12420,7 +12384,7 @@ async function _mergeSelfRemoteRecordings() {
     _saveRecordingsBase(nextBase)
     if (!_sameJson(merged, remote)) {
       window._recordingsDirty = true
-      try { localStorage.setItem(REC_DIRTY_KEY, '1') } catch (_) {}
+      try { _userData.setItem(REC_DIRTY_KEY, '1') } catch (_) {}
     }
     _reportRecordingCollisions(collided)
   }
@@ -12433,7 +12397,7 @@ async function _mergeSelfRemoteRecordings() {
   if (window._recordings[cur]) window._recording.items = window._recordings[cur].items
   // Persist without bumping dirty.
   try {
-    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
+    _userData.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
   } catch (_) {}
   _refreshRecordingSyncBtn()
   _updateRecordingUI()
@@ -12456,6 +12420,8 @@ async function syncRecordingsToGithub() {
   window._recordingsSyncing = true
   _refreshRecordingSyncBtn()
   try {
+    await _userData.flush()
+    context.assertCurrent()
     const pushed = await syncRecordingsFiles({
       mergeFolders: remote => (pushedFolders = mergeFolderCatalog(folderSnapshot, remote)),
       listParts: () => {
@@ -12506,7 +12472,7 @@ async function syncRecordingsToGithub() {
     const next = _threeWayRecordings(localSnapshot, current, pushed)
     next.conflicts.forEach(c => { if (c.local) next.merged[c.name] = c.local; else delete next.merged[c.name] })
     _adoptRecordings(next.merged)
-    try { localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings())) } catch (_) {}
+    try { _userData.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings())) } catch (_) {}
     _saveRecordingsBase(pushed)
     const folders = _playlistFolderState()
     folders.catalog = mergeFolderCatalog(folders.catalog, pushedFolders)
@@ -12515,11 +12481,14 @@ async function syncRecordingsToGithub() {
     _reportRecordingCollisions(syncCollisions)
     window._recordingsDirty = !_sameJson(_persistableRecordings(), pushed) || _playlistFoldersDirty()
     try {
-      if (window._recordingsDirty) localStorage.setItem(REC_DIRTY_KEY, '1')
-      else localStorage.removeItem(REC_DIRTY_KEY)
+      if (window._recordingsDirty) _userData.setItem(REC_DIRTY_KEY, '1')
+      else _userData.removeItem(REC_DIRTY_KEY)
     } catch (_) {}
+    await _userData.flush()
+    context.assertCurrent()
   } catch (e) {
     if (e && e.message === SYNC_CANCELLED) return
+    window._recordingsDirty = true
     console.error('syncRecordingsToGithub failed', e)
     alert('Sync failed: ' + (e && e.message || e))
     throw e
@@ -12532,14 +12501,14 @@ async function syncRecordingsToGithub() {
 
 function _refreshRecordingSyncBtn() {
   window._recordingsDirty = recordingsHaveChanges(
-    _persistableRecordings(), _loadRecordingsBase(), window._recordingsDirty) || _playlistFoldersDirty()
+    _persistableRecordings(), _loadRecordingsBase(), window._recordingsDirty) || _playlistFoldersDirty() || !!_userData.status?.error
   try {
-    if (window._recordingsDirty) localStorage.setItem(REC_DIRTY_KEY, '1')
-    else localStorage.removeItem(REC_DIRTY_KEY)
+    if (window._recordingsDirty) _userData.setItem(REC_DIRTY_KEY, '1')
+    else _userData.removeItem(REC_DIRTY_KEY)
   } catch (_) {}
   const $btn = $('#recRecSync')
-  const syncing = !!window._recordingsSyncing, dirty = !!window._recordingsDirty
-  $btn.prop('disabled', !dirty || syncing)
+  const syncing = !!window._recordingsSyncing, dirty = !!window._recordingsDirty || !!_userData.status?.error
+  $btn.prop('disabled', !dirty || syncing || !!_userData.status?.pending || !!_userData.status?.error)
     .toggleClass('syncing', syncing).toggleClass('rec-rec-dirty', dirty)
   $btn.find('.rec-rec-lbl').text(dirty ? 'Sync*' : 'Sync')
   $btn.attr('title', syncing ? 'Syncing playlists to GitHub' : dirty
@@ -12677,22 +12646,13 @@ window.createRandomFromAllPlaylist = createRandomFromAllPlaylist
 // window (keyed by corpus size) so repeated Random builds reuse the parse work.
 // With ~7000 subtitles this is the difference between re-scanning everything
 // per word and touching each file at most once.
-function _autoScanFiles() {
-  const all = window.allSubtitles || {}
-  const keys = Object.keys(all).filter(k => all[k] && (all[k].sv || all[k].en))
-  const cache = window._autoScanFilesCache
-  if (cache && cache.n === keys.length) return cache.files
-  const files = keys.map(k => ({
-    link: k,
-    source: all[k].source,
-    // Prefer the studied language (stored under `sv`); fall back to English.
-    raw: (all[k].sv && all[k].sv.length ? all[k].sv : all[k].en) || '',
-    lines: null // parsed on first match, then reused
-  }))
-  const shuffled = _fisherYates(files)
-  window._autoScanFilesCache = { n: keys.length, files: shuffled }
-  return shuffled
+function _subtitleDocumentIds() {
+  return Object.keys(window.allSubtitles || {}).filter(id=>{
+    const doc=window.allSubtitles[id]
+    return doc&&(doc.sv||doc.en||doc._hasSv||doc._hasEn)
+  })
 }
+function _autoScanFiles() { return _fisherYates(_subtitleDocumentIds()) }
 
 // Automatically generate captured-shaped items by scanning the downloaded
 // subtitle corpus for each vocabulary word in the selected categories.
@@ -12740,36 +12700,12 @@ async function buildAutomaticItems({ vocabCategories = [], words = null, matches
     // a substring of "töksfors".
     let re
     try { re = new RegExp(_relaxSpaces(withWordBoundaries(expanded)), 'i') } catch (_) { continue }
-    const matches = []
-    for (let fi = 0; fi < files.length && matches.length < matchesPerWord; fi++) {
-      const f = files[fi]
-      // Cheap raw-text gate: skip files that can't contain the word before the
-      // expensive parse. (re is non-global, so .test() is not stateful.)
-      if (!f.raw || !re.test(f.raw)) continue
-      if (!f.lines) {
-        f.lines = srtToJson(f.raw).map(e => ({
-          index: parseInt(e.index, 10),
-          ts: e.start && e.start.ordinal,
-          te: e.end && e.end.ordinal,
-          text: e.text || ''
-        }))
-      }
-      const positions = _matchingPositions(f.lines, re)
-      for (let pi = 0; pi < positions.length && matches.length < matchesPerWord; pi++) {
-        const pos = positions[pi]
-        // The actual surface word that matched this line (e.g. "gick" out of the
-        // "går|gick" expansion) — used as the item's single-word label.
-        const m = (f.lines[pos].text || '').match(re)
-        const surface = (m && m[0] && m[0].trim()) || expanded
-        matches.push({ link: f.link, source: f.source, lines: f.lines, pos, word: surface })
-      }
-    }
-    _buildAutoItemsForWord(expanded, matches, {
-      matchesPerWord, contextLines,
-      minWordsAround: _minWordsAround(),
-      gapThreshold: _clipGapThresholdSec(),
-      maxDuration: _clipMaxDurationSec(),
-    }).forEach(t => tuples.push(t))
+    const generated = await _subtitleSearch.run('automatic', {
+      ids:files, expanded, pattern:re.source,
+      options:{matchesPerWord,contextLines,minWordsAround:_minWordsAround(),
+        gapThreshold:_clipGapThresholdSec(),maxDuration:_clipMaxDurationSec()},
+    })
+    tuples.push(...generated)
     // Yield to the UI on a ~50ms budget so the dialog stays responsive and the
     // progress text repaints, without a forced event-loop hop per file/word.
     if (Date.now() - lastYield > 50) {
@@ -14444,10 +14380,9 @@ async function _lazyLoadRecItemPreviews($dlg) {
     const id = String($(this).attr('data-id') || '')
     if (id) ids.add(id)
   })
-  await Promise.all(Array.from(ids).map(async id => {
-    try { await getSubtitlesForLink(id) } catch (_) {}
-  }))
-  $pending.each(function () {
+  for (const documentId of ids) {
+    try { await getSubtitlesForLink(documentId) } catch (_) {}
+    $pending.filter(function(){return String($(this).attr('data-id'))===documentId}).each(function () {
     const $p = $(this)
     const id   = String($p.attr('data-id') || '')
     const text = _previewTextForRecItem({
@@ -14466,7 +14401,8 @@ async function _lazyLoadRecItemPreviews($dlg) {
     } else {
       $p.text('(no preview available)').addClass('rec-item-preview-missing')
     }
-  })
+    })
+  }
 }
 
 // ── Replace an auto-captured item with a different SRT example ────────────
@@ -14597,9 +14533,9 @@ function copyItemToPlaylist(srcRecName, st, w, idx, destRecName, insertIndex) {
   dst.updatedAt = Date.now()
   _rememberCardPlaylist(destRecName)
   try {
-    localStorage.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
+    _userData.setItem(REC_COLLECTION_KEY, JSON.stringify(_persistableRecordings()))
     window._recordingsDirty = true
-    localStorage.setItem(REC_DIRTY_KEY, '1')
+    _userData.setItem(REC_DIRTY_KEY, '1')
     try { _refreshRecordingSyncBtn() } catch (_) {}
   } catch (_) {}
   return true
@@ -14809,7 +14745,7 @@ async function translateVisibleLines(id, url, $btn) {
   if (!_requireSelf()) return
   if (_isReadOnlyLink(link)) { alert("This video is from the other user's library and is read-only."); return }
   if (!_haveTranslateBridge()) { alert('Translation needs the Cupitor app.'); return }
-  const stored = window.allSubtitles[link]
+  const stored = await _restoreSubtitleDocument(link)
   if (!stored || !stored.sv) { alert('No source subtitles loaded to translate.'); return }
   if (!stored._parsedSv) stored._parsedSv = srtToJson(stored.sv)
 
@@ -15046,14 +14982,14 @@ const _localSpeakOver = createLocalSpeakOver({
   loadAudio: url => loadManualAudioData(url),
   deleteAudio: url => deleteManualAudio(url),
   readSaved: identity => {
-    const value = localStorage.getItem(_scopedKey(
+    const value = _userData.getItem(_scopedKey(
       'cupitor:localSpeakOver:' + getLangFromUrl().fullName + ':' + identity))
     return value ? JSON.parse(value) : []
   },
   writeSaved: (identity, takes) => {
     const key = _scopedKey('cupitor:localSpeakOver:' + getLangFromUrl().fullName + ':' + identity)
-    if (takes.length) localStorage.setItem(key, JSON.stringify(takes))
-    else localStorage.removeItem(key)
+    if (takes.length) _userData.setItem(key, JSON.stringify(takes))
+    else _userData.removeItem(key)
   },
   onChange: _renderLocalSpeakOver,
 });
@@ -17117,7 +17053,7 @@ function _playlistFolderKey() { return _scopedKey('cupitor:playlistFolders:' + g
 function _playlistFolderState() {
   const key = _playlistFolderKey()
   if (!_playlistFolderStates.has(key)) {
-    const read = suffix => { try { return mergeFolderCatalog(JSON.parse(localStorage.getItem(key + suffix) || '{}')) } catch (_) { return {} } }
+    const read = suffix => { try { return mergeFolderCatalog(JSON.parse(_userData.getItem(key + suffix) || '{}')) } catch (_) { return {} } }
     _playlistFolderStates.set(key, {catalog:read(''),base:read(':base')})
   }
   return _playlistFolderStates.get(key)
@@ -17125,8 +17061,8 @@ function _playlistFolderState() {
 function _persistPlaylistFolders() {
   const state = _playlistFolderState(), key = _playlistFolderKey()
   try {
-    localStorage.setItem(key, JSON.stringify(state.catalog))
-    localStorage.setItem(key + ':base', JSON.stringify(state.base))
+    _userData.setItem(key, JSON.stringify(state.catalog))
+    _userData.setItem(key + ':base', JSON.stringify(state.base))
   } catch(e) { console.warn('Could not persist playlist folders', e) }
 }
 function _playlistFoldersDirty() {
@@ -18274,7 +18210,7 @@ async function _loadSubtitlesForItem(item) {
   // (1) Last search's parsed entries.
   const sr = window.searchResult || []
   const hit = sr.find(it => it && it.url === item.id)
-  if (hit && ((hit.sv_subs && hit.sv_subs.data && hit.sv_subs.data.length) ||
+  if (hit && !hit.sv_subs?._contextOnly && ((hit.sv_subs && hit.sv_subs.data && hit.sv_subs.data.length) ||
               (hit.en_subs && hit.en_subs.data && hit.en_subs.data.length))) {
     return {
       sv: (hit.sv_subs && hit.sv_subs.data) || [],
@@ -18449,14 +18385,14 @@ function _loadLastPlayedMap() {
   if (window._recLastPlayedMap) return window._recLastPlayedMap
   let map = {}
   try {
-    const raw = localStorage.getItem(REC_LAST_PLAYED_KEY)
+    const raw = _userData.getItem(REC_LAST_PLAYED_KEY)
     if (raw) {
       const parsed = JSON.parse(raw)
       const migrated = migrateLegacyLastPlayedMap(parsed)
       if (migrated) {
         // Re-persist migrated legacy entries so the next load is clean.
         if (parsed && parsed.recName) {
-          try { localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(migrated)) } catch (_) {}
+          try { _userData.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(migrated)) } catch (_) {}
         }
         map = migrated
       }
@@ -18467,8 +18403,8 @@ function _loadLastPlayedMap() {
 }
 function _saveLastPlayedMap(map) {
   try {
-    if (!map || !Object.keys(map).length) localStorage.removeItem(REC_LAST_PLAYED_KEY)
-    else localStorage.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(map))
+    if (!map || !Object.keys(map).length) _userData.removeItem(REC_LAST_PLAYED_KEY)
+    else _userData.setItem(REC_LAST_PLAYED_KEY, JSON.stringify(map))
   } catch (_) {}
 }
 function _setLastPlayed(it, mode, pos) {
@@ -18534,7 +18470,7 @@ function _setOpenView(view) {
   if ((view === 'practice' && window._practiceTemporary) ||
       (view === 'player' && window._recPlayTemporary)) {
     _postViewStateToHost('')
-    try { localStorage.removeItem(OPEN_VIEW_KEY) } catch (_) {}
+    try { _userData.removeItem(OPEN_VIEW_KEY) } catch (_) {}
     return
   }
   // A lone card from the search results is not worth reopening after a
@@ -18543,12 +18479,12 @@ function _setOpenView(view) {
   if (view === 'practice' && window._practiceSingle) {
     if (window._playingRecording) { _setOpenView('player'); return }
     _postViewStateToHost('')
-    try { localStorage.removeItem(OPEN_VIEW_KEY) } catch (_) {}
+    try { _userData.removeItem(OPEN_VIEW_KEY) } catch (_) {}
     return
   }
   _postViewStateToHost(view)
   try {
-    localStorage.setItem(OPEN_VIEW_KEY, JSON.stringify({
+    _userData.setItem(OPEN_VIEW_KEY, JSON.stringify({
       view,
       // Pinned so a restore never reopens a deck from a playlist the user is
       // no longer in. The id rides along where there is one, so a playlist
@@ -18572,7 +18508,7 @@ function _clearOpenView() {
   if (window._practiceActive) { _setOpenView('practice'); return }
   if (window._playingRecording) { _setOpenView('player'); return }
   _postViewStateToHost('')
-  try { localStorage.removeItem(OPEN_VIEW_KEY) } catch (_) {}
+  try { _userData.removeItem(OPEN_VIEW_KEY) } catch (_) {}
 }
 
 // Read once and wipe, whatever happens next.
@@ -18584,8 +18520,8 @@ function _clearOpenView() {
 function _takeOpenView() {
   let raw = null
   try {
-    raw = localStorage.getItem(OPEN_VIEW_KEY)
-    localStorage.removeItem(OPEN_VIEW_KEY)
+    raw = _userData.getItem(OPEN_VIEW_KEY)
+    _userData.removeItem(OPEN_VIEW_KEY)
   } catch (_) { return null }
   if (!raw) return null
   try {
@@ -18716,7 +18652,7 @@ const YT_UNAVAILABLE_CANONICAL_CODES = new Set([100, 101, 150])
 const PLAY_UNAVAILABLE_KEY = _scopedKey('cupitor:playUnavailable')
 function _loadPlayUnavailable() {
   try {
-    const raw = localStorage.getItem(PLAY_UNAVAILABLE_KEY)
+    const raw = _userData.getItem(PLAY_UNAVAILABLE_KEY)
     if (!raw) return {}
     const obj = JSON.parse(raw)
     return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
@@ -18724,8 +18660,8 @@ function _loadPlayUnavailable() {
 }
 function _savePlayUnavailable(map) {
   try {
-    if (!map || !Object.keys(map).length) localStorage.removeItem(PLAY_UNAVAILABLE_KEY)
-    else localStorage.setItem(PLAY_UNAVAILABLE_KEY, JSON.stringify(map))
+    if (!map || !Object.keys(map).length) _userData.removeItem(PLAY_UNAVAILABLE_KEY)
+    else _userData.setItem(PLAY_UNAVAILABLE_KEY, JSON.stringify(map))
   } catch (_) {}
 }
 function _recordPlayUnavailable(videoId, code, label) {
@@ -23491,7 +23427,7 @@ $(document).on('click', '.translate-lines-btn', function (e) {
 // Pencil icon next to each main/secondary line opens a textarea + Save/Cancel.
 // Save commits the edited line back to the matching SRT in the signed-in user's repo via
 // _saveSubtitleEdit, then re-renders the .line content in place.
-$(document).on('click', '.edit-line-btn', function (e) {
+$(document).on('click', '.edit-line-btn', async function (e) {
   e.preventDefault(); e.stopPropagation()
   const $line = $(this).closest('.line')
   if (!$line.length || $line.hasClass('editing')) return
@@ -23500,6 +23436,7 @@ $(document).on('click', '.edit-line-btn', function (e) {
   const langCode  = $line.attr('data-lang-code') || 'sv'
   const lineIndex = $line.attr('data-line-index') || ''
   if (!link || !lineIndex) { alert('Cannot edit — missing line metadata.'); return }
+  try { await _restoreSubtitleDocument(link) } catch (error) { alert(error.message); return }
   const raw = _getRawSubtitleLineText(link, langCode, lineIndex)
   // Stash the existing HTML so Cancel can restore (highlights survive).
   const $textSpan = $line.find('.line-text')
@@ -23753,7 +23690,7 @@ $(function () {
   _captionCaptureReady()
   // Restore dirty marker so a page refresh after a local edit still shows
   // the Sync* indicator until the user actually pushes.
-  try { window._recordingsDirty = localStorage.getItem(REC_DIRTY_KEY) === '1' } catch (_) {}
+  try { window._recordingsDirty = _userData.getItem(REC_DIRTY_KEY) === '1' } catch (_) {}
   _updateRecordingUI()
   // Merge whatever's on GitHub into local — bring in playlists captured
   // from another device. Fire-and-forget; failures are logged.
@@ -23853,3 +23790,7 @@ $(function () {
 });
 
 
+
+window.addEventListener('cupitor:user-data-status', () => {
+  if (_recordingsLoaded) _refreshRecordingSyncBtn()
+});

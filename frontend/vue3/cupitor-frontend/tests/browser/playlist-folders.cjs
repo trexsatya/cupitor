@@ -6,6 +6,7 @@ async function verify(browser,width){
  const mobile=width<700,page=await browser.newPage({viewport:{width,height:900},isMobile:mobile,hasTouch:mobile})
  const errors=[],alerts=[];let promptAnswer=''
  page.setDefaultTimeout(10000)
+ page.setDefaultNavigationTimeout(30000)
  page.on('pageerror',e=>errors.push(e.message))
  page.on('dialog',d=>{if(d.type()==='prompt')d.accept(promptAnswer);else{alerts.push(d.message());d.dismiss()}})
  await page.route('**/*',serveFixtures)
@@ -82,6 +83,7 @@ async function verify(browser,width){
   await page.getByRole('button',{name:'Clear',exact:true}).click()
   await create('Empty folder')
   // Reload must retain both an empty folder and assignments without server writes.
+  await page.evaluate(()=>window.cupitorUserData.flush())
   await page.reload({waitUntil:'networkidle'})
   await page.evaluate(()=>window.openRecordingReviewDialog())
   assert.equal(await page.evaluate(()=>window._recordings['Swedish stories'].folder),'Språk/Lyssna')

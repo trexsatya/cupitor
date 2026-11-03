@@ -223,9 +223,11 @@ export function guessCorrespondingWords({
   stopWords = new Set(),
   background = null,
   backgroundLines = 0,
+  frequencies = null,
+  matchedLineCount = null,
   max = MAX_GROUPS,
 } = {}) {
-  const freq = documentFrequencies(lines);
+  const freq = frequencies instanceof Map ? frequencies : documentFrequencies(lines);
   const isStop = w => stopWords instanceof Set ? stopWords.has(w) : false;
   const usable = w => typeof w === 'string' && w.length >= MIN_TOKEN_LEN && !isStop(w);
 
@@ -240,7 +242,7 @@ export function guessCorrespondingWords({
   };
 
   // Words that stand out from these subtitles' ordinary vocabulary.
-  const lineCount = (lines || []).length;
+  const lineCount = matchedLineCount == null ? (lines || []).length : matchedLineCount;
   const bgTotal = Number(backgroundLines) || 0;
   const haveBackground = background instanceof Map && bgTotal > 0;
   if (lineCount >= MIN_LINES_FOR_FREQUENCY && haveBackground) {

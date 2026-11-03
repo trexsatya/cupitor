@@ -8,6 +8,7 @@ export function wordMapStorageKey(search = location.search) {
   return scopedKey('cupitor:wordMaps:' + (new URLSearchParams(search).get('lang') || 'swedish'))
 }
 export function readSearchMaps(key, storage = localStorage) {
+  if (storage.readMaps) return storage.readMaps(key)
   return parseWordMaps(storage.getItem(key))
 }
 // One hit per map; retain every matching node for highlighting, rather than
