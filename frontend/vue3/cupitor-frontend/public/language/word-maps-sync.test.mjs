@@ -286,3 +286,23 @@ test('angled shapes survive syncing and loading on another device', async () => 
     ['hexagon', 'parallelogram']
   )
 })
+
+
+test('folder moves sync with stable map ids and remain explicit conflicts with concurrent edits', async () => {
+  const original = map('one')
+  const moved = {...original, folder: 'Swedish/People/Conflict'}
+  assert.equal(parseWordMaps(JSON.stringify({version: 1, maps: [moved]}))[0].folder, moved.folder)
+  assert.deepEqual(mergeWordMaps([original], [moved], [original]).maps, [moved])
+  const changed = {...original, name: 'Changed remotely'}
+  const conflict = mergeWordMaps([original], [moved], [changed])
+  assert.equal(conflict.maps.length, 0)
+  assert.equal(conflict.conflicts[0].local.folder, moved.folder)
+  const f = fixture([moved], []), sync = createWordMapSync(f.options)
+  await sync.push(f.get, f.adopt)
+  let pulled
+  await createWordMapSync({...f.options, storage: memory(), storageKey: 'other-device'})
+    .pull(() => [], maps => { pulled = maps })
+  assert.equal(pulled[0].id, original.id)
+  assert.equal(pulled[0].folder, moved.folder)
+  assert.equal(sync.dirty(f.local), false)
+})

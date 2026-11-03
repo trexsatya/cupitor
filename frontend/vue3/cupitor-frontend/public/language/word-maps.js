@@ -1,3 +1,4 @@
+import { folderPath, folderPaths, inFolder } from './playlist-folders.js'
 import { findWordMaps } from './word-map-search.js'
 import {
   emptyMap,
@@ -129,6 +130,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   fullscreenButton.setAttribute('aria-label', 'Enter fullscreen')
   fullscreenButton.setAttribute('aria-pressed', 'false')
   fullscreenButton.title = 'Enter fullscreen'
+  iconButton(close, 'M6 6l12 12M6 18L18 6')
   header.append(title, close)
   const syncButton = button('Sync', () => runSync(false))
   syncButton.className = 'wm-sync'
@@ -150,6 +152,47 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   name.setAttribute('aria-label', 'Map name')
   name.maxLength = 200
   name.className = 'wm-map-name'
+  let folderScope = null
+  const library = el('section', null, 'wm-library')
+  library.id = 'wordMapLibrary'
+  library.tabIndex = -1
+  library.hidden = true
+  library.setAttribute('aria-label', 'Map library')
+  const browseButton = iconButton(button('Browse maps', () => setLibrary(library.hidden)), 'M3 7h7l2-3h9v16H3z')
+  browseButton.classList.add('wm-browse')
+  browseButton.setAttribute('aria-controls', library.id)
+  browseButton.setAttribute('aria-expanded', 'false')
+  const libraryHeading = el('div', null, 'wm-library-heading')
+  const libraryClose = iconButton(button('Close browser', () => setLibrary(false)), 'M6 6l12 12M6 18L18 6')
+  libraryHeading.append(el('h3', 'Your maps'), libraryClose)
+  const librarySearch = el('input')
+  librarySearch.type = 'search'
+  librarySearch.placeholder = 'Filter maps…'
+  librarySearch.setAttribute('aria-label', 'Filter maps')
+  const folderTree = el('nav', null, 'wm-folder-tree')
+  folderTree.setAttribute('aria-label', 'Map folders')
+  const mapList = el('div', null, 'wm-map-list')
+  const folderForm = el('form', null, 'wm-folder-form')
+  const folderLabel = el('label', 'Folder for this map'), folderInput = el('input')
+  folderInput.setAttribute('aria-label', 'Map folder path')
+  folderInput.placeholder = 'e.g. Swedish/People'
+  folderInput.maxLength = 200
+  folderInput.setAttribute('list', 'wordMapFolderPaths')
+  const folderOptions = el('datalist'); folderOptions.id = 'wordMapFolderPaths'
+  folderLabel.append(folderInput)
+  const moveMap = button('Move map', () => {})
+  moveMap.type = 'submit'
+  folderForm.append(folderLabel, moveMap, el('small', 'Use / for subfolders. Leave blank for Unfiled. Folders appear when they contain maps.'), folderOptions)
+  folderForm.onsubmit = event => {
+    event.preventDefault()
+    const raw = folderInput.value.trim(), path = folderPath(raw)
+    if (raw && (!path || path.length > 200)) { status.textContent = 'Enter a valid folder path, such as Swedish/People.'; return }
+    commit(() => { if (path) map.folder = path; else delete map.folder })
+    folderScope = path
+    renderLibrary()
+  }
+  librarySearch.oninput = renderLibrary
+  library.append(libraryHeading, librarySearch, folderTree, mapList, folderForm)
   const layout = el('div', null, 'wm-layout'),
     work = el('div', null, 'wm-work'),
     viewport = el('div', null, 'wm-viewport'),
@@ -210,7 +253,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     })
   )
   work.append(hint, viewport, script, scriptTools)
-  layout.append(work, detailsButton, inspector)
+  layout.append(library, work, detailsButton, inspector)
   const file = el('input')
   file.type = 'file'
   file.accept = '.json,application/json'
@@ -226,11 +269,20 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       file.value = ''
     }
   }
-  const addWordButton = editBtn('+ Word', addWord, 'New word (N)')
+  const addWordButton = iconButton(editBtn('+ Word', addWord, 'New word (N)'), 'M12 5v14M5 12h14')
   const undo = editBtn('Undo', undoLast)
   const redo = editBtn('Redo', redoLast)
   const zoomControls = el('div', null, 'wm-zoom-controls')
-  zoomControls.append(button('Fit map', fitMap), button('−', () => scale(-0.2)), button('+', () => scale(0.2)))
+  zoomControls.setAttribute('role', 'group')
+  zoomControls.setAttribute('aria-label', 'Canvas controls')
+  const zoomLevel = el('output', '', 'wm-zoom-level')
+  zoomLevel.setAttribute('aria-label', 'Zoom level')
+  const fitButton = iconButton(button('Fit map', fitMap), 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M8 8h8v8H8z')
+  const zoomOut = button('−', () => scale(-0.2)), zoomIn = button('+', () => scale(0.2))
+  zoomOut.setAttribute('aria-label', 'Zoom out'); zoomOut.title = 'Zoom out'
+  zoomIn.setAttribute('aria-label', 'Zoom in'); zoomIn.title = 'Zoom in'
+  zoomControls.append(fitButton, zoomOut, zoomLevel, zoomIn, fullscreenButton)
+  work.append(zoomControls)
   toolbar.append(
     picker,
     name,
@@ -238,6 +290,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     syncButton,
     editBtn('New map', () => {
       const m = emptyMap()
+      const folder = folderScope ?? map.folder
+      if (folder) m.folder = folder
       maps = savedMaps()
       transientId = null
       maps.push(m)
@@ -297,25 +351,73 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   moreActions.id = 'wordMapMoreActions'
   moreActions.setAttribute('role', 'group')
   moreActions.setAttribute('aria-label', 'Map actions')
-  const moreButton = button('More', () => setMore(!moreActions.classList.contains('is-open')))
-  moreButton.className = 'wm-more-toggle'
+  const moreButton = iconButton(button('More', () => setMore(!moreActions.classList.contains('is-open'))), 'M5 12h.01M12 12h.01M19 12h.01')
+  moreButton.classList.add('wm-more-toggle')
   moreButton.setAttribute('aria-label', 'More map actions')
   moreButton.setAttribute('aria-expanded', 'false')
   moreButton.setAttribute('aria-controls', moreActions.id)
   const primary = new Set([picker, modeGroup, syncButton, addWordButton, zoomControls])
   for (const control of [...toolbar.children]) if (!primary.has(control)) moreActions.append(control)
-  toolbar.append(zoomControls, moreButton, moreActions)
+  toolbar.prepend(browseButton)
+  toolbar.append(moreButton, moreActions)
   const footer = el('footer')
   footer.append(el('small', sync
     ? 'Saved locally · Sync to GitHub to use your maps on other devices.'
     : 'Saved locally · Sign in and set up your repository to sync with GitHub.'), status)
-  layout.append(fullscreenButton)
   dialog.append(header, toolbar, layout, footer, file)
   document.body.append(dialog)
   dialog.addEventListener('click', e => {
     if (moreButton.contains(e.target)) return
     if (!moreActions.contains(e.target) || e.target.closest('button')) setMore(false)
   })
+  function setLibrary(open) {
+    library.hidden = !open
+    browseButton.setAttribute('aria-expanded', String(open))
+    if (open) { renderLibrary(); (window.innerWidth <= 700 ? library : librarySearch).focus() }
+  }
+  function renderLibrary() {
+    if (!map) return
+    const paths = folderPaths(maps)
+    if (folderScope && !paths.includes(folderScope)) folderScope = null
+    folderTree.replaceChildren()
+    const folderButton = (label, path, depth = 0) => {
+      const count = maps.filter(m => path === null || (path ? inFolder(m.folder || '', path) : !m.folder)).length
+      const b = button(label + ' · ' + count, () => {
+        folderScope = path
+        renderLibrary()
+        folderTree.querySelector('[aria-pressed="true"]')?.focus()
+      })
+      if (path) iconButton(b, 'M3 7h7l2-3h9v16H3z')
+      b.dataset.folder = path ?? '*'
+      b.style.paddingLeft = 10 + depth * 14 + 'px'
+      b.setAttribute('aria-pressed', String(folderScope === path))
+      folderTree.append(b)
+    }
+    folderButton('All maps', null)
+    folderButton('Unfiled', '')
+    for (const path of paths) folderButton(path.split('/').at(-1), path, path.split('/').length - 1)
+    folderTree.querySelector('[aria-pressed="true"]')?.scrollIntoView?.({block: 'nearest'})
+    const query = librarySearch.value.trim().toLocaleLowerCase()
+    const shown = maps.filter(m => (folderScope === null || (folderScope ? inFolder(m.folder || '', folderScope) : !m.folder)) &&
+      (m.name + ' ' + (m.folder || '')).toLocaleLowerCase().includes(query))
+    mapList.replaceChildren(el('p', shown.length + ' map' + (shown.length === 1 ? '' : 's'), 'wm-list-count'))
+    for (const item of shown) {
+      const b = button('', () => {
+        if (inline) finishInline(true)
+        activate(item); fitMap()
+        if (window.innerWidth <= 700) setLibrary(false)
+      })
+      b.className = 'wm-library-map'
+      b.dataset.mapId = item.id
+      b.setAttribute('aria-current', item.id === map.id ? 'true' : 'false')
+      b.append(el('strong', item.name), el('small', item.folder || 'Unfiled'))
+      mapList.append(b)
+    }
+    if (!shown.length) mapList.append(el('p', 'No maps in this view.', 'wm-list-empty'))
+    folderOptions.replaceChildren(...paths.map(path => new Option(path)))
+    if (document.activeElement !== folderInput) folderInput.value = map.folder || ''
+    folderForm.hidden = !editing()
+  }
   function setMore(open) {
     moreActions.classList.toggle('is-open', open)
     moreButton.setAttribute('aria-expanded', String(open))
@@ -336,6 +438,9 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   dialog.addEventListener('keydown', (e) => {
     e.stopPropagation()
     if (e.defaultPrevented) return
+    if (e.key === 'Escape' && !library.hidden) {
+      e.preventDefault(); setLibrary(false); browseButton.focus(); return
+    }
     if (e.key === 'Escape' && moreActions.classList.contains('is-open')) {
       e.preventDefault()
       setMore(false)
@@ -407,6 +512,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   }
   let nativeFullscreen = false
   function setExpanded(on) {
+    if (on) { setLibrary(false); setMore(false) }
     dialog.classList.toggle('wm-fullscreen', on)
     fullscreenIcon.setAttribute('d', on ? 'M3 8h5V3m8 0v5h5M8 21v-5H3m18 0h-5v5' : 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5')
     fullscreenButton.setAttribute('aria-pressed', String(on))
@@ -469,6 +575,17 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     centerSearchMatch()
     nodeEl(id)?.focus?.({ preventScroll: true })
   }
+  function iconButton(b, path) {
+    const label = b.textContent
+    b.replaceChildren()
+    const icon = svgEl('svg', { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })
+    icon.append(svgEl('path', { d: path }))
+    b.append(icon, el('span', label, 'wm-button-label'))
+    b.classList.add('wm-icon-button')
+    b.setAttribute('aria-label', label)
+    b.title = label
+    return b
+  }
   function button(text, fn) {
     const b = el('button', text)
     b.type = 'button'
@@ -494,6 +611,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     for (const b of editOnly) b.hidden = !editing()
     name.readOnly = !editing()
     modeToggle.checked = editing()
+    folderForm.hidden = !editing()
     hint.textContent = editing() ? EDIT_HINT : READ_HINT
     draw()
     details()
@@ -661,9 +779,13 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     return wrap
   }
   function scale(delta) {
+    const previous = zoom
+    const center = { x: (viewport.scrollLeft + viewport.clientWidth / 2) / previous, y: (viewport.scrollTop + viewport.clientHeight / 2) / previous }
     zoom = Math.max(0.1, Math.min(1.8, zoom + delta))
     canvas.style.width = 2400 * zoom + 'px'
     canvas.style.height = 1600 * zoom + 'px'
+    zoomLevel.textContent = Math.round(zoom * 100) + '%'
+    if (delta) viewport.scrollTo(Math.max(0, center.x * zoom - viewport.clientWidth / 2), Math.max(0, center.y * zoom - viewport.clientHeight / 2))
   }
   function importText(text) {
     if (text.length > 2000000) throw Error('Please select a JSON file smaller than 2 MB.')
@@ -727,6 +849,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   function refreshSync() {
     syncButton.disabled = !sync || syncing || storageBroken
     syncButton.textContent = syncing ? 'Syncing…' : sync?.dirty(savedMaps()) ? 'Sync*' : 'Sync'
+    iconButton(syncButton, 'M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 2M4 17l2 2a7 7 0 0 0 12-2')
+    syncButton.setAttribute('aria-label', 'Sync maps')
     syncButton.title = !sync
       ? 'Sign in and set up your repository to sync'
       : 'Load and save word maps in your GitHub repository'
@@ -821,7 +945,15 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     if (dialog.open && window.innerWidth < 700) fitMap()
   }
   function draw() {
-    picker.replaceChildren(...maps.map((m) => new Option(m.name, m.id)))
+    picker.replaceChildren()
+    for (const folder of ['', ...folderPaths(maps)]) {
+      const items = maps.filter(m => (m.folder || '') === folder)
+      if (!items.length) continue
+      const optgroup = el('optgroup'); optgroup.label = folder || 'Unfiled'
+      optgroup.append(...items.map(m => new Option(m.name, m.id)))
+      picker.append(optgroup)
+    }
+    renderLibrary()
     picker.value = map.id
     name.value = map.name
     undo.disabled = !history.length

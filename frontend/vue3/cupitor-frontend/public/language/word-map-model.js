@@ -1,3 +1,4 @@
+import { folderPath } from './playlist-folders.js'
 // Portable, data-only format: never evaluate imported map scripts.
 export const RELATIONS = [
   'association',
@@ -158,7 +159,11 @@ export function readMap(value) {
       arrows: ['none', 'start', 'end', 'both'].includes(e.arrows) ? e.arrows : 'none',
     }
   })
-  return { version: 1, id: str(data.id) || newId(), name: data.name.slice(0, 200), nodes, edges }
+  const folder = folderPath(data.folder)
+  if (data.folder != null && data.folder !== '' && (!folder || folder.length > 200))
+    throw Error('Use a folder path such as Swedish/People, without empty parts, “.” or “..”.')
+  return { version: 1, id: str(data.id) || newId(), name: data.name.slice(0, 200),
+    ...(folder ? { folder } : {}), nodes, edges }
 }
 export function removeNode(map, id) {
   map.nodes = map.nodes.filter((n) => n.id !== id)
