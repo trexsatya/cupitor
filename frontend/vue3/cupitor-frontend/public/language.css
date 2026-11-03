@@ -5539,3 +5539,13 @@ body.dialog-above-practice .ui-dialog {
 body.youtube-media-mode.dialog-above-practice .ui-widget-overlay {
     pointer-events: none;
 }
+
+/* Keep modal controls above the YouTube subtitle sidebar. The sidebar lives
+   inside the study surface and must never cover an open jQuery UI dialog. */
+body.youtube-media-mode.dialog-above-practice .ui-dialog {
+    position: fixed !important;
+    z-index: 2147483647 !important;
+}
+body.youtube-media-mode.dialog-above-practice #youtubeCaptionPanel {
+    z-index: 100000 !important;
+}
