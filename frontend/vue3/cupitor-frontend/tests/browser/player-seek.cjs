@@ -22,7 +22,7 @@ async function checkPlayerSeek(browser) {
     }
     const start = async (mode, options = {}) => page.evaluate(({ mode, options }) => {
       Object.assign(window._appSettings, { recPlayShuffle: false, recPlayLoop: 'off', recPlayGapSeconds: 30 })
-      const s = window.__seek = { mode, id: 'testVideo01', time: 0, state: 2, rate: 1, muted: !!options.muted,
+      const s = window.__seek = { mode, startedAt: Date.now(), id: 'testVideo01', time: 0, state: 2, rate: 1, muted: !!options.muted,
         loads: [], seeks: {}, events: [], audible: [] }
       const log = action => {
         s.events.push({ action, id: s.id, time: s.time, muted: s.muted })
@@ -86,11 +86,14 @@ async function checkPlayerSeek(browser) {
 
       await start('never')
       await loaded()
-      await page.clock.fastForward(19000)
+      // Stop at the exact boundary: a running fake clock also accumulates
+      // wall time between Playwright calls, which can cross the 20s timeout.
+      await page.clock.pauseAt(await page.evaluate(() => window.__seek.startedAt + 19000))
       assert.equal(await page.evaluate(() => window._recPlayIndex), 0)
       assert.equal(await page.evaluate(() => window.__seek.muted), true)
       assert.deepEqual(await page.evaluate(() => window.__seek.audible), [])
       await page.clock.fastForward(1500)
+      await page.clock.resume()
       await ready(1)
       assert.deepEqual(await page.evaluate(() => window.__seek.audible.filter(e => e.id === 'testVideo02')), [], 'failed clip is skipped instead of playing its beginning')
       await stop()

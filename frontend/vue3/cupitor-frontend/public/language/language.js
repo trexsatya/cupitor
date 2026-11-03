@@ -757,7 +757,9 @@ function importSearches() {
 // --- Minimized dialogs ----------------------------------------------------
 // Study views cover existing page dialogs. Dialogs opened while studying
 // (editors, queue, settings) are explicitly lifted above the view.
-const DIALOG_ABOVE_OVERLAY_Z = 100020
+// Match the media-mode dialog layer: this inline !important value wins
+// over CSS, including the caption sidebar and its modal backdrop.
+const DIALOG_ABOVE_OVERLAY_Z = 2147483647
 const _coveredStudyModals = new Set()
 
 function _screenOverlayOpen() {

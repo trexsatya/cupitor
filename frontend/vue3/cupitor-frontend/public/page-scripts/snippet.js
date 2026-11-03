@@ -474,6 +474,19 @@
           if (isFinite(v) && v > 0) localStorage.setItem(SPLIT_KEY, String(v));
         } catch (_) {}
       }
+      // A resize can move the iframe under the pointer before release.
+      // Capture the gesture so its end still reaches this document.
+      handleEl.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || e.isPrimary === false) return;
+        onDown(e);
+        try { handleEl.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      document.addEventListener('pointermove', (e) => onMove(e.clientY));
+      document.addEventListener('pointerup', onUp, true);
+      document.addEventListener('pointercancel', onUp, true);
+      handleEl.addEventListener('lostpointercapture', onUp);
+      window.addEventListener('blur', onUp);
+      // Preserve mouse/touch support for older embedded hosts.
       handleEl.addEventListener('mousedown', onDown);
       handleEl.addEventListener('touchstart', onDown, { passive: false });
       document.addEventListener('mousemove', (e) => onMove(e.clientY));
