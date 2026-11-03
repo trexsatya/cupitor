@@ -1,5 +1,5 @@
 import { fetchWithRetry } from './net.js'
-import { hasSelf, writeTarget, langFromLocation, sourceDescriptor } from './data-source.js'
+import { hasSelf, writeTarget, langFromLocation, sourceDescriptor, captureSourceContext } from './data-source.js'
 import { createWordMapSync } from './word-maps-sync.js'
 import { resolveWordMapConflicts } from './word-maps-sync-dialog.js'
 
@@ -13,6 +13,7 @@ export function githubWordMapSync(
     lang = langFromLocation(),
     descriptor = sourceDescriptor('self', lang),
     path = `${descriptor.root}/word-maps.json`
+  const context = captureSourceContext()
   const sourceKey = JSON.stringify([
     target.owner.toLowerCase(),
     target.repo.toLowerCase(),
@@ -20,8 +21,11 @@ export function githubWordMapSync(
     lang,
   ])
   const checkAccount = () => {
-    if (!hasSelf() || sourceDescriptor('self').identity !== descriptor.identity)
-      throw new Error('The account or repository changed, or another language is active. Reopen Word maps before syncing.')
+    try { context.assertCurrent() }
+    catch (_) {
+      throw Object.assign(new Error('The account or repository changed, or another language is active. Reopen Word maps before syncing.'),
+        { code: 'stale-data-source' })
+    }
   }
   const branchPath = `/repos/${target.owner}/${target.repo}/git/ref/heads/${target.branch}`
   const publicRequest = (url) =>

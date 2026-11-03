@@ -1,5 +1,5 @@
 import {
-  configure, readUrl, writeTarget, hasSelf, hasOther, source, langFromLocation, NoSelfRepoError,
+  configure, readUrl, writeTarget, hasSelf, hasOther, source, langFromLocation, NoSelfRepoError, captureSourceContext, sourceIdentity,
 } from './data-source.js'
 import { saveGuest } from './account-state.js'
 
@@ -177,7 +177,7 @@ describe('readLayers', () => {
       return url.includes('/alice/') ? res(200, 'mine') : res(404, '')
     }
     const out = await readLayers('vocabulary.txt', { lang: 'swedish', fetchFn })
-    expect(out).toEqual([
+    expect(out.map(({ sourceIdentity, ...layer }) => layer)).toEqual([
       { src: 'self', owner: 'alice', text: 'mine' },
       { src: 'other', owner: 'trexsatya', text: null },
     ])
@@ -191,7 +191,7 @@ describe('readLayers', () => {
     const notices = []
     const failing = async (url) => (url.includes('/alice/') ? res(200, 'x') : res(500, ''))
     const out = await readLayers('srts/index.json', { lang: 'swedish', fetchFn: failing, retry: { tries: 1 }, onNotice: n => notices.push(n) })
-    expect(out).toEqual([{ src: 'self', owner: 'alice', text: 'x' }])
+    expect(out.map(({ sourceIdentity, ...layer }) => layer)).toEqual([{ src: 'self', owner: 'alice', text: 'x' }])
     expect(notices).toHaveLength(1)
     expect(layerStats().other.errors).toBe(1)
     const selfFails = async () => res(500, '')
@@ -200,7 +200,7 @@ describe('readLayers', () => {
   test('guest: only the other layer', async () => {
     configure(guest)
     const out = await readLayers('recordings.json', { lang: 'swedish', fetchFn: async () => res(200, '{}') })
-    expect(out).toEqual([{ src: 'other', owner: 'trexsatya', text: '{}' }])
+    expect(out.map(({ sourceIdentity, ...layer }) => layer)).toEqual([{ src: 'other', owner: 'trexsatya', text: '{}' }])
     expect(layerStats().other.hits).toBe(1)
   })
   test('builds URLs like readUrl: per-segment encoding, . and .. refused, lang checked', async () => {
@@ -217,7 +217,7 @@ describe('readLayers', () => {
   test('owner with no other: only the self layer', async () => {
     configure(owner)
     const out = await readLayers('vocabulary.txt', { lang: 'swedish', fetchFn: async () => res(404, '') })
-    expect(out).toEqual([{ src: 'self', owner: 'trexsatya', text: null }])
+    expect(out.map(({ sourceIdentity, ...layer }) => layer)).toEqual([{ src: 'self', owner: 'trexsatya', text: null }])
     expect(layerStats().other).toEqual({ hits: 0, misses: 0, errors: 0 })
   })
   test('otherRetry applies to the other layer only; self keeps retry', async () => {
@@ -232,7 +232,7 @@ describe('readLayers', () => {
     calls.length = 0
     const otherFails = async (url) => { calls.push(url); return url.includes('/alice/') ? res(200, '[]') : res(500, '') }
     const out = await readLayers('srts/index.json', { lang: 'swedish', fetchFn: otherFails, retry: { tries: 3 }, otherRetry: { tries: 1 }, onNotice: n => notices.push(n) })
-    expect(out).toEqual([{ src: 'self', owner: 'alice', text: '[]' }])
+    expect(out.map(({ sourceIdentity, ...layer }) => layer)).toEqual([{ src: 'self', owner: 'alice', text: '[]' }])
     expect(calls.filter(u => u.includes('/trexsatya/'))).toHaveLength(1)
     expect(notices).toHaveLength(1)
   })
@@ -241,7 +241,7 @@ describe('readLayers', () => {
     let n = 0
     const fetchFn = async () => (++n < 3 ? res(500, '') : res(200, '[]'))
     const out = await readLayers('srts/index.json', { lang: 'swedish', fetchFn, retry: { tries: 3 }, otherRetry: { tries: 1 } })
-    expect(out).toEqual([{ src: 'other', owner: 'trexsatya', text: '[]' }])
+    expect(out.map(({ sourceIdentity, ...layer }) => layer)).toEqual([{ src: 'other', owner: 'trexsatya', text: '[]' }])
     expect(n).toBe(3)
   })
 })
@@ -274,7 +274,7 @@ describe('a missing other-layer file: empty repo or gone repo', () => {
     const notices = []
     const out = await readLayers(path, { lang: 'swedish', fetchFn, onNotice: n => notices.push(n) })
     await settle()
-    expect(out).toEqual([{ src: 'self', owner: 'alice', text: null }, { src: 'other', owner: 'trexsatya', text: null }])
+    expect(out.map(({ sourceIdentity, ...layer }) => layer)).toEqual([{ src: 'self', owner: 'alice', text: null }, { src: 'other', owner: 'trexsatya', text: null }])
     expect(notices).toEqual([])
     expect(apiCalls()).toEqual([{ url: API, init: expect.objectContaining({ cache: 'no-store' }) }])
   })
@@ -860,4 +860,57 @@ test('generic data routing remains usable for language-independent features with
   expect(sourceDescriptor('self', 'hindi').root).toBe('db/language/hindi')
   expect(writeTarget()).toEqual({owner:'alice', repo:'cupitor-data', branch:'main'})
   configure(null)
+})
+
+
+describe('source contexts and cache provenance', () => {
+  afterEach(() => { history.replaceState(null, '', '/'); configure(null) })
+  test('captures explicit read languages independently of the active page key', () => {
+    configure(alice)
+    expect(() => captureSourceContext('spanish').assertCurrent()).not.toThrow()
+  })
+  test('reapplying unchanged sources does not cancel current requests', () => {
+    configure(alice)
+    const context = captureSourceContext()
+    configure({...alice, login:'ALICE', other:{...alice.other, name:'Updated display name'}})
+    expect(() => context.assertCurrent()).not.toThrow()
+  })
+  test.each([
+    ['account', () => configure({...alice, login:'bob'})],
+    ['repository', () => configure({...alice, repo:'another'})],
+    ['branch', () => configure({...alice, branch:'next'})],
+    ['shared library', () => configure({...alice, other:null})],
+    ['language', () => history.replaceState(null, '', '?lang=spanish')],
+    ['switch away and back', () => { configure(guest); configure(alice) }],
+  ])('rejects delayed reads after a %s change without returning a partial corpus', async (_, change) => {
+    configure(alice)
+    const notices = []
+    const fetchFn = jest.fn(async () => {
+      change()
+      return res(200, '[]')
+    })
+    await expect(readLayers('srts/index.json', {fetchFn, onNotice:n => notices.push(n)}))
+      .rejects.toMatchObject({code:'stale-data-source'})
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(notices).toEqual([])
+  })
+  test('records complete per-layer provenance and invalidates owner-only or different-source caches', async () => {
+    configure(alice)
+    const layers = await readLayers('srts/index.json', {fetchFn:async () => res(200, '[{"link":"v","name":"Video"}]')})
+    expect(layers.map(l => l.sourceIdentity)).toEqual([sourceIdentity('self'), sourceIdentity('other')])
+    const entry = mergeIndexLayers(layers)[0]
+    expect(entry.sourceIdentity).toBe(sourceIdentity('self'))
+    expect(cacheRecordMatches({owner:'alice', sourceIdentity:entry.sourceIdentity}, entry, 'alice')).toBe(true)
+    expect(cacheRecordMatches({owner:'alice'}, entry, 'alice')).toBe(false)
+    configure({...alice, repo:'new-data'})
+    expect(cacheRecordMatches({owner:'alice', sourceIdentity:sourceIdentity('self')}, entry, 'alice')).toBe(false)
+  })
+  test('caller mutation of a shared library object cannot change an in-flight destination', () => {
+    const state = {...alice, other:{...alice.other}}
+    configure(state)
+    const context = captureSourceContext()
+    state.other.repo = 'changed-by-caller'
+    expect(source('other').repo).toBe('trexsatya.github.io')
+    expect(() => context.assertCurrent()).not.toThrow()
+  })
 })

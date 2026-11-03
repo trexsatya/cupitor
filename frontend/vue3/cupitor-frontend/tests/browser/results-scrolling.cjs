@@ -29,6 +29,7 @@ async function check(browser, mobile) {
   await page.addInitScript(() => { window.dontConfirmOnRefresh = true })
   try {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
+    await page.waitForFunction(() => window._vocabularyReadyPromise && window._subtitlesReadyPromise)
     await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
     await page.locator('#searchText').fill('färgsprakande')
     await page.locator('#searchText').press('Tab')
@@ -121,7 +122,13 @@ async function check(browser, mobile) {
     await page.locator('#searchNextPageButton').tap()
     await page.waitForFunction(() => window._searchResultPage === 1 &&
       document.querySelectorAll('#result .l-accordion').length === 15)
-    await page.waitForFunction(() => Math.abs(document.getElementById('result').getBoundingClientRect().top) < 2)
+    await page.waitForFunction(() => {
+      const top = document.getElementById('result').getBoundingClientRect().top + window.scrollY
+      // A short final page cannot always reach the viewport's top: native
+      // scrollIntoView clamps the target to the document's maximum offset.
+      const max = Math.max(0, document.scrollingElement.scrollHeight - window.innerHeight)
+      return Math.abs(window.scrollY - Math.min(top, max)) < 2
+    })
     assert.equal((await metrics()).top, 0)
     assert.equal(await page.evaluate(() => window._preventedScrollMoves), 0, 'native touch moves are never cancelled')
     await session.detach()
@@ -133,6 +140,8 @@ async function check(browser, mobile) {
       selected: document.getElementById('recRecSelect')?.value,
       dropdownOpen: !!document.querySelector('.select2-dropdown'),
       dialogRows: document.querySelectorAll('#recordingReviewDialog .rec-item').length,
+      resultTop: document.getElementById('result')?.getBoundingClientRect().top,
+      maxScroll: document.scrollingElement.scrollHeight - window.innerHeight,
     })))
     throw error
   } finally {

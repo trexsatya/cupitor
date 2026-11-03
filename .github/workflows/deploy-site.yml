@@ -67,6 +67,7 @@ jobs:
           node --test public/page-scripts/*.test.mjs
           node --test scripts/deploy-site.test.cjs scripts/cache-bust.test.cjs
           node --test tests/whiteboard/composites.unit.test.cjs
+          node --test public/language/data-source-loading.test.mjs
           node --test public/language/spotify-*.test.mjs public/language/card-selection-search.test.mjs public/language/recordings-sync-state.test.mjs
           node --test public/language/word-map-search.test.mjs public/language/word-map-model.test.mjs public/language/word-maps.test.mjs public/language/word-maps-sync.test.mjs public/language/word-maps-github.test.mjs
           node --test public/language/study-calls.test.mjs

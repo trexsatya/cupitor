@@ -113,6 +113,8 @@ export async function fetchWithRetry(url, { tries = 4, timeoutMs = 12000, init =
 // `deps.githubUtils` defaults to window.GitHubUtils. The target is always
 // given: `branch`, `deps.owner` and `deps.repo` (the signed-in user's repo);
 // a missing one throws before anything is read or written.
+// Optional deps.assertCurrent checks the captured account/source context
+// around every read, merge, write and retry, before callers adopt a result.
 export async function commitWithMerge({
   filePath, branch, commitMessage, merge, maxAttempts = 5
 }, deps = {}) {
@@ -121,9 +123,11 @@ export async function commitWithMerge({
   const { owner, repo } = deps
   if (!owner || !repo || !branch) throw new Error('commitWithMerge: owner, repo and branch are required')
   const log = deps.log || ((msg) => { try { console.warn(msg) } catch (_) {} })
+  const assertCurrent = deps.assertCurrent || (() => {})
 
   let lastErr
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    assertCurrent()
     let remoteContent = null
     let sha
     try {
@@ -135,12 +139,15 @@ export async function commitWithMerge({
       // read aborts: merging into "nothing" would overwrite the file.
       if (!/GitHub API error 404\b/.test(String(e && e.message))) throw e
     }
+    assertCurrent()
     const merged = await merge(remoteContent)
+    assertCurrent()
     if (merged === null || merged === undefined) {
       throw new Error(`commitWithMerge: merge returned no content for ${filePath}`)
     }
     try {
       await githubUtils.putFile(owner, repo, filePath, merged, commitMessage, sha, '', branch)
+      assertCurrent()
       return merged
     } catch (e) {
       lastErr = e

@@ -1,6 +1,50 @@
 const {chromium} = require('playwright')
 const assert = require('node:assert/strict')
 const {serveFixtures} = require('./language-dialogs.cjs')
+async function checkCacheSources(browser) {
+  const page = await browser.newPage()
+  let marker = 'Original corpus', requests = 0
+  await page.route('**/*', route => {
+    if (new URL(route.request().url()).pathname.endsWith('.srt')) {
+      requests++
+      return route.fulfill({contentType:'text/plain', body:`1\n00:00:01,000 --> 00:00:03,000\n${marker}\n`})
+    }
+    return serveFixtures(route)
+  })
+  // Same login throughout: repository and branch changes must not reuse the
+  // owner's old subtitles just because the link and owner still match.
+  await page.addInitScript(() => {
+    window.dontConfirmOnRefresh = true
+    if (!localStorage.getItem('cupitor:account'))
+      localStorage.setItem('cupitor:account', JSON.stringify({login:'trexsatya',repo:'trexsatya.github.io',branch:'gh-pages',other:null}))
+  })
+  const load = async () => {
+    await page.goto('http://127.0.0.1:3000/language.html', {waitUntil:'networkidle'})
+    await page.evaluate(async () => {
+      await window._subtitlesReadyPromise
+      // Wait for fire-and-forget cache commits before reloading the page.
+      while ((await window.cupitorCacheStats()).count !== 3) await new Promise(r => setTimeout(r, 20))
+    })
+    assert.match(await page.evaluate(() => window.allSubtitles.testVideo01.sv), new RegExp(marker))
+  }
+  try {
+    await load()
+    assert.equal(requests, 6)
+    requests = 0
+    await load()
+    assert.equal(requests, 0, 'unchanged complete corpora remain cached')
+    for (const changes of [{repo:'new-language-data'}, {branch:'next'}]) {
+      await page.evaluate(changes => localStorage.setItem('cupitor:account', JSON.stringify({
+        ...JSON.parse(localStorage.getItem('cupitor:account')), ...changes,
+      })), changes)
+      marker += ' changed'
+      requests = 0
+      await load()
+      assert.equal(requests, 6, 'repository and branch changes refetch the entire active corpus')
+    }
+    console.log('Subtitle cache: same-source reuse and repository/branch isolation passed')
+  } finally {await page.close()}
+}
 ;(async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, args:['--no-sandbox']})
   try {
@@ -43,5 +87,6 @@ const {serveFixtures} = require('./language-dialogs.cjs')
       console.log(name + ': language metadata, data paths, readiness and support state passed')
       await page.close()
     }
+    await checkCacheSources(browser)
   } finally {await browser.close()}
 })().catch(error => {console.error(error); process.exitCode=1})
