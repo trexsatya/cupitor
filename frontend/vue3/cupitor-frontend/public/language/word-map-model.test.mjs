@@ -104,3 +104,14 @@ test('arrows touch the triangular tips and slanted sides, not bounding boxes', (
     assert.deepEqual(reversed[1], p)
   }
 })
+
+
+test('nested folder paths normalize and survive portable maps without changing legacy maps', () => {
+  const legacy = readMap(sample())
+  assert.equal(Object.hasOwn(legacy, 'folder'), false)
+  const nested = readMap({...sample(), folder: ' Swedish / Feelings / Conflict '})
+  assert.equal(nested.folder, 'Swedish/Feelings/Conflict')
+  assert.deepEqual(readMap(JSON.stringify(nested)), nested)
+  for (const folder of ['a//b', '../a', 'a/..', 'a\\b', 42])
+    assert.throws(() => readMap({...sample(), folder}), /folder path/)
+})

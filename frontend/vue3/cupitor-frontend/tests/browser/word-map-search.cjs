@@ -71,7 +71,79 @@ async function check(browser, mobile) {
     throw error
   } finally { await page.close() }
 }
+async function checkLibrary(browser, width) {
+  const page = await browser.newPage({viewport: {width, height: 844}, isMobile: width < 700, hasTouch: width < 700})
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.setDefaultTimeout(10000)
+  await page.route('**/*', serveFixtures)
+  await page.addInitScript(() => {
+    window.dontConfirmOnRefresh = true
+    localStorage.setItem('cupitor:account', JSON.stringify({login: null}))
+    const key = 'cupitor:wordMaps:swedish@~guest'
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify([
+      {version: 1, id: 'conflict', name: 'Konflikt & aggression', folder: 'Swedish/People', nodes: [
+        {id:'a',word:'Gräl & käbbel',x:350,y:150,color:'#334155',shape:'hexagon'},
+        {id:'b',word:'Bråka',x:750,y:150,color:'#64748b'},
+        {id:'c',word:'Överfalla',x:550,y:420,color:'#334155',note:'Att plötsligt angripa någon fysiskt, ofta oväntat. Allvarligt.'},
+      ], edges: [{id:'e',from:'a',to:'b'},{id:'f',from:'b',to:'c'}]},
+      {version: 1, id: 'light', name: 'Ljus', folder: 'Swedish/Nature', nodes: [], edges: []},
+      {version: 1, id: 'other', name: 'Unfiled map', nodes: [], edges: []},
+    ]))
+  })
+  const screenshot = async name => {
+    if (!process.env.SCREENSHOT_DIR) return
+    require('node:fs').mkdirSync(process.env.SCREENSHOT_DIR, {recursive: true})
+    await page.screenshot({path:require('node:path').join(process.env.SCREENSHOT_DIR, `word-maps-${name}-${width}.png`)})
+  }
+  try {
+    await page.goto('http://127.0.0.1:3000/language.html?lang=swedish', {waitUntil:'networkidle'})
+    await page.evaluate(() => window.openWordMaps())
+    const dialog = page.locator('#wordMapsDialog')
+    await dialog.locator('[data-node="c"]').click()
+    await screenshot('read')
+    assert.equal(await dialog.evaluate(d => d.scrollWidth <= d.clientWidth + 1), true, 'dialog must fit narrow screens')
+    await dialog.getByRole('button', {name:'Browse maps', exact:true}).click()
+    await dialog.locator('[data-folder="Swedish/People"]').click()
+    assert.equal(await dialog.locator('.wm-library-map').count(), 1)
+    await dialog.getByRole('switch', {name:'Edit mode'}).check()
+    await dialog.locator('[aria-label="Map folder path"]').fill('Swedish/People/Conflict')
+    await dialog.getByRole('button', {name:'Move map', exact:true}).click()
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('cupitor:wordMaps:swedish@~guest')).find(m=>m.id==='conflict').folder), 'Swedish/People/Conflict')
+    await screenshot('folders')
+    await dialog.locator('[data-folder="*"]').click()
+    await dialog.getByRole('searchbox', {name:'Filter maps'}).fill('Ljus')
+    assert.equal(await dialog.locator('.wm-library-map').count(), 1)
+    await dialog.locator('[data-map-id="light"]').click()
+    assert.equal(await dialog.locator('[aria-label="Saved word map"]').inputValue(), 'light')
+    // Picker groups keep every map reachable without changing its identity.
+    await dialog.locator('[aria-label="Saved word map"]').selectOption('conflict')
+    if (await dialog.locator('.wm-library').isVisible()) await dialog.getByRole('button',{name:'Close browser',exact:true}).click()
+    await dialog.getByRole('switch', {name:'Edit mode'}).uncheck()
+    await dialog.getByRole('button', {name:'Enter fullscreen', exact:true}).click()
+    await page.waitForFunction(() => document.querySelector('#wordMapsDialog').classList.contains('wm-fullscreen'))
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const svg = dialog.locator('.wm-viewport > svg')
+    const before = await svg.evaluate(s => parseFloat(s.style.width))
+    await dialog.getByRole('button', {name:'Zoom in', exact:true}).click()
+    assert.ok(await svg.evaluate(s => parseFloat(s.style.width)) > before)
+    await dialog.getByRole('button', {name:'Zoom out', exact:true}).click()
+    assert.ok(Math.abs(await svg.evaluate(s => parseFloat(s.style.width)) - before) < 1)
+    await dialog.getByRole('button', {name:'Fit map', exact:true}).click()
+    await dialog.locator('[data-node="c"]').click()
+    await screenshot('fullscreen')
+    await dialog.getByRole('button', {name:'Exit fullscreen', exact:true}).click()
+    await page.waitForFunction(() => !document.querySelector('#wordMapsDialog').classList.contains('wm-fullscreen'))
+    await page.reload({waitUntil:'networkidle'})
+    await page.evaluate(() => window.openWordMaps())
+    assert.equal(await page.locator('[aria-label="Saved word map"] optgroup[label="Swedish/People/Conflict"]').count(), 1)
+    assert.equal(await page.locator('[data-node]').count(), 3)
+    assert.deepEqual(errors, [])
+    console.log(`${width}px: folder navigation, filtering, moves, reload, icons and fullscreen zoom passed`)
+  } finally { await page.close() }
+}
+
 ;(async () => {
   const browser = await chromium.launch({headless:true, executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined, args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-zygote']})
-  try { await check(browser, false); await check(browser, true) } finally { await browser.close() }
+  try { await check(browser, false); await check(browser, true); for (const width of [1280, 390, 320]) await checkLibrary(browser, width) } finally { await browser.close() }
 })().catch(error => {console.error(error);process.exitCode=1})
