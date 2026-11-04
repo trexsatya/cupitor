@@ -21,7 +21,7 @@
 //
 // Pure: takes parsed subtitle lines and returns seconds. No DOM, no player.
 
-import { contiguousClipWindow } from './random-playlist.js';
+import { contiguousClipWindow, wordsAroundInLine } from './random-playlist.js';
 
 const num = (v, fallback) => {
   const n = Number(v);
@@ -52,7 +52,7 @@ export function clipRange(lines, pos, before, after, fallback, opts = {}) {
   const fbStart = num(fb.start, 0);
   let start = fbStart;
   let stop = num(fb.stop, fbStart + CLIP_MIN_SECONDS);
-  const { from, to } = contiguousLineWindow(src, pos, before, after, opts);
+  const { from, to } = wordContextLineWindow(src, pos, before, after, opts);
   const first = startOf(src[from]);
   const last = endOf(src[to]);
   // Lines without usable timing leave the stored bounds alone.
@@ -98,6 +98,39 @@ export function contiguousLineWindow(lines, pos, before, after, opts = {}) {
     from: Math.max(0, Math.min(p, win.fromPos)),
     to: Math.min(src.length - 1, Math.max(p, win.toPos)),
   };
+}
+
+// Preserve the explicit context-line minimum, then add neighbouring words
+// only where the subtitle cues are temporally continuous. Player and Practice
+// use these same bounds for text and clip playback.
+export function wordContextLineWindow(lines, pos, before, after, opts = {}) {
+  const src = Array.isArray(lines) ? lines : [];
+  const base = contiguousLineWindow(src, pos, before, after, opts);
+  const target = Math.max(0, Math.min(100, Number(opts.minWordsAround) || 0));
+  if (!target || base.to < base.from || !opts.word || !src[pos]) return base;
+  const matchText = String(src[pos].text || '');
+  const word = String(opts.word).trim();
+  if (!word || !matchText.toLocaleLowerCase().includes(word.toLocaleLowerCase())) return base;
+  const countWords = str => String(str || '').trim().split(/\s+/).filter(Boolean).length;
+  const flank = wordsAroundInLine(matchText, word);
+  let previous = flank.before, following = flank.after;
+  let from = base.from, to = base.to;
+  for (let i = from; i < pos; i++) previous += countWords(src[i].text);
+  for (let i = pos + 1; i <= to; i++) following += countWords(src[i].text);
+  const gap = opts.gapThreshold == null ? CLIP_GAP_THRESHOLD : opts.gapThreshold;
+  while (previous < target && from > 0 && pos - from < 20) {
+    const lastEnd = endOf(src[from - 1]), firstStart = startOf(src[from]);
+    if (lastEnd == null || firstStart == null || firstStart - lastEnd > gap) break;
+    from--;
+    previous += countWords(src[from].text);
+  }
+  while (following < target && to + 1 < src.length && to - pos < 20) {
+    const lastEnd = endOf(src[to]), nextStart = startOf(src[to + 1]);
+    if (lastEnd == null || nextStart == null || nextStart - lastEnd > gap) break;
+    to++;
+    following += countWords(src[to].text);
+  }
+  return { from, to };
 }
 
 // Seconds of video between each line and the one before it, where that is more
