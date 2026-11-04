@@ -33,14 +33,17 @@ async function check(browser, mobile) {
     await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
     await page.locator('#searchText').fill('färgsprakande')
     await page.locator('#searchText').press('Tab')
-    await page.waitForFunction(() => document.querySelector('#result .srt-file') &&
-      !document.querySelector('#result').textContent.includes('Loading…'))
+    await page.waitForFunction(() => window._subtitleSearchCompletion?.complete &&
+      document.querySelector('#result .srt-file'))
     // Reuse real subtitle data and the real pagination/rendering path. More
     // than a page of headings also exercises a footer-triggered page change.
     await page.evaluate(async () => {
       const items = Object.values(window._lastWordToItemsMap).find(items => items.length)
       window.__scrollPaginationFixture = Object.fromEntries(
         Array.from({ length: 65 }, (_, i) => ['ord' + String(i).padStart(3, '0'), items]))
+      // The renderer includes the query heading even when it has no matches.
+      // Keep it inside these 65 groups so the last page has exactly 15 rows.
+      window.searchText = 'ord000'
       window._shownWordToItemsMap = window.__scrollPaginationFixture
       window.SEARCH_RESULT_PAGE_SIZE = 50
       await window.loadSearchResultsPage(0)
@@ -113,12 +116,26 @@ async function check(browser, mobile) {
     // results fixture. Reset it explicitly before testing footer pagination;
     // this checks paging separately from the dialog's change of playlist.
     await page.evaluate(async () => {
+      window.searchText = 'ord000'
       window._shownWordToItemsMap = window.__scrollPaginationFixture
       await window.loadSearchResultsPage(0)
     })
     assert.equal(await page.locator('#result .l-accordion').count(), 50)
+    assert.equal(await page.evaluate(() => window._lastRenderedWords.length), 65)
     assert.equal(await page.locator('#searchPageCount').innerText(), '2')
     assert.equal(await page.locator('#searchNextPageButton').evaluate(el => el.classList.contains('disabled')), false)
+    // A page request can arrive before the preceding asynchronous render
+    // finishes. The latest requested page must own the displayed headings.
+    for (const pages of [[0,1],[1,0],[1,1]]) {
+      const overlapping = await page.evaluate(async pages => {
+        await Promise.all(pages.map(page => window.loadSearchResultsPage(page)))
+        return {page:window._searchResultPage, headings:[...document.querySelectorAll('#result .l-accordion')]
+          .map(el => el.textContent.match(/ord\d{3}/)?.[0])}
+      }, pages)
+      const last = pages.at(-1), start = last * 50, count = last ? 15 : 50
+      assert.deepEqual(overlapping, {page:last, headings:Array.from({length:count},(_,i) => 'ord'+String(start+i).padStart(3,'0'))})
+    }
+    await page.evaluate(() => window.loadSearchResultsPage(0))
     await page.locator('#searchNextPageButton').tap()
     await page.waitForFunction(() => window._searchResultPage === 1 &&
       document.querySelectorAll('#result .l-accordion').length === 15)
@@ -141,6 +158,9 @@ async function check(browser, mobile) {
       dropdownOpen: !!document.querySelector('.select2-dropdown'),
       dialogRows: document.querySelectorAll('#recordingReviewDialog .rec-item').length,
       resultTop: document.getElementById('result')?.getBoundingClientRect().top,
+      page: window._searchResultPage, headings: document.querySelectorAll('#result .l-accordion').length,
+      query: window.searchText, renderedWords: window._lastRenderedWords?.length,
+      search: window._subtitleSearchCompletion,
       maxScroll: document.scrollingElement.scrollHeight - window.innerHeight,
     })))
     throw error
