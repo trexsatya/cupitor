@@ -66,6 +66,17 @@ export function createSubtitleMatchCollector(search, {regexMode=false,exactWords
       const lines=item.data
       for(const line of lines) {
         check()
+        if(regexMode) {
+          // Explicit regexes match spans of transcript text, not a
+          // loosely tokenised word. In particular, do not trim a trailing
+          // space from "[^ ]+Stå " and then report unrelated suffix hits.
+          const re=compileRegex(_relaxSpaces(search),'gi')
+          for(const hit of line.text.matchAll(re)) {
+            const matched=hit[0].trim().toLowerCase()
+            if(matched) add(map,matched,line,item)
+          }
+          continue
+        }
         if(transformed.test(line.text)) {
           const words=getWords(line.text).map(word=>word.trim().toLowerCase())
           for(const word of words) {
@@ -93,6 +104,7 @@ export function createSubtitleMatchCollector(search, {regexMode=false,exactWords
       }
     },
     finish(){
+      if(regexMode) return map
       if(map[search.trim()]===undefined)Object.defineProperty(map,search,{value:[],writable:true,enumerable:true,configurable:true})
       if(!included&&(!map[finalSearch.trim()]||!map[finalSearch.trim()].length))Object.assign(map,fallback)
       if(!regexMode)getSearchedTerms(search).forEach(term=>{
