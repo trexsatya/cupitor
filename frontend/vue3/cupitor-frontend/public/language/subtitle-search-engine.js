@@ -75,16 +75,30 @@ export function createSubtitleMatchCollector(search, {regexMode=false,exactWords
           const phrasePattern=hasPhraseWhitespace(search)||/\\s/.test(search)
           const wordRe=compileRegex(_relaxSpaces(search),'i')
           const spanRe=compileRegex(_relaxSpaces(search),'gi')
+          // Apply ^/$ and alternatives against the ACTUAL cue first.
+          // A word independently matching ^word must not make a line
+          // match when that word occurs only in its middle.
+          const spans=[...line.text.matchAll(spanRe)].filter(hit=>hit[0].length)
+          if(!spans.length)continue
           let grouped=false
-          if(!phrasePattern) for(const word of getWords(line.text)) {
-            const token=word.trim().toLowerCase()
-            if(!/[\p{L}\p{N}]/u.test(token))continue
-            const matched=token.match(wordRe)
-            if(matched?.[0]) {add(map,token,line,item);grouped=true}
+          if(!phrasePattern) {
+            let cursor=0
+            for(const raw of getWords(line.text)) {
+              const offset=line.text.indexOf(raw,cursor)
+              if(offset<0)continue
+              cursor=offset+raw.length
+              const token=raw.trim().toLowerCase()
+              if(!/[\p{L}\p{N}]/u.test(token))continue
+              // A second anchored alternative might match the token alone
+              // even though only the first alternative matched this cue.
+              if(!spans.some(hit=>offset<hit.index+hit[0].length&&offset+raw.length>hit.index))continue
+              const matched=token.match(wordRe)
+              if(matched?.[0]) {add(map,token,line,item);grouped=true}
+            }
           }
-          if(phrasePattern||!grouped)for(const hit of line.text.matchAll(spanRe)) {
+          if(phrasePattern||!grouped)for(const hit of spans) {
             const matched=hit[0].trim().toLowerCase()
-            if(matched) add(map,matched,line,item)
+            if(matched)add(map,matched,line,item)
           }
           continue
         }
