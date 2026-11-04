@@ -3916,6 +3916,7 @@ $('document').ready(e => {
     $('#searchVocabularyMenu').hide()
     if (mode === 'prefix') searchVocabularyByPrefix()
     else if (mode === 'similar') searchVocabularyBySimilarity()
+    else if (mode === 'rerun') searchTextChanged()
   })
   $(document).on('click', e => {
     if (!$(e.target).closest('#searchVocabularyMenu, #searchVocabularyByPrefixBtn').length) {
@@ -6387,7 +6388,13 @@ function sendWordToSearchBox(word, opts = {}) {
   }).get()
   // Only honour a context category that is a real (currently-loaded) category.
   const context = (opts && opts.category && window.vocabulary && window.vocabulary[opts.category]) ? opts.category : null
-  const decision = pickVocabOptionForWord(w, options, context)
+  // A partial-text match is not evidence that the user's selected word is
+  // that vocabulary entry. Preserve literal searches (e.g. "giva") instead
+  // of narrowing to an unrelated entry containing the same characters.
+  const hasExactVocabForm = options.some(o => wordIsExactInVocabularyLine(o.text, w, true))
+  const decision = hasExactVocabForm
+    ? pickVocabOptionForWord(w, options, context)
+    : { index: -1, showAll: true }
   if (decision.showAll) {
     // Several matches we won't narrow to one → leave the broad #searchText
     // search (run above; shows every matching line). Clear any stale picker
@@ -18661,7 +18668,13 @@ function _restoreOpenView() {
         saved.view === 'player' ? 'play' : 'practice')
       // No resume point just means starting at the top — still better than
       // not coming back at all.
-      if (point) resumeQueue = { queue: point.queue, pos: point.pos }
+      if (point) {
+        // A playlist may have grown since the last saved session. In that
+        // case ask before reopening with its new cards rather than quietly
+        // changing a previously running deck.
+        if (point.addedCount && !confirm(point.message)) return
+        resumeQueue = { queue: point.queue, pos: point.pos }
+      }
     } catch (e) {
       console.warn('[restore] could not rebuild the queue', e)
     }
