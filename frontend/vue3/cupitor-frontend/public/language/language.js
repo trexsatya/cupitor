@@ -6982,7 +6982,14 @@ async function renderLines(id, url) {
   if (lastIndex) { toLineIndex = Math.min(toLineIndex, lastIndex); fromLineIndex = Math.min(fromLineIndex, lastIndex) }
   let pair = original
   if (original[key]._contextOnly) {
-    const context = await _subtitleSearch.run('context', {id:url,from:fromLineIndex,to:toLineIndex,regexMode:!!window._resultsSearchRegex})
+    // Request a bounded reservoir of nearby cues once, then choose a window
+    // by word count. Packed SRTs only retain match metadata until this fetch.
+    const minWords = $container.data('autoWordContext') ? _minWordsAround() : 0
+    const contextFrom = minWords && Number.isFinite(matchLineIndex)
+      ? Math.max(1, Math.min(fromLineIndex, matchLineIndex - 12)) : fromLineIndex
+    const contextTo = minWords && Number.isFinite(matchLineIndex)
+      ? Math.max(toLineIndex, matchLineIndex + 12) : toLineIndex
+    const context = await _subtitleSearch.run('context', {id:url,from:contextFrom,to:contextTo,regexMode:!!window._resultsSearchRegex})
     if (!document.getElementById(id)) return
     pair = {...original,sv_subs:{...original.sv_subs,...context.sv_subs},en_subs:{...original.en_subs,...context.en_subs}}
   }
@@ -6997,6 +7004,26 @@ async function renderLines(id, url) {
     if (fromLineIndex > lastIdx) fromLineIndex = lastIdx
   }
 
+  // Expand initial search-result snippets until there are enough words on
+  // either side of the match, sharing Practice's contiguous subtitle limits.
+  // +/- adjustments are manual and therefore skip auto-extension.
+  if ($container.data('autoWordContext') && Number.isFinite(matchLineIndex)) {
+    $container.data('autoWordContext', false)
+    const sorted = (subtitleFile.data || []).slice().sort((a,b) => Number(a.index) - Number(b.index))
+    const anchor = sorted.findIndex(line => Number(line.index) === matchLineIndex)
+    const matchWord = String($container.data('matchWord') || '')
+    if (anchor >= 0 && matchWord) {
+      const bounds = _wordContextLineWindow(sorted, anchor,
+        Math.max(0, matchLineIndex - fromLineIndex),
+        Math.max(0, toLineIndex - matchLineIndex),
+        { word: matchWord, minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
+      if (bounds.to >= bounds.from) {
+        fromLineIndex = Number(sorted[bounds.from].index)
+        toLineIndex = Number(sorted[bounds.to].index)
+        $container.data({fromIndex: fromLineIndex, toIndex: toLineIndex})
+      }
+    }
+  }
   const getSub = x => subtitleFile.data.find(it => it.index + '' === x + '');
   const st = getSub(fromLineIndex);
   const end = getSub(toLineIndex)
@@ -7488,7 +7515,8 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
             // Stash the matched line's SRT index so renderLines can expose it
             // to the capture button (the +/- buttons mutate from/toIndex, but
             // the underlying matched line never changes).
-            $lines.data({fromIndex: matchIdx - _before, toIndex: matchIdx + _after, matchLineIndex: matchIdx})
+            $lines.data({fromIndex: matchIdx - _before, toIndex: matchIdx + _after,
+               matchLineIndex: matchIdx, matchWord: item.word || word, autoWordContext: true})
             $fileBlock.append($lines)
 
             await renderLines(id, item.url)
