@@ -34,11 +34,18 @@ export async function attributeSubtitleMatches(list, search, { regexMode = false
     for (const item of list) {
       check()
       for (const line of item.data) {
+        const spans = [...line.text.matchAll(re)].filter(hit => hit[0].length)
+        if (!spans.length) continue
         let grouped = false
         if (!phrasePattern) {
+          let cursor = 0
           for (const rawWord of getWords(line.text)) {
+            const offset = line.text.indexOf(rawWord, cursor)
+            if (offset < 0) continue
+            cursor = offset + rawWord.length
             const token = rawWord.trim().toLowerCase()
             if (!/[\p{L}\p{N}]/u.test(token)) continue
+            if (!spans.some(hit => offset < hit.index + hit[0].length && offset + rawWord.length > hit.index)) continue
             const match = token.match(wordRe)
             if (match?.[0]) {
               computeIfAbsent(out, token, () => []).push(new MatchResult(token, line, item.url, item.source))
@@ -46,7 +53,7 @@ export async function attributeSubtitleMatches(list, search, { regexMode = false
             }
           }
         }
-        if (phrasePattern || !grouped) for (const match of line.text.matchAll(re)) {
+        if (phrasePattern || !grouped) for (const match of spans) {
           const word = match[0].trim().toLowerCase()
           if (!word) continue
           computeIfAbsent(out, word, () => []).push(new MatchResult(word, line, item.url, item.source))
