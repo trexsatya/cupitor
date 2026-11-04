@@ -5569,3 +5569,28 @@ body:is(.rec-playing, .practice-mode) #youtubeResumePlayer {
     left: 12px;
     z-index: 100008;
 }
+
+/* Keep the loader above partial results until every accordion is wired. */
+#resultContainer { position: relative; min-height: 100px; }
+.search-loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    background: rgba(255, 255, 255, .8);
+    pointer-events: none;
+}
+.search-loading-overlay[hidden] { display: none; }
+.search-loading-overlay > span {
+    position: sticky;
+    top: 5rem;
+    margin: 24px 12px;
+    padding: 12px 20px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    color: #334155;
+    box-shadow: 0 2px 8px #0002;
+}

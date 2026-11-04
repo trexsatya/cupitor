@@ -2580,6 +2580,9 @@ window._appSettings = {
   // inter-item gap above is used, so one control covers both until the user
   // wants a different (usually shorter) pause inside a card.
   recPlaySrcTgtGapSeconds: null,
+  // Player-mode recordings keep the user's level when the element is rebuilt.
+  recAudioVolume: 1,
+  recAudioMuted: false,
   // Saved background-music tracks: [{ id, url, name }]. Empty means the
   // feature is off and no extra player is ever built.
   recMusicTracks: [],
@@ -2631,6 +2634,8 @@ window._appSettings = {
   // words before AND after the word, no context lines are added; otherwise lines
   // are added on the deficient side up to the "Sentences around word" cap.
   minWordsAround: 10,
+  // Show book search when the native app bridge is available.
+  includeLibraryInSearch: true,
   // Run the Cupitor library (EPUB full-text) search on every subtitle search.
   // Off by default: the host indexes each book the first time a search visits
   // it, so early searches cost seconds of native work (later ones hit the
@@ -2961,6 +2966,8 @@ function loadAppSettings() {
   const autoLib = !!window._appSettings.autoLibrarySearch
   $('#toggleAutoLibrarySearchCheckbox').prop('checked', autoLib)
   $('#librarySearchAutoCb').prop('checked', autoLib)
+  _syncSearchSourceSettings()
+  _ensureLibrarySearchBar()
   return Promise.resolve()
 }
 
@@ -4095,7 +4102,7 @@ $('document').ready(e => {
     window._appSettings.autoLibrarySearch = on
     saveAppSettings()
     $('#librarySearchAutoCb').prop('checked', on)
-    if (on && window.searchText) librarySearch(window.searchText)
+    if (on && window.searchText) librarySearch(_librarySearchTerm())
   })
 
   $('#toggleLangCb').change(e => {
@@ -9079,6 +9086,8 @@ async function render(searchResults, search, className, token) {
   }
   if (!searchResults) return {}
 
+  const finishLoading = _beginSearchLoading(token)
+  try {
   const $result = $('#result');
   // Keep a "Loading…" placeholder visible during the slow getMatchingWords /
   // populate phase so the result area never goes blank mid-search.
@@ -9166,6 +9175,7 @@ async function render(searchResults, search, className, token) {
   console.log(`Search render completed in ${(new Date() - startTime)/1000} s`)
   // return Object.assign({}, wordToItemsMap, wordToItemsMapNonSrt);
   return wordToItemsMap;
+  } finally { finishLoading() }
 } // end render
 
 function getSubs(text, file, url, source, fetchedFrom) {
@@ -9199,6 +9209,30 @@ function resetSearchResultIndex() {
 // here; per-line attribution still uses the parsed entries below.
 // _cleanSrtForMatch lives in ./search-text.js (imported at the top).
 
+let _searchLoadingToken
+const _searchLoadingTasks = new Set()
+function _beginSearchLoading(token = window._subtitleSearchToken) {
+  if (token !== _searchLoadingToken) {
+    _searchLoadingTasks.clear()
+    _searchLoadingToken = token
+  }
+  const task = Symbol()
+  _searchLoadingTasks.add(task)
+  $('#searchLoadingOverlay').prop('hidden', false)
+  $('#result').attr('aria-busy', 'true').prop('inert', true)
+  showResultContainer()
+  return () => {
+    if (!_searchLoadingTasks.delete(task) || _searchLoadingTasks.size) return
+    $('#searchLoadingOverlay').prop('hidden', true)
+    $('#result').attr('aria-busy', 'false').prop('inert', false)
+  }
+}
+function _clearSearchLoading() {
+  _searchLoadingTasks.clear()
+  $('#searchLoadingOverlay').prop('hidden', true)
+  $('#result').attr('aria-busy', 'false').prop('inert', false)
+}
+
 function _setSubtitleSearchStatus(text, running) {
   let row=document.getElementById('subtitleSearchStatus')
   if(!row) {
@@ -9208,6 +9242,7 @@ function _setSubtitleSearchStatus(text, running) {
     cancel.onclick=()=>{
       window._subtitleSearchToken=(window._subtitleSearchToken||0)+1
       _subtitleSearch.cancel();window._subtitleSearchCompletion={complete:false,reason:'cancelled'}
+      _clearSearchLoading()
       _setSubtitleSearchStatus('Search cancelled; results are incomplete.',false)
       $('#result').empty().append($('<p></p>').text('Search cancelled; results are incomplete.'))
     }
@@ -9298,6 +9333,8 @@ async function loadSearchResultsPage(page) {
   const renderVersion = ++_srtRenderVersion
   // Clamped by populateSRTFindings, against the headings it actually lists.
   window._searchResultPage = Math.max(0, page)
+  const finishLoading = _beginSearchLoading(token)
+  try {
   const $result = $('#result')
   $result.html('')
   // The wipe takes the book and manual-card bars with it.
@@ -9317,6 +9354,7 @@ async function loadSearchResultsPage(page) {
   if (getComputedStyle($result[0]).overflowY === 'visible') {
     $result[0].scrollIntoView({ block: 'start', behavior: 'instant' })
   }
+  } finally { finishLoading() }
 }
 
 function changeSearchResultsPage(delta) {
@@ -9333,6 +9371,7 @@ async function fetchSRTs(searchText, requestToken) {
   // Null until this run has a token of its own — a search refused for being too
   // short never gets one.
   let myToken = null
+  let finishLoading = () => {}
   try {
     if ((typeof searchText) !== 'string') {
       searchText = null
@@ -9380,6 +9419,8 @@ async function fetchSRTs(searchText, requestToken) {
       : requestToken
     myToken = window._subtitleSearchToken
     _searchRunsInFlight++
+    finishLoading = _beginSearchLoading(myToken)
+    _resetLibrarySearch()
     // A new search starts on its first page, and the old search's page bar
     // goes with its results — a click on it now would page the old results.
     resetSearchResultIndex()
@@ -9389,8 +9430,7 @@ async function fetchSRTs(searchText, requestToken) {
     // The dictionary panel describes the results being replaced, so it goes
     // with them rather than staying up, clickable, until the host answers.
     _hideStaleTranslationPanel()
-    // Keep the book-search bar (and any results already in it) alive across
-    // the placeholder — it is a separate, slower search than this one.
+    // Rebuild the enabled source blocks for this query.
     _ensureLibrarySearchBar()
 
     _setSubtitleSearchStatus('Searching subtitles…', true)
@@ -9434,6 +9474,7 @@ async function fetchSRTs(searchText, requestToken) {
 
       }
     }
+    if (myToken !== window._subtitleSearchToken) return false
     const expected=(window.srts || []).filter(item=>item && item.source !== 'local')
     const missing=expected.filter(item=>!window.allSubtitles[item.link] || window.allSubtitles[item.link]._partial)
     const complete=window._subtitleCoverageIndexReady && !missing.length
@@ -9451,6 +9492,7 @@ async function fetchSRTs(searchText, requestToken) {
     }
     return false
   } finally {
+    finishLoading()
     if (myToken !== null) _searchRunsInFlight--
     // The override belongs to whichever search is current. An older run
     // finishing late — it may have been waiting on the translator for seconds —
@@ -11743,6 +11785,46 @@ window._librarySearchPending = null
 // Last completed/partial payload, so a re-created result bar can restore it.
 window._librarySearchLast = null
 
+function _syncSearchSourceSettings() {
+  const books = window._appSettings?.includeLibraryInSearch !== false
+  $('#includeLibraryInSearchCb').prop('checked', books)
+  $('#manualSearchIncludeCb').prop('checked', !!window._appSettings?.includeManualInSearch)
+  $('#wordMapSearchIncludeCb').prop('checked', window._appSettings?.includeWordMapsInSearch !== false)
+  $('#toggleAutoLibrarySearchCheckbox').prop('disabled', !books)
+}
+
+// Detach the old stream before cancelling: the host can dispatch synchronously.
+// Clear queued paints and the completed payload restored on redraw/paging.
+function _resetLibrarySearch() {
+  clearTimeout(window._libraryAutoTimer)
+  const state = window._librarySearchPending
+  window._librarySearchPending = null
+  window._librarySearchLast = null
+  window._libraryLastOpts = null
+  window._librarySearchGeneration = (window._librarySearchGeneration || 0) + 1
+  if (state) {
+    clearTimeout(state.timer)
+    clearTimeout(state.paintTimer)
+    try { window.PlaylistBridge?.postMessage(JSON.stringify({ op: 'cancelSearch' })) }
+    catch (e) { console.warn('cancelSearch post failed', e) }
+  }
+  $('#libraryResults').empty()
+  _librarySetStatus('', false)
+}
+
+$(document).on('change', '#includeLibraryInSearchCb', e => {
+  window._appSettings.includeLibraryInSearch = $(e.target).is(':checked')
+  saveAppSettings()
+  if (!window._appSettings.includeLibraryInSearch) {
+    _resetLibrarySearch()
+    $('#librarySearchBar, #libraryResults').remove()
+  } else {
+    _ensureLibrarySearchBar()
+    _maybeAutoLibrarySearch()
+  }
+  _syncSearchSourceSettings()
+})
+
 function _haveLibrarySearchBridge() {
   return !!(window.PlaylistBridge && typeof window.PlaylistBridge.postMessage === 'function')
 }
@@ -11770,13 +11852,15 @@ function _armLibraryWatchdog(state) {
 // Post a globalSearch and return immediately. `searchText` is our internal
 // (possibly pipe-expanded, possibly regex-laced) term — translated here.
 function librarySearch(searchText) {
-  if (!_haveLibrarySearchBridge()) return false
+  if (window._appSettings?.includeLibraryInSearch === false || !_haveLibrarySearchBridge()) return false
   const query = _buildLibraryQuery(searchText)
   if (!query) {
     _librarySetStatus('Nothing searchable in that term.', false)
     return false
   }
   _ensureLibrarySearchBar()
+  window._librarySearchLast = null
+  window._libraryLastOpts = null
   const prev = window._librarySearchPending
   if (prev) {
     clearTimeout(prev.timer)
@@ -11835,6 +11919,7 @@ function _libraryRenderOpts(extra) {
 }
 
 function _renderLibraryPayload(payload, opts) {
+  if (window._appSettings?.includeLibraryInSearch === false) return
   window._librarySearchLast = payload
   window._libraryLastOpts = opts || {}
   _ensureLibrarySearchBar()
@@ -11862,14 +11947,14 @@ function _paintLibraryState(state, opts) {
 function _onLibrarySearchResults(detail) {
   const payload = _normalizeLibraryPayload(detail)
   const state = window._librarySearchPending
+  if (window._appSettings?.includeLibraryInSearch === false) return
   if (!state) {
-    // Unsolicited push (or a straggler from a search we already closed) —
-    // render it as a complete result set rather than dropping it.
-    if (payload.hits.length) {
-      setTimeout(() => _renderLibraryPayload(
-        { query: payload.query, hits: payload.hits, hitsCapped: payload.hitsCapped },
-        { cancelled: payload.cancelled }
-      ), 0)
+    // The host can push initial results before our first query. Once a new
+    // search has cleared them, unsolicited/late batches must stay discarded.
+    if (!window._librarySearchGeneration && payload.hits.length) {
+      setTimeout(() => {
+        if (!window._librarySearchGeneration) _renderLibraryPayload(payload, { cancelled: payload.cancelled })
+      }, 0)
     }
     return
   }
@@ -11902,8 +11987,7 @@ window.addEventListener('cupitorGlobalSearchResults', ev => {
   catch (e) { console.warn('cupitorGlobalSearchResults handler failed', e) }
 })
 
-// Manual cards in the search results. A bar of its own under the book search,
-// with an "include" toggle remembered in the settings. When on, every search
+// Manual cards in the search results, enabled in Settings > Search. Every search
 // lists the manual cards — from every playlist — whose Source or Target
 // matches the same term the subtitle search ran. Cheap enough to redo on
 // every redraw, so nothing is cached: an edited card shows its new text the
@@ -11911,16 +11995,16 @@ window.addEventListener('cupitorGlobalSearchResults', ev => {
 function _ensureManualSearchBar() {
   const $result = $('#result')
   if (!$result.length) return
-  if (!$result.children('#manualSearchBar').length) {
-    $result.prepend(`<div id="manualSearchBar" class="lib-search-bar">
-        <label class="lib-auto-label" title="Also list the manual cards in your playlists that match this search">
-          <input type="checkbox" id="manualSearchIncludeCb"> 🗂 Include manual cards
-        </label>
-      </div>
-      <div id="manualResults" class="lib-results"></div>`)
+  if (!window._appSettings?.includeManualInSearch) {
+    $result.children('#manualResults').remove()
+    return
   }
-  const on = !!(window._appSettings && window._appSettings.includeManualInSearch)
-  $('#manualSearchIncludeCb').prop('checked', on)
+  if (!$result.children('#manualResults').length) {
+    const $out = $('<div id="manualResults" class="lib-results"></div>')
+    const $books = $result.children('#libraryResults')
+    if ($books.length) $out.insertAfter($books)
+    else $result.prepend($out)
+  }
   _renderManualSearchResults()
 }
 
@@ -11942,7 +12026,7 @@ $(document).on('change', '#manualSearchIncludeCb', e => {
   if (!window._appSettings) window._appSettings = {}
   window._appSettings.includeManualInSearch = $(e.target).is(':checked')
   saveAppSettings()
-  _renderManualSearchResults()
+  _ensureManualSearchBar()
 })
 // A card opens on its own in Practice — just that card, not its playlist.
 $(document).on('click', '#manualResults .manual-hit', e => {
@@ -11975,13 +12059,17 @@ $(document).on('click', '#manualResults .manual-head', e => {
 function _ensureWordMapSearchBar() {
   const $result = $('#result')
   if (!$result.length) return
-  if (!$result.children('#wordMapSearchBar').length) {
-    const $bar = $('<div id="wordMapSearchBar" class="lib-search-bar"><label class="lib-auto-label"><input type="checkbox" id="wordMapSearchIncludeCb"> ◇ Include word maps</label></div><div id="wordMapResults" class="lib-results"></div>')
+  if (window._appSettings?.includeWordMapsInSearch === false) {
+    $result.children('#wordMapResults').remove()
+    return
+  }
+  if (!$result.children('#wordMapResults').length) {
+    const $bar = $('<div id="wordMapResults" class="lib-results"></div>')
     const $manual = $result.children('#manualResults')
     if ($manual.length) $bar.insertAfter($manual)
+    else if ($result.children('#libraryResults').length) $bar.insertAfter($result.children('#libraryResults'))
     else $result.prepend($bar)
   }
-  $('#wordMapSearchIncludeCb').prop('checked', window._appSettings?.includeWordMapsInSearch !== false)
   _renderWordMapSearchResults()
 }
 function _renderWordMapSearchResults() {
@@ -12002,7 +12090,7 @@ function _renderWordMapSearchResults() {
 $(document).on('change', '#wordMapSearchIncludeCb', e => {
   window._appSettings.includeWordMapsInSearch = $(e.target).is(':checked')
   saveAppSettings()
-  _renderWordMapSearchResults()
+  _ensureWordMapSearchBar()
 })
 $(document).on('click', '#wordMapResults .word-map-hit', e => {
   const id = $(e.currentTarget).attr('data-map-id')
@@ -12028,15 +12116,18 @@ window.addEventListener('storage', event => {
     _renderWordMapSearchResults()
 })
 
-// The results bar lives inside #result, which every render() rebuilds — so
-// re-insert it (and restore the last results) whenever it has been wiped.
+// The enabled source blocks live inside #result, which every render() rebuilds.
+// Restore book results only within the same search (settings redraw/paging).
 // Idempotent: safe to call from every point that touches #result.
 function _ensureLibrarySearchBar() {
   // First, so the book bar (prepended below) sits above it.
   _ensureManualSearchBar()
   _ensureWordMapSearchBar()
-  if (!_haveLibrarySearchBridge()) return
   const $result = $('#result')
+  if (window._appSettings?.includeLibraryInSearch === false || !_haveLibrarySearchBridge()) {
+    $result.children('#librarySearchBar, #libraryResults').remove()
+    return
+  }
   if (!$result.length || $result.children('#librarySearchBar').length) return
   $result.prepend(`<div id="librarySearchBar" class="lib-search-bar">
       <button type="button" id="librarySearchBtn" class="lang-tool-btn" title="Full-text search the EPUBs in your Cupitor library for the current search phrase. Words match whole, and the last word also matches by prefix (hem → hemma).">📚 Search books</button>
@@ -12082,15 +12173,18 @@ function _librarySearchTerm() {
   return window._librarySearchText || window.searchText
 }
 function _maybeAutoLibrarySearch() {
-  if (!_haveLibrarySearchBridge()) return
+  if (window._appSettings?.includeLibraryInSearch === false || !_haveLibrarySearchBridge()) return
   const term = _librarySearchTerm()
   const query = _buildLibraryQuery(term)
   const state = window._librarySearchPending
-  if (state && state.query !== query) libraryCancelSearch()
+  if (state && state.query !== query) _resetLibrarySearch()
   if (!(window._appSettings && window._appSettings.autoLibrarySearch)) return
   if (!term || !String(term).trim()) return
   clearTimeout(window._libraryAutoTimer)
-  window._libraryAutoTimer = setTimeout(() => librarySearch(term), LIBRARY_SEARCH_DEBOUNCE_MS)
+  const generation = window._librarySearchGeneration
+  window._libraryAutoTimer = setTimeout(() => {
+    if (generation === window._librarySearchGeneration) librarySearch(term)
+  }, LIBRARY_SEARCH_DEBOUNCE_MS)
 }
 window._maybeAutoLibrarySearch = _maybeAutoLibrarySearch
 
@@ -12114,7 +12208,7 @@ $(document).on('change', '#librarySearchAutoCb', e => {
   window._appSettings.autoLibrarySearch = on
   saveAppSettings()
   $('#toggleAutoLibrarySearchCheckbox').prop('checked', on)
-  if (on && window.searchText) librarySearch(window.searchText)
+  if (on && window.searchText) librarySearch(_librarySearchTerm())
 })
 // Fold the whole book-results block. Sticky across searches — a re-render
 // reads the setting back through _libraryRenderOpts.
@@ -19867,6 +19961,14 @@ function _recPlayAudioEl() {
       <div class="rec-pa-faces"></div>
     </div>`).appendTo('body')
     const el = $wrap.find('.rec-pa-el')[0]
+    const volume = Number(window._appSettings.recAudioVolume)
+    el.volume = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1
+    el.muted = !!window._appSettings.recAudioMuted
+    el.addEventListener('volumechange', () => {
+      window._appSettings.recAudioVolume = el.volume
+      window._appSettings.recAudioMuted = el.muted
+      saveAppSettings()
+    })
     // Hand-driven play/pause on the controls has to become the session's
     // pause state, or the playlist's poll would fight the user and the
     // overlay's Pause button would show the wrong thing.

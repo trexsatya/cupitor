@@ -51,7 +51,7 @@ async function checkCardPlayback(browser, mobile) {
         { manual: true, id: 'media-one', source: 'Du är i rätta händer.', target: 'You are in good hands.',
           mediaUrl: 'https://youtu.be/testVideo01?t=60', sourceAudioUrl: 'file:///source.wav', targetAudioUrl: 'file:///target.wav', _temporary: true },
         { manual: true, id: 'media-two', source: 'Nästa exempel börjar här.', target: 'The next example begins here.',
-          mediaUrl: 'https://youtu.be/testVideo01?t=72', _temporary: true },
+          mediaUrl: 'https://youtu.be/testVideo01?t=72', sourceAudioUrl: 'file:///next.wav', _temporary: true },
       ]
       window.__savedCards = JSON.stringify(window.__cards)
       const s = window.__yt = { id: 'boot', time: 0, state: 2, events: [], muted: false }
@@ -96,14 +96,27 @@ async function checkCardPlayback(browser, mobile) {
       return document.body.classList.contains('study-media-combined') && audio.top >= video.bottom - 1 && text.top >= audio.bottom + 8
     })
     assert.deepEqual(await page.evaluate(() => window.__loads), ['file:///source.wav'])
+    await page.evaluate(() => { window._recPlayManualAudio.volume = 0.27 })
+    await page.waitForFunction(() => window._appSettings.recAudioVolume === 0.27)
     await endAudio()
     await page.waitForFunction(() => window.__loads.length === 2)
     await audioPlaying()
+    assert.equal(await page.evaluate(() => window._recPlayManualAudio.volume), 0.27, 'the next face keeps the chosen volume')
     await endAudio()
     await page.waitForFunction(() => window._recPlayIndex === 1 && window.__yt.time === 72 && window.__yt.state === 1)
     await stop()
     await start('recordings')
     await audioPlaying()
+    assert.equal(await page.evaluate(() => window._recPlayManualAudio.volume), 0.27, 'a rebuilt Player audio element restores the chosen volume')
+    await page.evaluate(() => { window._recPlayManualAudio.volume = 0 })
+    await page.waitForFunction(() => window._appSettings.recAudioVolume === 0)
+    await endAudio()
+    await page.waitForFunction(() => window.__loads.includes('file:///target.wav'))
+    await audioPlaying()
+    await endAudio()
+    await page.waitForFunction(() => window._recPlayIndex === 1 && window.__loads.includes('file:///next.wav'))
+    await audioPlaying()
+    assert.equal(await page.evaluate(() => window._recPlayManualAudio.volume), 0, 'the next item keeps zero volume')
     assert.equal(await page.evaluate(() => window.__yt.events.some(e => ['load', 'play', 'seek'].includes(e.action))), false,
       'recordings-only does not start the link')
     await stop()
@@ -119,6 +132,7 @@ async function checkCardPlayback(browser, mobile) {
     if (mobile) await click('.rec-pb-info-btn')
     await page.selectOption('.rec-pb-media-mode', 'recordings')
     await audioPlaying()
+    assert.equal(await page.evaluate(() => window._recPlayManualAudio.volume), 0, 'zero volume survives moving to the next item/session')
     assert.equal(await page.evaluate(() => window._recPlayIndex), 0, 'changing the selector restarts this card')
     await page.selectOption('.rec-pb-media-mode', 'both')
     await videoPlaying()
