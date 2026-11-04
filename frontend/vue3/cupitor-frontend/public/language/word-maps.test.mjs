@@ -480,6 +480,52 @@ test('fullscreen fills the WebView when its native API is unavailable or refused
   assert.ok(dialog.classList.contains('wm-fullscreen'))
 })
 
+test('minimize and restore retain fullscreen in native and fallback views', async () => {
+  for (const native of [false, true]) {
+    setup()
+    let active = null
+    Object.defineProperty(document, 'fullscreenElement', { get: () => active })
+    window.HTMLElement.prototype.requestFullscreen = async function () {
+      if (!native) throw new Error('Fullscreen unavailable')
+      active = this
+      this.dispatchEvent(new window.Event('fullscreenchange', { bubbles: true }))
+    }
+    document.exitFullscreen = async () => {
+      const previous = active
+      active = null
+      previous?.dispatchEvent(new window.Event('fullscreenchange', { bubbles: true }))
+    }
+    openWordMaps({ storageKey: 'maps', onLookup() {} })
+    const dialog = document.querySelector('#wordMapsDialog')
+    click('+ Word')
+    click('Find vocabulary & clips')
+    document.querySelector('#wordMapsRestore').click()
+    assert.equal(dialog.classList.contains('wm-fullscreen'), false)
+    document.querySelector('[aria-label="Enter fullscreen"]').click()
+    await Promise.resolve()
+    for (let i = 0; i < 2; i++) {
+      click('Find vocabulary & clips')
+      assert.equal(active, null)
+      assert.equal(dialog.open, false)
+      document.querySelector('#wordMapsRestore').click()
+      await Promise.resolve()
+      assert.equal(dialog.open, true)
+      assert.ok(dialog.classList.contains('wm-fullscreen'))
+      assert.equal(active, native ? dialog : null)
+    }
+    if (!native) {
+      const cancel = new window.Event('cancel', { cancelable: true })
+      dialog.dispatchEvent(cancel)
+      assert.equal(cancel.defaultPrevented, true)
+      assert.equal(dialog.open, true)
+    } else document.querySelector('[aria-label="Exit fullscreen"]').click()
+    click('Find vocabulary & clips')
+    document.querySelector('#wordMapsRestore').click()
+    assert.equal(dialog.classList.contains('wm-fullscreen'), false)
+    click('Close')
+  }
+})
+
 test('GitHub refresh preserves a search highlight using the new map content', async () => {
   setup()
   const local = { version: 1, id: 'm', name: 'Map', edges: [], nodes: [{id:'a', word:'Gräl', x:200,y:200}] }

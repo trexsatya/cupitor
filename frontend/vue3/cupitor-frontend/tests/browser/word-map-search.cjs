@@ -48,6 +48,11 @@ async function check(browser, mobile) {
     const fullscreen = await dialog.boundingBox()
     assert.ok(fullscreen.width >= (mobile ? 388 : 1278), 'fullscreen fills the available viewport')
     await visibleMatch()
+    await dialog.getByRole('button', {name:'Find vocabulary & clips', exact:true}).click()
+    await page.locator('#wordMapsRestore').click()
+    await page.waitForFunction(() => document.querySelector('#wordMapsDialog').classList.contains('wm-fullscreen'))
+    await page.waitForFunction(() => document.querySelector('#wordMapsDialog').getBoundingClientRect().width >= innerWidth - 2)
+    await visibleMatch()
     if (process.env.SCREENSHOT_DIR) {
       require('node:fs').mkdirSync(process.env.SCREENSHOT_DIR, {recursive:true})
       await page.screenshot({path:require('node:path').join(process.env.SCREENSHOT_DIR, `word-map-search-${mobile ? 'mobile' : 'desktop'}.png`)})

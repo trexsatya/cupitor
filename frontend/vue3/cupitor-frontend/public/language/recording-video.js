@@ -10,8 +10,9 @@ export function confirmRecordingSeek({ player, videoId, start, requirePlaying = 
   setTimer = setTimeout, clearTimer = clearTimeout, timeoutMs = 3000 }) {
   const target = Number(start)
   return new Promise((resolve, reject) => {
-    let timer, settled = 0, lastSeek = -Infinity
+    let timer, settled = 0, lastSeek = -Infinity, lastTime = null
     const began = now()
+    let lastProgress = began, bestDistance = Infinity
     const finish = (error, success = false) => {
       clearTimer(timer)
       if (error) reject(error)
@@ -23,12 +24,31 @@ export function confirmRecordingSeek({ player, videoId, start, requirePlaying = 
       if (!Number.isFinite(target) || target < 0) {
         return finish(Object.assign(new Error('Invalid clip timestamp'), { kind: 'invalid-clip' }))
       }
-      if (now() - began >= timeoutMs) {
+      let state, time, loaded = false
+      try {
+        state = player.getPlayerState()
+        time = player.getCurrentTime()
+        loaded = player.getVideoData()?.video_id === videoId && Number.isFinite(time)
+      } catch (_) {}
+      // YouTube can land on an earlier keyframe. Let muted playback advance
+      // into the clip rather than seeking back to that keyframe every second.
+      // Only forward progress near the target earns more time; a frozen clock,
+      // another video or repeated jumps still exhaust the recovery budget.
+      const distance = target - time
+      const approaching = loaded && state === 1 && distance >= -0.5 && distance <= 10 &&
+        lastTime != null && time > lastTime + 0.01 && time - lastTime < 1 && distance < bestDistance - 0.01
+      if (approaching) { lastProgress = now(); bestDistance = distance }
+      lastTime = loaded ? time : null
+      if (now() - lastProgress >= timeoutMs) {
         return finish(Object.assign(new Error('Could not seek to the clip timestamp'), { kind: 'seek-failed' }))
       }
       // Always issue the command before trusting a cached timestamp, including
       // when adjacent clips share the same video and start time.
-      if (now() - lastSeek >= 1000) {
+      // Iframe timestamps may arrive less often than our polls. Keep a short
+      // grace after real progress so an unchanged sample cannot rewind it.
+      const advancing = loaded && state === 1 && distance >= -0.5 && distance <= 10 &&
+        Number.isFinite(bestDistance) && now() - lastProgress < 1000
+      if (now() - lastSeek >= 1000 && !advancing) {
         lastSeek = now()
         settled = 0
         try { player.seekTo(target, true) } catch (_) {}

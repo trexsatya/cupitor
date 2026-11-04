@@ -90,6 +90,7 @@ jobs:
           node tests/browser/local-speakover.cjs
           node tests/browser/local-media-subtitles.cjs
           node tests/browser/youtube-media-subtitles.cjs
+          node tests/browser/youtube-return.cjs
           node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
           node tests/browser/search-result-counts.cjs
           node tests/browser/dictionary-lookup.cjs
@@ -162,6 +163,7 @@ jobs:
           node tests/browser/local-speakover.cjs
           node tests/browser/local-media-subtitles.cjs
           node tests/browser/youtube-media-subtitles.cjs
+          node tests/browser/youtube-return.cjs
           node tests/browser/unavailable-videos.cjs
           node tests/browser/player-seek.cjs
           (cd dist && node ../tests/browser/dialog-scrolling.mjs)
