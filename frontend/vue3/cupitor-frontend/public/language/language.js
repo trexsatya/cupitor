@@ -7317,7 +7317,13 @@ function _renderSearchPlaylistToolbar(state, $result) {
   _syncSearchPlaylistSelection(state)
 }
 
-async function populateSRTFindings(wordToItemsMap, $result, token) {
+// Queries and pagination can redraw the same element while an older render
+// yields for context or the UI. Only the newest render may append headings.
+let _srtRenderVersion = 0
+async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion = _srtRenderVersion) {
+  const isCurrent = () => renderVersion === _srtRenderVersion &&
+    (token === undefined || token === window._subtitleSearchToken)
+  if (!isCurrent()) return
   const startTime = new Date()
   // Expose for debugging: inspect via `window._lastWordToItemsMap` in console.
   window._lastWordToItemsMap = wordToItemsMap
@@ -7361,10 +7367,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
   _renderSearchPagination(pg)
 
   for (let wStart = pg.start; wStart < pg.end; wStart += WORD_CHUNK) {
-    if (token !== undefined && token !== window._subtitleSearchToken) {
-      console.log('Token mismatch, aborting populateSRTFindings');
-      return
-    }
+    if (!isCurrent()) return
     const wEnd = Math.min(wStart + WORD_CHUNK, pg.end)
     const slice = words.slice(wStart, wEnd)
     for (const word of slice) {
@@ -7478,8 +7481,10 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
             $fileBlock.append($lines)
 
             await renderLines(id, item.url)
+            if (!isCurrent()) return
             rendered.push(item)
           } catch (perItemErr) {
+            if (!isCurrent()) return
             if (perItemErr.code?.startsWith('subtitle-search')) throw perItemErr
             // One bad item shouldn't kill the whole word block. Log and move on.
             console.error('populateSRTFindings: failed to render item for', word, item, perItemErr)
@@ -7504,6 +7509,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
           wordBlock.find('.l-accordion').addClass('no-result')
         }
       } catch (perWordErr) {
+        if (!isCurrent()) return
         if (perWordErr.code?.startsWith('subtitle-search')) throw perWordErr
         // Per-word failures (missing categories, bad item shape, …) used to
         // break the entire results render. Log and continue so the user
@@ -7512,6 +7518,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
       }
     } //end word slice
     await yieldToUI()
+    if (!isCurrent()) return
     // Measure the sticky accordion height once we've rendered enough chunks
     // for one to be on the page, and feed it back as a CSS variable so
     // `.lines-cntnr .buttons`' sticky `top` parks flush against it (instead
@@ -9001,6 +9008,9 @@ async function _regroupByCorrespondingWord(wordToItemsMap, search, token) {
 
 async function render(searchResults, search, className, token) {
   if (token !== undefined && token !== window._subtitleSearchToken) return {}
+  const renderVersion = ++_srtRenderVersion
+  const isCurrent = () => renderVersion === _srtRenderVersion &&
+    (token === undefined || token === window._subtitleSearchToken)
   const startTime = new Date()
   // The vocab list is rendered once on the primary pass. The secondary pass
   // (fired by fetchSRTs' stem fallback) gets a multi-pipe `search` like
@@ -9039,13 +9049,13 @@ async function render(searchResults, search, className, token) {
   const searchResultsFiltered = _filterSearchChannels(filterByLanguage(searchResults));
 
   let wordToItemsMap = await getMatchingWords(searchResultsFiltered, search, token);
+  if (!isCurrent()) return wordToItemsMap
   window.wordToItemsMap = wordToItemsMap
-  if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
 
   // An English search reads better split by the studied-language word behind
   // each hit. Falls through untouched whenever there is nothing to split on.
   const _regrouped = await _regroupByCorrespondingWord(wordToItemsMap, search, token)
-  if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
+  if (!isCurrent()) return wordToItemsMap
   window._srtGroupedByCorresponding = !!_regrouped
   if (_regrouped) wordToItemsMap = _regrouped
   // What the headings are drawn from — paging redraws from the same map.
@@ -9060,8 +9070,8 @@ async function render(searchResults, search, className, token) {
     }</p>`)
   }
 
-  await populateSRTFindings(wordToItemsMap, $result, token);
-  if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
+  await populateSRTFindings(wordToItemsMap, $result, token, renderVersion);
+  if (!isCurrent()) return wordToItemsMap
 
   if (Object.keys(wordToItemsMap).length === 0) {
     $result.html(resultNotFound(window.searchText))
@@ -9075,7 +9085,7 @@ async function render(searchResults, search, className, token) {
   let wordToItemsMapNonSrt = {}
   if (window.location.pathname.includes("wordbuilder")) {
     wordToItemsMapNonSrt = await getMatchingWords(searchResults.filter(it => it.nonSrt), search, token);
-    if (token !== undefined && token !== window._subtitleSearchToken) return wordToItemsMap
+    if (!isCurrent()) return wordToItemsMap
     populateNonSRTFindings(wordToItemsMapNonSrt, $result);
   }
 
@@ -9240,6 +9250,7 @@ async function loadSearchResultsPage(page) {
   const map = window._shownWordToItemsMap
   if (!map || _searchRunsInFlight > 0) return
   const token = window._subtitleSearchToken
+  const renderVersion = ++_srtRenderVersion
   // Clamped by populateSRTFindings, against the headings it actually lists.
   window._searchResultPage = Math.max(0, page)
   const $result = $('#result')
@@ -9252,8 +9263,8 @@ async function loadSearchResultsPage(page) {
     }</p>`)
   }
   $result.scrollTop(0)
-  await populateSRTFindings(map, $result, token);
-  if (token !== window._subtitleSearchToken) return
+  await populateSRTFindings(map, $result, token, renderVersion);
+  if (token !== window._subtitleSearchToken || renderVersion !== _srtRenderVersion) return
   $result.append("<hr>")
   renderAccordions($result[0])
   // Mobile results scroll with the document, so resetting the element's
