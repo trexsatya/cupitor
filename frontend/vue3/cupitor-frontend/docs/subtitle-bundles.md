@@ -19,6 +19,18 @@ the pack path/revision so changes invalidate stale entries. Account, repository,
 language and pack revision are represented in the request URL. Missing or
 malformed packs fail explicitly; they never become empty authoritative files.
 
+At boot, missing entries are grouped by pack URL and revision. Up to four packs
+load at once; each job holds its parsed pack while importing all needed pairs,
+even if the shared memory cache evicts it. This avoids refetching packs when
+their entries are interleaved in the index. Download-cache and search-corpus
+writes use batches of at most 32 pairs / 2 MiB, allowing one oversized pair
+alone. Imports wait for each batch before staging more. Existing complete
+cache hits are skipped, missing translations stay optional, and pending
+captures are merged into the imported snapshot. Background retries use the
+same grouped path. A search-storage commit failure stops further staging and
+reports incomplete search, retaining only the current unacknowledged batches.
+No stored subtitle format or repository data changes.
+
 ## Writes
 
 `GitHubUtils` installs a subtitle adapter. Existing `.srt` paths become virtual

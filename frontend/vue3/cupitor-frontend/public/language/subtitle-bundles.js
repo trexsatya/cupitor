@@ -71,29 +71,35 @@ export function packDocuments(documents, options = {}) {
 export function createBundleLoader(fetchText, {maxBytes=8*1024*1024}={}) {
   const pending = new Map(), sizes = new Map()
   let bytes=0
+  async function load(entry, baseUrl) {
+    const path = bundlePath(entry.bundle)
+    const url = baseUrl.replace(/\/$/, '') + '/' + path + '?v=' + encodeURIComponent(entry.bundleRevision || 1)
+    if (!pending.has(url)) {
+      const promise = Promise.resolve().then(() => fetchText(url)).then(parseBundle)
+      pending.set(url, promise)
+      promise.then(files=>{
+        if(pending.get(url)!==promise)return
+        const size=2*Object.values(files).reduce((sum,text)=>sum+text.length,0)
+        sizes.set(url,size);bytes+=size
+        for(const key of pending.keys()){
+          if(bytes<=maxBytes)break
+          if(!sizes.has(key))continue
+          bytes-=sizes.get(key);sizes.delete(key);pending.delete(key)
+        }
+      },()=>{})
+      promise.catch(() => { if (pending.get(url) === promise) pending.delete(url) })
+    }
+    const promise=pending.get(url)
+    pending.delete(url);pending.set(url,promise)
+    return promise
+  }
   return {
     clear() { pending.clear();sizes.clear();bytes=0 },
+    // Bulk import holds one parsed pack while consuming all its entries,
+    // independently of whether the shared LRU still has room for that pack.
+    bundle: load,
     async track(entry, code, baseUrl) {
-      const path = bundlePath(entry.bundle)
-      const url = baseUrl.replace(/\/$/, '') + '/' + path + '?v=' + encodeURIComponent(entry.bundleRevision || 1)
-      if (!pending.has(url)) {
-        const promise = Promise.resolve().then(() => fetchText(url)).then(parseBundle)
-        pending.set(url, promise)
-        promise.then(files=>{
-          if(pending.get(url)!==promise)return
-          const size=2*Object.values(files).reduce((sum,text)=>sum+text.length,0)
-          sizes.set(url,size);bytes+=size
-          for(const key of pending.keys()){
-            if(bytes<=maxBytes)break
-            if(!sizes.has(key))continue
-            bytes-=sizes.get(key);sizes.delete(key);pending.delete(key)
-          }
-        },()=>{})
-        promise.catch(() => { if (pending.get(url) === promise) pending.delete(url) })
-      }
-      const promise=pending.get(url)
-      pending.delete(url);pending.set(url,promise)
-      const files = await promise
+      const files = await load(entry, baseUrl)
       const key = (entry.bundleKey || entry.name) + '.' + code + '.srt'
       return owns(files, key) ? files[key] : null
     },

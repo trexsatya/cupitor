@@ -17,6 +17,7 @@ import { createSpotifyStudyPlayer } from './spotify-player.js';
 import { installDialogScrolling } from './dialog-scrolling.js';
 import { createFullSrtDialog } from './full-srt-dialog.js';
 import { createBundleLoader, createSubtitleBundleAdapter } from './subtitle-bundles.js';
+import { loadSubtitlePacks } from './subtitle-pack-loading.js';
 import { recordingsHaveChanges } from './recordings-sync-state.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
@@ -4888,6 +4889,51 @@ function populateAllLinks() {
   return srts;
 }
 
+function _loadSubtitleGroups(items, context, {onFailure, onProgress} = {}) {
+  return loadSubtitlePacks(items, {
+    loader: _subtitleBundleLoader,
+    baseUrl: entry => {
+      context.assertCurrent()
+      if (entry.sourceIdentity && entry.sourceIdentity !== _dsSourceIdentity(entry.src || 'primary'))
+        throw Object.assign(new Error('The subtitle index belongs to another source. Reload before opening it.'), {code: 'stale-data-source'})
+      return _dsReadUrl(entry.src || 'primary', 'srts', _dsLangFromLocation())
+    },
+    code: getLangFromUrl().code,
+    assertCurrent: () => context.assertCurrent(),
+    onFailure, onProgress,
+    loadLoose: entry => _withTimeout(getSubtitlesForLink(entry.link, entry.source, {prepareOnly:true}), 15000, entry.link),
+    commitBatch: async rows => {
+      context.assertCurrent()
+      const records = []
+      for (const {entry, sv, en} of rows) {
+        if (entry.sourceIdentity && entry.sourceIdentity !== _dsSourceIdentity(entry.src || 'primary'))
+          throw Object.assign(new Error('The subtitle index belongs to another source. Reload before opening it.'), {code: 'stale-data-source'})
+        // Playback, an edit or a capture push may already have installed a
+        // newer complete pair while this pack was downloading.
+        const current = window.allSubtitles[entry.link]
+        if (current?._remoteComplete && !current._partial) continue
+        const snapshot = _applySubtitleSnapshot(entry.link, {sv, en, source:entry.source, fileName:entry.name,
+          readOnly:!!entry.readOnly, bundle:entry.bundle, bundleRevision:entry.bundleRevision})
+        // Use the merged snapshot so unsynced captures are preserved in both
+        // the download cache and the worker's observable corpus.
+        records.push({link:entry.link, name:snapshot.fileName, sv:snapshot.sv, en:snapshot.en, source:snapshot.source,
+          owner:entry.owner || _sourceOwner('primary'), complete:snapshot._remoteComplete === true,
+          sourceIdentity:entry.sourceIdentity || _dsSourceIdentity(entry.src || 'primary'),
+          bundle:entry.bundle, bundleRevision:entry.bundleRevision})
+      }
+      // Stage all rows synchronously, then commit bounded batches rather than
+      // opening a download-cache and search transaction for every clip.
+      try { await Promise.all([_cacheWriteMany(records), _subtitleSearch.flush()]) }
+      catch (error) {
+        window._subtitleSearchStorageError = error.message
+        _setSubtitleSearchStatus('Subtitle search storage is incomplete: '+error.message,false)
+        throw error
+      }
+      context.assertCurrent()
+    },
+  })
+}
+
 async function loadAllSubtitles() {
   const context = _dsCaptureSourceContext()
   try {
@@ -4963,14 +5009,6 @@ async function loadAllSubtitles() {
     // are queued for a background retry after subtitles are declared ready, so
     // a flaky load doesn't permanently leave gaps in window.allSubtitles.
     const transientFailures = []
-    // Cap concurrent SRT fetches at SRT_FETCH_CONCURRENCY. Earlier we kicked
-    // off every pair in parallel via srts.map(async …), which on bigger
-    // indexes (hundreds of entries × 2 files each) flooded Chrome with
-    // requests and triggered net::ERR_INSUFFICIENT_RESOURCES. The pool keeps
-    // the in-flight count bounded so the browser doesn't bail out. The host
-    // (raw.githubusercontent.com) is HTTP/2, so this isn't the old 6-per-host
-    // cap — the practical ceiling is the host's rate limiter.
-    const SRT_FETCH_CONCURRENCY = 4
     // Only fetch what the cache didn't satisfy. On a steady-state boot this
     // is typically empty (everything came from IDB); on first boot it's the
     // whole corpus; on a deploy that added videos it's just the new ones.
@@ -4979,20 +5017,17 @@ async function loadAllSubtitles() {
       console.log(`[cache] boot: ${cacheHits.length} hits, ${toFetch.length} to fetch, ${deadLinks.length} evicted`)
     }
     _srtProgressShow(toFetch.length)
-    const srtLoadingDone = _runInBatches(toFetch, async (it) => {
-      // Queued work belongs to this boot, including batches that have not
-      // started yet when the account/language changes.
-      try { context.assertCurrent() } catch (_) { return }
-      try {
-        await _withTimeout(getSubtitlesForLink(it['link'], it['source'], {prepareOnly:true}), 15000, it['link'])
-      } catch (e) {
-        if (e?.code === 'stale-data-source') return
-        // A timeout from _withTimeout carries no .kind — treat it as transient.
-        if (e && e.kind === 'notfound') notFound.push(it['link'])
-        else transientFailures.push(it)
-      }
-    }, SRT_FETCH_CONCURRENCY, (done, total) => _srtProgressUpdate(done, total))
+    // Four pack jobs at a time. Each pack is downloaded/parsed once, then
+    // imported in batches of at most 32 pairs / 2 MiB before more are staged.
+    const srtLoadingDone = _loadSubtitleGroups(toFetch, context, {
+      onFailure: (entry, error) => {
+        if (error?.kind === 'notfound') notFound.push(entry.link)
+        else transientFailures.push(entry)
+      },
+      onProgress: (done, total) => _srtProgressUpdate(done, total),
+    })
       .finally(() => _srtProgressHide())
+    srtLoadingDone.catch(() => {}) // Observed below after vocabulary/settings.
 
     const categories = await fetchCategorisation()
     context.assertCurrent()
@@ -5065,18 +5100,9 @@ async function _retrySrtsInBackground(items, maxRounds = 4) {
       context.assertCurrent()
 
       const stillFailing = []
-      await _runInBatches(pending, async (it) => {
-        context.assertCurrent()
-        // Skip ones a prior round (or a normal search) already recovered.
-        if (window.allSubtitles[it['link']] && !window.allSubtitles[it['link']]._partial) return
-        try {
-          // A touch more patience per attempt than the initial 15s.
-          await _withTimeout(getSubtitlesForLink(it['link'], it['source']), 20000, it['link'])
-        } catch (e) {
-          // A 404 surfacing on retry means the file truly isn't there — drop it.
-          if (!(e && e.kind === 'notfound')) stillFailing.push(it)
-        }
-      }, 4 /* gentle concurrency to avoid re-tripping rate limits */)
+      await _loadSubtitleGroups(pending.filter(entry => !window.allSubtitles[entry.link] || window.allSubtitles[entry.link]._partial), context, {
+        onFailure: (entry, error) => { if (error?.kind !== 'notfound') stillFailing.push(entry) },
+      })
 
       const recovered = pending.length - stillFailing.length
       if (recovered > 0) {
@@ -5434,7 +5460,7 @@ async function _fetchSrtFile(url) {
   return res.text()
 }
 
-const _subtitleBundleLoader = createBundleLoader(_fetchSrtFile)
+const _subtitleBundleLoader = createBundleLoader(url => _withTimeout(_fetchSrtFile(url), 15000, url))
 async function _fetchIndexedSrt(entry, code, who) {
   const base = _dsReadUrl(who || entry.src || 'primary', 'srts', _dsLangFromLocation())
   if (entry.bundle) {
