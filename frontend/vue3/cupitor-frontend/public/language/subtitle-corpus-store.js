@@ -1,17 +1,23 @@
 // Disposable raw search corpus, separate from authoritative user edits. Only
 // the active scope and bounded document batches enter memory.
+import { createSubtitleIndex } from './subtitle-index-store.js'
 const request = req => new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})
 const done = tx => new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error||new Error('Search cache transaction interrupted'));tx.onerror=()=>{}})
 export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, {baseScope=scope}={}) {
   if (!factory) throw new Error('Search storage is unavailable; full subtitle coverage could not be prepared.')
   const db = await new Promise((resolve,reject)=>{
-    const req=factory.open('cupitor-search-corpus-v1',2)
+    const req=factory.open('cupitor-search-corpus-v1',3)
     let blocked=false
     req.onupgradeneeded=()=>{
       const documents=req.result.objectStoreNames.contains('documents')?req.transaction.objectStore('documents'):req.result.createObjectStore('documents',{keyPath:['scope','id']})
       if(!documents.indexNames.contains('scope'))documents.createIndex('scope','scope')
       if(!req.result.objectStoreNames.contains('info'))req.result.createObjectStore('info',{keyPath:['scope','id']}).createIndex('scope','scope')
       if(!req.result.objectStoreNames.contains('scopes'))req.result.createObjectStore('scopes',{keyPath:'scope'})
+      if(!req.result.objectStoreNames.contains('features'))req.result.createObjectStore('features',{keyPath:['scope','id']}).createIndex('scope','scope')
+      if(!req.result.objectStoreNames.contains('postings')){
+        const postings=req.result.createObjectStore('postings',{keyPath:['scope','term','shard']})
+        postings.createIndex('scope','scope');postings.createIndex('term',['scope','term'])
+      }
     }
     req.onsuccess=()=>{if(blocked)req.result.close();else resolve(req.result)}
     req.onerror=()=>reject(req.error)
@@ -20,6 +26,7 @@ export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, 
   let heartbeat=null,pruning=null
   db.onversionchange=()=>{clearInterval(heartbeat);db.close()}
   const transact=(names,mode='readonly')=>db.transaction(names,mode)
+  const searchIndex=createSubtitleIndex(db,scope)
   let touched=0
   const api={
     async touch(){
@@ -30,28 +37,36 @@ export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, 
       await complete;touched=Date.now()
     },
     async put(documents) {
+      documents=[...new Map(documents.map(doc=>[doc.id,doc])).values()]
       const tx=transact(['documents','info','scopes'],'readwrite'),complete=done(tx)
       complete.catch(()=>{})
+      const changed=[];let nextRevision
       try {
-        const [previous,meta]=await Promise.all([
+        const [previous,oldDocuments,meta]=await Promise.all([
           Promise.all(documents.map(doc=>request(tx.objectStore('info').get([scope,doc.id])))),
+          Promise.all(documents.map(doc=>request(tx.objectStore('documents').get([scope,doc.id])))),
           request(tx.objectStore('scopes').get(scope)),
         ])
-        let count=meta?.count||0,bytes=meta?.bytes||0
+        let count=meta?.count||0,bytes=meta?.bytes||0,nextOrdinal=meta?.nextOrdinal||0
         for(let i=0;i<documents.length;i++) {
           const doc=documents[i],old=previous[i]
           if(old){count--;bytes-=old.bytes}
-          if(doc.remove){tx.objectStore('documents').delete([scope,doc.id]);tx.objectStore('info').delete([scope,doc.id])}
+          if(doc.remove){tx.objectStore('documents').delete([scope,doc.id]);tx.objectStore('info').delete([scope,doc.id]);changed.push({id:doc.id})}
           else {
             const size=2*((doc.sv?.length||0)+(doc.en?.length||0))
             tx.objectStore('documents').put({...doc,scope})
-            tx.objectStore('info').put({scope,id:doc.id,bytes:size,revision:doc.revision})
+            const before=oldDocuments[i],same=!!before&&(before.sv||null)===(doc.sv||null)&&(before.en||null)===(doc.en||null)
+            const info={...old,scope,id:doc.id,bytes:size,revision:doc.revision,
+              generation:same?(old?.generation||0):(old?.generation||0)+1,ordinal:old?.ordinal??nextOrdinal++,
+              indexComplete:same&&!!old?.indexComplete,wordComplete:same&&!!old?.wordComplete}
+            tx.objectStore('info').put(info);changed.push(info)
             count++;bytes+=size
           }
         }
-        tx.objectStore('scopes').put({...meta,scope,baseScope,createdAt:meta?.createdAt||Date.now(),touchedAt:Date.now(),leaseUntil:Date.now()+180000,count,bytes})
+        nextRevision=(meta?.corpusRevision||0)+1
+        tx.objectStore('scopes').put({...meta,scope,baseScope,createdAt:meta?.createdAt||Date.now(),touchedAt:Date.now(),leaseUntil:Date.now()+180000,count,bytes,nextOrdinal,corpusRevision:nextRevision})
       }catch(error){tx.abort();await complete.catch(()=>{});throw error}
-      await complete;touched=Date.now()
+      await complete;touched=Date.now();searchIndex.changed(changed,nextRevision)
       if(!pruning)pruning=api.prune().catch(()=>{}).finally(()=>{pruning=null})
     },
     async get(ids) {
@@ -77,15 +92,22 @@ export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, 
       }
     },
     async list(){const tx=transact(['scopes']),complete=done(tx);complete.catch(()=>{});const result=await request(tx.objectStore('scopes').getAll());await complete;return result},
+    indexDocument:searchIndex.document,
+    candidates:searchIndex.candidates,
+    indexStatus:searchIndex.status,
+    pendingIndexIds:searchIndex.pending,
+    documentIds:()=>searchIndex.pending({all:true}),
     async removeScope(target) {
       if(target===scope)throw new Error('The active subtitle search cache is protected.')
       for(;;){
-        const tx=transact(['documents','info','scopes'],'readwrite'),complete=done(tx);complete.catch(()=>{})
-        const keys=await request(tx.objectStore('documents').index('scope').getAllKeys(target,256))
-        for(const key of keys){tx.objectStore('documents').delete(key);tx.objectStore('info').delete(key)}
-        if(keys.length<256)tx.objectStore('scopes').delete(target)
+        const stores=['documents','info','features','postings']
+        const tx=transact([...stores,'scopes'],'readwrite'),complete=done(tx);complete.catch(()=>{})
+        const keys=await Promise.all(stores.map(name=>request(tx.objectStore(name).index('scope').getAllKeys(target,256))))
+        stores.forEach((name,i)=>keys[i].forEach(key=>tx.objectStore(name).delete(key)))
+        const finished=keys.every(batch=>batch.length<256)
+        if(finished)tx.objectStore('scopes').delete(target)
         await complete
-        if(keys.length<256)return
+        if(finished)return
       }
     },
     async prune(){
@@ -97,9 +119,9 @@ export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, 
         else kept.add(meta.baseScope)
       }
       const removing=new Set(remove.map(meta=>meta.scope))
-      let bytes=entries.filter(meta=>!removing.has(meta.scope)).reduce((sum,meta)=>sum+(meta.bytes||0),0)
+      let bytes=entries.filter(meta=>!removing.has(meta.scope)).reduce((sum,meta)=>sum+(meta.bytes||0)+(meta.indexBytes||0),0)
       for(const meta of [...entries].reverse())if(bytes>128*1024*1024&&meta.scope!==scope&&!(meta.leaseUntil>now)&&!removing.has(meta.scope)){
-        remove.push(meta);removing.add(meta.scope);bytes-=meta.bytes||0
+        remove.push(meta);removing.add(meta.scope);bytes-=(meta.bytes||0)+(meta.indexBytes||0)
       }
       for(const meta of remove)await api.removeScope(meta.scope)
     },

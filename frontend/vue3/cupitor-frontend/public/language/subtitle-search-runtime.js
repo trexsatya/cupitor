@@ -9,9 +9,31 @@ export const searchError = (message,code='subtitle-search-incomplete')=>Object.a
 // Used by both the dedicated worker and the cooperative fallback. A complete
 // transcript remains the regex search unit; it is never split into guessed
 // overlapping text chunks.
-export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.indexedDB,cacheBytes,baseScope=scope}={}) {
+export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.indexedDB,cacheBytes,baseScope=scope,indexing=true}={}) {
   const corpus=await openSubtitleCorpus(scope,indexedDB,{baseScope}),cache=createDocumentCache(cacheBytes)
-  return {
+  const queue=new Set()
+  let closed=false,indexWork=null,indexDocumentWork=null,indexPaused=0,indexError=null,lastQuery=null
+  function enqueue(ids){
+    if(!indexing||closed)return
+    ids.forEach(id=>queue.add(id))
+    if(indexWork||indexPaused)return
+    indexWork=(async()=>{
+      while(queue.size&&!closed&&!indexPaused){
+        const id=queue.values().next().value;queue.delete(id)
+        try{indexDocumentWork=corpus.indexDocument(id,{check:()=>{if(closed)throw searchError('Search session closed.')}});await indexDocumentWork}
+        catch(error){if(!closed)indexError=error.message}
+        finally{indexDocumentWork=null}
+        await new Promise(resolve=>setTimeout(resolve,0))
+      }
+      if(!closed)await corpus.prune().catch(()=>{})
+    })().finally(()=>{indexWork=null;if(queue.size&&!closed&&!indexPaused)enqueue([])})
+  }
+  const resumed=corpus.pendingIndexIds().then(enqueue).catch(error=>{if(!closed)indexError=error.message})
+  async function candidates(ids,query,options,check){
+    if(indexing)try{return await corpus.candidates(ids,query,options,check)}catch(error){check();indexError=error.message}
+    return {ids,strategy:'scan',indexed:0,pending:ids.length}
+  }
+  const api={
     async update(documents){
       const missing=documents.filter(doc=>doc._evicted&&!doc.remove),incoming=new Map(missing.map(doc=>[doc.id,doc]))
       for await(const batch of corpus.iterate(missing.map(doc=>doc.id))) {
@@ -25,12 +47,15 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
       const normal=documents.filter(doc=>!doc._evicted||doc.remove)
       if(normal.length)await corpus.put(normal)
       documents.forEach(doc=>cache.remove(doc.id))
+      enqueue(documents.map(doc=>doc.id))
     },
     async document({id}){const [doc]=await corpus.get([id]);if(!doc)throw searchError('This subtitle is not downloaded for offline use.');return doc},
-    async files({ids,query,regexMode,suffix,compact=false},check=()=>{},progress=()=>{}) {
+    async files({ids,query,regexMode,suffix,compact=false,useIndex=true},check=()=>{},progress=()=>{}) {
       const result=[]
+      const selection=useIndex?await candidates(ids,query,{regexMode},check):{ids,strategy:'scan',pending:0}
+      lastQuery={total:ids.length,candidates:selection.ids.length,inspected:0,strategy:selection.strategy,pending:selection.pending}
       let visited=0
-      for await(const batch of corpus.iterate(ids)) {
+      for await(const batch of corpus.iterate(selection.ids)) {
         check()
         for(let i=0;i<batch.length;i++) {
           check()
@@ -42,10 +67,11 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
           if(hit)result.push(compact?compactSearchFile(hit):hit)
         }
         visited+=batch.length
-        progress({visited,total:ids.length})
+        lastQuery.inspected=visited
+        progress({visited:ids.length-selection.ids.length+visited,total:ids.length})
         await new Promise(resolve=>setTimeout(resolve,0))
       }
-      check();return result
+      check();progress({visited:ids.length,total:ids.length});return result
     },
     async attribute({files,query,regexMode,exactWordsOnly,compact=false,englishParts=[]},check=()=>{}) {
       const projected=new WeakMap()
@@ -59,6 +85,10 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
         return projected.get(line)
       }
       const collector=createSubtitleMatchCollector(query,{regexMode,exactWordsOnly,projectLine})
+      const language=files.length&&files.every(file=>file.language===files[0].language)?files[0].language:null
+      const selection=await candidates(files.map(file=>file.id),query,{language,regexMode,exactWordsOnly},check)
+      const selected=new Set(selection.ids)
+      files=files.filter(file=>selected.has(file.id))
       // Input contains identities, not another copy of the subtitle corpus.
       let offset=0
       for await(const batch of corpus.iterate(files.map(file=>file.id))) {
@@ -178,8 +208,29 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
       return result
     },
     async caches(){return corpus.list()},
+    async retain({ids}){
+      const wanted=new Set(ids),removed=(await corpus.documentIds()).filter(id=>!wanted.has(id))
+      for(let offset=0;offset<removed.length;offset+=32)await corpus.put(removed.slice(offset,offset+32).map(id=>({id,remove:true})))
+      enqueue(removed);return removed.length
+    },
+    async indexStatus({ids=[],wait=false}={}){
+      if(wait){await resumed;while(indexWork)await indexWork}
+      return {...await corpus.indexStatus(ids),building:!!indexWork,queued:queue.size,error:indexError,lastQuery}
+    },
     async clearCache({scope:target}){const entries=await corpus.list();if(entries.some(meta=>meta.scope===target&&(meta.baseScope===baseScope||meta.leaseUntil>Date.now())))throw searchError('The active language/source search data is protected.');await corpus.removeScope(target);return true},
-    close(){corpus.close()},
+    close(){closed=true;queue.clear();corpus.close()},
     get cacheBytes(){return cache.bytes},
   }
+  // A blocked native regex must not strand a background read/write index
+  // transaction. Finish the current document first, and pause further index
+  // writes until the query returns (or its worker is terminated).
+  for(const type of ['files','attribute','statistics','regroup','vocabScan','automatic','playlist']){
+    const run=api[type]
+    api[type]=async(...args)=>{
+      indexPaused++
+      try{if(indexDocumentWork)await indexDocumentWork.catch(()=>{});args[1]?.();return await run(...args)}
+      finally{indexPaused--;if(!indexPaused&&queue.size&&!closed)enqueue([])}
+    }
+  }
+  return api
 }

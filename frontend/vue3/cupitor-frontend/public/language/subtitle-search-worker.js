@@ -9,7 +9,7 @@ self.onmessage=async({data})=>{
     } else if(generation!==session) return
     else if(type==='cancel'){activeQuery=0;return}
     else if(type==='update')await runtime.update(payload.documents)
-    else if(['document','context','caches','clearCache'].includes(type)){self.postMessage({id,generation,result:await runtime[type](payload)});return}
+    else if(['document','context','caches','clearCache','indexStatus','retain'].includes(type)){self.postMessage({id,generation,result:await runtime[type](payload)});return}
     else if(['files','attribute','statistics','regroup','vocabScan','automatic','playlist'].includes(type)) {
       activeQuery=id
       const check=()=>{if(activeQuery!==id||session!==generation)throw searchError('Search cancelled.','subtitle-search-cancelled')}

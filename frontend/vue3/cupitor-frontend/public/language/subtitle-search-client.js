@@ -1,10 +1,12 @@
 import { createSubtitleSearchRuntime, searchError } from './subtitle-search-runtime.js'
+import { reserveSubtitleSession } from './subtitle-search-session.js'
 const queryTypes=['files','attribute','statistics','regroup','vocabScan','automatic','playlist']
 
 export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFactory=()=>new Worker(new URL('./subtitle-search-worker.js',import.meta.url),{type:'module'}),timeoutMs=10000,onProgress=()=>{},onMode=()=>{},onCommitted=()=>{}}) {
   const baseScope=scope
   scope=JSON.stringify([scope,globalThis.crypto?.randomUUID?.() || Date.now()+'-'+Math.random()])
-  let worker=null,fallback=null,ready=null,generation=0,nextId=0,revision=0,flushing=null,cancellation=0
+  let worker=null,fallback=null,ready=null,generation=0,nextId=0,revision=0,flushing=null,cancellation=0,hadWorker=false
+  let reservation=null
   const requests=new Map(),pending=new Map(),documentRevisions=new Map()
   function discard(error) {
     generation++;worker?.terminate();worker=null;fallback?.close();fallback=null;ready=null
@@ -15,6 +17,10 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
     if(ready)return ready
     assertCurrent();const current=++generation
     ready=(async()=>{
+      if(!reservation)reservation=reserveSubtitleSession(baseScope)
+      scope=(await reservation).scope
+      if(current!==generation)throw searchError('Search session changed.','subtitle-search-cancelled')
+      assertCurrent()
       try {
         worker=workerFactory()
         worker.onmessage=({data})=>{
@@ -32,15 +38,20 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
         }
         await send('init',{scope,baseScope},2000)
         if(current!==generation)throw searchError('Search session changed.','subtitle-search-cancelled')
+        hadWorker=true
         onMode('worker')
       }catch(error) {
         if(current!==generation)throw error
         worker?.terminate();worker=null
+        if(hadWorker){ready=null;throw searchError('The search worker could not restart. Search is incomplete; try again.','subtitle-search-incomplete')}
+        generation++ // Ignore any late events from the failed startup worker.
         fallback=await createSubtitleSearchRuntime(scope,{baseScope})
         onMode('cooperative')
       }
     })()
-    return ready
+    const attempt=ready
+    try{await attempt}catch(error){if(ready===attempt)ready=null;throw error}
+    return attempt
   }
   function send(type,payload,budget=timeoutMs) {
     const id=++nextId,current=generation
@@ -110,7 +121,8 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
       }
       worker?.postMessage({type:'cancel',generation})
     },
-    close(){discard(searchError('Search session closed.','subtitle-search-cancelled'))},
+    close(){const held=reservation;reservation=null;held?.then(lease=>lease.release()).catch(()=>{});discard(searchError('Search session closed.','subtitle-search-cancelled'))},
+    get storageScope(){return scope},
     get revision(){return revision},
     get pendingSize(){return pending.size},
   }
