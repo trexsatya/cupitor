@@ -226,7 +226,7 @@ export function computeResumePoint(map, collection, recName, mode) {
     ? live.length : Math.min(Math.max(0, rawPos), queue.length - 1)
   const remaining = queue.length - pos
   const message = resumePromptMessage(recName, m, remaining, queue.length) +
-    (added.length ? `\\n\\n${added.length} new playlist item(s) will also be included.` : '')
+    (added.length ? `\n\n${added.length} new playlist item(s) will also be included.` : '')
   return { queue, pos, message, addedCount: added.length }
 }
 
