@@ -7,6 +7,7 @@ async function check(browser, mobile) {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   page.setDefaultTimeout(10000)
+  page.setDefaultNavigationTimeout(30000)
   await page.route('**/*', serveFixtures)
   await page.addInitScript(() => {
     window.dontConfirmOnRefresh = true
@@ -24,6 +25,11 @@ async function check(browser, mobile) {
     else await page.locator('[data-settings-section="search"]').click()
   }
   const closeSettings = () => page.locator('#settingsPanel').getByRole('button', { name: 'Done', exact: true }).click()
+  const ready = async () => {
+    await page.waitForFunction(() => !!(window.__cupitorSearchReady && window._vocabularyReadyPromise &&
+      window._subtitlesReadyPromise), null, { timeout: 30000 })
+    await page.evaluate(() => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
+  }
   const search = async query => {
     await page.locator('#searchText').fill(query)
     await page.locator('#searchText').press('Tab')
@@ -37,7 +43,8 @@ async function check(browser, mobile) {
     } }))
   }, { query, done })
   try {
-    await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
+    await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'domcontentloaded' })
+    await ready()
     await page.evaluate(async () => {
       await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise])
       window._recordings.Fixture = { items: { Manual: { Card: [
@@ -109,8 +116,8 @@ async function check(browser, mobile) {
     assert.ok(loading.partial > 0, 'observe intermediate, unwired accordion DOM')
     assert.ok(loading.completed > 0, 'loader finishes after rendering')
     assert.equal(loading.uncovered, 0, 'unwired accordions always stay covered by the overlay')
-    await page.reload({ waitUntil: 'networkidle' })
-    await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await ready()
     await openSettings()
     for (const id of ['includeLibraryInSearchCb', 'manualSearchIncludeCb', 'wordMapSearchIncludeCb'])
       assert.equal(await page.locator('#' + id).isChecked(), false, id + ' persists after reload')
