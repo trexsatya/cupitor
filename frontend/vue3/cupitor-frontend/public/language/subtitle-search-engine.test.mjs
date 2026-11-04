@@ -64,3 +64,27 @@ test('broad regexes group each matching word, not greedy multi-word spans', asyn
   assert.ok(bounded.förringa?.some(item => item.line.index === 2))
   assert.equal(bounded.för, undefined)
 })
+
+test('regex anchors and alternatives apply at the original cue position', async () => {
+  const lines = [
+    {index: 1, text: 'Vi vill inte förringa detta'},
+    {index: 2, text: 'förringa i början'},
+    {index: 3, text: 'Slutar med förringa'},
+    {index: 4, text: 'Vi bör förhålla oss, inte överdriva detta'},
+    {index: 5, text: 'överdriva'},
+    {index: 6, text: 'we say thin thinking'},
+    {index: 7, text: 'thin thinking'},
+  ]
+  const source = [{url: 'anchored', source: 'local', data: lines}]
+  const options = {regexMode: true, yieldToUI: async () => {}}
+  const indices = hits => [...new Set((hits || []).map(hit => hit.line.index))]
+  const beginning = await attributeSubtitleMatches(source, '^förringa', options)
+  assert.deepEqual(indices(beginning.förringa), [2])
+  const ending = await attributeSubtitleMatches(source, 'förringa$', options)
+  assert.deepEqual(indices(ending.förringa), [3])
+  const alternatives = await attributeSubtitleMatches(source, 'för[^ ]+|^överdriva$', options)
+  assert.deepEqual(indices(alternatives.överdriva), [5])
+  assert.deepEqual(indices(alternatives.förhålla), [4])
+  const english = await attributeSubtitleMatches(source, '^thin', options)
+  assert.deepEqual(indices(english.thin), [7])
+})
