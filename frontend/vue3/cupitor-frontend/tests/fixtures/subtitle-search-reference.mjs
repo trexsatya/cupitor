@@ -38,6 +38,21 @@ export async function attributeSubtitleMatches(list, search, { regexMode = false
           computeIfAbsent(out, word, () => []).push(new MatchResult(word, line, item.url, item.source))
         }
       }
+      // Preserve the existing two-cue attribution for explicit regexes
+      // containing a literal phrase space (e.g. "göra susen").
+      if (hasPhraseWhitespace(search.trim())) {
+        const cross = compileRegex(_relaxSpaces(search.trim()), 'i')
+        const lines = item.data
+        for (let i = 0; i + 1 < lines.length; i++) {
+          const a = lines[i], b = lines[i + 1]
+          if (!a?.text || !b?.text) continue
+          const matched = (a.text + '\\n' + b.text).match(cross)
+          if (matched && !cross.test(a.text) && !cross.test(b.text)) {
+            const word = search.trim()
+            computeIfAbsent(out, word, () => []).push(new MatchResult(word, a, item.url, item.source))
+          }
+        }
+      }
     }
     return out
   }
