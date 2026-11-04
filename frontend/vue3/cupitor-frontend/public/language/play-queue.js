@@ -196,6 +196,7 @@ export function computeResumePoint(map, collection, recName, mode) {
   const lp = map && map[recName] && map[recName][m]
   if (!lp || !Array.isArray(lp.queueKeys) || !lp.queueKeys.length) return null
   const live = reconstituteQueue(collection, lp.queueKeys)
+  if (!live.length) return null // Original session was deleted; start a fresh one.
   const rec = collection[recName]
   const currentItems = rec.virtual ? resolveVirtualItems(collection, recName) : rec.items
   const current = buildPlayQueue({ loop: 'off', recordings: collection, currentName: recName, currentItems })
