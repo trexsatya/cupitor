@@ -127,7 +127,7 @@ export function createSubtitleMatchCollector(search, {regexMode=false,exactWords
         for(let i=0;i+1<lines.length;i++) {
           const a=lines[i],b=lines[i+1]
           if(!a?.text||!b?.text)continue
-          if(cross.test(a.text+'\\n'+b.text)&&!cross.test(a.text)&&!cross.test(b.text)) {
+          if(cross.test(a.text+'\n'+b.text)&&!cross.test(a.text)&&!cross.test(b.text)) {
             add(map,search.trim(),a,item)
           }
         }
