@@ -123,9 +123,15 @@ persistent documents too, so eviction never excludes a file. Selected search
 playlists use all selected matches, including cards not currently displayed.
 
 Normalized worker strings use a 16 MiB LRU budget. Raw read/update batches target
-2 MiB and at most 64/32 documents respectively. Initial subtitle fetching uses
-four concurrent requests with persistence backpressure. Bundle bodies use an
-8 MiB LRU; source and revision remain part of the cache key. A complete transcript
+2 MiB and at most 64/32 documents respectively. Initial subtitle fetching groups
+missing entries by pack URL and revision, with at most four active pack jobs.
+Each pack is fetched and parsed once per load round, then its required pairs
+are staged in batches of at most 32 pairs / 2 MiB and committed to both the
+download cache and worker corpus before the next batch. Background retries use
+the same path; loose files retain individual loading. Bundle bodies use an
+8 MiB LRU; each active import also holds its current pack until consumed, so
+eviction cannot cause repeated downloads during that import. Source and
+revision remain part of the cache key. A complete transcript
 is the indivisible regex unit: a single larger document is processed alone.
 These are estimates for retained strings, not total browser heap or network
 traffic guarantees. Result references, vocabulary metadata, currently displayed

@@ -17,15 +17,35 @@ const nextCap = { ...cap, lines: [cap.lines[1],
 async function check(browser, mobile) {
   const page = await browser.newPage({ viewport: mobile ? { width: 430, height: 900 } : { width: 1280, height: 900 },
     isMobile: mobile, hasTouch: mobile })
-  const errors = [], alerts = []
+  const errors = [], alerts = [], dialogTypes = []
   page.on('pageerror', e => errors.push(e.message))
-  page.on('dialog', d => { alerts.push(d.message()); d.dismiss() })
+  page.on('dialog', d => { dialogTypes.push(d.type()); alerts.push(d.message()); d.dismiss() })
   page.setDefaultTimeout(10000)
   await page.route('**/*', serveFixtures)
   await page.addInitScript(() => {
     window.dontConfirmOnRefresh = true
     window.__filed = []
     window.PlaylistBridge = { postMessage: raw => window.__filed.push(JSON.parse(raw)) }
+  })
+  if (mobile) await page.addInitScript(() => {
+    // Keep a real IndexedDB save unacknowledged after the dialog closes, as
+    // on a slower device. Reload assertions must await durable persistence.
+    const transaction = IDBDatabase.prototype.transaction
+    const completion = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete')
+    IDBDatabase.prototype.transaction = function(names, mode, ...rest) {
+      const tx = transaction.call(this, names, mode, ...rest)
+      if (this.name === 'cupitor-user-data' && mode === 'readwrite') {
+        let handler
+        Object.defineProperty(tx, 'oncomplete', {
+          get: () => handler,
+          set(fn) {
+            handler = fn
+            completion.set.call(tx, fn ? event => setTimeout(() => fn.call(tx, event), 1000) : null)
+          },
+        })
+      }
+      return tx
+    }
   })
   const click = selector => {
     const el = typeof selector === 'string' ? page.locator(selector) : selector
@@ -124,6 +144,9 @@ async function check(browser, mobile) {
     assert.equal(note.sourceAudioUrl, 'file://keep-voice')
     assert.equal(note.musicTrackId, 'keep-music')
     assert.equal(note.mediaUrl, 'https://example.org/notes')
+    // Closing the capture dialog updates the in-memory view immediately;
+    // wait for the save before testing persistence across a real reload.
+    await page.evaluate(() => window.cupitorUserData.flush())
     await page.reload({ waitUntil: 'networkidle' })
     await page.waitForFunction(() => window._vocabularyReadyPromise && window._subtitlesReadyPromise)
     await page.evaluate(async () => { await window._subtitlesReadyPromise })
@@ -231,12 +254,14 @@ async function check(browser, mobile) {
     assert.equal(await page.locator('#capCapItem').inputValue(), 'notes')
     await page.locator('#capCapItem').selectOption('')
     await commit()
+    await page.evaluate(() => window.cupitorUserData.flush())
     await page.reload({ waitUntil: 'networkidle' })
     await page.waitForFunction(() => window._vocabularyReadyPromise && window._subtitlesReadyPromise)
     await page.evaluate(async () => { await window._subtitlesReadyPromise })
     await send(cap)
     assert.equal(await page.locator('#capCapItem').inputValue(), '', 'Add clears the remembered merge target')
     await cancel()
+    assert(!dialogTypes.includes('beforeunload'), 'reload must not dismiss an unsaved-work warning')
     assert.deepEqual(alerts, [])
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'}: capture create/merge, remembered targets, reload, cancellation, reordering, stale destinations and queued sends passed`)
@@ -247,6 +272,7 @@ async function check(browser, mobile) {
       buttons: [...document.querySelectorAll('#capCapSave')].map(el => el.outerHTML) }))
       .catch(error => ({ diagnosticError: error.message, url: page.url() })))
     console.error('Page errors:', errors)
+    console.error('Dialog types:', dialogTypes)
     throw e
   } finally { await page.close() }
 }
