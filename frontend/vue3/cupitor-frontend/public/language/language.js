@@ -660,6 +660,23 @@ const _ytReturnGuard = createReturnGuard({
   getState: () => window.ytPlayer.getPlayerState(),
   pause: () => window.ytPlayer.pauseVideo(),
 })
+function _youtubePlaybackViewOpen() {
+  return ['rec-playing', 'practice-mode', 'youtube-media-mode'].some(name => document.body?.classList.contains(name))
+}
+// A browser/host resume or a late iframe message cannot start a parked clip.
+// This rule outlives the short return guard and is never cancelled by typing
+// or tapping on Search. A visible media view owns intentional playback.
+function _enforceYoutubePlaybackView(state) {
+  _hookYtForReturnGuard()
+  if (_youtubePlaybackViewOpen()) return true
+  try {
+    const current = state ?? window.ytPlayer?.getPlayerState?.()
+    if (current === 1 || current === 3) window.ytPlayer?.pauseVideo?.()
+  } catch (_) {}
+  window.ytPlaying = false
+  return false
+}
+window.enforceYoutubePlaybackView = _enforceYoutubePlaybackView
 function _hookYtForReturnGuard() {
   const p = window.ytPlayer
   if (!p || p.__returnGuardHooked || typeof p.playVideo !== 'function') return
@@ -667,13 +684,24 @@ function _hookYtForReturnGuard() {
   ;['playVideo', 'loadVideoById', 'loadVideoByUrl', 'seekTo'].forEach(m => {
     const orig = p[m]
     if (typeof orig !== 'function') return
-    p[m] = function (...args) { _ytReturnGuard.cancel(); return orig.apply(this, args) }
+    p[m] = function (...args) {
+      if (!_youtubePlaybackViewOpen()) { _enforceYoutubePlaybackView(); return }
+      _ytReturnGuard.cancel()
+      return orig.apply(this, args)
+    }
   })
-  try { p.addEventListener('onStateChange', e => _ytReturnGuard.onStateChange(e && e.data)) } catch (_) {}
+  try { p.addEventListener('onStateChange', e => {
+    _ytReturnGuard.onStateChange(e && e.data)
+    _enforceYoutubePlaybackView(e && e.data)
+  }) } catch (_) {}
 }
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { _hookYtForReturnGuard(); _ytReturnGuard.onHidden() }
-  else { _hookYtForReturnGuard(); _ytReturnGuard.onVisible() }
+  else { _enforceYoutubePlaybackView(); _ytReturnGuard.onVisible() }
+})
+;['pageshow', 'focus'].forEach(event => window.addEventListener(event, () => _enforceYoutubePlaybackView()))
+window.addEventListener('cupitorAppLifecycle', event => {
+  if (event.detail?.isForeground) _enforceYoutubePlaybackView()
 })
 ;['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
   document.addEventListener(ev, () => _ytReturnGuard.cancel(), true))

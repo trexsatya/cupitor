@@ -518,6 +518,12 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   })
   dialog.addEventListener('cancel', (e) => {
     if (inline || connecting) e.preventDefault()
+    // After restore the browser can deliver Escape as a dialog cancel
+    // without a keydown inside it (focus was on the removed restore pill).
+    if (dialog.classList.contains('wm-fullscreen') && document.fullscreenElement !== dialog) {
+      e.preventDefault()
+      leaveFullscreen()
+    }
   })
   dialog.addEventListener('wordmapsrestore', restoreMap)
   dialog.addEventListener('wordmapsfocus', event => {
@@ -533,6 +539,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     dialog.remove()
   })
   function minimizeMap() {
+    restoreFullscreen = dialog.classList.contains('wm-fullscreen')
     leaveFullscreen()
     if (inline) finishInline(true)
     minimized = true
@@ -542,11 +549,13 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     dialog.close()
   }
   function restoreMap() {
+    const expand = minimized && restoreFullscreen
     minimized = false
     restoreButton.remove()
     if (!dialog.open) dialog.showModal()
+    if (expand) enterFullscreen()
   }
-  let nativeFullscreen = false
+  let nativeFullscreen = false, restoreFullscreen = false
   function setExpanded(on) {
     if (on) { setLibrary(false); setMore(false) }
     dialog.classList.toggle('wm-fullscreen', on)
@@ -564,8 +573,11 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     setExpanded(false)
     if (document.fullscreenElement === dialog) document.exitFullscreen?.()?.catch?.(() => {})
   }
-  async function toggleFullscreen() {
+  function toggleFullscreen() {
     if (dialog.classList.contains('wm-fullscreen')) return leaveFullscreen()
+    return enterFullscreen()
+  }
+  async function enterFullscreen() {
     // Fill the WebView even where the Fullscreen API is unavailable or
     // refused. On supported browsers/the Mac host, also enter native fullscreen.
     setExpanded(true)

@@ -142,6 +142,21 @@ test('ignored initial seeks retry and can recover without playing from zero', as
   expect(player.seekTo).toHaveBeenCalledTimes(3)
 })
 
+test.each([100, 300])('a clip landing on an earlier keyframe advances with %sms samples without repeated rewinds', async sampleMs => {
+  let base = 0, began = 0
+  const player = {
+    getVideoData: () => ({ video_id: 'kD3FqenlrDA' }),
+    getPlayerState: () => 1,
+    getCurrentTime: () => base + Math.floor((Date.now() - began) / sampleMs) * sampleMs / 1000,
+    seekTo: jest.fn(() => { base = 185; began = Date.now() }),
+  }
+  const result = confirmRecordingSeek({ player, videoId: 'kD3FqenlrDA', start: 187,
+    requirePlaying: true, isCurrent: () => true }).catch(e => e)
+  jest.advanceTimersByTime(3000)
+  expect(await result).toBe(true)
+  expect(player.seekTo).toHaveBeenCalledTimes(1)
+})
+
 test.each([120, 1])('a video stuck at zero never reports seek success for target %s', async start => {
   const { result } = seekSetup({ start, acceptAfter: Infinity })
   jest.advanceTimersByTime(3000)

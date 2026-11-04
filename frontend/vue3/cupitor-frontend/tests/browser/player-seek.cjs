@@ -24,13 +24,14 @@ async function checkPlayerSeek(browser) {
       Object.assign(window._appSettings, { recPlayShuffle: false, recPlayLoop: 'off', recPlayGapSeconds: 30 })
       const s = window.__seek = { mode, startedAt: Date.now(), id: 'testVideo01', time: 0, state: 2, rate: 1, muted: !!options.muted,
         loads: [], seeks: {}, events: [], audible: [] }
+      const currentTime = () => s.time + (s.mode === 'keyframe' && s.state === 1 ? (Date.now() - s.positionedAt) / 1000 : 0)
       const log = action => {
-        s.events.push({ action, id: s.id, time: s.time, muted: s.muted })
-        if (s.state === 1 && !s.muted) s.audible.push({ action, id: s.id, time: s.time })
+        s.events.push({ action, id: s.id, time: currentTime(), muted: s.muted })
+        if (s.state === 1 && !s.muted) s.audible.push({ action, id: s.id, time: currentTime() })
       }
       window.ytPlayer = {
         getVideoData: () => ({ video_id: s.id }), getVideoUrl: () => 'https://youtube.com/watch?v=' + s.id,
-        getIframe: () => document.getElementById('youtubePlayer'), getCurrentTime: () => s.time,
+        getIframe: () => document.getElementById('youtubePlayer'), getCurrentTime: currentTime,
         getPlayerState: () => s.state, getDuration: () => 1000,
         getPlaybackRate: () => s.rate, setPlaybackRate: rate => { s.rate = rate },
         isMuted: () => s.muted, mute: () => { s.muted = true; log('mute') }, unMute: () => { s.muted = false; log('unmute') },
@@ -41,12 +42,14 @@ async function checkPlayerSeek(browser) {
             (s.mode === 'never' || s.mode === 'buffering' || (s.mode === 'retry' && s.seeks[target] < 3) ||
               (s.mode === 'reload' && s.loads.filter(v => v.videoId === s.id).length < 2))
           if (!broken) s.time = target
+          if (s.mode === 'keyframe') { s.time = target - 2; s.positionedAt = Date.now() }
           log('seek')
         },
         loadVideoById: value => {
           s.loads.push(value); s.id = value.videoId; s.state = 1
           const first = s.id === 'testVideo02' && s.loads.filter(v => v.videoId === s.id).length === 1
           s.time = s.id === 'testVideo02' && (s.mode === 'never' || s.mode === 'retry' || (s.mode === 'reload' && first)) ? 0 : value.startSeconds || 0
+          if (s.mode === 'keyframe') { s.time -= 2; s.positionedAt = Date.now() }
           if (s.mode === 'buffering' && s.id === 'testVideo02') s.state = 3
           if (s.mode === 'paused-load') s.state = 2
           log('load')
@@ -55,7 +58,7 @@ async function checkPlayerSeek(browser) {
       }
       window.ytPlayerReady = true
       const queue = [
-        { id: 'testVideo02', source: 'YouTube', searchText: 'räkna med', timeStart: 120, timeEnd: 123, lineIndex: 0 },
+        { id: 'testVideo02', source: 'YouTube', searchText: 'räkna med', timeStart: options.start || 120, timeEnd: (options.start || 120) + 3, lineIndex: 0 },
         { id: options.sameVideo ? 'testVideo02' : 'testVideo03', source: 'YouTube', searchText: 'nästa', timeStart: 180, timeEnd: 183, lineIndex: 1 },
       ]
       window.__seekTask = window.playRecording({ resumeQueue: { queue, pos: 0 } })
@@ -83,6 +86,17 @@ async function checkPlayerSeek(browser) {
         if (mode === 'reload') assert((await page.evaluate(() => window.__seek.loads.length)) >= 2, 'ignored seeks reload at startSeconds')
         await stop()
       }
+
+      // YouTube's documented seek behavior can land before the requested
+      // timestamp. Rewinding each second made these clips fail every time.
+      await start('keyframe', { start: 187 })
+      await loaded()
+      await page.clock.runFor(1800)
+      await page.waitForFunction(() => !window.seekRequestProcessing && !window.__seek.muted)
+      assert.equal(await page.evaluate(() => window.__seek.loads.length), 1)
+      assert.equal(await page.evaluate(() => window.__seek.seeks[187]), 1)
+      assert.deepEqual(await page.evaluate(() => window.__seek.audible.filter(e => e.time < 186.5)), [], 'keyframe lead-in stays muted')
+      await stop()
 
       await start('never')
       await loaded()
