@@ -24,6 +24,59 @@ export function matchSearchDocument(document, query, {regexMode=false, suffix='.
 }
 
 export async function attributeSubtitleMatches(list, search, { regexMode = false, exactWordsOnly = false, check = () => {}, yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0)) } = {}) {
+  if (regexMode) {
+    // The new regex contract attributes literal matched spans, preserving
+    // trailing-space requirements instead of falling back to trimmed queries.
+    const out = {}
+    const re = compileRegex(_relaxSpaces(search), 'gi')
+    const wordRe = compileRegex(_relaxSpaces(search), 'i')
+    const phrasePattern = hasPhraseWhitespace(search) || /\\s/.test(search)
+    for (const item of list) {
+      check()
+      for (const line of item.data) {
+        const spans = [...line.text.matchAll(re)].filter(hit => hit[0].length)
+        if (!spans.length) continue
+        let grouped = false
+        if (!phrasePattern) {
+          let cursor = 0
+          for (const rawWord of getWords(line.text)) {
+            const offset = line.text.indexOf(rawWord, cursor)
+            if (offset < 0) continue
+            cursor = offset + rawWord.length
+            const token = rawWord.trim().toLowerCase()
+            if (!/[\p{L}\p{N}]/u.test(token)) continue
+            if (!spans.some(hit => offset < hit.index + hit[0].length && offset + rawWord.length > hit.index)) continue
+            const match = token.match(wordRe)
+            if (match?.[0]) {
+              computeIfAbsent(out, token, () => []).push(new MatchResult(token, line, item.url, item.source))
+              grouped = true
+            }
+          }
+        }
+        if (phrasePattern || !grouped) for (const match of spans) {
+          const word = match[0].trim().toLowerCase()
+          if (!word) continue
+          computeIfAbsent(out, word, () => []).push(new MatchResult(word, line, item.url, item.source))
+        }
+      }
+      // Preserve the existing two-cue attribution for explicit regexes
+      // containing a literal phrase space (e.g. "göra susen").
+      if (hasPhraseWhitespace(search.trim())) {
+        const cross = compileRegex(_relaxSpaces(search.trim()), 'i')
+        const lines = item.data
+        for (let i = 0; i + 1 < lines.length; i++) {
+          const a = lines[i], b = lines[i + 1]
+          if (!a?.text || !b?.text) continue
+          const matched = (a.text + '\n' + b.text).match(cross)
+          if (matched && !cross.test(a.text) && !cross.test(b.text)) {
+            const word = search.trim()
+            computeIfAbsent(out, word, () => []).push(new MatchResult(word, a, item.url, item.source))
+          }
+        }
+      }
+    }
+    return out
+  }
   let wordToItemsMap = {}
   let searchText = search
   const transformedSearchText = search

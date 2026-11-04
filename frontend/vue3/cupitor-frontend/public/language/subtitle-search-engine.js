@@ -66,6 +66,42 @@ export function createSubtitleMatchCollector(search, {regexMode=false,exactWords
       const lines=item.data
       for(const line of lines) {
         check()
+        if(regexMode) {
+          // Regexes without a phrase/whitespace operator describe word
+          // families. Group by the matching WORD, not by a greedy match
+          // spanning the rest of the cue ("För.*" must retain both words).
+          // Explicit space or \\s patterns are span searches; preserve their
+          // full match, including the constraint on a trailing space.
+          const phrasePattern=hasPhraseWhitespace(search)||/\\s/.test(search)
+          const wordRe=compileRegex(_relaxSpaces(search),'i')
+          const spanRe=compileRegex(_relaxSpaces(search),'gi')
+          // Apply ^/$ and alternatives against the ACTUAL cue first.
+          // A word independently matching ^word must not make a line
+          // match when that word occurs only in its middle.
+          const spans=[...line.text.matchAll(spanRe)].filter(hit=>hit[0].length)
+          if(!spans.length)continue
+          let grouped=false
+          if(!phrasePattern) {
+            let cursor=0
+            for(const raw of getWords(line.text)) {
+              const offset=line.text.indexOf(raw,cursor)
+              if(offset<0)continue
+              cursor=offset+raw.length
+              const token=raw.trim().toLowerCase()
+              if(!/[\p{L}\p{N}]/u.test(token))continue
+              // A second anchored alternative might match the token alone
+              // even though only the first alternative matched this cue.
+              if(!spans.some(hit=>offset<hit.index+hit[0].length&&offset+raw.length>hit.index))continue
+              const matched=token.match(wordRe)
+              if(matched?.[0]) {add(map,token,line,item);grouped=true}
+            }
+          }
+          if(phrasePattern||!grouped)for(const hit of spans) {
+            const matched=hit[0].trim().toLowerCase()
+            if(matched)add(map,matched,line,item)
+          }
+          continue
+        }
         if(transformed.test(line.text)) {
           const words=getWords(line.text).map(word=>word.trim().toLowerCase())
           for(const word of words) {
@@ -93,6 +129,7 @@ export function createSubtitleMatchCollector(search, {regexMode=false,exactWords
       }
     },
     finish(){
+      if(regexMode) return map
       if(map[search.trim()]===undefined)Object.defineProperty(map,search,{value:[],writable:true,enumerable:true,configurable:true})
       if(!included&&(!map[finalSearch.trim()]||!map[finalSearch.trim()].length))Object.assign(map,fallback)
       if(!regexMode)getSearchedTerms(search).forEach(term=>{
