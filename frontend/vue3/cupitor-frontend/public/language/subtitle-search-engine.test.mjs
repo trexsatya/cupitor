@@ -49,3 +49,18 @@ test('typed regex preserves trailing-space constraints and groups only matched s
   assert.deepEqual(Object.keys(hits), ['förstå'])
   assert.deepEqual(hits.förstå.map(hit => hit.line.index), [1, 3])
 })
+
+test('broad regexes group each matching word, not greedy multi-word spans', async () => {
+  const lines = [
+    {index: 1, text: 'Vi måste förhålla oss till förutsättningarna och förhålla oss lugna.'},
+    {index: 2, text: 'Hellre för många än för få; men utan att förringa problemen.'},
+  ]
+  const options = {regexMode: true, yieldToUI: async () => {}}
+  const files = [{url: 'regression', source: 'local', data: lines}]
+  const groups = await attributeSubtitleMatches(files, 'För.*', options)
+  assert.deepEqual(Object.keys(groups).sort(), ['förhålla', 'förutsättningarna', 'förringa'])
+  assert.deepEqual([...new Set(groups.förhålla.map(item => item.line.index))], [1])
+  const bounded = await attributeSubtitleMatches(files, 'för[^ ]+', options)
+  assert.ok(bounded.förringa?.some(item => item.line.index === 2))
+  assert.equal(bounded.för, undefined)
+})
