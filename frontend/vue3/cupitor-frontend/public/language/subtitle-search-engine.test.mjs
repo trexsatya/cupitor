@@ -58,7 +58,7 @@ test('broad regexes group each matching word, not greedy multi-word spans', asyn
   const options = {regexMode: true, yieldToUI: async () => {}}
   const files = [{url: 'regression', source: 'local', data: lines}]
   const groups = await attributeSubtitleMatches(files, 'För.*', options)
-  assert.deepEqual(Object.keys(groups).sort(), ['förhålla', 'förutsättningarna', 'förringa'])
+  assert.deepEqual(Object.keys(groups).sort(), ['för', 'förhålla', 'förutsättningarna', 'förringa'])
   assert.deepEqual([...new Set(groups.förhålla.map(item => item.line.index))], [1])
   const bounded = await attributeSubtitleMatches(files, 'för[^ ]+', options)
   assert.ok(bounded.förringa?.some(item => item.line.index === 2))
