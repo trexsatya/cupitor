@@ -36,3 +36,32 @@ test('limits playable clips separately for every selected heading', () => {
     expect(() => buildSelectedSearchPlaylist(groups, selected, { ...opts, maxPerHeader })).toThrow(RangeError)
   }
 })
+
+test('minimum surrounding words extend the clip within a continuous subtitle run', () => {
+  const rich = [
+    { ...cue(1, 0, 2), text: 'first second third fourth' },
+    { ...cue(2, 2, 4), text: 'fifth sixth seventh eighth' },
+    { ...cue(3, 4, 6), text: 'word' },
+    { ...cue(4, 6, 8), text: 'ninth tenth eleventh twelfth' },
+    { ...cue(5, 8, 10), text: 'thirteenth fourteenth fifteenth sixteenth' },
+  ]
+  const queue = buildSearchPlaylist(
+    [{ url: 'words', source: 'YouTube', word: 'word', line: rich[2] }],
+    { files: [{ url: 'words', sv_subs: { data: rich } }], contextBefore: 0,
+      contextAfter: 0, minWordsAround: 6 },
+  )
+  expect(queue).toEqual([expect.objectContaining({ timeStart: 0, timeEnd: 10 })])
+})
+
+test('minimum surrounding words never jump across sparse subtitle seams', () => {
+  const sparse = [
+    { ...cue(1, 0, 2), text: 'earlier separate capture' },
+    { ...cue(2, 100, 102), text: 'word' },
+    { ...cue(3, 200, 202), text: 'later separate capture' },
+  ]
+  const queue = buildSearchPlaylist(
+    [{ url: 'seams', source: 'local', word: 'word', line: sparse[1] }],
+    { files: [{ url: 'seams', sv_subs: { data: sparse } }], minWordsAround: 10 },
+  )
+  expect(queue).toEqual([expect.objectContaining({ timeStart: 100, timeEnd: 102 })])
+})
