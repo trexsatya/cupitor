@@ -24,7 +24,7 @@ export function matchSearchDocument(document, query, {regexMode=false, suffix='.
 }
 
 export async function attributeSubtitleMatches(list, search, { regexMode = false, exactWordsOnly = false, check = () => {}, yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0)) } = {}) {
-  if (regexMode && search.endsWith(' ')) {
+  if (regexMode) {
     // The new regex contract attributes literal matched spans, preserving
     // trailing-space requirements instead of falling back to trimmed queries.
     const out = {}
