@@ -196,12 +196,38 @@ export function computeResumePoint(map, collection, recName, mode) {
   const lp = map && map[recName] && map[recName][m]
   if (!lp || !Array.isArray(lp.queueKeys) || !lp.queueKeys.length) return null
   const live = reconstituteQueue(collection, lp.queueKeys)
-  if (!live.length) return null
+  if (!live.length) return null // Original session was deleted; start a fresh one.
+  const rec = collection[recName]
+  const currentItems = rec.virtual ? resolveVirtualItems(collection, recName) : rec.items
+  const current = buildPlayQueue({ loop: 'off', recordings: collection, currentName: recName, currentItems })
+  // Snapshot order still wins for existing cards. Append newly inserted cards
+  // to the tail so a resumed Player/Practice session cannot silently miss them.
+  // Count identities rather than using a Set: duplicated cards are valid.
+  const identity = k => JSON.stringify([k.recName, k.st, k.w, k.id, k.lineIndex])
+  const remainingKeys = new Map()
+  for (const k of buildQueueKeys(live)) {
+    const id = identity(k)
+    remainingKeys.set(id, (remainingKeys.get(id) || 0) + 1)
+  }
+  const added = []
+  for (const item of current) {
+    const id = identity(buildQueueKeys([item])[0])
+    const count = remainingKeys.get(id) || 0
+    if (count) remainingKeys.set(id, count - 1)
+    else added.push(item)
+  }
+  const queue = live.concat(added)
+  if (!queue.length) return null
   const rawPos = lp.queuePos || 0
-  if (rawPos >= lp.queueKeys.length) return null
-  const pos = Math.min(Math.max(0, rawPos), live.length - 1)
-  const remaining = live.length - pos
-  return { queue: live, pos, message: resumePromptMessage(recName, m, remaining, live.length) }
+  if (rawPos >= lp.queueKeys.length && !added.length) return null
+  // A completed old queue with newly added cards resumes at the first new
+  // card; otherwise preserve the saved cursor and its original item order.
+  const pos = rawPos >= lp.queueKeys.length
+    ? live.length : Math.min(Math.max(0, rawPos), queue.length - 1)
+  const remaining = queue.length - pos
+  const message = resumePromptMessage(recName, m, remaining, queue.length) +
+    (added.length ? `\n\n${added.length} new playlist item(s) will also be included.` : '')
+  return { queue, pos, message, addedCount: added.length }
 }
 
 // Reconcile the app's rec-play pause state with the YouTube player's ACTUAL

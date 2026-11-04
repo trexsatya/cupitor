@@ -9,6 +9,7 @@ import { spotifyClipSegments } from '../spotify-clips.js';
 import { isManualItem } from '../recordings-merge.js'
 import { cardPlainText } from '../card-html.js'
 import { contiguousClipWindow } from '../random-playlist.js'
+import { wordContextLineWindow } from '../practice-clip.js'
 import { fromSeconds } from '../time-format.js'
 
 // Build a Unicode-bounded regex from `pattern` (already a regex source —
@@ -268,7 +269,7 @@ export function buildPlayingBannerVM(it, idx, total, gapSeconds, reversed = fals
 //   { state: 'no-primary' }
 //   { state: 'no-match' }
 //   { state: 'ok', from, to, matchIdx, primary, rows: [{ i, mainText, secText, active, highlightHtml? }] }
-export function buildPlayingSubsVM({ parsed, lang, item, before, after }) {
+export function buildPlayingSubsVM({ parsed, lang, item, before, after, minWordsAround = 0, gapThreshold }) {
   if (!parsed) return { state: 'no-primary' }
   const _lang = lang === 'sv' ? 'sv' : 'en'
   const _secLang = _lang === 'sv' ? 'en' : 'sv'
@@ -281,8 +282,12 @@ export function buildPlayingSubsVM({ parsed, lang, item, before, after }) {
 
   const _before = Math.max(0, parseInt(before, 10) || 0)
   const _after = Math.max(0, parseInt(after, 10) || 0)
-  const from = Math.max(0, matchIdx - _before)
-  const to = Math.min(primary.length - 1, matchIdx + _after)
+  const bounds = minWordsAround > 0
+    ? wordContextLineWindow(primary, matchIdx, _before, _after,
+        { word: item && item.word, minWordsAround, gapThreshold })
+    : { from: Math.max(0, matchIdx - _before),
+        to: Math.min(primary.length - 1, matchIdx + _after) }
+  const { from, to } = bounds
 
   const secById = new Map()
   if (secondary) secondary.forEach(s => { if (s && s.index != null) secById.set(s.index + '', s) })

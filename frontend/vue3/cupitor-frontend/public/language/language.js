@@ -334,6 +334,7 @@ import {
 import {
   clipRange as _clipRange,
   contiguousLineWindow as _contiguousLineWindow,
+  wordContextLineWindow as _wordContextLineWindow,
   formatGap as _formatGap,
 } from './practice-clip.js';
 import {
@@ -3916,6 +3917,7 @@ $('document').ready(e => {
     $('#searchVocabularyMenu').hide()
     if (mode === 'prefix') searchVocabularyByPrefix()
     else if (mode === 'similar') searchVocabularyBySimilarity()
+    else if (mode === 'rerun') searchTextChanged()
   })
   $(document).on('click', e => {
     if (!$(e.target).closest('#searchVocabularyMenu, #searchVocabularyByPrefixBtn').length) {
@@ -6387,7 +6389,13 @@ function sendWordToSearchBox(word, opts = {}) {
   }).get()
   // Only honour a context category that is a real (currently-loaded) category.
   const context = (opts && opts.category && window.vocabulary && window.vocabulary[opts.category]) ? opts.category : null
-  const decision = pickVocabOptionForWord(w, options, context)
+  // A partial-text match is not evidence that the user's selected word is
+  // that vocabulary entry. Preserve literal searches (e.g. "giva") instead
+  // of narrowing to an unrelated entry containing the same characters.
+  const hasExactVocabForm = options.some(o => wordIsExactInVocabularyLine(o.text, w, true))
+  const decision = hasExactVocabForm
+    ? pickVocabOptionForWord(w, options, context)
+    : { index: -1, showAll: true }
   if (decision.showAll) {
     // Several matches we won't narrow to one → leave the broad #searchText
     // search (run above; shows every matching line). Clear any stale picker
@@ -6974,7 +6982,14 @@ async function renderLines(id, url) {
   if (lastIndex) { toLineIndex = Math.min(toLineIndex, lastIndex); fromLineIndex = Math.min(fromLineIndex, lastIndex) }
   let pair = original
   if (original[key]._contextOnly) {
-    const context = await _subtitleSearch.run('context', {id:url,from:fromLineIndex,to:toLineIndex,regexMode:!!window._resultsSearchRegex})
+    // Request a bounded reservoir of nearby cues once, then choose a window
+    // by word count. Packed SRTs only retain match metadata until this fetch.
+    const minWords = $container.data('autoWordContext') ? _minWordsAround() : 0
+    const contextFrom = minWords && Number.isFinite(matchLineIndex)
+      ? Math.max(1, Math.min(fromLineIndex, matchLineIndex - 12)) : fromLineIndex
+    const contextTo = minWords && Number.isFinite(matchLineIndex)
+      ? Math.max(toLineIndex, matchLineIndex + 12) : toLineIndex
+    const context = await _subtitleSearch.run('context', {id:url,from:contextFrom,to:contextTo,regexMode:!!window._resultsSearchRegex})
     if (!document.getElementById(id)) return
     pair = {...original,sv_subs:{...original.sv_subs,...context.sv_subs},en_subs:{...original.en_subs,...context.en_subs}}
   }
@@ -6989,6 +7004,26 @@ async function renderLines(id, url) {
     if (fromLineIndex > lastIdx) fromLineIndex = lastIdx
   }
 
+  // Expand initial search-result snippets until there are enough words on
+  // either side of the match, sharing Practice's contiguous subtitle limits.
+  // +/- adjustments are manual and therefore skip auto-extension.
+  if ($container.data('autoWordContext') && Number.isFinite(matchLineIndex)) {
+    $container.data('autoWordContext', false)
+    const sorted = (subtitleFile.data || []).slice().sort((a,b) => Number(a.index) - Number(b.index))
+    const anchor = sorted.findIndex(line => Number(line.index) === matchLineIndex)
+    const matchWord = String($container.data('matchWord') || '')
+    if (anchor >= 0 && matchWord) {
+      const bounds = _wordContextLineWindow(sorted, anchor,
+        Math.max(0, matchLineIndex - fromLineIndex),
+        Math.max(0, toLineIndex - matchLineIndex),
+        { word: matchWord, minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
+      if (bounds.to >= bounds.from) {
+        fromLineIndex = Number(sorted[bounds.from].index)
+        toLineIndex = Number(sorted[bounds.to].index)
+        $container.data({fromIndex: fromLineIndex, toIndex: toLineIndex})
+      }
+    }
+  }
   const getSub = x => subtitleFile.data.find(it => it.index + '' === x + '');
   const st = getSub(fromLineIndex);
   const end = getSub(toLineIndex)
@@ -7305,6 +7340,7 @@ function _renderSearchPlaylistToolbar(state, $result) {
       files: state.files, lang: state.lang, searchText: state.searchText, maxPerHeader: raw,
       contextBefore: parseInt(window._appSettings?.contextLinesBefore, 10) || 0,
       contextAfter: parseInt(window._appSettings?.contextLinesAfter, 10) || 0,
+      minWordsAround: _minWordsAround(),
       gapThreshold: _clipGapThresholdSec() }
     let queue
     const $button = $toolbar.find('#searchPlaylistCreateBtn').prop('disabled',true)
@@ -7482,7 +7518,11 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
             // Stash the matched line's SRT index so renderLines can expose it
             // to the capture button (the +/- buttons mutate from/toIndex, but
             // the underlying matched line never changes).
-            $lines.data({fromIndex: matchIdx - _before, toIndex: matchIdx + _after, matchLineIndex: matchIdx})
+            $lines.data({fromIndex: matchIdx - _before, toIndex: matchIdx + _after,
+               matchLineIndex: matchIdx, matchWord: item.word || word,
+               // Explicitly selecting zero context lines disables automatic
+               // surrounding-word expansion for this search result.
+               autoWordContext: _before > 0 || _after > 0})
             $fileBlock.append($lines)
 
             await renderLines(id, item.url)
@@ -18329,7 +18369,8 @@ async function _renderPlayingSubtitles(item, { isCurrent = () => true } = {}) {
   const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
   const before = (window._appSettings && window._appSettings.contextLinesBefore) || 0
   const after  = (window._appSettings && window._appSettings.contextLinesAfter)  || 0
-  const vm = buildPlayingSubsVM({ parsed, lang, item, before, after })
+  const vm = buildPlayingSubsVM({ parsed, lang, item, before, after,
+    minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
 
   if (vm.state === 'no-primary') {
     $sub.html('<div class="rec-ps-err">Primary subtitle missing.</div>')
@@ -18672,7 +18713,13 @@ function _restoreOpenView() {
         saved.view === 'player' ? 'play' : 'practice')
       // No resume point just means starting at the top — still better than
       // not coming back at all.
-      if (point) resumeQueue = { queue: point.queue, pos: point.pos }
+      if (point) {
+        // A playlist may have grown since the last saved session. In that
+        // case ask before reopening with its new cards rather than quietly
+        // changing a previously running deck.
+        if (point.addedCount && !confirm(point.message)) return
+        resumeQueue = { queue: point.queue, pos: point.pos }
+      }
     } catch (e) {
       console.warn('[restore] could not rebuild the queue', e)
     }
@@ -22253,7 +22300,8 @@ async function _practiceClipRange(it, before, after) {
     // A stale lineIndex (SRT renumbered since capture) is checked against the
     // clip window and recovered by time and word, as the card itself does.
     const pos = _locateItemCue(src, it)
-    return _clipRange(src, pos, before, after, fallback)
+    return _clipRange(src, pos, before, after, fallback,
+      { word: it.word, minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
   } catch (err) { console.warn('practice: clip range resolve failed', err) }
   return _clipRange([], -1, before, after, fallback)
 }
@@ -23319,7 +23367,8 @@ async function _practiceCardLines(it, before, after) {
   // from distant moments together, so the line next to this one in the file
   // can be minutes away in the video — putting it on the card would show text
   // the playback never gets to.
-  const { from, to } = _contiguousLineWindow(src, matchPos, before || 0, after || 0)
+  const { from, to } = _wordContextLineWindow(src, matchPos, before || 0, after || 0,
+    { word: it.word, minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
   const rows = []
   for (let i = from; i <= to; i++) {
     const line = src[i]

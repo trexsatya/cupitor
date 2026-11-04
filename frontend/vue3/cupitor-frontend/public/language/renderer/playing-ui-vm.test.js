@@ -210,6 +210,26 @@ describe("buildPlayingSubsVM", () => {
     expect(out.rows[0].secText).toBe("a");
   });
 
+  test("Player displays enough surrounding words without crossing subtitle gaps", () => {
+    const cue = (index, text, ts, te) =>
+      ({ index, text, start: { ordinal: ts }, end: { ordinal: te } });
+    const parsed = { sv: [
+      cue(1, "distant previous capture", 0, 2),
+      cue(2, "one two three", 100, 102),
+      cue(3, "word", 102, 104),
+      cue(4, "four five six", 104, 106),
+      cue(5, "distant next capture", 200, 202),
+    ], en: [] };
+    const result = buildPlayingSubsVM({ parsed, lang: "sv",
+      item: { lineIndex: 3, word: "word" }, before: 0, after: 0,
+      minWordsAround: 3, gapThreshold: 2.5 });
+    expect(result.state).toBe("ok");
+    expect(result.rows.map(r => r.mainText)).toEqual([
+      "one two three", "word", "four five six"
+    ]);
+    expect([result.from, result.to]).toEqual([1, 3]);
+  });
+
   // Cues carrying start/end times — needed for the stale-lineIndex recovery.
   function timed(rows) {
     return {

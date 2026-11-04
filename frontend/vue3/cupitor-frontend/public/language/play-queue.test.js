@@ -272,14 +272,41 @@ describe("computeResumePoint", () => {
     expect(out.pos).toBe(1);
     expect(out.message).toContain("1 of 2");
   });
-  test("null when queuePos is past the end (full replay)", () => {
+  test("a completed saved session resumes newly appended items", () => {
+    const map = { P: { play: {
+      queueKeys: [{ recName: "P", st: "s", w: "w", id: "X", lineIndex: 1 }],
+      queuePos: 1
+    } } };
+    const out = computeResumePoint(map, coll, "P", "play");
+    expect(out.queue.map(x => x.id)).toEqual(["X", "Y"]);
+    expect(out.pos).toBe(1);
+    expect(out.addedCount).toBe(1);
+    expect(out.message).toContain("1 new playlist item");
+  });
+  test("new cards join the tail without disturbing saved order or cursor", () => {
+    const map = { P: { practice: {
+      queueKeys: [
+        { recName: "P", st: "s", w: "w", id: "Y", lineIndex: 2 },
+        { recName: "P", st: "s", w: "w", id: "X", lineIndex: 1 },
+      ],
+      queuePos: 1
+    } } };
+    const extended = { P: { items: { s: { w: [it("X", 1), it("Y", 2), it("Z", 3)] } } } };
+    const out = computeResumePoint(map, extended, "P", "practice");
+    expect(out.queue.map(x => x.id)).toEqual(["Y", "X", "Z"]);
+    expect(out.pos).toBe(1);
+    expect(out.addedCount).toBe(1);
+    expect(out.message).toContain("2 of 3");
+  });
+  test("null when queuePos is past the end and no new items exist", () => {
     const map = {
       P: { play: {
         queueKeys: [{ recName: "P", st: "s", w: "w", id: "X", lineIndex: 1 }],
         queuePos: 1
       } }
     };
-    expect(computeResumePoint(map, coll, "P", "play")).toBeNull();
+    const unchanged = { P: { items: { s: { w: [it("X", 1)] } } } };
+    expect(computeResumePoint(map, unchanged, "P", "play")).toBeNull();
   });
   test("null when reconstituted queue is empty", () => {
     const map = {
@@ -290,7 +317,7 @@ describe("computeResumePoint", () => {
     };
     expect(computeResumePoint(map, coll, "P", "play")).toBeNull();
   });
-  test("clamps pos within the live queue length", () => {
+  test("saved cursor skips deleted keys and can land on newly appended cards", () => {
     const map = {
       P: { play: {
         queueKeys: [
@@ -300,11 +327,12 @@ describe("computeResumePoint", () => {
         queuePos: 1
       } }
     };
-    // Live queue has 1 item; rawPos=1 < queueKeys.length=2 (passes that
-    // gate), then clamped to min(1, 0) = 0.
+    // The removed GHOST is skipped, while a newly added Y joins the queue.
+    // Position 1 now correctly addresses that new item.
     const out = computeResumePoint(map, coll, "P", "play");
-    expect(out.pos).toBe(0);
-    expect(out.queue.length).toBe(1);
+    expect(out.pos).toBe(1);
+    expect(out.queue.map(item => item.id)).toEqual(["X", "Y"]);
+    expect(out.addedCount).toBe(1);
   });
 });
 
