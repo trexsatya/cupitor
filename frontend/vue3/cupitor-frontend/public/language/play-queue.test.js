@@ -317,7 +317,7 @@ describe("computeResumePoint", () => {
     };
     expect(computeResumePoint(map, coll, "P", "play")).toBeNull();
   });
-  test("clamps pos within the live queue length", () => {
+  test("saved cursor skips deleted keys and can land on newly appended cards", () => {
     const map = {
       P: { play: {
         queueKeys: [
@@ -327,11 +327,12 @@ describe("computeResumePoint", () => {
         queuePos: 1
       } }
     };
-    // Live queue has 1 item; rawPos=1 < queueKeys.length=2 (passes that
-    // gate), then clamped to min(1, 0) = 0.
+    // The removed GHOST is skipped, while a newly added Y joins the queue.
+    // Position 1 now correctly addresses that new item.
     const out = computeResumePoint(map, coll, "P", "play");
-    expect(out.pos).toBe(0);
-    expect(out.queue.length).toBe(1);
+    expect(out.pos).toBe(1);
+    expect(out.queue.map(item => item.id)).toEqual(["X", "Y"]);
+    expect(out.addedCount).toBe(1);
   });
 });
 
