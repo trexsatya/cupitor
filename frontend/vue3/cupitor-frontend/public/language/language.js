@@ -7516,7 +7516,10 @@ async function populateSRTFindings(wordToItemsMap, $result, token) {
             // to the capture button (the +/- buttons mutate from/toIndex, but
             // the underlying matched line never changes).
             $lines.data({fromIndex: matchIdx - _before, toIndex: matchIdx + _after,
-               matchLineIndex: matchIdx, matchWord: item.word || word, autoWordContext: true})
+               matchLineIndex: matchIdx, matchWord: item.word || word,
+               // Explicitly selecting zero context lines disables automatic
+               // surrounding-word expansion for this search result.
+               autoWordContext: _before > 0 || _after > 0})
             $fileBlock.append($lines)
 
             await renderLines(id, item.url)
