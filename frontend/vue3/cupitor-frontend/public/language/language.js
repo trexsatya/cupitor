@@ -1207,9 +1207,12 @@ function loadWholeVocabulary(onDone) {
 
   const vocabCategoriesToPopulate = new Set()
 
-  Object.entries(vocabulary).forEach(it => {
-    if (VOCAB_HIDDEN_CATEGORIES.has(it[0])) return
-    vocabCategoriesToPopulate.add(it[0])
+  // Search must not offer expansion definitions as words, but the
+  // Add to Vocab dialog must allow editing them (the entries contain '=').
+  // Build both selectors from the full category set and filter only the
+  // search selector below.
+  Object.keys(vocabulary).forEach(cat => {
+    vocabCategoriesToPopulate.add(cat)
   })
 
   const categories = Array.from(vocabCategoriesToPopulate)
@@ -1225,7 +1228,7 @@ function loadWholeVocabulary(onDone) {
     // grey + italic.
     const searchHeading = new Option(`${category}`, '__cat__:' + category, false, false)
     searchHeading.className = 'vocab-category-option'
-    $('#searchedWords').append(searchHeading)
+    if (!VOCAB_HIDDEN_CATEGORIES.has(category)) $('#searchedWords').append(searchHeading)
     // addToVocabularyDialogSelect: keep the heading as a non-selectable label.
     const dialogHeading = new Option(`${category}`, category, false, false)
     dialogHeading.disabled = true
@@ -1233,7 +1236,9 @@ function loadWholeVocabulary(onDone) {
     dialogHeading.dataset.vocabCategory = category
     $('#addToVocabularyDialogSelect').append(dialogHeading)
     vocabLines.forEach(line => {
-      $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
+      if (!VOCAB_HIDDEN_CATEGORIES.has(category)) {
+        $('#searchedWords').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
+      }
       $('#addToVocabularyDialogSelect').append(createOptionElement(line, window.preSelectedSearchedWord && window.preSelectedSearchedWord === line))
     })
     done += 1
