@@ -67,11 +67,22 @@ export function createSubtitleMatchCollector(search, {regexMode=false,exactWords
       for(const line of lines) {
         check()
         if(regexMode) {
-          // Explicit regexes match spans of transcript text, not a
-          // loosely tokenised word. In particular, do not trim a trailing
-          // space from "[^ ]+Stå " and then report unrelated suffix hits.
-          const re=compileRegex(_relaxSpaces(search),'gi')
-          for(const hit of line.text.matchAll(re)) {
+          // Regexes without a phrase/whitespace operator describe word
+          // families. Group by the matching WORD, not by a greedy match
+          // spanning the rest of the cue ("För.*" must retain both words).
+          // Explicit space or \\s patterns are span searches; preserve their
+          // full match, including the constraint on a trailing space.
+          const phrasePattern=hasPhraseWhitespace(search)||/\\\\s/.test(search)
+          const wordRe=compileRegex(_relaxSpaces(search),'i')
+          const spanRe=compileRegex(_relaxSpaces(search),'gi')
+          let grouped=false
+          if(!phrasePattern) for(const word of getWords(line.text)) {
+            const token=word.trim().toLowerCase()
+            if(!/[\\p{L}\\p{N}]/u.test(token))continue
+            const matched=token.match(wordRe)
+            if(matched?.[0]) {add(map,token,line,item);grouped=true}
+          }
+          if(phrasePattern||!grouped)for(const hit of line.text.matchAll(spanRe)) {
             const matched=hit[0].trim().toLowerCase()
             if(matched) add(map,matched,line,item)
           }
