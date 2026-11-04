@@ -334,6 +334,7 @@ import {
 import {
   clipRange as _clipRange,
   contiguousLineWindow as _contiguousLineWindow,
+  wordContextLineWindow as _wordContextLineWindow,
   formatGap as _formatGap,
 } from './practice-clip.js';
 import {
@@ -22256,7 +22257,8 @@ async function _practiceClipRange(it, before, after) {
     // A stale lineIndex (SRT renumbered since capture) is checked against the
     // clip window and recovered by time and word, as the card itself does.
     const pos = _locateItemCue(src, it)
-    return _clipRange(src, pos, before, after, fallback)
+    return _clipRange(src, pos, before, after, fallback,
+      { word: it.word, minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
   } catch (err) { console.warn('practice: clip range resolve failed', err) }
   return _clipRange([], -1, before, after, fallback)
 }
@@ -23322,7 +23324,8 @@ async function _practiceCardLines(it, before, after) {
   // from distant moments together, so the line next to this one in the file
   // can be minutes away in the video — putting it on the card would show text
   // the playback never gets to.
-  const { from, to } = _contiguousLineWindow(src, matchPos, before || 0, after || 0)
+  const { from, to } = _wordContextLineWindow(src, matchPos, before || 0, after || 0,
+    { word: it.word, minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
   const rows = []
   for (let i = from; i <= to; i++) {
     const line = src[i]
