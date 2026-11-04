@@ -160,7 +160,6 @@ export function showUserDataError(error) {
   if (!banner) {
     banner = document.createElement('div'); banner.id = 'userDataError'
     banner.setAttribute('role', 'alert')
-    Object.assign(banner.style, { position: 'sticky', top: '0', zIndex: '2147483647', padding: '12px', background: '#fff0cf', color: '#302000' })
     const text = document.createElement('span'); text.className = 'user-data-error-text'
     const exportButton = document.createElement('button'); exportButton.textContent = 'Export pending work'
     exportButton.onclick = () => {
@@ -179,5 +178,10 @@ export function showUserDataError(error) {
     banner.append(text, ' ', exportButton, ' ', retry)
     document.body.prepend(banner)
   }
-  banner.querySelector('.user-data-error-text').textContent = 'Device save is incomplete. ' + error.message + ' '
+  // Chrome can report an IndexedDB AbortError with an empty message. Keep the
+  // reason useful even then; the in-memory draft remains available to export.
+  const reason = error?.message?.trim() || (error?.name === 'QuotaExceededError'
+    ? 'Device storage is full. Export pending work before freeing space, then retry the save.'
+    : 'The browser could not finish saving on this device. Export pending work or retry the save.')
+  banner.querySelector('.user-data-error-text').textContent = 'Device save is incomplete. ' + reason + ' '
 }

@@ -55,6 +55,25 @@ async function check(browser, mobile) {
     await page.goto('http://127.0.0.1:3000/language.html', { waitUntil: 'networkidle' })
     await page.waitForFunction(() => window._vocabularyReadyPromise && window._subtitlesReadyPromise && window._recordings)
     await page.evaluate(async () => Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise]))
+    // A real IndexedDB abort must leave recovery visible without covering the
+    // Practice/Player controls. In Chrome an aborted request can have no message.
+    await page.evaluate(async () => {
+      await window.cupitorUserData.flush()
+      const original = IDBDatabase.prototype.transaction
+      IDBDatabase.prototype.transaction = function(names, mode, ...rest) {
+        const tx = original.call(this, names, mode, ...rest)
+        if (mode === 'readwrite' && Array.from(names).includes('outbox')) queueMicrotask(() => tx.abort())
+        return tx
+      }
+      try {
+        window.cupitorUserData.setItem('spotify-save-recovery', 'Keep this pending edit')
+        await window.cupitorUserData.flush().catch(() => {})
+      } finally { IDBDatabase.prototype.transaction = original }
+      Object.defineProperty(window.cupitorUserData.status.error, 'message', {value: ''})
+      window.cupitorUserData.setItem('spotify-save-recovery', 'Keep this newest pending edit')
+    })
+    await page.locator('#userDataError').waitFor({state: 'visible'})
+    assert.match(await page.locator('#userDataError').innerText(), /The browser could not finish saving/)
     await page.evaluate(() => {
       const spotify = (id, start, end) => ({ id, manual: true, source: id, target: 'translation', mediaUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionUrl: 'spotify:episode:1ITvLBQG5IMWcE4BD0V49f', captionStarts: [start], captionEnds: [end] })
       const stored = [spotify('first', 30, 50), spotify('second', 60, 64), { id: 'text', manual: true, source: 'Text only', target: 'Text' }]
@@ -175,6 +194,18 @@ async function check(browser, mobile) {
       assert.equal(after.index, 0); assert.equal(after.paused, !resume)
       assert.equal(await page.evaluate(() => document.querySelector('#spotifyClipPlayer iframe') === window.__originalSpotifyIframe && window.__ytPlays === 0), true)
     }
+    assert.equal(await page.locator('#userDataError').isVisible(), true, 'save recovery stays visible throughout Practice and Player')
+    assert.equal(await page.evaluate(() => window.cupitorUserData.exportData().values['spotify-save-recovery']), 'Keep this newest pending edit')
+    fs.mkdirSync('test-results/dialog-browser-results/spotify', {recursive: true})
+    await page.screenshot({path: `test-results/dialog-browser-results/spotify/save-recovery-${mobile ? 'mobile' : 'desktop'}.png`})
+    const downloadEvent = page.waitForEvent('download')
+    await page.getByRole('button', {name: 'Export pending work', exact: true}).click()
+    const download = await downloadEvent
+    const backup = JSON.parse(fs.readFileSync(await download.path(), 'utf8'))
+    assert.equal(backup.values['spotify-save-recovery'], 'Keep this newest pending edit')
+    await page.getByRole('button', {name: 'Retry save', exact: true}).click()
+    await page.locator('#userDataError').waitFor({state: 'detached'})
+    assert.equal(await page.evaluate(() => window.cupitorUserData.status.pending), false)
     await page.evaluate(() => { window.stopPlayingRecording(); window.openPracticeMode({single: true, queue: [window.__spotifyCards[0]]}) })
     await click('.practice-settings')
     await page.getByRole('checkbox', {name: 'Show speakover', exact: true}).uncheck()
@@ -192,7 +223,7 @@ async function check(browser, mobile) {
     await page.locator('.practice-topbar').waitFor({state: 'hidden'})
     assert.equal(await page.locator('.practice-rec-bar').isVisible(), true, 'Spotify speakover stays visible when enabled')
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'Mobile' : 'Desktop'}: Spotify Practice/Player restore, persistent speakover toggle, Rec/replay, Keep/discard and navigation cancellation passed`)
+    console.log(`${mobile ? 'Mobile' : 'Desktop'}: Spotify Practice/Player restore, save-error controls/export/retry, persistent speakover toggle, Rec/replay, Keep/discard and navigation cancellation passed`)
   } catch (error) {
     fs.mkdirSync('test-results/dialog-browser-results/spotify', { recursive: true })
     await page.screenshot({path: 'test-results/dialog-browser-results/spotify/failure.png'}).catch(() => {})

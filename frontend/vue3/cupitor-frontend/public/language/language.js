@@ -3047,7 +3047,8 @@ async function openSubtitleCacheDialog() {
         label=`${account} / ${language} / ${source || shared || 'local'}`
       } catch (_) {}
       const size=((entry.bytes||0)/1024/1024).toFixed(1)
-      const text=`Search cache: ${label} · ${entry.count||0} subtitles · about ${size} MiB of raw text`
+      const indexSize=((entry.indexBytes||0)/1024/1024).toFixed(1)
+      const text=`Search cache: ${label} · ${entry.count||0} subtitles · about ${size} MiB of raw text + ${indexSize} MiB of index data`
       if (entry.baseScope===_subtitleSearchScope || entry.leaseUntil>Date.now()) {
         $('<p></p>').text(text+' (active session)').appendTo($body)
       } else row(text,()=>_subtitleSearch.run('clearCache',{scope:entry.scope}))
@@ -4981,6 +4982,10 @@ async function loadAllSubtitles() {
     // declare subtitles ready — searches deferred in doSearch will fire here.
     await srtLoadingDone
     context.assertCurrent()
+    if (srts.every(item=>window.allSubtitles[item.link]?._remoteComplete&&!window.allSubtitles[item.link]?._partial)) {
+      await _subtitleSearch.run('retain',{ids:Object.keys(window.allSubtitles)}).catch(error=>console.warn('Search cache cleanup will retry on reload',error))
+      context.assertCurrent()
+    }
     if (notFound.length > 0) {
       console.log("Not found", notFound.join('\n'))
     }

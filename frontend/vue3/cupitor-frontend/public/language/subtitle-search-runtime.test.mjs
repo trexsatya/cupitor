@@ -5,12 +5,34 @@ import { createSubtitleSearchRuntime } from './subtitle-search-runtime.js'
 import { openSubtitleCorpus } from './subtitle-corpus-store.js'
 import { buildSelectedSearchPlaylist } from './search-playlist.js'
 import { guessCorrespondingWords, documentFrequencies } from './corresponding-words.js'
+import { attributeSubtitleMatches } from './subtitle-search-engine.js'
 
 const srt=lines=>lines.map((text,i)=>`${i+1}\n00:00:${String(i+1).padStart(2,'0')},000 --> 00:00:${String(i+2).padStart(2,'0')},000\n${text}`).join('\n\n')+'\n'
 const documents=[
   {id:'one',sv:srt(['tunn skiva','smal väg','tunn igen','smal igen']),en:srt(['thin slice','thin road','another thin slice','another road']),source:'YouTube',revision:1},
   {id:'two',sv:srt(['smal bro','tunn tråd','annan smal bro']),en:srt(['thin bridge','thin thread','another bridge']),source:'YouTube',revision:1},
 ]
+test('indexed file and cue results agree with full scanning for both tracks and search modes',async()=>{
+  const runtime=await createSubtitleSearchRuntime('parity',{indexedDB:new IDBFactory()})
+  const extra=[
+    {id:'unicode',sv:srt(['En färgsprakande kväll.','göra','susen i kväll','kår väljarkår år','fö<c.huvudpratare>r','Kelvin ſong Σςσ ẞß',' a b ','alpha\nbeta']),en:srt(['A colorful evening.','make','a difference tonight','thin thinking thing','Weſt and west','don\'t know','AB𐐀𐐨cd','alpha\nbeta']),revision:1},
+  ]
+  const ids=[...documents,...extra].map(doc=>doc.id)
+  const queries=['thin','tunn','smal','thin|road','thin road',' thin','thin ',' thin ','göra susen','make a difference','kår','år','123','åäö','fö.*','^alpha','beta$','alpha beta','alpha\\s+beta','(?=a)','[åäö]+','kelvin','song','west','don','a b','thin?','thin*','thin{0}','thin{1}','thin.*road','AB𐐨𐐀cd','missing']
+  try{
+    await runtime.update([...documents,...extra]);assert.equal((await runtime.indexStatus({ids,wait:true})).ready,3)
+    for(const regexMode of [false,true])for(const query of queries){
+      const expected=await runtime.files({ids,query,regexMode,useIndex:false}),actual=await runtime.files({ids,query,regexMode})
+      assert.deepEqual(actual,expected,JSON.stringify({query,regexMode}))
+      for(const language of ['sv','en']){
+        const hits=expected.filter(file=>file[language+'_match']),options={regexMode,exactWordsOnly:language==='en'}
+        const attributed=await runtime.attribute({files:hits.map(file=>({id:file.url,language,suffix:'.sv.srt'})),query,...options})
+        const reference=await attributeSubtitleMatches(hits.map(file=>file[language+'_subs']),query,{...options,yieldToUI:async()=>{}})
+        assert.deepEqual(JSON.parse(JSON.stringify(attributed)),JSON.parse(JSON.stringify(reference)),JSON.stringify({query,regexMode,language}))
+      }
+    }
+  }finally{runtime.close()}
+})
 test('compact search, streamed grouping, context and playlist preserve full-corpus results',async()=>{
   const runtime=await createSubtitleSearchRuntime('scope',{indexedDB:new IDBFactory(),cacheBytes:10})
   try{
@@ -78,7 +100,7 @@ test('expired derived sessions are pruned without touching active leases or auth
       const store=await openSubtitleCorpus(scope,indexedDB,{baseScope:scope==='current'?'current':'other-source'})
       stores.push(store);await store.put([{id:scope,sv:'durable transcript',revision:1}])
     }
-    const db=await new Promise((resolve,reject)=>{const req=indexedDB.open('cupitor-search-corpus-v1',2);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})
+    const db=await new Promise((resolve,reject)=>{const req=indexedDB.open('cupitor-search-corpus-v1');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})
     const tx=db.transaction('scopes','readwrite'),complete=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error)})
     for(const [scope,age]of [['oldest',8],['older',2],['newer',1]]){
       const req=tx.objectStore('scopes').get(scope)

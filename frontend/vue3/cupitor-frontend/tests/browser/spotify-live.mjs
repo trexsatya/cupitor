@@ -88,6 +88,10 @@ await page.addInitScript(() => {
   const events = window.__spotifyLiveEvents = [];
   const record = (kind, data) => events.push({ms: performance.now(), kind,
     cardIndex: window._recPlayIndex ?? null, cardId: window._recPlayCurrentItem?.id ?? null, data});
+  window.addEventListener('cupitor:user-data-status', ({detail}) => {
+    if (detail.error) record('device-save-error', {name: detail.error.name,
+      message: detail.error.message, code: detail.error.code, revision: detail.revision});
+  });
   let callback;
   Object.defineProperty(window, 'onSpotifyIframeApiReady', {
     configurable: true,
@@ -364,6 +368,14 @@ if (result.status === 'passed') {
     result.status = 'failed'; result.reason = 'Spotify Practice/Player controls or minimize/restore failed';
   }
 }
+// Include the browser's actual storage error, even when its message is empty.
+// Do not include the user's saved values in playback diagnostics.
+result.deviceSave = await page.evaluate(() => {
+  const status = window.cupitorUserData?.status;
+  return {pending: status?.pending, revision: status?.revision,
+    error: status?.error ? {name: status.error.name, message: status.error.message, code: status.error.code} : null,
+    warning: document.querySelector('#userDataError')?.textContent || null};
+});
 await writeFile(resolve(output, 'result.json'), JSON.stringify(result, null, 2));
 await writeFile(resolve(output, 'events.json'), JSON.stringify(events, null, 2));
 console.log('LIVE_SPOTIFY_RESULT ' + JSON.stringify(result));

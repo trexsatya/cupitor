@@ -10,6 +10,33 @@
     --practice-card-back-color: #80cbc4;
 }
 
+#userDataError {
+    position: sticky;
+    top: 0;
+    z-index: 2147483647;
+    padding: 12px;
+    background: #fff0cf;
+    color: #302000;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+}
+
+/* Keep save recovery visible over study views, clear of their top controls
+   and bottom navigation. A sticky page banner otherwise covers Minimize. */
+body:is(.practice-mode, .rec-playing) #userDataError {
+    position: fixed;
+    top: 50%;
+    left: 8px;
+    right: 8px;
+    transform: translateY(-50%);
+    max-width: 560px;
+    max-height: calc(100dvh - 160px);
+    margin: 0 auto;
+    overflow-y: auto;
+    border: 1px solid #b38b36;
+    border-radius: 8px;
+}
+
 /* ── Toolbar ──────────────────────────────────────── */
 .lang-toolbar {
     display: flex;

@@ -87,11 +87,12 @@ device performance is not established by these checks.
 
 ## Complete search with bounded working data
 
-The module worker scans the complete downloaded active-language corpus in
-`cupitor-search-corpus-v1`. It preserves literal, substring, regex, cue-anchor,
+The module worker searches the complete downloaded active-language corpus in
+`cupitor-search-corpus-v1`. A persistent inverted index narrows candidate
+transcripts before the existing matcher verifies them. It preserves literal, substring, regex, cue-anchor,
 cross-cue phrase and expansion attribution, along with existing ranking,
-English corresponding-word grouping and own/shared precedence. No prefix index
-or fixed result limit substitutes for the full scan. Attribution streams one
+English corresponding-word grouping and own/shared precedence. Unsupported patterns and unindexed documents retain full scanning; no fixed
+result limit restricts coverage. Attribution streams one
 document batch at a time. English grouping streams frequency statistics and
 paired-line assignments instead of sending every studied-language line to the UI.
 
@@ -106,8 +107,12 @@ cannot interrupt a single native regex evaluation, and the status explains it.
 
 Each tab has a separate derived corpus namespace within the account, language
 and resolved own/shared sources. Unsynced edits in another tab cannot overwrite
-this tab's search data. The authoritative subtitle download cache is reused on
-reload; the derived namespace is prepared from it in bounded batches.
+this tab's search data. With sessionStorage and Web Locks, a tab reuses its
+namespace and index across reloads. A copied tab whose inherited token is
+already locked rotates it. Hosts without those APIs keep isolated disposable
+namespaces. The authoritative subtitle download cache is reused on reload;
+unchanged text retains its index generation when downloaded again. After a
+complete boot, stale documents outside the loaded corpus are retired.
 
 Raw main-thread subtitle strings use a 32 MiB working budget. Only acknowledged
 documents can be evicted; unsaved edits remain pinned. Metadata remains resident
@@ -132,6 +137,55 @@ expired sessions older than seven days, keeps one inactive session per source,
 and applies a soft 128 MiB budget to disposable derived data. Manage → Cached
 data lists account/language/source caches and sizes; active search sessions
 are protected. Removing disposable caches never removes pending user edits.
+
+## Inverted subtitle index
+
+Schema version 3 adds disposable `features` and `postings` stores. Each
+transcript records unique character trigrams for both the normalized file
+view and the actual parsed cue view, plus word tokens for exact-word
+attribution. Diacritics remain distinct; case folding preserves native regex
+case equivalences, including long s, Kelvin sign and Greek variants. Index
+normalization has its own version and a browser/locale environment signature;
+old or mismatched versions always scan until rebuilt.
+
+A query planner extracts necessary literal runs from supported patterns.
+It handles ordinary words, top-level alternatives, whitespace, anchors,
+character classes, wildcards and simple quantifiers conservatively. Groups,
+backreferences, short patterns and unsupported/legacy regex syntax fall back
+to scanning. Substring candidates retain compounds; phrase candidates are
+verified for order and cue boundaries by the unchanged matcher. Plain English
+exact-word attribution can use the word postings. Neither path changes ranking,
+highlighting, corresponding-word grouping or final match rules.
+
+Postings contain at most 128 numeric document ordinals per shard. Query
+planning chooses rare posting terms before loading bounded shard batches;
+coverage metadata is cached by corpus revision so warm searches avoid reading
+one metadata record per transcript. A raw edit atomically advances its content
+generation and invalidates index readiness. A separate optional transaction
+replaces old postings, feature metadata and the ready marker together after
+checking that generation again. Aborted writes, concurrent edits and interrupted
+builds cannot mark a partial index ready. Pending/unindexed documents remain in
+every applicable scan. Index storage failures fall back to complete scanning.
+
+Index work runs in the background, resumes after a worker restart and yields
+between documents and during long character passes. Queries drain the current
+index document and pause further indexing, so terminating a blocked regex does
+not strand an index write transaction. A failed restart after a previously
+working module worker reports an incomplete search and can retry; it does not
+move that regex to the main thread.
+
+A transcript exceeding 16,384 unique index terms remains scan-only. Very large
+cues can retain trigram indexing while exact-word queries use scanning. These
+limits bound index construction rather than excluding searchable material.
+Index payload sizes are estimates; the cache manager lists them separately
+from raw subtitle text, and derived-cache cleanup accounts for both. Removing a
+derived cache scope also deletes its feature and posting records. The index is
+rebuilt locally and requires no changes to GitHub data formats or repositories.
+
+Index tests verify result parity against full scanning for both subtitle tracks,
+regex and ordinary modes, Unicode equivalences, cross-cue phrases, mutations,
+transaction abort/retry, schema upgrades, bounded postings, actual candidate
+pruning, interrupted-build recovery, reload reuse and copied-tab isolation.
 
 ## Indexed maps and bounded views
 

@@ -57,3 +57,22 @@ test('a terminated worker cannot reject a newer query with a late error or respo
     assert.deepEqual(await second,[])
   }finally{client.close()}
 })
+
+test('a failed restart after worker mode reports an incomplete search and can retry without using cooperative regex',async()=>{
+  let failNext=false
+  const modes=[]
+  const client=createSubtitleSearchClient({scope:'failed-restart',onMode:mode=>modes.push(mode),workerFactory:()=>{
+    if(failNext){failNext=false;throw new Error('Transient worker failure')}
+    return {terminate(){},postMessage(message){queueMicrotask(()=>this.onmessage({data:{id:message.id,generation:message.generation,result:message.type==='files'?[]:true}}))}}
+  }})
+  try{
+    await client.run('files',{ids:[],query:'first'})
+    client.close();failNext=true
+    client.update('pending',{sv:'pending edit'})
+    await assert.rejects(client.run('files',{ids:['pending'],query:'next'}),/could not restart/)
+    assert.equal(client.pendingSize,1)
+    assert.deepEqual(await client.run('files',{ids:['pending'],query:'retry'}),[])
+    assert.equal(client.pendingSize,0)
+    assert.deepEqual(modes,['worker','worker'])
+  }finally{client.close()}
+})
