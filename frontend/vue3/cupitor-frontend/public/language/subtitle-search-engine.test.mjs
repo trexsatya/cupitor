@@ -34,3 +34,18 @@ test('normalization cache obeys a byte budget and invalidates same-id content re
   cache.put('large',1,{sv:'x'.repeat(100)})
   assert.equal(cache.get('large',1),null);assert.ok(cache.bytes<=100)
 })
+
+test('typed regex preserves trailing-space constraints and groups only matched spans', async () => {
+  const lines = [
+    {index: 1, text: 'Jag förStå här'},
+    {index: 2, text: 'Jag förStå!'},
+    {index: 3, text: 'Vi måste förStå saker'},
+  ]
+  const hits = await attributeSubtitleMatches(
+    [{url: 'regression', source: 'local', data: lines}],
+    '[^ ]+Stå ',
+    {regexMode: true, yieldToUI: async () => {}},
+  )
+  assert.deepEqual(Object.keys(hits), ['förstå'])
+  assert.deepEqual(hits.förstå.map(hit => hit.line.index), [1, 3])
+})
