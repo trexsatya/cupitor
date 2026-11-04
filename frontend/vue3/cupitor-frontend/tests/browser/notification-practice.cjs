@@ -46,7 +46,7 @@ async function check(browser, mobile) {
       window.__originalRecordings = JSON.stringify(window._recordings)
       Object.assign(window._appSettings, { recPlayShuffle: true, recPlayLoop: 'off' })
       window.__originalResume = JSON.stringify(window._recLastPlayedMap || {})
-      window.__storageBefore = Object.fromEntries(Object.keys(localStorage).filter(k => /recLastPlayed/.test(k)).map(k => [k, localStorage.getItem(k)]))
+      window.__storageBefore = Object.fromEntries(Object.entries(window.cupitorUserData.exportData().values).filter(([k]) => /recLastPlayed/.test(k)))
       window._notifSimulateFeed([
         { external_key: 'key-a', item_external_id: 'card:a1', title: 'First reminder', fired_at: 30, responded_at: null },
         { external_key: 'key-a', item_external_id: 'card:a2', title: 'Clicked reminder', fired_at: 20, responded_at: null },
@@ -67,7 +67,7 @@ async function check(browser, mobile) {
     await page.evaluate(() => {
       window.minimizePlayingRecording()
       window.__originalResume = JSON.stringify(window._recLastPlayedMap || {})
-      window.__storageBefore = Object.fromEntries(Object.keys(localStorage).filter(k => /recLastPlayed/.test(k)).map(k => [k, localStorage.getItem(k)]))
+      window.__storageBefore = Object.fromEntries(Object.entries(window.cupitorUserData.exportData().values).filter(([k]) => /recLastPlayed/.test(k)))
     })
     await page.locator('#toggleSettingsPanelBtn').click()
     if (mobile) await page.locator('.settings-section-picker select').selectOption('practice')
@@ -128,7 +128,7 @@ async function check(browser, mobile) {
     assert.equal(await page.evaluate(() => window._practiceCards.length), 0, 'closing discards every temporary queue')
     assert.equal(await page.evaluate(() => JSON.stringify(window._recordings) === window.__originalRecordings), true)
     assert.equal(await page.evaluate(() => JSON.stringify(window._recLastPlayedMap || {}) === window.__originalResume), true)
-    assert.equal(await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).filter(k => /recLastPlayed/.test(k)).map(k => [k, localStorage.getItem(k)]))) === JSON.stringify(window.__storageBefore)), true)
+    assert.equal(await page.evaluate(() => JSON.stringify(Object.fromEntries(Object.entries(window.cupitorUserData.exportData().values).filter(([k]) => /recLastPlayed/.test(k)))) === JSON.stringify(window.__storageBefore)), true)
     assert.equal(await page.evaluate(() => Object.keys(localStorage).some(k => /openView/.test(k))), false)
     // Native event includes clicked even if host already marked it read,
     // and the bridge request retains the 200-event bound.

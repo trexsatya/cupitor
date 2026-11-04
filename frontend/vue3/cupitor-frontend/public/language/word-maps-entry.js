@@ -1,14 +1,17 @@
+import { userDataReady } from './user-data.js'
 import { githubWordMapSync } from './word-maps-github.js'
 import { wordMapStorageKey } from './word-map-search.js'
 import { openWordMaps, hostBridge } from './word-maps.js'
 
 // Resolve the account and studied language at open time, just like other tools.
-window.openWordMaps = (focus) => {
+window.openWordMaps = async (focus) => {
+  const storage = await userDataReady()
   const storageKey = wordMapStorageKey()
   return openWordMaps({
     storageKey,
+    storage,
     focus,
-    sync: githubWordMapSync(storageKey),
+    sync: githubWordMapSync(storageKey, { storage }),
     vocabulary: Object.values(window.vocabulary || {})
       .flat()
       .filter((line) => typeof line === 'string')

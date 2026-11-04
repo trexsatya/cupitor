@@ -83,6 +83,7 @@ export function createWordMapSync({
       check()
       busy = true
       try {
+        if (storage.flush) await storage.flush()
         const remote = parseWordMaps(await readFile())
         const local = normalize(getMaps())
         const result = mergeWordMaps(base || [], local, remote)
@@ -96,6 +97,7 @@ export function createWordMapSync({
         }
         adopt(clone(result.maps))
         saveBase([...nextBase.values()])
+        if (storage.flush) await storage.flush()
         return { conflicts: result.conflicts.length }
       } finally {
         busy = false
@@ -109,6 +111,7 @@ export function createWordMapSync({
       busy = true
       let pushed
       try {
+        if (storage.flush) await storage.flush()
         await commitFile(async (text) => {
           const remote = parseWordMaps(text),
             result = mergeWordMaps(initialBase, snapshot, remote)
@@ -149,6 +152,7 @@ export function createWordMapSync({
         for (const c of next.conflicts) if (c.local) next.maps.push(c.local)
         adopt(clone(next.maps))
         saveBase(pushed)
+        if (storage.flush) await storage.flush()
         return { dirty: this.dirty(next.maps) }
       } finally {
         busy = false

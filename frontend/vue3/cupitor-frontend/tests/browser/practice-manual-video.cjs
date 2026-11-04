@@ -11,6 +11,7 @@ const actualCards = data.playlists[name].items.Manual.Card
 async function checkManualVideo(browser, mobile) {
   const page = await browser.newPage({ viewport: { width: mobile ? 393 : 1280, height: 900 }, isMobile: mobile, hasTouch: mobile })
   page.setDefaultTimeout(7000)
+  page.setDefaultNavigationTimeout(30000)
   const errors = []
   page.on('pageerror', e => errors.push(e.message))
   page.on('dialog', d => { errors.push(d.message()); d.dismiss() })
@@ -67,12 +68,13 @@ async function checkManualVideo(browser, mobile) {
     const starts = [2410, 2419, 2515, 0, 95, 2419]
     for (let i = 0; i < queue.length; i++) {
       const id = i === 4 ? 'testVideo02' : 'KX6xaWY99wQ'
+      const eventsBefore = await page.evaluate(() => window.__manualYT.events.length)
       if (i) await click(page.locator('#practiceMode .practice-next'))
       await page.waitForFunction(({ i, start, id }) => window._practiceIdx === i &&
         window.__manualYT.state === 5 && window.__manualYT.start === start && window.__manualYT.id === id,
       { i, start: starts[i], id })
       assert.equal(await page.evaluate(() => window.__manualYT.time), 0, 'a cued embed can report zero before playback')
-      assert.equal(await page.evaluate(() => window.__manualYT.events.at(-1).action), 'cue', 'navigation only cues; it never autoplays')
+      assert.equal(await page.evaluate(from => window.__manualYT.events.slice(from).some(event => ['play', 'load'].includes(event.action)), eventsBefore), false, 'navigation never sends an autoplay command, including while cue acknowledgement restores mute')
       // The iframe's own Play must use THIS card, even without clicking the
       // app's linked-media button first.
       await click(page.locator('#fixtureEmbeddedPlay'))

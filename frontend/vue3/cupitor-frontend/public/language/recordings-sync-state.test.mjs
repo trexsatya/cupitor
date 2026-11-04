@@ -43,6 +43,7 @@ function fixture(baseline = original()) {
   let calls = 0, fail = false, release = null, remoteFolders = {}, generation = 0;
   Object.assign(w, {
     $: w.jQuery, recordingsHaveChanges, mergeFolderCatalog,
+    _userData: { getItem: key => w.localStorage.getItem(key), setItem: (key,value) => w.localStorage.setItem(key,value), removeItem: key => w.localStorage.removeItem(key), flush: async () => {}, status: {} },
     _scopedKey: key => key, getLangFromUrl: () => ({fullName:"swedish"}), _sameJson: sameJson, _threeWayRecordings: threeWayRecordings,
     requireStudyLanguage() {},
     _dsWriteTarget: () => ({owner:'alice', repo:'data', branch:'main'}),
@@ -85,6 +86,7 @@ function fixture(baseline = original()) {
       folders.catalog=mergeFolderCatalog(folders.catalog,{[name]:{updatedAt:Date.now(),deleted}});
       w._persistPlaylistFolders();w.refreshSync();
     },
+    async started() { while (typeof release !== 'function') await new Promise(resolve => setTimeout(resolve, 0)); },
     hold() {release = true;}, release() {const resolve = release; release = null; resolve();},
     edit(text = 'Edited') {w._recording.items.Manual.Card[0].source = text; w.saveRecording();},
     close() {dom.window.close();}};
@@ -165,6 +167,7 @@ test('Sync stays disabled during a request, including after rerender, and preser
   try {
     p.edit(); p.hold();
     const pending = p.w.syncRecordings();
+    await p.started();
     assert.equal(p.button.disabled, true);
     p.button.outerHTML = buttonHtml; p.w.refreshSync();
     assert.equal(p.button.disabled, true);
@@ -182,6 +185,7 @@ test('a late sync response after a source switch cannot adopt data or advance th
   try {
     p.edit(); p.hold();
     const pending = p.w.syncRecordings();
+    await p.started();
     const baseline = p.w.localStorage.getItem('baseline');
     p.switchSource();
     p.edit('New pending edit');
@@ -243,6 +247,7 @@ test('folders added during an upload stay pending and are included in the next s
   try {
     p.editFolder('Before');p.hold();
     const pending=p.w.syncRecordings();
+    await p.started();
     p.editFolder('During');
     assert.equal(p.button.disabled,true);
     p.release();await pending;

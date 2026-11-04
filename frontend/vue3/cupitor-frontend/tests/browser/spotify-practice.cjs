@@ -28,7 +28,7 @@ async function check(browser, mobile) {
         resume() { s.paused = false; s.commands.push(['resume']); emit() },
         pause() { s.paused = true; s.commands.push(['pause']); emit() },
       })
-      setInterval(() => { if (!s.paused) { s.position += 0.1; emit() } }, 100)
+      setInterval(() => { if (!s.paused) { if (!window.__freezeSpotifyProgress) s.position += 0.1; emit() } }, 100)
     } }
     window.__audioRequests = []; window.__takeAudios = []
     const OriginalAudio = window.Audio
@@ -109,11 +109,17 @@ async function check(browser, mobile) {
     assert.equal(await page.evaluate(() => window.__spotify.paused), true, 'Rec pauses Spotify at its own clock')
     await click('.prec-toggle.on'); await takePlaying()
     assert.equal(await page.evaluate(() => window.__spotify.paused), true, 'the recorded take sounds while Spotify is held')
+    // Hold the fixture clock while Keep/Replay are tapped. Otherwise the
+    // next 100ms tick can reach this take's mark and disable Replay during
+    // the mobile tap, before the explicit review action is delivered.
+    await page.evaluate(() => { window.__freezeSpotifyProgress = true; window.__spotify.position = 30 })
     await finishTake(); await playing()
     await click('.prec-keep')
     const saved = await page.evaluate(() => window._recordings.Speak.items.Manual.Card[0].practiceTakes)
     assert.equal(saved.length, 1); assert(saved[0].t1 >= 30 && saved[0].t1 < 50, 'take uses Spotify time, not the YouTube clock at 900s')
-    await click('.prec-take'); await takePlaying()
+    await click('.prec-take')
+    await page.evaluate(() => { window.__freezeSpotifyProgress = false })
+    await takePlaying()
     await click('.practice-minimize'); await finishTake()
     await page.waitForTimeout(350)
     assert.equal(await page.evaluate(() => window.__spotify.paused && window.__takeAudios.every(a => a.paused)), true, 'minimizing parks a take and stale ended cannot resume it')
@@ -196,6 +202,6 @@ async function check(browser, mobile) {
   } finally { await page.close() }
 }
 ;(async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] })
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] })
   try { await check(browser, false); await check(browser, true) } finally { await browser.close() }
 })().catch(error => { console.error(error); process.exitCode = 1 })

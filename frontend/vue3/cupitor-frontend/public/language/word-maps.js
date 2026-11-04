@@ -1,5 +1,7 @@
+import { createWordMapIndex } from './word-map-library.js'
 import { folderPath, folderPaths, inFolder } from './playlist-folders.js'
 import { findWordMaps } from './word-map-search.js'
+import { parseWordMaps } from './word-maps-sync.js'
 import {
   emptyMap,
   readMap,
@@ -66,7 +68,7 @@ export function hostBridge(postMessage) {
     onImport: () => ask({ type: 'import' }),
   }
 }
-export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, onImport, sync, focus }) {
+export function openWordMaps({ storage = localStorage, storageKey, onLookup, vocabulary = [], onExport, onImport, sync, focus }) {
   const existing = document.querySelector('#wordMapsDialog')
   if (existing) {
     if (existing.dataset.scope === storageKey) {
@@ -107,16 +109,22 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   status.setAttribute('role', 'status')
   let storageBroken = false
   try {
-    const raw = localStorage.getItem(storageKey)
+    const raw = storage.getItem(storageKey)
     if (raw) {
-      const data = JSON.parse(raw)
-      if (!Array.isArray(data)) throw Error()
-      maps = data.map(readMap)
+      maps = storage.readMaps ? storage.readMaps(storageKey).map(readMap) : parseWordMaps(raw)
     }
   } catch (_) {
     storageBroken = true
     status.textContent =
       'Saved maps could not be read. Export or recover the stored data before saving new maps.'
+  }
+  let mapIndex = createWordMapIndex(maps)
+  let indexedIds = new Set(maps.map(item => item.id))
+  function updateMapIndex(all = false) {
+    const nextIds = new Set(maps.map(item => item.id))
+    for (const id of indexedIds) if (!nextIds.has(id)) mapIndex.remove(id)
+    for (const item of maps) if (all || item.id === map.id || !indexedIds.has(item.id)) mapIndex.update(item)
+    indexedIds = nextIds
   }
   const header = el('header'),
     title = el('h2', 'Word maps'),
@@ -191,7 +199,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     folderScope = path
     renderLibrary()
   }
-  librarySearch.oninput = renderLibrary
+  librarySearch.oninput = () => { libraryPage = 0; renderLibrary() }
   library.append(libraryHeading, librarySearch, folderTree, mapList, folderForm)
   const layout = el('div', null, 'wm-layout'),
     work = el('div', null, 'wm-work'),
@@ -341,6 +349,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     }),
     editBtn('Delete map', () => {
       if (confirm('Delete “' + map.name + '”?')) {
+        mapIndex.remove(map.id)
+        indexedIds.delete(map.id)
         maps = maps.filter((m) => m !== map)
         activate(maps[0] || null)
         save(false)
@@ -375,15 +385,30 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     browseButton.setAttribute('aria-expanded', String(open))
     if (open) { renderLibrary(); (window.innerWidth <= 700 ? library : librarySearch).focus() }
   }
+  const LIBRARY_PAGE_SIZE = 100
+  let libraryPage = 0, folderPage = 0
   function renderLibrary() {
     if (!map) return
     const paths = folderPaths(maps)
+    const counts = new Map([['',0]])
+    for (const item of maps) {
+      const path = item.folder || ''
+      if (!path) counts.set('',counts.get('')+1)
+      else {
+        const parts=path.split('/')
+        for(let i=1;i<=parts.length;i++) {
+          const parent=parts.slice(0,i).join('/')
+          counts.set(parent,(counts.get(parent)||0)+1)
+        }
+      }
+    }
     if (folderScope && !paths.includes(folderScope)) folderScope = null
     folderTree.replaceChildren()
     const folderButton = (label, path, depth = 0) => {
-      const count = maps.filter(m => path === null || (path ? inFolder(m.folder || '', path) : !m.folder)).length
+      const count = path === null ? maps.length : counts.get(path) || 0
       const b = button(label + ' · ' + count, () => {
         folderScope = path
+        libraryPage = 0
         renderLibrary()
         folderTree.querySelector('[aria-pressed="true"]')?.focus()
       })
@@ -395,13 +420,17 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     }
     folderButton('All maps', null)
     folderButton('Unfiled', '')
-    for (const path of paths) folderButton(path.split('/').at(-1), path, path.split('/').length - 1)
+    folderPage=Math.min(folderPage,Math.max(0,Math.ceil(paths.length/LIBRARY_PAGE_SIZE)-1))
+    for (const path of paths.slice(folderPage*LIBRARY_PAGE_SIZE,(folderPage+1)*LIBRARY_PAGE_SIZE))
+      folderButton(path.split('/').at(-1), path, path.split('/').length - 1)
+    appendPages(folderTree,paths.length,folderPage,'folders',next=>{folderPage=next;renderLibrary()})
     folderTree.querySelector('[aria-pressed="true"]')?.scrollIntoView?.({block: 'nearest'})
     const query = librarySearch.value.trim().toLocaleLowerCase()
     const shown = maps.filter(m => (folderScope === null || (folderScope ? inFolder(m.folder || '', folderScope) : !m.folder)) &&
       (m.name + ' ' + (m.folder || '')).toLocaleLowerCase().includes(query))
     mapList.replaceChildren(el('p', shown.length + ' map' + (shown.length === 1 ? '' : 's'), 'wm-list-count'))
-    for (const item of shown) {
+    libraryPage=Math.min(libraryPage,Math.max(0,Math.ceil(shown.length/LIBRARY_PAGE_SIZE)-1))
+    for (const item of shown.slice(libraryPage*LIBRARY_PAGE_SIZE,(libraryPage+1)*LIBRARY_PAGE_SIZE)) {
       const b = button('', () => {
         if (inline) finishInline(true)
         activate(item); fitMap()
@@ -413,10 +442,17 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
       b.append(el('strong', item.name), el('small', item.folder || 'Unfiled'))
       mapList.append(b)
     }
+    appendPages(mapList,shown.length,libraryPage,'maps',next=>{libraryPage=next;renderLibrary()})
     if (!shown.length) mapList.append(el('p', 'No maps in this view.', 'wm-list-empty'))
-    folderOptions.replaceChildren(...paths.map(path => new Option(path)))
+    folderOptions.replaceChildren(...paths.slice(0,200).map(path => new Option(path)))
     if (document.activeElement !== folderInput) folderInput.value = map.folder || ''
     folderForm.hidden = !editing()
+  }
+  function appendPages(parent,count,page,label,change) {
+    if(count<=LIBRARY_PAGE_SIZE)return
+    const previous=button('Previous '+label,()=>change(page-1)),next=button('Next '+label,()=>change(page+1))
+    previous.disabled=page===0;next.disabled=(page+1)*LIBRARY_PAGE_SIZE>=count
+    parent.append(previous,el('span',`${page+1} / ${Math.ceil(count/LIBRARY_PAGE_SIZE)}`),next)
   }
   function setMore(open) {
     moreActions.classList.toggle('is-open', open)
@@ -847,8 +883,8 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
   }
   const savedMaps = () => maps.filter(m => m.id !== transientId)
   function refreshSync() {
-    syncButton.disabled = !sync || syncing || storageBroken
-    syncButton.textContent = syncing ? 'Syncing…' : sync?.dirty(savedMaps()) ? 'Sync*' : 'Sync'
+    syncButton.disabled = !sync || syncing || storageBroken || !!storage.status?.error
+    syncButton.textContent = syncing ? 'Syncing…' : (sync?.dirty(savedMaps()) || storage.status?.error) ? 'Sync*' : 'Sync'
     iconButton(syncButton, 'M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 2M4 17l2 2a7 7 0 0 0 12-2')
     syncButton.setAttribute('aria-label', 'Sync maps')
     syncButton.title = !sync
@@ -862,24 +898,28 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     refreshSync()
     status.textContent = pull ? 'Loading maps from GitHub…' : 'Syncing maps to GitHub…'
     try {
+      if (storage.flush) await storage.flush()
       const getMaps = () => {
-        if (!dialog.isConnected) return JSON.parse(localStorage.getItem(storageKey) || '[]')
+        if (!dialog.isConnected) return JSON.parse(storage.getItem(storageKey) || '[]')
         // Inline text may have changed while the network request was pending.
         if (inline) finishInline(true)
         return savedMaps()
       }
       const adopt = next => {
-        localStorage.setItem(storageKey, JSON.stringify(next))
+        storage.setItem(storageKey, JSON.stringify(next))
         if (!dialog.isConnected) return
         const currentId = map.id
         const focused = searchFocus
         maps = next
+        mapIndex = createWordMapIndex(maps)
+        indexedIds = new Set(maps.map(item => item.id))
         transientId = null
         activate(maps.find(m => m.id === currentId) || maps[0] || null)
         if (focused && map.id === focused.mapId) revealSearchResult(focused)
         window.dispatchEvent(new window.CustomEvent('wordmapschanged', { detail: { storageKey } }))
       }
       const result = await sync[pull ? 'pull' : 'push'](getMaps, adopt)
+      if (storage.flush) await storage.flush()
       status.textContent = result.conflicts
         ? 'Loaded from GitHub. Conflicting maps kept locally; resolve them with Sync.'
         : sync.dirty(getMaps())
@@ -902,9 +942,18 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     }
     try {
       if (persistDraft && map.id === transientId) transientId = null
-      localStorage.setItem(storageKey, JSON.stringify(savedMaps()))
+      updateMapIndex()
+      if (storage.saveMaps) storage.saveMaps(storageKey, savedMaps(), map.id)
+      else storage.setItem(storageKey, JSON.stringify(savedMaps()))
       window.dispatchEvent(new window.CustomEvent('wordmapschanged', { detail: { storageKey } }))
-      status.textContent = sync ? 'Saved locally · unsynced changes' : 'Saved on this device'
+      status.textContent = storage.flush ? 'Saving…' : sync ? 'Saved locally · unsynced changes' : 'Saved on this device'
+      if (storage.flush) storage.flush().then(() => {
+        status.textContent = sync ? 'Saved locally · unsynced changes' : 'Saved on this device'
+        refreshSync()
+      }, () => {
+        status.textContent = 'Could not save. Export your map to keep your changes.'
+        refreshSync()
+      })
       refreshSync()
     } catch (_) {
       status.textContent = 'Could not save. Export your map to keep your changes.'
@@ -944,10 +993,12 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     viewport.scrollTo(0, 0)
     if (dialog.open && window.innerWidth < 700) fitMap()
   }
-  function draw() {
+  function draw(diagramOnly = false) {
+    if (!diagramOnly) {
     picker.replaceChildren()
-    for (const folder of ['', ...folderPaths(maps)]) {
-      const items = maps.filter(m => (m.folder || '') === folder)
+    const pickerMaps = maps.length <= 200 ? maps : [map, ...maps.filter(item=>item.id!==map.id).slice(0,100)]
+    for (const folder of ['', ...folderPaths(pickerMaps)]) {
+      const items = pickerMaps.filter(m => (m.folder || '') === folder)
       if (!items.length) continue
       const optgroup = el('optgroup'); optgroup.label = folder || 'Unfiled'
       optgroup.append(...items.map(m => new Option(m.name, m.id)))
@@ -956,6 +1007,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     renderLibrary()
     picker.value = map.id
     name.value = map.name
+    }
     undo.disabled = !history.length
     redo.disabled = !redoHistory.length
     const active = !inline && canvas.contains(document.activeElement) ? document.activeElement : null,
@@ -1069,11 +1121,12 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
           transform: `translate(${n.x},${n.y})`,
         })
       g.classList.add('wm-node')
-      const otherMaps = maps.filter(other => other.id !== map.id && other.nodes.some(candidate => candidate.word.trim().toLocaleLowerCase() === n.word.trim().toLocaleLowerCase()))
-      if (otherMaps.length) {
-        const badge = svgEl('g', { class: 'wm-cross-map-indicator', 'aria-label': 'Also in ' + otherMaps.map(other => other.name).join(', ') })
+      const relatedCount = mapIndex.count(n.word, map.id)
+      if (relatedCount) {
+        const otherMaps = mapIndex.related(n.word, map.id, 5)
+        const badge = svgEl('g', { class: 'wm-cross-map-indicator', 'aria-label': 'Also in ' + relatedCount + ' maps: ' + otherMaps.map(other => other.name).join(', ') })
         badge.append(svgEl('circle', { cx: w / 2 - 2, cy: -25, r: 12, fill: '#1769c2', stroke: 'white', 'stroke-width': 2 }))
-        badge.append(svgEl('text', { x: w / 2 - 2, y: -20, 'text-anchor': 'middle', fill: 'white', 'font-size': 14, 'font-weight': 700 }, String(otherMaps.length)))
+        badge.append(svgEl('text', { x: w / 2 - 2, y: -20, 'text-anchor': 'middle', fill: 'white', 'font-size': 14, 'font-weight': 700 }, String(relatedCount)))
         badge.style.pointerEvents = 'none'
         g.append(badge)
       }
@@ -1283,6 +1336,30 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     marquee = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive, base: additive ? new Set(group) : new Set() }
     canvas.setPointerCapture(e.pointerId)
   }
+  function updateDraggedNodes(ids) {
+    const nodes = new Map(map.nodes.map(node => [node.id, node]))
+    const edges = new Map(map.edges.map(edge => [edge.id, edge]))
+    for (const group of canvas.querySelectorAll('[data-node]')) {
+      const id = group.getAttribute('data-node')
+      if (ids.has(id)) {
+        const node = nodes.get(id)
+        group.setAttribute('transform', `translate(${node.x},${node.y})`)
+      }
+    }
+    for (const group of canvas.querySelectorAll('[data-edge]')) {
+      const edge = edges.get(group.getAttribute('data-edge'))
+      if (!edge || (!ids.has(edge.from) && !ids.has(edge.to))) continue
+      const [p, q] = edgeEnds(nodes.get(edge.from), nodes.get(edge.to))
+      for (const line of group.querySelectorAll('line')) {
+        for (const [name,value] of Object.entries({x1:p.x,y1:p.y,x2:q.x,y2:q.y})) line.setAttribute(name,value)
+      }
+      const x=(p.x+q.x)/2, y=(p.y+q.y)/2
+      for (const text of group.querySelectorAll('text')) {
+        const marker = text.getAttribute('font-size') === '36'
+        text.setAttribute('x',x);text.setAttribute('y',y+(marker?10:-14))
+      }
+    }
+  }
   canvas.onpointermove = (e) => {
     if (marquee) {
       const p = toCanvas(e)
@@ -1298,7 +1375,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         if (n.x + hw >= l && n.x - hw <= r && n.y + 27 >= t && n.y - 27 <= b) group.add(n.id)
       }
       selection = null
-      draw()
+      draw(true)
       return
     }
     if (!drag) return
@@ -1316,7 +1393,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
         n.x = start.x + dx
         n.y = start.y + dy
       }
-      draw()
+      updateDraggedNodes(new Set(drag.starts.keys()))
     }
   }
   canvas.onpointerup = (e) => {
@@ -1447,20 +1524,28 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     p.append(el('strong', label + ': '), document.createTextNode(value))
     return p
   }
+  function renderRelatedMaps(node, readMode) {
+    const total=mapIndex.count(node.word,map.id)
+    if(!total)return
+    const container=el('div',null,'wm-related-maps')
+    inspector.append(el('h4','Also appears in'),container)
+    const renderPage=page=>{
+      container.replaceChildren()
+      for(const other of mapIndex.related(node.word,map.id,100,page*100))container.append(button(other.name,()=>{
+        activate(other)
+        const id=mapIndex.nodes(node.word,other.id)[0]
+        if(id)select('node',id)
+        if(readMode)setMode('read')
+      }))
+      appendPages(container,total,page,'related maps',renderPage)
+    }
+    renderPage(0)
+  }
   function readDetails(n, e) {
     if (n) {
       inspector.append(el('h3', n.word))
       inspector.append(...[row('Looks up as', n.lookup)].filter(Boolean))
-      const relatedMaps = maps.filter(other => other.id !== map.id && other.nodes.some(candidate => candidate.word.trim().toLocaleLowerCase() === n.word.trim().toLocaleLowerCase()))
-      if (relatedMaps.length) {
-        inspector.append(el('h4', 'Also appears in'))
-        for (const other of relatedMaps) inspector.append(button(other.name, () => {
-          activate(other)
-          const match = other.nodes.find(candidate => candidate.word.trim().toLocaleLowerCase() === n.word.trim().toLocaleLowerCase())
-          if (match) select('node', match.id)
-          setMode('read')
-        }))
-      }
+      renderRelatedMaps(n,true)
       if (n.note) {
         const p = el('p', n.note)
         p.style.whiteSpace = 'pre-wrap'
@@ -1573,16 +1658,7 @@ export function openWordMaps({ storageKey, onLookup, vocabulary = [], onExport, 
     }
     inspector.append(el('h3', n ? 'Word' : 'Connection'))
     if (n) {
-      const relatedMaps = maps.filter(other => other.id !== map.id && other.nodes.some(candidate => candidate.word.trim().toLocaleLowerCase() === n.word.trim().toLocaleLowerCase()))
-      if (relatedMaps.length) {
-        inspector.append(el('h4', 'Also appears in'))
-        for (const other of relatedMaps) inspector.append(button(other.name, () => {
-          const word = n.word
-          activate(other)
-          const match = other.nodes.find(candidate => candidate.word.trim().toLocaleLowerCase() === word.trim().toLocaleLowerCase())
-          if (match) select('node', match.id)
-        }))
-      }
+      renderRelatedMaps(n,false)
     }
     const form = el('form')
     inspector.append(form)
