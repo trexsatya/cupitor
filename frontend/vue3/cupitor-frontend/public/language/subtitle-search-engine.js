@@ -66,7 +66,7 @@ export function createSubtitleMatchCollector(search, {regexMode=false,exactWords
       const lines=item.data
       for(const line of lines) {
         check()
-        if(regexMode) {
+        if(regexMode && search.endsWith(' ')) {
           // Regexes without a phrase/whitespace operator describe word
           // families. Group by the matching WORD, not by a greedy match
           // spanning the rest of the cue ("För.*" must retain both words).
@@ -129,7 +129,7 @@ export function createSubtitleMatchCollector(search, {regexMode=false,exactWords
       }
     },
     finish(){
-      if(regexMode) return map
+      if(regexMode && search.endsWith(' ')) return map
       if(map[search.trim()]===undefined)Object.defineProperty(map,search,{value:[],writable:true,enumerable:true,configurable:true})
       if(!included&&(!map[finalSearch.trim()]||!map[finalSearch.trim()].length))Object.assign(map,fallback)
       if(!regexMode)getSearchedTerms(search).forEach(term=>{
