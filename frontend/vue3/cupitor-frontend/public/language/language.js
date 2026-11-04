@@ -7312,6 +7312,7 @@ function _renderSearchPlaylistToolbar(state, $result) {
       files: state.files, lang: state.lang, searchText: state.searchText, maxPerHeader: raw,
       contextBefore: parseInt(window._appSettings?.contextLinesBefore, 10) || 0,
       contextAfter: parseInt(window._appSettings?.contextLinesAfter, 10) || 0,
+      minWordsAround: _minWordsAround(),
       gapThreshold: _clipGapThresholdSec() }
     let queue
     const $button = $toolbar.find('#searchPlaylistCreateBtn').prop('disabled',true)
