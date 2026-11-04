@@ -29,10 +29,24 @@ export async function attributeSubtitleMatches(list, search, { regexMode = false
     // trailing-space requirements instead of falling back to trimmed queries.
     const out = {}
     const re = compileRegex(_relaxSpaces(search), 'gi')
+    const wordRe = compileRegex(_relaxSpaces(search), 'i')
+    const phrasePattern = hasPhraseWhitespace(search) || /\\s/.test(search)
     for (const item of list) {
       check()
       for (const line of item.data) {
-        for (const match of line.text.matchAll(re)) {
+        let grouped = false
+        if (!phrasePattern) {
+          for (const rawWord of getWords(line.text)) {
+            const token = rawWord.trim().toLowerCase()
+            if (!/[\p{L}\p{N}]/u.test(token)) continue
+            const match = token.match(wordRe)
+            if (match?.[0]) {
+              computeIfAbsent(out, token, () => []).push(new MatchResult(token, line, item.url, item.source))
+              grouped = true
+            }
+          }
+        }
+        if (phrasePattern || !grouped) for (const match of line.text.matchAll(re)) {
           const word = match[0].trim().toLowerCase()
           if (!word) continue
           computeIfAbsent(out, word, () => []).push(new MatchResult(word, line, item.url, item.source))
