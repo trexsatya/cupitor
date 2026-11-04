@@ -1,6 +1,7 @@
 import {
   clipRange,
   contiguousLineWindow,
+  wordContextLineWindow,
   gapSecondsBefore,
   formatGap,
   CLIP_MIN_SECONDS,
@@ -150,5 +151,32 @@ describe("formatGap", () => {
   test("nothing to say about no gap", () => {
     expect(formatGap(0)).toBe("");
     expect(formatGap(null)).toBe("");
+  });
+});
+
+describe("wordContextLineWindow", () => {
+  const words = [
+    { ...line(1, 0, 2), text: "before one two" },
+    { ...line(2, 2, 4), text: "three four five" },
+    { ...line(3, 4, 6), text: "target" },
+    { ...line(4, 6, 8), text: "six seven eight" },
+    { ...line(5, 8, 10), text: "nine ten eleven" },
+  ];
+  test("extends context in both directions, and clip duration follows rendered rows", () => {
+    const opts = { word: "target", minWordsAround: 5 };
+    expect(wordContextLineWindow(words, 2, 0, 0, opts))
+      .toEqual({ from: 0, to: 4 });
+    const range = clipRange(words, 2, 0, 0, { start: 4, stop: 6 }, opts);
+    expect(range.start).toBeCloseTo(0 - 0 + CLIP_LEAD_SECONDS * 0, 5);
+    expect(range.stop).toBeCloseTo(10 + 0.6, 5);
+  });
+  test("will not cross gaps in sparse captured subtitles", () => {
+    const clips = [
+      { ...line(1, 0, 2), text: "other previous capture" },
+      { ...line(2, 100, 102), text: "target" },
+      { ...line(3, 200, 202), text: "other later capture" },
+    ];
+    expect(wordContextLineWindow(clips, 1, 0, 0, { word: "target", minWordsAround: 10 }))
+      .toEqual({ from: 1, to: 1 });
   });
 });
