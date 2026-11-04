@@ -29,7 +29,7 @@ export function buildSearchPlaylist(items, { files = [], lang = 'sv', word = '',
     // The fixed number of neighbouring cues may contain only a couple of
     // words. Grow within the same continuous subtitle run until the target
     // has useful verbal context on both sides. Never cross a capture seam.
-    const countWords = text => String(text || '').trim().split(/\\s+/).filter(Boolean).length
+    const countWords = text => String(text || '').trim().split(/\s+/).filter(Boolean).length
     const flank = wordsAroundInLine(lines[pos].text, item.word || word)
     let beforeWords = flank.before, afterWords = flank.after
     let lo = base.fromPos, hi = base.toPos
