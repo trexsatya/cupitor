@@ -18327,7 +18327,8 @@ async function _renderPlayingSubtitles(item, { isCurrent = () => true } = {}) {
   const lang = (typeof getSelectedLang === 'function') ? getSelectedLang() : 'sv'
   const before = (window._appSettings && window._appSettings.contextLinesBefore) || 0
   const after  = (window._appSettings && window._appSettings.contextLinesAfter)  || 0
-  const vm = buildPlayingSubsVM({ parsed, lang, item, before, after })
+  const vm = buildPlayingSubsVM({ parsed, lang, item, before, after,
+    minWordsAround: _minWordsAround(), gapThreshold: _clipGapThresholdSec() })
 
   if (vm.state === 'no-primary') {
     $sub.html('<div class="rec-ps-err">Primary subtitle missing.</div>')
