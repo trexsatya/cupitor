@@ -15,6 +15,22 @@ const app = read('./language.js');
 const navigation = parse(app, {sourceType: 'module'}).program.body.find(node =>
   node.type === 'FunctionDeclaration' && node.id.name === 'practiceNav');
 
+test('front-page result mutations do not read browser selection or force its layout',async()=>{
+  const dom=new JSDOM('<!doctype html><body><div id="result"></div></body>',{runScripts:'outside-only'})
+  let reads=0
+  dom.window.getSelection=()=>{reads++;return null}
+  dom.window.eval(selectionSource+'\nwindow.installSelection=installCardSelectionSearch;')
+  const installed=dom.window.installSelection()
+  try{
+    for(let i=0;i<100;i++)dom.window.document.getElementById('result').append(dom.window.document.createElement('div'))
+    await new Promise(resolve=>dom.window.setTimeout(resolve,0))
+    assert.equal(reads,0)
+    dom.window.document.body.classList.add('rec-playing')
+    await new Promise(resolve=>dom.window.setTimeout(resolve,0))
+    assert.ok(reads>0,'study-card selection still updates when Player is open')
+  }finally{installed.dispose();dom.window.close()}
+})
+
 function boot(mode = 'player') {
   const dom = new JSDOM(`<!doctype html><html><head></head><body>
     <div id="mediaContainer"></div>

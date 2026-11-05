@@ -156,8 +156,9 @@ async function checkSearchPlaylist(browser, mobile) {
     const active = await page.locator('#result .l-accordion').evaluate(el => el.classList.contains('active'))
     const button = page.locator('#searchPlaylistCreateBtn')
     const box = await button.boundingBox()
+    const iconBox = await button.locator('svg').boundingBox()
     const toolbarBox = await page.locator('#searchPlaylistToolbar').boundingBox()
-    assert(box && box.width >= 30 && box.width <= 36 && box.height <= 36 &&
+    assert(box && iconBox && box.width >= iconBox.width && box.height >= iconBox.height && box.width <= 36 && box.height <= 36 &&
       box.x >= 0 && box.x + box.width <= (mobile ? 360 : 1280) &&
       toolbarBox.x + toolbarBox.width - box.x - box.width <= 12,
       'compact playlist controls sit on the right above the results')

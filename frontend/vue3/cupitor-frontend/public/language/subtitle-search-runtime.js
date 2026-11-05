@@ -1,4 +1,5 @@
 import { openSubtitleCorpus, createDocumentCache } from './subtitle-corpus-store.js'
+import { openSubtitleMemoryCorpus } from './subtitle-memory-store.js'
 import { prepareSearchDocument, matchSearchDocument, createSubtitleMatchCollector, compactSearchFile, compactSubtitleMatches } from './subtitle-search-engine.js'
 import { srtToJson } from './srt-parser.js'
 import { tokenizeLine, wordMatches, EVERYTHING_ELSE, sinkUnevidencedGroups, capGroups } from './corresponding-words.js'
@@ -9,8 +10,20 @@ export const searchError = (message,code='subtitle-search-incomplete')=>Object.a
 // Used by both the dedicated worker and the cooperative fallback. A complete
 // transcript remains the regex search unit; it is never split into guessed
 // overlapping text chunks.
-export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.indexedDB,cacheBytes,baseScope=scope,indexing=true,indexingPaused=false,keyRange=globalThis.IDBKeyRange,legacyScope,onStorageProgress}={}) {
-  const corpus=await openSubtitleCorpus(scope,indexedDB,{baseScope,keyRange,legacyScope,onStorageProgress}),cache=createDocumentCache(cacheBytes)
+export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.indexedDB,storage='indexeddb',cacheBytes,baseScope=scope,indexing=true,indexingPaused=false,keyRange=globalThis.IDBKeyRange,legacyScope,onStorageProgress}={}) {
+  const memory=storage==='memory'
+  const corpus=memory?openSubtitleMemoryCorpus(scope):await openSubtitleCorpus(scope,indexedDB,{baseScope,keyRange,legacyScope,onStorageProgress})
+  const cache=createDocumentCache(cacheBytes??(memory?Infinity:undefined))
+  if(memory)indexing=false
+  let lastYield=performance.now(),channel=null
+  const yieldQueue=[]
+  const yieldQuery=async()=>{
+    if(!memory)return new Promise(resolve=>setTimeout(resolve,0))
+    if(performance.now()-lastYield<8)return
+    if(!channel){channel=new MessageChannel();channel.port1.onmessage=()=>yieldQueue.shift()?.()}
+    await new Promise(resolve=>{yieldQueue.push(resolve);channel.port2.postMessage(null)})
+    lastYield=performance.now()
+  }
   const queue=new Set()
   let closed=false,indexWork=null,indexDocumentWork=null,indexPaused=0,indexError=null,lastQuery=null
   function enqueue(ids){
@@ -32,13 +45,14 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
           if(error.name==='QuotaExceededError'||error.code===22){indexingPaused=true;queue.clear()}
         }
         finally{indexDocumentWork=null}
-        await new Promise(resolve=>setTimeout(resolve,0))
+        await yieldQuery()
       }
       if(!closed)await corpus.prune().catch(()=>{})
     })().finally(()=>{indexWork=null;if(queue.size&&!closed&&!indexPaused&&!indexingPaused)enqueue([])})
   }
   const resumed=corpus.pendingIndexIds().then(enqueue).catch(error=>{if(!closed)indexError=error.message})
   async function candidates(ids,query,options,check){
+    if(memory)return {ids,strategy:'memory',indexed:0,pending:0}
     if(indexing)try{return await corpus.candidates(ids,query,options,check)}catch(error){check();indexError=error.message}
     return {ids,strategy:'scan',indexed:0,pending:ids.length}
   }
@@ -79,7 +93,7 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
         visited+=batch.length
         lastQuery.inspected=visited
         progress({visited:ids.length-selection.ids.length+visited,total:ids.length})
-        await new Promise(resolve=>setTimeout(resolve,0))
+        await yieldQuery()
       }
       const order=new Map(ids.map((id,i)=>[id,i]))
       result.sort((a,b)=>order.get(a.url)-order.get(b.url))
@@ -114,7 +128,7 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
           if(hit)collector.add(file.language==='en'?hit.en_subs:hit.sv_subs,check)
         }
         offset+=batch.length
-        await new Promise(resolve=>setTimeout(resolve,0))
+        await yieldQuery()
       }
       const result=collector.finish()
       return compact?compactSubtitleMatches(result,englishParts):result
@@ -139,7 +153,7 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
           }
         }
         visited+=batch.length;progress({visited,total:ids.length})
-        await new Promise(resolve=>setTimeout(resolve,0))
+        await yieldQuery()
       }
       return compiled.map(({line,category,count,ids,re})=>({line,category,count,ids,valid:!!re}))
     },
@@ -159,7 +173,7 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
             if(matches.length>=options.matchesPerWord)return buildAutoItemsForWord(expanded,matches,options)
           }
         }
-        await new Promise(resolve=>setTimeout(resolve,0))
+        await yieldQuery()
       }
       return buildAutoItemsForWord(expanded,matches,options)
     },
@@ -230,7 +244,7 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
       return {...await corpus.indexStatus(ids),building:!!indexWork,queued:queue.size,error:indexError,lastQuery}
     },
     async clearCache({scope:target}){const entries=await corpus.list();if(entries.some(meta=>meta.scope===target&&(meta.baseScope===baseScope||meta.leaseUntil>Date.now())))throw searchError('The active language/source search data is protected.');await corpus.removeScope(target);return true},
-    close(){closed=true;queue.clear();corpus.close()},
+    close(){closed=true;queue.clear();channel?.port1.close();channel?.port2.close();while(yieldQueue.length)yieldQueue.shift()();corpus.close()},
     get cacheBytes(){return cache.bytes},
   }
   // Queries preempt optional indexing at its next bounded checkpoint. Its

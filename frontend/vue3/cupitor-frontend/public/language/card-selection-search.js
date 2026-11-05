@@ -8,6 +8,9 @@ export function installCardSelectionSearch({doc = document, onChange = () => {}}
 
   const elementOf = node => node?.nodeType === 1 ? node : node?.parentElement;
   function selectedButton() {
+    const practice = doc.body.classList.contains('practice-mode');
+    const player = doc.body.classList.contains('rec-playing') && !doc.body.classList.contains('rec-playing-minimized');
+    if (!practice && !player) return null;
     const selection = doc.defaultView.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
     const text = selection.toString().trim();
@@ -19,11 +22,10 @@ export function installCardSelectionSearch({doc = document, onChange = () => {}}
     if (anchor.closest(editable) || focus.closest(editable)) return null;
 
     let root, button;
-    if (doc.body.classList.contains('practice-mode')) {
+    if (practice) {
       root = anchor.closest('#practiceMode:not(.minimized) .practice-card');
       if (root && root.contains(focus)) button = doc.querySelector('#practiceMode .practice-search');
-    } else if (doc.body.classList.contains('rec-playing') &&
-               !doc.body.classList.contains('rec-playing-minimized')) {
+    } else if (player) {
       root = anchor.closest('#recPlayingSubs, #recPlayingWord');
       if (root && root.contains(focus)) button = doc.getElementById('recPlayingSearchBtn');
     }
