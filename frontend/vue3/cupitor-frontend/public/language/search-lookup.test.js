@@ -23,6 +23,13 @@ function makeDoSearch(win, fetcher) {
 }
 
 describe('lookup search request isolation', () => {
+  test('searching with SRTs off does not wait for subtitle startup', async () => {
+    const win = { vocabulary: {}, _subtitlesLoaded: false,
+      _appSettings: { includeSrtsInSearch: false }, _subtitlesReadyPromise: new Promise(() => {}) }
+    const fetcher = jest.fn(async () => true)
+    expect(await makeDoSearch(win, fetcher)('vaken')).toBe(true)
+    expect(fetcher).toHaveBeenCalledWith('vaken', 1)
+  })
   test('a new lookup supersedes an older query waiting for startup data', async () => {
     let release
     const ready = new Promise(resolve => { release = resolve })

@@ -12,7 +12,13 @@ self.onmessage=async({data})=>{
     else if(['document','context','caches','clearCache','indexStatus','retain'].includes(type)){self.postMessage({id,generation,result:await runtime[type](payload)});return}
     else if(['files','attribute','statistics','regroup','vocabScan','automatic','playlist'].includes(type)) {
       activeQuery=id
-      const check=()=>{if(activeQuery!==id||session!==generation)throw searchError('Search cancelled.','subtitle-search-cancelled')}
+      let lastHeartbeat=0
+      const check=()=>{
+        if(activeQuery!==id||session!==generation)throw searchError('Search cancelled.','subtitle-search-cancelled')
+        // Renew the supervisor only at real, cancellable work checkpoints.
+        // A synchronous runaway regex cannot send these heartbeats.
+        if(Date.now()-lastHeartbeat>=100){lastHeartbeat=Date.now();self.postMessage({id,generation,heartbeat:true})}
+      }
       const result=await runtime[type](payload,check,progress=>self.postMessage({id,generation,progress}))
       check();self.postMessage({id,generation,result});return
     }

@@ -26,7 +26,11 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
         worker.onmessage=({data})=>{
           if(data.generation!==generation)return
           const request=requests.get(data.id);if(!request)return
-          if(data.progress){onProgress(data.progress);return}
+          if(data.progress||data.heartbeat){
+            if(queryTypes.includes(request.type))request.arm()
+            if(data.progress)onProgress(data.progress)
+            return
+          }
           requests.delete(data.id);clearTimeout(request.timer)
           data.error?request.reject(searchError(data.error.message,data.error.code)):request.resolve(data.result)
         }
@@ -56,12 +60,15 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
   function send(type,payload,budget=timeoutMs) {
     const id=++nextId,current=generation
     return new Promise((resolve,reject)=>{
-      const timer=setTimeout(()=>{
+      const request={resolve,reject,timer:null,type,arm:()=>{
+        clearTimeout(request.timer)
+        request.timer=setTimeout(()=>{
         if(type==='init'){requests.delete(id);worker?.terminate();reject(searchError('The host could not start a search worker.'));return}
         discard(searchError('Search timed out and is incomplete. Try a more specific pattern.','subtitle-search-timeout'))
-      },budget)
-      requests.set(id,{resolve,reject,timer,type})
-      try{worker.postMessage({id,type,payload,generation:current})}catch(error){requests.delete(id);clearTimeout(timer);reject(error)}
+        },budget)
+      }}
+      requests.set(id,request);request.arm()
+      try{worker.postMessage({id,type,payload,generation:current})}catch(error){requests.delete(id);clearTimeout(request.timer);reject(error)}
     })
   }
   const client={
@@ -98,11 +105,12 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
       const corpusRevision=revision,query=queryTypes.includes(type),documentRevision=documentRevisions.get(payload?.id)
       const documentChanged=()=>['document','context'].includes(type)&&documentRevisions.get(payload.id)!==documentRevision
       if(worker){const result=await send(type,payload);assertCurrent();if((query&&!valid())||(query&&revision!==corpusRevision)||documentChanged())throw searchError('Subtitle contents changed. Run the search again.','subtitle-search-cancelled');return result}
-      const deadline=Date.now()+timeoutMs
+      let deadline=Date.now()+timeoutMs
       const check=()=>{
         assertCurrent()
         if(query&&(!valid()||revision!==corpusRevision))throw searchError('Search cancelled.','subtitle-search-cancelled')
         if(Date.now()>deadline)throw searchError('Search timed out and is incomplete. This host uses cooperative search and cannot interrupt a single regex evaluation.','subtitle-search-timeout')
+        deadline=Date.now()+timeoutMs
       }
       const result=await fallback[type](payload,check,onProgress)
       if(documentChanged())throw searchError('Subtitle contents changed. Run the search again.','subtitle-search-cancelled')

@@ -1,5 +1,7 @@
 const { chromium } = require('playwright')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const { serveFixtures } = require('./language-dialogs.cjs')
 
 async function check(browser, mobile) {
@@ -68,11 +70,18 @@ async function check(browser, mobile) {
         if (overlay.hidden) window.__loadingChecks.completed++
       }).observe(overlay, { attributes: true, attributeFilter: ['hidden'] })
     })
-    await openSettings()
-    assert.equal(await page.locator('#includeLibraryInSearchCb').isChecked(), true)
-    assert.equal(await page.locator('#wordMapSearchIncludeCb').isChecked(), true)
+    assert.deepEqual(await page.locator('#searchSourceChips span').allTextContents(), ['Books','SRTs','Maps','Cards'])
+    assert.equal(await page.locator('#includeSrtsInSearchCb').isChecked(), true)
+    for (const id of ['includeLibraryInSearchCb','wordMapSearchIncludeCb','manualSearchIncludeCb'])
+      assert.equal(await page.locator('#' + id).isChecked(), false, 'only SRTs are enabled by default')
+    await search('färgsprakande')
+    if (process.env.SCREENSHOT_DIR) {
+      fs.mkdirSync(process.env.SCREENSHOT_DIR, {recursive:true})
+      await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR, `cupitor-search-chips-${mobile?'mobile':'desktop'}.png`)})
+    }
+    await page.locator('#includeLibraryInSearchCb').check()
+    await page.locator('#wordMapSearchIncludeCb').check()
     await page.locator('#manualSearchIncludeCb').check()
-    await closeSettings()
     await search('färgsprakande')
     assert.equal(await page.locator('#manualResults .manual-hit').count(), 1)
     assert.equal(await page.locator('#wordMapResults .word-map-hit').count(), 1)
@@ -82,6 +91,24 @@ async function check(browser, mobile) {
     assert.match(await page.locator('#libraryResults').innerText(), /Book färgsprakande/)
     await page.evaluate(() => window.loadSearchResultsPage(0))
     assert.match(await page.locator('#libraryResults').innerText(), /Book färgsprakande/, 'paging the same query preserves its book results')
+
+    await page.evaluate(() => {
+      window.__searchRuns=0
+      const run=window.cupitorSubtitleSearch.run
+      window.cupitorSubtitleSearch.run=function(type,...args){
+        if(['files','attribute','statistics','regroup'].includes(type))window.__searchRuns++
+        return run.call(this,type,...args)
+      }
+    })
+    await page.locator('#includeSrtsInSearchCb').uncheck()
+    await page.waitForFunction(() => window._subtitleSearchCompletion?.disabled && document.querySelector('#searchLoadingOverlay').hidden)
+    assert.equal(await page.locator('#result .l-accordion').count(), 0)
+    assert.equal(await page.locator('#manualResults .manual-hit').count(), 1)
+    assert.equal(await page.locator('#wordMapResults .word-map-hit').count(), 1)
+    assert.equal(await page.evaluate(() => window.__searchRuns), 0, 'SRTs off skips the worker search entirely')
+    await page.locator('#includeSrtsInSearchCb').check()
+    await page.waitForFunction(() => window._subtitleSearchCompletion?.complete && !window._subtitleSearchCompletion.disabled)
+    assert.ok(await page.locator('#result .l-accordion').count())
 
     await search('hagla')
     assert.equal(await page.locator('#libraryResults').innerText(), '', 'new subtitle query clears completed book results')
@@ -100,12 +127,11 @@ async function check(browser, mobile) {
     assert.ok(await page.evaluate(() => window.__bridgeMessages.some(message => message.op === 'cancelSearch')))
 
     // Disabled sources are absent and cannot run, even with auto mode saved.
-    await openSettings()
     await page.locator('#includeLibraryInSearchCb').uncheck()
     await page.locator('#manualSearchIncludeCb').uncheck()
     await page.locator('#wordMapSearchIncludeCb').uncheck()
+    await page.locator('#includeSrtsInSearchCb').uncheck()
     assert.equal(await page.locator('#toggleAutoLibrarySearchCheckbox').isDisabled(), true)
-    await closeSettings()
     await page.evaluate(() => { window._appSettings.autoLibrarySearch = true; window.saveAppSettings(); window.__bridgeMessages = [] })
     await search('färgsprakande')
     await page.waitForTimeout(450)
@@ -118,14 +144,15 @@ async function check(browser, mobile) {
     assert.equal(loading.uncovered, 0, 'unwired accordions always stay covered by the overlay')
     await page.reload({ waitUntil: 'domcontentloaded' })
     await ready()
-    await openSettings()
-    for (const id of ['includeLibraryInSearchCb', 'manualSearchIncludeCb', 'wordMapSearchIncludeCb'])
+    for (const id of ['includeLibraryInSearchCb', 'includeSrtsInSearchCb', 'manualSearchIncludeCb', 'wordMapSearchIncludeCb'])
       assert.equal(await page.locator('#' + id).isChecked(), false, id + ' persists after reload')
     assert.equal(await page.locator('#toggleAutoLibrarySearchCheckbox').isDisabled(), true)
     await page.locator('#includeLibraryInSearchCb').check()
+    await openSettings()
     await page.locator('.settings-row').filter({ has: page.locator('#toggleAutoLibrarySearchCheckbox') }).locator('label').first().click()
-    await page.locator('#wordMapSearchIncludeCb').check()
     await closeSettings()
+    await page.locator('#wordMapSearchIncludeCb').check()
+    await page.locator('#includeSrtsInSearchCb').check()
     await search('färgsprakande')
     assert.equal(await page.locator('#wordMapResults .word-map-hit').count(), 1, 'source can be enabled again')
 
@@ -156,6 +183,13 @@ async function check(browser, mobile) {
     await page.locator('.subtitle-search-cancel').click()
     await page.evaluate(() => { window.__requests[1]([]); window.cupitorSubtitleSearch.run = window.__realRun })
     await page.locator('#searchLoadingOverlay').waitFor({ state: 'hidden' })
+    await page.evaluate(() => {
+      window.cupitorSubtitleSearch.run = async () => { throw new Error('The search worker stopped responding.') }
+    })
+    await search('hagla')
+    assert.equal(await page.locator('#result [role="alert"]').count(), 1, 'show a single search error')
+    assert.equal(await page.locator('#subtitleSearchStatus').isVisible(), false, 'do not repeat the same error above the results')
+    await page.evaluate(() => { window.cupitorSubtitleSearch.run = window.__realRun })
     assert.deepEqual(errors, [])
     console.log(`${mobile ? 'Mobile' : 'Desktop'}: saved search sources, book stream isolation and loading cancellation passed`)
   } finally { await page.close() }

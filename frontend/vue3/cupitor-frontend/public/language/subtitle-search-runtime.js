@@ -12,6 +12,7 @@ export const searchError = (message,code='subtitle-search-incomplete')=>Object.a
 export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.indexedDB,cacheBytes,baseScope=scope,indexing=true}={}) {
   const corpus=await openSubtitleCorpus(scope,indexedDB,{baseScope}),cache=createDocumentCache(cacheBytes)
   const queue=new Set()
+  const indexWaiters=new Set()
   let closed=false,indexWork=null,indexDocumentWork=null,indexPaused=0,indexError=null,lastQuery=null
   function enqueue(ids){
     if(!indexing||closed)return
@@ -20,7 +21,10 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
     indexWork=(async()=>{
       while(queue.size&&!closed&&!indexPaused){
         const id=queue.values().next().value;queue.delete(id)
-        try{indexDocumentWork=corpus.indexDocument(id,{check:()=>{if(closed)throw searchError('Search session closed.')}});await indexDocumentWork}
+        try{indexDocumentWork=corpus.indexDocument(id,{check:()=>{
+          if(closed)throw searchError('Search session closed.')
+          for(const checkpoint of indexWaiters)checkpoint()
+        }});await indexDocumentWork}
         catch(error){if(!closed)indexError=error.message}
         finally{indexDocumentWork=null}
         await new Promise(resolve=>setTimeout(resolve,0))
@@ -228,8 +232,14 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
     const run=api[type]
     api[type]=async(...args)=>{
       indexPaused++
-      try{if(indexDocumentWork)await indexDocumentWork.catch(()=>{});args[1]?.();return await run(...args)}
-      finally{indexPaused--;if(!indexPaused&&queue.size&&!closed)enqueue([])}
+      // Query time spent finishing an already-running index document is
+      // preparation, not a stuck regex. Forward its actual progress too.
+      const checkpoint=()=>{try{args[1]?.()}catch(_){}}
+      try{
+        if(indexDocumentWork){indexWaiters.add(checkpoint);await indexDocumentWork.catch(()=>{});indexWaiters.delete(checkpoint)}
+        args[1]?.();return await run(...args)
+      }
+      finally{indexWaiters.delete(checkpoint);indexPaused--;if(!indexPaused&&queue.size&&!closed)enqueue([])}
     }
   }
   return api
