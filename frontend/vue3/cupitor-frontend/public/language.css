@@ -635,6 +635,11 @@ body:is(.practice-mode, .rec-playing) #userDataError {
     background: #f1f3f5;
 }
 
+.subtitle-search-status-text {
+    color: grey;
+    font-size: smaller;  
+}
+
 .search-vocab-menu {
     position: absolute;
     top: 100%;
@@ -1005,11 +1010,11 @@ div.l-accordion h2, div.l-accordion h1, div.l-accordion h3, div.l-accordion h4, 
     align-items: center;
     justify-content: center;
     vertical-align: middle;
-    min-width: 32px;
-    min-height: 32px;
+    min-width: 15px;
+    min-height: 15px;
     padding: 4px;
     border: 1px solid currentColor;
-    border-radius: 50%;
+    border-radius: 19%;
     background: transparent;
     color: inherit;
     cursor: pointer;
@@ -1689,6 +1694,7 @@ body.practice-mode #srtLoadingBanner {
     padding: 1em;
     color: green;
     font-size: small;
+    display: none;
 }
 
 .vocabulary-line {
