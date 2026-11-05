@@ -11,6 +11,7 @@ async function check(browser, mobile) {
   await page.addInitScript(() => {
     window.dontConfirmOnRefresh = true
     localStorage.setItem('cupitor:account', JSON.stringify({ login: null }))
+    localStorage.setItem('cupitor:appSettings:swedish@~guest', JSON.stringify({includeWordMapsInSearch:true}))
     localStorage.setItem('cupitor:wordMaps:swedish@~guest', JSON.stringify([
       {version: 1, id: 'first', name: 'Conflict', edges: [], nodes: [{id:'a',word:'Gräl',x:180,y:120}, {id:'b',word:'Bråk',x:600,y:400}]},
       {version: 1, id: 'second', name: 'Escalation', edges: [], nodes: [{id:'c',word:'Gräl',x:2100,y:1400}, {id:'d',word:'Bråk',x:900,y:500}]},
@@ -33,13 +34,9 @@ async function check(browser, mobile) {
     await page.waitForFunction(() => document.querySelectorAll('#wordMapResults .word-map-hit').length === 2)
     await page.locator('#searchLoadingOverlay').waitFor({state:'hidden'})
     assert.equal(await page.locator('#wordMapResults .highlight').count(), 2)
-    await page.locator('#toggleSettingsPanelBtn').click()
-    if (mobile) await page.locator('.settings-section-picker select').selectOption('search')
-    else await page.locator('[data-settings-section="search"]').click()
     await page.locator('#wordMapSearchIncludeCb').uncheck()
     assert.equal(await page.locator('#wordMapResults .word-map-hit').count(), 0)
     await page.locator('#wordMapSearchIncludeCb').check()
-    await page.locator('#settingsPanel').getByRole('button', {name:'Done',exact:true}).click()
     await page.locator('.word-map-hit[data-map-id="second"]').click()
     const dialog = page.locator('#wordMapsDialog')
     await dialog.waitFor({state:'visible'})

@@ -36,10 +36,13 @@ export function installStudyChrome() {
   const controls = '#recPlayingBanner,#recPlayingTransport,#recPlayingMinimizeBtn,#recPlayingCloseBtn,#practiceMode .practice-topbar,#practiceMode .practice-nav,#practiceMode .practice-ctx-ctrl,#practiceMode .practice-rec-bar,#practiceAudio,#recPlayingAudio,#studyMediaDivider';
   const blocked = () => {
     if (selectionSearch?.hasSelection() || pointer || body.classList.contains('study-resizing')) return true;
-    if ([...document.querySelectorAll('.ui-dialog:not(.behind-study-view),#practiceMode .practice-info-panel,#practiceMode .practice-settings-panel,#recPlayingBanner.rec-pb-expanded')].some(shown)) return true;
+    if ([...document.querySelectorAll('.ui-dialog:not(.behind-study-view),#mediaControlPanel,#practiceMode .practice-info-panel,#practiceMode .practice-settings-panel,#recPlayingBanner.rec-pb-expanded')].some(shown)) return true;
     if (document.querySelector('#practiceMode .prec-toggle.on')) return true;
     const focus = document.activeElement;
-    return shown(focus) && (focus.matches('input,textarea,select,[contenteditable="true"]') ||
+    // Native speed/volume menus live in closed browser controls (or a
+    // cross-origin video frame). Keep them usable until focus moves away.
+    return shown(focus) && (focus.matches('input,textarea,select,audio,video,[contenteditable="true"]') ||
+      (focus.matches('iframe') && !!focus.closest('#mediaContainer')) ||
       (keyboard && !!focus.closest(controls)));
   };
   const coverVideo = () => {

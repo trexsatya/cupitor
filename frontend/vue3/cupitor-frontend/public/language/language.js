@@ -2167,12 +2167,14 @@ async function makeHttpCallToUpdateVocab() {
 // Otherwise an older search can become the newest after its late await.
 async function doSearch(searchThis, el) {
   const query = typeof searchThis === 'string' ? searchThis : $('#searchText').val()
+  window._requestedSearchText = query
   const token = (window._subtitleSearchToken || 0) + 1
   window._subtitleSearchToken = token
   window.cupitorSubtitleSearch?.cancel()
-  if (!window.vocabulary || !window._subtitlesLoaded) {
+  const searchSrts = window._appSettings?.includeSrtsInSearch !== false
+  if (!window.vocabulary || (searchSrts && !window._subtitlesLoaded)) {
     console.log('[search] data not loaded yet, deferring until vocabulary + subtitles ready…')
-    await Promise.all([window._vocabularyReadyPromise, window._subtitlesReadyPromise])
+    await Promise.all([window._vocabularyReadyPromise, ...(searchSrts ? [window._subtitlesReadyPromise] : [])])
   }
   if (token !== window._subtitleSearchToken) return false
   const completed = await fetchSRTs(query, token)
@@ -2583,6 +2585,7 @@ window._appSettings = {
   // Player-mode recordings keep the user's level when the element is rebuilt.
   recAudioVolume: 1,
   recAudioMuted: false,
+  recAudioPlaybackRate: 1,
   // Saved background-music tracks: [{ id, url, name }]. Empty means the
   // feature is off and no extra player is ever built.
   recMusicTracks: [],
@@ -2635,7 +2638,8 @@ window._appSettings = {
   // are added on the deficient side up to the "Sentences around word" cap.
   minWordsAround: 10,
   // Show book search when the native app bridge is available.
-  includeLibraryInSearch: true,
+  includeLibraryInSearch: false,
+  includeSrtsInSearch: true,
   // Run the Cupitor library (EPUB full-text) search on every subtitle search.
   // Off by default: the host indexes each book the first time a search visits
   // it, so early searches cost seconds of native work (later ones hit the
@@ -2645,7 +2649,7 @@ window._appSettings = {
   includeManualInSearch: false,
   // Whether that block starts folded. Sticky, like libraryResultsCollapsed.
   manualResultsCollapsed: false,
-  includeWordMapsInSearch: true,
+  includeWordMapsInSearch: false,
   wordMapResultsCollapsed: false,
   // Whether the book-results block inside #result starts folded. Sticky so a
   // user who keeps the books out of the way isn't re-shown them every search.
@@ -9102,13 +9106,14 @@ async function render(searchResults, search, className, token) {
 
   const searchResultsFiltered = _filterSearchChannels(filterByLanguage(searchResults));
 
-  let wordToItemsMap = await getMatchingWords(searchResultsFiltered, search, token);
+  const searchSrts = window._appSettings.includeSrtsInSearch !== false
+  let wordToItemsMap = searchSrts ? await getMatchingWords(searchResultsFiltered, search, token) : {};
   if (!isCurrent()) return wordToItemsMap
   window.wordToItemsMap = wordToItemsMap
 
   // An English search reads better split by the studied-language word behind
   // each hit. Falls through untouched whenever there is nothing to split on.
-  const _regrouped = await _regroupByCorrespondingWord(wordToItemsMap, search, token)
+  const _regrouped = searchSrts ? await _regroupByCorrespondingWord(wordToItemsMap, search, token) : null
   if (!isCurrent()) return wordToItemsMap
   window._srtGroupedByCorresponding = !!_regrouped
   if (_regrouped) wordToItemsMap = _regrouped
@@ -9124,10 +9129,11 @@ async function render(searchResults, search, className, token) {
     }</p>`)
   }
 
-  await populateSRTFindings(wordToItemsMap, $result, token, renderVersion);
+  if (searchSrts) await populateSRTFindings(wordToItemsMap, $result, token, renderVersion);
+  else window._lastRenderedWords = []
   if (!isCurrent()) return wordToItemsMap
 
-  if (Object.keys(wordToItemsMap).length === 0) {
+  if (searchSrts && Object.keys(wordToItemsMap).length === 0) {
     $result.html(resultNotFound(window.searchText))
     // No subtitle hits is exactly when the books are worth a look — put the
     // bar back after the wipe.
@@ -9249,6 +9255,7 @@ function _setSubtitleSearchStatus(text, running) {
     row.append(label,' ',cancel);document.getElementById('result')?.before(row)
   }
   row.querySelector('span').textContent=text
+  row.hidden=!text
   row.querySelector('button').hidden=!running
   row.dataset.complete=String(!running && !!window._subtitleSearchCompletion?.complete)
   row.title=window._subtitleSearchMode==='cooperative' ? 'This host uses cooperative search. A single regular-expression evaluation cannot be interrupted.' : ''
@@ -9327,6 +9334,7 @@ let _searchRunsInFlight = 0
 
 // Show page `page` (0-based) of the current search's results.
 async function loadSearchResultsPage(page) {
+  if (window._appSettings.includeSrtsInSearch === false) return
   const map = window._shownWordToItemsMap
   if (!map || _searchRunsInFlight > 0) return
   const token = window._subtitleSearchToken
@@ -9433,7 +9441,7 @@ async function fetchSRTs(searchText, requestToken) {
     // Rebuild the enabled source blocks for this query.
     _ensureLibrarySearchBar()
 
-    _setSubtitleSearchStatus('Searching subtitles…', true)
+    _setSubtitleSearchStatus(window._appSettings.includeSrtsInSearch === false ? '' : 'Searching subtitles…', true)
     window._subtitleSearchCompletion = {complete:false, reason:'running'}
     console.log("Loading from local")
     try { compileRegex(_relaxSpaces(window.searchText)) } catch (_) {
@@ -9446,6 +9454,15 @@ async function fetchSRTs(searchText, requestToken) {
       return
     }
     const primaryQuery = window.searchText
+    if (window._appSettings.includeSrtsInSearch === false) {
+      window.searchResult = []
+      window.wordToItemsMap = window._shownWordToItemsMap = window._lastWordToItemsMap = {}
+      await render([], primaryQuery, 'primary', myToken)
+      if (myToken !== window._subtitleSearchToken) return false
+      window._subtitleSearchCompletion = {complete:true, disabled:true}
+      _setSubtitleSearchStatus('', false)
+      return true
+    }
     const primaryResults = await fetchFromDownloadedFiles(primaryQuery.trim(), myToken)
     if (myToken !== window._subtitleSearchToken) return false
     window.searchResult = primaryResults
@@ -9486,7 +9503,7 @@ async function fetchSRTs(searchText, requestToken) {
   } catch (error) {
     if (myToken === window._subtitleSearchToken) {
       window._subtitleSearchCompletion={complete:false,reason:error.code || 'failed'}
-      _setSubtitleSearchStatus('Search incomplete: '+error.message,false)
+      _setSubtitleSearchStatus('',false)
       $('#result').empty().append($('<p role="alert" class="search-incomplete"></p>').text('Search incomplete. '+error.message))
       _ensureLibrarySearchBar();showResultContainer()
     }
@@ -11788,10 +11805,18 @@ window._librarySearchLast = null
 function _syncSearchSourceSettings() {
   const books = window._appSettings?.includeLibraryInSearch !== false
   $('#includeLibraryInSearchCb').prop('checked', books)
+  $('#includeSrtsInSearchCb').prop('checked', window._appSettings?.includeSrtsInSearch !== false)
   $('#manualSearchIncludeCb').prop('checked', !!window._appSettings?.includeManualInSearch)
   $('#wordMapSearchIncludeCb').prop('checked', window._appSettings?.includeWordMapsInSearch !== false)
   $('#toggleAutoLibrarySearchCheckbox').prop('disabled', !books)
 }
+
+$(document).on('change', '#includeSrtsInSearchCb', e => {
+  window._appSettings.includeSrtsInSearch = $(e.target).is(':checked')
+  saveAppSettings()
+  const query = window._requestedSearchText || window._vocabularySearchText || window.searchText || $('#searchText').val()
+  if (String(query || '').trim().length >= 3) doSearch(query)
+})
 
 // Detach the old stream before cancelling: the host can dispatch synchronously.
 // Clear queued paints and the completed payload restored on redraw/paging.
@@ -19952,6 +19977,29 @@ function _recPaExpectPause(a) {
   if (a && !a.paused) _recPaIgnorePauseUntil = Date.now() + REC_PA_IGNORE_MS
 }
 
+const _recAudioAppliedRates = new WeakMap()
+function _preferredRecordingAudioRate() {
+  const rate = Number(window._appSettings.recAudioPlaybackRate)
+  return Number.isFinite(rate) && rate > 0 ? rate : 1
+}
+function _applyRecordingAudioRate(audio, rate = _preferredRecordingAudioRate()) {
+  try { audio.defaultPlaybackRate = rate; audio.playbackRate = rate }
+  catch (_) { audio.defaultPlaybackRate = 1; audio.playbackRate = 1 }
+  _recAudioAppliedRates.set(audio, audio.playbackRate)
+}
+function _rememberRecordingAudioRate(audio) {
+  _applyRecordingAudioRate(audio)
+  audio.addEventListener('ratechange', () => {
+    const rate = audio.playbackRate
+    if (rate === _recAudioAppliedRates.get(audio) || !Number.isFinite(rate) || rate <= 0) return
+    window._appSettings.recAudioPlaybackRate = rate
+    // A manual speed choice takes precedence over a temporary Replay slowdown.
+    _restoreRecordingReplaySpeed()
+    _applyRecordingAudioRate(audio, rate)
+    saveAppSettings()
+  })
+}
+
 function _recPlayAudioEl() {
   let $wrap = $('#recPlayingAudio')
   if (!$wrap.length) {
@@ -19961,6 +20009,7 @@ function _recPlayAudioEl() {
       <div class="rec-pa-faces"></div>
     </div>`).appendTo('body')
     const el = $wrap.find('.rec-pa-el')[0]
+    _rememberRecordingAudioRate(el)
     const volume = Number(window._appSettings.recAudioVolume)
     el.volume = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1
     el.muted = !!window._appSettings.recAudioMuted
@@ -20002,8 +20051,8 @@ function _recPlayAudioEl() {
 // for a user pause.
 function _setManualAudioSrc(a, dataUrl) {
   _recPaExpectPause(a)
+  _applyRecordingAudioRate(a, window._recReplaySpeed ? 0.75 : _preferredRecordingAudioRate())
   a.src = dataUrl
-  a.playbackRate = window._recReplaySpeed ? 0.75 : 1
 }
 
 // Show/hide the audio player, and with it the YouTube slot it replaces.
@@ -21127,7 +21176,7 @@ function _restoreRecordingReplaySpeed() {
   if (!replay) return
   window._recReplaySpeed = null
   try { window.ytPlayer?.setPlaybackRate(replay.rate) } catch (_) {}
-  if (window._recPlayManualAudio) window._recPlayManualAudio.playbackRate = 1
+  if (window._recPlayManualAudio) _applyRecordingAudioRate(window._recPlayManualAudio)
   return replay.rate
 }
 

@@ -5594,3 +5594,16 @@ body:is(.rec-playing, .practice-mode) #youtubeResumePlayer {
     color: #334155;
     box-shadow: 0 2px 8px #0002;
 }
+
+.search-source-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.search-source-chip {
+    position: relative; display: inline-flex; flex: 1 1 0; align-items: center; justify-content: center;
+    gap: 6px; margin: 0; min-height: 34px; padding: 4px 8px; border: 1px solid #b9c1ca;
+    border-radius: 999px; background: #f6f7f9; color: #56616f; font-size: 13px; cursor: pointer;
+}
+.search-source-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.search-source-chip span { pointer-events: none; }
+.search-source-chip::before { content: ''; width: 8px; height: 8px; border: 1px solid currentColor; border-radius: 50%; flex-shrink: 0; }
+.search-source-chip:has(input:checked) { background: #e1eefb; border-color: #4078b5; color: #164b82; font-weight: 600; }
+.search-source-chip:has(input:checked)::before { background: currentColor; }
+.search-source-chip:has(input:focus-visible) { outline: 2px solid #4078b5; outline-offset: 2px; }

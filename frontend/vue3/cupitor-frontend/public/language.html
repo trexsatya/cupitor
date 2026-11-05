@@ -273,6 +273,13 @@
                 </button>
             </div>
 
+            <div id="searchSourceChips" class="search-source-chips" role="group" aria-label="Search sources">
+                <label class="search-source-chip"><input type="checkbox" id="includeLibraryInSearchCb"><span>Books</span></label>
+                <label class="search-source-chip"><input type="checkbox" id="includeSrtsInSearchCb" checked><span>SRTs</span></label>
+                <label class="search-source-chip"><input type="checkbox" id="wordMapSearchIncludeCb"><span>Maps</span></label>
+                <label class="search-source-chip"><input type="checkbox" id="manualSearchIncludeCb"><span>Cards</span></label>
+            </div>
+
             <div id="mainControlBody">
                 <!-- Front-page Practice Log/Schedule banner. JS reveals this on first ever
                      load (no opens recorded yet) and hides it once the dialog has been
@@ -387,15 +394,6 @@
                                 <div class="slider round"></div>
                             </label>
                         </div>
-                    </label>
-                    <label class="lang-panel-label" for="includeLibraryInSearchCb">Search books
-                        <input type="checkbox" id="includeLibraryInSearchCb" checked>
-                    </label>
-                    <label class="lang-panel-label" for="manualSearchIncludeCb">Search manual cards
-                        <input type="checkbox" id="manualSearchIncludeCb">
-                    </label>
-                    <label class="lang-panel-label" for="wordMapSearchIncludeCb">Search word maps
-                        <input type="checkbox" id="wordMapSearchIncludeCb" checked>
                     </label>
                     <label class="lang-panel-label" title="Also full-text search the books in your Cupitor library on every search (needs the Cupitor app). The first searches are slow while the app builds its index.">
                         Auto book search

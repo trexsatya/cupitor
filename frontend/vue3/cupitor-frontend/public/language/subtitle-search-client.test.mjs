@@ -2,6 +2,35 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { observeSubtitleCorpus, createSubtitleSearchClient } from './subtitle-search-client.js'
 
+test('a productive search can outlast the watchdog, but a stalled search is terminated', async t => {
+  t.mock.timers.enable({apis:['setTimeout','Date']})
+  let query, terminated = 0
+  const worker = {terminate(){terminated++},postMessage(message){
+    if(message.type==='init'||message.type==='update')queueMicrotask(()=>this.onmessage({data:{...message,result:true}}))
+    else if(message.type==='files')query=message
+  }}
+  const client=createSubtitleSearchClient({scope:'productive-search',timeoutMs:40,workerFactory:()=>worker})
+  const settle=async()=>{for(let i=0;i<12;i++)await Promise.resolve()}
+  try {
+    await client.flush()
+    let finished=false
+    const running=client.run('files',{ids:['one'],query:'vaken'}).then(result=>{finished=true;return result},error=>{finished=true;return error})
+    await settle()
+    for(let i=1;i<=5;i++){
+      t.mock.timers.tick(25)
+      worker.onmessage({data:{id:query.id,generation:query.generation,...(i%2?{heartbeat:true}:{progress:{visited:i,total:6}})}})
+      await settle()
+      assert.equal(finished,false,'progress keeps a healthy long corpus scan alive')
+    }
+    worker.onmessage({data:{id:query.id,generation:query.generation,result:['found']}})
+    assert.deepEqual(await running,['found'])
+    const stalled=client.run('files',{ids:['one'],query:'(a+)+$'}).catch(error=>error.code)
+    await settle();t.mock.timers.tick(41)
+    assert.equal(await stalled,'subtitle-search-timeout')
+    assert.equal(terminated,1)
+  } finally {client.close()}
+})
+
 test('raw transcripts are evicted only after acknowledgement; metadata and edits remain observable',async()=>{
   const target={},writes=[]
   const view=observeSubtitleCorpus(target,(id,doc)=>writes.push({id,...doc}),()=>{},{maxBytes:30})

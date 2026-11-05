@@ -128,6 +128,9 @@ async function checkStudyChrome(browser) {
       await tap(video.x + video.width / 2, video.y + video.height / 2)
       await page.waitForFunction(() => document.activeElement?.tagName === 'IFRAME')
       assert.equal(await page.frameLocator('#testStudyFrame').locator('body').getAttribute('data-clicks'), '1', 'the player is usable after controls return')
+      await page.clock.fastForward(5000)
+      assert.equal(await page.locator('#practiceMode .practice-topbar').isVisible(), true, 'focused video controls are protected from autohide')
+      await page.evaluate(() => document.activeElement.blur())
       await hide()
       // Selecting card text deliberately wakes Search. Clear that selection
       // before testing navigation gestures, which should leave chrome hidden.
@@ -290,6 +293,13 @@ async function checkStudyChrome(browser) {
       await page.locator('#recPlayingAudio audio').waitFor({ state: 'visible' })
       await checkHost(true)
       assert.equal(await page.evaluate(() => window._recPlayManualAudio.paused), true, 'first tap cannot activate native audio controls')
+      await page.locator('#recPlayingAudio audio').focus()
+      await page.clock.fastForward(5000)
+      assert.equal(await page.locator('#recPlayingAudio audio').isVisible(), true, 'native audio speed/volume controls stay visible while focused')
+      await screenshot('cupitor-media-controls-stay-visible')
+      await page.evaluate(() => document.activeElement.blur())
+      await hide()
+      await wakeCard()
       if (mobile) {
         const calls = await page.evaluate(() => window.__youtubeControlsCalls)
         assert(calls.includes(false) && calls.includes(true), 'calls both public host API operations')
