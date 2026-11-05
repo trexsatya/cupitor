@@ -5,11 +5,12 @@ self.onmessage=async({data})=>{
   try {
     if(type==='init') {
       runtime?.close();session=generation
-      runtime=await createSubtitleSearchRuntime(payload.scope,{...payload.options,baseScope:payload.baseScope})
+      runtime=await createSubtitleSearchRuntime(payload.scope,{...payload.options,baseScope:payload.baseScope,legacyScope:payload.legacyScope,
+        onStorageProgress:()=>self.postMessage({id,generation,heartbeat:true})})
     } else if(generation!==session) return
     else if(type==='cancel'){activeQuery=0;return}
     else if(type==='update')await runtime.update(payload.documents)
-    else if(['document','context','caches','clearCache','indexStatus','retain'].includes(type)){self.postMessage({id,generation,result:await runtime[type](payload)});return}
+    else if(['document','context','caches','clearCache','indexStatus','retain','setIndexingPaused'].includes(type)){self.postMessage({id,generation,result:await runtime[type](payload)});return}
     else if(['files','attribute','statistics','regroup','vocabScan','automatic','playlist'].includes(type)) {
       activeQuery=id
       let lastHeartbeat=0

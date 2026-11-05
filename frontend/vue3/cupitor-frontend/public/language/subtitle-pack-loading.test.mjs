@@ -34,10 +34,10 @@ test('interleaved entries previously refetch evicted packs; bulk import reads ea
     onProgress:(done,total) => progress.push([done,total]),
   })
   assert.equal(f.requests.length, 6)
-  assert.equal(batches.length, 12)
+  assert.equal(batches.length, 6)
   assert.equal(batches.flat().length, f.entries.length)
   assert.deepEqual(new Set(batches.flat().map(row => row.entry.link)), new Set(f.entries.map(entry => entry.link)))
-  assert.ok(batches.every(rows => rows.length <= 32 && rows.every(row => row.sv === 'å'.repeat(200) && row.en === 'English'.repeat(30))))
+  assert.ok(batches.every(rows => rows.length <= 128 && rows.every(row => row.sv === 'å'.repeat(200) && row.en === 'English'.repeat(30))))
   assert.deepEqual(progress.at(-1), [240,240])
 })
 
@@ -99,7 +99,7 @@ test('a persistence failure stops all lanes before unacknowledged raw text can g
     commitBatch:async rows => {staged.push(rows); throw error}, onProgress:done => progress.push(done),
   }),error)
   assert.equal(f.requests.length,4,'no queued pack starts after a failed commit')
-  assert.ok(staged.length <= 4 && staged.every(rows => rows.length === 32))
+  assert.ok(staged.length <= 4 && staged.every(rows => rows.length === 40))
   assert.deepEqual(progress,[])
 })
 

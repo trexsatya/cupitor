@@ -18,6 +18,7 @@ import { installDialogScrolling } from './dialog-scrolling.js';
 import { createFullSrtDialog } from './full-srt-dialog.js';
 import { createBundleLoader, createSubtitleBundleAdapter } from './subtitle-bundles.js';
 import { loadSubtitlePacks } from './subtitle-pack-loading.js';
+import { SUBTITLE_BATCH_DOCUMENTS, SUBTITLE_BATCH_BYTES } from './subtitle-batches.js'
 import { recordingsHaveChanges } from './recordings-sync-state.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
@@ -3663,6 +3664,9 @@ const _subtitleSearchContext = _dsCaptureSourceContext()
 const _subtitleSearchScope = JSON.stringify([_userData.scope, _dsHasOther() ? _dsSourceIdentity('other') : null])
 const _subtitleSearch = createSubtitleSearchClient({
   scope: _subtitleSearchScope,
+  // Import the complete corpus before optional posting writes compete with
+  // downloads and cache restoration. Queries can always scan pending rows.
+  indexingPaused: true,
   assertCurrent: () => _subtitleSearchContext.assertCurrent(),
   onProgress: progress => _setSubtitleSearchStatus(`Searching subtitles: ${progress.visited} / ${progress.total}`, true),
   onMode: mode => { window._subtitleSearchMode = mode },
@@ -3679,7 +3683,7 @@ const _subtitleCorpusView = observeSubtitleCorpus(window, (id,document) => {
   _subtitleFlushTimer = setTimeout(() => _subtitleSearch.flush().catch(error => {
     window._subtitleSearchStorageError = error.message
     _setSubtitleSearchStatus('Subtitle search storage is incomplete: '+error.message,false)
-  }), _subtitleSearch.pendingSize >= 32 ? 0 : 50)
+  }), _subtitleSearch.pendingSize >= SUBTITLE_BATCH_DOCUMENTS ? 0 : 50)
 }, () => {
   _subtitleSearch.cancel()
   for (const id of _observedSubtitleIds) _subtitleSearch.update(id,null)
@@ -5036,7 +5040,7 @@ async function loadAllSubtitles() {
     }
     _srtProgressShow(toFetch.length)
     // Four pack jobs at a time. Each pack is downloaded/parsed once, then
-    // imported in batches of at most 32 pairs / 2 MiB before more are staged.
+    // imported in bounded batches before more are staged.
     const srtLoadingDone = _loadSubtitleGroups(toFetch, context, {
       onFailure: (entry, error) => {
         if (error?.kind === 'notfound') notFound.push(entry.link)
@@ -5086,6 +5090,7 @@ async function loadAllSubtitles() {
     }
     window._subtitlesLoaded = true;
     window._subtitlesReadyResolve();
+    _subtitleSearch.setIndexingPaused(false).catch(error=>console.warn('Subtitle index preparation will retry on reload',error))
   }
 }
 
@@ -5290,7 +5295,7 @@ async function* _cachedSubtitleBatches() {
         if(!cursor){resolve({rows,last});return}
         const value=cursor.value;last=cursor.key
         if(value?.link){rows.push([value.link,value]);bytes+=2*((value.sv?.length||0)+(value.en?.length||0))}
-        if(rows.length>=32||bytes>=2*1024*1024)resolve({rows,last})
+        if(rows.length>=SUBTITLE_BATCH_DOCUMENTS||bytes>=SUBTITLE_BATCH_BYTES)resolve({rows,last})
         else cursor.continue()
       }
     })

@@ -1,4 +1,5 @@
 import { runInBatches } from './net.js'
+import { SUBTITLE_BATCH_DOCUMENTS, SUBTITLE_BATCH_BYTES } from './subtitle-batches.js'
 
 // Group the missing entries, not the full index: cache hits and index ordering
 // remain unchanged. Owner/repository, physical path and revision are separate
@@ -6,7 +7,7 @@ import { runInBatches } from './net.js'
 export async function loadSubtitlePacks(entries, {
   loader, baseUrl, code, commitBatch, loadLoose, assertCurrent = () => {},
   onFailure = () => {}, onProgress = () => {}, concurrency = 4,
-  maxDocuments = 32, maxBytes = 2 * 1024 * 1024,
+  maxDocuments = SUBTITLE_BATCH_DOCUMENTS, maxBytes = SUBTITLE_BATCH_BYTES,
 }) {
   const groups = new Map()
   for (const entry of entries) {

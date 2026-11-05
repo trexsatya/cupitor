@@ -2,6 +2,26 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { observeSubtitleCorpus, createSubtitleSearchClient } from './subtitle-search-client.js'
 
+test('bounded legacy-cache cleanup keeps a healthy worker startup supervised',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date']})
+  let init,finished=false
+  const worker={terminate(){},postMessage(message){if(message.type==='init')init=message}}
+  const client=createSubtitleSearchClient({scope:'startup-cleanup',workerFactory:()=>worker})
+  const settle=async()=>{for(let i=0;i<12;i++)await Promise.resolve()}
+  try{
+    const ready=client.flush().then(()=>{finished=true})
+    ready.catch(()=>{})
+    while(!init)await new Promise(resolve=>setImmediate(resolve))
+    for(let i=0;i<4;i++){
+      t.mock.timers.tick(1500)
+      worker.onmessage({data:{...init,heartbeat:true}})
+      await settle();assert.equal(finished,false)
+    }
+    worker.onmessage({data:{...init,result:true}})
+    await ready;assert.equal(finished,true)
+  }finally{client.close()}
+})
+
 test('a productive search can outlast the watchdog, but a stalled search is terminated', async t => {
   t.mock.timers.enable({apis:['setTimeout','Date']})
   let query, terminated = 0

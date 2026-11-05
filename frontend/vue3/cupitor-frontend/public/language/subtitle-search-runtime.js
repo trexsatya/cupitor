@@ -9,28 +9,33 @@ export const searchError = (message,code='subtitle-search-incomplete')=>Object.a
 // Used by both the dedicated worker and the cooperative fallback. A complete
 // transcript remains the regex search unit; it is never split into guessed
 // overlapping text chunks.
-export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.indexedDB,cacheBytes,baseScope=scope,indexing=true}={}) {
-  const corpus=await openSubtitleCorpus(scope,indexedDB,{baseScope}),cache=createDocumentCache(cacheBytes)
+export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.indexedDB,cacheBytes,baseScope=scope,indexing=true,indexingPaused=false,keyRange=globalThis.IDBKeyRange,legacyScope,onStorageProgress}={}) {
+  const corpus=await openSubtitleCorpus(scope,indexedDB,{baseScope,keyRange,legacyScope,onStorageProgress}),cache=createDocumentCache(cacheBytes)
   const queue=new Set()
-  const indexWaiters=new Set()
   let closed=false,indexWork=null,indexDocumentWork=null,indexPaused=0,indexError=null,lastQuery=null
   function enqueue(ids){
     if(!indexing||closed)return
     ids.forEach(id=>queue.add(id))
-    if(indexWork||indexPaused)return
+    if(indexWork||indexPaused||indexingPaused)return
     indexWork=(async()=>{
-      while(queue.size&&!closed&&!indexPaused){
+      while(queue.size&&!closed&&!indexPaused&&!indexingPaused){
         const id=queue.values().next().value;queue.delete(id)
         try{indexDocumentWork=corpus.indexDocument(id,{check:()=>{
           if(closed)throw searchError('Search session closed.')
-          for(const checkpoint of indexWaiters)checkpoint()
+          if(indexPaused||indexingPaused)throw searchError('Index preparation paused.','subtitle-index-paused')
         }});await indexDocumentWork}
-        catch(error){if(!closed)indexError=error.message}
+        catch(error){
+          if(error.code==='subtitle-index-paused'){if(!closed)queue.add(id)}
+          else if(!closed)indexError=error.message||error.name||'Optional subtitle indexing failed.'
+          // Indexes are disposable accelerators. A full disk must not turn
+          // the remaining library into an endless stream of failed writes.
+          if(error.name==='QuotaExceededError'||error.code===22){indexingPaused=true;queue.clear()}
+        }
         finally{indexDocumentWork=null}
         await new Promise(resolve=>setTimeout(resolve,0))
       }
       if(!closed)await corpus.prune().catch(()=>{})
-    })().finally(()=>{indexWork=null;if(queue.size&&!closed&&!indexPaused)enqueue([])})
+    })().finally(()=>{indexWork=null;if(queue.size&&!closed&&!indexPaused&&!indexingPaused)enqueue([])})
   }
   const resumed=corpus.pendingIndexIds().then(enqueue).catch(error=>{if(!closed)indexError=error.message})
   async function candidates(ids,query,options,check){
@@ -38,6 +43,7 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
     return {ids,strategy:'scan',indexed:0,pending:ids.length}
   }
   const api={
+    async setIndexingPaused({paused}){indexingPaused=!!paused;if(!indexingPaused)enqueue([]);return true},
     async update(documents){
       const missing=documents.filter(doc=>doc._evicted&&!doc.remove),incoming=new Map(missing.map(doc=>[doc.id,doc]))
       for await(const batch of corpus.iterate(missing.map(doc=>doc.id))) {
@@ -59,7 +65,7 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
       const selection=useIndex?await candidates(ids,query,{regexMode},check):{ids,strategy:'scan',pending:0}
       lastQuery={total:ids.length,candidates:selection.ids.length,inspected:0,strategy:selection.strategy,pending:selection.pending}
       let visited=0
-      for await(const batch of corpus.iterate(selection.ids)) {
+      for await(const batch of corpus.iterate(selection.ids,{unordered:true,check})) {
         check()
         for(let i=0;i<batch.length;i++) {
           check()
@@ -75,6 +81,8 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
         progress({visited:ids.length-selection.ids.length+visited,total:ids.length})
         await new Promise(resolve=>setTimeout(resolve,0))
       }
+      const order=new Map(ids.map((id,i)=>[id,i]))
+      result.sort((a,b)=>order.get(a.url)-order.get(b.url))
       check();progress({visited:ids.length,total:ids.length});return result
     },
     async attribute({files,query,regexMode,exactWordsOnly,compact=false,englishParts=[]},check=()=>{}) {
@@ -225,21 +233,17 @@ export async function createSubtitleSearchRuntime(scope,{indexedDB=globalThis.in
     close(){closed=true;queue.clear();corpus.close()},
     get cacheBytes(){return cache.bytes},
   }
-  // A blocked native regex must not strand a background read/write index
-  // transaction. Finish the current document first, and pause further index
-  // writes until the query returns (or its worker is terminated).
+  // Queries preempt optional indexing at its next bounded checkpoint. Its
+  // recovery manifest keeps interrupted rows safely on the full-scan path.
   for(const type of ['files','attribute','statistics','regroup','vocabScan','automatic','playlist']){
     const run=api[type]
     api[type]=async(...args)=>{
       indexPaused++
-      // Query time spent finishing an already-running index document is
-      // preparation, not a stuck regex. Forward its actual progress too.
-      const checkpoint=()=>{try{args[1]?.()}catch(_){}}
       try{
-        if(indexDocumentWork){indexWaiters.add(checkpoint);await indexDocumentWork.catch(()=>{});indexWaiters.delete(checkpoint)}
+        if(indexDocumentWork)await indexDocumentWork.catch(()=>{})
         args[1]?.();return await run(...args)
       }
-      finally{indexWaiters.delete(checkpoint);indexPaused--;if(!indexPaused&&queue.size&&!closed)enqueue([])}
+      finally{indexPaused--;if(!indexPaused&&queue.size&&!closed)enqueue([])}
     }
   }
   return api
