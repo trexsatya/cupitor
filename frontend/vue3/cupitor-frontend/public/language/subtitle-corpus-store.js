@@ -3,7 +3,7 @@
 import { createSubtitleIndex } from './subtitle-index-store.js'
 const request = req => new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})
 const done = tx => new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error||new Error('Search cache transaction interrupted'));tx.onerror=()=>{}})
-export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, {baseScope=scope}={}) {
+export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, {baseScope=scope,keyRange=globalThis.IDBKeyRange,legacyScope,onStorageProgress=()=>{}}={}) {
   if (!factory) throw new Error('Search storage is unavailable; full subtitle coverage could not be prepared.')
   const db = await new Promise((resolve,reject)=>{
     const req=factory.open('cupitor-search-corpus-v1',3)
@@ -26,7 +26,7 @@ export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, 
   let heartbeat=null,pruning=null
   db.onversionchange=()=>{clearInterval(heartbeat);db.close()}
   const transact=(names,mode='readonly')=>db.transaction(names,mode)
-  const searchIndex=createSubtitleIndex(db,scope)
+  const searchIndex=createSubtitleIndex(db,scope,{keyRange})
   let touched=0
   const api={
     async touch(){
@@ -75,10 +75,37 @@ export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, 
       const records=await Promise.all(ids.map(id=>request(tx.objectStore('documents').get([scope,id]))))
       await complete;return records
     },
-    async *iterate(ids) {
+    async *iterate(ids,{unordered=false,check=()=>{}}={}) {
+      if(unordered&&keyRange){
+        // File inclusion can read in storage order and restore the caller's
+        // order afterward. Consecutive records need one bounded getAll, not
+        // thousands of separate get callbacks for an unindexed library.
+        ids=[...ids].sort()
+        const info=await searchIndex.metadata(ids,undefined,check)
+        let batch=[],bytes=0
+        const read=async()=>{
+          check()
+          const tx=transact(['documents']),complete=done(tx);complete.catch(()=>{})
+          const store=tx.objectStore('documents'),range=keyRange.bound([scope,batch[0]],[scope,batch.at(-1)])
+          // A sparse candidate set may have large unselected transcripts in
+          // its gaps. Count before reading so those never enter the batch.
+          const count=await request(store.count(range))
+          let rows=count===batch.length?await request(store.getAll(range)):null
+          if(!rows||rows.some((row,i)=>row.id!==batch[i]))rows=await Promise.all(batch.map(id=>request(store.get([scope,id]))))
+          await complete;check();return rows
+        }
+        for(let i=0;i<ids.length;i++){
+          const size=info[i]?.bytes??Infinity
+          if(batch.length&&(bytes+size>2*1024*1024||batch.length>=64)){yield await read();batch=[];bytes=0}
+          batch.push(ids[i]);bytes+=size
+        }
+        if(batch.length)yield await read()
+        return
+      }
       // Plan batches from tiny metadata records, not full text. A transcript
       // larger than the budget is processed alone as an indivisible regex unit.
       for(let offset=0;offset<ids.length;offset+=128) {
+        check()
         const part=ids.slice(offset,offset+128),tx=transact(['info']),complete=done(tx);complete.catch(()=>{})
         const info=await Promise.all(part.map(id=>request(tx.objectStore('info').get([scope,id]))))
         await complete
@@ -97,7 +124,7 @@ export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, 
     indexStatus:searchIndex.status,
     pendingIndexIds:searchIndex.pending,
     documentIds:()=>searchIndex.pending({all:true}),
-    async removeScope(target) {
+    async removeScope(target,progress=()=>{}) {
       if(target===scope)throw new Error('The active subtitle search cache is protected.')
       for(;;){
         const stores=['documents','info','features','postings']
@@ -107,6 +134,7 @@ export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, 
         const finished=keys.every(batch=>batch.length<256)
         if(finished)tx.objectStore('scopes').delete(target)
         await complete
+        progress()
         if(finished)return
       }
     },
@@ -126,6 +154,14 @@ export async function openSubtitleCorpus(scope, factory = globalThis.indexedDB, 
       for(const meta of remove)await api.removeScope(meta.scope)
     },
     close(){clearInterval(heartbeat);db.close()},
+  }
+  // Only the tab holding the matching Web Lock supplies legacyScope. Reclaim
+  // its old, oversized derived index before writing another corpus copy.
+  // Authoritative downloads, captures and user edits live in other databases.
+  if(legacyScope&&legacyScope!==scope){
+    const tx=transact(['scopes']),complete=done(tx),meta=await request(tx.objectStore('scopes').get(legacyScope))
+    await complete
+    if(meta?.baseScope===baseScope)await api.removeScope(legacyScope,onStorageProgress)
   }
   await api.touch()
   heartbeat=setInterval(()=>api.touch().catch(()=>{}),30000)

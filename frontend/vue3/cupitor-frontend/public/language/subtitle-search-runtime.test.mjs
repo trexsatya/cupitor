@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { IDBFactory } from 'fake-indexeddb'
+import { IDBFactory, IDBKeyRange, IDBObjectStore } from 'fake-indexeddb'
 import { createSubtitleSearchRuntime } from './subtitle-search-runtime.js'
 import { openSubtitleCorpus } from './subtitle-corpus-store.js'
 import { buildSelectedSearchPlaylist } from './search-playlist.js'
@@ -12,6 +12,43 @@ const documents=[
   {id:'one',sv:srt(['tunn skiva','smal väg','tunn igen','smal igen']),en:srt(['thin slice','thin road','another thin slice','another road']),source:'YouTube',revision:1},
   {id:'two',sv:srt(['smal bro','tunn tråd','annan smal bro']),en:srt(['thin bridge','thin thread','another bridge']),source:'YouTube',revision:1},
 ]
+test('paused imports do no posting work; range scans preserve requested order and skip oversized gaps',async()=>{
+  const runtime=await createSubtitleSearchRuntime('bulk-runtime',{indexedDB:new IDBFactory(),keyRange:IDBKeyRange,indexingPaused:true})
+  const get=IDBObjectStore.prototype.get
+  let postingReads=0,unwantedReads=0
+  try{
+    IDBObjectStore.prototype.get=function(key){if(this.name==='postings')postingReads++;if(this.name==='documents'&&key[1]==='b')unwantedReads++;return get.call(this,key)}
+    await runtime.update([docForRange('a','needle'),docForRange('b','x'.repeat(2*1024*1024)),docForRange('c','needle')])
+    unwantedReads=0
+    const hits=await runtime.files({ids:['c','a'],query:'needle'})
+    assert.deepEqual(hits.map(hit=>hit.url),['c','a'])
+    assert.equal(postingReads,0,'imports and cold search never wait on optional posting construction')
+    assert.equal(unwantedReads,0,'range gaps do not materialize an unselected large transcript')
+    await runtime.setIndexingPaused({paused:false})
+    const status=await runtime.indexStatus({ids:['a','c'],wait:true})
+    assert.equal(status.ready,2,'optional indexing resumes after import')
+  }finally{IDBObjectStore.prototype.get=get;runtime.close()}
+})
+const docForRange=(id,text)=>({id,sv:srt([text]),revision:1})
+test('compact-scope upgrade reclaims only its locked legacy corpus before importing again',async()=>{
+  const indexedDB=new IDBFactory(),baseScope='upgrade-source'
+  const legacy=await openSubtitleCorpus('legacy-session',indexedDB,{baseScope})
+  const other=await openSubtitleCorpus('another-live-tab',indexedDB,{baseScope})
+  const foreign=await openSubtitleCorpus('another-source',indexedDB,{baseScope:'foreign-source'})
+  await legacy.put(Array.from({length:600},(_,i)=>docForRange('old'+i,'legacy material')))
+  await legacy.indexDocument('old0')
+  await other.put([docForRange('keep','another tab')]);await foreign.put([docForRange('keep','other source')])
+  legacy.close()
+  let checkpoints=0
+  const current=await openSubtitleCorpus('compact-session',indexedDB,{baseScope,legacyScope:'legacy-session',onStorageProgress:()=>checkpoints++})
+  try{
+    assert.ok(checkpoints>=3,'large old caches are deleted in bounded, supervised batches')
+    assert.deepEqual((await current.list()).map(row=>row.scope).sort(),['another-live-tab','another-source','compact-session'])
+    assert.equal((await other.get(['keep']))[0].sv,srt(['another tab']))
+    await current.put([docForRange('current','current material')])
+    assert.equal((await current.get(['current']))[0].sv,srt(['current material']))
+  }finally{current.close();other.close();foreign.close()}
+})
 test('indexed file and cue results agree with full scanning for both tracks and search modes',async()=>{
   const runtime=await createSubtitleSearchRuntime('parity',{indexedDB:new IDBFactory()})
   const extra=[

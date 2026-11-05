@@ -59,9 +59,9 @@ async function check(browser, mobile) {
     assert.equal(reads.size,10)
     assert.ok([...reads.values()].every(count => count === 1),'each interleaved pack downloads once despite exceeding the LRU budget')
     const metrics = await page.evaluate(() => window.__packMetrics)
-    assert.equal(metrics.cacheWrites,20,'400 pairs use two bounded download-cache transactions per pack')
+    assert.equal(metrics.cacheWrites,10,'400 small pairs share one bounded download-cache transaction per pack')
     assert.ok(metrics.updates.some(batch => batch.count > 1),'search writes must batch documents')
-    assert.ok(metrics.updates.every(batch => batch.count <= 32 && batch.bytes <= 2*1024*1024))
+    assert.ok(metrics.updates.every(batch => batch.count <= 128 && batch.bytes <= 2*1024*1024))
     assert.deepEqual(await page.evaluate(() => window.srts.map(entry => entry.link)),index.map(entry => entry.link),'the visible index retains its original order')
     assert.equal(await page.evaluate(() => window.allSubtitles['pack-0-0'].en),null)
     assert.match(await page.evaluate(() => window.allSubtitles['pack-0-1'].en),/complete translation/)
@@ -70,7 +70,7 @@ async function check(browser, mobile) {
     await load()
     assert.equal(reads.get('packs/pack-000001.json'),2,'only a changed pack is refetched')
     assert.ok([...reads].filter(([path]) => path !== 'packs/pack-000001.json').every(([,count]) => count === 1))
-    assert.equal(await page.evaluate(() => window.__packMetrics.cacheWrites),2)
+    assert.equal(await page.evaluate(() => window.__packMetrics.cacheWrites),1)
     offline = true
     const before = [...reads]
     await load()
@@ -78,7 +78,7 @@ async function check(browser, mobile) {
     assert.equal(await page.evaluate(() => window.__packMetrics.cacheWrites),0)
     assert.deepEqual(await searchAll(),index.map(entry => entry.link).sort())
     assert.deepEqual(errors,[])
-    console.log(`${mobile?'Mobile':'Desktop'}: 400 interleaved pairs, 10 pack reads, 20 cache transactions, bounded worker batches, revision refresh, complete search and offline reload passed`)
+    console.log(`${mobile?'Mobile':'Desktop'}: 400 interleaved pairs, 10 pack reads, 10 cache transactions, bounded worker batches, revision refresh, complete search and offline reload passed`)
   } finally {await page.close()}
 }
 
@@ -150,7 +150,7 @@ async function checkWriteFailure(browser) {
     await page.goto('http://127.0.0.1:3000/language.html',{waitUntil:'networkidle'})
     await page.waitForFunction(() => window._subtitlesLoaded && window._subtitleSearchStorageError)
     assert.ok(reads.length <= 4,'failed persistence cannot start the queued packs')
-    assert.ok(await page.evaluate(() => window.cupitorSubtitleMemoryStats().pendingDocuments <= 128))
+    assert.ok(await page.evaluate(() => window.cupitorSubtitleMemoryStats().pendingDocuments <= 512))
     assert.match(await page.evaluate(() => window._subtitleSearchStorageError),/Fixture search storage failed/)
     await page.reload({waitUntil:'networkidle'})
     await page.waitForFunction(() => window._subtitlesLoaded === true)

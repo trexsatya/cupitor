@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { IDBFactory, IDBDatabase, IDBObjectStore } from 'fake-indexeddb'
+import { IDBFactory, IDBDatabase, IDBObjectStore, IDBKeyRange } from 'fake-indexeddb'
 import { openSubtitleCorpus } from './subtitle-corpus-store.js'
 import { createSubtitleSearchRuntime } from './subtitle-search-runtime.js'
 import { POSTING_SHARD_SIZE } from './subtitle-search-index.js'
@@ -8,6 +8,52 @@ import { POSTING_SHARD_SIZE } from './subtitle-search-index.js'
 const srt=text=>`1\n00:00:01,000 --> 00:00:03,000\n${text}\n`
 const doc=(id,text)=>({id,sv:srt(text),en:srt('translated '+text),revision:1})
 const openDb=indexedDB=>new Promise((resolve,reject)=>{const req=indexedDB.open('cupitor-search-corpus-v1');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})
+
+test('cold library metadata uses bounded range reads and checks cancellation between them',async()=>{
+  const indexedDB=new IDBFactory(),writer=await openSubtitleCorpus('bulk-metadata',indexedDB,{keyRange:IDBKeyRange})
+  const documents=Array.from({length:1537},(_,i)=>doc('clip'+String(i).padStart(5,'0'),'ordinary caption'))
+  for(let i=0;i<documents.length;i+=128)await writer.put(documents.slice(i,i+128))
+  const reader=await openSubtitleCorpus('bulk-metadata',indexedDB,{keyRange:IDBKeyRange})
+  const get=IDBObjectStore.prototype.get,getAll=IDBObjectStore.prototype.getAll
+  let infoGets=0,ranges=0,checks=0
+  try{
+    IDBObjectStore.prototype.get=function(...args){if(this.name==='info')infoGets++;return get.apply(this,args)}
+    IDBObjectStore.prototype.getAll=function(range,count){if(this.name==='info'){ranges++;assert.equal(count,512)}return getAll.call(this,range,count)}
+    await assert.rejects(reader.candidates(documents.map(doc=>doc.id),'needle',{},()=>{if(++checks===3)throw new Error('cancel preparation')}),/cancel preparation/)
+    assert.equal(ranges,1,'cancellation stops preparation before the remaining library is read')
+    const result=await reader.candidates(documents.map(doc=>doc.id),'needle')
+    assert.equal(infoGets,0,'large libraries do not issue a separate metadata get for every clip')
+    assert.deepEqual(result.ids,documents.map(doc=>doc.id),'unindexed rows retain complete scan coverage')
+  }finally{IDBObjectStore.prototype.get=get;IDBObjectStore.prototype.getAll=getAll;reader.close();writer.close()}
+})
+
+test('interrupted bounded posting writes remain scan-safe and recover after a worker restart',async()=>{
+  const indexedDB=new IDBFactory()
+  let store=await openSubtitleCorpus('partial-postings',indexedDB)
+  const original=IDBObjectStore.prototype.get
+  const transaction=IDBDatabase.prototype.transaction
+  let writes=0,postingGets=0,maxGets=0
+  try{
+    await store.put([doc('clip','oldneedle')]);await store.indexDocument('clip')
+    const text=Array.from({length:600},(_,i)=>'word'+i.toString(36)).join(' ')+' newneedle'
+    await store.put([{...doc('clip',text),revision:2}])
+    IDBDatabase.prototype.transaction=function(names,mode,...rest){
+      if(mode==='readwrite'&&Array.from(names).includes('postings')){writes++;maxGets=Math.max(maxGets,postingGets);postingGets=0}
+      return transaction.call(this,names,mode,...rest)
+    }
+    IDBObjectStore.prototype.get=function(...args){if(this.name==='postings')postingGets++;return original.apply(this,args)}
+    await assert.rejects(store.indexDocument('clip',{check(){if(writes>=2)throw new Error('interrupt index')}}),/interrupt index/)
+    assert.ok(Math.max(maxGets,postingGets)<=128,'no posting transaction monopolizes storage with thousands of requests')
+    assert.equal((await store.indexStatus(['clip'])).pending,1)
+    assert.deepEqual((await store.candidates(['clip'],'newneedle')).ids,['clip'])
+    IDBDatabase.prototype.transaction=transaction;IDBObjectStore.prototype.get=original
+    store.close();store=await openSubtitleCorpus('partial-postings',indexedDB)
+    await store.indexDocument('clip')
+    assert.equal((await store.indexStatus(['clip'])).ready,1)
+    assert.deepEqual((await store.candidates(['clip'],'oldneedle')).ids,[])
+    assert.deepEqual((await store.candidates(['clip'],'newneedle')).ids,['clip'])
+  }finally{IDBDatabase.prototype.transaction=transaction;IDBObjectStore.prototype.get=original;store.close()}
+})
 test('postings actually prune reads, remain bounded and respect the requested scope and order',async()=>{
   const indexedDB=new IDBFactory(),store=await openSubtitleCorpus('alice/swedish',indexedDB),other=await openSubtitleCorpus('bob/spanish',indexedDB)
   try{

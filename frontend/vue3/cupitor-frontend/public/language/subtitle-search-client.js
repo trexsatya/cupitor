@@ -1,8 +1,9 @@
 import { createSubtitleSearchRuntime, searchError } from './subtitle-search-runtime.js'
 import { reserveSubtitleSession } from './subtitle-search-session.js'
+import { SUBTITLE_BATCH_DOCUMENTS, SUBTITLE_BATCH_BYTES } from './subtitle-batches.js'
 const queryTypes=['files','attribute','statistics','regroup','vocabScan','automatic','playlist']
 
-export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFactory=()=>new Worker(new URL('./subtitle-search-worker.js',import.meta.url),{type:'module'}),timeoutMs=10000,onProgress=()=>{},onMode=()=>{},onCommitted=()=>{}}) {
+export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFactory=()=>new Worker(new URL('./subtitle-search-worker.js',import.meta.url),{type:'module'}),timeoutMs=10000,indexingPaused=false,onProgress=()=>{},onMode=()=>{},onCommitted=()=>{}}) {
   const baseScope=scope
   scope=JSON.stringify([scope,globalThis.crypto?.randomUUID?.() || Date.now()+'-'+Math.random()])
   let worker=null,fallback=null,ready=null,generation=0,nextId=0,revision=0,flushing=null,cancellation=0,hadWorker=false
@@ -18,7 +19,8 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
     assertCurrent();const current=++generation
     ready=(async()=>{
       if(!reservation)reservation=reserveSubtitleSession(baseScope)
-      scope=(await reservation).scope
+      const lease=await reservation
+      scope=lease.scope
       if(current!==generation)throw searchError('Search session changed.','subtitle-search-cancelled')
       assertCurrent()
       try {
@@ -27,7 +29,7 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
           if(data.generation!==generation)return
           const request=requests.get(data.id);if(!request)return
           if(data.progress||data.heartbeat){
-            if(queryTypes.includes(request.type))request.arm()
+            if(queryTypes.includes(request.type)||request.type==='init')request.arm()
             if(data.progress)onProgress(data.progress)
             return
           }
@@ -40,7 +42,7 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
           if(boot){const [id,request]=boot;requests.delete(id);clearTimeout(request.timer);request.reject(searchError('The host could not start a search worker.'))}
           else discard(searchError('The search worker stopped. Run the search again.'))
         }
-        await send('init',{scope,baseScope},2000)
+        await send('init',{scope,baseScope,legacyScope:lease.legacyScope,options:{indexingPaused}},2000)
         if(current!==generation)throw searchError('Search session changed.','subtitle-search-cancelled')
         hadWorker=true
         onMode('worker')
@@ -49,7 +51,7 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
         worker?.terminate();worker=null
         if(hadWorker){ready=null;throw searchError('The search worker could not restart. Search is incomplete; try again.','subtitle-search-incomplete')}
         generation++ // Ignore any late events from the failed startup worker.
-        fallback=await createSubtitleSearchRuntime(scope,{baseScope})
+        fallback=await createSubtitleSearchRuntime(scope,{baseScope,indexingPaused,legacyScope:lease.legacyScope})
         onMode('cooperative')
       }
     })()
@@ -72,6 +74,12 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
     })
   }
   const client={
+    async setIndexingPaused(paused){
+      indexingPaused=!!paused
+      await start();assertCurrent()
+      if(worker)return send('setIndexingPaused',{paused:indexingPaused})
+      return fallback.setIndexingPaused({paused:indexingPaused})
+    },
     update(id,document){
       assertCurrent()
       if([...requests.values()].some(request=>queryTypes.includes(request.type)))client.cancel()
@@ -87,7 +95,7 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
           const documents=[];let bytes=0
           for(const doc of pending.values()){
             const size=2*((doc.sv?.length||0)+(doc.en?.length||0))
-            if(documents.length&&(documents.length>=32||bytes+size>2*1024*1024))break
+            if(documents.length&&(documents.length>=SUBTITLE_BATCH_DOCUMENTS||bytes+size>SUBTITLE_BATCH_BYTES))break
             documents.push(doc);bytes+=size
           }
           if(worker)await send('update',{documents},30000)
