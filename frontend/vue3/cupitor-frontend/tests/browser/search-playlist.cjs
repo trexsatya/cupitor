@@ -84,12 +84,25 @@ async function checkSearchPlaylist(browser, mobile) {
     })
     await search('händer|behöver|saknas', 2)
     assert.equal(await page.locator('#searchPlaylistSelectBtn').isVisible(), true)
-    assert.equal(await page.locator('#manualSearchBar #searchPlaylistToolbar').count(), 1,
-      'playlist controls share the existing results options row')
+    assert.equal(await page.locator('#result #searchPlaylistToolbar').count(), 1,
+      'search results have one playlist toolbar')
+    const initialToolbar = await page.locator('#searchPlaylistToolbar').boundingBox()
+    const firstHeading = await page.locator('#result .l-accordion').first().boundingBox()
+    assert(initialToolbar && firstHeading && initialToolbar.y + initialToolbar.height <= firstHeading.y + 1,
+      'playlist controls appear above the result headings')
     assert.equal(await page.locator('#result .l-accordion #searchPlaylistSelectBtn').count(), 0,
       'one playlist button sits outside all headings')
     assert.equal(await page.locator('#searchPlaylistActions').isVisible(), false)
     assert.equal(await page.locator('.search-playlist-checkbox:visible').count(), 0)
+    // Optional sources no longer own the playlist toolbar. Turning all of
+    // them off must retain selection, paging and temporary playlist playback.
+    await page.evaluate(() => {
+      for (const id of ['includeLibraryInSearchCb', 'manualSearchIncludeCb', 'wordMapSearchIncludeCb'])
+        $('#' + id).prop('checked', false).trigger('change')
+    })
+    assert.equal(await page.locator('#librarySearchBar, #libraryResults, #manualResults, #wordMapResults').count(), 0)
+    assert.equal(await page.locator('#result #searchPlaylistToolbar').count(), 1,
+      'disabling optional sources retains the playlist toolbar')
     await click('#searchPlaylistSelectBtn')
     const phrase = page.getByRole('checkbox', { name: 'Select clips for händer', exact: true })
     const other = page.getByRole('checkbox', { name: 'Select clips for behöver', exact: true })

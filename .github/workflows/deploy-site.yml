@@ -93,6 +93,7 @@ jobs:
           node tests/browser/youtube-return.cjs
           node --test tests/browser/subtitle-video-height.cjs public/page-scripts/*.browser.cjs
           node tests/browser/search-result-counts.cjs
+          node tests/browser/search-sources.cjs
           node tests/browser/dictionary-lookup.cjs
           node tests/browser/language-routing.cjs
           node tests/browser/word-map-search.cjs
@@ -130,6 +131,7 @@ jobs:
 
       - name: Test built regex search, Player and Practice controls
         run: |
+          node tests/browser/search-sources.cjs
           node tests/browser/user-data-storage.cjs
           node tests/browser/subtitle-worker.cjs
           node tests/browser/subtitle-index.cjs

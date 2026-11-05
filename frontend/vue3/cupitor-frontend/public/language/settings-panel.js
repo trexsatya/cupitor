@@ -74,6 +74,9 @@ export function organizeSettingsPanel(panel) {
     old?.remove()
   }
   const controls = [
+    ['search', 'includeLibraryInSearchCb', 'Search books', 'Show book search in the Cupitor app.'],
+    ['search', 'manualSearchIncludeCb', 'Search manual cards', 'Include matching cards from your playlists.'],
+    ['search', 'wordMapSearchIncludeCb', 'Search word maps', 'Include matching saved maps and nodes.'],
     ['search', 'numberOfFindingsToShow', 'Results per match', 'How many subtitle examples to show.'],
     ['search', 'numberOfSimilarFindings', 'Similar results', 'Maximum results for Search Similar.'],
     ['search', 'numberOfPrefixFindings', 'Prefix results', 'Extra rows stay available in Different prefixes.'],

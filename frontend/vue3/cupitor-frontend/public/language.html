@@ -388,6 +388,15 @@
                             </label>
                         </div>
                     </label>
+                    <label class="lang-panel-label" for="includeLibraryInSearchCb">Search books
+                        <input type="checkbox" id="includeLibraryInSearchCb" checked>
+                    </label>
+                    <label class="lang-panel-label" for="manualSearchIncludeCb">Search manual cards
+                        <input type="checkbox" id="manualSearchIncludeCb">
+                    </label>
+                    <label class="lang-panel-label" for="wordMapSearchIncludeCb">Search word maps
+                        <input type="checkbox" id="wordMapSearchIncludeCb" checked>
+                    </label>
                     <label class="lang-panel-label" title="Also full-text search the books in your Cupitor library on every search (needs the Cupitor app). The first searches are slow while the app builds its index.">
                         Auto book search
                         <div class="checkbox-wrapper-22" style="display: inline; margin-left: 4px;">
@@ -541,6 +550,9 @@
                 </defs>
             </svg>
             <div id="resultContainer" style="display: none;">
+                <div id="searchLoadingOverlay" class="search-loading-overlay" role="status" hidden>
+                    <span>Loading results…</span>
+                </div>
                 <div id="vocabularyResult">
 
                 </div>
