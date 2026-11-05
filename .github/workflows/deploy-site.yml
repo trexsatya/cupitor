@@ -22,6 +22,45 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  macos-search:
+    runs-on: macos-15
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: source/frontend/vue3/cupitor-frontend
+    env:
+      CUPITOR_REAL_SUBTITLE_DATA: ${{ github.workspace }}/data/db/language/swedish
+      CYPRESS_INSTALL_BINARY: '0'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: trexsatya/trexsatya.github.io
+          ref: gh-pages
+          path: data
+          sparse-checkout-cone-mode: false
+          sparse-checkout: /db/language/swedish/srts/
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: source/frontend/vue3/cupitor-frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Native WKWebView real-library search
+        run: node tests/macos/subtitle-search.cjs
+      - name: Build production site
+        run: npm run build
+        env:
+          NODE_OPTIONS: --openssl-legacy-provider
+      - name: Native WKWebView production search
+        run: node tests/macos/subtitle-search.cjs
+        env:
+          CUPITOR_TEST_ASSETS: dist
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -117,6 +156,8 @@ jobs:
         run: |
           node tests/browser/user-data-storage.cjs
           node tests/browser/subtitle-worker.cjs
+          node tests/browser/subtitle-busy-host.cjs
+          node tests/browser/subtitle-memory.cjs
           node tests/browser/subtitle-index.cjs
           node tests/browser/subtitle-scaling.cjs
           node tests/browser/subtitle-completeness.cjs
@@ -134,6 +175,8 @@ jobs:
           node tests/browser/search-sources.cjs
           node tests/browser/user-data-storage.cjs
           node tests/browser/subtitle-worker.cjs
+          node tests/browser/subtitle-busy-host.cjs
+          node tests/browser/subtitle-memory.cjs
           node tests/browser/subtitle-index.cjs
           node tests/browser/subtitle-scaling.cjs
           node tests/browser/compound-vocabulary-groups.cjs

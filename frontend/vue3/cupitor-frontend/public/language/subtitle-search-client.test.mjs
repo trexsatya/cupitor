@@ -2,6 +2,83 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { observeSubtitleCorpus, createSubtitleSearchClient } from './subtitle-search-client.js'
 
+test('slow startup and context reads continue while the worker can answer liveness probes',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date']})
+  let init,context,probes=0,terminated=0
+  const modes=[]
+  const worker={terminate(){terminated++},postMessage(message){
+    if(message.type==='init')init=message
+    else if(message.type==='context')context=message
+    else if(message.type==='ping'){probes++;queueMicrotask(()=>this.onmessage({data:{...message,pong:true}}))}
+  }}
+  const client=createSubtitleSearchClient({scope:'busy-storage',timeoutMs:40,workerFactory:()=>worker,onMode:mode=>modes.push(mode)})
+  const settle=async()=>{for(let i=0;i<12;i++)await Promise.resolve()}
+  try{
+    const ready=client.flush();ready.catch(()=>{})
+    while(!init)await new Promise(resolve=>setImmediate(resolve))
+    t.mock.timers.tick(2001);await settle()
+    assert.equal(terminated,0,'a busy startup is probed before declaring worker support unavailable')
+    worker.onmessage({data:{...init,result:true}});await ready
+    let finished=false
+    const reading=client.run('context',{id:'clip',from:1,to:3}).then(result=>{finished=true;return result})
+    reading.catch(()=>{});await settle()
+    for(let i=0;i<5;i++){t.mock.timers.tick(41);await settle();assert.equal(finished,false)}
+    assert.equal(terminated,0,'slow storage is not an unresponsive worker')
+    assert.ok(probes>=6)
+    worker.onmessage({data:{...context,result:{lines:['vaken']}}})
+    assert.deepEqual(await reading,{lines:['vaken']});assert.deepEqual(modes,['worker'])
+  }finally{client.close()}
+})
+
+test('a delayed main-thread timer lets queued worker replies arrive before killing a query',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date']})
+  let query,probe,terminated=0
+  const worker={terminate(){terminated++},postMessage(message){
+    if(message.type==='init')queueMicrotask(()=>this.onmessage({data:{...message,result:true}}))
+    else if(message.type==='files')query=message
+    else if(message.type==='ping')probe=message
+  }}
+  const client=createSubtitleSearchClient({scope:'busy-main-thread',timeoutMs:40,workerFactory:()=>worker})
+  const settle=async()=>{for(let i=0;i<12;i++)await Promise.resolve()}
+  try{
+    await client.flush()
+    const running=client.run('files',{ids:['clip'],query:'vaken'});running.catch(()=>{});await settle()
+    t.mock.timers.tick(41);await settle();assert.ok(probe)
+    // The main thread was unavailable for much longer than the probe budget.
+    t.mock.timers.tick(2000);await settle()
+    assert.equal(terminated,0,'a late timer is evidence of host load, not worker failure')
+    worker.onmessage({data:{...query,result:['clip']}})
+    assert.deepEqual(await running,['clip'])
+  }finally{client.close()}
+})
+
+test('Cancel interrupts context reads and stale pongs cannot renew another probe',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date']})
+  const probes=[]
+  let context,query,terminated=0
+  const worker={terminate(){terminated++},postMessage(message){
+    if(message.type==='init')queueMicrotask(()=>this.onmessage({data:{...message,result:true}}))
+    else if(message.type==='context')context=message
+    else if(message.type==='files')query=message
+    else if(message.type==='ping')probes.push(message)
+  }}
+  const client=createSubtitleSearchClient({scope:'probe-cancel',timeoutMs:40,workerFactory:()=>worker})
+  const settle=async()=>{for(let i=0;i<12;i++)await Promise.resolve()}
+  try{
+    await client.flush()
+    const reading=client.run('context',{id:'clip'}).catch(error=>error.code);await settle();assert.ok(context)
+    client.cancel();assert.equal(await reading,'subtitle-search-cancelled');assert.equal(terminated,1)
+    const waiting=client.run('files',{ids:['clip'],query:'vaken'}).catch(error=>error.code);await settle()
+    t.mock.timers.tick(41);await settle()
+    worker.onmessage({data:{...query,heartbeat:true}})
+    t.mock.timers.tick(41);await settle()
+    assert.equal(probes.length,2)
+    worker.onmessage({data:{...probes[0],pong:true}})
+    t.mock.timers.tick(40);await settle()
+    assert.equal(await waiting,'subtitle-search-timeout','an obsolete pong cannot extend the current deadline')
+  }finally{client.close()}
+})
+
 test('bounded legacy-cache cleanup keeps a healthy worker startup supervised',async t=>{
   t.mock.timers.enable({apis:['setTimeout','Date']})
   let init,finished=false
@@ -46,6 +123,7 @@ test('a productive search can outlast the watchdog, but a stalled search is term
     assert.deepEqual(await running,['found'])
     const stalled=client.run('files',{ids:['one'],query:'(a+)+$'}).catch(error=>error.code)
     await settle();t.mock.timers.tick(41)
+    await settle();t.mock.timers.tick(40)
     assert.equal(await stalled,'subtitle-search-timeout')
     assert.equal(terminated,1)
   } finally {client.close()}

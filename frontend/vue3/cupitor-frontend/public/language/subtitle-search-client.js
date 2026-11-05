@@ -2,13 +2,30 @@ import { createSubtitleSearchRuntime, searchError } from './subtitle-search-runt
 import { reserveSubtitleSession } from './subtitle-search-session.js'
 import { SUBTITLE_BATCH_DOCUMENTS, SUBTITLE_BATCH_BYTES } from './subtitle-batches.js'
 const queryTypes=['files','attribute','statistics','regroup','vocabScan','automatic','playlist']
+const interruptibleTypes=[...queryTypes,'context']
 
-export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFactory=()=>new Worker(new URL('./subtitle-search-worker.js',import.meta.url),{type:'module'}),timeoutMs=10000,indexingPaused=false,onProgress=()=>{},onMode=()=>{},onCommitted=()=>{}}) {
+export function createSubtitleSearchClient({scope,storage='indexeddb',assertCurrent=()=>{},workerFactory=()=>new Worker(new URL('./subtitle-search-worker.js',import.meta.url),{type:'module'}),timeoutMs=10000,indexingPaused=false,onProgress=()=>{},onMode=()=>{},onCommitted=()=>{}}) {
   const baseScope=scope
   scope=JSON.stringify([scope,globalThis.crypto?.randomUUID?.() || Date.now()+'-'+Math.random()])
-  let worker=null,fallback=null,ready=null,generation=0,nextId=0,revision=0,flushing=null,cancellation=0,hadWorker=false
+  let worker=null,fallback=null,ready=null,generation=0,nextId=0,nextProbe=0,revision=0,flushing=null,cancellation=0,hadWorker=false
   let reservation=null
   const requests=new Map(),pending=new Map(),documentRevisions=new Map()
+  const retained=storage==='memory'?new Map():null
+  const batchFrom=values=>{
+    const documents=[];let bytes=0
+    for(const doc of values){
+      const size=2*((doc.sv?.length||0)+(doc.en?.length||0))
+      if(documents.length&&(documents.length>=SUBTITLE_BATCH_DOCUMENTS||bytes+size>SUBTITLE_BATCH_BYTES))break
+      documents.push(doc);bytes+=size
+    }
+    return documents
+  }
+  async function commit(documents){
+    if(worker)await send('update',{documents},30000)
+    else await fallback.update(documents)
+    for(const doc of documents)if(pending.get(doc.id)===doc)pending.delete(doc.id)
+    onCommitted(documents)
+  }
   function discard(error) {
     generation++;worker?.terminate();worker=null;fallback?.close();fallback=null;ready=null
     for(const request of requests.values()){clearTimeout(request.timer);request.reject(error)}
@@ -18,7 +35,7 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
     if(ready)return ready
     assertCurrent();const current=++generation
     ready=(async()=>{
-      if(!reservation)reservation=reserveSubtitleSession(baseScope)
+      if(!reservation)reservation=storage==='memory'?Promise.resolve({scope,release(){}}):reserveSubtitleSession(baseScope)
       const lease=await reservation
       scope=lease.scope
       if(current!==generation)throw searchError('Search session changed.','subtitle-search-cancelled')
@@ -28,6 +45,10 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
         worker.onmessage=({data})=>{
           if(data.generation!==generation)return
           const request=requests.get(data.id);if(!request)return
+          if(data.pong){
+            if(data.probe===request.probe)request.arm()
+            return
+          }
           if(data.progress||data.heartbeat){
             if(queryTypes.includes(request.type)||request.type==='init')request.arm()
             if(data.progress)onProgress(data.progress)
@@ -42,7 +63,7 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
           if(boot){const [id,request]=boot;requests.delete(id);clearTimeout(request.timer);request.reject(searchError('The host could not start a search worker.'))}
           else discard(searchError('The search worker stopped. Run the search again.'))
         }
-        await send('init',{scope,baseScope,legacyScope:lease.legacyScope,options:{indexingPaused}},2000)
+        await send('init',{scope,baseScope,legacyScope:lease.legacyScope,options:{indexingPaused,storage}},2000)
         if(current!==generation)throw searchError('Search session changed.','subtitle-search-cancelled')
         hadWorker=true
         onMode('worker')
@@ -51,9 +72,15 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
         worker?.terminate();worker=null
         if(hadWorker){ready=null;throw searchError('The search worker could not restart. Search is incomplete; try again.','subtitle-search-incomplete')}
         generation++ // Ignore any late events from the failed startup worker.
-        fallback=await createSubtitleSearchRuntime(scope,{baseScope,indexingPaused,legacyScope:lease.legacyScope})
+        fallback=await createSubtitleSearchRuntime(scope,{baseScope,indexingPaused,legacyScope:lease.legacyScope,storage})
         onMode('cooperative')
       }
+      // Cancellation terminates a stuck worker. Reinstall the complete RAM
+      // snapshot before the next query, including edits not saved remotely.
+      if(retained)try{
+        const replay=new Map(retained)
+        while(replay.size){const documents=batchFrom(replay.values());await commit(documents);for(const doc of documents)replay.delete(doc.id)}
+      }catch(error){discard(error);throw error}
     })()
     const attempt=ready
     try{await attempt}catch(error){if(ready===attempt)ready=null;throw error}
@@ -62,11 +89,32 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
   function send(type,payload,budget=timeoutMs) {
     const id=++nextId,current=generation
     return new Promise((resolve,reject)=>{
-      const request={resolve,reject,timer:null,type,arm:()=>{
+      const fail=()=>{
+        if(current!==generation||requests.get(id)!==request)return
         clearTimeout(request.timer)
-        request.timer=setTimeout(()=>{
         if(type==='init'){requests.delete(id);worker?.terminate();reject(searchError('The host could not start a search worker.'));return}
         discard(searchError('Search timed out and is incomplete. Try a more specific pattern.','subtitle-search-timeout'))
+      }
+      const request={resolve,reject,timer:null,type,probe:null,arm:()=>{
+        clearTimeout(request.timer)
+        request.probe=null
+        request.timer=setTimeout(()=>{
+          // Silence can mean slow storage or a queued worker reply on a busy
+          // main thread. Probe the worker's event loop before terminating it.
+          request.probe=++nextProbe
+          const probeBudget=Math.max(budget,timeoutMs)
+          const watch=()=>{
+            const due=Date.now()+probeBudget
+            request.timer=setTimeout(()=>{
+              // A late supervisor cannot distinguish a hung worker from a
+              // suspended/busy browser. Give queued replies a turn to run.
+              if(Date.now()-due>Math.max(100,probeBudget/2)){watch();return}
+              fail()
+            },probeBudget)
+          }
+          watch()
+          try{worker.postMessage({type:'ping',id,generation:current,probe:request.probe})}
+          catch(_){fail()}
         },budget)
       }}
       requests.set(id,request);request.arm()
@@ -84,6 +132,11 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
       assertCurrent()
       if([...requests.values()].some(request=>queryTypes.includes(request.type)))client.cancel()
       pending.set(id,document?{...document,id,revision:++revision}:{id,remove:true,revision:++revision})
+      if(retained){
+        const next=pending.get(id),before=retained.get(id)
+        if(next.remove)retained.delete(id)
+        else retained.set(id,next._evicted&&before?{...before,...next,sv:next.sv===undefined?before.sv:next.sv,en:next.en===undefined?before.en:next.en,_evicted:false}:next)
+      }
       documentRevisions.set(id,revision)
     },
     async flush(){
@@ -92,16 +145,7 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
       flushing=(async()=>{
         while(pending.size){
           assertCurrent()
-          const documents=[];let bytes=0
-          for(const doc of pending.values()){
-            const size=2*((doc.sv?.length||0)+(doc.en?.length||0))
-            if(documents.length&&(documents.length>=SUBTITLE_BATCH_DOCUMENTS||bytes+size>SUBTITLE_BATCH_BYTES))break
-            documents.push(doc);bytes+=size
-          }
-          if(worker)await send('update',{documents},30000)
-          else await fallback.update(documents)
-          for(const doc of documents)if(pending.get(doc.id)===doc)pending.delete(doc.id)
-          onCommitted(documents)
+          await commit(batchFrom(pending.values()))
         }
       })()
       try{await flushing}finally{flushing=null}
@@ -110,34 +154,34 @@ export function createSubtitleSearchClient({scope,assertCurrent=()=>{},workerFac
       const epoch=cancellation,valid=()=>epoch===cancellation&&isCurrent()
       assertCurrent();await client.flush()
       if(!valid())throw searchError('Search cancelled.','subtitle-search-cancelled')
-      const corpusRevision=revision,query=queryTypes.includes(type),documentRevision=documentRevisions.get(payload?.id)
+      const corpusRevision=revision,query=queryTypes.includes(type),interruptible=interruptibleTypes.includes(type),documentRevision=documentRevisions.get(payload?.id)
       const documentChanged=()=>['document','context'].includes(type)&&documentRevisions.get(payload.id)!==documentRevision
-      if(worker){const result=await send(type,payload);assertCurrent();if((query&&!valid())||(query&&revision!==corpusRevision)||documentChanged())throw searchError('Subtitle contents changed. Run the search again.','subtitle-search-cancelled');return result}
-      let deadline=Date.now()+timeoutMs
+      if(worker){const result=await send(type,payload);assertCurrent();if((interruptible&&!valid())||(query&&revision!==corpusRevision)||documentChanged())throw searchError('Subtitle contents changed. Run the search again.','subtitle-search-cancelled');return result}
       const check=()=>{
         assertCurrent()
-        if(query&&(!valid()||revision!==corpusRevision))throw searchError('Search cancelled.','subtitle-search-cancelled')
-        if(Date.now()>deadline)throw searchError('Search timed out and is incomplete. This host uses cooperative search and cannot interrupt a single regex evaluation.','subtitle-search-timeout')
-        deadline=Date.now()+timeoutMs
+        if((interruptible&&!valid())||(query&&revision!==corpusRevision))throw searchError('Search cancelled.','subtitle-search-cancelled')
+        // A cooperative check cannot interrupt native regex execution. An
+        // elapsed-time check here only rejects finished work or slow IDB reads.
       }
       const result=await fallback[type](payload,check,onProgress)
-      if(documentChanged())throw searchError('Subtitle contents changed. Run the search again.','subtitle-search-cancelled')
+      if((interruptible&&!valid())||documentChanged())throw searchError('Search cancelled.','subtitle-search-cancelled')
       return result
     },
     cancel(){
       cancellation++
-      if(worker && [...requests.values()].some(request=>queryTypes.includes(request.type))) {
+      if(worker && [...requests.values()].some(request=>interruptibleTypes.includes(request.type))) {
         // A regex can prevent the worker from receiving a cancel message.
         // Termination is supervised here so the next query can start at once.
         discard(searchError('Search cancelled.','subtitle-search-cancelled'))
         return
       }
-      for(const [id,request]of requests)if(queryTypes.includes(request.type)){
+      for(const [id,request]of requests)if(interruptibleTypes.includes(request.type)){
         requests.delete(id);clearTimeout(request.timer);request.reject(searchError('Search cancelled.','subtitle-search-cancelled'))
       }
       worker?.postMessage({type:'cancel',generation})
     },
-    close(){const held=reservation;reservation=null;held?.then(lease=>lease.release()).catch(()=>{});discard(searchError('Search session closed.','subtitle-search-cancelled'))},
+    close(){cancellation++;const held=reservation;reservation=null;held?.then(lease=>lease.release()).catch(()=>{});retained?.clear();discard(searchError('Search session closed.','subtitle-search-cancelled'))},
+    get storage(){return storage},
     get storageScope(){return scope},
     get revision(){return revision},
     get pendingSize(){return pending.size},

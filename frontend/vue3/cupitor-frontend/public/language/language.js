@@ -3664,6 +3664,7 @@ const _subtitleSearchContext = _dsCaptureSourceContext()
 const _subtitleSearchScope = JSON.stringify([_userData.scope, _dsHasOther() ? _dsSourceIdentity('other') : null])
 const _subtitleSearch = createSubtitleSearchClient({
   scope: _subtitleSearchScope,
+  storage: new URLSearchParams(window.location.search).get('subtitleSearch') === 'indexeddb' ? 'indexeddb' : 'memory',
   // Import the complete corpus before optional posting writes compete with
   // downloads and cache restoration. Queries can always scan pending rows.
   indexingPaused: true,
@@ -3673,6 +3674,7 @@ const _subtitleSearch = createSubtitleSearchClient({
   onCommitted: documents => _subtitleCorpusView.committed(documents),
 })
 window.cupitorSubtitleSearch = _subtitleSearch
+window._subtitleSearchEngine = _subtitleSearch.storage
 let _observedSubtitleIds = new Set()
 let _subtitleFlushTimer = null
 const _subtitleCorpusView = observeSubtitleCorpus(window, (id,document) => {
