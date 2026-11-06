@@ -7530,12 +7530,18 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
         // header count showed the true total, the body showed only one row.
         // Removing the dedup; the per-result list is short enough that genuine
         // duplicates aren't a real UX problem.)
-        const rendered = [];
-
         const batchSize = Math.min(100, numberOfItemsToShow())
         const pageCount = Math.max(1, Math.ceil(items.length / batchSize))
-        const headingPage = Math.min(selection.headingPages.get(word) || 0, pageCount - 1)
-        for (let i = headingPage * batchSize; i < items.length; i++) {
+        let headingRenderId = 0
+        async function renderHeadingPage(requestedPage) {
+          const run = ++headingRenderId
+          const headingPage = Math.max(0, Math.min(requestedPage, pageCount - 1))
+          selection.headingPages.set(word, headingPage)
+          // Keep the heading, its options, the toolbar, other headings and
+          // their live DOM untouched. Only replace this heading's match rows.
+          wordBlock.children('.srt-file, .subtitle-heading-pages').remove()
+          const rendered = []
+          for (let i = headingPage * batchSize; i < items.length; i++) {
           if (rendered.length >= batchSize) {
             break;
           }
@@ -7606,22 +7612,26 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
             $fileBlock.append($lines)
 
             await renderLines(id, item.url)
-            if (!isCurrent()) return
+            if (!isCurrent() || run !== headingRenderId || !wordBlock[0].isConnected) return
             rendered.push(item)
           } catch (perItemErr) {
-            if (!isCurrent()) return
+            if (!isCurrent() || run !== headingRenderId || !wordBlock[0].isConnected) return
             if (perItemErr.code?.startsWith('subtitle-search')) throw perItemErr
             // One bad item shouldn't kill the whole word block. Log and move on.
             console.error('populateSRTFindings: failed to render item for', word, item, perItemErr)
           }
-        }//end for
-        if (pageCount > 1) {
+          }//end for
+          if (!isCurrent() || run !== headingRenderId || !wordBlock[0].isConnected) return
+          if (pageCount > 1) {
           const $pager = $('<div class="subtitle-heading-pages"></div>').appendTo(wordBlock)
-          const move = delta => { selection.headingPages.set(word,headingPage+delta); loadSearchResultsPage(pg.page) }
+          const move = delta => { void renderHeadingPage(headingPage + delta) }
           $('<button type="button" class="heading-page-prev" aria-label="Previous matches" title="Previous matches"><span class="heading-page-label">Previous matches</span><span class="heading-page-icon" aria-hidden="true">‹</span></button>').prop('disabled',!headingPage).on('click',()=>move(-1)).appendTo($pager)
           $('<span></span>').text(` ${headingPage * batchSize + 1}–${Math.min(items.length,(headingPage+1)*batchSize)} of ${items.length} `).appendTo($pager)
           $('<button type="button" class="heading-page-next" aria-label="Next matches" title="Next matches"><span class="heading-page-label">Next matches</span><span class="heading-page-icon" aria-hidden="true">›</span></button>').prop('disabled',headingPage>=pageCount-1).on('click',()=>move(1)).appendTo($pager)
+          }
+          wordBlock.find('.l-accordion').toggleClass('no-result', rendered.length === 0)
         }
+        await renderHeadingPage(selection.headingPages.get(word) || 0)
 
         // Header bookkeeping: show a match count, and grey the header out if
         // the post-filter pipeline produced nothing (sources disabled, all
@@ -7629,9 +7639,6 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
         // "hits, just collapsed".
         if (totalMatches > 0) {
           wordBlock.find('.match-count').text(`(${totalMatches})`)
-        }
-        if (rendered.length === 0) {
-          wordBlock.find('.l-accordion').addClass('no-result')
         }
       } catch (perWordErr) {
         if (!isCurrent()) return
