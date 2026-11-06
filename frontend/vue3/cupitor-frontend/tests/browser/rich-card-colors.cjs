@@ -69,6 +69,7 @@ const fs = require('node:fs')
       const pasted = await page.evaluate(() => {
         const keep = document.querySelector('#preservePasteFormatting');
         const pipeline = editor.plugins.get('ClipboardPipeline');
+        const defaultOff = !keep.checked;
         const run = preserve => {
           keep.checked = preserve;
           editor.setData('<p>Start </p>');
@@ -81,13 +82,13 @@ const fs = require('node:fs')
           });
           return editor.getData();
         };
-        return { defaultOff: !keep.checked, off: run(false), on: run(true) };
+        return { defaultOff, off: run(false), on: run(true) };
       });
       assert.equal(pasted.defaultOff, true);
       assert.match(pasted.off, /Bold source/);
-      assert.doesNotMatch(pasted.off, /<strong|<b(?:\\s|>)/i,
+      assert.doesNotMatch(pasted.off, /<strong|<b(?:\s|>)/i,
         'default paste mode must remove source bold formatting');
-      assert.match(pasted.on, /<(?:strong|b)(?:\\s|>)/i,
+      assert.match(pasted.on, /<(?:strong|b)(?:\s|>)/i,
         'enabling paste formatting must preserve source bold text');
       await page.close()
       console.log(`Rich card formatting colors and paste toggle: ${mobile ? 'mobile' : 'desktop'} passed`)
