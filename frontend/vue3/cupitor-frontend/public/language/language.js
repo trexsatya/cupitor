@@ -7532,6 +7532,17 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
         // duplicates aren't a real UX problem.)
         const batchSize = Math.min(100, numberOfItemsToShow())
         const pageCount = Math.max(1, Math.ceil(items.length / batchSize))
+        // Keep the per-heading pager mounted even while a new match is loading.
+        const $pager = pageCount > 1
+          ? $('<div class="subtitle-heading-pages"></div>').appendTo(wordBlock)
+          : $()
+        if ($pager.length) {
+          $('<button type="button" class="heading-page-prev" aria-label="Previous matches" title="Previous matches"><span class="heading-page-label">Previous matches</span><span class="heading-page-icon" aria-hidden="true">‹</span></button>')
+            .on('click', () => { void renderHeadingPage((selection.headingPages.get(word) || 0) - 1) }).appendTo($pager)
+          $('<span class="heading-page-range"></span>').appendTo($pager)
+          $('<button type="button" class="heading-page-next" aria-label="Next matches" title="Next matches"><span class="heading-page-label">Next matches</span><span class="heading-page-icon" aria-hidden="true">›</span></button>')
+            .on('click', () => { void renderHeadingPage((selection.headingPages.get(word) || 0) + 1) }).appendTo($pager)
+        }
         let headingRenderId = 0
         async function renderHeadingPage(requestedPage) {
           const run = ++headingRenderId
@@ -7539,7 +7550,13 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
           selection.headingPages.set(word, headingPage)
           // Keep the heading, its options, the toolbar, other headings and
           // their live DOM untouched. Only replace this heading's match rows.
-          wordBlock.children('.srt-file, .subtitle-heading-pages').remove()
+          wordBlock.children('.srt-file').remove()
+          if ($pager.length) {
+            $pager.find('.heading-page-prev').prop('disabled', headingPage === 0)
+            $pager.find('.heading-page-next').prop('disabled', headingPage >= pageCount - 1)
+            $pager.find('.heading-page-range').text(
+              ` ${headingPage * batchSize + 1}–${Math.min(items.length, (headingPage + 1) * batchSize)} of ${items.length} `)
+          }
           const rendered = []
           for (let i = headingPage * batchSize; i < items.length; i++) {
           if (rendered.length >= batchSize) {
@@ -7585,7 +7602,8 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
                 }
                 _syncSearchPlaylistSelection(selection)
               })
-            wordBlock.append($fileBlock)
+            if ($pager.length) $fileBlock.insertBefore($pager)
+            else wordBlock.append($fileBlock)
 
             const id = uuid()
             const $lines = $(`<div id="${id}" style="padding-top: 4px; padding-bottom: 8px;"></div>`)
@@ -7622,13 +7640,6 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
           }
           }//end for
           if (!isCurrent() || run !== headingRenderId || !wordBlock[0].isConnected) return
-          if (pageCount > 1) {
-          const $pager = $('<div class="subtitle-heading-pages"></div>').appendTo(wordBlock)
-          const move = delta => { void renderHeadingPage(headingPage + delta) }
-          $('<button type="button" class="heading-page-prev" aria-label="Previous matches" title="Previous matches"><span class="heading-page-label">Previous matches</span><span class="heading-page-icon" aria-hidden="true">‹</span></button>').prop('disabled',!headingPage).on('click',()=>move(-1)).appendTo($pager)
-          $('<span></span>').text(` ${headingPage * batchSize + 1}–${Math.min(items.length,(headingPage+1)*batchSize)} of ${items.length} `).appendTo($pager)
-          $('<button type="button" class="heading-page-next" aria-label="Next matches" title="Next matches"><span class="heading-page-label">Next matches</span><span class="heading-page-icon" aria-hidden="true">›</span></button>').prop('disabled',headingPage>=pageCount-1).on('click',()=>move(1)).appendTo($pager)
-          }
           wordBlock.find('.l-accordion').toggleClass('no-result', rendered.length === 0)
         }
         await renderHeadingPage(selection.headingPages.get(word) || 0)
