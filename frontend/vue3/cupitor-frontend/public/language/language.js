@@ -3923,6 +3923,16 @@ $('document').ready(e => {
 
   $('#prevSearchBtn').click(() => { if (_searchHistoryWasLongPress()) return; navigateSearchHistory(-1) })
   $('#nextSearchBtn').click(() => { if (_searchHistoryWasLongPress()) return; navigateSearchHistory(1) })
+  // Desktop-only search history keys, deliberately not the browser's native
+  // Alt+Left/Right and never inside editable fields or modal editors.
+  $(document).on('keydown.searchHistoryKeys', e => {
+    if (!(e.altKey && e.shiftKey) || e.ctrlKey || e.metaKey || e.repeat) return
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    if (window.matchMedia('(pointer: coarse)').matches) return
+    if ($(e.target).closest('input,textarea,select,[contenteditable],.ck,.ui-dialog').length) return
+    e.preventDefault()
+    navigateSearchHistory(e.key === 'ArrowLeft' ? -1 : 1)
+  })
   _wireSearchHistoryLongPress()
 
   $('#searchVocabularyByPrefixBtn').click(e => {
@@ -7321,11 +7331,33 @@ function getSearchResultPageSize() {
 let _searchPlaylistSelection = null
 const _searchPlaylistIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 4h12v2H3zm0 5h12v2H3zm0 5h7v2H3zm11-1 8 5-8 5z"/></svg>'
 
+function _selectedSearchGroups(state) {
+  return state.groups.map(group => {
+    const picks = state.individual.get(group.word)
+    return { ...group, items: picks
+      ? group.items.filter((_, index) => picks.has(index))
+      : state.selected.has(group.word) ? group.items : [] }
+  }).filter(group => group.items.length)
+}
+
 function _syncSearchPlaylistSelection(state) {
-  $('#result .search-playlist-choice').prop('hidden', !state.selecting)
+  $('#result .search-playlist-choice, #result .search-playlist-item-choice').prop('hidden', !state.selecting)
+  $('#result .search-playlist-item-checkbox').each((_, input) => {
+    const word = $(input).data('word'), index = $(input).data('index')
+    const picks = state.individual.get(word)
+    input.checked = picks ? picks.has(index) : state.selected.has(word)
+  })
+  $('#result .search-playlist-checkbox').each((_, input) => {
+    const word = $(input).data('word')
+    const picks = state.individual.get(word)
+    const total = state.groups.find(group => group.word === word)?.items.length || 0
+    input.checked = state.selected.has(word) || !!(picks && picks.size === total)
+    input.indeterminate = !!(picks && picks.size > 0 && picks.size < total)
+  })
   $('#searchPlaylistSelectBtn').attr('aria-pressed', String(state.selecting))
-  $('#searchPlaylistActions').prop('hidden', !state.selecting || !state.selected.size)
-  $('#searchPlaylistSelectedCount').text(state.selected.size || '').attr('aria-label', `${state.selected.size} headings selected`)
+  const count = _selectedSearchGroups(state).reduce((sum, group) => sum + group.items.length, 0)
+  $('#searchPlaylistActions').prop('hidden', !state.selecting || !count)
+  $('#searchPlaylistSelectedCount').text(count || '').attr('aria-label', `${count} clips selected`)
   _refreshAccordionStickyHeight()
 }
 
@@ -7344,14 +7376,15 @@ function _renderSearchPlaylistToolbar(state, $result) {
     state.selecting = !state.selecting
     if (!state.selecting) {
       state.selected.clear()
-      $('#result .search-playlist-checkbox').prop('checked', false)
+      state.individual.clear()
+      $('#result .search-playlist-checkbox, #result .search-playlist-item-checkbox').prop('checked', false)
     }
     _syncSearchPlaylistSelection(state)
   })
   $limit.on('input', () => { state.maxPerHeader = $limit.val() })
   $toolbar.on('submit', async e => {
     e.preventDefault()
-    if (!state.selecting || !state.selected.size || !$limit[0].reportValidity()) return
+    if (!state.selecting || !_selectedSearchGroups(state).length || !$limit[0].reportValidity()) return
     const raw = String($limit.val()).trim()
     if (raw && (!Number.isSafeInteger(Number(raw)) || Number(raw) < 1)) return
     const options = {
@@ -7360,12 +7393,13 @@ function _renderSearchPlaylistToolbar(state, $result) {
       contextAfter: parseInt(window._appSettings?.contextLinesAfter, 10) || 0,
       minWordsAround: _minWordsAround(),
       gapThreshold: _clipGapThresholdSec() }
+    const selectedGroups = _selectedSearchGroups(state)
     let queue
     const $button = $toolbar.find('#searchPlaylistCreateBtn').prop('disabled',true)
     try {
       queue = state.files.some(file => file.sv_subs?._contextOnly)
-        ? await _subtitleSearch.run('playlist',{groups:state.groups,selected:[...state.selected],options:{...options,files:[]}})
-        : buildSelectedSearchPlaylist(state.groups,state.selected,options)
+        ? await _subtitleSearch.run('playlist',{groups:selectedGroups,selected:selectedGroups.map(group => group.word),options:{...options,files:[]}})
+        : buildSelectedSearchPlaylist(selectedGroups,selectedGroups.map(group => group.word),options)
     } catch (error) { alert('Playlist could not be prepared: ' + error.message); return }
     finally { $button.prop('disabled',false) }
     if (!queue.length) { alert('No playable clips for the selected headings.'); return }
@@ -7403,7 +7437,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
   window._lastRenderedWords = words
 
   if (_searchPlaylistSelection?.map !== wordToItemsMap) {
-    _searchPlaylistSelection = { map: wordToItemsMap, selected: new Set(), selecting: false, maxPerHeader: '', headingPages:new Map() }
+    _searchPlaylistSelection = { map: wordToItemsMap, selected: new Set(), individual: new Map(), selecting: false, maxPerHeader: '', headingPages:new Map() }
   }
   const selection = _searchPlaylistSelection
   selection.files = window.searchResult
@@ -7416,6 +7450,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
   })
   const available = new Set(selection.groups.filter(group => group.items.length).map(group => group.word))
   for (const word of selection.selected) if (!available.has(word)) selection.selected.delete(word)
+  for (const word of selection.individual.keys()) if (!available.has(word)) selection.individual.delete(word)
   _renderSearchPlaylistToolbar(selection, $result)
 
   const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -7451,9 +7486,10 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
           .prop('hidden', !selection.selecting)
           .on('click', e => e.stopPropagation())
           .appendTo(wordBlock.find('.l-accordion'))
-        $choice.find('input').attr('aria-label', `Select clips for ${title}`)
+        $choice.find('input').attr('aria-label', `Select clips for ${title}`).data('word', word)
           .prop({ checked: selection.selected.has(word), disabled: !items.length })
           .on('change', e => {
+            selection.individual.delete(word)
             if (e.target.checked) selection.selected.add(word)
             else selection.selected.delete(word)
             _syncSearchPlaylistSelection(selection)
@@ -7517,6 +7553,29 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
                 `<span class="srt-via-guess" title="Found through the ${_.escape(item._viaGuess)} in this line, not through the English search">via ${_.escape(item._viaGuess)}</span>`)
             }
 
+            const $itemChoice = $('<label class="search-playlist-item-choice"><input type="checkbox" class="search-playlist-item-checkbox"><span>Select clip</span></label>')
+              .prop('hidden', !selection.selecting)
+              .prependTo($fileBlock)
+            $itemChoice.find('input').attr('aria-label', `Select match ${i + 1} under ${title}`)
+              .data({ word, index: i })
+              .prop('checked', selection.individual.has(word)
+                ? selection.individual.get(word).has(i) : selection.selected.has(word))
+              .on('change', e => {
+                let picks = selection.individual.get(word)
+                if (!picks) {
+                  picks = new Set(selection.selected.has(word) ? items.map((_, index) => index) : [])
+                  selection.individual.set(word, picks)
+                  selection.selected.delete(word)
+                }
+                if (e.target.checked) picks.add(i)
+                else picks.delete(i)
+                if (!picks.size) selection.individual.delete(word)
+                else if (picks.size === items.length) {
+                  selection.individual.delete(word)
+                  selection.selected.add(word)
+                }
+                _syncSearchPlaylistSelection(selection)
+              })
             wordBlock.append($fileBlock)
 
             const id = uuid()
@@ -7556,9 +7615,9 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
         if (pageCount > 1) {
           const $pager = $('<div class="subtitle-heading-pages"></div>').appendTo(wordBlock)
           const move = delta => { selection.headingPages.set(word,headingPage+delta); loadSearchResultsPage(pg.page) }
-          $('<button type="button">Previous matches</button>').prop('disabled',!headingPage).on('click',()=>move(-1)).appendTo($pager)
+          $('<button type="button" class="heading-page-prev" aria-label="Previous matches" title="Previous matches"><span class="heading-page-label">Previous matches</span><span class="heading-page-icon" aria-hidden="true">‹</span></button>').prop('disabled',!headingPage).on('click',()=>move(-1)).appendTo($pager)
           $('<span></span>').text(` ${headingPage * batchSize + 1}–${Math.min(items.length,(headingPage+1)*batchSize)} of ${items.length} `).appendTo($pager)
-          $('<button type="button">Next matches</button>').prop('disabled',headingPage>=pageCount-1).on('click',()=>move(1)).appendTo($pager)
+          $('<button type="button" class="heading-page-next" aria-label="Next matches" title="Next matches"><span class="heading-page-label">Next matches</span><span class="heading-page-icon" aria-hidden="true">›</span></button>').prop('disabled',headingPage>=pageCount-1).on('click',()=>move(1)).appendTo($pager)
         }
 
         // Header bookkeeping: show a match count, and grey the header out if
@@ -15742,6 +15801,14 @@ async function _openRichCardEditor($box, label) {
     })
     installRichCardStrikethrough(editor)
     installRichCardFormatting(editor)
+    // CKEditor has undo/redo commands; bind native desktop keys explicitly
+    // to the active rich card, without affecting the surrounding manual form.
+    $d.find('.ck-editor__editable').on('keydown.richCardUndo', ev => {
+      if (!(ev.metaKey || ev.ctrlKey) || ev.altKey || ev.key.toLowerCase() !== 'z') return
+      ev.preventDefault()
+      ev.stopPropagation()
+      editor.execute(ev.shiftKey ? 'redo' : 'undo')
+    })
     // CKEditor puts a new picture in place of a selected one, and a picture is
     // left selected once it is in — so a second one would silently replace
     // the first. A new picture goes after the selected one instead.
