@@ -538,7 +538,10 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     restoreButton.remove()
     dialog.remove()
   })
+  let parkedViewport = null, restoringViewport = false
   function minimizeMap() {
+    parkedViewport = { zoom, left: viewport.scrollLeft, top: viewport.scrollTop }
+    restoringViewport = true
     restoreFullscreen = dialog.classList.contains('wm-fullscreen')
     leaveFullscreen()
     if (inline) finishInline(true)
@@ -554,6 +557,16 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     restoreButton.remove()
     if (!dialog.open) dialog.showModal()
     if (expand) enterFullscreen()
+    // Fullscreen changes layout asynchronously; restore the saved scale and
+    // scroll position after the modal has its final dimensions.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (parkedViewport && dialog.open) {
+        zoom = parkedViewport.zoom
+        scale(0)
+        viewport.scrollTo(parkedViewport.left, parkedViewport.top)
+      }
+      setTimeout(() => { restoringViewport = false }, 150)
+    }))
   }
   let nativeFullscreen = false, restoreFullscreen = false
   function setExpanded(on) {
@@ -565,6 +578,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     fullscreenButton.title = on ? 'Exit fullscreen' : 'Enter fullscreen'
     setTimeout(() => {
       if (!dialog.open) return
+      if (restoringViewport || minimized) return
       if (searchFocus) centerSearchMatch()
       else fitMap()
     }, 0)
