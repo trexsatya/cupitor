@@ -7355,9 +7355,11 @@ function _syncSearchPlaylistSelection(state) {
     input.indeterminate = !!(picks && picks.size > 0 && picks.size < total)
   })
   $('#searchPlaylistSelectBtn').attr('aria-pressed', String(state.selecting))
-  const count = _selectedSearchGroups(state).reduce((sum, group) => sum + group.items.length, 0)
-  $('#searchPlaylistActions').prop('hidden', !state.selecting || !count)
-  $('#searchPlaylistSelectedCount').text(count || '').attr('aria-label', `${count} clips selected`)
+  const selectedGroups = _selectedSearchGroups(state)
+  const count = selectedGroups.length
+  const clipCount = selectedGroups.reduce((sum, group) => sum + group.items.length, 0)
+  $('#searchPlaylistActions').prop('hidden', !state.selecting || !clipCount)
+  $('#searchPlaylistSelectedCount').text(count || '').attr('aria-label', `${count} headings, ${clipCount} clips selected`)
   _refreshAccordionStickyHeight()
 }
 
