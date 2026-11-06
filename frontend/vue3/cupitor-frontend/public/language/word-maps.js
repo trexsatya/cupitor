@@ -527,7 +527,8 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
   })
   dialog.addEventListener('wordmapsrestore', restoreMap)
   dialog.addEventListener('wordmapsfocus', event => {
-    restoreMap()
+    // This is a new search target, not a request to return to the old viewport.
+    restoreMap({ preserveViewport: false })
     revealSearchResult(event.detail)
   })
   dialog.addEventListener('close', () => {
@@ -538,7 +539,10 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     restoreButton.remove()
     dialog.remove()
   })
+  let parkedViewport = null, restoringViewport = false
   function minimizeMap() {
+    parkedViewport = { zoom, left: viewport.scrollLeft, top: viewport.scrollTop }
+    restoringViewport = true
     restoreFullscreen = dialog.classList.contains('wm-fullscreen')
     leaveFullscreen()
     if (inline) finishInline(true)
@@ -548,12 +552,38 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     document.body.append(restoreButton)
     dialog.close()
   }
-  function restoreMap() {
-    const expand = minimized && restoreFullscreen
+  function restoreMap({ preserveViewport = true } = {}) {
+    const wasMinimized = minimized
+    const expand = wasMinimized && restoreFullscreen
     minimized = false
     restoreButton.remove()
     if (!dialog.open) dialog.showModal()
+    if (!wasMinimized) return
     if (expand) enterFullscreen()
+
+    if (!preserveViewport) {
+      // A lookup may open a different map. Never reapply the parked map's
+      // scroll/zoom over revealSearchResult's new selection and centering.
+      parkedViewport = null
+      setTimeout(() => { restoringViewport = false }, 150)
+      return
+    }
+
+    // Fullscreen changes layout asynchronously; wait until the modal's final
+    // dimensions are available before restoring scale and scroll position.
+    // jsdom and older hosts need a timeout fallback for requestAnimationFrame.
+    const frame = typeof window.requestAnimationFrame === 'function'
+      ? callback => window.requestAnimationFrame(callback)
+      : callback => setTimeout(callback, 0)
+    const savedViewport = parkedViewport
+    frame(() => frame(() => {
+      if (savedViewport && dialog.open && !minimized) {
+        zoom = savedViewport.zoom
+        scale(0)
+        viewport.scrollTo(savedViewport.left, savedViewport.top)
+      }
+      setTimeout(() => { restoringViewport = false }, 150)
+    }))
   }
   let nativeFullscreen = false, restoreFullscreen = false
   function setExpanded(on) {
@@ -565,6 +595,7 @@ export function openWordMaps({ storage = localStorage, storageKey, onLookup, voc
     fullscreenButton.title = on ? 'Exit fullscreen' : 'Enter fullscreen'
     setTimeout(() => {
       if (!dialog.open) return
+      if (restoringViewport || minimized) return
       if (searchFocus) centerSearchMatch()
       else fitMap()
     }, 0)

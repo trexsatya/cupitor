@@ -94,6 +94,41 @@ async function checkSearchPlaylist(browser, mobile) {
       'one playlist button sits outside all headings')
     assert.equal(await page.locator('#searchPlaylistActions').isVisible(), false)
     assert.equal(await page.locator('.search-playlist-checkbox:visible').count(), 0)
+    // Paging one heading must update only its match rows: other headings,
+    // their live DOM, their checkboxes and the toolbar remain intact.
+    await page.evaluate(() => {
+      const blocks = [...document.querySelectorAll('#result .l-accordion')].map(el => el.parentElement)
+      const paged = blocks.find(el => el.querySelector('.heading-page-next'))
+      const other = blocks.find(el => el !== paged)
+      if (!paged || !other) throw new Error('Expected two headings and a match pager')
+      window.__headingPageWitness = {
+        paged, other, header: paged.querySelector('.l-accordion'),
+        otherMatch: other.querySelector('.srt-file'),
+        toolbar: document.querySelector('#searchPlaylistToolbar'),
+      }
+      paged.querySelector('.heading-page-next').click()
+    })
+    await page.waitForFunction(() => /2[–-]2 of 4/.test(
+      window.__headingPageWitness.paged.querySelector('.subtitle-heading-pages')?.textContent || ''))
+    await page.waitForFunction(() => /Select match 2 under/.test(
+      window.__headingPageWitness.paged.querySelector('.search-playlist-item-checkbox')?.getAttribute('aria-label') || ''))
+    assert.equal(await page.evaluate(() => {
+      const w = window.__headingPageWitness
+      return w.paged.isConnected && w.other.isConnected &&
+        w.header === w.paged.querySelector('.l-accordion') &&
+        w.otherMatch === w.other.querySelector('.srt-file') &&
+        w.toolbar === document.querySelector('#searchPlaylistToolbar')
+    }), true, 'Next keeps the other heading, its match and the toolbar DOM')
+    await page.evaluate(() => window.__headingPageWitness.paged.querySelector('.heading-page-prev').click())
+    await page.waitForFunction(() => /1[–-]1 of 4/.test(
+      window.__headingPageWitness.paged.querySelector('.subtitle-heading-pages')?.textContent || ''))
+    await page.waitForFunction(() => /Select match 1 under/.test(
+      window.__headingPageWitness.paged.querySelector('.search-playlist-item-checkbox')?.getAttribute('aria-label') || ''))
+    assert.equal(await page.evaluate(() => {
+      const w = window.__headingPageWitness
+      return w.otherMatch === w.other.querySelector('.srt-file') &&
+        w.toolbar === document.querySelector('#searchPlaylistToolbar')
+    }), true, 'Previous also preserves the other heading and toolbar')
     // Optional sources no longer own the playlist toolbar. Turning all of
     // them off must retain selection, paging and temporary playlist playback.
     await page.evaluate(() => {

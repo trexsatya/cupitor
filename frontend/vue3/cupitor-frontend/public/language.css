@@ -5176,6 +5176,26 @@ body.study-split-active.study-media-combined.practice-mode #practiceMode .practi
 }
 #richCardEditor .rce-url { display: flex; gap: 6px; margin-bottom: 6px; }
 #richCardEditor .rce-url-input { flex: 1; min-width: 0; padding: 4px 6px; }
+#richCardEditor .rce-paste-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    max-width: 100%;
+    margin: 6px 0 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: inherit;
+    cursor: pointer;
+}
+#richCardEditor .rce-keep-paste-format {
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    flex: 0 0 auto;
+    accent-color: #186b8a;
+}
+
 
 #search-pagination { padding: 4px 0; }
 #search-pagination .btn.disabled { opacity: 0.4; pointer-events: none; }
@@ -5613,3 +5633,43 @@ body:is(.rec-playing, .practice-mode) #youtubeResumePlayer {
 .search-source-chip:has(input:checked) { background: #e1eefb; border-color: #4078b5; color: #164b82; font-weight: 600; }
 .search-source-chip:has(input:checked)::before { background: currentColor; }
 .search-source-chip:has(input:focus-visible) { outline: 2px solid #4078b5; outline-offset: 2px; }
+
+/* Search-result selection and compact pagination */
+#result .search-playlist-item-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 7px;
+    margin: 4px 0;
+    border-radius: 5px;
+    font-size: 12px;
+    cursor: pointer;
+}
+#result .search-playlist-item-choice[hidden] { display: none !important; }
+#result .search-playlist-item-checkbox { width: 16px; height: 16px; cursor: pointer; }
+#result .subtitle-heading-pages {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 10px auto;
+    text-align: center;
+}
+#result .subtitle-heading-pages button { min-height: 34px; }
+#result .subtitle-heading-pages .heading-page-icon { display: none; }
+@media (max-width: 600px) {
+    #result .subtitle-heading-pages .heading-page-label { display: none; }
+    #result .subtitle-heading-pages .heading-page-icon {
+        display: inline-block;
+        font-size: 26px;
+        line-height: 1;
+    }
+    #result .subtitle-heading-pages button {
+        min-width: 38px;
+        min-height: 38px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+}

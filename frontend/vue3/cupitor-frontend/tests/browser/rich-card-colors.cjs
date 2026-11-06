@@ -26,11 +26,14 @@ const fs = require('node:fs')
         const url = new URL(route.request().url())
         if (url.pathname === '/classic.js') return route.fulfill({ contentType: 'text/javascript', body: ckeditor })
         if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: `
+          <label><input id="preservePasteFormatting" type="checkbox">Keep formatting on paste</label>
           <div id="editor"></div><script src="/classic.js"></script>
           <script type="module">
             import { installRichCardFormatting } from '/language/rich-card-formatting.js';
+            import { installRichCardPasteControl } from '/language/rich-card-paste.js';
             window.editor = await ClassicEditor.create(document.querySelector('#editor'));
             installRichCardFormatting(editor);
+            installRichCardPasteControl(editor, document.querySelector('#preservePasteFormatting'));
             editor.setData('<p>first second third</p>');
             window.ready = true;
           </script>` })
@@ -60,8 +63,35 @@ const fs = require('node:fs')
           }, attribute), true)
         }
       }
+      // Paste conversion uses the real CKEditor clipboard pipeline, not a
+      // mock: the unchecked default must discard incoming markup, and the
+      // checked setting must preserve native CKEditor formatting.
+      const pasted = await page.evaluate(() => {
+        const keep = document.querySelector('#preservePasteFormatting');
+        const pipeline = editor.plugins.get('ClipboardPipeline');
+        const defaultOff = !keep.checked;
+        const run = preserve => {
+          keep.checked = preserve;
+          editor.setData('<p>Start </p>');
+          const p = editor.model.document.getRoot().getChild(0);
+          editor.model.change(w => w.setSelection(editor.model.createPositionAt(p, 'end')));
+          pipeline.fire('inputTransformation', {
+            content: editor.data.processor.toView('<p><strong>Bold source</strong></p>'),
+            dataTransfer: { getData: type => type === 'text/plain' ? 'Bold source' : '' },
+            method: 'paste',
+          });
+          return editor.getData();
+        };
+        return { defaultOff, off: run(false), on: run(true) };
+      });
+      assert.equal(pasted.defaultOff, true);
+      assert.match(pasted.off, /Bold source/);
+      assert.doesNotMatch(pasted.off, /<strong|<b(?:\s|>)/i,
+        'default paste mode must remove source bold formatting');
+      assert.match(pasted.on, /<(?:strong|b)(?:\s|>)/i,
+        'enabling paste formatting must preserve source bold text');
       await page.close()
-      console.log(`Repeated text/background color: ${mobile ? 'mobile' : 'desktop'} passed`)
+      console.log(`Rich card formatting colors and paste toggle: ${mobile ? 'mobile' : 'desktop'} passed`)
     }
   } finally { await browser.close() }
 })().catch(error => { console.error(error); process.exitCode = 1 })

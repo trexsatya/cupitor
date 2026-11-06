@@ -192,7 +192,7 @@ test('one Read/Edit switch toggles editing controls', () => {
     false
   )
 })
-test('lookup minimizes and restoring preserves the selected word, mode and zoom', () => {
+test('lookup minimizes and restoring preserves the selected word, mode and zoom', async () => {
   setup()
   let lookup
   openWordMaps({ storageKey: 'maps', onLookup: (word) => (lookup = word) })
@@ -210,6 +210,8 @@ test('lookup minimizes and restoring preserves the selected word, mode and zoom'
   assert.equal(dialog.hasAttribute('open'), false)
   assert.ok(document.querySelector('#wordMapsRestore'))
   document.querySelector('#wordMapsRestore').click()
+  // Wait for deferred viewport restoration, which previously threw in jsdom.
+  await new Promise(resolve => setTimeout(resolve, 15))
   assert.equal(document.querySelector('#wordMapsDialog'), dialog)
   assert.equal(dialog.hasAttribute('open'), true)
   assert.equal(canvas.style.width, width)
@@ -412,7 +414,7 @@ test('Fit map keeps an empty phone canvas at a readable entry scale', () => {
   assert.equal(document.querySelector('.wm-viewport svg').style.width, '2400px')
 })
 
-test('search opens the correct map, highlights all matching nodes and restores a minimized editor', () => {
+test('search opens the correct map, highlights all matching nodes and restores a minimized editor', async () => {
   setup()
   const maps = ['first', 'second'].map(id => ({ version: 1, id, name: id, edges: [], nodes: [
     { id: id + '-a', word: 'Gräl', x: 1800, y: 1200 },
@@ -432,6 +434,8 @@ test('search opens the correct map, highlights all matching nodes and restores a
   openWordMaps({ storageKey: 'maps', onLookup() {}, focus: { mapId: 'first', nodeId: 'first-a', query: 'gräl' } })
   assert.equal(document.querySelector('#wordMapsRestore'), null)
   assert.equal(document.querySelectorAll('#wordMapsDialog').length, 1)
+  assert.equal(document.querySelector('[aria-label="Saved word map"]').value, 'first')
+  await new Promise(resolve => setTimeout(resolve, 15))
   assert.equal(document.querySelector('[aria-label="Saved word map"]').value, 'first')
   assert.equal(document.querySelector('.wm-search-match').getAttribute('data-node'), 'first-a')
   assert.equal(localStorage.getItem('maps'), original, 'search highlights never change saved node colors or data')
