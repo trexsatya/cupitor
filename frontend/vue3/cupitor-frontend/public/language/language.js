@@ -7532,6 +7532,9 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
         // duplicates aren't a real UX problem.)
         const batchSize = Math.min(100, numberOfItemsToShow())
         const pageCount = Math.max(1, Math.ceil(items.length / batchSize))
+        // Dedicated match container: clear only these rows when this heading
+        // changes page. The heading, search links and pager remain mounted.
+        const $matches = $('<div class="subtitle-heading-matches"></div>').appendTo(wordBlock)
         // Keep the per-heading pager mounted even while a new match is loading.
         const $pager = pageCount > 1
           ? $('<div class="subtitle-heading-pages"></div>').appendTo(wordBlock)
@@ -7550,7 +7553,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
           selection.headingPages.set(word, headingPage)
           // Keep the heading, its options, the toolbar, other headings and
           // their live DOM untouched. Only replace this heading's match rows.
-          wordBlock.children('.srt-file').remove()
+          $matches.empty()
           if ($pager.length) {
             $pager.find('.heading-page-prev').prop('disabled', headingPage === 0)
             $pager.find('.heading-page-next').prop('disabled', headingPage >= pageCount - 1)
@@ -7602,8 +7605,7 @@ async function populateSRTFindings(wordToItemsMap, $result, token, renderVersion
                 }
                 _syncSearchPlaylistSelection(selection)
               })
-            if ($pager.length) $fileBlock.insertBefore($pager)
-            else wordBlock.append($fileBlock)
+            $matches.append($fileBlock)
 
             const id = uuid()
             const $lines = $(`<div id="${id}" style="padding-top: 4px; padding-bottom: 8px;"></div>`)
