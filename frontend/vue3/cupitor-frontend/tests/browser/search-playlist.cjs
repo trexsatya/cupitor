@@ -110,6 +110,8 @@ async function checkSearchPlaylist(browser, mobile) {
     })
     await page.waitForFunction(() => /2[–-]2 of 4/.test(
       window.__headingPageWitness.paged.querySelector('.subtitle-heading-pages')?.textContent || ''))
+    await page.waitForFunction(() => /Select match 2 under/.test(
+      window.__headingPageWitness.paged.querySelector('.search-playlist-item-checkbox')?.getAttribute('aria-label') || ''))
     assert.equal(await page.evaluate(() => {
       const w = window.__headingPageWitness
       return w.paged.isConnected && w.other.isConnected &&
@@ -120,6 +122,8 @@ async function checkSearchPlaylist(browser, mobile) {
     await page.evaluate(() => window.__headingPageWitness.paged.querySelector('.heading-page-prev').click())
     await page.waitForFunction(() => /1[–-]1 of 4/.test(
       window.__headingPageWitness.paged.querySelector('.subtitle-heading-pages')?.textContent || ''))
+    await page.waitForFunction(() => /Select match 1 under/.test(
+      window.__headingPageWitness.paged.querySelector('.search-playlist-item-checkbox')?.getAttribute('aria-label') || ''))
     assert.equal(await page.evaluate(() => {
       const w = window.__headingPageWitness
       return w.otherMatch === w.other.querySelector('.srt-file') &&
