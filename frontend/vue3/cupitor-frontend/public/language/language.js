@@ -24,6 +24,7 @@ import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
 import { installRichCardFormatting } from './rich-card-formatting.js';
+import { installRichCardPasteControl } from './rich-card-paste.js';
 import { createPracticeVideoCues } from './practice-video.js';
 import { createRecordingVideoAttempt, confirmRecordingSeek, VIDEO_RECOVERY_MS } from './recording-video.js';
 import { createAppLifecycleClock } from './app-lifecycle.js';
@@ -15746,6 +15747,10 @@ async function _openRichCardEditor($box, label) {
       <input type="url" class="rce-url-input" placeholder="https://…/picture.jpg or a Google Drive link" aria-label="Picture address">
       <button type="button" class="rce-url-insert">Insert</button>
     </div>
+    <label class="rce-paste-option" title="Off: paste text without source styling. On: preserve source formatting when supported.">
+      <input class="rce-keep-paste-format" type="checkbox" aria-label="Keep formatting on paste">
+      <span>Keep formatting on paste</span>
+    </label>
     <div class="rce-host"></div>
   </div>`).appendTo('body')
   const backFace = $box.is('#meeTarget') === (window._practiceFrontIsSource !== false)
@@ -15803,6 +15808,9 @@ async function _openRichCardEditor($box, label) {
     })
     installRichCardStrikethrough(editor)
     installRichCardFormatting(editor)
+    // Each editor opens with this unchecked. The clipboard hook updates
+    // immediately when the user toggles it without recreating the editor.
+    installRichCardPasteControl(editor, $d.find('.rce-keep-paste-format')[0])
     // CKEditor has undo/redo commands; bind native desktop keys explicitly
     // to the active rich card, without affecting the surrounding manual form.
     $d.find('.ck-editor__editable').on('keydown.richCardUndo', ev => {
