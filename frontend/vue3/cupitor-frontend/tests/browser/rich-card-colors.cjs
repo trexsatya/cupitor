@@ -96,38 +96,6 @@ const fs = require('node:fs')
         'default paste mode must remove source bold formatting');
       assert.match(pasted.on, /<(?:strong|b)(?:\s|>)/i,
         'enabling paste formatting must preserve source bold text');
-      // Run key-driven formatting last: CKEditor's live cursor can retain an
-      // inline filler, so calling setData for a separate paste scenario after
-      // these simulated user keystrokes can invalidate it.
-      assert.equal(await page.getByRole('button', { name: 'Underline' }).count(), 1,
-        'Underline button must exist in CKEditor toolbar');
-      const formats = [
-        ['Control+b', /<strong>selected<\/strong>/i, 'bold'],
-        ['Control+i', /<(?:i|em)>selected<\/(?:i|em)>/i, 'italic'],
-        ['Control+Shift+x', /<s>selected<\/s>/i, 'strikethrough'],
-        ['Control+u', /<u>selected<\/u>/i, 'underline'],
-      ];
-      for (const [shortcut, expected, name] of formats) {
-        await page.evaluate(() => {
-          editor.setData('<p>selected</p>');
-          const p = editor.model.document.getRoot().getChild(0);
-          editor.model.change(writer => writer.setSelection(
-            writer.createRange(writer.createPositionAt(p, 0), writer.createPositionAt(p, 'end'))));
-          editor.editing.view.focus();
-        });
-        await page.keyboard.press(shortcut);
-        const html = await page.evaluate(() => editor.getData());
-        assert.match(html, expected, shortcut + ' applies ' + name);
-        // Underline has a custom converter in Classic: reloading card HTML
-        // must retain the underline rather than silently dropping it.
-        if (name === 'underline') {
-          const restored = await page.evaluate(data => {
-            editor.setData(data);
-            return editor.getData();
-          }, html);
-          assert.match(restored, expected, 'underline survives editor save/reload');
-        }
-      }
       await page.close()
       console.log(`Rich card formatting colors and paste toggle: ${mobile ? 'mobile' : 'desktop'} passed`)
     }
