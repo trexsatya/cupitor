@@ -5162,6 +5162,39 @@ body.study-split-active.study-media-combined.practice-mode #practiceMode .practi
 }
 .mee-rich { margin-left: 4px; }
 #richCardEditor .ck-editor__editable { min-height: 160px; max-height: 55vh; }
+/* Desktop dialog has an explicit, user-resizable height. Let the actual
+   editing surface grow with it instead of leaving a small fixed-height box. */
+.rich-card-editor-desktop #richCardEditor {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+.rich-card-editor-desktop #richCardEditor .rce-host,
+.rich-card-editor-desktop #richCardEditor .rce-host > .ck-editor,
+.rich-card-editor-desktop #richCardEditor .ck-editor__main {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.rich-card-editor-desktop #richCardEditor .ck-editor__editable {
+    flex: 1 1 auto;
+    min-height: 160px;
+    max-height: none;
+    overflow-y: auto;
+}
+.rich-card-editor-desktop .ui-resizable-se {
+    width: 17px;
+    height: 17px;
+    right: 2px;
+    bottom: 2px;
+    border-right: 3px solid #888;
+    border-bottom: 3px solid #888;
+    border-radius: 2px;
+    cursor: se-resize;
+}
+
 /* Use one opaque writing surface so colors look the same while formatting,
    previewing and practising, regardless of the dialog underneath the editor. */
 #richCardEditor .ck-editor__editable,
