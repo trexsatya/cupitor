@@ -63,10 +63,10 @@ const fs = require('node:fs')
       // editor between keystrokes. CKEditor 5 uses an inline filler for its
       // live selection and cannot safely be setData() mid-keyboard event.
       const formats = [
-        { key: 'Control+b', start: 0, end: 4, pattern: /<strong>bold<\\/strong>/i },
-        { key: 'Control+i', start: 5, end: 11, pattern: /<(?:i|em)>italic<\\/(?:i|em)>/i },
-        { key: 'Control+Shift+x', start: 12, end: 18, pattern: /<s>strike<\\/s>/i },
-        { key: 'Control+u', start: 19, end: 28, pattern: /<u>underline<\\/u>/i },
+        { key: 'Control+b', start: 0, end: 4, pattern: /<strong>bold<\/strong>/i },
+        { key: 'Control+i', start: 5, end: 11, pattern: /<(?:i|em)>italic<\/(?:i|em)>/i },
+        { key: 'Control+Shift+x', start: 12, end: 18, pattern: /<s>strike<\/s>/i },
+        { key: 'Control+u', start: 19, end: 28, pattern: /<u>underline<\/u>/i },
       ]
       for (const format of formats) {
         await page.evaluate(({ start, end }) => {
@@ -85,20 +85,20 @@ const fs = require('node:fs')
       await page.getByRole('button', { name: 'Increase indent', exact: true }).click()
       await page.getByRole('button', { name: 'Increase indent', exact: true }).click()
       const html = await page.evaluate(() => editor.getData())
-      assert.match(html, /text-align:\\s*center/i, 'alignment is serialized to HTML')
-      assert.match(html, /margin-left:\\s*4em/i, 'two indent steps are serialized to HTML')
+      assert.match(html, /text-align:\s*center/i, 'alignment is serialized to HTML')
+      assert.match(html, /margin-left:\s*4em/i, 'two indent steps are serialized to HTML')
 
       const savedHtml = await page.evaluate(html => window.reopenEditor(html), html)
-      assert.match(savedHtml, /text-align:\\s*center/i, 'alignment survives reopen')
-      assert.match(savedHtml, /margin-left:\\s*4em/i, 'indent survives reopen')
-      assert.match(savedHtml, /<u>underline<\\/u>/i, 'underline survives reopen')
+      assert.match(savedHtml, /text-align:\s*center/i, 'alignment survives reopen')
+      assert.match(savedHtml, /margin-left:\s*4em/i, 'indent survives reopen')
+      assert.match(savedHtml, /<u>underline<\/u>/i, 'underline survives reopen')
 
       await page.getByRole('button', { name: 'Align right', exact: true }).first().click()
       const right = await page.evaluate(() => editor.getData())
-      assert.match(right, /text-align:\\s*right/i)
+      assert.match(right, /text-align:\s*right/i)
       await page.getByRole('button', { name: 'Decrease indent', exact: true }).first().click()
       const reduced = await page.evaluate(() => editor.getData())
-      assert.match(reduced, /margin-left:\\s*2em/i)
+      assert.match(reduced, /margin-left:\s*2em/i)
       await page.close()
       console.log(`${mobile ? 'Mobile' : 'Desktop'}: Ctrl formatting shortcuts, underline HTML roundtrip, alignment and indentation passed`)
     }
