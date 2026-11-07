@@ -72,10 +72,10 @@ const fs = require('node:fs')
       assert.equal(await page.getByRole('button', { name: 'Underline' }).count(), 1,
         'Underline button must exist in CKEditor toolbar');
       const formats = [
-        ['Control+b', /<strong>selected<\\/strong>/i, 'bold'],
-        ['Control+i', /<(?:i|em)>selected<\\/(?:i|em)>/i, 'italic'],
-        ['Control+Shift+x', /<s>selected<\\/s>/i, 'strikethrough'],
-        ['Control+u', /<u>selected<\\/u>/i, 'underline'],
+        ['Control+b', /<strong>selected<\/strong>/i, 'bold'],
+        ['Control+i', /<(?:i|em)>selected<\/(?:i|em)>/i, 'italic'],
+        ['Control+Shift+x', /<s>selected<\/s>/i, 'strikethrough'],
+        ['Control+u', /<u>selected<\/u>/i, 'underline'],
       ];
       for (const [shortcut, expected, name] of formats) {
         await page.evaluate(() => {
@@ -109,7 +109,7 @@ const fs = require('node:fs')
         }));
         return editor.getData();
       });
-      assert.match(commandUnderline, /<u>mac<\\/u>/i, 'Meta+U applies underline on Mac');
+      assert.match(commandUnderline, /<u>mac<\/u>/i, 'Meta+U applies underline on Mac');
       // Paste conversion uses the real CKEditor clipboard pipeline, not a
       // mock: the unchecked default must discard incoming markup, and the
       // checked setting must preserve native CKEditor formatting.
