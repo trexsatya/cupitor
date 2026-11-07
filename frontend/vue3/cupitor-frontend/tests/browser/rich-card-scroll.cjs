@@ -46,7 +46,7 @@ const fs = require('node:fs')
         'window.editor = await ClassicEditor.create(document.querySelector(".rce-host"));',
         'editor.setData(Array.from({length:95},(_,i)=>"<p>Paragraph "+i+" '+
           'containing enough words to make it wrap and scroll inside the editor, not the dialog.</p>").join(""));',
-        'if(window.desktopEditor) window.resizeEditingArea();',
+        'window.sizedOnOpen = window.desktopEditor ? window.resizeEditingArea() : null;',
         'window.ready = true;',
         '</script></body></html>',
       ].join('')
@@ -60,6 +60,8 @@ const fs = require('node:fs')
       })
       await page.goto('http://editor.test/')
       await page.waitForFunction(() => window.ready && document.querySelector('.ck-editor__editable'))
+      if (!mobile) assert.equal(await page.evaluate(() => window.sizedOnOpen), true,
+        'Desktop CKEditor wrapper must be found and sized on open')
       const metrics = () => page.locator('.ck-editor__editable').evaluate(el => ({
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
@@ -98,7 +100,7 @@ const fs = require('node:fs')
         assert(afterWheel.top > 80, 'Wheel should scroll the editor itself: ' + JSON.stringify(afterWheel))
         await page.evaluate(() => {
           document.querySelector('.ui-dialog').style.height = '500px'
-          window.resizeEditingArea()
+          if (!window.resizeEditingArea()) throw new Error('Desktop CKEditor wrapper was not sized after resize')
           document.querySelector('.ck-editor__editable').scrollTop = 0
         })
         const smaller = await metrics()
