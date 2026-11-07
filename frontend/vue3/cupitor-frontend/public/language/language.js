@@ -26,6 +26,7 @@ import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
 import { installRichCardUnderline } from './rich-card-underline.js';
 import { installRichCardParagraphTools } from './rich-card-paragraph.js';
 import { installRichCardShortcuts } from './rich-card-shortcuts.js';
+import { sizeRichCardEditingArea } from './rich-card-layout.js';
 import { installRichCardFormatting } from './rich-card-formatting.js';
 import { installRichCardPasteControl } from './rich-card-paste.js';
 import { createPracticeVideoCues } from './practice-video.js';
@@ -15790,6 +15791,9 @@ async function _openRichCardEditor($box, label) {
   const desktopEditor = windowWidth >= 800 && windowHeight >= 500
   const dialogWidth = Math.min(desktopEditor ? 980 : 640, windowWidth - (desktopEditor ? 32 : 16))
   const dialogHeight = desktopEditor ? Math.min(760, windowHeight - 44) : 'auto'
+  const syncEditingArea = () => {
+    if (desktopEditor && editor) sizeRichCardEditingArea($d[0])
+  }
   $d.dialog({
     title: `${label} — formatting`,
     dialogClass: desktopEditor ? 'rich-card-editor-desktop' : 'rich-card-editor-mobile',
@@ -15807,11 +15811,14 @@ async function _openRichCardEditor($box, label) {
     // Desktop can expand/shrink from the bottom-right handle. Mobile retains
     // the compact scrolling editor and avoids awkward resize handles.
     resizable: desktopEditor,
+    resize: syncEditingArea,
+    resizeStop: syncEditingArea,
     position: { my: 'center top', at: 'center top+20', of: window },
     buttons: {
       '🔗 Image from link'() {
         const $row = $d.find('.rce-url').toggle()
         if ($row.is(':visible')) $row.find('.rce-url-input').val('').trigger('focus')
+        requestAnimationFrame(syncEditingArea)
       },
       Apply() {
         // A picture still being shrunk is not in the text yet; applying now
@@ -15883,6 +15890,8 @@ async function _openRichCardEditor($box, label) {
     // destroy this one later, so do it now.
     if (seq !== _richEditorSeq || !document.body.contains($d[0])) { editor.destroy().catch(() => {}); editor = null; return }
     editor.setData(_faceToEditorHtml($box.val()))
+    syncEditingArea()
+    requestAnimationFrame(syncEditingArea)
     initial = editor.getData()
     editor.editing.view.focus()
     const insertFromLink = () => {
