@@ -23,6 +23,9 @@ import { recordingsHaveChanges } from './recordings-sync-state.js';
 import { installStudyCalls } from './study-calls.js';
 import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
+import { installRichCardUnderline } from './rich-card-underline.js';
+import { installRichCardShortcuts } from './rich-card-shortcuts.js';
+import { installRichCardBlockFormatting } from './rich-card-block-formatting.js';
 import { installRichCardFormatting } from './rich-card-formatting.js';
 import { installRichCardPasteControl } from './rich-card-paste.js';
 import { createPracticeVideoCues } from './practice-video.js';
@@ -15782,15 +15785,28 @@ async function _openRichCardEditor($box, label) {
     try { $d.dialog('destroy') } catch (_) {}
     $d.remove()
   }
+  const windowWidth = $(window).width()
+  const windowHeight = $(window).height()
+  const desktopEditor = windowWidth >= 800 && windowHeight >= 500
+  const dialogWidth = Math.min(desktopEditor ? 980 : 640, windowWidth - (desktopEditor ? 32 : 16))
+  const dialogHeight = desktopEditor ? Math.min(760, windowHeight - 44) : 'auto'
   $d.dialog({
     title: `${label} — formatting`,
-    width: Math.min(640, $(window).width() - 16),
+    dialogClass: desktopEditor ? 'rich-card-editor-desktop' : 'rich-card-editor-mobile',
+    width: dialogWidth,
+    height: dialogHeight,
+    minWidth: desktopEditor ? Math.min(620, dialogWidth) : 200,
+    minHeight: desktopEditor ? Math.min(440, dialogHeight) : 150,
+    maxWidth: desktopEditor ? windowWidth - 16 : undefined,
+    maxHeight: desktopEditor ? windowHeight - 16 : undefined,
     modal: true,
     // Escape belongs to the editor (closing a menu or a link balloon), not to
     // this dialog — closing here would throw the edit away.
     closeOnEscape: false,
     draggable: false,
-    resizable: false,
+    // Desktop can expand/shrink from the bottom-right handle. Mobile retains
+    // the compact scrolling editor and avoids awkward resize handles.
+    resizable: desktopEditor,
     position: { my: 'center top', at: 'center top+20', of: window },
     buttons: {
       '🔗 Image from link'() {
@@ -15827,7 +15843,10 @@ async function _openRichCardEditor($box, label) {
       image: { toolbar: ['imageTextAlternative'] },
     })
     installRichCardStrikethrough(editor)
+    installRichCardUnderline(editor)
     installRichCardFormatting(editor)
+    installRichCardBlockFormatting(editor)
+    installRichCardShortcuts(editor)
     // Each editor opens with this unchecked. The clipboard hook updates
     // immediately when the user toggles it without recreating the editor.
     installRichCardPasteControl(editor, $d.find('.rce-keep-paste-format')[0])
