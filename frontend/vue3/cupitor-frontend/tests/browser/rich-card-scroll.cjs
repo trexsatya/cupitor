@@ -72,10 +72,26 @@ const fs = require('node:fs')
         // CKEditor can scroll to its insertion point while loading setData().
         // Verify a fresh downward wheel gesture from the actual top.
         await editable.evaluate(el => { el.scrollTop = 0 })
+        const getScrollDetails = () => page.evaluate(() => {
+          const el = document.querySelector('.ck-editor__editable')
+          const rect = el.getBoundingClientRect()
+          const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+          return {
+            client: el.clientHeight, height: el.scrollHeight, top: el.scrollTop,
+            rect: { top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height },
+            hit: hit?.className || hit?.tagName,
+            hostTop: document.querySelector('#richCardEditor')?.scrollTop,
+            dialogTop: document.querySelector('.ui-dialog')?.scrollTop,
+            active: document.activeElement?.className,
+          }
+        })
         await editable.hover()
+        console.log('Rich editor before wheel:', JSON.stringify(await getScrollDetails()))
         await page.mouse.wheel(0, 550)
-        await page.waitForFunction(() => document.querySelector('.ck-editor__editable').scrollTop > 80,
-          { timeout: 5000 })
+        await page.waitForTimeout(450)
+        const afterWheel = await getScrollDetails()
+        console.log('Rich editor after wheel:', JSON.stringify(afterWheel))
+        assert(afterWheel.top > 80, 'Wheel should scroll the editor itself: ' + JSON.stringify(afterWheel))
         await page.evaluate(() => {
           document.querySelector('.ui-dialog').style.height = '500px'
           document.querySelector('.ck-editor__editable').scrollTop = 0
