@@ -69,6 +69,36 @@ const fs = require('node:fs')
           }, attribute), true)
         }
       }
+      // Paste conversion uses the real CKEditor clipboard pipeline, not a
+      // mock: the unchecked default must discard incoming markup, and the
+      // checked setting must preserve native CKEditor formatting.
+      const pasted = await page.evaluate(() => {
+        const keep = document.querySelector('#preservePasteFormatting');
+        const pipeline = editor.plugins.get('ClipboardPipeline');
+        const defaultOff = !keep.checked;
+        const run = preserve => {
+          keep.checked = preserve;
+          editor.setData('<p>Start </p>');
+          const p = editor.model.document.getRoot().getChild(0);
+          editor.model.change(w => w.setSelection(editor.model.createPositionAt(p, 'end')));
+          pipeline.fire('inputTransformation', {
+            content: editor.data.processor.toView('<p><strong>Bold source</strong></p>'),
+            dataTransfer: { getData: type => type === 'text/plain' ? 'Bold source' : '' },
+            method: 'paste',
+          });
+          return editor.getData();
+        };
+        return { defaultOff, off: run(false), on: run(true) };
+      });
+      assert.equal(pasted.defaultOff, true);
+      assert.match(pasted.off, /Bold source/);
+      assert.doesNotMatch(pasted.off, /<strong|<b(?:\s|>)/i,
+        'default paste mode must remove source bold formatting');
+      assert.match(pasted.on, /<(?:strong|b)(?:\s|>)/i,
+        'enabling paste formatting must preserve source bold text');
+      // Run key-driven formatting last: CKEditor's live cursor can retain an
+      // inline filler, so calling setData for a separate paste scenario after
+      // these simulated user keystrokes can invalidate it.
       assert.equal(await page.getByRole('button', { name: 'Underline' }).count(), 1,
         'Underline button must exist in CKEditor toolbar');
       const formats = [
@@ -98,36 +128,6 @@ const fs = require('node:fs')
           assert.match(restored, expected, 'underline survives editor save/reload');
         }
       }
-      // Meta/Cmd modifier is covered by the keyboard unit test. Triggering
-      // a synthetic Meta event after repeated setData/selection changes can
-      // invalidate CKEditor's inline filler in an otherwise passing browser.
-      // Paste conversion uses the real CKEditor clipboard pipeline, not a
-      // mock: the unchecked default must discard incoming markup, and the
-      // checked setting must preserve native CKEditor formatting.
-      const pasted = await page.evaluate(() => {
-        const keep = document.querySelector('#preservePasteFormatting');
-        const pipeline = editor.plugins.get('ClipboardPipeline');
-        const defaultOff = !keep.checked;
-        const run = preserve => {
-          keep.checked = preserve;
-          editor.setData('<p>Start </p>');
-          const p = editor.model.document.getRoot().getChild(0);
-          editor.model.change(w => w.setSelection(editor.model.createPositionAt(p, 'end')));
-          pipeline.fire('inputTransformation', {
-            content: editor.data.processor.toView('<p><strong>Bold source</strong></p>'),
-            dataTransfer: { getData: type => type === 'text/plain' ? 'Bold source' : '' },
-            method: 'paste',
-          });
-          return editor.getData();
-        };
-        return { defaultOff, off: run(false), on: run(true) };
-      });
-      assert.equal(pasted.defaultOff, true);
-      assert.match(pasted.off, /Bold source/);
-      assert.doesNotMatch(pasted.off, /<strong|<b(?:\s|>)/i,
-        'default paste mode must remove source bold formatting');
-      assert.match(pasted.on, /<(?:strong|b)(?:\s|>)/i,
-        'enabling paste formatting must preserve source bold text');
       await page.close()
       console.log(`Rich card formatting colors and paste toggle: ${mobile ? 'mobile' : 'desktop'} passed`)
     }
