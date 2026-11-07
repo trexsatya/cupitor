@@ -40,9 +40,13 @@ const fs = require('node:fs')
         '<div class="ui-dialog-buttonpane">Apply / Cancel</div></div>',
         '<script src="/classic.js"></script>',
         '<script type="module">',
+        'import { sizeRichCardEditingArea } from "/language/rich-card-layout.js";',
+        'window.resizeEditingArea = () => sizeRichCardEditingArea(document.querySelector("#richCardEditor"));',
+        'window.desktopEditor = ' + (!mobile) + ';',
         'window.editor = await ClassicEditor.create(document.querySelector(".rce-host"));',
         'editor.setData(Array.from({length:95},(_,i)=>"<p>Paragraph "+i+" '+
           'containing enough words to make it wrap and scroll inside the editor, not the dialog.</p>").join(""));',
+        'if(window.desktopEditor) window.resizeEditingArea();',
         'window.ready = true;',
         '</script></body></html>',
       ].join('')
@@ -94,6 +98,7 @@ const fs = require('node:fs')
         assert(afterWheel.top > 80, 'Wheel should scroll the editor itself: ' + JSON.stringify(afterWheel))
         await page.evaluate(() => {
           document.querySelector('.ui-dialog').style.height = '500px'
+          window.resizeEditingArea()
           document.querySelector('.ck-editor__editable').scrollTop = 0
         })
         const smaller = await metrics()
