@@ -1,0 +1,95 @@
+const { chromium } = require('playwright')
+const assert = require('node:assert/strict')
+const path = require('node:path')
+const fs = require('node:fs')
+
+;(async () => {
+  const ckeditor = process.env.CKEDITOR_CLASSIC_PATH
+    ? fs.readFileSync(process.env.CKEDITOR_CLASSIC_PATH, 'utf8')
+    : await (async () => {
+      const response = await fetch('https://cdn.jsdelivr.net/npm/@ckeditor/ckeditor5-build-classic@41.4.2/build/ckeditor.js')
+      assert(response.ok, 'CKEditor bundle download failed')
+      return response.text()
+    })()
+  const browser = await chromium.launch({
+    headless: true,
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+  })
+  try {
+    for (const mobile of [false, true]) {
+      const page = await browser.newPage({
+        viewport: { width: mobile ? 390 : 1280, height: 800 },
+        isMobile: mobile, hasTouch: mobile,
+      })
+      page.on('pageerror', error => console.error(error.message))
+      const body = [
+        '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">',
+        '<link rel="stylesheet" href="/language.css">',
+        '<style>body{margin:0}.ui-dialog{position:absolute;top:20px;left:12px;',
+        'width:90vw;height:700px;box-sizing:border-box;display:flex;flex-direction:column;',
+        'border:1px solid #999;background:white}',
+        '.ui-dialog-titlebar{flex:0 0 34px}.ui-dialog-buttonpane{flex:0 0 50px}',
+        '#richCardEditor.ui-dialog-content{flex:1 1 auto;min-height:0;min-width:0;',
+        'box-sizing:border-box;padding:12px}',
+        '</style></head><body>',
+        '<div class="ui-dialog ' + (mobile ? 'rich-card-editor-mobile' : 'rich-card-editor-desktop') + '">',
+        '<div class="ui-dialog-titlebar">Rich editor</div>',
+        '<div id="richCardEditor" class="ui-dialog-content">',
+        '<label class="rce-paste-option">Keep formatting on paste</label>',
+        '<div class="rce-host"></div></div>',
+        '<div class="ui-dialog-buttonpane">Apply / Cancel</div></div>',
+        '<script src="/classic.js"></script>',
+        '<script type="module">',
+        'window.editor = await ClassicEditor.create(document.querySelector(".rce-host"));',
+        'editor.setData(Array.from({length:95},(_,i)=>"<p>Paragraph "+i+" '+
+          'containing enough words to make it wrap and scroll inside the editor, not the dialog.</p>").join(""));',
+        'window.ready = true;',
+        '</script></body></html>',
+      ].join('')
+      await page.route('http://editor.test/**', route => {
+        const url = new URL(route.request().url())
+        if (url.pathname === '/classic.js')
+          return route.fulfill({ contentType: 'text/javascript', body: ckeditor })
+        if (url.pathname === '/')
+          return route.fulfill({ contentType: 'text/html', body })
+        return route.fulfill({ path: path.join(__dirname, '../../public', url.pathname) })
+      })
+      await page.goto('http://editor.test/')
+      await page.waitForFunction(() => window.ready && document.querySelector('.ck-editor__editable'))
+      const metrics = () => page.locator('.ck-editor__editable').evaluate(el => ({
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        overflowY: getComputedStyle(el).overflowY,
+        touchAction: getComputedStyle(el).touchAction,
+      }))
+      const before = await metrics()
+      assert(before.scrollHeight > before.clientHeight + 200,
+        'Long rich-card content must overflow the editable, not stretch the modal: ' +
+        JSON.stringify(before))
+      assert.equal(before.overflowY, 'auto', 'editable owns vertical scrolling')
+      const editable = page.locator('.ck-editor__editable')
+      if (!mobile) {
+        await editable.hover()
+        await page.mouse.wheel(0, 550)
+        await page.waitForFunction(() => document.querySelector('.ck-editor__editable').scrollTop > 80)
+        await page.evaluate(() => {
+          document.querySelector('.ui-dialog').style.height = '500px'
+          document.querySelector('.ck-editor__editable').scrollTop = 0
+        })
+        const smaller = await metrics()
+        assert(smaller.clientHeight < before.clientHeight - 80,
+          'Editable should shrink when desktop dialog is resized: ' + JSON.stringify({ before, smaller }))
+        await editable.hover()
+        await page.mouse.wheel(0, 450)
+        await page.waitForFunction(() => document.querySelector('.ck-editor__editable').scrollTop > 80)
+      } else {
+        assert.equal(before.touchAction, 'pan-y', 'mobile editor allows native vertical swipes')
+        const scrollTop = await editable.evaluate(el => { el.scrollTop = 240; return el.scrollTop })
+        assert(scrollTop > 80, 'Mobile rich-card editor must scroll long content')
+      }
+      console.log((mobile ? 'Mobile' : 'Desktop') +
+        ': rich card overflow, independent scrolling and desktop resize passed')
+      await page.close()
+    }
+  } finally { await browser.close() }
+})().catch(error => { console.error(error); process.exitCode = 1 })
