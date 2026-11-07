@@ -69,9 +69,13 @@ const fs = require('node:fs')
       assert.equal(before.overflowY, 'auto', 'editable owns vertical scrolling')
       const editable = page.locator('.ck-editor__editable')
       if (!mobile) {
+        // CKEditor can scroll to its insertion point while loading setData().
+        // Verify a fresh downward wheel gesture from the actual top.
+        await editable.evaluate(el => { el.scrollTop = 0 })
         await editable.hover()
         await page.mouse.wheel(0, 550)
-        await page.waitForFunction(() => document.querySelector('.ck-editor__editable').scrollTop > 80)
+        await page.waitForFunction(() => document.querySelector('.ck-editor__editable').scrollTop > 80,
+          { timeout: 5000 })
         await page.evaluate(() => {
           document.querySelector('.ui-dialog').style.height = '500px'
           document.querySelector('.ck-editor__editable').scrollTop = 0
@@ -81,7 +85,8 @@ const fs = require('node:fs')
           'Editable should shrink when desktop dialog is resized: ' + JSON.stringify({ before, smaller }))
         await editable.hover()
         await page.mouse.wheel(0, 450)
-        await page.waitForFunction(() => document.querySelector('.ck-editor__editable').scrollTop > 80)
+        await page.waitForFunction(() => document.querySelector('.ck-editor__editable').scrollTop > 80,
+          { timeout: 5000 })
       } else {
         assert.equal(before.touchAction, 'pan-y', 'mobile editor allows native vertical swipes')
         const scrollTop = await editable.evaluate(el => { el.scrollTop = 240; return el.scrollTop })
