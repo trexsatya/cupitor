@@ -25,6 +25,7 @@ import { createVocabularyMatcher } from './vocabulary-matcher.js';
 import { installRichCardStrikethrough } from './rich-card-strikethrough.js';
 import { installRichCardUnderline } from './rich-card-underline.js';
 import { installRichCardShortcuts } from './rich-card-shortcuts.js';
+import { installRichCardBlockFormatting } from './rich-card-block-formatting.js';
 import { installRichCardFormatting } from './rich-card-formatting.js';
 import { installRichCardPasteControl } from './rich-card-paste.js';
 import { createPracticeVideoCues } from './practice-video.js';
@@ -15844,6 +15845,7 @@ async function _openRichCardEditor($box, label) {
     installRichCardStrikethrough(editor)
     installRichCardUnderline(editor)
     installRichCardFormatting(editor)
+    installRichCardBlockFormatting(editor)
     installRichCardShortcuts(editor)
     // Each editor opens with this unchecked. The clipboard hook updates
     // immediately when the user toggles it without recreating the editor.
