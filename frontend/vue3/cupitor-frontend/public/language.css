@@ -5162,6 +5162,39 @@ body.study-split-active.study-media-combined.practice-mode #practiceMode .practi
 }
 .mee-rich { margin-left: 4px; }
 #richCardEditor .ck-editor__editable { min-height: 160px; max-height: 55vh; }
+/* Desktop dialog has an explicit, user-resizable height. Let the actual
+   editing surface grow with it instead of leaving a small fixed-height box. */
+.rich-card-editor-desktop #richCardEditor {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+.rich-card-editor-desktop #richCardEditor .rce-host,
+.rich-card-editor-desktop #richCardEditor .rce-host > .ck-editor,
+.rich-card-editor-desktop #richCardEditor .ck-editor__main {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.rich-card-editor-desktop #richCardEditor .ck-editor__editable {
+    flex: 1 1 auto;
+    min-height: 160px;
+    max-height: none;
+    overflow-y: auto;
+}
+.rich-card-editor-desktop .ui-resizable-se {
+    width: 17px;
+    height: 17px;
+    right: 2px;
+    bottom: 2px;
+    border-right: 3px solid #888;
+    border-bottom: 3px solid #888;
+    border-radius: 2px;
+    cursor: se-resize;
+}
+
 /* Use one opaque writing surface so colors look the same while formatting,
    previewing and practising, regardless of the dialog underneath the editor. */
 #richCardEditor .ck-editor__editable,
@@ -5176,6 +5209,27 @@ body.study-split-active.study-media-combined.practice-mode #practiceMode .practi
 }
 #richCardEditor .rce-url { display: flex; gap: 6px; margin-bottom: 6px; }
 #richCardEditor .rce-url-input { flex: 1; min-width: 0; padding: 4px 6px; }
+
+#richCardEditor .cup-card-paragraph-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding-left: 4px;
+    border-left: 1px solid #ccd3d8;
+}
+#richCardEditor .cup-card-paragraph-button {
+    min-width: 29px;
+    min-height: 28px;
+    padding: 3px 5px;
+    font-size: 17px;
+    line-height: 1;
+    font-weight: 600;
+}
+#richCardEditor .cup-card-align-left { text-align: left; }
+#richCardEditor .cup-card-align-center { text-align: center; }
+#richCardEditor .cup-card-align-right { text-align: right; }
+#richCardEditor .cup-card-align-justify { text-align: justify; }
+
 #richCardEditor .rce-paste-option {
     display: flex;
     align-items: center;

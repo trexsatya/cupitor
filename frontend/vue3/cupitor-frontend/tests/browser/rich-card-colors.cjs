@@ -30,9 +30,15 @@ const fs = require('node:fs')
           <div id="editor"></div><script src="/classic.js"></script>
           <script type="module">
             import { installRichCardFormatting } from '/language/rich-card-formatting.js';
+            import { installRichCardStrikethrough } from '/language/rich-card-strikethrough.js';
+            import { installRichCardUnderline } from '/language/rich-card-underline.js';
+            import { installRichCardShortcuts } from '/language/rich-card-shortcuts.js';
             import { installRichCardPasteControl } from '/language/rich-card-paste.js';
             window.editor = await ClassicEditor.create(document.querySelector('#editor'));
+            installRichCardStrikethrough(editor);
+            installRichCardUnderline(editor);
             installRichCardFormatting(editor);
+            installRichCardShortcuts(editor);
             installRichCardPasteControl(editor, document.querySelector('#preservePasteFormatting'));
             editor.setData('<p>first second third</p>');
             window.ready = true;
