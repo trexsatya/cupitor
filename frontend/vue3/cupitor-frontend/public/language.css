@@ -5209,6 +5209,27 @@ body.study-split-active.study-media-combined.practice-mode #practiceMode .practi
 }
 #richCardEditor .rce-url { display: flex; gap: 6px; margin-bottom: 6px; }
 #richCardEditor .rce-url-input { flex: 1; min-width: 0; padding: 4px 6px; }
+
+#richCardEditor .cup-card-paragraph-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding-left: 4px;
+    border-left: 1px solid #ccd3d8;
+}
+#richCardEditor .cup-card-paragraph-button {
+    min-width: 29px;
+    min-height: 28px;
+    padding: 3px 5px;
+    font-size: 17px;
+    line-height: 1;
+    font-weight: 600;
+}
+#richCardEditor .cup-card-align-left { text-align: left; }
+#richCardEditor .cup-card-align-center { text-align: center; }
+#richCardEditor .cup-card-align-right { text-align: right; }
+#richCardEditor .cup-card-align-justify { text-align: justify; }
+
 #richCardEditor .rce-paste-option {
     display: flex;
     align-items: center;
