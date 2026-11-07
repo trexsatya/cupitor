@@ -35,7 +35,7 @@ function fixture() {
   toolbar.innerHTML = '<div class="ck-toolbar__items"></div>';
   const editor = {
     model: { document: { selection, on: (name, fn) => { listeners[name] = fn; } }, schema,
-      change: cb => cb(writer) },
+      change: cb => { cb(writer); listeners['change:data']?.(); } },
     commands: { get: () => null },
     conversion: { attributeToAttribute: config => conversions.push(config) },
     editing: { view: { focus() { writes.push(['focus']); } } },
