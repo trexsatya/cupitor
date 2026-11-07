@@ -30,9 +30,15 @@ const fs = require('node:fs')
           <div id="editor"></div><script src="/classic.js"></script>
           <script type="module">
             import { installRichCardFormatting } from '/language/rich-card-formatting.js';
+            import { installRichCardStrikethrough } from '/language/rich-card-strikethrough.js';
+            import { installRichCardUnderline } from '/language/rich-card-underline.js';
+            import { installRichCardShortcuts } from '/language/rich-card-shortcuts.js';
             import { installRichCardPasteControl } from '/language/rich-card-paste.js';
             window.editor = await ClassicEditor.create(document.querySelector('#editor'));
+            installRichCardStrikethrough(editor);
+            installRichCardUnderline(editor);
             installRichCardFormatting(editor);
+            installRichCardShortcuts(editor);
             installRichCardPasteControl(editor, document.querySelector('#preservePasteFormatting'));
             editor.setData('<p>first second third</p>');
             window.ready = true;
@@ -63,6 +69,47 @@ const fs = require('node:fs')
           }, attribute), true)
         }
       }
+      assert.equal(await page.getByRole('button', { name: 'Underline' }).count(), 1,
+        'Underline button must exist in CKEditor toolbar');
+      const formats = [
+        ['Control+b', /<strong>selected<\\/strong>/i, 'bold'],
+        ['Control+i', /<(?:i|em)>selected<\\/(?:i|em)>/i, 'italic'],
+        ['Control+Shift+x', /<s>selected<\\/s>/i, 'strikethrough'],
+        ['Control+u', /<u>selected<\\/u>/i, 'underline'],
+      ];
+      for (const [shortcut, expected, name] of formats) {
+        await page.evaluate(() => {
+          editor.setData('<p>selected</p>');
+          const p = editor.model.document.getRoot().getChild(0);
+          editor.model.change(writer => writer.setSelection(
+            writer.createRange(writer.createPositionAt(p, 0), writer.createPositionAt(p, 'end'))));
+          editor.editing.view.focus();
+        });
+        await page.keyboard.press(shortcut);
+        const html = await page.evaluate(() => editor.getData());
+        assert.match(html, expected, shortcut + ' applies ' + name);
+        // Underline has a custom converter in Classic: reloading card HTML
+        // must retain the underline rather than silently dropping it.
+        if (name === 'underline') {
+          const restored = await page.evaluate(data => {
+            editor.setData(data);
+            return editor.getData();
+          }, html);
+          assert.match(restored, expected, 'underline survives editor save/reload');
+        }
+      }
+      const commandUnderline = await page.evaluate(() => {
+        editor.setData('<p>mac</p>');
+        const p = editor.model.document.getRoot().getChild(0);
+        editor.model.change(writer => writer.setSelection(
+          writer.createRange(writer.createPositionAt(p, 0), writer.createPositionAt(p, 'end'))));
+        editor.editing.view.focus();
+        editor.editing.view.getDomRoot().dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'u', metaKey: true, bubbles: true, cancelable: true
+        }));
+        return editor.getData();
+      });
+      assert.match(commandUnderline, /<u>mac<\\/u>/i, 'Meta+U applies underline on Mac');
       // Paste conversion uses the real CKEditor clipboard pipeline, not a
       // mock: the unchecked default must discard incoming markup, and the
       // checked setting must preserve native CKEditor formatting.
