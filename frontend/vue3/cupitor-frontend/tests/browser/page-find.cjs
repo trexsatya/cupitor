@@ -16,7 +16,7 @@ assert(/id="toggleResultContainer"[\s\S]*?<\/button>\s*<button type="button" id=
 
 function fixture() {
   return [
-    '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">',
+    '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
     '<link rel="stylesheet" href="/language.css">',
     '<style>body{margin:0;padding:12px;font-family:system-ui;background:#f5f7f9;color:#263747}',
     '.lang-toolbar{padding:7px;border:1px solid #dbe3ed;border-radius:9px;background:white}',
@@ -75,33 +75,6 @@ async function run(browser, mobile, legacy) {
     assert.equal(await bar.isVisible(), true)
     assert.equal(await input.evaluate(el => document.activeElement === el), true)
     await input.fill('färgsprakande')
-    await page.waitForTimeout(320)
-    console.log('Find result probe', JSON.stringify(await page.evaluate(() => ({
-      count: document.querySelector('#cupPageFindCount')?.textContent,
-      state: document.querySelector('#cupPageFindBar')?.__cupPageFind?.getState(),
-      marks: document.querySelectorAll('mark.cup-page-find-fallback').length,
-      rows: document.querySelectorAll('.fixture-row').length,
-      rects: [...document.querySelectorAll('.fixture-row')].map(x => [x.getBoundingClientRect().width,x.getBoundingClientRect().height]),
-      candidates: (() => {
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        const out = [];
-        let n;
-        while ((n = walker.nextNode())) {
-          if (!n.textContent.includes('färgsprakande')) continue;
-          const element = n.parentElement;
-          const begin = n.textContent.indexOf('färgsprakande');
-          const range = document.createRange();
-          range.setStart(n,begin);range.setEnd(n,begin+13);
-          out.push({text:n.textContent.slice(0,62),tag:element?.tagName,
-            hidden:element?.closest('[hidden]')?.tagName,
-            editable:element?.closest('[contenteditable]')?.tagName,
-            closest:element?.closest('#cupPageFindBar,script,style,noscript,template,textarea,input,select,option,button,svg,[hidden],[inert],[aria-hidden="true"],[contenteditable],.ck-editor__editable')?.tagName,
-            display:getComputedStyle(element).display,
-            rects:[...range.getClientRects()].map(r=>[r.width,r.height])});
-        }
-        return out;
-      })()
-    }))))
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 3')
     assert.equal(await count.textContent(), '1 of 3', 'only 3 visible non-editable matches')
     const status = async () => page.evaluate(() => document.querySelector('#cupPageFindBar').__cupPageFind.getState())
