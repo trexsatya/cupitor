@@ -50,6 +50,7 @@ async function run(browser, mobile, legacy) {
     isMobile: mobile, hasTouch: mobile,
   })
   try {
+    page.on('pageerror', error => console.error('Find page error:', error.message))
     if (legacy) {
       await page.addInitScript(() => {
         try { Object.defineProperty(CSS, 'highlights', { value: undefined, configurable: true }) } catch (_) {}
@@ -74,6 +75,14 @@ async function run(browser, mobile, legacy) {
     assert.equal(await bar.isVisible(), true)
     assert.equal(await input.evaluate(el => document.activeElement === el), true)
     await input.fill('färgsprakande')
+    await page.waitForTimeout(320)
+    console.log('Find result probe', JSON.stringify(await page.evaluate(() => ({
+      count: document.querySelector('#cupPageFindCount')?.textContent,
+      state: document.querySelector('#cupPageFindBar')?.__cupPageFind?.getState(),
+      marks: document.querySelectorAll('mark.cup-page-find-fallback').length,
+      rows: document.querySelectorAll('.fixture-row').length,
+      rects: [...document.querySelectorAll('.fixture-row')].map(x => [x.getBoundingClientRect().width,x.getBoundingClientRect().height])
+    }))))
     await page.waitForFunction(() => document.querySelector('#cupPageFindCount').textContent === '1 of 3')
     assert.equal(await count.textContent(), '1 of 3', 'only 3 visible non-editable matches')
     const status = async () => page.evaluate(() => document.querySelector('#cupPageFindBar').__cupPageFind.getState())
