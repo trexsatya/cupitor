@@ -124,6 +124,7 @@ jobs:
           SCREENSHOT_DIR: test-results/dialog-browser-results
         run: |
           node tests/browser/page-find.cjs
+          node tests/browser/card-tts.cjs
           node tests/browser/rich-card-scroll.cjs
           node tests/browser/study-page-scroll.cjs
           node tests/browser/spotify-practice.cjs
