@@ -21777,17 +21777,25 @@ function stopPlayingRecording() {
 // Practice never auto-speaks on reveal: Play reads the face currently on
 // screen, and pressing Play again stops it. A card change or minimize cancels.
 let _practiceTts = null
+let _practiceTtsFaceKey = null
 function _stopPracticeTts() {
   const active = _practiceTts
   _practiceTts = null
+  _practiceTtsFaceKey = null
   if (active) { try { active.cancel() } catch (_) {} }
   $('#practiceMode .practice-play').attr('aria-pressed', 'false')
 }
 function _togglePracticeTts(it) {
-  if (_practiceTts) { _stopPracticeTts(); return }
   if (!_canSpeakSilentCard(it)) return
   const front = window._practiceFrontIsSource !== false ? 'source' : 'target'
   const key = window._practiceFlipped ? (front === 'source' ? 'target' : 'source') : front
+  if (_practiceTts) {
+    // Same face: Play toggles speech off. Different face after Reveal:
+    // cancel the old face and immediately speak the newly visible answer.
+    const sameFace = _practiceTtsFaceKey === key
+    _stopPracticeTts()
+    if (sameFace) return
+  }
   const text = cardTtsText(it[key])
   if (!text) return
   const idx = window._practiceIdx
@@ -21801,10 +21809,12 @@ function _togglePracticeTts(it) {
       window._practiceCards?.[idx] === it,
   })
   _practiceTts = task
+  _practiceTtsFaceKey = key
   $('#practiceMode .practice-play').attr('aria-pressed', 'true')
   task.promise.finally(() => {
     if (_practiceTts === task) {
       _practiceTts = null
+      _practiceTtsFaceKey = null
       $('#practiceMode .practice-play').attr('aria-pressed', 'false')
     }
   })
