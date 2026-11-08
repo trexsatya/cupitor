@@ -9,7 +9,7 @@ export function plainTextPasteHtml(text) {
   // Plain-text newlines are soft breaks, not paragraph boundaries. Creating
   // one <p> per line introduces paragraph spacing on every copy/paste cycle.
   // Keep genuine empty lines as consecutive <br> elements instead.
-  return '<p>' + lines.map(escape).join('<br>') + '</p>';
+  return lines.map(escape).join('<br>');
 }
 
 export function installRichCardPasteControl(editor, checkbox) {
