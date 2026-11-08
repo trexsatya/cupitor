@@ -2161,7 +2161,6 @@ h5.l-accordion.srt-guess-only:hover {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-wrap: break-word;
-    text-align: center;
 }
 #practiceMode .practice-back .practice-manual-text,
 #practiceMode .practice-back-target .practice-manual-text { color: var(--practice-card-back-color); }
@@ -2878,7 +2877,6 @@ body.practice-manual #practiceMode .practice-card {
     border: none;
     border-radius: 10px;
     padding: 0;
-    text-align: center;
     box-shadow: none;
 }
 @media (min-width: 1000px) {
