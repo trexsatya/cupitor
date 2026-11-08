@@ -30,12 +30,12 @@ test('plain-text paste escapes HTML and preserves inline single-line content', (
 
 test('plain-text paste preserves individual newlines without paragraph spacing', () => {
   expect(plainTextPasteHtml('first\r\nsecond'))
-    .toBe('<p>first<br>second</p>');
+    .toBe('first<br>second');
   expect(plainTextPasteHtml('first\r\n\r\nsecond'))
-    .toBe('<p>first<br><br>second</p>');
+    .toBe('first<br><br>second');
   expect(plainTextPasteHtml('first\n\n\nsecond'))
-    .toBe('<p>first<br><br><br>second</p>');
-  expect(plainTextPasteHtml('first\n')).toBe('<p>first<br></p>');
+    .toBe('first<br><br><br>second');
+  expect(plainTextPasteHtml('first\n')).toBe('first<br>');
 });
 
 test('format-preservation toggle is off by default and updates the same editor', () => {
