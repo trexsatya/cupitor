@@ -22285,7 +22285,7 @@ function _searchCurrentPracticeWord() {
 }
 
 function minimizePracticeMode() {
-  _stopPracticeTts()
+  if (typeof _stopPracticeTts === 'function') _stopPracticeTts()
   // Hiding an <audio> does not silence it, and minimising hides the panel by
   // dropping the body class — the same trap closing the view has to avoid.
   try { _stopPracticeAudio() } catch (_) {}
