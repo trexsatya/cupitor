@@ -270,7 +270,23 @@ async function checkViewSwitching(browser) {
       // On desktop, double-clicking the displayed word should select it for copying.
       if (!mobile) {
         const manualText = page.locator('#practiceMode .practice-front-face .practice-manual-text').first()
-        await manualText.dblclick()
+        // Find a letter, not the element's center. A short left-aligned
+        // card such as "Hej" leaves most of its wide element empty.
+        const position = await manualText.evaluate(el => {
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+          let node
+          while ((node = walker.nextNode()) && !node.textContent.trim()) {}
+          if (!node) throw new Error('Practice manual card has no text to select')
+          const start = node.textContent.search(/\S/)
+          const range = document.createRange()
+          range.setStart(node, start)
+          range.setEnd(node, start + 1)
+          const glyph = range.getBoundingClientRect()
+          const box = el.getBoundingClientRect()
+          return { x: glyph.left - box.left + glyph.width / 2,
+            y: glyph.top - box.top + glyph.height / 2 }
+        })
+        await manualText.dblclick({ position })
         const selected = await page.evaluate(() => String(window.getSelection() || '').trim())
         assert(selected.length > 0, 'desktop double-click selects manual-card text')
         assert.equal(await page.evaluate(() => window._practiceFlipped), false,
